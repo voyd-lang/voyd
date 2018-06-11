@@ -25,8 +25,54 @@
 - await
 - mut
 - type
+- case
+- switch
+- where
+- static
 
 ## Operators
+
+Arithmetic
+- `-` Subtract (Or negate)
+- `+` Add
+- `*` Multiply
+- `/` Divide
+- `%` Remainder
+- `^` Exponent
+
+Asignment
+- `=` Assign to
+- `-=` Assign to something subtracted by itself
+- `+=` Assign to something added to itself
+- `*=` Assign to something multiplied by itself
+- `/=` Assign to something divided by itself
+
+Comparison
+- `==` Equal to
+- `>=` Greater than or equal to
+- `<=` Less than or equal to
+- `!=` Not equal to
+- `>` Greater than
+- `<` Less than
+
+Logical
+- `!` Not
+- `&&` And
+- `||` Or
+
+Bitwise
+- `~` Not
+- `&` And
+- `|` Or
+- `^|` XOr
+- `<<` Left shift
+- `>>` Right shift
+
+Other
+- `??` Nil-Coalescing Operator
+- `&+` Overflow add
+- `&-` Overflow subtract
+- `&*` Overflow multiply
 
 ## Examples
 
