@@ -2,6 +2,30 @@
 
 ## Keywords
 
+- if
+- else
+- elif
+- guard
+- while
+- loop
+- for
+- in
+- def
+- let
+- var
+- struct
+- impl
+- import
+- public
+- private
+- move
+- moveonly
+- yeild
+- async
+- await
+- mut
+- type
+
 ## Operators
 
 ## Examples
@@ -203,4 +227,10 @@ sort(list: exList, cb: { (item1, item2) => item1 > item2 })
 sort(list: exList, cb: { item1, item2 => item1 > item2 })
 sort(list: exList, cb: >)
 sort(list: exList) { item1, item2 => item1 > item2 } // Trailing syntax (Same as swifts trailing closure syntax)
+
+/**************************
+Refrencing
+**************************/
+let x = @a // Static reference to a
+let y = @mut b // Mutable reference to b
 ```
