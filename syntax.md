@@ -70,6 +70,9 @@ Bitwise
 
 Other
 - `??` Nil-Coalescing Operator
+- `...` Range
+- `>..` Another range
+- `..<` Another range again
 - `&+` Overflow add
 - `&-` Overflow subtract
 - `&*` Overflow multiply
