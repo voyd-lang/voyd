@@ -29,6 +29,7 @@
 - switch
 - where
 - static
+- enum
 
 ## Operators
 
@@ -282,4 +283,12 @@ Refrencing
 **************************/
 let x = @a // Static reference to a
 let y = @mut b // Mutable reference to b
+
+/**************************
+Enum
+**************************/
+
+enum Test {
+    h, i, be()
+}
 ```
