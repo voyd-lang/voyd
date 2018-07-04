@@ -178,11 +178,19 @@ let a = (1, 2, 3)
 let b: (Int, Int) = (1, 2)
 let singleton: (Int) = (1,) // Comma is needed to avoid ambiguity with expression grouping
 
+// Labled tuples
+type Point = (x: Int, y: Int, z: Int); // Semi-colon optional
+let p1: Point = (x: 1, y: 2, z: 3)
+
+// Shorthand syntax
+let x, y, z = 1, 2, 3
+let p2 = (:x, :y, :z)
+
 /**************************
 Methods
 **************************/
 
-def add(a: Int, b: Int) -> Int = a + b
+def add(a: Int, b: Int) -> Int { a + b }
 def add(x: Int, y: Int) -> Int = x + y
 def add(_x: Int, _y: Int) -> Int = {
     print("The leading underscores mean the parameter does not need to be labled when called")
@@ -281,8 +289,8 @@ sort(list: exList) { item1, item2 => item1 > item2 } // Trailing syntax (Same as
 /**************************
 Refrencing
 **************************/
-let x = @a // Static reference to a
-let y = @mut b // Mutable reference to b
+let x = &a // Static reference to a
+let y = &mut b // Mutable reference to b
 
 /**************************
 Enum
