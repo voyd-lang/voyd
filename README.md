@@ -23,3 +23,9 @@ Values:
 - [ ] LLVM Target
 - [ ] Viable Language for Performant Graphics and Machine Learning
 - [ ] Safe Concurrency
+
+## [Overview](./overview.md)
+
+## Is it real?
+
+No. At least not yet.
