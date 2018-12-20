@@ -5,9 +5,7 @@
 ```typescript
 // Single line comment
 
-/*
-    Block Comment
-*/
+/* Block Comment */
 ```
 
 ## Built in types
@@ -17,35 +15,18 @@
 true
 false
 
-// Int's
+// Int
 1
-2
-3
 
-// Doubles
-1.0
+// Double
 3.2
 
-
-// Strings
+// String
 "Hello World!"
 
 // Tuples
-(5, 3, "WOW!")
-(,"Single Element")
+(5, 3.0, "WOW!")
 (can: "Hello", have: "Hello", labels: "World!")
-
-// Anonymous structs
-{ x: 5, y: 4, z: 2 }
-
-// Arrays
-Array(1, 2, 3)
-
-// Dictionaries
-Dict(
-    ("first", 5),
-    ("second", 3)
-)
 ```
 
 ## Assignment
@@ -63,7 +44,7 @@ var y = 7
 In dream a block is a group of statements with the same level of indentation.
 
 ```
-// Top Level Blocl
+// Top Level Block
 let x = 3
 let y = 4
 if x < y:
@@ -86,8 +67,7 @@ let four =
 ```
 if expr: do_work()
 
-if expr: do_work()
-else: dont_do_work()
+if expr: do_work() else: dont_do_work()
 
 if expr:
     do_work()
@@ -118,7 +98,7 @@ while expr:
 ## Functions
 
 ```
-let add = (a: Int, b: Int) -> Int => a + b
+let add = (a: Int, b: Int)-> Int => a + b
 
 // Return can usually be inferred
 let add = (a: Int, b: Int) => a + b
@@ -137,11 +117,11 @@ multiline()
 
 ```
 // Basic definition
-def add(a: Int, b: Int) -> Int = a + b
+def add(a: Int, b: Int)-> Int = a + b
 
 // Can be overloaded
-def do_work(on: Array) -> void = on.uppercase()
-def do_work(on: String) -> void = on.lowercase()
+def do_work(on: Array)-> void = on.uppercase()
+def do_work(on: String)-> void = on.lowercase()
 
 // Parameters are labeled on call
 do_work(on: my_array)
@@ -169,30 +149,7 @@ enum NumsOrString =
     case Str(String),
     case Nums(Int, Int, Int)
 
-
 let nums: NumsOrString = .Nums(3, 2, 1)
-```
-
-## Optionals
-
-```typescript
-def div(a: Int, b: Int): Option[Int] => {
-    if b == 0 { return .None }
-    .Some(a / b)
-}
-
-// If the value is .Some, execute the block
-if let two = div(4, 2) {
-    print("4 / 2 is 2!")
-}
-
-def do_work() => {
-    guard let two = div(2, 0) else {
-        print("Two does not equal 2 / 0")
-        return
-    }
-    print("Two equals 2 / 0")
-}
 ```
 
 ## Structs
@@ -201,11 +158,10 @@ def do_work() => {
 struct Vector3D =
     var x, y, z: Double
 
-
 // Structs can be extended
 extension Vector3D =
-    def get_squared_length(): Double = x * x + y * y + z * z
-    def get_length(): Double = sqrt(get_squared_length())
+    def get_squared_length() -> Double = x * x + y * y + z * z
+    def get_length() -> Double = sqrt(get_squared_length())
 
     // Methods that mutate the value of the struct should be marked as mutating
     mutating def make_unit_vector() =
@@ -218,7 +174,6 @@ extension Vector3D =
     mutatating def apply(x: Double) = self.x = x
     mutatating def apply(y: Double) = self.y = x
     mutatating def apply(z: Double) = self.z = x
-}
 
 // Computed properites
 extension Vector3D =
@@ -243,7 +198,7 @@ let length = my_vec.length
 ## Generics
 
 ```
-def add[T](a: T, b: T): T = a + b
+def add[T](a: T, b: T) -> T = a + b
 
 struct RGB[T] =
     var r, g, b: T
@@ -260,9 +215,28 @@ protocol HasMath =
 
 // Implementing the protocol
 struct MyStruct: HasAdd =
-    def add(a: Int, b: Int): Int => a + b
-    def sub(a: Int, b: Int): Int => a - b
+    def add(a: Int, b: Int) -> Int => a + b
+    def sub(a: Int, b: Int) -> Int => a - b
+```
 
+## Optionals
+
+```
+(): void =>
+def div(a: Int, b: Int) -> Option[Int] =
+    if b == 0: return .None
+    .Some(a / b)
+
+// If the value is .Some, execute the block
+if let two = div(4, 2):
+    print("4 / 2 is ${two}!")
+
+
+def do_work() =
+    guard let two = div(2, 0) else:
+        print("Two does not equal 2 / 0")
+        return
+    print("Two equals 2 / 0")
 ```
 
 ## Sugar
