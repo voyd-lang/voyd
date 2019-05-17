@@ -1,312 +1,161 @@
-# Dream Language Overview
+# Dream
 
 ## Comments
 
-```typescript
-// Single line comment
+```
+// Single line
 
-/*
-    Block Comment
-*/
+///
+Block Comment
+///
 ```
 
-## Built in types
+## Data Types
 
-```typescript
-// Booleans
-true
-false
-
-// Int's
-1
-2
-3
-
-// Doubles
-1.0
-3.2
-
-
-// Strings
-"Hello World!"
-
-// Tuples
-(5, 3, "WOW!")
-(,"Single Element")
-(can: "Hello", have: "Hello", labels: "World!")
-
-// Anonymous structs
-{ x: 5, y: 4, z: 2 }
-
-// Arrays
-Array(1, 2, 3)
-
-// Dictionaries
-Dict(
-    ("first", 5),
-    ("second", 3)
-)
 ```
-
-## Assignment
-
-```typescript
-// Immutable assignment
-let x = 5
-
-// Mutable assignment
-var y = 7
+1 // Int
+1.0 // Float
+true // Bool
+false // Bool
+"Hello World!!" // String
+// All strings are multiline
+"
+    I am a multiline string!
+    Hooray!
+    I also support interpolation: #(1 + 2)
+"
+$(1, 2, 3) // Tuple
+$(x: 1, y: 2, z: 3) // Labeled tuple / anonymous stryct
+$[1, 2, 3] // Array
+${ firstname: "Drew", lastname: "Youngwerth" } // Dictionary / Hash Table / Object
 ```
 
 ## Blocks
 
-In dream a block is a group of statements with the same level of indentation.
-
 ```
-// Top Level Blocl
-let x = 3
-let y = 4
-if x < y:
-    // Second level block
-    print("Hello!")
-    print("x is less than y")
-```
+{
+    let x = 5
+}
+print(x) // Error: x is not defined
 
-Blocks evaluate to the result of their last expression.
-
-```
-let four =
-    let a = 2
-    let b = 2
-    a + b
+// Blocks are expressions, they return the result of the last expression in the block
+let five = {
+    let x = 2
+    x + 3
+}
 ```
 
-## If expressions
+## Control Flow
 
 ```
-if expr: do_work()
+// Basic if statement
+if 3 == 4 {
+    print("Thats not possible")
+} elif 3 == 2 {
+    print("Also not possible")
+} else {
+    print("Ok")
+}
 
-if expr: do_work()
-else: dont_do_work()
+// Basic while statement
+var x = 0
+while x < 10 {
+    x += 1
+    print(x)
+}
 
-if expr:
-    do_work()
-    andSomeOtherThing()
-elif other_test:
-    do_something_else()
-else:
-    dont_do_work()
+// Basic for in
+let my_iterable = $[1, 2, 3]
+for item in my_iterable {
+    if item == 2 { continue } // Traditional break and continues are supported
+    print(item)
+}
 
-// Ifs are expressions that can return a value
-let four =
-    if 3 > 2: 4
-    else: 2
+// Match statement
+match 4 {
+    case 1 { print(1) }
+    case 2 { print(2) }
+    case 3 { print(3) }
+    case 4 { print(4) }
+    case _ { print("No matching case found") } // Default, (matches must be exhaustive)
+}
+
+// if statements and matches are expressions
+let four = if 3 == 4 { 3 } else { 4 }
+let five = match "five" {
+    case "five" { 5 }
+    case _ { 3 }
+}
 ```
-
-## Loops
-
-```
-for item in iterator: doWorkOnItem(item)
-
-while expr:
-    doWork()
-    doOtherWork()
-```
-
-## Match Statements (TODO)
 
 ## Functions
 
 ```
-let add = (a: Int, b: Int) -> Int => a + b
-
-// Return can usually be inferred
-let add = (a: Int, b: Int) => a + b
-
-let multiline = () =>
-    do_this()
-    and_that()
-    5
-
-// Calling
-let four = add(2, 2)
-multiline()
-```
-
-## Methods
-
-```
-// Basic definition
-def add(a: Int, b: Int) -> Int = a + b
-
-// Can be overloaded
-def do_work(on: Array) -> void = on.uppercase()
-def do_work(on: String) -> void = on.lowercase()
-
-// Parameters are labeled on call
-do_work(on: my_array)
-let four = add(a: 2, b: 3)
-```
-
-## Enums
-
-```
-enum Direction =
-    case North
-    case East
-    case South
-    case West
-
-enum Direction =
-    // cases can be condensed to one line
-    case North, East, South, West
-
-// Supports swift dot notation (I.E. if the enum can be infered, it's name can be omitted)
-let direction: Direction = .North
-
-// Associated value
-enum NumsOrString =
-    case Str(String),
-    case Nums(Int, Int, Int)
-
-
-let nums: NumsOrString = .Nums(3, 2, 1)
-```
-
-## Optionals
-
-```typescript
-def div(a: Int, b: Int): Option[Int] => {
-    if b == 0 { return .None }
-    .Some(a / b)
+fn add { a: Int, b: Int -> Int |
+    a + b // Result of last expression is returned
 }
 
-// If the value is .Some, execute the block
-if let two = div(4, 2) {
-    print("4 / 2 is 2!")
+// In most cases, the return type can be infered
+fn sub { a: Int, b: Int | a - b }
+
+// Rest params are supported, if they are the last argument
+fn add_many { args: ...Array[Int] |
+    args.reduce { cur, prev | cur + prev }
+}
+let six = add_many(2, 2, 2)
+
+// Arguments can have default values, provided they are last and not coupled
+// With a rest parameter
+fn example { a = 3, b = 10 | a + b }
+let thirteen = example()
+let fourteen = example(4)
+
+// Arguments can be named
+fn splice {
+    item: Int, into insertable: Array[Int], at_index index: Int
+    -> Array[Int]
+|
+    insertable.insert(item, index)
+}
+splice(3, into: $[1, 2, 3, 4], at_index: 2) // $[1, 2, 3, 3, 4]
+```
+
+## Universal Function Call Syntax
+
+```
+fn my_custom_add { a: Int, b: Int -> Int |
+    a + b // Result of last expression is returned
 }
 
-def do_work() => {
-    guard let two = div(2, 0) else {
-        print("Two does not equal 2 / 0")
-        return
-    }
-    print("Two equals 2 / 0")
-}
+3.my_custom_add(4) // 7
 ```
 
-## Structs
+## Closures
 
 ```
-struct Vector3D =
-    var x, y, z: Double
+let my_closure = { a: Int, b: Int -> Int | a + b }
+let my_annotated_closure: { a: Int, b: Int -> Int } = { a, b | a + b }
 
-
-// Structs can be extended
-extension Vector3D =
-    def get_squared_length(): Double = x * x + y * y + z * z
-    def get_length(): Double = sqrt(get_squared_length())
-
-    // Methods that mutate the value of the struct should be marked as mutating
-    mutating def make_unit_vector() =
-        let k = 1.0 / length
-        x *= k
-        y *= k
-        z *= k
-
-    // Methods can be overloaded
-    mutatating def apply(x: Double) = self.x = x
-    mutatating def apply(y: Double) = self.y = x
-    mutatating def apply(z: Double) = self.z = x
-}
-
-// Computed properites
-extension Vector3D =
-    // Computed properties (getter only)
-    get squared_length: Double = get_squared_length()
-    get length: Double = get_length()
-
-    // Computed property (with getter and setter)
-    get x_alias: Double = x
-    set x_alias(v: Doble) => x = v
-
-/* Usage */
-
-// Create an instance
-let my_vec = Vector3D(x: 4, y: 3, z: 2)
-
-my_vec.make_unit_vector()
-
-let length = my_vec.length
+// If a closure is the last argument of a func it can be placed out of parens,
+// If it is the only argument, parens can be omitted
+let val = arr
+    .map {| $0 * 2 }
+    .filter {| $0 < 15 }
+    .reduce(5) { cur, prev | cur + prev }
+    .{ v | if $0 > 10 { "Yes" } else { "No" } }
 ```
 
-## Generics
+## Type annotations
 
 ```
-def add[T](a: T, b: T): T = a + b
-
-struct RGB[T] =
-    var r, g, b: T
-
-    def init(r: T, g: T, b: T) = // ETC
-```
-
-## Protocols
-
-```
-protocol HasMath =
-    def add(a: Int, b: Int) -> Int
-    def sub(a: Int, b: Int) -> Int
-
-// Implementing the protocol
-struct MyStruct: HasAdd =
-    def add(a: Int, b: Int): Int => a + b
-    def sub(a: Int, b: Int): Int => a - b
-
-```
-
-## Sugar
-
-```
-// Variadic parameters and splatting
-let make_array = (nums: ...Int) => Array(...nums)
-
-// Tuple destrucuring
-let (a, b) = (3, 2)
-
-// Ignoring values in tuple destructuring
-let (_, b) = (3, 2)
-
-// Struct destructuring
-let { x, y } = my_vec
-
-// Struct splatting
-let another_vec = Vector3D { ...new_vec, x: 3 }
-
-// Unlabled method parameters
-def my_method(_ not_labled: Int, labled: Int) = // ETC
-
-my_method(5, labled: 6)
-
-// Parameter label alias
-def add(a x: Int, b y: Int): Int => x + y
-add(a: 5, b: 3)
-
-// async / await
-async def request(url: String) = await net.request(:url)
-
-// Apply
-func()  // shorthand for func.apply()
-
-// Single argument application
-func~ 3 // Short for func(3)
-
-// Single argument application usage example
-let doubledAgesOfBrownMammals = animals
-    .filter~ animals => animals.type == "Mammals"
-    .filter~ animals => animals.color == "Brown"
-    .map~ animals =>
-        // Multiline example
-        let age = animals.age
-        age * 2
+// Main types
+Int
+Bool
+Float
+String
+$(Int, String, Float) // Tuple
+$(x: Int, y: Int, z: Int) // Labeled tuple / Anonymous struct
+$[Int] // Array
+${String, Int} // Dictionary (Key type, value type)
+{ Int, Int -> Int } // Function signature
 ```
