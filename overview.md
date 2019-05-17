@@ -159,3 +159,12 @@ $[Int] // Array
 ${String, Int} // Dictionary (Key type, value type)
 { Int, Int -> Int } // Function signature
 ```
+
+## Ownership
+
+Dream follows the same syntax and symantics as rust's ownership system.
+
+## Lifetimes
+
+Unlike rust, all types are reference counted by default, so lifetimes do not
+need to be annotated.
