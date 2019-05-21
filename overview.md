@@ -213,6 +213,15 @@ impl Age for Person {
 }
 ```
 
+## Generics
+
+```
+fn add[T] { a: T, b: T | a + b }
+
+struct Array[T] {}
+
+```
+
 ## Ownership
 
 Dream follows a simplified version of rust's ownership system.
