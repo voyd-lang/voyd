@@ -10,7 +10,7 @@ Block Comment
 ///
 ```
 
-## Data Types
+## Types
 
 ```
 1 // Int
@@ -28,6 +28,28 @@ $(1, 2, 3) // Tuple
 $(x: 1, y: 2, z: 3) // Labeled tuple / anonymous stryct
 $[1, 2, 3] // Array
 ${ firstname: "Drew", lastname: "Youngwerth" } // Dictionary / Hash Table / Object
+```
+
+### Type annotations
+
+```
+// Main types
+Int
+Bool
+Float
+String
+$(Int, String, Float) // Tuple
+$(x: Int, y: Int, z: Int) // Labeled tuple / Anonymous struct
+$[Int] // Array
+${String, Int} // Dictionary (Key type, value type)
+{ Int, Int -> Int } // Function signature
+```
+
+## Contants and Variables
+
+```
+let x = 5 // Constant
+var y = 4 // Variable
 ```
 
 ## Blocks
@@ -145,26 +167,73 @@ let val = arr
     .{ v | if $0 > 10 { "Yes" } else { "No" } }
 ```
 
-## Type annotations
+## Structs
 
 ```
-// Main types
-Int
-Bool
-Float
-String
-$(Int, String, Float) // Tuple
-$(x: Int, y: Int, z: Int) // Labeled tuple / Anonymous struct
-$[Int] // Array
-${String, Int} // Dictionary (Key type, value type)
-{ Int, Int -> Int } // Function signature
+struct Point {
+    var x, y, z: Int;
+
+    fn offset { x, y, z: Int | Point(self.x + x, self.y + y, self.z + z) }
+
+    // Members can usually be inferred without self prefix, unless a parameter
+    // or variable name conflicts with the member name
+    fn to_tuple {| $(x, y, z) }
+
+    // Any operations that mutate the struct require the mut annotation.
+    mut fn sq {|
+        x *= x
+        y *= y
+        z *= z
+    }
+}
+```
+
+## Traits
+
+```
+trait Age {
+    let born: Date
+
+    fn age_in_minutes { -> Int }
+
+    // Traits can have defailt implementations
+    fn age_in_hours {| age_in_minutes * 60 }
+}
+
+struct Person {
+    let firstname, lastname: String
+}
+
+impl Age for Person {
+    let born: Date
+
+    fn age_in_minutes {| (born - Date.now) * 60 }
+
+    // Age in hours has a defualt implementation, so it is omitted.
+}
 ```
 
 ## Ownership
 
-Dream follows the same syntax and symantics as rust's ownership system.
+Dream follows a simplified version of rust's ownership system.
 
-## Lifetimes
+```
+// Immutable reference
+let x = "Hello"
+ref y = x
+print(y) // Hello
+y = "World!" // Error: y is an immutable reference
+ref z = x // Multiple immutable references are allowed.
 
-Unlike rust, all types are reference counted by default, so lifetimes do not
-need to be annotated.
+// Mutable reference
+var a = "Hello"
+mref b = a
+b = "World"
+mref c = a // ERROR: Variables can only have one mutable ref.
+endScope(b)
+```
+
+### Difference from rust
+
+In rust you bind a reference to a variable. In dream, references are a type
+of variable.
