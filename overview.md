@@ -5,8 +5,10 @@
 ```
 // Single line
 
+/** block comment */
+
 ///
-Block Comment
+Documenation Comment
 ///
 ```
 

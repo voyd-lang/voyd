@@ -11,7 +11,9 @@ Dream:
 
     single_line_comment <- "//" .* "\n"
 
-    bock_comment <- "///" .* "///"
+    block_comment <- "/**" .* "*/"
+
+    doc_comment <- "///" .* "///"
 
     int <- [0-9]+
 
