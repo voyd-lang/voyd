@@ -150,6 +150,10 @@ fn my_custom_add { a: Int, b: Int -> Int |
 }
 
 3.my_custom_add(4) // 7
+
+fn my_print { v: Int | print(v) }
+
+"Hello".my_print // If the function takes 1 argument or less, () can be omitted.
 ```
 
 ## Closures
@@ -186,6 +190,18 @@ struct Point {
         z *= z
     }
 }
+
+// Structs can be extended with impl
+impl Point {
+    // Btw, normal functions act as getters, can be called with point.r
+    fn r {| x }
+    // This is how setters are defined, point.r = 5 works.
+    fn set_r { v: Int | x = v }
+    fn g {| y }
+    fn set_g { v: Int | y = v }
+    fn b {| z }
+    fn set_b { v: Int | z = v }
+}
 ```
 
 ## Traits
@@ -200,16 +216,20 @@ trait Age {
     fn age_in_hours {| age_in_minutes * 60 }
 }
 
-struct Person {
+// Implementing age in a new struct.
+struct Person: Age {
     let firstname, lastname: String
+
+    let born: Date
+
+    fn age_in_minutes {| (born - Date.now) * 60 }
 }
 
+// Traits can also be implemented in impl extensions.
 impl Age for Person {
     let born: Date
 
     fn age_in_minutes {| (born - Date.now) * 60 }
-
-    // Age in hours has a defualt implementation, so it is omitted.
 }
 ```
 
