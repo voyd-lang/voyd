@@ -175,6 +175,7 @@ let val = arr
 
 ```
 struct Point {
+
     var x, y, z: Int;
 
     fn offset { x, y, z: Int | Point(self.x + x, self.y + y, self.z + z) }
@@ -240,6 +241,9 @@ fn add[T] { a: T, b: T | a + b }
 
 struct Array[T] {}
 
+trait Age[T] {}
+
+impl [T] for Array[T] {}
 ```
 
 ## Ownership
