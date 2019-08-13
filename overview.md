@@ -44,7 +44,7 @@ $(Int, String, Float) // Tuple
 $(x: Int, y: Int, z: Int) // Labeled tuple / Anonymous struct
 $[Int] // Array
 ${String, Int} // Dictionary (Key type, value type)
-{ Int, Int -> Int } // Function signature
+Fn(Int, Int) Int // Function signature
 ```
 
 ## Contants and Variables
@@ -115,45 +115,42 @@ let five = match "five" {
 ## Functions
 
 ```
-fn add { a: Int, b: Int -> Int |
+fn add(a: Int, b: Int) Int => {
     a + b // Result of last expression is returned
 }
 
-// In most cases, the return type can be infered
-fn sub { a: Int, b: Int | a - b }
+// If the function only has a single expression the braces can be removed
+fn sub(a: Int, b: Int) Int => a - b
 
-// Rest params are supported, if they are the last argument
-fn add_many { args: ...Array[Int] |
-    args.reduce { cur, prev | cur + prev }
-}
+// Rest params are supported. They must be the last argument.
+fn add_many(args: ...Array[Int]) => args.reduce { cur, prev > cur + prev }
+
 let six = add_many(2, 2, 2)
 
 // Arguments can have default values, provided they are last and not coupled
 // With a rest parameter
-fn example { a = 3, b = 10 | a + b }
+fn example(a = 3, b = 10) => a + b
+
 let thirteen = example()
 let fourteen = example(4)
 
 // Arguments can be named
-fn splice {
-    item: Int, into insertable: Array[Int], at_index index: Int
-    -> Array[Int]
-|
+fn splice(item: Int, into insertable: Insertable[Int], at_index index: Int) Insertable[Int] =>
     insertable.insert(item, index)
-}
+
 splice(3, into: $[1, 2, 3, 4], at_index: 2) // $[1, 2, 3, 3, 4]
 ```
 
 ## Universal Function Call Syntax
 
 ```
-fn my_custom_add { a: Int, b: Int -> Int |
+fn my_custom_add(a: Int, b: Int) Int => {
     a + b // Result of last expression is returned
 }
 
 3.my_custom_add(4) // 7
 
-fn my_print { v: Int | print(v) }
+fn my_print(v: String) Void => print(v)
 
 "Hello".my_print // If the function takes 1 argument or less, () can be omitted.
 ```
@@ -161,33 +158,32 @@ fn my_print { v: Int | print(v) }
 ## Closures
 
 ```
-let my_closure = { a: Int, b: Int -> Int | a + b }
-let my_annotated_closure: { a: Int, b: Int -> Int } = { a, b | a + b }
+let my_closure = { (a: Int, b: Int) Int => a + b }
+let my_annotated_closure: Fn(a: Int, b: Int) Int = { a, b => a + b }
 
 // If a closure is the last argument of a func it can be placed out of parens,
 // If it is the only argument, parens can be omitted
 let val = arr
-    .map {| $0 * 2 }
-    .filter {| $0 < 15 }
-    .reduce(5) { cur, prev | cur + prev }
-    .{ v | if $0 > 10 { "Yes" } else { "No" } }
+    .map {=> $0 * 2 }
+    .filter {=> $0 < 15 }
+    .reduce(5) { cur, prev => cur + prev }
+    .(v) => if $0 > 10 { "Yes" } else { "No" }
 ```
 
 ## Structs
 
 ```
 struct Point {
-
     var x, y, z: Int;
 
-    fn offset { x, y, z: Int | Point(self.x + x, self.y + y, self.z + z) }
+    fn offset(x, y, z: Int) => Point(self.x + x, self.y + y, self.z + z)
 
     // Members can usually be inferred without self prefix, unless a parameter
     // or variable name conflicts with the member name
-    fn to_tuple {| $(x, y, z) }
+    fn to_tuple() => $(x, y, z)
 
     // Any operations that mutate the struct require the mut annotation.
-    mut fn sq {|
+    mut fn sq() => {
         x *= x
         y *= y
         z *= z
@@ -196,14 +192,14 @@ struct Point {
 
 // Structs can be extended with impl
 impl Point {
-    // Btw, normal functions act as getters, can be called with point.r
-    fn r {| x }
+    // Btw, normal functions act as getters, can be called as point.r
+    fn r() => x
     // This is how setters are defined, point.r = 5 works.
-    fn set_r { v: Int | x = v }
-    fn g {| y }
-    fn set_g { v: Int | y = v }
-    fn b {| z }
-    fn set_b { v: Int | z = v }
+    fn set_r(v: Int) => x = v
+    fn g() => y
+    fn set_g(v: Int) => y = v
+    fn b() => z
+    fn set_b(v: Int) => z = v
 }
 ```
 
@@ -213,10 +209,10 @@ impl Point {
 trait Age {
     let born: Date
 
-    fn age_in_minutes { -> Int }
+    fn age_in_minutes() Int
 
     // Traits can have defailt implementations
-    fn age_in_hours {| age_in_minutes * 60 }
+    fn age_in_hours() => age_in_minutes * 60
 }
 
 // Implementing age in a new struct.
@@ -225,21 +221,21 @@ struct Person: Age {
 
     let born: Date
 
-    fn age_in_minutes {| (born - Date.now) * 60 }
+    fn age_in_minutes() => (born - Date.now) * 60
 }
 
 // Traits can also be implemented in impl extensions.
 impl Age for Person {
     let born: Date
 
-    fn age_in_minutes {| (born - Date.now) * 60 }
+    fn age_in_minutes() => (born - Date.now) * 60
 }
 ```
 
 ## Generics
 
 ```
-fn add[T] { a: T, b: T | a + b }
+fn add[T](a: T, b: T) => a + b
 
 struct Array[T] {}
 
