@@ -176,6 +176,13 @@ let val = arr
 struct Point {
     var x, y, z: Int;
 
+    // Define a initializer for the struct
+    init(x, y, z: Int) => {
+        self.x = x
+        self.y = y
+        self.z = z
+    }
+
     fn offset(x, y, z: Int) => Point(self.x + x, self.y + y, self.z + z)
 
     // Members can usually be inferred without self prefix, unless a parameter
@@ -190,6 +197,9 @@ struct Point {
     }
 }
 
+// Use the struct
+let point = Point(1, 2, 3);
+
 // Structs can be extended with impl
 impl Point {
     // Btw, normal functions act as getters, can be called as point.r
@@ -200,6 +210,15 @@ impl Point {
     fn set_g(v: Int) => y = v
     fn b() => z
     fn set_b(v: Int) => z = v
+}
+```
+
+## Enums
+
+```
+enum Result {
+    case Failure(String)
+    case Success
 }
 ```
 
