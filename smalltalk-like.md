@@ -108,36 +108,31 @@ Examples:
 ```
 fn hi = print: "Hi!"
 
-hi "Hi!"
-
 fn double: i Int = i * 2
 
-double: 2 "4"
-
-
 fn [T Multiplyable] double: i T = i * 2
-
-double: 3.0 "6.0"
 
 fn (i Int) triple =
     i * 3
 
-4 triple "12"
-
 fn add: n1 Int and: n2 Int =
     n1 + n2
 
-add: 3 and: 4 "7"
-
 fn quadruple(i: Int) -> Int = i * 4
-
-quadruple(3) "12"
 
 fn square_point { x: Int, y: Int } -> { x: Int, y: Int } =
     { x: x squared, y: y squared }
 
-"Functions can also be anonymous:"
-let my_anon_func: Fn(Int) -> Int = fn(x) = x * 3
+let my_anon_func = fn(x) = x * 3
+
+hi "Result: Hi!"
+double: 2 "Result: 4"
+double: 3.0 "Result: 6.0"
+4 triple "Result: 12"
+add: 3 and: 4 "Result: 7"
+quadruple(3) "Result: 12"
+square_point { x: 2, y: 2 } "Result: { x: 4, y: 4 }"
+my_anon_func(3) "Result: 9"
 ```
 
 # Control flow
