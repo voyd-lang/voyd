@@ -1,4 +1,4 @@
-# Dream
+# Dream Lang With Scala Like Syntax
 
 ## Comments
 
