@@ -2,7 +2,7 @@
   "name": "dream-lang",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -10,6 +10,9 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "chevrotain": "^3.3.0"
+    "typescript": "^3.6.2"
+  },
+  "dependencies": {
+    "@types/node": "^12.7.3"
   }
 }
