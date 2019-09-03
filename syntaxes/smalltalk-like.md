@@ -85,23 +85,23 @@ Functions can take three forms. Message, destructured tuple, and destructured ob
 
 Message form:
 ```
-fn [Type] (reciever RecieverType) message: param ParamType -> ReturnType =
+fn [Generics...] message: param ParamType... -> ReturnType =
     Function Body
 ```
 
-`[Type]` and `(reciever RecieverType)` are optional. There can be multiple messages. If the
+The `[Generics]` section is optional. There can be multiple messages. If the
 function needs no arguments the `: param ParamType` can also be left out. In general the
 `-> ReturnType` can usually be infered so that can also be left out.
 
 Destructured tuple form:
 ```
-fn [Type] (reciver RecieverType) name(param ParamType) -> ReturnType =
+fn [Generics] name(param ParamType) -> ReturnType =
     Function body
 ```
 
 Destructured object form:
 ```
-fn [Type] (reciver RecieverType) name { param: ParamType } -> ReturnType =
+fn [Generics] name { param: ParamType } -> ReturnType =
 ```
 
 Examples:
@@ -112,18 +112,20 @@ fn double: i Int = i * 2
 
 fn [T Multiplyable] double: i T = i * 2
 
-fn (i Int) triple =
-    i * 3
+fn triple(i Int) = i * 3
 
-fn add: n1 Int and: n2 Int =
-    n1 + n2
+fn add: n1 Int, n2 Int with: n3 Int =
+    n1 + n2 + n3
+
+add: 1, 2 with: 3
 
 fn quadruple(i: Int) -> Int = i * 4
 
 fn square_point { x: Int, y: Int } -> { x: Int, y: Int } =
     { x: x squared, y: y squared }
 
-let my_anon_func = fn(x) = x * 3
+let my_anon_func = fn: x = x * 3
+let my_anon_func2 = fn(x) = x * 3
 
 hi "Result: Hi!"
 double: 2 "Result: 4"
@@ -132,7 +134,20 @@ double: 3.0 "Result: 6.0"
 add: 3 and: 4 "Result: 7"
 quadruple(3) "Result: 12"
 square_point { x: 2, y: 2 } "Result: { x: 4, y: 4 }"
-my_anon_func(3) "Result: 9"
+my_anon_func: 3 "Result: 9"
+```
+
+Note that all three function forms can be used interchangeably.
+
+For example:
+```
+"Given the following function"
+fn add: n1 Int, n2 Int = n1 + n2
+
+"All of the following calls are valid and equivalent"
+add: 1, 2
+add(1, 2)
+add { n1: 1, n2: 2 }
 ```
 
 # Control flow
@@ -237,3 +252,5 @@ object Point(Pointable):
 
     fn squared = Point x: x squared y: squared
 ```
+
+# Uniform Function Call Syntax

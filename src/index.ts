@@ -28,6 +28,10 @@ fn fib: n Int -> Int =
     if n <= 1: return n
     fib: n - 1 + fib: n - 2
 
+fn add: a Int with: b Int -> Int = a + b
+
+add: 3 with: 4
+
 "**Objects**"
 object Point:
     var x, y, z: Int
