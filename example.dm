@@ -5,7 +5,7 @@
 
 1 "Int"
 1.0 "Double"
-\`Hello\` "String"
+`Hello` "String"
 false "Boolean false"
 true "Boolean true"
 (1, 2, 3) "Tuple"
