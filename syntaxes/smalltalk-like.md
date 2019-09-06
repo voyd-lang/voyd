@@ -22,7 +22,6 @@ Features:
 false "Boolean false"
 trye "Boolean true
 (1, 2, 3) "Tuple"
-{ 1, 2, 3 } "Array"
 { a: 1, b: 2, c: 3 } "Anonymous object"
 
 "**Variables**"
@@ -34,16 +33,16 @@ let x = 3
 var y = 2
 
 "**Functions**"
-fn double: i Int = i * 2
-fn fib: n Int -> Int =
+fn double(i Int) = i * 2
+fn fib(n Int) -> Int =
     if n <= 1: return n
-    fib: n - 1 + fib: n - 2
+    fib(n - 1) + fib(n - 2)
 
-"**Objects**"
-object Point:
+"**Structs**"
+struct Point:
     var x, y, z: Int
 
-    fn squared =
+    def squared =
         Point
             x: x squared
             y: y squared
@@ -53,9 +52,43 @@ let p1 = Point x: 1 y: 2 z: 3
 let p2 = p1 squared
 ```
 
+# Messages
+
+Messages are commands sent to an object.
+
+Messages have 5 types:
+1. Unary
+2. Binary
+3. Keyword
+4. Parenthetical list
+5. Anonymous object
+
+Examples:
+```
+"Unary"
+engine start
+
+"Binary"
+1 + 2
+
+"Keyword"
+my_numeric_list push: 7
+
+"Keyword with multiple arguments"
+my_numeric_list insert: 2 atIndex: 0
+
+"Parenthetical list"
+add(1, 2)
+do_work()
+log("hello")
+
+"Anonymous object"
+square_vector { x: 3, y: 2, z: 1 }
+```
+
 # Expressions
 
-Expressions are parsed with the same rules as smalltalk. Unary messages > Binary messages > Keyoword
+Expressions are parsed with the same rules as smalltalk. Parenthetical list, anonymous object, and unary messages > binary messages > keyoword
 messages.
 
 Examples:
@@ -81,73 +114,46 @@ true
 
 # Functions
 
-Functions can take three forms. Message, destructured tuple, and destructured object form.
+A function is an object that accepts a single message. This message can be a tuple,
+object, or keyword.
 
-Message form:
 ```
-fn [Generics...] message: param ParamType... -> ReturnType =
+fn name [Generics...] message -> ReturnType =
     Function Body
 ```
 
-The `[Generics]` section is optional. There can be multiple messages. If the
-function needs no arguments the `: param ParamType` can also be left out. In general the
+The `[Generics...]` section is optional. There can be multiple messages.
 `-> ReturnType` can usually be infered so that can also be left out.
-
-Destructured tuple form:
-```
-fn [Generics] name(param ParamType) -> ReturnType =
-    Function body
-```
-
-Destructured object form:
-```
-fn [Generics] name { param: ParamType } -> ReturnType =
-```
 
 Examples:
 ```
 fn hi = print: "Hi!"
 
-fn double: i Int = i * 2
+fn double(i Int) = i * 2
+fn double = i * 2
 
-fn [T Multiplyable] double: i T = i * 2
+fn triple[T Numeric](n T) = n * 3
 
-fn triple(i Int) = i * 3
-
-fn add: n1 Int, n2 Int with: n3 Int =
+fn add nums: n1 Int, n2 Int with: n3 =
     n1 + n2 + n3
 
-add: 1, 2 with: 3
+
 
 fn quadruple(i: Int) -> Int = i * 4
 
 fn square_point { x: Int, y: Int } -> { x: Int, y: Int } =
     { x: x squared, y: y squared }
 
-let my_anon_func = fn: x = x * 3
-let my_anon_func2 = fn(x) = x * 3
+let my_anon_func = fn(x) = x * 3
 
 hi "Result: Hi!"
 double: 2 "Result: 4"
 double: 3.0 "Result: 6.0"
 4 triple "Result: 12"
-add: 3 and: 4 "Result: 7"
+add nums: 1, 2 with: 3 "Result: 6"
 quadruple(3) "Result: 12"
 square_point { x: 2, y: 2 } "Result: { x: 4, y: 4 }"
 my_anon_func: 3 "Result: 9"
-```
-
-Note that all three function forms can be used interchangeably.
-
-For example:
-```
-"Given the following function"
-fn add: n1 Int, n2 Int = n1 + n2
-
-"All of the following calls are valid and equivalent"
-add: 1, 2
-add(1, 2)
-add { n1: 1, n2: 2 }
 ```
 
 # Control flow
@@ -185,10 +191,10 @@ let number = match num:
     default: "A number"
 ```
 
-# Objects
+# Structs
 
 ```
-object Point:
+struct Point:
     let x, y: Int
 
     "
@@ -198,15 +204,15 @@ object Point:
     init x: Int y: Int =
         Point x: x y: y
 
-    fn squared =
+    def squared =
         Point
-            "Members of the object can be accessed with self"
+            "Members of the struct can be accessed with self"
             x: self x squared
             "If there are no conflicting names in the same scope, self can be omitted
             y: y squared
 
-    "Functions that mutate the object must be marked with mut"
-    mut fn square =
+    "Functions that mutate the struct must be marked with mut"
+    mut def square =
         x = x squared
         y = y squared
 ```
@@ -234,10 +240,10 @@ if let Signal AM(channel) = station:
     print: 'The AM channel is $(channel)'
 ```
 
-# Interfaces
+# Traits
 
 ```
-interface Pointable:
+trait Pointable:
     var x, y: Int
 
     fn squared -> Pointable
@@ -247,10 +253,35 @@ interface Pointable:
         x = x squared
         y = y squared
 
-object Point(Pointable):
+struct Point:
+    impl Pointable
     var x, y: Int
 
     fn squared = Point x: x squared y: squared
 ```
 
 # Uniform Function Call Syntax
+
+Dream supports Uniform Function Call Syntax (UFCS). This allows free standing functions to be called
+on objects as if they were methods of the object.
+
+```
+fn double: n Int = n * n
+
+"Both of the following are valid uses of the double fn."
+double: 3
+3 double
+
+fn add: n1 Int, n2 Int = n1 + n2
+
+"All of the following are valid uses of the sum fn."
+add: 1, 3
+1 add: 3
+1 add(3)
+```
+
+The lookup rules for UFCS are simple. To resolve `Object message`, the compiler will:
+
+1. Check `Object` for a `message` fn. If so, use it.
+2. Check the current scope for a `message: Object` fn. If so, use it.
+3. Error.
