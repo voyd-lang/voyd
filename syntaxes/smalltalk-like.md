@@ -38,8 +38,8 @@ fn fib(n Int) -> Int =
     if n <= 1: return n
     fib(n - 1) + fib(n - 2)
 
-"**Structs**"
-struct Point:
+"**Objects**"
+object Point:
     var x, y, z: Int
 
     def squared =
@@ -56,39 +56,49 @@ let p2 = p1 squared
 
 Messages are commands sent to an object.
 
-Messages have 5 types:
-1. Unary
-2. Binary
-3. Keyword
-4. Parenthetical list
-5. Anonymous object
+Messages have 3 types:
+1. Unary.
+2. Binary.
+3. Keyword.
+
 
 Examples:
 ```
 "Unary"
-engine start
+engine start "Send the message 'start' to the engine object'"
 
 "Binary"
-1 + 2
+1 + 2 "Send the message + 2 to 1"
 
 "Keyword"
-my_numeric_list push: 7
+my_numeric_list push: 7 "Send the message push: 7 to the my_numeric_list object"
 
-"Keyword with multiple arguments"
+"
+Keyword messages can have more than one keyword.
+In this case, the message is `insert:atIndex:`.
+"
 my_numeric_list insert: 2 atIndex: 0
+```
 
-"Parenthetical list"
+A unary message doesnt always have to be a word. It can also take the form
+of a parenthetical list, or an anonymous object.
+
+Examples:
+```
+"Send the message (1, 2) to the add object"
 add(1, 2)
-do_work()
-log("hello")
 
-"Anonymous object"
-square_vector { x: 3, y: 2, z: 1 }
+"Send the message () to the do_work object"
+do_work()
+
+"Some more examples"
+double(3)
+unit_vector_from { x: 1, y: 3, z: 7 }
 ```
 
 # Expressions
 
-Expressions are parsed with the same rules as smalltalk. Parenthetical list, anonymous object, and unary messages > binary messages > keyoword
+Expressions are parsed with the same rules as smalltalk. unary messages > binary messages > keyword.
 messages.
 
 Examples:
@@ -114,8 +124,7 @@ true
 
 # Functions
 
-A function is an object that accepts a single message. This message can be a tuple,
-object, or keyword.
+A function is an object that understands a single message.
 
 ```
 fn name [Generics...] message -> ReturnType =
@@ -130,30 +139,23 @@ Examples:
 fn hi = print: "Hi!"
 
 fn double(i Int) = i * 2
-fn double = i * 2
 
 fn triple[T Numeric](n T) = n * 3
 
 fn add nums: n1 Int, n2 Int with: n3 =
     n1 + n2 + n3
 
-
-
-fn quadruple(i: Int) -> Int = i * 4
-
-fn square_point { x: Int, y: Int } -> { x: Int, y: Int } =
-    { x: x squared, y: y squared }
+fn shift_point_by_2 { x: Int, y: Int } -> { x: Int, y: Int } =
+    { x: x + 2, y: y + 2 }
 
 let my_anon_func = fn(x) = x * 3
 
 hi "Result: Hi!"
-double: 2 "Result: 4"
-double: 3.0 "Result: 6.0"
-4 triple "Result: 12"
+double(2) "Result: 4"
+triple(4.0) "Result: 16.0"
 add nums: 1, 2 with: 3 "Result: 6"
-quadruple(3) "Result: 12"
-square_point { x: 2, y: 2 } "Result: { x: 4, y: 4 }"
-my_anon_func: 3 "Result: 9"
+shift_point_by_2 { x: 2, y: 2 } "Result: { x: 4, y: 4 }"
+my_anon_func(3) "Result: 9"
 ```
 
 # Control flow
@@ -191,14 +193,14 @@ let number = match num:
     default: "A number"
 ```
 
-# Structs
+# Objects
 
 ```
-struct Point:
+objects Point:
     let x, y: Int
 
     "
-    Like swift structs, initializers are defined automatically.
+    Like swift structs, objects in dream have initializers that are defined automatically.
     But can be defined explicitly too.
     "
     init x: Int y: Int =
@@ -206,12 +208,12 @@ struct Point:
 
     def squared =
         Point
-            "Members of the struct can be accessed with self"
+            "Members of the object can be accessed with self"
             x: self x squared
             "If there are no conflicting names in the same scope, self can be omitted
             y: y squared
 
-    "Functions that mutate the struct must be marked with mut"
+    "Methods that mutate the object must be marked with mut"
     mut def square =
         x = x squared
         y = y squared
@@ -246,18 +248,18 @@ if let Signal AM(channel) = station:
 trait Pointable:
     var x, y: Int
 
-    fn squared -> Pointable
+    def squared -> Pointable
 
     "Interfaces support default implementations"
-    mut fn square =
+    mut def square =
         x = x squared
         y = y squared
 
-struct Point:
-    impl Pointable
+object Point:
     var x, y: Int
 
-    fn squared = Point x: x squared y: squared
+impl Pointable for Point:
+    def squared = Point x: x squared y: squared
 ```
 
 # Uniform Function Call Syntax
@@ -266,22 +268,34 @@ Dream supports Uniform Function Call Syntax (UFCS). This allows free standing fu
 on objects as if they were methods of the object.
 
 ```
-fn double: n Int = n * n
+fn double(n Int) = n * n
 
 "Both of the following are valid uses of the double fn."
-double: 3
+double(3)
 3 double
-
-fn add: n1 Int, n2 Int = n1 + n2
-
-"All of the following are valid uses of the sum fn."
-add: 1, 3
-1 add: 3
-1 add(3)
 ```
 
 The lookup rules for UFCS are simple. To resolve `Object message`, the compiler will:
 
 1. Check `Object` for a `message` fn. If so, use it.
-2. Check the current scope for a `message: Object` fn. If so, use it.
-3. Error.
+2. Check the current scope for an object with the name `message`
+   that can take the message `(Obect)`. If one exists, use it.
+3. If both 1 and 2 failed, Error.
+
+Some more examples:
+```
+"UFCS also works with functions that take more than one argument"
+fn map(list List[Int], callback Fn(item Int) -> Int) =
+    var new_list = List[Int] new
+    list forEach: fn(item) =
+        new_list push: callback(item)
+
+let my_list = List(1, 2, 3)
+let my_doubled_list = my_list map(fn(item) = item * 2)
+
+"
+If there is only two arguments in a function, the function can also be
+called like a keyword message. So the following is also valid.
+"
+let my_other_doubled_list = my_list map: fn(item) = item * 2
+```
