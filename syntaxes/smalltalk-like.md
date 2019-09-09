@@ -258,7 +258,7 @@ trait Pointable =
 object Point =
     var x, y: Int
 
-impl Pointable for Point:
+impl Pointable for Point =
     def squared = Point x: x squared y: squared
 ```
 
