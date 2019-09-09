@@ -39,7 +39,7 @@ fn fib(n Int) -> Int =
     fib(n - 1) + fib(n - 2)
 
 "**Objects**"
-object Point:
+object Point =
     var x, y, z: Int
 
     def squared =
@@ -196,7 +196,7 @@ let number = match num:
 # Objects
 
 ```
-objects Point:
+objects Point =
     let x, y: Int
 
     "
@@ -223,14 +223,14 @@ objects Point:
 
 Basic definition
 ```
-enum Signal:
+enum Signal =
     case FM
     case AM
 ```
 
 Enums can have associated values
 ```
-enum Signal:
+enum Signal =
     case FM(Double)
     case AM(Double)
 
@@ -245,7 +245,7 @@ if let Signal AM(channel) = station:
 # Traits
 
 ```
-trait Pointable:
+trait Pointable =
     var x, y: Int
 
     def squared -> Pointable
@@ -255,7 +255,7 @@ trait Pointable:
         x = x squared
         y = y squared
 
-object Point:
+object Point =
     var x, y: Int
 
 impl Pointable for Point:
