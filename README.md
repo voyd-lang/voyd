@@ -4,25 +4,12 @@ An experimental programming language for WebAssembly. The language is mostly int
 to be a pet project for the years to come. Something to help me understand how computers
 work on a lower level.
 
-Values:
-- Simplicity
-- Expressiveness
-- Easy to for a human to read
-- Safety (Memory and Type)
-- Performance
-
-## Short Term Goals
-
-- [x] Expressive, easy to read Syntax
-- [ ] WebAssembly Target
-- [ ] Safe
-- [ ] Faster than JS
-
-## Long Term Goals
-
-- [ ] LLVM Target
-- [ ] Viable Language for Performant Graphics and Machine Learning
-- [ ] Safe Concurrency
+Goals (In order of importance):
+- Make coders happy - Dream code should be fun to read, write, and maintain.
+- Garunteed thread and memory safety
+- First class webassembly support
+- Predictable - The language should have as few surprises as possible.
+- Performant - It should be easy to write highly performant code.
 
 ## [Overview](./overview.md)
 
