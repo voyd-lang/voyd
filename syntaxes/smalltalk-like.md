@@ -122,6 +122,25 @@ Examples:
 true
 ```
 
+In dream expressions and statements are usually terminated by a newline. However, if the next line
+is indented an additional level and is a message send, the message is sent to the result of
+the previous expression. This enables elegant use of functional patterns.
+
+For example:
+```
+let nums = List(2, 1, 4)
+
+let result = nums
+    map: fn(num) =
+        num * 2
+    sort: fn(n1, n2) =
+        n1 > n2
+    startingWith: 2 reduce: fn(cur, prev) =
+        prev raiseBy: cur
+
+print(result) "256"
+```
+
 # Functions
 
 A function is an object that understands a single message.
