@@ -57,44 +57,92 @@ let p2 = p1 squared
 
 Messages are commands sent to an object.
 
-Messages have 3 types:
+Messages have take five forms:
 1. Unary.
 2. Binary.
 3. Keyword.
+4. Tuple.
+5. Object,
 
 
-Examples:
-```
-"Unary"
-engine start "Send the message 'start' to the engine object'"
+## Unary Messages
 
-"Binary"
-1 + 2 "Send the message + 2 to 1"
-
-"Keyword"
-my_numeric_list push: 7 "Send the message push: 7 to the my_numeric_list object"
-
-"
-Keyword messages can have more than one keyword.
-In this case, the message is `insert:atIndex:`.
-"
-my_numeric_list insert: 2 atIndex: 0
-```
-
-A unary message doesnt always have to be a word. It can also take the form
-of a parenthetical list, or an anonymous object.
+Unary messages are messages sent to a single object with no additional context.
 
 Examples:
 ```
-"Send the message (1, 2) to the add object"
-add(1, 2)
+engine start "Send the message 'start' to the engine object"
+door open "Send the message 'open' to the door object"
+```
 
-"Send the message () to the do_work object"
-do_work()
+## Binary Messages
 
-"Some more examples"
-double(3)
-unit_vector_from { x: 1, y: 3, z: 7 }
+Binary messages are messages that start with an operator character and have one argument.
+
+Examples:
+```
+1 + 2 "Send the message '+' with the argument '2' to the object '1'"
+3 / 4
+'Hello,' + ' World!'
+```
+
+## Keyword Messages
+
+Keyword messages are messages that can have one or more arguments.
+
+They look like this:
+```
+Object message: parameter
+```
+
+Keyword messages can have an unlimited number of arguments. But each argument is identified
+by a keyword:
+```
+Object keyword1: parameter1 keyword2: parameter2 "...etc"
+```
+
+Examples
+```
+'Hello, World!" indexOf: 'o' startingAt: 5 "Returns 8"
+MyList append: 5
+```
+
+## Tuple Messages
+
+Tuple messages are a parenthetical list of up to an unlimited number of arguments.
+
+Example:
+```
+add(1, 2) "Send the message (1, 2) to the add object
+```
+
+## Object Messages
+
+Object messages are a lot like keyword messages. They key difference is that they are wrapped
+in curly braces `{}` and are comma seperated. This allows you to spread the message accross
+multiple lines.
+
+```
+let point = Point {
+    x: 1 * 2,
+    y: 3 raisedBy: 5,
+    z: 5 + 4
+}
+```
+
+Object messages have another neat feature. If the keyword is being set to a variable that
+shares the same name as the keyword, you can omit the variable.
+
+For example:
+```
+let x = 1
+let y = 4
+
+"Instead of doint this"
+Point { x: x, y: y, z: 4 }
+
+"You can do this!"
+Point { x, y, z: 4 }
 ```
 
 # Expressions
@@ -215,6 +263,8 @@ let number = match num:
 
 # Objects
 
+Objects are self contained units that can store information and react to messages.
+
 ```
 objects Point =
     let x, y: Int
@@ -226,6 +276,7 @@ objects Point =
     init x: Int y: Int =
         Point { x, y }
 
+    "Unary message handler"
     def squared =
         Point
             "Members of the object can be accessed with self"
@@ -237,6 +288,71 @@ objects Point =
     mut def square =
         x = x squared
         y = y squared
+```
+
+## Object Methods
+
+Methods allow objects to respond to messages.
+
+In general, they take the form
+```
+def message -> ReturnType =
+    "Method body"
+```
+
+Methods always return the result of the last expression in the method body.
+But, if you need to return early, the `return` keyword is still available.
+
+Unary message handlers take the form:
+```
+def message =
+    "method body"
+```
+
+Binary message handlers take the form:
+```
+def operator parmaeter: ParameterType =
+    "method body"
+
+"i.e."
+def + num: Int =
+    "method body"
+```
+
+Keyword message handlers take the form:
+```
+def message parmaeter: ParameterType =
+    "method body"
+```
+
+If the message and parameter share the same name, the parameter portion can be omitted.
+For example:
+```
+"this"
+def x x: Int =
+    "method body"
+
+"is equivalent to this"
+def x: Int =
+    "method body"
+```
+
+Tuple message handlers take the form:
+```
+def (parameter: ParameterType) =
+    "method body"
+```
+
+Object message handlers take the form:
+```
+def { parameter: ParameterType } =
+    "method body"
+```
+
+If a method contains only one expression, it can be placed directly after the `=`.
+For example:
+```
+def short_method = 1 * 2
 ```
 
 # Enums
@@ -279,7 +395,7 @@ object Point =
     var x, y: Int
 
 impl Pointable for Point =
-    def squared = Point x: x squared y: squared
+    def squared = Point { x: x squared y: squared }
 ```
 
 # Uniform Function Call Syntax
