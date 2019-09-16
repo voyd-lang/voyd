@@ -62,7 +62,7 @@ Messages have take five forms:
 2. Binary.
 3. Keyword.
 4. Tuple.
-5. Object,
+5. Anonymous Object,
 
 
 ## Unary Messages
@@ -83,7 +83,7 @@ Examples:
 ```
 1 + 2 "Send the message '+' with the argument '2' to the object '1'"
 3 / 4
-'Hello,' + ' World!'
+`Hello,` + ` World!`
 ```
 
 ## Keyword Messages
@@ -103,7 +103,7 @@ Object keyword1: parameter1 keyword2: parameter2 "...etc"
 
 Examples
 ```
-'Hello, World!" indexOf: 'o' startingAt: 5 "Returns 8"
+`Hello, World!` indexOf: `o` startingAt: 5 "Returns 8"
 MyList append: 5
 ```
 
@@ -116,9 +116,9 @@ Example:
 add(1, 2) "Send the message (1, 2) to the add object
 ```
 
-## Object Messages
+## Anonymous Object Messages
 
-Object messages are a lot like keyword messages. They key difference is that they are wrapped
+Anonymous object messages are a lot like keyword messages. They key difference is that they are wrapped
 in curly braces `{}` and are comma seperated. This allows you to spread the message accross
 multiple lines.
 
