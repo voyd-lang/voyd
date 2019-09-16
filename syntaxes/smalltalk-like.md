@@ -49,7 +49,7 @@ object Point =
             z: z squared
         }
 
-let p1 = Point x: 1 y: 2 z: 3
+let p1 = Point { x: 1 y: 2 z: 3 }
 let p2 = p1 squared
 ```
 
