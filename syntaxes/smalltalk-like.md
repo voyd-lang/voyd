@@ -43,10 +43,11 @@ object Point =
     var x, y, z: Int
 
     def squared =
-        Point
-            x: x squared
-            y: y squared
+        Point {
+            x: x squared,
+            y: y squared,
             z: z squared
+        }
 
 let p1 = Point x: 1 y: 2 z: 3
 let p2 = p1 squared
@@ -135,8 +136,8 @@ let result = nums
         num * 2
     sort: fn(n1, n2) =
         n1 > n2
-    startingWith: 2 reduce: fn(cur, prev) =
-        prev raiseBy: cur
+    withAccumulater: 0 reduce: fn(acc, next) =
+        acc + next
 
 print(result) "256"
 ```
