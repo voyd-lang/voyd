@@ -20,7 +20,7 @@ Features:
 1.0 "Double"
 `Hello` "String"
 false "Boolean false"
-trye "Boolean true
+true "Boolean true
 (1, 2, 3) "Tuple"
 { a: 1, b: 2, c: 3 } "Anonymous object"
 
