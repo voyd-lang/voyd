@@ -224,7 +224,7 @@ objects Point =
     But can be defined explicitly too.
     "
     init x: Int y: Int =
-        Point x: x y: y
+        Point { x, y }
 
     def squared =
         Point
