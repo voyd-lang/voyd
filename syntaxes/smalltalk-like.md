@@ -35,7 +35,8 @@ var y = 2
 "**Functions**"
 fn double(i Int) = i * 2
 fn fib(n Int) -> Int =
-    if n <= 1: return n
+    If (n <= 1)
+        return n
     fib(n - 1) + fib(n - 2)
 
 "**Objects**"
@@ -57,12 +58,13 @@ let p2 = p1 squared
 
 Messages are commands sent to an object.
 
-Messages have take five forms:
+Messages have take six forms:
 1. Unary.
 2. Binary.
 3. Keyword.
 4. Tuple.
-5. Anonymous Object,
+5. Anonymous Object.
+6. Block
 
 
 ## Unary Messages
@@ -144,6 +146,17 @@ Point { x: x, y: y, z: 4 }
 "You can do this!"
 Point { x, y, z: 4 }
 ```
+
+## Block messages
+
+```
+If (true)
+    do_work()
+```
+
+In this example. We are sending the message `(true)` to the Ff object. This creates a condition
+object that is passed a block message. In the case the condition object realizes it's true, and
+executes the block.
 
 # Expressions
 
@@ -229,36 +242,22 @@ my_anon_func(3) "Result: 9"
 # Control flow
 
 ```
-if 3 > 2:
-    print: '3 > 2'
+If (3 > 2)
+    print(`3 > 2`)
 
-for num in (1 to: 4):
-    print: num
+(1 to: 4) each: |num|
+    print(num)
 
-match num:
-    case 1: "One"
-    case 2: "Two"
-    default: "A number"
-```
+"
+Note to self, exhaustiveness checking can be accomplished with conditional types.
+Match[T](T) returns a match object. with a message handler of
+`[U] case: T then: U -> T extends (Enum case) ? T : Match`.
 
-Dream supports expression oriented control flow. If, match, and loop constructs are all
-expressions that can return a value.
-
-```
-let my_string = if 3 > 2:
-    "3 > 2"
-else:
-    "3 is somehow less than 2"
-
-let my_num = for num in (1 to: 4):
-    if num > 2: break num
-default: "Garuntees that the for loop returns a value"
-    0
-
-let number = match num:
-    case 1: "One"
-    case 2: "Two"
-    default: "A number"
+"
+Match (num)
+    case: 1 then: `One`
+    case: 2 then: `Two`
+    default: `A number`
 ```
 
 # Objects
@@ -266,7 +265,7 @@ let number = match num:
 Objects are self contained units that can store information and react to messages.
 
 ```
-objects Point =
+object Point =
     let x, y: Int
 
     "
