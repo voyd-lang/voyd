@@ -163,3 +163,7 @@ Uses Ecmascript import syntax and nodejs like module resolution
 # String Interpolation
 
 Identical to swift
+
+# Enums
+
+Identical to swift
