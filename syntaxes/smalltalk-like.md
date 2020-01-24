@@ -58,13 +58,11 @@ let p2 = p1 squared
 
 Messages are commands sent to an object.
 
-Messages have take six forms:
+Messages have take four forms:
 1. Unary.
 2. Binary.
 3. Keyword.
-4. Tuple.
-5. Anonymous Object.
-6. Block
+4. Value.
 
 
 ## Unary Messages
@@ -97,15 +95,15 @@ They look like this:
 Object message: parameter
 ```
 
-Keyword messages can have an unlimited number of arguments. But each argument is identified
-by a keyword:
+Keyword messages can have an unlimited number of arguments. Each keyword much be seperated
+by a comma.
 ```
-Object keyword1: parameter1 keyword2: parameter2 "...etc"
+Object keyword1: parameter1, keyword2: parameter2 "...etc"
 ```
 
 Examples
 ```
-`Hello, World!` indexOf: `o` startingAt: 5 "Returns 8"
+`Hello, World!` indexOf: `o`, startingAt: 5 "Returns 8"
 MyList append: 5
 ```
 
@@ -147,17 +145,6 @@ Point { x: x, y: y, z: 4 }
 Point { x, y, z: 4 }
 ```
 
-## Block messages
-
-```
-If (true)
-    do_work()
-```
-
-In this example. We are sending the message `(true)` to the Ff object. This creates a condition
-object that is passed a block message. In the case the condition object realizes it's true, and
-executes the block.
-
 # Expressions
 
 Expressions are parsed with the same rules as smalltalk. unary messages > binary messages > keyword.
@@ -172,20 +159,20 @@ Examples:
 3 + 4
 
 "Keyword message"
-'This is a sentence' sliceFrom: 3 to: 4
+'This is a sentence' sliceFrom: 3, to: 4
 
 "The following expression:"
-5 double + 6 triple between: 5 and: 300
+5 double + 6 triple between: 5, and: 300
 "Evals to:"
-10 + 18 betweeen: 5 and: 300
+10 + 18 betweeen: 5, and: 300
 "Then:"
-28 between: 5 and: 300
+28 between: 5, and: 300
 "Finally:"
 true
 ```
 
 In dream expressions and statements are usually terminated by a newline. However, if the next line
-is indented an additional level and is a message send, the message is sent to the result of
+is indented an additional level and begins with a message send, the message is sent to the result of
 the previous expression. This enables elegant use of functional patterns.
 
 For example:
@@ -197,67 +184,10 @@ let result = nums
         num * 2
     sort: fn(n1, n2) =
         n1 > n2
-    withAccumulater: 0 reduce: fn(acc, next) =
+    withAccumulater: 0, reduce: fn(acc, next) =
         acc + next
 
 print(result) "256"
-```
-
-# Functions
-
-A function is an object that understands a single message.
-
-```
-fn name [Generics...] message -> ReturnType =
-    Function Body
-```
-
-The `[Generics...]` section is optional. There can be multiple messages.
-`-> ReturnType` can usually be infered so that can also be left out.
-
-Examples:
-```
-fn hi = print: "Hi!"
-
-fn double(i Int) = i * 2
-
-fn triple[T Numeric](n T) = n * 3
-
-fn add nums: n1 Int, n2 Int with: n3 =
-    n1 + n2 + n3
-
-fn shift_point_by_2 { x: Int, y: Int } -> { x: Int, y: Int } =
-    { x: x + 2, y: y + 2 }
-
-let my_anon_func = fn(x) = x * 3
-
-hi "Result: Hi!"
-double(2) "Result: 4"
-triple(4.0) "Result: 16.0"
-add nums: 1, 2 with: 3 "Result: 6"
-shift_point_by_2 { x: 2, y: 2 } "Result: { x: 4, y: 4 }"
-my_anon_func(3) "Result: 9"
-```
-
-# Control flow
-
-```
-If (3 > 2)
-    print(`3 > 2`)
-
-(1 to: 4) each: |num|
-    print(num)
-
-"
-Note to self, exhaustiveness checking can be accomplished with conditional types.
-Match[T](T) returns a match object. with a message handler of
-`[U] case: T then: U -> T extends (Enum case) ? T : Match`.
-
-"
-Match (num)
-    case: 1 then: `One`
-    case: 2 then: `Two`
-    default: `A number`
 ```
 
 # Objects
