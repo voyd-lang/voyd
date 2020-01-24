@@ -167,3 +167,8 @@ Identical to swift
 # Enums
 
 Identical to swift
+
+# Uniform Function Call syntax
+
+Supports D style UFCS
+https://tour.dlang.org/tour/en/gems/uniform-function-call-syntax-ufcs
