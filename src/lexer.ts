@@ -2,7 +2,7 @@ import { Token } from "./definitions";
 
 const operators = [
     "+", "-", "*", "/", "=", "==", "and", "or", "xor", "<", ">", ">=", "<=", "<>",
-    "=>", "??",
+    "=>", "??", "|>"
 ];
 
 const keywords = ["let", "var", "for", "in", "return", "break", "continue", "if", "else", "elif", "while"];
