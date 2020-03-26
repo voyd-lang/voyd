@@ -1,40 +1,21 @@
 
-"Comments in quotes"
 
-"**Types**"
+struct Target [
+    x: Number, y: Number, z: Number
 
-1 "Int"
-1.0 "Double"
-`Hello` "String"
-false "Boolean false"
-true "Boolean true"
-(1, 2, 3) "Tuple"
-{ 1, 2, 3 } "Array"
-{ a: 1, b: 2, c: 3 } "Anonymous object"
+    def offs [x: Number] -> Target {
+        Target [x: self.x + x, y, z]
+    }
 
-"**Variables**"
+    mut def shift [y: Number] -> Void {
+        self.y += y
+    }
+]
 
-"Immutable"
-let x = 3
+let target = Target [x: 5, y: 3, z: 2]
 
-"Mutable"
-var y = 2
+def move([x: Number, y: Number]) -> [x: Number, y: Number] {
+    // ...
+}
 
-"**Functions**"
-fn double: i Int = i * 2
-fn fib: n Int -> Int =
-    if n <= 1: return n
-    fib: n - 1 + fib: n - 2
-
-"**Objects**"
-object Point:
-    var x, y, z: Int
-
-    fn squared =
-        Point
-            x: x squared
-            y: y squared
-            z: z squared
-
-let p1 = Point x: 1 y: 2 z: 3
-let p2 = p1 squared
+move [x: 5, y: 3]
