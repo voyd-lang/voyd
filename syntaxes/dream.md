@@ -158,13 +158,34 @@ caller({ a, b | a + b })
 caller() { $0 + $1 } // Parameters can be referenced with a $ followed by their index
 caller { $0 + $1 }
 
-def fancyCaller
-([callIt: Boolean], fn: Fn() -> Void) -> Void {
+def fancyCaller([callIt: Boolean], fn: Fn() -> Void) -> Void {
     if callIt { fn() }
 }
 
 fancyCaller [callIt: true] {
     log("Hello!")
+}
+```
+
+# Enums
+
+```
+enum Friend [
+    eric
+    angie
+    carter
+]
+
+let friend = Friend.eric
+
+// Enum identifier can be omitted if it can be reasonable inferred.
+let bestFriend: Friend = .angie
+
+// Enums can have associated types
+enum ValidID {
+    // Struct associated type
+    driversLicense [name: String, no: String, issued: Date, exp: Date]
+    studentID(Int)
 }
 ```
 
