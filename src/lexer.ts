@@ -1,19 +1,13 @@
-import { Token } from "./definitions";
-
-const operators = [
-    "+", "-", "*", "/", "=", "==", "and", "or", "xor", "<", ">", ">=", "<=", "<>",
-    "=>", "??", "|>"
-];
-
-const keywords = ["let", "var", "for", "in", "return", "break", "continue", "if", "else", "elif", "while"];
+import { Token, operators, keywords, braces } from "./definitions";
+import { isInTuple } from "./helpers";
 
 const isLetter = (char: string) => (/[a-zA-Z]|_/g).test(char);
 
 const isNum = (char: string) => (/[0-9]/g).test(char);
 
-const isOperator = (str: string) => operators.includes(str);
+const isOperator = (str: string) => isInTuple(str, operators);
 
-const isKeyword = (str: string) => keywords.includes(str);
+const isKeyword = (str: string) => isInTuple(str, keywords);
 
 const isBool = (str: string) => str === "true" || str === "false";
 
@@ -26,14 +20,15 @@ const extractWord = (chars: string[]) => {
 };
 
 const extractNum = (chars: string[]) => {
-    let hasHadDot = false;
+    let hadDot = false;
     let num = "";
+
     while (chars.length > 0) {
         const next = chars[0];
-        if (next === "." && hasHadDot) break;
+        if (next === "." && hadDot) break;
 
         if (next === ".") {
-            hasHadDot = true;
+            hadDot = true;
             num += chars.shift();
             continue;
         }
@@ -45,7 +40,8 @@ const extractNum = (chars: string[]) => {
 
         break;
     }
-    return num;
+
+    return { num, type: (hadDot ? "double" : "int") as ("double" | "int") };
 };
 
 const extractString = (chars: string[]) => {
@@ -102,12 +98,14 @@ export const lexer = (code: string) => {
         }
 
         if (char === "-" && isNum(next)) {
-            tokens.push({ type: "number", value: `-${extractNum(chars)}` });
+            const { num, type } = extractNum(chars);
+            tokens.push({ type, value: `-${num}` });
             continue;
         }
 
         if (isNum(char)) {
-            tokens.push({ type: "number", value: `${char}${extractNum(chars)}` });
+            const { num, type } = extractNum(chars);
+            tokens.push({ type, value: `${char}${num}` });
             continue;
         }
 
@@ -116,42 +114,22 @@ export const lexer = (code: string) => {
             continue;
         }
 
-        if (char === "|") {
-            tokens.push({ type: "pipe", value: "|" });
-            continue;
-        }
-
-        if (char === "{") {
-            tokens.push({ type: "left-curly", value: "{" });
-            continue;
-        }
-
-        if (char === "}") {
-            tokens.push({ type: "right-curly", value: "}" });
-            continue;
-        }
-
-        if (char === "(") {
-            tokens.push({ type: "left-paren", value: "(" });
-            continue;
-        }
-
-        if (char === ")") {
-            tokens.push({ type: "right-paren", value: ")" });
+        if (isInTuple(char, braces)) {
+            tokens.push({ type: char, value: char });
             continue;
         }
 
         if (isOperator(char)) {
             const fullOp = `${char}${extractOperator(chars)}`;
             if (!isOperator(fullOp)) {
-                throw new Error(`Unkown operator: ${fullOp}`);
+                throw new Error(`Unknown operator: ${fullOp}`);
             }
             tokens.push({ type: "operator", value: fullOp });
             continue;
         }
 
         if (char === ",") {
-            tokens.push({ type: "comma", value: "," });
+            tokens.push({ type: ",", value: "," });
             continue;
         }
 

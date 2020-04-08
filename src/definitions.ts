@@ -102,3 +102,12 @@ export type Instruction =
     ReturnStatement;
 
 export interface AST extends Array<Instruction | AST> { }
+
+export const operators = [
+    "+", "-", "*", "/", "=", "==", "and", "or", "xor", "<", ">", ">=", "<=", "<>",
+    "=>", "??", "|", '&'
+] as const;
+
+export const keywords = ["let", "var", "for", "in", "return", "break", "continue", "if", "else", "while", "def", "get", "set"] as const;
+
+export const braces = ["{", "[", "]", "}", "(", ")"] as const;
