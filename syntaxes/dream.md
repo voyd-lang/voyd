@@ -191,6 +191,9 @@ enum ValidID {
 
 # Generics
 
+Generics work much like they do in TypeScript or Swift with a slightly different syntax.
+Top level types are defined and annotated between the pipe (`|`) character.
+
 ```
 def add|T|(a: T, b: T) -> T {
     a + b
@@ -201,4 +204,11 @@ struct Target|T| {
     y: T
     z: T
 }
+```
+
+Lower level generic type annotations use the same `<>` syntax as TypeScript.
+
+For example, an array of promises that resolve an Int would be annotated like so:
+```
+let arr: Array|Promise<Int>| = Array(Promise(5), Promise(4))
 ```
