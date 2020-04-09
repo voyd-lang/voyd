@@ -1,5 +1,5 @@
 import { Token, operators, keywords, brackets, symbols } from "./definitions";
-import { isInTuple } from "./helpers";
+import { isInTuple } from "../helpers";
 
 const isLetter = (char: string) => (/[a-zA-Z]|_/g).test(char);
 
