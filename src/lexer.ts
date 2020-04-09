@@ -1,4 +1,4 @@
-import { Token, operators, keywords, braces } from "./definitions";
+import { Token, operators, keywords, brackets, symbols } from "./definitions";
 import { isInTuple } from "./helpers";
 
 const isLetter = (char: string) => (/[a-zA-Z]|_/g).test(char);
@@ -71,11 +71,6 @@ export const lexer = (code: string) => {
         const char = chars.shift()!;
         const next = chars[0];
 
-        if (char === ";") {
-            tokens.push({ type: ";", value: char });
-            continue;
-        }
-
         if (isLetter(char)) {
             const word = `${char}${extractWord(chars)}`;
             if (isKeyword(word)) {
@@ -114,8 +109,18 @@ export const lexer = (code: string) => {
             continue;
         }
 
-        if (isInTuple(char, braces)) {
-            tokens.push({ type: char, value: char });
+        if (isInTuple(char, brackets)) {
+            tokens.push({ type: "bracket", value: char });
+            continue;
+        }
+
+        if (isInTuple(char, symbols)) {
+            tokens.push({ type: "symbol", value: char });
+            continue;
+        }
+
+        if (char === "-" && next === ">") {
+            tokens.push({ type: "symbol", value: "->" });
             continue;
         }
 
@@ -128,12 +133,7 @@ export const lexer = (code: string) => {
             continue;
         }
 
-        if (char === ",") {
-            tokens.push({ type: ",", value: "," });
-            continue;
-        }
-
-        if (char === " " || char === "\t" || char === "\r" || char === "\n") continue;
+        if (char === " " || char === "\t" || char === "\r") continue;
 
         throw new Error(`Unexpected token: ${char}`);
     }
