@@ -13,6 +13,7 @@
     "typescript": "^3.6.2"
   },
   "dependencies": {
-    "@types/node": "^12.7.3"
+    "@types/node": "^12.7.3",
+    "binaryen": "^91.0.0"
   }
 }
