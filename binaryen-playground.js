@@ -1,38 +1,46 @@
-// Create a module to work on
-var module = new binaryen.Module();
-module.autoDrop();
+const binaryen = require("binaryen");
 
-module.addGlobal("counter", binaryen.i32, true, module.i32.const(0))
+const mod = new binaryen.Module();
 
-module.addFunction('increment', [], binaryen.i32, [], module.block(null, [
-  module.global.set("counter",
-    module.i32.add(
-      module.global.get("counter", binaryen.i32),
-      module.i32.const(1)
+mod.autoDrop();
+
+mod.addGlobal("counter", binaryen.i32, true, mod.i32.const(0))
+mod.addFunctionImport("log", "imports", "log", binaryen.i32, binaryen.none);
+
+mod.addFunction('increment', binaryen.none, binaryen.none, [], mod.block("", [
+  mod.global.set("counter",
+    mod.i32.add(
+      mod.global.get("counter", binaryen.i32),
+      mod.i32.const(1)
     )
-  ),
-  module.return(module.global.get("counter", binaryen.i32))
+  )
 ]));
-module.addFunctionExport('increment', 'increment');
 
-// Print out the optimized module's text
-console.log(module.emitText());
+mod.addFunction('main', binaryen.none, binaryen.none, [], mod.block("", [
+  mod.call("increment", [], binaryen.none, binaryen.none),
+  mod.call("increment", [], binaryen.none, binaryen.none),
+  mod.call("increment", [], binaryen.none, binaryen.none),
+  mod.call("log", [mod.global.get("counter", binaryen.i32)], binaryen.none)
+]));
+mod.addFunctionExport('main', 'main');
+
+if (!mod.validate()) throw new Error("Invalid module");
 
 // Get the binary in typed array form
-var binary = module.emitBinary();
-console.log('binary size: ' + binary.length);
-module.validate()
+const binary = mod.emitBinary();
+console.log(mod.emitText());
 
 // We don't need the Binaryen module anymore, so we can tell it to
 // clean itself up
-module.dispose();
+mod.dispose();
 
 // Compile the binary and create an instance
-var wasm = new WebAssembly.Instance(new WebAssembly.Module(binary), {})
-console.log("exports: " + Object.keys(wasm.exports).sort().join(","));
+const wasm = new WebAssembly.Instance(new WebAssembly.Module(binary), {
+  imports: {
+    log(i) {
+      console.log(i)
+    }
+  }
+});
 
-console.log(wasm.exports.increment());
-console.log(wasm.exports.increment());
-console.log(wasm.exports.increment());
-
-console.log("done");
+wasm.exports.main();
