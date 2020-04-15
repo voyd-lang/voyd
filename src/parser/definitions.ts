@@ -44,6 +44,16 @@ export interface WhileStatement extends DreamNode {
     body: DreamNode[];
 }
 
+export interface BreakStatement extends DreamNode {
+    kind: "break-statement";
+}
+
+export interface ContinueStatement extends DreamNode {
+    kind: "while-statement";
+    expression: DreamNode;
+    body: DreamNode[];
+}
+
 export interface IfExpression extends DreamNode {
     kind: "if-expression";
     expression: DreamNode;
@@ -66,6 +76,11 @@ export interface MethodOrFunctionCall extends DreamNode {
     arguments: DreamNode[];
 }
 
+export interface ReturnStatement extends DreamNode {
+    kind: "return-statement";
+    expression: DreamNode;
+}
+
 export interface TypeParameterDeclaration extends DreamNode {
     kind: "type-parameter-declaration";
     identifier: string;
@@ -84,3 +99,21 @@ export interface TypeArgument extends DreamNode {
     identifier: string;
     flags: string[];
 }
+
+export type Instruction =
+    VariableDeclaration |
+    MethodDeclaration |
+    StructDeclaration |
+    ForInStatement |
+    WhileStatement |
+    IfExpression |
+    FunctionStatement |
+    MethodOrFunctionCall |
+    TypeParameterDeclaration |
+    ParameterDeclaration |
+    TypeArgument |
+    ContinueStatement |
+    BreakStatement |
+    ReturnStatement;
+
+export interface AST extends Array<AST | Instruction> { }
