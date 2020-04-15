@@ -20,7 +20,6 @@ let crossedVec = generateRandomVec3s()
     .reduce { $0.cross($1) }
 
 html! {
-
     div! {
         p! { "Hello" }
         p! { "How are you today" }

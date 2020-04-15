@@ -144,7 +144,7 @@ target.shift [x: 5]
 # Functions (Or closures, or lambdas)
 
 ```
-let add = { a: Int, b: Int -> Int |
+let add = {| a: Int, b: Int -> Int |
     a + b
 }
 
@@ -154,7 +154,7 @@ def caller(fn: Fn(a, b) -> Int) -> Int {
 
 // All are valid ways of calling the caller method
 caller(add)
-caller({ a, b | a + b })
+caller({| a, b | a + b })
 caller() { $0 + $1 } // Parameters can be referenced with a $ followed by their index
 caller { $0 + $1 }
 
@@ -182,11 +182,11 @@ let friend = Friend.eric
 let bestFriend: Friend = .angie
 
 // Enums can have associated types
-enum ValidID {
+enum ValidID [
     // Struct associated type
     driversLicense [name: String, no: String, issued: Date, exp: Date]
     studentID(Int)
-}
+]
 ```
 
 # Generics
@@ -199,11 +199,9 @@ def add|T|(a: T, b: T) -> T {
     a + b
 }
 
-struct Target|T| {
-    x: T
-    y: T
-    z: T
-}
+struct Target|T| [
+    x, y, z: T
+]
 ```
 
 Lower level generic type annotations use the same `<>` syntax as TypeScript.
