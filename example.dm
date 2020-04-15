@@ -18,3 +18,15 @@ def generateRandomVec3s(count = 10) -> Array|Vec3<Int>| {
 
 let crossedVec = generateRandomVec3s()
     .reduce { $0.cross($1) }
+
+html! {
+
+    div! {
+        p! { "Hello" }
+        p! { "How are you today" }
+    }
+
+    ul! {
+        messages.map { m | m.inCaps() }
+    }
+}
