@@ -212,3 +212,8 @@ For example, an array of promises that resolve an Int would be annotated like so
 ```
 let arr: Array|Promise<Int>| = Array(Promise(5), Promise(4))
 ```
+
+# Macros
+
+Dream supports macros that adhere to "Macro By Example". They work in a similar manner to
+[rust macros](https://doc.rust-lang.org/1.7.0/book/macros.html).
