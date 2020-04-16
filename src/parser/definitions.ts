@@ -5,10 +5,9 @@ export interface DreamNode {
 
 export interface VariableDeclaration extends DreamNode {
     kind: "variable-declaration"
-    text: string;
     identifier: string;
     flags: string[];
-    type: TypeArgument;
+    type?: TypeArgument;
     initializer: DreamNode;
 }
 
@@ -40,7 +39,7 @@ export interface ForInStatement extends DreamNode {
 
 export interface WhileStatement extends DreamNode {
     kind: "while-statement";
-    expression: DreamNode;
+    condition: DreamNode;
     body: DreamNode[];
 }
 
@@ -49,17 +48,15 @@ export interface BreakStatement extends DreamNode {
 }
 
 export interface ContinueStatement extends DreamNode {
-    kind: "while-statement";
-    expression: DreamNode;
-    body: DreamNode[];
+    kind: "continue-statement";
 }
 
 export interface IfExpression extends DreamNode {
     kind: "if-expression";
-    expression: DreamNode;
-    ifBody: DreamNode[];
-    elseBody: DreamNode[];
-    elseIfs: { expression: DreamNode, body: DreamNode[] }[];
+    condition: DreamNode;
+    body: DreamNode[];
+    elseBody?: DreamNode[];
+    elseIfBodies?: { expression: DreamNode, body: DreamNode[] }[];
 }
 
 export interface FunctionStatement extends DreamNode {
@@ -100,6 +97,36 @@ export interface TypeArgument extends DreamNode {
     flags: string[];
 }
 
+export interface I32Literal extends DreamNode {
+    kind: "i32-literal";
+    value: string;
+}
+
+export interface F32Literal extends DreamNode {
+    kind: "f32-literal";
+    value: string;
+}
+
+export interface StringLiteral extends DreamNode {
+    kind: "string-literal";
+    value: string;
+}
+
+export interface BoolLiteral extends DreamNode {
+    kind: "bool-literal";
+    value: boolean;
+}
+
+export interface Block extends DreamNode {
+    kind: "block";
+    body: Instruction[];
+}
+
+export interface Identifier extends DreamNode {
+    kind: "identifier";
+    value: string;
+}
+
 export type Instruction =
     VariableDeclaration |
     MethodDeclaration |
@@ -114,6 +141,10 @@ export type Instruction =
     TypeArgument |
     ContinueStatement |
     BreakStatement |
-    ReturnStatement;
-
-export interface AST extends Array<AST | Instruction> { }
+    ReturnStatement |
+    I32Literal |
+    F32Literal |
+    StringLiteral |
+    BoolLiteral |
+    Block |
+    Identifier;

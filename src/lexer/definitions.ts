@@ -1,7 +1,7 @@
 export type Token = {
     type:
     "operator" | "keyword" | "identifier" | "bracket" | "symbol" |
-    "boolean" | "string" | "int" | "double";
+    "boolean" | "string" | "int" | "float";
     value: string;
 }
 
