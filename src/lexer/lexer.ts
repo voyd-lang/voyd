@@ -41,7 +41,7 @@ const extractNum = (chars: string[]) => {
         break;
     }
 
-    return { num, type: (hadDot ? "double" : "int") as ("double" | "int") };
+    return { num, type: (hadDot ? "float" : "int") as ("float" | "int") };
 };
 
 const extractString = (chars: string[]) => {
@@ -110,17 +110,18 @@ export const lexer = (code: string) => {
         }
 
         if (isInTuple(char, brackets)) {
-            tokens.push({ type: "bracket", value: char });
+            tokens.push({ type: char, value: char });
             continue;
         }
 
         if (isInTuple(char, symbols)) {
-            tokens.push({ type: "symbol", value: char });
+            tokens.push({ type: char, value: char });
             continue;
         }
 
         if (char === "-" && next === ">") {
-            tokens.push({ type: "symbol", value: "->" });
+            tokens.push({ type: "->", value: "->" });
+            chars.shift();
             continue;
         }
 
@@ -133,7 +134,7 @@ export const lexer = (code: string) => {
             continue;
         }
 
-        if (char === " " || char === "\t" || char === "\r") continue;
+        if (isInTuple(char, [" ", "\r", "\t"])) continue;
 
         throw new Error(`Unexpected token: ${char}`);
     }
