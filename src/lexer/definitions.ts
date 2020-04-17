@@ -13,7 +13,7 @@ export const operators = [
 
 export const keywords = [
     "let", "var", "for", "in", "return", "break", "continue", "if", "else", "while", "def", "get",
-    "set", "struct", "class", "pub", "mut", "guard", "async", "await"
+    "set", "struct", "class", "pub", "mut", "guard", "async", "await", "ref"
 ] as const;
 
 export const brackets = ["{", "}", "[", "]", "(", ")", "|"] as const;

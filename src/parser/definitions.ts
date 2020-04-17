@@ -5,10 +5,10 @@ export interface DreamNode {
 
 export interface VariableDeclaration extends DreamNode {
     kind: "variable-declaration"
-    identifier: string;
+    identifiers: string[];
     flags: string[];
     type?: TypeArgument;
-    initializer: DreamNode;
+    initializer?: DreamNode;
 }
 
 export interface MethodDeclaration extends DreamNode {
@@ -16,7 +16,7 @@ export interface MethodDeclaration extends DreamNode {
     identifier: string;
     parameters: ParameterDeclaration[];
     typeParameters: TypeParameterDeclaration[];
-    returnType: TypeArgument;
+    returnType?: TypeArgument;
     flags: string[];
     body: DreamNode;
 }
@@ -88,7 +88,8 @@ export interface ParameterDeclaration extends DreamNode {
     kind: "parameter-declaration";
     identifier: string;
     flags: string[];
-    type: TypeArgument;
+    type?: TypeArgument;
+    initializer?: DreamNode;
 }
 
 export interface TypeArgument extends DreamNode {
