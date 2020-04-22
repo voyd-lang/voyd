@@ -38,55 +38,6 @@ while condition {
 }
 ```
 
-# Structs
-
-```
-struct Target [
-    x: Int, y: Int, z: Int // Commas can be replace with new lines
-]
-
-let target = Target [x: 4, y: 5, z: 3]
-
-// Anonymous struct.
-let point = [x: 5, y: 3]
-
-// Destructuring
-let [x, y] = point;
-log(x) // 5
-log(y) // 3
-
-// If an identifier has the same name as a struct field, the field label can be omitted.
-let x = 5
-let dot = [x] // Equivalent to [x: x]
-```
-
-## Mutability
-
-By default, struct fields are variable. You can make them immutable by prefixing them with let.
-
-struct Person [
-    let name: String,
-    age: Int
-]
-
-## Computed properties
-
-struct Vec3 [
-    x: Int, y: Int, z: Int
-
-    // Immutable computed property
-    get squaredLength: Int {
-        x * x + y * y + z * z
-    }
-
-    // Mutable computed property.
-    get a: Int {
-        x
-    }
-
-    set a { x = $0 }
-]
-
 
 # Methods
 
@@ -117,37 +68,35 @@ add([x: 5, y: 3])
 // the parenthesis can be omitted on call as well.
 add [x: 5, y: 3]
 
-// Methods can be added directly to a struct
-struct Target [
-    x: Int, y: Int, z: Int
-
-    def offs [x: Int] -> Target {
-        // Self can be omitted if the identifier does not conflict with a parameter.
-        // Here y and z have self omitted. In addition we are using struct shorthand for
-        // y and z
-        Target [x: self.x + x, y, z] // Equivalent to [x: self.x + x, y: self.y, z: self.z]
-    }
-]
-
-// Methods can also be added to structs through impl blocks.
-impl Target [
-    // If a method modifies it's struct, it must be marked as mut
-    mut def shift [x: Int] -> Void {
-        self.x += x
-    }
-]
-
-const target = Target [x: 5, y: 3, z: 7]
-target.shift [x: 5]
+// Single expression method
+def sub(a: Int, b: Int) => a - b
 ```
 
 # Functions (Or closures, or lambdas)
 
 ```
+// A function is a set of instructions enclosed by {}
+let myFunc = {
+    print("Hello!")
+    print("What's up?")
+}
+
+// Functions can define parameters between || characters.
 let add = {| a: Int, b: Int -> Int |
     a + b
 }
 
+// Functions are called with ().
+add(1, 2)
+
+// If a function has only one expression, {} can be omitted. But || are required.
+let sub = |a: Int, b: Int| a - b
+```
+
+## Higher Order Functions
+
+```
+// You can pass functions as parameters to methods or other functions
 def caller(fn: Fn(a, b) -> Int) -> Int {
     fn(1, 2)
 }
@@ -155,26 +104,71 @@ def caller(fn: Fn(a, b) -> Int) -> Int {
 // All are valid ways of calling the caller method
 caller(add)
 caller({| a, b | a + b })
-caller() { $0 + $1 } // Parameters can be referenced with a $ followed by their index
+caller() { $0 + $1 } // Parameters can be implicitly referenced using $ syntax
 caller { $0 + $1 }
+```
 
-def fancyCaller([callIt: Boolean], fn: Fn() -> Void) -> Void {
-    if callIt { fn() }
+# Structs
+
+```
+struct Target {
+    let x, y, z: Int
 }
 
-fancyCaller [callIt: true] {
-    log("Hello!")
+let target = Target [x: 4, y: 5, z: 3]
+
+// Anonymous struct.
+let point = [x: 5, y: 3]
+
+// Destructuring
+let [x, y] = point;
+log(x) // 5
+log(y) // 3
+
+// If an identifier has the same name as a struct field, the field label can be omitted.
+let x = 5
+let dot = [x] // Equivalent to [x: x]
+```
+
+## Struct Methods
+
+```
+// Methods can be added directly to a struct
+struct Target {
+    pub var x, y, z: Int
+
+    pub def offs [x: Int] -> Target =>
+        // Self can be omitted if the identifier does not conflict with a parameter.
+        // Here y and z have self omitted. In addition we are using struct shorthand for
+        // y and z
+        Target [x: self.x + x, y, z] // Equivalent to [x: self.x + x, y: self.y, z: self.z]
+
+
+    // Computed properties are supported
+    pub get distanceFromOrigin =>
+        sqrt(x.squared + y.squared + z.squared)
 }
+
+// Methods can also be added to structs through impl blocks.
+impl Target {
+    // If a method modifies it's struct, it must be marked as mut
+    mut def shift [x: Int] -> Void {
+        self.x += x
+    }
+}
+
+const target = Target [x: 5, y: 3, z: 7]
+target.shift [x: 5]
 ```
 
 # Enums
 
 ```
-enum Friend [
+enum Friend {
     eric
     angie
     carter
-]
+}
 
 let friend = Friend.eric
 
@@ -182,11 +176,11 @@ let friend = Friend.eric
 let bestFriend: Friend = .angie
 
 // Enums can have associated types
-enum ValidID [
+enum ValidID {
     // Struct associated type
     driversLicense [name: String, no: String, issued: Date, exp: Date]
     studentID(Int)
-]
+}
 ```
 
 # Generics
@@ -195,13 +189,13 @@ Generics work much like they do in TypeScript or Swift with a slightly different
 Top level types are defined and annotated between the pipe (`|`) character.
 
 ```
-def add|T|(a: T, b: T) -> T {
+def add`T`(a: T, b: T) -> T {
     a + b
 }
 
-struct Target|T| [
-    x, y, z: T
-]
+struct Target|T| {
+    let x, y, z: T
+}
 ```
 
 Lower level generic type annotations use the same `<>` syntax as TypeScript.
