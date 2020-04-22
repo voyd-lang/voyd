@@ -2,7 +2,7 @@
 
 - [x] Basic lexer
 - [x] Lexer tests (visual print)
-- [ ] Decide if Dream should switch to scala like method and block decelerations
+- [x] Clarify generics syntax
 - [ ] Basic parser
 - [ ] Parsing tests (visual print)
 - [ ] Expression parser
