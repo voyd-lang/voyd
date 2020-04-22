@@ -183,6 +183,36 @@ enum ValidID {
 }
 ```
 
+# Traits
+
+```
+trait Vehicle {
+    // Readonly property
+    var vin: String { get }
+
+    // Property can be read and set.
+    var color: Color { get set }
+
+    // Implementors must define this method
+    def start() -> Void
+
+    // Traits can define default implementations of their method requirements
+    def getInfo() => "Vin: ${vin}, Color: ${color}"
+}
+
+struct Car impl Vehicle {
+    var started = false
+    pub let vin: String
+    pub var color: String
+
+    def start() => started = true
+}
+
+let car = Car [vin: "12fda32213", color: "red"]
+car.start()
+car.getInfo()
+```
+
 # Generics
 
 Generics work much like they do in TypeScript or Swift with a slightly different syntax.
@@ -192,7 +222,7 @@ def add'T'(a: T, b: T) -> T {
     a + b
 }
 
-struct Target'T'{
+struct Target 'T' {
     let x, y, z: T
 }
 ```
