@@ -1,5 +1,5 @@
 import { Token } from "../lexer";
-import { Block, Instruction, VariableDeclaration, TypeArgument, DreamNode, MethodDeclaration, ParameterDeclaration } from "./definitions";
+import { Block, Instruction, VariableDeclaration, TypeArgument, DreamNode, MethodDeclaration, ParameterDeclaration, ReturnStatement } from "./definitions";
 import { isInTuple } from "../helpers";
 
 export function parser(tokens: Token[]): Block {
@@ -18,7 +18,7 @@ export function parser(tokens: Token[]): Block {
     return ast;
 }
 
-function parseStatement(tokens: Token[], terminator?: Token): Instruction {
+function parseStatement(tokens: Token[]): Instruction {
     while (tokens.length > 0) {
         let token = tokens[0];
 
@@ -36,10 +36,26 @@ function parseStatement(tokens: Token[], terminator?: Token): Instruction {
             return parseMethodDeclaration(tokens);
         }
 
+        if (token.type === "keyword" && token.value === "return") {
+            return parseReturnStatement(tokens);
+        }
+
         return parseExpression(tokens);
     }
 
     throw new Error("Invalid statement");
+}
+
+function parseReturnStatement(tokens: Token[]): ReturnStatement {
+    const returnToken = tokens.shift();
+    if (!returnToken || returnToken.value !== "return") {
+        throw new Error("Expected return token");
+    }
+
+    return {
+        kind: "return-statement",
+        expression: parseExpression(tokens)
+    }
 }
 
 function parseMethodDeclaration(tokens: Token[]): MethodDeclaration {
@@ -49,7 +65,12 @@ function parseMethodDeclaration(tokens: Token[]): MethodDeclaration {
         flags.push(tokens.shift()!.value);
     }
 
-    const identifier = tokens.shift()!.value;
+    const identifierToken = tokens.shift();
+    if (!identifierToken || identifierToken.type !== "identifier") {
+        throw new Error("Expected identifier after method declaration");
+    }
+
+    const identifier = identifierToken.value;
     const parameters = parseMethodParameters(tokens);
 
     let returnType: TypeArgument | undefined;
@@ -80,28 +101,32 @@ function parseMethodParameters(tokens: Token[]): ParameterDeclaration[] {
     const params: ParameterDeclaration[] = [];
 
     const openingBracket = tokens.shift();
-    if (!openingBracket || !isInTuple(tokens[0].type, <const>["("])) {
+    if (!openingBracket || !isInTuple(openingBracket.type, <const>["("])) {
         throw new Error("Method definition missing parameters");
     }
 
     // In the future, we will support "]" as well
     const closeBracket = <const>")";
 
-    let token = tokens.shift();
+    let token = tokens[0];
     while (token && token.type !== closeBracket) {
         if (token.type === "identifier") {
             params.push(parseParameter(tokens));
-            token = tokens.shift();
+            token = tokens[0];
             continue;
         }
 
         if (token.type === ",") {
-            token = tokens.shift();
+            tokens.shift();
+            token = tokens[0];
             continue;
         }
 
         throw new Error(`Invalid token in parameters: ${token.type}`);
     }
+
+    // Remove the closeBracket
+    tokens.shift();
 
     return params;
 }
@@ -131,10 +156,11 @@ function parseParameter(tokens: Token[]): ParameterDeclaration {
         }
     }
 
-    let token = tokens.shift();
+    let token = tokens[0];
     while (token && isInTuple(token.value, <const>["mut", "ref"])) {
         flags.push(token.value);
-        token = tokens.shift();
+        tokens.shift();
+        token = tokens[0];
     }
 
     const type = parseTypeArgument(tokens);
@@ -153,17 +179,19 @@ function parseVariableDeclaration(tokens: Token[]): VariableDeclaration {
     let type: TypeArgument | undefined = undefined;
     let initializer: DreamNode | undefined;
 
-    if (isInTuple(tokens[0].value, ["let", "var"])) {
+    while (tokens[0] && isInTuple(tokens[0].value, ["let", "var"])) {
         flags.push(tokens.shift()!.value);
     }
 
-    while (isInTuple(tokens[0].type, <const>["identifier", ","])) {
-        if (tokens[0].type === ",") {
+    while (tokens[0] && isInTuple(tokens[0].type, <const>["identifier", ","])) {
+        const token = tokens.shift()!;
+
+        if (token.type === ",") {
             tokens.shift();
             continue;
         }
 
-        identifiers.push(tokens[0].value)
+        identifiers.push(token.value);
     }
 
     if (tokens[0].type === ":") {
@@ -196,6 +224,10 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
     const output: Instruction[] = [];
     const operator: Token[] = [];
 
+    // Since we don't use ; to terminate an expression, we can tell the expression
+    // Is done if we get two non-operator tokens in a row (-newlines).
+    // This is my ugly temp solution. Looking for a way to make it cleaner.
+    let expectOperatorToContinue = false;
     while (tokens.length > 0) {
         const token = tokens[0];
 
@@ -212,35 +244,46 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
         }
 
         if (token.type === "int") {
+            if (expectOperatorToContinue) break;
             output.push({ kind: "i32-literal", value: token.value });
             tokens.shift();
+            expectOperatorToContinue = true;
             continue;
         }
 
         if (token.type === "float") {
+            if (expectOperatorToContinue) break;
             output.push({ kind: "f32-literal", value: token.value });
             tokens.shift();
+            expectOperatorToContinue = true;
             continue;
         }
 
         if (token.type === "string") {
+            if (expectOperatorToContinue) break;
             output.push({ kind: "string-literal", value: token.value });
             tokens.shift();
+            expectOperatorToContinue = true;
             continue;
         }
 
         if (token.type === "boolean") {
+            if (expectOperatorToContinue) break;
             output.push({ kind: "bool-literal", value: token.value === "true" });
             tokens.shift();
+            expectOperatorToContinue = true;
             continue;
         }
 
         if (token.type === "keyword") {
+            if (expectOperatorToContinue) break;
+
             if (token.value === "if") {
                 tokens.shift();
                 const condition = parseExpression(tokens, { type: "{", value: "{" });
                 const body = [parser(tokens)]; // [] is temp type hack
                 output.push({ kind: "if-expression", condition, body });
+                expectOperatorToContinue = true;
                 continue;
             }
 
@@ -248,24 +291,36 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
         }
 
         if (token.type === "identifier") {
+            if (expectOperatorToContinue) break;
+
+            // Handle possible function / method call
             const next = tokens[1];
             if (next && isInTuple(next.type, ["(", "["])) {
+                // Remove identifier token
                 tokens.shift();
-                tokens.shift();
+
                 output.push({
                     kind: "method-or-function-call",
                     identifier: token.value,
-                    arguments: parseArguments(tokens),
+                    arguments: parseArguments(tokens), // T
                 });
+
+                expectOperatorToContinue = true;
                 continue;
             }
 
+            expectOperatorToContinue = true;
             output.push({ kind: "identifier", value: token.value });
             tokens.shift();
             continue;
         }
 
         if (token.type === "operator") {
+            if (!expectOperatorToContinue) {
+                throw new Error(`Unexpected operator: ${token.value}`);
+            }
+
+            expectOperatorToContinue = false;
             while (operator.length > 0) {
                 const op = operator[operator.length - 1];
                 if (getOperatorPrecedence(op.value) >= getOperatorPrecedence(token.value)) {
@@ -284,6 +339,8 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
         }
 
         if (token.type === "(") {
+            if (expectOperatorToContinue) break;
+            expectOperatorToContinue = true;
             tokens.shift();
             output.push(parseExpression(tokens));
             tokens.shift();
@@ -293,7 +350,7 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
         // Non-consumed terminators
         if (isInTuple(token.type, ["}", ")", ","])) break;
 
-        throw new Error(`Unexpected token: ${token}`);
+        throw new Error(`Unexpected token: ${token.type} ${token.value}`);
     }
 
     // Infix parsing
@@ -335,16 +392,26 @@ function getOperatorPrecedence(operator: string): number {
 function parseArguments(tokens: Token[]): Instruction[] {
     const args: Instruction[] = [];
 
-    let token = tokens[0];
-    while (token.type !== ")") {
-        if (token.type !== ",") {
+    // For now we just get rid of the opening brace. We also only handle (
+    const openingBracket = tokens.shift();
+    if (!openingBracket || openingBracket.type !== "(") {
+        throw new Error("Expected opening bracket in argument expression");
+    }
+
+    while (tokens.length > 0) {
+        let token = tokens[0];
+        if (token.type === ",") {
             tokens.shift();
+        }
+
+        if (token.type === ")") {
+            tokens.shift();
+            break;
         }
 
         args.push(parseExpression(tokens))
         token = tokens[0];
     }
-    tokens.shift(); // Remove right paren;
 
     return args;
 }
