@@ -9,5 +9,5 @@ readFile(`${__dirname}/../../example.dm`, { encoding: "utf8" }, (err, data) => {
     }
 
     const tokens = lexer(data);
-    console.dir(parser(tokens));
+    console.dir(parser(tokens), { depth: 10 });
 });
