@@ -18,7 +18,7 @@ export interface MethodDeclaration extends DreamNode {
     typeParameters: TypeParameterDeclaration[];
     returnType?: TypeArgument;
     flags: string[];
-    body: DreamNode;
+    body: Instruction[];
 }
 
 export interface StructDeclaration extends DreamNode {
@@ -34,13 +34,13 @@ export interface StructDeclaration extends DreamNode {
 export interface ForInStatement extends DreamNode {
     kind: "for-in-statement";
     expression: DreamNode;
-    body: DreamNode[];
+    body: Instruction[];
 }
 
 export interface WhileStatement extends DreamNode {
     kind: "while-statement";
     condition: DreamNode;
-    body: DreamNode[];
+    body: Instruction[];
 }
 
 export interface BreakStatement extends DreamNode {
@@ -54,9 +54,9 @@ export interface ContinueStatement extends DreamNode {
 export interface IfExpression extends DreamNode {
     kind: "if-expression";
     condition: DreamNode;
-    body: DreamNode[];
-    elseBody?: DreamNode[];
-    elseIfBodies?: { expression: DreamNode, body: DreamNode[] }[];
+    body: Instruction[];
+    elseBody?: Instruction[];
+    elseIfBodies?: { expression: DreamNode, body: Instruction[] }[];
 }
 
 export interface FunctionStatement extends DreamNode {
@@ -64,13 +64,13 @@ export interface FunctionStatement extends DreamNode {
     identifier: string;
     parameters: ParameterDeclaration[];
     returnType: string;
-    body: DreamNode;
+    body: Instruction[];
 }
 
 export interface MethodOrFunctionCall extends DreamNode {
     kind: "method-or-function-call";
     identifier: string;
-    arguments: DreamNode[];
+    arguments: Instruction[];
 }
 
 export interface ReturnStatement extends DreamNode {
@@ -118,11 +118,6 @@ export interface BoolLiteral extends DreamNode {
     value: boolean;
 }
 
-export interface Block extends DreamNode {
-    kind: "block";
-    body: Instruction[];
-}
-
 export interface Identifier extends DreamNode {
     kind: "identifier";
     value: string;
@@ -147,5 +142,4 @@ export type Instruction =
     F32Literal |
     StringLiteral |
     BoolLiteral |
-    Block |
     Identifier;
