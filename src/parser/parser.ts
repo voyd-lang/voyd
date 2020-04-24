@@ -243,47 +243,47 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
             break;
         }
 
-        if (token.type === "int") {
+        if (token.type !== "operator") {
             if (expectOperatorToContinue) break;
+            expectOperatorToContinue = true;
+        } else {
+            if (!expectOperatorToContinue) {
+                throw new Error(`Unexpected operator: ${token.value}`);
+            }
+
+            expectOperatorToContinue = false;
+        }
+
+        if (token.type === "int") {
             output.push({ kind: "i32-literal", value: token.value });
             tokens.shift();
-            expectOperatorToContinue = true;
             continue;
         }
 
         if (token.type === "float") {
-            if (expectOperatorToContinue) break;
             output.push({ kind: "f32-literal", value: token.value });
             tokens.shift();
-            expectOperatorToContinue = true;
             continue;
         }
 
         if (token.type === "string") {
-            if (expectOperatorToContinue) break;
             output.push({ kind: "string-literal", value: token.value });
             tokens.shift();
-            expectOperatorToContinue = true;
             continue;
         }
 
         if (token.type === "boolean") {
-            if (expectOperatorToContinue) break;
             output.push({ kind: "bool-literal", value: token.value === "true" });
             tokens.shift();
-            expectOperatorToContinue = true;
             continue;
         }
 
         if (token.type === "keyword") {
-            if (expectOperatorToContinue) break;
-
             if (token.value === "if") {
                 tokens.shift();
                 const condition = parseExpression(tokens, { type: "{", value: "{" });
                 const body = [parser(tokens)]; // [] is temp type hack
                 output.push({ kind: "if-expression", condition, body });
-                expectOperatorToContinue = true;
                 continue;
             }
 
@@ -291,8 +291,6 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
         }
 
         if (token.type === "identifier") {
-            if (expectOperatorToContinue) break;
-
             // Handle possible function / method call
             const next = tokens[1];
             if (next && isInTuple(next.type, ["(", "["])) {
@@ -304,23 +302,15 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
                     identifier: token.value,
                     arguments: parseArguments(tokens), // T
                 });
-
-                expectOperatorToContinue = true;
                 continue;
             }
 
-            expectOperatorToContinue = true;
             output.push({ kind: "identifier", value: token.value });
             tokens.shift();
             continue;
         }
 
         if (token.type === "operator") {
-            if (!expectOperatorToContinue) {
-                throw new Error(`Unexpected operator: ${token.value}`);
-            }
-
-            expectOperatorToContinue = false;
             while (operator.length > 0) {
                 const op = operator[operator.length - 1];
                 if (getOperatorPrecedence(op.value) >= getOperatorPrecedence(token.value)) {
@@ -339,8 +329,6 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
         }
 
         if (token.type === "(") {
-            if (expectOperatorToContinue) break;
-            expectOperatorToContinue = true;
             tokens.shift();
             output.push(parseExpression(tokens));
             tokens.shift();
