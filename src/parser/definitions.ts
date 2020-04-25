@@ -53,7 +53,7 @@ export interface ContinueStatement extends DreamNode {
 
 export interface IfExpression extends DreamNode {
     kind: "if-expression";
-    condition: DreamNode;
+    condition: Instruction;
     body: Instruction[];
     elseBody?: Instruction[];
     elseIfBodies?: { expression: DreamNode, body: Instruction[] }[];

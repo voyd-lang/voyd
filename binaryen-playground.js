@@ -4,24 +4,13 @@ const mod = new binaryen.Module();
 
 mod.autoDrop();
 
-mod.addGlobal("counter", binaryen.i32, true, mod.i32.const(0))
-mod.addFunctionImport("log", "imports", "log", binaryen.i32, binaryen.none);
-
-mod.addFunction('increment', binaryen.none, binaryen.none, [], mod.block("", [
-  mod.global.set("counter",
-    mod.i32.add(
-      mod.global.get("counter", binaryen.i32),
-      mod.i32.const(1)
-    )
-  )
-]));
-
+mod.addFunctionImport("log", "imports", "log", [binaryen.i32], binaryen.none);
+mod.addGlobal("hello", binaryen.i32, true, mod.i32.const(0));
 mod.addFunction('main', binaryen.none, binaryen.none, [], mod.block("", [
-  mod.call("increment", [], binaryen.none, binaryen.none),
-  mod.call("increment", [], binaryen.none, binaryen.none),
-  mod.call("increment", [], binaryen.none, binaryen.none),
-  mod.call("log", [mod.global.get("counter", binaryen.i32)], binaryen.none)
+  mod.global.set("hello", mod.i32.add(mod.i32.const(1), mod.i32.const(1))),
+  mod.call("log", [mod.global.get("hello", binaryen.i32)], binaryen.none)
 ]));
+
 mod.addFunctionExport('main', 'main');
 
 if (!mod.validate()) throw new Error("Invalid module");
