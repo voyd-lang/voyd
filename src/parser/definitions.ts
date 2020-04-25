@@ -8,7 +8,7 @@ export interface VariableDeclaration extends DreamNode {
     identifiers: string[];
     flags: string[];
     type?: TypeArgument;
-    initializer?: DreamNode;
+    initializer?: Instruction;
 }
 
 export interface MethodDeclaration extends DreamNode {
@@ -75,7 +75,7 @@ export interface MethodOrFunctionCall extends DreamNode {
 
 export interface ReturnStatement extends DreamNode {
     kind: "return-statement";
-    expression: DreamNode;
+    expression: Instruction;
 }
 
 export interface TypeParameterDeclaration extends DreamNode {
@@ -89,7 +89,7 @@ export interface ParameterDeclaration extends DreamNode {
     identifier: string;
     flags: string[];
     type?: TypeArgument;
-    initializer?: DreamNode;
+    initializer?: Instruction;
 }
 
 export interface TypeArgument extends DreamNode {
@@ -123,6 +123,12 @@ export interface Identifier extends DreamNode {
     value: string;
 }
 
+export interface Assignment extends DreamNode {
+    kind: "assignment";
+    identifier: string;
+    expression: Instruction;
+}
+
 export type Instruction =
     VariableDeclaration |
     MethodDeclaration |
@@ -142,4 +148,5 @@ export type Instruction =
     F32Literal |
     StringLiteral |
     BoolLiteral |
-    Identifier;
+    Identifier |
+    Assignment;

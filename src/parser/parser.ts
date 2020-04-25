@@ -1,5 +1,5 @@
 import { Token } from "../lexer";
-import { Instruction, VariableDeclaration, TypeArgument, DreamNode, MethodDeclaration, ParameterDeclaration, ReturnStatement } from "./definitions";
+import { Instruction, VariableDeclaration, TypeArgument, DreamNode, MethodDeclaration, ParameterDeclaration, ReturnStatement, Assignment } from "./definitions";
 import { isInTuple } from "../helpers";
 
 export function parser(tokens: Token[]): Instruction[] {
@@ -21,9 +21,10 @@ export function parser(tokens: Token[]): Instruction[] {
 function parseStatement(tokens: Token[]): Instruction {
     while (tokens.length > 0) {
         let token = tokens[0];
+        const next = tokens[1];
 
         // Ignore newlines and semicolons
-        if (isInTuple(token.type, ["\n", ";"])) {
+        if (isInTuple(token.type, ["\n", ";"] as const)) {
             tokens.shift();
             continue;
         }
@@ -40,10 +41,32 @@ function parseStatement(tokens: Token[]): Instruction {
             return parseReturnStatement(tokens);
         }
 
+        if (token.type === "identifier" && next && next.type === "=") {
+            return parseAssignment(tokens);
+        }
+
         return parseExpression(tokens);
     }
 
     throw new Error("Invalid statement");
+}
+
+function parseAssignment(tokens: Token[]): Assignment {
+    const identifier = tokens.shift();
+    if (!identifier || identifier.type !== "identifier") {
+        throw new Error(`Unexpected identifier token in assignment`);
+    }
+
+    const equals = tokens.shift();
+    if (!equals || equals.type !== "=") {
+        throw new Error("Expected = token in assignment statement");
+    }
+
+    return {
+        kind: "assignment",
+        identifier: identifier.value,
+        expression: parseExpression(tokens)
+    }
 }
 
 function parseReturnStatement(tokens: Token[]): ReturnStatement {
@@ -177,7 +200,7 @@ function parseVariableDeclaration(tokens: Token[]): VariableDeclaration {
     const flags: string[] = [];
     const identifiers: string[] = [];
     let type: TypeArgument | undefined = undefined;
-    let initializer: DreamNode | undefined;
+    let initializer: Instruction | undefined;
 
     while (tokens[0] && isInTuple(tokens[0].value, ["let", "var"])) {
         flags.push(tokens.shift()!.value);
