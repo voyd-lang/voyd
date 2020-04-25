@@ -1,6 +1,7 @@
 import binaryen from "binaryen";
 import { Instruction, MethodOrFunctionCall } from "../parser/definitions";
 import { IdentifiersCollection } from "./identifiers";
+import { MethodIdentifier } from "./definitions";
 
 export function compile(ast: Instruction[]) {
     const mod = new binaryen.Module();
@@ -30,6 +31,13 @@ function compileBlock({ body, mod, ids, returnType }: {
                 inferType(instruction.initializer!, ids);
 
             mod.addGlobal(id, type, true, globalInit(type, mod));
+            ids.register({
+                kind: "var",
+                identifier: id,
+                type,
+                mutable: true,
+                flags: []
+            })
 
             if (instruction.initializer) {
                 block.push(
@@ -39,24 +47,48 @@ function compileBlock({ body, mod, ids, returnType }: {
                     )
                 );
             }
+
+            return;
         }
 
         if (instruction.kind === "method-declaration") {
             const id = instruction.identifier;
-            const params = instruction.parameters.map(param => {
-                return getTypeFromString(param.type!.identifier);
+            const subIDS = ids.clone();
+            const params = instruction.parameters.map((param, index) => {
+                const type = getTypeFromString(param.type!.identifier)
+                // Lots of room for optimization here. i.e. type could be stored as binaryen type
+                subIDS.register({
+                    kind: "var", mutable: false, isLocal: true,
+                    type, flags: [], identifier: param.identifier,
+                    localIndex: index
+                });
+
+                return type;
             });
             const methodReturnType = getTypeFromString(instruction.returnType!.identifier);
+
+            const methodIdentifier: MethodIdentifier = {
+                kind: "method",
+                identifier: id,
+                typeParameters: [],
+                parameterTypes: params,
+                returnType: instruction.returnType!.identifier
+            };
+            subIDS.register(methodIdentifier);
+            ids.register(methodIdentifier);
+
             const methodBody = compileBlock({
-                body: instruction.body, mod, ids, returnType: methodReturnType
+                body: instruction.body, mod, ids: subIDS, returnType: methodReturnType
             });
             mod.addFunction(id, binaryen.createType(params), methodReturnType, [], methodBody);
+            return;
         }
 
         if (instruction.kind === "assignment") {
             const id = instruction.identifier;
             const expr = compileExpression(instruction.expression, mod, ids);
             block.push(mod.global.set(id, expr));
+            return;
         }
 
         // TODO: make this an expression
@@ -65,10 +97,12 @@ function compileBlock({ body, mod, ids, returnType }: {
                 compileExpression(instruction.condition, mod, ids),
                 compileBlock({ body: instruction.body, mod, ids })
             ));
+            return;
         }
 
         if (instruction.kind === "return-statement") {
             block.push(mod.return(compileExpression(instruction.expression, mod, ids)));
+            return;
         }
 
         block.push(compileExpression(instruction, mod, ids));
@@ -93,7 +127,13 @@ function compileExpression(expr: Instruction, mod: binaryen.Module, ids: Identif
     if (expr.kind === "identifier") {
         const identifier = ids.retrieve(expr.value);
         if (identifier.kind !== "var") throw new Error("Methods not supported here yet.");
-        return mod.global.get(identifier.identifier, getTypeFromString(identifier.type));
+
+        // Lots of room for optimization here.;
+        if (identifier.isLocal) {
+            return mod.local.get(identifier.localIndex!, identifier.type);
+        }
+
+        return mod.global.get(identifier.identifier, identifier.type);
     }
 
     if (expr.kind === "method-or-function-call") {
@@ -102,8 +142,13 @@ function compileExpression(expr: Instruction, mod: binaryen.Module, ids: Identif
         }
 
         if (expr.identifier === "print") {
-            return (mod.call as any)("print", compileExpression(expr.arguments[0], mod, ids), binaryen.none);
+            return (mod.call as any)("print", [compileExpression(expr.arguments[0], mod, ids)], binaryen.none);
         }
+
+        const id = ids.retrieve(expr.identifier);
+        if (id.kind !== "method") throw new Error(`${expr.identifier} is not a method`);
+        const args = expr.arguments.map(instr => compileExpression(instr, mod, ids));
+        return (mod.call as any)(id.identifier, args, getTypeFromString(id.returnType));
     }
 
     throw new Error(`Invalid expression ${expr.kind}`);
@@ -207,6 +252,12 @@ function inferType(expression: Instruction, ids: IdentifiersCollection): number 
     if (expression.kind === "return-statement") return inferType(expression.expression, ids);
     if (expression.kind === "if-expression") {
         return inferType(expression.body[expression.body.length - 1], ids);
+    }
+
+    if (expression.kind === "identifier") {
+        const id = ids.retrieve(expression.value);
+        if (id.kind !== "var") throw new Error("Unexpected identifier");
+        return id.type;
     }
 
 

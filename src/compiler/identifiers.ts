@@ -1,7 +1,11 @@
 import { Identifier } from "./definitions";
 
 export class IdentifiersCollection {
-    private readonly identifiers: { [key: string]: Identifier } = {};
+    private readonly identifiers: { [key: string]: Identifier };
+
+    constructor(ids?: { [key: string]: Identifier }) {
+        this.identifiers = ids ? JSON.parse(JSON.stringify(ids)) : {};
+    }
 
     register(id: Identifier) {
         this.identifiers[id.identifier] = id;
@@ -14,5 +18,13 @@ export class IdentifiersCollection {
         }
 
         return ident;
+    }
+
+    clone() {
+        return new IdentifiersCollection(this.identifiers);
+    }
+
+    dir() {
+        console.dir(this.identifiers);
     }
 }

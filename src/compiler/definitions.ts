@@ -2,8 +2,10 @@
 export interface VarIdentifier {
     kind: "var";
     identifier: string;
-    type: string;
+    type: number;
     mutable: boolean;
+    isLocal?: boolean;
+    localIndex?: number;
     flags: string[];
 }
 
@@ -11,8 +13,8 @@ export interface MethodIdentifier {
     kind: "method";
     identifier: string;
     /** Parameters representing a generic type. */
-    typeParameters: string[];
-    parameterTypes: string[];
+    typeParameters: number[];
+    parameterTypes: number[];
     returnType: string;
 }
 
