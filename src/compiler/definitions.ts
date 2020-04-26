@@ -1,5 +1,5 @@
 
-export interface VarIdentifier {
+export interface VariableValue {
     kind: "var";
     identifier: string;
     type: number;
@@ -9,13 +9,14 @@ export interface VarIdentifier {
     flags: string[];
 }
 
-export interface MethodIdentifier {
+export interface MethodValue {
     kind: "method";
     identifier: string;
     /** Parameters representing a generic type. */
     typeParameters: number[];
     parameterTypes: number[];
     returnType: string;
+    flags: string[];
 }
 
-export type Identifier = VarIdentifier | MethodIdentifier;
+export type Value = VariableValue | MethodValue;
