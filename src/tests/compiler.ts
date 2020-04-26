@@ -1,30 +1,27 @@
-import { lexer } from "../lexer";
-import { readFile } from "fs";
-import { parser } from "../parser";
 import { compile } from "../compiler";
 
-readFile(`${__dirname}/../../example.dm`, { encoding: "utf8" }, (err, data) => {
-    if (err) {
-        console.log(err);
-        return;
+const code = `
+    def fib(n: i32) -> i32 {
+        if n < 2 { return n }
+        return fib(n - 2) + fib(n - 1)
     }
 
-    const tokens = lexer(data);
-    const ast = parser(tokens)
-    const mod = compile(ast);
-    mod.validate()
-    console.log(mod.emitText());
+    let count = 10
+    print(fib(count))
+`;
 
-    WebAssembly.instantiate(mod.emitBinary(), {
-        imports: {
-            print(v: number) {
-                console.log(v);
-            }
+const mod = compile(code);
+mod.validate();
+
+WebAssembly.instantiate(mod.emitBinary(), {
+    imports: {
+        print(v: number) {
+            console.log(v);
         }
-    }).then(result => {
-        const exports = result.instance.exports;
-        (exports as any).main();
-    }).catch(console.error);
+    }
+}).then(result => {
+    const exports = result.instance.exports;
+    (exports as any).main();
+}).catch(console.error);
 
-    mod.dispose();
-});
+mod.dispose();

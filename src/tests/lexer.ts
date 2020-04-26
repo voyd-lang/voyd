@@ -1,11 +1,13 @@
-import { lexer } from "../lexer";
-import { readFile } from "fs";
+import { tokenize } from "../lexer";
 
-readFile(`${__dirname}/../../example.dm`, { encoding: "utf8" }, (err, data) => {
-    if (err) {
-        console.log(err);
-        return;
+const code = `
+    def fib(n: i32) -> i32 {
+        if n < 2 { return n }
+        return fib(n - 2) + fib(n - 1)
     }
 
-    console.dir(lexer(data));
-});
+    let count = 10
+    print(fib(count))
+`;
+
+console.dir(tokenize(code));

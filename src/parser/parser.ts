@@ -1,8 +1,13 @@
-import { Token } from "../lexer";
-import { Instruction, VariableDeclaration, TypeArgument, DreamNode, MethodDeclaration, ParameterDeclaration, ReturnStatement, Assignment } from "./definitions";
+import { Token, tokenize } from "../lexer";
+import { Instruction, VariableDeclaration, TypeArgument, MethodDeclaration, ParameterDeclaration, ReturnStatement, Assignment } from "./definitions";
 import { isInTuple } from "../helpers";
 
-export function parser(tokens: Token[]): Instruction[] {
+export function parse(code: string): Instruction[] {
+    const tokens = tokenize(code);
+    return parseTokens(tokens);
+}
+
+function parseTokens(tokens: Token[]): Instruction[] {
     const ast: Instruction[] = [];
 
     while (tokens.length > 0) {
@@ -107,7 +112,7 @@ function parseMethodDeclaration(tokens: Token[]): MethodDeclaration {
     }
     tokens.shift();
 
-    const body = parser(tokens);
+    const body = parseTokens(tokens);
 
     return {
         kind: "method-declaration",
@@ -305,7 +310,7 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
             if (token.value === "if") {
                 tokens.shift();
                 const condition = parseExpression(tokens, { type: "{", value: "{" });
-                const body = parser(tokens);
+                const body = parseTokens(tokens);
                 output.push({ kind: "if-expression", condition, body });
                 continue;
             }

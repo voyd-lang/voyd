@@ -2,8 +2,10 @@ import binaryen from "binaryen";
 import { Instruction, MethodOrFunctionCall, ReturnStatement, IfExpression, Assignment, MethodDeclaration, VariableDeclaration } from "../parser/definitions";
 import { Values } from "./values";
 import { MethodValue } from "./definitions";
+import { parse } from "../parser";
 
-export function compile(ast: Instruction[]) {
+export function compile(code: string) {
+    const ast = parse(code);
     const mod = new binaryen.Module();
     const ids = new Values();
     mod.autoDrop();

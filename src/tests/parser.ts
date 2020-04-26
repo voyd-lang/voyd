@@ -1,13 +1,13 @@
-import { lexer } from "../lexer";
-import { readFile } from "fs";
-import { parser } from "../parser";
+import { parse } from "../parser";
 
-readFile(`${__dirname}/../../example.dm`, { encoding: "utf8" }, (err, data) => {
-    if (err) {
-        console.log(err);
-        return;
+const code = `
+    def fib(n: i32) -> i32 {
+        if n < 2 { return n }
+        return fib(n - 2) + fib(n - 1)
     }
 
-    const tokens = lexer(data);
-    console.dir(parser(tokens), { depth: 10 });
-});
+    let count = 10
+    print(fib(count))
+`;
+
+console.dir(parse(code));

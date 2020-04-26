@@ -1,69 +1,7 @@
 import { Token, operators, keywords, brackets, symbols } from "./definitions";
 import { isInTuple } from "../helpers";
 
-const isLetter = (char: string) => (/[a-zA-Z]|_/g).test(char);
-
-const isNum = (char: string) => (/[0-9]/g).test(char);
-
-const isOperator = (str: string) => isInTuple(str, operators);
-
-const isKeyword = (str: string) => isInTuple(str, keywords);
-
-const isBool = (str: string) => str === "true" || str === "false";
-
-const extractWord = (chars: string[]) => {
-    let word = "";
-    while (isLetter(chars[0]) || isNum(chars[0])) {
-        word += chars.shift();
-    }
-    return word;
-};
-
-const extractNum = (chars: string[]) => {
-    let hadDot = false;
-    let num = "";
-
-    while (chars.length > 0) {
-        const next = chars[0];
-        if (next === "." && hadDot) break;
-
-        if (next === ".") {
-            hadDot = true;
-            num += chars.shift();
-            continue;
-        }
-
-        if (isNum(next)) {
-            num += chars.shift();
-            continue;
-        }
-
-        break;
-    }
-
-    return { num, type: (hadDot ? "float" : "int") as ("float" | "int") };
-};
-
-const extractString = (chars: string[]) => {
-    let string = "";
-    while (chars.length > 0) {
-        const char = chars.shift();
-        if (char === "\"") break;
-        string += char;
-    }
-    return string;
-}
-
-const extractOperator = (chars: string[]) => {
-    let op = "";
-    while (isOperator(chars[0])) {
-        op += chars.shift();
-    }
-    return op;
-}
-
-
-export const lexer = (code: string) => {
+export function tokenize(code: string) {
     const chars = code.split("");
 
     const tokens: Token[] = [];
@@ -140,4 +78,65 @@ export const lexer = (code: string) => {
     }
 
     return tokens;
+}
+
+const isLetter = (char: string) => (/[a-zA-Z]|_/g).test(char);
+
+const isNum = (char: string) => (/[0-9]/g).test(char);
+
+const isOperator = (str: string) => isInTuple(str, operators);
+
+const isKeyword = (str: string) => isInTuple(str, keywords);
+
+const isBool = (str: string) => str === "true" || str === "false";
+
+const extractWord = (chars: string[]) => {
+    let word = "";
+    while (isLetter(chars[0]) || isNum(chars[0])) {
+        word += chars.shift();
+    }
+    return word;
+};
+
+const extractNum = (chars: string[]) => {
+    let hadDot = false;
+    let num = "";
+
+    while (chars.length > 0) {
+        const next = chars[0];
+        if (next === "." && hadDot) break;
+
+        if (next === ".") {
+            hadDot = true;
+            num += chars.shift();
+            continue;
+        }
+
+        if (isNum(next)) {
+            num += chars.shift();
+            continue;
+        }
+
+        break;
+    }
+
+    return { num, type: (hadDot ? "float" : "int") as ("float" | "int") };
+};
+
+const extractString = (chars: string[]) => {
+    let string = "";
+    while (chars.length > 0) {
+        const char = chars.shift();
+        if (char === "\"") break;
+        string += char;
+    }
+    return string;
+}
+
+const extractOperator = (chars: string[]) => {
+    let op = "";
+    while (isOperator(chars[0])) {
+        op += chars.shift();
+    }
+    return op;
 }
