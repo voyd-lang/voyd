@@ -34,16 +34,8 @@ function parseStatement(tokens: Token[]): Instruction {
             continue;
         }
 
-        if (token.type === "keyword" && isInTuple(token.value, ["let", "var"])) {
-            return parseVariableDeclaration(tokens);
-        }
-
-        if (token.type === "keyword" && isInTuple(token.value, ["async", "mut", "def"])) {
-            return parseMethodDeclaration(tokens);
-        }
-
-        if (token.type === "keyword" && token.value === "return") {
-            return parseReturnStatement(tokens);
+        if (token.type === "keyword") {
+            return parseKeywordStatement(tokens);
         }
 
         if (token.type === "identifier" && next && next.type === "=") {
@@ -54,6 +46,35 @@ function parseStatement(tokens: Token[]): Instruction {
     }
 
     throw new Error("Invalid statement");
+}
+
+function parseKeywordStatement(tokens: Token[]): Instruction {
+    let token = tokens[0];
+
+    if (token.value === "return") {
+        return parseReturnStatement(tokens);
+    }
+
+    if (token.value === "if") {
+        return parseExpression(tokens);
+    }
+
+    const flags: string[] = [];
+    while (token.type === "keyword") {
+        flags.push(tokens.shift()!.value);
+        token = tokens[0];
+    }
+
+    if (flags.some(val => val === "let" || val === "var")) {
+        return parseVariableDeclaration(tokens, flags);
+    }
+
+    if (flags.includes("def")) {
+        return parseMethodDeclaration(tokens, flags);
+    }
+
+    const keywordStr = flags.reduce((p, c) => `${p} ${c}`, "");
+    throw new Error(`Expected statement after keyword(s):${keywordStr}`);
 }
 
 function parseAssignment(tokens: Token[]): Assignment {
@@ -86,13 +107,8 @@ function parseReturnStatement(tokens: Token[]): ReturnStatement {
     }
 }
 
-function parseMethodDeclaration(tokens: Token[]): MethodDeclaration {
-    const flags: string[] = [];
-
-    while (tokens[0].type === "keyword" && isInTuple(tokens[0].value, ["async", "mut", "def"])) {
-        flags.push(tokens.shift()!.value);
-    }
-
+/** Parse a method, beginning after def */
+function parseMethodDeclaration(tokens: Token[], flags: string[]): MethodDeclaration {
     const identifierToken = tokens.shift();
     if (!identifierToken || identifierToken.type !== "identifier") {
         throw new Error("Expected identifier after method declaration");
@@ -201,15 +217,10 @@ function parseParameter(tokens: Token[]): ParameterDeclaration {
     }
 }
 
-function parseVariableDeclaration(tokens: Token[]): VariableDeclaration {
-    const flags: string[] = [];
+function parseVariableDeclaration(tokens: Token[], flags: string[]): VariableDeclaration {
     const identifiers: string[] = [];
     let type: TypeArgument | undefined = undefined;
     let initializer: Instruction | undefined;
-
-    while (tokens[0] && isInTuple(tokens[0].value, ["let", "var"])) {
-        flags.push(tokens.shift()!.value);
-    }
 
     while (tokens[0] && isInTuple(tokens[0].type, <const>["identifier", ","])) {
         const token = tokens.shift()!;
