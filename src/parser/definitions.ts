@@ -39,7 +39,7 @@ export interface ForInStatement extends DreamNode {
 
 export interface WhileStatement extends DreamNode {
     kind: "while-statement";
-    condition: DreamNode;
+    condition: Instruction;
     body: Instruction[];
 }
 

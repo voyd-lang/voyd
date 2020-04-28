@@ -55,8 +55,16 @@ function parseKeywordStatement(tokens: Token[]): Instruction {
         return parseReturnStatement(tokens);
     }
 
-    if (token.value === "if") {
+    if (["if", "while", "for"].includes(token.value)) {
         return parseExpression(tokens);
+    }
+
+    if (token.value === "continue") {
+        return { kind: "continue-statement" };
+    }
+
+    if (token.value === "break") {
+        return { kind: "break-statement" };
     }
 
     const flags: string[] = [];
@@ -323,6 +331,14 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
                 const condition = parseExpression(tokens, { type: "{", value: "{" });
                 const body = parseTokens(tokens);
                 output.push({ kind: "if-expression", condition, body });
+                continue;
+            }
+
+            if (token.value === "while") {
+                tokens.shift()
+                const condition = parseExpression(tokens, { type: "{", value: "{" });
+                const body = parseTokens(tokens);
+                output.push({ kind: "while-statement", condition, body });
                 continue;
             }
 

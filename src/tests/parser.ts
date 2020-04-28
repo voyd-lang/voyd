@@ -1,13 +1,13 @@
 import { parse } from "../parser";
 
 const code = `
-    def fib(n: i32) -> i32 {
-        if n < 2 { return n }
-        return fib(n - 2) + fib(n - 1)
+    var count = 0
+
+    while count < 7 {
+        count = count + 1
     }
 
-    let count = 10
-    print(fib(count))
+    print(count)
 `;
 
-console.dir(parse(code));
+console.dir(parse(code), { depth: 5 });

@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { Instruction, MethodOrFunctionCall, ReturnStatement, IfExpression, Assignment, MethodDeclaration, VariableDeclaration } from "../parser/definitions";
+import { Instruction, MethodOrFunctionCall, ReturnStatement, IfExpression, Assignment, MethodDeclaration, VariableDeclaration, WhileStatement } from "../parser/definitions";
 import { Values } from "./values";
 import { MethodValue } from "./definitions";
 import { parse } from "../parser";
@@ -17,13 +17,15 @@ export function compile(code: string) {
     return mod;
 }
 
-function compileBlock({ body, mod, vals, returnType }: {
+function compileBlock({ body, mod, vals, returnType, existingInstructions, additionalInstructions }: {
     body: Instruction[],
     mod: binaryen.Module,
     vals: Values,
-    returnType?: number
+    returnType?: number,
+    existingInstructions?: number[],
+    additionalInstructions?: number[],
 }): number {
-    const block: number[] = [];
+    const block: number[] = existingInstructions ?? [];
 
     body.forEach(instruction => {
         if (instruction.kind === "variable-declaration") {
@@ -47,6 +49,11 @@ function compileBlock({ body, mod, vals, returnType }: {
             return;
         }
 
+        if (instruction.kind === "while-statement") {
+            compileWhileStatement(block, mod, instruction, vals);
+            return;
+        }
+
         if (instruction.kind === "return-statement") {
             compileReturn(block, mod, instruction, vals);
             return;
@@ -55,6 +62,7 @@ function compileBlock({ body, mod, vals, returnType }: {
         block.push(compileExpression(instruction, mod, vals));
     });
 
+    if (additionalInstructions) block.push(...additionalInstructions);
     return mod.block("", block, returnType);
 }
 
@@ -66,6 +74,27 @@ function compileIfExpression(block: number[], mod: binaryen.Module, instruction:
     block.push(
         mod.if(compileExpression(instruction.condition, mod, vals),
             compileBlock({ body: instruction.body, mod, vals: vals }))
+    );
+}
+
+function compileWhileStatement(block: number[], mod: binaryen.Module, instruction: WhileStatement, vals: Values) {
+    block.push(
+        mod.block("while", [
+            mod.loop("loop",
+                compileBlock({
+                    body: instruction.body, mod, vals: vals,
+                    existingInstructions: [
+                        mod.br("while", mod.i32.ne(
+                            compileExpression(instruction.condition, mod, vals),
+                            mod.i32.const(1)
+                        ))
+                    ],
+                    additionalInstructions: [
+                        mod.br("loop")
+                    ]
+                })
+            )
+        ])
     );
 }
 
