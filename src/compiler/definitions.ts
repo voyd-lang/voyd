@@ -1,11 +1,18 @@
 
-export interface VariableValue {
-    kind: "var";
+export interface LocalValue {
+    kind: "local";
     identifier: string;
     type: number;
     mutable: boolean;
-    isLocal?: boolean;
-    localIndex?: number;
+    index: number;
+    flags: string[];
+}
+
+export interface GlobalValue {
+    kind: "global";
+    identifier: string;
+    type: number;
+    mutable: boolean;
     flags: string[];
 }
 
@@ -19,4 +26,4 @@ export interface MethodValue {
     flags: string[];
 }
 
-export type Value = VariableValue | MethodValue;
+export type Value = LocalValue | MethodValue | GlobalValue;

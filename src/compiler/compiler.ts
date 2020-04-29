@@ -110,9 +110,11 @@ function compileMethodDeclaration(instruction: MethodDeclaration, vals: Values, 
     const params = instruction.parameters.map((param, index) => {
         const type = getTypeFromString(param.type!.identifier);
         internalVals.register({
-            kind: "var", mutable: false, isLocal: true,
-            type, flags: [], identifier: param.identifier,
-            localIndex: index
+            kind: "local",
+            mutable: false,
+            type, flags: [],
+            identifier: param.identifier,
+            index
         });
         return type;
     });
@@ -145,11 +147,11 @@ function compileVariableDeclaration(instruction: VariableDeclaration, ids: Value
         inferType(instruction.initializer!, ids);
     mod.addGlobal(id, type, true, globalInit(type, mod));
     ids.register({
-        kind: "var",
+        kind: "global",
         identifier: id,
         type,
-        mutable: true,
-        flags: []
+        mutable: instruction.flags.includes("var"),
+        flags: instruction.flags
     });
     if (instruction.initializer) {
         block.push(mod.global.set(id, compileExpression(instruction.initializer, mod, ids)));
@@ -171,14 +173,16 @@ function compileExpression(expr: Instruction, mod: binaryen.Module, ids: Values)
 
     if (expr.kind === "identifier") {
         const identifier = ids.retrieve(expr.value);
-        if (identifier.kind !== "var") throw new Error("Methods not supported here yet.");
 
-        // Lots of room for optimization here.;
-        if (identifier.isLocal) {
-            return mod.local.get(identifier.localIndex!, identifier.type);
+        if (identifier.kind === "local") {
+            return mod.local.get(identifier.index, identifier.type);
         }
 
-        return mod.global.get(identifier.identifier, identifier.type);
+        if (identifier.kind === "global") {
+            return mod.global.get(identifier.identifier, identifier.type);
+        }
+
+        throw new Error(`Unsupported identifier type in expression: ${identifier.kind}`);
     }
 
     if (expr.kind === "method-or-function-call") {
@@ -301,7 +305,7 @@ function inferType(expression: Instruction, ids: Values): number {
 
     if (expression.kind === "identifier") {
         const id = ids.retrieve(expression.value);
-        if (id.kind !== "var") throw new Error("Unexpected identifier");
+        if (id.kind === "method") throw new Error("Unexpected identifier");
         return id.type;
     }
 
