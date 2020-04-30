@@ -1,26 +1,50 @@
-import { Value } from "./definitions";
+import { Value, LocalValue } from "./definitions";
 
-export class Values {
-    private readonly identifiers: { [key: string]: Value };
+export class ValueCollection {
+    private readonly values: { [key: string]: Value };
+    private readonly locals: LocalValue[];
 
-    constructor(ids?: { [key: string]: Value }) {
-        this.identifiers = ids ? JSON.parse(JSON.stringify(ids)) : {};
+    constructor({ vals, locals }: {
+        vals?: { [key: string]: Value },
+        locals?: LocalValue[]
+    } = {}) {
+        this.values = vals ? JSON.parse(JSON.stringify(vals)) : {};
+        this.locals = locals ? JSON.parse(JSON.stringify(locals)) : [];
     }
 
-    register(id: Value) {
-        this.identifiers[id.identifier] = id;
+    /**
+     * Register a value. If the value is a local,
+     * the index will be overwritten to the next available index.
+     * @param val
+     */
+    register(val: Value) {
+        if (val.kind === "local") {
+            this.locals.push({
+                ...val,
+                index: this.locals.length
+            });
+            return;
+        }
+
+        this.values[val.id] = val;
     }
 
     retrieve(id: string): Value {
-        const ident = this.identifiers[id];
-        if (!ident) {
-            throw new Error(`Unknown identifier: ${id}`);
-        }
+        const ident = this.values[id];
+        if (ident) return ident;
+        const local = this.locals.find(l => l.id === id);
+        if (local) return local;
 
-        return ident;
+        throw new Error(`Unknown identifier: ${id}`);
+    }
+
+    getNonParameterLocalTypes(): number[] {
+        return this.locals
+            .filter(l => l.nonParameter)
+            .map(l => l.type);
     }
 
     clone() {
-        return new Values(this.identifiers);
+        return new ValueCollection({ vals: this.values, locals: this.locals });
     }
 }

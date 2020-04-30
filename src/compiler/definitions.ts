@@ -1,16 +1,17 @@
 
 export interface LocalValue {
     kind: "local";
-    identifier: string;
+    id: string;
     type: number;
     mutable: boolean;
     index: number;
+    nonParameter?: boolean;
     flags: string[];
 }
 
 export interface GlobalValue {
     kind: "global";
-    identifier: string;
+    id: string;
     type: number;
     mutable: boolean;
     flags: string[];
@@ -18,11 +19,9 @@ export interface GlobalValue {
 
 export interface MethodValue {
     kind: "method";
-    identifier: string;
-    /** Parameters representing a generic type. */
-    typeParameters: number[];
-    parameterTypes: number[];
-    returnType: string;
+    id: string;
+    parameters: number[];
+    returnType: number;
     flags: string[];
 }
 

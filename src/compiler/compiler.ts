@@ -1,13 +1,15 @@
 import binaryen from "binaryen";
-import { Instruction, MethodOrFunctionCall, ReturnStatement, IfExpression, Assignment, MethodDeclaration, VariableDeclaration, WhileStatement } from "../parser/definitions";
-import { Values } from "./values";
-import { MethodValue } from "./definitions";
-import { parse } from "../parser";
+import { ValueCollection } from "./values";
+import { MethodValue, LocalValue } from "./definitions";
+import {
+    parse, Instruction, MethodOrFunctionCall, ReturnStatement, IfExpression, Assignment,
+    MethodDeclaration, VariableDeclaration, WhileStatement
+} from "../parser";
 
 export function compile(code: string) {
     const ast = parse(code);
     const mod = new binaryen.Module();
-    const ids = new Values();
+    const ids = new ValueCollection();
     mod.autoDrop();
     mod.addFunctionImport("print", "imports", "print", binaryen.i32, binaryen.none);
     mod.addFunction("main", binaryen.none, binaryen.none, [], compileBlock({
@@ -17,19 +19,23 @@ export function compile(code: string) {
     return mod;
 }
 
-function compileBlock({ body, mod, vals, returnType, existingInstructions, additionalInstructions }: {
+function compileBlock({
+    body, mod, vals, returnType, existingInstructions,
+    additionalInstructions, context = "global"
+}: {
     body: Instruction[],
     mod: binaryen.Module,
-    vals: Values,
+    vals: ValueCollection,
     returnType?: number,
     existingInstructions?: number[],
     additionalInstructions?: number[],
+    context?: "global" | "method";
 }): number {
     const block: number[] = existingInstructions ?? [];
 
     body.forEach(instruction => {
         if (instruction.kind === "variable-declaration") {
-            compileVariableDeclaration(instruction, vals, mod, block);
+            compileVariableDeclaration({ instruction, vals, mod, block, context });
             return;
         }
 
@@ -66,18 +72,18 @@ function compileBlock({ body, mod, vals, returnType, existingInstructions, addit
     return mod.block("", block, returnType);
 }
 
-function compileReturn(block: number[], mod: binaryen.Module, instruction: ReturnStatement, vals: Values) {
+function compileReturn(block: number[], mod: binaryen.Module, instruction: ReturnStatement, vals: ValueCollection) {
     block.push(mod.return(compileExpression(instruction.expression, mod, vals)));
 }
 
-function compileIfExpression(block: number[], mod: binaryen.Module, instruction: IfExpression, vals: Values) {
+function compileIfExpression(block: number[], mod: binaryen.Module, instruction: IfExpression, vals: ValueCollection) {
     block.push(
         mod.if(compileExpression(instruction.condition, mod, vals),
             compileBlock({ body: instruction.body, mod, vals: vals }))
     );
 }
 
-function compileWhileStatement(block: number[], mod: binaryen.Module, instruction: WhileStatement, vals: Values) {
+function compileWhileStatement(block: number[], mod: binaryen.Module, instruction: WhileStatement, vals: ValueCollection) {
     block.push(
         mod.block("while", [
             mod.loop("loop",
@@ -98,13 +104,24 @@ function compileWhileStatement(block: number[], mod: binaryen.Module, instructio
     );
 }
 
-function compileAssignment(instruction: Assignment, mod: binaryen.Module, vals: Values, block: number[]) {
+function compileAssignment(instruction: Assignment, mod: binaryen.Module, vals: ValueCollection, block: number[]) {
     const id = instruction.identifier;
     const expr = compileExpression(instruction.expression, mod, vals);
+    const val = vals.retrieve(id);
+
+    if (val.kind === "method" || !val.mutable) {
+        throw new Error(`${id} cannot be reassigned`);
+    }
+
+    if (val.kind === "local") {
+        block.push(mod.local.set(val.index, expr));
+        return;
+    }
+
     block.push(mod.global.set(id, expr));
 }
 
-function compileMethodDeclaration(instruction: MethodDeclaration, vals: Values, mod: binaryen.Module) {
+function compileMethodDeclaration(instruction: MethodDeclaration, vals: ValueCollection, mod: binaryen.Module) {
     const id = instruction.identifier;
     const internalVals = vals.clone();
     const params = instruction.parameters.map((param, index) => {
@@ -113,18 +130,21 @@ function compileMethodDeclaration(instruction: MethodDeclaration, vals: Values, 
             kind: "local",
             mutable: false,
             type, flags: [],
-            identifier: param.identifier,
+            id: param.identifier,
             index
         });
         return type;
     });
-    const returnType = getTypeFromString(instruction.returnType!.identifier);
+
+    const returnType = instruction.returnType ?
+        getTypeFromString(instruction.returnType.identifier) :
+        binaryen.none;
+
     const method: MethodValue = {
         kind: "method",
-        identifier: id,
-        typeParameters: [],
-        parameterTypes: params,
-        returnType: instruction.returnType!.identifier,
+        id,
+        parameters: params,
+        returnType,
         flags: instruction.flags ?? []
     };
     internalVals.register(method);
@@ -134,31 +154,62 @@ function compileMethodDeclaration(instruction: MethodDeclaration, vals: Values, 
         body: instruction.body,
         mod,
         vals: internalVals,
-        returnType
+        returnType,
+        context: "method",
     });
+    const additionalLocals = internalVals.getNonParameterLocalTypes();
 
-    mod.addFunction(id, binaryen.createType(params), returnType, [], methodBody);
+    mod.addFunction(id, binaryen.createType(params), returnType, additionalLocals, methodBody);
 }
 
-function compileVariableDeclaration(instruction: VariableDeclaration, ids: Values, mod: binaryen.Module, block: number[]) {
+function compileVariableDeclaration({
+    instruction, vals, mod, block, context = "global"
+}: {
+    instruction: VariableDeclaration, vals: ValueCollection, mod: binaryen.Module, block: number[],
+    context?: "global" | "method"
+}) {
     const id = instruction.identifiers[0];
     const type = instruction.type ?
         getTypeFromString(instruction.type.identifier) :
-        inferType(instruction.initializer!, ids);
+        inferType(instruction.initializer!, vals);
+
+    if (context === "method") {
+        vals.register({
+            kind: "local",
+            id, type,
+            flags: instruction.flags,
+            nonParameter: true,
+            mutable: instruction.flags.includes("var"),
+            index: 0
+        });
+
+        if (instruction.initializer) {
+            const local = vals.retrieve(id) as LocalValue;
+            block.push(mod.local.set(
+                local.index,
+                compileExpression(instruction.initializer, mod, vals)
+            ))
+        }
+
+        return;
+    }
+
     mod.addGlobal(id, type, true, globalInit(type, mod));
-    ids.register({
+
+    vals.register({
         kind: "global",
-        identifier: id,
+        id,
         type,
         mutable: instruction.flags.includes("var"),
         flags: instruction.flags
     });
+
     if (instruction.initializer) {
-        block.push(mod.global.set(id, compileExpression(instruction.initializer, mod, ids)));
+        block.push(mod.global.set(id, compileExpression(instruction.initializer, mod, vals)));
     }
 }
 
-function compileExpression(expr: Instruction, mod: binaryen.Module, ids: Values): number {
+function compileExpression(expr: Instruction, mod: binaryen.Module, vals: ValueCollection): number {
     if (expr.kind === "i32-literal") {
         return mod.i32.const(Number(expr.value));
     }
@@ -172,14 +223,14 @@ function compileExpression(expr: Instruction, mod: binaryen.Module, ids: Values)
     }
 
     if (expr.kind === "identifier") {
-        const identifier = ids.retrieve(expr.value);
+        const identifier = vals.retrieve(expr.value);
 
         if (identifier.kind === "local") {
             return mod.local.get(identifier.index, identifier.type);
         }
 
         if (identifier.kind === "global") {
-            return mod.global.get(identifier.identifier, identifier.type);
+            return mod.global.get(identifier.id, identifier.type);
         }
 
         throw new Error(`Unsupported identifier type in expression: ${identifier.kind}`);
@@ -187,23 +238,23 @@ function compileExpression(expr: Instruction, mod: binaryen.Module, ids: Values)
 
     if (expr.kind === "method-or-function-call") {
         if (["+", "-", "*", "/", "<", ">", ">=", "<="].includes(expr.identifier)) {
-            return compileBinaryExpression(expr, mod, ids);
+            return compileBinaryExpression(expr, mod, vals);
         }
 
         if (expr.identifier === "print") {
-            return (mod.call as any)("print", [compileExpression(expr.arguments[0], mod, ids)], binaryen.none);
+            return (mod.call as any)("print", [compileExpression(expr.arguments[0], mod, vals)], binaryen.none);
         }
 
-        const id = ids.retrieve(expr.identifier);
-        if (id.kind !== "method") throw new Error(`${expr.identifier} is not a method`);
-        const args = expr.arguments.map(instr => compileExpression(instr, mod, ids));
-        return (mod.call as any)(id.identifier, args, getTypeFromString(id.returnType));
+        const val = vals.retrieve(expr.identifier);
+        if (val.kind !== "method") throw new Error(`${expr.identifier} is not a method`);
+        const args = expr.arguments.map(instr => compileExpression(instr, mod, vals));
+        return (mod.call as any)(val.id, args, val.returnType);
     }
 
     throw new Error(`Invalid expression ${expr.kind}`);
 }
 
-function compileBinaryExpression(expr: MethodOrFunctionCall, mod: binaryen.Module, ids: Values): number {
+function compileBinaryExpression(expr: MethodOrFunctionCall, mod: binaryen.Module, ids: ValueCollection): number {
     const arg1 = expr.arguments.pop()!;
     const arg2 = expr.arguments.pop()!;
     const type = inferType(arg1, ids); // Probably room for performance improvements here.
@@ -278,7 +329,7 @@ function compileBinaryExpression(expr: MethodOrFunctionCall, mod: binaryen.Modul
     throw new Error(`Unsupported add type: ${type}`);
 }
 
-function inferType(expression: Instruction, ids: Values): number {
+function inferType(expression: Instruction, ids: ValueCollection): number {
     if (expression.kind === "method-or-function-call") {
         if (["+", "-", "*", "/"].includes(expression.identifier)) {
             return inferType(expression.arguments[0], ids);
@@ -292,7 +343,7 @@ function inferType(expression: Instruction, ids: Values): number {
         if (identifier.kind !== "method" || !identifier.returnType) {
             throw new Error(`Unable to infer return type for ${expression.identifier}`);
         }
-        return getTypeFromString(identifier.returnType);
+        return identifier.returnType;
     }
 
     if (expression.kind === "bool-literal") return binaryen.i32;

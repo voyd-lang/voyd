@@ -1,13 +1,15 @@
 import { compile } from "../compiler";
 
 const code = `
-    def fib(n: i32) -> i32 {
-        if n < 2 { return n }
-        return fib(n - 2) + fib(n - 1)
+    def exp(to: i32) {
+        var count = 1
+        while count < to {
+            print(count)
+            count = count * 2
+        }
     }
 
-    let count = 10
-    print(fib(count))
+    exp(10000)
 `;
 
 const mod = compile(code);
