@@ -1,14 +1,12 @@
 {
-  "name": "dream-lang",
+  "name": "dreamc",
   "version": "0.1.0",
   "description": "",
   "main": "dist/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "bin": {
-    "dream": "dist/cli.js"
-  },
+  "bin": "dist/cli.js",
   "keywords": [],
   "author": "",
   "license": "ISC",
