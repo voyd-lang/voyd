@@ -29,7 +29,19 @@ Core values:
 - Prefer existing standards when possible
 - Quality libraries for web, server, and graphic applications.
 
-**Feature Check List**
+## CLI Installation Usage
+
+**Install**
+```
+npm i -g dreamc
+```
+
+**Usage**
+```
+dreamc path/to/code.dm
+```
+
+## Feature Support Check List
 - [x] Methods
 - [x] If statements
 - [x] While loops
@@ -51,4 +63,5 @@ Core values:
 - [ ] UI Library
 - [ ] Server Library
 - [ ] NodeJS/Deno API bindings
+- [ ] Multiple files
 - [ ] ...?
