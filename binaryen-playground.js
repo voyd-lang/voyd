@@ -3,12 +3,20 @@ const binaryen = require("binaryen");
 const mod = new binaryen.Module();
 
 mod.autoDrop();
-
+mod.setFeatures(binaryen.Features.All);
 mod.addFunctionImport("log", "imports", "log", [binaryen.i32], binaryen.none);
-mod.addGlobal("hello", binaryen.i32, true, mod.i32.const(0));
-mod.addFunction('main', binaryen.none, binaryen.none, [], mod.block("", [
-  mod.global.set("hello", mod.i32.add(mod.i32.const(1), mod.i32.const(1))),
-  mod.call("log", [mod.global.get("hello", binaryen.i32)], binaryen.none)
+
+const tupleType = binaryen.createType([binaryen.i32, binaryen.i32, binaryen.i32]);
+
+mod.addFunction("make-tuple", binaryen.none, tupleType, [], mod.block("", [
+  mod.return(mod.tuple.make([mod.i32.const(1),mod.i32.const(2),mod.i32.const(3)]))
+]));
+
+mod.addFunction('main', binaryen.none, binaryen.none, [tupleType], mod.block("", [
+  mod.local.set(0, mod.call("make-tuple", [], tupleType)),
+  mod.call("log", [mod.tuple.extract(mod.local.get(0, tupleType), 0)], binaryen.none),
+  mod.call("log", [mod.tuple.extract(mod.local.get(0, tupleType), 1)], binaryen.none),
+  mod.call("log", [mod.tuple.extract(mod.local.get(0, tupleType), 2)], binaryen.none),
 ]));
 
 mod.addFunctionExport('main', 'main');
@@ -17,7 +25,6 @@ if (!mod.validate()) throw new Error("Invalid module");
 
 // Get the binary in typed array form
 const binary = mod.emitBinary();
-console.log(mod.emitText());
 
 // We don't need the Binaryen module anymore, so we can tell it to
 // clean itself up
