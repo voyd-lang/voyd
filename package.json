@@ -1,10 +1,13 @@
 {
   "name": "dream-lang",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "",
   "main": "dist/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "bin": {
+    "dream": "dist/cli.js"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +17,7 @@
   },
   "dependencies": {
     "@types/node": "^12.7.3",
-    "binaryen": "^93.0.0"
+    "binaryen": "^93.0.0",
+    "commander": "^5.1.0"
   }
 }

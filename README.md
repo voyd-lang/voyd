@@ -1,12 +1,54 @@
 # Dream
 
-An experimental programming language for WebAssembly. The language is mostly intended
-to be a pet project for the years to come. Something to help me understand how computers
-work on a lower level.
+An experimental language targeting WebAssembly.
 
-Goals (In order of importance):
+```
+def fib(n: i32) -> i32 {
+    if n < 2 { return n }
+    fib(n - 2) + fib(n - 1)
+}
+
+let count = 10
+print(fib(count))
+```
+
+Features:
+- First class WebAssembly support
+- Simple interop with TypeScript / JavaScript
+- Expressive syntax
+- Support for OOP and Functional paradigms
+- Macros
+- Optional GC
+
+Core values:
 - Developer satisfaction
-- Elegant readable syntax
 - Predictable syntax and APIs
-- Fast
-- Easy interop with TypeScript, JavaScript, and hopefully other webassembly languages.
+- First class WebAssembly support
+- Play nice with others
+- Fast performance
+- Prefer existing standards when possible
+- Quality libraries for web, server, and graphic applications.
+
+**Feature Check List**
+- [x] Methods
+- [x] If statements
+- [x] While loops
+- [x] let / var statements
+- [ ] Type checker
+- [ ] Structs
+- [ ] Classes
+- [ ] Match statements
+- [ ] For In loops
+- [ ] Anonymous structs
+- [ ] Tuples
+- [ ] Type aliasing
+- [ ] Traits
+- [ ] Macros
+- [ ] Arrays, Strings, other dynamic data types
+- [ ] Language server
+- [ ] VSCode integration and tooling
+- [ ] DOM Access
+- [ ] UI Library
+- [ ] Server Library
+- [ ] NodeJS/Deno API bindings
+- [ ] ...?
