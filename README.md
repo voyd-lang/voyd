@@ -46,6 +46,10 @@ dreamc path/to/code.dm
 - [x] If statements
 - [x] While loops
 - [x] let / var statements
+- [ ] Dot notation
+- [ ] Method overloading
+- [ ] Enums
+- [ ] Enums with associated values
 - [ ] Type checker
 - [ ] Structs
 - [ ] Classes

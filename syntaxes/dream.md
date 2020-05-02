@@ -36,6 +36,20 @@ for item in iterable {
 while condition {
 
 }
+
+let x = 3
+match x {
+    1 => print("One"),
+    2 => print("two"),
+    3 => print("three"),
+    _ {
+        // Match statements must cover every possible case.
+        // _ means default. I.E. if no other patterns match, use this one.
+        // Additionally, we are using {} instead of =>. {} can be used for
+        // any case that requires more than one line.
+        print("A number")
+    }
+}
 ```
 
 
@@ -58,7 +72,7 @@ def add([x: Int, y: Int]) -> Int {
 }
 
 // If a struct is the only argument of a method, parenthesis can be omitted.
-def add [x: Int, y: Int] -> Int {
+def add[x: Int, y: Int] -> Int {
     x + y
 }
 
@@ -66,7 +80,7 @@ add([x: 5, y: 3])
 
 // If a struct is the only argument or the second argument is a function (more on that later),
 // the parenthesis can be omitted on call as well.
-add [x: 5, y: 3]
+add[x: 5, y: 3]
 
 // Single expression method
 def sub(a: Int, b: Int) => a - b
@@ -165,12 +179,18 @@ target.shift [x: 5]
 
 ```
 enum Friend {
-    eric
-    angie
+    eric,
+    angie,
     carter
 }
 
-let friend = Friend.eric
+var friend = Friend.eric
+
+match friend {
+    ::eric { },
+    ::angie { },
+    ::carter
+}
 
 // Enum identifier can be omitted if it can be reasonable inferred.
 let bestFriend: Friend = .angie
@@ -233,6 +253,8 @@ For example, an array of promises that resolve an Int would be annotated like so
 ```
 let arr: Array'Promise<Int>' = Array(Promise(5), Promise(4))
 ```
+
+directionToHead = ::east
 
 # Macros
 
