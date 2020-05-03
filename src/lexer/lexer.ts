@@ -1,16 +1,15 @@
-import { Token, operators, keywords, brackets, symbols } from "./definitions";
+import { Token, operators, keywords, brackets, symbols, symbolAndOperatorChars } from "./definitions";
 import { isInTuple } from "../helpers";
 
 export function tokenize(code: string) {
     const chars = code.split("");
-
     const tokens: Token[] = [];
     while (chars.length > 0) {
-        const char = chars.shift()!;
-        const next = chars[0];
+        const char = chars[0];
+        const next = chars[1];
 
         if (isLetter(char)) {
-            const word = `${char}${extractWord(chars)}`;
+            const word = extractWord(chars);
             if (isKeyword(word)) {
                 tokens.push({ type: "keyword", value: word });
                 continue;
@@ -30,7 +29,9 @@ export function tokenize(code: string) {
             continue;
         }
 
+        // May push this to the parser later.
         if (char === "-" && isNum(next)) {
+            chars.shift(); // Eat the -
             const { num, type } = extractNum(chars);
             tokens.push({ type, value: `-${num}` });
             continue;
@@ -38,7 +39,7 @@ export function tokenize(code: string) {
 
         if (isNum(char)) {
             const { num, type } = extractNum(chars);
-            tokens.push({ type, value: `${char}${num}` });
+            tokens.push({ type, value: num });
             continue;
         }
 
@@ -47,32 +48,43 @@ export function tokenize(code: string) {
             continue;
         }
 
+        if (char === "\n") {
+            chars.shift();
+            tokens.push({ type: "\n", value: "\n" });
+            continue;
+        }
+
+        if (isSymbolOrOperatorChar(char)) {
+            const initial = JSON.parse(JSON.stringify(chars));
+            const value = extractSymbolOrOperator(chars);
+            if (isInTuple(value, symbols)) {
+                tokens.push({ type: value, value });
+                continue;
+            }
+
+            if (isOperator(value)) {
+                tokens.push({ type: "operator", value });
+                continue;
+            }
+
+            // Handles | overlap
+            if (isInTuple(value, brackets)) {
+                tokens.push({ type: value, value });
+                continue;
+            }
+
+            throw new Error(`Unknown operator or symbol: ${value}`);
+        }
+
         if (isInTuple(char, brackets)) {
-            tokens.push({ type: char, value: char });
+            tokens.push({ type: char, value: chars.shift()! });
             continue;
         }
 
-        if (isInTuple(char, symbols)) {
-            tokens.push({ type: char, value: char });
-            continue;
-        }
-
-        if (char === "-" && next === ">") {
-            tokens.push({ type: "->", value: "->" });
+        if (isInTuple(char, [" ", "\r", "\t"])) {
             chars.shift();
             continue;
         }
-
-        if (isOperator(char)) {
-            const fullOp = `${char}${extractOperator(chars)}`;
-            if (!isOperator(fullOp)) {
-                throw new Error(`Unknown operator: ${fullOp}`);
-            }
-            tokens.push({ type: "operator", value: fullOp });
-            continue;
-        }
-
-        if (isInTuple(char, [" ", "\r", "\t"])) continue;
 
         throw new Error(`Unexpected token: ${char}`);
     }
@@ -86,13 +98,15 @@ const isNum = (char: string) => (/[0-9]/g).test(char);
 
 const isOperator = (str: string) => isInTuple(str, operators);
 
+const isSymbolOrOperatorChar = (str: string) => isInTuple(str, symbolAndOperatorChars);
+
 const isKeyword = (str: string) => isInTuple(str, keywords);
 
 const isBool = (str: string) => str === "true" || str === "false";
 
 const extractWord = (chars: string[]) => {
     let word = "";
-    while (isLetter(chars[0]) || isNum(chars[0])) {
+    while (chars[0] && (isLetter(chars[0]) || isNum(chars[0]))) {
         word += chars.shift();
     }
     return word;
@@ -124,18 +138,21 @@ const extractNum = (chars: string[]) => {
 };
 
 const extractString = (chars: string[]) => {
+    chars.shift(); // Eat the leading "
+
     let string = "";
     while (chars.length > 0) {
         const char = chars.shift();
         if (char === "\"") break;
         string += char;
     }
+
     return string;
 }
 
-const extractOperator = (chars: string[]) => {
+const extractSymbolOrOperator = (chars: string[]) => {
     let op = "";
-    while (isOperator(chars[0])) {
+    while (isSymbolOrOperatorChar(chars[0])) {
         op += chars.shift();
     }
     return op;

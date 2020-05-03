@@ -11,9 +11,11 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "mocha": "^7.1.2",
     "typescript": "^3.6.2"
   },
   "dependencies": {
+    "@types/mocha": "^7.0.2",
     "@types/node": "^12.7.3",
     "binaryen": "^93.0.0",
     "commander": "^5.1.0"

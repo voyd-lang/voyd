@@ -8,7 +8,7 @@ export type Token = {
 
 export const operators = [
     "+", "-", "*", "/", "==", "!=", "and", "or", "xor", "<", ">", ">=", "<=", "<>",
-    "??", "."
+    "??", ".", "|>", "|<", "<|", "|>", "<<", ">>"
 ] as const;
 
 export const keywords = [
@@ -19,4 +19,9 @@ export const keywords = [
 
 export const brackets = ["{", "}", "[", "]", "(", ")", "|", "'"] as const;
 
-export const symbols = ["?", ":", ";", ",", "->", "$", "\n", "=>", "=", "&", "!"] as const;
+export const symbols = ["?", ":", ";", ",", "->", "$", "=>", "=", "&", "!"] as const;
+
+export const symbolAndOperatorChars = [
+    "+", "-", "*", "/", "=", "!", "<", ">", "?", ":", ".", ";", ",", "$",
+    "&", "|"
+] as const;
