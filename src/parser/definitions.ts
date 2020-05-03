@@ -21,6 +21,22 @@ export interface MethodDeclaration extends DreamNode {
     body: Instruction[];
 }
 
+export interface EnumDeclaration extends DreamNode {
+    kind: "enum-declaration";
+    identifier: string;
+    typeParameters: TypeParameterDeclaration[];
+    flags: string[];
+    variants: EnumVariant[];
+}
+
+export interface EnumVariant {
+    kind: "enum-variant";
+    identifier: string;
+    parentEnum: string;
+    flags: string[];
+    associatedType?: DreamNode; // TBD
+}
+
 export interface StructDeclaration extends DreamNode {
     kind: "struct-declaration";
     identifier: string;
@@ -149,4 +165,6 @@ export type Instruction =
     StringLiteral |
     BoolLiteral |
     Identifier |
-    Assignment;
+    Assignment |
+    EnumDeclaration |
+    EnumVariant;

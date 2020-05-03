@@ -1,5 +1,5 @@
 import { Token, tokenize } from "../lexer";
-import { Instruction, VariableDeclaration, TypeArgument, MethodDeclaration, ParameterDeclaration, ReturnStatement, Assignment } from "./definitions";
+import { Instruction, VariableDeclaration, TypeArgument, MethodDeclaration, ParameterDeclaration, ReturnStatement, Assignment, EnumDeclaration, EnumVariant } from "./definitions";
 import { isInTuple } from "../helpers";
 
 export function parse(code: string): Instruction[] {
@@ -15,6 +15,11 @@ function parseTokens(tokens: Token[]): Instruction[] {
         if (next.type === "}") {
             tokens.shift();
             break;
+        }
+
+        if (next.type === "\n") {
+            tokens.shift();
+            continue;
         }
 
         ast.push(parseStatement(tokens));
@@ -79,6 +84,10 @@ function parseKeywordStatement(tokens: Token[]): Instruction {
 
     if (flags.includes("def")) {
         return parseMethodDeclaration(tokens, flags);
+    }
+
+    if (flags.includes("enum")) {
+        return parseEnumDeclaration(tokens, flags);
     }
 
     const keywordStr = flags.reduce((p, c) => `${p} ${c}`, "");
@@ -457,4 +466,61 @@ function parseArguments(tokens: Token[]): Instruction[] {
     }
 
     return args;
+}
+
+/** Parse an enum, beginning after enum */
+function parseEnumDeclaration(tokens: Token[], flags: string[]): EnumDeclaration {
+    const identifierToken = tokens.shift();
+    if (!identifierToken || identifierToken.type !== "identifier") {
+        throw new Error("Expected identifier after enum declaration");
+    }
+
+    const identifier = identifierToken.value;
+
+    if (tokens[0].type !== "{") {
+        throw new Error(`Unexpected token in method declaration: ${tokens[0].type}`);
+    }
+    tokens.shift();
+
+    const variants = parseEnumVariants(tokens, identifier);
+
+    return {
+        kind: "enum-declaration",
+        identifier,
+        flags,
+        variants,
+        typeParameters: []
+    }
+}
+
+function parseEnumVariants(tokens: Token[], parentEnum: string): EnumVariant[] {
+    const variants: EnumVariant[] = [];
+
+    while (tokens[0]) {
+        const token = tokens[0];
+        if (token.type === "identifier") {
+            variants.push({
+                kind: "enum-variant",
+                identifier: token.value,
+                parentEnum,
+                flags: []
+            });
+            tokens.shift();
+            continue;
+        }
+
+        if (token.type === "," || token.type === "\n") {
+            tokens.shift();
+            continue;
+        }
+
+        if (token.type === "}") {
+            tokens.shift();
+            break;
+        }
+
+        throw new Error(`Unexpected token in enum: ${token.value}`);
+    }
+
+    return variants;
 }
