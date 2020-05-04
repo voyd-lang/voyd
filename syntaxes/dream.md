@@ -235,7 +235,7 @@ car.getInfo()
 
 # Generics
 
-Generics work much like they do in TypeScript or Swift and essentially use the same syntax.
+Generics work much like they do in TypeScript or Swift with essentially the same syntax.
 ```
 def add<T>(a: T, b: T) -> T {
     a + b
@@ -244,6 +244,14 @@ def add<T>(a: T, b: T) -> T {
 struct Target<T> {
     let x, y, z: T
 }
+```
+
+The one exception (for now) is when a generic type parameter needs to be explicitly defined in an
+expression. In such a case, the type parameters must be prefixed with a `:`. For example:
+```
+def add<T>(a: T, b: T) => a + b
+
+add::<i32>()
 ```
 
 # Macros
