@@ -55,7 +55,6 @@ export function tokenize(code: string) {
         }
 
         if (isSymbolOrOperatorChar(char)) {
-            const initial = JSON.parse(JSON.stringify(chars));
             const value = extractSymbolOrOperator(chars);
             if (isInTuple(value, symbols)) {
                 tokens.push({ type: value, value });
