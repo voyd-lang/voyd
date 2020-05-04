@@ -75,6 +75,19 @@ export interface IfExpression extends DreamNode {
     elseIfBodies?: { expression: DreamNode, body: Instruction[] }[];
 }
 
+export interface MatchExpression extends DreamNode {
+    kind: "match-expression";
+    expression: Instruction;
+    cases: MatchCase[];
+    flags: string[];
+}
+
+export interface MatchCase extends DreamNode {
+    kind: "match-case",
+    case: Instruction;
+    expression: Instruction;
+}
+
 export interface FunctionStatement extends DreamNode {
     kind: "function-declaration";
     identifier: string;
@@ -167,4 +180,6 @@ export type Instruction =
     Identifier |
     Assignment |
     EnumDeclaration |
-    EnumVariant;
+    EnumVariant |
+    MatchCase |
+    MatchExpression;

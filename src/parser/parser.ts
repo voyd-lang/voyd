@@ -1,5 +1,5 @@
 import { Token, tokenize } from "../lexer";
-import { Instruction, VariableDeclaration, TypeArgument, MethodDeclaration, ParameterDeclaration, ReturnStatement, Assignment, EnumDeclaration, EnumVariant } from "./definitions";
+import { Instruction, VariableDeclaration, TypeArgument, MethodDeclaration, ParameterDeclaration, ReturnStatement, Assignment, EnumDeclaration, EnumVariant, MatchCase } from "./definitions";
 import { isInTuple } from "../helpers";
 
 export function parse(code: string): Instruction[] {
@@ -60,7 +60,7 @@ function parseKeywordStatement(tokens: Token[]): Instruction {
         return parseReturnStatement(tokens);
     }
 
-    if (["if", "while", "for"].includes(token.value)) {
+    if (["if", "while", "for", "match"].includes(token.value)) {
         return parseExpression(tokens);
     }
 
@@ -294,6 +294,7 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
         }
 
         // Consumed terminator
+        // TODO: !!! Important !!! Make this non consuming
         if (terminator && token.type === terminator.type) {
             tokens.shift();
             break;
@@ -348,6 +349,14 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
                 const condition = parseExpression(tokens, { type: "{", value: "{" });
                 const body = parseTokens(tokens);
                 output.push({ kind: "while-statement", condition, body });
+                continue;
+            }
+
+            if (token.value === "match") {
+                tokens.shift();
+                const expression = parseExpression(tokens, { type: "{", value: "{" });
+                const cases = parseMatchCases(tokens);
+                output.push({ kind: "match-expression", expression, cases, flags: [] });
                 continue;
             }
 
@@ -520,6 +529,35 @@ function parseEnumVariants(tokens: Token[], parentEnum: string): EnumVariant[] {
         }
 
         throw new Error(`Unexpected token in enum: ${token.value}`);
+    }
+
+    return variants;
+}
+
+function parseMatchCases(tokens: Token[]): MatchCase[] {
+    const variants: MatchCase[] = [];
+
+    while (tokens[0]) {
+        const token = tokens[0];
+
+        if (token.type === "}") {
+            tokens.shift();
+            break;
+        }
+
+        if (token.type === "\n") {
+            tokens.shift();
+            continue;
+        }
+
+        const matchCase = parseExpression(tokens, { type: "=>", value: "=>" });
+        const expression = parseExpression(tokens, { type: ",", value: "," });
+
+        variants.push({
+            kind: "match-case",
+            case: matchCase,
+            expression
+        });
     }
 
     return variants;

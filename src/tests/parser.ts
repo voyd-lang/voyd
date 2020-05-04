@@ -9,6 +9,10 @@ describe("Parser", function() {
     it("should parse a basic code snippet", function() {
         assert.deepStrictEqual(parse(basicCodeSnippet), correctCodeSnippetAST);
     });
+
+    it("should parse a basic match expression", function() {
+        assert.deepStrictEqual(parse(basicMatchExpression), correctBasicMatchExpressionAST);
+    });
 });
 
 const enumSnippet = `
@@ -140,5 +144,50 @@ const correctCodeSnippetAST = [
                 arguments: [{ kind: 'i32-literal', value: '10' }]
             }
         ]
+    }
+];
+
+const basicMatchExpression = `
+match 3 {
+    1 => print(3),
+    2 => print(2),
+    3 => print(1)
+}
+`
+
+const correctBasicMatchExpressionAST = [
+    {
+        kind: 'match-expression',
+        expression: { kind: 'i32-literal', value: '3' },
+        cases: [
+            {
+                kind: 'match-case',
+                case: { kind: 'i32-literal', value: '1' },
+                expression: {
+                    kind: 'method-or-function-call',
+                    identifier: 'print',
+                    arguments: [{ kind: 'i32-literal', value: '3' }]
+                }
+            },
+            {
+                kind: 'match-case',
+                case: { kind: 'i32-literal', value: '2' },
+                expression: {
+                    kind: 'method-or-function-call',
+                    identifier: 'print',
+                    arguments: [{ kind: 'i32-literal', value: '2' }]
+                }
+            },
+            {
+                kind: 'match-case',
+                case: { kind: 'i32-literal', value: '3' },
+                expression: {
+                    kind: 'method-or-function-call',
+                    identifier: 'print',
+                    arguments: [{ kind: 'i32-literal', value: '1' }]
+                }
+            }
+        ],
+        flags: []
     }
 ];
