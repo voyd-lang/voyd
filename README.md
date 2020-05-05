@@ -12,11 +12,15 @@ let count = 10
 print(fib(count))
 ```
 
+Language Goal:
+Make writing WASM apps a delight for individuals and teams alike.
+
 Features:
 - First class WebAssembly support
 - Simple interop with TypeScript / JavaScript
 - Expressive syntax
 - Support for OOP and Functional paradigms
+- Strongly typed, with type inference
 - Macros
 - Optional GC
 
@@ -29,7 +33,7 @@ Core values:
 - Prefer existing standards when possible
 - Quality libraries for web, server, and graphic applications.
 
-## CLI Installation Usage
+# CLI Installation Usage
 
 **Install**
 ```
@@ -41,7 +45,7 @@ npm i -g dreamc
 dreamc path/to/code.dm
 ```
 
-## Feature Support Check List
+# Feature Support Check List
 - [x] Methods
 - [x] If statements
 - [x] While loops
