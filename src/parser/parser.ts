@@ -356,7 +356,7 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
                 tokens.shift();
                 const expression = parseExpression(tokens, { type: "{", value: "{" });
                 const cases = parseMatchCases(tokens);
-                output.push({ kind: "match-expression", expression, cases, flags: [] });
+                output.push({ kind: "match-expression", value: expression, cases, flags: [] });
                 continue;
             }
 

@@ -77,7 +77,7 @@ export interface IfExpression extends DreamNode {
 
 export interface MatchExpression extends DreamNode {
     kind: "match-expression";
-    expression: Instruction;
+    value: Instruction;
     cases: MatchCase[];
     flags: string[];
 }

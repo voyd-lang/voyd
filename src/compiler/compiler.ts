@@ -3,8 +3,9 @@ import { ValueCollection } from "./values";
 import { MethodValue, LocalValue } from "./definitions";
 import {
     parse, Instruction, MethodOrFunctionCall, ReturnStatement, IfExpression, Assignment,
-    MethodDeclaration, VariableDeclaration, WhileStatement
+    MethodDeclaration, VariableDeclaration, WhileStatement, MatchExpression
 } from "../parser";
+import uniqid from "uniqid";
 
 export function compile(code: string) {
     const ast = parse(code);
@@ -60,6 +61,11 @@ function compileBlock({
             return;
         }
 
+        if (instruction.kind === "match-expression") {
+            compileMatchExpression(block, mod, instruction, vals);
+            return;
+        }
+
         if (instruction.kind === "return-statement") {
             compileReturn(block, mod, instruction, vals);
             return;
@@ -70,6 +76,58 @@ function compileBlock({
 
     if (additionalInstructions) block.push(...additionalInstructions);
     return mod.block("", block, returnType);
+}
+
+// TODO: Support non integer cases.
+// TODO: Support patterns (ranges, strings, enum destructuring, etc.)
+// TODO: Support default
+// TODO: Document how this works. ASAP
+function compileMatchExpression(block: number[], mod: binaryen.Module, instruction: MatchExpression, vals: ValueCollection) {
+    const indexFunctionName = `match-${uniqid}`;
+    const cases: { name: string, case: number, expression: number }[] = [];
+    for (const dCase of instruction.cases) {
+        const name = JSON.stringify(dCase.case);
+        cases.push({
+            name,
+            case: compileExpression(dCase.case, mod, vals),
+            expression: compileExpression(dCase.expression, mod, vals)
+        });
+    }
+
+    // Build the match indexing function
+
+    const matchBlock: number[] = [
+        mod.local.set(0, compileExpression(instruction.value, mod, vals))
+    ];
+
+    cases.forEach((cCase, index) => {
+        // If the match value is equal to the case, return the block index of the case's expression.
+        matchBlock.push(mod.if(
+            mod.i32.eq(cCase.case, mod.local.get(0, binaryen.i32)),
+            mod.return(mod.i32.const(index))
+        ))
+    });
+
+    mod.addFunction(indexFunctionName, binaryen.createType([]), binaryen.i32, [binaryen.i32], mod.block("", matchBlock));
+
+    // Convert the 1D cases array to a hierarchical set of blocks, last one containing the switch (br_table).
+    // TODO: Make this iterative.
+    function makeBlockTree(caseIndex = 0): number {
+        const cCase = cases[caseIndex];
+
+        if (cCase) {
+            return mod.block(cCase.name, [
+                makeBlockTree(caseIndex + 1),
+                cCase.expression
+            ]);
+        }
+
+        return mod.block("matcher", [
+            mod.switch(cases.map(c => c.name), cases[0].name, mod.call(indexFunctionName, [], binaryen.i32))
+        ]);
+    }
+
+    return makeBlockTree();
 }
 
 function compileReturn(block: number[], mod: binaryen.Module, instruction: ReturnStatement, vals: ValueCollection) {
