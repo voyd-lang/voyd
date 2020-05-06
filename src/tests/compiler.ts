@@ -1,15 +1,11 @@
 import { compile } from "../compiler";
 
 const code = `
-    def exp(to: i32) {
-        var count = 1
-        while count < to {
-            print(count)
-            count = count * 2
-        }
+    match 2 {
+        1 => print(1),
+        2 => print(2),
+        3 => print(3),
     }
-
-    exp(10000)
 `;
 
 const mod = compile(code);

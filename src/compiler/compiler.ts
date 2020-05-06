@@ -83,7 +83,7 @@ function compileBlock({
 // TODO: Support default
 // TODO: Document how this works. ASAP
 function compileMatchExpression(block: number[], mod: binaryen.Module, instruction: MatchExpression, vals: ValueCollection) {
-    const indexFunctionName = `match-${uniqid}`;
+    const indexFunctionName = `match-${uniqid()}`;
     const cases: { name: string, case: number, expression: number }[] = [];
     for (const dCase of instruction.cases) {
         const name = JSON.stringify(dCase.case);
@@ -104,11 +104,13 @@ function compileMatchExpression(block: number[], mod: binaryen.Module, instructi
         // If the match value is equal to the case, return the block index of the case's expression.
         matchBlock.push(mod.if(
             mod.i32.eq(cCase.case, mod.local.get(0, binaryen.i32)),
-            mod.return(mod.i32.const(index))
+            mod.return(mod.i32.const(index + 1))
         ))
     });
 
-    mod.addFunction(indexFunctionName, binaryen.createType([]), binaryen.i32, [binaryen.i32], mod.block("", matchBlock));
+    matchBlock.push(mod.i32.const(0));
+
+    mod.addFunction(indexFunctionName, binaryen.createType([]), binaryen.i32, [binaryen.i32], mod.block("", matchBlock, binaryen.i32));
 
     // Convert the 1D cases array to a hierarchical set of blocks, last one containing the switch (br_table).
     // TODO: Make this iterative.
@@ -118,16 +120,21 @@ function compileMatchExpression(block: number[], mod: binaryen.Module, instructi
         if (cCase) {
             return mod.block(cCase.name, [
                 makeBlockTree(caseIndex + 1),
-                cCase.expression
+                cCase.expression,
+                mod.br("match")
             ]);
         }
 
         return mod.block("matcher", [
-            mod.switch(cases.map(c => c.name), cases[0].name, mod.call(indexFunctionName, [], binaryen.i32))
+            mod.switch(
+                [...cases.map(c => c.name), "matcher"],
+                cases[0].name,
+                mod.call(indexFunctionName, [], binaryen.i32)
+            )
         ]);
     }
 
-    return makeBlockTree();
+    block.push(mod.block("match", [makeBlockTree()]));
 }
 
 function compileReturn(block: number[], mod: binaryen.Module, instruction: ReturnStatement, vals: ValueCollection) {
