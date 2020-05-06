@@ -275,11 +275,11 @@ function compileVariableDeclaration({
 }
 
 function compileExpression(expr: Instruction, mod: binaryen.Module, vals: ValueCollection): number {
-    if (expr.kind === "i32-literal") {
+    if (expr.kind === "int-literal") {
         return mod.i32.const(Number(expr.value));
     }
 
-    if (expr.kind === "f32-literal") {
+    if (expr.kind === "float-literal") {
         return mod.f32.const(Number(expr.value));
     }
 
@@ -412,8 +412,8 @@ function inferType(expression: Instruction, ids: ValueCollection): number {
     }
 
     if (expression.kind === "bool-literal") return binaryen.i32;
-    if (expression.kind === "f32-literal") return binaryen.f32;
-    if (expression.kind === "i32-literal") return binaryen.i32;
+    if (expression.kind === "float-literal") return binaryen.f32;
+    if (expression.kind === "int-literal") return binaryen.i32;
     if (expression.kind === "return-statement") return inferType(expression.expression, ids);
     if (expression.kind === "if-expression") {
         return inferType(expression.body[expression.body.length - 1], ids);

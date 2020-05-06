@@ -312,13 +312,13 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
         }
 
         if (token.type === "int") {
-            output.push({ kind: "i32-literal", value: token.value });
+            output.push({ kind: "int-literal", value: token.value });
             tokens.shift();
             continue;
         }
 
         if (token.type === "float") {
-            output.push({ kind: "f32-literal", value: token.value });
+            output.push({ kind: "float-literal", value: token.value });
             tokens.shift();
             continue;
         }

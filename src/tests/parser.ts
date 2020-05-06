@@ -85,7 +85,7 @@ const correctCodeSnippetAST = [
                     kind: 'method-or-function-call',
                     identifier: '<',
                     arguments: [
-                        { kind: 'i32-literal', value: '2' },
+                        { kind: 'int-literal', value: '2' },
                         { kind: 'identifier', value: 'n' }
                     ]
                 },
@@ -108,7 +108,7 @@ const correctCodeSnippetAST = [
                                 kind: 'method-or-function-call',
                                 identifier: '-',
                                 arguments: [
-                                    { kind: 'i32-literal', value: '1' },
+                                    { kind: 'int-literal', value: '1' },
                                     { kind: 'identifier', value: 'n' }
                                 ]
                             }
@@ -122,7 +122,7 @@ const correctCodeSnippetAST = [
                                 kind: 'method-or-function-call',
                                 identifier: '-',
                                 arguments: [
-                                    { kind: 'i32-literal', value: '2' },
+                                    { kind: 'int-literal', value: '2' },
                                     { kind: 'identifier', value: 'n' }
                                 ]
                             }
@@ -141,7 +141,7 @@ const correctCodeSnippetAST = [
             {
                 kind: 'method-or-function-call',
                 identifier: 'fib',
-                arguments: [{ kind: 'i32-literal', value: '10' }]
+                arguments: [{ kind: 'int-literal', value: '10' }]
             }
         ]
     }
@@ -158,33 +158,33 @@ match 3 {
 const correctBasicMatchExpressionAST = [
     {
         kind: 'match-expression',
-        expression: { kind: 'i32-literal', value: '3' },
+        expression: { kind: 'int-literal', value: '3' },
         cases: [
             {
                 kind: 'match-case',
-                case: { kind: 'i32-literal', value: '1' },
+                case: { kind: 'int-literal', value: '1' },
                 expression: {
                     kind: 'method-or-function-call',
                     identifier: 'print',
-                    arguments: [{ kind: 'i32-literal', value: '3' }]
+                    arguments: [{ kind: 'int-literal', value: '3' }]
                 }
             },
             {
                 kind: 'match-case',
-                case: { kind: 'i32-literal', value: '2' },
+                case: { kind: 'int-literal', value: '2' },
                 expression: {
                     kind: 'method-or-function-call',
                     identifier: 'print',
-                    arguments: [{ kind: 'i32-literal', value: '2' }]
+                    arguments: [{ kind: 'int-literal', value: '2' }]
                 }
             },
             {
                 kind: 'match-case',
-                case: { kind: 'i32-literal', value: '3' },
+                case: { kind: 'int-literal', value: '3' },
                 expression: {
                     kind: 'method-or-function-call',
                     identifier: 'print',
-                    arguments: [{ kind: 'i32-literal', value: '1' }]
+                    arguments: [{ kind: 'int-literal', value: '1' }]
                 }
             }
         ],

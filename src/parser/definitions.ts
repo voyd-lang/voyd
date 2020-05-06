@@ -127,13 +127,13 @@ export interface TypeArgument extends DreamNode {
     flags: string[];
 }
 
-export interface I32Literal extends DreamNode {
-    kind: "i32-literal";
+export interface IntLiteral extends DreamNode {
+    kind: "int-literal";
     value: string;
 }
 
-export interface F32Literal extends DreamNode {
-    kind: "f32-literal";
+export interface FloatLiteral extends DreamNode {
+    kind: "float-literal";
     value: string;
 }
 
@@ -173,8 +173,8 @@ export type Instruction =
     ContinueStatement |
     BreakStatement |
     ReturnStatement |
-    I32Literal |
-    F32Literal |
+    IntLiteral |
+    FloatLiteral |
     StringLiteral |
     BoolLiteral |
     Identifier |
