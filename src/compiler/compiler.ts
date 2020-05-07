@@ -3,7 +3,7 @@ import { ValueCollection } from "./values";
 import { MethodValue, LocalValue } from "./definitions";
 import {
     parse, Instruction, MethodOrFunctionCall, ReturnStatement, IfExpression, Assignment,
-    MethodDeclaration, VariableDeclaration, WhileStatement, MatchExpression
+    MethodDeclaration, VariableDeclaration, WhileStatement, MatchExpression, BinaryExpression
 } from "../parser";
 import uniqid from "uniqid";
 
@@ -301,11 +301,12 @@ function compileExpression(expr: Instruction, mod: binaryen.Module, vals: ValueC
         throw new Error(`Unsupported identifier type in expression: ${identifier.kind}`);
     }
 
-    if (expr.kind === "method-or-function-call") {
-        if (["+", "-", "*", "/", "<", ">", ">=", "<="].includes(expr.identifier)) {
-            return compileBinaryExpression(expr, mod, vals);
-        }
+    if (expr.kind === "binary-expression") {
+        return compileBinaryExpression(expr, mod, vals);
+    }
 
+    if (expr.kind === "method-or-function-call") {
+        // TODO: Add to vals as stdlib
         if (expr.identifier === "print") {
             return (mod.call as any)("print", [compileExpression(expr.arguments[0], mod, vals)], binaryen.none);
         }
@@ -319,9 +320,9 @@ function compileExpression(expr: Instruction, mod: binaryen.Module, vals: ValueC
     throw new Error(`Invalid expression ${expr.kind}`);
 }
 
-function compileBinaryExpression(expr: MethodOrFunctionCall, mod: binaryen.Module, ids: ValueCollection): number {
-    const arg1 = expr.arguments.pop()!;
-    const arg2 = expr.arguments.pop()!;
+function compileBinaryExpression(expr: BinaryExpression, mod: binaryen.Module, ids: ValueCollection): number {
+    const arg1 = expr.arguments.shift()!;
+    const arg2 = expr.arguments.shift()!;
     const type = inferType(arg1, ids); // Probably room for performance improvements here.
     const cArg1 = compileExpression(arg1, mod, ids);
     const cArg2 = compileExpression(arg2, mod, ids);

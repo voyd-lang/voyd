@@ -416,10 +416,12 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
 
     // Infix parsing
     while (operator.length > 0) {
+        const arg2 = output.pop()!;
+        const arg1 = output.pop()!;
         output.push({
-            kind: "method-or-function-call",
+            kind: "binary-expression",
             identifier: operator.pop()!.value,
-            arguments: [output.pop()!, output.pop()!]
+            arguments: [arg1, arg2]
         });
     }
 

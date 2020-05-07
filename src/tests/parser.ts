@@ -82,11 +82,11 @@ const correctCodeSnippetAST = [
             {
                 kind: 'if-expression',
                 condition: {
-                    kind: 'method-or-function-call',
+                    kind: 'binary-expression',
                     identifier: '<',
                     arguments: [
-                        { kind: 'int-literal', value: '2' },
-                        { kind: 'identifier', value: 'n' }
+                        { kind: 'identifier', value: 'n' },
+                        { kind: 'int-literal', value: '2' }
                     ]
                 },
                 body: [
@@ -97,7 +97,7 @@ const correctCodeSnippetAST = [
                 ]
             },
             {
-                kind: 'method-or-function-call',
+                kind: 'binary-expression',
                 identifier: '+',
                 arguments: [
                     {
@@ -105,11 +105,11 @@ const correctCodeSnippetAST = [
                         identifier: 'fib',
                         arguments: [
                             {
-                                kind: 'method-or-function-call',
+                                kind: 'binary-expression',
                                 identifier: '-',
                                 arguments: [
-                                    { kind: 'int-literal', value: '1' },
-                                    { kind: 'identifier', value: 'n' }
+                                    { kind: 'identifier', value: 'n' },
+                                    { kind: 'int-literal', value: '2' }
                                 ]
                             }
                         ]
@@ -119,11 +119,11 @@ const correctCodeSnippetAST = [
                         identifier: 'fib',
                         arguments: [
                             {
-                                kind: 'method-or-function-call',
+                                kind: 'binary-expression',
                                 identifier: '-',
                                 arguments: [
-                                    { kind: 'int-literal', value: '2' },
-                                    { kind: 'identifier', value: 'n' }
+                                    { kind: 'identifier', value: 'n' },
+                                    { kind: 'int-literal', value: '1' }
                                 ]
                             }
                         ]
@@ -158,7 +158,7 @@ match 3 {
 const correctBasicMatchExpressionAST = [
     {
         kind: 'match-expression',
-        expression: { kind: 'int-literal', value: '3' },
+        value: { kind: 'int-literal', value: '3' },
         cases: [
             {
                 kind: 'match-case',

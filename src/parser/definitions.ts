@@ -102,6 +102,12 @@ export interface MethodOrFunctionCall extends DreamNode {
     arguments: Instruction[];
 }
 
+export interface BinaryExpression extends DreamNode {
+    kind: "binary-expression";
+    identifier: string;
+    arguments: [Instruction, Instruction];
+}
+
 export interface ReturnStatement extends DreamNode {
     kind: "return-statement";
     expression: Instruction;
@@ -182,4 +188,5 @@ export type Instruction =
     EnumDeclaration |
     EnumVariant |
     MatchCase |
-    MatchExpression;
+    MatchExpression |
+    BinaryExpression;

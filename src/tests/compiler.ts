@@ -1,11 +1,12 @@
 import { compile } from "../compiler";
 
 const code = `
-    match 2 {
-        1 => print(1),
-        2 => print(2),
-        3 => print(3),
+    def fib(n: i32) -> i32 {
+        if n < 2 { return n }
+        fib(n - 2) + fib(n - 1)
     }
+
+    print(fib(10))
 `;
 
 const mod = compile(code);
