@@ -371,7 +371,7 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
                 tokens.shift();
 
                 output.push({
-                    kind: "method-or-function-call",
+                    kind: "call-expression",
                     identifier: token.value,
                     arguments: parseArguments(tokens), // T
                 });
@@ -388,7 +388,7 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
                 const op = operator[operator.length - 1];
                 if (getOperatorPrecedence(op.value) >= getOperatorPrecedence(token.value)) {
                     output.push({
-                        kind: "method-or-function-call",
+                        kind: "call-expression",
                         identifier: operator.pop()!.value,
                         arguments: [output.pop()!, output.pop()!]
                     });

@@ -101,7 +101,7 @@ const correctCodeSnippetAST = [
                 identifier: '+',
                 arguments: [
                     {
-                        kind: 'method-or-function-call',
+                        kind: 'call-expression',
                         identifier: 'fib',
                         arguments: [
                             {
@@ -115,7 +115,7 @@ const correctCodeSnippetAST = [
                         ]
                     },
                     {
-                        kind: 'method-or-function-call',
+                        kind: 'call-expression',
                         identifier: 'fib',
                         arguments: [
                             {
@@ -135,11 +135,11 @@ const correctCodeSnippetAST = [
         flags: ['def']
     },
     {
-        kind: 'method-or-function-call',
+        kind: 'call-expression',
         identifier: 'print',
         arguments: [
             {
-                kind: 'method-or-function-call',
+                kind: 'call-expression',
                 identifier: 'fib',
                 arguments: [{ kind: 'int-literal', value: '10' }]
             }
@@ -164,7 +164,7 @@ const correctBasicMatchExpressionAST = [
                 kind: 'match-case',
                 case: { kind: 'int-literal', value: '1' },
                 expression: {
-                    kind: 'method-or-function-call',
+                    kind: 'call-expression',
                     identifier: 'print',
                     arguments: [{ kind: 'int-literal', value: '3' }]
                 }
@@ -173,7 +173,7 @@ const correctBasicMatchExpressionAST = [
                 kind: 'match-case',
                 case: { kind: 'int-literal', value: '2' },
                 expression: {
-                    kind: 'method-or-function-call',
+                    kind: 'call-expression',
                     identifier: 'print',
                     arguments: [{ kind: 'int-literal', value: '2' }]
                 }
@@ -182,7 +182,7 @@ const correctBasicMatchExpressionAST = [
                 kind: 'match-case',
                 case: { kind: 'int-literal', value: '3' },
                 expression: {
-                    kind: 'method-or-function-call',
+                    kind: 'call-expression',
                     identifier: 'print',
                     arguments: [{ kind: 'int-literal', value: '1' }]
                 }

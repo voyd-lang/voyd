@@ -96,8 +96,8 @@ export interface FunctionStatement extends DreamNode {
     body: Instruction[];
 }
 
-export interface MethodOrFunctionCall extends DreamNode {
-    kind: "method-or-function-call";
+export interface CallExpression extends DreamNode {
+    kind: "call-expression";
     identifier: string;
     arguments: Instruction[];
 }
@@ -172,7 +172,7 @@ export type Instruction =
     WhileStatement |
     IfExpression |
     FunctionStatement |
-    MethodOrFunctionCall |
+    CallExpression |
     TypeParameterDeclaration |
     ParameterDeclaration |
     TypeArgument |

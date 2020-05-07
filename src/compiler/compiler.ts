@@ -2,7 +2,7 @@ import binaryen from "binaryen";
 import { ValueCollection } from "./values";
 import { MethodValue, LocalValue } from "./definitions";
 import {
-    parse, Instruction, MethodOrFunctionCall, ReturnStatement, IfExpression, Assignment,
+    parse, Instruction, CallExpression, ReturnStatement, IfExpression, Assignment,
     MethodDeclaration, VariableDeclaration, WhileStatement, MatchExpression, BinaryExpression
 } from "../parser";
 import uniqid from "uniqid";
@@ -305,7 +305,7 @@ function compileExpression(expr: Instruction, mod: binaryen.Module, vals: ValueC
         return compileBinaryExpression(expr, mod, vals);
     }
 
-    if (expr.kind === "method-or-function-call") {
+    if (expr.kind === "call-expression") {
         // TODO: Add to vals as stdlib
         if (expr.identifier === "print") {
             return (mod.call as any)("print", [compileExpression(expr.arguments[0], mod, vals)], binaryen.none);
@@ -396,7 +396,7 @@ function compileBinaryExpression(expr: BinaryExpression, mod: binaryen.Module, i
 }
 
 function inferType(expression: Instruction, ids: ValueCollection): number {
-    if (expression.kind === "method-or-function-call") {
+    if (expression.kind === "call-expression") {
         if (["+", "-", "*", "/"].includes(expression.identifier)) {
             return inferType(expression.arguments[0], ids);
         }
