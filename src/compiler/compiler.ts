@@ -170,7 +170,7 @@ function compileWhileStatement(block: number[], mod: binaryen.Module, instructio
 }
 
 function compileAssignment(instruction: Assignment, mod: binaryen.Module, vals: ValueCollection, block: number[]) {
-    const id = instruction.identifier;
+    const id = instruction.assigneeLabel;
     const expr = compileExpression(instruction.expression, mod, vals);
     const val = vals.retrieve(id);
 
@@ -187,22 +187,22 @@ function compileAssignment(instruction: Assignment, mod: binaryen.Module, vals: 
 }
 
 function compileMethodDeclaration(instruction: MethodDeclaration, vals: ValueCollection, mod: binaryen.Module) {
-    const id = instruction.identifier;
+    const id = instruction.label;
     const internalVals = vals.clone();
     const params = instruction.parameters.map((param, index) => {
-        const type = getTypeFromString(param.type!.identifier);
+        const type = getTypeFromString(param.type!.label);
         internalVals.register({
             kind: "local",
             mutable: false,
             type, flags: [],
-            id: param.identifier,
+            id: param.label,
             index
         });
         return type;
     });
 
     const returnType = instruction.returnType ?
-        getTypeFromString(instruction.returnType.identifier) :
+        getTypeFromString(instruction.returnType.label) :
         binaryen.none;
 
     const method: MethodValue = {
@@ -233,9 +233,9 @@ function compileVariableDeclaration({
     instruction: VariableDeclaration, vals: ValueCollection, mod: binaryen.Module, block: number[],
     context?: "global" | "method"
 }) {
-    const id = instruction.identifiers[0];
+    const id = instruction.labels[0];
     const type = instruction.type ?
-        getTypeFromString(instruction.type.identifier) :
+        getTypeFromString(instruction.type.label) :
         inferType(instruction.initializer!, vals);
 
     if (context === "method") {
@@ -288,7 +288,7 @@ function compileExpression(expr: Instruction, mod: binaryen.Module, vals: ValueC
     }
 
     if (expr.kind === "identifier") {
-        const identifier = vals.retrieve(expr.value);
+        const identifier = vals.retrieve(expr.label);
 
         if (identifier.kind === "local") {
             return mod.local.get(identifier.index, identifier.type);
@@ -307,12 +307,12 @@ function compileExpression(expr: Instruction, mod: binaryen.Module, vals: ValueC
 
     if (expr.kind === "call-expression") {
         // TODO: Add to vals as stdlib
-        if (expr.identifier === "print") {
+        if (expr.calleeLabel === "print") {
             return (mod.call as any)("print", [compileExpression(expr.arguments[0], mod, vals)], binaryen.none);
         }
 
-        const val = vals.retrieve(expr.identifier);
-        if (val.kind !== "method") throw new Error(`${expr.identifier} is not a method`);
+        const val = vals.retrieve(expr.calleeLabel);
+        if (val.kind !== "method") throw new Error(`${expr.calleeLabel} is not a method`);
         const args = expr.arguments.map(instr => compileExpression(instr, mod, vals));
         return (mod.call as any)(val.id, args, val.returnType);
     }
@@ -326,7 +326,7 @@ function compileBinaryExpression(expr: BinaryExpression, mod: binaryen.Module, i
     const type = inferType(arg1, ids); // Probably room for performance improvements here.
     const cArg1 = compileExpression(arg1, mod, ids);
     const cArg2 = compileExpression(arg2, mod, ids);
-    const id = expr.identifier;
+    const id = expr.calleeLabel;
 
     if (type === binaryen.i32 && id === "+") {
         return mod.i32.add(cArg1, cArg2)
@@ -397,17 +397,17 @@ function compileBinaryExpression(expr: BinaryExpression, mod: binaryen.Module, i
 
 function inferType(expression: Instruction, ids: ValueCollection): number {
     if (expression.kind === "call-expression") {
-        if (["+", "-", "*", "/"].includes(expression.identifier)) {
+        if (["+", "-", "*", "/"].includes(expression.calleeLabel)) {
             return inferType(expression.arguments[0], ids);
         }
 
-        if (["==", ">", "<", ">=", "<=", "and", "ir"].includes(expression.identifier)) {
+        if (["==", ">", "<", ">=", "<=", "and", "ir"].includes(expression.calleeLabel)) {
             return binaryen.i32;
         }
 
-        const identifier = ids.retrieve(expression.identifier);
+        const identifier = ids.retrieve(expression.calleeLabel);
         if (identifier.kind !== "method" || !identifier.returnType) {
-            throw new Error(`Unable to infer return type for ${expression.identifier}`);
+            throw new Error(`Unable to infer return type for ${expression.calleeLabel}`);
         }
         return identifier.returnType;
     }
@@ -421,7 +421,7 @@ function inferType(expression: Instruction, ids: ValueCollection): number {
     }
 
     if (expression.kind === "identifier") {
-        const id = ids.retrieve(expression.value);
+        const id = ids.retrieve(expression.label);
         if (id.kind === "method") throw new Error("Unexpected identifier");
         return id.type;
     }
