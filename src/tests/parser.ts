@@ -1,4 +1,4 @@
-import { parse } from "../parser";
+import { parse, AST } from "../parser";
 import { strict as assert } from "assert";
 
 describe("Parser", function() {
@@ -21,33 +21,33 @@ const enumSnippet = `
     }
 `;
 
-const correctEnumAst = [
+const correctEnumAst: AST = [
     {
         kind: 'enum-declaration',
-        identifier: 'Friends',
+        label: 'Friends',
         flags: ['enum'],
         variants: [
             {
                 kind: 'enum-variant',
-                identifier: 'dan',
+                label: 'dan',
                 parentEnum: 'Friends',
                 flags: []
             },
             {
                 kind: 'enum-variant',
-                identifier: 'paige',
+                label: 'paige',
                 parentEnum: 'Friends',
                 flags: []
             },
             {
                 kind: 'enum-variant',
-                identifier: 'jimmy',
+                label: 'jimmy',
                 parentEnum: 'Friends',
                 flags: []
             },
             {
                 kind: 'enum-variant',
-                identifier: 'glados',
+                label: 'glados',
                 parentEnum: 'Friends',
                 flags: []
             }
@@ -65,50 +65,50 @@ const basicCodeSnippet = `
     print(fib(10))
 `;
 
-const correctCodeSnippetAST = [
+const correctCodeSnippetAST: AST = [
     {
         kind: 'method-declaration',
-        identifier: 'fib',
+        label: 'fib',
         parameters: [
             {
                 kind: 'parameter-declaration',
-                identifier: 'n',
-                type: { kind: 'type-argument', identifier: 'i32', flags: [] },
+                label: 'n',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
                 flags: []
             }
         ],
-        returnType: { kind: 'type-argument', identifier: 'i32', flags: [] },
+        returnType: { kind: 'type-argument', label: 'i32', flags: [] },
         body: [
             {
                 kind: 'if-expression',
                 condition: {
                     kind: 'binary-expression',
-                    identifier: '<',
+                    calleeLabel: '<',
                     arguments: [
-                        { kind: 'identifier', value: 'n' },
+                        { kind: 'identifier', label: 'n' },
                         { kind: 'int-literal', value: '2' }
                     ]
                 },
                 body: [
                     {
                         kind: 'return-statement',
-                        expression: { kind: 'identifier', value: 'n' }
+                        expression: { kind: 'identifier', label: 'n' }
                     }
                 ]
             },
             {
                 kind: 'binary-expression',
-                identifier: '+',
+                calleeLabel: '+',
                 arguments: [
                     {
                         kind: 'call-expression',
-                        identifier: 'fib',
+                        calleeLabel: 'fib',
                         arguments: [
                             {
                                 kind: 'binary-expression',
-                                identifier: '-',
+                                calleeLabel: '-',
                                 arguments: [
-                                    { kind: 'identifier', value: 'n' },
+                                    { kind: 'identifier', label: 'n' },
                                     { kind: 'int-literal', value: '2' }
                                 ]
                             }
@@ -116,13 +116,13 @@ const correctCodeSnippetAST = [
                     },
                     {
                         kind: 'call-expression',
-                        identifier: 'fib',
+                        calleeLabel: 'fib',
                         arguments: [
                             {
                                 kind: 'binary-expression',
-                                identifier: '-',
+                                calleeLabel: '-',
                                 arguments: [
-                                    { kind: 'identifier', value: 'n' },
+                                    { kind: 'identifier', label: 'n' },
                                     { kind: 'int-literal', value: '1' }
                                 ]
                             }
@@ -136,11 +136,11 @@ const correctCodeSnippetAST = [
     },
     {
         kind: 'call-expression',
-        identifier: 'print',
+        calleeLabel: 'print',
         arguments: [
             {
                 kind: 'call-expression',
-                identifier: 'fib',
+                calleeLabel: 'fib',
                 arguments: [{ kind: 'int-literal', value: '10' }]
             }
         ]
@@ -155,7 +155,7 @@ match 3 {
 }
 `
 
-const correctBasicMatchExpressionAST = [
+const correctBasicMatchExpressionAST: AST = [
     {
         kind: 'match-expression',
         value: { kind: 'int-literal', value: '3' },
@@ -165,7 +165,7 @@ const correctBasicMatchExpressionAST = [
                 case: { kind: 'int-literal', value: '1' },
                 expression: {
                     kind: 'call-expression',
-                    identifier: 'print',
+                    calleeLabel: 'print',
                     arguments: [{ kind: 'int-literal', value: '3' }]
                 }
             },
@@ -174,7 +174,7 @@ const correctBasicMatchExpressionAST = [
                 case: { kind: 'int-literal', value: '2' },
                 expression: {
                     kind: 'call-expression',
-                    identifier: 'print',
+                    calleeLabel: 'print',
                     arguments: [{ kind: 'int-literal', value: '2' }]
                 }
             },
@@ -183,7 +183,7 @@ const correctBasicMatchExpressionAST = [
                 case: { kind: 'int-literal', value: '3' },
                 expression: {
                     kind: 'call-expression',
-                    identifier: 'print',
+                    calleeLabel: 'print',
                     arguments: [{ kind: 'int-literal', value: '1' }]
                 }
             }

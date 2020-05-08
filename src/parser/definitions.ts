@@ -1,19 +1,19 @@
 
-export interface DreamNode {
+export interface ASTNode {
     kind: string;
 }
 
-export interface VariableDeclaration extends DreamNode {
+export interface VariableDeclaration extends ASTNode {
     kind: "variable-declaration"
-    identifiers: string[];
+    identifierLabel: string;
     flags: string[];
     type?: TypeArgument;
     initializer?: Instruction;
 }
 
-export interface MethodDeclaration extends DreamNode {
+export interface MethodDeclaration extends ASTNode {
     kind: "method-declaration";
-    identifier: string;
+    label: string;
     parameters: ParameterDeclaration[];
     typeParameters: TypeParameterDeclaration[];
     returnType?: TypeArgument;
@@ -21,9 +21,9 @@ export interface MethodDeclaration extends DreamNode {
     body: Instruction[];
 }
 
-export interface EnumDeclaration extends DreamNode {
+export interface EnumDeclaration extends ASTNode {
     kind: "enum-declaration";
-    identifier: string;
+    label: string;
     typeParameters: TypeParameterDeclaration[];
     flags: string[];
     variants: EnumVariant[];
@@ -31,15 +31,15 @@ export interface EnumDeclaration extends DreamNode {
 
 export interface EnumVariant {
     kind: "enum-variant";
-    identifier: string;
+    label: string;
     parentEnum: string;
     flags: string[];
-    associatedType?: DreamNode; // TBD
+    associatedType?: ASTNode; // TBD
 }
 
-export interface StructDeclaration extends DreamNode {
+export interface StructDeclaration extends ASTNode {
     kind: "struct-declaration";
-    identifier: string;
+    label: string;
     typeParameters: TypeParameterDeclaration[];
     variables: VariableDeclaration[];
     methods: MethodDeclaration[];
@@ -47,120 +47,119 @@ export interface StructDeclaration extends DreamNode {
     flags: string[];
 }
 
-export interface ForInStatement extends DreamNode {
+export interface ForInStatement extends ASTNode {
     kind: "for-in-statement";
-    expression: DreamNode;
+    expression: ASTNode;
     body: Instruction[];
 }
 
-export interface WhileStatement extends DreamNode {
+export interface WhileStatement extends ASTNode {
     kind: "while-statement";
     condition: Instruction;
     body: Instruction[];
 }
 
-export interface BreakStatement extends DreamNode {
+export interface BreakStatement extends ASTNode {
     kind: "break-statement";
 }
 
-export interface ContinueStatement extends DreamNode {
+export interface ContinueStatement extends ASTNode {
     kind: "continue-statement";
 }
 
-export interface IfExpression extends DreamNode {
+export interface IfExpression extends ASTNode {
     kind: "if-expression";
     condition: Instruction;
     body: Instruction[];
     elseBody?: Instruction[];
-    elseIfBodies?: { expression: DreamNode, body: Instruction[] }[];
+    elseIfBodies?: { expression: ASTNode, body: Instruction[] }[];
 }
 
-export interface MatchExpression extends DreamNode {
+export interface MatchExpression extends ASTNode {
     kind: "match-expression";
     value: Instruction;
     cases: MatchCase[];
     flags: string[];
 }
 
-export interface MatchCase extends DreamNode {
+export interface MatchCase extends ASTNode {
     kind: "match-case",
     case: Instruction;
     expression: Instruction;
 }
 
-export interface FunctionStatement extends DreamNode {
+export interface FunctionStatement extends ASTNode {
     kind: "function-declaration";
-    identifier: string;
     parameters: ParameterDeclaration[];
     returnType: string;
     body: Instruction[];
 }
 
-export interface CallExpression extends DreamNode {
+export interface CallExpression extends ASTNode {
     kind: "call-expression";
-    identifier: string;
+    calleeLabel: string;
     arguments: Instruction[];
 }
 
-export interface BinaryExpression extends DreamNode {
+export interface BinaryExpression extends ASTNode {
     kind: "binary-expression";
-    identifier: string;
+    calleeLabel: string;
     arguments: [Instruction, Instruction];
 }
 
-export interface ReturnStatement extends DreamNode {
+export interface ReturnStatement extends ASTNode {
     kind: "return-statement";
     expression: Instruction;
 }
 
-export interface TypeParameterDeclaration extends DreamNode {
+export interface TypeParameterDeclaration extends ASTNode {
     kind: "type-parameter-declaration";
-    identifier: string;
+    label: string;
     constraints: string[];
 }
 
-export interface ParameterDeclaration extends DreamNode {
+export interface ParameterDeclaration extends ASTNode {
     kind: "parameter-declaration";
-    identifier: string;
+    label: string;
     flags: string[];
     type?: TypeArgument;
     initializer?: Instruction;
 }
 
-export interface TypeArgument extends DreamNode {
+export interface TypeArgument extends ASTNode {
     kind: "type-argument";
-    identifier: string;
+    label: string;
     flags: string[];
 }
 
-export interface IntLiteral extends DreamNode {
+export interface IntLiteral extends ASTNode {
     kind: "int-literal";
     value: string;
 }
 
-export interface FloatLiteral extends DreamNode {
+export interface FloatLiteral extends ASTNode {
     kind: "float-literal";
     value: string;
 }
 
-export interface StringLiteral extends DreamNode {
+export interface StringLiteral extends ASTNode {
     kind: "string-literal";
     value: string;
 }
 
-export interface BoolLiteral extends DreamNode {
+export interface BoolLiteral extends ASTNode {
     kind: "bool-literal";
     value: boolean;
 }
 
-export interface Identifier extends DreamNode {
+export interface Identifier extends ASTNode {
     kind: "identifier";
-    value: string;
+    label: string;
 }
 
-export interface Assignment extends DreamNode {
+export interface Assignment extends ASTNode {
     kind: "assignment";
-    identifier: string;
+    assigneeLabel: string;
     expression: Instruction;
 }
 
@@ -190,3 +189,5 @@ export type Instruction =
     MatchCase |
     MatchExpression |
     BinaryExpression;
+
+export type AST = Instruction[];

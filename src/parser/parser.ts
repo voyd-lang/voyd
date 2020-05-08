@@ -1,14 +1,17 @@
 import { Token, tokenize } from "../lexer";
-import { Instruction, VariableDeclaration, TypeArgument, MethodDeclaration, ParameterDeclaration, ReturnStatement, Assignment, EnumDeclaration, EnumVariant, MatchCase } from "./definitions";
+import {
+    Instruction, VariableDeclaration, TypeArgument, MethodDeclaration, ParameterDeclaration,
+    ReturnStatement, Assignment, EnumDeclaration, EnumVariant, MatchCase, Identifier, AST
+} from "./definitions";
 import { isInTuple } from "../helpers";
 
-export function parse(code: string): Instruction[] {
+export function parse(code: string): AST {
     const tokens = tokenize(code);
     return parseTokens(tokens);
 }
 
-function parseTokens(tokens: Token[]): Instruction[] {
-    const ast: Instruction[] = [];
+function parseTokens(tokens: Token[]): AST {
+    const ast: AST = [];
 
     while (tokens.length > 0) {
         const next = tokens[0];
@@ -95,8 +98,8 @@ function parseKeywordStatement(tokens: Token[]): Instruction {
 }
 
 function parseAssignment(tokens: Token[]): Assignment {
-    const identifier = tokens.shift();
-    if (!identifier || identifier.type !== "identifier") {
+    const label = tokens.shift();
+    if (!label || label.type !== "identifier") {
         throw new Error(`Unexpected identifier token in assignment`);
     }
 
@@ -107,7 +110,7 @@ function parseAssignment(tokens: Token[]): Assignment {
 
     return {
         kind: "assignment",
-        identifier: identifier.value,
+        assigneeLabel: label.value,
         expression: parseExpression(tokens)
     }
 }
@@ -131,7 +134,7 @@ function parseMethodDeclaration(tokens: Token[], flags: string[]): MethodDeclara
         throw new Error("Expected identifier after method declaration");
     }
 
-    const identifier = identifierToken.value;
+    const label = identifierToken.value;
     const parameters = parseMethodParameters(tokens);
 
     let returnType: TypeArgument | undefined;
@@ -149,7 +152,7 @@ function parseMethodDeclaration(tokens: Token[], flags: string[]): MethodDeclara
 
     return {
         kind: "method-declaration",
-        identifier,
+        label,
         parameters,
         returnType,
         body,
@@ -200,7 +203,7 @@ function parseParameter(tokens: Token[]): ParameterDeclaration {
         throw new Error("Invalid parameter definition");
     }
 
-    const identifier = identifierToken.value;
+    const label = identifierToken.value;
 
     const separator = tokens.shift();
     if (!separator || !isInTuple(separator.value, <const>[":", "="])) {
@@ -211,7 +214,7 @@ function parseParameter(tokens: Token[]): ParameterDeclaration {
         const initializer = parseExpression(tokens);
         return {
             kind: "parameter-declaration",
-            identifier,
+            label,
             initializer,
             flags
         }
@@ -228,26 +231,19 @@ function parseParameter(tokens: Token[]): ParameterDeclaration {
 
     return {
         kind: "parameter-declaration",
-        identifier,
+        label,
         type,
         flags
     }
 }
 
 function parseVariableDeclaration(tokens: Token[], flags: string[]): VariableDeclaration {
-    const identifiers: string[] = [];
     let type: TypeArgument | undefined = undefined;
     let initializer: Instruction | undefined;
 
-    while (tokens[0] && isInTuple(tokens[0].type, <const>["identifier", ","])) {
-        const token = tokens.shift()!;
-
-        if (token.type === ",") {
-            tokens.shift();
-            continue;
-        }
-
-        identifiers.push(token.value);
+    const labelToken = tokens.shift();
+    if (!labelToken || labelToken.type !== "identifier") {
+        throw new Error("Identifier expected");
     }
 
     if (tokens[0].type === ":") {
@@ -262,7 +258,7 @@ function parseVariableDeclaration(tokens: Token[], flags: string[]): VariableDec
 
     return {
         kind: "variable-declaration",
-        identifiers, flags, type, initializer
+        identifierLabel: labelToken.value, flags, type, initializer
     };
 }
 
@@ -271,7 +267,7 @@ function parseTypeArgument(tokens: Token[]): TypeArgument {
     // For now we assume a simple type as an identifier.
     return {
         kind: "type-argument",
-        identifier: token.value,
+        label: token.value,
         flags: []
     };
 }
@@ -372,13 +368,13 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
 
                 output.push({
                     kind: "call-expression",
-                    identifier: token.value,
+                    calleeLabel: token.value,
                     arguments: parseArguments(tokens), // T
                 });
                 continue;
             }
 
-            output.push({ kind: "identifier", value: token.value });
+            output.push({ kind: "identifier", label: token.value });
             tokens.shift();
             continue;
         }
@@ -389,7 +385,7 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
                 if (getOperatorPrecedence(op.value) >= getOperatorPrecedence(token.value)) {
                     output.push({
                         kind: "call-expression",
-                        identifier: operator.pop()!.value,
+                        calleeLabel: operator.pop()!.value,
                         arguments: [output.pop()!, output.pop()!]
                     });
                     continue;
@@ -420,7 +416,7 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
         const arg1 = output.pop()!;
         output.push({
             kind: "binary-expression",
-            identifier: operator.pop()!.value,
+            calleeLabel: operator.pop()!.value,
             arguments: [arg1, arg2]
         });
     }
@@ -486,18 +482,18 @@ function parseEnumDeclaration(tokens: Token[], flags: string[]): EnumDeclaration
         throw new Error("Expected identifier after enum declaration");
     }
 
-    const identifier = identifierToken.value;
+    const label = identifierToken.value;
 
     if (tokens[0].type !== "{") {
         throw new Error(`Unexpected token in method declaration: ${tokens[0].type}`);
     }
     tokens.shift();
 
-    const variants = parseEnumVariants(tokens, identifier);
+    const variants = parseEnumVariants(tokens, label);
 
     return {
         kind: "enum-declaration",
-        identifier,
+        label,
         flags,
         variants,
         typeParameters: []
@@ -512,7 +508,7 @@ function parseEnumVariants(tokens: Token[], parentEnum: string): EnumVariant[] {
         if (token.type === "identifier") {
             variants.push({
                 kind: "enum-variant",
-                identifier: token.value,
+                label: token.value,
                 parentEnum,
                 flags: []
             });

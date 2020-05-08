@@ -73,3 +73,14 @@ dreamc path/to/code.dm
 - [ ] NodeJS/Deno API bindings
 - [ ] Multiple files
 - [ ] ...?
+
+# Task List
+- [ ] Get basic dir (IR) defined, plugged into compiler
+- [ ] Support and use enums
+  - [ ] Can be used in match
+  - [ ] Can be used in if (val === Enum.variant)
+  - [ ] Can have associated fields
+- [ ] Support and use structs
+- [ ] Generics expansion
+- [ ] Basic std lib
+  - [ ] Generically defined and implemented binary expression types. Allows us to remove hard-coded
