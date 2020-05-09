@@ -1,42 +1,112 @@
 
-export interface IRNode {
-    kind: string;
-}
+export type IR = IRInstruction;
 
-export interface IRTypeBase {
-    kind: string;
-}
+export interface IRModule extends IRNode {
+    /** Stores all identifiers in the entire WASM module */
+    identifiers: IRIdentifiers;
+    /** Top level namespace */
+    namespace: IRNamespace;
 
-export interface IRValueType extends IRTypeBase {
-    kind: "value";
-    binaryenType: number;
-    mutable: boolean;
+    instructions: IRInstruction[];
 }
-
-export interface IRMultiValueType extends IRTypeBase {
-    kind: "multi-value";
-    binaryenType: number[];
-    mutable: boolean;
-}
-
-export interface IRFunctionType extends IRTypeBase {
-    kind: "function";
-    parameters: number[];
-    locals: number[];
-    returnType: IRValueType | IRMultiValueType; // More possible later.
-    mutable: boolean;
-}
-
-export type IRType =
-    IRValueType |
-    IRMultiValueType |
-    IRFunctionType;
 
 export interface IRNamespace {
     id: string;
-    values: string[];
-    inherits?: IRNamespace;
+    /** Set of identifier ids accessible to this namespace */
+    fields: Set<string>;
 }
+
+export interface IRIdentifiers {
+    [id: string]: IRDefinition;
+}
+
+/**
+ * This may need to be fused with IRTypes, there is some redundancy and confusion there
+ * Currently my thought is that these should include "Type", "Namespace", and other corresponding
+ * information such as label and id. Types don't include that
+ * */
+export type IRDefinition =
+    IRValueDef |
+    IRFunctionDef |
+    IRStructDef |
+    IRStructFieldDef |
+    IREnumDef |
+    IREnumVariantDef |
+    IRDefinitionBase;
+
+export interface IRValueDef extends IRDefinitionBase {
+    defKind: "value";
+}
+
+export interface IRFunctionDef extends IRDefinitionBase {
+    defKind: "function";
+    type: IRFunctionType;
+    namespace: IRNamespace;
+}
+
+export interface IRStructDef extends IRDefinitionBase { // May need to distinguish reference and value type structs (analog is swift class vs struct)
+    defKind: "struct";
+    type: IRMultiValueType;
+    fields: Set<IRStructFieldDef>;
+    namespace: IRNamespace;
+}
+
+export interface IRStructFieldDef extends IRDefinitionBase {
+    defKind: "struct-field";
+    type: IRType;
+}
+
+export interface IREnumDef extends IRDefinitionBase {
+    defKind: "enum";
+    variants: Set<IREnumVariantDef>
+    namespace: IRNamespace;
+}
+
+export interface IREnumVariantDef extends IRDefinitionBase {
+    defKind: "enum-variant";
+    value: number;
+    associatedType?: IRType;
+}
+
+/** A declared definition */
+export interface IRDefinitionBase extends IRNode {
+    kind: "identifier";
+    defKind: string;
+    id: string;
+    label: string;
+    type: IRType;
+}
+
+///////////////////////////////
+///////////////////////////////
+///// Instructions
+///////////////////////////////
+///////////////////////////////
+
+export type IRInstruction =
+    IRVariableDeclaration |
+    IRMethodDeclaration |
+    IRStructDeclaration |
+    IRForInStatement |
+    IRWhileStatement |
+    IRIfExpression |
+    IRFunctionStatement |
+    IRCallExpression |
+    IRParameterDeclaration |
+    IRType |
+    IRContinueStatement |
+    IRBreakStatement |
+    IRReturnStatement |
+    IRIntLiteral |
+    IRFloatLiteral |
+    IRStringLiteral |
+    IRBoolLiteral |
+    IRIdentifierCall |
+    IRAssignment |
+    IREnumDeclaration |
+    IREnumVariantDeclaration |
+    IRMatchCase |
+    IRMatchExpression;
 
 export interface IRVariableDeclaration extends IRNode {
     kind: "variable-declaration";
@@ -62,10 +132,10 @@ export interface IREnumDeclaration extends IRNode {
     id: string;
     label: string;
     flags: string[];
-    variants: IREnumVariant[];
+    variants: IREnumVariantDeclaration[];
 }
 
-export interface IREnumVariant {
+export interface IREnumVariantDeclaration {
     kind: "enum-variant";
     id: string;
     label: string;
@@ -79,7 +149,6 @@ export interface IRStructDeclaration extends IRNode {
     id: string;
     label: string;
     fields: { [id: string]: IRType };
-    namespaceID: string;
     flags: string[];
 }
 
@@ -175,8 +244,10 @@ export interface IRBoolLiteral extends IRNode {
     value: boolean;
 }
 
-export interface IRIdentifier extends IRNode {
+/** This instruction should return the value of the identifier, it is not a function call. */
+export interface IRIdentifierCall extends IRNode {
     kind: "identifier";
+    id: string;
     label: string;
     type: IRType;
 }
@@ -188,27 +259,41 @@ export interface IRAssignment extends IRNode {
     expression: IRInstruction;
 }
 
-export type IRInstruction =
-    IRVariableDeclaration |
-    IRMethodDeclaration |
-    IRStructDeclaration |
-    IRForInStatement |
-    IRWhileStatement |
-    IRIfExpression |
-    IRFunctionStatement |
-    IRCallExpression |
-    IRParameterDeclaration |
-    IRType |
-    IRContinueStatement |
-    IRBreakStatement |
-    IRReturnStatement |
-    IRIntLiteral |
-    IRFloatLiteral |
-    IRStringLiteral |
-    IRBoolLiteral |
-    IRIdentifier |
-    IRAssignment |
-    IREnumDeclaration |
-    IREnumVariant |
-    IRMatchCase |
-    IRMatchExpression;
+export interface IRNode {
+    kind: string;
+}
+
+///////////////////////////////
+///////////////////////////////
+///// Types
+///////////////////////////////
+///////////////////////////////
+
+export type IRType =
+    IRValueType |
+    IRMultiValueType |
+    IRFunctionType;
+
+export interface IRValueType extends IRTypeBase {
+    kind: "value";
+    binaryenType: number;
+    mutable: boolean;
+}
+
+export interface IRMultiValueType extends IRTypeBase {
+    kind: "multi-value";
+    binaryenType: number[];
+    mutable: boolean;
+}
+
+export interface IRFunctionType extends IRTypeBase {
+    kind: "function";
+    parameters: number[];
+    locals: number[];
+    returnType: IRValueType | IRMultiValueType; // More possible later.
+    mutable: boolean;
+}
+
+export interface IRTypeBase {
+    kind: string;
+}

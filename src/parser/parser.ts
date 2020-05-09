@@ -1,7 +1,7 @@
 import { Token, tokenize } from "../lexer";
 import {
     Instruction, VariableDeclaration, TypeArgument, MethodDeclaration, ParameterDeclaration,
-    ReturnStatement, Assignment, EnumDeclaration, EnumVariant, MatchCase, Identifier, AST
+    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST
 } from "./definitions";
 import { isInTuple } from "../helpers";
 
@@ -500,8 +500,8 @@ function parseEnumDeclaration(tokens: Token[], flags: string[]): EnumDeclaration
     }
 }
 
-function parseEnumVariants(tokens: Token[], parentEnum: string): EnumVariant[] {
-    const variants: EnumVariant[] = [];
+function parseEnumVariants(tokens: Token[], parentEnum: string): EnumVariantDeclaration[] {
+    const variants: EnumVariantDeclaration[] = [];
 
     while (tokens[0]) {
         const token = tokens[0];

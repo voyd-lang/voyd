@@ -26,10 +26,10 @@ export interface EnumDeclaration extends ASTNode {
     label: string;
     typeParameters: TypeParameterDeclaration[];
     flags: string[];
-    variants: EnumVariant[];
+    variants: EnumVariantDeclaration[];
 }
 
-export interface EnumVariant {
+export interface EnumVariantDeclaration {
     kind: "enum-variant";
     label: string;
     parentEnum: string;
@@ -185,7 +185,7 @@ export type Instruction =
     Identifier |
     Assignment |
     EnumDeclaration |
-    EnumVariant |
+    EnumVariantDeclaration |
     MatchCase |
     MatchExpression |
     BinaryExpression;
