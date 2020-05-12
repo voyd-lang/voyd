@@ -85,7 +85,7 @@ function parseKeywordStatement(tokens: Token[]): Instruction {
         return parseVariableDeclaration(tokens, flags);
     }
 
-    if (flags.includes("def")) {
+    if (flags.includes("fn")) {
         return parseMethodDeclaration(tokens, flags);
     }
 
@@ -127,7 +127,7 @@ function parseReturnStatement(tokens: Token[]): ReturnStatement {
     }
 }
 
-/** Parse a method, beginning after def */
+/** Parse a method, beginning after fn */
 function parseMethodDeclaration(tokens: Token[], flags: string[]): MethodDeclaration {
     const identifierToken = tokens.shift();
     if (!identifierToken || identifierToken.type !== "identifier") {
@@ -143,12 +143,20 @@ function parseMethodDeclaration(tokens: Token[], flags: string[]): MethodDeclara
         returnType = parseTypeArgument(tokens);
     }
 
-    if (tokens[0].type !== "{") {
+    let body: AST = [];
+    if (tokens[0].type === "{") {
+        tokens.shift();
+        body = parseTokens(tokens);
+    } else if (tokens[0].type === "=" && tokens[1].type === "{") {
+        tokens.shift();
+        tokens.shift();
+        body = parseTokens(tokens);
+    } else if (tokens[0].type === "=") {
+        tokens.shift();
+        body.push(parseExpression(tokens));
+    } else {
         throw new Error(`Unexpected token in method declaration: ${tokens[0].type}`);
     }
-    tokens.shift();
-
-    const body = parseTokens(tokens);
 
     return {
         kind: "method-declaration",
@@ -258,7 +266,7 @@ function parseVariableDeclaration(tokens: Token[], flags: string[]): VariableDec
 
     return {
         kind: "variable-declaration",
-        identifierLabel: labelToken.value, flags, type, initializer
+        label: labelToken.value, flags, type, initializer
     };
 }
 

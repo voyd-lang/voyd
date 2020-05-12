@@ -5,7 +5,7 @@ export interface ASTNode {
 
 export interface VariableDeclaration extends ASTNode {
     kind: "variable-declaration"
-    identifierLabel: string;
+    label: string;
     flags: string[];
     type?: TypeArgument;
     initializer?: Instruction;

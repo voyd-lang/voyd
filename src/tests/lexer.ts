@@ -47,7 +47,7 @@ describe("Lexer", function() {
 });
 
 const semiComplexCodeSnippet = `
-    def fib(n: i32) -> i32 {
+    fn fib(n: i32) -> i32 {
         if n < 2 { return n }
         fib(n - 2) + fib(n - 1)
     }
@@ -57,7 +57,7 @@ const semiComplexCodeSnippet = `
 
 const correctTokensOfSemiComplexCodeSnippet = [
     { type: '\n', value: '\n' },
-    { type: 'keyword', value: 'def' },
+    { type: 'keyword', value: 'fn' },
     { type: 'identifier', value: 'fib' },
     { type: '(', value: '(' },
     { type: 'identifier', value: 'n' },

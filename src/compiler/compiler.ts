@@ -233,7 +233,7 @@ function compileVariableDeclaration({
     instruction: VariableDeclaration, vals: ValueCollection, mod: binaryen.Module, block: number[],
     context?: "global" | "method"
 }) {
-    const id = instruction.labels[0];
+    const id = instruction.label
     const type = instruction.type ?
         getTypeFromString(instruction.type.label) :
         inferType(instruction.initializer!, vals);

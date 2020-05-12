@@ -13,6 +13,12 @@ describe("Parser", function() {
     it("should parse a basic match expression", function() {
         assert.deepStrictEqual(parse(basicMatchExpression), correctBasicMatchExpressionAST);
     });
+
+    it("should parse the different method syntaxes", function() {
+        assert.deepStrictEqual(parse(methodSyntax1), correctMethodSyntax1AST);
+        assert.deepStrictEqual(parse(methodSyntax2), correctMethodSyntax2AST);
+        assert.deepStrictEqual(parse(methodSyntax3), correctMethodSyntax3AST);
+    });
 });
 
 const enumSnippet = `
@@ -57,7 +63,7 @@ const correctEnumAst: AST = [
 ];
 
 const basicCodeSnippet = `
-    def fib(n: i32) -> i32 {
+    fn fib(n: i32) -> i32 {
         if n < 2 { return n }
         fib(n - 2) + fib(n - 1)
     }
@@ -132,7 +138,7 @@ const correctCodeSnippetAST: AST = [
             }
         ],
         typeParameters: [],
-        flags: ['def']
+        flags: ['fn']
     },
     {
         kind: 'call-expression',
@@ -189,5 +195,215 @@ const correctBasicMatchExpressionAST: AST = [
             }
         ],
         flags: []
+    }
+];
+
+const methodSyntax1 = `
+    fn add(a: i32, b: i32) = a + b
+    fn sub(a: i32, b: i32) -> i32 = a - b
+`
+
+const methodSyntax2 = `
+    fn add(a: i32, b: i32) = { a + b }
+    fn sub(a: i32, b: i32) -> i32 = { a - b }
+`
+
+const methodSyntax3 = `
+    fn add(a: i32, b: i32) { a + b }
+    fn sub(a: i32, b: i32) -> i32 { a - b }
+`
+
+const correctMethodSyntax1AST = [
+    {
+        kind: 'method-declaration',
+        label: 'add',
+        parameters: [
+            {
+                kind: 'parameter-declaration',
+                label: 'a',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            },
+            {
+                kind: 'parameter-declaration',
+                label: 'b',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            }
+        ],
+        returnType: undefined,
+        body: [
+            {
+                kind: 'binary-expression',
+                calleeLabel: '+',
+                arguments: [
+                    { kind: 'identifier', label: 'a' },
+                    { kind: 'identifier', label: 'b' }
+                ]
+            }
+        ],
+        typeParameters: [],
+        flags: ['fn']
+    },
+    {
+        kind: 'method-declaration',
+        label: 'sub',
+        parameters: [
+            {
+                kind: 'parameter-declaration',
+                label: 'a',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            },
+            {
+                kind: 'parameter-declaration',
+                label: 'b',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            }
+        ],
+        returnType: { kind: 'type-argument', label: 'i32', flags: [] },
+        body: [
+            {
+                kind: 'binary-expression',
+                calleeLabel: '-',
+                arguments: [
+                    { kind: 'identifier', label: 'a' },
+                    { kind: 'identifier', label: 'b' }
+                ]
+            }
+        ],
+        typeParameters: [],
+        flags: ['fn']
+    }
+];
+
+const correctMethodSyntax2AST = [
+    {
+        kind: 'method-declaration',
+        label: 'add',
+        parameters: [
+            {
+                kind: 'parameter-declaration',
+                label: 'a',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            },
+            {
+                kind: 'parameter-declaration',
+                label: 'b',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            }
+        ],
+        returnType: undefined,
+        body: [
+            {
+                kind: 'binary-expression',
+                calleeLabel: '+',
+                arguments: [
+                    { kind: 'identifier', label: 'a' },
+                    { kind: 'identifier', label: 'b' }
+                ]
+            }
+        ],
+        typeParameters: [],
+        flags: ['fn']
+    },
+    {
+        kind: 'method-declaration',
+        label: 'sub',
+        parameters: [
+            {
+                kind: 'parameter-declaration',
+                label: 'a',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            },
+            {
+                kind: 'parameter-declaration',
+                label: 'b',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            }
+        ],
+        returnType: { kind: 'type-argument', label: 'i32', flags: [] },
+        body: [
+            {
+                kind: 'binary-expression',
+                calleeLabel: '-',
+                arguments: [
+                    { kind: 'identifier', label: 'a' },
+                    { kind: 'identifier', label: 'b' }
+                ]
+            }
+        ],
+        typeParameters: [],
+        flags: ['fn']
+    }
+];
+
+const correctMethodSyntax3AST = [
+    {
+        kind: 'method-declaration',
+        label: 'add',
+        parameters: [
+            {
+                kind: 'parameter-declaration',
+                label: 'a',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            },
+            {
+                kind: 'parameter-declaration',
+                label: 'b',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            }
+        ],
+        returnType: undefined,
+        body: [
+            {
+                kind: 'binary-expression',
+                calleeLabel: '+',
+                arguments: [
+                    { kind: 'identifier', label: 'a' },
+                    { kind: 'identifier', label: 'b' }
+                ]
+            }
+        ],
+        typeParameters: [],
+        flags: ['fn']
+    },
+    {
+        kind: 'method-declaration',
+        label: 'sub',
+        parameters: [
+            {
+                kind: 'parameter-declaration',
+                label: 'a',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            },
+            {
+                kind: 'parameter-declaration',
+                label: 'b',
+                type: { kind: 'type-argument', label: 'i32', flags: [] },
+                flags: []
+            }
+        ],
+        returnType: { kind: 'type-argument', label: 'i32', flags: [] },
+        body: [
+            {
+                kind: 'binary-expression',
+                calleeLabel: '-',
+                arguments: [
+                    { kind: 'identifier', label: 'a' },
+                    { kind: 'identifier', label: 'b' }
+                ]
+            }
+        ],
+        typeParameters: [],
+        flags: ['fn']
     }
 ];
