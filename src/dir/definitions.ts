@@ -10,9 +10,9 @@ export interface IRModule extends IRNode {
     exports: IRNamespace;
 
     /** List of all the function ids */
-    functions: IRFunctions;
+    functions: Set<string>;
 
-    globals: IRGlobals;
+    globals: Set<string>;
 
     /** All user defined types  */
     types: IRTypes;
@@ -20,7 +20,7 @@ export interface IRModule extends IRNode {
 
 export interface IRIdentifiers {
     /** Where key is the unique id of the identifier, and value is the key of the type */
-    [id: string]: IRIdentifier;
+    [id: string]: IREntity;
 }
 
 export interface IRTypes {
@@ -29,24 +29,21 @@ export interface IRTypes {
 }
 
 export interface IRFunctions {
-    [id: string]: IRFunctionDef;
+    [id: string]: string;
 }
 
 export interface IRGlobals {
-    [id: string]: IRGlobalDef;
+    [id: string]: string;
 }
 
 ///////////////////////////////
 ///////////////////////////////
-///// IRIdentifier
+///// IREntities
 ///////////////////////////////
 ///////////////////////////////
 
-// TODO: Do we remove these? Make functions their own module level category. Do namespace error
-// checking on the dir generation side? Make identifiers only point to types?
-
-
-export type IRIdentifier =
+/** Any item that can be referenced by an identifier */
+export type IREntity =
     IRVariableDef |
     IRFunctionDef |
     IRStructDef |
@@ -65,10 +62,13 @@ export interface IRDefinitionBase {
 }
 
 export interface IRVariableDef extends IRDefinitionBase {
-    kind: "value";
+    kind: "variable";
 
     /** Where type is the ID of the type definition */
     type: string;
+    entity: IREntity;
+    mutable: boolean;
+    global?: boolean;
 }
 
 export interface IRTypeDef extends IRDefinitionBase {
@@ -238,7 +238,9 @@ export interface IRNode {
 ///////////////////////////////
 ///////////////////////////////
 
-/** Todo add support for other wasm types I.E. reftypes, struct, array, etc */
+/**
+ * A WASM Type header
+ */
 export type IRType =
     IRValueType |
     IRMultiValueType |

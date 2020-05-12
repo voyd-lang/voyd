@@ -284,3 +284,24 @@ fn add(a: i32, b: i32) -> i32 {
 
 }
 ```
+
+# Type alias
+
+Types can be aliased / defined using using the syntax: `type Identifier = Type`.
+
+Examples:
+```
+type Int = i32
+type MyTuple = (i32, String, f32)
+type MyAnonStruct = [a: i32, b: i32]
+
+type MyNativeMultiValType = wasm_multi_val_type!(i32, i32, i32)
+type MyOtherCustomType = wasm_val_type!(i32)
+
+// Types can have namespaces, impls, and conform to traits
+impl MyOtherCustomType {
+    fn +(l: i32, r: i32) = unsafe {
+        wasm_i32_add()
+    }
+}
+```
