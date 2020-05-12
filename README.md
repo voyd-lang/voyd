@@ -2,7 +2,7 @@
 
 An experimental language targeting WebAssembly.
 
-```
+```rust
 fn fib(n: i32) =
     if n < 2 {
         n
