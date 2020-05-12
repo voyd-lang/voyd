@@ -3,12 +3,19 @@
 An experimental language targeting WebAssembly.
 
 ```
-def fib(n: i32) -> i32 {
-    if n < 2 { return n }
-    fib(n - 2) + fib(n - 1)
-}
+fn fib(n: i32) =
+    if n < 2 {
+        n
+    } else {
+        fib(n - 2) + fib(n - 1)
+    }
 
 let count = 10
+
+// Supports UFCS
+count.fib().print()
+
+// And standard
 print(fib(count))
 ```
 
