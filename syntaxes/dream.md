@@ -56,6 +56,8 @@ match x {
 # Methods
 
 ```
+
+fn add(a: Int, b: Int): Int => a + b
 def add(a: Int, b: Int) -> Int {
     // Result of last expression is returned
     a + b
@@ -96,7 +98,7 @@ let myFunc = {
 }
 
 // Functions can define parameters between || characters.
-let add = {| a: Int, b: Int -> Int |
+let add = {| a: Int, b: Int |: Int
     a + b
 }
 
@@ -175,6 +177,17 @@ const target = Target [x: 5, y: 3, z: 7]
 target.shift [x: 5]
 ```
 
+## Static Methods
+
+Static methods can be added to a struct, or any other type, by augmenting their namespace.
+```
+namespace Target {
+    fn from(tuple: (Int, Int, Int))
+}
+```
+
+Static constants can be added this way too.
+
 # Enums
 
 ```
@@ -187,9 +200,9 @@ enum Friend {
 var friend = Friend.eric
 
 match friend {
-    ::eric { },
-    ::angie { },
-    ::carter
+    .eric { },
+    .angie { },
+    .carter { }
 }
 
 // Enum identifier can be omitted if it can be reasonable inferred.
@@ -258,3 +271,16 @@ add::<i32>()
 
 Dream supports macros that adhere to "Macro By Example". They work in a similar manner to
 [rust macros](https://doc.rust-lang.org/1.7.0/book/macros.html).
+
+# Compiler directives
+
+Compiler directives are each prefixed with a `#` and can have additional arguments supplied
+in the form of an anonymous struct
+
+```
+#inline
+#deprecated[since: "3.0"]
+fn add(a: i32, b: i32) -> i32 {
+
+}
+```
