@@ -1,31 +1,32 @@
-import { Instruction } from "../parser";
 
-export type IR = IRInstruction;
-
-export interface IRModule extends IRNode {
+export interface IR {
     /** Stores all identifiers in the entire WASM module */
-    identifiers: IRIdentifiers;
+    entities: IREntities;
+
+    /** Key is the label, value is a list of entity ID's where the entity has that label */
+    entitiesByLabel: { [label: string]: Set<string> };
+
+    /** Top level namespace */
+    namespace: IRNamespace;
 
     /** All of the items the module exports */
-    exports: IRNamespace;
+    exports: Set<string>;
 
     /** List of all the function ids */
     functions: Set<string>;
 
-    globals: Set<string>;
-
     /** All user defined types  */
-    types: IRTypes;
+    wasmTypes: WASMTypes;
 }
 
-export interface IRIdentifiers {
+export interface IREntities {
     /** Where key is the unique id of the identifier, and value is the key of the type */
     [id: string]: IREntity;
 }
 
-export interface IRTypes {
+export interface WASMTypes {
     /** Where key is the unique id of the user defined type, value is the type */
-    [id: string]: IRType;
+    [id: string]: WASMType;
 }
 
 export interface IRFunctions {
@@ -45,72 +46,83 @@ export interface IRGlobals {
 /** Any item that can be referenced by an identifier */
 export type IREntity =
     IRVariableDef |
-    IRFunctionDef |
+    IRMethodDef |
     IRStructDef |
     IRStructFieldDef |
     IREnumDef |
-    IREnumVariantDef |
-    IRDefinitionBase;
+    IRTypeDef |
+    IREnumVariantDef;
 
 
 /** A declared definition */
-export interface IRDefinitionBase {
+export interface IREntityDefinitionBase {
     kind: string;
     id: string;
     label: string;
     flags: string[];
-}
 
-export interface IRVariableDef extends IRDefinitionBase {
-    kind: "variable";
+    /** The entity represents a type */
+    isType?: boolean;
 
     /** Where type is the ID of the type definition */
+    wasmType: string;
+}
+
+export interface IRVariableDef extends IREntityDefinitionBase {
+    kind: "variable";
+
+    /** Entity ID of the struct, enum, or type def that defines this variable */
     type: string;
-    entity: IREntity;
     mutable: boolean;
     global?: boolean;
 }
 
-export interface IRTypeDef extends IRDefinitionBase {
+export interface IRTypeDef extends IREntityDefinitionBase {
     kind: "type";
     namespace: IRNamespace;
-
-    /** Where type is the ID of the type definition */
-    type: string;
+    isType: true;
 }
 
-export interface IRFunctionDef extends IRDefinitionBase {
-    kind: "function";
-    body: Instruction[];
+export interface IRMethodDef extends IREntityDefinitionBase {
+    kind: "method";
+    body: IRInstruction[];
     namespace: IRNamespace;
 
-    /** Where type is the ID of the type definition */
-    type: string;
+    /** ID of the entity that represents the parameter in order  */
+    parameterTypes: string[];
+
+    /** ID of the entity that represents the return type */
+    returnType: string;
 }
 
-export interface IRStructDef extends IRDefinitionBase {
+export interface IRStructDef extends IREntityDefinitionBase {
     kind: "struct";
     fields: Set<IRStructFieldDef>;
     namespace: IRNamespace;
-
-    /** Where type is the ID of the type definition */
-    type: string;
+    isType: true;
 }
 
-export interface IRStructFieldDef extends IRDefinitionBase {
+export interface IRStructFieldDef extends IREntityDefinitionBase {
     kind: "struct-field";
+
+    /** Entity ID of the field's parent struct */
+    parent: string;
     initializer?: IRInstruction;
 }
 
-export interface IREnumDef extends IRDefinitionBase {
+export interface IREnumDef extends IREntityDefinitionBase {
     kind: "enum";
     namespace: IRNamespace;
+    isType: true;
 }
 
-export interface IREnumVariantDef extends IRDefinitionBase {
+export interface IREnumVariantDef extends IREntityDefinitionBase {
     kind: "enum-variant";
     value: number;
+    /** Entity id of the variant's parent enum */
+    parent: string;
     associatedType?: {
+        /** Entity ID that defines the type, (NOT WASM Type) */
         type: string;
         /** ID of the init function for the type */
         initializer: string;
@@ -134,7 +146,7 @@ export type IRInstruction =
     IRFloatLiteral |
     IRStringLiteral |
     IRBoolLiteral |
-    IRIdentifierCall |
+    IRIdentifier |
     IRAssignment |
     IRMatchCase |
     IRMatchExpression;
@@ -142,6 +154,7 @@ export type IRInstruction =
 export interface IRWhileStatement extends IRNode {
     kind: "while-statement";
     condition: IRInstruction;
+    namespace: IRNamespace;
     body: IRInstruction[];
 }
 
@@ -158,6 +171,7 @@ export interface IRIfExpression extends IRNode {
     returnType: string;
     condition: IRInstruction;
     body: IRInstruction[];
+    namespace: IRNamespace;
     elseBody?: IRInstruction[];
     elseIfBodies?: { expression: IRNode, body: IRInstruction[] }[];
 }
@@ -211,12 +225,11 @@ export interface IRBoolLiteral extends IRNode {
     value: boolean;
 }
 
-/** This instruction should return the value of the identifier, it is not a function call. */
-export interface IRIdentifierCall extends IRNode {
+/** This instruction should return the value of the identifier. */
+export interface IRIdentifier extends IRNode {
     kind: "identifier";
     id: string;
     label: string;
-    type: IRType;
 }
 
 export interface IRAssignment extends IRNode {
@@ -241,34 +254,47 @@ export interface IRNode {
 /**
  * A WASM Type header
  */
-export type IRType =
-    IRValueType |
-    IRMultiValueType |
-    IRFunctionType;
+export type WASMType =
+    IRValueWASMType |
+    IRMultiValueWASMType |
+    IRFunctionWASMType;
 
-export interface IRValueType extends IRTypeBase {
+export interface IRValueWASMType extends WASMTypeBase {
     kind: "value";
     binaryenType: number;
     mutable: boolean;
 }
 
-export interface IRMultiValueType extends IRTypeBase {
+export interface IRMultiValueWASMType extends WASMTypeBase {
     kind: "multi-value";
     binaryenType: number[];
     mutable: boolean;
 }
 
-export interface IRFunctionType extends IRTypeBase {
+export interface IRFunctionWASMType extends WASMTypeBase {
     kind: "function";
-    parameters: IRType[];
-    locals: IRType[];
-    returnType: IRType;
+    parameters: WASMType[];
+    locals: WASMType[];
+    returnType: WASMType;
 }
 
-export interface IRTypeBase {
+export interface WASMTypeBase {
     id: string;
     kind: string;
 }
 
 /** A set of identifier ids accessible to the namespace owner */
-export type IRNamespace = Set<string>;
+export interface IRNamespace {
+    /** Entities by label */
+    entities: Set<string>;
+
+    /** Labels already taken, except by methods */
+    labels: Set<string>;
+};
+
+export interface IRBlockContext {
+    ir: IR,
+    namespace: IRNamespace,
+    entities: IREntity[],
+    body: IRInstruction[]
+}
