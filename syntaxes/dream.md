@@ -177,6 +177,26 @@ const target = Target [x: 5, y: 3, z: 7]
 target.shift [x: 5]
 ```
 
+## Computed Properties
+
+```
+impl Target {
+    // Getters are just functions that have no parameters.
+    // Getters are always "pure" and cannot have side effects.
+    pub fn distanceFromOrigin =
+        sqrt(x.squared + y.squared + z.squared)
+
+    // Define a as an alias for x
+    pub fn a = x
+
+    // Setters are defined as methods that take a share the same name as a getter appended with
+    // "_=", the same syntax as Scala.
+    pub fn a_=(v: Int) {
+        x = v
+    }
+}
+```
+
 ## Static Methods
 
 Static methods can be added to a struct, or any other type, by augmenting their namespace.
