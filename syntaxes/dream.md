@@ -59,11 +59,9 @@ match x {
     1 => print("One"),
     2 => print("two"),
     3 => print("three"),
-    _ {
+    _ => {
         // Match statements must cover every possible case.
         // _ means default. I.E. if no other patterns match, use this one.
-        // Additionally, we are using {} instead of =>. {} can be used for
-        // any case that requires more than one line.
         print("A number")
     }
 }
