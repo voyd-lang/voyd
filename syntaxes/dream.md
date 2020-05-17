@@ -19,7 +19,24 @@ $(1, 2, 3) // Array
 $[x: 3] // Dictionary
 ```
 
+# Blocks
+
+```
+// Basic Block, returns the result of the last expression
+{
+    let x = 5
+    let y = 4
+    x * y
+}
+
+let x = {
+    3 * 5
+}
+print(x) // 15
+```
+
 # Control flow
+
 ```
 if 3 > val {
 
@@ -52,29 +69,45 @@ match x {
 }
 ```
 
-
-# Methods
+# Functions
 
 ```
+// A basic function
+fn add(a: i32, b: i32) -> i32 = a + b
 
-fn add(a: Int, b: Int): Int => a + b
-def add(a: Int, b: Int) -> Int {
-    // Result of last expression is returned
+// In most cases, the return type can be inferred.
+fn add(a: i32, b: i32) = a + b
+
+// Use {} to enclose multi-line functions
+fn add(a: Int, b: Int) -> Int = {
+    // Result of last expression is always returned, though return is still supported.
     a + b
 }
 
+// You can optionally omit the = on multi-line functions
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+// Functions are called using the standard () syntax
+add(1, 2)
+```
+
+## Struct Sugar Syntax
+
+```
 // Structs can be destructed in the method signature.
-def add([x, y]: [x: Int, y: Int]) -> Int {
+fn add([x, y]: [x: Int, y: Int]) -> Int {
     x + y
 }
 
 // This can be shortened further, unlabeled structs are automatically destructed.
-def add([x: Int, y: Int]) -> Int {
+fn add([x: Int, y: Int]) -> Int {
     x + y
 }
 
 // If a struct is the only argument of a method, parenthesis can be omitted.
-def add[x: Int, y: Int] -> Int {
+fn add[x: Int, y: Int] -> Int {
     x + y
 }
 
@@ -83,45 +116,88 @@ add([x: 5, y: 3])
 // If a struct is the only argument or the second argument is a function (more on that later),
 // the parenthesis can be omitted on call as well.
 add[x: 5, y: 3]
-
-// Single expression method
-def sub(a: Int, b: Int) => a - b
 ```
 
-# Functions (Or closures, or lambdas)
+## Pure Functions
 
 ```
-// A function is a set of instructions enclosed by {}
-let myFunc = {
-    print("Hello!")
-    print("What's up?")
+// Pure functions are marked with a "pure" attribute and can only call other pure functions.
+// They also cannot have side effects.
+pure fn mul(a: i32, b: i32) = a * b
+
+pure fn div(a: i32, b: i32) {
+    // This will throw an error, as print has side effects and isn't marked pure.
+    print(a)
+    a / b
+}
+```
+
+## Parameter-less Functions
+
+```
+// Functions can have no parameters.
+fn test = 3 * 2
+
+// Parameter-less functions are called without ().
+test // 3
+
+// Parameter-less functions are always pure,
+var x = 1
+fn bump = x += 1 // ERROR: bump cannot have side-effects.
+```
+
+## Unsafe Functions
+
+```
+// Some functions are marked "unsafe". In dream this means they can call low level wasm functions
+// And have access to  linear memory. Unsafe functions can only be called inside other unsafe
+// functions, or from unsafe blocks.
+unsafe fn readI32FromMem(ptr: i32) -> i32 =
+    wasm_i32_load(0, 2, ptr)
+
+// This function is not considered unsafe as the call to an unsafe function happens in an unsafe
+// block
+fn mul(a: i32, b: i32) -> i32 = unsafe {
+    wasm_i32_mul(a, b)
+}
+```
+
+# Closures
+
+```
+// Closures are essentially anonymous functions with the syntax
+// | ...params: ParamType -> ReturnType | Expr
+let add = |a: i32, b: i32 -> i32| a + b
+
+// Closures can have multiple expressions when wrapped in, or followed by {}
+let sub = {|a: i32, b: i32|
+    print("Subtracting ${a} and ${b})
+    a - b
 }
 
-// Functions can define parameters between || characters.
-let add = {| a: Int, b: Int |: Int
-    a + b
+// Same as sub
+let sub2 = |a: i32, b: i32| {
+    print("Subtracting ${a} and ${b})
+    a - b
 }
 
-// Functions are called with ().
-add(1, 2)
-
-// If a function has only one expression, {} can be omitted. But || are required.
-let sub = |a: Int, b: Int| a - b
+// Closures parameters and return type can be inferred
+let mul: Fn(a: i32, b: i32) -> i32 = |a, b| a * b
 ```
 
 ## Higher Order Functions
 
 ```
 // You can pass functions as parameters to methods or other functions
-def caller(fn: Fn(a, b) -> Int) -> Int {
+fn caller(fn: Fn(a: i32, b: i32) -> i32) -> i32 {
     fn(1, 2)
 }
 
 // All are valid ways of calling the caller method
 caller(add)
 caller({| a, b | a + b })
-caller() { $0 + $1 } // Parameters can be implicitly referenced using $ syntax
-caller { $0 + $1 }
+caller() {|a, b| a + b }
+caller {|a, b| a + b }
 ```
 
 # Structs
@@ -153,22 +229,17 @@ let dot = [x] // Equivalent to [x: x]
 struct Target {
     pub var x, y, z: Int
 
-    pub def offs [x: Int] -> Target =>
+    pub fn offs [x: Int] -> Target =
         // Self can be omitted if the identifier does not conflict with a parameter.
         // Here y and z have self omitted. In addition we are using struct shorthand for
         // y and z
         Target [x: self.x + x, y, z] // Equivalent to [x: self.x + x, y: self.y, z: self.z]
-
-
-    // Computed properties are supported
-    pub get distanceFromOrigin =>
-        sqrt(x.squared + y.squared + z.squared)
 }
 
 // Methods can also be added to structs through impl blocks.
 impl Target {
     // If a method modifies it's struct, it must be marked as mut
-    mut def shift [x: Int] -> Void {
+    mut fn shift [x: Int] -> Void {
         self.x += x
     }
 }
@@ -241,16 +312,17 @@ enum ValidID {
 ```
 trait Vehicle {
     // Readonly property
-    var vin: String { get }
+    fn vin -> String;
 
     // Property can be read and set.
-    var color: Color { get set }
+    fn color -> Color;
+    fn color_=(v: Color) -> none;
 
     // Implementors must define this method
-    def start() -> Void
+    fn start() -> Void
 
     // Traits can define default implementations of their method requirements
-    def getInfo() => "Vin: ${vin}, Color: ${color}"
+    fn getInfo() => "Vin: ${vin}, Color: ${color}"
 }
 
 struct Car impl Vehicle {
@@ -258,7 +330,8 @@ struct Car impl Vehicle {
     pub let vin: String
     pub var color: String
 
-    def start() => started = true
+    fn start() =
+        started = true
 }
 
 let car = Car [vin: "12fda32213", color: "red"]
@@ -270,7 +343,7 @@ car.getInfo()
 
 Generics work much like they do in TypeScript or Swift with essentially the same syntax.
 ```
-def add<T>(a: T, b: T) -> T {
+fn add<T>(a: T, b: T) -> T {
     a + b
 }
 
@@ -282,7 +355,7 @@ struct Target<T> {
 The one exception (for now) is when a generic type parameter needs to be explicitly defined in an
 expression. In such a case, the type parameters must be prefixed with a `:`. For example:
 ```
-def add<T>(a: T, b: T) => a + b
+fn add<T>(a: T, b: T) = a + b
 
 add::<i32>()
 ```
