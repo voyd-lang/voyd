@@ -1,6 +1,11 @@
 import { Instruction, AST, MethodDeclaration, VariableDeclaration, MatchExpression, CallExpression, BinaryExpression } from "../parser";
-import { IR, IRInstruction, IRMethodDef, IRVariableDef, IRNamespace, IREntity, IRMatchCase, IRBlockContext } from "./definitions";
+import { IR, IRInstruction, IREntity, IRMatchCase, IRFunctionWASMType } from "./definitions";
 import uniqid from "uniqid";
+
+export class DIRCompiler {
+    private ir = genEmptyIR();
+
+}
 
 export function dir(ast: AST): IR {
     const ir = genEmptyIR();
@@ -15,30 +20,63 @@ export function dir(ast: AST): IR {
     return ir;
 }
 
-function genMethodIR(method: MethodDeclaration, ir: IR): { method: IRMethodDef, entities: IREntity[] } {
+function genMethodIR(method: MethodDeclaration, ir: IR): { method: IRMethodDef, entities: IREntity[], wasmType: IRFunctionWASMType } {
     const id = uniqid();
     const label = method.label;
     const namespace = genNamespace(ir.namespace);
     const body: IRInstruction[] = [];
     const entities: IREntity[] = [];
-    const parameterTypes: string[] = [];
+    const parameters: IRParameterDef[] = [];
     const ctx: IRBlockContext = {
         ir, namespace, entities, body
     };
 
-    // TODO
     method.parameters.forEach(p => {
-        const type = findEntityIDByLabel(p.label, ctx);
+        const typeID = findEntityIDByLabel(p.label, ctx);
+        const typeEntity = ir.entities[typeID];
+        if (!typeEntity.isType) throw new Error(`${typeEntity.label} is not a type`);
+        const param: IRParameterDef = {
+            kind: "parameter",
+            id: uniqid(),
+            flags: [],
+            label: p.label,
+            type: typeID,
+            isType: false,
+            wasmType: typeEntity.wasmType,
+        }
+        entities.push(param);
+        namespace.entities.add(param.id);
+        namespace.labels.add(param.label);
+        parameters.push(param);
     });
+
+    const { returnType, returnWASMType } = (() => {
+        const typeID = method.returnType ?
+            findEntityIDByLabel(method.returnType.label, ctx) :
+            inferType(method.body[method.body.length - 1], ctx);
+        const typeEntity = ir.entities[typeID];
+        if (!typeEntity.isType) throw new Error(`${typeEntity.label} is not a type`);
+        return { returnType: typeID, returnWASMType: typeEntity.wasmType };
+    })()
 
     body.push(...genBody(method.body, ctx));
 
-    // TODO WASMType
+
+    const wasmType: IRFunctionWASMType = {
+        kind: "function",
+        id: uniqid(),
+        parameters: parameters.map(p => p.wasmType),
+        locals: entities.filter(e => e.kind === "variable").map(e => e.wasmType),
+        returnType: returnWASMType
+    };
+
     return {
-        entities, method: {
+        entities, wasmType, method: {
             kind: "method",
             id, label, flags: method.flags,
-            body, namespace, parameterTypes
+            body, namespace, returnType,
+            parameters: parameters.map(p => p.id),
+            wasmType: wasmType.id
         }
     };
 }
@@ -150,16 +188,17 @@ function findCalleeID(expr: CallExpression | BinaryExpression, ctx: IRBlockConte
 
     for (const entityID of entities.keys()) {
         const entity = ctx.ir.entities[entityID] as IRMethodDef;
-        const signatureMatches = entity.parameterTypes.every((val, index) => {
+        const signatureMatches = entity.parameters.every((val, index) => {
             const argExpr = expr.arguments[index];
             if (!argExpr) return false;
             const typeID = inferType(argExpr, ctx);
+            // TODO: This is wrong, val is the parameter entity ID, not the type ID of the parameter
             return typeID === val;
         });
         if (signatureMatches) return entity.id;
     }
 
-    throw new Error(`No method found for ${expr.calleeLabel}`);
+    throw new Error(`No function found for ${expr.calleeLabel}`);
 }
 
 function genMatchCases(expr: MatchExpression, ctx: IRBlockContext): IRMatchCase[] {
@@ -225,7 +264,7 @@ function inferType(expr: Instruction, ctx: IRBlockContext): string {
 
 /** Need a better name, finds the entity that represents the type of another */
 function findTypeEntityIDOfEntity(entity: IREntity): string {
-    if (entity.kind === "variable") return entity.type;
+    if (entity.kind === "variable" || entity.kind === "parameter") return entity.type;
 
     if (entity.isType) {
         throw new Error("Cannot assign variables to a type yet");
