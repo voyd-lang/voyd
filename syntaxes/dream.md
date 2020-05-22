@@ -396,3 +396,18 @@ impl MyOtherCustomType {
     }
 }
 ```
+
+# Uniform Function Call Syntax.
+
+Dream supports UFCS. https://en.wikipedia.org/wiki/Uniform_Function_Call_Syntax
+
+Examples
+```
+fn add(a: i32, b: i32) -> i32 = a + b
+
+1.add(2)
+
+fn double(a: i32) -> i32 = a * 2
+
+add(2, 4).double()
+```
