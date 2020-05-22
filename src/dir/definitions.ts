@@ -4,11 +4,6 @@ export interface IREntities {
     [id: string]: IREntity;
 }
 
-export interface WASMTypes {
-    /** Where key is the unique id of the user defined type, value is the type */
-    [id: string]: WASMType;
-}
-
 export interface IRFunctions {
     [id: string]: string;
 }
@@ -29,6 +24,11 @@ export type IREntity =
     IRTypeEntity |
     IRValueEntity;
 
+export type IREntityWithoutID =
+    Omit<IRFunctionEntity, "id"> |
+    Omit<IRTypeEntity, "id"> |
+    Omit<IRValueEntity, "id">;
+
 export interface IRFunctionEntity extends IREntityBase {
     kind: "function";
 
@@ -40,6 +40,8 @@ export interface IRFunctionEntity extends IREntityBase {
 
     /** Entity ID */
     returnType: string;
+
+    body: IRInstruction[];
 }
 
 /** Represents types such as structs, enums, and type aliases */
@@ -63,8 +65,7 @@ export interface IREntityBase {
     /** Namespace ID */
     namespace: string;
 
-    /** Where type is the ID of the type definition */
-    wasmType: string;
+    wasmType: WASMType;
 }
 
 
@@ -88,7 +89,12 @@ export type IRInstruction =
     IRIdentifier |
     IRAssignment |
     IRMatchCase |
-    IRMatchExpression;
+    IRMatchExpression |
+    IRNoOP;
+
+export interface IRNoOP extends IRNode {
+    kind: "no-op";
+}
 
 export interface IRWhileStatement extends IRNode {
     kind: "while-statement";
@@ -167,14 +173,14 @@ export interface IRBoolLiteral extends IRNode {
 /** This instruction should return the value of the identifier. */
 export interface IRIdentifier extends IRNode {
     kind: "identifier";
-    id: string;
+    identifierEntityID: string;
     label: string;
 }
 
 export interface IRAssignment extends IRNode {
     kind: "assignment";
     /** identifier id */
-    id: string;
+    assigneeEntityID: string;
     /** identifier label */
     label: string;
     expression: IRInstruction;
@@ -200,21 +206,19 @@ export type WASMType =
 
 export interface IRValueWASMType extends WASMTypeBase {
     kind: "value";
-    binaryenType: number;
-    mutable: boolean;
+    binaryenType: WASMType;
 }
 
 export interface IRMultiValueWASMType extends WASMTypeBase {
     kind: "multi-value";
-    binaryenType: number[];
-    mutable: boolean;
+    binaryenType: WASMType[];
 }
 
 export interface IRFunctionWASMType extends WASMTypeBase {
     kind: "function";
-    parameters: number[];
-    locals: number[];
-    returnType: number;
+    parameters: WASMType[];
+    locals: WASMType[];
+    returnType: WASMType;
 }
 
 export interface WASMTypeBase {

@@ -1,4 +1,4 @@
-import { IREntities, IREntity, IRFunctionEntity } from "./definitions";
+import { IREntities, IREntity, IRFunctionEntity, IREntityWithoutID } from "./definitions";
 import uniqid from "uniqid";
 
 export class IR {
@@ -15,7 +15,7 @@ export class IR {
     private readonly namespaces: { [id: string]: string[] } = {};
 
     exportEntity(id: string) {
-
+        this.exports.push(id);
     }
 
     addEntityToSTD(id: string) {
@@ -50,12 +50,11 @@ export class IR {
             .filter(entity => entity.label === label && entity.kind === "function") as IRFunctionEntity[];
     }
 
-
     /**
      * Returns the ID of the entity.
      * If namespace is supplied, the entity will be added to that namespace
      */
-    addEntity(entity: Omit<IREntity, "id">, namespaceID?: string): string {
+    addEntity(entity: IREntityWithoutID, namespaceID?: string): string {
         const id = uniqid();
         const fullEntity = { id, ...entity } as IREntity;
         this.entities[id] = fullEntity;
@@ -68,6 +67,8 @@ export class IR {
 
         return id;
     }
+
+    addFunctionEntity()
 
     /** Returns a new namespace id */
     newNamespace(parent?: string): string {
