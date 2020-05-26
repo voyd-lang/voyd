@@ -14,10 +14,10 @@ describe("Parser", function() {
         assert.deepStrictEqual(parse(basicMatchExpression), correctBasicMatchExpressionAST);
     });
 
-    it("should parse the different method syntaxes", function() {
-        assert.deepStrictEqual(parse(methodSyntax1), correctMethodSyntax1AST);
-        assert.deepStrictEqual(parse(methodSyntax2), correctMethodSyntax2AST);
-        assert.deepStrictEqual(parse(methodSyntax3), correctMethodSyntax3AST);
+    it("should parse the different function syntaxes", function() {
+        assert.deepStrictEqual(parse(fnSyntax1), correctFnSyntax1AST);
+        assert.deepStrictEqual(parse(fnSyntax2), correctFnSyntax2AST);
+        assert.deepStrictEqual(parse(fnSyntax3), correctFnSyntax3AST);
     });
 });
 
@@ -73,7 +73,7 @@ const basicCodeSnippet = `
 
 const correctCodeSnippetAST: AST = [
     {
-        kind: 'method-declaration',
+        kind: 'function-declaration',
         label: 'fib',
         parameters: [
             {
@@ -198,24 +198,24 @@ const correctBasicMatchExpressionAST: AST = [
     }
 ];
 
-const methodSyntax1 = `
+const fnSyntax1 = `
     fn add(a: i32, b: i32) = a + b
     fn sub(a: i32, b: i32) -> i32 = a - b
 `
 
-const methodSyntax2 = `
+const fnSyntax2 = `
     fn add(a: i32, b: i32) = { a + b }
     fn sub(a: i32, b: i32) -> i32 = { a - b }
 `
 
-const methodSyntax3 = `
+const fnSyntax3 = `
     fn add(a: i32, b: i32) { a + b }
     fn sub(a: i32, b: i32) -> i32 { a - b }
 `
 
-const correctMethodSyntax1AST = [
+const correctFnSyntax1AST = [
     {
-        kind: 'method-declaration',
+        kind: 'function-declaration',
         label: 'add',
         parameters: [
             {
@@ -246,7 +246,7 @@ const correctMethodSyntax1AST = [
         flags: ['fn']
     },
     {
-        kind: 'method-declaration',
+        kind: 'function-declaration',
         label: 'sub',
         parameters: [
             {
@@ -278,9 +278,9 @@ const correctMethodSyntax1AST = [
     }
 ];
 
-const correctMethodSyntax2AST = [
+const correctFnSyntax2AST = [
     {
-        kind: 'method-declaration',
+        kind: 'function-declaration',
         label: 'add',
         parameters: [
             {
@@ -311,7 +311,7 @@ const correctMethodSyntax2AST = [
         flags: ['fn']
     },
     {
-        kind: 'method-declaration',
+        kind: 'function-declaration',
         label: 'sub',
         parameters: [
             {
@@ -343,9 +343,9 @@ const correctMethodSyntax2AST = [
     }
 ];
 
-const correctMethodSyntax3AST = [
+const correctFnSyntax3AST = [
     {
-        kind: 'method-declaration',
+        kind: 'function-declaration',
         label: 'add',
         parameters: [
             {
@@ -376,7 +376,7 @@ const correctMethodSyntax3AST = [
         flags: ['fn']
     },
     {
-        kind: 'method-declaration',
+        kind: 'function-declaration',
         label: 'sub',
         parameters: [
             {

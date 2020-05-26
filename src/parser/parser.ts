@@ -1,6 +1,6 @@
 import { Token, tokenize } from "../lexer";
 import {
-    Instruction, VariableDeclaration, TypeArgument, MethodDeclaration, ParameterDeclaration,
+    Instruction, VariableDeclaration, TypeArgument, FunctionDeclaration, ParameterDeclaration,
     ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST
 } from "./definitions";
 import { isInTuple } from "../helpers";
@@ -86,7 +86,7 @@ function parseKeywordStatement(tokens: Token[]): Instruction {
     }
 
     if (flags.includes("fn")) {
-        return parseMethodDeclaration(tokens, flags);
+        return parseFnDeclaration(tokens, flags);
     }
 
     if (flags.includes("enum")) {
@@ -127,15 +127,15 @@ function parseReturnStatement(tokens: Token[]): ReturnStatement {
     }
 }
 
-/** Parse a method, beginning after fn */
-function parseMethodDeclaration(tokens: Token[], flags: string[]): MethodDeclaration {
+/** Parse a function, beginning after fn */
+function parseFnDeclaration(tokens: Token[], flags: string[]): FunctionDeclaration {
     const identifierToken = tokens.shift();
     if (!identifierToken || identifierToken.type !== "identifier") {
-        throw new Error("Expected identifier after method declaration");
+        throw new Error("Expected identifier after function declaration");
     }
 
     const label = identifierToken.value;
-    const parameters = parseMethodParameters(tokens);
+    const parameters = parseFnParameters(tokens);
 
     let returnType: TypeArgument | undefined;
     if (tokens[0].type === "->") {
@@ -155,11 +155,11 @@ function parseMethodDeclaration(tokens: Token[], flags: string[]): MethodDeclara
         tokens.shift();
         body.push(parseExpression(tokens));
     } else {
-        throw new Error(`Unexpected token in method declaration: ${tokens[0].type}`);
+        throw new Error(`Unexpected token in function declaration: ${tokens[0].type}`);
     }
 
     return {
-        kind: "method-declaration",
+        kind: "function-declaration",
         label,
         parameters,
         returnType,
@@ -169,12 +169,12 @@ function parseMethodDeclaration(tokens: Token[], flags: string[]): MethodDeclara
     }
 }
 
-function parseMethodParameters(tokens: Token[]): ParameterDeclaration[] {
+function parseFnParameters(tokens: Token[]): ParameterDeclaration[] {
     const params: ParameterDeclaration[] = [];
 
     const openingBracket = tokens.shift();
     if (!openingBracket || !isInTuple(openingBracket.type, <const>["("])) {
-        throw new Error("Method definition missing parameters");
+        throw new Error("Function definition missing parameters");
     }
 
     // In the future, we will support "]" as well
@@ -493,7 +493,7 @@ function parseEnumDeclaration(tokens: Token[], flags: string[]): EnumDeclaration
     const label = identifierToken.value;
 
     if (tokens[0].type !== "{") {
-        throw new Error(`Unexpected token in method declaration: ${tokens[0].type}`);
+        throw new Error(`Unexpected token in enum declaration: ${tokens[0].type}`);
     }
     tokens.shift();
 

@@ -3,7 +3,7 @@ import { ValueCollection } from "./values";
 import { MethodValue, LocalValue } from "./definitions";
 import {
     parse, Instruction, CallExpression, ReturnStatement, IfExpression, Assignment,
-    MethodDeclaration, VariableDeclaration, WhileStatement, MatchExpression, BinaryExpression
+    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, BinaryExpression
 } from "../parser";
 import uniqid from "uniqid";
 
@@ -40,7 +40,7 @@ function compileBlock({
             return;
         }
 
-        if (instruction.kind === "method-declaration") {
+        if (instruction.kind === "function-declaration") {
             compileMethodDeclaration(instruction, vals, mod);
             return;
         }
@@ -186,7 +186,7 @@ function compileAssignment(instruction: Assignment, mod: binaryen.Module, vals: 
     block.push(mod.global.set(id, expr));
 }
 
-function compileMethodDeclaration(instruction: MethodDeclaration, vals: ValueCollection, mod: binaryen.Module) {
+function compileMethodDeclaration(instruction: FunctionDeclaration, vals: ValueCollection, mod: binaryen.Module) {
     const id = instruction.label;
     const internalVals = vals.clone();
     const params = instruction.parameters.map((param, index) => {

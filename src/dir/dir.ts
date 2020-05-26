@@ -1,4 +1,4 @@
-import { Instruction, AST, MethodDeclaration, VariableDeclaration, MatchExpression, CallExpression, BinaryExpression } from "../parser";
+import { Instruction, AST, FunctionDeclaration, VariableDeclaration, MatchExpression, CallExpression, BinaryExpression } from "../parser";
 import { IRInstruction, IREntity, IRMatchCase, IRFunctionWASMType, IRFunctionEntity, IRValueEntity, IRTypeEntity } from "./definitions";
 import uniqid from "uniqid";
 import { IR } from "./ir";
@@ -10,7 +10,7 @@ export class DIRCompiler {
 
     compile(ast: AST) {
         for (const instruction of ast) {
-            if (instruction.kind === "method-declaration") {
+            if (instruction.kind === "function-declaration") {
                 const id = this.compileFunction(instruction, this.moduleNamespace);
                 const entity = this.ir.getEntity(id, this.moduleNamespace);
                 console.dir(entity, { depth: 10 });
@@ -20,16 +20,16 @@ export class DIRCompiler {
     }
 
     /** Returns the ID of the function entity */
-    private compileFunction(method: MethodDeclaration, namespace: string): string {
-        const label = method.label;
+    private compileFunction(fn: FunctionDeclaration, namespace: string): string {
+        const label = fn.label;
         const internalNamespace = this.ir.newNamespace(namespace);
         const body: IRInstruction[] = [];
         const locals: string[] = [];
         const parameters: string[] = [];
 
-        // Resolve method parameters.
-        method.parameters.forEach(p => {
-            const typeEntity = this.ir.findEntityByLabel(label, internalNamespace);
+        // Resolve function parameters.
+        fn.parameters.forEach(p => {
+            const typeEntity = this.ir.findEntityByLabel(p.type!.label, internalNamespace);
             if (typeEntity.kind !== "type") throw new Error(`${typeEntity.label} is not a type`);
             const paramID = this.ir.addEntity({
                 kind: "value",
@@ -44,14 +44,14 @@ export class DIRCompiler {
 
         // Resolve return type entity, generate returnWASMType type.
         const { returnType, returnWASMType } = (() => {
-            const typeEntity = method.returnType ? this.ir.findEntityByLabel(method.returnType.label, internalNamespace) :
-                this.inferType(method.body[method.body.length - 1], internalNamespace);
+            const typeEntity = fn.returnType ? this.ir.findEntityByLabel(fn.returnType.label, internalNamespace) :
+                this.inferType(fn.body[fn.body.length - 1], internalNamespace);
             if (typeEntity.kind !== "type") throw new Error(`${typeEntity.label} is not a type`);
             return { returnType: typeEntity.id, returnWASMType: typeEntity.wasmType };
         })()
 
         // Build the function body
-        body.push(...this.compileBlock(method.body, locals, internalNamespace));
+        body.push(...this.compileBlock(fn.body, locals, internalNamespace));
 
         // Generate the WASMType for the function
         const wasmType: IRFunctionWASMType = {
@@ -66,7 +66,7 @@ export class DIRCompiler {
         const id = this.ir.addEntity({
             kind: "function",
             label,
-            flags: method.flags,
+            flags: fn.flags,
             body,
             parameters,
             locals,
@@ -75,7 +75,7 @@ export class DIRCompiler {
             wasmType: wasmType,
         }, namespace);
 
-        if (method.flags.includes("pub")) this.ir.exportEntity(id);
+        if (fn.flags.includes("pub")) this.ir.exportEntity(id);
 
         return id;
     }

@@ -11,8 +11,8 @@ export interface VariableDeclaration extends ASTNode {
     initializer?: Instruction;
 }
 
-export interface MethodDeclaration extends ASTNode {
-    kind: "method-declaration";
+export interface FunctionDeclaration extends ASTNode {
+    kind: "function-declaration";
     label: string;
     parameters: ParameterDeclaration[];
     typeParameters: TypeParameterDeclaration[];
@@ -42,8 +42,7 @@ export interface StructDeclaration extends ASTNode {
     label: string;
     typeParameters: TypeParameterDeclaration[];
     variables: VariableDeclaration[];
-    methods: MethodDeclaration[];
-    initializers: MethodDeclaration[];
+    methods: FunctionDeclaration[];
     flags: string[];
 }
 
@@ -88,8 +87,8 @@ export interface MatchCase extends ASTNode {
     expression: Instruction;
 }
 
-export interface FunctionStatement extends ASTNode {
-    kind: "function-declaration";
+export interface ClosureExpression extends ASTNode {
+    kind: "closure-expression";
     parameters: ParameterDeclaration[];
     returnType: string;
     body: Instruction[];
@@ -165,12 +164,12 @@ export interface Assignment extends ASTNode {
 
 export type Instruction =
     VariableDeclaration |
-    MethodDeclaration |
+    FunctionDeclaration |
     StructDeclaration |
     ForInStatement |
     WhileStatement |
     IfExpression |
-    FunctionStatement |
+    ClosureExpression |
     CallExpression |
     TypeParameterDeclaration |
     ParameterDeclaration |
