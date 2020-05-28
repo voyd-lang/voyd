@@ -19,6 +19,14 @@ describe("Parser", function() {
         assert.deepStrictEqual(parse(fnSyntax2), correctFnSyntax2AST);
         assert.deepStrictEqual(parse(fnSyntax3), correctFnSyntax3AST);
     });
+
+    it("Should parse property access expressions", function() {
+        assert.deepStrictEqual(parse(basicPropertyAccessSnippet), correctBasicPropertyAccessAST);
+    })
+
+    it("Should parse a property accessed function", function() {
+        assert.deepStrictEqual(parse(propertyAccessFnCallSnippet), correctPropertyAccessFnCallAST);
+    })
 });
 
 const enumSnippet = `
@@ -108,7 +116,7 @@ const correctCodeSnippetAST: AST = [
                 arguments: [
                     {
                         kind: 'call-expression',
-                        calleeLabel: 'fib',
+                        callee: { kind: 'identifier', label: 'fib' },
                         arguments: [
                             {
                                 kind: 'binary-expression',
@@ -122,7 +130,7 @@ const correctCodeSnippetAST: AST = [
                     },
                     {
                         kind: 'call-expression',
-                        calleeLabel: 'fib',
+                        callee: { kind: 'identifier', label: 'fib' },
                         arguments: [
                             {
                                 kind: 'binary-expression',
@@ -142,11 +150,11 @@ const correctCodeSnippetAST: AST = [
     },
     {
         kind: 'call-expression',
-        calleeLabel: 'print',
+        callee: { kind: 'identifier', label: 'print' },
         arguments: [
             {
                 kind: 'call-expression',
-                calleeLabel: 'fib',
+                callee: { kind: 'identifier', label: 'fib' },
                 arguments: [{ kind: 'int-literal', value: '10' }]
             }
         ]
@@ -171,7 +179,7 @@ const correctBasicMatchExpressionAST: AST = [
                 case: { kind: 'int-literal', value: '1' },
                 expression: {
                     kind: 'call-expression',
-                    calleeLabel: 'print',
+                    callee: { kind: 'identifier', label: 'print' },
                     arguments: [{ kind: 'int-literal', value: '3' }]
                 }
             },
@@ -180,7 +188,7 @@ const correctBasicMatchExpressionAST: AST = [
                 case: { kind: 'int-literal', value: '2' },
                 expression: {
                     kind: 'call-expression',
-                    calleeLabel: 'print',
+                    callee: { kind: 'identifier', label: 'print' },
                     arguments: [{ kind: 'int-literal', value: '2' }]
                 }
             },
@@ -189,7 +197,7 @@ const correctBasicMatchExpressionAST: AST = [
                 case: { kind: 'int-literal', value: '3' },
                 expression: {
                     kind: 'call-expression',
-                    calleeLabel: 'print',
+                    callee: { kind: 'identifier', label: 'print' },
                     arguments: [{ kind: 'int-literal', value: '1' }]
                 }
             }
@@ -299,11 +307,17 @@ const correctFnSyntax2AST = [
         returnType: undefined,
         body: [
             {
-                kind: 'binary-expression',
-                calleeLabel: '+',
-                arguments: [
-                    { kind: 'identifier', label: 'a' },
-                    { kind: 'identifier', label: 'b' }
+                kind: 'block-expression',
+                flags: [],
+                body: [
+                    {
+                        kind: 'binary-expression',
+                        calleeLabel: '+',
+                        arguments: [
+                            { kind: 'identifier', label: 'a' },
+                            { kind: 'identifier', label: 'b' }
+                        ]
+                    }
                 ]
             }
         ],
@@ -330,11 +344,17 @@ const correctFnSyntax2AST = [
         returnType: { kind: 'type-argument', label: 'i32', flags: [] },
         body: [
             {
-                kind: 'binary-expression',
-                calleeLabel: '-',
-                arguments: [
-                    { kind: 'identifier', label: 'a' },
-                    { kind: 'identifier', label: 'b' }
+                kind: 'block-expression',
+                flags: [],
+                body: [
+                    {
+                        kind: 'binary-expression',
+                        calleeLabel: '-',
+                        arguments: [
+                            { kind: 'identifier', label: 'a' },
+                            { kind: 'identifier', label: 'b' }
+                        ]
+                    }
                 ]
             }
         ],
@@ -405,5 +425,55 @@ const correctFnSyntax3AST = [
         ],
         typeParameters: [],
         flags: ['fn']
+    }
+];
+
+const basicPropertyAccessSnippet = `
+my.property.access.example
+`
+
+const correctBasicPropertyAccessAST = [
+    {
+        kind: 'property-access-expression',
+        arguments: [
+            {
+                kind: 'property-access-expression',
+                arguments: [
+                    {
+                        kind: 'property-access-expression',
+                        arguments: [
+                            { kind: 'identifier', label: 'my' },
+                            { kind: 'identifier', label: 'property' }
+                        ]
+                    },
+                    { kind: 'identifier', label: 'access' }
+                ]
+            },
+            { kind: 'identifier', label: 'example' }
+        ]
+    }
+];
+
+const propertyAccessFnCallSnippet = `
+call.this.func()
+`
+
+const correctPropertyAccessFnCallAST = [
+    {
+        kind: 'call-expression',
+        callee: {
+            kind: 'property-access-expression',
+            arguments: [
+                {
+                    kind: 'property-access-expression',
+                    arguments: [
+                        { kind: 'identifier', label: 'call' },
+                        { kind: 'identifier', label: 'this' }
+                    ]
+                },
+                { kind: 'identifier', label: 'func' }
+            ]
+        },
+        arguments: []
     }
 ];

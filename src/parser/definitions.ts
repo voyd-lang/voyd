@@ -46,6 +46,12 @@ export interface StructDeclaration extends ASTNode {
     flags: string[];
 }
 
+export interface TypeDeclaration extends ASTNode {
+    kind: "type-declaration";
+    label: string;
+    type: TypeArgument;
+}
+
 export interface ForInStatement extends ASTNode {
     kind: "for-in-statement";
     expression: ASTNode;
@@ -64,6 +70,12 @@ export interface BreakStatement extends ASTNode {
 
 export interface ContinueStatement extends ASTNode {
     kind: "continue-statement";
+}
+
+export interface BlockExpression extends ASTNode {
+    kind: "block-expression";
+    flags: string[];
+    body: Instruction[];
 }
 
 export interface IfExpression extends ASTNode {
@@ -94,9 +106,14 @@ export interface ClosureExpression extends ASTNode {
     body: Instruction[];
 }
 
+export interface PropertyAccessExpression extends ASTNode {
+    kind: "property-access-expression";
+    arguments: (PropertyAccessExpression | Identifier)[];
+}
+
 export interface CallExpression extends ASTNode {
     kind: "call-expression";
-    calleeLabel: string;
+    callee: PropertyAccessExpression | Identifier;
     arguments: Instruction[];
 }
 
@@ -187,6 +204,9 @@ export type Instruction =
     EnumVariantDeclaration |
     MatchCase |
     MatchExpression |
-    BinaryExpression;
+    BinaryExpression |
+    TypeDeclaration |
+    BlockExpression |
+    PropertyAccessExpression;
 
 export type AST = Instruction[];

@@ -1,7 +1,7 @@
-import { Token, tokenize } from "../lexer";
+import { Token, tokenize, operators } from "../lexer";
 import {
     Instruction, VariableDeclaration, TypeArgument, FunctionDeclaration, ParameterDeclaration,
-    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST
+    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST, BlockExpression, TypeDeclaration, PropertyAccessExpression
 } from "./definitions";
 import { isInTuple } from "../helpers";
 
@@ -93,6 +93,14 @@ function parseKeywordStatement(tokens: Token[]): Instruction {
         return parseEnumDeclaration(tokens, flags);
     }
 
+    if (flags.includes("type")) {
+        return parseTypeDeclaration(tokens, flags);
+    }
+
+    if (flags.includes("unsafe")) {
+        return parseBlockExpression(tokens, flags);
+    }
+
     const keywordStr = flags.reduce((p, c) => `${p} ${c}`, "");
     throw new Error(`Expected statement after keyword(s):${keywordStr}`);
 }
@@ -147,13 +155,11 @@ function parseFnDeclaration(tokens: Token[], flags: string[]): FunctionDeclarati
     if (tokens[0].type === "{") {
         tokens.shift();
         body = parseTokens(tokens);
-    } else if (tokens[0].type === "=" && tokens[1].type === "{") {
-        tokens.shift();
-        tokens.shift();
-        body = parseTokens(tokens);
     } else if (tokens[0].type === "=") {
         tokens.shift();
         body.push(parseExpression(tokens));
+    } else if (flags.includes("declare")) {
+        // Do nothing
     } else {
         throw new Error(`Unexpected token in function declaration: ${tokens[0].type}`);
     }
@@ -315,6 +321,12 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
             expectOperatorToContinue = false;
         }
 
+        if (token.type === "{") {
+            tokens.shift();
+            output.push({ kind: "block-expression", flags: [], body: parseTokens(tokens) });
+            continue;
+        }
+
         if (token.type === "int") {
             output.push({ kind: "int-literal", value: token.value });
             tokens.shift();
@@ -368,22 +380,20 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
         }
 
         if (token.type === "identifier") {
-            // Handle possible function / method call
-            const next = tokens[1];
-            if (next && isInTuple(next.type, ["(", "["])) {
-                // Remove identifier token
-                tokens.shift();
+            let expr = parseIdentifierExpression(tokens);
 
+            // Handle possible function / method call
+            const next = tokens[0];
+            if (next && isInTuple(next.type, ["(", "["])) {
                 output.push({
                     kind: "call-expression",
-                    calleeLabel: token.value,
+                    callee: expr,
                     arguments: parseArguments(tokens), // T
                 });
                 continue;
             }
 
-            output.push({ kind: "identifier", label: token.value });
-            tokens.shift();
+            output.push(expr);
             continue;
         }
 
@@ -391,10 +401,12 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
             while (operator.length > 0) {
                 const op = operator[operator.length - 1];
                 if (getOperatorPrecedence(op.value) >= getOperatorPrecedence(token.value)) {
+                    const arg2 = output.pop()!;
+                    const arg1 = output.pop()!;
                     output.push({
-                        kind: "call-expression",
+                        kind: "binary-expression",
                         calleeLabel: operator.pop()!.value,
-                        arguments: [output.pop()!, output.pop()!]
+                        arguments: [arg1, arg2]
                     });
                     continue;
                 }
@@ -456,6 +468,53 @@ function getOperatorPrecedence(operator: string): number {
     return precedences[operator];
 }
 
+/**
+ * Starting with an identifier token. Can break down property access expressions.
+ * Simplified form of shunting yard.
+ * @param tokens
+ */
+function parseIdentifierExpression(tokens: Token[]): PropertyAccessExpression | Identifier {
+    const identifiers: (PropertyAccessExpression | Identifier)[] = [];
+    const operators: string[] = [];
+
+    while (tokens[0]) {
+        if (tokens[0].type === "identifier") {
+            identifiers.push({ kind: "identifier", label: tokens.shift()!.value });
+            continue;
+        }
+
+        if (tokens[0].value === ".") {
+            while (operators.length > 0) {
+                operators.pop();
+                const arg2 = identifiers.pop()!;
+                const arg1 = identifiers.pop()!;
+                identifiers.push({
+                    kind: "property-access-expression",
+                    arguments: [arg1, arg2]
+                });
+            }
+
+            operators.push(tokens.shift()!.value);
+            continue;
+        }
+
+        break;
+    }
+
+    let output: PropertyAccessExpression | Identifier = identifiers.pop()!;
+
+    if (operators.length > 0) {
+        const arg2: PropertyAccessExpression | Identifier = output;
+        const arg1 = identifiers.pop()!;
+        output = {
+            kind: "property-access-expression",
+            arguments: [arg1, arg2]
+        };
+    }
+
+    return output;
+}
+
 function parseArguments(tokens: Token[]): Instruction[] {
     const args: Instruction[] = [];
 
@@ -481,6 +540,33 @@ function parseArguments(tokens: Token[]): Instruction[] {
     }
 
     return args;
+}
+
+/** Parse a block beginning with the initial opening curly brace ({) */
+function parseBlockExpression(tokens: Token[], flags: string[]): BlockExpression {
+    return {
+        kind: "block-expression",
+        flags,
+        body: parseTokens(tokens)
+    }
+}
+
+function parseTypeDeclaration(tokens: Token[], flags: string[]): TypeDeclaration {
+    let labelToken = tokens.shift();
+    if (!labelToken || labelToken.type !== "identifier") {
+        throw new Error("Expected identifier for type declaration");
+    }
+
+    return {
+        kind: "type-declaration",
+        label: labelToken.value,
+        // TODO
+        type: {
+            kind: "type-argument",
+            label: "",
+            flags: []
+        }
+    }
 }
 
 /** Parse an enum, beginning after enum */
