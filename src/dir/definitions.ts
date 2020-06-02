@@ -4,14 +4,6 @@ export interface IREntities {
     [id: string]: IREntity;
 }
 
-export interface IRFunctions {
-    [id: string]: string;
-}
-
-export interface IRGlobals {
-    [id: string]: string;
-}
-
 ///////////////////////////////
 ///////////////////////////////
 ///// IREntities

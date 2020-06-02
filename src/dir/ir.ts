@@ -68,7 +68,9 @@ export class IR {
         return id;
     }
 
-    addFunctionEntity()
+    addFunctionEntity() {
+
+    }
 
     /** Returns a new namespace id */
     newNamespace(parent?: string): string {

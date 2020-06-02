@@ -1,7 +1,7 @@
 import { Token, tokenize, operators } from "../lexer";
 import {
     Instruction, VariableDeclaration, TypeArgument, FunctionDeclaration, ParameterDeclaration,
-    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST, BlockExpression, TypeDeclaration, PropertyAccessExpression
+    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST, BlockExpression, TypeDeclaration, PropertyAccessExpression, ImplDeclaration
 } from "./definitions";
 import { isInTuple } from "../helpers";
 
@@ -99,6 +99,10 @@ function parseKeywordStatement(tokens: Token[]): Instruction {
 
     if (flags.includes("unsafe")) {
         return parseBlockExpression(tokens, flags);
+    }
+
+    if (flags.includes("impl")) {
+        return parseImplDeclaration(tokens, flags);
     }
 
     const keywordStr = flags.reduce((p, c) => `${p} ${c}`, "");
@@ -551,6 +555,59 @@ function parseBlockExpression(tokens: Token[], flags: string[]): BlockExpression
     }
 }
 
+function parseImplDeclaration(tokens: Token[], flags: string[]): ImplDeclaration {
+    const { target, trait } = extractTargetAndTraitFromImplSignature(tokens);
+    const functions: FunctionDeclaration[] = [];
+
+    // Get rid of the opening {
+    tokens.shift();
+
+    let next = tokens[0];
+    while (next) {
+        if (next.type === "}") {
+            tokens.shift();
+            break;
+        };
+
+        if (next.type !== "keyword") {
+            console.dir(next);
+            throw new Error("Unexpected token in impl block.");
+        }
+
+        const statement = parseKeywordStatement(tokens);
+
+        // Only functions are allowed in impls for now.
+        if (statement.kind !== "function-declaration") {
+            console.dir(statement);
+            throw new Error("Unexpected statement in impl.")
+        }
+
+        functions.push(statement);
+        next = tokens[0];
+    }
+
+    return {
+        kind: "impl-declaration",
+        flags,
+        trait,
+        target,
+        functions
+    }
+}
+
+function extractTargetAndTraitFromImplSignature(tokens: Token[]) {
+    const label1 = tokens.shift();
+    assertIdentifer(label1);
+    const next = tokens[0];
+    if (next && next.type === "keyword" && next.value === "for") {
+        tokens.shift();
+        const label2 = tokens.shift();
+        assertIdentifer(label2);
+        return { target: label2.value, trait: label1.value };
+    }
+    return { target: label1.value, trait: undefined };
+}
+
 function parseTypeDeclaration(tokens: Token[], flags: string[]): TypeDeclaration {
     let labelToken = tokens.shift();
     if (!labelToken || labelToken.type !== "identifier") {
@@ -560,6 +617,7 @@ function parseTypeDeclaration(tokens: Token[], flags: string[]): TypeDeclaration
     return {
         kind: "type-declaration",
         label: labelToken.value,
+        flags,
         // TODO
         type: {
             kind: "type-argument",
@@ -653,4 +711,10 @@ function parseMatchCases(tokens: Token[]): MatchCase[] {
     }
 
     return variants;
+}
+
+function assertIdentifer(token: any): asserts token is { type: "identifier", value: string } {
+    if (!token || token.type !== "identifier") {
+        throw new Error("Expected identifier");
+    }
 }

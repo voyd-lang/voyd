@@ -46,9 +46,18 @@ export interface StructDeclaration extends ASTNode {
     flags: string[];
 }
 
+export interface ImplDeclaration extends ASTNode {
+    kind: "impl-declaration";
+    target: string;
+    trait?: string;
+    functions: FunctionDeclaration[];
+    flags: string[];
+}
+
 export interface TypeDeclaration extends ASTNode {
     kind: "type-declaration";
     label: string;
+    flags: string[];
     type: TypeArgument;
 }
 
@@ -207,6 +216,7 @@ export type Instruction =
     BinaryExpression |
     TypeDeclaration |
     BlockExpression |
-    PropertyAccessExpression;
+    PropertyAccessExpression |
+    ImplDeclaration;
 
 export type AST = Instruction[];

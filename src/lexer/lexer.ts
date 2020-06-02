@@ -103,6 +103,7 @@ const isKeyword = (str: string) => isInTuple(str, keywords);
 
 const isBool = (str: string) => str === "true" || str === "false";
 
+// TODO: This can probably just be a simple regex.
 const extractWord = (chars: string[]) => {
     let word = "";
     while (chars[0] && (isLetter(chars[0]) || isNum(chars[0]))) {

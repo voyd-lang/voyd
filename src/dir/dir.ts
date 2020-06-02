@@ -7,7 +7,6 @@ export class DIRCompiler {
     private ir = new IR();
     private moduleNamespace = this.ir.newNamespace();
 
-
     compile(ast: AST) {
         for (const instruction of ast) {
             if (instruction.kind === "function-declaration") {
