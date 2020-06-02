@@ -92,7 +92,7 @@ export interface IfExpression extends ASTNode {
     condition: Instruction;
     body: Instruction[];
     elseBody?: Instruction[];
-    elseIfBodies?: { expression: ASTNode, body: Instruction[] }[];
+    elifBodies: { condition: ASTNode, body: Instruction[] }[];
 }
 
 export interface MatchExpression extends ASTNode {

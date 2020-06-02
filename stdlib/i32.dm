@@ -2,48 +2,48 @@
 declare type i32
 
 impl i32 {
-    pure fn +(l: i32, r: i32) = unsafe {
-        i32_add(l, r)
+    pure fn +(r: i32) = unsafe {
+        i32_add(self, r)
     }
 
-    pure fn -(l: i32, r: i32) = unsafe {
-        i32_sub(l, r)
+    pure fn -(r: i32) = unsafe {
+        i32_sub(self, r)
     }
 
-    pure fn /(l: i32, r: i32) = unsafe {
-        i32_div_s(l, r)
+    pure fn /(r: i32) = unsafe {
+        i32_div_s(self, r)
     }
 
-    pure fn *(l: i32, r: i32) = unsafe {
-        i32_mul(l, r)
+    pure fn *(r: i32) = unsafe {
+        i32_mul(self, r)
     }
 
-    pure fn ==(l: i32, r: i32) = unsafe {
-        i32_eq(l, r)
+    pure fn ==(r: i32) = unsafe {
+        i32_eq(self, r)
     }
 
-    pure fn >(l: i32, r: i32) = unsafe {
-        i32_gt_s(l, r)
+    pure fn >(r: i32) = unsafe {
+        i32_gt_s(self, r)
     }
 
-    pure fn <(l: i32, r: i32) = unsafe {
-        i32_lt_s(l, r)
+    pure fn <(r: i32) = unsafe {
+        i32_lt_s(self, r)
     }
 
-    pure fn >=(l: i32, r: i32) = unsafe {
-        i32_ge_s(l, r)
+    pure fn >=(r: i32) = unsafe {
+        i32_ge_s(self, r)
     }
 
-    pure fn <=(l: i32, r: i32) = unsafe {
-        i32_le_s(l, r)
+    pure fn <=(r: i32) = unsafe {
+        i32_le_s(self, r)
     }
 
-    pure fn and(l: i32, r: i32) = unsafe {
-        i32_and(l, r)
+    pure fn and(r: i32) = unsafe {
+        i32_and(self, r)
     }
 
-    pure fn or(l: i32, r: i32) = unsafe {
-        i32_or(l, r)
+    pure fn or(r: i32) = unsafe {
+        i32_or(self, r)
     }
 }
 

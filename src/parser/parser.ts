@@ -1,7 +1,7 @@
 import { Token, tokenize, operators } from "../lexer";
 import {
     Instruction, VariableDeclaration, TypeArgument, FunctionDeclaration, ParameterDeclaration,
-    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST, BlockExpression, TypeDeclaration, PropertyAccessExpression, ImplDeclaration
+    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST, BlockExpression, TypeDeclaration, PropertyAccessExpression, ImplDeclaration, ASTNode
 } from "./definitions";
 import { isInTuple } from "../helpers";
 
@@ -104,7 +104,7 @@ function parseKeywordStatement(tokens: Token[]): Instruction {
     if (flags.includes("impl")) {
         return parseImplDeclaration(tokens, flags);
     }
-
+    console.log(flags);
     const keywordStr = flags.reduce((p, c) => `${p} ${c}`, "");
     throw new Error(`Expected statement after keyword(s):${keywordStr}`);
 }
@@ -142,7 +142,7 @@ function parseReturnStatement(tokens: Token[]): ReturnStatement {
 /** Parse a function, beginning after fn */
 function parseFnDeclaration(tokens: Token[], flags: string[]): FunctionDeclaration {
     const identifierToken = tokens.shift();
-    if (!identifierToken || identifierToken.type !== "identifier") {
+    if (!identifierToken || identifierToken.type !== "identifier" && identifierToken.type !== "operator") {
         throw new Error("Expected identifier after function declaration");
     }
 
@@ -290,7 +290,7 @@ function parseTypeArgument(tokens: Token[]): TypeArgument {
     };
 }
 
-function parseExpression(tokens: Token[], terminator?: Token): Instruction {
+function parseExpression(tokens: Token[], terminator?: Token, flags: string[] = []): Instruction {
     const output: Instruction[] = [];
     const operator: Token[] = [];
 
@@ -327,7 +327,7 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
 
         if (token.type === "{") {
             tokens.shift();
-            output.push({ kind: "block-expression", flags: [], body: parseTokens(tokens) });
+            output.push({ kind: "block-expression", flags, body: parseTokens(tokens) });
             continue;
         }
 
@@ -357,10 +357,7 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
 
         if (token.type === "keyword") {
             if (token.value === "if") {
-                tokens.shift();
-                const condition = parseExpression(tokens, { type: "{", value: "{" });
-                const body = parseTokens(tokens);
-                output.push({ kind: "if-expression", condition, body });
+                parseIfExpression(tokens, output);
                 continue;
             }
 
@@ -377,6 +374,12 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
                 const expression = parseExpression(tokens, { type: "{", value: "{" });
                 const cases = parseMatchCases(tokens);
                 output.push({ kind: "match-expression", value: expression, cases, flags: [] });
+                continue;
+            }
+
+            if (token.value === "unsafe") {
+                tokens.shift();
+                output.push(parseExpression(tokens, undefined, ["unsafe"]));
                 continue;
             }
 
@@ -446,6 +449,38 @@ function parseExpression(tokens: Token[], terminator?: Token): Instruction {
     }
 
     return output[0] as Instruction;
+}
+
+function parseIfExpression(tokens: Token[], output: Instruction[]) {
+    // Get rid of the if token
+    tokens.shift();
+
+    const condition = parseExpression(tokens, { type: "{", value: "{" });
+    const body = parseTokens(tokens);
+    let elseBody: undefined | Instruction[] = undefined;
+    let elifBodies: { condition: ASTNode, body: Instruction[] }[] = [];
+
+    let next = tokens[0];
+    while (next) {
+        if (next.type === "keyword" && next.value === "else") {
+            tokens.shift();
+            elseBody = parseTokens(tokens);
+            break;
+        }
+
+        if (next.type === "keyword" && next.value === "elif") {
+            tokens.shift();
+            const condition = parseExpression(tokens, { type: "{", value: "{" });
+            const body = parseTokens(tokens);
+            elifBodies.push({ condition, body });
+            next = tokens[0];
+            continue;
+        }
+
+        break;
+    }
+
+    output.push({ kind: "if-expression", condition, body, elifBodies, elseBody });
 }
 
 function getOperatorPrecedence(operator: string): number {
@@ -568,6 +603,12 @@ function parseImplDeclaration(tokens: Token[], flags: string[]): ImplDeclaration
             tokens.shift();
             break;
         };
+
+        if (next.type === "\n") {
+            tokens.shift();
+            next = tokens[0];
+            continue;
+        }
 
         if (next.type !== "keyword") {
             console.dir(next);

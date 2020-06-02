@@ -7,7 +7,7 @@ describe("Parser", function() {
     });
 
     it("should parse a basic code snippet", function() {
-        assert.deepStrictEqual(parse(basicCodeSnippet), correctCodeSnippetAST);
+        assert.deepStrictEqual(parse(basicCodeSnippet), correctBasicCodeSnippetAST);
     });
 
     it("should parse a basic match expression", function() {
@@ -22,11 +22,19 @@ describe("Parser", function() {
 
     it("Should parse property access expressions", function() {
         assert.deepStrictEqual(parse(basicPropertyAccessSnippet), correctBasicPropertyAccessAST);
-    })
+    });
 
     it("Should parse a property accessed function", function() {
         assert.deepStrictEqual(parse(propertyAccessFnCallSnippet), correctPropertyAccessFnCallAST);
-    })
+    });
+
+    it("Should parse impl declarations without a trait", function() {
+        assert.deepStrictEqual(parse(implWithoutTraitSnippet), correctImplWithoutTraitAST);
+    });
+
+    it("Should parse an impl declaration with a trait", function() {
+        assert.deepStrictEqual(parse(implWithTraitSnippet), correctImplWithTraitAST);
+    });
 });
 
 const enumSnippet = `
@@ -79,7 +87,7 @@ const basicCodeSnippet = `
     print(fib(10))
 `;
 
-const correctCodeSnippetAST: AST = [
+const correctBasicCodeSnippetAST: AST = [
     {
         kind: 'function-declaration',
         label: 'fib',
@@ -108,7 +116,9 @@ const correctCodeSnippetAST: AST = [
                         kind: 'return-statement',
                         expression: { kind: 'identifier', label: 'n' }
                     }
-                ]
+                ],
+                elifBodies: [],
+                elseBody: undefined
             },
             {
                 kind: 'binary-expression',
@@ -162,11 +172,11 @@ const correctCodeSnippetAST: AST = [
 ];
 
 const basicMatchExpression = `
-match 3 {
-    1 => print(3),
-    2 => print(2),
-    3 => print(1)
-}
+    match 3 {
+        1 => print(3),
+        2 => print(2),
+        3 => print(1)
+    }
 `
 
 const correctBasicMatchExpressionAST: AST = [
@@ -429,7 +439,7 @@ const correctFnSyntax3AST = [
 ];
 
 const basicPropertyAccessSnippet = `
-my.property.access.example
+    my.property.access.example
 `
 
 const correctBasicPropertyAccessAST = [
@@ -455,7 +465,7 @@ const correctBasicPropertyAccessAST = [
 ];
 
 const propertyAccessFnCallSnippet = `
-call.this.func()
+    call.this.func()
 `
 
 const correctPropertyAccessFnCallAST = [
@@ -475,5 +485,255 @@ const correctPropertyAccessFnCallAST = [
             ]
         },
         arguments: []
+    }
+];
+
+const implWithoutTraitSnippet = `
+    declare type i32
+
+    impl i32 {
+        fn to_f32() = unsafe {
+            i32_to_f32(self)
+        }
+
+        fn min(other: i32) = if self < other { self } else { other }
+    }
+`
+
+const correctImplWithoutTraitAST = [
+    {
+        kind: 'type-declaration',
+        label: 'i32',
+        flags: ['declare', 'type'],
+        type: { kind: 'type-argument', label: '', flags: [] }
+    },
+    {
+        kind: 'impl-declaration',
+        flags: ['impl'],
+        trait: undefined,
+        target: 'i32',
+        functions: [
+            {
+                kind: 'function-declaration',
+                label: 'to_f32',
+                parameters: [],
+                returnType: undefined,
+                body: [
+                    {
+                        kind: 'block-expression',
+                        flags: ['unsafe'],
+                        body: [
+                            {
+                                kind: 'call-expression',
+                                callee: { kind: 'identifier', label: 'i32_to_f32' },
+                                arguments: [{ kind: 'identifier', label: 'self' }]
+                            }
+                        ]
+                    }
+                ],
+                typeParameters: [],
+                flags: ['fn']
+            },
+            {
+                kind: 'function-declaration',
+                label: 'min',
+                parameters: [
+                    {
+                        kind: 'parameter-declaration',
+                        label: 'other',
+                        type: { kind: 'type-argument', label: 'i32', flags: [] },
+                        flags: []
+                    }
+                ],
+                returnType: undefined,
+                body: [
+                    {
+                        kind: 'if-expression',
+                        condition: {
+                            kind: 'binary-expression',
+                            calleeLabel: '<',
+                            arguments: [
+                                { kind: 'identifier', label: 'self' },
+                                { kind: 'identifier', label: 'other' }
+                            ]
+                        },
+                        body: [{ kind: 'identifier', label: 'self' }],
+                        elifBodies: [],
+                        elseBody: [
+                            {
+                                kind: 'block-expression',
+                                flags: [],
+                                body: [{ kind: 'identifier', label: 'other' }]
+                            }
+                        ]
+                    }
+                ],
+                typeParameters: [],
+                flags: ['fn']
+            }
+        ]
+    }
+];
+
+const implWithTraitSnippet = `
+    declare type i32
+
+    impl Numerical for i32 {
+        pure fn +(r: i32) = unsafe {
+            i32_add(self, r)
+        }
+
+        pure fn -(r: i32) = unsafe {
+            i32_sub(self, r)
+        }
+
+        pure fn /(r: i32) = unsafe {
+            i32_div_s(self, r)
+        }
+
+        pure fn *(r: i32) = unsafe {
+            i32_mul(self, r)
+        }
+    }
+`;
+
+const correctImplWithTraitAST = [
+    {
+        kind: 'type-declaration',
+        label: 'i32',
+        flags: ['declare', 'type'],
+        type: { kind: 'type-argument', label: '', flags: [] }
+    },
+    {
+        kind: 'impl-declaration',
+        flags: ['impl'],
+        trait: 'Numerical',
+        target: 'i32',
+        functions: [
+            {
+                kind: 'function-declaration',
+                label: '+',
+                parameters: [
+                    {
+                        kind: 'parameter-declaration',
+                        label: 'r',
+                        type: { kind: 'type-argument', label: 'i32', flags: [] },
+                        flags: []
+                    }
+                ],
+                returnType: undefined,
+                body: [
+                    {
+                        kind: 'block-expression',
+                        flags: ['unsafe'],
+                        body: [
+                            {
+                                kind: 'call-expression',
+                                callee: { kind: 'identifier', label: 'i32_add' },
+                                arguments: [
+                                    { kind: 'identifier', label: 'self' },
+                                    { kind: 'identifier', label: 'r' }
+                                ]
+                            }
+                        ]
+                    }
+                ],
+                typeParameters: [],
+                flags: ['pure', 'fn']
+            },
+            {
+                kind: 'function-declaration',
+                label: '-',
+                parameters: [
+                    {
+                        kind: 'parameter-declaration',
+                        label: 'r',
+                        type: { kind: 'type-argument', label: 'i32', flags: [] },
+                        flags: []
+                    }
+                ],
+                returnType: undefined,
+                body: [
+                    {
+                        kind: 'block-expression',
+                        flags: ['unsafe'],
+                        body: [
+                            {
+                                kind: 'call-expression',
+                                callee: { kind: 'identifier', label: 'i32_sub' },
+                                arguments: [
+                                    { kind: 'identifier', label: 'self' },
+                                    { kind: 'identifier', label: 'r' }
+                                ]
+                            }
+                        ]
+                    }
+                ],
+                typeParameters: [],
+                flags: ['pure', 'fn']
+            },
+            {
+                kind: 'function-declaration',
+                label: '/',
+                parameters: [
+                    {
+                        kind: 'parameter-declaration',
+                        label: 'r',
+                        type: { kind: 'type-argument', label: 'i32', flags: [] },
+                        flags: []
+                    }
+                ],
+                returnType: undefined,
+                body: [
+                    {
+                        kind: 'block-expression',
+                        flags: ['unsafe'],
+                        body: [
+                            {
+                                kind: 'call-expression',
+                                callee: { kind: 'identifier', label: 'i32_div_s' },
+                                arguments: [
+                                    { kind: 'identifier', label: 'self' },
+                                    { kind: 'identifier', label: 'r' }
+                                ]
+                            }
+                        ]
+                    }
+                ],
+                typeParameters: [],
+                flags: ['pure', 'fn']
+            },
+            {
+                kind: 'function-declaration',
+                label: '*',
+                parameters: [
+                    {
+                        kind: 'parameter-declaration',
+                        label: 'r',
+                        type: { kind: 'type-argument', label: 'i32', flags: [] },
+                        flags: []
+                    }
+                ],
+                returnType: undefined,
+                body: [
+                    {
+                        kind: 'block-expression',
+                        flags: ['unsafe'],
+                        body: [
+                            {
+                                kind: 'call-expression',
+                                callee: { kind: 'identifier', label: 'i32_mul' },
+                                arguments: [
+                                    { kind: 'identifier', label: 'self' },
+                                    { kind: 'identifier', label: 'r' }
+                                ]
+                            }
+                        ]
+                    }
+                ],
+                typeParameters: [],
+                flags: ['pure', 'fn']
+            }
+        ]
     }
 ];
