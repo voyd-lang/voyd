@@ -91,113 +91,34 @@ fn add(a: i32, b: i32) -> i32 {
 add(1, 2)
 ```
 
-## Struct Sugar Syntax
+# Expression Oriented
 
+Dream is an expression oriented language. Blocks, Ifs, and Matches all return a value, that is
+the result of the last expression in their group. Functions will also implicitly return the
+value of the last expression in their body (Unless it's return type is explicitly set to Void).
+
+Examples:
 ```
-// Structs can be destructed in the method signature.
-fn add([x, y]: [x: Int, y: Int]) -> Int {
-    x + y
+let three = if true { 3 } else { 4 }
+
+let fred = match "Smith" {
+    "Jobs" => "Steve",
+    "Smith" => "Fred",
+    "Gates" => "Bill"
 }
 
-// This can be shortened further, unlabeled structs are automatically destructed.
-fn add([x: Int, y: Int]) -> Int {
-    x + y
+let six = {
+    let a = 3
+    let b = 3
+    a + b
 }
 
-// If a struct is the only argument of a method, parenthesis can be omitted.
-fn add[x: Int, y: Int] -> Int {
-    x + y
+fn add(a: Int, b: Int) = {
+    a + b
 }
 
-add([x: 5, y: 3])
-
-// If a struct is the only argument or the second argument is a function (more on that later),
-// the parenthesis can be omitted on call as well.
-add[x: 5, y: 3]
+let four = add(2, 2)
 ```
-
-## Pure Functions
-
-```
-// Pure functions are marked with a "pure" attribute and can only call other pure functions.
-// They also cannot have side effects.
-pure fn mul(a: i32, b: i32) = a * b
-
-pure fn div(a: i32, b: i32) {
-    // This will throw an error, as print has side effects and isn't marked pure.
-    print(a)
-    a / b
-}
-```
-
-## Parameter-less Functions
-
-```
-// Functions can have no parameters.
-fn test = 3 * 2
-
-// Parameter-less functions are called without ().
-test // 3
-
-// Parameter-less functions are always pure,
-var x = 1
-fn bump = x += 1 // ERROR: bump cannot have side-effects.
-```
-
-## Unsafe Functions
-
-```
-// Some functions are marked "unsafe". In dream this means they can call low level wasm functions
-// And have access to  linear memory. Unsafe functions can only be called inside other unsafe
-// functions, or from unsafe blocks.
-unsafe fn readI32FromMem(ptr: i32) -> i32 =
-    wasm_i32_load(0, 2, ptr)
-
-// This function is not considered unsafe as the call to an unsafe function happens in an unsafe
-// block
-fn mul(a: i32, b: i32) -> i32 = unsafe {
-    wasm_i32_mul(a, b)
-}
-```
-
-# Closures
-
-```
-// Closures are essentially anonymous functions with the syntax
-// | ...params: ParamType -> ReturnType | Expr
-let add = |a: i32, b: i32 -> i32| a + b
-
-// Closures can have multiple expressions when wrapped in, or followed by {}
-let sub = {|a: i32, b: i32|
-    print("Subtracting ${a} and ${b})
-    a - b
-}
-
-// Same as sub
-let sub2 = |a: i32, b: i32| {
-    print("Subtracting ${a} and ${b})
-    a - b
-}
-
-// Closures parameters and return type can be inferred
-let mul: Fn(a: i32, b: i32) -> i32 = |a, b| a * b
-```
-
-## Higher Order Functions
-
-```
-// You can pass functions as parameters to methods or other functions
-fn caller(fn: Fn(a: i32, b: i32) -> i32) -> i32 {
-    fn(1, 2)
-}
-
-// All are valid ways of calling the caller method
-caller(add)
-caller({| a, b | a + b })
-caller() {|a, b| a + b }
-caller {|a, b| a + b }
-```
-
 # Structs
 
 ```
@@ -289,9 +210,9 @@ enum Friend {
 var friend = Friend.eric
 
 match friend {
-    .eric { },
-    .angie { },
-    .carter { }
+    .eric => { },
+    .angie => { },
+    .carter => { }
 }
 
 // Enum identifier can be omitted if it can be reasonable inferred.
@@ -323,11 +244,13 @@ trait Vehicle {
     fn getInfo() => "Vin: ${vin}, Color: ${color}"
 }
 
-struct Car impl Vehicle {
+struct Car {
     var started = false
     pub let vin: String
     pub var color: String
+}
 
+impl Vehicle for Car {
     fn start() =
         started = true
 }
@@ -335,6 +258,53 @@ struct Car impl Vehicle {
 let car = Car [vin: "12fda32213", color: "red"]
 car.start()
 car.getInfo()
+```
+
+# Closures
+
+```
+// Closures are essentially anonymous functions with the syntax
+// | ...params: ParamType -> ReturnType | Expr
+let add = |a: i32, b: i32 -> i32| a + b
+
+// Closures can have multiple expressions when wrapped in, or followed by {}
+let sub = {|a: i32, b: i32|
+    print("Subtracting ${a} and ${b})
+    a - b
+}
+
+// Same as sub
+let sub2 = |a: i32, b: i32| {
+    print("Subtracting ${a} and ${b})
+    a - b
+}
+
+// Closures parameters and return type can be inferred
+let mul: Fn(a: i32, b: i32) -> i32 = |a, b| a * b
+```
+
+## Higher Order Functions
+
+```
+// You can pass functions as parameters to methods or other functions
+fn caller(cb: Fn(a: i32, b: i32) -> i32) -> i32 {
+    cb(1, 2)
+}
+
+// All are valid ways of calling the caller method
+caller(add)
+caller({| a, b | a + b })
+caller() {|a, b| a + b }
+caller {|a, b| a + b }
+
+// If a function takes no parameters, the passed expression will be converted into a function.
+fn everySecond(cb: Fn -> Void) {
+    setInterval(|| cb(), 1000)
+}
+
+everySecond {
+    print("Ping!")
+}
 ```
 
 # Generics
@@ -376,7 +346,7 @@ fn add(a: i32, b: i32) -> i32 {
 }
 ```
 
-# Type alias
+# Defining Types
 
 Types can be aliased / defined using using the syntax: `type Identifier = Type`.
 
@@ -410,4 +380,162 @@ fn add(a: i32, b: i32) -> i32 = a + b
 fn double(a: i32) -> i32 = a * 2
 
 add(2, 4).double()
+```
+
+# Memory Management
+
+1. Dream uses the standard WASM garbage collector for Struct, Enum, and Tuple types.
+2. Primitive WASM types such as i32, f32, i64, etc are allocated on the stack and are
+   not garbage collected.
+3. All types are value types
+4. For a type to be passed by reference to a function or a closure, it must be a garbage collected
+   type.
+
+## Value Types
+
+Dream types are value types. This means when some variable `a` is assigned to some variable
+`b`, `a` is copied into `b`. As a result, changes made to `b` do not happen to `a` and vise versa.
+
+This is in contrast to reference types used in other languages. For example, in javascript,
+an object is a reference type:
+```javascript
+let a = { x: 3 };
+let b = a;
+b.x = 7;
+print(a.x) // 7
+```
+
+The in Dream, a would not have been affected
+```dream
+let a = [x: 3]
+let b = a
+b.x = 7
+print(a.x) // 3
+```
+
+## References
+
+It is still possible to create a mutable reference to a value in dream. Currently this can
+be done using closures (anonymous functions) or inout parameters. Note, this only applies to
+garbage collected type.
+
+**Inout Parameters**
+
+Inout parameters create a mutable reference to a given variable. Changes made to an inout parameter
+within a function are reflected in their original variable.
+
+Example:
+```dream
+var count: Int = 0;
+
+fn bump(val: inout Int) {
+    val += 1
+}
+
+print(count) // 0
+
+// The & is required and makes it clear count is being referenced
+bump(&count)
+
+// Note: Inout parameters must refer to a mutable variable.
+let count2 = 0
+bump(&count2) // This will throw an error.
+```
+
+**Closures**
+
+Closures can refer to and modify values within their scope.
+
+Example:
+```dream
+fn createCounter() {
+    var count = 0
+    {||
+        count += 1
+        count
+    }
+}
+
+let counter = createCounter()
+print(counter()) // 1
+print(counter()) // 2
+print(counter()) // 3
+```
+
+# Functions In Depth
+
+Functions have some additional features and conveniences that are laid out in this section.
+
+## Struct Sugar Syntax
+
+```
+// Structs can be destructed in the method signature.
+fn add([x, y]: [x: Int, y: Int]) -> Int {
+    x + y
+}
+
+// This can be shortened further, unlabeled structs are automatically destructed.
+fn add([x: Int, y: Int]) -> Int {
+    x + y
+}
+
+// If a struct is the only argument of a method, parenthesis can be omitted.
+fn add[x: Int, y: Int] -> Int {
+    x + y
+}
+
+add([x: 5, y: 3])
+
+// If a struct is the only argument or the second argument is a function (more on that later),
+// the parenthesis can be omitted on call as well.
+add[x: 5, y: 3]
+```
+
+## Pure Functions
+
+```
+// Pure functions are marked with a "pure" attribute and can only call other pure functions.
+// They also cannot have side effects.
+pure fn mul(a: i32, b: i32) = a * b
+
+pure fn div(a: i32, b: i32) {
+    // This will throw an error, as print has side effects and isn't marked pure.
+    print(a)
+    a / b
+}
+```
+
+## Parameter-less Functions
+
+It is possible to define a function that takes no parameters and is called without ().
+
+```
+fn anyNum = random()
+
+print(anyNum) // 7
+print(anyNum) // 2341
+print(anyNum) // 562
+```
+
+It is best practice to define these functions as pure and add a comment if they are computationally
+intensive
+```
+// This function is O(n!)
+pure fn test = /** COMPUTATIONALLY EXPENSIVE OPERATION HERE */
+```
+
+## Unsafe Functions
+
+```
+// Some functions are marked "unsafe". In dream this means they can call low level wasm functions
+// And have access to  linear memory. Unsafe functions can only be called inside other unsafe
+// functions, or from unsafe blocks.
+unsafe fn readI32FromMem(ptr: i32) -> i32 =
+    wasm_i32_load(0, 2, ptr)
+
+// This function is not considered unsafe as the call to an unsafe function happens in an unsafe
+// block
+fn mul(a: i32, b: i32) -> i32 = unsafe {
+    wasm_i32_mul(a, b)
+}
 ```
