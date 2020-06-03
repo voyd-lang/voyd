@@ -110,19 +110,16 @@ function parseKeywordStatement(tokens: Token[]): Instruction {
 }
 
 function parseAssignment(tokens: Token[]): Assignment {
-    const label = tokens.shift();
-    if (!label || label.type !== "identifier") {
-        throw new Error(`Unexpected identifier token in assignment`);
-    }
+    const assignee = parseIdentifierExpression(tokens);
 
     const equals = tokens.shift();
     if (!equals || equals.type !== "=") {
-        throw new Error("Expected = token in assignment statement");
+        throw new Error("Expected = token in assignment expression");
     }
 
     return {
         kind: "assignment",
-        assigneeLabel: label.value,
+        assignee,
         expression: parseExpression(tokens)
     }
 }

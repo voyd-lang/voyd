@@ -2,6 +2,8 @@
     "cSpell.words": [
         "Deno",
         "Inout",
-        "binaryen"
+        "binaryen",
+        "popcnt",
+        "rotr"
     ]
 }

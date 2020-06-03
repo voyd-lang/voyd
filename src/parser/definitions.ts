@@ -184,7 +184,7 @@ export interface Identifier extends ASTNode {
 
 export interface Assignment extends ASTNode {
     kind: "assignment";
-    assigneeLabel: string;
+    assignee: PropertyAccessExpression | Identifier;
     expression: Instruction;
 }
 

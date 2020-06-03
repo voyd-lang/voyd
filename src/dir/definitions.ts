@@ -31,7 +31,7 @@ export interface IRFunctionEntity extends IREntityBase {
     locals: string[];
 
     /** Entity ID */
-    returnType: string;
+    returnType?: string;
 
     body: IRInstruction[];
 }
@@ -57,7 +57,7 @@ export interface IREntityBase {
     /** Namespace ID */
     namespace: string;
 
-    wasmType: WASMType;
+    wasmType?: WASMType;
 }
 
 

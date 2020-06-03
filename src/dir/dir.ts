@@ -1,5 +1,5 @@
-import { Instruction, AST, FunctionDeclaration, VariableDeclaration, MatchExpression, CallExpression, BinaryExpression } from "../parser";
-import { IRInstruction, IREntity, IRMatchCase, IRFunctionWASMType, IRFunctionEntity, IRValueEntity, IRTypeEntity } from "./definitions";
+import { Instruction, AST, FunctionDeclaration, VariableDeclaration, MatchExpression, CallExpression, BinaryExpression, Identifier, PropertyAccessExpression } from "../parser";
+import { IRInstruction, IREntity, IRMatchCase, IRFunctionWASMType, IRFunctionEntity, IRValueEntity, IRTypeEntity, WASMType } from "./definitions";
 import uniqid from "uniqid";
 import { IR } from "./ir";
 
@@ -11,7 +11,7 @@ export class DIRCompiler {
         for (const instruction of ast) {
             if (instruction.kind === "function-declaration") {
                 const id = this.compileFunction(instruction, this.moduleNamespace);
-                const entity = this.ir.getEntity(id, this.moduleNamespace);
+                const entity = this.ir.getEntity(id);
                 console.dir(entity, { depth: 10 });
                 continue;
             }
@@ -21,45 +21,11 @@ export class DIRCompiler {
     /** Returns the ID of the function entity */
     private compileFunction(fn: FunctionDeclaration, namespace: string): string {
         const label = fn.label;
-        const internalNamespace = this.ir.newNamespace(namespace);
+        const fnNamespace = this.ir.newNamespace(namespace);
         const body: IRInstruction[] = [];
         const locals: string[] = [];
-        const parameters: string[] = [];
-
-        // Resolve function parameters.
-        fn.parameters.forEach(p => {
-            const typeEntity = this.ir.findEntityByLabel(p.type!.label, internalNamespace);
-            if (typeEntity.kind !== "type") throw new Error(`${typeEntity.label} is not a type`);
-            const paramID = this.ir.addEntity({
-                kind: "value",
-                flags: [],
-                label: p.label,
-                wasmType: typeEntity.wasmType,
-                namespace: internalNamespace,
-                typeEntity: typeEntity.id
-            });
-            parameters.push(paramID);
-        });
-
-        // Resolve return type entity, generate returnWASMType type.
-        const { returnType, returnWASMType } = (() => {
-            const typeEntity = fn.returnType ? this.ir.findEntityByLabel(fn.returnType.label, internalNamespace) :
-                this.inferType(fn.body[fn.body.length - 1], internalNamespace);
-            if (typeEntity.kind !== "type") throw new Error(`${typeEntity.label} is not a type`);
-            return { returnType: typeEntity.id, returnWASMType: typeEntity.wasmType };
-        })()
-
-        // Build the function body
-        body.push(...this.compileBlock(fn.body, locals, internalNamespace));
-
-        // Generate the WASMType for the function
-        const wasmType: IRFunctionWASMType = {
-            kind: "function",
-            id: uniqid(),
-            parameters: parameters.map(id => this.ir.getEntity(id, internalNamespace).wasmType),
-            locals: locals.map(id => this.ir.getEntity(id, internalNamespace).wasmType),
-            returnType: returnWASMType
-        };
+        const parameters = this.compileFunctionParameters(fn, fnNamespace);
+        const { returnType, returnWASMType } = this.compileFunctionReturnType(fn, fnNamespace);
 
         // Create the function entity
         const id = this.ir.addEntity({
@@ -69,14 +35,80 @@ export class DIRCompiler {
             body,
             parameters,
             locals,
-            namespace: internalNamespace,
+            namespace: fnNamespace,
             returnType,
-            wasmType: wasmType,
         }, namespace);
+
+        // Build the function body
+        body.push(...this.compileBlock(fn.body, locals, fnNamespace));
+
+        // Generate the WASMType for the function
+        const wasmType: IRFunctionWASMType =
+            this.compileFnWASMType(parameters, locals, returnWASMType);
+
+        this.ir.updateFunction(id, { locals, body, wasmType });
 
         if (fn.flags.includes("pub")) this.ir.exportEntity(id);
 
         return id;
+    }
+
+    private compileFnWASMType(parameters: never[], locals: string[], returnWASMType: WASMType): IRFunctionWASMType {
+        return {
+            kind: "function",
+            id: uniqid(),
+            parameters: parameters
+                .map(id => this.ir.getEntity(id).wasmType)
+                .filter(e => !!e) as WASMType[],
+            locals: locals
+                .map(id => this.ir.getEntity(id).wasmType)
+                .filter(e => !!e) as WASMType[],
+            returnType: returnWASMType
+        };
+    }
+
+    private compileFunctionReturnType(fn: FunctionDeclaration, internalNamespace: string): {
+        returnType: string,
+        returnWASMType: WASMType
+    } {
+        const typeEntity = fn.returnType ?
+            this.ir.findEntitiesWithLabel(fn.returnType.label, internalNamespace)[0] :
+            this.inferType(fn.body[fn.body.length - 1], internalNamespace);
+
+        if (!typeEntity || typeEntity.kind !== "type") {
+            throw new Error(`${typeEntity.label} is not a type`);
+        }
+
+        if (!typeEntity.wasmType) {
+            throw new Error(`The return type of ${fn.label} could not be inferred`);
+        }
+
+        return { returnType: typeEntity.id, returnWASMType: typeEntity.wasmType };
+    }
+
+    private compileFunctionParameters(fn: FunctionDeclaration, internalNamespace: string) {
+        const parameters: string[] = [];
+
+        fn.parameters.forEach(p => {
+            const typeEntity = this.ir.findEntitiesWithLabel(p.type!.label, internalNamespace)[0];
+
+            if (!typeEntity || typeEntity.kind !== "type") {
+                throw new Error(`${typeEntity.label} is not a type`);
+            }
+
+            const paramID = this.ir.addEntity({
+                kind: "value",
+                flags: [],
+                label: p.label,
+                wasmType: typeEntity.wasmType,
+                namespace: internalNamespace,
+                typeEntity: typeEntity.id
+            }, internalNamespace);
+
+            parameters.push(paramID);
+        });
+
+        return [];
     }
 
     private compileBlock(instructions: Instruction[], locals: string[], namespace: string): IRInstruction[] {
@@ -124,14 +156,7 @@ export class DIRCompiler {
         }
 
         if (expr.kind === "call-expression" || expr.kind === "binary-expression") {
-            const func = this.findCalleeFunctionEntity(expr, namespace);
-            return {
-                kind: "call-expression",
-                calleeID: func.id,
-                calleeLabel: expr.calleeLabel,
-                arguments: expr.arguments.map(arg => this.compileExpression(arg, locals, namespace)),
-                returnType: func.returnType
-            }
+            return this.compileCallExpression(expr, namespace, locals);
         }
 
         if (expr.kind === "break-statement") return { kind: "break-statement" };
@@ -144,20 +169,22 @@ export class DIRCompiler {
         }
 
         if (expr.kind === "assignment") {
+            const assignee = this.resolveEntity(expr.assignee, namespace)[0]; // TODO: Assert.
             return {
                 kind: "assignment",
-                assigneeEntityID: this.ir.findEntityByLabel(expr.assigneeLabel, namespace).id,
-                label: expr.assigneeLabel,
+                assigneeEntityID: assignee.id,
+                label: assignee.label,
                 expression: this.compileExpression(expr.expression, locals, namespace)
             }
         }
 
-        if (expr.kind === "identifier") {
-            const identifierEntity = this.ir.findEntityByLabel(expr.label, namespace);
+        if (expr.kind === "identifier" || expr.kind === "property-access-expression") {
+            const entity = this.resolveEntity(expr, namespace)[0];
+
             return {
                 kind: "identifier",
-                identifierEntityID: identifierEntity.id,
-                label: expr.label,
+                identifierEntityID: entity.id,
+                label: entity.label,
             }
         }
 
@@ -179,23 +206,49 @@ export class DIRCompiler {
         throw new Error(`ASTNode, ${expr.kind}, cannot be converted to an instruction`);
     }
 
+    private compileCallExpression(expr: CallExpression | BinaryExpression, namespace: string, locals: string[]): IRInstruction {
+        const func = this.findCalleeFunctionEntity(expr, namespace);
+        return {
+            kind: "call-expression",
+            calleeID: func.id,
+            calleeLabel: func.label,
+            arguments: expr.arguments.map(arg => this.compileExpression(arg, locals, namespace)),
+            returnType: func.returnType! // TODO??
+        };
+    }
+
     private findCalleeFunctionEntity(expr: CallExpression | BinaryExpression, namespace: string): IRFunctionEntity {
-        const entities = this.ir.findFunctionsWithLabel(expr.calleeLabel, namespace);
-        if (!entities) throw new Error(`No function found for ${expr.calleeLabel}`);
+        const entities = (
+            expr.kind === "call-expression" ?
+                this.resolveEntity(expr.callee, namespace) :
+                this.ir.findEntitiesWithLabel(expr.calleeLabel, namespace)
+        ).filter(v => v.kind === "function") as IRFunctionEntity[];
+
+        if (entities.length === 0) throw new Error(`No function found for ${findLabelForCall(expr)}`);
 
         for (const entity of entities) {
             const signatureMatches = entity.parameters.every((paramEntityID, index) => {
                 const argExpr = expr.arguments[index];
                 if (!argExpr) return false;
-                // TODO: Some of the types the function uses might not be in the current namespace, but are still valid.
+
                 const typeID = this.inferType(argExpr, namespace).id;
+
                 // TODO: This is wrong, val is the parameter entity ID, not the type ID of the parameter
-                return typeID === (this.ir.getEntity(paramEntityID, namespace) as IRValueEntity).typeEntity;
+                return typeID === (this.ir.getEntity(paramEntityID) as IRValueEntity).typeEntity;
             });
             if (signatureMatches) return entity;
         }
 
-        throw new Error(`No function found for ${expr.calleeLabel}`);
+        throw new Error(`No function found for ${findLabelForCall(expr)}`);
+    }
+
+    private resolveEntity(expr: PropertyAccessExpression | Identifier, namespace: string): IREntity[] {
+        if (expr.kind === "identifier") {
+            return this.ir.findEntitiesWithLabel(expr.label, namespace);
+        }
+
+        const parent = this.resolveEntity(expr.arguments[0], namespace)[0];
+        return this.resolveEntity(expr.arguments[1], parent.namespace);
     }
 
     private compileMatchCases(expr: MatchExpression, locals: string[], namespace: string): IRMatchCase[] {
@@ -223,7 +276,7 @@ export class DIRCompiler {
 
     private getVariableTypeEntity(variable: VariableDeclaration, namespace: string): IRTypeEntity {
         if (variable.type) {
-            const type = this.ir.findEntityByLabel(variable.type.label, namespace);
+            const type = this.ir.findEntitiesWithLabel(variable.type.label, namespace)[0];
             if (type.kind !== "type") throw new Error(`${variable.type.label} is not a type`);
             return type as IRTypeEntity;
         }
@@ -234,19 +287,37 @@ export class DIRCompiler {
 
     /** Returns the expression's result type entity, TODO: ADD ERROR CHECKING IN PLACE OF AS IRTypeEntity */
     private inferType(expr: Instruction, namespace: string): IRTypeEntity {
-        if (expr.kind === "call-expression" || expr.kind === "binary-expression") {
-            const entity = this.ir.findEntityByLabel(expr.calleeLabel, namespace);
-            if (entity.kind !== "function") throw new Error(`${expr.calleeLabel} is not a function.`);
-            return this.ir.getEntity((entity as IRFunctionEntity).returnType, namespace) as IRTypeEntity;
+        if (expr.kind === "call-expression") {
+            const entity = this.resolveEntity(expr.callee, namespace)[0];
+            if (entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
+            const returnType = (entity as IRFunctionEntity).returnType;
+            if (returnType) return this.ir.getEntity(returnType) as IRTypeEntity;
+        }
+
+        if (expr.kind === "binary-expression") {
+            const entity = this.ir.findEntitiesWithLabel(expr.calleeLabel, namespace)[0];
+            if (entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
+            const returnType = (entity as IRFunctionEntity).returnType;
+            if (returnType) return this.ir.getEntity(returnType) as IRTypeEntity;
         }
 
         if (expr.kind === "identifier") {
-            const entity = this.ir.findEntityByLabel(expr.label, namespace);
-            if (entity.kind === "value") return this.ir.getEntity(entity.typeEntity, namespace) as IRTypeEntity;
+            const entity = this.resolveEntity(expr, namespace)[0];
+            if (entity.kind === "value") return this.ir.getEntity(entity.typeEntity) as IRTypeEntity;
             return entity as IRTypeEntity;
         }
 
-        const byLabel = (label: string) => this.ir.findEntityByLabel(label, namespace);
+        if (expr.kind === "parameter-declaration") {
+            if (expr.type) {
+                return this.ir.findEntitiesWithLabel(expr.type.label, namespace)[0] as IRTypeEntity;
+            }
+
+            if (expr.initializer) {
+                return this.inferType(expr.initializer, namespace);
+            }
+        }
+
+        const byLabel = (label: string) => this.ir.findEntitiesWithLabel(label, namespace)[0];
         if (expr.kind === "bool-literal") return byLabel("bool") as IRTypeEntity;
         if (expr.kind === "float-literal") return byLabel("f32") as IRTypeEntity;
         if (expr.kind === "int-literal") return byLabel("i32") as IRTypeEntity;
@@ -259,4 +330,13 @@ export class DIRCompiler {
         console.dir(expr);
         throw new Error(`Unable to infer type`);
     }
+}
+
+function findLabelForCall(call: CallExpression | BinaryExpression): string {
+    if (call.kind === "binary-expression") return call.calleeLabel;
+    if (call.callee.kind === "identifier") {
+        return call.callee.label;
+    }
+
+    return (call.callee.arguments[1] as Identifier).label;
 }

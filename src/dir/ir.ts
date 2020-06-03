@@ -1,91 +1,113 @@
-import { IREntities, IREntity, IRFunctionEntity, IREntityWithoutID } from "./definitions";
+import { IREntities, IREntity, IRFunctionEntity, IREntityWithoutID, IRInstruction, WASMType } from "./definitions";
 import uniqid from "uniqid";
 
 export class IR {
     /** Stores all identifiers in the entire WASM module */
     private readonly entities: IREntities = {};
 
-    /** Std entities (stdlib) */
-    private readonly std: string[] = [];
-
     /** All of the entities the module exports */
     private readonly exports: string[] = [];
 
-    /** Key is the namespace id, value is a set of entity IDs accessible to the namespace */
-    private readonly namespaces: { [id: string]: string[] } = {};
+    private readonly stdNamespaceID: string;
+
+    /** Key is the namespace id */
+    private readonly namespaces: Record<string, {
+        /** Parent namespace id, if any */
+        parent?: string;
+
+        entities: string[]
+    }> = {};
+
+    constructor() {
+        this.stdNamespaceID = uniqid();
+        this.namespaces[this.stdNamespaceID] = { entities: [] };
+    }
 
     exportEntity(id: string) {
         this.exports.push(id);
     }
 
     addEntityToSTD(id: string) {
-        const entity = this.entities[id];
-        if (!entity) throw new Error(`Entity ${id} not found`);
-        this.std.push(id);
+        this.namespaces[this.stdNamespaceID].entities.push(id);
     }
 
-    getEntity(id: string, namespaceID: string): IREntity {
-        const inNamespace = this.namespaces[namespaceID].some(nid => nid === id) ?
-            true :
-            this.std.some(nid => nid === id);
-
-        if (!inNamespace) {
-            throw new Error(`No entity with id ${id} found in supplied namespace`);
-        }
-
+    /** Get entity with id. */
+    getEntity(id: string): IREntity {
         return this.entities[id];
     }
 
-    findEntityByLabel(label: string, namespaceID: string): IREntity {
-        const idFromNamespace = this.namespaces[namespaceID].find(nid => this.entities[nid].label === label);
-        if (idFromNamespace) return this.entities[idFromNamespace];
-        const idFromStd = this.std.find(nid => this.entities[nid].label === label);
-        if (idFromStd) return this.entities[idFromStd];
-        throw new Error(`${label} not found`);
+    namespaceHasEntity(entityID: string, namespaceID: string): boolean {
+        const namespace = this.namespaces[namespaceID];
+
+        if (namespace.entities.includes(entityID)) return true;
+
+        if (namespace.parent) {
+            return this.namespaceHasEntity(entityID, namespace.parent);
+        }
+
+        return false;
     }
 
-    findFunctionsWithLabel(label: string, namespaceID: string): IRFunctionEntity[] {
-        return [...this.std, ...this.namespaces[namespaceID]]
-            .map(id => this.entities[id])
-            .filter(entity => entity.label === label && entity.kind === "function") as IRFunctionEntity[];
+    findEntitiesWithLabel(
+        label: string,
+        namespaceID: string = this.stdNamespaceID,
+        entities: IREntity[] = []
+    ): IREntity[] {
+        const namespace = this.namespaces[namespaceID];
+
+        for (const id of namespace.entities) {
+            const entity = this.entities[id];
+            if (entity.label === label) entities.push(entity);
+        }
+
+        if (namespace.parent) {
+            return this.findEntitiesWithLabel(label, namespace.parent, entities);
+        }
+
+        return entities;
     }
 
     /**
      * Returns the ID of the entity.
      * If namespace is supplied, the entity will be added to that namespace
      */
-    addEntity(entity: IREntityWithoutID, namespaceID?: string): string {
+    addEntity(entity: IREntityWithoutID, namespaceID: string): string {
         const id = uniqid();
         const fullEntity = { id, ...entity } as IREntity;
         this.entities[id] = fullEntity;
 
-        if (namespaceID) {
-            const namespace = this.namespaces[id];
-            if (!namespace) throw new Error(`No namespace with id ${namespaceID}`);
-            namespace.push(id);
-        }
+        const namespace = this.namespaces[id];
+        if (!namespace) throw new Error(`No namespace with id ${namespaceID}`);
+        namespace.entities.push(id);
 
         return id;
     }
 
-    addFunctionEntity() {
+    updateFunction(id: string, items: {
+        locals: string[];
+        body: IRInstruction[];
+        wasmType: WASMType;
+    }) {
+        const fn = this.getEntity(id);
 
+        if (fn.kind !== "function") {
+            throw new Error(`${fn.label} is not a function`);
+        }
+
+        fn.locals = items.locals;
+        fn.body = items.body;
+        fn.wasmType = items.wasmType;
     }
 
     /** Returns a new namespace id */
-    newNamespace(parent?: string): string {
-        const inherits = (() => {
-            if (parent) {
-                const entities = this.namespaces[parent];
-                if (!entities) throw new Error(`Parent namespace ${parent} does not exist`);
-                return Array.from(entities);
-            }
-
-            return [];
-        })();
-
+    newNamespace(parent: string = this.stdNamespaceID): string {
         const id = uniqid();
-        this.namespaces[id] = Array.from(inherits);
+
+        this.namespaces[id] = {
+            parent,
+            entities: []
+        };
+
         return id;
     }
 }
