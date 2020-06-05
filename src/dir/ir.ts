@@ -8,8 +8,6 @@ export class IR {
     /** All of the entities the module exports */
     private readonly exports: string[] = [];
 
-    private readonly stdNamespaceID: string;
-
     /** Key is the namespace id */
     private readonly namespaces: Record<string, {
         /** Parent namespace id, if any */
@@ -17,6 +15,8 @@ export class IR {
 
         entities: string[]
     }> = {};
+
+    readonly stdNamespaceID: string;
 
     constructor() {
         this.stdNamespaceID = uniqid();
@@ -76,8 +76,10 @@ export class IR {
         const fullEntity = { id, ...entity } as IREntity;
         this.entities[id] = fullEntity;
 
-        const namespace = this.namespaces[id];
-        if (!namespace) throw new Error(`No namespace with id ${namespaceID}`);
+        const namespace = this.namespaces[namespaceID];
+        if (!namespace) {
+            throw new Error(`No namespace with id ${namespaceID}`);
+        }
         namespace.entities.push(id);
 
         return id;
@@ -109,5 +111,16 @@ export class IR {
         };
 
         return id;
+    }
+
+    // For debug use. DELETE ME SOMETIME.
+    logEntitiesOfNamespace(id: string) {
+        const namespace = this.namespaces[id];
+
+        for (const id of namespace.entities) {
+            console.log(this.getEntity(id).label);
+        }
+
+        if (namespace.parent) this.logEntitiesOfNamespace(namespace.parent);
     }
 }

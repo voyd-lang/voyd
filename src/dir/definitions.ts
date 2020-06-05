@@ -82,7 +82,8 @@ export type IRInstruction =
     IRAssignment |
     IRMatchCase |
     IRMatchExpression |
-    IRNoOP;
+    IRNoOP |
+    IRBlockExpression;
 
 export interface IRNoOP extends IRNode {
     kind: "no-op";
@@ -133,6 +134,15 @@ export interface IRCallExpression extends IRNode {
     calleeID: string;
     calleeLabel: string;
     arguments: IRInstruction[];
+    /** unique id of the type */
+    returnType: string;
+}
+
+export interface IRBlockExpression extends IRNode {
+    kind: "block-expression";
+    body: IRInstruction[];
+    flags: string[];
+    namespace: string;
     /** unique id of the type */
     returnType: string;
 }
@@ -194,7 +204,8 @@ export interface IRNode {
 export type WASMType =
     IRValueWASMType |
     IRMultiValueWASMType |
-    IRFunctionWASMType;
+    IRFunctionWASMType |
+    IRExternalWASMType;
 
 export interface IRValueWASMType extends WASMTypeBase {
     kind: "value";
@@ -213,7 +224,11 @@ export interface IRFunctionWASMType extends WASMTypeBase {
     returnType: WASMType;
 }
 
+// Used for declared types i.e. `declare type i32`
+export interface IRExternalWASMType extends WASMTypeBase {
+    kind: "external"
+}
+
 export interface WASMTypeBase {
-    id: string;
     kind: string;
 }

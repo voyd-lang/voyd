@@ -1,30 +1,75 @@
-import { Instruction, AST, FunctionDeclaration, VariableDeclaration, MatchExpression, CallExpression, BinaryExpression, Identifier, PropertyAccessExpression } from "../parser";
+import { Instruction, AST, FunctionDeclaration, VariableDeclaration, MatchExpression, CallExpression, BinaryExpression, Identifier, PropertyAccessExpression, parse } from "../parser";
 import { IRInstruction, IREntity, IRMatchCase, IRFunctionWASMType, IRFunctionEntity, IRValueEntity, IRTypeEntity, WASMType } from "./definitions";
 import uniqid from "uniqid";
 import { IR } from "./ir";
+import { readFileSync } from "fs";
 
 export class DIRCompiler {
-    private ir = new IR();
-    private moduleNamespace = this.ir.newNamespace();
+    private readonly ir = new IR();
+    private readonly deferredCompQueue: (() => void)[] = [];
 
-    compile(ast: AST) {
+    compile(code: string) {
+        const std = readFileSync(`${__dirname}/../../stdlib/i32.dm`, { encoding: "utf8" });
+        const stdAST = parse(std);
+        this.compileModule(stdAST, this.ir.stdNamespaceID);
+        const ast = parse(code);
+        const namespace = this.ir.newNamespace();
+        this.compileModule(ast, namespace);
+        this.ir.logEntitiesOfNamespace(namespace);
+    }
+
+    private compileModule(ast: AST, namespace: string) {
         for (const instruction of ast) {
-            if (instruction.kind === "function-declaration") {
-                const id = this.compileFunction(instruction, this.moduleNamespace);
-                const entity = this.ir.getEntity(id);
-                console.dir(entity, { depth: 10 });
+            if (instruction.kind === "type-declaration") {
+                const typeNamespace = this.ir.newNamespace(namespace);
+                this.ir.addEntity({
+                    kind: "type",
+                    label: instruction.label,
+                    flags: instruction.flags,
+
+                    // TODO distinguish static and instance namespaces
+                    namespace: typeNamespace,
+
+                    // TODO, Handle aliases etc.
+                    wasmType: { kind: "external" }
+                }, namespace);
+
                 continue;
             }
+
+            if (instruction.kind === "function-declaration") {
+                this.compileFunction(instruction, namespace);
+                continue;
+            }
+
+            if (instruction.kind === "impl-declaration") {
+                const type = this.ir.findEntitiesWithLabel(instruction.target, namespace)[0];
+
+                if (!type || type.kind !== "type") {
+                    throw new Error(`${instruction.target} is not a type`);
+                }
+
+                instruction.functions.forEach(fn => this.compileFunction(fn, type.namespace, type.id));
+            }
+        }
+
+        while (this.deferredCompQueue.length > 0) {
+            const func = this.deferredCompQueue.shift();
+            if (func) func();
         }
     }
 
-    /** Returns the ID of the function entity */
-    private compileFunction(fn: FunctionDeclaration, namespace: string): string {
+    /**
+     * Compile a function or method.
+     * @param self - The ID of the type this function is a method of, if any.
+     * @returns the ID of the function entity.
+     * */
+    private compileFunction(fn: FunctionDeclaration, namespace: string, self?: string): string {
         const label = fn.label;
         const fnNamespace = this.ir.newNamespace(namespace);
         const body: IRInstruction[] = [];
         const locals: string[] = [];
-        const parameters = this.compileFunctionParameters(fn, fnNamespace);
+        const parameters = this.compileFunctionParameters(fn, fnNamespace, self);
         const { returnType, returnWASMType } = this.compileFunctionReturnType(fn, fnNamespace);
 
         // Create the function entity
@@ -39,24 +84,23 @@ export class DIRCompiler {
             returnType,
         }, namespace);
 
-        // Build the function body
-        body.push(...this.compileBlock(fn.body, locals, fnNamespace));
+        this.deferredCompQueue.push(() => {
+            // Build the function body
+            body.push(...this.compileBlock(fn.body, locals, fnNamespace));
 
-        // Generate the WASMType for the function
-        const wasmType: IRFunctionWASMType =
-            this.compileFnWASMType(parameters, locals, returnWASMType);
+            // Generate the WASMType for the function
+            const wasmType: IRFunctionWASMType =
+                this.compileFnWASMType(parameters, locals, returnWASMType);
 
-        this.ir.updateFunction(id, { locals, body, wasmType });
-
-        if (fn.flags.includes("pub")) this.ir.exportEntity(id);
+            this.ir.updateFunction(id, { locals, body, wasmType });
+        });
 
         return id;
     }
 
-    private compileFnWASMType(parameters: never[], locals: string[], returnWASMType: WASMType): IRFunctionWASMType {
+    private compileFnWASMType(parameters: string[], locals: string[], returnWASMType: WASMType): IRFunctionWASMType {
         return {
             kind: "function",
-            id: uniqid(),
             parameters: parameters
                 .map(id => this.ir.getEntity(id).wasmType)
                 .filter(e => !!e) as WASMType[],
@@ -86,7 +130,7 @@ export class DIRCompiler {
         return { returnType: typeEntity.id, returnWASMType: typeEntity.wasmType };
     }
 
-    private compileFunctionParameters(fn: FunctionDeclaration, internalNamespace: string) {
+    private compileFunctionParameters(fn: FunctionDeclaration, internalNamespace: string, self?: string) {
         const parameters: string[] = [];
 
         fn.parameters.forEach(p => {
@@ -108,7 +152,19 @@ export class DIRCompiler {
             parameters.push(paramID);
         });
 
-        return [];
+        if (self) {
+            const paramID = this.ir.addEntity({
+                kind: "value",
+                label: "self",
+                flags: fn.flags.includes("mut") ? ["mut"] : [],
+                namespace: internalNamespace,
+                typeEntity: self
+            }, internalNamespace);
+
+            parameters.push(paramID);
+        }
+
+        return parameters;
     }
 
     private compileBlock(instructions: Instruction[], locals: string[], namespace: string): IRInstruction[] {
@@ -155,6 +211,17 @@ export class DIRCompiler {
             }
         }
 
+        if (expr.kind === "block-expression") {
+            const blockNamespace = this.ir.newNamespace(namespace);
+            return {
+                kind: "block-expression",
+                flags: expr.flags,
+                namespace: blockNamespace,
+                returnType: this.inferType(expr.body[expr.body.length - 1], blockNamespace).id,
+                body: this.compileBlock(expr.body, locals, blockNamespace)
+            }
+        }
+
         if (expr.kind === "call-expression" || expr.kind === "binary-expression") {
             return this.compileCallExpression(expr, namespace, locals);
         }
@@ -164,7 +231,7 @@ export class DIRCompiler {
         if (expr.kind === "return-statement") {
             return {
                 kind: "return-statement",
-                expression: this.compileExpression(expr, locals, namespace)
+                expression: this.compileExpression(expr.expression, locals, namespace)
             }
         }
 
@@ -221,7 +288,7 @@ export class DIRCompiler {
         const entities = (
             expr.kind === "call-expression" ?
                 this.resolveEntity(expr.callee, namespace) :
-                this.ir.findEntitiesWithLabel(expr.calleeLabel, namespace)
+                this.resolveBinaryFunctionEntity(expr, namespace)
         ).filter(v => v.kind === "function") as IRFunctionEntity[];
 
         if (entities.length === 0) throw new Error(`No function found for ${findLabelForCall(expr)}`);
@@ -231,15 +298,23 @@ export class DIRCompiler {
                 const argExpr = expr.arguments[index];
                 if (!argExpr) return false;
 
-                const typeID = this.inferType(argExpr, namespace).id;
+                // The ID of the type being passed
+                const argTypeID = this.inferType(argExpr, namespace).id;
 
-                // TODO: This is wrong, val is the parameter entity ID, not the type ID of the parameter
-                return typeID === (this.ir.getEntity(paramEntityID) as IRValueEntity).typeEntity;
+                // The ID of the parameter's type
+                const paramTypeID = (this.ir.getEntity(paramEntityID) as IRValueEntity).typeEntity;
+
+                return argTypeID === paramTypeID;
             });
             if (signatureMatches) return entity;
         }
 
         throw new Error(`No function found for ${findLabelForCall(expr)}`);
+    }
+
+    private resolveBinaryFunctionEntity(expr: BinaryExpression, namespace: string): IREntity[] {
+        const operandType = this.inferType(expr.arguments[0], namespace);
+        return this.ir.findEntitiesWithLabel(expr.calleeLabel, operandType.namespace);
     }
 
     private resolveEntity(expr: PropertyAccessExpression | Identifier, namespace: string): IREntity[] {
@@ -289,22 +364,32 @@ export class DIRCompiler {
     private inferType(expr: Instruction, namespace: string): IRTypeEntity {
         if (expr.kind === "call-expression") {
             const entity = this.resolveEntity(expr.callee, namespace)[0];
-            if (entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
+            if (!entity || entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
             const returnType = (entity as IRFunctionEntity).returnType;
             if (returnType) return this.ir.getEntity(returnType) as IRTypeEntity;
         }
 
         if (expr.kind === "binary-expression") {
-            const entity = this.ir.findEntitiesWithLabel(expr.calleeLabel, namespace)[0];
-            if (entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
+            const operand = this.inferType(expr.arguments[0], namespace);
+            const entity = this.ir.findEntitiesWithLabel(expr.calleeLabel, operand.namespace)[0];
+            if (!entity || entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
             const returnType = (entity as IRFunctionEntity).returnType;
             if (returnType) return this.ir.getEntity(returnType) as IRTypeEntity;
         }
 
         if (expr.kind === "identifier") {
             const entity = this.resolveEntity(expr, namespace)[0];
+
+            if (!entity) {
+                throw new Error(`${expr.label} is not defined`);
+            }
+
             if (entity.kind === "value") return this.ir.getEntity(entity.typeEntity) as IRTypeEntity;
             return entity as IRTypeEntity;
+        }
+
+        if (expr.kind === "block-expression") {
+            return this.inferType(expr.body[expr.body.length - 1], namespace);
         }
 
         if (expr.kind === "parameter-declaration") {
@@ -326,8 +411,6 @@ export class DIRCompiler {
             return this.inferType(expr.body[expr.body.length - 1], namespace);
         }
 
-
-        console.dir(expr);
         throw new Error(`Unable to infer type`);
     }
 }
