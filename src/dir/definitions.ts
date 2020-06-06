@@ -1,3 +1,4 @@
+import { IRScope } from "./scope";
 
 export interface IREntities {
     /** Where key is the unique id of the identifier, and value is the key of the type */
@@ -54,9 +55,7 @@ export interface IREntityBase {
     id: string;
     label: string;
     flags: string[];
-
-    /** Namespace ID */
-    namespace: string;
+    scope: IRScope;
 }
 
 
@@ -91,7 +90,7 @@ export interface IRNoOP extends IRNode {
 export interface IRWhileStatement extends IRNode {
     kind: "while-statement";
     condition: IRInstruction;
-    namespace: string;
+    scope: IRScope;
     body: IRInstruction[];
 }
 
@@ -108,7 +107,7 @@ export interface IRIfExpression extends IRNode {
     returnType: string;
     condition: IRInstruction;
     body: IRInstruction[];
-    namespace: string;
+    scope: IRScope;
     elseBody?: IRInstruction[];
     elseIfBodies?: { expression: IRNode, body: IRInstruction[] }[];
 }
@@ -141,7 +140,7 @@ export interface IRBlockExpression extends IRNode {
     kind: "block-expression";
     body: IRInstruction[];
     flags: string[];
-    namespace: string;
+    scope: IRScope;
     /** unique id of the type */
     returnType: string;
 }

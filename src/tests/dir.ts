@@ -1,8 +1,8 @@
-import { DIRCompiler } from "../dir/dir";
+import { DIRModule } from "../dir/dir";
 import { parse } from "../parser";
 
 
-const dir = new DIRCompiler();
+const dir = new DIRModule();
 
 const basicCodeSnippet = `
     fn fib(n: i32) -> i32 = {
