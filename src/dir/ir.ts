@@ -1,4 +1,4 @@
-import { IREntities, IREntity, IRFunctionEntity, IREntityWithoutID, IRInstruction, WASMType } from "./definitions";
+import { IREntities, IREntity, IREntityWithoutID, IRInstruction } from "./definitions";
 import uniqid from "uniqid";
 
 export class IR {
@@ -88,7 +88,6 @@ export class IR {
     updateFunction(id: string, items: {
         locals: string[];
         body: IRInstruction[];
-        wasmType: WASMType;
     }) {
         const fn = this.getEntity(id);
 
@@ -98,7 +97,6 @@ export class IR {
 
         fn.locals = items.locals;
         fn.body = items.body;
-        fn.wasmType = items.wasmType;
     }
 
     /** Returns a new namespace id */

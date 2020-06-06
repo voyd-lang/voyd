@@ -1,5 +1,5 @@
 import { Instruction, AST, FunctionDeclaration, VariableDeclaration, MatchExpression, CallExpression, BinaryExpression, Identifier, PropertyAccessExpression, parse } from "../parser";
-import { IRInstruction, IREntity, IRMatchCase, IRFunctionWASMType, IRFunctionEntity, IRValueEntity, IRTypeEntity, WASMType } from "./definitions";
+import { IRInstruction, IREntity, IRMatchCase, IRFunctionEntity, IRValueEntity, IRTypeEntity } from "./definitions";
 import uniqid from "uniqid";
 import { IR } from "./ir";
 import { readFileSync } from "fs";
@@ -29,9 +29,6 @@ export class DIRCompiler {
 
                     // TODO distinguish static and instance namespaces
                     namespace: typeNamespace,
-
-                    // TODO, Handle aliases etc.
-                    wasmType: { kind: "external" }
                 }, namespace);
 
                 continue;
@@ -70,7 +67,7 @@ export class DIRCompiler {
         const body: IRInstruction[] = [];
         const locals: string[] = [];
         const parameters = this.compileFunctionParameters(fn, fnNamespace, self);
-        const { returnType, returnWASMType } = this.compileFunctionReturnType(fn, fnNamespace);
+        const returnType = this.resolveFnReturnType(fn, fnNamespace);
 
         // Create the function entity
         const id = this.ir.addEntity({
@@ -88,33 +85,13 @@ export class DIRCompiler {
             // Build the function body
             body.push(...this.compileBlock(fn.body, locals, fnNamespace));
 
-            // Generate the WASMType for the function
-            const wasmType: IRFunctionWASMType =
-                this.compileFnWASMType(parameters, locals, returnWASMType);
-
-            this.ir.updateFunction(id, { locals, body, wasmType });
+            this.ir.updateFunction(id, { locals, body });
         });
 
         return id;
     }
 
-    private compileFnWASMType(parameters: string[], locals: string[], returnWASMType: WASMType): IRFunctionWASMType {
-        return {
-            kind: "function",
-            parameters: parameters
-                .map(id => this.ir.getEntity(id).wasmType)
-                .filter(e => !!e) as WASMType[],
-            locals: locals
-                .map(id => this.ir.getEntity(id).wasmType)
-                .filter(e => !!e) as WASMType[],
-            returnType: returnWASMType
-        };
-    }
-
-    private compileFunctionReturnType(fn: FunctionDeclaration, internalNamespace: string): {
-        returnType: string,
-        returnWASMType: WASMType
-    } {
+    private resolveFnReturnType(fn: FunctionDeclaration, internalNamespace: string): string {
         const typeEntity = fn.returnType ?
             this.ir.findEntitiesWithLabel(fn.returnType.label, internalNamespace)[0] :
             this.inferType(fn.body[fn.body.length - 1], internalNamespace);
@@ -123,11 +100,7 @@ export class DIRCompiler {
             throw new Error(`${typeEntity.label} is not a type`);
         }
 
-        if (!typeEntity.wasmType) {
-            throw new Error(`The return type of ${fn.label} could not be inferred`);
-        }
-
-        return { returnType: typeEntity.id, returnWASMType: typeEntity.wasmType };
+        return typeEntity.id
     }
 
     private compileFunctionParameters(fn: FunctionDeclaration, internalNamespace: string, self?: string) {
@@ -144,7 +117,6 @@ export class DIRCompiler {
                 kind: "value",
                 flags: [],
                 label: p.label,
-                wasmType: typeEntity.wasmType,
                 namespace: internalNamespace,
                 typeEntity: typeEntity.id
             }, internalNamespace);
@@ -344,7 +316,6 @@ export class DIRCompiler {
             kind: "value",
             id, label, typeEntity: typeEntity.id,
             flags: variable.flags,
-            wasmType: typeEntity.wasmType,
             namespace
         }
     }

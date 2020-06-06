@@ -36,9 +36,10 @@ export interface IRFunctionEntity extends IREntityBase {
     body: IRInstruction[];
 }
 
-/** Represents types such as structs, enums, and type aliases */
+/** Represents types such as structs, enums, and type aliases. i.e. `type Foo =` or `declare type` */
 export interface IRTypeEntity extends IREntityBase {
     kind: "type";
+    typeEntity?: string;
 }
 
 
@@ -56,8 +57,6 @@ export interface IREntityBase {
 
     /** Namespace ID */
     namespace: string;
-
-    wasmType?: WASMType;
 }
 
 
@@ -189,46 +188,5 @@ export interface IRAssignment extends IRNode {
 }
 
 export interface IRNode {
-    kind: string;
-}
-
-///////////////////////////////
-///////////////////////////////
-///// Types
-///////////////////////////////
-///////////////////////////////
-
-/**
- * A WASM Type header
- */
-export type WASMType =
-    IRValueWASMType |
-    IRMultiValueWASMType |
-    IRFunctionWASMType |
-    IRExternalWASMType;
-
-export interface IRValueWASMType extends WASMTypeBase {
-    kind: "value";
-    binaryenType: WASMType;
-}
-
-export interface IRMultiValueWASMType extends WASMTypeBase {
-    kind: "multi-value";
-    binaryenType: WASMType[];
-}
-
-export interface IRFunctionWASMType extends WASMTypeBase {
-    kind: "function";
-    parameters: WASMType[];
-    locals: WASMType[];
-    returnType: WASMType;
-}
-
-// Used for declared types i.e. `declare type i32`
-export interface IRExternalWASMType extends WASMTypeBase {
-    kind: "external"
-}
-
-export interface WASMTypeBase {
     kind: string;
 }
