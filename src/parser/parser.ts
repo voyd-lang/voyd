@@ -152,13 +152,12 @@ function parseFnDeclaration(tokens: Token[], flags: string[]): FunctionDeclarati
         returnType = parseTypeArgument(tokens);
     }
 
-    let body: AST = [];
+    let expression: Instruction | undefined;
     if (tokens[0].type === "{") {
-        tokens.shift();
-        body = parseTokens(tokens);
+        expression = parseExpression(tokens);
     } else if (tokens[0].type === "=") {
         tokens.shift();
-        body.push(parseExpression(tokens));
+        expression = parseExpression(tokens);
     } else if (flags.includes("declare")) {
         // Do nothing
     } else {
@@ -170,7 +169,7 @@ function parseFnDeclaration(tokens: Token[], flags: string[]): FunctionDeclarati
         label,
         parameters,
         returnType,
-        body,
+        expression,
         typeParameters: [], // TODO
         flags
     }

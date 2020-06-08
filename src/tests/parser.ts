@@ -100,61 +100,65 @@ const correctBasicCodeSnippetAST: AST = [
             }
         ],
         returnType: { kind: 'type-argument', label: 'i32', flags: [] },
-        body: [
-            {
-                kind: 'if-expression',
-                condition: {
-                    kind: 'binary-expression',
-                    calleeLabel: '<',
-                    arguments: [
-                        { kind: 'identifier', label: 'n' },
-                        { kind: 'int-literal', value: '2' }
-                    ]
-                },
-                body: [
-                    {
-                        kind: 'return-statement',
-                        expression: { kind: 'identifier', label: 'n' }
-                    }
-                ],
-                elifBodies: [],
-                elseBody: undefined
-            },
-            {
-                kind: 'binary-expression',
-                calleeLabel: '+',
-                arguments: [
-                    {
-                        kind: 'call-expression',
-                        callee: { kind: 'identifier', label: 'fib' },
+        expression: {
+            kind: "block-expression",
+            flags: [],
+            body: [
+                {
+                    kind: 'if-expression',
+                    condition: {
+                        kind: 'binary-expression',
+                        calleeLabel: '<',
                         arguments: [
-                            {
-                                kind: 'binary-expression',
-                                calleeLabel: '-',
-                                arguments: [
-                                    { kind: 'identifier', label: 'n' },
-                                    { kind: 'int-literal', value: '2' }
-                                ]
-                            }
+                            { kind: 'identifier', label: 'n' },
+                            { kind: 'int-literal', value: '2' }
                         ]
                     },
-                    {
-                        kind: 'call-expression',
-                        callee: { kind: 'identifier', label: 'fib' },
-                        arguments: [
-                            {
-                                kind: 'binary-expression',
-                                calleeLabel: '-',
-                                arguments: [
-                                    { kind: 'identifier', label: 'n' },
-                                    { kind: 'int-literal', value: '1' }
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            }
-        ],
+                    body: [
+                        {
+                            kind: 'return-statement',
+                            expression: { kind: 'identifier', label: 'n' }
+                        }
+                    ],
+                    elifBodies: [],
+                    elseBody: undefined
+                },
+                {
+                    kind: 'binary-expression',
+                    calleeLabel: '+',
+                    arguments: [
+                        {
+                            kind: 'call-expression',
+                            callee: { kind: 'identifier', label: 'fib' },
+                            arguments: [
+                                {
+                                    kind: 'binary-expression',
+                                    calleeLabel: '-',
+                                    arguments: [
+                                        { kind: 'identifier', label: 'n' },
+                                        { kind: 'int-literal', value: '2' }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            kind: 'call-expression',
+                            callee: { kind: 'identifier', label: 'fib' },
+                            arguments: [
+                                {
+                                    kind: 'binary-expression',
+                                    calleeLabel: '-',
+                                    arguments: [
+                                        { kind: 'identifier', label: 'n' },
+                                        { kind: 'int-literal', value: '1' }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
         typeParameters: [],
         flags: ['fn']
     },

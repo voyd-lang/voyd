@@ -1,81 +1,270 @@
 import binaryen from "binaryen";
 import { ValueCollection } from "./values";
-import { MethodValue, LocalValue } from "./definitions";
+import { TypeEntity, Entity, FunctionEntity, LocalsTracker } from "./definitions";
 import {
     parse, Instruction, CallExpression, ReturnStatement, IfExpression, Assignment,
-    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, BinaryExpression
+    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, BinaryExpression, AST, TypeDeclaration, PropertyAccessExpression, Identifier
 } from "../parser";
 import uniqid from "uniqid";
+import { Entities } from "./entities";
+import { Scope } from "./scope";
+import { readFileSync } from "fs";
+import { EntityResolver } from "./entity-resolver";
+import { DeclarationScanner } from "./declaration-scanner";
 
-export function compile(code: string) {
-    const ast = parse(code);
-    const mod = new binaryen.Module();
-    const ids = new ValueCollection();
-    mod.autoDrop();
-    mod.addFunctionImport("print", "imports", "print", binaryen.i32, binaryen.none);
-    mod.addFunction("main", binaryen.none, binaryen.none, [], compileBlock({
-        body: ast, mod, vals: ids, returnType: binaryen.none
-    }));
-    mod.addFunctionExport("main", "main");
-    return mod;
-}
+export class Compiler {
+    private readonly entities = new Entities();
+    private readonly entityResolver = new EntityResolver(this.entities);
+    private readonly scanner = new DeclarationScanner(this.entities);
+    private readonly mod = new binaryen.Module();
+    private readonly stdScope = new Scope();
 
-function compileBlock({
-    body, mod, vals, returnType, existingInstructions,
-    additionalInstructions, context = "global"
-}: {
-    body: Instruction[],
-    mod: binaryen.Module,
-    vals: ValueCollection,
-    returnType?: number,
-    existingInstructions?: number[],
-    additionalInstructions?: number[],
-    context?: "global" | "method";
-}): number {
-    const block: number[] = existingInstructions ?? [];
+    constructor() {
+        this.mod.autoDrop();
+        this.mod.addFunctionImport("print", "imports", "print", binaryen.i32, binaryen.none);
+        const std = readFileSync(`${__dirname}/../../stdlib/i32.dm`, { encoding: "utf8" });
+        this.compile(std);
+    }
 
-    body.forEach(instruction => {
-        if (instruction.kind === "variable-declaration") {
-            compileVariableDeclaration({ instruction, vals, mod, block, context });
-            return;
+    compile(code: string, fromScope?: Scope) {
+        const ast = parse(code);
+        const scope = fromScope ?? this.stdScope.newSubScope();
+        this.walkAST(ast, scope);
+        return this.mod;
+    }
+
+    private walkAST(ast: AST, scope: Scope) {
+        for (const instruction of ast) {
+            if (instruction.kind === "type-declaration") {
+                // TODO.
+                continue;
+            }
+
+            if (instruction.kind === "function-declaration") {
+                this.compileFn(instruction, scope);
+                continue;
+            }
+
+            if (instruction.kind === "impl-declaration") {
+                const type = scope.accessibleEntitiesWithLabel(instruction.target, this.entities)[0];
+
+                if (!type || type.kind !== "type") {
+                    throw new Error(`${instruction.target} is not a type`);
+                }
+
+                instruction.functions.forEach(fn => this.compileFn(fn, type.scope, type.id));
+            }
+        }
+    }
+
+
+    private compileFn(fn: FunctionDeclaration, outerScope: Scope, self?: string): number {
+        const locals: LocalsTracker = { offset: parameters.length, values: [] };
+        const expression = this.compileExpression(fn.expression!, locals, fnScope);
+        const binParams = binaryen.createType(parameters.map(p => {
+            const type = this.entities.get(p) as TypeEntity;
+            return type.binType;
+        }))
+
+        return this.mod.addFunction(id, binParams, returnType.binType, locals.values, expression);
+    }
+
+    private compileExpression(expr: Instruction, locals: LocalsTracker, scope: Scope): number {
+        if (expr.kind === "if-expression") {
+            return this.compileIfExpression(expr, locals, scope);
         }
 
-        if (instruction.kind === "function-declaration") {
-            compileMethodDeclaration(instruction, vals, mod);
-            return;
+        if (expr.kind === "while-statement") {
+            return this.compileWhileStatement(block, mod, expr, vals);
         }
 
-        if (instruction.kind === "assignment") {
-            compileAssignment(instruction, mod, vals, block);
-            return;
+        if (expr.kind === "match-expression") {
+            return this.compileMatchExpression(block, mod, expr, vals);
         }
 
-        // TODO: make this an expression
-        if (instruction.kind === "if-expression") {
-            compileIfExpression(block, mod, instruction, vals);
-            return;
+        if (expr.kind === "return-statement") {
+            return this.compileReturn(block, mod, expr, vals);
         }
 
-        if (instruction.kind === "while-statement") {
-            compileWhileStatement(block, mod, instruction, vals);
-            return;
+        if (expr.kind === "int-literal") {
+            return this.mod.i32.const(Number(expr.value));
         }
 
-        if (instruction.kind === "match-expression") {
-            compileMatchExpression(block, mod, instruction, vals);
-            return;
+        if (expr.kind === "float-literal") {
+            return this.mod.f32.const(Number(expr.value));
         }
 
-        if (instruction.kind === "return-statement") {
-            compileReturn(block, mod, instruction, vals);
-            return;
+        if (expr.kind === "bool-literal") {
+            return this.mod.i32.const(expr.value ? 1 : 0);
         }
 
-        block.push(compileExpression(instruction, mod, vals));
-    });
+        if (expr.kind === "identifier") {
+            const identifier = vals.retrieve(expr.label);
 
-    if (additionalInstructions) block.push(...additionalInstructions);
-    return mod.block("", block, returnType);
+            if (identifier.kind === "local") {
+                return mod.local.get(identifier.index, identifier.type);
+            }
+
+            if (identifier.kind === "global") {
+                return mod.global.get(identifier.id, identifier.type);
+            }
+
+            throw new Error(`Unsupported identifier type in expression: ${identifier.kind}`);
+        }
+
+        if (expr.kind === "binary-expression") {
+            return compileBinaryExpression(expr, mod, vals);
+        }
+
+        if (expr.kind === "call-expression") {
+            // TODO: Add to vals as stdlib
+            if (expr.calleeLabel === "print") {
+                return (mod.call as any)("print", [compileExpression(expr.arguments[0], mod, vals)], binaryen.none);
+            }
+
+            const val = vals.retrieve(expr.calleeLabel);
+            if (val.kind !== "method") throw new Error(`${expr.calleeLabel} is not a method`);
+            const args = expr.arguments.map(instr => compileExpression(instr, mod, vals));
+            return (mod.call as any)(val.id, args, val.returnType);
+        }
+
+        throw new Error(`Invalid expression ${expr.kind}`);
+    }
+
+    private compileIfExpression(instruction: IfExpression, locals: LocalsTracker, scope: Scope) {
+        return this.mod.if(
+            this.compileExpression(instruction.condition, locals, scope),
+            this.compileBlock(instruction.body, locals, scope)
+        )
+    }
+
+    private compileBlock(body: AST, locals: LocalsTracker, scope: Scope): number {
+        return this.mod.block("", body.map(instruction => {
+            if (instruction.kind === "variable-declaration") {
+                return this.compileVariableDeclaration(instruction, locals, scope);
+            }
+
+            if (instruction.kind === "function-declaration") {
+                return this
+            }
+
+            if (instruction.kind === "assignment") {
+                compileAssignment(instruction, mod, vals, block);
+                return;
+            }
+
+            return compileExpression(instruction, mod, vals);
+        }));
+    }
+
+    private compileVariableDeclaration(vr: VariableDeclaration, locals: LocalsTracker, scope: Scope): number {
+        const type = vr.type ?
+            this.resolveTypeEntityFromLabel(vr.type.label, scope) :
+            this.inferType(vr.initializer!, scope) as TypeEntity;
+
+        locals.values.push(type.binType);
+
+        const index = locals.values.length + locals.offset;
+
+        this.entities.add({
+            kind: "local",
+            label: vr.label,
+            typeEntity: type.id,
+            flags: vr.flags,
+            mutable: vr.flags.includes("var"),
+            index,
+            scope
+        });
+
+        if (!vr.initializer) return this.mod.nop();
+
+        return this.mod.local.set(index, this.compileExpression(vr.initializer, locals, scope));
+    }
+
+    /** Returns the expression's result type entity, TODO: ADD ERROR CHECKING IN PLACE OF AS IRTypeEntity */
+    private inferType(expr: Instruction, scope: Scope): TypeEntity {
+        if (expr.kind === "call-expression") {
+            const entity = this.resolveEntity(expr.callee, scope)[0];
+            if (!entity || entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
+            const returnType = (entity as FunctionEntity).returnType;
+            if (returnType) return this.entities.get(returnType) as TypeEntity;
+        }
+
+        if (expr.kind === "binary-expression") {
+            const operand = this.inferType(expr.arguments[0], scope);
+            const entity = operand.scope.accessibleEntitiesWithLabel(expr.calleeLabel, this.entities)[0];
+            if (!entity || entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
+            const returnType = (entity as FunctionEntity).returnType;
+            if (returnType) return this.entities.get(returnType) as TypeEntity;
+        }
+
+        if (expr.kind === "identifier") {
+            const entity = this.resolveEntity(expr, scope)[0];
+
+            if (!entity) {
+                throw new Error(`${expr.label} is not defined`);
+            }
+
+            if (entity.kind === "local") return this.entities.get(entity.typeEntity) as TypeEntity;
+            return entity as TypeEntity;
+        }
+
+        if (expr.kind === "block-expression") {
+            return this.inferType(expr.body[expr.body.length - 1], scope);
+        }
+
+        if (expr.kind === "parameter-declaration") {
+            if (expr.type) {
+                return scope.accessibleEntitiesWithLabel(expr.type.label, this.entities)[0] as TypeEntity;
+            }
+
+            if (expr.initializer) {
+                return this.inferType(expr.initializer, scope);
+            }
+        }
+
+        const byLabel = (label: string) => scope.accessibleEntitiesWithLabel(label, this.entities)[0];
+        if (expr.kind === "bool-literal") return byLabel("bool") as TypeEntity;
+        if (expr.kind === "float-literal") return byLabel("f32") as TypeEntity;
+        if (expr.kind === "int-literal") return byLabel("i32") as TypeEntity;
+        if (expr.kind === "return-statement") return this.inferType(expr.expression, scope);
+        if (expr.kind === "if-expression") {
+            return this.inferType(expr.body[expr.body.length - 1], scope);
+        }
+
+        throw new Error(`Unable to infer type`);
+    }
+
+    private resolveEntity(expr: PropertyAccessExpression | Identifier, scope: Scope): Entity[] {
+        if (expr.kind === "identifier") {
+            return scope.accessibleEntitiesWithLabel(expr.label, this.entities);
+        }
+
+        const parent = this.resolveEntity(expr.arguments[0], scope)[0];
+        return this.resolveEntity(expr.arguments[1], parent.scope);
+    }
+
+    private resolveTypeEntityFromLabel(label: string, scope: Scope) {
+        const typeEntity = scope.accessibleEntitiesWithLabel(label, this.entities)[0];
+
+        if (!typeEntity || typeEntity.kind !== "type") {
+            throw new Error(`${typeEntity.label} is not a type`);
+        }
+
+        return typeEntity;
+    }
+
+    private getBinType(type: TypeDeclaration): number {
+        if (!type.flags.includes("declare")) {
+            throw new Error(`Unsupported type alias ${type.label}`);
+        }
+
+        if (type.label === "i32") {
+            return binaryen.i32;
+        }
+
+        throw new Error(`Unsupported type alias ${type.label}`);
+    }
 }
 
 // TODO: Support non integer cases.
@@ -141,13 +330,6 @@ function compileReturn(block: number[], mod: binaryen.Module, instruction: Retur
     block.push(mod.return(compileExpression(instruction.expression, mod, vals)));
 }
 
-function compileIfExpression(block: number[], mod: binaryen.Module, instruction: IfExpression, vals: ValueCollection) {
-    block.push(
-        mod.if(compileExpression(instruction.condition, mod, vals),
-            compileBlock({ body: instruction.body, mod, vals: vals }))
-    );
-}
-
 function compileWhileStatement(block: number[], mod: binaryen.Module, instruction: WhileStatement, vals: ValueCollection) {
     block.push(
         mod.block("while", [
@@ -184,277 +366,4 @@ function compileAssignment(instruction: Assignment, mod: binaryen.Module, vals: 
     }
 
     block.push(mod.global.set(id, expr));
-}
-
-function compileMethodDeclaration(instruction: FunctionDeclaration, vals: ValueCollection, mod: binaryen.Module) {
-    const id = instruction.label;
-    const internalVals = vals.clone();
-    const params = instruction.parameters.map((param, index) => {
-        const type = getTypeFromString(param.type!.label);
-        internalVals.register({
-            kind: "local",
-            mutable: false,
-            type, flags: [],
-            id: param.label,
-            index
-        });
-        return type;
-    });
-
-    const returnType = instruction.returnType ?
-        getTypeFromString(instruction.returnType.label) :
-        binaryen.none;
-
-    const method: MethodValue = {
-        kind: "method",
-        id,
-        parameters: params,
-        returnType,
-        flags: instruction.flags ?? []
-    };
-    internalVals.register(method);
-    vals.register(method);
-
-    const methodBody = compileBlock({
-        body: instruction.body,
-        mod,
-        vals: internalVals,
-        returnType,
-        context: "method",
-    });
-    const additionalLocals = internalVals.getNonParameterLocalTypes();
-
-    mod.addFunction(id, binaryen.createType(params), returnType, additionalLocals, methodBody);
-}
-
-function compileVariableDeclaration({
-    instruction, vals, mod, block, context = "global"
-}: {
-    instruction: VariableDeclaration, vals: ValueCollection, mod: binaryen.Module, block: number[],
-    context?: "global" | "method"
-}) {
-    const id = instruction.label
-    const type = instruction.type ?
-        getTypeFromString(instruction.type.label) :
-        inferType(instruction.initializer!, vals);
-
-    if (context === "method") {
-        vals.register({
-            kind: "local",
-            id, type,
-            flags: instruction.flags,
-            nonParameter: true,
-            mutable: instruction.flags.includes("var"),
-            index: 0
-        });
-
-        if (instruction.initializer) {
-            const local = vals.retrieve(id) as LocalValue;
-            block.push(mod.local.set(
-                local.index,
-                compileExpression(instruction.initializer, mod, vals)
-            ))
-        }
-
-        return;
-    }
-
-    mod.addGlobal(id, type, true, globalInit(type, mod));
-
-    vals.register({
-        kind: "global",
-        id,
-        type,
-        mutable: instruction.flags.includes("var"),
-        flags: instruction.flags
-    });
-
-    if (instruction.initializer) {
-        block.push(mod.global.set(id, compileExpression(instruction.initializer, mod, vals)));
-    }
-}
-
-function compileExpression(expr: Instruction, mod: binaryen.Module, vals: ValueCollection): number {
-    if (expr.kind === "int-literal") {
-        return mod.i32.const(Number(expr.value));
-    }
-
-    if (expr.kind === "float-literal") {
-        return mod.f32.const(Number(expr.value));
-    }
-
-    if (expr.kind === "bool-literal") {
-        return mod.i32.const(expr.value ? 1 : 0);
-    }
-
-    if (expr.kind === "identifier") {
-        const identifier = vals.retrieve(expr.label);
-
-        if (identifier.kind === "local") {
-            return mod.local.get(identifier.index, identifier.type);
-        }
-
-        if (identifier.kind === "global") {
-            return mod.global.get(identifier.id, identifier.type);
-        }
-
-        throw new Error(`Unsupported identifier type in expression: ${identifier.kind}`);
-    }
-
-    if (expr.kind === "binary-expression") {
-        return compileBinaryExpression(expr, mod, vals);
-    }
-
-    if (expr.kind === "call-expression") {
-        // TODO: Add to vals as stdlib
-        if (expr.calleeLabel === "print") {
-            return (mod.call as any)("print", [compileExpression(expr.arguments[0], mod, vals)], binaryen.none);
-        }
-
-        const val = vals.retrieve(expr.calleeLabel);
-        if (val.kind !== "method") throw new Error(`${expr.calleeLabel} is not a method`);
-        const args = expr.arguments.map(instr => compileExpression(instr, mod, vals));
-        return (mod.call as any)(val.id, args, val.returnType);
-    }
-
-    throw new Error(`Invalid expression ${expr.kind}`);
-}
-
-function compileBinaryExpression(expr: BinaryExpression, mod: binaryen.Module, ids: ValueCollection): number {
-    const arg1 = expr.arguments.shift()!;
-    const arg2 = expr.arguments.shift()!;
-    const type = inferType(arg1, ids); // Probably room for performance improvements here.
-    const cArg1 = compileExpression(arg1, mod, ids);
-    const cArg2 = compileExpression(arg2, mod, ids);
-    const id = expr.calleeLabel;
-
-    if (type === binaryen.i32 && id === "+") {
-        return mod.i32.add(cArg1, cArg2)
-    }
-
-    if (type === binaryen.f32 && id === "+") {
-        return mod.f32.add(cArg1, cArg2)
-    }
-
-    if (type === binaryen.i32 && id === "-") {
-        return mod.i32.sub(cArg1, cArg2)
-    }
-
-    if (type === binaryen.f32 && id === "-") {
-        return mod.f32.sub(cArg1, cArg2)
-    }
-
-    if (type === binaryen.i32 && id === "*") {
-        return mod.i32.mul(cArg1, cArg2)
-    }
-
-    if (type === binaryen.f32 && id === "*") {
-        return mod.f32.mul(cArg1, cArg2)
-    }
-
-    if (type === binaryen.i32 && id === "/") {
-        return mod.i32.div_s(cArg1, cArg2)
-    }
-
-    if (type === binaryen.f32 && id === "/") {
-        return mod.f32.div(cArg1, cArg2)
-    }
-
-    if (type === binaryen.i32 && id === "<") {
-        return mod.i32.lt_s(cArg1, cArg2)
-    }
-
-    if (type === binaryen.i32 && id === ">") {
-        return mod.i32.gt_s(cArg1, cArg2)
-    }
-
-    if (type === binaryen.i32 && id === "<=") {
-        return mod.i32.le_s(cArg1, cArg2)
-    }
-
-    if (type === binaryen.i32 && id === ">=") {
-        return mod.i32.ge_s(cArg1, cArg2)
-    }
-
-    if (type === binaryen.f32 && id === "<") {
-        return mod.f32.lt(cArg1, cArg2)
-    }
-
-    if (type === binaryen.f32 && id === ">") {
-        return mod.f32.gt(cArg1, cArg2)
-    }
-
-    if (type === binaryen.f32 && id === "<=") {
-        return mod.f32.le(cArg1, cArg2)
-    }
-
-    if (type === binaryen.f32 && id === ">=") {
-        return mod.f32.ge(cArg1, cArg2)
-    }
-
-    throw new Error(`Unsupported add type: ${type}`);
-}
-
-function inferType(expression: Instruction, ids: ValueCollection): number {
-    if (expression.kind === "call-expression") {
-        if (["+", "-", "*", "/"].includes(expression.calleeLabel)) {
-            return inferType(expression.arguments[0], ids);
-        }
-
-        if (["==", ">", "<", ">=", "<=", "and", "ir"].includes(expression.calleeLabel)) {
-            return binaryen.i32;
-        }
-
-        const identifier = ids.retrieve(expression.calleeLabel);
-        if (identifier.kind !== "method" || !identifier.returnType) {
-            throw new Error(`Unable to infer return type for ${expression.calleeLabel}`);
-        }
-        return identifier.returnType;
-    }
-
-    if (expression.kind === "bool-literal") return binaryen.i32;
-    if (expression.kind === "float-literal") return binaryen.f32;
-    if (expression.kind === "int-literal") return binaryen.i32;
-    if (expression.kind === "return-statement") return inferType(expression.expression, ids);
-    if (expression.kind === "if-expression") {
-        return inferType(expression.body[expression.body.length - 1], ids);
-    }
-
-    if (expression.kind === "identifier") {
-        const id = ids.retrieve(expression.label);
-        if (id.kind === "method") throw new Error("Unexpected identifier");
-        return id.type;
-    }
-
-
-    throw new Error(`Unable to infer type for ${expression.kind}`);
-}
-
-function globalInit(type: number, mod: binaryen.Module): number {
-    switch (type) {
-        case binaryen.i32:
-            return mod.i32.const(0);
-        case binaryen.i64:
-            return mod.i64.const(0, 0);
-        case binaryen.f32:
-            return mod.f32.const(0);
-        case binaryen.f64:
-            return mod.f64.const(0);
-        default:
-            throw new Error(`Unknown type: ${type}`);
-    }
-}
-
-function getTypeFromString(typeIdentifier: string): number {
-    if (typeIdentifier === "i32") return binaryen.i32;
-    if (typeIdentifier === "f32") return binaryen.f32;
-    if (typeIdentifier === "i64") return binaryen.i64;
-    if (typeIdentifier === "f64") return binaryen.f64;
-    throw new Error(`Unknown type: ${typeIdentifier}`);
-}
-
-function getMutability(flags: string[]): boolean {
-    if (flags.includes("let")) return false;
-    if (flags.includes("var")) return true;
-    throw new Error("Passed flags do not include mutability modifiers");
 }

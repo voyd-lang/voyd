@@ -9,6 +9,9 @@ export interface VariableDeclaration extends ASTNode {
     flags: string[];
     type?: TypeArgument;
     initializer?: Instruction;
+
+    /** Entity ID if resolved */
+    id?: string;
 }
 
 export interface FunctionDeclaration extends ASTNode {
@@ -18,7 +21,10 @@ export interface FunctionDeclaration extends ASTNode {
     typeParameters: TypeParameterDeclaration[];
     returnType?: TypeArgument;
     flags: string[];
-    body: Instruction[];
+    expression?: Instruction;
+
+    /** Entity ID if resolved */
+    id?: string;
 }
 
 export interface EnumDeclaration extends ASTNode {
@@ -27,6 +33,9 @@ export interface EnumDeclaration extends ASTNode {
     typeParameters: TypeParameterDeclaration[];
     flags: string[];
     variants: EnumVariantDeclaration[];
+
+    /** Entity ID if resolved */
+    id?: string;
 }
 
 export interface EnumVariantDeclaration {
@@ -35,6 +44,9 @@ export interface EnumVariantDeclaration {
     parentEnum: string;
     flags: string[];
     associatedType?: ASTNode; // TBD
+
+    /** Entity ID if resolved */
+    id?: string;
 }
 
 export interface StructDeclaration extends ASTNode {
@@ -44,6 +56,9 @@ export interface StructDeclaration extends ASTNode {
     variables: VariableDeclaration[];
     methods: FunctionDeclaration[];
     flags: string[];
+
+    /** Entity ID if resolved */
+    id?: string;
 }
 
 export interface ImplDeclaration extends ASTNode {
@@ -52,6 +67,9 @@ export interface ImplDeclaration extends ASTNode {
     trait?: string;
     functions: FunctionDeclaration[];
     flags: string[];
+
+    targetID?: string;
+    traitID?: string;
 }
 
 export interface TypeDeclaration extends ASTNode {
@@ -59,6 +77,34 @@ export interface TypeDeclaration extends ASTNode {
     label: string;
     flags: string[];
     type: TypeArgument;
+
+    /** Entity ID if resolved */
+    id?: string;
+}
+
+export interface ParameterDeclaration extends ASTNode {
+    kind: "parameter-declaration";
+    label: string;
+    flags: string[];
+    type?: TypeArgument;
+    initializer?: Instruction;
+
+    /** Entity ID if resolved */
+    id?: string;
+}
+
+export interface Identifier extends ASTNode {
+    kind: "identifier";
+    label: string;
+
+    /** Entity ID if resolved */
+    id?: string;
+}
+
+export interface TypeArgument extends ASTNode {
+    kind: "type-argument";
+    label: string;
+    flags: string[];
 }
 
 export interface ForInStatement extends ASTNode {
@@ -143,20 +189,6 @@ export interface TypeParameterDeclaration extends ASTNode {
     constraints: string[];
 }
 
-export interface ParameterDeclaration extends ASTNode {
-    kind: "parameter-declaration";
-    label: string;
-    flags: string[];
-    type?: TypeArgument;
-    initializer?: Instruction;
-}
-
-export interface TypeArgument extends ASTNode {
-    kind: "type-argument";
-    label: string;
-    flags: string[];
-}
-
 export interface IntLiteral extends ASTNode {
     kind: "int-literal";
     value: string;
@@ -175,11 +207,6 @@ export interface StringLiteral extends ASTNode {
 export interface BoolLiteral extends ASTNode {
     kind: "bool-literal";
     value: boolean;
-}
-
-export interface Identifier extends ASTNode {
-    kind: "identifier";
-    label: string;
 }
 
 export interface Assignment extends ASTNode {

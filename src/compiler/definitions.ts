@@ -1,28 +1,57 @@
+import { Scope } from "./scope";
 
-export interface LocalValue {
+/** Any item that can be referenced by an identifier */
+export type Entity =
+    FunctionEntity |
+    TypeEntity |
+    LocalEntity;
+
+export type EntityWithoutID =
+    Omit<FunctionEntity, "id"> |
+    Omit<TypeEntity, "id"> |
+    Omit<LocalEntity, "id">;
+
+export interface FunctionEntity extends EntityBase {
+    kind: "function";
+
+    /** Entity ID */
+    parameters: string[];
+
+    /** Entity ID */
+    returnType?: string;
+}
+
+/** Represents types such as structs, enums, and type aliases. i.e. `type Foo =` or `declare type` */
+export interface TypeEntity extends EntityBase {
+    kind: "type";
+
+    /** Binaryen type ref */
+    binType?: number;
+
+    typeEntity?: string;
+}
+
+
+export interface LocalEntity extends EntityBase {
     kind: "local";
-    id: string;
-    type: number;
     mutable: boolean;
     index: number;
-    nonParameter?: boolean;
-    flags: string[];
+    typeEntity?: string;
 }
 
-export interface GlobalValue {
-    kind: "global";
+/** A declared definition */
+export interface EntityBase {
+    kind: string;
     id: string;
-    type: number;
-    mutable: boolean;
+    label: string;
     flags: string[];
+    scope: Scope;
 }
 
-export interface MethodValue {
-    kind: "method";
-    id: string;
-    parameters: number[];
-    returnType: number;
-    flags: string[];
-}
+/** Tracks the locals of a WASM function */
+export interface LocalsTracker {
+    /** The number of parameters in a function. Represents where the index should start. */
+    offset: number;
 
-export type Value = LocalValue | MethodValue | GlobalValue;
+    values: number[];
+}
