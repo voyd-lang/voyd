@@ -1,7 +1,7 @@
-import { SemanticAnalyzer } from "../compiler/declaration-scanner";
-import { Entities } from "../compiler/entities";
+import { SemanticAnalyzer } from "../semantic-analyzer";
+import { EntityCollection } from "../entity-collection";
 import { readFileSync } from "fs";
-import { Scope } from "../compiler/scope";
+import { Scope } from "../scope";
 import { parse } from "../parser";
 
 console.dir(parse("hello.world.today"), { depth: 20 });

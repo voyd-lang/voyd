@@ -1,4 +1,4 @@
-import { Value, LocalValue } from "./definitions";
+import { Value, LocalValue } from "../definitions";
 
 export class ValueCollection {
     private readonly values: { [key: string]: Value };

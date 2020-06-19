@@ -1,4 +1,4 @@
-import { compile } from "../compiler";
+import { compile } from "../assembler";
 
 const code = `
     fn fib(n: i32) -> i32 {

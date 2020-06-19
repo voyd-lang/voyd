@@ -1,21 +1,21 @@
 import binaryen from "binaryen";
 import { ValueCollection } from "./values";
-import { TypeEntity, Entity, FunctionEntity, LocalsTracker } from "./definitions";
+import { TypeEntity, Entity, FunctionEntity, LocalsTracker } from "../definitions";
 import {
     parse, Instruction, CallExpression, ReturnStatement, IfExpression, Assignment,
-    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, BinaryExpression, AST, TypeDeclaration, PropertyAccessExpression, Identifier
+    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, TypeDeclaration, PropertyAccessExpression, Identifier
 } from "../parser";
 import uniqid from "uniqid";
-import { Entities } from "./entities";
-import { Scope } from "./scope";
+import { EntityCollection } from "../entity-collection";
+import { Scope } from "../scope";
 import { readFileSync } from "fs";
-import { EntityResolver } from "./entity-resolver";
-import { DeclarationScanner } from "./declaration-scanner";
+import { EntityResolver } from "../entity-resolver";
+import { SemanticAnalyzer } from "../semantic-analyzer";
 
-export class Compiler {
-    private readonly entities = new Entities();
+export class Assembler {
+    private readonly entities = new EntityCollection();
     private readonly entityResolver = new EntityResolver(this.entities);
-    private readonly scanner = new DeclarationScanner(this.entities);
+    private readonly scanner = new SemanticAnalyzer(this.entities);
     private readonly mod = new binaryen.Module();
     private readonly stdScope = new Scope();
 
@@ -28,7 +28,7 @@ export class Compiler {
 
     compile(code: string, fromScope?: Scope) {
         const ast = parse(code);
-        const scope = fromScope ?? this.stdScope.newSubScope();
+        const scope = fromScope ?? this.stdScope.sub();
         this.walkAST(ast, scope);
         return this.mod;
     }
@@ -46,19 +46,19 @@ export class Compiler {
             }
 
             if (instruction.kind === "impl-declaration") {
-                const type = scope.accessibleEntitiesWithLabel(instruction.target, this.entities)[0];
+                const type = scope.functionsWithLabel(instruction.target, this.entities)[0];
 
                 if (!type || type.kind !== "type") {
                     throw new Error(`${instruction.target} is not a type`);
                 }
 
-                instruction.functions.forEach(fn => this.compileFn(fn, type.scope, type.id));
+                instruction.functions.forEach(fn => this.compileFn(fn, type.id));
             }
         }
     }
 
 
-    private compileFn(fn: FunctionDeclaration, outerScope: Scope, self?: string): number {
+    private compileFn(fn: FunctionDeclaration, self?: string): number {
         const locals: LocalsTracker = { offset: parameters.length, values: [] };
         const expression = this.compileExpression(fn.expression!, locals, fnScope);
         const binParams = binaryen.createType(parameters.map(p => {
@@ -192,7 +192,7 @@ export class Compiler {
 
         if (expr.kind === "binary-expression") {
             const operand = this.inferType(expr.arguments[0], scope);
-            const entity = operand.scope.accessibleEntitiesWithLabel(expr.calleeLabel, this.entities)[0];
+            const entity = operand.scope.functionsWithLabel(expr.calleeLabel, this.entities)[0];
             if (!entity || entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
             const returnType = (entity as FunctionEntity).returnType;
             if (returnType) return this.entities.get(returnType) as TypeEntity;
@@ -215,7 +215,7 @@ export class Compiler {
 
         if (expr.kind === "parameter-declaration") {
             if (expr.type) {
-                return scope.accessibleEntitiesWithLabel(expr.type.label, this.entities)[0] as TypeEntity;
+                return scope.functionsWithLabel(expr.type.label, this.entities)[0] as TypeEntity;
             }
 
             if (expr.initializer) {
@@ -223,7 +223,7 @@ export class Compiler {
             }
         }
 
-        const byLabel = (label: string) => scope.accessibleEntitiesWithLabel(label, this.entities)[0];
+        const byLabel = (label: string) => scope.functionsWithLabel(label, this.entities)[0];
         if (expr.kind === "bool-literal") return byLabel("bool") as TypeEntity;
         if (expr.kind === "float-literal") return byLabel("f32") as TypeEntity;
         if (expr.kind === "int-literal") return byLabel("i32") as TypeEntity;
@@ -237,7 +237,7 @@ export class Compiler {
 
     private resolveEntity(expr: PropertyAccessExpression | Identifier, scope: Scope): Entity[] {
         if (expr.kind === "identifier") {
-            return scope.accessibleEntitiesWithLabel(expr.label, this.entities);
+            return scope.functionsWithLabel(expr.label, this.entities);
         }
 
         const parent = this.resolveEntity(expr.arguments[0], scope)[0];
@@ -245,7 +245,7 @@ export class Compiler {
     }
 
     private resolveTypeEntityFromLabel(label: string, scope: Scope) {
-        const typeEntity = scope.accessibleEntitiesWithLabel(label, this.entities)[0];
+        const typeEntity = scope.functionsWithLabel(label, this.entities)[0];
 
         if (!typeEntity || typeEntity.kind !== "type") {
             throw new Error(`${typeEntity.label} is not a type`);

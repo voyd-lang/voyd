@@ -4,14 +4,16 @@ import {
     ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST, BlockExpression, TypeDeclaration, PropertyAccessExpression, ImplDeclaration, ASTNode
 } from "./definitions";
 import { isInTuple } from "../helpers";
+import { Scope } from "../scope";
 
 export function parse(code: string): AST {
     const tokens = tokenize(code);
-    return parseTokens(tokens);
+    const scope = new Scope();
+    return { body: parseTokens(tokens, scope), scope };
 }
 
-function parseTokens(tokens: Token[]): AST {
-    const ast: AST = [];
+function parseTokens(tokens: Token[], scope: Scope): Instruction[] {
+    const instructions: Instruction[] = [];
 
     while (tokens.length > 0) {
         const next = tokens[0];
@@ -25,13 +27,13 @@ function parseTokens(tokens: Token[]): AST {
             continue;
         }
 
-        ast.push(parseStatement(tokens));
+        instructions.push(parseStatement(tokens, scope));
     }
 
-    return ast;
+    return instructions;
 }
 
-function parseStatement(tokens: Token[]): Instruction {
+function parseStatement(tokens: Token[], scope: Scope): Instruction {
     while (tokens.length > 0) {
         let token = tokens[0];
         const next = tokens[1];
@@ -43,28 +45,28 @@ function parseStatement(tokens: Token[]): Instruction {
         }
 
         if (token.type === "keyword") {
-            return parseKeywordStatement(tokens);
+            return parseKeywordStatement(tokens, scope);
         }
 
         if (token.type === "identifier" && next && next.type === "=") {
-            return parseAssignment(tokens);
+            return parseAssignment(tokens, scope);
         }
 
-        return parseExpression(tokens);
+        return parseExpression(tokens, scope);
     }
 
     throw new Error("Invalid statement");
 }
 
-function parseKeywordStatement(tokens: Token[]): Instruction {
+function parseKeywordStatement(tokens: Token[], scope: Scope): Instruction {
     let token = tokens[0];
 
     if (token.value === "return") {
-        return parseReturnStatement(tokens);
+        return parseReturnStatement(tokens, scope);
     }
 
     if (["if", "while", "for", "match"].includes(token.value)) {
-        return parseExpression(tokens);
+        return parseExpression(tokens, scope);
     }
 
     if (token.value === "continue") {
@@ -82,34 +84,35 @@ function parseKeywordStatement(tokens: Token[]): Instruction {
     }
 
     if (flags.some(val => val === "let" || val === "var")) {
-        return parseVariableDeclaration(tokens, flags);
+        return parseVariableDeclaration(tokens, flags, scope);
     }
 
     if (flags.includes("fn")) {
-        return parseFnDeclaration(tokens, flags);
+        return parseFnDeclaration(tokens, flags, scope);
     }
 
     if (flags.includes("enum")) {
-        return parseEnumDeclaration(tokens, flags);
+        return parseEnumDeclaration(tokens, flags, scope);
     }
 
     if (flags.includes("type")) {
-        return parseTypeDeclaration(tokens, flags);
+        return parseTypeDeclaration(tokens, flags, scope);
     }
 
     if (flags.includes("unsafe")) {
-        return parseBlockExpression(tokens, flags);
+        return parseBlockExpression(tokens, flags, scope);
     }
 
     if (flags.includes("impl")) {
-        return parseImplDeclaration(tokens, flags);
+        return parseImplDeclaration(tokens, flags, scope);
     }
+
     console.log(flags);
     const keywordStr = flags.reduce((p, c) => `${p} ${c}`, "");
     throw new Error(`Expected statement after keyword(s):${keywordStr}`);
 }
 
-function parseAssignment(tokens: Token[]): Assignment {
+function parseAssignment(tokens: Token[], scope: Scope): Assignment {
     const assignee = parseIdentifierExpression(tokens);
 
     const equals = tokens.shift();
@@ -120,11 +123,11 @@ function parseAssignment(tokens: Token[]): Assignment {
     return {
         kind: "assignment",
         assignee,
-        expression: parseExpression(tokens)
+        expression: parseExpression(tokens, scope)
     }
 }
 
-function parseReturnStatement(tokens: Token[]): ReturnStatement {
+function parseReturnStatement(tokens: Token[], scope: Scope): ReturnStatement {
     const returnToken = tokens.shift();
     if (!returnToken || returnToken.value !== "return") {
         throw new Error("Expected return token");
@@ -132,19 +135,19 @@ function parseReturnStatement(tokens: Token[]): ReturnStatement {
 
     return {
         kind: "return-statement",
-        expression: parseExpression(tokens)
+        expression: parseExpression(tokens, scope)
     }
 }
 
 /** Parse a function, beginning after fn */
-function parseFnDeclaration(tokens: Token[], flags: string[]): FunctionDeclaration {
+function parseFnDeclaration(tokens: Token[], flags: string[], scope: Scope): FunctionDeclaration {
     const identifierToken = tokens.shift();
     if (!identifierToken || identifierToken.type !== "identifier" && identifierToken.type !== "operator") {
         throw new Error("Expected identifier after function declaration");
     }
 
     const label = identifierToken.value;
-    const parameters = parseFnParameters(tokens);
+    const parameters = parseFnParameters(tokens, scope);
 
     let returnType: TypeArgument | undefined;
     if (tokens[0].type === "->") {
@@ -154,10 +157,10 @@ function parseFnDeclaration(tokens: Token[], flags: string[]): FunctionDeclarati
 
     let expression: Instruction | undefined;
     if (tokens[0].type === "{") {
-        expression = parseExpression(tokens);
+        expression = parseExpression(tokens, scope);
     } else if (tokens[0].type === "=") {
         tokens.shift();
-        expression = parseExpression(tokens);
+        expression = parseExpression(tokens, scope);
     } else if (flags.includes("declare")) {
         // Do nothing
     } else {
@@ -170,12 +173,13 @@ function parseFnDeclaration(tokens: Token[], flags: string[]): FunctionDeclarati
         parameters,
         returnType,
         expression,
+        scope: scope.sub(),
         typeParameters: [], // TODO
         flags
     }
 }
 
-function parseFnParameters(tokens: Token[]): ParameterDeclaration[] {
+function parseFnParameters(tokens: Token[], scope: Scope): ParameterDeclaration[] {
     const params: ParameterDeclaration[] = [];
 
     const openingBracket = tokens.shift();
@@ -189,7 +193,7 @@ function parseFnParameters(tokens: Token[]): ParameterDeclaration[] {
     let token = tokens[0];
     while (token && token.type !== closeBracket) {
         if (token.type === "identifier") {
-            params.push(parseParameter(tokens));
+            params.push(parseParameter(tokens, scope));
             token = tokens[0];
             continue;
         }
@@ -209,7 +213,7 @@ function parseFnParameters(tokens: Token[]): ParameterDeclaration[] {
     return params;
 }
 
-function parseParameter(tokens: Token[]): ParameterDeclaration {
+function parseParameter(tokens: Token[], scope: Scope): ParameterDeclaration {
     const flags: string[] = [];
 
     const identifierToken = tokens.shift();
@@ -225,7 +229,7 @@ function parseParameter(tokens: Token[]): ParameterDeclaration {
     }
 
     if (separator.value === "=") {
-        const initializer = parseExpression(tokens);
+        const initializer = parseExpression(tokens, scope);
         return {
             kind: "parameter-declaration",
             label,
@@ -251,7 +255,7 @@ function parseParameter(tokens: Token[]): ParameterDeclaration {
     }
 }
 
-function parseVariableDeclaration(tokens: Token[], flags: string[]): VariableDeclaration {
+function parseVariableDeclaration(tokens: Token[], flags: string[], scope: Scope): VariableDeclaration {
     let type: TypeArgument | undefined = undefined;
     let initializer: Instruction | undefined;
 
@@ -267,7 +271,7 @@ function parseVariableDeclaration(tokens: Token[], flags: string[]): VariableDec
 
     if (tokens[0].value === "=") {
         tokens.shift();
-        initializer = parseExpression(tokens);
+        initializer = parseExpression(tokens, scope);
     }
 
     return {
@@ -286,7 +290,7 @@ function parseTypeArgument(tokens: Token[]): TypeArgument {
     };
 }
 
-function parseExpression(tokens: Token[], terminator?: Token, flags: string[] = []): Instruction {
+function parseExpression(tokens: Token[], scope: Scope, terminator?: Token, flags: string[] = []): Instruction {
     const output: Instruction[] = [];
     const operator: Token[] = [];
 
@@ -323,7 +327,7 @@ function parseExpression(tokens: Token[], terminator?: Token, flags: string[] = 
 
         if (token.type === "{") {
             tokens.shift();
-            output.push({ kind: "block-expression", flags, body: parseTokens(tokens) });
+            output.push({ kind: "block-expression", flags, body: parseTokens(tokens, scope), scope: scope.sub() });
             continue;
         }
 
@@ -353,29 +357,30 @@ function parseExpression(tokens: Token[], terminator?: Token, flags: string[] = 
 
         if (token.type === "keyword") {
             if (token.value === "if") {
-                parseIfExpression(tokens, output);
+                parseIfExpression(tokens, output, scope);
                 continue;
             }
 
             if (token.value === "while") {
                 tokens.shift()
-                const condition = parseExpression(tokens, { type: "{", value: "{" });
-                const body = parseTokens(tokens);
-                output.push({ kind: "while-statement", condition, body });
+                const whileScope = scope.sub();
+                const condition = parseExpression(tokens, whileScope, { type: "{", value: "{" });
+                const body = parseTokens(tokens, whileScope);
+                output.push({ kind: "while-statement", condition, body, scope: whileScope });
                 continue;
             }
 
             if (token.value === "match") {
                 tokens.shift();
-                const expression = parseExpression(tokens, { type: "{", value: "{" });
-                const cases = parseMatchCases(tokens);
+                const expression = parseExpression(tokens, scope, { type: "{", value: "{" });
+                const cases = parseMatchCases(tokens, scope);
                 output.push({ kind: "match-expression", value: expression, cases, flags: [] });
                 continue;
             }
 
             if (token.value === "unsafe") {
                 tokens.shift();
-                output.push(parseExpression(tokens, undefined, ["unsafe"]));
+                output.push(parseExpression(tokens, scope, undefined, ["unsafe"]));
                 continue;
             }
 
@@ -391,7 +396,7 @@ function parseExpression(tokens: Token[], terminator?: Token, flags: string[] = 
                 output.push({
                     kind: "call-expression",
                     callee: expr,
-                    arguments: parseArguments(tokens), // T
+                    arguments: parseArguments(tokens, scope), // T
                 });
                 continue;
             }
@@ -422,7 +427,7 @@ function parseExpression(tokens: Token[], terminator?: Token, flags: string[] = 
 
         if (token.type === "(") {
             tokens.shift();
-            output.push(parseExpression(tokens));
+            output.push(parseExpression(tokens, scope));
             tokens.shift();
             continue;
         }
@@ -447,28 +452,31 @@ function parseExpression(tokens: Token[], terminator?: Token, flags: string[] = 
     return output[0] as Instruction;
 }
 
-function parseIfExpression(tokens: Token[], output: Instruction[]) {
+function parseIfExpression(tokens: Token[], output: Instruction[], scope: Scope) {
     // Get rid of the if token
     tokens.shift();
 
-    const condition = parseExpression(tokens, { type: "{", value: "{" });
-    const body = parseTokens(tokens);
-    let elseBody: undefined | Instruction[] = undefined;
-    let elifBodies: { condition: ASTNode, body: Instruction[] }[] = [];
+    const condition = parseExpression(tokens, scope, { type: "{", value: "{" });
+    const ifScope = scope.sub();
+    const body = parseTokens(tokens, ifScope);
+    let elseVal: undefined | { body: Instruction[], scope: Scope } = undefined;
+    const elifs: { condition: ASTNode, body: Instruction[], scope: Scope }[] = [];
 
     let next = tokens[0];
     while (next) {
         if (next.type === "keyword" && next.value === "else") {
             tokens.shift();
-            elseBody = parseTokens(tokens);
+            const elseScope = scope.sub();
+            elseVal = { body: parseTokens(tokens, elseScope), scope: elseScope };
             break;
         }
 
         if (next.type === "keyword" && next.value === "elif") {
             tokens.shift();
-            const condition = parseExpression(tokens, { type: "{", value: "{" });
-            const body = parseTokens(tokens);
-            elifBodies.push({ condition, body });
+            const elifScope = scope.sub();
+            const condition = parseExpression(tokens, scope, { type: "{", value: "{" });
+            const body = parseTokens(tokens, elifScope);
+            elifs.push({ condition, body, scope: elifScope });
             next = tokens[0];
             continue;
         }
@@ -476,7 +484,7 @@ function parseIfExpression(tokens: Token[], output: Instruction[]) {
         break;
     }
 
-    output.push({ kind: "if-expression", condition, body, elifBodies, elseBody });
+    output.push({ kind: "if-expression", condition, body, elifs, else: elseVal, scope: ifScope });
 }
 
 function getOperatorPrecedence(operator: string): number {
@@ -550,7 +558,7 @@ function parseIdentifierExpression(tokens: Token[]): PropertyAccessExpression | 
     return output;
 }
 
-function parseArguments(tokens: Token[]): Instruction[] {
+function parseArguments(tokens: Token[], scope: Scope): Instruction[] {
     const args: Instruction[] = [];
 
     // For now we just get rid of the opening brace. We also only handle (
@@ -570,7 +578,7 @@ function parseArguments(tokens: Token[]): Instruction[] {
             break;
         }
 
-        args.push(parseExpression(tokens))
+        args.push(parseExpression(tokens, scope))
         token = tokens[0];
     }
 
@@ -578,17 +586,20 @@ function parseArguments(tokens: Token[]): Instruction[] {
 }
 
 /** Parse a block beginning with the initial opening curly brace ({) */
-function parseBlockExpression(tokens: Token[], flags: string[]): BlockExpression {
+function parseBlockExpression(tokens: Token[], flags: string[], scope: Scope): BlockExpression {
+    const blockScope = scope.sub();
     return {
         kind: "block-expression",
         flags,
-        body: parseTokens(tokens)
+        scope: blockScope,
+        body: parseTokens(tokens, blockScope)
     }
 }
 
-function parseImplDeclaration(tokens: Token[], flags: string[]): ImplDeclaration {
+function parseImplDeclaration(tokens: Token[], flags: string[], scope: Scope): ImplDeclaration {
     const { target, trait } = extractTargetAndTraitFromImplSignature(tokens);
     const functions: FunctionDeclaration[] = [];
+    const implScope = scope.sub();
 
     // Get rid of the opening {
     tokens.shift();
@@ -611,7 +622,7 @@ function parseImplDeclaration(tokens: Token[], flags: string[]): ImplDeclaration
             throw new Error("Unexpected token in impl block.");
         }
 
-        const statement = parseKeywordStatement(tokens);
+        const statement = parseKeywordStatement(tokens, implScope);
 
         // Only functions are allowed in impls for now.
         if (statement.kind !== "function-declaration") {
@@ -628,7 +639,8 @@ function parseImplDeclaration(tokens: Token[], flags: string[]): ImplDeclaration
         flags,
         trait,
         target,
-        functions
+        functions,
+        scope: implScope
     }
 }
 
@@ -645,7 +657,7 @@ function extractTargetAndTraitFromImplSignature(tokens: Token[]) {
     return { target: label1.value, trait: undefined };
 }
 
-function parseTypeDeclaration(tokens: Token[], flags: string[]): TypeDeclaration {
+function parseTypeDeclaration(tokens: Token[], flags: string[], scope: Scope): TypeDeclaration {
     let labelToken = tokens.shift();
     if (!labelToken || labelToken.type !== "identifier") {
         throw new Error("Expected identifier for type declaration");
@@ -655,17 +667,12 @@ function parseTypeDeclaration(tokens: Token[], flags: string[]): TypeDeclaration
         kind: "type-declaration",
         label: labelToken.value,
         flags,
-        // TODO
-        type: {
-            kind: "type-argument",
-            label: "",
-            flags: []
-        }
+        scope: scope.sub()
     }
 }
 
 /** Parse an enum, beginning after enum */
-function parseEnumDeclaration(tokens: Token[], flags: string[]): EnumDeclaration {
+function parseEnumDeclaration(tokens: Token[], flags: string[], scope: Scope): EnumDeclaration {
     const identifierToken = tokens.shift();
     if (!identifierToken || identifierToken.type !== "identifier") {
         throw new Error("Expected identifier after enum declaration");
@@ -685,7 +692,8 @@ function parseEnumDeclaration(tokens: Token[], flags: string[]): EnumDeclaration
         label,
         flags,
         variants,
-        typeParameters: []
+        typeParameters: [],
+        scope: scope.sub()
     }
 }
 
@@ -721,7 +729,7 @@ function parseEnumVariants(tokens: Token[], parentEnum: string): EnumVariantDecl
     return variants;
 }
 
-function parseMatchCases(tokens: Token[]): MatchCase[] {
+function parseMatchCases(tokens: Token[], scope: Scope): MatchCase[] {
     const variants: MatchCase[] = [];
 
     while (tokens[0]) {
@@ -737,8 +745,8 @@ function parseMatchCases(tokens: Token[]): MatchCase[] {
             continue;
         }
 
-        const matchCase = parseExpression(tokens, { type: "=>", value: "=>" });
-        const expression = parseExpression(tokens, { type: ",", value: "," });
+        const matchCase = parseExpression(tokens, scope, { type: "=>", value: "=>" });
+        const expression = parseExpression(tokens, scope, { type: ",", value: "," });
 
         variants.push({
             kind: "match-case",

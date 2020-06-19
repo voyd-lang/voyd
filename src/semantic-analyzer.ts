@@ -1,7 +1,8 @@
-import { Entities } from "./entities";
+import { EntityCollection } from "./entity-collection";
 import { Scope } from "./scope";
-import { AST, FunctionDeclaration, TypeDeclaration, Instruction, Identifier, VariableDeclaration, PropertyAccessExpression, ImplDeclaration, CallExpression, BinaryExpression, StructDeclaration, EnumDeclaration } from "../parser";
+import { AST, FunctionDeclaration, TypeDeclaration, Instruction, Identifier, VariableDeclaration, PropertyAccessExpression, ImplDeclaration, CallExpression, BinaryExpression, StructDeclaration, EnumDeclaration } from "./parser";
 import { EntityResolver } from "./entity-resolver";
+import { Entity } from "./definitions";
 
 /**
  * Performs initial namespace and scoping resolution. Does not resolve function calls.
@@ -13,10 +14,10 @@ import { EntityResolver } from "./entity-resolver";
  * 4. Generating errors for unknown identifiers
  */
 export class SemanticAnalyzer {
-    private readonly entities: Entities;
+    private readonly entities: EntityCollection;
     private readonly resolver: EntityResolver;
 
-    constructor(entities: Entities) {
+    constructor(entities: EntityCollection) {
         this.entities = entities;
         this.resolver = new EntityResolver(entities);
     }
@@ -28,7 +29,7 @@ export class SemanticAnalyzer {
     }
 
     listUnresolved(): string[] {
-        return this.resolver.listUnresolved();
+        return this.resolver.listUnresolvedLabels();
     }
 
     private scanInstruction(instruction: Instruction, scope: Scope) {
@@ -94,24 +95,26 @@ export class SemanticAnalyzer {
     }
 
     private scanImplDeclaration(impl: ImplDeclaration, scope: Scope) {
-        this.resolver.resolveTypeEntity({
+        this.resolver.resolveEntity({
+            kind: ["type"],
             label: impl.target,
             scope,
-            resolver: type => {
+            resolve: type => {
                 impl.targetID = type.id;
                 impl.functions.forEach(fn => this.scanFn(fn, type.scope, type.id));
             }
-        })
+        });
     }
 
     private scanPropertyAccessExpression(expr: PropertyAccessExpression, scope: Scope) {
         const walk = async (expr: PropertyAccessExpression | Identifier, scope: Scope): Promise<Scope> =>
             new Promise<Scope>(async res => {
                 if (expr.kind === "identifier") {
-                    return this.resolver.resolveIdentifier({
+                    return this.resolver.resolveEntity({
+                        kind: ["value", "type"],
                         label: expr.label,
                         scope,
-                        resolver: e => {
+                        resolve: e => {
                             expr.id = e.id;
                             res(e.scope);
                         }
@@ -129,7 +132,7 @@ export class SemanticAnalyzer {
         if (vr.initializer) this.scanInstruction(vr.initializer, scope);
 
         const id = this.entities.add({
-            kind: "local",
+            kind: "value",
             label: vr.label,
             flags: vr.flags,
             mutable: vr.flags.includes("var"),
@@ -142,9 +145,10 @@ export class SemanticAnalyzer {
     }
 
     private scanIdentifier(ident: Identifier, scope: Scope) {
-        this.resolver.resolveIdentifier({
+        this.resolver.resolveEntity({
+            kind: ["type", "value"],
             label: ident.label, scope,
-            resolver: e => ident.id = e.id
+            resolve: e => ident.id = e.id
         });
     }
 
@@ -154,7 +158,7 @@ export class SemanticAnalyzer {
             label: type.label,
             flags: type.flags,
             // TODO distinguish static and instance namespaces
-            scope: scope.newSubScope(),
+            scope: scope.sub(),
         });
         scope.add(id);
         if (type.flags.includes("pub")) scope.export(id);
@@ -162,7 +166,7 @@ export class SemanticAnalyzer {
     }
 
     private scanFn(fn: FunctionDeclaration, outerScope: Scope, self?: string) {
-        const fnScope = outerScope.newSubScope();
+        const fnScope = outerScope.sub();
         fnScope.isFnScope = true;
         const id = this.entities.add({
             kind: "function",
@@ -179,10 +183,11 @@ export class SemanticAnalyzer {
         if (fn.flags.includes("pub")) outerScope.export(id);
         if (fn.expression) this.scanInstruction(fn.expression, fnScope);
         if (fn.returnType) {
-            this.resolver.resolveTypeEntity({
+            this.resolver.resolveEntity({
+                kind: ["type"],
                 scope: outerScope,
                 label: fn.returnType.label,
-                resolver: (e) => this.entities.update({ id, returnType: e.id })
+                resolve: (e) => this.entities.update({ id, returnType: e.id })
             });
         }
     }
@@ -192,7 +197,7 @@ export class SemanticAnalyzer {
 
         if (self) {
             const paramID = this.entities.add({
-                kind: "local",
+                kind: "value",
                 label: "self",
                 flags: [],
                 scope: fnScope,
@@ -207,7 +212,7 @@ export class SemanticAnalyzer {
 
         fn.parameters.forEach(p => {
             const id = this.entities.add({
-                kind: "local",
+                kind: "value",
                 flags: [],
                 label: p.label,
                 scope: fnScope,
@@ -215,10 +220,11 @@ export class SemanticAnalyzer {
                 index: parameters.length
             });
 
-            this.resolver.resolveTypeEntity({
+            this.resolver.resolveEntity({
+                kind: ["type"],
                 label: p.type!.label,
                 scope: fnScope,
-                resolver: entity => this.entities.update({ id, typeEntity: entity.id })
+                resolve: entity => this.entities.update({ id, typeEntity: entity.id })
             });
 
             fnScope.add(id);

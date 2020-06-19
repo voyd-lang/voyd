@@ -1,0 +1,94 @@
+import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration } from "./parser";
+import { Scope } from "./scope";
+
+/**
+ * Scans an AST for declared entities. Update AST scopes with the resolved items
+ *
+ * @returns a collection of all detected entities.
+ *  */
+export function entityScanner(ast: AST) {
+    scanBlock(ast);
+}
+
+function scanBlock({ body, scope }: { body: Instruction[]; scope: Scope; }) {
+    for (const instruction of body) {
+        scanInstruction({ instruction, scope });
+    }
+}
+
+function scanInstruction({ scope, instruction }: { scope: Scope, instruction: Instruction }) {
+    if (instruction.kind === "block-expression") {
+        scanBlock({ body: instruction.body, scope: instruction.scope });
+        return;
+    }
+
+    if (instruction.kind === "type-declaration") {
+        scope.add({ kind: "type", label: instruction.label, flags: instruction.flags });
+        return;
+    }
+
+    if (instruction.kind === "impl-declaration") {
+        scanImpl({ scope, instruction });
+        return;
+    }
+
+    if (instruction.kind === "variable-declaration") {
+        scope.addLocal({
+            kind: "variable",
+            label: instruction.label,
+            flags: instruction.flags,
+            mutable: instruction.flags.includes("var"),
+            index: scope.localsCount() + 1
+        });
+        return;
+    }
+
+    if (instruction.kind === "function-declaration") {
+        scanFn({ fn: instruction, scope });
+        return;
+    }
+
+    if (instruction.kind === "if-expression") {
+        scanIf({ dif: instruction, scope });
+        return;
+    }
+}
+
+function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {
+    scope.add({ kind: "impl", flags: instruction.flags, label: instruction.target });
+    scanBlock({ body: instruction.functions, scope: instruction.scope });
+}
+
+function scanFn({ fn, scope }: { fn: FunctionDeclaration, scope: Scope }) {
+    fn.scope.isFnScope = true;
+    const parameters = fn.parameters.map(pd => fn.scope.add({
+        kind: "parameter",
+        index: fn.scope.localsCount() + 1,
+        label: pd.label,
+        flags: pd.flags,
+        typeLabel: pd.type ? pd.type.label : undefined,
+        mutable: pd.flags.includes("var")
+    }));
+
+    scope.add({
+        kind: "function",
+        flags: fn.flags,
+        returnTypeLabel: fn.returnType ? fn.returnType.label : undefined,
+        parameters,
+        label: fn.label
+    });
+
+    if (fn.expression) scanInstruction({ scope: fn.scope, instruction: fn.expression });
+}
+
+function scanIf({ dif, scope }: { dif: IfExpression; scope: Scope; }) {
+    scanInstruction({ instruction: dif.condition, scope });
+    scanBlock({ body: dif.body, scope: dif.scope });
+    dif.elifs.forEach(({ condition, body, scope: elifScope }) => {
+        scanInstruction({ instruction: condition, scope });
+        scanBlock({ body, scope: elifScope });
+    });
+    if (dif.else) {
+        scanBlock({ body: dif.else.body, scope: dif.else.scope });
+    }
+}

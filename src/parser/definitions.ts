@@ -1,3 +1,4 @@
+import { Scope } from "../scope";
 
 export interface ASTNode {
     kind: string;
@@ -19,6 +20,7 @@ export interface FunctionDeclaration extends ASTNode {
     label: string;
     parameters: ParameterDeclaration[];
     typeParameters: TypeParameterDeclaration[];
+    scope: Scope;
     returnType?: TypeArgument;
     flags: string[];
     expression?: Instruction;
@@ -33,6 +35,7 @@ export interface EnumDeclaration extends ASTNode {
     typeParameters: TypeParameterDeclaration[];
     flags: string[];
     variants: EnumVariantDeclaration[];
+    scope: Scope;
 
     /** Entity ID if resolved */
     id?: string;
@@ -56,6 +59,7 @@ export interface StructDeclaration extends ASTNode {
     variables: VariableDeclaration[];
     methods: FunctionDeclaration[];
     flags: string[];
+    scope: Scope;
 
     /** Entity ID if resolved */
     id?: string;
@@ -67,7 +71,7 @@ export interface ImplDeclaration extends ASTNode {
     trait?: string;
     functions: FunctionDeclaration[];
     flags: string[];
-
+    scope: Scope;
     targetID?: string;
     traitID?: string;
 }
@@ -76,7 +80,9 @@ export interface TypeDeclaration extends ASTNode {
     kind: "type-declaration";
     label: string;
     flags: string[];
-    type: TypeArgument;
+    scope: Scope;
+
+    type?: TypeArgument;
 
     /** Entity ID if resolved */
     id?: string;
@@ -110,12 +116,14 @@ export interface TypeArgument extends ASTNode {
 export interface ForInStatement extends ASTNode {
     kind: "for-in-statement";
     expression: ASTNode;
+    scope: Scope;
     body: Instruction[];
 }
 
 export interface WhileStatement extends ASTNode {
     kind: "while-statement";
     condition: Instruction;
+    scope: Scope;
     body: Instruction[];
 }
 
@@ -130,15 +138,17 @@ export interface ContinueStatement extends ASTNode {
 export interface BlockExpression extends ASTNode {
     kind: "block-expression";
     flags: string[];
+    scope: Scope;
     body: Instruction[];
 }
 
 export interface IfExpression extends ASTNode {
     kind: "if-expression";
     condition: Instruction;
+    scope: Scope;
     body: Instruction[];
-    elseBody?: Instruction[];
-    elifBodies: { condition: ASTNode, body: Instruction[] }[];
+    else?: { scope: Scope, body: Instruction[] };
+    elifs: { condition: Instruction, body: Instruction[], scope: Scope }[];
 }
 
 export interface MatchExpression extends ASTNode {
@@ -158,6 +168,7 @@ export interface ClosureExpression extends ASTNode {
     kind: "closure-expression";
     parameters: ParameterDeclaration[];
     returnType: string;
+    scope: Scope;
     body: Instruction[];
 }
 
@@ -246,4 +257,4 @@ export type Instruction =
     PropertyAccessExpression |
     ImplDeclaration;
 
-export type AST = Instruction[];
+export type AST = { body: Instruction[], scope: Scope };

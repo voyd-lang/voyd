@@ -3,6 +3,7 @@
         "Deno",
         "Inout",
         "binaryen",
+        "elifs",
         "popcnt",
         "rotr"
     ]
