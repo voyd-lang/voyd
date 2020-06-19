@@ -38,7 +38,7 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
             label: instruction.label,
             flags: instruction.flags,
             mutable: instruction.flags.includes("var"),
-            index: scope.localsCount() + 1
+            index: scope.localsCount()
         });
         return;
     }
@@ -77,9 +77,9 @@ function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDecla
 
 function scanFn({ fn, scope }: { fn: FunctionDeclaration, scope: Scope }) {
     fn.scope.isFnScope = true;
-    const parameters = fn.parameters.map(pd => fn.scope.add({
+    const parameters = fn.parameters.map(pd => fn.scope.addLocal({
         kind: "parameter",
-        index: fn.scope.localsCount() + 1,
+        index: fn.scope.localsCount(),
         label: pd.label,
         flags: pd.flags,
         typeLabel: pd.type ? pd.type.label : undefined,

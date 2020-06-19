@@ -66,6 +66,7 @@ export class Scope {
     addLocal(entity: NewEntity) {
         const id = this.add(entity);
         this.addEntityIDToFnLocals(id);
+        return id;
     }
 
     protected addEntityIDToFnLocals(id: string) {

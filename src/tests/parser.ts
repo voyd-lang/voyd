@@ -1,4 +1,4 @@
-import { parse, AST } from "../parser";
+import { parse } from "../parser";
 import { strict as assert } from "assert";
 
 describe("Parser", function() {
@@ -43,7 +43,7 @@ const enumSnippet = `
     }
 `;
 
-const correctEnumAst: AST = [
+const correctEnumAst = [
     {
         kind: 'enum-declaration',
         label: 'Friends',
@@ -87,7 +87,7 @@ const basicCodeSnippet = `
     print(fib(10))
 `;
 
-const correctBasicCodeSnippetAST: AST = [
+const correctBasicCodeSnippetAST = [
     {
         kind: 'function-declaration',
         label: 'fib',
@@ -183,7 +183,7 @@ const basicMatchExpression = `
     }
 `
 
-const correctBasicMatchExpressionAST: AST = [
+const correctBasicMatchExpressionAST = [
     {
         kind: 'match-expression',
         value: { kind: 'int-literal', value: '3' },

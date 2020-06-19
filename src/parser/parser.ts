@@ -141,12 +141,14 @@ function parseReturnStatement(tokens: Token[], scope: Scope): ReturnStatement {
 
 /** Parse a function, beginning after fn */
 function parseFnDeclaration(tokens: Token[], flags: string[], scope: Scope): FunctionDeclaration {
+    const fnScope = scope.sub();
     const identifierToken = tokens.shift();
     if (!identifierToken || identifierToken.type !== "identifier" && identifierToken.type !== "operator") {
         throw new Error("Expected identifier after function declaration");
     }
-
     const label = identifierToken.value;
+
+    // We don't pass fn scope here because the scope is used for a possible parameter initializer.
     const parameters = parseFnParameters(tokens, scope);
 
     let returnType: TypeArgument | undefined;
@@ -157,10 +159,10 @@ function parseFnDeclaration(tokens: Token[], flags: string[], scope: Scope): Fun
 
     let expression: Instruction | undefined;
     if (tokens[0].type === "{") {
-        expression = parseExpression(tokens, scope);
+        expression = parseExpression(tokens, fnScope);
     } else if (tokens[0].type === "=") {
         tokens.shift();
-        expression = parseExpression(tokens, scope);
+        expression = parseExpression(tokens, fnScope);
     } else if (flags.includes("declare")) {
         // Do nothing
     } else {
@@ -172,8 +174,8 @@ function parseFnDeclaration(tokens: Token[], flags: string[], scope: Scope): Fun
         label,
         parameters,
         returnType,
+        scope: fnScope,
         expression,
-        scope: scope.sub(),
         typeParameters: [], // TODO
         flags
     }
@@ -326,8 +328,7 @@ function parseExpression(tokens: Token[], scope: Scope, terminator?: Token, flag
         }
 
         if (token.type === "{") {
-            tokens.shift();
-            output.push({ kind: "block-expression", flags, body: parseTokens(tokens, scope), scope: scope.sub() });
+            output.push(parseBlockExpression(tokens, flags, scope));
             continue;
         }
 
@@ -588,6 +589,7 @@ function parseArguments(tokens: Token[], scope: Scope): Instruction[] {
 /** Parse a block beginning with the initial opening curly brace ({) */
 function parseBlockExpression(tokens: Token[], flags: string[], scope: Scope): BlockExpression {
     const blockScope = scope.sub();
+    tokens.shift();
     return {
         kind: "block-expression",
         flags,
