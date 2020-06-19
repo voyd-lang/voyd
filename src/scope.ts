@@ -103,6 +103,18 @@ export class Scope {
     sub(): Scope {
         return new Scope(this);
     }
+
+    toJSON() {
+        return {
+            entities: Array.from(this.entities.entries()).reduce((obj, [id, entity]) => {
+                obj[id] = entity;
+                return obj;
+            }, {} as Record<string, Entity>),
+            exports: this.exports,
+            isFnScope: this.isFnScope,
+            locals: this.locals
+        };
+    }
 }
 
 /** Represents all entities within the scope. A depth of 0 represents the current scope, each scope above adds 1 */

@@ -460,7 +460,7 @@ function parseIfExpression(tokens: Token[], output: Instruction[], scope: Scope)
     const ifScope = scope.sub();
     const body = parseTokens(tokens, ifScope);
     let elseVal: undefined | { body: Instruction[], scope: Scope } = undefined;
-    const elifs: { condition: ASTNode, body: Instruction[], scope: Scope }[] = [];
+    const elifs: { condition: Instruction, body: Instruction[], scope: Scope }[] = [];
 
     let next = tokens[0];
     while (next) {
