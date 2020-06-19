@@ -52,6 +52,22 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
         scanIf({ dif: instruction, scope });
         return;
     }
+
+    if (instruction.kind === "while-statement") {
+        scanBlock({ body: instruction.body, scope });
+        scanInstruction({ instruction: instruction.condition, scope });
+        return;
+    }
+
+    if (instruction.kind === "binary-expression" || instruction.kind === "call-expression") {
+        instruction.arguments.forEach(instruction => scanInstruction({ scope, instruction }));
+        return;
+    }
+
+    if (instruction.kind === "match-expression") {
+        instruction.cases.forEach(mCase => scanInstruction({ scope, instruction: mCase.expression }));
+        return;
+    }
 }
 
 function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {
