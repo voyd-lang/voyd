@@ -106,6 +106,7 @@ export class Scope {
 
     toJSON() {
         return {
+            // When available, this should be translated to Object.fromEntries(this.entities.entries)
             entities: Array.from(this.entities.entries()).reduce((obj, [id, entity]) => {
                 obj[id] = entity;
                 return obj;
