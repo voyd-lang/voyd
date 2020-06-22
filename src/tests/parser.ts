@@ -1,5 +1,12 @@
-import { parse } from "../parser";
+import { parse as dParser } from "../parser";
 import { strict as assert } from "assert";
+import { recursiveStripFields } from "./helpers";
+
+const parse = (code: string) => {
+    const instructions = dParser(code).body;
+    recursiveStripFields(instructions, ["scope"]);
+    return instructions;
+};
 
 describe("Parser", function() {
     it("should parse a basic enum", function() {
