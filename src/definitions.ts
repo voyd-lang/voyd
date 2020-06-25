@@ -1,4 +1,3 @@
-import { Scope } from "./scope";
 import { DistributiveOmit } from "./helpers";
 
 export type NewEntity = DistributiveOmit<Entity, "id">;
@@ -6,7 +5,7 @@ export type NewEntity = DistributiveOmit<Entity, "id">;
 /** Any item that can be referenced by an identifier */
 export type Entity =
     FunctionEntity |
-    TypeEntity |
+    WASMType |
     VariableEntity |
     ParameterEntity |
     ImplEntity;
@@ -23,8 +22,8 @@ export interface FunctionEntity extends EntityBase {
 }
 
 /** Represents some form of type alias */
-export interface TypeEntity extends EntityBase {
-    kind: "type";
+export interface WASMType extends EntityBase {
+    kind: "wasm-type";
 
     /** Binaryen type ref */
     binType?: number;
@@ -62,4 +61,4 @@ export interface EntityBase {
     flags: string[];
 }
 
-export type EntityKind = "type" | "function" | "variable" | "parameter" | "impl";
+export type EntityKind = "wasm-type" | "function" | "variable" | "parameter" | "impl";
