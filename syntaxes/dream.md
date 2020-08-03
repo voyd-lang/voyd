@@ -19,20 +19,14 @@ $(1, 2, 3) // Array
 $[x: 3] // Dictionary
 ```
 
-# Blocks
+# Constant and Variables
 
 ```
-// Basic Block, returns the result of the last expression
-{
-    let x = 5
-    let y = 4
-    x * y
-}
+// A constant is defined using the let keyword
+let x = 5
 
-let x = {
-    3 * 5
-}
-print(x) // 15
+// A variable is defined using the var keyword
+var y = 3
 ```
 
 # Control flow
@@ -59,7 +53,7 @@ match x {
     1 => print("One"),
     2 => print("two"),
     3 => print("three"),
-    _ => {
+    _ {
         // Match statements must cover every possible case.
         // _ means default. I.E. if no other patterns match, use this one.
         print("A number")
@@ -71,24 +65,20 @@ match x {
 
 ```
 // A basic function
-fn add(a: i32, b: i32) -> i32 = a + b
-
-// In most cases, the return type can be inferred.
-fn add(a: i32, b: i32) = a + b
-
-// Use {} to enclose multi-line functions
-fn add(a: Int, b: Int) -> Int = {
-    // Result of last expression is always returned, though return is still supported.
+fn add(a: i32, b: i32) -> i32 {
     a + b
 }
 
-// You can optionally omit the = on multi-line functions
-fn add(a: i32, b: i32) -> i32 {
+// In most cases, the return type can be inferred.
+fn add(a: i32, b: i32) {
     a + b
 }
 
 // Functions are called using the standard () syntax
 add(1, 2)
+
+// Single expressions can be defined using a shorter = sign notation
+fn add(a: i32, b: i32) = a + b
 ```
 
 # Expression Oriented
@@ -107,17 +97,12 @@ let fred = match "Smith" {
     "Gates" => "Bill"
 }
 
-let six = {
-    let a = 3
-    let b = 3
-    a + b
+fn work(a: Int) {
+    let b = a * 2
+    b + 3
 }
 
-fn add(a: Int, b: Int) = {
-    a + b
-}
-
-let four = add(2, 2)
+let five = work(1)
 ```
 # Structs
 
@@ -210,9 +195,9 @@ enum Friend {
 var friend = Friend.eric
 
 match friend {
-    .eric => { },
-    .angie => { },
-    .carter => { }
+    .eric {},
+    .angie {},
+    .carter {}
 }
 
 // Enum identifier can be omitted if it can be reasonable inferred.
@@ -262,25 +247,22 @@ car.getInfo()
 
 # Closures
 
+Closures are functions that can capture values from the scope they were defined in.
+Closures are defined using the syntax `{|...params -> ReturnType| body }`
+
 ```
-// Closures are essentially anonymous functions with the syntax
-// | ...params: ParamType -> ReturnType | Expr
-let add = |a: i32, b: i32 -> i32| a + b
+// Basic closure
+let add = {|a: Int, b: Int -> Int| a + b }
 
-// Closures can have multiple expressions when wrapped in, or followed by {}
-let sub = {|a: i32, b: i32|
-    print("Subtracting ${a} and ${b})
-    a - b
-}
+// A type annotation for a closure. Closures passed to an annotated value can infer all of their
+// types
+let add: Fn(a: Int, b: Int) -> Int = {|a, b| a + b }
 
-// Same as sub
-let sub2 = |a: i32, b: i32| {
-    print("Subtracting ${a} and ${b})
-    a - b
-}
+// If a closure doesn't need parameters, you can omit the ||
+let offset_rand = { rand() + 7 }
 
-// Closures parameters and return type can be inferred
-let mul: Fn(a: i32, b: i32) -> i32 = |a, b| a * b
+// If a closure is only a single expression, you may also omit the {}, but || will be required
+let add = |a: Int, b: Int| a + b
 ```
 
 ## Higher Order Functions
@@ -297,14 +279,8 @@ caller({| a, b | a + b })
 caller() {|a, b| a + b }
 caller {|a, b| a + b }
 
-// If a function takes no parameters, the passed expression will be converted into a function.
-fn everySecond(cb: Fn -> Void) {
-    setInterval(|| cb(), 1000)
-}
-
-everySecond {
-    print("Ping!")
-}
+// You can use $<ParamNum> in place of defining the parameters, just like Swift.
+caller { $0 + $1 }
 ```
 
 # Generics
@@ -354,7 +330,7 @@ Examples:
 ```
 type Int = i32
 type MyTuple = (i32, String, f32)
-type MyAnonStruct = [a: i32, b: i32]
+type MyStruct = [a: i32, b: i32]
 
 type MyNativeMultiValType = wasm_multi_val_type!(i32, i32, i32)
 type MyOtherCustomType = wasm_val_type!(i32)
@@ -380,6 +356,8 @@ fn add(a: i32, b: i32) -> i32 = a + b
 fn double(a: i32) -> i32 = a * 2
 
 add(2, 4).double()
+
+add(2, 4).double
 ```
 
 # Memory Management
