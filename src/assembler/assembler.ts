@@ -1,47 +1,37 @@
 import binaryen from "binaryen";
 import { ValueCollection } from "./values";
-import { TypeEntity, Entity, FunctionEntity, LocalsTracker } from "../definitions";
+import { WASMType, Entity, FunctionEntity } from "../definitions";
 import {
-    parse, Instruction, CallExpression, ReturnStatement, IfExpression, Assignment,
+    parse, Instruction, ReturnStatement, IfExpression, Assignment,
     FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, TypeDeclaration, PropertyAccessExpression, Identifier
 } from "../parser";
 import uniqid from "uniqid";
-import { EntityCollection } from "../entity-collection";
 import { Scope } from "../scope";
 import { readFileSync } from "fs";
-import { EntityResolver } from "../entity-resolver";
-import { SemanticAnalyzer } from "../semantic-analyzer";
 
 export class Assembler {
-    private readonly entities = new EntityCollection();
-    private readonly entityResolver = new EntityResolver(this.entities);
-    private readonly scanner = new SemanticAnalyzer(this.entities);
     private readonly mod = new binaryen.Module();
     private readonly stdScope = new Scope();
 
     constructor() {
         this.mod.autoDrop();
         this.mod.addFunctionImport("print", "imports", "print", binaryen.i32, binaryen.none);
-        const std = readFileSync(`${__dirname}/../../stdlib/i32.dm`, { encoding: "utf8" });
-        this.compile(std);
     }
 
-    compile(code: string, fromScope?: Scope) {
-        const ast = parse(code);
-        const scope = fromScope ?? this.stdScope.sub();
-        this.walkAST(ast, scope);
+    compile(ast: AST) {
+        this.walkInstructions(ast.body, ast.scope);
         return this.mod;
     }
 
-    private walkAST(ast: AST, scope: Scope) {
-        for (const instruction of ast) {
+    private walkInstructions(instructions: Instruction[], scope: Scope) {
+        for (const instruction of instructions) {
             if (instruction.kind === "type-declaration") {
                 // TODO.
                 continue;
             }
 
             if (instruction.kind === "function-declaration") {
-                this.compileFn(instruction, scope);
+                this.compileFn(instruction);
                 continue;
             }
 
@@ -59,10 +49,9 @@ export class Assembler {
 
 
     private compileFn(fn: FunctionDeclaration, self?: string): number {
-        const locals: LocalsTracker = { offset: parameters.length, values: [] };
         const expression = this.compileExpression(fn.expression!, locals, fnScope);
         const binParams = binaryen.createType(parameters.map(p => {
-            const type = this.entities.get(p) as TypeEntity;
+            const type = this.entities.get(p) as WASMType;
             return type.binType;
         }))
 
@@ -160,7 +149,7 @@ export class Assembler {
     private compileVariableDeclaration(vr: VariableDeclaration, locals: LocalsTracker, scope: Scope): number {
         const type = vr.type ?
             this.resolveTypeEntityFromLabel(vr.type.label, scope) :
-            this.inferType(vr.initializer!, scope) as TypeEntity;
+            this.inferType(vr.initializer!, scope) as WASMType;
 
         locals.values.push(type.binType);
 
@@ -182,12 +171,12 @@ export class Assembler {
     }
 
     /** Returns the expression's result type entity, TODO: ADD ERROR CHECKING IN PLACE OF AS IRTypeEntity */
-    private inferType(expr: Instruction, scope: Scope): TypeEntity {
+    private inferType(expr: Instruction, scope: Scope): WASMType {
         if (expr.kind === "call-expression") {
             const entity = this.resolveEntity(expr.callee, scope)[0];
             if (!entity || entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
             const returnType = (entity as FunctionEntity).returnType;
-            if (returnType) return this.entities.get(returnType) as TypeEntity;
+            if (returnType) return this.entities.get(returnType) as WASMType;
         }
 
         if (expr.kind === "binary-expression") {
@@ -195,7 +184,7 @@ export class Assembler {
             const entity = operand.scope.functionsWithLabel(expr.calleeLabel, this.entities)[0];
             if (!entity || entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
             const returnType = (entity as FunctionEntity).returnType;
-            if (returnType) return this.entities.get(returnType) as TypeEntity;
+            if (returnType) return this.entities.get(returnType) as WASMType;
         }
 
         if (expr.kind === "identifier") {
@@ -205,8 +194,8 @@ export class Assembler {
                 throw new Error(`${expr.label} is not defined`);
             }
 
-            if (entity.kind === "local") return this.entities.get(entity.typeEntity) as TypeEntity;
-            return entity as TypeEntity;
+            if (entity.kind === "local") return this.entities.get(entity.typeEntity) as WASMType;
+            return entity as WASMType;
         }
 
         if (expr.kind === "block-expression") {
@@ -215,7 +204,7 @@ export class Assembler {
 
         if (expr.kind === "parameter-declaration") {
             if (expr.type) {
-                return scope.functionsWithLabel(expr.type.label, this.entities)[0] as TypeEntity;
+                return scope.functionsWithLabel(expr.type.label, this.entities)[0] as WASMType;
             }
 
             if (expr.initializer) {
@@ -224,9 +213,9 @@ export class Assembler {
         }
 
         const byLabel = (label: string) => scope.functionsWithLabel(label, this.entities)[0];
-        if (expr.kind === "bool-literal") return byLabel("bool") as TypeEntity;
-        if (expr.kind === "float-literal") return byLabel("f32") as TypeEntity;
-        if (expr.kind === "int-literal") return byLabel("i32") as TypeEntity;
+        if (expr.kind === "bool-literal") return byLabel("bool") as WASMType;
+        if (expr.kind === "float-literal") return byLabel("f32") as WASMType;
+        if (expr.kind === "int-literal") return byLabel("i32") as WASMType;
         if (expr.kind === "return-statement") return this.inferType(expr.expression, scope);
         if (expr.kind === "if-expression") {
             return this.inferType(expr.body[expr.body.length - 1], scope);

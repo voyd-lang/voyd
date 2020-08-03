@@ -24,6 +24,12 @@ export class Scope {
         this.parent = parent;
     }
 
+    import(scope: Scope) {
+        for (const entity of scope.entities.values()) {
+            this.entities.set(entity.id, entity);
+        }
+    }
+
     entitiesWithLabel(label: string, found: AccessibleEntities = [], depth = 0): AccessibleEntities {
         for (const entity of this.entities.values()) {
             if (entity.label === label) found.push({ entity, depth });

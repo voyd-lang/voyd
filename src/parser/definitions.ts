@@ -74,6 +74,7 @@ export interface ImplDeclaration extends ASTNode {
     scope: Scope;
     targetID?: string;
     traitID?: string;
+    id?: string;
 }
 
 export interface TypeDeclaration extends ASTNode {

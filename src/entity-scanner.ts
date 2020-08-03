@@ -23,7 +23,8 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
     }
 
     if (instruction.kind === "type-declaration") {
-        scope.add({ kind: "type", label: instruction.label, flags: instruction.flags });
+        instruction.id =
+            scope.add({ kind: "type", label: instruction.label, flags: instruction.flags });
         return;
     }
 
@@ -33,7 +34,7 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
     }
 
     if (instruction.kind === "variable-declaration") {
-        scope.addLocal({
+        instruction.id = scope.addLocal({
             kind: "variable",
             label: instruction.label,
             flags: instruction.flags,
@@ -71,7 +72,7 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
 }
 
 function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {
-    scope.add({ kind: "impl", flags: instruction.flags, label: instruction.target });
+    instruction.id = scope.add({ kind: "impl", flags: instruction.flags, label: instruction.target });
     scanBlock({ body: instruction.functions, scope: instruction.scope });
 }
 
@@ -86,7 +87,7 @@ function scanFn({ fn, scope }: { fn: FunctionDeclaration, scope: Scope }) {
         mutable: pd.flags.includes("var")
     }));
 
-    scope.add({
+    fn.id = scope.add({
         kind: "function",
         flags: fn.flags,
         returnTypeLabel: fn.returnType ? fn.returnType.label : undefined,

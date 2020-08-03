@@ -1,46 +1,42 @@
-import { parse as dParser } from "../parser";
 import { strict as assert } from "assert";
-import { recursiveStripFields } from "./helpers";
+import { parse as dParse } from "../parser";
 
-const parse = (code: string) => {
-    const instructions = dParser(code).body;
-    recursiveStripFields(instructions, ["scope"]);
-    return instructions;
-};
+// Stringify AST for testing purposes
+export const parse = (code: string) => JSON.stringify(dParse(code), undefined, 2);
 
 describe("Parser", function() {
     it("should parse a basic enum", function() {
-        assert.deepStrictEqual(parse(enumSnippet), correctEnumAst);
+        assert.equal(parse(enumSnippet), correctEnumAst);
     });
 
     it("should parse a basic code snippet", function() {
-        assert.deepStrictEqual(parse(basicCodeSnippet), correctBasicCodeSnippetAST);
+        assert.equal(parse(basicCodeSnippet), correctBasicCodeSnippetAST);
     });
 
     it("should parse a basic match expression", function() {
-        assert.deepStrictEqual(parse(basicMatchExpression), correctBasicMatchExpressionAST);
+        assert.equal(parse(basicMatchExpression), correctBasicMatchExpressionAST);
     });
 
     it("should parse the different function syntaxes", function() {
-        assert.deepStrictEqual(parse(fnSyntax1), correctFnSyntax1AST);
-        assert.deepStrictEqual(parse(fnSyntax2), correctFnSyntax2AST);
-        assert.deepStrictEqual(parse(fnSyntax3), correctFnSyntax3AST);
+        assert.equal(parse(fnSyntax1), correctFnSyntax1AST);
+        assert.equal(parse(fnSyntax2), correctFnSyntax2AST);
+        assert.equal(parse(fnSyntax3), correctFnSyntax3AST);
     });
 
     it("Should parse property access expressions", function() {
-        assert.deepStrictEqual(parse(basicPropertyAccessSnippet), correctBasicPropertyAccessAST);
+        assert.equal(parse(basicPropertyAccessSnippet), correctBasicPropertyAccessAST);
     });
 
     it("Should parse a property accessed function", function() {
-        assert.deepStrictEqual(parse(propertyAccessFnCallSnippet), correctPropertyAccessFnCallAST);
+        assert.equal(parse(propertyAccessFnCallSnippet), correctPropertyAccessFnCallAST);
     });
 
     it("Should parse impl declarations without a trait", function() {
-        assert.deepStrictEqual(parse(implWithoutTraitSnippet), correctImplWithoutTraitAST);
+        assert.equal(parse(implWithoutTraitSnippet), correctImplWithoutTraitAST);
     });
 
     it("Should parse an impl declaration with a trait", function() {
-        assert.deepStrictEqual(parse(implWithTraitSnippet), correctImplWithTraitAST);
+        assert.equal(parse(implWithTraitSnippet), correctImplWithTraitAST);
     });
 });
 
@@ -50,40 +46,56 @@ const enumSnippet = `
     }
 `;
 
-const correctEnumAst = [
+const correctEnumAst = `{
+  "body": [
     {
-        kind: 'enum-declaration',
-        label: 'Friends',
-        flags: ['enum'],
-        variants: [
-            {
-                kind: 'enum-variant',
-                label: 'dan',
-                parentEnum: 'Friends',
-                flags: []
-            },
-            {
-                kind: 'enum-variant',
-                label: 'paige',
-                parentEnum: 'Friends',
-                flags: []
-            },
-            {
-                kind: 'enum-variant',
-                label: 'jimmy',
-                parentEnum: 'Friends',
-                flags: []
-            },
-            {
-                kind: 'enum-variant',
-                label: 'glados',
-                parentEnum: 'Friends',
-                flags: []
-            }
-        ],
-        typeParameters: []
+      "kind": "enum-declaration",
+      "label": "Friends",
+      "flags": [
+        "enum"
+      ],
+      "variants": [
+        {
+          "kind": "enum-variant",
+          "label": "dan",
+          "parentEnum": "Friends",
+          "flags": []
+        },
+        {
+          "kind": "enum-variant",
+          "label": "paige",
+          "parentEnum": "Friends",
+          "flags": []
+        },
+        {
+          "kind": "enum-variant",
+          "label": "jimmy",
+          "parentEnum": "Friends",
+          "flags": []
+        },
+        {
+          "kind": "enum-variant",
+          "label": "glados",
+          "parentEnum": "Friends",
+          "flags": []
+        }
+      ],
+      "typeParameters": [],
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      }
     }
-];
+  ],
+  "scope": {
+    "entities": {},
+    "exports": [],
+    "isFnScope": false,
+    "locals": []
+  }
+}`;
 
 const basicCodeSnippet = `
     fn fib(n: i32) -> i32 {
@@ -94,93 +106,166 @@ const basicCodeSnippet = `
     print(fib(10))
 `;
 
-const correctBasicCodeSnippetAST = [
+const correctBasicCodeSnippetAST = `{
+  "body": [
     {
-        kind: 'function-declaration',
-        label: 'fib',
-        parameters: [
-            {
-                kind: 'parameter-declaration',
-                label: 'n',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            }
-        ],
-        returnType: { kind: 'type-argument', label: 'i32', flags: [] },
-        expression: {
-            kind: "block-expression",
-            flags: [],
-            body: [
+      "kind": "function-declaration",
+      "label": "fib",
+      "parameters": [
+        {
+          "kind": "parameter-declaration",
+          "label": "n",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        }
+      ],
+      "returnType": {
+        "kind": "type-argument",
+        "label": "i32",
+        "flags": []
+      },
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      },
+      "expression": {
+        "kind": "block-expression",
+        "flags": [],
+        "scope": {
+          "entities": {},
+          "exports": [],
+          "isFnScope": false,
+          "locals": []
+        },
+        "body": [
+          {
+            "kind": "if-expression",
+            "condition": {
+              "kind": "binary-expression",
+              "calleeLabel": "<",
+              "arguments": [
                 {
-                    kind: 'if-expression',
-                    condition: {
-                        kind: 'binary-expression',
-                        calleeLabel: '<',
-                        arguments: [
-                            { kind: 'identifier', label: 'n' },
-                            { kind: 'int-literal', value: '2' }
-                        ]
-                    },
-                    body: [
-                        {
-                            kind: 'return-statement',
-                            expression: { kind: 'identifier', label: 'n' }
-                        }
-                    ],
-                    elifBodies: [],
-                    elseBody: undefined
+                  "kind": "identifier",
+                  "label": "n"
                 },
                 {
-                    kind: 'binary-expression',
-                    calleeLabel: '+',
-                    arguments: [
-                        {
-                            kind: 'call-expression',
-                            callee: { kind: 'identifier', label: 'fib' },
-                            arguments: [
-                                {
-                                    kind: 'binary-expression',
-                                    calleeLabel: '-',
-                                    arguments: [
-                                        { kind: 'identifier', label: 'n' },
-                                        { kind: 'int-literal', value: '2' }
-                                    ]
-                                }
-                            ]
-                        },
-                        {
-                            kind: 'call-expression',
-                            callee: { kind: 'identifier', label: 'fib' },
-                            arguments: [
-                                {
-                                    kind: 'binary-expression',
-                                    calleeLabel: '-',
-                                    arguments: [
-                                        { kind: 'identifier', label: 'n' },
-                                        { kind: 'int-literal', value: '1' }
-                                    ]
-                                }
-                            ]
-                        }
-                    ]
+                  "kind": "int-literal",
+                  "value": "2"
                 }
+              ]
+            },
+            "body": [
+              {
+                "kind": "return-statement",
+                "expression": {
+                  "kind": "identifier",
+                  "label": "n"
+                }
+              }
+            ],
+            "elifs": [],
+            "scope": {
+              "entities": {},
+              "exports": [],
+              "isFnScope": false,
+              "locals": []
+            }
+          },
+          {
+            "kind": "binary-expression",
+            "calleeLabel": "+",
+            "arguments": [
+              {
+                "kind": "call-expression",
+                "callee": {
+                  "kind": "identifier",
+                  "label": "fib"
+                },
+                "arguments": [
+                  {
+                    "kind": "binary-expression",
+                    "calleeLabel": "-",
+                    "arguments": [
+                      {
+                        "kind": "identifier",
+                        "label": "n"
+                      },
+                      {
+                        "kind": "int-literal",
+                        "value": "2"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "kind": "call-expression",
+                "callee": {
+                  "kind": "identifier",
+                  "label": "fib"
+                },
+                "arguments": [
+                  {
+                    "kind": "binary-expression",
+                    "calleeLabel": "-",
+                    "arguments": [
+                      {
+                        "kind": "identifier",
+                        "label": "n"
+                      },
+                      {
+                        "kind": "int-literal",
+                        "value": "1"
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
-        },
-        typeParameters: [],
-        flags: ['fn']
+          }
+        ]
+      },
+      "typeParameters": [],
+      "flags": [
+        "fn"
+      ]
     },
     {
-        kind: 'call-expression',
-        callee: { kind: 'identifier', label: 'print' },
-        arguments: [
+      "kind": "call-expression",
+      "callee": {
+        "kind": "identifier",
+        "label": "print"
+      },
+      "arguments": [
+        {
+          "kind": "call-expression",
+          "callee": {
+            "kind": "identifier",
+            "label": "fib"
+          },
+          "arguments": [
             {
-                kind: 'call-expression',
-                callee: { kind: 'identifier', label: 'fib' },
-                arguments: [{ kind: 'int-literal', value: '10' }]
+              "kind": "int-literal",
+              "value": "10"
             }
-        ]
+          ]
+        }
+      ]
     }
-];
+  ],
+  "scope": {
+    "entities": {},
+    "exports": [],
+    "isFnScope": false,
+    "locals": []
+  }
+}`;
 
 const basicMatchExpression = `
     match 3 {
@@ -190,42 +275,86 @@ const basicMatchExpression = `
     }
 `
 
-const correctBasicMatchExpressionAST = [
+const correctBasicMatchExpressionAST = `{
+  "body": [
     {
-        kind: 'match-expression',
-        value: { kind: 'int-literal', value: '3' },
-        cases: [
-            {
-                kind: 'match-case',
-                case: { kind: 'int-literal', value: '1' },
-                expression: {
-                    kind: 'call-expression',
-                    callee: { kind: 'identifier', label: 'print' },
-                    arguments: [{ kind: 'int-literal', value: '3' }]
-                }
+      "kind": "match-expression",
+      "value": {
+        "kind": "int-literal",
+        "value": "3"
+      },
+      "cases": [
+        {
+          "kind": "match-case",
+          "case": {
+            "kind": "int-literal",
+            "value": "1"
+          },
+          "expression": {
+            "kind": "call-expression",
+            "callee": {
+              "kind": "identifier",
+              "label": "print"
             },
-            {
-                kind: 'match-case',
-                case: { kind: 'int-literal', value: '2' },
-                expression: {
-                    kind: 'call-expression',
-                    callee: { kind: 'identifier', label: 'print' },
-                    arguments: [{ kind: 'int-literal', value: '2' }]
-                }
+            "arguments": [
+              {
+                "kind": "int-literal",
+                "value": "3"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "match-case",
+          "case": {
+            "kind": "int-literal",
+            "value": "2"
+          },
+          "expression": {
+            "kind": "call-expression",
+            "callee": {
+              "kind": "identifier",
+              "label": "print"
             },
-            {
-                kind: 'match-case',
-                case: { kind: 'int-literal', value: '3' },
-                expression: {
-                    kind: 'call-expression',
-                    callee: { kind: 'identifier', label: 'print' },
-                    arguments: [{ kind: 'int-literal', value: '1' }]
-                }
-            }
-        ],
-        flags: []
+            "arguments": [
+              {
+                "kind": "int-literal",
+                "value": "2"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "match-case",
+          "case": {
+            "kind": "int-literal",
+            "value": "3"
+          },
+          "expression": {
+            "kind": "call-expression",
+            "callee": {
+              "kind": "identifier",
+              "label": "print"
+            },
+            "arguments": [
+              {
+                "kind": "int-literal",
+                "value": "1"
+              }
+            ]
+          }
+        }
+      ],
+      "flags": []
     }
-];
+  ],
+  "scope": {
+    "entities": {},
+    "exports": [],
+    "isFnScope": false,
+    "locals": []
+  }
+}`;
 
 const fnSyntax1 = `
     fn add(a: i32, b: i32) = a + b
@@ -242,262 +371,488 @@ const fnSyntax3 = `
     fn sub(a: i32, b: i32) -> i32 { a - b }
 `
 
-const correctFnSyntax1AST = [
+const correctFnSyntax1AST = `{
+  "body": [
     {
-        kind: 'function-declaration',
-        label: 'add',
-        parameters: [
-            {
-                kind: 'parameter-declaration',
-                label: 'a',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            },
-            {
-                kind: 'parameter-declaration',
-                label: 'b',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            }
-        ],
-        returnType: undefined,
-        body: [
-            {
-                kind: 'binary-expression',
-                calleeLabel: '+',
-                arguments: [
-                    { kind: 'identifier', label: 'a' },
-                    { kind: 'identifier', label: 'b' }
-                ]
-            }
-        ],
-        typeParameters: [],
-        flags: ['fn']
+      "kind": "function-declaration",
+      "label": "add",
+      "parameters": [
+        {
+          "kind": "parameter-declaration",
+          "label": "a",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        },
+        {
+          "kind": "parameter-declaration",
+          "label": "b",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        }
+      ],
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      },
+      "expression": {
+        "kind": "binary-expression",
+        "calleeLabel": "+",
+        "arguments": [
+          {
+            "kind": "identifier",
+            "label": "a"
+          },
+          {
+            "kind": "identifier",
+            "label": "b"
+          }
+        ]
+      },
+      "typeParameters": [],
+      "flags": [
+        "fn"
+      ]
     },
     {
-        kind: 'function-declaration',
-        label: 'sub',
-        parameters: [
-            {
-                kind: 'parameter-declaration',
-                label: 'a',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            },
-            {
-                kind: 'parameter-declaration',
-                label: 'b',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            }
-        ],
-        returnType: { kind: 'type-argument', label: 'i32', flags: [] },
-        body: [
-            {
-                kind: 'binary-expression',
-                calleeLabel: '-',
-                arguments: [
-                    { kind: 'identifier', label: 'a' },
-                    { kind: 'identifier', label: 'b' }
-                ]
-            }
-        ],
-        typeParameters: [],
-        flags: ['fn']
+      "kind": "function-declaration",
+      "label": "sub",
+      "parameters": [
+        {
+          "kind": "parameter-declaration",
+          "label": "a",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        },
+        {
+          "kind": "parameter-declaration",
+          "label": "b",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        }
+      ],
+      "returnType": {
+        "kind": "type-argument",
+        "label": "i32",
+        "flags": []
+      },
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      },
+      "expression": {
+        "kind": "binary-expression",
+        "calleeLabel": "-",
+        "arguments": [
+          {
+            "kind": "identifier",
+            "label": "a"
+          },
+          {
+            "kind": "identifier",
+            "label": "b"
+          }
+        ]
+      },
+      "typeParameters": [],
+      "flags": [
+        "fn"
+      ]
     }
-];
+  ],
+  "scope": {
+    "entities": {},
+    "exports": [],
+    "isFnScope": false,
+    "locals": []
+  }
+}`;
 
-const correctFnSyntax2AST = [
+const correctFnSyntax2AST = `{
+  "body": [
     {
-        kind: 'function-declaration',
-        label: 'add',
-        parameters: [
-            {
-                kind: 'parameter-declaration',
-                label: 'a',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            },
-            {
-                kind: 'parameter-declaration',
-                label: 'b',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            }
-        ],
-        returnType: undefined,
-        body: [
-            {
-                kind: 'block-expression',
-                flags: [],
-                body: [
-                    {
-                        kind: 'binary-expression',
-                        calleeLabel: '+',
-                        arguments: [
-                            { kind: 'identifier', label: 'a' },
-                            { kind: 'identifier', label: 'b' }
-                        ]
-                    }
-                ]
-            }
-        ],
-        typeParameters: [],
-        flags: ['fn']
+      "kind": "function-declaration",
+      "label": "add",
+      "parameters": [
+        {
+          "kind": "parameter-declaration",
+          "label": "a",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        },
+        {
+          "kind": "parameter-declaration",
+          "label": "b",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        }
+      ],
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      },
+      "expression": {
+        "kind": "block-expression",
+        "flags": [],
+        "scope": {
+          "entities": {},
+          "exports": [],
+          "isFnScope": false,
+          "locals": []
+        },
+        "body": [
+          {
+            "kind": "binary-expression",
+            "calleeLabel": "+",
+            "arguments": [
+              {
+                "kind": "identifier",
+                "label": "a"
+              },
+              {
+                "kind": "identifier",
+                "label": "b"
+              }
+            ]
+          }
+        ]
+      },
+      "typeParameters": [],
+      "flags": [
+        "fn"
+      ]
     },
     {
-        kind: 'function-declaration',
-        label: 'sub',
-        parameters: [
-            {
-                kind: 'parameter-declaration',
-                label: 'a',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            },
-            {
-                kind: 'parameter-declaration',
-                label: 'b',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            }
-        ],
-        returnType: { kind: 'type-argument', label: 'i32', flags: [] },
-        body: [
-            {
-                kind: 'block-expression',
-                flags: [],
-                body: [
-                    {
-                        kind: 'binary-expression',
-                        calleeLabel: '-',
-                        arguments: [
-                            { kind: 'identifier', label: 'a' },
-                            { kind: 'identifier', label: 'b' }
-                        ]
-                    }
-                ]
-            }
-        ],
-        typeParameters: [],
-        flags: ['fn']
+      "kind": "function-declaration",
+      "label": "sub",
+      "parameters": [
+        {
+          "kind": "parameter-declaration",
+          "label": "a",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        },
+        {
+          "kind": "parameter-declaration",
+          "label": "b",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        }
+      ],
+      "returnType": {
+        "kind": "type-argument",
+        "label": "i32",
+        "flags": []
+      },
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      },
+      "expression": {
+        "kind": "block-expression",
+        "flags": [],
+        "scope": {
+          "entities": {},
+          "exports": [],
+          "isFnScope": false,
+          "locals": []
+        },
+        "body": [
+          {
+            "kind": "binary-expression",
+            "calleeLabel": "-",
+            "arguments": [
+              {
+                "kind": "identifier",
+                "label": "a"
+              },
+              {
+                "kind": "identifier",
+                "label": "b"
+              }
+            ]
+          }
+        ]
+      },
+      "typeParameters": [],
+      "flags": [
+        "fn"
+      ]
     }
-];
+  ],
+  "scope": {
+    "entities": {},
+    "exports": [],
+    "isFnScope": false,
+    "locals": []
+  }
+}`;
 
-const correctFnSyntax3AST = [
+const correctFnSyntax3AST = `{
+  "body": [
     {
-        kind: 'function-declaration',
-        label: 'add',
-        parameters: [
-            {
-                kind: 'parameter-declaration',
-                label: 'a',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            },
-            {
-                kind: 'parameter-declaration',
-                label: 'b',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            }
-        ],
-        returnType: undefined,
-        body: [
-            {
-                kind: 'binary-expression',
-                calleeLabel: '+',
-                arguments: [
-                    { kind: 'identifier', label: 'a' },
-                    { kind: 'identifier', label: 'b' }
-                ]
-            }
-        ],
-        typeParameters: [],
-        flags: ['fn']
+      "kind": "function-declaration",
+      "label": "add",
+      "parameters": [
+        {
+          "kind": "parameter-declaration",
+          "label": "a",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        },
+        {
+          "kind": "parameter-declaration",
+          "label": "b",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        }
+      ],
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      },
+      "expression": {
+        "kind": "block-expression",
+        "flags": [],
+        "scope": {
+          "entities": {},
+          "exports": [],
+          "isFnScope": false,
+          "locals": []
+        },
+        "body": [
+          {
+            "kind": "binary-expression",
+            "calleeLabel": "+",
+            "arguments": [
+              {
+                "kind": "identifier",
+                "label": "a"
+              },
+              {
+                "kind": "identifier",
+                "label": "b"
+              }
+            ]
+          }
+        ]
+      },
+      "typeParameters": [],
+      "flags": [
+        "fn"
+      ]
     },
     {
-        kind: 'function-declaration',
-        label: 'sub',
-        parameters: [
-            {
-                kind: 'parameter-declaration',
-                label: 'a',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            },
-            {
-                kind: 'parameter-declaration',
-                label: 'b',
-                type: { kind: 'type-argument', label: 'i32', flags: [] },
-                flags: []
-            }
-        ],
-        returnType: { kind: 'type-argument', label: 'i32', flags: [] },
-        body: [
-            {
-                kind: 'binary-expression',
-                calleeLabel: '-',
-                arguments: [
-                    { kind: 'identifier', label: 'a' },
-                    { kind: 'identifier', label: 'b' }
-                ]
-            }
-        ],
-        typeParameters: [],
-        flags: ['fn']
+      "kind": "function-declaration",
+      "label": "sub",
+      "parameters": [
+        {
+          "kind": "parameter-declaration",
+          "label": "a",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        },
+        {
+          "kind": "parameter-declaration",
+          "label": "b",
+          "type": {
+            "kind": "type-argument",
+            "label": "i32",
+            "flags": []
+          },
+          "flags": []
+        }
+      ],
+      "returnType": {
+        "kind": "type-argument",
+        "label": "i32",
+        "flags": []
+      },
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      },
+      "expression": {
+        "kind": "block-expression",
+        "flags": [],
+        "scope": {
+          "entities": {},
+          "exports": [],
+          "isFnScope": false,
+          "locals": []
+        },
+        "body": [
+          {
+            "kind": "binary-expression",
+            "calleeLabel": "-",
+            "arguments": [
+              {
+                "kind": "identifier",
+                "label": "a"
+              },
+              {
+                "kind": "identifier",
+                "label": "b"
+              }
+            ]
+          }
+        ]
+      },
+      "typeParameters": [],
+      "flags": [
+        "fn"
+      ]
     }
-];
+  ],
+  "scope": {
+    "entities": {},
+    "exports": [],
+    "isFnScope": false,
+    "locals": []
+  }
+}`;
 
 const basicPropertyAccessSnippet = `
     my.property.access.example
 `
 
-const correctBasicPropertyAccessAST = [
+const correctBasicPropertyAccessAST = `{
+  "body": [
     {
-        kind: 'property-access-expression',
-        arguments: [
+      "kind": "property-access-expression",
+      "arguments": [
+        {
+          "kind": "property-access-expression",
+          "arguments": [
             {
-                kind: 'property-access-expression',
-                arguments: [
-                    {
-                        kind: 'property-access-expression',
-                        arguments: [
-                            { kind: 'identifier', label: 'my' },
-                            { kind: 'identifier', label: 'property' }
-                        ]
-                    },
-                    { kind: 'identifier', label: 'access' }
-                ]
+              "kind": "property-access-expression",
+              "arguments": [
+                {
+                  "kind": "identifier",
+                  "label": "my"
+                },
+                {
+                  "kind": "identifier",
+                  "label": "property"
+                }
+              ]
             },
-            { kind: 'identifier', label: 'example' }
-        ]
+            {
+              "kind": "identifier",
+              "label": "access"
+            }
+          ]
+        },
+        {
+          "kind": "identifier",
+          "label": "example"
+        }
+      ]
     }
-];
+  ],
+  "scope": {
+    "entities": {},
+    "exports": [],
+    "isFnScope": false,
+    "locals": []
+  }
+}`;
 
 const propertyAccessFnCallSnippet = `
     call.this.func()
 `
 
-const correctPropertyAccessFnCallAST = [
+const correctPropertyAccessFnCallAST = `{
+  "body": [
     {
-        kind: 'call-expression',
-        callee: {
-            kind: 'property-access-expression',
-            arguments: [
-                {
-                    kind: 'property-access-expression',
-                    arguments: [
-                        { kind: 'identifier', label: 'call' },
-                        { kind: 'identifier', label: 'this' }
-                    ]
-                },
-                { kind: 'identifier', label: 'func' }
+      "kind": "call-expression",
+      "callee": {
+        "kind": "property-access-expression",
+        "arguments": [
+          {
+            "kind": "property-access-expression",
+            "arguments": [
+              {
+                "kind": "identifier",
+                "label": "call"
+              },
+              {
+                "kind": "identifier",
+                "label": "this"
+              }
             ]
-        },
-        arguments: []
+          },
+          {
+            "kind": "identifier",
+            "label": "func"
+          }
+        ]
+      },
+      "arguments": []
     }
-];
+  ],
+  "scope": {
+    "entities": {},
+    "exports": [],
+    "isFnScope": false,
+    "locals": []
+  }
+}`;
 
 const implWithoutTraitSnippet = `
     declare type i32
@@ -511,80 +866,169 @@ const implWithoutTraitSnippet = `
     }
 `
 
-const correctImplWithoutTraitAST = [
+const correctImplWithoutTraitAST = `{
+  "body": [
     {
-        kind: 'type-declaration',
-        label: 'i32',
-        flags: ['declare', 'type'],
-        type: { kind: 'type-argument', label: '', flags: [] }
+      "kind": "type-declaration",
+      "label": "i32",
+      "flags": [
+        "declare",
+        "type"
+      ],
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      }
     },
     {
-        kind: 'impl-declaration',
-        flags: ['impl'],
-        trait: undefined,
-        target: 'i32',
-        functions: [
-            {
-                kind: 'function-declaration',
-                label: 'to_f32',
-                parameters: [],
-                returnType: undefined,
-                body: [
-                    {
-                        kind: 'block-expression',
-                        flags: ['unsafe'],
-                        body: [
-                            {
-                                kind: 'call-expression',
-                                callee: { kind: 'identifier', label: 'i32_to_f32' },
-                                arguments: [{ kind: 'identifier', label: 'self' }]
-                            }
-                        ]
-                    }
-                ],
-                typeParameters: [],
-                flags: ['fn']
+      "kind": "impl-declaration",
+      "flags": [
+        "impl"
+      ],
+      "target": "i32",
+      "functions": [
+        {
+          "kind": "function-declaration",
+          "label": "to_f32",
+          "parameters": [],
+          "scope": {
+            "entities": {},
+            "exports": [],
+            "isFnScope": false,
+            "locals": []
+          },
+          "expression": {
+            "kind": "block-expression",
+            "flags": [
+              "unsafe"
+            ],
+            "scope": {
+              "entities": {},
+              "exports": [],
+              "isFnScope": false,
+              "locals": []
             },
+            "body": [
+              {
+                "kind": "call-expression",
+                "callee": {
+                  "kind": "identifier",
+                  "label": "i32_to_f32"
+                },
+                "arguments": [
+                  {
+                    "kind": "identifier",
+                    "label": "self"
+                  }
+                ]
+              }
+            ]
+          },
+          "typeParameters": [],
+          "flags": [
+            "fn"
+          ]
+        },
+        {
+          "kind": "function-declaration",
+          "label": "min",
+          "parameters": [
             {
-                kind: 'function-declaration',
-                label: 'min',
-                parameters: [
-                    {
-                        kind: 'parameter-declaration',
-                        label: 'other',
-                        type: { kind: 'type-argument', label: 'i32', flags: [] },
-                        flags: []
-                    }
-                ],
-                returnType: undefined,
-                body: [
-                    {
-                        kind: 'if-expression',
-                        condition: {
-                            kind: 'binary-expression',
-                            calleeLabel: '<',
-                            arguments: [
-                                { kind: 'identifier', label: 'self' },
-                                { kind: 'identifier', label: 'other' }
-                            ]
-                        },
-                        body: [{ kind: 'identifier', label: 'self' }],
-                        elifBodies: [],
-                        elseBody: [
-                            {
-                                kind: 'block-expression',
-                                flags: [],
-                                body: [{ kind: 'identifier', label: 'other' }]
-                            }
-                        ]
-                    }
-                ],
-                typeParameters: [],
-                flags: ['fn']
+              "kind": "parameter-declaration",
+              "label": "other",
+              "type": {
+                "kind": "type-argument",
+                "label": "i32",
+                "flags": []
+              },
+              "flags": []
             }
-        ]
+          ],
+          "scope": {
+            "entities": {},
+            "exports": [],
+            "isFnScope": false,
+            "locals": []
+          },
+          "expression": {
+            "kind": "if-expression",
+            "condition": {
+              "kind": "binary-expression",
+              "calleeLabel": "<",
+              "arguments": [
+                {
+                  "kind": "identifier",
+                  "label": "self"
+                },
+                {
+                  "kind": "identifier",
+                  "label": "other"
+                }
+              ]
+            },
+            "body": [
+              {
+                "kind": "identifier",
+                "label": "self"
+              }
+            ],
+            "elifs": [],
+            "else": {
+              "body": [
+                {
+                  "kind": "block-expression",
+                  "flags": [],
+                  "scope": {
+                    "entities": {},
+                    "exports": [],
+                    "isFnScope": false,
+                    "locals": []
+                  },
+                  "body": [
+                    {
+                      "kind": "identifier",
+                      "label": "other"
+                    }
+                  ]
+                }
+              ],
+              "scope": {
+                "entities": {},
+                "exports": [],
+                "isFnScope": false,
+                "locals": []
+              }
+            },
+            "scope": {
+              "entities": {},
+              "exports": [],
+              "isFnScope": false,
+              "locals": []
+            }
+          },
+          "typeParameters": [],
+          "flags": [
+            "fn"
+          ]
+        }
+      ],
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      }
     }
-];
+  ],
+  "scope": {
+    "entities": {},
+    "exports": [],
+    "isFnScope": false,
+    "locals": []
+  }
+}`;
 
 const implWithTraitSnippet = `
     declare type i32
@@ -608,143 +1052,275 @@ const implWithTraitSnippet = `
     }
 `;
 
-const correctImplWithTraitAST = [
+const correctImplWithTraitAST = `{
+  "body": [
     {
-        kind: 'type-declaration',
-        label: 'i32',
-        flags: ['declare', 'type'],
-        type: { kind: 'type-argument', label: '', flags: [] }
+      "kind": "type-declaration",
+      "label": "i32",
+      "flags": [
+        "declare",
+        "type"
+      ],
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      }
     },
     {
-        kind: 'impl-declaration',
-        flags: ['impl'],
-        trait: 'Numerical',
-        target: 'i32',
-        functions: [
+      "kind": "impl-declaration",
+      "flags": [
+        "impl"
+      ],
+      "trait": "Numerical",
+      "target": "i32",
+      "functions": [
+        {
+          "kind": "function-declaration",
+          "label": "+",
+          "parameters": [
             {
-                kind: 'function-declaration',
-                label: '+',
-                parameters: [
-                    {
-                        kind: 'parameter-declaration',
-                        label: 'r',
-                        type: { kind: 'type-argument', label: 'i32', flags: [] },
-                        flags: []
-                    }
-                ],
-                returnType: undefined,
-                body: [
-                    {
-                        kind: 'block-expression',
-                        flags: ['unsafe'],
-                        body: [
-                            {
-                                kind: 'call-expression',
-                                callee: { kind: 'identifier', label: 'i32_add' },
-                                arguments: [
-                                    { kind: 'identifier', label: 'self' },
-                                    { kind: 'identifier', label: 'r' }
-                                ]
-                            }
-                        ]
-                    }
-                ],
-                typeParameters: [],
-                flags: ['pure', 'fn']
-            },
-            {
-                kind: 'function-declaration',
-                label: '-',
-                parameters: [
-                    {
-                        kind: 'parameter-declaration',
-                        label: 'r',
-                        type: { kind: 'type-argument', label: 'i32', flags: [] },
-                        flags: []
-                    }
-                ],
-                returnType: undefined,
-                body: [
-                    {
-                        kind: 'block-expression',
-                        flags: ['unsafe'],
-                        body: [
-                            {
-                                kind: 'call-expression',
-                                callee: { kind: 'identifier', label: 'i32_sub' },
-                                arguments: [
-                                    { kind: 'identifier', label: 'self' },
-                                    { kind: 'identifier', label: 'r' }
-                                ]
-                            }
-                        ]
-                    }
-                ],
-                typeParameters: [],
-                flags: ['pure', 'fn']
-            },
-            {
-                kind: 'function-declaration',
-                label: '/',
-                parameters: [
-                    {
-                        kind: 'parameter-declaration',
-                        label: 'r',
-                        type: { kind: 'type-argument', label: 'i32', flags: [] },
-                        flags: []
-                    }
-                ],
-                returnType: undefined,
-                body: [
-                    {
-                        kind: 'block-expression',
-                        flags: ['unsafe'],
-                        body: [
-                            {
-                                kind: 'call-expression',
-                                callee: { kind: 'identifier', label: 'i32_div_s' },
-                                arguments: [
-                                    { kind: 'identifier', label: 'self' },
-                                    { kind: 'identifier', label: 'r' }
-                                ]
-                            }
-                        ]
-                    }
-                ],
-                typeParameters: [],
-                flags: ['pure', 'fn']
-            },
-            {
-                kind: 'function-declaration',
-                label: '*',
-                parameters: [
-                    {
-                        kind: 'parameter-declaration',
-                        label: 'r',
-                        type: { kind: 'type-argument', label: 'i32', flags: [] },
-                        flags: []
-                    }
-                ],
-                returnType: undefined,
-                body: [
-                    {
-                        kind: 'block-expression',
-                        flags: ['unsafe'],
-                        body: [
-                            {
-                                kind: 'call-expression',
-                                callee: { kind: 'identifier', label: 'i32_mul' },
-                                arguments: [
-                                    { kind: 'identifier', label: 'self' },
-                                    { kind: 'identifier', label: 'r' }
-                                ]
-                            }
-                        ]
-                    }
-                ],
-                typeParameters: [],
-                flags: ['pure', 'fn']
+              "kind": "parameter-declaration",
+              "label": "r",
+              "type": {
+                "kind": "type-argument",
+                "label": "i32",
+                "flags": []
+              },
+              "flags": []
             }
-        ]
+          ],
+          "scope": {
+            "entities": {},
+            "exports": [],
+            "isFnScope": false,
+            "locals": []
+          },
+          "expression": {
+            "kind": "block-expression",
+            "flags": [
+              "unsafe"
+            ],
+            "scope": {
+              "entities": {},
+              "exports": [],
+              "isFnScope": false,
+              "locals": []
+            },
+            "body": [
+              {
+                "kind": "call-expression",
+                "callee": {
+                  "kind": "identifier",
+                  "label": "i32_add"
+                },
+                "arguments": [
+                  {
+                    "kind": "identifier",
+                    "label": "self"
+                  },
+                  {
+                    "kind": "identifier",
+                    "label": "r"
+                  }
+                ]
+              }
+            ]
+          },
+          "typeParameters": [],
+          "flags": [
+            "pure",
+            "fn"
+          ]
+        },
+        {
+          "kind": "function-declaration",
+          "label": "-",
+          "parameters": [
+            {
+              "kind": "parameter-declaration",
+              "label": "r",
+              "type": {
+                "kind": "type-argument",
+                "label": "i32",
+                "flags": []
+              },
+              "flags": []
+            }
+          ],
+          "scope": {
+            "entities": {},
+            "exports": [],
+            "isFnScope": false,
+            "locals": []
+          },
+          "expression": {
+            "kind": "block-expression",
+            "flags": [
+              "unsafe"
+            ],
+            "scope": {
+              "entities": {},
+              "exports": [],
+              "isFnScope": false,
+              "locals": []
+            },
+            "body": [
+              {
+                "kind": "call-expression",
+                "callee": {
+                  "kind": "identifier",
+                  "label": "i32_sub"
+                },
+                "arguments": [
+                  {
+                    "kind": "identifier",
+                    "label": "self"
+                  },
+                  {
+                    "kind": "identifier",
+                    "label": "r"
+                  }
+                ]
+              }
+            ]
+          },
+          "typeParameters": [],
+          "flags": [
+            "pure",
+            "fn"
+          ]
+        },
+        {
+          "kind": "function-declaration",
+          "label": "/",
+          "parameters": [
+            {
+              "kind": "parameter-declaration",
+              "label": "r",
+              "type": {
+                "kind": "type-argument",
+                "label": "i32",
+                "flags": []
+              },
+              "flags": []
+            }
+          ],
+          "scope": {
+            "entities": {},
+            "exports": [],
+            "isFnScope": false,
+            "locals": []
+          },
+          "expression": {
+            "kind": "block-expression",
+            "flags": [
+              "unsafe"
+            ],
+            "scope": {
+              "entities": {},
+              "exports": [],
+              "isFnScope": false,
+              "locals": []
+            },
+            "body": [
+              {
+                "kind": "call-expression",
+                "callee": {
+                  "kind": "identifier",
+                  "label": "i32_div_s"
+                },
+                "arguments": [
+                  {
+                    "kind": "identifier",
+                    "label": "self"
+                  },
+                  {
+                    "kind": "identifier",
+                    "label": "r"
+                  }
+                ]
+              }
+            ]
+          },
+          "typeParameters": [],
+          "flags": [
+            "pure",
+            "fn"
+          ]
+        },
+        {
+          "kind": "function-declaration",
+          "label": "*",
+          "parameters": [
+            {
+              "kind": "parameter-declaration",
+              "label": "r",
+              "type": {
+                "kind": "type-argument",
+                "label": "i32",
+                "flags": []
+              },
+              "flags": []
+            }
+          ],
+          "scope": {
+            "entities": {},
+            "exports": [],
+            "isFnScope": false,
+            "locals": []
+          },
+          "expression": {
+            "kind": "block-expression",
+            "flags": [
+              "unsafe"
+            ],
+            "scope": {
+              "entities": {},
+              "exports": [],
+              "isFnScope": false,
+              "locals": []
+            },
+            "body": [
+              {
+                "kind": "call-expression",
+                "callee": {
+                  "kind": "identifier",
+                  "label": "i32_mul"
+                },
+                "arguments": [
+                  {
+                    "kind": "identifier",
+                    "label": "self"
+                  },
+                  {
+                    "kind": "identifier",
+                    "label": "r"
+                  }
+                ]
+              }
+            ]
+          },
+          "typeParameters": [],
+          "flags": [
+            "pure",
+            "fn"
+          ]
+        }
+      ],
+      "scope": {
+        "entities": {},
+        "exports": [],
+        "isFnScope": false,
+        "locals": []
+      }
     }
-];
+  ],
+  "scope": {
+    "entities": {},
+    "exports": [],
+    "isFnScope": false,
+    "locals": []
+  }
+}`;

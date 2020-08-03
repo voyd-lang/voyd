@@ -4,7 +4,6 @@ import { entityScanner } from "../entity-scanner";
 const basicCodeSnippet = `
     fn fib(n: i32) -> i32 {
         if n < 2 { return n }
-        let x = 3
         fib(n - 2) + fib(n - 1)
     }
 
