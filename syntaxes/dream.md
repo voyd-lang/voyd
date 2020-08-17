@@ -19,14 +19,27 @@ $(1, 2, 3) // Array
 $[x: 3] // Dictionary
 ```
 
-# Constant and Variables
+# Variables
 
 ```
-// A constant is defined using the let keyword
+// An immutable variable is defined using the let keyword
 let x = 5
 
-// A variable is defined using the var keyword
+// A mutable variable is defined using the var keyword
 var y = 3
+```
+
+# Blocks
+
+Blocks are a group of expressions enclosed in `{}`. Blocks return the result of the
+last expression they hold.
+
+```
+let twenty = {
+    let a = 5
+    let b = 4
+    a * b
+}
 ```
 
 # Control flow
@@ -53,7 +66,7 @@ match x {
     1 => print("One"),
     2 => print("two"),
     3 => print("three"),
-    _ {
+    _ => {
         // Match statements must cover every possible case.
         // _ means default. I.E. if no other patterns match, use this one.
         print("A number")
@@ -65,19 +78,19 @@ match x {
 
 ```
 // A basic function
-fn add(a: i32, b: i32) -> i32 {
+fn add(a: i32, b: i32) -> i32 = {
     a + b
 }
 
 // In most cases, the return type can be inferred.
-fn add(a: i32, b: i32) {
+fn add(a: i32, b: i32) = {
     a + b
 }
 
 // Functions are called using the standard () syntax
 add(1, 2)
 
-// Single expressions can be defined using a shorter = sign notation
+// Single expression functions can omit the {}
 fn add(a: i32, b: i32) = a + b
 ```
 
@@ -89,6 +102,12 @@ value of the last expression in their body (Unless it's return type is explicitl
 
 Examples:
 ```
+let four = {
+    let a = 2
+    let b = 2
+    a * b
+}
+
 let three = if true { 3 } else { 4 }
 
 let fred = match "Smith" {
@@ -97,13 +116,14 @@ let fred = match "Smith" {
     "Gates" => "Bill"
 }
 
-fn work(a: Int) {
+fn work(a: Int) = {
     let b = a * 2
     b + 3
 }
 
 let five = work(1)
 ```
+
 # Structs
 
 ```
@@ -143,7 +163,7 @@ struct Target {
 // Methods can also be added to structs through impl blocks.
 impl Target {
     // If a method modifies it's struct, it must be marked as mut
-    mut fn shift [x: Int] -> Void {
+    mut fn shift [x: Int] -> Void = {
         self.x += x
     }
 }
@@ -166,7 +186,7 @@ impl Target {
 
     // Setters are defined as methods that take a share the same name as a getter appended with
     // "_=", the same syntax as Scala.
-    pub fn a_=(v: Int) {
+    pub fn a_=(v: Int) = {
         x = v
     }
 }
@@ -177,7 +197,11 @@ impl Target {
 Static methods can be added to a struct, or any other type, by augmenting their namespace.
 ```
 namespace Target {
-    fn from(tuple: (Int, Int, Int))
+    fn from(tuple: (Int, Int, Int)) = Target [
+        x: tuple.0,
+        y: tuple.1,
+        z: tuple.2,
+    ]
 }
 ```
 
@@ -187,17 +211,17 @@ Static constants can be added this way too.
 
 ```
 enum Friend {
-    eric,
-    angie,
-    carter
+    case eric,
+    case angie,
+    case carter
 }
 
 var friend = Friend.eric
 
 match friend {
-    .eric {},
-    .angie {},
-    .carter {}
+    .eric => (),
+    .angie => ()
+    .carter => ()
 }
 
 // Enum identifier can be omitted if it can be reasonable inferred.
@@ -206,8 +230,8 @@ let bestFriend: Friend = .angie
 // Enums can have associated types
 enum ValidID {
     // Struct associated type
-    driversLicense [name: String, no: String, issued: Date, exp: Date]
-    studentID(Int)
+    case driversLicense [name: String, no: String, issued: Date, exp: Date]
+    case studentID(Int)
 }
 ```
 
@@ -247,22 +271,29 @@ car.getInfo()
 
 # Closures
 
-Closures are functions that can capture values from the scope they were defined in.
-Closures are defined using the syntax `{|...params -> ReturnType| body }`
+Closures are functions that can capture values of the scope they were defined in.
+
+Closures are defined using the syntax `{ (...params) -> ReturnType => body }`
 
 ```
 // Basic closure
-let add = {|a: Int, b: Int -> Int| a + b }
+let add = { (a: Int, b: Int) -> Int => a + b }
 
-// A type annotation for a closure. Closures passed to an annotated value can infer all of their
-// types
-let add: Fn(a: Int, b: Int) -> Int = {|a, b| a + b }
+// Return types can almost always be inferred. So it's better to leave their annotation out.
+let add = { (a: Int, b: Int) => a + b }
 
-// If a closure doesn't need parameters, you can omit the ||
-let offset_rand = { rand() + 7 }
+// If the closure has only one expression, the {} can be omitted
+let add = (a: Int, b: Int) => a + b
 
-// If a closure is only a single expression, you may also omit the {}, but || will be required
-let add = |a: Int, b: Int| a + b
+// In cases where the closure is passed to an already annotated value (such as a parameter
+// or annotated variable)
+let add: Fn(a: Int, b: Int) -> Int = (a, b) => a + b
+
+// If a closure has no parameters the () can be omitted.
+let doIt = => doWork()
+
+// Additionally, () can be left out when a closure is wrapped in a block
+let add = { a: Int, b: Int => a + b }
 ```
 
 ## Higher Order Functions
@@ -273,14 +304,34 @@ fn caller(cb: Fn(a: i32, b: i32) -> i32) -> i32 {
     cb(1, 2)
 }
 
-// All are valid ways of calling the caller method
+let add = { a: Int, b: Int => a + b }
 caller(add)
-caller({| a, b | a + b })
-caller() {|a, b| a + b }
-caller {|a, b| a + b }
 
-// You can use $<ParamNum> in place of defining the parameters, just like Swift.
-caller { $0 + $1 }
+// Or
+caller({ a, b => a + b })
+
+// Or
+caller((a, b) => a + b)
+```
+
+## Trailing Closure Syntax
+
+Dream supports swift-like trailing closure syntax. Trailing closures must always
+be wrapped in {}.
+
+```
+caller() { a, b => a + b }
+
+// Since the closure is the last parameter of caller, () can be omitted.
+caller { a, b => a + b }
+
+// If a trailing closure has no parameters, => can be omitted. Note: this is only
+// true for TRAILING closures
+fn callThis(func: Fn() -> Void) = func()
+
+callThis {
+    doWork()
+}
 ```
 
 # Generics
@@ -406,7 +457,7 @@ Example:
 ```dream
 var count: Int = 0;
 
-fn bump(val: inout Int) {
+fn bump(val: inout Int) = {
     val += 1
 }
 
@@ -426,9 +477,9 @@ Closures can refer to and modify values within their scope.
 
 Example:
 ```dream
-fn createCounter() {
+fn createCounter() = {
     var count = 0
-    {||
+    { =>
         count += 1
         count
     }

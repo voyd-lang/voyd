@@ -21,6 +21,4 @@ struct Vec3 {
 
     fn squaredLength =
         x * x + y * y + z * z
-
-    fn length = squaredLength.sqrt
 }
