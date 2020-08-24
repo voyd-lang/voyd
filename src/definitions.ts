@@ -5,7 +5,7 @@ export type NewEntity = DistributiveOmit<Entity, "id">;
 /** Any item that can be referenced by an identifier */
 export type Entity =
     FunctionEntity |
-    WASMType |
+    TypeAlias |
     VariableEntity |
     ParameterEntity |
     ImplEntity;
@@ -22,11 +22,8 @@ export interface FunctionEntity extends EntityBase {
 }
 
 /** Represents some form of type alias */
-export interface WASMType extends EntityBase {
-    kind: "wasm-type";
-
-    /** Binaryen type ref */
-    binType?: number;
+export interface TypeAlias extends EntityBase {
+    kind: "type-alias";
 }
 
 /** A value can be t */
@@ -61,4 +58,4 @@ export interface EntityBase {
     flags: string[];
 }
 
-export type EntityKind = "wasm-type" | "function" | "variable" | "parameter" | "impl";
+export type EntityKind = "function" | "variable" | "parameter" | "impl" | "type-alias";

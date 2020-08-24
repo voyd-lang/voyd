@@ -24,7 +24,7 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
 
     if (instruction.kind === "type-declaration") {
         instruction.id =
-            scope.add({ kind: "type", label: instruction.label, flags: instruction.flags });
+            scope.add({ kind: "type-alias", label: instruction.label, flags: instruction.flags });
         return;
     }
 
