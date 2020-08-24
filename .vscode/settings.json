@@ -5,7 +5,9 @@
         "Structs",
         "WASM",
         "binaryen",
+        "elif",
         "elifs",
+        "impls",
         "popcnt",
         "rotr"
     ]

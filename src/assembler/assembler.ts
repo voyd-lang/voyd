@@ -2,7 +2,7 @@ import binaryen from "binaryen";
 import { TypeAlias, VariableEntity, FunctionEntity } from "../definitions";
 import {
     Instruction, ReturnStatement, IfExpression, Assignment,
-    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, Identifier
+    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, Identifier, CallExpression
 } from "../parser";
 import uniqid from "uniqid";
 import { Scope } from "../scope";
@@ -97,9 +97,6 @@ export class Assembler {
 
         if (expr.kind === "call-expression") {
             const label = (expr.callee as Identifier).label;
-            if (label) {
-                return this.mod.call("print", [this.compileExpression(expr.arguments[0], scope)], binaryen.none);
-            }
 
             const func = scope.closestEntityWithLabel(label, ["function"]) as FunctionEntity;
             if (!func) throw new Error(`${label} is not a function`);
@@ -241,5 +238,56 @@ export class Assembler {
         }
 
         throw new Error(`Unsupported type alias ${type.label}`);
+    }
+
+    private getBuiltIn(name: string, scope: Scope): ((expr: CallExpression) => number) | void {
+        return ({
+            "print": expr =>
+                this.mod.call("print", [this.compileExpression(expr.arguments[0], scope)], binaryen.none),
+            "i32_add": expr => this.mod.i32.add(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_sub": expr => this.mod.i32.sub(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_div_s": expr => this.mod.i32.div_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_mul": expr => this.mod.i32.mul(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_eq": expr => this.mod.i32.eq(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_gt_s": expr => this.mod.i32.gt_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_lt_s": expr => this.mod.i32.lt_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_ge_s": expr => this.mod.i32.add(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_le_s": expr => this.mod.i32.le_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_and": expr => this.mod.i32.and(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_or": expr => this.mod.i32.or(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            )
+        } as Record<string, (expr: CallExpression) => number>)[name];
     }
 }
