@@ -411,6 +411,28 @@ add(2, 4).double()
 add(2, 4).double
 ```
 
+This applies to some primitive control flow operations as well.
+
+Examples
+```
+let x = false
+x.if {
+    do_work()
+}
+
+let test = "test"
+test.match {
+    "hello" => print("world"),
+    "test" => print("complete"),
+    _ => print("unknown")
+}
+
+var a = true
+a.while {
+    do_work()
+}
+```
+
 # Memory Management
 
 1. Dream uses the standard WASM garbage collector for Struct, Enum, and Tuple types.
