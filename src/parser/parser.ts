@@ -636,6 +636,19 @@ function parseImplDeclaration(tokens: Token[], flags: string[], scope: Scope): I
         next = tokens[0];
     }
 
+    functions.forEach(fn => {
+        fn.parameters.unshift({
+            kind: "parameter-declaration",
+            label: "self",
+            flags: ["self"],
+            type: {
+                kind: "type-argument",
+                label: target,
+                flags: []
+            }
+        })
+    })
+
     return {
         kind: "impl-declaration",
         flags,
