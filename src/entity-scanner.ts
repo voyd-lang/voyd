@@ -39,6 +39,8 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
             label: instruction.label,
             flags: instruction.flags,
             mutable: instruction.flags.includes("var"),
+            typeLabel: instruction.type ? instruction.type.label : undefined,
+            typeEntity: instruction.type ? scope.closestEntityWithLabel(instruction.type.label, ["type-alias"]) : undefined,
             index: scope.localsCount()
         });
         return;
@@ -84,13 +86,17 @@ function scanFn({ fn, scope }: { fn: FunctionDeclaration, scope: Scope }) {
         label: pd.label,
         flags: pd.flags,
         typeLabel: pd.type ? pd.type.label : undefined,
+        typeEntity: pd.type ? scope.closestEntityWithLabel(pd.type.label, ["type-alias"]) : undefined,
         mutable: pd.flags.includes("var")
     }));
 
     fn.id = scope.add({
         kind: "function",
         flags: fn.flags,
-        returnTypeLabel: fn.returnType ? fn.returnType.label : undefined,
+        returnTypeLabel: fn.returnType ?
+            fn.returnType.label : undefined,
+        returnTypeEntity: fn.returnType ?
+            scope.closestEntityWithLabel(fn.returnType.label, ["type-alias"]) : undefined,
         parameters,
         label: fn.label
     });

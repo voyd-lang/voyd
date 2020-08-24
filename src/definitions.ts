@@ -18,7 +18,7 @@ export interface FunctionEntity extends EntityBase {
 
     returnTypeLabel?: string;
 
-    returnTypeEntity?: string;
+    returnTypeEntity?: Entity;
 }
 
 /** Represents some form of type alias */
@@ -32,7 +32,7 @@ export interface VariableEntity extends EntityBase {
     mutable: boolean;
     index: number;
     typeLabel?: string;
-    typeEntity?: string;
+    typeEntity?: Entity;
 }
 
 /** A value can be t */
@@ -41,13 +41,13 @@ export interface ParameterEntity extends EntityBase {
     mutable: boolean;
     index: number;
     typeLabel?: string;
-    typeEntity?: string;
+    typeEntity?: Entity;
 }
 
 export interface ImplEntity extends EntityBase {
     kind: "impl";
     traitLabel?: string;
-    traitEntity?: string;
+    traitEntity?: Entity;
 }
 
 /** A declared definition */

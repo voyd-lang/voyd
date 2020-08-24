@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { TypeAlias, VariableEntity } from "../definitions";
+import { TypeAlias, VariableEntity, FunctionEntity } from "../definitions";
 import {
     Instruction, ReturnStatement, IfExpression, Assignment,
     FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, Identifier
@@ -22,11 +22,6 @@ export class Assembler {
 
     private walkInstructions(instructions: Instruction[], scope: Scope) {
         for (const instruction of instructions) {
-            if (instruction.kind === "type-declaration") {
-                // TODO.
-                continue;
-            }
-
             if (instruction.kind === "function-declaration") {
                 this.compileFn(instruction);
                 continue;
@@ -88,32 +83,28 @@ export class Assembler {
         }
 
         if (expr.kind === "identifier") {
-
-            if (identifier.kind === "local") {
-                return mod.local.get(identifier.index, identifier.type);
-            }
-
-            if (identifier.kind === "global") {
-                return mod.global.get(identifier.id, identifier.type);
-            }
-
-            throw new Error(`Unsupported identifier type in expression: ${identifier.kind}`);
+            const entity = scope.entities.get(expr.id!) as VariableEntity;
+            return this.mod.local.get(entity.index, this.getBinType(entity.typeEntity as TypeAlias));
         }
 
         if (expr.kind === "binary-expression") {
-            return this.compileBinaryExpression(expr, mod, vals);
+            const fnEntity = scope.closestEntityWithLabel(expr.calleeLabel, ["function"]) as FunctionEntity;
+            return this.mod.call(fnEntity.id, [
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ], this.getBinType(fnEntity.returnTypeEntity as TypeAlias))
         }
 
         if (expr.kind === "call-expression") {
-            // TODO: Add to vals as stdlib
-            if (expr.calleeLabel === "print") {
-                return (mod.call as any)("print", [compileExpression(expr.arguments[0], mod, vals)], binaryen.none);
+            const label = (expr.callee as Identifier).label;
+            if (label) {
+                return this.mod.call("print", [this.compileExpression(expr.arguments[0], scope)], binaryen.none);
             }
 
-            const val = vals.retrieve(expr.calleeLabel);
-            if (val.kind !== "method") throw new Error(`${expr.calleeLabel} is not a method`);
-            const args = expr.arguments.map(instr => compileExpression(instr, mod, vals));
-            return (mod.call as any)(val.id, args, val.returnType);
+            const func = scope.closestEntityWithLabel(label, ["function"]) as FunctionEntity;
+            if (!func) throw new Error(`${label} is not a function`);
+            const args = expr.arguments.map(instr => this.compileExpression(instr, scope));
+            return this.mod.call(func.id, args, this.getBinType(func.returnTypeEntity! as TypeAlias));
         }
 
         throw new Error(`Invalid expression ${expr.kind}`);
@@ -163,10 +154,6 @@ export class Assembler {
         }, scope);
     }
 
-    // TODO: Support non integer cases.
-    // TODO: Support patterns (ranges, strings, enum destructuring, etc.)
-    // TODO: Support default
-    // TODO: Document how this works. ASAP
     private compileMatchExpression(instruction: MatchExpression, scope: Scope): number {
         const indexFunctionName = `match-${uniqid()}`;
         const cases: { name: string, case: number, expression: number }[] = [];
