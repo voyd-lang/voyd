@@ -175,20 +175,28 @@ target.shift [x: 5]
 ## Computed Properties
 
 ```
-impl Target {
-    // Getters are just functions that have no parameters.
-    // Getters are always "pure" and cannot have side effects.
-    pub fn distanceFromOrigin =
-        sqrt(x.squared + y.squared + z.squared)
+struct Planet {
+    var radius = 5000
 
-    // Define a as an alias for x
-    pub fn a = x
-
-    // Setters are defined as methods that take a share the same name as a getter appended with
-    // "_=", the same syntax as Scala.
-    pub fn a_=(v: Int) = {
-        x = v
+    /** Computed property with getter and setter */
+    prop diameter {
+        get => radius * 2
+        set(v: Int) => radius = v / 2
     }
+
+    /** Readonly computed property */
+    prop surfaceArea {
+        get => 4 * PI * radius.sq
+    }
+
+    /** Shorthand readonly computed property */
+    prop circumference = 2 * PI * radius
+
+    /**
+     * Prop with a default getter and private default setter. This is essentially
+     * making a var field that can only be set privately
+     */
+    prop mass: Int { get, private set }
 }
 ```
 
@@ -240,17 +248,16 @@ enum ValidID {
 ```
 trait Vehicle {
     // Readonly property
-    fn vin -> String;
+    prop vin: String { get }
 
     // Property can be read and set.
-    fn color -> Color;
-    fn color_=(v: Color) -> none;
+    prop color: String { get, set }
 
     // Implementors must define this method
     fn start() -> Void
 
     // Traits can define default implementations of their method requirements
-    fn getInfo() => "Vin: ${vin}, Color: ${color}"
+    fn getInfo() = "Vin: ${vin}, Color: ${color}"
 }
 
 struct Car {
