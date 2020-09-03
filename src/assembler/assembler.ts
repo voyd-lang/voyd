@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { TypeAlias, VariableEntity, FunctionEntity } from "../definitions";
+import { TypeAlias, VariableEntity, FunctionEntity } from "../entity-scanner/definitions";
 import {
     Instruction, ReturnStatement, IfExpression, Assignment,
     FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, Identifier, CallExpression

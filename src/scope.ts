@@ -1,14 +1,9 @@
-import { Entity, EntityKind, NewEntity } from "./definitions";
+import { Entity, EntityKind, NewEntity } from "./entity-scanner/definitions";
 import uniqid from "uniqid";
 
 export class Scope {
     /** Entities within this scope */
-    readonly entities: Map<string, Entity> = new Map();
-
-    /** All of the entities the module exports */
-    readonly exports: string[] = [];
-
-    readonly parent?: Scope;
+    private readonly entities: Map<string, Entity>;
 
     /** The scope allows local variables */
     isFnScope: boolean = false;
@@ -20,14 +15,9 @@ export class Scope {
      */
     locals: string[] = [];
 
-    constructor(parent?: Scope) {
+    constructor(parent?: Scope, entities?: Map<string, Entity>) {
+        this.entities = entities ?? new Map();
         this.parent = parent;
-    }
-
-    import(scope: Scope) {
-        for (const entity of scope.entities.values()) {
-            this.entities.set(entity.id, entity);
-        }
     }
 
     entitiesWithLabel(label: string, found: AccessibleEntities = [], depth = 0): AccessibleEntities {
@@ -48,13 +38,6 @@ export class Scope {
         if (this.parent) return this.parent.closestEntityWithLabel(label, includedKinds);
 
         return undefined;
-    }
-
-    /** Iterator of all entities accessible from this scope */
-    accessibleEntities(found: AccessibleEntities = [], depth = 0): AccessibleEntities {
-        found.push(...Array.from(this.entities.values()).map(entity => ({ entity, depth })));
-        if (this.parent) return this.parent.accessibleEntities(found, depth + 1);
-        return found;
     }
 
     /** Add the entity as accessible from this scope */
@@ -127,3 +110,5 @@ export class Scope {
 
 /** Represents all entities within the scope. A depth of 0 represents the current scope, each scope above adds 1 */
 export type AccessibleEntities = { entity: Entity, depth: number }[];
+
+export type AccessLevel = "private" | "protected"

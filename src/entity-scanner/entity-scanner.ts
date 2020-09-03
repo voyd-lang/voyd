@@ -1,5 +1,6 @@
-import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration } from "./parser";
-import { Scope } from "./scope";
+import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration } from "../parser";
+import { Scope } from "../scope";
+import { TypeAlias } from "./definitions";
 
 /**
  * Scans an AST for declared entities. Update AST scopes with the resolved items
@@ -23,8 +24,12 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
     }
 
     if (instruction.kind === "type-declaration") {
-        instruction.id =
-            scope.add({ kind: "type-alias", label: instruction.label, flags: instruction.flags });
+        instruction.id = scope.add({
+            kind: "type-alias",
+            label: instruction.label,
+            flags: instruction.flags,
+            instanceScope: scope.sub()
+        });
         return;
     }
 
@@ -75,7 +80,8 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
 
 function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {
     instruction.id = scope.add({ kind: "impl", flags: instruction.flags, label: instruction.target });
-    scanBlock({ body: instruction.functions, scope: instruction.scope });
+    const target = scope.closestEntityWithLabel(instruction.target, ["type-alias"]) as TypeAlias;
+    instruction.functions.forEach(fn => scanFn({ fn, scope: target.instanceScope }));
 }
 
 function scanFn({ fn, scope }: { fn: FunctionDeclaration, scope: Scope }) {

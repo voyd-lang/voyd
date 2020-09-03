@@ -1,4 +1,5 @@
-import { DistributiveOmit } from "./helpers";
+import { DistributiveOmit } from "../helpers";
+import { Scope } from "../scope";
 
 export type NewEntity = DistributiveOmit<Entity, "id">;
 
@@ -24,6 +25,8 @@ export interface FunctionEntity extends EntityBase {
 /** Represents some form of type alias */
 export interface TypeAlias extends EntityBase {
     kind: "type-alias";
+
+    instanceScope: Scope;
 }
 
 /** A value can be t */

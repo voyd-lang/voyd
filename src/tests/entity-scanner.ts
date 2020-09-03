@@ -1,5 +1,5 @@
 import { parse } from "../parser";
-import { entityScanner } from "../entity-scanner";
+import { entityScanner } from "../entity-scanner/entity-scanner";
 
 const basicCodeSnippet = `
     fn fib(n: i32) -> i32 {
