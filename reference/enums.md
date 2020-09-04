@@ -2,7 +2,7 @@
 # Examples
 ```
 enum Friend {
-    eric, alex, will, jacob
+    case eric, alex, will, jacob
 }
 
 let friend = Friend.jacob
@@ -15,16 +15,16 @@ match friend {
 
 // Associated types
 enum Volume {
-    cubicFeet(f64),
-    cubicMeters(f64),
-    cuboidMeters[length: f64, width: f64, height: f64]
+    case cubicFeet(f64),
+    case cubicMeters(f64),
+    case cuboidMeters[length: f64, width: f64, height: f64]
 }
 
 let volume = Volume.cuboidMeters
 match volume {
     .cubicFeet(feet) => print("The volume in feet is ${feet}),
     .cubicMeters(m) => print("The volume in meters is ${m}),
-    .cuboidMeters[length, width, height] {
+    .cuboidMeters[length, width, height] => {
         let vol = length * width * height
         print("The volume in meters is ${vol})
     },
@@ -67,7 +67,7 @@ switch Enum.A {
 
 Ideally, in Dream:
 ```dream
-enum Enum { A, B, C }
+enum Enum { case A, B, C }
 
 match Enum.A {
     .A => {},
@@ -82,7 +82,7 @@ could be done in if lets as well.
 This has been proposed in rust. But there are some ambiguities (particularly with binding) that
 prevent it from ever being implemented.
 
-[I think helps identify the problem and makes a solution obvious (Just don't allow it)](https://github.com/rust-lang/rfcs/issues/421#issuecomment-260175176)
+[I think this helps identify the problem and makes a solution obvious (Just don't allow it)](https://github.com/rust-lang/rfcs/issues/421#issuecomment-260175176)
 
 
 ## Links

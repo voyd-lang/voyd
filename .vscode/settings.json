@@ -2,8 +2,12 @@
     "cSpell.words": [
         "Deno",
         "Inout",
+        "Structs",
+        "WASM",
         "binaryen",
+        "elif",
         "elifs",
+        "impls",
         "popcnt",
         "rotr"
     ]

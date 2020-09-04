@@ -13,14 +13,9 @@ struct Vec3 {
         z: x * vec.y - y * vec.x
     ]
 
-    fn sqrt = Vec3 [
+    prop sqrt = Vec3 [
         x: x.sqrt,
         y: y.sqrt,
         z: z.sqrt
     ]
-
-    fn squaredLength =
-        x * x + y * y + z * z
-
-    fn length = squaredLength.sqrt
 }

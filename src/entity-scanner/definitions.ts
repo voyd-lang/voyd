@@ -1,11 +1,12 @@
-import { DistributiveOmit } from "./helpers";
+import { DistributiveOmit } from "../helpers";
+import { Scope } from "../scope";
 
 export type NewEntity = DistributiveOmit<Entity, "id">;
 
 /** Any item that can be referenced by an identifier */
 export type Entity =
     FunctionEntity |
-    WASMType |
+    TypeAlias |
     VariableEntity |
     ParameterEntity |
     ImplEntity;
@@ -18,15 +19,14 @@ export interface FunctionEntity extends EntityBase {
 
     returnTypeLabel?: string;
 
-    returnTypeEntity?: string;
+    returnTypeEntity?: Entity;
 }
 
 /** Represents some form of type alias */
-export interface WASMType extends EntityBase {
-    kind: "wasm-type";
+export interface TypeAlias extends EntityBase {
+    kind: "type-alias";
 
-    /** Binaryen type ref */
-    binType?: number;
+    instanceScope: Scope;
 }
 
 /** A value can be t */
@@ -35,7 +35,7 @@ export interface VariableEntity extends EntityBase {
     mutable: boolean;
     index: number;
     typeLabel?: string;
-    typeEntity?: string;
+    typeEntity?: Entity;
 }
 
 /** A value can be t */
@@ -44,13 +44,13 @@ export interface ParameterEntity extends EntityBase {
     mutable: boolean;
     index: number;
     typeLabel?: string;
-    typeEntity?: string;
+    typeEntity?: Entity;
 }
 
 export interface ImplEntity extends EntityBase {
     kind: "impl";
     traitLabel?: string;
-    traitEntity?: string;
+    traitEntity?: Entity;
 }
 
 /** A declared definition */
@@ -61,4 +61,4 @@ export interface EntityBase {
     flags: string[];
 }
 
-export type EntityKind = "wasm-type" | "function" | "variable" | "parameter" | "impl";
+export type EntityKind = "function" | "variable" | "parameter" | "impl" | "type-alias";

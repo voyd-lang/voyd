@@ -1,17 +1,14 @@
 import binaryen from "binaryen";
-import { ValueCollection } from "./values";
-import { WASMType, Entity, FunctionEntity } from "../definitions";
+import { TypeAlias, VariableEntity, FunctionEntity } from "../entity-scanner/definitions";
 import {
-    parse, Instruction, ReturnStatement, IfExpression, Assignment,
-    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, TypeDeclaration, PropertyAccessExpression, Identifier
+    Instruction, ReturnStatement, IfExpression, Assignment,
+    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, Identifier, CallExpression
 } from "../parser";
 import uniqid from "uniqid";
 import { Scope } from "../scope";
-import { readFileSync } from "fs";
 
 export class Assembler {
     private readonly mod = new binaryen.Module();
-    private readonly stdScope = new Scope();
 
     constructor() {
         this.mod.autoDrop();
@@ -25,54 +22,52 @@ export class Assembler {
 
     private walkInstructions(instructions: Instruction[], scope: Scope) {
         for (const instruction of instructions) {
-            if (instruction.kind === "type-declaration") {
-                // TODO.
-                continue;
-            }
-
             if (instruction.kind === "function-declaration") {
                 this.compileFn(instruction);
                 continue;
             }
 
             if (instruction.kind === "impl-declaration") {
-                const type = scope.functionsWithLabel(instruction.target, this.entities)[0];
+                const type = scope.closestEntityWithLabel(instruction.target, ["type-alias"]);
 
-                if (!type || type.kind !== "type") {
+                if (!type) {
                     throw new Error(`${instruction.target} is not a type`);
                 }
 
-                instruction.functions.forEach(fn => this.compileFn(fn, type.id));
+                instruction.functions.forEach(fn => this.compileFn(fn));
             }
         }
     }
 
+    private compileFn(fn: FunctionDeclaration): number {
+        const expression = this.compileExpression(fn.expression!, fn.scope);
+        const binParams = binaryen.createType(fn.parameters.map(p => {
+            return this.getBinType(fn.scope.closestEntityWithLabel(p.type!.label, ["type-alias"]) as TypeAlias)
+        }));
+        const binReturnType = this.getBinType(fn.scope.closestEntityWithLabel(fn.returnType!.label, ["type-alias"]) as TypeAlias);
+        const binLocals = fn.scope.locals.map(id => {
+            const entity = fn.scope.entities.get(id) as VariableEntity;
+            return this.getBinType(fn.scope.closestEntityWithLabel(entity.typeLabel!, ["type-alias"]) as TypeAlias);
+        });
 
-    private compileFn(fn: FunctionDeclaration, self?: string): number {
-        const expression = this.compileExpression(fn.expression!, locals, fnScope);
-        const binParams = binaryen.createType(parameters.map(p => {
-            const type = this.entities.get(p) as WASMType;
-            return type.binType;
-        }))
-
-        return this.mod.addFunction(id, binParams, returnType.binType, locals.values, expression);
+        return this.mod.addFunction(fn.id!, binParams, binReturnType, binLocals, expression);
     }
 
-    private compileExpression(expr: Instruction, locals: LocalsTracker, scope: Scope): number {
+    private compileExpression(expr: Instruction, scope: Scope): number {
         if (expr.kind === "if-expression") {
-            return this.compileIfExpression(expr, locals, scope);
+            return this.compileIfExpression(expr);
         }
 
         if (expr.kind === "while-statement") {
-            return this.compileWhileStatement(block, mod, expr, vals);
+            return this.compileWhileStatement(expr, scope);
         }
 
         if (expr.kind === "match-expression") {
-            return this.compileMatchExpression(block, mod, expr, vals);
+            return this.compileMatchExpression(expr, scope);
         }
 
         if (expr.kind === "return-statement") {
-            return this.compileReturn(block, mod, expr, vals);
+            return this.compileReturn(expr, scope);
         }
 
         if (expr.kind === "int-literal") {
@@ -88,162 +83,152 @@ export class Assembler {
         }
 
         if (expr.kind === "identifier") {
-            const identifier = vals.retrieve(expr.label);
-
-            if (identifier.kind === "local") {
-                return mod.local.get(identifier.index, identifier.type);
-            }
-
-            if (identifier.kind === "global") {
-                return mod.global.get(identifier.id, identifier.type);
-            }
-
-            throw new Error(`Unsupported identifier type in expression: ${identifier.kind}`);
+            const entity = scope.entities.get(expr.id!) as VariableEntity;
+            return this.mod.local.get(entity.index, this.getBinType(entity.typeEntity as TypeAlias));
         }
 
         if (expr.kind === "binary-expression") {
-            return compileBinaryExpression(expr, mod, vals);
+            const fnEntity = scope.closestEntityWithLabel(expr.calleeLabel, ["function"]) as FunctionEntity;
+            return this.mod.call(fnEntity.id, [
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ], this.getBinType(fnEntity.returnTypeEntity as TypeAlias))
         }
 
         if (expr.kind === "call-expression") {
-            // TODO: Add to vals as stdlib
-            if (expr.calleeLabel === "print") {
-                return (mod.call as any)("print", [compileExpression(expr.arguments[0], mod, vals)], binaryen.none);
-            }
+            const label = (expr.callee as Identifier).label;
 
-            const val = vals.retrieve(expr.calleeLabel);
-            if (val.kind !== "method") throw new Error(`${expr.calleeLabel} is not a method`);
-            const args = expr.arguments.map(instr => compileExpression(instr, mod, vals));
-            return (mod.call as any)(val.id, args, val.returnType);
+            const func = scope.closestEntityWithLabel(label, ["function"]) as FunctionEntity;
+            if (!func) throw new Error(`${label} is not a function`);
+            const args = expr.arguments.map(instr => this.compileExpression(instr, scope));
+            return this.mod.call(func.id, args, this.getBinType(func.returnTypeEntity! as TypeAlias));
         }
 
         throw new Error(`Invalid expression ${expr.kind}`);
     }
 
-    private compileIfExpression(instruction: IfExpression, locals: LocalsTracker, scope: Scope) {
+    private compileIfExpression(instruction: IfExpression) {
         return this.mod.if(
-            this.compileExpression(instruction.condition, locals, scope),
-            this.compileBlock(instruction.body, locals, scope)
-        )
+            this.compileExpression(instruction.condition, instruction.scope),
+            this.compileBlock(instruction)
+        );
     }
 
-    private compileBlock(body: AST, locals: LocalsTracker, scope: Scope): number {
-        return this.mod.block("", body.map(instruction => {
-            if (instruction.kind === "variable-declaration") {
-                return this.compileVariableDeclaration(instruction, locals, scope);
-            }
+    private compileBlock(block: AST, prepend: number[] = [], append: number[] = []): number {
+        return this.mod.block("", [
+            ...prepend,
+            ...block.body.map(instruction => {
+                if (instruction.kind === "variable-declaration") {
+                    return this.compileVariableDeclaration(instruction, block.scope);
+                }
 
-            if (instruction.kind === "function-declaration") {
-                return this
-            }
+                if (instruction.kind === "function-declaration") {
+                    return this.compileFn(instruction);
+                }
 
-            if (instruction.kind === "assignment") {
-                compileAssignment(instruction, mod, vals, block);
-                return;
-            }
+                if (instruction.kind === "assignment") {
+                    return this.compileAssignment(instruction, block.scope);
+                }
 
-            return compileExpression(instruction, mod, vals);
-        }));
+                return this.compileExpression(instruction, block.scope);
+            }),
+            ...append
+        ]);
     }
 
-    private compileVariableDeclaration(vr: VariableDeclaration, locals: LocalsTracker, scope: Scope): number {
-        const type = vr.type ?
-            this.resolveTypeEntityFromLabel(vr.type.label, scope) :
-            this.inferType(vr.initializer!, scope) as WASMType;
+    compileAssignment(instruction: Assignment, scope: Scope): number {
+        const assignee = scope.entities.get((instruction.assignee as Identifier).id!)! as VariableEntity;
+        const expr = this.compileExpression(instruction.expression, scope);
+        return this.mod.local.set(assignee.index, expr)
+    }
 
-        locals.values.push(type.binType);
+    private compileVariableDeclaration(vr: VariableDeclaration, scope: Scope): number {
+        if (!vr.initializer) return this.mod.nop();
+        return this.compileAssignment({
+            kind: "assignment",
+            assignee: { kind: "identifier", label: "no", id: vr.id! },
+            expression: vr.initializer
+        }, scope);
+    }
 
-        const index = locals.values.length + locals.offset;
+    private compileMatchExpression(instruction: MatchExpression, scope: Scope): number {
+        const indexFunctionName = `match-${uniqid()}`;
+        const cases: { name: string, case: number, expression: number }[] = [];
+        for (const dCase of instruction.cases) {
+            const name = JSON.stringify(dCase.case);
+            cases.push({
+                name,
+                case: this.compileExpression(dCase.case, scope),
+                expression: this.compileExpression(dCase.expression, scope)
+            });
+        }
 
-        this.entities.add({
-            kind: "local",
-            label: vr.label,
-            typeEntity: type.id,
-            flags: vr.flags,
-            mutable: vr.flags.includes("var"),
-            index,
-            scope
+        // Build the match indexing function
+        const matchBlock: number[] = [
+            this.mod.local.set(0, this.compileExpression(instruction.value, scope))
+        ];
+
+        cases.forEach((cCase, index) => {
+            // If the match value is equal to the case, return the block index of the case's expression.
+            matchBlock.push(this.mod.if(
+                this.mod.i32.eq(cCase.case, this.mod.local.get(0, binaryen.i32)),
+                this.mod.return(this.mod.i32.const(index + 1))
+            ))
         });
 
-        if (!vr.initializer) return this.mod.nop();
+        matchBlock.push(this.mod.i32.const(0));
 
-        return this.mod.local.set(index, this.compileExpression(vr.initializer, locals, scope));
-    }
+        this.mod.addFunction(indexFunctionName, binaryen.createType([]), binaryen.i32, [binaryen.i32], this.mod.block("", matchBlock, binaryen.i32));
 
-    /** Returns the expression's result type entity, TODO: ADD ERROR CHECKING IN PLACE OF AS IRTypeEntity */
-    private inferType(expr: Instruction, scope: Scope): WASMType {
-        if (expr.kind === "call-expression") {
-            const entity = this.resolveEntity(expr.callee, scope)[0];
-            if (!entity || entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
-            const returnType = (entity as FunctionEntity).returnType;
-            if (returnType) return this.entities.get(returnType) as WASMType;
-        }
+        // Convert the 1D cases array to a hierarchical set of blocks, last one containing the switch (br_table).
+        // TODO: Make this iterative.
+        const makeBlockTree = (caseIndex = 0): number => {
+            const cCase = cases[caseIndex];
 
-        if (expr.kind === "binary-expression") {
-            const operand = this.inferType(expr.arguments[0], scope);
-            const entity = operand.scope.functionsWithLabel(expr.calleeLabel, this.entities)[0];
-            if (!entity || entity.kind !== "function") throw new Error(`${findLabelForCall(expr)} is not a function.`);
-            const returnType = (entity as FunctionEntity).returnType;
-            if (returnType) return this.entities.get(returnType) as WASMType;
-        }
-
-        if (expr.kind === "identifier") {
-            const entity = this.resolveEntity(expr, scope)[0];
-
-            if (!entity) {
-                throw new Error(`${expr.label} is not defined`);
+            if (cCase) {
+                return this.mod.block(cCase.name, [
+                    makeBlockTree(caseIndex + 1),
+                    cCase.expression,
+                    this.mod.br("match")
+                ]);
             }
 
-            if (entity.kind === "local") return this.entities.get(entity.typeEntity) as WASMType;
-            return entity as WASMType;
+            return this.mod.block("matcher", [
+                this.mod.switch(
+                    [...cases.map(c => c.name), "matcher"],
+                    cases[0].name,
+                    this.mod.call(indexFunctionName, [], binaryen.i32)
+                )
+            ]);
         }
 
-        if (expr.kind === "block-expression") {
-            return this.inferType(expr.body[expr.body.length - 1], scope);
-        }
-
-        if (expr.kind === "parameter-declaration") {
-            if (expr.type) {
-                return scope.functionsWithLabel(expr.type.label, this.entities)[0] as WASMType;
-            }
-
-            if (expr.initializer) {
-                return this.inferType(expr.initializer, scope);
-            }
-        }
-
-        const byLabel = (label: string) => scope.functionsWithLabel(label, this.entities)[0];
-        if (expr.kind === "bool-literal") return byLabel("bool") as WASMType;
-        if (expr.kind === "float-literal") return byLabel("f32") as WASMType;
-        if (expr.kind === "int-literal") return byLabel("i32") as WASMType;
-        if (expr.kind === "return-statement") return this.inferType(expr.expression, scope);
-        if (expr.kind === "if-expression") {
-            return this.inferType(expr.body[expr.body.length - 1], scope);
-        }
-
-        throw new Error(`Unable to infer type`);
+        return this.mod.block("match", [makeBlockTree()]);
     }
 
-    private resolveEntity(expr: PropertyAccessExpression | Identifier, scope: Scope): Entity[] {
-        if (expr.kind === "identifier") {
-            return scope.functionsWithLabel(expr.label, this.entities);
-        }
-
-        const parent = this.resolveEntity(expr.arguments[0], scope)[0];
-        return this.resolveEntity(expr.arguments[1], parent.scope);
+    private compileReturn(instruction: ReturnStatement, scope: Scope) {
+        return this.mod.return(this.compileExpression(instruction.expression, scope))
     }
 
-    private resolveTypeEntityFromLabel(label: string, scope: Scope) {
-        const typeEntity = scope.functionsWithLabel(label, this.entities)[0];
-
-        if (!typeEntity || typeEntity.kind !== "type") {
-            throw new Error(`${typeEntity.label} is not a type`);
-        }
-
-        return typeEntity;
+    private compileWhileStatement(instruction: WhileStatement, scope: Scope) {
+        return this.mod.block("while", [
+            this.mod.loop("loop",
+                this.compileBlock(
+                    instruction,
+                    [
+                        this.mod.br("while", this.mod.i32.ne(
+                            this.compileExpression(instruction.condition, scope),
+                            this.mod.i32.const(1)
+                        ))
+                    ],
+                    [
+                        this.mod.br("loop")
+                    ]
+                )
+            )
+        ]);
     }
 
-    private getBinType(type: TypeDeclaration): number {
+    private getBinType(type: TypeAlias): number {
         if (!type.flags.includes("declare")) {
             throw new Error(`Unsupported type alias ${type.label}`);
         }
@@ -254,105 +239,55 @@ export class Assembler {
 
         throw new Error(`Unsupported type alias ${type.label}`);
     }
-}
 
-// TODO: Support non integer cases.
-// TODO: Support patterns (ranges, strings, enum destructuring, etc.)
-// TODO: Support default
-// TODO: Document how this works. ASAP
-function compileMatchExpression(block: number[], mod: binaryen.Module, instruction: MatchExpression, vals: ValueCollection) {
-    const indexFunctionName = `match-${uniqid()}`;
-    const cases: { name: string, case: number, expression: number }[] = [];
-    for (const dCase of instruction.cases) {
-        const name = JSON.stringify(dCase.case);
-        cases.push({
-            name,
-            case: compileExpression(dCase.case, mod, vals),
-            expression: compileExpression(dCase.expression, mod, vals)
-        });
-    }
-
-    // Build the match indexing function
-
-    const matchBlock: number[] = [
-        mod.local.set(0, compileExpression(instruction.value, mod, vals))
-    ];
-
-    cases.forEach((cCase, index) => {
-        // If the match value is equal to the case, return the block index of the case's expression.
-        matchBlock.push(mod.if(
-            mod.i32.eq(cCase.case, mod.local.get(0, binaryen.i32)),
-            mod.return(mod.i32.const(index + 1))
-        ))
-    });
-
-    matchBlock.push(mod.i32.const(0));
-
-    mod.addFunction(indexFunctionName, binaryen.createType([]), binaryen.i32, [binaryen.i32], mod.block("", matchBlock, binaryen.i32));
-
-    // Convert the 1D cases array to a hierarchical set of blocks, last one containing the switch (br_table).
-    // TODO: Make this iterative.
-    function makeBlockTree(caseIndex = 0): number {
-        const cCase = cases[caseIndex];
-
-        if (cCase) {
-            return mod.block(cCase.name, [
-                makeBlockTree(caseIndex + 1),
-                cCase.expression,
-                mod.br("match")
-            ]);
-        }
-
-        return mod.block("matcher", [
-            mod.switch(
-                [...cases.map(c => c.name), "matcher"],
-                cases[0].name,
-                mod.call(indexFunctionName, [], binaryen.i32)
+    private getBuiltIn(name: string, scope: Scope): ((expr: CallExpression) => number) | void {
+        return ({
+            "print": expr =>
+                this.mod.call("print", [this.compileExpression(expr.arguments[0], scope)], binaryen.none),
+            "i32_add": expr => this.mod.i32.add(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_sub": expr => this.mod.i32.sub(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_div_s": expr => this.mod.i32.div_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_mul": expr => this.mod.i32.mul(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_eq": expr => this.mod.i32.eq(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_gt_s": expr => this.mod.i32.gt_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_lt_s": expr => this.mod.i32.lt_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_ge_s": expr => this.mod.i32.add(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_le_s": expr => this.mod.i32.le_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_and": expr => this.mod.i32.and(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i32_or": expr => this.mod.i32.or(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
             )
-        ]);
+        } as Record<string, (expr: CallExpression) => number>)[name];
     }
-
-    block.push(mod.block("match", [makeBlockTree()]));
-}
-
-function compileReturn(block: number[], mod: binaryen.Module, instruction: ReturnStatement, vals: ValueCollection) {
-    block.push(mod.return(compileExpression(instruction.expression, mod, vals)));
-}
-
-function compileWhileStatement(block: number[], mod: binaryen.Module, instruction: WhileStatement, vals: ValueCollection) {
-    block.push(
-        mod.block("while", [
-            mod.loop("loop",
-                compileBlock({
-                    body: instruction.body, mod, vals: vals,
-                    existingInstructions: [
-                        mod.br("while", mod.i32.ne(
-                            compileExpression(instruction.condition, mod, vals),
-                            mod.i32.const(1)
-                        ))
-                    ],
-                    additionalInstructions: [
-                        mod.br("loop")
-                    ]
-                })
-            )
-        ])
-    );
-}
-
-function compileAssignment(instruction: Assignment, mod: binaryen.Module, vals: ValueCollection, block: number[]) {
-    const id = instruction.assigneeLabel;
-    const expr = compileExpression(instruction.expression, mod, vals);
-    const val = vals.retrieve(id);
-
-    if (val.kind === "method" || !val.mutable) {
-        throw new Error(`${id} cannot be reassigned`);
-    }
-
-    if (val.kind === "local") {
-        block.push(mod.local.set(val.index, expr));
-        return;
-    }
-
-    block.push(mod.global.set(id, expr));
 }
