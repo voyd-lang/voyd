@@ -19,13 +19,13 @@ $(1, 2, 3) // Array
 $[x: 3] // Dictionary
 ```
 
-# Constant and Variables
+# Variables
 
 ```
-// A constant is defined using the let keyword
+// An immutable variable is defined using the let keyword
 let x = 5
 
-// A variable is defined using the var keyword
+// A mutable variable is defined with the var keyword
 var y = 3
 ```
 
@@ -34,7 +34,7 @@ var y = 3
 ```
 if 3 > val {
 
-} else if 3 < val {
+} elif 3 < val {
 
 } else {
 
@@ -187,9 +187,7 @@ Static constants can be added this way too.
 
 ```
 enum Friend {
-    eric,
-    angie,
-    carter
+    case eric, angie, carter
 }
 
 var friend = Friend.eric
@@ -206,8 +204,8 @@ let bestFriend: Friend = .angie
 // Enums can have associated types
 enum ValidID {
     // Struct associated type
-    driversLicense [name: String, no: String, issued: Date, exp: Date]
-    studentID(Int)
+    case driversLicense [name: String, no: String, issued: Date, exp: Date]
+    case studentID(Int)
 }
 ```
 
@@ -256,7 +254,7 @@ let add = {|a: Int, b: Int -> Int| a + b }
 
 // A type annotation for a closure. Closures passed to an annotated value can infer all of their
 // types
-let add: Fn(a: Int, b: Int) -> Int = {|a, b| a + b }
+let add: Fn(a: Int, b: Int) -> Int = {|a, b| a + b}
 
 // If a closure doesn't need parameters, you can omit the ||
 let offset_rand = { rand() + 7 }
