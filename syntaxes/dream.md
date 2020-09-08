@@ -563,25 +563,6 @@ pure fn div(a: i32, b: i32) {
 }
 ```
 
-## Parameter-less Functions
-
-It is possible to define a function that takes no parameters and is called without ().
-
-```
-fn anyNum = random()
-
-print(anyNum) // 7
-print(anyNum) // 2341
-print(anyNum) // 562
-```
-
-It is best practice to define these functions as pure and add a comment if they are computationally
-intensive
-```
-// This function is O(n!)
-pure fn test = /** COMPUTATIONALLY EXPENSIVE OPERATION HERE */
-```
-
 ## Unsafe Functions
 
 ```
