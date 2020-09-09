@@ -292,15 +292,12 @@ let add = { (a: Int, b: Int) => a + b }
 // If the closure has only one expression, the {} can be omitted
 let add = (a: Int, b: Int) => a + b
 
-// In cases where the closure is passed to an already annotated value (such as a parameter
-// or annotated variable)
+// A closure's parameter types may be left out in places where they can be inferred.
 let add: Fn(a: Int, b: Int) -> Int = (a, b) => a + b
 
-// If a closure has no parameters the () can be omitted.
-let doIt = => doWork()
-
-// Additionally, () can be left out when a closure is wrapped in a block
-let add = { a: Int, b: Int => a + b }
+// Additionally, the () can be omitted from block style closures when all types can be
+// inferred and there are one or more parameters.
+let add: Fn(a: Int, b: Int) -> Int = { a, b => a + b }
 ```
 
 ## Higher Order Functions
@@ -311,7 +308,7 @@ fn caller(cb: Fn(a: i32, b: i32) -> i32) -> i32 {
     cb(1, 2)
 }
 
-let add = { a: Int, b: Int => a + b }
+let add = { (a: Int, b: Int) => a + b }
 caller(add)
 
 // Or
