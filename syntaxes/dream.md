@@ -552,6 +552,33 @@ add[x: 5, y: 3]
 fn sum(numbers: ...Int) = numbers.reduce(0) { prev, cur => prev + cur }
 ```
 
+## Overloading
+
+Dream functions can be overloaded. Provided that function overload can be unambiguously distinguished
+via their parameters and return type.
+
+```
+fn sum(a: Int, b: Int) = {
+    print("Def 1");
+    a + b
+}
+
+fn sum[a: Int, b: Int] = {
+    print("Def 2");
+    a + b
+}
+
+sum(1, 2) // Def 1
+sum[a: 1, b: 2] // Def 2
+
+// ERROR: sum(numbers: ...Int) overlaps ambiguously with sum(a: Int, b: Int)
+fn sum(numbers: ...Int) = {
+    print("Def 3")
+    numbers.reduce { prev, cur => prev + cur }
+}
+```
+
+
 ## Pure Functions
 
 ```
