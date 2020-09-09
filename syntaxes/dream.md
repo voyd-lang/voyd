@@ -525,17 +525,17 @@ Functions have some additional features and conveniences that are laid out in th
 
 ```
 // Structs can be destructed in the method signature.
-fn add([x, y]: [x: Int, y: Int]) -> Int {
+fn add([x, y]: [x: Int, y: Int]) -> Int = {
     x + y
 }
 
 // This can be shortened further, unlabeled structs are automatically destructed.
-fn add([x: Int, y: Int]) -> Int {
+fn add([x: Int, y: Int]) -> Int = {
     x + y
 }
 
 // If a struct is the only argument of a method, parenthesis can be omitted.
-fn add[x: Int, y: Int] -> Int {
+fn add[x: Int, y: Int] -> Int = {
     x + y
 }
 
@@ -544,6 +544,12 @@ add([x: 5, y: 3])
 // If a struct is the only argument or the second argument is a function (more on that later),
 // the parenthesis can be omitted on call as well.
 add[x: 5, y: 3]
+```
+
+## Variadics
+
+```
+fn sum(numbers: ...Int) = numbers.reduce(0) { prev, cur => prev + cur }
 ```
 
 ## Pure Functions
