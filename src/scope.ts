@@ -3,7 +3,7 @@ import uniqid from "uniqid";
 
 export class Scope {
     /** Entities within this scope */
-    readonly entities: Map<string, Entity> = new Map();
+    private readonly entities: Map<string, Entity> = new Map();
 
     /** All of the entities the module exports */
     readonly exports: string[] = [];
@@ -57,6 +57,13 @@ export class Scope {
         return found;
     }
 
+    get(id: string): Entity | undefined {
+        const entity = this.entities.get(id);
+        if (entity) return entity;
+        if (!this.parent) return undefined;
+        return this.parent.get(id);
+    }
+
     /** Add the entity as accessible from this scope */
     add(entity: NewEntity) {
         const id = uniqid();
@@ -70,24 +77,20 @@ export class Scope {
 
      */
     addLocal(entity: NewEntity) {
-        const id = this.add(entity);
-        this.addEntityIDToFnLocals(id);
-        return id;
-    }
-
-    protected addEntityIDToFnLocals(id: string) {
         if (this.isFnScope) {
+            const id = this.add(entity);
             this.locals.push(id);
-            return;
+            return id;
         }
 
         if (this.parent) {
-            this.parent.addEntityIDToFnLocals(id);
+            this.parent.addLocal(entity);
             return;
         }
 
         throw new Error("Variable defined in invalid scope");
     }
+
 
     localsCount(): number {
         if (this.isFnScope) return this.locals.length;

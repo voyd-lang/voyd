@@ -48,7 +48,12 @@ export class Assembler {
         }));
         const binReturnType = this.getBinType(fn.scope.closestEntityWithLabel(fn.returnType!.label, ["type-alias"]) as TypeAlias);
         const binLocals = fn.scope.locals.map(id => {
-            const entity = fn.scope.entities.get(id) as VariableEntity;
+            const entity = fn.scope.get(id) as VariableEntity;
+            if (!entity) {
+                console.log(id);
+                console.log(fn);
+                console.log(fn.scope.get(id));
+            }
             return this.getBinType(fn.scope.closestEntityWithLabel(entity.typeLabel!, ["type-alias"]) as TypeAlias);
         });
 
@@ -117,7 +122,7 @@ export class Assembler {
         }
 
         if (expr.kind === "block-expression") {
-            return this.mod.block("", expr.body.map(v => this.compileExpression(v, expr.scope)), binaryen.auto);
+            return this.compileBlock(expr);
         }
 
         throw new Error(`Invalid expression ${expr.kind}`);
@@ -173,7 +178,7 @@ export class Assembler {
     }
 
     compileAssignment(instruction: Assignment, scope: Scope): number {
-        const assignee = scope.entities.get((instruction.assignee as Identifier).id!)! as VariableEntity;
+        const assignee = scope.closestEntityWithLabel((instruction.assignee as Identifier).label, ["parameter", "variable"])! as VariableEntity;
         const expr = this.compileExpression(instruction.expression, scope);
         return this.mod.local.set(assignee.index, expr)
     }
@@ -182,7 +187,7 @@ export class Assembler {
         if (!vr.initializer) return this.mod.nop();
         return this.compileAssignment({
             kind: "assignment",
-            assignee: { kind: "identifier", label: "no", id: vr.id! },
+            assignee: { kind: "identifier", label: vr.label, id: vr.id! },
             expression: vr.initializer
         }, scope);
     }
