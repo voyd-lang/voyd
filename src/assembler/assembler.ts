@@ -97,6 +97,8 @@ export class Assembler {
 
         if (expr.kind === "call-expression") {
             const label = (expr.callee as Identifier).label;
+            const builtIn = this.getBuiltIn(label, scope);
+            if (builtIn) return builtIn(expr);
 
             const func = scope.closestEntityWithLabel(label, ["function"]) as FunctionEntity;
             if (!func) throw new Error(`${label} is not a function`);
