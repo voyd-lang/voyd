@@ -42,7 +42,7 @@ export class Scope {
 
     closestEntityWithLabel(label: string, includedKinds: EntityKind[]): Entity | undefined {
         for (const entity of this.entities.values()) {
-            if (entity.label && includedKinds.includes(entity.kind)) return entity;
+            if (entity.label === label && includedKinds.includes(entity.kind)) return entity;
         }
 
         if (this.parent) return this.parent.closestEntityWithLabel(label, includedKinds);

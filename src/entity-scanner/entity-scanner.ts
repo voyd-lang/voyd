@@ -7,7 +7,7 @@ import { TypeAlias } from "./definitions";
  *
  * @returns a collection of all detected entities.
  *  */
-export function entityScanner(ast: AST) {
+export function scanForEntities(ast: AST) {
     scanBlock(ast);
 }
 

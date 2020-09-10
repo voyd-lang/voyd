@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { TypeAlias, VariableEntity, FunctionEntity } from "../entity-scanner/definitions";
+import { TypeAlias, VariableEntity, FunctionEntity, ParameterEntity } from "../entity-scanner/definitions";
 import {
     Instruction, ReturnStatement, IfExpression, Assignment,
     FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, Identifier, CallExpression
@@ -40,7 +40,9 @@ export class Assembler {
     }
 
     private compileFn(fn: FunctionDeclaration): number {
-        const expression = this.compileExpression(fn.expression!, fn.scope);
+        if (!fn.expression) return this.mod.nop();
+
+        const expression = this.compileExpression(fn.expression, fn.scope);
         const binParams = binaryen.createType(fn.parameters.map(p => {
             return this.getBinType(fn.scope.closestEntityWithLabel(p.type!.label, ["type-alias"]) as TypeAlias)
         }));
@@ -50,7 +52,14 @@ export class Assembler {
             return this.getBinType(fn.scope.closestEntityWithLabel(entity.typeLabel!, ["type-alias"]) as TypeAlias);
         });
 
-        return this.mod.addFunction(fn.id!, binParams, binReturnType, binLocals, expression);
+        const id = fn.label === "main" ? "main" : fn.id!;
+        const modId = this.mod.addFunction(id, binParams, binReturnType, binLocals, expression);
+
+        if (id === "main") {
+            this.mod.addFunctionExport("main", "main");
+        }
+
+        return modId;
     }
 
     private compileExpression(expr: Instruction, scope: Scope): number {
@@ -83,16 +92,17 @@ export class Assembler {
         }
 
         if (expr.kind === "identifier") {
-            const entity = scope.entities.get(expr.id!) as VariableEntity;
+            const entity = scope.closestEntityWithLabel(expr.label, ["variable", "parameter"]) as VariableEntity | ParameterEntity;
             return this.mod.local.get(entity.index, this.getBinType(entity.typeEntity as TypeAlias));
         }
 
         if (expr.kind === "binary-expression") {
-            const fnEntity = scope.closestEntityWithLabel(expr.calleeLabel, ["function"]) as FunctionEntity;
+            const type = this.getReturnTypeForExpression(expr.arguments[0], scope);
+            const fnEntity = type.instanceScope.closestEntityWithLabel(expr.calleeLabel, ["function"]) as FunctionEntity;
             return this.mod.call(fnEntity.id, [
                 this.compileExpression(expr.arguments[0], scope),
                 this.compileExpression(expr.arguments[1], scope)
-            ], this.getBinType(fnEntity.returnTypeEntity as TypeAlias))
+            ], this.getBinType(fnEntity.returnTypeEntity as TypeAlias));
         }
 
         if (expr.kind === "call-expression") {
@@ -106,13 +116,37 @@ export class Assembler {
             return this.mod.call(func.id, args, this.getBinType(func.returnTypeEntity! as TypeAlias));
         }
 
+        if (expr.kind === "block-expression") {
+            return this.mod.block("", expr.body.map(v => this.compileExpression(v, expr.scope)), binaryen.auto);
+        }
+
         throw new Error(`Invalid expression ${expr.kind}`);
+    }
+
+    private getReturnTypeForExpression(expr: Instruction, scope: Scope): TypeAlias {
+        if (expr.kind === "int-literal") {
+            return scope.closestEntityWithLabel("i32", ["type-alias"]) as TypeAlias;
+        }
+
+        if (expr.kind === "identifier") {
+            const entity = scope.closestEntityWithLabel(expr.label, ["variable", "parameter"]) as VariableEntity | ParameterEntity;
+            return entity.typeEntity! as TypeAlias;
+        }
+
+        if (expr.kind === "call-expression") {
+            const label = (expr.callee as Identifier).label;
+            const fn = scope.closestEntityWithLabel(label, ["function"]) as FunctionEntity;
+            return fn.returnTypeEntity! as TypeAlias;
+        }
+
+        throw new Error(`Cannot infer type for expr ${expr.kind}`);
     }
 
     private compileIfExpression(instruction: IfExpression) {
         return this.mod.if(
             this.compileExpression(instruction.condition, instruction.scope),
-            this.compileBlock(instruction)
+            this.compileBlock(instruction),
+            instruction.else ? this.compileBlock(instruction.else) : undefined
         );
     }
 
@@ -135,7 +169,7 @@ export class Assembler {
                 return this.compileExpression(instruction, block.scope);
             }),
             ...append
-        ]);
+        ], binaryen.auto);
     }
 
     compileAssignment(instruction: Assignment, scope: Scope): number {
@@ -237,6 +271,10 @@ export class Assembler {
 
         if (type.label === "i32") {
             return binaryen.i32;
+        }
+
+        if (type.label === "Void") {
+            return binaryen.none;
         }
 
         throw new Error(`Unsupported type alias ${type.label}`);

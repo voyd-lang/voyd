@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { createCommand } from "commander";
 import { readFileSync } from "fs";
-import { compile } from "./assembler";
 import { run } from "./run";
+import { compile } from "./compiler";
 
 const program = createCommand();
 

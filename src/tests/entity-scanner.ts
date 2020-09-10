@@ -1,15 +1,16 @@
 import { parse } from "../parser";
-import { entityScanner } from "../entity-scanner/entity-scanner";
+import { scanForEntities } from "../entity-scanner/entity-scanner";
 
 const basicCodeSnippet = `
-    fn fib(n: i32) -> i32 {
-        if n < 2 { return n }
-        fib(n - 2) + fib(n - 1)
-    }
+declare type i32
 
-    print(fib(10))
+impl i32 {
+    pure fn +(r: i32) = unsafe {
+        i32_add(self, r)
+    }
+}
 `;
 
 const ast = parse(basicCodeSnippet);
-entityScanner(ast);
+scanForEntities(ast);
 console.dir(ast, { depth: 20 });
