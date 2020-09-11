@@ -76,7 +76,7 @@ export class Scope {
      * If we are not inside a function, throw an error.
 
      */
-    addLocal(entity: NewEntity) {
+    addLocal(entity: NewEntity): string {
         if (this.isFnScope) {
             const id = this.add(entity);
             this.locals.push(id);
@@ -84,8 +84,7 @@ export class Scope {
         }
 
         if (this.parent) {
-            this.parent.addLocal(entity);
-            return;
+            return this.parent.addLocal(entity);
         }
 
         throw new Error("Variable defined in invalid scope");

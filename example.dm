@@ -5,7 +5,7 @@ fn fib(n: i32) -> i32 =
 
 fn main() -> Void = {
     var index: i32 = 0
-    while index <= 15 {
+    while index <= 30 {
         print(fib(index))
         index = index + 1
     }
