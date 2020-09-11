@@ -1003,20 +1003,8 @@ const correctImplWithoutTraitAST = `{
             "else": {
               "body": [
                 {
-                  "kind": "block-expression",
-                  "flags": [],
-                  "scope": {
-                    "entities": {},
-                    "exports": [],
-                    "isFnScope": false,
-                    "locals": []
-                  },
-                  "body": [
-                    {
-                      "kind": "identifier",
-                      "label": "other"
-                    }
-                  ]
+                  "kind": "identifier",
+                  "label": "other"
                 }
               ],
               "scope": {

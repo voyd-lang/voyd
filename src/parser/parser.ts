@@ -9,11 +9,12 @@ import { Scope } from "../scope";
 export function parse(code: string, parentScope?: Scope): AST {
     const tokens = tokenize(code);
     const scope = parentScope ?? new Scope();
-    const res = { body: parseTokens(tokens, scope), scope };
+    const res = { body: parseBody(tokens, scope), scope };
     return res;
 }
 
-function parseTokens(tokens: Token[], scope: Scope): Instruction[] {
+/** Parse a body. Will stop at "}" characters and remove them. */
+function parseBody(tokens: Token[], scope: Scope): Instruction[] {
     const instructions: Instruction[] = [];
 
     while (tokens.length > 0) {
@@ -21,11 +22,6 @@ function parseTokens(tokens: Token[], scope: Scope): Instruction[] {
         if (next.type === "}") {
             tokens.shift();
             break;
-        }
-
-        if (next.type === "\n") {
-            tokens.shift();
-            continue;
         }
 
         instructions.push(parseStatement(tokens, scope));
@@ -302,14 +298,7 @@ function parseExpression(tokens: Token[], scope: Scope, terminator?: Token, flag
     while (tokens.length > 0) {
         const token = tokens[0];
 
-        // Ignore new lines for now
-        if (token.type === "\n") {
-            tokens.shift();
-            continue;
-        }
-
         // Consumed terminator
-        // TODO: !!! Important !!! Make this non consuming
         if (terminator && token.type === terminator.type) {
             tokens.shift();
             break;
@@ -365,7 +354,7 @@ function parseExpression(tokens: Token[], scope: Scope, terminator?: Token, flag
                 tokens.shift()
                 const whileScope = scope.sub();
                 const condition = parseExpression(tokens, whileScope, { type: "{", value: "{" });
-                const body = parseTokens(tokens, whileScope);
+                const body = parseBody(tokens, whileScope);
                 output.push({ kind: "while-statement", condition, body, scope: whileScope });
                 continue;
             }
@@ -458,7 +447,7 @@ function parseIfExpression(tokens: Token[], output: Instruction[], scope: Scope)
 
     const condition = parseExpression(tokens, scope, { type: "{", value: "{" });
     const ifScope = scope.sub();
-    const body = parseTokens(tokens, ifScope);
+    const body = parseBody(tokens, ifScope);
     let elseVal: undefined | { body: Instruction[], scope: Scope } = undefined;
     const elifs: { condition: Instruction, body: Instruction[], scope: Scope }[] = [];
 
@@ -468,7 +457,7 @@ function parseIfExpression(tokens: Token[], output: Instruction[], scope: Scope)
             tokens.shift();
             tokens.shift();
             const elseScope = scope.sub();
-            elseVal = { body: parseTokens(tokens, elseScope), scope: elseScope };
+            elseVal = { body: parseBody(tokens, elseScope), scope: elseScope };
             break;
         }
 
@@ -476,14 +465,8 @@ function parseIfExpression(tokens: Token[], output: Instruction[], scope: Scope)
             tokens.shift();
             const elifScope = scope.sub();
             const condition = parseExpression(tokens, scope, { type: "{", value: "{" });
-            const body = parseTokens(tokens, elifScope);
+            const body = parseBody(tokens, elifScope);
             elifs.push({ condition, body, scope: elifScope });
-            next = tokens[0];
-            continue;
-        }
-
-        if (next.type === "\n") {
-            tokens.shift();
             next = tokens[0];
             continue;
         }
@@ -600,7 +583,7 @@ function parseBlockExpression(tokens: Token[], flags: string[], scope: Scope): B
         kind: "block-expression",
         flags,
         scope: blockScope,
-        body: parseTokens(tokens, blockScope)
+        body: parseBody(tokens, blockScope)
     }
 }
 
@@ -618,12 +601,6 @@ function parseImplDeclaration(tokens: Token[], flags: string[], scope: Scope): I
             tokens.shift();
             break;
         };
-
-        if (next.type === "\n") {
-            tokens.shift();
-            next = tokens[0];
-            continue;
-        }
 
         if (next.type !== "keyword") {
             throw new Error("Unexpected token in impl block.");
@@ -733,7 +710,7 @@ function parseEnumVariants(tokens: Token[], parentEnum: string): EnumVariantDecl
             continue;
         }
 
-        if (token.type === "," || token.type === "\n") {
+        if (token.type === ",") {
             tokens.shift();
             continue;
         }
@@ -758,11 +735,6 @@ function parseMatchCases(tokens: Token[], scope: Scope): MatchCase[] {
         if (token.type === "}") {
             tokens.shift();
             break;
-        }
-
-        if (token.type === "\n") {
-            tokens.shift();
-            continue;
         }
 
         const matchCase = parseExpression(tokens, scope, { type: "=>", value: "=>" });

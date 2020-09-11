@@ -2,7 +2,7 @@ export type Token = {
     type:
     "operator" | "keyword" | "identifier" | "boolean" | "string" | "int" | "float" |
     "{" | "}" | "[" | "]" | "(" | ")" | "|" | "'" |
-    ":" | ";" | "," | "?" | "->" | "=>" | "$" | "\n" | "=" | "&" | "!";
+    ":" | ";" | "," | "?" | "->" | "=>" | "$" | "=" | "&" | "!";
     value: string;
 }
 

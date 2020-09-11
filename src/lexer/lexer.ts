@@ -48,12 +48,6 @@ export function tokenize(code: string) {
             continue;
         }
 
-        if (char === "\n") {
-            chars.shift();
-            tokens.push({ type: "\n", value: "\n" });
-            continue;
-        }
-
         if (isSymbolOrOperatorChar(char)) {
             const value = extractSymbolOrOperator(chars);
             if (isInTuple(value, symbols)) {
@@ -80,7 +74,7 @@ export function tokenize(code: string) {
             continue;
         }
 
-        if (isInTuple(char, [" ", "\r", "\t"])) {
+        if (isInTuple(char, [" ", "\r", "\t", "\n"])) {
             chars.shift();
             continue;
         }
