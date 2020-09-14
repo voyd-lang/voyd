@@ -4,7 +4,7 @@ fn fib(n: i32) -> i32 =
     else { fib(n - 1) + fib(n - 2) }
 
 fn main() -> Void = {
-    var index: i32 = 0
+    var index = 0
     while index <= 30 {
         print(fib(index))
         index = index + 1

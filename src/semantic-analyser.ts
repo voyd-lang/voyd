@@ -192,6 +192,12 @@ function typeEntityIdOfExpression(expr: Instruction, scope: Scope): string {
         return typeEntityIdOfExpression(expr.body[expr.body.length], scope);
     }
 
+    if (expr.kind === "int-literal") {
+        const i32Entity = scope.closestEntityWithLabel("i32", ["type-alias"]);
+        if (!i32Entity) throw new Error("Uh oh. i32 entity not found. Bad compiler! BAD!");
+        return i32Entity.id;
+    }
+
     const voidEntity = scope.closestEntityWithLabel("Void", ["type-alias"]);
     if (!voidEntity) throw new Error("Uh oh. Void entity not found. Bad compiler! BAD!");
     return voidEntity.id;
