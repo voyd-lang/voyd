@@ -187,7 +187,7 @@ export class Assembler {
         if (!vr.initializer) return this.mod.nop();
         return this.compileAssignment({
             kind: "assignment",
-            assignee: { kind: "identifier", label: vr.label, id: vr.id! },
+            assignee: { kind: "identifier", label: vr.label, id: vr.id!, tokenIndex: vr.tokenIndex },
             expression: vr.initializer
         }, scope);
     }

@@ -36,6 +36,7 @@ export interface VariableEntity extends EntityBase {
     kind: "variable";
     mutable: boolean;
     index: number;
+    tokenIndex: number;
     typeLabel?: string;
     typeEntity?: Entity;
 }

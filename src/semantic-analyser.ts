@@ -1,13 +1,13 @@
-import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration } from "../parser";
-import { Scope } from "../scope";
-import { TypeAlias } from "./definitions";
+import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration } from "./parser";
+import { Scope } from "./scope";
+import { TypeAlias } from "./entity-scanner";
 
 /**
  * Scans an AST for declared entities. Update AST scopes with the resolved items
  *
  * @returns a collection of all detected entities.
  *  */
-export function scanForEntities(ast: AST) {
+export function analyseSemantics(ast: AST) {
     scanBlock(ast);
 }
 
@@ -23,31 +23,13 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
         return;
     }
 
-    if (instruction.kind === "type-declaration") {
-        instruction.id = scope.add({
-            kind: "type-alias",
-            label: instruction.label,
-            flags: instruction.flags,
-            instanceScope: scope.sub("type")
-        });
-        return;
-    }
-
     if (instruction.kind === "impl-declaration") {
         scanImpl({ scope, instruction });
         return;
     }
 
     if (instruction.kind === "variable-declaration") {
-        instruction.id = scope.addLocal({
-            kind: "variable",
-            label: instruction.label,
-            flags: instruction.flags,
-            mutable: instruction.flags.includes("var"),
-            typeLabel: instruction.type ? instruction.type.label : undefined,
-            index: scope.localsCount(),
-            tokenIndex: instruction.tokenIndex
-        });
+        // TODO: Check for already defined.
         return;
     }
 
@@ -65,6 +47,15 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
         scanBlock({ body: instruction.body, scope });
         scanInstruction({ instruction: instruction.condition, scope });
         return;
+    }
+
+    if (instruction.kind === "identifier") {
+        const entity = scope.closestEntityWithLabel(instruction.label, ["function", "parameter", "variable", "type-alias"]);
+        if (!entity) throw new Error(`No entity with label ${instruction.label} in current scope.`);
+        if (entity.kind === "variable" && instruction.tokenIndex < entity.tokenIndex) {
+            throw new Error(`Identifier ${instruction.label} used before defined`);
+        }
+        instruction.id = entity.id;
     }
 
     if (instruction.kind === "binary-expression" || instruction.kind === "call-expression") {
