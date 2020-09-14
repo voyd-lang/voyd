@@ -85,15 +85,19 @@ function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDecla
 }
 
 function scanFn({ fn, scope }: { fn: FunctionDeclaration, scope: Scope }) {
-    const parameters = fn.parameters.map(pd => fn.scope.addLocal({
-        kind: "parameter",
-        index: fn.scope.localsCount(),
-        label: pd.label,
-        flags: pd.flags,
-        typeLabel: pd.type ? pd.type.label : undefined,
-        typeEntity: pd.type ? scope.closestEntityWithLabel(pd.type.label, ["type-alias"]) : undefined,
-        mutable: pd.flags.includes("var")
-    }));
+    const parameters = fn.parameters.map(pd => {
+        const id = fn.scope.addLocal({
+            kind: "parameter",
+            index: fn.scope.localsCount(),
+            label: pd.label,
+            flags: pd.flags,
+            typeLabel: pd.type ? pd.type.label : undefined,
+            typeEntity: pd.type ? scope.closestEntityWithLabel(pd.type.label, ["type-alias"]) : undefined,
+            mutable: pd.flags.includes("var")
+        });
+        pd.id = id;
+        return id;
+    });
 
     fn.id = scope.add({
         kind: "function",
