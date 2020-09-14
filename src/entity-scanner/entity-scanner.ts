@@ -28,7 +28,7 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
             kind: "type-alias",
             label: instruction.label,
             flags: instruction.flags,
-            instanceScope: scope.sub()
+            instanceScope: scope.sub("type")
         });
         return;
     }
@@ -85,7 +85,6 @@ function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDecla
 }
 
 function scanFn({ fn, scope }: { fn: FunctionDeclaration, scope: Scope }) {
-    fn.scope.isFnScope = true;
     const parameters = fn.parameters.map(pd => fn.scope.addLocal({
         kind: "parameter",
         index: fn.scope.localsCount(),

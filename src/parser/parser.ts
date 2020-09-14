@@ -8,7 +8,7 @@ import { Scope } from "../scope";
 
 export function parse(code: string, parentScope?: Scope): AST {
     const tokens = tokenize(code);
-    const scope = parentScope ?? new Scope();
+    const scope = parentScope ?? new Scope("block");
     const res = { body: parseBody(tokens, scope), scope };
     return res;
 }
@@ -136,7 +136,7 @@ function parseReturnStatement(tokens: Token[], scope: Scope): ReturnStatement {
 
 /** Parse a function, beginning after fn */
 function parseFnDeclaration(tokens: Token[], flags: string[], scope: Scope): FunctionDeclaration {
-    const fnScope = scope.sub();
+    const fnScope = scope.sub("function");
     const identifierToken = tokens.shift();
     if (!identifierToken || identifierToken.type !== "identifier" && identifierToken.type !== "operator") {
         throw new Error("Expected identifier after function declaration");
@@ -352,7 +352,7 @@ function parseExpression(tokens: Token[], scope: Scope, terminator?: Token, flag
 
             if (token.value === "while") {
                 tokens.shift()
-                const whileScope = scope.sub();
+                const whileScope = scope.sub("block");
                 const condition = parseExpression(tokens, whileScope, { type: "{", value: "{" });
                 const body = parseBody(tokens, whileScope);
                 output.push({ kind: "while-statement", condition, body, scope: whileScope });
@@ -446,7 +446,7 @@ function parseIfExpression(tokens: Token[], output: Instruction[], scope: Scope)
     tokens.shift();
 
     const condition = parseExpression(tokens, scope, { type: "{", value: "{" });
-    const ifScope = scope.sub();
+    const ifScope = scope.sub("block");
     const body = parseBody(tokens, ifScope);
     let elseVal: undefined | { body: Instruction[], scope: Scope } = undefined;
     const elifs: { condition: Instruction, body: Instruction[], scope: Scope }[] = [];
@@ -456,14 +456,14 @@ function parseIfExpression(tokens: Token[], output: Instruction[], scope: Scope)
         if (next.type === "keyword" && next.value === "else") {
             tokens.shift();
             tokens.shift();
-            const elseScope = scope.sub();
+            const elseScope = scope.sub("block");
             elseVal = { body: parseBody(tokens, elseScope), scope: elseScope };
             break;
         }
 
         if (next.type === "keyword" && next.value === "elif") {
             tokens.shift();
-            const elifScope = scope.sub();
+            const elifScope = scope.sub("block");
             const condition = parseExpression(tokens, scope, { type: "{", value: "{" });
             const body = parseBody(tokens, elifScope);
             elifs.push({ condition, body, scope: elifScope });
@@ -577,7 +577,7 @@ function parseArguments(tokens: Token[], scope: Scope): Instruction[] {
 
 /** Parse a block beginning with the initial opening curly brace ({) */
 function parseBlockExpression(tokens: Token[], flags: string[], scope: Scope): BlockExpression {
-    const blockScope = scope.sub();
+    const blockScope = scope.sub("block");
     tokens.shift();
     return {
         kind: "block-expression",
@@ -590,7 +590,7 @@ function parseBlockExpression(tokens: Token[], flags: string[], scope: Scope): B
 function parseImplDeclaration(tokens: Token[], flags: string[], scope: Scope): ImplDeclaration {
     const { target, trait } = extractTargetAndTraitFromImplSignature(tokens);
     const functions: FunctionDeclaration[] = [];
-    const implScope = scope.sub();
+    const implScope = scope.sub("type");
 
     // Get rid of the opening {
     tokens.shift();
@@ -664,7 +664,7 @@ function parseTypeDeclaration(tokens: Token[], flags: string[], scope: Scope): T
         kind: "type-declaration",
         label: labelToken.value,
         flags,
-        scope: scope.sub()
+        scope: scope.sub("type")
     }
 }
 
@@ -690,7 +690,7 @@ function parseEnumDeclaration(tokens: Token[], flags: string[], scope: Scope): E
         flags,
         variants,
         typeParameters: [],
-        scope: scope.sub()
+        scope: scope.sub("type")
     }
 }
 

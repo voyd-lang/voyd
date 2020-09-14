@@ -3,6 +3,8 @@ import { Scope } from "../scope";
 
 export type NewEntity = DistributiveOmit<Entity, "id">;
 
+export type OrderedEntity = Entity & { order: number };
+
 /** Any item that can be referenced by an identifier */
 export type Entity =
     FunctionEntity |

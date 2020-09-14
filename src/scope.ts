@@ -10,8 +10,7 @@ export class Scope {
 
     readonly parent?: Scope;
 
-    /** The scope allows local variables */
-    isFnScope: boolean = false;
+    readonly type: ScopeType;
 
     /**
      * Defined locals in this scope. Only allowed if isMainFnScope.
@@ -20,7 +19,8 @@ export class Scope {
      */
     locals: string[] = [];
 
-    constructor(parent?: Scope) {
+    constructor(type: ScopeType, parent?: Scope) {
+        this.type = type;
         this.parent = parent;
     }
 
@@ -28,16 +28,6 @@ export class Scope {
         for (const entity of scope.entities.values()) {
             this.entities.set(entity.id, entity);
         }
-    }
-
-    entitiesWithLabel(label: string, found: AccessibleEntities = [], depth = 0): AccessibleEntities {
-        for (const entity of this.entities.values()) {
-            if (entity.label === label) found.push({ entity, depth });
-        }
-
-        if (this.parent) return this.parent.entitiesWithLabel(label, found, depth + 1);
-
-        return found;
     }
 
     closestEntityWithLabel(label: string, includedKinds: EntityKind[]): Entity | undefined {
@@ -48,13 +38,6 @@ export class Scope {
         if (this.parent) return this.parent.closestEntityWithLabel(label, includedKinds);
 
         return undefined;
-    }
-
-    /** Iterator of all entities accessible from this scope */
-    accessibleEntities(found: AccessibleEntities = [], depth = 0): AccessibleEntities {
-        found.push(...Array.from(this.entities.values()).map(entity => ({ entity, depth })));
-        if (this.parent) return this.parent.accessibleEntities(found, depth + 1);
-        return found;
     }
 
     get(id: string): Entity | undefined {
@@ -77,7 +60,7 @@ export class Scope {
 
      */
     addLocal(entity: NewEntity): string {
-        if (this.isFnScope) {
+        if (this.type === "function") {
             const id = this.add(entity);
             this.locals.push(id);
             return id;
@@ -92,7 +75,7 @@ export class Scope {
 
 
     localsCount(): number {
-        if (this.isFnScope) return this.locals.length;
+        if (this.type === "function") return this.locals.length;
         if (this.parent) return this.parent.localsCount();
         throw new Error("Not in a function");
     }
@@ -109,8 +92,8 @@ export class Scope {
         return false;
     }
 
-    sub(): Scope {
-        return new Scope(this);
+    sub(type: ScopeType): Scope {
+        return new Scope(type, this);
     }
 
     toJSON() {
@@ -120,12 +103,10 @@ export class Scope {
                 obj[id] = entity;
                 return obj;
             }, {} as Record<string, Entity>),
-            exports: this.exports,
-            isFnScope: this.isFnScope,
+            type: this.type,
             locals: this.locals
         };
     }
 }
 
-/** Represents all entities within the scope. A depth of 0 represents the current scope, each scope above adds 1 */
-export type AccessibleEntities = { entity: Entity, depth: number }[];
+export type ScopeType = "block" | "function" | "type";
