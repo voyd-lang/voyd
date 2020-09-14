@@ -1,12 +1,8 @@
-import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration } from "./parser";
+import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, Identifier, VariableDeclaration } from "./parser";
 import { Scope } from "./scope";
-import { TypeAlias } from "./entity-scanner";
+import { FunctionEntity, ParameterEntity, TypeAlias, VariableEntity } from "./entity-scanner";
 
-/**
- * Scans an AST for declared entities. Update AST scopes with the resolved items
- *
- * @returns a collection of all detected entities.
- *  */
+/** Enforces scoping rules, resolves identifiers and infers types. */
 export function analyseSemantics(ast: AST) {
     scanBlock(ast);
 }
@@ -29,12 +25,12 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
     }
 
     if (instruction.kind === "variable-declaration") {
-        // TODO: Check for already defined.
+        scanVariableDeclaration(instruction, scope);
         return;
     }
 
     if (instruction.kind === "function-declaration") {
-        scanFn({ fn: instruction, scope });
+        scanFn(instruction, scope);
         return;
     }
 
@@ -58,8 +54,22 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
         instruction.id = entity.id;
     }
 
-    if (instruction.kind === "binary-expression" || instruction.kind === "call-expression") {
+    if (instruction.kind === "binary-expression") {
         instruction.arguments.forEach(instruction => scanInstruction({ scope, instruction }));
+        const typeEntityId = typeEntityIdOfExpression(instruction.arguments[0], scope);
+        const typeEntity = scope.get(typeEntityId) as TypeAlias;
+        const func = typeEntity.instanceScope.closestEntityWithLabel(instruction.calleeLabel, ["function"]);
+        if (!func) throw new Error(`${instruction.calleeLabel} is not a function`);
+        instruction.calleeId = func.id;
+        return;
+    }
+
+    if (instruction.kind === "call-expression") {
+        instruction.arguments.forEach(instruction => scanInstruction({ scope, instruction }));
+        const label = (instruction.callee as Identifier).label;
+        const func = scope.closestEntityWithLabel(label, ["function"]);
+        if (!func) throw new Error(`${label} is not a function`);
+        instruction.calleeId = func.id;
         return;
     }
 
@@ -67,37 +77,77 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
         instruction.cases.forEach(mCase => scanInstruction({ scope, instruction: mCase.expression }));
         return;
     }
+
+    if (instruction.kind === "assignment") {
+        scanInstruction({ scope, instruction: instruction.assignee });
+        scanInstruction({ scope, instruction: instruction.expression });
+    }
+}
+
+function scanVariableDeclaration(expr: VariableDeclaration, scope: Scope) {
+    const varEntity = scope.get(expr.id!) as VariableEntity;
+    if (expr.initializer) scanInstruction({ scope, instruction: expr.initializer });
+    if (expr.type) {
+        const typeEntity = scope.closestEntityWithLabel(expr.type.label, ["type-alias"]);
+        if (!typeEntity) throw new Error(`Could not resolve type for ${expr.label}`);
+        varEntity.typeEntity = typeEntity;
+        varEntity.typeLabel = typeEntity.label;
+    } else if (expr.initializer) {
+        const typeEntityId = typeEntityIdOfExpression(expr.initializer, scope);
+        const typeEntity = scope.get(typeEntityId) as TypeAlias;
+        varEntity.typeEntity = typeEntity;
+        varEntity.typeLabel = typeEntity.label;
+    } else {
+        throw new Error(`Could not resolve type for ${expr.label}`);
+    }
 }
 
 function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {
     instruction.id = scope.add({ kind: "impl", flags: instruction.flags, label: instruction.target });
     const target = scope.closestEntityWithLabel(instruction.target, ["type-alias"]) as TypeAlias;
-    instruction.functions.forEach(fn => scanFn({ fn, scope: target.instanceScope }));
+    instruction.functions.forEach(fn => scanFn(fn, target.instanceScope));
 }
 
-function scanFn({ fn, scope }: { fn: FunctionDeclaration, scope: Scope }) {
-    const parameters = fn.parameters.map(pd => {
-        const id = fn.scope.addLocal({
-            kind: "parameter",
-            index: fn.scope.localsCount(),
-            label: pd.label,
-            flags: pd.flags,
-            mutable: pd.flags.includes("var")
-        });
-        pd.id = id;
-        return id;
-    });
+function scanFn(fn: FunctionDeclaration, scope: Scope) {
+    const fnEntity = scope.get(fn.id!) as FunctionEntity;
 
-    fn.id = scope.add({
-        kind: "function",
-        flags: fn.flags,
-        returnTypeLabel: fn.returnType ?
-            fn.returnType.label : undefined,
-        parameters,
-        label: fn.label
+    if (fn.returnType) {
+        const typeEntity = scope.closestEntityWithLabel(fn.returnType.label, ["type-alias"]);
+        fnEntity.returnTypeEntity = typeEntity;
+        fnEntity.returnTypeLabel = typeEntity?.label;
+    }
+
+    fn.parameters.forEach(p => {
+        const pEntity = scope.get(p.id!) as ParameterEntity;
+        if (p.type) {
+            const typeEntity = scope.closestEntityWithLabel(p.type.label, ["type-alias"]);
+            if (!typeEntity) throw new Error(`Cannot resolve type for ${p.label} of ${fn.label}.`);
+            pEntity.typeEntity = typeEntity;
+            pEntity.typeLabel = typeEntity.label;
+            return;
+        }
+
+        if (p.initializer) {
+            const typeEntityId = typeEntityIdOfExpression(p.initializer, scope);
+            const typeEntity = scope.get(typeEntityId)!;
+            pEntity.typeEntity = typeEntity;
+            pEntity.typeLabel = typeEntity.label;
+            return;
+        }
+
+        throw new Error(`Missing type for parameter ${p.label} of ${fn.label}`);
     });
 
     if (fn.expression) scanInstruction({ scope: fn.scope, instruction: fn.expression });
+
+    if (!fn.returnType && fn.expression) {
+        const typeEntityId = typeEntityIdOfExpression(fn.expression, fn.scope);
+        const typeEntity = fn.scope.get(typeEntityId)!;
+        fnEntity.returnTypeEntity = typeEntity;
+        fnEntity.returnTypeLabel = typeEntity.label;
+    } else if (!fn.returnType && !fn.expression) {
+        throw new Error(`Missing return type for ${fnEntity.label}`);
+    }
 }
 
 function scanIf({ dif, scope }: { dif: IfExpression; scope: Scope; }) {
@@ -110,4 +160,39 @@ function scanIf({ dif, scope }: { dif: IfExpression; scope: Scope; }) {
     if (dif.else) {
         scanBlock({ body: dif.else.body, scope: dif.else.scope });
     }
+}
+
+function typeEntityIdOfExpression(expr: Instruction, scope: Scope): string {
+    if (expr.kind === "identifier") {
+        const entity = scope.closestEntityWithLabel(expr.label, ["type-alias", "parameter", "variable"]);
+        if (!entity) throw new Error(`Unknown identifier ${expr.label}`);
+        if (entity.kind === "type-alias") return entity.id;
+        return ((entity as (ParameterEntity | VariableEntity)).typeEntity!.id);
+    }
+
+    if (expr.kind === "block-expression") {
+        return typeEntityIdOfExpression(expr.body[expr.body.length - 1], expr.scope);
+    }
+
+    if (expr.kind === "call-expression") {
+        if (!expr.calleeId) throw new Error(`Function not yet resolved for ${expr.callee}`);
+        const fnEntity = scope.get(expr.calleeId) as FunctionEntity;
+        if (!fnEntity.returnTypeEntity) throw new Error(`Return type not yet resolved for ${fnEntity.label}`);
+        return fnEntity.returnTypeEntity.id;
+    }
+
+    if (expr.kind === "binary-expression") {
+        if (!expr.calleeId) throw new Error(`Function not yet resolved for ${expr.calleeLabel}`);
+        const fnEntity = scope.get(expr.calleeId) as FunctionEntity;
+        if (!fnEntity.returnTypeEntity) throw new Error(`Return type not yet resolved for ${fnEntity.label}`);
+        return fnEntity.returnTypeEntity.id;
+    }
+
+    if (expr.kind === "if-expression") {
+        return typeEntityIdOfExpression(expr.body[expr.body.length], scope);
+    }
+
+    const voidEntity = scope.closestEntityWithLabel("Void", ["type-alias"]);
+    if (!voidEntity) throw new Error("Uh oh. Void entity not found. Bad compiler! BAD!");
+    return voidEntity.id;
 }

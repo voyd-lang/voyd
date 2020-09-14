@@ -114,6 +114,9 @@ export interface TypeArgument extends ASTNode {
     kind: "type-argument";
     label: string;
     flags: string[];
+
+    /** Entity ID of the type */
+    typeId?: string;
 }
 
 export interface ForInStatement extends ASTNode {
@@ -184,12 +187,24 @@ export interface CallExpression extends ASTNode {
     kind: "call-expression";
     callee: PropertyAccessExpression | Identifier;
     arguments: Instruction[];
+
+    /** Id of the function entity being called */
+    calleeId?: string;
+
+    /** Entity id of each of the argument's types */
+    argumentTypeIds?: string[];
 }
 
 export interface BinaryExpression extends ASTNode {
     kind: "binary-expression";
     calleeLabel: string;
     arguments: [Instruction, Instruction];
+
+    /** Id of the function entity being called */
+    calleeId?: string;
+
+    /** Entity id of each of the argument's types */
+    argumentTypeIds?: string[];
 }
 
 export interface ReturnStatement extends ASTNode {
