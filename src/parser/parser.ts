@@ -1,4 +1,4 @@
-import { Token, tokenize } from "../lexer";
+import { Token, tokenize, TokenType } from "../lexer";
 import {
     Instruction, VariableDeclaration, TypeArgument, FunctionDeclaration, ParameterDeclaration,
     ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST, BlockExpression, TypeDeclaration, PropertyAccessExpression, ImplDeclaration, ASTNode
@@ -273,7 +273,8 @@ function parseVariableDeclaration(tokens: Token[], flags: string[], scope: Scope
 
     return {
         kind: "variable-declaration",
-        label: labelToken.value, flags, type, initializer
+        label: labelToken.value, flags, type, initializer,
+        tokenIndex: labelToken.index
     };
 }
 
@@ -287,7 +288,7 @@ function parseTypeArgument(tokens: Token[]): TypeArgument {
     };
 }
 
-function parseExpression(tokens: Token[], scope: Scope, terminator?: Token, flags: string[] = []): Instruction {
+function parseExpression(tokens: Token[], scope: Scope, terminator?: TokenType, flags: string[] = []): Instruction {
     const output: Instruction[] = [];
     const operator: Token[] = [];
 
@@ -299,7 +300,7 @@ function parseExpression(tokens: Token[], scope: Scope, terminator?: Token, flag
         const token = tokens[0];
 
         // Consumed terminator
-        if (terminator && token.type === terminator.type) {
+        if (terminator && token.type === terminator) {
             tokens.shift();
             break;
         }
@@ -353,7 +354,7 @@ function parseExpression(tokens: Token[], scope: Scope, terminator?: Token, flag
             if (token.value === "while") {
                 tokens.shift()
                 const whileScope = scope.sub("block");
-                const condition = parseExpression(tokens, whileScope, { type: "{", value: "{" });
+                const condition = parseExpression(tokens, whileScope, "{");
                 const body = parseBody(tokens, whileScope);
                 output.push({ kind: "while-statement", condition, body, scope: whileScope });
                 continue;
@@ -361,7 +362,7 @@ function parseExpression(tokens: Token[], scope: Scope, terminator?: Token, flag
 
             if (token.value === "match") {
                 tokens.shift();
-                const expression = parseExpression(tokens, scope, { type: "{", value: "{" });
+                const expression = parseExpression(tokens, scope, "{");
                 const cases = parseMatchCases(tokens, scope);
                 output.push({ kind: "match-expression", value: expression, cases, flags: [] });
                 continue;
@@ -445,7 +446,7 @@ function parseIfExpression(tokens: Token[], output: Instruction[], scope: Scope)
     // Get rid of the if token
     tokens.shift();
 
-    const condition = parseExpression(tokens, scope, { type: "{", value: "{" });
+    const condition = parseExpression(tokens, scope, "{");
     const ifScope = scope.sub("block");
     const body = parseBody(tokens, ifScope);
     let elseVal: undefined | { body: Instruction[], scope: Scope } = undefined;
@@ -464,7 +465,7 @@ function parseIfExpression(tokens: Token[], output: Instruction[], scope: Scope)
         if (next.type === "keyword" && next.value === "elif") {
             tokens.shift();
             const elifScope = scope.sub("block");
-            const condition = parseExpression(tokens, scope, { type: "{", value: "{" });
+            const condition = parseExpression(tokens, scope, "{");
             const body = parseBody(tokens, elifScope);
             elifs.push({ condition, body, scope: elifScope });
             next = tokens[0];
@@ -512,7 +513,8 @@ function parseIdentifierExpression(tokens: Token[]): PropertyAccessExpression | 
 
     while (tokens[0]) {
         if (tokens[0].type === "identifier") {
-            identifiers.push({ kind: "identifier", label: tokens.shift()!.value });
+            const token = tokens.shift()!;
+            identifiers.push({ kind: "identifier", label: token.value, tokenIndex: token.index });
             continue;
         }
 
@@ -737,8 +739,8 @@ function parseMatchCases(tokens: Token[], scope: Scope): MatchCase[] {
             break;
         }
 
-        const matchCase = parseExpression(tokens, scope, { type: "=>", value: "=>" });
-        const expression = parseExpression(tokens, scope, { type: ",", value: "," });
+        const matchCase = parseExpression(tokens, scope, "=>");
+        const expression = parseExpression(tokens, scope, ",");
 
         variants.push({
             kind: "match-case",

@@ -8,6 +8,7 @@ export interface VariableDeclaration extends ASTNode {
     kind: "variable-declaration"
     label: string;
     flags: string[];
+    tokenIndex: number;
     type?: TypeArgument;
     initializer?: Instruction;
 
@@ -103,6 +104,7 @@ export interface ParameterDeclaration extends ASTNode {
 export interface Identifier extends ASTNode {
     kind: "identifier";
     label: string;
+    tokenIndex: number;
 
     /** Entity ID if resolved */
     id?: string;

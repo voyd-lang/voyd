@@ -11,21 +11,21 @@ export function tokenize(code: string) {
         if (isLetter(char)) {
             const word = extractWord(chars);
             if (isKeyword(word)) {
-                tokens.push({ type: "keyword", value: word });
+                tokens.push({ type: "keyword", value: word, index: tokens.length });
                 continue;
             }
 
             if (isOperator(word)) {
-                tokens.push({ type: "operator", value: word });
+                tokens.push({ type: "operator", value: word, index: tokens.length });
                 continue;
             }
 
             if (isBool(word)) {
-                tokens.push({ type: "boolean", value: word });
+                tokens.push({ type: "boolean", value: word, index: tokens.length });
                 continue;
             }
 
-            tokens.push({ type: "identifier", value: word });
+            tokens.push({ type: "identifier", value: word, index: tokens.length });
             continue;
         }
 
@@ -33,36 +33,36 @@ export function tokenize(code: string) {
         if (char === "-" && isNum(next)) {
             chars.shift(); // Eat the -
             const { num, type } = extractNum(chars);
-            tokens.push({ type, value: `-${num}` });
+            tokens.push({ type, value: `-${num}`, index: tokens.length });
             continue;
         }
 
         if (isNum(char)) {
             const { num, type } = extractNum(chars);
-            tokens.push({ type, value: num });
+            tokens.push({ type, value: num, index: tokens.length });
             continue;
         }
 
         if (char === "\"") {
-            tokens.push({ type: "string", value: extractString(chars) });
+            tokens.push({ type: "string", value: extractString(chars), index: tokens.length });
             continue;
         }
 
         if (isSymbolOrOperatorChar(char)) {
             const value = extractSymbolOrOperator(chars);
             if (isInTuple(value, symbols)) {
-                tokens.push({ type: value, value });
+                tokens.push({ type: value, value, index: tokens.length });
                 continue;
             }
 
             if (isOperator(value)) {
-                tokens.push({ type: "operator", value });
+                tokens.push({ type: "operator", value, index: tokens.length });
                 continue;
             }
 
             // Handles | overlap
             if (isInTuple(value, brackets)) {
-                tokens.push({ type: value, value });
+                tokens.push({ type: value, value, index: tokens.length });
                 continue;
             }
 
@@ -70,7 +70,7 @@ export function tokenize(code: string) {
         }
 
         if (isInTuple(char, brackets)) {
-            tokens.push({ type: char, value: chars.shift()! });
+            tokens.push({ type: char, value: chars.shift()!, index: tokens.length });
             continue;
         }
 
