@@ -44,7 +44,6 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
             label: instruction.label,
             flags: instruction.flags,
             mutable: instruction.flags.includes("var"),
-            typeLabel: instruction.type ? instruction.type.label : undefined,
             index: scope.localsCount(),
             tokenIndex: instruction.tokenIndex
         });
@@ -100,8 +99,6 @@ function scanFn({ fn, scope }: { fn: FunctionDeclaration, scope: Scope }) {
     fn.id = scope.add({
         kind: "function",
         flags: fn.flags,
-        returnTypeLabel: fn.returnType ?
-            fn.returnType.label : undefined,
         parameters,
         label: fn.label
     });

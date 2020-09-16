@@ -35,7 +35,6 @@ export interface VariableEntity extends EntityBase {
     mutable: boolean;
     index: number;
     tokenIndex: number;
-    typeLabel?: string;
     typeEntity?: Entity;
 }
 
@@ -44,13 +43,11 @@ export interface ParameterEntity extends EntityBase {
     kind: "parameter";
     mutable: boolean;
     index: number;
-    typeLabel?: string;
     typeEntity?: Entity;
 }
 
 export interface ImplEntity extends EntityBase {
     kind: "impl";
-    traitLabel?: string;
     traitEntity?: Entity;
 }
 

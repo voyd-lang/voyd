@@ -91,12 +91,10 @@ function scanVariableDeclaration(expr: VariableDeclaration, scope: Scope) {
         const typeEntity = scope.closestEntityWithLabel(expr.type.label, ["type-alias"]);
         if (!typeEntity) throw new Error(`Could not resolve type for ${expr.label}`);
         varEntity.typeEntity = typeEntity;
-        varEntity.typeLabel = typeEntity.label;
     } else if (expr.initializer) {
         const typeEntityId = typeEntityIdOfExpression(expr.initializer, scope);
         const typeEntity = scope.get(typeEntityId) as TypeAlias;
         varEntity.typeEntity = typeEntity;
-        varEntity.typeLabel = typeEntity.label;
     } else {
         throw new Error(`Could not resolve type for ${expr.label}`);
     }
