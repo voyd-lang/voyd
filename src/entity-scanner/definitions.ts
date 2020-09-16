@@ -19,8 +19,6 @@ export interface FunctionEntity extends EntityBase {
     /** Entity ID */
     parameters: string[];
 
-    returnTypeLabel?: string;
-
     returnTypeEntity?: Entity;
 }
 

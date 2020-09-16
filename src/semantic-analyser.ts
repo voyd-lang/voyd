@@ -114,7 +114,6 @@ function scanFn(fn: FunctionDeclaration, scope: Scope) {
     if (fn.returnType) {
         const typeEntity = scope.closestEntityWithLabel(fn.returnType.label, ["type-alias"]);
         fnEntity.returnTypeEntity = typeEntity;
-        fnEntity.returnTypeLabel = typeEntity?.label;
     }
 
     fn.parameters.forEach(p => {
@@ -123,7 +122,6 @@ function scanFn(fn: FunctionDeclaration, scope: Scope) {
             const typeEntity = scope.closestEntityWithLabel(p.type.label, ["type-alias"]);
             if (!typeEntity) throw new Error(`Cannot resolve type for ${p.label} of ${fn.label}.`);
             pEntity.typeEntity = typeEntity;
-            pEntity.typeLabel = typeEntity.label;
             return;
         }
 
@@ -131,7 +129,6 @@ function scanFn(fn: FunctionDeclaration, scope: Scope) {
             const typeEntityId = typeEntityIdOfExpression(p.initializer, scope);
             const typeEntity = scope.get(typeEntityId)!;
             pEntity.typeEntity = typeEntity;
-            pEntity.typeLabel = typeEntity.label;
             return;
         }
 
@@ -144,7 +141,6 @@ function scanFn(fn: FunctionDeclaration, scope: Scope) {
         const typeEntityId = typeEntityIdOfExpression(fn.expression, fn.scope);
         const typeEntity = fn.scope.get(typeEntityId)!;
         fnEntity.returnTypeEntity = typeEntity;
-        fnEntity.returnTypeLabel = typeEntity.label;
     } else if (!fn.returnType && !fn.expression) {
         throw new Error(`Missing return type for ${fnEntity.label}`);
     }
