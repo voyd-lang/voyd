@@ -15,6 +15,7 @@ false // Boolean
 "Hello!" // String, can be multiline, supports interpolation via ${}
 (1, 2, 3) // Tuple
 [x: 2, y: 4] // Anonymous struct
+(.am,.pm) //Anonymous enum
 $(1, 2, 3) // Array
 $[x: 3] // Dictionary
 ```
@@ -47,7 +48,7 @@ let twenty = {
 ```
 if 3 > val {
 
-} else if 3 < val {
+} elif 3 < val {
 
 } else {
 
