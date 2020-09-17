@@ -1,8 +1,9 @@
-import { Module } from "binaryen";
+import binaryen, { Module } from "binaryen";
 
 /** Run a binaryen module */
 export async function run(mod: Module) {
     mod.validate();
+    mod.optimize();
     const bin = mod.emitBinary();
     await runBinary(bin);
     mod.dispose();

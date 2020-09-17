@@ -1,10 +1,12 @@
 export type Token = {
-    type:
-    "operator" | "keyword" | "identifier" | "boolean" | "string" | "int" | "float" |
-    "{" | "}" | "[" | "]" | "(" | ")" | "|" | "'" |
-    ":" | ";" | "," | "?" | "->" | "=>" | "$" | "\n" | "=" | "&" | "!";
+    type: TokenType;
     value: string;
+    index: number;
 }
+
+export type TokenType = "operator" | "keyword" | "identifier" | "boolean" | "string" | "int" | "float" |
+    "{" | "}" | "[" | "]" | "(" | ")" | "|" | "'" |
+    ":" | ";" | "," | "?" | "->" | "=>" | "$" | "=" | "&" | "!";
 
 export const operators = [
     "+", "-", "*", "/", "==", "!=", "and", "or", "xor", "<", ">", ">=", "<=", "<>",

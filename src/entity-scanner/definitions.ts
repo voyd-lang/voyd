@@ -3,6 +3,8 @@ import { Scope } from "../scope";
 
 export type NewEntity = DistributiveOmit<Entity, "id">;
 
+export type OrderedEntity = Entity & { order: number };
+
 /** Any item that can be referenced by an identifier */
 export type Entity =
     FunctionEntity |
@@ -16,8 +18,6 @@ export interface FunctionEntity extends EntityBase {
 
     /** Entity ID */
     parameters: string[];
-
-    returnTypeLabel?: string;
 
     returnTypeEntity?: Entity;
 }
@@ -34,7 +34,7 @@ export interface VariableEntity extends EntityBase {
     kind: "variable";
     mutable: boolean;
     index: number;
-    typeLabel?: string;
+    tokenIndex: number;
     typeEntity?: Entity;
 }
 
@@ -43,13 +43,11 @@ export interface ParameterEntity extends EntityBase {
     kind: "parameter";
     mutable: boolean;
     index: number;
-    typeLabel?: string;
     typeEntity?: Entity;
 }
 
 export interface ImplEntity extends EntityBase {
     kind: "impl";
-    traitLabel?: string;
     traitEntity?: Entity;
 }
 

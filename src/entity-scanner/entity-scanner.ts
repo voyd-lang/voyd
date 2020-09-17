@@ -28,7 +28,7 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
             kind: "type-alias",
             label: instruction.label,
             flags: instruction.flags,
-            instanceScope: scope.sub()
+            instanceScope: scope.sub("type")
         });
         return;
     }
@@ -44,9 +44,8 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
             label: instruction.label,
             flags: instruction.flags,
             mutable: instruction.flags.includes("var"),
-            typeLabel: instruction.type ? instruction.type.label : undefined,
-            typeEntity: instruction.type ? scope.closestEntityWithLabel(instruction.type.label, ["type-alias"]) : undefined,
-            index: scope.localsCount()
+            index: scope.localsCount(),
+            tokenIndex: instruction.tokenIndex
         });
         return;
     }
@@ -85,24 +84,21 @@ function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDecla
 }
 
 function scanFn({ fn, scope }: { fn: FunctionDeclaration, scope: Scope }) {
-    fn.scope.isFnScope = true;
-    const parameters = fn.parameters.map(pd => fn.scope.addLocal({
-        kind: "parameter",
-        index: fn.scope.localsCount(),
-        label: pd.label,
-        flags: pd.flags,
-        typeLabel: pd.type ? pd.type.label : undefined,
-        typeEntity: pd.type ? scope.closestEntityWithLabel(pd.type.label, ["type-alias"]) : undefined,
-        mutable: pd.flags.includes("var")
-    }));
+    const parameters = fn.parameters.map(pd => {
+        const id = fn.scope.addLocal({
+            kind: "parameter",
+            index: fn.scope.localsCount(),
+            label: pd.label,
+            flags: pd.flags,
+            mutable: pd.flags.includes("var")
+        });
+        pd.id = id;
+        return id;
+    });
 
     fn.id = scope.add({
         kind: "function",
         flags: fn.flags,
-        returnTypeLabel: fn.returnType ?
-            fn.returnType.label : undefined,
-        returnTypeEntity: fn.returnType ?
-            scope.closestEntityWithLabel(fn.returnType.label, ["type-alias"]) : undefined,
         parameters,
         label: fn.label
     });
