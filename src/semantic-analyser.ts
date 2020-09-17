@@ -1,6 +1,6 @@
-import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, Identifier, VariableDeclaration } from "./parser";
+import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, VariableDeclaration, PropertyAccessExpression } from "./parser";
 import { Scope } from "./scope";
-import { FunctionEntity, ParameterEntity, TypeAlias, VariableEntity } from "./entity-scanner";
+import { FunctionEntity, ParameterEntity, TypeAliasEntity, TypeEntity, VariableEntity } from "./entity-scanner";
 
 /** Enforces scoping rules, resolves identifiers and infers types. */
 export function analyseSemantics(ast: AST) {
@@ -56,8 +56,8 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
 
     if (instruction.kind === "binary-expression") {
         instruction.arguments.forEach(instruction => scanInstruction({ scope, instruction }));
-        const typeEntityId = typeEntityIdOfExpression(instruction.arguments[0], scope);
-        const typeEntity = scope.get(typeEntityId) as TypeAlias;
+        const typeEntity = typeEntityOfExpression(instruction.arguments[0], scope);
+        if (!typeEntity) throw new Error("Missing type for left hand of binary expression");
         const func = typeEntity.instanceScope.closestEntityWithLabel(instruction.calleeLabel, ["function"]);
         if (!func) throw new Error(`${instruction.calleeLabel} is not a function`);
         instruction.calleeId = func.id;
@@ -72,6 +72,11 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
         return;
     }
 
+    if (instruction.kind === "property-access-expression") {
+        scanPropertyAccessExpression(instruction, scope);
+        return;
+    }
+
     if (instruction.kind === "match-expression") {
         instruction.cases.forEach(mCase => scanInstruction({ scope, instruction: mCase.expression }));
         return;
@@ -80,8 +85,39 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
     if (instruction.kind === "assignment") {
         scanInstruction({ scope, instruction: instruction.assignee });
         scanInstruction({ scope, instruction: instruction.expression });
+        return;
     }
 }
+
+function scanPropertyAccessExpression(expr: PropertyAccessExpression, scope: Scope) {
+    const left = expr.arguments[0];
+    const right = expr.arguments[1];
+    scanInstruction({ instruction: left, scope });
+    const typeEntity = typeEntityOfExpression(left, scope);
+
+    if (right.kind === "call-expression") {
+        const typeEntityFunc = typeEntity.instanceScope.closestEntityWithLabel(right.calleeLabel, ["function"]);
+
+        if (typeEntityFunc) {
+            right.calleeId = typeEntityFunc.id;
+            return;
+        }
+
+        // UFCS Search
+        const scopeEntityFunc = scope.closestEntityWithLabel(right.calleeLabel, ["function"]);
+        if (!scopeEntityFunc) throw new Error(`${right.calleeLabel} is not a function`);
+        right.calleeId = scopeEntityFunc.id;
+        return;
+    }
+
+    if (right.kind === "identifier") {
+        scanInstruction({ instruction: right, scope: typeEntity.instanceScope });
+        return;
+    }
+
+    throw new Error(`Invalid right of property access expression ${right.kind}`);
+}
+
 
 function scanVariableDeclaration(expr: VariableDeclaration, scope: Scope) {
     const varEntity = scope.get(expr.id!) as VariableEntity;
@@ -89,10 +125,9 @@ function scanVariableDeclaration(expr: VariableDeclaration, scope: Scope) {
     if (expr.type) {
         const typeEntity = scope.closestEntityWithLabel(expr.type.label, ["type-alias"]);
         if (!typeEntity) throw new Error(`Could not resolve type for ${expr.label}`);
-        varEntity.typeEntity = typeEntity;
+        varEntity.typeEntity = typeEntity as TypeEntity;
     } else if (expr.initializer) {
-        const typeEntityId = typeEntityIdOfExpression(expr.initializer, scope);
-        const typeEntity = scope.get(typeEntityId) as TypeAlias;
+        const typeEntity = typeEntityOfExpression(expr.initializer, scope);
         varEntity.typeEntity = typeEntity;
     } else {
         throw new Error(`Could not resolve type for ${expr.label}`);
@@ -101,7 +136,7 @@ function scanVariableDeclaration(expr: VariableDeclaration, scope: Scope) {
 
 function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {
     instruction.id = scope.add({ kind: "impl", flags: instruction.flags, label: instruction.target });
-    const target = scope.closestEntityWithLabel(instruction.target, ["type-alias"]) as TypeAlias;
+    const target = scope.closestEntityWithLabel(instruction.target, ["type-alias"]) as TypeAliasEntity;
     instruction.functions.forEach(fn => scanFn(fn, target.instanceScope));
 }
 
@@ -110,7 +145,7 @@ function scanFn(fn: FunctionDeclaration, scope: Scope) {
 
     if (fn.returnType) {
         const typeEntity = scope.closestEntityWithLabel(fn.returnType.label, ["type-alias"]);
-        fnEntity.returnTypeEntity = typeEntity;
+        fnEntity.returnTypeEntity = typeEntity as TypeEntity;
     }
 
     fn.parameters.forEach(p => {
@@ -118,13 +153,12 @@ function scanFn(fn: FunctionDeclaration, scope: Scope) {
         if (p.type) {
             const typeEntity = scope.closestEntityWithLabel(p.type.label, ["type-alias"]);
             if (!typeEntity) throw new Error(`Cannot resolve type for ${p.label} of ${fn.label}.`);
-            pEntity.typeEntity = typeEntity;
+            pEntity.typeEntity = typeEntity as TypeEntity;
             return;
         }
 
         if (p.initializer) {
-            const typeEntityId = typeEntityIdOfExpression(p.initializer, scope);
-            const typeEntity = scope.get(typeEntityId)!;
+            const typeEntity = typeEntityOfExpression(p.initializer, scope);
             pEntity.typeEntity = typeEntity;
             return;
         }
@@ -135,8 +169,7 @@ function scanFn(fn: FunctionDeclaration, scope: Scope) {
     if (fn.expression) scanInstruction({ scope: fn.scope, instruction: fn.expression });
 
     if (!fn.returnType && fn.expression) {
-        const typeEntityId = typeEntityIdOfExpression(fn.expression, fn.scope);
-        const typeEntity = fn.scope.get(typeEntityId)!;
+        const typeEntity = typeEntityOfExpression(fn.expression, fn.scope);
         fnEntity.returnTypeEntity = typeEntity;
     } else if (!fn.returnType && !fn.expression) {
         throw new Error(`Missing return type for ${fnEntity.label}`);
@@ -155,43 +188,45 @@ function scanIf({ dif, scope }: { dif: IfExpression; scope: Scope; }) {
     }
 }
 
-function typeEntityIdOfExpression(expr: Instruction, scope: Scope): string {
+function typeEntityOfExpression(expr: Instruction, scope: Scope): TypeEntity {
     if (expr.kind === "identifier") {
-        const entity = scope.closestEntityWithLabel(expr.label, ["type-alias", "parameter", "variable"]);
+        const entity = scope.get(expr.id!);
         if (!entity) throw new Error(`Unknown identifier ${expr.label}`);
-        if (entity.kind === "type-alias") return entity.id;
-        return ((entity as (ParameterEntity | VariableEntity)).typeEntity!.id);
+        if (entity.kind === "type-alias") return entity;
+        return ((entity as (ParameterEntity | VariableEntity)).typeEntity!);
     }
 
     if (expr.kind === "block-expression") {
-        return typeEntityIdOfExpression(expr.body[expr.body.length - 1], expr.scope);
+        return typeEntityOfExpression(expr.body[expr.body.length - 1], expr.scope);
     }
 
     if (expr.kind === "call-expression") {
         if (!expr.calleeId) throw new Error(`Function not yet resolved for ${expr.calleeLabel}`);
         const fnEntity = scope.get(expr.calleeId) as FunctionEntity;
         if (!fnEntity.returnTypeEntity) throw new Error(`Return type not yet resolved for ${fnEntity.label}`);
-        return fnEntity.returnTypeEntity.id;
+        return fnEntity.returnTypeEntity;
     }
 
     if (expr.kind === "binary-expression") {
         if (!expr.calleeId) throw new Error(`Function not yet resolved for ${expr.calleeLabel}`);
         const fnEntity = scope.get(expr.calleeId) as FunctionEntity;
         if (!fnEntity.returnTypeEntity) throw new Error(`Return type not yet resolved for ${fnEntity.label}`);
-        return fnEntity.returnTypeEntity.id;
+        return fnEntity.returnTypeEntity;
     }
 
     if (expr.kind === "if-expression") {
-        return typeEntityIdOfExpression(expr.body[expr.body.length], scope);
+        return typeEntityOfExpression(expr.body[expr.body.length], scope);
     }
 
     if (expr.kind === "int-literal") {
         const i32Entity = scope.closestEntityWithLabel("i32", ["type-alias"]);
         if (!i32Entity) throw new Error("Uh oh. i32 entity not found. Bad compiler! BAD!");
-        return i32Entity.id;
+        return i32Entity as TypeEntity;
     }
 
-    const voidEntity = scope.closestEntityWithLabel("Void", ["type-alias"]);
-    if (!voidEntity) throw new Error("Uh oh. Void entity not found. Bad compiler! BAD!");
-    return voidEntity.id;
+    if (expr.kind === "property-access-expression") {
+        return typeEntityOfExpression(expr.arguments[1], scope);
+    }
+
+    throw new Error(`Cannot determine type entity for ${expr.kind}`);
 }

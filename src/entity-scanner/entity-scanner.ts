@@ -1,6 +1,6 @@
 import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration } from "../parser";
 import { Scope } from "../scope";
-import { TypeAlias } from "./definitions";
+import { TypeAliasEntity } from "./definitions";
 
 /**
  * Scans an AST for declared entities. Update AST scopes with the resolved items
@@ -84,7 +84,7 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
 
 function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {
     instruction.id = scope.add({ kind: "impl", flags: instruction.flags, label: instruction.target });
-    const target = scope.closestEntityWithLabel(instruction.target, ["type-alias"]) as TypeAlias;
+    const target = scope.closestEntityWithLabel(instruction.target, ["type-alias"]) as TypeAliasEntity;
     instruction.functions.forEach(fn => scanFn({ fn, scope: target.instanceScope }));
 }
 

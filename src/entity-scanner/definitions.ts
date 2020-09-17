@@ -8,7 +8,7 @@ export type OrderedEntity = Entity & { order: number };
 /** Any item that can be referenced by an identifier */
 export type Entity =
     FunctionEntity |
-    TypeAlias |
+    TypeAliasEntity |
     VariableEntity |
     ParameterEntity |
     ImplEntity;
@@ -19,11 +19,11 @@ export interface FunctionEntity extends EntityBase {
     /** Entity ID */
     parameters: string[];
 
-    returnTypeEntity?: Entity;
+    returnTypeEntity?: TypeEntity;
 }
 
 /** Represents some form of type alias */
-export interface TypeAlias extends EntityBase {
+export interface TypeAliasEntity extends TypeEntity {
     kind: "type-alias";
 
     instanceScope: Scope;
@@ -35,7 +35,7 @@ export interface VariableEntity extends EntityBase {
     mutable: boolean;
     index: number;
     tokenIndex: number;
-    typeEntity?: Entity;
+    typeEntity?: TypeEntity;
 }
 
 /** A value can be t */
@@ -43,12 +43,16 @@ export interface ParameterEntity extends EntityBase {
     kind: "parameter";
     mutable: boolean;
     index: number;
-    typeEntity?: Entity;
+    typeEntity?: TypeEntity;
 }
 
 export interface ImplEntity extends EntityBase {
     kind: "impl";
     traitEntity?: Entity;
+}
+
+export interface TypeEntity extends EntityBase {
+    instanceScope: Scope;
 }
 
 /** A declared definition */

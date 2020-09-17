@@ -3,6 +3,7 @@
         "Deno",
         "Inout",
         "Structs",
+        "UFCS",
         "WASM",
         "binaryen",
         "elif",

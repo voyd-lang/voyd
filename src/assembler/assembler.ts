@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { TypeAlias, VariableEntity, FunctionEntity, ParameterEntity } from "../entity-scanner/definitions";
+import { TypeAliasEntity, VariableEntity, FunctionEntity, ParameterEntity } from "../entity-scanner/definitions";
 import {
     Instruction, ReturnStatement, IfExpression, Assignment,
     FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, Identifier, CallExpression
@@ -46,9 +46,9 @@ export class Assembler {
         const expression = this.compileExpression(fn.expression, fn.scope);
         const binParams = binaryen.createType(fnEntity.parameters.map(pId => {
             const pEntity = fn.scope.get(pId) as ParameterEntity;
-            return this.getBinType(pEntity.typeEntity! as TypeAlias);
+            return this.getBinType(pEntity.typeEntity! as TypeAliasEntity);
         }));
-        const binReturnType = this.getBinType(fnEntity.returnTypeEntity as TypeAlias);
+        const binReturnType = this.getBinType(fnEntity.returnTypeEntity as TypeAliasEntity);
         const binLocals = fn.scope.locals.map(id => {
             const entity = fn.scope.get(id) as VariableEntity;
             if (!entity) {
@@ -56,7 +56,7 @@ export class Assembler {
                 console.log(fn);
                 console.log(fn.scope.get(id));
             }
-            return this.getBinType(entity.typeEntity as TypeAlias);
+            return this.getBinType(entity.typeEntity as TypeAliasEntity);
         });
 
         const id = fn.label === "main" ? "main" : fn.id!;
@@ -100,7 +100,7 @@ export class Assembler {
 
         if (expr.kind === "identifier") {
             const entity = scope.get(expr.id!) as VariableEntity | ParameterEntity;
-            return this.mod.local.get(entity.index, this.getBinType(entity.typeEntity as TypeAlias));
+            return this.mod.local.get(entity.index, this.getBinType(entity.typeEntity as TypeAliasEntity));
         }
 
         if (expr.kind === "binary-expression") {
@@ -108,7 +108,7 @@ export class Assembler {
             return this.mod.call(fnEntity.id, [
                 this.compileExpression(expr.arguments[0], scope),
                 this.compileExpression(expr.arguments[1], scope)
-            ], this.getBinType(fnEntity.returnTypeEntity as TypeAlias));
+            ], this.getBinType(fnEntity.returnTypeEntity as TypeAliasEntity));
         }
 
         if (expr.kind === "call-expression") {
@@ -117,7 +117,7 @@ export class Assembler {
 
             const func = scope.get(expr.calleeId!) as FunctionEntity;
             const args = expr.arguments.map(instr => this.compileExpression(instr, scope));
-            return this.mod.call(func.id, args, this.getBinType(func.returnTypeEntity! as TypeAlias));
+            return this.mod.call(func.id, args, this.getBinType(func.returnTypeEntity! as TypeAliasEntity));
         }
 
         if (expr.kind === "block-expression") {
@@ -249,7 +249,7 @@ export class Assembler {
         ]);
     }
 
-    private getBinType(type: TypeAlias): number {
+    private getBinType(type: TypeAliasEntity): number {
         if (!type.flags.includes("declare")) {
             throw new Error(`Unsupported type alias ${type.label}`);
         }
