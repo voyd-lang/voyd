@@ -1,7 +1,7 @@
-import { operators, Token, tokenize, TokenType } from "../lexer";
+import { Token, tokenize, TokenType } from "../lexer";
 import {
     Instruction, VariableDeclaration, TypeArgument, FunctionDeclaration, ParameterDeclaration,
-    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST, BlockExpression, TypeDeclaration, PropertyAccessExpression, ImplDeclaration, ASTNode, CallExpression
+    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, AST, BlockExpression, TypeDeclaration, ImplDeclaration
 } from "./definitions";
 import { isInTuple } from "../helpers";
 import { Scope } from "../scope";
@@ -32,7 +32,6 @@ function parseBody(tokens: Token[], scope: Scope): Instruction[] {
 function parseStatement(tokens: Token[], scope: Scope): Instruction {
     while (tokens.length > 0) {
         let token = tokens[0];
-        const next = tokens[1];
 
         // Ignore newlines and semicolons
         if (isInTuple(token.type, ["\n", ";"] as const)) {
@@ -42,10 +41,6 @@ function parseStatement(tokens: Token[], scope: Scope): Instruction {
 
         if (token.type === "keyword") {
             return parseKeywordStatement(tokens, scope);
-        }
-
-        if (token.type === "identifier" && next && next.type === "=") {
-            return parseAssignment(tokens, scope);
         }
 
         return parseExpression(tokens, scope);
@@ -105,25 +100,6 @@ function parseKeywordStatement(tokens: Token[], scope: Scope): Instruction {
 
     const keywordStr = flags.reduce((p, c) => `${p} ${c}`, "");
     throw new Error(`Expected statement after keyword(s):${keywordStr}`);
-}
-
-function parseAssignment(tokens: Token[], scope: Scope): Assignment {
-    const assignee = parseExpression(tokens, scope);
-
-    if (assignee.kind !== "identifier" && assignee.kind !== "property-access-expression") {
-        throw new Error("Invalid assignment expression.");
-    }
-
-    const equals = tokens.shift();
-    if (!equals || equals.type !== "=") {
-        throw new Error("Expected = token in assignment expression");
-    }
-
-    return {
-        kind: "assignment",
-        assignee,
-        expression: parseExpression(tokens, scope)
-    }
 }
 
 function parseReturnStatement(tokens: Token[], scope: Scope): ReturnStatement {
@@ -443,6 +419,18 @@ function buildBinaryExpressionObject(output: Instruction[], operators: Token[]):
         return {
             kind: "property-access-expression",
             arguments: [arg1, arg2]
+        }
+    }
+
+    if (label === "=") {
+        if (arg1.kind !== "property-access-expression" && arg1.kind !== "identifier") {
+            throw new Error("Invalid expression on left side of assignment.");
+        }
+
+        return {
+            kind: "assignment",
+            assignee: arg1,
+            expression: arg2
         }
     }
 
