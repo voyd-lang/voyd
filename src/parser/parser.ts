@@ -135,7 +135,7 @@ function parseFnDeclaration(tokens: Token[], flags: string[], scope: Scope): Fun
     let expression: Instruction | undefined;
     if (tokens[0].type === "{") {
         expression = parseExpression(tokens, fnScope);
-    } else if (tokens[0].type === "=") {
+    } else if (tokens[0].type === "operator" && tokens[0].value === "=") {
         tokens.shift();
         expression = parseExpression(tokens, fnScope);
     } else if (flags.includes("declare")) {
