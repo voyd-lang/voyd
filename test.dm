@@ -1,2 +1,2 @@
 
-test.hello().world.print()
+count.fib().print()
