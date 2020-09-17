@@ -185,7 +185,7 @@ export interface PropertyAccessExpression extends ASTNode {
 
 export interface CallExpression extends ASTNode {
     kind: "call-expression";
-    callee: Instruction;
+    calleeLabel: string;
     arguments: Instruction[];
 
     /** Id of the function entity being called */

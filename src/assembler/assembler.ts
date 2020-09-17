@@ -112,8 +112,7 @@ export class Assembler {
         }
 
         if (expr.kind === "call-expression") {
-            const label = (expr.callee as Identifier).label;
-            const builtIn = this.getBuiltIn(label, scope);
+            const builtIn = this.getBuiltIn(expr.calleeLabel, scope);
             if (builtIn) return builtIn(expr);
 
             const func = scope.get(expr.calleeId!) as FunctionEntity;

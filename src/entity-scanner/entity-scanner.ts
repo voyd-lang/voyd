@@ -66,10 +66,15 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
         return;
     }
 
-    if (instruction.kind === "binary-expression" || instruction.kind === "call-expression") {
+    if (
+        instruction.kind === "binary-expression" ||
+        instruction.kind === "call-expression" ||
+        instruction.kind === "property-access-expression"
+    ) {
         instruction.arguments.forEach(instruction => scanInstruction({ scope, instruction }));
         return;
     }
+
 
     if (instruction.kind === "match-expression") {
         instruction.cases.forEach(mCase => scanInstruction({ scope, instruction: mCase.expression }));

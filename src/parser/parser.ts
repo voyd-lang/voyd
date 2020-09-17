@@ -383,20 +383,20 @@ function parseExpression(tokens: Token[], scope: Scope, terminator?: TokenType, 
 
         if (token.type === "identifier") {
             tokens.shift();
-            let expr: Identifier = { kind: "identifier", label: token.value, tokenIndex: token.index };
+            const label = token.value;
 
             // Handle possible function / method call
             const next = tokens[0];
             if (next && isInTuple(next.type, ["(", "["])) {
                 output.push({
                     kind: "call-expression",
-                    callee: expr,
+                    calleeLabel: label,
                     arguments: parseArguments(tokens, scope), // T
                 });
                 continue;
             }
 
-            output.push(expr);
+            output.push({ kind: "identifier", label, tokenIndex: token.index });
             continue;
         }
 

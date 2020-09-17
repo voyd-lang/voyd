@@ -66,9 +66,8 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
 
     if (instruction.kind === "call-expression") {
         instruction.arguments.forEach(instruction => scanInstruction({ scope, instruction }));
-        const label = (instruction.callee as Identifier).label;
-        const func = scope.closestEntityWithLabel(label, ["function"]);
-        if (!func) throw new Error(`${label} is not a function`);
+        const func = scope.closestEntityWithLabel(instruction.calleeLabel, ["function"]);
+        if (!func) throw new Error(`${instruction.calleeLabel} is not a function`);
         instruction.calleeId = func.id;
         return;
     }
@@ -169,7 +168,7 @@ function typeEntityIdOfExpression(expr: Instruction, scope: Scope): string {
     }
 
     if (expr.kind === "call-expression") {
-        if (!expr.calleeId) throw new Error(`Function not yet resolved for ${expr.callee}`);
+        if (!expr.calleeId) throw new Error(`Function not yet resolved for ${expr.calleeLabel}`);
         const fnEntity = scope.get(expr.calleeId) as FunctionEntity;
         if (!fnEntity.returnTypeEntity) throw new Error(`Return type not yet resolved for ${fnEntity.label}`);
         return fnEntity.returnTypeEntity.id;
