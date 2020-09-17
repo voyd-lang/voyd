@@ -1,21 +1,12 @@
 
-struct Vec3 {
-    var x: Float
-    var y: Float
-    var z: Float
+fn fib(n: i32) -> i32 =
+    if n < 2 { n }
+    else { fib(n - 1) + fib(n - 2) }
 
-    fn dot(vec: Vec3) =
-        x * vec.x + y * vec.y + z * vec.z
-
-    fn cross(vec: Vec3) = Vec3 [
-        x: y * vec.z - z * vec.y,
-        y: -(x * vec.z - z * vec.x),
-        z: x * vec.y - y * vec.x
-    ]
-
-    prop sqrt = Vec3 [
-        x: x.sqrt,
-        y: y.sqrt,
-        z: z.sqrt
-    ]
+fn main() -> Void = {
+    var index: i32 = 0
+    while index <= 15 {
+        print(fib(index))
+        index = index + 1
+    }
 }

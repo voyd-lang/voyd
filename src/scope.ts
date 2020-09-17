@@ -3,7 +3,12 @@ import uniqid from "uniqid";
 
 export class Scope {
     /** Entities within this scope */
-    private readonly entities: Map<string, Entity>;
+    private readonly entities: Map<string, Entity> = new Map();
+
+    /** All of the entities the module exports */
+    readonly exports: string[] = [];
+
+    readonly parent?: Scope;
 
     /** The scope allows local variables */
     isFnScope: boolean = false;
@@ -15,9 +20,14 @@ export class Scope {
      */
     locals: string[] = [];
 
-    constructor(parent?: Scope, entities?: Map<string, Entity>) {
-        this.entities = entities ?? new Map();
+    constructor(parent?: Scope) {
         this.parent = parent;
+    }
+
+    import(scope: Scope) {
+        for (const entity of scope.entities.values()) {
+            this.entities.set(entity.id, entity);
+        }
     }
 
     entitiesWithLabel(label: string, found: AccessibleEntities = [], depth = 0): AccessibleEntities {
@@ -32,12 +42,26 @@ export class Scope {
 
     closestEntityWithLabel(label: string, includedKinds: EntityKind[]): Entity | undefined {
         for (const entity of this.entities.values()) {
-            if (entity.label && includedKinds.includes(entity.kind)) return entity;
+            if (entity.label === label && includedKinds.includes(entity.kind)) return entity;
         }
 
         if (this.parent) return this.parent.closestEntityWithLabel(label, includedKinds);
 
         return undefined;
+    }
+
+    /** Iterator of all entities accessible from this scope */
+    accessibleEntities(found: AccessibleEntities = [], depth = 0): AccessibleEntities {
+        found.push(...Array.from(this.entities.values()).map(entity => ({ entity, depth })));
+        if (this.parent) return this.parent.accessibleEntities(found, depth + 1);
+        return found;
+    }
+
+    get(id: string): Entity | undefined {
+        const entity = this.entities.get(id);
+        if (entity) return entity;
+        if (!this.parent) return undefined;
+        return this.parent.get(id);
     }
 
     /** Add the entity as accessible from this scope */
@@ -53,24 +77,20 @@ export class Scope {
 
      */
     addLocal(entity: NewEntity) {
-        const id = this.add(entity);
-        this.addEntityIDToFnLocals(id);
-        return id;
-    }
-
-    protected addEntityIDToFnLocals(id: string) {
         if (this.isFnScope) {
+            const id = this.add(entity);
             this.locals.push(id);
-            return;
+            return id;
         }
 
         if (this.parent) {
-            this.parent.addEntityIDToFnLocals(id);
+            this.parent.addLocal(entity);
             return;
         }
 
         throw new Error("Variable defined in invalid scope");
     }
+
 
     localsCount(): number {
         if (this.isFnScope) return this.locals.length;
@@ -110,5 +130,3 @@ export class Scope {
 
 /** Represents all entities within the scope. A depth of 0 represents the current scope, each scope above adds 1 */
 export type AccessibleEntities = { entity: Entity, depth: number }[];
-
-export type AccessLevel = "private" | "protected"

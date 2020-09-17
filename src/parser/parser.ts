@@ -6,10 +6,11 @@ import {
 import { isInTuple } from "../helpers";
 import { Scope } from "../scope";
 
-export function parse(code: string): AST {
+export function parse(code: string, parentScope?: Scope): AST {
     const tokens = tokenize(code);
-    const scope = new Scope();
-    return { body: parseTokens(tokens, scope), scope };
+    const scope = parentScope ?? new Scope();
+    const res = { body: parseTokens(tokens, scope), scope };
+    return res;
 }
 
 function parseTokens(tokens: Token[], scope: Scope): Instruction[] {
@@ -29,7 +30,6 @@ function parseTokens(tokens: Token[], scope: Scope): Instruction[] {
 
         instructions.push(parseStatement(tokens, scope));
     }
-
     return instructions;
 }
 
@@ -107,7 +107,6 @@ function parseKeywordStatement(tokens: Token[], scope: Scope): Instruction {
         return parseImplDeclaration(tokens, flags, scope);
     }
 
-    console.log(flags);
     const keywordStr = flags.reduce((p, c) => `${p} ${c}`, "");
     throw new Error(`Expected statement after keyword(s):${keywordStr}`);
 }
@@ -467,6 +466,7 @@ function parseIfExpression(tokens: Token[], output: Instruction[], scope: Scope)
     while (next) {
         if (next.type === "keyword" && next.value === "else") {
             tokens.shift();
+            tokens.shift();
             const elseScope = scope.sub();
             elseVal = { body: parseTokens(tokens, elseScope), scope: elseScope };
             break;
@@ -478,6 +478,12 @@ function parseIfExpression(tokens: Token[], output: Instruction[], scope: Scope)
             const condition = parseExpression(tokens, scope, { type: "{", value: "{" });
             const body = parseTokens(tokens, elifScope);
             elifs.push({ condition, body, scope: elifScope });
+            next = tokens[0];
+            continue;
+        }
+
+        if (next.type === "\n") {
+            tokens.shift();
             next = tokens[0];
             continue;
         }
@@ -620,7 +626,6 @@ function parseImplDeclaration(tokens: Token[], flags: string[], scope: Scope): I
         }
 
         if (next.type !== "keyword") {
-            console.dir(next);
             throw new Error("Unexpected token in impl block.");
         }
 

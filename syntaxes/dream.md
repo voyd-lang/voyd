@@ -293,15 +293,12 @@ let add = { (a: Int, b: Int) => a + b }
 // If the closure has only one expression, the {} can be omitted
 let add = (a: Int, b: Int) => a + b
 
-// In cases where the closure is passed to an already annotated value (such as a parameter
-// or annotated variable)
+// A closure's parameter types may be left out in places where they can be inferred.
 let add: Fn(a: Int, b: Int) -> Int = (a, b) => a + b
 
-// If a closure has no parameters the () can be omitted.
-let doIt = => doWork()
-
-// Additionally, () can be left out when a closure is wrapped in a block
-let add = { a: Int, b: Int => a + b }
+// Additionally, the () can be omitted from block style closures when all types can be
+// inferred and there are one or more parameters.
+let add: Fn(a: Int, b: Int) -> Int = { a, b => a + b }
 ```
 
 ## Higher Order Functions
@@ -312,7 +309,7 @@ fn caller(cb: Fn(a: i32, b: i32) -> i32) -> i32 {
     cb(1, 2)
 }
 
-let add = { a: Int, b: Int => a + b }
+let add = { (a: Int, b: Int) => a + b }
 caller(add)
 
 // Or
@@ -529,17 +526,17 @@ Functions have some additional features and conveniences that are laid out in th
 
 ```
 // Structs can be destructed in the method signature.
-fn add([x, y]: [x: Int, y: Int]) -> Int {
+fn add([x, y]: [x: Int, y: Int]) -> Int = {
     x + y
 }
 
 // This can be shortened further, unlabeled structs are automatically destructed.
-fn add([x: Int, y: Int]) -> Int {
+fn add([x: Int, y: Int]) -> Int = {
     x + y
 }
 
 // If a struct is the only argument of a method, parenthesis can be omitted.
-fn add[x: Int, y: Int] -> Int {
+fn add[x: Int, y: Int] -> Int = {
     x + y
 }
 
@@ -549,6 +546,39 @@ add([x: 5, y: 3])
 // the parenthesis can be omitted on call as well.
 add[x: 5, y: 3]
 ```
+
+## Variadics
+
+```
+fn sum(numbers: ...Int) = numbers.reduce(0) { prev, cur => prev + cur }
+```
+
+## Overloading
+
+Dream functions can be overloaded. Provided that function overload can be unambiguously distinguished
+via their parameters and return type.
+
+```
+fn sum(a: Int, b: Int) = {
+    print("Def 1");
+    a + b
+}
+
+fn sum[a: Int, b: Int] = {
+    print("Def 2");
+    a + b
+}
+
+sum(1, 2) // Def 1
+sum[a: 1, b: 2] // Def 2
+
+// ERROR: sum(numbers: ...Int) overlaps ambiguously with sum(a: Int, b: Int)
+fn sum(numbers: ...Int) = {
+    print("Def 3")
+    numbers.reduce { prev, cur => prev + cur }
+}
+```
+
 
 ## Pure Functions
 
@@ -562,25 +592,6 @@ pure fn div(a: i32, b: i32) {
     print(a)
     a / b
 }
-```
-
-## Parameter-less Functions
-
-It is possible to define a function that takes no parameters and is called without ().
-
-```
-fn anyNum = random()
-
-print(anyNum) // 7
-print(anyNum) // 2341
-print(anyNum) // 562
-```
-
-It is best practice to define these functions as pure and add a comment if they are computationally
-intensive
-```
-// This function is O(n!)
-pure fn test = /** COMPUTATIONALLY EXPENSIVE OPERATION HERE */
 ```
 
 ## Unsafe Functions

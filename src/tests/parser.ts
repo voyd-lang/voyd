@@ -892,7 +892,20 @@ const correctImplWithoutTraitAST = `{
         {
           "kind": "function-declaration",
           "label": "to_f32",
-          "parameters": [],
+          "parameters": [
+            {
+              "kind": "parameter-declaration",
+              "label": "self",
+              "flags": [
+                "self"
+              ],
+              "type": {
+                "kind": "type-argument",
+                "label": "i32",
+                "flags": []
+              }
+            }
+          ],
           "scope": {
             "entities": {},
             "exports": [],
@@ -935,6 +948,18 @@ const correctImplWithoutTraitAST = `{
           "kind": "function-declaration",
           "label": "min",
           "parameters": [
+            {
+              "kind": "parameter-declaration",
+              "label": "self",
+              "flags": [
+                "self"
+              ],
+              "type": {
+                "kind": "type-argument",
+                "label": "i32",
+                "flags": []
+              }
+            },
             {
               "kind": "parameter-declaration",
               "label": "other",
@@ -1082,6 +1107,18 @@ const correctImplWithTraitAST = `{
           "parameters": [
             {
               "kind": "parameter-declaration",
+              "label": "self",
+              "flags": [
+                "self"
+              ],
+              "type": {
+                "kind": "type-argument",
+                "label": "i32",
+                "flags": []
+              }
+            },
+            {
+              "kind": "parameter-declaration",
               "label": "r",
               "type": {
                 "kind": "type-argument",
@@ -1138,6 +1175,18 @@ const correctImplWithTraitAST = `{
           "kind": "function-declaration",
           "label": "-",
           "parameters": [
+            {
+              "kind": "parameter-declaration",
+              "label": "self",
+              "flags": [
+                "self"
+              ],
+              "type": {
+                "kind": "type-argument",
+                "label": "i32",
+                "flags": []
+              }
+            },
             {
               "kind": "parameter-declaration",
               "label": "r",
@@ -1198,6 +1247,18 @@ const correctImplWithTraitAST = `{
           "parameters": [
             {
               "kind": "parameter-declaration",
+              "label": "self",
+              "flags": [
+                "self"
+              ],
+              "type": {
+                "kind": "type-argument",
+                "label": "i32",
+                "flags": []
+              }
+            },
+            {
+              "kind": "parameter-declaration",
               "label": "r",
               "type": {
                 "kind": "type-argument",
@@ -1254,6 +1315,18 @@ const correctImplWithTraitAST = `{
           "kind": "function-declaration",
           "label": "*",
           "parameters": [
+            {
+              "kind": "parameter-declaration",
+              "label": "self",
+              "flags": [
+                "self"
+              ],
+              "type": {
+                "kind": "type-argument",
+                "label": "i32",
+                "flags": []
+              }
+            },
             {
               "kind": "parameter-declaration",
               "label": "r",
