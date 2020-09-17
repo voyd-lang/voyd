@@ -180,12 +180,12 @@ export interface ClosureExpression extends ASTNode {
 
 export interface PropertyAccessExpression extends ASTNode {
     kind: "property-access-expression";
-    arguments: (PropertyAccessExpression | Identifier)[];
+    arguments: Instruction[];
 }
 
 export interface CallExpression extends ASTNode {
     kind: "call-expression";
-    callee: PropertyAccessExpression | Identifier;
+    callee: Instruction;
     arguments: Instruction[];
 
     /** Id of the function entity being called */

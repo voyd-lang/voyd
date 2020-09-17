@@ -1,7 +1,7 @@
 import { Token, tokenize, TokenType } from "../lexer";
 import {
     Instruction, VariableDeclaration, TypeArgument, FunctionDeclaration, ParameterDeclaration,
-    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST, BlockExpression, TypeDeclaration, PropertyAccessExpression, ImplDeclaration, ASTNode
+    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, Identifier, AST, BlockExpression, TypeDeclaration, PropertyAccessExpression, ImplDeclaration, ASTNode, CallExpression
 } from "./definitions";
 import { isInTuple } from "../helpers";
 import { Scope } from "../scope";
@@ -108,7 +108,11 @@ function parseKeywordStatement(tokens: Token[], scope: Scope): Instruction {
 }
 
 function parseAssignment(tokens: Token[], scope: Scope): Assignment {
-    const assignee = parseIdentifierExpression(tokens);
+    const assignee = parsePossiblePropertyAccessExpression(tokens, scope);
+
+    if (assignee.kind !== "identifier" && assignee.kind !== "property-access-expression") {
+        throw new Error("Invalid assignment expression.");
+    }
 
     const equals = tokens.shift();
     if (!equals || equals.type !== "=") {
@@ -378,19 +382,7 @@ function parseExpression(tokens: Token[], scope: Scope, terminator?: TokenType, 
         }
 
         if (token.type === "identifier") {
-            let expr = parseIdentifierExpression(tokens);
-
-            // Handle possible function / method call
-            const next = tokens[0];
-            if (next && isInTuple(next.type, ["(", "["])) {
-                output.push({
-                    kind: "call-expression",
-                    callee: expr,
-                    arguments: parseArguments(tokens, scope), // T
-                });
-                continue;
-            }
-
+            const expr = parsePossiblePropertyAccessExpression(tokens, scope);
             output.push(expr);
             continue;
         }
@@ -507,23 +499,40 @@ function getOperatorPrecedence(operator: string): number {
  * Simplified form of shunting yard.
  * @param tokens
  */
-function parseIdentifierExpression(tokens: Token[]): PropertyAccessExpression | Identifier {
-    const identifiers: (PropertyAccessExpression | Identifier)[] = [];
+function parsePossiblePropertyAccessExpression(tokens: Token[], scope: Scope): Instruction {
+    const output: Instruction[] = [];
     const operators: string[] = [];
 
+    let expectDotToContinue = false;
     while (tokens[0]) {
+        if (expectDotToContinue && tokens[0].value !== ".") break;
+
         if (tokens[0].type === "identifier") {
+            expectDotToContinue = true;
             const token = tokens.shift()!;
-            identifiers.push({ kind: "identifier", label: token.value, tokenIndex: token.index });
+            const identifier: Identifier = { kind: "identifier", label: token.value, tokenIndex: token.index };
+
+            const next = tokens[0];
+            if (next && isInTuple(next.type, ["(", "["])) {
+                output.push({
+                    kind: "call-expression",
+                    callee: identifier,
+                    arguments: parseArguments(tokens, scope), // T
+                });
+            } else {
+                output.push(identifier);
+            }
+
             continue;
         }
 
         if (tokens[0].value === ".") {
+            expectDotToContinue = false;
             while (operators.length > 0) {
                 operators.pop();
-                const arg2 = identifiers.pop()!;
-                const arg1 = identifiers.pop()!;
-                identifiers.push({
+                const arg2 = output.pop()!;
+                const arg1 = output.pop()!;
+                output.push({
                     kind: "property-access-expression",
                     arguments: [arg1, arg2]
                 });
@@ -536,18 +545,18 @@ function parseIdentifierExpression(tokens: Token[]): PropertyAccessExpression | 
         break;
     }
 
-    let output: PropertyAccessExpression | Identifier = identifiers.pop()!;
+    let result = output.pop()!;
 
     if (operators.length > 0) {
-        const arg2: PropertyAccessExpression | Identifier = output;
-        const arg1 = identifiers.pop()!;
-        output = {
+        const arg2 = result;
+        const arg1 = output.pop()!;
+        result = {
             kind: "property-access-expression",
             arguments: [arg1, arg2]
         };
     }
 
-    return output;
+    return result;
 }
 
 function parseArguments(tokens: Token[], scope: Scope): Instruction[] {
