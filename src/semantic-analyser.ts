@@ -95,7 +95,7 @@ function scanAssignment(expr: Assignment, scope: Scope) {
     if (expr.assignee.kind === "identifier") {
         const entity = scope.get(expr.assignee.id!) as VariableEntity;
         if (!entity.flags.includes("let")) return;
-        throw new Error(`Error: Cannot reassign constant ${expr.assignee.label}.`);
+        throw new Error(`Error: Cannot reassign immutable variable: ${expr.assignee.label}.`);
     }
 }
 
