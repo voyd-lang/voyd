@@ -1,6 +1,7 @@
 # Dream
 
-An experimental language targeting WebAssembly.
+An experimental WebAssembly language. Designed to make writing high performance
+web apps fun for individuals and teams alike.
 
 ```rust
 /** Find the value of the fibonacci sequence at index n */
@@ -12,17 +13,24 @@ fn fib(n: i32) -> i32 =
 fn main() -> Void = {
     var index = 0
     while index <= 15 {
-        // Print fibonacci sequence at index using UFCS. Also supports standard print(fib(index)) syntax.
+
+        // Print fibonacci sequence at index using UFCS.
         index.fib().print()
+
+        // Standard call syntax is also supported.
+        // i.e print(fib(index))
+
         index = index + 1
     }
 }
 ```
 
-Language Goal:
-Make writing WASM apps a delight for individuals and teams alike.
+**Disclaimer**
+Dream is in it's very early stages and should not be used for production applications.
+Most MVP features have not been implemented yet. The language does run and compile
+though. So feel free to play around.
 
-Features:
+**Features:**
 - First class WebAssembly support
 - Simple interop with TypeScript / JavaScript
 - Expressive syntax
@@ -31,16 +39,16 @@ Features:
 - Macros
 - Optional GC
 
-Core values:
+**Core values:**
 - Developer satisfaction
 - Predictable syntax and APIs
 - First class WebAssembly support
 - Play nice with others
 - Fast performance
 - Prefer existing standards when possible
-- Quality libraries for web, server, and graphic applications.
+- Quality libraries for web, server, and graphics applications.
 
-# CLI Installation Usage
+# Getting Started
 
 **Install**
 ```
