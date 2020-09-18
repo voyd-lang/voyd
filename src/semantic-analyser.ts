@@ -1,4 +1,4 @@
-import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, VariableDeclaration, PropertyAccessExpression } from "./parser";
+import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, VariableDeclaration, PropertyAccessExpression, Assignment } from "./parser";
 import { Scope } from "./scope";
 import { FunctionEntity, ParameterEntity, TypeAliasEntity, TypeEntity, VariableEntity } from "./entity-scanner";
 
@@ -83,9 +83,19 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
     }
 
     if (instruction.kind === "assignment") {
-        scanInstruction({ scope, instruction: instruction.assignee });
-        scanInstruction({ scope, instruction: instruction.expression });
+        scanAssignment(instruction, scope);
         return;
+    }
+}
+
+function scanAssignment(expr: Assignment, scope: Scope) {
+    scanInstruction({ scope, instruction: expr.assignee });
+    scanInstruction({ scope, instruction: expr.expression });
+
+    if (expr.assignee.kind === "identifier") {
+        const entity = scope.get(expr.assignee.id!) as VariableEntity;
+        if (!entity.flags.includes("let")) return;
+        throw new Error(`Error: Cannot reassign constant ${expr.assignee.label}.`);
     }
 }
 
