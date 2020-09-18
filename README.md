@@ -32,12 +32,14 @@ though. So feel free to play around.
 
 **Features:**
 - First class WebAssembly support
-- Simple interop with TypeScript / JavaScript
-- Expressive syntax
+- Expression oriented syntax
+- UFCS
 - Support for OOP and Functional paradigms
 - Strongly typed, with type inference
 - Macros
 - Optional GC
+- Simple interop with TypeScript / JavaScript
+- Optional Pure and Unsafe function enforcement.
 
 **Core values:**
 - Developer satisfaction
