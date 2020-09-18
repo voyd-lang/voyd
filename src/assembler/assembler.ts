@@ -2,7 +2,7 @@ import binaryen from "binaryen";
 import { TypeAliasEntity, VariableEntity, FunctionEntity, ParameterEntity } from "../entity-scanner/definitions";
 import {
     Instruction, ReturnStatement, IfExpression, Assignment,
-    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, Identifier, CallExpression
+    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, Identifier, CallExpression, PropertyAccessExpression
 } from "../parser";
 import uniqid from "uniqid";
 import { Scope } from "../scope";
@@ -120,11 +120,37 @@ export class Assembler {
             return this.mod.call(func.id, args, this.getBinType(func.returnTypeEntity! as TypeAliasEntity));
         }
 
+        if (expr.kind === "property-access-expression") {
+            return this.compilePropertyAccessExpression(expr, scope);
+        }
+
         if (expr.kind === "block-expression") {
             return this.compileBlock(expr);
         }
 
         throw new Error(`Invalid expression ${expr.kind}`);
+    }
+
+    private compilePropertyAccessExpression(expr: PropertyAccessExpression, scope: Scope) {
+        const left = expr.arguments[0];
+        const right = expr.arguments[1];
+
+        if (right.kind !== "call-expression") {
+            throw new Error("Right side property access expression type not yet supported");
+        }
+
+        const builtIn = this.getBuiltIn(right.calleeLabel, scope);
+        if (builtIn) {
+            right.arguments.unshift(left);
+            return builtIn(right);
+        };
+
+        const func = scope.get(right.calleeId!) as FunctionEntity;
+
+        return this.mod.call(func.id, [
+            this.compileExpression(left, scope),
+            ...right.arguments.map(expr => this.compileExpression(expr, scope))
+        ], this.getBinType(func.returnTypeEntity! as TypeAliasEntity))
     }
 
     private compileIfExpression(instruction: IfExpression) {

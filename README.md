@@ -3,20 +3,18 @@
 An experimental language targeting WebAssembly.
 
 ```rust
-fn fib(n: i32) =
-    if n < 2 {
-        n
-    } else {
-        fib(n - 2) + fib(n - 1)
-    }
+fn fib(n: i32) -> i32 =
+  if n < 2 { n }
+  else { fib(n - 1) + fib(n - 2) }
 
-let count = 10
-
-// Supports UFCS
-count.fib().print()
-
-// And standard
-print(fib(count))
+fn main() -> Void = {
+  var index = 0
+  while index <= 15 {
+    // UFCS Syntax. Can also be written as print(fib(index))
+    index.fib().print()
+    index = index + 1
+  }
+}
 ```
 
 Language Goal:
@@ -57,8 +55,9 @@ dreamc path/to/code.dm
 - [x] If statements
 - [x] While loops
 - [x] let / var statements
-- [ ] Dot notation
-- [ ] Method overloading
+- [x] Dot notation
+- [x] Method overloading
+- [x] UFCS
 - [ ] Enums
 - [ ] Enums with associated values
 - [ ] Type checker
@@ -80,14 +79,3 @@ dreamc path/to/code.dm
 - [ ] NodeJS/Deno API bindings
 - [ ] Multiple files
 - [ ] ...?
-
-# Task List
-- [ ] Get basic dir (IR) defined, plugged into compiler
-- [ ] Support and use enums
-  - [ ] Can be used in match
-  - [ ] Can be used in if (val === Enum.variant)
-  - [ ] Can have associated fields
-- [ ] Support and use structs
-- [ ] Generics expansion
-- [ ] Basic std lib
-  - [ ] Generically defined and implemented binary expression types. Allows us to remove hard-coded
