@@ -53,6 +53,14 @@ export interface EnumVariantDeclaration {
     id?: string;
 }
 
+export interface StructLiteral extends ASTNode {
+    kind: "struct-literal";
+
+    fields: { [label: string]: Instruction };
+
+    flags: string[];
+}
+
 export interface StructDeclaration extends ASTNode {
     kind: "struct-declaration";
     label: string;
@@ -273,6 +281,7 @@ export type Instruction =
     TypeDeclaration |
     BlockExpression |
     PropertyAccessExpression |
-    ImplDeclaration;
+    ImplDeclaration |
+    StructLiteral;
 
 export type AST = { body: Instruction[], scope: Scope };

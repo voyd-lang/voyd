@@ -25,8 +25,22 @@ export interface FunctionEntity extends EntityBase {
 /** Represents some form of type alias */
 export interface TypeAliasEntity extends TypeEntity {
     kind: "type-alias";
+}
 
-    instanceScope: Scope;
+export interface StructEntity extends TypeEntity {
+    kind: "struct";
+
+    fields: string[];
+
+    byteSize: number;
+}
+
+export interface StructField extends EntityBase {
+    kind: "struct-field";
+
+    type: string;
+
+    byteSize: number;
 }
 
 /** A value can be t */
@@ -63,4 +77,4 @@ export interface EntityBase {
     flags: string[];
 }
 
-export type EntityKind = "function" | "variable" | "parameter" | "impl" | "type-alias";
+export type EntityKind = "function" | "variable" | "parameter" | "impl" | "type-alias" | "struct" | "struct-field";

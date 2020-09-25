@@ -1,7 +1,10 @@
 import { Token, tokenize, TokenType } from "../lexer";
 import {
     Instruction, VariableDeclaration, TypeArgument, FunctionDeclaration, ParameterDeclaration,
-    ReturnStatement, Assignment, EnumDeclaration, EnumVariantDeclaration, MatchCase, AST, BlockExpression, TypeDeclaration, ImplDeclaration
+    ReturnStatement, EnumDeclaration, EnumVariantDeclaration, MatchCase, AST, BlockExpression,
+    TypeDeclaration,
+    ImplDeclaration,
+    StructLiteral
 } from "./definitions";
 import { isInTuple } from "../helpers";
 import { Scope } from "../scope";
@@ -301,6 +304,12 @@ function parseExpression(tokens: Token[], scope: Scope, terminator?: TokenType, 
             continue;
         }
 
+        if (token.type === "[") {
+            output.push(parseStructInstance(tokens, flags, scope));
+            continue;
+        }
+
+
         if (token.type === "int") {
             output.push({ kind: "int-literal", value: token.value });
             tokens.shift();
@@ -538,6 +547,44 @@ function parseBlockExpression(tokens: Token[], flags: string[], scope: Scope): B
         scope: blockScope,
         body: parseBody(tokens, blockScope)
     }
+}
+
+function parseStructInstance(tokens: Token[], flags: string[], scope: Scope): StructLiteral {
+    const fields: { [label: string]: Instruction } = {};
+
+    // For now we just get rid of the opening brace. We also only handle [
+    const openingBracket = tokens.shift();
+    if (!openingBracket || openingBracket.type !== "[") {
+        throw new Error("Expected opening bracket in struct instance");
+    }
+
+    while (tokens.length > 0) {
+        const token = tokens[0];
+        if (token.type === "]") {
+            tokens.shift();
+            break;
+        }
+
+        if (token.type === "identifier" && tokens[1] && tokens[1].type === ":") {
+            const label = token.value;
+            tokens.shift();
+            tokens.shift();
+            fields[label] = parseExpression(tokens, scope, ",");
+            continue;
+        }
+
+        if (token.type === "identifier" && tokens[1] && tokens[1].type === ",") {
+            const label = token.value;
+            tokens.shift();
+            tokens.shift();
+            fields[label] = { kind: "identifier", label, tokenIndex: token.index };
+            continue;
+        }
+
+        throw new Error(`Unexpected token: ${token.value}`);
+    }
+
+    return { kind: "struct-literal", fields, flags };
 }
 
 function parseImplDeclaration(tokens: Token[], flags: string[], scope: Scope): ImplDeclaration {
