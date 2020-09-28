@@ -1,7 +1,5 @@
 
-let x = [
-    a: 1, b: 2, c: 3,
-    sub: [x: 4, y: 3, z: 2],
-    hello,
-    world: 3 + 4
-]
+fn main() = {
+    let vec = [x: 1, y: 2, z: 3]
+    print(vec.y)
+}

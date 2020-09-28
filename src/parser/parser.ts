@@ -4,7 +4,7 @@ import {
     ReturnStatement, EnumDeclaration, EnumVariantDeclaration, MatchCase, AST, BlockExpression,
     TypeDeclaration,
     ImplDeclaration,
-    StructLiteral
+    StructLiteral, StructLiteralField
 } from "./definitions";
 import { isInTuple } from "../helpers";
 import { Scope } from "../scope";
@@ -305,7 +305,7 @@ function parseExpression(tokens: Token[], scope: Scope, terminator?: TokenType, 
         }
 
         if (token.type === "[") {
-            output.push(parseStructInstance(tokens, flags, scope));
+            output.push(parseStructLiteral(tokens, flags, scope));
             continue;
         }
 
@@ -549,8 +549,8 @@ function parseBlockExpression(tokens: Token[], flags: string[], scope: Scope): B
     }
 }
 
-function parseStructInstance(tokens: Token[], flags: string[], scope: Scope): StructLiteral {
-    const fields: { [label: string]: Instruction } = {};
+function parseStructLiteral(tokens: Token[], flags: string[], scope: Scope): StructLiteral {
+    const fields: { [label: string]: StructLiteralField } = {};
 
     // For now we just get rid of the opening brace. We also only handle [
     const openingBracket = tokens.shift();
@@ -569,7 +569,10 @@ function parseStructInstance(tokens: Token[], flags: string[], scope: Scope): St
             const label = token.value;
             tokens.shift();
             tokens.shift();
-            fields[label] = parseExpression(tokens, scope, ",");
+            fields[label] = {
+                kind: "struct-field",
+                initializer: parseExpression(tokens, scope, ",")
+            };
             continue;
         }
 
@@ -577,7 +580,10 @@ function parseStructInstance(tokens: Token[], flags: string[], scope: Scope): St
             const label = token.value;
             tokens.shift();
             tokens.shift();
-            fields[label] = { kind: "identifier", label, tokenIndex: token.index };
+            fields[label] = {
+                kind: "struct-field",
+                initializer: { kind: "identifier", label, tokenIndex: token.index }
+            };
             continue;
         }
 

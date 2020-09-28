@@ -11,7 +11,9 @@ export type Entity =
     TypeAliasEntity |
     VariableEntity |
     ParameterEntity |
-    ImplEntity;
+    ImplEntity |
+    StructEntity |
+    StructFieldEntity;
 
 export interface FunctionEntity extends EntityBase {
     kind: "function";
@@ -31,16 +33,14 @@ export interface StructEntity extends TypeEntity {
     kind: "struct";
 
     fields: string[];
-
-    byteSize: number;
 }
 
-export interface StructField extends EntityBase {
+export interface StructFieldEntity extends EntityBase {
     kind: "struct-field";
 
-    type: string;
+    typeEntity?: TypeEntity;
 
-    byteSize: number;
+    index: number;
 }
 
 /** A value can be t */

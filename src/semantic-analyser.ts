@@ -1,6 +1,6 @@
-import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, VariableDeclaration, PropertyAccessExpression, Assignment } from "./parser";
+import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, VariableDeclaration, PropertyAccessExpression, Assignment, StructLiteral } from "./parser";
 import { Scope } from "./scope";
-import { FunctionEntity, ParameterEntity, TypeAliasEntity, TypeEntity, VariableEntity } from "./entity-scanner";
+import { FunctionEntity, ParameterEntity, StructFieldEntity, TypeAliasEntity, TypeEntity, VariableEntity } from "./entity-scanner";
 
 /** Enforces scoping rules, resolves identifiers and infers types. */
 export function analyseSemantics(ast: AST) {
@@ -46,7 +46,7 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
     }
 
     if (instruction.kind === "identifier") {
-        const entity = scope.closestEntityWithLabel(instruction.label, ["function", "parameter", "variable", "type-alias"]);
+        const entity = scope.closestEntityWithLabel(instruction.label, ["function", "parameter", "variable", "type-alias", "struct-field"]);
         if (!entity) throw new Error(`No entity with label ${instruction.label} in current scope.`);
         if (entity.kind === "variable" && instruction.tokenIndex < entity.tokenIndex) {
             throw new Error(`Identifier ${instruction.label} used before defined`);
@@ -85,6 +85,20 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
     if (instruction.kind === "assignment") {
         scanAssignment(instruction, scope);
         return;
+    }
+
+    if (instruction.kind === "struct-literal") {
+        scanStructLiteral(instruction, scope);
+        return;
+    }
+}
+
+function scanStructLiteral(struct: StructLiteral, scope: Scope) {
+    for (const label in struct.fields) {
+        const fieldNode = struct.fields[label];
+        scanInstruction({ scope, instruction: fieldNode.initializer });
+        const entity = scope.get(fieldNode.id!) as StructFieldEntity;
+        entity.typeEntity = typeEntityOfExpression(fieldNode.initializer, scope);
     }
 }
 
@@ -204,6 +218,10 @@ function typeEntityOfExpression(expr: Instruction, scope: Scope): TypeEntity {
         if (!entity) throw new Error(`Unknown identifier ${expr.label}`);
         if (entity.kind === "type-alias") return entity;
         return ((entity as (ParameterEntity | VariableEntity)).typeEntity!);
+    }
+
+    if (expr.kind === "struct-literal") {
+        return scope.get(expr.id!) as TypeEntity;
     }
 
     if (expr.kind === "block-expression") {

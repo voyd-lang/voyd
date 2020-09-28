@@ -1,4 +1,4 @@
-import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration } from "../parser";
+import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, StructLiteral, VariableDeclaration } from "../parser";
 import { Scope } from "../scope";
 import { TypeAliasEntity } from "./definitions";
 
@@ -39,14 +39,7 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
     }
 
     if (instruction.kind === "variable-declaration") {
-        instruction.id = scope.addLocal({
-            kind: "variable",
-            label: instruction.label,
-            flags: instruction.flags,
-            mutable: instruction.flags.includes("var"),
-            index: scope.localsCount(),
-            tokenIndex: instruction.tokenIndex
-        });
+        scanVariableDeclaration(instruction, scope);
         return;
     }
 
@@ -80,6 +73,51 @@ function scanInstruction({ scope, instruction }: { scope: Scope, instruction: In
         instruction.cases.forEach(mCase => scanInstruction({ scope, instruction: mCase.expression }));
         return;
     }
+
+    if (instruction.kind === "struct-literal") {
+        scanStructLiteral(instruction, scope);
+        return;
+    }
+}
+
+function scanVariableDeclaration(variable: VariableDeclaration, scope: Scope) {
+    variable.id = scope.addLocal({
+        kind: "variable",
+        label: variable.label,
+        flags: variable.flags,
+        mutable: variable.flags.includes("var"),
+        index: scope.localsCount(),
+        tokenIndex: variable.tokenIndex
+    });
+
+    if (variable.initializer) {
+        scanInstruction({ scope, instruction: variable.initializer });
+    }
+}
+
+function scanStructLiteral(struct: StructLiteral, scope: Scope) {
+    const fields: string[] = [];
+    const instanceScope = scope.sub("type");
+
+    for (const label in struct.fields) {
+        const id = instanceScope.add({
+            kind: "struct-field",
+            index: fields.length,
+            label,
+            flags: []
+        });
+        scanInstruction({ scope, instruction: struct.fields[label].initializer });
+        struct.fields[label].id = id;
+        fields.push(id);
+    }
+
+    struct.id = scope.add({
+        kind: "struct",
+        label: "literal",
+        fields,
+        instanceScope,
+        flags: []
+    });
 }
 
 function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {

@@ -56,9 +56,20 @@ export interface EnumVariantDeclaration {
 export interface StructLiteral extends ASTNode {
     kind: "struct-literal";
 
-    fields: { [label: string]: Instruction };
+    fields: { [label: string]: StructLiteralField };
 
     flags: string[];
+
+    /** Entity ID if resolved */
+    id?: string;
+}
+
+export interface StructLiteralField extends ASTNode {
+    kind: "struct-field";
+
+    initializer: Instruction;
+
+    id?: string;
 }
 
 export interface StructDeclaration extends ASTNode {

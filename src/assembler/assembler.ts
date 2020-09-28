@@ -1,8 +1,8 @@
 import binaryen from "binaryen";
-import { TypeAliasEntity, VariableEntity, FunctionEntity, ParameterEntity } from "../entity-scanner/definitions";
+import { TypeAliasEntity, VariableEntity, FunctionEntity, ParameterEntity, StructFieldEntity, StructEntity } from "../entity-scanner/definitions";
 import {
     Instruction, ReturnStatement, IfExpression, Assignment,
-    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, Identifier, CallExpression, PropertyAccessExpression
+    FunctionDeclaration, VariableDeclaration, WhileStatement, MatchExpression, AST, Identifier, CallExpression, PropertyAccessExpression, StructLiteral
 } from "../parser";
 import uniqid from "uniqid";
 import { Scope } from "../scope";
@@ -11,6 +11,7 @@ export class Assembler {
     private readonly mod = new binaryen.Module();
 
     constructor() {
+        this.mod.setFeatures(512);
         this.mod.autoDrop();
         this.mod.addFunctionImport("print", "imports", "print", binaryen.i32, binaryen.none);
     }
@@ -86,6 +87,10 @@ export class Assembler {
             return this.compileReturn(expr, scope);
         }
 
+        if (expr.kind === "struct-literal") {
+            return this.compileStructLiteral(expr, scope);
+        }
+
         if (expr.kind === "int-literal") {
             return this.mod.i32.const(Number(expr.value));
         }
@@ -131,9 +136,24 @@ export class Assembler {
         throw new Error(`Invalid expression ${expr.kind}`);
     }
 
+    private compileStructLiteral(expr: StructLiteral, scope: Scope): number {
+        const elements: number[] = [];
+
+        for (const label in expr.fields) {
+            elements.push(this.compileExpression(expr.fields[label].initializer, scope));
+        }
+
+        return this.mod.tuple.make(elements);
+    }
+
     private compilePropertyAccessExpression(expr: PropertyAccessExpression, scope: Scope) {
         const left = expr.arguments[0];
         const right = expr.arguments[1];
+
+        if (right.kind === "identifier") {
+            const entity = scope.get(right.id!) as StructFieldEntity;
+            return this.mod.tuple.extract(this.compileExpression(left, scope), entity.index);
+        }
 
         if (right.kind !== "call-expression") {
             throw new Error("Right side property access expression type not yet supported");
@@ -275,7 +295,14 @@ export class Assembler {
         ]);
     }
 
-    private getBinType(type: TypeAliasEntity): number {
+    private getBinType(type: TypeAliasEntity | StructEntity): number {
+        if (type.kind === "struct") {
+            return binaryen.createType(type.fields.map(id => {
+                const field = type.instanceScope.get(id) as StructFieldEntity;
+                return this.getBinType(field.typeEntity! as any);
+            }));
+        }
+
         if (!type.flags.includes("declare")) {
             throw new Error(`Unsupported type alias ${type.label}`);
         }
