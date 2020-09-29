@@ -98,8 +98,12 @@ function scanVariableDeclaration(variable: VariableDeclaration, scope: Scope) {
 function scanStructLiteral(struct: StructLiteral, scope: Scope) {
     const fields: string[] = [];
     const instanceScope = scope.sub("type");
+    const fieldLabels = Object.keys(struct.fields).sort((a, b) => {
+        if (a === b) return 0;
+        return a > b ? 1 : -1;
+    });
 
-    for (const label in struct.fields) {
+    for (const label of fieldLabels) {
         const id = instanceScope.add({
             kind: "struct-field",
             index: fields.length,
