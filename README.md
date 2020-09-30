@@ -62,6 +62,12 @@ npm i -g dreamc
 dreamc path/to/code.dm
 ```
 
+# Documentation
+
+To get a feel of the language, check out the [overview.md file](./overview.md).
+
+For an in depth language guide, check out the [reference folder](./reference).
+
 # Feature Support Check List
 - [x] Methods
 - [x] If statements
