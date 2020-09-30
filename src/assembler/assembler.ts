@@ -11,7 +11,7 @@ export class Assembler {
     private readonly mod = new binaryen.Module();
 
     constructor() {
-        this.mod.setFeatures(binaryen.Features.Multivalue);
+        this.mod.setFeatures(512); // Temp workaround till binaryen.js #36 is published
         this.mod.autoDrop();
         this.mod.addFunctionImport("print", "imports", "print", binaryen.i32, binaryen.none);
     }
@@ -210,38 +210,88 @@ export class Assembler {
             return this.mod.local.set(assignee.index, expr);
         }
 
-        return this.compilePropertyAccessAssignment({ left: instruction, right: scope });
+        return this.compilePropertyAccessAssignment({
+            expr: instruction.assignee,
+            initializer: instruction.expression,
+            scope
+        });
     }
 
-    compilePropertyAccessAssignment({ left, right, initializer, scope }: {
-        left: Instruction; right: Identifier; initializer: Instruction; scope: Scope;
+    compilePropertyAccessAssignment({ expr, initializer, scope }: {
+        expr: PropertyAccessExpression;
+        initializer: Instruction;
+        scope: Scope;
     }): number {
-        if (left.kind === "property-access-expression") {
-            return this.compilePropertyAccessAssignment({
-                scope,
-                left: left.arguments[0],
-                right: left.arguments[1] as Identifier,
-                initializer:
-            })
-        }
+        const identifiers = this.flattenPropertyAccessAssignmentExpr(expr);
+        console.dir(identifiers);
+        const topIdentifier = identifiers.shift()!
+        const variable = scope.get(topIdentifier.id!) as VariableEntity | ParameterEntity;
+        const struct = variable.typeEntity! as StructEntity;
+        const modifiedField = scope.get(identifiers.shift()!.id!) as StructFieldEntity;
 
-        if (left.kind !== "identifier") {
-            throw new Error("Expected identifier or property access expression.");
-        }
+        return this.mod.local.set(variable.index, this.mod.tuple.make(this.buildStructTree({
+            tuple: this.mod.local.get(variable.index, this.getBinType(struct)),
+            struct, modifiedField, scope, identifiers, initializer
+        })));
+    }
 
-        const valueEntity = scope.get(left.id!) as VariableEntity | ParameterEntity;
-        const structEntity = valueEntity.typeEntity! as StructEntity;
-        const fieldEntity = scope.get(right.id!) as StructFieldEntity;
-        const elements = structEntity.fields.map((fieldId, index) => {
-            const elementEntity = structEntity.instanceScope.get(fieldId) as StructFieldEntity;
+    /** The complexity of this function fills me with pain. */
+    buildStructTree({ struct, tuple, modifiedField, scope, identifiers, initializer }: {
+        struct: StructEntity; tuple: number; modifiedField: StructFieldEntity;
+        scope: Scope; identifiers: Identifier[]; initializer: Instruction;
+    }): number[] {
+        const elements: number[] = [];
+        const nextFieldIdentifier = identifiers.shift();
+        const nextField = nextFieldIdentifier ?
+            (scope.get(nextFieldIdentifier.id!) as StructFieldEntity) :
+            undefined;
 
-            if (elementEntity.index === fieldEntity.index) {
-                return this.compileExpression(initializer, scope);
+        for (const id of struct.fields) {
+            const field = scope.get(id) as StructFieldEntity;
+
+            if (field.index !== modifiedField.index) {
+                elements.push(this.mod.tuple.extract(tuple, field.index));
+                continue;
             }
 
-            return this.mod.tuple.extract(valueEntity.index, index);
-        });
-        return this.mod.local.set(valueEntity.index, this.mod.tuple.make(elements));
+            if (!nextField) {
+                elements.push(this.compileExpression(initializer, scope));
+                continue;
+            }
+
+            elements.push(
+                this.mod.tuple.make(
+                    this.buildStructTree({
+                        struct: modifiedField.typeEntity as StructEntity,
+                        tuple: this.mod.tuple.extract(tuple, field.index),
+                        modifiedField: nextField,
+                        scope, identifiers, initializer
+                    })
+                )
+            );
+        }
+
+        return elements;
+    }
+
+    /** converts a.b.c tree to [a, b, c] */
+    flattenPropertyAccessAssignmentExpr(expr: PropertyAccessExpression): Identifier[] {
+        const left = expr.arguments[0];
+        const right = expr.arguments[1];
+
+        if (right.kind !== "identifier") {
+            throw new Error("Invalid property access assignment expression.");
+        }
+
+        if (left.kind === "identifier") {
+            return [left, right];
+        }
+
+        if (left.kind === "property-access-expression") {
+            return [...this.flattenPropertyAccessAssignmentExpr(left), right];
+        }
+
+        throw new Error("Invalid property access assignment expression.");
     }
 
     private compileVariableDeclaration(vr: VariableDeclaration, scope: Scope): number {

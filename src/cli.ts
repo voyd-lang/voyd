@@ -1,4 +1,4 @@
-#!/usr/bin/env node --experimental-wasm-modules
+#!/usr/bin/env node
 import { createCommand } from "commander";
 import { readFileSync } from "fs";
 import { run } from "./run";
