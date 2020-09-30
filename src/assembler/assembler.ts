@@ -11,7 +11,7 @@ export class Assembler {
     private readonly mod = new binaryen.Module();
 
     constructor() {
-        this.mod.setFeatures(512);
+        this.mod.setFeatures(binaryen.Features.Multivalue);
         this.mod.autoDrop();
         this.mod.addFunctionImport("print", "imports", "print", binaryen.i32, binaryen.none);
     }
@@ -204,9 +204,44 @@ export class Assembler {
     }
 
     compileAssignment(instruction: Assignment, scope: Scope): number {
-        const assignee = scope.get((instruction.assignee as Identifier).id!)! as VariableEntity;
-        const expr = this.compileExpression(instruction.expression, scope);
-        return this.mod.local.set(assignee.index, expr)
+        if (instruction.assignee.kind === "identifier") {
+            const assignee = scope.get(instruction.assignee.id!)! as VariableEntity;
+            const expr = this.compileExpression(instruction.expression, scope);
+            return this.mod.local.set(assignee.index, expr);
+        }
+
+        return this.compilePropertyAccessAssignment({ left: instruction, right: scope });
+    }
+
+    compilePropertyAccessAssignment({ left, right, initializer, scope }: {
+        left: Instruction; right: Identifier; initializer: Instruction; scope: Scope;
+    }): number {
+        if (left.kind === "property-access-expression") {
+            return this.compilePropertyAccessAssignment({
+                scope,
+                left: left.arguments[0],
+                right: left.arguments[1] as Identifier,
+                initializer:
+            })
+        }
+
+        if (left.kind !== "identifier") {
+            throw new Error("Expected identifier or property access expression.");
+        }
+
+        const valueEntity = scope.get(left.id!) as VariableEntity | ParameterEntity;
+        const structEntity = valueEntity.typeEntity! as StructEntity;
+        const fieldEntity = scope.get(right.id!) as StructFieldEntity;
+        const elements = structEntity.fields.map((fieldId, index) => {
+            const elementEntity = structEntity.instanceScope.get(fieldId) as StructFieldEntity;
+
+            if (elementEntity.index === fieldEntity.index) {
+                return this.compileExpression(initializer, scope);
+            }
+
+            return this.mod.tuple.extract(valueEntity.index, index);
+        });
+        return this.mod.local.set(valueEntity.index, this.mod.tuple.make(elements));
     }
 
     private compileVariableDeclaration(vr: VariableDeclaration, scope: Scope): number {
