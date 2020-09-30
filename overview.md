@@ -181,13 +181,13 @@ struct Planet {
 
     /** Computed property with getter and setter */
     prop diameter {
-        get => radius * 2
-        set(v: Int) => radius = v / 2
+        fn get() = radius * 2
+        fn set(v: Int) = radius = v / 2
     }
 
     /** Readonly computed property */
-    prop surfaceArea {
-        get => 4 * PI * radius.sq
+    prop surfaceArea = {
+        fn get() = 4 * PI * radius.sq
     }
 
     /** Shorthand readonly computed property */
