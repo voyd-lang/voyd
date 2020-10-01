@@ -4,7 +4,7 @@ import {
     ReturnStatement, EnumDeclaration, EnumVariantDeclaration, MatchCase, AST, BlockExpression,
     TypeDeclaration,
     ImplDeclaration,
-    StructLiteral, StructLiteralField, UseStatement, Identifier, PropertyAccessExpression
+    StructLiteral, StructLiteralField, UseStatement, Identifier
 } from "./definitions";
 import { isInTuple } from "../helpers";
 import { Scope } from "../scope";
