@@ -10,7 +10,7 @@ export type TokenType = "operator" | "keyword" | "identifier" | "boolean" | "str
 
 export const operators = [
     "+", "-", "*", "/", "==", "!=", "and", "or", "xor", "<", ">", ">=", "<=", "<>",
-    "??", ".", "|>", "|<", "<|", "|>", "<<", ">>", "="
+    "??", ".", "|>", "|<", "<|", "|>", "<<", ">>", "=", "as"
 ] as const;
 
 export const keywords = [

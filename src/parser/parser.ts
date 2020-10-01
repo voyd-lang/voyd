@@ -4,7 +4,7 @@ import {
     ReturnStatement, EnumDeclaration, EnumVariantDeclaration, MatchCase, AST, BlockExpression,
     TypeDeclaration,
     ImplDeclaration,
-    StructLiteral, StructLiteralField
+    StructLiteral, StructLiteralField, UseStatement, Identifier, PropertyAccessExpression
 } from "./definitions";
 import { isInTuple } from "../helpers";
 import { Scope } from "../scope";
@@ -77,6 +77,10 @@ function parseKeywordStatement(tokens: Token[], scope: Scope): Instruction {
         token = tokens[0];
     }
 
+    if (flags.includes("use")) {
+        return parseUseStatement(tokens, flags, scope);
+    }
+
     if (flags.some(val => val === "let" || val === "var")) {
         return parseVariableDeclaration(tokens, flags, scope);
     }
@@ -103,6 +107,66 @@ function parseKeywordStatement(tokens: Token[], scope: Scope): Instruction {
 
     const keywordStr = flags.reduce((p, c) => `${p} ${c}`, "");
     throw new Error(`Expected statement after keyword(s):${keywordStr}`);
+}
+
+function parseUseStatement(tokens: Token[], flags: string[], scope: Scope): UseStatement {
+    let module: Instruction | undefined = undefined;
+    let selectiveImports: Identifier[] | undefined = undefined;
+    let alias: Identifier | undefined = undefined;
+    let bindModuleToLocalNamespace = false;
+
+
+    while (tokens[0]) {
+        const next = tokens[0];
+
+        if (next.type === "operator" && next.value === "*") {
+            bindModuleToLocalNamespace = true;
+            tokens.shift();
+            continue;
+        }
+
+        if (next.type === "operator" && next.value === "as" && !bindModuleToLocalNamespace) {
+            throw new Error("Expected * before as in use statement.");
+        }
+
+        if (next.type === "operator" && next.value === "as") {
+            // Get rid of as
+            tokens.shift();
+            const possibleAlias = tokens.shift();
+
+            if (!possibleAlias || possibleAlias.type !== "identifier") {
+                throw new Error("Expected identifier after as in use statement.");
+            }
+
+            alias = { kind: "identifier", label: possibleAlias.value, tokenIndex: possibleAlias.index };
+            bindModuleToLocalNamespace = false;
+        }
+
+        if (next.type === "keyword" && next.value === "from") {
+            if (!bindModuleToLocalNamespace || alias || selectiveImports) {
+                throw new Error("Expected wildcard or selective import before from in use statement.");
+            }
+
+            tokens.shift();
+        }
+
+        if (next.type === "identifier") {
+            module = parseExpression(tokens, scope);
+        }
+    }
+
+    if (!module || (module.kind !== "property-access-expression" && module.kind !== "identifier")) {
+        throw new Error("Expected module in use statement.");
+    }
+
+    return {
+        kind: "use",
+        module,
+        selectiveImports,
+        alias,
+        bindModuleToLocalNamespace,
+        flags
+    }
 }
 
 function parseReturnStatement(tokens: Token[], scope: Scope): ReturnStatement {

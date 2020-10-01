@@ -263,6 +263,19 @@ export interface Assignment extends ASTNode {
     expression: Instruction;
 }
 
+export interface UseStatement extends ASTNode {
+    kind: "use",
+    module: PropertyAccessExpression | Identifier;
+    alias?: Identifier;
+
+    selectiveImports?: Identifier[];
+
+    /** This is true when the * wildcard is used */
+    bindModuleToLocalNamespace: boolean;
+
+    flags: string[];
+}
+
 export type Instruction =
     VariableDeclaration |
     FunctionDeclaration |
@@ -293,6 +306,7 @@ export type Instruction =
     BlockExpression |
     PropertyAccessExpression |
     ImplDeclaration |
-    StructLiteral;
+    StructLiteral |
+    UseStatement;
 
 export type AST = { body: Instruction[], scope: Scope };
