@@ -140,18 +140,22 @@ function parseUseStatement(tokens: Token[], flags: string[], scope: Scope): UseS
 
             alias = { kind: "identifier", label: possibleAlias.value, tokenIndex: possibleAlias.index };
             bindModuleToLocalNamespace = false;
+            continue;
         }
 
         if (next.type === "keyword" && next.value === "from") {
-            if (!bindModuleToLocalNamespace || alias || selectiveImports) {
+            if (!bindModuleToLocalNamespace && !alias && !selectiveImports) {
+                console.log(next);
                 throw new Error("Expected wildcard or selective import before from in use statement.");
             }
 
             tokens.shift();
+            continue;
         }
 
         if (next.type === "identifier") {
             module = parseExpression(tokens, scope);
+            break;
         }
     }
 
