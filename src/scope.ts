@@ -20,19 +20,17 @@ export class Scope {
         this.entities = this.parent ? this.parent.entities : new Map();
     }
 
-    import(scope: Scope) {
-        for (const entity of scope.entities.values()) {
-            this.entities.set(entity.id, entity);
-        }
+    import(entities: string[]) {
+        entities.forEach(id => this.ownEntities.add(id));
     }
 
-    closestEntityWithLabel(label: string, includedKinds: EntityKind[]): Entity | undefined {
+    resolveLabel(label: string): Entity | undefined {
         for (const id of this.ownEntities) {
             const entity = this.get(id)!;
-            if (entity.label === label && includedKinds.includes(entity.kind)) return entity;
+            if (entity.label === label) return entity;
         }
 
-        if (this.parent) return this.parent.closestEntityWithLabel(label, includedKinds);
+        if (this.parent) return this.parent.resolveLabel(label);
 
         return undefined;
     }

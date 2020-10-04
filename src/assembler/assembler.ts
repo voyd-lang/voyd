@@ -29,7 +29,7 @@ export class Assembler {
             }
 
             if (instruction.kind === "impl-declaration") {
-                const type = scope.closestEntityWithLabel(instruction.target, ["type-alias"]);
+                const type = scope.resolveLabel(instruction.target);
 
                 if (!type) {
                     throw new Error(`${instruction.target} is not a type`);

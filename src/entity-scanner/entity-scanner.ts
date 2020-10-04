@@ -122,7 +122,7 @@ function scanStructLiteral(struct: StructLiteral, scope: Scope) {
 
 function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {
     instruction.id = scope.add({ kind: "impl", flags: instruction.flags, label: instruction.target });
-    const target = scope.closestEntityWithLabel(instruction.target, ["type-alias"]) as TypeAliasEntity;
+    const target = scope.resolveLabel(instruction.target) as TypeAliasEntity;
     instruction.functions.forEach(fn => scanFn({ fn, scope: target.instanceScope }));
 }
 
