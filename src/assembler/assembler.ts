@@ -6,9 +6,10 @@ import {
 } from "../parser";
 import uniqid from "uniqid";
 import { Scope } from "../scope";
+import { Module } from "../module";
 
 export class Assembler {
-    private readonly mod = new binaryen.Module();
+    readonly mod = new binaryen.Module();
 
     constructor() {
         this.mod.setFeatures(512); // Temp workaround till binaryen.js #36 is published
@@ -16,9 +17,12 @@ export class Assembler {
         this.mod.addFunctionImport("print", "imports", "print", binaryen.i32, binaryen.none);
     }
 
-    compile(ast: AST) {
-        this.walkInstructions(ast.body, ast.scope);
-        return this.mod;
+    compile(module: Module) {
+        for (const name in module.subModules) {
+            this.compile(module.subModules[name]);
+        }
+
+        this.walkInstructions(module.ast, module.scope);
     }
 
     private walkInstructions(instructions: Instruction[], scope: Scope) {
@@ -181,7 +185,7 @@ export class Assembler {
         );
     }
 
-    private compileBlock(block: AST, prepend: number[] = [], append: number[] = []): number {
+    private compileBlock(block: { body: AST, scope: Scope }, prepend: number[] = [], append: number[] = []): number {
         return this.mod.block("", [
             ...prepend,
             ...block.body.map(instruction => {

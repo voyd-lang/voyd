@@ -309,4 +309,4 @@ export type Instruction =
     StructLiteral |
     UseStatement;
 
-export type AST = { body: Instruction[], scope: Scope };
+export type AST = Instruction[];

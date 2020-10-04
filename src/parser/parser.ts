@@ -9,11 +9,9 @@ import {
 import { isInTuple } from "../helpers";
 import { Scope } from "../scope";
 
-export function parse(code: string, parentScope?: Scope): AST {
+export function parse(code: string, scope: Scope): AST {
     const tokens = tokenize(code);
-    const scope = parentScope ?? new Scope("block");
-    const res = { body: parseBody(tokens, scope), scope };
-    return res;
+    return parseBody(tokens, scope);
 }
 
 /** Parse a body. Will stop at "}" characters and remove them. */
@@ -204,13 +202,13 @@ function parseFnDeclaration(tokens: Token[], flags: string[], scope: Scope): Fun
     }
 
     let expression: Instruction | undefined;
-    if (tokens[0].type === "{") {
+    if (flags.includes("declare")) {
+        // Do nothing
+    } else if (tokens[0].type === "{") {
         expression = parseExpression(tokens, fnScope);
     } else if (tokens[0].type === "operator" && tokens[0].value === "=") {
         tokens.shift();
         expression = parseExpression(tokens, fnScope);
-    } else if (flags.includes("declare")) {
-        // Do nothing
     } else {
         throw new Error(`Unexpected token in function declaration: ${tokens[0].type}`);
     }
