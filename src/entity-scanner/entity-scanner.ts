@@ -1,3 +1,4 @@
+import { Module } from "../module";
 import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, StructLiteral, VariableDeclaration } from "../parser";
 import { Scope } from "../scope";
 import { TypeAliasEntity } from "./definitions";
@@ -7,11 +8,15 @@ import { TypeAliasEntity } from "./definitions";
  *
  * @returns a collection of all detected entities.
  *  */
-export function scanForEntities(ast: AST) {
-    scanBlock(ast);
+export function scanForEntities(module: Module) {
+    for (const subModule in module.subModules) {
+        scanForEntities(module.subModules[subModule]);
+    }
+
+    scanBlock({ body: module.ast, scope: module.scope });
 }
 
-function scanBlock({ body, scope }: { body: Instruction[]; scope: Scope; }) {
+function scanBlock({ body, scope }: { body: AST; scope: Scope; }) {
     for (const instruction of body) {
         scanInstruction({ instruction, scope });
     }
@@ -122,8 +127,7 @@ function scanStructLiteral(struct: StructLiteral, scope: Scope) {
 
 function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {
     instruction.id = scope.add({ kind: "impl", flags: instruction.flags, label: instruction.target });
-    const target = scope.resolveLabel(instruction.target) as TypeAliasEntity;
-    instruction.functions.forEach(fn => scanFn({ fn, scope: target.instanceScope }));
+    instruction.functions.forEach(fn => scanFn({ fn, scope: instruction.scope }));
 }
 
 function scanFn({ fn, scope }: { fn: FunctionDeclaration, scope: Scope }) {

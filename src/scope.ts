@@ -20,6 +20,10 @@ export class Scope {
         this.entities = this.parent ? this.parent.entities : new Map();
     }
 
+    get exports(): string[] {
+        return Array.from(this.ownEntities);
+    }
+
     import(entities: string[]) {
         entities.forEach(id => this.ownEntities.add(id));
     }
@@ -28,6 +32,17 @@ export class Scope {
         for (const id of this.ownEntities) {
             const entity = this.get(id)!;
             if (entity.label === label) return entity;
+        }
+
+        if (this.parent) return this.parent.resolveLabel(label);
+
+        return undefined;
+    }
+
+    resolveType(label: string): Entity | undefined {
+        for (const id of this.ownEntities) {
+            const entity = this.get(id)!;
+            if (entity.label === label && (entity.kind === "struct" || entity.kind === "type-alias")) return entity;
         }
 
         if (this.parent) return this.parent.resolveLabel(label);
@@ -92,4 +107,4 @@ export class Scope {
     }
 }
 
-export type ScopeType = "block" | "function" | "type";
+export type ScopeType = "block" | "function" | "type" | "module";

@@ -1,10 +1,49 @@
-import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, VariableDeclaration, PropertyAccessExpression, Assignment, StructLiteral } from "./parser";
+import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, VariableDeclaration, PropertyAccessExpression, Assignment, StructLiteral, Identifier } from "./parser";
 import { Scope } from "./scope";
 import { FunctionEntity, ParameterEntity, StructFieldEntity, TypeAliasEntity, TypeEntity, VariableEntity } from "./entity-scanner";
+import { Module } from "./module";
 
 /** Enforces scoping rules, resolves identifiers and infers types. */
-export function analyseSemantics(ast: AST) {
-    scanBlock(ast);
+export function analyseSemantics(module: Module) {
+    for (const subModule in module.subModules) {
+        analyseSemantics(module.subModules[subModule]);
+    }
+
+    scanForImports(module);
+    scanBlock({ body: module.ast, scope: module.scope });
+}
+
+function scanForImports(module: Module) {
+    for (const instruction of module.ast) {
+        if (instruction.kind !== "use") continue;
+
+        if (instruction.bindModuleToLocalNamespace) {
+            const useModule = getSiblingModule(module, (instruction.module as Identifier).label);
+            module.scope.import(useModule.exports);
+        }
+
+        if (instruction.selectiveImports) {
+            const useModuleLabel = (instruction.module as Identifier).label;
+            const useModule = getSiblingModule(module, useModuleLabel);
+            const imports = instruction.selectiveImports
+                .map(identifier => {
+                    const symbol = useModule.scope.resolveLabel(identifier.label);
+                    if (!symbol) {
+                        throw new Error(`${useModuleLabel} has no exported item ${identifier.label}`);
+                    }
+                    return symbol.id;
+                });
+            module.scope.import(imports);
+        }
+    }
+}
+
+function getSiblingModule(module: Module, label: string): Module {
+    const sibling = module.parent!.subModules[label];
+    if (!sibling) {
+        throw new Error(`Sibling module ${label} does not exist`);
+    }
+    return sibling;
 }
 
 function scanBlock({ body, scope }: { body: Instruction[]; scope: Scope; }) {
@@ -160,12 +199,15 @@ function scanVariableDeclaration(expr: VariableDeclaration, scope: Scope) {
 
 function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {
     instruction.id = scope.add({ kind: "impl", flags: instruction.flags, label: instruction.target });
-    const target = scope.resolveLabel(instruction.target) as TypeAliasEntity;
+    const target = scope.resolveType(instruction.target) as TypeAliasEntity;
     instruction.functions.forEach(fn => scanFn(fn, target.instanceScope));
 }
 
 function scanFn(fn: FunctionDeclaration, scope: Scope) {
     const fnEntity = scope.get(fn.id!) as FunctionEntity;
+
+    // Add the function to the target instanceScope
+    scope.import([fn.id!]);
 
     if (fn.returnType) {
         const typeEntity = scope.resolveLabel(fn.returnType.label);

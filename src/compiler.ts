@@ -1,21 +1,54 @@
 import binaryen from "binaryen";
-import { readFileSync } from "fs";
-import { parse, AST } from "./parser";
+import { promises as fs } from "fs";
+import { parse } from "./parser";
 import { scanForEntities } from "./entity-scanner";
 import { Assembler } from "./assembler";
-import { Scope } from "./scope";
 import { analyseSemantics } from "./semantic-analyser";
+import { Module } from "./module";
+import { parse as pathParse } from "path";
+import { walkDir } from "./helpers";
 
-export function compile(code: string): binaryen.Module {
-    const std = readFileSync(`${__dirname}/../std/i32.dm`, { encoding: "utf8" });
+export async function compile(path: string): Promise<binaryen.Module> {
+    const rootModule = new Module({ name: "root" });
+
+    const stdModule = await buildModuleTree(`${__dirname}/../std`, rootModule);
+    scanForEntities(stdModule);
+    analyseSemantics(stdModule);
+
+    const userModule = rootModule.sub("user");
+    userModule.scope.import(stdModule.subModules["index"].exports);
+    await buildModuleTree(path, userModule);
+
+    scanForEntities(userModule);
+    analyseSemantics(userModule);
+
     const assembler = new Assembler();
-    const { ast } = build(std, assembler);
-    return build(code, assembler, ast.scope).mod;
+    assembler.compile(rootModule);
+    return assembler.mod;
 }
 
-function build(code: string, assembler: Assembler, scope?: Scope): { ast: AST, mod: binaryen.Module } {
-    const ast = parse(code, scope);
-    scanForEntities(ast);
-    analyseSemantics(ast);
-    return { ast, mod: assembler.compile(ast) };
+async function buildModuleTree(path: string, parent: Module): Promise<Module> {
+    const stats = await fs.lstat(path);
+    const pathInfo = pathParse(path);
+    const module = parent.sub(pathInfo.name);
+
+    if (stats.isDirectory()) {
+        const children = (await walkDir(path))
+            .filter(item => item.type === "dir" || item.extension === ".dm");
+
+        for (const child of children) {
+            await buildModuleTree(child.path, module)
+        }
+
+        return module;
+    }
+
+    if (pathInfo.ext !== ".dm") {
+        throw new Error(`File must have .dm extension. ${path}`);
+    }
+
+    const code = await fs.readFile(path, { encoding: "utf8" });
+    module.ast = parse(code, module.scope);
+
+    return module;
 }
