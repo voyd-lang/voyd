@@ -173,6 +173,38 @@ const target = Target [x: 5, y: 3, z: 7]
 target.shift [x: 5]
 ```
 
+## Struct Initializers
+
+Structs have an implicit initializer that accepts a struct literal that matches the fields
+of the structs.
+
+For example, the following struct has an implicit initializer with the signature `init [a: i32, b: i32, c: i32] -> Vec3`.
+```
+struct Vec3 {
+    let a: i32
+    let b: i32
+    let c: i32
+}
+
+let vec = Vec3[a: 1, b: 2, c: 3]
+```
+
+Additional initializers can also be added thanks to function overloading.
+```
+struct Vec3 {
+    let a: i32
+    let b: i32
+    let c: i32
+
+    init(a: i32, b: i32, c: i32) = Vec3[a, b, c]
+}
+
+let vec = Vec3(1, 2, 3)
+
+// Implicit initializer can still be used
+let vec2 = Vec3[a: 1, b: 2, c: 3]
+```
+
 ## Computed Properties
 
 ```
@@ -341,23 +373,23 @@ callThis {
 
 # Generics
 
-Generics work much like they do in TypeScript or Swift with essentially the same syntax.
 ```
-fn add<T>(a: T, b: T) -> T {
+fn add(T)(a: T, b: T) -> T = {
     a + b
 }
 
-struct Target<T> {
+add(i32)(1, 2)
+
+// With type inference
+add(1, 2)
+```
+
+```
+struct Target(T) {
     let x, y, z: T
 }
-```
 
-The one exception (for now) is when a generic type parameter needs to be explicitly defined in an
-expression. In such a case, the type parameters must be prefixed with a `:`. For example:
-```
-fn add<T>(a: T, b: T) = a + b
-
-add::<i32>()
+let t1 = Target(i32)[x: 1, y: 2, z: 3]
 ```
 
 # Macros
