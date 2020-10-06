@@ -2,7 +2,7 @@
 
 Modules provide an easy way to organize dream source code in a hierarchical manor.
 
-Modules can be created using module blocks, files, and folders with an index.dm file.
+Modules can be created using module blocks, files, and folders with a mod.dm file.
 
 Only items marked with pub can be accessed outside of their module.
 
@@ -28,28 +28,38 @@ my_module.hello() // ERROR! hello() is private.
 
 In dream, every file is a module.
 
-File modules can only be imported by other sibling modules in the same folder. They
-can be exported for use using an index.dm file, more on that in the Folder Modules section.
+File modules can only be imported by other sibling modules in the same folder using their file name without the extension.
+
 
 ```dream
 // src/math.dm
+
 pub fn add(a: Int, b: Int) = a + b
 pub fn sub(a: Int, b: Int) = a - b
 ```
 
 ```dream
-src/main.dm
-use [add, sub] from "math"
+// src/main.dm
 
-fn main() = 3.add(4).sub(1).print()
+use math
+
+fn main() = math.add(2, math.sub(3, 4)).print()
 ```
 
 # Folder Modules
 
-Folder level modules can be used to expose internal modules to other folders.
+Folder level modules can be used to organize source code in a hierarchy. Folder modules
+take on the name of their folder and must contain a mod.dm file describing everything
+the module makes public.
 
-Folder modules are accessed using the name of the folder. They are defined using
-an index.dm file from inside the folder
+For example. A project could be organized using the following file structure:
+- src
+  - math
+    - ops.dm
+    - min_max.dm
+    - constants.dm
+    - mod.dm
+  - main.dm
 
 
 ```dream
@@ -61,30 +71,34 @@ pub fn mul(a: Int, b: Int) = a * b
 ```
 
 ```dream
-// src/math/min_max.dm
-
 pub fn min(a: Int, b: Int) = if a < b { a } else { b }
 pub fn max(a: Int, b: Int) = if a > b { a } else { b }
+
+// src/math/min_max.dm
 ```
 
 ```dream
-// src/math/constants.dm
-
 pub let PI = 3.14159
+
+// src/math/constants.dm
 ```
 
-
+To make the above modules accessible from outside the math folder, we re-export them
+using the `pub use` syntax in `src/math/mod.dm`.
 ```
-// src/math/index.dm
+// src/math/mod.dm
 
 // Export the entire ops module
 pub use ops
 
 // Export only the min function from min_max
-pub use [min] from min_max
+pub use min_max.min
+
+// If we wanted to instead export only the min and max functions, we could write the above like this
+pub use min_max.[min, max]
 
 // Export everything in the constants module as part of the math namespace
-pub use * from constants.dm
+pub constants.*
 ```
 
 ```
@@ -107,9 +121,13 @@ Given module:
 
 pub fn foo() = {}
 pub fn bar() = {}
+
+pub mod more_helpers {
+    pub fn baz() = {}
+}
 ```
 
-Basic import:
+Basic module import:
 ```
 // src/main.dm
 
@@ -118,27 +136,30 @@ use helpers
 pub fn main() = {
     helpers.foo()
     helpers.bar()
+    helpers.more_helpers.baz()
 }
 ```
 
-Merged namespace import:
+Wildcard import:
 ```
 // src/main.dm
 
-use * from helpers
+use helpers.*
 
 pub fn main() = {
     foo()
     bar()
+    more_helpers.baz()
 }
 ```
 
 Selective import:
 ```
-use [foo] from helpers
+use helpers.[foo, more_helpers.*]
 
 pub fn main() = {
     foo()
+    baz()
 
     // Error, no function bar in scope
     bar()
