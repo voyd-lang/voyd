@@ -373,6 +373,9 @@ callThis {
 
 # Generics
 
+In Dream generics are essentially compile time functions that can accept type parameters and spit out a new function or type that make use of those types. Because of this generics use the standard call syntax instead of the normal angle brackets (`<>`).
+
+Functions:
 ```
 fn add(T)(a: T, b: T) -> T = {
     a + b
@@ -384,12 +387,22 @@ add(i32)(1, 2)
 add(1, 2)
 ```
 
+Structs
 ```
 struct Target(T) {
     let x, y, z: T
+
+    // Init functions implicitly take on the type parameters of the struct. So
+    // the final signature looks like init(T)(x: T, y: T, z: T) -> Target(T)
+    init(x: T, y: T, z: T) = Target[x, y, z]
 }
 
 let t1 = Target(i32)[x: 1, y: 2, z: 3]
+let t2 = Target(i32)(1, 2, 3)
+
+// In this case the above could also be written as follows thanks to type inference.
+let t1 = Target[x: 1, y: 2, z: 3]
+let t2 = Target(1, 2, 3)
 ```
 
 # Macros
