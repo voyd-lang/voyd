@@ -585,11 +585,36 @@ fn add[x: Int, y: Int] -> Int = {
     x + y
 }
 
+// You can also alias fields to different identifiers internally
+// Note: The "as" is optional, as demonstrated by the y field
+fn add[x as a: Int, y b: Int] -> Int = {
+    a + y
+}
+
+
 add([x: 5, y: 3])
 
 // If a struct is the only argument or the second argument is a function (more on that later),
 // the parenthesis can be omitted on call as well.
 add[x: 5, y: 3]
+```
+
+Struct sugar syntax can be used to make APIs cleaner and easier to understand. They bring some
+of the advantages of Smalltalk and Swift over to Dream
+
+Here's an idiomatic example:
+```
+fn draw_line[from point_a: Vec3D, to point_b: Vec3D] -> Void = {
+    let line = Line(point_a, point_b)
+    line.draw()
+}
+
+fn main() = {
+    let a = Vec3D[x: 1, y: 2, z: 3]
+    let b = Vec3D[x: 7, y: 3, z: 30]
+
+    draw_line[from: a, to: b]
+}
 ```
 
 ## Variadics
