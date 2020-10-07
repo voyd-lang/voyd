@@ -1,4 +1,4 @@
-use * from wasm
+use wasm.*
 
 impl i32 {
     pure fn +(r: i32) -> i32 = unsafe {

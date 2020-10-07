@@ -1,7 +1,6 @@
 import { Module } from "../module";
 import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, StructLiteral, VariableDeclaration } from "../parser";
 import { Scope } from "../scope";
-import { TypeAliasEntity } from "./definitions";
 
 /**
  * Scans an AST for declared entities. Update AST scopes with the resolved items

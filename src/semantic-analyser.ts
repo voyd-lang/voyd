@@ -1,4 +1,4 @@
-import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, VariableDeclaration, PropertyAccessExpression, Assignment, StructLiteral, Identifier } from "./parser";
+import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, VariableDeclaration, PropertyAccessExpression, Assignment, StructLiteral, Identifier, UseStatement, UseTree } from "./parser";
 import { Scope } from "./scope";
 import { FunctionEntity, ParameterEntity, StructFieldEntity, TypeAliasEntity, TypeEntity, VariableEntity } from "./entity-scanner";
 import { Module } from "./module";
@@ -9,31 +9,43 @@ export function analyseSemantics(module: Module) {
         analyseSemantics(module.subModules[subModule]);
     }
 
+    // We are doing this here because it is a pain to pass module all over the place.
+    // This will be moved to scanInstruction after an AST rework.
     scanForImports(module);
     scanBlock({ body: module.ast, scope: module.scope });
 }
 
+// Currently assumes use statements are at the top of the module
 function scanForImports(module: Module) {
     for (const instruction of module.ast) {
-        if (instruction.kind !== "use") continue;
+        if (instruction.kind !== "use") break;
+        scanUseTree(instruction.tree, module);
+    }
+}
 
-        if (instruction.bindModuleToLocalNamespace) {
-            const useModule = getSiblingModule(module, (instruction.module as Identifier).label);
-            module.scope.import(useModule.exports);
-        }
+function scanUseTree(tree: UseTree, module: Module) {
+    const resolveUseModule = (module: Module, path: Identifier[]): Module => {
+        if (path.length === 0) return module;
+        const moduleIdentifier = path.shift()!;
+        return resolveUseModule(getSiblingModule(module, moduleIdentifier.label), path);
+    }
+    const useModule = resolveUseModule(module, JSON.parse(JSON.stringify(tree.path)));
 
-        if (instruction.selectiveImports) {
-            const useModuleLabel = (instruction.module as Identifier).label;
-            const useModule = getSiblingModule(module, useModuleLabel);
-            const imports = instruction.selectiveImports
-                .map(identifier => {
-                    const symbol = useModule.scope.resolveLabel(identifier.label);
-                    if (!symbol) {
-                        throw new Error(`${useModuleLabel} has no exported item ${identifier.label}`);
-                    }
-                    return symbol.id;
-                });
-            module.scope.import(imports);
+    if (tree.node.kind === "self") {
+        // TODO
+    }
+
+    if (tree.node.kind === "alias") {
+        // TODO
+    }
+
+    if (tree.node.kind === "wildcard") {
+        module.scope.import(useModule.exports);
+    }
+
+    if (tree.node.kind === "branched") {
+        for (const branch of tree.node.branches) {
+            scanUseTree(branch, useModule);
         }
     }
 }
@@ -186,7 +198,7 @@ function scanVariableDeclaration(expr: VariableDeclaration, scope: Scope) {
     const varEntity = scope.get(expr.id!) as VariableEntity;
     if (expr.initializer) scanInstruction({ scope, instruction: expr.initializer });
     if (expr.type) {
-        const typeEntity = scope.resolveLabel(expr.type.label);
+        const typeEntity = scope.resolveType(expr.type.label);
         if (!typeEntity) throw new Error(`Could not resolve type for ${expr.label}`);
         varEntity.typeEntity = typeEntity as TypeEntity;
     } else if (expr.initializer) {
@@ -210,14 +222,14 @@ function scanFn(fn: FunctionDeclaration, scope: Scope) {
     scope.import([fn.id!]);
 
     if (fn.returnType) {
-        const typeEntity = scope.resolveLabel(fn.returnType.label);
+        const typeEntity = scope.resolveType(fn.returnType.label);
         fnEntity.returnTypeEntity = typeEntity as TypeEntity;
     }
 
     fn.parameters.forEach(p => {
         const pEntity = scope.get(p.id!) as ParameterEntity;
         if (p.type) {
-            const typeEntity = scope.resolveLabel(p.type.label);
+            const typeEntity = scope.resolveType(p.type.label);
             if (!typeEntity) throw new Error(`Cannot resolve type for ${p.label} of ${fn.label}.`);
             pEntity.typeEntity = typeEntity as TypeEntity;
             return;
@@ -289,7 +301,7 @@ function typeEntityOfExpression(expr: Instruction, scope: Scope): TypeEntity {
     }
 
     if (expr.kind === "int-literal") {
-        const i32Entity = scope.resolveLabel("i32");
+        const i32Entity = scope.resolveType("i32");
         if (!i32Entity) throw new Error("Uh oh. i32 entity not found. Bad compiler! BAD!");
         return i32Entity as TypeEntity;
     }

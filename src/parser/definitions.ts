@@ -265,15 +265,17 @@ export interface Assignment extends ASTNode {
 
 export interface UseStatement extends ASTNode {
     kind: "use",
-    module: PropertyAccessExpression | Identifier;
-    alias?: Identifier;
-
-    selectiveImports?: Identifier[];
-
-    /** This is true when the * wildcard is used */
-    bindModuleToLocalNamespace: boolean;
-
+    tree: UseTree;
     flags: string[];
+}
+
+export interface UseTree {
+    path: Identifier[];
+    node:
+    { kind: "wildcard" } |
+    { kind: "alias", alias: Identifier } |
+    { kind: "branched", branches: UseTree[] } |
+    { kind: "self" }
 }
 
 export type Instruction =

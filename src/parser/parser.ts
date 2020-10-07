@@ -4,7 +4,7 @@ import {
     ReturnStatement, EnumDeclaration, EnumVariantDeclaration, MatchCase, AST, BlockExpression,
     TypeDeclaration,
     ImplDeclaration,
-    StructLiteral, StructLiteralField, UseStatement, Identifier
+    StructLiteral, StructLiteralField, UseStatement, Identifier, UseTree
 } from "./definitions";
 import { isInTuple } from "../helpers";
 import { Scope } from "../scope";
@@ -76,7 +76,7 @@ function parseKeywordStatement(tokens: Token[], scope: Scope): Instruction {
     }
 
     if (flags.includes("use")) {
-        return parseUseStatement(tokens, flags, scope);
+        return parseUseStatement(tokens, flags);
     }
 
     if (flags.some(val => val === "let" || val === "var")) {
@@ -107,68 +107,69 @@ function parseKeywordStatement(tokens: Token[], scope: Scope): Instruction {
     throw new Error(`Expected statement after keyword(s):${keywordStr}`);
 }
 
-function parseUseStatement(tokens: Token[], flags: string[], scope: Scope): UseStatement {
-    let module: Instruction | undefined = undefined;
-    let selectiveImports: Identifier[] | undefined = undefined;
-    let alias: Identifier | undefined = undefined;
-    let bindModuleToLocalNamespace = false;
-
-
-    while (tokens[0]) {
-        const next = tokens[0];
-
-        if (next.type === "operator" && next.value === "*") {
-            bindModuleToLocalNamespace = true;
-            tokens.shift();
-            continue;
-        }
-
-        if (next.type === "operator" && next.value === "as" && !bindModuleToLocalNamespace) {
-            throw new Error("Expected * before as in use statement.");
-        }
-
-        if (next.type === "operator" && next.value === "as") {
-            // Get rid of as
-            tokens.shift();
-            const possibleAlias = tokens.shift();
-
-            if (!possibleAlias || possibleAlias.type !== "identifier") {
-                throw new Error("Expected identifier after as in use statement.");
-            }
-
-            alias = { kind: "identifier", label: possibleAlias.value, tokenIndex: possibleAlias.index };
-            bindModuleToLocalNamespace = false;
-            continue;
-        }
-
-        if (next.type === "keyword" && next.value === "from") {
-            if (!bindModuleToLocalNamespace && !alias && !selectiveImports) {
-                console.log(next);
-                throw new Error("Expected wildcard or selective import before from in use statement.");
-            }
-
-            tokens.shift();
-            continue;
-        }
-
-        if (next.type === "identifier") {
-            module = parseExpression(tokens, scope);
-            break;
-        }
-    }
-
-    if (!module || (module.kind !== "property-access-expression" && module.kind !== "identifier")) {
-        throw new Error("Expected module in use statement.");
-    }
-
+function parseUseStatement(tokens: Token[], flags: string[]): UseStatement {
     return {
         kind: "use",
-        module,
-        selectiveImports,
-        alias,
-        bindModuleToLocalNamespace,
+        tree: parseUseTree(tokens),
         flags
     }
+}
+
+function parseUseTree(tokens: Token[]): UseTree {
+    const tree: UseTree = { path: [], node: { kind: "self" } };
+
+    while (tokens[0]) {
+        const token = tokens[0];
+        const next = tokens[1];
+
+        if (token.type === "identifier" && next && next.value === ".") {
+            tokens.shift();
+            tokens.shift();
+            tree.path.push({ kind: "identifier", label: token.value, tokenIndex: token.index });
+            continue;
+        }
+
+        if (token.type === "identifier" && next && next.value === ",") {
+            tokens.shift();
+            tokens.shift();
+            tree.path.push({ kind: "identifier", label: token.value, tokenIndex: token.index });
+            break;
+        }
+
+        if (token.type === "identifier") {
+            tokens.shift();
+            tree.path.push({ kind: "identifier", label: token.value, tokenIndex: token.index });
+            break;
+        }
+
+        if (token.value === "*") {
+            tokens.shift();
+            tree.node = { kind: "wildcard" };
+            break;
+        }
+
+        if (token.value === ",") {
+            tokens.shift();
+            break;
+        }
+
+        if (token.value === "]") {
+            // Do not get rid of "]" so branch parsing knows when to stop
+            break;
+        }
+
+        if (token.value === "[") {
+            tokens.shift();
+            tree.node = { kind: "branched", branches: [] };
+            while (tokens[0] && tokens[0].value !== "]") {
+                tree.node.branches.push(parseUseTree(tokens));
+            }
+            // Get rid of "]"
+            tokens.shift();
+        }
+    }
+
+    return tree;
 }
 
 function parseReturnStatement(tokens: Token[], scope: Scope): ReturnStatement {

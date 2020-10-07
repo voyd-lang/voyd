@@ -173,6 +173,38 @@ const target = Target [x: 5, y: 3, z: 7]
 target.shift [x: 5]
 ```
 
+## Struct Initializers
+
+Structs have an implicit initializer that accepts a struct literal that matches the fields
+of the structs.
+
+For example, the following struct has an implicit initializer with the signature `init [a: i32, b: i32, c: i32] -> Vec3`.
+```
+struct Vec3 {
+    let a: i32
+    let b: i32
+    let c: i32
+}
+
+let vec = Vec3[a: 1, b: 2, c: 3]
+```
+
+Additional initializers can also be added thanks to function overloading.
+```
+struct Vec3 {
+    let a: i32
+    let b: i32
+    let c: i32
+
+    init(a: i32, b: i32, c: i32) = Vec3[a, b, c]
+}
+
+let vec = Vec3(1, 2, 3)
+
+// Implicit initializer can still be used
+let vec2 = Vec3[a: 1, b: 2, c: 3]
+```
+
 ## Computed Properties
 
 ```
@@ -341,23 +373,36 @@ callThis {
 
 # Generics
 
-Generics work much like they do in TypeScript or Swift with essentially the same syntax.
+In Dream generics are essentially compile time functions that can accept type parameters and spit out a new function or type that make use of those types. Because of this generics use the standard call syntax instead of the normal angle brackets (`<>`).
+
+Functions:
 ```
-fn add<T>(a: T, b: T) -> T {
+fn add(T)(a: T, b: T) -> T = {
     a + b
 }
 
-struct Target<T> {
+add(i32)(1, 2)
+
+// With type inference
+add(1, 2)
+```
+
+Structs
+```
+struct Target(T) {
     let x, y, z: T
+
+    // Init functions implicitly take on the type parameters of the struct. So
+    // the final signature looks like init(T)(x: T, y: T, z: T) -> Target(T)
+    init(x: T, y: T, z: T) = Target[x, y, z]
 }
-```
 
-The one exception (for now) is when a generic type parameter needs to be explicitly defined in an
-expression. In such a case, the type parameters must be prefixed with a `:`. For example:
-```
-fn add<T>(a: T, b: T) = a + b
+let t1 = Target(i32)[x: 1, y: 2, z: 3]
+let t2 = Target(i32)(1, 2, 3)
 
-add::<i32>()
+// In this case the above could also be written as follows thanks to type inference.
+let t1 = Target[x: 1, y: 2, z: 3]
+let t2 = Target(1, 2, 3)
 ```
 
 # Macros
@@ -540,11 +585,36 @@ fn add[x: Int, y: Int] -> Int = {
     x + y
 }
 
+// You can also alias fields to different identifiers internally
+// Note: The "as" is optional, as demonstrated by the y field
+fn add[x as a: Int, y b: Int] -> Int = {
+    a + y
+}
+
+
 add([x: 5, y: 3])
 
 // If a struct is the only argument or the second argument is a function (more on that later),
 // the parenthesis can be omitted on call as well.
 add[x: 5, y: 3]
+```
+
+Struct sugar syntax can be used to make APIs cleaner and easier to understand. They bring some
+of the advantages of Smalltalk and Swift over to Dream
+
+Here's an idiomatic example:
+```
+fn draw_line[from point_a: Vec3D, to point_b: Vec3D] -> Void = {
+    let line = Line(point_a, point_b)
+    line.draw()
+}
+
+fn main() = {
+    let a = Vec3D[x: 1, y: 2, z: 3]
+    let b = Vec3D[x: 7, y: 3, z: 30]
+
+    draw_line[from: a, to: b]
+}
 ```
 
 ## Variadics
