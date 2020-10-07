@@ -16,7 +16,7 @@ export async function compile(path: string): Promise<binaryen.Module> {
     analyseSemantics(stdModule);
 
     const userModule = rootModule.sub("user");
-    userModule.scope.import(stdModule.subModules["index"].exports);
+    userModule.scope.import(stdModule.subModules["mod"].exports);
     await buildModuleTree(path, userModule);
 
     scanForEntities(userModule);

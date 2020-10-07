@@ -45,7 +45,7 @@ export class Scope {
             if (entity.label === label && (entity.kind === "struct" || entity.kind === "type-alias")) return entity;
         }
 
-        if (this.parent) return this.parent.resolveLabel(label);
+        if (this.parent) return this.parent.resolveType(label);
 
         return undefined;
     }
