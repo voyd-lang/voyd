@@ -76,6 +76,13 @@ export function tokenize(code: string) {
                 continue;
             }
 
+            // Bit of a hack for .* imports. Maybe do something better later. Idk.
+            if (value === ".*") {
+                tokens.push({ type: "operator", value: ".", index: tokens.length });
+                tokens.push({ type: "operator", value: "*", index: tokens.length });
+                continue;
+            }
+
             throw new Error(`Unknown operator or symbol: ${value}`);
         }
 
