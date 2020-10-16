@@ -1,5 +1,7 @@
+# Enums
 
 # Examples
+
 ```
 enum Friend {
     case eric, alex, will, jacob
@@ -29,6 +31,13 @@ match volume {
         print("The volume in meters is ${vol})
     },
 }
+
+// Anonymous enum
+type MyAnonEnum = (am|pm)
+let period = MyAnonEnum.am
+
+// Anonymous enum with associated data
+type Rotation = (euler[x: Int, y: Int, z: Int] | quaternion(Int, Int, Int))
 ```
 
 # Research
