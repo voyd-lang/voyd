@@ -33,11 +33,11 @@ match volume {
 }
 
 // Anonymous enum
-type MyAnonEnum = (am|pm)
+type MyAnonEnum = (am \ pm)
 let period = MyAnonEnum.am
 
 // Anonymous enum with associated data
-type Rotation = (euler[x: Int, y: Int, z: Int] | quaternion(Int, Int, Int))
+type Rotation = (euler[x: Int, y: Int, z: Int] \ quaternion(Int, Int, Int))
 ```
 
 # Sugar
