@@ -4,7 +4,7 @@
 
 ```
 enum Friend {
-    Ease Eric, Alex, Will, Jacob
+    case Eric, Alex, Will, Jacob
 }
 
 let friend = Friend.jacob
@@ -26,7 +26,7 @@ let volume = Volume.cuboidMeters
 match volume {
     CubicFeet(feet) => print("The volume in feet is ${feet}),
     CubicMeters(m) => print("The volume in meters is ${m}),
-    CuboidMeters[length, width, height] => {
+    CuboidMeters[length, width, height] {
         let vol = length * width * height
         print("The volume in meters is ${vol})
     },
@@ -127,9 +127,9 @@ Ideally, in Dream:
 enum Enum { case A, B, C }
 
 match Enum.A {
-    .A => {},
-    .B => {},
-    .C => {},
+    A => (),
+    B => (),
+    C => (),
 }
 ```
 
