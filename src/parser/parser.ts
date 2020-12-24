@@ -333,7 +333,6 @@ function parseExpression(tokens: Token[], parent: ContainerNode, terminator?: To
             continue;
         }
 
-
         if (token.type === "int") {
             output.push(new IntLiteral({ parent, value: token.value }));
             tokens.shift();
