@@ -1,198 +1,299 @@
-import { AST, FunctionDeclaration, Instruction, IfExpression, ImplDeclaration, Identifier, VariableDeclaration } from "./parser";
-import { Scope } from "./scope";
-import { FunctionEntity, ParameterEntity, TypeAlias, VariableEntity } from "./entity-scanner";
+import {
+    Assignment, BinaryExpression, Block, Call, ContainerNode, FunctionNode, Identifier, If,
+    Impl, IntLiteral, Module, NamedNode, Node, PropertyAccess, StructLiteral, TypedNode, TypeNode, Use,
+    UseTree, Variable, While
+} from "./ast";
+
 
 /** Enforces scoping rules, resolves identifiers and infers types. */
-export function analyseSemantics(ast: AST) {
-    scanBlock(ast);
-}
-
-function scanBlock({ body, scope }: { body: Instruction[]; scope: Scope; }) {
-    for (const instruction of body) {
-        scanInstruction({ instruction, scope });
+export function analyseSemantics(container: ContainerNode): void {
+    for (const instruction of container.children) {
+        scanInstruction(instruction, container)
     }
 }
 
-function scanInstruction({ scope, instruction }: { scope: Scope, instruction: Instruction }) {
-    if (instruction.kind === "block-expression") {
-        scanBlock({ body: instruction.body, scope: instruction.scope });
+function scanInstruction(instruction: Node, container: ContainerNode) {
+    if (instruction instanceof Block) {
+        scanBlock(instruction);
         return;
     }
 
-    if (instruction.kind === "impl-declaration") {
-        scanImpl({ scope, instruction });
+    if (instruction instanceof Module) {
+        analyseSemantics(instruction);
+        if (instruction.name === "mod") container.import(instruction.exports);
         return;
     }
 
-    if (instruction.kind === "variable-declaration") {
-        scanVariableDeclaration(instruction, scope);
+    if (instruction instanceof Use) {
+        scanUseTree(instruction.tree, container);
         return;
     }
 
-    if (instruction.kind === "function-declaration") {
-        scanFn(instruction, scope);
+    if (instruction instanceof Impl) {
+        scanImpl(instruction, container);
         return;
     }
 
-    if (instruction.kind === "if-expression") {
-        scanIf({ dif: instruction, scope });
+    if (instruction instanceof Variable) {
+        scanVariableDeclaration(instruction, container);
         return;
     }
 
-    if (instruction.kind === "while-statement") {
-        scanBlock({ body: instruction.body, scope });
-        scanInstruction({ instruction: instruction.condition, scope });
+    if (instruction instanceof FunctionNode) {
+        scanFn(instruction, container);
         return;
     }
 
-    if (instruction.kind === "identifier") {
-        const entity = scope.closestEntityWithLabel(instruction.label, ["function", "parameter", "variable", "type-alias"]);
-        if (!entity) throw new Error(`No entity with label ${instruction.label} in current scope.`);
-        if (entity.kind === "variable" && instruction.tokenIndex < entity.tokenIndex) {
-            throw new Error(`Identifier ${instruction.label} used before defined`);
+    if (instruction instanceof If) {
+        scanIf(instruction, container);
+        return;
+    }
+
+    if (instruction instanceof While) {
+        scanBlock(instruction.block);
+        scanInstruction(instruction.condition, container);
+        return;
+    }
+
+    if (instruction instanceof Identifier) {
+        const entity = container.lookupSymbol(instruction.name);
+        if (!entity) throw new Error(`No entity with label ${instruction.name} in current scope.`);
+        if (entity instanceof Variable && instruction.tokenIndex < entity.tokenIndex) {
+            throw new Error(`Identifier ${instruction.name} used before defined`);
         }
-        instruction.id = entity.id;
+        instruction.resolve(entity as NamedNode);
     }
 
-    if (instruction.kind === "binary-expression") {
-        instruction.arguments.forEach(instruction => scanInstruction({ scope, instruction }));
-        const typeEntityId = typeEntityIdOfExpression(instruction.arguments[0], scope);
-        const typeEntity = scope.get(typeEntityId) as TypeAlias;
-        const func = typeEntity.instanceScope.closestEntityWithLabel(instruction.calleeLabel, ["function"]);
-        if (!func) throw new Error(`${instruction.calleeLabel} is not a function`);
-        instruction.calleeId = func.id;
+    if (instruction instanceof BinaryExpression) {
+        instruction.arguments.forEach(instruction => scanInstruction(instruction, container));
+        const typeEntity = typeEntityOfExpression(instruction.arguments[0], container);
+        if (!typeEntity) throw new Error("Missing type for left hand of binary expression");
+        const func = typeEntity.lookupSymbol(instruction.calleeName);
+        if (!func || !(func instanceof FunctionNode)) throw new Error(`${instruction.calleeName} is not a function`);
+        instruction.resolveCallee(func);
         return;
     }
 
-    if (instruction.kind === "call-expression") {
-        instruction.arguments.forEach(instruction => scanInstruction({ scope, instruction }));
-        const label = (instruction.callee as Identifier).label;
-        const func = scope.closestEntityWithLabel(label, ["function"]);
-        if (!func) throw new Error(`${label} is not a function`);
-        instruction.calleeId = func.id;
+    if (instruction instanceof Call) {
+        instruction.arguments.forEach(instruction => scanInstruction(instruction, container));
+        const func = container.lookupSymbol(instruction.calleeName);
+        if (!func || !(func instanceof FunctionNode)) throw new Error(`${instruction.calleeName} is not a function`);
+        instruction.resolveCallee(func);
         return;
     }
 
-    if (instruction.kind === "match-expression") {
-        instruction.cases.forEach(mCase => scanInstruction({ scope, instruction: mCase.expression }));
+    if (instruction instanceof PropertyAccess) {
+        scanPropertyAccessExpression(instruction, container);
         return;
     }
 
-    if (instruction.kind === "assignment") {
-        scanInstruction({ scope, instruction: instruction.assignee });
-        scanInstruction({ scope, instruction: instruction.expression });
+    if (instruction instanceof Assignment) {
+        scanAssignment(instruction, container);
+        return;
+    }
+
+    if (instruction instanceof StructLiteral) {
+        scanStructLiteral(instruction, container);
+        return;
     }
 }
 
-function scanVariableDeclaration(expr: VariableDeclaration, scope: Scope) {
-    const varEntity = scope.get(expr.id!) as VariableEntity;
-    if (expr.initializer) scanInstruction({ scope, instruction: expr.initializer });
-    if (expr.type) {
-        const typeEntity = scope.closestEntityWithLabel(expr.type.label, ["type-alias"]);
-        if (!typeEntity) throw new Error(`Could not resolve type for ${expr.label}`);
-        varEntity.typeEntity = typeEntity;
+function scanUseTree(tree: UseTree, container: ContainerNode) {
+    const resolveUseModule = (module: ContainerNode, path: Identifier[]): ContainerNode => {
+        if (path.length === 0) return module;
+        const moduleIdentifier = path.shift()!;
+        const subMod = module.lookupSiblingModule(moduleIdentifier.name);
+        if (!subMod) throw new Error(`Module ${moduleIdentifier.name} not found.`);
+        return resolveUseModule(subMod, path);
+    }
+    const useModule = resolveUseModule(container, JSON.parse(JSON.stringify(tree.path)));
+
+    if (tree.node.kind === "self") {
+        // TODO
+    }
+
+    if (tree.node.kind === "alias") {
+        // TODO
+    }
+
+    if (tree.node.kind === "wildcard") {
+        container.import(useModule.exports);
+    }
+
+    if (tree.node.kind === "branched") {
+        for (const branch of tree.node.branches) {
+            scanUseTree(branch, useModule);
+        }
+    }
+}
+
+function scanBlock(block: Block) {
+    for (const instruction of block.children) {
+        scanInstruction(instruction, block);
+    }
+}
+
+
+function scanStructLiteral(struct: StructLiteral, container: ContainerNode) {
+    for (const label in struct.fields) {
+        const fieldNode = struct.fields[label];
+        scanInstruction(fieldNode.initializer, container);
+        fieldNode.resolveType(typeEntityOfExpression(fieldNode.initializer, container));
+    }
+}
+
+function scanAssignment(expr: Assignment, container: ContainerNode) {
+    scanInstruction(expr.assignee, container);
+    scanInstruction(expr.expression, container);
+
+    if (expr.assignee instanceof Identifier) {
+        const entity = expr.assignee.ref();
+        if (!entity.flags.includes("let")) return;
+        throw new Error(`Error: Cannot reassign immutable variable: ${expr.assignee.name}.`);
+    }
+}
+
+function scanPropertyAccessExpression(expr: PropertyAccess, container: ContainerNode) {
+    const left = expr.left;
+    const right = expr.right;
+    scanInstruction(left, container);
+    const typeEntity = typeEntityOfExpression(left, container);
+
+    if (right instanceof Call) {
+        const typeEntityFunc = typeEntity.lookupTypeSymbol(right.calleeName);
+
+        if (typeEntityFunc instanceof FunctionNode) {
+            right.resolveCallee(typeEntityFunc)
+            return;
+        }
+
+        // UFCS Search
+        const scopeEntityFunc = container.lookupSymbol(right.calleeName)
+        if (!scopeEntityFunc || !(scopeEntityFunc instanceof FunctionNode)) {
+            throw new Error(`${right.calleeName} is not a function`);
+        }
+        right.resolveCallee(scopeEntityFunc);
+        return;
+    }
+
+    if (right instanceof Identifier) {
+        scanInstruction(right, container);
+        return;
+    }
+
+    throw new Error(`Invalid right of property access expression.`);
+}
+
+
+function scanVariableDeclaration(expr: Variable, container: ContainerNode) {
+    if (expr.initializer) scanInstruction(expr.initializer, container);
+    if (expr.typeName) {
+        const typeEntity = container.lookupTypeSymbol(expr.typeName);
+        if (!typeEntity) throw new Error(`Could not resolve type for ${expr.name}`);
+        expr.resolveType(typeEntity);
     } else if (expr.initializer) {
-        const typeEntityId = typeEntityIdOfExpression(expr.initializer, scope);
-        const typeEntity = scope.get(typeEntityId) as TypeAlias;
-        varEntity.typeEntity = typeEntity;
+        const typeEntity = typeEntityOfExpression(expr.initializer, container);
+        expr.resolveType(typeEntity);
     } else {
-        throw new Error(`Could not resolve type for ${expr.label}`);
+        throw new Error(`Could not resolve type for ${expr.name}`);
     }
 }
 
-function scanImpl({ scope, instruction }: { scope: Scope; instruction: ImplDeclaration; }) {
-    instruction.id = scope.add({ kind: "impl", flags: instruction.flags, label: instruction.target });
-    const target = scope.closestEntityWithLabel(instruction.target, ["type-alias"]) as TypeAlias;
-    instruction.functions.forEach(fn => scanFn(fn, target.instanceScope));
+function scanImpl(instruction: Impl, container: ContainerNode) {
+    const target = container.lookupSymbol(instruction.targetName);
+    if (!target) throw new Error(`Target ${instruction.targetName} for impl not found`);
+    if (!(target instanceof TypeNode)) throw new Error(`Cannot impl ${instruction.targetName}, not a type.`);
+    instruction.functions.forEach(fn => {
+        scanFn(fn, instruction);
+        target.pushChild(fn);
+    });
 }
 
-function scanFn(fn: FunctionDeclaration, scope: Scope) {
-    const fnEntity = scope.get(fn.id!) as FunctionEntity;
+function scanFn(fn: FunctionNode, container: ContainerNode) {
+    if (fn.returnTypeName && fn.name === "fib") {
+        const typeEntity = container.lookupTypeSymbol(fn.returnTypeName);
+        if (!typeEntity) throw new Error(`No type with name ${fn.returnTypeName} found.`)
+        fn.resolveReturnType(typeEntity)
+    }
 
-    if (fn.returnType) {
-        const typeEntity = scope.closestEntityWithLabel(fn.returnType.label, ["type-alias"]);
-        fnEntity.returnTypeEntity = typeEntity;
+    if (fn.returnTypeName) {
+        const typeEntity = container.lookupTypeSymbol(fn.returnTypeName);
+        if (!typeEntity) throw new Error(`No type with name ${fn.returnTypeName} found.`)
+        fn.resolveReturnType(typeEntity)
     }
 
     fn.parameters.forEach(p => {
-        const pEntity = scope.get(p.id!) as ParameterEntity;
-        if (p.type) {
-            const typeEntity = scope.closestEntityWithLabel(p.type.label, ["type-alias"]);
-            if (!typeEntity) throw new Error(`Cannot resolve type for ${p.label} of ${fn.label}.`);
-            pEntity.typeEntity = typeEntity;
+        if (p.typeName) {
+            const typeEntity = container.lookupTypeSymbol(p.typeName);
+            if (!typeEntity) throw new Error(`Cannot resolve type for ${p.name} of ${fn.name}.`);
+            p.resolveType(typeEntity)
             return;
         }
 
         if (p.initializer) {
-            const typeEntityId = typeEntityIdOfExpression(p.initializer, scope);
-            const typeEntity = scope.get(typeEntityId)!;
-            pEntity.typeEntity = typeEntity;
+            const typeEntity = typeEntityOfExpression(p.initializer, container);
+            p.resolveType(typeEntity)
             return;
         }
 
-        throw new Error(`Missing type for parameter ${p.label} of ${fn.label}`);
+        throw new Error(`Cannot resolve type for ${p.name} of ${fn.name}.`);
     });
 
-    if (fn.expression) scanInstruction({ scope: fn.scope, instruction: fn.expression });
+    if (fn.expression) scanInstruction(fn.expression, fn);
 
-    if (!fn.returnType && fn.expression) {
-        const typeEntityId = typeEntityIdOfExpression(fn.expression, fn.scope);
-        const typeEntity = fn.scope.get(typeEntityId)!;
-        fnEntity.returnTypeEntity = typeEntity;
-    } else if (!fn.returnType && !fn.expression) {
-        throw new Error(`Missing return type for ${fnEntity.label}`);
+    if (!fn.resolvedReturnType && fn.expression) {
+        const typeEntity = typeEntityOfExpression(fn.expression, fn);
+        fn.resolveReturnType(typeEntity)
+    } else if (!fn.resolvedReturnType && !fn.expression) {
+        throw new Error(`Missing return type for ${fn.name}`);
     }
 }
 
-function scanIf({ dif, scope }: { dif: IfExpression; scope: Scope; }) {
-    scanInstruction({ instruction: dif.condition, scope });
-    scanBlock({ body: dif.body, scope: dif.scope });
-    dif.elifs.forEach(({ condition, body, scope: elifScope }) => {
-        scanInstruction({ instruction: condition, scope });
-        scanBlock({ body, scope: elifScope });
+function scanIf(ifNode: If, container: ContainerNode) {
+    scanInstruction(ifNode.condition, container);
+    scanBlock(ifNode.block);
+    ifNode.elifs.forEach(({ condition, block }) => {
+        scanInstruction(condition, container);
+        scanBlock(block);
     });
-    if (dif.else) {
-        scanBlock({ body: dif.else.body, scope: dif.else.scope });
-    }
+    if (ifNode.elseBlock) scanBlock(ifNode.elseBlock);
 }
 
-function typeEntityIdOfExpression(expr: Instruction, scope: Scope): string {
-    if (expr.kind === "identifier") {
-        const entity = scope.closestEntityWithLabel(expr.label, ["type-alias", "parameter", "variable"]);
-        if (!entity) throw new Error(`Unknown identifier ${expr.label}`);
-        if (entity.kind === "type-alias") return entity.id;
-        return ((entity as (ParameterEntity | VariableEntity)).typeEntity!.id);
+function typeEntityOfExpression(expr: Node, container: ContainerNode): TypeNode {
+    if (expr instanceof Identifier) {
+        const entity = expr.ref();
+        if (entity instanceof TypeNode) return entity;
+        if (entity instanceof TypedNode) return entity.type;
     }
 
-    if (expr.kind === "block-expression") {
-        return typeEntityIdOfExpression(expr.body[expr.body.length - 1], expr.scope);
+    if (expr instanceof StructLiteral) {
+        return expr;
     }
 
-    if (expr.kind === "call-expression") {
-        if (!expr.calleeId) throw new Error(`Function not yet resolved for ${expr.callee}`);
-        const fnEntity = scope.get(expr.calleeId) as FunctionEntity;
-        if (!fnEntity.returnTypeEntity) throw new Error(`Return type not yet resolved for ${fnEntity.label}`);
-        return fnEntity.returnTypeEntity.id;
+    if (expr instanceof Block) {
+        const lastChild = expr.lastChild();
+        if (!lastChild) return container.lookupTypeSymbol("Void")!;
+        return typeEntityOfExpression(lastChild, expr);
     }
 
-    if (expr.kind === "binary-expression") {
-        if (!expr.calleeId) throw new Error(`Function not yet resolved for ${expr.calleeLabel}`);
-        const fnEntity = scope.get(expr.calleeId) as FunctionEntity;
-        if (!fnEntity.returnTypeEntity) throw new Error(`Return type not yet resolved for ${fnEntity.label}`);
-        return fnEntity.returnTypeEntity.id;
+    if (expr instanceof Call || expr instanceof BinaryExpression) {
+        if (!expr.resolvedCallee) throw new Error(`Function not yet resolved for ${expr.calleeName}`);
+        return expr.resolvedCallee.returnType;
     }
 
-    if (expr.kind === "if-expression") {
-        return typeEntityIdOfExpression(expr.body[expr.body.length], scope);
+    if (expr instanceof If) {
+        return typeEntityOfExpression(expr.block, expr.block);
     }
 
-    if (expr.kind === "int-literal") {
-        const i32Entity = scope.closestEntityWithLabel("i32", ["type-alias"]);
+    if (expr instanceof IntLiteral) {
+        const i32Entity = container.lookupTypeSymbol("i32");
         if (!i32Entity) throw new Error("Uh oh. i32 entity not found. Bad compiler! BAD!");
-        return i32Entity.id;
+        return i32Entity;
     }
 
-    const voidEntity = scope.closestEntityWithLabel("Void", ["type-alias"]);
-    if (!voidEntity) throw new Error("Uh oh. Void entity not found. Bad compiler! BAD!");
-    return voidEntity.id;
+    if (expr instanceof PropertyAccess) {
+        return typeEntityOfExpression(expr.right, container);
+    }
+
+    throw new Error(`Cannot determine type entity for ${expr}`);
 }

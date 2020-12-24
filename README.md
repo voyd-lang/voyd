@@ -1,46 +1,56 @@
 # Dream
 
-An experimental language targeting WebAssembly.
+An experimental WebAssembly language. Designed to make writing high performance
+web apps fun for individuals and teams alike.
 
-```rust
-fn fib(n: i32) =
-    if n < 2 {
-        n
-    } else {
-        fib(n - 2) + fib(n - 1)
+```dm
+/** Find the value of the fibonacci sequence at index n */
+fn fib(n: i32) -> i32 =
+    if n < 2 { n }
+    else { fib(n - 1) + fib(n - 2) }
+
+/** All binary programs have a main function */
+fn main() -> Void = {
+    var index = 0
+    while index <= 15 {
+
+        // Print fibonacci sequence at index using UFCS.
+        index.fib().print()
+
+        // Standard call syntax is also supported.
+        // i.e print(fib(index))
+
+        index = index + 1
     }
-
-let count = 10
-
-// Supports UFCS
-count.fib().print()
-
-// And standard
-print(fib(count))
+}
 ```
 
-Language Goal:
-Make writing WASM apps a delight for individuals and teams alike.
+**Disclaimer**
+Dream is in it's very early stages and should not be used for production applications.
+Most MVP features have not been implemented yet. The language does run and compile
+though. So feel free to play around.
 
-Features:
+**Features:**
 - First class WebAssembly support
-- Simple interop with TypeScript / JavaScript
-- Expressive syntax
+- Expression oriented syntax
+- UFCS
 - Support for OOP and Functional paradigms
 - Strongly typed, with type inference
 - Macros
 - Optional GC
+- Simple interop with TypeScript / JavaScript
+- Optional Pure and Unsafe function enforcement.
 
-Core values:
+**Core values:**
 - Developer satisfaction
 - Predictable syntax and APIs
 - First class WebAssembly support
 - Play nice with others
 - Fast performance
 - Prefer existing standards when possible
-- Quality libraries for web, server, and graphic applications.
+- Quality libraries for web, server, and graphics applications.
 
-# CLI Installation Usage
+# Getting Started
 
 **Install**
 ```
@@ -52,13 +62,20 @@ npm i -g dreamc
 dreamc path/to/code.dm
 ```
 
+# Documentation
+
+To get a feel of the language, check out the [overview.md file](./overview.md).
+
+For an in depth language guide, check out the [reference folder](./reference).
+
 # Feature Support Check List
 - [x] Methods
 - [x] If statements
 - [x] While loops
 - [x] let / var statements
-- [ ] Dot notation
-- [ ] Method overloading
+- [x] Dot notation
+- [x] Method overloading
+- [x] UFCS
 - [ ] Enums
 - [ ] Enums with associated values
 - [ ] Type checker
@@ -80,14 +97,3 @@ dreamc path/to/code.dm
 - [ ] NodeJS/Deno API bindings
 - [ ] Multiple files
 - [ ] ...?
-
-# Task List
-- [ ] Get basic dir (IR) defined, plugged into compiler
-- [ ] Support and use enums
-  - [ ] Can be used in match
-  - [ ] Can be used in if (val === Enum.variant)
-  - [ ] Can have associated fields
-- [ ] Support and use structs
-- [ ] Generics expansion
-- [ ] Basic std lib
-  - [ ] Generically defined and implemented binary expression types. Allows us to remove hard-coded

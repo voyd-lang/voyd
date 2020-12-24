@@ -2,9 +2,12 @@
     "cSpell.words": [
         "Deno",
         "Inout",
+        "Multivalue",
         "Structs",
+        "UFCS",
         "WASM",
         "binaryen",
+        "curlys",
         "elif",
         "elifs",
         "impls",

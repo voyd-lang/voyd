@@ -29,6 +29,16 @@ export function tokenize(code: string) {
             continue;
         }
 
+        if (char === "/" && next === "/") {
+            extractSingleLineComment(chars);
+            continue;
+        }
+
+        if (char === "/" && next === "*") {
+            extractMultilineComment(chars);
+            continue;
+        }
+
         // May push this to the parser later.
         if (char === "-" && isNum(next)) {
             chars.shift(); // Eat the -
@@ -66,6 +76,13 @@ export function tokenize(code: string) {
                 continue;
             }
 
+            // Bit of a hack for .* imports. Maybe do something better later. Idk.
+            if (value === ".*") {
+                tokens.push({ type: "operator", value: ".", index: tokens.length });
+                tokens.push({ type: "operator", value: "*", index: tokens.length });
+                continue;
+            }
+
             throw new Error(`Unknown operator or symbol: ${value}`);
         }
 
@@ -96,6 +113,18 @@ const isSymbolOrOperatorChar = (str: string) => isInTuple(str, symbolAndOperator
 const isKeyword = (str: string) => isInTuple(str, keywords);
 
 const isBool = (str: string) => str === "true" || str === "false";
+
+const extractSingleLineComment = (chars: string[]) => {
+    while (chars[0] !== "\n") chars.shift();
+}
+
+const extractMultilineComment = (chars: string[]) => {
+    while (chars[0] !== "*" || chars[1] !== "/") {
+        chars.shift();
+    }
+    chars.shift();
+    chars.shift();
+}
 
 // TODO: This can probably just be a simple regex.
 const extractWord = (chars: string[]) => {

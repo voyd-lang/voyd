@@ -1,34 +1,59 @@
 
 # Examples
+
 ```
 enum Friend {
-    case eric, alex, will, jacob
+    Ease Eric, Alex, Will, Jacob
 }
 
 let friend = Friend.jacob
 match friend {
-    .jacob => print("Jacob"),
-    .alex => print("Jacob"),
-    .will => print("Jacob"),
-    .eric => print("Jacob")
+    Jacob => print("Jacob"),
+    Alex => print("Jacob"),
+    Will => print("Jacob"),
+    Eric => print("Jacob")
 }
 
 // Associated types
 enum Volume {
-    case cubicFeet(f64),
-    case cubicMeters(f64),
-    case cuboidMeters[length: f64, width: f64, height: f64]
+    case CubicFeet(f64),
+    case CubicMeters(f64),
+    case CuboidMeters[length: f64, width: f64, height: f64]
 }
 
 let volume = Volume.cuboidMeters
 match volume {
-    .cubicFeet(feet) => print("The volume in feet is ${feet}),
-    .cubicMeters(m) => print("The volume in meters is ${m}),
-    .cuboidMeters[length, width, height] => {
+    CubicFeet(feet) => print("The volume in feet is ${feet}),
+    CubicMeters(m) => print("The volume in meters is ${m}),
+    CuboidMeters[length, width, height] => {
         let vol = length * width * height
         print("The volume in meters is ${vol})
     },
 }
+```
+
+# Sugar
+
+Enums are just sugar for type unions.
+
+For example, This enum:
+```
+enum Shape {
+    case Point
+    case Circle(Int)
+    case Square[width: Int, height: Int]
+}
+```
+
+Is just sugar for the lower level syntax:
+```
+type Shape = Point | Circle | Square
+
+struct Point
+struct Circle(Int)
+struct Square[width: Int, height: Int]
+
+// TODO: Desugar the implicit methods
 ```
 
 # Research
@@ -84,8 +109,12 @@ prevent it from ever being implemented.
 
 [I think this helps identify the problem and makes a solution obvious (Just don't allow it)](https://github.com/rust-lang/rfcs/issues/421#issuecomment-260175176)
 
+# Inspiration
 
-## Links
+1. [Lys](https://github.com/lys-lang/lys)
+
+# Links
+
 https://github.com/rust-lang/rfcs/pull/1949
 https://github.com/rust-lang/rfcs/issues/421
 https://github.com/rust-lang/rust/blob/master/src/librustc_error_codes/error_codes/E0170.md

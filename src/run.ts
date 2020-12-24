@@ -1,7 +1,7 @@
-import binaryen, { Module } from "binaryen";
+import { Module } from "binaryen";
 
 /** Run a binaryen module */
-export async function run(mod: Module) {
+export async function run(mod: Module): Promise<void> {
     mod.validate();
     mod.optimize();
     const bin = mod.emitBinary();
@@ -10,7 +10,7 @@ export async function run(mod: Module) {
 }
 
 /** Run a compiled WASM binary */
-export function runBinary(bin: Uint8Array) {
+export function runBinary(bin: Uint8Array): Promise<void> {
     return WebAssembly.instantiate(bin, {
         imports: {
             print(v: number) {

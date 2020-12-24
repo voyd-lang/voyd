@@ -30,19 +30,6 @@ let x = 5
 var y = 3
 ```
 
-# Blocks
-
-Blocks are a group of expressions enclosed in `{}`. Blocks return the result of the
-last expression they hold.
-
-```
-let twenty = {
-    let a = 5
-    let b = 4
-    a * b
-}
-```
-
 # Control flow
 
 ```
@@ -79,12 +66,12 @@ match x {
 
 ```
 // A basic function
-fn add(a: i32, b: i32) -> i32 = {
+fn add(a: i32, b: i32) -> i32 {
     a + b
 }
 
 // In most cases, the return type can be inferred.
-fn add(a: i32, b: i32) = {
+fn add(a: i32, b: i32) {
     a + b
 }
 
@@ -103,12 +90,6 @@ value of the last expression in their body (Unless it's return type is explicitl
 
 Examples:
 ```
-let four = {
-    let a = 2
-    let b = 2
-    a * b
-}
-
 let three = if true { 3 } else { 4 }
 
 let fred = match "Smith" {
@@ -117,7 +98,7 @@ let fred = match "Smith" {
     "Gates" => "Bill"
 }
 
-fn work(a: Int) = {
+fn work(a: Int) {
     let b = a * 2
     b + 3
 }
@@ -164,13 +145,45 @@ struct Target {
 // Methods can also be added to structs through impl blocks.
 impl Target {
     // If a method modifies it's struct, it must be marked as mut
-    mut fn shift [x: Int] -> Void = {
+    mut fn shift [x: Int] -> Void {
         self.x += x
     }
 }
 
 const target = Target [x: 5, y: 3, z: 7]
 target.shift [x: 5]
+```
+
+## Struct Initializers
+
+Structs have an implicit initializer that accepts a struct literal that matches the fields
+of the structs.
+
+For example, the following struct has an implicit initializer with the signature `init [a: i32, b: i32, c: i32] -> Vec3`.
+```
+struct Vec3 {
+    let a: i32
+    let b: i32
+    let c: i32
+}
+
+let vec = Vec3[a: 1, b: 2, c: 3]
+```
+
+Additional initializers can also be added thanks to function overloading.
+```
+struct Vec3 {
+    let a: i32
+    let b: i32
+    let c: i32
+
+    init(a: i32, b: i32, c: i32) = Vec3[a, b, c]
+}
+
+let vec = Vec3(1, 2, 3)
+
+// Implicit initializer can still be used
+let vec2 = Vec3[a: 1, b: 2, c: 3]
 ```
 
 ## Computed Properties
@@ -181,13 +194,13 @@ struct Planet {
 
     /** Computed property with getter and setter */
     prop diameter {
-        get => radius * 2
-        set(v: Int) => radius = v / 2
+        fn get() = radius * 2
+        fn set(v: Int) = radius = v / 2
     }
 
     /** Readonly computed property */
     prop surfaceArea {
-        get => 4 * PI * radius.sq
+        fn get() = 4 * PI * radius.sq
     }
 
     /** Shorthand readonly computed property */
@@ -299,6 +312,9 @@ let add: Fn(a: Int, b: Int) -> Int = (a, b) => a + b
 // Additionally, the () can be omitted from block style closures when all types can be
 // inferred and there are one or more parameters.
 let add: Fn(a: Int, b: Int) -> Int = { a, b => a + b }
+
+// If a closure has no parameters, it can be defined using {}
+let say_hey = { print("hey") }
 ```
 
 ## Higher Order Functions
@@ -329,35 +345,43 @@ caller() { a, b => a + b }
 
 // Since the closure is the last parameter of caller, () can be omitted.
 caller { a, b => a + b }
-
-// If a trailing closure has no parameters, => can be omitted. Note: this is only
-// true for TRAILING closures
-fn callThis(func: Fn() -> Void) = func()
-
-callThis {
-    doWork()
-}
 ```
 
 # Generics
 
-Generics work much like they do in TypeScript or Swift with essentially the same syntax.
+Functions:
 ```
-fn add<T>(a: T, b: T) -> T {
+fn add|T|(a: T, b: T) -> T = {
     a + b
 }
 
-struct Target<T> {
+add|i32|(1, 2)
+
+// With type inference
+add(1, 2)
+```
+
+Structs
+```
+struct Target|T| {
     let x, y, z: T
+
+    // Init functions implicitly take on the type parameters of the struct. So
+    // the final signature looks like init(T)(x: T, y: T, z: T) -> Target(T)
+    init(x: T, y: T, z: T) = Target[x, y, z]
 }
+
+let t1 = Target|i32|(1, 2, 3)
+
+// In this case the above could also be written as follows thanks to type inference.
+let t2 = Target(1, 2, 3)
 ```
 
-The one exception (for now) is when a generic type parameter needs to be explicitly defined in an
-expression. In such a case, the type parameters must be prefixed with a `:`. For example:
+When a type argument itself has a type parameter, they are passed using the standard function call `()` syntax:
 ```
-fn add<T>(a: T, b: T) = a + b
+type TwoItems|T| = (T, T)
 
-add::<i32>()
+let targets: TwoItems|Target(i32)|
 ```
 
 # Macros
@@ -516,96 +540,4 @@ let counter = createCounter()
 print(counter()) // 1
 print(counter()) // 2
 print(counter()) // 3
-```
-
-# Functions In Depth
-
-Functions have some additional features and conveniences that are laid out in this section.
-
-## Struct Sugar Syntax
-
-```
-// Structs can be destructed in the method signature.
-fn add([x, y]: [x: Int, y: Int]) -> Int = {
-    x + y
-}
-
-// This can be shortened further, unlabeled structs are automatically destructed.
-fn add([x: Int, y: Int]) -> Int = {
-    x + y
-}
-
-// If a struct is the only argument of a method, parenthesis can be omitted.
-fn add[x: Int, y: Int] -> Int = {
-    x + y
-}
-
-add([x: 5, y: 3])
-
-// If a struct is the only argument or the second argument is a function (more on that later),
-// the parenthesis can be omitted on call as well.
-add[x: 5, y: 3]
-```
-
-## Variadics
-
-```
-fn sum(numbers: ...Int) = numbers.reduce(0) { prev, cur => prev + cur }
-```
-
-## Overloading
-
-Dream functions can be overloaded. Provided that function overload can be unambiguously distinguished
-via their parameters and return type.
-
-```
-fn sum(a: Int, b: Int) = {
-    print("Def 1");
-    a + b
-}
-
-fn sum[a: Int, b: Int] = {
-    print("Def 2");
-    a + b
-}
-
-sum(1, 2) // Def 1
-sum[a: 1, b: 2] // Def 2
-
-// ERROR: sum(numbers: ...Int) overlaps ambiguously with sum(a: Int, b: Int)
-fn sum(numbers: ...Int) = {
-    print("Def 3")
-    numbers.reduce { prev, cur => prev + cur }
-}
-```
-
-
-## Pure Functions
-
-```
-// Pure functions are marked with a "pure" attribute and can only call other pure functions.
-// They also cannot have side effects.
-pure fn mul(a: i32, b: i32) = a * b
-
-pure fn div(a: i32, b: i32) {
-    // This will throw an error, as print has side effects and isn't marked pure.
-    print(a)
-    a / b
-}
-```
-
-## Unsafe Functions
-
-```
-// Some functions are marked "unsafe". In dream this means they can call low level wasm functions
-// And have access to  linear memory. Unsafe functions can only be called inside other unsafe
-// functions, or from unsafe blocks.
-unsafe fn readI32FromMem(ptr: i32) -> i32 =
-    wasm_i32_load(0, 2, ptr)
-
-// This function is not considered unsafe as the call to an unsafe function happens in an unsafe
-// block
-fn mul(a: i32, b: i32) -> i32 = unsafe {
-    wasm_i32_mul(a, b)
-}
 ```
