@@ -1,3 +1,4 @@
+# Enums
 
 # Examples
 
@@ -30,6 +31,37 @@ match volume {
         print("The volume in meters is ${vol})
     },
 }
+
+// Anonymous enum
+type MyAnonEnum = (am|pm)
+let period = MyAnonEnum.am
+
+// Anonymous enum with associated data
+type Rotation = (euler[x: Int, y: Int, z: Int] | quaternion(Int, Int, Int))
+```
+
+# Sugar
+
+Enums are just sugar for type unions.
+
+For example, This enum:
+```
+enum Shape {
+    case Point
+    case Circle(Int)
+    case Square[width: Int, height: Int]
+}
+```
+
+Is just sugar for the lower level syntax:
+```
+type Shape = Point | Circle | Square
+
+struct Point
+struct Circle(Int)
+struct Square[width: Int, height: Int]
+
+// TODO: Desugar the implicit methods
 ```
 
 # Sugar
