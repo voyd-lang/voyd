@@ -94,69 +94,106 @@ foo(5) {
 }
 ```
 
-# Struct Sugar Syntax
+# Named Arguments
+
+Named arguments are defined by wrapping parameters with []. This can improve the readability of
+a function on call.
+
+For Example:
+```
+fn alert(msg: string, [title: string, color: string]) = /* Implementation */
+
+alert("I'm out of cash", title: "Uh oh", color: red)
+```
+
+## Named Argument Aliasing
+
+You can specify a different name to be used on call than what is referenced in the function body.
+To do this, just add the call name in front of the referenced name.
+
+For example:
+```
+fn add(a: Int, [with b: Int]) = a + b
+
+add(1, with: 3)
+```
+
+## Named Argument Shorthand
+
+If all the arguments of a function are named, the parenthesis can be omitted at definition.
 
 ```
-// Structs can be destructed in the method signature.
-fn add([x, y]: [x: Int, y: Int]) -> Int {
-    x + y
+fn make_vec [x: Int, y: Int, z: Int] = Vec(x, y, z)
+make_vec(x: 4, y: 4, z: 3)
+```
+
+## Named Arguments Are Sugar For Structs
+
+Named arguments are really just sugar for passing struct literals.
+
+This works by automatically grouping all *consecutive* named arguments into a struct.
+
+This example demonstrates how the alert function is translated by the compiler:
+```
+// This function
+fn alert(msg: string, [title: string, color: string]) = /* Implementation */
+
+// Is translated into:
+fn alert(msg: string, opts: [title: string, color: string]) {
+    let title = opts.title
+    let color = opts.color
+    /* implementation */
 }
 
-// This can be shortened further, unlabeled structs are automatically destructed.
-fn add([x: Int, y: Int]) -> Int {
-    x + y
-}
+// This call:
+alert("I'm out of cash", title: "Uh oh", color: red)
 
-// If a struct is the only argument of a method, parenthesis can be omitted.
-fn add[x: Int, y: Int] -> Int {
-    x + y
-}
-
-// You can also alias fields to different identifiers internally
-// Note: The "as" is optional, as demonstrated by the y field
-fn add[x as a: Int, y b: Int] -> Int {
-    a + y
-}
-
-
-add([x: 5, y: 3])
+// Is translated to:
+alert("I'm out of cash", [title: "Uh oh", color: red])
 ```
 
-When the only argument to a function is a struct, the parenthesis can be omitted.
+To get a better since of how this conversion works, try and understand how this more complex
+function call is translated:
 ```
-add [x: 5, y: 3]
-```
+my_special_call(4, arg1: 1, arg2: 3, 5, arg3: 1, () => ())
 
-Dream also supports some syntactic sugar to more closely emulate swift style argument labels.
-Labeled arguments are placed in a single struct and passed as the the argument to where the first
-instance began.
-
-Some examples:
-```
-fn multiply(val: Int, [with: Int, and: Int]) = val * with * and
-
-multiply(3, with: 4, and: 2) // Converted to multiply(3, [with: 4, and: 2]).
-
-// Order is important
-multiply(with: 4, 3, and: 2) // Converted to multiply([with: 4], 3, [and: 2]), no overloads match that signature.
+// Translated into:
+my_special_call(4, [arg1: 1, arg2: 3], 5, [arg3: 1], () => ())
 ```
 
-Struct sugar syntax can be used to make APIs cleaner and easier to understand. They bring some
-of the advantages of Smalltalk and Swift over to Dream
+Because named arguments are just fancy syntax sugar for passing structs, you can opt to pass
+a normal struct literal instead. There are some cases where this might be more convenient.
 
-Here's an idiomatic example:
+For example:
 ```
-fn draw_line[from point_a: Vec3D, to point_b: Vec3D] -> Void {
-    let line = Line(point_a, point_b)
-    line.draw()
-}
+fn make_vec [x: Int, y: Int, z: Int] = Vec(x, y, z)
 
-fn main() {
-    let a = Vec3D[x: 1, y: 2, z: 3]
-    let b = Vec3D[x: 7, y: 3, z: 30]
+let x = 3;
+let y = 4;
+let z = 7;
 
-    draw_line[from: a, to: b]
-}
+// You could use the standard named argument syntax, but it's a bit redundant in this case.
+make_vec(x: x, y: y, z: z)
+
+// It would be clearer take advantage of struct literal property shorthand
+make_vec([x, y, z])
+
+// Event better, since we are only passing a struct the () can be omitted
+make_vec [x, y, z]
+```
+
+# Destructuring Within A Parameter Definition
+
+Struct and Tuple parameters can be destructed directly within their definition
+
+Examples
+```
+type MyTuple = (Int, Int, Int)
+type MyStruct = [x: Int, y: Int, z: Int]
+
+fn multiply_my_tuple((a, b, c): MyTuple) = a * b * c
+
+fn multiply_my_struct([x, y, z]: MyStruct) = x * y * c
 ```
 
 # Overloading

@@ -88,6 +88,30 @@ struct Square[width: Int, height: Int]
 // TODO: Desugar the implicit methods
 ```
 
+# Sugar
+
+Enums are just sugar for type unions.
+
+For example, This enum:
+```
+enum Shape {
+    case Point
+    case Circle(Int)
+    case Square[width: Int, height: Int]
+}
+```
+
+Is just sugar for the lower level syntax:
+```
+type Shape = Point | Circle | Square
+
+struct Point
+struct Circle(Int)
+struct Square[width: Int, height: Int]
+
+// TODO: Desugar the implicit methods
+```
+
 # Research
 
 ## Notes
