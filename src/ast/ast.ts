@@ -754,7 +754,7 @@ export class StructLiteral extends TypeNode implements ExpressionNode {
         flags: string[],
         parent: ContainerNode,
     }) {
-        super({ ...opts, name: `struct literal ${uniqid}` });
+        super({ ...opts, name: `struct literal ${uniqid()}` });
         this.flags = opts.flags;
     }
 
@@ -790,5 +790,9 @@ export class StructLiteralField extends TypedNode {
         this.parent = opts.parent;
         this.initializer = opts.initializer;
         this.index = opts.index;
+    }
+
+    toJSON(): object {
+        return { ...super.toJSON(), initializer: this.initializer }
     }
 }

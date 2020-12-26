@@ -574,12 +574,14 @@ function parseStructLiteral(tokens: Token[], flags: string[], parent: ContainerN
 
     while (tokens.length > 0) {
         const token = tokens[0];
+        const nextTokenType = tokens[1] ? tokens[1].type : undefined;
+
         if (token.type === "]") {
             tokens.shift();
             break;
         }
 
-        if (token.type === "identifier" && tokens[1] && tokens[1].type === ":") {
+        if (token.type === "identifier" && nextTokenType === ":") {
             const name = token.value;
             tokens.shift();
             tokens.shift();
@@ -587,7 +589,7 @@ function parseStructLiteral(tokens: Token[], flags: string[], parent: ContainerN
             continue;
         }
 
-        if (token.type === "identifier" && tokens[1] && tokens[1].type === ",") {
+        if (token.type === "identifier" && nextTokenType === ",") {
             const name = token.value;
             tokens.shift();
             tokens.shift();
@@ -596,6 +598,17 @@ function parseStructLiteral(tokens: Token[], flags: string[], parent: ContainerN
                 initializer: new Identifier({ name, tokenIndex: token.index, parent })
             });
             continue;
+        }
+
+        if (token.type === "identifier" && nextTokenType === "]") {
+            const name = token.value;
+            tokens.shift();
+            tokens.shift();
+            struct.addField({
+                name, flags: [],
+                initializer: new Identifier({ name, tokenIndex: token.index, parent })
+            });
+            break;
         }
 
         throw new Error(`Unexpected token: ${token.value}`);
