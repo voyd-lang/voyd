@@ -186,6 +186,8 @@ export abstract class TypeNode extends ContainerNode implements NamedNode {
         this.name = opts.name;
     }
 
+    abstract size(): number;
+
     toJSON(): object {
         return { name: this.name, ...super.toJSON() };
     }
@@ -203,6 +205,32 @@ export abstract class TypedNode extends NamedNode {
 
     resolveType(type: TypeNode): void {
         this.resolvedType = type;
+    }
+}
+
+export class WasmType extends TypeNode {
+    readonly wasmTypeId: string;
+    readonly byteSize: number;
+
+    constructor(opts: {
+        name: string,
+        flags: string[],
+        wasmTypeId: string,
+        /** Size of the type in bytes */
+        size: number,
+        parent?: ContainerNode,
+    }) {
+        super(opts);
+        this.wasmTypeId = opts.wasmTypeId;
+        this.byteSize = opts.size;
+    }
+
+    size(): number {
+        return this.byteSize;
+    }
+
+    toJSON(): object {
+        return { ...super.toJSON(), wasmTypeId: this.wasmTypeId, size: this.byteSize };
     }
 }
 
@@ -236,6 +264,10 @@ export class FunctionNode extends TypeNode {
     get returnType(): TypeNode {
         if (!this.resolvedReturnType) throw new Error("Return type not yet resolved for this function");
         return this.resolvedReturnType;
+    }
+
+    size(): number {
+        return 0;
     }
 
     resolveReturnType(type: TypeNode): void {
@@ -303,6 +335,10 @@ export class Enum extends TypeNode {
         return this.resolvedVariants;
     }
 
+    size(): number {
+        throw new Error("Not yet implemented.");
+    }
+
     pushVariant(...variant: EnumVariant[]): void {
         this.resolvedVariants.push(...variant);
     }
@@ -342,11 +378,15 @@ export class EnumVariant extends NamedNode {
 export class TypeAlias extends TypeNode {
     resolvedType?: TypeNode;
 
-    type(): TypeNode {
+    get type(): TypeNode {
         if (!this.resolvedType) {
             throw new Error("Type not yet resolved.");
         }
         return this.resolvedType;
+    }
+
+    size(): number {
+        return this.type.size();
     }
 
     resolveType(type: TypeNode): void {
@@ -368,6 +408,10 @@ export class Struct extends TypeNode {
     toJSON(): object {
         return { ...super.toJSON(), fields: this.fields };
     }
+
+    size(): number {
+        return this.fields.reduce((total, field) => total += field.size(), 0);
+    }
 }
 
 export class Field extends TypedNode {
@@ -383,6 +427,10 @@ export class Field extends TypedNode {
         super(opts);
         this.parent = opts.parent; // May not be necessary.
         this.initializer = opts.initializer;
+    }
+
+    size(): number {
+        return this.type.size();
     }
 }
 
@@ -405,6 +453,10 @@ export class Impl extends TypeNode {
         });
         this.targetName = opts.targetName;
         this.traitName = opts.traitName
+    }
+
+    size(): number {
+        return 0;
     }
 
     pushFn(fn: FunctionNode): void {
@@ -758,6 +810,10 @@ export class StructLiteral extends TypeNode implements ExpressionNode {
         this.flags = opts.flags;
     }
 
+    size(): number {
+        return Object.entries(this.fields).reduce((total, [, field]) => total += field.size(), 0);
+    }
+
     addField(opts: {
         name: string,
         initializer: ExpressionNode,
@@ -790,6 +846,10 @@ export class StructLiteralField extends TypedNode {
         this.parent = opts.parent;
         this.initializer = opts.initializer;
         this.index = opts.index;
+    }
+
+    size(): number {
+        return this.type.size();
     }
 
     toJSON(): object {

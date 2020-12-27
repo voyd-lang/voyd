@@ -1,6 +1,6 @@
 import { Token, tokenize, TokenType } from "../lexer";
 import { isInTuple } from "../helpers";
-import { Assignment, BinaryExpression, Block, BoolLiteral, Break, Call, ContainerNode, Continue, ExpressionNode, FloatLiteral, FunctionNode, Identifier, If, Impl, IntLiteral, Parameter, PropertyAccess, Return, StatementNode, StringLiteral, StructLiteral, Use, UseTree, Variable, While, TypeAlias, Enum, EnumVariant, Module } from "../ast";
+import { Assignment, BinaryExpression, Block, BoolLiteral, Break, Call, ContainerNode, Continue, ExpressionNode, FloatLiteral, FunctionNode, Identifier, If, Impl, IntLiteral, Parameter, PropertyAccess, Return, StatementNode, StringLiteral, StructLiteral, Use, UseTree, Variable, While, TypeAlias, Enum, EnumVariant, Module, WasmType, TypeNode } from "../ast";
 
 export function parse({ code, name, parent }: {
     code: string,
@@ -581,6 +581,11 @@ function parseStructLiteral(tokens: Token[], flags: string[], parent: ContainerN
             break;
         }
 
+        if (token.type === ",") {
+            tokens.shift();
+            continue;
+        }
+
         if (token.type === "identifier" && nextTokenType === ":") {
             const name = token.value;
             tokens.shift();
@@ -665,14 +670,53 @@ function extractTargetAndTraitFromImplSignature(tokens: Token[]) {
     return { target: label1.value, trait: undefined };
 }
 
-function parseTypeDeclaration(tokens: Token[], flags: string[], parent: ContainerNode): TypeAlias {
+function parseTypeDeclaration(tokens: Token[], flags: string[], parent: ContainerNode): TypeNode {
     const nameToken = tokens.shift();
     if (!nameToken || nameToken.type !== "identifier") {
         throw new Error("Expected identifier for type declaration");
     }
     const name = nameToken.value;
 
-    return new TypeAlias({ name, flags, parent });
+    if (flags.includes("declare")) {
+        return new TypeAlias({ name, flags, parent });
+    }
+
+    const equals = tokens.shift();
+    if (!equals) throw new Error("Expected =");
+    if (equals.value !== "=") throw new Error(`Unexpected token ${equals.type}`);
+
+    const type = tokens.shift();
+    if (!type) throw new Error(`Expected type after type declaration ${name}`);
+
+    if (type.type === "keyword" && type.value === "wasm_type") {
+        return parseWasmType({ tokens, flags, parent, name });
+    }
+
+    throw new Error(`Unknown type in type declaration ${name}`);
+}
+
+function parseWasmType({ tokens, flags, parent, name }: {
+    tokens: Token[]; flags: string[]; parent: ContainerNode;
+    name: string;
+}) {
+    const typeInfo = parseStructLiteral(tokens, [], parent);
+    const { id, size } = typeInfo.fields;
+
+    if (!id) throw new Error(`Missing wasm type id for ${name}`);
+    if (!size) throw new Error(`Missing wasm type size for ${name}`);
+
+    if (!(id.initializer instanceof StringLiteral)) {
+        throw new Error(`Invalid id for wasm type ${name}, expected string literal.`);
+    }
+
+    if (!(size.initializer instanceof IntLiteral)) {
+        throw new Error(`Invalid size for wasm type ${name}, expected int literal.`);
+    }
+
+    return new WasmType({
+        name, wasmTypeId: id.initializer.value, size: size.initializer.value, flags,
+        parent
+    });
 }
 
 /** Parse an enum, beginning after enum */

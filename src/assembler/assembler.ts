@@ -307,10 +307,6 @@ export class Assembler {
             return binaryen.createType(Object.entries(type.fields).map(([, field]) => this.getBinType(field.type! as any)));
         }
 
-        if (!type.flags.includes("declare")) {
-            throw new Error(`Unsupported type alias ${type.name}`);
-        }
-
         if (type.name === "i32") {
             return binaryen.i32;
         }

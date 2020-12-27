@@ -1,4 +1,5 @@
-pub declare type i32
+pub type i32 = wasm_type [id: "i32", size: 4]
+
 pub declare type Void
 
 pub declare unsafe fn i32_clz(value: i32) -> i32
