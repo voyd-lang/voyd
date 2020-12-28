@@ -255,7 +255,7 @@ export class Assembler {
     }
 
     /** converts a.b.c tree to [a, b, c] */
-    flattenPropertyAccessAssignmentExpr(expr: PropertyAccess): Identifier[] {
+    private flattenPropertyAccessAssignmentExpr(expr: PropertyAccess): Identifier[] {
         const left = expr.left;
         const right = expr.right;
 
