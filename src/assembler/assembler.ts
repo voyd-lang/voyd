@@ -365,7 +365,66 @@ export class Assembler {
             "i32_or": expr => this.mod.i32.or(
                 this.compileExpression(expr.arguments[0], scope),
                 this.compileExpression(expr.arguments[1], scope)
-            )
+            ),
+            "i32_load": expr => this.mod.i32.load(0, 1,
+                this.compileExpression(expr.arguments[0], scope),
+            ),
+            "i32_store": expr => this.mod.i32.store(0, 1,
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope),
+            ),
+
+            "i64_add": expr => this.mod.i64.add(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i64_sub": expr => this.mod.i64.sub(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i64_div_s": expr => this.mod.i64.div_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i64_mul": expr => this.mod.i64.mul(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i64_eq": expr => this.mod.i64.eq(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i64_gt_s": expr => this.mod.i64.gt_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i64_lt_s": expr => this.mod.i64.lt_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i64_ge_s": expr => this.mod.i64.add(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i64_le_s": expr => this.mod.i64.le_s(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i64_and": expr => this.mod.i64.and(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i64_or": expr => this.mod.i64.or(
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope)
+            ),
+            "i64_load": expr => this.mod.i64.load(0, 1,
+                this.compileExpression(expr.arguments[0], scope),
+            ),
+            "i64_store": expr => this.mod.i64.store(0, 1,
+                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[1], scope),
+            ),
         } as Record<string, (expr: Call) => number>)[name];
     }
 }

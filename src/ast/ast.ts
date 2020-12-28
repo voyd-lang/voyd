@@ -831,6 +831,7 @@ export class StructLiteral extends TypeNode implements ExpressionNode {
 }
 
 export class StructLiteralField extends TypedNode {
+    private cachedOffset: number | undefined;
     parent: StructLiteral;
     initializer: ExpressionNode;
     index: number;
@@ -850,6 +851,19 @@ export class StructLiteralField extends TypedNode {
 
     size(): number {
         return this.type.size();
+    }
+
+    /** Position of the struct where the field begins */
+    offset(): number {
+        if (this.cachedOffset !== undefined) return this.cachedOffset;
+
+        let offset = 0;
+        for (const [, field] of Object.entries(this.parent.fields)) {
+            if (field.index >= this.index) continue;
+            offset += field.size();
+        }
+        this.cachedOffset = offset;
+        return offset;
     }
 
     toJSON(): object {
