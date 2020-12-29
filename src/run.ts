@@ -15,6 +15,9 @@ export function runBinary(bin: Uint8Array): Promise<void> {
         imports: {
             print(v: number) {
                 console.log(v);
+            },
+            panic() {
+                throw new Error("PANIC!!!");
             }
         }
     }).then(result => {

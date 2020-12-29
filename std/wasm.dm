@@ -1,4 +1,5 @@
 pub type i32 = wasm_type [id: "i32", size: 4]
+pub type i64 = wasm_type [id: "i64", size: 8]
 
 pub declare type Void
 
@@ -69,8 +70,7 @@ pub declare unsafe fn i64_load(index: i64) -> Void
 pub declare unsafe fn i64_store(index: i64, value: i64) -> Void
 
 pub declare unsafe fn mem_size() -> i32
-pub declare unsafe fn mem_grow(pages: i32) -> Void
-
+pub declare unsafe fn mem_grow(pages: i32) -> i32
 pub declare unsafe fn panic() -> Void
 
 pub declare fn print(val: i32) -> Void

@@ -1,9 +1,9 @@
+use i32.*
 use wasm.*
-use i64.*
 
-pub unsafe fn stack_return_address() -> i32 = i64_load(0)
+pub unsafe fn stack_return_address() -> i32 = i32_load(0)
 
-pub unsafe fn stack_return(addr: i32) -> Void = i64_store(0, addr)
+pub unsafe fn stack_return(addr: i32) -> Void = i32_store(0, addr)
 
 /* Returns the address of the pushed memory */
 pub unsafe fn stack_alloc(size: i32) -> i32 {
@@ -19,7 +19,7 @@ pub unsafe fn stack_copy(src: i32, dest: i32, size: i32) -> Void {
 
     while bytes_written < size {
         i32_store8(
-            src + i32,
+            src + dest,
             i32_load8_u(dest + bytes_written)
         )
         bytes_written = bytes_written + 1

@@ -1,5 +1,5 @@
-import binaryen from "binaryen";
-import { Assignment, BinaryExpression, Block, BoolLiteral, Call, ContainerNode, ExpressionNode, FloatLiteral, FunctionNode, Identifier, If, Impl, IntLiteral, Node, Parameter, PropertyAccess, Return, StructLiteral, StructLiteralField, TypeAlias, TypeNode, Variable, While } from "../ast";
+import binaryen, { i32, none } from "binaryen";
+import { Assignment, BinaryExpression, Block, BoolLiteral, Call, ContainerNode, ExpressionNode, FloatLiteral, FunctionNode, Identifier, If, Impl, IntLiteral, Node, Parameter, PropertyAccess, Return, StructLiteral, StructLiteralField, TypeNode, Variable, While } from "../ast";
 import uniqid from "uniqid";
 
 export class Assembler {
@@ -9,6 +9,8 @@ export class Assembler {
         this.mod.setFeatures(512); // Temp workaround till binaryen.js #36 is published
         this.mod.autoDrop();
         this.mod.addFunctionImport("print", "imports", "print", binaryen.i32, binaryen.none);
+        this.mod.addFunctionImport("panic", "imports", "print", binaryen.none, binaryen.none);
+        this.mod.setMemory(3, 100);
     }
 
     compile(node: ContainerNode): void {
@@ -112,18 +114,40 @@ export class Assembler {
     }
 
     private compileStructLiteral(expr: StructLiteral, scope: ContainerNode): number {
-        const elements: number[] = [];
-
-        for (const label in expr.fields) {
-            elements.push(this.compileExpression(expr.fields[label].initializer, scope));
-        }
-
         const constructorId = `struct_literal_constructor_${uniqid()}`
-        this.mod.addFunction(constructorId)
+        const stackAlloc = this.getFnFromScope("stack_alloc", scope);
+        const stackReturnAddress = this.getFnFromScope("stack_return_address", scope);
+        const stackCopy = this.getFnFromScope("stack_copy", scope);
 
-        return this.mod.block("struct_op", [
+        // Var is struct address in linear memory
+        return this.mod.block(constructorId, [
+            // Compile the initializer for each field and store the results
+            ...Object.entries(expr.fields)
+                .map(([, field]): number => {
+                    const fieldAddr = this.mod.i32.add(
+                        this.mod.call(stackReturnAddress.id, [], i32), // Struct start addr
+                        this.mod.i32.const(field.offset()) // Offset of the field
+                    );
+                    const fieldValRef = this.compileExpression(field.initializer, scope);
 
-        ], binaryen.i64);
+                    if (field.type.name === "i32") {
+                        return this.mod.i32.store(0, 1, fieldAddr, fieldValRef);
+                    }
+
+                    if (field.type instanceof StructLiteral) {
+                        return this.mod.call(stackCopy.id, [
+                            fieldValRef,
+                            fieldAddr,
+                            field.size()
+                        ], none)
+                    }
+
+                    throw new Error(`Incompatible type for structs ${field.type.name}`)
+                }),
+
+            // Update the stack frame pointer and return the struct address.
+            this.mod.call(stackAlloc.id, [this.mod.i32.const(expr.size())], i32)
+        ], i32)
     }
 
     private compilePropertyAccessExpression(expr: PropertyAccess, scope: ContainerNode) {
@@ -131,8 +155,13 @@ export class Assembler {
         const right = expr.right;
 
         if (right instanceof Identifier) {
-            const entity = right.ref() as StructLiteralField;
-            return this.mod.tuple.extract(this.compileExpression(left, scope), entity.index);
+            const field = right.ref() as StructLiteralField;
+            return this.mod.i32.load(0, 1,
+                this.mod.i32.add(
+                    this.compileExpression(left, scope),
+                    this.mod.i32.const(field.offset())
+                )
+            )
         }
 
         if (!(right instanceof Call)) {
@@ -310,7 +339,7 @@ export class Assembler {
 
     private getBinType(type: TypeNode | StructLiteral): number {
         if (type instanceof StructLiteral) {
-            return binaryen.createType(Object.entries(type.fields).map(([, field]) => this.getBinType(field.type! as any)));
+            return binaryen.i32;
         }
 
         if (type.name === "i32") {
@@ -321,13 +350,17 @@ export class Assembler {
             return binaryen.none;
         }
 
-        throw new Error(`Unsupported type alias ${type.name}`);
+        throw new Error(`Unsupported type ${type.name}`);
     }
 
     private getBuiltIn(name: string, scope: ContainerNode): ((expr: Call) => number) | void {
         return ({
             "print": expr =>
                 this.mod.call("print", [this.compileExpression(expr.arguments[0], scope)], binaryen.none),
+
+            "panic": _expr =>
+                this.mod.call("panic", [], binaryen.none),
+
             "i32_add": expr => this.mod.i32.add(
                 this.compileExpression(expr.arguments[0], scope),
                 this.compileExpression(expr.arguments[1], scope)
@@ -373,68 +406,25 @@ export class Assembler {
                 this.compileExpression(expr.arguments[1], scope)
             ),
             "i32_load": expr => this.mod.i32.load(0, 1,
-                this.compileExpression(expr.arguments[0], scope),
+                this.compileExpression(expr.arguments[0], scope)
             ),
             "i32_store": expr => this.mod.i32.store(0, 1,
                 this.compileExpression(expr.arguments[0], scope),
                 this.compileExpression(expr.arguments[1], scope),
             ),
-
-            "i64_add": expr => this.mod.i64.add(
-                this.compileExpression(expr.arguments[0], scope),
-                this.compileExpression(expr.arguments[1], scope)
-            ),
-            "i64_sub": expr => this.mod.i64.sub(
-                this.compileExpression(expr.arguments[0], scope),
-                this.compileExpression(expr.arguments[1], scope)
-            ),
-            "i64_div_s": expr => this.mod.i64.div_s(
-                this.compileExpression(expr.arguments[0], scope),
-                this.compileExpression(expr.arguments[1], scope)
-            ),
-            "i64_mul": expr => this.mod.i64.mul(
-                this.compileExpression(expr.arguments[0], scope),
-                this.compileExpression(expr.arguments[1], scope)
-            ),
-            "i64_eq": expr => this.mod.i64.eq(
-                this.compileExpression(expr.arguments[0], scope),
-                this.compileExpression(expr.arguments[1], scope)
-            ),
-            "i64_gt_s": expr => this.mod.i64.gt_s(
-                this.compileExpression(expr.arguments[0], scope),
-                this.compileExpression(expr.arguments[1], scope)
-            ),
-            "i64_lt_s": expr => this.mod.i64.lt_s(
-                this.compileExpression(expr.arguments[0], scope),
-                this.compileExpression(expr.arguments[1], scope)
-            ),
-            "i64_ge_s": expr => this.mod.i64.add(
-                this.compileExpression(expr.arguments[0], scope),
-                this.compileExpression(expr.arguments[1], scope)
-            ),
-            "i64_le_s": expr => this.mod.i64.le_s(
-                this.compileExpression(expr.arguments[0], scope),
-                this.compileExpression(expr.arguments[1], scope)
-            ),
-            "i64_and": expr => this.mod.i64.and(
-                this.compileExpression(expr.arguments[0], scope),
-                this.compileExpression(expr.arguments[1], scope)
-            ),
-            "i64_or": expr => this.mod.i64.or(
-                this.compileExpression(expr.arguments[0], scope),
-                this.compileExpression(expr.arguments[1], scope)
-            ),
-            "i64_load": expr => this.mod.i64.load(0, 1,
-                this.compileExpression(expr.arguments[0], scope),
-            ),
-            "i64_store": expr => this.mod.i64.store(0, 1,
+            "i32_load8_u": expr => this.mod.i32.load8_u(0, 1,
+                this.compileExpression(expr.arguments[0], scope)),
+            "i32_store8": expr => this.mod.i32.store8(0, 1,
                 this.compileExpression(expr.arguments[0], scope),
                 this.compileExpression(expr.arguments[1], scope),
             ),
+
+            "mem_size": _expr => this.mod.memory.size(),
+            "mem_grow": expr => this.mod.memory.grow(this.compileExpression(expr.arguments[0], scope))
         } as Record<string, (expr: Call) => number>)[name];
     }
 
-    private get_fn_from_scope(name: string, scope: ContainerNode): FunctionNode {
+    private getFnFromScope(name: string, scope: ContainerNode): FunctionNode {
         const fn = scope.lookupFunctionSymbol(name);
         if (!fn) throw new Error(`Could not find function ${name} in current scope.`);
         return fn;
