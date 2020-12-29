@@ -220,7 +220,7 @@ function parseFnParameters(tokens: Token[], container: ContainerNode): Parameter
     let token = tokens[0];
     while (token && token.type !== closeBracket) {
         if (token.type === "identifier") {
-            params.push(parseParameter(tokens, params.length, container));
+            params.push(parseParameter(tokens, container));
             token = tokens[0];
             continue;
         }
@@ -240,7 +240,7 @@ function parseFnParameters(tokens: Token[], container: ContainerNode): Parameter
     return params;
 }
 
-function parseParameter(tokens: Token[], localIndex: number, container: ContainerNode): Parameter {
+function parseParameter(tokens: Token[], container: ContainerNode): Parameter {
     const flags: string[] = [];
 
     const identifierToken = tokens.shift();
@@ -257,7 +257,7 @@ function parseParameter(tokens: Token[], localIndex: number, container: Containe
 
     if (separator.value === "=") {
         const initializer = parseExpression(tokens, container);
-        return new Parameter({ name, localIndex, initializer, parent: container, flags });
+        return new Parameter({ name, initializer, parent: container, flags });
     }
 
     let token = tokens[0];
@@ -269,7 +269,7 @@ function parseParameter(tokens: Token[], localIndex: number, container: Containe
 
     const typeName = parseTypeArgument(tokens);
 
-    return new Parameter({ name, localIndex, parent: container, flags, typeName });
+    return new Parameter({ name, parent: container, flags, typeName });
 }
 
 function parseVariableDeclaration(tokens: Token[], flags: string[], parent: ContainerNode): Variable {

@@ -102,7 +102,7 @@ export abstract class ContainerNode extends StatementNode {
 
     private registerVariableWithParentFn(variable: Variable): void {
         if (this instanceof FunctionNode) {
-            this.variables.push(variable);
+            this.registerVariable(variable);
             return;
         }
 
@@ -245,7 +245,7 @@ export class WasmType extends TypeNode {
 /** Note, variables are detected and added using insertSymbol in the scanning phase */
 export class FunctionNode extends TypeNode {
     readonly name: string;
-    readonly parameters: Parameter[];
+    readonly parameters: Parameter[] = [];
     readonly variables: Variable[] = [];
     readonly returnTypeName?: string;
     resolvedReturnType?: TypeNode;
@@ -255,18 +255,19 @@ export class FunctionNode extends TypeNode {
         name: string,
         parent: ContainerNode,
         flags: string[],
-        parameters: Parameter[];
         returnTypeName?: string;
+        parameters: Parameter[];
     }) {
         super(opts);
         this.name = opts.name;
-        this.parameters = opts.parameters;
         this.returnTypeName = opts.returnTypeName;
-        this.parameters.forEach(p => this.insertSymbol(p));
+        opts.parameters.forEach(p => this.addParameter(p));
     }
 
-    get nextLocalIndex(): number {
-        return this.parameters.length + this.variables.length
+    private addParameter(parameter: Parameter) {
+        parameter.localIndex = this.parameters.length;
+        this.parameters.push(parameter);
+        this.insertSymbol(parameter);
     }
 
     get returnType(): TypeNode {
@@ -285,11 +286,21 @@ export class FunctionNode extends TypeNode {
     addThisParameter(type: string, parent: ContainerNode): void {
         const thisParam = new Parameter({
             name: "this", flags: ["this"], parent, typeName: type,
-            localIndex: 0
-        })
+        });
+        thisParam.localIndex = 0;
         this.parameters.unshift(thisParam);
-        this.parameters.forEach((p, i) => p.localIndex = i);
+        this.parameters.forEach(p => p.localIndex += 1);
+        this.variables.forEach(v => v.localIndex += 1);
         this.insertSymbol(thisParam);
+    }
+
+    /**
+     * Register a variable with the function. For use in the insertSymbol function
+     * of container node ONLY.
+     */
+    registerVariable(variable: Variable) {
+        variable.localIndex = this.parameters.length + this.variables.length;
+        this.variables.push(variable);
     }
 
     toJSON(): object {
@@ -306,11 +317,10 @@ export class Parameter extends TypedNode {
     readonly parent: ContainerNode;
     readonly initializer?: ExpressionNode;
     readonly typeName?: string;
-    localIndex: number;
+    localIndex: number = 0;
 
     constructor(opts: {
         name: string,
-        localIndex: number,
         flags: string[],
         parent: ContainerNode,
         typeName?: string;
@@ -318,7 +328,6 @@ export class Parameter extends TypedNode {
     }) {
         super(opts);
         this.parent = opts.parent;
-        this.localIndex = opts.localIndex;
         this.initializer = opts.initializer;
         this.typeName = opts.typeName;
     }
@@ -498,7 +507,7 @@ export class Variable extends TypedNode {
     readonly tokenIndex: number;
     readonly typeName?: string;
     readonly parent: ContainerNode;
-    localIndex?: number;
+    localIndex: number = 0;
 
     constructor(opts: {
         name: string;
