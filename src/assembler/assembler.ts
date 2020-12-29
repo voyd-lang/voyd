@@ -1,5 +1,6 @@
 import binaryen from "binaryen";
 import { Assignment, BinaryExpression, Block, BoolLiteral, Call, ContainerNode, ExpressionNode, FloatLiteral, FunctionNode, Identifier, If, Impl, IntLiteral, Node, Parameter, PropertyAccess, Return, StructLiteral, StructLiteralField, TypeAlias, TypeNode, Variable, While } from "../ast";
+import uniqid from "uniqid";
 
 export class Assembler {
     readonly mod = new binaryen.Module();
@@ -117,7 +118,12 @@ export class Assembler {
             elements.push(this.compileExpression(expr.fields[label].initializer, scope));
         }
 
-        return this.mod.tuple.make(elements);
+        const constructorId = `struct_literal_constructor_${uniqid()}`
+        this.mod.addFunction(constructorId)
+
+        return this.mod.block("struct_op", [
+
+        ], binaryen.i64);
     }
 
     private compilePropertyAccessExpression(expr: PropertyAccess, scope: ContainerNode) {
@@ -426,5 +432,11 @@ export class Assembler {
                 this.compileExpression(expr.arguments[1], scope),
             ),
         } as Record<string, (expr: Call) => number>)[name];
+    }
+
+    private get_fn_from_scope(name: string, scope: ContainerNode): FunctionNode {
+        const fn = scope.lookupFunctionSymbol(name);
+        if (!fn) throw new Error(`Could not find function ${name} in current scope.`);
+        return fn;
     }
 }

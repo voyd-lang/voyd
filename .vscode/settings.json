@@ -11,6 +11,7 @@
         "elif",
         "elifs",
         "impls",
+        "memcpy",
         "popcnt",
         "rotr"
     ]

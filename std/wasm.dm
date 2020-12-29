@@ -32,7 +32,9 @@ pub declare unsafe fn i32_gt_u(left: i32, right: i32) -> i32
 pub declare unsafe fn i32_ge_s(left: i32, right: i32) -> i32
 pub declare unsafe fn i32_ge_u(left: i32, right: i32) -> i32
 pub declare unsafe fn i32_load(index: i32) -> Void
+pub declare unsafe fn i32_load8_u(index: i32) -> Void
 pub declare unsafe fn i32_store(index: i32, value: i32) -> Void
+pub declare unsafe fn i32_store8(index: i32, value: i32) -> Void
 
 pub declare unsafe fn i64_clz(value: i64) -> i64
 pub declare unsafe fn i64_ctz(value: i64) -> i64
@@ -65,5 +67,10 @@ pub declare unsafe fn i64_ge_s(left: i64, right: i64) -> i64
 pub declare unsafe fn i64_ge_u(left: i64, right: i64) -> i64
 pub declare unsafe fn i64_load(index: i64) -> Void
 pub declare unsafe fn i64_store(index: i64, value: i64) -> Void
+
+pub declare unsafe fn mem_size() -> i32
+pub declare unsafe fn mem_grow(pages: i32) -> Void
+
+pub declare unsafe fn panic() -> Void
 
 pub declare fn print(val: i32) -> Void

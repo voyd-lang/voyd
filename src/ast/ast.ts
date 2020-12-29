@@ -111,27 +111,28 @@ export abstract class ContainerNode extends StatementNode {
         throw new Error("Variable declared outside of function scope.");
     }
 
-    lookupSymbol(name: string): Node | undefined {
+    lookupSymbolWithConstraint<T extends Node>(name: string, constraint: (node?: Node) => node is T): T | undefined {
         for (const nodeId of this.ownSymbols) {
             const node = this.symbols.get(nodeId);
-            if (node && node.name === name) return node;
+            if (node && node.name !== name) continue;
+            if (constraint(node)) return node;
         }
 
-        if (this.parent) return this.parent.lookupSymbol(name);
+        if (this.parent) return this.parent.lookupSymbolWithConstraint(name, constraint);
 
         return undefined;
     }
 
+    lookupSymbol(name: string): Node | undefined {
+        return this.lookupSymbolWithConstraint(name, (node): node is Node => node instanceof Node);
+    }
+
     lookupTypeSymbol(name: string): TypeNode | undefined {
-        for (const nodeId of this.ownSymbols) {
-            const node = this.symbols.get(nodeId);
-            if (!node || node.name !== name) continue;
-            if (node instanceof TypeNode) return node;
-        }
+        return this.lookupSymbolWithConstraint(name, (node): node is TypeNode => node instanceof TypeNode);
+    }
 
-        if (this.parent) return this.parent.lookupTypeSymbol(name);
-
-        return undefined;
+    lookupFunctionSymbol(name: string): FunctionNode | undefined {
+        return this.lookupSymbolWithConstraint(name, (node): node is FunctionNode => node instanceof FunctionNode);
     }
 
     lookupSiblingModule(name: string): Module | undefined {
