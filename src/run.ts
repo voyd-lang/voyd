@@ -21,7 +21,13 @@ export function runBinary(bin: Uint8Array): Promise<void> {
             }
         }
     }).then(result => {
-        const exports = result.instance.exports;
-        (exports as any).main();
+        const { main, memory } = result.instance.exports as any;
+
+        // Set the stack frame address to proper starting location
+        const buffer = new Uint32Array(memory.buffer);
+        buffer[0] = 4;
+
+        // Execute main function of the dream module.
+        main();
     }).catch(console.error);
 }

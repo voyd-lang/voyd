@@ -11,6 +11,7 @@ export class Assembler {
         this.mod.addFunctionImport("print", "imports", "print", binaryen.i32, binaryen.none);
         this.mod.addFunctionImport("panic", "imports", "print", binaryen.none, binaryen.none);
         this.mod.setMemory(3, 100);
+        this.mod.addMemoryExport("0", "memory");
     }
 
     compile(node: ContainerNode): void {
