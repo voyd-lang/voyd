@@ -7,9 +7,11 @@ import {
 
 /** Enforces scoping rules, resolves identifiers and infers types. */
 export function analyseSemantics(container: ContainerNode): void {
+    if (container.hasBeenSemanticallyAnalyzed) return;
     for (const instruction of container.children) {
         scanInstruction(instruction, container)
     }
+    container.hasBeenSemanticallyAnalyzed = true;
 }
 
 function scanInstruction(instruction: Node, container: ContainerNode) {
@@ -107,6 +109,7 @@ function scanUseTree(tree: UseTree, container: ContainerNode) {
         return resolveUseModule(subMod, path);
     }
     const useModule = resolveUseModule(container, JSON.parse(JSON.stringify(tree.path)));
+    analyseSemantics(useModule);
 
     if (tree.node.kind === "self") {
         // TODO
@@ -177,7 +180,7 @@ function scanPropertyAccessExpression(expr: PropertyAccess, container: Container
     }
 
     if (right instanceof Identifier) {
-        scanInstruction(right, container);
+        scanInstruction(right, typeEntity);
         return;
     }
 

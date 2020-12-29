@@ -19,6 +19,7 @@ export abstract class StatementNode extends Node { }
 export abstract class ExpressionNode extends StatementNode { }
 
 export class NamedNode extends StatementNode {
+    readonly id: string;
     readonly name: string;
     readonly flags: string[];
 
@@ -28,6 +29,7 @@ export class NamedNode extends StatementNode {
         parent?: ContainerNode
     }) {
         super(opts.parent);
+        this.id = `${opts.name}_${uniqid()}`;
         this.name = opts.name;
         this.flags = opts.flags;
     }
@@ -43,6 +45,7 @@ export abstract class ContainerNode extends StatementNode {
     readonly flags: string[];
     readonly children: Node[] = [];
     parent?: ContainerNode;
+    hasBeenSemanticallyAnalyzed = false;
 
     constructor(opts: {
         flags: string[],
@@ -154,6 +157,7 @@ export abstract class ContainerNode extends StatementNode {
 export class AST extends ContainerNode { }
 
 export class Module extends ContainerNode implements NamedNode {
+    readonly id: string;
     readonly name: string;
 
     constructor(opts: {
@@ -161,6 +165,7 @@ export class Module extends ContainerNode implements NamedNode {
         parent?: ContainerNode,
     }) {
         super({ ...opts, flags: [] });
+        this.id = `${opts.name}_${uniqid()}`;
         this.name = opts.name;
     }
 
@@ -177,6 +182,7 @@ export class FileModule extends Module { }
 
 export abstract class TypeNode extends ContainerNode implements NamedNode {
     readonly name: string;
+    readonly id: string;
 
     constructor(opts: {
         name: string,
@@ -184,6 +190,7 @@ export abstract class TypeNode extends ContainerNode implements NamedNode {
         parent?: ContainerNode,
     }) {
         super(opts);
+        this.id = `${opts.name}_${uniqid()}`;
         this.name = opts.name;
     }
 
@@ -263,7 +270,7 @@ export class FunctionNode extends TypeNode {
     }
 
     get returnType(): TypeNode {
-        if (!this.resolvedReturnType) throw new Error("Return type not yet resolved for this function");
+        if (!this.resolvedReturnType) throw new Error(`Return type not yet resolved for ${this.name}`);
         return this.resolvedReturnType;
     }
 
