@@ -1,16 +1,44 @@
 use i32.*
 use wasm.*
 
-pub unsafe fn stack_return_address() -> i32 = i32_load(0)
+// Returns the stack pointer
+pub stack_frame_start() -> i32 {
+    // Save the active frame address
+    let frame_return_addr = get_frame_pointer()
 
-pub unsafe fn stack_return(addr: i32) -> Void = i32_store(0, addr)
+    // Allocate the new frame
+    let frame_start_addr = stack_alloc(4)
+    set_frame_pointer(frame_start_addr)
+
+    // Save the frame return address to the start of the new frame
+    i32_store(frame_start_addr, frame_return_addr)
+
+    // Return the stack pointer
+    get_stack_pointer()
+}
+
+// Returns the stack pointer
+pub unsafe fn stack_frame_return() -> i32 {
+    let stack_return_addr = get_frame_pointer()
+
+    // The frame return pointer is actually stored at the same location of the stack_return_address
+    set_frame_pointer(i32_load(stack_return_address))
+    set_stack_pointer(stack_return_address)
+
+    stack_return_addr
+}
+
+pub unsafe fn get_stack_pointer() -> i32 = i32_load(0)
+pub unsafe fn get_frame_pointer() -> i32 = i32_load(4)
+pub unsafe fn set_stack_pointer(val: i32) -> i32 = i32_store(0, val)
+pub unsafe fn set_frame_pointer(val: i32) -> i32 = i32_store(4, val)
 
 /* Returns the address of the pushed memory */
 pub unsafe fn stack_alloc(size: i32) -> i32 {
-    let addr = stack_return_address()
+    let addr = get_stack_pointer()
     let new_addr = addr + size
     ensure_mem_is_at_least(new_addr)
-    i32_store(0, new_addr)
+    set_stack_pointer(new_addr)
     addr
 }
 

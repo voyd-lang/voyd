@@ -117,7 +117,7 @@ export class Assembler {
     private compileStructLiteral(expr: StructLiteral, scope: ContainerNode): number {
         const constructorId = `struct_literal_constructor_${uniqid()}`
         const stackAlloc = this.getFnFromScope("stack_alloc", scope);
-        const stackReturnAddress = this.getFnFromScope("stack_return_address", scope);
+        const getStackPointer = this.getFnFromScope("get_stack_pointer", scope);
         const stackCopy = this.getFnFromScope("stack_copy", scope);
 
         // Var is struct address in linear memory
@@ -126,7 +126,7 @@ export class Assembler {
             ...Object.entries(expr.fields)
                 .map(([, field]): number => {
                     const fieldAddr = this.mod.i32.add(
-                        this.mod.call(stackReturnAddress.id, [], i32), // Struct start addr
+                        this.mod.call(getStackPointer.id, [], i32), // Struct start addr
                         this.mod.i32.const(field.offset()) // Offset of the field
                     );
                     const fieldValRef = this.compileExpression(field.initializer, scope);
@@ -192,6 +192,8 @@ export class Assembler {
     }
 
     private compileBlock(block: Block, prepend: number[] = [], append: number[] = []): number {
+        const stackFrameStart = this.getFnFromScope("stack_frame_start", block);
+        const stackFrameReturn = this.getFnFromScope("stack_frame_return", block);
         return this.mod.block("", [
             ...prepend,
             ...block.children.map(instruction => {
