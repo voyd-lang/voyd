@@ -213,6 +213,8 @@ function scanImpl(instruction: Impl, container: ContainerNode) {
 }
 
 function scanFn(fn: FunctionNode, container: ContainerNode) {
+    if (fn.hasBeenSemanticallyAnalyzed) return;
+
     if (fn.returnTypeName && fn.name === "fib") {
         const typeEntity = container.lookupTypeSymbol(fn.returnTypeName);
         if (!typeEntity) throw new Error(`No type with name ${fn.returnTypeName} found.`)
@@ -250,6 +252,8 @@ function scanFn(fn: FunctionNode, container: ContainerNode) {
     } else if (!fn.resolvedReturnType && !fn.expression) {
         throw new Error(`Missing return type for ${fn.name}`);
     }
+
+    fn.hasBeenSemanticallyAnalyzed = true;
 }
 
 function scanIf(ifNode: If, container: ContainerNode) {
@@ -281,6 +285,7 @@ function typeEntityOfExpression(expr: Node, container: ContainerNode): TypeNode 
 
     if (expr instanceof Call || expr instanceof BinaryExpression) {
         if (!expr.resolvedCallee) throw new Error(`Function not yet resolved for ${expr.calleeName}`);
+        if (!expr.resolvedCallee.hasBeenSemanticallyAnalyzed) scanFn(expr.resolvedCallee, expr.resolvedCallee.parent!)
         return expr.resolvedCallee.returnType;
     }
 
