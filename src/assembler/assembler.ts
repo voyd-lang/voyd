@@ -1,5 +1,5 @@
 import binaryen, { i32, none } from "binaryen";
-import { Assignment, BinaryExpression, Block, BoolLiteral, Call, ContainerNode, ExpressionNode, FloatLiteral, FunctionNode, Identifier, If, Impl, IntLiteral, Node, Parameter, PropertyAccess, Return, StructLiteral, StructLiteralField, TypeNode, Variable, While } from "../ast";
+import { Assignment, BinaryExpression, Block, BoolLiteral, Call, ContainerNode, ExpressionNode, FloatLiteral, FunctionNode, Identifier, If, Impl, IntLiteral, Parameter, PropertyAccess, Return, StructLiteral, StructLiteralField, TypeNode, Variable, While } from "../ast";
 import uniqid from "uniqid";
 
 export class Assembler {
@@ -51,7 +51,7 @@ export class Assembler {
         return modId;
     }
 
-    private compileExpression(expr: Node, container: ContainerNode): number {
+    private compileExpression(expr: ExpressionNode, container: ContainerNode): number {
         if (expr instanceof If) {
             return this.compileIfExpression(expr, container);
         }
@@ -59,7 +59,6 @@ export class Assembler {
         if (expr instanceof While) {
             return this.compileWhileStatement(expr, container);
         }
-
 
         if (expr instanceof Return) {
             return this.compileReturn(expr, container);
@@ -109,6 +108,14 @@ export class Assembler {
 
         if (expr instanceof Block) {
             return this.compileBlock(expr);
+        }
+
+        if (expr instanceof Assignment) {
+            return this.compileAssignment(expr, container);
+        }
+
+        if (expr instanceof Variable) {
+            return this.compileVariableDeclaration(expr, container);
         }
 
         throw new Error(`Invalid expression ${expr}`);
@@ -192,25 +199,9 @@ export class Assembler {
     }
 
     private compileBlock(block: Block, prepend: number[] = [], append: number[] = []): number {
-        const stackFrameStart = this.getFnFromScope("stack_frame_start", block);
-        const stackFrameReturn = this.getFnFromScope("stack_frame_return", block);
         return this.mod.block("", [
             ...prepend,
-            ...block.children.map(instruction => {
-                if (instruction instanceof Variable) {
-                    return this.compileVariableDeclaration(instruction, block);
-                }
-
-                if (instruction instanceof FunctionNode) {
-                    return this.compileFn(instruction);
-                }
-
-                if (instruction instanceof Assignment) {
-                    return this.compileAssignment(instruction, block);
-                }
-
-                return this.compileExpression(instruction, block);
-            }),
+            ...block.children.map(instruction => this.compileExpression(instruction, block)),
             ...append
         ], binaryen.auto);
     }
