@@ -2,7 +2,7 @@ use i32.*
 use wasm.*
 
 // Returns the stack pointer
-pub stack_frame_start() -> i32 {
+pub unsafe fn stack_frame_start() -> i32 {
     // Save the active frame address
     let frame_return_addr = get_frame_pointer()
 
@@ -21,9 +21,9 @@ pub stack_frame_start() -> i32 {
 pub unsafe fn stack_frame_return() -> i32 {
     let stack_return_addr = get_frame_pointer()
 
-    // The frame return pointer is actually stored at the same location of the stack_return_address
-    set_frame_pointer(i32_load(stack_return_address))
-    set_stack_pointer(stack_return_address)
+    // The frame return pointer is actually stored at the same location of the stack_return_addr
+    set_frame_pointer(i32_load(stack_return_addr))
+    set_stack_pointer(stack_return_addr)
 
     stack_return_addr
 }
