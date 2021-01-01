@@ -1,8 +1,9 @@
 import {
     Assignment, BinaryExpression, Block, Call, ContainerNode, FunctionNode, Identifier, If,
-    Impl, IntLiteral, Module, NamedNode, Node, PropertyAccess, StructLiteral, TypedNode, TypeNode, Use,
+    Impl, IntLiteral, Module, NamedNode, Node, Parameter, PropertyAccess, StructLiteral, TypedNode, TypeNode, Use,
     UseTree, Variable, While
 } from "./ast";
+import uniqid from "uniqid";
 
 
 /** Enforces scoping rules, resolves identifiers and infers types. */
@@ -77,10 +78,13 @@ function scanInstruction(instruction: Node, container: ContainerNode) {
     }
 
     if (instruction instanceof Call) {
-        instruction.arguments.forEach(instruction => scanInstruction(instruction, container));
         const func = container.lookupSymbol(instruction.calleeName);
-        if (!func || !(func instanceof FunctionNode)) throw new Error(`${instruction.calleeName} is not a function`);
+        if (!func || !(func instanceof FunctionNode)) {
+            throw new Error(`${instruction.calleeName} is not a function`);
+        }
+
         instruction.resolveCallee(func);
+        scanCallArguments(instruction, container);
         return;
     }
 
@@ -215,12 +219,6 @@ function scanImpl(instruction: Impl, container: ContainerNode) {
 function scanFn(fn: FunctionNode, container: ContainerNode) {
     if (fn.hasBeenSemanticallyAnalyzed) return;
 
-    if (fn.returnTypeName && fn.name === "fib") {
-        const typeEntity = container.lookupTypeSymbol(fn.returnTypeName);
-        if (!typeEntity) throw new Error(`No type with name ${fn.returnTypeName} found.`)
-        fn.resolveReturnType(typeEntity)
-    }
-
     if (fn.returnTypeName) {
         const typeEntity = container.lookupTypeSymbol(fn.returnTypeName);
         if (!typeEntity) throw new Error(`No type with name ${fn.returnTypeName} found.`)
@@ -253,7 +251,23 @@ function scanFn(fn: FunctionNode, container: ContainerNode) {
         throw new Error(`Missing return type for ${fn.name}`);
     }
 
+    if (fn.returnType instanceof StructLiteral) {
+        fn.addParameter(new Parameter({ name: "return_ref", flags: ["return_ref"], parent: fn }));
+    }
+
     fn.hasBeenSemanticallyAnalyzed = true;
+}
+
+/** Scan all the arguments of a call */
+function scanCallArguments(call: Call, container: ContainerNode) {
+    call.arguments.forEach(instruction => scanInstruction(instruction, container));
+    if (call.callee.returnType instanceof StructLiteral) {
+        const refId = uniqid();
+        container.pushChild(new Variable({
+            name: refId, flags: ["ref"], parent: container, tokenIndex: 0
+        }));
+        call.arguments.push(new Identifier({ name: refId, tokenIndex: 0, flags: ["ref"], parent: container }));
+    }
 }
 
 function scanIf(ifNode: If, container: ContainerNode) {

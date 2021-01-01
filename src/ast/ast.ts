@@ -248,6 +248,7 @@ export class FunctionNode extends TypeNode {
     readonly parameters: Parameter[] = [];
     readonly variables: Variable[] = [];
     readonly returnTypeName?: string;
+    private _stackReturnParameterIndex?: number;
     resolvedReturnType?: TypeNode;
     expression?: ExpressionNode;
 
@@ -264,9 +265,10 @@ export class FunctionNode extends TypeNode {
         opts.parameters.forEach(p => this.addParameter(p));
     }
 
-    private addParameter(parameter: Parameter) {
+    addParameter(parameter: Parameter) {
         parameter.localIndex = this.parameters.length;
         this.parameters.push(parameter);
+        this.variables.forEach(v => v.localIndex += 1);
         this.insertSymbol(parameter);
     }
 
@@ -301,6 +303,53 @@ export class FunctionNode extends TypeNode {
     registerVariable(variable: Variable) {
         variable.localIndex = this.parameters.length + this.variables.length;
         this.variables.push(variable);
+    }
+
+    /**
+     * Generate a parameter for returning a value from the stack.
+     * Should be used by the assembler when a function returns a struct. Must be called
+     * BEFORE any calls to genStackVariable as this function will will bump the localIndexes
+     * of all variables.
+     *
+     * Returns the localIndex of the new parameter.
+     */
+    genStackReturnParameter(): number {
+        const retParam = new Parameter({
+            name: "this", flags: ["this"], parent: this, typeName: "i32",
+        });
+        retParam.localIndex = this.parameters.length;
+        this.parameters.push(retParam);
+        this.variables.forEach(v => v.localIndex += 1);
+        this._stackReturnParameterIndex = retParam.localIndex
+        return retParam.localIndex;
+    }
+
+    /**
+     * Get the index of the stack return parameter.
+     *
+     * IMPORTANT NOTE: This function should only be called after genStackReturnParameter has
+     * been called. Otherwise it will throw an error. As a result it should also only be called
+     * within functions that return a value on the stack.
+     */
+    get stackReturnParameterIndex(): number {
+        if (this._stackReturnParameterIndex === undefined) {
+            throw new Error(`Function ${this.name} does not have a stack return parameter`)
+        }
+
+        return this._stackReturnParameterIndex;
+    }
+
+    /**
+     * Add a variable for storing a reference to a value on the stack. For use inside the assembler.
+     * Returns the local index of the new stack variable.
+     */
+    genStackVariable(): number {
+        const variable = new Variable({
+            name: `stack_var_${uniqid()}`, flags: [], tokenIndex: 0,
+            typeName: "i32", parent: this
+        });
+        this.registerVariable(variable);
+        return variable.localIndex;
     }
 
     toJSON(): object {

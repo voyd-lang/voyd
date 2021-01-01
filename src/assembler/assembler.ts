@@ -36,8 +36,8 @@ export class Assembler {
     private compileFn(fn: FunctionNode): number {
         if (!fn.expression) return this.mod.nop();
 
-        const expression = this.compileExpression(fn.expression, fn);
         const binParams = binaryen.createType(fn.parameters.map(param => this.getBinType(param.type)));
+        const expression = this.compileExpression(fn.expression, fn);
         const binReturnType = this.getBinType(fn.returnType);
         const binLocals = fn.variables.map(variable => this.getBinType(variable.type));
 
