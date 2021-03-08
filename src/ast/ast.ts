@@ -278,13 +278,14 @@ export class FunctionNode extends TypeNode {
     }
 
     size(): number {
-        return 0;
+        return this.variables.reduce((total, variable) => total + variable.type.size(), 0)
     }
 
     resolveReturnType(type: TypeNode): void {
         this.resolvedReturnType = type;
     }
 
+    /** TODO: Move this to the parser */
     addThisParameter(type: string, parent: ContainerNode): void {
         const thisParam = new Parameter({
             name: "this", flags: ["this"], parent, typeName: type,

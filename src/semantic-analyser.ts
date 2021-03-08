@@ -251,10 +251,6 @@ function scanFn(fn: FunctionNode, container: ContainerNode) {
         throw new Error(`Missing return type for ${fn.name}`);
     }
 
-    if (fn.returnType instanceof StructLiteral) {
-        fn.addParameter(new Parameter({ name: "return_ref", flags: ["return_ref"], parent: fn }));
-    }
-
     fn.hasBeenSemanticallyAnalyzed = true;
 }
 
