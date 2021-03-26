@@ -152,6 +152,21 @@ export abstract class ContainerNode extends StatementNode {
     getSymbol(id: string): NamedNode | undefined {
         return this.symbols.get(id);
     }
+
+    /**
+     * Add a variable for storing a reference to a value on the stack. For use inside the assembler.
+     * Returns the local index of the new stack variable.
+     *
+     * TODO: In memory analyzer initialize the variable to frame_pointer + frame location.
+     */
+    addStackReturnVariable(): Variable {
+        const variable = new Variable({
+            name: `stack_var_${uniqid()}`, flags: [], tokenIndex: 0,
+            typeName: "i32", parent: this
+        });
+        this.registerVariableWithParentFn(variable);
+        return variable;
+    }
 }
 
 export class AST extends ContainerNode { }
@@ -248,8 +263,9 @@ export class FunctionNode extends TypeNode {
     readonly parameters: Parameter[] = [];
     readonly variables: Variable[] = [];
     readonly returnTypeName?: string;
-    private _stackReturnParameterIndex?: number;
-    resolvedReturnType?: TypeNode;
+    private resolvedThisParam?: Parameter;
+    private resolvedStackReturnParam?: Parameter;
+    private resolvedReturnType?: TypeNode;
     expression?: ExpressionNode;
 
     constructor(opts: {
@@ -277,6 +293,16 @@ export class FunctionNode extends TypeNode {
         return this.resolvedReturnType;
     }
 
+    get thisParam(): Parameter {
+        if (!this.resolvedThisParam) throw new Error(`Function doesn't have this param`);
+        return this.resolvedThisParam;
+    }
+
+    get stackReturnParam(): Parameter {
+        if (!this.resolvedStackReturnParam) throw new Error(`Function doesn't have a stack return param`);
+        return this.resolvedStackReturnParam;
+    }
+
     size(): number {
         return this.variables.reduce((total, variable) => total + variable.type.size(), 0)
     }
@@ -295,6 +321,7 @@ export class FunctionNode extends TypeNode {
         this.parameters.forEach(p => p.localIndex += 1);
         this.variables.forEach(v => v.localIndex += 1);
         this.insertSymbol(thisParam);
+        this.resolvedThisParam = thisParam;
     }
 
     /**
@@ -314,43 +341,13 @@ export class FunctionNode extends TypeNode {
      *
      * Returns the localIndex of the new parameter.
      */
-    genStackReturnParameter(): number {
+    addStackReturnParameter() {
         const retParam = new Parameter({
             name: "this", flags: ["this"], parent: this, typeName: "i32",
         });
         retParam.localIndex = this.parameters.length;
         this.parameters.push(retParam);
         this.variables.forEach(v => v.localIndex += 1);
-        this._stackReturnParameterIndex = retParam.localIndex
-        return retParam.localIndex;
-    }
-
-    /**
-     * Get the index of the stack return parameter.
-     *
-     * IMPORTANT NOTE: This function should only be called after genStackReturnParameter has
-     * been called. Otherwise it will throw an error. As a result it should also only be called
-     * within functions that return a value on the stack.
-     */
-    get stackReturnParameterIndex(): number {
-        if (this._stackReturnParameterIndex === undefined) {
-            throw new Error(`Function ${this.name} does not have a stack return parameter`)
-        }
-
-        return this._stackReturnParameterIndex;
-    }
-
-    /**
-     * Add a variable for storing a reference to a value on the stack. For use inside the assembler.
-     * Returns the local index of the new stack variable.
-     */
-    genStackVariable(): number {
-        const variable = new Variable({
-            name: `stack_var_${uniqid()}`, flags: [], tokenIndex: 0,
-            typeName: "i32", parent: this
-        });
-        this.registerVariable(variable);
-        return variable.localIndex;
     }
 
     toJSON(): object {
