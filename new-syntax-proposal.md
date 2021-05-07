@@ -186,20 +186,15 @@ let t2 = Target(1, 2, 3)
 # Closures
 
 ```
-get("http://api.example.com/stuff") @(json)
+let add = |a: Int, b: Int|: a + b;
+```
 
-@fail(error)
+## Trailing closures
+
+```
+get("http://api.example.com/stuff") ||
+
+@fail |error|
 
 end
 ```
-
-```
-get("http://api.example.com/stuff") { json =>
-
-} fail { error =>
-
-}
-```
-
-
-get("http://api.example.com/stuff", |json| )
