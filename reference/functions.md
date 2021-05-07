@@ -89,7 +89,7 @@ fn foo(bar: Int, baz: [main: Fn(Int) -> Void, on_error: Fn(Err) -> Void]) =
 
 foo(5) {
     print "Yay!!!, Foo worked"
-} onError: { _ =>
+} onError: {
     print "Dang, Foo failed"
 }
 ```

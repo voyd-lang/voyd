@@ -20,7 +20,6 @@ false // Boolean
 "Hello!" // String, can be multiline, supports interpolation via ${}
 (1, 2, 3) // Tuple
 {x: 2, y: 4} // Anonymous struct
-(am|pm) // Anonymous enum
 $(1, 2, 3) // Array
 ${x: 3} // Dictionary
 ```
@@ -36,15 +35,14 @@ var y = 3
 ```
 
 # Blocks
-
-Blocks generally start with a `:` and can be terminated by an `end` or a `;`.
-
 Standard block evaluated once.
 ```
-block:
+block
     print("hello world!")
 end
 ```
+
+Blocks generally start with a `\n` or a `:` for single line blocks and can be terminated by an `end` or a `;`.
 
 In general `end` should be used for multi-line blocks while `;` should be
 used for single expression, one line blocks.
@@ -53,25 +51,25 @@ used for single expression, one line blocks.
 
 **Ifs**
 ```
-if 3 > val:
+if 3 > val
 
-elif 3 < val:
+elif 3 < val
 
-else:
+else
 
 end
 
-# Ifs can be used like a ternary
+# Ifs can be used like a ternary, note `:` is required for single line ifs
 let three = if 4 > 5: 2 else 3;
 ```
 
 **Loops**
 ```
-for item in iterable:
+for item in iterable
 
 end
 
-while condition:
+while condition
 
 end
 ```
@@ -79,11 +77,11 @@ end
 **Match statements**
 ```
 let x = 3
-match x:
+match x
     case 1: print("One");
     case 2: print("two");
     case 3: print("three");
-    case _:
+    case _
         # Match statements must cover every possible case.
         # _ means default. I.E. if no other patterns match, use this one.
         print("A number")
@@ -95,12 +93,12 @@ end
 
 ```
 # A basic function
-fn add(a: i32, b: i32) -> i32:
+fn add(a: i32, b: i32) -> i32
     a + b
 end
 
 # In most cases the return type can be inferred.
-fn add(a: i32, b: i32):
+fn add(a: i32, b: i32)
     a + b
 end
 
@@ -118,14 +116,14 @@ Examples:
 ```
 let three = if true: 3 else 4;
 
-let fred = match "Smith":
+let fred = match "Smith"
     case "Jobs": "Steve";
     case "Smith": "Fred";
     case "Gates": "Bill";
     case _: "Unknown";
 end
 
-fn work(a: Int):
+fn work(a: Int)
     let b = a * 2
     b + 3
 end
@@ -136,7 +134,7 @@ let five = work(1)
 # Structs
 
 ```
-struct Target:
+struct Target
     let x, y, z: Int
 end
 
@@ -159,7 +157,7 @@ let dot = {x} // Equivalent to {x: x}
 
 Functions:
 ```
-fn add[T](a: T, b: T) -> T:
+fn add[T](a: T, b: T) -> T
     a + b
 end
 
@@ -184,3 +182,24 @@ let t1 = Target[i32](1, 2, 3)
 // In this case the above could also be written as follows thanks to type inference.
 let t2 = Target(1, 2, 3)
 ```
+
+# Closures
+
+```
+get("http://api.example.com/stuff") @(json)
+
+@fail(error)
+
+end
+```
+
+```
+get("http://api.example.com/stuff") { json =>
+
+} fail { error =>
+
+}
+```
+
+
+get("http://api.example.com/stuff", |json| )
