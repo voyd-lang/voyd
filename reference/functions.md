@@ -42,8 +42,6 @@ new types. See the overloading section.
 Parenthesis can be removed when:
 1. The only argument is a struct literal
 2. The only argument is a closure wrapped in curly braces
-3. The function is followed by a colon, a single expression representing the first argument, and
-   a final trailing closure
 
 Examples:
 ```
@@ -51,10 +49,10 @@ fn add(val: [a: Int, b: Int]) = val.a + val.b
 
 add [a: 3, b: 4]
 
-fn on(event: String, action: Fn() -> Void) =
-    window.addEventListener(event, action)
+fn onClick(action: Fn() -> Void) =
+    window.addEventListener("click, action)
 
-on: "click" {
+onClick {
     print("You clicked me!!");
 }
 ```
