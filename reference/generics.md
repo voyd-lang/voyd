@@ -1,50 +1,48 @@
 # Generics
 
-Pipes `||` mark the beginning and end of type parameters.
+Generics in dream, like in other languages, allow code to be reused across a variety of types.
+
+# Generics Functions
+
+Generic type parameters are declared as a second set of type parameters after the function name.
+Like normal parameters generic type parameters are declared using the `()` syntax. However, unlike
+normal parameters their names must be in PascalCase.
 
 Defining a generic function:
 ```
-fn foo|(T, U)|(bar: T) -> U = {}
-
-// Top level () can be omitted
-fn foo|T, U|(bar: T) -> U = {}
+fn foo(T)(bar: T) -> T = {}
 ```
 
 Calling a generic function:
 ```
-foo|Type1, Type2|(Type1())
+let type1 = Type1()
+
+// Dream can differentiate from type parameters because the passed value is a Type. Types cannot be
+// passed as normal parameters.
+foo(Type1)(type1)
 ```
 
-When a supplied type argument itself has a type parameter, they are passed
-like a normal parameter:
+In most cases the type can be inferred on call so the type parameters can be omitted.
 ```
-type Doubled|T| = (T, T)
-
-let my_quadrupled: Doubled|Doubled(i32)| = ((1, 2), (2, 4))
+let type1 = Type1()
+foo(type1)
 ```
 
-# Examples
 
-Generic struct:
+# Generics Types
+
 ```
-struct Target|T| {
-    let x, y, z: T
+type Doubled(T) = (T, T)
+
+let my_quadrupled: Doubled(Doubled(i32)) = ((1, 2), (2, 4))
+```
+
+# Generic Structs
+
+```
+struct Point(T) {
+    let x, y: T;
 }
-
-let target = Target|i32|[x: 1, y: 2, z: 3]
-
-// In this case, the type parameter could be inferred. So the above could also be written as:
-let target = Target[x: 1, y: 2, z: 3]
-```
-
-Generic function:
-```
-fn add|T|(a: T, b: T) = a + b
-
-add<i32>(1, 2)
-
-// In this case, the type parameter could be inferred. So the above could also be written as:
-add(1, 2)
 ```
 
 # Research
