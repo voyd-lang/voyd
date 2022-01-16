@@ -1,3 +1,33 @@
+# Traits
+
+# Traits as types
+
+In dream traits are types:
+```
+trait Foo {
+    fn foo(&self)
+}
+
+fn my_fn(x: Foo) {
+    x.foo()
+}
+```
+
+## Comparison to rust
+
+Unlike in dream, rust Traits are not types. The same behavior can be achieved using a trait object:
+```
+fn my_fn(x: &dyn Foo) {
+    x.foo()
+}
+```
+
+This involves doing some other work. `x` must always be a pointer to a trait object somehow.
+
+Rust's semantics here are very powerful and give tight control over the memory behavior of the
+parameter. This allows for incredible zero overhead memory management. Dream trades some of the
+control and performance for simplicity. If you need that kind of control and performance I highly
+recommend using rust.
 
 # Overloading and Traits With Default Implementations in Dream
 
