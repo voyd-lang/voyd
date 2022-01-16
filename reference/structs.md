@@ -28,6 +28,36 @@ struct[0: Int, 1: Int]
 
 Low level structs can contain no data, or multiple fields of data
 
+# Struct methods mutability and memory
+
+```
+struct Target {
+    let x, y: Int
+    var z: Int
+
+    // Methods must be marked as mutable if they mutate the struct
+    mut fn raise_z([by val: Int]) {
+        z += val
+    }
+}
+
+// Functions must declare their intention to mutate parameters using &mut
+fn mutate_target(target: &mut Target) {
+    target.raise_z(by: 10)
+}
+
+// Functions may obtain an immutable reference to a struct with just &
+fn check_target(target: &Target) {
+    print(target.z)
+}
+
+// If a parameter is a plain struct type, it must be passed by value. The parameter will be a copy.
+fn target_raised(target: Target) {
+    target.raise_z(by: 10)
+    target
+}
+```
+
 # Inspiration
 
 1. [Lys](https://github.com/lys-lang/lys)
