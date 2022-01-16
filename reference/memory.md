@@ -1,3 +1,33 @@
+# Memory Management in Dream
+
+Dream hopes to strike a balance between simple semantics and the performance of a compile time
+memory management system like rust. Dream will implement an ownership system that may improve
+performance over a standard GC by a little.
+
+However Dream does not aim to compete with rust's more advanced memory management semantics. So
+if you are looking for a zero overhead management memory system. Dream is not for you.
+
+# GC agnostic
+
+For now Dream will use the standard Javascript GC. Possibly with WASM gc if that ever becomes
+standardized.
+
+The language is designed to also work with a reference counting GC in the future. This may
+improve performance.
+
+# How Structs are Stored
+
+For the time being all structs are stored on the heap. This is to keep the language implementation
+simple. However, the syntax should allow for structs to be stored in stack memory in some cases.
+
+In the future we may add a "sized" struct type that will allow for structs to be stored in stack.
+Either through a language annotation or a trait type.
+
+# Legacy Memory Docs
+
+Below is the (at least soon to be) legacy memory docs. Phasing out for a simpler approach. For
+now.
+
 # Stack Memory Layout
 
 All user definable dream value types (structs, tuples, and enums) are stored in wasm linear

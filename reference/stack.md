@@ -1,5 +1,7 @@
 # Stack Memory Layout
 
+// Possibly out dated.
+
 By default, structs are stored in linear memory using stack memory allocation.
 
 Here is they byte layout of our stack:
