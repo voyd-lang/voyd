@@ -5,63 +5,42 @@
 ## Promises/Async
 
 ```
-effect Promise<T> {
-    case start(initiator: Fn [
-        resolve: Fn(val: T) -> Void,
-        reject: Fn(err: Error) -> Void
-     ] -> Void) -> T
+struct Promise(ResolveTyp) {
+    var resolve_handlers: Array(Fn(ResolveType) -> void) = $()
+    let promise_fn: Fn(resolve: Fn(ResolveType), reject: Fn(RejectType)) -> void
 
-    case await<U>(prom: Promise<U>) -> U
+    // Implementation details
+    fn then(on_resolve: ResolveType) {
+        resolve_handlers.push(on_resolve)
+    }
+};
 
-    case return(val: T) -> Void
+effect Async(T) {
+    ctrl fn await(prom: Promise(T)) -> T
 }
 
-impl Promise<T> {
-    static fn resolve(val: T) = Promise<T> {
-        start { resolve, _ => resolve(val) }
-    }
-
-    pub fn then(cb: Fn(result: Result<T>) -> Void) -> Void = self.handle {
-        start(initiator) => initiator[
-            resolve: val => resume(val),
-            reject: err => cb(Err(err))
-        ],
-
-        await(prom) => prom.then { result =>
-            result.match {
-                Ok(val) => resume(val),
-                Err(err) => cb(Err(err))
-            }
-        },
-
-        return(val) => cb(Ok(val))
+fn wait(time: Int): Async {
+    await Promise { resolve =>
+        setTimeout(resolve, time)
     }
 }
 
-fn wait(time: Int) = Promise<Void> {
-    start { resolve, _ => setTimeout(_ => resolve(Void()), time) }
-}
-
-fn say_things() = Promise<Void> {
-    print "Hello!"
-    await wait(3000)
-    print "Hello!"
-}
-
-fn main() = {
-    say_things.then { result =>
-        result.match {
-            Ok(_) => print "Done!",
-            Err(_) => print "Oops!"
-        }
+// An async function that handles Async effects by converting them back into a promise
+fn async(T)(Fn()) -> Promise(T) {
+    with ctrl fn await(prom: Promise(T)) -> T {
+        prom.then { val => resume(val) }
     }
+}
+
+fn prom_wait(time: Int) -> Promise(()) = async {
+    await wait(time)
 }
 ```
 
 ## Exceptions
 
 ```
-effect Exn<T> {
+effect Exn(T) {
     throw(err: Error) -> Void
     return(val: T) -> Void
 }
