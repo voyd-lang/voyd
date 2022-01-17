@@ -13,6 +13,21 @@ fn my_fn(x: Foo) {
 }
 ```
 
+# Function Traits
+
+```
+Fn AddsANumber(Int) -> Int
+
+fn add_one: AddsANumber (x: Int) -> Int {
+    x(1)
+}
+
+// Technically the param value and return value can be inferred:
+fn add_one: AddOne (x) {
+    x + 1
+}
+```
+
 ## Comparison to rust
 
 Unlike in dream, rust Traits are not types. The same behavior can be achieved using a trait object:
