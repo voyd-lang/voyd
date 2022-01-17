@@ -39,6 +39,57 @@ struct Target {
 }
 ```
 
+# Computed properties
+
+```
+struct Square {
+    var height, width: Int
+
+    // Computed readonly property (getter)
+    let area: Int {
+        height * width
+    }
+
+    // Compted mutable property (getter and setter)
+    var size: Int {
+        get { height * width }
+        set {
+            // Note: implicit &mut self. Setters are the only place where this is allowed.
+            height = val.sqrt // Note: val is an implicit parameter unique to setter functions
+            width = val.sqrt
+        }
+    }
+}
+```
+
+## Computed Properties and Strictness
+
+Only strict functions can be used within computed properties:
+```
+strict fn get_area(height: Int, width: Int) -> Int {
+    height * width
+}
+
+fn unstrict_get_size(height: Int, width: Int) -> Int {
+    height * width
+}
+
+struct Square {
+    var height, width: Int
+
+    // Computed readonly property (getter)
+    let area: Int {
+        get_area(height, width)
+    }
+
+    // Compted mutable property (getter and setter)
+    let size: Int {
+        // ERROR: unstrict_get_area is not strict. Only strict functions can be used within computed properties
+        unstrict_get_area(height, width)
+    }
+}
+```
+
 # Low Level Syntax
 
 ```

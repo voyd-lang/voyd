@@ -32,18 +32,18 @@ though. So feel free to play around.
 
 **Features:**
 - First class WebAssembly support
-- Expression oriented syntax
-- UFCS
-- Support for OOP and Functional paradigms
+- Rust inspired Functional / Expression oriented syntax
+- Algebraic effects
+- Uniform function call syntax
+- Simple and safe memory management (GC)
 - Strongly typed, with type inference
-- Macros
-- Optional GC
 - Simple interop with TypeScript / JavaScript
-- Optional Pure and Unsafe function enforcement.
+- Strict and Unsafe function enforcement.
 
 **Core values:**
 - Developer satisfaction
-- Predictable syntax and APIs
+- Predictability
+- Balance between performance and simplicity. Zero-Cost abstractions is a non-goal.
 - First class WebAssembly support
 - Play nice with others
 - Fast performance

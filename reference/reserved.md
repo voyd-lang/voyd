@@ -3,7 +3,8 @@
 
 let, var, if, else, elif, for, while, loop, break, continue, return, match, enum, struct, impl,
 trait, sized, type, fn, static, true, false, as, self, pub, use, import, from, with, move, owned,
-boolean, i32, i64, i8, i16, u32, u64, u8, u64, u16, f32, f64, strict, unsafe, mut, void
+boolean, i32, i64, i8, i16, u32, u64, u8, u64, u16, f32, f64, strict, unsafe, mut, void, get,
+set
 
 # Operators
 

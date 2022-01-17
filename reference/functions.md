@@ -40,21 +40,91 @@ new types. See the overloading section.
 ## Omitting Parentheses from a Function Call
 
 Parenthesis can be removed when:
-1. The only argument is a struct literal
-2. The only argument is a closure wrapped in curly braces
+1. The only argument is a struct literal or string literal.
+   1. The function *must* be separated from the argument by only a single space.
+2. The only argument is a curly closure.
+   1. The function *must* be separated from the argument by only a single space.
+3. The first argument is a struct literal or string literal, the second argument is a curly closure.
+   1. The first argument *must* be separated by the function by a single space.
+   2. The curly closure *must* be on the same line as the end of the first argument.
+4. The function is a UFCS call with one argument. And the function is strict.
 
-Examples:
+**Examples of 1:**
 ```
-fn add(val: [a: Int, b: Int]) = val.a + val.b
+print "Hello" // Sugar for print("Hello")
 
-add [a: 3, b: 4]
+new_target [x: 1, y: 2, z: 3] // Sugar for move_l([x: 1, y: 2, z: 3])
 
-fn onClick(action: Fn() -> Void) =
-    window.addEventListener("click, action)
+// Note: If the function does not result in the creation of a new struct it's preferred you use
+// named arguments. Instead of struct literals with no parens:
+move_l(x: 1, y: 2, z: 3) // Sugar for move_l([x: 1, y: 2, z: 3])
 
-onClick {
-    print("You clicked me!!");
+// The argument can span multiple lines as long as it starts on the same line as the function:
+print "
+   lorem ipsum dolor sit amet
+   consectetur adipiscing elit
+"
+```
+
+**Examples of 2:**
+```
+// Given function onClick
+fn onClick(callback: Fn() -> void) {
+    window.onEvent("click", callback)
 }
+
+// Can be called with:
+onClick {
+    print("Hello")
+}
+```
+
+**Examples of 3:**
+```
+// Given function on
+fn on(event: String, callback: Fn() -> void) {
+    window.onEvent(event, callback)
+}
+
+on "click" {
+    print("Hello")
+}
+
+// The curly must be on the same line as the end of the first argument.
+// This will error:
+on "click" // Error: Expected two parameters, found 1
+{
+    // This is evaluated as a block
+    print("Hello")
+}
+
+// It's still ok for the first argument to span multiple lines:
+on "
+   click
+" {
+    print("Hello")
+}
+```
+
+**Examples of 4:**
+```
+strict fn plus_one(x: i32) -> i32 {
+    x + 1
+}
+
+let three = 2.plus_one // Sugar for 2.add_one()
+
+// Note: If the function is not strict it must be called with parenthesis:
+fn do_something_with_effect_and_add_one(x: i32) -> i32 {
+    print(x)
+    x + 1
+}
+
+// ERROR: do_something_with_effect_and_add_one is not a strict function. () required.
+let three = 2.do_something_with_effect_and_add_one
+
+// This is still ok
+let three = 2.do_something_with_effect_and_add_one()
 ```
 
 ## Trailing Closure Syntax
