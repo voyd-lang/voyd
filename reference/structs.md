@@ -62,15 +62,15 @@ struct Square {
 }
 ```
 
-## Computed Properties and Strictness
+## Computed Properties and Purity
 
-Only strict functions can be used within computed properties:
+Only pure functions can be used within computed properties:
 ```
-strict fn get_area(height: Int, width: Int) -> Int {
+pure fn get_area(height: Int, width: Int) -> Int {
     height * width
 }
 
-fn unstrict_get_size(height: Int, width: Int) -> Int {
+fn unpure_get_size(height: Int, width: Int) -> Int {
     height * width
 }
 
@@ -84,8 +84,8 @@ struct Square {
 
     // Compted mutable property (getter and setter)
     let size: Int {
-        // ERROR: unstrict_get_area is not strict. Only strict functions can be used within computed properties
-        unstrict_get_area(height, width)
+        // ERROR: unpure_get_area is not pure. Only pure functions can be used within computed properties
+        unpure_get_area(height, width)
     }
 }
 ```
