@@ -44,10 +44,8 @@ Parenthesis can be removed when:
    1. The function *must* be separated from the argument by only a single space.
 2. The only argument is a curly closure.
    1. The function *must* be separated from the argument by only a single space.
-3. The first argument is a struct literal or string literal, the second argument is a curly closure.
-   1. The first argument *must* be separated by the function by a single space.
-   2. The curly closure *must* be on the same line as the end of the first argument.
-4. The function is a UFCS call with one argument. And the function is strict.
+3. The first argument is an expression terminated and the remaining arguments are closures.
+4. The function is a UFCS call with one argument. And the function is pure.
 
 **Examples of 1:**
 ```
@@ -108,19 +106,19 @@ on "
 
 **Examples of 4:**
 ```
-strict fn plus_one(x: i32) -> i32 {
+pure fn plus_one(x: i32) -> i32 {
     x + 1
 }
 
 let three = 2.plus_one // Sugar for 2.add_one()
 
-// Note: If the function is not strict it must be called with parenthesis:
+// Note: If the function is not pure it must be called with parenthesis:
 fn do_something_with_effect_and_add_one(x: i32) -> i32 {
     print(x)
     x + 1
 }
 
-// ERROR: do_something_with_effect_and_add_one is not a strict function. () required.
+// ERROR: do_something_with_effect_and_add_one is not a pure function. () required.
 let three = 2.do_something_with_effect_and_add_one
 
 // This is still ok
@@ -421,6 +419,14 @@ let six = my_prom.await.add(1);
 ```
 
 In conclusion. Dream is a flexible language. Flexibility can come at a cost. But when used at the hands of a disciplined developer, it can make for more elegant and readable code.
+
+# Full function syntax
+
+```
+fn fn_name: FnTrait (...args): effects -> return_type {
+    body
+}
+```
 
 # TODO
 
