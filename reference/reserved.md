@@ -22,7 +22,7 @@ Note that all operators can be overridden.
 The following are reserved for various language constructs (some may be removed, no additional will
 be added):
 
-#, @, //, /*, */, #!, &, :, :>, :<, ::, ::=, ::<, ::<=, ::>=, ::>, $, %
+#, @, //, /*, */, #!, &, :, :>, :<, ::, ::=, ::<, ::<=, ::>=, ::>, $, %, _
 
 # Notes:
 

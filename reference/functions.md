@@ -125,41 +125,6 @@ let three = 2.do_something_with_effect_and_add_one
 let three = 2.do_something_with_effect_and_add_one()
 ```
 
-## Trailing Closure Syntax
-
-Rules:
-1. When a closure wrapped in curly braces trails a function call, it is supplied as the last
-   argument to the function
-2. Parenthesis can be omitted if the closure is the only argument or if the function call
-   follows the rules of "Omitting Parentheses from a Function Call".
-3. Multiple trailing closures can be supplied to a single function call. When their are more than
-   one trailing closures they are transformed into a struct before being passed to the function.
-   The first trailing takes the field `main`, subsequent trailing closures must have their fields
-   labeled using the syntax `field_name: { /** closure */ }`.
-
-Basic Examples:
-```
-fn call(func: Fn() -> Void) = func()
-
-call() { () => print("hey") }
-call { () => print("hey") }
-call { print("hey") }
-```
-
-Multiple Trailing Closures Example:
-```
-fn foo(bar: Int, baz: [main: Fn(Int) -> Void, on_error: Fn(Err) -> Void]) =
-    do_work(bar)
-        .then(baz.main)
-        .catch(baz.error)
-
-foo(5) {
-    print "Yay!!!, Foo worked"
-} onError: {
-    print "Dang, Foo failed"
-}
-```
-
 # Named Arguments
 
 Named arguments are defined by wrapping parameters with []. This can improve the readability of
