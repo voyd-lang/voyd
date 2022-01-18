@@ -12,7 +12,7 @@ fn add(a: i32, b: i32) {
 }
 
 // Single expression functions can be written more simply as
-fn add(a: i32, b: i32) = a + b
+fn add(a: i32, b: i32) a + b
 ```
 
 # Calling Functions

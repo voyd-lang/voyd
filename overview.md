@@ -79,8 +79,9 @@ fn add(a: i32, b: i32) {
 // Functions are called using the standard () syntax
 add(1, 2)
 
-// Single expression functions can omit the {}
-fn add(a: i32, b: i32) = a + b
+// Single expression functions can be written directly after the parenthesis on the same line
+// provided there is no explicit return type annotation
+fn add(a: i32, b: i32) a + b
 ```
 
 # Expression Oriented
@@ -178,7 +179,7 @@ struct Vec3 {
     let b: i32
     let c: i32
 
-    init(a: i32, b: i32, c: i32) = Vec3[a, b, c]
+    init(a: i32, b: i32, c: i32) Vec3[a, b, c]
 }
 
 let vec = Vec3(1, 2, 3)
@@ -194,24 +195,21 @@ struct Planet {
     var radius = 5000
 
     /** Computed property with getter and setter */
-    prop diameter {
-        fn get() = radius * 2
-        fn set(v: Int) = radius = v / 2
+    var diameter {
+        get { radius * 2 }
+        set { radius = val / 2 } // Note: val is an implicit parameter unique to setter functions
     }
 
     /** Readonly computed property */
-    prop surfaceArea {
-        fn get() = 4 * PI * radius.sq
+    let surfaceArea {
+        4 * PI * radius.sq
     }
-
-    /** Shorthand readonly computed property */
-    prop circumference = 2 * PI * radius
 
     /**
      * Prop with a default getter and private default setter. This is essentially
      * making a var field that can only be set privately
      */
-    prop mass: Int { get, private set }
+    var mass: Int { get, private set }
 }
 ```
 
@@ -220,7 +218,7 @@ struct Planet {
 Static methods can be added to a struct, or any other type, by augmenting their namespace.
 ```
 namespace Target {
-    fn from(tuple: (Int, Int, Int)) = Target [
+    fn from(tuple: (Int, Int, Int)) Target [
         x: tuple.0,
         y: tuple.1,
         z: tuple.2,
@@ -263,16 +261,16 @@ enum ValidID {
 ```
 trait Vehicle {
     // Readonly property
-    prop vin: String { get }
+    let vin: String { get }
 
     // Property can be read and set.
-    prop color: String { get, set }
+    val color: String { get, set }
 
     // Implementors must define this method
     fn start() -> Void
 
     // Traits can define default implementations of their method requirements
-    fn getInfo() = "Vin: ${vin}, Color: ${color}"
+    fn getInfo() "Vin: ${vin}, Color: ${color}"
 }
 
 struct Car {
@@ -282,7 +280,7 @@ struct Car {
 }
 
 impl Vehicle for Car {
-    fn start() =
+    fn start()
         started = true
 }
 
@@ -352,11 +350,11 @@ caller { a, b => a + b }
 
 Functions:
 ```
-fn add|T|(a: T, b: T) -> T = {
+fn add(T)(a: T, b: T) -> T = {
     a + b
 }
 
-add|i32|(1, 2)
+add(i32)(1, 2)
 
 // With type inference
 add(1, 2)
@@ -364,7 +362,7 @@ add(1, 2)
 
 Structs
 ```
-struct Target|T| {
+struct Target(T) {
     let x, y, z: T
 
     // Init functions implicitly take on the type parameters of the struct. So
@@ -372,35 +370,16 @@ struct Target|T| {
     init(x: T, y: T, z: T) = Target[x, y, z]
 }
 
-let t1 = Target|i32|(1, 2, 3)
+let t1 = Target(i32)(1, 2, 3)
 
 // In this case the above could also be written as follows thanks to type inference.
 let t2 = Target(1, 2, 3)
 ```
 
-When a type argument itself has a type parameter, they are passed using the standard function call `()` syntax:
+A couple more examples
 ```
-type TwoItems|T| = (T, T)
-
-let targets: TwoItems|Target(i32)|
-```
-
-# Macros
-
-Dream supports macros that adhere to "Macro By Example". They work in a similar manner to
-[rust macros](https://doc.rust-lang.org/1.7.0/book/macros.html).
-
-# Compiler directives
-
-Compiler directives are each prefixed with a `#` and can have additional arguments supplied
-in the form of an anonymous struct
-
-```
-#inline
-#deprecated[since: "3.0"]
-fn add(a: i32, b: i32) -> i32 {
-
-}
+type TwoItems(T) = (T, T)
+let targets: TwoItems(Target(i32))
 ```
 
 # Defining Types
@@ -509,36 +488,16 @@ Example:
 ```dream
 var count: Int = 0;
 
-fn bump(val: inout Int) = {
+fn bump(val: &mut Int) = {
     val += 1
 }
 
 print(count) // 0
 
-// The & is required and makes it clear count is being referenced
-bump(&count)
+// The &mut is required and makes it clear count is being referenced
+bump(&mut count)
 
-// Note: Inout parameters must refer to a mutable variable.
+// Note: &mut parameters must refer to a mutable variable.
 let count2 = 0
-bump(&count2) // This will throw an error.
-```
-
-**Closures**
-
-Closures can refer to and modify values within their scope.
-
-Example:
-```dream
-fn createCounter() = {
-    var count = 0
-    { =>
-        count += 1
-        count
-    }
-}
-
-let counter = createCounter()
-print(counter()) // 1
-print(counter()) // 2
-print(counter()) // 3
+bump(&mut count2) // This will throw an error.
 ```
