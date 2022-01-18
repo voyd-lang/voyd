@@ -82,6 +82,12 @@ add(1, 2)
 // Single expression functions can be written directly after the parenthesis on the same line
 // provided there is no explicit return type annotation
 fn add(a: i32, b: i32) a + b
+
+// If a function has no parameters the parenthesis can be omitted
+var x = 1
+fn bump {
+    x += 1
+}
 ```
 
 # Expression Oriented
@@ -232,28 +238,69 @@ Static constants can be added this way too.
 
 ```
 enum Friend {
-    case eric,
-    case angie,
-    case carter
+    Eric, Angie, Carter
 }
 
-var friend = Friend.eric
+var friend = Friend.Eric
 
 match friend {
-    .eric => (),
-    .angie => ()
-    .carter => ()
+    // Friend
+    Eric => (),
+    Angie => (),
+    Carter => ()
 }
 
-// Enum identifier can be omitted if it can be reasonable inferred.
-let bestFriend: Friend = .angie
+// EWhen a value is known to be
+let best_friend: Friend = Angie
 
 // Enums can have associated types
 enum ValidID {
     // Struct associated type
-    case driversLicense [name: String, no: String, issued: Date, exp: Date]
-    case studentID(Int)
+    DriversLicense [name: String, no: String, issued: Date, exp: Date],
+    case StudentID(Int)
 }
+```
+
+# Curly Brace Ellison
+
+One of many features inspired by [Koka](koka-lang.github.io) is curly brace ellison. A set
+of rules which allow curly braces to be automatically inserted.
+
+```
+struct Point
+    pub var x, y: Float
+
+    pub fn distance_from(point: Point) -> Float
+        (point.x - x).squared +
+        (point.y - y).squared >>
+        sqrt
+
+fn add(a: Int, b: Int)
+    a + b
+
+fn fib(n: Int)
+    if n <= 1
+        return n
+    fib(n - 1) + fib(n - 2)
+```
+
+See [layout](./reference/layout.md) for more info.
+
+# Function Overloading
+
+Dream functions can be overloaded
+
+```
+fn add(a: Int, b: Int)
+    print("Adding integers")
+    a + b
+
+fn add(a: Float, b: Float)
+    print("Adding floats")
+    a + b
+
+add(1, 2) // Adding integers
+add(1.2, 1.3) // Adding floats
 ```
 
 # Traits
@@ -280,8 +327,9 @@ struct Car {
 }
 
 impl Vehicle for Car {
-    fn start()
+    fn start() {
         started = true
+    }
 }
 
 let car = Car [vin: "12fda32213", color: "red"]
@@ -388,7 +436,7 @@ Types can be aliased / defined using using the syntax: `type Identifier = Type`.
 
 Examples:
 ```
-type Int = i32
+type MyInt = Int
 type MyTuple = (i32, String, f32)
 type MyStruct = [a: i32, b: i32]
 
@@ -400,6 +448,23 @@ impl MyOtherCustomType {
     fn +(l: i32, r: i32) = unsafe {
         wasm_i32_add()
     }
+}
+```
+
+# Algebraic Effects
+
+Dream supports a [Koka inspired](koka-lang.github.io) Algebraic Effects system. A language level
+abstraction of control mechanisms like exceptions, async/await, io and more.
+
+```
+effect Async(T) {
+    // ctrl operations a function with the async effect can take
+    ctrl fn await(promise: Promise(T)) -> T
+}
+
+// A function can declare its "effects" like this
+fn read_json(path: String): Async -> JSON {
+    let file = read_file(path, Utf8)
 }
 ```
 
@@ -445,11 +510,9 @@ a.while {
 # Memory Management
 
 1. Dream uses the standard WASM garbage collector for Struct, Enum, and Tuple types.
-2. Primitive WASM types such as i32, f32, i64, etc are allocated on the stack and are
-   not garbage collected.
+2. Primitive WASM types such as i32, f32, i64, etc are allocated on the stack and are not garbage collected.
 3. All types are value types
-4. For a type to be passed by reference to a function or a closure, it must be a garbage collected
-   type.
+4. For a type to be passed by reference to a function or a closure, it must be a garbage collected type.
 
 ## Value Types
 
@@ -479,16 +542,16 @@ It is still possible to create a mutable reference to a value in dream. Currentl
 be done using closures (anonymous functions) or inout parameters. Note, this only applies to
 garbage collected type.
 
-**Inout Parameters**
+**&mut Parameters**
 
-Inout parameters create a mutable reference to a given variable. Changes made to an inout parameter
+&mut parameters create a mutable reference to a given variable. Changes made to an &mut parameter
 within a function are reflected in their original variable.
 
 Example:
 ```dream
 var count: Int = 0;
 
-fn bump(val: &mut Int) = {
+fn bump(val: &mut Int) {
     val += 1
 }
 
