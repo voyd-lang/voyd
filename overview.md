@@ -272,7 +272,7 @@ struct Point
 
     pub fn distance_from(point: Point) -> Float
         (point.x - x).squared +
-        (point.y - y).squared >>
+        (point.y - y).squared |
         sqrt
 
 fn add(a: Int, b: Int)

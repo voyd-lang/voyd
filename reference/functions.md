@@ -2,17 +2,17 @@
 
 ```
 // A basic function
-fn add(a: i32, b: i32) -> i32 {
+fn add(a: Int, b: Int) -> Int {
     a + b
 }
 
 // In most cases, the return type can be inferred.
-fn add(a: i32, b: i32) {
+fn add(a: Int, b: Int) {
     a + b
 }
 
 // Single expression functions can be written more simply as
-fn add(a: i32, b: i32) a + b
+fn add(a: Int, b: Int) a + b
 ```
 
 # Calling Functions

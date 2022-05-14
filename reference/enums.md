@@ -116,6 +116,8 @@ struct Square[width: Int, height: Int]
 
 ## Notes
 
+### 1 May 2020
+
 I want the enum syntax and usage to mostly resemble rust's. But I want to support something like
 swift's leading dot notation for enum variant access.
 
