@@ -46,6 +46,21 @@ fn make_closure(a: Int, b: Int) { { a + b } }
 fn make_closure(a: Int, b: Int) ({ a + b })
 ```
 
+# Implicit Parameters
+
+If a closure with no parameters is passed to a function that provides parameters
+on call, they can still be accessed using `_<index>` syntax i.e. `_0` is parameter
+1, `_1` is parameter two and so on. `_` is assumed to be shorthand for `_0`.
+
+```
+let array = Array(1, 2, 3)
+
+array.each {
+    print(_) // Prints the current value of the array
+    print(_1) // Prints the current index of the array
+}
+```
+
 # Trailing Closure Syntax
 
 Rules:
