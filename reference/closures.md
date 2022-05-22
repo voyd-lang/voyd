@@ -6,7 +6,9 @@ values of it's parent scope.
 In Dream closures is any `fn` that does not have a name. These can be passed as parameters
 assigned to variables, or returned from other functions and closures:
 ```
-let my_closure = fn(a: Int) { a - 1 }
+let subtract_one = fn(a: Int) {
+    a - 1
+}
 
 pass_me_a_closure(fn() { "here's one" })
 
@@ -16,34 +18,15 @@ let make_counter = fn() {
 }
 ```
 
+When a closure only contains one expression, the `{}` can be omitted.
+
+```
+let subtract_one = fn(a: Int) a - 1
+```
+
 When a closure has no parameters the `fn()` portion can be entirely omitted:
 ```
 pass_me_a_closure({ "here's one" })
-let emit_hello = { emit("hello") }
-```
-
-**An Important Note On Returning Closures From Single Expression Functions**
-
-As stated in the functions section, dream functions can omit `{}` when there is only one
-expression:
-```
-fn add(a: Int, b: Int) a + b
-```
-
-If closures with no parameters can omit the `fn()` portion. Doesn't that mean that this function
-would return a closure?
-```
-fn add(a: Int, b: Int) { a + b }
-```
-
-No. Thanks to a special rule in Dream. If the first and only expression of a function is
-wrapped in `{}`, the `{}` is treated as a standard block.
-
-In order to return a closure in that scenario you can re-write the function in one of two ways:
-```
-fn make_closure(a: Int, b: Int) { { a + b } }
-// OR
-fn make_closure(a: Int, b: Int) ({ a + b })
 ```
 
 # Implicit Parameters
@@ -113,7 +96,7 @@ foo(5) {
     print(err)
     print("Dang, Foo failed")
 }
-```func()
+```
 
 
 # Curly Brace Elision and Closures
@@ -139,7 +122,33 @@ array.each fn(item, index)
 // previous
 foo(5)
     print "Yay!!!, Foo worked"
-  on_error(err)
+  --on_error(err)
     print(err)
     print("Dang)
+```
+
+# Gotchas
+
+**Returning functions from closures**
+
+As stated in the functions section, dream functions can omit `{}` when there is only one
+expression:
+```
+fn add(a: Int, b: Int) a + b
+```
+
+If closures with no parameters can omit the `fn()` portion. Doesn't that mean that this function
+would return a closure?
+```
+fn add(a: Int, b: Int) { a + b }
+```
+
+No. Thanks to a special rule in Dream. If the first and only expression of a function is
+wrapped in `{}`, the `{}` is treated as a standard block.
+
+In order to return a closure in that scenario you can re-write the function in one of two ways:
+```
+fn make_closure(a: Int, b: Int) { { a + b } }
+// OR
+fn make_closure(a: Int, b: Int) ({ a + b })
 ```
