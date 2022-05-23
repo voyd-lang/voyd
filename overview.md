@@ -263,8 +263,8 @@ enum ValidID {
 
 let id = ValidID.drivers_license [name: "John", no: "12345", issued: Date(0), exp: Date(0)]
 let name = match id {
-    let (:drivers_license, [name]) => name,
-    let (:student_id, name) => name
+    (:drivers_license, [name]) => name,
+    (:student_id, name) => name
 }
 
 // Cases with associated types are just syntactic sugar for a tuple with an atom and a value.
