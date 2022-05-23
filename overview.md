@@ -14,8 +14,7 @@ false // Boolean
 1.0 // Double
 "Hello!" // String, can be multiline, supports interpolation via ${}
 (1, 2, 3) // Tuple
-[x: 2, y: 4] // Anonymous struct
-(am\pm) // Anonymous enum
+[x: 2, y: 4] // Struct literal
 $(1, 2, 3) // Array
 $[x: 3] // Dictionary
 ```
@@ -30,6 +29,41 @@ let x = 5
 var y = 3
 ```
 
+# Functions
+
+A basic function:
+```
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+```
+
+Inspired by [Koka](https://koka-lang.github.io/koka/doc/index.html), Dream supports curly brace
+elision. This means that indented blocks are implicitly wrapped by curly braces. The basic function
+above can be written as:
+```
+fn add(a: i32, b: i32) -> i32
+    a + b
+```
+
+In most cases the return type can be inferred
+```
+fn add(a: i32, b: i32)
+    a + b
+```
+
+Functions are called using the standard () syntax
+```
+add(1, 2)
+```
+
+If a function has no parameters the parenthesis can be omitted
+```
+var x = 1
+fn bump
+    x += 1
+```
+
 # Control flow
 
 ```
@@ -41,6 +75,9 @@ if 3 > val {
 
 }
 
+// Single line ifs can be written using then syntax
+let x = if 3 > val then 1 else 0
+
 for item in iterable {
 
 }
@@ -50,44 +87,14 @@ while condition {
 }
 
 let x = 3
-match x {
+match x
     1 => print("One"),
     2 => print("two"),
     3 => print("three"),
-    _ {
+    _ =>
         // Match statements must cover every possible case.
         // _ means default. I.E. if no other patterns match, use this one.
-        // Here we also use {} in place of => to represent a multiline match case.
         print("A number")
-    }
-}
-```
-
-# Functions
-
-```
-// A basic function
-fn add(a: i32, b: i32) -> i32 {
-    a + b
-}
-
-// In most cases, the return type can be inferred.
-fn add(a: i32, b: i32) {
-    a + b
-}
-
-// Functions are called using the standard () syntax
-add(1, 2)
-
-// Single expression functions can be written directly after the parenthesis on the same line
-// provided there is no explicit return type annotation
-fn add(a: i32, b: i32) a + b
-
-// If a function has no parameters the parenthesis can be omitted
-var x = 1
-fn bump {
-    x += 1
-}
 ```
 
 # Expression Oriented
@@ -98,18 +105,16 @@ value of the last expression in their body (Unless it's return type is explicitl
 
 Examples:
 ```
-let three = if true { 3 } else { 4 }
+let three = if true then 3 else 4
 
-let fred = match "Smith" {
+let fred = match "Smith"
     "Jobs" => "Steve",
     "Smith" => "Fred",
     "Gates" => "Bill"
-}
 
-fn work(a: Int) {
+fn work(a: Int)
     let b = a * 2
     b + 3
-}
 
 let five = work(1)
 ```
@@ -117,9 +122,8 @@ let five = work(1)
 # Structs
 
 ```
-struct Target {
+struct Target
     let x, y, z: Int
-}
 
 let target = Target [x: 4, y: 5, z: 3]
 
@@ -140,26 +144,24 @@ let dot = [x] // Equivalent to [x: x]
 
 ```
 // Methods can be added directly to a struct
-struct Target {
+struct Target
     pub var x, y, z: Int
 
-    pub fn offs [x: Int] -> Target =
+    pub fn x_offs(x: Int) -> Target
         // Self can be omitted if the identifier does not conflict with a parameter.
         // Here y and z have self omitted. In addition we are using struct shorthand for
         // y and z
         Target [x: self.x + x, y, z] // Equivalent to [x: self.x + x, y: self.y, z: self.z]
-}
 
 // Methods can also be added to structs through impl blocks.
-impl Target {
-    // If a method modifies it's struct, it must be marked as mut
-    mut fn shift [x: Int] -> Void {
+impl Target
+    // If a method modifies it's struct, it must be marked as mut (mutable)
+    mut fn shift_x(x: Int) -> Void
         self.x += x
-    }
-}
+
 
 const target = Target [x: 5, y: 3, z: 7]
-target.shift [x: 5]
+target.shift_x(3)
 ```
 
 ## Struct Initializers
@@ -167,7 +169,7 @@ target.shift [x: 5]
 Structs have an implicit initializer that accepts a struct literal that matches the fields
 of the structs.
 
-For example, the following struct has an implicit initializer with the signature `init [a: i32, b: i32, c: i32] -> Vec3`.
+For example, the following struct has an implicit initializer with the signature `init [a: Int, b: Int, c: Int] -> Vec3`.
 ```
 struct Vec3 {
     let a: i32
@@ -185,7 +187,8 @@ struct Vec3 {
     let b: i32
     let c: i32
 
-    init(a: i32, b: i32, c: i32) Vec3[a, b, c]
+    init(a: i32, b: i32, c: i32)
+        Vec3[a, b, c]
 }
 
 let vec = Vec3(1, 2, 3)
@@ -197,13 +200,13 @@ let vec2 = Vec3[a: 1, b: 2, c: 3]
 ## Computed Properties
 
 ```
-struct Planet {
+struct Planet
     var radius = 5000
 
     /** Computed property with getter and setter */
     var diameter {
         get { radius * 2 }
-        set { radius = val / 2 } // Note: val is an implicit parameter unique to setter functions
+        set { radius = val / 2 } // Note: val is an implicit parameter
     }
 
     /** Readonly computed property */
@@ -216,20 +219,19 @@ struct Planet {
      * making a var field that can only be set privately
      */
     var mass: Int { get, private set }
-}
 ```
 
 ## Static Methods
 
 Static methods can be added to a struct, or any other type, by augmenting their namespace.
 ```
-namespace Target {
-    fn from(tuple: (Int, Int, Int)) Target [
-        x: tuple.0,
-        y: tuple.1,
-        z: tuple.2,
-    ]
-}
+namespace Target
+    fn from(tuple: (Int, Int, Int))
+        Target [
+            x: tuple.0,
+            y: tuple.1,
+            z: tuple.2,
+        ]
 ```
 
 Static constants can be added this way too.
@@ -237,28 +239,37 @@ Static constants can be added this way too.
 # Enums
 
 ```
-enum Friend {
-    Eric, Angie, Carter
-}
+enum Friend
+    case eric, angie, carter
 
-var friend = Friend.Eric
+var friend = Friend.eric
 
-match friend {
+match friend
     // Friend
-    Eric => (),
-    Angie => (),
-    Carter => ()
-}
+    eric => (),
+    angie => (),
+    carter => ()
 
-// EWhen a value is known to be
-let best_friend: Friend = Angie
+// Enums are just sugar for writing a union of atoms, so this is valid
+let best_friend: Friend = :angie
+```
 
-// Enums can have associated types
+Enum cases can have associated types
+```
 enum ValidID {
     // Struct associated type
-    DriversLicense [name: String, no: String, issued: Date, exp: Date],
-    case StudentID(Int)
+    case drivers_license [name: String, no: String, issued: Date, exp: Date],
+    case student_id (String)
+
+let id = ValidID.drivers_license [name: "John", no: "12345", issued: Date(0), exp: Date(0)]
+let name = match id {
+    let (:drivers_license, [name]) => name,
+    let (:student_id, name) => name
 }
+
+// Cases with associated types are just syntactic sugar for a tuple with an atom and a value.
+// driver_license is equivalent to:
+type DriversLicense = (:drivers_license, [name: String, no: String, issued: Date, exp: Date])
 ```
 
 # Curly Brace Ellison
@@ -272,7 +283,7 @@ struct Point
 
     pub fn distance_from(point: Point) -> Float
         (point.x - x).squared +
-        (point.y - y).squared |
+        (point.y - y).squared >>
         sqrt
 
 fn add(a: Int, b: Int)
@@ -341,57 +352,38 @@ car.getInfo()
 
 Closures are functions that can capture values of the scope they were defined in.
 
-Closures are defined using the syntax `{ (...params) -> ReturnType => body }`
+Closures are defined using the syntax `|...params| { body }`
 
 ```
 // Basic closure
-let add = { (a: Int, b: Int) -> Int => a + b }
-
-// Return types can almost always be inferred. So it's better to leave their annotation out.
-let add = { (a: Int, b: Int) => a + b }
+let add = |a: Int, b: Int| { a + b }
 
 // If the closure has only one expression, the {} can be omitted
-let add = (a: Int, b: Int) => a + b
+let add = |a: Int, b: Int| a + b
 
 // A closure's parameter types may be left out in places where they can be inferred.
-let add: Fn(a: Int, b: Int) -> Int = (a, b) => a + b
+let add: Fn(a: Int, b: Int) -> Int = |a, b| a + b
 
-// Additionally, the () can be omitted from block style closures when all types can be
-// inferred and there are one or more parameters.
-let add: Fn(a: Int, b: Int) -> Int = { a, b => a + b }
-
-// If a closure has no parameters, it can be defined using {}
+// If a closure has no parameters the || can be omitted
 let say_hey = { print("hey") }
-```
 
-## Higher Order Functions
-
-```
-// You can pass functions as parameters to methods or other functions
-fn caller(cb: Fn(a: i32, b: i32) -> i32) -> i32 {
+// You can pass closures to functions
+fn caller(cb: Fn(a: Int, b: Int) -> Int) -> Int {
     cb(1, 2)
 }
 
-let add = { (a: Int, b: Int) => a + b }
-caller(add)
-
-// Or
-caller({ a, b => a + b })
-
-// Or
-caller((a, b) => a + b)
+caller(|a, b| a + b)
 ```
 
 ## Trailing Closure Syntax
 
-Dream supports swift-like trailing closure syntax. Trailing closures must always
-be wrapped in {}.
+Dream supports swift-like trailing closure syntax.
 
 ```
-caller() { a, b => a + b }
+caller() |a, b| a + b
 
 // Since the closure is the last parameter of caller, () can be omitted.
-caller { a, b => a + b }
+caller |a, b| a + b
 ```
 
 # Generics
@@ -402,7 +394,7 @@ fn add(T)(a: T, b: T) -> T = {
     a + b
 }
 
-add(i32)(1, 2)
+add(Int)(1, 2)
 
 // With type inference
 add(1, 2)
@@ -415,7 +407,8 @@ struct Target(T) {
 
     // Init functions implicitly take on the type parameters of the struct. So
     // the final signature looks like init(T)(x: T, y: T, z: T) -> Target(T)
-    init(x: T, y: T, z: T) = Target[x, y, z]
+    init(x: T, y: T, z: T)
+        Target[x, y, z]
 }
 
 let t1 = Target(i32)(1, 2, 3)
@@ -444,11 +437,10 @@ type MyNativeMultiValType = wasm_multi_val_type!(i32, i32, i32)
 type MyOtherCustomType = wasm_val_type!(i32)
 
 // Types can have namespaces, impls, and conform to traits
-impl MyOtherCustomType {
-    fn +(l: i32, r: i32) = unsafe {
-        wasm_i32_add()
-    }
-}
+impl MyOtherCustomType
+    fn +(l: i32, r: i32)
+        unsafe
+            wasm_i32_add()
 ```
 
 # Algebraic Effects

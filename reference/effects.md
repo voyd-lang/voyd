@@ -19,7 +19,7 @@ effect Async(T) {
     ctrl fn await(prom: Promise(T)) -> T
 }
 
-fn wait(time: Int): Async {
+fn wait(time: Int) Async {
     await Promise { resolve =>
         setTimeout(resolve, time)
     }
@@ -32,7 +32,7 @@ fn async(T)(Fn()) -> Promise(T) {
     }
 }
 
-fn prom_wait(time: Int) -> Promise(()) = async {
+fn prom_wait(time: Int) -> Promise(Void) async {
     await wait(time)
 }
 ```

@@ -1,30 +1,23 @@
 # Closures
 
-A closure is an anonymous function or lambda that captures the
-values of it's parent scope.
+A closure is an unnamed function that captures the values of it's parent scope.
+Closures can be passed as parameters assigned to variables, or returned from other functions and
+closures.
 
-In Dream closures is any `fn` that does not have a name. These can be passed as parameters
-assigned to variables, or returned from other functions and closures:
+The basic syntax for a closure is:
 ```
-let subtract_one = fn(a: Int) {
-    a - 1
-}
-
-pass_me_a_closure(fn() { "here's one" })
-
-let make_counter = fn() {
-    var counter = 0
-    { counter += 1 }
+let my_closure = |x: Int| {
+    x + 1
 }
 ```
 
 When a closure only contains one expression, the `{}` can be omitted.
 
 ```
-let subtract_one = fn(a: Int) a - 1
+let subtract_one = |a: Int| a - 1
 ```
 
-When a closure has no parameters the `fn()` portion can be entirely omitted:
+When a closure has no parameters the `||` portion can be entirely omitted:
 ```
 pass_me_a_closure({ "here's one" })
 ```
@@ -32,15 +25,15 @@ pass_me_a_closure({ "here's one" })
 # Implicit Parameters
 
 If a closure with no parameters is passed to a function that provides parameters
-on call, they can still be accessed using `_<index>` syntax i.e. `_0` is parameter
-1, `_1` is parameter two and so on. `_` is assumed to be shorthand for `_0`.
+on call, they can still be accessed using `val<index>` syntax i.e. `val0` is parameter
+1, `val1` is parameter two and so on. `val` is assumed to be shorthand for `it0`.
 
 ```
 let array = Array(1, 2, 3)
 
 array.each {
-    print(_) // Prints the current value of the array
-    print(_1) // Prints the current index of the array
+    print(val) // Prints the current value of the array
+    print(val) // Prints the current index of the array
 }
 ```
 
@@ -74,12 +67,7 @@ Rules:
 1. When more than one closure trails a function, the are added to a struct that is passed as the
    last argument of the function
 2. The first trailing closure a added as `main` to the struct.
-3. Subsequent closures must take the form `} label(args) { body }`. This means
-   1. They are always labeled. This label is what they are referred as when passed to the struct
-   2. The label trails the previous closure by only a single space
-   3. Arguments passed to the closure are defined in `()` that come immediately after the label
-   with no space. If there are no arguments `()` can be omitted.
-   4. Closure body comes one space after the args (or label if there are none)
+3. Subsequent closures must take the form `label: <CLOSURE>`
 
 Example:
 ```
@@ -92,7 +80,7 @@ fn foo(bar: Int, baz: [main: Fn(Int) -> Void, on_error: Fn(Err) -> Void])
 // Use the function
 foo(5) {
     print "Yay!!!, Foo worked"
-} on_error(err) {
+} on_error: |err| {
     print(err)
     print("Dang, Foo failed")
 }
@@ -107,48 +95,36 @@ info on how Curly Brace Elision works.
 ```
 let array = Array(1, 2, 3)
 
+array.each |val| val * 2
+array.each { val * 2 }
+
 array.each
-    print($) // The item parameter
-    print($1) // The index parameter
+    print(val) // The item parameter
+    print(val1) // The index parameter
 
 // With named parameters
-array.each fn(item, index)
-    (item, index) =>
+array.each |item, index|
     print(item)
     print(index)
 
-// Multiple trailing closures work too. Just pretend that the curly braces are there.
-// Trailing labels use two white spaces on the next line to indicate they are chained with the
-// previous
+// Multiple trailing closures work too.
 foo(5)
     print "Yay!!!, Foo worked"
-  --on_error(err)
+on_error: |err|
     print(err)
     print("Dang)
 ```
 
 # Gotchas
 
-**Returning functions from closures**
+## Specifying a Return Type
 
-As stated in the functions section, dream functions can omit `{}` when there is only one
-expression:
+Use the standard `fn` syntax, but without the function name.
 ```
-fn add(a: Int, b: Int) a + b
-```
-
-If closures with no parameters can omit the `fn()` portion. Doesn't that mean that this function
-would return a closure?
-```
-fn add(a: Int, b: Int) { a + b }
+let add = fn(a: Int, b: Int) -> Int { a + b }
 ```
 
-No. Thanks to a special rule in Dream. If the first and only expression of a function is
-wrapped in `{}`, the `{}` is treated as a standard block.
-
-In order to return a closure in that scenario you can re-write the function in one of two ways:
 ```
-fn make_closure(a: Int, b: Int) { { a + b } }
-// OR
-fn make_closure(a: Int, b: Int) ({ a + b })
+val strings = someArray.map { it.toString() }
+val strings = someArray.map |it| it.toString()
 ```
