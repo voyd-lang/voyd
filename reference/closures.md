@@ -4,7 +4,14 @@ A closure is an unnamed function that captures the values of it's parent scope.
 Closures can be passed as parameters assigned to variables, or returned from other functions and
 closures.
 
-The basic syntax for a closure is:
+The basic syntax for a closure is the same as a function, but without the name:
+```
+let my_closure = fn(a: Int, b: Int) -> Int {
+    a + b
+}
+```
+
+This can be made even more concise by using the `|` operator:
 ```
 let my_closure = |x: Int| {
     x + 1

@@ -10,6 +10,13 @@ fn add(a: Int, b: Int) -> Int {
 fn add(a: Int, b: Int) {
     a + b
 }
+
+// With curly brace elision, you can the {}.
+fn add(a: Int, b: Int)
+    a + b
+
+// Smaller single expression functions can be written on one line.
+fn add(a: Int, b: Int) a + b
 ```
 
 # Calling Functions
@@ -403,7 +410,7 @@ let three = 2.do_something_with_effect_and_add_one()
 # Full function syntax
 
 ```
-fn fn_name: FnTrait (...args) effects -> return_type {
+fn fn_name: FnTrait (...args): effects -> return_type {
     body
 }
 ```

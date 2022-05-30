@@ -19,7 +19,7 @@ effect Async(T) {
     ctrl fn await(prom: Promise(T)) -> T
 }
 
-fn wait(time: Int) Async {
+fn wait(time: Int): Async {
     await Promise { resolve =>
         setTimeout(resolve, time)
     }
