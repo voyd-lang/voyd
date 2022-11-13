@@ -1,4 +1,4 @@
-import { AST } from "./parser";
+import { AST, Expr } from "./parser";
 
 export type Macro = (ast: AST) => AST;
 
@@ -64,21 +64,21 @@ const parentheticalElision = (
   return transformed;
 };
 
-const removeWhitespace = (ast: string | AST) => {
-  if (typeof ast === "string") return ast;
+const removeWhitespace = (expr: Expr) => {
+  if (typeof expr === "string") return expr;
 
   const transformed: AST = [];
 
-  for (const expr of ast) {
-    if (expr === " " || expr === "\t" || expr === "\n") {
+  for (const exp of expr) {
+    if (exp === " " || exp === "\t" || exp === "\n") {
       continue;
     }
 
-    if (expr instanceof Array) {
-      transformed.push(removeWhitespace(expr));
+    if (exp instanceof Array) {
+      transformed.push(removeWhitespace(exp));
     }
 
-    transformed.push(expr);
+    transformed.push(exp);
   }
 
   return transformed;

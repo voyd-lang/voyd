@@ -1,4 +1,5 @@
-export type AST = (string | AST)[];
+export type AST = Expr[];
+export type Expr = string | AST;
 
 export interface ParseOpts {
   nested?: boolean;
