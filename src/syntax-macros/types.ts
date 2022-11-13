@@ -1,3 +1,3 @@
 import { AST } from "../parser";
 
-export type Macro = (ast: AST) => AST;
+export type SyntaxMacro = (ast: AST) => AST;
