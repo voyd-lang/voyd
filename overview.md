@@ -13,6 +13,7 @@ Features:
 - Algebraic effects and data types
 - Balanced approach to lisp syntax
 - Macros and language extensions
+- Standard mathematical function and infix notion support
 
 ## Comments
 
