@@ -1,12 +1,10 @@
-import { AST, Expr } from "./parser";
-
-export type Macro = (ast: AST) => AST;
+import { AST, Expr } from "../parser";
 
 export type ParentheticalElisionOpts = {
   parentIndentLevel?: number;
 };
 
-const parentheticalElision = (
+export const parentheticalElision = (
   ast: AST,
   opts: ParentheticalElisionOpts = {}
 ): AST => {
@@ -83,5 +81,3 @@ const removeWhitespace = (expr: Expr) => {
 
   return transformed;
 };
-
-export const macros = [parentheticalElision];
