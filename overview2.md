@@ -1,11 +1,18 @@
 # Dream Overview
 
-Dream is a high performance, high level applications language
-with an emphasis on full stack web development.
+Dream is a high performance, high level applications language with an emphasis on full stack web development.
 
 Dream uses a hybrid lisp syntax designed to balance the benefits of data-as-code with the familiarity of C style programming languages.
 
-Dream compiles to WASM.
+Features:
+
+- Functional
+- Strongly Typed
+- First class wasm support
+- Memory Safe GC
+- Algebraic effects and data types
+- Balanced approach to lisp syntax
+- Macros and language extensions
 
 ## Comments
 
@@ -189,6 +196,9 @@ You can also provide an external label to alias the keyword on call.
 ```
 fn add(a:i32 ~ with:b:i32)
   a + b
+  html
+    ul
+      items.each item => (li item)
 
 add 1 with: 4
 ```
