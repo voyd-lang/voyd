@@ -1,3 +1,5 @@
+import { readerMacros } from "./reader-macros";
+
 export type AST = Expr[];
 export type Expr = string | AST;
 
@@ -21,6 +23,12 @@ export function parse(dream: string[], opts: ParseOpts = {}): AST {
 
   while (dream.length) {
     const char = dream.shift();
+
+    if (readerMacros.has(char ?? "")) {
+      pushCurrentToken();
+      ast.push(readerMacros.get(char!)!(dream));
+      continue;
+    }
 
     if (char === "(" && token) {
       ast.push(parse(dream, { insertToken: token, nested: true }));
