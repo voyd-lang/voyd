@@ -31,8 +31,8 @@ false ; Boolean
 "Hello!" ; String, can be multiline, supports interpolation via ${}
 [1 2 3] ; Tuple
 {x: 2 y: 4} ; Struct literal
-$[1 2 3] ; Array
-${x: 3 y: 4} ; Dictionary / Hash Table / Object
+#[1 2 3] ; Array
+#{x: 3 y: 4} ; Dictionary / Hash Table / Object
 ```
 
 ## Variables

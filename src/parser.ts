@@ -13,7 +13,21 @@ export function parse(dream: string[], opts: ParseOpts = {}): AST {
   const ast: AST = [];
   let token = "";
 
+  const runReaderMacro = (tag: string) => {
+    ast.push(
+      readerMacros.get(tag)!(dream, (dream, terminator) =>
+        parse(dream, { nested: true, terminator })
+      )
+    );
+  };
+
   const pushCurrentToken = () => {
+    if (token[0] === "#" && readerMacros.has(token)) {
+      runReaderMacro(token);
+      token = "";
+      return;
+    }
+
     if (token) ast.push(token);
     token = "";
   };
@@ -25,13 +39,21 @@ export function parse(dream: string[], opts: ParseOpts = {}): AST {
   while (dream.length) {
     const char = dream.shift();
 
+    if (char === " " || char === "\t" || char === "\n") {
+      pushCurrentToken();
+      ast.push(char);
+      continue;
+    }
+
+    if (token[0] === "#") {
+      token += char;
+      if (["(", "[", "{"].includes(char!)) pushCurrentToken();
+      continue;
+    }
+
     if (readerMacros.has(char ?? "")) {
       pushCurrentToken();
-      ast.push(
-        readerMacros.get(char!)!(dream, (dream, terminator) =>
-          parse(dream, { nested: true, terminator })
-        )
-      );
+      runReaderMacro(char!);
       continue;
     }
 
@@ -46,15 +68,9 @@ export function parse(dream: string[], opts: ParseOpts = {}): AST {
       continue;
     }
 
-    if (char === ")" || char === opts.terminator) {
+    if (char === ")" || char === opts.terminator || token === opts.terminator) {
       pushCurrentToken();
       if (opts.nested) break;
-      continue;
-    }
-
-    if (char === " " || char === "\t" || char === "\n") {
-      pushCurrentToken();
-      ast.push(char);
       continue;
     }
 
