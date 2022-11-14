@@ -6,6 +6,7 @@ export type Expr = string | AST;
 export interface ParseOpts {
   nested?: boolean;
   insertToken?: string;
+  terminator?: string;
 }
 
 export function parse(dream: string[], opts: ParseOpts = {}): AST {
@@ -26,7 +27,11 @@ export function parse(dream: string[], opts: ParseOpts = {}): AST {
 
     if (readerMacros.has(char ?? "")) {
       pushCurrentToken();
-      ast.push(readerMacros.get(char!)!(dream));
+      ast.push(
+        readerMacros.get(char!)!(dream, (dream, terminator) =>
+          parse(dream, { nested: true, terminator })
+        )
+      );
       continue;
     }
 
@@ -41,7 +46,7 @@ export function parse(dream: string[], opts: ParseOpts = {}): AST {
       continue;
     }
 
-    if (char === ")") {
+    if (char === ")" || char === opts.terminator) {
       pushCurrentToken();
       if (opts.nested) break;
       continue;

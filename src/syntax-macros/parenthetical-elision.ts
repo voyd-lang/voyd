@@ -1,3 +1,4 @@
+import { removeWhitespace } from "../lib/remove-whitespace";
 import { AST, Expr } from "../parser";
 
 export type ParentheticalElisionOpts = {
@@ -100,24 +101,4 @@ const consumeLeadingWhitespace = (ast: AST) => {
     }
     break;
   }
-};
-
-const removeWhitespace = (expr: Expr) => {
-  if (typeof expr === "string") return expr;
-
-  const transformed: AST = [];
-
-  for (const exp of expr) {
-    if (exp === " " || exp === "\t" || exp === "\n") {
-      continue;
-    }
-
-    if (exp instanceof Array) {
-      transformed.push(removeWhitespace(exp));
-    }
-
-    transformed.push(exp);
-  }
-
-  return transformed;
 };
