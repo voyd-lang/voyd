@@ -1,81 +1,86 @@
-import { readerMacros } from "./reader-macros";
+import { getReaderMacroForToken } from "./reader-macros";
 
 export type AST = Expr[];
 export type Expr = string | AST;
 
 export interface ParseOpts {
   nested?: boolean;
-  insertToken?: string;
   terminator?: string;
 }
 
 export function parse(dream: string[], opts: ParseOpts = {}): AST {
   const ast: AST = [];
-  let token = "";
-
-  const runReaderMacro = (tag: string) => {
-    ast.push(
-      readerMacros.get(tag)!(dream, (dream, terminator) =>
-        parse(dream, { nested: true, terminator })
-      )
-    );
-  };
-
-  const pushCurrentToken = () => {
-    if (token[0] === "#" && readerMacros.has(token)) {
-      runReaderMacro(token);
-      token = "";
-      return;
-    }
-
-    if (token) ast.push(token);
-    token = "";
-  };
-
-  if (opts.insertToken) {
-    ast.push(opts.insertToken);
-  }
 
   while (dream.length) {
-    const char = dream.shift();
+    const token = lexer(dream);
 
-    if (char === " " || char === "\t" || char === "\n") {
-      pushCurrentToken();
-      ast.push(char);
+    const readerMacro = getReaderMacroForToken(token);
+
+    if (readerMacro) {
+      ast.push(
+        readerMacro(dream, (dream, terminator) =>
+          parse(dream, { nested: true, terminator })
+        )
+      );
       continue;
     }
 
-    if (token[0] === "#") {
-      token += char;
-      if (["(", "[", "{"].includes(char!)) pushCurrentToken();
-      continue;
-    }
-
-    if (readerMacros.has(char ?? "")) {
-      pushCurrentToken();
-      runReaderMacro(char!);
-      continue;
-    }
-
-    if (char === "(" && token) {
-      ast.push(parse(dream, { insertToken: token, nested: true }));
-      token = "";
-      continue;
-    }
-
-    if (char === "(") {
+    if (token === "(") {
       ast.push(parse(dream, { nested: true }));
       continue;
     }
 
-    if (char === ")" || char === opts.terminator || token === opts.terminator) {
-      pushCurrentToken();
+    if (token === ")" || token === opts.terminator) {
       if (opts.nested) break;
       continue;
     }
 
-    token += char;
+    ast.push(token);
   }
 
   return ast;
 }
+
+const lexer = (dream: string[]): string => {
+  let token = "";
+
+  while (dream.length) {
+    const char = dream[0];
+    const isWhitespace = /\s/.test(char);
+
+    if (isWhitespace && !token.length) {
+      token += dream.shift()!;
+      break;
+    }
+
+    if (isWhitespace) {
+      break;
+    }
+
+    const isOpenBrace = /[\(\[\{]/.test(char);
+
+    if (isOpenBrace && (token[0] === "#" || !token.length)) {
+      token += dream.shift()!;
+      break;
+    }
+
+    if (isOpenBrace) {
+      break;
+    }
+
+    const isCloseBrace = /[\)\]\}]/.test(char);
+
+    if (isCloseBrace && !token.length) {
+      token += dream.shift()!;
+      break;
+    }
+
+    if (isCloseBrace) {
+      break;
+    }
+
+    token += dream.shift()!;
+  }
+
+  return token;
+};

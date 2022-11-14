@@ -7,4 +7,5 @@ const ast = syntaxMacros.reduce(
   (ast, macro) => macro(ast),
   parse(file.split(""))
 );
+// const ast = parse(file.split(""));
 console.log(JSON.stringify(ast, undefined, 2));
