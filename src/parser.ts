@@ -46,36 +46,15 @@ const lexer = (dream: string[]): string => {
 
   while (dream.length) {
     const char = dream[0];
-    const isWhitespace = /\s/.test(char);
 
-    if (isWhitespace && !token.length) {
+    const isTerminator = /[\.\{\[\(\}\]\)\s]/.test(char);
+
+    if (isTerminator && (token[0] === "#" || !token.length)) {
       token += dream.shift()!;
       break;
     }
 
-    if (isWhitespace) {
-      break;
-    }
-
-    const isOpenBrace = /[\(\[\{]/.test(char);
-
-    if (isOpenBrace && (token[0] === "#" || !token.length)) {
-      token += dream.shift()!;
-      break;
-    }
-
-    if (isOpenBrace) {
-      break;
-    }
-
-    const isCloseBrace = /[\)\]\}]/.test(char);
-
-    if (isCloseBrace && !token.length) {
-      token += dream.shift()!;
-      break;
-    }
-
-    if (isCloseBrace) {
+    if (isTerminator) {
       break;
     }
 
