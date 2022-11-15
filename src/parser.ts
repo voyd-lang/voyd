@@ -18,7 +18,7 @@ export function parse(dream: string[], opts: ParseOpts = {}): AST {
 
     if (readerMacro) {
       ast.push(
-        readerMacro(dream, (dream, terminator) =>
+        readerMacro(dream, token, (dream, terminator) =>
           parse(dream, { nested: true, terminator })
         )
       );

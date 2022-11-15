@@ -3,5 +3,8 @@ import { ReaderMacro } from "./types";
 
 export const structLiteralMacro: ReaderMacro = {
   tag: "{",
-  macro: (dream, reader) => ["struct", ...removeWhitespace(reader(dream, "}"))],
+  macro: (dream, _, reader) => [
+    "struct",
+    ...removeWhitespace(reader(dream, "}")),
+  ],
 };

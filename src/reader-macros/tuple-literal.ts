@@ -3,5 +3,8 @@ import { ReaderMacro } from "./types";
 
 export const tupleLiteralMacro: ReaderMacro = {
   tag: "[",
-  macro: (dream, reader) => ["tuple", ...removeWhitespace(reader(dream, "]"))],
+  macro: (dream, _, reader) => [
+    "tuple",
+    ...removeWhitespace(reader(dream, "]")),
+  ],
 };

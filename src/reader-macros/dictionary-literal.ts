@@ -3,7 +3,7 @@ import { ReaderMacro } from "./types";
 
 export const dictionaryLiteralMacro: ReaderMacro = {
   tag: "#{",
-  macro: (dream, reader) => [
+  macro: (dream, _, reader) => [
     "dictionary",
     ...removeWhitespace(reader(dream, "}")),
   ],

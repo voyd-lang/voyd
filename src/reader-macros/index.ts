@@ -3,6 +3,7 @@ import { dictionaryLiteralMacro } from "./dictionary-literal";
 import { stringMacro } from "./double-quote";
 import { structLiteralMacro } from "./struct-literal";
 import { tupleLiteralMacro } from "./tuple-literal";
+import { typedParameterMacro } from "./typed-parameter";
 import { ReaderMacro } from "./types";
 
 const macros = [
@@ -11,6 +12,7 @@ const macros = [
   tupleLiteralMacro,
   arrayLiteralMacro,
   dictionaryLiteralMacro,
+  typedParameterMacro,
 ];
 
 const readerMacros = macros.reduce(
