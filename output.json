@@ -1,0 +1,25 @@
+[
+  [
+    "fn",
+    ["fib", ["typed-parameter", "n", "Int"]],
+    "->",
+    "Int",
+    [
+      "if",
+      ["<", "n", ["int", "2"]],
+      ["n"],
+      [
+        "+",
+        ["fib", ["-", "n", ["int", "1"]]],
+        ["fib", ["-", "n", ["int", "2"]]]
+      ]
+    ]
+  ],
+  [
+    "fn",
+    ["call-method", ["typed-parameter", "n", "Float"]],
+    "->",
+    "Float",
+    ["add.a.ridiculous", "n", ["float", "1.7"]]
+  ]
+]
