@@ -3,26 +3,21 @@
 An experimental WebAssembly language. Designed to make writing high performance
 web apps fun for individuals and teams alike.
 
+https://justforfunnoreally.dev/
+
 ```dm
-/** Find the value of the fibonacci sequence at index n */
-fn fib(n: i32) -> i32 =
-    if n < 2 { n }
-    else { fib(n - 1) + fib(n - 2) }
+; Find the value of the fibonacci sequence at index n
+fn fib(n:i32) -> i32
+    if (n < 2)
+        n
+        fib(n - 1) + fib(n - 2)
 
-/** All binary programs have a main function */
-fn main() -> Void = {
+; All binary programs have a main function
+fn main() -> Void
     var index = 0
-    while index <= 15 {
-
-        // Print fibonacci sequence at index using UFCS.
-        index.fib().print()
-
-        // Standard call syntax is also supported.
-        // i.e print(fib(index))
-
-        index = index + 1
-    }
-}
+    for num in range(15)
+        ; Print fibonacci sequence at index using UFCS.
+        num.fib().print()
 ```
 
 **Disclaimer**
@@ -31,6 +26,7 @@ Most MVP features have not been implemented yet. The language does run and compi
 though. So feel free to play around.
 
 **Features:**
+
 - First class WebAssembly support
 - Rust inspired Functional / Expression oriented syntax
 - Algebraic effects
@@ -41,6 +37,7 @@ though. So feel free to play around.
 - Strict and Unsafe function enforcement.
 
 **Core values:**
+
 - Developer satisfaction
 - Predictability
 - Balance between performance and simplicity. Zero-Cost abstractions is a non-goal.
@@ -53,11 +50,13 @@ though. So feel free to play around.
 # Getting Started
 
 **Install**
+
 ```
 npm i -g dreamc
 ```
 
 **Usage**
+
 ```
 dreamc path/to/code.dm
 ```
@@ -69,6 +68,7 @@ To get a feel of the language, check out the [overview.md file](./overview.md).
 For an in depth language guide, check out the [reference folder](./reference).
 
 # Feature Support Check List
+
 - [x] Methods
 - [x] If statements
 - [x] While loops
