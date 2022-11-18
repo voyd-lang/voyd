@@ -1,4 +1,4 @@
-import { AST } from "../parser";
+import { AST } from "../parser.mjs";
 
 export const functionalNotation = (ast: AST): AST => {
   return ast

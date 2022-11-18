@@ -1,5 +1,5 @@
-import { AST } from "../parser";
-import { ReaderMacro } from "./types";
+import { AST } from "../parser.mjs";
+import { ReaderMacro } from "./types.mjs";
 
 const macro = (dream: string[]): AST => {
   let string = "";

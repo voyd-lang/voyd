@@ -1,4 +1,4 @@
-import { ReaderMacro } from "./types";
+import { ReaderMacro } from "./types.mjs";
 
 /** Splits a token separated by dots when not a valid number */
 export const dotMacro: ReaderMacro = {

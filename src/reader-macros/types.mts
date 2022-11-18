@@ -1,4 +1,4 @@
-import { AST } from "../parser";
+import { AST } from "../parser.mjs";
 
 export interface ReaderMacro {
   tag: string | RegExp;

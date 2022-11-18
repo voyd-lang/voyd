@@ -1,4 +1,4 @@
-import { AST, Expr } from "../parser";
+import { AST, Expr } from "../parser.mjs";
 
 export const infixOperators = new Set([
   "+",

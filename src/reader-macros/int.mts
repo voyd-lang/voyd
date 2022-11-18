@@ -1,4 +1,4 @@
-import { ReaderMacro } from "./types";
+import { ReaderMacro } from "./types.mjs";
 
 export const intMacro: ReaderMacro = {
   tag: /^[+-]?\d+$/,

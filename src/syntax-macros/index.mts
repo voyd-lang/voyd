@@ -1,7 +1,7 @@
-import { functionalNotation } from "./functional-notation";
-import { infix } from "./infix";
-import { parentheticalElision } from "./parenthetical-elision";
-import { SyntaxMacro } from "./types";
+import { functionalNotation } from "./functional-notation.mjs";
+import { infix } from "./infix.mjs";
+import { parentheticalElision } from "./parenthetical-elision.mjs";
+import { SyntaxMacro } from "./types.mjs";
 
 export const syntaxMacros: SyntaxMacro[] = [
   functionalNotation,

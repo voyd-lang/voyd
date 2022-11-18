@@ -1,5 +1,5 @@
-import { removeWhitespace } from "../lib/remove-whitespace";
-import { AST, Expr } from "../parser";
+import { removeWhitespace } from "../lib/remove-whitespace.mjs";
+import { AST, Expr } from "../parser.mjs";
 
 export type ParentheticalElisionOpts = {
   indentLevel?: number;

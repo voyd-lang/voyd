@@ -1,1 +1,1 @@
-export * from "./remove-whitespace";
+export * from "./remove-whitespace.mjs";

@@ -1,4 +1,4 @@
-import { getReaderMacroForToken } from "./reader-macros";
+import { getReaderMacroForToken } from "./reader-macros/index.mjs";
 
 export type AST = Expr[];
 export type Expr = string | AST;

@@ -1,13 +1,13 @@
-import { arrayLiteralMacro } from "./array-literal";
-import { dictionaryLiteralMacro } from "./dictionary-literal";
-import { stringMacro } from "./double-quote";
-import { floatMacro } from "./float";
-import { intMacro } from "./int";
-import { scientificENotationMacro } from "./scientific-e-notation";
-import { structLiteralMacro } from "./struct-literal";
-import { tupleLiteralMacro } from "./tuple-literal";
-import { typedParameterMacro } from "./typed-parameter";
-import { ReaderMacro } from "./types";
+import { arrayLiteralMacro } from "./array-literal.mjs";
+import { dictionaryLiteralMacro } from "./dictionary-literal.mjs";
+import { stringMacro } from "./double-quote.mjs";
+import { floatMacro } from "./float.mjs";
+import { intMacro } from "./int.mjs";
+import { scientificENotationMacro } from "./scientific-e-notation.mjs";
+import { structLiteralMacro } from "./struct-literal.mjs";
+import { tupleLiteralMacro } from "./tuple-literal.mjs";
+import { typedParameterMacro } from "./typed-parameter.mjs";
+import { ReaderMacro } from "./types.mjs";
 
 const macros = [
   stringMacro,

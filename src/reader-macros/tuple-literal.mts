@@ -1,5 +1,5 @@
-import { removeWhitespace } from "../lib";
-import { ReaderMacro } from "./types";
+import { removeWhitespace } from "../lib/index.mjs";
+import { ReaderMacro } from "./types.mjs";
 
 export const tupleLiteralMacro: ReaderMacro = {
   tag: "[",

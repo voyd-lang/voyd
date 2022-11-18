@@ -1,3 +1,3 @@
-import { AST } from "../parser";
+import { AST } from "../parser.mjs";
 
 export type SyntaxMacro = (ast: AST) => AST;

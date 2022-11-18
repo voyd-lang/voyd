@@ -1,4 +1,4 @@
-import { ReaderMacro } from "./types";
+import { ReaderMacro } from "./types.mjs";
 
 export const typedParameterMacro: ReaderMacro = {
   tag: /^[^.\s:]+(:[^.\s:]+){1,2}$/g,
