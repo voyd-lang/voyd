@@ -2,5 +2,5 @@ import { ReaderMacro } from "./types.mjs";
 
 export const intMacro: ReaderMacro = {
   tag: /^[+-]?\d+$/,
-  macro: (_, token) => ["int", token],
+  macro: (_, token) => parseInt(token),
 };

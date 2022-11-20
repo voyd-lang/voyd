@@ -11,9 +11,9 @@ global scope and therefore must each have a unique identifier.
 
 ```lisp
 (define-function $identifier
-  (parameters ($param $type)*)
-  (variables ($variable $type)*)
-  (return-type $type)
+  (parameters ($param $type-id)*)
+  (variables ($variable $type-id)*)
+  (return-type $type-id)
   $expr*)
 ```
 
@@ -25,11 +25,11 @@ global scope and therefore must each have a unique identifier.
   ;; Function parameter list
   (parameters
     ;; Parameter definition
-    (n Int))
+    (n i32))
 
   (variables)
 
-  (return-type Int)
+  (return-type i32)
 
   (if (< n 2)
     n

@@ -16,5 +16,9 @@
     "Structs",
     "UFCS",
     "WASM"
-  ]
+  ],
+  "debug.javascript.terminalOptions": {
+    "skipFiles": ["<node_internals>/**"],
+    "outFiles": ["${workspaceFolder}/**/*.mjs"]
+  }
 }

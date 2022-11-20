@@ -1,7 +1,7 @@
 import { getReaderMacroForToken } from "./reader-macros/index.mjs";
 
 export type AST = Expr[];
-export type Expr = string | AST;
+export type Expr = string | number | AST;
 
 export interface ParseOpts {
   nested?: boolean;

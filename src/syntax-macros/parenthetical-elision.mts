@@ -1,3 +1,4 @@
+import { isList } from "../lib/is-list.mjs";
 import { removeWhitespace } from "../lib/remove-whitespace.mjs";
 import { AST, Expr } from "../parser.mjs";
 
@@ -21,6 +22,11 @@ export const parentheticalElision = (
   };
 
   const push = (expr: Expr) => {
+    if (!isList(expr)) {
+      transformed.push(expr);
+      return;
+    }
+
     if (expr.length === 0) return;
 
     if (expr.length === 1 && expr[0] instanceof Array) {

@@ -1,9 +1,10 @@
-import { AST, Expr } from "../parser.mjs";
+import { isList } from "../lib/is-list.mjs";
+import { AST } from "../parser.mjs";
 
-/** Converts fn syntax full function definition (defun). TODO: Move to normal macro */
+/** Converts fn syntax full function definition (define-function). TODO: Move to normal macro */
 export const fn = (ast: AST): AST => {
-  return ast.map((expr, index, array) => {
-    if (typeof expr === "string") return expr;
+  return ast.map((expr) => {
+    if (!isList(expr)) return expr;
     if (expr[0] !== "fn") return fn(expr);
 
     const definitions = expr[1];
@@ -13,45 +14,56 @@ export const fn = (ast: AST): AST => {
     }
 
     const identifier = definitions[0];
+
     const params = [
       "parameters",
-      definitions.slice(1).map((expr) => {
+      ...definitions.slice(1).map((expr) => {
+        if (!isList(expr)) {
+          throw new Error(`Expected list, got ${expr}`);
+        }
+
         const noLabel = expr.length === 3;
         const identifier = noLabel ? expr[1] : expr[2];
         const type = noLabel ? expr[2] : expr[3];
-        const label = noLabel ? [] : expr[1];
-        return ["parameter", identifier, type, label];
+        return [identifier, type];
       }),
     ];
 
     const typeArrowIndex =
       expr[2] === "->" ? 2 : expr[3] === "->" ? 3 : undefined;
 
-    const effects = [
-      "effects",
-      ...(typeArrowIndex === 3
-        ? []
-        : typeof expr[2] === "string"
-        ? [expr[2]]
-        : expr[2]),
+    const returnType = [
+      "return-type",
+      typeArrowIndex ? expr[typeArrowIndex + 1] : [],
     ];
 
-    const returnType =
-      expr[2] === "->"
-        ? expr[3]
-        : toType(expr[3]) === "->"
-        ? toType(expr[4])
-        : [];
+    const expressions = typeArrowIndex
+      ? expr.slice(typeArrowIndex + 2)
+      : expr.slice(2);
 
-    return ["defun", identifier, params, effects, returnType];
+    const variables = ["variables", ...findVariables(expressions)];
+
+    return [
+      "define-function",
+      identifier,
+      params,
+      variables,
+      returnType,
+      ...expressions,
+    ];
   });
 };
 
-const toType = (expr: Expr): Expr => {
-  if (typeof expr === "string") return ["type", expr];
-  return ["type", expr[0], ...expr.slice(1).map(toType)];
-};
+const findVariables = (fnBody: AST): AST => {
+  return fnBody.reduce((vars: AST, expr) => {
+    if (!(expr instanceof Array)) return vars;
 
-const toEffect = (expr: Expr): Expr => {
-  if (typeof expr === "string") return ["effect", expr];
+    if (expr[0] === "define-let") {
+      vars.push([expr[1], expr[2]]);
+      return vars;
+    }
+
+    vars.push(...findVariables(expr));
+    return vars;
+  }, []);
 };
