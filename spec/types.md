@@ -4,10 +4,10 @@
 
 `define type` Defines a new type,
 
-### Grammar
+### Expanded Meta Syntax
 
-```ebnf
-DefineType = "(" "define-type" Identifier TypeExpr ")";
+```lisp
+(define-type $identifier $type-expr)
 ```
 
 ### Examples
@@ -31,7 +31,7 @@ Define AsyncNumericOp as an asynchronous function that accepts a number and retu
 
 ## Type Parameters
 
-### Grammar
+### Syntax
 
 ```ebnf
 

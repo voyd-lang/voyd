@@ -22,7 +22,18 @@ Symbols in dream follow the same rules as symbols in lisp with a few modificatio
 ## Grammar
 
 ```ebnf
-Symbol = !Number FirstSymbolChar { Alphanumeric };
+Symbol = !Number FirstSymbolChar Alphanumeric*;
 FirstSymbolChar = "<" | Alphanumeric;
 Alphanumeric = #'[^\s\(\)\[\]\{\}<@&]';
+```
+
+# Number
+
+## Grammar
+
+```ebnf
+Number = ScientificNumber | Int | Float;
+ScientificNumber = #'^[+-]?\d(\.\d+)?[Ee][+-]?\d+$';
+Int = #'^[+-]?\d+$';
+Float = #'^[+-]?\d+\.\d+$';
 ```

@@ -1,22 +1,23 @@
 # Functions Spec
 
-# Defun
+## Define Function
 
-A complete expanded function definition. The fn macro expands to this value.
+The final function definition. This function is as close to the
+final representation the AST can get and is interpreted directly
+by the code generator. These functions are registered in the
+global scope and therefore must each have a unique identifier.
 
-## Grammar
+### Expanded Meta Syntax
 
-```ebnf
-Defun = "(" "defun" Identifier TypeParameters Parameters Effects ReturnType Documentation { Block } ")";
-Parameters = "(" "parameters"  { Parameter } ")";
-Parameter = "(" "parameter" Identifier OptionalType Label ")";
-Effects = "(" "effects" { Effect } ")";
-Documentation = "(" "documentation" { String } ")";
-ReturnType = Type | EmptyList;
-Label = Identifier | EmptyList;
+```lisp
+(define-function $identifier
+  (parameters ($param $type)*)
+  (variables ($variable $type)*)
+  (return-type $type)
+  $expr*)
 ```
 
-## Examples
+### Examples
 
 ```lisp
 ;; Define a function fib
@@ -24,19 +25,13 @@ Label = Identifier | EmptyList;
   ;; Function parameter list
   (parameters
     ;; Parameter definition
-    (n Int ()))
+    (n Int))
 
-  (effects)
+  (variables)
 
-  Int
-
-  (documentation "returns the value of the fibonacci sequence at the provided index")
+  (return-type Int)
 
   (if (< n 2)
     n
     (+ (fib (- n 1))) (fib (- n 2))))
-```
-
-```lisp
-
 ```
