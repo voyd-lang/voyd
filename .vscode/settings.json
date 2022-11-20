@@ -1,18 +1,20 @@
 {
-    "cSpell.words": [
-        "Deno",
-        "Inout",
-        "Multivalue",
-        "Structs",
-        "UFCS",
-        "WASM",
-        "binaryen",
-        "curlys",
-        "elif",
-        "elifs",
-        "impls",
-        "memcpy",
-        "popcnt",
-        "rotr"
-    ]
+  "cSpell.words": [
+    "binaryen",
+    "curlys",
+    "Defun",
+    "Deno",
+    "EBNF",
+    "elif",
+    "elifs",
+    "impls",
+    "Inout",
+    "memcpy",
+    "Multivalue",
+    "popcnt",
+    "rotr",
+    "Structs",
+    "UFCS",
+    "WASM"
+  ]
 }

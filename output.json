@@ -17,9 +17,10 @@
   ],
   [
     "fn",
-    ["call-method", ["typed-parameter", "n", "Float"]],
+    ["call-method", ["typed-parameter", "label", "n", "Float"]],
     "->",
     "Float",
     ["add.a.ridiculous", "n", ["float", "1.7"]]
-  ]
+  ],
+  ["fn", ["multi-line-block"], "->", "Hello", ["world"], ["how-are-we"]]
 ]
