@@ -14,7 +14,7 @@ global scope and therefore must each have a unique identifier.
   (parameters ($param $type-id)*)
   (variables ($variable $type-id)*)
   (return-type $type-id)
-  $expr*)
+  $expr)
 ```
 
 ### Examples

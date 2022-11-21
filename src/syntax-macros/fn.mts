@@ -49,7 +49,7 @@ export const fn = (ast: AST): AST => {
       params,
       variables,
       returnType,
-      ...expressions,
+      ["block", ...expressions],
     ];
   });
 };

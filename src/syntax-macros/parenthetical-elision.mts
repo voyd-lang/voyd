@@ -2,14 +2,15 @@ import { isList } from "../lib/is-list.mjs";
 import { removeWhitespace } from "../lib/remove-whitespace.mjs";
 import { AST, Expr } from "../parser.mjs";
 
-export type ParentheticalElisionOpts = {
+export const parentheticalElision = (ast: AST): AST => elideParens(ast) as AST;
+
+export type ElideParensOpts = {
   indentLevel?: number;
 };
 
-export const parentheticalElision = (
-  ast: AST,
-  opts: ParentheticalElisionOpts = {}
-): AST => {
+/** Not in love with this alg yet */
+const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
+  if (!isList(ast)) return ast;
   const transformed: AST = [];
   let indentLevel = opts.indentLevel;
 
@@ -22,18 +23,7 @@ export const parentheticalElision = (
   };
 
   const push = (expr: Expr) => {
-    if (!isList(expr)) {
-      transformed.push(expr);
-      return;
-    }
-
-    if (expr.length === 0) return;
-
-    if (expr.length === 1 && expr[0] instanceof Array) {
-      transformed.push(expr[0]);
-      return;
-    }
-
+    if (isList(expr) && expr.length === 0) return;
     transformed.push(expr);
   };
 
@@ -43,7 +33,7 @@ export const parentheticalElision = (
     if (next === "\n" && nextLineHasChildExpr()) {
       const indentLevel = nextExprIndentLevel(ast);
       consumeLeadingWhitespace(ast);
-      push(parentheticalElision(ast, { indentLevel }));
+      push(elideParens(ast, { indentLevel }));
       continue;
     }
 
@@ -63,15 +53,16 @@ export const parentheticalElision = (
     }
   }
 
+  // Continue consuming until the whole ast has been consumed (undefined === top level)
   if (ast.length && typeof indentLevel === "undefined") {
     consumeLeadingWhitespace(ast);
+    return [...transformed, elideParens(ast)];
   }
 
-  if (ast.length && typeof indentLevel === "undefined") {
-    return [...transformed, parentheticalElision(ast)];
-  }
+  /** Do not flatten top level ast */
+  if (typeof indentLevel === "undefined") return transformed;
 
-  return transformed;
+  return transformed.length === 1 ? transformed[0] : transformed;
 };
 
 const nextExprIndentLevel = (ast: AST) => {

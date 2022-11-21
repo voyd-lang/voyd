@@ -1,3 +1,4 @@
+import { block } from "./block.mjs";
 import { fn } from "./fn.mjs";
 import { functionalNotation } from "./functional-notation.mjs";
 import { infix } from "./infix.mjs";
@@ -9,4 +10,5 @@ export const syntaxMacros: SyntaxMacro[] = [
   parentheticalElision,
   infix,
   fn,
+  block,
 ];
