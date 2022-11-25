@@ -29,13 +29,27 @@ export const infix = (ast: AST) => {
     return isOperand(next);
   };
 
-  const push = (op: Expr, operand1: Expr, operand2: Expr) => {
-    if (transformed.length !== 0 || operatorIsNext()) {
-      transformed.push([op, operand1, operand2]);
+  const push = (ast: AST) => {
+    if (operatorIsNext()) {
+      transformed.push(ast);
       return;
     }
 
-    transformed.push(op, operand1, operand2);
+    transformed.push(...ast);
+  };
+
+  const pushDot = (operand1: Expr, operand2: Expr) => {
+    if (operand2 instanceof Array) {
+      push([operand2[0], operand1, ...operand2.slice(1)]);
+      return;
+    }
+
+    push([operand2, operand1]);
+  };
+
+  const pushOperation = (op: Expr, operand1: Expr, operand2: Expr) => {
+    if (op === ".") return pushDot(operand1, operand2);
+    push([op, operand1, operand2]);
   };
 
   while (ast.length) {
@@ -43,14 +57,14 @@ export const infix = (ast: AST) => {
 
     if (isOperand(operand1) && transformed.length && ast.length >= 1) {
       const operand2 = shift();
-      push(operand1, transformed.pop()!, operand2);
+      pushOperation(operand1, transformed.pop()!, operand2);
       continue;
     }
 
     if (operatorIsNext() && ast.length >= 2) {
       const op = shift();
       const operand2 = shift();
-      push(op, operand1, operand2);
+      pushOperation(op, operand1, operand2);
       continue;
     }
 
