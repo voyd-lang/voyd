@@ -21,7 +21,7 @@ are also useful for defining operator overloads.
 ### Syntax
 
 ```
-'i can be used as an identifier`
+'i can be used as an identifier'
 ```
 
 ## String literal
