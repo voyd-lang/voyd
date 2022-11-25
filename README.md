@@ -78,6 +78,8 @@ For an in depth language guide, check out the [reference folder](./reference).
 - [ ] Variables
 - [x] If statements
 - [ ] Function overloading 🚧
+- [ ] Type checking
+- [ ] Type inference
 - [ ] Match statements
 - [ ] Loops
 - [ ] Algebraic data types
