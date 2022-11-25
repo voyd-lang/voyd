@@ -77,6 +77,7 @@ For an in depth language guide, check out the [reference folder](./reference).
 - [x] UFCS (dot notation)
 - [ ] Variables
 - [x] If statements
+- [x] WASM code generation
 - [ ] Function overloading 🚧
 - [ ] Type checking
 - [ ] Type inference
