@@ -96,3 +96,4 @@ For an in depth language guide, check out the [reference folder](./reference).
 - [ ] Array literals 🚧
 - [ ] Named arguments
 - [ ] Rest parameters
+- [ ] WASM module function exports
