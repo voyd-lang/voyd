@@ -3,25 +3,27 @@ import { removeWhitespace } from "../lib/remove-whitespace.mjs";
 import { AST, Expr } from "../parser.mjs";
 import { infixOperators } from "./infix.mjs";
 
-export const parentheticalElision = (ast: AST): AST => elideParens(ast) as AST;
+export const parentheticalElision = (ast: AST): AST => {
+  const transformed: AST = [];
+
+  while (ast.length) {
+    consumeLeadingWhitespace(ast);
+    transformed.push(elideParens(ast));
+  }
+
+  return transformed;
+};
 
 export type ElideParensOpts = {
   indentLevel?: number;
 };
 
-/** Not in love with this alg yet */
 const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
   if (!isList(ast)) return ast;
   const transformed: AST = [];
-  let indentLevel = opts.indentLevel;
+  let indentLevel = opts.indentLevel ?? 0;
 
-  const nextLineHasChildExpr = () => {
-    if (typeof indentLevel === "undefined" && ast.length) {
-      return true;
-    }
-
-    return nextExprIndentLevel(ast) > (indentLevel ?? 0);
-  };
+  const nextLineHasChildExpr = () => nextExprIndentLevel(ast) > indentLevel;
 
   const push = (expr: Expr) => {
     if (isList(expr) && expr.length === 0) return;
@@ -61,15 +63,6 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
       continue;
     }
   }
-
-  // Continue consuming until the whole ast has been consumed (undefined === top level)
-  if (ast.length && typeof indentLevel === "undefined") {
-    consumeLeadingWhitespace(ast);
-    return [...transformed, elideParens(ast)];
-  }
-
-  /** Do not flatten top level ast */
-  if (typeof indentLevel === "undefined") return transformed;
 
   return transformed.length === 1 ? transformed[0] : transformed;
 };
