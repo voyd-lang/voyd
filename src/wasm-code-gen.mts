@@ -5,7 +5,6 @@ import { AST, Expr } from "./parser.mjs";
 export const genWasmCode = (ast: AST) => {
   const mod = new binaryen.Module();
   const functionMap = genFunctionMap(ast);
-  registerStandardFunctions(mod, functionMap);
   compileExpression({ expr: ast, mod, parameters: new Map(), functionMap });
   return mod;
 };
@@ -32,7 +31,11 @@ const compileSymbol = (opts: CompileExpressionOpts) => {
     throw new Error("Expected symbol");
   }
 
-  const info = parameters.get(expr);
+  if (expr[0] === '"') {
+    throw new Error("String literals not yet supported");
+  }
+
+  const info = parameters.get(toIdentifier(expr));
   if (!info) {
     throw new Error(`Unrecognized symbol ${expr}`);
   }
@@ -63,10 +66,11 @@ const compileList = (opts: CompileListOpts): number => {
 
 const compileFunctionCall = (opts: CompileListOpts) => {
   const { expr, functionMap, mod } = opts;
-  const identifier = expr[0] as string;
+  const identifier = toIdentifier(expr[0] as string);
 
   if (identifier === "define-function") return compileFunction(opts);
   if (identifier === "if") return compileIf(opts);
+  if (identifier === "binaryen-mod") return compileBinaryenModCall(opts);
 
   const functionInfo = functionMap.get(identifier);
   if (!functionInfo) {
@@ -80,9 +84,20 @@ const compileFunctionCall = (opts: CompileListOpts) => {
   return mod.call(identifier, args, functionInfo.returnType);
 };
 
+const compileBinaryenModCall = (opts: CompileListOpts): number => {
+  const { expr } = opts;
+  const call = expr as any;
+  const namespace = call[1][0];
+  const func = call[1][1];
+  const args = call[2];
+  return (opts.mod as any)[namespace][func](
+    ...args.map((expr: Expr) => compileExpression({ ...opts, expr }))
+  );
+};
+
 const compileFunction = (opts: CompileListOpts): number => {
   const { expr, mod } = opts;
-  const identifier = expr[1] as string;
+  const identifier = toIdentifier(expr[1] as string);
   const returnType = mapBinaryenType((expr[4] as AST)[1] as string);
   const { parameters, parameterTypes } = getFunctionParameters(expr[2] as AST);
   const body = compileList({
@@ -122,7 +137,7 @@ const getFunctionParameters = (ast: AST) => {
       }
       const type = mapBinaryenType(expr[1] as string);
 
-      prev.parameters.set(expr[0] as string, { index, type });
+      prev.parameters.set(toIdentifier(expr[0] as string), { index, type });
       prev.types.push(type);
       return prev;
     },
@@ -145,8 +160,8 @@ const genFunctionMap = (ast: AST): FunctionMap => {
     if (!isList(expr)) return map;
 
     if (ast[0] === "define-function") {
-      map.set(ast[1] as string, {
-        returnType: mapBinaryenType((ast[4] as AST)[1] as string),
+      map.set(toIdentifier(ast[1] as string), {
+        returnType: mapBinaryenType(toIdentifier((ast[4] as AST)[1] as string)),
       });
       return map;
     }
@@ -161,141 +176,4 @@ const mapBinaryenType = (typeIdentifier: string): binaryen.Type => {
   throw new Error(`Unsupported type ${typeIdentifier}`);
 };
 
-/** TODO: Move everything below into the standard library */
-
-const registerStandardFunctions = (mod: binaryen.Module, map: FunctionMap) => {
-  const { i32, f32 } = binaryen;
-  const { i32: i32m, f32: f32m } = mod;
-  const common = { mod, map };
-  registerLogicFunction({
-    name: ">",
-    type: i32,
-    operator: i32m.gt_s,
-    ...common,
-  });
-  registerLogicFunction({
-    name: "==",
-    type: i32,
-    operator: i32m.eq,
-    ...common,
-  });
-  registerLogicFunction({
-    name: "lt_f32",
-    type: f32,
-    operator: f32m.lt,
-    ...common,
-  });
-  registerLogicFunction({
-    name: "gt_f32",
-    type: f32,
-    operator: f32m.gt,
-    ...common,
-  });
-  registerLogicFunction({
-    name: "eq_f32",
-    type: f32,
-    operator: f32m.eq,
-    ...common,
-  });
-  registerMathFunction({
-    name: "+",
-    type: i32,
-    operator: i32m.add,
-    ...common,
-  });
-  registerMathFunction({
-    name: "-",
-    type: i32,
-    operator: i32m.sub,
-    ...common,
-  });
-  registerMathFunction({
-    name: "*",
-    type: i32,
-    operator: i32m.mul,
-    ...common,
-  });
-  registerMathFunction({
-    name: "add_f32",
-    type: f32,
-    operator: f32m.add,
-    ...common,
-  });
-  registerMathFunction({
-    name: "sub_f32",
-    type: f32,
-    operator: f32m.sub,
-    ...common,
-  });
-  registerMathFunction({
-    name: "mul_f32",
-    type: f32,
-    operator: f32m.mul,
-    ...common,
-  });
-  registerMathFunction({
-    name: "div_f32",
-    type: f32,
-    operator: f32m.div,
-    ...common,
-  });
-};
-
-const registerMathFunction = (opts: {
-  mod: binaryen.Module;
-  name: string;
-  type: number;
-  operator: (left: number, right: number) => number;
-  map: FunctionMap;
-}) => {
-  const { mod, name, type, operator, map } = opts;
-  return registerBinaryFunction({
-    mod,
-    name,
-    paramType: type,
-    returnType: type,
-    operator,
-    map,
-  });
-};
-
-const registerLogicFunction = (opts: {
-  mod: binaryen.Module;
-  name: string;
-  type: number;
-  operator: (left: number, right: number) => number;
-  map: FunctionMap;
-}) => {
-  const { mod, name, type, operator, map } = opts;
-  return registerBinaryFunction({
-    mod,
-    name,
-    paramType: type,
-    returnType: binaryen.i32,
-    operator,
-    map,
-  });
-};
-
-const registerBinaryFunction = (opts: {
-  mod: binaryen.Module;
-  name: string;
-  paramType: number;
-  returnType: number;
-  operator: (left: number, right: number) => number;
-  map: FunctionMap;
-}) => {
-  const { mod, name, paramType, returnType, operator, map } = opts;
-  mod.addFunction(
-    name,
-    binaryen.createType([paramType, paramType]),
-    returnType,
-    [],
-    mod.block(
-      null,
-      [operator(mod.local.get(0, paramType), mod.local.get(1, paramType))],
-      binaryen.auto
-    )
-  );
-  map.set(name, { returnType });
-};
+const toIdentifier = (str: string): string => str.replace(/\'/g, "");

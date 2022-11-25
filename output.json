@@ -2,6 +2,43 @@
   "block",
   [
     "define-function",
+    "test",
+    ["parameters"],
+    ["variables"],
+    ["return-type", "i32"],
+    [
+      "block",
+      ["+", "a", "b"],
+      ["+", ["+", "a", "b"], "c"],
+      ["seven", ["five", ["c", ["b", ["dot", "a"]], 3]]]
+    ]
+  ],
+  [
+    "define-function",
+    "'<'",
+    ["parameters", ["left", "i32"], ["right", "i32"]],
+    ["variables"],
+    ["return-type", "i32"],
+    ["block", ["binaryen-mod", ["i32", "lt_s"], ["left", "right"]]]
+  ],
+  [
+    "define-function",
+    "'-'",
+    ["parameters", ["left", "i32"], ["right", "i32"]],
+    ["variables"],
+    ["return-type", "i32"],
+    ["block", ["binaryen-mod", ["i32", "sub"], ["left", "right"]]]
+  ],
+  [
+    "define-function",
+    "'+'",
+    ["parameters", ["left", "i32"], ["right", "i32"]],
+    ["variables"],
+    ["return-type", "i32"],
+    ["block", ["binaryen-mod", ["i32", "add"], ["left", "right"]]]
+  ],
+  [
+    "define-function",
     "fib",
     ["parameters", ["n", "i32"]],
     ["variables"],
@@ -15,5 +52,13 @@
         ["+", ["fib", ["-", "n", 1]], ["fib", ["-", "n", 2]]]
       ]
     ]
+  ],
+  [
+    "define-function",
+    "main",
+    ["parameters"],
+    ["variables"],
+    ["return-type", "i32"],
+    ["block", ["fib", 10]]
   ]
 ]
