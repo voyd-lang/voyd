@@ -78,7 +78,9 @@ For an in depth language guide, check out the [reference folder](./reference).
 - [ ] Variables
 - [x] If statements
 - [x] WASM code generation
-- [ ] Function overloading 🚧
+- [x] Function overloading
+- [ ] Modules
+- [ ] Std library
 - [ ] Type checking
 - [ ] Type inference
 - [ ] Match statements
@@ -92,3 +94,5 @@ For an in depth language guide, check out the [reference folder](./reference).
 - [ ] Struct literals 🚧
 - [ ] Tuple literals 🚧
 - [ ] Array literals 🚧
+- [ ] Named arguments
+- [ ] Rest parameters

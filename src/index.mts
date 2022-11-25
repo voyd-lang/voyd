@@ -14,4 +14,4 @@ const mod = genWasmCode(ast);
 const binary = mod.emitBinary();
 const compiled = new WebAssembly.Module(binary);
 const instance = new WebAssembly.Instance(compiled, {});
-console.log((instance.exports as any).main());
+console.log((instance.exports as any).main0());
