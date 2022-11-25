@@ -168,12 +168,6 @@ const registerStandardFunctions = (mod: binaryen.Module, map: FunctionMap) => {
   const { i32: i32m, f32: f32m } = mod;
   const common = { mod, map };
   registerLogicFunction({
-    name: "<",
-    type: i32,
-    operator: i32m.lt_s,
-    ...common,
-  });
-  registerLogicFunction({
     name: ">",
     type: i32,
     operator: i32m.gt_s,

@@ -5,7 +5,7 @@ import { AST } from "../parser.mjs";
 export const fn = (ast: AST): AST => {
   return ast.map((expr) => {
     if (!isList(expr)) return expr;
-    if (expr[0] !== "fn") return fn(expr);
+    if (expr[0] !== "fn" && expr[0] !== "defun") return fn(expr);
 
     const definitions = expr[1];
 

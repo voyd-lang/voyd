@@ -8,7 +8,9 @@ export const parentheticalElision = (ast: AST): AST => {
 
   while (ast.length) {
     consumeLeadingWhitespace(ast);
-    transformed.push(elideParens(ast));
+    const elided = elideParens(ast);
+    if (elided instanceof Array && elided.length === 0) continue;
+    transformed.push(elided);
   }
 
   return transformed;
