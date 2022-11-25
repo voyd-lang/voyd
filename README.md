@@ -67,33 +67,25 @@ To get a feel of the language, check out the [overview.md file](./overview.md).
 
 For an in depth language guide, check out the [reference folder](./reference).
 
-# Feature Support Check List
+# Features / TODO list
 
-- [x] Methods
+- [x] Fn syntax
+- [x] Primitive `macro`
+- [x] Infix support
+- [x] Standard function notation
+- [x] Parenthetical elision
+- [x] UFCS (dot notation)
+- [ ] Variables
 - [x] If statements
-- [x] While loops
-- [x] let / var statements
-- [x] Dot notation
-- [x] Method overloading
-- [x] UFCS
-- [ ] Enums
-- [ ] Enums with associated values
-- [ ] Type checker
-- [ ] Structs
-- [ ] Classes
+- [ ] Function overloading 🚧
 - [ ] Match statements
-- [ ] For In loops
-- [ ] Anonymous structs
-- [ ] Tuples
-- [ ] Type aliasing
+- [ ] Loops
+- [ ] Algebraic data types
+- [ ] Algebraic effects
+- [ ] GC
+- [ ] Classes / Box structs
 - [ ] Traits
-- [ ] Macros
-- [ ] Arrays, Strings, other dynamic data types
-- [ ] Language server
-- [ ] VSCode integration and tooling
-- [ ] DOM Access
-- [ ] UI Library
-- [ ] Server Library
-- [ ] NodeJS/Deno API bindings
-- [ ] Multiple files
-- [ ] ...?
+- [ ] String literals 🚧
+- [ ] Struct literals 🚧
+- [ ] Tuple literals 🚧
+- [ ] Array literals 🚧
