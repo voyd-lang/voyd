@@ -30,7 +30,7 @@ export const infix = (ast: AST) => {
   };
 
   const push = (ast: AST) => {
-    if (operatorIsNext()) {
+    if (transformed.length !== 0 || operatorIsNext()) {
       transformed.push(ast);
       return;
     }

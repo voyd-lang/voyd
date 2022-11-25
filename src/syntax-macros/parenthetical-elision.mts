@@ -1,4 +1,5 @@
 import { isList } from "../lib/is-list.mjs";
+import { isWhitespace } from "../lib/is-whitespace.mjs";
 import { removeWhitespace } from "../lib/remove-whitespace.mjs";
 import { AST, Expr } from "../parser.mjs";
 import { infixOperators } from "./infix.mjs";
@@ -35,10 +36,7 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
   const consumeChildExpr = () => {
     const indentLevel = nextExprIndentLevel(ast);
     consumeLeadingWhitespace(ast);
-    const inInfixOp =
-      infixOperators.has(ast[0] as string) ||
-      infixOperators.has(transformed[transformed.length - 1] as string);
-    if (inInfixOp) return;
+    if (hasContinuation(ast, transformed)) return;
     push(elideParens(ast, { indentLevel }));
   };
 
@@ -50,11 +48,11 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
       continue;
     }
 
-    if (next === "\n") {
+    if (next === "\n" && !hasContinuation(ast, transformed)) {
       break;
     }
 
-    if (next === " " || next === "\t") {
+    if (typeof next === "string" && isWhitespace(next)) {
       ast.shift();
       continue;
     }
@@ -93,10 +91,24 @@ const nextExprIndentLevel = (ast: AST) => {
   return nextIndentLevel;
 };
 
+const hasContinuation = (ast: AST, transformed: AST) => {
+  if (infixOperators.has(transformed[transformed.length - 1] as string)) {
+    return true;
+  }
+
+  for (const expr of ast) {
+    if (typeof expr !== "string") return false;
+    if (isWhitespace(expr)) continue;
+    return infixOperators.has(expr);
+  }
+
+  return false;
+};
+
 const consumeLeadingWhitespace = (ast: AST) => {
   while (ast.length) {
     const next = ast[0];
-    if (typeof next === "string" && [" ", "\n", "\t"].includes(next)) {
+    if (typeof next === "string" && isWhitespace(next)) {
       ast.shift();
       continue;
     }
