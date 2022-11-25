@@ -1,16 +1,15 @@
 import { arrayLiteralMacro } from "./array-literal.mjs";
 import { dictionaryLiteralMacro } from "./dictionary-literal.mjs";
-import { stringMacro } from "./double-quote.mjs";
 import { floatMacro } from "./float.mjs";
 import { intMacro } from "./int.mjs";
 import { scientificENotationMacro } from "./scientific-e-notation.mjs";
+import { stringMacro } from "./string.mjs";
 import { structLiteralMacro } from "./struct-literal.mjs";
 import { tupleLiteralMacro } from "./tuple-literal.mjs";
 import { typedParameterMacro } from "./typed-parameter.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 const macros = [
-  stringMacro,
   structLiteralMacro,
   tupleLiteralMacro,
   arrayLiteralMacro,
@@ -19,6 +18,7 @@ const macros = [
   intMacro,
   floatMacro,
   scientificENotationMacro,
+  stringMacro,
 ];
 
 const readerMacros = macros.reduce(

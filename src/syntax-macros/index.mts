@@ -10,7 +10,7 @@ export const syntaxMacros: SyntaxMacro[] = [
   functionalNotation,
   parentheticalElision,
   infix,
+  macro,
   fn,
   block,
-  macro,
 ];
