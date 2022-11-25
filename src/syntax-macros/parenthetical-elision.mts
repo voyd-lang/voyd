@@ -1,6 +1,7 @@
 import { isList } from "../lib/is-list.mjs";
 import { removeWhitespace } from "../lib/remove-whitespace.mjs";
 import { AST, Expr } from "../parser.mjs";
+import { infixOperators } from "./infix.mjs";
 
 export const parentheticalElision = (ast: AST): AST => elideParens(ast) as AST;
 
@@ -27,13 +28,21 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
     transformed.push(expr);
   };
 
+  const consumeChildExpr = () => {
+    const indentLevel = nextExprIndentLevel(ast);
+    consumeLeadingWhitespace(ast);
+    const inInfixOp =
+      infixOperators.has(ast[0] as string) ||
+      infixOperators.has(transformed[transformed.length - 1] as string);
+    if (inInfixOp) return;
+    push(elideParens(ast, { indentLevel }));
+  };
+
   while (ast.length) {
     const next = ast[0];
 
     if (next === "\n" && nextLineHasChildExpr()) {
-      const indentLevel = nextExprIndentLevel(ast);
-      consumeLeadingWhitespace(ast);
-      push(elideParens(ast, { indentLevel }));
+      consumeChildExpr();
       continue;
     }
 
