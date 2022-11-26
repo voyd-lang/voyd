@@ -6,5 +6,5 @@ export interface ReaderMacro {
     dream: string[],
     tag: string,
     reader: (dream: string[], terminator?: string) => Expr
-  ) => Expr;
+  ) => Expr | undefined;
 }

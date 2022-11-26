@@ -79,7 +79,7 @@ For an in depth language guide, check out the [reference folder](./reference).
 - [x] If statements
 - [x] WASM code generation
 - [x] Function overloading
-- [ ] Modules
+- [ ] Modules 🚧
 - [ ] Std library
 - [ ] Type checking
 - [ ] Type inference
@@ -97,3 +97,5 @@ For an in depth language guide, check out the [reference folder](./reference).
 - [ ] Named arguments
 - [ ] Rest parameters
 - [ ] WASM module function exports
+- [ ] Access control (public / private etc)
+- [x] Comments

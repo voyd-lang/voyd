@@ -6,6 +6,6 @@ export const structLiteralMacro: ReaderMacro = {
   macro: (dream, _, reader) => {
     const items = removeWhitespace(reader(dream, "}"));
     if (isList(items)) return ["struct", ...items];
-    return ["strict", items];
+    return ["struct", items];
   },
 };

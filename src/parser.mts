@@ -17,11 +17,10 @@ export function parse(dream: string[], opts: ParseOpts = {}): AST {
     const readerMacro = getReaderMacroForToken(token);
 
     if (readerMacro) {
-      ast.push(
-        readerMacro(dream, token, (dream, terminator) =>
-          parse(dream, { nested: true, terminator })
-        )
+      const result = readerMacro(dream, token, (dream, terminator) =>
+        parse(dream, { nested: true, terminator })
       );
+      if (typeof result !== "undefined") ast.push(result);
       continue;
     }
 
