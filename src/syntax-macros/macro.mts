@@ -1,21 +1,31 @@
+import { ModuleInfo } from "../lib/module-info.mjs";
 import { AST, Expr } from "../parser.mjs";
 
+/** TODO: Support scoping */
 type Macros = Map<string, AST>;
 
 /** Transforms macro's into their final form and then runs them */
-export const macro = (ast: AST): AST => {
+export const macro = (ast: AST, info: ModuleInfo): AST => {
+  if (!info.isRoot) return ast;
   const { macros, transformed } = registerMacros(ast);
   return expandMacros(transformed, macros) as AST;
 };
 
 /** Registers macros and removes them. For now we cheat and interpret `macro` directly rather than transforming it */
 const registerMacros = (ast: AST): { transformed: AST; macros: Macros } => {
-  const macros: Macros = new Map();
+  let macros: Macros = new Map();
   const transformed: AST = [];
 
   for (const expr of ast) {
-    if (!(expr instanceof Array) || expr[0] !== "macro") {
+    if (!(expr instanceof Array)) {
       transformed.push(expr);
+      continue;
+    }
+
+    if (expr[0] !== "macro") {
+      const sub = registerMacros(expr);
+      macros = new Map([...macros, ...sub.macros]);
+      transformed.push(sub.transformed);
       continue;
     }
 

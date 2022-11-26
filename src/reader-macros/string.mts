@@ -2,7 +2,7 @@ import { ReaderMacro } from "./types.mjs";
 
 export const stringMacro: ReaderMacro = {
   tag: /^[\"\']$/,
-  macro: (dream, token) => {
+  macro: (dream, { token }) => {
     let string = token;
     while (dream.length) {
       const next = dream.shift();

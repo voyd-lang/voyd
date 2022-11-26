@@ -99,3 +99,7 @@ For an in depth language guide, check out the [reference folder](./reference).
 - [ ] WASM module function exports
 - [ ] Access control (public / private etc)
 - [x] Comments
+- [ ] Scoping / (Namespacing?)
+- [ ] Syntax Highlighting
+- [ ] Language Sever Protocol
+- [ ] Website

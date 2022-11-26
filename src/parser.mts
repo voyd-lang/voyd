@@ -1,3 +1,4 @@
+import { ModuleInfo } from "./lib/module-info.mjs";
 import { getReaderMacroForToken } from "./reader-macros/index.mjs";
 
 export type AST = Expr[];
@@ -6,9 +7,10 @@ export type Expr = string | number | AST;
 export interface ParseOpts {
   nested?: boolean;
   terminator?: string;
+  module: ModuleInfo;
 }
 
-export function parse(dream: string[], opts: ParseOpts = {}): AST {
+export function parse(dream: string[], opts: ParseOpts): AST {
   const ast: AST = [];
 
   while (dream.length) {
@@ -17,15 +19,18 @@ export function parse(dream: string[], opts: ParseOpts = {}): AST {
     const readerMacro = getReaderMacroForToken(token);
 
     if (readerMacro) {
-      const result = readerMacro(dream, token, (dream, terminator) =>
-        parse(dream, { nested: true, terminator })
-      );
+      const result = readerMacro(dream, {
+        token,
+        module: opts.module,
+        reader: (dream, terminator) =>
+          parse(dream, { nested: true, terminator, module: opts.module }),
+      });
       if (typeof result !== "undefined") ast.push(result);
       continue;
     }
 
     if (token === "(") {
-      ast.push(parse(dream, { nested: true }));
+      ast.push(parse(dream, { nested: true, module: opts.module }));
       continue;
     }
 

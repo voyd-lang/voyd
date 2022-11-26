@@ -3,7 +3,7 @@ import { ReaderMacro } from "./types.mjs";
 
 export const arrayLiteralMacro: ReaderMacro = {
   tag: "#[",
-  macro: (dream, _, reader) => {
+  macro: (dream, { reader }) => {
     const items = reader(dream, "]");
     if (isList(items)) return ["array", ...items];
     return ["array", items];

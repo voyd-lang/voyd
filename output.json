@@ -1,101 +1,113 @@
 [
-  "block",
-  ["use", "src/lib", "***"],
-  ["use", "src/lib", "as", "my-lib"],
-  ["use", "src/lib", ["struct", "my-util-function"]],
-  ["use", "src/lib", ["struct", "func-a", "sub-module:", ["struct", "func-b"]]],
-  ["use", "super/helpers", ["struct", "func-a:", "func-c"]],
-  ["use", "package", ["struct", "pack-func"]],
+  "root",
   [
-    "define-function",
-    "'<'",
-    ["parameters", ["left", "i32"], ["right", "i32"]],
-    ["variables"],
-    ["return-type", "i32"],
-    ["block", ["binaryen-mod", ["i32", "lt_s"], ["left", "right"]]]
-  ],
-  [
-    "define-function",
-    "'-'",
-    ["parameters", ["left", "i32"], ["right", "i32"]],
-    ["variables"],
-    ["return-type", "i32"],
-    ["block", ["binaryen-mod", ["i32", "sub"], ["left", "right"]]]
-  ],
-  [
-    "define-function",
-    "'+'",
-    ["parameters", ["left", "i32"], ["right", "i32"]],
-    ["variables"],
-    ["return-type", "i32"],
-    ["block", ["binaryen-mod", ["i32", "add"], ["left", "right"]]]
-  ],
-  [
-    "define-function",
-    "'<'",
-    ["parameters", ["left", "f32"], ["right", "f32"]],
-    ["variables"],
-    ["return-type", "i32"],
-    ["block", ["binaryen-mod", ["f32", "lt"], ["left", "right"]]]
-  ],
-  [
-    "define-function",
-    "'-'",
-    ["parameters", ["left", "f32"], ["right", "f32"]],
-    ["variables"],
-    ["return-type", "f32"],
-    ["block", ["binaryen-mod", ["f32", "sub"], ["left", "right"]]]
-  ],
-  [
-    "define-function",
-    "'+'",
-    ["parameters", ["left", "f32"], ["right", "f32"]],
-    ["variables"],
-    ["return-type", "f32"],
-    ["block", ["binaryen-mod", ["f32", "add"], ["left", "right"]]]
-  ],
-  [
-    "define-function",
-    "fib",
-    ["parameters", ["n", "i32"]],
-    ["variables"],
-    ["return-type", "i32"],
+    "module",
+    "src/std",
+    ["imports"],
+    ["exports"],
     [
       "block",
       [
-        "if",
-        ["<", "n", 2],
-        "n",
-        ["+", ["fib", ["-", "n", 1]], ["fib", ["-", "n", 2]]]
+        "define-function",
+        "'<'",
+        ["parameters", ["left", "i32"], ["right", "i32"]],
+        ["variables"],
+        ["return-type", "i32"],
+        ["block", ["binaryen-mod", ["i32", "lt_s"], ["left", "right"]]]
+      ],
+      [
+        "define-function",
+        "'-'",
+        ["parameters", ["left", "i32"], ["right", "i32"]],
+        ["variables"],
+        ["return-type", "i32"],
+        ["block", ["binaryen-mod", ["i32", "sub"], ["left", "right"]]]
+      ],
+      [
+        "define-function",
+        "'+'",
+        ["parameters", ["left", "i32"], ["right", "i32"]],
+        ["variables"],
+        ["return-type", "i32"],
+        ["block", ["binaryen-mod", ["i32", "add"], ["left", "right"]]]
+      ],
+      [
+        "define-function",
+        "'<'",
+        ["parameters", ["left", "f32"], ["right", "f32"]],
+        ["variables"],
+        ["return-type", "i32"],
+        ["block", ["binaryen-mod", ["f32", "lt"], ["left", "right"]]]
+      ],
+      [
+        "define-function",
+        "'-'",
+        ["parameters", ["left", "f32"], ["right", "f32"]],
+        ["variables"],
+        ["return-type", "f32"],
+        ["block", ["binaryen-mod", ["f32", "sub"], ["left", "right"]]]
+      ],
+      [
+        "define-function",
+        "'+'",
+        ["parameters", ["left", "f32"], ["right", "f32"]],
+        ["variables"],
+        ["return-type", "f32"],
+        ["block", ["binaryen-mod", ["f32", "add"], ["left", "right"]]]
       ]
     ]
   ],
   [
-    "define-function",
-    "fib",
-    ["parameters", ["n", "f32"]],
-    ["variables"],
-    ["return-type", "f32"],
+    "module",
+    "src/example",
+    ["imports", ["src/std", "***"]],
+    ["exports"],
     [
       "block",
       [
-        "if",
-        ["<", "n", "/float2.0"],
-        "n",
+        "define-function",
+        "fib",
+        ["parameters", ["n", "i32"]],
+        ["variables"],
+        ["return-type", "i32"],
         [
-          "+",
-          ["fib", ["-", "n", "/float1.0"]],
-          ["fib", ["-", "n", "/float2.0"]]
+          "block",
+          [
+            "if",
+            ["<", "n", 2],
+            "n",
+            ["+", ["fib", ["-", "n", 1]], ["fib", ["-", "n", 2]]]
+          ]
         ]
+      ],
+      [
+        "define-function",
+        "fib",
+        ["parameters", ["n", "f32"]],
+        ["variables"],
+        ["return-type", "f32"],
+        [
+          "block",
+          [
+            "if",
+            ["<", "n", "/float2.0"],
+            "n",
+            [
+              "+",
+              ["fib", ["-", "n", "/float1.0"]],
+              ["fib", ["-", "n", "/float2.0"]]
+            ]
+          ]
+        ]
+      ],
+      [
+        "define-function",
+        "main",
+        ["parameters"],
+        ["variables"],
+        ["return-type", "f32"],
+        ["block", ["fib", "/float10.0"]]
       ]
     ]
-  ],
-  [
-    "define-function",
-    "main",
-    ["parameters"],
-    ["variables"],
-    ["return-type", "f32"],
-    ["block", ["fib", "/float10.0"]]
   ]
 ]
