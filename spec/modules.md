@@ -5,7 +5,7 @@
 ### Syntax
 
 ```dream
-use src/lib * ; Import everything from src/lib
+use src/lib *** ; Import everything from src/lib
 use src/lib as my-lib ; Import everything as my-lib
 use src/lib { my-util-function } ; Import my-util-function from src/lib
 use src/lib { func-a sub-module: { func-b } } ; Import func-a from src/lib and func-b from the submodule in src/lib

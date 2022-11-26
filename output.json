@@ -1,23 +1,11 @@
 [
   "block",
-  ["use", "src", "lib", "my-util-function"],
-  [
-    "use",
-    "src",
-    "lib",
-    ["struct", "func-a", ["sub-module:", "struct", "func-b"]]
-  ],
-  ["use", "super", "helpers", ["struct", "func-a:", "func-c"]],
-  ["use", "@package", ["struct", "pack-func"]],
-  [
-    "use",
-    "super",
-    ["*", "other-helpers", "fn"],
-    ["do-work"],
-    "->",
-    "bleh",
-    ["if", ["a"], ["struct", "a", "b", "c"]]
-  ],
+  ["use", "src/lib", "***"],
+  ["use", "src/lib", "as", "my-lib"],
+  ["use", "src/lib", ["struct", "my-util-function"]],
+  ["use", "src/lib", ["struct", "func-a", "sub-module:", ["struct", "func-b"]]],
+  ["use", "super/helpers", ["struct", "func-a:", "func-c"]],
+  ["use", "package", ["struct", "pack-func"]],
   [
     "define-function",
     "'<'",
