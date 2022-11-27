@@ -55,7 +55,7 @@ const expandMacro = (expr: AST, macros: Macros): Expr => {
   if (!macro) return expr;
   const parameters = mapMacroParameters(expr, (macro[1] as string[]).slice(1));
   parameters.set("&body", expr.slice(1));
-  return evalMacroBody(macro.slice(2), parameters);
+  return evalMacroBody(macro.slice(2), parameters, macros);
 };
 
 const mapMacroParameters = (callExpr: AST, parameters: string[]) =>
@@ -65,27 +65,92 @@ const mapMacroParameters = (callExpr: AST, parameters: string[]) =>
     return map;
   }, new Map<string, Expr>());
 
-const evalMacroBody = (body: Expr, parameters: Map<string, Expr>): Expr => {
+const evalMacroBody = (
+  body: Expr,
+  parameters: Map<string, Expr>,
+  macros: Macros
+): Expr => {
   if (typeof body === "number") return body;
   if (typeof body === "string" && body[0] === "$" && body.length > 1) {
     return parameters.get(body.slice(1)) ?? [];
   }
   if (typeof body === "string") return body;
-  if (body[0] === "$") return callFn(body.slice(1), parameters);
-  return body.map((expr) => evalMacroBody(expr, parameters));
+  if (body[0] === "$") return callFn(body.slice(1), { parameters, macros });
+  return body.map((expr) => evalMacroBody(expr, parameters, macros));
 };
 
-const callFn = (fn: AST, parameters: Map<string, Expr>) => {
-  const identifier = fn[0];
+type Variable = { value: Expr; mutable: boolean };
+type Variables = Map<string, Variable>;
+type CallFnOpts = {
+  parameters: Map<string, Expr>;
+  vars?: Variables;
+  macros: Macros;
+};
+
+const callFn = (fn: AST, { parameters, vars, macros }: CallFnOpts): Expr => {
+  const identifier = fn[0] as string;
+
+  if (identifier === "quote") return fn.slice(1);
+
+  if (macros.has(identifier)) {
+    const transformed = expandMacro(fn, macros);
+    return callFn(transformed as AST, { parameters, vars, macros });
+  }
+
+  const variables: Variables =
+    vars ??
+    new Map(
+      [...parameters].map(([key, value]) => [key, { value, mutable: false }])
+    );
+
   const args: AST = fn.slice(1).map((expr) => {
-    if (expr instanceof Array) return callFn(expr, parameters);
+    if (expr instanceof Array) {
+      return callFn(expr, {
+        parameters,
+        macros,
+        vars: new Map([...variables]),
+      });
+    }
+
     if (typeof expr === "number") return expr;
     if (isString(expr) || isFloat(expr)) return expr;
-    return parameters.get(expr);
+    return parameters.get(expr)!;
   });
-  return functions[identifier as string](...args);
+
+  return functions[identifier]({ variables, macros }, ...args);
 };
 
-const functions: any = {
-  extract: (list: Array<any>, index: number) => list[index],
+type FnOpts = {
+  variables: Variables;
+  macros: Macros;
+};
+
+const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
+  extract: (_, list: AST, index: number) => list[index],
+  block: (_, ...expressions: Expr[]) => expressions[expressions.length - 1],
+  array: (_, ...rest: Expr[]) => rest,
+  "define-mut": ({ variables: vars }, assignment: any[]) => {
+    vars.set(assignment[0], { value: assignment[1], mutable: true });
+    return [];
+  },
+  define: ({ variables: vars }, assignment: any[]) => {
+    vars.set(assignment[0], { value: assignment[1], mutable: false });
+    return [];
+  },
+  "=": ({ variables: vars }, identifier, expr) => {
+    const variable = vars.get(identifier);
+    if (!variable) throw new Error(`identifier not found ${identifier}`);
+    if (!variable.mutable) {
+      throw new Error(`Variable ${identifier} is not mutable`);
+    }
+    vars.set(identifier, expr);
+    return [];
+  },
+  "lambda-expr": ({ variables: vars, macros }, quote: AST) => {
+    const variables: Variables = new Map([
+      ...vars,
+      ["&lambda", { value: ["lambda-expr", quote], mutable: false }],
+    ]);
+    return callFn();
+  },
 };

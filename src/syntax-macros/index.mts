@@ -11,7 +11,7 @@ export const syntaxMacros: SyntaxMacro[] = [
   functionalNotation,
   parentheticalElision,
   infix,
-  moduleSyntaxMacro,
-  macro,
-  fn,
+  // moduleSyntaxMacro,
+  // macro,
+  // fn,
 ];

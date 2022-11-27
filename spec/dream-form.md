@@ -16,8 +16,9 @@ Symbols in dream follow the same rules as symbols in lisp with a few modificatio
 - Symbols beginning with a `#` denote a reader macro
 - `? !` are treated as alphanumeric along with `+ - \* / $ % ^ \_ = >`
 - When an infix operator symbol is between two expressions within a block, it is interpreted as an
-  infix operation automatically. Infix operators are ` + - / * = == < > >= <= => |> | ^ % and or xor ||`
+  infix operation automatically. Infix operators are ` + - / * == < > >= <= => |> | ^ % and or xor ||`
 - Dream is case sensitive
+- A single equal sign is NOT an operator. It is typically used as a visual separator in assignment operations. (Maybe it should be considered synonymous with \n\t)
 
 ## Grammar
 

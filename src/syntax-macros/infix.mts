@@ -5,7 +5,6 @@ export const infixOperators = new Set([
   "-",
   "*",
   "/",
-  "=",
   "==",
   "!=",
   "<",
@@ -13,6 +12,7 @@ export const infixOperators = new Set([
   "<=",
   ">=",
   ".",
+  "|>",
 ]);
 
 export const infix = (ast: AST) => {

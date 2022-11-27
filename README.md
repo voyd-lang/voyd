@@ -48,6 +48,8 @@ though. So feel free to play around.
 - [x] If statements
 - [x] WASM code generation
 - [x] Function overloading
+- [ ] Booleans
+- [ ] Tail recursion
 - [ ] Generics
 - [ ] Modules 🚧
 - [ ] Std library
