@@ -12,7 +12,6 @@ macro let(&body)
 macro var(&body)
 	define-mut $(extract &body 0) $(extract &body 2)
 
-; TODO: the same, but for ifs
 macro lambda(&body)
 	lambda-expr (quote $&body)
 
@@ -50,7 +49,6 @@ macro fn(&body)
 					vars.push(#[extract(expr 1) extract(expr 2)])
 					concat(vars &lambda(expr))
 			vars
-
 
 		#[
 			"define-function",

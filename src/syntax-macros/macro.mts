@@ -103,19 +103,22 @@ const callFn = (fn: AST, { parameters, vars, macros }: CallFnOpts): Expr => {
       [...parameters].map(([key, value]) => [key, { value, mutable: false }])
     );
 
-  const args: AST = fn.slice(1).map((expr) => {
-    if (expr instanceof Array) {
-      return callFn(expr, {
-        parameters,
-        macros,
-        vars: new Map([...variables]),
-      });
-    }
+  const args: AST =
+    identifier !== "if"
+      ? fn.slice(1).map((expr) => {
+          if (expr instanceof Array) {
+            return callFn(expr, {
+              parameters,
+              macros,
+              vars: new Map([...variables]),
+            });
+          }
 
-    if (typeof expr === "number") return expr;
-    if (isString(expr) || isFloat(expr)) return expr;
-    return parameters.get(expr)!;
-  });
+          if (typeof expr === "number") return expr;
+          if (isString(expr) || isFloat(expr)) return expr;
+          return parameters.get(expr)!;
+        })
+      : fn.slice(1);
 
   return functions[identifier]({ variables, macros }, ...args);
 };
@@ -153,4 +156,5 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
     ]);
     return callFn();
   },
+  if: () => {},
 };
