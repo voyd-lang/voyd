@@ -12,6 +12,6 @@ export const syntaxMacros: SyntaxMacro[] = [
   parentheticalElision,
   infix,
   // moduleSyntaxMacro,
-  // macro,
+  macro,
   // fn,
 ];

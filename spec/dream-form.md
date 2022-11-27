@@ -13,12 +13,12 @@ Symbols in dream follow the same rules as symbols in lisp with a few modificatio
 - `@ & ~` are reserved for future use
 - Scientific E notation is interpreted as a number
 - Strings are not symbols i.e. `"i am a string"`
+- Characters in single quotes _are_ symbols i.e. `'i am a symbol'`
 - Symbols beginning with a `#` denote a reader macro
 - `? !` are treated as alphanumeric along with `+ - \* / $ % ^ \_ = >`
-- When an infix operator symbol is between two expressions within a block, it is interpreted as an
-  infix operation automatically. Infix operators are ` + - / * == < > >= <= => |> | ^ % and or xor ||`
+- When an infix operator symbol is between two expressions within a block, it is interpreted as an infix operation automatically. Infix operators are ` + - / * = => == < > >= <= => |> | ^ % and or xor ||`
 - Dream is case sensitive
-- A single equal sign is NOT an operator. It is typically used as a visual separator in assignment operations. (Maybe it should be considered synonymous with \n\t)
+- `=>` and `=` Cause the value on the right to be interpreted as a new-line and child indent.
 
 ## Grammar
 

@@ -7,22 +7,37 @@ macro pub(&body)
 	export $(extract &body 1)
 
 macro let(&body)
-	define $(extract &body 0) $(extract &body 2)
+	$@ block
+		define equals-expr (extract &body 0)
+		#[
+			"define"
+			extract equals-expr 1
+			extract equals-expr 2
+		]
 
 macro var(&body)
-	define-mut $(extract &body 0) $(extract &body 2)
+	$@ block
+		define equals-expr (extract &body 0)
+		#[
+			"define-mut"
+			extract equals-expr 1
+			extract equals-expr 2
+		]
 
 macro lambda(&body)
 	lambda-expr (quote $&body)
 
+macro '=>'(&body)
+	lambda-expr (quote $&body)
+
 macro fn(&body)
-	$ block
+	$@ block
 		let definitions = extract(&body 0)
 		let identifier = extract(definitions 0)
 
 		let params = concat
 			#["parameters"]
-			definitions.slice(1).map lambda (expr)
+			definitions.slice(1).map (expr) =>
 				let param-identifier-index = (if (expr.length == 3) 1 2)
 				let param-identifier = extract(expr param-identifier-index)
 				let type = extract(expr param-identifier-index + 1)
@@ -35,28 +50,28 @@ macro fn(&body)
 		let return-type = #[
 			"return-type"
 			if (type-arrow-index > -1)
-				extract(&body type-arrowIndex + 1)
+				extract(&body type-arrow-index + 1)
 				#[]
 		]
 
-		let expressions = if (typeArrowIndex > -1)
+		let expressions = if (type-arrow-index > -1)
 			&body.slice(type-arrow-index + 2)
 			&body.slice(1)
 
-		let variables = expressions.reduce(#[]) lambda (vars expr)
+		let variables = expressions.reduce(#[]) (vars expr) =>
 			if (is-list(vars))
-				if (extract(vars 0) == "define-let")
+				if (extract(vars 0) == "define-mut" or extract(vars 0) == "define")
 					vars.push(#[extract(expr 1) extract(expr 2)])
 					concat(vars &lambda(expr))
 			vars
 
 		#[
-			"define-function",
-			identifier,
-			params,
-			variables,
+			"define-function"
+			identifier
+			params
+			variables
 			return-type
-			concat(["block", expressions])
+			concat(#["block" expressions])
 		]
 
 

@@ -58,7 +58,7 @@ const findVariables = (fnBody: AST): AST => {
   return fnBody.reduce((vars: AST, expr) => {
     if (!(expr instanceof Array)) return vars;
 
-    if (expr[0] === "define-let") {
+    if (expr[0] === "define" || expr[0] === "define-mut") {
       vars.push([expr[1], expr[2]]);
       return vars;
     }

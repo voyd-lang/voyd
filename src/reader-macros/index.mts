@@ -1,4 +1,5 @@
 import { arrayLiteralMacro } from "./array-literal.mjs";
+import { booleanMacro } from "./boolean.mjs";
 import { comment } from "./comment.mjs";
 import { dictionaryLiteralMacro } from "./dictionary-literal.mjs";
 import { floatMacro } from "./float.mjs";
@@ -21,6 +22,7 @@ const macros = [
   scientificENotationMacro,
   stringMacro,
   comment,
+  booleanMacro,
 ];
 
 const readerMacros = macros.reduce(

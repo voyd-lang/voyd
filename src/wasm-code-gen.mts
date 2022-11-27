@@ -24,6 +24,9 @@ const compileExpression = (opts: CompileExpressionOpts): number => {
   if (typeof expr === "number") return mod.f32.const(expr);
   if (typeof expr === "string" && isFloat(expr)) return compileFloat(mod, expr);
   if (typeof expr === "string") return compileSymbol({ ...opts, expr });
+  if (typeof expr === "boolean") {
+    return expr ? mod.i32.const(1) : mod.i32.const(2);
+  }
   throw new Error(`Unrecognized expression ${expr}`);
 };
 
@@ -220,6 +223,7 @@ const getExprReturnTypeId = (
 ): string | undefined => {
   if (typeof expr === "number") return "i32";
   if (typeof expr === "string" && expr.startsWith("/float")) return "f32";
+  if (typeof expr === "boolean") return "i32";
   if (typeof expr === "string") {
     return paramMap.get(toIdentifier(expr))?.typeId;
   }
