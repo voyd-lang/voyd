@@ -48,6 +48,13 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
       continue;
     }
 
+    if (infixExceptions.has(next as string)) {
+      push(next);
+      ast.shift();
+      push(elideParens(ast, { indentLevel }));
+      continue;
+    }
+
     if (next === "\n" && !hasContinuation(ast, transformed)) {
       break;
     }
@@ -63,7 +70,6 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
       continue;
     }
 
-    // TODO: Support elision within lists
     if (next || ast.length) {
       transformed.push(removeWhitespace(next));
       ast.shift();
@@ -98,15 +104,20 @@ const nextExprIndentLevel = (ast: AST) => {
   return nextIndentLevel;
 };
 
+const infixExceptions = new Set(["=>", "="]);
+const isInfixOp = (op: string) =>
+  !infixExceptions.has(op) && infixOperators.has(op);
+
 const hasContinuation = (ast: AST, transformed: AST) => {
-  if (infixOperators.has(transformed[transformed.length - 1] as string)) {
+  const lastTransformedExpr = transformed[transformed.length - 1] as string;
+  if (isInfixOp(lastTransformedExpr)) {
     return true;
   }
 
   for (const expr of ast) {
     if (typeof expr !== "string") return false;
     if (isWhitespace(expr)) continue;
-    return infixOperators.has(expr);
+    return isInfixOp(expr);
   }
 
   return false;
