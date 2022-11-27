@@ -57,7 +57,14 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
       continue;
     }
 
-    if (next) {
+    if (next instanceof Array) {
+      push(elideParens(next, { indentLevel }));
+      ast.shift();
+      continue;
+    }
+
+    // TODO: Support elision within lists
+    if (next || ast.length) {
       transformed.push(removeWhitespace(next));
       ast.shift();
       continue;
