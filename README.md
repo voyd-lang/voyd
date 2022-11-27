@@ -25,17 +25,6 @@ Dream is in it's very early stages and should not be used for production applica
 Most MVP features have not been implemented yet. The language does run and compile
 though. So feel free to play around.
 
-**Features:**
-
-- First class WebAssembly support
-- Rust inspired Functional / Expression oriented syntax
-- Algebraic effects
-- Uniform function call syntax
-- Simple and safe memory management (GC)
-- Strongly typed, with type inference
-- Simple interop with TypeScript / JavaScript
-- Strict and Unsafe function enforcement.
-
 **Core values:**
 
 - Developer satisfaction
@@ -47,27 +36,7 @@ though. So feel free to play around.
 - Prefer existing standards when possible
 - Quality libraries for web, server, and graphics applications.
 
-# Getting Started
-
-**Install**
-
-```
-npm i -g dreamc
-```
-
-**Usage**
-
-```
-dreamc path/to/code.dm
-```
-
-# Documentation
-
-To get a feel of the language, check out the [overview.md file](./overview.md).
-
-For an in depth language guide, check out the [reference folder](./reference).
-
-# Features / TODO list
+**Features:**
 
 - [x] Fn syntax
 - [x] Primitive `macro`
@@ -79,6 +48,7 @@ For an in depth language guide, check out the [reference folder](./reference).
 - [x] If statements
 - [x] WASM code generation
 - [x] Function overloading
+- [ ] Generics
 - [ ] Modules 🚧
 - [ ] Std library
 - [ ] Type checking
@@ -103,3 +73,23 @@ For an in depth language guide, check out the [reference folder](./reference).
 - [ ] Syntax Highlighting
 - [ ] Language Sever Protocol
 - [ ] Website
+
+# Getting Started
+
+**Install**
+
+```
+npm i -g dreamc
+```
+
+**Usage**
+
+```
+dreamc path/to/code.dm
+```
+
+# Documentation
+
+To get a feel of the language, check out the [overview.md file](./overview.md).
+
+For an in depth language guide, check out the [reference folder](./reference).

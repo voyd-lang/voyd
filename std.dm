@@ -1,6 +1,10 @@
 macro def-wasm-operator(op wasm-fn arg-type return-type)
-	fn $op(left:$arg-type right:$arg-type) -> $return-type
+	pub fn $op(left:$arg-type right:$arg-type) -> $return-type
 		binaryen-mod ($arg-type $wasm-fn) (left right)
+
+macro pub(&body)
+	$&body
+	export $(extract &body 1)
 
 def-wasm-operator('<' lt_s i32 i32)
 def-wasm-operator('-' sub i32 i32)
