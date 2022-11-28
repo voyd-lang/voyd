@@ -41,14 +41,24 @@ const registerMacros = (ast: AST): { transformed: AST; macros: Macros } => {
 
 /** Recursively expands all macros in the expr */
 const expandMacros = (expr: Expr, macros: Macros): Expr => {
-  if (!(expr instanceof Array)) return expr;
+  if (!isList(expr)) return expr;
 
-  if (typeof expr[0] === "string" && macros.has(expr[0])) {
-    const transformed = expandMacro(expr, macros);
-    return expandMacros(transformed, macros);
-  }
+  const next = expr.reduce((prev: AST, expr) => {
+    if (!isList(expr)) {
+      prev.push(expr);
+      return prev;
+    }
 
-  return expr.map((expr) => expandMacros(expr, macros));
+    if (typeof expr[0] === "string" && macros.has(expr[0])) {
+      const transformed = expandMacro(expr, macros);
+      prev.push(...(expandMacros(transformed, macros) as AST));
+      return prev;
+    }
+
+    prev.push(expandMacros(expr, macros));
+    return prev;
+  }, []);
+  return next;
 };
 
 /** Expands a macro call. Assumes expr is a macro call */
@@ -79,7 +89,7 @@ const evalMacroBody = (
   }
   if (typeof body === "string") return body;
   if (typeof body === "boolean") return body;
-  return body.reduce((prev: AST, expr) => {
+  const result = body.reduce((prev: AST, expr) => {
     const fnCall = fnCallSymbol(expr);
     if (fnCall === "$") {
       prev.push(callFn((expr as AST).slice(1), { parameters, macros }));
@@ -94,6 +104,7 @@ const evalMacroBody = (
     prev.push(evalMacroBody(expr, parameters, macros));
     return prev;
   }, []);
+  return result;
 };
 
 const fnCallSymbol = (expr: Expr): string | undefined => {
@@ -227,10 +238,7 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
   "-": (_, left, right) => left - right,
   "*": (_, left, right) => left * right,
   "/": (_, left, right) => left / right,
-  "lambda-expr": (_, lambda: AST) => {
-    console.log(JSON.stringify(lambda, undefined, 2));
-    return lambda;
-  },
+  "lambda-expr": (_, lambda: AST) => lambda,
   quote: (_, quote) => quote[0],
   if: (
     { variables, macros, parameters },
@@ -286,4 +294,8 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
   },
   concat: (_, ...rest: AST[]) => rest.flat(),
   "is-list": (_, list) => isList(list),
+  log: (_, arg) => {
+    console.log(JSON.stringify(arg, undefined, 2));
+    return arg;
+  },
 };
