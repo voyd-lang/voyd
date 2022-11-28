@@ -51,13 +51,18 @@ const expandMacros = (expr: Expr, macros: Macros): Expr => {
 
     if (typeof expr[0] === "string" && macros.has(expr[0])) {
       const transformed = expandMacro(expr, macros);
-      prev.push(...(expandMacros(transformed, macros) as AST));
+      prev.push(expandMacros(transformed, macros));
       return prev;
     }
 
     prev.push(expandMacros(expr, macros));
     return prev;
   }, []);
+
+  if (isList(next[0]) && next.length === 1) {
+    return next[0];
+  }
+
   return next;
 };
 
@@ -126,6 +131,10 @@ type CallFnOpts = {
 
 /** TODO: Support scoping */
 const callFn = (fn: Expr, { parameters, vars, macros }: CallFnOpts): Expr => {
+  if (typeof fn === "string") {
+    return vars?.get(fn)?.value ?? parameters.get(fn) ?? fn;
+  }
+
   if (!isList(fn)) return fn;
   const identifier = fn[0];
 
@@ -144,24 +153,38 @@ const callFn = (fn: Expr, { parameters, vars, macros }: CallFnOpts): Expr => {
       [...parameters].map(([key, value]) => [key, { value, mutable: false }])
     );
 
-  const args: AST =
-    identifier !== "if" && identifier !== "quote"
-      ? fn.slice(1).map((expr) => {
-          if (expr instanceof Array) {
-            return callFn(expr, {
-              parameters,
-              macros,
-              vars: variables,
-            });
-          }
+  const shouldSkipArgEval =
+    identifier === "if" ||
+    identifier === "quote" ||
+    identifier === "lambda-expr";
 
-          if (typeof expr === "number") return expr;
-          if (typeof expr === "boolean") return expr;
-          if (isString(expr)) return expr.replace(/\"/g, "");
-          if (isFloat(expr)) return Number(expr.replace("/float", ""));
-          return variables.get(expr)?.value ?? expr;
-        })
-      : fn.slice(1);
+  const args: AST = !shouldSkipArgEval
+    ? fn.slice(1).map((expr) => {
+        if (expr instanceof Array) {
+          return callFn(expr, {
+            parameters,
+            macros,
+            vars: variables,
+          });
+        }
+
+        if (typeof expr === "number") return expr;
+        if (typeof expr === "boolean") return expr;
+        if (isString(expr)) return expr.replace(/\"/g, "");
+        if (isFloat(expr)) return Number(expr.replace("/float", ""));
+        return variables.get(expr)?.value ?? expr;
+      })
+    : fn.slice(1);
+
+  if (variables.has(identifier)) {
+    return callLambda({
+      lambda: variables.get(identifier)?.value,
+      macros,
+      parameters,
+      variables,
+      args,
+    });
+  }
 
   return functions[identifier]({ variables, macros, parameters }, ...args);
 };
@@ -238,7 +261,7 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
   "-": (_, left, right) => left - right,
   "*": (_, left, right) => left * right,
   "/": (_, left, right) => left / right,
-  "lambda-expr": (_, lambda: AST) => lambda,
+  "lambda-expr": (_, lambda) => ["lambda-expr", lambda],
   quote: (_, quote) => quote[0],
   if: (
     { variables, macros, parameters },
@@ -246,7 +269,7 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
     ifTrue: Expr,
     ifFalse: Expr
   ) => {
-    const condResult = callFn(condition, {
+    const condResult = callFn(handleOptionalConditionParenthesis(condition), {
       vars: variables,
       macros,
       parameters,
@@ -263,7 +286,7 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
     return array.map((val, index, array) =>
       callLambda({
         lambda,
-        macros: macros,
+        macros,
         parameters,
         variables,
         args: [val, index, array],
@@ -280,7 +303,7 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
       (prev, cur, index, array) =>
         callLambda({
           lambda,
-          macros: macros,
+          macros,
           parameters,
           variables,
           args: [prev, cur, index, array],
@@ -295,7 +318,15 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
   concat: (_, ...rest: AST[]) => rest.flat(),
   "is-list": (_, list) => isList(list),
   log: (_, arg) => {
-    console.log(JSON.stringify(arg, undefined, 2));
+    console.error(JSON.stringify(arg, undefined, 2));
     return arg;
   },
+  "macro-expand": ({ macros }, body: AST) => expandMacros(body, macros),
+};
+
+const handleOptionalConditionParenthesis = (expr: Expr): Expr => {
+  if (isList(expr) && expr.length === 1 && isList(expr[0])) {
+    return expr[0];
+  }
+  return expr;
 };

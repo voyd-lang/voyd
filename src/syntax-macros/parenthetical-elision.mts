@@ -37,19 +37,16 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
     transformed.push(expr);
   };
 
-  const pushChild = (elided: Expr) => {
+  const consumeChildExpr = () => {
+    const indentLevel = nextExprIndentLevel(ast);
+    consumeLeadingWhitespace(ast);
+    if (hasContinuation(ast, transformed)) return;
+    const elided = elideParens(ast, { indentLevel });
     if (isList(elided) && elided.length === 1) {
       push(elided[0]);
       return;
     }
     push(elided);
-  };
-
-  const consumeChildExpr = () => {
-    const indentLevel = nextExprIndentLevel(ast);
-    consumeLeadingWhitespace(ast);
-    if (hasContinuation(ast, transformed)) return;
-    pushChild(elideParens(ast, { indentLevel }));
   };
 
   while (ast.length) {
@@ -60,10 +57,10 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
       continue;
     }
 
-    if (infixExceptions.has(next as string)) {
+    if (greedyOps.has(next as string)) {
       push(next);
       ast.shift();
-      pushChild(elideParens(ast, { indentLevel }));
+      push(["block", ...(elideParens(ast, { indentLevel }) as AST)]);
       continue;
     }
 
@@ -116,9 +113,8 @@ const nextExprIndentLevel = (ast: AST) => {
   return nextIndentLevel;
 };
 
-const infixExceptions = new Set(["=>", "="]);
-const isInfixOp = (op: string) =>
-  !infixExceptions.has(op) && infixOperators.has(op);
+const greedyOps = new Set(["=>", "=", "<|"]);
+const isInfixOp = (op: string) => infixOperators.has(op);
 
 const hasContinuation = (ast: AST, transformed: AST) => {
   const lastTransformedExpr = transformed[transformed.length - 1] as string;

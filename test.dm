@@ -1,15 +1,31 @@
-macro def-wasm-operator(op wasm-fn arg-type return-type)
-	pub fn $op(left:$arg-type right:$arg-type) -> $return-type
-		binaryen-mod ($arg-type $wasm-fn) (left right)
+let hello = world
 
-macro pub(&body)
-	$&body
-	export $(extract &body 1)
+let goose =
+	(egg)
 
-def-wasm-operator('<' lt_s i32 i32)
-def-wasm-operator('-' sub i32 i32)
-def-wasm-operator('+' add i32 i32)
+let type-arrow-index = (if (extract(&body 1) == "->") 1 (if (extract(&body 2) == "->") 2 -1)))
 
-def-wasm-operator('<' lt f32 i32)
-def-wasm-operator('-' sub f32 f32)
-def-wasm-operator('+' add f32 f32)
+() => a
+() =>
+	a
+() => a()
+() => (a)
+
+let x = (a) => hello()
+
+let extract-variables = (exprs) =>
+	exprs.reduce(#[]) (vars expr) =>
+		if (is-list(vars))
+			if (extract(vars 0) == "define-mut" or extract(vars 0) == "define")
+				vars.push(#[extract(expr 1) extract(expr 2)])
+				concat(vars extract-variables(expr))
+		vars
+	hello
+
+let extract-variables = (exprs) =>
+	exprs.reduce(#[]) (vars expr) =>
+		if (is-list(vars))
+			if (extract(vars 0) == "define-mut" or extract(vars 0) == "define")
+				vars.push(#[extract(expr 1) extract(expr 2)])
+				concat(vars extract-variables(expr))
+		vars

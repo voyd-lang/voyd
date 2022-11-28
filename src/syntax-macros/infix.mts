@@ -13,6 +13,7 @@ export const infixOperators = new Set([
   ">=",
   ".",
   "|>",
+  "<|",
   "and",
   "or",
   "=", // Not considered a continuation for parenthetical elision
