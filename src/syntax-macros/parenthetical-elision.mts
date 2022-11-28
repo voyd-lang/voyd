@@ -11,6 +11,10 @@ export const parentheticalElision = (ast: AST): AST => {
     consumeLeadingWhitespace(ast);
     const elided = elideParens(ast);
     if (elided instanceof Array && elided.length === 0) continue;
+    if (isList(elided) && elided.length === 1) {
+      transformed.push(elided[0]);
+      continue;
+    }
     transformed.push(elided);
   }
 
@@ -33,11 +37,19 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
     transformed.push(expr);
   };
 
+  const pushChild = (elided: Expr) => {
+    if (isList(elided) && elided.length === 1) {
+      push(elided[0]);
+      return;
+    }
+    push(elided);
+  };
+
   const consumeChildExpr = () => {
     const indentLevel = nextExprIndentLevel(ast);
     consumeLeadingWhitespace(ast);
     if (hasContinuation(ast, transformed)) return;
-    push(elideParens(ast, { indentLevel }));
+    pushChild(elideParens(ast, { indentLevel }));
   };
 
   while (ast.length) {
@@ -51,7 +63,7 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
     if (infixExceptions.has(next as string)) {
       push(next);
       ast.shift();
-      push(elideParens(ast, { indentLevel }));
+      pushChild(elideParens(ast, { indentLevel }));
       continue;
     }
 
@@ -77,7 +89,7 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
     }
   }
 
-  return transformed.length === 1 ? transformed[0] : transformed;
+  return transformed;
 };
 
 const nextExprIndentLevel = (ast: AST) => {
