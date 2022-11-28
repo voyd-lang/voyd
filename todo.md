@@ -5,3 +5,4 @@
   macro '<|'(&body)
     $@ &body
   ```
+- fix nested array weirdness particularly around macro expansion
