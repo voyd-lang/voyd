@@ -1,7 +1,7 @@
 import { isList } from "../lib/is-list.mjs";
 import { isWhitespace } from "../lib/is-whitespace.mjs";
 import { AST, Expr } from "../parser.mjs";
-import { isInfixOp } from "./infix.mjs";
+import { isContinuationOp } from "./infix.mjs";
 
 export const parentheticalElision = (ast: AST): AST => elideParens(ast);
 
@@ -108,14 +108,14 @@ const nextExprIndentLevel = (ast: AST) => {
 
 const hasContinuation = (ast: AST, transformed: AST) => {
   const lastTransformedExpr = transformed[transformed.length - 1] as string;
-  if (isInfixOp(lastTransformedExpr)) {
+  if (isContinuationOp(lastTransformedExpr)) {
     return true;
   }
 
   for (const expr of ast) {
     if (typeof expr !== "string") return false;
     if (isWhitespace(expr)) continue;
-    return isInfixOp(expr);
+    return isContinuationOp(expr);
   }
 
   return false;

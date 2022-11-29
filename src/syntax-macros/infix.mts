@@ -1,4 +1,5 @@
 import { AST, Expr } from "../parser.mjs";
+import { greedyOps } from "./greedy-ops.mjs";
 
 export const infixOperators = new Set([
   "+",
@@ -20,10 +21,10 @@ export const infixOperators = new Set([
   "=>", // Not considered a continuation for parenthetical elision
 ]);
 
-export const greedyOps = new Set(["=>", "=", "<|"]);
+export const isContinuationOp = (op: string) =>
+  isInfixOp(op) && !greedyOps.has(op);
 
-export const isInfixOp = (op: string) =>
-  infixOperators.has(op) && !greedyOps.has(op);
+export const isInfixOp = (op: string) => infixOperators.has(op);
 
 export const infix = (ast: AST) => {
   const transformed: AST = [];
@@ -84,5 +85,4 @@ export const infix = (ast: AST) => {
   return transformed;
 };
 
-const isOperand = (expr: Expr) =>
-  typeof expr === "string" && infixOperators.has(expr);
+const isOperand = (expr: Expr) => typeof expr === "string" && isInfixOp(expr);

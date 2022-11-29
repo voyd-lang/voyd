@@ -75,6 +75,7 @@ though. So feel free to play around.
 - [ ] Syntax Highlighting
 - [ ] Language Sever Protocol
 - [ ] Website
+- [ ] Debugger
 
 # Getting Started
 

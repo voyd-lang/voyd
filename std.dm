@@ -1,9 +1,9 @@
 hello
 
-let map = (expr) =>
+let map = ((expr) =>
 	world
 	world
-		world
+		world)
 
 hello
 	how are you
