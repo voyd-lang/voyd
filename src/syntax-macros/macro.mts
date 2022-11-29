@@ -43,7 +43,7 @@ const registerMacros = (ast: AST): { transformed: AST; macros: Macros } => {
 const expandMacros = (expr: Expr, macros: Macros): Expr => {
   if (!isList(expr)) return expr;
 
-  const next = expr.reduce((prev: AST, expr) => {
+  return expr.reduce((prev: AST, expr) => {
     if (!isList(expr)) {
       prev.push(expr);
       return prev;
@@ -51,19 +51,13 @@ const expandMacros = (expr: Expr, macros: Macros): Expr => {
 
     if (typeof expr[0] === "string" && macros.has(expr[0])) {
       const transformed = expandMacro(expr, macros);
-      prev.push(expandMacros(transformed, macros));
+      prev.push(...(expandMacros(transformed, macros) as AST));
       return prev;
     }
 
     prev.push(expandMacros(expr, macros));
     return prev;
   }, []);
-
-  if (isList(next[0]) && next.length === 1) {
-    return next[0];
-  }
-
-  return next;
 };
 
 /** Expands a macro call. Assumes expr is a macro call */
@@ -89,12 +83,12 @@ const evalMacroBody = (
   macros: Macros
 ): Expr => {
   if (typeof body === "number") return body;
-  if (typeof body === "string" && body[0] === "$") {
+  if (typeof body === "string" && body.startsWith("$")) {
     return parameters.get(body.slice(1)) ?? [];
   }
   if (typeof body === "string") return body;
   if (typeof body === "boolean") return body;
-  const result = body.reduce((prev: AST, expr) => {
+  return body.reduce((prev: AST, expr) => {
     const fnCall = fnCallSymbol(expr);
     if (fnCall === "$") {
       prev.push(callFn((expr as AST).slice(1), { parameters, macros }));
@@ -109,7 +103,6 @@ const evalMacroBody = (
     prev.push(evalMacroBody(expr, parameters, macros));
     return prev;
   }, []);
-  return result;
 };
 
 const fnCallSymbol = (expr: Expr): string | undefined => {
