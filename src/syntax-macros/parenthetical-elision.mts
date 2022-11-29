@@ -1,66 +1,53 @@
 import { isList } from "../lib/is-list.mjs";
 import { isWhitespace } from "../lib/is-whitespace.mjs";
-import { removeWhitespace } from "../lib/remove-whitespace.mjs";
 import { AST, Expr } from "../parser.mjs";
-import { infixOperators } from "./infix.mjs";
+import { isInfixOp } from "./infix.mjs";
 
-export const parentheticalElision = (ast: AST): AST => {
-  const transformed: AST = [];
-
-  while (ast.length) {
-    consumeLeadingWhitespace(ast);
-    const elided = elideParens(ast);
-    if (elided instanceof Array && elided.length === 0) continue;
-    if (isList(elided) && elided.length === 1) {
-      transformed.push(elided[0]);
-      continue;
-    }
-    transformed.push(elided);
-  }
-
-  return transformed;
-};
+export const parentheticalElision = (ast: AST): AST => elideParens(ast);
 
 export type ElideParensOpts = {
   indentLevel?: number;
+  transformed?: AST;
+  isList?: boolean;
 };
 
-const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
-  if (!isList(ast)) return ast;
+const elideParens = (ast: AST, opts: ElideParensOpts = {}): AST => {
   const transformed: AST = [];
   let indentLevel = opts.indentLevel ?? 0;
 
   const nextLineHasChildExpr = () => nextExprIndentLevel(ast) > indentLevel;
 
-  const push = (expr: Expr) => {
-    if (isList(expr) && expr.length === 0) return;
-    transformed.push(expr);
+  const pushArgs = (...expr: Expr[]) => {
+    if (opts.isList) {
+      transformed.push(...expr);
+      return;
+    }
+
+    const fn = transformed.pop();
+    if (!fn) {
+      transformed.push(...expr);
+      return;
+    }
+
+    let list = isList(fn) && fn.length ? fn : [fn];
+    list.push(...expr);
+    transformed.push(list);
   };
 
   const consumeChildExpr = () => {
     const indentLevel = nextExprIndentLevel(ast);
     consumeLeadingWhitespace(ast);
     if (hasContinuation(ast, transformed)) return;
-    const elided = elideParens(ast, { indentLevel });
-    if (isList(elided) && elided.length === 1) {
-      push(elided[0]);
-      return;
-    }
-    push(elided);
+    pushArgs(...elideParens(ast, { indentLevel }));
   };
+
+  consumeLeadingWhitespace(ast);
 
   while (ast.length) {
     const next = ast[0];
 
     if (next === "\n" && nextLineHasChildExpr()) {
       consumeChildExpr();
-      continue;
-    }
-
-    if (greedyOps.has(next as string)) {
-      push(next);
-      ast.shift();
-      push(["block", ...(elideParens(ast, { indentLevel }) as AST)]);
       continue;
     }
 
@@ -74,19 +61,25 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
     }
 
     if (next instanceof Array) {
-      push(elideParens(next, { indentLevel }));
+      pushArgs(elideParens(next, { indentLevel, isList: true }));
       ast.shift();
       continue;
     }
 
-    if (next || ast.length) {
-      transformed.push(removeWhitespace(next));
+    if (next !== undefined) {
+      pushArgs(next);
       ast.shift();
       continue;
     }
   }
 
-  return transformed;
+  if (ast.length && indentLevel === 0) {
+    return elideParens(ast, {
+      transformed: [...(opts.transformed ?? []), ...transformed],
+    });
+  }
+
+  return [...(opts.transformed ?? []), ...transformed];
 };
 
 const nextExprIndentLevel = (ast: AST) => {
@@ -112,9 +105,6 @@ const nextExprIndentLevel = (ast: AST) => {
 
   return nextIndentLevel;
 };
-
-const greedyOps = new Set(["=>", "=", "<|"]);
-const isInfixOp = (op: string) => infixOperators.has(op);
 
 const hasContinuation = (ast: AST, transformed: AST) => {
   const lastTransformedExpr = transformed[transformed.length - 1] as string;

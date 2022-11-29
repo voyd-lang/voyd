@@ -1,3 +1,22 @@
+hello
+
+let map = (expr) =>
+	world
+	world
+		world
+
+hello
+	how are you
+
+() => 5
+
+() =>
+	5
+
+hello
+
+(hello)
+
 macro def-wasm-operator(op wasm-fn arg-type return-type)
 	pub fn $op(left:$arg-type right:$arg-type) -> $return-type
 		binaryen-mod ($arg-type $wasm-fn) (left right)
@@ -31,8 +50,7 @@ macro '=>'(&body)
 	lambda-expr (quote $(macro-expand &body))
 
 macro '<|'(&body)
-	$@ block
-		&body
+	$&body
 
 macro fn(&body)
 	$@ block

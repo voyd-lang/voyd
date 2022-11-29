@@ -20,6 +20,11 @@ export const infixOperators = new Set([
   "=>", // Not considered a continuation for parenthetical elision
 ]);
 
+export const greedyOps = new Set(["=>", "=", "<|"]);
+
+export const isInfixOp = (op: string) =>
+  infixOperators.has(op) && !greedyOps.has(op);
+
 export const infix = (ast: AST) => {
   const transformed: AST = [];
 

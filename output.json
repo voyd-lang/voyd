@@ -1,537 +1,206 @@
 [
+  "hello",
+  ["let", "map", "=", ["expr"], "=>", "world", ["world", "world"]],
+  ["hello", ["how", "are", "you"]],
+  [[], "=>", 5],
+  [[], "=>", 5],
+  "hello",
+  ["hello"],
   [
     "macro",
-    [
-      "def-wasm-operator",
-      "op",
-      "wasm-fn",
-      "arg-type",
-      "return-type"
-    ],
+    ["def-wasm-operator", "op", "wasm-fn", "arg-type", "return-type"],
     [
       "pub",
       "fn",
       [
         "$op",
-        [
-          "typed-parameter",
-          "left",
-          "$arg-type"
-        ],
-        [
-          "typed-parameter",
-          "right",
-          "$arg-type"
-        ]
+        ["typed-parameter", "left", "$arg-type"],
+        ["typed-parameter", "right", "$arg-type"]
       ],
       "->",
       "$return-type",
-      [
-        "binaryen-mod",
-        [
-          "$arg-type",
-          "$wasm-fn"
-        ],
-        [
-          "left",
-          "right"
-        ]
-      ]
+      ["binaryen-mod", ["$arg-type", "$wasm-fn"], ["left", "right"]]
     ]
   ],
   [
     "macro",
-    [
-      "pub",
-      "&body"
-    ],
-    "$&body",
-    [
-      "export",
-      [
-        "$",
-        "extract",
-        "&body",
-        1
-      ]
-    ]
+    ["pub", "&body"],
+    ["$&body"],
+    ["export", ["$", "extract", "&body", 1]]
   ],
   [
     "macro",
-    [
-      "let",
-      "&body"
-    ],
+    ["let", "&body"],
     [
       "$@",
       "block",
-      [
-        "define",
-        "equals-expr",
-        [
-          "extract",
-          "&body",
-          0
-        ]
-      ],
+      ["define", "equals-expr", ["extract", "&body", 0]],
       [
         "array",
         "\"define\"",
-        [
-          "extract",
-          "equals-expr",
-          1
-        ],
-        [
-          "extract",
-          "equals-expr",
-          2
-        ]
+        ["extract", "equals-expr", 1],
+        ["extract", "equals-expr", 2]
       ]
     ]
   ],
   [
     "macro",
-    [
-      "var",
-      "&body"
-    ],
+    ["var", "&body"],
     [
       "$@",
       "block",
-      [
-        "define",
-        "equals-expr",
-        [
-          "extract",
-          "&body",
-          0
-        ]
-      ],
+      ["define", "equals-expr", ["extract", "&body", 0]],
       [
         "array",
         "\"define-mut\"",
-        [
-          "extract",
-          "equals-expr",
-          1
-        ],
-        [
-          "extract",
-          "equals-expr",
-          2
-        ]
+        ["extract", "equals-expr", 1],
+        ["extract", "equals-expr", 2]
       ]
     ]
   ],
+  ["macro", ["lambda", "&body"], ["lambda-expr", ["quote", "$&body"]]],
   [
     "macro",
-    [
-      "lambda",
-      "&body"
-    ],
-    [
-      "lambda-expr",
-      [
-        "quote",
-        "$&body"
-      ]
-    ]
+    ["'=>'", "&body"],
+    ["lambda-expr", ["quote", ["$", "macro-expand", "&body"]]]
   ],
+  ["macro", ["'<|'", "&body"], "$&body"],
   [
     "macro",
-    [
-      "'=>'",
-      "&body"
-    ],
-    [
-      "lambda-expr",
-      [
-        "quote",
-        [
-          "$",
-          "macro-expand",
-          "&body"
-        ]
-      ]
-    ]
-  ],
-  [
-    "macro",
-    [
-      "'<|'",
-      "&body"
-    ],
+    ["fn", "&body"],
     [
       "$@",
       "block",
-      "&body"
-    ]
-  ],
-  [
-    "macro",
-    [
-      "fn",
-      "&body"
-    ],
-    [
-      "$@",
-      "block",
+      ["let", "definitions", "=", ["extract", "&body", 0]],
+      ["let", "identifier", "=", ["extract", "definitions", 0]],
       [
         "let",
+        "params",
+        "=",
+        ["array", "\"parameters\""],
+        ".",
         [
-          "=",
-          "definitions",
+          "concat",
           [
-            "block",
+            "definitions",
+            ".",
+            ["slice", 1],
+            ".",
+            "map",
+            ["expr"],
+            "=>",
             [
-              "extract",
-              "&body",
-              0
-            ]
+              "let",
+              "param-identifier-index",
+              "=",
+              ["if", ["expr", ".", "length", "==", 3], 1, 2]
+            ],
+            [
+              "let",
+              "param-identifier",
+              "=",
+              ["extract", "expr", "param-identifier-index"]
+            ],
+            [
+              "let",
+              "type",
+              "=",
+              ["extract", "expr", "param-identifier-index", "+", 1]
+            ],
+            ["array", "param-identifier", "type"]
           ]
         ]
       ],
       [
         "let",
+        "type-arrow-index",
+        "=",
         [
-          "=",
-          "identifier",
+          "if",
+          [["extract", "&body", 1], "==", "\"->\""],
+          1,
+          ["if", [["extract", "&body", 2], "==", "\"->\""], 2, -1]
+        ]
+      ],
+      [
+        "let",
+        "return-type",
+        "=",
+        [
+          "array",
+          "\"return-type\"",
           [
-            "block",
-            [
-              "extract",
-              "definitions",
-              0
-            ]
+            "if",
+            ["type-arrow-index", ">", -1],
+            ["extract", "&body", "type-arrow-index", "+", 1],
+            ["array"]
           ]
         ]
       ],
       [
         "let",
+        "expressions",
+        "=",
+        "macro-expand",
+        "<|",
         [
-          "=",
-          "params",
-          [
-            "block",
-            [
-              "concat",
-              [
-                "array",
-                "\"parameters\""
-              ],
-              [
-                "map",
-                [
-                  "slice",
-                  "definitions",
-                  1
-                ],
-                [
-                  "=>",
-                  [
-                    "expr"
-                  ],
-                  [
-                    "block",
-                    [
-                      "let",
-                      [
-                        "=",
-                        "param-identifier-index",
-                        [
-                          "block",
-                          [
-                            "if",
-                            [
-                              "==",
-                              [
-                                "length",
-                                "expr"
-                              ],
-                              3
-                            ],
-                            1,
-                            2
-                          ]
-                        ]
-                      ]
-                    ],
-                    [
-                      "let",
-                      [
-                        "=",
-                        "param-identifier",
-                        [
-                          "block",
-                          [
-                            "extract",
-                            "expr",
-                            "param-identifier-index"
-                          ]
-                        ]
-                      ]
-                    ],
-                    [
-                      "let",
-                      [
-                        "=",
-                        "type",
-                        [
-                          "block",
-                          [
-                            "extract",
-                            "expr",
-                            [
-                              "+",
-                              "param-identifier-index",
-                              1
-                            ]
-                          ]
-                        ]
-                      ]
-                    ],
-                    [
-                      "array",
-                      "param-identifier",
-                      "type"
-                    ]
-                  ]
-                ]
-              ]
-            ]
-          ]
+          "if",
+          ["type-arrow-index", ">", -1],
+          ["&body", ".", ["slice", "type-arrow-index", "+", 2]],
+          ["&body", ".", ["slice", 1]]
         ]
       ],
       [
         "let",
+        "extract-variables",
+        "=",
+        ["exprs"],
+        "=>",
         [
-          "=",
-          "type-arrow-index",
+          "exprs",
+          ".",
+          ["reduce", ["array"]],
+          ["vars", "expr"],
+          "=>",
           [
-            "block",
+            "if",
+            [["is-list", "expr"]],
             [
               "if",
               [
+                ["extract", "expr", 0],
                 "==",
-                [
-                  "extract",
-                  "&body",
-                  1
-                ],
-                "\"->\""
-              ],
-              1,
-              [
-                "if",
-                [
-                  "==",
-                  [
-                    "extract",
-                    "&body",
-                    2
-                  ],
-                  "\"->\""
-                ],
-                2,
-                -1
-              ]
-            ]
-          ]
-        ]
-      ],
-      [
-        "let",
-        [
-          "=",
-          "return-type",
-          [
-            "block",
-            [
-              "array",
-              "\"return-type\"",
-              [
-                "if",
-                [
-                  ">",
-                  "type-arrow-index",
-                  -1
-                ],
-                [
-                  "extract",
-                  "&body",
-                  [
-                    "+",
-                    "type-arrow-index",
-                    1
-                  ]
-                ],
-                [
-                  "array"
-                ]
-              ]
-            ]
-          ]
-        ]
-      ],
-      [
-        "let",
-        [
-          "=",
-          "expressions",
-          [
-            "block",
-            [
-              "<|",
-              "macro-expand",
-              [
-                "block",
-                [
-                  "if",
-                  [
-                    ">",
-                    "type-arrow-index",
-                    -1
-                  ],
-                  [
-                    "slice",
-                    "&body",
-                    [
-                      "+",
-                      "type-arrow-index",
-                      2
-                    ]
-                  ],
-                  [
-                    "slice",
-                    "&body",
-                    1
-                  ]
-                ]
-              ]
-            ]
-          ]
-        ]
-      ],
-      [
-        "let",
-        [
-          "=",
-          "extract-variables",
-          [
-            "block",
-            [
-              "=>",
-              [
-                "exprs"
+                "\"define-mut\"",
+                "or",
+                ["extract", "expr", 0],
+                "==",
+                "\"define\""
               ],
               [
                 "block",
                 [
-                  "reduce",
-                  "exprs",
+                  "vars",
+                  ".",
                   [
-                    "array"
-                  ],
-                  [
-                    "=>",
-                    [
-                      "vars",
-                      "expr"
-                    ],
-                    [
-                      "block",
-                      [
-                        "if",
-                        [
-                          [
-                            "is-list",
-                            "expr"
-                          ]
-                        ],
-                        [
-                          "if",
-                          [
-                            "==",
-                            [
-                              "or",
-                              [
-                                "==",
-                                [
-                                  "extract",
-                                  "expr",
-                                  0
-                                ],
-                                "\"define-mut\""
-                              ],
-                              [
-                                "extract",
-                                "expr",
-                                0
-                              ]
-                            ],
-                            "\"define\""
-                          ],
-                          [
-                            "block",
-                            [
-                              "push",
-                              "vars",
-                              [
-                                "array",
-                                [
-                                  "extract",
-                                  "expr",
-                                  1
-                                ],
-                                [
-                                  "extract",
-                                  "expr",
-                                  2
-                                ]
-                              ]
-                            ],
-                            "vars"
-                          ],
-                          [
-                            "concat",
-                            "vars",
-                            [
-                              "extract-variables",
-                              "expr"
-                            ]
-                          ]
-                        ],
-                        "vars"
-                      ]
-                    ]
+                    "push",
+                    ["array", ["extract", "expr", 1], ["extract", "expr", 2]]
                   ]
-                ]
-              ]
-            ]
+                ],
+                "vars"
+              ],
+              ["concat", "vars", ["extract-variables", "expr"]]
+            ],
+            "vars"
           ]
         ]
       ],
       [
         "let",
-        [
-          "=",
-          "variables",
-          [
-            "block",
-            [
-              "concat",
-              [
-                "array",
-                "variables"
-              ],
-              [
-                "extract-variables",
-                "expressions"
-              ]
-            ]
-          ]
-        ]
+        "variables",
+        "=",
+        ["array", "variables"],
+        ".",
+        ["concat", ["extract-variables", "expressions"]]
       ],
       [
         "array",
@@ -540,57 +209,14 @@
         "params",
         "variables",
         "return-type",
-        [
-          "concat",
-          [
-            "array",
-            "\"block\""
-          ],
-          "expressions"
-        ]
+        ["array", "\"block\"", ".", ["concat", "expressions"]]
       ]
     ]
   ],
-  [
-    "def-wasm-operator",
-    "'<'",
-    "lt_s",
-    "i32",
-    "i32"
-  ],
-  [
-    "def-wasm-operator",
-    "'-'",
-    "sub",
-    "i32",
-    "i32"
-  ],
-  [
-    "def-wasm-operator",
-    "'+'",
-    "add",
-    "i32",
-    "i32"
-  ],
-  [
-    "def-wasm-operator",
-    "'<'",
-    "lt",
-    "f32",
-    "i32"
-  ],
-  [
-    "def-wasm-operator",
-    "'-'",
-    "sub",
-    "f32",
-    "f32"
-  ],
-  [
-    "def-wasm-operator",
-    "'+'",
-    "add",
-    "f32",
-    "f32"
-  ]
+  ["def-wasm-operator", "'<'", "lt_s", "i32", "i32"],
+  ["def-wasm-operator", "'-'", "sub", "i32", "i32"],
+  ["def-wasm-operator", "'+'", "add", "i32", "i32"],
+  ["def-wasm-operator", "'<'", "lt", "f32", "i32"],
+  ["def-wasm-operator", "'-'", "sub", "f32", "f32"],
+  ["def-wasm-operator", "'+'", "add", "f32", "f32"]
 ]
