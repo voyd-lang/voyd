@@ -1,4 +1,4 @@
 - Consider redefining block http://www.lispworks.com/documentation/lw51/CLHS/Body/s_block.htm
-- Fix bug in parenthetical elision where an empty list is deleted even when desired.
 - Switch comment syntax to C style. Semicolon is too useful. It could be used as a join operator. Like how its used in english https://en.wikipedia.org/wiki/Semicolon
-- comma may be diff than greedy
+- semi-colon may be diff than greedy
+- implement greedy ops from infix macro
