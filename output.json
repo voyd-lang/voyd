@@ -1,216 +1,98 @@
 [
-  "root",
   [
-    "module",
-    "src/std",
-    ["imports"],
-    ["exports"],
+    "define-function",
+    "'<'",
+    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+    ["variables"],
+    ["return-type", "i32"],
+    ["block", ["binaryen-mod", ["i32", "lt_s"], ["left", "right"]]]
+  ],
+  [
+    "export",
     [
-      "block",
-      [
-        "define-function",
-        "'<'",
-        [
-          "parameters",
-          ["param-identifier", "type"],
-          ["param-identifier", "type"]
-        ],
-        ["variables"],
-        ["return-type", "i32"],
-        [
-          [
-            "block",
-            "macro-expand",
-            [
-              "block",
-              [
-                "if",
-                [">", "type-arrow-index", -1],
-                ["slice", "&body", ["+", "type-arrow-index", 2]],
-                ["slice", "&body", 1]
-              ]
-            ]
-          ]
-        ]
-      ],
-      [
-        "export",
-        [
-          "'<'",
-          ["typed-parameter", "left", "i32"],
-          ["typed-parameter", "right", "i32"]
-        ]
-      ],
-      [
-        "define-function",
-        "'-'",
-        [
-          "parameters",
-          ["param-identifier", "type"],
-          ["param-identifier", "type"]
-        ],
-        ["variables"],
-        ["return-type", "i32"],
-        [
-          [
-            "block",
-            "macro-expand",
-            [
-              "block",
-              [
-                "if",
-                [">", "type-arrow-index", -1],
-                ["slice", "&body", ["+", "type-arrow-index", 2]],
-                ["slice", "&body", 1]
-              ]
-            ]
-          ]
-        ]
-      ],
-      [
-        "export",
-        [
-          "'-'",
-          ["typed-parameter", "left", "i32"],
-          ["typed-parameter", "right", "i32"]
-        ]
-      ],
-      [
-        "define-function",
-        "'+'",
-        [
-          "parameters",
-          ["param-identifier", "type"],
-          ["param-identifier", "type"]
-        ],
-        ["variables"],
-        ["return-type", "i32"],
-        [
-          [
-            "block",
-            "macro-expand",
-            [
-              "block",
-              [
-                "if",
-                [">", "type-arrow-index", -1],
-                ["slice", "&body", ["+", "type-arrow-index", 2]],
-                ["slice", "&body", 1]
-              ]
-            ]
-          ]
-        ]
-      ],
-      [
-        "export",
-        [
-          "'+'",
-          ["typed-parameter", "left", "i32"],
-          ["typed-parameter", "right", "i32"]
-        ]
-      ],
-      [
-        "define-function",
-        "'<'",
-        [
-          "parameters",
-          ["param-identifier", "type"],
-          ["param-identifier", "type"]
-        ],
-        ["variables"],
-        ["return-type", "i32"],
-        [
-          [
-            "block",
-            "macro-expand",
-            [
-              "block",
-              [
-                "if",
-                [">", "type-arrow-index", -1],
-                ["slice", "&body", ["+", "type-arrow-index", 2]],
-                ["slice", "&body", 1]
-              ]
-            ]
-          ]
-        ]
-      ],
-      [
-        "export",
-        [
-          "'<'",
-          ["typed-parameter", "left", "f32"],
-          ["typed-parameter", "right", "f32"]
-        ]
-      ],
-      [
-        "define-function",
-        "'-'",
-        [
-          "parameters",
-          ["param-identifier", "type"],
-          ["param-identifier", "type"]
-        ],
-        ["variables"],
-        ["return-type", "f32"],
-        [
-          [
-            "block",
-            "macro-expand",
-            [
-              "block",
-              [
-                "if",
-                [">", "type-arrow-index", -1],
-                ["slice", "&body", ["+", "type-arrow-index", 2]],
-                ["slice", "&body", 1]
-              ]
-            ]
-          ]
-        ]
-      ],
-      [
-        "export",
-        [
-          "'-'",
-          ["typed-parameter", "left", "f32"],
-          ["typed-parameter", "right", "f32"]
-        ]
-      ],
-      [
-        "define-function",
-        "'+'",
-        [
-          "parameters",
-          ["param-identifier", "type"],
-          ["param-identifier", "type"]
-        ],
-        ["variables"],
-        ["return-type", "f32"],
-        [
-          [
-            "block",
-            "macro-expand",
-            [
-              "block",
-              [
-                "if",
-                [">", "type-arrow-index", -1],
-                ["slice", "&body", ["+", "type-arrow-index", 2]],
-                ["slice", "&body", 1]
-              ]
-            ]
-          ]
-        ]
-      ],
-      [
-        "export",
-        [
-          "'+'",
-          ["typed-parameter", "left", "f32"],
-          ["typed-parameter", "right", "f32"]
-        ]
-      ]
+      "'<'",
+      ["typed-parameter", "left", "i32"],
+      ["typed-parameter", "right", "i32"]
+    ]
+  ],
+  [
+    "define-function",
+    "'-'",
+    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+    ["variables"],
+    ["return-type", "i32"],
+    ["block", ["binaryen-mod", ["i32", "sub"], ["left", "right"]]]
+  ],
+  [
+    "export",
+    [
+      "'-'",
+      ["typed-parameter", "left", "i32"],
+      ["typed-parameter", "right", "i32"]
+    ]
+  ],
+  [
+    "define-function",
+    "'+'",
+    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+    ["variables"],
+    ["return-type", "i32"],
+    ["block", ["binaryen-mod", ["i32", "add"], ["left", "right"]]]
+  ],
+  [
+    "export",
+    [
+      "'+'",
+      ["typed-parameter", "left", "i32"],
+      ["typed-parameter", "right", "i32"]
+    ]
+  ],
+  [
+    "define-function",
+    "'<'",
+    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+    ["variables"],
+    ["return-type", "i32"],
+    ["block", ["binaryen-mod", ["f32", "lt"], ["left", "right"]]]
+  ],
+  [
+    "export",
+    [
+      "'<'",
+      ["typed-parameter", "left", "f32"],
+      ["typed-parameter", "right", "f32"]
+    ]
+  ],
+  [
+    "define-function",
+    "'-'",
+    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+    ["variables"],
+    ["return-type", "f32"],
+    ["block", ["binaryen-mod", ["f32", "sub"], ["left", "right"]]]
+  ],
+  [
+    "export",
+    [
+      "'-'",
+      ["typed-parameter", "left", "f32"],
+      ["typed-parameter", "right", "f32"]
+    ]
+  ],
+  [
+    "define-function",
+    "'+'",
+    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+    ["variables"],
+    ["return-type", "f32"],
+    ["block", ["binaryen-mod", ["f32", "add"], ["left", "right"]]]
+  ],
+  [
+    "export",
+    [
+      "'+'",
+      ["typed-parameter", "left", "f32"],
+      ["typed-parameter", "right", "f32"]
     ]
   ]
 ]

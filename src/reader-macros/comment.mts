@@ -1,7 +1,7 @@
 import { ReaderMacro } from "./types.mjs";
 
 export const comment: ReaderMacro = {
-  tag: /^\;[^\s]*$/,
+  tag: /^\/\/[^\s]*$/,
   macro: (dream) => {
     while (dream.length) {
       const next = dream[0];

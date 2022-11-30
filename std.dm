@@ -30,25 +30,29 @@ macro lambda(&body)
 macro '=>'(&body)
 	lambda-expr (quote $(macro-expand &body))
 
-macro '<|'(&body)
-	$&body
+macro ';'(&body)
+	$@ block
+		let func = &body.extract(0)
+		let block-list = &body.extract(1)
+		if is-list(func)
+			func.concat(block-list.slice(1))
+			concat(#[func] block-list.slice(1))
 
 macro fn(&body)
 	$@ block
 		let definitions = extract(&body 0)
 		let identifier = extract(definitions 0)
 
-		let params = #["parameters"].concat(
+		let params = #["parameters"].concat;
 			definitions.slice(1).map (expr) =>
 				let param-identifier-index = (if (expr.length == 3) 1 2)
 				let param-identifier = extract(expr param-identifier-index)
 				let type = extract(expr param-identifier-index + 1)
 				#[param-identifier type]
-		)
 
-		let type-arrow-index = (if (extract(&body 1) == "->")
+		let type-arrow-index = if; (extract(&body 1) == "->")
 			1
-			if (extract(&body 2) == "->") 2 -1)
+			if (extract(&body 2) == "->") 2 -1
 
 
 		let return-type = #[
@@ -58,7 +62,7 @@ macro fn(&body)
 				#[]
 		]
 
-		let expressions = macro-expand <|
+		let expressions = macro-expand;
 			if (type-arrow-index > -1)
 				&body.slice(type-arrow-index + 2)
 				&body.slice(1)
@@ -74,6 +78,7 @@ macro fn(&body)
 					vars
 
 		let variables = #[variables].concat(extract-variables(expressions))
+		let test = #["block"].concat(expressions)
 
 		#[
 			"define-function"
@@ -81,7 +86,7 @@ macro fn(&body)
 			params
 			variables
 			return-type
-			#["block"].concat(expressions)
+			test
 		]
 
 

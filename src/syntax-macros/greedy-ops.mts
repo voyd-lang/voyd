@@ -1,6 +1,6 @@
 import { AST, Expr } from "../parser.mjs";
 
-export const greedyOps = new Set(["=>", "=", "<|"]);
+export const greedyOps = new Set(["=>", "=", "<|", ";"]);
 
 export const processGreedyOps = (ast: AST) => {
   const transformed: AST = [];

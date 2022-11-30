@@ -1,4 +1,13 @@
 - Consider redefining block http://www.lispworks.com/documentation/lw51/CLHS/Body/s_block.htm
-- Switch comment syntax to C style. Semicolon is too useful. It could be used as a join operator. Like how its used in english https://en.wikipedia.org/wiki/Semicolon
-- semi-colon may be diff than greedy
-- implement greedy ops from infix macro
+- figure out why I can't inline sub expressions into arrays like this:
+  ```
+  	#[
+  		"define-function"
+  		identifier
+  		params
+  		variables
+  		return-type
+  		#["block"].concat(expressions)
+  	]
+  ```
+  I think its the dot
