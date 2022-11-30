@@ -1,4 +1,3 @@
-import { fn } from "./fn.mjs";
 import { functionalNotation } from "./functional-notation.mjs";
 import { processGreedyOps } from "./greedy-ops.mjs";
 import { infix } from "./infix.mjs";
@@ -12,8 +11,7 @@ export const syntaxMacros: SyntaxMacro[] = [
   functionalNotation,
   (ast) => parentheticalElision(ast),
   processGreedyOps,
-  // infix,
-  // moduleSyntaxMacro,
-  // macro,
-  // fn,
+  infix,
+  moduleSyntaxMacro,
+  macro,
 ];

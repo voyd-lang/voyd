@@ -11,7 +11,9 @@ export const processGreedyOps = (ast: AST) => {
       continue;
     }
     if (typeof next === "string" && greedyOps.has(next)) {
-      transformed.push(processGreedyOps(ast));
+      transformed.push(next);
+      const consumed = processGreedyOps(ast);
+      transformed.push(["block", ...consumed]);
       continue;
     }
     transformed.push(next);
