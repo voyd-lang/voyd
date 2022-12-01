@@ -60,6 +60,7 @@ const elideParens = (ast: AST, opts: ElideParensOpts = {}): AST => {
       continue;
     }
 
+    // TODO Custom parser here
     if (next instanceof Array) {
       pushArgs(elideParens(next, { indentLevel, isList: true }));
       ast.shift();
