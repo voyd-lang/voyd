@@ -163,8 +163,8 @@ const callFn = (fn: Expr, { parameters, vars, macros }: CallFnOpts): Expr => {
 
         if (typeof expr === "number") return expr;
         if (typeof expr === "boolean") return expr;
-        if (isString(expr)) return expr.replace(/\"/g, "");
         if (isFloat(expr)) return Number(expr.replace("/float", ""));
+        if (isString(expr)) return expr.replace(/\"/g, "");
         return variables.get(expr)?.value ?? expr;
       })
     : fn.slice(1);

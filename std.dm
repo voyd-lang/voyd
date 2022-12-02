@@ -10,8 +10,8 @@ macro let(&body)
 	$@ block
 		define equals-expr (extract &body 0)
 		#[
-			"define"
-			extract equals-expr 1
+			"define",
+			extract equals-expr 1,
 			extract equals-expr 2
 		]
 
@@ -19,8 +19,8 @@ macro var(&body)
 	$@ block
 		define equals-expr (extract &body 0)
 		#[
-			"define-mut"
-			extract equals-expr 1
+			"define-mut",
+			extract equals-expr 1,
 			extract equals-expr 2
 		]
 
@@ -48,7 +48,7 @@ macro fn(&body)
 				let param-identifier-index = (if (expr.length == 3) 1 2)
 				let param-identifier = extract(expr param-identifier-index)
 				let type = extract(expr param-identifier-index + 1)
-				#[param-identifier type]
+				#[param-identifier, type]
 
 		let type-arrow-index = if; (extract(&body 1) == "->")
 			1
@@ -56,10 +56,10 @@ macro fn(&body)
 
 
 		let return-type = #[
-			"return-type"
+			"return-type",
 			if (type-arrow-index > -1)
 				extract(&body type-arrow-index + 1)
-				#[]
+				#[],
 		]
 
 		let expressions = macro-expand;
@@ -78,15 +78,14 @@ macro fn(&body)
 					vars
 
 		let variables = #[variables].concat(extract-variables(expressions))
-		let test = #["block"].concat(expressions)
 
 		#[
-			"define-function"
-			identifier
-			params
-			variables
-			return-type
-			test
+			"define-function",
+			identifier,
+			params,
+			variables,
+			return-type,
+			#["block"].concat(expressions)
 		]
 
 

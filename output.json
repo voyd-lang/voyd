@@ -1,12 +1,10 @@
 [
-  [
-    "define-function",
-    "'<'",
-    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
-    ["variables"],
-    ["return-type", "i32"],
-    ["block", ["binaryen-mod", ["i32", "lt_s"], ["left", "right"]]]
-  ],
+  "define-function",
+  "'<'",
+  ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+  ["variables", "array", "array", "array", "array"],
+  ["return-type", "i32"],
+  ["block", ["binaryen-mod", ["i32", "lt_s"], ["left", "right"]]],
   [
     "export",
     [
@@ -15,14 +13,12 @@
       ["typed-parameter", "right", "i32"]
     ]
   ],
-  [
-    "define-function",
-    "'-'",
-    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
-    ["variables"],
-    ["return-type", "i32"],
-    ["block", ["binaryen-mod", ["i32", "sub"], ["left", "right"]]]
-  ],
+  "define-function",
+  "'-'",
+  ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+  ["variables", "array", "array", "array", "array"],
+  ["return-type", "i32"],
+  ["block", ["binaryen-mod", ["i32", "sub"], ["left", "right"]]],
   [
     "export",
     [
@@ -31,14 +27,12 @@
       ["typed-parameter", "right", "i32"]
     ]
   ],
-  [
-    "define-function",
-    "'+'",
-    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
-    ["variables"],
-    ["return-type", "i32"],
-    ["block", ["binaryen-mod", ["i32", "add"], ["left", "right"]]]
-  ],
+  "define-function",
+  "'+'",
+  ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+  ["variables", "array", "array", "array", "array"],
+  ["return-type", "i32"],
+  ["block", ["binaryen-mod", ["i32", "add"], ["left", "right"]]],
   [
     "export",
     [
@@ -47,14 +41,12 @@
       ["typed-parameter", "right", "i32"]
     ]
   ],
-  [
-    "define-function",
-    "'<'",
-    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
-    ["variables"],
-    ["return-type", "i32"],
-    ["block", ["binaryen-mod", ["f32", "lt"], ["left", "right"]]]
-  ],
+  "define-function",
+  "'<'",
+  ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+  ["variables", "array", "array", "array", "array"],
+  ["return-type", "i32"],
+  ["block", ["binaryen-mod", ["f32", "lt"], ["left", "right"]]],
   [
     "export",
     [
@@ -63,14 +55,12 @@
       ["typed-parameter", "right", "f32"]
     ]
   ],
-  [
-    "define-function",
-    "'-'",
-    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
-    ["variables"],
-    ["return-type", "f32"],
-    ["block", ["binaryen-mod", ["f32", "sub"], ["left", "right"]]]
-  ],
+  "define-function",
+  "'-'",
+  ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+  ["variables", "array", "array", "array", "array"],
+  ["return-type", "f32"],
+  ["block", ["binaryen-mod", ["f32", "sub"], ["left", "right"]]],
   [
     "export",
     [
@@ -79,14 +69,12 @@
       ["typed-parameter", "right", "f32"]
     ]
   ],
-  [
-    "define-function",
-    "'+'",
-    ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
-    ["variables"],
-    ["return-type", "f32"],
-    ["block", ["binaryen-mod", ["f32", "add"], ["left", "right"]]]
-  ],
+  "define-function",
+  "'+'",
+  ["parameters", ["param-identifier", "type"], ["param-identifier", "type"]],
+  ["variables", "array", "array", "array", "array"],
+  ["return-type", "f32"],
+  ["block", ["binaryen-mod", ["f32", "add"], ["left", "right"]]],
   [
     "export",
     [

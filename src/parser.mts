@@ -56,7 +56,7 @@ const lexer = (dream: string[]): string => {
       continue;
     }
 
-    const isTerminator = /[\{\[\(\}\]\)\s\.\;\'\"]/.test(char);
+    const isTerminator = /[\{\[\(\}\]\)\s\.\;\'\"\,]/.test(char);
 
     if (isTerminator && (token[0] === "#" || !token.length)) {
       token += dream.shift()!;

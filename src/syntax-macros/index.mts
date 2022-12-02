@@ -9,7 +9,7 @@ import { SyntaxMacro } from "./types.mjs";
 /** Caution: Order matters */
 export const syntaxMacros: SyntaxMacro[] = [
   functionalNotation,
-  (ast) => parentheticalElision(ast),
+  parentheticalElision,
   processGreedyOps,
   infix,
   // moduleSyntaxMacro,

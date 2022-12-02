@@ -1,48 +1,38 @@
 import { isList } from "../lib/is-list.mjs";
+import { isString } from "../lib/is-string.mjs";
 import { isWhitespace } from "../lib/is-whitespace.mjs";
 import { AST, Expr } from "../parser.mjs";
 import { isContinuationOp } from "./infix.mjs";
 
-export const parentheticalElision = (ast: AST): AST => elideParens(ast);
+export const parentheticalElision = (ast: AST): AST => {
+  const transformed: AST = [];
+  const start = Date.now();
+  while (ast.length) {
+    transformed.push(elideParens(ast) as AST);
+    consumeLeadingWhitespace(ast);
+  }
+  return transformed;
+};
 
 export type ElideParensOpts = {
   indentLevel?: number;
-  transformed?: AST;
-  isList?: boolean;
 };
 
-const elideParens = (ast: AST, opts: ElideParensOpts = {}): AST => {
+const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
+  if (!isList(ast)) return ast;
   const transformed: AST = [];
   let indentLevel = opts.indentLevel ?? 0;
 
   const nextLineHasChildExpr = () => nextExprIndentLevel(ast) > indentLevel;
 
-  const pushArgs = (...expr: Expr[]) => {
-    if (opts.isList) {
-      transformed.push(...expr);
-      return;
-    }
-
-    const fn = transformed.pop();
-    if (!fn) {
-      transformed.push(...expr);
-      return;
-    }
-
-    let list = isList(fn) && fn.length ? fn : [fn];
-    list.push(...expr);
-    transformed.push(list);
-  };
-
   const consumeChildExpr = () => {
     const indentLevel = nextExprIndentLevel(ast);
     consumeLeadingWhitespace(ast);
     if (hasContinuation(ast, transformed)) return;
-    pushArgs(...elideParens(ast, { indentLevel }));
+    transformed.push(elideParens(ast, { indentLevel }) as AST);
   };
 
   consumeLeadingWhitespace(ast);
-
   while (ast.length) {
     const next = ast[0];
 
@@ -60,27 +50,52 @@ const elideParens = (ast: AST, opts: ElideParensOpts = {}): AST => {
       continue;
     }
 
-    // TODO Custom parser here
-    if (next instanceof Array) {
-      pushArgs(elideParens(next, { indentLevel, isList: true }));
+    if (isList(next)) {
+      transformed.push(handleArray(next, indentLevel));
       ast.shift();
       continue;
     }
 
     if (next !== undefined) {
-      pushArgs(next);
+      transformed.push(next);
       ast.shift();
       continue;
     }
   }
 
-  if (ast.length && indentLevel === 0) {
-    return elideParens(ast, {
-      transformed: [...(opts.transformed ?? []), ...transformed],
-    });
+  if (transformed.length === 1) {
+    return transformed[0];
   }
 
-  return [...(opts.transformed ?? []), ...transformed];
+  return transformed;
+};
+
+const handleArray = (ast: AST, indentLevel: number): Expr => {
+  const transformed: AST = [];
+
+  let currentExpr: AST = [];
+  while (ast.length) {
+    const next = ast.shift()!;
+
+    if (next === ",") {
+      transformed.push(elideParens(currentExpr) as AST);
+      currentExpr = [];
+      continue;
+    }
+
+    currentExpr.push(next);
+  }
+
+  consumeLeadingWhitespace(currentExpr);
+  if (currentExpr.length) {
+    transformed.push(elideParens(currentExpr, { indentLevel }) as AST);
+  }
+
+  if (transformed.length === 1) {
+    return transformed[0];
+  }
+
+  return transformed;
 };
 
 const nextExprIndentLevel = (ast: AST) => {
