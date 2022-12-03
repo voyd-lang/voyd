@@ -1,32 +1,56 @@
-macro `(&body)
+macro pub(&body)
+	log "body"
+	log &body
+	// Temp hack to get pub def-wasm-operator and the like to work
+	define body
+		if is-list(&body.extract(0))
+			&body.extract(0)
+			&body
+
+	define expanded macro-expand(body)
+
+	if expanded.extract(0) == "macro"
+		block
+			register-macro expanded
+			define definitions expanded.extract(1)
+			quote splice-block
+				export
+					$(extract definitions 0)
+					(parameters $(slice definitions 1))
+		quote splice-block
+			$expanded
+			export $(extract expanded 1) $(extract expanded 2)
+
+pub macro `(&body)
 	quote quote $@&body
 
-macro let(&body)
+pub macro let(&body)
 	define equals-expr (extract &body 0)
 	` define
 		$(macro-expand (extract equals-expr 1))
 		$(macro-expand (extract equals-expr 2)))
 
-macro var(&body)
+pub macro var(&body)
 	define equals-expr (extract &body 0)
-	`(define-mut $(extract equals-expr 1) $(extract equals-expr 2))
+	` define-mut
+		$(macro-expand (extract equals-expr 1))
+		$(macro-expand (extract equals-expr 2)))
 
-macro lambda(&body)
+pub macro lambda(&body)
 	` lambda-expr $@(macro-expand &body)
 
-macro '=>'(&body)
+pub macro '=>'(&body)
 	let quoted = `(lambda $@(&body))
 	macro-expand quoted
 
-
-macro ';'(&body)
+pub macro ';'(&body)
 	let func = macro-expand(&body.extract(0))
 	let block-list = macro-expand(&body.extract(1))
 	if is-list(func)
 		func.concat(block-list.slice(1))
 		concat(`($func) block-list.slice(1))
 
-macro fn(&body)
+pub macro fn(&body)
 	let definitions = extract(&body 0)
 	let identifier = extract(definitions 0)
 
@@ -69,22 +93,11 @@ macro fn(&body)
 		$params
 		$variables
 		$return-type
-		$ #["block"].concat(expressions)
+		// TODO: Debug why I can't use this syntax here
+		// $ #["block"].concat(expressions)
+		$(concat #["block"] expressions)
 
-
-macro pub(&body)
-	let expanded = macro-expand(&body)
-	` splice-block
-			$expanded
-			export $(extract expanded 1) $(extract expanded 2)
-
-macro def-wasm-operator(op wasm-fn arg-type return-type)
+pub macro def-wasm-operator(op wasm-fn arg-type return-type)
 	let expanded = macro-expand;
-		` pub fn $op(left:$arg-type right:$arg-type) -> $return-type
+		` fn $op(left:$arg-type right:$arg-type) -> $return-type
 			binaryen-mod ($arg-type $wasm-fn) (left right)
-
-def-wasm-operator('<' lt_s i32 i32)
-def-wasm-operator('+' add i32 i32)
-def-wasm-operator('<' lt f32 i32)
-def-wasm-operator('-' sub f32 f32)
-def-wasm-operator('+' add f32 f32)

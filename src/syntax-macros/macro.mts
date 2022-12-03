@@ -4,51 +4,62 @@ import { isString } from "../lib/is-string.mjs";
 import { ModuleInfo } from "../lib/module-info.mjs";
 import { AST, Expr } from "../parser.mjs";
 
-/** TODO: Support scoping */
+/** TODO: Support macro scoping / module import checking */
 type Macros = Map<string, AST>;
 
 /** Transforms macro's into their final form and then runs them */
 export const macro = (ast: AST, info: ModuleInfo): AST => {
   if (!info.isRoot) return ast;
-  const { macros, transformed } = registerMacros(ast);
-  return expandMacros(transformed, macros);
+  const macros: Macros = new Map();
+  // const { macros, transformed } = registerMacros(ast);
+  return expandMacros(ast, macros);
 };
 
-/** Registers macros and removes them. For now we cheat and interpret `macro` directly rather than transforming it */
-const registerMacros = (ast: AST): { transformed: AST; macros: Macros } => {
-  let macros: Macros = new Map();
-  const transformed: AST = [];
+// // NOTE: The pub macro does this for us. This c
+// /** Registers macros and removes them. For now we cheat and interpret `macro` directly rather than transforming it */
+// const registerMacros = (ast: AST): { transformed: AST; macros: Macros } => {
+//   let macros: Macros = new Map();
+//   const transformed: AST = [];
 
-  for (const expr of ast) {
-    if (!isList(expr)) {
-      transformed.push(expr);
-      continue;
-    }
+//   for (const expr of ast) {
+//     if (!isList(expr)) {
+//       transformed.push(expr);
+//       continue;
+//     }
 
-    if (expr[0] !== "macro") {
-      const sub = registerMacros(expr);
-      macros = new Map([...macros, ...sub.macros]);
-      transformed.push(sub.transformed);
-      continue;
-    }
+//     if (expr[0] !== "macro") {
+//       const sub = registerMacros(expr);
+//       macros = new Map([...macros, ...sub.macros]);
+//       transformed.push(sub.transformed);
+//       continue;
+//     }
 
-    const id = ((expr[1] as AST)[0] as string).replace(/\'/g, "");
-    macros.set(id, expr);
-  }
+//     registerMacro(macros, expr);
+//   }
 
-  // Expand macro calls within macros
-  for (const [id, macro] of macros.entries()) {
-    macros.set(id, [
-      ...macro.slice(0, 2),
-      ...macro.slice(2).map((exp) => expandMacro(exp, macros)),
-    ]);
-  }
+//   // Expand macro calls within macros
+//   for (const [id, macro] of macros.entries()) {
+//     macros.set(id, [
+//       ...macro.slice(0, 2),
+//       ...macro.slice(2).map((exp) => expandMacro(exp, macros)),
+//     ]);
+//   }
 
-  return { transformed, macros };
+//   return { transformed, macros };
+// };
+
+const registerMacro = (macros: Macros, ast: AST) => {
+  const id = ((ast[1] as AST)[0] as string).replace(/\'/g, "");
+  macros.set(id, ast);
 };
 
 const expandMacros = (ast: AST, macros: Macros): AST => {
   return ast.reduce((newAst: AST, expr) => {
+    if (isList(expr) && expr[0] === "macro") {
+      registerMacro(macros, expandMacro(expr, macros) as AST);
+      return newAst;
+    }
+
     if (isList(expr)) {
       const expanded = expandMacro(expr, macros);
       const result = isList(expanded)
@@ -307,6 +318,10 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
   },
   "macro-expand": ({ macros }, body: AST) => expandMacro(body, macros),
   eval: (opts, body: AST) => evalExpr(body, opts),
+  "register-macro": ({ macros }, ast: AST) => {
+    registerMacro(macros, ast);
+    return [];
+  },
 };
 
 const handleOptionalConditionParenthesis = (expr: Expr): Expr => {

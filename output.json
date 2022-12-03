@@ -1,47 +1,95 @@
 [
+  "root",
   [
-    "define-function",
-    "'<'",
-    ["parameters", ["left", "i32"], ["right", "i32"]],
-    ["variables"],
-    ["return-type", "i32"],
-    ["concat", ["array", "\"block\""], "expressions"]
+    "module",
+    "src/macros",
+    ["imports"],
+    ["exports"],
+    [
+      "block",
+      ["export", "`", ["parameters", ["&body"]]],
+      ["export", "let", ["parameters", ["&body"]]],
+      ["export", "var", ["parameters", ["&body"]]],
+      ["export", "lambda", ["parameters", ["&body"]]],
+      ["export", "'=>'", ["parameters", ["&body"]]],
+      ["export", "';'", ["parameters", ["&body"]]],
+      ["export", "fn", ["parameters", ["&body"]]],
+      [
+        "export",
+        "def-wasm-operator",
+        ["parameters", ["op", "wasm-fn", "arg-type", "return-type"]]
+      ]
+    ]
   ],
-  ["export", "'<'", ["parameters", ["left", "i32"], ["right", "i32"]]],
   [
-    "define-function",
-    "'+'",
-    ["parameters", ["left", "i32"], ["right", "i32"]],
-    ["variables"],
-    ["return-type", "i32"],
-    ["concat", ["array", "\"block\""], "expressions"]
-  ],
-  ["export", "'+'", ["parameters", ["left", "i32"], ["right", "i32"]]],
-  [
-    "define-function",
-    "'<'",
-    ["parameters", ["left", "f32"], ["right", "f32"]],
-    ["variables"],
-    ["return-type", "i32"],
-    ["concat", ["array", "\"block\""], "expressions"]
-  ],
-  ["export", "'<'", ["parameters", ["left", "f32"], ["right", "f32"]]],
-  [
-    "define-function",
-    "'-'",
-    ["parameters", ["left", "f32"], ["right", "f32"]],
-    ["variables"],
-    ["return-type", "f32"],
-    ["concat", ["array", "\"block\""], "expressions"]
-  ],
-  ["export", "'-'", ["parameters", ["left", "f32"], ["right", "f32"]]],
-  [
-    "define-function",
-    "'+'",
-    ["parameters", ["left", "f32"], ["right", "f32"]],
-    ["variables"],
-    ["return-type", "f32"],
-    ["concat", ["array", "\"block\""], "expressions"]
-  ],
-  ["export", "'+'", ["parameters", ["left", "f32"], ["right", "f32"]]]
+    "module",
+    "src/std",
+    ["imports", ["dir/macros", "***"]],
+    ["exports"],
+    [
+      "block",
+      [
+        "define-function",
+        "'<'",
+        ["parameters", ["left", "i32"], ["right", "i32"]],
+        ["variables"],
+        ["return-type", "i32"],
+        ["block", ["binaryen-mod", ["i32", "lt_s"], ["left", "right"]]]
+      ],
+      ["export", "'<'", ["parameters", ["left", "i32"], ["right", "i32"]]],
+      [
+        "define-function",
+        "'+'",
+        ["parameters", ["left", "i32"], ["right", "i32"]],
+        ["variables"],
+        ["return-type", "i32"],
+        ["block", ["binaryen-mod", ["i32", "add"], ["left", "right"]]]
+      ],
+      ["export", "'+'", ["parameters", ["left", "i32"], ["right", "i32"]]],
+      [
+        "define-function",
+        "'<'",
+        ["parameters", ["left", "f32"], ["right", "f32"]],
+        ["variables"],
+        ["return-type", "i32"],
+        ["block", ["binaryen-mod", ["f32", "lt"], ["left", "right"]]]
+      ],
+      ["export", "'<'", ["parameters", ["left", "f32"], ["right", "f32"]]],
+      [
+        "define-function",
+        "'-'",
+        ["parameters", ["left", "f32"], ["right", "f32"]],
+        ["variables"],
+        ["return-type", "f32"],
+        ["block", ["binaryen-mod", ["f32", "sub"], ["left", "right"]]]
+      ],
+      ["export", "'-'", ["parameters", ["left", "f32"], ["right", "f32"]]],
+      [
+        "define-function",
+        "'+'",
+        ["parameters", ["left", "f32"], ["right", "f32"]],
+        ["variables"],
+        ["return-type", "f32"],
+        ["block", ["binaryen-mod", ["f32", "add"], ["left", "right"]]]
+      ],
+      ["export", "'+'", ["parameters", ["left", "f32"], ["right", "f32"]]],
+      [
+        "define-function",
+        "hello",
+        ["parameters", ["world", "i32"]],
+        ["variables"],
+        ["return-type", "i32"],
+        ["block", "world"]
+      ],
+      ["export", "hello", ["parameters", ["world", "i32"]]],
+      [
+        "define-function",
+        "'*'",
+        ["parameters", ["left", "f32"], ["right", "f32"]],
+        ["variables"],
+        ["return-type", "f32"],
+        ["block", ["binaryen-mod", ["f32", "add"], ["left", "right"]]]
+      ]
+    ]
+  ]
 ]
