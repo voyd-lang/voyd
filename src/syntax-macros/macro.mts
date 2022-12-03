@@ -11,7 +11,7 @@ type Macros = Map<string, AST>;
 export const macro = (ast: AST, info: ModuleInfo): AST => {
   if (!info.isRoot) return ast;
   const { macros, transformed } = registerMacros(ast);
-  return transformed.map((exp) => expandMacro(exp, macros));
+  return expandMacros(transformed, macros);
 };
 
 /** Registers macros and removes them. For now we cheat and interpret `macro` directly rather than transforming it */
@@ -38,16 +38,31 @@ const registerMacros = (ast: AST): { transformed: AST; macros: Macros } => {
 
   // Expand macro calls within macros
   for (const [id, macro] of macros.entries()) {
-    const newBody = [
+    macros.set(id, [
       ...macro.slice(0, 2),
       ...macro.slice(2).map((exp) => expandMacro(exp, macros)),
-    ];
-    console.error("New body");
-    console.error(JSON.stringify(newBody, undefined, 2));
-    macros.set(id, newBody);
+    ]);
   }
 
   return { transformed, macros };
+};
+
+const expandMacros = (ast: AST, macros: Macros): AST => {
+  return ast.reduce((newAst: AST, expr) => {
+    if (isList(expr)) {
+      const expanded = expandMacro(expr, macros);
+      const result = isList(expanded)
+        ? expandMacros(expanded, macros)
+        : expanded;
+      isList(result) && result[0] === "splice-block"
+        ? newAst.push(...result.slice(1))
+        : newAst.push(result);
+      return newAst;
+    }
+
+    newAst.push(expr);
+    return newAst;
+  }, []);
 };
 
 /** Expands a macro call. Assumes expr is a macro call */
@@ -58,12 +73,7 @@ const expandMacro = (
 ): Expr => {
   if (!isList(expr)) return expr;
   const macro = macros.get(expr[0] as string);
-  // if (!macro) {
-  //   return expr.map((exp) => expandMacro(exp, macros, vars));
-  // }
-  if (!macro) {
-    return expr;
-  }
+  if (!macro) return expandMacros(expr, macros);
 
   const variables: Variables = new Map([
     ...vars,
@@ -150,7 +160,7 @@ type CallLambdaOpts = {
 };
 
 const callLambda = (opts: CallLambdaOpts): Expr => {
-  const lambda = opts.lambda[1][1];
+  const lambda = opts.lambda.slice(1);
   const parameters = lambda[0];
   const body = lambda[1];
   const vars = new Map([
@@ -209,7 +219,7 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
   "-": (_, left, right) => left - right,
   "*": (_, left, right) => left * right,
   "/": (_, left, right) => left / right,
-  "lambda-expr": (_, lambda) => ["lambda-expr", lambda],
+  "lambda-expr": (_, ...lambda) => ["lambda-expr", ...lambda],
   quote: ({ vars, macros }, ...quote: AST) => {
     const expand = (body: AST) =>
       body.reduce((ast: AST, exp) => {
@@ -295,8 +305,7 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
     console.error(JSON.stringify(arg, undefined, 2));
     return arg;
   },
-  "macro-expand": ({ macros, vars }, body: AST) =>
-    expandMacro(body, macros, vars),
+  "macro-expand": ({ macros }, body: AST) => expandMacro(body, macros),
   eval: (opts, body: AST) => evalExpr(body, opts),
 };
 

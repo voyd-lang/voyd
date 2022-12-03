@@ -12,10 +12,12 @@ macro var(&body)
 	`(define-mut $(extract equals-expr 1) $(extract equals-expr 2))
 
 macro lambda(&body)
-	` lambda-expr $(macro-expand &body)
+	` lambda-expr $@(macro-expand &body)
 
 macro '=>'(&body)
-	` lambda $@(&body)
+	let quoted = `(lambda $@(&body))
+	macro-expand quoted
+
 
 macro ';'(&body)
 	let func = macro-expand(&body.extract(0))
@@ -33,7 +35,7 @@ macro fn(&body)
 			let param-identifier-index = (if (expr.length == 3) 1 2)
 			let param-identifier = extract(expr param-identifier-index)
 			let type = extract(expr param-identifier-index + 1)
-			` param-identifier $type
+			` $param-identifier $type
 
 	let type-arrow-index = if; (extract(&body 1) == "->")
 		1
@@ -72,9 +74,9 @@ macro fn(&body)
 
 macro pub(&body)
 	let expanded = macro-expand(&body)
-	` block
+	` splice-block
 			$expanded
-			export $(extract expanded 1)
+			export $(extract expanded 1) $(extract expanded 2)
 
 macro def-wasm-operator(op wasm-fn arg-type return-type)
 	let expanded = macro-expand;
@@ -82,7 +84,7 @@ macro def-wasm-operator(op wasm-fn arg-type return-type)
 			binaryen-mod ($arg-type $wasm-fn) (left right)
 
 def-wasm-operator('<' lt_s i32 i32)
-// def-wasm-operator('+' add i32 i32)
-// def-wasm-operator('<' lt f32 i32)
-// def-wasm-operator('-' sub f32 f32)
-// def-wasm-operator('+' add f32 f32)
+def-wasm-operator('+' add i32 i32)
+def-wasm-operator('<' lt f32 i32)
+def-wasm-operator('-' sub f32 f32)
+def-wasm-operator('+' add f32 f32)
