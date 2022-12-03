@@ -18,30 +18,30 @@ Features:
 ## Comments
 
 ```
-; Comments are single line and are marked with a semi-colon
+// Comments are single line and are marked with a c style slash slash
 ```
 
 ## Primitive Types
 
 ```
-true ; Boolean
-false ; Boolean
-1 ; i32 by default (32 bit integer)
-1.0 ; f32 by default (32 bit float)
-"Hello!" ; String, can be multiline, supports interpolation via ${}
-[1 2 3] ; Tuple
-{x: 2 y: 4} ; Struct literal
-#[1 2 3] ; Array
-#{x: 3 y: 4} ; Dictionary / Hash Table / Object
+true // Boolean
+false // Boolean
+1 // i32 by default (32 bit integer)
+1.0 // f32 by default (32 bit float)
+"Hello!" // String, can be multiline, supports interpolation via ${}
+[1 2 3] // Tuple
+{x: 2 y: 4} // Struct literal
+#[1 2 3] // Array
+#{x: 3 y: 4} // Dictionary / Hash Table / Object
 ```
 
 ## Variables
 
 ```
-; Immutable variable
+// Immutable variable
 let my-immutable-var = 7
 
-; Mutable variable
+// Mutable variable
 var my-var = 7
 ```
 
@@ -64,7 +64,7 @@ fn add(a: i32 b: i32)
 Functions are called using S-expression syntax
 
 ```
-(add 1 2) ; 3
+(add 1 2) // 3
 ```
 
 Dream uses significant indentation like [sweat](https://dwheeler.com/readable/sweet-expressions.html). So the parenthesis can be omitted provided its the only expression on it's line and is properly indented
@@ -107,8 +107,8 @@ Operators include:
 
 ```
 if 3 < val
-  "hello" ; true case
-  "bye" ; false case (optional)
+  "hello" // true case
+  "bye" // false case (optional)
 ```
 
 Ifs are expressions that return a value
@@ -155,9 +155,9 @@ match x
   2 (write "Two")
   3 (write "Three")
   default
-    ; Match statements are exhaustive, they must cover every possible
-    ; case. When not every case is covered, a default handler must be
-    ; provided.
+    // Match statements are exhaustive, they must cover every possible
+    // case. When not every case is covered, a default handler must be
+    // provided.
     write "A number"
 ```
 
@@ -178,8 +178,8 @@ let x = 4
 
 x.squared
 
-; Translates to
-squared x ; (squared x)
+// Translates to
+squared x // (squared x)
 ```
 
 ## Keyword Arguments
