@@ -6,7 +6,6 @@ import { isContinuationOp } from "./infix.mjs";
 
 export const parentheticalElision = (ast: AST): AST => {
   const transformed: AST = [];
-  const start = Date.now();
   while (ast.length) {
     transformed.push(elideParens(ast) as AST);
     consumeLeadingWhitespace(ast);
@@ -91,7 +90,7 @@ const handleArray = (ast: AST, indentLevel: number): Expr => {
     transformed.push(elideParens(currentExpr, { indentLevel }) as AST);
   }
 
-  if (transformed.length === 1) {
+  if (transformed.length === 1 && isList(transformed[0])) {
     return transformed[0];
   }
 

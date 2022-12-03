@@ -1,1 +1,1 @@
-export const isWhitespace = (str: string) => /\s/.test(str);
+export const isWhitespace = (str: string) => /^\s/.test(str);
