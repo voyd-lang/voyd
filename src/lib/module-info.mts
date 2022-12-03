@@ -32,7 +32,8 @@ export const resolveModule = (
 export const getModulePath = (usePath: string, srcPath: string): string => {
   const parts = usePath.split("/").map((v, index, arr) => {
     if (v === "src") return srcPath;
-    if (v === "super") return "../";
+    if (v === "super") return path.resolve(srcPath, "../");
+    if (v === "dir") return path.resolve(srcPath, "./");
     if (index === arr.length - 1) return `${v}.dm`;
     return v;
   });
