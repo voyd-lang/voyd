@@ -16,7 +16,7 @@ const resolveModule = (ast: AST, info: ModuleInfo): AST => {
     info.moduleId,
     ["imports", ...imports],
     ["exports"],
-    ["block", ...newAst],
+    newAst,
   ];
 
   if (!info.isRoot) return module;
