@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 export type ModuleInfo = {
@@ -30,12 +31,17 @@ export const resolveModule = (
 };
 
 export const getModulePath = (usePath: string, srcPath: string): string => {
-  const parts = usePath.split("/").map((v, index, arr) => {
+  const split = usePath.split("/");
+  const parts = split.map((v, index, arr) => {
     if (v === "src") return srcPath;
     if (v === "super") return path.resolve(srcPath, "../");
     if (v === "dir") return path.resolve(srcPath, "./");
-    if (index === arr.length - 1) return `${v}.dm`;
+    // We check the last item to see if its a file or folder later
+    if (index === arr.length - 1) return "";
     return v;
   });
-  return path.resolve(...parts);
+  const moduleName = split.pop();
+  const prefix = path.resolve(...parts);
+  const filePath = path.resolve(prefix, `${moduleName}.dm`);
+  return existsSync(filePath) ? filePath : path.resolve(prefix, "index.dm");
 };
