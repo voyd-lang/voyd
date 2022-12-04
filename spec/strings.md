@@ -27,5 +27,5 @@ are also useful for defining operator overloads.
 ## String literal
 
 ```
-"i can be manipulated and printed and am not evaluated like as an atom"
+"i can be manipulated and printed and am not evaluated as an atom"
 ```

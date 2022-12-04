@@ -1,6 +1,7 @@
 {
   "cSpell.words": [
     "binaryen",
+    "cond",
     "curlys",
     "Defun",
     "Deno",
@@ -12,6 +13,7 @@
     "memcpy",
     "Multivalue",
     "popcnt",
+    "printstr",
     "rotr",
     "Structs",
     "UFCS",

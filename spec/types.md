@@ -12,6 +12,12 @@
 
 ### Examples
 
+Define `Int` as an alias to i32
+
+```lisp
+(define-type Int i32)
+```
+
 Define `ArrayInt` as an array of integers
 
 ```lisp

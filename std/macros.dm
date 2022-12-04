@@ -1,3 +1,8 @@
+def loop () =>
+
+macro cond(&body)
+	quote if
+
 macro pub(&body)
 	// Temp hack to get pub def-wasm-operator and the like to work
 	define body
@@ -101,3 +106,38 @@ pub macro def-wasm-operator(op wasm-fn arg-type return-type)
 	let expanded = macro-expand;
 		` fn $op(left:$arg-type right:$arg-type) -> $return-type
 			binaryen-mod ($arg-type $wasm-fn) (left right)
+
+// extern $fn-id(namespace params*)
+// extern max("Math" x:i32 y:i32)
+pub macro extern-fn(&body)
+	let definitions = &body.extract(0)
+	let identifier = definitions.extract(0)
+	let namespace = definitions.extract(1)
+	let params = #["parameters"].concat;
+		definitions.slice(2).map (expr) =>
+			let param-identifier-index = (if (expr.length == 3) 1 2)
+			let param-identifier = extract(expr param-identifier-index)
+			let type = extract(expr param-identifier-index + 1)
+			` $param-identifier $type
+
+	let type-arrow-index = if; (extract(&body 1) == "->")
+		1
+		if (extract(&body 2) == "->") 2 -1
+
+	let return-type = quote;
+		return-type
+		$ if (type-arrow-index > -1)
+			extract(&body type-arrow-index + 1)
+			`()
+
+	` define-extern-function
+		$identifier
+		$namespace
+		$parameters
+		$return-type
+
+pub macro type(&body)
+	define equals-expr (extract &body 0)
+	` define
+		$(macro-expand (extract equals-expr 1))
+		$(macro-expand (extract equals-expr 2)))
