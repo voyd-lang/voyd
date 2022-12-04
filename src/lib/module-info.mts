@@ -1,47 +1,82 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const stdPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../std"
+);
 
 export type ModuleInfo = {
   moduleId: string;
   path: string;
   srcPath: string;
   isRoot: boolean;
+  workingDir: string;
+  imports: ModuleImports;
 };
+
+export type ModuleImports = [ModuleInfo, string][];
 
 export const resolveRootModule = (): ModuleInfo => {
   const filePath = process.argv[2];
   const parsed = path.parse(filePath);
   const srcPath = path.resolve(parsed.dir);
-  return resolveModule(`src/${parsed.name}`, srcPath, true);
+  return resolveModule({
+    usePath: `src/${parsed.name}`,
+    srcPath,
+    isRoot: true,
+    workingDir: srcPath,
+  });
 };
 
-export const resolveModule = (
-  usePath: string,
-  srcPath: string,
-  isRoot = false
-): ModuleInfo => {
-  const modulePath = getModulePath(usePath, srcPath);
+export const resolveModule = ({
+  usePath,
+  srcPath,
+  isRoot,
+  workingDir,
+}: {
+  usePath: string;
+  srcPath: string;
+  workingDir: string;
+  isRoot?: boolean;
+}): ModuleInfo => {
+  const modulePath = getModulePath({ usePath, srcPath, workingDir });
   const parsed = path.parse(modulePath);
+  console.error(parsed.dir);
+  const prefix = parsed.dir.includes(stdPath)
+    ? parsed.dir.replace(stdPath, "std")
+    : parsed.dir.replace(srcPath, "src");
   return {
-    moduleId: `${parsed.dir.replace(srcPath, "src")}/${parsed.name}`,
+    moduleId: `${prefix}/${parsed.name}`,
     path: modulePath,
     srcPath,
-    isRoot,
+    isRoot: isRoot ?? false,
+    workingDir: parsed.dir,
+    imports: [],
   };
 };
 
-export const getModulePath = (usePath: string, srcPath: string): string => {
+export const getModulePath = ({
+  usePath,
+  srcPath,
+  workingDir,
+}: {
+  workingDir: string;
+  usePath: string;
+  srcPath: string;
+}): string => {
   const split = usePath.split("/");
-  const parts = split.map((v, index, arr) => {
-    if (v === "src") return srcPath;
-    if (v === "super") return path.resolve(srcPath, "../");
-    if (v === "dir") return path.resolve(srcPath, "./");
+  const prefix = split.reduce((partialPath, part, index, arr) => {
+    if (part === "src") return srcPath;
+    if (part === "super") return path.resolve(partialPath, "../");
+    if (part === "dir") return path.resolve(partialPath, "./");
+    if (part === "std") return stdPath;
     // We check the last item to see if its a file or folder later
-    if (index === arr.length - 1) return "";
-    return v;
-  });
+    if (index === split.length - 1) return partialPath;
+    return path.resolve(partialPath, part);
+  }, workingDir);
   const moduleName = split.pop();
-  const prefix = path.resolve(...parts);
   const filePath = path.resolve(prefix, `${moduleName}.dm`);
   return existsSync(filePath) ? filePath : path.resolve(prefix, "index.dm");
 };

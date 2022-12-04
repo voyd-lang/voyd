@@ -3,26 +3,21 @@ import { AST, parse } from "./parser.mjs";
 import fs from "node:fs";
 import { syntaxMacros } from "./syntax-macros/index.mjs";
 
-export type Module = { module: AST } & ModuleInfo;
+export type Module = { ast: AST } & ModuleInfo;
 
 export const importRootModule = (): Module => {
   const root = resolveRootModule();
-  return importModule(root.moduleId, root.srcPath, true);
+  return importModule(root);
 };
 
-export const importModule = (
-  usePath: string,
-  srcPath: string,
-  isRoot = false
-): Module => {
-  const module = resolveModule(usePath, srcPath, isRoot);
-  const file = fs.readFileSync(module.path, { encoding: "utf8" });
+export const importModule = (info: ModuleInfo): Module => {
+  const file = fs.readFileSync(info.path, { encoding: "utf8" });
   const ast = syntaxMacros.reduce(
-    (ast, macro) => macro(ast, module),
-    parse(file.split(""), { module })
+    (ast, macro) => macro(ast, info),
+    parse(file.split(""), { module: info })
   );
   return {
-    module: ast,
-    ...module,
+    ast: ast,
+    ...info,
   };
 };

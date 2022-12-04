@@ -1,6 +1,4 @@
 macro pub(&body)
-	log "body"
-	log &body
 	// Temp hack to get pub def-wasm-operator and the like to work
 	define body
 		if is-list(&body.extract(0))
@@ -8,6 +6,8 @@ macro pub(&body)
 			&body
 
 	define expanded macro-expand(body)
+
+	log expanded
 
 	if expanded.extract(0) == "macro"
 		block
@@ -20,6 +20,8 @@ macro pub(&body)
 		quote splice-block
 			$expanded
 			export $(extract expanded 1) $(extract expanded 2)
+
+export pub (parameters (&body))
 
 pub macro `(&body)
 	quote quote $@&body

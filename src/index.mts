@@ -1,7 +1,7 @@
 import { importRootModule } from "./import-module.mjs";
 
 const root = importRootModule();
-console.log(JSON.stringify(root.module, undefined, 2));
+console.log(JSON.stringify(root.ast, undefined, 2));
 
 // const mod = genWasmCode(ast);
 

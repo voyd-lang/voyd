@@ -15,39 +15,6 @@ export const macro = (ast: AST, info: ModuleInfo): AST => {
   return expandMacros(ast, macros);
 };
 
-// // NOTE: The pub macro does this for us. This c
-// /** Registers macros and removes them. For now we cheat and interpret `macro` directly rather than transforming it */
-// const registerMacros = (ast: AST): { transformed: AST; macros: Macros } => {
-//   let macros: Macros = new Map();
-//   const transformed: AST = [];
-
-//   for (const expr of ast) {
-//     if (!isList(expr)) {
-//       transformed.push(expr);
-//       continue;
-//     }
-
-//     if (expr[0] !== "macro") {
-//       const sub = registerMacros(expr);
-//       macros = new Map([...macros, ...sub.macros]);
-//       transformed.push(sub.transformed);
-//       continue;
-//     }
-
-//     registerMacro(macros, expr);
-//   }
-
-//   // Expand macro calls within macros
-//   for (const [id, macro] of macros.entries()) {
-//     macros.set(id, [
-//       ...macro.slice(0, 2),
-//       ...macro.slice(2).map((exp) => expandMacro(exp, macros)),
-//     ]);
-//   }
-
-//   return { transformed, macros };
-// };
-
 const registerMacro = (macros: Macros, ast: AST) => {
   const id = ((ast[1] as AST)[0] as string).replace(/\'/g, "");
   macros.set(id, ast);

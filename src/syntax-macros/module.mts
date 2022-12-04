@@ -1,51 +1,62 @@
 import { importModule } from "../import-module.mjs";
-import { ModuleInfo } from "../lib/module-info.mjs";
+import {
+  ModuleImports,
+  ModuleInfo,
+  resolveModule as resolveModuleInfo,
+} from "../lib/module-info.mjs";
 import { AST } from "../parser.mjs";
 
 type Modules = Map<string, AST | "IN_PROGRESS">;
-type Imports = [string, string][];
 
 export const moduleSyntaxMacro = (ast: AST, info: ModuleInfo): AST =>
   resolveModule(ast, info);
 
 const resolveModule = (ast: AST, info: ModuleInfo): AST => {
-  const [imports, newAst] = resolveImports(ast);
+  const newAst = resolveImports(ast, info);
 
   const module: AST = [
     "module",
     info.moduleId,
-    ["imports", ...imports],
+    ["imports", ...info.imports.map(([info, expr]) => [info.moduleId, expr])],
     ["exports"],
     newAst,
   ];
 
   if (!info.isRoot) return module;
 
-  return [
-    "root",
-    ...expandImports(module[2] as Imports, info).values(),
-    module,
-  ];
+  return ["root", ...expandImports(info.imports).values(), module];
 };
 
 const expandImports = (
-  imports: Imports,
-  info: ModuleInfo,
+  imports: ModuleImports,
   modules: Modules = new Map()
 ): Modules => {
-  for (const use of imports.slice(1)) {
-    const moduleId = (use as [string, string])[0];
-    if (modules.has(moduleId)) continue;
-    modules.set(moduleId, "IN_PROGRESS");
-    const module = importModule(moduleId, info.srcPath).module;
-    expandImports(module[2] as Imports, info, modules);
-    modules.set(moduleId, module);
+  for (const [importInfo] of imports) {
+    if (modules.has(importInfo.moduleId)) continue;
+    modules.set(importInfo.moduleId, "IN_PROGRESS");
+    const module = importModule(importInfo);
+    const expanded = expandImports(module.imports, modules);
+    // Must come after expansion of its own imports (for now)
+    modules.delete(module.moduleId);
+    modules.set(module.moduleId, module.ast);
+    return expanded;
   }
   return modules;
 };
 
+const stdModuleInfo = resolveModuleInfo({
+  srcPath: "",
+  usePath: "std/index",
+  workingDir: "",
+});
+
+// TODO: Support import scoping
 /** Resolves import statements (use) and removes them from the AST */
-const resolveImports = (ast: AST, imports: Imports = []): [Imports, AST] => {
+const resolveImports = (ast: AST, info: ModuleInfo): AST => {
+  if (!info.moduleId.startsWith("std") && !info.imports.length) {
+    info.imports.push([stdModuleInfo, "***"]);
+  }
+
   const newAst = ast.reduce<AST>((newAst, expr) => {
     if (!(expr instanceof Array)) {
       newAst.push(expr);
@@ -53,12 +64,21 @@ const resolveImports = (ast: AST, imports: Imports = []): [Imports, AST] => {
     }
 
     if (expr[0] === "use") {
-      imports.push([expr[1] as string, expr[2] as string]);
+      info.imports.push([
+        resolveModuleInfo({
+          usePath: expr[1] as string,
+          srcPath: info.srcPath,
+          workingDir: info.workingDir,
+          isRoot: info.isRoot,
+        }),
+        expr[2] as string,
+      ]);
       return newAst;
     }
 
-    newAst.push(resolveImports(expr, imports)[1]);
+    newAst.push(resolveImports(expr, info));
     return newAst;
   }, []);
-  return [imports, newAst];
+
+  return newAst;
 };

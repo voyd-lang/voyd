@@ -1,5 +1,3 @@
-use src/std ***
-
 pub fn fib(n:i32) -> i32
 	if (n < 2)
 		n
