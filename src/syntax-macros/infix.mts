@@ -17,6 +17,7 @@ export const infixOperators = new Set([
   "<|",
   "and",
   "or",
+  "xor",
   "=",
   "=>",
   ";",

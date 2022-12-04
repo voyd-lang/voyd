@@ -3,8 +3,21 @@ import { isFloat } from "./lib/is-float.mjs";
 import { isList } from "./lib/is-list.mjs";
 import { AST, Expr } from "./parser.mjs";
 
+let mod: binaryen.Module | undefined = undefined;
+
+process
+  .on("unhandledRejection", (reason, p) => {
+    console.error(reason, "Unhandled Rejection at Promise", p);
+  })
+  .on("uncaughtException", (err) => {
+    console.error(err, "Uncaught Exception thrown");
+    mod?.dispose();
+    binaryen.exit(1);
+    process.exit(1);
+  });
+
 export const genWasmCode = (ast: AST) => {
-  const mod = new binaryen.Module();
+  mod = new binaryen.Module();
   const functionMap = genFunctionMap(ast);
   compileExpression({ expr: ast, mod, parameters: new Map(), functionMap });
   return mod;
@@ -65,11 +78,32 @@ const compileList = (opts: CompileListOpts): number => {
     return mod.block(null, block, binaryen.auto);
   }
 
+  if (expr[0] === "root") {
+    return compileRootExpr({ ...opts, expr });
+  }
+
+  // TODO: Implement export logic etc. Probably can be handled by a macro.
+  if (expr[0] === "export") {
+    return mod.nop();
+  }
+
   if (typeof expr[0] === "string") {
     return compileFunctionCall({ ...opts, expr });
   }
 
   return mod.nop();
+};
+
+const compileRootExpr = (opts: CompileListOpts): number => {
+  for (const module of opts.expr.slice(1)) {
+    if (!isList(module) || module[0] !== "module") {
+      throw new Error(
+        "Expected module, got: " + JSON.stringify(module, null, 2)
+      );
+    }
+    (module[4] as AST).forEach((expr) => compileExpression({ ...opts, expr }));
+  }
+  return opts.mod.nop();
 };
 
 const compileFunctionCall = (opts: CompileListOpts) => {
@@ -95,16 +129,18 @@ const compileFunctionCall = (opts: CompileListOpts) => {
 const compileBinaryenModCall = (opts: CompileListOpts): number => {
   const { expr } = opts;
   const call = expr as any;
-  const namespace = call[1][0];
-  const func = call[1][1];
+  const namespaceId = toIdentifier(call[1][0]);
+  const funcId = toIdentifier(call[1][1]);
   const args = call[2];
-  return (opts.mod as any)[namespace][func](
+  const namespace = (opts.mod as any)[namespaceId];
+  const func = namespace[funcId];
+  return func(
     ...args.map((expr: Expr) => compileExpression({ ...opts, expr }))
   );
 };
 
 const compileFunction = (opts: CompileListOpts): number => {
-  const { expr, mod, functionMap, parameters: paramMap } = opts;
+  const { expr, mod, functionMap } = opts;
   const identifier = toIdentifier(expr[1] as string);
   const returnType = mapBinaryenType((expr[4] as AST)[1] as string);
   const { parameters, parameterTypes } = getFunctionParameters(expr[2] as AST);
@@ -193,8 +229,7 @@ const getMatchingFnForCallExpr = (
   const identifier = toIdentifier(call[0] as string);
   const paramTypeIds = call
     .slice(1)
-    .map((expr) => getExprReturnTypeId(expr, fnMap, paramMap))
-    .filter(Boolean) as string[];
+    .map((expr) => getExprReturnTypeId(expr, fnMap, paramMap) as string);
   return getMatchingFn({ identifier, paramTypeIds, fnMap });
 };
 
@@ -263,4 +298,6 @@ const mapBinaryenType = (typeIdentifier: string): binaryen.Type => {
   throw new Error(`Unsupported type ${typeIdentifier}`);
 };
 
-const toIdentifier = (str: string): string => str.replace(/\'/g, "");
+const toIdentifier = (str: string): string => {
+  return str.replace(/\'/g, "");
+};
