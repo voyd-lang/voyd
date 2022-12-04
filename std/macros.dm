@@ -7,8 +7,6 @@ macro pub(&body)
 
 	define expanded macro-expand(body)
 
-	log expanded
-
 	if expanded.extract(0) == "macro"
 		block
 			register-macro expanded

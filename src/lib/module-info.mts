@@ -43,7 +43,6 @@ export const resolveModule = ({
 }): ModuleInfo => {
   const modulePath = getModulePath({ usePath, srcPath, workingDir });
   const parsed = path.parse(modulePath);
-  console.error(parsed.dir);
   const prefix = parsed.dir.includes(stdPath)
     ? parsed.dir.replace(stdPath, "std")
     : parsed.dir.replace(srcPath, "src");
