@@ -35,3 +35,39 @@ global scope and therefore must each have a unique identifier.
     n
     (+ (fib (- n 1))) (fib (- n 2))))
 ```
+
+## Extern Function
+
+Represents an external function import (a function provided by the host).
+
+### Expanded Meta Syntax
+
+```lisp
+(define-extern-function $identifier
+  $external-namespace
+  (parameters ($param $type-id)*)
+  (return-type $type-id))
+```
+
+### Examples
+
+```lisp
+// Define a function fib
+(define-extern-function fib
+  // Function parameter list
+  (parameters
+    // Parameter definition
+    (n i32))
+
+  (return-type i32))
+```
+
+## Tail Return
+
+Performs a tail return call.
+
+### Expanded Meta Syntax
+
+```lisp
+(return-call $fn-identifier $args*)
+```

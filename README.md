@@ -53,8 +53,10 @@ though. So feel free to play around.
 - [ ] Generics
 - [ ] Modules 🚧
 - [ ] Std library
+- [ ] Test framework
 - [ ] Type checking
 - [ ] Type inference
+- [ ] Safety semantics (unsafe, ownership etc)
 - [ ] Match statements
 - [ ] Loops
 - [ ] Algebraic data types

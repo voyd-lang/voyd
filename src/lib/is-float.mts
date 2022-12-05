@@ -1,1 +1,6 @@
-export const isFloat = (str: string) => str.startsWith("/float");
+import { Expr } from "../parser.mjs";
+
+export const isFloat = (str: Expr): str is string => {
+  if (typeof str !== "string") return false;
+  return str.startsWith("/float");
+};

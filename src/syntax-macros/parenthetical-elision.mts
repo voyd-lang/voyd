@@ -1,5 +1,5 @@
 import { isList } from "../lib/is-list.mjs";
-import { isString } from "../lib/is-string.mjs";
+import { isStringLiteral } from "../lib/is-string.mjs";
 import { isWhitespace } from "../lib/is-whitespace.mjs";
 import { AST, Expr } from "../parser.mjs";
 import { isContinuationOp } from "./infix.mjs";

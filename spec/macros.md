@@ -8,6 +8,8 @@ boiler plate. The body of a `macro` is automatically surrounded by a `quote` blo
 as the `,@` in common lisp and splices the list into the current list. Note that these shortcuts
 only apply to `macro`, `define-macro` uses the standard operators of common lisp (`,`, `,@`, etc).
 
+TODO: syntax contracts - type checking for macros. Enforces the structure for inputs and outputs of macros.
+
 ### Dream Syntax
 
 ```rust
