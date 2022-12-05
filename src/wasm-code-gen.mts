@@ -1,6 +1,7 @@
 import binaryen from "binaryen";
 import { isFloat } from "./lib/is-float.mjs";
 import { isList } from "./lib/is-list.mjs";
+import { toIdentifier } from "./lib/to-identifier.mjs";
 import { AST, Expr } from "./parser.mjs";
 
 let mod: binaryen.Module | undefined = undefined;
@@ -369,8 +370,4 @@ const mapBinaryenType = (
     );
   }
   throw new Error(`Unsupported type ${typeIdentifier}`);
-};
-
-const toIdentifier = (str: string): string => {
-  return str.replace(/\'/g, "");
 };

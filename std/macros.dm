@@ -1,7 +1,10 @@
-def loop () =>
+// macro def(&body)
+//	` define $(extract &body 0) $(extract &body 1)
 
-macro cond(&body)
-	quote if
+// export def (parameters (&body))
+
+// macro cond(&body)
+//	quote if
 
 macro pub(&body)
 	// Temp hack to get pub def-wasm-operator and the like to work
@@ -14,7 +17,7 @@ macro pub(&body)
 
 	if expanded.extract(0) == "macro"
 		block
-			register-macro expanded
+			register-macro expanded.slice(1)
 			define definitions expanded.extract(1)
 			quote splice-block
 				export
@@ -22,7 +25,7 @@ macro pub(&body)
 					(parameters $(slice definitions 1))
 		quote splice-block
 			$expanded
-			export $(extract expanded 1) $(extract expanded 2)
+			export $(extract body 1) $(extract body 2)
 
 export pub (parameters (&body))
 
@@ -32,25 +35,27 @@ pub macro `(&body)
 pub macro let(&body)
 	define equals-expr (extract &body 0)
 	` define
-		$(macro-expand (extract equals-expr 1))
-		$(macro-expand (extract equals-expr 2)))
+		$(extract equals-expr 1)
+		$(extract equals-expr 2)
 
 pub macro var(&body)
 	define equals-expr (extract &body 0)
 	` define-mut
-		$(macro-expand (extract equals-expr 1))
-		$(macro-expand (extract equals-expr 2)))
+		$(extract equals-expr 1)
+		$(extract equals-expr 2)
 
 pub macro lambda(&body)
-	` lambda-expr $@(macro-expand &body)
+	let parameters = &body.extract(0)
+	let body = &body.extract(1)
+	` lambda-expr $parameters $body
 
 pub macro '=>'(&body)
-	let quoted = `(lambda $@(&body))
-	macro-expand quoted
+	macro-expand
+		` lambda $@&body
 
 pub macro ';'(&body)
-	let func = macro-expand(&body.extract(0))
-	let block-list = macro-expand(&body.extract(1))
+	let func = &body.extract(0)
+	let block-list = &body.extract(1)
 	if is-list(func)
 		func.concat(block-list.slice(1))
 		concat(`($func) block-list.slice(1))
@@ -70,14 +75,13 @@ pub macro fn(&body)
 		1
 		if (extract(&body 2) == "->") 2 -1
 
-	let return-type = quote;
-		return-type
-		$ if (type-arrow-index > -1)
-			extract(&body type-arrow-index + 1)
-			`()
+	let return-type =
+		` return-type
+			$ if (type-arrow-index > -1)
+				extract(&body type-arrow-index + 1)
+				`()
 
-	let expressions = macro-expand;
-		if (type-arrow-index > -1)
+	let expressions = if; (type-arrow-index > -1)
 			&body.slice(type-arrow-index + 2)
 			&body.slice(1)
 
@@ -103,7 +107,7 @@ pub macro fn(&body)
 		$(concat #["block"] expressions)
 
 pub macro def-wasm-operator(op wasm-fn arg-type return-type)
-	let expanded = macro-expand;
+	macro-expand
 		` fn $op(left:$arg-type right:$arg-type) -> $return-type
 			binaryen-mod ($arg-type $wasm-fn) (left right)
 
@@ -124,11 +128,10 @@ pub macro extern-fn(&body)
 		1
 		if (extract(&body 2) == "->") 2 -1
 
-	let return-type = quote;
-		return-type
-		$ if (type-arrow-index > -1)
-			extract(&body type-arrow-index + 1)
-			`()
+	let return-type = ` return-type
+			$ if (type-arrow-index > -1)
+				extract(&body type-arrow-index + 1)
+				`()
 
 	` define-extern-function
 		$identifier
@@ -139,5 +142,5 @@ pub macro extern-fn(&body)
 pub macro type(&body)
 	define equals-expr (extract &body 0)
 	` define
-		$(macro-expand (extract equals-expr 1))
-		$(macro-expand (extract equals-expr 2)))
+		$(extract equals-expr 1)
+		$(extract equals-expr 2)
