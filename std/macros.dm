@@ -51,7 +51,7 @@ pub macro lambda(&body)
 	` lambda-expr $parameters $body
 
 pub macro '=>'(&body)
-	macro-expand
+	macro-expand;
 		` lambda $@&body
 
 // Extracts typed parameters from a list where index 0 is fn name, and offset-index+ are typed parameters
@@ -68,7 +68,7 @@ pub macro fn(&body)
 	let identifier = extract(definitions 0)
 	let params = extract-parameters(definitions)
 
-	let type-arrow-index = if; (extract(&body 1) == "->")
+	let type-arrow-index = if (extract(&body 1) == "->")
 		1
 		if (extract(&body 2) == "->") 2 -1
 
@@ -78,9 +78,9 @@ pub macro fn(&body)
 				extract(&body type-arrow-index + 1)
 				`()
 
-	let expressions = if; (type-arrow-index > -1)
-			&body.slice(type-arrow-index + 2)
-			&body.slice(1)
+	let expressions = if (type-arrow-index > -1)
+		&body.slice(type-arrow-index + 2)
+		&body.slice(1)
 
 	let extract-variables = (exprs) =>
 		exprs.reduce(#[]) (vars expr) =>
@@ -99,7 +99,7 @@ pub macro fn(&body)
 		$params
 		$variables
 		$return-type
-		// TODO: Debug why I can't use this syntax here
+		// TODO: Debug why I can't use this syntax here (its because I need to change the interpolation syntax, right now it just an s-expression style function call)
 		// $ #["block"].concat(expressions)
 		$(concat #["block"] expressions)
 
@@ -116,7 +116,7 @@ pub macro extern-fn(&body)
 	let identifier = definitions.extract(0)
 	let parameters = extract-parameters(definitions)
 
-	let type-arrow-index = if; (extract(&body 1) == "->")
+	let type-arrow-index = if (extract(&body 1) == "->")
 		1
 		if (extract(&body 2) == "->") 2 -1
 
@@ -133,6 +133,7 @@ pub macro extern-fn(&body)
 		$return-type
 
 pub macro type(&body)
+	log &body
 	define equals-expr (extract &body 0)
 	` define-type
 		$(extract equals-expr 1)

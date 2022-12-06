@@ -1,6 +1,10 @@
 import { AST, Expr } from "../parser.mjs";
 
 export const greedyOps = new Set(["=>", "=", "<|", ";"]);
+export const isGreedyOp = (expr: Expr): expr is string => {
+  if (typeof expr !== "string") return false;
+  return greedyOps.has(expr);
+};
 
 export const processGreedyOps = (ast: AST) => {
   const transformed: AST = [];
@@ -10,10 +14,10 @@ export const processGreedyOps = (ast: AST) => {
       transformed.push(processGreedyOps(next));
       continue;
     }
-    if (typeof next === "string" && greedyOps.has(next)) {
+    if (isGreedyOp(next)) {
       transformed.push(next);
       const consumed = processGreedyOps(ast);
-      transformed.push(["block", ...consumed]);
+      transformed.push(consumed);
       continue;
     }
     transformed.push(next);

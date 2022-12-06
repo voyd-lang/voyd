@@ -89,8 +89,7 @@ const expandMacros = (ast: Expr, macros: Macros, vars: Variables): Expr => {
       return newAst;
     }
 
-    const expanded = expandMacro({ macro, call: expr, macros, vars });
-    const result = expandMacros(expanded, macros, vars);
+    const result = expandMacro({ macro, call: expr, macros, vars });
     isList(result) && result[0] === "splice-block"
       ? newAst.push(...result.slice(1))
       : newAst.push(result);
@@ -118,7 +117,7 @@ const expandMacro = ({
   const result = macro
     .slice(1)
     .map((exp) => evalExpr(exp, { macros, vars: variables }));
-  return result.pop() ?? [];
+  return expandMacros(result.pop()!, macros, vars) ?? [];
 };
 
 const mapMacroParameters = (callExpr: AST, parameters: string[]) =>

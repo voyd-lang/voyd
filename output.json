@@ -1,148 +1,539 @@
-[
-  "root",
-  [
-    "module",
-    "std/macros",
-    ["imports"],
-    ["exports"],
+{
+  "ast": [
+    "root",
     [
-      ["export", "pub", ["parameters", ["&body"]]],
-      ["export", "`", ["parameters", ["&body"]]],
-      ["export", "let", ["parameters", ["&body"]]],
-      ["export", "var", ["parameters", ["&body"]]],
-      ["export", "lambda", ["parameters", ["&body"]]],
-      ["export", "'=>'", ["parameters", ["&body"]]],
-      ["export", "';'", ["parameters", ["&body"]]],
-      ["export", "fn", ["parameters", ["&body"]]],
+      "module",
+      "std/macros",
+      ["imports"],
+      ["exports"],
       [
-        "export",
-        "def-wasm-operator",
-        ["parameters", ["op", "wasm-fn", "arg-type", "return-type"]]
-      ]
-    ]
-  ],
-  [
-    "module",
-    "std/index",
-    ["imports", ["std/macros", "***"]],
-    ["exports"],
-    [
-      [
-        "define-function",
-        "'<'",
-        ["parameters", ["left", "i32"], ["right", "i32"]],
-        ["variables"],
-        ["return-type", "i32"],
-        ["block", ["binaryen-mod", ["i32", "lt_s"], ["left", "right"]]]
-      ],
-      ["export", "'<'", ["parameters", ["left", "i32"], ["right", "i32"]]],
-      [
-        "define-function",
-        "'+'",
-        ["parameters", ["left", "i32"], ["right", "i32"]],
-        ["variables"],
-        ["return-type", "i32"],
-        ["block", ["binaryen-mod", ["i32", "add"], ["left", "right"]]]
-      ],
-      ["export", "'+'", ["parameters", ["left", "i32"], ["right", "i32"]]],
-      [
-        "define-function",
-        "'<'",
-        ["parameters", ["left", "f32"], ["right", "f32"]],
-        ["variables"],
-        ["return-type", "i32"],
-        ["block", ["binaryen-mod", ["f32", "lt"], ["left", "right"]]]
-      ],
-      ["export", "'<'", ["parameters", ["left", "f32"], ["right", "f32"]]],
-      [
-        "define-function",
-        "'-'",
-        ["parameters", ["left", "f32"], ["right", "f32"]],
-        ["variables"],
-        ["return-type", "f32"],
-        ["block", ["binaryen-mod", ["f32", "sub"], ["left", "right"]]]
-      ],
-      ["export", "'-'", ["parameters", ["left", "f32"], ["right", "f32"]]],
-      [
-        "define-function",
-        "'+'",
-        ["parameters", ["left", "f32"], ["right", "f32"]],
-        ["variables"],
-        ["return-type", "f32"],
-        ["block", ["binaryen-mod", ["f32", "add"], ["left", "right"]]]
-      ],
-      ["export", "'+'", ["parameters", ["left", "f32"], ["right", "f32"]]],
-      [
-        "define-function",
-        "hello",
-        ["parameters", ["world", "i32"]],
-        ["variables"],
-        ["return-type", "i32"],
-        ["block", "world"]
-      ],
-      ["export", "hello", ["parameters", ["world", "i32"]]],
-      [
-        "define-function",
-        "'*'",
-        ["parameters", ["left", "f32"], ["right", "f32"]],
-        ["variables"],
-        ["return-type", "f32"],
-        ["block", ["binaryen-mod", ["f32", "add"], ["left", "right"]]]
-      ]
-    ]
-  ],
-  [
-    "module",
-    "src/example",
-    ["imports", ["std/index", "***"]],
-    ["exports"],
-    [
-      [
-        "define-function",
-        "fib",
-        ["parameters", ["n", "i32"]],
-        ["variables"],
-        ["return-type", "i32"],
+        ["export", "pub", ["parameters", ["&body"]]],
+        ["export", "`", ["parameters", ["&body"]]],
+        ["export", "let", ["parameters", ["&body"]]],
+        ["export", "var", ["parameters", ["&body"]]],
+        ["export", "';'", ["parameters", ["&body"]]],
+        ["export", "lambda", ["parameters", ["&body"]]],
+        ["export", "'=>'", ["parameters", ["&body"]]],
         [
-          "block",
+          "lambda-expr",
+          ["definitions"],
           [
-            "if",
-            ["<", "n", 2],
-            "n",
-            ["+", ["fib", ["-", "n", 1]], ["fib", ["-", "n", 2]]]
-          ]
-        ]
-      ],
-      ["export", "fib", ["parameters", ["n", "i32"]]],
-      [
-        "define-function",
-        "fib",
-        ["parameters", ["n", "f32"]],
-        ["variables"],
-        ["return-type", "f32"],
-        [
-          "block",
-          [
-            "if",
-            ["<", "n", "/float2.0"],
-            "n",
+            "block",
             [
-              "+",
-              ["fib", ["-", "n", "/float1.0"]],
-              ["fib", ["-", "n", "/float2.0"]]
+              "concat",
+              ["quote", "parameters"],
+              [
+                "map",
+                ["slice", "definitions", 1],
+                [
+                  "lambda-expr",
+                  ["expr"],
+                  [
+                    "block",
+                    [
+                      "define",
+                      "param-identifier-index",
+                      [["if", ["==", ["length", "expr"], 3], 1, 2]]
+                    ],
+                    [
+                      "define",
+                      "param-identifier",
+                      [["extract", "expr", "param-identifier-index"]]
+                    ],
+                    [
+                      "define",
+                      "type",
+                      [["extract", "expr", ["+", "param-identifier-index", 1]]]
+                    ],
+                    ["quote", "$param-identifier", "$type"]
+                  ]
+                ]
+              ]
             ]
           ]
-        ]
-      ],
-      ["export", "fib", ["parameters", ["n", "f32"]]],
+        ],
+        ["export", "fn", ["parameters", ["&body"]]],
+        [
+          "export",
+          "def-wasm-operator",
+          ["parameters", ["op", "wasm-fn", "arg-type", "return-type"]]
+        ],
+        ["export", "extern-fn", ["parameters", ["&body"]]],
+        ["export", "type", ["parameters", ["&body"]]]
+      ]
+    ],
+    [
+      "module",
+      "std/external-functions",
+      ["imports", ["std/macros", "***"]],
+      ["exports"],
       [
-        "define-function",
-        "main",
-        ["parameters"],
-        ["variables"],
-        ["return-type", "f32"],
-        ["block", ["fib", "/float10.0"]]
+        ["define-type", "String", null],
+        [
+          "define-extern-function",
+          "alloc-string",
+          ["namespace", "strings"],
+          [["extract-parameters", "definitions"]],
+          ["return-type", "String"]
+        ],
+        [
+          "define-extern-function",
+          "de-alloc-string",
+          ["namespace", "strings"],
+          [["extract-parameters", "definitions"]],
+          ["return-type", "void"]
+        ],
+        [
+          "define-extern-function",
+          "add-char-code-to-string",
+          ["namespace", "strings"],
+          [["extract-parameters", "definitions"]],
+          ["return-type", "void"]
+        ],
+        [
+          "define-extern-function",
+          "str-len",
+          ["namespace", "strings"],
+          [["extract-parameters", "definitions"]],
+          ["return-type", "i32"]
+        ],
+        [
+          "define-extern-function",
+          "printstr",
+          ["namespace", "strings"],
+          [["extract-parameters", "definitions"]],
+          ["return-type", "void"]
+        ],
+        [
+          "define-extern-function",
+          "get-char-code-from-string",
+          ["namespace", "strings"],
+          [["extract-parameters", "definitions"]],
+          ["return-type", "i32"]
+        ]
+      ]
+    ],
+    [
+      "module",
+      "std/index",
+      ["imports", ["std/macros", "***"], ["std/external-functions", "***"]],
+      ["exports"],
+      [
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "lt_s"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "gt_s"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "le_s"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "ge_s"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "eq"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "'and'"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "'or'"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "'xor'"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "ne"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "add"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "sub"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "mul"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["i32", "div_s"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["f32", "lt"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["f32", "gt"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["f32", "le"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["f32", "ge"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["f32", "eq"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["binaryen-mod", ["f32", "ne"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "f32"],
+          ["block", ["binaryen-mod", ["f32", "add"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "f32"],
+          ["block", ["binaryen-mod", ["f32", "sub"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "f32"],
+          ["block", ["binaryen-mod", ["f32", "mul"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "f32"],
+          ["block", ["binaryen-mod", ["f32", "div"], ["left", "right"]]]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ]
+      ]
+    ],
+    [
+      "module",
+      "src/example",
+      ["imports", ["std/index", "***"]],
+      ["exports"],
+      [
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "i32"],
+          [
+            "block",
+            [
+              "if",
+              ["<", "n", 2],
+              "n",
+              ["+", ["fib", ["-", "n", 1]], ["fib", ["-", "n", 2]]]
+            ]
+          ]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "f32"],
+          [
+            "block",
+            [
+              "if",
+              ["<", "n", "/float2.0"],
+              "n",
+              [
+                "+",
+                ["fib", ["-", "n", "/float1.0"]],
+                ["fib", ["-", "n", "/float2.0"]]
+              ]
+            ]
+          ]
+        ],
+        [
+          "export",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]]
+        ],
+        [
+          "define-function",
+          [["extract", "definitions", 0]],
+          [["extract-parameters", "definitions"]],
+          ["variables"],
+          ["return-type", "f32"],
+          ["block", ["fib", "/float10.0"]]
+        ]
       ]
     ]
+  ],
+  "moduleId": "src/example",
+  "path": "/Users/drew/projects/dream/example.dm",
+  "srcPath": "/Users/drew/projects/dream",
+  "isRoot": true,
+  "workingDir": "/Users/drew/projects/dream",
+  "imports": [
+    [
+      {
+        "moduleId": "std/index",
+        "path": "/Users/drew/projects/dream/std/index.dm",
+        "srcPath": "",
+        "isRoot": false,
+        "workingDir": "/Users/drew/projects/dream/std",
+        "imports": [
+          [
+            {
+              "moduleId": "std/macros",
+              "path": "/Users/drew/projects/dream/std/macros.dm",
+              "srcPath": "",
+              "isRoot": false,
+              "workingDir": "/Users/drew/projects/dream/std",
+              "imports": []
+            },
+            "***"
+          ],
+          [
+            {
+              "moduleId": "std/external-functions",
+              "path": "/Users/drew/projects/dream/std/external-functions.dm",
+              "srcPath": "",
+              "isRoot": false,
+              "workingDir": "/Users/drew/projects/dream/std",
+              "imports": [
+                [
+                  {
+                    "moduleId": "std/macros",
+                    "path": "/Users/drew/projects/dream/std/macros.dm",
+                    "srcPath": "",
+                    "isRoot": false,
+                    "workingDir": "/Users/drew/projects/dream/std",
+                    "imports": []
+                  },
+                  "***"
+                ]
+              ]
+            },
+            "***"
+          ]
+        ]
+      },
+      "***"
+    ]
   ]
-]
+}

@@ -10,6 +10,8 @@
 - Develop and apply strict naming conventions for all APIs
 - Develop best practices
 - Write a formal spec for Dream IR (Post expansion expressions)
+- `def` macro like https://docs.racket-lang.org/guide/syntax-overview.html#%28part._.Definitions%29
+- Adopt some conventions from https://docs.racket-lang.org/style/Textual_Matters.html like `!` and `?` conventions
 - make `;` less necessary. It exists because `=` is greedy. Which I still think is the write move,
   but maybe = should itself be a macro. Reason being, in most cases you want to pass arguments
   to the atom on the right of `=`

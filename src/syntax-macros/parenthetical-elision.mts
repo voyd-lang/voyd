@@ -1,7 +1,7 @@
 import { isList } from "../lib/is-list.mjs";
-import { isStringLiteral } from "../lib/is-string.mjs";
 import { isWhitespace } from "../lib/is-whitespace.mjs";
 import { AST, Expr } from "../parser.mjs";
+import { isGreedyOp } from "./greedy-ops.mjs";
 import { isContinuationOp } from "./infix.mjs";
 
 export const parentheticalElision = (ast: AST): AST => {
@@ -44,7 +44,7 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
       break;
     }
 
-    if (typeof next === "string" && isWhitespace(next)) {
+    if (isWhitespace(next)) {
       ast.shift();
       continue;
     }
@@ -52,6 +52,11 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
     if (isList(next)) {
       transformed.push(handleArray(next, indentLevel));
       ast.shift();
+      continue;
+    }
+
+    if (isGreedyOp(next)) {
+      assistGreedyOpProcessing(ast, transformed, indentLevel);
       continue;
     }
 
@@ -69,7 +74,45 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
   return transformed;
 };
 
-const handleArray = (ast: AST, indentLevel: number): Expr => {
+// Modifies transformed, assumes ast[0] is greedy op
+const assistGreedyOpProcessing = (
+  ast: AST,
+  transformed: AST,
+  indentLevel: number
+) => {
+  transformed.push(ast[0] as string);
+  ast.shift();
+
+  const precedingExprCount = lineExpressionCount(ast);
+  if (precedingExprCount === 0) {
+    transformed.push("block");
+    return;
+  }
+
+  consumeLeadingWhitespace(ast);
+  if (precedingExprCount === 1 && isList(ast[0])) {
+    transformed.push(...handleArray(ast[0], indentLevel));
+    ast.shift();
+    return;
+  }
+
+  if (precedingExprCount === 1 && nextExprIndentLevel(ast) <= indentLevel) {
+    transformed.push("block");
+    return;
+  }
+};
+
+const lineExpressionCount = (ast: AST) => {
+  let count = 0;
+  for (const expr of ast) {
+    if (isWhitespace(expr) && expr !== "\n") continue;
+    if (expr === "\n") break;
+    count += 1;
+  }
+  return count;
+};
+
+const handleArray = (ast: AST, indentLevel: number): AST => {
   const transformed: AST = [];
 
   let currentExpr: AST = [];
