@@ -3,7 +3,10 @@
 - Unsafe macros (As add unsafe macro and check safety macros that do a form of "unsafe" checking i.e. rust)
 - Fix bug in modules where I can't run syntax macros directly on files within std
 - Write up a layout spec defining exactly how parenthetical elision works
-- Hygenic macros
+- Hygienic macros
+- Consider making $() considered to be a block, rather than assuming a
+  function call
+- Investigate why commas can't separate arguments but can separate array values
 - make `;` less necessary. It exists because `=` is greedy. Which I still think is the write move,
   but maybe = should itself be a macro. Reason being, in most cases you want to pass arguments
   to the atom on the right of `=`

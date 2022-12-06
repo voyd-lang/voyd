@@ -35,11 +35,10 @@ const expandImports = (
     if (modules.has(importInfo.moduleId)) continue;
     modules.set(importInfo.moduleId, "IN_PROGRESS");
     const module = importModule(importInfo);
-    const expanded = expandImports(module.imports, modules);
+    expandImports(module.imports, modules);
     // Must come after expansion of its own imports (for now)
     modules.delete(module.moduleId);
     modules.set(module.moduleId, module.ast);
-    return expanded;
   }
   return modules;
 };

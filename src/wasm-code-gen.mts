@@ -118,6 +118,7 @@ const compileFunctionCall = (opts: CompileFnCallOpts) => {
   const identifier = toIdentifier(expr[0] as string);
 
   if (identifier === "define-type") return compileType(opts);
+  if (identifier === "lambda-expr") return mod.nop();
   if (identifier === "define-function") return compileFunction(opts);
   if (identifier === "define-external-function") return compileExternFn(opts);
   if (identifier === "return-call") {

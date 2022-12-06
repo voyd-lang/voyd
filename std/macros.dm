@@ -1,11 +1,3 @@
-// macro def(&body)
-//	` define $(extract &body 0) $(extract &body 1)
-
-// export def (parameters (&body))
-
-// macro cond(&body)
-//	quote if
-
 macro pub(&body)
 	// Temp hack to get pub def-wasm-operator and the like to work
 	define body
@@ -25,7 +17,7 @@ macro pub(&body)
 					(parameters $(slice definitions 1))
 		quote splice-block
 			$expanded
-			export $(extract body 1) $(extract body 2)
+			export $(extract expanded 1) $(extract expanded 2)
 
 export pub (parameters (&body))
 
@@ -34,15 +26,24 @@ pub macro `(&body)
 
 pub macro let(&body)
 	define equals-expr (extract &body 0)
-	` define
-		$(extract equals-expr 1)
-		$(extract equals-expr 2)
+	macro-expand
+		` define
+			$(extract equals-expr 1)
+			$(extract equals-expr 2)
 
 pub macro var(&body)
 	define equals-expr (extract &body 0)
-	` define-mut
-		$(extract equals-expr 1)
-		$(extract equals-expr 2)
+	macro-expand
+		` define-mut
+			$(extract equals-expr 1)
+			$(extract equals-expr 2)
+
+pub macro ';'(&body)
+	let func = &body.extract(0)
+	let block-list = &body.extract(1)
+	if is-list(func)
+		func.concat(block-list.slice(1))
+		concat(`($func) block-list.slice(1))
 
 pub macro lambda(&body)
 	let parameters = &body.extract(0)
@@ -53,23 +54,19 @@ pub macro '=>'(&body)
 	macro-expand
 		` lambda $@&body
 
-pub macro ';'(&body)
-	let func = &body.extract(0)
-	let block-list = &body.extract(1)
-	if is-list(func)
-		func.concat(block-list.slice(1))
-		concat(`($func) block-list.slice(1))
-
-pub macro fn(&body)
-	let definitions = extract(&body 0)
-	let identifier = extract(definitions 0)
-
-	let params = #["parameters"].concat;
+// Extracts typed parameters from a list where index 0 is fn name, and offset-index+ are typed parameters
+let extract-parameters = (definitions) =>
+	`(parameters).concat
 		definitions.slice(1).map (expr) =>
 			let param-identifier-index = (if (expr.length == 3) 1 2)
 			let param-identifier = extract(expr param-identifier-index)
 			let type = extract(expr param-identifier-index + 1)
 			` $param-identifier $type
+
+pub macro fn(&body)
+	let definitions = extract(&body 0)
+	let identifier = extract(definitions 0)
+	let params = extract-parameters(definitions)
 
 	let type-arrow-index = if; (extract(&body 1) == "->")
 		1
@@ -114,33 +111,29 @@ pub macro def-wasm-operator(op wasm-fn arg-type return-type)
 // extern $fn-id(namespace params*)
 // extern max("Math" x:i32 y:i32)
 pub macro extern-fn(&body)
-	let definitions = &body.extract(0)
+	let namespace = &body.extract(0)
+	let definitions = &body.extract(1)
 	let identifier = definitions.extract(0)
-	let namespace = definitions.extract(1)
-	let params = #["parameters"].concat;
-		definitions.slice(2).map (expr) =>
-			let param-identifier-index = (if (expr.length == 3) 1 2)
-			let param-identifier = extract(expr param-identifier-index)
-			let type = extract(expr param-identifier-index + 1)
-			` $param-identifier $type
+	let parameters = extract-parameters(definitions)
 
 	let type-arrow-index = if; (extract(&body 1) == "->")
 		1
 		if (extract(&body 2) == "->") 2 -1
 
-	let return-type = ` return-type
+	let return-type =
+		` return-type
 			$ if (type-arrow-index > -1)
 				extract(&body type-arrow-index + 1)
 				`()
 
 	` define-extern-function
 		$identifier
-		$namespace
+		namespace $namespace
 		$parameters
 		$return-type
 
 pub macro type(&body)
 	define equals-expr (extract &body 0)
-	` define
+	` define-type
 		$(extract equals-expr 1)
-		$(extract equals-expr 2)
+		$(extract (extract equals-expr 2) 1)
