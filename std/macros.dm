@@ -133,7 +133,6 @@ pub macro extern-fn(&body)
 		$return-type
 
 pub macro type(&body)
-	log &body
 	define equals-expr (extract &body 0)
 	` define-type
 		$(extract equals-expr 1)
