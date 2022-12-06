@@ -7,6 +7,9 @@
 - Consider making $() considered to be a block, rather than assuming a
   function call
 - Investigate why commas can't separate arguments but can separate array values
+- Develop and apply strict naming conventions for all APIs
+- Develop best practices
+- Write a formal spec for Dream IR (Post expansion expressions)
 - make `;` less necessary. It exists because `=` is greedy. Which I still think is the write move,
   but maybe = should itself be a macro. Reason being, in most cases you want to pass arguments
   to the atom on the right of `=`

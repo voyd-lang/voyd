@@ -117,10 +117,10 @@ const compileFunctionCall = (opts: CompileFnCallOpts) => {
   const { expr, functionMap, mod, isReturnCall } = opts;
   const identifier = toIdentifier(expr[0] as string);
 
-  if (identifier === "define-type") return compileType(opts);
+  if (identifier === "define-type") return mod.nop();
   if (identifier === "lambda-expr") return mod.nop();
   if (identifier === "define-function") return compileFunction(opts);
-  if (identifier === "define-external-function") return compileExternFn(opts);
+  if (identifier === "define-extern-function") return compileExternFn(opts);
   if (identifier === "return-call") {
     return compileFunction({ ...opts, expr: expr.slice(1) });
   }
@@ -141,15 +141,6 @@ const compileFunctionCall = (opts: CompileFnCallOpts) => {
   }
 
   return mod.call(fn.binaryenId, args, fn.returnType);
-};
-
-const compileType = (opts: CompileListOpts): number => {
-  const { expr } = opts;
-  const identifier = toIdentifier(expr[0] as string);
-  /** TODO support more complex types... Somehow. */
-  const typeIdentifier = toIdentifier(expr[1] as string);
-  opts.typeIdentifiers.set(identifier, typeIdentifier);
-  return opts.mod.nop();
 };
 
 const compileBinaryenModCall = (opts: CompileListOpts): number => {
@@ -199,7 +190,7 @@ const compileFunction = (opts: CompileListOpts): number => {
 const compileExternFn = (opts: CompileListOpts) => {
   const { expr, mod, functionMap } = opts;
   const identifier = toIdentifier(expr[1] as string);
-  const namespace = toIdentifier(expr[2] as string);
+  const namespace = toIdentifier((expr as any)[2][1]);
   const { parameters, parameterTypes } = getFunctionParameters(
     expr[3] as AST,
     opts.typeIdentifiers
@@ -335,6 +326,11 @@ const genFunctionMap = (ast: AST, typeIdentifiers: TypeIdentifiers): FnMap => {
   return ast.reduce((map: FnMap, expr: Expr) => {
     if (!isList(expr)) return map;
 
+    if (expr[0] === "define-type") {
+      typeIdentifiers.set(toIdentifier(expr[1] as string), expr[2] as string);
+      return map;
+    }
+
     if (expr[0] !== "define-function" && expr[0] !== "define-extern-function") {
       return new Map([...map, ...genFunctionMap(expr, typeIdentifiers)]);
     }
@@ -342,7 +338,8 @@ const genFunctionMap = (ast: AST, typeIdentifiers: TypeIdentifiers): FnMap => {
     const fnIdentifier = toIdentifier(expr[1] as string);
     const fnArray: Fn[] = map.get(fnIdentifier) ?? [];
     const returns = toIdentifier((expr[4] as AST)[1] as string);
-    const parameters = (expr[2] as string[][])
+    const parametersIndex = expr[0] === "define-function" ? 2 : 3;
+    const parameters = (expr[parametersIndex] as string[][])
       .slice(1)
       .map((arr) => toIdentifier(arr[1]));
     map.set(fnIdentifier, [
