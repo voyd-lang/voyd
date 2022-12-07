@@ -31,4 +31,5 @@ const instance = new WebAssembly.Instance(compiled, {
       strings.strTest(strIndex, regexIndex, flagsIndex),
   },
 });
-console.log((instance.exports as any).main0());
+
+(instance.exports as any).main0();

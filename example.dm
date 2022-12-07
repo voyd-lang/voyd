@@ -5,11 +5,6 @@ pub fn fib(n:i32) -> i32
 		n
 		fib(n - 1) + fib(n - 2)
 
-pub fn fib(n:f32) -> f32
-	if (n < 2.0)
-		n
-		fib(n - 1.0) + fib(n - 2.0)
-
-fn main() -> f32
-	print-str (string "Hello, world!")
-	fib(10.0)
+fn main() -> void
+	let str:String = string "Hello, world!"
+	print-str str

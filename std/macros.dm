@@ -91,7 +91,7 @@ pub macro fn(&body)
 						// For now, assume all vars are typed
 						let definition = extract(expr 1)
 						vars.push(#[extract(definition 1), extract(definition 2)])
-						vars
+						vars.concat(expr.extract(2).extract-variables())
 					concat(vars extract-variables(expr))
 				vars
 
