@@ -96,10 +96,16 @@ const assistGreedyOpProcessing = (
     return;
   }
 
-  if (precedingExprCount === 1 && nextExprIndentLevel(ast) <= indentLevel) {
+  if (precedingExprCount === 1 && nextLineIndentLevel(ast) <= indentLevel) {
     transformed.push("block");
     return;
   }
+};
+
+const nextLineIndentLevel = (ast: AST) => {
+  const index = ast.indexOf("\n");
+  if (index === -1) return 0;
+  return nextExprIndentLevel(ast, index);
 };
 
 const lineExpressionCount = (ast: AST) => {
@@ -140,8 +146,8 @@ const handleArray = (ast: AST, indentLevel: number): AST => {
   return transformed;
 };
 
-const nextExprIndentLevel = (ast: AST) => {
-  let index = 0;
+const nextExprIndentLevel = (ast: AST, startIndex?: number) => {
+  let index = startIndex ?? 0;
   let nextIndentLevel = 0;
 
   while (ast[index]) {

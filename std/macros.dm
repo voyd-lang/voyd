@@ -78,21 +78,24 @@ pub macro fn(&body)
 				extract(&body type-arrow-index + 1)
 				`()
 
-	let expressions = if (type-arrow-index > -1)
-		&body.slice(type-arrow-index + 2)
-		&body.slice(1)
+	let expressions = macro-expand
+		if (type-arrow-index > -1)
+			&body.slice(type-arrow-index + 2)
+			&body.slice(1)
 
 	let extract-variables = (exprs) =>
-		exprs.reduce(#[]) (vars expr) =>
+		exprs.reduce(`()) (vars expr) =>
 			if (is-list(expr))
 				if (extract(expr 0) == "define-mut" or extract(expr 0) == "define")
 					block
-						vars.push(#[extract(expr 1) extract(expr 2)])
+						// For now, assume all vars are typed
+						let definition = extract(expr 1)
+						vars.push(#[extract(definition 1), extract(definition 2)])
 						vars
 					concat(vars extract-variables(expr))
 				vars
 
-	let variables = #[variables].concat(extract-variables(expressions))
+	let variables = `(variables).concat(extract-variables(expressions))
 
 	` define-function
 		$identifier

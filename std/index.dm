@@ -1,5 +1,5 @@
 use dir/macros ***
-use dir/external-functions ***
+use dir/string ***
 
 pub def-wasm-operator('<' lt_s i32 i32)
 pub def-wasm-operator('>' gt_s i32 i32)

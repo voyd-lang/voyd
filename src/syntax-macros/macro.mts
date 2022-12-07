@@ -327,8 +327,10 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
     console.error(JSON.stringify(arg, undefined, 2));
     return arg;
   },
+  split: (_, str: string, splitter: string) => str.split(splitter),
   "macro-expand": ({ macros, vars }, body: AST) =>
     expandMacros(body, macros, vars),
+  "char-to-code": (_, char: string) => String(char).charCodeAt(0),
   eval: (opts, body: AST) => evalFnCall(body, opts),
   "register-macro": ({ macros }, ast: AST) => {
     registerMacro(macros, ast);
