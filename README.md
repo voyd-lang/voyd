@@ -16,7 +16,7 @@ fn fib(n:i32) -> i32
 fn main() -> Void
     var index = 0
     for num in range(15)
-        ; Print fibonacci sequence at index using UFCS.
+        // Print fibonacci sequence at index using UFCS.
         num.fib().print()
 ```
 
