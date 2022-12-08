@@ -191,10 +191,7 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
       return module;
     });
   },
-  extract: (_, list: AST, index: number) => list[index],
   block: (_, ...expressions: AST[]) => expressions[expressions.length - 1],
-  array: (_, ...rest: AST[]) => rest,
-  slice: (_, array: AST, index: number) => array.slice(index),
   length: (_, array: AST) => array.length,
   "define-mut": ({ vars, macros }, id: string, value: Expr) => {
     vars.set(id, { value: evalExpr(value, { vars, macros }), mutable: true });
@@ -295,6 +292,9 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
     }
     return [];
   },
+  array: (_, ...rest: AST[]) => rest,
+  slice: (_, array: AST, index: number) => array.slice(index),
+  extract: (_, list: AST, index: number) => list[index],
   map: ({ vars, macros }, array: AST, lambda: AST) => {
     return array.map((val, index, array) =>
       callLambda({
