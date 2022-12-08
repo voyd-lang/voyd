@@ -6,13 +6,13 @@ web apps fun for individuals and teams alike.
 https://justforfunnoreally.dev/
 
 ```dm
-; Find the value of the fibonacci sequence at index n
+// Find the value of the fibonacci sequence at index n
 fn fib(n:i32) -> i32
     if (n < 2)
         n
         fib(n - 1) + fib(n - 2)
 
-; All binary programs have a main function
+// All binary programs have a main function
 fn main() -> Void
     var index = 0
     for num in range(15)
