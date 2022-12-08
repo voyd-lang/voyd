@@ -1,8 +1,33 @@
 # Modules
 
-## Importing Modules With Use
+## Root Module
 
-### Syntax
+Type: Root
+
+Syntax:
+
+```lisp
+(root $module-id:String $modules:Module*)
+```
+
+## Standard Module
+
+Type: Module
+
+Syntax:
+
+```lisp
+(module $module-id:String
+  (imports ($import-module-id "***")*)
+  (exports $exports:Export*)
+  (block $body*))
+```
+
+Example export `["export", "'<'", ["parameters", ["left", "i32"], ["right", "i32"]]]`
+
+## Use (Module Imports)
+
+Dream Syntax:
 
 ```dream
 use src/lib *** // Import everything from src/lib
