@@ -1,26 +1,35 @@
+import { isList } from "../lib/is-list.mjs";
 import { AST, Expr } from "../parser.mjs";
 import { greedyOps } from "./greedy-ops.mjs";
 
-export const infixOperators = new Set([
-  "+",
-  "-",
-  "*",
-  "/",
-  "==",
-  "!=",
-  "<",
-  ">",
-  "<=",
-  ">=",
-  ".",
-  "|>",
-  "<|",
-  "and",
-  "or",
-  "xor",
-  "=",
-  "=>",
-  ";",
+export type Associativity = "left" | "right";
+
+/** Key is the operator, value is its [precedence, associativity] */
+export const infixOperators = new Map<string, [number, Associativity]>([
+  ["+", [0, "left"]],
+  ["-", [0, "left"]],
+  ["*", [1, "left"]],
+  ["/", [1, "left"]],
+  ["==", [2, "left"]],
+  ["!=", [2, "left"]],
+  ["<", [2, "left"]],
+  [">", [2, "left"]],
+  ["<=", [2, "left"]],
+  [">=", [2, "left"]],
+  [".", [6, "left"]],
+  ["|>", [4, "left"]],
+  ["<|", [4, "right"]],
+  ["and", [2, "left"]],
+  ["or", [2, "left"]],
+  ["xor", [2, "left"]],
+  ["=", [4, "right"]],
+  ["+=", [4, "right"]],
+  ["-=", [4, "right"]],
+  ["*=", [4, "right"]],
+  ["/=", [4, "right"]],
+  ["=>", [5, "right"]],
+  [";", [4, "left"]],
+  ["??", [3, "right"]],
 ]);
 
 export const isContinuationOp = (op: string) =>
@@ -28,63 +37,68 @@ export const isContinuationOp = (op: string) =>
 
 export const isInfixOp = (op: string) => infixOperators.has(op);
 
-export const infix = (ast: AST) => {
-  const transformed: AST = [];
+export const infix = (ast: AST, start: AST = []): AST => {
+  const outputQueue: AST = [...start];
+  const operatorQueue: string[] = [];
 
-  const shift = (): Expr => {
-    const val = ast.shift();
-    if (val instanceof Array) return infix(val);
-    return val!;
+  const opQueueHasHigherOp = (op1: string) => {
+    const op2 = operatorQueue.at(-1);
+    if (!op2) return false;
+    const [op1Precedence, op1Associativity] = infixOperators.get(op1)!;
+    const [op2Precedence] = infixOperators.get(op2)!;
+    return op2Precedence > op1Precedence || op1Associativity === "left";
   };
 
-  const operatorIsNext = () => {
-    const next = ast[0];
-    return isOperand(next);
-  };
-
-  const push = (ast: AST) => {
-    if (transformed.length !== 0 || operatorIsNext()) {
-      transformed.push(ast);
+  const pushOut = (val: AST) => {
+    if (!outputQueue.length && !isOperand(ast[0])) {
+      outputQueue.push(...val);
       return;
     }
 
-    transformed.push(...ast);
+    outputQueue.push(val);
   };
 
   const pushDot = (operand1: Expr, operand2: Expr) => {
     if (operand2 instanceof Array) {
-      push([operand2[0], operand1, ...operand2.slice(1)]);
+      pushOut([operand2[0], operand1, ...operand2.slice(1)]);
       return;
     }
 
-    push([operand2, operand1]);
+    pushOut([operand2, operand1]);
   };
 
-  const pushOperation = (op: Expr, operand1: Expr, operand2: Expr) => {
-    if (op === ".") return pushDot(operand1, operand2);
-    push([op, operand1, operand2]);
+  const applyLastOperator = () => {
+    const b = outputQueue.pop()!; // TODO: Error handling
+    const a = outputQueue.pop()!;
+    const op = operatorQueue.pop()!;
+    if (op === ".") return pushDot(a, b);
+    pushOut([op, a, b]);
   };
 
   while (ast.length) {
-    const operand1 = shift();
-
-    if (isOperand(operand1) && transformed.length && ast.length >= 1) {
-      const operand2 = shift();
-      pushOperation(operand1, transformed.pop()!, operand2);
+    const expr = ast[0];
+    if (isOperand(expr)) {
+      while (opQueueHasHigherOp(expr)) {
+        applyLastOperator();
+      }
+      operatorQueue.push(expr);
+      ast.shift();
       continue;
     }
 
-    if (operatorIsNext() && ast.length >= 2) {
-      const op = shift();
-      const operand2 = shift();
-      pushOperation(op, operand1, operand2);
-      continue;
-    }
+    isList(expr) ? outputQueue.push(infix(expr)) : outputQueue.push(expr);
+    ast.shift();
 
-    transformed.push(operand1);
+    if (!isOperand(ast.at(0) ?? false)) break;
   }
 
-  return transformed;
+  while (operatorQueue.length) {
+    applyLastOperator();
+  }
+
+  if (ast.length) return infix(ast, outputQueue);
+  return outputQueue;
 };
 
-const isOperand = (expr: Expr) => typeof expr === "string" && isInfixOp(expr);
+const isOperand = (expr: Expr): expr is string =>
+  typeof expr === "string" && isInfixOp(expr);

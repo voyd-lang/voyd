@@ -44,7 +44,7 @@ though. So feel free to play around.
 - [x] Standard function notation
 - [x] Parenthetical elision
 - [x] UFCS (dot notation)
-- [ ] Variables
+- [ ] Variables 🚧 (let done)
 - [x] If statements
 - [x] WASM code generation
 - [x] Function overloading
@@ -52,7 +52,7 @@ though. So feel free to play around.
 - [ ] Tail recursion
 - [ ] Generics
 - [ ] Modules 🚧
-- [ ] Std library
+- [ ] Std library 🚧
 - [ ] Test framework
 - [ ] Type checking
 - [ ] Type inference
