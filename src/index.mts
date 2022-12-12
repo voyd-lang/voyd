@@ -10,6 +10,8 @@ if (!mod.validate()) {
   process.exit(1);
 }
 
+// console.log(mod.emitText());
+
 const binary = mod.emitBinary();
 const compiled = new WebAssembly.Module(binary);
 const strings = new StringsTable();

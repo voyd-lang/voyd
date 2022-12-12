@@ -9,7 +9,8 @@ let mod: binaryen.Module | undefined = undefined;
 // TODO Handle scoping better
 export const genWasmCode = (ast: AST) => {
   mod = new binaryen.Module();
-  mod.setMemory(5, 150);
+  mod.setMemory(1, 150, "buffer");
+  mod.setFeatures(binaryen.Features.All);
   const typeIdentifiers = new Map();
   const functionMap = genFunctionMap(ast, typeIdentifiers);
   compileExpression({
