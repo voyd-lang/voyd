@@ -9,6 +9,7 @@ let mod: binaryen.Module | undefined = undefined;
 // TODO Handle scoping better
 export const genWasmCode = (ast: AST) => {
   mod = new binaryen.Module();
+  mod.setMemory(5, 150);
   const typeIdentifiers = new Map();
   const functionMap = genFunctionMap(ast, typeIdentifiers);
   compileExpression({
@@ -16,9 +17,11 @@ export const genWasmCode = (ast: AST) => {
     mod,
     parameters: new Map(),
     vars: new Map(),
+    globals: new Map(),
     functionMap,
     typeIdentifiers,
   });
+  mod.autoDrop();
   return mod;
 };
 
@@ -27,9 +30,24 @@ interface CompileExpressionOpts {
   mod: binaryen.Module;
   parameters: VarMap;
   vars: VarMap;
+  globals: GlobalMap;
   functionMap: FnMap;
   typeIdentifiers: TypeIdentifiers;
 }
+
+type FnMap = Map<string, Fn[]>;
+type Fn = {
+  binaryenId: string;
+  /** returns and parameters are the type identifier */
+  signature: {
+    paramTypeIds: string[];
+    variableTypeIds: string[];
+    returnTypeIds: string;
+  };
+  returnType: number;
+};
+type VarMap = Map<string, { index: number; type: number; typeId: string }>;
+type GlobalMap = Map<string, { name: string; type: number; typeId: string }>;
 
 /** Name / Alias, should eventually lead to a native WASM type */
 type TypeIdentifiers = Map<string, string>;
@@ -51,7 +69,7 @@ const compileFloat = (mod: binaryen.Module, flt: string) =>
   mod.f32.const(Number(flt.replace("/float", "")));
 
 const compileSymbol = (opts: CompileExpressionOpts) => {
-  const { expr, parameters, mod, vars } = opts;
+  const { expr, parameters, mod, vars, globals } = opts;
   if (typeof expr !== "string") {
     throw new Error("Expected symbol");
   }
@@ -61,6 +79,11 @@ const compileSymbol = (opts: CompileExpressionOpts) => {
   }
 
   const id = toIdentifier(expr);
+  const global = globals.get(id);
+  if (global) {
+    return mod.global.get(global.name, global.type);
+  }
+
   const info = parameters.get(id) ?? vars.get(id);
   if (!info) {
     throw new Error(`Unrecognized symbol ${expr}`);
@@ -122,9 +145,11 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
 
   if (identifier === "define-type") return mod.nop();
   if (identifier === "lambda-expr") return mod.nop();
-  if (identifier === "define") return compileDefine(opts);
   if (identifier === "define-function") return compileFunction(opts);
+  if (identifier === "host-num") return expr[1] as number;
   if (identifier === "define-extern-function") return compileExternFn(opts);
+  if (identifier === "=") return compileAssign(opts);
+  if (identifier.startsWith("define")) return compileDefine(opts);
   if (identifier === "return-call") {
     return compileFunctionCall({
       ...opts,
@@ -133,13 +158,16 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
     });
   }
   if (identifier === "if") return compileIf(opts);
-  if (identifier === "binaryen-mod") return compileBinaryenModCall(opts);
+  if (identifier === "binaryen-mod" || identifier === "bnr") {
+    return compileBnrCall(opts);
+  }
 
   const fn = getMatchingFnForCallExpr(
     expr,
     functionMap,
     opts.parameters,
-    opts.vars
+    opts.vars,
+    opts.globals
   );
   if (!fn) {
     throw new Error(`Function ${identifier} not found`);
@@ -156,7 +184,24 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
   return mod.call(fn.binaryenId, args, fn.returnType);
 };
 
-const compileBinaryenModCall = (opts: CompileListOpts): number => {
+const compileAssign = (opts: CompileFnCallOpts): number => {
+  const { expr, mod, vars, globals, typeIdentifiers } = opts;
+  const identifier = toIdentifier(expr[1] as string);
+  const value = compileExpression({ ...opts, expr: expr[2] });
+  const variable = vars.get(identifier);
+  if (variable) {
+    return mod.local.set(variable.index, value);
+  }
+
+  const global = globals.get(identifier);
+  if (global) {
+    return mod.global.set(global.name, value);
+  }
+
+  throw new Error(`${identifier} not found in scope`);
+};
+
+const compileBnrCall = (opts: CompileListOpts): number => {
   const { expr } = opts;
   const call = expr as any;
   const namespaceId = toIdentifier(call[1][0]);
@@ -166,19 +211,31 @@ const compileBinaryenModCall = (opts: CompileListOpts): number => {
     namespaceId === "mod" ? opts.mod : (opts.mod as any)[namespaceId];
   const func = namespace[funcId];
   return func(
-    ...args.map((expr: Expr) => compileExpression({ ...opts, expr }))
+    ...(args?.map((expr: Expr) => compileExpression({ ...opts, expr })) ?? [])
   );
 };
 
 const compileDefine = (opts: CompileFnCallOpts): number => {
-  const { expr, mod, vars } = opts;
-  const identifier = (expr as string[][])[1][1];
+  const { expr, mod, vars, globals, typeIdentifiers } = opts;
+  const defineIdentifier = toIdentifier(expr[0] as string);
+  const identifier = toIdentifier((expr as string[][])[1][1]);
+  const value = compileExpression({ ...opts, expr: expr[2] });
+
+  if (defineIdentifier.includes("global")) {
+    const type = toIdentifier((expr as string[][])[1][2]);
+    const binType = mapBinaryenType(type, typeIdentifiers);
+    mod.addGlobal(identifier, binType, defineIdentifier.includes("mut"), value);
+    globals.set(identifier, {
+      name: identifier,
+      type: binType,
+      typeId: type,
+    });
+    return mod.nop();
+  }
+
   const variable = vars.get(identifier);
   if (!variable) throw new Error(`Variable, ${identifier} not found`);
-  return mod.local.set(
-    variable.index,
-    compileExpression({ ...opts, expr: expr[2] })
-  );
+  return mod.local.set(variable.index, value);
 };
 
 const compileFunction = (opts: CompileListOpts): number => {
@@ -261,13 +318,12 @@ const compileIf = (opts: CompileListOpts) => {
   const ifFalseNode = expr[3];
   const condition = compileExpression({ ...opts, expr: conditionNode });
   const ifTrue = compileExpression({ ...opts, expr: ifTrueNode });
-  const ifFalse = ifFalseNode
-    ? compileExpression({ ...opts, expr: ifFalseNode })
-    : undefined;
+  const ifFalse =
+    ifFalseNode !== undefined
+      ? compileExpression({ ...opts, expr: ifFalseNode })
+      : undefined;
   return mod.if(condition, ifTrue, ifFalse);
 };
-
-type VarMap = Map<string, { index: number; type: number; typeId: string }>;
 
 const getFunctionParameters = (ast: AST, typeIdentifiers: TypeIdentifiers) => {
   if (ast[0] !== "parameters") {
@@ -339,29 +395,19 @@ const getFunctionVars = (
   };
 };
 
-type FnMap = Map<string, Fn[]>;
-type Fn = {
-  binaryenId: string;
-  /** returns and parameters are the type identifier */
-  signature: {
-    paramTypeIds: string[];
-    variableTypeIds: string[];
-    returnTypeIds: string;
-  };
-  returnType: number;
-};
-
 const getMatchingFnForCallExpr = (
   call: AST,
   fnMap: FnMap,
   paramMap: VarMap,
-  varMap: VarMap
+  varMap: VarMap,
+  globals: GlobalMap
 ): Fn | undefined => {
   const identifier = toIdentifier(call[0] as string);
   const paramTypeIds = call
     .slice(1)
     .map(
-      (expr) => getExprReturnTypeId(expr, fnMap, paramMap, varMap) as string
+      (expr) =>
+        getExprReturnTypeId(expr, fnMap, paramMap, varMap, globals) as string
     );
 
   return getMatchingFn({ identifier, paramTypeIds, fnMap });
@@ -389,20 +435,31 @@ const getExprReturnTypeId = (
   expr: Expr,
   fnMap: FnMap,
   paramMap: VarMap,
-  varMap: VarMap
+  varMap: VarMap,
+  globals: GlobalMap
 ): string | undefined => {
   if (typeof expr === "number") return "i32";
   if (typeof expr === "string" && expr.startsWith("/float")) return "f32";
   if (typeof expr === "boolean") return "i32";
   if (typeof expr === "string" && expr === "void") return expr;
   if (typeof expr === "string") {
-    return paramMap.get(toIdentifier(expr))?.typeId ?? varMap.get(expr)?.typeId;
+    return (
+      paramMap.get(toIdentifier(expr))?.typeId ??
+      varMap.get(toIdentifier(expr))?.typeId ??
+      globals.get(toIdentifier(expr))?.typeId
+    );
   }
   if (isList(expr) && expr[0] === "block") {
-    return getExprReturnTypeId(expr[expr.length - 1]!, fnMap, paramMap, varMap);
+    return getExprReturnTypeId(
+      expr[expr.length - 1]!,
+      fnMap,
+      paramMap,
+      varMap,
+      globals
+    );
   }
-  return getMatchingFnForCallExpr(expr, fnMap, paramMap, varMap)?.signature
-    .returnTypeIds;
+  return getMatchingFnForCallExpr(expr, fnMap, paramMap, varMap, globals)
+    ?.signature.returnTypeIds;
 };
 
 const genFunctionMap = (ast: AST, typeIdentifiers: TypeIdentifiers): FnMap => {

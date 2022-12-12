@@ -140,3 +140,13 @@ pub macro type(&body)
 	` define-type
 		$(extract equals-expr 1)
 		$(extract (extract equals-expr 2) 1)
+
+pub macro global(&body)
+	let mutability = extract &body 0
+	let equals-expr = extract &body 1
+	let function = if mutability == "let"
+		` define-global
+		` define-mut-global
+	`	$@function
+		$(extract equals-expr 1)
+		$(extract (extract equals-expr 2) 1)

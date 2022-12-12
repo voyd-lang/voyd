@@ -15,3 +15,4 @@
   `?` conventions
 - Make spread of define-function, fn and lambda more consistent. They use a mix of either the last
   is a single expr, or a bunch of expressions
+- Massive cleanup pass (spec + wasm-code-gen)
