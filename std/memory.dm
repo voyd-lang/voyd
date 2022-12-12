@@ -12,15 +12,15 @@ pub fn alloc(size:i32) -> i32
 
 // Sets the stack pointer to the end of a function return space, returns the return address
 pub fn set-return(return-address:i32) -> i32
-	let size:i32 = bnr (i32 load) ((host-num 0) (host-num 0) return-address)
+	let size:i32 = bnr (i32 load) (`(0) `(0) return-address)
 	stack-pointer = return-address + size
 	return-address
 
 pub fn read-i32(address:i32 offset:i32) -> i32
-	bnr (i32 load) ((host-num 0) (host-num 0) (address + offset + header-size))
+	bnr (i32 load) (`(0) `(0) (address + offset + header-size))
 
 pub fn store-i32(address:i32 offset:i32 value:i32) -> void
-	bnr (i32 store) ((host-num 0) (host-num 0) (address + offset + header-size) value)
+	bnr (i32 store) (`(0) `(0) (address + offset + header-size) value)
 
 fn ensure-space(size:i32) -> i32
 	let mem-size:i32 = bnr (memory size)

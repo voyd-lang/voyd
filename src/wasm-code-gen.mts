@@ -146,7 +146,7 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
   if (identifier === "define-type") return mod.nop();
   if (identifier === "lambda-expr") return mod.nop();
   if (identifier === "define-function") return compileFunction(opts);
-  if (identifier === "host-num") return expr[1] as number;
+  if (identifier === "quote") return expr[1] as number;
   if (identifier === "define-extern-function") return compileExternFn(opts);
   if (identifier === "=") return compileAssign(opts);
   if (identifier.startsWith("define")) return compileDefine(opts);
