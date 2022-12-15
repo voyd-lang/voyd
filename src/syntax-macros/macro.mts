@@ -218,13 +218,16 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
     vars.set(id, { value: lambda, mutable: false });
     return ["define-function", id, parameters, variables, returnType, body];
   },
-  "=": ({ vars }, identifier, expr) => {
+  "=": ({ vars, macros }, identifier, expr) => {
     const variable = vars.get(identifier);
     if (!variable) throw new Error(`identifier not found ${identifier}`);
     if (!variable.mutable) {
       throw new Error(`Variable ${identifier} is not mutable`);
     }
-    vars.set(identifier, expr);
+    vars.set(identifier, {
+      value: evalExpr(expr, { vars, macros }),
+      mutable: true,
+    });
     return [];
   },
   "==": (_, left, right) => left === right,
@@ -349,6 +352,7 @@ const fnsToSkipArgEval = new Set([
   "define",
   "define-mut",
   "define-function",
+  "=",
 ]);
 
 const handleOptionalConditionParenthesis = (expr: Expr): Expr => {

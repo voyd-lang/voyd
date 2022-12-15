@@ -135,11 +135,70 @@ pub macro extern-fn(&body)
 		$parameters
 		$return-type
 
+pub macro match(&body)
+	let value-expr = &body.extract(0)
+	let cases = &body.slice(1)
+	let expand-cases = (cases index) =>
+		let case = cases.extract(index)
+		if is-list(case) and (case.length == 1)
+			case.extract(0) // Default
+			if is-list(case)
+				` if $(extract case 0) == match-value
+					$(extract case 1)
+					$(&lambda cases (index + 1))
+
+	let conditions = expand-cases(cases 0)
+	` block
+		let match-value = $value-expr
+		$conditions
+
 pub macro type(&body)
 	define equals-expr (extract &body 0)
-	` define-type
-		$(extract equals-expr 1)
-		$(extract (extract equals-expr 2) 1)
+	let expr = equals-expr.extract(2)
+	if expr.is-list and (expr.extract(0) == "struct")
+		struct-to-cdt(equals-expr.extract(1) expr)
+		` define-type
+			$(extract equals-expr 1)
+			$(extract (extract equals-expr 2) 1)
+
+var cdt-type-id = 0
+
+// Takes (struct $typed-parameter*), returns (define-cdt $name $type-id:i32 $size:i32) + field accessor functions
+let struct-to-cdt = (name expr) =>
+	let fields = expr.slice(1)
+	cdt-type-id = cdt-type-id + 1
+	let get-size = (param) => param.extract(2).match
+		"i32" 4
+		"i64" 8
+		"f32" 4
+		"f64" 8
+		4
+	let total-size = fields.reduce(0) (size param) =>
+		let next-size = param.get-size
+		next-size + size
+
+	var cur-size = 0
+	let accessors = fields.reduce(`()) (accessors param) =>
+		let field-name = param.extract(1)
+		let field-type = param.extract(2)
+		let offset = cur-size
+		cur-size = offset + param.get-size
+		let read-fn = field-type.match
+			"i32" `(read-i32)
+			"i64" `(read-i64)
+			"f32" `(read-f32)
+			"f64" `(read-f64)
+			`(read-i32)
+
+		let accessor =
+			` fn $field-name(self:$name) -> $field-type
+				$@read-fn self offset
+		accessors.push(accessor)
+		accessors
+
+	` splice-block
+		define-cdt $name $cdt-type-id $total-size
+		$@accessors
 
 pub macro global(&body)
 	let mutability = extract &body 0

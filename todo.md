@@ -16,3 +16,5 @@
 - Make spread of define-function, fn and lambda more consistent. They use a mix of either the last
   is a single expr, or a bunch of expressions
 - Massive cleanup pass (spec + wasm-code-gen)
+- Flags for outputting AST and WAT
+- Use tabstops (the thing that handles tab based comment alignment etc)

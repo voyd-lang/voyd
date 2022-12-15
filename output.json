@@ -59,7 +59,142 @@
           ["parameters", ["op", "wasm-fn", "arg-type", "return-type"]]
         ],
         ["export", "extern-fn", ["parameters", ["&body"]]],
+        ["export", "match", ["parameters", ["&body"]]],
         ["export", "type", ["parameters", ["&body"]]],
+        ["block", 0],
+        [
+          "lambda-expr",
+          ["name", "expr"],
+          [
+            "block",
+            ["define", "fields", ["slice", "expr", 1]],
+            ["=", "cdt-type-id", ["+", "cdt-type-id", 1]],
+            [
+              "define",
+              "get-size",
+              [
+                "lambda-expr",
+                ["param"],
+                [
+                  "block",
+                  ["define", "match-value", ["block", ["extract", "param", 2]]],
+                  [
+                    "if",
+                    ["==", "\"i32\"", "match-value"],
+                    4,
+                    [
+                      "if",
+                      ["==", "\"i64\"", "match-value"],
+                      8,
+                      [
+                        "if",
+                        ["==", "\"f32\"", "match-value"],
+                        4,
+                        ["if", ["==", "\"f64\"", "match-value"], 8, []]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "define",
+              "total-size",
+              [
+                "reduce",
+                "fields",
+                0,
+                [
+                  "lambda-expr",
+                  ["size", "param"],
+                  [
+                    "block",
+                    ["define", "next-size", ["get-size", "param"]],
+                    ["+", "next-size", "size"]
+                  ]
+                ]
+              ]
+            ],
+            ["define-mut", "cur-size", ["block", 0]],
+            [
+              "define",
+              "accessors",
+              [
+                "reduce",
+                "fields",
+                ["quote"],
+                [
+                  "lambda-expr",
+                  ["accessors", "param"],
+                  [
+                    "block",
+                    ["define", "field-name", ["extract", "param", 1]],
+                    ["define", "field-type", ["extract", "param", 2]],
+                    ["define", "offset", ["block", "cur-size"]],
+                    ["=", "cur-size", ["get-size", ["+", "offset", "param"]]],
+                    [
+                      "define",
+                      "read-fn",
+                      [
+                        "block",
+                        ["define", "match-value", ["block", "field-type"]],
+                        [
+                          "if",
+                          ["==", "\"i32\"", "match-value"],
+                          ["quote", "read-i32"],
+                          [
+                            "if",
+                            ["==", "\"i64\"", "match-value"],
+                            ["quote", "read-i64"],
+                            [
+                              "if",
+                              ["==", "\"f32\"", "match-value"],
+                              ["quote", "read-f32"],
+                              [
+                                "if",
+                                ["==", "\"f64\"", "match-value"],
+                                ["quote", "read-f64"],
+                                [
+                                  "if",
+                                  ["==", "`", "match-value"],
+                                  "read-i32",
+                                  []
+                                ]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "define",
+                      "accessor",
+                      [
+                        "block",
+                        [
+                          "quote",
+                          "fn",
+                          ["$field-name", ["typed-parameter", "self", "$name"]],
+                          "->",
+                          "$field-type",
+                          ["$@read-fn", "self", "offset"]
+                        ]
+                      ]
+                    ],
+                    ["push", "accessors", "accessor"],
+                    "accessors"
+                  ]
+                ]
+              ]
+            ],
+            [
+              "quote",
+              "splice-block",
+              ["define-cdt", "$name", "$cdt-type-id", "$total-size"],
+              "$@accessors"
+            ]
+          ]
+        ],
         ["export", "global", ["parameters", ["&body"]]]
       ]
     ],
@@ -92,6 +227,16 @@
               "stack-pointer",
               ["+", ["+", "stack-pointer", "size"], "header-size"]
             ],
+            [
+              "bnr",
+              ["i32", "store"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                "address",
+                ["+", "size", "header-size"]
+              ]
+            ],
             "address"
           ]
         ],
@@ -104,7 +249,7 @@
           ["return-type", "void"],
           [
             "block",
-            ["bnr", ["memory", "copy"], ["dest", "src", ["read-i32", "src", 0]]]
+            ["bnr", ["memory", "copy"], ["dest", "src", ["size", "src"]]]
           ]
         ],
         ["export", "copy", ["parameters", ["src", "i32"], ["dest", "i32"]]],
@@ -116,7 +261,15 @@
           ["return-type", "i32"],
           [
             "block",
-            ["bnr", ["i32", "load"], [["quote", 0], ["quote", 0], "size-index"]]
+            [
+              "bnr",
+              ["i32", "load"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                ["+", "size-index", "address"]
+              ]
+            ]
           ]
         ],
         ["export", "size", ["parameters", ["address", "i32"]]],
@@ -124,20 +277,15 @@
           "define-function",
           "set-return",
           ["parameters", ["return-address", "i32"]],
-          ["variables", ["size", "i32"]],
+          ["variables"],
           ["return-type", "i32"],
           [
             "block",
             [
-              "define",
-              ["typed-parameter", "size", "i32"],
-              [
-                "bnr",
-                ["i32", "load"],
-                [["quote", 0], ["quote", 0], "return-address"]
-              ]
+              "=",
+              "stack-pointer",
+              ["size", ["+", "return-address", "return-address"]]
             ],
-            ["=", "stack-pointer", ["+", "return-address", "size"]],
             "return-address"
           ]
         ],
@@ -155,7 +303,7 @@
               ["i32", "load"],
               [
                 ["quote", 0],
-                ["quote", 0],
+                ["quote", 2],
                 ["+", ["+", "address", "offset"], "header-size"]
               ]
             ]
@@ -184,7 +332,7 @@
               ["i32", "store"],
               [
                 ["quote", 0],
-                ["quote", 0],
+                ["quote", 2],
                 ["+", ["+", "address", "offset"], "header-size"],
                 "value"
               ]
@@ -322,12 +470,46 @@
     ],
     [
       "module",
+      "std/struct",
+      ["imports", ["std/macros", "***"]],
+      ["exports"],
+      [
+        ["define-cdt", "Pos", 1, 12],
+        [
+          "define-function",
+          "x",
+          ["parameters", ["self", "Pos"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["read-i32", "self", "offset"]]
+        ],
+        [
+          "define-function",
+          "y",
+          ["parameters", ["self", "Pos"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["read-i32", "self", "offset"]]
+        ],
+        [
+          "define-function",
+          "z",
+          ["parameters", ["self", "Pos"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["read-i32", "self", "offset"]]
+        ]
+      ]
+    ],
+    [
+      "module",
       "std/index",
       [
         "imports",
         ["std/macros", "***"],
         ["std/memory", "***"],
-        ["std/string", "***"]
+        ["std/string", "***"],
+        ["std/struct", "***"]
       ],
       ["exports"],
       [
@@ -660,8 +842,7 @@
           [
             "block",
             ["define", ["typed-parameter", "my-pos", "i32"], ["make-pos"]],
-            ["get-z", "my-pos"],
-            "stack-pointer"
+            ["get-x", "my-pos"]
           ]
         ]
       ]
@@ -719,6 +900,29 @@
             {
               "moduleId": "std/string",
               "path": "/Users/drew/projects/dream/std/string.dm",
+              "srcPath": "",
+              "isRoot": false,
+              "workingDir": "/Users/drew/projects/dream/std",
+              "imports": [
+                [
+                  {
+                    "moduleId": "std/macros",
+                    "path": "/Users/drew/projects/dream/std/macros.dm",
+                    "srcPath": "",
+                    "isRoot": false,
+                    "workingDir": "/Users/drew/projects/dream/std",
+                    "imports": []
+                  },
+                  "***"
+                ]
+              ]
+            },
+            "***"
+          ],
+          [
+            {
+              "moduleId": "std/struct",
+              "path": "/Users/drew/projects/dream/std/struct.dm",
               "srcPath": "",
               "isRoot": false,
               "workingDir": "/Users/drew/projects/dream/std",

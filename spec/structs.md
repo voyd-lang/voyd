@@ -1,4 +1,4 @@
-# Structs
+# Structs / Complex Data Types (CDT)
 
 ## Type Form
 
@@ -11,5 +11,5 @@ Syntax:
 ## Value Form
 
 ```
-(struct (field $name $value))
+(struct (field $name $value)*)
 ```

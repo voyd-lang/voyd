@@ -156,3 +156,9 @@ Define AsyncNumericOp as an asynchronous function that accepts a number and retu
 ```lisp
 (define-let $identifier $type-id $expr)
 ```
+
+## Structs / Complex Data Types
+
+```lisp
+(define-cdt $name:String $type-id:i32 $size:i32)
+```
