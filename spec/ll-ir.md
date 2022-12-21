@@ -3,14 +3,32 @@
 This spec defines the lowest intermediate representation of Dream before it is converted into
 WASM / machine code.
 
+## Define
+
+`define` defines an immutable variable within a function
+
+```lisp
+(define $identifier:String | $typed-identifier:TypedIdentifier $expr)
+```
+
+## Define CDT
+
+Defines a complex data type I.E. tuple / struct
+
+```lisp
+(define-cdt
+  (name $name:String)
+  (size $size:i32)
+  (fields
+    (field (name $name:String) (type)) ))
+```
+
 ## Define Function
 
 The final function definition. This function is as close to the
 final representation the AST can get and is interpreted directly
 by the code generator. These functions are registered in the
 global scope and therefore must each have a unique identifier.
-
-### Expanded Meta Syntax
 
 ```lisp
 (define-function $identifier
@@ -39,90 +57,31 @@ global scope and therefore must each have a unique identifier.
     (+ (fib (- n 1))) (fib (- n 2))))
 ```
 
-## Extern Function
-
-Represents an external function import (a function provided by the host).
-
-### Expanded Meta Syntax
-
-```lisp
-(define-extern-function $identifier
-  $external-namespace
-  (parameters ($param $type-id)*)
-  (return-type $type-id))
-```
-
-### Examples
-
-```lisp
-// Define a function fib
-(define-extern-function fib
-  // Function parameter list
-  (parameters
-    // Parameter definition
-    (n i32))
-
-  (return-type i32))
-```
-
-## Tail Return
-
-Performs a tail return call.
-
-### Expanded Meta Syntax
-
-```lisp
-(return-call $fn-identifier $args*)
-```
-
-## Globals
+## Define Global
 
 Defines a global value accessible across function instances
 
 ```
-(global $mutability:(var|let) $name:TypedParameter = $value)
+(define-global $mutability:(var|let) $name:TypedParameter = $value)
 ```
 
-## Modules
+## Define Mut
 
-### Root Module
-
-Type: Root
-
-Syntax:
+`define-mut` defines a mutable variable within a function
 
 ```lisp
-(root $module-id:String $modules:Module*)
+(define-mut $identifier:String | $typed-identifier:TypedIdentifier $expr)
 ```
 
-### Standard Module
-
-Type: Module
-
-Syntax:
-
-```lisp
-(module $module-id:String
-  (imports ($import-module-id "***")*)
-  (exports $exports:Export*)
-  (block $body*))
-```
-
-Example export `["export", "'<'", ["parameters", ["left", "i32"], ["right", "i32"]]]`
-
-## Types
-
-### Define Type
+## Define Type
 
 `define type` Defines a new type,
-
-#### Expanded Meta Syntax
 
 ```lisp
 (define-type $identifier $type-expr)
 ```
 
-#### Examples
+### Examples
 
 Define `Int` as an alias to i32
 
@@ -147,18 +106,55 @@ Define AsyncNumericOp as an asynchronous function that accepts a number and retu
     (return-type Int)))
 ```
 
-## Type Parameters
+## Extern Function
 
-## Variables Spec
-
-## Let / Var
+Represents an external function import (a function provided by the host).
 
 ```lisp
-(define-let $identifier $type-id $expr)
+(define-extern-function $identifier
+  $external-namespace
+  (parameters ($param $type-id)*)
+  (return-type $type-id))
 ```
 
-## Structs / Complex Data Types
+### Examples
 
 ```lisp
-(define-cdt $name:String $type-id:i32 $size:i32)
+// Define a function fib
+(define-extern-function fib
+  // Function parameter list
+  (parameters
+    // Parameter definition
+    (n i32))
+
+  (return-type i32))
+```
+
+## Module
+
+Type: Module
+
+```lisp
+(module $module-id:String
+  (imports ($import-module-id "***")*)
+  (exports $exports:Export*)
+  (block $body*))
+```
+
+Example export `["export", "'<'", ["parameters", ["left", "i32"], ["right", "i32"]]]`
+
+## Tail Return
+
+Performs a tail return call.
+
+```lisp
+(return-call $fn-identifier $args*)
+```
+
+## Root Module
+
+Type: Root
+
+```lisp
+(root $module-id:String $modules:Module*)
 ```
