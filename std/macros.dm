@@ -40,10 +40,13 @@ pub macro var(&body)
 
 pub macro ';'(&body)
 	let func = &body.extract(0)
-	let block-list = &body.extract(1)
+	let body = &body.extract(1)
+	let args = if body.extract(0) == "block"
+		body.slice(1)
+		body
 	if is-list(func)
-		func.concat(block-list.slice(1))
-		concat(`($func) block-list.slice(1))
+		func.concat(args)
+		concat(`($func) args)
 
 pub macro lambda(&body)
 	let parameters = &body.extract(0)
