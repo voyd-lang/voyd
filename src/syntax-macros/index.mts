@@ -13,5 +13,5 @@ export const syntaxMacros: SyntaxMacro[] = [
   processGreedyOps,
   (ast) => infix(ast),
   moduleSyntaxMacro,
-  // macro,
+  macro,
 ];
