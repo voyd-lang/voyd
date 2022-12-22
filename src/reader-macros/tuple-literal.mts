@@ -5,7 +5,7 @@ export const tupleLiteralMacro: ReaderMacro = {
   tag: "[",
   macro: (dream, { reader }) => {
     const items = reader(dream, "]");
-    if (isList(items)) return ["tuple", ",", ...items];
+    if (isList(items)) return ["tuple", ...items];
     return ["tuple", items];
   },
 };

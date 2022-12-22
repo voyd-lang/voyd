@@ -93,7 +93,7 @@ pub macro fn(&body)
 					block
 						// For now, assume all vars are typed
 						let definition = extract(expr 1)
-						vars.push(#[extract(definition 1), extract(definition 2)])
+						vars.push(#[extract(definition 1) extract(definition 2)])
 						vars.concat(expr.extract(2).extract-variables())
 					concat(vars extract-variables(expr))
 				vars
@@ -191,12 +191,26 @@ let struct-to-cdt = (name expr) =>
 			"i64" `(read-i64)
 			"f32" `(read-f32)
 			"f64" `(read-f64)
-			`(read-i32)
+			`(read-i32) // TODO Support sub-structs
 
-		let accessor =
+		let read-accessor =
 			` fn $field-name(self:$name) -> $field-type
-				$@read-fn self offset
-		accessors.push(accessor)
+				$@read-fn self $offset
+
+		let write-name = "set-" + field-name
+		let write-fn = field-type.match
+			"i32" `(store-i32)
+			"i64" `(store-i64)
+			"f32" `(store-f32)
+			"f64" `(store-f64)
+			`(store-i32) // TODO Support sub-structs
+
+		let write-accessor =
+			` fn $write-name(self:$name value:$field-type) -> void
+				$@write-fn self $offset value
+
+		accessors.push(read-accessor)
+		accessors.push(write-accessor)
 		accessors
 
 	` splice-block

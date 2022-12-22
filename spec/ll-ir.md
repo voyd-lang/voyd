@@ -16,11 +16,7 @@ WASM / machine code.
 Defines a complex data type I.E. tuple / struct
 
 ```lisp
-(define-cdt
-  (name $name:String)
-  (size $size:i32)
-  (fields
-    (field (name $name:String) (type)) ))
+(define-cdt $name:String $type-id:i32 $size:i32)
 ```
 
 ## Define Function

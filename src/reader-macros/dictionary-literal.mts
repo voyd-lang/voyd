@@ -5,7 +5,7 @@ export const dictionaryLiteralMacro: ReaderMacro = {
   tag: "#{",
   macro: (dream, { reader }) => {
     const items = reader(dream, "}");
-    if (isList(items)) return ["dictionary", ",", ...items];
-    return ["dictionary", ",", items];
+    if (isList(items)) return ["dictionary", ...items];
+    return ["dictionary", items];
   },
 };

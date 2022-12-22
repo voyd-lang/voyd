@@ -50,7 +50,7 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
     }
 
     if (isList(next)) {
-      transformed.push(handleArray(next, indentLevel));
+      transformed.push(elideParens(next, { indentLevel }));
       ast.shift();
       continue;
     }
@@ -91,7 +91,7 @@ const assistGreedyOpProcessing = (
 
   consumeLeadingWhitespace(ast);
   if (precedingExprCount === 1 && isList(ast[0])) {
-    transformed.push(...handleArray(ast[0], indentLevel));
+    transformed.push(...(elideParens(ast[0], { indentLevel }) as AST));
     ast.shift();
     return;
   }
@@ -116,34 +116,6 @@ const lineExpressionCount = (ast: AST) => {
     count += 1;
   }
   return count;
-};
-
-const handleArray = (ast: AST, indentLevel: number): AST => {
-  const transformed: AST = [];
-
-  let currentExpr: AST = [];
-  while (ast.length) {
-    const next = ast.shift()!;
-
-    if (next === ",") {
-      transformed.push(elideParens(currentExpr) as AST);
-      currentExpr = [];
-      continue;
-    }
-
-    currentExpr.push(next);
-  }
-
-  consumeLeadingWhitespace(currentExpr);
-  if (currentExpr.length) {
-    transformed.push(elideParens(currentExpr, { indentLevel }) as AST);
-  }
-
-  if (transformed.length === 1 && isList(transformed[0])) {
-    return transformed[0];
-  }
-
-  return transformed;
 };
 
 const nextExprIndentLevel = (ast: AST, startIndex?: number) => {
