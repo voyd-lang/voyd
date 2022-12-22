@@ -8,7 +8,6 @@ import { scientificENotationMacro } from "./scientific-e-notation.mjs";
 import { stringMacro } from "./string.mjs";
 import { structLiteralMacro } from "./struct-literal.mjs";
 import { tupleLiteralMacro } from "./tuple-literal.mjs";
-import { typedParameterMacro } from "./typed-parameter.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 const macros = [
@@ -16,7 +15,6 @@ const macros = [
   tupleLiteralMacro,
   arrayLiteralMacro,
   dictionaryLiteralMacro,
-  typedParameterMacro,
   intMacro,
   floatMacro,
   scientificENotationMacro,

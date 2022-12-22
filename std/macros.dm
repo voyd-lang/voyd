@@ -24,6 +24,11 @@ export pub (parameters (&body))
 pub macro `(&body)
 	quote quote $@&body
 
+pub macro ':'(&body)
+	define expr0 &body.extract(0)
+	define expr1 &body.extract(1)
+	` labeled-expr $expr0 $expr1
+
 pub macro let(&body)
 	define equals-expr (extract &body 0)
 	macro-expand
