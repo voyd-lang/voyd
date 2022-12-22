@@ -34,7 +34,7 @@ export const infixOperators = new Map<string, [number, Associativity]>([
 ]);
 
 export const isContinuationOp = (op: string) =>
-  isInfixOp(op) && !greedyOps.has(op);
+  isInfixOp(op) && op !== ":" && !greedyOps.has(op); // `:` is a hacky exception (Hopefully the only one.)
 
 export const isInfixOp = (op: string) => infixOperators.has(op);
 

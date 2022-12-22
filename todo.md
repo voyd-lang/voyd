@@ -18,8 +18,5 @@
 - Massive cleanup pass (spec + wasm-code-gen)
 - Flags for outputting AST and WAT
 - Use tabstops (the thing that handles tab based comment alignment etc)
-- Remove special syntax for commas within a list (i.e. `handleArray` in parenthetical elision)
-  - Remove handleArray
-  - Treat `identifier: expr` as a binary expression macro that converts to `(labeled-expr identifier expr)`
-  - Commas are no longer necessary in array, tuple, and struct expressions after this. We could do
-    something else with the operator or ignore it so people can use it as a visual separator
+- Support struct field assignment via `=` operator
+- Check mutability of struct before allowing modification (&mut semantics?)
