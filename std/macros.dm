@@ -24,6 +24,11 @@ export pub (parameters (&body))
 pub macro `(&body)
 	quote quote $@&body
 
+pub macro ':'(&body)
+	define expr0 &body.extract(0)
+	define expr1 &body.extract(1)
+	` labeled-expr $expr0 $expr1
+
 pub macro let(&body)
 	define equals-expr (extract &body 0)
 	macro-expand
@@ -40,10 +45,13 @@ pub macro var(&body)
 
 pub macro ';'(&body)
 	let func = &body.extract(0)
-	let block-list = &body.extract(1)
+	let body = &body.extract(1)
+	let args = if body.extract(0) == "block"
+		body.slice(1)
+		body
 	if is-list(func)
-		func.concat(block-list.slice(1))
-		concat(`($func) block-list.slice(1))
+		func.concat(args)
+		concat(`($func) args)
 
 pub macro lambda(&body)
 	let parameters = &body.extract(0)
@@ -58,10 +66,17 @@ pub macro '=>'(&body)
 let extract-parameters = (definitions) =>
 	`(parameters).concat
 		definitions.slice(1).map (expr) =>
-			let param-identifier-index = (if (expr.length == 3) 1 2)
-			let param-identifier = extract(expr param-identifier-index)
-			let type = extract(expr param-identifier-index + 1)
-			` $param-identifier $type
+			let is-labeled = is-list(expr.extract(2))
+			let param-definition = if is-labeled
+				expr.extract(2)
+				expr
+
+			let param-identifier = param-definition.extract(1)
+			let type = param-definition.extract(2)
+			let param = ` $param-identifier $type
+			if is-labeled
+				param.push(expr.extract(1))
+			param
 
 pub macro fn(&body)
 	let definitions = extract(&body 0)
@@ -90,7 +105,7 @@ pub macro fn(&body)
 					block
 						// For now, assume all vars are typed
 						let definition = extract(expr 1)
-						vars.push(#[extract(definition 1), extract(definition 2)])
+						vars.push(#[extract(definition 1) extract(definition 2)])
 						vars.concat(expr.extract(2).extract-variables())
 					concat(vars extract-variables(expr))
 				vars
@@ -135,8 +150,110 @@ pub macro extern-fn(&body)
 		$parameters
 		$return-type
 
+pub macro match(&body)
+	let value-expr = &body.extract(0)
+	let cases = &body.slice(1)
+	let expand-cases = (cases index) =>
+		let case = cases.extract(index)
+		if is-list(case) and not(index + 1 >= cases.length)
+			` if $(extract case 0) == match-value
+				$(extract case 1)
+				$(&lambda cases (index + 1))
+			case
+
+	let conditions = expand-cases(cases 0)
+	` block
+		let match-value = $value-expr
+		$conditions
+
 pub macro type(&body)
 	define equals-expr (extract &body 0)
-	` define-type
+	let expr = equals-expr.extract(2)
+	if expr.is-list and (expr.extract(0) == "struct")
+		struct-to-cdt(equals-expr.extract(1) expr)
+		` define-type
+			$(extract equals-expr 1)
+			$(extract (extract equals-expr 2) 1)
+
+var cdt-type-id = 0
+
+// Takes (struct $typed-parameter*), returns (define-cdt $name $type-id:i32 $size:i32) + field accessor functions
+let struct-to-cdt = (name expr) =>
+	let fields = expr.slice(1)
+	cdt-type-id = cdt-type-id + 1
+	let get-size = (param) => param.extract(2).match
+		"i32" 4
+		"i64" 8
+		"f32" 4
+		"f64" 8
+		4
+
+	let total-size = fields.reduce(0) (size param) =>
+		let next-size = param.get-size
+		next-size + size
+
+	let initializer-params = fields.reduce(`()) (params field) =>
+		let name = field.extract(1)
+		let type = field.extract(2)
+		params.push(`(labeled-expr $name (labeled-expr $name $type)))
+		params
+
+	let field-initializers = fields.map (field) =>
+		let field-name = field.extract(1)
+		let fn-name = "set-" + field-name
+		` $fn-name address $field-name
+
+	let initializer =
+		` fn $name($@initializer-params) -> $name
+			let address:$name = alloc($total-size)
+			$@field-initializers
+			address
+
+	// cur-size / accessors
+	let accessors-info = fields.reduce(#[0 `()]) (info param) =>
+		let offset = info.extract(0)
+		let accessors = info.extract(1)
+		let field-name = param.extract(1)
+		let field-type = param.extract(2)
+		let read-fn = field-type.match
+			"i32" `(read-i32)
+			"i64" `(read-i64)
+			"f32" `(read-f32)
+			"f64" `(read-f64)
+			`(read-i32) // TODO Support sub-structs
+
+		let read-accessor =
+			` fn $field-name(self:$name) -> $field-type
+				$@read-fn self $offset
+
+		let write-name = "set-" + field-name
+		let write-fn = field-type.match
+			"i32" `(store-i32)
+			"i64" `(store-i64)
+			"f32" `(store-f32)
+			"f64" `(store-f64)
+			`(store-i32) // TODO Support sub-structs
+
+		let write-accessor =
+			` fn $write-name(self:$name value:$field-type) -> void
+				$@write-fn self $offset value
+
+		accessors.push(read-accessor)
+		accessors.push(write-accessor)
+		#[offset + param.get-size accessors]
+
+	let accessors = accessors-info.extract(1)
+	` splice-block
+		define-cdt $name $cdt-type-id $total-size
+		$initializer
+		$@accessors
+
+pub macro global(&body)
+	let mutability = extract &body 0
+	let equals-expr = extract &body 1
+	let function = if mutability == "let"
+		` define-global
+		` define-mut-global
+	`	$@function
 		$(extract equals-expr 1)
 		$(extract (extract equals-expr 2) 1)

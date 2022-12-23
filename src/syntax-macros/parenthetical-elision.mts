@@ -50,7 +50,7 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
     }
 
     if (isList(next)) {
-      transformed.push(handleArray(next, indentLevel));
+      transformed.push(elideListContents(next, indentLevel));
       ast.shift();
       continue;
     }
@@ -74,7 +74,8 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
   return transformed;
 };
 
-// Modifies transformed, assumes ast[0] is greedy op
+// Consumes preceding expressions as though they belong to the operator at ast[-]
+// Modifies ast and transformed parameters
 const assistGreedyOpProcessing = (
   ast: AST,
   transformed: AST,
@@ -91,7 +92,7 @@ const assistGreedyOpProcessing = (
 
   consumeLeadingWhitespace(ast);
   if (precedingExprCount === 1 && isList(ast[0])) {
-    transformed.push(...handleArray(ast[0], indentLevel));
+    transformed.push(...elideListContents(ast[0], indentLevel));
     ast.shift();
     return;
   }
@@ -118,26 +119,9 @@ const lineExpressionCount = (ast: AST) => {
   return count;
 };
 
-const handleArray = (ast: AST, indentLevel: number): AST => {
-  const transformed: AST = [];
-
-  let currentExpr: AST = [];
-  while (ast.length) {
-    const next = ast.shift()!;
-
-    if (next === ",") {
-      transformed.push(elideParens(currentExpr) as AST);
-      currentExpr = [];
-      continue;
-    }
-
-    currentExpr.push(next);
-  }
-
-  consumeLeadingWhitespace(currentExpr);
-  if (currentExpr.length) {
-    transformed.push(elideParens(currentExpr, { indentLevel }) as AST);
-  }
+const elideListContents = (ast: AST, indentLevel: number): AST => {
+  consumeLeadingWhitespace(ast);
+  const transformed: AST = [elideParens(ast, { indentLevel })];
 
   if (transformed.length === 1 && isList(transformed[0])) {
     return transformed[0];

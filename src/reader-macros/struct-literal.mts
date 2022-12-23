@@ -5,7 +5,7 @@ export const structLiteralMacro: ReaderMacro = {
   tag: "{",
   macro: (dream, { reader }) => {
     const items = reader(dream, "}");
-    if (isList(items)) return ["struct", ",", ...items];
+    if (isList(items)) return ["struct", ...items];
     return ["struct", items];
   },
 };

@@ -13,7 +13,7 @@ fn fib(n:i32) -> i32
         fib(n - 1) + fib(n - 2)
 
 // All binary programs have a main function
-fn main() -> Void
+fn main() -> void
     var index = 0
     for num in range(15)
         // Print fibonacci sequence at index using UFCS.
@@ -44,7 +44,7 @@ though. So feel free to play around.
 - [x] Standard function notation
 - [x] Parenthetical elision
 - [x] UFCS (dot notation)
-- [ ] Variables 🚧 (let done)
+- [x] Variables
 - [x] If statements
 - [x] WASM code generation
 - [x] Function overloading
@@ -60,6 +60,7 @@ though. So feel free to play around.
 - [ ] Match statements
 - [ ] Loops
 - [ ] Algebraic data types
+- [ ] Optionals
 - [ ] Algebraic effects
 - [ ] GC
 - [ ] Classes / Box structs

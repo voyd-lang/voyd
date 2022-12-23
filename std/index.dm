@@ -1,4 +1,5 @@
 use dir/macros ***
+use dir/memory ***
 use dir/string ***
 
 pub def-wasm-operator('<' lt_s i32 i32)

@@ -4,11 +4,14 @@ import { isList } from "./lib/is-list.mjs";
 import { toIdentifier } from "./lib/to-identifier.mjs";
 import { AST, Expr } from "./parser.mjs";
 
+const CDT_ADDRESS_TYPE = "i32";
 let mod: binaryen.Module | undefined = undefined;
 
-// TODO Handle scoping better
+// TODO Handle scoping
 export const genWasmCode = (ast: AST) => {
   mod = new binaryen.Module();
+  mod.setMemory(1, 150, "buffer");
+  mod.setFeatures(binaryen.Features.All);
   const typeIdentifiers = new Map();
   const functionMap = genFunctionMap(ast, typeIdentifiers);
   compileExpression({
@@ -16,9 +19,11 @@ export const genWasmCode = (ast: AST) => {
     mod,
     parameters: new Map(),
     vars: new Map(),
+    globals: new Map(),
     functionMap,
     typeIdentifiers,
   });
+  mod.autoDrop();
   return mod;
 };
 
@@ -27,9 +32,27 @@ interface CompileExpressionOpts {
   mod: binaryen.Module;
   parameters: VarMap;
   vars: VarMap;
+  globals: GlobalMap;
   functionMap: FnMap;
   typeIdentifiers: TypeIdentifiers;
 }
+
+type FnMap = Map<string, Fn[]>;
+type Fn = {
+  binaryenId: string;
+  /** returns and parameters are the type identifier */
+  signature: {
+    parameters: { typeId: string; label?: string }[];
+    variableTypeIds: string[];
+    returnTypeIds: string;
+  };
+  returnType: number;
+};
+type VarMap = Map<
+  string,
+  { index: number; type: number; typeId: string; label?: string } // Label is used for parameter definitions where the caller must pass the label.
+>;
+type GlobalMap = Map<string, { name: string; type: number; typeId: string }>;
 
 /** Name / Alias, should eventually lead to a native WASM type */
 type TypeIdentifiers = Map<string, string>;
@@ -51,7 +74,7 @@ const compileFloat = (mod: binaryen.Module, flt: string) =>
   mod.f32.const(Number(flt.replace("/float", "")));
 
 const compileSymbol = (opts: CompileExpressionOpts) => {
-  const { expr, parameters, mod, vars } = opts;
+  const { expr, parameters, mod, vars, globals } = opts;
   if (typeof expr !== "string") {
     throw new Error("Expected symbol");
   }
@@ -61,6 +84,11 @@ const compileSymbol = (opts: CompileExpressionOpts) => {
   }
 
   const id = toIdentifier(expr);
+  const global = globals.get(id);
+  if (global) {
+    return mod.global.get(global.name, global.type);
+  }
+
   const info = parameters.get(id) ?? vars.get(id);
   if (!info) {
     throw new Error(`Unrecognized symbol ${expr}`);
@@ -121,10 +149,16 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
   const identifier = toIdentifier(expr[0] as string);
 
   if (identifier === "define-type") return mod.nop();
+  if (identifier === "define-cdt") return mod.nop();
   if (identifier === "lambda-expr") return mod.nop();
-  if (identifier === "define") return compileDefine(opts);
   if (identifier === "define-function") return compileFunction(opts);
+  if (identifier === "labeled-expr") {
+    return compileExpression({ ...opts, expr: expr[2] });
+  }
+  if (identifier === "quote") return expr[1] as number;
   if (identifier === "define-extern-function") return compileExternFn(opts);
+  if (identifier === "=") return compileAssign(opts);
+  if (identifier.startsWith("define")) return compileDefine(opts);
   if (identifier === "return-call") {
     return compileFunctionCall({
       ...opts,
@@ -133,13 +167,16 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
     });
   }
   if (identifier === "if") return compileIf(opts);
-  if (identifier === "binaryen-mod") return compileBinaryenModCall(opts);
+  if (identifier === "binaryen-mod" || identifier === "bnr") {
+    return compileBnrCall(opts);
+  }
 
   const fn = getMatchingFnForCallExpr(
     expr,
     functionMap,
     opts.parameters,
-    opts.vars
+    opts.vars,
+    opts.globals
   );
   if (!fn) {
     throw new Error(`Function ${identifier} not found`);
@@ -156,7 +193,24 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
   return mod.call(fn.binaryenId, args, fn.returnType);
 };
 
-const compileBinaryenModCall = (opts: CompileListOpts): number => {
+const compileAssign = (opts: CompileFnCallOpts): number => {
+  const { expr, mod, vars, globals } = opts;
+  const identifier = toIdentifier(expr[1] as string);
+  const value = compileExpression({ ...opts, expr: expr[2] });
+  const variable = vars.get(identifier);
+  if (variable) {
+    return mod.local.set(variable.index, value);
+  }
+
+  const global = globals.get(identifier);
+  if (global) {
+    return mod.global.set(global.name, value);
+  }
+
+  throw new Error(`${identifier} not found in scope`);
+};
+
+const compileBnrCall = (opts: CompileListOpts): number => {
   const { expr } = opts;
   const call = expr as any;
   const namespaceId = toIdentifier(call[1][0]);
@@ -166,19 +220,31 @@ const compileBinaryenModCall = (opts: CompileListOpts): number => {
     namespaceId === "mod" ? opts.mod : (opts.mod as any)[namespaceId];
   const func = namespace[funcId];
   return func(
-    ...args.map((expr: Expr) => compileExpression({ ...opts, expr }))
+    ...(args?.map((expr: Expr) => compileExpression({ ...opts, expr })) ?? [])
   );
 };
 
 const compileDefine = (opts: CompileFnCallOpts): number => {
-  const { expr, mod, vars } = opts;
-  const identifier = (expr as string[][])[1][1];
+  const { expr, mod, vars, globals, typeIdentifiers } = opts;
+  const defineIdentifier = toIdentifier(expr[0] as string);
+  const identifier = toIdentifier((expr as string[][])[1][1]);
+  const value = compileExpression({ ...opts, expr: expr[2] });
+
+  if (defineIdentifier.includes("global")) {
+    const type = toIdentifier((expr as string[][])[1][2]);
+    const binType = mapBinaryenType(type, typeIdentifiers);
+    mod.addGlobal(identifier, binType, defineIdentifier.includes("mut"), value);
+    globals.set(identifier, {
+      name: identifier,
+      type: binType,
+      typeId: type,
+    });
+    return mod.nop();
+  }
+
   const variable = vars.get(identifier);
   if (!variable) throw new Error(`Variable, ${identifier} not found`);
-  return mod.local.set(
-    variable.index,
-    compileExpression({ ...opts, expr: expr[2] })
-  );
+  return mod.local.set(variable.index, value);
 };
 
 const compileFunction = (opts: CompileListOpts): number => {
@@ -199,7 +265,7 @@ const compileFunction = (opts: CompileListOpts): number => {
   );
   const fn = getMatchingFn({
     identifier,
-    paramTypeIds: [...parameters.values()].map((p) => p.typeId),
+    parameters: [...parameters.values()],
     fnMap: functionMap,
   });
   if (!fn) {
@@ -237,7 +303,7 @@ const compileExternFn = (opts: CompileListOpts) => {
   );
   const fn = getMatchingFn({
     identifier,
-    paramTypeIds: [...parameters.values()].map((p) => p.typeId),
+    parameters: [...parameters.values()].map((p) => ({ typeId: p.typeId })),
     fnMap: functionMap,
   });
   if (!fn) {
@@ -261,13 +327,12 @@ const compileIf = (opts: CompileListOpts) => {
   const ifFalseNode = expr[3];
   const condition = compileExpression({ ...opts, expr: conditionNode });
   const ifTrue = compileExpression({ ...opts, expr: ifTrueNode });
-  const ifFalse = ifFalseNode
-    ? compileExpression({ ...opts, expr: ifFalseNode })
-    : undefined;
+  const ifFalse =
+    ifFalseNode !== undefined
+      ? compileExpression({ ...opts, expr: ifFalseNode })
+      : undefined;
   return mod.if(condition, ifTrue, ifFalse);
 };
-
-type VarMap = Map<string, { index: number; type: number; typeId: string }>;
 
 const getFunctionParameters = (ast: AST, typeIdentifiers: TypeIdentifiers) => {
   if (ast[0] !== "parameters") {
@@ -280,12 +345,15 @@ const getFunctionParameters = (ast: AST, typeIdentifiers: TypeIdentifiers) => {
         throw new Error("All parameters must be typed");
       }
       const typeId = toIdentifier(expr[1] as string);
+      const label =
+        typeof expr[2] === "string" ? toIdentifier(expr[2]) : undefined;
       const type = mapBinaryenType(typeId, typeIdentifiers);
 
       prev.parameters.set(toIdentifier(expr[0] as string), {
         index,
         type,
         typeId,
+        label,
       });
       prev.types.push(type);
       return prev;
@@ -339,49 +407,54 @@ const getFunctionVars = (
   };
 };
 
-type FnMap = Map<string, Fn[]>;
-type Fn = {
-  binaryenId: string;
-  /** returns and parameters are the type identifier */
-  signature: {
-    paramTypeIds: string[];
-    variableTypeIds: string[];
-    returnTypeIds: string;
-  };
-  returnType: number;
-};
-
 const getMatchingFnForCallExpr = (
   call: AST,
   fnMap: FnMap,
   paramMap: VarMap,
-  varMap: VarMap
+  varMap: VarMap,
+  globals: GlobalMap
 ): Fn | undefined => {
   const identifier = toIdentifier(call[0] as string);
-  const paramTypeIds = call
-    .slice(1)
-    .map(
-      (expr) => getExprReturnTypeId(expr, fnMap, paramMap, varMap) as string
-    );
+  const parameters = call.slice(1).map((expr) => ({
+    typeId: getExprReturnTypeId(
+      expr,
+      fnMap,
+      paramMap,
+      varMap,
+      globals
+    ) as string,
+    label:
+      isList(expr) && expr[0] === "labeled-expr"
+        ? (expr[1] as string)
+        : undefined,
+  }));
 
-  return getMatchingFn({ identifier, paramTypeIds, fnMap });
+  return getMatchingFn({ identifier, parameters, fnMap });
 };
 
 const getMatchingFn = ({
   identifier,
-  paramTypeIds,
+  parameters,
   fnMap,
 }: {
   identifier: string;
-  paramTypeIds: string[];
+  parameters: { typeId: string; label?: string }[];
   fnMap: FnMap;
 }): Fn | undefined => {
   const candidates = fnMap.get(identifier);
   if (!candidates) return undefined;
   return candidates.find((candidate) =>
-    candidate.signature.paramTypeIds.every(
-      (typeId, index) => paramTypeIds[index] === typeId
-    )
+    candidate.signature.parameters.every(({ typeId, label }, index) => {
+      const arg = parameters[index];
+      // Until a more complex type system is implemented, assume that non-primitive types
+      // Can be treated as i32's. This is obviously dangerous. But a type checker should catch
+      // the bugs this could cause before we reach the code gen phase anyway.
+      return (
+        (arg?.typeId === typeId ||
+          (!isPrimitive(arg?.typeId) && typeId === CDT_ADDRESS_TYPE)) &&
+        arg?.label === label
+      );
+    })
   );
 };
 
@@ -389,20 +462,31 @@ const getExprReturnTypeId = (
   expr: Expr,
   fnMap: FnMap,
   paramMap: VarMap,
-  varMap: VarMap
+  varMap: VarMap,
+  globals: GlobalMap
 ): string | undefined => {
   if (typeof expr === "number") return "i32";
   if (typeof expr === "string" && expr.startsWith("/float")) return "f32";
   if (typeof expr === "boolean") return "i32";
   if (typeof expr === "string" && expr === "void") return expr;
   if (typeof expr === "string") {
-    return paramMap.get(toIdentifier(expr))?.typeId ?? varMap.get(expr)?.typeId;
+    return (
+      paramMap.get(toIdentifier(expr))?.typeId ??
+      varMap.get(toIdentifier(expr))?.typeId ??
+      globals.get(toIdentifier(expr))?.typeId
+    );
   }
   if (isList(expr) && expr[0] === "block") {
-    return getExprReturnTypeId(expr[expr.length - 1]!, fnMap, paramMap, varMap);
+    return getExprReturnTypeId(
+      expr[expr.length - 1]!,
+      fnMap,
+      paramMap,
+      varMap,
+      globals
+    );
   }
-  return getMatchingFnForCallExpr(expr, fnMap, paramMap, varMap)?.signature
-    .returnTypeIds;
+  return getMatchingFnForCallExpr(expr, fnMap, paramMap, varMap, globals)
+    ?.signature.returnTypeIds;
 };
 
 const genFunctionMap = (ast: AST, typeIdentifiers: TypeIdentifiers): FnMap => {
@@ -411,6 +495,11 @@ const genFunctionMap = (ast: AST, typeIdentifiers: TypeIdentifiers): FnMap => {
 
     if (expr[0] === "define-type") {
       typeIdentifiers.set(toIdentifier(expr[1] as string), expr[2] as string);
+      return map;
+    }
+
+    if (expr[0] === "define-cdt") {
+      typeIdentifiers.set(toIdentifier(expr[1] as string), CDT_ADDRESS_TYPE);
       return map;
     }
 
@@ -424,7 +513,7 @@ const genFunctionMap = (ast: AST, typeIdentifiers: TypeIdentifiers): FnMap => {
     const parametersIndex = expr[0] === "define-function" ? 2 : 3;
     const parameters = (expr[parametersIndex] as string[][])
       .slice(1)
-      .map((arr) => toIdentifier(arr[1]));
+      .map((arr) => ({ typeId: toIdentifier(arr[1]), label: arr[2] }));
     const variables =
       expr[0] === "define-function"
         ? (expr[parametersIndex + 1] as string[][])
@@ -438,7 +527,7 @@ const genFunctionMap = (ast: AST, typeIdentifiers: TypeIdentifiers): FnMap => {
         signature: {
           returnTypeIds: returns,
           variableTypeIds: variables,
-          paramTypeIds: parameters,
+          parameters,
         },
         returnType: mapBinaryenType(returns, typeIdentifiers),
       },
@@ -462,3 +551,6 @@ const mapBinaryenType = (
   }
   throw new Error(`Unsupported type ${typeIdentifier}`);
 };
+
+const isPrimitive = (type: string) =>
+  new Set(["i32", "f32", "i64", "f64"]).has(type);

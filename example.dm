@@ -1,10 +1,14 @@
-use std/strings ***
+use std/struct ***
 
-pub fn fib(n:i32) -> i32
-	if (n < 2)
-		n
-		fib(n - 1) + fib(n - 2)
+type Pos = {
+	x:i32
+	y:i32
+	z:i32
+}
 
-fn main() -> void
-	let str:String = string "Hello, world!"
-	print-str str
+fn multiply(a:i32 by:b:i32) -> i32
+	a * b
+
+fn main() -> i32
+	let pos:Pos = Pos x: 23 y: 42 z: 5
+	pos.x

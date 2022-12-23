@@ -6,34 +6,35 @@ export type Associativity = "left" | "right";
 
 /** Key is the operator, value is its [precedence, associativity] */
 export const infixOperators = new Map<string, [number, Associativity]>([
-  ["+", [0, "left"]],
-  ["-", [0, "left"]],
-  ["*", [1, "left"]],
-  ["/", [1, "left"]],
-  ["==", [2, "left"]],
-  ["!=", [2, "left"]],
-  ["<", [2, "left"]],
-  [">", [2, "left"]],
-  ["<=", [2, "left"]],
-  [">=", [2, "left"]],
+  ["+", [1, "left"]],
+  ["-", [1, "left"]],
+  ["*", [2, "left"]],
+  ["/", [2, "left"]],
+  ["and", [0, "left"]],
+  ["or", [0, "left"]],
+  ["xor", [0, "left"]],
+  ["==", [0, "left"]],
+  ["!=", [0, "left"]],
+  ["<", [0, "left"]],
+  [">", [0, "left"]],
+  ["<=", [0, "left"]],
+  [">=", [0, "left"]],
   [".", [6, "left"]],
   ["|>", [4, "left"]],
   ["<|", [4, "right"]],
-  ["and", [2, "left"]],
-  ["or", [2, "left"]],
-  ["xor", [2, "left"]],
   ["=", [4, "right"]],
   ["+=", [4, "right"]],
   ["-=", [4, "right"]],
   ["*=", [4, "right"]],
   ["/=", [4, "right"]],
   ["=>", [5, "right"]],
+  [":", [6, "right"]],
   [";", [4, "left"]],
   ["??", [3, "right"]],
 ]);
 
 export const isContinuationOp = (op: string) =>
-  isInfixOp(op) && !greedyOps.has(op);
+  isInfixOp(op) && op !== ":" && !greedyOps.has(op); // `:` is a hacky exception (Hopefully the only one.)
 
 export const isInfixOp = (op: string) => infixOperators.has(op);
 
@@ -46,7 +47,10 @@ export const infix = (ast: AST, start: AST = []): AST => {
     if (!op2) return false;
     const [op1Precedence, op1Associativity] = infixOperators.get(op1)!;
     const [op2Precedence] = infixOperators.get(op2)!;
-    return op2Precedence > op1Precedence || op1Associativity === "left";
+    return (
+      op2Precedence > op1Precedence ||
+      (op2Precedence === op1Precedence && op1Associativity === "left")
+    );
   };
 
   const pushOut = (val: AST) => {

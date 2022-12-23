@@ -24,5 +24,6 @@
     "outFiles": ["${workspaceFolder}/**/*.mjs"]
   },
   "editor.insertSpaces": false,
-  "editor.tabSize": 2
+  "editor.tabSize": 2,
+  "editor.wordSeparators": "`~!@#$%^&*()=[{]}\\|;:'\",.<>/?"
 }

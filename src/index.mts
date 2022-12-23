@@ -6,6 +6,12 @@ const root = importRootModule();
 // console.log(JSON.stringify(root, undefined, 2));
 const mod = genWasmCode(root.ast);
 
+if (!mod.validate()) {
+  process.exit(1);
+}
+
+// console.log(mod.emitText());
+
 const binary = mod.emitBinary();
 const compiled = new WebAssembly.Module(binary);
 const strings = new StringsTable();
@@ -32,4 +38,4 @@ const instance = new WebAssembly.Instance(compiled, {
   },
 });
 
-(instance.exports as any).main0();
+console.log((instance.exports as any).main0());
