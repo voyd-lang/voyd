@@ -185,6 +185,23 @@ let struct-to-cdt = (name expr) =>
 		let next-size = param.get-size
 		next-size + size
 
+	let initializer-params = fields.reduce(`()) (params field) =>
+		let name = field.extract(1)
+		let type = field.extract(2)
+		params.push(`(labeled-expr $name $type))
+		params
+
+	let field-initializers = fields.map (field) =>
+		let field-name = field.extract(1)
+		let fn-name = "set-" + field-name
+		` $fn-name address $field-name
+
+	let initializer =
+		` fn $name($@initializer-params) -> $name
+			let address:i32 = alloc($total-size)
+			$@field-initializers
+			address
+
 	var cur-size = 0
 	let accessors = fields.reduce(`()) (accessors param) =>
 		let field-name = param.extract(1)
@@ -220,6 +237,7 @@ let struct-to-cdt = (name expr) =>
 
 	` splice-block
 		define-cdt $name $cdt-type-id $total-size
+		$initializer
 		$@accessors
 
 pub macro global(&body)

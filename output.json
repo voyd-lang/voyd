@@ -116,6 +116,70 @@
                 ]
               ]
             ],
+            [
+              "define",
+              "initializer-params",
+              [
+                "reduce",
+                "fields",
+                ["quote"],
+                [
+                  "lambda-expr",
+                  ["params", "field"],
+                  [
+                    "block",
+                    ["define", "name", ["extract", "field", 1]],
+                    ["define", "type", ["extract", "field", 2]],
+                    [
+                      "push",
+                      "params",
+                      ["quote", "labeled-expr", "$name", "$type"]
+                    ],
+                    "params"
+                  ]
+                ]
+              ]
+            ],
+            ["log", "initializer-params"],
+            [
+              "define",
+              "field-initializers",
+              [
+                "map",
+                "fields",
+                [
+                  "lambda-expr",
+                  ["field"],
+                  [
+                    "block",
+                    ["define", "field-name", ["extract", "field", 1]],
+                    ["define", "fn-name", ["+", "\"set-\"", "field-name"]],
+                    ["quote", "$fn-name", "address", "$field-name"]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "define",
+              "initializer",
+              [
+                "block",
+                [
+                  "quote",
+                  "fn",
+                  ["$name", "$@initializer-params"],
+                  "->",
+                  "$name",
+                  [
+                    "define",
+                    ["labeled-expr", "address", "i32"],
+                    ["alloc", "$total-size"]
+                  ],
+                  "$@field-initializers",
+                  "address"
+                ]
+              ]
+            ],
             ["define-mut", "cur-size", ["block", 0]],
             [
               "define",
@@ -247,6 +311,7 @@
               "quote",
               "splice-block",
               ["define-cdt", "$name", "$cdt-type-id", "$total-size"],
+              "$initializer",
               "$@accessors"
             ]
           ]
@@ -483,9 +548,9 @@
         ],
         [
           "define-extern-function",
-          ":",
+          "str-equals",
           ["namespace", "strings"],
-          ["parameters", ["r", "-"], ["a", "String"], ["b", "String"]],
+          ["parameters", ["a", "String"], ["b", "String"]],
           ["return-type", "void"]
         ],
         [
@@ -761,6 +826,21 @@
         ["define-cdt", "Pos", 1, 12],
         [
           "define-function",
+          "Pos",
+          ["parameters", ["x", "i32"], ["y", "i32"], ["z", "i32"]],
+          ["variables", ["address", "i32"]],
+          ["return-type", "Pos"],
+          [
+            "block",
+            ["define", ["labeled-expr", "address", "i32"], ["alloc", 12]],
+            ["set-x", "address", "x"],
+            ["set-y", "address", "y"],
+            ["set-z", "address", "z"],
+            "address"
+          ]
+        ],
+        [
+          "define-function",
           "x",
           ["parameters", ["self", "Pos"]],
           ["variables"],
@@ -811,7 +891,7 @@
           "define-function",
           "main",
           ["parameters"],
-          ["variables", ["a", "Pos"], ["a", "Pos"], ["b", "Pos"]],
+          ["variables", ["a", "Pos"], ["b", "Pos"]],
           ["return-type", "i32"],
           [
             "block",
@@ -829,16 +909,6 @@
               ]
             ],
             [
-              "define",
-              ["labeled-expr", "a", "Pos"],
-              [
-                "Pos",
-                ["labeled-expr", "x", 23],
-                ["labeled-expr", "y", "c"],
-                ["labeled-expr", "z", "a"]
-              ]
-            ],
-            [
               "move",
               ["labeled-expr", "hello", "world"],
               ["labeled-expr", "from", "a"],
@@ -852,7 +922,7 @@
                 [
                   "struct",
                   ["labeled-expr", "x", 23],
-                  ["labeled-expr", "y", "a"],
+                  ["labeled-expr", "y", ["a", "b"]],
                   ["labeled-expr", "z", 3]
                 ]
               ]

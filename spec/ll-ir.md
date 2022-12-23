@@ -58,7 +58,7 @@ global scope and therefore must each have a unique identifier.
 Defines a global value accessible across function instances
 
 ```
-(define-global $mutability:(var|let) $name:TypedParameter = $value)
+(define-global $mutability:(var|let) $name:LabeledExpr = $value)
 ```
 
 ## Define Mut
@@ -66,7 +66,7 @@ Defines a global value accessible across function instances
 `define-mut` defines a mutable variable within a function
 
 ```lisp
-(define-mut $identifier:String | $typed-identifier:TypedIdentifier $expr)
+(define-mut $identifier:String | $labeled-expr:LabeledExpr $expr)
 ```
 
 ## Define Type
@@ -124,6 +124,14 @@ Represents an external function import (a function provided by the host).
     (n i32))
 
   (return-type i32))
+```
+
+## Labeled Expr
+
+Defines a labeled expression. These are used to annotate types
+
+```lisp
+(labeled-expr $label:String $exp)
 ```
 
 ## Module

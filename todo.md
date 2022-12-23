@@ -20,3 +20,4 @@
 - Use tabstops (the thing that handles tab based comment alignment etc)
 - Support struct field assignment via `=` operator
 - Check mutability of struct before allowing modification (&mut semantics?)
+- replace `quote splice-block` with `quote-splice` or something similar.
