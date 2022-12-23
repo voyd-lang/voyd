@@ -1,9 +1,9 @@
-# Expanded Form
+# Low Level IR Form
 
 The expanded form is a pure s-expression based syntax with an
 extremely simple grammar. There are no infix operators, prefix function notation etc.
 
-## Full Grammar
+## Grammar
 
 ```ebnf
 SExpr = AtomicSymbol | List;
@@ -27,10 +27,9 @@ Float = #'^[+-]?\d+\.\d+$';
 Empty = " ";
 ```
 
-## Expanded Meta Syntax Grammar
+## Extended Spec Grammar
 
-A modified version of the full expanded form grammar is used to
-define syntax elsewhere in this spec.
+A modified version of the normal grammar used by the spec to define types of expressions.
 
 Note: Optional is equivalent to `Atom | ()`;
 

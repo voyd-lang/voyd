@@ -28,7 +28,7 @@ global scope and therefore must each have a unique identifier.
 
 ```lisp
 (define-function $identifier
-  (parameters ($param $type-id)*)
+  (parameters ($name $type-id $label?)*)
   (variables ($variable $type-id)*)
   (return-type $type-id)
   $expr)
@@ -51,6 +51,31 @@ global scope and therefore must each have a unique identifier.
   (if (< n 2)
     n
     (+ (fib (- n 1))) (fib (- n 2))))
+```
+
+## Define Extern Function
+
+Defines an external function that has been imported into the module via WASM imports or equivalent.
+
+```lisp
+(define-extern-function $identifier
+  (namespace $name) // TODO: Move to bottom of list for implementation simplicity.
+  (parameters ($name $type-id $label?)*)
+  (return-type $type-id))
+```
+
+### Examples
+
+```lisp
+;; Define a function fib
+(define-extern-function fib
+  (namespace math)
+  ;; Function parameter list
+  (parameters
+    ;; Parameter definition
+    (n i32))
+
+  (return-type i32))
 ```
 
 ## Define Global
