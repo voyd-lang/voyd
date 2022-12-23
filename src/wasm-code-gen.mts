@@ -6,7 +6,7 @@ import { AST, Expr } from "./parser.mjs";
 
 let mod: binaryen.Module | undefined = undefined;
 
-// TODO Handle scoping better
+// TODO Handle scoping
 export const genWasmCode = (ast: AST) => {
   mod = new binaryen.Module();
   mod.setMemory(1, 150, "buffer");
@@ -41,13 +41,16 @@ type Fn = {
   binaryenId: string;
   /** returns and parameters are the type identifier */
   signature: {
-    paramTypeIds: string[];
+    parameters: { typeId: string; label?: string }[];
     variableTypeIds: string[];
     returnTypeIds: string;
   };
   returnType: number;
 };
-type VarMap = Map<string, { index: number; type: number; typeId: string }>;
+type VarMap = Map<
+  string,
+  { index: number; type: number; typeId: string; label?: string } // Label is used for parameter definitions where the caller must pass the label.
+>;
 type GlobalMap = Map<string, { name: string; type: number; typeId: string }>;
 
 /** Name / Alias, should eventually lead to a native WASM type */
@@ -145,8 +148,12 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
   const identifier = toIdentifier(expr[0] as string);
 
   if (identifier === "define-type") return mod.nop();
+  if (identifier === "define-cdt") return mod.nop();
   if (identifier === "lambda-expr") return mod.nop();
   if (identifier === "define-function") return compileFunction(opts);
+  if (identifier === "labeled-expr") {
+    return compileExpression({ ...opts, expr: expr[2] });
+  }
   if (identifier === "quote") return expr[1] as number;
   if (identifier === "define-extern-function") return compileExternFn(opts);
   if (identifier === "=") return compileAssign(opts);
@@ -186,7 +193,7 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
 };
 
 const compileAssign = (opts: CompileFnCallOpts): number => {
-  const { expr, mod, vars, globals, typeIdentifiers } = opts;
+  const { expr, mod, vars, globals } = opts;
   const identifier = toIdentifier(expr[1] as string);
   const value = compileExpression({ ...opts, expr: expr[2] });
   const variable = vars.get(identifier);
@@ -257,7 +264,7 @@ const compileFunction = (opts: CompileListOpts): number => {
   );
   const fn = getMatchingFn({
     identifier,
-    paramTypeIds: [...parameters.values()].map((p) => p.typeId),
+    parameters: [...parameters.values()],
     fnMap: functionMap,
   });
   if (!fn) {
@@ -295,7 +302,7 @@ const compileExternFn = (opts: CompileListOpts) => {
   );
   const fn = getMatchingFn({
     identifier,
-    paramTypeIds: [...parameters.values()].map((p) => p.typeId),
+    parameters: [...parameters.values()].map((p) => ({ typeId: p.typeId })),
     fnMap: functionMap,
   });
   if (!fn) {
@@ -404,31 +411,39 @@ const getMatchingFnForCallExpr = (
   globals: GlobalMap
 ): Fn | undefined => {
   const identifier = toIdentifier(call[0] as string);
-  const paramTypeIds = call
-    .slice(1)
-    .map(
-      (expr) =>
-        getExprReturnTypeId(expr, fnMap, paramMap, varMap, globals) as string
-    );
+  const parameters = call.slice(1).map((expr) => ({
+    typeId: getExprReturnTypeId(
+      expr,
+      fnMap,
+      paramMap,
+      varMap,
+      globals
+    ) as string,
+    label:
+      isList(expr) && expr[0] === "labeled-expr"
+        ? (expr[1] as string)
+        : undefined,
+  }));
 
-  return getMatchingFn({ identifier, paramTypeIds, fnMap });
+  return getMatchingFn({ identifier, parameters, fnMap });
 };
 
 const getMatchingFn = ({
   identifier,
-  paramTypeIds,
+  parameters,
   fnMap,
 }: {
   identifier: string;
-  paramTypeIds: string[];
+  parameters: { typeId: string; label?: string }[];
   fnMap: FnMap;
 }): Fn | undefined => {
   const candidates = fnMap.get(identifier);
   if (!candidates) return undefined;
   return candidates.find((candidate) =>
-    candidate.signature.paramTypeIds.every(
-      (typeId, index) => paramTypeIds[index] === typeId
-    )
+    candidate.signature.parameters.every(({ typeId, label }, index) => {
+      const arg = parameters[index];
+      return arg?.typeId === typeId && arg?.label === label;
+    })
   );
 };
 
@@ -472,6 +487,11 @@ const genFunctionMap = (ast: AST, typeIdentifiers: TypeIdentifiers): FnMap => {
       return map;
     }
 
+    if (expr[0] === "define-cdt") {
+      typeIdentifiers.set(toIdentifier(expr[1] as string), "i32"); // CDTs are always i32s as that is used to represent their address.
+      return map;
+    }
+
     if (expr[0] !== "define-function" && expr[0] !== "define-extern-function") {
       return new Map([...map, ...genFunctionMap(expr, typeIdentifiers)]);
     }
@@ -482,7 +502,7 @@ const genFunctionMap = (ast: AST, typeIdentifiers: TypeIdentifiers): FnMap => {
     const parametersIndex = expr[0] === "define-function" ? 2 : 3;
     const parameters = (expr[parametersIndex] as string[][])
       .slice(1)
-      .map((arr) => toIdentifier(arr[1]));
+      .map((arr) => ({ typeId: toIdentifier(arr[1]), label: arr[2] }));
     const variables =
       expr[0] === "define-function"
         ? (expr[parametersIndex + 1] as string[][])
@@ -496,7 +516,7 @@ const genFunctionMap = (ast: AST, typeIdentifiers: TypeIdentifiers): FnMap => {
         signature: {
           returnTypeIds: returns,
           variableTypeIds: variables,
-          paramTypeIds: parameters,
+          parameters,
         },
         returnType: mapBinaryenType(returns, typeIdentifiers),
       },
