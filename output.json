@@ -33,20 +33,31 @@
                     "block",
                     [
                       "define",
-                      "param-identifier-index",
-                      ["if", ["==", ["length", "expr"], 3], 1, 2]
+                      "is-labeled",
+                      ["is-list", ["extract", "expr", 2]]
+                    ],
+                    [
+                      "define",
+                      "param-definition",
+                      ["if", "is-labeled", ["extract", "expr", 2], "expr"]
                     ],
                     [
                       "define",
                       "param-identifier",
-                      ["extract", "expr", "param-identifier-index"]
+                      ["extract", "param-definition", 1]
                     ],
+                    ["define", "type", ["extract", "param-definition", 2]],
                     [
                       "define",
-                      "type",
-                      ["extract", "expr", ["+", "param-identifier-index", 1]]
+                      "param",
+                      ["quote", "$param-identifier", "$type"]
                     ],
-                    ["quote", "$param-identifier", "$type"]
+                    [
+                      "if",
+                      "is-labeled",
+                      ["push", "param", ["extract", "expr", 1]]
+                    ],
+                    "param"
                   ]
                 ]
               ]
@@ -133,14 +144,18 @@
                     [
                       "push",
                       "params",
-                      ["quote", "labeled-expr", "$name", "$type"]
+                      [
+                        "quote",
+                        "labeled-expr",
+                        "$name",
+                        ["labeled-expr", "$name", "$type"]
+                      ]
                     ],
                     "params"
                   ]
                 ]
               ]
             ],
-            ["log", "initializer-params"],
             [
               "define",
               "field-initializers",
@@ -591,20 +606,12 @@
     ],
     [
       "module",
-      "std/struct",
-      ["imports", ["std/macros", "***"]],
-      ["exports"],
-      []
-    ],
-    [
-      "module",
       "std/index",
       [
         "imports",
         ["std/macros", "***"],
         ["std/memory", "***"],
-        ["std/string", "***"],
-        ["std/struct", "***"]
+        ["std/string", "***"]
       ],
       ["exports"],
       [
@@ -820,14 +827,19 @@
     [
       "module",
       "src/example",
-      ["imports", ["std/index", "***"], ["std/struct", "***"]],
+      ["imports", ["std/index", "***"], ["std/index", "***"]],
       ["exports"],
       [
         ["define-cdt", "Pos", 1, 12],
         [
           "define-function",
           "Pos",
-          ["parameters", ["x", "i32"], ["y", "i32"], ["z", "i32"]],
+          [
+            "parameters",
+            ["x", "i32", "x"],
+            ["y", "i32", "y"],
+            ["z", "i32", "z"]
+          ],
           ["variables", ["address", "i32"]],
           ["return-type", "Pos"],
           [
@@ -889,9 +901,17 @@
         ],
         [
           "define-function",
+          "multiply",
+          ["parameters", ["a", "i32"], ["b", "i32", "by"]],
+          ["variables"],
+          ["return-type", "i32"],
+          ["block", ["*", "a", "b"]]
+        ],
+        [
+          "define-function",
           "main",
           ["parameters"],
-          ["variables", ["a", "Pos"], ["b", "Pos"]],
+          ["variables", ["a", "Pos"]],
           ["return-type", "i32"],
           [
             "block",
@@ -904,25 +924,6 @@
                   "struct",
                   ["labeled-expr", "x", 23],
                   ["labeled-expr", "y", "c"],
-                  ["labeled-expr", "z", 3]
-                ]
-              ]
-            ],
-            [
-              "move",
-              ["labeled-expr", "hello", "world"],
-              ["labeled-expr", "from", "a"],
-              ["labeled-expr", "to", "b"]
-            ],
-            [
-              "define",
-              ["labeled-expr", "b", "Pos"],
-              [
-                "Pos",
-                [
-                  "struct",
-                  ["labeled-expr", "x", 23],
-                  ["labeled-expr", "y", ["a", "b"]],
                   ["labeled-expr", "z", 3]
                 ]
               ]
@@ -1003,29 +1004,6 @@
               ]
             },
             "***"
-          ],
-          [
-            {
-              "moduleId": "std/struct",
-              "path": "/Users/drew/projects/dream/std/struct.dm",
-              "srcPath": "",
-              "isRoot": false,
-              "workingDir": "/Users/drew/projects/dream/std",
-              "imports": [
-                [
-                  {
-                    "moduleId": "std/macros",
-                    "path": "/Users/drew/projects/dream/std/macros.dm",
-                    "srcPath": "",
-                    "isRoot": false,
-                    "workingDir": "/Users/drew/projects/dream/std",
-                    "imports": []
-                  },
-                  "***"
-                ]
-              ]
-            },
-            "***"
           ]
         ]
       },
@@ -1033,8 +1011,8 @@
     ],
     [
       {
-        "moduleId": "std/struct",
-        "path": "/Users/drew/projects/dream/std/struct.dm",
+        "moduleId": "std/index",
+        "path": "/Users/drew/projects/dream/std/index.dm",
         "srcPath": "/Users/drew/projects/dream",
         "isRoot": true,
         "workingDir": "/Users/drew/projects/dream/std",

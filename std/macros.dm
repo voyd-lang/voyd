@@ -66,10 +66,17 @@ pub macro '=>'(&body)
 let extract-parameters = (definitions) =>
 	`(parameters).concat
 		definitions.slice(1).map (expr) =>
-			let param-identifier-index = (if (expr.length == 3) 1 2)
-			let param-identifier = extract(expr param-identifier-index)
-			let type = extract(expr param-identifier-index + 1)
-			` $param-identifier $type
+			let is-labeled = is-list(expr.extract(2))
+			let param-definition = if is-labeled
+				expr.extract(2)
+				expr
+
+			let param-identifier = param-definition.extract(1)
+			let type = param-definition.extract(2)
+			let param = ` $param-identifier $type
+			if is-labeled
+				param.push(expr.extract(1))
+			param
 
 pub macro fn(&body)
 	let definitions = extract(&body 0)
@@ -188,7 +195,7 @@ let struct-to-cdt = (name expr) =>
 	let initializer-params = fields.reduce(`()) (params field) =>
 		let name = field.extract(1)
 		let type = field.extract(2)
-		params.push(`(labeled-expr $name $type))
+		params.push(`(labeled-expr $name (labeled-expr $name $type)))
 		params
 
 	let field-initializers = fields.map (field) =>

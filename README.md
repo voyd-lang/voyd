@@ -60,6 +60,7 @@ though. So feel free to play around.
 - [ ] Match statements
 - [ ] Loops
 - [ ] Algebraic data types
+- [ ] Optionals
 - [ ] Algebraic effects
 - [ ] GC
 - [ ] Classes / Box structs
