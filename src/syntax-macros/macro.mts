@@ -237,6 +237,7 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
   "<=": (_, left, right) => left <= right,
   and: (_, left, right) => left && right,
   or: (_, left, right) => left || right,
+  not: (_, right) => !right,
   "+": (_, left, right) => left + right,
   "-": (_, left, right) => left - right,
   "*": (_, left, right) => left * right,

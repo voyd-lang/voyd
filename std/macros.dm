@@ -155,12 +155,11 @@ pub macro match(&body)
 	let cases = &body.slice(1)
 	let expand-cases = (cases index) =>
 		let case = cases.extract(index)
-		if is-list(case) and (case.length == 1)
-			case.extract(0) // Default
-			if is-list(case)
-				` if $(extract case 0) == match-value
-					$(extract case 1)
-					$(&lambda cases (index + 1))
+		if is-list(case) and not(index + 1 >= cases.length)
+			` if $(extract case 0) == match-value
+				$(extract case 1)
+				$(&lambda cases (index + 1))
+			case
 
 	let conditions = expand-cases(cases 0)
 	` block
@@ -188,6 +187,7 @@ let struct-to-cdt = (name expr) =>
 		"f32" 4
 		"f64" 8
 		4
+
 	let total-size = fields.reduce(0) (size param) =>
 		let next-size = param.get-size
 		next-size + size
@@ -205,16 +205,16 @@ let struct-to-cdt = (name expr) =>
 
 	let initializer =
 		` fn $name($@initializer-params) -> $name
-			let address:i32 = alloc($total-size)
+			let address:$name = alloc($total-size)
 			$@field-initializers
 			address
 
-	var cur-size = 0
-	let accessors = fields.reduce(`()) (accessors param) =>
+	// cur-size / accessors
+	let accessors-info = fields.reduce(#[0 `()]) (info param) =>
+		let offset = info.extract(0)
+		let accessors = info.extract(1)
 		let field-name = param.extract(1)
 		let field-type = param.extract(2)
-		let offset = cur-size
-		cur-size = offset + param.get-size
 		let read-fn = field-type.match
 			"i32" `(read-i32)
 			"i64" `(read-i64)
@@ -240,8 +240,9 @@ let struct-to-cdt = (name expr) =>
 
 		accessors.push(read-accessor)
 		accessors.push(write-accessor)
-		accessors
+		#[offset + param.get-size accessors]
 
+	let accessors = accessors-info.extract(1)
 	` splice-block
 		define-cdt $name $cdt-type-id $total-size
 		$initializer

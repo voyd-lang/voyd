@@ -102,7 +102,7 @@
                         "if",
                         ["==", "\"f32\"", "match-value"],
                         4,
-                        ["if", ["==", "\"f64\"", "match-value"], 8, []]
+                        ["if", ["==", "\"f64\"", "match-value"], 8, 4]
                       ]
                     ]
                   ]
@@ -187,7 +187,7 @@
                   "$name",
                   [
                     "define",
-                    ["labeled-expr", "address", "i32"],
+                    ["labeled-expr", "address", "$name"],
                     ["alloc", "$total-size"]
                   ],
                   "$@field-initializers",
@@ -195,23 +195,22 @@
                 ]
               ]
             ],
-            ["define-mut", "cur-size", ["block", 0]],
             [
               "define",
-              "accessors",
+              "accessors-info",
               [
                 "reduce",
                 "fields",
-                ["quote"],
+                ["array", 0, ["quote"]],
                 [
                   "lambda-expr",
-                  ["accessors", "param"],
+                  ["info", "param"],
                   [
                     "block",
+                    ["define", "offset", ["extract", "info", 0]],
+                    ["define", "accessors", ["extract", "info", 1]],
                     ["define", "field-name", ["extract", "param", 1]],
                     ["define", "field-type", ["extract", "param", 2]],
-                    ["define", "offset", ["block", "cur-size"]],
-                    ["=", "cur-size", ["get-size", ["+", "offset", "param"]]],
                     [
                       "define",
                       "read-fn",
@@ -234,12 +233,7 @@
                                 "if",
                                 ["==", "\"f64\"", "match-value"],
                                 ["quote", "read-f64"],
-                                [
-                                  "if",
-                                  ["==", "`", "match-value"],
-                                  "read-i32",
-                                  []
-                                ]
+                                ["quote", "read-i32"]
                               ]
                             ]
                           ]
@@ -284,12 +278,7 @@
                                 "if",
                                 ["==", "\"f64\"", "match-value"],
                                 ["quote", "store-f64"],
-                                [
-                                  "if",
-                                  ["==", "`", "match-value"],
-                                  "store-i32",
-                                  []
-                                ]
+                                ["quote", "store-i32"]
                               ]
                             ]
                           ]
@@ -317,11 +306,16 @@
                     ],
                     ["push", "accessors", "read-accessor"],
                     ["push", "accessors", "write-accessor"],
-                    "accessors"
+                    [
+                      "array",
+                      ["+", "offset", ["get-size", "param"]],
+                      "accessors"
+                    ]
                   ]
                 ]
               ]
             ],
+            ["define", "accessors", ["extract", "accessors-info", 1]],
             [
               "quote",
               "splice-block",
@@ -420,7 +414,7 @@
             [
               "=",
               "stack-pointer",
-              ["size", ["+", "return-address", "return-address"]]
+              ["+", "return-address", ["size", "return-address"]]
             ],
             "return-address"
           ]
@@ -840,11 +834,11 @@
             ["y", "i32", "y"],
             ["z", "i32", "z"]
           ],
-          ["variables", ["address", "i32"]],
+          ["variables", ["address", "Pos"]],
           ["return-type", "Pos"],
           [
             "block",
-            ["define", ["labeled-expr", "address", "i32"], ["alloc", 12]],
+            ["define", ["labeled-expr", "address", "Pos"], ["alloc", 12]],
             ["set-x", "address", "x"],
             ["set-y", "address", "y"],
             ["set-z", "address", "z"],
@@ -873,7 +867,7 @@
           ["parameters", ["self", "Pos"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["read-i32", "self", 0]]
+          ["block", ["read-i32", "self", 4]]
         ],
         [
           "define-function",
@@ -881,7 +875,7 @@
           ["parameters", ["self", "Pos"], ["value", "i32"]],
           ["variables"],
           ["return-type", "void"],
-          ["block", ["store-i32", "self", 0, "value"]]
+          ["block", ["store-i32", "self", 4, "value"]]
         ],
         [
           "define-function",
@@ -889,7 +883,7 @@
           ["parameters", ["self", "Pos"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["read-i32", "self", 0]]
+          ["block", ["read-i32", "self", 8]]
         ],
         [
           "define-function",
@@ -897,7 +891,7 @@
           ["parameters", ["self", "Pos"], ["value", "i32"]],
           ["variables"],
           ["return-type", "void"],
-          ["block", ["store-i32", "self", 0, "value"]]
+          ["block", ["store-i32", "self", 8, "value"]]
         ],
         [
           "define-function",
@@ -911,21 +905,18 @@
           "define-function",
           "main",
           ["parameters"],
-          ["variables", ["a", "Pos"]],
+          ["variables", ["pos", "Pos"]],
           ["return-type", "i32"],
           [
             "block",
             [
               "define",
-              ["labeled-expr", "a", "Pos"],
+              ["labeled-expr", "pos", "Pos"],
               [
                 "Pos",
-                [
-                  "struct",
-                  ["labeled-expr", "x", 23],
-                  ["labeled-expr", "y", "c"],
-                  ["labeled-expr", "z", 3]
-                ]
+                ["labeled-expr", "x", 23],
+                ["labeled-expr", "y", 42],
+                ["labeled-expr", "z", 5]
               ]
             ],
             ["x", "pos"]

@@ -20,8 +20,13 @@
 - Support struct field assignment via `=` operator
 - Check mutability of struct before allowing modification (&mut semantics?)
 - replace `quote splice-block` with `quote-splice` or something similar.
-- Improve macro expansion algorithm so macros like `var` and `let` don't need to call `macro-expand`.
-  Outside of `pub`, I don't believe any macro should need to call that function unless they need to
-  extract info post expansion like `pub` does. https://stackoverflow.com/questions/72865649/how-does-macroexpansion-actually-work-in-lisp
-- Rewrite reference. Also move the files that are more reference oriented from spec to reference. (i.e. not the ll-ir)
-- Consider using the struct syntax to define named arguments. See `archived-reference/functions.md#NamedArguments` for inspiration.
+- Improve macro expansion algorithm so macros like `var` and `let` don't need to call
+  `macro-expand`. Outside of `pub`, I don't believe any macro should need to call that function
+  unless they need to extract info post expansion like `pub` does.
+  https://stackoverflow.com/questions/72865649/how-does-macroexpansion-actually-work-in-lisp
+- Rewrite reference. Also move the files that are more reference oriented from spec to reference.
+  (i.e. not the ll-ir)
+- Consider using the struct syntax to define named arguments. See
+  `archived-reference/functions.md#NamedArguments` for inspiration.
+- Scoping. For macro expansion and compile time. Probably need a semantic in general. Without this
+  type-ids for structs are broken

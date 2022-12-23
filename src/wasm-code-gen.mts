@@ -4,6 +4,7 @@ import { isList } from "./lib/is-list.mjs";
 import { toIdentifier } from "./lib/to-identifier.mjs";
 import { AST, Expr } from "./parser.mjs";
 
+const CDT_ADDRESS_TYPE = "i32";
 let mod: binaryen.Module | undefined = undefined;
 
 // TODO Handle scoping
@@ -344,12 +345,15 @@ const getFunctionParameters = (ast: AST, typeIdentifiers: TypeIdentifiers) => {
         throw new Error("All parameters must be typed");
       }
       const typeId = toIdentifier(expr[1] as string);
+      const label =
+        typeof expr[2] === "string" ? toIdentifier(expr[2]) : undefined;
       const type = mapBinaryenType(typeId, typeIdentifiers);
 
       prev.parameters.set(toIdentifier(expr[0] as string), {
         index,
         type,
         typeId,
+        label,
       });
       prev.types.push(type);
       return prev;
@@ -442,7 +446,14 @@ const getMatchingFn = ({
   return candidates.find((candidate) =>
     candidate.signature.parameters.every(({ typeId, label }, index) => {
       const arg = parameters[index];
-      return arg?.typeId === typeId && arg?.label === label;
+      // Until a more complex type system is implemented, assume that non-primitive types
+      // Can be treated as i32's. This is obviously dangerous. But a type checker should catch
+      // the bugs this could cause before we reach the code gen phase anyway.
+      return (
+        (arg?.typeId === typeId ||
+          (!isPrimitive(arg?.typeId) && typeId === CDT_ADDRESS_TYPE)) &&
+        arg?.label === label
+      );
     })
   );
 };
@@ -488,7 +499,7 @@ const genFunctionMap = (ast: AST, typeIdentifiers: TypeIdentifiers): FnMap => {
     }
 
     if (expr[0] === "define-cdt") {
-      typeIdentifiers.set(toIdentifier(expr[1] as string), "i32"); // CDTs are always i32s as that is used to represent their address.
+      typeIdentifiers.set(toIdentifier(expr[1] as string), CDT_ADDRESS_TYPE);
       return map;
     }
 
@@ -540,3 +551,6 @@ const mapBinaryenType = (
   }
   throw new Error(`Unsupported type ${typeIdentifier}`);
 };
+
+const isPrimitive = (type: string) =>
+  new Set(["i32", "f32", "i64", "f64"]).has(type);

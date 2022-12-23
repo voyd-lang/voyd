@@ -10,5 +10,5 @@ fn multiply(a:i32 by:b:i32) -> i32
 	a * b
 
 fn main() -> i32
-	let a:Pos = Pos { x: 23 y: c z: 3 }
+	let pos:Pos = Pos x: 23 y: 42 z: 5
 	pos.x
