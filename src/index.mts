@@ -39,3 +39,4 @@ const instance = new WebAssembly.Instance(compiled, {
 });
 
 console.log((instance.exports as any).main0());
+// console.error(new Uint32Array((instance.exports.buffer as any).buffer));

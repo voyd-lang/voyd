@@ -29,9 +29,9 @@ global scope and therefore must each have a unique identifier.
 ```lisp
 (define-function $identifier
   (parameters ($name $type-id $label?)*)
-  (variables ($variable $type-id)*)
+  (variables ($name $type-id)*)
   (return-type $type-id)
-  $expr)
+  $block)
 ```
 
 ### Examples
@@ -48,9 +48,10 @@ global scope and therefore must each have a unique identifier.
 
   (return-type i32)
 
-  (if (< n 2)
-    n
-    (+ (fib (- n 1))) (fib (- n 2))))
+  (block
+    (if (< n 2)
+      n
+      (+ (fib (- n 1))) (fib (- n 2)))))
 ```
 
 ## Define Extern Function

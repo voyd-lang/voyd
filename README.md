@@ -62,9 +62,10 @@ though. So feel free to play around.
 - [ ] Algebraic data types
 - [ ] Optionals
 - [ ] Algebraic effects
-- [ ] GC
-- [ ] Classes / Box structs
+- [ ] Reference Types (Boxes? / Mutable Borrows? / GC?)
 - [ ] Traits
+- [ ] Syntax Objects and Syntax Traits / Interfaces
+- [ ] Hygienic Macros
 - [ ] String literals 🚧
 - [ ] Struct literals 🚧
 - [ ] Tuple literals 🚧
