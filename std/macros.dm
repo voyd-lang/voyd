@@ -204,7 +204,7 @@ let struct-to-cdt = (name expr) =>
 		` $fn-name address $field-name
 
 	let initializer =
-		` fn $name($@initializer-params) -> $name
+		` fn $name($@initializer-params) -> (cdt-pointer $name $total-size)
 			let address:$name = alloc($total-size)
 			$@field-initializers
 			address

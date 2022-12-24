@@ -1,10 +1,10 @@
 import binaryen from "binaryen";
+import { CDT_ADDRESS_TYPE } from "./lib/index.mjs";
 import { isFloat } from "./lib/is-float.mjs";
 import { isList } from "./lib/is-list.mjs";
 import { toIdentifier } from "./lib/to-identifier.mjs";
 import { AST, Expr } from "./parser.mjs";
 
-const CDT_ADDRESS_TYPE = "i32";
 let mod: binaryen.Module | undefined = undefined;
 
 // TODO Handle scoping

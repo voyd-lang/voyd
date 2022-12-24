@@ -13,8 +13,10 @@ pub fn alloc(size:i32) -> i32
 	bnr (i32 store) (`(0) `(2) address size + header-size)
 	address
 
-pub fn copy(src:i32 dest:i32) -> void
+// Returns dest pointer
+pub fn copy(src:i32 dest:i32) -> i32
 	bnr (memory copy) (dest src src.size)
+	dest
 
 pub fn size(address:i32) -> i32
 	bnr (i32 load) (`(0) `(2) size-index + address)
