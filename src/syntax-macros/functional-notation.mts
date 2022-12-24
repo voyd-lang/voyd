@@ -1,7 +1,7 @@
 import { AST } from "../parser.mjs";
 
-export const functionalNotation = (ast: AST): AST => {
-  return ast
+export const functionalNotation = (ast: AST): AST =>
+  ast
     .slice(0)
     .map((expr, index, array) => {
       if (expr instanceof Array) return functionalNotation(expr);
@@ -15,4 +15,3 @@ export const functionalNotation = (ast: AST): AST => {
       return expr;
     })
     .filter((expr) => typeof expr !== undefined);
-};
