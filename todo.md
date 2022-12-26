@@ -24,6 +24,7 @@
 - Scoping. For macro expansion and compile time. Probably need a semantic analysis phase in general.
   Without this type-ids for structs are broken
 - Type inference
+- De-allocate allocated memory inside of blocks.
 - Cleanup pass
   - Make typing of variables, functions and parameters much more clear and consistent, both
     at the `define-function` header level and body level.
