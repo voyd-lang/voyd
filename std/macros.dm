@@ -89,8 +89,8 @@ pub macro fn(&body)
 
 	let return-type =
 		` return-type
-			$ if (type-arrow-index > -1)
-				extract(&body type-arrow-index + 1)
+			$@ if (type-arrow-index > -1)
+				&body.slice(type-arrow-index + 1 type-arrow-index + 2)
 				`()
 
 	let expressions = macro-expand
@@ -98,33 +98,17 @@ pub macro fn(&body)
 			&body.slice(type-arrow-index + 2)
 			&body.slice(1)
 
-	let extract-variables = (exprs) =>
-		exprs.reduce(`()) (vars expr) =>
-			if (is-list(expr))
-				if (extract(expr 0) == "define-mut" or extract(expr 0) == "define")
-					block
-						// For now, assume all vars are typed
-						let definition = extract(expr 1)
-						vars.push(#[extract(definition 1) extract(definition 2)])
-						vars.concat(expr.extract(2).extract-variables())
-					concat(vars extract-variables(expr))
-				vars
-
-	let variables = `(variables).concat(extract-variables(expressions))
-
 	` define-function
 		$identifier
 		$params
-		$variables
+		(variables) // Extracted in type system
 		$return-type
-		// TODO: Debug why I can't use this syntax here (its because I need to change the interpolation syntax, right now it just an s-expression style function call)
-		// $ #["block"].concat(expressions)
 		$(concat #["block"] expressions)
 
 pub macro def-wasm-operator(op wasm-fn arg-type return-type)
 	macro-expand
 		` fn $op(left:$arg-type right:$arg-type) -> $return-type
-			binaryen-mod ($arg-type $wasm-fn) (left right)
+			binaryen-mod ($arg-type $wasm-fn $return-type) (left right)
 
 // extern $fn-id(namespace params*)
 // extern max("Math" x:i32 y:i32)

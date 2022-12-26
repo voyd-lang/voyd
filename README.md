@@ -75,6 +75,7 @@ though. So feel free to play around.
 - [ ] WASM module function exports
 - [ ] Access control (public / private etc)
 - [x] Comments
+- [ ] First class functions
 - [ ] Scoping / (Namespacing?)
 - [ ] Syntax Highlighting
 - [ ] Language Sever Protocol

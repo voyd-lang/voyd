@@ -6,13 +6,13 @@ type Pos = {
 	z:i32
 }
 
-fn make-pos() -> Pos
-	let my:Pos = Pos x: 5 y: 4 z: 3
-	let my2:Pos = Pos x: 11 y: 24 z: 33
-	let my3:Pos = Pos x: 11 y: 24 z: 33
+fn make-pos()
+	let my = Pos x: 5 y: 4 z: 3
+	let my2 = Pos x: 11 y: 24 z: 33
+	let my3 = Pos x: 11 y: 24 z: 33
 	my
 
-fn main() -> i32
-	let pos:Pos = make-pos()
-	let pos2:Pos = Pos x: 98 y: 43 z: 32
+fn main()
+	let pos = make-pos()
+	let pos2 = Pos x: 98 y: 43 z: 32
 	pos.x

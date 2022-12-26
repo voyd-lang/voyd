@@ -297,7 +297,8 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
     return [];
   },
   array: (_, ...rest: AST[]) => rest,
-  slice: (_, array: AST, index: number) => array.slice(index),
+  slice: (_, array: AST, index: number, end?: number) =>
+    array.slice(index, end),
   extract: (_, list: AST, index: number) => list[index],
   map: ({ vars, macros }, array: AST, lambda: AST) => {
     return array.map((val, index, array) =>

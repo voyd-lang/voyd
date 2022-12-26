@@ -73,7 +73,7 @@
         ["export", "extern-fn", ["parameters", ["&body"]]],
         ["export", "match", ["parameters", ["&body"]]],
         ["export", "type", ["parameters", ["&body"]]],
-        ["block", 0],
+        ["typed-block", "i32", 0],
         [
           "lambda-expr",
           ["name", "expr"],
@@ -184,7 +184,7 @@
                   "fn",
                   ["$name", "$@initializer-params"],
                   "->",
-                  "$name",
+                  ["cdt-pointer", "$name", "$total-size"],
                   [
                     "define",
                     ["labeled-expr", "address", "$name"],
@@ -345,12 +345,13 @@
           ["variables", ["address", "i32"]],
           ["return-type", "i32"],
           [
-            "block",
+            "typed-block",
+            "i32",
             ["ensure-space", "size"],
             [
               "define",
               ["labeled-expr", "address", "i32"],
-              ["block", "stack-pointer"]
+              ["typed-block", "i32", "stack-pointer"]
             ],
             [
               "=",
@@ -359,7 +360,7 @@
             ],
             [
               "bnr",
-              ["i32", "store"],
+              ["i32", "store", "void"],
               [
                 ["quote", 0],
                 ["quote", 2],
@@ -376,10 +377,16 @@
           "copy",
           ["parameters", ["src", "i32"], ["dest", "i32"]],
           ["variables"],
-          ["return-type", "void"],
+          ["return-type", "i32"],
           [
-            "block",
-            ["bnr", ["memory", "copy"], ["dest", "src", ["size", "src"]]]
+            "typed-block",
+            "i32",
+            [
+              "bnr",
+              ["memory", "copy", "void"],
+              ["dest", "src", ["size", "src"]]
+            ],
+            "dest"
           ]
         ],
         ["export", "copy", ["parameters", ["src", "i32"], ["dest", "i32"]]],
@@ -390,10 +397,11 @@
           ["variables"],
           ["return-type", "i32"],
           [
-            "block",
+            "typed-block",
+            "i32",
             [
               "bnr",
-              ["i32", "load"],
+              ["i32", "load", "i32"],
               [
                 ["quote", 0],
                 ["quote", 2],
@@ -410,7 +418,8 @@
           ["variables"],
           ["return-type", "i32"],
           [
-            "block",
+            "typed-block",
+            "i32",
             [
               "=",
               "stack-pointer",
@@ -427,10 +436,11 @@
           ["variables"],
           ["return-type", "i32"],
           [
-            "block",
+            "typed-block",
+            "i32",
             [
               "bnr",
-              ["i32", "load"],
+              ["i32", "load", "i32"],
               [
                 ["quote", 0],
                 ["quote", 2],
@@ -456,10 +466,11 @@
           ["variables"],
           ["return-type", "void"],
           [
-            "block",
+            "typed-block",
+            "i32",
             [
               "bnr",
-              ["i32", "store"],
+              ["i32", "store", "i32"],
               [
                 ["quote", 0],
                 ["quote", 2],
@@ -486,11 +497,12 @@
           ["variables", ["mem-size", "i32"]],
           ["return-type", "i32"],
           [
-            "block",
+            "typed-block",
+            "i32",
             [
               "define",
               ["labeled-expr", "mem-size", "i32"],
-              ["bnr", ["memory", "size"]]
+              ["bnr", ["memory", "size", "i32"]]
             ],
             [
               "if",
@@ -499,7 +511,7 @@
                 ["+", ["+", "stack-pointer", "size"], "header-size"],
                 ["*", "mem-size", 65536]
               ],
-              ["bnr", ["memory", "grow"], [1]],
+              ["bnr", ["memory", "grow", "i32"], [1]],
               0
             ]
           ]
@@ -611,209 +623,301 @@
       [
         [
           "define-function",
-          "'<'",
+          "<",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "lt_s"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "lt_s", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'<'", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'>'",
+          ">",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "gt_s"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "gt_s", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'>'", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'<='",
+          "<=",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "le_s"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "le_s", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'<='", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'>='",
+          ">=",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "ge_s"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "ge_s", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'>='", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'=='",
+          "==",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "eq"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "eq", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'=='", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'and'",
+          "and",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "'and'"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "'and'", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'and'", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'or'",
+          "or",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "'or'"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "'or'", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'or'", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'xor'",
+          "xor",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "'xor'"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "'xor'", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'xor'", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'not'",
+          "not",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "ne"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "ne", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'not'", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'+'",
+          "+",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "add"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "add", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'+'", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'-'",
+          "-",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "sub"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "sub", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'-'", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'*'",
+          "*",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "mul"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "mul", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'*'", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'/'",
+          "/",
           ["parameters", ["left", "i32"], ["right", "i32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["i32", "div_s"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["i32", "div_s", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'/'", ["parameters", ["left", "i32"], ["right", "i32"]]],
         [
           "define-function",
-          "'<'",
+          "<",
           ["parameters", ["left", "f32"], ["right", "f32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["f32", "lt"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["f32", "lt", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'<'", ["parameters", ["left", "f32"], ["right", "f32"]]],
         [
           "define-function",
-          "'>'",
+          ">",
           ["parameters", ["left", "f32"], ["right", "f32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["f32", "gt"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["f32", "gt", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'>'", ["parameters", ["left", "f32"], ["right", "f32"]]],
         [
           "define-function",
-          "'<='",
+          "<=",
           ["parameters", ["left", "f32"], ["right", "f32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["f32", "le"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["f32", "le", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'<='", ["parameters", ["left", "f32"], ["right", "f32"]]],
         [
           "define-function",
-          "'>='",
+          ">=",
           ["parameters", ["left", "f32"], ["right", "f32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["f32", "ge"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["f32", "ge", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'>='", ["parameters", ["left", "f32"], ["right", "f32"]]],
         [
           "define-function",
-          "'=='",
+          "==",
           ["parameters", ["left", "f32"], ["right", "f32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["f32", "eq"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["f32", "eq", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'=='", ["parameters", ["left", "f32"], ["right", "f32"]]],
         [
           "define-function",
-          "'not'",
+          "not",
           ["parameters", ["left", "f32"], ["right", "f32"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["binaryen-mod", ["f32", "ne"], ["left", "right"]]]
+          [
+            "typed-block",
+            "i32",
+            ["binaryen-mod", ["f32", "ne", "i32"], ["left", "right"]]
+          ]
         ],
         ["export", "'not'", ["parameters", ["left", "f32"], ["right", "f32"]]],
         [
           "define-function",
-          "'+'",
+          "+",
           ["parameters", ["left", "f32"], ["right", "f32"]],
           ["variables"],
           ["return-type", "f32"],
-          ["block", ["binaryen-mod", ["f32", "add"], ["left", "right"]]]
+          [
+            "typed-block",
+            "f32",
+            ["binaryen-mod", ["f32", "add", "f32"], ["left", "right"]]
+          ]
         ],
         ["export", "'+'", ["parameters", ["left", "f32"], ["right", "f32"]]],
         [
           "define-function",
-          "'-'",
+          "-",
           ["parameters", ["left", "f32"], ["right", "f32"]],
           ["variables"],
           ["return-type", "f32"],
-          ["block", ["binaryen-mod", ["f32", "sub"], ["left", "right"]]]
+          [
+            "typed-block",
+            "f32",
+            ["binaryen-mod", ["f32", "sub", "f32"], ["left", "right"]]
+          ]
         ],
         ["export", "'-'", ["parameters", ["left", "f32"], ["right", "f32"]]],
         [
           "define-function",
-          "'*'",
+          "*",
           ["parameters", ["left", "f32"], ["right", "f32"]],
           ["variables"],
           ["return-type", "f32"],
-          ["block", ["binaryen-mod", ["f32", "mul"], ["left", "right"]]]
+          [
+            "typed-block",
+            "f32",
+            ["binaryen-mod", ["f32", "mul", "f32"], ["left", "right"]]
+          ]
         ],
         ["export", "'*'", ["parameters", ["left", "f32"], ["right", "f32"]]],
         [
           "define-function",
-          "'/'",
+          "/",
           ["parameters", ["left", "f32"], ["right", "f32"]],
           ["variables"],
           ["return-type", "f32"],
-          ["block", ["binaryen-mod", ["f32", "div"], ["left", "right"]]]
+          [
+            "typed-block",
+            "f32",
+            ["binaryen-mod", ["f32", "div", "f32"], ["left", "right"]]
+          ]
         ],
         ["export", "'/'", ["parameters", ["left", "f32"], ["right", "f32"]]]
       ]
@@ -834,15 +938,32 @@
             ["y", "i32", "y"],
             ["z", "i32", "z"]
           ],
-          ["variables", ["address", "Pos"]],
+          ["variables", ["address", "Pos"], ["*__return_alloc_address", "i32"]],
           ["return-type", "Pos"],
           [
-            "block",
-            ["define", ["labeled-expr", "address", "Pos"], ["alloc", 12]],
-            ["set-x", "address", "x"],
-            ["set-y", "address", "y"],
-            ["set-z", "address", "z"],
-            "address"
+            "typed-block",
+            "i32",
+            [
+              "define",
+              ["labeled-expr", "*__return_alloc_address", "i32"],
+              ["alloc", 12]
+            ],
+            [
+              "set-return",
+              [
+                "copy",
+                [
+                  "typed-block",
+                  "Pos",
+                  ["define", ["labeled-expr", "address", "Pos"], ["alloc", 12]],
+                  ["set-x", "address", "x"],
+                  ["set-y", "address", "y"],
+                  ["set-z", "address", "z"],
+                  "address"
+                ],
+                "*__return_alloc_address"
+              ]
+            ]
           ]
         ],
         [
@@ -851,7 +972,7 @@
           ["parameters", ["self", "Pos"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["read-i32", "self", 0]]
+          ["typed-block", "i32", ["read-i32", "self", 0]]
         ],
         [
           "define-function",
@@ -859,7 +980,7 @@
           ["parameters", ["self", "Pos"], ["value", "i32"]],
           ["variables"],
           ["return-type", "void"],
-          ["block", ["store-i32", "self", 0, "value"]]
+          ["typed-block", "void", ["store-i32", "self", 0, "value"]]
         ],
         [
           "define-function",
@@ -867,7 +988,7 @@
           ["parameters", ["self", "Pos"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["read-i32", "self", 4]]
+          ["typed-block", "i32", ["read-i32", "self", 4]]
         ],
         [
           "define-function",
@@ -875,7 +996,7 @@
           ["parameters", ["self", "Pos"], ["value", "i32"]],
           ["variables"],
           ["return-type", "void"],
-          ["block", ["store-i32", "self", 4, "value"]]
+          ["typed-block", "void", ["store-i32", "self", 4, "value"]]
         ],
         [
           "define-function",
@@ -883,7 +1004,7 @@
           ["parameters", ["self", "Pos"]],
           ["variables"],
           ["return-type", "i32"],
-          ["block", ["read-i32", "self", 8]]
+          ["typed-block", "i32", ["read-i32", "self", 8]]
         ],
         [
           "define-function",
@@ -891,32 +1012,90 @@
           ["parameters", ["self", "Pos"], ["value", "i32"]],
           ["variables"],
           ["return-type", "void"],
-          ["block", ["store-i32", "self", 8, "value"]]
+          ["typed-block", "void", ["store-i32", "self", 8, "value"]]
         ],
         [
           "define-function",
-          "multiply",
-          ["parameters", ["a", "i32"], ["b", "i32", "by"]],
-          ["variables"],
-          ["return-type", "i32"],
-          ["block", ["*", "a", "b"]]
+          "make-pos",
+          ["parameters"],
+          [
+            "variables",
+            ["my", "Pos"],
+            ["my2", "Pos"],
+            ["my3", "Pos"],
+            ["*__return_alloc_address", "i32"]
+          ],
+          ["return-type", "Pos"],
+          [
+            "typed-block",
+            "i32",
+            [
+              "define",
+              ["labeled-expr", "*__return_alloc_address", "i32"],
+              ["alloc", 12]
+            ],
+            [
+              "set-return",
+              [
+                "copy",
+                [
+                  "typed-block",
+                  "Pos",
+                  [
+                    "define",
+                    ["labeled-expr", "my", "Pos"],
+                    [
+                      "Pos",
+                      ["labeled-expr", "x", 5],
+                      ["labeled-expr", "y", 4],
+                      ["labeled-expr", "z", 3]
+                    ]
+                  ],
+                  [
+                    "define",
+                    ["labeled-expr", "my2", "Pos"],
+                    [
+                      "Pos",
+                      ["labeled-expr", "x", 11],
+                      ["labeled-expr", "y", 24],
+                      ["labeled-expr", "z", 33]
+                    ]
+                  ],
+                  [
+                    "define",
+                    ["labeled-expr", "my3", "Pos"],
+                    [
+                      "Pos",
+                      ["labeled-expr", "x", 11],
+                      ["labeled-expr", "y", 24],
+                      ["labeled-expr", "z", 33]
+                    ]
+                  ],
+                  "my"
+                ],
+                "*__return_alloc_address"
+              ]
+            ]
+          ]
         ],
         [
           "define-function",
           "main",
           ["parameters"],
-          ["variables", ["pos", "Pos"]],
+          ["variables", ["pos", "Pos"], ["pos2", "Pos"]],
           ["return-type", "i32"],
           [
-            "block",
+            "typed-block",
+            "i32",
+            ["define", ["labeled-expr", "pos", "Pos"], ["make-pos"]],
             [
               "define",
-              ["labeled-expr", "pos", "Pos"],
+              ["labeled-expr", "pos2", "Pos"],
               [
                 "Pos",
-                ["labeled-expr", "x", 23],
-                ["labeled-expr", "y", 42],
-                ["labeled-expr", "z", 5]
+                ["labeled-expr", "x", 98],
+                ["labeled-expr", "y", 43],
+                ["labeled-expr", "z", 32]
               ]
             ],
             ["x", "pos"]

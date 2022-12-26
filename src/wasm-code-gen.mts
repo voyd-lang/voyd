@@ -105,9 +105,9 @@ const compileList = (opts: CompileListOpts): number => {
   const { expr, mod } = opts;
 
   // TODO: Move bloc, root, and export to compileFunctionCall
-  if (expr[0] === "block") {
+  if (expr[0] === "typed-block") {
     const block = expr
-      .slice(1)
+      .slice(2)
       .map((expr) => compileExpression({ ...opts, expr }));
     return mod.block(null, block, binaryen.auto);
   }
@@ -466,7 +466,7 @@ const getExprReturnTypeId = (
   globals: GlobalMap
 ): string | undefined => {
   if (typeof expr === "number") return "i32";
-  if (typeof expr === "string" && expr.startsWith("/float")) return "f32";
+  if (isFloat(expr)) return "f32";
   if (typeof expr === "boolean") return "i32";
   if (typeof expr === "string" && expr === "void") return expr;
   if (typeof expr === "string") {
@@ -476,14 +476,8 @@ const getExprReturnTypeId = (
       globals.get(toIdentifier(expr))?.typeId
     );
   }
-  if (isList(expr) && expr[0] === "block") {
-    return getExprReturnTypeId(
-      expr[expr.length - 1]!,
-      fnMap,
-      paramMap,
-      varMap,
-      globals
-    );
+  if (isList(expr) && expr[0] === "typed-block") {
+    return expr[1] as string;
   }
   return getMatchingFnForCallExpr(expr, fnMap, paramMap, varMap, globals)
     ?.signature.returnTypeIds;

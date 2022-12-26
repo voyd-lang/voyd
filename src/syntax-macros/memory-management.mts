@@ -56,7 +56,8 @@ const addMemInstructionsToFunctionDef = (
   const returnAddressVarName = "*__return_alloc_address";
   variables.push([returnAddressVarName, CDT_ADDRESS_TYPE]);
   ast[5] = [
-    "block",
+    "typed-block",
+    CDT_ADDRESS_TYPE,
     [
       "define",
       ["labeled-expr", returnAddressVarName, CDT_ADDRESS_TYPE],

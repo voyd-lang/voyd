@@ -21,12 +21,16 @@
 - Rewrite reference manual.
 - Consider using the struct syntax to define named arguments. See
   `archived-reference/functions.md#NamedArguments` for inspiration.
+- Consider making `,` and ignored visual separator.
+- Consider allowing struct literals to be passed as the equivalent to labeled arguments (but maybe allow mismatched ordering?)
 - Scoping. For macro expansion and compile time. Probably need a semantic analysis phase in general.
   Without this type-ids for structs are broken
-- Type inference
 - De-allocate allocated memory inside of blocks.
 - Cleanup pass
   - Make typing of variables, functions and parameters much more clear and consistent, both
     at the `define-function` header level and body level.
   - Make spread of define-function, fn and lambda more consistent. They use a mix of either the last
     is a single expr, or a bunch of expressions
+- Reference Types (Boxes? / Mutable Borrows? / GC? / Ownership?)
+- Test sub tuple init and assignment
+- Copy CDTs on assignment

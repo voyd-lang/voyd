@@ -3,12 +3,20 @@
 This spec defines the lowest intermediate representation of Dream before it is converted into
 WASM / machine code.
 
-## Define
+## BNR
 
-`define` defines an immutable variable within a function
+Defines a call to a binaryen function
 
 ```lisp
-(define $identifier:String | $typed-identifier:TypedIdentifier $expr)
+(bnr ($namespace:String $function:String $return-type:String) ($args:Expr*))
+```
+
+## Define
+
+`define` defines an immutable variable within a function. Where identifier is a labeled expression where the label is the identifier name and the expr is it's type.
+
+```lisp
+(define $identifier:LabeledExpr $expr)
 ```
 
 ## Define CDT
@@ -31,7 +39,7 @@ global scope and therefore must each have a unique identifier.
   (parameters ($name $type-id $label?)*)
   (variables ($name $type-id)*)
   (return-type $type-id)
-  $block)
+  $block:TypedBlock)
 ```
 
 ### Examples
@@ -48,7 +56,7 @@ global scope and therefore must each have a unique identifier.
 
   (return-type i32)
 
-  (block
+  (typed-block i32
     (if (< n 2)
       n
       (+ (fib (- n 1))) (fib (- n 2)))))
@@ -187,4 +195,12 @@ Type: Root
 
 ```lisp
 (root $module-id:String $modules:Module*)
+```
+
+## Typed Block
+
+A standard block with return type annotations
+
+```lisp
+(typed-block $return-type:String $expr:Expr*)
 ```
