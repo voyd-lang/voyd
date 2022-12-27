@@ -64,19 +64,28 @@ pub macro '=>'(&body)
 
 // Extracts typed parameters from a list where index 0 is fn name, and offset-index+ are typed parameters
 let extract-parameters = (definitions) =>
-	`(parameters).concat
-		definitions.slice(1).map (expr) =>
-			let is-labeled = is-list(expr.extract(2))
-			let param-definition = if is-labeled
-				expr.extract(2)
-				expr
+	if definitions.extract(0) == "struct" // Struct parameter shorthand (fn example { a:i32, b:i32, c:i32 })
+		` parameters $definitions
+		`(parameters).concat
+			definitions.slice(1).map(labeled-expr-to-param)
 
+let labeled-expr-to-param = (expr) =>
+	let is-labeled = (expr.extract(0) == "labeled-expr") and is-list(expr.extract(2))
+	let param-definition = if is-labeled
+		expr.extract(2)
+		expr
+
+	let param = if param-definition.extract(0) == "struct"
+		` $param-definition // Struct literal parameters are handled by the memory allocator
+		block
 			let param-identifier = param-definition.extract(1)
 			let type = param-definition.extract(2)
-			let param = ` $param-identifier $type
-			if is-labeled
-				param.push(expr.extract(1))
-			param
+			` $param-identifier $type
+
+	if is-labeled
+		param.push(expr.extract(1))
+
+	param
 
 pub macro fn(&body)
 	let definitions = extract(&body 0)
@@ -161,7 +170,7 @@ pub macro type(&body)
 
 var cdt-type-id = 0
 
-// Takes (struct $typed-parameter*), returns (define-cdt $name $type-id:i32 $size:i32) + field accessor functions
+// Takes (struct $labeled-expr*), returns (define-cdt $name $type-id:i32 $size:i32) + field accessor functions
 let struct-to-cdt = (name expr) =>
 	let fields = expr.slice(1)
 	cdt-type-id = cdt-type-id + 1
@@ -176,19 +185,13 @@ let struct-to-cdt = (name expr) =>
 		let next-size = param.get-size
 		next-size + size
 
-	let initializer-params = fields.reduce(`()) (params field) =>
-		let name = field.extract(1)
-		let type = field.extract(2)
-		params.push(`(labeled-expr $name (labeled-expr $name $type)))
-		params
-
 	let field-initializers = fields.map (field) =>
 		let field-name = field.extract(1)
 		let fn-name = "set-" + field-name
 		` $fn-name address $field-name
 
 	let initializer =
-		` fn $name($@initializer-params) -> (cdt-pointer $name $total-size)
+		` fn $name($expr) -> (cdt-pointer $name $total-size)
 			let address:$name = alloc($total-size)
 			$@field-initializers
 			address
