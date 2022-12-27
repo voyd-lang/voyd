@@ -49,6 +49,7 @@ though. So feel free to play around.
 - [x] WASM code generation
 - [x] Function overloading
 - [x] Booleans
+- [ ] Tuple and Struct destructuring
 - [ ] Tail recursion
 - [ ] Generics
 - [ ] Modules 🚧

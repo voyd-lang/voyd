@@ -21,8 +21,6 @@
 - Rewrite reference manual.
 - Consider using the struct syntax to define named arguments. See
   `archived-reference/functions.md#NamedArguments` for inspiration.
-- Consider making `,` and ignored visual separator.
-- Consider allowing struct literals to be passed as the equivalent to labeled arguments (but maybe allow mismatched ordering?)
 - Scoping. For macro expansion and compile time. Probably need a semantic analysis phase in general.
   Without this type-ids for structs are broken
 - De-allocate allocated memory inside of blocks.
@@ -34,3 +32,6 @@
 - Reference Types (Boxes? / Mutable Borrows? / GC? / Ownership?)
 - Test sub tuple init and assignment
 - Copy CDTs on assignment
+- Anonymous struct literals
+- Erlang like atoms for to facilitate optionals and other union data types that may not need associated data.
+- Optional parameters and default parameter values.
