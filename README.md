@@ -48,14 +48,14 @@ though. So feel free to play around.
 - [x] If statements
 - [x] WASM code generation
 - [x] Function overloading
-- [ ] Booleans
+- [x] Booleans
 - [ ] Tail recursion
 - [ ] Generics
 - [ ] Modules 🚧
 - [ ] Std library 🚧
 - [ ] Test framework
 - [ ] Type checking
-- [ ] Type inference
+- [x] Type inference
 - [ ] Safety semantics (unsafe, ownership etc)
 - [ ] Match statements
 - [ ] Loops
