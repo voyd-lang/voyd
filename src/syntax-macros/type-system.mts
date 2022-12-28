@@ -17,14 +17,15 @@ type TypeInfo = {
 
 type FnMap = Map<string, Fn[]>;
 type Fn = {
-  /** returns and parameters are the type identifier */
-  params: { type: string; label?: string }[];
-  returnType?: string;
+  params: Param[];
+  returnType?: Expr;
 };
+
+type Param = { type: Expr; label?: string };
 
 type VarMap = Map<string, Variable>;
 type Variable = {
-  type: string;
+  type: Expr;
   /** Label is used for parameter definitions where the caller must pass the label. */
   label?: string;
   /** Defaults to false if undefined */
@@ -50,62 +51,96 @@ const addTypeAnnotationsToExpr = (expr: Expr, types: TypeInfo): Expr => {
 const addTypeAnnotationsToFn = (ast: AST, types: TypeInfo): AST => {
   const identifier = toIdentifier(ast[1] as string);
   const suppliedReturnType = getSuppliedReturnTypeForFn(ast);
+
   const scopedTypes: TypeInfo = {
     ...types,
     vars: new Map(),
     params: new Map(),
   };
-  addFnParams(ast[2] as AST, scopedTypes);
+
+  const rawParameters = ast[2] as AST;
+  const parameters = registerFnParams(rawParameters, scopedTypes);
+
   const fn = getMatchingFn({
     identifier,
-    params: [...scopedTypes.params.values()],
+    args: rawParameters.slice(1).map((expr) => {
+      if (isStruct(expr)) {
+        return { type: expr };
+      }
+
+      return getInfoFromRawParam(expr as AST);
+    }),
     fns: types.fns,
   });
+
   if (!fn) {
     throw new Error(`Could not find matching function for ${identifier}`);
   }
+
   const typedBlock = addTypeAnnotationsToExpr(ast[5], scopedTypes);
   if (!isList(typedBlock) || typedBlock[0] !== "typed-block") {
     throw new Error("Expected typed-block");
   }
-  const inferredReturnType = typedBlock[1] as string;
-  if (!suppliedMatchesInferredType(suppliedReturnType, inferredReturnType)) {
-    throw new Error(
-      `Expected fn ${identifier} to return ${suppliedReturnType}, got ${inferredReturnType}`
-    );
-  }
+
+  const inferredReturnType = assertFunctionReturnType(
+    typedBlock,
+    suppliedReturnType,
+    identifier
+  );
+
   fn.returnType = suppliedReturnType ?? inferredReturnType;
-  const variables: [string, string][] = [...scopedTypes.vars].map(
+  const variables: [string, Expr][] = [...scopedTypes.vars].map(
     ([id, { type }]) => [id, type]
   );
 
   return [
     "define-function",
     identifier,
-    ast[2],
+    parameters,
     ["variables", ...variables],
     ["return-type", fn.returnType!],
     typedBlock,
   ];
 };
 
-/** For now, all params are assumed to be manually typed */
-const addFnParams = (ast: AST, types: TypeInfo) => {
+/**
+ * For now, all params are assumed to be manually typed.
+ * Returns the updated list of parameters
+ */
+const registerFnParams = (ast: AST, types: TypeInfo): AST => {
   if (ast[0] !== "parameters") {
     throw new Error("Expected function parameters");
   }
 
-  for (const expr of ast.slice(1)) {
-    if (!isList(expr)) {
-      throw new Error("All parameters must be typed");
-    }
+  return [
+    "parameters",
+    ...ast.slice(1).flatMap((expr): Expr => {
+      if (!isList(expr)) {
+        throw new Error("All parameters must be typed");
+      }
 
-    const identifier = toIdentifier(expr[0] as string);
-    const type = toIdentifier(expr[1] as string);
-    const label =
-      typeof expr[2] === "string" ? toIdentifier(expr[2]) : undefined;
-    types.params.set(identifier, { type, label });
-  }
+      if (isStruct(expr)) {
+        return expr.slice(1).map(registerStructParamField(types));
+      }
+
+      const { identifier, type, label } = getInfoFromRawParam(expr);
+      types.params.set(identifier!, { type, label });
+      return [[identifier!, type]];
+    }),
+  ];
+};
+
+const registerStructParamField = (
+  types: TypeInfo
+): ((value: Expr, index: number, array: Expr[]) => Expr) => {
+  return (exp) => {
+    if (!isList(exp)) {
+      throw new Error("All struct parameters must be typed");
+    }
+    const { identifier, type, label } = getInfoFromRawParam(exp);
+    types.params.set(identifier!, { type, label });
+    return [identifier!, type];
+  };
 };
 
 const addTypeAnnotationsToBlock = (ast: AST, types: TypeInfo): AST => {
@@ -158,12 +193,14 @@ const addTypeAnnotationToVar = (ast: AST, types: TypeInfo): AST => {
   const annotatedInitializer = addTypeAnnotationsToExpr(ast[2], types);
   const inferredType = getExprReturnType(annotatedInitializer, types);
   const suppliedType = isList(ast[1])
-    ? toIdentifier(ast[1][2] as string)
+    ? typeof ast[1][2] === "string"
+      ? toIdentifier(ast[1][2])
+      : ast[1][2]
     : undefined;
   const identifier = isList(ast[1])
     ? toIdentifier(ast[1][1] as string)
     : toIdentifier(ast[1] as string);
-  if (!suppliedMatchesInferredType(suppliedType, inferredType)) {
+  if (suppliedType && !typesMatch(suppliedType, inferredType)) {
     throw new Error(
       `${identifier} of type ${suppliedType} is not assignable to ${inferredType}`
     );
@@ -180,7 +217,7 @@ const addTypeAnnotationToVar = (ast: AST, types: TypeInfo): AST => {
   return [ast[0], ["labeled-expr", identifier, type], annotatedInitializer];
 };
 
-const getExprReturnType = (expr: Expr, types: TypeInfo): string | undefined => {
+const getExprReturnType = (expr: Expr, types: TypeInfo): Expr | undefined => {
   const { params, vars, globals } = types;
   if (typeof expr === "number") return "i32";
   if (isFloat(expr)) return "f32";
@@ -199,6 +236,9 @@ const getExprReturnType = (expr: Expr, types: TypeInfo): string | undefined => {
   if (expr[0] === "typed-block") {
     return expr[1] as string;
   }
+  if (expr[0] === "struct") {
+    return getStructLiteralType(expr, types);
+  }
   if (expr[0] === "bnr" || expr[0] === "binaryen-mod") {
     return getBnrReturnType(expr);
   }
@@ -209,7 +249,20 @@ const getExprReturnType = (expr: Expr, types: TypeInfo): string | undefined => {
   return getMatchingFnForCallExpr(expr, types)?.returnType;
 };
 
-const getIfReturnType = (ast: AST, types: TypeInfo): string | undefined => {
+/** Takes the expression form of a struct and converts it into type form */
+const getStructLiteralType = (ast: AST, types: TypeInfo): AST => [
+  "struct",
+  ...ast.slice(1).map((labeledExpr) => {
+    const identifier = toIdentifier((labeledExpr as AST)[1] as string);
+    const type = getExprReturnType((labeledExpr as AST)[2], types);
+    if (!type) {
+      throw new Error("Could not determine type for struct literal");
+    }
+    return ["labeled-expr", identifier, type];
+  }),
+];
+
+const getIfReturnType = (ast: AST, types: TypeInfo): Expr | undefined => {
   // TODO type check this mofo
   return getExprReturnType(ast[2], types);
 };
@@ -224,40 +277,59 @@ const getMatchingFnForCallExpr = (
   types: TypeInfo
 ): Fn | undefined => {
   const identifier = toIdentifier(call[0] as string);
-  const parameters = call.slice(1).map((expr) => ({
-    type: getExprReturnType(expr, types) as string,
+  const args = call.slice(1).map((expr) => ({
+    type: getExprReturnType(expr, types)!,
     label:
       isList(expr) && expr[0] === "labeled-expr"
         ? (expr[1] as string)
         : undefined,
   }));
 
-  return getMatchingFn({ identifier, params: parameters, fns: types.fns });
+  return getMatchingFn({ identifier, args, fns: types.fns });
 };
 
 const getMatchingFn = ({
   identifier,
-  params,
+  args,
   fns,
 }: {
   identifier: string;
-  params: { type: string; label?: string }[];
+  args: Param[];
   fns: FnMap;
 }): Fn | undefined => {
   const candidates = fns.get(identifier);
   if (!candidates) return undefined;
   return candidates.find((candidate) =>
     candidate.params.every(({ type, label }, index) => {
-      const arg = params[index];
-      // Until a more complex type system is implemented, assume that non-primitive types
-      // Can be treated as i32's. This is obviously dangerous. But a type checker should catch
-      // the bugs this could cause before we reach the code gen phase anyway.
-      return (
-        (arg?.type === type ||
-          (!isPrimitiveType(arg?.type) && type === CDT_ADDRESS_TYPE)) &&
-        arg?.label === label
-      );
+      const arg = args[index];
+      return typesMatch(type, arg?.type) && arg?.label === label;
     })
+  );
+};
+
+const typesMatch = (expected?: Expr, given?: Expr) => {
+  if (isList(expected) && isList(given)) {
+    return structArgsMatch(expected, given);
+  }
+
+  return expected === given || isStructPointerMatch(expected, given);
+};
+
+// Until a more complex type system is implemented, assume that non-primitive types
+// Can be treated as i32's. This is obviously dangerous. But a type checker should catch
+// the bugs this could cause before we reach the code gen phase anyway.
+const isStructPointerMatch = (expected?: Expr, given?: Expr) =>
+  (!isPrimitiveType(expected) && given === CDT_ADDRESS_TYPE) ||
+  (!isPrimitiveType(given) && expected === CDT_ADDRESS_TYPE);
+
+const structArgsMatch = (expected: AST, given: AST): boolean => {
+  return (
+    expected.length === given.length &&
+    expected
+      .slice(1)
+      .every((fieldType) =>
+        given.slice(1).some((argType) => typesMatch(fieldType, argType))
+      )
   );
 };
 
@@ -271,11 +343,18 @@ const genFunctionMap = (ast: AST): FnMap => {
 
     const fnIdentifier = toIdentifier(expr[1] as string);
     const fnArray: Fn[] = map.get(fnIdentifier) ?? [];
-    const returns = getSuppliedReturnTypeForFn(ast);
+    const returns = getSuppliedReturnTypeForFn(expr);
     const parametersIndex = expr[0] === "define-function" ? 2 : 3;
-    const params = (expr[parametersIndex] as string[][])
+    const params: Param[] = (expr[parametersIndex] as Expr[][])
       .slice(1)
-      .map((arr) => ({ type: toIdentifier(arr[1]), label: arr[2] }));
+      .map((arr) => {
+        if (isStruct(arr)) {
+          return { type: arr };
+        }
+
+        return getInfoFromRawParam(arr);
+      });
+
     map.set(fnIdentifier, [
       ...fnArray,
       {
@@ -287,7 +366,7 @@ const genFunctionMap = (ast: AST): FnMap => {
   }, new Map());
 };
 
-const getSuppliedReturnTypeForFn = (ast: AST): string | undefined => {
+const getSuppliedReturnTypeForFn = (ast: AST): Expr | undefined => {
   const returnDef = (ast[4] as AST)[1];
   // TODO: Support type literals
   return typeof returnDef === "string"
@@ -297,15 +376,37 @@ const getSuppliedReturnTypeForFn = (ast: AST): string | undefined => {
     : undefined;
 };
 
-const suppliedMatchesInferredType = (
-  suppliedType: string | undefined,
-  inferredType: string | undefined
-) =>
-  !(
-    suppliedType &&
-    suppliedType !== "void" &&
-    inferredType &&
-    inferredType !== suppliedType &&
-    // This is a temp hack for checking memory allocation, where the supplied type is a CDT and the inferred type is CDT_ADDRESS_TYPE
-    !(!isPrimitiveType(suppliedType) && inferredType === CDT_ADDRESS_TYPE)
-  );
+function assertFunctionReturnType(
+  typedBlock: AST,
+  suppliedReturnType: Expr | undefined,
+  identifier: string
+) {
+  const inferredReturnType = typedBlock[1] as string;
+  const shouldCheckInferredType =
+    suppliedReturnType && suppliedReturnType !== "void";
+  const typeMismatch =
+    shouldCheckInferredType &&
+    !typesMatch(suppliedReturnType, inferredReturnType);
+
+  if (typeMismatch) {
+    throw new Error(
+      `Expected fn ${identifier} to return ${suppliedReturnType}, got ${inferredReturnType}`
+    );
+  }
+  return inferredReturnType;
+}
+
+const getInfoFromRawParam = (ast: AST) => {
+  const isLabeled = !isStruct(ast) && isList(ast[2]);
+  const paramDef: AST = isLabeled ? (ast[2] as AST) : ast;
+  const identifier =
+    typeof paramDef[1] === "string"
+      ? toIdentifier(paramDef[1] as string)
+      : undefined;
+  const type =
+    typeof paramDef[2] === "string" ? toIdentifier(paramDef[2]) : paramDef[2];
+  const label = isLabeled ? toIdentifier(ast[1] as string) : undefined;
+  return { identifier, type, label };
+};
+
+const isStruct = (expr?: Expr) => isList(expr) && expr[0] === "struct";

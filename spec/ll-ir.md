@@ -36,7 +36,7 @@ global scope and therefore must each have a unique identifier.
 
 ```lisp
 (define-function $identifier
-  (parameters ($name $type-id $label?)*)
+  (parameters ($name $type-id)*)
   (variables ($name $type-id)*)
   (return-type $type-id)
   $block:TypedBlock)
@@ -69,7 +69,7 @@ Defines an external function that has been imported into the module via WASM imp
 ```lisp
 (define-extern-function $identifier
   (namespace $name) // TODO: Move to bottom of list for implementation simplicity.
-  (parameters ($name $type-id $label?)*)
+  (parameters ($name $type-id)*)
   (return-type $type-id))
 ```
 

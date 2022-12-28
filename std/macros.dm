@@ -62,30 +62,9 @@ pub macro '=>'(&body)
 	macro-expand;
 		` lambda $@&body
 
-// Extracts typed parameters from a list where index 0 is fn name, and offset-index+ are typed parameters
+// Extracts typed parameters from a list where index 0 is fn name, and offset-index+ are labeled-expr
 let extract-parameters = (definitions) =>
-	if definitions.extract(0) == "struct" // Struct parameter shorthand (fn example { a:i32, b:i32, c:i32 })
-		` parameters $definitions
-		`(parameters).concat
-			definitions.slice(1).map(labeled-expr-to-param)
-
-let labeled-expr-to-param = (expr) =>
-	let is-labeled = (expr.extract(0) == "labeled-expr") and is-list(expr.extract(2))
-	let param-definition = if is-labeled
-		expr.extract(2)
-		expr
-
-	let param = if param-definition.extract(0) == "struct"
-		` $param-definition // Struct literal parameters are handled by the memory allocator
-		block
-			let param-identifier = param-definition.extract(1)
-			let type = param-definition.extract(2)
-			` $param-identifier $type
-
-	if is-labeled
-		param.push(expr.extract(1))
-
-	param
+	`(parameters).concat definitions.slice(1)
 
 pub macro fn(&body)
 	let definitions = extract(&body 0)

@@ -35,3 +35,7 @@
 - Anonymous struct literals
 - Erlang like atoms for to facilitate optionals and other union data types that may not need associated data.
 - Optional parameters and default parameter values.
+- Move function selection entirely to type system.
+  - Make type system remove labels from parameters on call and definition sites.
+  - Transform struct parameters on call and definition to normal parameters
+- Pre type system phase IR spec.
