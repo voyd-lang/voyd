@@ -166,18 +166,57 @@ const addTypeAnnotationsToFnCall = (ast: AST, types: TypeInfo): AST => {
   if (ast[0] === "block") return addTypeAnnotationsToBlock(ast, types);
   if (ast[0] === "lambda-expr") return ast;
   if (ast[0] === "quote") return ast;
+  if (ast[0] === "export") return ast; // TODO
+  if (ast[0] === "=") return ast; // TODO
   if (ast[0] === "root") return addTypeAnnotationToRoot(ast, types);
   if (ast[0] === "module") return addTypeAnnotationToModule(ast, types);
   if (ast[0] === "bnr" || ast[0] === "binaryen-mod") return ast;
   if (typeof ast[0] === "string" && ast[0].startsWith("define")) {
     return addTypeAnnotationToVar(ast, types);
   }
+  if (isPrimitiveFn(ast[0])) {
+    return addTypeAnnotationsToPrimitiveFn(ast, types);
+  }
 
+  return addTypeAnnotationToUserFnCall(ast, types);
+};
+
+const addTypeAnnotationsToPrimitiveFn = (ast: AST, types: TypeInfo): AST => {
   const annotatedArgs = ast
     .slice(1)
     .map((expr) => addTypeAnnotationsToExpr(expr, types));
   return [ast[0], ...annotatedArgs];
 };
+
+function addTypeAnnotationToUserFnCall(ast: AST, types: TypeInfo) {
+  const fn = getMatchingFnForCallExpr(ast, types);
+  if (!fn) {
+    console.error(JSON.stringify(ast, undefined, 2));
+    throw new Error("Could not find matching fn for above call expression");
+  }
+
+  const annotatedArgs = ast.slice(1).flatMap((expr, index) => {
+    if (isStruct(expr)) {
+      return applyStructParams(fn.params[index].type as AST, expr as AST);
+    }
+
+    return [addTypeAnnotationsToExpr(expr, types)];
+  });
+
+  return [ast[0], ...annotatedArgs];
+}
+
+/** Re-orders the supplied struct and returns it as a normal list of expressions to be passed as args */
+const applyStructParams = (expectedStruct: AST, suppliedStruct: AST): AST =>
+  expectedStruct.slice(1).map((expr) => {
+    const labeledExpr = expr as AST;
+    const label = labeledExpr[1];
+    const arg = suppliedStruct
+      .slice(1)
+      .find((expr) => (expr as AST)[1] === label) as AST;
+    if (!arg) throw new Error(`Could not find arg for field ${label}`);
+    return arg[2];
+  });
 
 const addTypeAnnotationToRoot = (ast: AST, types: TypeInfo): AST =>
   ast.map((expr) => addTypeAnnotationsToExpr(expr, types));
@@ -190,8 +229,8 @@ const addTypeAnnotationToModule = (ast: AST, types: TypeInfo): AST => {
 const addTypeAnnotationToVar = (ast: AST, types: TypeInfo): AST => {
   const mutable = ast[0] === "define-mut";
   const global = typeof ast[0] === "string" && ast[0].includes("global");
+  const inferredType = getExprReturnType(ast[2], types);
   const annotatedInitializer = addTypeAnnotationsToExpr(ast[2], types);
-  const inferredType = getExprReturnType(annotatedInitializer, types);
   const suppliedType = isList(ast[1])
     ? typeof ast[1][2] === "string"
       ? toIdentifier(ast[1][2])
@@ -233,8 +272,11 @@ const getExprReturnType = (expr: Expr, types: TypeInfo): Expr | undefined => {
   if (!isList(expr)) {
     throw new Error(`Invalid expression ${expr}`);
   }
-  if (expr[0] === "typed-block") {
-    return expr[1] as string;
+  if (expr[0] === "labeled-expr") {
+    return getExprReturnType(expr[2], types);
+  }
+  if (expr[0] === "block") {
+    return getExprReturnType(expr[expr.length - 1], types);
   }
   if (expr[0] === "struct") {
     return getStructLiteralType(expr, types);
@@ -246,7 +288,8 @@ const getExprReturnType = (expr: Expr, types: TypeInfo): Expr | undefined => {
     return getIfReturnType(expr, types);
   }
 
-  return getMatchingFnForCallExpr(expr, types)?.returnType;
+  const fn = getMatchingFnForCallExpr(expr, types);
+  return fn?.returnType;
 };
 
 /** Takes the expression form of a struct and converts it into type form */
@@ -308,8 +351,8 @@ const getMatchingFn = ({
 };
 
 const typesMatch = (expected?: Expr, given?: Expr) => {
-  if (isList(expected) && isList(given)) {
-    return structArgsMatch(expected, given);
+  if (isStruct(expected) && isStruct(given)) {
+    return structArgsMatch(expected as AST, given as AST);
   }
 
   return expected === given || isStructPointerMatch(expected, given);
@@ -325,11 +368,14 @@ const isStructPointerMatch = (expected?: Expr, given?: Expr) =>
 const structArgsMatch = (expected: AST, given: AST): boolean => {
   return (
     expected.length === given.length &&
-    expected
-      .slice(1)
-      .every((fieldType) =>
-        given.slice(1).some((argType) => typesMatch(fieldType, argType))
-      )
+    expected.slice(1).every((fieldTypeAst) =>
+      given.slice(1).some((argTypeAst) => {
+        // Both fieldTypeAst and argTypeAst should be labeled-exprs
+        const fieldType = (fieldTypeAst as AST)[2];
+        const argType = (argTypeAst as AST)[2];
+        return typesMatch(fieldType, argType);
+      })
+    )
   );
 };
 
@@ -410,3 +456,7 @@ const getInfoFromRawParam = (ast: AST) => {
 };
 
 const isStruct = (expr?: Expr) => isList(expr) && expr[0] === "struct";
+const isPrimitiveFn = (expr?: Expr) => {
+  if (typeof expr !== "string") return false;
+  return new Set(["if", "="]).has(expr);
+};

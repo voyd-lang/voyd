@@ -35,7 +35,13 @@
 - Anonymous struct literals
 - Erlang like atoms for to facilitate optionals and other union data types that may not need associated data.
 - Optional parameters and default parameter values.
-- Move function selection entirely to type system.
-  - Make type system remove labels from parameters on call and definition sites.
-  - Transform struct parameters on call and definition to normal parameters
+- Simplify function selection for code gen phase
+  - Make type system remove labels from parameters on call and definition sites. (In type system)
+  - Create new ID's for functions with multiple overloads (In type system)
+  - Transform struct / match parameters on call and definition to normal parameters. (In type system)
+  - Remove label matching from code gen.
 - Pre type system phase IR spec.
+- Fix parameter outputs for exports and extern-functions
+- Fix issue marked with the comment `// TODO: This doesn't work when expr is a labeled-expr`
+- Create an actual list type that extends Array and allows us to attach metadata. Use in place of AST.
+-
