@@ -1,18 +1,27 @@
 import { ModuleInfo } from "./lib/module-info.mjs";
-import { List } from "./lib/syntax.mjs";
+import { Identifier, List, Syntax, Whitespace } from "./lib/syntax.mjs";
 import { Token } from "./lib/token.mjs";
 import { File } from "./lib/file.mjs";
 import { getReaderMacroForToken } from "./reader-macros/index.mjs";
-import { newIdentifier, newList, newToken } from "./lib/index.mjs";
 
 export interface ParseOpts {
   nested?: boolean;
   terminator?: string;
   module: ModuleInfo;
+  parent?: Syntax;
 }
 
 export function parse(file: File, opts: ParseOpts): List {
-  const list = newList(file);
+  const list = new List({
+    location: {
+      startIndex: file.position,
+      endIndex: 0,
+      line: file.line,
+      column: file.column,
+      filePath: file.filePath,
+    },
+    parent: opts.parent,
+  });
 
   while (file.hasCharacters) {
     const token = lexer(file);
@@ -23,8 +32,13 @@ export function parse(file: File, opts: ParseOpts): List {
       const result = readerMacro(file, {
         token,
         module: opts.module,
-        reader: (file, terminator) =>
-          parse(file, { nested: true, terminator, module: opts.module }),
+        reader: (file, terminator, parent) =>
+          parse(file, {
+            nested: true,
+            terminator,
+            module: opts.module,
+            parent: parent ?? opts.parent,
+          }),
       });
       if (typeof result !== "undefined") list.push(result);
       continue;
@@ -40,7 +54,21 @@ export function parse(file: File, opts: ParseOpts): List {
       continue;
     }
 
-    list.push(newIdentifier(token));
+    if (token.isWhitespace) {
+      list.push(
+        new Whitespace({
+          value: token.value,
+          location: token.location,
+        })
+      );
+    }
+
+    list.push(
+      new Identifier({
+        value: token.value,
+        location: token.location,
+      })
+    );
   }
 
   list.location!.endIndex = file.position;
@@ -48,7 +76,13 @@ export function parse(file: File, opts: ParseOpts): List {
 }
 
 const lexer = (file: File): Token => {
-  const token = newToken("", file);
+  const token = new Token({
+    line: file.line,
+    column: file.column,
+    startIndex: file.position,
+    endIndex: 0,
+    filePath: file.filePath,
+  });
 
   while (file.hasCharacters) {
     const char = file.next;

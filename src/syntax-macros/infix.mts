@@ -1,5 +1,10 @@
-import { isList } from "../lib/is-list.mjs";
-import { AST, Expr } from "../parser.mjs";
+import {
+  Expr,
+  Identifier,
+  isIdentifier,
+  isList,
+  List,
+} from "../lib/syntax.mjs";
 import { greedyOps } from "./greedy-ops.mjs";
 
 export type Associativity = "left" | "right";
@@ -38,33 +43,33 @@ export const isContinuationOp = (op: string) =>
 
 export const isInfixOp = (op: string) => infixOperators.has(op);
 
-export const infix = (ast: AST, start: AST = []): AST => {
-  const outputQueue: AST = [...start];
-  const operatorQueue: string[] = [];
+export const infix = (list: List, startList?: List): List => {
+  const outputQueue = startList ?? new List({ context: list });
+  const operatorQueue: Identifier[] = [];
 
-  const opQueueHasHigherOp = (op1: string) => {
+  const opQueueHasHigherOp = (op1: Identifier) => {
     const op2 = operatorQueue.at(-1);
     if (!op2) return false;
-    const [op1Precedence, op1Associativity] = infixOperators.get(op1)!;
-    const [op2Precedence] = infixOperators.get(op2)!;
+    const [op1Precedence, op1Associativity] = infixOperators.get(op1.value)!;
+    const [op2Precedence] = infixOperators.get(op2.value)!;
     return (
       op2Precedence > op1Precedence ||
       (op2Precedence === op1Precedence && op1Associativity === "left")
     );
   };
 
-  const pushOut = (val: AST) => {
-    if (!outputQueue.length && !isOperand(ast[0])) {
-      outputQueue.push(...val);
+  const pushOut = (value: Expr[]) => {
+    if (!outputQueue.hasChildren && !isOperand(list.first())) {
+      outputQueue.push(...value);
       return;
     }
 
-    outputQueue.push(val);
+    outputQueue.push(new List({ value }));
   };
 
   const pushDot = (operand1: Expr, operand2: Expr) => {
-    if (operand2 instanceof Array) {
-      pushOut([operand2[0], operand1, ...operand2.slice(1)]);
+    if (isList(operand2)) {
+      pushOut([operand2.consume(), operand1, ...operand2.value]);
       return;
     }
 
@@ -72,37 +77,35 @@ export const infix = (ast: AST, start: AST = []): AST => {
   };
 
   const applyLastOperator = () => {
-    const b = outputQueue.pop()!; // TODO: Error handling
+    const b = outputQueue.pop()!;
     const a = outputQueue.pop()!;
     const op = operatorQueue.pop()!;
-    if (op === ".") return pushDot(a, b);
+    if (op.is(".")) return pushDot(a, b);
     pushOut([op, a, b]);
   };
 
-  while (ast.length) {
-    const expr = ast[0];
+  while (list.hasChildren) {
+    const expr = list.consume();
     if (isOperand(expr)) {
       while (opQueueHasHigherOp(expr)) {
         applyLastOperator();
       }
       operatorQueue.push(expr);
-      ast.shift();
       continue;
     }
 
     isList(expr) ? outputQueue.push(infix(expr)) : outputQueue.push(expr);
-    ast.shift();
 
-    if (!isOperand(ast.at(0) ?? false)) break;
+    if (!isOperand(list.first())) break;
   }
 
   while (operatorQueue.length) {
     applyLastOperator();
   }
 
-  if (ast.length) return infix(ast, outputQueue);
+  if (list.hasChildren) return infix(list, outputQueue);
   return outputQueue;
 };
 
-const isOperand = (expr: Expr): expr is string =>
-  typeof expr === "string" && isInfixOp(expr);
+export const isOperand = (expr?: Expr): expr is Identifier =>
+  isIdentifier(expr) && isInfixOp(expr.value);

@@ -1,100 +1,92 @@
-import { isFloat } from "../lib/is-float.mjs";
-import { isList } from "../lib/is-list.mjs";
-import { isStringLiteral } from "../lib/is-string.mjs";
 import { ModuleInfo } from "../lib/module-info.mjs";
-import { toIdentifier } from "../lib/to-identifier.mjs";
-import { AST, Expr } from "../parser.mjs";
+import {
+  Bool,
+  Expr,
+  Float,
+  Identifier,
+  Int,
+  isFloat,
+  isIdentifier,
+  isList,
+  isStringLiteral,
+  List,
+  Syntax,
+} from "../lib/syntax.mjs";
 
 /** TODO: Support macro scoping / module import checking */
-type Macros = Map<string, AST>;
-type Variable = { value: Expr; mutable: boolean };
-type Variables = Map<string, Variable>;
+type Macros = Map<string, List>;
 
 /** Transforms macro's into their final form and then runs them */
-export const macro = (ast: AST, info: ModuleInfo): AST => {
-  if (!info.isRoot) return ast;
+export const macro = (list: List, info: ModuleInfo): List => {
+  if (!info.isRoot) return list;
   const macros: Macros = new Map();
-  const vars: Variables = new Map();
-  return evalExpr(ast, { macros, vars }) as AST;
+  return evalExpr(list, { macros }) as List;
 };
 
 type EvalExprOpts = {
-  vars: Variables;
   macros: Macros;
 };
 
-const evalExpr = (expr: Expr, { vars, macros }: EvalExprOpts) => {
-  if (isFloat(expr)) return Number(expr.replace("/float", ""));
-  if (isStringLiteral(expr)) return expr.replace(/\"/g, "");
-  if (typeof expr === "string") {
-    return vars?.get(toIdentifier(expr))?.value ?? expr;
-  }
+const evalExpr = (expr: Expr, { macros }: EvalExprOpts) => {
+  if (isFloat(expr)) return expr;
+  if (isStringLiteral(expr)) return expr;
+  if (isIdentifier(expr)) return expr.assertedResult();
   if (!isList(expr)) return expr;
-
-  return evalFnCall(expr, { vars, macros });
+  return evalFnCall(expr, { macros });
 };
 
-const evalFnCall = (ast: AST, { vars, macros }: EvalExprOpts): Expr => {
-  if (typeof ast[0] !== "string") {
-    return ast;
+const evalFnCall = (list: List, { macros }: EvalExprOpts): Expr => {
+  const identifier = list.first();
+  if (!isIdentifier(identifier)) {
+    return list;
   }
 
-  const identifier = toIdentifier(ast[0]);
+  const shouldSkipArgEval = fnsToSkipArgEval.has(identifier.value);
 
-  const shouldSkipArgEval = fnsToSkipArgEval.has(identifier);
+  const args = !shouldSkipArgEval
+    ? list.rest().map((exp) => evalExpr(exp, { macros }))
+    : list.rest();
 
-  const args: AST = !shouldSkipArgEval
-    ? ast.slice(1).map((exp) => evalExpr(exp, { vars, macros }))
-    : ast.slice(1);
-
-  const variable = vars?.get(identifier)?.value;
-  if (variable && isLambda(variable)) {
+  const variable = identifier.getResult();
+  if (isLambda(variable)) {
     return callLambda({
       lambda: variable,
       macros,
-      vars,
       args,
     });
   }
 
-  if (!functions[identifier]) {
-    return ast;
+  if (!functions[identifier.value]) {
+    return list;
   }
 
-  return functions[identifier]({ vars, macros }, ...args);
+  return functions[identifier.value](
+    { macros, identifier, parent: list },
+    args
+  );
 };
 
-const expandMacros = (ast: Expr, macros: Macros, vars: Variables): Expr => {
-  if (!isList(ast)) return ast;
-  if (typeof ast[0] === "string") {
-    const macro = macros.get(toIdentifier(ast[0]));
-    if (macro) return expandMacro({ macro, call: ast, macros, vars });
+const expandMacros = (list: Expr, macros: Macros): Expr => {
+  if (!isList(list)) return list;
+  const identifier = list.first();
+  if (isIdentifier(identifier)) {
+    const macro = macros.get(identifier.value);
+    if (macro) return expandMacro({ macro, call: list, macros });
   }
 
-  return ast.reduce((newAst: AST, expr) => {
-    if (!isList(expr)) {
-      newAst.push(expr);
-      return newAst;
+  return list.reduce((expr) => {
+    if (!isList(expr)) return expr;
+
+    const identifier = expr.first();
+    if (!isIdentifier(identifier)) {
+      return expandMacros(expr, macros);
     }
 
-    if (typeof expr[0] !== "string") {
-      newAst.push(expandMacros(expr, macros, vars));
-      return newAst;
-    }
+    const macro = macros.get(identifier.value);
+    if (!macro) return expandMacros(expr, macros);
 
-    const identifier = toIdentifier(expr[0]);
-    const macro = macros.get(identifier);
-    if (!macro) {
-      newAst.push(expandMacros(expr, macros, vars));
-      return newAst;
-    }
-
-    const result = expandMacro({ macro, call: expr, macros, vars });
-    isList(result) && result[0] === "splice-block"
-      ? newAst.push(...result.slice(1))
-      : newAst.push(result);
-    return newAst;
-  }, []);
+    return expandMacro({ macro, call: expr, macros });
+  });
 };
 
 /** Expands a macro call */
@@ -102,216 +94,234 @@ const expandMacro = ({
   macro,
   call,
   macros,
-  vars,
 }: {
-  macro: AST;
-  call: AST;
+  macro: List;
+  call: List;
   macros: Macros;
-  vars: Variables;
 }): Expr => {
-  const variables: Variables = new Map([
-    ...vars,
-    ...mapMacroParameters(call, (macro[0] as string[]).slice(1)),
-  ]);
-  variables.set("&body", { value: call.slice(1), mutable: false });
-  const result = macro
-    .slice(1)
-    .map((exp) => evalExpr(exp, { macros, vars: variables }));
-  return expandMacros(result.pop()!, macros, vars) ?? [];
+  macro.setVar(new Identifier({ value: "&body", bind: call.rest() }));
+  const result = macro.rest().map((exp) => evalExpr(exp, { macros }));
+  return expandMacros(result.pop()!, macros) ?? [];
 };
-
-const mapMacroParameters = (callExpr: AST, parameters: string[]) =>
-  parameters.reduce((vars: Variables, name, index) => {
-    const value = callExpr[index + 1];
-    vars.set(name, { value, mutable: false });
-    return vars;
-  }, new Map());
 
 type CallLambdaOpts = {
-  lambda: any;
-  args: AST;
-  vars: Variables;
+  lambda: List;
+  args: List;
   macros: Macros;
 };
 
-const callLambda = (opts: CallLambdaOpts): AST => {
-  const lambda = opts.lambda.slice(1);
-  const parameters = lambda[0];
-  const body = lambda.slice(1);
-  const vars: Variables = new Map([
-    ...opts.vars,
-    ["&lambda", { mutable: false, value: opts.lambda }],
-    ...parameters.map((p: any, index: number): [string, Variable] => [
-      p,
-      { mutable: false, value: opts.args[index] },
-    ]),
-  ]);
+const callLambda = (opts: CallLambdaOpts): Expr => {
+  const lambda = opts.lambda.rest();
+  const body = lambda.at(1);
 
-  const result = body.map((expr: any) =>
-    evalExpr(expr, { macros: opts.macros, vars })
-  );
-  return result[result.length - 1];
+  if (!body) {
+    throw new Error("Expected body");
+  }
+
+  return evalExpr(body, { macros: opts.macros });
 };
 
 type FnOpts = {
-  vars: Variables;
+  parent: Syntax;
+  identifier: Identifier;
   macros: Macros;
 };
 
-const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
-  macro: ({ macros, vars }, ...macro: AST) => {
-    registerMacro(macros, expandMacros(macro, macros, vars) as AST);
-    return ["splice-block"];
+const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
+  macro: ({ macros }, macro) => {
+    registerMacro(macros, expandMacros(macro, macros) as List);
+    return nop();
   },
-  root: ({ vars, macros }, ...root: AST) => {
-    root.unshift("root");
+  root: ({ macros, identifier }, root) => {
+    root.insert(identifier);
     return root.map((module) => {
       if (!isList(module)) return module;
-      module[4] = (module[4] as AST).reduce((body: AST, expr) => {
-        if (!isList(expr)) {
-          body.push(evalExpr(expr, { vars, macros }));
-          return body;
-        }
-
-        const transformed = evalExpr(expandMacros(expr, macros, vars), {
-          vars,
-          macros,
-        });
-
-        if (!isList(transformed)) {
-          body.push(transformed);
-          return body;
-        }
-
-        transformed[0] === "splice-block"
-          ? body.push(...transformed.splice(1))
-          : body.push(transformed);
-        return body;
-      }, []);
+      module.value[4] = (module.value[4] as List).reduce((expr) => {
+        if (!isList(expr)) return evalExpr(expr, { macros });
+        return evalExpr(expandMacros(expr, macros), { macros });
+      });
       return module;
     });
   },
-  block: (_, ...expressions: AST[]) => expressions[expressions.length - 1],
-  length: (_, array: AST) => array.length,
-  "define-mut": ({ vars, macros }, id: string, value: Expr) => {
-    vars.set(id, { value: evalExpr(value, { vars, macros }), mutable: true });
-    return value;
+  block: (_, args) => args.at(-1)!,
+  length: (_, array) => array.length,
+  "define-mut": ({ macros, parent }, args) => {
+    // Warning: Cannot be typed like would be at compile time (for now);
+    const identifier = args.at(0);
+    const init = args.at(1);
+    if (!isIdentifier(identifier) || !init) {
+      throw new Error("Invalid variable");
+    }
+    identifier.isMutable = true;
+    identifier.bind = init;
+    identifier.setKind("var");
+    identifier.setResult(evalExpr(init, { macros }));
+    parent.setVar(identifier);
+    return nop();
   },
-  define: ({ vars, macros }, id: string, value: Expr) => {
-    vars.set(id, { value: evalExpr(value, { vars, macros }), mutable: false });
-    return value;
+  define: ({ parent, macros }, args) => {
+    const identifier = args.at(0);
+    const init = args.at(1);
+    if (!isIdentifier(identifier) || !init) {
+      throw new Error("Invalid variable");
+    }
+    identifier.isMutable = true;
+    identifier.bind = init;
+    identifier.setKind("var");
+    identifier.setResult(evalExpr(init, { macros }));
+    parent.setVar(identifier);
+    return nop();
   },
-  // TODO: Support overloading
-  "define-function": (
-    { vars },
-    id: string,
-    parameters: ["parameters", [string, string][]],
-    variables: AST,
-    returnType: AST,
-    body: AST
-  ) => {
-    const lambda = [
-      "lambda-expr",
-      parameters.slice(1).map((p) => p[0] as string),
-      ...body,
-    ];
-    vars.set(id, { value: lambda, mutable: false });
-    return ["define-function", id, parameters, variables, returnType, body];
+  // TODO: Support functions in macro expansion phase
+  "define-function": ({ identifier }, args) => {
+    return args.insert(identifier);
   },
-  "=": ({ vars, macros }, identifier, expr) => {
-    const variable = vars.get(identifier);
-    if (!variable) throw new Error(`identifier not found ${identifier}`);
-    if (!variable.mutable) {
+  "=": ({ macros, parent }, args) => {
+    const identifier = args.first();
+    if (!isIdentifier(identifier) || !identifier.isDefined) {
+      throw new Error(`identifier not found ${identifier}`);
+    }
+
+    if (!identifier.isMutable) {
       throw new Error(`Variable ${identifier} is not mutable`);
     }
-    vars.set(identifier, {
-      value: evalExpr(expr, { vars, macros }),
-      mutable: true,
-    });
-    return [];
+
+    identifier.setResult(evalExpr(args.at(1)!, { macros }));
+    return new List({ parent });
   },
-  "==": (_, left, right) => left === right,
-  ">": (_, left, right) => left > right,
-  ">=": (_, left, right) => left >= right,
-  "<": (_, left, right) => left < right,
-  "<=": (_, left, right) => left <= right,
-  and: (_, left, right) => left && right,
-  or: (_, left, right) => left || right,
-  not: (_, right) => !right,
-  "+": (_, left, right) => left + right,
-  "-": (_, left, right) => left - right,
-  "*": (_, left, right) => left * right,
-  "/": (_, left, right) => left / right,
-  "lambda-expr": (_, ...lambda) => ["lambda-expr", ...lambda],
-  quote: ({ vars, macros }, ...quote: AST) => {
-    const expand = (body: AST) =>
-      body.reduce((ast: AST, exp) => {
-        if (isList(exp) && exp[0] === "$") {
-          ast.push(evalExpr(exp.slice(1), { vars, macros }));
-          return ast;
+  "==": (_, args) => bl(args, (l, r) => l === r),
+  ">": (_, args) => bl(args, (l, r) => l > r),
+  ">=": (_, args) => bl(args, (l, r) => l >= r),
+  "<": (_, args) => bl(args, (l, r) => l < r),
+  "<=": (_, args) => bl(args, (l, r) => l <= r),
+  and: (_, args) => bl(args, (l, r) => l && r),
+  or: (_, args) => bl(args, (l, r) => l || r),
+  not: (_, args) => bool(!args.first()?.value),
+  "+": (_, args) => ba(args, (l, r) => l + r),
+  "-": (_, args) => ba(args, (l, r) => l - r),
+  "*": (_, args) => ba(args, (l, r) => l * r),
+  "/": (_, args) => ba(args, (l, r) => l / r),
+  "lambda-expr": (_, args) => {
+    const params = args.first();
+    const body = args.at(1);
+    const lambda = args.insert("lambda-expr");
+
+    if (!isList(params) || !body) {
+      console.error(JSON.stringify(lambda, undefined, 2));
+      throw new Error("invalid lambda expression");
+    }
+
+    // For now, assumes params are untyped
+    params.map((p) => {
+      if (!isIdentifier(p)) {
+        console.error(JSON.stringify(p, undefined, 2));
+        throw new Error("Invalid lambda parameter");
+      }
+
+      p.bind = new List({});
+      p.setKind("param");
+      lambda.setVar(p);
+      return p;
+    });
+
+    return lambda;
+  },
+  quote: ({ macros }, quote: List) => {
+    const expand = (body: List): List =>
+      body.reduce((exp) => {
+        if (isList(exp) && exp.first()?.is("$")) {
+          return evalExpr(exp.rest(), { macros });
         }
 
-        if (isList(exp) && exp[0] === "$@") {
-          ast.push(...(evalExpr(exp.slice(1), { vars, macros }) as AST));
-          return ast;
+        if (isList(exp) && exp.first()?.is("$@")) {
+          const result = evalExpr(exp.rest(), { macros }) as List;
+          result.insert("splice-block");
+          return result;
         }
 
-        if (isList(exp)) {
-          ast.push(expand(exp));
-          return ast;
+        if (isList(exp)) return expand(exp);
+
+        if (isIdentifier(exp) && exp.value.startsWith("$@")) {
+          const id = exp.value.replace("$@", "");
+          const value = exp.getVar(id)!;
+          const list = value.assertedResult() as List;
+          list.insert("splice-block");
+          return list;
         }
 
-        if (typeof exp === "string" && exp.startsWith("$@")) {
-          const id = exp.replace("$@", "");
-          const value = vars.get(id)?.value as AST;
-          ast.push(...(value ?? []));
-          return ast;
+        if (isIdentifier(exp) && exp.value.startsWith("$")) {
+          const id = exp.value.replace("$@", "");
+          const value = exp.getVar(id)!;
+          return value.assertedResult();
         }
 
-        if (typeof exp === "string" && exp.startsWith("$")) {
-          ast.push(vars.get(exp.replace("$", ""))?.value!);
-          return ast;
+        if (isIdentifier(exp) || isStringLiteral(exp)) {
+          exp.value = exp.value.replace("\\", "");
         }
 
-        if (typeof exp === "string" && exp.startsWith("\\")) {
-          ast.push(exp.replace("\\", ""));
-          return ast;
-        }
-
-        ast.push(exp);
-        return ast;
-      }, []);
+        return exp;
+      });
     return expand(quote);
   },
-  if: ({ vars, macros }, condition: Expr, ifTrue: Expr, ifFalse: Expr) => {
+  if: ({ macros }, args) => {
+    const condition = args.at(0);
+    const ifTrue = args.at(1);
+    const ifFalse = args.at(2);
+
+    if (!condition || !ifTrue) {
+      console.log(JSON.stringify(args, undefined, 2));
+      throw new Error("Invalid if expr");
+    }
+
     const condResult = evalExpr(handleOptionalConditionParenthesis(condition), {
-      vars,
       macros,
     });
-    if (condResult) {
-      return evalExpr(ifTrue, { macros, vars });
+
+    if (condResult.value) {
+      return evalExpr(ifTrue, { macros });
     }
+
     if (ifFalse) {
-      return evalExpr(ifFalse, { macros, vars });
+      return evalExpr(ifFalse, { macros });
     }
-    return [];
+
+    return nop();
   },
-  array: (_, ...rest: AST[]) => rest,
-  slice: (_, array: AST, index: number, end?: number) =>
-    array.slice(index, end),
-  extract: (_, list: AST, index: number) => list[index],
-  map: ({ vars, macros }, array: AST, lambda: AST) => {
-    return array.map((val, index, array) =>
+  array: (_, args) => args,
+  slice: (_, args) => {
+    const list = args.first()! as List;
+    const start = args.at(1)?.value as number | undefined;
+    const end = args.at(2)?.value as number | undefined;
+    return list.slice(start, end);
+  },
+  extract: (_, args) => {
+    const list = args.first()! as List;
+    const index = args.at(1)!.value as number;
+    return list.at(index)!; // TODO: Make this safer
+  },
+  map: ({ macros, parent }, args) => {
+    const list = args.first()! as List;
+    const lambda = args.at(1)! as List;
+    return list.map((val, index, array) =>
       callLambda({
         lambda,
         macros,
-        vars,
-        args: [val, index, array],
+        args: new List({
+          value: [
+            val,
+            new Int({ value: index }),
+            new List({ value: array, parent }),
+          ],
+          parent,
+        }),
       })
     );
   },
-  reduce: ({ vars, macros }, array: AST, start: Expr, lambda: AST) => {
-    return array.reduce(
+  reduce: ({ macros }, args) => {
+    const list = args.at(0)! as List;
+    const start = args.at(1)!;
+    const lambda = args.at(2)! as List;
+    return list.value.reduce(
       (prev, cur, index, array) =>
         callLambda({
           lambda,
@@ -319,7 +329,7 @@ const functions: Record<string, (opts: FnOpts, ...rest: any[]) => Expr> = {
           vars,
           args: [prev, cur, index, array],
         }),
-      start
+      start.value
     );
   },
   push: (_, array: AST, val: Expr) => {
@@ -364,9 +374,9 @@ const handleOptionalConditionParenthesis = (expr: Expr): Expr => {
   return expr;
 };
 
-const isLambda = (expr: Expr): boolean => {
+const isLambda = (expr?: Expr): expr is List => {
   if (!isList(expr)) return false;
-  return expr[0] === "lambda-expr";
+  return expr.first()?.is("lambda-expr") ?? false;
 };
 
 /** Slice out the beginning macro before calling */
@@ -374,3 +384,12 @@ const registerMacro = (macros: Macros, ast: AST) => {
   const id = ((ast[0] as AST)[0] as string).replace(/\'/g, "");
   macros.set(id, ast);
 };
+
+const nop = () => new List({}).push(Identifier.from("splice-block"));
+/** Binary logical comparison */
+const bl = (args: List, fn: (l: any, r: any) => boolean) =>
+  bool(fn(args.at(0)?.value, args.at(1)?.value));
+/** Binary arithmetic operation */
+const ba = (args: List, fn: (l: any, r: any) => number) =>
+  new Float({ value: fn(args.at(0)?.value, args.at(1)?.value) });
+const bool = (b: boolean) => new Bool({ value: b });

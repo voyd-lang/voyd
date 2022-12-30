@@ -9,8 +9,8 @@ export interface ReaderMacro {
     file: File,
     opts: {
       token: Token;
-      reader: (file: File, terminator?: string) => List;
+      reader: (file: File, terminator?: string, parent?: Syntax) => List;
       module: ModuleInfo;
     }
-  ) => Syntax | undefined;
+  ) => Syntax;
 }

@@ -1,4 +1,4 @@
 import { ModuleInfo } from "../lib/module-info.mjs";
-import { AST } from "../parser.mjs";
+import { List } from "../lib/syntax.mjs";
 
-export type SyntaxMacro = (ast: AST, module: ModuleInfo) => AST;
+export type SyntaxMacro = (list: List, module: ModuleInfo) => List;

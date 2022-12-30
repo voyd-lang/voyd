@@ -1,12 +1,22 @@
 import { ReaderMacro } from "./types.mjs";
+import { Comment } from "../lib/index.mjs";
 
 export const comment: ReaderMacro = {
   tag: /^\/\/[^\s]*$/,
-  macro: (file) => {
+  macro: (file, { token }) => {
+    let comment = "";
+
     while (file.hasCharacters) {
       if (file.next === "\n") break;
-      file.consume();
+      comment += file.consume();
     }
-    return undefined;
+
+    return new Comment({
+      location: {
+        ...token.location,
+        endIndex: file.position,
+      },
+      value: comment,
+    });
   },
 };

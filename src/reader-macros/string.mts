@@ -30,6 +30,9 @@ export const stringMacro: ReaderMacro = {
       });
     }
 
-    return new StringLiteral({ value: token.value, location: token.location });
+    return new StringLiteral({
+      value: token.value,
+      location: token.location,
+    });
   },
 };

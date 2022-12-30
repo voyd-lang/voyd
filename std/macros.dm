@@ -89,7 +89,6 @@ pub macro fn(&body)
 	` define-function
 		$identifier
 		$params
-		(variables) // Extracted in type system
 		$return-type
 		$(concat #["block"] expressions)
 

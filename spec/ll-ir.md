@@ -37,7 +37,6 @@ global scope and therefore must each have a unique identifier.
 ```lisp
 (define-function $identifier
   (parameters ($name $type-id)*)
-  (variables ($name $type-id)*)
   (return-type $type-id)
   $block:TypedBlock)
 ```
@@ -51,8 +50,6 @@ global scope and therefore must each have a unique identifier.
   (parameters
     ;; Parameter definition
     (n i32))
-
-  (variables)
 
   (return-type i32)
 
@@ -89,10 +86,18 @@ Defines an external function that has been imported into the module via WASM imp
 
 ## Define Global
 
-Defines a global value accessible across function instances
+Defines an immutable global value accessible across function instances
 
+```lisp
+(define-global $identifier:String | $labeled-expr:LabeledExpr $expr)
 ```
-(define-global $mutability:(var|let) $name:LabeledExpr = $value)
+
+## Define Mutable Global
+
+Defines a mutable global value accessible across function instances
+
+```lisp
+(define-mut-global $identifier:String | $labeled-expr:LabeledExpr $expr)
 ```
 
 ## Define Mut
@@ -136,30 +141,6 @@ Define AsyncNumericOp as an asynchronous function that accepts a number and retu
     (return-type Int)))
 ```
 
-## Extern Function
-
-Represents an external function import (a function provided by the host).
-
-```lisp
-(define-extern-function $identifier
-  $external-namespace
-  (parameters ($param $type-id)*)
-  (return-type $type-id))
-```
-
-### Examples
-
-```lisp
-// Define a function fib
-(define-extern-function fib
-  // Function parameter list
-  (parameters
-    // Parameter definition
-    (n i32))
-
-  (return-type i32))
-```
-
 ## Labeled Expr
 
 Defines a labeled expression. These are used to annotate types
@@ -176,7 +157,7 @@ Type: Module
 (module $module-id:String
   (imports ($import-module-id "***")*)
   (exports $exports:Export*)
-  (block $body*))
+  ($body*))
 ```
 
 Example export `["export", "'<'", ["parameters", ["left", "i32"], ["right", "i32"]]]`
