@@ -1,14 +1,16 @@
+import { File } from "../lib/file.mjs";
 import { ModuleInfo } from "../lib/module-info.mjs";
-import { Expr } from "../parser.mjs";
+import { List, Syntax } from "../lib/syntax.mjs";
+import { Token } from "../lib/token.mjs";
 
 export interface ReaderMacro {
   tag: string | RegExp;
   macro: (
-    dream: string[],
+    file: File,
     opts: {
-      token: string;
-      reader: (dream: string[], terminator?: string) => Expr;
+      token: Token;
+      reader: (file: File, terminator?: string) => List;
       module: ModuleInfo;
     }
-  ) => Expr | undefined;
+  ) => Syntax | undefined;
 }

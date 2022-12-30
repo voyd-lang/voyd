@@ -1,3 +1,4 @@
+import { Token } from "../lib/token.mjs";
 import { arrayLiteralMacro } from "./array-literal.mjs";
 import { booleanMacro } from "./boolean.mjs";
 import { comment } from "./comment.mjs";
@@ -40,10 +41,11 @@ const readerMacros = macros.reduce(
 );
 
 export const getReaderMacroForToken = (
-  token: string
+  token: Token
 ): ReaderMacro["macro"] | undefined => {
   return (
-    readerMacros.map.get(token) ??
-    readerMacros.patterns.find(({ pattern }) => pattern.test(token))?.macro
+    readerMacros.map.get(token.value) ??
+    readerMacros.patterns.find(({ pattern }) => pattern.test(token.value))
+      ?.macro
   );
 };
