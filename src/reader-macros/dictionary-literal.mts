@@ -1,11 +1,12 @@
-import { isList } from "../lib/index.mjs";
+import { Identifier, isList, List } from "../lib/index.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const dictionaryLiteralMacro: ReaderMacro = {
   tag: "#{",
-  macro: (dream, { reader }) => {
-    const items = reader(dream, "}");
-    if (isList(items)) return ["dictionary", ...items];
-    return ["dictionary", items];
+  macro: (file, { reader }) => {
+    const dict = new Identifier({ value: "dict" });
+    const items = reader(file, "}");
+    if (isList(items)) return items.insert(dict);
+    return new List({ value: [dict, items] });
   },
 };

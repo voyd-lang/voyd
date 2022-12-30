@@ -1,14 +1,13 @@
+import { SourceLocation } from "./syntax.mjs";
+
 export class Token {
-  readonly line: number;
-  readonly column: number;
-  readonly startIndex: number;
-  endIndex = 0;
+  readonly location: SourceLocation;
   value = "";
 
-  constructor(opts: { line: number; column: number; index: number }) {
-    this.line = opts.line;
-    this.column = opts.column;
-    this.startIndex = opts.index;
+  constructor(opts: SourceLocation & { value?: string }) {
+    const { value, ...location } = opts;
+    this.value = value ?? "";
+    this.location = location;
   }
 
   get span() {

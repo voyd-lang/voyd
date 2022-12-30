@@ -131,6 +131,12 @@ export class List extends Syntax {
 
   push(expr: Expr) {
     this.value.push(expr);
+    return this;
+  }
+
+  insert(expr: Expr, at = 0) {
+    this.value.splice(at, 0, expr);
+    return this;
   }
 
   is(_: Syntax): boolean {

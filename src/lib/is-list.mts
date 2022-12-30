@@ -1,3 +1,3 @@
-import { AST, Expr } from "../parser.mjs";
+import { List, Expr } from "./syntax.mjs";
 
-export const isList = (expr?: Expr): expr is AST => expr instanceof Array;
+export const isList = (expr?: Expr): expr is List => expr instanceof List;

@@ -9,3 +9,4 @@ export * from "./is-primitive-type.mjs";
 export * from "./syntax.mjs";
 export * from "./file.mjs";
 export * from "./token.mjs";
+export * from "./syntax-helpers.mjs";

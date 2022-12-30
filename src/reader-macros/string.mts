@@ -1,25 +1,35 @@
+import { Identifier, StringLiteral } from "../lib/syntax.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const stringMacro: ReaderMacro = {
   tag: /^[\"\']$/,
-  macro: (dream, { token }) => {
-    let string = token;
-    while (dream.length) {
-      const next = dream.shift();
+  macro: (file, { token }) => {
+    const startChar = token.value;
+    token.value = "";
+    while (file.hasCharacters) {
+      const next = file.consume();
 
       if (next === "\\") {
-        string += next;
-        string += dream.shift();
+        token.addChar(next);
+        token.addChar(file.consume());
         continue;
       }
 
-      if (next === token) {
-        string += token;
+      if (next === startChar) {
         break;
       }
 
-      string += next;
+      token.addChar(next);
     }
-    return string;
+    token.location.endIndex = file.position;
+
+    if (startChar === "'") {
+      return new Identifier({
+        value: token.value,
+        location: token.location,
+      });
+    }
+
+    return new StringLiteral({ value: token.value, location: token.location });
   },
 };
