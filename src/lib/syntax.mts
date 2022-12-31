@@ -243,6 +243,10 @@ export class List extends Syntax {
     return this.value.at(index);
   }
 
+  calls(fnId: Expr | string) {
+    return this.at(0)?.is(fnId);
+  }
+
   consume(): Expr {
     const next = this.value.shift();
     if (!next) {

@@ -2,12 +2,15 @@ import {
   isFloat,
   isList,
   ModuleInfo,
-  toIdentifier,
   isPrimitiveType,
   CDT_ADDRESS_TYPE,
   List,
   Expr,
   Identifier,
+  isIdentifier,
+  isInt,
+  isBool,
+  Bool,
 } from "../lib/index.mjs";
 
 export const typeSystem = (list: List, info: ModuleInfo): List => {
@@ -16,284 +19,287 @@ export const typeSystem = (list: List, info: ModuleInfo): List => {
   return list.map((expr) => addTypeAnnotationsToExpr(expr));
 };
 
-const addTypeAnnotationsToExpr = (expr: Expr): Expr => {
+const addTypeAnnotationsToExpr = (expr?: Expr): Expr => {
+  if (!expr) return new List({});
   if (!isList(expr)) return expr;
   return addTypeAnnotationsToFnCall(expr);
 };
 
 const addTypeAnnotationsToFn = (list: List): List => {
   const identifier = list.at(1) as Identifier;
-  const suppliedReturnType = getSuppliedReturnTypeForFn(list);
   const rawParameters = list.at(2) as List;
-  const parameters = registerFnParams(rawParameters);
-
   const fn = getMatchingFn({
     identifier,
-    args: rawParameters.slice(1).map((expr) => {
-      if (isStruct(expr)) {
-        return { type: expr };
-      }
-
-      return getInfoFromRawParam(expr as List);
-    }),
+    args: rawParameters,
+    parent: list,
   });
 
   if (!fn) {
     throw new Error(`Could not find matching function for ${identifier}`);
   }
 
-  const typedBlock = addTypeAnnotationsToExpr(list[5], scopedTypes);
-  if (!isList(typedBlock) || typedBlock[0] !== "typed-block") {
+  const parameters = annotateFnParams(rawParameters, fn);
+
+  const typedBlock = addTypeAnnotationsToExpr(list.at(4));
+  if (!isList(typedBlock) || typedBlock.at(0)?.is("typed-block")) {
     throw new Error("Expected typed-block");
   }
+
+  // Function types are (((paramIdentifier | false) paramType)* returnType:Expr | false) (at this point)
+  const fnType = fn.getType() as List | undefined;
+  const suppliedReturnType = fnType?.at(1);
 
   const inferredReturnType = assertFunctionReturnType(
     typedBlock,
     suppliedReturnType,
-    identifier
+    identifier.value
   );
 
-  fn.returnType = suppliedReturnType ?? inferredReturnType;
-  const variables: [string, Expr][] = [...scopedTypes.vars].map(
-    ([id, { type }]) => [id, type]
-  );
+  const returnType = suppliedReturnType ?? inferredReturnType;
 
-  return [
-    "define-function",
-    identifier,
-    parameters,
-    ["variables", ...variables],
-    ["return-type", fn.returnType!],
-    typedBlock,
-  ];
+  const newBody = new List({
+    value: [
+      "define-function",
+      fn,
+      parameters,
+      ["return-type", returnType!],
+      typedBlock,
+    ],
+    context: fn,
+  });
+
+  fn.bind = newBody;
+  return newBody;
 };
 
 /**
  * For now, all params are assumed to be manually typed.
  * Returns the updated list of parameters
  */
-const registerFnParams = (ast: AST, types: TypeInfo): AST => {
-  if (ast[0] !== "parameters") {
+const annotateFnParams = (list: List, parent: Expr): List => {
+  if (list.calls("parameters")) {
     throw new Error("Expected function parameters");
   }
 
-  return [
-    "parameters",
-    ...ast.slice(1).flatMap((expr): Expr => {
-      if (!isList(expr)) {
-        throw new Error("All parameters must be typed");
-      }
+  return new List({
+    value: [
+      "parameters",
+      ...list.slice(1).value.flatMap((expr): Expr[] => {
+        if (!isList(expr)) {
+          throw new Error("All parameters must be typed");
+        }
 
-      if (isStruct(expr)) {
-        return expr.slice(1).map(registerStructParamField(types));
-      }
+        if (isStruct(expr)) {
+          return expr
+            .slice(1)
+            .value.map((value) => registerStructParamField(value, parent));
+        }
 
-      const { identifier, type, label } = getInfoFromRawParam(expr);
-      types.params.set(identifier!, { type, label });
-      return [[identifier!, type]];
-    }),
-  ];
+        const { identifier, type, label } = getInfoFromRawParam(expr);
+        identifier!.setType(type);
+        identifier!.setKind("param");
+        parent.setVar(identifier!);
+        const value = [identifier!, type];
+        if (label) value.push(label);
+        return [new List({ value, context: expr })];
+      }),
+    ],
+    context: list,
+  });
 };
 
-const registerStructParamField = (
-  types: TypeInfo
-): ((value: Expr, index: number, array: Expr[]) => Expr) => {
-  return (exp) => {
-    if (!isList(exp)) {
-      throw new Error("All struct parameters must be typed");
-    }
-    const { identifier, type, label } = getInfoFromRawParam(exp);
-    types.params.set(identifier!, { type, label });
-    return [identifier!, type];
-  };
+const registerStructParamField = (value: Expr, parent: Expr): Expr => {
+  if (!isList(value)) {
+    throw new Error("All struct parameters must be typed");
+  }
+  const { identifier, type } = getInfoFromRawParam(value);
+  identifier!.setType(type);
+  parent.setVar(identifier!);
+  return new List({ value: [identifier!, type] });
 };
 
-const addTypeAnnotationsToBlock = (ast: AST, types: TypeInfo): AST => {
-  const annotatedArgs = ast
+const addTypeAnnotationsToBlock = (list: List): List => {
+  const annotatedArgs = list
     .slice(1)
-    .map((expr) => addTypeAnnotationsToExpr(expr, types));
-  const type = getExprReturnType(
-    annotatedArgs[annotatedArgs.length - 1],
-    types
-  );
+    .map((expr) => addTypeAnnotationsToExpr(expr));
+
+  const type = getExprReturnType(annotatedArgs.at(-1));
+
   if (!type) {
-    console.error(JSON.stringify(ast, undefined, 2));
+    console.error(JSON.stringify(list, undefined, 2));
     throw new Error("Could not determine return type of preceding block");
   }
-  return ["typed-block", type, ...annotatedArgs];
+
+  return new List({
+    value: ["typed-block", type, ...annotatedArgs.value],
+    context: list,
+  });
 };
 
-const addTypeAnnotationsToFnCall = (ast: AST, types: TypeInfo): AST => {
-  if (ast[0] === "define-function") return addTypeAnnotationsToFn(ast, types);
-  if (ast[0] === "define-extern-function") return ast; // TODO: type check this mofo
-  if (ast[0] === "define-type") return ast; // TODO: type check this mofo
-  if (ast[0] === "define-cdt") return ast; // TODO: type check this mofo
-  if (ast[0] === "block") return addTypeAnnotationsToBlock(ast, types);
-  if (ast[0] === "lambda-expr") return ast;
-  if (ast[0] === "quote") return ast;
-  if (ast[0] === "export") return ast; // TODO
-  if (ast[0] === "=") return ast; // TODO
-  if (ast[0] === "root") return addTypeAnnotationToRoot(ast, types);
-  if (ast[0] === "module") return addTypeAnnotationToModule(ast, types);
-  if (ast[0] === "bnr" || ast[0] === "binaryen-mod") return ast;
-  if (typeof ast[0] === "string" && ast[0].startsWith("define")) {
-    return addTypeAnnotationToVar(ast, types);
+const addTypeAnnotationsToFnCall = (list: List): List => {
+  if (list.calls("define-function")) return addTypeAnnotationsToFn(list);
+  if (list.calls("define-extern-function")) return list; // TODO: type check this mofo
+  if (list.calls("define-type")) return list; // TODO: type check this mofo
+  if (list.calls("define-cdt")) return list; // TODO: type check this mofo
+  if (list.calls("block")) return addTypeAnnotationsToBlock(list);
+  if (list.calls("lambda-expr")) return list;
+  if (list.calls("quote")) return list;
+  if (list.calls("export")) return list; // TODO
+  if (list.calls("=")) return list; // TODO
+  if (list.calls("root")) return addTypeAnnotationToRoot(list);
+  if (list.calls("module")) return addTypeAnnotationToModule(list);
+  if (list.calls("bnr") || list.calls("binaryen-mod")) return list;
+  if (
+    typeof list.at(0)?.value === "string" &&
+    (list.at(0)!.value as string).startsWith("define")
+  ) {
+    return addTypeAnnotationToVar(list);
   }
-  if (isPrimitiveFn(ast[0])) {
-    return addTypeAnnotationsToPrimitiveFn(ast, types);
+  if (isPrimitiveFn(list.at(0))) {
+    return addTypeAnnotationsToPrimitiveFn(list);
   }
 
-  return addTypeAnnotationToUserFnCall(ast, types);
+  return addTypeAnnotationToUserFnCall(list);
 };
 
-const addTypeAnnotationsToPrimitiveFn = (ast: AST, types: TypeInfo): AST => {
-  const annotatedArgs = ast
+const addTypeAnnotationsToPrimitiveFn = (list: List): List => {
+  const annotatedArgs = list
     .slice(1)
-    .map((expr) => addTypeAnnotationsToExpr(expr, types));
-  return [ast[0], ...annotatedArgs];
+    .value.map((expr) => addTypeAnnotationsToExpr(expr));
+  return new List({ value: [list.first()!, ...annotatedArgs], context: list });
 };
 
-function addTypeAnnotationToUserFnCall(ast: AST, types: TypeInfo) {
-  const fn = getMatchingFnForCallExpr(ast, types);
+function addTypeAnnotationToUserFnCall(list: List) {
+  const fn = getMatchingFnForCallExpr(list);
   if (!fn) {
-    console.error(JSON.stringify(ast, undefined, 2));
+    console.error(JSON.stringify(list, undefined, 2));
     throw new Error("Could not find matching fn for above call expression");
   }
 
-  const annotatedArgs = ast.slice(1).flatMap((expr, index) => {
-    if (isStruct(expr)) {
-      return applyStructParams(fn.params[index].type as AST, expr as AST);
+  const annotatedArgs = list.slice(1).value.flatMap((expr, index) => {
+    const paramType = (fn.getType() as List).at(index);
+    if (isStruct(paramType) && isStruct(expr)) {
+      return applyStructParams(paramType as List, expr as List);
     }
 
-    return [addTypeAnnotationsToExpr(expr, types)];
+    return [addTypeAnnotationsToExpr(expr)];
   });
 
-  return [ast[0], ...annotatedArgs];
+  return new List({ value: [fn, ...annotatedArgs], context: list });
 }
 
 /** Re-orders the supplied struct and returns it as a normal list of expressions to be passed as args */
-const applyStructParams = (expectedStruct: AST, suppliedStruct: AST): AST =>
+const applyStructParams = (expectedStruct: List, suppliedStruct: List): List =>
   expectedStruct.slice(1).map((expr) => {
-    const labeledExpr = expr as AST;
-    const label = labeledExpr[1];
+    const labeledExpr = expr as List;
+    const label = labeledExpr.at(1) as Identifier;
     const arg = suppliedStruct
       .slice(1)
-      .find((expr) => (expr as AST)[1] === label) as AST;
+      .value.find((expr) => (expr as List).at(1)?.is(label)) as List;
     if (!arg) throw new Error(`Could not find arg for field ${label}`);
-    return arg[2];
+    return arg.at(2)!;
   });
 
-const addTypeAnnotationToRoot = (ast: AST, types: TypeInfo): AST =>
-  ast.map((expr) => addTypeAnnotationsToExpr(expr, types));
+const addTypeAnnotationToRoot = (ast: List): List =>
+  ast.map((expr) => addTypeAnnotationsToExpr(expr));
 
-const addTypeAnnotationToModule = (ast: AST, types: TypeInfo): AST => {
-  ast[4] = (ast[4] as AST).map((expr) => addTypeAnnotationsToExpr(expr, types));
-  return ast;
+const addTypeAnnotationToModule = (list: List): List => {
+  list.value[4] = (list.value[4] as List).map((expr) =>
+    addTypeAnnotationsToExpr(expr)
+  );
+  return list;
 };
 
-const addTypeAnnotationToVar = (ast: AST, types: TypeInfo): AST => {
-  const mutable = ast[0] === "define-mut";
-  const global = typeof ast[0] === "string" && ast[0].includes("global");
-  const inferredType = getExprReturnType(ast[2], types);
-  const annotatedInitializer = addTypeAnnotationsToExpr(ast[2], types);
-  const suppliedType = isList(ast[1])
-    ? typeof ast[1][2] === "string"
-      ? toIdentifier(ast[1][2])
-      : ast[1][2]
+const addTypeAnnotationToVar = (list: List): List => {
+  const varFnId = list.at(0) as Identifier;
+  const mutable = varFnId.value.includes("define-mut");
+  const global = varFnId.value.includes("global");
+  const initializer = list.at(2);
+  const inferredType = getExprReturnType(initializer);
+  const annotatedInitializer = addTypeAnnotationsToExpr(list.at(2));
+  const suppliedType = isList(list.at(1))
+    ? (list.at(1) as List).at(2)
     : undefined;
-  const identifier = isList(ast[1])
-    ? toIdentifier(ast[1][1] as string)
-    : toIdentifier(ast[1] as string);
+
+  // Get identifier from a potentially untyped definition
+  const identifier = isList(list.at(1))
+    ? ((list.at(1) as List).at(1) as Identifier) // Typed case
+    : (list.at(1) as Identifier); // Untyped case
+
   if (suppliedType && !typesMatch(suppliedType, inferredType)) {
     throw new Error(
       `${identifier} of type ${suppliedType} is not assignable to ${inferredType}`
     );
   }
+
   const type = suppliedType ?? inferredType;
   if (!type) {
     throw new Error(`Could not determine type for identifier ${identifier}`);
   }
 
-  global
-    ? types.globals.set(identifier, { type, mutable })
-    : types.vars.set(identifier, { type, mutable });
+  identifier.setType(type);
+  identifier.setKind(global ? "global" : "var");
+  identifier.isMutable = mutable;
 
-  return [ast[0], ["labeled-expr", identifier, type], annotatedInitializer];
+  return new List({
+    value: [varFnId, identifier, annotatedInitializer],
+    context: list,
+  });
 };
 
 const getExprReturnType = (expr?: Expr): Expr | undefined => {
   if (!expr) return;
-  if (typeof expr === "number") return "i32";
-  if (isFloat(expr)) return "f32";
-  if (typeof expr === "boolean") return "i32";
-  if (expr === "void") return "void";
-  if (typeof expr === "string") {
-    return (
-      params.get(toIdentifier(expr))?.type ??
-      vars.get(toIdentifier(expr))?.type ??
-      globals.get(toIdentifier(expr))?.type
-    );
-  }
-  if (!isList(expr)) {
-    throw new Error(`Invalid expression ${expr}`);
-  }
-  if (expr[0] === "labeled-expr") {
-    return getExprReturnType(expr[2], types);
-  }
-  if (expr[0] === "block") {
-    return getExprReturnType(expr[expr.length - 1], types);
-  }
-  if (expr[0] === "struct") {
-    return getStructLiteralType(expr, types);
-  }
-  if (expr[0] === "bnr" || expr[0] === "binaryen-mod") {
+  if (isInt(expr)) return i32;
+  if (isFloat(expr)) return f32;
+  if (isBool(expr)) return bool;
+  if (expr.is("void")) return dVoid;
+  if (isIdentifier(expr)) return expr.getType();
+  if (!isList(expr)) throw new Error(`Invalid expression ${expr}`);
+
+  if (expr.calls("labeled-expr")) return getExprReturnType(expr.at(2));
+  if (expr.calls("block")) getExprReturnType(expr.at(-1));
+  if (expr.calls("struct")) return getStructLiteralType(expr);
+  if (expr.calls("bnr") || expr.calls("binaryen-mod")) {
     return getBnrReturnType(expr);
   }
-  if (expr[0] === "if") {
-    return getIfReturnType(expr, types);
-  }
+  if (expr.calls("if")) return getIfReturnType(expr);
 
-  const fn = getMatchingFnForCallExpr(expr, types);
-  return fn?.returnType;
+  const fn = getMatchingFnForCallExpr(expr);
+  return fn?.props.get("returnType");
 };
 
 /** Takes the expression form of a struct and converts it into type form */
-const getStructLiteralType = (ast: AST, types: TypeInfo): AST => [
-  "struct",
-  ...ast.slice(1).map((labeledExpr) => {
-    const identifier = toIdentifier((labeledExpr as AST)[1] as string);
-    const type = getExprReturnType((labeledExpr as AST)[2], types);
-    if (!type) {
-      throw new Error("Could not determine type for struct literal");
-    }
-    return ["labeled-expr", identifier, type];
-  }),
-];
+const getStructLiteralType = (ast: List): List =>
+  new List({
+    value: [
+      "struct",
+      ...ast.slice(1).value.map((labeledExpr) => {
+        const list = labeledExpr as List;
+        const identifier = list.at(1) as Identifier;
+        const type = getExprReturnType(list.at(2));
+        if (!type) {
+          throw new Error("Could not determine type for struct literal");
+        }
+        return ["labeled-expr", identifier, type];
+      }),
+    ],
+    parent: ast,
+  });
 
-const getIfReturnType = (ast: AST, types: TypeInfo): Expr | undefined => {
+const getIfReturnType = (list: List): Expr | undefined => {
   // TODO type check this mofo
-  return getExprReturnType(ast[2], types);
+  return getExprReturnType(list.at(2));
 };
 
-const getBnrReturnType = (ast: AST): string => {
-  const call = ast as any;
-  return toIdentifier(call[1][2]);
+const getBnrReturnType = (call: List): Expr | undefined => {
+  const info = call.at(1) as List | undefined;
+  return info?.at(2);
 };
 
-const getMatchingFnForCallExpr = (
-  call: AST,
-  types: TypeInfo
-): Fn | undefined => {
-  const identifier = toIdentifier(call[0] as string);
-  const args = call.slice(1).map((expr) => ({
-    type: getExprReturnType(expr, types)!,
-    label:
-      isList(expr) && expr[0] === "labeled-expr"
-        ? (expr[1] as string)
-        : undefined,
-  }));
-
-  return getMatchingFn({ identifier, args, fns: types.fns });
+const getMatchingFnForCallExpr = (call: List): Identifier | undefined => {
+  const identifier = call.first() as Identifier;
+  const args = call.slice(1);
+  return getMatchingFn({ identifier, args, parent: call });
 };
 
 const getMatchingFn = ({
@@ -304,22 +310,25 @@ const getMatchingFn = ({
   identifier: Identifier;
   args: List;
   parent: Expr;
-}): List | undefined => {
+}): Identifier | undefined => {
   const candidates = parent.getFns(identifier);
   if (!candidates) return undefined;
   return candidates.find((candidate) => {
-    const definition = candidate.bind as List;
-    const params = definition.at(2) as List;
+    // Function types are (((paramIdentifier | false) paramType)* returnType:Expr)
+    const params = (candidate.getType() as List).at(0) as List;
     return params.value.every((p, index) => {
       const arg = args.at(index);
       if (!arg) return false;
       const argType = getExprReturnType(arg);
       const argLabel = getExprLabel(arg);
-      const param = p as Identifier;
-      const labelsMatch = param.label === argLabel;
+      const paramInfo = p as List;
+      const param = isIdentifier(paramInfo.at(0))
+        ? (paramInfo.at(0) as Identifier)
+        : undefined;
+      const labelsMatch = param?.label === argLabel;
       return typesMatch((p as Identifier).getType(), argType) && labelsMatch;
     });
-  })?.bind as List;
+  });
 };
 
 const getExprLabel = (expr?: Expr): string | undefined => {
@@ -371,46 +380,59 @@ const setFunctionMap = (list: List) => {
     }
 
     const fnIdentifier = expr.at(1) as Identifier;
-    const fnArray = list.getFns(fnIdentifier) ?? [];
-    const returns = getSuppliedReturnTypeForFn(expr);
+    fnIdentifier.bind = expr;
     const parametersIndex = expr.first()?.is("define-function") ? 2 : 3;
-    const params = (expr.at(2) as List).slice(1).value.map((arr) => {
-      if (isStruct(arr)) {
-        return { type: arr };
+    const params = (expr.at(parametersIndex) as List).slice(1).map((p) => {
+      // For now assume all params are either structs or labeled expressions
+      const { label, identifier, type } = getInfoFromRawParam(p as List);
+      if (identifier) {
+        identifier.setKind("param");
+        identifier.setType(type);
+        identifier.label = label?.value;
       }
 
-      return getInfoFromRawParam(arr);
+      return new List({
+        parent: expr,
+        value: [identifier ?? new Bool({ value: false }), type],
+      });
     });
+    const suppliedReturnType = getSuppliedReturnTypeForFn(expr);
+    const value: Expr[] = [params];
+    if (suppliedReturnType) value.push(suppliedReturnType);
+    fnIdentifier.setType(new List({ value, parent: expr }));
 
-    map.set(fnIdentifier, [
-      ...fnArray,
-      {
-        params,
-        returnType: returns,
-      },
-    ]);
-    return map;
-  }, new Map());
+    list.setFn(fnIdentifier);
+  });
 };
 
-const getSuppliedReturnTypeForFn = (ast: AST): Expr | undefined => {
-  const returnDef = (ast[4] as AST)[1];
-  // TODO: Support type literals
-  return typeof returnDef === "string"
-    ? toIdentifier(returnDef)
-    : isList(returnDef) && returnDef[0] === "cdt-pointer"
-    ? toIdentifier(returnDef[1] as string)
-    : undefined;
+const getSuppliedReturnTypeForFn = (list: List): Expr | undefined => {
+  const returnDef = (list.at(3) as List).at(1);
+  return isIdentifier(returnDef)
+    ? returnDef
+    : isList(returnDef) && returnDef.at(0)?.is("cdt-pointer")
+    ? returnDef.at(1)!
+    : returnDef;
+};
+
+const getInfoFromRawParam = (list: List) => {
+  const isLabeled = !isStruct(list) && isList(list.at(2));
+  const paramDef = isLabeled ? (list.at(2) as List) : list;
+  const identifier = isStruct(list)
+    ? undefined
+    : (paramDef.at(1) as Identifier);
+  const type = isStruct(list) ? list : paramDef.at(2)!;
+  const label = isLabeled ? (list.at(1) as Identifier) : undefined;
+  return { identifier, type, label };
 };
 
 function assertFunctionReturnType(
-  typedBlock: AST,
+  typedBlock: List,
   suppliedReturnType: Expr | undefined,
   identifier: string
 ) {
-  const inferredReturnType = typedBlock[1] as string;
+  const inferredReturnType = typedBlock.at(1);
   const shouldCheckInferredType =
-    suppliedReturnType && suppliedReturnType !== "void";
+    suppliedReturnType && suppliedReturnType?.is("void");
   const typeMismatch =
     shouldCheckInferredType &&
     !typesMatch(suppliedReturnType, inferredReturnType);
@@ -423,21 +445,13 @@ function assertFunctionReturnType(
   return inferredReturnType;
 }
 
-const getInfoFromRawParam = (ast: AST) => {
-  const isLabeled = !isStruct(ast) && isList(ast[2]);
-  const paramDef: AST = isLabeled ? (ast[2] as AST) : ast;
-  const identifier =
-    typeof paramDef[1] === "string"
-      ? toIdentifier(paramDef[1] as string)
-      : undefined;
-  const type =
-    typeof paramDef[2] === "string" ? toIdentifier(paramDef[2]) : paramDef[2];
-  const label = isLabeled ? toIdentifier(ast[1] as string) : undefined;
-  return { identifier, type, label };
-};
-
-const isStruct = (expr?: Expr) => isList(expr) && expr[0] === "struct";
+const isStruct = (expr?: Expr) => isList(expr) && expr.first()?.is("struct");
 const isPrimitiveFn = (expr?: Expr) => {
   if (typeof expr !== "string") return false;
   return new Set(["if", "="]).has(expr);
 };
+
+const i32 = Identifier.from("i32");
+const f32 = Identifier.from("f32");
+const bool = Identifier.from("i32");
+const dVoid = Identifier.from("void");
