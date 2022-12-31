@@ -208,10 +208,12 @@ export class Bool extends Syntax {
   }
 }
 
+export type ListValue = Expr | string | ListValue[];
+
 export class List extends Syntax {
   value: Expr[] = [];
 
-  constructor(opts: SyntaxOpts & { value?: (Expr | string)[] }) {
+  constructor(opts: SyntaxOpts & { value?: ListValue[] }) {
     super(opts);
     this.push(...(opts.value ?? []));
   }
@@ -248,10 +250,15 @@ export class List extends Syntax {
     return this.value.pop();
   }
 
-  push(...expr: (Expr | string)[]) {
+  push(...expr: ListValue[]) {
     expr.forEach((ex) => {
       if (typeof ex === "string") {
         this.value.push(new Identifier({ value: ex, parent: this }));
+        return;
+      }
+
+      if (ex instanceof Array) {
+        this.push(new List({ value: ex, parent: this }));
         return;
       }
 

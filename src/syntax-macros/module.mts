@@ -4,27 +4,31 @@ import {
   ModuleInfo,
   resolveModule as resolveModuleInfo,
 } from "../lib/module-info.mjs";
-import { AST } from "../parser.mjs";
+import { isIdentifier, isList, List } from "../lib/syntax.mjs";
 
-type Modules = Map<string, AST | "IN_PROGRESS">;
+type Modules = Map<string, List | "IN_PROGRESS">;
 
-export const moduleSyntaxMacro = (ast: AST, info: ModuleInfo): AST =>
-  resolveModule(ast, info);
+export const moduleSyntaxMacro = (list: List, info: ModuleInfo): List =>
+  resolveModule(list, info);
 
-const resolveModule = (ast: AST, info: ModuleInfo): AST => {
-  const newAst = resolveImports(ast, info);
+const resolveModule = (list: List, info: ModuleInfo): List => {
+  const newAst = resolveImports(list, info);
 
-  const module: AST = [
-    "module",
-    info.moduleId,
-    ["imports", ...info.imports.map(([info, expr]) => [info.moduleId, expr])],
-    ["exports"],
-    newAst,
-  ];
+  const module = new List({
+    value: [
+      "module",
+      info.moduleId,
+      ["imports", ...info.imports.map(([info, expr]) => [info.moduleId, expr])],
+      ["exports"],
+      newAst,
+    ],
+  });
 
   if (!info.isRoot) return module;
 
-  return ["root", ...expandImports(info.imports).values(), module];
+  return new List({
+    value: ["root", ...expandImports(info.imports).values(), module],
+  });
 };
 
 const expandImports = (
@@ -51,33 +55,29 @@ const stdModuleInfo = resolveModuleInfo({
 
 // TODO: Support import scoping
 /** Resolves import statements (use) and removes them from the AST */
-const resolveImports = (ast: AST, info: ModuleInfo): AST => {
+const resolveImports = (list: List, info: ModuleInfo): List => {
   if (!info.moduleId.startsWith("std") && !info.imports.length) {
     info.imports.push([stdModuleInfo, "***"]);
   }
 
-  const newAst = ast.reduce<AST>((newAst, expr) => {
-    if (!(expr instanceof Array)) {
-      newAst.push(expr);
-      return newAst;
-    }
+  const newAst = list.reduce((expr) => {
+    if (!isList(expr)) return expr;
 
-    if (expr[0] === "use") {
+    const identifier = expr.first();
+    if (isIdentifier(identifier) && identifier.is("use")) {
       info.imports.push([
         resolveModuleInfo({
-          usePath: expr[1] as string,
+          usePath: expr.at(1)!.value as string,
           srcPath: info.srcPath,
           workingDir: info.workingDir,
           isRoot: info.isRoot,
         }),
-        expr[2] as string,
+        expr.at(2)!.value as string,
       ]);
-      return newAst;
     }
 
-    newAst.push(resolveImports(expr, info));
-    return newAst;
-  }, []);
+    return resolveImports(expr, info);
+  });
 
   return newAst;
 };
