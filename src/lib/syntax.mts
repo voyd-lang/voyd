@@ -37,6 +37,7 @@ export abstract class Syntax {
   readonly context: LexicalContext;
   readonly props: Map<string, any> = new Map();
   readonly flags: Map<string, boolean> = new Map();
+  protected type?: Expr;
   abstract value: any;
 
   constructor({ location, context, parent }: SyntaxOpts) {
@@ -60,7 +61,16 @@ export abstract class Syntax {
     return this.context.getVar(identifier);
   }
 
-  is(val: SyntaxComparable) {
+  getType(): Expr | undefined {
+    return this.type;
+  }
+
+  setType(type: Expr) {
+    this.type = type;
+    return this;
+  }
+
+  is(val?: SyntaxComparable) {
     if (val instanceof Syntax) {
       return val.value === this.value;
     }
@@ -81,7 +91,6 @@ export abstract class Syntax {
 export type IdentifierKind = "fn" | "var" | "param" | "global";
 
 export class Identifier extends Syntax {
-  private type?: Expr;
   private kind?: IdentifierKind;
   /** A place to store an value for the identifier during expansion time only. */
   private result?: Expr;
@@ -90,6 +99,8 @@ export class Identifier extends Syntax {
   isMutable?: boolean;
   /** The Expr the identifier is bound to. Can be a function, variable initializer, etc. */
   bind?: Expr;
+  /** Used to identify a labeled parameter on function call */
+  label?: string;
 
   constructor(
     opts: SyntaxOpts & {
@@ -97,6 +108,7 @@ export class Identifier extends Syntax {
       bind?: Expr;
       isMutable?: boolean;
       kind?: IdentifierKind;
+      label?: string;
     }
   ) {
     super(opts);
@@ -104,6 +116,7 @@ export class Identifier extends Syntax {
     this.bind = opts.bind;
     this.isMutable = opts.isMutable;
     this.kind = opts.kind;
+    this.label = opts.label;
   }
 
   get isDefined() {
@@ -289,7 +302,7 @@ export class List extends Syntax {
     return this;
   }
 
-  is(_: SyntaxComparable): boolean {
+  is(_?: SyntaxComparable): boolean {
     return false;
   }
 
