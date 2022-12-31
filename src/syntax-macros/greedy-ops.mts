@@ -7,7 +7,7 @@ import {
 } from "../lib/syntax.mjs";
 
 export const greedyOps = new Set(["=>", "=", "<|", ";"]);
-export const isGreedyOp = (expr: Expr): expr is Identifier => {
+export const isGreedyOp = (expr?: Expr): expr is Identifier => {
   if (!isIdentifier(expr)) return false;
   return greedyOps.has(expr.value);
 };

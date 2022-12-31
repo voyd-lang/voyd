@@ -1,15 +1,15 @@
-import { isList } from "../lib/is-list.mjs";
-import { isWhitespace } from "../lib/is-whitespace.mjs";
-import { AST, Expr } from "../parser.mjs";
+import { Expr, isList, isWhitespace, List, newLine } from "../lib/syntax.mjs";
 import { isGreedyOp } from "./greedy-ops.mjs";
 import { isContinuationOp } from "./infix.mjs";
 
-export const parentheticalElision = (ast: AST): AST => {
-  const transformed: AST = [];
-  while (ast.length) {
-    transformed.push(elideParens(ast) as AST);
-    consumeLeadingWhitespace(ast);
+export const parentheticalElision = (list: List): List => {
+  const transformed = new List({ context: list });
+
+  while (list.hasChildren) {
+    transformed.push(elideParens(list) as List);
+    consumeLeadingWhitespace(list);
   }
+
   return transformed;
 };
 
@@ -17,58 +17,59 @@ export type ElideParensOpts = {
   indentLevel?: number;
 };
 
-const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
-  if (!isList(ast)) return ast;
-  const transformed: AST = [];
+const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
+  if (!isList(list)) return list;
+  const transformed = new List({ context: list });
   let indentLevel = opts.indentLevel ?? 0;
 
-  const nextLineHasChildExpr = () => nextExprIndentLevel(ast) > indentLevel;
+  const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;
 
   const consumeChildExpr = () => {
-    const indentLevel = nextExprIndentLevel(ast);
-    consumeLeadingWhitespace(ast);
-    if (hasContinuation(ast, transformed)) return;
-    transformed.push(elideParens(ast, { indentLevel }) as AST);
+    const indentLevel = nextExprIndentLevel(list);
+    consumeLeadingWhitespace(list);
+    if (hasContinuation(list, transformed)) return;
+    transformed.push(elideParens(list, { indentLevel }) as List);
   };
 
-  consumeLeadingWhitespace(ast);
-  while (ast.length) {
-    const next = ast[0];
+  consumeLeadingWhitespace(list);
+  while (list.hasChildren) {
+    const next = list.first();
 
-    if (next === "\n" && nextLineHasChildExpr()) {
+    const isNewline = isWhitespace(next) && next.isNewline;
+    if (isNewline && nextLineHasChildExpr()) {
       consumeChildExpr();
       continue;
     }
 
-    if (next === "\n" && !hasContinuation(ast, transformed)) {
+    if (isNewline && !hasContinuation(list, transformed)) {
       break;
     }
 
     if (isWhitespace(next)) {
-      ast.shift();
+      list.consume();
       continue;
     }
 
     if (isList(next)) {
       transformed.push(elideListContents(next, indentLevel));
-      ast.shift();
+      list.consume();
       continue;
     }
 
     if (isGreedyOp(next)) {
-      assistGreedyOpProcessing(ast, transformed, indentLevel);
+      assistGreedyOpProcessing(list, transformed, indentLevel);
       continue;
     }
 
     if (next !== undefined) {
       transformed.push(next);
-      ast.shift();
+      list.consume();
       continue;
     }
   }
 
-  if (transformed.length === 1) {
-    return transformed[0];
+  if (transformed.value.length === 1) {
+    return transformed.first()!;
   }
 
   return transformed;
@@ -77,72 +78,75 @@ const elideParens = (ast: Expr, opts: ElideParensOpts = {}): Expr => {
 // Consumes preceding expressions as though they belong to the operator at ast[-]
 // Modifies ast and transformed parameters
 const assistGreedyOpProcessing = (
-  ast: AST,
-  transformed: AST,
+  list: List,
+  transformed: List,
   indentLevel: number
 ) => {
-  transformed.push(ast[0] as string);
-  ast.shift();
+  transformed.push(list.consume());
 
-  const precedingExprCount = lineExpressionCount(ast);
+  const precedingExprCount = lineExpressionCount(list);
   if (precedingExprCount === 0) {
     transformed.push("block");
     return;
   }
 
-  consumeLeadingWhitespace(ast);
-  if (precedingExprCount === 1 && isList(ast[0])) {
-    transformed.push(...elideListContents(ast[0], indentLevel));
-    ast.shift();
+  consumeLeadingWhitespace(list);
+  if (precedingExprCount === 1 && isList(list.first())) {
+    transformed.push(
+      ...elideListContents(list.consume() as List, indentLevel).value
+    );
     return;
   }
 
-  if (precedingExprCount === 1 && nextLineIndentLevel(ast) <= indentLevel) {
+  if (precedingExprCount === 1 && nextLineIndentLevel(list) <= indentLevel) {
     transformed.push("block");
     return;
   }
 };
 
-const nextLineIndentLevel = (ast: AST) => {
-  const index = ast.indexOf("\n");
+const nextLineIndentLevel = (list: List) => {
+  const index = list.indexOf(newLine());
   if (index === -1) return 0;
-  return nextExprIndentLevel(ast, index);
+  return nextExprIndentLevel(list, index);
 };
 
-const lineExpressionCount = (ast: AST) => {
+const lineExpressionCount = (list: List) => {
   let count = 0;
-  for (const expr of ast) {
-    if (isWhitespace(expr) && expr !== "\n") continue;
-    if (expr === "\n") break;
+  for (const expr of list.value) {
+    if (isWhitespace(expr) && !expr.isNewline) continue;
+    if (expr.is("\n")) break;
     count += 1;
   }
   return count;
 };
 
-const elideListContents = (ast: AST, indentLevel: number): AST => {
-  consumeLeadingWhitespace(ast);
-  const transformed: AST = [elideParens(ast, { indentLevel })];
+const elideListContents = (list: List, indentLevel: number): List => {
+  consumeLeadingWhitespace(list);
+  const transformed = new List({
+    value: [elideParens(list, { indentLevel })],
+    context: list,
+  });
 
-  if (transformed.length === 1 && isList(transformed[0])) {
-    return transformed[0];
+  if (transformed.value.length === 1 && isList(transformed.first())) {
+    return transformed.first() as List;
   }
 
   return transformed;
 };
 
-const nextExprIndentLevel = (ast: AST, startIndex?: number) => {
+const nextExprIndentLevel = (list: List, startIndex?: number) => {
   let index = startIndex ?? 0;
   let nextIndentLevel = 0;
 
-  while (ast[index]) {
-    const expr = ast[index];
-    if (expr === "\n") {
+  while (list.at(index)) {
+    const expr = list.at(index)!;
+    if (expr.is("\n")) {
       nextIndentLevel = 0;
       index += 1;
       continue;
     }
 
-    if (expr === "\t") {
+    if (expr.is("\t")) {
       nextIndentLevel += 1;
       index += 1;
       continue;
@@ -154,14 +158,13 @@ const nextExprIndentLevel = (ast: AST, startIndex?: number) => {
   return nextIndentLevel;
 };
 
-const hasContinuation = (ast: AST, transformed: AST) => {
-  const lastTransformedExpr = transformed[transformed.length - 1] as string;
+const hasContinuation = (list: List, transformed: List) => {
+  const lastTransformedExpr = transformed.at(-1);
   if (isContinuationOp(lastTransformedExpr)) {
     return true;
   }
 
-  for (const expr of ast) {
-    if (typeof expr !== "string") return false;
+  for (const expr of list.value) {
     if (isWhitespace(expr)) continue;
     return isContinuationOp(expr);
   }
@@ -169,11 +172,11 @@ const hasContinuation = (ast: AST, transformed: AST) => {
   return false;
 };
 
-const consumeLeadingWhitespace = (ast: AST) => {
-  while (ast.length) {
-    const next = ast[0];
-    if (typeof next === "string" && isWhitespace(next)) {
-      ast.shift();
+const consumeLeadingWhitespace = (list: List) => {
+  while (list.hasChildren) {
+    const next = list.first();
+    if (isWhitespace(next)) {
+      list.consume();
       continue;
     }
     break;

@@ -38,10 +38,11 @@ export const infixOperators = new Map<string, [number, Associativity]>([
   ["??", [3, "right"]],
 ]);
 
-export const isContinuationOp = (op: string) =>
-  isInfixOp(op) && op !== ":" && !greedyOps.has(op); // `:` is a hacky exception (Hopefully the only one.)
+export const isContinuationOp = (op?: Expr) =>
+  isInfixOp(op) && !op.is(":") && !greedyOps.has(op.value); // `:` is a hacky exception (Hopefully the only one.)
 
-export const isInfixOp = (op: string) => infixOperators.has(op);
+export const isInfixOp = (op?: Expr): op is Identifier =>
+  isIdentifier(op) && infixOperators.has(op.value);
 
 export const infix = (list: List, startList?: List): List => {
   const outputQueue = startList ?? new List({ context: list });
@@ -108,4 +109,4 @@ export const infix = (list: List, startList?: List): List => {
 };
 
 export const isOperand = (expr?: Expr): expr is Identifier =>
-  isIdentifier(expr) && isInfixOp(expr.value);
+  isIdentifier(expr) && isInfixOp(expr);

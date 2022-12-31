@@ -272,6 +272,10 @@ export class List extends Syntax {
     return this;
   }
 
+  indexOf(expr: Expr) {
+    return this.value.findIndex((v) => v.is(expr));
+  }
+
   insert(expr: Expr | string, at = 0) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
     this.value.splice(at, 0, result);
@@ -381,3 +385,4 @@ export const isWhitespace = (expr?: Expr): expr is Whitespace =>
   expr instanceof Whitespace;
 export const isIdentifier = (expr?: Expr): expr is Identifier =>
   expr instanceof Identifier;
+export const newLine = () => new Whitespace({ value: "\n" });
