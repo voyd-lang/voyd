@@ -10,6 +10,7 @@ import {
   isList,
   isStringLiteral,
   List,
+  StringLiteral,
   Syntax,
 } from "../lib/syntax.mjs";
 
@@ -326,30 +327,48 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
         callLambda({
           lambda,
           macros,
-          vars,
-          args: [prev, cur, index, array],
+          args: new List({
+            value: [
+              prev,
+              cur,
+              new Float({ value: index }),
+              new List({ value: array }),
+            ],
+          }),
         }),
-      start.value
+      evalExpr(start, { macros })
     );
   },
-  push: (_, array: AST, val: Expr) => {
-    array.push(val);
-    return [];
+  push: (_, args) => {
+    const list = args.at(0) as List;
+    const val = args.at(1)!;
+    list.push(val);
+    return list;
   },
-  concat: (_, ...rest: AST[]) => rest.flat(),
-  "is-list": (_, list) => isList(list),
+  concat: (_, args) => {
+    const list = args.first() as List;
+    list.push(...args.rest().value.flatMap((expr) => (expr as List).value));
+    return list;
+  },
+  "is-list": (_, args) => bool(isList(args.at(0))),
   log: (_, arg) => {
     console.error(JSON.stringify(arg, undefined, 2));
     return arg;
   },
-  split: (_, str: string, splitter: string) => str.split(splitter),
-  "macro-expand": ({ macros, vars }, body: AST) =>
-    expandMacros(body, macros, vars),
-  "char-to-code": (_, char: string) => String(char).charCodeAt(0),
-  eval: (opts, body: AST) => evalFnCall(body, opts),
-  "register-macro": ({ macros }, ast: AST) => {
-    registerMacro(macros, ast);
-    return [];
+  split: ({ parent }, arg) => {
+    const str = arg.at(0) as StringLiteral;
+    const splitter = arg.at(0) as StringLiteral;
+    return new List({ value: str.value.split(splitter.value), parent });
+  },
+  "macro-expand": ({ macros }, args) => expandMacros(args, macros),
+  "char-to-code": (_, args) =>
+    new Int({
+      value: String((args.at(0) as StringLiteral).value).charCodeAt(0),
+    }),
+  eval: (opts, body) => evalFnCall(body, opts),
+  "register-macro": ({ macros }, args) => {
+    registerMacro(macros, args);
+    return nop();
   },
 };
 
@@ -368,9 +387,10 @@ const fnsToSkipArgEval = new Set([
 ]);
 
 const handleOptionalConditionParenthesis = (expr: Expr): Expr => {
-  if (isList(expr) && expr.length === 1 && isList(expr[0])) {
-    return expr[0];
+  if (isList(expr) && isList(expr.first())) {
+    return expr.first()!;
   }
+
   return expr;
 };
 
@@ -380,9 +400,9 @@ const isLambda = (expr?: Expr): expr is List => {
 };
 
 /** Slice out the beginning macro before calling */
-const registerMacro = (macros: Macros, ast: AST) => {
-  const id = ((ast[0] as AST)[0] as string).replace(/\'/g, "");
-  macros.set(id, ast);
+const registerMacro = (macros: Macros, list: List) => {
+  const id = list.first() as Identifier;
+  macros.set(id.value, list);
 };
 
 const nop = () => new List({}).push(Identifier.from("splice-block"));

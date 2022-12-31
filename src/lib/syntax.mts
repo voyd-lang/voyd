@@ -249,14 +249,26 @@ export class List extends Syntax {
   }
 
   push(...expr: (Expr | string)[]) {
-    this.value.push(
-      ...expr.map((ex) => {
-        if (typeof ex === "string") {
-          return new Identifier({ value: ex, parent: this });
-        }
-        return ex.setParent(this);
-      })
-    );
+    expr.forEach((ex) => {
+      if (typeof ex === "string") {
+        this.value.push(new Identifier({ value: ex, parent: this }));
+        return;
+      }
+
+      ex.setParent(this);
+
+      if (
+        isList(ex) &&
+        isIdentifier(ex.first()) &&
+        ex.first()!.value === "splice-block"
+      ) {
+        this.value.push(...ex.rest().value);
+        return;
+      }
+
+      this.value.push(ex);
+    });
+
     return this;
   }
 
@@ -278,11 +290,7 @@ export class List extends Syntax {
     const list = new List({ value: [], context: this });
     return this.value.reduce((newList: List, expr, index, array) => {
       if (!expr) return newList;
-      const val = fn(expr, index, array);
-      if (isList(val) && val.first()?.is("splice-block")) {
-        return newList.push(...val.rest().value);
-      }
-      return newList.push(val);
+      return newList.push(fn(expr, index, array));
     }, list);
   }
 
