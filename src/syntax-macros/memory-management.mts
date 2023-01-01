@@ -1,64 +1,51 @@
 import {
-  CDT_ADDRESS_TYPE,
+  List,
+  isList,
+  Identifier,
   isPrimitiveType,
-} from "../lib/is-primitive-type.mjs";
+  CDT_ADDRESS_TYPE,
+  FnType,
+  Int,
+} from "../lib/index.mjs";
 import { ModuleInfo } from "../lib/module-info.mjs";
-import { Expr, Identifier, isList, List } from "../lib/syntax/syntax.mjs";
-import { toIdentifier } from "../lib/to-identifier.mjs";
 
 export const memoryManagement = (list: List, info: ModuleInfo): List => {
   if (!info.isRoot) return list;
-  const cdts = mapCDTs(list);
-  return insertMemInstructions(list, cdts);
+  return insertMemInstructions(list);
 };
 
-const insertMemInstructions = (list: List, map: CdtSizeMap): List =>
+const insertMemInstructions = (list: List): List =>
   list.reduce((expr) => {
     if (!isList(expr)) return expr;
 
-    if (expr.calls("define-function")) return insertMemInstructions(expr, map);
+    if (!expr.calls("define-function")) return insertMemInstructions(expr);
 
-    const fn = expr.at(1) as Identifier;
-    const returnType = fn.props.get("returnType") as Expr;
+    const fnId = expr.at(1) as Identifier;
+    const fn = fnId.getTypeOf() as FnType;
 
-    if (isPrimitiveType(returnType)) return insertMemInstructions(expr, map);
-
-    const size = map.get(toIdentifier(returnTypeDef[1] as string));
-    if (typeof size === "undefined") {
-      throw new Error(`Unrecognized type ${returnTypeDef}`);
-    }
-
-    list.push(addMemInstructionsToFunctionDef(expr, size));
-    return list;
-  }, []);
+    if (isPrimitiveType(fn.returns)) return insertMemInstructions(expr);
+    return addMemInstructionsToFunctionDef(expr, fn.returns!.size);
+  });
 
 const addMemInstructionsToFunctionDef = (
-  ast: AST,
+  list: List,
   allocationSize: number
-): AST => {
-  const body = ast[5];
-  const variables = ast[3] as AST;
-  const returnAddressVarName = "*__return_alloc_address";
-  variables.push([returnAddressVarName, CDT_ADDRESS_TYPE]);
-  ast[5] = [
-    "typed-block",
-    CDT_ADDRESS_TYPE,
-    [
-      "define",
-      ["labeled-expr", returnAddressVarName, CDT_ADDRESS_TYPE],
-      ["alloc", allocationSize],
+): List => {
+  const body = list.at(4)!;
+  const returnAddr = "*__return_alloc_address";
+  list.setVar(returnAddr, { kind: "var", type: CDT_ADDRESS_TYPE });
+  list.value[4] = new List({
+    context: list,
+    value: [
+      "typed-block",
+      CDT_ADDRESS_TYPE,
+      [
+        "define",
+        ["labeled-expr", returnAddr, CDT_ADDRESS_TYPE],
+        ["alloc", new Int({ value: allocationSize })],
+      ],
+      ["set-return", ["copy", body, returnAddr]],
     ],
-    ["set-return", ["copy", body, returnAddressVarName]],
-  ];
-  return ast;
+  });
+  return list;
 };
-
-// TODO: Support scoping
-type CdtSizeMap = Map<string, number>;
-
-const mapCDTs = (ast: AST, map: CdtSizeMap = new Map()) =>
-  ast.reduce((map: CdtSizeMap, expr): CdtSizeMap => {
-    if (!isList(expr)) return map;
-    if (expr[0] !== "define-cdt") return mapCDTs(expr, map);
-    return map.set(toIdentifier(expr[1] as string), expr[3] as number);
-  }, map);

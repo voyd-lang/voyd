@@ -10,8 +10,6 @@ export type Type =
   | ArrayType
   | FnType;
 
-export const CDT_ADDRESS_TYPE = "i32";
-
 export abstract class BaseType extends Syntax {
   /** Size in bytes */
   abstract readonly size: number;
@@ -173,3 +171,9 @@ const primitives = new Set([
   "funcref",
   "externref",
 ]);
+
+export const i32 = PrimitiveType.from("i32");
+export const f32 = PrimitiveType.from("f32");
+export const bool = PrimitiveType.from("i32");
+export const dVoid = PrimitiveType.from("void");
+export const CDT_ADDRESS_TYPE = i32;

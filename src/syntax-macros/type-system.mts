@@ -17,6 +17,10 @@ import {
   PrimitiveType,
   WasmStackType,
   isPrimitiveType,
+  i32,
+  bool,
+  dVoid,
+  f32,
 } from "../lib/index.mjs";
 
 export const typeSystem = (list: List, info: ModuleInfo): List => {
@@ -310,7 +314,9 @@ const getBnrReturnType = (call: List): Type | undefined => {
 const getMatchingFnForCallExpr = (call: List): FnType | undefined => {
   const identifier = call.first() as Identifier;
   const args = call.slice(1);
-  return getMatchingFn({ identifier, args, parent: call });
+  const fn = getMatchingFn({ identifier, args, parent: call });
+  if (fn) identifier.setTypeOf(fn);
+  return fn;
 };
 
 const getMatchingFn = ({
@@ -476,8 +482,3 @@ const isPrimitiveFn = (expr?: Expr) => {
   if (typeof expr !== "string") return false;
   return new Set(["if", "="]).has(expr);
 };
-
-const i32 = PrimitiveType.from("i32");
-const f32 = PrimitiveType.from("f32");
-const bool = PrimitiveType.from("i32");
-const dVoid = PrimitiveType.from("void");
