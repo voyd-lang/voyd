@@ -1,4 +1,10 @@
-import { Expr, isList, isWhitespace, List, newLine } from "../lib/syntax.mjs";
+import {
+  Expr,
+  isList,
+  isWhitespace,
+  List,
+  newLine,
+} from "../lib/syntax/syntax.mjs";
 import { isGreedyOp } from "./greedy-ops.mjs";
 import { isContinuationOp } from "./infix.mjs";
 

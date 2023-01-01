@@ -8,6 +8,8 @@
     "EBNF",
     "elif",
     "elifs",
+    "externref",
+    "funcref",
     "impls",
     "Inout",
     "memcpy",

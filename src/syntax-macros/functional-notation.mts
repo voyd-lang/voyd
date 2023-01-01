@@ -1,4 +1,9 @@
-import { isList, isWhitespace, List, Whitespace } from "../lib/syntax.mjs";
+import {
+  isList,
+  isWhitespace,
+  List,
+  Whitespace,
+} from "../lib/syntax/syntax.mjs";
 
 export const functionalNotation = (list: List): List =>
   list.reduce((expr, index, array) => {

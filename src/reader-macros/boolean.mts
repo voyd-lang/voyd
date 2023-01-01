@@ -1,4 +1,4 @@
-import { Bool } from "../lib/syntax.mjs";
+import { Bool } from "../lib/syntax/syntax.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const booleanMacro: ReaderMacro = {

@@ -11,11 +11,12 @@ import {
   isInt,
   isBool,
   Bool,
+  Int,
 } from "../lib/index.mjs";
 
 export const typeSystem = (list: List, info: ModuleInfo): List => {
   if (!info.isRoot) return list;
-  setFunctionMap(list);
+  initTypes(list);
   return list.map((expr) => addTypeAnnotationsToExpr(expr));
 };
 
@@ -56,6 +57,14 @@ const addTypeAnnotationsToFn = (list: List): List => {
   );
 
   const returnType = suppliedReturnType ?? inferredReturnType;
+  if (!returnType || !fnType) {
+    console.error(JSON.stringify(list, undefined, 2));
+    throw new Error("Could not determine return type of fn");
+  }
+
+  fnType.value[1] = returnType;
+  fn.setType(fnType);
+  fn.props.set("returnType", returnType);
 
   const newBody = new List({
     value: [
@@ -98,7 +107,7 @@ const annotateFnParams = (list: List, parent: Expr): List => {
         const { identifier, type, label } = getInfoFromRawParam(expr);
         identifier!.setType(type);
         identifier!.setKind("param");
-        parent.setVar(identifier!);
+        parent.setId(identifier!);
         const value = [identifier!, type];
         if (label) value.push(label);
         return [new List({ value, context: expr })];
@@ -114,7 +123,7 @@ const registerStructParamField = (value: Expr, parent: Expr): Expr => {
   }
   const { identifier, type } = getInfoFromRawParam(value);
   identifier!.setType(type);
-  parent.setVar(identifier!);
+  parent.setId(identifier!);
   return new List({ value: [identifier!, type] });
 };
 
@@ -139,8 +148,8 @@ const addTypeAnnotationsToBlock = (list: List): List => {
 const addTypeAnnotationsToFnCall = (list: List): List => {
   if (list.calls("define-function")) return addTypeAnnotationsToFn(list);
   if (list.calls("define-extern-function")) return list; // TODO: type check this mofo
-  if (list.calls("define-type")) return list; // TODO: type check this mofo
-  if (list.calls("define-cdt")) return list; // TODO: type check this mofo
+  if (list.calls("define-type")) return list;
+  if (list.calls("define-cdt")) return list;
   if (list.calls("block")) return addTypeAnnotationsToBlock(list);
   if (list.calls("lambda-expr")) return list;
   if (list.calls("quote")) return list;
@@ -366,43 +375,62 @@ const structArgsMatch = (expected: List, given: List): boolean => {
   );
 };
 
-const setFunctionMap = (list: List) => {
+const initTypes = (list: List) => {
   return list.value.forEach((expr) => {
     if (!isList(expr)) return;
-
     const isFnDef =
-      expr.first()?.is("define-function") &&
-      expr.first()?.is("define-extern-function");
+      expr.calls("define-function") || expr.calls("define-extern-function");
 
-    if (!isFnDef) {
-      setFunctionMap(expr);
+    if (isFnDef) {
+      initFn(expr, list);
       return;
     }
 
-    const fnIdentifier = expr.at(1) as Identifier;
-    fnIdentifier.bind = expr;
-    const parametersIndex = expr.first()?.is("define-function") ? 2 : 3;
-    const params = (expr.at(parametersIndex) as List).slice(1).map((p) => {
-      // For now assume all params are either structs or labeled expressions
-      const { label, identifier, type } = getInfoFromRawParam(p as List);
-      if (identifier) {
-        identifier.setKind("param");
-        identifier.setType(type);
-        identifier.label = label?.value;
-      }
+    if (expr.calls("define-type")) {
+      const id = expr.at(1) as Identifier;
+      const val = expr.at(2) as Expr;
+      id.bind = expr;
+      id.setType(val);
+      id.setKind("type");
+      list.setType(id);
+    }
 
-      return new List({
-        parent: expr,
-        value: [identifier ?? new Bool({ value: false }), type],
-      });
-    });
-    const suppliedReturnType = getSuppliedReturnTypeForFn(expr);
-    const value: Expr[] = [params];
-    if (suppliedReturnType) value.push(suppliedReturnType);
-    fnIdentifier.setType(new List({ value, parent: expr }));
-
-    list.setFn(fnIdentifier);
+    if (expr.calls("define-cdt")) {
+      const id = expr.at(1) as Identifier;
+      const size = expr.at(3) as Int;
+      id.props.set("size", size.value);
+      id.bind = expr;
+      id.setKind("type");
+      id.setType(expr);
+      list.setType(id);
+    }
   });
+};
+
+const initFn = (expr: List, parent: Expr) => {
+  const fnIdentifier = expr.at(1) as Identifier;
+  fnIdentifier.bind = expr;
+  const parametersIndex = expr.first()?.is("define-function") ? 2 : 3;
+  const params = (expr.at(parametersIndex) as List).slice(1).map((p) => {
+    // For now assume all params are either structs or labeled expressions
+    const { label, identifier, type } = getInfoFromRawParam(p as List);
+    if (identifier) {
+      identifier.setKind("param");
+      identifier.setType(type);
+      identifier.label = label?.value;
+    }
+
+    return new List({
+      parent: expr,
+      value: [identifier ?? new Bool({ value: false }), type],
+    });
+  });
+  const suppliedReturnType = getSuppliedReturnTypeForFn(expr);
+  const value: Expr[] = [params];
+  if (suppliedReturnType) value.push(suppliedReturnType);
+  fnIdentifier.setType(new List({ value, parent: expr }));
+
+  parent.setFn(fnIdentifier);
 };
 
 const getSuppliedReturnTypeForFn = (list: List): Expr | undefined => {

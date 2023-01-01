@@ -1,6 +1,6 @@
 import { File } from "../lib/file.mjs";
 import { ModuleInfo } from "../lib/module-info.mjs";
-import { List, Syntax } from "../lib/syntax.mjs";
+import { List, Syntax } from "../lib/syntax/syntax.mjs";
 import { Token } from "../lib/token.mjs";
 
 export interface ReaderMacro {

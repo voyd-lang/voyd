@@ -4,7 +4,7 @@ import {
   isIdentifier,
   isList,
   List,
-} from "../lib/syntax.mjs";
+} from "../lib/syntax/syntax.mjs";
 import { greedyOps } from "./greedy-ops.mjs";
 
 export type Associativity = "left" | "right";

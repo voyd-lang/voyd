@@ -4,7 +4,7 @@ import {
   isIdentifier,
   isList,
   List,
-} from "../lib/syntax.mjs";
+} from "../lib/syntax/syntax.mjs";
 
 export const greedyOps = new Set(["=>", "=", "<|", ";"]);
 export const isGreedyOp = (expr?: Expr): expr is Identifier => {

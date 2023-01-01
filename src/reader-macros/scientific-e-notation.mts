@@ -1,4 +1,4 @@
-import { Identifier, List, StringLiteral } from "../lib/syntax.mjs";
+import { Identifier, List, StringLiteral } from "../lib/syntax/syntax.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const scientificENotationMacro: ReaderMacro = {

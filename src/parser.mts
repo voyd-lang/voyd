@@ -1,5 +1,5 @@
 import { ModuleInfo } from "./lib/module-info.mjs";
-import { Identifier, List, Syntax, Whitespace } from "./lib/syntax.mjs";
+import { Identifier, List, Syntax, Whitespace } from "./lib/syntax/syntax.mjs";
 import { Token } from "./lib/token.mjs";
 import { File } from "./lib/file.mjs";
 import { getReaderMacroForToken } from "./reader-macros/index.mjs";

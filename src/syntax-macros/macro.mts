@@ -12,7 +12,7 @@ import {
   List,
   StringLiteral,
   Syntax,
-} from "../lib/syntax.mjs";
+} from "../lib/syntax/syntax.mjs";
 
 /** TODO: Support macro scoping / module import checking */
 type Macros = Map<string, List>;
@@ -100,7 +100,7 @@ const expandMacro = ({
   call: List;
   macros: Macros;
 }): Expr => {
-  macro.setVar(new Identifier({ value: "&body", bind: call.rest() }));
+  macro.setId(new Identifier({ value: "&body", bind: call.rest() }));
   const result = macro.rest().map((exp) => evalExpr(exp, { macros }));
   return expandMacros(result.pop()!, macros) ?? [];
 };
@@ -157,7 +157,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     identifier.bind = init;
     identifier.setKind("var");
     identifier.setResult(evalExpr(init, { macros }));
-    parent.setVar(identifier);
+    parent.setId(identifier);
     return nop();
   },
   define: ({ parent, macros }, args) => {
@@ -170,7 +170,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     identifier.bind = init;
     identifier.setKind("var");
     identifier.setResult(evalExpr(init, { macros }));
-    parent.setVar(identifier);
+    parent.setId(identifier);
     return nop();
   },
   // TODO: Support functions in macro expansion phase
@@ -221,7 +221,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
 
       p.bind = new List({});
       p.setKind("param");
-      lambda.setVar(p);
+      lambda.setId(p);
       return p;
     });
 
@@ -244,7 +244,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
 
         if (isIdentifier(exp) && exp.value.startsWith("$@")) {
           const id = exp.value.replace("$@", "");
-          const value = exp.getVar(id)!;
+          const value = exp.getId(id)!;
           const list = value.assertedResult() as List;
           list.insert("splice-block");
           return list;
@@ -252,7 +252,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
 
         if (isIdentifier(exp) && exp.value.startsWith("$")) {
           const id = exp.value.replace("$@", "");
-          const value = exp.getVar(id)!;
+          const value = exp.getId(id)!;
           return value.assertedResult();
         }
 

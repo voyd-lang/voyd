@@ -1,4 +1,4 @@
-import { SourceLocation } from "./syntax.mjs";
+import { SourceLocation } from "./syntax/syntax.mjs";
 
 export class Token {
   readonly location: SourceLocation;
