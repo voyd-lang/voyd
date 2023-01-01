@@ -16,6 +16,7 @@ export abstract class BaseType extends Syntax {
 }
 
 export class PrimitiveType extends BaseType {
+  readonly __type = "primitive-type";
   value: WasmStackType;
 
   constructor(opts: SyntaxOpts & { value: WasmStackType }) {
@@ -42,7 +43,7 @@ export class PrimitiveType extends BaseType {
 }
 
 export class UnionType extends BaseType {
-  private readonly __type = "union-type";
+  readonly __type = "union-type";
   value: Type[];
 
   constructor(opts: SyntaxOpts & { value: Type[] }) {
@@ -60,7 +61,7 @@ export class UnionType extends BaseType {
 }
 
 export class IntersectionType extends BaseType {
-  private readonly __type = "intersection-type";
+  readonly __type = "intersection-type";
   value: Type[];
 
   constructor(opts: SyntaxOpts & { value: Type[] }) {
@@ -78,7 +79,7 @@ export class IntersectionType extends BaseType {
 }
 
 export class TupleType extends BaseType {
-  private readonly __type = "tuple-type";
+  readonly __type = "tuple-type";
   value: Type[];
 
   constructor(opts: SyntaxOpts & { value: Type[] }) {
@@ -96,7 +97,7 @@ export class TupleType extends BaseType {
 }
 
 export class StructType extends BaseType {
-  private readonly __type = "struct-type";
+  readonly __type = "struct-type";
   value: { name: string; type: Type }[];
 
   constructor(opts: SyntaxOpts & { value: { name: string; type: Type }[] }) {
@@ -118,7 +119,7 @@ export class StructType extends BaseType {
 }
 
 export class ArrayType extends BaseType {
-  private readonly __type = "array-type";
+  readonly __type = "array-type";
   readonly size = Infinity;
   value: Type;
 
@@ -136,8 +137,9 @@ export type FnTypeValue = {
 export type Param = { label?: string; name?: string; type: Type };
 
 export class FnType extends BaseType {
-  private readonly __type = "array-type";
+  readonly __type = "array-type";
   readonly size = 0;
+  binaryenId = "";
   value: FnTypeValue;
 
   constructor(opts: SyntaxOpts & { value: FnTypeValue }) {
@@ -174,6 +176,8 @@ const primitives = new Set([
 
 export const i32 = PrimitiveType.from("i32");
 export const f32 = PrimitiveType.from("f32");
+export const i64 = PrimitiveType.from("i64");
+export const f64 = PrimitiveType.from("f64");
 export const bool = PrimitiveType.from("i32");
 export const dVoid = PrimitiveType.from("void");
 export const CDT_ADDRESS_TYPE = i32;

@@ -1,7 +1,7 @@
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export class Whitespace extends Syntax {
-  private readonly __type = "whitespace";
+  readonly __type = "whitespace";
   value: string;
 
   constructor(opts: SyntaxOpts & { value: string }) {

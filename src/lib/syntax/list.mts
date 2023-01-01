@@ -5,6 +5,7 @@ import { Int } from "./int.mjs";
 import { Syntax, SyntaxOpts, SyntaxComparable } from "./syntax.mjs";
 
 export class List extends Syntax {
+  readonly __type = "list";
   value: Expr[] = [];
 
   constructor(opts: SyntaxOpts & { value?: ListValue[] }) {
@@ -97,6 +98,12 @@ export class List extends Syntax {
       if (!expr) return newList;
       return newList.push(fn(expr, index, array));
     }, list);
+  }
+
+  /** Marks this list as a function definition */
+  setAsFn() {
+    this.context.setAsFn();
+    return this;
   }
 
   slice(start?: number, end?: number): List {

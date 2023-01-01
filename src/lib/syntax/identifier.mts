@@ -6,6 +6,7 @@ import { Type } from "./types.mjs";
 export type Id = Identifier | string;
 
 export class Identifier extends Syntax {
+  readonly __type = "identifier";
   /** The actual string ID of the identifier */
   value: string;
   binding?: Expr;

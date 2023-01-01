@@ -21,6 +21,8 @@ import {
   bool,
   dVoid,
   f32,
+  f64,
+  i64,
 } from "../lib/index.mjs";
 
 export const typeSystem = (list: List, info: ModuleInfo): List => {
@@ -39,6 +41,7 @@ const addTypeAnnotationsToExpr = (
 };
 
 const addTypeAnnotationsToFn = (list: List, parent: Expr): List => {
+  list.setAsFn();
   const identifier = list.at(1) as Identifier;
   const rawParameters = list.at(2) as List;
   const fn = getMatchingFn({
@@ -300,10 +303,9 @@ const getStructLiteralType = (ast: List): StructType =>
     parent: ast,
   });
 
-const getIfReturnType = (list: List): Type | undefined => {
-  // TODO type check this mofo
-  return getExprReturnType(list.at(2));
-};
+// TODO type check this mofo
+const getIfReturnType = (list: List): Type | undefined =>
+  getExprReturnType(list.at(2));
 
 const getBnrReturnType = (call: List): Type | undefined => {
   const info = call.at(1) as List | undefined;
@@ -373,6 +375,12 @@ const structArgsMatch = (expected: StructType, given: StructType): boolean => {
 };
 
 const initTypes = (list: List) => {
+  list.setType("i32", i32);
+  list.setType("f32", f32);
+  list.setType("i32", i64);
+  list.setType("f32", f64);
+  list.setType("bool", bool);
+  list.setType("void", dVoid);
   return list.value.forEach((expr) => {
     if (!isList(expr)) return;
     const isFnDef =

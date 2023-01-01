@@ -31,6 +31,8 @@ export abstract class Syntax {
   readonly props: Map<string, any> = new Map();
   readonly flags: Map<string, boolean> = new Map();
   protected type?: Type;
+  // Typescript can't discriminate between types via instanceof without this for some reason
+  abstract readonly __type: string;
   abstract value: any;
 
   constructor({ location, context, parent }: SyntaxOpts) {
@@ -47,13 +49,21 @@ export abstract class Syntax {
     return this.context.getFns(id);
   }
 
-  setVar(id: Id, val: Var) {
+  setVar(id: Id, val: Omit<Var, "index">) {
     this.context.setVar(id, val);
     return this;
   }
 
   getVar(id: Id) {
     return this.context.getVar(id);
+  }
+
+  getAllFnVars() {
+    return this.context.getAllFnVars();
+  }
+
+  getAllFnParams() {
+    return this.context.getAllFnParams();
   }
 
   setType(id: Id, val: Type) {
