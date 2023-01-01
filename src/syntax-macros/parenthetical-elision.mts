@@ -4,7 +4,7 @@ import {
   isWhitespace,
   List,
   newLine,
-} from "../lib/syntax/syntax.mjs";
+} from "../lib/syntax/index.mjs";
 import { isGreedyOp } from "./greedy-ops.mjs";
 import { isContinuationOp } from "./infix.mjs";
 

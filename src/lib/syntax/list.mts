@@ -1,12 +1,8 @@
+import { Expr } from "./expr.mjs";
+import { isList } from "./helpers.mjs";
 import { Identifier } from "./identifier.mjs";
-import {
-  Syntax,
-  Expr,
-  SyntaxOpts,
-  Int,
-  isList,
-  SyntaxComparable,
-} from "./syntax.mjs";
+import { Int } from "./int.mjs";
+import { Syntax, SyntaxOpts, SyntaxComparable } from "./syntax.mjs";
 
 export class List extends Syntax {
   value: Expr[] = [];
@@ -29,7 +25,7 @@ export class List extends Syntax {
   }
 
   calls(fnId: Expr | string) {
-    return this.at(0)?.is(fnId);
+    return !!this.at(0)?.is(fnId);
   }
 
   consume(): Expr {

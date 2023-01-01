@@ -1,19 +1,27 @@
-import { Identifier } from "./identifier.mjs";
+import { Expr } from "./expr.mjs";
+import { getIdStr, Id } from "./identifier.mjs";
 import { FnType, Type } from "./types.mjs";
+
+export type Var = {
+  mut?: boolean;
+  type?: Type;
+  kind: "var" | "param" | "global";
+  /** For macro expansion phase */
+  value?: Expr;
+};
 
 export class LexicalContext {
   private parent?: LexicalContext;
   private fns: Map<string, FnType[]> = new Map();
-  private vars: Map<string, { mut: boolean; type: Type }> = new Map();
-  private globals: Map<string, { mut: boolean; type: Type }> = new Map();
-  private params: Map<string, Type> = new Map();
+  private vars: Map<string, Var> = new Map();
+  private types: Map<string, Type> = new Map();
 
   constructor(parent?: LexicalContext) {
     this.parent = parent;
   }
 
-  setFn(identifier: string | Identifier, type: FnType) {
-    const id = typeof identifier === "string" ? identifier : identifier.value;
+  setFn(identifier: Id, type: FnType) {
+    const id = getIdStr(identifier);
     const fns = this.fns.get(id);
     if (!fns) {
       this.fns.set(id, [type]);
@@ -23,24 +31,34 @@ export class LexicalContext {
     return this;
   }
 
-  getFns(identifier: Identifier | string): FnType[] | undefined {
-    const id = typeof identifier === "string" ? identifier : identifier.value;
+  getFns(identifier: Id): FnType[] | undefined {
+    const id = getIdStr(identifier);
     return this.fns.get(id) ?? this.parent?.getFns(id);
   }
 
-  setId(identifier: Identifier) {
-    this.vars.set(identifier.value, identifier);
+  setVar(identifier: Id, v: Var) {
+    const id = getIdStr(identifier);
+    this.vars.set(id, v);
     return this;
   }
 
-  getId(identifier: Identifier | string): Identifier | undefined {
-    const id = typeof identifier === "string" ? identifier : identifier.value;
-    return this.vars.get(id) ?? this.parent?.getId(id);
+  getVar(identifier: Id): Var | undefined {
+    const id = getIdStr(identifier);
+    return this.vars.get(id) ?? this.parent?.getVar(id);
+  }
+
+  setType(identifier: Id, v: Type) {
+    const id = getIdStr(identifier);
+    this.types.set(id, v);
+    return this;
+  }
+
+  getType(identifier: Id): Type | undefined {
+    const id = getIdStr(identifier);
+    return this.types.get(id) ?? this.parent?.getType(id);
   }
 
   setParent(parent: LexicalContext) {
     this.parent = parent;
   }
 }
-
-const getIdStr = (id: string | Identifier) =>

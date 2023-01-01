@@ -12,7 +12,7 @@ import {
   List,
   StringLiteral,
   Syntax,
-} from "../lib/syntax/syntax.mjs";
+} from "../lib/syntax/index.mjs";
 
 /** TODO: Support macro scoping / module import checking */
 type Macros = Map<string, List>;
@@ -100,7 +100,7 @@ const expandMacro = ({
   call: List;
   macros: Macros;
 }): Expr => {
-  macro.setId(new Identifier({ value: "&body", bind: call.rest() }));
+  macro.setVar("&body", { kind: "param", value: call.rest() });
   const result = macro.rest().map((exp) => evalExpr(exp, { macros }));
   return expandMacros(result.pop()!, macros) ?? [];
 };
@@ -153,24 +153,27 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     if (!isIdentifier(identifier) || !init) {
       throw new Error("Invalid variable");
     }
-    identifier.isMutable = true;
-    identifier.bind = init;
-    identifier.setKind("var");
-    identifier.setResult(evalExpr(init, { macros }));
-    parent.setId(identifier);
+    identifier.binding = init;
+    parent.setVar(identifier, {
+      kind: "var",
+      mut: true,
+      value: evalExpr(init, { macros }),
+    });
     return nop();
   },
   define: ({ parent, macros }, args) => {
+    // Warning: Cannot be typed like would be at compile time (for now);
     const identifier = args.at(0);
     const init = args.at(1);
     if (!isIdentifier(identifier) || !init) {
       throw new Error("Invalid variable");
     }
-    identifier.isMutable = true;
-    identifier.bind = init;
-    identifier.setKind("var");
-    identifier.setResult(evalExpr(init, { macros }));
-    parent.setId(identifier);
+    identifier.binding = init;
+    parent.setVar(identifier, {
+      kind: "var",
+      mut: false,
+      value: evalExpr(init, { macros }),
+    });
     return nop();
   },
   // TODO: Support functions in macro expansion phase
@@ -179,15 +182,20 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
   },
   "=": ({ macros, parent }, args) => {
     const identifier = args.first();
-    if (!isIdentifier(identifier) || !identifier.isDefined) {
-      throw new Error(`identifier not found ${identifier}`);
+    if (!isIdentifier(identifier)) {
+      throw new Error(`Expected identifier, got ${identifier}`);
     }
 
-    if (!identifier.isMutable) {
+    const info = parent.getVar(identifier);
+    if (!info) {
+      throw new Error(`Identifier ${identifier.value} is not defined`);
+    }
+
+    if (!info.mut) {
       throw new Error(`Variable ${identifier} is not mutable`);
     }
 
-    identifier.setResult(evalExpr(args.at(1)!, { macros }));
+    info.value = evalExpr(args.at(1)!, { macros });
     return new List({ parent });
   },
   "==": (_, args) => bl(args, (l, r) => l === r),
@@ -219,9 +227,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
         throw new Error("Invalid lambda parameter");
       }
 
-      p.bind = new List({});
-      p.setKind("param");
-      lambda.setId(p);
+      lambda.setVar(p, { kind: "param" });
       return p;
     });
 
@@ -244,16 +250,15 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
 
         if (isIdentifier(exp) && exp.value.startsWith("$@")) {
           const id = exp.value.replace("$@", "");
-          const value = exp.getId(id)!;
-          const list = value.assertedResult() as List;
+          const info = exp.getVar(id)!;
+          const list = info.value as List;
           list.insert("splice-block");
           return list;
         }
 
         if (isIdentifier(exp) && exp.value.startsWith("$")) {
           const id = exp.value.replace("$@", "");
-          const value = exp.getId(id)!;
-          return value.assertedResult();
+          return exp.getVar(id)!.value!;
         }
 
         if (isIdentifier(exp) || isStringLiteral(exp)) {

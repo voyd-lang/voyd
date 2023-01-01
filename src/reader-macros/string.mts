@@ -1,4 +1,4 @@
-import { Identifier, StringLiteral } from "../lib/syntax/syntax.mjs";
+import { Identifier, StringLiteral } from "../lib/syntax/index.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const stringMacro: ReaderMacro = {

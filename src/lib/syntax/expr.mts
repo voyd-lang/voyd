@@ -6,6 +6,7 @@ import { List } from "./list.mjs";
 import { StringLiteral } from "./string-literal.mjs";
 import { Type } from "./types.mjs";
 import { Whitespace } from "./whitespace.mjs";
+import { Comment } from "./comment.mjs";
 
 export type Expr =
   | Comment

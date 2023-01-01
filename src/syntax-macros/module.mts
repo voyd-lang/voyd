@@ -4,7 +4,7 @@ import {
   ModuleInfo,
   resolveModule as resolveModuleInfo,
 } from "../lib/module-info.mjs";
-import { isIdentifier, isList, List } from "../lib/syntax/syntax.mjs";
+import { isIdentifier, isList, List } from "../lib/syntax/index.mjs";
 
 type Modules = Map<string, List | "IN_PROGRESS">;
 

@@ -141,17 +141,14 @@ pub macro type(&body)
 	define equals-expr (extract &body 0)
 	let expr = equals-expr.extract(2)
 	if expr.is-list and (expr.extract(0) == "struct")
-		struct-to-cdt(equals-expr.extract(1) expr)
+		init-struct(equals-expr.extract(1) expr)
 		` define-type
 			$(extract equals-expr 1)
 			$(extract (extract equals-expr 2) 1)
 
-var cdt-type-id = 0
-
-// Takes (struct $labeled-expr*), returns (define-cdt $name $type-id:i32 $size:i32) + field accessor functions
-let struct-to-cdt = (name expr) =>
+// Takes (struct $labeled-expr*), returns (struct $labeled-expr*) + field accessor functions
+let init-struct = (name expr) =>
 	let fields = expr.slice(1)
-	cdt-type-id = cdt-type-id + 1
 	let get-size = (param) => param.extract(2).match
 		"i32" 4
 		"i64" 8
@@ -159,17 +156,13 @@ let struct-to-cdt = (name expr) =>
 		"f64" 8
 		4
 
-	let total-size = fields.reduce(0) (size param) =>
-		let next-size = param.get-size
-		next-size + size
-
 	let field-initializers = fields.map (field) =>
 		let field-name = field.extract(1)
 		let fn-name = "set-" + field-name
 		` $fn-name address $field-name
 
 	let initializer =
-		` fn $name($expr) -> (cdt-pointer $name $total-size)
+		` fn $name($expr) -> $name
 			let address:$name = alloc($total-size)
 			$@field-initializers
 			address
@@ -209,7 +202,7 @@ let struct-to-cdt = (name expr) =>
 
 	let accessors = accessors-info.extract(1)
 	` splice-block
-		define-cdt $name $cdt-type-id $total-size
+		$expr
 		$initializer
 		$@accessors
 

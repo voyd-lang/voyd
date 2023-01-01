@@ -19,14 +19,6 @@ Defines a call to a binaryen function
 (define $identifier:LabeledExpr $expr)
 ```
 
-## Define CDT
-
-Defines a complex data type I.E. tuple / struct
-
-```lisp
-(define-cdt $name:String $type-id:i32 $size:i32)
-```
-
 ## Define Function
 
 The final function definition. This function is as close to the

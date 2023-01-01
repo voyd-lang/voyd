@@ -1,3 +1,6 @@
+import { getIdStr, Id } from "./identifier.mjs";
+import { Syntax, SyntaxOpts } from "./syntax.mjs";
+
 export type Type =
   | PrimitiveType
   | UnionType
@@ -9,7 +12,7 @@ export type Type =
 
 export const CDT_ADDRESS_TYPE = "i32";
 
-export abstract class BaseType {
+export abstract class BaseType extends Syntax {
   /** Size in bytes */
   abstract readonly size: number;
 }
@@ -17,8 +20,8 @@ export abstract class BaseType {
 export class PrimitiveType extends BaseType {
   value: WasmStackType;
 
-  constructor(opts: { value: WasmStackType }) {
-    super();
+  constructor(opts: SyntaxOpts & { value: WasmStackType }) {
+    super(opts);
     this.value = opts.value;
   }
 
@@ -33,14 +36,19 @@ export class PrimitiveType extends BaseType {
   static isPrimitive(val: string): val is WasmStackType {
     return primitives.has(val);
   }
+
+  static from(id: Id) {
+    const str = getIdStr(id) as WasmStackType; // TODO: Check this
+    return new PrimitiveType({ value: str });
+  }
 }
 
 export class UnionType extends BaseType {
   private readonly __type = "union-type";
   value: Type[];
 
-  constructor(opts: { value: Type[] }) {
-    super();
+  constructor(opts: SyntaxOpts & { value: Type[] }) {
+    super(opts);
     this.value = opts.value;
   }
 
@@ -57,8 +65,8 @@ export class IntersectionType extends BaseType {
   private readonly __type = "intersection-type";
   value: Type[];
 
-  constructor(opts: { value: Type[] }) {
-    super();
+  constructor(opts: SyntaxOpts & { value: Type[] }) {
+    super(opts);
     this.value = opts.value;
   }
 
@@ -75,8 +83,8 @@ export class TupleType extends BaseType {
   private readonly __type = "tuple-type";
   value: Type[];
 
-  constructor(opts: { value: Type[] }) {
-    super();
+  constructor(opts: SyntaxOpts & { value: Type[] }) {
+    super(opts);
     this.value = opts.value;
   }
 
@@ -93,8 +101,8 @@ export class StructType extends BaseType {
   private readonly __type = "struct-type";
   value: { name: string; type: Type }[];
 
-  constructor(opts: { value: { name: string; type: Type }[] }) {
-    super();
+  constructor(opts: SyntaxOpts & { value: { name: string; type: Type }[] }) {
+    super(opts);
     this.value = opts.value;
   }
 
@@ -105,6 +113,10 @@ export class StructType extends BaseType {
     }
     return total;
   }
+
+  toJSON() {
+    return ["struct", ...this.value.map(({ name, type }) => [name, type])];
+  }
 }
 
 export class ArrayType extends BaseType {
@@ -112,25 +124,39 @@ export class ArrayType extends BaseType {
   readonly size = Infinity;
   value: Type;
 
-  constructor(opts: { value: Type }) {
-    super();
+  constructor(opts: SyntaxOpts & { value: Type }) {
+    super(opts);
     this.value = opts.value;
   }
 }
 
 export type FnTypeValue = {
-  params: { label?: string; name: string; type: Type }[];
-  returns: Type;
+  params: Param[];
+  returns?: Type;
 };
+
+export type Param = { label?: string; name?: string; type: Type };
 
 export class FnType extends BaseType {
   private readonly __type = "array-type";
   readonly size = 0;
   value: FnTypeValue;
 
-  constructor(opts: { value: FnTypeValue }) {
-    super();
+  constructor(opts: SyntaxOpts & { value: FnTypeValue }) {
+    super(opts);
     this.value = opts.value;
+  }
+
+  getParam(index: number): Param | undefined {
+    return this.value.params[index];
+  }
+
+  get returns() {
+    return this.value.returns;
+  }
+
+  set returns(type: Type | undefined) {
+    this.value.returns = type;
   }
 }
 

@@ -3,7 +3,7 @@ import {
   isWhitespace,
   List,
   Whitespace,
-} from "../lib/syntax/syntax.mjs";
+} from "../lib/syntax/index.mjs";
 
 export const functionalNotation = (list: List): List =>
   list.reduce((expr, index, array) => {

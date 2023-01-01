@@ -9,3 +9,4 @@ export * from "./int.mjs";
 export * from "./list.mjs";
 export * from "./string-literal.mjs";
 export * from "./types.mjs";
+export * from "./whitespace.mjs";
