@@ -10,14 +10,15 @@ export const functionalNotation = (list: List): List =>
     if (isList(expr)) return functionalNotation(expr);
     if (isWhitespace(expr)) return expr;
 
-    if (isList(array[index + 1])) {
+    const nextExpr = array[index + 1];
+    if (isList(nextExpr)) {
       const next = new List({
         value: [
           expr,
           new Whitespace({ value: " " }),
           ...array.splice(index + 1, 1),
         ].flat(),
-        parent: list,
+        context: nextExpr,
       });
       return functionalNotation(next);
     }

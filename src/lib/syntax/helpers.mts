@@ -1,6 +1,7 @@
 import { Bool } from "./bool.mjs";
 import { Float } from "./float.mjs";
 import { Identifier } from "./identifier.mjs";
+import type { Id } from "./identifier.mjs";
 import { Int } from "./int.mjs";
 import { List } from "./list.mjs";
 import { StringLiteral } from "./string-literal.mjs";

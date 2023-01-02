@@ -3,6 +3,7 @@ import {
   Bool,
   Expr,
   Float,
+  Id,
   Identifier,
   Int,
   isFloat,
@@ -11,32 +12,23 @@ import {
   isStringLiteral,
   List,
   StringLiteral,
-  Syntax,
 } from "../lib/syntax/index.mjs";
-
-/** TODO: Support macro scoping / module import checking */
-type Macros = Map<string, List>;
 
 /** Transforms macro's into their final form and then runs them */
 export const macro = (list: List, info: ModuleInfo): List => {
   if (!info.isRoot) return list;
-  const macros: Macros = new Map();
-  return evalExpr(list, { macros }) as List;
+  return evalExpr(list) as List;
 };
 
-type EvalExprOpts = {
-  macros: Macros;
-};
-
-const evalExpr = (expr: Expr, { macros }: EvalExprOpts) => {
+const evalExpr = (expr: Expr) => {
   if (isFloat(expr)) return expr;
   if (isStringLiteral(expr)) return expr;
   if (isIdentifier(expr)) return expr.assertedResult();
   if (!isList(expr)) return expr;
-  return evalFnCall(expr, { macros });
+  return evalFnCall(expr);
 };
 
-const evalFnCall = (list: List, { macros }: EvalExprOpts): Expr => {
+const evalFnCall = (list: List): Expr => {
   const identifier = list.first();
   if (!isIdentifier(identifier)) {
     return list;
@@ -45,14 +37,13 @@ const evalFnCall = (list: List, { macros }: EvalExprOpts): Expr => {
   const shouldSkipArgEval = fnsToSkipArgEval.has(identifier.value);
 
   const args = !shouldSkipArgEval
-    ? list.rest().map((exp) => evalExpr(exp, { macros }))
+    ? list.rest().map((exp) => evalExpr(exp))
     : list.rest();
 
   const variable = identifier.getResult();
   if (isLambda(variable)) {
     return callLambda({
       lambda: variable,
-      macros,
       args,
     });
   }
@@ -61,18 +52,15 @@ const evalFnCall = (list: List, { macros }: EvalExprOpts): Expr => {
     return list;
   }
 
-  return functions[identifier.value](
-    { macros, identifier, parent: list },
-    args
-  );
+  return functions[identifier.value]({ identifier, parent: list }, args);
 };
 
-const expandMacros = (list: Expr, macros: Macros): Expr => {
+const expandMacros = (list: Expr): Expr => {
   if (!isList(list)) return list;
   const identifier = list.first();
   if (isIdentifier(identifier)) {
-    const macro = macros.get(identifier.value);
-    if (macro) return expandMacro({ macro, call: list, macros });
+    const macro = getMacro(identifier, list);
+    if (macro) return expandMacro({ macro, call: list });
   }
 
   return list.reduce((expr) => {
@@ -80,35 +68,26 @@ const expandMacros = (list: Expr, macros: Macros): Expr => {
 
     const identifier = expr.first();
     if (!isIdentifier(identifier)) {
-      return expandMacros(expr, macros);
+      return expandMacros(expr);
     }
 
-    const macro = macros.get(identifier.value);
-    if (!macro) return expandMacros(expr, macros);
+    const macro = getMacro(identifier, list);
+    if (!macro) return expandMacros(expr);
 
-    return expandMacro({ macro, call: expr, macros });
+    return expandMacro({ macro, call: expr });
   });
 };
 
 /** Expands a macro call */
-const expandMacro = ({
-  macro,
-  call,
-  macros,
-}: {
-  macro: List;
-  call: List;
-  macros: Macros;
-}): Expr => {
+const expandMacro = ({ macro, call }: { macro: List; call: List }): Expr => {
   macro.setVar("&body", { kind: "param", value: call.rest() });
-  const result = macro.rest().map((exp) => evalExpr(exp, { macros }));
-  return expandMacros(result.pop()!, macros) ?? [];
+  const result = macro.rest().map((exp) => evalExpr(exp));
+  return expandMacros(result.pop()!) ?? [];
 };
 
 type CallLambdaOpts = {
   lambda: List;
   args: List;
-  macros: Macros;
 };
 
 const callLambda = (opts: CallLambdaOpts): Expr => {
@@ -119,34 +98,33 @@ const callLambda = (opts: CallLambdaOpts): Expr => {
     throw new Error("Expected body");
   }
 
-  return evalExpr(body, { macros: opts.macros });
+  return evalExpr(body);
 };
 
 type FnOpts = {
-  parent: Syntax;
+  parent: Expr;
   identifier: Identifier;
-  macros: Macros;
 };
 
 const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
-  macro: ({ macros }, macro) => {
-    registerMacro(macros, expandMacros(macro, macros) as List);
+  macro: ({ parent }, macro) => {
+    registerMacro(expandMacros(macro) as List, parent);
     return nop();
   },
-  root: ({ macros, identifier }, root) => {
+  root: ({ identifier }, root) => {
     root.insert(identifier);
     return root.map((module) => {
       if (!isList(module)) return module;
       module.value[4] = (module.value[4] as List).reduce((expr) => {
-        if (!isList(expr)) return evalExpr(expr, { macros });
-        return evalExpr(expandMacros(expr, macros), { macros });
+        if (!isList(expr)) return evalExpr(expr);
+        return evalExpr(expandMacros(expr));
       });
       return module;
     });
   },
   block: (_, args) => args.at(-1)!,
   length: (_, array) => array.length,
-  "define-mut": ({ macros, parent }, args) => {
+  "define-mut": ({ parent }, args) => {
     // Warning: Cannot be typed like would be at compile time (for now);
     const identifier = args.at(0);
     const init = args.at(1);
@@ -157,11 +135,11 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     parent.setVar(identifier, {
       kind: "var",
       mut: true,
-      value: evalExpr(init, { macros }),
+      value: evalExpr(init),
     });
     return nop();
   },
-  define: ({ parent, macros }, args) => {
+  define: ({ parent }, args) => {
     // Warning: Cannot be typed like would be at compile time (for now);
     const identifier = args.at(0);
     const init = args.at(1);
@@ -172,7 +150,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     parent.setVar(identifier, {
       kind: "var",
       mut: false,
-      value: evalExpr(init, { macros }),
+      value: evalExpr(init),
     });
     return nop();
   },
@@ -180,7 +158,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
   "define-function": ({ identifier }, args) => {
     return args.insert(identifier);
   },
-  "=": ({ macros, parent }, args) => {
+  "=": ({ parent }, args) => {
     const identifier = args.first();
     if (!isIdentifier(identifier)) {
       throw new Error(`Expected identifier, got ${identifier}`);
@@ -195,7 +173,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
       throw new Error(`Variable ${identifier} is not mutable`);
     }
 
-    info.value = evalExpr(args.at(1)!, { macros });
+    info.value = evalExpr(args.at(1)!);
     return new List({ parent });
   },
   "==": (_, args) => bl(args, (l, r) => l === r),
@@ -233,15 +211,15 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
 
     return lambda;
   },
-  quote: ({ macros }, quote: List) => {
+  quote: (_, quote: List) => {
     const expand = (body: List): List =>
       body.reduce((exp) => {
         if (isList(exp) && exp.first()?.is("$")) {
-          return evalExpr(exp.rest(), { macros });
+          return evalExpr(exp.rest());
         }
 
         if (isList(exp) && exp.first()?.is("$@")) {
-          const result = evalExpr(exp.rest(), { macros }) as List;
+          const result = evalExpr(exp.rest()) as List;
           result.insert("splice-block");
           return result;
         }
@@ -269,7 +247,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
       });
     return expand(quote);
   },
-  if: ({ macros }, args) => {
+  if: (_, args) => {
     const condition = args.at(0);
     const ifTrue = args.at(1);
     const ifFalse = args.at(2);
@@ -279,16 +257,14 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
       throw new Error("Invalid if expr");
     }
 
-    const condResult = evalExpr(handleOptionalConditionParenthesis(condition), {
-      macros,
-    });
+    const condResult = evalExpr(handleOptionalConditionParenthesis(condition));
 
     if (condResult.value) {
-      return evalExpr(ifTrue, { macros });
+      return evalExpr(ifTrue);
     }
 
     if (ifFalse) {
-      return evalExpr(ifFalse, { macros });
+      return evalExpr(ifFalse);
     }
 
     return nop();
@@ -305,13 +281,12 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     const index = args.at(1)!.value as number;
     return list.at(index)!; // TODO: Make this safer
   },
-  map: ({ macros, parent }, args) => {
+  map: ({ parent }, args) => {
     const list = args.first()! as List;
     const lambda = args.at(1)! as List;
     return list.map((val, index, array) =>
       callLambda({
         lambda,
-        macros,
         args: new List({
           value: [
             val,
@@ -323,7 +298,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
       })
     );
   },
-  reduce: ({ macros }, args) => {
+  reduce: (_, args) => {
     const list = args.at(0)! as List;
     const start = args.at(1)!;
     const lambda = args.at(2)! as List;
@@ -331,7 +306,6 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
       (prev, cur, index, array) =>
         callLambda({
           lambda,
-          macros,
           args: new List({
             value: [
               prev,
@@ -341,7 +315,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
             ],
           }),
         }),
-      evalExpr(start, { macros })
+      evalExpr(start)
     );
   },
   push: (_, args) => {
@@ -365,14 +339,14 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     const splitter = arg.at(0) as StringLiteral;
     return new List({ value: str.value.split(splitter.value), parent });
   },
-  "macro-expand": ({ macros }, args) => expandMacros(args, macros),
+  "macro-expand": (_, args) => expandMacros(args),
   "char-to-code": (_, args) =>
     new Int({
       value: String((args.at(0) as StringLiteral).value).charCodeAt(0),
     }),
-  eval: (opts, body) => evalFnCall(body, opts),
-  "register-macro": ({ macros }, args) => {
-    registerMacro(macros, args);
+  eval: (_, body) => evalFnCall(body),
+  "register-macro": ({ parent }, args) => {
+    registerMacro(args, parent);
     return nop();
   },
 };
@@ -405,9 +379,9 @@ const isLambda = (expr?: Expr): expr is List => {
 };
 
 /** Slice out the beginning macro before calling */
-const registerMacro = (macros: Macros, list: List) => {
+const registerMacro = (list: List, parent: Expr) => {
   const id = list.first() as Identifier;
-  macros.set(id.value, list);
+  parent.setVar(id.value, { value: list, kind: "var" });
 };
 
 const nop = () => new List({}).push(Identifier.from("splice-block"));
@@ -418,3 +392,6 @@ const bl = (args: List, fn: (l: any, r: any) => boolean) =>
 const ba = (args: List, fn: (l: any, r: any) => number) =>
   new Float({ value: fn(args.at(0)?.value, args.at(1)?.value) });
 const bool = (b: boolean) => new Bool({ value: b });
+
+const getMacro = (id: Id, scope: Expr) =>
+  scope.getVar(id)?.value as List | undefined;

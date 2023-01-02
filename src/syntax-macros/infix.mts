@@ -42,7 +42,7 @@ export const isContinuationOp = (op?: Expr) =>
   isInfixOp(op) && !op.is(":") && !greedyOps.has(op.value); // `:` is a hacky exception (Hopefully the only one.)
 
 export const isInfixOp = (op?: Expr): op is Identifier =>
-  isIdentifier(op) && infixOperators.has(op.value);
+  isIdentifier(op) && !op.isQuoted && infixOperators.has(op.value);
 
 export const infix = (list: List, startList?: List): List => {
   const outputQueue = startList ?? new List({ context: list });

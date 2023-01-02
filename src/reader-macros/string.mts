@@ -27,6 +27,7 @@ export const stringMacro: ReaderMacro = {
       return new Identifier({
         value: token.value,
         location: token.location,
+        isQuoted: true,
       });
     }
 

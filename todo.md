@@ -38,5 +38,3 @@
 - Pre type system phase IR spec.
 - Fix parameter outputs for exports and extern-functions
 - Scope phase to register functions, vars, and types within their proper scope, maybe in the type system, maybe separate.
-- Figure out how to automatically add identifier's to their parent context. Would need to
-  somehow set the kind as well.

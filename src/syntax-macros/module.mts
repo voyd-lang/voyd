@@ -60,7 +60,7 @@ const resolveImports = (list: List, info: ModuleInfo): List => {
     info.imports.push([stdModuleInfo, "***"]);
   }
 
-  const newAst = list.reduce((expr) => {
+  return list.reduce((expr) => {
     if (!isList(expr)) return expr;
 
     const identifier = expr.first();
@@ -78,6 +78,4 @@ const resolveImports = (list: List, info: ModuleInfo): List => {
 
     return resolveImports(expr, info);
   });
-
-  return newAst;
 };

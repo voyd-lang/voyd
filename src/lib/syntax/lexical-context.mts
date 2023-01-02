@@ -1,6 +1,7 @@
-import { Expr } from "./expr.mjs";
-import { getIdStr, Id } from "./identifier.mjs";
-import { FnType, Type } from "./types.mjs";
+import type { Expr } from "./expr.mjs";
+import { getIdStr } from "./get-id-str.mjs";
+import type { Id } from "./identifier.mjs";
+import type { FnType, Type } from "./types.mjs";
 
 export type Var = {
   mut?: boolean;

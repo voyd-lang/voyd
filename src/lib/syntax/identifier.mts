@@ -3,10 +3,11 @@ import { isIdentifier } from "./helpers.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 import { Type } from "./types.mjs";
 
-export type Id = Identifier | string;
+export type Id = string | Identifier;
 
 export class Identifier extends Syntax {
   readonly __type = "identifier";
+  readonly isQuoted?: boolean;
   /** The actual string ID of the identifier */
   value: string;
   binding?: Expr;
@@ -15,10 +16,12 @@ export class Identifier extends Syntax {
     opts: SyntaxOpts & {
       value: string;
       bind?: Expr;
+      isQuoted?: boolean;
     }
   ) {
     super(opts);
-    this.value = toIdentifier(opts.value);
+    this.isQuoted = opts.isQuoted;
+    this.value = opts.value;
   }
 
   get isDefined() {
@@ -55,9 +58,3 @@ export class Identifier extends Syntax {
     return val;
   }
 }
-
-const toIdentifier = (str: string): string => {
-  return str.replace(/\'/g, "");
-};
-
-export const getIdStr = (id: Id) => (typeof id === "string" ? id : id.value);

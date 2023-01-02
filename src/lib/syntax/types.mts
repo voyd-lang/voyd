@@ -1,5 +1,6 @@
-import { getIdStr, Id } from "./identifier.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import type { Id } from "./identifier.mjs";
+import { getIdStr } from "./get-id-str.mjs";
 
 export type Type =
   | PrimitiveType

@@ -61,6 +61,7 @@ export function parse(file: File, opts: ParseOpts): List {
           location: token.location,
         })
       );
+      continue;
     }
 
     list.push(

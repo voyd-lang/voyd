@@ -1,4 +1,3 @@
-export * from "./remove-whitespace.mjs";
 export * from "./module-info.mjs";
 export * from "./syntax/index.mjs";
 export * from "./file.mjs";

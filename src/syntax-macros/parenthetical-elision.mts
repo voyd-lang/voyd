@@ -25,7 +25,7 @@ export type ElideParensOpts = {
 
 const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
   if (!isList(list)) return list;
-  const transformed = new List({ context: list });
+  const transformed = new List({});
   let indentLevel = opts.indentLevel ?? 0;
 
   const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;

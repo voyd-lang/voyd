@@ -1,7 +1,7 @@
-import { Expr } from "./expr.mjs";
-import { Id } from "./identifier.mjs";
+import type { Expr } from "./expr.mjs";
+import type { Id } from "./identifier.mjs";
 import { LexicalContext, Var } from "./lexical-context.mjs";
-import { FnType, Type } from "./types.mjs";
+import type { FnType, Type } from "./types.mjs";
 
 export type SourceLocation = {
   /** The exact character index the syntax starts */

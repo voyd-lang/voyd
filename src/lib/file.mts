@@ -4,7 +4,7 @@ export class File {
   readonly value: string[];
   readonly location = {
     index: 0,
-    line: 0,
+    line: 1,
     column: 0,
   };
 
