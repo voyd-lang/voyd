@@ -68,6 +68,11 @@ const expandMacros = (list: Expr): Expr => {
 
 /** Expands a macro call */
 const expandMacro = ({ macro, call }: { macro: List; call: List }): Expr => {
+  const params = (macro.at(0) as List).rest();
+  params.forEach((p, index) => {
+    const identifier = p as Identifier;
+    macro.setVar(identifier, { value: call.at(index + 1)!, kind: "param" });
+  });
   macro.setVar("&body", {
     kind: "param",
     value: new List({ value: call.rest() }),
@@ -126,6 +131,15 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
   // TODO: Support functions in macro expansion phase
   "define-function": ({ identifier }, args) => {
     return args.insert(identifier);
+  },
+  export: (_, args) => {
+    const id = args.first() as Identifier;
+    const fn = currentModuleScope.getFns(id)?.[0];
+    const parent = currentModuleScope.getParent();
+    if (fn && parent) {
+      parent.setFn(id, fn);
+    }
+    return args.insert("export");
   },
   "=": ({ parent }, args) => {
     const identifier = args.first();
@@ -328,6 +342,7 @@ const fnsToSkipArgEval = new Set([
   "define-mut",
   "define-function",
   "=",
+  "export",
 ]);
 
 const handleOptionalConditionParenthesis = (expr: Expr): Expr => {
