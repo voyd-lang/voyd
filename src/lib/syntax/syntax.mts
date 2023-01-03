@@ -45,9 +45,6 @@ export abstract class Syntax {
     this.location = location ?? from?.location;
     this.parent = parent ?? from?.getParent();
     this.context = from?.context ?? new LexicalContext();
-    if (isCyclic(this.parent)) {
-      console.error("Cycle detected");
-    }
   }
 
   setFn(id: Id, fn: FnType) {
@@ -105,9 +102,6 @@ export abstract class Syntax {
 
   setParent(parent: Expr) {
     this.parent = parent;
-    if (isCyclic(this.parent)) {
-      console.error("Cycle detected");
-    }
     return this;
   }
 
