@@ -31,17 +31,25 @@ pub macro ':'(&body)
 
 pub macro let(&body)
 	define equals-expr (extract &body 0)
-	macro-expand
-		` define
-			$(extract equals-expr 1)
-			$(extract equals-expr 2)
+	` define
+		$(extract equals-expr 1)
+		$(extract equals-expr 2)
 
 pub macro var(&body)
 	define equals-expr (extract &body 0)
-	macro-expand
-		` define-mut
-			$(extract equals-expr 1)
-			$(extract equals-expr 2)
+	` define-mut
+		$(extract equals-expr 1)
+		$(extract equals-expr 2)
+
+pub macro global(&body)
+	let mutability = extract &body 0
+	let equals-expr = extract &body 1
+	let function = if mutability == "let"
+		` define-global
+		` define-mut-global
+	`	$@function
+		$(extract equals-expr 1)
+		$(extract (extract equals-expr 2) 1)
 
 pub macro ';'(&body)
 	let func = &body.extract(0)
@@ -63,7 +71,7 @@ pub macro '=>'(&body)
 		` lambda $@&body
 
 // Extracts typed parameters from a list where index 0 is fn name, and offset-index+ are labeled-expr
-let extract-parameters = (definitions) =>
+global let extract-parameters = (definitions) =>
 	`(parameters).concat definitions.slice(1)
 
 pub macro fn(&body)
@@ -147,7 +155,7 @@ pub macro type(&body)
 			$(extract (extract equals-expr 2) 1)
 
 // Takes (struct $labeled-expr*), returns (struct $labeled-expr*) + field accessor functions
-let init-struct = (name expr) =>
+global let init-struct = (name expr) =>
 	let fields = expr.slice(1)
 	let get-size = (param) => param.extract(2).match
 		"i32" 4
@@ -205,13 +213,3 @@ let init-struct = (name expr) =>
 		$expr
 		$initializer
 		$@accessors
-
-pub macro global(&body)
-	let mutability = extract &body 0
-	let equals-expr = extract &body 1
-	let function = if mutability == "let"
-		` define-global
-		` define-mut-global
-	`	$@function
-		$(extract equals-expr 1)
-		$(extract (extract equals-expr 2) 1)

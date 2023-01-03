@@ -45,7 +45,7 @@ export const isInfixOp = (op?: Expr): op is Identifier =>
   isIdentifier(op) && !op.isQuoted && infixOperators.has(op.value);
 
 export const infix = (list: List, startList?: List): List => {
-  const outputQueue = startList ?? new List({ context: list });
+  const outputQueue = startList ?? new List({ from: list });
   const operatorQueue: Identifier[] = [];
 
   const opQueueHasHigherOp = (op1: Identifier) => {

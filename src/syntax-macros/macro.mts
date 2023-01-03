@@ -3,7 +3,7 @@ import {
   Bool,
   Expr,
   Float,
-  Id,
+  FnType,
   Identifier,
   Int,
   isFloat,
@@ -13,6 +13,7 @@ import {
   List,
   StringLiteral,
 } from "../lib/syntax/index.mjs";
+import { Var } from "../lib/syntax/lexical-context.mjs";
 
 /** Transforms macro's into their final form and then runs them */
 export const macro = (list: List, info: ModuleInfo): List => {
@@ -34,53 +35,43 @@ const evalFnCall = (list: List): Expr => {
     return list;
   }
 
-  const shouldSkipArgEval = fnsToSkipArgEval.has(identifier.value);
-
-  const args = !shouldSkipArgEval
-    ? list.rest().map((exp) => evalExpr(exp))
-    : list.rest();
+  const macro = getMacro(identifier);
+  if (macro) return expandMacro({ macro, call: list });
 
   const variable = identifier.getResult();
-  if (isLambda(variable)) {
-    return callLambda({
-      lambda: variable,
-      args,
-    });
-  }
-
-  if (!functions[identifier.value]) {
+  if (!functions[identifier.value] && !isLambda(variable)) {
     return list;
   }
 
-  return functions[identifier.value]({ identifier, parent: list }, args);
+  const shouldSkipArgEval = fnsToSkipArgEval.has(identifier.value);
+
+  const argsArr = !shouldSkipArgEval ? list.rest().map(evalExpr) : list.rest();
+  const args = new List({ value: argsArr, parent: list.getParent() });
+
+  if (isLambda(variable)) return callLambda({ lambda: variable, args });
+
+  const func = functions[identifier.value];
+  return func({ identifier, parent: list.getParent() ?? list }, args);
 };
 
 const expandMacros = (list: Expr): Expr => {
   if (!isList(list)) return list;
+
   const identifier = list.first();
   if (isIdentifier(identifier)) {
-    const macro = getMacro(identifier, list);
+    const macro = getMacro(identifier);
     if (macro) return expandMacro({ macro, call: list });
   }
 
-  return list.reduce((expr) => {
-    if (!isList(expr)) return expr;
-
-    const identifier = expr.first();
-    if (!isIdentifier(identifier)) {
-      return expandMacros(expr);
-    }
-
-    const macro = getMacro(identifier, list);
-    if (!macro) return expandMacros(expr);
-
-    return expandMacro({ macro, call: expr });
-  });
+  return list.reduce(expandMacros);
 };
 
 /** Expands a macro call */
 const expandMacro = ({ macro, call }: { macro: List; call: List }): Expr => {
-  macro.setVar("&body", { kind: "param", value: call.rest() });
+  macro.setVar("&body", {
+    kind: "param",
+    value: new List({ value: call.rest() }),
+  });
   const result = macro.rest().map((exp) => evalExpr(exp));
   return expandMacros(result.pop()!) ?? [];
 };
@@ -106,54 +97,32 @@ type FnOpts = {
   identifier: Identifier;
 };
 
+// Ugly hack for forcing registerMacro to use the right scope. TODO something better I guess.
+let currentModuleScope = new List({});
 const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
-  macro: ({ parent }, macro) => {
-    registerMacro(expandMacros(macro) as List, parent);
+  macro: (_, macro) => {
+    const result = expandMacros(macro) as List;
+    registerMacro(result, currentModuleScope);
     return nop();
   },
   root: ({ identifier }, root) => {
     root.insert(identifier);
     return root.map((module) => {
       if (!isList(module)) return module;
-      module.value[4] = (module.value[4] as List).reduce((expr) => {
-        if (!isList(expr)) return evalExpr(expr);
-        return evalExpr(expandMacros(expr));
-      });
+      currentModuleScope = module;
+      module.value[4] = (module.value[4] as List).reduce(evalExpr);
       return module;
     });
   },
   block: (_, args) => args.at(-1)!,
   length: (_, array) => array.length,
-  "define-mut": ({ parent }, args) => {
-    // Warning: Cannot be typed like would be at compile time (for now);
-    const identifier = args.at(0);
-    const init = args.at(1);
-    if (!isIdentifier(identifier) || !init) {
-      throw new Error("Invalid variable");
-    }
-    identifier.binding = init;
-    parent.setVar(identifier, {
-      kind: "var",
-      mut: true,
-      value: evalExpr(init),
-    });
-    return nop();
-  },
-  define: ({ parent }, args) => {
-    // Warning: Cannot be typed like would be at compile time (for now);
-    const identifier = args.at(0);
-    const init = args.at(1);
-    if (!isIdentifier(identifier) || !init) {
-      throw new Error("Invalid variable");
-    }
-    identifier.binding = init;
-    parent.setVar(identifier, {
-      kind: "var",
-      mut: false,
-      value: evalExpr(init),
-    });
-    return nop();
-  },
+  "define-mut": ({ parent }, args) =>
+    defineVar({ args, parent, kind: "var", mut: true }),
+  define: ({ parent }, args) => defineVar({ args, parent, kind: "var" }),
+  "define-global": ({ parent }, args) =>
+    defineVar({ args, parent, kind: "global" }),
+  "define-mut-global": ({ parent }, args) =>
+    defineVar({ args, parent, kind: "global", mut: true }),
   // TODO: Support functions in macro expansion phase
   "define-function": ({ identifier }, args) => {
     return args.insert(identifier);
@@ -205,7 +174,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
         throw new Error("Invalid lambda parameter");
       }
 
-      lambda.setVar(p, { kind: "param" });
+      lambda.setVar(p, { kind: "var" });
       return p;
     });
 
@@ -215,13 +184,12 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     const expand = (body: List): List =>
       body.reduce((exp) => {
         if (isList(exp) && exp.first()?.is("$")) {
-          return evalExpr(exp.rest());
+          return evalExpr(new List({ value: exp.rest(), parent: body }));
         }
 
         if (isList(exp) && exp.first()?.is("$@")) {
-          const result = evalExpr(exp.rest()) as List;
-          result.insert("splice-block");
-          return result;
+          const rest = new List({ value: exp.rest(), parent: body });
+          return (evalExpr(rest) as List).insert("splice-block");
         }
 
         if (isList(exp)) return expand(exp);
@@ -235,12 +203,13 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
         }
 
         if (isIdentifier(exp) && exp.value.startsWith("$")) {
-          const id = exp.value.replace("$@", "");
+          const id = exp.value.replace("$", "");
           return exp.getVar(id)!.value!;
         }
 
         if (isIdentifier(exp) || isStringLiteral(exp)) {
           exp.value = exp.value.replace("\\", "");
+          return exp;
         }
 
         return exp;
@@ -248,9 +217,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     return expand(quote);
   },
   if: (_, args) => {
-    const condition = args.at(0);
-    const ifTrue = args.at(1);
-    const ifFalse = args.at(2);
+    const [condition, ifTrue, ifFalse] = args.value;
 
     if (!condition || !ifTrue) {
       console.log(JSON.stringify(args, undefined, 2));
@@ -321,17 +288,15 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
   push: (_, args) => {
     const list = args.at(0) as List;
     const val = args.at(1)!;
-    list.push(val);
-    return list;
+    return list.push(val);
   },
   concat: (_, args) => {
     const list = args.first() as List;
-    list.push(...args.rest().value.flatMap((expr) => (expr as List).value));
-    return list;
+    return list.push(...args.rest().flatMap((expr) => (expr as List).value));
   },
   "is-list": (_, args) => bool(isList(args.at(0))),
   log: (_, arg) => {
-    console.error(JSON.stringify(arg, undefined, 2));
+    console.error(JSON.stringify(arg.first(), undefined, 2));
     return arg;
   },
   split: ({ parent }, arg) => {
@@ -339,14 +304,14 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     const splitter = arg.at(0) as StringLiteral;
     return new List({ value: str.value.split(splitter.value), parent });
   },
-  "macro-expand": (_, args) => expandMacros(args),
+  "macro-expand": (_, args) => expandMacros(args.at(0)!),
   "char-to-code": (_, args) =>
     new Int({
       value: String((args.at(0) as StringLiteral).value).charCodeAt(0),
     }),
   eval: (_, body) => evalFnCall(body),
-  "register-macro": ({ parent }, args) => {
-    registerMacro(args, parent);
+  "register-macro": (_, args) => {
+    registerMacro(args.at(0) as List, currentModuleScope);
     return nop();
   },
 };
@@ -380,8 +345,12 @@ const isLambda = (expr?: Expr): expr is List => {
 
 /** Slice out the beginning macro before calling */
 const registerMacro = (list: List, parent: Expr) => {
-  const id = list.first() as Identifier;
-  parent.setVar(id.value, { value: list, kind: "var" });
+  const id = (list.first() as List).first() as Identifier;
+  const fn = new FnType({ value: { params: [] } });
+  list.setAsFn();
+  fn.flags.add("isMacro");
+  fn.props.set("body", list);
+  parent.setFn(id.value, fn);
 };
 
 const nop = () => new List({}).push(Identifier.from("splice-block"));
@@ -393,5 +362,26 @@ const ba = (args: List, fn: (l: any, r: any) => number) =>
   new Float({ value: fn(args.at(0)?.value, args.at(1)?.value) });
 const bool = (b: boolean) => new Bool({ value: b });
 
-const getMacro = (id: Id, scope: Expr) =>
-  scope.getVar(id)?.value as List | undefined;
+const getMacro = (id: Identifier): List | undefined => {
+  const fn = id.getFns(id)?.[0];
+  if (!fn?.flags.has("isMacro")) return;
+  return fn.props.get("body") as List;
+};
+
+const defineVar = (opts: {
+  args: List;
+  parent: Expr;
+  kind: Var["kind"];
+  mut?: boolean;
+}) => {
+  const { args, parent, kind, mut } = opts;
+  // Warning: Cannot be typed like would be at compile time (for now);
+  const identifier = args.at(0);
+  const init = args.at(1);
+  if (!isIdentifier(identifier) || !init) {
+    throw new Error("Invalid variable");
+  }
+  identifier.binding = init;
+  parent.setVar(identifier, { kind, mut, value: evalExpr(init) });
+  return nop();
+};

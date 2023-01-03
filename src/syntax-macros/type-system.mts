@@ -86,7 +86,7 @@ const addTypeAnnotationsToFn = (list: List, parent: Expr): List => {
       ["return-type", returnType!],
       typedBlock,
     ],
-    context: list,
+    from: list,
   });
 };
 
@@ -118,10 +118,10 @@ const annotateFnParams = (list: List, parent: Expr): List => {
         parent.setVar(identifier!, { kind: "param", type });
         const value = [identifier!, type];
         if (label) value.push(label);
-        return [new List({ value, context: expr })];
+        return [new List({ value, from: expr })];
       }),
     ],
-    context: list,
+    from: list,
   });
 };
 
@@ -149,7 +149,7 @@ const addTypeAnnotationsToBlock = (list: List, parent: Expr): List => {
 
   return new List({
     value: ["typed-block", type, ...annotatedArgs.value],
-    context: list,
+    from: list,
   });
 };
 
@@ -185,7 +185,7 @@ const addTypeAnnotationsToPrimitiveFn = (list: List, parent: Expr): List => {
   const annotatedArgs = list
     .slice(1)
     .value.map((expr) => addTypeAnnotationsToExpr(expr, parent));
-  return new List({ value: [list.first()!, ...annotatedArgs], context: list });
+  return new List({ value: [list.first()!, ...annotatedArgs], from: list });
 };
 
 function addTypeAnnotationToUserFnCall(list: List, parent: Expr) {
@@ -204,7 +204,7 @@ function addTypeAnnotationToUserFnCall(list: List, parent: Expr) {
     return [addTypeAnnotationsToExpr(expr, parent)];
   });
 
-  return new List({ value: [fn, ...annotatedArgs], context: list });
+  return new List({ value: [fn, ...annotatedArgs], from: list });
 }
 
 /** Re-orders the supplied struct and returns it as a normal list of expressions to be passed as args */
@@ -263,7 +263,7 @@ const addTypeAnnotationToVar = (list: List, parent: Expr): List => {
 
   return new List({
     value: [varFnId, identifier, annotatedInitializer],
-    context: list,
+    from: list,
   });
 };
 
@@ -285,7 +285,7 @@ const getExprReturnType = (expr?: Expr): Type | undefined => {
   if (expr.calls("if")) return getIfReturnType(expr);
 
   const fn = getMatchingFnForCallExpr(expr);
-  return fn?.props.get("returnType");
+  return fn?.props.get("returnType") as Type | undefined;
 };
 
 /** Takes the expression form of a struct and converts it into type form */
@@ -310,7 +310,7 @@ const getIfReturnType = (list: List): Type | undefined =>
 const getBnrReturnType = (call: List): Type | undefined => {
   const info = call.at(1) as List | undefined;
   const id = info?.at(2) as Identifier;
-  return new PrimitiveType({ context: id, value: id.value as WasmStackType });
+  return new PrimitiveType({ from: id, value: id.value as WasmStackType });
 };
 
 const getMatchingFnForCallExpr = (call: List): FnType | undefined => {
@@ -422,7 +422,7 @@ const initFn = (expr: List, parent: Expr) => {
   const suppliedReturnType = getSuppliedReturnTypeForFn(expr);
 
   const fnType = new FnType({
-    context: expr,
+    from: expr,
     value: { params, returns: suppliedReturnType },
   });
   fnIdentifier.setTypeOf(fnType);
@@ -450,7 +450,7 @@ const getInfoFromRawParam = (list: List) => {
 
 const typedStructListToStructType = (list: List): StructType => {
   return new StructType({
-    context: list,
+    from: list,
     value: list.value.map((v) => {
       // v is always a labeled expression
       const labeledExpr = v as List;

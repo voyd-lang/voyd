@@ -35,7 +35,7 @@ const addMemInstructionsToFunctionDef = (
   const returnAddr = "*__return_alloc_address";
   list.setVar(returnAddr, { kind: "var", type: CDT_ADDRESS_TYPE });
   list.value[4] = new List({
-    context: list,
+    from: list,
     value: [
       "typed-block",
       CDT_ADDRESS_TYPE,

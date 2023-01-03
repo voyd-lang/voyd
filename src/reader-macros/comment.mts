@@ -16,7 +16,7 @@ export const comment: ReaderMacro = {
         ...token.location,
         endIndex: file.position,
       },
-      value: comment,
+      value: `//${comment}`,
     });
   },
 };

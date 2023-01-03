@@ -97,7 +97,7 @@ const compileList = (opts: CompileListOpts): number => {
 };
 
 const compileRootExpr = (opts: CompileListOpts): number => {
-  for (const module of opts.expr.rest().value) {
+  for (const module of opts.expr.rest()) {
     if (!isList(module) || !module.calls("module")) {
       throw new Error(
         "Expected module, got: " + JSON.stringify(module, null, 2)
@@ -155,9 +155,7 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
     throw new Error(`Function ${fnId.value} not found`);
   }
 
-  const args = expr
-    .rest()
-    .value.map((expr) => compileExpression({ ...opts, expr }));
+  const args = expr.rest().map((expr) => compileExpression({ ...opts, expr }));
 
   if (isReturnCall) {
     return mod.return_call(fn.binaryenId, args, mapBinaryenType(fn.returns!));

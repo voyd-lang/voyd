@@ -41,8 +41,8 @@ export class List extends Syntax {
     return this.value[0];
   }
 
-  rest(): List {
-    return new List({ value: this.value.slice(1), context: this });
+  rest(): Expr[] {
+    return this.value.slice(1);
   }
 
   pop(): Expr | undefined {
@@ -64,7 +64,7 @@ export class List extends Syntax {
       ex.setParent(this);
 
       if (isList(ex) && ex.calls("splice-block")) {
-        this.value.push(...ex.rest().value);
+        this.value.push(...ex.rest());
         return;
       }
 
@@ -80,6 +80,7 @@ export class List extends Syntax {
 
   insert(expr: Expr | string, at = 0) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
+    result.setParent(this);
     this.value.splice(at, 0, result);
     return this;
   }
@@ -89,25 +90,19 @@ export class List extends Syntax {
   }
 
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
-    return new List({ value: this.value.map(fn), context: this });
+    return new List({ value: this.value.map(fn), from: this });
   }
 
   reduce(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
-    const list = new List({ value: [], context: this });
+    const list = new List({ value: [], from: this });
     return this.value.reduce((newList: List, expr, index, array) => {
       if (!expr) return newList;
       return newList.push(fn(expr, index, array));
     }, list);
   }
 
-  /** Marks this list as a function definition */
-  setAsFn() {
-    this.context.setAsFn();
-    return this;
-  }
-
   slice(start?: number, end?: number): List {
-    return new List({ context: this, value: this.value.slice(start, end) });
+    return new List({ from: this, value: this.value.slice(start, end) });
   }
 
   toJSON() {
