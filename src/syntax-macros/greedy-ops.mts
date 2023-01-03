@@ -9,7 +9,7 @@ import {
 export const greedyOps = new Set(["=>", "=", "<|", ";"]);
 export const isGreedyOp = (expr?: Expr): expr is Identifier => {
   if (!isIdentifier(expr)) return false;
-  return greedyOps.has(expr.value);
+  return !expr.isQuoted && greedyOps.has(expr.value);
 };
 
 export const processGreedyOps = (list: List) => {
