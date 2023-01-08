@@ -59,8 +59,9 @@ export const infix = (list: List, startList?: List): List => {
     );
   };
 
-  const pushOut = (value: Expr[]) => {
-    if (!outputQueue.hasChildren && !isOperand(list.first())) {
+  const pushOut = (value: Expr[], currentExpr?: Expr) => {
+    // Ensure we don't duplicate wrapping parenthesis
+    if (!outputQueue.hasChildren && !isOperand(currentExpr)) {
       outputQueue.push(...value);
       return;
     }
@@ -68,28 +69,28 @@ export const infix = (list: List, startList?: List): List => {
     outputQueue.push(new List({ value }));
   };
 
-  const pushDot = (operand1: Expr, operand2: Expr) => {
+  const pushDot = (operand1: Expr, operand2: Expr, currentExpr?: Expr) => {
     if (isList(operand2)) {
-      pushOut([operand2.consume(), operand1, ...operand2.value]);
+      pushOut([operand2.consume(), operand1, ...operand2.value], currentExpr);
       return;
     }
 
-    pushOut([operand2, operand1]);
+    pushOut([operand2, operand1], currentExpr);
   };
 
-  const applyLastOperator = () => {
+  const applyLastOperator = (currentExpr?: Expr) => {
     const b = outputQueue.pop()!;
     const a = outputQueue.pop()!;
     const op = operatorQueue.pop()!;
-    if (op.is(".")) return pushDot(a, b);
-    pushOut([op, a, b]);
+    if (op.is(".")) return pushDot(a, b, currentExpr);
+    pushOut([op, a, b], currentExpr);
   };
 
   while (list.hasChildren) {
     const expr = list.consume();
     if (isOperand(expr)) {
       while (opQueueHasHigherOp(expr)) {
-        applyLastOperator();
+        applyLastOperator(expr);
       }
       operatorQueue.push(expr);
       continue;
