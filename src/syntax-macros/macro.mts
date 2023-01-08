@@ -36,7 +36,14 @@ const evalFnCall = (list: List): Expr => {
   }
 
   const macro = getMacro(identifier);
-  if (macro) return expandMacro({ macro, call: list });
+  if (macro) {
+    const expanded = expandMacro({ macro, call: list });
+    // Expanded has its old definition as it's parent for whatever reason
+    // Here we set it back to the correct parent (its original parent)
+    // Hopefully not just a band-aid for a larger problem.
+    expanded.setParent(list.getParent());
+    return evalExpr(expanded);
+  }
 
   const variable = identifier.getResult();
   if (!functions[identifier.value] && !isLambda(variable)) {
@@ -71,14 +78,18 @@ const expandMacro = ({ macro, call }: { macro: List; call: List }): Expr => {
   const params = (macro.at(0) as List).rest();
   params.forEach((p, index) => {
     const identifier = p as Identifier;
+    if (identifier.value === "&body") {
+      macro.setVar("&body", {
+        kind: "param",
+        value: new List({ value: call.rest() }),
+      });
+      return;
+    }
+
     macro.setVar(identifier, { value: call.at(index + 1)!, kind: "param" });
   });
-  macro.setVar("&body", {
-    kind: "param",
-    value: new List({ value: call.rest() }),
-  });
   const result = macro.rest().map((exp) => evalExpr(exp));
-  return expandMacros(result.pop()!) ?? [];
+  return expandMacros(result.pop()!) ?? new List({});
 };
 
 type CallLambdaOpts = {
@@ -88,11 +99,17 @@ type CallLambdaOpts = {
 
 const callLambda = (opts: CallLambdaOpts): Expr => {
   const lambda = opts.lambda.rest();
+  const params = lambda.at(0);
   const body = lambda.at(1);
 
-  if (!body) {
-    throw new Error("Expected body");
+  if (!body || !isList(params)) {
+    throw new Error("Invalid lambda definition");
   }
+
+  params.value.forEach((p, index) => {
+    const identifier = p as Identifier;
+    body.setVar(identifier, { value: opts.args.at(index)!, kind: "param" });
+  });
 
   return evalExpr(body);
 };
@@ -124,9 +141,11 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
   "define-mut": ({ parent }, args) =>
     defineVar({ args, parent, kind: "var", mut: true }),
   define: ({ parent }, args) => defineVar({ args, parent, kind: "var" }),
-  "define-global": ({ parent }, args) =>
+  "define-global": ({ identifier }, args) => args.insert(identifier),
+  "define-mut-global": ({ identifier }, args) => args.insert(identifier),
+  "define-macro-var": ({ parent }, args) =>
     defineVar({ args, parent, kind: "global" }),
-  "define-mut-global": ({ parent }, args) =>
+  "define-mut-macro-var": ({ parent }, args) =>
     defineVar({ args, parent, kind: "global", mut: true }),
   // TODO: Support functions in macro expansion phase
   "define-function": ({ identifier }, args) => {
@@ -180,6 +199,8 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
       console.error(JSON.stringify(lambda, undefined, 2));
       throw new Error("invalid lambda expression");
     }
+
+    lambda.setAsFn();
 
     // For now, assumes params are untyped
     params.map((p) => {
@@ -340,7 +361,11 @@ const fnsToSkipArgEval = new Set([
   "splice-block",
   "define",
   "define-mut",
+  "define-global",
+  "define-mut-global",
   "define-function",
+  "define-macro-var",
+  "define-mut-macro-var",
   "=",
   "export",
 ]);
@@ -397,6 +422,7 @@ const defineVar = (opts: {
     throw new Error("Invalid variable");
   }
   identifier.binding = init;
-  parent.setVar(identifier, { kind, mut, value: evalExpr(init) });
+  const value = evalExpr(init);
+  parent.setVar(identifier, { kind, mut, value });
   return nop();
 };

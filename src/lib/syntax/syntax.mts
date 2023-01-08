@@ -100,7 +100,7 @@ export abstract class Syntax {
     return this.parent;
   }
 
-  setParent(parent: Expr) {
+  setParent(parent?: Expr) {
     this.parent = parent;
     return this;
   }

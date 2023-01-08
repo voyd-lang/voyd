@@ -41,6 +41,18 @@ pub macro var(&body)
 		$(extract equals-expr 1)
 		$(extract equals-expr 2)
 
+pub macro m-let(&body)
+	define equals-expr (extract &body 0)
+	` define-macro-var
+		$(extract equals-expr 1)
+		$(extract equals-expr 2)
+
+pub macro m-var(&body)
+	define equals-expr (extract &body 0)
+	` define-mut-macro-var
+		$(extract equals-expr 1)
+		$(extract equals-expr 2)
+
 pub macro global(&body)
 	let mutability = extract &body 0
 	let equals-expr = extract &body 1
@@ -67,11 +79,10 @@ pub macro lambda(&body)
 	` lambda-expr $parameters $body
 
 pub macro '=>'(&body)
-	macro-expand;
-		` lambda $@&body
+	` lambda $@&body
 
 // Extracts typed parameters from a list where index 0 is fn name, and offset-index+ are labeled-expr
-global let extract-parameters = (definitions) =>
+m-let extract-parameters = (definitions) =>
 	`(parameters).concat definitions.slice(1)
 
 pub macro fn(&body)
@@ -89,7 +100,7 @@ pub macro fn(&body)
 				&body.slice(type-arrow-index + 1 type-arrow-index + 2)
 				`()
 
-	let expressions = macro-expand
+	let expressions =
 		if (type-arrow-index > -1)
 			&body.slice(type-arrow-index + 2)
 			&body.slice(1)
@@ -101,9 +112,8 @@ pub macro fn(&body)
 		$(concat #["block"] expressions)
 
 pub macro def-wasm-operator(op wasm-fn arg-type return-type)
-	macro-expand
-		` fn $op(left:$arg-type right:$arg-type) -> $return-type
-			binaryen-mod ($arg-type $wasm-fn $return-type) (left right)
+	` fn $op(left:$arg-type right:$arg-type) -> $return-type
+		binaryen-mod ($arg-type $wasm-fn $return-type) (left right)
 
 // extern $fn-id(namespace params*)
 // extern max("Math" x:i32 y:i32)
@@ -155,7 +165,7 @@ pub macro type(&body)
 			$(extract (extract equals-expr 2) 1)
 
 // Takes (struct $labeled-expr*), returns (struct $labeled-expr*) + field accessor functions
-global let init-struct = (name expr) =>
+m-let init-struct = (name expr) =>
 	let fields = expr.slice(1)
 	let get-size = (param) => param.extract(2).match
 		"i32" 4

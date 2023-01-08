@@ -94,7 +94,7 @@ export class List extends Syntax {
   }
 
   reduce(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
-    const list = new List({ value: [], from: this });
+    const list = new List({ from: this });
     return this.value.reduce((newList: List, expr, index, array) => {
       if (!expr) return newList;
       return newList.push(fn(expr, index, array));

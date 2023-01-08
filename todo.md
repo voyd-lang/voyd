@@ -39,3 +39,5 @@
 - Fix parameter outputs for exports and extern-functions
 - Scope phase to register functions, vars, and types within their proper scope, maybe in the type system, maybe separate.
 - Circular syntax reference detection
+- Make dot `.` a macro and pull the logic from infix
+- Reset getAllFnParams etc each time a function is used in syntax for macro phase. Right now parameters and variables get re-registered each time the function is executed.

@@ -16,6 +16,6 @@ export const syntaxMacros: SyntaxMacro[] = [
   (ast) => infix(ast),
   moduleSyntaxMacro,
   macro,
-  typeSystem,
-  memoryManagement,
+  // typeSystem,
+  // memoryManagement,
 ];
