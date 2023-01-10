@@ -20,7 +20,9 @@ export class Identifier extends Syntax {
     }
   ) {
     super(opts);
-    this.isQuoted = opts.isQuoted;
+    this.isQuoted =
+      opts.isQuoted ??
+      (opts.from instanceof Identifier ? opts.from.isQuoted : undefined);
     this.value = opts.value;
   }
 
@@ -56,5 +58,14 @@ export class Identifier extends Syntax {
       throw new Error(`Identifier ${this.value} is not defined`);
     }
     return val;
+  }
+
+  clone(parent?: Expr): Identifier {
+    return new Identifier({
+      parent,
+      value: this.value,
+      from: this,
+      isQuoted: this.isQuoted,
+    });
   }
 }

@@ -1,4 +1,3 @@
-import { isCyclic } from "../helpers.mjs";
 import type { Expr } from "./expr.mjs";
 import { getIdStr } from "./get-id-str.mjs";
 import type { Id } from "./identifier.mjs";

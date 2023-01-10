@@ -1,3 +1,4 @@
+import { Expr } from "./expr.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export class StringLiteral extends Syntax {
@@ -7,5 +8,9 @@ export class StringLiteral extends Syntax {
   constructor(opts: SyntaxOpts & { value: string }) {
     super(opts);
     this.value = opts.value;
+  }
+
+  clone(parent?: Expr): StringLiteral {
+    return new StringLiteral({ parent, value: this.value, from: this });
   }
 }

@@ -1,6 +1,7 @@
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 import type { Id } from "./identifier.mjs";
 import { getIdStr } from "./get-id-str.mjs";
+import { Expr } from "./expr.mjs";
 
 export type Type =
   | PrimitiveType
@@ -41,6 +42,10 @@ export class PrimitiveType extends BaseType {
     const str = getIdStr(id) as WasmStackType; // TODO: Check this
     return new PrimitiveType({ value: str });
   }
+
+  clone(parent?: Expr): PrimitiveType {
+    return new PrimitiveType({ parent, value: this.value, from: this });
+  }
 }
 
 export class UnionType extends BaseType {
@@ -58,6 +63,10 @@ export class UnionType extends BaseType {
       if (type.size > max) max = type.size;
     }
     return max;
+  }
+
+  clone(parent?: Expr): UnionType {
+    return new UnionType({ parent, value: this.value, from: this });
   }
 }
 
@@ -77,6 +86,10 @@ export class IntersectionType extends BaseType {
     }
     return total;
   }
+
+  clone(parent?: Expr): IntersectionType {
+    return new IntersectionType({ parent, value: this.value, from: this });
+  }
 }
 
 export class TupleType extends BaseType {
@@ -94,6 +107,10 @@ export class TupleType extends BaseType {
       total += type.size;
     }
     return total;
+  }
+
+  clone(parent?: Expr): TupleType {
+    return new TupleType({ parent, value: this.value, from: this });
   }
 }
 
@@ -117,6 +134,10 @@ export class StructType extends BaseType {
   toJSON() {
     return ["struct", ...this.value.map(({ name, type }) => [name, type])];
   }
+
+  clone(parent?: Expr): StructType {
+    return new StructType({ parent, value: this.value, from: this });
+  }
 }
 
 export class ArrayType extends BaseType {
@@ -127,6 +148,10 @@ export class ArrayType extends BaseType {
   constructor(opts: SyntaxOpts & { value: Type }) {
     super(opts);
     this.value = opts.value;
+  }
+
+  clone(parent?: Expr): ArrayType {
+    return new ArrayType({ parent, value: this.value, from: this });
   }
 }
 
@@ -158,6 +183,10 @@ export class FnType extends BaseType {
 
   set returns(type: Type | undefined) {
     this.value.returns = type;
+  }
+
+  clone(parent?: Expr): FnType {
+    return new FnType({ parent, value: this.value, from: this });
   }
 }
 

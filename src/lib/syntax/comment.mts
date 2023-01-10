@@ -1,3 +1,4 @@
+import { Expr } from "./expr.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export class Comment extends Syntax {
@@ -7,5 +8,9 @@ export class Comment extends Syntax {
   constructor(opts: SyntaxOpts & { value: string }) {
     super(opts);
     this.value = opts.value;
+  }
+
+  clone(parent?: Expr): Comment {
+    return new Comment({ parent, value: this.value, from: this });
   }
 }

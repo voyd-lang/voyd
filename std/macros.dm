@@ -145,7 +145,7 @@ pub macro match(&body)
 	let expand-cases = (cases index) =>
 		let case = cases.extract(index)
 		if is-list(case) and not(index + 1 >= cases.length)
-			` if $(extract case 0) == match-value
+			` if $(extract case 0) == "match-value"
 				$(extract case 1)
 				$(&lambda cases (index + 1))
 			case
@@ -156,7 +156,7 @@ pub macro match(&body)
 		$conditions
 
 pub macro type(&body)
-	define equals-expr (extract &body 0)
+	let equals-expr = &body.extract(0)
 	let expr = equals-expr.extract(2)
 	if expr.is-list and (expr.extract(0) == "struct")
 		init-struct(equals-expr.extract(1) expr)
@@ -178,12 +178,6 @@ m-let init-struct = (name expr) =>
 		let field-name = field.extract(1)
 		let fn-name = "set-" + field-name
 		` $fn-name address $field-name
-
-	let initializer =
-		` fn $name($expr) -> $name
-			let address:$name = alloc($total-size)
-			$@field-initializers
-			address
 
 	// cur-size / accessors
 	let accessors-info = fields.reduce(#[0 `()]) (info param) =>
@@ -208,7 +202,7 @@ m-let init-struct = (name expr) =>
 			"i64" `(store-i64)
 			"f32" `(store-f32)
 			"f64" `(store-f64)
-			`(store-i32) // TODO Support sub-structs
+			`(store-i32)
 
 		let write-accessor =
 			` fn $write-name(self:$name value:$field-type) -> void
@@ -216,10 +210,17 @@ m-let init-struct = (name expr) =>
 
 		accessors.push(read-accessor)
 		accessors.push(write-accessor)
-		#[offset + param.get-size accessors]
+		#[offset + param.get-size, accessors]
 
+	let total-size = accessors-info.extract(0)
 	let accessors = accessors-info.extract(1)
-	` splice-block
-		$expr
+	let initializer =
+		` fn $name($expr) -> $name
+			let address:$name = alloc($total-size)
+			$@field-initializers
+			address
+
+	` quote splice-block
+		define-type $name $expr
 		$initializer
 		$@accessors

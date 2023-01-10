@@ -1,3 +1,4 @@
+import { Expr } from "./expr.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export class Whitespace extends Syntax {
@@ -19,5 +20,9 @@ export class Whitespace extends Syntax {
 
   get isTab() {
     return this.value === "\t";
+  }
+
+  clone(parent?: Expr): Whitespace {
+    return new Whitespace({ parent, value: this.value, from: this });
   }
 }

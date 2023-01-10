@@ -51,7 +51,6 @@ const evalFnCall = (list: List): Expr => {
   }
 
   const shouldSkipArgEval = fnsToSkipArgEval.has(identifier.value);
-
   const argsArr = !shouldSkipArgEval ? list.rest().map(evalExpr) : list.rest();
   const args = new List({ value: argsArr, parent: list.getParent() });
 
@@ -76,8 +75,10 @@ const expandMacros = (list: Expr): Expr => {
 /** Expands a macro call */
 const expandMacro = ({ macro, call }: { macro: List; call: List }): Expr => {
   const params = (macro.at(0) as List).rest();
+
   params.forEach((p, index) => {
     const identifier = p as Identifier;
+    // Todo: Just make this an implicit variable
     if (identifier.value === "&body") {
       macro.setVar("&body", {
         kind: "param",
@@ -88,8 +89,13 @@ const expandMacro = ({ macro, call }: { macro: List; call: List }): Expr => {
 
     macro.setVar(identifier, { value: call.at(index + 1)!, kind: "param" });
   });
-  const result = macro.rest().map((exp) => evalExpr(exp));
-  return expandMacros(result.pop()!) ?? new List({});
+
+  const result = macro
+    .rest()
+    .map((exp) => evalExpr(exp))
+    .at(-1)!;
+  result.setParent(call.getParent());
+  return expandMacros(result) ?? new List({});
 };
 
 type CallLambdaOpts = {
@@ -106,6 +112,7 @@ const callLambda = (opts: CallLambdaOpts): Expr => {
     throw new Error("Invalid lambda definition");
   }
 
+  body.setVar("&lambda", { value: opts.lambda.clone(), kind: "var" });
   params.value.forEach((p, index) => {
     const identifier = p as Identifier;
     body.setVar(identifier, { value: opts.args.at(index)!, kind: "param" });
@@ -137,20 +144,14 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     });
   },
   block: (_, args) => args.at(-1)!,
-  length: (_, array) => array.length,
+  length: (_, args) => (args.first()! as List).length,
   "define-mut": ({ parent }, args) =>
     defineVar({ args, parent, kind: "var", mut: true }),
   define: ({ parent }, args) => defineVar({ args, parent, kind: "var" }),
-  "define-global": ({ identifier }, args) => args.insert(identifier),
-  "define-mut-global": ({ identifier }, args) => args.insert(identifier),
   "define-macro-var": ({ parent }, args) =>
     defineVar({ args, parent, kind: "global" }),
   "define-mut-macro-var": ({ parent }, args) =>
     defineVar({ args, parent, kind: "global", mut: true }),
-  // TODO: Support functions in macro expansion phase
-  "define-function": ({ identifier }, args) => {
-    return args.insert(identifier);
-  },
   export: (_, args) => {
     const id = args.first() as Identifier;
     const fn = currentModuleScope.getFns(id)?.[0];
@@ -358,7 +359,6 @@ const fnsToSkipArgEval = new Set([
   "root",
   "module",
   "macro",
-  "splice-block",
   "define",
   "define-mut",
   "define-global",

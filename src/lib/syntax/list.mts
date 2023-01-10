@@ -61,14 +61,14 @@ export class List extends Syntax {
         return;
       }
 
-      ex.setParent(this);
+      const cloned = ex.clone(this);
 
-      if (isList(ex) && ex.calls("splice-block")) {
-        this.value.push(...ex.rest());
+      if (isList(cloned) && cloned.calls("splice-block")) {
+        this.value.push(...cloned.rest());
         return;
       }
 
-      this.value.push(ex);
+      this.value.push(cloned);
     });
 
     return this;
@@ -107,6 +107,10 @@ export class List extends Syntax {
 
   toJSON() {
     return this.value;
+  }
+
+  clone(parent?: Expr): List {
+    return new List({ parent, value: this.value, from: this });
   }
 }
 

@@ -23,6 +23,8 @@ export type SyntaxOpts = {
   location?: SourceLocation;
   from?: Syntax;
   parent?: Expr;
+  isFn?: boolean;
+  value?: any;
 };
 
 export abstract class Syntax {
@@ -41,10 +43,11 @@ export abstract class Syntax {
   abstract readonly __type: string;
   abstract value: any;
 
-  constructor({ location, from, parent }: SyntaxOpts) {
+  constructor({ location, from, parent, isFn }: SyntaxOpts) {
     this.location = location ?? from?.location;
     this.parent = parent ?? from?.getParent();
     this.context = from?.context ?? new LexicalContext();
+    this.isFn = isFn ?? from?.isFn;
   }
 
   setFn(id: Id, fn: FnType) {
@@ -138,6 +141,8 @@ export abstract class Syntax {
   toJSON() {
     return this.value;
   }
+
+  abstract clone(parent?: Expr): Expr;
 
   private registerVarWithParentFn(v: Var) {
     if (v.kind === "global") return;
