@@ -31,9 +31,9 @@ export class LexicalContext {
     return this;
   }
 
-  getFns(identifier: Id): FnType[] | undefined {
+  getFns(identifier: Id): FnType[] {
     const id = getIdStr(identifier);
-    return this.fns.get(id);
+    return this.fns.get(id) ?? [];
   }
 
   setVar(identifier: Id, v: Var) {

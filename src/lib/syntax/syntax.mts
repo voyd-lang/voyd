@@ -55,8 +55,10 @@ export abstract class Syntax {
     return this;
   }
 
-  getFns(id: Id): FnType[] | undefined {
-    return this.context.getFns(id) ?? this.parent?.getFns(id);
+  getFns(id: Id, start: FnType[] = []): FnType[] {
+    start.push(...this.context.getFns(id));
+    if (this.parent) return this.parent.getFns(id, start);
+    return start;
   }
 
   setVar(id: Id, v: Omit<Var, "index">) {

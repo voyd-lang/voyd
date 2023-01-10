@@ -1,11 +1,10 @@
 import { Bool } from "./bool.mjs";
 import { Float } from "./float.mjs";
 import { Identifier } from "./identifier.mjs";
-import type { Id } from "./identifier.mjs";
 import { Int } from "./int.mjs";
 import { List } from "./list.mjs";
 import { StringLiteral } from "./string-literal.mjs";
-import { PrimitiveType, StructType } from "./types.mjs";
+import { FnType, PrimitiveType, StructType } from "./types.mjs";
 import { Whitespace } from "./whitespace.mjs";
 
 export const isStringLiteral = (expr: unknown): expr is StringLiteral =>
@@ -22,4 +21,7 @@ export const isPrimitiveType = (expr?: unknown): expr is PrimitiveType =>
   expr instanceof PrimitiveType;
 export const isIdentifier = (expr?: unknown): expr is Identifier =>
   expr instanceof Identifier;
+export const isFnType = (expr?: unknown): expr is FnType =>
+  expr instanceof FnType;
 export const newLine = () => new Whitespace({ value: "\n" });
+export const noop = () => new List({ value: ["splice-block"] });

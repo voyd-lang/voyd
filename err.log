@@ -1,0 +1,26 @@
+Debugger listening on ws://127.0.0.1:9229/e61ecb6c-4216-473a-87d8-9cfd1f1598cc
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Debugger ending on ws://127.0.0.1:9229/e61ecb6c-4216-473a-87d8-9cfd1f1598cc
+For help, see: https://nodejs.org/en/docs/inspector
+[
+  "ensure-space",
+  "size"
+]
+file:///Users/drew/projects/dream/dist/syntax-macros/type-system.mjs:150
+        throw new Error("Could not find matching fn for above call expression");
+              ^
+
+Error: Could not find matching fn for above call expression
+    at addTypeAnnotationToUserFnCall (file:///Users/drew/projects/dream/dist/syntax-macros/type-system.mjs:150:15)
+    at addTypeAnnotationsToFnCall (file:///Users/drew/projects/dream/dist/syntax-macros/type-system.mjs:48:12)
+    at addTypeAnnotationsToExpr (file:///Users/drew/projects/dream/dist/syntax-macros/type-system.mjs:13:12)
+    at file:///Users/drew/projects/dream/dist/syntax-macros/type-system.mjs:129:24
+    at Array.map (<anonymous>)
+    at List.map (file:///Users/drew/projects/dream/dist/lib/syntax/list.mjs:74:45)
+    at addTypeAnnotationsToBlock (file:///Users/drew/projects/dream/dist/syntax-macros/type-system.mjs:129:10)
+    at addTypeAnnotationsToFnCall (file:///Users/drew/projects/dream/dist/syntax-macros/type-system.mjs:26:16)
+    at addTypeAnnotationsToExpr (file:///Users/drew/projects/dream/dist/syntax-macros/type-system.mjs:13:12)
+    at addTypeAnnotationsToFn (file:///Users/drew/projects/dream/dist/syntax-macros/type-system.mjs:59:24)
+
+Node.js v18.12.1

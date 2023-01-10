@@ -4,7 +4,7 @@ import {
   ModuleInfo,
   resolveModule as resolveModuleInfo,
 } from "../lib/module-info.mjs";
-import { isIdentifier, isList, List } from "../lib/syntax/index.mjs";
+import { isIdentifier, isList, List, noop } from "../lib/syntax/index.mjs";
 
 type Modules = Map<string, List | "IN_PROGRESS">;
 
@@ -74,6 +74,7 @@ const resolveImports = (list: List, info: ModuleInfo): List => {
         }),
         expr.at(2)!.value as string,
       ]);
+      return noop();
     }
 
     return resolveImports(expr, info);

@@ -14,10 +14,6 @@
 - Support struct field assignment via `=` operator
 - Check mutability of struct before allowing modification (&mut semantics?)
 - replace `quote splice-block` with `quote-splice` or something similar.
-- Improve macro expansion algorithm so macros like `var` and `let` don't need to call
-  `macro-expand`. Outside of `pub`, I don't believe any macro should need to call that function
-  unless they need to extract info post expansion like `pub` does.
-  https://stackoverflow.com/questions/72865649/how-does-macroexpansion-actually-work-in-lisp
 - Rewrite reference manual.
 - Consider using the struct syntax to define named arguments. See
   `archived-reference/functions.md#NamedArguments` for inspiration.
@@ -36,8 +32,6 @@
 - Erlang like atoms for to facilitate optionals and other union data types that may not need associated data.
 - Optional parameters and default parameter values.
 - Pre type system phase IR spec.
-- Fix parameter outputs for exports and extern-functions
-- Scope phase to register functions, vars, and types within their proper scope, maybe in the type system, maybe separate.
-- Circular syntax reference detection
 - Make dot `.` a macro and pull the logic from infix
 - Reset getAllFnParams etc each time a function is used in syntax for macro phase. Right now parameters and variables get re-registered each time the function is executed.
+- Smarter lets and vars. Should detect when they are in or out of a function and create a global when out of one automatically. Should also remove m-let as a result.
