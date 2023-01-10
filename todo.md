@@ -35,3 +35,4 @@
 - Make dot `.` a macro and pull the logic from infix
 - Reset getAllFnParams etc each time a function is used in syntax for macro phase. Right now parameters and variables get re-registered each time the function is executed.
 - Smarter lets and vars. Should detect when they are in or out of a function and create a global when out of one automatically. Should also remove m-let as a result.
+- Add Identifier object constructor to macro runtime

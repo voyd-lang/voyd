@@ -163,7 +163,7 @@ export type FnTypeValue = {
 export type Param = { label?: string; name?: string; type: Type };
 
 export class FnType extends BaseType {
-  readonly __type = "array-type";
+  readonly __type = "fn-type";
   readonly size = 0;
   binaryenId = "";
   value: FnTypeValue;

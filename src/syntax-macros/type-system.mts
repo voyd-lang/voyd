@@ -26,6 +26,7 @@ import {
   noop,
   isFnType,
 } from "../lib/index.mjs";
+import { getIdStr } from "../lib/syntax/get-id-str.mjs";
 
 export const typeSystem = (list: List, info: ModuleInfo): List => {
   if (!info.isRoot) return list;
@@ -35,8 +36,6 @@ export const typeSystem = (list: List, info: ModuleInfo): List => {
 
 const addTypeAnnotationsToExpr = (expr: Expr | undefined): Expr => {
   if (!expr) return noop();
-  if (isIdentifier(expr)) {
-  }
   if (!isList(expr)) return expr;
   return addTypeAnnotationsToFnCall(expr);
 };
@@ -80,7 +79,7 @@ const addTypeAnnotationsToFn = (list: List): List => {
   const parameters = annotateFnParams(rawParameters);
 
   const typedBlock = addTypeAnnotationsToExpr(list.at(4));
-  if (!isList(typedBlock) || typedBlock.calls("typed-block")) {
+  if (!isList(typedBlock) || !typedBlock.calls("typed-block")) {
     throw new Error("Expected typed-block");
   }
 
@@ -195,7 +194,7 @@ function addTypeAnnotationToUserFnCall(list: List) {
   }
 
   const annotatedArgs = list.slice(1).value.flatMap((expr, index) => {
-    const paramType = (fn.getTypeOf() as FnType).getParam(index);
+    const paramType = fn.getParam(index);
     if (isStructType(paramType) && isStruct(expr)) {
       return applyStructParams(paramType, expr as List);
     }
@@ -235,15 +234,16 @@ const addTypeAnnotationToVar = (list: List): List => {
   const global = varFnId.value.includes("global");
   const initializer = list.at(2);
   const inferredType = getExprReturnType(initializer);
-  const annotatedInitializer = addTypeAnnotationsToExpr(list.at(2));
+  const annotatedInitializer = addTypeAnnotationsToExpr(initializer?.clone());
   // Get identifier from a potentially untyped definition
-  const identifier = isList(list.at(1))
-    ? ((list.at(1) as List).at(1) as Identifier) // Typed case
-    : (list.at(1) as Identifier); // Untyped case
-  const suppliedType = isList(list.at(1))
-    ? isStruct(list.at(1) as List)
-      ? typedStructListToStructType(list.at(1) as List)
-      : list.getType(identifier)!
+  const def = list.at(1)!;
+  const identifier = isList(def)
+    ? (def.at(1) as Identifier) // Typed case
+    : (def as Identifier); // Untyped case
+  const suppliedType = isList(def)
+    ? isStruct(def)
+      ? typedStructListToStructType(def)
+      : getTypeFromLabeledExpr(def)
     : undefined;
 
   if (suppliedType && !typesMatch(suppliedType, inferredType)) {
@@ -254,11 +254,13 @@ const addTypeAnnotationToVar = (list: List): List => {
 
   const type = suppliedType ?? inferredType;
   if (!type) {
-    throw new Error(`Could not determine type for identifier ${identifier}`);
+    throw new Error(
+      `Could not determine type for identifier ${identifier.value}`
+    );
   }
 
   identifier.setTypeOf(type);
-  identifier
+  list
     .getParent()
     ?.setVar(identifier, { kind: global ? "global" : "var", mut, type });
 
@@ -266,6 +268,18 @@ const addTypeAnnotationToVar = (list: List): List => {
     value: [varFnId, identifier, annotatedInitializer],
     from: list,
   });
+};
+
+const getTypeFromLabeledExpr = (def: List): Type | undefined => {
+  if (!def.calls("labeled-expr")) {
+    throw new Error("Expected labeled expression");
+  }
+  const typeId = def.at(2);
+  if (!isIdentifier(typeId)) {
+    throw new Error("Param type annotations must be identifiers (for now)");
+  }
+
+  return def.getType(typeId);
 };
 
 const getExprReturnType = (expr?: Expr): Type | undefined => {
@@ -278,7 +292,7 @@ const getExprReturnType = (expr?: Expr): Type | undefined => {
   if (!isList(expr)) throw new Error(`Invalid expression ${expr}`);
 
   if (expr.calls("labeled-expr")) return getExprReturnType(expr.at(2));
-  if (expr.calls("block")) getExprReturnType(expr.at(-1));
+  if (expr.calls("block")) return getExprReturnType(expr.at(-1));
   if (expr.calls("struct")) return getStructLiteralType(expr);
   if (expr.calls("bnr") || expr.calls("binaryen-mod")) {
     return getBnrReturnType(expr);
@@ -286,7 +300,7 @@ const getExprReturnType = (expr?: Expr): Type | undefined => {
   if (expr.calls("if")) return getIfReturnType(expr);
 
   const fn = getMatchingFnForCallExpr(expr);
-  return fn?.props.get("returnType") as Type | undefined;
+  return fn?.returns;
 };
 
 /** Takes the expression form of a struct and converts it into type form */
@@ -376,8 +390,8 @@ const structArgsMatch = (expected: StructType, given: StructType): boolean => {
 const initTypes = (list: List) => {
   list.setType("i32", i32);
   list.setType("f32", f32);
-  list.setType("i32", i64);
-  list.setType("f32", f64);
+  list.setType("i64", i64);
+  list.setType("f64", f64);
   list.setType("bool", bool);
   list.setType("void", dVoid);
   const scan = (expr: Expr) => {
@@ -393,7 +407,6 @@ const initTypes = (list: List) => {
     if (expr.calls("define-type")) {
       const id = expr.at(1) as Identifier;
       const val = expr.at(2) as Expr;
-      id.binding = expr;
 
       // Todo support more than primitives and structs;
       const type = isStruct(val)
@@ -401,6 +414,11 @@ const initTypes = (list: List) => {
         : list.getType(id)!;
 
       list.setType(id, type);
+      return;
+    }
+
+    if (expr.calls("export")) {
+      initExport(expr);
       return;
     }
 
@@ -412,8 +430,7 @@ const initTypes = (list: List) => {
 const initFn = (expr: List) => {
   const parent = expr.getParent()!;
   const fnIdentifier = expr.at(1) as Identifier;
-  fnIdentifier.binding = expr;
-  const paramsIndex = expr.first()?.is("define-function") ? 2 : 3;
+  const paramsIndex = expr.calls("define-function") ? 2 : 3;
   const params = (expr.at(paramsIndex) as List).value.slice(1).map((p) => {
     // For now assume all params are either structs or labeled expressions
     const { label, identifier, type } = getInfoFromRawParam(p as List);
@@ -432,6 +449,41 @@ const initFn = (expr: List) => {
 
   expr.setTypeOf(fnType);
   parent.setFn(fnIdentifier, fnType);
+};
+
+const initExport = (exp: List) => {
+  // Module Block > Module > Root Block (hopefully this applies to other places an export might occur)
+  const target = exp.getParent()?.getParent()?.getParent();
+  if (!target) {
+    throw new Error("Nothing to export to");
+  }
+
+  const exportId = exp.at(1);
+  if (!isIdentifier(exportId)) {
+    throw new Error("Missing identifier in export");
+  }
+
+  const params = exp.at(2);
+  if (isList(params) && params.calls("parameters")) {
+    initFnExport(exportId, params, target);
+    return;
+  }
+};
+
+const initFnExport = (fnId: Identifier, params: List, exportTarget: Expr) => {
+  const candidates = fnId.getFns(fnId);
+  const fn = candidates.find((candidate) =>
+    candidate.value.params.every((param, index) => {
+      const p = params.at(index + 1);
+      if (!isList(p)) return false;
+      const { label, identifier, type } = getInfoFromRawParam(p as List);
+      const identifiersMatch = identifier ? identifier.is(param.name) : true;
+      const labelsMatch = label ? label.is(param.label) : true;
+      const typesDoMatch = typesMatch(param.type, type);
+      return typesDoMatch && identifiersMatch && labelsMatch;
+    })
+  );
+  if (fn) exportTarget.setFn(fnId, fn);
 };
 
 const getSuppliedReturnTypeForFn = (
@@ -497,6 +549,6 @@ function assertFunctionReturnType(
 
 const isStruct = (expr?: Expr) => isList(expr) && expr.calls("struct");
 const isPrimitiveFn = (expr?: Expr) => {
-  if (typeof expr !== "string") return false;
-  return new Set(["if", "="]).has(expr);
+  if (!isIdentifier(expr)) return false;
+  return new Set(["if", "="]).has(getIdStr(expr));
 };

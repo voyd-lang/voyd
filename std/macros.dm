@@ -176,7 +176,7 @@ m-let init-struct = (name expr) =>
 
 	let field-initializers = fields.map (field) =>
 		let field-name = field.extract(1)
-		let fn-name = "set-" + field-name
+		let fn-name = Identifier from: "set-" + field-name
 		` $fn-name address $field-name
 
 	// cur-size / accessors
@@ -196,7 +196,7 @@ m-let init-struct = (name expr) =>
 			` fn $field-name(self:$name) -> $field-type
 				$@read-fn self $offset
 
-		let write-name = "set-" + field-name
+		let write-name = Identifier from: "set-" + field-name
 		let write-fn = field-type.match
 			"i32" `(store-i32)
 			"i64" `(store-i64)

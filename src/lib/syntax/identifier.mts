@@ -10,7 +10,6 @@ export class Identifier extends Syntax {
   readonly isQuoted?: boolean;
   /** The actual string ID of the identifier */
   value: string;
-  binding?: Expr;
 
   constructor(
     opts: SyntaxOpts & {
@@ -30,29 +29,17 @@ export class Identifier extends Syntax {
     return !!this.getVar(this);
   }
 
-  static from(str: string) {
-    return new Identifier({ value: str });
-  }
-
   getTypeOf(): Type | undefined {
-    return (
-      this.type ??
-      (isIdentifier(this.binding) ? this.binding.getTypeOf() : undefined)
-    );
+    return this.getVar(this)?.type;
   }
 
-  setTypeOf(type: Type) {
-    this.type = type;
-    return this;
-  }
-
-  /** Returns the result of the identifier */
-  getResult(): Expr | undefined {
+  /** Returns the value of the identifier if assigned in expansion phase */
+  getAssignedValue(): Expr | undefined {
     return this.getVar(this)?.value;
   }
 
-  /** Like get result but throws if undefined */
-  assertedResult(): Expr {
+  /** Like getAssignedValue but throws if undefined */
+  assertAssignedValue(): Expr {
     const val = this.getVar(this)?.value;
     if (!val) {
       throw new Error(`Identifier ${this.value} is not defined`);
@@ -67,5 +54,9 @@ export class Identifier extends Syntax {
       from: this,
       isQuoted: this.isQuoted,
     });
+  }
+
+  static from(str: string) {
+    return new Identifier({ value: str });
   }
 }

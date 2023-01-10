@@ -6,10 +6,9 @@ import {
   FnType,
   Identifier,
   Int,
-  isFloat,
   isIdentifier,
+  isInt,
   isList,
-  isStringLiteral,
   List,
   StringLiteral,
 } from "../lib/syntax/index.mjs";
@@ -22,9 +21,7 @@ export const macro = (list: List, info: ModuleInfo): List => {
 };
 
 const evalExpr = (expr: Expr) => {
-  if (isFloat(expr)) return expr;
-  if (isStringLiteral(expr)) return expr;
-  if (isIdentifier(expr)) return expr.assertedResult();
+  if (isIdentifier(expr)) return expr.assertAssignedValue();
   if (!isList(expr)) return expr;
   return evalFnCall(expr);
 };
@@ -45,7 +42,7 @@ const evalFnCall = (list: List): Expr => {
     return evalExpr(expanded);
   }
 
-  const variable = identifier.getResult();
+  const variable = identifier.getAssignedValue();
   if (!functions[identifier.value] && !isLambda(variable)) {
     return list;
   }
@@ -152,6 +149,13 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     defineVar({ args, parent, kind: "global" }),
   "define-mut-macro-var": ({ parent }, args) =>
     defineVar({ args, parent, kind: "global", mut: true }),
+  Identifier: (_, args) => {
+    const nameDef = args.at(0);
+    const name = isList(nameDef)
+      ? evalExpr(nameDef.at(2)!)
+      : (nameDef as Identifier);
+    return new Identifier({ value: name.value as string });
+  },
   export: (_, args) => {
     const id = args.first() as Identifier;
     const fn = currentModuleScope.getFns(id)?.[0];
@@ -241,11 +245,6 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
         if (isIdentifier(exp) && exp.value.startsWith("$")) {
           const id = exp.value.replace("$", "");
           return exp.getVar(id)!.value!;
-        }
-
-        if (isIdentifier(exp) || isStringLiteral(exp)) {
-          exp.value = exp.value.replace("\\", "");
-          return exp;
         }
 
         return exp;
@@ -398,8 +397,22 @@ const nop = () => new List({}).push(Identifier.from("splice-block"));
 const bl = (args: List, fn: (l: any, r: any) => boolean) =>
   bool(fn(args.at(0)?.value, args.at(1)?.value));
 /** Binary arithmetic operation */
-const ba = (args: List, fn: (l: any, r: any) => number) =>
-  new Float({ value: fn(args.at(0)?.value, args.at(1)?.value) });
+const ba = (args: List, fn: (l: number, r: number) => number) => {
+  const l = args.at(0) as Float | Int;
+  const r = args.at(1) as Float | Int;
+  const value = fn(l.value, r.value);
+
+  if (isInt(l) && isInt(r) && value % 1 === 0) {
+    return new Int({ value });
+  }
+
+  // Yucky. What was I thinking, concatenating strings with +
+  if (typeof value === "string") {
+    return new StringLiteral({ value });
+  }
+
+  return new Float({ value });
+};
 const bool = (b: boolean) => new Bool({ value: b });
 
 const getMacro = (id: Identifier): List | undefined => {
@@ -421,7 +434,6 @@ const defineVar = (opts: {
   if (!isIdentifier(identifier) || !init) {
     throw new Error("Invalid variable");
   }
-  identifier.binding = init;
   const value = evalExpr(init);
   parent.setVar(identifier, { kind, mut, value });
   return nop();
