@@ -840,10 +840,7 @@
           "define-function",
           "Pos",
           ["parameters", ["x", "i32"], ["y", "i32"], ["z", "i32"]],
-          [
-            "return-type",
-            ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]]
-          ],
+          ["return-type", ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]]],
           [
             "typed-block",
             "i32",
@@ -858,7 +855,7 @@
                 "copy",
                 [
                   "typed-block",
-                  ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]],
+                  ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]],
                   ["define", "address", ["alloc", 12]],
                   ["set-x", "address", "x"],
                   ["set-y", "address", "y"],
@@ -875,7 +872,7 @@
           "x",
           [
             "parameters",
-            ["self", ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]]]
+            ["self", ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]]]
           ],
           ["return-type", "i32"],
           ["typed-block", "i32", ["read-i32", "self", 0]]
@@ -885,10 +882,7 @@
           "set-x",
           [
             "parameters",
-            [
-              "self",
-              ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]]
-            ],
+            ["self", ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]]],
             ["value", "i32"]
           ],
           ["return-type", "void"],
@@ -899,7 +893,7 @@
           "y",
           [
             "parameters",
-            ["self", ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]]]
+            ["self", ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]]]
           ],
           ["return-type", "i32"],
           ["typed-block", "i32", ["read-i32", "self", 4]]
@@ -909,10 +903,7 @@
           "set-y",
           [
             "parameters",
-            [
-              "self",
-              ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]]
-            ],
+            ["self", ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]]],
             ["value", "i32"]
           ],
           ["return-type", "void"],
@@ -923,7 +914,7 @@
           "z",
           [
             "parameters",
-            ["self", ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]]]
+            ["self", ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]]]
           ],
           ["return-type", "i32"],
           ["typed-block", "i32", ["read-i32", "self", 8]]
@@ -933,10 +924,7 @@
           "set-z",
           [
             "parameters",
-            [
-              "self",
-              ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]]
-            ],
+            ["self", ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]]],
             ["value", "i32"]
           ],
           ["return-type", "void"],
@@ -946,10 +934,7 @@
           "define-function",
           "make-pos",
           ["parameters"],
-          [
-            "return-type",
-            ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]]
-          ],
+          ["return-type", ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]]],
           [
             "typed-block",
             "i32",
@@ -964,7 +949,7 @@
                 "copy",
                 [
                   "typed-block",
-                  ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]],
+                  ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]],
                   [
                     "define",
                     "my",
