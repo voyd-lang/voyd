@@ -17,5 +17,5 @@ export const syntaxMacros: SyntaxMacro[] = [
   moduleSyntaxMacro,
   macro,
   typeSystem,
-  // memoryManagement,
+  memoryManagement,
 ];

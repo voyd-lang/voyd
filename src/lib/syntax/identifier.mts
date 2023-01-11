@@ -30,7 +30,7 @@ export class Identifier extends Syntax {
   }
 
   getTypeOf(): Type | undefined {
-    return this.getVar(this)?.type;
+    return this.type ?? this.getVar(this)?.type;
   }
 
   /** Returns the value of the identifier if assigned in expansion phase */

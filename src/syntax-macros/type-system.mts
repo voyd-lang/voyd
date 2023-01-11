@@ -452,6 +452,7 @@ const initFn = (expr: List) => {
   });
 
   expr.setTypeOf(fnType);
+  fnIdentifier.setTypeOf(fnType);
   parent.setFn(fnIdentifier, fnType);
 };
 

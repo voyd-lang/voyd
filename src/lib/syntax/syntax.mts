@@ -48,6 +48,7 @@ export abstract class Syntax {
     this.parent = parent ?? from?.getParent();
     this.context = from?.context ?? new LexicalContext();
     this.isFn = isFn ?? from?.isFn;
+    this.type = from?.type;
   }
 
   setFn(id: Id, fn: FnType) {

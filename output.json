@@ -846,12 +846,28 @@
           ],
           [
             "typed-block",
-            ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]],
-            ["define", "address", ["alloc", 12]],
-            ["set-x", "address", "x"],
-            ["set-y", "address", "y"],
-            ["set-z", "address", "z"],
-            "address"
+            "i32",
+            [
+              "define",
+              ["labeled-expr", "*__return_alloc_address", "i32"],
+              ["alloc", 12]
+            ],
+            [
+              "set-return",
+              [
+                "copy",
+                [
+                  "typed-block",
+                  ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]],
+                  ["define", "address", ["alloc", 12]],
+                  ["set-x", "address", "x"],
+                  ["set-y", "address", "y"],
+                  ["set-z", "address", "z"],
+                  "address"
+                ],
+                "*__return_alloc_address"
+              ]
+            ]
           ]
         ],
         [
@@ -936,47 +952,63 @@
           ],
           [
             "typed-block",
-            ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]],
+            "i32",
             [
               "define",
-              "my",
-              [
-                "Pos",
-                [
-                  "struct",
-                  ["labeled-expr", "x", 5],
-                  ["labeled-expr", "y", 4],
-                  ["labeled-expr", "z", 3]
-                ]
-              ]
+              ["labeled-expr", "*__return_alloc_address", "i32"],
+              ["alloc", 12]
             ],
             [
-              "define",
-              "my2",
+              "set-return",
               [
-                "Pos",
+                "copy",
                 [
-                  "struct",
-                  ["labeled-expr", "x", 11],
-                  ["labeled-expr", "y", 24],
-                  ["labeled-expr", "z", 33]
-                ]
+                  "typed-block",
+                  ["struct", ["i32", "i32"], ["i32", "i32"], ["i32", "i32"]],
+                  [
+                    "define",
+                    "my",
+                    [
+                      "Pos",
+                      [
+                        "struct",
+                        ["labeled-expr", "x", 5],
+                        ["labeled-expr", "y", 4],
+                        ["labeled-expr", "z", 3]
+                      ]
+                    ]
+                  ],
+                  [
+                    "define",
+                    "my2",
+                    [
+                      "Pos",
+                      [
+                        "struct",
+                        ["labeled-expr", "x", 11],
+                        ["labeled-expr", "y", 24],
+                        ["labeled-expr", "z", 33]
+                      ]
+                    ]
+                  ],
+                  [
+                    "define",
+                    "my3",
+                    [
+                      "Pos",
+                      [
+                        "struct",
+                        ["labeled-expr", "x", 11],
+                        ["labeled-expr", "y", 24],
+                        ["labeled-expr", "z", 33]
+                      ]
+                    ]
+                  ],
+                  "my"
+                ],
+                "*__return_alloc_address"
               ]
-            ],
-            [
-              "define",
-              "my3",
-              [
-                "Pos",
-                [
-                  "struct",
-                  ["labeled-expr", "x", 11],
-                  ["labeled-expr", "y", 24],
-                  ["labeled-expr", "z", 33]
-                ]
-              ]
-            ],
-            "my"
+            ]
           ]
         ],
         [
