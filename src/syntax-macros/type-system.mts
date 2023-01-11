@@ -521,7 +521,7 @@ const typedStructListToStructType = (list: List): StructType => {
     value: list.value.slice(1).map((v) => {
       // v is always a labeled expression
       const labeledExpr = v as List;
-      const name = labeledExpr.at(2) as Identifier;
+      const name = labeledExpr.at(1) as Identifier;
       const typeId = labeledExpr.at(2) as Identifier;
       const type = list.getType(typeId);
       if (!type) {
