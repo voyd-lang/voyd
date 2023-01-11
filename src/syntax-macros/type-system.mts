@@ -47,6 +47,7 @@ const addTypeAnnotationsToFnCall = (list: List): List => {
   if (list.calls("define-cdt")) return list;
   if (list.calls("block")) return addTypeAnnotationsToBlock(list);
   if (list.calls("lambda-expr")) return list;
+  if (list.calls("struct")) return list;
   if (list.calls("quote")) return list;
   if (list.calls("export")) return list; // TODO
   if (list.calls("=")) return list; // TODO
@@ -100,11 +101,12 @@ const addTypeAnnotationsToFn = (list: List): List => {
 
   // Note to future self. This is why references can be so nice to have. But we should probably have an &mut syntax
   fn.returns = returnType;
+  identifier.setTypeOf(fn);
 
   return new List({
     value: [
       "define-function",
-      fn,
+      identifier,
       parameters,
       ["return-type", returnType!],
       typedBlock,
@@ -186,6 +188,7 @@ const addTypeAnnotationsToPrimitiveFn = (list: List): List => {
 };
 
 function addTypeAnnotationToUserFnCall(list: List) {
+  const identifier = list.first() as Identifier;
   list.rest().forEach(addTypeAnnotationsToExpr);
   const fn = getMatchingFnForCallExpr(list);
   if (!fn) {
@@ -202,7 +205,8 @@ function addTypeAnnotationToUserFnCall(list: List) {
     return [addTypeAnnotationsToExpr(expr)];
   });
 
-  return new List({ value: [fn, ...annotatedArgs], from: list });
+  identifier.setTypeOf(fn);
+  return new List({ value: [identifier, ...annotatedArgs], from: list });
 }
 
 /** Re-orders the supplied struct and returns it as a normal list of expressions to be passed as args */

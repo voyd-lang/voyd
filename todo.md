@@ -1,3 +1,5 @@
+# Todo List
+
 - Unsafe macros (As add unsafe macro and check safety macros that do a form of "unsafe" checking
   i.e. rust)
 - Fix bug in modules where I can't run syntax macros directly on files within std
@@ -35,4 +37,17 @@
 - Make dot `.` a macro and pull the logic from infix
 - Reset getAllFnParams etc each time a function is used in syntax for macro phase. Right now parameters and variables get re-registered each time the function is executed.
 - Smarter lets and vars. Should detect when they are in or out of a function and create a global when out of one automatically. Should also remove m-let as a result.
-- Add Identifier object constructor to macro runtime
+- Fix bug where using comments in match statements at macro expansion time can change behavior see example 1
+
+# Examples
+
+Example 1
+
+```
+let write-fn = field-type.match
+	"i32" `(store-i32)
+	"i64" `(store-i64)
+	"f32" `(store-f32)
+	"f64" `(store-f64)
+	`(store-i32) // Bleep bloop blop
+```

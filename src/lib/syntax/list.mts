@@ -114,4 +114,22 @@ export class List extends Syntax {
   }
 }
 
+/**
+ * Passes a reference to itself rather than being copied on pushed.
+ *
+ * This was created due to an issue with the list.reduce function of
+ * the macro expansion phase. The macro evaluator would clone the reduced
+ * list when evaluating arguments to list.push. This prevented the list
+ * from ever truly being updated as it was always pushing to a new list.
+ *
+ * Note: I've decided to use the normal list in a functional way, by chaining
+ * the push operations and creating a new list on each push. This might
+ * end up being too memory intensive, so I may use the BoxList in the future.
+ */
+export class BoxList extends List {
+  clone() {
+    return this;
+  }
+}
+
 export type ListValue = Expr | string | ListValue[];

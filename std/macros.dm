@@ -190,7 +190,7 @@ m-let init-struct = (name expr) =>
 			"i64" `(read-i64)
 			"f32" `(read-f32)
 			"f64" `(read-f64)
-			`(read-i32) // TODO Support sub-structs
+			`(read-i32)
 
 		let read-accessor =
 			` fn $field-name(self:$name) -> $field-type
@@ -208,9 +208,11 @@ m-let init-struct = (name expr) =>
 			` fn $write-name(self:$name value:$field-type) -> void
 				$@write-fn self $offset value
 
-		accessors.push(read-accessor)
-		accessors.push(write-accessor)
-		#[offset + param.get-size, accessors]
+		let newAccessors = accessors
+			.push(read-accessor)
+			.push(write-accessor)
+
+		#[offset + param.get-size, newAccessors]
 
 	let total-size = accessors-info.extract(0)
 	let accessors = accessors-info.extract(1)
