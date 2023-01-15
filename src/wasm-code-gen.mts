@@ -11,6 +11,7 @@ import {
   Identifier,
   Int,
   isBool,
+  isComment,
   isFloat,
   isIdentifier,
   isInt,
@@ -43,21 +44,22 @@ const compileExpression = (opts: CompileExpressionOpts): number => {
   if (isList(expr)) return compileList({ ...opts, expr: expr });
   if (isInt(expr)) return mod.i32.const(expr.value);
   if (isFloat(expr)) return mod.f32.const(expr.value);
+  if (isComment(expr)) return mod.nop();
   if (isIdentifier(expr)) return compileIdentifier({ ...opts, expr });
   if (isBool(bool)) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);
   }
-  throw new Error(`Unrecognized expression ${expr}`);
+  throw new Error(`Unrecognized expression ${expr.value}`);
 };
 
 const compileIdentifier = (
   opts: CompileExpressionOpts & { expr: Identifier }
 ) => {
-  const { expr, mod, parent } = opts;
+  const { expr, mod } = opts;
 
-  const variable = parent.getVar(expr);
+  const variable = expr.getVar(expr);
   if (!variable) {
-    throw new Error(`Unrecognized symbol ${expr}`);
+    throw new Error(`Unrecognized symbol ${expr.value}`);
   }
 
   if (variable?.kind === "global") {
@@ -150,7 +152,7 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
   }
 
   const fnId = expr.first() as Identifier;
-  const fn = expr.getTypeOf() as FnType | undefined;
+  const fn = fnId.getTypeOf() as FnType | undefined;
   if (!fn) {
     throw new Error(`Function ${fnId.value} not found`);
   }
@@ -201,20 +203,28 @@ const compileBnrCall = (opts: CompileListOpts): number => {
 };
 
 const compileDefine = (opts: CompileFnCallOpts): number => {
-  const { expr, mod, parent } = opts;
-  const identifier = (expr.at(1)! as List).at(1) as Identifier;
+  const { expr, mod } = opts;
+  const identifier = expr.at(1) as Identifier;
   const value = compileExpression({ ...opts, expr: expr.at(2)! });
-  const variable = parent.getVar(identifier)!;
-  if (!variable) throw new Error(`Variable, ${identifier} not found`);
 
-  if (variable.kind === "global") {
-    const type = variable.type!;
+  if (expr.calls("define-global") || expr.calls("define-mut-global")) {
+    const type = identifier.getTypeOf()!;
     const binType = mapBinaryenType(type);
-    mod.addGlobal(identifier.value, binType, !!variable.mut, value);
+    mod.addGlobal(
+      identifier.value,
+      binType,
+      expr.calls("define-mut-global"),
+      value
+    );
     return mod.nop();
   }
 
-  return mod.local.set(variable.index, value);
+  const info = identifier.setVar(identifier, {
+    type: identifier.getTypeOf()!,
+    mut: expr.calls("define-mut"),
+    kind: "var",
+  })!;
+  return mod.local.set(info.index, value);
 };
 
 const compileFunction = (opts: CompileListOpts): number => {
@@ -222,10 +232,10 @@ const compileFunction = (opts: CompileListOpts): number => {
   const fnId = expr.at(1) as Identifier;
   const fn = fnId.getTypeOf() as FnType;
   const parameterTypes = getFunctionParameterTypes(fn);
-  const variableTypes = getFunctionVarTypes(fn);
   const returnType = mapBinaryenType(fn.returns!);
-
   const body = compileList({ ...opts, expr: expr.at(4) as List });
+  const variableTypes = getFunctionVarTypes(expr); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
+
   mod.addFunction(
     fn.binaryenId,
     parameterTypes,
@@ -270,14 +280,11 @@ const compileIf = (opts: CompileListOpts) => {
 };
 
 const getFunctionParameterTypes = (fn: FnType) => {
-  const types = fn
-    .getAllFnParams()
-    .map((param) => mapBinaryenType(param.type!));
-
+  const types = fn.value.params.map((param) => mapBinaryenType(param.type!));
   return binaryen.createType(types);
 };
 
-const getFunctionVarTypes = (fn: FnType) =>
+const getFunctionVarTypes = (fn: Expr) =>
   fn.getAllFnVars().map((v) => mapBinaryenType(v.type!));
 
 const mapBinaryenType = (type: Type): binaryen.Type => {

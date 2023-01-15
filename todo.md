@@ -38,6 +38,7 @@
 - Reset getAllFnParams etc each time a function is used in syntax for macro phase. Right now parameters and variables get re-registered each time the function is executed.
 - Smarter lets and vars. Should detect when they are in or out of a function and create a global when out of one automatically. Should also remove m-let as a result.
 - Fix bug where using comments in match statements at macro expansion time can change behavior see example 1
+- Simplify `setFn` and `setVar`. Type info should be attached to identifier, so passing it is redundant
 
 # Examples
 

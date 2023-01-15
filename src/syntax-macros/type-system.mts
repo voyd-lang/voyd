@@ -47,10 +47,7 @@ const addTypeAnnotationsToFnCall = (list: List): List => {
   if (list.calls("define-cdt")) return list;
   if (list.calls("block")) return addTypeAnnotationsToBlock(list);
   if (list.calls("lambda-expr")) return list;
-  if (list.calls("struct")) return list;
-  if (list.calls("quote")) return list;
-  if (list.calls("export")) return list; // TODO
-  if (list.calls("=")) return list; // TODO
+  if (list.calls("export")) return list;
   if (list.calls("root")) return addTypeAnnotationToRoot(list);
   if (list.calls("module")) return addTypeAnnotationToModule(list);
   if (list.calls("bnr") || list.calls("binaryen-mod")) return list;
@@ -555,5 +552,7 @@ function assertFunctionReturnType(
 const isStruct = (expr?: Expr) => isList(expr) && expr.calls("struct");
 const isPrimitiveFn = (expr?: Expr) => {
   if (!isIdentifier(expr)) return false;
-  return new Set(["if", "="]).has(getIdStr(expr));
+  return new Set(["if", "=", "struct", "quote", "labeled-expr"]).has(
+    getIdStr(expr)
+  );
 };

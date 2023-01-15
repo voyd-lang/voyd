@@ -1,4 +1,3 @@
-import { isCyclic } from "../helpers.mjs";
 import type { Expr } from "./expr.mjs";
 import type { Id } from "./identifier.mjs";
 import { LexicalContext, Var } from "./lexical-context.mjs";
@@ -35,7 +34,6 @@ export abstract class Syntax {
   readonly context: LexicalContext;
   readonly props: Map<string, Expr> = new Map();
   readonly flags: Set<string> = new Set();
-  private allFnParams: Var[] = [];
   private allFnVars: Var[] = [];
   private parent?: Expr;
   protected type?: Type;
@@ -69,7 +67,7 @@ export abstract class Syntax {
     };
     this.context.setVar(id, val);
     this.registerVarWithParentFn(val);
-    return this;
+    return val;
   }
 
   getVar(id: Id): Var | undefined {
@@ -123,18 +121,6 @@ export abstract class Syntax {
     throw new Error("Not in a function.");
   }
 
-  getAllFnParams(): Var[] {
-    if (this.isFn) {
-      return this.allFnParams;
-    }
-
-    if (this.parent) {
-      return this.parent.getAllFnParams();
-    }
-
-    throw new Error("Not in a function.");
-  }
-
   /** Marks this as a function definition */
   setAsFn() {
     this.isFn = true;
@@ -152,11 +138,6 @@ export abstract class Syntax {
 
     if (this.isFn && v.kind === "var") {
       this.allFnVars.push(v);
-      return;
-    }
-
-    if (this.isFn && v.kind === "param") {
-      this.allFnParams.push(v);
       return;
     }
 

@@ -1,5 +1,6 @@
 import { Bool } from "./bool.mjs";
 import { Float } from "./float.mjs";
+import { Comment } from "./comment.mjs";
 import { Identifier } from "./identifier.mjs";
 import { Int } from "./int.mjs";
 import { List } from "./list.mjs";
@@ -10,6 +11,8 @@ import { Whitespace } from "./whitespace.mjs";
 export const isStringLiteral = (expr: unknown): expr is StringLiteral =>
   expr instanceof StringLiteral;
 export const isList = (expr?: unknown): expr is List => expr instanceof List;
+export const isComment = (expr?: unknown): expr is Comment =>
+  expr instanceof Comment;
 export const isFloat = (expr?: unknown): expr is Float => expr instanceof Float;
 export const isInt = (expr?: unknown): expr is Int => expr instanceof Int;
 export const isBool = (expr?: unknown): expr is Bool => expr instanceof Bool;
