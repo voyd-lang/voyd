@@ -5,7 +5,25 @@
       "module",
       "std/macros",
       ["imports"],
-      ["exports"],
+      [
+        "exports",
+        "pub",
+        "`",
+        ":",
+        "let",
+        "var",
+        "m-let",
+        "m-var",
+        "global",
+        ";",
+        "lambda",
+        "=>",
+        "fn",
+        "def-wasm-operator",
+        "extern-fn",
+        "match",
+        "type"
+      ],
       [
         ["export", "pub", ["parameters", ["&body"]]],
         ["export", "`", ["parameters", ["&body"]]],
@@ -35,328 +53,34 @@
     ],
     [
       "module",
-      "std/memory",
-      ["imports", ["std/macros", "***"]],
-      ["exports"],
+      "std/operators",
+      ["imports"],
       [
-        ["define-global", "header-size", 8],
-        ["define-global", "size-index", 0],
-        ["define-global", "type-index", 4],
-        ["define-mut-global", "stack-pointer", 0],
-        "// Returns a pointer with the location of the allocation",
-        [
-          "define-function",
-          "alloc",
-          ["parameters", ["size", "i32"]],
-          ["return-type", "i32"],
-          [
-            "typed-block",
-            "i32",
-            ["ensure-space", "size"],
-            ["define", "address", ["typed-block", "i32", "stack-pointer"]],
-            [
-              "=",
-              "stack-pointer",
-              ["+", ["+", "stack-pointer", "size"], "header-size"]
-            ],
-            [
-              "bnr",
-              ["i32", "store", "void"],
-              [
-                ["quote", 0],
-                ["quote", 2],
-                "address",
-                ["+", "size", "header-size"]
-              ]
-            ],
-            "address"
-          ]
-        ],
-        ["export", "alloc", ["parameters", ["labeled-expr", "size", "i32"]]],
-        "// Returns dest pointer",
-        [
-          "define-function",
-          "copy",
-          ["parameters", ["src", "i32"], ["dest", "i32"]],
-          ["return-type", "i32"],
-          [
-            "typed-block",
-            "i32",
-            [
-              "bnr",
-              ["memory", "copy", "void"],
-              ["dest", "src", ["size", "src"]]
-            ],
-            "dest"
-          ]
-        ],
-        [
-          "export",
-          "copy",
-          [
-            "parameters",
-            ["labeled-expr", "src", "i32"],
-            ["labeled-expr", "dest", "i32"]
-          ]
-        ],
-        [
-          "define-function",
-          "size",
-          ["parameters", ["address", "i32"]],
-          ["return-type", "i32"],
-          [
-            "typed-block",
-            "i32",
-            [
-              "bnr",
-              ["i32", "load", "i32"],
-              [
-                ["quote", 0],
-                ["quote", 2],
-                ["+", "size-index", "address"]
-              ]
-            ]
-          ]
-        ],
-        ["export", "size", ["parameters", ["labeled-expr", "address", "i32"]]],
-        "// Sets the stack pointer to the end of a function return space, returns the return address",
-        [
-          "define-function",
-          "set-return",
-          ["parameters", ["return-address", "i32"]],
-          ["return-type", "i32"],
-          [
-            "typed-block",
-            "i32",
-            [
-              "=",
-              "stack-pointer",
-              ["+", "return-address", ["size", "return-address"]]
-            ],
-            "return-address"
-          ]
-        ],
-        [
-          "export",
-          "set-return",
-          ["parameters", ["labeled-expr", "return-address", "i32"]]
-        ],
-        "// For external load and store use. Add header size automatically to offset",
-        [
-          "define-function",
-          "read-i32",
-          ["parameters", ["address", "i32"], ["offset", "i32"]],
-          ["return-type", "i32"],
-          [
-            "typed-block",
-            "i32",
-            [
-              "bnr",
-              ["i32", "load", "i32"],
-              [
-                ["quote", 0],
-                ["quote", 2],
-                ["+", ["+", "address", "offset"], "header-size"]
-              ]
-            ]
-          ]
-        ],
-        [
-          "export",
-          "read-i32",
-          [
-            "parameters",
-            ["labeled-expr", "address", "i32"],
-            ["labeled-expr", "offset", "i32"]
-          ]
-        ],
-        "// For external load and store use. Add header size automatically to offset",
-        [
-          "define-function",
-          "store-i32",
-          [
-            "parameters",
-            ["address", "i32"],
-            ["offset", "i32"],
-            ["value", "i32"]
-          ],
-          ["return-type", "void"],
-          [
-            "typed-block",
-            "i32",
-            [
-              "bnr",
-              ["i32", "store", "i32"],
-              [
-                ["quote", 0],
-                ["quote", 2],
-                ["+", ["+", "address", "offset"], "header-size"],
-                "value"
-              ]
-            ]
-          ]
-        ],
-        [
-          "export",
-          "store-i32",
-          [
-            "parameters",
-            ["labeled-expr", "address", "i32"],
-            ["labeled-expr", "offset", "i32"],
-            ["labeled-expr", "value", "i32"]
-          ]
-        ],
-        [
-          "define-function",
-          "ensure-space",
-          ["parameters", ["size", "i32"]],
-          ["return-type", "i32"],
-          [
-            "typed-block",
-            "i32",
-            ["define", "mem-size", ["bnr", ["memory", "size", "i32"]]],
-            [
-              "if",
-              [
-                ">=",
-                ["+", ["+", "stack-pointer", "size"], "header-size"],
-                ["*", "mem-size", 65536]
-              ],
-              ["bnr", ["memory", "grow", "i32"], [1]],
-              0
-            ]
-          ]
-        ]
-      ]
-    ],
-    [
-      "module",
-      "std/string",
-      ["imports", ["std/macros", "***"]],
-      ["exports"],
-      [
-        ["define-type", "String", "i32"],
-        [
-          "define-extern-function",
-          "alloc-string",
-          ["namespace", "strings"],
-          ["parameters"],
-          ["return-type", "String"]
-        ],
-        [
-          "define-extern-function",
-          "de-alloc-string",
-          ["namespace", "strings"],
-          ["parameters", ["labeled-expr", "str", "String"]],
-          ["return-type", "void"]
-        ],
-        [
-          "define-extern-function",
-          "str-len",
-          ["namespace", "strings"],
-          ["parameters", ["labeled-expr", "str", "String"]],
-          ["return-type", "i32"]
-        ],
-        "// Returns -1 if not found",
-        [
-          "define-extern-function",
-          "get-char-code-from-string",
-          ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "charIndex", "i32"],
-            ["labeled-expr", "str", "String"]
-          ],
-          ["return-type", "i32"]
-        ],
-        [
-          "define-extern-function",
-          "add-char-code-to-string",
-          ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "char", "i32"],
-            ["labeled-expr", "str", "String"]
-          ],
-          ["return-type", "void"]
-        ],
-        [
-          "define-extern-function",
-          "print-str",
-          ["namespace", "strings"],
-          ["parameters", ["labeled-expr", "str", "String"]],
-          ["return-type", "void"]
-        ],
-        [
-          "define-extern-function",
-          "str-equals",
-          ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "a", "String"],
-            ["labeled-expr", "b", "String"]
-          ],
-          ["return-type", "void"]
-        ],
-        [
-          "define-extern-function",
-          "str-starts-with",
-          ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "str", "String"],
-            ["labeled-expr", "startsWith", "String"]
-          ],
-          ["return-type", "void"]
-        ],
-        [
-          "define-extern-function",
-          "str-ends-with",
-          ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "str", "String"],
-            ["labeled-expr", "endsWith", "String"]
-          ],
-          ["return-type", "void"]
-        ],
-        [
-          "define-extern-function",
-          "str-includes",
-          ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "str", "String"],
-            ["labeled-expr", "includes", "String"]
-          ],
-          ["return-type", "void"]
-        ],
-        "// Regex test (pass -1 to flags for default (g))",
-        [
-          "define-extern-function",
-          "str-test",
-          ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "str", "String"],
-            ["labeled-expr", "regex", "String"],
-            ["labeled-expr", "flags", "String"]
-          ],
-          ["return-type", "void"]
-        ],
-        ["export", "string", ["parameters", ["str"]]]
-      ]
-    ],
-    [
-      "module",
-      "std/index",
-      [
-        "imports",
-        ["std/macros", "***"],
-        ["std/memory", "***"],
-        ["std/string", "***"]
+        "exports",
+        "<",
+        ">",
+        "<=",
+        ">=",
+        "==",
+        "and",
+        "or",
+        "xor",
+        "not",
+        "+",
+        "-",
+        "*",
+        "/",
+        "<",
+        ">",
+        "<=",
+        ">=",
+        "==",
+        "not",
+        "+",
+        "-",
+        "*",
+        "/"
       ],
-      ["exports"],
       [
         [
           "define-function",
@@ -822,8 +546,391 @@
     ],
     [
       "module",
+      "std/memory",
+      ["imports", ["std/macros", "***"], ["std/operators", "***"]],
+      [
+        "exports",
+        "alloc",
+        "copy",
+        "size",
+        "set-return",
+        "read-i32",
+        "store-i32"
+      ],
+      [
+        ["define-global", "header-size", 8],
+        ["define-global", "size-index", 0],
+        ["define-global", "type-index", 4],
+        ["define-mut-global", "stack-pointer", 0],
+        "// Returns a pointer with the location of the allocation",
+        [
+          "define-function",
+          "alloc",
+          ["parameters", ["size", "i32"]],
+          ["return-type", "i32"],
+          [
+            "typed-block",
+            "i32",
+            ["ensure-space", "size"],
+            ["define", "address", ["typed-block", "i32", "stack-pointer"]],
+            [
+              "=",
+              "stack-pointer",
+              ["+", ["+", "stack-pointer", "size"], "header-size"]
+            ],
+            [
+              "bnr",
+              ["i32", "store", "void"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                "address",
+                ["+", "size", "header-size"]
+              ]
+            ],
+            "address"
+          ]
+        ],
+        ["export", "alloc", ["parameters", ["labeled-expr", "size", "i32"]]],
+        "// Returns dest pointer",
+        [
+          "define-function",
+          "copy",
+          ["parameters", ["src", "i32"], ["dest", "i32"]],
+          ["return-type", "i32"],
+          [
+            "typed-block",
+            "i32",
+            [
+              "bnr",
+              ["memory", "copy", "void"],
+              ["dest", "src", ["size", "src"]]
+            ],
+            "dest"
+          ]
+        ],
+        [
+          "export",
+          "copy",
+          [
+            "parameters",
+            ["labeled-expr", "src", "i32"],
+            ["labeled-expr", "dest", "i32"]
+          ]
+        ],
+        [
+          "define-function",
+          "size",
+          ["parameters", ["address", "i32"]],
+          ["return-type", "i32"],
+          [
+            "typed-block",
+            "i32",
+            [
+              "bnr",
+              ["i32", "load", "i32"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                ["+", "size-index", "address"]
+              ]
+            ]
+          ]
+        ],
+        ["export", "size", ["parameters", ["labeled-expr", "address", "i32"]]],
+        "// Sets the stack pointer to the end of a function return space, returns the return address",
+        [
+          "define-function",
+          "set-return",
+          ["parameters", ["return-address", "i32"]],
+          ["return-type", "i32"],
+          [
+            "typed-block",
+            "i32",
+            [
+              "=",
+              "stack-pointer",
+              ["+", "return-address", ["size", "return-address"]]
+            ],
+            "return-address"
+          ]
+        ],
+        [
+          "export",
+          "set-return",
+          ["parameters", ["labeled-expr", "return-address", "i32"]]
+        ],
+        "// For external load and store use. Add header size automatically to offset",
+        [
+          "define-function",
+          "read-i32",
+          ["parameters", ["address", "i32"], ["offset", "i32"]],
+          ["return-type", "i32"],
+          [
+            "typed-block",
+            "i32",
+            [
+              "bnr",
+              ["i32", "load", "i32"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                ["+", ["+", "address", "offset"], "header-size"]
+              ]
+            ]
+          ]
+        ],
+        [
+          "export",
+          "read-i32",
+          [
+            "parameters",
+            ["labeled-expr", "address", "i32"],
+            ["labeled-expr", "offset", "i32"]
+          ]
+        ],
+        "// For external load and store use. Add header size automatically to offset",
+        [
+          "define-function",
+          "store-i32",
+          [
+            "parameters",
+            ["address", "i32"],
+            ["offset", "i32"],
+            ["value", "i32"]
+          ],
+          ["return-type", "void"],
+          [
+            "typed-block",
+            "i32",
+            [
+              "bnr",
+              ["i32", "store", "i32"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                ["+", ["+", "address", "offset"], "header-size"],
+                "value"
+              ]
+            ]
+          ]
+        ],
+        [
+          "export",
+          "store-i32",
+          [
+            "parameters",
+            ["labeled-expr", "address", "i32"],
+            ["labeled-expr", "offset", "i32"],
+            ["labeled-expr", "value", "i32"]
+          ]
+        ],
+        [
+          "define-function",
+          "ensure-space",
+          ["parameters", ["size", "i32"]],
+          ["return-type", "i32"],
+          [
+            "typed-block",
+            "i32",
+            ["define", "mem-size", ["bnr", ["memory", "size", "i32"]]],
+            [
+              "if",
+              [
+                ">=",
+                ["+", ["+", "stack-pointer", "size"], "header-size"],
+                ["*", "mem-size", 65536]
+              ],
+              ["bnr", ["memory", "grow", "i32"], [1]],
+              0
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "module",
+      "std/string",
+      ["imports", ["std/macros", "***"]],
+      ["exports", "string"],
+      [
+        ["define-type", "String", "i32"],
+        [
+          "define-extern-function",
+          "alloc-string",
+          ["namespace", "strings"],
+          ["parameters"],
+          ["return-type", "String"]
+        ],
+        [
+          "define-extern-function",
+          "de-alloc-string",
+          ["namespace", "strings"],
+          ["parameters", ["labeled-expr", "str", "String"]],
+          ["return-type", "void"]
+        ],
+        [
+          "define-extern-function",
+          "str-len",
+          ["namespace", "strings"],
+          ["parameters", ["labeled-expr", "str", "String"]],
+          ["return-type", "i32"]
+        ],
+        "// Returns -1 if not found",
+        [
+          "define-extern-function",
+          "get-char-code-from-string",
+          ["namespace", "strings"],
+          [
+            "parameters",
+            ["labeled-expr", "charIndex", "i32"],
+            ["labeled-expr", "str", "String"]
+          ],
+          ["return-type", "i32"]
+        ],
+        [
+          "define-extern-function",
+          "add-char-code-to-string",
+          ["namespace", "strings"],
+          [
+            "parameters",
+            ["labeled-expr", "char", "i32"],
+            ["labeled-expr", "str", "String"]
+          ],
+          ["return-type", "void"]
+        ],
+        [
+          "define-extern-function",
+          "print-str",
+          ["namespace", "strings"],
+          ["parameters", ["labeled-expr", "str", "String"]],
+          ["return-type", "void"]
+        ],
+        [
+          "define-extern-function",
+          "str-equals",
+          ["namespace", "strings"],
+          [
+            "parameters",
+            ["labeled-expr", "a", "String"],
+            ["labeled-expr", "b", "String"]
+          ],
+          ["return-type", "void"]
+        ],
+        [
+          "define-extern-function",
+          "str-starts-with",
+          ["namespace", "strings"],
+          [
+            "parameters",
+            ["labeled-expr", "str", "String"],
+            ["labeled-expr", "startsWith", "String"]
+          ],
+          ["return-type", "void"]
+        ],
+        [
+          "define-extern-function",
+          "str-ends-with",
+          ["namespace", "strings"],
+          [
+            "parameters",
+            ["labeled-expr", "str", "String"],
+            ["labeled-expr", "endsWith", "String"]
+          ],
+          ["return-type", "void"]
+        ],
+        [
+          "define-extern-function",
+          "str-includes",
+          ["namespace", "strings"],
+          [
+            "parameters",
+            ["labeled-expr", "str", "String"],
+            ["labeled-expr", "includes", "String"]
+          ],
+          ["return-type", "void"]
+        ],
+        "// Regex test (pass -1 to flags for default (g))",
+        [
+          "define-extern-function",
+          "str-test",
+          ["namespace", "strings"],
+          [
+            "parameters",
+            ["labeled-expr", "str", "String"],
+            ["labeled-expr", "regex", "String"],
+            ["labeled-expr", "flags", "String"]
+          ],
+          ["return-type", "void"]
+        ],
+        ["export", "string", ["parameters", ["str"]]]
+      ]
+    ],
+    [
+      "module",
+      "std/index",
+      [
+        "imports",
+        ["std/macros", "dir/macros", "re-exported"],
+        ["std/operators", "dir/operators", "re-exported"],
+        ["std/memory", "dir/memory", "re-exported"],
+        ["std/string", "dir/string", "re-exported"]
+      ],
+      [
+        "exports",
+        "pub",
+        "`",
+        ":",
+        "let",
+        "var",
+        "m-let",
+        "m-var",
+        "global",
+        ";",
+        "lambda",
+        "=>",
+        "fn",
+        "def-wasm-operator",
+        "extern-fn",
+        "match",
+        "type",
+        "<",
+        ">",
+        "<=",
+        ">=",
+        "==",
+        "and",
+        "or",
+        "xor",
+        "not",
+        "+",
+        "-",
+        "*",
+        "/",
+        "<",
+        ">",
+        "<=",
+        ">=",
+        "==",
+        "not",
+        "+",
+        "-",
+        "*",
+        "/",
+        "alloc",
+        "copy",
+        "size",
+        "set-return",
+        "read-i32",
+        "store-i32",
+        "string"
+      ],
+      []
+    ],
+    [
+      "module",
       "src/example",
-      ["imports", ["std/index", "***"], ["std/index", "***"]],
+      ["imports", ["std/index", "***"]],
       ["exports"],
       [
         [
@@ -1047,7 +1154,20 @@
               "workingDir": "/Users/drew/projects/dream/std",
               "imports": []
             },
-            "***"
+            "dir/macros",
+            "re-exported"
+          ],
+          [
+            {
+              "moduleId": "std/operators",
+              "path": "/Users/drew/projects/dream/std/operators.dm",
+              "srcPath": "",
+              "isRoot": false,
+              "workingDir": "/Users/drew/projects/dream/std",
+              "imports": []
+            },
+            "dir/operators",
+            "re-exported"
           ],
           [
             {
@@ -1066,11 +1186,25 @@
                     "workingDir": "/Users/drew/projects/dream/std",
                     "imports": []
                   },
-                  "***"
+                  "***",
+                  null
+                ],
+                [
+                  {
+                    "moduleId": "std/operators",
+                    "path": "/Users/drew/projects/dream/std/operators.dm",
+                    "srcPath": "",
+                    "isRoot": false,
+                    "workingDir": "/Users/drew/projects/dream/std",
+                    "imports": []
+                  },
+                  "***",
+                  null
                 ]
               ]
             },
-            "***"
+            "dir/memory",
+            "re-exported"
           ],
           [
             {
@@ -1089,24 +1223,15 @@
                     "workingDir": "/Users/drew/projects/dream/std",
                     "imports": []
                   },
-                  "***"
+                  "***",
+                  null
                 ]
               ]
             },
-            "***"
+            "dir/string",
+            "re-exported"
           ]
         ]
-      },
-      "***"
-    ],
-    [
-      {
-        "moduleId": "std/index",
-        "path": "/Users/drew/projects/dream/std/index.dm",
-        "srcPath": "/Users/drew/projects/dream",
-        "isRoot": true,
-        "workingDir": "/Users/drew/projects/dream/std",
-        "imports": []
       },
       "***"
     ]

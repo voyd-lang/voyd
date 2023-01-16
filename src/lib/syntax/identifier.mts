@@ -1,5 +1,4 @@
 import { Expr } from "./expr.mjs";
-import { isIdentifier } from "./helpers.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 import { Type } from "./types.mjs";
 
@@ -29,8 +28,12 @@ export class Identifier extends Syntax {
     return !!this.getVar(this);
   }
 
+  get def() {
+    return this.getVar(this);
+  }
+
   getTypeOf(): Type | undefined {
-    return this.type ?? this.getVar(this)?.type;
+    return this.type ?? this.getVar(this)?.type ?? this.getType(this); // This may be too flexible
   }
 
   /** Returns the value of the identifier if assigned in expansion phase */

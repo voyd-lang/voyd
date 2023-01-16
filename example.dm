@@ -1,5 +1,3 @@
-use std/struct ***
-
 type Pos = {
 	x:i32,
 	y:i32,

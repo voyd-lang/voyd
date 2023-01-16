@@ -167,10 +167,10 @@ const compileFunctionCall = (opts: CompileFnCallOpts): number => {
 };
 
 const compileAssign = (opts: CompileFnCallOpts): number => {
-  const { expr, mod, parent } = opts;
+  const { expr, mod } = opts;
   const identifier = expr.at(1) as Identifier;
   const value = compileExpression({ ...opts, expr: expr.at(2)! });
-  const variable = parent.getVar(identifier);
+  const variable = identifier.def;
   if (!variable) {
     throw new Error(`${identifier.value} not found in scope`);
   }

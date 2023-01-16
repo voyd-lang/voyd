@@ -25,8 +25,11 @@ import {
   i64,
   noop,
   isFnType,
+  BaseType,
 } from "../lib/index.mjs";
 import { getIdStr } from "../lib/syntax/get-id-str.mjs";
+
+const modules = new Map<string, List>();
 
 export const typeSystem = (list: List, info: ModuleInfo): List => {
   if (!info.isRoot) return list;
@@ -47,21 +50,33 @@ const addTypeAnnotationsToFnCall = (list: List): List => {
   if (list.calls("define-cdt")) return list;
   if (list.calls("block")) return addTypeAnnotationsToBlock(list);
   if (list.calls("lambda-expr")) return list;
-  if (list.calls("export")) return list;
+  if (list.calls("export")) return initExport(list);
   if (list.calls("root")) return addTypeAnnotationToRoot(list);
   if (list.calls("module")) return addTypeAnnotationToModule(list);
-  if (list.calls("bnr") || list.calls("binaryen-mod")) return list;
+  if (list.calls("quote")) return list;
+
+  if (list.calls("bnr") || list.calls("binaryen-mod")) {
+    return addTypeAnnotationsToBnr(list);
+  }
+
   if (
     typeof list.at(0)?.value === "string" &&
     (list.at(0)!.value as string).startsWith("define")
   ) {
     return addTypeAnnotationToVar(list);
   }
+
   if (isPrimitiveFn(list.at(0))) {
     return addTypeAnnotationsToPrimitiveFn(list);
   }
 
   return addTypeAnnotationToUserFnCall(list);
+};
+
+const addTypeAnnotationsToBnr = (list: List): List => {
+  const body = list.at(2) as List | undefined;
+  body?.value.forEach((v) => addTypeAnnotationsToExpr(v));
+  return list;
 };
 
 const addTypeAnnotationsToFn = (list: List): List => {
@@ -223,10 +238,65 @@ const addTypeAnnotationToRoot = (list: List): List =>
   list.map((expr) => addTypeAnnotationsToExpr(expr));
 
 const addTypeAnnotationToModule = (list: List): List => {
-  list.value[4] = (list.value[4] as List).map((expr) =>
-    addTypeAnnotationsToExpr(expr)
-  );
+  modules.set((list.at(1) as Identifier)!.value, list);
+  const imports = list.at(2) as List;
+  const exports = list.at(3) as List;
+  const body = list.at(4) as List;
+  resolveImports(imports, exports);
+  list.value[4] = body.map((expr) => addTypeAnnotationsToExpr(expr));
+  resolveExports({ exports, body: list.at(4) as List });
   return list;
+};
+
+// This is probably super problematic
+const resolveImports = (imports: List, exports: List): void => {
+  const parent = imports.getParent()!;
+  for (const imp of imports.value) {
+    if (!isList(imp)) continue;
+    const module = modules.get(imp.at(0)!.value as string);
+    const isReExported = imp.at(2)?.is("re-exported");
+    if (!module) continue;
+    // TODO support import patterns other than ***
+    for (const exp of module.at(3)?.value as Expr[]) {
+      if (!isIdentifier(exp) || exp.is("exports")) continue;
+      const type = exp.getTypeOf();
+
+      if (type instanceof FnType) {
+        parent.setFn(exp, type);
+        if (isReExported) exports.push(exp);
+        continue;
+      }
+
+      if (exp.def && exp.def.kind === "global") {
+        parent.setVar(exp, exp.def);
+        if (isReExported) exports.push(exp);
+        continue;
+      }
+
+      if (type instanceof BaseType) {
+        parent.setType(exp, type);
+        if (isReExported) exports.push(exp);
+        continue;
+      }
+    }
+  }
+};
+
+const resolveExports = ({
+  exports,
+  body,
+}: {
+  exports: List;
+  body: List;
+}): void => {
+  body.value.forEach((expr) => {
+    if (!isList(expr)) return;
+    if (expr.calls("export")) {
+      exports.push(expr.at(1) as Identifier);
+      return;
+    }
+    return resolveExports({ exports, body: expr });
+  });
 };
 
 const addTypeAnnotationToVar = (list: List): List => {
@@ -412,14 +482,9 @@ const initTypes = (list: List) => {
       // Todo support more than primitives and structs;
       const type = isStruct(val)
         ? typedStructListToStructType(val as List)
-        : list.getType(id)!;
-
-      list.setType(id, type);
-      return;
-    }
-
-    if (expr.calls("export")) {
-      initExport(expr);
+        : val.getTypeOf()!;
+      const parent = expr.getParent();
+      parent?.setType(id, type);
       return;
     }
 
@@ -454,12 +519,6 @@ const initFn = (expr: List) => {
 };
 
 const initExport = (exp: List) => {
-  // Module Block > Module > Root Block (hopefully this applies to other places an export might occur)
-  const target = exp.getParent()?.getParent()?.getParent();
-  if (!target) {
-    throw new Error("Nothing to export to");
-  }
-
   const exportId = exp.at(1);
   if (!isIdentifier(exportId)) {
     throw new Error("Missing identifier in export");
@@ -467,12 +526,14 @@ const initExport = (exp: List) => {
 
   const params = exp.at(2);
   if (isList(params) && params.calls("parameters")) {
-    initFnExport(exportId, params, target);
-    return;
+    initFnExport(exportId, params);
+    return exp;
   }
+
+  return exp;
 };
 
-const initFnExport = (fnId: Identifier, params: List, exportTarget: Expr) => {
+const initFnExport = (fnId: Identifier, params: List) => {
   const candidates = fnId.getFns(fnId);
   const fn = candidates.find((candidate) =>
     candidate.value.params.every((param, index) => {
@@ -485,7 +546,13 @@ const initFnExport = (fnId: Identifier, params: List, exportTarget: Expr) => {
       return typesDoMatch && identifiersMatch && labelsMatch;
     })
   );
-  if (fn) exportTarget.setFn(fnId, fn);
+
+  if (!fn) {
+    console.error(JSON.stringify([fnId, params], null, 2));
+    throw new Error(`Fn ${fnId} not found for the above export expression`);
+  }
+
+  fnId.setTypeOf(fn);
 };
 
 const getSuppliedReturnTypeForFn = (
@@ -507,7 +574,7 @@ const getInfoFromRawParam = (list: List) => {
     : (paramDef.at(1) as Identifier);
   const type = isStruct(list)
     ? typedStructListToStructType(list)
-    : list.getType(paramDef.at(2)! as Identifier)!;
+    : (paramDef.at(2)! as Identifier).getTypeOf()!;
   const label = isLabeled ? (list.at(1) as Identifier) : undefined;
   return { identifier, type, label };
 };
