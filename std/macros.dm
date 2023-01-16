@@ -15,9 +15,11 @@ macro pub(&body)
 				export
 					$(extract definitions 0)
 					(parameters $(slice definitions 1))
-		quote splice-block
-			$expanded
-			export $(extract expanded 1) $(extract expanded 2)
+		block
+			define index (if expanded.extract(0) == "define-function" 2 3)
+			quote quote splice-block
+				$expanded
+				export $(extract expanded 1) $(extract expanded index)
 
 export pub (parameters (&body))
 

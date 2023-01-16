@@ -67,8 +67,7 @@ const compileIdentifier = (
     return mod.global.get(expr.value, mapBinaryenType(variable.type!));
   }
 
-  const index = getVarIndex(variable, expr);
-  return mod.local.get(index, mapBinaryenType(variable.type!));
+  return mod.local.get(variable.index, mapBinaryenType(variable.type!));
 };
 
 type CompileListOpts = CompileExpressionOpts & { expr: List };
@@ -182,8 +181,7 @@ const compileAssign = (opts: CompileFnCallOpts): number => {
   }
 
   if (variable?.mut) {
-    const index = getVarIndex(variable, identifier);
-    return mod.local.set(index, value);
+    return mod.local.set(variable.index, value);
   }
 
   throw new Error(`${identifier.value} is not mutable`);
@@ -228,8 +226,7 @@ const compileDefine = (opts: CompileFnCallOpts): number => {
     kind: "var",
   })!;
 
-  const index = getVarIndex(info, identifier);
-  return mod.local.set(index, value);
+  return mod.local.set(info.index, value);
 };
 
 const compileFunction = (opts: CompileListOpts): number => {
@@ -289,7 +286,9 @@ const getFunctionParameterTypes = (paramIndex: number, fnDef: List) => {
   const types = parameters.slice(1).value.map((expr) => {
     const list = expr as List;
     const identifier = list.first() as Identifier;
-    return mapBinaryenType(identifier.getTypeOf()!);
+    const type = identifier.getTypeOf()!;
+    fnDef.setVar(identifier, { kind: "param", type });
+    return mapBinaryenType(type);
   });
   return binaryen.createType(types);
 };
@@ -306,9 +305,3 @@ const mapBinaryenType = (type: Type): binaryen.Type => {
   if (isStructType(type)) return binaryen.i32;
   throw new Error(`Unsupported type ${type.value}`);
 };
-function getVarIndex(variable: Var, expr: Identifier) {
-  return variable.kind === "param"
-    ? variable.index
-    : variable.index +
-        ((expr.parentFn?.at(2) as List).slice(1).length.value ?? 0);
-}

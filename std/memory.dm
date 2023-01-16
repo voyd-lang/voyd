@@ -1,5 +1,6 @@
 use dir/macros ***
 use dir/operators ***
+use dir/utils ***
 
 global let header-size:i32 = 8
 global let size-index:i32 = 0

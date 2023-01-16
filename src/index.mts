@@ -5,12 +5,10 @@ import { genWasmCode } from "./wasm-code-gen.mjs";
 const root = importRootModule();
 // console.log(JSON.stringify(root, undefined, 2));
 const mod = genWasmCode(root.ast);
-
+console.log(mod.emitText());
 if (!mod.validate()) {
   process.exit(1);
 }
-
-// console.log(mod.emitText());
 
 const binary = mod.emitBinary();
 const compiled = new WebAssembly.Module(binary);
@@ -36,7 +34,10 @@ const instance = new WebAssembly.Instance(compiled, {
     "str-test": (strIndex: number, regexIndex: number, flagsIndex: number) =>
       strings.strTest(strIndex, regexIndex, flagsIndex),
   },
+  utils: {
+    log: (val: number) => console.log(val),
+  },
 });
 
 console.log((instance.exports as any).main0());
-// console.error(new Uint32Array((instance.exports.buffer as any).buffer));
+console.error(new Uint32Array((instance.exports.buffer as any).buffer));

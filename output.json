@@ -546,8 +546,29 @@
     ],
     [
       "module",
+      "std/utils",
+      ["imports", ["std/macros", "***"]],
+      ["exports", "log"],
+      [
+        [
+          "define-extern-function",
+          "log",
+          ["namespace", "utils"],
+          ["parameters", ["val", "i32"]],
+          ["return-type", "void"]
+        ],
+        ["export", "log", ["parameters", ["labeled-expr", "val", "i32"]]]
+      ]
+    ],
+    [
+      "module",
       "std/memory",
-      ["imports", ["std/macros", "***"], ["std/operators", "***"]],
+      [
+        "imports",
+        ["std/macros", "***"],
+        ["std/operators", "***"],
+        ["std/utils", "***"]
+      ],
       [
         "exports",
         "alloc",
@@ -578,6 +599,7 @@
               "stack-pointer",
               ["+", ["+", "stack-pointer", "size"], "header-size"]
             ],
+            ["log", "stack-pointer"],
             [
               "bnr",
               ["i32", "store", "void"],
@@ -760,20 +782,20 @@
           "alloc-string",
           ["namespace", "strings"],
           ["parameters"],
-          ["return-type", "String"]
+          ["return-type", "i32"]
         ],
         [
           "define-extern-function",
           "de-alloc-string",
           ["namespace", "strings"],
-          ["parameters", ["labeled-expr", "str", "String"]],
+          ["parameters", ["str", "i32"]],
           ["return-type", "void"]
         ],
         [
           "define-extern-function",
           "str-len",
           ["namespace", "strings"],
-          ["parameters", ["labeled-expr", "str", "String"]],
+          ["parameters", ["str", "i32"]],
           ["return-type", "i32"]
         ],
         "// Returns -1 if not found",
@@ -781,73 +803,49 @@
           "define-extern-function",
           "get-char-code-from-string",
           ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "charIndex", "i32"],
-            ["labeled-expr", "str", "String"]
-          ],
+          ["parameters", ["charIndex", "i32"], ["str", "i32"]],
           ["return-type", "i32"]
         ],
         [
           "define-extern-function",
           "add-char-code-to-string",
           ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "char", "i32"],
-            ["labeled-expr", "str", "String"]
-          ],
+          ["parameters", ["char", "i32"], ["str", "i32"]],
           ["return-type", "void"]
         ],
         [
           "define-extern-function",
           "print-str",
           ["namespace", "strings"],
-          ["parameters", ["labeled-expr", "str", "String"]],
+          ["parameters", ["str", "i32"]],
           ["return-type", "void"]
         ],
         [
           "define-extern-function",
           "str-equals",
           ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "a", "String"],
-            ["labeled-expr", "b", "String"]
-          ],
+          ["parameters", ["a", "i32"], ["b", "i32"]],
           ["return-type", "void"]
         ],
         [
           "define-extern-function",
           "str-starts-with",
           ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "str", "String"],
-            ["labeled-expr", "startsWith", "String"]
-          ],
+          ["parameters", ["str", "i32"], ["startsWith", "i32"]],
           ["return-type", "void"]
         ],
         [
           "define-extern-function",
           "str-ends-with",
           ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "str", "String"],
-            ["labeled-expr", "endsWith", "String"]
-          ],
+          ["parameters", ["str", "i32"], ["endsWith", "i32"]],
           ["return-type", "void"]
         ],
         [
           "define-extern-function",
           "str-includes",
           ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "str", "String"],
-            ["labeled-expr", "includes", "String"]
-          ],
+          ["parameters", ["str", "i32"], ["includes", "i32"]],
           ["return-type", "void"]
         ],
         "// Regex test (pass -1 to flags for default (g))",
@@ -855,12 +853,7 @@
           "define-extern-function",
           "str-test",
           ["namespace", "strings"],
-          [
-            "parameters",
-            ["labeled-expr", "str", "String"],
-            ["labeled-expr", "regex", "String"],
-            ["labeled-expr", "flags", "String"]
-          ],
+          ["parameters", ["str", "i32"], ["regex", "i32"], ["flags", "i32"]],
           ["return-type", "void"]
         ],
         ["export", "string", ["parameters", ["str"]]]
@@ -873,6 +866,7 @@
         "imports",
         ["std/macros", "dir/macros", "re-exported"],
         ["std/operators", "dir/operators", "re-exported"],
+        ["std/utils", "dir/utils", "re-exported"],
         ["std/memory", "dir/memory", "re-exported"],
         ["std/string", "dir/string", "re-exported"]
       ],
@@ -917,6 +911,7 @@
         "-",
         "*",
         "/",
+        "log",
         "alloc",
         "copy",
         "size",
@@ -951,11 +946,7 @@
           [
             "typed-block",
             "i32",
-            [
-              "define",
-              ["labeled-expr", "*__return_alloc_address", "i32"],
-              ["alloc", 12]
-            ],
+            ["define", "*__return_alloc_address", ["alloc", 12]],
             [
               "set-return",
               [
@@ -1045,11 +1036,7 @@
           [
             "typed-block",
             "i32",
-            [
-              "define",
-              ["labeled-expr", "*__return_alloc_address", "i32"],
-              ["alloc", 12]
-            ],
+            ["define", "*__return_alloc_address", ["alloc", 12]],
             [
               "set-return",
               [
@@ -1057,45 +1044,9 @@
                 [
                   "typed-block",
                   ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]],
-                  [
-                    "define",
-                    "my",
-                    [
-                      "Pos",
-                      [
-                        "struct",
-                        ["labeled-expr", "x", 5],
-                        ["labeled-expr", "y", 4],
-                        ["labeled-expr", "z", 3]
-                      ]
-                    ]
-                  ],
-                  [
-                    "define",
-                    "my2",
-                    [
-                      "Pos",
-                      [
-                        "struct",
-                        ["labeled-expr", "x", 11],
-                        ["labeled-expr", "y", 24],
-                        ["labeled-expr", "z", 33]
-                      ]
-                    ]
-                  ],
-                  [
-                    "define",
-                    "my3",
-                    [
-                      "Pos",
-                      [
-                        "struct",
-                        ["labeled-expr", "x", 11],
-                        ["labeled-expr", "y", 24],
-                        ["labeled-expr", "z", 33]
-                      ]
-                    ]
-                  ],
+                  ["define", "my", ["Pos", 5, 4, 3]],
+                  ["define", "my2", ["Pos", 11, 24, 33]],
+                  ["define", "my3", ["Pos", 11, 24, 33]],
                   "my"
                 ],
                 "*__return_alloc_address"
@@ -1112,19 +1063,7 @@
             "typed-block",
             "i32",
             ["define", "pos", ["make-pos"]],
-            [
-              "define",
-              "pos2",
-              [
-                "Pos",
-                [
-                  "struct",
-                  ["labeled-expr", "x", 98],
-                  ["labeled-expr", "y", 43],
-                  ["labeled-expr", "z", 32]
-                ]
-              ]
-            ],
+            ["define", "pos2", ["Pos", 98, 43, 32]],
             ["x", "pos"]
           ]
         ]
@@ -1171,6 +1110,31 @@
           ],
           [
             {
+              "moduleId": "std/utils",
+              "path": "/Users/drew/projects/dream/std/utils.dm",
+              "srcPath": "",
+              "isRoot": false,
+              "workingDir": "/Users/drew/projects/dream/std",
+              "imports": [
+                [
+                  {
+                    "moduleId": "std/macros",
+                    "path": "/Users/drew/projects/dream/std/macros.dm",
+                    "srcPath": "",
+                    "isRoot": false,
+                    "workingDir": "/Users/drew/projects/dream/std",
+                    "imports": []
+                  },
+                  "***",
+                  null
+                ]
+              ]
+            },
+            "dir/utils",
+            "re-exported"
+          ],
+          [
+            {
               "moduleId": "std/memory",
               "path": "/Users/drew/projects/dream/std/memory.dm",
               "srcPath": "",
@@ -1193,6 +1157,18 @@
                   {
                     "moduleId": "std/operators",
                     "path": "/Users/drew/projects/dream/std/operators.dm",
+                    "srcPath": "",
+                    "isRoot": false,
+                    "workingDir": "/Users/drew/projects/dream/std",
+                    "imports": []
+                  },
+                  "***",
+                  null
+                ],
+                [
+                  {
+                    "moduleId": "std/utils",
+                    "path": "/Users/drew/projects/dream/std/utils.dm",
                     "srcPath": "",
                     "isRoot": false,
                     "workingDir": "/Users/drew/projects/dream/std",

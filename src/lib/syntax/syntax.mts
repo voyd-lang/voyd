@@ -47,6 +47,7 @@ export abstract class Syntax {
     this.context = from?.context ?? new LexicalContext();
     this.isFn = isFn ?? from?.isFn;
     this.type = from?.type;
+    // NOTE: For now we intentionally do not clone allFnVars so code gen can get up to date indexes by manually setting the vars
   }
 
   get parentFn(): List | undefined {
@@ -140,7 +141,7 @@ export abstract class Syntax {
   private registerVarWithParentFn(v: Var) {
     if (v.kind === "global") return;
 
-    if (this.isFn && v.kind === "var") {
+    if (this.isFn) {
       this.allFnVars.push(v);
       return;
     }

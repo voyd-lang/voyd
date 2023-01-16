@@ -41,6 +41,8 @@
 - Simplify `setFn` and `setVar`. Type info should be attached to identifier, so passing it is redundant
 - Create a Fn expr that extends list and handles accessing of parameters, return type, body, etc.
 - Create a Call expr that extends lists and handles references to the function identifier etc.
+- Figure out how to avoid having to double quote macros
+- Major cleanup pass. There is much room for easy refactors
 
 # Examples
 
