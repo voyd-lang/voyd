@@ -32,21 +32,17 @@ const addMemInstructionsToFunctionDef = (
   allocationSize: number
 ): List => {
   const body = list.at(4)!;
-  const returnAddr = "*__return_alloc_address";
-  list.setVar(returnAddr, { kind: "var", type: CDT_ADDRESS_TYPE });
+  const returnAddr = Identifier.from("*__return_alloc_address");
+  returnAddr.setTypeOf(CDT_ADDRESS_TYPE);
   const alloc = getFnId(list, "alloc");
   const setReturn = getFnId(list, "set-return");
   const copy = getFnId(list, "copy");
   list.value[4] = new List({
-    from: list,
+    from: list.value[4],
     value: [
       "typed-block",
       CDT_ADDRESS_TYPE,
-      [
-        "define",
-        ["labeled-expr", returnAddr, CDT_ADDRESS_TYPE],
-        [alloc, new Int({ value: allocationSize })],
-      ],
+      ["define", returnAddr, [alloc, new Int({ value: allocationSize })]],
       [setReturn, [copy, body, returnAddr]],
     ],
   });
