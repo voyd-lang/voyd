@@ -1,6 +1,7 @@
 import type { Expr } from "./expr.mjs";
 import type { Id } from "./identifier.mjs";
 import { LexicalContext, Var } from "./lexical-context.mjs";
+import type { List } from "./list.mjs";
 import type { FnType, Type } from "./types.mjs";
 
 export type SourceLocation = {
@@ -28,7 +29,6 @@ export type SyntaxOpts = {
 
 export abstract class Syntax {
   protected isFn?: boolean;
-  private fnVarIndex = 0;
   readonly id = getSyntaxId();
   readonly location?: SourceLocation;
   readonly context: LexicalContext;
@@ -47,6 +47,10 @@ export abstract class Syntax {
     this.context = from?.context ?? new LexicalContext();
     this.isFn = isFn ?? from?.isFn;
     this.type = from?.type;
+  }
+
+  get parentFn(): List | undefined {
+    return this.isFn ? (this as unknown as List) : this.parent?.parentFn;
   }
 
   setFn(id: Id, fn: FnType) {
@@ -146,9 +150,7 @@ export abstract class Syntax {
 
   private getNewVarIndex(): number {
     if (this.isFn) {
-      const cur = this.fnVarIndex;
-      this.fnVarIndex += 1;
-      return cur;
+      return this.allFnVars.length;
     }
 
     if (!this.parent) {

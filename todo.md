@@ -39,6 +39,8 @@
 - Smarter lets and vars. Should detect when they are in or out of a function and create a global when out of one automatically. Should also remove m-let as a result.
 - Fix bug where using comments in match statements at macro expansion time can change behavior see example 1
 - Simplify `setFn` and `setVar`. Type info should be attached to identifier, so passing it is redundant
+- Create a Fn expr that extends list and handles accessing of parameters, return type, body, etc.
+- Create a Call expr that extends lists and handles references to the function identifier etc.
 
 # Examples
 

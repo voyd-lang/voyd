@@ -20,6 +20,7 @@ import {
   List,
   Type,
 } from "./lib/index.mjs";
+import { Var } from "./lib/syntax/lexical-context.mjs";
 
 let mod: binaryen.Module | undefined = undefined;
 
@@ -62,11 +63,12 @@ const compileIdentifier = (
     throw new Error(`Unrecognized symbol ${expr.value}`);
   }
 
-  if (variable?.kind === "global") {
+  if (variable.kind === "global") {
     return mod.global.get(expr.value, mapBinaryenType(variable.type!));
   }
 
-  return mod.local.get(variable.index, mapBinaryenType(variable.type!));
+  const index = getVarIndex(variable, expr);
+  return mod.local.get(index, mapBinaryenType(variable.type!));
 };
 
 type CompileListOpts = CompileExpressionOpts & { expr: List };
@@ -180,7 +182,8 @@ const compileAssign = (opts: CompileFnCallOpts): number => {
   }
 
   if (variable?.mut) {
-    return mod.local.set(variable.index, value);
+    const index = getVarIndex(variable, identifier);
+    return mod.local.set(index, value);
   }
 
   throw new Error(`${identifier.value} is not mutable`);
@@ -224,7 +227,9 @@ const compileDefine = (opts: CompileFnCallOpts): number => {
     mut: expr.calls("define-mut"),
     kind: "var",
   })!;
-  return mod.local.set(info.index, value);
+
+  const index = getVarIndex(info, identifier);
+  return mod.local.set(index, value);
 };
 
 const compileFunction = (opts: CompileListOpts): number => {
@@ -301,3 +306,9 @@ const mapBinaryenType = (type: Type): binaryen.Type => {
   if (isStructType(type)) return binaryen.i32;
   throw new Error(`Unsupported type ${type.value}`);
 };
+function getVarIndex(variable: Var, expr: Identifier) {
+  return variable.kind === "param"
+    ? variable.index
+    : variable.index +
+        ((expr.parentFn?.at(2) as List).slice(1).length.value ?? 0);
+}
