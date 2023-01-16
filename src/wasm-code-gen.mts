@@ -231,7 +231,7 @@ const compileFunction = (opts: CompileListOpts): number => {
   const { expr, mod } = opts;
   const fnId = expr.at(1) as Identifier;
   const fn = fnId.getTypeOf() as FnType;
-  const parameterTypes = getFunctionParameterTypes(fn);
+  const parameterTypes = getFunctionParameterTypes(2, expr);
   const returnType = mapBinaryenType(fn.returns!);
   const body = compileList({ ...opts, expr: expr.at(4) as List });
   const variableTypes = getFunctionVarTypes(expr); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
@@ -252,7 +252,7 @@ const compileExternFn = (opts: CompileListOpts) => {
   const fnId = expr.at(1) as Identifier;
   const fn = fnId.getTypeOf() as FnType;
   const namespace = (expr.at(2) as List).at(1) as Identifier;
-  const parameterTypes = getFunctionParameterTypes(fn);
+  const parameterTypes = getFunctionParameterTypes(3, expr);
   const returnType = mapBinaryenType(fn.returns!);
 
   mod.addFunctionImport(
@@ -279,8 +279,13 @@ const compileIf = (opts: CompileListOpts) => {
   return mod.if(condition, ifTrue, ifFalse);
 };
 
-const getFunctionParameterTypes = (fn: FnType) => {
-  const types = fn.value.params.map((param) => mapBinaryenType(param.type!));
+const getFunctionParameterTypes = (paramIndex: number, fnDef: List) => {
+  const parameters = fnDef.at(paramIndex) as List;
+  const types = parameters.slice(1).value.map((expr) => {
+    const list = expr as List;
+    const identifier = list.first() as Identifier;
+    return mapBinaryenType(identifier.getTypeOf()!);
+  });
   return binaryen.createType(types);
 };
 

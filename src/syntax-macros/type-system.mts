@@ -45,7 +45,6 @@ const addTypeAnnotationsToExpr = (expr: Expr | undefined): Expr => {
 
 const addTypeAnnotationsToFnCall = (list: List): List => {
   if (list.calls("define-function")) return addTypeAnnotationsToFn(list);
-  if (list.calls("define-extern-function")) return list; // TODO: type check this mofo
   if (list.calls("define-type")) return list;
   if (list.calls("define-cdt")) return list;
   if (list.calls("block")) return addTypeAnnotationsToBlock(list);
@@ -54,6 +53,10 @@ const addTypeAnnotationsToFnCall = (list: List): List => {
   if (list.calls("root")) return addTypeAnnotationToRoot(list);
   if (list.calls("module")) return addTypeAnnotationToModule(list);
   if (list.calls("quote")) return list;
+
+  if (list.calls("define-extern-function")) {
+    return addTypeAnnotationsToExternFn(list);
+  }
 
   if (list.calls("bnr") || list.calls("binaryen-mod")) {
     return addTypeAnnotationsToBnr(list);
@@ -127,6 +130,34 @@ const addTypeAnnotationsToFn = (list: List): List => {
   });
 };
 
+const addTypeAnnotationsToExternFn = (list: List): List => {
+  list.setAsFn();
+  const identifier = list.at(1) as Identifier;
+  const namespace = list.at(2) as List;
+  const rawParameters = list.at(3) as List;
+  const fn = list.getTypeOf();
+
+  if (!isFnType(fn)) {
+    throw new Error(`Could not find matching function for ${identifier.value}`);
+  }
+
+  const parameters = annotateFnParams(rawParameters);
+
+  // Function types are (((paramIdentifier | false) paramType)* returnType:Expr | false) (at this point)
+  identifier.setTypeOf(fn);
+
+  return new List({
+    value: [
+      "define-extern-function",
+      identifier,
+      namespace,
+      parameters,
+      ["return-type", fn.returns!],
+    ],
+    from: list,
+  });
+};
+
 /**
  * For now, all params are assumed to be manually typed.
  * Returns the updated list of parameters
@@ -137,11 +168,12 @@ const annotateFnParams = (params: List): List => {
   }
 
   const fnDef = params.getParent() as List;
+  const fn = fnDef.at(1)?.getTypeOf() as FnType;
 
   return new List({
     value: [
       "parameters",
-      ...params.slice(1).value.flatMap((expr): Expr[] => {
+      ...params.slice(1).value.flatMap((expr, index): Expr[] => {
         if (!isList(expr)) {
           throw new Error("All parameters must be typed");
         }
