@@ -33,9 +33,13 @@ fn make-pos() -> i32
 	copy pos-a return-address
 	set-return return-address
 
+fn make-pos2() -> i32
+	let return-address:i32 = alloc(12)
+	let pos-a:i32 = pos(15 22 30)
+	copy pos-a return-address
+	set-return return-address
+
 fn main() -> i32
-	let return-address2 = alloc(12)
-	let return-address = alloc(12)
-	// let my-pos:i32 = make-pos()
-	// my-pos.get-x
-	return-address
+	let my-pos = make-pos()
+	let my-pos2 = make-pos2()
+	my-pos2.get-x

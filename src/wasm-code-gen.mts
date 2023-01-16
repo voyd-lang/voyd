@@ -220,7 +220,12 @@ const compileDefine = (opts: CompileFnCallOpts): number => {
     return mod.nop();
   }
 
-  const info = identifier.setVar(identifier, {
+  const parent = expr.getParent();
+  if (!parent) {
+    throw new Error("Invalid variable location (has no parent)");
+  }
+
+  const info = parent.setVar(identifier, {
     type: identifier.getTypeOf()!,
     mut: expr.calls("define-mut"),
     kind: "var",

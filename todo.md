@@ -43,6 +43,13 @@
 - Create a Call expr that extends lists and handles references to the function identifier etc.
 - Figure out how to avoid having to double quote macros
 - Major cleanup pass. There is much room for easy refactors
+- Fix object field assignment
+- Old variable registration from type system can interfere with code gen index lookup. For example,
+  there was a bug in the code-gen layer that re-registered an identifier at the wrong level. The
+  older registration was left untouched (with an out-of-date index). So when the identifier was
+  later retrieved, the wrong index was fetched. This is mostly a safety issue. Need to figure out
+  a better way to handle index updates, rather than relying on the code gen to re-register a
+  variable altogether.
 
 # Examples
 

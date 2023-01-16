@@ -1,4 +1,16 @@
-Debugger listening on ws://127.0.0.1:9229/137167ff-6929-4ace-9659-48c5ed361169
+Debugger listening on ws://127.0.0.1:9229/558163ac-2fc9-4d57-8ac2-88d266a8e068
 For help, see: https://nodejs.org/en/docs/inspector
 Debugger attached.
+Uint32Array(16384) [
+   20,   0, 98, 43, 32, 20,  0, 72, 39, 86, 20,  0,
+  123, 654,  1, 20,  0,  5,  4,  3, 20,  0,  5,  4,
+    3,  20,  0, 11, 20, 33, 20,  0, 11, 24, 33, 20,
+    0,  11, 24, 33,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,   0,  0,  0,
+  ... 16284 more items
+]
 Waiting for the debugger to disconnect...

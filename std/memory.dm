@@ -2,15 +2,15 @@ use dir/macros ***
 use dir/operators ***
 use dir/utils ***
 
-global let header-size:i32 = 8
-global let size-index:i32 = 0
-global let type-index:i32 = 4
-global var stack-pointer:i32 = 0
+global let header-size = 8
+global let size-index = 0
+global let type-index = 4
+global var stack-pointer = 0
 
 // Returns a pointer with the location of the allocation
 pub fn alloc(size:i32) -> i32
 	ensure-space(size)
-	let address:i32 = stack-pointer
+	let address = stack-pointer
 	stack-pointer = stack-pointer + size + header-size
 	bnr (i32 store void) (`(0) `(2) address size + header-size)
 	address

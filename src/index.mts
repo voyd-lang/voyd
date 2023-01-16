@@ -5,7 +5,7 @@ import { genWasmCode } from "./wasm-code-gen.mjs";
 const root = importRootModule();
 // console.log(JSON.stringify(root, undefined, 2));
 const mod = genWasmCode(root.ast);
-console.log(mod.emitText());
+// console.log(mod.emitText());
 if (!mod.validate()) {
   process.exit(1);
 }
