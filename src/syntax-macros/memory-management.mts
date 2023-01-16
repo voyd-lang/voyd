@@ -34,6 +34,9 @@ const addMemInstructionsToFunctionDef = (
   const body = list.at(4)!;
   const returnAddr = "*__return_alloc_address";
   list.setVar(returnAddr, { kind: "var", type: CDT_ADDRESS_TYPE });
+  const alloc = getFnId(list, "alloc");
+  const setReturn = getFnId(list, "set-return");
+  const copy = getFnId(list, "copy");
   list.value[4] = new List({
     from: list,
     value: [
@@ -42,10 +45,17 @@ const addMemInstructionsToFunctionDef = (
       [
         "define",
         ["labeled-expr", returnAddr, CDT_ADDRESS_TYPE],
-        ["alloc", new Int({ value: allocationSize })],
+        [alloc, new Int({ value: allocationSize })],
       ],
-      ["set-return", ["copy", body, returnAddr]],
+      [setReturn, [copy, body, returnAddr]],
     ],
   });
   return list;
+};
+
+const getFnId = (parent: List, name: string): Identifier => {
+  const fnIdFn = parent.getFns(name)[0];
+  const fnId = Identifier.from(name);
+  fnId.setTypeOf(fnIdFn);
+  return fnId;
 };

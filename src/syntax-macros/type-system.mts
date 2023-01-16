@@ -209,8 +209,10 @@ function addTypeAnnotationToUserFnCall(list: List) {
   }
 
   const annotatedArgs = list.slice(1).value.flatMap((expr, index) => {
-    const paramType = fn.getParam(index);
-    if (isStructType(paramType) && isStruct(expr)) {
+    const paramType = fn.getParam(index)?.type;
+    const paramIsStructType = isStructType(paramType);
+    const exprIsStruct = isStruct(expr);
+    if (paramIsStructType && exprIsStruct) {
       return applyStructParams(paramType, expr as List);
     }
 
