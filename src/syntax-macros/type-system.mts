@@ -29,6 +29,11 @@ import {
 } from "../lib/index.mjs";
 import { getIdStr } from "../lib/syntax/get-id-str.mjs";
 
+// Note: This type system is a *first* pass. It needs some refactoring.
+// Currently, the single file handles too much in one go. I'm certain
+// Much of the logic could be separated into distinct phases and run in
+// a sub pipeline of the main syntax macro pipeline.
+
 const modules = new Map<string, List>();
 
 export const typeSystem = (list: List, info: ModuleInfo): List => {
@@ -225,11 +230,33 @@ const addTypeAnnotationsToBlock = (list: List): List => {
 };
 
 const addTypeAnnotationsToPrimitiveFn = (list: List): List => {
-  const annotatedArgs = list
-    .slice(1)
-    .value.map((expr) => addTypeAnnotationsToExpr(expr));
-  return new List({ value: [list.first()!, ...annotatedArgs], from: list });
+  if (list.calls("=")) {
+    return addTypeAnnotationsToAssignment(list);
+  }
+
+  return list.mapArgs(addTypeAnnotationsToExpr);
 };
+
+const addTypeAnnotationsToAssignment = (list: List): List => {
+  const assignee = list.at(1);
+
+  if (isList(assignee)) {
+    return transformFieldAssignment(assignee, list);
+  }
+
+  return list.mapArgs(addTypeAnnotationsToExpr);
+};
+
+// Convert field assignment expressions into set expressions
+// ["=", ["y", "pos"], 10] converts to ["set-y", "pos", 10]
+function transformFieldAssignment(assignee: List, assignmentExpr: List) {
+  const updated = assignee.clone().setParent(assignmentExpr.getParent());
+  const field = assignee.at(0)?.value as string;
+  const setter = Identifier.from(`set-${field}`);
+  updated.set(0, setter);
+  updated.push(assignmentExpr.at(2)!);
+  return addTypeAnnotationToUserFnCall(updated);
+}
 
 function addTypeAnnotationToUserFnCall(list: List) {
   const identifier = list.first() as Identifier;

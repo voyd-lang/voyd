@@ -15,4 +15,5 @@ fn main()
 	let pos2 = Pos { x: 72, y: 39, z: 86 }
 	let pos3 = Pos { x: 123, y: 654, z: 1 }
 	let pos4 = make-pos()
+	pos4.y = 10
 	pos4.y

@@ -599,7 +599,6 @@
               "stack-pointer",
               ["+", ["+", "stack-pointer", "size"], "header-size"]
             ],
-            ["log", "stack-pointer"],
             [
               "bnr",
               ["i32", "store", "void"],
@@ -1045,7 +1044,7 @@
                   "typed-block",
                   ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]],
                   ["define", "my", ["Pos", 5, 4, 3]],
-                  ["define", "my2", ["Pos", 11, 24, 33]],
+                  ["define", "my2", ["Pos", 11, 20, 33]],
                   ["define", "my3", ["Pos", 11, 24, 33]],
                   "my"
                 ],
@@ -1062,9 +1061,14 @@
           [
             "typed-block",
             "i32",
-            ["define", "pos", ["make-pos"]],
-            ["define", "pos2", ["Pos", 98, 43, 32]],
-            ["x", "pos"]
+            ["define", "pos", ["Pos", 98, 43, 32]],
+            ["define", "pos2", ["Pos", 72, 39, 86]],
+            ["define", "pos3", ["Pos", 123, 654, 1]],
+            ["define", "pos4", ["make-pos"]],
+            ["define-mut", "x", ["typed-block", "i32", 5]],
+            ["=", "x", ["typed-block", "i32", 2]],
+            ["set-y", "pos4", ["typed-block", "i32", 10]],
+            ["y", "pos4"]
           ]
         ]
       ]

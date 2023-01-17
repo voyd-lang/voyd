@@ -10,6 +10,10 @@ export class List extends Syntax {
 
   constructor(opts: SyntaxOpts & { value?: ListValue[] }) {
     super(opts);
+
+    // NOTE: We intentionally don't use from.value as from is only
+    // intended to inherit the context.
+    // TODO: Consider renaming `from`.
     this.push(...(opts.value ?? []));
   }
 
@@ -23,6 +27,12 @@ export class List extends Syntax {
 
   at(index: number): Expr | undefined {
     return this.value.at(index);
+  }
+
+  set(index: number, value: Expr) {
+    value.setParent(this);
+    this.value[index] = value; // Should this clone?
+    return this;
   }
 
   calls(fnId: Expr | string) {
@@ -91,6 +101,13 @@ export class List extends Syntax {
 
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
     return new List({ value: this.value.map(fn), from: this });
+  }
+
+  /** Returns a copy of this list where all the parameters mapped by the supplied function */
+  mapArgs(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
+    const newList = new List({ value: this.rest().map(fn), from: this });
+    if (this.first()) newList.insert(this.first()!);
+    return newList;
   }
 
   reduce(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
