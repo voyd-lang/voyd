@@ -37,15 +37,18 @@ const addMemInstructionsToFunctionDef = (
   const alloc = getFnId(list, "alloc");
   const setReturn = getFnId(list, "set-return");
   const copy = getFnId(list, "copy");
-  list.value[4] = new List({
-    from: list.value[4],
-    value: [
-      "typed-block",
-      CDT_ADDRESS_TYPE,
-      ["define", returnAddr, [alloc, new Int({ value: allocationSize })]],
-      [setReturn, [copy, body, returnAddr]],
-    ],
-  });
+  list.set(
+    4,
+    new List({
+      from: list.value[4],
+      value: [
+        "typed-block",
+        CDT_ADDRESS_TYPE,
+        ["define", returnAddr, [alloc, new Int({ value: allocationSize })]],
+        [setReturn, [copy, body, returnAddr]],
+      ],
+    })
+  );
   return list;
 };
 
