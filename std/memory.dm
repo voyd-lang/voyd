@@ -38,6 +38,6 @@ pub fn store-i32(address:i32 offset:i32 value:i32) -> void
 
 fn ensure-space(size:i32) -> i32
 	let mem-size:i32 = bnr (memory size i32)
-	if (stack-pointer + size + header-size) >= (mem-size * 65536))
+	if (stack-pointer + size + header-size) >= (mem-size * 65536)
 		bnr (memory grow i32) (1)
 		0
