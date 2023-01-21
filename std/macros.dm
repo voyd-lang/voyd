@@ -147,7 +147,7 @@ pub macro match(&body)
 	let expand-cases = (cases index) =>
 		let case = cases.extract(index)
 		if is-list(case) and not(index + 1 >= cases.length)
-			` if $(extract case 0) == "match-value"
+			` if $(extract case 0) == match-value
 				$(extract case 1)
 				$(&lambda cases (index + 1))
 			case
