@@ -660,7 +660,7 @@ const typedStructListToStructType = (list: List): StructType => {
 function assertFunctionReturnType(
   typedBlock: List,
   suppliedReturnType: Type | undefined,
-  identifier: Id
+  id: Id
 ): Type {
   const inferredReturnType = typedBlock.at(1) as Type;
   const shouldCheckInferredType =
@@ -670,8 +670,9 @@ function assertFunctionReturnType(
     !typesMatch(suppliedReturnType, inferredReturnType);
 
   if (typeMismatch) {
+    const name = getIdStr(id);
     throw new Error(
-      `Expected fn ${identifier} to return ${suppliedReturnType}, got ${inferredReturnType}`
+      `Expected fn ${name} to return ${suppliedReturnType}, got ${inferredReturnType}`
     );
   }
   return inferredReturnType;
