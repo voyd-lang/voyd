@@ -20,7 +20,6 @@ import {
   List,
   Type,
 } from "./lib/index.mjs";
-import { Var } from "./lib/syntax/lexical-context.mjs";
 
 let mod: binaryen.Module | undefined = undefined;
 
@@ -299,7 +298,10 @@ const getFunctionParameterTypes = (paramIndex: number, fnDef: List) => {
 };
 
 const getFunctionVarTypes = (fn: Expr) =>
-  fn.getAllFnVars().map((v) => mapBinaryenType(v.type!));
+  fn
+    .getAllFnVars()
+    .filter((v) => v.kind === "var")
+    .map((v) => mapBinaryenType(v.type!));
 
 const mapBinaryenType = (type: Type): binaryen.Type => {
   if (type.is(i32)) return binaryen.i32;
