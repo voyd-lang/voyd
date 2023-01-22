@@ -1,3 +1,14 @@
+type B = {
+	abba:f32,
+	b:i32
+}
+
+type A = {
+	a:i32,
+	b:B
+}
+
+
 type Pos = {
 	x:i32,
 	y:i32,
@@ -11,9 +22,9 @@ fn make-pos()
 	my
 
 fn main()
-	let pos = Pos { x: 98, y: 43, z: 32 }
-	let pos2 = Pos { x: 72, y: 39, z: 86 }
-	let pos3 = Pos { x: 123, y: 654, z: 1 }
-	let pos4 = make-pos()
-	pos4.y = 10
-	pos4.y
+	let b = B { abba: 5.8, b: 3 }
+	let a = A { a: 1, b: b }
+	a.b.abba = 22.4
+	a.b.abba = 151.8
+	a.b.b = 7
+	a.b.b

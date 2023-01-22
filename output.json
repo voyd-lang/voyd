@@ -576,7 +576,13 @@
         "size",
         "set-return",
         "read-i32",
-        "store-i32"
+        "store-i32",
+        "read-f32",
+        "store-f32",
+        "read-i64",
+        "store-i64",
+        "read-f64",
+        "store-f64"
       ],
       [
         ["define-global", "header-size", 8],
@@ -744,6 +750,201 @@
             ["labeled-expr", "address", "i32"],
             ["labeled-expr", "offset", "i32"],
             ["labeled-expr", "value", "i32"]
+          ]
+        ],
+        "// For external load and store use. Add header size automatically to offset",
+        [
+          "define-function",
+          "read-f32",
+          ["parameters", ["address", "i32"], ["offset", "i32"]],
+          ["return-type", "f32"],
+          [
+            "typed-block",
+            "f32",
+            [
+              "bnr",
+              ["f32", "load", "f32"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                ["+", ["+", "address", "offset"], "header-size"]
+              ]
+            ]
+          ]
+        ],
+        [
+          "export",
+          "read-f32",
+          [
+            "parameters",
+            ["labeled-expr", "address", "i32"],
+            ["labeled-expr", "offset", "i32"]
+          ]
+        ],
+        "// For external load and store use. Add header size automatically to offset",
+        [
+          "define-function",
+          "store-f32",
+          [
+            "parameters",
+            ["address", "i32"],
+            ["offset", "i32"],
+            ["value", "f32"]
+          ],
+          ["return-type", "void"],
+          [
+            "typed-block",
+            "f32",
+            [
+              "bnr",
+              ["f32", "store", "f32"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                ["+", ["+", "address", "offset"], "header-size"],
+                "value"
+              ]
+            ]
+          ]
+        ],
+        [
+          "export",
+          "store-f32",
+          [
+            "parameters",
+            ["labeled-expr", "address", "i32"],
+            ["labeled-expr", "offset", "i32"],
+            ["labeled-expr", "value", "f32"]
+          ]
+        ],
+        "// For external load and store use. Add header size automatically to offset",
+        [
+          "define-function",
+          "read-i64",
+          ["parameters", ["address", "i32"], ["offset", "i32"]],
+          ["return-type", "i64"],
+          [
+            "typed-block",
+            "i64",
+            [
+              "bnr",
+              ["i64", "load", "i64"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                ["+", ["+", "address", "offset"], "header-size"]
+              ]
+            ]
+          ]
+        ],
+        [
+          "export",
+          "read-i64",
+          [
+            "parameters",
+            ["labeled-expr", "address", "i32"],
+            ["labeled-expr", "offset", "i32"]
+          ]
+        ],
+        "// For external load and store use. Add header size automatically to offset",
+        [
+          "define-function",
+          "store-i64",
+          [
+            "parameters",
+            ["address", "i32"],
+            ["offset", "i32"],
+            ["value", "i64"]
+          ],
+          ["return-type", "void"],
+          [
+            "typed-block",
+            "i64",
+            [
+              "bnr",
+              ["i64", "store", "i64"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                ["+", ["+", "address", "offset"], "header-size"],
+                "value"
+              ]
+            ]
+          ]
+        ],
+        [
+          "export",
+          "store-i64",
+          [
+            "parameters",
+            ["labeled-expr", "address", "i32"],
+            ["labeled-expr", "offset", "i32"],
+            ["labeled-expr", "value", "i64"]
+          ]
+        ],
+        "// For external load and store use. Add header size automatically to offset",
+        [
+          "define-function",
+          "read-f64",
+          ["parameters", ["address", "i32"], ["offset", "i32"]],
+          ["return-type", "f64"],
+          [
+            "typed-block",
+            "f64",
+            [
+              "bnr",
+              ["f64", "load", "f64"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                ["+", ["+", "address", "offset"], "header-size"]
+              ]
+            ]
+          ]
+        ],
+        [
+          "export",
+          "read-f64",
+          [
+            "parameters",
+            ["labeled-expr", "address", "i32"],
+            ["labeled-expr", "offset", "i32"]
+          ]
+        ],
+        "// For external load and store use. Add header size automatically to offset",
+        [
+          "define-function",
+          "store-f64",
+          [
+            "parameters",
+            ["address", "i32"],
+            ["offset", "i32"],
+            ["value", "f64"]
+          ],
+          ["return-type", "void"],
+          [
+            "typed-block",
+            "f64",
+            [
+              "bnr",
+              ["f64", "store", "f64"],
+              [
+                ["quote", 0],
+                ["quote", 2],
+                ["+", ["+", "address", "offset"], "header-size"],
+                "value"
+              ]
+            ]
+          ]
+        ],
+        [
+          "export",
+          "store-f64",
+          [
+            "parameters",
+            ["labeled-expr", "address", "i32"],
+            ["labeled-expr", "offset", "i32"],
+            ["labeled-expr", "value", "f64"]
           ]
         ],
         [
@@ -917,6 +1118,12 @@
         "set-return",
         "read-i32",
         "store-i32",
+        "read-f32",
+        "store-f32",
+        "read-i64",
+        "store-i64",
+        "read-f64",
+        "store-f64",
         "string"
       ],
       []
@@ -927,6 +1134,205 @@
       ["imports", ["std/index", "***"]],
       ["exports"],
       [
+        [
+          "define-type",
+          "B",
+          [
+            "struct",
+            ["labeled-expr", "abba", "f32"],
+            ["labeled-expr", "b", "i32"]
+          ]
+        ],
+        [
+          "define-function",
+          "B",
+          ["parameters", ["abba", "f32"], ["b", "i32"]],
+          ["return-type", ["struct", ["abba", "f32"], ["b", "i32"]]],
+          [
+            "typed-block",
+            "i32",
+            ["define", "*__return_alloc_address", ["alloc", 8]],
+            [
+              "set-return",
+              [
+                "copy",
+                [
+                  "typed-block",
+                  ["struct", ["abba", "f32"], ["b", "i32"]],
+                  ["define", "address", ["alloc", 8]],
+                  ["set-abba", "address", "abba"],
+                  ["set-b", "address", "b"],
+                  "address"
+                ],
+                "*__return_alloc_address"
+              ]
+            ]
+          ]
+        ],
+        [
+          "define-function",
+          "abba",
+          ["parameters", ["self", ["struct", ["abba", "f32"], ["b", "i32"]]]],
+          ["return-type", "f32"],
+          ["typed-block", "f32", ["read-f32", "self", 0]]
+        ],
+        [
+          "define-function",
+          "set-abba",
+          [
+            "parameters",
+            ["self", ["struct", ["abba", "f32"], ["b", "i32"]]],
+            ["value", "f32"]
+          ],
+          ["return-type", "void"],
+          ["typed-block", "void", ["store-f32", "self", 0, "value"]]
+        ],
+        [
+          "define-function",
+          "b",
+          ["parameters", ["self", ["struct", ["abba", "f32"], ["b", "i32"]]]],
+          ["return-type", "i32"],
+          ["typed-block", "i32", ["read-i32", "self", 4]]
+        ],
+        [
+          "define-function",
+          "set-b",
+          [
+            "parameters",
+            ["self", ["struct", ["abba", "f32"], ["b", "i32"]]],
+            ["value", "i32"]
+          ],
+          ["return-type", "void"],
+          ["typed-block", "void", ["store-i32", "self", 4, "value"]]
+        ],
+        [
+          "define-type",
+          "A",
+          ["struct", ["labeled-expr", "a", "i32"], ["labeled-expr", "b", "B"]]
+        ],
+        [
+          "define-function",
+          "A",
+          [
+            "parameters",
+            ["a", "i32"],
+            ["b", ["struct", ["abba", "f32"], ["b", "i32"]]]
+          ],
+          [
+            "return-type",
+            [
+              "struct",
+              ["a", "i32"],
+              ["b", ["struct", ["abba", "f32"], ["b", "i32"]]]
+            ]
+          ],
+          [
+            "typed-block",
+            "i32",
+            ["define", "*__return_alloc_address", ["alloc", 12]],
+            [
+              "set-return",
+              [
+                "copy",
+                [
+                  "typed-block",
+                  [
+                    "struct",
+                    ["a", "i32"],
+                    ["b", ["struct", ["abba", "f32"], ["b", "i32"]]]
+                  ],
+                  ["define", "address", ["alloc", 8]],
+                  ["set-a", "address", "a"],
+                  ["set-b", "address", "b"],
+                  "address"
+                ],
+                "*__return_alloc_address"
+              ]
+            ]
+          ]
+        ],
+        [
+          "define-function",
+          "a",
+          [
+            "parameters",
+            [
+              "self",
+              [
+                "struct",
+                ["a", "i32"],
+                ["b", ["struct", ["abba", "f32"], ["b", "i32"]]]
+              ]
+            ]
+          ],
+          ["return-type", "i32"],
+          ["typed-block", "i32", ["read-i32", "self", 0]]
+        ],
+        [
+          "define-function",
+          "set-a",
+          [
+            "parameters",
+            [
+              "self",
+              [
+                "struct",
+                ["a", "i32"],
+                ["b", ["struct", ["abba", "f32"], ["b", "i32"]]]
+              ]
+            ],
+            ["value", "i32"]
+          ],
+          ["return-type", "void"],
+          ["typed-block", "void", ["store-i32", "self", 0, "value"]]
+        ],
+        [
+          "define-function",
+          "b",
+          [
+            "parameters",
+            [
+              "self",
+              [
+                "struct",
+                ["a", "i32"],
+                ["b", ["struct", ["abba", "f32"], ["b", "i32"]]]
+              ]
+            ]
+          ],
+          ["return-type", ["struct", ["abba", "f32"], ["b", "i32"]]],
+          [
+            "typed-block",
+            "i32",
+            ["define", "*__return_alloc_address", ["alloc", 8]],
+            [
+              "set-return",
+              [
+                "copy",
+                ["typed-block", "i32", ["read-i32", "self", 4]],
+                "*__return_alloc_address"
+              ]
+            ]
+          ]
+        ],
+        [
+          "define-function",
+          "set-b",
+          [
+            "parameters",
+            [
+              "self",
+              [
+                "struct",
+                ["a", "i32"],
+                ["b", ["struct", ["abba", "f32"], ["b", "i32"]]]
+              ]
+            ],
+            ["value", ["struct", ["abba", "f32"], ["b", "i32"]]]
+          ],
+          ["return-type", "void"],
+          ["typed-block", "void", ["store-i32", "self", 4, "value"]]
+        ],
         [
           "define-type",
           "Pos",
@@ -1061,14 +1467,12 @@
           [
             "typed-block",
             "i32",
-            ["define", "pos", ["Pos", 98, 43, 32]],
-            ["define", "pos2", ["Pos", 72, 39, 86]],
-            ["define", "pos3", ["Pos", 123, 654, 1]],
-            ["define", "pos4", ["make-pos"]],
-            ["define-mut", "x", ["typed-block", "i32", 5]],
-            ["=", "x", ["typed-block", "i32", 2]],
-            ["set-y", "pos4", ["typed-block", "i32", 10]],
-            ["y", "pos4"]
+            ["define", "b", ["B", 5.8, 3]],
+            ["define", "a", ["A", 1, "b"]],
+            ["set-abba", ["b", "a"], ["typed-block", "f32", 22.4]],
+            ["set-abba", ["b", "a"], ["typed-block", "f32", 151.8]],
+            ["set-b", ["b", "a"], ["typed-block", "i32", 7]],
+            ["b", ["b", "a"]]
           ]
         ]
       ]
