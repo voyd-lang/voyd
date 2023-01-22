@@ -548,7 +548,7 @@
       "module",
       "std/utils",
       ["imports", ["std/macros", "***"]],
-      ["exports", "log"],
+      ["exports", "log", "log", "log", "log"],
       [
         [
           "define-extern-function",
@@ -557,7 +557,31 @@
           ["parameters", ["val", "i32"]],
           ["return-type", "void"]
         ],
-        ["export", "log", ["parameters", ["labeled-expr", "val", "i32"]]]
+        ["export", "log", ["parameters", ["labeled-expr", "val", "i32"]]],
+        [
+          "define-extern-function",
+          "log",
+          ["namespace", "utils"],
+          ["parameters", ["val", "f32"]],
+          ["return-type", "void"]
+        ],
+        ["export", "log", ["parameters", ["labeled-expr", "val", "f32"]]],
+        [
+          "define-extern-function",
+          "log",
+          ["namespace", "utils"],
+          ["parameters", ["val", "f64"]],
+          ["return-type", "void"]
+        ],
+        ["export", "log", ["parameters", ["labeled-expr", "val", "f64"]]],
+        [
+          "define-extern-function",
+          "log",
+          ["namespace", "utils"],
+          ["parameters", ["val", "i64"]],
+          ["return-type", "void"]
+        ],
+        ["export", "log", ["parameters", ["labeled-expr", "val", "i64"]]]
       ]
     ],
     [
@@ -1112,6 +1136,9 @@
         "*",
         "/",
         "log",
+        "log",
+        "log",
+        "log",
         "alloc",
         "copy",
         "size",
@@ -1171,6 +1198,13 @@
         ],
         [
           "define-function",
+          "abba-pointer",
+          ["parameters", ["self", ["struct", ["abba", "f32"], ["b", "i32"]]]],
+          ["return-type", "i32"],
+          ["typed-block", "i32", ["read-i32", "self", 0]]
+        ],
+        [
+          "define-function",
           "abba",
           ["parameters", ["self", ["struct", ["abba", "f32"], ["b", "i32"]]]],
           ["return-type", "f32"],
@@ -1186,6 +1220,13 @@
           ],
           ["return-type", "void"],
           ["typed-block", "void", ["store-f32", "self", 0, "value"]]
+        ],
+        [
+          "define-function",
+          "b-pointer",
+          ["parameters", ["self", ["struct", ["abba", "f32"], ["b", "i32"]]]],
+          ["return-type", "i32"],
+          ["typed-block", "i32", ["read-i32", "self", 4]]
         ],
         [
           "define-function",
@@ -1253,6 +1294,23 @@
         ],
         [
           "define-function",
+          "a-pointer",
+          [
+            "parameters",
+            [
+              "self",
+              [
+                "struct",
+                ["a", "i32"],
+                ["b", ["struct", ["abba", "f32"], ["b", "i32"]]]
+              ]
+            ]
+          ],
+          ["return-type", "i32"],
+          ["typed-block", "i32", ["read-i32", "self", 0]]
+        ],
+        [
+          "define-function",
           "a",
           [
             "parameters",
@@ -1285,6 +1343,23 @@
           ],
           ["return-type", "void"],
           ["typed-block", "void", ["store-i32", "self", 0, "value"]]
+        ],
+        [
+          "define-function",
+          "b-pointer",
+          [
+            "parameters",
+            [
+              "self",
+              [
+                "struct",
+                ["a", "i32"],
+                ["b", ["struct", ["abba", "f32"], ["b", "i32"]]]
+              ]
+            ]
+          ],
+          ["return-type", "i32"],
+          ["typed-block", "i32", ["read-i32", "self", 4]]
         ],
         [
           "define-function",
@@ -1372,6 +1447,16 @@
         ],
         [
           "define-function",
+          "x-pointer",
+          [
+            "parameters",
+            ["self", ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]]]
+          ],
+          ["return-type", "i32"],
+          ["typed-block", "i32", ["read-i32", "self", 0]]
+        ],
+        [
+          "define-function",
           "x",
           [
             "parameters",
@@ -1393,6 +1478,16 @@
         ],
         [
           "define-function",
+          "y-pointer",
+          [
+            "parameters",
+            ["self", ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]]]
+          ],
+          ["return-type", "i32"],
+          ["typed-block", "i32", ["read-i32", "self", 4]]
+        ],
+        [
+          "define-function",
           "y",
           [
             "parameters",
@@ -1411,6 +1506,16 @@
           ],
           ["return-type", "void"],
           ["typed-block", "void", ["store-i32", "self", 4, "value"]]
+        ],
+        [
+          "define-function",
+          "z-pointer",
+          [
+            "parameters",
+            ["self", ["struct", ["x", "i32"], ["y", "i32"], ["z", "i32"]]]
+          ],
+          ["return-type", "i32"],
+          ["typed-block", "i32", ["read-i32", "self", 8]]
         ],
         [
           "define-function",
@@ -1463,16 +1568,14 @@
           "define-function",
           "main",
           ["parameters"],
-          ["return-type", "i32"],
+          ["return-type", "f32"],
           [
             "typed-block",
-            "i32",
+            "f32",
             ["define", "b", ["B", 5.8, 3]],
             ["define", "a", ["A", 1, "b"]],
-            ["set-abba", ["b", "a"], ["typed-block", "f32", 22.4]],
-            ["set-abba", ["b", "a"], ["typed-block", "f32", 151.8]],
-            ["set-b", ["b", "a"], ["typed-block", "i32", 7]],
-            ["b", ["b", "a"]]
+            ["set-abba", ["b-pointer", "a"], ["typed-block", "f32", 145.2]],
+            ["abba", ["b", "a"]]
           ]
         ]
       ]

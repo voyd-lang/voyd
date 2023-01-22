@@ -249,13 +249,26 @@ const addTypeAnnotationsToAssignment = (list: List): List => {
 
 // Convert field assignment expressions into set expressions
 // ["=", ["y", "pos"], 10] converts to ["set-y", "pos", 10]
+// Positions { pos: { x:i32, y:i32 } }
+// ["=", ["y", ["pos", "positions"]], 10] converts to ["set-y", ["pos-pointer" positions], 10]
 function transformFieldAssignment(assignee: List, assignmentExpr: List) {
   const updated = assignee.clone().setParent(assignmentExpr.getParent());
   const field = assignee.at(0)?.value as string;
   const setter = Identifier.from(`set-${field}`);
   updated.set(0, setter);
+  updated.set(1, fieldParentPointer(assignee.at(1)!));
   updated.push(assignmentExpr.at(2)!);
   return addTypeAnnotationToUserFnCall(updated);
+}
+
+function fieldParentPointer(expr: Expr): Expr {
+  if (!isList(expr)) return expr;
+  const field = expr.at(0)?.value as string;
+  const pointerFn = Identifier.from(`${field}-pointer`);
+  const updated = expr.clone();
+  updated.set(0, pointerFn);
+  updated.set(1, fieldParentPointer(expr.at(1)!));
+  return updated;
 }
 
 function addTypeAnnotationToUserFnCall(list: List) {

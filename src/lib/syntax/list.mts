@@ -8,13 +8,15 @@ export class List extends Syntax {
   readonly __type = "list";
   value: Expr[] = [];
 
-  constructor(opts: SyntaxOpts & { value?: ListValue[] }) {
+  constructor(opts: SyntaxOpts<ListValue[] | List>) {
     super(opts);
+    const value = opts.value;
 
-    // NOTE: We intentionally don't use from.value as from is only
-    // intended to inherit the context.
-    // TODO: Consider renaming `from`.
-    this.push(...(opts.value ?? []));
+    if (!value || value instanceof Array) {
+      this.push(...(value ?? []));
+    } else {
+      this.push(...value.value);
+    }
   }
 
   get hasChildren() {
@@ -60,28 +62,30 @@ export class List extends Syntax {
   }
 
   push(...expr: ListValue[]) {
-    expr.forEach((ex) => {
-      if (typeof ex === "string") {
-        this.value.push(new Identifier({ value: ex, parent: this }));
-        return;
-      }
-
-      if (ex instanceof Array) {
-        this.push(new List({ value: ex, parent: this }));
-        return;
-      }
-
-      const cloned = ex.clone(this);
-
-      if (isList(cloned) && cloned.calls("splice-block")) {
-        this.value.push(...cloned.rest());
-        return;
-      }
-
-      this.value.push(cloned);
-    });
-
+    expr.forEach((ex) => this.pushOne(ex));
     return this;
+  }
+
+  private pushOne(ex: ListValue, checkForSpliceBlock = true) {
+    if (typeof ex === "string") {
+      this.value.push(new Identifier({ value: ex, parent: this }));
+      return;
+    }
+
+    if (ex instanceof Array) {
+      this.push(new List({ value: ex, parent: this }));
+      return;
+    }
+
+    const cloned = ex.clone(this);
+
+    // TODO: This should probably not be done here (thus the checkForSpliceBlock hack used by the constructor)
+    if (checkForSpliceBlock && isList(cloned) && cloned.calls("splice-block")) {
+      this.value.push(...cloned.rest());
+      return;
+    }
+
+    this.value.push(cloned);
   }
 
   indexOf(expr: Expr) {
@@ -127,7 +131,7 @@ export class List extends Syntax {
   }
 
   clone(parent?: Expr): List {
-    return new List({ parent, value: this.value, from: this });
+    return new List({ parent, value: this, from: this });
   }
 }
 

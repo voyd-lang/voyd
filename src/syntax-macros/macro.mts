@@ -325,6 +325,11 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     const val = args.at(1)!;
     return list.push(val);
   },
+  spread: (_, args) => {
+    const list = args.at(0) as List;
+    const val = args.at(1)! as List;
+    return list.push(...val.value);
+  },
   concat: (_, args) => {
     const list = args.first() as List;
     return list.push(...args.rest().flatMap((expr) => (expr as List).value));

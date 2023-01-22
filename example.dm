@@ -24,7 +24,5 @@ fn make-pos()
 fn main()
 	let b = B { abba: 5.8, b: 3 }
 	let a = A { a: 1, b: b }
-	a.b.abba = 22.4
-	a.b.abba = 151.8
-	a.b.b = 7
-	a.b.b
+	a.b.abba = 145.2
+	a.b.abba

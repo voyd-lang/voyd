@@ -19,12 +19,13 @@ export type SourceLocation = {
 
 export type SyntaxComparable = Expr | string | number | boolean;
 
-export type SyntaxOpts = {
+export type SyntaxOpts<T = any> = {
   location?: SourceLocation;
+  // TODO: Consider renaming to something along the lines of inherit properties of.
   from?: Syntax;
   parent?: Expr;
   isFn?: boolean;
-  value?: any;
+  value?: T;
 };
 
 export abstract class Syntax {

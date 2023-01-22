@@ -194,9 +194,13 @@ m-let init-struct = (name expr) =>
 			"f64" `(read-f64)
 			`(read-i32)
 
-		let read-accessor =
-			` fn $field-name(self:$name) -> $field-type
-				$@read-fn self $offset
+		let pointer = Identifier from: field-name + "-pointer"
+		let read-accessors =
+			`
+				fn $pointer(self:$name) -> i32
+					read-i32 self $offset
+				fn $field-name(self:$name) -> $field-type
+					$@read-fn self $offset
 
 		let write-name = Identifier from: "set-" + field-name
 		let write-fn = field-type.match
@@ -211,7 +215,7 @@ m-let init-struct = (name expr) =>
 				$@write-fn self $offset value
 
 		let newAccessors = accessors
-			.push(read-accessor)
+			.spread(read-accessors)
 			.push(write-accessor)
 
 		#[offset + param.get-size, newAccessors]
