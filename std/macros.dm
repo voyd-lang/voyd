@@ -1,4 +1,4 @@
-macro pub(&body)
+macro pub()
 	// Temp hack to get pub def-wasm-operator and the like to work
 	define body
 		if is-list(&body.extract(0))
@@ -23,39 +23,39 @@ macro pub(&body)
 
 export pub (parameters (&body))
 
-pub macro `(&body)
+pub macro `()
 	quote quote $@&body
 
-pub macro ':'(&body)
+pub macro ':'()
 	define expr0 &body.extract(0)
 	define expr1 &body.extract(1)
 	` labeled-expr $expr0 $expr1
 
-pub macro let(&body)
+pub macro let()
 	define equals-expr (extract &body 0)
 	` define
 		$(extract equals-expr 1)
 		$(extract equals-expr 2)
 
-pub macro var(&body)
+pub macro var()
 	define equals-expr (extract &body 0)
 	` define-mut
 		$(extract equals-expr 1)
 		$(extract equals-expr 2)
 
-pub macro m-let(&body)
+pub macro m-let()
 	define equals-expr (extract &body 0)
 	` define-macro-var
 		$(extract equals-expr 1)
 		$(extract equals-expr 2)
 
-pub macro m-var(&body)
+pub macro m-var()
 	define equals-expr (extract &body 0)
 	` define-mut-macro-var
 		$(extract equals-expr 1)
 		$(extract equals-expr 2)
 
-pub macro global(&body)
+pub macro global()
 	let mutability = extract &body 0
 	let equals-expr = extract &body 1
 	let function = if mutability == "let"
@@ -65,7 +65,7 @@ pub macro global(&body)
 		$(extract equals-expr 1)
 		$(extract (extract equals-expr 2) 1)
 
-pub macro ';'(&body)
+pub macro ';'()
 	let func = &body.extract(0)
 	let body = &body.extract(1)
 	let args = if body.extract(0) == "block"
@@ -75,7 +75,7 @@ pub macro ';'(&body)
 		func.concat(args)
 		concat(`($func) args)
 
-pub macro lambda(&body)
+pub macro lambda()
 	let parameters = &body.extract(0)
 	let body = &body.extract(1)
 	` lambda-expr $parameters $body
@@ -87,7 +87,7 @@ pub macro '=>'(&body)
 m-let extract-parameters = (definitions) =>
 	`(parameters).concat definitions.slice(1)
 
-pub macro fn(&body)
+pub macro fn()
 	let definitions = extract(&body 0)
 	let identifier = extract(definitions 0)
 	let params = extract-parameters(definitions)
@@ -119,7 +119,7 @@ pub macro def-wasm-operator(op wasm-fn arg-type return-type)
 
 // extern $fn-id(namespace params*)
 // extern max("Math" x:i32 y:i32)
-pub macro extern-fn(&body)
+pub macro extern-fn()
 	let namespace = &body.extract(0)
 	let definitions = &body.extract(1)
 	let identifier = definitions.extract(0)
@@ -141,7 +141,7 @@ pub macro extern-fn(&body)
 		$parameters
 		$return-type
 
-pub macro match(&body)
+pub macro match()
 	let value-expr = &body.extract(0)
 	let cases = &body.slice(1)
 	let expand-cases = (cases index) =>
@@ -157,7 +157,7 @@ pub macro match(&body)
 		let match-value = $value-expr
 		$conditions
 
-pub macro type(&body)
+pub macro type()
 	let equals-expr = &body.extract(0)
 	let expr = equals-expr.extract(2)
 	if expr.is-list and (expr.extract(0) == "struct")

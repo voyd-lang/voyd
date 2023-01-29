@@ -75,16 +75,13 @@ const expandMacro = ({ macro, call }: { macro: List; call: List }): Expr => {
 
   params.forEach((p, index) => {
     const identifier = p as Identifier;
-    // Todo: Just make this an implicit variable
-    if (identifier.value === "&body") {
-      macro.setVar("&body", {
-        kind: "param",
-        value: new List({ value: call.rest() }),
-      });
-      return;
-    }
-
     macro.setVar(identifier, { value: call.at(index + 1)!, kind: "param" });
+  });
+
+  // Implicit &body param
+  macro.setVar("&body", {
+    kind: "param",
+    value: new List({ value: call.rest() }),
   });
 
   const result = macro
