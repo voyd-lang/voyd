@@ -47,7 +47,6 @@
   later retrieved, the wrong index was fetched. This is mostly a safety issue. Need to figure out
   a better way to handle index updates, rather than relying on the code gen to re-register a
   variable altogether.
-- Investigate why example 2 does not parse correctly (the function call inside push gets spread onto push)
 - Check mutability of struct variable before field re-assignment (may need a borrow checker to do this right)
 - Error framework
   - Don't throw errors, collect them in an array
@@ -65,23 +64,4 @@ let write-fn = field-type.match
 	"f32" `(store-f32)
 	"f64" `(store-f64)
 	`(store-i32) // Bleep bloop blop
-```
-
-**Example 2**
-
-```
-let newAccessors = accessors
-  .push(`(splice-block read-accessor))
-```
-
-Gets parsed as:
-
-```
-(define newAccessors (push accessors ` splice-block read-accessor))
-```
-
-Instead of the correct form:
-
-```
-(define newAccessors (push accessors (` splice-block read-accessor)))
 ```
