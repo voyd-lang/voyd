@@ -47,7 +47,7 @@ const inferFnCallTypes = (list: List): List => {
   if (list.calls("define-cdt")) return list;
   if (list.calls("block")) return inferBlockTypes(list);
   if (list.calls("lambda-expr")) return list;
-  if (list.calls("export")) return initExport(list);
+  if (list.calls("export")) return inferExportTypes(list);
   if (list.calls("root")) return inferRootModuleTypes(list);
   if (list.calls("module")) return inferModuleTypes(list);
   if (list.calls("quote")) return list;
@@ -499,7 +499,7 @@ const getExprLabel = (expr?: Expr): string | undefined => {
   return expr.at(1)!.value as string;
 };
 
-const initExport = (exp: List) => {
+const inferExportTypes = (exp: List) => {
   const exportId = exp.at(1);
   if (!isIdentifier(exportId)) {
     throw new Error("Missing identifier in export");
@@ -507,14 +507,14 @@ const initExport = (exp: List) => {
 
   const params = exp.at(2);
   if (isList(params) && params.calls("parameters")) {
-    initFnExport(exportId, params);
+    inferFnExportTypes(exportId, params);
     return exp;
   }
 
   return exp;
 };
 
-const initFnExport = (fnId: Identifier, params: List) => {
+const inferFnExportTypes = (fnId: Identifier, params: List) => {
   const candidates = fnId.getFns(fnId);
   const fn = candidates.find((candidate) =>
     candidate.value.params.every((param, index) => {
