@@ -1,19 +1,13 @@
 # Todo List
 
-- Unsafe macros (As add unsafe macro and check safety macros that do a form of "unsafe" checking
-  i.e. rust)
-- Fix bug in modules where I can't run syntax macros directly on files within std
+- Type System Pipeline
+- Unsafe effect handling (i.e. rust unsafe keyword)
 - Write up a layout spec defining exactly how parenthetical elision works
-- Hygienic macros
 - Consider making $() a block, rather than assuming a function call
 - Develop and apply strict naming conventions for all APIs
 - Develop best practices
-- `def` macro like https://docs.racket-lang.org/guide/syntax-overview.html#%28part._.Definitions%29
-- Adopt some conventions from https://docs.racket-lang.org/style/Textual_Matters.html like `!` and
-  `?` conventions
 - Flags for outputting AST and WAT
 - Use tabstops (the thing that handles tab based comment alignment etc)
-- Support struct field assignment via `=` operator
 - Check mutability of struct before allowing modification (&mut semantics?)
 - Rewrite reference manual.
 - Consider using the struct syntax to define named arguments. See
