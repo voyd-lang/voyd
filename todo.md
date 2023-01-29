@@ -15,7 +15,6 @@
 - Use tabstops (the thing that handles tab based comment alignment etc)
 - Support struct field assignment via `=` operator
 - Check mutability of struct before allowing modification (&mut semantics?)
-- replace `quote splice-block` with `quote-splice` or something similar.
 - Rewrite reference manual.
 - Consider using the struct syntax to define named arguments. See
   `archived-reference/functions.md#NamedArguments` for inspiration.
@@ -42,8 +41,6 @@
 - Create a Fn expr that extends list and handles accessing of parameters, return type, body, etc.
 - Create a Call expr that extends lists and handles references to the function identifier etc.
 - Figure out how to avoid having to double quote macros
-- Major cleanup pass. There is much room for easy refactors
-- Fix object field assignment
 - Old variable registration from type system can interfere with code gen index lookup. For example,
   there was a bug in the code-gen layer that re-registered an identifier at the wrong level. The
   older registration was left untouched (with an out-of-date index). So when the identifier was
@@ -51,8 +48,11 @@
   a better way to handle index updates, rather than relying on the code gen to re-register a
   variable altogether.
 - Investigate why example 2 does not parse correctly (the function call inside push gets spread onto push)
-- Move `splice-block` handling from list.push
 - Check mutability of struct variable before field re-assignment (may need a borrow checker to do this right)
+- Error framework
+  - Don't throw errors, collect them in an array
+  - Continue processing until a detected error can prevent further processing
+  - Display a list of all detected errors in the console before exiting.
 
 # Examples
 

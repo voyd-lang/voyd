@@ -11,13 +11,13 @@ macro pub(&body)
 		block
 			register-macro expanded.slice(1)
 			define definitions expanded.extract(1)
-			quote splice-block
+			quote splice-quote
 				export
 					$(extract definitions 0)
 					(parameters $(slice definitions 1))
 		block
 			define index (if expanded.extract(0) == "define-function" 2 3)
-			quote quote splice-block
+			quote quote splice-quote
 				$expanded
 				export $(extract expanded 1) $(extract expanded index)
 

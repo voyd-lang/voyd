@@ -43,9 +43,7 @@ export class List extends Syntax {
 
   consume(): Expr {
     const next = this.value.shift();
-    if (!next) {
-      throw new Error("No remaining expressions");
-    }
+    if (!next) throw new Error("No remaining expressions");
     return next;
   }
 
@@ -62,30 +60,26 @@ export class List extends Syntax {
   }
 
   push(...expr: ListValue[]) {
-    expr.forEach((ex) => this.pushOne(ex));
+    expr.forEach((ex) => {
+      if (typeof ex === "string") {
+        this.value.push(new Identifier({ value: ex, parent: this }));
+        return;
+      }
+
+      if (ex instanceof Array) {
+        this.push(new List({ value: ex, parent: this }));
+        return;
+      }
+
+      if (isList(ex) && ex.calls("splice-quote")) {
+        this.value.push(...ex.rest());
+        return;
+      }
+
+      this.value.push(ex.clone(this));
+    });
+
     return this;
-  }
-
-  private pushOne(ex: ListValue, checkForSpliceBlock = true) {
-    if (typeof ex === "string") {
-      this.value.push(new Identifier({ value: ex, parent: this }));
-      return;
-    }
-
-    if (ex instanceof Array) {
-      this.push(new List({ value: ex, parent: this }));
-      return;
-    }
-
-    const cloned = ex.clone(this);
-
-    // TODO: This should probably not be done here (thus the checkForSpliceBlock hack used by the constructor)
-    if (checkForSpliceBlock && isList(cloned) && cloned.calls("splice-block")) {
-      this.value.push(...cloned.rest());
-      return;
-    }
-
-    this.value.push(cloned);
   }
 
   indexOf(expr: Expr) {

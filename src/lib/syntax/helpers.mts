@@ -27,4 +27,4 @@ export const isIdentifier = (expr?: unknown): expr is Identifier =>
 export const isFnType = (expr?: unknown): expr is FnType =>
   expr instanceof FnType;
 export const newLine = () => new Whitespace({ value: "\n" });
-export const noop = () => new List({ value: ["splice-block"] });
+export const noop = () => new List({ value: ["splice-quote"] });

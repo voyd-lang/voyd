@@ -229,7 +229,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
 
         if (isList(exp) && exp.first()?.is("$@")) {
           const rest = new List({ value: exp.rest(), parent: body });
-          return (evalExpr(rest) as List).insert("splice-block");
+          return (evalExpr(rest) as List).insert("splice-quote");
         }
 
         if (isList(exp)) return expand(exp);
@@ -238,7 +238,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
           const id = exp.value.replace("$@", "");
           const info = exp.getVar(id)!;
           const list = info.value as List;
-          list.insert("splice-block");
+          list.insert("splice-quote");
           return list;
         }
 
@@ -397,7 +397,7 @@ const registerMacro = (list: List, parent: Expr) => {
   parent.setFn(id.value, fn);
 };
 
-const nop = () => new List({}).push(Identifier.from("splice-block"));
+const nop = () => new List({}).push(Identifier.from("splice-quote"));
 /** Binary logical comparison */
 const bl = (args: List, fn: (l: any, r: any) => boolean) =>
   bool(fn(args.at(0)?.value, args.at(1)?.value));
