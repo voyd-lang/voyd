@@ -6,10 +6,8 @@ import type { List } from "./list.mjs";
 import type { StringLiteral } from "./string-literal.mjs";
 import type { Type } from "./types.mjs";
 import type { Whitespace } from "./whitespace.mjs";
-import type { Comment } from "./comment.mjs";
 
 export type Expr =
-  | Comment
   | Bool
   | Int
   | Float

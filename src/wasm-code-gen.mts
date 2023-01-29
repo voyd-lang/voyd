@@ -11,7 +11,6 @@ import {
   Identifier,
   Int,
   isBool,
-  isComment,
   isFloat,
   isIdentifier,
   isInt,
@@ -44,7 +43,6 @@ const compileExpression = (opts: CompileExpressionOpts): number => {
   if (isList(expr)) return compileList({ ...opts, expr: expr });
   if (isInt(expr)) return mod.i32.const(expr.value);
   if (isFloat(expr)) return mod.f32.const(expr.value);
-  if (isComment(expr)) return mod.nop();
   if (isIdentifier(expr)) return compileIdentifier({ ...opts, expr });
   if (isBool(bool)) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);

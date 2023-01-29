@@ -1,6 +1,5 @@
 export * from "./syntax.mjs";
 export * from "./bool.mjs";
-export * from "./comment.mjs";
 export * from "./expr.mjs";
 export * from "./float.mjs";
 export * from "./helpers.mjs";

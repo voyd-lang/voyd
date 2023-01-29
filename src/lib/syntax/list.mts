@@ -110,11 +110,15 @@ export class List extends Syntax {
     return newList;
   }
 
-  reduce(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
+  reduce(
+    fn: (expr: Expr, index: number, array: Expr[]) => Expr | undefined
+  ): List {
     const list = new List({ from: this });
     return this.value.reduce((newList: List, expr, index, array) => {
       if (!expr) return newList;
-      return newList.push(fn(expr, index, array));
+      const result = fn(expr, index, array);
+      if (!result) return newList;
+      return newList.push(result);
     }, list);
   }
 
