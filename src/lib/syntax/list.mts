@@ -71,12 +71,14 @@ export class List extends Syntax {
         return;
       }
 
-      if (isList(ex) && ex.calls("splice-quote")) {
-        this.value.push(...ex.clone().rest());
+      const cloned = ex.clone(this);
+
+      if (isList(cloned) && cloned.calls("splice-quote")) {
+        this.value.push(...cloned.rest());
         return;
       }
 
-      this.value.push(ex.clone(this));
+      this.value.push(cloned);
     });
 
     return this;

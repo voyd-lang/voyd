@@ -228,7 +228,7 @@ m-let init-struct = (name expr) =>
 			$@field-initializers
 			address
 
-	` quote splice-block
+	` quote splice-quote
 		define-type $name $expr
 		$initializer
 		$@accessors
