@@ -72,7 +72,7 @@ export class List extends Syntax {
       }
 
       if (isList(ex) && ex.calls("splice-quote")) {
-        this.value.push(...ex.rest());
+        this.value.push(...ex.clone().rest());
         return;
       }
 
