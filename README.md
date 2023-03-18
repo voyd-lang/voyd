@@ -21,7 +21,7 @@ fn main() -> void
 ```
 
 **Disclaimer**
-Dream is in it's very early stages and should not be used for production applications.
+Void is in it's very early stages and should not be used for production applications.
 Most MVP features have not been implemented yet. The language does run and compile
 though. So feel free to play around.
 
