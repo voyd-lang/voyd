@@ -5,7 +5,7 @@ web apps fun for individuals and teams alike.
 
 https://justforfunnoreally.dev/
 
-```dm
+```v
 // Find the value of the fibonacci sequence at index n
 fn fib(n:i32) -> i32
     if (n < 2)
