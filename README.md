@@ -88,13 +88,13 @@ though. So feel free to play around.
 **Install**
 
 ```
-npm i -g dreamc
+npm i -g voidc
 ```
 
 **Usage**
 
 ```
-dreamc path/to/code.dm
+voidc path/to/code.void
 ```
 
 # Documentation

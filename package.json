@@ -1,12 +1,12 @@
 {
-  "name": "dreamc",
+  "name": "voidc",
   "version": "0.4.0",
   "description": "",
   "module": "dist/index.mjs",
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "debug-parser": "dreamc --ast test.dm",
+    "debug-parser": "voidc --ast test.dm",
     "prepublishOnly": "tsc"
   },
   "bin": "dist/cli.js",
