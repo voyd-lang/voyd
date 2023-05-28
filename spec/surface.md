@@ -76,6 +76,7 @@ On top of the syntax features supported by the core language syntax, the surface
 - Tuple, Struct, Array, and Dictionary literals etc
 
 At its core, the surface language is still very lisp like. As in lisp, everything built on a list.
+Any valid s-expression, is a valid Surface Language Expression
 
 ## The Syntax Pipeline
 
@@ -105,6 +106,33 @@ User defined reader macros should always begin with a `#`. As of writing, this i
 ### Syntax Macros
 
 Syntax Macros are responsible for transforming the ast produced by the parser into the core language ast. Each syntax macro is passed a full copy of the AST. These macros are strictly run in order. The output of the final syntax macro must strictly adhere to the core language specification.
+
+Syntax Macro Pipeline Example:
+
+```
+fn fib(n:i32) -> i32
+    if (n < 2)
+        n
+        fib(n - 1) + fib(n - 2)
+
+// After parenthetical elision syntax macro
+(fn fib(n:i32) -> i32
+	(if (n < 2)
+		n
+		fib(n - 1) + fib(n - 2)))
+
+// After function notation syntax macro
+(fn (fib n:i32) -> i32
+	(if (n < 2)
+		n
+		(fib n - 1) + (fib n - 2)))
+
+// After infix notation syntax macro
+(fn (-> (fib (: n i32)) i32)
+	(if (< n 2)
+		n
+		(+ (fib (- n 1)) (fib (- n 2)))))
+```
 
 ### Regular Macros
 
