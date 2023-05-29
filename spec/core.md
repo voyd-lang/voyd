@@ -1,7 +1,42 @@
-# Low Level IR
+# The Core Language Specification
 
-This spec defines the lowest intermediate representation of Dream before it is converted into
-WASM / machine code.
+This specification defines the language targeted by the surface language. After all macros have been evaluated, void source files are transformed into a form compliant with this spec.
+
+# The Core Language Grammar
+
+```ebnf
+SExpr = AtomicSymbol | List;
+
+List = OpenBracket SExpr* CloseBracket;
+
+OpenBracket = Empty* "(" Empty*
+
+CloseBracket = Empty* ")" Empty*
+
+AtomicSymbol = !Number (Alphanumeric+ | Empty+);
+
+Alphanumeric = #'[^\s\(\)]';
+
+Number = Int | Float;
+
+Int = #'^[+-]?\d+$';
+
+Float = #'^[+-]?\d+\.\d+$';
+
+Empty = " ";
+```
+
+# Basic Language Features
+
+## Cond
+
+Multiple conditions
+
+Syntax:
+
+```lisp
+(cond ($condition:Boolean result:Expr)*)
+```
 
 ## BNR
 
@@ -177,3 +212,17 @@ A standard block with return type annotations
 ```lisp
 (typed-block $return-type:String $expr:Expr*)
 ```
+
+# Memory Layout
+
+### Stack / Linear Memory
+
+Structs and unboxed types are stored in linear memory using a stack.
+
+Each datum stored on the stack has the following layout:
+
+- Byte 0-3, i32, Size - the size of the datum it represents
+- Byte 4-7, i32, Type ID - An ID of the type the datum uses
+- Byte 8+, any, The data.
+
+---

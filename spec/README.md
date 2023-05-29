@@ -1,8 +1,6 @@
 # Void Language Spec
 
-Because Void is still under heavy pre-alpha development. This specification only describes high level and reasonably stable behaviors of the language. While in this stage of development, the spec mostly
-serves as a reference to aid contributing to the development of the language. It is not detailed
-enough to serve as a basis for standardization.
+Because Void is still under heavy pre-alpha development. This specification only describes high level and reasonably stable behaviors of the language. While in this stage of development, the spec mostly serves as a reference to aid contributing to the development of the language. It is not detailed enough to serve as a basis for standardization.
 
 **Audience**
 
