@@ -171,9 +171,7 @@ Note: Unlike common lisp, the single quote is not a macro for `quote`. Only the 
 Void follows the suggestion of this website and pairs commas with the outermost backquote. Which allows
 one to use a backquote where a quote would normally be needed.
 
-## Macros
-
-### Macro
+## Regular Macros
 
 The `macro` macro is designed to make defining simple expansion macros easy and with minimal
 boiler plate. The body of a `macro` is automatically surrounded by a `quote` block. The
@@ -181,15 +179,7 @@ boiler plate. The body of a `macro` is automatically surrounded by a `quote` blo
 as the `,@` in common lisp and splices the list into the current list. Note that these shortcuts
 only apply to `macro`, `define-macro` uses the standard operators of common lisp (`,`, `,@`, etc).
 
-TODO: syntax contracts - type checking for macros. Enforces the structure for inputs and outputs of macros.
-
-```rust
-macro $macro($params*) $body
-```
-
-### Example
-
-```lisp
+```void
 macro def-wasm-operator(op wasm-fn arg-type return-type)
 	defun $op(left:$arg-type right:$arg-type) -> $return-type
 		binaryen-mod ($arg-type $wasm-fn) (left right)
@@ -200,7 +190,17 @@ defun "<"(left:i32 right:i32) -> i32
   binaryen-mod (i32 lt_s) (left right)
 ```
 
-### Modules
+### Syntax Objects
+
+TODO
+
+### Syntax Contracts
+
+Type checking for macros. Enforces the structure for inputs and outputs of macros.
+
+TODO
+
+## Modules
 
 ```void
 use src/lib *** // Import everything from src/lib
