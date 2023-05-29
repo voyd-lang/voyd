@@ -22,6 +22,94 @@ let x = 5
 var y = 3
 ```
 
+## Functions
+
+Syntax:
+
+```dream
+fn $name([$label:?$param-name:$ParamType]*) [$effects? -> $return-type]?
+	$body:Expr*
+```
+
+### Examples
+
+Basic function:
+
+```dream
+fn add(a:i32 b:i32) -> i32
+	a + b
+
+// To call
+add 1 2
+
+// Or
+add(1 2)
+
+// Or
+(add 1 2)
+
+// Or with UFCS
+1.add(2)
+```
+
+With labels:
+
+```
+fn multiply(a:i32 by:b:i32) -> i32
+	a * b
+
+// To call
+multiply 1 by: 2
+
+// Or
+multiply(1 by: 2)
+
+// Or with UFCS. NOTE: Will not work if first argument is labeled
+1.multiply(by: 2)
+```
+
+With return type inference:
+
+```dream
+fn add(a:i32 b:i32)
+	a + b
+```
+
+With effects:
+
+```dream
+fn get-json(address:String) Async -> Dictionary
+	let json-text = await fetch(address)
+	parse-json json-text
+```
+
+### Struct Literal Parameters
+
+Struct literal parameters allow property shorthand and do not care about order, unlike labeled parameters
+
+```dream
+fn move-to { x:i32, y:i32, z: i32 } -> void
+	robot.move x y z
+
+// With other parameters
+fn move-to(scale:scale:i32, { x:i32, y:i32, z:i32 }) -> void
+	move-to { x: x * scale, y: y * scale, z: z * scale }
+
+fn main() -> void
+	let z = 7
+	move-to { z, x: 5, y }
+
+	move-to scale: 5 { x: 1, y: 2, z: 3 }
+```
+
+**Note:** For now, struct parameters must be passed as an inline struct
+literal only. That feature requires anon struct literals. So this won't work quite yet.
+
+```dream
+let pos = { x: 3, y: 4, z: 2 }
+move-to scale: 3 pos // ERROR!
+```
+
 ## String Literals
 
 ```void
@@ -62,6 +150,16 @@ let value = {
 	b: 4
 }
 ```
+
+## Traits
+
+TBD
+
+### Default function implementations
+
+Things to consider:
+
+- http://developear.com/blog/2017/02/26/swift-protocols.html
 
 ## Quote
 
@@ -252,6 +350,62 @@ add (1 2)
 // Becomes
 (add (1 2))
 ```
+
+## Uniform Function Call Syntax (Dot Notation)
+
+The dot (or period) operator applies the expression on the left as an argument of the expression on the right.
+
+```
+5.add(1)
+
+// Becomes
+add(5 1)
+
+// Parenthesis on the right expression are not required when the function only takes one argument
+5.squared
+
+// Becomes
+squared(5)
+```
+
+## Function Overloading
+
+Void functions can be overloaded. Provided that function overload can be unambiguously distinguished
+via their parameters and return type.
+
+```void
+fn sum(a:Int, b:Int)
+  print("Def 1");
+  a + b
+
+fn sum { a:Int, b:Int }
+  print("Def 2");
+  a + b
+
+sum(1, 2) // Def 1
+sum { a: 1, b: 2 } // Def 2
+
+// ERROR: sum(numbers: ...Int) overlaps ambiguously with sum(a: Int, b: Int)
+fn sum(numbers: ...Int)
+  print("Def 3");
+```
+
+This can be especially useful for overloading operators to support a custom type:
+
+```
+fn '+'(a:Vec3, b:Vec3) -> Vec3
+  Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
+
+Vec3(1, 2, 3) + Vec3(4, 5, 6) // Vec3(5, 7, 9)
+```
+
+### Rules
+
+- A function signature is:
+  - Its identifier
+  - Its parameters, their name, types, order, and label (if applicable)
+- Each full function signature must be unique in a given scope
+- TBD...
 
 ## Infix Notation
 
