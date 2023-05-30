@@ -1,3 +1,4 @@
 node_modules
 dist
 ast.json
+run_output.*
