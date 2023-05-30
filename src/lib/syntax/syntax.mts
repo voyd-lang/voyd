@@ -55,8 +55,8 @@ export abstract class Syntax {
     return this.isFn ? (this as unknown as List) : this.parent?.parentFn;
   }
 
-  setFn(id: Id, fn: FnType) {
-    this.context.setFn(id, fn);
+  addFn(id: Id, fn: FnType) {
+    this.context.addFn(id, fn);
     return this;
   }
 
@@ -66,12 +66,12 @@ export abstract class Syntax {
     return start;
   }
 
-  setVar(id: Id, v: Omit<Var, "index">) {
+  addVar(id: Id, v: Omit<Var, "index">) {
     const val: Var = {
       ...v,
       index: v.kind !== "global" ? this.getNewVarIndex() : 0,
     };
-    this.context.setVar(id, val);
+    this.context.addVar(id, val);
     this.registerVarWithParentFn(val);
     return val;
   }
@@ -80,8 +80,8 @@ export abstract class Syntax {
     return this.context.getVar(id) ?? this.parent?.getVar(id);
   }
 
-  setType(id: Id, val: Type) {
-    this.context.setType(id, val);
+  addType(id: Id, val: Type) {
+    this.context.addType(id, val);
     return this;
   }
 

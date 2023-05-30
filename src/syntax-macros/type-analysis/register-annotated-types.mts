@@ -37,7 +37,7 @@ const scanAnnotatedTypes = (expr: Expr) => {
       ? typedStructListToStructType(val as List)
       : val.getTypeOf()!;
     const parent = expr.getParent();
-    parent?.setType(id, type);
+    parent?.addType(id, type);
     return;
   }
 
@@ -66,7 +66,7 @@ const initFn = (expr: List) => {
 
   expr.setTypeOf(fnType);
   fnIdentifier.setTypeOf(fnType);
-  parent.setFn(fnIdentifier, fnType);
+  parent.addFn(fnIdentifier, fnType);
 };
 
 const getSuppliedReturnTypeForFn = (

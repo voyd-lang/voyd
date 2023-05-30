@@ -222,7 +222,7 @@ const compileDefine = (opts: CompileFnCallOpts): number => {
     throw new Error("Invalid variable location (has no parent)");
   }
 
-  const info = parent.setVar(identifier, {
+  const info = parent.addVar(identifier, {
     type: identifier.getTypeOf()!,
     mut: expr.calls("define-mut"),
     kind: "var",
@@ -289,7 +289,7 @@ const getFunctionParameterTypes = (paramIndex: number, fnDef: List) => {
     const list = expr as List;
     const identifier = list.first() as Identifier;
     const type = identifier.getTypeOf()!;
-    fnDef.setVar(identifier, { kind: "param", type });
+    fnDef.addVar(identifier, { kind: "param", type });
     return mapBinaryenType(type);
   });
   return binaryen.createType(types);

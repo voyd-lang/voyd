@@ -183,7 +183,7 @@ const inferFnParams = (params: List): List => {
 
         const { identifier, type, label } = getInfoFromRawParam(expr);
         identifier!.setTypeOf(type);
-        fnDef.setVar(identifier!, { kind: "param", type });
+        fnDef.addVar(identifier!, { kind: "param", type });
         const value = [identifier!, type];
         if (label) value.push(label);
         return [new List({ value, from: expr })];
@@ -199,7 +199,7 @@ const registerStructParamField = (value: Expr, fnDef: Expr): Expr => {
   }
   const { identifier, type } = getInfoFromRawParam(value);
   identifier!.setTypeOf(type);
-  fnDef.setVar(identifier!, { kind: "param", type });
+  fnDef.addVar(identifier!, { kind: "param", type });
   return new List({ value: [identifier!, type] });
 };
 
@@ -326,19 +326,19 @@ const resolveImports = (imports: List, exports: List): void => {
       const type = exp.getTypeOf();
 
       if (type instanceof FnType) {
-        parent.setFn(exp, type);
+        parent.addFn(exp, type);
         if (isReExported) exports.push(exp);
         continue;
       }
 
       if (exp.def && exp.def.kind === "global") {
-        parent.setVar(exp, exp.def);
+        parent.addVar(exp, exp.def);
         if (isReExported) exports.push(exp);
         continue;
       }
 
       if (type instanceof BaseType) {
-        parent.setType(exp, type);
+        parent.addType(exp, type);
         if (isReExported) exports.push(exp);
         continue;
       }
@@ -397,7 +397,7 @@ const inferVarTypes = (list: List): List => {
   identifier.setTypeOf(type);
   list
     .getParent()
-    ?.setVar(identifier, { kind: global ? "global" : "var", mut, type });
+    ?.addVar(identifier, { kind: global ? "global" : "var", mut, type });
 
   return new List({
     value: [varFnId, identifier, annotatedInitializer],

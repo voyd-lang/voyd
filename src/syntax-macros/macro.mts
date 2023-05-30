@@ -75,11 +75,11 @@ const expandMacro = ({ macro, call }: { macro: List; call: List }): Expr => {
 
   params.forEach((p, index) => {
     const identifier = p as Identifier;
-    macro.setVar(identifier, { value: call.at(index + 1)!, kind: "param" });
+    macro.addVar(identifier, { value: call.at(index + 1)!, kind: "param" });
   });
 
   // Implicit &body param
-  macro.setVar("&body", {
+  macro.addVar("&body", {
     kind: "param",
     value: new List({ value: call.rest() }),
   });
@@ -106,10 +106,10 @@ const callLambda = (opts: CallLambdaOpts): Expr => {
     throw new Error("Invalid lambda definition");
   }
 
-  body.setVar("&lambda", { value: opts.lambda.clone(), kind: "var" });
+  body.addVar("&lambda", { value: opts.lambda.clone(), kind: "var" });
   params.value.forEach((p, index) => {
     const identifier = p as Identifier;
-    body.setVar(identifier, { value: opts.args.at(index)!, kind: "param" });
+    body.addVar(identifier, { value: opts.args.at(index)!, kind: "param" });
   });
 
   return evalExpr(body);
@@ -158,7 +158,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     const fn = currentModuleScope.getFns(id)?.[0];
     const parent = currentModuleScope.getParent();
     if (fn && parent) {
-      parent.setFn(id, fn);
+      parent.addFn(id, fn);
     }
     return args.insert("export");
   },
@@ -211,7 +211,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
         throw new Error("Invalid lambda parameter");
       }
 
-      lambda.setVar(p, { kind: "var" });
+      lambda.addVar(p, { kind: "var" });
       return p;
     });
 
@@ -391,7 +391,7 @@ const registerMacro = (list: List, parent: Expr) => {
   list.setAsFn();
   fn.flags.add("isMacro");
   fn.props.set("body", list);
-  parent.setFn(id.value, fn);
+  parent.addFn(id.value, fn);
 };
 
 const nop = () => new List({}).push(Identifier.from("splice-quote"));
@@ -437,6 +437,6 @@ const defineVar = (opts: {
     throw new Error("Invalid variable");
   }
   const value = evalExpr(init);
-  parent.setVar(identifier, { kind, mut, value });
+  parent.addVar(identifier, { kind, mut, value });
   return nop();
 };

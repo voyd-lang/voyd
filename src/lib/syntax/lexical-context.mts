@@ -14,11 +14,11 @@ export type Var = {
 };
 
 export class LexicalContext {
-  private fns: Map<string, FnType[]> = new Map();
-  private vars: Map<string, Var> = new Map();
-  private types: Map<string, Type> = new Map();
+  private readonly fns: Map<string, FnType[]> = new Map();
+  private readonly vars: Map<string, Var> = new Map();
+  private readonly types: Map<string, Type> = new Map();
 
-  setFn(identifier: Id, type: FnType) {
+  addFn(identifier: Id, type: FnType) {
     const id = getIdStr(identifier);
     const fns = this.fns.get(id);
     if (!fns) {
@@ -36,7 +36,7 @@ export class LexicalContext {
     return this.fns.get(id) ?? [];
   }
 
-  setVar(identifier: Id, v: Var) {
+  addVar(identifier: Id, v: Var) {
     const id = getIdStr(identifier);
     this.vars.set(id, v);
     return this;
@@ -47,7 +47,7 @@ export class LexicalContext {
     return this.vars.get(id);
   }
 
-  setType(identifier: Id, v: Type) {
+  addType(identifier: Id, v: Type) {
     const id = getIdStr(identifier);
     this.types.set(id, v);
     return this;
