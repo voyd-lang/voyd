@@ -44,7 +44,7 @@ export class PrimitiveType extends BaseType {
   }
 
   clone(parent?: Expr): PrimitiveType {
-    return new PrimitiveType({ parent, value: this.value, from: this });
+    return new PrimitiveType({ parent, value: this.value, inherit: this });
   }
 }
 
@@ -66,7 +66,7 @@ export class UnionType extends BaseType {
   }
 
   clone(parent?: Expr): UnionType {
-    return new UnionType({ parent, value: this.value, from: this });
+    return new UnionType({ parent, value: this.value, inherit: this });
   }
 }
 
@@ -88,7 +88,7 @@ export class IntersectionType extends BaseType {
   }
 
   clone(parent?: Expr): IntersectionType {
-    return new IntersectionType({ parent, value: this.value, from: this });
+    return new IntersectionType({ parent, value: this.value, inherit: this });
   }
 }
 
@@ -110,7 +110,7 @@ export class TupleType extends BaseType {
   }
 
   clone(parent?: Expr): TupleType {
-    return new TupleType({ parent, value: this.value, from: this });
+    return new TupleType({ parent, value: this.value, inherit: this });
   }
 }
 
@@ -136,7 +136,7 @@ export class StructType extends BaseType {
   }
 
   clone(parent?: Expr): StructType {
-    return new StructType({ parent, value: this.value, from: this });
+    return new StructType({ parent, value: this.value, inherit: this });
   }
 }
 
@@ -151,7 +151,7 @@ export class ArrayType extends BaseType {
   }
 
   clone(parent?: Expr): ArrayType {
-    return new ArrayType({ parent, value: this.value, from: this });
+    return new ArrayType({ parent, value: this.value, inherit: this });
   }
 }
 
@@ -186,7 +186,7 @@ export class FnType extends BaseType {
   }
 
   clone(parent?: Expr): FnType {
-    return new FnType({ parent, value: this.value, from: this });
+    return new FnType({ parent, value: this.value, inherit: this });
   }
 }
 

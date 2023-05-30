@@ -21,8 +21,7 @@ export type SyntaxComparable = Expr | string | number | boolean;
 
 export type SyntaxOpts<T = any> = {
   location?: SourceLocation;
-  // TODO: Consider renaming to something along the lines of inherit properties of.
-  from?: Syntax;
+  inherit?: Syntax;
   parent?: Expr;
   isFn?: boolean;
   value?: T;
@@ -42,7 +41,7 @@ export abstract class Syntax {
   abstract readonly __type: string;
   abstract value: any;
 
-  constructor({ location, from, parent, isFn }: SyntaxOpts) {
+  constructor({ location, inherit: from, parent, isFn }: SyntaxOpts) {
     this.location = location ?? from?.location;
     this.parent = parent ?? from?.getParent();
     this.context = from?.context ?? new LexicalContext();

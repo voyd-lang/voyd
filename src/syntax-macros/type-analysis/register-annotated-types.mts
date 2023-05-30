@@ -60,7 +60,7 @@ const initFn = (expr: List) => {
   const suppliedReturnType = getSuppliedReturnTypeForFn(expr, paramsIndex + 1);
 
   const fnType = new FnType({
-    from: expr,
+    inherit: expr,
     value: { params, returns: suppliedReturnType },
   });
 

@@ -100,12 +100,12 @@ export class List extends Syntax {
   }
 
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
-    return new List({ value: this.value.map(fn), from: this });
+    return new List({ value: this.value.map(fn), inherit: this });
   }
 
   /** Returns a copy of this list where all the parameters mapped by the supplied function */
   mapArgs(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
-    const newList = new List({ value: this.rest().map(fn), from: this });
+    const newList = new List({ value: this.rest().map(fn), inherit: this });
     if (this.first()) newList.insert(this.first()!);
     return newList;
   }
@@ -113,7 +113,7 @@ export class List extends Syntax {
   reduce(
     fn: (expr: Expr, index: number, array: Expr[]) => Expr | undefined
   ): List {
-    const list = new List({ from: this });
+    const list = new List({ inherit: this });
     return this.value.reduce((newList: List, expr, index, array) => {
       if (!expr) return newList;
       const result = fn(expr, index, array);
@@ -123,7 +123,7 @@ export class List extends Syntax {
   }
 
   slice(start?: number, end?: number): List {
-    return new List({ from: this, value: this.value.slice(start, end) });
+    return new List({ inherit: this, value: this.value.slice(start, end) });
   }
 
   toJSON() {
@@ -131,7 +131,7 @@ export class List extends Syntax {
   }
 
   clone(parent?: Expr): List {
-    return new List({ parent, value: this, from: this });
+    return new List({ parent, value: this, inherit: this });
   }
 }
 

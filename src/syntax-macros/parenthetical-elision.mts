@@ -9,7 +9,7 @@ import { isGreedyOp } from "./greedy-ops.mjs";
 import { isContinuationOp } from "./infix.mjs";
 
 export const parentheticalElision = (list: List): List => {
-  const transformed = new List({ from: list });
+  const transformed = new List({ inherit: list });
 
   while (list.hasChildren) {
     transformed.push(elideParens(list) as List);
@@ -130,7 +130,7 @@ const elideListContents = (list: List, indentLevel: number): List => {
   consumeLeadingWhitespace(list);
   const transformed = new List({
     value: [elideParens(list, { indentLevel })],
-    from: list,
+    inherit: list,
   });
 
   if (transformed.value.length === 1 && isList(transformed.first())) {

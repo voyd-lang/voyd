@@ -124,7 +124,7 @@ const inferFnTypes = (list: List): List => {
       ["return-type", returnType!],
       typedBlock,
     ],
-    from: list,
+    inherit: list,
   });
 };
 
@@ -152,7 +152,7 @@ const inferExternFnTypes = (list: List): List => {
       parameters,
       ["return-type", fn.returns!],
     ],
-    from: list,
+    inherit: list,
   });
 };
 
@@ -186,10 +186,10 @@ const inferFnParams = (params: List): List => {
         fnDef.addVar(identifier!, { kind: "param", type });
         const value = [identifier!, type];
         if (label) value.push(label);
-        return [new List({ value, from: expr })];
+        return [new List({ value, inherit: expr })];
       }),
     ],
-    from: params,
+    inherit: params,
   });
 };
 
@@ -215,7 +215,7 @@ const inferBlockTypes = (list: List): List => {
 
   return new List({
     value: ["typed-block", type, ...annotatedArgs.value],
-    from: list,
+    inherit: list,
   });
 };
 
@@ -282,7 +282,7 @@ function inferUserFnCallTypes(list: List) {
   });
 
   identifier.setTypeOf(fn);
-  return new List({ value: [identifier, ...annotatedArgs], from: list });
+  return new List({ value: [identifier, ...annotatedArgs], inherit: list });
 }
 
 /** Re-orders the supplied struct and returns it as a normal list of expressions to be passed as args */
@@ -401,7 +401,7 @@ const inferVarTypes = (list: List): List => {
 
   return new List({
     value: [varFnId, identifier, annotatedInitializer],
-    from: list,
+    inherit: list,
   });
 };
 
@@ -460,7 +460,7 @@ const getIfReturnType = (list: List): Type | undefined =>
 const getBnrReturnType = (call: List): Type | undefined => {
   const info = call.at(1) as List | undefined;
   const id = info?.at(2) as Identifier;
-  return new PrimitiveType({ from: id, value: id.value as WasmStackType });
+  return new PrimitiveType({ inherit: id, value: id.value as WasmStackType });
 };
 
 const getMatchingFnForCallExpr = (call: List): FnType | undefined => {

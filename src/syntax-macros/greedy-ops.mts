@@ -13,7 +13,7 @@ export const isGreedyOp = (expr?: Expr): expr is Identifier => {
 };
 
 export const processGreedyOps = (list: List) => {
-  const transformed = new List({ from: list });
+  const transformed = new List({ inherit: list });
   while (list.hasChildren) {
     const next = list.consume();
 

@@ -40,7 +40,7 @@ const addMemInstructionsToFunctionDef = (
   list.set(
     4,
     new List({
-      from: list.value[4],
+      inherit: list.value[4],
       value: [
         "typed-block",
         CDT_ADDRESS_TYPE,

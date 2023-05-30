@@ -11,6 +11,6 @@ export class Float extends Syntax {
   }
 
   clone(parent?: Expr): Float {
-    return new Float({ parent, value: this.value, from: this });
+    return new Float({ parent, value: this.value, inherit: this });
   }
 }

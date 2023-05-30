@@ -23,6 +23,6 @@ export class Whitespace extends Syntax {
   }
 
   clone(parent?: Expr): Whitespace {
-    return new Whitespace({ parent, value: this.value, from: this });
+    return new Whitespace({ parent, value: this.value, inherit: this });
   }
 }

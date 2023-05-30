@@ -11,6 +11,6 @@ export class StringLiteral extends Syntax {
   }
 
   clone(parent?: Expr): StringLiteral {
-    return new StringLiteral({ parent, value: this.value, from: this });
+    return new StringLiteral({ parent, value: this.value, inherit: this });
   }
 }

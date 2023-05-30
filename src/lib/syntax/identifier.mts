@@ -20,7 +20,7 @@ export class Identifier extends Syntax {
     super(opts);
     this.isQuoted =
       opts.isQuoted ??
-      (opts.from instanceof Identifier ? opts.from.isQuoted : undefined);
+      (opts.inherit instanceof Identifier ? opts.inherit.isQuoted : undefined);
     this.value = opts.value;
   }
 
@@ -54,7 +54,7 @@ export class Identifier extends Syntax {
     return new Identifier({
       parent,
       value: this.value,
-      from: this,
+      inherit: this,
       isQuoted: this.isQuoted,
     });
   }
