@@ -76,6 +76,6 @@ export const getModulePath = ({
     return path.resolve(partialPath, part);
   }, workingDir);
   const moduleName = split.pop();
-  const filePath = path.resolve(prefix, `${moduleName}.dm`);
-  return existsSync(filePath) ? filePath : path.resolve(prefix, "index.dm");
+  const filePath = path.resolve(prefix, `${moduleName}.void`);
+  return existsSync(filePath) ? filePath : path.resolve(prefix, "index.void");
 };
