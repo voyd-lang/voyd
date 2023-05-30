@@ -84,7 +84,7 @@ export class List extends Syntax {
     return this;
   }
 
-  indexOf(expr: Expr) {
+  indexOfFirstInstance(expr: Expr) {
     return this.value.findIndex((v) => v.is(expr));
   }
 

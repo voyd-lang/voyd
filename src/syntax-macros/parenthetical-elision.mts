@@ -111,7 +111,7 @@ const assistGreedyOpProcessing = (
 };
 
 const nextLineIndentLevel = (list: List) => {
-  const index = list.indexOf(newLine());
+  const index = list.indexOfFirstInstance(newLine());
   if (index === -1) return 0;
   return nextExprIndentLevel(list, index);
 };
