@@ -10,7 +10,7 @@ This surface language spec includes:
 - A standard library (Built in macros, types, and functions)
 - More?
 
-# Basic Language Features
+# Language Features
 
 ## Variables
 

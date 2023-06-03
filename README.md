@@ -36,8 +36,10 @@ Note: Not all features are complete.
 - Algebraic data types
 - Algebraic effects
 - Macros and language extensions
-- Homoiconic
+- [Homoiconic](https://en.wikipedia.org/wiki/Homoiconicity)
 - Pythonesque syntax that de-sugars into a lisp like dialect
+  - Parenthesis can be elided in most cases
+  - Infix notation and standard function call notation support
 - Uniform function call syntax
 
 **Guiding Principles**:

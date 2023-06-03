@@ -15,6 +15,10 @@
   - Add getDefinition method to Identifier object
 - Compute Variable / Parameter index on get to ensure information is up to date.
 - Phase out `value` and `is` from `Syntax`
+- Update internal source code to use new heap and stack based terms
+  - Struct literal -> Object literal (class based, on the heap)
+  - Tuple literal -> Tuples are the same as structs, but with out fields (on the stack)
+  - (New) Struct literal -> A labeled tuple (on the stack)
 
 OLD (NEEDS REVIEW)
 
