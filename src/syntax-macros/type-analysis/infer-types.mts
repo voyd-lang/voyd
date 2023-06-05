@@ -19,7 +19,7 @@ import {
   bool,
   dVoid,
   PrimitiveType,
-  WasmStackType,
+  StackType,
   Id,
 } from "../../lib/index.mjs";
 import { getIdStr } from "../../lib/syntax/get-id-str.mjs";
@@ -460,7 +460,7 @@ const getIfReturnType = (list: List): Type | undefined =>
 const getBnrReturnType = (call: List): Type | undefined => {
   const info = call.at(1) as List | undefined;
   const id = info?.at(2) as Identifier;
-  return new PrimitiveType({ inherit: id, value: id.value as WasmStackType });
+  return new PrimitiveType({ inherit: id, value: id.value as StackType });
 };
 
 const getMatchingFnForCallExpr = (call: List): FnType | undefined => {

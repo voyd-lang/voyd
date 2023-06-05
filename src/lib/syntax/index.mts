@@ -9,3 +9,7 @@ export * from "./list.mjs";
 export * from "./string-literal.mjs";
 export * from "./types.mjs";
 export * from "./whitespace.mjs";
+export * from "./fn.mjs";
+export * from "./global.mjs";
+export * from "./variable.mjs";
+export * from "./parameter.mjs";

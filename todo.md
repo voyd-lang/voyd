@@ -19,6 +19,7 @@
   - Struct literal -> Object literal (class based, on the heap)
   - Tuple literal -> Tuples are the same as structs, but with out fields (on the stack)
   - (New) Struct literal -> A labeled tuple (on the stack)
+- Are macros still hygienic? I think the list.push implementation prevents it since it sets child expressions parent to itself on clone.
 
 OLD (NEEDS REVIEW)
 

@@ -2,7 +2,7 @@ import { Expr } from "./expr.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export class Float extends Syntax {
-  readonly __type = "float";
+  readonly syntaxType = "float";
   value: number;
 
   constructor(opts: SyntaxOpts & { value: number }) {

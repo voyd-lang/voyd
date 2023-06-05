@@ -1,7 +1,8 @@
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
-import type { Id } from "./identifier.mjs";
+import type { Id, Identifier } from "./identifier.mjs";
 import { getIdStr } from "./get-id-str.mjs";
 import { Expr } from "./expr.mjs";
+import { Parameter } from "./parameter.mjs";
 
 export type Type =
   | PrimitiveType
@@ -12,44 +13,53 @@ export type Type =
   | ArrayType
   | FnType;
 
+export type TypeJSON = ["type", [string, ...any[]]];
+
 export abstract class BaseType extends Syntax {
+  readonly syntaxType = "type";
+  abstract readonly kindOfType: string;
   /** Size in bytes */
   abstract readonly size: number;
+
+  abstract toJSON(): TypeJSON;
 }
 
 export class PrimitiveType extends BaseType {
-  readonly __type = "primitive-type";
-  value: WasmStackType;
+  readonly kindOfType = "primitive";
+  readonly primitiveId: Primitive;
 
-  constructor(opts: SyntaxOpts & { value: WasmStackType }) {
+  constructor(opts: SyntaxOpts & { primitiveId: Primitive }) {
     super(opts);
-    this.value = opts.value;
+    this.primitiveId = opts.primitiveId;
   }
 
   get size() {
-    if (this.value === "i32") return 4;
-    if (this.value === "f32") return 4;
-    if (this.value === "i64") return 8;
-    if (this.value === "f64") return 8;
+    if (this.primitiveId === "i32") return 4;
+    if (this.primitiveId === "f32") return 4;
+    if (this.primitiveId === "i64") return 8;
+    if (this.primitiveId === "f64") return 8;
     return 0;
   }
 
-  static isPrimitive(val: string): val is WasmStackType {
-    return primitives.has(val);
-  }
-
-  static from(id: Id) {
-    const str = getIdStr(id) as WasmStackType; // TODO: Check this
-    return new PrimitiveType({ value: str });
+  static from(id: Primitive) {
+    return new PrimitiveType({ primitiveId: id });
   }
 
   clone(parent?: Expr): PrimitiveType {
-    return new PrimitiveType({ parent, value: this.value, inherit: this });
+    return new PrimitiveType({
+      parent,
+      inherit: this,
+      primitiveId: this.primitiveId,
+    });
+  }
+
+  toJSON(): TypeJSON {
+    return ["type", ["primitive", this.primitiveId]];
   }
 }
 
 export class UnionType extends BaseType {
-  readonly __type = "union-type";
+  readonly kindOfType = "union";
   value: Type[];
 
   constructor(opts: SyntaxOpts & { value: Type[] }) {
@@ -68,10 +78,14 @@ export class UnionType extends BaseType {
   clone(parent?: Expr): UnionType {
     return new UnionType({ parent, value: this.value, inherit: this });
   }
+
+  toJSON(): TypeJSON {
+    return ["type", ["union", ...this.value]];
+  }
 }
 
 export class IntersectionType extends BaseType {
-  readonly __type = "intersection-type";
+  readonly kindOfType = "intersection";
   value: Type[];
 
   constructor(opts: SyntaxOpts & { value: Type[] }) {
@@ -90,10 +104,14 @@ export class IntersectionType extends BaseType {
   clone(parent?: Expr): IntersectionType {
     return new IntersectionType({ parent, value: this.value, inherit: this });
   }
+
+  toJSON(): TypeJSON {
+    return ["type", ["intersection", ...this.value]];
+  }
 }
 
 export class TupleType extends BaseType {
-  readonly __type = "tuple-type";
+  readonly kindOfType = "tuple";
   value: Type[];
 
   constructor(opts: SyntaxOpts & { value: Type[] }) {
@@ -112,10 +130,14 @@ export class TupleType extends BaseType {
   clone(parent?: Expr): TupleType {
     return new TupleType({ parent, value: this.value, inherit: this });
   }
+
+  toJSON(): TypeJSON {
+    return ["type", ["tuple", ...this.value]];
+  }
 }
 
 export class StructType extends BaseType {
-  readonly __type = "struct-type";
+  readonly kindOfType = "struct";
   value: { name: string; type: Type }[];
 
   constructor(opts: SyntaxOpts & { value: { name: string; type: Type }[] }) {
@@ -131,8 +153,11 @@ export class StructType extends BaseType {
     return total;
   }
 
-  toJSON() {
-    return ["struct", ...this.value.map(({ name, type }) => [name, type])];
+  toJSON(): TypeJSON {
+    return [
+      "type",
+      ["struct", ...this.value.map(({ name, type }) => [name, type])],
+    ];
   }
 
   clone(parent?: Expr): StructType {
@@ -141,7 +166,7 @@ export class StructType extends BaseType {
 }
 
 export class ArrayType extends BaseType {
-  readonly __type = "array-type";
+  readonly kindOfType = "array";
   readonly size = Infinity;
   value: Type;
 
@@ -153,56 +178,64 @@ export class ArrayType extends BaseType {
   clone(parent?: Expr): ArrayType {
     return new ArrayType({ parent, value: this.value, inherit: this });
   }
+
+  toJSON(): TypeJSON {
+    return ["type", ["array", this.value]];
+  }
 }
 
-export type FnTypeValue = {
-  params: Param[];
-  returns?: Type;
-};
-
-export type Param = { label?: string; name?: string; type: Type };
-
 export class FnType extends BaseType {
-  readonly __type = "fn-type";
+  readonly kindOfType = "fn";
   readonly size = 0;
-  binaryenId = "";
-  value: FnTypeValue;
+  readonly fnId: string;
+  readonly identifier: Identifier;
+  readonly parameters: Parameter[];
+  readonly returnType: Type;
 
-  constructor(opts: SyntaxOpts & { value: FnTypeValue }) {
+  constructor(
+    opts: SyntaxOpts & {
+      fnId: string;
+      identifier: Identifier;
+      parameters: Parameter[];
+      returnType: Type;
+    }
+  ) {
     super(opts);
-    this.value = opts.value;
-  }
-
-  getParam(index: number): Param | undefined {
-    return this.value.params[index];
-  }
-
-  get returns() {
-    return this.value.returns;
-  }
-
-  set returns(type: Type | undefined) {
-    this.value.returns = type;
+    this.fnId = opts.fnId;
+    this.identifier = opts.identifier;
+    this.parameters = opts.parameters;
+    this.returnType = opts.returnType;
   }
 
   clone(parent?: Expr): FnType {
-    return new FnType({ parent, value: this.value, inherit: this });
+    return new FnType({
+      parent,
+      inherit: this,
+      identifier: this.identifier,
+      returnType: this.returnType,
+      parameters: this.parameters,
+      fnId: this.fnId,
+    });
+  }
+
+  toJSON(): TypeJSON {
+    return [
+      "type",
+      [
+        "fn",
+        this.fnId,
+        ["parameters", this.parameters],
+        ["return-type", this.returnType],
+      ],
+    ];
   }
 }
 
-export type WasmStackType = NumericType | ReferenceType;
+// TODO add structs
+export type StackType = NumericType | ReferenceType;
+export type Primitive = NumericType | ReferenceType | "void";
 export type NumericType = "i32" | "f32" | "i64" | "f64";
 export type ReferenceType = "funcref" | "externref";
-
-const primitives = new Set([
-  "f64",
-  "f32",
-  "i64",
-  "i32",
-  "void",
-  "funcref",
-  "externref",
-]);
 
 export const i32 = PrimitiveType.from("i32");
 export const f32 = PrimitiveType.from("f32");

@@ -2,7 +2,7 @@ import { Expr } from "./expr.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export class StringLiteral extends Syntax {
-  readonly __type = "string-literal";
+  readonly syntaxType = "string-literal";
   value: string;
 
   constructor(opts: SyntaxOpts & { value: string }) {
@@ -12,5 +12,9 @@ export class StringLiteral extends Syntax {
 
   clone(parent?: Expr): StringLiteral {
     return new StringLiteral({ parent, value: this.value, inherit: this });
+  }
+
+  toJSON() {
+    return ["string", this.value];
   }
 }

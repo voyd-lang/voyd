@@ -168,7 +168,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
       throw new Error(`Expected identifier, got ${identifier}`);
     }
 
-    const info = parent.getVar(identifier);
+    const info = parent.resolveIdentifier(identifier);
     if (!info) {
       throw new Error(`Identifier ${identifier.value} is not defined`);
     }
@@ -233,7 +233,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
 
         if (isIdentifier(exp) && exp.value.startsWith("$@")) {
           const id = exp.value.replace("$@", "");
-          const info = exp.getVar(id)!;
+          const info = exp.resolveIdentifier(id)!;
           const list = info.value as List;
           list.insert("splice-quote");
           return list;
@@ -241,7 +241,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
 
         if (isIdentifier(exp) && exp.value.startsWith("$")) {
           const id = exp.value.replace("$", "");
-          return exp.getVar(id)!.value!;
+          return exp.resolveIdentifier(id)!.value!;
         }
 
         return exp;

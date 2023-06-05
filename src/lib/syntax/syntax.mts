@@ -1,8 +1,9 @@
 import type { Expr } from "./expr.mjs";
+import type { Fn } from "./fn.mjs";
 import type { Id } from "./identifier.mjs";
-import { LexicalContext, Var } from "./lexical-context.mjs";
-import type { List } from "./list.mjs";
-import type { FnType, Type } from "./types.mjs";
+import { IdentifierEntity, LexicalContext } from "./lexical-context.mjs";
+import { Parameter } from "./parameter.mjs";
+import { Variable } from "./variable.mjs";
 
 export type SourceLocation = {
   /** The exact character index the syntax starts */
@@ -17,92 +18,51 @@ export type SourceLocation = {
   filePath: string;
 };
 
-export type SyntaxComparable = Expr | string | number | boolean;
-
-export type SyntaxOpts<T = any> = {
+export type SyntaxOpts = {
   location?: SourceLocation;
   inherit?: Syntax;
   parent?: Expr;
-  isFn?: boolean;
-  value?: T;
 };
 
 export abstract class Syntax {
-  protected isFn?: boolean;
   readonly id = getSyntaxId();
   readonly location?: SourceLocation;
   readonly context: LexicalContext;
   readonly props: Map<string, Expr> = new Map();
   readonly flags: Set<string> = new Set();
-  private allFnVars: Var[] = [];
-  private parent?: Expr;
-  protected type?: Type;
-  // Typescript can't discriminate between types via instanceof without this for some reason
-  abstract readonly __type: string;
-  abstract value: any;
+  protected parent?: Expr;
+  /** For tagged unions */
+  abstract readonly syntaxType: string;
 
-  constructor({ location, inherit: from, parent, isFn }: SyntaxOpts) {
-    this.location = location ?? from?.location;
-    this.parent = parent ?? from?.getParent();
-    this.context = from?.context ?? new LexicalContext();
-    this.isFn = isFn ?? from?.isFn;
-    this.type = from?.type;
-    // NOTE: For now we intentionally do not clone allFnVars so code gen can get up to date indexes by manually setting the vars
+  constructor({ location, inherit, parent }: SyntaxOpts) {
+    this.location = location ?? inherit?.location;
+    this.parent = parent ?? inherit?.getParent();
+    this.context = inherit?.context ?? new LexicalContext();
   }
 
-  get parentFn(): List | undefined {
-    return this.isFn ? (this as unknown as List) : this.parent?.parentFn;
+  get parentFn(): Fn | undefined {
+    return this.parent?.syntaxType === "fn"
+      ? this.parent
+      : this.parent?.parentFn;
   }
 
-  addFn(id: Id, fn: FnType) {
-    this.context.addFn(id, fn);
-    return this;
-  }
-
-  getFns(id: Id, start: FnType[] = []): FnType[] {
+  getFns(id: Id, start: Fn[] = []): Fn[] {
     start.push(...this.context.getFns(id));
     if (this.parent) return this.parent.getFns(id, start);
     return start;
   }
 
-  addVar(id: Id, v: Omit<Var, "index">) {
-    const val: Var = {
-      ...v,
-      index: v.kind !== "global" ? this.getNewVarIndex() : 0,
-    };
-    this.context.addVar(id, val);
-    this.registerVarWithParentFn(val);
-    return val;
-  }
-
-  getVar(id: Id): Var | undefined {
-    return this.context.getVar(id) ?? this.parent?.getVar(id);
-  }
-
-  addType(id: Id, val: Type) {
-    this.context.addType(id, val);
-    return this;
-  }
-
-  getType(id: Id): Type | undefined {
-    return this.context.getType(id) ?? this.parent?.getType(id);
-  }
-
-  getTypeOf(): Type | undefined {
-    return this.type;
-  }
-
-  setTypeOf(type: Type) {
-    this.type = type;
-    return this;
-  }
-
-  is(val?: SyntaxComparable) {
-    if (val instanceof Syntax) {
-      return val.value === this.value;
+  registerEntity(id: Id, v: IdentifierEntity) {
+    this.context.registerEntity(id, v);
+    if (v.syntaxType === "parameter" || v.syntaxType === "variable") {
+      this.registerLocalWithParentFn(v);
     }
+  }
 
-    return val === this.value;
+  resolveIdentifier(id: Id): IdentifierEntity | undefined {
+    return (
+      this.context.resolveIdentifier(id) ?? this.parent?.resolveIdentifier(id)
+    );
   }
 
   getParent() {
@@ -114,51 +74,20 @@ export abstract class Syntax {
     return this;
   }
 
-  getAllFnVars(): Var[] {
-    if (this.isFn) {
-      return this.allFnVars;
-    }
-
-    if (this.parent) {
-      return this.parent.getAllFnVars();
-    }
-
-    throw new Error("Not in a function.");
-  }
-
-  /** Marks this as a function definition */
-  setAsFn() {
-    this.isFn = true;
-    return this;
-  }
-
-  toJSON() {
-    return this.value;
-  }
-
   abstract clone(parent?: Expr): Expr;
+  abstract toJSON(): any;
 
-  private registerVarWithParentFn(v: Var) {
-    if (v.kind === "global") return;
+  private registerLocalWithParentFn(v: Variable | Parameter): void {
+    if (!this.parent) {
+      throw new Error(`Not in fn, cannot register ${v}`);
+    }
 
-    if (this.isFn) {
-      this.allFnVars.push(v);
+    if (this.parent.syntaxType === "fn") {
+      this.parent?.registerLocal(v);
       return;
     }
 
-    this.parent?.registerVarWithParentFn(v);
-  }
-
-  private getNewVarIndex(): number {
-    if (this.isFn) {
-      return this.allFnVars.length;
-    }
-
-    if (!this.parent) {
-      throw new Error("Not in a function");
-    }
-
-    return this.parent.getNewVarIndex();
+    return this.parent.registerLocalWithParentFn(v);
   }
 }
 

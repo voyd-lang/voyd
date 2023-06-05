@@ -3,16 +3,20 @@ import { Identifier } from "./identifier.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 import { Type } from "./types.mjs";
 
-export class Variable extends Syntax {
+export class Parameter extends Syntax {
   readonly identifier: Identifier;
+  readonly label?: Identifier;
   readonly isMutable: boolean;
   protected type?: Type;
-  readonly syntaxType = "variable";
+  readonly syntaxType = "parameter";
   readonly initializer?: Expr;
 
   constructor(
     opts: SyntaxOpts & {
+      /** Identifier used to refer to the parameter from within the function */
       identifier: Identifier;
+      /** External label the parameter must be called with e.g. myFunc(label: value) */
+      label?: Identifier;
       isMutable: boolean;
       initializer?: Expr;
       type?: Type;
@@ -20,6 +24,7 @@ export class Variable extends Syntax {
   ) {
     super(opts);
     this.identifier = opts.identifier;
+    this.label = opts.label;
     this.isMutable = opts.isMutable;
     this.type = opts.type;
     this.initializer = opts.initializer;
@@ -30,9 +35,9 @@ export class Variable extends Syntax {
   }
 
   getIndex(): number {
-    const index = this.parentFn?.getIndexOfVariable(this) ?? -1;
+    const index = this.parentFn?.getIndexOfParameter(this) ?? -1;
     if (index < -1) {
-      throw new Error(`Variable ${this} is not registered with a function`);
+      throw new Error(`Parameter ${this} is not registered with a function`);
     }
     return index;
   }
@@ -50,18 +55,8 @@ export class Variable extends Syntax {
     return this.identifier.toString();
   }
 
-  toJSON() {
-    return [
-      "define-variable",
-      this.identifier,
-      this.type,
-      ["is-mutable", this.isMutable],
-      this.initializer,
-    ];
-  }
-
-  clone(parent?: Expr | undefined): Variable {
-    return new Variable({
+  clone(parent?: Expr | undefined): Parameter {
+    return new Parameter({
       location: this.location,
       inherit: this,
       parent: parent ?? this.parent,
@@ -69,6 +64,18 @@ export class Variable extends Syntax {
       isMutable: this.isMutable,
       initializer: this.initializer,
       type: this.type,
+      label: this.label,
     });
+  }
+
+  toJSON() {
+    return [
+      "define-parameter",
+      this.identifier,
+      ["label", this.label],
+      this.type,
+      ["is-mutable", this.isMutable],
+      this.initializer,
+    ];
   }
 }

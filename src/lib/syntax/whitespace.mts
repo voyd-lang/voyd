@@ -2,7 +2,7 @@ import { Expr } from "./expr.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export class Whitespace extends Syntax {
-  readonly __type = "whitespace";
+  readonly syntaxType = "whitespace";
   value: string;
 
   constructor(opts: SyntaxOpts & { value: string }) {

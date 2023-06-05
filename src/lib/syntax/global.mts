@@ -3,11 +3,11 @@ import { Identifier } from "./identifier.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 import { Type } from "./types.mjs";
 
-export class Variable extends Syntax {
+export class Global extends Syntax {
   readonly identifier: Identifier;
   readonly isMutable: boolean;
   protected type?: Type;
-  readonly syntaxType = "variable";
+  readonly syntaxType = "global";
   readonly initializer?: Expr;
 
   constructor(
@@ -29,17 +29,9 @@ export class Variable extends Syntax {
     return `${this.location?.filePath ?? "unknown"}/${this.identifier.value}`;
   }
 
-  getIndex(): number {
-    const index = this.parentFn?.getIndexOfVariable(this) ?? -1;
-    if (index < -1) {
-      throw new Error(`Variable ${this} is not registered with a function`);
-    }
-    return index;
-  }
-
   getType(): Type {
     if (this.type) return this.type;
-    throw new Error(`Type not yet resolved for variable ${this.identifier}`);
+    throw new Error(`Type not yet resolved for global ${this.identifier}`);
   }
 
   setType(type: Type) {
@@ -52,7 +44,7 @@ export class Variable extends Syntax {
 
   toJSON() {
     return [
-      "define-variable",
+      "define-global",
       this.identifier,
       this.type,
       ["is-mutable", this.isMutable],
@@ -60,8 +52,8 @@ export class Variable extends Syntax {
     ];
   }
 
-  clone(parent?: Expr | undefined): Variable {
-    return new Variable({
+  clone(parent?: Expr | undefined): Global {
+    return new Global({
       location: this.location,
       inherit: this,
       parent: parent ?? this.parent,

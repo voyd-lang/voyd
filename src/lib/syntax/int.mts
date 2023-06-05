@@ -2,7 +2,7 @@ import { Expr } from "./expr.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export class Int extends Syntax {
-  readonly __type = "int";
+  readonly syntaxType = "int";
   value: number;
 
   constructor(opts: SyntaxOpts & { value: number }) {

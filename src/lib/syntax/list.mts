@@ -5,7 +5,7 @@ import { Int } from "./int.mjs";
 import { Syntax, SyntaxOpts, SyntaxComparable } from "./syntax.mjs";
 
 export class List extends Syntax {
-  readonly __type = "list";
+  readonly syntaxType = "list";
   value: Expr[] = [];
 
   constructor(opts: SyntaxOpts<ListValue[] | List>) {

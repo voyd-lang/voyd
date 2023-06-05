@@ -2,7 +2,7 @@ import { Expr } from "./expr.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export class Bool extends Syntax {
-  readonly __type = "bool";
+  readonly syntaxType = "bool";
   value: boolean;
 
   constructor(opts: SyntaxOpts & { value: boolean }) {
@@ -12,5 +12,9 @@ export class Bool extends Syntax {
 
   clone(parent?: Expr): Bool {
     return new Bool({ parent, value: this.value, inherit: this });
+  }
+
+  toJSON() {
+    return this.value;
   }
 }

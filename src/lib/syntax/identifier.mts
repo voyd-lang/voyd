@@ -5,7 +5,7 @@ import { Type } from "./types.mjs";
 export type Id = string | Identifier;
 
 export class Identifier extends Syntax {
-  readonly __type = "identifier";
+  readonly syntaxType = "identifier";
   readonly isQuoted?: boolean;
   /** The actual string ID of the identifier */
   value: string;
@@ -25,25 +25,21 @@ export class Identifier extends Syntax {
   }
 
   get isDefined() {
-    return !!this.getVar(this);
+    return !!this.resolveIdentifier(this);
   }
 
   get def() {
-    return this.getVar(this);
-  }
-
-  getTypeOf(): Type | undefined {
-    return this.type ?? this.getVar(this)?.type ?? this.getType(this); // This may be too flexible
+    return this.resolveIdentifier(this);
   }
 
   /** Returns the value of the identifier if assigned in expansion phase */
   getAssignedValue(): Expr | undefined {
-    return this.getVar(this)?.value;
+    return this.resolveIdentifier(this)?.value;
   }
 
   /** Like getAssignedValue but throws if undefined */
   assertAssignedValue(): Expr {
-    const val = this.getVar(this)?.value;
+    const val = this.resolveIdentifier(this)?.value;
     if (!val) {
       throw new Error(`Identifier ${this.value} is not defined`);
     }
@@ -61,5 +57,9 @@ export class Identifier extends Syntax {
 
   static from(str: string) {
     return new Identifier({ value: str });
+  }
+
+  toString() {
+    return this.value;
   }
 }
