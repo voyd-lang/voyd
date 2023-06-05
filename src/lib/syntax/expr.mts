@@ -10,6 +10,8 @@ import type { Type } from "./types.mjs";
 import { Variable } from "./variable.mjs";
 import type { Whitespace } from "./whitespace.mjs";
 import type { Global } from "./global.mjs";
+import { MacroVariable } from "./macro-variable.mjs";
+import { Macro } from "./macros.mjs";
 
 export type Expr =
   | Bool
@@ -21,6 +23,8 @@ export type Expr =
   | List
   | Type
   | Fn
+  | Macro
   | Variable
   | Parameter
-  | Global;
+  | Global
+  | MacroVariable;

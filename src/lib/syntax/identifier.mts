@@ -1,6 +1,5 @@
 import { Expr } from "./expr.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
-import { Type } from "./types.mjs";
 
 export type Id = string | Identifier;
 
@@ -24,26 +23,12 @@ export class Identifier extends Syntax {
     this.value = opts.value;
   }
 
-  get isDefined() {
+  isDefined() {
     return !!this.resolveIdentifier(this);
   }
 
-  get def() {
+  resolve() {
     return this.resolveIdentifier(this);
-  }
-
-  /** Returns the value of the identifier if assigned in expansion phase */
-  getAssignedValue(): Expr | undefined {
-    return this.resolveIdentifier(this)?.value;
-  }
-
-  /** Like getAssignedValue but throws if undefined */
-  assertAssignedValue(): Expr {
-    const val = this.resolveIdentifier(this)?.value;
-    if (!val) {
-      throw new Error(`Identifier ${this.value} is not defined`);
-    }
-    return val;
   }
 
   clone(parent?: Expr): Identifier {
@@ -60,6 +45,10 @@ export class Identifier extends Syntax {
   }
 
   toString() {
+    return this.value;
+  }
+
+  toJSON() {
     return this.value;
   }
 }

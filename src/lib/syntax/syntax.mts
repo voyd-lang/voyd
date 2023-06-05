@@ -75,6 +75,8 @@ export abstract class Syntax {
   }
 
   abstract clone(parent?: Expr): Expr;
+
+  /** Should emit in compliance with core language spec */
   abstract toJSON(): any;
 
   private registerLocalWithParentFn(v: Variable | Parameter): void {

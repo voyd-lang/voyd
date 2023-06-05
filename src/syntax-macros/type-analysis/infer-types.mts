@@ -331,8 +331,8 @@ const resolveImports = (imports: List, exports: List): void => {
         continue;
       }
 
-      if (exp.def && exp.def.kind === "global") {
-        parent.addVar(exp, exp.def);
+      if (exp.resolve && exp.resolve.kind === "global") {
+        parent.addVar(exp, exp.resolve);
         if (isReExported) exports.push(exp);
         continue;
       }

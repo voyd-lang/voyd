@@ -173,7 +173,7 @@ const compileAssign = (opts: CompileFnCallOpts): number => {
   const { expr, mod } = opts;
   const identifier = expr.at(1) as Identifier;
   const value = compileExpression({ ...opts, expr: expr.at(2)! });
-  const entity = identifier.def;
+  const entity = identifier.resolve();
   if (!entity) {
     throw new Error(`${identifier} not found in scope`);
   }
