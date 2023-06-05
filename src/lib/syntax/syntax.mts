@@ -25,7 +25,7 @@ export type SyntaxOpts = {
 };
 
 export abstract class Syntax {
-  readonly id = getSyntaxId();
+  readonly syntaxId = getSyntaxId();
   readonly location?: SourceLocation;
   readonly context: LexicalContext;
   readonly props: Map<string, Expr> = new Map();

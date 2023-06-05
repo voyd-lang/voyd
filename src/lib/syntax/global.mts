@@ -4,6 +4,8 @@ import { Syntax, SyntaxOpts } from "./syntax.mjs";
 import { Type } from "./types.mjs";
 
 export class Global extends Syntax {
+  /** Absolute unique id */
+  readonly id: string;
   readonly identifier: Identifier;
   readonly isMutable: boolean;
   protected type?: Type;
@@ -16,6 +18,7 @@ export class Global extends Syntax {
       isMutable: boolean;
       initializer?: Expr;
       type?: Type;
+      id?: string;
     }
   ) {
     super(opts);
@@ -23,10 +26,13 @@ export class Global extends Syntax {
     this.isMutable = opts.isMutable;
     this.type = opts.type;
     this.initializer = opts.initializer;
+    this.id = opts.id ?? this.generateId();
   }
 
-  getReadableId() {
-    return `${this.location?.filePath ?? "unknown"}/${this.identifier.value}`;
+  private generateId() {
+    return `${this.location?.filePath ?? "unknown"}/${this.identifier.value}#${
+      this.syntaxId
+    }`;
   }
 
   getType(): Type {
@@ -54,13 +60,13 @@ export class Global extends Syntax {
 
   clone(parent?: Expr | undefined): Global {
     return new Global({
-      location: this.location,
       inherit: this,
       parent: parent ?? this.parent,
       identifier: this.identifier,
       isMutable: this.isMutable,
       initializer: this.initializer,
       type: this.type,
+      id: this.id,
     });
   }
 }

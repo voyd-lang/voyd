@@ -30,10 +30,6 @@ export class Parameter extends Syntax {
     this.initializer = opts.initializer;
   }
 
-  getReadableId() {
-    return `${this.location?.filePath ?? "unknown"}/${this.identifier.value}`;
-  }
-
   getIndex(): number {
     const index = this.parentFn?.getIndexOfParameter(this) ?? -1;
     if (index < -1) {

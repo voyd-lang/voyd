@@ -8,7 +8,7 @@ import { Variable } from "./variable.mjs";
 export class Fn extends Syntax {
   readonly syntaxType = "fn";
   /** A unique, human readable id to be used as the absolute id of the function (helps with function overloading) */
-  readonly fnId: string;
+  readonly id: string;
   readonly identifier: Identifier;
   readonly variables: Variable[] = [];
   readonly parameters: Parameter[] = [];
@@ -28,12 +28,12 @@ export class Fn extends Syntax {
       isExternal?: boolean;
       externalNamespace?: string;
       /** Internal to Fn only, do not set here unless this is the clone implementation */
-      fnId?: string;
+      id?: string;
     }
   ) {
     super(opts);
     this.identifier = opts.identifier;
-    this.fnId = this.generateFnId();
+    this.id = opts.id ?? this.generateId();
     this.returnType = opts.returnType;
     this.parameters = opts.parameters ?? [];
     this.variables = opts.variables ?? [];
@@ -42,9 +42,9 @@ export class Fn extends Syntax {
     this.body = opts.body;
   }
 
-  private generateFnId() {
+  private generateId() {
     return `${this.location?.filePath ?? "unknown"}/${this.identifier}#${
-      this.id
+      this.syntaxId
     }`;
   }
 
@@ -54,7 +54,7 @@ export class Fn extends Syntax {
 
   getType(): FnType {
     return new FnType({
-      fnId: this.fnId,
+      fnId: this.id,
       identifier: this.identifier,
       parameters: this.parameters,
       returnType: this.getReturnType(),
@@ -63,7 +63,9 @@ export class Fn extends Syntax {
   }
 
   getIndexOfParameter(parameter: Parameter) {
-    const index = this.parameters.findIndex((p) => p.id === parameter.id);
+    const index = this.parameters.findIndex(
+      (p) => p.syntaxId === parameter.syntaxId
+    );
     if (index < 0) {
       throw new Error(`Parameter ${parameter} not registered with fn ${this}`);
     }
@@ -71,7 +73,9 @@ export class Fn extends Syntax {
   }
 
   getIndexOfVariable(variable: Variable) {
-    const index = this.variables.findIndex((v) => v.id === variable.id);
+    const index = this.variables.findIndex(
+      (v) => v.syntaxId === variable.syntaxId
+    );
     if (index < 0) {
       throw new Error(`Variable ${variable} not registered with fn ${this}`);
     }
@@ -100,12 +104,12 @@ export class Fn extends Syntax {
   }
 
   toString() {
-    return this.fnId;
+    return this.id;
   }
 
   clone(parent?: Expr | undefined): Fn {
     return new Fn({
-      fnId: this.fnId,
+      id: this.id,
       identifier: this.identifier,
       variables: this.variables,
       parameters: this.parameters,
@@ -122,7 +126,7 @@ export class Fn extends Syntax {
     if (this.isExternal) {
       return [
         "extern-fn",
-        this.fnId,
+        this.id,
         ["parameters", ...this.parameters],
         ["return-type", this.returnType],
       ];
@@ -130,7 +134,7 @@ export class Fn extends Syntax {
 
     return [
       "fn",
-      this.fnId,
+      this.id,
       ["parameters", ...this.parameters],
       ["return-type", this.returnType],
       this.body,

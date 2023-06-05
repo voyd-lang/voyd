@@ -72,10 +72,7 @@ const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
   }
 
   if (entity.syntaxType === "global") {
-    return mod.global.get(
-      entity.getReadableId(),
-      mapBinaryenType(entity.getType())
-    );
+    return mod.global.get(entity.id, mapBinaryenType(entity.getType()));
   }
 
   if (entity.syntaxType === "variable" || entity.syntaxType === "parameter") {
@@ -182,7 +179,7 @@ const compileAssign = (opts: CompileFnCallOpts): number => {
   }
 
   if (entity.syntaxType === "global" && entity.isMutable) {
-    return mod.global.set(entity.getReadableId(), value);
+    return mod.global.set(entity.id, value);
   }
 
   if (entity.syntaxType === "variable" && entity.isMutable) {
@@ -221,7 +218,7 @@ const compileVariable = (opts: CompileExprOpts<Variable>): number => {
 const compileGlobal = (opts: CompileExprOpts<Global>): number => {
   const { expr, mod } = opts;
   mod.addGlobal(
-    expr.getReadableId(),
+    expr.id,
     mapBinaryenType(expr.getType()),
     expr.isMutable,
     expr.initializer
@@ -239,8 +236,8 @@ const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   const body = compileExpression({ ...opts, expr: fn.body });
   const variableTypes = getFunctionVarTypes(fn); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
 
-  mod.addFunction(fn.fnId, parameterTypes, returnType, variableTypes, body);
-  mod.addFunctionExport(fn.fnId, fn.fnId);
+  mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
+  mod.addFunctionExport(fn.id, fn.id);
   return mod.nop();
 };
 
@@ -249,7 +246,7 @@ const compileExternFn = (opts: CompileExprOpts<Fn>) => {
   const parameterTypes = getFunctionParameterTypes(fn);
 
   mod.addFunctionImport(
-    fn.fnId,
+    fn.id,
     fn.externalNamespace!,
     fn.getIdentifierName(),
     parameterTypes,

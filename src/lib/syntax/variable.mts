@@ -25,10 +25,6 @@ export class Variable extends Syntax {
     this.initializer = opts.initializer;
   }
 
-  getReadableId() {
-    return `${this.location?.filePath ?? "unknown"}/${this.identifier.value}`;
-  }
-
   getIndex(): number {
     const index = this.parentFn?.getIndexOfVariable(this) ?? -1;
     if (index < -1) {
