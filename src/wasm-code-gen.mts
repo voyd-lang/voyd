@@ -66,7 +66,7 @@ const compileExpression = (opts: CompileExprOpts): number => {
 const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
   const { expr, mod } = opts;
 
-  const entity = expr.resolveIdentifier(expr);
+  const entity = expr.resolveEntity(expr);
   if (!entity) {
     throw new Error(`Unrecognized symbol ${expr.value}`);
   }
@@ -248,7 +248,7 @@ const compileExternFn = (opts: CompileExprOpts<Fn>) => {
   mod.addFunctionImport(
     fn.id,
     fn.externalNamespace!,
-    fn.getIdentifierName(),
+    fn.getName(),
     parameterTypes,
     mapBinaryenType(fn.getReturnType())
   );

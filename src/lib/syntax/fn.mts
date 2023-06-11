@@ -48,7 +48,7 @@ export class Fn extends Syntax {
     }`;
   }
 
-  getIdentifierName(): string {
+  getName(): string {
     return this.identifier.value;
   }
 

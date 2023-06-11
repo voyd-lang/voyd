@@ -5,8 +5,18 @@ import type { Parameter } from "./parameter.mjs";
 import type { Type } from "./types.mjs";
 import type { Variable } from "./variable.mjs";
 import type { Global } from "./global.mjs";
+import { MacroVariable } from "./macro-variable.mjs";
+import { Macro } from "./macros.mjs";
 
-export type IdentifierEntity = Fn | Type | Variable | Parameter | Global;
+export type IdentifierEntity =
+  | Fn
+  | Type
+  | Variable
+  | Parameter
+  | Global
+  | MacroEntity;
+
+export type MacroEntity = Macro | MacroVariable;
 
 export class LexicalContext {
   private readonly fns: Map<string, Fn[]> = new Map();
@@ -14,6 +24,9 @@ export class LexicalContext {
   private readonly params: Map<string, Parameter> = new Map();
   private readonly types: Map<string, Type> = new Map();
   private readonly globals: Map<string, Global> = new Map();
+  // TODO: Do these belong here? Seems like we may be giving LexicalContext too much work.
+  private readonly macroVars: Map<string, MacroVariable> = new Map();
+  private readonly macros: Map<string, Macro> = new Map();
 
   registerEntity(id: Id, entity: IdentifierEntity) {
     const idStr = getIdStr(id);
@@ -39,15 +52,29 @@ export class LexicalContext {
       this.globals.set(idStr, entity);
     }
 
+    if (entity.syntaxType === "macro-variable") {
+      this.macroVars.set(idStr, entity);
+    }
+
+    if (entity.syntaxType === "macro") {
+      this.macros.set(idStr, entity);
+    }
+
     throw new Error(`Unrecognized entity ${entity}, id: ${id}`);
   }
 
-  resolveIdentifier(identifier: Id): IdentifierEntity | undefined {
+  resolveEntity(identifier: Id): IdentifierEntity | undefined {
     // Intentionally does not check this.fns, those have separate resolution rules i.e. overloading that are handled elsewhere (for now)
     const idStr = getIdStr(identifier);
     return (
       this.vars.get(idStr) ?? this.params.get(idStr) ?? this.types.get(idStr)
     );
+  }
+
+  /** Macro entity's includes macro parameters, variables,  */
+  resolveMacroEntity(identifier: Id): MacroEntity | undefined {
+    const idStr = getIdStr(identifier);
+    return this.macroVars.get(idStr);
   }
 
   getFns(identifier: Id): Fn[] {

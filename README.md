@@ -14,6 +14,7 @@ fn fib(n:i32) -> i32
 // All binary programs have a main function (NOTE: for in syntax shown below not yet supported)
 fn main() -> void
     var index = 0
+    range(15).each num =>
     for num in range(15)
         // Print fibonacci sequence at index using UFCS.
         num.fib().print()

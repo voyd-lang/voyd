@@ -1,26 +1,24 @@
 import { Expr } from "./expr.mjs";
 import { Identifier } from "./identifier.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
-import { Type } from "./types.mjs";
 
 export class MacroVariable extends Syntax {
   readonly identifier: Identifier;
   readonly isMutable: boolean;
   readonly syntaxType = "macro-variable";
-  readonly initializer?: Expr;
+  value?: Expr;
 
   constructor(
     opts: SyntaxOpts & {
       identifier: Identifier;
       isMutable: boolean;
-      initializer?: Expr;
-      type?: Type;
+      value?: Expr;
     }
   ) {
     super(opts);
     this.identifier = opts.identifier;
     this.isMutable = opts.isMutable;
-    this.initializer = opts.initializer;
+    this.value = opts.value;
   }
 
   toString() {
@@ -33,7 +31,6 @@ export class MacroVariable extends Syntax {
       this.identifier,
       ["reserved-for-type"],
       ["is-mutable", this.isMutable],
-      this.initializer,
     ];
   }
 
@@ -44,7 +41,7 @@ export class MacroVariable extends Syntax {
       parent: parent ?? this.parent,
       identifier: this.identifier,
       isMutable: this.isMutable,
-      initializer: this.initializer,
+      value: this.value,
     });
   }
 }

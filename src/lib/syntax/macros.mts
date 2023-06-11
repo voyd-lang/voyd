@@ -1,31 +1,25 @@
 import type { Expr } from "./expr.mjs";
 import { Identifier } from "./identifier.mjs";
-import { MacroVariable } from "./macro-variable.mjs";
-import { Parameter } from "./parameter.mjs";
+import { List } from "./list.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
-import { FnType, Type } from "./types.mjs";
 
 export type Macro = RegularMacro;
 
 export class RegularMacro extends Syntax {
   readonly syntaxType = "macro";
+  readonly macroType = "regular";
   /** A unique, human readable id to be used as the absolute id of the function (helps with function overloading) */
   readonly id: string;
   readonly identifier: Identifier;
-  readonly variables: MacroVariable[] = [];
-  readonly parameters: Parameter[] = [];
-  readonly body: Expr;
+  readonly parameters: Identifier[] = [];
+  readonly body: List;
 
   constructor(
     opts: SyntaxOpts & {
       identifier: Identifier;
-      returnType?: Type;
-      variables?: MacroVariable[];
-      parameters?: Parameter[];
-      body: Expr;
-      isExternal?: boolean;
-      externalNamespace?: string;
-      /** Internal to Fn only, do not set here unless this is the clone implementation */
+      parameters?: Identifier[];
+      body: List;
+      /** Internal to Macro only, do not set here unless this is the clone implementation */
       id?: string;
     }
   ) {
@@ -33,7 +27,6 @@ export class RegularMacro extends Syntax {
     this.identifier = opts.identifier;
     this.id = opts.id ?? this.generateId();
     this.parameters = opts.parameters ?? [];
-    this.variables = opts.variables ?? [];
     this.body = opts.body;
   }
 
@@ -43,48 +36,8 @@ export class RegularMacro extends Syntax {
     }`;
   }
 
-  newEvaluationContext() {}
-
-  getIdentifierName(): string {
+  getName(): string {
     return this.identifier.value;
-  }
-
-  getType(): FnType {
-    return new FnType({
-      fnId: this.id,
-      identifier: this.identifier,
-      parameters: this.parameters,
-      inherit: this,
-    });
-  }
-
-  getIndexOfParameter(parameter: Parameter) {
-    const index = this.parameters.findIndex(
-      (p) => p.syntaxId === parameter.syntaxId
-    );
-    if (index < 0) {
-      throw new Error(`Parameter ${parameter} not registered with fn ${this}`);
-    }
-    return index;
-  }
-
-  getIndexOfVariable(variable: Variable) {
-    const index = this.variables.findIndex(
-      (v) => v.syntaxId === variable.syntaxId
-    );
-    if (index < 0) {
-      throw new Error(`Variable ${variable} not registered with fn ${this}`);
-    }
-    return index + this.parameters.length;
-  }
-
-  registerLocal(local: Variable | Parameter) {
-    if (local.syntaxType === "variable") {
-      this.variables.push(local);
-      return;
-    }
-
-    this.parameters.push(local);
   }
 
   toString() {
@@ -95,7 +48,6 @@ export class RegularMacro extends Syntax {
     return new RegularMacro({
       id: this.id,
       identifier: this.identifier,
-      variables: this.variables,
       parameters: this.parameters,
       inherit: this,
       body: this.body,

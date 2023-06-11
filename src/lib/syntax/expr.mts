@@ -12,6 +12,7 @@ import type { Whitespace } from "./whitespace.mjs";
 import type { Global } from "./global.mjs";
 import { MacroVariable } from "./macro-variable.mjs";
 import { Macro } from "./macros.mjs";
+import { MacroLambda } from "./macro-lambda.mjs";
 
 export type Expr =
   | Bool
@@ -27,4 +28,5 @@ export type Expr =
   | Variable
   | Parameter
   | Global
-  | MacroVariable;
+  | MacroVariable
+  | MacroLambda;

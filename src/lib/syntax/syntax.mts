@@ -1,7 +1,11 @@
 import type { Expr } from "./expr.mjs";
 import type { Fn } from "./fn.mjs";
 import type { Id } from "./identifier.mjs";
-import { IdentifierEntity, LexicalContext } from "./lexical-context.mjs";
+import {
+  IdentifierEntity,
+  LexicalContext,
+  MacroEntity,
+} from "./lexical-context.mjs";
 import { Parameter } from "./parameter.mjs";
 import { Variable } from "./variable.mjs";
 
@@ -59,9 +63,13 @@ export abstract class Syntax {
     }
   }
 
-  resolveIdentifier(id: Id): IdentifierEntity | undefined {
+  resolveEntity(id: Id): IdentifierEntity | undefined {
+    return this.context.resolveEntity(id) ?? this.parent?.resolveEntity(id);
+  }
+
+  resolveMacroEntity(id: Id): MacroEntity | undefined {
     return (
-      this.context.resolveIdentifier(id) ?? this.parent?.resolveIdentifier(id)
+      this.context.resolveMacroEntity(id) ?? this.parent?.resolveMacroEntity(id)
     );
   }
 

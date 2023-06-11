@@ -1,4 +1,5 @@
 import { Expr } from "./expr.mjs";
+import { MacroEntity } from "./lexical-context.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export type Id = string | Identifier;
@@ -24,11 +25,15 @@ export class Identifier extends Syntax {
   }
 
   isDefined() {
-    return !!this.resolveIdentifier(this);
+    return !!this.resolveEntity(this);
   }
 
   resolve() {
-    return this.resolveIdentifier(this);
+    return this.resolveEntity(this);
+  }
+
+  resolveAsMacroEntity(): MacroEntity | undefined {
+    return this.resolveMacroEntity(this);
   }
 
   clone(parent?: Expr): Identifier {

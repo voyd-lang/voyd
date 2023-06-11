@@ -111,7 +111,7 @@ const assistGreedyOpProcessing = (
 };
 
 const nextLineIndentLevel = (list: List) => {
-  const index = list.indexOfFirstInstance(newLine());
+  const index = list.findIndex(isNewline);
   if (index === -1) return 0;
   return nextExprIndentLevel(list, index);
 };
@@ -120,7 +120,7 @@ const lineExpressionCount = (list: List) => {
   let count = 0;
   for (const expr of list.value) {
     if (isWhitespace(expr) && !expr.isNewline) continue;
-    if (expr.is("\n")) break;
+    if (isNewline(expr)) break;
     count += 1;
   }
   return count;
@@ -146,13 +146,13 @@ const nextExprIndentLevel = (list: List, startIndex?: number) => {
 
   while (list.at(index)) {
     const expr = list.at(index)!;
-    if (expr.is("\n")) {
+    if (isNewline(expr)) {
       nextIndentLevel = 0;
       index += 1;
       continue;
     }
 
-    if (expr.is("\t")) {
+    if (isTab(expr)) {
       nextIndentLevel += 1;
       index += 1;
       continue;
@@ -188,3 +188,7 @@ const consumeLeadingWhitespace = (list: List) => {
     break;
   }
 };
+
+const isNewline = (v: Expr) => isWhitespace(v) && v.isNewline;
+const isTab = (v: Expr) => isWhitespace(v) && v.isTab;
+const isSpace = (v: Expr) => isWhitespace(v) && v.isSpace;

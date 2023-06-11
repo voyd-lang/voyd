@@ -1,18 +1,22 @@
 import { ModuleInfo } from "../lib/module-info.mjs";
+import { getIdStr } from "../lib/syntax/get-id-str.mjs";
 import {
   Bool,
   Expr,
   Float,
-  FnType,
   Identifier,
   Int,
+  isFloat,
   isIdentifier,
   isInt,
   isList,
+  isStringLiteral,
   List,
   StringLiteral,
 } from "../lib/syntax/index.mjs";
-import { Var } from "../lib/syntax/lexical-context.mjs";
+import { MacroLambda } from "../lib/syntax/macro-lambda.mjs";
+import { MacroVariable } from "../lib/syntax/macro-variable.mjs";
+import { Macro, RegularMacro } from "../lib/syntax/macros.mjs";
 
 /** Transforms macro's into their final form and then runs them */
 export const macro = (list: List, info: ModuleInfo): List => {
@@ -21,9 +25,17 @@ export const macro = (list: List, info: ModuleInfo): List => {
 };
 
 const evalExpr = (expr: Expr) => {
-  if (isIdentifier(expr)) return expr.assertAssignedValue();
+  if (isIdentifier(expr)) return evalIdentifier(expr);
   if (!isList(expr)) return expr;
   return evalFnCall(expr);
+};
+
+const evalIdentifier = (expr: Identifier): Expr => {
+  const entity = expr.resolveAsMacroEntity();
+  if (!entity) return expr;
+  if (entity.syntaxType !== "macro-variable") return expr;
+  if (!entity.value) return expr;
+  return entity.value;
 };
 
 const evalFnCall = (list: List): Expr => {
@@ -32,87 +44,96 @@ const evalFnCall = (list: List): Expr => {
     return list;
   }
 
-  const macro = getMacro(identifier);
-  if (macro) {
-    const expanded = expandMacro({ macro, call: list });
-    // Expanded has its old definition as it's parent for whatever reason
-    // Here we set it back to the correct parent (its original parent)
-    // Hopefully not just a band-aid for a larger problem.
-    expanded.setParent(list.getParent());
-    return evalExpr(expanded);
-  }
-
-  const variable = identifier.getAssignedValue();
-  if (!functions[identifier.value] && !isLambda(variable)) {
+  const entity = identifier.resolveAsMacroEntity();
+  if (!entity) {
     return list;
   }
 
-  const shouldSkipArgEval = fnsToSkipArgEval.has(identifier.value);
+  if (entity.syntaxType === "macro") {
+    const expanded = expandMacro({ macro: entity, call: list });
+    return evalExpr(expanded);
+  }
+
+  const value = entity.value;
+  if (!value) {
+    return list;
+  }
+
+  const idStr = getIdStr(identifier);
+  const shouldSkipArgEval = fnsToSkipArgEval.has(idStr);
   const argsArr = !shouldSkipArgEval ? list.rest().map(evalExpr) : list.rest();
   const args = new List({ value: argsArr, parent: list.getParent() });
 
-  if (isLambda(variable)) return callLambda({ lambda: variable, args });
-
-  const func = functions[identifier.value];
-  return func({ identifier, parent: list.getParent() ?? list }, args);
-};
-
-const expandMacros = (list: Expr): Expr => {
-  if (!isList(list)) return list;
-
-  const identifier = list.first();
-  if (isIdentifier(identifier)) {
-    const macro = getMacro(identifier);
-    if (macro) return expandMacro({ macro, call: list });
+  const stdFn = functions[idStr];
+  if (stdFn) {
+    return stdFn({ identifier, parent: list.getParent() ?? list }, args);
   }
 
-  return list.reduce(expandMacros);
+  if (value.syntaxType === "macro-lambda") {
+    return callLambda({ lambda: value, args });
+  }
+
+  return list;
 };
 
 /** Expands a macro call */
-const expandMacro = ({ macro, call }: { macro: List; call: List }): Expr => {
-  const params = (macro.at(0) as List).rest();
+const expandMacro = ({ macro, call }: { macro: Macro; call: List }): Expr => {
+  const clone = macro.clone();
 
-  params.forEach((p, index) => {
-    const identifier = p as Identifier;
-    macro.addVar(identifier, { value: call.at(index + 1)!, kind: "param" });
+  // Register parameters
+  clone.parameters.forEach((identifier, index) => {
+    clone.registerEntity(
+      identifier,
+      new MacroVariable({
+        identifier,
+        value: call.at(index + 1)!,
+        isMutable: false,
+      })
+    );
   });
 
   // Implicit &body param
-  macro.addVar("&body", {
-    kind: "param",
-    value: new List({ value: call.rest() }),
-  });
+  const bodyIdentifier = new Identifier({ value: "&body" });
+  clone.registerEntity(
+    bodyIdentifier,
+    new MacroVariable({
+      identifier: bodyIdentifier,
+      value: new List({ value: call.rest() }),
+      isMutable: false,
+    })
+  );
 
-  const result = macro
-    .rest()
-    .map((exp) => evalExpr(exp))
-    .at(-1)!;
-  result.setParent(call.getParent());
-  return expandMacros(result) ?? new List({});
+  return clone.body.map((exp) => evalExpr(exp)).at(-1) ?? nop();
 };
 
 type CallLambdaOpts = {
-  lambda: List;
+  lambda: MacroLambda;
   args: List;
 };
 
 const callLambda = (opts: CallLambdaOpts): Expr => {
-  const lambda = opts.lambda.rest();
-  const params = lambda.at(0);
-  const body = lambda.at(1);
+  const clone = opts.lambda.clone();
+  clone.registerEntity(
+    "&lambda",
+    new MacroVariable({
+      identifier: new Identifier({ value: "&lambda" }),
+      value: opts.lambda.clone(),
+      isMutable: false,
+    })
+  );
 
-  if (!body || !isList(params)) {
-    throw new Error("Invalid lambda definition");
-  }
+  clone.parameters.forEach((identifier, index) =>
+    clone.registerEntity(
+      identifier,
+      new MacroVariable({
+        identifier,
+        value: opts.args.at(index)!,
+        isMutable: false,
+      })
+    )
+  );
 
-  body.addVar("&lambda", { value: opts.lambda.clone(), kind: "var" });
-  params.value.forEach((p, index) => {
-    const identifier = p as Identifier;
-    body.addVar(identifier, { value: opts.args.at(index)!, kind: "param" });
-  });
-
-  return evalExpr(body);
+  return clone.body.map((exp) => evalExpr(exp)).at(-1) ?? nop();
 };
 
 type FnOpts = {
@@ -120,19 +141,19 @@ type FnOpts = {
   identifier: Identifier;
 };
 
-// Ugly hack for forcing registerMacro to use the right scope. TODO something better I guess.
-let currentModuleScope = new List({});
-const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
+const functions: Record<
+  string,
+  ((opts: FnOpts, args: List) => Expr) | undefined
+> = {
   macro: (_, macro) => {
     const result = expandMacros(macro) as List;
-    registerMacro(result, currentModuleScope);
-    return nop();
+    registerMacro(result);
+    return result;
   },
   root: ({ identifier }, root) => {
     root.insert(identifier);
     return root.map((module) => {
       if (!isList(module)) return module;
-      currentModuleScope = module;
       module.value[4] = (module.value[4] as List).reduce(evalExpr);
       return module;
     });
@@ -168,7 +189,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
       throw new Error(`Expected identifier, got ${identifier}`);
     }
 
-    const info = parent.resolveIdentifier(identifier);
+    const info = parent.resolveEntity(identifier);
     if (!info) {
       throw new Error(`Identifier ${identifier.value} is not defined`);
     }
@@ -202,8 +223,6 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
       throw new Error("invalid lambda expression");
     }
 
-    lambda.setAsFn();
-
     // For now, assumes params are untyped
     params.map((p) => {
       if (!isIdentifier(p)) {
@@ -233,7 +252,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
 
         if (isIdentifier(exp) && exp.value.startsWith("$@")) {
           const id = exp.value.replace("$@", "");
-          const info = exp.resolveIdentifier(id)!;
+          const info = exp.resolveEntity(id)!;
           const list = info.value as List;
           list.insert("splice-quote");
           return list;
@@ -241,7 +260,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
 
         if (isIdentifier(exp) && exp.value.startsWith("$")) {
           const id = exp.value.replace("$", "");
-          return exp.resolveIdentifier(id)!.value!;
+          return exp.resolveEntity(id)!.value!;
         }
 
         return exp;
@@ -258,7 +277,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
 
     const condResult = evalExpr(handleOptionalConditionParenthesis(condition));
 
-    if (condResult.value) {
+    if (getRuntimeValue(condResult)) {
       return evalExpr(ifTrue);
     }
 
@@ -271,13 +290,13 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
   array: (_, args) => args,
   slice: (_, args) => {
     const list = args.first()! as List;
-    const start = args.at(1)?.value as number | undefined;
-    const end = args.at(2)?.value as number | undefined;
+    const start = getRuntimeValue(args.at(1)) as number | undefined;
+    const end = getRuntimeValue(args.at(2)) as number | undefined;
     return list.slice(start, end);
   },
   extract: (_, args) => {
     const list = args.first()! as List;
-    const index = args.at(1)!.value as number;
+    const index = getRuntimeValue(args.at(1)) as number;
     return list.at(index)!; // TODO: Make this safer
   },
   map: ({ parent }, args) => {
@@ -348,7 +367,7 @@ const functions: Record<string, (opts: FnOpts, args: List) => Expr> = {
     }),
   eval: (_, body) => evalFnCall(body),
   "register-macro": (_, args) => {
-    registerMacro(args.at(0) as List, currentModuleScope);
+    registerMacro(args.at(0) as List);
     return nop();
   },
 };
@@ -379,38 +398,55 @@ const handleOptionalConditionParenthesis = (expr: Expr): Expr => {
   return expr;
 };
 
-const isLambda = (expr?: Expr): expr is List => {
-  if (!isList(expr)) return false;
-  return expr.first()?.is("lambda-expr") ?? false;
-};
-
 /** Slice out the beginning macro before calling */
-const registerMacro = (list: List, parent: Expr) => {
-  const id = (list.first() as List).first() as Identifier;
-  const fn = new FnType({ value: { params: [] } });
-  list.setAsFn();
-  fn.flags.add("isMacro");
-  fn.props.set("body", list);
-  parent.addFn(id.value, fn);
+const registerMacro = (list: List) => {
+  // TODO Assertions?
+  const signature = list.first() as List;
+  const identifier = signature.first() as Identifier;
+  const parameters = signature.rest() as Identifier[];
+  const body = list.slice(1);
+  const macro = new RegularMacro({
+    inherit: list,
+    identifier,
+    parameters,
+    body,
+  });
+  macro.getParent()?.registerEntity(identifier, macro);
+  return nop();
 };
 
 const nop = () => new List({}).push(Identifier.from("splice-quote"));
 /** Binary logical comparison */
-const bl = (args: List, fn: (l: any, r: any) => boolean) =>
-  bool(fn(args.at(0)?.value, args.at(1)?.value));
-/** Binary arithmetic operation */
-const ba = (args: List, fn: (l: number, r: number) => number) => {
-  const l = args.at(0) as Float | Int;
-  const r = args.at(1) as Float | Int;
-  const value = fn(l.value, r.value);
+const bl = (
+  args: List,
+  fn: (l: MacroRuntimeValue, r: MacroRuntimeValue) => boolean
+) => bool(fn(getRuntimeValue(args.at(0)), getRuntimeValue(args.at(1))));
 
-  if (isInt(l) && isInt(r) && value % 1 === 0) {
+/** Binary arithmetic operation */
+const ba = (
+  args: List,
+  fn: (l: MacroRuntimeValue, r: MacroRuntimeValue) => MacroRuntimeValue
+) => {
+  const left = args.at(0);
+  const right = args.at(1);
+  const value = fn(getRuntimeValue(left), getRuntimeValue(right));
+
+  if (
+    typeof value === "number" &&
+    isInt(left) &&
+    isInt(right) &&
+    value % 1 === 0
+  ) {
     return new Int({ value });
   }
 
   // Yucky. What was I thinking, concatenating strings with +
   if (typeof value === "string") {
     return new StringLiteral({ value });
+  }
+
+  if (typeof value === "undefined") {
+    throw new Error(`Invalid macro binary arithmetic expression ${args}`);
   }
 
   return new Float({ value });
@@ -423,13 +459,36 @@ const getMacro = (id: Identifier): List | undefined => {
   return fn.props.get("body") as List;
 };
 
-const defineVar = (opts: {
-  args: List;
-  parent: Expr;
-  kind: Var["kind"];
-  mut?: boolean;
-}) => {
-  const { args, parent, kind, mut } = opts;
+/**
+ * Used to interpret the real value of a macro entity. This means we convert syntax objects
+ * like strings, floats, and ints, to values the macro runtime (i.e. nodejs right now) can understand
+ * and evaluate. If the entity is an identifier, we hopefully resolve it into something the runtime
+ * can understand
+ */
+const getRuntimeValue = (expr: Expr | undefined): MacroRuntimeValue => {
+  if (!expr) return undefined;
+
+  if (isIdentifier(expr)) {
+    const result = expr.resolveAsMacroEntity();
+    if (result?.syntaxType !== "macro-variable") {
+      throw new Error(
+        `Macro entity cannot be resolved into runtime value, ${result}`
+      );
+    }
+    return getRuntimeValue(result.value);
+  }
+
+  if (isFloat(expr) || isInt(expr) || isStringLiteral(expr)) {
+    return expr.value;
+  }
+
+  throw new Error(
+    `Macro entity cannot be resolved into runtime value, ${expr}`
+  );
+};
+
+const defineVar = (opts: { args: List; parent: Expr; mut?: boolean }) => {
+  const { args, parent, mut } = opts;
   // Warning: Cannot be typed like would be at compile time (for now);
   const identifier = args.at(0);
   const init = args.at(1);
@@ -437,6 +496,14 @@ const defineVar = (opts: {
     throw new Error("Invalid variable");
   }
   const value = evalExpr(init);
-  parent.addVar(identifier, { kind, mut, value });
+  const variable = new MacroVariable({
+    identifier,
+    isMutable: !!mut,
+    value,
+    inherit: args,
+  });
+  parent.registerEntity(identifier, variable);
   return nop();
 };
+
+export type MacroRuntimeValue = string | number | undefined;

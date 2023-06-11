@@ -1,14 +1,19 @@
 import { Expr } from "./expr.mjs";
-import { isList } from "./helpers.mjs";
-import { Identifier } from "./identifier.mjs";
+import { getIdStr } from "./get-id-str.mjs";
+import { isIdentifier, isList } from "./helpers.mjs";
+import { Id, Identifier } from "./identifier.mjs";
 import { Int } from "./int.mjs";
-import { Syntax, SyntaxOpts, SyntaxComparable } from "./syntax.mjs";
+import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export class List extends Syntax {
   readonly syntaxType = "list";
   value: Expr[] = [];
 
-  constructor(opts: SyntaxOpts<ListValue[] | List>) {
+  constructor(
+    opts: SyntaxOpts & {
+      value?: ListValue[] | List;
+    }
+  ) {
     super(opts);
     const value = opts.value;
 
@@ -37,8 +42,9 @@ export class List extends Syntax {
     return this;
   }
 
-  calls(fnId: Expr | string) {
-    return !!this.at(0)?.is(fnId);
+  calls(fnId: Id) {
+    const first = this.first();
+    return isIdentifier(first) && getIdStr(first) === getIdStr(fnId);
   }
 
   consume(): Expr {
@@ -51,6 +57,7 @@ export class List extends Syntax {
     return this.value[0];
   }
 
+  /** Returns all but the first element in an array */
   rest(): Expr[] {
     return this.value.slice(1);
   }
@@ -84,8 +91,8 @@ export class List extends Syntax {
     return this;
   }
 
-  indexOfFirstInstance(expr: Expr) {
-    return this.value.findIndex((v) => v.is(expr));
+  findIndex(cb: (expr: Expr) => boolean) {
+    return this.value.findIndex(cb);
   }
 
   insert(expr: Expr | string, at = 0) {
@@ -93,10 +100,6 @@ export class List extends Syntax {
     result.setParent(this);
     this.value.splice(at, 0, result);
     return this;
-  }
-
-  is(_?: SyntaxComparable): boolean {
-    return false;
   }
 
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
