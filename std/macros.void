@@ -1,28 +1,3 @@
-macro pub()
-	// Temp hack to get pub def-wasm-operator and the like to work
-	define body
-		if is-list(&body.extract(0))
-			&body.extract(0)
-			&body
-
-	define expanded macro-expand(body)
-
-	if expanded.extract(0) == "macro"
-		block
-			register-macro expanded.slice(1)
-			define definitions expanded.extract(1)
-			quote splice-quote
-				export
-					$(extract definitions 0)
-					(parameters $(slice definitions 1))
-		block
-			define index (if expanded.extract(0) == "define-function" 2 3)
-			quote quote splice-quote
-				$expanded
-				export $(extract expanded 1) $(extract expanded index)
-
-export pub (parameters (&body))
-
 pub macro `()
 	quote quote $@&body
 
@@ -40,18 +15,6 @@ pub macro let()
 pub macro var()
 	define equals-expr (extract &body 0)
 	` define-mut
-		$(extract equals-expr 1)
-		$(extract equals-expr 2)
-
-pub macro m-let()
-	define equals-expr (extract &body 0)
-	` define-macro-var
-		$(extract equals-expr 1)
-		$(extract equals-expr 2)
-
-pub macro m-var()
-	define equals-expr (extract &body 0)
-	` define-mut-macro-var
 		$(extract equals-expr 1)
 		$(extract equals-expr 2)
 
@@ -84,7 +47,7 @@ pub macro '=>'(&body)
 	` lambda $@&body
 
 // Extracts typed parameters from a list where index 0 is fn name, and offset-index+ are labeled-expr
-m-let extract-parameters = (definitions) =>
+macro-let = (definitions) =>
 	`(parameters).concat definitions.slice(1)
 
 pub macro fn()
@@ -167,7 +130,7 @@ pub macro type()
 			$(extract (extract equals-expr 2) 1)
 
 // Takes (struct $labeled-expr*), returns (struct $labeled-expr*) + field accessor functions
-m-let init-struct = (name expr) =>
+macro-let init-struct = (name expr) =>
 	let fields = expr.slice(1)
 	let get-size = (param) => param.extract(2).match
 		"i32" 4

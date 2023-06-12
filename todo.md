@@ -18,7 +18,7 @@
   - Continue processing until a detected error can prevent further processing
   - Display a list of all detected errors in the console before exiting.
 - CLI Flags for outputting AST and WAT
-- Smarter lets and vars. Should detect when they are in or out of a function and create a global when out of one automatically. Should also remove m-let as a result.
+- Smarter lets and vars. Should detect when they are in or out of a function and create a global when out of one automatically. Should also remove macro-let and macro-var as a result.
 - Come up with an elegant language versioning strategy. Should be able to completely change how core language features work,
   libraries work, macros etc without breaking anything or forcing people to migrate. Should apply to libraries and applications
   written in the language as well.
@@ -28,6 +28,12 @@
   - I think I can do this just using $() interpolation. I def need to change that syntax to being a block rather than assuming its a function call.
 - Write out ownership spec
 - Consider making $() a block, rather than assuming a function call
+- Macro runtime should also handle / allow function overloads (Zoom out - Macro runtime should behave as close to normal runtime as possible)
+- Make `pub` as syntax macro
+- Handle platform / runtime specific syntax macros
+  - For now, their is only one - node/wasm
+  - Codebase should be written so Void can easily be ported to other platforms or runtimes.
+- Handle new define syntax (define now must include mutability)
 
 OLD (NEEDS REVIEW)
 
