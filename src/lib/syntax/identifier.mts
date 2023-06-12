@@ -6,6 +6,7 @@ export type Id = string | Identifier;
 
 export class Identifier extends Syntax {
   readonly syntaxType = "identifier";
+  /** Is surrounded by single quotes, allows identifiers to have spaces */
   readonly isQuoted?: boolean;
   /** The actual string ID of the identifier */
   value: string;
@@ -34,6 +35,17 @@ export class Identifier extends Syntax {
 
   resolveAsMacroEntity(): MacroEntity | undefined {
     return this.resolveMacroEntity(this);
+  }
+
+  startsWith(search: string) {
+    return this.value.startsWith(search);
+  }
+
+  replace(search: string, newVal: string): Identifier {
+    return new Identifier({
+      value: this.value.replace(search, newVal),
+      inherit: this,
+    });
   }
 
   clone(parent?: Expr): Identifier {

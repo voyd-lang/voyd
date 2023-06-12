@@ -29,13 +29,14 @@
 - Write out ownership spec
 - Consider making $() a block, rather than assuming a function call
 - Macro runtime should also handle / allow function overloads (Zoom out - Macro runtime should behave as close to normal runtime as possible)
-- Make `pub` as syntax macro
 - Handle platform / runtime specific syntax macros
   - For now, their is only one - node/wasm
   - Codebase should be written so Void can easily be ported to other platforms or runtimes.
 - Handle new define syntax (define now must include mutability)
+- Figure out a better place to handle splice-quote than in List implementation
+- Handle new `export` syntax (`[export definition]`)
 
-OLD (NEEDS REVIEW)
+## OLD (NEEDS REVIEW)
 
 - Unsafe effect handling (i.e. rust unsafe keyword)
 - Develop and apply strict naming conventions for all APIs
