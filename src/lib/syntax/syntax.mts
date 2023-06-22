@@ -28,8 +28,6 @@ export abstract class Syntax {
   readonly syntaxId = getSyntaxId();
   readonly location?: SourceLocation;
   readonly context: LexicalContext;
-  readonly props: Map<string, Expr> = new Map();
-  readonly flags: Set<string> = new Set();
   protected parent?: Expr;
   /** For tagged unions */
   abstract readonly syntaxType: string;
@@ -59,13 +57,14 @@ export abstract class Syntax {
     }
   }
 
-  resolveEntity(id: Id): Entity | undefined {
-    return this.context.resolveEntity(id) ?? this.parent?.resolveEntity(id);
+  resolveEntity(name: Id): Entity | undefined {
+    return this.context.resolveEntity(name) ?? this.parent?.resolveEntity(name);
   }
 
-  resolveMacroEntity(id: Id): MacroEntity | undefined {
+  resolveMacroEntity(name: Id): MacroEntity | undefined {
     return (
-      this.context.resolveMacroEntity(id) ?? this.parent?.resolveMacroEntity(id)
+      this.context.resolveMacroEntity(name) ??
+      this.parent?.resolveMacroEntity(name)
     );
   }
 

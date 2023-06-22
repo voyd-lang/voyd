@@ -56,37 +56,37 @@ export class LexicalContext {
     throw new Error(`Unrecognized entity ${entity}, id: ${entity.name}`);
   }
 
-  resolveEntity(identifier: Id): Entity | undefined {
+  resolveEntity(name: Id): Entity | undefined {
     // Intentionally does not check this.fns, those have separate resolution rules i.e. overloading that are handled elsewhere (for now)
-    const idStr = getIdStr(identifier);
+    const idStr = getIdStr(name);
     return (
       this.vars.get(idStr) ?? this.params.get(idStr) ?? this.types.get(idStr)
     );
   }
 
   /** Macro entity's includes macro parameters, variables,  */
-  resolveMacroEntity(identifier: Id): MacroEntity | undefined {
-    const idStr = getIdStr(identifier);
+  resolveMacroEntity(name: Id): MacroEntity | undefined {
+    const idStr = getIdStr(name);
     return this.macroVars.get(idStr);
   }
 
-  getFns(identifier: Id): Fn[] {
-    const id = getIdStr(identifier);
+  getFns(name: Id): Fn[] {
+    const id = getIdStr(name);
     return this.fns.get(id) ?? [];
   }
 
-  getVar(identifier: Id): Variable | undefined {
-    const id = getIdStr(identifier);
+  getVar(name: Id): Variable | undefined {
+    const id = getIdStr(name);
     return this.vars.get(id);
   }
 
-  getParam(identifier: Id): Parameter | undefined {
-    const id = getIdStr(identifier);
+  getParam(name: Id): Parameter | undefined {
+    const id = getIdStr(name);
     return this.params.get(id);
   }
 
-  getType(identifier: Id): Type | undefined {
-    const id = getIdStr(identifier);
+  getType(name: Id): Type | undefined {
+    const id = getIdStr(name);
     return this.types.get(id);
   }
 }
