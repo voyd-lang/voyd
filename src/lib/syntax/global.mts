@@ -1,20 +1,17 @@
 import { Expr } from "./expr.mjs";
-import { Identifier } from "./identifier.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 import { Type } from "./types.mjs";
 
-export class Global extends Syntax {
+export class Global extends NamedEntity {
   /** Absolute unique id */
   readonly id: string;
-  readonly identifier: Identifier;
   readonly isMutable: boolean;
   protected type?: Type;
   readonly syntaxType = "global";
   readonly initializer?: Expr;
 
   constructor(
-    opts: SyntaxOpts & {
-      identifier: Identifier;
+    opts: NamedEntityOpts & {
       isMutable: boolean;
       initializer?: Expr;
       type?: Type;
@@ -22,7 +19,6 @@ export class Global extends Syntax {
     }
   ) {
     super(opts);
-    this.identifier = opts.identifier;
     this.isMutable = opts.isMutable;
     this.type = opts.type;
     this.initializer = opts.initializer;
@@ -30,14 +26,14 @@ export class Global extends Syntax {
   }
 
   private generateId() {
-    return `${this.location?.filePath ?? "unknown"}/${this.identifier.value}#${
+    return `${this.location?.filePath ?? "unknown"}/${this.name.value}#${
       this.syntaxId
     }`;
   }
 
   getType(): Type {
     if (this.type) return this.type;
-    throw new Error(`Type not yet resolved for global ${this.identifier}`);
+    throw new Error(`Type not yet resolved for global ${this.name}`);
   }
 
   setType(type: Type) {
@@ -45,13 +41,13 @@ export class Global extends Syntax {
   }
 
   toString() {
-    return this.identifier.toString();
+    return this.name.toString();
   }
 
   toJSON() {
     return [
       "define-global",
-      this.identifier,
+      this.name,
       this.type,
       ["is-mutable", this.isMutable],
       this.initializer,
@@ -62,7 +58,7 @@ export class Global extends Syntax {
     return new Global({
       inherit: this,
       parent: parent ?? this.parent,
-      identifier: this.identifier,
+      name: this.name,
       isMutable: this.isMutable,
       initializer: this.initializer,
       type: this.type,

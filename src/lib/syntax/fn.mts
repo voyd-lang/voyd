@@ -1,15 +1,13 @@
 import type { Expr } from "./expr.mjs";
-import { Identifier } from "./identifier.mjs";
+import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 import { Parameter } from "./parameter.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
 import { FnType, Type } from "./types.mjs";
 import { Variable } from "./variable.mjs";
 
-export class Fn extends Syntax {
+export class Fn extends NamedEntity {
   readonly syntaxType = "fn";
   /** A unique, human readable id to be used as the absolute id of the function (helps with function overloading) */
   readonly id: string;
-  readonly identifier: Identifier;
   readonly variables: Variable[] = [];
   readonly parameters: Parameter[] = [];
   // I'm too lazy do define an ExternFn Syntax object
@@ -19,8 +17,7 @@ export class Fn extends Syntax {
   readonly body: Expr;
 
   constructor(
-    opts: SyntaxOpts & {
-      identifier: Identifier;
+    opts: NamedEntityOpts & {
       returnType?: Type;
       variables?: Variable[];
       parameters?: Parameter[];
@@ -32,7 +29,6 @@ export class Fn extends Syntax {
     }
   ) {
     super(opts);
-    this.identifier = opts.identifier;
     this.id = opts.id ?? this.generateId();
     this.returnType = opts.returnType;
     this.parameters = opts.parameters ?? [];
@@ -43,19 +39,19 @@ export class Fn extends Syntax {
   }
 
   private generateId() {
-    return `${this.location?.filePath ?? "unknown"}/${this.identifier}#${
+    return `${this.location?.filePath ?? "unknown"}/${this.name}#${
       this.syntaxId
     }`;
   }
 
   getName(): string {
-    return this.identifier.value;
+    return this.name.value;
   }
 
   getType(): FnType {
     return new FnType({
       fnId: this.id,
-      identifier: this.identifier,
+      name: this.name,
       parameters: this.parameters,
       returnType: this.getReturnType(),
       inherit: this,
@@ -110,7 +106,7 @@ export class Fn extends Syntax {
   clone(parent?: Expr | undefined): Fn {
     return new Fn({
       id: this.id,
-      identifier: this.identifier,
+      name: this.name,
       variables: this.variables,
       parameters: this.parameters,
       returnType: this.returnType,

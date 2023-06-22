@@ -1,22 +1,20 @@
 import type { Expr } from "./expr.mjs";
 import { Identifier } from "./identifier.mjs";
 import { List } from "./list.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 
 export type Macro = RegularMacro;
 
-export class RegularMacro extends Syntax {
+export class RegularMacro extends NamedEntity {
   readonly syntaxType = "macro";
   readonly macroType = "regular";
   /** A unique, human readable id to be used as the absolute id of the function (helps with function overloading) */
   readonly id: string;
-  readonly identifier: Identifier;
   readonly parameters: Identifier[] = [];
   readonly body: List;
 
   constructor(
-    opts: SyntaxOpts & {
-      identifier: Identifier;
+    opts: NamedEntityOpts & {
       parameters?: Identifier[];
       body: List;
       /** Internal to Macro only, do not set here unless this is the clone implementation */
@@ -24,20 +22,19 @@ export class RegularMacro extends Syntax {
     }
   ) {
     super(opts);
-    this.identifier = opts.identifier;
     this.id = opts.id ?? this.generateId();
     this.parameters = opts.parameters ?? [];
     this.body = opts.body;
   }
 
   private generateId() {
-    return `${this.location?.filePath ?? "unknown"}/${this.identifier}#${
+    return `${this.location?.filePath ?? "unknown"}/${this.name}#${
       this.syntaxId
     }`;
   }
 
   getName(): string {
-    return this.identifier.value;
+    return this.name.value;
   }
 
   toString() {
@@ -47,7 +44,7 @@ export class RegularMacro extends Syntax {
   clone(parent?: Expr | undefined): RegularMacro {
     return new RegularMacro({
       id: this.id,
-      identifier: this.identifier,
+      name: this.name,
       parameters: this.parameters,
       inherit: this,
       body: this.body,

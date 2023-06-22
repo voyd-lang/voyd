@@ -39,7 +39,7 @@ interface CompileExprOpts<T = Expr> {
 
 const compileExpression = (opts: CompileExprOpts): number => {
   const { expr, mod } = opts;
-  if (isList(expr)) return compileList({ ...opts, expr: expr });
+  if (isList(expr)) return compileList({ ...opts, expr });
   if (isInt(expr)) return mod.i32.const(expr.value);
   if (isFloat(expr)) return mod.f32.const(expr.value);
   if (isIdentifier(expr)) return compileIdentifier({ ...opts, expr });

@@ -1,8 +1,6 @@
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
-import type { Id, Identifier } from "./identifier.mjs";
-import { getIdStr } from "./get-id-str.mjs";
 import { Expr } from "./expr.mjs";
 import { Parameter } from "./parameter.mjs";
+import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 
 export type Type =
   | PrimitiveType
@@ -15,7 +13,7 @@ export type Type =
 
 export type TypeJSON = ["type", [string, ...any[]]];
 
-export abstract class BaseType extends Syntax {
+export abstract class BaseType extends NamedEntity {
   readonly syntaxType = "type";
   abstract readonly kindOfType: string;
   /** Size in bytes */
@@ -26,35 +24,33 @@ export abstract class BaseType extends Syntax {
 
 export class PrimitiveType extends BaseType {
   readonly kindOfType = "primitive";
-  readonly primitiveId: Primitive;
 
-  constructor(opts: SyntaxOpts & { primitiveId: Primitive }) {
+  constructor(opts: NamedEntityOpts) {
     super(opts);
-    this.primitiveId = opts.primitiveId;
   }
 
   get size() {
-    if (this.primitiveId === "i32") return 4;
-    if (this.primitiveId === "f32") return 4;
-    if (this.primitiveId === "i64") return 8;
-    if (this.primitiveId === "f64") return 8;
+    if (this.name.value === "i32") return 4;
+    if (this.name.value === "f32") return 4;
+    if (this.name.value === "i64") return 8;
+    if (this.name.value === "f64") return 8;
     return 0;
   }
 
-  static from(id: Primitive) {
-    return new PrimitiveType({ primitiveId: id });
+  static from(name: Primitive) {
+    return new PrimitiveType({ name });
   }
 
   clone(parent?: Expr): PrimitiveType {
     return new PrimitiveType({
       parent,
       inherit: this,
-      primitiveId: this.primitiveId,
+      name: this.name,
     });
   }
 
   toJSON(): TypeJSON {
-    return ["type", ["primitive", this.primitiveId]];
+    return ["type", ["primitive", this.name]];
   }
 }
 
@@ -62,7 +58,7 @@ export class UnionType extends BaseType {
   readonly kindOfType = "union";
   value: Type[];
 
-  constructor(opts: SyntaxOpts & { value: Type[] }) {
+  constructor(opts: NamedEntityOpts & { value: Type[] }) {
     super(opts);
     this.value = opts.value;
   }
@@ -76,7 +72,12 @@ export class UnionType extends BaseType {
   }
 
   clone(parent?: Expr): UnionType {
-    return new UnionType({ parent, value: this.value, inherit: this });
+    return new UnionType({
+      parent,
+      value: this.value,
+      inherit: this,
+      name: this.name,
+    });
   }
 
   toJSON(): TypeJSON {
@@ -88,7 +89,7 @@ export class IntersectionType extends BaseType {
   readonly kindOfType = "intersection";
   value: Type[];
 
-  constructor(opts: SyntaxOpts & { value: Type[] }) {
+  constructor(opts: NamedEntityOpts & { value: Type[] }) {
     super(opts);
     this.value = opts.value;
   }
@@ -102,7 +103,12 @@ export class IntersectionType extends BaseType {
   }
 
   clone(parent?: Expr): IntersectionType {
-    return new IntersectionType({ parent, value: this.value, inherit: this });
+    return new IntersectionType({
+      parent,
+      value: this.value,
+      inherit: this,
+      name: this.name,
+    });
   }
 
   toJSON(): TypeJSON {
@@ -114,7 +120,7 @@ export class TupleType extends BaseType {
   readonly kindOfType = "tuple";
   value: Type[];
 
-  constructor(opts: SyntaxOpts & { value: Type[] }) {
+  constructor(opts: NamedEntityOpts & { value: Type[] }) {
     super(opts);
     this.value = opts.value;
   }
@@ -128,7 +134,12 @@ export class TupleType extends BaseType {
   }
 
   clone(parent?: Expr): TupleType {
-    return new TupleType({ parent, value: this.value, inherit: this });
+    return new TupleType({
+      parent,
+      value: this.value,
+      inherit: this,
+      name: this.name,
+    });
   }
 
   toJSON(): TypeJSON {
@@ -140,7 +151,9 @@ export class StructType extends BaseType {
   readonly kindOfType = "struct";
   value: { name: string; type: Type }[];
 
-  constructor(opts: SyntaxOpts & { value: { name: string; type: Type }[] }) {
+  constructor(
+    opts: NamedEntityOpts & { value: { name: string; type: Type }[] }
+  ) {
     super(opts);
     this.value = opts.value;
   }
@@ -161,7 +174,12 @@ export class StructType extends BaseType {
   }
 
   clone(parent?: Expr): StructType {
-    return new StructType({ parent, value: this.value, inherit: this });
+    return new StructType({
+      parent,
+      value: this.value,
+      inherit: this,
+      name: this.name,
+    });
   }
 }
 
@@ -170,13 +188,18 @@ export class ArrayType extends BaseType {
   readonly size = Infinity;
   value: Type;
 
-  constructor(opts: SyntaxOpts & { value: Type }) {
+  constructor(opts: NamedEntityOpts & { value: Type }) {
     super(opts);
     this.value = opts.value;
   }
 
   clone(parent?: Expr): ArrayType {
-    return new ArrayType({ parent, value: this.value, inherit: this });
+    return new ArrayType({
+      parent,
+      value: this.value,
+      inherit: this,
+      name: this.name,
+    });
   }
 
   toJSON(): TypeJSON {
@@ -188,21 +211,18 @@ export class FnType extends BaseType {
   readonly kindOfType = "fn";
   readonly size = 0;
   readonly fnId: string;
-  readonly identifier: Identifier;
   readonly parameters: Parameter[];
   readonly returnType: Type;
 
   constructor(
-    opts: SyntaxOpts & {
+    opts: NamedEntityOpts & {
       fnId: string;
-      identifier: Identifier;
       parameters: Parameter[];
       returnType: Type;
     }
   ) {
     super(opts);
     this.fnId = opts.fnId;
-    this.identifier = opts.identifier;
     this.parameters = opts.parameters;
     this.returnType = opts.returnType;
   }
@@ -211,7 +231,7 @@ export class FnType extends BaseType {
     return new FnType({
       parent,
       inherit: this,
-      identifier: this.identifier,
+      name: this.name,
       returnType: this.returnType,
       parameters: this.parameters,
       fnId: this.fnId,

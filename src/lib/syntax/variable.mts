@@ -1,25 +1,22 @@
 import { Expr } from "./expr.mjs";
 import { Identifier } from "./identifier.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 import { Type } from "./types.mjs";
 
-export class Variable extends Syntax {
-  readonly identifier: Identifier;
+export class Variable extends NamedEntity {
   readonly isMutable: boolean;
   protected type?: Type;
   readonly syntaxType = "variable";
   readonly initializer?: Expr;
 
   constructor(
-    opts: SyntaxOpts & {
-      identifier: Identifier;
+    opts: NamedEntityOpts & {
       isMutable: boolean;
       initializer?: Expr;
       type?: Type;
     }
   ) {
     super(opts);
-    this.identifier = opts.identifier;
     this.isMutable = opts.isMutable;
     this.type = opts.type;
     this.initializer = opts.initializer;
@@ -35,7 +32,7 @@ export class Variable extends Syntax {
 
   getType(): Type {
     if (this.type) return this.type;
-    throw new Error(`Type not yet resolved for variable ${this.identifier}`);
+    throw new Error(`Type not yet resolved for variable ${this.name}`);
   }
 
   setType(type: Type) {
@@ -43,13 +40,13 @@ export class Variable extends Syntax {
   }
 
   toString() {
-    return this.identifier.toString();
+    return this.name.toString();
   }
 
   toJSON() {
     return [
       "define-variable",
-      this.identifier,
+      this.name,
       this.type,
       ["is-mutable", this.isMutable],
       this.initializer,
@@ -61,7 +58,7 @@ export class Variable extends Syntax {
       location: this.location,
       inherit: this,
       parent: parent ?? this.parent,
-      identifier: this.identifier,
+      name: this.name,
       isMutable: this.isMutable,
       initializer: this.initializer,
       type: this.type,

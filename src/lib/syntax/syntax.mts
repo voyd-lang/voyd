@@ -1,11 +1,7 @@
 import type { Expr } from "./expr.mjs";
 import type { Fn } from "./fn.mjs";
 import type { Id } from "./identifier.mjs";
-import {
-  IdentifierEntity,
-  LexicalContext,
-  MacroEntity,
-} from "./lexical-context.mjs";
+import { Entity, LexicalContext, MacroEntity } from "./lexical-context.mjs";
 import { Parameter } from "./parameter.mjs";
 import { Variable } from "./variable.mjs";
 
@@ -56,14 +52,14 @@ export abstract class Syntax {
     return start;
   }
 
-  registerEntity(id: Id, v: IdentifierEntity) {
-    this.context.registerEntity(id, v);
+  registerEntity(v: Entity) {
+    this.context.registerEntity(v);
     if (v.syntaxType === "parameter" || v.syntaxType === "variable") {
       this.registerLocalWithParentFn(v);
     }
   }
 
-  resolveEntity(id: Id): IdentifierEntity | undefined {
+  resolveEntity(id: Id): Entity | undefined {
     return this.context.resolveEntity(id) ?? this.parent?.resolveEntity(id);
   }
 

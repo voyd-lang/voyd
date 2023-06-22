@@ -1,10 +1,10 @@
 import { Expr } from "./expr.mjs";
 import { Identifier } from "./identifier.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 import { Type } from "./types.mjs";
 
-export class Parameter extends Syntax {
-  readonly identifier: Identifier;
+export class Parameter extends NamedEntity {
+  /** External label the parameter must be called with e.g. myFunc(label: value) */
   readonly label?: Identifier;
   readonly isMutable: boolean;
   protected type?: Type;
@@ -12,10 +12,7 @@ export class Parameter extends Syntax {
   readonly initializer?: Expr;
 
   constructor(
-    opts: SyntaxOpts & {
-      /** Identifier used to refer to the parameter from within the function */
-      identifier: Identifier;
-      /** External label the parameter must be called with e.g. myFunc(label: value) */
+    opts: NamedEntityOpts & {
       label?: Identifier;
       isMutable: boolean;
       initializer?: Expr;
@@ -23,7 +20,6 @@ export class Parameter extends Syntax {
     }
   ) {
     super(opts);
-    this.identifier = opts.identifier;
     this.label = opts.label;
     this.isMutable = opts.isMutable;
     this.type = opts.type;
@@ -40,7 +36,7 @@ export class Parameter extends Syntax {
 
   getType(): Type {
     if (this.type) return this.type;
-    throw new Error(`Type not yet resolved for variable ${this.identifier}`);
+    throw new Error(`Type not yet resolved for variable ${this.name}`);
   }
 
   setType(type: Type) {
@@ -48,7 +44,7 @@ export class Parameter extends Syntax {
   }
 
   toString() {
-    return this.identifier.toString();
+    return this.name.toString();
   }
 
   clone(parent?: Expr | undefined): Parameter {
@@ -56,7 +52,7 @@ export class Parameter extends Syntax {
       location: this.location,
       inherit: this,
       parent: parent ?? this.parent,
-      identifier: this.identifier,
+      name: this.name,
       isMutable: this.isMutable,
       initializer: this.initializer,
       type: this.type,
@@ -67,7 +63,7 @@ export class Parameter extends Syntax {
   toJSON() {
     return [
       "define-parameter",
-      this.identifier,
+      this.name,
       ["label", this.label],
       this.type,
       ["is-mutable", this.isMutable],

@@ -8,13 +8,7 @@ import type { Global } from "./global.mjs";
 import { MacroVariable } from "./macro-variable.mjs";
 import { Macro } from "./macros.mjs";
 
-export type IdentifierEntity =
-  | Fn
-  | Type
-  | Variable
-  | Parameter
-  | Global
-  | MacroEntity;
+export type Entity = Fn | Type | Variable | Parameter | Global | MacroEntity;
 
 export type MacroEntity = Macro | MacroVariable;
 
@@ -24,12 +18,11 @@ export class LexicalContext {
   private readonly params: Map<string, Parameter> = new Map();
   private readonly types: Map<string, Type> = new Map();
   private readonly globals: Map<string, Global> = new Map();
-  // TODO: Do these belong here? Seems like we may be giving LexicalContext too much work.
   private readonly macroVars: Map<string, MacroVariable> = new Map();
   private readonly macros: Map<string, Macro> = new Map();
 
-  registerEntity(id: Id, entity: IdentifierEntity) {
-    const idStr = getIdStr(id);
+  registerEntity(entity: Entity) {
+    const idStr = getIdStr(entity.name);
     if (entity.syntaxType === "fn") {
       const fns = this.fns.get(idStr) ?? [];
       fns.push(entity);
@@ -60,10 +53,10 @@ export class LexicalContext {
       this.macros.set(idStr, entity);
     }
 
-    throw new Error(`Unrecognized entity ${entity}, id: ${id}`);
+    throw new Error(`Unrecognized entity ${entity}, id: ${entity.name}`);
   }
 
-  resolveEntity(identifier: Id): IdentifierEntity | undefined {
+  resolveEntity(identifier: Id): Entity | undefined {
     // Intentionally does not check this.fns, those have separate resolution rules i.e. overloading that are handled elsewhere (for now)
     const idStr = getIdStr(identifier);
     return (

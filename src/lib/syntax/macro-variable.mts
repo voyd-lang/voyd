@@ -1,34 +1,30 @@
 import { Expr } from "./expr.mjs";
-import { Identifier } from "./identifier.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 
-export class MacroVariable extends Syntax {
-  readonly identifier: Identifier;
+export class MacroVariable extends NamedEntity {
   readonly isMutable: boolean;
   readonly syntaxType = "macro-variable";
   value?: Expr;
 
   constructor(
-    opts: SyntaxOpts & {
-      identifier: Identifier;
+    opts: NamedEntityOpts & {
       isMutable: boolean;
       value?: Expr;
     }
   ) {
     super(opts);
-    this.identifier = opts.identifier;
     this.isMutable = opts.isMutable;
     this.value = opts.value;
   }
 
   toString() {
-    return this.identifier.toString();
+    return this.name.toString();
   }
 
   toJSON() {
     return [
       "define-macro-variable",
-      this.identifier,
+      this.name,
       ["reserved-for-type"],
       ["is-mutable", this.isMutable],
     ];
@@ -39,7 +35,7 @@ export class MacroVariable extends Syntax {
       location: this.location,
       inherit: this,
       parent: parent ?? this.parent,
-      identifier: this.identifier,
+      name: this.name,
       isMutable: this.isMutable,
       value: this.value,
     });

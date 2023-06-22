@@ -46,11 +46,11 @@ const expandMacros = (expr: Expr): Expr => {
 const evalExport = (list: List) => {
   const value = expandMacros(list.at(1)!);
   if (value.syntaxType === "macro") {
-    list.getParent()?.registerEntity(value.identifier, value);
+    list.getParent()?.registerEntity(value);
   }
 
   if (value.syntaxType === "macro-variable") {
-    list.getParent()?.registerEntity(value.identifier, value);
+    list.getParent()?.registerEntity(value);
   }
 
   return list;
@@ -58,7 +58,7 @@ const evalExport = (list: List) => {
 
 const evalMacroDef = (list: List) => {
   const macro = listToMacro(list);
-  list.getParent()?.registerEntity(macro.identifier, macro);
+  list.getParent()?.registerEntity(macro);
   return macro;
 };
 
@@ -69,12 +69,12 @@ const evalMacroLetDef = (list: List) =>
 const listToMacro = (list: List): Macro => {
   // TODO Assertions?
   const signature = list.first() as List;
-  const identifier = signature.first() as Identifier;
+  const name = signature.first() as Identifier;
   const parameters = signature.rest() as Identifier[];
   const body = list.slice(1).map(expandMacros);
   const macro = new RegularMacro({
     inherit: list,
-    identifier,
+    name,
     parameters,
     body,
   });
@@ -400,16 +400,9 @@ const registerMacroVar = (opts: {
   value: Expr;
   isMut?: boolean;
 }) => {
-  opts.with.registerEntity(
-    opts.name,
-    new MacroVariable({
-      identifier: isIdentifier(opts.name)
-        ? opts.name
-        : Identifier.from(opts.name),
-      value: opts.value,
-      isMutable: !!opts.isMut,
-    })
-  );
+  const { name, value, isMut } = opts;
+  const variable = new MacroVariable({ name, value, isMutable: !!isMut });
+  opts.with.registerEntity(variable);
 };
 
 export const evalMacroVarDef = (call: List) => {
@@ -422,7 +415,7 @@ export const evalMacroVarDef = (call: List) => {
   }
 
   return new MacroVariable({
-    identifier,
+    name: identifier,
     isMutable: mut.value,
     value: evalMacroExpr(init),
     inherit: call,
