@@ -4,7 +4,7 @@ import {
   ModuleInfo,
   resolveModule as resolveModuleInfo,
 } from "../lib/module-info.mjs";
-import { isList, List, noop } from "../lib/syntax/index.mjs";
+import { List, noop } from "../lib/syntax/index.mjs";
 
 type Modules = Map<string, List | "IN_PROGRESS">;
 
@@ -68,19 +68,19 @@ const resolveImports = (list: List, info: ModuleInfo): List => {
   }
 
   return list.reduce((expr) => {
-    if (!isList(expr)) return expr;
+    if (!expr.isList()) return expr;
 
     const { isUseExpr, isReExported } = getUseInfo(expr);
     const pathIndex = isReExported ? 2 : 1;
     if (isUseExpr) {
       info.imports.push([
         resolveModuleInfo({
-          usePath: expr.at(pathIndex)!.value as string,
+          usePath: expr.getIdStrAt(pathIndex)!,
           srcPath: info.srcPath,
           workingDir: info.workingDir,
           isRoot: info.isRoot,
         }),
-        expr.at(2)!.value as string,
+        expr.getIdStrAt(2)!,
         isReExported ? "re-exported" : undefined,
       ]);
       return noop();
@@ -94,7 +94,7 @@ const getUseInfo = (
   expr: List
 ): { isUseExpr: boolean; isReExported?: boolean } => {
   if (expr.calls("use")) return { isUseExpr: true };
-  if (expr.calls("pub") && expr.at(1)?.is("use")) {
+  if (expr.calls("pub") && expr.calls("use", 1)) {
     return { isUseExpr: true, isReExported: true };
   }
   return { isUseExpr: false };

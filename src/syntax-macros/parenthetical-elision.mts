@@ -1,15 +1,9 @@
-import {
-  Expr,
-  isList,
-  isWhitespace,
-  List,
-  newLine,
-} from "../lib/syntax/index.mjs";
+import { Expr, List } from "../lib/syntax/index.mjs";
 import { isGreedyOp } from "./greedy-ops.mjs";
 import { isContinuationOp } from "./infix.mjs";
 
 export const parentheticalElision = (list: List): List => {
-  const transformed = new List({ inherit: list });
+  const transformed = new List({ ...list.context });
 
   while (list.hasChildren) {
     transformed.push(elideParens(list) as List);
@@ -24,7 +18,7 @@ export type ElideParensOpts = {
 };
 
 const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
-  if (!isList(list)) return list;
+  if (!list.isList()) return list;
   const transformed = new List({});
   let indentLevel = opts.indentLevel ?? 0;
 
@@ -41,7 +35,7 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
   while (list.hasChildren) {
     const next = list.first();
 
-    const isNewline = isWhitespace(next) && next.isNewline;
+    const isNewline = next?.isWhitespace() && next.isNewline;
     if (isNewline && nextLineHasChildExpr()) {
       consumeChildExpr();
       continue;
@@ -51,12 +45,12 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
       break;
     }
 
-    if (isWhitespace(next)) {
+    if (next?.isWhitespace()) {
       list.consume();
       continue;
     }
 
-    if (isList(next)) {
+    if (next?.isList()) {
       transformed.push(elideListContents(next, indentLevel));
       list.consume();
       continue;
@@ -97,7 +91,7 @@ const assistGreedyOpProcessing = (
   }
 
   consumeLeadingWhitespace(list);
-  if (precedingExprCount === 1 && isList(list.first())) {
+  if (precedingExprCount === 1 && list.first()?.isList()) {
     transformed.push(
       ...elideListContents(list.consume() as List, indentLevel).value
     );
@@ -119,7 +113,7 @@ const nextLineIndentLevel = (list: List) => {
 const lineExpressionCount = (list: List) => {
   let count = 0;
   for (const expr of list.value) {
-    if (isWhitespace(expr) && !expr.isNewline) continue;
+    if (expr.isWhitespace() && !expr.isNewline) continue;
     if (isNewline(expr)) break;
     count += 1;
   }
@@ -129,11 +123,11 @@ const lineExpressionCount = (list: List) => {
 const elideListContents = (list: List, indentLevel: number): List => {
   consumeLeadingWhitespace(list);
   const transformed = new List({
+    ...list.context,
     value: [elideParens(list, { indentLevel })],
-    inherit: list,
   });
 
-  if (transformed.value.length === 1 && isList(transformed.first())) {
+  if (transformed.value.length === 1 && transformed.first()?.isList()) {
     return transformed.first() as List;
   }
 
@@ -171,7 +165,7 @@ const hasContinuation = (list: List, transformed: List) => {
   }
 
   for (const expr of list.value) {
-    if (isWhitespace(expr)) continue;
+    if (expr.isWhitespace()) continue;
     return isContinuationOp(expr);
   }
 
@@ -181,7 +175,7 @@ const hasContinuation = (list: List, transformed: List) => {
 const consumeLeadingWhitespace = (list: List) => {
   while (list.hasChildren) {
     const next = list.first();
-    if (isWhitespace(next)) {
+    if (next?.isWhitespace()) {
       list.consume();
       continue;
     }
@@ -189,6 +183,5 @@ const consumeLeadingWhitespace = (list: List) => {
   }
 };
 
-const isNewline = (v: Expr) => isWhitespace(v) && v.isNewline;
-const isTab = (v: Expr) => isWhitespace(v) && v.isTab;
-const isSpace = (v: Expr) => isWhitespace(v) && v.isSpace;
+const isNewline = (v: Expr) => v.isWhitespace() && v.isNewline;
+const isTab = (v: Expr) => v.isWhitespace() && v.isTab;

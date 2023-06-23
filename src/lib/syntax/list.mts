@@ -1,6 +1,5 @@
 import { Expr } from "./expr.mjs";
 import { getIdStr } from "./get-id-str.mjs";
-import { isIdentifier, isList } from "./helpers.mjs";
 import { Id, Identifier } from "./identifier.mjs";
 import { Int } from "./int.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
@@ -42,9 +41,13 @@ export class List extends Syntax {
     return this;
   }
 
-  calls(fnId: Id) {
-    const first = this.first();
-    return isIdentifier(first) && getIdStr(first) === getIdStr(fnId);
+  calls(fnId: Id, atIndex = 0) {
+    return this.getIdStrAt(atIndex) === getIdStr(fnId);
+  }
+
+  getIdStrAt(index: number): string | undefined {
+    const v = this.at(index);
+    return v?.isIdentifier() || v?.isStringLiteral() ? v.value : undefined;
   }
 
   consume(): Expr {
@@ -80,7 +83,7 @@ export class List extends Syntax {
 
       const cloned = ex.clone(this);
 
-      if (isList(cloned) && cloned.calls("splice-quote")) {
+      if (cloned.isList() && cloned.calls("splice-quote")) {
         this.value.push(...cloned.rest());
         return;
       }

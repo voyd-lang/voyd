@@ -5,12 +5,6 @@ import {
   FnType,
   Identifier,
   Int,
-  isBool,
-  isFloat,
-  isIdentifier,
-  isInt,
-  isList,
-  isStructType,
   List,
   Primitive,
   Type,
@@ -39,25 +33,16 @@ interface CompileExprOpts<T = Expr> {
 
 const compileExpression = (opts: CompileExprOpts): number => {
   const { expr, mod } = opts;
-  if (isList(expr)) return compileList({ ...opts, expr });
-  if (isInt(expr)) return mod.i32.const(expr.value);
-  if (isFloat(expr)) return mod.f32.const(expr.value);
-  if (isIdentifier(expr)) return compileIdentifier({ ...opts, expr });
+  if (expr.isList()) return compileList({ ...opts, expr });
+  if (expr.isInt()) return mod.i32.const(expr.value);
+  if (expr.isFloat()) return mod.f32.const(expr.value);
+  if (expr.isIdentifier()) return compileIdentifier({ ...opts, expr });
+  if (expr.isFn()) return compileFunction({ ...opts, expr });
+  if (expr.isVariable()) return compileVariable({ ...opts, expr });
+  if (expr.isGlobal()) return compileGlobal({ ...opts, expr });
 
-  if (isBool(expr)) {
+  if (expr.isBool()) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);
-  }
-
-  if (expr.syntaxType === "fn") {
-    return compileFunction({ ...opts, expr });
-  }
-
-  if (expr.syntaxType === "variable") {
-    return compileVariable({ ...opts, expr });
-  }
-
-  if (expr.syntaxType === "global") {
-    return compileGlobal({ ...opts, expr });
   }
 
   throw new Error(`Unrecognized expression ${expr}`);
@@ -104,7 +89,7 @@ const compileList = (opts: CompileListOpts): number => {
     return mod.nop();
   }
 
-  if (isIdentifier(expr.first())) {
+  if (expr.first()?.isIdentifier()) {
     return compileFunctionCall({ ...opts, expr });
   }
 
@@ -113,7 +98,7 @@ const compileList = (opts: CompileListOpts): number => {
 
 const compileRootExpr = (opts: CompileListOpts): number => {
   for (const module of opts.expr.rest()) {
-    if (!isList(module) || !module.calls("module")) {
+    if (!module.isList() || !module.calls("module")) {
       throw new Error(
         "Expected module, got: " + JSON.stringify(module, null, 2)
       );
@@ -283,9 +268,9 @@ const mapBinaryenType = (type: Type): binaryen.Type => {
   if (isPrimitiveId(type, "i64")) return binaryen.i64;
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "void")) return binaryen.none;
-  if (isStructType(type)) return binaryen.i32;
+  if (type.isStructType()) return binaryen.i32;
   throw new Error(`Unsupported type ${type}`);
 };
 
 const isPrimitiveId = (type: Type, id: Primitive) =>
-  type.kindOfType === "primitive" && type.primitiveId === id;
+  type.isPrimitiveType() && type.name.value === id;

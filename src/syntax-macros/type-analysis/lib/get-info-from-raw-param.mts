@@ -1,9 +1,9 @@
-import { List, isList, Identifier } from "../../../lib/index.mjs";
+import { List, Identifier } from "../../../lib/index.mjs";
 import { isStruct } from "./is-struct.mjs";
 import { typedStructListToStructType } from "./typed-struct-to-struct-type.mjs";
 
 export const getInfoFromRawParam = (list: List) => {
-  const isLabeled = !isStruct(list) && isList(list.at(2));
+  const isLabeled = !isStruct(list) && list.at(2)?.isList();
   const paramDef = isLabeled ? (list.at(2) as List) : list;
   const identifier = isStruct(list)
     ? undefined

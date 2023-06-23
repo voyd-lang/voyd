@@ -1,8 +1,6 @@
 import {
   List,
-  isList,
   Identifier,
-  isPrimitiveType,
   CDT_ADDRESS_TYPE,
   FnType,
   Int,
@@ -16,15 +14,15 @@ export const memoryManagement = (list: List, info: ModuleInfo): List => {
 
 const insertMemInstructions = (list: List): List =>
   list.reduce((expr) => {
-    if (!isList(expr)) return expr;
+    if (!expr.isList()) return expr;
 
     if (!expr.calls("define-function")) return insertMemInstructions(expr);
 
     const fnId = expr.at(1) as Identifier;
     const fn = fnId.getTypeOf() as FnType;
 
-    if (isPrimitiveType(fn.returns)) return insertMemInstructions(expr);
-    return addMemInstructionsToFunctionDef(expr, fn.returns!.size);
+    if (fn.returnType.isPrimitiveType()) return insertMemInstructions(expr);
+    return addMemInstructionsToFunctionDef(expr, fn.returnType.size);
   });
 
 const addMemInstructionsToFunctionDef = (
@@ -40,7 +38,7 @@ const addMemInstructionsToFunctionDef = (
   list.set(
     4,
     new List({
-      inherit: list.value[4],
+      ...list.value[4]?.context,
       value: [
         "typed-block",
         CDT_ADDRESS_TYPE,

@@ -1,12 +1,4 @@
-import {
-  Expr,
-  isList,
-  Identifier,
-  List,
-  FnType,
-  isIdentifier,
-  Type,
-} from "../../lib/index.mjs";
+import { Expr, Identifier, List, FnType, Type } from "../../lib/index.mjs";
 import { SyntaxMacro } from "../types.mjs";
 import { getInfoFromRawParam } from "./lib/get-info-from-raw-param.mjs";
 import { isStruct } from "./lib/is-struct.mjs";
@@ -19,7 +11,7 @@ export const registerAnnotatedTypes: SyntaxMacro = (list) => {
 };
 
 const scanAnnotatedTypes = (expr: Expr) => {
-  if (!isList(expr)) return;
+  if (!expr.isList()) return;
   const isFnDef =
     expr.calls("define-function") || expr.calls("define-extern-function");
 
@@ -36,8 +28,7 @@ const scanAnnotatedTypes = (expr: Expr) => {
     const type = isStruct(val)
       ? typedStructListToStructType(val as List)
       : val.getTypeOf()!;
-    const parent = expr.getParent();
-    parent?.addType(id, type);
+    expr.parent?.addType(id, type);
     return;
   }
 
@@ -45,7 +36,7 @@ const scanAnnotatedTypes = (expr: Expr) => {
 };
 
 const initFn = (expr: List) => {
-  const parent = expr.getParent()!;
+  const parent = expr.parent!;
   const fnIdentifier = expr.at(1) as Identifier;
   const paramsIndex = expr.calls("define-function") ? 2 : 3;
   const params = (expr.at(paramsIndex) as List).value.slice(1).map((p) => {
@@ -60,7 +51,7 @@ const initFn = (expr: List) => {
   const suppliedReturnType = getSuppliedReturnTypeForFn(expr, paramsIndex + 1);
 
   const fnType = new FnType({
-    inherit: expr,
+    ...expr.context,
     value: { params, returns: suppliedReturnType },
   });
 
@@ -74,8 +65,8 @@ const getSuppliedReturnTypeForFn = (
   defIndex: number
 ): Type | undefined => {
   const definition = list.at(defIndex);
-  if (!isList(definition)) return undefined;
+  if (!definition?.isList()) return undefined;
   const identifier = definition.at(1); // Todo: Support inline context data types?
-  if (!isIdentifier(identifier)) return undefined;
+  if (!identifier?.isIdentifier()) return undefined;
   return list.getType(identifier);
 };

@@ -22,6 +22,10 @@ export class Identifier extends Syntax {
     this.value = opts.value;
   }
 
+  is(v: string) {
+    return v === this.value;
+  }
+
   isDefined() {
     return !!this.resolveEntity(this);
   }

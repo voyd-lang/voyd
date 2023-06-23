@@ -1,23 +1,17 @@
-import {
-  Expr,
-  Identifier,
-  isIdentifier,
-  isList,
-  List,
-} from "../lib/syntax/index.mjs";
+import { Expr, Identifier, List } from "../lib/syntax/index.mjs";
 
 export const greedyOps = new Set(["=>", "=", "<|", ";"]);
 export const isGreedyOp = (expr?: Expr): expr is Identifier => {
-  if (!isIdentifier(expr)) return false;
+  if (!expr?.isIdentifier()) return false;
   return !expr.isQuoted && greedyOps.has(expr.value);
 };
 
 export const processGreedyOps = (list: List) => {
-  const transformed = new List({ inherit: list });
+  const transformed = new List({ ...list.context });
   while (list.hasChildren) {
     const next = list.consume();
 
-    if (isList(next)) {
+    if (next.isList()) {
       transformed.push(processGreedyOps(next));
       continue;
     }

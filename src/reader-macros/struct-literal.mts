@@ -1,4 +1,4 @@
-import { Identifier, isList, List } from "../lib/index.mjs";
+import { Identifier } from "../lib/index.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const structLiteralMacro: ReaderMacro = {

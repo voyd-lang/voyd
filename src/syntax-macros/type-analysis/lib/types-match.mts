@@ -1,14 +1,12 @@
 import {
   Type,
-  isStructType,
   CDT_ADDRESS_TYPE,
   Expr,
-  isPrimitiveType,
   StructType,
 } from "../../../lib/index.mjs";
 
 export const typesMatch = (expected?: Type, given?: Type) => {
-  if (isStructType(expected) && isStructType(given)) {
+  if (expected?.isStructType() && given?.isStructType()) {
     return structArgsMatch(expected, given);
   }
 
@@ -18,8 +16,8 @@ export const typesMatch = (expected?: Type, given?: Type) => {
 // Until a more complex type system is implemented, assume that non-primitive types
 // Can be treated as i32's.
 const isStructPointerMatch = (expected?: Type, given?: Expr) =>
-  (!isPrimitiveType(expected) && given?.is(CDT_ADDRESS_TYPE)) ||
-  (!isPrimitiveType(given) && expected?.is(CDT_ADDRESS_TYPE));
+  (!expected?.isPrimitiveType() && given?.is(CDT_ADDRESS_TYPE)) ||
+  (!given?.isPrimitiveType() && expected?.is(CDT_ADDRESS_TYPE));
 
 const structArgsMatch = (expected: StructType, given: StructType): boolean => {
   return (

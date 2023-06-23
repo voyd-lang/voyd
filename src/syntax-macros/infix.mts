@@ -1,10 +1,4 @@
-import {
-  Expr,
-  Identifier,
-  isIdentifier,
-  isList,
-  List,
-} from "../lib/syntax/index.mjs";
+import { Expr, Identifier, List } from "../lib/syntax/index.mjs";
 import { greedyOps } from "./greedy-ops.mjs";
 
 export type Associativity = "left" | "right";
@@ -42,10 +36,10 @@ export const isContinuationOp = (op?: Expr) =>
   isInfixOp(op) && !op.is(":") && !greedyOps.has(op.value); // `:` is a hacky exception (Hopefully the only one.)
 
 export const isInfixOp = (op?: Expr): op is Identifier =>
-  isIdentifier(op) && !op.isQuoted && infixOperators.has(op.value);
+  !!op?.isIdentifier() && !op.isQuoted && infixOperators.has(op.value);
 
 export const infix = (list: List, startList?: List): List => {
-  const outputQueue = startList ?? new List({ inherit: list });
+  const outputQueue = startList ?? new List({ ...list.context });
   const operatorQueue: Identifier[] = [];
 
   const opQueueHasHigherOp = (op1: Identifier) => {
@@ -70,7 +64,7 @@ export const infix = (list: List, startList?: List): List => {
   };
 
   const pushDot = (operand1: Expr, operand2: Expr, currentExpr?: Expr) => {
-    if (isList(operand2)) {
+    if (operand2.isList()) {
       pushOut([operand2.consume(), operand1, ...operand2.value], currentExpr);
       return;
     }
@@ -96,7 +90,7 @@ export const infix = (list: List, startList?: List): List => {
       continue;
     }
 
-    isList(expr) ? outputQueue.push(infix(expr)) : outputQueue.push(expr);
+    expr.isList() ? outputQueue.push(infix(expr)) : outputQueue.push(expr);
 
     if (!isOperand(list.first())) break;
   }
@@ -110,4 +104,4 @@ export const infix = (list: List, startList?: List): List => {
 };
 
 export const isOperand = (expr?: Expr): expr is Identifier =>
-  isIdentifier(expr) && isInfixOp(expr);
+  !!expr?.isIdentifier() && isInfixOp(expr);
