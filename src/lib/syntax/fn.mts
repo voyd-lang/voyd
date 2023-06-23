@@ -6,8 +6,6 @@ import { Variable } from "./variable.mjs";
 
 export class Fn extends NamedEntity {
   readonly syntaxType = "fn";
-  /** A unique, human readable id to be used as the absolute id of the function (helps with function overloading) */
-  readonly id: string;
   readonly variables: Variable[] = [];
   readonly parameters: Parameter[] = [];
   // I'm too lazy do define an ExternFn Syntax object
@@ -24,12 +22,9 @@ export class Fn extends NamedEntity {
       body: Expr;
       isExternal?: boolean;
       externalNamespace?: string;
-      /** Internal to Fn only, do not set here unless this is the clone implementation */
-      id?: string;
     }
   ) {
     super(opts);
-    this.id = opts.id ?? this.generateId();
     this.returnType = opts.returnType;
     this.parameters = opts.parameters ?? [];
     this.variables = opts.variables ?? [];
@@ -38,23 +33,15 @@ export class Fn extends NamedEntity {
     this.body = opts.body;
   }
 
-  private generateId() {
-    return `${this.location?.filePath ?? "unknown"}/${this.name}#${
-      this.syntaxId
-    }`;
-  }
-
   getName(): string {
     return this.name.value;
   }
 
   getType(): FnType {
     return new FnType({
-      fnId: this.id,
-      name: this.name,
+      ...this.getCloneOpts(this.parent),
       parameters: this.parameters,
       returnType: this.getReturnType(),
-      inherit: this,
     });
   }
 
@@ -105,14 +92,11 @@ export class Fn extends NamedEntity {
 
   clone(parent?: Expr | undefined): Fn {
     return new Fn({
-      id: this.id,
-      name: this.name,
+      ...this.getCloneOpts(parent),
       variables: this.variables,
       parameters: this.parameters,
       returnType: this.returnType,
-      inherit: this,
       body: this.body,
-      parent,
       isExternal: this.isExternal,
       externalNamespace: this.externalNamespace,
     });

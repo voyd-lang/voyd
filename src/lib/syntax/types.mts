@@ -42,11 +42,7 @@ export class PrimitiveType extends BaseType {
   }
 
   clone(parent?: Expr): PrimitiveType {
-    return new PrimitiveType({
-      parent,
-      inherit: this,
-      name: this.name,
-    });
+    return new PrimitiveType({ ...this.getCloneOpts(parent) });
   }
 
   toJSON(): TypeJSON {
@@ -72,12 +68,7 @@ export class UnionType extends BaseType {
   }
 
   clone(parent?: Expr): UnionType {
-    return new UnionType({
-      parent,
-      value: this.value,
-      inherit: this,
-      name: this.name,
-    });
+    return new UnionType({ ...this.getCloneOpts(parent), value: this.value });
   }
 
   toJSON(): TypeJSON {
@@ -104,10 +95,8 @@ export class IntersectionType extends BaseType {
 
   clone(parent?: Expr): IntersectionType {
     return new IntersectionType({
-      parent,
+      ...this.getCloneOpts(parent),
       value: this.value,
-      inherit: this,
-      name: this.name,
     });
   }
 
@@ -134,12 +123,7 @@ export class TupleType extends BaseType {
   }
 
   clone(parent?: Expr): TupleType {
-    return new TupleType({
-      parent,
-      value: this.value,
-      inherit: this,
-      name: this.name,
-    });
+    return new TupleType({ ...this.getCloneOpts(parent), value: this.value });
   }
 
   toJSON(): TypeJSON {
@@ -174,12 +158,7 @@ export class StructType extends BaseType {
   }
 
   clone(parent?: Expr): StructType {
-    return new StructType({
-      parent,
-      value: this.value,
-      inherit: this,
-      name: this.name,
-    });
+    return new StructType({ ...this.getCloneOpts(parent), value: this.value });
   }
 }
 
@@ -194,12 +173,7 @@ export class ArrayType extends BaseType {
   }
 
   clone(parent?: Expr): ArrayType {
-    return new ArrayType({
-      parent,
-      value: this.value,
-      inherit: this,
-      name: this.name,
-    });
+    return new ArrayType({ ...this.getCloneOpts(parent), value: this.value });
   }
 
   toJSON(): TypeJSON {
@@ -210,31 +184,25 @@ export class ArrayType extends BaseType {
 export class FnType extends BaseType {
   readonly kindOfType = "fn";
   readonly size = 0;
-  readonly fnId: string;
   readonly parameters: Parameter[];
   readonly returnType: Type;
 
   constructor(
     opts: NamedEntityOpts & {
-      fnId: string;
       parameters: Parameter[];
       returnType: Type;
     }
   ) {
     super(opts);
-    this.fnId = opts.fnId;
     this.parameters = opts.parameters;
     this.returnType = opts.returnType;
   }
 
   clone(parent?: Expr): FnType {
     return new FnType({
-      parent,
-      inherit: this,
-      name: this.name,
+      ...this.getCloneOpts(parent),
       returnType: this.returnType,
       parameters: this.parameters,
-      fnId: this.fnId,
     });
   }
 
@@ -243,7 +211,7 @@ export class FnType extends BaseType {
       "type",
       [
         "fn",
-        this.fnId,
+        this.id,
         ["parameters", this.parameters],
         ["return-type", this.returnType],
       ],

@@ -1,5 +1,4 @@
 import { Expr } from "./expr.mjs";
-import { Identifier } from "./identifier.mjs";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 import { Type } from "./types.mjs";
 
