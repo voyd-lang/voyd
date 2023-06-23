@@ -42,7 +42,7 @@ export class PrimitiveType extends BaseType {
   }
 
   clone(parent?: Expr): PrimitiveType {
-    return new PrimitiveType({ ...this.getCloneOpts(parent) });
+    return new PrimitiveType({ ...super.getCloneOpts(parent) });
   }
 
   toJSON(): TypeJSON {
@@ -68,7 +68,7 @@ export class UnionType extends BaseType {
   }
 
   clone(parent?: Expr): UnionType {
-    return new UnionType({ ...this.getCloneOpts(parent), value: this.value });
+    return new UnionType({ ...super.getCloneOpts(parent), value: this.value });
   }
 
   toJSON(): TypeJSON {
@@ -95,7 +95,7 @@ export class IntersectionType extends BaseType {
 
   clone(parent?: Expr): IntersectionType {
     return new IntersectionType({
-      ...this.getCloneOpts(parent),
+      ...super.getCloneOpts(parent),
       value: this.value,
     });
   }
@@ -123,7 +123,7 @@ export class TupleType extends BaseType {
   }
 
   clone(parent?: Expr): TupleType {
-    return new TupleType({ ...this.getCloneOpts(parent), value: this.value });
+    return new TupleType({ ...super.getCloneOpts(parent), value: this.value });
   }
 
   toJSON(): TypeJSON {
@@ -158,7 +158,7 @@ export class StructType extends BaseType {
   }
 
   clone(parent?: Expr): StructType {
-    return new StructType({ ...this.getCloneOpts(parent), value: this.value });
+    return new StructType({ ...super.getCloneOpts(parent), value: this.value });
   }
 }
 
@@ -173,7 +173,7 @@ export class ArrayType extends BaseType {
   }
 
   clone(parent?: Expr): ArrayType {
-    return new ArrayType({ ...this.getCloneOpts(parent), value: this.value });
+    return new ArrayType({ ...super.getCloneOpts(parent), value: this.value });
   }
 
   toJSON(): TypeJSON {
@@ -200,7 +200,7 @@ export class FnType extends BaseType {
 
   clone(parent?: Expr): FnType {
     return new FnType({
-      ...this.getCloneOpts(parent),
+      ...super.getCloneOpts(parent),
       returnType: this.returnType,
       parameters: this.parameters,
     });

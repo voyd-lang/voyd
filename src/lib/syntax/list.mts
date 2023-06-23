@@ -37,7 +37,7 @@ export class List extends Syntax {
   }
 
   set(index: number, value: Expr) {
-    value.setParent(this);
+    value.parent = this;
     this.value[index] = value; // Should this clone?
     return this;
   }
@@ -97,18 +97,24 @@ export class List extends Syntax {
 
   insert(expr: Expr | string, at = 0) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
-    result.setParent(this);
+    result.parent = this;
     this.value.splice(at, 0, result);
     return this;
   }
 
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
-    return new List({ value: this.value.map(fn), inherit: this });
+    return new List({
+      ...super.getCloneOpts(),
+      value: this.value.map(fn),
+    });
   }
 
   /** Returns a copy of this list where all the parameters mapped by the supplied function */
   mapArgs(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
-    const newList = new List({ value: this.rest().map(fn), inherit: this });
+    const newList = new List({
+      ...super.getCloneOpts(),
+      value: this.rest().map(fn),
+    });
     if (this.first()) newList.insert(this.first()!);
     return newList;
   }
@@ -116,7 +122,7 @@ export class List extends Syntax {
   reduce(
     fn: (expr: Expr, index: number, array: Expr[]) => Expr | undefined
   ): List {
-    const list = new List({ inherit: this });
+    const list = new List({ ...super.getCloneOpts() });
     return this.value.reduce((newList: List, expr, index, array) => {
       if (!expr) return newList;
       const result = fn(expr, index, array);
@@ -126,7 +132,10 @@ export class List extends Syntax {
   }
 
   slice(start?: number, end?: number): List {
-    return new List({ inherit: this, value: this.value.slice(start, end) });
+    return new List({
+      ...super.getCloneOpts(),
+      value: this.value.slice(start, end),
+    });
   }
 
   toJSON() {
@@ -134,25 +143,7 @@ export class List extends Syntax {
   }
 
   clone(parent?: Expr): List {
-    return new List({ parent, value: this, inherit: this });
-  }
-}
-
-/**
- * Passes a reference to itself rather than being copied on pushed.
- *
- * This was created due to an issue with the list.reduce function of
- * the macro expansion phase. The macro evaluator would clone the reduced
- * list when evaluating arguments to list.push. This prevented the list
- * from ever truly being updated as it was always pushing to a new list.
- *
- * Note: I've decided to use the normal list in a functional way, by chaining
- * the push operations and creating a new list on each push. This might
- * end up being too memory intensive, so I may use the BoxList in the future.
- */
-export class BoxList extends List {
-  clone() {
-    return this;
+    return new List({ ...super.getCloneOpts(parent), value: this });
   }
 }
 

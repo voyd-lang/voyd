@@ -11,7 +11,7 @@ export class Bool extends Syntax {
   }
 
   clone(parent?: Expr): Bool {
-    return new Bool({ parent, value: this.value, inherit: this });
+    return new Bool({ ...super.getCloneOpts(parent), value: this.value });
   }
 
   toJSON() {

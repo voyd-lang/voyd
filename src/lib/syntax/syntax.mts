@@ -20,34 +20,28 @@ export type SourceLocation = {
 
 export type SyntaxOpts = {
   location?: SourceLocation;
-  inherit?: Syntax;
   parent?: Expr;
+  context?: LexicalContext;
 };
 
 export abstract class Syntax {
   readonly syntaxId = getSyntaxId();
   readonly location?: SourceLocation;
   readonly context: LexicalContext;
-  protected parent?: Expr;
+  parent?: Expr;
   /** For tagged unions */
   abstract readonly syntaxType: string;
 
-  constructor({ location, inherit, parent }: SyntaxOpts) {
-    this.location = location ?? inherit?.location;
-    this.parent = parent ?? inherit?.getParent();
-    this.context = inherit?.context ?? new LexicalContext();
+  constructor({ location, parent, context }: SyntaxOpts) {
+    this.location = location;
+    this.parent = parent;
+    this.context = context ?? new LexicalContext();
   }
 
   get parentFn(): Fn | undefined {
     return this.parent?.syntaxType === "fn"
       ? this.parent
       : this.parent?.parentFn;
-  }
-
-  getFns(id: Id, start: Fn[] = []): Fn[] {
-    start.push(...this.context.getFns(id));
-    if (this.parent) return this.parent.getFns(id, start);
-    return start;
   }
 
   registerEntity(v: Entity) {
@@ -68,13 +62,22 @@ export abstract class Syntax {
     );
   }
 
-  getParent() {
-    return this.parent;
+  resolveFns(id: Id, start: Fn[] = []): Fn[] {
+    start.push(...this.context.resolveFns(id));
+    if (this.parent) return this.parent.resolveFns(id, start);
+    return start;
   }
 
-  setParent(parent?: Expr) {
-    this.parent = parent;
-    return this;
+  resolveFnById(id: string): Fn | undefined {
+    return this.context.resolveFnById(id) ?? this.parent?.resolveFnById(id);
+  }
+
+  getCloneOpts(parent?: Expr): SyntaxOpts {
+    return {
+      location: this.location,
+      parent: parent ?? this.parent,
+      context: this.context,
+    };
   }
 
   abstract clone(parent?: Expr): Expr;

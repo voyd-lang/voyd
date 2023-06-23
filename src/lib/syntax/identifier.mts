@@ -14,14 +14,11 @@ export class Identifier extends Syntax {
   constructor(
     opts: SyntaxOpts & {
       value: string;
-      bind?: Expr;
       isQuoted?: boolean;
     }
   ) {
     super(opts);
-    this.isQuoted =
-      opts.isQuoted ??
-      (opts.inherit instanceof Identifier ? opts.inherit.isQuoted : undefined);
+    this.isQuoted = opts.isQuoted;
     this.value = opts.value;
   }
 
@@ -43,16 +40,15 @@ export class Identifier extends Syntax {
 
   replace(search: string, newVal: string): Identifier {
     return new Identifier({
+      ...super.getCloneOpts(),
       value: this.value.replace(search, newVal),
-      inherit: this,
     });
   }
 
   clone(parent?: Expr): Identifier {
     return new Identifier({
-      parent,
+      ...super.getCloneOpts(parent),
       value: this.value,
-      inherit: this,
       isQuoted: this.isQuoted,
     });
   }

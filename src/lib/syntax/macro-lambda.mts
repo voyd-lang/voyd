@@ -25,10 +25,9 @@ export class MacroLambda extends Syntax {
 
   clone(parent?: Expr | undefined): MacroLambda {
     return new MacroLambda({
+      ...super.getCloneOpts(parent),
       parameters: this.parameters,
-      inherit: this,
       body: this.body,
-      parent,
     });
   }
 

@@ -14,6 +14,7 @@ export type MacroEntity = Macro | MacroVariable;
 
 export class LexicalContext {
   private readonly fns: Map<string, Fn[]> = new Map();
+  private readonly fnsById: Map<string, Fn> = new Map();
   private readonly vars: Map<string, Variable> = new Map();
   private readonly params: Map<string, Parameter> = new Map();
   private readonly types: Map<string, Type> = new Map();
@@ -27,6 +28,7 @@ export class LexicalContext {
       const fns = this.fns.get(idStr) ?? [];
       fns.push(entity);
       this.fns.set(idStr, fns);
+      this.fnsById.set(entity.id, entity);
     }
 
     if (entity.syntaxType === "type") {
@@ -58,9 +60,12 @@ export class LexicalContext {
 
   resolveEntity(name: Id): Entity | undefined {
     // Intentionally does not check this.fns, those have separate resolution rules i.e. overloading that are handled elsewhere (for now)
-    const idStr = getIdStr(name);
+    const id = getIdStr(name);
     return (
-      this.vars.get(idStr) ?? this.params.get(idStr) ?? this.types.get(idStr)
+      this.vars.get(id) ??
+      this.params.get(id) ??
+      this.types.get(id) ??
+      this.globals.get(id)
     );
   }
 
@@ -70,23 +75,12 @@ export class LexicalContext {
     return this.macroVars.get(idStr);
   }
 
-  getFns(name: Id): Fn[] {
+  resolveFns(name: Id): Fn[] {
     const id = getIdStr(name);
     return this.fns.get(id) ?? [];
   }
 
-  getVar(name: Id): Variable | undefined {
-    const id = getIdStr(name);
-    return this.vars.get(id);
-  }
-
-  getParam(name: Id): Parameter | undefined {
-    const id = getIdStr(name);
-    return this.params.get(id);
-  }
-
-  getType(name: Id): Type | undefined {
-    const id = getIdStr(name);
-    return this.types.get(id);
+  resolveFnById(id: string): Fn | undefined {
+    return this.fnsById.get(id);
   }
 }

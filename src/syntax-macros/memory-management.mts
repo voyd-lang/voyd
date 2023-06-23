@@ -53,7 +53,7 @@ const addMemInstructionsToFunctionDef = (
 };
 
 const getFnId = (parent: List, name: string): Identifier => {
-  const fnIdFn = parent.getFns(name)[0];
+  const fnIdFn = parent.resolveFns(name)[0];
   const fnId = Identifier.from(name);
   fnId.setTypeOf(fnIdFn);
   return fnId;

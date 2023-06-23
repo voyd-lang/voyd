@@ -11,6 +11,10 @@ export class Int extends Syntax {
   }
 
   clone(parent?: Expr): Int {
-    return new Int({ parent, value: this.value, inherit: this });
+    return new Int({ ...super.getCloneOpts(parent), value: this.value });
+  }
+
+  toJSON() {
+    return this.value;
   }
 }

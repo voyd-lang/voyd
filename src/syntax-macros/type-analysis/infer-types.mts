@@ -478,7 +478,7 @@ const getMatchingFn = ({
   identifier: Identifier;
   args: List;
 }): FnType | undefined => {
-  const candidates = identifier.getFns(identifier);
+  const candidates = identifier.resolveFns(identifier);
   if (!candidates) return undefined;
   return candidates.find((candidate) => {
     const params = candidate.value.params;
@@ -515,7 +515,7 @@ const inferExportTypes = (exp: List) => {
 };
 
 const inferFnExportTypes = (fnId: Identifier, params: List) => {
-  const candidates = fnId.getFns(fnId);
+  const candidates = fnId.resolveFns(fnId);
   const fn = candidates.find((candidate) =>
     candidate.value.params.every((param, index) => {
       const p = params.at(index + 1);

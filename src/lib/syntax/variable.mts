@@ -54,10 +54,7 @@ export class Variable extends NamedEntity {
 
   clone(parent?: Expr | undefined): Variable {
     return new Variable({
-      location: this.location,
-      inherit: this,
-      parent: parent ?? this.parent,
-      name: this.name,
+      ...super.getCloneOpts(parent),
       isMutable: this.isMutable,
       initializer: this.initializer,
       type: this.type,

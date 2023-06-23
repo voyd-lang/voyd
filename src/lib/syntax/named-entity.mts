@@ -21,7 +21,7 @@ export abstract class NamedEntity extends Syntax {
     }`;
   }
 
-  protected getCloneOpts(parent?: Expr): NamedEntityOpts {
-    return { id: this.id, name: this.name, inherit: this, parent };
+  getCloneOpts(parent?: Expr): NamedEntityOpts {
+    return { ...super.getCloneOpts(parent), id: this.id, name: this.name };
   }
 }

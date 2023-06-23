@@ -32,11 +32,9 @@ export class RegularMacro extends NamedEntity {
 
   clone(parent?: Expr | undefined): RegularMacro {
     return new RegularMacro({
-      name: this.name,
+      ...super.getCloneOpts(parent),
       parameters: this.parameters,
-      inherit: this,
       body: this.body,
-      parent,
     });
   }
 

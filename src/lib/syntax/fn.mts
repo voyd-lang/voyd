@@ -39,7 +39,7 @@ export class Fn extends NamedEntity {
 
   getType(): FnType {
     return new FnType({
-      ...this.getCloneOpts(this.parent),
+      ...super.getCloneOpts(this.parent),
       parameters: this.parameters,
       returnType: this.getReturnType(),
     });
@@ -92,7 +92,7 @@ export class Fn extends NamedEntity {
 
   clone(parent?: Expr | undefined): Fn {
     return new Fn({
-      ...this.getCloneOpts(parent),
+      ...super.getCloneOpts(parent),
       variables: this.variables,
       parameters: this.parameters,
       returnType: this.returnType,

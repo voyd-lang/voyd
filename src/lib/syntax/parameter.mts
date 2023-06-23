@@ -49,10 +49,7 @@ export class Parameter extends NamedEntity {
 
   clone(parent?: Expr | undefined): Parameter {
     return new Parameter({
-      location: this.location,
-      inherit: this,
-      parent: parent ?? this.parent,
-      name: this.name,
+      ...super.getCloneOpts(parent),
       isMutable: this.isMutable,
       initializer: this.initializer,
       type: this.type,

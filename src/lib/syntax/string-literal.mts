@@ -11,7 +11,10 @@ export class StringLiteral extends Syntax {
   }
 
   clone(parent?: Expr): StringLiteral {
-    return new StringLiteral({ parent, value: this.value, inherit: this });
+    return new StringLiteral({
+      ...super.getCloneOpts(parent),
+      value: this.value,
+    });
   }
 
   toJSON() {
