@@ -33,7 +33,7 @@ export class Fn extends NamedEntity {
     this.body = opts.body;
   }
 
-  getName(): string {
+  getNameStr(): string {
     return this.name.value;
   }
 

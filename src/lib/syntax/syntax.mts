@@ -1,4 +1,5 @@
 import { Bool } from "./bool.mjs";
+import { Call } from "./call.mjs";
 import type { Expr } from "./expr.mjs";
 import { Float } from "./float.mjs";
 import { Fn } from "./fn.mjs";
@@ -173,6 +174,14 @@ export abstract class Syntax {
 
   isMacroVariable(): this is MacroVariable {
     return this instanceof MacroVariable;
+  }
+
+  isCall(): this is Call {
+    return this instanceof Call;
+  }
+
+  isParameter(): this is Parameter {
+    return this instanceof Parameter;
   }
 }
 

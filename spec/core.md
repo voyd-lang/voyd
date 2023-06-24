@@ -194,7 +194,7 @@ Example export `["export", "'<'", ["parameters", ["left", "i32"], ["right", "i32
 Performs a tail return call.
 
 ```lisp
-(return-call $fn-identifier $args*)
+(return-call ($fn-identifier $args*))
 ```
 
 ## Root Module

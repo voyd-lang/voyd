@@ -2,7 +2,6 @@ import binaryen from "binaryen";
 import {
   Expr,
   Fn,
-  FnType,
   Identifier,
   Int,
   List,
@@ -11,15 +10,13 @@ import {
   Variable,
   Global,
 } from "./lib/index.mjs";
+import { Call } from "./lib/syntax/call.mjs";
 
-let mod: binaryen.Module | undefined = undefined;
-
-// TODO Handle scoping
 export const genWasmCode = (ast: List) => {
-  mod = new binaryen.Module();
+  const mod = new binaryen.Module();
   mod.setMemory(1, 150, "buffer");
   mod.setFeatures(binaryen.Features.All);
-  compileExpression({ expr: ast, mod, parent: ast });
+  compileExpression({ expr: ast, mod });
   mod.autoDrop();
   return mod;
 };
@@ -27,13 +24,11 @@ export const genWasmCode = (ast: List) => {
 interface CompileExprOpts<T = Expr> {
   expr: T;
   mod: binaryen.Module;
-  // TODO Really don't think this is necessary
-  parent: Expr;
 }
 
 const compileExpression = (opts: CompileExprOpts): number => {
   const { expr, mod } = opts;
-  if (expr.isList()) return compileList({ ...opts, expr });
+  if (expr.isCall()) return compileCall({ ...opts, expr });
   if (expr.isInt()) return mod.i32.const(expr.value);
   if (expr.isFloat()) return mod.f32.const(expr.value);
   if (expr.isIdentifier()) return compileIdentifier({ ...opts, expr });
@@ -56,108 +51,49 @@ const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
     throw new Error(`Unrecognized symbol ${expr.value}`);
   }
 
-  if (entity.syntaxType === "global") {
+  if (entity.isGlobal()) {
     return mod.global.get(entity.id, mapBinaryenType(entity.getType()));
   }
 
-  if (entity.syntaxType === "variable" || entity.syntaxType === "parameter") {
+  if (entity.isVariable() || entity.isParameter()) {
     return mod.local.get(entity.getIndex(), mapBinaryenType(entity.getType()));
   }
 
   throw new Error(`Cannot compile identifier ${expr}`);
 };
 
-type CompileListOpts = CompileExprOpts<List>;
+type CompileFnCallOpts = CompileExprOpts<Call> & { isReturnCall?: boolean };
 
-const compileList = (opts: CompileListOpts): number => {
-  const { expr, mod } = opts;
-
-  // TODO: Move bloc, root, and export to compileFunctionCall
-  if (expr.calls("typed-block")) {
-    const block = expr.value
-      .slice(2)
-      .map((expr) => compileExpression({ ...opts, expr }));
-    return mod.block(null, block, binaryen.auto);
-  }
-
-  if (expr.calls("root")) {
-    return compileRootExpr({ ...opts, expr });
-  }
-
-  // TODO: Implement export logic etc. Probably can be handled by a macro.
-  if (expr.calls("export")) {
-    return mod.nop();
-  }
-
-  if (expr.first()?.isIdentifier()) {
-    return compileFunctionCall({ ...opts, expr });
-  }
-
-  return mod.nop();
-};
-
-const compileRootExpr = (opts: CompileListOpts): number => {
-  for (const module of opts.expr.rest()) {
-    if (!module.isList() || !module.calls("module")) {
-      throw new Error(
-        "Expected module, got: " + JSON.stringify(module, null, 2)
-      );
-    }
-    (module.at(4) as List).value.forEach((expr) =>
-      compileExpression({ ...opts, expr })
-    );
-  }
-  return opts.mod.nop();
-};
-
-interface CompileFnCallOpts extends CompileListOpts {
-  isReturnCall?: boolean;
-}
-
-const compileFunctionCall = (opts: CompileFnCallOpts): number => {
+const compileCall = (opts: CompileFnCallOpts): number => {
   const { expr, mod, isReturnCall } = opts;
-  if (expr.calls("define-type")) return mod.nop();
-  if (expr.calls("define-cdt")) return mod.nop();
-  if (expr.calls("lambda-expr")) return mod.nop();
-  if (expr.calls("quote")) return (expr.at(1) as Int).value; // TODO: This is an ugly hack to get constants that the compiler needs to know at compile time for ex bnr calls;
+  if (expr.calls("quote")) return (expr.args[0] as Int).value; // TODO: This is an ugly hack to get constants that the compiler needs to know at compile time for ex bnr calls;
   if (expr.calls("=")) return compileAssign(opts);
   if (expr.calls("if")) return compileIf(opts);
-
   if (expr.calls("return-call")) {
-    return compileFunctionCall({
+    return compileCall({
       ...opts,
-      expr: expr.slice(1),
+      expr: expr.args[0] as Call,
       isReturnCall: true,
     });
-  }
-
-  if (expr.calls("labeled-expr")) {
-    return compileExpression({ ...opts, expr: expr.at(2)! });
   }
 
   if (expr.calls("binaryen-mod") || expr.calls("bnr")) {
     return compileBnrCall(opts);
   }
 
-  const fnId = expr.first() as Identifier;
-  const fn = fnId.getTypeOf() as FnType | undefined;
-  if (!fn) {
-    throw new Error(`Function ${fnId.value} not found`);
-  }
-
-  const args = expr.rest().map((expr) => compileExpression({ ...opts, expr }));
+  const args = expr.args.map((expr) => compileExpression({ ...opts, expr }));
 
   if (isReturnCall) {
-    return mod.return_call(fn.fnId, args, mapBinaryenType(fn.returnType));
+    return mod.return_call(expr.fnId, args, mapBinaryenType(expr.type));
   }
 
-  return mod.call(fn.fnId, args, mapBinaryenType(fn.returnType));
+  return mod.call(expr.fnId, args, mapBinaryenType(expr.type));
 };
 
 const compileAssign = (opts: CompileFnCallOpts): number => {
   const { expr, mod } = opts;
-  const identifier = expr.at(1) as Identifier;
-  const value = compileExpression({ ...opts, expr: expr.at(2)! });
+  const identifier = expr.args[0] as Identifier;
+  const value = compileExpression({ ...opts, expr: expr.args[1]! });
   const entity = identifier.resolve();
   if (!entity) {
     throw new Error(`${identifier} not found in scope`);
@@ -174,11 +110,11 @@ const compileAssign = (opts: CompileFnCallOpts): number => {
   throw new Error(`${identifier} cannot be re-assigned`);
 };
 
-const compileBnrCall = (opts: CompileListOpts): number => {
+const compileBnrCall = (opts: CompileFnCallOpts): number => {
   const { expr } = opts;
-  const namespaceId = (expr.at(1)! as List).at(0) as Identifier;
-  const funcId = (expr.at(1)! as List).at(1) as Identifier;
-  const args = expr.at(2) as List | undefined;
+  const namespaceId = (expr.args[0]! as List).at(0) as Identifier;
+  const funcId = (expr.args[0]! as List).at(1) as Identifier;
+  const args = expr.args[1] as List | undefined;
   const namespace =
     namespaceId.value === "mod"
       ? opts.mod
@@ -233,18 +169,18 @@ const compileExternFn = (opts: CompileExprOpts<Fn>) => {
   mod.addFunctionImport(
     fn.id,
     fn.externalNamespace!,
-    fn.getName(),
+    fn.getNameStr(),
     parameterTypes,
     mapBinaryenType(fn.getReturnType())
   );
   return mod.nop();
 };
 
-const compileIf = (opts: CompileListOpts) => {
+const compileIf = (opts: CompileFnCallOpts) => {
   const { expr, mod } = opts;
-  const conditionNode = expr.at(1)!;
-  const ifTrueNode = expr.at(2)!;
-  const ifFalseNode = expr.at(3)!;
+  const conditionNode = expr.args[0]!;
+  const ifTrueNode = expr.args[1]!;
+  const ifFalseNode = expr.args[2]!;
   const condition = compileExpression({ ...opts, expr: conditionNode });
   const ifTrue = compileExpression({ ...opts, expr: ifTrueNode });
   const ifFalse =
