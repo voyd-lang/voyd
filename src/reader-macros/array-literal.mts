@@ -1,4 +1,4 @@
-import { Identifier, isList, List } from "../lib/index.mjs";
+import { Identifier, List } from "../lib/index.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const arrayLiteralMacro: ReaderMacro = {
@@ -6,7 +6,7 @@ export const arrayLiteralMacro: ReaderMacro = {
   macro: (file, { reader }) => {
     const array = new Identifier({ value: "array" });
     const items = reader(file, "]");
-    if (isList(items)) return items.insert(array);
+    if (items.isList()) return items.insert(array);
     return new List({ value: [array, items] });
   },
 };
