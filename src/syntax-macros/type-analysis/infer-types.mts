@@ -14,6 +14,7 @@ import {
   PrimitiveType,
   StackType,
   Id,
+  Fn,
 } from "../../lib/index.mjs";
 import { getIdStr } from "../../lib/syntax/get-id-str.mjs";
 import { SyntaxMacro } from "../types.mjs";
@@ -34,7 +35,7 @@ const inferExprTypes = (expr: Expr | undefined): Expr => {
   return inferFnCallTypes(expr);
 };
 
-const inferFnCallTypes = (list: List): List => {
+const inferFnCallTypes = (list: List): Expr => {
   if (list.calls("define-function")) return inferFnTypes(list);
   if (list.calls("define-type")) return list;
   if (list.calls("define-cdt")) return list;
@@ -70,7 +71,7 @@ const inferBnrCallTypes = (list: List): List => {
   return list;
 };
 
-const inferFnTypes = (list: List): List => {
+const inferFnTypes = (list: List): Fn => {
   const identifier = list.at(1) as Identifier;
   const rawParameters = list.at(2) as List;
   const fn = list.getTypeOf();
@@ -171,7 +172,7 @@ const inferFnParams = (params: List): List => {
             .value.map((value) => registerStructParamField(value, fnDef));
         }
 
-        const { identifier, type, label } = getInfoFromRawParam(expr);
+        const { name: identifier, type, label } = getInfoFromRawParam(expr);
         identifier!.setTypeOf(type);
         fnDef.addVar(identifier!, { kind: "param", type });
         const value = [identifier!, type];
@@ -186,7 +187,7 @@ const registerStructParamField = (value: Expr, fnDef: Expr): Expr => {
   if (!value.isList()) {
     throw new Error("All struct parameters must be typed");
   }
-  const { identifier, type } = getInfoFromRawParam(value);
+  const { name: identifier, type } = getInfoFromRawParam(value);
   identifier!.setTypeOf(type);
   fnDef.addVar(identifier!, { kind: "param", type });
   return new List({ value: [identifier!, type] });
@@ -512,7 +513,7 @@ const inferFnExportTypes = (fnId: Identifier, params: List) => {
     candidate.value.params.every((param, index) => {
       const p = params.at(index + 1);
       if (!p?.isList()) return false;
-      const { label, identifier, type } = getInfoFromRawParam(p as List);
+      const { label, name: identifier, type } = getInfoFromRawParam(p as List);
       const identifiersMatch = identifier ? identifier.is(param.name) : true;
       const labelsMatch = label ? label.is(param.label) : true;
       const typesDoMatch = typesMatch(param.type, type);

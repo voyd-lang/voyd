@@ -5,6 +5,7 @@ try {
   mod.setMemory(1, 150, "buffer");
   mod.setFeatures(binaryen.Features.All);
   const tuple = binaryen.createType([binaryen.i32, binaryen.i32]);
+  // const tuple2 = binaryen.createType([binaryen.i32, tuple, binaryen.i32]);
 
   mod.addFunction(
     "main",
@@ -32,7 +33,7 @@ try {
     const binary = mod.emitBinary();
     const compiled = new WebAssembly.Module(binary);
     const instance = new WebAssembly.Instance(compiled, {});
-    // console.log(instance.exports.main());
+    console.log(instance.exports.main());
   }
 } catch (error) {
   console.log(error);

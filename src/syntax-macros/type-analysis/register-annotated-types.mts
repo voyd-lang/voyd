@@ -1,4 +1,12 @@
-import { Expr, Identifier, List, FnType, Type } from "../../lib/index.mjs";
+import {
+  Expr,
+  Identifier,
+  List,
+  FnType,
+  Type,
+  Fn,
+  Parameter,
+} from "../../lib/index.mjs";
 import { SyntaxMacro } from "../types.mjs";
 import { getInfoFromRawParam } from "./lib/get-info-from-raw-param.mjs";
 import { isStruct } from "./lib/is-struct.mjs";
@@ -28,25 +36,22 @@ const scanAnnotatedTypes = (expr: Expr) => {
     const type = isStruct(val)
       ? typedStructListToStructType(val as List)
       : val.getTypeOf()!;
-    expr.parent?.addType(id, type);
+    expr.parent?.registerEntity(type);
     return;
   }
 
   expr.value.forEach(scanAnnotatedTypes);
 };
 
-const initFn = (expr: List) => {
+const initFn = (expr: List): Fn => {
   const parent = expr.parent!;
   const fnIdentifier = expr.at(1) as Identifier;
   const paramsIndex = expr.calls("define-function") ? 2 : 3;
   const params = (expr.at(paramsIndex) as List).value.slice(1).map((p) => {
     // For now assume all params are either structs or labeled expressions
-    const { label, identifier, type } = getInfoFromRawParam(p as List);
-    if (identifier) {
-      identifier.setTypeOf(type);
-    }
+    const { label, name, type } = getInfoFromRawParam(p as List);
 
-    return { label: label?.value, name: identifier?.value, type };
+    return new Parameter({ name, type });
   });
   const suppliedReturnType = getSuppliedReturnTypeForFn(expr, paramsIndex + 1);
 

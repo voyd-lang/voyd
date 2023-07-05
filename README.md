@@ -81,8 +81,7 @@ false // Boolean
 1 // i32 by default (32 bit integer)
 1.0 // f32 by default (32 bit float)
 "Hello!" // String, can be multiline, supports interpolation via ${}
-[1, 2, 3] // Tuple
-[x: 1, y: 2] // Struct
+[1, 2, 3] // Tuple object literal
 {x: 2, y: 4} // Object literal
 #[1, 2, 3] // Array
 #{x: 3, y: 4} // Dictionary
@@ -237,18 +236,18 @@ squared x // (squared x)
 
 ## Keyword Arguments
 
-Any arguments that are listed after the `~` are keyword arguments.
+Any arguments prefixed with ~ are keyword arguments
 
 ```
-fn move(robot:Robot ~ to:(i32 i32 i32))
+fn move(robot: Robot, ~to: [i32 i32 i32])
 
-move robot to: (3.1, 2.3, 4.0)
+move robot to: [3.1, 2.3, 4.0]
 ```
 
 You can also provide an external label to alias the keyword on call.
 
 ```
-fn add(a:i32 ~ with:b:i32)
+fn add(a:i32, with:b:i32)
   a + b
   html
     ul

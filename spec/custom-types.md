@@ -1,117 +1,72 @@
 # Types
 
-## Class
-
-- Defines a template for an object
-- Represent a "heap" type
-- Can be recursive
-- Can hold structs
-- Traits are abstract classes
-- A class that implements a trait may be passed to a parameter who's set to that trait
-
 ```
-class Point2D = {
-	x: i32,
-	y: i32
-}
+// Object type (curly braces are optional)
+obj Point2D { x: Int, y: Int }
 
-// Shorthand for single types (no union or intersection)
-class Point2D
-  x: i32
-  y: i32
+// Object type with methods
+obj Point2D
+  x: Int
+  y: Int
 
-class Point3D = Point2D & { z: i32 }
+  fn toVec() -> Vec2D
+    Vec2D[x, y] // self is implicit
 
-// Alternative syntax
-class Point3D extends Point2D
-  z: i32
+// Object extensions
+obj Point3D extends Point2D
+  x: Int
+  y: Int
+  z: Int
+
+  fn toVec3() -> Vec3D
+    Vec3D[self.x, self.y, self.z]
+
+  // Mutating method
+  fn setZ(v: Int) mut -> void
+    // self is implicit
+    z = v
+
+  // ERROR: overrides must return the same type
+  override fn toVec() -> Vec3D
+    Vec3D[self.x, self.y, self.z]
+
+// Tuple object
+obj Vec2D [Int, Int]
+
+// Tuple object with methods
+obj Vec3D
+  [Int, Int, Int]
+
+  fn product(self: Self)
+    self.0 * self.1 * self.2
 
 
-class Line<T> = {
-  a: T
-  b: T
-}
+// Intersections
+// (Types are structural, objects are nominal[1])
+type NamedPoint = Point3D & { name: string }
 
-class Line2D = Line<Point2D>
-class Line3D = Line<Point3D>
+// Union
+type Point = NamedPoint | Point3D | Point2D
 
-class GraphItem = Line2D | Line3D | Point2D | Point3D
+// Union with inline types
+type Optional =
+  obj None |
+  obj Some [Int]
 
-class Shape =
-  Circle { radius: i32 } |
-  Square { radius: i32 }
+// Trait (Abstract objects)
+trait Animal
+  species: string
 
-// Custom Array Type Definition
-class MyIntArray
-  [key: i32]: i32
-```
+  fn age() -> Int
 
-## Structs
 
-- Are essentially just tuples with labels
-- Represent a "stack" type
-- Cannot mix with class types
-- Cannot be recursive
-- Cannot be referenced - may be box-able in the future
-- Are always copied
-- Compiler may optimize an object
-- Note: Tuples are struct types
-- A struct can implement a trait, but can not be passed as a parameter who's type is set to that trait
+  // Default implementation
+  fn hey() log -> void
+    log("hey")
 
-```
-struct Point2D = [x: i32, y: i32]
-
-struct Point3D = Point2D & [z: i32]
-
-struct Line<T> = [a: T, b: T]
-
-struct Line2D = Line<Point2D>
-struct Line3D = Line<Point3D>
-
-struct GraphItem = Line2D | Line3D | Point2D | Point3D
-
-struct Shape =
-  Circle [radius: i32] |
-  Square [height: i32, length: i32]
-
-// Struct literal syntax
-fn make_struct(a: i32, b: i32) -> [x: i32, y: i32]
-  // Note the labels x and y are simply aliases for 0 and 1 respectively. They do not
-  // need to be supplied on initialization
-	[a, b]
+obj Human extends Animal
+  fn age()
+    years
 ```
 
-## Types
-
-- The type keyword defines a type alias
-- Cannot mix stack and heap types
-- Class and struct definitions desugar to type expressions
-
-```
-type Heap2DPoint = { x:i32, y: i32 }
-type Stack2DPoint = [x:i32, y: i32]
-
-type Heap3DPoint = Heap2DPoint & { z: i32 }
-type Stack3DPoint = Stack2DPoint & [z:i32]
-type Invalid3DPoint = Heap3DPoint & [z:i32] // ERROR: Cannot mix stack and heap types
-
-class Point2D
-  x: i32
-  y: i32
-
-// De-sugars to
-type Point2D = Point2D { x: i32, y: i32 }
-
-class GraphItem = Line2D | Line3D | Point2D | Point3D
-
-// De-sugars to
-type GraphItem = Line2D | Line3D | Point2D | Point3D
-
-// Structs de-sugar in the same way
-
-// Note: All types must be tagged
-// This expression is sugar for
-type Heap2DPoint = { x: i32, y: i32 }
-// This
-type Heap2DPoint = Heap2DPoint { x: i32, y: i32 }
-```
+1. When a value's type is defined as an object, it must be set to that object or an extended version of that object. When a value's type is defined as a type literal or type alias, it must be set to an object or type that satisfies the definition, regardless of type name. Thus objects are nominal, types are structural.
