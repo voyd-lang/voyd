@@ -2,7 +2,7 @@ import {
   Type,
   CDT_ADDRESS_TYPE,
   Expr,
-  StructType,
+  ObjectType,
 } from "../../../lib/index.mjs";
 
 export const typesMatch = (expected?: Type, given?: Type) => {
@@ -19,7 +19,7 @@ const isStructPointerMatch = (expected?: Type, given?: Expr) =>
   (!expected?.isPrimitiveType() && given?.is(CDT_ADDRESS_TYPE)) ||
   (!given?.isPrimitiveType() && expected?.is(CDT_ADDRESS_TYPE));
 
-const structArgsMatch = (expected: StructType, given: StructType): boolean => {
+const structArgsMatch = (expected: ObjectType, given: ObjectType): boolean => {
   return (
     expected.value.length === given.value.length &&
     expected.value.every((field) =>

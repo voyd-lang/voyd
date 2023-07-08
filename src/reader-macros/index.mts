@@ -7,12 +7,12 @@ import { floatMacro } from "./float.mjs";
 import { intMacro } from "./int.mjs";
 import { scientificENotationMacro } from "./scientific-e-notation.mjs";
 import { stringMacro } from "./string.mjs";
-import { structLiteralMacro } from "./struct-literal.mjs";
+import { objectLiteralMacro } from "./object-literal.mjs";
 import { tupleLiteralMacro } from "./tuple-literal.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 const macros = [
-  structLiteralMacro,
+  objectLiteralMacro,
   tupleLiteralMacro,
   arrayLiteralMacro,
   dictionaryLiteralMacro,

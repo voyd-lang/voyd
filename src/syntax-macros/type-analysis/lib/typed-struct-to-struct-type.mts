@@ -1,7 +1,7 @@
-import { List, StructType, Identifier } from "../../../lib/index.mjs";
+import { List, ObjectType, Identifier } from "../../../lib/index.mjs";
 
-export const typedStructListToStructType = (list: List): StructType => {
-  return new StructType({
+export const typedStructListToStructType = (list: List): ObjectType => {
+  return new ObjectType({
     ...list.context,
     value: list.value.slice(1).map((v) => {
       // v is always a labeled expression

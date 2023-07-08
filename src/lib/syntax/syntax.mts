@@ -12,7 +12,7 @@ import { MacroVariable } from "./macro-variable.mjs";
 import { Macro } from "./macros.mjs";
 import { Parameter } from "./parameter.mjs";
 import { StringLiteral } from "./string-literal.mjs";
-import { FnType, PrimitiveType, StructType, Type } from "./types.mjs";
+import { FnType, PrimitiveType, ObjectType, Type } from "./types.mjs";
 import { Variable } from "./variable.mjs";
 import { Whitespace } from "./whitespace.mjs";
 
@@ -140,8 +140,8 @@ export abstract class Syntax {
     return this instanceof Whitespace;
   }
 
-  isStructType(): this is StructType {
-    return this instanceof StructType;
+  isStructType(): this is ObjectType {
+    return this instanceof ObjectType;
   }
 
   isPrimitiveType(): this is PrimitiveType {

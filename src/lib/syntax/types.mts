@@ -6,7 +6,7 @@ export type Type =
   | PrimitiveType
   | UnionType
   | IntersectionType
-  | StructType
+  | ObjectType
   | TupleType
   | ArrayType
   | FnType;
@@ -131,7 +131,7 @@ export class TupleType extends BaseType {
   }
 }
 
-export class StructType extends BaseType {
+export class ObjectType extends BaseType {
   readonly kindOfType = "struct";
   value: { name: string; type: Type }[];
 
@@ -153,12 +153,12 @@ export class StructType extends BaseType {
   toJSON(): TypeJSON {
     return [
       "type",
-      ["struct", ...this.value.map(({ name, type }) => [name, type])],
+      ["object", ...this.value.map(({ name, type }) => [name, type])],
     ];
   }
 
-  clone(parent?: Expr): StructType {
-    return new StructType({ ...super.getCloneOpts(parent), value: this.value });
+  clone(parent?: Expr): ObjectType {
+    return new ObjectType({ ...super.getCloneOpts(parent), value: this.value });
   }
 }
 

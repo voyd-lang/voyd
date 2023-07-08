@@ -4,7 +4,7 @@ import {
   noop,
   Identifier,
   FnType,
-  StructType,
+  ObjectType,
   BaseType,
   Type,
   i32,
@@ -277,7 +277,7 @@ function inferUserFnCallTypes(list: List) {
 
 /** Re-orders the supplied struct and returns it as a normal list of expressions to be passed as args */
 const applyStructParams = (
-  expectedStruct: StructType,
+  expectedStruct: ObjectType,
   suppliedStruct: List
 ): Expr[] =>
   expectedStruct.value.map(({ name }) => {
@@ -431,8 +431,8 @@ const getExprReturnType = (expr?: Expr): Type | undefined => {
 };
 
 /** Takes the expression form of a struct and converts it into type form */
-const getStructLiteralType = (ast: List): StructType =>
-  new StructType({
+const getStructLiteralType = (ast: List): ObjectType =>
+  new ObjectType({
     ...ast.context,
     name: "literal",
     value: ast.slice(1).value.map((labeledExpr) => {
