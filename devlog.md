@@ -1,3 +1,15 @@
+# 8 July 2023
+
+Expanding on the previous entry. There are multiple reasons I've made this change.
+
+- I wanted the type system to be as simple as possible while still having the potential to match
+  the power of typescript's type system (with the added bonus of run time types)
+- Having both `class` and `struct` and potentially different runtime behavioral characteristics was
+  not ideal.
+- Structs are stupidly difficult to model in wasm in a way that is both performant and works with a gc system.
+  - Linear memory cannot hold reference types
+  - Structs could leverage multi-value, but they are a pain to work with in binaryen. We'd also have to be smart about how we pass them around.
+
 # 4 July 2023
 
 I'm changing the type system again. Heavily inspired by the paper, [Integrating Nominal and Structural Subtyping](https://www.cs.cmu.edu/~aldrich/papers/ecoop08.pdf).
