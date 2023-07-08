@@ -81,7 +81,7 @@ false // Boolean
 1 // i32 by default (32 bit integer)
 1.0 // f32 by default (32 bit float)
 "Hello!" // String, can be multiline, supports interpolation via ${}
-[1, 2, 3] // Tuple object literal
+[1, 2, 3] // Tuple literal
 {x: 2, y: 4} // Object literal
 #[1, 2, 3] // Array
 #{x: 3, y: 4} // Dictionary
@@ -269,6 +269,6 @@ fn add<T>(a:T b:T) -> T
 With trait constraints
 
 ```
-fn add(type T:Numeric)(a:T b:T) -> T
+fn add<T:Numeric>(a:T b:T) -> T
   a + b
 ```

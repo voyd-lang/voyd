@@ -83,16 +83,16 @@ fn get-json(address:String) Async -> Dictionary
 	parse-json json-text
 ```
 
-### Struct Literal Parameters
+### Object Literal Parameters
 
-Struct literal parameters allow property shorthand and do not care about order, unlike labeled parameters
+Object literal parameters allow property shorthand and do not care about order, unlike labeled parameters
 
 ```dream
 fn move-to { x:i32, y:i32, z: i32 } -> void
 	robot.move x y z
 
 // With other parameters
-fn move-to(scale:scale:i32, { x:i32, y:i32, z:i32 }) -> void
+fn move-to(~scale:i32, { x:i32, y:i32, z:i32 }) -> void
 	move-to { x: x * scale, y: y * scale, z: z * scale }
 
 fn main() -> void
@@ -100,14 +100,6 @@ fn main() -> void
 	move-to { z, x: 5, y }
 
 	move-to scale: 5 { x: 1, y: 2, z: 3 }
-```
-
-**Note:** For now, struct parameters must be passed as an inline struct
-literal only. That feature requires anon struct literals. So this won't work quite yet.
-
-```dream
-let pos = { x: 3, y: 4, z: 2 }
-move-to scale: 3 pos // ERROR!
 ```
 
 ## String Literals
@@ -126,23 +118,36 @@ Hey!
 "1 + 1 is ${1 + 1}"
 ```
 
-## Structs
+## Objects
 
-### Struct Type
+### Object Type
 
 ```void
 // Definition
-type Pos = {
-	x:i32,
-	y:i32,
-	z:i32
-}
+obj Pos
+	x: i32
+	y: i32
+	z: i32
 
 // Usage
 let my-pos = Pos { x: 5, y: 4, z: 3 }
+
+// The obj syntax is sugar for
+type Pos = { x: i32, y: i32, z: i32 }
 ```
 
-### Struct literal
+### Object With Methods
+
+```
+obj Point2D
+  x: Int
+  y: Int
+
+  fn toTuple() -> [Int, Int]
+    [self.x, self.y] // self is optional, x and y can be implicitly understood to be referencing self
+```
+
+### Object literal
 
 ```void
 let value = {
@@ -153,7 +158,21 @@ let value = {
 
 ## Traits
 
-TBD
+```
+// Trait (Abstract objects)
+trait Animal
+  species: string
+
+  fn age() -> Int
+
+  // Default implementation
+  fn hey() log -> void
+    log("hey")
+
+obj Human extends Animal
+  fn age()
+    years
+```
 
 ### Default function implementations
 
