@@ -2,7 +2,6 @@ import { functionalNotation } from "./functional-notation.mjs";
 import { processGreedyOps } from "./greedy-ops.mjs";
 import { infix } from "./infix.mjs";
 import { macro } from "./macro.mjs";
-import { memoryManagement } from "./memory-management.mjs";
 import { moduleSyntaxMacro } from "./module.mjs";
 import { parentheticalElision } from "./parenthetical-elision.mjs";
 import { typeAnalysis } from "./type-analysis/index.mjs";
@@ -17,5 +16,4 @@ export const syntaxMacros: SyntaxMacro[] = [
   moduleSyntaxMacro,
   macro,
   typeAnalysis,
-  memoryManagement,
 ];
