@@ -6,7 +6,7 @@ import { FnType, Type } from "./types.mjs";
 export class ExternFn extends NamedEntity {
   readonly syntaxType = "extern-fn";
   readonly parameters: Parameter[] = [];
-  readonly namespace?: string;
+  readonly namespace: string;
   private returnType: Type;
 
   constructor(
