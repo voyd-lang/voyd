@@ -1,3 +1,29 @@
+# 9 July 2023
+
+I'm making yet another major change to the syntax. All declaration statements will separate the
+signature from the definition using an `=`. This is to improve syntactic consistency across the
+language. I.E. Why do some declarations (`type`, `let`, etc) use an `=` while others (fn, obj, etc)
+do not. It has the added bonus of making more complex `let` and `type` definitions easier to support
+while also making single line functions more readable.
+
+```
+// Old syntax
+fn add(a: i32, b: i32) -> i32
+  a + b
+
+// New syntax
+fn add(a: i32, b: i32) -> i32 =
+  a + b
+
+// Looks a lot better when we use type inference
+fn add(a: i32, b: i32) = a + b
+```
+
+I have an obscenely long history of making major syntax changes to this language. While this has
+been substantially reduced in the last year, it is still an ongoing problem. This language would
+likely be in a much more usable state years ago if I didn't have this habit. But its all for fun
+in the end so I guess not much harm is done.
+
 # 8 July 2023
 
 Expanding on the previous entry. There are multiple reasons I've made this change.

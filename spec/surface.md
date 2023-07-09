@@ -26,8 +26,8 @@ var y = 3
 
 Syntax:
 
-```dream
-fn $name([$label:?$param-name:$ParamType]*) [$effects? -> $return-type]?
+```void
+fn $name([$label:?$param-name:$ParamType]*) [$effects? -> $return-type]? =
 	$body:Expr*
 ```
 
@@ -35,8 +35,8 @@ fn $name([$label:?$param-name:$ParamType]*) [$effects? -> $return-type]?
 
 Basic function:
 
-```dream
-fn add(a:i32 b:i32) -> i32
+```void
+fn add(a:i32 b:i32) -> i32 =
 	a + b
 
 // To call
@@ -54,8 +54,8 @@ add(1 2)
 
 With labels:
 
-```
-fn multiply(a:i32 by:b:i32) -> i32
+```void
+fn multiply(a:i32 by:b:i32) -> i32 =
 	a * b
 
 // To call
@@ -70,15 +70,15 @@ multiply(1 by: 2)
 
 With return type inference:
 
-```dream
-fn add(a:i32 b:i32)
+```void
+fn add(a:i32 b:i32) =
 	a + b
 ```
 
 With effects:
 
-```dream
-fn get-json(address:String) Async -> Dictionary
+```void
+fn get-json(address:String) Async -> Dictionary =
 	let json-text = await fetch(address)
 	parse-json json-text
 ```
@@ -87,15 +87,15 @@ fn get-json(address:String) Async -> Dictionary
 
 Object literal parameters allow property shorthand and do not care about order, unlike labeled parameters
 
-```dream
-fn move-to { x:i32, y:i32, z: i32 } -> void
+```void
+fn move-to { x:i32, y:i32, z: i32 } -> void =
 	robot.move x y z
 
 // With other parameters
-fn move-to(~scale:i32, { x:i32, y:i32, z:i32 }) -> void
+fn move-to(~scale:i32, { x:i32, y:i32, z:i32 }) -> void =
 	move-to { x: x * scale, y: y * scale, z: z * scale }
 
-fn main() -> void
+fn main() -> void =
 	let z = 7
 	move-to { z, x: 5, y }
 
@@ -124,7 +124,7 @@ Hey!
 
 ```void
 // Definition
-obj Pos
+obj Pos =
 	x: i32
 	y: i32
 	z: i32
@@ -139,7 +139,7 @@ type Pos = { x: i32, y: i32, z: i32 }
 ### Object With Methods
 
 ```
-obj Point2D
+obj Point2D =
   x: Int
   y: Int
 
@@ -160,7 +160,7 @@ let value = {
 
 ```
 // Trait (Abstract objects)
-trait Animal
+trait Animal =
   species: string
 
   fn age() -> Int
@@ -169,7 +169,7 @@ trait Animal
   fn hey() log -> void
     log("hey")
 
-obj Human extends Animal
+obj Human extends Animal =
   fn age()
     years
 ```
@@ -393,11 +393,11 @@ Void functions can be overloaded. Provided that function overload can be unambig
 via their parameters and return type.
 
 ```void
-fn sum(a:Int, b:Int)
+fn sum(a:Int, b:Int) =
   print("Def 1");
   a + b
 
-fn sum { a:Int, b:Int }
+fn sum { a:Int, b:Int } =
   print("Def 2");
   a + b
 
@@ -405,14 +405,14 @@ sum(1, 2) // Def 1
 sum { a: 1, b: 2 } // Def 2
 
 // ERROR: sum(numbers: ...Int) overlaps ambiguously with sum(a: Int, b: Int)
-fn sum(numbers: ...Int)
+fn sum(numbers: ...Int) =
   print("Def 3");
 ```
 
 This can be especially useful for overloading operators to support a custom type:
 
 ```
-fn '+'(a:Vec3, b:Vec3) -> Vec3
+fn '+'(a:Vec3, b:Vec3) -> Vec3 =
   Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
 
 Vec3(1, 2, 3) + Vec3(4, 5, 6) // Vec3(5, 7, 9)
@@ -508,6 +508,12 @@ Syntax Macros are responsible for transforming the ast produced by the parser in
 Syntax Macro Pipeline Example:
 
 ```void
+fn fib(n:i32) -> i32 =
+    if (n < 2)
+        n
+        fib(n - 1) + fib(n - 2)
+
+// After declaration syntax macro (removes the = symbol, which just acts as a visual separator)
 fn fib(n:i32) -> i32
     if (n < 2)
         n
@@ -525,8 +531,8 @@ fn (fib n:i32) -> i32
 		n
 		(fib n - 1) + (fib n - 2)))
 
-// After infix notation syntax macro
-(fn (-> (fib (: n i32)) i32)
+// After infix notation syntax macro (-> is not an operator)
+(fn (fib (: n i32)) -> i32
 	(if (< n 2)
 		n
 		(+ (fib (- n 1)) (fib (- n 2)))))

@@ -1,10 +1,10 @@
 
-fn fib(n: i32)
+fn fib(n: i32) =
 	if n < 2
 		n
 		fib(n - 1) + fib(n - 2)
 
-fn main()
+fn main() =
 	let b = B { abba: 5.8, b: 3 }
 	let a = A { a: 1, b: b }
 	a.b.abba = 145.2

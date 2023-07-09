@@ -1,10 +1,10 @@
 # Types
 
-## Objects
+## Object Types
 
 ```
 // Object type with methods
-obj Point2D
+obj Point2D =
   x: Int
   y: Int
 
@@ -12,20 +12,20 @@ obj Point2D
     [self.x, self.y]
 
 // Object extensions
-obj Point3D extends Point2D
+obj Point3D extends Point2D =
   x: Int
   y: Int
   z: Int
 
-  fn toTuple3() -> [Int, Int, Int]
+  fn toTuple3() -> [Int, Int, Int] =
     [x, y, z] // Self is implicit
 
   // Mutating method
-  fn setZ(v: Int) mut -> void
+  fn setZ(v: Int) mut -> void =
     z = v
 
   // ERROR: overrides must return the same type as their parent
-  override fn toTuple() -> [Int, Int, Int]
+  override fn toTuple() -> [Int, Int, Int] =
   [self.x, self.y, self.z]
 
 // Intersections
@@ -36,7 +36,7 @@ type NamedPoint = Point3D & { name: string }
 type Point = NamedPoint | Point3D | Point2D
 
 // Trait (Abstract objects)
-trait Animal
+trait Animal =
   species: string
 
   fn age() -> Int
@@ -45,12 +45,12 @@ trait Animal
   fn hey() log -> void
     log("hey")
 
-obj Human extends Animal
+obj Human extends Animal =
   fn age()
     years
 ```
 
-## Case
+## Case Types
 
 Case types define a situation. They serve a similar purpose to enums. They can be very useful
 as return values when a function may return more than one type of result. Cases may also hold

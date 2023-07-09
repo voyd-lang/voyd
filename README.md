@@ -6,15 +6,14 @@ https://justforfunnoreally.dev/
 
 ```swift
 // Find the value of the fibonacci sequence at index n
-fn fib(n:i32) -> i32
+fn fib(n:i32) -> i32 =
     if (n < 2)
         n
         fib(n - 1) + fib(n - 2)
 
 // All binary programs have a main function (NOTE: for in syntax shown below not yet supported)
-fn main() -> void
+fn main() -> void =
     var index = 0
-    range(15).each num =>
     for num in range(15)
         // Print fibonacci sequence at index using UFCS.
         num.fib().print()
@@ -102,15 +101,14 @@ var my_var = 7
 A Basic function:
 
 ```
-fn add(a: i32 b: i32) -> i32
+fn add(a: i32 b: i32) -> i32 =
   a + b
 ```
 
 In most cases the return type can be inferred
 
 ```
-fn add(a: i32 b: i32)
-  a + b
+fn add(a: i32 b: i32) = a + b
 ```
 
 Functions are called using S-expression syntax
@@ -239,7 +237,8 @@ squared x // (squared x)
 Any arguments prefixed with ~ are keyword arguments
 
 ```
-fn move(robot: Robot, ~to: [i32 i32 i32])
+fn move(robot: Robot, ~to: [i32 i32 i32]) =
+  // etc
 
 move robot to: [3.1, 2.3, 4.0]
 ```
@@ -247,7 +246,7 @@ move robot to: [3.1, 2.3, 4.0]
 You can also provide an external label to alias the keyword on call.
 
 ```
-fn add(a:i32, with:b:i32)
+fn add(a:i32, with:b:i32) =
   a + b
   html
     ul
@@ -262,13 +261,13 @@ Generics are defined using angle brackets. Note: there must not be any
 spaces between the function name and open parenthesis of a function call.
 
 ```
-fn add<T>(a:T b:T) -> T
+fn add<T>(a:T b:T) -> T =
   a + b
 ```
 
 With trait constraints
 
 ```
-fn add<T:Numeric>(a:T b:T) -> T
+fn add<T:Numeric>(a:T b:T) -> T =
   a + b
 ```
