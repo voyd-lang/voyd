@@ -67,7 +67,7 @@ global scope and therefore must each have a unique identifier.
 (define-function $identifier
   (parameters ($name $type-id)*)
   (return-type $type-id)
-  $block:TypedBlock)
+  $block:Block)
 ```
 
 ### Examples
@@ -82,7 +82,7 @@ global scope and therefore must each have a unique identifier.
 
   (return-type i32)
 
-  (typed-block i32
+  (block i32
     (if (< n 2)
       n
       (+ (fib (- n 1))) (fib (- n 2)))))
