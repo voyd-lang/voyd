@@ -1,3 +1,4 @@
+import { Block } from "./block.mjs";
 import { Bool } from "./bool.mjs";
 import { Call } from "./call.mjs";
 import type { Expr } from "./expr.mjs";
@@ -196,6 +197,10 @@ export abstract class Syntax {
 
   isType(): this is Type {
     return this.syntaxType === "type";
+  }
+
+  isBlock(): this is Block {
+    return this instanceof Block;
   }
 }
 
