@@ -42,31 +42,12 @@ trait Animal =
   fn age() -> Int
 
   // Default implementation
-  fn hey() log -> void
+  fn hey() log -> void =
     log("hey")
 
 obj Human extends Animal =
-  fn age()
+  fn age() =
     years
-```
-
-## Case Types
-
-Case types define a situation. They serve a similar purpose to enums. They can be very useful
-as return values when a function may return more than one type of result. Cases may also hold
-an associated value.
-
-```
-type Optional<T> =
-  case Some(T) |
-  case None
-
-type Result =
-  case Ok |
-  case Error(String)
-
-// Possible sugar
-enum Result = Ok, Error(String)
 ```
 
 1. When a value's type is defined as an object, it must be set to that object or an extended version of that object. When a value's type is defined as a type literal or type alias, it must be set to an object or type that satisfies the definition, regardless of type name. Thus objects are nominal, types are structural.
