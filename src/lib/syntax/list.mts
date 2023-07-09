@@ -35,6 +35,22 @@ export class List extends Syntax {
     return this.value.at(index);
   }
 
+  identifierAt(index: number): Identifier {
+    const id = this.at(index);
+    if (!id?.isIdentifier()) {
+      throw new Error(`No identifier at index ${index}`);
+    }
+    return id;
+  }
+
+  listAt(index: number): List {
+    const id = this.at(index);
+    if (!id?.isList()) {
+      throw new Error(`No identifier at index ${index}`);
+    }
+    return id;
+  }
+
   set(index: number, value: Expr) {
     value.parent = this;
     this.value[index] = value; // Should this clone?

@@ -1,12 +1,18 @@
 import { Bool } from "./bool.mjs";
 import { Call } from "./call.mjs";
 import type { Expr } from "./expr.mjs";
+import { ExternFn } from "./extern-fn.mjs";
 import { Float } from "./float.mjs";
 import { Fn } from "./fn.mjs";
 import { Global } from "./global.mjs";
 import { Id, Identifier } from "./identifier.mjs";
 import { Int } from "./int.mjs";
-import { Entity, LexicalContext, MacroEntity } from "./lexical-context.mjs";
+import {
+  Entity,
+  FnEntity,
+  LexicalContext,
+  MacroEntity,
+} from "./lexical-context.mjs";
 import { List } from "./list.mjs";
 import { MacroVariable } from "./macro-variable.mjs";
 import { Macro } from "./macros.mjs";
@@ -81,13 +87,13 @@ export abstract class Syntax {
     );
   }
 
-  resolveFns(id: Id, start: Fn[] = []): Fn[] {
+  resolveFns(id: Id, start: FnEntity[] = []): FnEntity[] {
     start.push(...this.lexicon.resolveFns(id));
     if (this.parent) return this.parent.resolveFns(id, start);
     return start;
   }
 
-  resolveFnById(id: string): Fn | undefined {
+  resolveFnById(id: string): FnEntity | undefined {
     return this.lexicon.resolveFnById(id) ?? this.parent?.resolveFnById(id);
   }
 
@@ -140,7 +146,7 @@ export abstract class Syntax {
     return this instanceof Whitespace;
   }
 
-  isStructType(): this is ObjectType {
+  isObjectType(): this is ObjectType {
     return this instanceof ObjectType;
   }
 
@@ -158,6 +164,10 @@ export abstract class Syntax {
 
   isFn(): this is Fn {
     return this instanceof Fn;
+  }
+
+  isExternFn(): this is ExternFn {
+    return this instanceof ExternFn;
   }
 
   isVariable(): this is Variable {

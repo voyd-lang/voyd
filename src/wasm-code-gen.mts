@@ -204,7 +204,7 @@ const mapBinaryenType = (type: Type): binaryen.Type => {
   if (isPrimitiveId(type, "i64")) return binaryen.i64;
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "void")) return binaryen.none;
-  if (type.isStructType()) return binaryen.i32;
+  if (type.isObjectType()) return binaryen.i32;
   throw new Error(`Unsupported type ${type}`);
 };
 

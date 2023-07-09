@@ -6,24 +6,18 @@ import { Type } from "./types.mjs";
 export class Parameter extends NamedEntity {
   /** External label the parameter must be called with e.g. myFunc(label: value) */
   readonly label?: Identifier;
-  readonly isMutable: boolean;
   protected type?: Type;
   readonly syntaxType = "parameter";
-  readonly initializer?: Expr;
 
   constructor(
     opts: NamedEntityOpts & {
       label?: Identifier;
-      isMutable: boolean;
-      initializer?: Expr;
       type?: Type;
     }
   ) {
     super(opts);
     this.label = opts.label;
-    this.isMutable = opts.isMutable;
     this.type = opts.type;
-    this.initializer = opts.initializer;
   }
 
   getIndex(): number {
@@ -50,21 +44,12 @@ export class Parameter extends NamedEntity {
   clone(parent?: Expr | undefined): Parameter {
     return new Parameter({
       ...super.getCloneOpts(parent),
-      isMutable: this.isMutable,
-      initializer: this.initializer,
       type: this.type,
       label: this.label,
     });
   }
 
   toJSON() {
-    return [
-      "define-parameter",
-      this.name,
-      ["label", this.label],
-      this.type,
-      ["is-mutable", this.isMutable],
-      this.initializer,
-    ];
+    return ["define-parameter", this.name, ["label", this.label], this.type];
   }
 }

@@ -13,3 +13,4 @@ export * from "./fn.mjs";
 export * from "./global.mjs";
 export * from "./variable.mjs";
 export * from "./parameter.mjs";
+export * from "./extern-fn.mjs";

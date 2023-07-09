@@ -14,6 +14,7 @@ import { MacroVariable } from "./macro-variable.mjs";
 import { Macro } from "./macros.mjs";
 import { MacroLambda } from "./macro-lambda.mjs";
 import { Call } from "./call.mjs";
+import { ExternFn } from "./extern-fn.mjs";
 
 export type Expr =
   | Bool
@@ -25,6 +26,7 @@ export type Expr =
   | List
   | Type
   | Fn
+  | ExternFn
   | Macro
   | Variable
   | Parameter

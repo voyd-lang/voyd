@@ -2,6 +2,8 @@
 
 This specification defines the language targeted by the surface language. After all macros have been evaluated, void source files are transformed into a form compliant with this spec.
 
+NOTE: MAY BE OUT OF DATE. DO NOT RELY ON THIS YET.
+
 # The Core Language Grammar
 
 ```ebnf

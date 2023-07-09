@@ -63,8 +63,8 @@ const evalMacroLetDef = (list: List) =>
 /** Slice out the beginning macro before calling */
 const listToMacro = (list: List): Macro => {
   // TODO Assertions?
-  const signature = list.first() as List;
-  const name = signature.first() as Identifier;
+  const signature = list.listAt(0);
+  const name = signature.identifierAt(0);
   const parameters = signature.rest() as Identifier[];
   const body = list.slice(1).map(expandMacros);
   const macro = new RegularMacro({
@@ -138,12 +138,12 @@ type MacroFn = (args: List) => Expr;
 
 const functions: Record<string, MacroFn | undefined> = {
   block: (args) => args.at(-1)!,
-  length: (args) => (args.first()! as List).length,
+  length: (args) => args.listAt(0).length,
   define: (args) => evalMacroVarDef(args.insert("define")),
   Identifier: (args) => {
     const nameDef = args.at(0);
     const name = nameDef?.isList()
-      ? (evalMacroExpr(nameDef.at(2)!) as Identifier)
+      ? (evalMacroExpr(nameDef.identifierAt(2)) as Identifier)
       : (nameDef as Identifier);
     return new Identifier({ value: name.value as string });
   },
@@ -249,7 +249,7 @@ const functions: Record<string, MacroFn | undefined> = {
   },
   array: (args) => args,
   slice: (args) => {
-    const list = args.first()! as List;
+    const list = args.listAt(0);
     const start = getMacroTimeValue(args.at(1)) as number | undefined;
     const end = getMacroTimeValue(args.at(2)) as number | undefined;
     return list.slice(start, end);

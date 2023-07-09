@@ -52,7 +52,7 @@ pub macro '=>'(&body)
 	` lambda $@&body
 
 // Extracts typed parameters from a list where index 0 is fn name, and offset-index+ are labeled-expr
-macro-let = (definitions) =>
+macro-let extract-parameters = (definitions) =>
 	`(parameters).concat definitions.slice(1)
 
 pub macro fn()

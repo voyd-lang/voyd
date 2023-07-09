@@ -2,28 +2,24 @@ import type { Expr } from "./expr.mjs";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 import { Parameter } from "./parameter.mjs";
 import { FnType, Type } from "./types.mjs";
-import { Variable } from "./variable.mjs";
 
-export class Fn extends NamedEntity {
-  readonly syntaxType = "fn";
-  readonly variables: Variable[] = [];
+export class ExternFn extends NamedEntity {
+  readonly syntaxType = "extern-fn";
   readonly parameters: Parameter[] = [];
-  private returnType?: Type;
-  readonly body: Expr;
+  readonly namespace?: string;
+  private returnType: Type;
 
   constructor(
     opts: NamedEntityOpts & {
-      returnType?: Type;
-      variables?: Variable[];
+      returnType: Type;
       parameters: Parameter[];
-      body: Expr;
+      namespace: string;
     }
   ) {
     super(opts);
     this.returnType = opts.returnType;
     this.parameters = opts.parameters ?? [];
-    this.variables = opts.variables ?? [];
-    this.body = opts.body;
+    this.namespace = opts.namespace;
   }
 
   getNameStr(): string {
@@ -48,16 +44,6 @@ export class Fn extends NamedEntity {
     return index;
   }
 
-  getIndexOfVariable(variable: Variable) {
-    const index = this.variables.findIndex(
-      (v) => v.syntaxId === variable.syntaxId
-    );
-    if (index < 0) {
-      throw new Error(`Variable ${variable} not registered with fn ${this}`);
-    }
-    return index + this.parameters.length;
-  }
-
   getReturnType(): Type {
     if (this.returnType) {
       return this.returnType;
@@ -70,36 +56,25 @@ export class Fn extends NamedEntity {
     this.returnType = type;
   }
 
-  registerLocal(local: Variable | Parameter) {
-    if (local.syntaxType === "variable") {
-      this.variables.push(local);
-      return;
-    }
-
-    this.parameters.push(local);
-  }
-
   toString() {
     return this.id;
   }
 
-  clone(parent?: Expr | undefined): Fn {
-    return new Fn({
+  clone(parent?: Expr | undefined): ExternFn {
+    return new ExternFn({
       ...super.getCloneOpts(parent),
-      variables: this.variables,
       parameters: this.parameters,
       returnType: this.returnType,
-      body: this.body,
+      namespace: this.namespace,
     });
   }
 
   toJSON() {
     return [
-      "fn",
+      "extern-fn",
       this.id,
       ["parameters", ...this.parameters],
       ["return-type", this.returnType],
-      this.body,
     ];
   }
 }

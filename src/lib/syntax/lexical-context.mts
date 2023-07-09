@@ -7,14 +7,23 @@ import type { Variable } from "./variable.mjs";
 import type { Global } from "./global.mjs";
 import { MacroVariable } from "./macro-variable.mjs";
 import { Macro } from "./macros.mjs";
+import { ExternFn } from "./extern-fn.mjs";
 
-export type Entity = Fn | Type | Variable | Parameter | Global | MacroEntity;
+export type Entity =
+  | FnEntity
+  | Type
+  | Variable
+  | Parameter
+  | Global
+  | MacroEntity;
 
 export type MacroEntity = Macro | MacroVariable;
 
+export type FnEntity = Fn | ExternFn;
+
 export class LexicalContext {
-  private readonly fns: Map<string, Fn[]> = new Map();
-  private readonly fnsById: Map<string, Fn> = new Map();
+  private readonly fns: Map<string, FnEntity[]> = new Map();
+  private readonly fnsById: Map<string, FnEntity> = new Map();
   private readonly vars: Map<string, Variable> = new Map();
   private readonly params: Map<string, Parameter> = new Map();
   private readonly types: Map<string, Type> = new Map();
@@ -24,7 +33,7 @@ export class LexicalContext {
 
   registerEntity(entity: Entity) {
     const idStr = getIdStr(entity.name);
-    if (entity.syntaxType === "fn") {
+    if (entity.syntaxType === "fn" || entity.syntaxType === "extern-fn") {
       const fns = this.fns.get(idStr) ?? [];
       fns.push(entity);
       this.fns.set(idStr, fns);
@@ -75,12 +84,12 @@ export class LexicalContext {
     return this.macroVars.get(idStr);
   }
 
-  resolveFns(name: Id): Fn[] {
+  resolveFns(name: Id): FnEntity[] {
     const id = getIdStr(name);
     return this.fns.get(id) ?? [];
   }
 
-  resolveFnById(id: string): Fn | undefined {
+  resolveFnById(id: string): FnEntity | undefined {
     return this.fnsById.get(id);
   }
 }
