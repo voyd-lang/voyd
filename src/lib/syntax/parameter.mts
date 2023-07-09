@@ -6,13 +6,13 @@ import { Type } from "./types.mjs";
 export class Parameter extends NamedEntity {
   /** External label the parameter must be called with e.g. myFunc(label: value) */
   readonly label?: Identifier;
-  protected type?: Type;
+  readonly type: Type;
   readonly syntaxType = "parameter";
 
   constructor(
     opts: NamedEntityOpts & {
       label?: Identifier;
-      type?: Type;
+      type: Type;
     }
   ) {
     super(opts);
@@ -26,15 +26,6 @@ export class Parameter extends NamedEntity {
       throw new Error(`Parameter ${this} is not registered with a function`);
     }
     return index;
-  }
-
-  getType(): Type {
-    if (this.type) return this.type;
-    throw new Error(`Type not yet resolved for variable ${this.name}`);
-  }
-
-  setType(type: Type) {
-    this.type = type;
   }
 
   toString() {

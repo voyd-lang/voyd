@@ -15,14 +15,15 @@ import {
   StackType,
   Id,
   Fn,
+  ExternFn,
+  Parameter,
+  Block,
+  Call,
 } from "../../lib/index.mjs";
 import { getIdStr } from "../../lib/syntax/get-id-str.mjs";
+import { FnEntity } from "../../lib/syntax/lexical-context.mjs";
 import { SyntaxMacro } from "../types.mjs";
-import { getInfoFromRawParam } from "./lib/get-info-from-raw-param.mjs";
 import { isPrimitiveFn } from "./lib/is-primitive-fn.mjs";
-import { isStruct } from "./lib/is-struct.mjs";
-import { typedStructListToStructType } from "./lib/typed-struct-to-struct-type.mjs";
-import { typesMatch } from "./lib/types-match.mjs";
 
 const modules = new Map<string, List>();
 
@@ -36,18 +37,15 @@ const inferExprTypes = (expr: Expr | undefined): Expr => {
 };
 
 const inferFnCallTypes = (list: List): Expr => {
-  if (list.calls("define-function")) return inferFnTypes(list);
-  if (list.calls("define-type")) return list;
-  if (list.calls("define-cdt")) return list;
+  if (list.calls("define-function")) return inferFn(list);
   if (list.calls("block")) return inferBlockTypes(list);
-  if (list.calls("lambda-expr")) return list;
   if (list.calls("export")) return inferExportTypes(list);
   if (list.calls("root")) return inferRootModuleTypes(list);
   if (list.calls("module")) return inferModuleTypes(list);
   if (list.calls("quote")) return list;
 
   if (list.calls("define-extern-function")) {
-    return inferExternFnTypes(list);
+    return inferExternFn(list);
   }
 
   if (list.calls("bnr") || list.calls("binaryen-mod")) {
@@ -71,129 +69,87 @@ const inferBnrCallTypes = (list: List): List => {
   return list;
 };
 
-const inferFnTypes = (list: List): Fn => {
-  const identifier = list.at(1) as Identifier;
-  const rawParameters = list.at(2) as List;
-  const fn = list.getTypeOf();
+const inferFn = (expr: List): Fn => {
+  const parent = expr.parent!;
+  const name = expr.identifierAt(1);
+  const parameters = expr
+    .listAt(2)
+    .value.slice(1)
+    .map((p) => listToParameter(p as List));
+  const suppliedReturnType = getSuppliedReturnTypeForFn(expr, 3);
+  const body = inferBlockTypes(expr.listAt(4));
+  const returnType = assertFunctionReturnType(body, suppliedReturnType, name);
 
-  if (!fn.isFnType()) {
-    throw new Error(`Could not find matching function for ${identifier.value}`);
-  }
-
-  const parameters = inferFnParams(rawParameters);
-
-  const typedBlock = inferExprTypes(list.at(4));
-  if (!typedBlock.isList() || !typedBlock.calls("typed-block")) {
-    throw new Error("Expected typed-block");
-  }
-
-  // Function types are (((paramIdentifier | false) paramType)* returnType:Expr | false) (at this point)
-  const suppliedReturnType = fn.returns;
-
-  const inferredReturnType = assertFunctionReturnType(
-    typedBlock,
-    suppliedReturnType,
-    identifier
-  );
-
-  const returnType = suppliedReturnType ?? inferredReturnType;
-  if (!returnType) {
-    console.error(JSON.stringify(list, undefined, 2));
-    throw new Error("Could not determine return type of fn");
-  }
-
-  // Note to future self. This is why references can be so nice to have. But we should probably have an &mut syntax
-  fn.returns = returnType;
-  identifier.setTypeOf(fn);
-
-  return new List({
-    ...list.context,
-    value: [
-      "define-function",
-      identifier,
-      parameters,
-      ["return-type", returnType!],
-      typedBlock,
-    ],
+  const fn = new Fn({
+    name,
+    returnType,
+    parameters,
+    body,
+    ...expr.context,
   });
+
+  parent.registerEntity(fn);
+  return fn;
 };
 
-const inferExternFnTypes = (list: List): List => {
-  list.setAsFn();
-  const identifier = list.at(1) as Identifier;
-  const namespace = list.at(2) as List;
-  const rawParameters = list.at(3) as List;
-  const fn = list.getTypeOf();
+const inferExternFn = (expr: List): ExternFn => {
+  const parent = expr.parent!;
+  const name = expr.identifierAt(1);
+  const namespace = expr.listAt(2).identifierAt(1);
+  const parameters = expr
+    .listAt(3)
+    .value.slice(1)
+    .map((p) => listToParameter(p as List));
+  const suppliedReturnType = getSuppliedReturnTypeForFn(expr, 4);
 
-  if (!fn.isFnType()) {
-    throw new Error(`Could not find matching function for ${identifier.value}`);
+  if (!suppliedReturnType) {
+    throw new Error(`Missing return type for extern fn ${name}`);
   }
 
-  const parameters = inferFnParams(rawParameters);
-
-  // Function types are (((paramIdentifier | false) paramType)* returnType:Expr | false) (at this point)
-  identifier.setTypeOf(fn);
-
-  return new List({
-    ...list.context,
-    value: [
-      "define-extern-function",
-      identifier,
-      namespace,
-      parameters,
-      ["return-type", fn.returns!],
-    ],
+  const fn = new ExternFn({
+    name,
+    returnType: suppliedReturnType,
+    parameters,
+    namespace: namespace.toString(),
+    ...expr.context,
   });
+
+  parent.registerEntity(fn);
+  return fn;
 };
 
-/**
- * For now, all params are assumed to be manually typed.
- * Returns the updated list of parameters
- */
-const inferFnParams = (params: List): List => {
-  if (!params.calls("parameters")) {
-    throw new Error("Expected function parameters");
+const getSuppliedReturnTypeForFn = (
+  list: List,
+  defIndex: number
+): Type | undefined => {
+  const definition = list.at(defIndex);
+  if (!definition?.isList()) return undefined;
+  const identifier = definition.at(1); // Todo: Support inline context data types?
+  if (!identifier?.isIdentifier()) return undefined;
+  const type = identifier.resolve();
+  if (!type) return undefined;
+  if (!type.isType()) {
+    throw new Error(`${identifier} is not a type`);
+  }
+  return type;
+};
+
+// Accepts (label name )
+export const listToParameter = (list: List) => {
+  const isLabeled = list.at(2)?.isList();
+  const paramDef = isLabeled ? (list.at(2) as List) : list;
+  const label = isLabeled ? list.identifierAt(1) : undefined;
+  const name = paramDef.identifierAt(1);
+  const type = paramDef.identifierAt(2).resolve();
+
+  if (!type?.isType()) {
+    throw new Error(`Could not resolve type for parameter ${name}`);
   }
 
-  const fnDef = params.parent as List;
-
-  return new List({
-    ...params.context,
-    value: [
-      "parameters",
-      ...params.slice(1).value.flatMap((expr): Expr[] => {
-        if (!expr.isList()) {
-          throw new Error("All parameters must be typed");
-        }
-
-        if (isStruct(expr)) {
-          return expr
-            .slice(1)
-            .value.map((value) => registerStructParamField(value, fnDef));
-        }
-
-        const { name: identifier, type, label } = getInfoFromRawParam(expr);
-        identifier!.setTypeOf(type);
-        fnDef.addVar(identifier!, { kind: "param", type });
-        const value = [identifier!, type];
-        if (label) value.push(label);
-        return [new List({ value, ...expr.context })];
-      }),
-    ],
-  });
+  return new Parameter({ name, label, type, ...list.context });
 };
 
-const registerStructParamField = (value: Expr, fnDef: Expr): Expr => {
-  if (!value.isList()) {
-    throw new Error("All struct parameters must be typed");
-  }
-  const { name: identifier, type } = getInfoFromRawParam(value);
-  identifier!.setTypeOf(type);
-  fnDef.addVar(identifier!, { kind: "param", type });
-  return new List({ value: [identifier!, type] });
-};
-
-const inferBlockTypes = (list: List): List => {
+const inferBlockTypes = (list: List): Block => {
   const annotatedArgs = list.slice(1).map((expr) => inferExprTypes(expr));
 
   const type = getExprReturnType(annotatedArgs.at(-1));
@@ -203,9 +159,10 @@ const inferBlockTypes = (list: List): List => {
     throw new Error("Could not determine return type of preceding block");
   }
 
-  return new List({
+  return new Block({
     ...list.context,
-    value: ["typed-block", type, ...annotatedArgs.value],
+    body: annotatedArgs.value,
+    returnType: type,
   });
 };
 
@@ -218,60 +175,18 @@ const inferPrimitiveFnTypes = (list: List): List => {
 };
 
 const addTypeAnnotationsToAssignment = (list: List): List => {
-  const assignee = list.at(1);
-
-  if (assignee?.isList()) {
-    return transformFieldAssignment(assignee, list);
-  }
-
   return list.mapArgs(inferExprTypes);
 };
 
-// Convert field assignment expressions into set expressions
-// ["=", ["y", "pos"], 10] converts to ["set-y", "pos", 10]
-// Positions { pos: { x:i32, y:i32 } }
-// ["=", ["y", ["pos", "positions"]], 10] converts to ["set-y", ["pos-pointer" positions], 10]
-function transformFieldAssignment(assignee: List, assignmentExpr: List) {
-  const updated = assignee.clone().setParent(assignmentExpr.getParent());
-  const field = assignee.getIdStrAt(0);
-  const setter = Identifier.from(`set-${field}`);
-  updated.set(0, setter);
-  updated.set(1, fieldParentPointer(assignee.at(1)!));
-  updated.push(assignmentExpr.at(2)!);
-  return inferUserFnCallTypes(updated);
-}
-
-function fieldParentPointer(expr: Expr): Expr {
-  if (!expr.isList()) return expr;
-  const field = expr.getIdStrAt(0);
-  const pointerFn = Identifier.from(`${field}-pointer`);
-  const updated = expr.clone();
-  updated.set(0, pointerFn);
-  updated.set(1, fieldParentPointer(expr.at(1)!));
-  return updated;
-}
-
-function inferUserFnCallTypes(list: List) {
-  const identifier = list.first() as Identifier;
-  list.rest().forEach(inferExprTypes);
-  const fn = getMatchingFnForCallExpr(list);
+function inferUserFnCallTypes(list: List): Call {
+  const identifier = list.identifierAt(0);
+  const args = list.rest().map(inferExprTypes);
+  const fn = getMatchingFnForCallExpr(identifier, args);
   if (!fn) {
     console.error(JSON.stringify(list, undefined, 2));
     throw new Error("Could not find matching fn for above call expression");
   }
 
-  const annotatedArgs = list.slice(1).value.flatMap((expr, index) => {
-    const paramType = fn.getParam(index)?.type;
-    const paramIsStructType = paramType.isStructType();
-    const exprIsStruct = isStruct(expr);
-    if (paramIsStructType && exprIsStruct) {
-      return applyStructParams(paramType, expr as List);
-    }
-
-    return [inferExprTypes(expr)];
-  });
-
-  identifier.setTypeOf(fn);
   return new List({ ...list.context, value: [identifier, ...annotatedArgs] });
 }
 
@@ -456,25 +371,14 @@ const getBnrReturnType = (call: List): Type | undefined => {
   return new PrimitiveType({ ...id.context, name: id.value as StackType });
 };
 
-const getMatchingFnForCallExpr = (call: List): FnType | undefined => {
-  const identifier = call.first() as Identifier;
-  const args = call.slice(1);
-  const fn = getMatchingFn({ identifier, args });
-  if (fn) identifier.setTypeOf(fn);
-  return fn;
-};
-
-const getMatchingFn = ({
-  identifier,
-  args,
-}: {
-  identifier: Identifier;
-  args: List;
-}): FnType | undefined => {
+const getMatchingFnForCallExpr = (
+  identifier: Identifier,
+  args: Expr[]
+): FnEntity | undefined => {
   const candidates = identifier.resolveFns(identifier);
   if (!candidates) return undefined;
   return candidates.find((candidate) => {
-    const params = candidate.value.params;
+    const params = candidate.parameters;
     return params.every((p, index) => {
       const arg = args.at(index);
       if (!arg) return false;
@@ -530,16 +434,18 @@ const inferFnExportTypes = (fnId: Identifier, params: List) => {
 };
 
 function assertFunctionReturnType(
-  typedBlock: List,
+  block: Block,
   suppliedReturnType: Type | undefined,
   id: Id
 ): Type {
-  const inferredReturnType = typedBlock.at(1) as Type;
+  const inferredReturnType = block.returnType;
+
   const shouldCheckInferredType =
-    suppliedReturnType && !suppliedReturnType?.is("void");
+    suppliedReturnType && !suppliedReturnType.isEquivalentTo(dVoid);
+
   const typeMismatch =
     shouldCheckInferredType &&
-    !typesMatch(suppliedReturnType, inferredReturnType);
+    !suppliedReturnType.isEquivalentTo(inferredReturnType);
 
   if (typeMismatch) {
     const name = getIdStr(id);
@@ -547,5 +453,6 @@ function assertFunctionReturnType(
       `Expected fn ${name} to return ${suppliedReturnType}, got ${inferredReturnType}`
     );
   }
+
   return inferredReturnType;
 }

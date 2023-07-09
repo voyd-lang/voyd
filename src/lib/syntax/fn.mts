@@ -8,12 +8,12 @@ export class Fn extends NamedEntity {
   readonly syntaxType = "fn";
   readonly variables: Variable[] = [];
   readonly parameters: Parameter[] = [];
-  private returnType?: Type;
+  private returnType: Type;
   readonly body: Expr;
 
   constructor(
     opts: NamedEntityOpts & {
-      returnType?: Type;
+      returnType: Type;
       variables?: Variable[];
       parameters: Parameter[];
       body: Expr;
