@@ -1,12 +1,4 @@
-import {
-  Expr,
-  Identifier,
-  List,
-  Type,
-  Fn,
-  Parameter,
-  ExternFn,
-} from "../../lib/index.mjs";
+import { Expr, List, Type, Fn, Parameter, ExternFn } from "../../lib/index.mjs";
 import { SyntaxMacro } from "../types.mjs";
 
 /** Registers any explicitly type annotated values */
