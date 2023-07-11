@@ -4,15 +4,15 @@ import { Type } from "./types.mjs";
 
 export class Variable extends NamedEntity {
   readonly isMutable: boolean;
-  protected type?: Type;
+  readonly type: Type;
   readonly syntaxType = "variable";
-  readonly initializer?: Expr;
+  readonly initializer: Expr;
 
   constructor(
     opts: NamedEntityOpts & {
       isMutable: boolean;
-      initializer?: Expr;
-      type?: Type;
+      initializer: Expr;
+      type: Type;
     }
   ) {
     super(opts);
@@ -27,15 +27,6 @@ export class Variable extends NamedEntity {
       throw new Error(`Variable ${this} is not registered with a function`);
     }
     return index;
-  }
-
-  getType(): Type {
-    if (this.type) return this.type;
-    throw new Error(`Type not yet resolved for variable ${this.name}`);
-  }
-
-  setType(type: Type) {
-    this.type = type;
   }
 
   toString() {

@@ -19,6 +19,7 @@ import {
   Parameter,
   Block,
   Call,
+  Variable,
 } from "../../lib/index.mjs";
 import { getIdStr } from "../../lib/syntax/get-id-str.mjs";
 import { FnEntity } from "../../lib/syntax/lexical-context.mjs";
@@ -39,7 +40,6 @@ const inferExprTypes = (expr: Expr | undefined): Expr => {
 const inferFnCallTypes = (list: List): Expr => {
   if (list.calls("define-function")) return inferFn(list);
   if (list.calls("block")) return inferBlockTypes(list);
-  if (list.calls("export")) return inferExportTypes(list);
   if (list.calls("root")) return inferRootModuleTypes(list);
   if (list.calls("module")) return inferModuleTypes(list);
   if (list.calls("quote")) return list;
@@ -150,9 +150,9 @@ export const listToParameter = (list: List) => {
 };
 
 const inferBlockTypes = (list: List): Block => {
-  const annotatedArgs = list.slice(1).map((expr) => inferExprTypes(expr));
+  const body = list.slice(1).map((expr) => inferExprTypes(expr));
 
-  const type = getExprReturnType(annotatedArgs.at(-1));
+  const type = getExprReturnType(body.at(-1));
 
   if (!type) {
     console.error(JSON.stringify(list, undefined, 2));
@@ -161,7 +161,7 @@ const inferBlockTypes = (list: List): Block => {
 
   return new Block({
     ...list.context,
-    body: annotatedArgs.value,
+    body: body.value,
     returnType: type,
   });
 };
@@ -187,21 +187,8 @@ function inferUserFnCallTypes(list: List): Call {
     throw new Error("Could not find matching fn for above call expression");
   }
 
-  return new List({ ...list.context, value: [identifier, ...annotatedArgs] });
+  return new Call({ ...list.context, args, fnId: fn.id });
 }
-
-/** Re-orders the supplied struct and returns it as a normal list of expressions to be passed as args */
-const applyStructParams = (
-  expectedStruct: ObjectType,
-  suppliedStruct: List
-): Expr[] =>
-  expectedStruct.value.map(({ name }) => {
-    const arg = suppliedStruct
-      .slice(1)
-      .value.find((expr) => (expr as List).calls(name, 1)) as List;
-    if (!arg) throw new Error(`Could not find arg for field ${name}`);
-    return arg.at(2)!;
-  });
 
 const inferRootModuleTypes = (list: List): List =>
   list.map((expr) => inferExprTypes(expr));
@@ -268,60 +255,59 @@ const resolveExports = ({
   });
 };
 
-const inferVarTypes = (list: List): List => {
-  const varFnId = list.at(0) as Identifier;
-  const mut = varFnId.value.includes("define-mut");
-  const global = varFnId.value.includes("global");
-  const initializer = list.at(2);
+const inferVarTypes = (list: List): Variable => {
+  const parent = list.parent;
+  const varFnId = list.identifierAt(0);
+  const isMutable = varFnId.value.includes("define-mut");
+  const initializer = inferExprTypes(list.at(2));
   const inferredType = getExprReturnType(initializer);
-  const annotatedInitializer = inferExprTypes(initializer?.clone());
+
   // Get identifier from a potentially untyped definition
   const def = list.at(1)!;
-  const identifier = def.isList()
-    ? (def.at(1) as Identifier) // Typed case
+  const name = def.isList()
+    ? def.identifierAt(1) // Typed case
     : (def as Identifier); // Untyped case
-  const suppliedType = def.isList()
-    ? isStruct(def)
-      ? typedStructListToStructType(def)
-      : getTypeFromLabeledExpr(def)
-    : undefined;
 
-  if (suppliedType && !typesMatch(suppliedType, inferredType)) {
+  const suppliedType = def.isList() ? getTypeFromLabeledExpr(def) : undefined;
+
+  if (suppliedType && !(inferredType?.isEquivalentTo(suppliedType) ?? true)) {
     throw new Error(
-      `${identifier} of type ${suppliedType} is not assignable to ${inferredType}`
+      `${name} of type ${suppliedType} is not assignable to ${inferredType}`
     );
   }
 
   const type = suppliedType ?? inferredType;
   if (!type) {
-    throw new Error(
-      `Could not determine type for identifier ${identifier.value}`
-    );
+    throw new Error(`Could not determine type for identifier ${name.value}`);
   }
 
-  identifier.setTypeOf(type);
-  list.parent?.addVar(identifier, {
-    kind: global ? "global" : "var",
-    mut,
+  const variable = new Variable({
+    ...list.context,
+    name,
+    initializer,
+    isMutable,
     type,
   });
 
-  return new List({
-    ...list.context,
-    value: [varFnId, identifier, annotatedInitializer],
-  });
+  parent?.registerEntity(variable);
+
+  return variable;
 };
 
-const getTypeFromLabeledExpr = (def: List): Type | undefined => {
+const getTypeFromLabeledExpr = (def: List): Type => {
   if (!def.calls("labeled-expr")) {
     throw new Error("Expected labeled expression");
   }
-  const typeId = def.at(2);
-  if (!typeId?.isIdentifier()) {
-    throw new Error("Param type annotations must be identifiers (for now)");
+
+  const typeId = def.identifierAt(2);
+
+  const type = typeId.resolve();
+
+  if (!type?.isType()) {
+    throw new Error(`${typeId} is not a type`);
   }
 
-  return def.getType(typeId);
+  return type;
 };
 
 const getExprReturnType = (expr?: Expr): Type | undefined => {
@@ -329,24 +315,31 @@ const getExprReturnType = (expr?: Expr): Type | undefined => {
   if (expr.isInt()) return i32;
   if (expr.isFloat()) return f32;
   if (expr.isBool()) return bool;
-  if (expr.isIdentifier() && expr.is("void")) return dVoid;
-  if (expr.isIdentifier()) return expr.getTypeOf();
+  if (expr.isIdentifier()) return getIdentifierType(expr);
+  if (expr.isCall()) return expr.type;
   if (!expr.isList()) throw new Error(`Invalid expression ${expr}`);
 
   if (expr.calls("labeled-expr")) return getExprReturnType(expr.at(2));
   if (expr.calls("block")) return getExprReturnType(expr.at(-1));
-  if (expr.calls("struct")) return getStructLiteralType(expr);
+  if (expr.calls("object")) return getObjectLiteralType(expr);
   if (expr.calls("bnr") || expr.calls("binaryen-mod")) {
     return getBnrReturnType(expr);
   }
   if (expr.calls("if")) return getIfReturnType(expr);
+};
 
-  const fn = getMatchingFnForCallExpr(expr);
-  return fn?.returnType;
+const getIdentifierType = (id: Identifier): Type | undefined => {
+  const entity = id.resolve();
+  if (!entity) return;
+  if (entity.isVariable()) return entity.type;
+  if (entity.isGlobal()) return entity.type;
+  if (entity.isParameter()) return entity.type;
+  if (entity.isFn()) return entity.getType();
+  if (entity.isType()) return entity;
 };
 
 /** Takes the expression form of a struct and converts it into type form */
-const getStructLiteralType = (ast: List): ObjectType =>
+const getObjectLiteralType = (ast: List): ObjectType =>
   new ObjectType({
     ...ast.context,
     name: "literal",
@@ -383,9 +376,12 @@ const getMatchingFnForCallExpr = (
       const arg = args.at(index);
       if (!arg) return false;
       const argType = getExprReturnType(arg);
+      if (!argType) {
+        throw new Error(`Could not determine type for ${arg}`);
+      }
       const argLabel = getExprLabel(arg);
       const labelsMatch = p.label === argLabel;
-      return typesMatch(p.type, argType) && labelsMatch;
+      return p.type.isEquivalentTo(argType) && labelsMatch;
     });
   });
 };
@@ -394,43 +390,6 @@ const getExprLabel = (expr?: Expr): string | undefined => {
   if (!expr?.isList()) return;
   if (!expr.calls("labeled-expr")) return;
   return expr.getIdStrAt(1);
-};
-
-const inferExportTypes = (exp: List) => {
-  const exportId = exp.at(1);
-  if (!exportId?.isIdentifier()) {
-    throw new Error("Missing identifier in export");
-  }
-
-  const params = exp.at(2);
-  if (params?.isList() && params.calls("parameters")) {
-    inferFnExportTypes(exportId, params);
-    return exp;
-  }
-
-  return exp;
-};
-
-const inferFnExportTypes = (fnId: Identifier, params: List) => {
-  const candidates = fnId.resolveFns(fnId);
-  const fn = candidates.find((candidate) =>
-    candidate.value.params.every((param, index) => {
-      const p = params.at(index + 1);
-      if (!p?.isList()) return false;
-      const { label, name: identifier, type } = getInfoFromRawParam(p as List);
-      const identifiersMatch = identifier ? identifier.is(param.name) : true;
-      const labelsMatch = label ? label.is(param.label) : true;
-      const typesDoMatch = typesMatch(param.type, type);
-      return typesDoMatch && identifiersMatch && labelsMatch;
-    })
-  );
-
-  if (!fn) {
-    console.error(JSON.stringify([fnId, params], null, 2));
-    throw new Error(`Fn ${fnId} not found for the above export expression`);
-  }
-
-  fnId.setTypeOf(fn);
 };
 
 function assertFunctionReturnType(
