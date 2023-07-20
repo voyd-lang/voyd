@@ -3,9 +3,7 @@ import {
   Expr,
   noop,
   Identifier,
-  FnType,
   ObjectType,
-  BaseType,
   Type,
   i32,
   f32,
@@ -202,40 +200,6 @@ const inferModuleTypes = (list: List): List => {
   list.value[4] = body.map((expr) => inferExprTypes(expr));
   resolveExports({ exports, body: list.at(4) as List });
   return list;
-};
-
-// This is probably super problematic
-const resolveImports = (imports: List, exports: List): void => {
-  const parent = imports.getParent()!;
-  for (const imp of imports.value) {
-    if (!isList(imp)) continue;
-    const module = modules.get(imp.at(0)!.value as string);
-    const isReExported = imp.at(2)?.is("re-exported");
-    if (!module) continue;
-    // TODO support import patterns other than ***
-    for (const exp of module.at(3)?.value as Expr[]) {
-      if (!exp.isIdentifier() || exp.is("exports")) continue;
-      const type = exp.getTypeOf();
-
-      if (type instanceof FnType) {
-        parent.addFn(exp, type);
-        if (isReExported) exports.push(exp);
-        continue;
-      }
-
-      if (exp.resolve && exp.resolve.kind === "global") {
-        parent.addVar(exp, exp.resolve);
-        if (isReExported) exports.push(exp);
-        continue;
-      }
-
-      if (type instanceof BaseType) {
-        parent.addType(exp, type);
-        if (isReExported) exports.push(exp);
-        continue;
-      }
-    }
-  }
 };
 
 const resolveExports = ({
