@@ -1,3 +1,29 @@
+# 20 July 2023
+
+The previous syntax change had some problems. So I've modified the rules of the language to
+resolve some of the ambiguities (among other changes).
+
+- The `=` sign separating a function signature is now optional. It should be used only for single
+  line functions.
+- Effects are now on the right side of `->`. A function signature is now `fn name() -> (effect return-type)`.
+  This allows `->` to be treated as an operator and makes the `=` far less complex to implement.
+- Generics are now defined with `::()`. This prevents us from needing to add hacks to the parser
+  and makes the language much more predictable and uniform. Its also inline with the new FQCS
+- Introduce FQCS inspired by rust
+- Remove `=` from `obj` and `impl` defs.
+- Objects now behave more similarly to Rust's structs. Though they are still reference types and
+  can be extended, they now only define data. Traits define behavior and can only hold functions/methods. Methods must now be define
+  inside of `impl`. For now, extensions must repeat all the items they inherit.
+- Add Fully Qualified Call Syntax (FQCS) inspired by rust. Makes it possible to impl multiple traits
+  with a method that has the same signature
+
+Now all thats left is to:
+
+- Decide casing convention once and for all
+  - Native types lowercase? (i32 vs I32)
+  - CamelCase?
+- Decide on type spacing rules `a:i32` vs `a: i32`
+
 # 9 July 2023
 
 I'm making yet another major change to the syntax. All declaration statements will separate the

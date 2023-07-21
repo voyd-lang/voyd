@@ -27,16 +27,18 @@ var y = 3
 Syntax:
 
 ```void
-fn $name([$label:?$param-name:$ParamType]*) [$effects? -> $return-type]? =
+fn $name([$label:?$param-name:$ParamType]*) [-> ($effects? $return-type)]? =?
 	$body:Expr*
 ```
+
+The trailing equal sign is optional and used only when the entire function is defined on one line.
 
 ### Examples
 
 Basic function:
 
 ```void
-fn add(a:i32 b:i32) -> i32 =
+fn add(a:i32 b:i32) -> i32
 	a + b
 
 // To call
@@ -55,7 +57,7 @@ add(1 2)
 With labels:
 
 ```void
-fn multiply(a:i32 by:b:i32) -> i32 =
+fn multiply(a:i32 by:b:i32) -> i32
 	a * b
 
 // To call
@@ -71,14 +73,19 @@ multiply(1 by: 2)
 With return type inference:
 
 ```void
-fn add(a:i32 b:i32) =
-	a + b
+fn add(a:i32 b:i32) = a + b
 ```
 
 With effects:
 
 ```void
-fn get-json(address:String) Async -> Dictionary =
+// When effects are explicit, the return type must be grouped in ()
+fn get-json(address:String) -> (Async Dictionary)
+	let json-text = await fetch(address)
+	parse-json json-text
+
+// Multiple effects must also be grouped
+fn get-json(address:String) -> ((Async Throws) Dictionary)
 	let json-text = await fetch(address)
 	parse-json json-text
 ```
@@ -88,14 +95,14 @@ fn get-json(address:String) Async -> Dictionary =
 Object literal parameters allow property shorthand and do not care about order, unlike labeled parameters
 
 ```void
-fn move-to { x:i32, y:i32, z: i32 } -> void =
+fn move-to { x:i32, y:i32, z: i32 } -> void
 	robot.move x y z
 
 // With other parameters
-fn move-to(~scale:i32, { x:i32, y:i32, z:i32 }) -> void =
+fn move-to(~scale:i32, { x:i32, y:i32, z:i32 }) -> void
 	move-to { x: x * scale, y: y * scale, z: z * scale }
 
-fn main() -> void =
+fn main() -> void
 	let z = 7
 	move-to { z, x: 5, y }
 
@@ -124,7 +131,7 @@ Hey!
 
 ```void
 // Definition
-obj Pos =
+obj Pos
 	x: i32
 	y: i32
 	z: i32
@@ -139,10 +146,11 @@ type Pos = { x: i32, y: i32, z: i32 }
 ### Object With Methods
 
 ```
-obj Point2D =
+obj Point2D
   x: Int
   y: Int
 
+impl Point2D
   fn toTuple() -> [Int, Int]
     [self.x, self.y] // self is optional, x and y can be implicitly understood to be referencing self
 ```
@@ -158,20 +166,65 @@ let value = {
 
 ## Traits
 
-```
-// Trait (Abstract objects)
-trait Animal =
-  species: string
+Traits define the behavior of an object. That is, a group of methods associated with
+an object. They work similarly to traits in rust, except they can extend other traits.
 
+If you're unfamiliar with rust, traits are like interfaces in other languages. The main difference
+is they can only define the methods of an object and not the fields.
+
+```
+trait Animal
   fn age() -> Int
 
   // Default implementation
-  fn hey() log -> void
+  fn hey() -> (log void)
     log("hey")
 
-obj Human extends Animal =
-  fn age()
-    years
+obj Human
+  years: Int
+
+impl Animal for Human
+  fn age() = years
+```
+
+## Trait Extensions
+
+```
+trait Animal
+  fn age() -> Int
+  // Default implementation
+  fn hey() -> (log void)
+    log("hey")
+
+
+trait Mammal extends Animal
+  fn age() -> Int
+  fn isAquatic() -> Boolean
+  // Default implementation is inherited
+  fn hey() -> (log void)
+
+```
+
+## Fully Qualified Call Syntax
+
+Resolves the correct method when the selection is ambiguous to the compiler
+
+```
+trait Render
+  fn draw() -> Int = ()
+
+trait Cowboy
+  fn draw() -> Int = ()
+
+
+obj Person
+
+impl Render for Person
+impl Cowboy for Person
+
+const me = Person()
+Cowboy::draw(me)
+Render::draw(me)
 ```
 
 ### Default function implementations
@@ -393,11 +446,11 @@ Void functions can be overloaded. Provided that function overload can be unambig
 via their parameters and return type.
 
 ```void
-fn sum(a:Int, b:Int) =
+fn sum(a:Int, b:Int)
   print("Def 1");
   a + b
 
-fn sum { a:Int, b:Int } =
+fn sum { a:Int, b:Int }
   print("Def 2");
   a + b
 
@@ -405,14 +458,14 @@ sum(1, 2) // Def 1
 sum { a: 1, b: 2 } // Def 2
 
 // ERROR: sum(numbers: ...Int) overlaps ambiguously with sum(a: Int, b: Int)
-fn sum(numbers: ...Int) =
+fn sum(numbers: ...Int)
   print("Def 3");
 ```
 
 This can be especially useful for overloading operators to support a custom type:
 
 ```
-fn '+'(a:Vec3, b:Vec3) -> Vec3 =
+fn '+'(a:Vec3, b:Vec3) -> Vec3
   Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
 
 Vec3(1, 2, 3) + Vec3(4, 5, 6) // Vec3(5, 7, 9)
@@ -508,12 +561,6 @@ Syntax Macros are responsible for transforming the ast produced by the parser in
 Syntax Macro Pipeline Example:
 
 ```void
-fn fib(n:i32) -> i32 =
-    if (n < 2)
-        n
-        fib(n - 1) + fib(n - 2)
-
-// After declaration syntax macro (removes the = symbol, which just acts as a visual separator)
 fn fib(n:i32) -> i32
     if (n < 2)
         n
