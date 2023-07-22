@@ -101,14 +101,14 @@ var my_var = 7
 A Basic function:
 
 ```
-fn add(a: i32 b: i32) -> i32
+fn add(a:i32 b:i32) -> i32
   a + b
 ```
 
 In most cases the return type can be inferred
 
 ```
-fn add(a: i32 b: i32) = a + b // The equal sign is used when the function is written on one line
+fn add(a:i32 b:i32) = a + b // The equal sign is used when the function is written on one line
 ```
 
 Functions are called using S-expression syntax
@@ -237,7 +237,7 @@ squared x // (squared x)
 Any arguments prefixed with ~ are keyword arguments
 
 ```
-fn move(robot: Robot, ~to: [i32 i32 i32])
+fn move(robot:Robot ~to:[i32 i32 i32])
   // etc
 
 move robot to: [3.1, 2.3, 4.0]
@@ -246,13 +246,9 @@ move robot to: [3.1, 2.3, 4.0]
 You can also provide an external label to alias the keyword on call.
 
 ```
-fn add(a:i32, with:b:i32)
-  a + b
-  html
-    ul
-      items.each item => (li item)
+fn add(a:i32 to:b:i32) = a + b
 
-add 1 with: 4
+add 1 to: 4
 ```
 
 ## Generics

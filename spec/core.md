@@ -6,6 +6,8 @@ NOTE: MAY BE OUT OF DATE. DO NOT RELY ON THIS YET.
 
 # The Core Language Grammar
 
+The core language grammar uses standard S-Expression based syntax rules
+
 ```ebnf
 SExpr = AtomicSymbol | List;
 

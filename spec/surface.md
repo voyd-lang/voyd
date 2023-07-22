@@ -256,9 +256,9 @@ macro def-wasm-operator(op wasm-fn arg-type return-type)
 	defun $op(left:$arg-type right:$arg-type) -> $return-type
 		binaryen-mod ($arg-type $wasm-fn) (left right)
 
-def-wasm-operator("<" lt_s i32 i32)
+def-wasm-operator('<' lt_s i32 i32)
 ; Expands into
-defun "<"(left:i32 right:i32) -> i32
+defun '<'(left:i32 right:i32) -> i32
   binaryen-mod (i32 lt_s) (left right)
 ```
 
@@ -275,15 +275,15 @@ TODO
 ## Modules
 
 ```void
-use src/lib *** // Import everything from src/lib
-use src/lib as my-lib // Import everything as my-lib
-use src/lib { my-util-function } // Import my-util-function from src/lib
-use src/lib { func-a sub-module: { func-b } } // Import func-a from src/lib and func-b from the submodule in src/lib
-use super/helpers { func-a: func-c } // Import func-a as func-c from ../helpers
-use dir/helpers { a } // import a from ./helpers
+use src::lib::*** // Import everything from src/lib
+use src::lib as my-lib // Import everything as my-lib
+use src::lib::{ my-util-function } // Import my-util-function from src/lib
+use src::lib::{ func-a sub-module: { func-b } } // Import func-a from src/lib and func-b from the submodule in src/lib
+use super::helpers::{ func-a: func-c } // Import func-a as func-c from ../helpers
+use dir::helpers::{ a } // import a from ./helpers
 // If the path points to a folder, an index.void is assumed
-use src/folder { b } // Resolves to src/folder/index.void
-use package { pack-func } // Import pack-func from the installed package called package. Note folders take precedent over installed packages
+use src::folder::{ b } // Resolves to src/folder/index.void
+use package::{ pack-func } // Import pack-func from the installed package called package. Note folders take precedent over installed packages
 ```
 
 # The Surface Language Grammar
@@ -298,20 +298,20 @@ NewLine = "\n";
 (* Comment *)
 Comment = "//", { AnyChar - NewLine }, NewLine;
 
-(* Operators *)
-Operator = InfixOperator | GreedyOperator;
-InfixOperator = "and" | "or" | "xor" | "+" | "-" | "/" | "*" | "==" | "<" | ">" | ">=" | "<=" | "|>" | "|" | "^" | "%" | "||" | ":" | ".";
-GreedyOperator = "=" | "=>" | "<|" | ";";
-
 (* Brackets *)
 Bracket = "{" | "}" | "[" | "]" | "(" | ")";
 
+(* Operator Characters *)
+OpChar = "+" | "-" | "*" | "/" | "=" | ":" | "?" | "." | ";" | "," | "<" | ">" | "$" | "!" | "@" | "%" | "^" | "&" | "~";
+Operator = OpChar, { OpChar }
+
 (* Terminators *)
-Terminator = Bracket | Whitespace | '"' | "'" | "." | ";" | ":" | ",";
+Terminator = Bracket | Whitespace | TerminatingOperator | '"' | "'" | "`";
+TerminatingOperator = ":" | "?" | "!" | "." | ";" | ",", { OpChar } ;
 
 (* Identifier *)
-Identifier = ['#'], RegularIdentifier | SuperIdentifier
-RegularIdentifier = AlphabeticChar, { AnyChar - Terminator }
+Identifier = RegularIdentifier | SuperIdentifier;
+RegularIdentifier =  (AnyChar - (Number | Terminator)), { AnyChar - Terminator };
 SuperIdentifier = "'", { AnyChar - "'" }, "'";
 
 (* Numbers *)
@@ -319,9 +319,6 @@ Number = ScientificNumber | Int | Float;
 ScientificNumber = #'^[+-]?\d(\.\d+)?[Ee][+-]?\d+$';
 Int = #'^[+-]?\d+$';
 Float = #'^[+-]?\d+\.\d+$';
-
-(* Characters reserved for future use*)
-Reserved = "@" | "&" | "~";
 
 (* A string is a sequence of characters surrounded by double quotes *)
 String = '"', { AnyChar - '"' }, '"';
@@ -519,7 +516,7 @@ export const infixOperators = new Map<string, [number, Associativity]>([
 Terminal operators:
 
 ```typescript
-[".", ":", ";"];
+[".", ":", ";", "::", "?:"];
 ```
 
 ### Rules
