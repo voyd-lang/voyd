@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { stdout } from "process";
 import { getConfig } from "./config/index.mjs";
 import { importRootModule, parseFile } from "./import-module.mjs";

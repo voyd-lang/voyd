@@ -9,7 +9,9 @@
     "debug-parser": "voidc --ast test.dm",
     "prepublishOnly": "tsc"
   },
-  "bin": "dist/cli.js",
+  "bin": {
+    "voidc": "./dist/index.mjs"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
