@@ -38,33 +38,42 @@ export class LexicalContext {
       fns.push(entity);
       this.fns.set(idStr, fns);
       this.fnsById.set(entity.id, entity);
+      return;
     }
 
     if (entity.syntaxType === "type") {
       this.types.set(idStr, entity);
+      return;
     }
 
     if (entity.syntaxType === "parameter") {
       this.params.set(idStr, entity);
+      return;
     }
 
     if (entity.syntaxType === "variable") {
       this.vars.set(idStr, entity);
+      return;
     }
 
     if (entity.syntaxType === "global") {
       this.globals.set(idStr, entity);
+      return;
     }
 
     if (entity.syntaxType === "macro-variable") {
       this.macroVars.set(idStr, entity);
+      return;
     }
 
     if (entity.syntaxType === "macro") {
       this.macros.set(idStr, entity);
+      return;
     }
 
-    throw new Error(`Unrecognized entity ${entity}, id: ${entity.name}`);
+    throw new Error(
+      `Unrecognized entity ${entity}, name: ${(entity as any)?.name}`
+    );
   }
 
   resolveEntity(name: Id): Entity | undefined {

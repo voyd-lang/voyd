@@ -6,7 +6,7 @@ export const functionalNotation = (list: List): List =>
     if (expr.isWhitespace()) return expr;
 
     const nextExpr = array[index + 1];
-    if (nextExpr.isList()) {
+    if (nextExpr && nextExpr.isList()) {
       const list = array.splice(index + 1, 1)[0] as List;
       list.insert(new Whitespace({ value: " " }));
       list.insert(expr);
