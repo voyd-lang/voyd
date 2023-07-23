@@ -96,14 +96,12 @@ const lexer = (file: File): Token => {
   while (file.hasCharacters) {
     const char = file.next;
 
-    // Ignore commas for now. They make a nice visual separator
     if (char === ",") {
-      file.consumeChar();
-      continue;
+      file.consumeChar(); // Leave out for now
+      break;
     }
 
-    // Handle numbers
-    if (!token.hasChars && nextMightBeNumber(file)) {
+    if (!token.hasChars && nextIsNumber(file)) {
       consumeNumber(file, token);
       break;
     }
@@ -113,10 +111,15 @@ const lexer = (file: File): Token => {
       break;
     }
 
+    if (!token.hasChars && isTerminator(char)) {
+      token.addChar(file.consumeChar());
+      break;
+    }
+
     // Support sharp identifiers (Used by reader macros ignores non-whitespace terminators)
     if (token.first === "#" && !isWhitespace(char)) {
       token.addChar(file.consumeChar());
-      break;
+      continue;
     }
 
     if (isTerminator(char)) {
@@ -149,5 +152,5 @@ const consumeNumber = (file: File, token: Token) => {
   }
 };
 
-const nextMightBeNumber = (file: File) =>
+const nextIsNumber = (file: File) =>
   isDigit(file.next) || (isDigitSign(file.next) && isDigit(file.at(1) ?? ""));
