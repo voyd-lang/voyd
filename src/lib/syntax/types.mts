@@ -138,7 +138,7 @@ export class TupleType extends BaseType {
 }
 
 export class ObjectType extends BaseType {
-  readonly kindOfType = "struct";
+  readonly kindOfType = "object";
   value: { name: string; type: Type }[];
 
   constructor(

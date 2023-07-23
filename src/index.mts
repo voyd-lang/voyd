@@ -9,7 +9,7 @@ function main() {
   const config = getConfig();
 
   if (config.emitParserAst) {
-    console.log(JSON.stringify(parseFile(config.index)), undefined, 2);
+    console.log(JSON.stringify(parseFile(config.index), undefined, 2));
     return;
   }
 
