@@ -7,11 +7,11 @@ export const stringMacro: ReaderMacro = {
     const startChar = token.value;
     token.value = "";
     while (file.hasCharacters) {
-      const next = file.consume();
+      const next = file.consumeChar();
 
       if (next === "\\") {
         token.addChar(next);
-        token.addChar(file.consume());
+        token.addChar(file.consumeChar());
         continue;
       }
 

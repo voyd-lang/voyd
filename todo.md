@@ -1,0 +1,12 @@
+- Add support for CLI
+  - Emit parser AST
+  - Emit syntax AST
+  - Emit wasm code
+  - Run wasm code
+- Add jest tests for parsing phase
+- Repair macro syntax macro
+- Repair type system
+- Add jest tests for syntax phase
+- Add back support for object syntax
+- Add GC
+- Add jest tests for code gen phase (assembly phase?)

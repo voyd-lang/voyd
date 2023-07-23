@@ -6,7 +6,7 @@ export const comment: ReaderMacro = {
   macro: (file) => {
     while (file.hasCharacters) {
       if (file.next === "\n") break;
-      file.consume();
+      file.consumeChar();
     }
 
     return noop();

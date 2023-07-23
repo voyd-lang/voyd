@@ -3,6 +3,14 @@ import { Expr, Identifier, List, Whitespace } from "./lib/syntax/index.mjs";
 import { Token } from "./lib/token.mjs";
 import { File } from "./lib/file.mjs";
 import { getReaderMacroForToken } from "./reader-macros/index.mjs";
+import {
+  isDigit,
+  isDigitSign,
+  isOpChar,
+  isTerminatingOpChar,
+  isTerminator,
+  isWhitespace,
+} from "./lib/grammar.mjs";
 
 export interface ParseOpts {
   nested?: boolean;
@@ -90,30 +98,56 @@ const lexer = (file: File): Token => {
 
     // Ignore commas for now. They make a nice visual separator
     if (char === ",") {
-      file.consume();
+      file.consumeChar();
       continue;
     }
 
-    // Handle real numbers
-    if (char === "." && token.isNumber) {
-      token.addChar(file.consume());
-      continue;
-    }
-
-    const isTerminator = /[\{\[\(\}\]\)\s\.\;\:\'\"]/.test(char);
-
-    if (isTerminator && (token.first === "#" || !token.hasChars)) {
-      token.addChar(file.consume());
+    // Handle numbers
+    if (!token.hasChars && nextMightBeNumber(file)) {
+      consumeNumber(file, token);
       break;
     }
 
-    if (isTerminator) {
+    if (!token.hasChars && isTerminatingOpChar(char)) {
+      consumeTerminatingOp(file, token);
       break;
     }
 
-    token.addChar(file.consume());
+    // Support sharp identifiers (Used by reader macros ignores non-whitespace terminators)
+    if (token.first === "#" && !isWhitespace(char)) {
+      token.addChar(file.consumeChar());
+      break;
+    }
+
+    if (isTerminator(char)) {
+      break;
+    }
+
+    token.addChar(file.consumeChar());
   }
 
   token.location.endIndex = file.position;
   return token;
 };
+
+const consumeTerminatingOp = (file: File, token: Token) => {
+  while (isOpChar(file.next)) {
+    token.addChar(file.consumeChar());
+  }
+};
+
+const consumeNumber = (file: File, token: Token) => {
+  const isValidNumber = (str: string) =>
+    /^[+-]?\d*(\.\d+)?[Ee]?[+-]?\d*$/.test(str);
+  const stillConsumingNumber = () =>
+    file.next &&
+    (isValidNumber(token.value + file.next) ||
+      isValidNumber(token.value + file.next + file.at(1)));
+
+  while (stillConsumingNumber()) {
+    token.addChar(file.consumeChar());
+  }
+};
+
+const nextMightBeNumber = (file: File) =>
+  isDigit(file.next) || (isDigitSign(file.next) && isDigit(file.at(1) ?? ""));

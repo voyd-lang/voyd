@@ -35,8 +35,12 @@ export class File {
     return this.value[0];
   }
 
+  at(index: number): string | undefined {
+    return this.value.at(index);
+  }
+
   /** Returns the next character and removes it from the queue */
-  consume(): string {
+  consumeChar(): string {
     const char = this.value.shift();
     if (!char) {
       throw new Error("Out of characters");

@@ -302,17 +302,19 @@ Comment = "//", { AnyChar - NewLine }, NewLine;
 Bracket = "{" | "}" | "[" | "]" | "(" | ")";
 
 (* Operator Characters *)
-OpChar = "+" | "-" | "*" | "/" | "=" | ":" | "?" | "." | ";" | "," | "<" | ">" | "$" | "!" | "@" | "%" | "^" | "&" | "~";
+OpChar = "+" | "-" | "*" | "/" | "=" | ":" | "?" | "." | ";" | "<" | ">" | "$" | "!" | "@" | "%" | "^" | "&" | "~";
 Operator = OpChar, { OpChar }
 
 (* Terminators *)
-Terminator = Bracket | Whitespace | TerminatingOperator | '"' | "'" | "`";
-TerminatingOperator = ":" | "?" | "!" | "." | ";" | ",", { OpChar } ;
+Terminator = Bracket | Whitespace | TerminatingOperator | Quote | ",";
+Quote = '"' | "'" | "`";
+TerminatingOperator = (":" | "?" | "!" | "." | ";"), { OpChar } ;
 
 (* Identifier *)
-Identifier = RegularIdentifier | SuperIdentifier;
-RegularIdentifier =  (AnyChar - (Number | Terminator)), { AnyChar - Terminator };
-SuperIdentifier = "'", { AnyChar - "'" }, "'";
+Identifier = StandardIdentifier | QuotedIdentifier | SharpIdentifier;
+StandardIdentifier =  (AnyChar - (Number | Terminator)), { AnyChar - Terminator };
+QuotedIdentifier = "'", { AnyChar - "'" }, "'";
+SharpIdentifier = "#", AnyChar - Whitespace, { AnyChar - Whitespace };
 
 (* Numbers *)
 Number = ScientificNumber | Int | Float;
