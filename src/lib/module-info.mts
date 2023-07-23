@@ -18,8 +18,7 @@ export type ModuleInfo = {
 
 export type ModuleImports = [ModuleInfo, string, "re-exported"?][];
 
-export const resolveRootModule = (): ModuleInfo => {
-  const filePath = process.argv[2];
+export const resolveRootModule = (filePath: string): ModuleInfo => {
   const parsed = path.parse(filePath);
   const srcPath = path.resolve(parsed.dir);
   return resolveModule({

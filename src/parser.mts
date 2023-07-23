@@ -1,4 +1,3 @@
-import { ModuleInfo } from "./lib/module-info.mjs";
 import { Expr, Identifier, List, Whitespace } from "./lib/syntax/index.mjs";
 import { Token } from "./lib/token.mjs";
 import { File } from "./lib/file.mjs";
@@ -15,11 +14,10 @@ import {
 export interface ParseOpts {
   nested?: boolean;
   terminator?: string;
-  module: ModuleInfo;
   parent?: Expr;
 }
 
-export function parse(file: File, opts: ParseOpts): List {
+export function parse(file: File, opts: ParseOpts = {}): List {
   const list = new List({
     location: {
       startIndex: file.position,
@@ -39,12 +37,10 @@ export function parse(file: File, opts: ParseOpts): List {
     if (readerMacro) {
       const result = readerMacro(file, {
         token,
-        module: opts.module,
         reader: (file, terminator, parent) =>
           parse(file, {
             nested: true,
             terminator,
-            module: opts.module,
             parent: parent ?? opts.parent,
           }),
       });
@@ -53,7 +49,7 @@ export function parse(file: File, opts: ParseOpts): List {
     }
 
     if (token.is("(")) {
-      list.push(parse(file, { nested: true, module: opts.module }));
+      list.push(parse(file, { nested: true }));
       continue;
     }
 

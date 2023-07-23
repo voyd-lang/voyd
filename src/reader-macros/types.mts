@@ -10,7 +10,6 @@ export interface ReaderMacro {
     opts: {
       token: Token;
       reader: (file: File, terminator?: string, parent?: Expr) => List;
-      module: ModuleInfo;
     }
   ) => Expr;
 }
