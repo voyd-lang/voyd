@@ -92,9 +92,10 @@ const lexer = (file: File): Token => {
   while (file.hasCharacters) {
     const char = file.next;
 
-    if (char === ",") {
-      file.consumeChar(); // Leave out for now
-      break;
+    // Skip comma's (for now)
+    if (!token.hasChars && char === ",") {
+      file.consumeChar();
+      continue;
     }
 
     if (!token.hasChars && nextIsNumber(file)) {

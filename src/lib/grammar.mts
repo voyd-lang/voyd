@@ -1,5 +1,6 @@
 export const isTerminator = (char: string) =>
   isWhitespace(char) ||
+  char === "," ||
   isBracket(char) ||
   isQuote(char) ||
   isTerminatingOpChar(char);

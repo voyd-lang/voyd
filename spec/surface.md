@@ -275,11 +275,11 @@ TODO
 ## Modules
 
 ```void
-use src::lib::*** // Import everything from src/lib
+use src::lib::* // Import everything from src/lib
 use src::lib as my-lib // Import everything as my-lib
 use src::lib::{ my-util-function } // Import my-util-function from src/lib
 use src::lib::{ func-a sub-module: { func-b } } // Import func-a from src/lib and func-b from the submodule in src/lib
-use super::helpers::{ func-a: func-c } // Import func-a as func-c from ../helpers
+use super::helpers::{ func-a as func-c } // Import func-a as func-c from ../helpers
 use dir::helpers::{ a } // import a from ./helpers
 // If the path points to a folder, an index.void is assumed
 use src::folder::{ b } // Resolves to src/folder/index.void
@@ -303,7 +303,7 @@ Bracket = "{" | "}" | "[" | "]" | "(" | ")";
 
 (* Operator Characters *)
 OpChar = "+" | "-" | "*" | "/" | "=" | ":" | "?" | "." | ";" | "<" | ">" | "$" | "!" | "@" | "%" | "^" | "&" | "~";
-Operator = OpChar, { OpChar }
+Operator = (OpChar, { OpChar }) | "and" | "or" | "xor" | "as" | "is" | "in";
 
 (* Terminators *)
 Terminator = Bracket | Whitespace | TerminatingOperator | Quote | ",";
@@ -494,6 +494,9 @@ export const infixOperators = new Map<string, [number, Associativity]>([
   ["and", [0, "left"]],
   ["or", [0, "left"]],
   ["xor", [0, "left"]],
+  ["as", [0, "left"]],
+  ["is", [0, "left"]],
+  ["in", [0, "left"]],
   ["==", [0, "left"]],
   ["!=", [0, "left"]],
   ["<", [0, "left"]],
@@ -510,6 +513,7 @@ export const infixOperators = new Map<string, [number, Associativity]>([
   ["/=", [4, "right"]],
   ["=>", [5, "right"]],
   [":", [0, "left"]],
+  ["::", [0, "left"]],
   [";", [4, "left"]],
   ["??", [3, "right"]],
 ]);

@@ -12,6 +12,9 @@ export const infixOperators = new Map<string, [number, Associativity]>([
   ["and", [0, "left"]],
   ["or", [0, "left"]],
   ["xor", [0, "left"]],
+  ["as", [0, "left"]],
+  ["is", [0, "left"]],
+  ["in", [0, "left"]],
   ["==", [0, "left"]],
   ["!=", [0, "left"]],
   ["<", [0, "left"]],
@@ -28,6 +31,7 @@ export const infixOperators = new Map<string, [number, Associativity]>([
   ["/=", [4, "right"]],
   ["=>", [5, "right"]],
   [":", [0, "left"]],
+  ["::", [0, "left"]],
   [";", [4, "left"]],
   ["??", [3, "right"]],
 ]);
