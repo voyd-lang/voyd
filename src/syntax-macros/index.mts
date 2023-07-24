@@ -14,6 +14,10 @@ export const getSyntaxMacros = (): SyntaxMacro[] => {
     return deSugarSyntaxMacros;
   }
 
+  if (getConfig().emitPostMacroAst) {
+    return macroPhaseSyntaxMacros;
+  }
+
   return standardSyntaxMacros;
 };
 
@@ -25,10 +29,14 @@ const deSugarSyntaxMacros: SyntaxMacro[] = [
   (ast) => infix(ast),
 ];
 
-/** Caution: Order matters */
-const standardSyntaxMacros: SyntaxMacro[] = [
+const macroPhaseSyntaxMacros: SyntaxMacro[] = [
   ...deSugarSyntaxMacros,
   moduleSyntaxMacro,
   macro,
+];
+
+/** Caution: Order matters */
+const standardSyntaxMacros: SyntaxMacro[] = [
+  ...macroPhaseSyntaxMacros,
   typeAnalysis,
 ];

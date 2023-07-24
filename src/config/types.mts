@@ -3,6 +3,8 @@ export type VoidConfig = {
   emitParserAst?: boolean;
   /** Write de-sugared AST to stdout */
   emitDeSugaredAst?: boolean;
+  /** Write post-macro AST to stdout */
+  emitPostMacroAst?: boolean;
   /** Write syntax SDT to stdout */
   emitSyntaxAst?: boolean;
   /** Write wasm bytecode to stdout */

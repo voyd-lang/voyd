@@ -14,7 +14,7 @@ function main() {
   }
 
   const root = importRootModule();
-  if (config.emitSyntaxAst || config.emitDeSugaredAst) {
+  if (config.emitSyntaxAst || config.emitDeSugaredAst || config.emitPostMacroAst) {
     console.log(JSON.stringify(root, undefined, 2));
     return;
   }
