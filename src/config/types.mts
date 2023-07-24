@@ -1,11 +1,13 @@
 export type VoidConfig = {
-  /** Specifies location to emit the parser ast */
+  /** Write raw parser AST to stdout */
   emitParserAst?: boolean;
-  /** Specifies location to emit the syntax ast */
+  /** Write de-sugared AST to stdout */
+  emitDeSugaredAst?: boolean;
+  /** Write syntax SDT to stdout */
   emitSyntaxAst?: boolean;
-  /** Specifies location to emit wasm bytecode */
+  /** Write wasm bytecode to stdout */
   emitWasm?: boolean;
-  /** Specifies location to emit wasm text */
+  /** Write wasm bytecode to stdout (binaryen flavor) */
   emitWasmText?: boolean;
   /** Have binaryen run an optimization pass */
   runBinaryenOptimizationPass?: boolean;

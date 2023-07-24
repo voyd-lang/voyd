@@ -5,6 +5,9 @@ const options: ParseArgsConfig["options"] = {
   "emit-parser-ast": {
     type: "boolean",
   },
+  "emit-de-sugared-ast": {
+    type: "boolean",
+  },
   "emit-syntax-ast": {
     type: "boolean",
   },
@@ -45,6 +48,7 @@ export const getConfigFromCli = (): VoidConfig => {
   return {
     index,
     emitParserAst: values["emit-parser-ast"] as boolean,
+    emitDeSugaredAst: values["emit-de-sugared-ast"] as boolean,
     emitSyntaxAst: values["emit-syntax-ast"] as boolean,
     emitWasm: values["emit-wasm"] as boolean,
     emitWasmText: values["emit-wasm-text"] as boolean,
