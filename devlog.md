@@ -1,3 +1,7 @@
+# 25 July 2023
+
+TODO: Investigate go like co-routines for use in the language.
+
 # 24 July 2023
 
 Memory semantics.
