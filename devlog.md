@@ -1,3 +1,42 @@
+# 24 July 2023
+
+Memory semantics.
+
+- Objects are pass by reference
+- Everything else is pass by value
+- Mutable variables cannot be captured by closures (Inspired by Koka)
+- Objects are immutable by default
+- There can only ever be one reference to a mutable entity
+- Object dereferences are automatic
+
+An object can be marked as mutable with `::mut`:
+
+```
+obj Point { x: Int, y: Int, z: Int }
+let p = Point::mut { x: 1, y: 2, z: 3}
+let p2 = p // Error!
+
+fn square(p: Point::mut)
+  p.x = p.x.square
+  p.y = p.y.square
+  p.z = p.z.square
+
+impl Point
+  fn square(self::mut)
+    self.x = self.x.square
+    self.y = self.y.square
+    self.z = self.z.square
+
+// Possible alternative for implicit self
+impl Point::mut
+  fn square()
+    x = x.square
+    y = y.square
+    z = z.square
+```
+
+I'd also like to consider requiring parenthesis on any impure function (i.e. cannot look like a field access)
+
 # 20 July 2023
 
 The previous syntax change had some problems. So I've modified the rules of the language to
