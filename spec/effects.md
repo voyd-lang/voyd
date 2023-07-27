@@ -37,19 +37,21 @@ fn is-valid(val: i32)
 // Define a generic handler
 
 ```
-handler try::<T> for throw::<T>
+handler try::<T> impl throw::<T>
 	ctl throw(val)
 
 fn try::<T, R>(action: () -> (throws::<T> R), catch: (T) -> R) -> R
 	handles throw
 	handle(action)
-
 ```
 
 **Combining effects:**
 
 ```
 effect type ThrowsAndLogs = Throws & Console
+
+// Or this (but would have to list everything out I should think)
+effect ThrowsAndLogs extends (Throws, Console)
 ```
 
 ## Implementation Ideas
