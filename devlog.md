@@ -1,5 +1,61 @@
 # 26 July 2023
 
+**Trailing lambda problem**
+
+For awhile now I've been noticing an awkwardness in the language due
+to the lack of elegant support for trailing arguments.
+
+Take, for example, a hypothetical if/else or try/catch implementation (assume no macros).
+
+```
+if x < 3
+  then:
+    bloop()
+    bleep()
+  else:
+    blop()
+
+try
+  this:
+    can_throw()
+  catch:
+    ball()
+```
+
+This can be trivially solved with macros The issue is that this is a common pattern, and the average user shouldn't have to resort to macros almost ever.
+
+Looking at this now, it's really not all that bad. But I'm wondering
+if it would be worth it to complicate the language and add an operator that applies a line as if it were an argument to the preceding function call:
+
+```
+if x < 3 do
+  bleep()
+-else:
+  bloop()
+
+try do
+  can_throw()
+-catch:
+  ball()
+
+// Or
+
+if x < 3 do
+  bleep()
+\else:
+  bloop()
+
+try do
+  can_throw()
+\catch:
+  ball()
+```
+
+Note: this assumes `do` is a greedy prefix operator. If it wasn't
+we could also use `do;`. Reminder that `;` is a greedy terminating operator, so all arguments on the right are applied to do.
+
+**Other**
+
 - I really like how Koka uses a single letter for generics in the type definition for parameters
   that accept a function. Though I'm not a fan of single letter generics in the general sense,
   they're not great at communicating intention. Still worth considering.
