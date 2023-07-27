@@ -1,3 +1,9 @@
+# 26 July 2023
+
+- I really like how Koka uses a single letter for generics in the type definition for parameters
+  that accept a function. Though I'm not a fan of single letter generics in the general sense,
+  they're not great at communicating intention. Still worth considering.
+
 # 25 July 2023
 
 TODO: Investigate go like co-routines for use in the language.

@@ -30,17 +30,15 @@ though. So feel free to play around.
 Note: Not all features are complete.
 
 - Functional
-- Strongly Typed
-- First class wasm support
-- Memory Safe GC
-- Algebraic data types
+- Hybrid Nominal & Structural type system
 - Algebraic effects
+- First class wasm support
 - Macros and language extensions
+- Uniform function call syntax
 - [Homoiconic](https://en.wikipedia.org/wiki/Homoiconicity)
 - Pythonesque syntax that de-sugars into a lisp like dialect
   - Parenthesis can be elided in most cases
   - Infix notation and standard function call notation support
-- Uniform function call syntax
 
 **Guiding Principles**:
 
@@ -254,13 +252,13 @@ add 1 to: 4
 ## Generics
 
 ```
-fn add::(T)(a:T b:T) -> T
+fn add::<T>(a:T b:T) -> T
   a + b
 ```
 
 With trait constraints
 
 ```
-fn add::(T:Numeric)(a:T b:T) -> T
+fn add::<T:Numeric>(a:T b:T) -> T
   a + b
 ```
