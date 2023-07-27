@@ -32,7 +32,7 @@ export const isOpChar = newTest([
   "~",
 ]);
 
-export const isTerminatingOpChar = newTest([":", "?", "!", ".", ";"]);
+export const isTerminatingOpChar = newTest([":", "?", "!", ".", ";", "\\"]);
 
 export const isDigit = (char: string) => /[0-9]/.test(char);
 export const isDigitSign = (char: string) => char === "+" || char === "-";

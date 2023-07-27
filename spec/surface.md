@@ -294,6 +294,7 @@ Whitespace = Space | Tab | Newline
 Space = " ";
 Tab = "\t";
 NewLine = "\n";
+BackSlash = "\\"; // Single back slash character \
 
 (* Comment *)
 Comment = "//", { AnyChar - NewLine }, NewLine;
@@ -301,14 +302,14 @@ Comment = "//", { AnyChar - NewLine }, NewLine;
 (* Brackets *)
 Bracket = "{" | "}" | "[" | "]" | "(" | ")";
 
-(* Operator Characters *)
-OpChar = "+" | "-" | "*" | "/" | "=" | ":" | "?" | "." | ";" | "<" | ">" | "$" | "!" | "@" | "%" | "^" | "&" | "~";
-Operator = (OpChar, { OpChar }) | "and" | "or" | "xor" | "as" | "is" | "in";
+(* Operator Characters (does not imply infix, prefix, or postfix) *)
+OpChar = "+" | "-" | "*" | "/" | "=" | ":" | "?" | "." | ";" | "<" | ">" | "$" | "!" | "@" | "%" | "^" | "&" | "~" | BackSlash;
+Operator = (OpChar, { OpChar });
 
 (* Terminators *)
 Terminator = Bracket | Whitespace | TerminatingOperator | Quote | ",";
 Quote = '"' | "'" | "`";
-TerminatingOperator = (":" | "?" | "!" | "." | ";"), { OpChar } ;
+TerminatingOperator = (":" | "?" | "!" | "." | ";" | BackSlash), { OpChar } ;
 
 (* Identifier *)
 Identifier = StandardIdentifier | QuotedIdentifier | SharpIdentifier;
@@ -346,7 +347,7 @@ On top of the syntax features supported by the core language syntax, the surface
 - Standard function call syntax `f(x)`
 - Uniform function call syntax `hello.world()` -> `world(hello)`
 - Infix operators
-- Greedy operators
+- Greedy identifiers
 - Macro expansion
 - Tuple, Struct, Array, and Dictionary literals etc
 
@@ -439,6 +440,26 @@ add(5 1)
 squared(5)
 ```
 
+## Trailing Arguments
+
+The `\` function takes its arguments and concatenates them with the preceding function call. This
+allows for cleaner trailing arguments:
+
+```
+try
+  this: do
+    can_throw()
+  catch: do
+    ball()
+
+// Becomes:
+
+try do
+  can_throw()
+\catch: do
+  ball()
+```
+
 ## Function Overloading
 
 Void functions can be overloaded. Provided that function overload can be unambiguously distinguished
@@ -480,7 +501,7 @@ Vec3(1, 2, 3) + Vec3(4, 5, 6) // Vec3(5, 7, 9)
 
 ## Infix Notation
 
-Void supports infix notation using a predefined set of operators.
+Void supports infix notation using a predefined set of infix operators.
 
 Operators, their precedence, and associativity (in typescript):
 
@@ -516,21 +537,25 @@ export const infixOperators = new Map<string, [number, Associativity]>([
   ["::", [0, "left"]],
   [";", [4, "left"]],
   ["??", [3, "right"]],
+  ["?:", [3, "right"]],
 ]);
-```
-
-Terminal operators:
-
-```typescript
-[".", ":", ";", "::", "?:"];
 ```
 
 ### Rules
 
 - The infix operator must be surrounded by whitespace to be interpreted as an infix operation
-- Terminal operators are _always_ treated as infix operators, even if no whitespace separates them from the expressions they are applied to
 - If the infix operator is the first identifier in a list, s-expression syntax is used instead
-- Operators should use the same precedence and associative rules as JavaScript
+- Infix perators should use the same precedence and associative rules as JavaScript
+
+## Terminal Identifier
+
+Terminal identifiers do not need to be separated by a whitespace from other identifiers.
+
+They are any list of OpChars (see grammar) that start with one of the following OpChars:
+
+- `.`, `:`, `;`, `?`, `\`, `!`, `;`, `&`, `|`
+
+Note: Being a terminal operator does not imply infix
 
 ## The Syntax Pipeline
 

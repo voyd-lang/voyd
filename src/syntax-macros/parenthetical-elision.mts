@@ -75,7 +75,7 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
   return transformed;
 };
 
-// Consumes preceding expressions as though they belong to the operator at ast[-]
+// Consumes preceding expressions as though they belong to the operator at ast[-1]
 // Modifies ast and transformed parameters
 const assistGreedyOpProcessing = (
   list: List,

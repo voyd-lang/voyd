@@ -47,7 +47,14 @@ if x < 3 do
 
 try do
   can_throw()
-\catch:
+\catch: do // Should : be implicit?
+  ball()
+
+// Or
+
+try do
+  can_throw()
+,catch: do // Should : be implicit?
   ball()
 ```
 
@@ -56,6 +63,10 @@ we could also use `do;`. Reminder that `;` is a greedy terminating operator, so 
 
 **Other**
 
+- Since effects abstract the concept of return, we no longer need to treat blocks as separate from
+  functions. `block` can become `do` and `do` can be an alias for `() =>`
+- If `:` were a greedy operator, it would implicitly `block` (i.e. `do`)
+- Need to experiment.
 - I really like how Koka uses a single letter for generics in the type definition for parameters
   that accept a function. Though I'm not a fan of single letter generics in the general sense,
   they're not great at communicating intention. Still worth considering.
