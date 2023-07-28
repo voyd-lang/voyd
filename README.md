@@ -230,9 +230,9 @@ x.squared
 squared x // (squared x)
 ```
 
-## Keyword Arguments
+## Named Arguments
 
-Any arguments prefixed with ~ are keyword arguments
+Any arguments prefixed with ~ are named arguments
 
 ```
 fn move(robot:Robot ~to:[i32 i32 i32])
@@ -241,7 +241,7 @@ fn move(robot:Robot ~to:[i32 i32 i32])
 move robot to: [3.1, 2.3, 4.0]
 ```
 
-You can also provide an external label to alias the keyword on call.
+You can also provide separate external and internal names.
 
 ```
 fn add(a:i32 to:b:i32) = a + b

@@ -1,3 +1,28 @@
+# 28 July 2023
+
+Just defined this:
+
+When a named arguments act like a lambda function, and can take
+parameters:
+
+```
+fn call(cb: (v: i32) -> void)
+  cb(5)
+
+call cb(v):
+  print(v)
+
+// Equivalent to
+call cb: (v) =>
+  print
+```
+
+Will require semi-colons to be consuming operators, which would
+mean that ether those shouldn't work in parenthesis (which I think
+maybe should be the case anyway event though it isnt right now). Now that I'm writing this, it may not work. but would be very nice
+to provide symmetry with `;` which could do the same thing
+but be trailing.
+
 # 26 July 2023
 
 **Trailing lambda problem**

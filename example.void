@@ -1,7 +1,15 @@
-fn fib(n: i32)
-	if n < 2
-		n
-		fib(n - 1) + fib(n - 2)
+fn fib(n: i32 x: i32)
+	if (x = 3)
+		x = 3 + 5 = 2
+	let x =
+		test()
+		me()
+	if x < 3
+		then:
+			bloop()
+			bleep()
+		else:
+			blop()
 
 fn main()
 	let b = B { abba: 5.8, b: 3 }

@@ -54,7 +54,7 @@ add(1 2)
 1.add(2)
 ```
 
-With labels:
+With named arguments:
 
 ```void
 fn multiply(a:i32 by:b:i32) -> i32
@@ -66,7 +66,7 @@ multiply 1 by: 2
 // Or
 multiply(1 by: 2)
 
-// Or with UFCS. NOTE: Will not work if first argument is labeled
+// Or with UFCS. NOTE: Will not work if first argument is named
 1.multiply(by: 2)
 ```
 
@@ -92,7 +92,7 @@ fn get-json(address:String) -> ((Async Throws) Dictionary)
 
 ### Object Literal Parameters
 
-Object literal parameters allow property shorthand and do not care about order, unlike labeled parameters
+Object literal parameters allow property shorthand and do not care about order, unlike named parameters
 
 ```void
 fn move-to { x:i32, y:i32, z: i32 } -> void
@@ -440,23 +440,48 @@ add(5 1)
 squared(5)
 ```
 
+## Named Argument Lambda
+
+When a named arguments act like a lambda function, and can take
+parameters:
+
+```
+fn call(cb: (v: i32) -> void)
+  cb(5)
+
+call cb(v):
+  print(v)
+
+// Equivalent to
+call cb: (v) =>
+  print
+```
+
 ## Trailing Arguments
 
-The `\` function takes its arguments and concatenates them with the preceding function call. This
-allows for cleaner trailing arguments:
+The `;` operator takes the identifier the left and the lambda function on the right and passes it to the preceding function as a
+named argument.
 
 ```
 try
-  this: do
-    can_throw()
-  catch: do
+  can_throw()
+  catch(error):
     ball()
 
 // Becomes:
 
-try do
+try
   can_throw()
-\catch: do
+catch(error);
+  ball()
+```
+
+Arguments can be left out if they're not needed:
+
+```
+try
+  can_throw()
+catch;
   ball()
 ```
 
