@@ -154,15 +154,16 @@ Operators include:
 ### If statements
 
 ```
-if 3 < val
+if 3 < val then:
   "hello" // true case
+else:
   "bye" // false case (optional)
 ```
 
 Ifs are expressions that return a value
 
 ```
-let x = (if 3 < val "hello" "bye")
+let x = if 3 < val then: "hello" else: "bye"
 ```
 
 ### Loops
@@ -181,7 +182,7 @@ Loops can be named
 
 ```
 var a = 0
-loop :named increment
+loop ~named increment
   if a > 10
     return_from increment a
   a += 1

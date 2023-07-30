@@ -80,19 +80,20 @@ With effects:
 
 ```void
 // When effects are explicit, the return type must be grouped in ()
-fn get-json(address:String) -> (Async Dictionary)
+fn get-json(address:String) -> (async Dictionary)
 	let json-text = await fetch(address)
 	parse-json json-text
 
 // Multiple effects must also be grouped
-fn get-json(address:String) -> ((Async Throws) Dictionary)
+fn get-json(address:String) -> ((async throws) Dictionary)
 	let json-text = await fetch(address)
 	parse-json json-text
 ```
 
 ### Object Literal Parameters
 
-Object literal parameters allow property shorthand and do not care about order, unlike named parameters
+Object literal parameters allow property shorthand and do not care about order, unlike named
+parameters
 
 ```void
 fn move-to { x:i32, y:i32, z: i32 } -> void
@@ -166,8 +167,8 @@ let value = {
 
 ## Traits
 
-Traits define the behavior of an object. That is, a group of methods associated with
-an object. They work similarly to traits in rust, except they can extend other traits.
+Traits define the behavior of an object. That is, a group of methods associated with an object. They
+work similarly to traits in rust, except they can extend other traits.
 
 If you're unfamiliar with rust, traits are like interfaces in other languages. The main difference
 is they can only define the methods of an object and not the fields.
@@ -237,19 +238,24 @@ Things to consider:
 
 Note: Unlike common lisp, the single quote is not a macro for `quote`. Only the backtick.
 
-> Second, one might wonder what happens if a backquote expression occurs inside another backquote. The answer is that the backquote becomes essentially unreadable and unwriteable; using nested backquote is usually a tedious debugging exercise. The reason, in my not-so-humble opinion, is that backquote is defined wrong. A comma pairs up with the innermost backquote when the default should be that it pairs up with the outermost. But this is not the place for a rant; consult your favorite Lisp reference for the exact behavior of nested backquote plus some examples.
+> Second, one might wonder what happens if a backquote expression occurs inside another backquote.
+> The answer is that the backquote becomes essentially unreadable and unwriteable; using nested
+> backquote is usually a tedious debugging exercise. The reason, in my not-so-humble opinion, is
+> that backquote is defined wrong. A comma pairs up with the innermost backquote when the default
+> should be that it pairs up with the outermost. But this is not the place for a rant; consult your
+> favorite Lisp reference for the exact behavior of nested backquote plus some examples.
 > https://lisp-journey.gitlab.io/blog/common-lisp-macros-by-example-tutorial/
 
-Void follows the suggestion of this website and pairs commas with the outermost backquote. Which allows
-one to use a backquote where a quote would normally be needed.
+Void follows the suggestion of this website and pairs commas with the outermost backquote. Which
+allows one to use a backquote where a quote would normally be needed.
 
 ## Regular Macros
 
-The `macro` macro is designed to make defining simple expansion macros easy and with minimal
-boiler plate. The body of a `macro` is automatically surrounded by a `quote` block. The
-`$` acts as the `,` in common lisp and evaluates the expression it prefixes. The `@` acts
-as the `,@` in common lisp and splices the list into the current list. Note that these shortcuts
-only apply to `macro`, `define-macro` uses the standard operators of common lisp (`,`, `,@`, etc).
+The `macro` macro is designed to make defining simple expansion macros easy and with minimal boiler
+plate. The body of a `macro` is automatically surrounded by a `quote` block. The `$` acts as the `,`
+in common lisp and evaluates the expression it prefixes. The `@` acts as the `,@` in common lisp and
+splices the list into the current list. Note that these shortcuts only apply to `macro`,
+`define-macro` uses the standard operators of common lisp (`,`, `,@`, etc).
 
 ```void
 macro def-wasm-operator(op wasm-fn arg-type return-type)
@@ -339,9 +345,11 @@ AnyChar = ? all valid characters (including whitespace) ?;
 
 # The Surface Language Syntax
 
-The surface language is a superset of the core language (a minimalistic lisp dialect). Its goal is to balance the power and simplicity of lisp with a more modern python like feel.
+The surface language is a superset of the core language (a minimalistic lisp dialect). Its goal is
+to balance the power and simplicity of lisp with a more modern python like feel.
 
-On top of the syntax features supported by the core language syntax, the surface language syntax supports:
+On top of the syntax features supported by the core language syntax, the surface language syntax
+supports:
 
 - Parenthetical ellison via syntactically significant whitespace
 - Standard function call syntax `f(x)`
@@ -364,7 +372,8 @@ Void language is built around an s-expression syntax, like lisp:
   (+ (fib (- n 1)) (fib (- n 2))))
 ```
 
-To reduce visual noise, parenthesis can be elided, using tabs as a mechanism to infer where the parenthesis should be inserted:
+To reduce visual noise, parenthesis can be elided, using tabs as a mechanism to infer where the
+parenthesis should be inserted:
 
 ```void
 if (n < 2)
@@ -372,11 +381,12 @@ if (n < 2)
 	+ (fib (- n 1)) (fib (- n 2))
 ```
 
-This feature was inspired by [Koka's brace elision](https://koka-lang.github.io/koka/doc/book.html#sec-layout)
+This feature was inspired by [Koka's brace
+elision](https://koka-lang.github.io/koka/doc/book.html#sec-layout)
 
 ### Rules
 
-- Any line with more than one symbol is wrapped with parenthesis (if it does not already have them)
+1. Any line with more than one symbol is wrapped with parenthesis (if it does not already have them)
 
 ```void
 add 1 2
@@ -385,26 +395,98 @@ add 1 2
 (add 1 2)
 ```
 
-- Indented lines are assumed to be parameters of the next line above with one less indentation level provided:
-  - There are no empty new lines between the child and the parent
-  - The parent is not wrapped in parenthesis
+2. Indented lines are wrapped in a block and passed as an argument to the preceding function call
+   with one less indentation level, provided:
 
-```
-add 2
-	mul 2
-		sub 3 1
-	mul 4 5
+   1. There are no empty lines between the child and the parent
+   2. The first child is not a named argument
+   3. The parent is not wrapped in parenthesis
 
-// Becomes
-(add 2
-	(mul 2
-		(sub 3 1))
-	(mul 4 5))
-```
+   ```void
+   add 2
+   	mul 4 x
+
+   // Becomes
+   (add 2 (block
+     (mul 4 x)))
+   ```
+
+3. Isolated named arguments, that is named arguments that are on their own line, are applied to the
+   preceding function call provided:
+
+   1. There are no empty lines separating between the two
+   2. The named argument is on the same indentation level, or 1 child indentation level as the
+      preceding function call.
+
+   ```
+   try
+     this_throws_an_error()
+   catch(e):
+     print(e)
+
+   // Becomes
+   (try
+     (block (this_throws_an_error))
+     (named catch (lambda (e) (block
+       print(e)))))
+
+   // Another example
+   if x > y
+     then: 3
+     else: 5
+
+   // Becomes
+   (if (x > y)
+     (named then 3)
+     (named else 5))
+   ```
+
+4. (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;`) get special handling.
+
+   1. Greedy operators consume indented child blocks, rather than the parent function call
+
+      ```
+      let x =
+       if (x > y)
+         then: 3
+         else: 5
+
+      // Becomes
+      (let (= x
+        (block
+          (if (> x y)
+            (named then 3)
+            (named else 5)))))
+      ```
+
+   2. If an expression follows a greedy operator on the same line, a new line is inserted after the
+      operator and each child line has an additional level of indentation supplied.
+
+      ```
+      let z = if x > y
+        then: 3
+        else: 5
+
+      // Becomes
+      let z =
+        if x > y
+          then: 3
+          else: 5
+
+      // Which in turn becomes
+      (let (=
+        z
+        (block
+          (if
+            (> z y)
+            (named then 3)
+            (named else 5)))))
+      ```
 
 ## Standard Function Call Syntax
 
-To make Void language feel more familiar to users familiar with C style languages, Void supports standard function call syntax of the form `f(x)`.
+To make Void language feel more familiar to users familiar with C style languages, Void supports
+standard function call syntax of the form `f(x)`.
 
 ### Rules
 
@@ -425,7 +507,8 @@ add (1 2)
 
 ## Uniform Function Call Syntax (Dot Notation)
 
-The dot (or period) operator applies the expression on the left as an argument of the expression on the right.
+The dot (or period) operator applies the expression on the left as an argument of the expression on
+the right.
 
 ```
 5.add(1)
@@ -440,10 +523,12 @@ add(5 1)
 squared(5)
 ```
 
-## Named Argument Lambda
+## Named Argument Lambda Syntax
 
-When a named arguments act like a lambda function, and can take
-parameters:
+Named arguments have syntactic sugar that make passing lambda's much cleaner.
+
+When the left hand side of the `:` operator is a list, the first identifier in that list is treated
+as the name, additional identifiers become parameters.
 
 ```
 fn call(cb: (v: i32) -> void)
@@ -457,32 +542,14 @@ call cb: (v) =>
   print
 ```
 
-## Trailing Arguments
-
-The `;` operator takes the identifier the left and the lambda function on the right and passes it to the preceding function as a
-named argument.
+This works nicely with the rules of named arguments to support a trailing lambda syntax similar to
+that of swift or koka.
 
 ```
 try
-  can_throw()
-  catch(error):
-    ball()
-
-// Becomes:
-
-try
-  can_throw()
-catch(error);
-  ball()
-```
-
-Arguments can be left out if they're not needed:
-
-```
-try
-  can_throw()
-catch;
-  ball()
+  do_work()
+catch(e):
+  print(e)
 ```
 
 ## Function Overloading
@@ -585,31 +652,40 @@ Note: Being a terminal operator does not imply infix
 ## The Syntax Pipeline
 
 In the spirit of lisp, Void language is designed to be hackable. As a result, the surface language
-syntax is implemented entirely in macros. This makes the language both easy to maintain, and easy
-to extend.
+syntax is implemented entirely in macros. This makes the language both easy to maintain, and easy to
+extend.
 
 There are three types of macros:
 
 - Reader Macros: Expanded during parsing, emit am ast
-- Syntax Macros: Expanded after parsing, are passed the ast from the parser and produce the final ast
+- Syntax Macros: Expanded after parsing, are passed the ast from the parser and produce the final
+  ast
 - Regular Macros: Expanded by a syntax macro
 
-At a high level, the pipeline looks something like this:
-`file.void -> parser + reader macros -> syntax macros -> ast (the core language)`
+At a high level, the pipeline looks something like this: `file.void -> parser + reader macros ->
+syntax macros -> ast (the core language)`
 
 In the next sections, the different macros will be defined in depth.
 
 ### Reader Macros
 
-Reader macros are effectively extensions of the parser. They take over parsing for anything more complex than identifying tokens and producing a tree from `(nested (lisp like function calls))`.
+Reader macros are effectively extensions of the parser. They take over parsing for anything more
+complex than identifying tokens and producing a tree from `(nested (lisp like function calls))`.
 
-Each time the parser encounters a token, it will match that token against all registered reader macros. If a reader macro exists for that token, the file stream is passed to the reader macro. The macro then consumes the characters off of this stream at its own discretion. Once finished, it returns a partial ast of the same type that the parser returns. Once the macro returns, the parser will insert the result at its current location within the AST and continue on.
+Each time the parser encounters a token, it will match that token against all registered reader
+macros. If a reader macro exists for that token, the file stream is passed to the reader macro. The
+macro then consumes the characters off of this stream at its own discretion. Once finished, it
+returns a partial ast of the same type that the parser returns. Once the macro returns, the parser
+will insert the result at its current location within the AST and continue on.
 
-User defined reader macros should always begin with a `#`. As of writing, this is by convention and not enforced in the compiler. It may be enforced at a later date.
+User defined reader macros should always begin with a `#`. As of writing, this is by convention and
+not enforced in the compiler. It may be enforced at a later date.
 
 ### Syntax Macros
 
-Syntax Macros are responsible for transforming the ast produced by the parser into the core language ast. Each syntax macro is passed a full copy of the AST. These macros are strictly run in order. The output of the final syntax macro must strictly adhere to the core language specification.
+Syntax Macros are responsible for transforming the ast produced by the parser into the core language
+ast. Each syntax macro is passed a full copy of the AST. These macros are strictly run in order. The
+output of the final syntax macro must strictly adhere to the core language specification.
 
 Syntax Macro Pipeline Example:
 
@@ -640,6 +716,10 @@ fn (fib n:i32) -> i32
 
 ### Regular Macros
 
-These are the macros most users will interact with and define the bulk of the language. They are called in the language exactly like a normal function and return an expression.
+These are the macros most users will interact with and define the bulk of the language. They are
+called in the language exactly like a normal function and return an expression.
 
-In general, user macros can return any valid surface language expression. Surface Language implementation macros should either directly return a core language expression or return an expression that can be converted to a core language expression further down the syntax macro pipeline.
+In general, user macros can return any valid surface language expression. Surface Language
+implementation macros should either directly return a core language expression or return an
+expression that can be converted to a core language expression further down the syntax macro
+pipeline.
