@@ -1,3 +1,156 @@
+# 30 July 2023
+
+## Updated Rules For Parenthetical Elision
+
+1. (Unchanged) Any line with more than one symbol is wrapped with parenthesis (if it does not already have them)
+
+   ```void
+   add 1 2
+
+   // Becomes
+   (add 1 2)
+   ```
+
+2. (Updated) Indented lines are wrapped in a block and passed as an
+   argument to the preceding function call with one less indentation level, provided:
+
+   1. There are no empty lines between the child and the parent
+   2. The first child is not a named argument
+   3. The parent is not wrapped in parenthesis
+
+   ```void
+   add 2
+   	mul 4 x
+
+   // Becomes
+   (add 2 (block
+     (mul 4 x)))
+   ```
+
+3. (New) Isolated named arguments, that is named arguments that are on their own line, are applied to the preceding function call provided:
+
+   1. There are no empty lines separating between the two
+   2. The named argument is on the same indentation level, or 1 child indentation level as the preceding function call.
+
+   ```
+   try
+     this_throws_an_error()
+   catch(e):
+     print(e)
+
+   // Becomes
+   (try
+     (block (this_throws_an_error))
+     (named catch (lambda (e) (block
+       print(e)))))
+
+   // Another example
+   if x > y
+     then: 3
+     else: 5
+
+   // Becomes
+   (if (x > y)
+     (named then 3)
+     (named else 5))
+   ```
+
+4. (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;`) get special handling.
+
+   1. Greedy operators consume indented child blocks, rather than
+      the parent function call
+
+      ```
+      let x =
+       if (x > y)
+         then: 3
+         else: 5
+
+      // Becomes
+      (let (= x
+        (block
+          (if (> x y)
+            (named then 3)
+            (named else 5)))))
+      ```
+
+   2. If an expression follows a greedy operator on the same line,
+      a new line is inserted after the operator and each child line
+      has an additional level of indentation supplied.
+
+      ```
+      let z = if x > y
+        then: 3
+        else: 5
+
+      // Becomes
+      let z =
+        if x > y
+          then: 3
+          else: 5
+
+      // Which in turn becomes
+      (let (=
+        z
+        (block
+          (if
+            (> z y)
+            (named then 3)
+            (named else 5)))))
+      ```
+
+These new rules solve a number of problems in one go.
+
+1. Trailing named arguments no longer need special handling or a different operator
+2. Greedy operator rules are simplified
+3. Named arguments can now properly accept blocks
+
+Examples of improvements:
+
+```
+// Given
+accept my: "favorite" stuff:
+  do_work()
+  again_for_me()
+
+// Translation before new rules
+(accept
+  (named my "favorite")
+  (named stuff (do_work)
+  (again_for_me)))
+
+// After new rules
+(accept
+  (named my "favorite")
+  (named stuff
+    (block
+      (do_work)
+      (again_for_me))))
+```
+
+## Named Argument Lambda Syntax
+
+```
+
+// Named arguments as lambda functions
+fn call(~cb: (v: i32) -> void, val: i32)
+  cb(5)
+
+// Usage without accepting the parameter
+call cb(): print("hey") 5
+
+// Short for
+call
+  cb: () =>
+    print("hey")
+  5
+
+```
+
+Note how `:` is not a consuming operator. There's just no way I can
+think of to make that work well. It conflicts to heavily with how we
+define parameters. (parameters definitions would consume each other).
+
 # 28 July 2023
 
 Just defined this:
@@ -16,6 +169,8 @@ call cb(v):
 call cb: (v) =>
   print
 ```
+
+**Edit 30 July 2023** Ignore the following paragraph
 
 Will require semi-colons to be consuming operators, which would
 mean that ether those shouldn't work in parenthesis (which I think
