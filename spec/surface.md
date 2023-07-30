@@ -368,8 +368,8 @@ Void language is built around an s-expression syntax, like lisp:
 
 ```void
 (if (n < 2)
-  n
-  (+ (fib (- n 1)) (fib (- n 2))))
+  (named then n)
+  (named else (+ (fib (- n 1)) (fib (- n 2)))))
 ```
 
 To reduce visual noise, parenthesis can be elided, using tabs as a mechanism to infer where the
@@ -377,12 +377,11 @@ parenthesis should be inserted:
 
 ```void
 if (n < 2)
-	n
-	+ (fib (- n 1)) (fib (- n 2))
+	then: n
+	else: (+ (fib (- n 1)) (fib (- n 2)))
 ```
 
-This feature was inspired by [Koka's brace
-elision](https://koka-lang.github.io/koka/doc/book.html#sec-layout)
+This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org/srfi-110/)
 
 ### Rules
 
