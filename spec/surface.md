@@ -54,22 +54,6 @@ add(1 2)
 1.add(2)
 ```
 
-With named arguments:
-
-```void
-fn multiply(a:i32 by:b:i32) -> i32
-	a * b
-
-// To call
-multiply 1 by: 2
-
-// Or
-multiply(1 by: 2)
-
-// Or with UFCS. NOTE: Will not work if first argument is named
-1.multiply(by: 2)
-```
-
 With return type inference:
 
 ```void
@@ -90,24 +74,47 @@ fn get-json(address:String) -> ((async throws) Dictionary)
 	parse-json json-text
 ```
 
-### Object Literal Parameters
+### Named arguments
 
-Object literal parameters allow property shorthand and do not care about order, unlike named
-parameters
+Named arguments can be defined using an object literal within the list of arguments.
 
 ```void
-fn move-to { x:i32, y:i32, z: i32 } -> void
-	robot.move x y z
+fn scaled-move(scale:i32, { x: i32, y: i32, z: i32 }) -> void
+	robot.move(scale * x, scale * y scale * z)
 
-// With other parameters
-fn move-to(~scale:i32, { x:i32, y:i32, z:i32 }) -> void
-	move-to { x: x * scale, y: y * scale, z: z * scale }
+// On call, the curly braces can be left out
+scaled-move 5 x: 1 y: 2 z: 3
 
-fn main() -> void
-	let z = 7
-	move-to { z, x: 5, y }
+// Note that field shorthand does not work with named parameters
+let x = 5
+scaled-move 5 x y: 2, z: 3 // Error! no function with signature scaled-move(i32, i32, { y: i32, z: i32 });
+```
 
-	move-to scale: 5 { x: 1, y: 2, z: 3 }
+Named arguments can have separate external and internal names:
+
+```void
+fn multiply(a:i32 { by:b:i32 }) -> i32
+	a * b
+
+// To call
+multiply 1 by: 2
+
+// Or
+multiply(1 by: 2)
+```
+
+Named arguments are syntactic sugar for object literals with automatic de-structuring inside the function.
+Here's the first example in de-sugared form:
+
+```
+fn scaled-move(scale:i32, named1: { x: i32, y: i32, z: i32 }) -> void
+  let { x, y, z } = named1;
+	robot.move(scale * x, scale * y scale * z)
+
+scaled-move(5, { x: 1, y: 2, z: 3 })
+
+// The de-sugared form makes it clear why field shorthand doesn't work
+scaled-move(5, x, { y: 2, z: 3 }) // Error! no function with signature scaled-move(i32, i32, { y: i32, z: i32 });
 ```
 
 ## String Literals

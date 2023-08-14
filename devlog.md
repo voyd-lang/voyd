@@ -1,3 +1,26 @@
+# 14 August 2023
+
+JavaScript / TS Pivot
+
+JavaScript should be a first-class target. WASM is going to take awhile to get where I need it
+and this move will make delivering MVP features much easier. It would have the affect of also
+making the language a lot more practical / pragmatic.
+
+Ideal features:
+
+- Can natively import js/ts files
+- Can emit typescript declaration files
+- Supports ES Module Syntax natively?
+- Handles function overloads cleanly
+- Still easily supports WASM and potentially other sources while still providing a good DX
+- A `module.void` format for configuration and exports etc
+
+Open questions:
+
+- Void supports _both_ named parameters _and_ objects and treats each one differently. How should
+  this be handled? The best I can think of is that named parameters should be treated as objects
+- Need to define a standard for tagged data structures.
+
 # 30 July 2023
 
 ## Updated Rules For Parenthetical Elision

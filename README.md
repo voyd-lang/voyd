@@ -193,9 +193,9 @@ Loops can be named
 
 ```rust
 var a = 0
-loop ~named increment
+loop name: "increment"
   if a > 10
-    return_from increment a
+    return_from "increment" a
   a += 1
 ```
 
@@ -244,10 +244,10 @@ squared(x)
 
 ## Named Arguments
 
-Any arguments prefixed with ~ are named arguments
+Any arguments are surrounded by curly braces
 
 ```
-fn move(robot:Robot ~to:[i32 i32 i32])
+fn move(robot:Robot, { to: [i32 i32 i32] })
   // etc
 
 move robot to: [3.1, 2.3, 4.0]
@@ -256,7 +256,7 @@ move robot to: [3.1, 2.3, 4.0]
 You can also provide separate external and internal names.
 
 ```
-fn add(a:i32 to:b:i32) = a + b
+fn add(a:i32, { to:b: i32 }) = a + b
 
 add 1 to: 4
 ```
