@@ -4,19 +4,30 @@ Void is a high performance WebAssembly language with an emphasis on full stack w
 
 https://justforfunnoreally.dev/
 
-```swift
+```rust
 // Find the value of the fibonacci sequence at index n
-fn fib(n:i32) -> i32
-    if (n < 2)
-        n
-        fib(n - 1) + fib(n - 2)
+fn fib(n: i32) -> i32
+  if n < 2 then:
+    n
+  else:
+    fib(n - 1) + fib(n - 2)
 
-// All binary programs have a main function (NOTE: for in syntax shown below not yet supported)
+// All binary programs have a main function
 fn main() -> void
-    var index = 0
-    for num in range(15)
-        // Print fibonacci sequence at index using UFCS.
-        num.fib().print()
+  for num in range(15)
+    // Print fibonacci sequence at index using UFCS.
+    num.fib().print()
+```
+
+```rust
+fn app() -> html
+  let todo-items = ["wake up", "eat", "code", "sleep"]
+  <div>
+    <h1>TODO</h1>
+    <ul>
+      {todo-items.map i => <li>{i}</li>}
+    </ul>
+  </div>
 ```
 
 **Disclaimer**
@@ -66,13 +77,13 @@ voidc path/to/code.void
 
 ## Comments
 
-```
+```rust
 // Comments are single line and are marked with a c style slash slash
 ```
 
 ## Primitive Types
 
-```
+```rust
 true // Boolean
 false // Boolean
 1 // i32 by default (32 bit integer)
@@ -86,7 +97,7 @@ false // Boolean
 
 ## Variables
 
-```
+```rust
 // Immutable variable
 let my_immutable_var = 7
 
@@ -98,24 +109,24 @@ var my_var = 7
 
 A Basic function:
 
-```
+```rust
 fn add(a:i32 b:i32) -> i32
   a + b
 ```
 
 In most cases the return type can be inferred
 
-```
+```rust
 fn add(a:i32 b:i32) = a + b // The equal sign is used when the function is written on one line
 ```
 
 Functions are called using S-expression syntax
 
-```
+```rust
 (add 1 2) // 3
 ```
 
-Dream uses significant indentation like [sweat](https://dwheeler.com/readable/sweet-expressions.html). So the parenthesis can be omitted provided its the only expression on it's line and is properly indented
+Dream uses significant indentation like [sweet](https://dwheeler.com/readable/sweet-expressions.html). So the parenthesis can be omitted provided its the only expression on it's line and is properly indented
 
 ```
 add 1 2
@@ -153,7 +164,7 @@ Operators include:
 
 ### If statements
 
-```
+```rust
 if 3 < val then:
   "hello" // true case
 else:
@@ -162,7 +173,7 @@ else:
 
 Ifs are expressions that return a value
 
-```
+```rust
 let x = if 3 < val then: "hello" else: "bye"
 ```
 
@@ -170,7 +181,7 @@ let x = if 3 < val then: "hello" else: "bye"
 
 Basic loops repeat until returned from
 
-```
+```rust
 var a = 0
 loop
   if a > 10
@@ -180,7 +191,7 @@ loop
 
 Loops can be named
 
-```
+```rust
 var a = 0
 loop ~named increment
   if a > 10
@@ -190,7 +201,7 @@ loop ~named increment
 
 Useful constructs from looping through iterables
 
-```
+```rust
 for item in iterable
   write item
 ```
@@ -212,7 +223,7 @@ match x
 
 ## Lambdas
 
-```
+```rust
 let double = n => n * 2
 
 array.map n => n * 2
@@ -222,13 +233,13 @@ array.map n => n * 2
 
 The dot is a simple form of syntactic sugar
 
-```
+```rust
 let x = 4
 
 x.squared
 
 // Translates to
-squared x // (squared x)
+squared(x)
 ```
 
 ## Named Arguments
@@ -252,14 +263,14 @@ add 1 to: 4
 
 ## Generics
 
-```
+```rust
 fn add::<T>(a:T b:T) -> T
   a + b
 ```
 
 With trait constraints
 
-```
-fn add::<T:Numeric>(a:T b:T) -> T
+```rust
+fn add::<T extends Numeric>(a:T b:T) -> T
   a + b
 ```
