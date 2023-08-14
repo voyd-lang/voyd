@@ -2,9 +2,9 @@
 
 JavaScript / TS Pivot
 
-JavaScript should be a first-class target. WASM is going to take awhile to get where I need it
-and this move will make delivering MVP features much easier. It would have the affect of also
-making the language a lot more practical / pragmatic.
+JavaScript should be a first-class target. WASM is going to take awhile to get where I need it and
+this move will make delivering MVP features much easier. It would have the affect of also making the
+language a lot more practical / pragmatic.
 
 Ideal features:
 
@@ -25,7 +25,8 @@ Open questions:
 
 ## Updated Rules For Parenthetical Elision
 
-1. (Unchanged) Any line with more than one symbol is wrapped with parenthesis (if it does not already have them)
+1. (Unchanged) Any line with more than one symbol is wrapped with parenthesis (if it does not
+   already have them)
 
    ```void
    add 1 2
@@ -34,8 +35,8 @@ Open questions:
    (add 1 2)
    ```
 
-2. (Updated) Indented lines are wrapped in a block and passed as an
-   argument to the preceding function call with one less indentation level, provided:
+2. (Updated) Indented lines are wrapped in a block and passed as an argument to the preceding
+   function call with one less indentation level, provided:
 
    1. There are no empty lines between the child and the parent
    2. The first child is not a named argument
@@ -50,10 +51,12 @@ Open questions:
      (mul 4 x)))
    ```
 
-3. (New) Isolated named arguments, that is named arguments that are on their own line, are applied to the preceding function call provided:
+3. (New) Isolated named arguments, that is named arguments that are on their own line, are applied
+   to the preceding function call provided:
 
    1. There are no empty lines separating between the two
-   2. The named argument is on the same indentation level, or 1 child indentation level as the preceding function call.
+   2. The named argument is on the same indentation level, or 1 child indentation level as the
+      preceding function call.
 
    ```
    try
@@ -80,8 +83,7 @@ Open questions:
 
 4. (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;`) get special handling.
 
-   1. Greedy operators consume indented child blocks, rather than
-      the parent function call
+   1. Greedy operators consume indented child blocks, rather than the parent function call
 
       ```
       let x =
@@ -97,9 +99,8 @@ Open questions:
             (named else 5)))))
       ```
 
-   2. If an expression follows a greedy operator on the same line,
-      a new line is inserted after the operator and each child line
-      has an additional level of indentation supplied.
+   2. If an expression follows a greedy operator on the same line, a new line is inserted after the
+      operator and each child line has an additional level of indentation supplied.
 
       ```
       let z = if x > y
@@ -170,16 +171,15 @@ call
 
 ```
 
-Note how `:` is not a consuming operator. There's just no way I can
-think of to make that work well. It conflicts to heavily with how we
-define parameters. (parameters definitions would consume each other).
+Note how `:` is not a consuming operator. There's just no way I can think of to make that work well.
+It conflicts to heavily with how we define parameters. (parameters definitions would consume each
+other).
 
 # 28 July 2023
 
 Just defined this:
 
-When a named arguments act like a lambda function, and can take
-parameters:
+When a named arguments act like a lambda function, and can take parameters:
 
 ```
 fn call(cb: (v: i32) -> void)
@@ -195,18 +195,17 @@ call cb: (v) =>
 
 **Edit 30 July 2023** Ignore the following paragraph
 
-Will require semi-colons to be consuming operators, which would
-mean that ether those shouldn't work in parenthesis (which I think
-maybe should be the case anyway event though it isnt right now). Now that I'm writing this, it may not work. but would be very nice
-to provide symmetry with `;` which could do the same thing
-but be trailing.
+Will require semi-colons to be consuming operators, which would mean that ether those shouldn't work
+in parenthesis (which I think maybe should be the case anyway event though it isnt right now). Now
+that I'm writing this, it may not work. but would be very nice to provide symmetry with `;` which
+could do the same thing but be trailing.
 
 # 26 July 2023
 
 **Trailing lambda problem**
 
-For awhile now I've been noticing an awkwardness in the language due
-to the lack of elegant support for trailing arguments.
+For awhile now I've been noticing an awkwardness in the language due to the lack of elegant support
+for trailing arguments.
 
 Take, for example, a hypothetical if/else or try/catch implementation (assume no macros).
 
@@ -225,10 +224,12 @@ try
     ball()
 ```
 
-This can be trivially solved with macros The issue is that this is a common pattern, and the average user shouldn't have to resort to macros almost ever.
+This can be trivially solved with macros The issue is that this is a common pattern, and the average
+user shouldn't have to resort to macros almost ever.
 
-Looking at this now, it's really not all that bad. But I'm wondering
-if it would be worth it to complicate the language and add an operator that applies a line as if it were an argument to the preceding function call:
+Looking at this now, it's really not all that bad. But I'm wondering if it would be worth it to
+complicate the language and add an operator that applies a line as if it were an argument to the
+preceding function call:
 
 ```
 if x < 3 do
@@ -261,8 +262,8 @@ try do
   ball()
 ```
 
-Note: this assumes `do` is a greedy prefix operator. If it wasn't
-we could also use `do;`. Reminder that `;` is a greedy terminating operator, so all arguments on the right are applied to do.
+Note: this assumes `do` is a greedy prefix operator. If it wasn't we could also use `do;`. Reminder
+that `;` is a greedy terminating operator, so all arguments on the right are applied to do.
 
 **Other**
 
@@ -315,24 +316,27 @@ impl Point::mut
     z = z.square
 ```
 
-I'd also like to consider requiring parenthesis on any impure function (i.e. cannot look like a field access)
+I'd also like to consider requiring parenthesis on any impure function (i.e. cannot look like a
+field access)
 
 # 20 July 2023
 
-The previous syntax change had some problems. So I've modified the rules of the language to
-resolve some of the ambiguities (among other changes).
+The previous syntax change had some problems. So I've modified the rules of the language to resolve
+some of the ambiguities (among other changes).
 
 - The `=` sign separating a function signature is now optional. It should be used only for single
   line functions.
-- Effects are now on the right side of `->`. A function signature is now `fn name() -> (effect return-type)`.
-  This allows `->` to be treated as an operator and makes the `=` far less complex to implement.
-- Generics are now defined with `::()`. This prevents us from needing to add hacks to the parser
-  and makes the language much more predictable and uniform. Its also inline with the new FQCS
+- Effects are now on the right side of `->`. A function signature is now `fn name() -> (effect
+return-type)`. This allows `->` to be treated as an operator and makes the `=` far less complex to
+  implement.
+- Generics are now defined with `::()`. This prevents us from needing to add hacks to the parser and
+  makes the language much more predictable and uniform. Its also inline with the new FQCS
 - Introduce FQCS inspired by rust
 - Remove `=` from `obj` and `impl` defs.
-- Objects now behave more similarly to Rust's structs. Though they are still reference types and
-  can be extended, they now only define data. Traits define behavior and can only hold functions/methods. Methods must now be define
-  inside of `impl`. For now, extensions must repeat all the items they inherit.
+- Objects now behave more similarly to Rust's structs. Though they are still reference types and can
+  be extended, they now only define data. Traits define behavior and can only hold
+  functions/methods. Methods must now be define inside of `impl`. For now, extensions must repeat
+  all the items they inherit.
 - Add Fully Qualified Call Syntax (FQCS) inspired by rust. Makes it possible to impl multiple traits
   with a method that has the same signature
 
@@ -366,24 +370,27 @@ fn add(a: i32, b: i32) = a + b
 
 I have an obscenely long history of making major syntax changes to this language. While this has
 been substantially reduced in the last year, it is still an ongoing problem. This language would
-likely be in a much more usable state years ago if I didn't have this habit. But its all for fun
-in the end so I guess not much harm is done.
+likely be in a much more usable state years ago if I didn't have this habit. But its all for fun in
+the end so I guess not much harm is done.
 
 # 8 July 2023
 
 Expanding on the previous entry. There are multiple reasons I've made this change.
 
-- I wanted the type system to be as simple as possible while still having the potential to match
-  the power of typescript's type system (with the added bonus of run time types)
+- I wanted the type system to be as simple as possible while still having the potential to match the
+  power of typescript's type system (with the added bonus of run time types)
 - Having both `class` and `struct` and potentially different runtime behavioral characteristics was
   not ideal.
-- Structs are stupidly difficult to model in wasm in a way that is both performant and works with a gc system.
+- Structs are stupidly difficult to model in wasm in a way that is both performant and works with a
+  gc system.
   - Linear memory cannot hold reference types
-  - Structs could leverage multi-value, but they are a pain to work with in binaryen. We'd also have to be smart about how we pass them around.
+  - Structs could leverage multi-value, but they are a pain to work with in binaryen. We'd also have
+    to be smart about how we pass them around.
 
 # 4 July 2023
 
-I'm changing the type system again. Heavily inspired by the paper, [Integrating Nominal and Structural Subtyping](https://www.cs.cmu.edu/~aldrich/papers/ecoop08.pdf).
+I'm changing the type system again. Heavily inspired by the paper, [Integrating Nominal and
+Structural Subtyping](https://www.cs.cmu.edu/~aldrich/papers/ecoop08.pdf).
 
 Here are the changes:
 
@@ -392,9 +399,13 @@ Here are the changes:
   - Objects are nominal
 - `type` defines a literal (structural) type (essentially an alias)
 - Literal types are structural, object types are nominal
-- Most user types are assumed to be heap types now. Will need new /custom syntax do define stack types. Do not be afraid to make these more verbose and difficult to use, that is webassembly's fault, not yours.
+- Most user types are assumed to be heap types now. Will need new /custom syntax do define stack
+  types. Do not be afraid to make these more verbose and difficult to use, that is webassembly's
+  fault, not yours.
 
-The main benefit to this change is it is much simpler to understand, will likely be more fun write while also being more maintainable. Thee performance impact is worth the expressiveness. You can always use the more complex stack type system when you need the performance.
+The main benefit to this change is it is much simpler to understand, will likely be more fun write
+while also being more maintainable. Thee performance impact is worth the expressiveness. You can
+always use the more complex stack type system when you need the performance.
 
 # 5 Dec 2022
 
@@ -403,5 +414,5 @@ The main benefit to this change is it is much simpler to understand, will likely
 - Greedy operators (`;`, `=`, `=>`, etc) are much smarter now.
 
 When next expression directly follows a greedy op, child expressions of the line are treated as
-arguments of that expression. When the next expression is a child expression of the line, they become
-part of a block
+arguments of that expression. When the next expression is a child expression of the line, they
+become part of a block
