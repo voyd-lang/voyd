@@ -410,11 +410,14 @@ add 1 2
 
    ```void
    add 2
-   	mul 4 x
+       let x = 5
+       mul 4 x
 
    // Becomes
-   (add 2 (block
-     (mul 4 x)))
+   (add 2
+       (block
+           (let (= x 5))
+           (mul 4 x)))
    ```
 
 3. Isolated named arguments, that is named arguments that are on their own line, are applied to the
@@ -488,6 +491,47 @@ add 1 2
             (named then 3)
             (named else 5)))))
       ```
+
+Kitchen Sink:
+
+```
+if x > 3 then:
+  do_work()
+  blah()
+else:
+  do_other_work()
+
+if test()
+  a
+  b
+
+try this():
+  work()
+catch(e):
+  hey()
+
+if x > 3 then:
+  do_work()
+  blah
+  if x < 3
+    be_me()
+  else:
+    dont()
+
+
+add 1 2
+  3 4
+
+obj Pos
+  x: (if x > 3 then: b else: c)
+  y: 2
+  z: 3
+
+obj Pos
+x: 1
+y: 2
+z: 3
+```
 
 ## Standard Function Call Syntax
 
