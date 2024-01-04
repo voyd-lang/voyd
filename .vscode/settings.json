@@ -27,5 +27,24 @@
   },
   "editor.insertSpaces": false,
   "editor.tabSize": 2,
-  "editor.wordSeparators": "`~!@#$%^&*()=[{]}\\|;:'\",.<>/?"
+  "editor.wordSeparators": "`~!@#$%^&*()=[{]}\\|;:'\",.<>/?",
+  "[markdown]": {
+    "editor.unicodeHighlight.ambiguousCharacters": false,
+    "editor.unicodeHighlight.invisibleCharacters": false,
+    "diffEditor.ignoreTrimWhitespace": false,
+    "editor.wordWrap": "on",
+    "editor.quickSuggestions": {
+      "comments": "off",
+      "strings": "off",
+      "other": "off"
+    },
+    "editor.useTabStops": true,
+    "editor.tabSize": 4,
+    "cSpell.fixSpellingWithRenameProvider": true,
+    "cSpell.advanced.feature.useReferenceProviderWithRename": true,
+    "cSpell.advanced.feature.useReferenceProviderRemove": "/^#+\\s/"
+  },
+  "[void]": {
+    "editor.tabSize": 4
+  }
 }

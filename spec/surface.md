@@ -4,11 +4,11 @@ This specification defines the language users write, the "surface" void language
 
 This surface language spec includes:
 
-- The surface grammar
-- The surface syntax
-- Macros
-- A standard library (Built in macros, types, and functions)
-- More?
+-   The surface grammar
+-   The surface syntax
+-   Macros
+-   A standard library (Built in macros, types, and functions)
+-   More?
 
 # Language Features
 
@@ -27,7 +27,7 @@ var y = 3
 Syntax:
 
 ```void
-fn $name([$label:?$param-name:$ParamType]*) [-> ($effects? $return-type)]? =?
+fn $name([$param-name:$param-type | ObjectLiteralType]*) [-> ($effects? $return-type)]? =?
 	$body:Expr*
 ```
 
@@ -87,7 +87,7 @@ scaled-move 5 x: 1 y: 2 z: 3
 
 // Note that field shorthand does not work with named parameters
 let x = 5
-scaled-move 5 x y: 2, z: 3 // Error! no function with signature scaled-move(i32, i32, { y: i32, z: i32 });
+	scaled-move 5 x y: 2, z: 3 // Error! no function with signature scaled-move(i32, i32, { y: i32, z: i32 });
 ```
 
 Named arguments can have separate external and internal names:
@@ -108,7 +108,7 @@ Here's the first example in de-sugared form:
 
 ```
 fn scaled-move(scale:i32, named1: { x: i32, y: i32, z: i32 }) -> void
-  let { x, y, z } = named1;
+	let { x, y, z } = named1;
 	robot.move(scale * x, scale * y scale * z)
 
 scaled-move(5, { x: 1, y: 2, z: 3 })
@@ -155,12 +155,12 @@ type Pos = { x: i32, y: i32, z: i32 }
 
 ```
 obj Point2D
-  x: Int
-  y: Int
+	x: Int
+	y: Int
 
 impl Point2D
-  fn toTuple() -> [Int, Int]
-    [self.x, self.y] // self is optional, x and y can be implicitly understood to be referencing self
+	fn toTuple() -> [Int, Int]
+		[self.x, self.y] // self is optional, x and y can be implicitly understood to be referencing self
 ```
 
 ### Object literal
@@ -182,34 +182,35 @@ is they can only define the methods of an object and not the fields.
 
 ```
 trait Animal
-  fn age() -> Int
+	fn age() -> Int
 
-  // Default implementation
-  fn hey() -> (log void)
-    log("hey")
+// Default implementation
+fn hey() -> (log void)
+	log("hey")
 
 obj Human
-  years: Int
+	years: Int
 
 impl Animal for Human
-  fn age() = years
+	fn age() = years
 ```
 
 ## Trait Extensions
 
 ```
 trait Animal
-  fn age() -> Int
-  // Default implementation
-  fn hey() -> (log void)
-    log("hey")
+	fn age() -> Int
+
+	// Default implementation
+	fn hey() -> (log void)
+		log("hey")
 
 
 trait Mammal extends Animal
-  fn age() -> Int
-  fn isAquatic() -> Boolean
-  // Default implementation is inherited
-  fn hey() -> (log void)
+	fn age() -> Int
+	fn isAquatic() -> Boolean
+	// Default implementation is inherited
+	fn hey() -> (log void)
 
 ```
 
@@ -219,10 +220,10 @@ Resolves the correct method when the selection is ambiguous to the compiler
 
 ```
 trait Render
-  fn draw() -> Int = ()
+	fn draw() -> Int = ()
 
 trait Cowboy
-  fn draw() -> Int = ()
+	fn draw() -> Int = ()
 
 
 obj Person
@@ -239,7 +240,7 @@ Render::draw(me)
 
 Things to consider:
 
-- http://developear.com/blog/2017/02/26/swift-protocols.html
+-   http://developear.com/blog/2017/02/26/swift-protocols.html
 
 ## Quote
 
@@ -270,9 +271,10 @@ macro def-wasm-operator(op wasm-fn arg-type return-type)
 		binaryen-mod ($arg-type $wasm-fn) (left right)
 
 def-wasm-operator('<' lt_s i32 i32)
-; Expands into
+
+// Expands into
 defun '<'(left:i32 right:i32) -> i32
-  binaryen-mod (i32 lt_s) (left right)
+	binaryen-mod (i32 lt_s) (left right)
 ```
 
 ### Syntax Objects
@@ -358,13 +360,13 @@ to balance the power and simplicity of lisp with a more modern python like feel.
 On top of the syntax features supported by the core language syntax, the surface language syntax
 supports:
 
-- Parenthetical ellison via syntactically significant whitespace
-- Standard function call syntax `f(x)`
-- Uniform function call syntax `hello.world()` -> `world(hello)`
-- Infix operators
-- Greedy identifiers
-- Macro expansion
-- Tuple, Struct, Array, and Dictionary literals etc
+-   Parenthetical ellison via syntactically significant whitespace
+-   Standard function call syntax `f(x)`
+-   Uniform function call syntax `hello.world()` -> `world(hello)`
+-   Infix operators
+-   Greedy identifiers
+-   Macro expansion
+-   Tuple, Struct, Array, and Dictionary literals etc
 
 At its core, the surface language is still very lisp like. As in lisp, everything built on a list.
 Any valid s-expression, is a valid Surface Language Expression
@@ -375,8 +377,8 @@ Void language is built around an s-expression syntax, like lisp:
 
 ```void
 (if (n < 2)
-  (named then n)
-  (named else (+ (fib (- n 1)) (fib (- n 2)))))
+	(: then n)
+	(: else (+ (fib (- n 1)) (fib (- n 2)))))
 ```
 
 To reduce visual noise, parenthesis can be elided, using tabs as a mechanism to infer where the
@@ -401,131 +403,148 @@ add 1 2
 (add 1 2)
 ```
 
-2. Indented lines are wrapped in a block and passed as an argument to the preceding function call
+1. Indented lines are wrapped in a block and passed as an argument to the preceding function call
    with one less indentation level, provided:
 
-   1. There are no empty lines between the child and the parent
-   2. The first child is not a named argument
-   3. The parent is not wrapped in parenthesis
+    1. There are no empty lines between the child and the parent
+    2. The first child is not a named argument
+    3. The parent is not wrapped in parenthesis
 
-   ```void
-   add 2
-       let x = 5
-       mul 4 x
+    ```void
+    add 2
+    	let x = 5
+    	mul 4 x
 
-   // Becomes
-   (add 2
-       (block
-           (let (= x 5))
-           (mul 4 x)))
-   ```
+    // Becomes
+    (add 2
+    	(block
+    		(let (= x 5))
+    		(mul 4 x)))
 
-3. Isolated named arguments, that is named arguments that are on their own line, are applied to the
+    // Another example
+    add(
+    	3, 4, 5,
+    	if x > 3
+    		then: 3
+    		else: 5,
+    )
+
+    // Becomes
+    add(
+    	3, 4, 5,
+    	(block
+    		(if (> x 3)
+    			(: then 3)
+    			(: else 5)))
+    )
+    ```
+
+2. Isolated named arguments, that is named arguments that are on their own line, are applied to the
    preceding function call provided:
 
-   1. There are no empty lines separating between the two
-   2. The named argument is on the same indentation level, or 1 child indentation level as the
-      preceding function call.
+    1. There are no empty lines separating between the two
+    2. The named argument is on the same indentation level, or 1 child indentation level as the
+       preceding function call.
 
-   ```
-   try
-     this_throws_an_error()
-   catch(e):
-     print(e)
+    ```
+    try this():
+    	this_throws_an_error()
+    catch(e):
+    	print(e)
 
-   // Becomes
-   (try
-     (block (this_throws_an_error))
-     (named catch (lambda (e) (block
-       print(e)))))
+    // Becomes
+    (try
+    	(: this (lambda () (block (this_throws_an_error))))
+    	(: catch (lambda (e) (block
+    		print(e)))))
 
-   // Another example
-   if x > y
-     then: 3
-     else: 5
+    // Another example
+    if x > y
+    	then: 3
+    	else: 5
 
-   // Becomes
-   (if (x > y)
-     (named then 3)
-     (named else 5))
-   ```
+    // Becomes
+    (if (x > y)
+    	(: then 3)
+    	(: else 5))
+    ```
 
-4. (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;`) get special handling.
+3. (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;`) get special handling.
 
-   1. Greedy operators consume indented child blocks, rather than the parent function call
+    1. Greedy operators consume indented child blocks, rather than the parent function call
 
-      ```
-      let x =
-       if (x > y)
-         then: 3
-         else: 5
+    ```
+    let x =
+    	if (x > y)
+    		then: 3
+    		else: 5
 
-      // Becomes
-      (let (= x
-        (block
-          (if (> x y)
-            (named then 3)
-            (named else 5)))))
-      ```
+    // Becomes
+    (let (= x
+    	(block
+    		(if (> x y)
+    		(: then 3)
+    		(: else 5)))))
+    ```
 
-   2. If an expression follows a greedy operator on the same line, a new line is inserted after the
-      operator and each child line has an additional level of indentation supplied.
+4. If an expression follows a greedy operator on the same line, a new line is inserted after the
+   operator and each child line has an additional level of indentation supplied.
 
-      ```
-      let z = if x > y
-        then: 3
-        else: 5
+    ```
+    let z = if x > y
+    	then: 3
+    	else: 5
 
-      // Becomes
-      let z =
-        if x > y
-          then: 3
-          else: 5
+    // Becomes
+    let z =
+    	if x > y
+    		then: 3
+    		else: 5
 
-      // Which in turn becomes
-      (let (=
-        z
-        (block
-          (if
-            (> z y)
-            (named then 3)
-            (named else 5)))))
-      ```
+    // Which in turn becomes
+    (let (=
+    	z
+    	(block
+    		(if
+    			(> z y)
+    				(: then 3)
+    				(: else 5)))))
+    ```
 
 Kitchen Sink:
 
 ```
 if x > 3 then:
-  do_work()
-  blah()
+	do_work()
+	blah()
 else:
-  do_other_work()
+	do_other_work()
 
 if test()
-  a
-  b
+	a
+	b
 
 try this():
-  work()
+	work()
 catch(e):
-  hey()
+	hey()
 
 if x > 3 then:
-  do_work()
-  blah
-  if x < 3
-    be_me()
-  else:
-    dont()
+	do_work()
+	blah
+if x < 3
+	be_me()
+else:
+	do_not()
 
 
 add 1 2
-  3 4
+	3 4
 
 obj Pos
-  x: (if x > 3 then: b else: c)
-  y: 2
-  z: 3
+	x: (if x > 3 then: b else: c)
+	y: 2
+	z: 3
 
 obj Pos
 x: 1
@@ -540,7 +559,7 @@ standard function call syntax of the form `f(x)`.
 
 ### Rules
 
-- Any identifier placed directly next to a list is inserted as the first argument of that list
+1.  Any identifier placed directly next to a list is inserted as the first argument of that list
 
 ```
 add(1 2)
@@ -582,14 +601,14 @@ as the name, additional identifiers become parameters.
 
 ```
 fn call(cb: (v: i32) -> void)
-  cb(5)
+	cb(5)
 
 call cb(v):
-  print(v)
+	print(v)
 
 // Equivalent to
 call cb: (v) =>
-  print
+	print
 ```
 
 This works nicely with the rules of named arguments to support a trailing lambda syntax similar to
@@ -597,9 +616,9 @@ that of swift or koka.
 
 ```
 try
-  do_work()
+	do_work()
 catch(e):
-  print(e)
+	print(e)
 ```
 
 ## Function Overloading
@@ -609,37 +628,37 @@ via their parameters and return type.
 
 ```void
 fn sum(a:Int, b:Int)
-  print("Def 1");
-  a + b
+	print("Def 1");
+	a + b
 
 fn sum { a:Int, b:Int }
-  print("Def 2");
-  a + b
+	print("Def 2");
+	a + b
 
 sum(1, 2) // Def 1
 sum { a: 1, b: 2 } // Def 2
 
 // ERROR: sum(numbers: ...Int) overlaps ambiguously with sum(a: Int, b: Int)
 fn sum(numbers: ...Int)
-  print("Def 3");
+	print("Def 3");
 ```
 
 This can be especially useful for overloading operators to support a custom type:
 
 ```
 fn '+'(a:Vec3, b:Vec3) -> Vec3
-  Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
+	Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
 
 Vec3(1, 2, 3) + Vec3(4, 5, 6) // Vec3(5, 7, 9)
 ```
 
 ### Rules
 
-- A function signature is:
-  - Its identifier
-  - Its parameters, their name, types, order, and label (if applicable)
-- Each full function signature must be unique in a given scope
-- TBD...
+-   A function signature is:
+-   Its identifier
+-   Its parameters, their name, types, order, and label (if applicable)
+-   Each full function signature must be unique in a given scope
+-   TBD...
 
 ## Infix Notation
 
@@ -650,44 +669,44 @@ Operators, their precedence, and associativity (in typescript):
 ```typescript
 /** Key is the operator, value is its [precedence, associativity] */
 export const infixOperators = new Map<string, [number, Associativity]>([
-  ["+", [1, "left"]],
-  ["-", [1, "left"]],
-  ["*", [2, "left"]],
-  ["/", [2, "left"]],
-  ["and", [0, "left"]],
-  ["or", [0, "left"]],
-  ["xor", [0, "left"]],
-  ["as", [0, "left"]],
-  ["is", [0, "left"]],
-  ["in", [0, "left"]],
-  ["==", [0, "left"]],
-  ["!=", [0, "left"]],
-  ["<", [0, "left"]],
-  [">", [0, "left"]],
-  ["<=", [0, "left"]],
-  [">=", [0, "left"]],
-  [".", [6, "left"]],
-  ["|>", [4, "left"]],
-  ["<|", [4, "right"]],
-  ["=", [0, "left"]],
-  ["+=", [4, "right"]],
-  ["-=", [4, "right"]],
-  ["*=", [4, "right"]],
-  ["/=", [4, "right"]],
-  ["=>", [5, "right"]],
-  [":", [0, "left"]],
-  ["::", [0, "left"]],
-  [";", [4, "left"]],
-  ["??", [3, "right"]],
-  ["?:", [3, "right"]],
+	["+", [1, "left"]],
+	["-", [1, "left"]],
+	["*", [2, "left"]],
+	["/", [2, "left"]],
+	["and", [0, "left"]],
+	["or", [0, "left"]],
+	["xor", [0, "left"]],
+	["as", [0, "left"]],
+	["is", [0, "left"]],
+	["in", [0, "left"]],
+	["==", [0, "left"]],
+	["!=", [0, "left"]],
+	["<", [0, "left"]],
+	[">", [0, "left"]],
+	["<=", [0, "left"]],
+	[">=", [0, "left"]],
+	[".", [6, "left"]],
+	["|>", [4, "left"]],
+	["<|", [4, "right"]],
+	["=", [0, "left"]],
+	["+=", [4, "right"]],
+	["-=", [4, "right"]],
+	["*=", [4, "right"]],
+	["/=", [4, "right"]],
+	["=>", [5, "right"]],
+	[":", [0, "left"]],
+	["::", [0, "left"]],
+	[";", [4, "left"]],
+	["??", [3, "right"]],
+	["?:", [3, "right"]],
 ]);
 ```
 
 ### Rules
 
-- The infix operator must be surrounded by whitespace to be interpreted as an infix operation
-- If the infix operator is the first identifier in a list, s-expression syntax is used instead
-- Infix perators should use the same precedence and associative rules as JavaScript
+-   The infix operator must be surrounded by whitespace to be interpreted as an infix operation
+-   If the infix operator is the first identifier in a list, s-expression syntax is used instead
+-   Infix perators should use the same precedence and associative rules as JavaScript
 
 ## Terminal Identifier
 
@@ -695,7 +714,7 @@ Terminal identifiers do not need to be separated by a whitespace from other iden
 
 They are any list of OpChars (see grammar) that start with one of the following OpChars:
 
-- `.`, `:`, `;`, `?`, `\`, `!`, `;`, `&`, `|`
+-   `.`, `:`, `;`, `?`, `\`, `!`, `;`, `&`, `|`
 
 Note: Being a terminal operator does not imply infix
 
@@ -707,13 +726,12 @@ extend.
 
 There are three types of macros:
 
-- Reader Macros: Expanded during parsing, emit am ast
-- Syntax Macros: Expanded after parsing, are passed the ast from the parser and produce the final
-  ast
-- Regular Macros: Expanded by a syntax macro
+-   Reader Macros: Expanded during parsing, emit am ast
+-   Syntax Macros: Expanded after parsing, are passed the ast from the parser and produce the final
+    ast
+-   Regular Macros: Expanded by a syntax macro
 
-At a high level, the pipeline looks something like this: `file.void -> parser + reader macros ->
-syntax macros -> ast (the core language)`
+At a high level, the pipeline looks something like this: `file.void -> parser + reader macros -> syntax macros -> ast (the core language)`
 
 In the next sections, the different macros will be defined in depth.
 
@@ -741,27 +759,27 @@ Syntax Macro Pipeline Example:
 
 ```void
 fn fib(n:i32) -> i32
-    if (n < 2)
-        n
-        fib(n - 1) + fib(n - 2)
+	if (n < 2)
+		then: n
+		else: fib(n - 1) + fib(n - 2)
 
 // After function notation syntax macro
 fn (fib n:i32) -> i32
 	if (n < 2)
-		n
-		(fib n - 1) + (fib n - 2)
+		then: n
+		else: (fib n - 1) + (fib n - 2)
 
 // After parenthetical elision syntax macro
 (fn (fib n:i32) -> i32
 	(if (n < 2)
-		n
-		(fib n - 1) + (fib n - 2)))
+		(then: n)
+		(else: (fib n - 1) + (fib n - 2))))
 
 // After infix notation syntax macro (-> is not an operator)
 (fn (fib (: n i32)) -> i32
 	(if (< n 2)
-		n
-		(+ (fib (- n 1)) (fib (- n 2)))))
+		(: then n)
+		(: else (+ (fib (- n 1)) (fib (- n 2))))))
 ```
 
 ### Regular Macros
