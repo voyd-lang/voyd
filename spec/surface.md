@@ -394,21 +394,40 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
 
 ### Rules
 
-1. Any line with more than one symbol is wrapped with parenthesis (if it does not already have them)
+1.  Any line with more than one symbol is wrapped in parenthesis (if it does not already have them)
 
-```void
-add 1 2
+    ```void
+    add 1 2
 
-// Becomes
-(add 1 2)
-```
+    // Becomes
+    (add 1 2)
+    ```
 
-1. Indented lines are wrapped in a block and passed as an argument to the preceding function call
-   with one less indentation level, provided:
+2.  Commas can be used to separate function calls on the same line
+
+    ````void
+    add 1 2, add 3 4
+
+    // Becomes
+    (add 1 2)
+    (add 3 4)
+
+    This can be useful when calling functions with a large number of arguments:
+    ```void
+    add(
+    	1, 2,
+    	add 3 4
+    )
+
+    // Becomes
+    (add 1 2 (add 3 4))
+    ````
+
+3.  Indented lines are grouped together in a block and passed to their parent function call provided:
 
     1. There are no empty lines between the child and the parent
     2. The first child is not a named argument
-    3. The parent is not wrapped in parenthesis
+    3. The direct child is not wrapped in parenthesis. Note: this does not apply to nested children.
 
     ```void
     add 2
@@ -426,37 +445,32 @@ add 1 2
     	3, 4, 5,
     	if x > 3
     		then: 3
-    		else: 5,
+    		else: 5
     )
 
     // Becomes
-    add(
-    	3, 4, 5,
+    (add 3 4 5
     	(block
     		(if (> x 3)
     			(: then 3)
-    			(: else 5)))
-    )
+    			(: else 5))))
     ```
 
-2. Isolated named arguments, that is named arguments that are on their own line, are applied to the
-   preceding function call provided:
+4.  Isolated named arguments, that is named arguments that are on their own line, are applied to the
+    preceding function call provided:
 
     1. There are no empty lines separating between the two
     2. The named argument is on the same indentation level, or 1 child indentation level as the
        preceding function call.
 
     ```
-    try this():
-    	this_throws_an_error()
-    catch(e):
-    	print(e)
+    if x > y then: 3
+    else: 5
 
     // Becomes
-    (try
-    	(: this (lambda () (block (this_throws_an_error))))
-    	(: catch (lambda (e) (block
-    		print(e)))))
+    (if (> x y)
+    	(: then 3)
+    	(: else 5))
 
     // Another example
     if x > y
@@ -469,49 +483,49 @@ add 1 2
     	(: else 5))
     ```
 
-3. (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;`) get special handling.
+5.  (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;`) get special handling.
 
-    1. Greedy operators consume indented child blocks, rather than the parent function call
+    1.  Greedy operators consume indented child blocks, rather than the parent function call
 
-    ```
-    let x =
-    	if (x > y)
-    		then: 3
-    		else: 5
+        ```
+        let x =
+        	if (x > y)
+        		then: 3
+        		else: 5
 
-    // Becomes
-    (let (= x
-    	(block
-    		(if (> x y)
-    		(: then 3)
-    		(: else 5)))))
-    ```
+        // Becomes
+        (let (= x
+        	(block
+        		(if (> x y)
+        		(: then 3)
+        		(: else 5)))))
+        ```
 
-4. If an expression follows a greedy operator on the same line, a new line is inserted after the
-   operator and each child line has an additional level of indentation supplied.
+    2.  If an expression follows a greedy operator on the same line, a new line is inserted after the
+        operator and each child line has an additional level of indentation supplied.
 
-    ```
-    let z = if x > y
-    	then: 3
-    	else: 5
+            ```
+            let z = if x > y
+            	then: 3
+            	else: 5
 
-    // Becomes
-    let z =
-    	if x > y
-    		then: 3
-    		else: 5
+            // Becomes
+            let z =
+            	if x > y
+            		then: 3
+            		else: 5
 
-    // Which in turn becomes
-    (let (=
-    	z
-    	(block
-    		(if
-    			(> z y)
-    				(: then 3)
-    				(: else 5)))))
-    ```
+            // Which in turn becomes
+            (let (=
+            	z
+            	(block
+            		(if
+            			(> z y)
+            				(: then 3)
+            				(: else 5)))))
+            ```
 
-Kitchen Sink:
+Examples:
 
 ```
 if x > 3 then:
@@ -520,36 +534,37 @@ if x > 3 then:
 else:
 	do_other_work()
 
-if test()
-	a
-	b
-
-try this():
-	work()
-catch(e):
-	hey()
-
-if x > 3 then:
-	do_work()
-	blah
-if x < 3
-	be_me()
-else:
-	do_not()
-
-
-add 1 2
-	3 4
+// Becomes
+(if (> x 3)
+	(: then (block
+		do_work()
+		blah()))
+	(: else (block
+		do_other_work())))
 
 obj Pos
 	x: (if x > 3 then: b else: c)
 	y: 2
 	z: 3
 
+// Becomes
+(obj Pos
+	(: x (if (> x 3)
+		(: then b)
+		(: else c)))
+	(: y 2)
+	(: z 3))
+
 obj Pos
 x: 1
 y: 2
 z: 3
+
+// Becomes
+(obj Pos
+	(: x 1)
+	(: y 2)
+	(: z 3))
 ```
 
 ## Standard Function Call Syntax
@@ -615,10 +630,16 @@ This works nicely with the rules of named arguments to support a trailing lambda
 that of swift or koka.
 
 ```
-try
-	do_work()
+try this():
+	this_throws_an_error()
 catch(e):
 	print(e)
+
+// Becomes
+(try
+	(: this (lambda () (block (this_throws_an_error))))
+	(: catch (lambda (e) (block
+		print(e)))))
 ```
 
 ## Function Overloading
@@ -791,3 +812,7 @@ In general, user macros can return any valid surface language expression. Surfac
 implementation macros should either directly return a core language expression or return an
 expression that can be converted to a core language expression further down the syntax macro
 pipeline.
+
+```
+
+```
