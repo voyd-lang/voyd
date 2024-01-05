@@ -816,3 +816,19 @@ pipeline.
 ```
 
 ```
+
+# Examples
+
+```
+// Translated version of a swift example from https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/
+
+let photos = await taskGroup(of: Optional(Data).self); (group) =>
+	let photoNames = await listPhotos(inGallery: "Summer Vacation")
+
+	for name in photoNames
+		group.addTaskUnlessCancelled (isCancelled) =>
+			if not(isCancelled)
+				await downloadPhoto(named: name)
+
+	group.await.filter (photo) => photo != nil
+```
