@@ -80,14 +80,14 @@ Named arguments can be defined using an object literal within the list of argume
 
 ```void
 fn scaled-move(scale:i32, { x: i32, y: i32, z: i32 }) -> void
-	robot.move(scale * x, scale * y scale * z)
+	robot.move(scale * x, scale * y, scale * z)
 
 // On call, the curly braces can be left out
 scaled-move 5 x: 1 y: 2 z: 3
 
 // Note that field shorthand does not work with named parameters
 let x = 5
-	scaled-move 5 x y: 2, z: 3 // Error! no function with signature scaled-move(i32, i32, { y: i32, z: i32 });
+scaled-move 5 x y: 2 z: 3 // Error! no function with signature scaled-move(i32, i32, { y: i32, z: i32 });
 ```
 
 Named arguments can have separate external and internal names:
@@ -107,9 +107,9 @@ Named arguments are syntactic sugar for object literals with automatic de-struct
 Here's the first example in de-sugared form:
 
 ```
-fn scaled-move(scale:i32, named1: { x: i32, y: i32, z: i32 }) -> void
+fn scaled-move(scale:i32 named1: { x: i32 y: i32 z: i32 }) -> void
 	let { x, y, z } = named1;
-	robot.move(scale * x, scale * y scale * z)
+	robot.move (scale * x) (scale * y) (scale * z)
 
 scaled-move(5, { x: 1, y: 2, z: 3 })
 
