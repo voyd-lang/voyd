@@ -11,3 +11,10 @@
 - Better separate the language reference from the specification
 	- The specification should be a formal description of the language, and use ebnf to describe the syntax
 	- The reference should be a more informal description of the language, targeting users.
+- Support safe mutation https://dl.acm.org/doi/pdf/10.1145/3471874.3472988
+
+Data types:
+- Decide on if self is implicit or explicit
+- Should obj be renamed to class
+- Decide on wether an obj can have methods as part of their initial definition
+- How do we define method requirements in a structural type.
