@@ -819,10 +819,10 @@ pipeline.
 
 # Examples
 
-```
+```void
 // Translated version of a swift example from https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/
 
-let photos = await taskGroup(of: Optional(Data).self); (group) =>
+let photos = await taskGroup(of: Optional(Data).self) | () =>
 	let photoNames = await listPhotos(inGallery: "Summer Vacation")
 
 	for name in photoNames
@@ -830,5 +830,10 @@ let photos = await taskGroup(of: Optional(Data).self); (group) =>
 			if not(isCancelled)
 				await downloadPhoto(named: name)
 
-	group.await.filter (photo) => photo != nil
+	await group.filter() | (photo) => photo != nil
+
+photos.map(name =>
+	let photo = await downloadPhoto(named: name)
+	photo.map(processPhoto)
+)
 ```
