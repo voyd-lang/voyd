@@ -13,6 +13,3 @@
 	  But the former way is easier to read and understand.
 	- The disadvantage of the former way is that we can't reasonably explicitly type lambda functions
 	  (`() -> () => `) anymore. But if people need to do that they can just use an anonymous function instead `fn(param) ->`.
-- Consider re-enabling parenthetical elision inside of function calls / lines wrapped in parenthesis.
-	- Possibly by enforcing the use of commas when using standard function call syntax or s-expressions (when a line is wrapped in parenthesis)
-	- May also consider using an operator or a new block syntax i.e. `${ let x = 5 }`

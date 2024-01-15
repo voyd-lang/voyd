@@ -394,7 +394,7 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
 
 ### Rules
 
-1.  Any line with more than one symbol is wrapped in parenthesis (if it does not already have them)
+1.  Any line with more than one symbol is wrapped in parenthesis.
 
     ```void
     add 1 2
@@ -403,11 +403,7 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     (add 1 2)
     ```
 
-2.  Indented lines are grouped together in a block and passed to their parent function call provided:
-
-    1. There are no empty lines between the child and the parent
-    2. The first child is not a named argument
-    3. The line is not surrounded by parenthesis (part of an argument list)
+2.  Indented lines are grouped together in a block and passed to their parent function call, provided the fist line is not a named argument.
 
     ```void
     add 2
@@ -419,16 +415,6 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     	(block
     		(let (= x 5))
     		(mul 4 x)))
-
-    // An example of bad usage
-    add(
-    	3 4 5
-		// Bad!, these arguments will be passed to the parent add call since the lines are wrapped in parenthesis
-    	sub a b c
-    )
-
-	// Becomes
-	(add 3 4 5 sub a b c)
     ```
 
 3.  Isolated named arguments, that is named arguments that are on their own line, are applied to the
@@ -499,6 +485,25 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
             				(: then 3)
             				(: else 5)))))
             ```
+
+5. Parenthetical elision is disabled on any lines surrounded by parenthesis
+	1. Parenthetical elision can be re-enabled by using the `${}` syntax
+
+		```
+		add(x, y, ${
+			if x > y
+				then: 3 else: 5
+		})
+
+
+		// Becomes
+		(add x y
+			(block
+				(if (> x y)
+					(: then 3)
+					(: else 5))))
+		```
+
 
 Examples:
 
