@@ -27,11 +27,30 @@ var y = 3
 Syntax:
 
 ```void
-fn $name([$param-name:$param-type | ObjectLiteralType]*) [-> ($effects? $return-type)]? =?
-	$body:Expr*
+fn name(arg1:type1 arg2:type2) effects -> returnType =
+	// Body
 ```
 
 The trailing equal sign is optional and used only when the entire function is defined on one line.
+
+```void
+fn name(arg1:type1 arg2:type2) effects -> returnType
+	// Body
+```
+
+Effects can also typically be inferred by the compiler, in which case they can be omitted.
+
+```void
+fn name(arg1:type1 arg2:type2) -> returnType
+	// Body
+```
+
+The return type can also be inferred by the compiler, in which case it can be omitted.
+
+```void
+fn name(arg1:type1 arg2:type2)
+	// Body
+```
 
 ### Examples
 
@@ -41,14 +60,8 @@ Basic function:
 fn add(a:i32 b:i32) -> i32
 	a + b
 
-// To call
-add 1 2
-
-// Or
+// Usage
 add(1 2)
-
-// Or
-(add 1 2)
 
 // Or with UFCS
 1.add(2)
@@ -63,15 +76,14 @@ fn add(a:i32 b:i32) = a + b
 With effects:
 
 ```void
-// When effects are explicit, the return type must be grouped in ()
-fn get-json(address:String) -> (async Dictionary)
+fn get-json(address:String) async -> Dictionary
 	let json-text = await fetch(address)
-	parse-json json-text
+	parse-json(json-text)
 
 // Multiple effects must also be grouped
 fn get-json(address:String) -> ((async throws) Dictionary)
 	let json-text = await fetch(address)
-	parse-json json-text
+	parse-json(json-text)
 ```
 
 ### Named arguments
@@ -83,11 +95,11 @@ fn scaled-move(scale:i32, { x: i32, y: i32, z: i32 }) -> void
 	robot.move(scale * x, scale * y, scale * z)
 
 // On call, the curly braces can be left out
-scaled-move 5 x: 1 y: 2 z: 3
+scaled-move(5, x: 1, y: 2, z: 3)
 
 // Note that field shorthand does not work with named parameters
 let x = 5
-scaled-move 5 x y: 2 z: 3 // Error! no function with signature scaled-move(i32, i32, { y: i32, z: i32 });
+scaled-move(5 x y: 2 z: 3) // Error! no function with signature scaled-move(i32, i32, { y: i32, z: i32 });
 ```
 
 Named arguments can have separate external and internal names:
@@ -109,13 +121,19 @@ Here's the first example in de-sugared form:
 ```
 fn scaled-move(scale:i32 named1: { x: i32 y: i32 z: i32 }) -> void
 	let { x, y, z } = named1;
-	robot.move (scale * x) (scale * y) (scale * z)
+	robot.move(scale * x, scale * y, scale * z)
 
 scaled-move(5, { x: 1, y: 2, z: 3 })
 
 // The de-sugared form makes it clear why field shorthand doesn't work
 scaled-move(5, x, { y: 2, z: 3 }) // Error! no function with signature scaled-move(i32, i32, { y: i32, z: i32 });
 ```
+
+### Parenthetical Elision
+
+When a function call is isolated on its own line, the parenthesis can be elided.
+
+TODO: Fill this section out
 
 ## String Literals
 
@@ -185,7 +203,7 @@ trait Animal
 	fn age() -> Int
 
 // Default implementation
-fn hey() -> (log void)
+fn hey() log -> void
 	log("hey")
 
 obj Human
@@ -202,7 +220,7 @@ trait Animal
 	fn age() -> Int
 
 	// Default implementation
-	fn hey() -> (log void)
+	fn hey() log -> void
 		log("hey")
 
 
@@ -210,7 +228,7 @@ trait Mammal extends Animal
 	fn age() -> Int
 	fn isAquatic() -> Boolean
 	// Default implementation is inherited
-	fn hey() -> (log void)
+	fn hey() log -> void
 
 ```
 
@@ -595,7 +613,7 @@ When the left hand side of the `:` operator is a list, the first identifier in t
 as the name, additional identifiers become parameters.
 
 ```
-fn call(cb: (v: i32) -> void)
+fn call(cb: fn(v: i32) -> void)
 	cb(5)
 
 call cb(v):

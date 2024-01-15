@@ -23,7 +23,7 @@ Note: Effect types are lower-kebab-case, data types are UpperCamelCase
 ## Handling An Effect
 
 ```
-fn validate(val: i32) -> (async ())
+fn validate(val: i32) async -> void
 	if val > 100 or val < 0
 		throw "Value out of range"
 
@@ -40,7 +40,7 @@ fn is-valid(val: i32)
 handler try::<T> impl throw::<T>
 	ctl throw(val)
 
-fn try::<T, R>(action: () -> (throws::<T> R), catch: (T) -> R) -> R
+fn try::<T, R>(action: fn() throws::<T> -> R, catch: fn(T) -> R) -> R
 	handles throw
 	handle(action)
 ```

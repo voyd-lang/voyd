@@ -23,7 +23,7 @@ impl Point3D
     [x, y, z] // Self is implicit
 
   // Mutating method
-  fn setZ(v: Int) -> (mut void)
+  fn setZ(v: Int) mut -> void
     z = v
 
   // ERROR: overrides must return the same type as their parent
