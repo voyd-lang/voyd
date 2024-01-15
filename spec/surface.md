@@ -403,31 +403,11 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     (add 1 2)
     ```
 
-2.  Commas can be used to separate function calls on the same line
-
-    ````void
-    add 1 2, add 3 4
-
-    // Becomes
-    (add 1 2)
-    (add 3 4)
-
-    This can be useful when calling functions with a large number of arguments:
-    ```void
-    add(
-    	1, 2,
-    	add 3 4
-    )
-
-    // Becomes
-    (add 1 2 (add 3 4))
-    ````
-
-3.  Indented lines are grouped together in a block and passed to their parent function call provided:
+2.  Indented lines are grouped together in a block and passed to their parent function call provided:
 
     1. There are no empty lines between the child and the parent
     2. The first child is not a named argument
-    3. The direct child is not wrapped in parenthesis. Note: this does not apply to nested children.
+    3. The line is not surrounded by parenthesis (part of an argument list)
 
     ```void
     add 2
@@ -440,23 +420,18 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     		(let (= x 5))
     		(mul 4 x)))
 
-    // Another example
+    // An example of bad usage
     add(
-    	3, 4, 5,
-    	if x > 3
-    		then: 3
-    		else: 5
+    	3 4 5
+		// Bad!, these arguments will be passed to the parent add call since the lines are wrapped in parenthesis
+    	sub a b c
     )
 
-    // Becomes
-    (add 3 4 5
-    	(block
-    		(if (> x 3)
-    			(: then 3)
-    			(: else 5))))
+	// Becomes
+	(add 3 4 5 sub a b c)
     ```
 
-4.  Isolated named arguments, that is named arguments that are on their own line, are applied to the
+3.  Isolated named arguments, that is named arguments that are on their own line, are applied to the
     preceding function call provided:
 
     1. There are no empty lines separating between the two
@@ -483,7 +458,7 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     	(: else 5))
     ```
 
-5.  (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;`) get special handling.
+4.  (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special handling.
 
     1.  Greedy operators consume indented child blocks, rather than the parent function call
 
@@ -727,7 +702,7 @@ export const infixOperators = new Map<string, [number, Associativity]>([
 
 -   The infix operator must be surrounded by whitespace to be interpreted as an infix operation
 -   If the infix operator is the first identifier in a list, s-expression syntax is used instead
--   Infix perators should use the same precedence and associative rules as JavaScript
+-   Infix operators should use the same precedence and associative rules as JavaScript
 
 ## Terminal Identifier
 
