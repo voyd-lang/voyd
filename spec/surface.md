@@ -435,7 +435,7 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
             ```
 
 5. Parenthetical elision is disabled on any lines surrounded by parenthesis
-	1. Parenthetical elision can be re-enabled by using the `${}` syntax
+	1. Parenthetical elision can be re-enabled by using the whitespace block `${}` syntax
 
 		```
 		add(x, y, ${
