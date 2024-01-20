@@ -57,11 +57,6 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
       continue;
     }
 
-    if (isGreedyOp(next)) {
-      assistGreedyOpProcessing(list, transformed, indentLevel);
-      continue;
-    }
-
     if (next !== undefined) {
       transformed.push(next);
       list.consume();
@@ -74,35 +69,6 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
   }
 
   return transformed;
-};
-
-// Consumes preceding expressions as though they belong to the operator at ast[-1]
-// Modifies ast and transformed parameters
-const assistGreedyOpProcessing = (
-  list: List,
-  transformed: List,
-  indentLevel: number
-) => {
-  transformed.push(list.consume());
-
-  const precedingExprCount = lineExpressionCount(list);
-  if (precedingExprCount === 0) {
-    transformed.push("block");
-    return;
-  }
-
-  consumeLeadingWhitespace(list);
-  if (precedingExprCount === 1 && list.first()?.isList()) {
-    transformed.push(
-      ...removeWhitespaceFromList(list.consume() as List, indentLevel).value
-    );
-    return;
-  }
-
-  if (precedingExprCount === 1 && nextLineIndentLevel(list) <= indentLevel) {
-    transformed.push("block");
-    return;
-  }
 };
 
 const nextLineIndentLevel = (list: List) => {
