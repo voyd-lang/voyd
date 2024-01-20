@@ -23,6 +23,7 @@ export const infixOperators = new Map<string, [number, Associativity]>([
   [">=", [0, "left"]],
   [".", [6, "left"]],
   ["|>", [4, "left"]],
+  ["|", [4, "left"]],
   ["<|", [4, "right"]],
   ["=", [0, "left"]],
   ["+=", [4, "right"]],
