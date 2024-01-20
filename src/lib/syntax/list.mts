@@ -121,6 +121,13 @@ export class List extends Syntax {
     return this;
   }
 
+  filter(fn: (expr: Expr, index: number, array: Expr[]) => boolean): List {
+    return new List({
+      ...super.getCloneOpts(),
+      value: this.value.filter(fn),
+    });
+  }
+
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
     return new List({
       ...super.getCloneOpts(),

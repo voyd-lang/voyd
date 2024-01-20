@@ -51,7 +51,7 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
     }
 
     if (next?.isList()) {
-      transformed.push(elideListContents(next, indentLevel));
+      transformed.push(removeWhitespaceFromList(next, indentLevel));
       list.consume();
       continue;
     }
@@ -93,7 +93,7 @@ const assistGreedyOpProcessing = (
   consumeLeadingWhitespace(list);
   if (precedingExprCount === 1 && list.first()?.isList()) {
     transformed.push(
-      ...elideListContents(list.consume() as List, indentLevel).value
+      ...removeWhitespaceFromList(list.consume() as List, indentLevel).value
     );
     return;
   }
@@ -120,18 +120,20 @@ const lineExpressionCount = (list: List) => {
   return count;
 };
 
-const elideListContents = (list: List, indentLevel: number): List => {
+const removeWhitespaceFromList = (list: List, indentLevel: number): List => {
   consumeLeadingWhitespace(list);
-  const transformed = new List({
-    ...list.context,
-    value: [elideParens(list, { indentLevel })],
-  });
+  return list
+    .map((expr) => {
+      if (expr.isList()) {
+        return removeWhitespaceFromList(expr, indentLevel);
+      }
 
-  if (transformed.value.length === 1 && transformed.first()?.isList()) {
-    return transformed.first() as List;
-  }
-
-  return transformed;
+      return expr;
+    })
+    .filter((expr) => {
+      if (expr.isWhitespace()) return false;
+      return true;
+    });
 };
 
 const nextExprIndentLevel = (list: List, startIndex?: number) => {
