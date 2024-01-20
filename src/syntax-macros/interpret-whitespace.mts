@@ -1,8 +1,7 @@
 import { Expr, List } from "../lib/syntax/index.mjs";
-import { isGreedyOp } from "./greedy-ops.mjs";
 import { isContinuationOp } from "./infix.mjs";
 
-export const parentheticalElision = (list: List): List => {
+export const interpretWhitespace = (list: List): List => {
   const transformed = new List({ ...list.context });
 
   while (list.hasChildren) {
@@ -69,22 +68,6 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
   }
 
   return transformed;
-};
-
-const nextLineIndentLevel = (list: List) => {
-  const index = list.findIndex(isNewline);
-  if (index === -1) return 0;
-  return nextExprIndentLevel(list, index);
-};
-
-const lineExpressionCount = (list: List) => {
-  let count = 0;
-  for (const expr of list.value) {
-    if (expr.isWhitespace() && !expr.isNewline) continue;
-    if (isNewline(expr)) break;
-    count += 1;
-  }
-  return count;
 };
 
 const removeWhitespaceFromList = (list: List, indentLevel: number): List => {
