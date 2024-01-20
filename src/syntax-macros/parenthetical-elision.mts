@@ -25,10 +25,11 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
   const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;
 
   const consumeChildExpr = () => {
-    const indentLevel = nextExprIndentLevel(list);
-    consumeLeadingWhitespace(list);
-    if (hasContinuation(list, transformed)) return;
-    transformed.push(elideParens(list, { indentLevel }) as List);
+    const child = new List({ value: ["block"] });
+    while (nextExprIndentLevel(list) > indentLevel) {
+      child.push(elideParens(list, { indentLevel: indentLevel + 1 }));
+    }
+    transformed.push(child);
   };
 
   consumeLeadingWhitespace(list);
