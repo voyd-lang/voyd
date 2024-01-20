@@ -4,7 +4,7 @@ import { processGreedyOps } from "./greedy-ops.mjs";
 import { infix } from "./infix.mjs";
 import { macro } from "./macro.mjs";
 import { moduleSyntaxMacro } from "./module.mjs";
-import { parentheticalElision } from "./parenthetical-elision.mjs";
+import { parentheticalElision } from "./interpret-whitespace.mjs";
 import { typeAnalysis } from "./type-analysis/index.mjs";
 import { SyntaxMacro } from "./types.mjs";
 
