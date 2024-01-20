@@ -73,6 +73,14 @@ npm i -g voidc
 voidc path/to/code.void
 ```
 
+**Requirements**
+
+Currently requires node v22 nightly
+
+```
+fnm --node-dist-mirror https://nodejs.org/download/nightly install v22
+```
+
 # Overview
 
 ## Comments

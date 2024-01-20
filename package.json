@@ -5,8 +5,7 @@
   "module": "dist/index.mjs",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "debug-parser": "voidc --ast test.dm",
+    "test": "node --test",
     "prepublishOnly": "tsc"
   },
   "bin": {
@@ -19,11 +18,9 @@
     "@typescript-eslint/eslint-plugin": "^4.4.0",
     "@typescript-eslint/parser": "^4.4.0",
     "eslint": "^7.10.0",
-    "mocha": "^10.1.0",
     "typescript": "^4.9.3"
   },
   "dependencies": {
-    "@types/mocha": "^7.0.2",
     "@types/node": "^18.11.9",
     "@types/uniqid": "^4.1.3",
     "binaryen": "^111.0.0",

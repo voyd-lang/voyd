@@ -7,6 +7,7 @@ import { moduleSyntaxMacro } from "./module.mjs";
 import { interpretWhitespace } from "./interpret-whitespace.mjs";
 import { typeAnalysis } from "./type-analysis/index.mjs";
 import { SyntaxMacro } from "./types.mjs";
+import { deSugarSyntaxMacros } from "./desugar.mjs";
 
 export const getSyntaxMacros = (): SyntaxMacro[] => {
   // This is smelly, but will have to do until I figure out a better structure for this.
@@ -20,14 +21,6 @@ export const getSyntaxMacros = (): SyntaxMacro[] => {
 
   return standardSyntaxMacros;
 };
-
-/** Caution: Order matters */
-const deSugarSyntaxMacros: SyntaxMacro[] = [
-  functionalNotation,
-  interpretWhitespace,
-  processGreedyOps,
-  (ast) => infix(ast),
-];
 
 const macroPhaseSyntaxMacros: SyntaxMacro[] = [
   ...deSugarSyntaxMacros,
