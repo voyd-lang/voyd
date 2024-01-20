@@ -1,3 +1,15 @@
+# Today
+
+- [ ] Support isolated named arguments
+- [ ] Cleanup parenthetical elision code, make it more functional if possible
+
+
+# High Level
+
+- Audit code base for side effects, style, and functional purity
+- Remove invisible dependencies from getConfig function, pass arguments explicitly (i.e. from importRootModule etc)
+- Support whitespace curly block syntax
+- Support whitespace curly block syntax inside of strings / string interpolation
 - Add jest tests for parsing phase
 - Repair macro syntax macro
 - Repair type system
