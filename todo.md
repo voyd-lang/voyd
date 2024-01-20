@@ -1,6 +1,6 @@
 # Today
 
-- [ ] Support isolated named arguments
+- [ ] UNIT TESTS FOR INTERPRET WHITESPACE!!!
 - [ ] Cleanup parenthetical elision code, make it more functional if possible
 
 

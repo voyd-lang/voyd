@@ -19,6 +19,7 @@ export const processGreedyOps = (list: List) => {
     if (isGreedyOp(next)) {
       transformed.push(next);
       const consumed = processGreedyOps(list);
+      consumed.insert("block", 0);
       transformed.push(consumed);
       continue;
     }

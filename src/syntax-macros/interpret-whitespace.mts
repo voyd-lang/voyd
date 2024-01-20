@@ -23,12 +23,36 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
 
   const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;
 
-  const consumeChildExpr = () => {
-    const child = new List({ value: ["block"] });
+  const consumeChildren = () => {
+    const children = new List({ value: [] });
+
     while (nextExprIndentLevel(list) > indentLevel) {
-      child.push(elideParens(list, { indentLevel: indentLevel + 1 }));
+      const child = elideParens(list, { indentLevel: indentLevel + 1 });
+
+      const olderSibling = children.at(-1);
+      if (
+        isNamedParameter(child) &&
+        olderSibling?.isList() &&
+        !isNamedParameter(olderSibling)
+      ) {
+        olderSibling.push(child);
+        continue;
+      }
+
+      children.push(child);
     }
-    transformed.push(child);
+
+    return children;
+  };
+
+  const pushChildren = (child: List) => {
+    if (isListOfNamedParameters(child)) {
+      transformed.push(...child.value);
+      return;
+    }
+
+    transformed.push(["block", ...child.value]);
+    return;
   };
 
   consumeLeadingWhitespace(list);
@@ -37,7 +61,8 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
 
     const isNewline = next?.isWhitespace() && next.isNewline;
     if (isNewline && nextLineHasChildExpr()) {
-      consumeChildExpr();
+      const child = consumeChildren();
+      pushChildren(child);
       continue;
     }
 
@@ -137,3 +162,26 @@ const consumeLeadingWhitespace = (list: List) => {
 
 const isNewline = (v: Expr) => v.isWhitespace() && v.isNewline;
 const isTab = (v: Expr) => v.isWhitespace() && v.isTab;
+
+const isListOfNamedParameters = (v: Expr) => {
+  return v.isList() && v.value.every((v) => isNamedParameter(v));
+};
+
+const isNamedParameter = (v: Expr) => {
+  if (!v.isList()) return false;
+
+  const identifier = v.at(0);
+  const colon = v.at(1);
+
+  // First value should be an identifier
+  if (!identifier?.isIdentifier()) {
+    return false;
+  }
+
+  // Second value should be an identifier whose value is a colon
+  if (!(colon?.isIdentifier() && colon.is(":"))) {
+    return false;
+  }
+
+  return true;
+};

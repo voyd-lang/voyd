@@ -8,7 +8,7 @@ export class Identifier extends Syntax {
   readonly syntaxType = "identifier";
   /** Is surrounded by single quotes, allows identifiers to have spaces */
   readonly isQuoted?: boolean;
-  /** The actual string ID of the identifier */
+  /** The given name of the identifier */
   value: string;
 
   constructor(
