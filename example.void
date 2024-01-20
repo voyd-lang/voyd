@@ -1,18 +1,24 @@
-fn fib(n: i32 x: i32)
-	if (x = 3)
-		x = 3 + 5 = 2
-	let x =
-		test()
-		me()
-	if x < 3
-		then:
-			bloop()
-			bleep()
-		else:
-			blop()
+fn fib(n: i32) -> i32
+	if n <= 1 then:
+		n
+	else:
+		fib(n - 1) + fib(n - 2)
 
 fn main()
-	let b = B { abba: 5.8, b: 3 }
-	let a = A { a: 1, b: b }
-	a.b.abba = 145.2
-	a.b.abba
+	let x = 10 +
+		20 +
+		30
+
+	do me while () => if x > 10
+		then:
+			x -= 1
+		else:
+			x += 1
+
+	let n = if args.len() > 1 then:
+		console.log("Hey there!")
+		args.at(1).parseInt().unwrap()
+	else:
+		10
+
+	let result = fib(n)
