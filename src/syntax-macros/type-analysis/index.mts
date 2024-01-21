@@ -9,7 +9,7 @@ const typePhases: SyntaxMacro[] = [
   inferTypes,
 ];
 
-export const typeAnalysis: SyntaxMacro = (list, info) => {
+export const typeCheck: SyntaxMacro = (list, info) => {
   if (!info.isRoot) return list;
   return typePhases.reduce((ast, macro) => macro(ast, info), list);
 };

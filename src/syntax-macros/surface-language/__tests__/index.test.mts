@@ -1,12 +1,12 @@
 import { describe, it } from "node:test";
-import { parse } from "../../parser.mjs";
-import { voidFile } from "../../__tests__/fixtures/void-file.mjs";
-import { desugar } from "../desugar.mjs";
 import assert from "assert";
 import { desugarredAst } from "./fixtures/desugarred-ast.mjs";
+import { parse } from "../../../parser.mjs";
+import { voidFile } from "../../../__tests__/fixtures/void-file.mjs";
+import { desugar } from "../../index.mjs";
 
-describe("desugar", () => {
-  it("should desugar the example file", async () => {
+describe("surface language macros", () => {
+  it("should transform the surface language to the core language", async () => {
     const parserOutput = parse(voidFile);
 
     const result = JSON.parse(

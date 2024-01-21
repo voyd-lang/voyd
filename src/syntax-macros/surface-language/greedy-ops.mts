@@ -1,4 +1,4 @@
-import { Expr, Identifier, List } from "../lib/syntax/index.mjs";
+import { Expr, Identifier, List } from "../../lib/syntax/index.mjs";
 
 export const greedyOps = new Set(["=>", "=", "<|", ";"]);
 export const isGreedyOp = (expr?: Expr): expr is Identifier => {
