@@ -1,5 +1,5 @@
 import { getConfig } from "../config/index.mjs";
-import { macro } from "./macro.mjs";
+import { macro } from "./function-macros.mjs";
 import { moduleSyntaxMacro } from "./module.mjs";
 import { typeCheck } from "./type-analysis/index.mjs";
 import { SyntaxMacro } from "./types.mjs";
