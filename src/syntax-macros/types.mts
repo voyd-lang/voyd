@@ -1,4 +1,4 @@
 import { List } from "../lib/index.mjs";
-import { ModuleInfo } from "../lib/module-info.mjs";
 
-export type SyntaxMacro = (list: List, module: ModuleInfo) => List;
+/** Takes the whole ast, returns a transformed version of the whole ast */
+export type SyntaxMacro = (list: List) => List;

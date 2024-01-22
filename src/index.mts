@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { stdout } from "process";
 import { getConfig } from "./config/index.mjs";
-import { importRootModule, parseFile } from "./import-module.mjs";
 import { genWasmCode } from "./wasm-code-gen.mjs";
 import { run } from "./run.mjs";
 
@@ -14,7 +13,11 @@ function main() {
   }
 
   const root = importRootModule();
-  if (config.emitSyntaxAst || config.emitDeSugaredAst || config.emitPostMacroAst) {
+  if (
+    config.emitSyntaxAst ||
+    config.emitDeSugaredAst ||
+    config.emitPostMacroAst
+  ) {
     console.log(JSON.stringify(root, undefined, 2));
     return;
   }

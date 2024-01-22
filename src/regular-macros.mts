@@ -1,5 +1,4 @@
-import { ModuleInfo } from "../lib/module-info.mjs";
-import { getIdStr } from "../lib/syntax/get-id-str.mjs";
+import { getIdStr } from "./lib/syntax/get-id-str.mjs";
 import {
   Bool,
   Expr,
@@ -8,18 +7,12 @@ import {
   Int,
   List,
   StringLiteral,
-} from "../lib/syntax/index.mjs";
-import { MacroLambda } from "../lib/syntax/macro-lambda.mjs";
-import { MacroVariable } from "../lib/syntax/macro-variable.mjs";
-import { Macro, RegularMacro } from "../lib/syntax/macros.mjs";
+} from "./lib/syntax/index.mjs";
+import { MacroLambda } from "./lib/syntax/macro-lambda.mjs";
+import { MacroVariable } from "./lib/syntax/macro-variable.mjs";
+import { Macro, RegularMacro } from "./lib/syntax/macros.mjs";
 
-/** Transforms macro's into their final form and then runs them */
-export const macro = (list: List, info: ModuleInfo): List => {
-  if (!info.isRoot) return list;
-  return expandMacros(list) as List;
-};
-
-const expandMacros = (expr: Expr): Expr => {
+export const expandRegularMacros = (expr: Expr): Expr => {
   if (!expr.isList()) return expr;
   if (expr.calls("export")) return evalExport(expr);
   if (expr.calls("macro")) return evalMacroDef(expr);
@@ -27,19 +20,19 @@ const expandMacros = (expr: Expr): Expr => {
 
   const identifier = expr.first();
   if (!identifier?.isIdentifier()) {
-    return expr.map(expandMacros);
+    return expr.map(expandRegularMacros);
   }
 
   const macro = identifier.resolveAsMacroEntity();
   if (macro?.syntaxType === "macro") {
-    return expandMacros(expandMacro(macro, expr));
+    return expandRegularMacros(expandMacro(macro, expr));
   }
 
-  return expr.map(expandMacros);
+  return expr.map(expandRegularMacros);
 };
 
 const evalExport = (list: List) => {
-  const value = expandMacros(list.at(1)!);
+  const value = expandRegularMacros(list.at(1)!);
   if (value.isMacro()) {
     list.parent?.registerEntity(value);
   }
@@ -66,7 +59,7 @@ const listToMacro = (list: List): Macro => {
   const signature = list.listAt(0);
   const name = signature.identifierAt(0);
   const parameters = signature.rest() as Identifier[];
-  const body = list.slice(1).map(expandMacros);
+  const body = list.slice(1).map(expandRegularMacros);
   const macro = new RegularMacro({
     ...list.context,
     name,
@@ -312,7 +305,7 @@ const functions: Record<string, MacroFn | undefined> = {
       ...args.context,
     });
   },
-  "expand-macros": (args) => expandMacros(args.at(0)!),
+  "expand-macros": (args) => expandRegularMacros(args.at(0)!),
   "char-to-code": (args) =>
     new Int({
       value: String((args.at(0) as StringLiteral).value).charCodeAt(0),

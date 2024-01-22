@@ -3,7 +3,7 @@ import assert from "assert";
 import { desugarredAst } from "./fixtures/desugarred-ast.mjs";
 import { parse } from "../../../parser.mjs";
 import { voidFile } from "../../../__tests__/fixtures/void-file.mjs";
-import { desugar } from "../../index.mjs";
+import { surfaceLanguage } from "../index.mjs";
 
 describe("surface language macros", () => {
   it("should transform the surface language to the core language", async () => {
@@ -11,7 +11,7 @@ describe("surface language macros", () => {
 
     const result = JSON.parse(
       JSON.stringify(
-        desugar(parserOutput, {
+        surfaceLanguage(parserOutput, {
           moduleId: "",
           path: "",
           srcPath: "",

@@ -1,4 +1,4 @@
-import { List, ModuleInfo } from "../../lib/index.mjs";
+import { List } from "../../lib/index.mjs";
 import { functionalNotation } from "./functional-notation.mjs";
 import { processGreedyOps } from "./greedy-ops.mjs";
 import { infix } from "./infix.mjs";
@@ -14,5 +14,5 @@ const surfaceLanguageMacros: SyntaxMacro[] = [
 ];
 
 /** Transforms the surface language into the core language */
-export const surfaceLanguageMacro = (parserOutput: List, info: ModuleInfo) =>
-  surfaceLanguageMacros.reduce((ast, macro) => macro(ast, info), parserOutput);
+export const surfaceLanguage = (parserOutput: List) =>
+  surfaceLanguageMacros.reduce((ast, macro) => macro(ast), parserOutput);
