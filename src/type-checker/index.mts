@@ -1,4 +1,3 @@
-import { SyntaxMacro } from "../types.mjs";
 import { inferTypes } from "./infer-types.mjs";
 import { initPrimitiveTypes } from "./init-primitive-types.mjs";
 import { registerAnnotatedTypes } from "./register-annotated-types.mjs";

@@ -18,16 +18,14 @@ import {
   Block,
   Call,
   Variable,
-} from "../../lib/index.mjs";
-import { getIdStr } from "../../lib/syntax/get-id-str.mjs";
-import { FnEntity } from "../../lib/syntax/lexical-context.mjs";
-import { SyntaxMacro } from "../types.mjs";
+} from "../syntax-objects/index.mjs";
+import { getIdStr } from "../syntax-objects/get-id-str.mjs";
+import { FnEntity } from "../syntax-objects/lexical-context.mjs";
 import { isPrimitiveFn } from "./lib/is-primitive-fn.mjs";
 
 const modules = new Map<string, List>();
 
-export const inferTypes: SyntaxMacro = (list): List =>
-  inferExprTypes(list) as List;
+export const inferTypes = (list: List): List => inferExprTypes(list) as List;
 
 const inferExprTypes = (expr: Expr | undefined): Expr => {
   if (!expr) return noop();

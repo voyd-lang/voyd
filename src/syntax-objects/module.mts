@@ -1,4 +1,5 @@
 import { Expr } from "./expr.mjs";
+import { Id } from "./identifier.mjs";
 import { List } from "./list.mjs";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 
@@ -28,5 +29,19 @@ export class VoidModule extends NamedEntity {
 
   toJSON() {
     return ["module", this.id, this.ast];
+  }
+
+  /** Must not be recursive / search parents. */
+  resolveChildModule(name: Id): VoidModule | undefined {
+    return this.lexicon.resolveModuleEntity(name);
+  }
+
+  resolveNestedModule(path: Id[]): VoidModule | undefined {
+    const [id, ...rest] = path;
+    if (!id) return;
+    const module = this.resolveChildModule(id);
+    if (!module) return;
+    if (!rest.length) return module;
+    return module.resolveNestedModule(rest);
   }
 }

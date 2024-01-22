@@ -32,7 +32,7 @@ export class LexicalContext {
   private readonly globals: Map<string, Global> = new Map();
   private readonly macroVars: Map<string, MacroVariable> = new Map();
   private readonly macros: Map<string, Macro> = new Map();
-  private readonly nodules: Map<string, VoidModule> = new Map();
+  private readonly modules: Map<string, VoidModule> = new Map();
 
   registerEntity(entity: Entity) {
     const idStr = getIdStr(entity.name);
@@ -74,6 +74,11 @@ export class LexicalContext {
       return;
     }
 
+    if (entity.syntaxType === "module") {
+      this.modules.set(idStr, entity);
+      return;
+    }
+
     throw new Error(
       `Unrecognized entity ${entity}, name: ${(entity as any)?.name}`
     );
@@ -94,6 +99,11 @@ export class LexicalContext {
   resolveMacroEntity(name: Id): MacroEntity | undefined {
     const idStr = getIdStr(name);
     return this.macroVars.get(idStr);
+  }
+
+  resolveModuleEntity(name: Id): VoidModule | undefined {
+    const idStr = getIdStr(name);
+    return this.modules.get(idStr);
   }
 
   resolveFns(name: Id): FnEntity[] {

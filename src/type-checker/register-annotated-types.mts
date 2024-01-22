@@ -1,8 +1,15 @@
-import { Expr, List, Type, Fn, Parameter, ExternFn } from "../../lib/index.mjs";
+import {
+  Expr,
+  List,
+  Type,
+  Fn,
+  Parameter,
+  ExternFn,
+} from "../syntax-objects/index.mjs";
 import { SyntaxMacro } from "../types.mjs";
 
 /** Registers any explicitly type annotated values */
-export const registerAnnotatedTypes: SyntaxMacro = (list) => {
+export const registerAnnotatedTypes = (list: List) => {
   scanAnnotatedTypes(list);
   return list;
 };
