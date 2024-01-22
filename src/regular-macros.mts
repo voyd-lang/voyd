@@ -1,4 +1,4 @@
-import { getIdStr } from "./lib/syntax/get-id-str.mjs";
+import { getIdStr } from "./syntax-objects/get-id-str.mjs";
 import {
   Bool,
   Expr,
@@ -7,10 +7,11 @@ import {
   Int,
   List,
   StringLiteral,
-} from "./lib/syntax/index.mjs";
-import { MacroLambda } from "./lib/syntax/macro-lambda.mjs";
-import { MacroVariable } from "./lib/syntax/macro-variable.mjs";
-import { Macro, RegularMacro } from "./lib/syntax/macros.mjs";
+  MacroLambda,
+  Macro,
+  RegularMacro,
+  MacroVariable,
+} from "./syntax-objects/index.mjs";
 
 export const expandRegularMacros = (expr: Expr): Expr => {
   if (!expr.isList()) return expr;
