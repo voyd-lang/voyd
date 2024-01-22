@@ -16,6 +16,7 @@ import { MacroLambda } from "./macro-lambda.mjs";
 import { Call } from "./call.mjs";
 import { ExternFn } from "./extern-fn.mjs";
 import { Block } from "./block.mjs";
+import { VoidModule } from "./module.mjs";
 
 export type Expr =
   | Bool
@@ -34,5 +35,6 @@ export type Expr =
   | Global
   | MacroVariable
   | MacroLambda
+  | VoidModule
   | Call
   | Block;

@@ -8,6 +8,7 @@ import type { Fn } from "./fn.mjs";
 import type { Global } from "./global.mjs";
 import type { Id, Identifier } from "./identifier.mjs";
 import type { Int } from "./int.mjs";
+import type { VoidModule } from "./module.mjs";
 import {
   Entity,
   FnEntity,
@@ -194,6 +195,10 @@ export abstract class Syntax {
 
   isMacroLambda(): this is MacroLambda {
     return this.isExpr() && this.syntaxType === "macro-lambda";
+  }
+
+  isModule(): this is VoidModule {
+    return this.isExpr() && this.syntaxType === "module";
   }
 
   isCall(): this is Call {

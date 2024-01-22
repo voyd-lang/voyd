@@ -16,3 +16,4 @@ export * from "./parameter.mjs";
 export * from "./extern-fn.mjs";
 export * from "./block.mjs";
 export * from "./call.mjs";
+export * from "./module.mjs";

@@ -8,6 +8,7 @@ import type { Global } from "./global.mjs";
 import { MacroVariable } from "./macro-variable.mjs";
 import { Macro } from "./macros.mjs";
 import { ExternFn } from "./extern-fn.mjs";
+import { VoidModule } from "./module.mjs";
 
 export type Entity =
   | FnEntity
@@ -15,7 +16,8 @@ export type Entity =
   | Variable
   | Parameter
   | Global
-  | MacroEntity;
+  | MacroEntity
+  | VoidModule;
 
 export type MacroEntity = Macro | MacroVariable;
 
@@ -30,6 +32,7 @@ export class LexicalContext {
   private readonly globals: Map<string, Global> = new Map();
   private readonly macroVars: Map<string, MacroVariable> = new Map();
   private readonly macros: Map<string, Macro> = new Map();
+  private readonly nodules: Map<string, VoidModule> = new Map();
 
   registerEntity(entity: Entity) {
     const idStr = getIdStr(entity.name);
