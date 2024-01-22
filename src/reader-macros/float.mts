@@ -1,4 +1,4 @@
-import { Float } from "../lib/syntax/index.mjs";
+import { Float } from "../syntax-objects/index.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const floatMacro: ReaderMacro = {

@@ -1,4 +1,4 @@
-import { noop } from "../lib/index.mjs";
+import { noop } from "../syntax-objects/index.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const comment: ReaderMacro = {

@@ -28,7 +28,12 @@ export class VoidModule extends NamedEntity {
   }
 
   toJSON() {
-    return ["module", this.id, this.ast];
+    return ["module", this.name, this.ast];
+  }
+
+  pushChildModule(module: VoidModule) {
+    this.registerEntity(module);
+    this.ast.push(module);
   }
 
   /** Must not be recursive / search parents. */

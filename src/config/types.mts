@@ -1,12 +1,12 @@
 export type VoidConfig = {
   /** Write raw parser AST to stdout */
   emitParserAst?: boolean;
-  /** Write de-sugared AST to stdout */
-  emitDeSugaredAst?: boolean;
-  /** Write post-macro AST to stdout */
-  emitPostMacroAst?: boolean;
-  /** Write syntax SDT to stdout */
-  emitSyntaxAst?: boolean;
+  /** Write desurfaced AST to stdout */
+  emitCoreAst?: boolean;
+  /** Emit full AST with all resolved file modules */
+  emitModuleAst?: boolean;
+  /** Emit ast with regular macros expanded */
+  emitMacroAst?: boolean;
   /** Write wasm bytecode to stdout */
   emitWasm?: boolean;
   /** Write wasm bytecode to stdout (binaryen flavor) */

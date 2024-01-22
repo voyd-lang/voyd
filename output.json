@@ -1,90 +1,1137 @@
-{
-  "ast": [
+[
+  "module",
+  "root",
+  [
     [
-      "fn",
-      ["fib", [":", "n", "i32"]],
-      "->",
-      "i32",
+      "module",
+      "src",
       [
-        "block",
         [
-          "if",
-          ["<=", "n", 1],
-          [":", "then", ["block", "n"]],
+          "module",
+          "example",
           [
-            ":",
-            "else",
-            ["block", ["+", ["fib", ["-", "n", 1]], ["fib", ["-", "n", 2]]]]
+            [
+              "fn",
+              ["fib", [":", "n", "i32"]],
+              "->",
+              "i32",
+              [
+                "block",
+                [
+                  "if",
+                  ["<=", "n", 1],
+                  [":", "then", ["block", "n"]],
+                  [
+                    ":",
+                    "else",
+                    [
+                      "block",
+                      ["+", ["fib", ["-", "n", 1]], ["fib", ["-", "n", 2]]]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "fn",
+              ["main"],
+              [
+                "block",
+                [
+                  "let",
+                  ["=", "x", ["block", ["+", 10, ["block", ["+", 20, 30]]]]]
+                ],
+                [
+                  "let",
+                  [
+                    "=",
+                    "y",
+                    [
+                      "block",
+                      "if",
+                      [">", "x", 10],
+                      [":", "then", ["block", 10]],
+                      [":", "else", ["block", 20]]
+                    ]
+                  ]
+                ],
+                [
+                  "do",
+                  "me",
+                  "while",
+                  [
+                    "=>",
+                    [],
+                    [
+                      "block",
+                      "if",
+                      [">", "x", 10],
+                      [":", "then", ["block", ["-=", "x", 1]]],
+                      [":", "else", ["block", ["+=", "x", 1]]]
+                    ]
+                  ]
+                ],
+                [
+                  "let",
+                  [
+                    "=",
+                    "n",
+                    [
+                      "block",
+                      "if",
+                      [">", ["len", "args"], 1],
+                      [
+                        ":",
+                        "then",
+                        [
+                          "block",
+                          ["log", "console", ["string", "Hey there!"]],
+                          ["unwrap", ["parseInt", ["at", "args", 1]]]
+                        ]
+                      ],
+                      [":", "else", ["block", 10]]
+                    ]
+                  ]
+                ],
+                ["let", ["=", "result", ["block", ["fib", "n"]]]]
+              ]
+            ]
           ]
         ]
       ]
     ],
     [
-      "fn",
-      ["main"],
+      "module",
+      "std",
       [
-        "block",
-        ["let", ["=", "x", ["block", ["+", 10, ["block", ["+", 20, 30]]]]]],
         [
-          "let",
+          "module",
+          "utils",
           [
-            "=",
-            "y",
+            ["use", "dir/macros", "***"],
             [
-              "block",
-              "if",
-              [">", "x", 10],
-              [":", "then", ["block", 10]],
-              [":", "else", ["block", 20]]
+              "pub",
+              "extern-fn",
+              "utils",
+              ["log", [":", "val", "i32"]],
+              "->",
+              "void"
+            ],
+            [
+              "pub",
+              "extern-fn",
+              "utils",
+              ["log", [":", "val", "f32"]],
+              "->",
+              "void"
+            ],
+            [
+              "pub",
+              "extern-fn",
+              "utils",
+              ["log", [":", "val", "f64"]],
+              "->",
+              "void"
+            ],
+            [
+              "pub",
+              "extern-fn",
+              "utils",
+              ["log", [":", "val", "i64"]],
+              "->",
+              "void"
             ]
           ]
         ],
         [
-          "do",
-          "me",
-          "while",
+          "module",
+          "string",
           [
-            "=>",
-            [],
+            ["use", "std/macros", "***"],
+            ["type", ["=", "String", ["block", "i32"]]],
+            ["extern-fn", "strings", ["alloc-string"], "->", "String"],
             [
-              "block",
-              "if",
-              [">", "x", 10],
-              [":", "then", ["block", ["-=", "x", 1]]],
-              [":", "else", ["block", ["+=", "x", 1]]]
-            ]
-          ]
-        ],
-        [
-          "let",
-          [
-            "=",
-            "n",
+              "extern-fn",
+              "strings",
+              ["de-alloc-string", [":", "str", "String"]],
+              "->",
+              "void"
+            ],
             [
-              "block",
-              "if",
-              [">", ["len", "args"], 1],
+              "extern-fn",
+              "strings",
+              ["str-len", [":", "str", "String"]],
+              "->",
+              "i32"
+            ],
+            [
+              "extern-fn",
+              "strings",
               [
-                ":",
-                "then",
+                "get-char-code-from-string",
+                [":", "charIndex", "i32"],
+                [":", "str", "String"]
+              ],
+              "->",
+              "i32"
+            ],
+            [
+              "extern-fn",
+              "strings",
+              [
+                "add-char-code-to-string",
+                [":", "char", "i32"],
+                [":", "str", "String"]
+              ],
+              "->",
+              "void"
+            ],
+            [
+              "extern-fn",
+              "strings",
+              ["print-str", [":", "str", "String"]],
+              "->",
+              "void"
+            ],
+            [
+              "extern-fn",
+              "strings",
+              ["str-equals", [":", "a", "String"], [":", "b", "String"]],
+              "->",
+              "void"
+            ],
+            [
+              "extern-fn",
+              "strings",
+              [
+                "str-starts-with",
+                [":", "str", "String"],
+                [":", "startsWith", "String"]
+              ],
+              "->",
+              "void"
+            ],
+            [
+              "extern-fn",
+              "strings",
+              [
+                "str-ends-with",
+                [":", "str", "String"],
+                [":", "endsWith", "String"]
+              ],
+              "->",
+              "void"
+            ],
+            [
+              "extern-fn",
+              "strings",
+              [
+                "str-includes",
+                [":", "str", "String"],
+                [":", "includes", "String"]
+              ],
+              "->",
+              "void"
+            ],
+            [
+              "extern-fn",
+              "strings",
+              [
+                "str-test",
+                [":", "str", "String"],
+                [":", "regex", "String"],
+                [":", "flags", "String"]
+              ],
+              "->",
+              "void"
+            ],
+            [
+              "pub",
+              "macro",
+              ["string", "str"],
+              [
+                "block",
+                [
+                  "let",
+                  [
+                    "=",
+                    "add-codes",
+                    [
+                      "block",
+                      ["map", ["split", "str", ["string", ""]]],
+                      [
+                        "=>",
+                        ["char"],
+                        [
+                          "block",
+                          [
+                            "block",
+                            [
+                              "`",
+                              "add-char-code-to-string",
+                              ["$", "char-to-code", "char"],
+                              "index"
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "macro-expand",
+                  [
+                    "block",
+                    [
+                      "`",
+                      "block",
+                      [
+                        "block",
+                        [
+                          "let",
+                          [
+                            "=",
+                            [":", "index", "String"],
+                            ["block", ["alloc-string"]]
+                          ]
+                        ],
+                        "$@add-codes",
+                        "index"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "module",
+          "operators",
+          [
+            ["pub", ["def-wasm-operator", "<", "lt_s", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", ">", "gt_s", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", "<=", "le_s", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", ">=", "ge_s", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", "==", "eq", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", "and", "and", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", "or", "or", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", "xor", "xor", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", "not", "ne", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", "+", "add", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", "-", "sub", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", "*", "mul", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", "/", "div_s", "i32", "i32"]],
+            ["pub", ["def-wasm-operator", "<", "lt", "f32", "i32"]],
+            ["pub", ["def-wasm-operator", ">", "gt", "f32", "i32"]],
+            ["pub", ["def-wasm-operator", "<=", "le", "f32", "i32"]],
+            ["pub", ["def-wasm-operator", ">=", "ge", "f32", "i32"]],
+            ["pub", ["def-wasm-operator", "==", "eq", "f32", "i32"]],
+            ["pub", ["def-wasm-operator", "not", "ne", "f32", "i32"]],
+            ["pub", ["def-wasm-operator", "+", "add", "f32", "f32"]],
+            ["pub", ["def-wasm-operator", "-", "sub", "f32", "f32"]],
+            ["pub", ["def-wasm-operator", "*", "mul", "f32", "f32"]],
+            ["pub", ["def-wasm-operator", "/", "div", "f32", "f32"]]
+          ]
+        ],
+        [
+          "module",
+          "memory",
+          [
+            ["use", "dir/macros", "***"],
+            ["use", "dir/operators", "***"],
+            ["use", "dir/utils", "***"],
+            ["global", "let", ["=", "header-size", ["block", 8]]],
+            ["global", "let", ["=", "size-index", ["block", 0]]],
+            ["global", "let", ["=", "type-index", ["block", 4]]],
+            ["global", "var", ["=", "stack-pointer", ["block", 0]]],
+            [
+              "pub",
+              "fn",
+              ["alloc", [":", "size", "i32"]],
+              "->",
+              "i32",
+              [
+                "block",
+                ["ensure-space", "size"],
+                ["let", ["=", "address", ["block", "stack-pointer"]]],
+                [
+                  "=",
+                  "stack-pointer",
+                  [
+                    "block",
+                    ["+", ["+", "stack-pointer", "size"], "header-size"]
+                  ]
+                ],
+                [
+                  "bnr",
+                  ["i32", "store", "void"],
+                  [["`", 0], ["`", 2], "address", ["+", "size", "header-size"]]
+                ],
+                "address"
+              ]
+            ],
+            [
+              "pub",
+              "fn",
+              ["copy", [":", "src", "i32"], [":", "dest", "i32"]],
+              "->",
+              "i32",
+              [
+                "block",
+                [
+                  "bnr",
+                  ["memory", "copy", "void"],
+                  ["dest", "src", ["size", "src"]]
+                ],
+                "dest"
+              ]
+            ],
+            [
+              "pub",
+              "fn",
+              ["size", [":", "address", "i32"]],
+              "->",
+              "i32",
+              [
+                "block",
+                [
+                  "bnr",
+                  ["i32", "load", "i32"],
+                  [
+                    ["`", 0],
+                    ["`", 2],
+                    ["+", "size-index", "address"]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "fn",
+              ["set-return", [":", "return-address", "i32"]],
+              "->",
+              "i32",
+              [
+                "block",
+                [
+                  "=",
+                  "stack-pointer",
+                  ["block", ["+", "return-address", ["size", "return-address"]]]
+                ],
+                "return-address"
+              ]
+            ],
+            [
+              "pub",
+              "fn",
+              ["read-i32", [":", "address", "i32"], [":", "offset", "i32"]],
+              "->",
+              "i32",
+              [
+                "block",
+                [
+                  "bnr",
+                  ["i32", "load", "i32"],
+                  [
+                    ["`", 0],
+                    ["`", 2],
+                    ["+", ["+", "address", "offset"], "header-size"]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "fn",
+              [
+                "store-i32",
+                [":", "address", "i32"],
+                [":", "offset", "i32"],
+                [":", "value", "i32"]
+              ],
+              "->",
+              "void",
+              [
+                "block",
+                [
+                  "bnr",
+                  ["i32", "store", "i32"],
+                  [
+                    ["`", 0],
+                    ["`", 2],
+                    ["+", ["+", "address", "offset"], "header-size"],
+                    "value"
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "fn",
+              ["read-f32", [":", "address", "i32"], [":", "offset", "i32"]],
+              "->",
+              "f32",
+              [
+                "block",
+                [
+                  "bnr",
+                  ["f32", "load", "f32"],
+                  [
+                    ["`", 0],
+                    ["`", 2],
+                    ["+", ["+", "address", "offset"], "header-size"]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "fn",
+              [
+                "store-f32",
+                [":", "address", "i32"],
+                [":", "offset", "i32"],
+                [":", "value", "f32"]
+              ],
+              "->",
+              "void",
+              [
+                "block",
+                [
+                  "bnr",
+                  ["f32", "store", "f32"],
+                  [
+                    ["`", 0],
+                    ["`", 2],
+                    ["+", ["+", "address", "offset"], "header-size"],
+                    "value"
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "fn",
+              ["read-i64", [":", "address", "i32"], [":", "offset", "i32"]],
+              "->",
+              "i64",
+              [
+                "block",
+                [
+                  "bnr",
+                  ["i64", "load", "i64"],
+                  [
+                    ["`", 0],
+                    ["`", 2],
+                    ["+", ["+", "address", "offset"], "header-size"]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "fn",
+              [
+                "store-i64",
+                [":", "address", "i32"],
+                [":", "offset", "i32"],
+                [":", "value", "i64"]
+              ],
+              "->",
+              "void",
+              [
+                "block",
+                [
+                  "bnr",
+                  ["i64", "store", "i64"],
+                  [
+                    ["`", 0],
+                    ["`", 2],
+                    ["+", ["+", "address", "offset"], "header-size"],
+                    "value"
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "fn",
+              ["read-f64", [":", "address", "i32"], [":", "offset", "i32"]],
+              "->",
+              "f64",
+              [
+                "block",
+                [
+                  "bnr",
+                  ["f64", "load", "f64"],
+                  [
+                    ["`", 0],
+                    ["`", 2],
+                    ["+", ["+", "address", "offset"], "header-size"]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "fn",
+              [
+                "store-f64",
+                [":", "address", "i32"],
+                [":", "offset", "i32"],
+                [":", "value", "f64"]
+              ],
+              "->",
+              "void",
+              [
+                "block",
+                [
+                  "bnr",
+                  ["f64", "store", "f64"],
+                  [
+                    ["`", 0],
+                    ["`", 2],
+                    ["+", ["+", "address", "offset"], "header-size"],
+                    "value"
+                  ]
+                ]
+              ]
+            ],
+            [
+              "fn",
+              ["ensure-space", [":", "size", "i32"]],
+              "->",
+              "i32",
+              [
+                "block",
+                [
+                  "let",
+                  [
+                    "=",
+                    [":", "mem-size", "i32"],
+                    ["block", "bnr", ["memory", "size", "i32"]]
+                  ]
+                ],
+                [
+                  "if",
+                  [
+                    ">=",
+                    ["+", ["+", "stack-pointer", "size"], "header-size"],
+                    ["*", "mem-size", 65536]
+                  ],
+                  ["block", ["bnr", ["memory", "grow", "i32"], [1]], 0]
+                ]
+              ]
+            ]
+          ]
+        ],
+        [
+          "module",
+          "macros",
+          [
+            [
+              "export",
+              [
+                "block",
+                [
+                  "macro",
+                  ["pub"],
+                  [
+                    "block",
+                    ["define", "body", ["expand-macros", "&body"]],
+                    ["quote", "export", "&body"]
+                  ]
+                ]
+              ]
+            ],
+            ["pub", "macro", ["`"], ["block", ["quote", "quote", "$@&body"]]],
+            [
+              "pub",
+              "macro",
+              [":"],
+              [
+                "block",
+                ["define", "expr0", ["extract", "&body", 0]],
+                ["define", "expr1", ["extract", "&body", 1]],
+                ["`", "labeled-expr", "$expr0", "$expr1"]
+              ]
+            ],
+            [
+              "pub",
+              "macro",
+              ["let"],
+              [
+                "block",
+                ["define", "equals-expr", ["extract", "&body", 0]],
+                [
+                  "`",
+                  "define",
+                  [
+                    "block",
+                    ["$", "extract", "equals-expr", 1],
+                    ["$", "extract", "equals-expr", 2]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "macro",
+              ["var"],
+              [
+                "block",
+                ["define", "equals-expr", ["extract", "&body", 0]],
+                [
+                  "`",
+                  "define-mut",
+                  [
+                    "block",
+                    ["$", "extract", "equals-expr", 1],
+                    ["$", "extract", "equals-expr", 2]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "macro",
+              ["global"],
+              [
+                "block",
+                ["let", ["=", "mutability", ["block", "extract", "&body", 0]]],
+                ["let", ["=", "equals-expr", ["block", "extract", "&body", 1]]],
+                [
+                  "let",
+                  [
+                    "=",
+                    "function",
+                    [
+                      "block",
+                      "if",
+                      ["==", "mutability", ["string", "let"]],
+                      [
+                        "block",
+                        ["`", "define-global"],
+                        ["`", "define-mut-global"]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "`",
+                  "$@function",
+                  [
+                    "block",
+                    ["$", "extract", "equals-expr", 1],
+                    ["$", "extract", ["extract", "equals-expr", 2], 1]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "macro",
+              [";"],
+              [
+                "block",
+                ["let", ["=", "func", ["block", ["extract", "&body", 0]]]],
+                ["let", ["=", "body", ["block", ["extract", "&body", 1]]]],
+                [
+                  "let",
+                  [
+                    "=",
+                    "args",
+                    [
+                      "block",
+                      "if",
+                      ["==", ["extract", "body", 0], ["string", "block"]],
+                      ["block", ["slice", "body", 1], "body"]
+                    ]
+                  ]
+                ],
+                [
+                  "if",
+                  ["is-list", "func"],
+                  [
+                    "block",
+                    ["concat", "func", "args"],
+                    ["concat", ["`", "$func"], "args"]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "macro",
+              ["lambda"],
+              [
+                "block",
+                [
+                  "let",
+                  ["=", "parameters", ["block", ["extract", "&body", 0]]]
+                ],
+                ["let", ["=", "body", ["block", ["extract", "&body", 1]]]],
+                ["`", "lambda-expr", "$parameters", "$body"]
+              ]
+            ],
+            [
+              "pub",
+              "macro",
+              ["=>", "&body"],
+              ["block", ["`", "lambda", "$@&body"]]
+            ],
+            [
+              "macro-let",
+              [
+                "=",
+                "extract-parameters",
                 [
                   "block",
-                  ["log", "console", ["string", "Hey there!"]],
-                  ["unwrap", ["parseInt", ["at", "args", 1]]]
+                  [
+                    "=>",
+                    ["definitions"],
+                    [
+                      "block",
+                      [
+                        "block",
+                        [
+                          "concat",
+                          ["`", "parameters"],
+                          ["slice", "definitions", 1]
+                        ]
+                      ]
+                    ]
+                  ]
                 ]
-              ],
-              [":", "else", ["block", 10]]
+              ]
+            ],
+            [
+              "pub",
+              "macro",
+              ["fn"],
+              [
+                "block",
+                [
+                  "let",
+                  ["=", "definitions", ["block", ["extract", "&body", 0]]]
+                ],
+                [
+                  "let",
+                  ["=", "identifier", ["block", ["extract", "definitions", 0]]]
+                ],
+                [
+                  "let",
+                  [
+                    "=",
+                    "params",
+                    ["block", ["extract-parameters", "definitions"]]
+                  ]
+                ],
+                [
+                  "let",
+                  [
+                    "=",
+                    "type-arrow-index",
+                    [
+                      "block",
+                      "if",
+                      ["==", ["extract", "&body", 1], ["string", "->"]],
+                      [
+                        "block",
+                        1,
+                        [
+                          "if",
+                          ["==", ["extract", "&body", 2], ["string", "->"]],
+                          2,
+                          -1
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "let",
+                  [
+                    "=",
+                    "return-type",
+                    [
+                      "block",
+                      [
+                        "block",
+                        [
+                          "`",
+                          "return-type",
+                          [
+                            "block",
+                            [
+                              "$@",
+                              "if",
+                              [">", "type-arrow-index", -1],
+                              [
+                                "block",
+                                [
+                                  "slice",
+                                  "&body",
+                                  ["+", "type-arrow-index", 1],
+                                  ["+", "type-arrow-index", 2]
+                                ],
+                                ["`"]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "let",
+                  [
+                    "=",
+                    "expressions",
+                    [
+                      "block",
+                      [
+                        "block",
+                        [
+                          "if",
+                          [">", "type-arrow-index", -1],
+                          [
+                            "block",
+                            ["slice", "&body", ["+", "type-arrow-index", 2]],
+                            ["slice", "&body", 1]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "`",
+                  "define-function",
+                  [
+                    "block",
+                    "$identifier",
+                    "$params",
+                    "$return-type",
+                    ["$", "concat", "#[\"block\"]", "expressions"]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "macro",
+              ["def-wasm-operator", "op", "wasm-fn", "arg-type", "return-type"],
+              [
+                "block",
+                [
+                  "`",
+                  "fn",
+                  ["$op", "left", ":$", "arg-type", "right", ":$", "arg-type"],
+                  "->",
+                  "$return-type",
+                  [
+                    "block",
+                    [
+                      "binaryen-mod",
+                      ["$arg-type", "$wasm-fn", "$return-type"],
+                      ["left", "right"]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "macro",
+              ["extern-fn"],
+              [
+                "block",
+                ["let", ["=", "namespace", ["block", ["extract", "&body", 0]]]],
+                [
+                  "let",
+                  ["=", "definitions", ["block", ["extract", "&body", 1]]]
+                ],
+                [
+                  "let",
+                  ["=", "identifier", ["block", ["extract", "definitions", 0]]]
+                ],
+                [
+                  "let",
+                  [
+                    "=",
+                    "parameters",
+                    ["block", ["extract-parameters", "definitions"]]
+                  ]
+                ],
+                [
+                  "let",
+                  [
+                    "=",
+                    "type-arrow-index",
+                    [
+                      "block",
+                      "if",
+                      ["==", ["extract", "&body", 1], ["string", "->"]],
+                      [
+                        "block",
+                        1,
+                        [
+                          "if",
+                          ["==", ["extract", "&body", 2], ["string", "->"]],
+                          2,
+                          -1
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "let",
+                  [
+                    "=",
+                    "return-type",
+                    [
+                      "block",
+                      [
+                        "block",
+                        [
+                          "`",
+                          "return-type",
+                          [
+                            "block",
+                            [
+                              "$",
+                              "if",
+                              [">", "type-arrow-index", -1],
+                              [
+                                "block",
+                                [
+                                  "extract",
+                                  "&body",
+                                  ["+", "type-arrow-index", 1]
+                                ],
+                                ["`"]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "`",
+                  "define-extern-function",
+                  [
+                    "block",
+                    "$identifier",
+                    ["namespace", "$namespace"],
+                    "$parameters",
+                    "$return-type"
+                  ]
+                ]
+              ]
+            ],
+            [
+              "pub",
+              "macro",
+              ["match"],
+              [
+                "block",
+                [
+                  "let",
+                  ["=", "value-expr", ["block", ["extract", "&body", 0]]]
+                ],
+                ["let", ["=", "cases", ["block", ["slice", "&body", 1]]]],
+                [
+                  "let",
+                  [
+                    "=",
+                    "expand-cases",
+                    [
+                      "block",
+                      [
+                        "=>",
+                        ["cases", "index"],
+                        [
+                          "block",
+                          [
+                            "block",
+                            [
+                              "let",
+                              [
+                                "=",
+                                "case",
+                                ["block", ["extract", "cases", "index"]]
+                              ]
+                            ],
+                            [
+                              "if",
+                              [
+                                "and",
+                                ["is-list", "case"],
+                                [
+                                  "not",
+                                  [">=", ["+", "index", 1], ["length", "cases"]]
+                                ]
+                              ],
+                              [
+                                "block",
+                                [
+                                  "`",
+                                  "if",
+                                  [
+                                    "==",
+                                    ["$", "extract", "case", 0],
+                                    "match-value"
+                                  ],
+                                  [
+                                    "block",
+                                    ["$", "extract", "case", 1],
+                                    ["$", "&lambda", "cases", ["+", "index", 1]]
+                                  ]
+                                ],
+                                "case"
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "let",
+                  ["=", "conditions", ["block", ["expand-cases", "cases", 0]]]
+                ],
+                [
+                  "`",
+                  "block",
+                  [
+                    "block",
+                    ["let", ["=", "match-value", ["block", "$value-expr"]]],
+                    "$conditions"
+                  ]
+                ]
+              ]
             ]
           ]
         ],
-        ["let", ["=", "result", ["block", ["fib", "n"]]]]
+        [
+          "module",
+          "index",
+          [
+            ["pub", "use", ["::", "dir", "macros"], "::***"],
+            ["pub", "use", ["::", "dir", "operators"], "::***"],
+            ["pub", "use", ["::", "dir", "utils"], "::***"],
+            ["pub", "use", ["::", "dir", "memory"], "::***"],
+            ["pub", "use", ["::", "dir", "string"], "::***"]
+          ]
+        ]
       ]
     ]
-  ],
-  "moduleId": "src/example",
-  "path": "/Users/drew/projects/void/example.void",
-  "srcPath": "/Users/drew/projects/void",
-  "isRoot": true,
-  "workingDir": "/Users/drew/projects/void",
-  "imports": []
-}
+  ]
+]

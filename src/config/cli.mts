@@ -5,13 +5,13 @@ const options: ParseArgsConfig["options"] = {
   "emit-parser-ast": {
     type: "boolean",
   },
-  "emit-de-sugared-ast": {
+  "emit-core-ast": {
     type: "boolean",
   },
-  "emit-post-macro-ast": {
+  "emit-module-ast": {
     type: "boolean",
   },
-  "emit-syntax-ast": {
+  "emit-macro-ast": {
     type: "boolean",
   },
   "emit-wasm": {
@@ -43,7 +43,9 @@ export const getConfigFromCli = (): VoidConfig => {
     options,
     allowPositionals: true,
   });
+
   const index = positionals[0];
+
   if (typeof index !== "string") {
     throw new Error("Expected void entry file path");
   }
@@ -51,9 +53,9 @@ export const getConfigFromCli = (): VoidConfig => {
   return {
     index,
     emitParserAst: values["emit-parser-ast"] as boolean,
-    emitDeSugaredAst: values["emit-de-sugared-ast"] as boolean,
-    emitPostMacroAst: values["emit-post-macro-ast"] as boolean,
-    emitSyntaxAst: values["emit-syntax-ast"] as boolean,
+    emitCoreAst: values["emit-core-ast"] as boolean,
+    emitModuleAst: values["emit-module-ast"] as boolean,
+    emitMacroAst: values["emit-macro-ast"] as boolean,
     emitWasm: values["emit-wasm"] as boolean,
     emitWasmText: values["emit-wasm-text"] as boolean,
     runBinaryenOptimizationPass: values["bin-opt"] as boolean,

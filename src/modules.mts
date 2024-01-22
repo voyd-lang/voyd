@@ -1,25 +1,25 @@
 import { resolve } from "path";
-import { ParsedDirectory } from "./lib/parse-directory.mjs";
+import { ParsedFiles } from "./lib/parse-directory.mjs";
 import { List } from "./syntax-objects/list.mjs";
 import { VoidModule } from "./syntax-objects/module.mjs";
 
-export const resolveModules = (opts: {
+export const resolveFileModules = (opts: {
   /** Path to the std lib directory */
   stdPath: string;
   /** Path to the user source code */
   srcPath: string;
-  parsedFiles: ParsedDirectory;
+  files: ParsedFiles;
 }): VoidModule => {
-  const { stdPath, srcPath, parsedFiles } = opts;
+  const { stdPath, srcPath, files } = opts;
 
   const rootModule = new VoidModule({
     name: "root",
     ast: new List({ value: [] }),
   });
 
-  for (const [filePath, file] of Object.entries(parsedFiles)) {
-    const resolvedPath = resolveFilePath(filePath, srcPath, stdPath);
-    const parsedPath = resolvedPath.split("/");
+  for (const [filePath, file] of Object.entries(files)) {
+    const resolvedPath = filePathToModulePath(filePath, srcPath, stdPath);
+    const parsedPath = resolvedPath.split("/").filter(Boolean);
     registerModule({ path: parsedPath, parentModule: rootModule, ast: file });
   }
 
@@ -48,17 +48,27 @@ const registerModule = ({
       ast: rest.length ? new List({ value: [] }) : ast,
     });
 
-  if (!existingModule) parentModule.registerEntity(module);
+  if (!existingModule) parentModule.pushChildModule(module);
 
   if (!rest.length) return;
 
   return registerModule({ path: rest, parentModule: module, ast });
 };
 
-const resolveFilePath = (filePath: string, srcPath: string, stdPath: string) =>
-  resolve(
-    filePath
-      .replace(srcPath, "src")
-      .replace(stdPath, "std")
-      .replace(".void", "")
-  );
+const filePathToModulePath = (
+  filePath: string,
+  srcPath: string,
+  stdPath: string
+) => {
+  let finalPath = filePath.startsWith(stdPath)
+    ? filePath.replace(stdPath, "std")
+    : filePath;
+
+  finalPath = finalPath.startsWith(srcPath)
+    ? finalPath.replace(srcPath, "src")
+    : finalPath;
+
+  finalPath = finalPath.replace(".void", "");
+
+  return finalPath;
+};
