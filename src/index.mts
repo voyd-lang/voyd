@@ -11,37 +11,21 @@ import {
 import { resolveFileModules } from "./modules.mjs";
 import path from "path";
 
+main().catch(errorHandler);
+
 async function main() {
   const config = getConfig();
 
   if (config.emitParserAst) {
-    const parserAst = await parseFile(config.index);
-    console.log(JSON.stringify(parserAst, undefined, 2));
-    return;
+    return emit(getParserAst(config.index));
   }
 
   if (config.emitCoreAst) {
-    const parserAst = await parseFile(config.index);
-    console.log(JSON.stringify(expandSyntaxMacros(parserAst), undefined, 2));
-    return;
+    return emit(getCoreAst(config.index));
   }
 
   if (config.emitModuleAst) {
-    const indexFilePath = path.resolve(config.index);
-    const parsedFiles = {
-      [indexFilePath]: await parseFile(indexFilePath),
-      ...(await parseStd()),
-    };
-    const files = expandSyntaxMacrosOfFiles(parsedFiles);
-
-    const module = resolveFileModules({
-      files,
-      srcPath: path.dirname(indexFilePath),
-      stdPath: stdPath,
-    });
-
-    console.log(JSON.stringify(module, undefined, 2));
-    return;
+    return emit(getModuleAst(config.index));
   }
 
   const mod = genWasmCode(root.ast);
@@ -64,8 +48,35 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  // Catch cause binaryen dumps its whole codebase to stdout if we don't
+async function getParserAst(index: string) {
+  return parseFile(index);
+}
+
+async function getCoreAst(index: string) {
+  const parserAst = await getParserAst(index);
+  return expandSyntaxMacros(parserAst);
+}
+
+async function getModuleAst(index: string) {
+  const indexFilePath = path.resolve(index);
+  const parsedFiles = {
+    [indexFilePath]: await parseFile(indexFilePath),
+    ...(await parseStd()),
+  };
+  const files = expandSyntaxMacrosOfFiles(parsedFiles);
+
+  return resolveFileModules({
+    files,
+    srcPath: path.dirname(indexFilePath),
+    stdPath: stdPath,
+  });
+}
+
+function emit(json: any) {
+  console.log(JSON.stringify(json, undefined, 2));
+}
+
+function errorHandler(error: Error) {
   console.error(error);
   process.exit(1);
-});
+}
