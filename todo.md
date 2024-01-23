@@ -1,5 +1,7 @@
 # Today
 
+- Update macros for new syntax
+- Fix macro interpreter
 - Add unit test for resolveFileModules
 - Cleanup parenthetical elision code, make it more functional if possible
 - Support whitespace curly block syntax
@@ -7,7 +9,6 @@
 
 # High Level
 
-- Separate Parser AST from Syntax AST i.e. `type ParserAST = (Token | ParserAST)[]` and `type SyntaxAST = Expr[]`
 - Audit code base for side effects, style, and functional purity
 - Support whitespace curly block syntax inside of strings / string interpolation
 - Add jest tests for parsing phase

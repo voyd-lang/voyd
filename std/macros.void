@@ -13,34 +13,45 @@ pub macro ':'()
 
 pub macro let()
 	define equals-expr (extract &body 0)
-	` define
+	`(
+		define
 		$(extract equals-expr 1)
 		$(extract equals-expr 2)
+	)
 
 pub macro var()
 	define equals-expr (extract &body 0)
-	` define-mut
+	`(
+		define-mut
 		$(extract equals-expr 1)
 		$(extract equals-expr 2)
+	)
 
 pub macro global()
 	let mutability = extract &body 0
 	let equals-expr = extract &body 1
-	let function = if mutability == "let"
-		` define-global
-		` define-mut-global
-	`	$@function
+	let function =
+		if mutability == "let" then:
+			` define-global
+		else:
+			` define-mut-global
+	`(
+		$@function
 		$(extract equals-expr 1)
 		$(extract (extract equals-expr 2) 1)
+	)
 
 pub macro ';'()
 	let func = &body.extract(0)
 	let body = &body.extract(1)
-	let args = if body.extract(0) == "block"
-		body.slice(1)
-		body
-	if is-list(func)
+	let args =
+		if body.extract(0) == "block" then:
+			body.slice(1)
+		else:
+			body
+	if is-list(func) then:
 		func.concat(args)
+	else:
 		concat(`($func) args)
 
 pub macro lambda()
@@ -60,26 +71,32 @@ pub macro fn()
 	let identifier = extract(definitions 0)
 	let params = extract-parameters(definitions)
 
-	let type-arrow-index = if (extract(&body 1) == "->")
-		1
-		if (extract(&body 2) == "->") 2 -1
+	let type-arrow-index =
+		if (extract(&body 1) == "->") then:
+			1
+		else:
+			if (extract(&body 2) == "->") then: 2 else: -1
 
 	let return-type =
-		` return-type
-			$@ if (type-arrow-index > -1)
-				&body.slice(type-arrow-index + 1 type-arrow-index + 2)
-				`()
+		`(
+			return-type
+			$@(if(type-arrow-index > -1
+				then: &body.slice(type-arrow-index + 1 type-arrow-index + 2)
+				else: `()))
+		)
 
 	let expressions =
-		if (type-arrow-index > -1)
+		if (type-arrow-index > -1) then:
 			&body.slice(type-arrow-index + 2)
-			&body.slice(1)
+		else: &body.slice(1)
 
-	` define-function
+	`(
+		define-function
 		$identifier
 		$params
 		$return-type
 		$(concat #["block"] expressions)
+	)
 
 pub macro def-wasm-operator(op wasm-fn arg-type return-type)
 	` fn $op(left:$arg-type right:$arg-type) -> $return-type
@@ -93,32 +110,35 @@ pub macro extern-fn()
 	let identifier = definitions.extract(0)
 	let parameters = extract-parameters(definitions)
 
-	let type-arrow-index = if (extract(&body 1) == "->")
+	let type-arrow-index = if (extract(&body 1) == "->") then:
 		1
-		if (extract(&body 2) == "->") 2 -1
+	else:
+		if (extract(&body 2) == "->") then: 2 else: -1
 
 	let return-type =
 		` return-type
-			$ if (type-arrow-index > -1)
+			$ if (type-arrow-index > -1) then:
 				extract(&body type-arrow-index + 1)
-				`()
+			else: `()
 
-	` define-extern-function
+	`(
+		define-extern-function
 		$identifier
 		namespace $namespace
 		$parameters
 		$return-type
+	)
 
 pub macro match()
 	let value-expr = &body.extract(0)
 	let cases = &body.slice(1)
 	let expand-cases = (cases index) =>
 		let case = cases.extract(index)
-		if is-list(case) and not(index + 1 >= cases.length)
+		if is-list(case) and not(index + 1 >= cases.length) then:
 			` if $(extract case 0) == match-value
 				$(extract case 1)
 				$(&lambda cases (index + 1))
-			case
+		else: case
 
 	let conditions = expand-cases(cases 0)
 	` block
