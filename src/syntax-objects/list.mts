@@ -51,9 +51,10 @@ export class List extends Syntax {
     return id;
   }
 
-  set(index: number, value: Expr) {
-    value.parent = this;
-    this.value[index] = value; // Should this clone?
+  set(index: number, expr: Expr | string) {
+    const result = typeof expr === "string" ? Identifier.from(expr) : expr;
+    result.parent = this;
+    this.value[index] = result; // Should this clone?
     return this;
   }
 

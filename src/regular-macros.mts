@@ -52,15 +52,14 @@ const evalMacroDef = (list: List) => {
   return macro;
 };
 
-const evalMacroLetDef = (list: List) =>
-  evalMacroVarDef(list.slice(1).insert("define"));
+const evalMacroLetDef = (list: List) => evalMacroVarDef(list.set(0, "define"));
 
 /** Slice out the beginning macro before calling */
 const listToMacro = (list: List): Macro => {
   const signature = list.listAt(1);
   const name = signature.identifierAt(0);
   const parameters = signature.rest() as Identifier[];
-  const body = list.slice(1).map(expandRegularMacros);
+  const body = list.slice(2).map(expandRegularMacros).insert("block");
   const macro = new RegularMacro({
     ...list.context,
     name,
@@ -402,10 +401,11 @@ const registerMacroVar = (opts: {
 };
 
 export const evalMacroVarDef = (call: List) => {
-  // Warning: Cannot be typed like would be at compile time (for now);
-  const identifier = call.at(1);
-  const mut = call.at(2) as Bool;
-  const init = call.at(3);
+  const assignment = call.listAt(1);
+  const isMutable = call.identifierAt(0).is("define-mut");
+
+  const identifier = assignment.at(1);
+  const init = assignment.at(2);
   if (!identifier?.isIdentifier() || !init) {
     throw new Error("Invalid variable");
   }
@@ -413,7 +413,7 @@ export const evalMacroVarDef = (call: List) => {
   return new MacroVariable({
     ...identifier.context,
     name: identifier,
-    isMutable: mut.value,
+    isMutable,
     value: evalMacroExpr(init),
   });
 };
