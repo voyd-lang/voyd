@@ -10,6 +10,7 @@ import {
 } from "./syntax-macros/index.mjs";
 import { resolveFileModules } from "./modules.mjs";
 import path from "path";
+import { expandRegularMacros } from "./regular-macros.mjs";
 
 main().catch(errorHandler);
 
@@ -26,6 +27,10 @@ async function main() {
 
   if (config.emitModuleAst) {
     return emit(await getModuleAst(config.index));
+  }
+
+  if (config.emitMacroAst) {
+    return emit(await getMacroAst(config.index));
   }
 
   const mod = genWasmCode(root.ast);
@@ -70,6 +75,11 @@ async function getModuleAst(index: string) {
     srcPath: path.dirname(indexFilePath),
     stdPath: stdPath,
   });
+}
+
+async function getMacroAst(index: string) {
+  const moduleAst = await getModuleAst(index);
+  return expandRegularMacros(moduleAst);
 }
 
 function emit(json: any) {

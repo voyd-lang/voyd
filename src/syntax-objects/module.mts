@@ -16,6 +16,13 @@ export class VoidModule extends NamedEntity {
     this.ast = opts.ast;
   }
 
+  map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoidModule {
+    return new VoidModule({
+      ...super.getCloneOpts(),
+      ast: this.ast.map(fn),
+    });
+  }
+
   toString() {
     return this.id;
   }

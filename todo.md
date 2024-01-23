@@ -1,14 +1,15 @@
 # Today
 
-- Update macros for new syntax
 - Fix macro interpreter
 - Add unit test for resolveFileModules
 - Cleanup parenthetical elision code, make it more functional if possible
-- Support whitespace curly block syntax
 
 
 # High Level
 
+- Update generics syntax to `my_fn[T]` instead of `my_fn::<T>`
+	- We should be able to do this and keep array syntax as `[1, 2, 3]`. Since we don't support array subscript syntax (`my_array[0]`) anyway.
+- Support whitespace curly block syntax
 - Audit code base for side effects, style, and functional purity
 - Support whitespace curly block syntax inside of strings / string interpolation
 - Add jest tests for parsing phase

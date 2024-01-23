@@ -14,6 +14,7 @@ import {
 } from "./syntax-objects/index.mjs";
 
 export const expandRegularMacros = (expr: Expr): Expr => {
+  if (expr.isModule()) return expr.map(expandRegularMacros);
   if (!expr.isList()) return expr;
   if (expr.calls("export")) return evalExport(expr);
   if (expr.calls("macro")) return evalMacroDef(expr);
@@ -159,6 +160,7 @@ const functions: Record<string, MacroFn | undefined> = {
     info.value = evalMacroExpr(args.at(1)!);
     return nop();
   },
+  ":": (args) => args.at(1) ?? nop(),
   "==": (args) => bl(args, (l, r) => l === r),
   ">": (args) => bl(args, (l, r) => l > r),
   ">=": (args) => bl(args, (l, r) => l >= r),
