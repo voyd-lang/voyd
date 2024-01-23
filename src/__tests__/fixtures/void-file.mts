@@ -18,7 +18,7 @@ fn main()
 		else:
 			20
 
-	do me while () => if x > 10 then:
+	call this while () => if x > 10 then:
 		x -= 1
 	else:
 		x += 1
@@ -29,8 +29,10 @@ fn main()
 	else:
 		10
 
+	let x2 = 10
+	let z = nothing()
+	let test_spacing = fib n
 	let result = fib(n)
-
 `;
 
 export const voidFile = new File(exampleVoidText, "beep/boop");

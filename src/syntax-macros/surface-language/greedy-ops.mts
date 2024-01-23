@@ -19,12 +19,13 @@ export const processGreedyOps = (list: List) => {
     if (isGreedyOp(next)) {
       transformed.push(next);
       const consumed = processGreedyOps(list);
-      consumed.insert("block", 0);
-      transformed.push(consumed);
+      const result = consumed.value.length === 1 ? consumed.first()! : consumed;
+      transformed.push(result);
       continue;
     }
 
     transformed.push(next);
   }
+
   return transformed;
 };

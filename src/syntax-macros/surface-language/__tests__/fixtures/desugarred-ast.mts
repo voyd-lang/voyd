@@ -23,14 +23,13 @@ export const desugarredAst = [
     ["main"],
     [
       "block",
-      ["let", ["=", "x", ["block", ["+", 10, ["block", ["+", 20, 30]]]]]],
+      ["let", ["=", "x", ["+", 10, ["block", ["+", 20, 30]]]]],
       [
         "let",
         [
           "=",
           "y",
           [
-            "block",
             "if",
             [">", "x", 10],
             [":", "then", ["block", 10]],
@@ -39,14 +38,13 @@ export const desugarredAst = [
         ],
       ],
       [
-        "do",
-        "me",
+        "call",
+        "this",
         "while",
         [
           "=>",
           [],
           [
-            "block",
             "if",
             [">", "x", 10],
             [":", "then", ["block", ["-=", "x", 1]]],
@@ -60,7 +58,6 @@ export const desugarredAst = [
           "=",
           "n",
           [
-            "block",
             "if",
             [">", ["len", "args"], 1],
             [
@@ -76,7 +73,10 @@ export const desugarredAst = [
           ],
         ],
       ],
-      ["let", ["=", "result", ["block", ["fib", "n"]]]],
+      ["let", ["=", "x2", 10]],
+      ["let", ["=", "z", ["nothing"]]],
+      ["let", ["=", "test_spacing", ["fib", "n"]]],
+      ["let", ["=", "result", ["fib", "n"]]],
     ],
   ],
 ];
