@@ -57,8 +57,7 @@ const evalMacroLetDef = (list: List) =>
 
 /** Slice out the beginning macro before calling */
 const listToMacro = (list: List): Macro => {
-  // TODO Assertions?
-  const signature = list.listAt(0);
+  const signature = list.listAt(1);
   const name = signature.identifierAt(0);
   const parameters = signature.rest() as Identifier[];
   const body = list.slice(1).map(expandRegularMacros);

@@ -46,7 +46,7 @@ export class List extends Syntax {
   listAt(index: number): List {
     const id = this.at(index);
     if (!id?.isList()) {
-      throw new Error(`No identifier at index ${index}`);
+      throw new Error(`No list at index ${index}`);
     }
     return id;
   }
