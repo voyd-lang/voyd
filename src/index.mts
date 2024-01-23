@@ -17,15 +17,15 @@ async function main() {
   const config = getConfig();
 
   if (config.emitParserAst) {
-    return emit(getParserAst(config.index));
+    return emit(await getParserAst(config.index));
   }
 
   if (config.emitCoreAst) {
-    return emit(getCoreAst(config.index));
+    return emit(await getCoreAst(config.index));
   }
 
   if (config.emitModuleAst) {
-    return emit(getModuleAst(config.index));
+    return emit(await getModuleAst(config.index));
   }
 
   const mod = genWasmCode(root.ast);
