@@ -1,4 +1,4 @@
-import { Expr, Identifier, List, Whitespace } from "./lib/syntax/index.mjs";
+import { Expr, Identifier, List, Whitespace } from "./syntax-objects/index.mjs";
 import { Token } from "./lib/token.mjs";
 import { File } from "./lib/file.mjs";
 import { getReaderMacroForToken } from "./reader-macros/index.mjs";

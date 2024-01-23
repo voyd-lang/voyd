@@ -1,5 +1,4 @@
 import { File } from "../lib/file.mjs";
-import { ModuleInfo } from "../lib/module-info.mjs";
 import { Expr, List } from "../syntax-objects/index.mjs";
 import { Token } from "../lib/token.mjs";
 

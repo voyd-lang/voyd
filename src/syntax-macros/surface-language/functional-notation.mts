@@ -1,4 +1,4 @@
-import { List } from "../../lib/syntax/index.mjs";
+import { List } from "../../syntax-objects/index.mjs";
 
 export const functionalNotation = (list: List): List =>
   list.reduce((expr, index, array) => {

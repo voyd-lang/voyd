@@ -1,4 +1,4 @@
-import { Expr, Identifier, List } from "../../lib/syntax/index.mjs";
+import { Expr, Identifier, List } from "../../syntax-objects/index.mjs";
 import { greedyOps } from "./greedy-ops.mjs";
 
 export type Associativity = "left" | "right";

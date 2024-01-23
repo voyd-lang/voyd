@@ -1,4 +1,4 @@
-import { List } from "../../lib/index.mjs";
+import { List } from "../../syntax-objects/index.mjs";
 import { functionalNotation } from "./functional-notation.mjs";
 import { processGreedyOps } from "./greedy-ops.mjs";
 import { infix } from "./infix.mjs";
