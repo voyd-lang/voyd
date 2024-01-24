@@ -760,8 +760,7 @@ let photos = await taskGroup(of: Optional(Data).self) | () =>
 
 	await group.filter() | (photo) => photo != nil
 
-photos.map(name =>
+photos.map name =>
 	let photo = await downloadPhoto(named: name)
 	photo.map(processPhoto)
-)
 ```
