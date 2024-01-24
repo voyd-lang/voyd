@@ -1,3 +1,5 @@
+use std::macros::***
+
 pub def-wasm-operator('<' lt_s i32 i32)
 pub def-wasm-operator('>' gt_s i32 i32)
 pub def-wasm-operator('<=' le_s i32 i32)
