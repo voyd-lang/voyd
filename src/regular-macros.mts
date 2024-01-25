@@ -66,7 +66,7 @@ const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
   const unexpandedModule = left?.isList()
     ? resolveUsePath(left)
     : left?.isIdentifier()
-    ? path.resolveEntity(left)
+    ? resolveUseIdentifier(left)
     : undefined;
 
   if (
@@ -100,6 +100,14 @@ const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
   }
 
   return entity;
+};
+
+const resolveUseIdentifier = (identifier: Identifier) => {
+  if (identifier.is("super")) {
+    return identifier.parentModule?.parentModule;
+  }
+
+  return identifier.resolve();
 };
 
 const evalExport = (list: List) => {

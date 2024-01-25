@@ -1,4 +1,4 @@
-use dir::macros::***
+use super::macros::***
 
 pub extern-fn utils log(val:i32) -> void
 pub extern-fn utils log(val:f32) -> void

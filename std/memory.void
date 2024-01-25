@@ -1,6 +1,6 @@
-use dir::macros::***
-use dir::operators::***
-use dir::utils::***
+use super::macros::***
+use super::operators::***
+use super::utils::***
 
 global let header-size = 8
 global let size-index = 0

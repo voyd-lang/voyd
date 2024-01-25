@@ -16,6 +16,7 @@ export class VoidModule extends NamedEntity {
   ) {
     super(opts);
     this.ast = opts.ast;
+    this.ast.parent = this;
     this.macrosExpanded = opts.macrosExpanded ?? false;
   }
 

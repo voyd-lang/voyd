@@ -55,9 +55,11 @@ export abstract class Syntax {
   }
 
   get parentFn(): Fn | undefined {
-    return this.parent?.syntaxType === "fn"
-      ? this.parent
-      : this.parent?.parentFn;
+    return this.parent?.isFn() ? this.parent : this.parent?.parentFn;
+  }
+
+  get parentModule(): VoidModule | undefined {
+    return this.parent?.isModule() ? this.parent : this.parent?.parentModule;
   }
 
   get context() {
