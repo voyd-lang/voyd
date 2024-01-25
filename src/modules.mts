@@ -1,4 +1,3 @@
-import { resolve } from "path";
 import { ParsedFiles } from "./lib/parse-directory.mjs";
 import { List } from "./syntax-objects/list.mjs";
 import { VoidModule } from "./syntax-objects/module.mjs";

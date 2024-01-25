@@ -1,7 +1,6 @@
 export
 	macro pub()
-		define body expand-macros(&body)
-		quote export &body
+		quote(export (block $&body))
 
 pub macro `()
 	quote quote $@&body

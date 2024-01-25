@@ -7,6 +7,7 @@
 
 # High Level
 
+- Support pub use
 - Improve function overloading support so they can be treated as a normal entity.
 	- Idea: Add new entity, FnCollection, which is a collection of functions with the same name in the same scope.
 - Update generics syntax to `my_fn[T]` instead of `my_fn::<T>`
