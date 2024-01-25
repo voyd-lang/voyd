@@ -40,7 +40,9 @@ export const expandRegularMacros = (expr: Expr): Expr => {
 const expandModuleMacros = (module: VoidModule): VoidModule => {
   if (module.phase > 0) return module;
   module.phase = 1;
-  const expanded = module.map(expandRegularMacros);
+  const expanded = module.map((expr) => {
+    return expandRegularMacros(expr);
+  });
   expanded.phase = 2;
   expanded.parent?.registerEntity(expanded);
   return expanded;
@@ -76,6 +78,7 @@ const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
     unexpandedModule instanceof Array ||
     !unexpandedModule.isModule()
   ) {
+    // This is caused by pushChildModule which clones the module and stores the wrong one.
     throw new Error(
       `Invalid use statement, not a module ${console.log(
         JSON.stringify(path, undefined, 2)
@@ -196,7 +199,13 @@ const evalMacroTimeFnCall = (list: List): Expr => {
   const argsArr = fnsToSkipArgEval.has(idStr)
     ? list.rest()
     : list.rest().map(evalMacroExpr);
-  const args = new List({ ...list.context, value: argsArr });
+  const args = (() => {
+    try {
+      return new List({ ...list.context, value: argsArr });
+    } catch (error) {
+      throw error;
+    }
+  })();
 
   const func = functions[idStr];
   if (func) return func(args);
@@ -342,7 +351,7 @@ const functions: Record<string, MacroFn | undefined> = {
     return list.slice(start, end);
   },
   extract: (args) => {
-    const list = args.first()! as List;
+    const list = args.listAt(0);
     const index = getMacroTimeValue(args.at(1)) as number;
     return list.at(index)!; // TODO: Make this safer
   },
@@ -502,10 +511,12 @@ export const evalMacroVarDef = (call: List) => {
     throw new Error("Invalid variable");
   }
 
-  return new MacroVariable({
+  const variable = new MacroVariable({
     ...identifier.context,
     name: identifier,
     isMutable,
     value: evalMacroExpr(init),
   });
+  call.parent?.registerEntity(variable);
+  return variable;
 };

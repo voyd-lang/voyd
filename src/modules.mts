@@ -11,10 +11,7 @@ export const resolveFileModules = (opts: {
 }): VoidModule => {
   const { stdPath, srcPath, files } = opts;
 
-  const rootModule = new VoidModule({
-    name: "root",
-    ast: new List({ value: [] }),
-  });
+  const rootModule = new VoidModule({ name: "root" });
 
   for (const [filePath, file] of Object.entries(files)) {
     const resolvedPath = filePathToModulePath(filePath, srcPath, stdPath);
@@ -49,8 +46,8 @@ const registerModule = ({
   const module =
     existingModule ??
     new VoidModule({
+      ...(ast.length ? { ...ast.context, value: ast.value } : {}),
       name,
-      ast: rest.length ? new List({ value: [] }) : ast,
     });
   module.isExported = true;
 

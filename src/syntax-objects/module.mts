@@ -1,30 +1,29 @@
 import { Expr } from "./expr.mjs";
-import { Id } from "./identifier.mjs";
-import { List } from "./list.mjs";
+import { Id, Identifier } from "./identifier.mjs";
+import { List, ListValue } from "./list.mjs";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 
 export class VoidModule extends NamedEntity {
   readonly syntaxType = "module";
-  readonly ast: List;
+  readonly value: Expr[] = [];
   /** 0 = init, 1 = expanding regular macros, 2 = regular macros expanded */
   phase = 0;
 
   constructor(
     opts: NamedEntityOpts & {
-      ast: List;
+      value?: ListValue[];
       phase?: number;
     }
   ) {
     super(opts);
-    this.ast = opts.ast;
-    this.ast.parent = this;
+    if (opts.value) this.push(...opts.value);
     this.phase = opts.phase ?? 0;
   }
 
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoidModule {
     return new VoidModule({
       ...super.getCloneOpts(),
-      ast: this.ast.map(fn),
+      value: this.value.map(fn),
       phase: this.phase,
     });
   }
@@ -36,17 +35,42 @@ export class VoidModule extends NamedEntity {
   clone(parent?: Expr | undefined): VoidModule {
     return new VoidModule({
       ...super.getCloneOpts(parent),
-      ast: this.ast,
+      value: this.value,
       phase: this.phase,
     });
   }
 
   toJSON() {
-    return ["module", this.name, this.ast];
+    return ["module", this.name, this.value];
+  }
+
+  push(...expr: ListValue[]) {
+    expr.forEach((ex) => {
+      if (typeof ex === "string") {
+        this.value.push(new Identifier({ value: ex, parent: this }));
+        return;
+      }
+
+      if (ex instanceof Array) {
+        this.push(new List({ value: ex, parent: this }));
+        return;
+      }
+
+      const cloned = ex.clone(this);
+
+      if (cloned.isList() && cloned.calls("splice-quote")) {
+        this.value.push(...cloned.rest());
+        return;
+      }
+
+      this.value.push(cloned);
+    });
+
+    return this;
   }
 
   pushChildModule(module: VoidModule) {
     this.registerEntity(module);
-    this.ast.push(module);
+    this.push(module);
   }
 }
