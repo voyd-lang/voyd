@@ -11,11 +11,14 @@ import {
   Macro,
   RegularMacro,
   MacroVariable,
+  VoidModule,
 } from "./syntax-objects/index.mjs";
+import { NamedEntity } from "./syntax-objects/named-entity.mjs";
 
 export const expandRegularMacros = (expr: Expr): Expr => {
-  if (expr.isModule()) return expr.map(expandRegularMacros);
+  if (expr.isModule()) return expandModuleMacros(expr);
   if (!expr.isList()) return expr;
+  if (expr.calls("use")) return resolveUseStatement(expr);
   if (expr.calls("export")) return evalExport(expr);
   if (expr.calls("macro")) return evalMacroDef(expr);
   if (expr.calls("macro-let")) return evalMacroLetDef(expr);
@@ -25,12 +28,78 @@ export const expandRegularMacros = (expr: Expr): Expr => {
     return expr.map(expandRegularMacros);
   }
 
-  const macro = identifier.resolveAsMacroEntity();
-  if (macro?.syntaxType === "macro") {
+  const macro = identifier.resolve();
+  if (macro?.isMacro()) {
     return expandRegularMacros(expandMacro(macro, expr));
   }
 
   return expr.map(expandRegularMacros);
+};
+
+const expandModuleMacros = (module: VoidModule): VoidModule => {
+  if (module.macrosExpanded) return module;
+  const expanded = module.map(expandRegularMacros);
+  expanded.macrosExpanded = true;
+  expanded.parent?.registerEntity(expanded);
+  return expanded;
+};
+
+const resolveUseStatement = (list: List) => {
+  const path = list.listAt(1);
+  const entities = resolveUsePath(path);
+  if (entities instanceof Array) {
+    entities.forEach((e) => list.parent?.registerEntity(e));
+  } else {
+    list.parent?.registerEntity(entities);
+  }
+  return list;
+};
+
+const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
+  if (!path.calls("::")) {
+    throw new Error(
+      `Invalid use statement ${console.log(JSON.stringify(path, undefined, 2))}`
+    );
+  }
+
+  const [_, left, right] = path.value;
+  const unexpandedModule = left?.isList()
+    ? resolveUsePath(left)
+    : left?.isIdentifier()
+    ? path.resolveEntity(left)
+    : undefined;
+
+  if (
+    !unexpandedModule ||
+    unexpandedModule instanceof Array ||
+    !unexpandedModule.isModule()
+  ) {
+    throw new Error(
+      `Invalid use statement, not a module ${console.log(
+        JSON.stringify(path, undefined, 2)
+      )}`
+    );
+  }
+
+  const module = expandModuleMacros(unexpandedModule);
+  const identifier = right as Identifier;
+
+  if (identifier.is("***")) {
+    return module.getAllEntities().filter((e) => e.isExported);
+  }
+
+  const entity = module.resolveChildEntity(right as Identifier);
+  if (!entity) {
+    throw new Error(
+      `Invalid use statement, macro ${right} not found in module ${module}`
+    );
+  }
+
+  if (!entity.isExported) {
+    throw new Error(`Invalid use statement, entity ${right} is not exported`);
+  }
+
+  return entity;
 };
 
 const evalExport = (list: List) => {
@@ -88,9 +157,9 @@ const evalMacroExpr = (expr: Expr) => {
 };
 
 const evalIdentifier = (expr: Identifier): Expr => {
-  const entity = expr.resolveAsMacroEntity();
+  const entity = expr.resolve();
   if (!entity) return expr;
-  if (entity.syntaxType !== "macro-variable") return expr;
+  if (!entity.isMacroVariable()) return expr;
   if (!entity.value) return expr;
   return entity.value;
 };
@@ -146,8 +215,8 @@ const functions: Record<string, MacroFn | undefined> = {
       throw new Error(`Expected identifier, got ${identifier}`);
     }
 
-    const info = args.parent?.resolveMacroEntity(identifier);
-    if (!info || info.syntaxType !== "macro-variable") {
+    const info = args.parent?.resolveEntity(identifier);
+    if (!info || !info.isMacroVariable()) {
       throw new Error(`Identifier ${identifier.value} is not defined`);
     }
 
@@ -371,8 +440,8 @@ const getMacroTimeValue = (expr: Expr | undefined): any => {
   if (!expr) return undefined;
 
   if (expr.isIdentifier()) {
-    const result = expr.resolveAsMacroEntity();
-    if (result?.syntaxType !== "macro-variable") {
+    const result = expr.resolve();
+    if (!result?.isMacroVariable()) {
       throw new Error(
         `Macro entity cannot be resolved into macro time value, ${result}`
       );

@@ -39,7 +39,13 @@ const registerModule = ({
 
   if (!name) return;
 
-  const existingModule = parentModule.resolveChildModule(name);
+  const existingModule = parentModule.resolveChildEntity(name);
+
+  if (existingModule && !existingModule.isModule()) {
+    throw new Error(
+      `Cannot register module ${name} because it is already registered as ${existingModule.syntaxType}`
+    );
+  }
 
   const module =
     existingModule ??
@@ -47,6 +53,7 @@ const registerModule = ({
       name,
       ast: rest.length ? new List({ value: [] }) : ast,
     });
+  module.isExported = true;
 
   if (!existingModule) parentModule.pushChildModule(module);
 

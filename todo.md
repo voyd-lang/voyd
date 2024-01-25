@@ -7,6 +7,8 @@
 
 # High Level
 
+- Improve function overloading support so they can be treated as a normal entity.
+	- Idea: Add new entity, FnCollection, which is a collection of functions with the same name in the same scope.
 - Update generics syntax to `my_fn[T]` instead of `my_fn::<T>`
 	- We should be able to do this and keep array syntax as `[1, 2, 3]`. Since we don't support array subscript syntax (`my_array[0]`) anyway.
 - Support whitespace curly block syntax

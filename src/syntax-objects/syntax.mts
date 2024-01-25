@@ -9,12 +9,7 @@ import type { Global } from "./global.mjs";
 import type { Id, Identifier } from "./identifier.mjs";
 import type { Int } from "./int.mjs";
 import type { VoidModule } from "./module.mjs";
-import {
-  Entity,
-  FnEntity,
-  LexicalContext,
-  MacroEntity,
-} from "./lexical-context.mjs";
+import { FnEntity, LexicalContext } from "./lexical-context.mjs";
 import type { List } from "./list.mjs";
 import type { MacroLambda } from "./macro-lambda.mjs";
 import type { MacroVariable } from "./macro-variable.mjs";
@@ -24,6 +19,7 @@ import type { StringLiteral } from "./string-literal.mjs";
 import type { FnType, PrimitiveType, ObjectType, Type } from "./types.mjs";
 import type { Variable } from "./variable.mjs";
 import type { Whitespace } from "./whitespace.mjs";
+import { NamedEntity } from "./named-entity.mjs";
 
 export type SourceLocation = {
   /** The exact character index the syntax starts */
@@ -72,30 +68,34 @@ export abstract class Syntax {
     };
   }
 
-  registerEntity(v: Entity) {
+  getAllEntities(): NamedEntity[] {
+    return this.lexicon.getAllEntities();
+  }
+
+  registerEntity(v: NamedEntity) {
     this.lexicon.registerEntity(v);
-    if (v.syntaxType === "parameter" || v.syntaxType === "variable") {
+    if (v.isParameter() || v.isVariable()) {
       this.registerLocalWithParentFn(v);
     }
   }
 
-  resolveEntity(name: Id): Entity | undefined {
+  resolveChildEntity(name: Id): NamedEntity | undefined {
+    return this.lexicon.resolveEntity(name);
+  }
+
+  /** Recursively searches for the entity up the parent tree */
+  resolveEntity(name: Id): NamedEntity | undefined {
     return this.lexicon.resolveEntity(name) ?? this.parent?.resolveEntity(name);
   }
 
-  resolveMacroEntity(name: Id): MacroEntity | undefined {
-    return (
-      this.lexicon.resolveMacroEntity(name) ??
-      this.parent?.resolveMacroEntity(name)
-    );
-  }
-
+  /** Recursively searches for the fn entity(s) up the parent tree */
   resolveFns(id: Id, start: FnEntity[] = []): FnEntity[] {
     start.push(...this.lexicon.resolveFns(id));
     if (this.parent) return this.parent.resolveFns(id, start);
     return start;
   }
 
+  /** Recursively searches for the fn entity up the parent tree */
   resolveFnById(id: string): FnEntity | undefined {
     return this.lexicon.resolveFnById(id) ?? this.parent?.resolveFnById(id);
   }

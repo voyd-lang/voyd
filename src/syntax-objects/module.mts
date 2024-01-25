@@ -6,20 +6,24 @@ import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 export class VoidModule extends NamedEntity {
   readonly syntaxType = "module";
   readonly ast: List;
+  macrosExpanded = false;
 
   constructor(
     opts: NamedEntityOpts & {
       ast: List;
+      macrosExpanded?: boolean;
     }
   ) {
     super(opts);
     this.ast = opts.ast;
+    this.macrosExpanded = opts.macrosExpanded ?? false;
   }
 
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoidModule {
     return new VoidModule({
       ...super.getCloneOpts(),
       ast: this.ast.map(fn),
+      macrosExpanded: this.macrosExpanded,
     });
   }
 
@@ -31,6 +35,7 @@ export class VoidModule extends NamedEntity {
     return new VoidModule({
       ...super.getCloneOpts(parent),
       ast: this.ast,
+      macrosExpanded: this.macrosExpanded,
     });
   }
 
@@ -41,19 +46,5 @@ export class VoidModule extends NamedEntity {
   pushChildModule(module: VoidModule) {
     this.registerEntity(module);
     this.ast.push(module);
-  }
-
-  /** Must not be recursive / search parents. */
-  resolveChildModule(name: Id): VoidModule | undefined {
-    return this.lexicon.resolveModuleEntity(name);
-  }
-
-  resolveNestedModule(path: Id[]): VoidModule | undefined {
-    const [id, ...rest] = path;
-    if (!id) return;
-    const module = this.resolveChildModule(id);
-    if (!module) return;
-    if (!rest.length) return module;
-    return module.resolveNestedModule(rest);
   }
 }
