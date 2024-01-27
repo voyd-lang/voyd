@@ -54,7 +54,7 @@ export class List extends Syntax {
   set(index: number, expr: Expr | string) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
     result.parent = this;
-    this.value[index] = result; // Should this clone?
+    this.value[index] = result;
     return this;
   }
 
@@ -98,14 +98,14 @@ export class List extends Syntax {
         return;
       }
 
-      const cloned = ex.clone(this);
+      ex.parent = this;
 
-      if (cloned.isList() && cloned.calls("splice-quote")) {
-        this.value.push(...cloned.rest());
+      if (ex.isList() && ex.calls("splice-quote")) {
+        this.value.push(...ex.rest());
         return;
       }
 
-      this.value.push(cloned);
+      this.value.push(ex);
     });
 
     return this;

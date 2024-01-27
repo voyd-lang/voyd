@@ -56,14 +56,14 @@ export class VoidModule extends NamedEntity {
         return;
       }
 
-      const cloned = ex.clone(this);
+      ex.parent = this;
 
-      if (cloned.isList() && cloned.calls("splice-quote")) {
-        this.value.push(...cloned.rest());
+      if (ex.isList() && ex.calls("splice-quote")) {
+        this.value.push(...ex.rest());
         return;
       }
 
-      this.value.push(cloned);
+      this.value.push(ex);
     });
 
     return this;
