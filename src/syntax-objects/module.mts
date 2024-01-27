@@ -5,7 +5,7 @@ import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 
 export class VoidModule extends NamedEntity {
   readonly syntaxType = "module";
-  readonly value: Expr[] = [];
+  value: Expr[] = [];
   /** 0 = init, 1 = expanding regular macros, 2 = regular macros expanded */
   phase = 0;
 
@@ -26,6 +26,13 @@ export class VoidModule extends NamedEntity {
       value: this.value.map(fn),
       phase: this.phase,
     });
+  }
+
+  applyMap(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoidModule {
+    const old = this.value;
+    this.value = [];
+    this.push(...old.map(fn));
+    return this;
   }
 
   toString() {
@@ -58,6 +65,10 @@ export class VoidModule extends NamedEntity {
 
       ex.parent = this;
 
+      if (ex instanceof NamedEntity) {
+        this.registerEntity(ex);
+      }
+
       if (ex.isList() && ex.calls("splice-quote")) {
         this.value.push(...ex.rest());
         return;
@@ -67,10 +78,5 @@ export class VoidModule extends NamedEntity {
     });
 
     return this;
-  }
-
-  pushChildModule(module: VoidModule) {
-    this.registerEntity(module);
-    this.push(module);
   }
 }

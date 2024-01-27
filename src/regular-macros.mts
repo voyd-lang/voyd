@@ -40,12 +40,9 @@ export const expandRegularMacros = (expr: Expr): Expr => {
 const expandModuleMacros = (module: VoidModule): VoidModule => {
   if (module.phase > 0) return module;
   module.phase = 1;
-  const expanded = module.map((expr) => {
-    return expandRegularMacros(expr);
-  });
-  expanded.phase = 2;
-  expanded.parent?.registerEntity(expanded);
-  return expanded;
+  module.applyMap((expr) => expandRegularMacros(expr));
+  module.phase = 2;
+  return module;
 };
 
 const resolveUseStatement = (list: List) => {

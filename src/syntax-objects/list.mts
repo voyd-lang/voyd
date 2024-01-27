@@ -2,6 +2,7 @@ import { Expr } from "./expr.mjs";
 import { getIdStr } from "./get-id-str.mjs";
 import { Id, Identifier } from "./identifier.mjs";
 import { Int } from "./int.mjs";
+import { NamedEntity } from "./named-entity.mjs";
 import { Syntax, SyntaxOpts } from "./syntax.mjs";
 
 export class List extends Syntax {
@@ -99,6 +100,10 @@ export class List extends Syntax {
       }
 
       ex.parent = this;
+
+      if (ex instanceof NamedEntity) {
+        this.registerEntity(ex);
+      }
 
       if (ex.isList() && ex.calls("splice-quote")) {
         this.value.push(...ex.rest());

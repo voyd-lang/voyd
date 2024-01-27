@@ -51,7 +51,7 @@ const registerModule = ({
     });
   module.isExported = true;
 
-  if (!existingModule) parentModule.pushChildModule(module);
+  if (!existingModule) parentModule.push(module);
 
   if (!rest.length) return;
 
