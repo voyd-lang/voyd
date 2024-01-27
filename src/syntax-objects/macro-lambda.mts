@@ -17,6 +17,7 @@ export class MacroLambda extends Syntax {
     super(opts);
     this.parameters = opts.parameters ?? [];
     this.body = opts.body;
+    this.body.parent = this;
   }
 
   toString() {

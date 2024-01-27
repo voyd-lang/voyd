@@ -194,13 +194,7 @@ const evalMacroTimeFnCall = (list: List): Expr => {
   const argsArr = fnsToSkipArgEval.has(idStr)
     ? list.rest()
     : list.rest().map(evalMacroExpr);
-  const args = (() => {
-    try {
-      return new List({ ...list.context, value: argsArr });
-    } catch (error) {
-      throw error;
-    }
-  })();
+  const args = new List({ ...list.context, value: argsArr });
 
   const func = functions[idStr];
   if (func) return func(args);
@@ -221,7 +215,9 @@ const callLambda = (lambda: MacroLambda, args: List): Expr => {
     registerMacroVar({ with: clone, name, value: args.at(index)! });
   });
 
-  return clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
+  const result = clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
+  result.parent = args.parent;
+  return result;
 };
 
 type MacroFn = (args: List) => Expr;
