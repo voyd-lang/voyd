@@ -22,9 +22,7 @@ export abstract class NamedEntity extends Syntax {
   }
 
   private genId() {
-    return `${this.location?.filePath ?? "unknown"}/${this.name}#${
-      this.syntaxId
-    }`;
+    return `${this.name}#${this.syntaxId}`;
   }
 
   getCloneOpts(parent?: Expr): NamedEntityOpts {
