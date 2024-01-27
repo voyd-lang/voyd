@@ -136,19 +136,13 @@ const evalExport = (list: List) => {
   return list;
 };
 
-const evalMacroDef = (list: List) => {
-  const macro = listToMacro(list);
-  list.parent?.registerEntity(macro);
-  return macro;
-};
-
 const evalMacroLetDef = (list: List) => {
   const expanded = expandRegularMacros(list.set(0, "let")) as List;
   return evalMacroVarDef(expanded);
 };
 
 /** Slice out the beginning macro before calling */
-const listToMacro = (list: List): Macro => {
+const evalMacroDef = (list: List): Macro => {
   const signature = list.listAt(1);
   const name = signature.identifierAt(0);
   const parameters = signature.rest() as Identifier[];
@@ -171,7 +165,9 @@ export const expandMacro = (macro: Macro, call: List): Expr => {
     registerMacroVar({ with: clone, name, value: call.at(index + 1)! });
   });
 
-  return clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
+  const result = clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
+  result.parent = call.parent;
+  return result;
 };
 
 const evalMacroExpr = (expr: Expr) => {
