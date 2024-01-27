@@ -46,7 +46,7 @@ const registerModule = ({
   const module =
     existingModule ??
     new VoidModule({
-      ...(ast.length ? { ...ast.context, value: ast.value } : {}),
+      ...(!rest.length ? { ...ast.context, value: ast.value } : {}),
       name,
     });
   module.isExported = true;
