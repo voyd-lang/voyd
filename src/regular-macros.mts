@@ -383,7 +383,7 @@ const functions: Record<string, MacroFn | undefined> = {
     return list.push(...val.value);
   },
   concat: (args) => {
-    const list = args.first() as List;
+    const list = args.listAt(0);
     return list.push(...args.rest().flatMap((expr) => (expr as List).value));
   },
   "is-list": (args) => bool(!!args.at(0)?.isList()),
@@ -463,23 +463,26 @@ const bool = (b: boolean) => new Bool({ value: b });
 const getMacroTimeValue = (expr: Expr | undefined): any => {
   if (!expr) return undefined;
 
+  // This behavior is a bit magical. If an identifier has a runtime value, we return that value.
+  // Otherwise we return the name of identifier as a string. This is because we do not properly
+  // Distinguish between a macro time identifier and an identifier from the ast it is operating on.
   if (expr.isIdentifier()) {
     const result = expr.resolve();
-    if (!result?.isMacroVariable()) {
-      throw new Error(
-        `Macro entity cannot be resolved into macro time value, ${result}`
-      );
+    if (result?.isMacroVariable()) {
+      return getMacroTimeValue(result.value);
     }
-    return getMacroTimeValue(result.value);
+    if (result) return result;
   }
 
-  if (expr.isFloat() || expr.isInt() || expr.isStringLiteral()) {
-    return expr.value;
-  }
+  const hasValue =
+    expr.isFloat() ||
+    expr.isInt() ||
+    expr.isStringLiteral() ||
+    expr.isList() ||
+    expr.isIdentifier();
 
-  throw new Error(
-    `Macro entity cannot be resolved into macro time value, ${expr}`
-  );
+  if (hasValue) return expr.value;
+  return expr;
 };
 
 const registerMacroVar = (opts: {

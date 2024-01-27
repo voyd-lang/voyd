@@ -67,7 +67,7 @@ pub macro fn()
 		$identifier
 		$params
 		$(`(return-type $@(return-type)))
-		$(concat #["block"] expressions))
+		$(concat `(block) expressions))
 
 pub macro def-wasm-operator(op wasm-fn arg-type return-type)
 	`(fn $op(left:$arg-type right:$arg-type) -> $return-type

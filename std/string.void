@@ -30,7 +30,7 @@ pub macro string(str)
 	let add-codes = str.split("").map (char) =>
 		` add-char-code-to-string $(char-to-code char) index
 	macro-expand
-		` block
-			let index:String = alloc-string()
+		`(block
+			(let index:String = alloc-string())
 			$@add-codes
-			index
+			index)
