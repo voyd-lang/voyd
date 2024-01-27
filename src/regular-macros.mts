@@ -122,10 +122,12 @@ const evalExport = (list: List) => {
   const expandedBlock = block.map((exp) => {
     const expanded = expandRegularMacros(exp);
     if (expanded.isMacro()) {
+      expanded.isExported = true;
       list.parent?.registerEntity(expanded);
     }
 
     if (expanded.isMacroVariable()) {
+      expanded.isExported = true;
       list.parent?.registerEntity(expanded);
     }
 
