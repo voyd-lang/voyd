@@ -34,21 +34,21 @@ export type SourceLocation = {
   filePath: string;
 };
 
-export type SyntaxOpts = {
+export type SyntaxMetadata = {
   location?: SourceLocation;
   parent?: Expr;
   lexicon?: LexicalContext;
 };
 
 export abstract class Syntax {
+  /** For tagged unions */
+  abstract readonly syntaxType: string;
   readonly syntaxId = getSyntaxId();
   readonly location?: SourceLocation;
   readonly lexicon: LexicalContext;
   parent?: Expr;
-  /** For tagged unions */
-  abstract readonly syntaxType: string;
 
-  constructor({ location, parent, lexicon }: SyntaxOpts) {
+  constructor({ location, parent, lexicon }: SyntaxMetadata) {
     this.location = location;
     this.parent = parent;
     this.lexicon = lexicon ?? new LexicalContext();
@@ -62,7 +62,7 @@ export abstract class Syntax {
     return this.parent?.isModule() ? this.parent : this.parent?.parentModule;
   }
 
-  get context() {
+  get metadata() {
     return {
       location: this.location,
       parent: this.parent,
@@ -76,9 +76,6 @@ export abstract class Syntax {
 
   registerEntity(v: NamedEntity) {
     this.lexicon.registerEntity(v);
-    if (v.isParameter() || v.isVariable()) {
-      this.registerLocalWithParentFn(v);
-    }
   }
 
   resolveChildEntity(name: Id): NamedEntity | undefined {
@@ -102,9 +99,9 @@ export abstract class Syntax {
     return this.lexicon.resolveFnById(id) ?? this.parent?.resolveFnById(id);
   }
 
-  getCloneOpts(parent?: Expr): SyntaxOpts {
+  getCloneOpts(parent?: Expr): SyntaxMetadata {
     return {
-      ...this.context,
+      ...this.metadata,
       parent: parent ?? this.parent,
     };
   }
@@ -113,19 +110,6 @@ export abstract class Syntax {
 
   /** Should emit in compliance with core language spec */
   abstract toJSON(): any;
-
-  private registerLocalWithParentFn(v: Variable | Parameter): void {
-    if (!this.parent) {
-      throw new Error(`Not in fn, cannot register ${v}`);
-    }
-
-    if (this.parent.syntaxType === "fn") {
-      this.parent?.registerLocal(v);
-      return;
-    }
-
-    return this.parent.registerLocalWithParentFn(v);
-  }
 
   isExpr(): this is Expr {
     return true;

@@ -2,7 +2,7 @@ import { Expr, List } from "../../syntax-objects/index.mjs";
 import { isContinuationOp } from "./infix.mjs";
 
 export const interpretWhitespace = (list: List): List => {
-  const transformed = new List({ ...list.context });
+  const transformed = new List({ ...list.metadata });
 
   while (list.hasChildren) {
     transformed.push(elideParens(list) as List);
@@ -24,7 +24,7 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
   const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;
 
   const consumeChildren = () => {
-    const children = new List({ value: [] });
+    const children = new List({});
 
     while (nextExprIndentLevel(list) > indentLevel) {
       const child = elideParens(list, { indentLevel: indentLevel + 1 });

@@ -45,7 +45,7 @@ const initFn = (expr: List): Fn => {
     returnType: suppliedReturnType,
     parameters,
     body,
-    ...expr.context,
+    ...expr.metadata,
   });
 
   parent.registerEntity(fn);

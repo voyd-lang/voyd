@@ -1,5 +1,5 @@
 import { Expr } from "./expr.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 
 export type Id = string | Identifier;
 
@@ -11,7 +11,7 @@ export class Identifier extends Syntax {
   value: string;
 
   constructor(
-    opts: SyntaxOpts & {
+    opts: SyntaxMetadata & {
       value: string;
       isQuoted?: boolean;
     }

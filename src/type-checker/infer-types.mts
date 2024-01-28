@@ -81,7 +81,7 @@ const inferFn = (expr: List): Fn => {
     returnType,
     parameters,
     body,
-    ...expr.context,
+    ...expr.metadata,
   });
 
   parent.registerEntity(fn);
@@ -107,7 +107,7 @@ const inferExternFn = (expr: List): ExternFn => {
     returnType: suppliedReturnType,
     parameters,
     namespace: namespace.toString(),
-    ...expr.context,
+    ...expr.metadata,
   });
 
   parent.registerEntity(fn);
@@ -142,7 +142,7 @@ export const listToParameter = (list: List) => {
     throw new Error(`Could not resolve type for parameter ${name}`);
   }
 
-  return new Parameter({ name, label, type, ...list.context });
+  return new Parameter({ name, label, type, ...list.metadata });
 };
 
 const inferBlockTypes = (list: List): Block => {
@@ -156,7 +156,7 @@ const inferBlockTypes = (list: List): Block => {
   }
 
   return new Block({
-    ...list.context,
+    ...list.metadata,
     body: body.value,
     returnType: type,
   });
@@ -183,7 +183,7 @@ function inferUserFnCallTypes(list: List): Call {
     throw new Error("Could not find matching fn for above call expression");
   }
 
-  return new Call({ ...list.context, args, fnId: fn.id });
+  return new Call({ ...list.metadata, args, fnId: fn.id });
 }
 
 const inferRootModuleTypes = (list: List): List =>
@@ -244,7 +244,7 @@ const inferVarTypes = (list: List): Variable => {
   }
 
   const variable = new Variable({
-    ...list.context,
+    ...list.metadata,
     name,
     initializer,
     isMutable,
@@ -303,7 +303,7 @@ const getIdentifierType = (id: Identifier): Type | undefined => {
 /** Takes the expression form of a struct and converts it into type form */
 const getObjectLiteralType = (ast: List): ObjectType =>
   new ObjectType({
-    ...ast.context,
+    ...ast.metadata,
     name: "literal",
     value: ast.slice(1).value.map((labeledExpr) => {
       const list = labeledExpr as List;
@@ -323,7 +323,7 @@ const getIfReturnType = (list: List): Type | undefined =>
 const getBnrReturnType = (call: List): Type | undefined => {
   const info = call.at(1) as List | undefined;
   const id = info?.at(2) as Identifier;
-  return new PrimitiveType({ ...id.context, name: id.value as StackType });
+  return new PrimitiveType({ ...id.metadata, name: id.value as StackType });
 };
 
 const getMatchingFnForCallExpr = (

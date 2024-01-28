@@ -150,7 +150,7 @@ const evalMacroDef = (list: List): Macro => {
   const parameters = signature.rest() as Identifier[];
   const body = list.slice(2).map(expandRegularMacros).insert("block");
   const macro = new RegularMacro({
-    ...list.context,
+    ...list.metadata,
     name,
     parameters,
     body,
@@ -194,7 +194,7 @@ const evalMacroTimeFnCall = (list: List): Expr => {
   const argsArr = fnsToSkipArgEval.has(idStr)
     ? list.rest()
     : list.rest().map(evalMacroExpr);
-  const args = new List({ ...list.context, value: argsArr });
+  const args = new List({ ...list.metadata, value: argsArr });
 
   const func = functions[idStr];
   if (func) return func(args);
@@ -396,7 +396,7 @@ const functions: Record<string, MacroFn | undefined> = {
     const splitter = args.at(0) as StringLiteral;
     return new List({
       value: str.value.split(splitter.value),
-      ...args.context,
+      ...args.metadata,
     });
   },
   "expand-macros": (args) => expandRegularMacros(args.at(0)!),
@@ -506,7 +506,7 @@ export const evalMacroVarDef = (call: List) => {
   }
 
   const variable = new MacroVariable({
-    ...identifier.context,
+    ...identifier.metadata,
     name: identifier,
     isMutable,
     value: evalMacroExpr(init),

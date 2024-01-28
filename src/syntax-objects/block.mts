@@ -1,5 +1,5 @@
 import { Expr } from "./expr.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 import { Type } from "./types.mjs";
 
 export class Block extends Syntax {
@@ -8,7 +8,7 @@ export class Block extends Syntax {
   readonly returnType: Type;
 
   constructor(
-    opts: SyntaxOpts & {
+    opts: SyntaxMetadata & {
       body: Expr[];
       returnType: Type;
     }

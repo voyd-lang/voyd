@@ -1,8 +1,8 @@
 import { Expr } from "./expr.mjs";
 import { Id, Identifier } from "./identifier.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 
-export type NamedEntityOpts = SyntaxOpts & {
+export type NamedEntityOpts = SyntaxMetadata & {
   name: Id;
   id?: string;
   isExported?: boolean;

@@ -3,14 +3,14 @@ import { getIdStr } from "./get-id-str.mjs";
 import { Id, Identifier } from "./identifier.mjs";
 import { Int } from "./int.mjs";
 import { NamedEntity } from "./named-entity.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 
 export class List extends Syntax {
   readonly syntaxType = "list";
   value: Expr[] = [];
 
   constructor(
-    opts: SyntaxOpts & {
+    opts: SyntaxMetadata & {
       value?: ListValue[] | List;
     }
   ) {
