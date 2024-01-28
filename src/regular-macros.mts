@@ -287,11 +287,11 @@ const functions: Record<string, MacroFn | undefined> = {
     const expand = (body: List): List =>
       body.reduce((exp) => {
         if (exp.isList() && exp.calls("$")) {
-          return evalMacroExpr(new List({ value: exp.rest(), parent: body }));
+          return evalMacroExpr(new List({ value: exp.rest() }));
         }
 
         if (exp.isList() && exp.calls("$@")) {
-          const rest = new List({ value: exp.rest(), parent: body });
+          const rest = new List({ value: exp.rest() });
           return (evalMacroExpr(rest) as List).insert("splice-quote");
         }
 
