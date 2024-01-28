@@ -20,6 +20,11 @@ export class VoidModule extends NamedEntity {
     this.phase = opts.phase ?? 0;
   }
 
+  getPath(): string[] {
+    const path = this.parentModule?.getPath() ?? [];
+    return [...path, this.name.toString()];
+  }
+
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoidModule {
     return new VoidModule({
       ...super.getCloneOpts(),
