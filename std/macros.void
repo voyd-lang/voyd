@@ -23,7 +23,7 @@ pub macro global()
 			` define-mut-global
 	`($@function
 		$(extract equals-expr 1)
-		$(extract (extract equals-expr 2) 1))
+		$(extract equals-expr 2)
 
 pub macro ';'()
 	let func = &body.extract(0)

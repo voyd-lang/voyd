@@ -75,7 +75,6 @@ const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
     unexpandedModule instanceof Array ||
     !unexpandedModule.isModule()
   ) {
-    // This is caused by pushChildModule which clones the module and stores the wrong one.
     throw new Error(
       `Invalid use statement, not a module ${console.log(
         JSON.stringify(path, undefined, 2)
@@ -168,13 +167,8 @@ export const expandMacro = (macro: Macro, call: List): Expr => {
   });
 
   const result = clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
-  return new List({
-    value: [
-      "macro-context",
-      ["context-path", macro.parentModule?.getPath() ?? []],
-      result,
-    ],
-  });
+  result.parent = call.parent;
+  return result;
 };
 
 const evalMacroExpr = (expr: Expr) => {
@@ -292,14 +286,12 @@ const functions: Record<string, MacroFn | undefined> = {
     const expand = (body: List): List =>
       body.reduce((exp) => {
         if (exp.isList() && exp.calls("$")) {
-          return evalMacroExpr(new List({ value: exp.rest() }));
+          return evalMacroExpr(new List({ value: exp.rest(), parent: body }));
         }
 
         if (exp.isList() && exp.calls("$@")) {
-          const value = ["normal-context", ...exp.rest()];
-          return new List({ value });
-          // Thinking we don't need to do this but saving just in case
-          // return (evalMacroExpr(rest) as List).insert("splice-normal-context");
+          const rest = new List({ value: exp.rest(), parent: body });
+          return (evalMacroExpr(rest) as List).insert("splice-normal-context");
         }
 
         if (exp.isList()) return expand(exp);
@@ -307,16 +299,12 @@ const functions: Record<string, MacroFn | undefined> = {
         if (exp.isIdentifier() && exp.startsWith("$@")) {
           const value = evalIdentifier(exp.replace("$@", ""));
           if (!value.isList()) return nop();
-          return value.insert("splice-normal-context");
+          value.insert("splice-quote");
+          return value;
         }
 
         if (exp.isIdentifier() && exp.startsWith("$")) {
-          const value = [
-            "normal-context",
-            evalIdentifier(exp.replace("$", "")),
-          ];
-
-          return new List({ value });
+          return evalIdentifier(exp.replace("$", ""));
         }
 
         return exp;
