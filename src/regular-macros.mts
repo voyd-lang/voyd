@@ -386,9 +386,15 @@ const functions: Record<string, MacroFn | undefined> = {
     return list.push(...args.rest().flatMap((expr) => (expr as List).value));
   },
   "is-list": (args) => bool(!!args.at(0)?.isList()),
-  log: (arg) => {
-    console.error(JSON.stringify(arg.first(), undefined, 2));
-    return arg;
+  log: (args) => {
+    const arg = args.first();
+    if (arg?.isStringLiteral()) {
+      console.error(arg.value);
+      return args;
+    }
+
+    console.error(JSON.stringify(arg, undefined, 2));
+    return args;
   },
   split: (args) => {
     const str = args.at(0) as StringLiteral;

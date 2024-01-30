@@ -23,7 +23,7 @@ pub macro global()
 			` define-mut-global
 	`($@function
 		$(extract equals-expr 1)
-		$(extract equals-expr 2)
+		$(extract equals-expr 2))
 
 pub macro ';'()
 	let func = &body.extract(0)
@@ -98,6 +98,7 @@ pub macro extern-fn()
 		$(`(return-type $@(return-type))))
 
 pub macro match()
+	log "match"
 	let value-expr = &body.extract(0)
 	let cases = &body.slice(1)
 	let expand-cases = (cases index) =>
