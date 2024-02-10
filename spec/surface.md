@@ -27,7 +27,7 @@ var y = 3
 Syntax:
 
 ```void
-fn name(arg1:type1 arg2:type2) effects -> returnType =
+fn name(label? arg1: type1, label? arg2: type2) effects -> returnType =
 	// Body
 ```
 
@@ -57,7 +57,7 @@ fn name(arg1:type1 arg2:type2)
 Basic function:
 
 ```void
-fn add(a:i32 b:i32) -> i32
+fn add(_ a: i32, _ b: i32) -> i32
 	a + b
 
 // Usage
@@ -86,52 +86,44 @@ fn get-json(address:String) -> ((async throws) Dictionary)
 	parse-json(json-text)
 ```
 
-### Named arguments
+### Labeled arguments
 
-Named arguments can be defined using an object literal within the list of arguments.
+Void has similar function definition semantics to Swift. Arguments are labeled by default. The label also inherits the name of the argument by default. This is useful for readability and self documenting code.
 
-```void
-fn scaled-move(scale:i32, { x: i32, y: i32, z: i32 }) -> void
-	robot.move(scale * x, scale * y, scale * z)
-
-// On call, the curly braces can be left out
-scaled-move(5, x: 1, y: 2, z: 3)
-
-// Note that field shorthand does not work with named parameters
-let x = 5
-scaled-move(5 x y: 2 z: 3) // Error! no function with signature scaled-move(i32, i32, { y: i32, z: i32 });
+```rust
+fn add(num: i32, other_num: i32) = num + other_num
+add(num: 1, other_num: 2)
 ```
 
-Named arguments can have separate external and internal names:
+To change the name of the label from the default, specify it before the argument name.
 
-```void
-fn multiply(a:i32 { by:b:i32 }) -> i32
-	a * b
+```rust
+fn add(this num: i32, to other_num: i32) = num + other_num
 
-// To call
-multiply 1 by: 2
-
-// Or
-multiply(1 by: 2)
+add(this: 1, to: 2)
 ```
 
-Named arguments are syntactic sugar for object literals with automatic de-structuring inside the function.
-Here's the first example in de-sugared form:
+You can also omit the label by using an underscore
 
+```rust
+fn add(_ num: i32, _ other_num: i32) = num + other_num
+
+add(1, 2)
 ```
-fn scaled-move(scale:i32 named1: { x: i32 y: i32 z: i32 }) -> void
-	let { x, y, z } = named1;
-	robot.move(scale * x, scale * y, scale * z)
 
-scaled-move(5, { x: 1, y: 2, z: 3 })
+Arguments named `self` never have a label
 
-// The de-sugared form makes it clear why field shorthand doesn't work
-scaled-move(5, x, { y: 2, z: 3 }) // Error! no function with signature scaled-move(i32, i32, { y: i32, z: i32 });
+```rust
+fn add(self: i32, to num: i32) = self + to
+
+add(1, to: 2)
 ```
 
 ### Parenthetical Elision
 
 When a function call is isolated on its own line, the parenthesis can be elided.
+
+Dream uses significant indentation like [sweet](https://dwheeler.com/readable/sweet-expressions.html). So the parenthesis can be omitted provided its the only expression on it's line and is properly indented
 
 TODO: Fill this section out
 
@@ -164,9 +156,6 @@ obj Pos
 
 // Usage
 let my-pos = Pos { x: 5, y: 4, z: 3 }
-
-// The obj syntax is sugar for
-type Pos = { x: i32, y: i32, z: i32 }
 ```
 
 ### Object With Methods
@@ -246,6 +235,10 @@ use super::helpers::{ func-a as func-c } // Import func-a as func-c from the par
 // If the path points to a folder, an index.void is assumed
 use src::folder::{ b } // Resolves to src/folder/index.void
 use package::my_package::{ pack-func } // Import pack-func from the installed package called my_package.
+
+mod my-module // Create a new module within the current module
+	fn my-func() // Define a function within the module
+		print "Hello from my-module"
 ```
 
 # The Surface Language Grammar
@@ -364,11 +357,10 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     		(mul 4 x)))
     ```
 
-3.  Isolated named arguments, that is named arguments that are on their own line, are applied to the
-    preceding function call provided:
+3.  Isolated labeled arguments, that is labeled arguments that are on their own line, are applied to the preceding function call provided:
 
-    1. There are no empty lines separating between the two
-    2. The named argument is on the same indentation level, or 1 child indentation level as the
+    1. There are no empty lines separating the two
+    2. The labeled argument is on the same indentation level, or 1 child indentation level as the
        preceding function call.
 
     ```
@@ -534,9 +526,9 @@ add(5 1)
 squared(5)
 ```
 
-## Named Argument Lambda Syntax
+## Labeled Argument Lambda Syntax
 
-Named arguments have syntactic sugar that make passing lambda's much cleaner.
+Labeled arguments have syntactic sugar that make passing lambda's much cleaner.
 
 When the left hand side of the `:` operator is a list, the first identifier in that list is treated
 as the name, additional identifiers become parameters.
@@ -553,8 +545,7 @@ call cb: (v) =>
 	print
 ```
 
-This works nicely with the rules of named arguments to support a trailing lambda syntax similar to
-that of swift or koka.
+This works nicely with the rules of labeled arguments to support a trailing lambda syntax similar to that of swift or koka.
 
 ```
 try this():
@@ -575,15 +566,15 @@ Void functions can be overloaded. Provided that function overload can be unambig
 via their parameters and return type.
 
 ```void
-fn sum(a:Int, b:Int)
+fn sum(a: i32, b: i32)
 	print("Def 1");
 	a + b
 
-fn sum { a:Int, b:Int }
+fn sum(vec: {a:i32, b: i32})
 	print("Def 2");
-	a + b
+	vec.a + vec.b
 
-sum(1, 2) // Def 1
+sum a: 1, b: 2 // Def 1
 sum { a: 1, b: 2 } // Def 2
 
 // ERROR: sum(numbers: ...Int) overlaps ambiguously with sum(a: Int, b: Int)
@@ -594,7 +585,7 @@ fn sum(numbers: ...Int)
 This can be especially useful for overloading operators to support a custom type:
 
 ```
-fn '+'(a:Vec3, b:Vec3) -> Vec3
+fn '+'(_ a: Vec3, _ b: Vec3) -> Vec3
 	Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
 
 Vec3(1, 2, 3) + Vec3(4, 5, 6) // Vec3(5, 7, 9)
@@ -636,6 +627,7 @@ export const infixOperators = new Map<string, [number, Associativity]>([
 	[".", [6, "left"]],
 	["|>", [4, "left"]],
 	["<|", [4, "right"]],
+	["|", [4, "right"]],
 	["=", [0, "left"]],
 	["+=", [4, "right"]],
 	["-=", [4, "right"]],
