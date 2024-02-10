@@ -15,17 +15,17 @@ fn fib(at n: i32) -> i32
 // All binary programs have a main function
 fn main() -> void
   for num in range(15)
-    // Print fibonacci sequence at index using UFCS.
+    // Call print on the fibonacci sequence at index using UFCS.
     fib(at: num).print()
 ```
 
 ```rust
 fn app() -> html
-  let todo-items = ["wake up", "eat", "code", "sleep"]
+  let todo_items = ["wake up", "eat", "code", "sleep"]
   <div>
     <h1>TODO</h1>
     <ul>
-      ${todo-items.map i => <li>${i}</li>}
+      ${todo_items.map i => <li>${i}</li>}
     </ul>
   </div>
 ```
