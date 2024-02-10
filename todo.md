@@ -4,6 +4,9 @@
 
 # High Level
 
+- Make NamedEntity an interface instead of abstract class?
+- Only add lexical scopes to syntax types that need them (block, function, etc). Not literally every list and or syntax object.
+- Separate meta lexical scopes from runtime lexical scopes
 - Support pub use
 - Should let and var be a macro? Do we need to transform them into a different syntax?
 - Improve function overloading support so they can be treated as a normal entity.
