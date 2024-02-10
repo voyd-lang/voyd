@@ -7,34 +7,34 @@ https://justforfunnoreally.dev/
 ```rust
 // Find the value of the fibonacci sequence at index n
 fn fib(at n: i32) -> i32
-  if n < 2 then:
-    n
-  else:
-    fib(at: n - 1) + fib(at: n - 2)
+	if n < 2 then:
+		n
+	else:
+		fib(at: n - 1) + fib(at: n - 2)
 
 // All binary programs have a main function
 fn main() -> void
-  for num in range(15)
-    // Call print on the fibonacci sequence at index using UFCS.
-    fib(at: num).print()
+	for num in range(15)
+		// Call print on the fibonacci sequence at index using UFCS.
+		fib(at: num).print()
 ```
 
 ```rust
 fn app() -> html
-  let todo_items = ["wake up", "eat", "code", "sleep"]
-  <div>
-    <h1>TODO</h1>
-    <ul>
-      ${todo_items.map i => <li>${i}</li>}
-    </ul>
-  </div>
+	let todo_items = ["wake up", "eat", "code", "sleep"]
+	<div>
+		<h1>TODO</h1>
+		<ul>
+			${todo_items.map i => <li>${i}</li>}
+		</ul>
+	</div>
 ```
 
 **Disclaimer**
 
-Void is in it's very early stages and should not be used for production applications.
-Most MVP features have not been implemented yet. The language does run and compile
-though. So feel free to play around.
+Void is in it's very early stages and should not be used for production applications. Most MVP
+features have not been implemented yet. The language does run and compile though. So feel free to
+play around.
 
 **Features**:
 
@@ -48,8 +48,8 @@ Note: Not all features are complete.
 - Uniform function call syntax
 - [Homoiconic](https://en.wikipedia.org/wiki/Homoiconicity)
 - Pythonesque syntax that de-sugars into a lisp like dialect
-  - Parenthesis can be elided in most cases
-  - Infix notation and standard function call notation support
+	- Parenthesis can be elided in most cases
+	- Infix notation and standard function call notation support
 
 **Guiding Principles**:
 
@@ -119,7 +119,7 @@ A Basic function:
 
 ```rust
 fn add(a: i32, b: i32) -> i32
-  a + b
+	a + b
 ```
 
 In most cases the return type can be inferred
@@ -134,7 +134,9 @@ To call a function, use the function name followed by the arguments in parenthes
 add(a: 1, b: 2)
 ```
 
-Void has similar function definition semantics to Swift. Arguments are labeled by default. The label also inherits the name of the argument by default. This is useful for readability and self documenting code.
+Void has similar function definition semantics to Swift. Arguments are labeled by default. The label
+also inherits the name of the argument by default. This is useful for readability and self
+documenting code.
 
 To change the name of the label from the default, specify it before the argument name.
 
@@ -160,7 +162,9 @@ fn add(self: i32, to num: i32) = self + to
 add(1, to: 2)
 ```
 
-This makes another feature of Void much more convenient, Uniform Function Call Syntax (UFCS). When the first argument of a function is not labeled, the function can be called on the first argument using dot notation.
+This makes another feature of Void much more convenient, Uniform Function Call Syntax (UFCS). When
+the first argument of a function is not labeled, the function can be called on the first argument
+using dot notation.
 
 ```rust
 fn add(self: i32, to num: i32) = self + num
@@ -168,7 +172,8 @@ fn add(self: i32, to num: i32) = self + num
 1.add(to: 2)
 ```
 
-One final neat feature of functions in Void is that they can be called without parenthesis. This is useful for creating DSLs and for supporting a more natural language like syntax.
+One final neat feature of functions in Void is that they can be called without parenthesis. This is
+useful for creating DSLs and for supporting a more natural language like syntax.
 
 ```rust
 fn walk(from: Point, to: Point) = // ...
@@ -176,10 +181,11 @@ fn walk(from: Point, to: Point) = // ...
 walk from: home to: school
 ```
 
-A function can only be called without parenthesis when they are not an argument to another function*.
+A function can only be called without parenthesis when they are not an argument to another
+function*.
 
-* This is a simplification, the actual rules are a bit more complex. But its all you
-need to know in order to use the feature.
+* This is a simplification, the actual rules are a bit more complex. But its all you need to know in
+order to use the feature.
 
 ## Control flow
 
@@ -187,9 +193,9 @@ need to know in order to use the feature.
 
 ```rust
 if 3 < val then:
-  "hello" // true case
+	"hello" // true case
 else:
-  "bye" // false case (optional)
+	"bye" // false case (optional)
 ```
 
 Ifs are expressions that return a value
@@ -205,9 +211,9 @@ Basic loops repeat until returned from
 ```rust
 var a = 0
 loop
-  if a > 10
-    return a
-  a += 1
+	if a > 10
+		return a
+	a += 1
 ```
 
 Loops can be labeled
@@ -215,16 +221,16 @@ Loops can be labeled
 ```rust
 var a = 0
 loop name: "increment"
-  if a > 10
-    return_from "increment" a
-  a += 1
+	if a > 10
+		return_from "increment" a
+	a += 1
 ```
 
 Useful constructs from looping through iterables
 
 ```rust
 for item in iterable
-  print item
+	print item
 ```
 
 ### Match Statements
@@ -232,14 +238,14 @@ for item in iterable
 ```rust
 let x = 3
 match x
-  1 => print "One"
-  2 => print "Two"
-  3 => print "Three"
-  _ =>
-    // Match statements are exhaustive, they must cover every possible
-    // case. When not every case is covered, a default handler must be
-    // provided.
-    write "A number"
+	1 => print "One"
+	2 => print "Two"
+	3 => print "Three"
+	_ =>
+		// Match statements are exhaustive, they must cover every possible
+		// case. When not every case is covered, a default handler must be
+		// provided.
+		write "A number"
 ```
 
 ## Closures
@@ -267,12 +273,12 @@ squared(x)
 
 ```rust
 fn add[T](a: T, b: T) -> T
-  a + b
+	a + b
 ```
 
 With trait constraints
 
 ```rust
 fn add[T impls Numeric](a: T, b: T) -> T
-  a + b
+	a + b
 ```

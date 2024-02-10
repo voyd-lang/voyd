@@ -1,6 +1,7 @@
 # The Surface Language Specification
 
-This specification defines the language users write, the "surface" void language.
+This specification defines the language users write, the "surface" void
+language.
 
 This surface language spec includes:
 
@@ -31,21 +32,24 @@ fn name(label? arg1: type1, label? arg2: type2) effects -> returnType =
 	// Body
 ```
 
-The trailing equal sign is optional and used only when the entire function is defined on one line.
+The trailing equal sign is optional and used only when the entire function is
+defined on one line.
 
 ```void
 fn name(arg1:type1 arg2:type2) effects -> returnType
 	// Body
 ```
 
-Effects can also typically be inferred by the compiler, in which case they can be omitted.
+Effects can also typically be inferred by the compiler, in which case they can
+be omitted.
 
 ```void
 fn name(arg1:type1 arg2:type2) -> returnType
 	// Body
 ```
 
-The return type can also be inferred by the compiler, in which case it can be omitted.
+The return type can also be inferred by the compiler, in which case it can be
+omitted.
 
 ```void
 fn name(arg1:type1 arg2:type2)
@@ -88,14 +92,17 @@ fn get-json(address:String) -> ((async throws) Dictionary)
 
 ### Labeled arguments
 
-Void has similar function definition semantics to Swift. Arguments are labeled by default. The label also inherits the name of the argument by default. This is useful for readability and self documenting code.
+Void has similar function definition semantics to Swift. Arguments are labeled
+by default. The label also inherits the name of the argument by default. This is
+useful for readability and self documenting code.
 
 ```rust
 fn add(num: i32, other_num: i32) = num + other_num
 add(num: 1, other_num: 2)
 ```
 
-To change the name of the label from the default, specify it before the argument name.
+To change the name of the label from the default, specify it before the argument
+name.
 
 ```rust
 fn add(this num: i32, to other_num: i32) = num + other_num
@@ -123,7 +130,10 @@ add(1, to: 2)
 
 When a function call is isolated on its own line, the parenthesis can be elided.
 
-Dream uses significant indentation like [sweet](https://dwheeler.com/readable/sweet-expressions.html). So the parenthesis can be omitted provided its the only expression on it's line and is properly indented
+Dream uses significant indentation like
+[sweet](https://dwheeler.com/readable/sweet-expressions.html). So the
+parenthesis can be omitted provided its the only expression on it's line and is
+properly indented
 
 TODO: Fill this section out
 
@@ -181,25 +191,30 @@ let value = {
 
 ## Quote
 
-Note: Unlike common lisp, the single quote is not a macro for `quote`. Only the backtick.
+Note: Unlike common lisp, the single quote is not a macro for `quote`. Only the
+backtick.
 
-> Second, one might wonder what happens if a backquote expression occurs inside another backquote.
-> The answer is that the backquote becomes essentially unreadable and unwriteable; using nested
-> backquote is usually a tedious debugging exercise. The reason, in my not-so-humble opinion, is
-> that backquote is defined wrong. A comma pairs up with the innermost backquote when the default
-> should be that it pairs up with the outermost. But this is not the place for a rant; consult your
-> favorite Lisp reference for the exact behavior of nested backquote plus some examples.
+> Second, one might wonder what happens if a backquote expression occurs inside
+> another backquote. The answer is that the backquote becomes essentially
+> unreadable and unwriteable; using nested backquote is usually a tedious
+> debugging exercise. The reason, in my not-so-humble opinion, is that backquote
+> is defined wrong. A comma pairs up with the innermost backquote when the
+> default should be that it pairs up with the outermost. But this is not the
+> place for a rant; consult your favorite Lisp reference for the exact behavior
+> of nested backquote plus some examples.
 > https://lisp-journey.gitlab.io/blog/common-lisp-macros-by-example-tutorial/
 
-Void follows the suggestion of this website and pairs commas with the outermost backquote. Which
-allows one to use a backquote where a quote would normally be needed.
+Void follows the suggestion of this website and pairs commas with the outermost
+backquote. Which allows one to use a backquote where a quote would normally be
+needed.
 
 ## Regular Macros
 
-The `macro` macro is designed to make defining simple expansion macros easy and with minimal boiler
-plate. The body of a `macro` is automatically surrounded by a `quote` block. The `$` acts as the `,`
-in common lisp and evaluates the expression it prefixes. The `@` acts as the `,@` in common lisp and
-splices the list into the current list. Note that these shortcuts only apply to `macro`,
+The `macro` macro is designed to make defining simple expansion macros easy and
+with minimal boiler plate. The body of a `macro` is automatically surrounded by
+a `quote` block. The `$` acts as the `,` in common lisp and evaluates the
+expression it prefixes. The `@` acts as the `,@` in common lisp and splices the
+list into the current list. Note that these shortcuts only apply to `macro`,
 `define-macro` uses the standard operators of common lisp (`,`, `,@`, etc).
 
 ```void
@@ -220,7 +235,8 @@ TODO
 
 ### Syntax Contracts
 
-Type checking for macros. Enforces the structure for inputs and outputs of macros.
+Type checking for macros. Enforces the structure for inputs and outputs of
+macros.
 
 TODO
 
@@ -294,11 +310,12 @@ AnyChar = ? all valid characters (including whitespace) ?;
 
 # The Surface Language Syntax
 
-The surface language is a superset of the core language (a minimalistic lisp dialect). Its goal is
-to balance the power and simplicity of lisp with a more modern python like feel.
+The surface language is a superset of the core language (a minimalistic lisp
+dialect). Its goal is to balance the power and simplicity of lisp with a more
+modern python like feel.
 
-On top of the syntax features supported by the core language syntax, the surface language syntax
-supports:
+On top of the syntax features supported by the core language syntax, the surface
+language syntax supports:
 
 -   Parenthetical ellison via syntactically significant whitespace
 -   Standard function call syntax `f(x)`
@@ -308,8 +325,9 @@ supports:
 -   Macro expansion
 -   Tuple, Struct, Array, and Dictionary literals etc
 
-At its core, the surface language is still very lisp like. As in lisp, everything built on a list.
-Any valid s-expression, is a valid Surface Language Expression
+At its core, the surface language is still very lisp like. As in lisp,
+everything built on a list. Any valid s-expression, is a valid Surface Language
+Expression
 
 ## Parenthetical Elision
 
@@ -321,8 +339,8 @@ Void language is built around an s-expression syntax, like lisp:
 	(: else (+ (fib (- n 1)) (fib (- n 2)))))
 ```
 
-To reduce visual noise, parenthesis can be elided, using tabs as a mechanism to infer where the
-parenthesis should be inserted:
+To reduce visual noise, parenthesis can be elided, using tabs as a mechanism to
+infer where the parenthesis should be inserted:
 
 ```void
 if (n < 2)
@@ -330,7 +348,8 @@ if (n < 2)
 	else: (+ (fib (- n 1)) (fib (- n 2)))
 ```
 
-This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org/srfi-110/)
+This feature is inspired by [Scheme
+sweet-expressions](https://srfi.schemers.org/srfi-110/)
 
 ### Rules
 
@@ -343,7 +362,8 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     (add 1 2)
     ```
 
-2.  Indented lines are grouped together in a block and passed to their parent function call, provided the fist line is not a named argument.
+2.  Indented lines are grouped together in a block and passed to their parent
+    function call, provided the fist line is not a named argument.
 
     ```void
     add 2
@@ -357,11 +377,12 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     		(mul 4 x)))
     ```
 
-3.  Isolated labeled arguments, that is labeled arguments that are on their own line, are applied to the preceding function call provided:
+3.  Isolated labeled arguments, that is labeled arguments that are on their own
+    line, are applied to the preceding function call provided:
 
     1. There are no empty lines separating the two
-    2. The labeled argument is on the same indentation level, or 1 child indentation level as the
-       preceding function call.
+    2. The labeled argument is on the same indentation level, or 1 child
+       indentation level as the preceding function call.
 
     ```
     if x > y then: 3
@@ -383,9 +404,11 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     	(: else 5))
     ```
 
-4.  (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special handling.
+4.  (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special
+    handling.
 
-    1.  Greedy operators consume indented child blocks, rather than the parent function call
+    1.  Greedy operators consume indented child blocks, rather than the parent
+        function call
 
         ```
         let x =
@@ -401,8 +424,9 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
         		(: else 5)))))
         ```
 
-    2.  If an expression follows a greedy operator on the same line, a new line is inserted after the
-        operator and each child line has an additional level of indentation supplied.
+    2.  If an expression follows a greedy operator on the same line, a new line
+        is inserted after the operator and each child line has an additional
+        level of indentation supplied.
 
             ```
             let z = if x > y
@@ -425,23 +449,14 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
             				(: else 5)))))
             ```
 
-5. Parenthetical elision is disabled on any lines surrounded by parenthesis
-	1. Parenthetical elision can be re-enabled by using the whitespace curly block `${}` syntax
+5. Parenthetical elision is disabled on any lines surrounded by parenthesis 1.
+	Parenthetical elision can be re-enabled by using the whitespace curly block
+	`${}` syntax
 
-		```
-		add(x, y, ${
-			if x > y
-				then: 3 else: 5
-		})
+		``` add(x, y, ${ if x > y then: 3 else: 5 })
 
 
-		// Becomes
-		(add x y
-			(block
-				(if (> x y)
-					(: then 3)
-					(: else 5))))
-		```
+		// Becomes (add x y (block (if (> x y) (: then 3) (: else 5)))) ```
 
 
 Examples:
@@ -488,12 +503,13 @@ z: 3
 
 ## Standard Function Call Syntax
 
-To make Void language feel more familiar to users familiar with C style languages, Void supports
-standard function call syntax of the form `f(x)`.
+To make Void language feel more familiar to users familiar with C style
+languages, Void supports standard function call syntax of the form `f(x)`.
 
 ### Rules
 
-1.  Any identifier placed directly next to a list is inserted as the first argument of that list
+1.  Any identifier placed directly next to a list is inserted as the first
+    argument of that list
 
 ```
 add(1 2)
@@ -510,8 +526,8 @@ add (1 2)
 
 ## Uniform Function Call Syntax (Dot Notation)
 
-The dot (or period) operator applies the expression on the left as an argument of the expression on
-the right.
+The dot (or period) operator applies the expression on the left as an argument
+of the expression on the right.
 
 ```
 5.add(1)
@@ -530,8 +546,8 @@ squared(5)
 
 Labeled arguments have syntactic sugar that make passing lambda's much cleaner.
 
-When the left hand side of the `:` operator is a list, the first identifier in that list is treated
-as the name, additional identifiers become parameters.
+When the left hand side of the `:` operator is a list, the first identifier in
+that list is treated as the name, additional identifiers become parameters.
 
 ```
 fn call(cb: fn(v: i32) -> void)
@@ -545,7 +561,8 @@ call cb: (v) =>
 	print
 ```
 
-This works nicely with the rules of labeled arguments to support a trailing lambda syntax similar to that of swift or koka.
+This works nicely with the rules of labeled arguments to support a trailing
+lambda syntax similar to that of swift or koka.
 
 ```
 try this():
@@ -562,8 +579,8 @@ catch(e):
 
 ## Function Overloading
 
-Void functions can be overloaded. Provided that function overload can be unambiguously distinguished
-via their parameters and return type.
+Void functions can be overloaded. Provided that function overload can be
+unambiguously distinguished via their parameters and return type.
 
 ```void
 fn sum(a: i32, b: i32)
@@ -582,7 +599,8 @@ fn sum(numbers: ...Int)
 	print("Def 3");
 ```
 
-This can be especially useful for overloading operators to support a custom type:
+This can be especially useful for overloading operators to support a custom
+type:
 
 ```
 fn '+'(_ a: Vec3, _ b: Vec3) -> Vec3
@@ -644,15 +662,20 @@ export const infixOperators = new Map<string, [number, Associativity]>([
 
 ### Rules
 
--   The infix operator must be surrounded by whitespace to be interpreted as an infix operation
--   If the infix operator is the first identifier in a list, s-expression syntax is used instead
--   Infix operators should use the same precedence and associative rules as JavaScript
+-   The infix operator must be surrounded by whitespace to be interpreted as an
+    infix operation
+-   If the infix operator is the first identifier in a list, s-expression syntax
+    is used instead
+-   Infix operators should use the same precedence and associative rules as
+    JavaScript
 
 ## Terminal Identifier
 
-Terminal identifiers do not need to be separated by a whitespace from other identifiers.
+Terminal identifiers do not need to be separated by a whitespace from other
+identifiers.
 
-They are any list of OpChars (see grammar) that start with one of the following OpChars:
+They are any list of OpChars (see grammar) that start with one of the following
+OpChars:
 
 -   `.`, `:`, `;`, `?`, `\`, `!`, `;`, `&`, `|`
 
@@ -660,40 +683,45 @@ Note: Being a terminal operator does not imply infix
 
 ## The Syntax Pipeline
 
-In the spirit of lisp, Void language is designed to be hackable. As a result, the surface language
-syntax is implemented entirely in macros. This makes the language both easy to maintain, and easy to
-extend.
+In the spirit of lisp, Void language is designed to be hackable. As a result,
+the surface language syntax is implemented entirely in macros. This makes the
+language both easy to maintain, and easy to extend.
 
 There are three types of macros:
 
 -   Reader Macros: Expanded during parsing, emit am ast
--   Syntax Macros: Expanded after parsing, are passed the ast from the parser and produce the final
-    ast
+-   Syntax Macros: Expanded after parsing, are passed the ast from the parser
+    and produce the final ast
 -   Regular Macros: Expanded by a syntax macro
 
-At a high level, the pipeline looks something like this: `file.void -> parser + reader macros -> syntax macros -> ast (the core language)`
+At a high level, the pipeline looks something like this: `file.void -> parser +
+reader macros -> syntax macros -> ast (the core language)`
 
 In the next sections, the different macros will be defined in depth.
 
 ### Reader Macros
 
-Reader macros are effectively extensions of the parser. They take over parsing for anything more
-complex than identifying tokens and producing a tree from `(nested (lisp like function calls))`.
+Reader macros are effectively extensions of the parser. They take over parsing
+for anything more complex than identifying tokens and producing a tree from
+`(nested (lisp like function calls))`.
 
-Each time the parser encounters a token, it will match that token against all registered reader
-macros. If a reader macro exists for that token, the file stream is passed to the reader macro. The
-macro then consumes the characters off of this stream at its own discretion. Once finished, it
-returns a partial ast of the same type that the parser returns. Once the macro returns, the parser
-will insert the result at its current location within the AST and continue on.
+Each time the parser encounters a token, it will match that token against all
+registered reader macros. If a reader macro exists for that token, the file
+stream is passed to the reader macro. The macro then consumes the characters off
+of this stream at its own discretion. Once finished, it returns a partial ast of
+the same type that the parser returns. Once the macro returns, the parser will
+insert the result at its current location within the AST and continue on.
 
-User defined reader macros should always begin with a `#`. As of writing, this is by convention and
-not enforced in the compiler. It may be enforced at a later date.
+User defined reader macros should always begin with a `#`. As of writing, this
+is by convention and not enforced in the compiler. It may be enforced at a later
+date.
 
 ### Syntax Macros
 
-Syntax Macros are responsible for transforming the ast produced by the parser into the core language
-ast. Each syntax macro is passed a full copy of the AST. These macros are strictly run in order. The
-output of the final syntax macro must strictly adhere to the core language specification.
+Syntax Macros are responsible for transforming the ast produced by the parser
+into the core language ast. Each syntax macro is passed a full copy of the AST.
+These macros are strictly run in order. The output of the final syntax macro
+must strictly adhere to the core language specification.
 
 Syntax Macro Pipeline Example:
 
@@ -724,13 +752,14 @@ fn (fib n:i32) -> i32
 
 ### Regular Macros
 
-These are the macros most users will interact with and define the bulk of the language. They are
-called in the language exactly like a normal function and return an expression.
+These are the macros most users will interact with and define the bulk of the
+language. They are called in the language exactly like a normal function and
+return an expression.
 
-In general, user macros can return any valid surface language expression. Surface Language
-implementation macros should either directly return a core language expression or return an
-expression that can be converted to a core language expression further down the syntax macro
-pipeline.
+In general, user macros can return any valid surface language expression.
+Surface Language implementation macros should either directly return a core
+language expression or return an expression that can be converted to a core
+language expression further down the syntax macro pipeline.
 
 ```
 
