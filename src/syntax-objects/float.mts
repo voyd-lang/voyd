@@ -1,11 +1,11 @@
 import { Expr } from "./expr.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 
 export class Float extends Syntax {
   readonly syntaxType = "float";
   value: number;
 
-  constructor(opts: SyntaxOpts & { value: number }) {
+  constructor(opts: SyntaxMetadata & { value: number }) {
     super(opts);
     this.value = opts.value;
   }

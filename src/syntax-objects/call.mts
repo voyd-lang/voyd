@@ -1,5 +1,5 @@
 import { Expr } from "./expr.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 import { Type } from "./types.mjs";
 
 /** Defines a function call */
@@ -8,7 +8,7 @@ export class Call extends Syntax {
   readonly fnId: string;
   readonly args: Expr[];
 
-  constructor(opts: SyntaxOpts & { fnId: string; args: Expr[] }) {
+  constructor(opts: SyntaxMetadata & { fnId: string; args: Expr[] }) {
     super(opts);
     this.fnId = opts.fnId;
     this.args = opts.args;

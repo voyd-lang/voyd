@@ -6,7 +6,7 @@ https://justforfunnoreally.dev/
 
 ```rust
 // Find the value of the fibonacci sequence at index n
-fn fib(n: i32) -> i32
+fn fib(at n: i32) -> i32
   if n < 2 then:
     n
   else:
@@ -15,17 +15,17 @@ fn fib(n: i32) -> i32
 // All binary programs have a main function
 fn main() -> void
   for num in range(15)
-    // Print fibonacci sequence at index using UFCS.
-    num.fib().print()
+    // Call print on the fibonacci sequence at index using UFCS.
+    fib(at: num).print()
 ```
 
 ```rust
 fn app() -> html
-  let todo-items = ["wake up", "eat", "code", "sleep"]
+  let todo_items = ["wake up", "eat", "code", "sleep"]
   <div>
     <h1>TODO</h1>
     <ul>
-      ${todo-items.map i => <li>${i}</li>}
+      ${todo_items.map i => <li>${i}</li>}
     </ul>
   </div>
 ```
@@ -118,55 +118,68 @@ var my_var = 7
 A Basic function:
 
 ```rust
-fn add(a:i32 b:i32) -> i32
+fn add(a: i32, b: i32) -> i32
   a + b
 ```
 
 In most cases the return type can be inferred
 
 ```rust
-fn add(a:i32 b:i32) = a + b // The equal sign is used when the function is written on one line
+fn add(a:i32, b:i32) = a + b // The equal sign is used when the function is written on one line
 ```
 
-Functions are called using S-expression syntax
+To call a function, use the function name followed by the arguments in parenthesis
+
+```
+add(a: 1, b: 2)
+```
+
+Void has similar function definition semantics to Swift. Arguments are labeled by default. The label also inherits the name of the argument by default. This is useful for readability and self documenting code.
+
+To change the name of the label from the default, specify it before the argument name.
 
 ```rust
-(add 1 2) // 3
+fn add(this num: i32, to other_num: i32) = num + other_num
+
+add(this: 1, to: 2)
 ```
 
-Dream uses significant indentation like [sweet](https://dwheeler.com/readable/sweet-expressions.html). So the parenthesis can be omitted provided its the only expression on it's line and is properly indented
+You can also omit the label by using an underscore
 
-```
-add 1 2
-```
+```rust
+fn add(_ num: i32, _ other_num: i32) = num + other_num
 
-Dream can also call functions in the more standard mathematical notation. Note that there cannot be whitespace separating the function name from the opening parenthesis
-
-```
-add(1 2)
+add(1, 2)
 ```
 
-## Infix Notation
+Arguments named `self` never have a label
 
-Dream supports infix notation on a fixed list of operators. Infix operators must be separated by whitespace on each side.
+```rust
+fn add(self: i32, to num: i32) = self + to
 
-Operators include:
+add(1, to: 2)
+```
 
-- `+`
-- `-`
-- `*`
-- `/`
-- `<`
-- `>`
-- `<=`
-- `>=`
-- `^`
-- `=` Assignment
-- `+=` Assignment
-- `-=` Assignment
-- `*=` Assignment
-- `/=` Assignment
-- `==` Comparison
+This makes another feature of Void much more convenient, Uniform Function Call Syntax (UFCS). When the first argument of a function is not labeled, the function can be called on the first argument using dot notation.
+
+```rust
+fn add(self: i32, to num: i32) = self + num
+
+1.add(to: 2)
+```
+
+One final neat feature of functions in Void is that they can be called without parenthesis. This is useful for creating DSLs and for supporting a more natural language like syntax.
+
+```rust
+fn walk(from: Point, to: Point) = // ...
+
+walk from: home to: school
+```
+
+A function can only be called without parenthesis when they are not an argument to another function*.
+
+* This is a simplification, the actual rules are a bit more complex. But its all you
+need to know in order to use the feature.
 
 ## Control flow
 
@@ -197,7 +210,7 @@ loop
   a += 1
 ```
 
-Loops can be named
+Loops can be labeled
 
 ```rust
 var a = 0
@@ -211,25 +224,25 @@ Useful constructs from looping through iterables
 
 ```rust
 for item in iterable
-  write item
+  print item
 ```
 
 ### Match Statements
 
-```
+```rust
 let x = 3
 match x
-  1 (write "One")
-  2 (write "Two")
-  3 (write "Three")
-  default
+  1 => print "One"
+  2 => print "Two"
+  3 => print "Three"
+  _ =>
     // Match statements are exhaustive, they must cover every possible
     // case. When not every case is covered, a default handler must be
     // provided.
     write "A number"
 ```
 
-## Lambdas
+## Closures
 
 ```rust
 let double = n => n * 2
@@ -250,35 +263,16 @@ x.squared
 squared(x)
 ```
 
-## Named Arguments
-
-Any arguments are surrounded by curly braces
-
-```
-fn move(robot:Robot, { to: [i32 i32 i32] })
-  // etc
-
-move robot to: [3.1, 2.3, 4.0]
-```
-
-You can also provide separate external and internal names.
-
-```
-fn add(a:i32, { to:b: i32 }) = a + b
-
-add 1 to: 4
-```
-
 ## Generics
 
 ```rust
-fn add::<T>(a:T b:T) -> T
+fn add[T](a: T, b: T) -> T
   a + b
 ```
 
 With trait constraints
 
 ```rust
-fn add::<T extends Numeric>(a:T b:T) -> T
+fn add[T impls Numeric](a: T, b: T) -> T
   a + b
 ```

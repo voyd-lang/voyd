@@ -11,10 +11,14 @@ import {
   Macro,
   RegularMacro,
   MacroVariable,
+  VoidModule,
 } from "./syntax-objects/index.mjs";
+import { NamedEntity } from "./syntax-objects/named-entity.mjs";
 
 export const expandRegularMacros = (expr: Expr): Expr => {
+  if (expr.isModule()) return expandModuleMacros(expr);
   if (!expr.isList()) return expr;
+  if (expr.calls("use")) return resolveUseStatement(expr);
   if (expr.calls("export")) return evalExport(expr);
   if (expr.calls("macro")) return evalMacroDef(expr);
   if (expr.calls("macro-let")) return evalMacroLetDef(expr);
@@ -24,45 +28,128 @@ export const expandRegularMacros = (expr: Expr): Expr => {
     return expr.map(expandRegularMacros);
   }
 
-  const macro = identifier.resolveAsMacroEntity();
-  if (macro?.syntaxType === "macro") {
-    return expandRegularMacros(expandMacro(macro, expr));
+  const macro = identifier.resolve();
+  if (macro?.isMacro()) {
+    const after = expandRegularMacros(expandMacro(macro, expr));
+    return after;
   }
 
   return expr.map(expandRegularMacros);
 };
 
-const evalExport = (list: List) => {
-  const value = expandRegularMacros(list.at(1)!);
-  if (value.isMacro()) {
-    list.parent?.registerEntity(value);
-  }
+const expandModuleMacros = (module: VoidModule): VoidModule => {
+  if (module.phase > 0) return module;
+  module.phase = 1;
+  module.applyMap((expr) => expandRegularMacros(expr));
+  module.phase = 2;
+  return module;
+};
 
-  if (value.isMacroVariable()) {
-    list.parent?.registerEntity(value);
+const resolveUseStatement = (list: List) => {
+  const path = list.listAt(1);
+  const entities = resolveUsePath(path);
+  if (entities instanceof Array) {
+    entities.forEach((e) => list.parent?.registerEntity(e));
+  } else {
+    list.parent?.registerEntity(entities);
   }
-
   return list;
 };
 
-const evalMacroDef = (list: List) => {
-  const macro = listToMacro(list);
-  list.parent?.registerEntity(macro);
-  return macro;
+const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
+  if (!path.calls("::")) {
+    throw new Error(
+      `Invalid use statement ${console.log(JSON.stringify(path, undefined, 2))}`
+    );
+  }
+
+  const [_, left, right] = path.value;
+  const unexpandedModule = left?.isList()
+    ? resolveUsePath(left)
+    : left?.isIdentifier()
+    ? resolveUseIdentifier(left)
+    : undefined;
+
+  if (
+    !unexpandedModule ||
+    unexpandedModule instanceof Array ||
+    !unexpandedModule.isModule()
+  ) {
+    throw new Error(
+      `Invalid use statement, not a module ${console.log(
+        JSON.stringify(path, undefined, 2)
+      )}`
+    );
+  }
+
+  const module = expandModuleMacros(unexpandedModule);
+  const identifier = right as Identifier;
+
+  if (!identifier?.isIdentifier()) {
+    throw new Error(`Invalid use statement, expected identifier, got ${right}`);
+  }
+
+  if (identifier?.is("***")) {
+    return module.getAllEntities().filter((e) => e.isExported);
+  }
+
+  const entity = module.resolveChildEntity(right as Identifier);
+  if (!entity) {
+    throw new Error(
+      `Invalid use statement, macro ${right} not found in module ${module}`
+    );
+  }
+
+  if (!entity.isExported) {
+    throw new Error(`Invalid use statement, entity ${right} is not exported`);
+  }
+
+  return entity;
 };
 
-const evalMacroLetDef = (list: List) =>
-  evalMacroVarDef(list.slice(1).insert("define"));
+const resolveUseIdentifier = (identifier: Identifier) => {
+  if (identifier.is("super")) {
+    return identifier.parentModule?.parentModule;
+  }
+
+  return identifier.resolve();
+};
+
+const evalExport = (list: List) => {
+  const block = list.listAt(1); // export is expected to be passed a block
+
+  const expandedBlock = block.map((exp) => {
+    const expanded = expandRegularMacros(exp);
+    if (expanded.isMacro()) {
+      expanded.isExported = true;
+      list.parent?.registerEntity(expanded);
+    }
+
+    if (expanded.isMacroVariable()) {
+      expanded.isExported = true;
+      list.parent?.registerEntity(expanded);
+    }
+
+    return expanded;
+  });
+
+  list.set(1, expandedBlock);
+  return list;
+};
+
+const evalMacroLetDef = (list: List) => {
+  const expanded = expandRegularMacros(list.set(0, "let")) as List;
+  return evalMacroVarDef(expanded);
+};
 
 /** Slice out the beginning macro before calling */
-const listToMacro = (list: List): Macro => {
-  // TODO Assertions?
-  const signature = list.listAt(0);
+const evalMacroDef = (list: List): Macro => {
+  const signature = list.listAt(1);
   const name = signature.identifierAt(0);
   const parameters = signature.rest() as Identifier[];
-  const body = list.slice(1).map(expandRegularMacros);
+  const body = list.slice(2).map(expandRegularMacros).insert("block");
   const macro = new RegularMacro({
-    ...list.context,
+    ...list.metadata,
     name,
     parameters,
     body,
@@ -79,7 +166,9 @@ export const expandMacro = (macro: Macro, call: List): Expr => {
     registerMacroVar({ with: clone, name, value: call.at(index + 1)! });
   });
 
-  return clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
+  const result = clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
+  result.parent = call.parent;
+  return result;
 };
 
 const evalMacroExpr = (expr: Expr) => {
@@ -89,9 +178,9 @@ const evalMacroExpr = (expr: Expr) => {
 };
 
 const evalIdentifier = (expr: Identifier): Expr => {
-  const entity = expr.resolveAsMacroEntity();
+  const entity = expr.resolve();
   if (!entity) return expr;
-  if (entity.syntaxType !== "macro-variable") return expr;
+  if (!entity.isMacroVariable()) return expr;
   if (!entity.value) return expr;
   return entity.value;
 };
@@ -104,7 +193,7 @@ const evalMacroTimeFnCall = (list: List): Expr => {
   const argsArr = fnsToSkipArgEval.has(idStr)
     ? list.rest()
     : list.rest().map(evalMacroExpr);
-  const args = new List({ ...list.context, value: argsArr });
+  const args = new List({ ...list.metadata, value: argsArr });
 
   const func = functions[idStr];
   if (func) return func(args);
@@ -125,7 +214,9 @@ const callLambda = (lambda: MacroLambda, args: List): Expr => {
     registerMacroVar({ with: clone, name, value: args.at(index)! });
   });
 
-  return clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
+  const result = clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
+  result.parent = args.parent;
+  return result;
 };
 
 type MacroFn = (args: List) => Expr;
@@ -147,8 +238,8 @@ const functions: Record<string, MacroFn | undefined> = {
       throw new Error(`Expected identifier, got ${identifier}`);
     }
 
-    const info = args.parent?.resolveMacroEntity(identifier);
-    if (!info || info.syntaxType !== "macro-variable") {
+    const info = args.parent?.resolveEntity(identifier);
+    if (!info || !info.isMacroVariable()) {
       throw new Error(`Identifier ${identifier.value} is not defined`);
     }
 
@@ -159,6 +250,7 @@ const functions: Record<string, MacroFn | undefined> = {
     info.value = evalMacroExpr(args.at(1)!);
     return nop();
   },
+  ":": (args) => args.at(1) ?? nop(),
   "==": (args) => bl(args, (l, r) => l === r),
   ">": (args) => bl(args, (l, r) => l > r),
   ">=": (args) => bl(args, (l, r) => l >= r),
@@ -171,7 +263,7 @@ const functions: Record<string, MacroFn | undefined> = {
   "-": (args) => ba(args, (l, r) => l - r),
   "*": (args) => ba(args, (l, r) => l * r),
   "/": (args) => ba(args, (l, r) => l / r),
-  "lambda-expr": (args) => {
+  "=>": (args) => {
     const params = args.first();
     const body = args.at(1);
 
@@ -199,7 +291,7 @@ const functions: Record<string, MacroFn | undefined> = {
 
         if (exp.isList() && exp.calls("$@")) {
           const rest = new List({ value: exp.rest(), parent: body });
-          return (evalMacroExpr(rest) as List).insert("splice-quote");
+          return (evalMacroExpr(rest) as List).insert("splice-normal-context");
         }
 
         if (exp.isList()) return expand(exp);
@@ -249,7 +341,7 @@ const functions: Record<string, MacroFn | undefined> = {
     return list.slice(start, end);
   },
   extract: (args) => {
-    const list = args.first()! as List;
+    const list = args.listAt(0);
     const index = getMacroTimeValue(args.at(1)) as number;
     return list.at(index)!; // TODO: Make this safer
   },
@@ -290,20 +382,26 @@ const functions: Record<string, MacroFn | undefined> = {
     return list.push(...val.value);
   },
   concat: (args) => {
-    const list = args.first() as List;
+    const list = args.listAt(0);
     return list.push(...args.rest().flatMap((expr) => (expr as List).value));
   },
   "is-list": (args) => bool(!!args.at(0)?.isList()),
-  log: (arg) => {
-    console.error(JSON.stringify(arg.first(), undefined, 2));
-    return arg;
+  log: (args) => {
+    const arg = args.first();
+    if (arg?.isStringLiteral()) {
+      console.error(arg.value);
+      return args;
+    }
+
+    console.error(JSON.stringify(arg, undefined, 2));
+    return args;
   },
   split: (args) => {
     const str = args.at(0) as StringLiteral;
     const splitter = args.at(0) as StringLiteral;
     return new List({
       value: str.value.split(splitter.value),
-      ...args.context,
+      ...args.metadata,
     });
   },
   "expand-macros": (args) => expandRegularMacros(args.at(0)!),
@@ -313,7 +411,7 @@ const functions: Record<string, MacroFn | undefined> = {
     }),
 };
 
-const fnsToSkipArgEval = new Set(["if", "quote", "lambda-expr", "define", "="]);
+const fnsToSkipArgEval = new Set(["if", "quote", "=>", "define", "="]);
 
 const handleOptionalConditionParenthesis = (expr: Expr): Expr => {
   if (expr.isList() && expr.first()?.isList()) {
@@ -370,23 +468,26 @@ const bool = (b: boolean) => new Bool({ value: b });
 const getMacroTimeValue = (expr: Expr | undefined): any => {
   if (!expr) return undefined;
 
+  // This behavior is a bit magical. If an identifier has a runtime value, we return that value.
+  // Otherwise we return the name of identifier as a string. This is because we do not properly
+  // Distinguish between a macro time identifier and an identifier from the ast it is operating on.
   if (expr.isIdentifier()) {
-    const result = expr.resolveAsMacroEntity();
-    if (result?.syntaxType !== "macro-variable") {
-      throw new Error(
-        `Macro entity cannot be resolved into macro time value, ${result}`
-      );
+    const result = expr.resolve();
+    if (result?.isMacroVariable()) {
+      return getMacroTimeValue(result.value);
     }
-    return getMacroTimeValue(result.value);
+    if (result) return result;
   }
 
-  if (expr.isFloat() || expr.isInt() || expr.isStringLiteral()) {
-    return expr.value;
-  }
+  const hasValue =
+    expr.isFloat() ||
+    expr.isInt() ||
+    expr.isStringLiteral() ||
+    expr.isList() ||
+    expr.isIdentifier();
 
-  throw new Error(
-    `Macro entity cannot be resolved into macro time value, ${expr}`
-  );
+  if (hasValue) return expr.value;
+  return expr;
 };
 
 const registerMacroVar = (opts: {
@@ -401,18 +502,20 @@ const registerMacroVar = (opts: {
 };
 
 export const evalMacroVarDef = (call: List) => {
-  // Warning: Cannot be typed like would be at compile time (for now);
+  const isMutable = call.calls("define-mut");
+
   const identifier = call.at(1);
-  const mut = call.at(2) as Bool;
-  const init = call.at(3);
+  const init = call.at(2);
   if (!identifier?.isIdentifier() || !init) {
     throw new Error("Invalid variable");
   }
 
-  return new MacroVariable({
-    ...identifier.context,
+  const variable = new MacroVariable({
+    ...identifier.metadata,
     name: identifier,
-    isMutable: mut.value,
+    isMutable,
     value: evalMacroExpr(init),
   });
+  call.parent?.registerEntity(variable);
+  return variable;
 };

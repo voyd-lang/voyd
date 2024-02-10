@@ -1,7 +1,7 @@
 import { Expr } from "./expr.mjs";
 import { Identifier } from "./identifier.mjs";
 import { List } from "./list.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 
 export class MacroLambda extends Syntax {
   readonly syntaxType = "macro-lambda";
@@ -9,7 +9,7 @@ export class MacroLambda extends Syntax {
   readonly body: List;
 
   constructor(
-    opts: SyntaxOpts & {
+    opts: SyntaxMetadata & {
       parameters?: Identifier[];
       body: List;
     }
@@ -17,6 +17,7 @@ export class MacroLambda extends Syntax {
     super(opts);
     this.parameters = opts.parameters ?? [];
     this.body = opts.body;
+    this.body.parent = this;
   }
 
   toString() {

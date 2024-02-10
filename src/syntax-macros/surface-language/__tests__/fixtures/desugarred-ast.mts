@@ -1,4 +1,5 @@
 export const desugarredAst = [
+  ["use", ["::", ["::", "std", "io"], ["object", "read"]]],
   [
     "fn",
     ["fib", [":", "n", "i32"]],

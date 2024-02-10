@@ -1,19 +1,43 @@
 import { Expr } from "./expr.mjs";
-import { Id } from "./identifier.mjs";
-import { List } from "./list.mjs";
+import { Identifier } from "./identifier.mjs";
+import { List, ListValue } from "./list.mjs";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 
 export class VoidModule extends NamedEntity {
   readonly syntaxType = "module";
-  readonly ast: List;
+  value: Expr[] = [];
+  /** 0 = init, 1 = expanding regular macros, 2 = regular macros expanded */
+  phase = 0;
 
   constructor(
     opts: NamedEntityOpts & {
-      ast: List;
+      value?: ListValue[];
+      phase?: number;
     }
   ) {
     super(opts);
-    this.ast = opts.ast;
+    if (opts.value) this.push(...opts.value);
+    this.phase = opts.phase ?? 0;
+  }
+
+  getPath(): string[] {
+    const path = this.parentModule?.getPath() ?? [];
+    return [...path, this.name.toString()];
+  }
+
+  map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoidModule {
+    return new VoidModule({
+      ...super.getCloneOpts(),
+      value: this.value.map(fn),
+      phase: this.phase,
+    });
+  }
+
+  applyMap(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoidModule {
+    const old = this.value;
+    this.value = [];
+    this.push(...old.map(fn));
+    return this;
   }
 
   toString() {
@@ -23,30 +47,41 @@ export class VoidModule extends NamedEntity {
   clone(parent?: Expr | undefined): VoidModule {
     return new VoidModule({
       ...super.getCloneOpts(parent),
-      ast: this.ast,
+      value: this.value,
+      phase: this.phase,
     });
   }
 
   toJSON() {
-    return ["module", this.name, this.ast];
+    return ["module", this.name, this.value];
   }
 
-  pushChildModule(module: VoidModule) {
-    this.registerEntity(module);
-    this.ast.push(module);
-  }
+  push(...expr: ListValue[]) {
+    expr.forEach((ex) => {
+      if (typeof ex === "string") {
+        this.value.push(new Identifier({ value: ex, parent: this }));
+        return;
+      }
 
-  /** Must not be recursive / search parents. */
-  resolveChildModule(name: Id): VoidModule | undefined {
-    return this.lexicon.resolveModuleEntity(name);
-  }
+      if (ex instanceof Array) {
+        this.push(new List({ value: ex, parent: this }));
+        return;
+      }
 
-  resolveNestedModule(path: Id[]): VoidModule | undefined {
-    const [id, ...rest] = path;
-    if (!id) return;
-    const module = this.resolveChildModule(id);
-    if (!module) return;
-    if (!rest.length) return module;
-    return module.resolveNestedModule(rest);
+      ex.parent = this;
+
+      if (ex instanceof NamedEntity) {
+        this.registerEntity(ex);
+      }
+
+      if (ex.isList() && ex.calls("splice-quote")) {
+        this.value.push(...ex.rest());
+        return;
+      }
+
+      this.value.push(ex);
+    });
+
+    return this;
   }
 }

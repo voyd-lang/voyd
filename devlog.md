@@ -1,3 +1,45 @@
+# 24 July 2024
+
+Effect system implementation ideas:
+
+```ts
+type Get = () => number;
+type Put = (value: number) => void;
+
+const loop = (n: number) => {
+  if (n === 0) return;
+  put(get() + 1);
+  return loop(n - 1);
+};
+
+// Effect functions
+const get = (state, continuation) => continuation(state, state.value);
+const put = (value, state, continuation) =>
+  continuation({ ...state, value }, undefined);
+
+// Transpiled loop function
+const loop2 = (
+  n: number,
+  state: { value: number },
+  continuation: (state: { value: number }) => void
+) => {
+  if (n === 0) return continuation(state, undefined);
+
+  return get(state, (newState, result) =>
+    put(result + 1, newState, (newerState) =>
+      loop2(n - 1, newerState, continuation)
+    )
+  );
+};
+
+// Example usage
+const initialState = { value: 0 };
+loop(5, initialState, (finalState, result) => {
+  console.log("Final State:", finalState);
+  console.log("Result:", result);
+});
+```
+
 # 14 August 2023
 
 JavaScript / TS Pivot

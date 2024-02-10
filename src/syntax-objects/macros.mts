@@ -20,6 +20,7 @@ export class RegularMacro extends NamedEntity {
     super(opts);
     this.parameters = opts.parameters ?? [];
     this.body = opts.body;
+    this.body.parent = this;
   }
 
   getName(): string {

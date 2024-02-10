@@ -1,4 +1,7 @@
-use std::macros::***
+import { File } from "../../../../lib/file.mjs";
+
+export const exampleVoidText = `
+use std::io::{ read }
 
 fn fib(n: i32) -> i32
 	if n <= 1 then:
@@ -32,3 +35,6 @@ fn main()
 	let z = nothing()
 	let test_spacing = fib n
 	let result = fib(n)
+`;
+
+export const voidFile = new File(exampleVoidText, "beep/boop");

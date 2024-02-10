@@ -1,7 +1,6 @@
 export
 	macro pub()
-		define body expand-macros(&body)
-		quote export &body
+		quote(export (block $&body))
 
 pub macro `()
 	quote quote $@&body
@@ -24,7 +23,7 @@ pub macro global()
 			` define-mut-global
 	`($@function
 		$(extract equals-expr 1)
-		$(extract (extract equals-expr 2) 1))
+		$(extract equals-expr 2))
 
 pub macro ';'()
 	let func = &body.extract(0)
@@ -38,14 +37,6 @@ pub macro ';'()
 		func.concat(args)
 	else:
 		concat(`($func) args)
-
-pub macro lambda()
-	let parameters = &body.extract(0)
-	let body = &body.extract(1)
-	` lambda-expr $parameters $body
-
-pub macro '=>'(&body)
-	` lambda $@&body
 
 // Extracts typed parameters from a list where index 0 is fn name, and offset-index+ are labeled-expr
 macro-let extract-parameters = (definitions) =>
@@ -76,7 +67,7 @@ pub macro fn()
 		$identifier
 		$params
 		$(`(return-type $@(return-type)))
-		$(concat #["block"] expressions))
+		$(concat `(block) expressions))
 
 pub macro def-wasm-operator(op wasm-fn arg-type return-type)
 	`(fn $op(left:$arg-type right:$arg-type) -> $return-type
@@ -107,6 +98,7 @@ pub macro extern-fn()
 		$(`(return-type $@(return-type))))
 
 pub macro match()
+	log "match"
 	let value-expr = &body.extract(0)
 	let cases = &body.slice(1)
 	let expand-cases = (cases index) =>

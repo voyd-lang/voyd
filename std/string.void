@@ -1,4 +1,4 @@
-use std/macros ***
+use std::macros::***
 
 type String = i32
 
@@ -29,8 +29,7 @@ extern-fn strings str-test(str:String regex:String flags:String) -> void
 pub macro string(str)
 	let add-codes = str.split("").map (char) =>
 		` add-char-code-to-string $(char-to-code char) index
-	macro-expand
-		` block
-			let index:String = alloc-string()
-			$@add-codes
-			index
+	`(block
+		(let index:String = alloc-string())
+		$@add-codes
+		index)

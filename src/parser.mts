@@ -5,7 +5,6 @@ import { getReaderMacroForToken } from "./reader-macros/index.mjs";
 import {
   isDigit,
   isDigitSign,
-  isOpChar,
   isTerminatingOpChar,
   isTerminator,
   isWhitespace,
@@ -131,7 +130,7 @@ const lexer = (file: File): Token => {
 };
 
 const consumeTerminatingOp = (file: File, token: Token) => {
-  while (isOpChar(file.next)) {
+  while (isTerminatingOpChar(file.next)) {
     token.addChar(file.consumeChar());
   }
 };

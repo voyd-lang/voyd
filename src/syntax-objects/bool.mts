@@ -1,11 +1,11 @@
 import { Expr } from "./expr.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 
 export class Bool extends Syntax {
   readonly syntaxType = "bool";
   value: boolean;
 
-  constructor(opts: SyntaxOpts & { value: boolean }) {
+  constructor(opts: SyntaxMetadata & { value: boolean }) {
     super(opts);
     this.value = opts.value;
   }

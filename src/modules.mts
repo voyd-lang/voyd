@@ -1,4 +1,3 @@
-import { resolve } from "path";
 import { ParsedFiles } from "./lib/parse-directory.mjs";
 import { List } from "./syntax-objects/list.mjs";
 import { VoidModule } from "./syntax-objects/module.mjs";
@@ -12,10 +11,7 @@ export const resolveFileModules = (opts: {
 }): VoidModule => {
   const { stdPath, srcPath, files } = opts;
 
-  const rootModule = new VoidModule({
-    name: "root",
-    ast: new List({ value: [] }),
-  });
+  const rootModule = new VoidModule({ name: "root" });
 
   for (const [filePath, file] of Object.entries(files)) {
     const resolvedPath = filePathToModulePath(filePath, srcPath, stdPath);
@@ -39,16 +35,23 @@ const registerModule = ({
 
   if (!name) return;
 
-  const existingModule = parentModule.resolveChildModule(name);
+  const existingModule = parentModule.resolveChildEntity(name);
+
+  if (existingModule && !existingModule.isModule()) {
+    throw new Error(
+      `Cannot register module ${name} because it is already registered as ${existingModule.syntaxType}`
+    );
+  }
 
   const module =
     existingModule ??
     new VoidModule({
+      ...(!rest.length ? { ...ast.metadata, value: ast.value } : {}),
       name,
-      ast: rest.length ? new List({ value: [] }) : ast,
     });
+  module.isExported = true;
 
-  if (!existingModule) parentModule.pushChildModule(module);
+  if (!existingModule) parentModule.push(module);
 
   if (!rest.length) return;
 

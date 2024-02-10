@@ -2,14 +2,15 @@ import { Expr } from "./expr.mjs";
 import { getIdStr } from "./get-id-str.mjs";
 import { Id, Identifier } from "./identifier.mjs";
 import { Int } from "./int.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { NamedEntity } from "./named-entity.mjs";
+import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 
 export class List extends Syntax {
   readonly syntaxType = "list";
   value: Expr[] = [];
 
   constructor(
-    opts: SyntaxOpts & {
+    opts: SyntaxMetadata & {
       value?: ListValue[] | List;
     }
   ) {
@@ -46,14 +47,15 @@ export class List extends Syntax {
   listAt(index: number): List {
     const id = this.at(index);
     if (!id?.isList()) {
-      throw new Error(`No identifier at index ${index}`);
+      throw new Error(`No list at index ${index}`);
     }
     return id;
   }
 
-  set(index: number, value: Expr) {
-    value.parent = this;
-    this.value[index] = value; // Should this clone?
+  set(index: number, expr: Expr | string) {
+    const result = typeof expr === "string" ? Identifier.from(expr) : expr;
+    result.parent = this;
+    this.value[index] = result;
     return this;
   }
 
@@ -97,14 +99,18 @@ export class List extends Syntax {
         return;
       }
 
-      const cloned = ex.clone(this);
+      ex.parent = this;
 
-      if (cloned.isList() && cloned.calls("splice-quote")) {
-        this.value.push(...cloned.rest());
+      if (ex instanceof NamedEntity) {
+        this.registerEntity(ex);
+      }
+
+      if (ex.isList() && ex.calls("splice-quote")) {
+        this.value.push(...ex.rest());
         return;
       }
 
-      this.value.push(cloned);
+      this.value.push(ex);
     });
 
     return this;

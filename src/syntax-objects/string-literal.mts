@@ -1,11 +1,11 @@
 import { Expr } from "./expr.mjs";
-import { Syntax, SyntaxOpts } from "./syntax.mjs";
+import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 
 export class StringLiteral extends Syntax {
   readonly syntaxType = "string-literal";
   value: string;
 
-  constructor(opts: SyntaxOpts & { value: string }) {
+  constructor(opts: SyntaxMetadata & { value: string }) {
     super(opts);
     this.value = opts.value;
   }
