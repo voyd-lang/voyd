@@ -1,5 +1,7 @@
 import { Expr } from "./expr.mjs";
+import { Float } from "./float.mjs";
 import { Identifier } from "./identifier.mjs";
+import { Int } from "./int.mjs";
 import { List, ListValue } from "./list.mjs";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 
@@ -65,6 +67,16 @@ export class VoidModule extends NamedEntity {
 
       if (ex instanceof Array) {
         this.push(new List({ value: ex, parent: this }));
+        return;
+      }
+
+      if (typeof ex === "number" && Number.isInteger(ex)) {
+        this.value.push(new Int({ value: ex, parent: this }));
+        return;
+      }
+
+      if (typeof ex === "number") {
+        this.value.push(new Float({ value: ex, parent: this }));
         return;
       }
 

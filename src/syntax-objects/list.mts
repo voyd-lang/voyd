@@ -1,4 +1,5 @@
 import { Expr } from "./expr.mjs";
+import { Float } from "./float.mjs";
 import { getIdStr } from "./get-id-str.mjs";
 import { Id, Identifier } from "./identifier.mjs";
 import { Int } from "./int.mjs";
@@ -94,6 +95,16 @@ export class List extends Syntax {
         return;
       }
 
+      if (typeof ex === "number" && Number.isInteger(ex)) {
+        this.value.push(new Int({ value: ex, parent: this }));
+        return;
+      }
+
+      if (typeof ex === "number") {
+        this.value.push(new Float({ value: ex, parent: this }));
+        return;
+      }
+
       if (ex instanceof Array) {
         this.push(new List({ value: ex, parent: this }));
         return;
@@ -179,4 +190,4 @@ export class List extends Syntax {
   }
 }
 
-export type ListValue = Expr | string | ListValue[];
+export type ListValue = Expr | string | number | ListValue[];
