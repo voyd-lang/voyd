@@ -1,6 +1,5 @@
 # Today
 
-- Fix macro interpreter
 - Add unit test for resolveFileModules
 
 # High Level
@@ -16,12 +15,8 @@
 - Overhaul core language spec. It doesn't need to be as different from the surface language as it is now. (i.e. does var really need to be `define`)
 - Audit code base for side effects, style, and functional purity
 - Support whitespace curly block syntax inside of strings / string interpolation
-- Add jest tests for parsing phase
-- Repair macro syntax macro
 - Repair type system
-- Add jest tests for syntax phase
 - Add back support for object syntax
-- Add GC
 - Add jest tests for code gen phase (assembly phase?)
 - Describe / Add [Call By Name semantics](https://en.wikipedia.org/wiki/Evaluation_strategy#Call_by_name)
 	- We may want to use swift's @autoclosure feature for this
