@@ -121,23 +121,23 @@ export abstract class Syntax {
   }
 
   isStringLiteral(): this is StringLiteral {
-    return this.isExpr() && this.syntaxType === "string-literal";
+    return this.syntaxType === "string-literal";
   }
 
   isList(): this is List {
-    return this.isExpr() && this.syntaxType === "list";
+    return this.syntaxType === "list";
   }
 
   isFloat(): this is Float {
-    return this.isExpr() && this.syntaxType === "float";
+    return this.syntaxType === "float";
   }
 
   isInt(): this is Int {
-    return this.isExpr() && this.syntaxType === "int";
+    return this.syntaxType === "int";
   }
 
   isBool(): this is Bool {
-    return this.isExpr() && this.syntaxType === "bool";
+    return this.syntaxType === "bool";
   }
 
   isWhitespace(): this is Whitespace {
@@ -153,7 +153,7 @@ export abstract class Syntax {
   }
 
   isIdentifier(): this is Identifier {
-    return this.isExpr() && this.syntaxType === "identifier";
+    return this.syntaxType === "identifier";
   }
 
   isFnType(): this is FnType {
@@ -161,51 +161,51 @@ export abstract class Syntax {
   }
 
   isFn(): this is Fn {
-    return this.isExpr() && this.syntaxType === "fn";
+    return this.syntaxType === "fn";
   }
 
   isExternFn(): this is ExternFn {
-    return this.isExpr() && this.syntaxType === "extern-fn";
+    return this.syntaxType === "extern-fn";
   }
 
   isVariable(): this is Variable {
-    return this.isExpr() && this.syntaxType === "variable";
+    return this.syntaxType === "variable";
   }
 
   isGlobal(): this is Global {
-    return this.isExpr() && this.syntaxType === "global";
+    return this.syntaxType === "global";
   }
 
   isMacro(): this is Macro {
-    return this.isExpr() && this.syntaxType === "macro";
+    return this.syntaxType === "macro";
   }
 
   isMacroVariable(): this is MacroVariable {
-    return this.isExpr() && this.syntaxType === "macro-variable";
+    return this.syntaxType === "macro-variable";
   }
 
   isMacroLambda(): this is MacroLambda {
-    return this.isExpr() && this.syntaxType === "macro-lambda";
+    return this.syntaxType === "macro-lambda";
   }
 
   isModule(): this is VoidModule {
-    return this.isExpr() && this.syntaxType === "module";
+    return this.syntaxType === "module";
   }
 
   isCall(): this is Call {
-    return this.isExpr() && this.syntaxType === "call";
+    return this.syntaxType === "call";
   }
 
   isParameter(): this is Parameter {
-    return this.isExpr() && this.syntaxType === "parameter";
+    return this.syntaxType === "parameter";
   }
 
   isType(): this is Type {
-    return this.isExpr() && this.syntaxType === "type";
+    return this.syntaxType === "type";
   }
 
   isBlock(): this is Block {
-    return this.isExpr() && this.syntaxType === "block";
+    return this.syntaxType === "block";
   }
 }
 
