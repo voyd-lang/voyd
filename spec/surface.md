@@ -28,7 +28,7 @@ var y = 3
 Syntax:
 
 ```void
-fn name(label? arg1: type1, label? arg2: type2) effects -> returnType =
+fn name(arg1: type1, arg2: type2) effects -> returnType =
 	// Body
 ```
 
@@ -61,11 +61,11 @@ fn name(arg1:type1 arg2:type2)
 Basic function:
 
 ```void
-fn add(_ a: i32, _ b: i32) -> i32
+fn add(a: i32, b: i32) -> i32
 	a + b
 
 // Usage
-add(1 2)
+add(1, 2)
 
 // Or with UFCS
 1.add(2)
@@ -74,7 +74,7 @@ add(1 2)
 With return type inference:
 
 ```void
-fn add(a:i32 b:i32) = a + b
+fn add(a:i32, b:i32) = a + b
 ```
 
 With effects:
@@ -92,39 +92,58 @@ fn get-json(address:String) -> ((async throws) Dictionary)
 
 ### Labeled arguments
 
-Void has similar function definition semantics to Swift. Arguments are labeled
-by default. The label also inherits the name of the argument by default. This is
-useful for readability and self documenting code.
+Labeled arguments can be defined by wrapping parameters you wish to be labeled
+on call in curly braces.
 
 ```rust
-fn add(num: i32, other_num: i32) = num + other_num
-add(num: 1, other_num: 2)
-```
-
-To change the name of the label from the default, specify it before the argument
-name.
-
-```rust
-fn add(this num: i32, to other_num: i32) = num + other_num
-
-add(this: 1, to: 2)
-```
-
-You can also omit the label by using an underscore
-
-```rust
-fn add(_ num: i32, _ other_num: i32) = num + other_num
-
-add(1, 2)
-```
-
-Arguments named `self` never have a label
-
-```rust
-fn add(self: i32, to num: i32) = self + to
+fn add(a: i32, {to: i32}) = a + to
 
 add(1, to: 2)
 ```
+
+By default, the argument label is the same as the parameter name. You can
+override this by specifying the label before the argument name.
+
+```rust
+fn add(a: i32, {to:b: i32}) = a + b
+
+add(1, to: 2)
+```
+
+Labeled arguments can be thought of as syntactic sugar for defining a object
+type parameter and destructuring it in the function body[1]:
+
+```rust
+fn move({ x: i32 y: i32 z: i32 }) -> void
+	// ...
+
+// Semantically equivalent to:
+fn move(vec: { x: i32 y: i32 z: i32 }) -> void
+	let { x, y, z } = vec
+	// ...
+
+move(x: 1, y: 2, z: 3)
+
+// Equivalent to:
+move({ x: 1, y: 2, z: 3 })
+```
+
+This allows you to still use object literal syntax for labeled arguments when
+it might be cleaner to do so. For example, when the variable names match the
+argument labels:
+
+```rust
+let [x, y, z] = [1, 2, 3]
+
+// Object field shorthand allows for this:
+move({ x, y, z })
+
+// Which is better than
+move(x: x, y: y, z: z)
+```
+
+[1] The compiler will typically optimize this away, so there is no performance
+penalty for using labeled arguments.
 
 ### Parenthetical Elision
 
@@ -187,6 +206,16 @@ let value = {
 	a: 5,
 	b: 4
 }
+```
+
+Field shorthand:
+
+```void
+let a = 5
+let value = { a, b: 4 }
+
+// Equivalent to
+let value = { a: a, b: 4 }
 ```
 
 ## Quote
@@ -584,11 +613,11 @@ unambiguously distinguished via their parameters and return type.
 
 ```void
 fn sum(a: i32, b: i32)
-	print("Def 1");
+	print("Def 1")
 	a + b
 
 fn sum(vec: {a:i32, b: i32})
-	print("Def 2");
+	print("Def 2")
 	vec.a + vec.b
 
 sum a: 1, b: 2 // Def 1
@@ -596,14 +625,14 @@ sum { a: 1, b: 2 } // Def 2
 
 // ERROR: sum(numbers: ...Int) overlaps ambiguously with sum(a: Int, b: Int)
 fn sum(numbers: ...Int)
-	print("Def 3");
+	print("Def 3")
 ```
 
 This can be especially useful for overloading operators to support a custom
 type:
 
 ```
-fn '+'(_ a: Vec3, _ b: Vec3) -> Vec3
+fn '+'(a: Vec3, b: Vec3) -> Vec3
 	Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
 
 Vec3(1, 2, 3) + Vec3(4, 5, 6) // Vec3(5, 7, 9)
@@ -677,7 +706,7 @@ identifiers.
 They are any list of OpChars (see grammar) that start with one of the following
 OpChars:
 
--   `.`, `:`, `;`, `?`, `\`, `!`, `;`, `&`, `|`
+-   `.`, `:`, `;`, `?`, `\`, `!`, `&`, `|`
 
 Note: Being a terminal operator does not imply infix
 

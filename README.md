@@ -5,18 +5,22 @@ Void is a high performance WebAssembly language with an emphasis on full stack w
 https://justforfunnoreally.dev/
 
 ```rust
-// Find the value of the fibonacci sequence at index n
-fn fib(at n: i32) -> i32
+fn fib(n: i32) -> i32
 	if n < 2 then:
 		n
 	else:
-		fib(at: n - 1) + fib(at: n - 2)
+		fib(n - 1) + fib(n - 2)
+
+fn insert(item: i32, {at index: i32}) -> void
+	// ...
+
+insert(3, at: 2)
 
 // All binary programs have a main function
 fn main() -> void
-	for num in range(15)
+	for n in range(15)
 		// Call print on the fibonacci sequence at index using UFCS.
-		fib(at: num).print()
+		fib(n).print()
 ```
 
 ```rust
@@ -272,7 +276,7 @@ squared(x)
 ## Generics
 
 ```rust
-fn add[T](a: T, b: T) -> T
+fn add<T>(a: T, b: T) -> T
 	a + b
 ```
 
