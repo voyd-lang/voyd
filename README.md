@@ -11,11 +11,6 @@ fn fib(n: i32) -> i32
 	else:
 		fib(n - 1) + fib(n - 2)
 
-fn insert(item: i32, {at index: i32}) -> void
-	// ...
-
-insert(3, at: 2)
-
 // All binary programs have a main function
 fn main() -> void
 	for n in range(15)
@@ -135,61 +130,14 @@ fn add(a:i32, b:i32) = a + b // The equal sign is used when the function is writ
 To call a function, use the function name followed by the arguments in parenthesis
 
 ```
-add(a: 1, b: 2)
-```
-
-Void has similar function definition semantics to Swift. Arguments are labeled by default. The label
-also inherits the name of the argument by default. This is useful for readability and self
-documenting code.
-
-To change the name of the label from the default, specify it before the argument name.
-
-```rust
-fn add(this num: i32, to other_num: i32) = num + other_num
-
-add(this: 1, to: 2)
-```
-
-You can also omit the label by using an underscore
-
-```rust
-fn add(_ num: i32, _ other_num: i32) = num + other_num
-
 add(1, 2)
 ```
 
-Arguments named `self` never have a label
+Void also supports uniform function call syntax (UFCS), allowing functions to be called on a type as if they were methods of that type.
 
 ```rust
-fn add(self: i32, to num: i32) = self + to
-
-add(1, to: 2)
+1.add(2)
 ```
-
-This makes another feature of Void much more convenient, Uniform Function Call Syntax (UFCS). When
-the first argument of a function is not labeled, the function can be called on the first argument
-using dot notation.
-
-```rust
-fn add(self: i32, to num: i32) = self + num
-
-1.add(to: 2)
-```
-
-One final neat feature of functions in Void is that they can be called without parenthesis. This is
-useful for creating DSLs and for supporting a more natural language like syntax.
-
-```rust
-fn walk(from: Point, to: Point) = // ...
-
-walk from: home to: school
-```
-
-A function can only be called without parenthesis when they are not an argument to another
-function*.
-
-* This is a simplification, the actual rules are a bit more complex. But its all you need to know in
-order to use the feature.
 
 ## Control flow
 
@@ -276,7 +224,7 @@ squared(x)
 ## Generics
 
 ```rust
-fn add<T>(a: T, b: T) -> T
+fn add[T](a: T, b: T) -> T
 	a + b
 ```
 

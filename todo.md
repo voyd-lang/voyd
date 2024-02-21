@@ -4,6 +4,8 @@
 
 - Make NamedEntity an interface instead of abstract class?
 - Add spec for structs (allocated on stack)
+- Ensure enums / unions are well defined
+	- Maybe support atoms like erlang with `@` syntax (i.e. `@my_atom`)
 - Only add lexical scopes to syntax types that need them (block, function, etc).
   Not literally every list and or syntax object.
 - Separate meta lexical scopes from runtime lexical scopes
