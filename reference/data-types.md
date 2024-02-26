@@ -1,17 +1,30 @@
+# Strings
+
+Strings are a sequence of characters. The main string type, `String`, is can grow and shrink in size when defined as a mutable variable.
+
+Type: `String`
+
+```
+
+```
 
 # Atoms
 
-Atoms are constants useful in pattern matching. They hold equivalence to any other atom with the same name.
+Atoms are literals who's type and value are equivalent to their given name. They are useful for defining a set of unique values.
 
-```void
-type MyAtom = @hello
-let a: MyAtom = @hello
-let b = @world
+```
+let my_atom: @my_atom = @my_atom
+let my_atom2 = @my_atom
+let other_atom = @other_atom
 
-let other_hello = @hello
+my_atom == my_atom2 // true
+my_atom == other_atom // false
+```
 
-print a == other_hello // true
-print a == b // false
+Atoms with spaces in their can be defined using the `@` prefix and single quotes.
+
+```
+let my_atom = @'my atom'
 ```
 
 # Unions
