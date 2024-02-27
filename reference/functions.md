@@ -16,7 +16,7 @@ add(1, 2)
 With return type inference:
 
 ```void
-fn add(a:i32, b:i32) = a + b
+fn add(a: i32, b: i32) = a + b
 ```
 
 With effects:
