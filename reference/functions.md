@@ -22,12 +22,12 @@ fn add(a: i32, b: i32) = a + b
 With effects:
 
 ```void
-fn get-json(address:String) async -> Dictionary
+fn get-json(address: String) Async -> Dictionary
 	let json-text = await fetch(address)
 	parse-json(json-text)
 
-// Multiple effects must also be grouped
-fn get-json(address:String) -> ((async throws) Dictionary)
+// Multiple effects may be specified
+fn get-json(address: String) Async Throws -> Dictionary
 	let json-text = await fetch(address)
 	parse-json(json-text)
 ```
