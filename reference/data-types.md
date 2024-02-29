@@ -11,19 +11,6 @@ let my_string = String()
 let my_string2 = "Hello, world!"
 ```
 
-# Atoms
-
-Atoms are static strings that are initialized once and never change. They
-are more efficient than strings and should be used when the value of the string does not need to change at runtime.
-
-Type: The type of an atom is same as its value. For example, the type of the atom `'ok'` is `'ok'`.
-
-
-```
-let hey: 'hey' = 'hey'
-print(hey) // hey
-```
-
 # Tuples
 
 Tuples are a fixed sequence of values of different types.
@@ -63,8 +50,17 @@ let my_dict = Dict { a: 1, b: 2, c: 3 }
 
 # Objects
 
-Objects are a collection of key-value pairs. They can be either structural,
-or nominal.
+Objects are extensible data types that can be used to represent complex user defined data structures.
+
+They have a few key features:
+- They are passed by reference
+- They can be extended
+- They maintain type information at runtime
+
+All objects extend the top level `Object` type.
+
+`Strings`, `Arrays`, `Tuples`, and `Dictionaries` are all `Object` types.
+
 
 ## Structural Objects
 
@@ -190,23 +186,22 @@ fn run_thing(thing: Runnable) -> void
 
 # Unions
 
-Unions represent a type that can be one of a set of other types.
+Union types represent a value that can be one of a predefined set of types.
 
-A union type is defined by listing the types it can be separated by `|`.
+A union type is defined by listing each of the types it may be, separated by the pipe operator, `|`.
 
 ```
-obj Cat
-	age: i32
-	name: String
-
-obj Dog
-	age: i32
-	name: String
-
 type Animal = Cat | Dog
 
-// Can be used with atoms
-type MyResult = 'ok' | 'error'
+obj Cat {
+	age: i32
+	name: String
+}
+
+obj Dog {
+	age: i32
+	name: String
+}
 ```
 
 # Intersection Types
