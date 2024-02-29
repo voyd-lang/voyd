@@ -13,28 +13,15 @@ let my_string2 = "Hello, world!"
 
 # Atoms
 
-Atoms are literals who's type and value are equivalent to their given name. They are useful for defining a set of unique values.
+Atoms are static strings that are initialized once and never change. They
+are more efficient than strings and should be used when the value of the string does not need to change at runtime.
+
+Type: The type of an atom is same as its value. For example, the type of the atom `'ok'` is `'ok'`.
+
 
 ```
-let my_atom: @my_atom = @my_atom
-let my_atom2 = @my_atom
-let other_atom = @other_atom
-
-my_atom == my_atom2 // true
-my_atom == other_atom // false
-```
-
-Atoms with spaces in their can be defined using the `@` prefix and single quotes.
-
-```
-let my_atom = @'my atom'
-```
-
-Atoms may also contain associated data.
-
-```
-type Tag = @tag(String)
-let my_tag = @tag("hello")
+let hey: 'hey' = 'hey'
+print(hey) // hey
 ```
 
 # Tuples
@@ -61,7 +48,17 @@ Arrays are a growable sequence of values of the same type.
 Type: `Array`
 
 ```
-let my_array = Array<i32>()
+let my_array = Array(1, 2, 3)
+```
+
+# Dictionaries
+
+Dictionaries are a growable collection of key-value pairs.
+
+Type: `Dictionary`
+
+```
+let my_dict = Dict { a: 1, b: 2, c: 3 }
 ```
 
 # Objects
@@ -209,7 +206,7 @@ obj Dog
 type Animal = Cat | Dog
 
 // Can be used with atoms
-type MyResult = @ok | @error
+type MyResult = 'ok' | 'error'
 ```
 
 # Intersection Types
@@ -247,21 +244,25 @@ let person: NameAndAge = Person { name: "John", age: 25, id: 1 }
 let person2: NameAndAge = { name: "John", age: 25 }
 ```
 
-# Enums / Algebraic Data Types
+## Intersection Types and Traits
 
-In void, enums are implemented using a combination of unions and atoms.
+A nominal type can be intersected with one or more traits to define a type
+that must extend the nominal type and implement the traits.
 
 ```
-type Result = @ok(i32) | @error(String)
+obj Shape
 
-fn divide(a: i32, b: i32) -> Result
-	if b == 0
-		@error("Cannot divide by zero")
-	else
-		@ok(a / b)
+trait Drawable
+	fn draw(self) -> void
 
-if let @ok(result) = divide(10, 2)
-	log(result)
-else
-	log("Error")
+type DrawableShape = Shape & Drawable
+
+obj Circle extends Shape
+	radius: i32
+
+impl Drawable for Circle
+	fn draw(self) -> void
+		// ...
+
+let circle: DrawableShape = Circle { radius: 10 }
 ```
