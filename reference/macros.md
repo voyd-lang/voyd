@@ -33,7 +33,7 @@ defun '<'(left:i32 right:i32) -> i32
 	binaryen-mod (i32 lt_s) (left right)
 ```
 
-# Quotes
+## Quotes
 
 Note: Unlike common lisp, the single quote is not a macro for `quote`. Only the
 backtick.
@@ -52,7 +52,7 @@ Void follows the suggestion of this website and pairs commas with the outermost
 backquote. Which allows one to use a backquote where a quote would normally be
 needed.
 
-# Macro Input
+## Macro Input
 
 Standard macros receive their arguments in standard S-Expression format. Each supplied argument
 is a syntax object that is either a symbol or a list:
@@ -72,3 +72,72 @@ Type checking for macros. Enforces the structure for inputs and outputs of
 macros.
 
 TODO
+
+# Advanced
+
+## Reader Macros
+
+Reader macros are effectively extensions of the parser. They take over parsing
+for anything more complex than identifying tokens and producing a tree from
+`(nested (lisp like function calls))`.
+
+Each time the parser encounters a token, it will match that token against all
+registered reader macros. If a reader macro exists for that token, the file
+stream is passed to the reader macro. The macro then consumes the characters off
+of this stream at its own discretion. Once finished, it returns a partial ast of
+the same type that the parser returns. Once the macro returns, the parser will
+insert the result at its current location within the AST and continue on.
+
+User defined reader macros should always begin with a `#`. As of writing, this
+is by convention and not enforced in the compiler. It may be enforced at a later
+date.
+
+## Syntax Macros
+
+Syntax Macros are responsible for transforming the ast produced by the parser
+into the core language ast. Each syntax macro is passed a full copy of the AST.
+These macros are strictly run in order. The output of the final syntax macro
+must strictly adhere to the core language specification.
+
+Syntax Macro Pipeline Example:
+
+```void
+fn fib(n:i32) -> i32
+	if (n < 2)
+		then: n
+		else: fib(n - 1) + fib(n - 2)
+
+// After function notation syntax macro
+fn (fib n:i32) -> i32
+	if (n < 2)
+		then: n
+		else: (fib n - 1) + (fib n - 2)
+
+// After parenthetical elision syntax macro
+(fn (fib n:i32) -> i32
+	(if (n < 2)
+		(then: n)
+		(else: (fib n - 1) + (fib n - 2))))
+
+// After infix notation syntax macro (-> is not an operator)
+(fn (fib (: n i32)) -> i32
+	(if (< n 2)
+		(: then n)
+		(: else (+ (fib (- n 1)) (fib (- n 2))))))
+```
+
+## The Macro Pipeline
+
+In the spirit of lisp, Void language is designed to be hackable. As a result,
+the surface language syntax is implemented entirely in macros. This makes the
+language both easy to maintain, and easy to extend.
+
+There are three types of macros:
+
+-   Reader Macros: Expanded during parsing, emit am ast
+-   Syntax Macros: Expanded after parsing, are passed the ast from the parser
+    and produce the final ast
+-   Regular Macros: Expanded by a syntax macro
+
+At a high level, the pipeline looks something like this: `file.void -> parser +
+reader macros -> syntax macros -> ast (the core language)`
