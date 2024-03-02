@@ -22,14 +22,14 @@ fn add(a: i32, b: i32) = a + b
 With effects:
 
 ```void
-fn get-json(address: String) Async -> Dictionary
-	let json-text = await fetch(address)
-	parse-json(json-text)
+fn get_json(address: String): Async -> Dictionary
+	let json_text = await fetch(address)
+	parse_json(json_text)
 
-// Multiple effects may be specified
-fn get-json(address: String) Async Throws -> Dictionary
-	let json-text = await fetch(address)
-	parse-json(json-text)
+// Multiple effects may be specified in parenthesis
+fn get_json(address: String): (Async, Throws) -> Dictionary
+	let json_text = await fetch(address)
+	parse_json(json_text)
 ```
 
 ## Labeled arguments
@@ -86,3 +86,34 @@ move(x: x, y: y, z: z)
 
 [1] The compiler will typically optimize this away, so there is no performance
 penalty for using labeled arguments.
+
+## Generics
+
+```rust
+fn add<T>(a: T, b: T) -> T
+	a + b
+```
+
+With trait constraints
+
+```rust
+fn add<T impls Numeric>(a: T, b: T) -> T
+	a + b
+```
+
+## Call By Name Parameters
+
+Call by name parameters automatically wrap the passed expression in a closure.
+Call by name parameters are defined by prefixing the parameter type with `@`.
+Their type must always be a function type with no parameters.
+
+```rust
+fn eval_twice(@f: () -> void) -> void
+	f()
+	f()
+
+fn main()
+	var x = 0
+	eval_twice(x = x + 1)
+	print(x) // 2
+```

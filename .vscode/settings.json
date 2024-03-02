@@ -20,7 +20,8 @@
     "rotr",
     "Structs",
     "UFCS",
-    "WASM"
+    "WASM",
+    "webassembly"
   ],
   "debug.javascript.terminalOptions": {
     "skipFiles": ["<node_internals>/**"],

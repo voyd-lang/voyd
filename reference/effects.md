@@ -12,53 +12,52 @@ as well as the [Effeckt Language](https://effekt-lang.org/).
 
 ```
 // src/throws.void
-effect Throws<T>
-	ctl throw(val: T) -> void
-```
-
-// Single operation effects can be defined as (effect type would be throw)
-
-```
-effect ctl throw<t>(val: T) -> void
+effect State<T>
+	// Ctl effects yield to the handler and may be resumed
+	ctl set(val: T) -> T
+	// Fn effects are tail resumptive and return a value, use this if you don't need to yield and expect to always resume exactly once
+	fn get() -> T
 ```
 
 ## Handling An Effect
 
 ```
-fn validate(val: i32) Async -> void
-	if val > 100 or val < 0
-		throw "Value out of range"
+// Define a function that uses the state effect
+fn bump_state(): State<i32> -> void
+	let state = get()
+	let new_state = set(state + 1)
+	log(new_state)
 
-// Returns true when the value is between 0 and 100, false otherwise
-fn is-valid(val: i32)
-	with ctl throw(val) false
-	validate(val)
-	true
+
+// Define a function that handles the state effect
+fn main(val: i32)
+	var state = 0
+	with handler:
+		get: () => state
+		set: (val) =>
+			state = val
+			resume(state)
+	do:
+		bump_state()
+	print(state) // 5
 ```
 
-// Define a generic handler
-
+Define and use generic effect handler (@f is a call by name parameter, see functions for more details)
 ```
-handler try<T> impl throw<T>
-	ctl throw(val)
+fn state_handler<T>({initial: T, @action: ((): State<T> -> T)}) -> T
+	var state = initial
+	with handler:
+		get: () => state
+		set: (val) =>
+			state = val
+			state
+	do:
+		f()
 
-fn try<T, R>(action: fn() throws<T> -> R, catch: fn(T) -> R) -> R
-	handles throw
-	handle(action)
+fn main()
+	let state = state_handler initial: 3 action:
+		bump_state()
+		bump_state()
+
+	print(state) // 5
 ```
-
-**Combining effects:**
-
-```
-effect type ThrowsAndLogs = Throws & Console
-
-// Or this (but would have to list everything out I should think)
-effect ThrowsAndLogs extends (Throws, Console)
-```
-
-## Implementation Ideas
-
-- `ctl` handlers (i.e. `with ctl`) could potentially implemented in wasm today
-  using threads/atomics
-- Tail resumptive handlers (i.e. `with fn`) would likely be as simple as calling
-  the handler and returning the results

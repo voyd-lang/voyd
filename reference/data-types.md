@@ -1,3 +1,27 @@
+# Types Overview
+
+Types come in two flavors: primitive and object.
+
+## Primitive Types
+
+Primitive types are passed by value and are immutable. This means when they are
+copied on assignment to a variable or parameter. Unlike objects types, their type
+name always starts with a lowercase letter.
+
+They include::
+- `i32`
+- `i64`
+- `f32`
+- `f64`
+- `v128`
+- `bool`
+- `void`
+
+## Object Types
+
+Object types are passed by reference and can be mutable. All Object types extend
+the top level `Object` type and may be defined by the user.
+
 # Strings
 
 Strings are a sequence of characters. The main string type, `String`, is can grow and shrink in size when defined as a mutable variable.

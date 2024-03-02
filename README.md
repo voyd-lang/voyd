@@ -31,13 +31,12 @@ fn app() -> html
 
 **Disclaimer**
 
-Void is in it's very early stages and should not be used for production applications. Most MVP
-features have not been implemented yet. The language does run and compile though. So feel free to
-play around.
+Void is in it's very early stages of development. Void is not ready for public
+announcement or use. Some core syntax and semantics are subject to change.
+Expect frequent breaking changes. In addition, many documented features are not
+yet implemented.
 
 **Features**:
-
-Note: Not all features are complete.
 
 - Functional
 - Hybrid Nominal & Structural type system
@@ -280,13 +279,13 @@ squared(x)
 ## Generics
 
 ```rust
-fn add[T](a: T, b: T) -> T
+fn add<T>(a: T, b: T) -> T
 	a + b
 ```
 
 With trait constraints
 
 ```rust
-fn add[T impls Numeric](a: T, b: T) -> T
+fn add<T impls Numeric>(a: T, b: T) -> T
 	a + b
 ```

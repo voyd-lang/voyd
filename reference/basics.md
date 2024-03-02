@@ -1,17 +1,28 @@
+# Comments
+
+```void
+// This is a single line comment
+```
+# Identifiers
+
+Identifiers bind names to values, types, and other language constructs. They can
+contain letters, numbers, and underscores, and must start with a letter or underscore.
+
+```void
+hey
+hey_there
+MyType
+MyType2
+```
+
 # Variables
 
 ```void
 // Declare an immutable variable
 let x = 5
 
-// Declare a mutable variable
+// Declare a mutable variable (see note)
 var y = 3
-```
-
-# Comments
-
-```void
-// This is a single line comment
 ```
 
 # String Literals
