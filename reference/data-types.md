@@ -192,7 +192,7 @@ obj Animal {
 let me = Animal { name: "John", id: 1 }
 ```
 
-You can add a custom initializer by defining an `init` method on the object.
+You can add a custom initializer by defining a function with the same name as the object that accepts different arguments.
 
 ```
 obj Animal {
@@ -200,9 +200,8 @@ obj Animal {
 	name: String
 }
 
-impl Animal
-	fn init(animal: { name: String }) -> Animal
-		Animal { id: genId(), name: animal.name }
+fn Animal({ name: String }) -> Animal
+	Animal { id: genId(), name }
 ```
 
 ## Traits
