@@ -179,6 +179,32 @@ log(me.run()) // "John is running!"
 &me.change_name("Bob")
 ```
 
+### Nominal Object Initializers
+
+Nominal objects have a default initializer that takes the fields of the object as arguments.
+
+```
+obj Animal {
+	id: i32
+	name: String
+}
+
+let me = Animal { name: "John", id: 1 }
+```
+
+You can add a custom initializer by defining an `init` method on the object.
+
+```
+obj Animal {
+	id: i32
+	name: String
+}
+
+impl Animal
+	fn init(animal: { name: String }) -> Animal
+		Animal { id: genId(), name: animal.name }
+```
+
 ## Traits
 
 Traits are first class types that define the behavior of a nominal object.
