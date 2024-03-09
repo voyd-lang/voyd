@@ -2,6 +2,8 @@
 
 Data types come in two flavors: value and reference.
 
+The type system is structural at its core and supports nominal types through the use of objects and traits.
+
 ## Value Types
 
 Value types are copied when passed to a function or assigned to a variable.
@@ -18,19 +20,6 @@ They include:
 ## Reference Types
 
 Reference types are heap allocated, passed by reference, can be mutable, and can be extends. All reference types extend the top level `Object` type.
-
-# Strings
-
-Strings are a sequence of characters. The main string type, `String`, is can grow and shrink in size when defined as a mutable variable.
-
-Type: `String`
-
-```
-let my_string = String()
-
-// String literals are of type `String`
-let my_string2 = "Hello, world!"
-```
 
 # Tuples
 
@@ -49,26 +38,6 @@ let z = my_tuple.2
 let [a, b, c] = my_tuple
 ```
 
-# Arrays
-
-Arrays are a growable sequence of values of the same type.
-
-Type: `Array`
-
-```
-let my_array = Array(1, 2, 3)
-```
-
-# Dictionaries
-
-Dictionaries are a growable collection of key-value pairs.
-
-Type: `Dictionary`
-
-```
-let my_dict = Dict { a: 1, b: 2, c: 3 }
-```
-
 # Objects
 
 Objects are extensible data types that can be used to represent complex user defined data structures.
@@ -81,6 +50,13 @@ They have a few key features:
 All objects extend the top level `Object` type.
 
 `Strings`, `Arrays`, `Tuples`, and `Dictionaries` are all `Object` types.
+
+```
+record Ab extends Record has {
+	a: i32
+	b: i32
+}
+```
 
 
 ## Structural Objects
@@ -315,4 +291,39 @@ impl Movable for Shape
 		self.y += y
 
 let shape: MoveableImage = Shape { image: [Rgb(0, 0, 0)], x: 0, y: 0 }
+```
+
+# Built in Object Types
+
+## Strings
+
+Strings are a sequence of characters. The main string type, `String`, is can grow and shrink in size when defined as a mutable variable.
+
+Type: `String`
+
+```
+let my_string = String()
+
+// String literals are of type `String`
+let my_string2 = "Hello, world!"
+```
+
+## Arrays
+
+Arrays are a growable sequence of values of the same type.
+
+Type: `Array`
+
+```
+let my_array = Array(1, 2, 3)
+```
+
+## Dictionaries
+
+Dictionaries are a growable collection of key-value pairs.
+
+Type: `Dictionary`
+
+```
+let my_dict = Dict { a: 1, b: 2, c: 3 }
 ```
