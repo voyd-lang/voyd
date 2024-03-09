@@ -1,0 +1,14 @@
+obj Syntax
+
+obj NamedSyntax < Syntax {
+	name: String
+}
+
+obj ScopedSyntax < Syntax {
+	scope: Scope
+}
+
+obj NamedAndScopedSyntax < Syntax {
+	name: String
+	scope: Scope
+}
