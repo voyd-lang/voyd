@@ -1,14 +1,12 @@
 # Types Overview
 
-Types come in two flavors: primitive and object.
+Data types come in two flavors: value and reference.
 
-## Primitive Types
+## Value Types
 
-Primitive types are passed by value and are immutable. This means when they are
-copied on assignment to a variable or parameter. Unlike objects types, their type
-name always starts with a lowercase letter.
+Value types are copied when passed to a function or assigned to a variable.
 
-They include::
+They include:
 - `i32`
 - `i64`
 - `f32`
@@ -17,10 +15,9 @@ They include::
 - `bool`
 - `void`
 
-## Object Types
+## Reference Types
 
-Object types are passed by reference and can be mutable. All Object types extend
-the top level `Object` type and may be defined by the user.
+Reference types are heap allocated, passed by reference, can be mutable, and can be extends. All reference types extend the top level `Object` type.
 
 # Strings
 
@@ -290,23 +287,31 @@ let person2: NameAndAge = { name: "John", age: 25 }
 
 ## Intersection Types and Traits
 
-A nominal type can be intersected with one or more traits to define a type
-that must extend the nominal type and implement the traits.
+An intersection type can combine multiple traits to define a type that must satisfy all of the traits.
 
 ```
+
+trait Image
+	fn draw(self) -> Array[Rgb]
+
+trait Movable
+	fn move(&self, x: i32, y: i32) -> void
+
+type MoveableImage = Movable & Drawable
+
 obj Shape
+	image: Array[Rgb]
+	x: i32
+	y: i32
 
-trait Drawable
-	fn draw(self) -> void
+impl Image for Shape
+	fn draw(self) -> Array[Rgb]
+		self.image
 
-type DrawableShape = Shape & Drawable
+impl Movable for Shape
+	fn move(&self, x: i32, y: i32) -> void
+		self.x += x
+		self.y += y
 
-obj Circle extends Shape
-	radius: i32
-
-impl Drawable for Circle
-	fn draw(self) -> void
-		// ...
-
-let circle: DrawableShape = Circle { radius: 10 }
+let shape: MoveableImage = Shape { image: [Rgb(0, 0, 0)], x: 0, y: 0 }
 ```
