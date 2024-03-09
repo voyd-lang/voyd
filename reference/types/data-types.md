@@ -1,30 +1,55 @@
-# Types Overview
+# Objects
 
-Data types come in two flavors: value and reference.
+Objects are a reference data type that represent a fixed collection of key value
+pairs (fields).
 
-The type system is structural at its core and supports nominal types through the use of objects and traits.
+They are defined by listing their fields between curly braces `{}`.
 
-## Value Types
+```
+type MyObject = {
+	a: i32,
+	b: i32
+}
+```
 
-Value types are copied when passed to a function or assigned to a variable.
+# Initializing an Object
 
-They include:
-- `i32`
-- `i64`
-- `f32`
-- `f64`
-- `v128`
-- `bool`
-- `void`
+An object is initialized using object literal syntax. Listing the fields and
+their corresponding values between curly braces `{}`.
 
-## Reference Types
+```
+let my_object: MyObject = {
+	a: 5,
+	b: 4
+}
+```
 
-Reference types are heap allocated, passed by reference, can be mutable, and can be extends. All reference types extend the top level `Object` type.
+Field shorthand:
+
+```
+// When a variable has the same name as a field;
+let a = 5
+// The field can be omitted
+let value = { a, b: 4 }
+```
+
+Spread operator:
+
+```
+type MyObject2 = {
+	a: i32,
+	b: i32,
+	c: i32
+}
+
+let a = 5
+let value = { a, b: 4 }
+let value2: MyObject2 = { ...value, c: 3 }
+```
 
 # Tuples
 
 Tuples are a fixed sequence of values of different types.
-
 
 ```
 type MyTuple = [i32, String, bool]
@@ -38,86 +63,109 @@ let z = my_tuple.2
 let [a, b, c] = my_tuple
 ```
 
-# Objects
-
-Objects are extensible data types that can be used to represent complex user defined data structures.
-
-They have a few key features:
-- They are passed by reference
-- They can be extended
-- They maintain type information at runtime
-
-All objects extend the top level `Object` type.
-
-`Strings`, `Arrays`, `Tuples`, and `Dictionaries` are all `Object` types.
+They are effectively syntactic sugar for an object with incrementing
+integer keys.
 
 ```
-record Ab extends Record has {
-	a: i32
-	b: i32
+type MyTuple = [i32, String, bool]
+
+// Resolves to:
+type MyTuple = {
+	0: i32,
+	1: String,
+	2: bool
 }
 ```
 
+# Nominal Objects
 
-## Structural Objects
+The objects we have defined so far were all structural types. That is, they were
+satisfied by any object that had the same fields:
 
-Structural objects are defined by their structure. That is, any object that contains the same fields as the type you're defining is considered to be of that type.
-
-```
-type MyObject = {
-	a: i32,
-	b: i32
+```void
+type Animal = {
+	name: string
 }
 
-let my_object: MyObject = {
-	a: 5,
-	b: 4
+fn print_animal_name(animal: Animal) -> void
+	log(animal.name)
+
+square_area({ name: "Spot" }) // Ok!
+square_area({ name: "Spot", species: "Dog" }) // Also Ok!
+```
+
+Sometimes, it may be desirable to define a type that is only satisfied by a type
+explicitly defined to satisfy it. This is called a nominal type.
+
+For example:
+
+```
+type BaseballPlayer = {
+	has_bat: bool
 }
+
+type Cave = {
+	has_bat: bool
+}
+
+fn can_hit_ball(player: BaseballPlayer) -> bool
+	player.has_bat
+
+let ruth: BaseballPlayer = { has_bat: true }
+let bat_cave: Cave = { has_bat: true }
+
+can_hit_ball(ruth) // true
+can_hit_ball(bat_cave) // true
 ```
 
-Field shorthand:
+In this example, because `BaseballPlayer` and `Cave` both have a `has_bat`
+field, the `can_hit_ball` function can accept both types. So
+`can_hit_ball(bat_cave)` returned true, even though it doesn't make sense for a
+cave to hit a ball.
+
+to alleviate this, we can define a nominal subtype of `Object`:
 
 ```
-let a = 5
-let value = { a, b: 4 }
+obj BaseballPlayer {
+	has_bat: bool
+}
+
+type Cave = {
+	has_bat: bool
+}
+
+fn can_hit_ball(player: BaseballPlayer) -> bool
+	player.has_bat
+
+let ruth = BaseballPlayer { has_bat: true }
+let bat_cave: Cave = { has_bat: true }
+
+can_hit_ball(ruth) // true
+can_hit_ball(bat_cave) // Error - bat_cave is not a BaseballPlayer
 ```
 
-Spread operator:
+While a nominal object can satisfy a structural type with the same fields, the
+reverse is not true. A nominal object can only be used where the type it extends
+is expected.
 
 ```
-let a = 5
-let value = { a, b: 4 }
-let value2 = { ...value, c: 3 }
-```
-
-## Nominal Objects
-
-Nominal objects are structural objects with a few extra features. They can be extended, have methods, and implement traits.
-
-```
-obj Animal
+obj Animal {
 	name: String
+}
 
-// Note that extensions must include all fields of the type being extended
-obj Cat extends Animal
-	name: String
+obj Cat extends Animal {
 	lives_remaining: i32
+}
 
-obj Dog extends Animal
-	name: String
+obj Dog extends Animal {
 	likes_belly_rubs: bool
+}
 
-let me = Animal { name: "John" }
-```
-
-While a nominal object can satisfy a structural type with the same fields, the reverse is not true. A nominal object can only be used where the type it extends is expected.
-
-```
 fn pet(animal: Animal) -> void
 	// ...
 
-pet(Cat { name: "Whiskers", lives_remaining: 9 })
-pet(Dog { name: "Spot", likes_belly_rubs: true })
+pet(Cat { name: "Whiskers", lives_remaining: 9 }) // Ok!
+pet(Dog { name: "Spot", likes_belly_rubs: true }) // Ok!
 
 // Error - pet expects an Animal, not a { name: String, lives_remaining: i32 }
 pet({ name: "Whiskers", lives_remaining: 9 })
@@ -132,11 +180,42 @@ pet_structural({ name: "Whiskers" })
 pet_structural(Cat { name: "Whiskers", lives_remaining: 9 })
 ```
 
+
+## Nominal Object Initializers
+
+Nominal objects have a default initializer that takes the fields of the object
+as arguments.
+
+```
+obj Animal {
+	id: i32
+	name: String
+}
+
+let me = Animal { name: "John", id: 1 }
+```
+
+You can add a custom initializer by defining a function with the same name as
+the object that accepts different arguments.
+
+```
+obj Animal {
+	id: i32
+	name: String
+}
+
+fn Animal({ name: String }) -> Animal
+	Animal { id: genId(), name }
+```
+
+## Methods
+
 Methods can be defined on nominal objects using the `impl` keyword.
 
 ```
-obj Animal
+obj Animal {
 	name: String
+}
 
 impl Animal
 	fn run(self) -> String
@@ -152,32 +231,22 @@ log(me.run()) // "John is running!"
 &me.change_name("Bob")
 ```
 
-### Nominal Object Initializers
+## Final Objects
 
-Nominal objects have a default initializer that takes the fields of the object as arguments.
+Objects can be defined as final, meaning they cannot be extended.
 
 ```
-obj Animal {
-	id: i32
+final obj Animal {
 	name: String
 }
 
-let me = Animal { name: "John", id: 1 }
-```
-
-You can add a custom initializer by defining a function with the same name as the object that accepts different arguments.
-
-```
-obj Animal {
-	id: i32
-	name: String
+// Error - Animal is final
+obj Cat extends Animal {
+	lives_remaining: i32
 }
-
-fn Animal({ name: String }) -> Animal
-	Animal { id: genId(), name }
 ```
 
-## Traits
+# Traits
 
 Traits are first class types that define the behavior of a nominal object.
 
@@ -186,8 +255,9 @@ trait Runnable
 	fn run(self) -> String
 	fn stop(mut self) -> void
 
-obj Car
+obj Car {
 	speed: i32
+}
 
 impl Runnable for Car
 	fn run(self) -> String
@@ -210,7 +280,8 @@ fn run_thing(thing: Runnable) -> void
 
 Union types represent a value that can be one of a predefined set of types.
 
-A union type is defined by listing each of the types it may be, separated by the pipe operator, `|`.
+A union type is defined by listing each of the types it may be, separated by the
+pipe operator, `|`.
 
 ```
 type Animal = Cat | Dog
@@ -226,45 +297,106 @@ obj Dog {
 }
 ```
 
-# Intersection Types
+# Intersections
 
-Intersection types combine the fields of object types into a single type.
+Void uses intersection types to combine the fields of multiple objects into a
+single type.
 
-An intersection type is defined by listing the types it is composed of separated by `&`.
+An intersection type is defined by listing the types it is composed of separated
+by `&`.
 
 ```
-type Name = { name: String }
-type Age = { age: i32 }
-type Person = Name & Age & { id: i32 }
+type Vec2D = {
+	a: i32,
+	b: i32
+}
 
-let person: Person = { name: "John", age: 25, id: 1 }
+type Vec3D = Vec2D & {
+	c: i32
+}
+```
+
+the type expression of `Vec3D` resolves to:
+
+```
+type Vec3D = Object & {
+	a: i32,
+	b: i32,
+	c: i32
+}
+```
+
+Note that the fields of an intersection cannot conflict:
+
+```
+type Vec2D = {
+	a: i32,
+	b: i32
+}
+
+type Vec3D = Vec2D & {
+	// Error - Conflicts with intersected field b: i32
+	b: string,
+	c: i32
+}
 ```
 
 ## Intersection Types and Nominal Objects
 
-When a nominal object is intersected, only types that extend the nominal object can satisfy the intersection. All nominal objects included must be
-a subtype of the previous nominal object included in the intersection.
+When an intersection includes a nominal object, the object must be a subtype of
+that object.
 
 ```
-obj Name
+obj Animal {
 	name: String
+}
 
-type NameAndAge = Name & { age: i32 }
+type Cat = Animal & {
+	lives_remaining: i32
+}
 
-obj Person extends Name
-	age: i32
-	id: i32
+let cat: Cat = Animal { name: "Whiskers", lives_remaining: 9 }
 
-// Ok!
-let person: NameAndAge = Person { name: "John", age: 25, id: 1 }
+// Error - Object { name: "Whiskers", lives_remaining: 9 } is not an Animal
+let bad_cat: Cat = { name: "Whiskers", lives_remaining: 9 }
+```
 
-// Error - NameAndAge expects a Name & { age: i32 }
-let person2: NameAndAge = { name: "John", age: 25 }
+All object types of an intersection must be a subtype of the previous
+intersected object type, or a parent type of the previous intersected object type.
+
+```
+obj Animal {
+	name: String
+}
+
+obj Cat extends Animal {
+	lives_remaining: i32
+}
+
+obj Dog extends Animal {
+	likes_belly_rubs: bool
+}
+
+type Chihuahua =
+	Dog & { size: i32 } &
+	Animal & { age: i32 } // This is ok since Animal is a parent of Dog
+
+// Resolves to:
+type Chihuahua = Dog & {
+	name: String,
+	likes_belly_rubs: bool,
+	age: i32,
+	size: i32
+}
+
+// Error Dog is not a subtype of Cat
+type Abomination = Cat & Dog
 ```
 
 ## Intersection Types and Traits
 
-An intersection type can combine multiple traits to define a type that must satisfy all of the traits.
+An intersection type can combine multiple traits to define a type that must
+satisfy all of the traits.
 
 ```
 
@@ -276,10 +408,11 @@ trait Movable
 
 type MoveableImage = Movable & Drawable
 
-obj Shape
+obj Shape {
 	image: Array[Rgb]
 	x: i32
 	y: i32
+}
 
 impl Image for Shape
 	fn draw(self) -> Array[Rgb]
@@ -297,7 +430,8 @@ let shape: MoveableImage = Shape { image: [Rgb(0, 0, 0)], x: 0, y: 0 }
 
 ## Strings
 
-Strings are a sequence of characters. The main string type, `String`, is can grow and shrink in size when defined as a mutable variable.
+Strings are a sequence of characters. The main string type, `String`, is can
+grow and shrink in size when defined as a mutable variable.
 
 Type: `String`
 
