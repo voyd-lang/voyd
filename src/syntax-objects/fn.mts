@@ -1,10 +1,10 @@
 import type { Expr } from "./expr.mjs";
-import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
+import { ScopedNamedEntity, ScopedNamedEntityOpts } from "./named-entity.mjs";
 import { Parameter } from "./parameter.mjs";
 import { FnType, Type } from "./types.mjs";
 import { Variable } from "./variable.mjs";
 
-export class Fn extends NamedEntity {
+export class Fn extends ScopedNamedEntity {
   readonly syntaxType = "fn";
   readonly variables: Variable[] = [];
   readonly parameters: Parameter[] = [];
@@ -12,7 +12,7 @@ export class Fn extends NamedEntity {
   readonly body: Expr;
 
   constructor(
-    opts: NamedEntityOpts & {
+    opts: ScopedNamedEntityOpts & {
       returnType: Type;
       variables?: Variable[];
       parameters: Parameter[];

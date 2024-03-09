@@ -20,6 +20,7 @@ import type { FnType, PrimitiveType, ObjectType, Type } from "./types.mjs";
 import type { Variable } from "./variable.mjs";
 import type { Whitespace } from "./whitespace.mjs";
 import { NamedEntity } from "./named-entity.mjs";
+import { ScopedEntity } from "./scoped-entity.mjs";
 
 export type SourceLocation = {
   /** The exact character index the syntax starts */
@@ -37,7 +38,6 @@ export type SourceLocation = {
 export type SyntaxMetadata = {
   location?: SourceLocation;
   parent?: Expr;
-  lexicon?: LexicalContext;
   contextTag?: ContextTag;
 };
 
@@ -46,15 +46,13 @@ export abstract class Syntax {
   abstract readonly syntaxType: string;
   readonly syntaxId = getSyntaxId();
   readonly location?: SourceLocation;
-  readonly lexicon: LexicalContext;
   contextTag?: ContextTag;
   parent?: Expr;
 
   constructor(metadata: SyntaxMetadata) {
-    const { location, parent, lexicon, contextTag } = metadata;
+    const { location, parent, contextTag } = metadata;
     this.location = location;
     this.parent = parent;
-    this.lexicon = lexicon ?? new LexicalContext();
     this.contextTag = contextTag;
   }
 
@@ -70,30 +68,37 @@ export abstract class Syntax {
     return {
       location: this.location,
       parent: this.parent,
-      lexicon: this.lexicon,
       contextTag: this.contextTag,
     };
   }
 
   getAllEntities(): NamedEntity[] {
+    if (!this.isScopedEntity()) return this.parent?.getAllEntities() ?? [];
     return this.lexicon.getAllEntities();
   }
 
-  registerEntity(v: NamedEntity) {
+  registerEntity(v: NamedEntity): void {
+    if (!this.isScopedEntity()) return this.parent?.registerEntity(v);
     this.lexicon.registerEntity(v);
   }
 
   resolveChildEntity(name: Id): NamedEntity | undefined {
+    if (!this.isScopedEntity()) return undefined;
     return this.lexicon.resolveEntity(name);
   }
 
   /** Recursively searches for the entity up the parent tree */
   resolveEntity(name: Id): NamedEntity | undefined {
+    if (!this.isScopedEntity()) return this.parent?.resolveEntity(name);
     return this.lexicon.resolveEntity(name) ?? this.parent?.resolveEntity(name);
   }
 
   /** Recursively searches for the fn entity(s) up the parent tree */
   resolveFns(id: Id, start: FnEntity[] = []): FnEntity[] {
+    if (!this.isScopedEntity()) {
+      return this.parent?.resolveFns(id, start) ?? start;
+    }
+
     start.push(...this.lexicon.resolveFns(id));
     if (this.parent) return this.parent.resolveFns(id, start);
     return start;
@@ -101,6 +106,7 @@ export abstract class Syntax {
 
   /** Recursively searches for the fn entity up the parent tree */
   resolveFnById(id: string): FnEntity | undefined {
+    if (!this.isScopedEntity()) return this.parent?.resolveFnById(id);
     return this.lexicon.resolveFnById(id) ?? this.parent?.resolveFnById(id);
   }
 
@@ -115,6 +121,10 @@ export abstract class Syntax {
 
   /** Should emit in compliance with core language spec */
   abstract toJSON(): any;
+
+  isScopedEntity(): this is ScopedEntity {
+    return (this as unknown as ScopedEntity).lexicon instanceof LexicalContext;
+  }
 
   isExpr(): this is Expr {
     return true;

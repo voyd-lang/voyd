@@ -1,15 +1,15 @@
 import { Expr } from "./expr.mjs";
 import { Identifier } from "./identifier.mjs";
 import { List } from "./list.mjs";
-import { Syntax, SyntaxMetadata } from "./syntax.mjs";
+import { ScopedSyntax, ScopedSyntaxMetadata } from "./scoped-entity.mjs";
 
-export class MacroLambda extends Syntax {
+export class MacroLambda extends ScopedSyntax {
   readonly syntaxType = "macro-lambda";
   readonly parameters: Identifier[] = [];
   readonly body: List;
 
   constructor(
-    opts: SyntaxMetadata & {
+    opts: ScopedSyntaxMetadata & {
       parameters?: Identifier[];
       body: List;
     }

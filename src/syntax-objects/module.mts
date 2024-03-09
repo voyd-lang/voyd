@@ -3,16 +3,20 @@ import { Float } from "./float.mjs";
 import { Identifier } from "./identifier.mjs";
 import { Int } from "./int.mjs";
 import { List, ListValue } from "./list.mjs";
-import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
+import {
+  NamedEntity,
+  ScopedNamedEntity,
+  ScopedNamedEntityOpts,
+} from "./named-entity.mjs";
 
-export class VoidModule extends NamedEntity {
+export class VoidModule extends ScopedNamedEntity {
   readonly syntaxType = "module";
   value: Expr[] = [];
   /** 0 = init, 1 = expanding regular macros, 2 = regular macros expanded */
   phase = 0;
 
   constructor(
-    opts: NamedEntityOpts & {
+    opts: ScopedNamedEntityOpts & {
       value?: ListValue[];
       phase?: number;
     }

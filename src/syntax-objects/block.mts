@@ -1,16 +1,16 @@
 import { Expr } from "./expr.mjs";
-import { Syntax, SyntaxMetadata } from "./syntax.mjs";
+import { ScopedSyntax, ScopedSyntaxMetadata } from "./scoped-entity.mjs";
 import { Type } from "./types.mjs";
 
-export class Block extends Syntax {
+export class Block extends ScopedSyntax {
   readonly syntaxType = "block";
   readonly body: Expr[];
-  readonly returnType: Type;
+  returnType?: Type;
 
   constructor(
-    opts: SyntaxMetadata & {
+    opts: ScopedSyntaxMetadata & {
       body: Expr[];
-      returnType: Type;
+      returnType?: Type;
     }
   ) {
     super(opts);

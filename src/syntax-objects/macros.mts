@@ -1,18 +1,18 @@
 import type { Expr } from "./expr.mjs";
 import { Identifier } from "./identifier.mjs";
 import { List } from "./list.mjs";
-import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
+import { ScopedNamedEntityOpts, ScopedNamedEntity } from "./named-entity.mjs";
 
 export type Macro = RegularMacro;
 
-export class RegularMacro extends NamedEntity {
+export class RegularMacro extends ScopedNamedEntity {
   readonly syntaxType = "macro";
   readonly macroType = "regular";
   readonly parameters: Identifier[] = [];
   readonly body: List;
 
   constructor(
-    opts: NamedEntityOpts & {
+    opts: ScopedNamedEntityOpts & {
       parameters?: Identifier[];
       body: List;
     }
