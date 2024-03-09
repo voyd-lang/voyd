@@ -266,7 +266,8 @@ let person: Person = { name: "John", age: 25, id: 1 }
 
 ## Intersection Types and Nominal Objects
 
-When a nominal object is intersected, only types that extend the nominal object can satisfy the intersection. Only one nominal object can be included in an intersection.
+When a nominal object is intersected, only types that extend the nominal object can satisfy the intersection. All nominal objects included must be
+a subtype of the previous nominal object included in the intersection.
 
 ```
 obj Name
