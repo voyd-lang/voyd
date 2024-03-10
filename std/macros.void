@@ -95,7 +95,7 @@ pub macro extern-fn()
 		$identifier
 		namespace $namespace
 		$parameters
-		$(`(return-type $@(return-type))))
+		(return-type $@return-type))
 
 pub macro match()
 	log "match"
