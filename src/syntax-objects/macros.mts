@@ -1,26 +1,30 @@
+import { Block } from "./block.mjs";
 import type { Expr } from "./expr.mjs";
 import { Identifier } from "./identifier.mjs";
-import { List } from "./list.mjs";
-import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
+import { ScopedNamedEntityOpts, ScopedNamedEntity } from "./named-entity.mjs";
 
 export type Macro = RegularMacro;
 
-export class RegularMacro extends NamedEntity {
+export class RegularMacro extends ScopedNamedEntity {
   readonly syntaxType = "macro";
   readonly macroType = "regular";
   readonly parameters: Identifier[] = [];
-  readonly body: List;
+  readonly body: Block;
 
   constructor(
-    opts: NamedEntityOpts & {
+    opts: ScopedNamedEntityOpts & {
       parameters?: Identifier[];
-      body: List;
+      body: Block;
     }
   ) {
     super(opts);
     this.parameters = opts.parameters ?? [];
     this.body = opts.body;
     this.body.parent = this;
+  }
+
+  evaluate(evaluator: (expr: Expr) => Expr): Expr | undefined {
+    return this.body.evaluate(evaluator);
   }
 
   getName(): string {

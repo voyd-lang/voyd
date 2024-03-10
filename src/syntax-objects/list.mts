@@ -79,6 +79,10 @@ export class List extends Syntax {
     return this.value[0];
   }
 
+  last(): Expr | undefined {
+    return this.value.at(-1);
+  }
+
   /** Returns all but the first element in an array */
   rest(): Expr[] {
     return this.value.slice(1);
