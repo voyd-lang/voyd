@@ -508,6 +508,7 @@ const getMacroTimeValue = (expr: Expr | undefined): any => {
     expr.isInt() ||
     expr.isStringLiteral() ||
     expr.isList() ||
+    expr.isBool() ||
     expr.isIdentifier();
 
   if (hasValue) return expr.value;
