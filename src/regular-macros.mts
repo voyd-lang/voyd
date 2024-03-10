@@ -12,6 +12,7 @@ import {
   RegularMacro,
   MacroVariable,
   VoidModule,
+  Block,
 } from "./syntax-objects/index.mjs";
 import { NamedEntity } from "./syntax-objects/named-entity.mjs";
 
@@ -147,14 +148,36 @@ const evalMacroDef = (list: List): Macro => {
   const signature = list.listAt(1);
   const name = signature.identifierAt(0);
   const parameters = signature.rest() as Identifier[];
-  const body = list.slice(2).map(expandRegularMacros).insert("block");
   const macro = new RegularMacro({
     ...list.metadata,
     name,
     parameters,
-    body,
+    body: new Block({
+      ...list.metadata,
+      body: list
+        .slice(2)
+        .map(expandRegularMacros)
+        .map((expr) => {
+          if (expr.isList() && expr.calls("quote")) return expr;
+          return initializeMacroBlocks(expr);
+        }),
+    }),
   });
   return macro;
+};
+
+const initializeMacroBlocks = (list: Expr): Expr => {
+  if (!list.isList()) return list;
+  if (list.calls("quote")) return list;
+
+  if (list.calls("block")) {
+    return new Block({
+      ...list.metadata,
+      body: list.slice(1).map(initializeMacroBlocks),
+    });
+  }
+
+  return list.map((expr) => initializeMacroBlocks(expr));
 };
 
 /** Expands a macro call */
@@ -166,13 +189,14 @@ export const expandMacro = (macro: Macro, call: List): Expr => {
     registerMacroVar({ with: clone, name, value: call.at(index + 1)! });
   });
 
-  const result = clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
+  const result = clone.evaluate(evalMacroExpr) ?? nop();
   result.parent = call.parent;
   return result;
 };
 
 const evalMacroExpr = (expr: Expr) => {
   if (expr.isIdentifier()) return evalIdentifier(expr);
+  if (expr.isBlock()) return expr.evaluate(evalMacroExpr) ?? nop();
   if (!expr.isList()) return expr;
   return evalMacroTimeFnCall(expr);
 };
@@ -291,7 +315,7 @@ const functions: Record<string, MacroFn | undefined> = {
 
         if (exp.isList() && exp.calls("$@")) {
           const rest = new List({ value: exp.rest(), parent: body });
-          return (evalMacroExpr(rest) as List).insert("splice-normal-context");
+          return (evalMacroExpr(rest) as List).insert("splice-quote");
         }
 
         if (exp.isList()) return expand(exp);
@@ -516,6 +540,6 @@ export const evalMacroVarDef = (call: List) => {
     isMutable,
     value: evalMacroExpr(init),
   });
-  call.parent?.registerEntity(variable);
+  call.registerEntity(variable);
   return variable;
 };

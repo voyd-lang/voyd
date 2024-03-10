@@ -19,13 +19,7 @@ import { Block } from "./block.mjs";
 import { VoidModule } from "./module.mjs";
 
 export type Expr =
-  | Bool
-  | Int
-  | Float
-  | StringLiteral
-  | Identifier
-  | Whitespace
-  | List
+  | PrimitiveExpr
   | Type
   | Fn
   | ExternFn
@@ -38,3 +32,15 @@ export type Expr =
   | VoidModule
   | Call
   | Block;
+
+/**
+ * These are the Expr types that must be returned until all macros have been expanded (reader, syntax, and regular)
+ */
+export type PrimitiveExpr =
+  | Bool
+  | Int
+  | Float
+  | StringLiteral
+  | Identifier
+  | Whitespace
+  | List;
