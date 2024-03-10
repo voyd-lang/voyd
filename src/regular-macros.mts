@@ -367,7 +367,7 @@ const functions: Record<string, MacroFn | undefined> = {
   extract: (args) => {
     const list = args.listAt(0);
     const index = getMacroTimeValue(args.at(1)) as number;
-    return list.at(index)!; // TODO: Make this safer
+    return list.at(index) ?? nop();
   },
   map: (args) => {
     const list = args.first()! as List;

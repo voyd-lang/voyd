@@ -66,7 +66,7 @@ pub macro fn()
 	`(define-function
 		$identifier
 		$params
-		$(`(return-type $@(return-type)))
+		(return-type $@return-type)
 		$(concat `(block) expressions))
 
 pub macro def-wasm-operator(op wasm-fn arg-type return-type)
