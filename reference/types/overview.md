@@ -6,8 +6,8 @@ through the use of objects and traits.
 - [Types Overview](#types-overview)
 - [Defining Types](#defining-types)
 - [Data Types](#data-types)
-	- [Primitive Data Types](#primitive-data-types)
-	- [Objects](#objects)
+  - [Primitive Data Types](#primitive-data-types)
+  - [Objects](#objects)
 
 A type comes in a few categories:
 - `Data` - The most basic types that store bits of information

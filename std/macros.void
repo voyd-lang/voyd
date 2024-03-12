@@ -1,115 +1,115 @@
 export
-	macro pub()
-		quote(export (block $&body))
+    macro pub()
+        quote(export (block $&body))
 
 pub macro `()
-	quote quote $@&body
+    quote quote $@&body
 
 pub macro let()
-	define equals-expr (extract &body 0)
-	`(define $(extract equals-expr 1) $(extract equals-expr 2))
+    define equals-expr (extract &body 0)
+    `(define $(extract equals-expr 1) $(extract equals-expr 2))
 
 pub macro var()
-	define equals-expr (extract &body 0)
-	`(define-mut $(extract equals-expr 1) $(extract equals-expr 2))
+    define equals-expr (extract &body 0)
+    `(define-mut $(extract equals-expr 1) $(extract equals-expr 2))
 
 pub macro global()
-	let mutability = extract &body 0
-	let equals-expr = extract &body 1
-	let function =
-		if mutability == "let" then:
-			` define-global
-		else:
-			` define-mut-global
-	`($@function
-		$(extract equals-expr 1)
-		$(extract equals-expr 2))
+    let mutability = extract &body 0
+    let equals-expr = extract &body 1
+    let function =
+        if mutability == "let" then:
+            ` define-global
+        else:
+            ` define-mut-global
+    `($@function
+        $(extract equals-expr 1)
+        $(extract equals-expr 2))
 
 pub macro ';'()
-	let func = &body.extract(0)
-	let body = &body.extract(1)
-	let args =
-		if body.extract(0) == "block" then:
-			body.slice(1)
-		else:
-			body
-	if is-list(func) then:
-		func.concat(args)
-	else:
-		concat(`($func) args)
+    let func = &body.extract(0)
+    let body = &body.extract(1)
+    let args =
+        if body.extract(0) == "block" then:
+            body.slice(1)
+        else:
+            body
+    if is-list(func) then:
+        func.concat(args)
+    else:
+        concat(`($func) args)
 
 // Extracts typed parameters from a list where index 0 is fn name, and offset-index+ are labeled-expr
 macro-let extract-parameters = (definitions) =>
-	`(parameters).concat definitions.slice(1)
+    `(parameters).concat definitions.slice(1)
 
 pub macro fn()
-	let definitions = extract(&body 0)
-	let identifier = extract(definitions 0)
-	let params = extract-parameters(definitions)
+    let definitions = extract(&body 0)
+    let identifier = extract(definitions 0)
+    let params = extract-parameters(definitions)
 
-	let type-arrow-index =
-		if (extract(&body 1) == "->") then:
-			1
-		else:
-			if (extract(&body 2) == "->") then: 2 else: -1
+    let type-arrow-index =
+        if (extract(&body 1) == "->") then:
+            1
+        else:
+            if (extract(&body 2) == "->") then: 2 else: -1
 
-	let return-type =
-		if type-arrow-index > -1 then:
-			&body.slice(type-arrow-index + 1 type-arrow-index + 2)
-		else: `()
+    let return-type =
+        if type-arrow-index > -1 then:
+            &body.slice(type-arrow-index + 1 type-arrow-index + 2)
+        else: `()
 
-	let expressions =
-		if (type-arrow-index > -1) then:
-			&body.slice(type-arrow-index + 2)
-		else: &body.slice(1)
+    let expressions =
+        if (type-arrow-index > -1) then:
+            &body.slice(type-arrow-index + 2)
+        else: &body.slice(1)
 
-	`(define-function
-		$identifier
-		$params
-		(return-type $@return-type)
-		$(concat `(block) expressions))
+    `(define-function
+        $identifier
+        $params
+        (return-type $@return-type)
+        $(concat `(block) expressions))
 
 pub macro def-wasm-operator(op wasm-fn arg-type return-type)
-	`(fn $op(left:$arg-type right:$arg-type) -> $return-type
-		binaryen-mod ($arg-type $wasm-fn $return-type) (left right))
+    `(fn $op(left:$arg-type right:$arg-type) -> $return-type
+        binaryen-mod ($arg-type $wasm-fn $return-type) (left right))
 
 // extern $fn-id(namespace params*)
 // extern max("Math" x:i32 y:i32)
 pub macro extern-fn()
-	let namespace = &body.extract(0)
-	let definitions = &body.extract(1)
-	let identifier = definitions.extract(0)
-	let parameters = extract-parameters(definitions)
+    let namespace = &body.extract(0)
+    let definitions = &body.extract(1)
+    let identifier = definitions.extract(0)
+    let parameters = extract-parameters(definitions)
 
-	let type-arrow-index = if (extract(&body 1) == "->") then:
-		1
-	else:
-		if (extract(&body 2) == "->") then: 2 else: -1
+    let type-arrow-index = if (extract(&body 1) == "->") then:
+        1
+    else:
+        if (extract(&body 2) == "->") then: 2 else: -1
 
-	let return-type =
-		if (type-arrow-index > -1) then:
-			extract(&body type-arrow-index + 1)
-		else: `()
+    let return-type =
+        if (type-arrow-index > -1) then:
+            extract(&body type-arrow-index + 1)
+        else: `()
 
-	`(define-extern-function
-		$identifier
-		namespace $namespace
-		$parameters
-		(return-type $@return-type))
+    `(define-extern-function
+        $identifier
+        namespace $namespace
+        $parameters
+        (return-type $@return-type))
 
 pub macro match()
-	log "match"
-	let value-expr = &body.extract(0)
-	let cases = &body.slice(1)
-	let expand-cases = (cases index) =>
-		let case = cases.extract(index)
-		if is-list(case) and not(index + 1 >= cases.length) then:
-			`(if $(extract case 0) == match-value
-				then: $(extract case 1)
-				else: $(&lambda cases (index + 1)))
-		else: case
+    log "match"
+    let value-expr = &body.extract(0)
+    let cases = &body.slice(1)
+    let expand-cases = (cases index) =>
+        let case = cases.extract(index)
+        if is-list(case) and not(index + 1 >= cases.length) then:
+            `(if $(extract case 0) == match-value
+                then: $(extract case 1)
+                else: $(&lambda cases (index + 1)))
+        else: case
 
-	let conditions = expand-cases(cases 0)
-	`(block
-		let match-value = $value-expr
-		$conditions)
+    let conditions = expand-cases(cases 0)
+    `(block
+        let match-value = $value-expr
+        $conditions)

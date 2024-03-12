@@ -7,36 +7,36 @@ type Get = () => number;
 type Put = (value: number) => void;
 
 const loop = (n: number) => {
-  if (n === 0) return;
-  put(get() + 1);
-  return loop(n - 1);
+    if (n === 0) return;
+    put(get() + 1);
+    return loop(n - 1);
 };
 
 // Effect functions
 const get = (state, continuation) => continuation(state, state.value);
 const put = (value, state, continuation) =>
-  continuation({ ...state, value }, undefined);
+    continuation({ ...state, value }, undefined);
 
 // Transpiled loop function
 const loop2 = (
-  n: number,
-  state: { value: number },
-  continuation: (state: { value: number }) => void
+    n: number,
+    state: { value: number },
+    continuation: (state: { value: number }) => void
 ) => {
-  if (n === 0) return continuation(state, undefined);
+    if (n === 0) return continuation(state, undefined);
 
-  return get(state, (newState, result) =>
-    put(result + 1, newState, (newerState) =>
-      loop2(n - 1, newerState, continuation)
-    )
-  );
+    return get(state, (newState, result) =>
+        put(result + 1, newState, (newerState) =>
+            loop2(n - 1, newerState, continuation)
+        )
+    );
 };
 
 // Example usage
 const initialState = { value: 0 };
 loop(5, initialState, (finalState, result) => {
-  console.log("Final State:", finalState);
-  console.log("Result:", result);
+    console.log("Final State:", finalState);
+    console.log("Result:", result);
 });
 ```
 
@@ -60,7 +60,7 @@ Ideal features:
 Open questions:
 
 - Void supports _both_ named parameters _and_ objects and treats each one differently. How should
-  this be handled? The best I can think of is that named parameters should be treated as objects
+    this be handled? The best I can think of is that named parameters should be treated as objects
 - Need to define a standard for tagged data structures.
 
 # 30 July 2023
@@ -68,102 +68,102 @@ Open questions:
 ## Updated Rules For Parenthetical Elision
 
 1. (Unchanged) Any line with more than one symbol is wrapped with parenthesis (if it does not
-   already have them)
+     already have them)
 
-   ```void
-   add 1 2
+     ```void
+     add 1 2
 
-   // Becomes
-   (add 1 2)
-   ```
+     // Becomes
+     (add 1 2)
+     ```
 
 2. (Updated) Indented lines are wrapped in a block and passed as an argument to the preceding
-   function call with one less indentation level, provided:
+     function call with one less indentation level, provided:
 
-   1. There are no empty lines between the child and the parent
-   2. The first child is not a named argument
-   3. The parent is not wrapped in parenthesis
+     1. There are no empty lines between the child and the parent
+     2. The first child is not a named argument
+     3. The parent is not wrapped in parenthesis
 
-   ```void
-   add 2
-   	mul 4 x
+     ```void
+     add 2
+         mul 4 x
 
-   // Becomes
-   (add 2 (block
-     (mul 4 x)))
-   ```
+     // Becomes
+     (add 2 (block
+         (mul 4 x)))
+     ```
 
 3. (New) Isolated named arguments, that is named arguments that are on their own line, are applied
-   to the preceding function call provided:
+     to the preceding function call provided:
 
-   1. There are no empty lines separating between the two
-   2. The named argument is on the same indentation level, or 1 child indentation level as the
-      preceding function call.
+     1. There are no empty lines separating between the two
+     2. The named argument is on the same indentation level, or 1 child indentation level as the
+            preceding function call.
 
-   ```
-   try
-     this_throws_an_error()
-   catch(e):
-     print(e)
+     ```
+     try
+         this_throws_an_error()
+     catch(e):
+         print(e)
 
-   // Becomes
-   (try
-     (block (this_throws_an_error))
-     (named catch (lambda (e) (block
-       print(e)))))
+     // Becomes
+     (try
+         (block (this_throws_an_error))
+         (named catch (lambda (e) (block
+             print(e)))))
 
-   // Another example
-   if x > y
-     then: 3
-     else: 5
-
-   // Becomes
-   (if (x > y)
-     (named then 3)
-     (named else 5))
-   ```
-
-4. (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;`) get special handling.
-
-   1. Greedy operators consume indented child blocks, rather than the parent function call
-
-      ```
-      let x =
-       if (x > y)
+     // Another example
+     if x > y
          then: 3
          else: 5
 
-      // Becomes
-      (let (= x
-        (block
-          (if (> x y)
-            (named then 3)
-            (named else 5)))))
-      ```
+     // Becomes
+     (if (x > y)
+         (named then 3)
+         (named else 5))
+     ```
 
-   2. If an expression follows a greedy operator on the same line, a new line is inserted after the
-      operator and each child line has an additional level of indentation supplied.
+4. (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;`) get special handling.
 
-      ```
-      let z = if x > y
-        then: 3
-        else: 5
+     1. Greedy operators consume indented child blocks, rather than the parent function call
 
-      // Becomes
-      let z =
-        if x > y
-          then: 3
-          else: 5
+            ```
+            let x =
+             if (x > y)
+                 then: 3
+                 else: 5
 
-      // Which in turn becomes
-      (let (=
-        z
-        (block
-          (if
-            (> z y)
-            (named then 3)
-            (named else 5)))))
-      ```
+            // Becomes
+            (let (= x
+                (block
+                    (if (> x y)
+                        (named then 3)
+                        (named else 5)))))
+            ```
+
+     2. If an expression follows a greedy operator on the same line, a new line is inserted after the
+            operator and each child line has an additional level of indentation supplied.
+
+            ```
+            let z = if x > y
+                then: 3
+                else: 5
+
+            // Becomes
+            let z =
+                if x > y
+                    then: 3
+                    else: 5
+
+            // Which in turn becomes
+            (let (=
+                z
+                (block
+                    (if
+                        (> z y)
+                        (named then 3)
+                        (named else 5)))))
+            ```
 
 These new rules solve a number of problems in one go.
 
@@ -176,22 +176,22 @@ Examples of improvements:
 ```
 // Given
 accept my: "favorite" stuff:
-  do_work()
-  again_for_me()
+    do_work()
+    again_for_me()
 
 // Translation before new rules
 (accept
-  (named my "favorite")
-  (named stuff (do_work)
-  (again_for_me)))
+    (named my "favorite")
+    (named stuff (do_work)
+    (again_for_me)))
 
 // After new rules
 (accept
-  (named my "favorite")
-  (named stuff
-    (block
-      (do_work)
-      (again_for_me))))
+    (named my "favorite")
+    (named stuff
+        (block
+            (do_work)
+            (again_for_me))))
 ```
 
 ## Named Argument Lambda Syntax
@@ -200,16 +200,16 @@ accept my: "favorite" stuff:
 
 // Named arguments as lambda functions
 fn call(~cb: (v: i32) -> void, val: i32)
-  cb(5)
+    cb(5)
 
 // Usage without accepting the parameter
 call cb(): print("hey") 5
 
 // Short for
 call
-  cb: () =>
-    print("hey")
-  5
+    cb: () =>
+        print("hey")
+    5
 
 ```
 
@@ -225,14 +225,14 @@ When a named arguments act like a lambda function, and can take parameters:
 
 ```
 fn call(cb: (v: i32) -> void)
-  cb(5)
+    cb(5)
 
 call cb(v):
-  print(v)
+    print(v)
 
 // Equivalent to
 call cb: (v) =>
-  print
+    print
 ```
 
 **Edit 30 July 2023** Ignore the following paragraph
@@ -253,17 +253,17 @@ Take, for example, a hypothetical if/else or try/catch implementation (assume no
 
 ```
 if x < 3
-  then:
-    bloop()
-    bleep()
-  else:
-    blop()
+    then:
+        bloop()
+        bleep()
+    else:
+        blop()
 
 try
-  this:
-    can_throw()
-  catch:
-    ball()
+    this:
+        can_throw()
+    catch:
+        ball()
 ```
 
 This can be trivially solved with macros The issue is that this is a common pattern, and the average
@@ -275,33 +275,33 @@ preceding function call:
 
 ```
 if x < 3 do
-  bleep()
+    bleep()
 -else:
-  bloop()
+    bloop()
 
 try do
-  can_throw()
+    can_throw()
 -catch:
-  ball()
+    ball()
 
 // Or
 
 if x < 3 do
-  bleep()
+    bleep()
 \else:
-  bloop()
+    bloop()
 
 try do
-  can_throw()
+    can_throw()
 \catch: do // Should : be implicit?
-  ball()
+    ball()
 
 // Or
 
 try do
-  can_throw()
+    can_throw()
 ,catch: do // Should : be implicit?
-  ball()
+    ball()
 ```
 
 Note: this assumes `do` is a greedy prefix operator. If it wasn't we could also use `do;`. Reminder
@@ -310,12 +310,12 @@ that `;` is a greedy terminating operator, so all arguments on the right are app
 **Other**
 
 - Since effects abstract the concept of return, we no longer need to treat blocks as separate from
-  functions. `block` can become `do` and `do` can be an alias for `() =>`
+    functions. `block` can become `do` and `do` can be an alias for `() =>`
 - If `:` were a greedy operator, it would implicitly `block` (i.e. `do`)
 - Need to experiment.
 - I really like how Koka uses a single letter for generics in the type definition for parameters
-  that accept a function. Though I'm not a fan of single letter generics in the general sense,
-  they're not great at communicating intention. Still worth considering.
+    that accept a function. Though I'm not a fan of single letter generics in the general sense,
+    they're not great at communicating intention. Still worth considering.
 
 # 25 July 2023
 
@@ -340,22 +340,22 @@ let p = Point::mut { x: 1, y: 2, z: 3}
 let p2 = p // Error!
 
 fn square(p: Point::mut)
-  p.x = p.x.square
-  p.y = p.y.square
-  p.z = p.z.square
+    p.x = p.x.square
+    p.y = p.y.square
+    p.z = p.z.square
 
 impl Point
-  fn square(self::mut)
-    self.x = self.x.square
-    self.y = self.y.square
-    self.z = self.z.square
+    fn square(self::mut)
+        self.x = self.x.square
+        self.y = self.y.square
+        self.z = self.z.square
 
 // Possible alternative for implicit self
 impl Point::mut
-  fn square()
-    x = x.square
-    y = y.square
-    z = z.square
+    fn square()
+        x = x.square
+        y = y.square
+        z = z.square
 ```
 
 I'd also like to consider requiring parenthesis on any impure function (i.e. cannot look like a
@@ -367,26 +367,26 @@ The previous syntax change had some problems. So I've modified the rules of the 
 some of the ambiguities (among other changes).
 
 - The `=` sign separating a function signature is now optional. It should be used only for single
-  line functions.
+    line functions.
 - Effects are now on the right side of `->`. A function signature is now `fn name() -> (effect
 return-type)`. This allows `->` to be treated as an operator and makes the `=` far less complex to
-  implement.
+    implement.
 - Generics are now defined with `::()`. This prevents us from needing to add hacks to the parser and
-  makes the language much more predictable and uniform. Its also inline with the new FQCS
+    makes the language much more predictable and uniform. Its also inline with the new FQCS
 - Introduce FQCS inspired by rust
 - Remove `=` from `obj` and `impl` defs.
 - Objects now behave more similarly to Rust's structs. Though they are still reference types and can
-  be extended, they now only define data. Traits define behavior and can only hold
-  functions/methods. Methods must now be define inside of `impl`. For now, extensions must repeat
-  all the items they inherit.
+    be extended, they now only define data. Traits define behavior and can only hold
+    functions/methods. Methods must now be define inside of `impl`. For now, extensions must repeat
+    all the items they inherit.
 - Add Fully Qualified Call Syntax (FQCS) inspired by rust. Makes it possible to impl multiple traits
-  with a method that has the same signature
+    with a method that has the same signature
 
 Now all thats left is to:
 
 - Decide casing convention once and for all
-  - Native types lowercase? (i32 vs I32)
-  - CamelCase?
+    - Native types lowercase? (i32 vs I32)
+    - CamelCase?
 - Decide on type spacing rules `a:i32` vs `a: i32`
 
 # 9 July 2023
@@ -400,11 +400,11 @@ while also making single line functions more readable.
 ```
 // Old syntax
 fn add(a: i32, b: i32) -> i32
-  a + b
+    a + b
 
 // New syntax
 fn add(a: i32, b: i32) -> i32 =
-  a + b
+    a + b
 
 // Looks a lot better when we use type inference
 fn add(a: i32, b: i32) = a + b
@@ -420,14 +420,14 @@ the end so I guess not much harm is done.
 Expanding on the previous entry. There are multiple reasons I've made this change.
 
 - I wanted the type system to be as simple as possible while still having the potential to match the
-  power of typescript's type system (with the added bonus of run time types)
+    power of typescript's type system (with the added bonus of run time types)
 - Having both `class` and `struct` and potentially different runtime behavioral characteristics was
-  not ideal.
+    not ideal.
 - Structs are stupidly difficult to model in wasm in a way that is both performant and works with a
-  gc system.
-  - Linear memory cannot hold reference types
-  - Structs could leverage multi-value, but they are a pain to work with in binaryen. We'd also have
-    to be smart about how we pass them around.
+    gc system.
+    - Linear memory cannot hold reference types
+    - Structs could leverage multi-value, but they are a pain to work with in binaryen. We'd also have
+        to be smart about how we pass them around.
 
 # 4 July 2023
 
@@ -438,12 +438,12 @@ Here are the changes:
 
 - Remove struct and class
 - Add object types
-  - Objects are nominal
+    - Objects are nominal
 - `type` defines a literal (structural) type (essentially an alias)
 - Literal types are structural, object types are nominal
 - Most user types are assumed to be heap types now. Will need new /custom syntax do define stack
-  types. Do not be afraid to make these more verbose and difficult to use, that is webassembly's
-  fault, not yours.
+    types. Do not be afraid to make these more verbose and difficult to use, that is webassembly's
+    fault, not yours.
 
 The main benefit to this change is it is much simpler to understand, will likely be more fun write
 while also being more maintainable. Thee performance impact is worth the expressiveness. You can
