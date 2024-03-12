@@ -27,7 +27,7 @@ export class Token {
   }
 
   get isWhitespace() {
-    return /^\s$/.test(this.value);
+    return /^\s+$/.test(this.value);
   }
 
   addChar(string: string) {
