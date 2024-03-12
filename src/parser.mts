@@ -97,6 +97,11 @@ const lexer = (file: File): Token => {
       continue;
     }
 
+    if (!token.hasChars && char === " ") {
+      consumeSpaces(file, token);
+      break;
+    }
+
     if (!token.hasChars && nextIsNumber(file)) {
       consumeNumber(file, token);
       break;
@@ -116,6 +121,12 @@ const lexer = (file: File): Token => {
     if (token.first === "#" && !isWhitespace(char)) {
       token.addChar(file.consumeChar());
       continue;
+    }
+
+    if (char === "\t") {
+      throw new Error(
+        "Tabs are not supported, use four spaces for indentation"
+      );
     }
 
     if (isTerminator(char)) {
@@ -150,3 +161,9 @@ const consumeNumber = (file: File, token: Token) => {
 
 const nextIsNumber = (file: File) =>
   isDigit(file.next) || (isDigitSign(file.next) && isDigit(file.at(1) ?? ""));
+
+const consumeSpaces = (file: File, token: Token) => {
+  while (file.next === " " && token.span < 4) {
+    token.addChar(file.consumeChar());
+  }
+};

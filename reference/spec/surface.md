@@ -18,7 +18,7 @@ This surface language spec includes:
 (* Whitespace (Significant to the surface level language) *)
 Whitespace = Space | Tab | Newline
 Space = " ";
-Tab = "\t";
+Indent = "    ";
 NewLine = "\n";
 BackSlash = "\\"; // Single back slash character \
 

@@ -15,11 +15,11 @@ export class Whitespace extends Syntax {
   }
 
   get isSpace() {
-    return this.value === " ";
+    return !this.isNewline && !this.isIndent;
   }
 
-  get isTab() {
-    return this.value === "\t";
+  get isIndent() {
+    return this.value === "    ";
   }
 
   clone(parent?: Expr): Whitespace {
