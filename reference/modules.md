@@ -11,6 +11,6 @@ use src::folder::{ b } // Resolves to src/folder/index.void
 use package::my_package::{ pack-func } // Import pack-func from the installed package called my_package.
 
 mod my-module // Create a new module within the current module
-	fn my-func() // Define a function within the module
-		print "Hello from my-module"
+    fn my-func() // Define a function within the module
+        print "Hello from my-module"
 ```

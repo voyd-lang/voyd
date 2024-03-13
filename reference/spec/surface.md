@@ -18,7 +18,7 @@ This surface language spec includes:
 (* Whitespace (Significant to the surface level language) *)
 Whitespace = Space | Tab | Newline
 Space = " ";
-Tab = "\t";
+Indent = "    ";
 NewLine = "\n";
 BackSlash = "\\"; // Single back slash character \
 
@@ -87,16 +87,16 @@ In the next sections, the different macros will be defined in depth.
 // Translated version of a swift example from https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/
 
 let photos = await taskGroup(of: Optional(Data).self) | () =>
-	let photoNames = await listPhotos(inGallery: "Summer Vacation")
+    let photoNames = await listPhotos(inGallery: "Summer Vacation")
 
-	for name in photoNames
-		group.addTaskUnlessCancelled (isCancelled) =>
-			if not(isCancelled)
-				await downloadPhoto(named: name)
+    for name in photoNames
+        group.addTaskUnlessCancelled (isCancelled) =>
+            if not(isCancelled)
+                await downloadPhoto(named: name)
 
-	await group.filter() | (photo) => photo != nil
+    await group.filter() | (photo) => photo != nil
 
 photos.map name =>
-	let photo = await downloadPhoto(named: name)
-	photo.map(processPhoto)
+    let photo = await downloadPhoto(named: name)
+    photo.map(processPhoto)
 ```

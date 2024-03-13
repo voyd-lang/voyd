@@ -27,8 +27,8 @@
     "skipFiles": ["<node_internals>/**"],
     "outFiles": ["${workspaceFolder}/**/*.mjs"]
   },
-  "editor.insertSpaces": false,
-  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "editor.tabSize": 4,
   "editor.wordSeparators": "`~!@#$%^&*()=[{]}\\|;:'\",.<>/?",
   "[markdown]": {
     "editor.unicodeHighlight.ambiguousCharacters": false,

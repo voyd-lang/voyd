@@ -6,27 +6,27 @@ https://justforfunnoreally.dev/
 
 ```rust
 fn fib(n: i32) -> i32
-	if n < 2 then:
-		n
-	else:
-		fib(n - 1) + fib(n - 2)
+    if n < 2 then:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
 
 // All binary programs have a main function
 fn main() -> void
-	for n in range(15)
-		// Call print on the fibonacci sequence at index using UFCS.
-		fib(n).print()
+    for n in range(15)
+        // Call print on the fibonacci sequence at index using UFCS.
+        fib(n).print()
 ```
 
 ```rust
 fn app() -> html
-	let todo_items = ["wake up", "eat", "code", "sleep"]
-	<div>
-		<h1>TODO</h1>
-		<ul>
-			${todo_items.map i => <li>${i}</li>}
-		</ul>
-	</div>
+    let todo_items = ["wake up", "eat", "code", "sleep"]
+    <div>
+        <h1>TODO</h1>
+        <ul>
+            ${todo_items.map i => <li>${i}</li>}
+        </ul>
+    </div>
 ```
 
 **Disclaimer**
@@ -46,8 +46,8 @@ yet implemented.
 - Uniform function call syntax
 - [Homoiconic](https://en.wikipedia.org/wiki/Homoiconicity)
 - Pythonesque syntax that de-sugars into a lisp like dialect
-	- Parenthesis can be elided in most cases
-	- Infix notation and standard function call notation support
+    - Parenthesis can be elided in most cases
+    - Infix notation and standard function call notation support
 
 **Guiding Principles**:
 
@@ -117,7 +117,7 @@ A Basic function:
 
 ```rust
 fn add(a: i32, b: i32) -> i32
-	a + b
+    a + b
 ```
 
 In most cases the return type can be inferred
@@ -163,12 +163,12 @@ type parameter and destructuring it in the function body[1]:
 
 ```rust
 fn move({ x: i32 y: i32 z: i32 }) -> void
-	// ...
+    // ...
 
 // Semantically equivalent to:
 fn move(vec: { x: i32 y: i32 z: i32 }) -> void
-	let { x, y, z } = vec
-	// ...
+    let { x, y, z } = vec
+    // ...
 
 move(x: 1, y: 2, z: 3)
 
@@ -200,9 +200,9 @@ penalty for using labeled arguments.
 
 ```rust
 if 3 < val then:
-	"hello" // true case
+    "hello" // true case
 else:
-	"bye" // false case (optional)
+    "bye" // false case (optional)
 ```
 
 Ifs are expressions that return a value
@@ -218,9 +218,9 @@ Basic loops repeat until returned from
 ```rust
 var a = 0
 loop
-	if a > 10
-		return a
-	a += 1
+    if a > 10
+        return a
+    a += 1
 ```
 
 Loops can be labeled
@@ -228,16 +228,16 @@ Loops can be labeled
 ```rust
 var a = 0
 loop name: "increment"
-	if a > 10
-		return_from "increment" a
-	a += 1
+    if a > 10
+        return_from "increment" a
+    a += 1
 ```
 
 Useful constructs from looping through iterables
 
 ```rust
 for item in iterable
-	print item
+    print item
 ```
 
 ### Match Statements
@@ -245,14 +245,14 @@ for item in iterable
 ```rust
 let x = 3
 match x
-	1 => print "One"
-	2 => print "Two"
-	3 => print "Three"
-	_ =>
-		// Match statements are exhaustive, they must cover every possible
-		// case. When not every case is covered, a default handler must be
-		// provided.
-		write "A number"
+    1 => print "One"
+    2 => print "Two"
+    3 => print "Three"
+    _ =>
+        // Match statements are exhaustive, they must cover every possible
+        // case. When not every case is covered, a default handler must be
+        // provided.
+        write "A number"
 ```
 
 ## Closures
@@ -280,12 +280,12 @@ squared(x)
 
 ```rust
 fn add<T>(a: T, b: T) -> T
-	a + b
+    a + b
 ```
 
 With trait constraints
 
 ```rust
 fn add<T impls Numeric>(a: T, b: T) -> T
-	a + b
+    a + b
 ```

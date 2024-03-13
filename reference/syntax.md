@@ -25,8 +25,8 @@ Void language is built around an s-expression syntax, like lisp:
 
 ```void
 (if (n < 2)
-	(: then n)
-	(: else (+ (fib (- n 1)) (fib (- n 2)))))
+    (: then n)
+    (: else (+ (fib (- n 1)) (fib (- n 2)))))
 ```
 
 To reduce visual noise, parenthesis can be elided, using tabs as a mechanism to
@@ -34,8 +34,8 @@ infer where the parenthesis should be inserted:
 
 ```void
 if (n < 2)
-	then: n
-	else: (+ (fib (- n 1)) (fib (- n 2)))
+    then: n
+    else: (+ (fib (- n 1)) (fib (- n 2)))
 ```
 
 This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org/srfi-110/)
@@ -56,14 +56,14 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
 
     ```void
     add 2
-    	let x = 5
-    	mul 4 x
+        let x = 5
+        mul 4 x
 
     // Becomes
     (add 2
-    	(block
-    		(let (= x 5))
-    		(mul 4 x)))
+        (block
+            (let (= x 5))
+            (mul 4 x)))
     ```
 
 3.  Isolated labeled arguments, that is labeled arguments that are on their own
@@ -79,18 +79,18 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
 
     // Becomes
     (if (> x y)
-    	(: then 3)
-    	(: else 5))
+        (: then 3)
+        (: else 5))
 
     // Another example
     if x > y
-    	then: 3
-    	else: 5
+        then: 3
+        else: 5
 
     // Becomes
     (if (x > y)
-    	(: then 3)
-    	(: else 5))
+        (: then 3)
+        (: else 5))
     ```
 
 4.  (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special
@@ -101,16 +101,16 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
 
         ```
         let x =
-        	if (x > y)
-        		then: 3
-        		else: 5
+            if (x > y)
+                then: 3
+                else: 5
 
         // Becomes
         (let (= x
-        	(block
-        		(if (> x y)
-        		(: then 3)
-        		(: else 5)))))
+            (block
+                (if (> x y)
+                (: then 3)
+                (: else 5)))))
         ```
 
     2.  If an expression follows a greedy operator on the same line, a new line
@@ -119,64 +119,64 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
 
             ```
             let z = if x > y
-            	then: 3
-            	else: 5
+                then: 3
+                else: 5
 
             // Becomes
             let z =
-            	if x > y
-            		then: 3
-            		else: 5
+                if x > y
+                    then: 3
+                    else: 5
 
             // Which in turn becomes
             (let (=
-            	z
-            	(block
-            		(if
-            			(> z y)
-            				(: then 3)
-            				(: else 5)))))
+                z
+                (block
+                    (if
+                        (> z y)
+                            (: then 3)
+                            (: else 5)))))
             ```
 
 5. Parenthetical elision is disabled on any lines surrounded by parenthesis 1.
-	Parenthetical elision can be re-enabled by using the whitespace curly block
-	`${}` syntax
+    Parenthetical elision can be re-enabled by using the whitespace curly block
+    `${}` syntax
 
-		``` add(x, y, ${ if x > y then: 3 else: 5 })
+        ``` add(x, y, ${ if x > y then: 3 else: 5 })
 
 
-		// Becomes (add x y (block (if (> x y) (: then 3) (: else 5)))) ```
+        // Becomes (add x y (block (if (> x y) (: then 3) (: else 5)))) ```
 
 
 Examples:
 
 ```
 if x > 3 then:
-	do_work()
-	blah()
+    do_work()
+    blah()
 else:
-	do_other_work()
+    do_other_work()
 
 // Becomes
 (if (> x 3)
-	(: then (block
-		do_work()
-		blah()))
-	(: else (block
-		do_other_work())))
+    (: then (block
+        do_work()
+        blah()))
+    (: else (block
+        do_other_work())))
 
 obj Pos
-	x: (if x > 3 then: b else: c)
-	y: 2
-	z: 3
+    x: (if x > 3 then: b else: c)
+    y: 2
+    z: 3
 
 // Becomes
 (obj Pos
-	(: x (if (> x 3)
-		(: then b)
-		(: else c)))
-	(: y 2)
-	(: z 3))
+    (: x (if (> x 3)
+        (: then b)
+        (: else c)))
+    (: y 2)
+    (: z 3))
 
 obj Pos
 x: 1
@@ -185,9 +185,9 @@ z: 3
 
 // Becomes
 (obj Pos
-	(: x 1)
-	(: y 2)
-	(: z 3))
+    (: x 1)
+    (: y 2)
+    (: z 3))
 ```
 
 # Standard Function Call Syntax
@@ -240,14 +240,14 @@ that list is treated as the name, additional identifiers become parameters.
 
 ```
 fn call(cb: fn(v: i32) -> void)
-	cb(5)
+    cb(5)
 
 call cb(v):
-	print(v)
+    print(v)
 
 // Equivalent to
 call cb: (v) =>
-	print
+    print
 ```
 
 This works nicely with the rules of labeled arguments to support a trailing
@@ -255,15 +255,15 @@ lambda syntax similar to that of swift or koka.
 
 ```
 try this():
-	this_throws_an_error()
+    this_throws_an_error()
 catch(e):
-	print(e)
+    print(e)
 
 // Becomes
 (try
-	(: this (lambda () (block (this_throws_an_error))))
-	(: catch (lambda (e) (block
-		print(e)))))
+    (: this (lambda () (block (this_throws_an_error))))
+    (: catch (lambda (e) (block
+        print(e)))))
 ```
 
 # Infix Notation
@@ -275,37 +275,37 @@ Operators, their precedence, and associativity (in typescript):
 ```typescript
 /** Key is the operator, value is its [precedence, associativity] */
 export const infixOperators = new Map<string, [number, Associativity]>([
-	["+", [1, "left"]],
-	["-", [1, "left"]],
-	["*", [2, "left"]],
-	["/", [2, "left"]],
-	["and", [0, "left"]],
-	["or", [0, "left"]],
-	["xor", [0, "left"]],
-	["as", [0, "left"]],
-	["is", [0, "left"]],
-	["in", [0, "left"]],
-	["==", [0, "left"]],
-	["!=", [0, "left"]],
-	["<", [0, "left"]],
-	[">", [0, "left"]],
-	["<=", [0, "left"]],
-	[">=", [0, "left"]],
-	[".", [6, "left"]],
-	["|>", [4, "left"]],
-	["<|", [4, "right"]],
-	["|", [4, "right"]],
-	["=", [0, "left"]],
-	["+=", [4, "right"]],
-	["-=", [4, "right"]],
-	["*=", [4, "right"]],
-	["/=", [4, "right"]],
-	["=>", [5, "right"]],
-	[":", [0, "left"]],
-	["::", [0, "left"]],
-	[";", [4, "left"]],
-	["??", [3, "right"]],
-	["?:", [3, "right"]],
+    ["+", [1, "left"]],
+    ["-", [1, "left"]],
+    ["*", [2, "left"]],
+    ["/", [2, "left"]],
+    ["and", [0, "left"]],
+    ["or", [0, "left"]],
+    ["xor", [0, "left"]],
+    ["as", [0, "left"]],
+    ["is", [0, "left"]],
+    ["in", [0, "left"]],
+    ["==", [0, "left"]],
+    ["!=", [0, "left"]],
+    ["<", [0, "left"]],
+    [">", [0, "left"]],
+    ["<=", [0, "left"]],
+    [">=", [0, "left"]],
+    [".", [6, "left"]],
+    ["|>", [4, "left"]],
+    ["<|", [4, "right"]],
+    ["|", [4, "right"]],
+    ["=", [0, "left"]],
+    ["+=", [4, "right"]],
+    ["-=", [4, "right"]],
+    ["*=", [4, "right"]],
+    ["/=", [4, "right"]],
+    ["=>", [5, "right"]],
+    [":", [0, "left"]],
+    ["::", [0, "left"]],
+    [";", [4, "left"]],
+    ["??", [3, "right"]],
+    ["?:", [3, "right"]],
 ]);
 ```
 

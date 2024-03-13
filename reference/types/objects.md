@@ -7,8 +7,8 @@ They are defined by listing their fields between curly braces `{}`.
 
 ```
 type MyObject = {
-	a: i32,
-	b: i32
+    a: i32,
+    b: i32
 }
 ```
 
@@ -19,8 +19,8 @@ their corresponding values between curly braces `{}`.
 
 ```
 let my_object: MyObject = {
-	a: 5,
-	b: 4
+    a: 5,
+    b: 4
 }
 ```
 
@@ -37,9 +37,9 @@ Spread operator:
 
 ```
 type MyObject2 = {
-	a: i32,
-	b: i32,
-	c: i32
+    a: i32,
+    b: i32,
+    c: i32
 }
 
 let a = 5
@@ -71,9 +71,9 @@ type MyTuple = [i32, String, bool]
 
 // Resolves to:
 type MyTuple = {
-	0: i32,
-	1: String,
-	2: bool
+    0: i32,
+    1: String,
+    2: bool
 }
 ```
 
@@ -84,11 +84,11 @@ satisfied by any object that had the same fields:
 
 ```void
 type Animal = {
-	name: string
+    name: string
 }
 
 fn print_animal_name(animal: Animal) -> void
-	log(animal.name)
+    log(animal.name)
 
 square_area({ name: "Spot" }) // Ok!
 square_area({ name: "Spot", species: "Dog" }) // Also Ok!
@@ -101,15 +101,15 @@ For example:
 
 ```
 type BaseballPlayer = {
-	has_bat: bool
+    has_bat: bool
 }
 
 type Cave = {
-	has_bat: bool
+    has_bat: bool
 }
 
 fn can_hit_ball(player: BaseballPlayer) -> bool
-	player.has_bat
+    player.has_bat
 
 let ruth: BaseballPlayer = { has_bat: true }
 let bat_cave: Cave = { has_bat: true }
@@ -127,15 +127,15 @@ to alleviate this, we can define a nominal subtype of `Object`:
 
 ```
 obj BaseballPlayer {
-	has_bat: bool
+    has_bat: bool
 }
 
 type Cave = {
-	has_bat: bool
+    has_bat: bool
 }
 
 fn can_hit_ball(player: BaseballPlayer) -> bool
-	player.has_bat
+    player.has_bat
 
 let ruth = BaseballPlayer { has_bat: true }
 let bat_cave: Cave = { has_bat: true }
@@ -150,19 +150,19 @@ is expected.
 
 ```
 obj Animal {
-	name: String
+    name: String
 }
 
 obj Cat extends Animal {
-	lives_remaining: i32
+    lives_remaining: i32
 }
 
 obj Dog extends Animal {
-	likes_belly_rubs: bool
+    likes_belly_rubs: bool
 }
 
 fn pet(animal: Animal) -> void
-	// ...
+    // ...
 
 pet(Cat { name: "Whiskers", lives_remaining: 9 }) // Ok!
 pet(Dog { name: "Spot", likes_belly_rubs: true }) // Ok!
@@ -171,7 +171,7 @@ pet(Dog { name: "Spot", likes_belly_rubs: true }) // Ok!
 pet({ name: "Whiskers", lives_remaining: 9 })
 
 fn pet_structural(animal: { name: String }) -> void
-	// ...
+    // ...
 
 // Ok!
 pet_structural({ name: "Whiskers" })
@@ -188,8 +188,8 @@ as arguments.
 
 ```
 obj Animal {
-	id: i32
-	name: String
+    id: i32
+    name: String
 }
 
 let me = Animal { name: "John", id: 1 }
@@ -200,12 +200,12 @@ the object that accepts different arguments.
 
 ```
 obj Animal {
-	id: i32
-	name: String
+    id: i32
+    name: String
 }
 
 fn Animal({ name: String }) -> Animal
-	Animal { id: genId(), name }
+    Animal { id: genId(), name }
 ```
 
 ## Methods
@@ -214,15 +214,15 @@ Methods can be defined on nominal objects using the `impl` keyword.
 
 ```
 obj Animal {
-	name: String
+    name: String
 }
 
 impl Animal
-	fn run(self) -> String
-		"${self.name} is running!"
+    fn run(self) -> String
+        "${self.name} is running!"
 
-	fn change_name(mut self, name: String) -> void
-		self.name = name
+    fn change_name(mut self, name: String) -> void
+        self.name = name
 
 let me = Animal { name: "John" }
 log(me.run()) // "John is running!"
@@ -237,12 +237,12 @@ Objects can be defined as final, meaning they cannot be extended.
 
 ```
 final obj Animal {
-	name: String
+    name: String
 }
 
 // Error - Animal is final
 obj Cat extends Animal {
-	lives_remaining: i32
+    lives_remaining: i32
 }
 ```
 
@@ -252,19 +252,19 @@ Traits are first class types that define the behavior of a nominal object.
 
 ```
 trait Runnable
-	fn run(self) -> String
-	fn stop(mut self) -> void
+    fn run(self) -> String
+    fn stop(mut self) -> void
 
 obj Car {
-	speed: i32
+    speed: i32
 }
 
 impl Runnable for Car
-	fn run(self) -> String
-		"Vroom!"
+    fn run(self) -> String
+        "Vroom!"
 
-	fn stop(mut self) -> void
-		self.speed = 0
+    fn stop(mut self) -> void
+        self.speed = 0
 
 let car = Car { speed: 10 }
 log(car.run()) // "Vroom!"
@@ -273,7 +273,7 @@ log(car.run()) // "Vroom!"
 car is Runnable // true
 
 fn run_thing(thing: Runnable) -> void
-	log(thing.run())
+    log(thing.run())
 ```
 
 # Unions
@@ -287,13 +287,13 @@ pipe operator, `|`.
 type Animal = Cat | Dog
 
 obj Cat {
-	age: i32
-	name: String
+    age: i32
+    name: String
 }
 
 obj Dog {
-	age: i32
-	name: String
+    age: i32
+    name: String
 }
 ```
 
@@ -307,12 +307,12 @@ by `&`.
 
 ```
 type Vec2D = {
-	a: i32,
-	b: i32
+    a: i32,
+    b: i32
 }
 
 type Vec3D = Vec2D & {
-	c: i32
+    c: i32
 }
 ```
 
@@ -320,9 +320,9 @@ the type expression of `Vec3D` resolves to:
 
 ```
 type Vec3D = Object & {
-	a: i32,
-	b: i32,
-	c: i32
+    a: i32,
+    b: i32,
+    c: i32
 }
 ```
 
@@ -330,14 +330,14 @@ Note that the fields of an intersection cannot conflict:
 
 ```
 type Vec2D = {
-	a: i32,
-	b: i32
+    a: i32,
+    b: i32
 }
 
 type Vec3D = Vec2D & {
-	// Error - Conflicts with intersected field b: i32
-	b: string,
-	c: i32
+    // Error - Conflicts with intersected field b: i32
+    b: string,
+    c: i32
 }
 ```
 
@@ -348,11 +348,11 @@ that object.
 
 ```
 obj Animal {
-	name: String
+    name: String
 }
 
 type Cat = Animal & {
-	lives_remaining: i32
+    lives_remaining: i32
 }
 
 let cat: Cat = Animal { name: "Whiskers", lives_remaining: 9 }
@@ -366,27 +366,27 @@ intersected object type, or a parent type of the previous intersected object typ
 
 ```
 obj Animal {
-	name: String
+    name: String
 }
 
 obj Cat extends Animal {
-	lives_remaining: i32
+    lives_remaining: i32
 }
 
 obj Dog extends Animal {
-	likes_belly_rubs: bool
+    likes_belly_rubs: bool
 }
 
 type Chihuahua =
-	Dog & { size: i32 } &
-	Animal & { age: i32 } // This is ok since Animal is a parent of Dog
+    Dog & { size: i32 } &
+    Animal & { age: i32 } // This is ok since Animal is a parent of Dog
 
 // Resolves to:
 type Chihuahua = Dog & {
-	name: String,
-	likes_belly_rubs: bool,
-	age: i32,
-	size: i32
+    name: String,
+    likes_belly_rubs: bool,
+    age: i32,
+    size: i32
 }
 
 // Error Dog is not a subtype of Cat
@@ -401,27 +401,27 @@ satisfy all of the traits.
 ```
 
 trait Image
-	fn draw(self) -> Array[Rgb]
+    fn draw(self) -> Array[Rgb]
 
 trait Movable
-	fn move(&self, x: i32, y: i32) -> void
+    fn move(&self, x: i32, y: i32) -> void
 
 type MoveableImage = Movable & Drawable
 
 obj Shape {
-	image: Array[Rgb]
-	x: i32
-	y: i32
+    image: Array[Rgb]
+    x: i32
+    y: i32
 }
 
 impl Image for Shape
-	fn draw(self) -> Array[Rgb]
-		self.image
+    fn draw(self) -> Array[Rgb]
+        self.image
 
 impl Movable for Shape
-	fn move(&self, x: i32, y: i32) -> void
-		self.x += x
-		self.y += y
+    fn move(&self, x: i32, y: i32) -> void
+        self.x += x
+        self.y += y
 
 let shape: MoveableImage = Shape { image: [Rgb(0, 0, 0)], x: 0, y: 0 }
 ```

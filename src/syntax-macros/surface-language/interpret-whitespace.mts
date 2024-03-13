@@ -123,7 +123,7 @@ const nextExprIndentLevel = (list: List, startIndex?: number) => {
       continue;
     }
 
-    if (isTab(expr)) {
+    if (isIndent(expr)) {
       nextIndentLevel += 1;
       index += 1;
       continue;
@@ -161,7 +161,7 @@ const consumeLeadingWhitespace = (list: List) => {
 };
 
 const isNewline = (v: Expr) => v.isWhitespace() && v.isNewline;
-const isTab = (v: Expr) => v.isWhitespace() && v.isTab;
+const isIndent = (v: Expr) => v.isWhitespace() && v.isIndent;
 
 const isListOfNamedParameters = (v: Expr) => {
   return v.isList() && v.value.every((v) => isNamedParameter(v));
