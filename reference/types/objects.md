@@ -63,20 +63,6 @@ let z = my_tuple.2
 let [a, b, c] = my_tuple
 ```
 
-They are effectively syntactic sugar for an object with incrementing
-integer keys.
-
-```
-type MyTuple = [i32, String, bool]
-
-// Resolves to:
-type MyTuple = {
-    0: i32,
-    1: String,
-    2: bool
-}
-```
-
 # Nominal Objects
 
 The objects we have defined so far were all structural types. That is, they were
@@ -297,6 +283,19 @@ obj Dog {
 }
 ```
 
+In some cases, where the nominal object is only ever used as part of a union, it may
+by better to define the objects directly inside the type:
+
+```
+type Direction =
+    obj North |
+    obj East |
+    obj South |
+    obj West
+
+let direction: Direction = North
+```
+
 # Intersections
 
 Void uses intersection types to combine the fields of multiple objects into a
@@ -409,13 +408,13 @@ trait Movable
 type MoveableImage = Movable & Drawable
 
 obj Shape {
-    image: Array[Rgb]
+    image: Array<Rgb>
     x: i32
     y: i32
 }
 
 impl Image for Shape
-    fn draw(self) -> Array[Rgb]
+    fn draw(self) -> Array<Rgb>
         self.image
 
 impl Movable for Shape
@@ -461,3 +460,23 @@ Type: `Dictionary`
 ```
 let my_dict = Dict { a: 1, b: 2, c: 3 }
 ```
+
+# Objects In Depth
+
+## Tuples
+
+Tuples are effectively syntactic sugar for an object with incrementing
+integer keys.
+
+```
+type MyTuple = [i32, String, bool]
+
+// Resolves to:
+type MyTuple = {
+    0: i32,
+    1: String,
+    2: bool
+}
+```
+
+
