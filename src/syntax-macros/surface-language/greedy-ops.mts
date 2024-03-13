@@ -1,6 +1,6 @@
 import { Expr, Identifier, List } from "../../syntax-objects/index.mjs";
 
-export const greedyOps = new Set(["=>", "=", "<|", ";"]);
+export const greedyOps = new Set(["=>", "=", "<|", ";", "|"]);
 export const isGreedyOp = (expr?: Expr): expr is Identifier => {
   if (!expr?.isIdentifier()) return false;
   return !expr.isQuoted && greedyOps.has(expr.value);
