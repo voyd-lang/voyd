@@ -24,6 +24,10 @@ export const desugarredAst = [
     ["main"],
     [
       "block",
+      [
+        "let",
+        ["=", "a", ["+", ["...", ["hey", "test"]], ["now", ["&", "other"]]]],
+      ],
       ["let", ["=", "x", ["+", 10, ["block", ["+", 20, 30]]]]],
       [
         "let",

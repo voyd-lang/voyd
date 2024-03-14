@@ -10,6 +10,7 @@ fn fib(n: i32) -> i32
         fib(n - 1) + fib(n - 2)
 
 fn main()
+    let a = ...(test.hey) + &other.now
     let x = 10 +
         20 +
         30
