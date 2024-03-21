@@ -1,5 +1,5 @@
+import { isContinuationOp } from "../../lib/grammar.mjs";
 import { Expr, List } from "../../syntax-objects/index.mjs";
-import { isContinuationOp } from "./infix.mjs";
 
 export const interpretWhitespace = (list: List): List => {
   const transformed = new List({ ...list.metadata });

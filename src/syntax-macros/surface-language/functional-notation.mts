@@ -1,8 +1,8 @@
+import { isInfixOp } from "../../lib/grammar.mjs";
 import { List } from "../../syntax-objects/index.mjs";
-import { isInfixOp } from "./infix.mjs";
 
 export const functionalNotation = (list: List): List =>
-  list.reduce((expr, index, array) => {
+  list.mapFilter((expr, index, array) => {
     if (expr.isList()) return functionalNotation(expr);
     if (expr.isWhitespace()) return expr;
 

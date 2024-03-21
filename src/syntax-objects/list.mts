@@ -166,7 +166,8 @@ export class List extends Syntax {
     return newList;
   }
 
-  reduce(
+  /** Like a regular map, but omits undefined values returned from the mapper */
+  mapFilter(
     fn: (expr: Expr, index: number, array: Expr[]) => Expr | undefined
   ): List {
     const list = new List({ ...super.getCloneOpts() });

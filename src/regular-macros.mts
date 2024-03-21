@@ -308,7 +308,7 @@ const functions: Record<string, MacroFn | undefined> = {
   },
   quote: (quote: List) => {
     const expand = (body: List): List =>
-      body.reduce((exp) => {
+      body.mapFilter((exp) => {
         if (exp.isList() && exp.calls("$")) {
           return evalMacroExpr(new List({ value: exp.rest(), parent: body }));
         }
