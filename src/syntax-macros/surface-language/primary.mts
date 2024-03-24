@@ -4,7 +4,7 @@ import {
   isPrefixOp,
   prefixOps,
 } from "../../lib/grammar.mjs";
-import { Expr, Identifier, List } from "../../syntax-objects/index.mjs";
+import { Expr, List } from "../../syntax-objects/index.mjs";
 
 /**
  * Primary surface language syntax macro. Post whitespace interpretation.
