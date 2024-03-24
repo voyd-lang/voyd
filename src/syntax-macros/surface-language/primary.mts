@@ -37,7 +37,7 @@ const parseBinaryCall = (left: Expr, list: List): List => {
 
   const right = isGreedyOp(op)
     ? parseGreedy(list)
-    : parsePrecedence(list, (infixOpInfo(op)?.precedence ?? -1) + 1);
+    : parsePrecedence(list, (infixOpInfo(op) ?? -1) + 1);
 
   // Dot handling should maybe be moved to a macro?
   return isDotOp(op)
@@ -70,7 +70,7 @@ const parsePrecedence = (list: List, minPrecedence = 0): Expr => {
     ? parseUnaryCall(list)
     : parseExpression(list.consume());
 
-  while ((infixOpInfo(list.first())?.precedence ?? -1) >= minPrecedence) {
+  while ((infixOpInfo(list.first()) ?? -1) >= minPrecedence) {
     expr = parseBinaryCall(expr, list);
   }
 
@@ -83,17 +83,9 @@ const parseUnaryCall = (list: List): List => {
   return new List({ value: [op, expr] });
 };
 
-type InfixOp = {
-  precedence: number;
-  associativity: "right" | "left";
-  op: Identifier;
-};
-
-const infixOpInfo = (op?: Expr): InfixOp | undefined => {
+const infixOpInfo = (op?: Expr): number | undefined => {
   if (!op?.isIdentifier()) return undefined;
-  const info = infixOps.get(op.value);
-  if (!info) return undefined;
-  return { precedence: info[0], associativity: info[1], op };
+  return infixOps.get(op.value);
 };
 
 const unaryOpInfo = (op?: Expr): number | undefined => {

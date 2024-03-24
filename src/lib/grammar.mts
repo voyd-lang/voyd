@@ -40,46 +40,41 @@ export const isOpChar = newTest([
 export const isDigit = (char: string) => /[0-9]/.test(char);
 export const isDigitSign = (char: string) => char === "+" || char === "-";
 
-export type Associativity = "left" | "right";
-
-/** Key is the operator, value is its [precedence, associativity] */
-export type InfixOpMap = Map<string, [number, Associativity]>;
-
 /** Key is the operator, value is its precedence */
-export type UnaryOpMap = Map<string, number>;
+export type OpMap = Map<string, number>;
 
-export const infixOps: InfixOpMap = new Map([
-  ["+", [1, "left"]],
-  ["-", [1, "left"]],
-  ["*", [2, "left"]],
-  ["/", [2, "left"]],
-  ["and", [0, "left"]],
-  ["or", [0, "left"]],
-  ["xor", [0, "left"]],
-  ["as", [0, "left"]],
-  ["is", [0, "left"]],
-  ["in", [0, "left"]],
-  ["==", [0, "left"]],
-  ["!=", [0, "left"]],
-  ["<", [0, "left"]],
-  [">", [0, "left"]],
-  ["<=", [0, "left"]],
-  [">=", [0, "left"]],
-  [".", [6, "left"]],
-  ["|>", [4, "left"]],
-  ["<|", [4, "right"]],
-  ["|", [4, "left"]],
-  ["&", [4, "left"]],
-  ["=", [0, "left"]],
-  ["+=", [4, "right"]],
-  ["-=", [4, "right"]],
-  ["*=", [4, "right"]],
-  ["/=", [4, "right"]],
-  ["=>", [5, "right"]],
-  [":", [0, "left"]],
-  ["::", [0, "left"]],
-  [";", [4, "left"]],
-  ["??", [3, "right"]],
+export const infixOps: OpMap = new Map([
+  ["+", 1],
+  ["-", 1],
+  ["*", 2],
+  ["/", 2],
+  ["and", 0],
+  ["or", 0],
+  ["xor", 0],
+  ["as", 0],
+  ["is", 0],
+  ["in", 0],
+  ["==", 0],
+  ["!=", 0],
+  ["<", 0],
+  [">", 0],
+  ["<=", 0],
+  [">=", 0],
+  [".", 6],
+  ["|>", 4],
+  ["<|", 4],
+  ["|", 4],
+  ["&", 4],
+  ["=", 0],
+  ["+=", 4],
+  ["-=", 4],
+  ["*=", 4],
+  ["/=", 4],
+  ["=>", 5],
+  [":", 0],
+  ["::", 0],
+  [";", 4],
+  ["??", 3],
 ]);
 
 export const isInfixOp = (op?: Expr): op is Identifier =>
@@ -88,7 +83,7 @@ export const isInfixOp = (op?: Expr): op is Identifier =>
 export const isInfixOpIdentifier = (op?: Identifier) =>
   !!op && !op.isQuoted && infixOps.has(op.value);
 
-export const prefixOps: UnaryOpMap = new Map([
+export const prefixOps: OpMap = new Map([
   ["#", 7],
   ["&", 7],
   ["!", 7],
