@@ -94,7 +94,7 @@ export const prefixOps: UnaryOpMap = new Map([
   ["!", 7],
   ["~", 7],
   ["%", 7],
-  ["...", 0],
+  ["...", 5],
 ]);
 
 // let x = ...a.hey + &b.there

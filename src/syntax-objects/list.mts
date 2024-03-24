@@ -30,7 +30,7 @@ export class List extends Syntax {
   }
 
   get length() {
-    return new Int({ value: this.value.length });
+    return this.value.length;
   }
 
   at(index: number): Expr | undefined {
@@ -73,6 +73,12 @@ export class List extends Syntax {
     const next = this.value.shift();
     if (!next) throw new Error("No remaining expressions");
     return next;
+  }
+
+  consumeRest(): List {
+    const newVal = this.slice(0);
+    this.value = [];
+    return newVal;
   }
 
   first(): Expr | undefined {

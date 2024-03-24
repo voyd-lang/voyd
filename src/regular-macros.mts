@@ -247,7 +247,7 @@ type MacroFn = (args: List) => Expr;
 
 const functions: Record<string, MacroFn | undefined> = {
   block: (args) => args.at(-1)!,
-  length: (args) => args.listAt(0).length,
+  length: (args) => new Int({ value: args.listAt(0).length }),
   define: (args) => evalMacroVarDef(args.insert("define")),
   Identifier: (args) => {
     const nameDef = args.at(0);

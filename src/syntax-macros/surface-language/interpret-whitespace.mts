@@ -137,16 +137,7 @@ const nextExprIndentLevel = (list: List, startIndex?: number) => {
 
 const hasContinuation = (list: List, transformed: List) => {
   const lastTransformedExpr = transformed.at(-1);
-  if (isContinuationOp(lastTransformedExpr)) {
-    return true;
-  }
-
-  for (const expr of list.value) {
-    if (expr.isWhitespace()) continue;
-    return isContinuationOp(expr);
-  }
-
-  return false;
+  return isContinuationOp(lastTransformedExpr);
 };
 
 const consumeLeadingWhitespace = (list: List) => {

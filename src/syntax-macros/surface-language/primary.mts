@@ -1,128 +1,102 @@
 import {
   infixOps,
   isGreedyOp,
-  isInfixOp,
-  isInfixOpIdentifier,
-  isPrefixOpIdentifier,
+  isPrefixOp,
+  prefixOps,
 } from "../../lib/grammar.mjs";
 import { Expr, Identifier, List } from "../../syntax-objects/index.mjs";
 
 /**
  * Primary surface language macro. Post whitespace interpretation.
  * In charge of operator parsing and precedence.
+ *
+ * For now we expect a list of expressions. In the future, we may want to
+ * pass a single block expression and recursively parse it.
  */
-export const primary = (list: List): List => list.map(primary_expression);
-
-const primary_expression = (expr: Expr): Expr => {
-  if (expr.isList()) return parse_list(expr);
-  return expr;
+export const primary = (list: List): List => {
+  const result = list.map(parseExpression);
+  return result;
 };
 
-const parse_list = (list: List): List => {
+const parseExpression = (expr: Expr): Expr => {
+  if (!expr.isList()) return expr;
+  return parseList(expr);
+};
+
+const parseList = (list: List): List => {
   const transformed = new List({ ...list.metadata });
 
   while (list.hasChildren) {
-    const expr = primary_expression(list.consume());
-    const next = list.first();
-
-    if (!next?.isIdentifier()) {
-      transformed.push(expr);
-      continue;
-    }
-
-    if (isInfixOpIdentifier(next)) {
-      transformed.push(precedenceClimb(expr, list));
-      continue;
-    }
-
-    if (isPrefixOpIdentifier(next)) {
-    }
-
-    transformed.push(expr);
-  }
-
-  if (transformed.length.value === 1 && transformed.first()?.isList()) {
-    return transformed.first() as List;
+    transformed.push(parsePrecedence(list));
   }
 
   return transformed;
+};
+
+const parseBinaryCall = (left: Expr, list: List): List => {
+  const op = list.consume();
+
+  const right = isGreedyOp(op)
+    ? parseGreedy(list)
+    : parsePrecedence(list, infixOpInfo(op)?.precedence ?? -1 + 1);
+
+  return isDotOp(op)
+    ? parseDot(right, left)
+    : new List({ value: [op, left, right] });
+};
+
+const isDotOp = (op?: Expr): boolean => {
+  return !!op?.isIdentifier() && op.is(".");
+};
+
+const parseDot = (right: Expr, left: Expr): List => {
+  if (right.isList()) {
+    right.insert(left, 1);
+    return right;
+  }
+
+  return new List({ value: [right, left] });
+};
+
+const parseGreedy = (list: List): Expr => {
+  const result = parseList(list.consumeRest());
+  return result.length === 1 ? result.consume() : result;
 };
 
 // TODO: Cleanup with https://chidiwilliams.com/posts/on-recursive-descent-and-pratt-parsing#:~:text=Pratt%20parsing%20describes%20an%20alternative,an%20identifier%2C%20or%20a%20unary.
-const precedenceClimb = (lhs: Expr, rest: List, minPrecedence = 0): Expr => {
-  if (isGreedyOp(rest.first())) {
-    rest = processGreedyOp(rest);
+const parsePrecedence = (list: List, minPrecedence = 0): Expr => {
+  const next = list.at(0);
+  let expr = isPrefixOp(next)
+    ? parseUnaryCall(list)
+    : parseExpression(list.consume());
+
+  while ((infixOpInfo(list.first())?.precedence ?? -1) >= minPrecedence) {
+    expr = parseBinaryCall(expr, list);
   }
 
-  let opInfo = getOpInfo(rest.first());
-  while (opInfo.type === "infix" && opInfo.precedence >= minPrecedence) {
-    rest.consume();
-    let rhs = primary_expression(rest.consume());
-    const oldOpInfo = opInfo;
-    opInfo = getOpInfo(rest.first());
-    while (
-      opInfo.type == "infix" &&
-      (opInfo.precedence > oldOpInfo.precedence ||
-        (opInfo.associativity === "right" &&
-          opInfo.precedence === oldOpInfo.precedence))
-    ) {
-      rhs = precedenceClimb(
-        rhs,
-        rest,
-        oldOpInfo.precedence + opInfo.precedence > oldOpInfo.precedence ? 1 : 0
-      );
-      opInfo = getOpInfo(rest.first());
-    }
-
-    const value = op.value === "." ? [lhs, rhs] : [op, lhs, rhs];
-    lhs = new List({ value });
-  }
-
-  return lhs;
+  return expr;
 };
 
-const binary = (lhs: Expr, op: InfixOp, rest: List): List => {
-  const rhs = precedenceClimb(lhs, rest, op.precedence + 1);
-  const value = op.op.value === "." ? [lhs, rhs] : [op.op, lhs, rhs];
-  return new List({ value });
+const parseUnaryCall = (list: List): List => {
+  const op = list.consume();
+  const expr = parsePrecedence(list, unaryOpInfo(op) ?? -1);
+  return new List({ value: [op, expr] });
 };
-
-const processGreedyOp = (list: List) => {
-  const transformed = new List({ ...list.metadata });
-  while (list.hasChildren) {
-    const next = list.consume();
-
-    if (next.isList()) {
-      transformed.push(processGreedyOp(next));
-      continue;
-    }
-
-    if (isGreedyOp(next)) {
-      transformed.push(next);
-      const consumed = processGreedyOp(list);
-      const result = consumed.value.length === 1 ? consumed.first()! : consumed;
-      transformed.push(result);
-      continue;
-    }
-
-    transformed.push(next);
-  }
-
-  return transformed;
-};
-
-type OpInfo = { type: "n/a" } | InfixOp;
 
 type InfixOp = {
-  type: "infix";
   precedence: number;
   associativity: "right" | "left";
   op: Identifier;
 };
 
-const getOpInfo = (op?: Expr): OpInfo => {
-  if (!isInfixOp(op)) return { type: "n/a" };
+const infixOpInfo = (op?: Expr): InfixOp | undefined => {
+  if (!op?.isIdentifier()) return undefined;
   const info = infixOps.get(op.value);
-  if (!info) return { type: "n/a" };
-  return { type: "infix", precedence: info[0], associativity: info[1], op };
+  if (!info) return undefined;
+  return { precedence: info[0], associativity: info[1], op };
+};
+
+const unaryOpInfo = (op?: Expr): number | undefined => {
+  if (!op?.isIdentifier()) return undefined;
+  return prefixOps.get(op.value);
 };
