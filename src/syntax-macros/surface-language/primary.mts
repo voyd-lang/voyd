@@ -7,16 +7,10 @@ import {
 import { Expr, Identifier, List } from "../../syntax-objects/index.mjs";
 
 /**
- * Primary surface language macro. Post whitespace interpretation.
+ * Primary surface language syntax macro. Post whitespace interpretation.
  * In charge of operator parsing and precedence.
- *
- * For now we expect a list of expressions. In the future, we may want to
- * pass a single block expression and recursively parse it.
  */
-export const primary = (list: List): List => {
-  const result = list.map(parseExpression);
-  return result;
-};
+export const primary = (list: List): List => list.map(parseExpression);
 
 const parseExpression = (expr: Expr): Expr => {
   if (!expr.isList()) return expr;
@@ -25,12 +19,17 @@ const parseExpression = (expr: Expr): Expr => {
 
 const parseList = (list: List): List => {
   const transformed = new List({ ...list.metadata });
+  const hadSingleListChild = list.length === 1 && list.at(0)?.isList();
 
   while (list.hasChildren) {
     transformed.push(parsePrecedence(list));
   }
 
-  return transformed;
+  return transformed.length === 1 &&
+    !hadSingleListChild &&
+    transformed.at(0)?.isList()
+    ? transformed.listAt(0)
+    : transformed;
 };
 
 const parseBinaryCall = (left: Expr, list: List): List => {
@@ -38,8 +37,9 @@ const parseBinaryCall = (left: Expr, list: List): List => {
 
   const right = isGreedyOp(op)
     ? parseGreedy(list)
-    : parsePrecedence(list, infixOpInfo(op)?.precedence ?? -1 + 1);
+    : parsePrecedence(list, (infixOpInfo(op)?.precedence ?? -1) + 1);
 
+  // Dot handling should maybe be moved to a macro?
   return isDotOp(op)
     ? parseDot(right, left)
     : new List({ value: [op, left, right] });

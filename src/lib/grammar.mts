@@ -97,13 +97,6 @@ export const prefixOps: UnaryOpMap = new Map([
   ["...", 5],
 ]);
 
-// let x = ...a.hey + &b.there
-// [let
-//   [= x
-//     [+
-//       [... [. a hey]]
-//       [. [& b] there]]]]
-
 export const isPrefixOp = (op?: Expr): op is Identifier =>
   !!op?.isIdentifier() && isPrefixOpIdentifier(op);
 
