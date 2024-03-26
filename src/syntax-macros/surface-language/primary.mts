@@ -25,10 +25,8 @@ const parseList = (list: List): List => {
     transformed.push(parsePrecedence(list));
   }
 
-  return transformed.length === 1 &&
-    !hadSingleListChild &&
-    transformed.at(0)?.isList()
-    ? transformed.listAt(0)
+  return !hadSingleListChild && transformed.at(0)?.isList()
+    ? transformed.listAt(0).push(...transformed.rest())
     : transformed;
 };
 

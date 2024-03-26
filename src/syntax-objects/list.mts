@@ -126,7 +126,7 @@ export class List extends Syntax {
         this.registerEntity(ex);
       }
 
-      if (ex.isList() && ex.calls("splice-quote")) {
+      if (ex.isList() && ex.calls("splice_quote")) {
         this.value.push(...ex.rest());
         return;
       }

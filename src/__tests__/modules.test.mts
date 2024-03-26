@@ -16,7 +16,7 @@ const input = {
   files: {
     "/Users/drew/projects/void/example.void": new List({
       value: [
-        ["use", ["::", ["::", "std", "macros"], "***"]],
+        ["use", ["::", ["::", "std", "macros"], "all"]],
         [
           "fn",
           ["fib", [":", "n", "i32"]],
@@ -104,7 +104,7 @@ const input = {
     }),
     "/Users/drew/projects/void/std/memory.void": new List({
       value: [
-        ["use", ["::", ["::", "super", "macros"], "***"]],
+        ["use", ["::", ["::", "super", "macros"], "all"]],
         ["global", "let", ["=", "header-size", 8]],
         ["global", "let", ["=", "size-index", 0]],
         ["global", "let", ["=", "type-index", 4]],
@@ -144,7 +144,7 @@ const output = [
           "module",
           "example",
           [
-            ["use", ["::", ["::", "std", "macros"], "***"]],
+            ["use", ["::", ["::", "std", "macros"], "all"]],
             [
               "fn",
               ["fib", [":", "n", "i32"]],
@@ -240,7 +240,7 @@ const output = [
           "module",
           "memory",
           [
-            ["use", ["::", ["::", "super", "macros"], "***"]],
+            ["use", ["::", ["::", "super", "macros"], "all"]],
             ["global", "let", ["=", "header-size", 8]],
             ["global", "let", ["=", "size-index", 0]],
             ["global", "let", ["=", "type-index", 4]],
