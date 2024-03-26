@@ -1,4 +1,5 @@
 export const desugarredAst = [
+  ["use", ["::", ["::", "std", "macros"], "all"]],
   ["use", ["::", ["::", "std", "io"], ["object", "read"]]],
   [
     "fn",
@@ -16,6 +17,18 @@ export const desugarredAst = [
           "else",
           ["block", ["+", ["fib", ["-", "n", 1]], ["fib", ["-", "n", 2]]]],
         ],
+      ],
+    ],
+  ],
+  [
+    "macro_let",
+    [
+      "=",
+      "extract_parameters",
+      [
+        "=>",
+        ["definitions"],
+        ["block", ["concat", ["`", "parameters"], ["slice", "definitions", 1]]],
       ],
     ],
   ],
@@ -80,8 +93,20 @@ export const desugarredAst = [
       ],
       ["let", ["=", "x2", 10]],
       ["let", ["=", "z", ["nothing"]]],
+      ["let", ["=", "a", ["boop", "hello", 1]]],
       ["let", ["=", "test_spacing", ["fib", "n"]]],
       ["let", ["=", "result", ["fib", "n"]]],
+      ["let", ["=", "x", ["&", "hey"]]],
+      ["$", "hey"],
+      ["$@", ["hey"]],
+      ["$", ["hey"]],
+      ["$", ["extract", "equals_expr", 2]],
+      ["block", ["$", "body"]],
+      ["+", "x", 5],
+      ["+", ["+", "x", "y"], 10],
+      ["+", ["*", "x", "y"], 10],
+      ["x"],
+      "x",
     ],
   ],
 ];
