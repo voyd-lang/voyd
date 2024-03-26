@@ -30,7 +30,7 @@ export class List extends Syntax {
   }
 
   get length() {
-    return new Int({ value: this.value.length });
+    return this.value.length;
   }
 
   at(index: number): Expr | undefined {
@@ -73,6 +73,12 @@ export class List extends Syntax {
     const next = this.value.shift();
     if (!next) throw new Error("No remaining expressions");
     return next;
+  }
+
+  consumeRest(): List {
+    const newVal = this.slice(0);
+    this.value = [];
+    return newVal;
   }
 
   first(): Expr | undefined {
@@ -120,7 +126,7 @@ export class List extends Syntax {
         this.registerEntity(ex);
       }
 
-      if (ex.isList() && ex.calls("splice-quote")) {
+      if (ex.isList() && ex.calls("splice_quote")) {
         this.value.push(...ex.rest());
         return;
       }
@@ -166,7 +172,8 @@ export class List extends Syntax {
     return newList;
   }
 
-  reduce(
+  /** Like a regular map, but omits undefined values returned from the mapper */
+  mapFilter(
     fn: (expr: Expr, index: number, array: Expr[]) => Expr | undefined
   ): List {
     const list = new List({ ...super.getCloneOpts() });

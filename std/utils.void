@@ -1,6 +1,6 @@
-use super::macros::***
+use super::macros::all
 
-pub extern-fn utils log(val:i32) -> void
-pub extern-fn utils log(val:f32) -> void
-pub extern-fn utils log(val:f64) -> void
-pub extern-fn utils log(val:i64) -> void
+pub extern_fn utils log(val:i32) -> void
+pub extern_fn utils log(val:f32) -> void
+pub extern_fn utils log(val:f64) -> void
+pub extern_fn utils log(val:i64) -> void

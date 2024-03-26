@@ -1,6 +1,7 @@
 import { File } from "../../../../lib/file.mjs";
 
 export const exampleVoidText = `
+use std::macros::all
 use std::io::{ read }
 
 fn fib(n: i32) -> i32
@@ -9,7 +10,11 @@ fn fib(n: i32) -> i32
     else:
         fib(n - 1) + fib(n - 2)
 
+macro_let extract_parameters = (definitions) =>
+    \`(parameters).concat definitions.slice(1)
+
 fn main()
+    let a = ...test.hey + &other.now
     let x = 10 +
         20 +
         30
@@ -33,8 +38,20 @@ fn main()
 
     let x2 = 10
     let z = nothing()
+    let a = hello.boop(1)
     let test_spacing = fib n
     let result = fib(n)
+    let x = &hey
+    $hey
+    $@(hey)
+    $(hey)
+    $(extract equals_expr 2)
+    (block $body)
+    x + 5
+    x + y + 10
+    x * y + 10
+    x()
+    x
 `;
 
 export const voidFile = new File(exampleVoidText, "beep/boop");

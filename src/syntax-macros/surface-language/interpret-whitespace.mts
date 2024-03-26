@@ -1,5 +1,5 @@
+import { isContinuationOp } from "../../lib/grammar.mjs";
 import { Expr, List } from "../../syntax-objects/index.mjs";
-import { isContinuationOp } from "./infix.mjs";
 
 export const interpretWhitespace = (list: List): List => {
   const transformed = new List({ ...list.metadata });
@@ -137,16 +137,7 @@ const nextExprIndentLevel = (list: List, startIndex?: number) => {
 
 const hasContinuation = (list: List, transformed: List) => {
   const lastTransformedExpr = transformed.at(-1);
-  if (isContinuationOp(lastTransformedExpr)) {
-    return true;
-  }
-
-  for (const expr of list.value) {
-    if (expr.isWhitespace()) continue;
-    return isContinuationOp(expr);
-  }
-
-  return false;
+  return isContinuationOp(lastTransformedExpr);
 };
 
 const consumeLeadingWhitespace = (list: List) => {

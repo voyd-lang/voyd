@@ -1,16 +1,14 @@
 import { List } from "../../syntax-objects/index.mjs";
 import { functionalNotation } from "./functional-notation.mjs";
-import { processGreedyOps } from "./greedy-ops.mjs";
-import { infix } from "./infix.mjs";
 import { interpretWhitespace } from "./interpret-whitespace.mjs";
 import { SyntaxMacro } from "../types.mjs";
+import { primary } from "./primary.mjs";
 
 /** Caution: Order matters */
 const surfaceLanguageMacros: SyntaxMacro[] = [
   functionalNotation,
   interpretWhitespace,
-  processGreedyOps,
-  (ast) => infix(ast),
+  primary,
 ];
 
 /** Transforms the surface language into the core language */

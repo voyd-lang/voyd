@@ -22,7 +22,7 @@ export const expandRegularMacros = (expr: Expr): Expr => {
   if (expr.calls("use")) return resolveUseStatement(expr);
   if (expr.calls("export")) return evalExport(expr);
   if (expr.calls("macro")) return evalMacroDef(expr);
-  if (expr.calls("macro-let")) return evalMacroLetDef(expr);
+  if (expr.calls("macro_let")) return evalMacroLetDef(expr);
 
   const identifier = expr.first();
   if (!identifier?.isIdentifier()) {
@@ -59,9 +59,7 @@ const resolveUseStatement = (list: List) => {
 
 const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
   if (!path.calls("::")) {
-    throw new Error(
-      `Invalid use statement ${console.log(JSON.stringify(path, undefined, 2))}`
-    );
+    throw new Error(`Invalid use statement ${path}`);
   }
 
   const [_, left, right] = path.value;
@@ -76,11 +74,7 @@ const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
     unexpandedModule instanceof Array ||
     !unexpandedModule.isModule()
   ) {
-    throw new Error(
-      `Invalid use statement, not a module ${console.log(
-        JSON.stringify(path, undefined, 2)
-      )}`
-    );
+    throw new Error(`Invalid use statement, not a module ${path}`);
   }
 
   const module = expandModuleMacros(unexpandedModule);
@@ -90,7 +84,7 @@ const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
     throw new Error(`Invalid use statement, expected identifier, got ${right}`);
   }
 
-  if (identifier?.is("***")) {
+  if (identifier?.is("all")) {
     return module.getAllEntities().filter((e) => e.isExported);
   }
 
@@ -184,7 +178,7 @@ const initializeMacroBlocks = (list: Expr): Expr => {
 export const expandMacro = (macro: Macro, call: List): Expr => {
   const clone = macro.clone();
 
-  registerMacroVar({ with: clone, name: "&body", value: call.slice(1) });
+  registerMacroVar({ with: clone, name: "body", value: call.slice(1) });
   clone.parameters.forEach((name, index) => {
     registerMacroVar({ with: clone, name, value: call.at(index + 1)! });
   });
@@ -247,7 +241,7 @@ type MacroFn = (args: List) => Expr;
 
 const functions: Record<string, MacroFn | undefined> = {
   block: (args) => args.at(-1)!,
-  length: (args) => args.listAt(0).length,
+  length: (args) => new Int({ value: args.listAt(0).length }),
   define: (args) => evalMacroVarDef(args.insert("define")),
   Identifier: (args) => {
     const nameDef = args.at(0);
@@ -308,28 +302,20 @@ const functions: Record<string, MacroFn | undefined> = {
   },
   quote: (quote: List) => {
     const expand = (body: List): List =>
-      body.reduce((exp) => {
+      body.mapFilter((exp) => {
         if (exp.isList() && exp.calls("$")) {
-          return evalMacroExpr(new List({ value: exp.rest(), parent: body }));
+          const val = exp.at(1) ?? nop();
+          val.parent = body;
+          return evalMacroExpr(val);
         }
 
         if (exp.isList() && exp.calls("$@")) {
-          const rest = new List({ value: exp.rest(), parent: body });
-          return (evalMacroExpr(rest) as List).insert("splice-quote");
+          const val = exp.at(1) ?? nop();
+          val.parent = body;
+          return (evalMacroExpr(val) as List).insert("splice_quote");
         }
 
         if (exp.isList()) return expand(exp);
-
-        if (exp.isIdentifier() && exp.startsWith("$@")) {
-          const value = evalIdentifier(exp.replace("$@", ""));
-          if (!value.isList()) return nop();
-          value.insert("splice-quote");
-          return value;
-        }
-
-        if (exp.isIdentifier() && exp.startsWith("$")) {
-          return evalIdentifier(exp.replace("$", ""));
-        }
 
         return exp;
       });
@@ -409,7 +395,7 @@ const functions: Record<string, MacroFn | undefined> = {
     const list = args.listAt(0);
     return list.push(...args.rest().flatMap((expr) => (expr as List).value));
   },
-  "is-list": (args) => bool(!!args.at(0)?.isList()),
+  is_list: (args) => bool(!!args.at(0)?.isList()),
   log: (args) => {
     const arg = args.first();
     if (arg?.isStringLiteral()) {
@@ -428,8 +414,8 @@ const functions: Record<string, MacroFn | undefined> = {
       ...args.metadata,
     });
   },
-  "expand-macros": (args) => expandRegularMacros(args.at(0)!),
-  "char-to-code": (args) =>
+  expand_macros: (args) => expandRegularMacros(args.at(0)!),
+  char_to_code: (args) =>
     new Int({
       value: String((args.at(0) as StringLiteral).value).charCodeAt(0),
     }),
@@ -445,7 +431,7 @@ const handleOptionalConditionParenthesis = (expr: Expr): Expr => {
   return expr;
 };
 
-const nop = () => new List({}).push(Identifier.from("splice-quote"));
+const nop = () => new List({}).push(Identifier.from("splice_quote"));
 
 /** Binary logical comparison */
 const bl = (args: List, fn: (l: any, r: any) => boolean) => {
@@ -527,7 +513,7 @@ const registerMacroVar = (opts: {
 };
 
 export const evalMacroVarDef = (call: List) => {
-  const isMutable = call.calls("define-mut");
+  const isMutable = call.calls("define_mut");
 
   const identifier = call.at(1);
   const init = call.at(2);

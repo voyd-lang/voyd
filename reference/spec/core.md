@@ -186,7 +186,7 @@ Type: Module
 
 ```lisp
 (module $module-id:String
-  (imports ($import-module-id "***")*)
+  (imports ($import-module-id "all")*)
   (exports $exports:Export*)
   ($body*))
 ```
