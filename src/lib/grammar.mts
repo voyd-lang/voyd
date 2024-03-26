@@ -83,12 +83,16 @@ export const isInfixOp = (op?: Expr): op is Identifier =>
 export const isInfixOpIdentifier = (op?: Identifier) =>
   !!op && !op.isQuoted && infixOps.has(op.value);
 
+export const isOp = (op?: Expr): boolean => isInfixOp(op) || isPrefixOp(op);
+
 export const prefixOps: OpMap = new Map([
   ["#", 7],
   ["&", 7],
   ["!", 7],
   ["~", 7],
   ["%", 7],
+  ["$", 7],
+  ["$@", 7],
   ["...", 5],
 ]);
 
