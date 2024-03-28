@@ -1,6 +1,6 @@
 node_modules
 dist
 ast.json
-run_output.*
-*output.json
+*output*.json
 .env
+test.void
