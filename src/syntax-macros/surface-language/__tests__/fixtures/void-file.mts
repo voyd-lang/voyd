@@ -23,6 +23,15 @@ array.reduce(0, 1, 2) hey: () =>
     acc + val
 with: () => 0
 
+10
++ 3
+
+let a = array
+    .reduce(0) (acc, val) =>
+        acc + val
+    + 10
+    * 3
+
 fn main()
     let a = ...test.hey + &other.now
     let x = 10 +

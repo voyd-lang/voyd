@@ -6,13 +6,7 @@ export const interpretWhitespace = (list: List): List => {
 
   while (list.hasChildren) {
     const child = elideParens(list);
-    const olderSibling = transformed.at(-1);
-    if (isLoneLabeledArgument(child, olderSibling)) {
-      olderSibling.push(child);
-    } else {
-      transformed.push(child);
-    }
-
+    addSibling(child, transformed);
     consumeLeadingWhitespace(list);
   }
 
@@ -30,32 +24,21 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
 
   const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;
 
-  const consumeChildren = () => {
-    const children = new List({});
+  const pushChildBlock = () => {
+    const children = new List({ value: ["block"] });
 
     while (nextExprIndentLevel(list) > indentLevel) {
       const child = elideParens(list, { indentLevel: indentLevel + 1 });
-
-      const olderSibling = children.at(-1);
-      if (isLoneLabeledArgument(child, olderSibling)) {
-        olderSibling.push(child);
-        continue;
-      }
-
-      children.push(child);
+      addSibling(child, children);
     }
 
-    return children;
-  };
-
-  const pushChildren = (child: List) => {
-    if (isListOfNamedParameters(child)) {
-      transformed.push(...child.value);
+    const firstChild = children.at(1);
+    if (firstChild?.isList() && isNamedParameter(firstChild)) {
+      transformed.push(...children.rest());
       return;
     }
 
-    transformed.push(["block", ...child.value]);
-    return;
+    transformed.push(children);
   };
 
   consumeLeadingWhitespace(list);
@@ -64,12 +47,17 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
 
     const isNewline = next?.isWhitespace() && next.isNewline;
     if (isNewline && nextLineHasChildExpr()) {
-      const child = consumeChildren();
-      pushChildren(child);
+      if (isContinuationOp(nextNonWhitespace(list, 1))) {
+        const child = elideParens(list, { indentLevel: indentLevel + 1 });
+        addSibling(child, transformed);
+        continue;
+      }
+
+      pushChildBlock();
       continue;
     }
 
-    if (isNewline && !hasContinuation(list, transformed)) {
+    if (isNewline && !isContinuationOp(transformed.at(-1))) {
       break;
     }
 
@@ -144,9 +132,14 @@ const nextExprIndentLevel = (list: List, startIndex?: number) => {
   return nextIndentLevel;
 };
 
-const hasContinuation = (list: List, transformed: List) => {
-  const lastTransformedExpr = transformed.at(-1);
-  return isContinuationOp(lastTransformedExpr);
+const nextNonWhitespace = (list: List, startIndex?: number) => {
+  let index = startIndex ?? 0;
+
+  while (list.at(index)?.isWhitespace()) {
+    index += 1;
+  }
+
+  return list.at(index);
 };
 
 const consumeLeadingWhitespace = (list: List) => {
@@ -163,13 +156,7 @@ const consumeLeadingWhitespace = (list: List) => {
 const isNewline = (v: Expr) => v.isWhitespace() && v.isNewline;
 const isIndent = (v: Expr) => v.isWhitespace() && v.isIndent;
 
-const isListOfNamedParameters = (v: Expr) => {
-  return v.isList() && v.value.every((v) => isNamedParameter(v));
-};
-
-const isNamedParameter = (v: Expr) => {
-  if (!v.isList()) return false;
-
+const isNamedParameter = (v: List) => {
   const identifier = v.at(0);
   const colon = v.at(1);
 
@@ -186,13 +173,28 @@ const isNamedParameter = (v: Expr) => {
   return true;
 };
 
-function isLoneLabeledArgument(
-  child: Expr,
-  olderSibling: Expr | undefined
-): olderSibling is List {
-  return !!(
-    isNamedParameter(child) &&
-    olderSibling?.isList() &&
-    !isNamedParameter(olderSibling)
-  );
-}
+const addSibling = (child: Expr, siblings: List) => {
+  const olderSibling = siblings.at(-1);
+
+  if (!child.isList()) {
+    siblings.push(child);
+    return;
+  }
+
+  if (isContinuationOp(child.first()) && olderSibling) {
+    siblings.push([siblings.pop()!, ...child.value]);
+    return;
+  }
+
+  if (!olderSibling?.isList()) {
+    siblings.push(child);
+    return;
+  }
+
+  if (isNamedParameter(child) && !isNamedParameter(olderSibling)) {
+    olderSibling.push(child);
+    return;
+  }
+
+  siblings.push(child);
+};
