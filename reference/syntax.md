@@ -93,7 +93,7 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
         (: else 5))
     ```
 
-4.  (New) Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special
+4.  Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special
     handling.
 
     1.  Greedy operators consume indented child blocks, rather than the parent
@@ -138,14 +138,19 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
                             (: else 5)))))
             ```
 
-5. Parenthetical elision is disabled on any lines surrounded by parenthesis 1.
-    Parenthetical elision can be re-enabled by using the whitespace curly block
-    `${}` syntax
+5. Arguments already wrapped in parenthesis must be separated by a comma
 
-        ``` add(x, y, ${ if x > y then: 3 else: 5 })
+    ```void
+    add(1, 2)
 
+    // Becomes
+    (add 1 2)
 
-        // Becomes (add x y (block (if (> x y) (: then 3) (: else 5)))) ```
+    add(sub 1 2, 3)
+
+    // Becomes
+    (add (sub 1 2) 3)
+    ```
 
 
 Examples:
@@ -188,6 +193,22 @@ z: 3
     (: x 1)
     (: y 2)
     (: z 3))
+
+let x = my_func(
+    add 1 2,
+    () =>
+        hello(),
+    3 + 4,
+)
+
+// Becomes
+(let
+  (=
+    x
+    (my_func
+      (add 1 2)
+      (=> () (block (hello)))
+      (+ 3 4))))
 ```
 
 # Standard Function Call Syntax
