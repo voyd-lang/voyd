@@ -1,11 +1,18 @@
-import { isContinuationOp } from "../../lib/grammar.mjs";
+import { isContinuationOp, isGreedyOp } from "../../lib/grammar.mjs";
 import { Expr, List } from "../../syntax-objects/index.mjs";
 
 export const interpretWhitespace = (list: List): List => {
   const transformed = new List({ ...list.metadata });
 
   while (list.hasChildren) {
-    transformed.push(elideParens(list) as List);
+    const child = elideParens(list);
+    const olderSibling = transformed.at(-1);
+    if (isLoneLabeledArgument(child, olderSibling)) {
+      olderSibling.push(child);
+    } else {
+      transformed.push(child);
+    }
+
     consumeLeadingWhitespace(list);
   }
 
@@ -30,11 +37,7 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
       const child = elideParens(list, { indentLevel: indentLevel + 1 });
 
       const olderSibling = children.at(-1);
-      if (
-        isNamedParameter(child) &&
-        olderSibling?.isList() &&
-        !isNamedParameter(olderSibling)
-      ) {
+      if (isLoneLabeledArgument(child, olderSibling)) {
         olderSibling.push(child);
         continue;
       }
@@ -78,6 +81,12 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
     if (next?.isList()) {
       transformed.push(removeWhitespaceFromList(next, indentLevel));
       list.consume();
+      continue;
+    }
+
+    if (isGreedyOp(next)) {
+      transformed.push(list.consume());
+      if (!nextLineHasChildExpr()) transformed.push(elideParens(list, opts));
       continue;
     }
 
@@ -176,3 +185,14 @@ const isNamedParameter = (v: Expr) => {
 
   return true;
 };
+
+function isLoneLabeledArgument(
+  child: Expr,
+  olderSibling: Expr | undefined
+): olderSibling is List {
+  return !!(
+    isNamedParameter(child) &&
+    olderSibling?.isList() &&
+    !isNamedParameter(olderSibling)
+  );
+}
