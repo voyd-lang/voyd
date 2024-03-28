@@ -10,6 +10,7 @@ export const functionalNotation = (list: List): List =>
     if (nextExpr && nextExpr.isList() && !isOp(expr)) {
       const list = array.splice(index + 1, 1)[0] as List;
       list.insert(expr);
+      list.insert(",", 1);
       return functionalNotation(list);
     }
 

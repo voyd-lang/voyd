@@ -91,12 +91,6 @@ const lexer = (file: File): Token => {
   while (file.hasCharacters) {
     const char = file.next;
 
-    // Skip comma's (for now)
-    if (!token.hasChars && char === ",") {
-      file.consumeChar();
-      continue;
-    }
-
     if (!token.hasChars && char === " ") {
       consumeSpaces(file, token);
       break;

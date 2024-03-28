@@ -8,7 +8,7 @@ import { primary } from "./primary.mjs";
 const surfaceLanguageMacros: SyntaxMacro[] = [
   functionalNotation,
   interpretWhitespace,
-  primary,
+  // primary,
 ];
 
 /** Transforms the surface language into the core language */

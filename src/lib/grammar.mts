@@ -2,11 +2,7 @@ import { Expr } from "../syntax-objects/expr.mjs";
 import { Identifier } from "../syntax-objects/identifier.mjs";
 
 export const isTerminator = (char: string) =>
-  isWhitespace(char) ||
-  char === "," ||
-  isBracket(char) ||
-  isQuote(char) ||
-  isOpChar(char);
+  isWhitespace(char) || isBracket(char) || isQuote(char) || isOpChar(char);
 
 export const isQuote = newTest(["'", '"', "`"]);
 
@@ -23,6 +19,7 @@ export const isOpChar = newTest([
   ":",
   "?",
   ".",
+  ",",
   ";",
   "<",
   ">",
@@ -61,6 +58,7 @@ export const infixOps: OpMap = new Map([
   ["<=", 0],
   [">=", 0],
   [".", 6],
+  [",", 6],
   ["|>", 4],
   ["<|", 4],
   ["|", 4],

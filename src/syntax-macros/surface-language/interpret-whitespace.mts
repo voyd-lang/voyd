@@ -67,8 +67,7 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
     }
 
     if (next?.isList()) {
-      transformed.push(removeWhitespaceFromList(next, indentLevel));
-      list.consume();
+      transformed.push(elideParens(list.consume()));
       continue;
     }
 
@@ -90,22 +89,6 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
   }
 
   return transformed;
-};
-
-const removeWhitespaceFromList = (list: List, indentLevel: number): List => {
-  consumeLeadingWhitespace(list);
-  return list
-    .map((expr) => {
-      if (expr.isList()) {
-        return removeWhitespaceFromList(expr, indentLevel);
-      }
-
-      return expr;
-    })
-    .filter((expr) => {
-      if (expr.isWhitespace()) return false;
-      return true;
-    });
 };
 
 const nextExprIndentLevel = (list: List, startIndex?: number) => {
