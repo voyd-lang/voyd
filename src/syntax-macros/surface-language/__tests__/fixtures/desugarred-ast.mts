@@ -33,6 +33,21 @@ export const desugarredAst = [
     ],
   ],
   [
+    "if",
+    [">", "x", 10],
+    [":", "then", ["block", 10]],
+    [":", "else", ["block", 20]],
+  ],
+  [
+    "reduce",
+    "array",
+    0,
+    1,
+    2,
+    [":", "hey", ["=>", [], ["block", ["log", "val"], ["+", "acc", "val"]]]],
+    [":", "with", ["=>", [], 0]],
+  ],
+  [
     "fn",
     ["main"],
     [
@@ -56,38 +71,26 @@ export const desugarredAst = [
         ],
       ],
       [
-        "call",
-        "this",
-        "while",
-        [
-          "=>",
-          [],
-          [
-            "if",
-            [">", "x", 10],
-            [":", "then", ["block", ["-=", "x", 1]]],
-            [":", "else", ["block", ["+=", "x", 1]]],
-          ],
-        ],
-      ],
-      [
         "let",
         [
           "=",
           "n",
           [
-            "if",
-            [">", ["len", "args"], 1],
+            "block",
             [
-              ":",
-              "then",
+              "if",
+              [">", ["len", "args"], 1],
               [
-                "block",
-                ["log", "console", ["string", "Hey there!"]],
-                ["unwrap", ["parseInt", ["at", "args", 1]]],
+                ":",
+                "then",
+                [
+                  "block",
+                  ["log", "console", ["string", "Hey there!"]],
+                  ["unwrap", ["parseInt", ["at", "args", 1]]],
+                ],
               ],
+              [":", "else", ["block", 10]],
             ],
-            [":", "else", ["block", 10]],
           ],
         ],
       ],

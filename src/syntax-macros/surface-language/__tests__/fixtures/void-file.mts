@@ -13,6 +13,16 @@ fn fib(n: i32) -> i32
 macro_let extract_parameters = (definitions) =>
     \`(parameters).concat definitions.slice(1)
 
+if x > 10 then:
+    10
+else:
+    20
+
+array.reduce(0, 1, 2) hey: () =>
+    log val
+    acc + val
+with: () => 0
+
 fn main()
     let a = ...test.hey + &other.now
     let x = 10 +
@@ -25,16 +35,12 @@ fn main()
         else:
             20
 
-    call this while () => if x > 10 then:
-        x -= 1
-    else:
-        x += 1
-
-    let n = if args.len() > 1 then:
-        console.log("Hey there!")
-        args.at(1).parseInt().unwrap()
-    else:
-        10
+    let n =
+        if args.len() > 1 then:
+            console.log("Hey there!")
+            args.at(1).parseInt().unwrap()
+        else:
+            10
 
     let x2 = 10
     let z = nothing()

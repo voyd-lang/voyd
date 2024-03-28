@@ -1,9 +1,4 @@
-import {
-  infixOps,
-  isGreedyOp,
-  isPrefixOp,
-  prefixOps,
-} from "../../lib/grammar.mjs";
+import { infixOps, isPrefixOp, prefixOps } from "../../lib/grammar.mjs";
 import { Expr, List } from "../../syntax-objects/index.mjs";
 
 /**
@@ -33,9 +28,7 @@ const parseList = (list: List): List => {
 const parseBinaryCall = (left: Expr, list: List): List => {
   const op = list.consume();
 
-  const right = isGreedyOp(op)
-    ? parseGreedy(list)
-    : parsePrecedence(list, (infixOpInfo(op) ?? -1) + 1);
+  const right = parsePrecedence(list, (infixOpInfo(op) ?? -1) + 1);
 
   // Dot handling should maybe be moved to a macro?
   return isDotOp(op)
@@ -56,12 +49,6 @@ const parseDot = (right: Expr, left: Expr): List => {
   return new List({ value: [right, left] });
 };
 
-const parseGreedy = (list: List): Expr => {
-  const result = parseList(list.consumeRest());
-  return result.length === 1 ? result.consume() : result;
-};
-
-// TODO: Cleanup with https://chidiwilliams.com/posts/on-recursive-descent-and-pratt-parsing#:~:text=Pratt%20parsing%20describes%20an%20alternative,an%20identifier%2C%20or%20a%20unary.
 const parsePrecedence = (list: List, minPrecedence = 0): Expr => {
   const next = list.at(0);
   let expr = isPrefixOp(next)
