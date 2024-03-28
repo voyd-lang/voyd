@@ -32,6 +32,12 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
       addSibling(child, children);
     }
 
+    const firstChild = children.at(1);
+    if (firstChild?.isList() && isNamedParameter(firstChild)) {
+      transformed.push(...children.rest());
+      return;
+    }
+
     transformed.push(children);
   };
 
