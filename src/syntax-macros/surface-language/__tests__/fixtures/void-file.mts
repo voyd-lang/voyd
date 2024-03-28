@@ -2,7 +2,7 @@ import { File } from "../../../../lib/file.mjs";
 
 export const exampleVoidText = `
 use std::macros::all
-use std::io::{ read }
+use std::io::{ read, write: io_write }
 
 fn fib(n: i32) -> i32
     if n <= 1 then:
