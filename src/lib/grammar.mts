@@ -19,7 +19,7 @@ export const isOpChar = newTest([
   ":",
   "?",
   ".",
-  // ",",
+  ",",
   ";",
   "<",
   ">",

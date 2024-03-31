@@ -6,7 +6,12 @@ export const interpretWhitespace = (list: List): List => {
 
   while (list.hasChildren) {
     const child = elideParens(list);
+    if (child?.isList() && child.value.length === 0) continue;
     addSibling(child, transformed);
+  }
+
+  if (transformed.value.length === 1 && transformed.first()?.isList()) {
+    return transformed.first() as List;
   }
 
   return transformed;
