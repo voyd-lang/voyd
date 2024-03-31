@@ -73,6 +73,14 @@ export const desugarredAst = [
     ],
   ],
   [
+    "let",
+    [
+      "=",
+      "x",
+      ["my_func", ["add", 1, 2], ["=>", [], ["block", ["hello"]]], ["+", 3, 4]],
+    ],
+  ],
+  [
     "fn",
     ["main"],
     [

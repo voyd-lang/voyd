@@ -32,6 +32,14 @@ let a = array
     + 10
     * 3
 
+let x = my_func(
+    add 1 2,
+    () =>
+        hello()
+    ,
+    3 + 4
+)
+
 fn main()
     let a = ...test.hey + &other.now
     let x = 10 +
