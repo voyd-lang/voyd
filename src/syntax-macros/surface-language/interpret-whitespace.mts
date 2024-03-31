@@ -7,7 +7,6 @@ export const interpretWhitespace = (list: List): List => {
   while (list.hasChildren) {
     const child = elideParens(list);
     addSibling(child, transformed);
-    consumeLeadingWhitespace(list);
   }
 
   return transformed;
@@ -20,7 +19,7 @@ export type ElideParensOpts = {
 const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
   if (!list.isList()) return list;
   const transformed = new List({});
-  let indentLevel = opts.indentLevel ?? 0;
+  let indentLevel = opts.indentLevel ?? nextExprIndentLevel(list);
 
   const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;
 
@@ -66,8 +65,14 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
       continue;
     }
 
+    if (next?.isIdentifier() && next.is(",")) {
+      list.consume();
+      break;
+    }
+
     if (next?.isList()) {
-      transformed.push(elideParens(list.consume()));
+      list.consume();
+      transformed.push(interpretWhitespace(next));
       continue;
     }
 
