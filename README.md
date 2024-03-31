@@ -25,7 +25,7 @@ fn app() -> html
         <h1>TODO</h1>
         <ul>
             ${todo_items.map i => <li>${i}</li>}
-        </ul>xs
+        </ul>
     </div>
 ```
 
