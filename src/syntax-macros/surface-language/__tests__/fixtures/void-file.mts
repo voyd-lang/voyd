@@ -2,7 +2,7 @@ import { File } from "../../../../lib/file.mjs";
 
 export const exampleVoidText = `
 use std::macros::all
-use std::io::{ read }
+use std::io::{ read, write: io_write }
 
 fn fib(n: i32) -> i32
     if n <= 1 then:
@@ -31,6 +31,14 @@ let a = array
         acc + val
     + 10
     * 3
+
+let x = my_func(
+    add 1 2,
+    () =>
+        hello()
+    ,
+    3 + 4
+)
 
 fn main()
     let a = ...test.hey + &other.now

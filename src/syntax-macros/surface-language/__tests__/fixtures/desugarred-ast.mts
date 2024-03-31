@@ -1,6 +1,9 @@
 export const desugarredAst = [
   ["use", ["::", ["::", "std", "macros"], "all"]],
-  ["use", ["::", ["::", "std", "io"], ["object", "read"]]],
+  [
+    "use",
+    ["::", ["::", "std", "io"], ["object", "read", [":", "write", "io_write"]]],
+  ],
   [
     "fn",
     ["fib", [":", "n", "i32"]],
@@ -67,6 +70,14 @@ export const desugarredAst = [
         ],
         3,
       ],
+    ],
+  ],
+  [
+    "let",
+    [
+      "=",
+      "x",
+      ["my_func", ["add", 1, 2], ["=>", [], ["block", ["hello"]]], ["+", 3, 4]],
     ],
   ],
   [
