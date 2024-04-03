@@ -79,15 +79,15 @@ global scope and therefore must each have a unique identifier.
 (define-function fib
   ;; Function parameter list
   (parameters
-    ;; Parameter definition
-    (n i32))
+  ;; Parameter definition
+  (n i32))
 
   (return-type i32)
 
   (block i32
-    (if (< n 2)
-      n
-      (+ (fib (- n 1))) (fib (- n 2)))))
+  (if (< n 2)
+    n
+    (+ (fib (- n 1))) (fib (- n 2)))))
 ```
 
 ## Define Extern Function
@@ -109,8 +109,8 @@ Defines an external function that has been imported into the module via WASM imp
   (namespace math)
   ;; Function parameter list
   (parameters
-    ;; Parameter definition
-    (n i32))
+  ;; Parameter definition
+  (n i32))
 
   (return-type i32))
 ```
@@ -166,10 +166,10 @@ Define AsyncNumericOp as an asynchronous function that accepts a number and retu
 ```lisp
 (define-type AsyncNumericOp
   (Function
-    (type-parameters)
-    (parameters (n Int ()))
-    (effects Async)
-    (return-type Int)))
+  (type-parameters)
+  (parameters (n Int ()))
+  (effects Async)
+  (return-type Int)))
 ```
 
 ## Labeled Expr

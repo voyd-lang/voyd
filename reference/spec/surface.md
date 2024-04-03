@@ -18,7 +18,7 @@ This surface language spec includes:
 (* Whitespace (Significant to the surface level language) *)
 Whitespace = Space | Tab | Newline
 Space = " ";
-Indent = "    ";
+Indent = "  ";
 NewLine = "\n";
 BackSlash = "\\"; // Single back slash character \
 
@@ -73,7 +73,7 @@ There are three types of macros:
 
 -   Reader Macros: Expanded during parsing, emit am ast
 -   Syntax Macros: Expanded after parsing, are passed the ast from the parser
-    and produce the final ast
+  and produce the final ast
 -   Regular Macros: Expanded by a syntax macro
 
 At a high level, the pipeline looks something like this: `file.void -> parser +
@@ -87,16 +87,16 @@ In the next sections, the different macros will be defined in depth.
 // Translated version of a swift example from https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/
 
 let photos = await taskGroup(of: Optional(Data).self) | () =>
-    let photoNames = await listPhotos(inGallery: "Summer Vacation")
+  let photoNames = await listPhotos(inGallery: "Summer Vacation")
 
-    for name in photoNames
-        group.addTaskUnlessCancelled (isCancelled) =>
-            if not(isCancelled)
-                await downloadPhoto(named: name)
+  for name in photoNames
+    group.addTaskUnlessCancelled (isCancelled) =>
+      if not(isCancelled)
+        await downloadPhoto(named: name)
 
-    await group.filter() | (photo) => photo != nil
+  await group.filter() | (photo) => photo != nil
 
 photos.map name =>
-    let photo = await downloadPhoto(named: name)
-    photo.map(processPhoto)
+  let photo = await downloadPhoto(named: name)
+  photo.map(processPhoto)
 ```

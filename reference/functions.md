@@ -4,7 +4,7 @@
 
 ```void
 fn add(a: i32, b: i32) -> i32
-    a + b
+  a + b
 
 // Usage
 add(1, 2)
@@ -23,13 +23,13 @@ With effects:
 
 ```void
 fn get_json(address: String): Async -> Dictionary
-    let json_text = await fetch(address)
-    parse_json(json_text)
+  let json_text = await fetch(address)
+  parse_json(json_text)
 
 // Multiple effects may be specified in parenthesis
 fn get_json(address: String): (Async, Throws) -> Dictionary
-    let json_text = await fetch(address)
-    parse_json(json_text)
+  let json_text = await fetch(address)
+  parse_json(json_text)
 ```
 
 ## Labeled arguments
@@ -57,12 +57,12 @@ type parameter and destructuring it in the function body[1]:
 
 ```rust
 fn move({ x: i32 y: i32 z: i32 }) -> void
-    // ...
+  // ...
 
 // Semantically equivalent to:
 fn move(vec: { x: i32 y: i32 z: i32 }) -> void
-    let { x, y, z } = vec
-    // ...
+  let { x, y, z } = vec
+  // ...
 
 move(x: 1, y: 2, z: 3)
 
@@ -111,14 +111,14 @@ See the chapter on [Syntax](./syntax.md) for more information.
 
 ```rust
 fn add<T>(a: T, b: T) -> T
-    a + b
+  a + b
 ```
 
 With trait constraints
 
 ```rust
 fn add<T impls Numeric>(a: T, b: T) -> T
-    a + b
+  a + b
 ```
 
 See the chapter on [Generics](./generics.md) for more information.
@@ -131,13 +131,13 @@ Their type must always be a function type with no parameters.
 
 ```rust
 fn eval_twice(@f: () -> void) -> void
-    f()
-    f()
+  f()
+  f()
 
 fn main()
-    var x = 0
-    eval_twice(x = x + 1)
-    print(x) // 2
+  var x = 0
+  eval_twice(x = x + 1)
+  print(x) // 2
 ```
 
 Use by name parameters very SPARINGLY. And only when the function name makes
@@ -150,7 +150,7 @@ the arguments (as well as the commas) can be elided.
 
 ```rust
 fn add_three_numbers(a: i32, b: i32, c: i32) -> i32
-    a + b + c
+  a + b + c
 
 add_three_numbers 1 2 3
 ```
@@ -160,33 +160,33 @@ on the previous line
 
 ```rust
 add_three_numbers 1 2
-    let x = 1
-    let y = 2
-    x + y
+  let x = 1
+  let y = 2
+  x + y
 ```
 
 This can be used to achieve trailing closures, much like swift:
 
 ```rust
 fn call_with_5(f: (i32) -> void) -> void
-    f(5)
+  f(5)
 
 call_with_5 (x) =>
-    print(x)
+  print(x)
 ```
 
 By name parameters make this feature even more powerful:
 
 ```rust
 fn eval_twice(@f: () -> void) -> void
-    f()
-    f()
+  f()
+  f()
 
 fn main()
-    var x = 0
-    eval_twice
-        x = x + 1
-    print(x) // 2
+  var x = 0
+  eval_twice
+    x = x + 1
+  print(x) // 2
 ```
 
 Parenthetical elision also works with labeled arguments:
@@ -211,15 +211,15 @@ implementation of a custom DSL for native like control flow:
 
 ```rust
 fn my_if(@condition: () -> bool, {@then: () -> void, @else: () -> void}) -> void
-    if condition then:
-        then()
-    else:
-        else()
+  if condition then:
+    then()
+  else:
+    else()
 
 my_if true then:
-    print("It's true!")
+  print("It's true!")
 else:
-    print("It's false!")
+  print("It's false!")
 ```
 
 See the chapter on [Syntax](./syntax.md) for more information and detailed rules.
@@ -231,19 +231,19 @@ unambiguously distinguished via their parameters and return type.
 
 ```void
 fn sum(a: i32, b: i32)
-    print("Def 1")
-    a + b
+  print("Def 1")
+  a + b
 
 fn sum(vec: {a:i32, b: i32})
-    print("Def 2")
-    vec.a + vec.b
+  print("Def 2")
+  vec.a + vec.b
 
 sum a: 1, b: 2 // Def 1
 sum { a: 1, b: 2 } // Def 2
 
 // ERROR: sum(numbers: ...Int) overlaps ambiguously with sum(a: Int, b: Int)
 fn sum(numbers: ...Int)
-    print("Def 3")
+  print("Def 3")
 ```
 
 This can be especially useful for overloading operators to support a custom
@@ -251,7 +251,7 @@ type:
 
 ```
 fn '+'(a: Vec3, b: Vec3) -> Vec3
-    Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
+  Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
 
 Vec3(1, 2, 3) + Vec3(4, 5, 6) // Vec3(5, 7, 9)
 ```

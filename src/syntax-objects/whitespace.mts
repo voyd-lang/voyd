@@ -19,7 +19,7 @@ export class Whitespace extends Syntax {
   }
 
   get isIndent() {
-    return this.value === "    ";
+    return this.value === "  ";
   }
 
   clone(parent?: Expr): Whitespace {
