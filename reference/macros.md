@@ -23,14 +23,14 @@ list into the current list. Note that these shortcuts only apply to `macro`,
 
 ```void
 macro def-wasm-operator(op wasm-fn arg-type return-type)
-    defun $op(left:$arg-type right:$arg-type) -> $return-type
-        binaryen-mod ($arg-type $wasm-fn) (left right)
+  defun $op(left:$arg-type right:$arg-type) -> $return-type
+    binaryen-mod ($arg-type $wasm-fn) (left right)
 
 def-wasm-operator('<' lt_s i32 i32)
 
 // Expands into
 defun '<'(left:i32 right:i32) -> i32
-    binaryen-mod (i32 lt_s) (left right)
+  binaryen-mod (i32 lt_s) (left right)
 ```
 
 ## Quotes
@@ -103,27 +103,27 @@ Syntax Macro Pipeline Example:
 
 ```void
 fn fib(n:i32) -> i32
-    if (n < 2)
-        then: n
-        else: fib(n - 1) + fib(n - 2)
+  if (n < 2)
+    then: n
+    else: fib(n - 1) + fib(n - 2)
 
 // After function notation syntax macro
 fn (fib n:i32) -> i32
-    if (n < 2)
-        then: n
-        else: (fib n - 1) + (fib n - 2)
+  if (n < 2)
+    then: n
+    else: (fib n - 1) + (fib n - 2)
 
 // After parenthetical elision syntax macro
 (fn (fib n:i32) -> i32
-    (if (n < 2)
-        (then: n)
-        (else: (fib n - 1) + (fib n - 2))))
+  (if (n < 2)
+    (then: n)
+    (else: (fib n - 1) + (fib n - 2))))
 
 // After infix notation syntax macro (-> is not an operator)
 (fn (fib (: n i32)) -> i32
-    (if (< n 2)
-        (: then n)
-        (: else (+ (fib (- n 1)) (fib (- n 2))))))
+  (if (< n 2)
+    (: then n)
+    (: else (+ (fib (- n 1)) (fib (- n 2))))))
 ```
 
 ## The Macro Pipeline
@@ -136,7 +136,7 @@ There are three types of macros:
 
 -   Reader Macros: Expanded during parsing, emit am ast
 -   Syntax Macros: Expanded after parsing, are passed the ast from the parser
-    and produce the final ast
+  and produce the final ast
 -   Regular Macros: Expanded by a syntax macro
 
 At a high level, the pipeline looks something like this: `file.void -> parser +

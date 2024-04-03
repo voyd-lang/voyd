@@ -9,59 +9,59 @@ global var stack_pointer = 0
 
 // Returns a pointer with the location of the allocation
 pub fn alloc(size:i32) -> i32
-    ensure_space(size)
-    let address = stack_pointer
-    stack_pointer = stack_pointer + size + header_size
-    bnr (i32 store void) (`(0) `(2) address size + header_size)
-    address
+  ensure_space(size)
+  let address = stack_pointer
+  stack_pointer = stack_pointer + size + header_size
+  bnr (i32 store void) (`(0) `(2) address size + header_size)
+  address
 
 // Returns dest pointer
 pub fn copy(src:i32 dest:i32) -> i32
-    bnr (memory copy void) (dest src src.size)
-    dest
+  bnr (memory copy void) (dest src src.size)
+  dest
 
 pub fn size(address:i32) -> i32
-    bnr (i32 load i32) (`(0) `(2) size_index + address)
+  bnr (i32 load i32) (`(0) `(2) size_index + address)
 
 // Sets the stack pointer to the end of a function return space, returns the return address
 pub fn set_return(return_address:i32) -> i32
-    stack_pointer = return_address + return_address.size
-    return_address
+  stack_pointer = return_address + return_address.size
+  return_address
 
 // For external load and store use. Add header size automatically to offset
 pub fn read_i32(address:i32 offset:i32) -> i32
-    bnr (i32 load i32) (`(0) `(2) (address + offset + header_size))
+  bnr (i32 load i32) (`(0) `(2) (address + offset + header_size))
 
 // For external load and store use. Add header size automatically to offset
 pub fn store_i32(address:i32 offset:i32 value:i32) -> void
-    bnr (i32 store i32) (`(0) `(2) (address + offset + header_size) value)
+  bnr (i32 store i32) (`(0) `(2) (address + offset + header_size) value)
 
 // For external load and store use. Add header size automatically to offset
 pub fn read_f32(address:i32 offset:i32) -> f32
-    bnr (f32 load f32) (`(0) `(2) (address + offset + header_size))
+  bnr (f32 load f32) (`(0) `(2) (address + offset + header_size))
 
 // For external load and store use. Add header size automatically to offset
 pub fn store_f32(address:i32 offset:i32 value:f32) -> void
-    bnr (f32 store f32) (`(0) `(2) (address + offset + header_size) value)
+  bnr (f32 store f32) (`(0) `(2) (address + offset + header_size) value)
 
 // For external load and store use. Add header size automatically to offset
 pub fn read_i64(address:i32 offset:i32) -> i64
-    bnr (i64 load i64) (`(0) `(2) (address + offset + header_size))
+  bnr (i64 load i64) (`(0) `(2) (address + offset + header_size))
 
 // For external load and store use. Add header size automatically to offset
 pub fn store_i64(address:i32 offset:i32 value:i64) -> void
-    bnr (i64 store i64) (`(0) `(2) (address + offset + header_size) value)
+  bnr (i64 store i64) (`(0) `(2) (address + offset + header_size) value)
 
 // For external load and store use. Add header size automatically to offset
 pub fn read_f64(address:i32 offset:i32) -> f64
-    bnr (f64 load f64) (`(0) `(2) (address + offset + header_size))
+  bnr (f64 load f64) (`(0) `(2) (address + offset + header_size))
 
 // For external load and store use. Add header size automatically to offset
 pub fn store_f64(address:i32 offset:i32 value:f64) -> void
-    bnr (f64 store f64) (`(0) `(2) (address + offset + header_size) value)
+  bnr (f64 store f64) (`(0) `(2) (address + offset + header_size) value)
 
 fn ensure_space(size:i32) -> i32
-    let mem_size:i32 = bnr (memory size i32)
-    if (stack_pointer + size + header_size) >= (mem_size * 65536)
-        bnr (memory grow i32) (1)
-        0
+  let mem_size:i32 = bnr (memory size i32)
+  if (stack_pointer + size + header_size) >= (mem_size * 65536)
+    bnr (memory grow i32) (1)
+    0

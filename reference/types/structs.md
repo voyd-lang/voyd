@@ -11,8 +11,8 @@ the percent sign `%{}`.
 
 ```void
 type MyStruct = %{
-    a: i32,
-    b: i32
+  a: i32,
+  b: i32
 }
 ```
 
@@ -41,7 +41,7 @@ type MyTupleStruct = %[i32, bool]
 
 // Resolves to
 type MyTupleStruct = %{
-    0: i32,
-    1: bool
+  0: i32,
+  1: bool
 }
 ```

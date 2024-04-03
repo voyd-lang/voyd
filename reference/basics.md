@@ -61,8 +61,8 @@ let y = false
 
 ```void
 let value = {
-    a: 5,
-    b: 4
+  a: 5,
+  b: 4
 }
 
 let x = value.a // x will be bound to 5
@@ -90,35 +90,35 @@ let x = value.0 // x will be bound to 5
 ```void
 // If statements
 if x > 5 then:
-    // Do something
+  // Do something
 else:
-    // Do something else
+  // Do something else
 
 // When else is not needed both `then:` and `else:` can be omitted
 if x > 5
-    // Do something
+  // Do something
 
 // While loops
 while x > 5
-    // Do something
+  // Do something
 
 // For loops
 for i in 0..10
-    // Do something
+  // Do something
 
 // Blocks*
 let y = ${
-    let x = 5
+  let x = 5
 
-    // The result of the block is the result of the last statement, y will be bound to 8
-    x + 3
+  // The result of the block is the result of the last statement, y will be bound to 8
+  x + 3
 }
 
 // Blocks are implicitly defined by indentation, so this is also valid.
 let y =
-    let x =
-        2 + 3
-    x + 3 // y will be bound to 8
+  let x =
+  2 + 3
+  x + 3 // y will be bound to 8
 ```
 
 * The ${} syntax is useful to restore indentation sensitivity in non-indentation sensitive contexts, such as in function arguments, string literals, object literals etc. See the syntax reference for more details.
@@ -142,8 +142,8 @@ let x = if true then: 1 else: 2
 
 // Blocks are also expressions, returning the result of the last statement
 let y =
-    let x = 5
-    x + 3
+  let x = 5
+  x + 3
 
 // Both z and u will be bound to 5
 let z = let u = 5

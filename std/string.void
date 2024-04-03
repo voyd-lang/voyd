@@ -27,9 +27,9 @@ extern_fn strings str_includes(str:String includes:String) -> void
 extern_fn strings str_test(str:String regex:String flags:String) -> void
 
 pub macro string(str)
-    let add_codes = str.split("").map (char) =>
-        ` add_char_code_to_string $(char_to_code char) index
-    `(block
-        (let index:String = alloc_string())
-        $@add_codes
-        index)
+  let add_codes = str.split("").map (char) =>
+    ` add_char_code_to_string $(char_to_code char) index
+  `(block
+    (let index:String = alloc_string())
+    $@add_codes
+    index)

@@ -25,30 +25,30 @@ Normal Usage:
 ```
 // Given an object
 obj Vec3 {
-    x: i32
-    y: i32
-    z: i32
+  x: i32
+  y: i32
+  z: i32
 }
 
 fn bump_x(v: &Vec3) -> Vec3
-    v.x += 1
+  v.x += 1
 
 fn main()
-    var mutable = Vec3 { x: 1, y: 2, z: 3 }
+  var mutable = Vec3 { x: 1, y: 2, z: 3 }
 
-    // Mutable references must be explicitly borrowed with the & operator
-    bump_x(&mutable)
+  // Mutable references must be explicitly borrowed with the & operator
+  bump_x(&mutable)
 
-    // & operator must be used even when using methods
-    &mutable.bump_x()
-    &mutable.x = 5
+  // & operator must be used even when using methods
+  &mutable.bump_x()
+  &mutable.x = 5
 
-    // Examples of immutable behavior
-    let immutable = Vec3 { x: 1, y: 2, z: 3 }
+  // Examples of immutable behavior
+  let immutable = Vec3 { x: 1, y: 2, z: 3 }
 
-    // ERROR: Cannot borrow immutable reference as mutable
-    &immutable.bump_x()
-    &immutable.x = 5
+  // ERROR: Cannot borrow immutable reference as mutable
+  &immutable.bump_x()
+  &immutable.x = 5
 ```
 
 Mutable references can only be made to object types:
@@ -56,14 +56,14 @@ Mutable references can only be made to object types:
 ```void
 // Error cannot borrow primitive type as mutable
 fn bump(x: &i32) -> i32
-    x += 1
+  x += 1
 
 fn main()
-    var x = 5
+  var x = 5
 
-    // Ok
-    x = 3
+  // Ok
+  x = 3
 
-    // Error
-    bump(&x)
+  // Error
+  bump(&x)
 ```

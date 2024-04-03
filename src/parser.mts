@@ -157,7 +157,7 @@ const nextIsNumber = (file: File) =>
   isDigit(file.next) || (isDigitSign(file.next) && isDigit(file.at(1) ?? ""));
 
 const consumeSpaces = (file: File, token: Token) => {
-  while (file.next === " " && token.span < 4) {
+  while (file.next === " " && token.span < 2) {
     token.addChar(file.consumeChar());
   }
 };
