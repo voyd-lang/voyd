@@ -114,7 +114,7 @@ let y = ${
   x + 3
 }
 
-// Blocks are implicitly defined by indentation, so this is also valid.
+// Blocks are implicitly defined by 2 space indentation, so this is also valid.
 let y =
   let x =
   2 + 3
