@@ -20,7 +20,7 @@ fn main() -> void
   todo()
 ```
 
-```rust
+```tsx
 fn app() -> JSX::Element
   let todo_items = ["wake up", "eat", "code", "sleep"]
   <div>
