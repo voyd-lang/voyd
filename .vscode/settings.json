@@ -40,13 +40,13 @@
       "strings": "off",
       "other": "off"
     },
-    "editor.useTabStops": true,
-    "editor.tabSize": 4,
+    "editor.useTabStops": false,
+    "editor.tabSize": 2,
     "cSpell.fixSpellingWithRenameProvider": true,
     "cSpell.advanced.feature.useReferenceProviderWithRename": true,
     "cSpell.advanced.feature.useReferenceProviderRemove": "/^#+\\s/"
   },
   "[void]": {
-    "editor.tabSize": 4
+    "editor.tabSize": 2
   }
 }
