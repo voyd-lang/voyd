@@ -5,25 +5,25 @@ export
 pub macro `()
   quote quote $@body
 
-pub macro let()
-  define equals_expr (extract body 0)
-  `(define $(extract equals_expr 1) $(extract equals_expr 2))
+macro let()
+  define equals_expr body.extract(0)
+  ` define $(equals_expr.extract(1)) $(equals_expr.extract(2))
 
 pub macro var()
-  define equals_expr (extract body 0)
-  `(define_mut $(extract equals_expr 1) $(extract equals_expr 2))
+  define equals_expr body.extract(0)
+  ` define_mut $(equals_expr.extract(1)) $(equals_expr.extract(2))
 
 pub macro global()
-  let mutability = extract body 0
-  let equals_expr = extract body 1
+  let mutability = body.extract(0)
+  let equals_expr = body.extract(1)
   let function =
     if mutability == "let" then:
       ` define_global
     else:
       ` define_mut_global
-  `($@function
-    $(extract equals_expr 1)
-    $(extract equals_expr 2))
+  `($@function,
+    $(equals_expr.extract(1))
+    $(equals_expr.extract(2))
 
 pub macro ';'()
   let func = body.extract(0)
@@ -36,42 +36,42 @@ pub macro ';'()
   if is_list(func) then:
     func.concat(args)
   else:
-    concat(`($func) args)
+    `($func).concat(args)
 
 // Extracts typed parameters from a list where index 0 is fn name, and offset_index+ are labeled_expr
 macro_let extract_parameters = (definitions) =>
   `(parameters).concat definitions.slice(1)
 
 pub macro fn()
-  let definitions = extract(body 0)
-  let identifier = extract(definitions 0)
+  let definitions = body.extract(0)
+  let identifier = definitions.extract(0)
   let params = extract_parameters(definitions)
 
   let type_arrow_index =
-    if (extract(body 1) == "->") then:
+    if body.extract(1) == "->" then:
       1
     else:
-      if (extract(body 2) == "->") then: 2 else: -1
+      if body.extract(2) == "->" then: 2 else: -1
 
   let return_type =
     if type_arrow_index > -1 then:
-      body.slice(type_arrow_index + 1 type_arrow_index + 2)
+      body.slice(type_arrow_index + 1, type_arrow_index + 2)
     else: `()
 
   let expressions =
-    if (type_arrow_index > -1) then:
+    if type_arrow_index > -1 then:
       body.slice(type_arrow_index + 2)
     else: body.slice(1)
 
-  `(define_function
-    $identifier
-    $params
+  `(define_function,
+    $identifier,
+    $params,
     (return_type $@return_type)
-    $(concat `(block) expressions))
+    $(`(block).concat(expressions)))
 
-pub macro def_wasm_operator(op wasm_fn arg_type return_type)
-  `(fn $op(left:$arg_type right:$arg_type) -> $return_type
-    binaryen_mod ($arg_type $wasm_fn $return_type) (left right))
+pub macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
+  ` fn $op(left:$arg_type, right:$arg_type) -> $return_type
+    binaryen_mod ($arg_type, $wasm_fn, $return_type) (left right)
 
 // extern $fn_id(namespace params*)
 // extern max("Math" x:i32 y:i32)
@@ -82,34 +82,34 @@ pub macro extern_fn()
   let parameters = extract_parameters(definitions)
 
   let type_arrow_index =
-    if (extract(body 1) == "->") then: 1
+    if body.extract(1) == "->" then: 1
     else:
-      if (extract(body 2) == "->") then: 2 else: -1
+      if body.extract(2) == "->" then: 2 else: -1
 
   let return_type =
-    if (type_arrow_index > -1) then:
-      extract(body type_arrow_index + 1)
+    if type_arrow_index > -1 then:
+      body.extract(type_arrow_index + 1)
     else: `()
 
-  `(define_extern_function
-    $identifier
-    namespace $namespace
-    $parameters
-    (return_type $@return_type))
+  `(define_extern_function,
+    $identifier,
+    (namespace $namespace),
+    $parameters,
+    (return_type $return_type))
 
 pub macro match()
   log "match"
   let value_expr = body.extract(0)
   let cases = body.slice(1)
-  let expand_cases = (cases index) =>
+  let expand_cases = (cases, index) =>
     let case = cases.extract(index)
     if is_list(case) and not(index + 1 >= cases.length) then:
-      `(if $(extract case 0) == match_value
+      ` if $(extract case 0) == match_value
         then: $(extract case 1)
-        else: $(&lambda cases (index + 1)))
+        else: $(&lambda cases (index + 1))
     else: case
 
-  let conditions = expand_cases(cases 0)
-  `(block
+  let conditions = expand_cases(cases, 0)
+  `
     let match_value = $value_expr
-    $conditions)
+    $conditions

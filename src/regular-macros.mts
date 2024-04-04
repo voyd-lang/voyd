@@ -142,7 +142,7 @@ const evalMacroDef = (list: List): Macro => {
   const signature = list.listAt(1);
   const name = signature.identifierAt(0);
   const parameters = signature.rest() as Identifier[];
-  const macro = new RegularMacro({
+  return new RegularMacro({
     ...list.metadata,
     name,
     parameters,
@@ -157,7 +157,6 @@ const evalMacroDef = (list: List): Macro => {
         }),
     }),
   });
-  return macro;
 };
 
 const initializeMacroBlocks = (list: Expr): Expr => {

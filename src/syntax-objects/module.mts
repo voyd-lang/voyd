@@ -42,7 +42,7 @@ export class VoidModule extends ScopedNamedEntity {
   applyMap(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoidModule {
     const old = this.value;
     this.value = [];
-    this.push(...old.map(fn));
+    old.forEach((expr, index, arr) => this.push(fn(expr, index, arr)));
     return this;
   }
 
