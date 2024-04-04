@@ -86,15 +86,10 @@ pub macro extern_fn()
     else:
       if body.extract(2) == "->" then: 2 else: -1
 
-  log "extern"
-  log type_arrow_index
-  log body
   let return_type =
     if type_arrow_index > -1 then:
       body.extract(type_arrow_index + 1)
     else: `()
-
-  log return_type
 
   `(define_extern_function,
     $identifier,
