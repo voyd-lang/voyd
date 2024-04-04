@@ -11,13 +11,9 @@ fn fib(n: i32) -> i32
   else:
     fib(n - 1) + fib(n - 2)
 
-// All binary programs have a main function
 fn main() -> void
   for n in range(15)
-    write fib(n)
-    // Call print on the fibonacci sequence at index using UFCS.
-    fib(n).print()
-  todo()
+    print fib(n)
 ```
 
 ```tsx
