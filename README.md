@@ -21,7 +21,7 @@ fn main() -> void
 ```
 
 ```rust
-fn app() -> html
+fn app() -> JSX::Element
   let todo_items = ["wake up", "eat", "code", "sleep"]
   <div>
     <h1>TODO</h1>
