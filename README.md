@@ -23,20 +23,12 @@ fn main() -> void
 ```rust
 fn app() -> html
   let todo_items = ["wake up", "eat", "code", "sleep"]
-  if boop then:
-    <div>
-      <h1>TODO</h1>
-      <ul>
-        ${todo_items.map i => <li>${i}</li>}
-      </ul>
-    </div>
-  else:
-    <div>
-      <h1>TODO</h1>
-      <ul>
-        ${todo_items.map i => <li>${i}</li>}
-      </ul>
-    </div>
+  <div>
+    <h1>TODO</h1>
+    <ul>
+      ${todo_items.map i => <li>${i}</li>}
+    </ul>
+  </div>
 ```
 
 **Disclaimer**
