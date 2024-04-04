@@ -4,3 +4,4 @@ ast.json
 *output*.json
 .env
 test.void
+/playground.*
