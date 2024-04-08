@@ -1,14 +1,15 @@
 import { inferTypes } from "./infer-types.mjs";
 import { initPrimitiveTypes } from "./init-primitive-types.mjs";
 import { registerAnnotatedTypes } from "./register-annotated-types.mjs";
+import { TypeChecker } from "./types";
 
-const typePhases: SyntaxMacro[] = [
+const typePhases: TypeChecker[] = [
   initPrimitiveTypes,
   registerAnnotatedTypes,
   inferTypes,
 ];
 
-export const typeCheck: SyntaxMacro = (list, info) => {
-  if (!info.isRoot) return list;
-  return typePhases.reduce((ast, macro) => macro(ast, info), list);
+export const typeCheck: TypeChecker = (expr) => {
+  typePhases.forEach((checker) => checker(expr));
+  return expr;
 };

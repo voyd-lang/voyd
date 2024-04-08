@@ -6,14 +6,16 @@ import { Variable } from "./variable.mjs";
 
 export class Fn extends ScopedNamedEntity {
   readonly syntaxType = "fn";
-  readonly variables: Variable[] = [];
-  readonly parameters: Parameter[] = [];
-  private returnType: Type;
-  readonly body: Expr;
+  variables: Variable[] = [];
+  parameters: Parameter[] = [];
+  returnType?: Type;
+  returnTypeExpr?: Expr;
+  body: Expr;
 
   constructor(
     opts: ScopedNamedEntityOpts & {
-      returnType: Type;
+      returnType?: Type;
+      returnTypeExpr?: Expr;
       variables?: Variable[];
       parameters: Parameter[];
       body: Expr;
@@ -24,6 +26,7 @@ export class Fn extends ScopedNamedEntity {
     this.parameters = opts.parameters ?? [];
     this.variables = opts.variables ?? [];
     this.body = opts.body;
+    this.returnTypeExpr = opts.returnTypeExpr;
   }
 
   getNameStr(): string {
@@ -64,10 +67,6 @@ export class Fn extends ScopedNamedEntity {
     }
 
     throw new Error(`Return type not yet resolved for fn ${this}`);
-  }
-
-  setReturnType(type: Type) {
-    this.returnType = type;
   }
 
   registerLocal(local: Variable | Parameter) {

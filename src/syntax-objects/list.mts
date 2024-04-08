@@ -192,6 +192,14 @@ export class List extends Syntax {
     });
   }
 
+  sliceAsArray(start?: number, end?: number) {
+    return this.value.slice(start, end);
+  }
+
+  toArray(): Expr[] {
+    return [...this.value];
+  }
+
   toJSON() {
     return this.value;
   }
