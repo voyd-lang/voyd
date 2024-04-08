@@ -4,7 +4,6 @@ import {
   Parameter,
   Expr,
   Variable,
-  Identifier,
 } from "../syntax-objects/index.mjs";
 import { TypeChecker } from "./types";
 
