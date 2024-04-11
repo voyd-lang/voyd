@@ -1,3 +1,51 @@
+# Ergonomics
+
+## Hybrid Nominal And Structural Sub-typing
+
+```
+obj Robot
+
+obj ArmRobot extends Robot {
+  vise: Vise
+}
+
+obj HumanoidRobot extends Robot {
+  vise: Vise
+  legs: Legs
+}
+
+obj DogRobot extends Robot {
+  legs: Legs
+}
+
+obj Human {
+  legs: Legs
+}
+
+trait Gripper
+  fn grip(self) async -> void
+  fn un_grip(self) async -> void
+
+trait Moveable
+  fn move_to(self, location: Location) async -> void
+
+// Provides implementation for ArmRobot and HumanoidRobot
+impl Gripper for Robot & { vise: Vise }
+  fn grip(self) async -> void
+    await! self.vise.close()
+
+  fn un_grip(self) async -> void
+    await! self.vise.open()
+
+// Provides implementation for DogRobot and HumanoidRobot, but not Human as its not a Robot
+impl Moveable for Robot & { legs: Legs }
+  fn grip(self) async -> void
+    await! self.vise.close()
+
+  fn un_grip(self) async -> void
+    await! self.vise.open()
+```
+
 # Common Errors In TypeScript Solved
 
 ## Failure to initialize all class properties
