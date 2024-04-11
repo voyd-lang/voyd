@@ -1,39 +1,51 @@
 import { Expr } from "./expr.mjs";
+import { Identifier } from "./identifier.mjs";
 import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 import { Type } from "./types.mjs";
 
 /** Defines a function call */
 export class Call extends Syntax {
   readonly syntaxType = "call";
-  readonly fnId: string;
-  readonly args: Expr[];
+  fnId?: string;
+  fnName: Identifier;
+  args: Expr[];
 
-  constructor(opts: SyntaxMetadata & { fnId: string; args: Expr[] }) {
+  constructor(
+    opts: SyntaxMetadata & {
+      fnName: Identifier;
+      fnId?: string;
+      args: Expr[];
+    }
+  ) {
     super(opts);
+    this.fnName = opts.fnName;
     this.fnId = opts.fnId;
     this.args = opts.args;
   }
 
   get type(): Type {
+    if (!this.fnId) {
+      throw new Error("Could not resolve return type of fn call");
+    }
     const type = this.resolveFnById(this.fnId)?.getReturnType();
     if (!type) {
-      throw new Error(`Could not resolve return type of ${this.fnId}`);
+      throw new Error(`Could not resolve return type of ${this.fnName}`);
     }
     return type;
   }
 
-  calls(id: string) {
-    return this.fnId === id;
+  calls(name: string) {
+    return this.fnName.is(name);
   }
 
   toJSON() {
-    return [this.fnId, ...this.args];
+    return [this.fnName, ...this.args];
   }
 
   clone(parent?: Expr) {
     return new Call({
       ...this.getCloneOpts(parent),
-      fnId: this.fnId,
+      fnName: this.fnName,
       args: this.args,
     });
   }

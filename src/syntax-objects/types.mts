@@ -9,7 +9,8 @@ export type Type =
   | ObjectType
   | TupleType
   | ArrayType
-  | FnType;
+  | FnType
+  | TypeAlias;
 
 export type TypeJSON = ["type", [string, ...any[]]];
 
@@ -25,6 +26,28 @@ export abstract class BaseType extends NamedEntity {
   isEquivalentTo(type: Type) {
     // TODO: This is very much not good enough. Would break down given structural types.
     return type.id === this.id;
+  }
+}
+
+export class TypeAlias extends BaseType {
+  readonly kindOfType = "type-alias";
+  readonly size = 4;
+  typeExpr: Expr;
+
+  constructor(opts: NamedEntityOpts & { typeExpr: Expr }) {
+    super(opts);
+    this.typeExpr = opts.typeExpr;
+  }
+
+  toJSON(): TypeJSON {
+    return ["type", ["type-alias", this.typeExpr]];
+  }
+
+  clone(parent?: Expr | undefined): TypeAlias {
+    return new TypeAlias({
+      ...super.getCloneOpts(parent),
+      typeExpr: this.typeExpr,
+    });
   }
 }
 

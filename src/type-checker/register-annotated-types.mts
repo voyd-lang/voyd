@@ -4,6 +4,7 @@ import {
   Parameter,
   Expr,
   Variable,
+  Call,
 } from "../syntax-objects/index.mjs";
 import { TypeChecker } from "./types";
 
@@ -23,7 +24,7 @@ export const registerAnnotatedTypes: TypeChecker = (expr) => {
     return initVar(expr);
   }
 
-  return expr.map(registerAnnotatedTypes);
+  return initCall(expr);
 };
 
 const initFn = (expr: List): Fn => {
@@ -103,4 +104,18 @@ const initVar = (varDef: List): Variable => {
     initializer,
     isMutable,
   });
+};
+
+const initCall = (call: List) => {
+  if (!call.length) {
+    throw new Error("Invalid fn call");
+  }
+
+  const fnName = call.at(0);
+  if (!fnName?.isIdentifier()) {
+    throw new Error("Invalid fn call");
+  }
+
+  const args = call.sliceAsArray(1);
+  return new Call({ ...call.metadata, fnName, args });
 };
