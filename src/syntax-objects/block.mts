@@ -31,6 +31,10 @@ export class Block extends ScopedSyntax {
     this._body = body;
   }
 
+  lastExpr() {
+    return this.body.last();
+  }
+
   each(fn: (expr: Expr, index: number, array: Expr[]) => Expr) {
     this.body.each(fn);
     return this;

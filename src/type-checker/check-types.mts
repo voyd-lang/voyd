@@ -9,16 +9,13 @@ import {
   f32,
   bool,
   dVoid,
-  PrimitiveType,
-  StackType,
-  Id,
   Fn,
   Block,
   Call,
   Variable,
   VoidModule,
+  Parameter,
 } from "../syntax-objects/index.mjs";
-import { getIdStr } from "../syntax-objects/get-id-str.mjs";
 import { NamedEntity } from "../syntax-objects/named-entity.mjs";
 
 export const checkTypes = (expr: Expr | undefined): Expr => {
@@ -37,9 +34,54 @@ const checkBlockTypes = (block: Block): Block => {
 };
 
 const checkCallTypes = (call: Call): Call => {
-  if (call.calls("export")) checkExport(call);
-  if (call.calls("if")) checkExport(call);
-  if (call.calls("use")) checkUse(call);
+  if (call.calls("export")) return checkExport(call);
+  if (call.calls("if")) return checkIf(call);
+  if (call.calls("use")) return checkUse(call);
+  if (call.calls("binaryen")) return checkBinaryenCall(call);
+  if (call.calls(":")) return checkLabeledArg(call);
+  call.eachArg(checkTypes);
+  call.fn = resolveCallFn(call);
+  if (!call.fn) {
+    throw new Error(`Could not resolve fn ${call.fnName}`);
+  }
+  call.type = call.fn.getReturnType();
+  return call;
+};
+
+const checkIf = (call: Call) => {
+  const condType = resolveExprType(call.argAt(0));
+  if (!condType || !typesAreEquivalent(condType, bool)) {
+    throw new Error("If conditions must resolve to a boolean");
+  }
+  const thenExpr = call.argAt(1);
+  const elseExpr = call.argAt(2);
+
+  // Until unions are supported, return void if no else
+  if (!elseExpr) {
+    call.type = dVoid;
+    return call;
+  }
+
+  const thenType = resolveExprType(thenExpr);
+  const elseType = resolveExprType(elseExpr);
+
+  // Until unions are supported, throw an error when types don't match
+  if (!typesAreEquivalent(thenType, elseType)) {
+    throw new Error("If condition clauses do not return same type");
+  }
+
+  call.type = thenType;
+  return call;
+};
+
+// TODO: Maybe type check this??
+const checkBinaryenCall = (call: Call) => {
+  call.type = resolveExprType(call.argAt(2));
+  return call;
+};
+
+const checkLabeledArg = (call: Call) => {
+  checkTypes(call.argAt(1));
   return call;
 };
 
@@ -138,6 +180,7 @@ const inferBnrCallTypes = (list: List): List => {
 };
 
 const checkFnTypes = (fn: Fn): Fn => {
+  checkParameters(fn.parameters);
   checkTypes(fn.body);
 
   if (fn.returnTypeExpr) {
@@ -159,6 +202,19 @@ const checkFnTypes = (fn: Fn): Fn => {
   }
 
   return fn;
+};
+
+const checkParameters = (params: Parameter[]) => {
+  params.forEach((p) => {
+    if (!p.typeExpr) {
+      throw new Error(`Unable to determine type for ${p}`);
+    }
+    const type = resolveExprType(p.typeExpr);
+    if (!type) {
+      throw new Error(`Unable to resolve type for ${p}`);
+    }
+    p.type = type;
+  });
 };
 
 const checkModuleTypes = (mod: VoidModule): VoidModule => {
@@ -217,15 +273,9 @@ const resolveExprType = (expr?: Expr): Type | undefined => {
   if (expr.isBool()) return bool;
   if (expr.isIdentifier()) return getIdentifierType(expr);
   if (expr.isCall()) return expr.type;
-  if (!expr.isList()) throw new Error(`Invalid expression ${expr}`);
-
-  if (expr.calls("labeled-expr")) return resolveExprType(expr.at(2));
-  if (expr.calls("block")) return resolveExprType(expr.at(-1));
-  if (expr.calls("object")) return getObjectLiteralType(expr);
-  if (expr.calls("bnr") || expr.calls("binaryen-mod")) {
-    return getBnrReturnType(expr);
-  }
-  if (expr.calls("if")) return getIfReturnType(expr);
+  if (expr.isFn()) return expr.getType();
+  if (expr.isType()) return expr;
+  if (expr.isBlock()) return resolveExprType(expr.lastExpr());
 };
 
 const getIdentifierType = (id: Identifier): Type | undefined => {
@@ -260,26 +310,13 @@ const checkListTypes = (list: List) => {
   return list.map(checkTypes);
 };
 
-// TODO type check this mofo
-const getIfReturnType = (list: List): Type | undefined =>
-  resolveExprType(list.at(2));
-
-const getBnrReturnType = (call: List): Type | undefined => {
-  const info = call.at(1) as List | undefined;
-  const id = info?.at(2) as Identifier;
-  return new PrimitiveType({ ...id.metadata, name: id.value as StackType });
-};
-
-const getMatchingFnForCallExpr = (
-  identifier: Identifier,
-  args: Expr[]
-): Fn | undefined => {
-  const candidates = identifier.resolveFns(identifier);
+const resolveCallFn = (call: Call): Fn | undefined => {
+  const candidates = call.resolveFns(call.fnName);
   if (!candidates) return undefined;
   return candidates.find((candidate) => {
     const params = candidate.parameters;
     return params.every((p, index) => {
-      const arg = args.at(index);
+      const arg = call.argAt(index);
       if (!arg) return false;
       const argType = resolveExprType(arg);
       if (!argType) {
@@ -287,42 +324,21 @@ const getMatchingFnForCallExpr = (
       }
       const argLabel = getExprLabel(arg);
       const labelsMatch = p.label === argLabel;
-      return p.type.isEquivalentTo(argType) && labelsMatch;
+      return typesAreEquivalent(p.type!, argType) && labelsMatch;
     });
   });
 };
 
 const getExprLabel = (expr?: Expr): string | undefined => {
-  if (!expr?.isList()) return;
-  if (!expr.calls("labeled-expr")) return;
-  return expr.getIdStrAt(1);
+  if (!expr?.isCall()) return;
+  if (!expr.calls(":")) return;
+  const id = expr.argAt(0);
+  if (!id?.isIdentifier()) return;
+  return id.value;
 };
 
-function assertFunctionReturnType(
-  block: Block,
-  suppliedReturnType: Type | undefined,
-  id: Id
-): Type {
-  const inferredReturnType = block.returnType;
-
-  const shouldCheckInferredType =
-    suppliedReturnType && !suppliedReturnType.isEquivalentTo(dVoid);
-
-  const typeMismatch =
-    shouldCheckInferredType &&
-    !suppliedReturnType.isEquivalentTo(inferredReturnType);
-
-  if (typeMismatch) {
-    const name = getIdStr(id);
-    throw new Error(
-      `Expected fn ${name} to return ${suppliedReturnType}, got ${inferredReturnType}`
-    );
-  }
-
-  return inferredReturnType;
-}
-
-const typesAreEquivalent = (a: Type, b: Type): boolean => {
+const typesAreEquivalent = (a?: Type, b?: Type): boolean => {
+  if (!a || !b) return false;
   if (a.isPrimitiveType() && b.isPrimitiveType()) {
     return a.id === b.id;
   }

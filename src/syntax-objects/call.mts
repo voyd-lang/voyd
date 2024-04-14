@@ -1,4 +1,5 @@
 import { Expr } from "./expr.mjs";
+import { Fn } from "./fn.mjs";
 import { Identifier } from "./identifier.mjs";
 import { List } from "./list.mjs";
 import { Syntax, SyntaxMetadata } from "./syntax.mjs";
@@ -7,32 +8,27 @@ import { Type } from "./types.mjs";
 /** Defines a function call */
 export class Call extends Syntax {
   readonly syntaxType = "call";
-  fnId?: string;
+  fn?: Fn;
   fnName: Identifier;
   args: List;
+  type?: Type;
 
   constructor(
     opts: SyntaxMetadata & {
       fnName: Identifier;
-      fnId?: string;
+      fn?: Fn;
       args: List;
     }
   ) {
     super(opts);
     this.fnName = opts.fnName;
-    this.fnId = opts.fnId;
+    this.fn = opts.fn;
     this.args = opts.args;
   }
 
-  get type(): Type {
-    if (!this.fnId) {
-      throw new Error("Could not resolve return type of fn call");
-    }
-    const type = this.resolveFnById(this.fnId)?.getReturnType();
-    if (!type) {
-      throw new Error(`Could not resolve return type of ${this.fnName}`);
-    }
-    return type;
+  eachArg(fn: (expr: Expr) => void) {
+    this.args.each(fn);
+    return this;
   }
 
   argAt(index: number) {

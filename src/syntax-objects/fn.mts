@@ -7,7 +7,7 @@ import { Variable } from "./variable.mjs";
 export class Fn extends ScopedNamedEntity {
   readonly syntaxType = "fn";
   variables: Variable[] = [];
-  parameters: Parameter[] = [];
+  _parameters: Parameter[] = [];
   returnType?: Type;
   returnTypeExpr?: Expr;
   private _body?: Expr;
@@ -39,6 +39,18 @@ export class Fn extends ScopedNamedEntity {
     }
 
     this._body = body;
+  }
+
+  get parameters() {
+    return this._parameters;
+  }
+
+  set parameters(parameters: Parameter[]) {
+    this._parameters = parameters;
+    parameters.forEach((p) => {
+      p.parent = this;
+      this.registerEntity(p);
+    });
   }
 
   getNameStr(): string {
