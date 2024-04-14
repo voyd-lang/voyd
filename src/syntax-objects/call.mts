@@ -1,5 +1,6 @@
 import { Expr } from "./expr.mjs";
 import { Identifier } from "./identifier.mjs";
+import { List } from "./list.mjs";
 import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 import { Type } from "./types.mjs";
 
@@ -8,13 +9,13 @@ export class Call extends Syntax {
   readonly syntaxType = "call";
   fnId?: string;
   fnName: Identifier;
-  args: Expr[];
+  args: List;
 
   constructor(
     opts: SyntaxMetadata & {
       fnName: Identifier;
       fnId?: string;
-      args: Expr[];
+      args: List;
     }
   ) {
     super(opts);
@@ -39,7 +40,7 @@ export class Call extends Syntax {
   }
 
   toJSON() {
-    return [this.fnName, ...this.args];
+    return [this.fnName, ...this.args.value];
   }
 
   clone(parent?: Expr) {
