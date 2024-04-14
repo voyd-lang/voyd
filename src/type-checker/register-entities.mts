@@ -5,13 +5,13 @@ import {
   Expr,
   Variable,
   Call,
+  Block,
 } from "../syntax-objects/index.mjs";
 import { TypeChecker } from "./types";
 
-/** Registers any explicitly type annotated values */
-export const registerAnnotatedTypes: TypeChecker = (expr) => {
+export const registerEntities: TypeChecker = (expr) => {
   if (expr.isModule()) {
-    return expr.applyMap(registerAnnotatedTypes);
+    return expr.applyMap(registerEntities);
   }
 
   if (!expr.isList()) return expr;
@@ -24,7 +24,17 @@ export const registerAnnotatedTypes: TypeChecker = (expr) => {
     return initVar(expr);
   }
 
+  if (expr.calls("block")) {
+    return initBlock(expr);
+  }
+
   return initCall(expr);
+};
+
+const initBlock = (block: List): Block => {
+  return new Block({ ...block.metadata, body: block.slice(1) }).applyMap(
+    registerEntities
+  );
 };
 
 const initFn = (expr: List): Fn => {
@@ -34,15 +44,20 @@ const initFn = (expr: List): Fn => {
     .sliceAsArray(1)
     .flatMap((p) => listToParameter(p as List));
   const returnTypeExpr = getReturnTypeExprForFn(expr, 3);
-  const body = expr.slice(4);
 
   const fn = new Fn({
     name,
     returnTypeExpr: returnTypeExpr,
     parameters,
-    body,
     ...expr.metadata,
   });
+
+  const body = expr.at(4);
+
+  if (body) {
+    body.parent = fn;
+    fn.body = registerEntities(body);
+  }
 
   return fn;
 };

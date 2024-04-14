@@ -1,12 +1,12 @@
-import { inferTypes } from "./infer-types.mjs";
+import { evalTypes } from "./check-types.mjs";
 import { initPrimitiveTypes } from "./init-primitive-types.mjs";
-import { registerAnnotatedTypes } from "./register-annotated-types.mjs";
+import { registerEntities } from "./register-entities.mjs";
 import { TypeChecker } from "./types";
 
 const typePhases: TypeChecker[] = [
   initPrimitiveTypes,
-  registerAnnotatedTypes,
-  inferTypes,
+  registerEntities,
+  evalTypes,
 ];
 
 export const typeCheck: TypeChecker = (expr) => {

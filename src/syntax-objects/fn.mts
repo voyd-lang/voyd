@@ -10,7 +10,7 @@ export class Fn extends ScopedNamedEntity {
   parameters: Parameter[] = [];
   returnType?: Type;
   returnTypeExpr?: Expr;
-  body: Expr;
+  private _body?: Expr;
 
   constructor(
     opts: ScopedNamedEntityOpts & {
@@ -18,15 +18,27 @@ export class Fn extends ScopedNamedEntity {
       returnTypeExpr?: Expr;
       variables?: Variable[];
       parameters: Parameter[];
-      body: Expr;
+      body?: Expr;
     }
   ) {
     super(opts);
     this.returnType = opts.returnType;
     this.parameters = opts.parameters ?? [];
     this.variables = opts.variables ?? [];
-    this.body = opts.body;
     this.returnTypeExpr = opts.returnTypeExpr;
+    this.body = opts.body;
+  }
+
+  get body() {
+    return this._body;
+  }
+
+  set body(body: Expr | undefined) {
+    if (body) {
+      body.parent = this;
+    }
+
+    this._body = body;
   }
 
   getNameStr(): string {
