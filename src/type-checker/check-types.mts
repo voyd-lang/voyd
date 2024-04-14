@@ -173,12 +173,6 @@ const resolveUseIdentifier = (identifier: Identifier) => {
   return identifier.resolve();
 };
 
-const inferBnrCallTypes = (list: List): List => {
-  const body = list.at(2) as List | undefined;
-  body?.value.forEach((v) => checkTypes(v));
-  return list;
-};
-
 const checkFnTypes = (fn: Fn): Fn => {
   checkParameters(fn.parameters);
   checkTypes(fn.body);
