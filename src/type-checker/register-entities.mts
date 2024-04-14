@@ -9,9 +9,9 @@ import {
 } from "../syntax-objects/index.mjs";
 import { TypeChecker } from "./types";
 
-export const registerEntities: TypeChecker = (expr) => {
+export const initEntities: TypeChecker = (expr) => {
   if (expr.isModule()) {
-    return expr.applyMap(registerEntities);
+    return expr.applyMap(initEntities);
   }
 
   if (!expr.isList()) return expr;
@@ -33,7 +33,7 @@ export const registerEntities: TypeChecker = (expr) => {
 
 const initBlock = (block: List): Block => {
   return new Block({ ...block.metadata, body: block.slice(1) }).applyMap(
-    registerEntities
+    initEntities
   );
 };
 
@@ -56,7 +56,7 @@ const initFn = (expr: List): Fn => {
 
   if (body) {
     body.parent = fn;
-    fn.body = registerEntities(body);
+    fn.body = initEntities(body);
   }
 
   return fn;
@@ -131,6 +131,6 @@ const initCall = (call: List) => {
     throw new Error("Invalid fn call");
   }
 
-  const args = call.sliceAsArray(1);
+  const args = call.slice(1).map(initEntities);
   return new Call({ ...call.metadata, fnName, args });
 };
