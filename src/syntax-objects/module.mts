@@ -12,7 +12,13 @@ import {
 export class VoidModule extends ScopedNamedEntity {
   readonly syntaxType = "module";
   value: Expr[] = [];
-  /** 0 = init, 1 = expanding regular macros, 2 = regular macros expanded */
+  /**
+   * 0 = init,
+   * 1 = expanding regular macros,
+   * 2 = regular macros expanded,
+   * 3 = checking types,
+   * 4 = types checked
+   */
   phase = 0;
 
   constructor(
@@ -29,6 +35,11 @@ export class VoidModule extends ScopedNamedEntity {
   getPath(): string[] {
     const path = this.parentModule?.getPath() ?? [];
     return [...path, this.name.toString()];
+  }
+
+  each(fn: (expr: Expr, index: number, array: Expr[]) => void): VoidModule {
+    this.value.forEach(fn);
+    return this;
   }
 
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoidModule {

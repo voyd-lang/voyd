@@ -31,6 +31,11 @@ export class Block extends ScopedSyntax {
     this._body = body;
   }
 
+  each(fn: (expr: Expr, index: number, array: Expr[]) => Expr) {
+    this.body.each(fn);
+    return this;
+  }
+
   applyMap(fn: (expr: Expr, index: number, array: Expr[]) => Expr) {
     this.body = this.body.map(fn);
     return this;

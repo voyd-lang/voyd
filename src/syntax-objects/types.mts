@@ -21,12 +21,6 @@ export abstract class BaseType extends NamedEntity {
   abstract readonly size: number;
 
   abstract toJSON(): TypeJSON;
-
-  /** Ensures the supplied type is equivalent to this type, that is, they can be used interchangeably */
-  isEquivalentTo(type: Type) {
-    // TODO: This is very much not good enough. Would break down given structural types.
-    return type.id === this.id;
-  }
 }
 
 export class TypeAlias extends BaseType {

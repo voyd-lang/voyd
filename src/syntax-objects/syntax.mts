@@ -103,6 +103,12 @@ export abstract class Syntax {
     return start;
   }
 
+  /** Returns functions with the given name that are a direct child of the scoped entity */
+  resolveChildFns(name: Id): Fn[] {
+    if (!this.isScopedEntity()) return [];
+    return this.lexicon.resolveFns(name);
+  }
+
   /** Recursively searches for the fn entity up the parent tree */
   resolveFnById(id: string): Fn | undefined {
     if (!this.isScopedEntity()) return this.parent?.resolveFnById(id);

@@ -35,6 +35,18 @@ export class Call extends Syntax {
     return type;
   }
 
+  argAt(index: number) {
+    return this.args.at(index);
+  }
+
+  callArgAt(index: number): Call {
+    const call = this.args.at(index);
+    if (!call?.isCall()) {
+      throw new Error(`No call at ${index}`);
+    }
+    return call;
+  }
+
   calls(name: string) {
     return this.fnName.is(name);
   }

@@ -16,26 +16,119 @@ import {
   Block,
   Call,
   Variable,
+  VoidModule,
 } from "../syntax-objects/index.mjs";
 import { getIdStr } from "../syntax-objects/get-id-str.mjs";
-import { FnEntity } from "../syntax-objects/lexical-context.mjs";
-import { isPrimitiveFn } from "./lib/is-primitive-fn.mjs";
+import { NamedEntity } from "../syntax-objects/named-entity.mjs";
 
-const checkTypes = (expr: Expr | undefined): Expr => {
+export const checkTypes = (expr: Expr | undefined): Expr => {
   if (!expr) return noop();
-  if (expr.isBlock()) return evalBlockTypes(expr);
-  if (expr.isCall()) return evalCallTypes(expr);
-  if (expr.isFn()) return inferFn(expr);
-  if (expr.isVariable()) return evalVarTypes(expr);
-  if (expr.isModule()) return evalModuleTypes(expr);
-  if (expr.isList()) return evalListTypes(expr);
+  if (expr.isBlock()) return checkBlockTypes(expr);
+  if (expr.isCall()) return checkCallTypes(expr);
+  if (expr.isFn()) return checkFnTypes(expr);
+  if (expr.isVariable()) return checkVarTypes(expr);
+  if (expr.isModule()) return checkModuleTypes(expr);
+  if (expr.isList()) return checkListTypes(expr);
   return expr;
 };
 
-const evalBlockTypes = (block: Block): Block => {};
+const checkBlockTypes = (block: Block): Block => {
+  return block.each(checkTypes);
+};
 
-const evalCallTypes = (call: Call): Call => {
-  if (call.calls("export")) return evalExport(call);
+const checkCallTypes = (call: Call): Call => {
+  if (call.calls("export")) checkExport(call);
+  if (call.calls("if")) checkExport(call);
+  if (call.calls("use")) checkUse(call);
+  return call;
+};
+
+const checkExport = (call: Call) => {
+  const block = call.argAt(0);
+  if (!block?.isBlock()) {
+    throw new Error("Expected export to contain block");
+  }
+
+  const entities = block.getAllEntities();
+  entities.forEach((e) => {
+    e.isExported = true;
+    call.parent?.registerEntity(e);
+  });
+
+  return call;
+};
+
+const checkUse = (use: Call) => {
+  const path = use.argAt(0);
+  if (!path?.isCall()) throw new Error("Expected use path");
+
+  const entities = resolveUsePath(path);
+  if (entities instanceof Array) {
+    entities.forEach((e) => use.parent?.registerEntity(e));
+  } else {
+    use.parent?.registerEntity(entities);
+  }
+  return use;
+};
+
+const resolveUsePath = (path: Call): NamedEntity | NamedEntity[] => {
+  if (!path.calls("::")) {
+    throw new Error(`Invalid use statement ${path}`);
+  }
+
+  const [left, right] = [path.argAt(0), path.argAt(1)];
+  const resolvedModule = left?.isCall()
+    ? resolveUsePath(left)
+    : left?.isIdentifier()
+    ? resolveUseIdentifier(left)
+    : undefined;
+
+  if (
+    !resolvedModule ||
+    resolvedModule instanceof Array ||
+    !resolvedModule.isModule()
+  ) {
+    throw new Error(`Invalid use statement, not a module ${path}`);
+  }
+
+  const module =
+    resolvedModule.phase < 4
+      ? checkModuleTypes(resolvedModule)
+      : resolvedModule;
+
+  if (!right?.isIdentifier()) {
+    throw new Error(`Invalid use statement, expected identifier, got ${right}`);
+  }
+
+  if (right?.is("all")) {
+    return module.getAllEntities().filter((e) => e.isExported);
+  }
+
+  const entity = module.resolveChildEntity(right);
+  if (entity && !entity.isExported) {
+    throw new Error(
+      `Invalid use statement, entity ${right} not is not exported`
+    );
+  }
+
+  if (entity) {
+    return entity;
+  }
+
+  const fns = module.resolveChildFns(right).filter((f) => f.isExported);
+  if (!fns.length) {
+    throw new Error(`No exported entities with name ${right}`);
+  }
+
+  return fns;
+};
+
+const resolveUseIdentifier = (identifier: Identifier) => {
+  if (identifier.is("super")) {
+    return identifier.parentModule?.parentModule;
+  }
+
+  return identifier.resolve();
 };
 
 const inferBnrCallTypes = (list: List): List => {
@@ -44,9 +137,36 @@ const inferBnrCallTypes = (list: List): List => {
   return list;
 };
 
-const inferFn = (fn: Fn): Fn => {};
+const checkFnTypes = (fn: Fn): Fn => {
+  checkTypes(fn.body);
 
-const evalModuleTypes = (list: List): List => {};
+  if (fn.returnTypeExpr) {
+    fn.returnType = resolveExprType(fn.returnType);
+  }
+
+  const inferredReturnType = resolveExprType(fn.body);
+  if (!inferredReturnType) {
+    throw new Error(`Unable to determine fn return type, ${fn.name}`);
+  }
+
+  if (!fn.returnType) {
+    fn.returnType = inferredReturnType;
+    return fn;
+  }
+
+  if (!typesAreEquivalent(inferredReturnType, fn.returnType)) {
+    throw new Error(`Fn ${fn.name} return value does not match return type`);
+  }
+
+  return fn;
+};
+
+const checkModuleTypes = (mod: VoidModule): VoidModule => {
+  mod.phase = 3;
+  mod.each(checkTypes);
+  mod.phase = 4;
+  return mod;
+};
 
 const resolveExports = ({
   exports,
@@ -65,62 +185,32 @@ const resolveExports = ({
   });
 };
 
-const evalVarTypes = (list: List): Variable => {
-  const parent = list.parent;
-  const varFnId = list.identifierAt(0);
-  const isMutable = varFnId.value.includes("define-mut");
-  const initializer = checkTypes(list.at(2));
-  const inferredType = getExprReturnType(initializer);
+const checkVarTypes = (variable: Variable): Variable => {
+  const initializer = checkTypes(variable.initializer);
+  const inferredType = resolveExprType(initializer);
 
-  // Get identifier from a potentially untyped definition
-  const def = list.at(1)!;
-  const name = def.isList()
-    ? def.identifierAt(1) // Typed case
-    : (def as Identifier); // Untyped case
-
-  const suppliedType = def.isList() ? getTypeFromLabeledExpr(def) : undefined;
-
-  if (suppliedType && !(inferredType?.isEquivalentTo(suppliedType) ?? true)) {
+  if (!inferredType) {
     throw new Error(
-      `${name} of type ${suppliedType} is not assignable to ${inferredType}`
+      `Enable to determine variable initializer return type ${variable.name}`
     );
   }
 
-  const type = suppliedType ?? inferredType;
-  if (!type) {
-    throw new Error(`Could not determine type for identifier ${name.value}`);
+  if (variable.typeExpr) {
+    variable.type = resolveExprType(variable.typeExpr);
   }
 
-  const variable = new Variable({
-    ...list.metadata,
-    name,
-    initializer,
-    isMutable,
-    type,
-  });
+  if (variable.type && !typesAreEquivalent(variable.type, inferredType)) {
+    throw new Error(
+      `${variable.name} of type ${variable.type} is not assignable to ${inferredType}`
+    );
+  }
 
-  parent?.registerEntity(variable);
+  variable.type = variable.type ?? inferredType;
 
   return variable;
 };
 
-const getTypeFromLabeledExpr = (def: List): Type => {
-  if (!def.calls("labeled-expr")) {
-    throw new Error("Expected labeled expression");
-  }
-
-  const typeId = def.identifierAt(2);
-
-  const type = typeId.resolve();
-
-  if (!type?.isType()) {
-    throw new Error(`${typeId} is not a type`);
-  }
-
-  return type;
-};
-
-const getExprReturnType = (expr?: Expr): Type | undefined => {
+const resolveExprType = (expr?: Expr): Type | undefined => {
   if (!expr) return;
   if (expr.isInt()) return i32;
   if (expr.isFloat()) return f32;
@@ -129,8 +219,8 @@ const getExprReturnType = (expr?: Expr): Type | undefined => {
   if (expr.isCall()) return expr.type;
   if (!expr.isList()) throw new Error(`Invalid expression ${expr}`);
 
-  if (expr.calls("labeled-expr")) return getExprReturnType(expr.at(2));
-  if (expr.calls("block")) return getExprReturnType(expr.at(-1));
+  if (expr.calls("labeled-expr")) return resolveExprType(expr.at(2));
+  if (expr.calls("block")) return resolveExprType(expr.at(-1));
   if (expr.calls("object")) return getObjectLiteralType(expr);
   if (expr.calls("bnr") || expr.calls("binaryen-mod")) {
     return getBnrReturnType(expr);
@@ -156,7 +246,7 @@ const getObjectLiteralType = (ast: List): ObjectType =>
     value: ast.slice(1).value.map((labeledExpr) => {
       const list = labeledExpr as List;
       const identifier = list.at(1) as Identifier;
-      const type = getExprReturnType(list.at(2));
+      const type = resolveExprType(list.at(2));
       if (!type) {
         throw new Error("Could not determine type for struct literal");
       }
@@ -164,7 +254,7 @@ const getObjectLiteralType = (ast: List): ObjectType =>
     }),
   });
 
-const evalListTypes = (list: List) => {
+const checkListTypes = (list: List) => {
   console.log("Unexpected list");
   console.log(JSON.stringify(list, undefined, 2));
   return list.map(checkTypes);
@@ -172,7 +262,7 @@ const evalListTypes = (list: List) => {
 
 // TODO type check this mofo
 const getIfReturnType = (list: List): Type | undefined =>
-  getExprReturnType(list.at(2));
+  resolveExprType(list.at(2));
 
 const getBnrReturnType = (call: List): Type | undefined => {
   const info = call.at(1) as List | undefined;
@@ -183,7 +273,7 @@ const getBnrReturnType = (call: List): Type | undefined => {
 const getMatchingFnForCallExpr = (
   identifier: Identifier,
   args: Expr[]
-): FnEntity | undefined => {
+): Fn | undefined => {
   const candidates = identifier.resolveFns(identifier);
   if (!candidates) return undefined;
   return candidates.find((candidate) => {
@@ -191,7 +281,7 @@ const getMatchingFnForCallExpr = (
     return params.every((p, index) => {
       const arg = args.at(index);
       if (!arg) return false;
-      const argType = getExprReturnType(arg);
+      const argType = resolveExprType(arg);
       if (!argType) {
         throw new Error(`Could not determine type for ${arg}`);
       }
@@ -231,3 +321,10 @@ function assertFunctionReturnType(
 
   return inferredReturnType;
 }
+
+const typesAreEquivalent = (a: Type, b: Type): boolean => {
+  if (a.isPrimitiveType() && b.isPrimitiveType()) {
+    return a.id === b.id;
+  }
+  return false;
+};

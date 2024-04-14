@@ -163,6 +163,11 @@ export class List extends Syntax {
     });
   }
 
+  each(fn: (expr: Expr, index: number, array: Expr[]) => void): List {
+    this.value.forEach(fn);
+    return this;
+  }
+
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
     return new List({
       ...super.getCloneOpts(),
