@@ -1,9 +1,8 @@
-import { Expr } from "../../../lib/index.mjs";
-import { getIdStr } from "../../../lib/syntax/get-id-str.mjs";
+import { Expr } from "../../syntax-objects/expr.mjs";
 
 export const isPrimitiveFn = (expr?: Expr) => {
   if (!expr?.isIdentifier()) return false;
   return new Set(["if", "=", "struct", "quote", "labeled-expr"]).has(
-    getIdStr(expr)
+    expr.value
   );
 };
