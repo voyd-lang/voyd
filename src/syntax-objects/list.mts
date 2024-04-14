@@ -162,16 +162,6 @@ export class List extends Syntax {
     });
   }
 
-  /** Returns a copy of this list where all the parameters mapped by the supplied function */
-  mapArgs(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
-    const newList = new List({
-      ...super.getCloneOpts(),
-      value: this.rest().map(fn),
-    });
-    if (this.first()) newList.insert(this.first()!);
-    return newList;
-  }
-
   /** Like a regular map, but omits undefined values returned from the mapper */
   mapFilter(
     fn: (expr: Expr, index: number, array: Expr[]) => Expr | undefined
