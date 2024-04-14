@@ -1,6 +1,6 @@
 import { evalTypes } from "./check-types.mjs";
 import { initPrimitiveTypes } from "./init-primitive-types.mjs";
-import { initEntities } from "./register-entities.mjs";
+import { initEntities } from "./init-entities.mjs";
 import { TypeChecker } from "./types";
 
 const typePhases: TypeChecker[] = [initPrimitiveTypes, initEntities, evalTypes];
