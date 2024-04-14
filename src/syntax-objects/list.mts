@@ -37,6 +37,14 @@ export class List extends Syntax {
     return this.value.at(index);
   }
 
+  exprAt(index: number): Expr {
+    const expr = this.value.at(index);
+    if (!expr) {
+      throw new Error(`No expr at ${index}`);
+    }
+    return expr;
+  }
+
   identifierAt(index: number): Identifier {
     const id = this.at(index);
     if (!id?.isIdentifier()) {
@@ -155,21 +163,16 @@ export class List extends Syntax {
     });
   }
 
+  each(fn: (expr: Expr, index: number, array: Expr[]) => void): List {
+    this.value.forEach(fn);
+    return this;
+  }
+
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
     return new List({
       ...super.getCloneOpts(),
       value: this.value.map(fn),
     });
-  }
-
-  /** Returns a copy of this list where all the parameters mapped by the supplied function */
-  mapArgs(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
-    const newList = new List({
-      ...super.getCloneOpts(),
-      value: this.rest().map(fn),
-    });
-    if (this.first()) newList.insert(this.first()!);
-    return newList;
   }
 
   /** Like a regular map, but omits undefined values returned from the mapper */
@@ -190,6 +193,14 @@ export class List extends Syntax {
       ...super.getCloneOpts(),
       value: this.value.slice(start, end),
     });
+  }
+
+  sliceAsArray(start?: number, end?: number) {
+    return this.value.slice(start, end);
+  }
+
+  toArray(): Expr[] {
+    return [...this.value];
   }
 
   toJSON() {

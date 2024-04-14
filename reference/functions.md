@@ -47,7 +47,7 @@ By default, the argument label is the same as the parameter name. You can
 override this by specifying the label before the argument name.
 
 ```rust
-fn add(a: i32, {to:b: i32}) = a + b
+fn add(a: i32, { to b: i32 }) = a + b
 
 add(1, to: 2)
 ```
@@ -56,11 +56,11 @@ Labeled arguments can be thought of as syntactic sugar for defining a object
 type parameter and destructuring it in the function body[1]:
 
 ```rust
-fn move({ x: i32 y: i32 z: i32 }) -> void
+fn move({ x: i32, y: i32, z: i32 }) -> void
   // ...
 
 // Semantically equivalent to:
-fn move(vec: { x: i32 y: i32 z: i32 }) -> void
+fn move(vec: { x: i32, y: i32, z: i32, }) -> void
   let { x, y, z } = vec
   // ...
 
@@ -117,7 +117,7 @@ fn add<T>(a: T, b: T) -> T
 With trait constraints
 
 ```rust
-fn add<T impls Numeric>(a: T, b: T) -> T
+fn add<T: Numeric>(a: T, b: T) -> T
   a + b
 ```
 

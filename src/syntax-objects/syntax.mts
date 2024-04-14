@@ -2,14 +2,13 @@ import type { Block } from "./block.mjs";
 import type { Bool } from "./bool.mjs";
 import type { Call } from "./call.mjs";
 import type { Expr } from "./expr.mjs";
-import type { ExternFn } from "./extern-fn.mjs";
 import type { Float } from "./float.mjs";
 import type { Fn } from "./fn.mjs";
 import type { Global } from "./global.mjs";
 import type { Id, Identifier } from "./identifier.mjs";
 import type { Int } from "./int.mjs";
 import type { VoidModule } from "./module.mjs";
-import { FnEntity, LexicalContext } from "./lexical-context.mjs";
+import { LexicalContext } from "./lexical-context.mjs";
 import type { List } from "./list.mjs";
 import type { MacroLambda } from "./macro-lambda.mjs";
 import type { MacroVariable } from "./macro-variable.mjs";
@@ -94,7 +93,7 @@ export abstract class Syntax {
   }
 
   /** Recursively searches for the fn entity(s) up the parent tree */
-  resolveFns(id: Id, start: FnEntity[] = []): FnEntity[] {
+  resolveFns(id: Id, start: Fn[] = []): Fn[] {
     if (!this.isScopedEntity()) {
       return this.parent?.resolveFns(id, start) ?? start;
     }
@@ -104,8 +103,14 @@ export abstract class Syntax {
     return start;
   }
 
+  /** Returns functions with the given name that are a direct child of the scoped entity */
+  resolveChildFns(name: Id): Fn[] {
+    if (!this.isScopedEntity()) return [];
+    return this.lexicon.resolveFns(name);
+  }
+
   /** Recursively searches for the fn entity up the parent tree */
-  resolveFnById(id: string): FnEntity | undefined {
+  resolveFnById(id: string): Fn | undefined {
     if (!this.isScopedEntity()) return this.parent?.resolveFnById(id);
     return this.lexicon.resolveFnById(id) ?? this.parent?.resolveFnById(id);
   }
@@ -172,10 +177,6 @@ export abstract class Syntax {
 
   isFn(): this is Fn {
     return this.syntaxType === "fn";
-  }
-
-  isExternFn(): this is ExternFn {
-    return this.syntaxType === "extern-fn";
   }
 
   isVariable(): this is Variable {

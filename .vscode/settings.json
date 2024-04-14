@@ -40,7 +40,7 @@
       "strings": "off",
       "other": "off"
     },
-    "editor.useTabStops": false,
+    "editor.useTabStops": true,
     "editor.tabSize": 2,
     "cSpell.fixSpellingWithRenameProvider": true,
     "cSpell.advanced.feature.useReferenceProviderWithRename": true,

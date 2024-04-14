@@ -6,24 +6,51 @@ import { Variable } from "./variable.mjs";
 
 export class Fn extends ScopedNamedEntity {
   readonly syntaxType = "fn";
-  readonly variables: Variable[] = [];
-  readonly parameters: Parameter[] = [];
-  private returnType: Type;
-  readonly body: Expr;
+  variables: Variable[] = [];
+  _parameters: Parameter[] = [];
+  returnType?: Type;
+  returnTypeExpr?: Expr;
+  private _body?: Expr;
 
   constructor(
     opts: ScopedNamedEntityOpts & {
-      returnType: Type;
+      returnType?: Type;
+      returnTypeExpr?: Expr;
       variables?: Variable[];
       parameters: Parameter[];
-      body: Expr;
+      body?: Expr;
     }
   ) {
     super(opts);
     this.returnType = opts.returnType;
     this.parameters = opts.parameters ?? [];
     this.variables = opts.variables ?? [];
+    this.returnTypeExpr = opts.returnTypeExpr;
     this.body = opts.body;
+  }
+
+  get body() {
+    return this._body;
+  }
+
+  set body(body: Expr | undefined) {
+    if (body) {
+      body.parent = this;
+    }
+
+    this._body = body;
+  }
+
+  get parameters() {
+    return this._parameters;
+  }
+
+  set parameters(parameters: Parameter[]) {
+    this._parameters = parameters;
+    parameters.forEach((p) => {
+      p.parent = this;
+      this.registerEntity(p);
+    });
   }
 
   getNameStr(): string {
@@ -64,10 +91,6 @@ export class Fn extends ScopedNamedEntity {
     }
 
     throw new Error(`Return type not yet resolved for fn ${this}`);
-  }
-
-  setReturnType(type: Type) {
-    this.returnType = type;
   }
 
   registerLocal(local: Variable | Parameter) {

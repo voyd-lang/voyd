@@ -4,20 +4,23 @@ import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 import { Type } from "./types.mjs";
 
 export class Parameter extends NamedEntity {
-  /** External label the parameter must be called with e.g. myFunc(label: value) */
-  readonly label?: Identifier;
-  readonly type: Type;
   readonly syntaxType = "parameter";
+  /** External label the parameter must be called with e.g. myFunc(label: value) */
+  label?: Identifier;
+  type?: Type;
+  typeExpr?: Expr;
 
   constructor(
     opts: NamedEntityOpts & {
       label?: Identifier;
-      type: Type;
+      type?: Type;
+      typeExpr?: Expr;
     }
   ) {
     super(opts);
     this.label = opts.label;
     this.type = opts.type;
+    this.typeExpr = opts.typeExpr;
   }
 
   getIndex(): number {

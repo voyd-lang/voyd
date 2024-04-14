@@ -3,21 +3,24 @@ import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
 import { Type } from "./types.mjs";
 
 export class Variable extends NamedEntity {
-  readonly isMutable: boolean;
-  readonly type: Type;
   readonly syntaxType = "variable";
-  readonly initializer: Expr;
+  isMutable: boolean;
+  type?: Type;
+  typeExpr?: Expr;
+  initializer: Expr;
 
   constructor(
     opts: NamedEntityOpts & {
       isMutable: boolean;
       initializer: Expr;
-      type: Type;
+      type?: Type;
+      typeExpr?: Expr;
     }
   ) {
     super(opts);
     this.isMutable = opts.isMutable;
     this.type = opts.type;
+    this.typeExpr = opts.typeExpr;
     this.initializer = opts.initializer;
   }
 
