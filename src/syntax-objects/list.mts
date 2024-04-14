@@ -37,6 +37,14 @@ export class List extends Syntax {
     return this.value.at(index);
   }
 
+  exprAt(index: number): Expr {
+    const expr = this.value.at(index);
+    if (!expr) {
+      throw new Error(`No expr at ${index}`);
+    }
+    return expr;
+  }
+
   identifierAt(index: number): Identifier {
     const id = this.at(index);
     if (!id?.isIdentifier()) {
