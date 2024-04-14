@@ -1,18 +1,15 @@
 import binaryen from "binaryen";
-import {
-  Expr,
-  Fn,
-  Identifier,
-  Int,
-  List,
-  Primitive,
-  Type,
-  Variable,
-  Global,
-} from "./lib/index.mjs";
-import { Call } from "./lib/syntax/call.mjs";
+import { Call } from "./syntax-objects/call.mjs";
+import { Expr } from "./syntax-objects/expr.mjs";
+import { Fn } from "./syntax-objects/fn.mjs";
+import { Identifier } from "./syntax-objects/identifier.mjs";
+import { Int } from "./syntax-objects/int.mjs";
+import { List } from "./syntax-objects/list.mjs";
+import { Type, Primitive } from "./syntax-objects/types.mjs";
+import { Variable } from "./syntax-objects/variable.mjs";
+import { Block } from "./syntax-objects/block.mjs";
 
-export const genWasmCode = (ast: List) => {
+export const genWasmCode = (ast: Expr) => {
   const mod = new binaryen.Module();
   mod.setMemory(1, 150, "buffer");
   mod.setFeatures(binaryen.Features.All);
@@ -34,13 +31,20 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isIdentifier()) return compileIdentifier({ ...opts, expr });
   if (expr.isFn()) return compileFunction({ ...opts, expr });
   if (expr.isVariable()) return compileVariable({ ...opts, expr });
-  if (expr.isGlobal()) return compileGlobal({ ...opts, expr });
+  if (expr.isBlock()) return compileBlock({ ...opts, expr });
 
   if (expr.isBool()) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);
   }
 
   throw new Error(`Unrecognized expression ${expr}`);
+};
+
+const compileBlock = (opts: CompileExprOpts<Block>) => {
+  return opts.mod.block(
+    null,
+    opts.expr.body.toArray().map((expr) => compileExpression({ ...opts, expr }))
+  );
 };
 
 const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
@@ -51,78 +55,63 @@ const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
     throw new Error(`Unrecognized symbol ${expr.value}`);
   }
 
-  if (entity.isGlobal()) {
-    return mod.global.get(entity.id, mapBinaryenType(entity.getType()));
-  }
+  // if (entity.isGlobal()) {
+  //   return mod.global.get(entity.id, mapBinaryenType(entity.getType()));
+  // }
 
   if (entity.isVariable() || entity.isParameter()) {
-    return mod.local.get(entity.getIndex(), mapBinaryenType(entity.getType()));
+    return mod.local.get(entity.getIndex(), mapBinaryenType(entity.type!));
   }
 
   throw new Error(`Cannot compile identifier ${expr}`);
 };
 
-type CompileFnCallOpts = CompileExprOpts<Call> & { isReturnCall?: boolean };
-
-const compileCall = (opts: CompileFnCallOpts): number => {
-  const { expr, mod, isReturnCall } = opts;
-  if (expr.calls("quote")) return (expr.args[0] as Int).value; // TODO: This is an ugly hack to get constants that the compiler needs to know at compile time for ex bnr calls;
+const compileCall = (opts: CompileExprOpts<Call>): number => {
+  const { expr, mod } = opts;
+  if (expr.calls("quote")) return (expr.argAt(0) as Int).value; // TODO: This is an ugly hack to get constants that the compiler needs to know at compile time for ex bnr calls;
   if (expr.calls("=")) return compileAssign(opts);
   if (expr.calls("if")) return compileIf(opts);
-  if (expr.calls("return-call")) {
-    return compileCall({
-      ...opts,
-      expr: expr.args[0] as Call,
-      isReturnCall: true,
-    });
-  }
 
-  if (expr.calls("binaryen-mod") || expr.calls("bnr")) {
+  if (expr.calls("binaryen")) {
     return compileBnrCall(opts);
   }
 
-  const args = expr.args.map((expr) => compileExpression({ ...opts, expr }));
+  const args = expr.args
+    .toArray()
+    .map((expr) => compileExpression({ ...opts, expr }));
 
-  if (isReturnCall) {
-    return mod.return_call(expr.fnId, args, mapBinaryenType(expr.type));
-  }
-
-  return mod.call(expr.fnId, args, mapBinaryenType(expr.type));
+  return mod.call(expr.fn!.id, args, mapBinaryenType(expr.fn!.returnType!));
 };
 
-const compileAssign = (opts: CompileFnCallOpts): number => {
+const compileAssign = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod } = opts;
-  const identifier = expr.args[0] as Identifier;
-  const value = compileExpression({ ...opts, expr: expr.args[1]! });
+  const identifier = expr.argAt(0) as Identifier;
+  const value = compileExpression({ ...opts, expr: expr.argAt(1)! });
   const entity = identifier.resolve();
   if (!entity) {
     throw new Error(`${identifier} not found in scope`);
   }
 
-  if (entity.syntaxType === "global" && entity.isMutable) {
-    return mod.global.set(entity.id, value);
-  }
+  // if (entity.syntaxType === "global" && entity.isMutable) {
+  //   return mod.global.set(entity.id, value);
+  // }
 
-  if (entity.syntaxType === "variable" && entity.isMutable) {
+  if (entity.isVariable()) {
     return mod.local.set(entity.getIndex(), value);
   }
 
   throw new Error(`${identifier} cannot be re-assigned`);
 };
 
-const compileBnrCall = (opts: CompileFnCallOpts): number => {
+const compileBnrCall = (opts: CompileExprOpts<Call>): number => {
   const { expr } = opts;
-  const namespaceId = (expr.args[0]! as List).at(0) as Identifier;
-  const funcId = (expr.args[0]! as List).at(1) as Identifier;
-  const args = expr.args[1] as List | undefined;
-  const namespace =
-    namespaceId.value === "mod"
-      ? opts.mod
-      : (opts.mod as any)[namespaceId.value];
-  const func = namespace[funcId.value];
+  const funcId = expr.callArgAt(1).identifierArgAt(1);
+  const args = expr.callArgAt(3).callArgAt(0);
+  const func = (opts.mod as any)[funcId.value];
   return func(
-    ...(args?.value.map((expr: Expr) => compileExpression({ ...opts, expr })) ??
-      [])
+    ...(args.argArrayMap((expr: Expr) =>
+      compileExpression({ ...opts, expr })
+    ) ?? [])
   );
 };
 
@@ -136,22 +125,21 @@ const compileVariable = (opts: CompileExprOpts<Variable>): number => {
   );
 };
 
-const compileGlobal = (opts: CompileExprOpts<Global>): number => {
-  const { expr, mod } = opts;
-  mod.addGlobal(
-    expr.id,
-    mapBinaryenType(expr.getType()),
-    expr.isMutable,
-    expr.initializer
-      ? compileExpression({ ...opts, expr: expr.initializer })
-      : mod.nop()
-  );
-  return mod.nop();
-};
+// const compileGlobal = (opts: CompileExprOpts<Global>): number => {
+//   const { expr, mod } = opts;
+//   mod.addGlobal(
+//     expr.id,
+//     mapBinaryenType(expr.getType()),
+//     expr.isMutable,
+//     expr.initializer
+//       ? compileExpression({ ...opts, expr: expr.initializer })
+//       : mod.nop()
+//   );
+//   return mod.nop();
+// };
 
 const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   const { expr: fn, mod } = opts;
-  if (fn.isExternal) return compileExternFn(opts);
   const parameterTypes = getFunctionParameterTypes(fn);
   const returnType = mapBinaryenType(fn.getReturnType());
   const body = compileExpression({ ...opts, expr: fn.body });
@@ -162,19 +150,19 @@ const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   return mod.nop();
 };
 
-const compileExternFn = (opts: CompileExprOpts<Fn>) => {
-  const { expr: fn, mod } = opts;
-  const parameterTypes = getFunctionParameterTypes(fn);
+// const compileExternFn = (opts: CompileExprOpts<Fn>) => {
+//   const { expr: fn, mod } = opts;
+//   const parameterTypes = getFunctionParameterTypes(fn);
 
-  mod.addFunctionImport(
-    fn.id,
-    fn.externalNamespace!,
-    fn.getNameStr(),
-    parameterTypes,
-    mapBinaryenType(fn.getReturnType())
-  );
-  return mod.nop();
-};
+//   mod.addFunctionImport(
+//     fn.id,
+//     fn.externalNamespace!,
+//     fn.getNameStr(),
+//     parameterTypes,
+//     mapBinaryenType(fn.getReturnType())
+//   );
+//   return mod.nop();
+// };
 
 const compileIf = (opts: CompileFnCallOpts) => {
   const { expr, mod } = opts;
@@ -196,7 +184,7 @@ const getFunctionParameterTypes = (fn: Fn) => {
 };
 
 const getFunctionVarTypes = (fn: Fn) =>
-  fn.variables.map((v) => mapBinaryenType(v.getType()));
+  fn.variables.map((v) => mapBinaryenType(v.type!));
 
 const mapBinaryenType = (type: Type): binaryen.Type => {
   if (isPrimitiveId(type, "i32")) return binaryen.i32;

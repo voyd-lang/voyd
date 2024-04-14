@@ -9,7 +9,5 @@ const typePhases: TypeChecker[] = [
   checkTypes,
 ];
 
-export const typeCheck: TypeChecker = (expr) => {
-  typePhases.forEach((checker) => checker(expr));
-  return expr;
-};
+export const typeCheck: TypeChecker = (expr) =>
+  typePhases.reduce((expr, checker) => checker(expr), expr);

@@ -26,11 +26,14 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isVariable()) return checkVarTypes(expr);
   if (expr.isModule()) return checkModuleTypes(expr);
   if (expr.isList()) return checkListTypes(expr);
+  if (expr.isIdentifier()) return checkIdentifier(expr);
   return expr;
 };
 
 const checkBlockTypes = (block: Block): Block => {
-  return block.each(checkTypes);
+  block.each(checkTypes);
+  block.type = resolveExprType(block.lastExpr());
+  return block;
 };
 
 const checkCallTypes = (call: Call): Call => {
@@ -39,6 +42,7 @@ const checkCallTypes = (call: Call): Call => {
   if (call.calls("use")) return checkUse(call);
   if (call.calls("binaryen")) return checkBinaryenCall(call);
   if (call.calls(":")) return checkLabeledArg(call);
+  if (call.calls("=")) return checkAssign(call);
   call.eachArg(checkTypes);
   call.fn = resolveCallFn(call);
   if (!call.fn) {
@@ -46,6 +50,45 @@ const checkCallTypes = (call: Call): Call => {
   }
   call.type = call.fn.getReturnType();
   return call;
+};
+
+const checkAssign = (call: Call) => {
+  const id = call.argAt(0);
+  if (!id?.isIdentifier()) {
+    throw new Error(`Can only assign to variables for now ${id}`);
+  }
+
+  const variable = id.resolve();
+  if (!variable || !variable.isVariable()) {
+    throw new Error(`Unrecognized variable ${id}`);
+  }
+
+  if (!variable.isMutable) {
+    throw new Error(`${id} cannot be re-assigned`);
+  }
+
+  const initType = resolveExprType(call.argAt(1));
+
+  if (!typesAreEquivalent(variable.type, initType)) {
+    throw new Error(`${id} cannot be assigned to ${initType}`);
+  }
+
+  return call;
+};
+
+const checkIdentifier = (id: Identifier) => {
+  const entity = id.resolve();
+  if (!entity) {
+    throw new Error(`Unrecognized identifier, ${id}`);
+  }
+
+  if (entity.isVariable()) {
+    if ((entity.location?.startIndex ?? 0) <= (id.location?.startIndex ?? 0)) {
+      throw new Error(`${id} used before defined`);
+    }
+  }
+
+  return id;
 };
 
 const checkIf = (call: Call) => {
@@ -269,7 +312,7 @@ const resolveExprType = (expr?: Expr): Type | undefined => {
   if (expr.isCall()) return expr.type;
   if (expr.isFn()) return expr.getType();
   if (expr.isType()) return expr;
-  if (expr.isBlock()) return resolveExprType(expr.lastExpr());
+  if (expr.isBlock()) return expr.type;
 };
 
 const getIdentifierType = (id: Identifier): Type | undefined => {

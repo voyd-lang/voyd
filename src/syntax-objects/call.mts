@@ -43,6 +43,18 @@ export class Call extends Syntax {
     return call;
   }
 
+  identifierArgAt(index: number): Identifier {
+    const call = this.args.at(index);
+    if (!call?.isIdentifier()) {
+      throw new Error(`No identifier at ${index}`);
+    }
+    return call;
+  }
+
+  argArrayMap<T>(fn: (expr: Expr) => T): T[] {
+    return this.args.toArray().map(fn);
+  }
+
   calls(name: string) {
     return this.fnName.is(name);
   }

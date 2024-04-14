@@ -79,9 +79,12 @@ export class Fn extends ScopedNamedEntity {
     const index = this.variables.findIndex(
       (v) => v.syntaxId === variable.syntaxId
     );
+
     if (index < 0) {
-      throw new Error(`Variable ${variable} not registered with fn ${this}`);
+      const newIndex = this.variables.push(variable);
+      return newIndex + this.parameters.length;
     }
+
     return index + this.parameters.length;
   }
 
