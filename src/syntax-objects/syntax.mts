@@ -20,6 +20,7 @@ import type { Variable } from "./variable.mjs";
 import type { Whitespace } from "./whitespace.mjs";
 import { NamedEntity } from "./named-entity.mjs";
 import { ScopedEntity } from "./scoped-entity.mjs";
+import { Declaration } from "./declaration.mjs";
 
 export type SourceLocation = {
   /** The exact character index the syntax starts */
@@ -217,6 +218,10 @@ export abstract class Syntax {
 
   isBlock(): this is Block {
     return this.syntaxType === "block";
+  }
+
+  isDeclaration(): this is Declaration {
+    return this.syntaxType === "declaration";
   }
 }
 

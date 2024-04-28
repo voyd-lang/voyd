@@ -4,10 +4,10 @@ import { Expr } from "./syntax-objects/expr.mjs";
 import { Fn } from "./syntax-objects/fn.mjs";
 import { Identifier } from "./syntax-objects/identifier.mjs";
 import { Int } from "./syntax-objects/int.mjs";
-import { List } from "./syntax-objects/list.mjs";
 import { Type, Primitive } from "./syntax-objects/types.mjs";
 import { Variable } from "./syntax-objects/variable.mjs";
 import { Block } from "./syntax-objects/block.mjs";
+import { Declaration } from "./syntax-objects/declaration.mjs";
 
 export const genWasmCode = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -32,6 +32,7 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isFn()) return compileFunction({ ...opts, expr });
   if (expr.isVariable()) return compileVariable({ ...opts, expr });
   if (expr.isBlock()) return compileBlock({ ...opts, expr });
+  if (expr.isDeclaration()) return compileDeclaration({ ...opts, expr });
 
   if (expr.isBool()) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);
@@ -125,7 +126,7 @@ const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   const { expr: fn, mod } = opts;
   const parameterTypes = getFunctionParameterTypes(fn);
   const returnType = mapBinaryenType(fn.getReturnType());
-  const body = compileExpression({ ...opts, expr: fn.body });
+  const body = compileExpression({ ...opts, expr: fn.body! });
   const variableTypes = getFunctionVarTypes(fn); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
 
   mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
@@ -133,36 +134,48 @@ const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   return mod.nop();
 };
 
-const compileExternFn = (opts: CompileExprOpts<Fn>) => {
-  const { expr: fn, mod } = opts;
+const compileDeclaration = (opts: CompileExprOpts<Declaration>) => {
+  const { expr: decl, mod } = opts;
+
+  decl.fns.forEach((expr) =>
+    compileExternFn({ ...opts, expr, namespace: decl.namespace })
+  );
+
+  return mod.nop();
+};
+
+const compileExternFn = (opts: CompileExprOpts<Fn> & { namespace: string }) => {
+  const { expr: fn, mod, namespace } = opts;
   const parameterTypes = getFunctionParameterTypes(fn);
 
   mod.addFunctionImport(
     fn.id,
-    fn.externalNamespace!,
+    namespace,
     fn.getNameStr(),
     parameterTypes,
     mapBinaryenType(fn.getReturnType())
   );
+
   return mod.nop();
 };
 
-const compileIf = (opts: CompileFnCallOpts) => {
+const compileIf = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;
-  const conditionNode = expr.args[0]!;
-  const ifTrueNode = expr.args[1]!;
-  const ifFalseNode = expr.args[2]!;
+  const conditionNode = expr.exprArgAt(0);
+  const ifTrueNode = expr.exprArgAt(1);
+  const ifFalseNode = expr.argAt(2);
   const condition = compileExpression({ ...opts, expr: conditionNode });
   const ifTrue = compileExpression({ ...opts, expr: ifTrueNode });
   const ifFalse =
     ifFalseNode !== undefined
       ? compileExpression({ ...opts, expr: ifFalseNode })
       : undefined;
+
   return mod.if(condition, ifTrue, ifFalse);
 };
 
 const getFunctionParameterTypes = (fn: Fn) => {
-  const types = fn.parameters.map((param) => mapBinaryenType(param.getType()));
+  const types = fn.parameters.map((param) => mapBinaryenType(param.type!));
   return binaryen.createType(types);
 };
 

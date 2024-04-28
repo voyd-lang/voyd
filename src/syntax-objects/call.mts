@@ -35,6 +35,16 @@ export class Call extends Syntax {
     return this.args.at(index);
   }
 
+  exprArgAt(index: number): Expr {
+    const expr = this.argAt(index);
+
+    if (!expr) {
+      throw new Error(`No expression found at ${index}`);
+    }
+
+    return expr;
+  }
+
   callArgAt(index: number): Call {
     const call = this.args.at(index);
     if (!call?.isCall()) {
