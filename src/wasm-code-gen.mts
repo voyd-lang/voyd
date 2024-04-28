@@ -92,10 +92,6 @@ const compileAssign = (opts: CompileExprOpts<Call>): number => {
     throw new Error(`${identifier} not found in scope`);
   }
 
-  // if (entity.syntaxType === "global" && entity.isMutable) {
-  //   return mod.global.set(entity.id, value);
-  // }
-
   if (entity.isVariable()) {
     return mod.local.set(entity.getIndex(), value);
   }
@@ -125,19 +121,6 @@ const compileVariable = (opts: CompileExprOpts<Variable>): number => {
   );
 };
 
-// const compileGlobal = (opts: CompileExprOpts<Global>): number => {
-//   const { expr, mod } = opts;
-//   mod.addGlobal(
-//     expr.id,
-//     mapBinaryenType(expr.getType()),
-//     expr.isMutable,
-//     expr.initializer
-//       ? compileExpression({ ...opts, expr: expr.initializer })
-//       : mod.nop()
-//   );
-//   return mod.nop();
-// };
-
 const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   const { expr: fn, mod } = opts;
   const parameterTypes = getFunctionParameterTypes(fn);
@@ -150,19 +133,19 @@ const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   return mod.nop();
 };
 
-// const compileExternFn = (opts: CompileExprOpts<Fn>) => {
-//   const { expr: fn, mod } = opts;
-//   const parameterTypes = getFunctionParameterTypes(fn);
+const compileExternFn = (opts: CompileExprOpts<Fn>) => {
+  const { expr: fn, mod } = opts;
+  const parameterTypes = getFunctionParameterTypes(fn);
 
-//   mod.addFunctionImport(
-//     fn.id,
-//     fn.externalNamespace!,
-//     fn.getNameStr(),
-//     parameterTypes,
-//     mapBinaryenType(fn.getReturnType())
-//   );
-//   return mod.nop();
-// };
+  mod.addFunctionImport(
+    fn.id,
+    fn.externalNamespace!,
+    fn.getNameStr(),
+    parameterTypes,
+    mapBinaryenType(fn.getReturnType())
+  );
+  return mod.nop();
+};
 
 const compileIf = (opts: CompileFnCallOpts) => {
   const { expr, mod } = opts;

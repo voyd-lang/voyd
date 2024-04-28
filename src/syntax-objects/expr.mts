@@ -16,6 +16,7 @@ import { MacroLambda } from "./macro-lambda.mjs";
 import { Call } from "./call.mjs";
 import { Block } from "./block.mjs";
 import { VoidModule } from "./module.mjs";
+import { Declaration } from "./declaration.mjs";
 
 export type Expr =
   | PrimitiveExpr
@@ -29,7 +30,8 @@ export type Expr =
   | MacroLambda
   | VoidModule
   | Call
-  | Block;
+  | Block
+  | Declaration;
 
 /**
  * These are the Expr types that must be returned until all macros have been expanded (reader, syntax, and regular)

@@ -1,3 +1,4 @@
+import { Declaration } from "../syntax-objects/declaration.mjs";
 import {
   List,
   Fn,
@@ -26,6 +27,10 @@ export const initEntities: TypeChecker = (expr) => {
 
   if (expr.calls("block")) {
     return initBlock(expr);
+  }
+
+  if (expr.calls("declare")) {
+    return initDeclaration(expr);
   }
 
   return initCall(expr);
@@ -118,6 +123,26 @@ const initVar = (varDef: List): Variable => {
     typeExpr,
     initializer,
     isMutable,
+  });
+};
+
+const initDeclaration = (decl: List) => {
+  const namespaceString = decl.at(1);
+
+  if (!namespaceString?.isStringLiteral()) {
+    throw new Error("Expected namespace string");
+  }
+
+  const fns = decl
+    .listAt(2)
+    .sliceAsArray(1)
+    .map(initEntities)
+    .filter((e) => e.isFn()) as Fn[];
+
+  return new Declaration({
+    ...decl.metadata,
+    namespace: namespaceString.value,
+    fns,
   });
 };
 

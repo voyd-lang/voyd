@@ -19,3 +19,4 @@ export * from "./module.mjs";
 export * from "./macro-lambda.mjs";
 export * from "./macro-variable.mjs";
 export * from "./macros.mjs";
+export * from "./declaration.mjs";
