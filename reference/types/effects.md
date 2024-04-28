@@ -8,15 +8,32 @@ Daan
 Leijen](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/05/asynceffects-msr-tr-2017-21.pdf),
 as well as the [Effeckt Language](https://effekt-lang.org/).
 
+## Overview
+
+Effects are interfaces for functions that can be
+
+```
+// An effect is a function that
+effect talk(msg: string) -> string
+
+fn send_messages(): talk -> void
+  print talk("Hey") // prints "Hey there"
+  talk("Goodbye")
+  print talk("Hey") // Does not execute as the handler does not call resume
+
+fn main() -> void
+  handle
+    send_messages()
+  with:
+    talk: (msg: string) =>
+      if msg == "Goodbye" then: return
+      resume msg.concat(" there")
+```
+
 ## Defining Effects
 
 ```
-// src/throws.void
-effect State<T>
-  // Ctl effects yield to the handler and may be resumed
-  ctl set(val: T) -> T
-  // Fn effects are tail resumptive and return a value, use this if you don't need to yield and expect to always resume exactly once
-  fn get() -> T
+effect throw(msg: string) -> void
 ```
 
 ## Handling An Effect

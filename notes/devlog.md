@@ -11,9 +11,6 @@ effect name() -> String
 // A trait can be used to group effects
 trait Counter
   effect bump() -> void
-    j
-
-    j
 
   // Effects that are tail resumptive (always return), can be typed as normal functions
   fn get() -> i32
