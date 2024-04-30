@@ -1,6 +1,6 @@
 export
   macro pub()
-    quote(export (block $body))
+    quote export block($body)
 
 pub macro `()
   quote quote $@body
@@ -70,6 +70,7 @@ pub macro fn()
     $(`(block).concat(expressions)))
 
 pub macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
+
   ` fn $op(left: $arg_type, right: $arg_type) -> $return_type
     binaryen
       func: $wasm_fn
