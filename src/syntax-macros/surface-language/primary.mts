@@ -69,7 +69,7 @@ const parseUnaryCall = (list: List): List => {
 };
 
 const infixOpInfo = (op?: Expr): number | undefined => {
-  if (!op?.isIdentifier()) return undefined;
+  if (!op?.isIdentifier() || op.isQuoted) return undefined;
   return infixOps.get(op.value);
 };
 
