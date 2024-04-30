@@ -13,6 +13,8 @@ import {
   MacroVariable,
   VoidModule,
   Block,
+  Use,
+  Call,
 } from "./syntax-objects/index.mjs";
 import { NamedEntity } from "./syntax-objects/named-entity.mjs";
 
@@ -49,12 +51,22 @@ const expandModuleMacros = (module: VoidModule): VoidModule => {
 const resolveUseStatement = (list: List) => {
   const path = list.listAt(1);
   const entities = resolveUsePath(path);
+
   if (entities instanceof Array) {
     entities.forEach((e) => list.parent?.registerEntity(e));
   } else {
     list.parent?.registerEntity(entities);
   }
-  return list;
+
+  return new Use({
+    ...list.metadata,
+    entities: entities instanceof Array ? entities : [entities],
+    path: new Call({
+      ...path.metadata,
+      fnName: path.identifierAt(0),
+      args: list.slice(1),
+    }),
+  });
 };
 
 const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
@@ -74,11 +86,13 @@ const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
     unexpandedModule instanceof Array ||
     !unexpandedModule.isModule()
   ) {
-    throw new Error(`Invalid use statement, not a module ${path}`);
+    throw new Error(
+      `Invalid use statement, not a module ${JSON.stringify(path.toJSON())}`
+    );
   }
 
   const module = expandModuleMacros(unexpandedModule);
-  const identifier = right as Identifier;
+  const identifier = right;
 
   if (!identifier?.isIdentifier()) {
     throw new Error(`Invalid use statement, expected identifier, got ${right}`);
@@ -115,14 +129,13 @@ const evalExport = (list: List) => {
 
   const expandedBlock = block.map((exp) => {
     const expanded = expandRegularMacros(exp);
-    if (expanded.isMacro()) {
+    if (expanded instanceof NamedEntity) {
       expanded.isExported = true;
       list.parent?.registerEntity(expanded);
     }
 
-    if (expanded.isMacroVariable()) {
-      expanded.isExported = true;
-      list.parent?.registerEntity(expanded);
+    if (expanded.isUse()) {
+      expanded.entities.forEach((e) => list.parent?.registerEntity(e));
     }
 
     return expanded;

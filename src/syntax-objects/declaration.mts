@@ -1,9 +1,6 @@
 import { Expr } from "./expr.mjs";
 import { Fn } from "./fn.mjs";
-import { Identifier } from "./identifier.mjs";
-import { List } from "./list.mjs";
 import { Syntax, SyntaxMetadata } from "./syntax.mjs";
-import { Type } from "./types.mjs";
 
 /** Defines a declared namespace for external function imports */
 export class Declaration extends Syntax {

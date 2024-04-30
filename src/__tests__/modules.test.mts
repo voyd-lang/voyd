@@ -127,6 +127,9 @@ const input = {
         ],
       ],
     }),
+    "/Users/drew/projects/void/std/index.void": new List({
+      value: [["pub", ["use", ["::", "macros", "all"]]]],
+    }),
   },
   srcPath: "/Users/drew/projects/void",
   stdPath: "/Users/drew/projects/void/std",
@@ -263,6 +266,7 @@ const output = [
             ],
           ],
         ],
+        ["pub", ["use", ["::", "macros", "all"]]],
       ],
     ],
   ],

@@ -15,6 +15,7 @@ import {
   Variable,
   VoidModule,
   Parameter,
+  Use,
 } from "../syntax-objects/index.mjs";
 import { NamedEntity } from "../syntax-objects/named-entity.mjs";
 
@@ -27,6 +28,7 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isModule()) return checkModuleTypes(expr);
   if (expr.isList()) return checkListTypes(expr);
   if (expr.isIdentifier()) return checkIdentifier(expr);
+  if (expr.isUse()) return checkUse(expr);
   return expr;
 };
 
@@ -39,7 +41,6 @@ const checkBlockTypes = (block: Block): Block => {
 const checkCallTypes = (call: Call): Call => {
   if (call.calls("export")) return checkExport(call);
   if (call.calls("if")) return checkIf(call);
-  if (call.calls("use")) return checkUse(call);
   if (call.calls("binaryen")) return checkBinaryenCall(call);
   if (call.calls(":")) return checkLabeledArg(call);
   if (call.calls("=")) return checkAssign(call);
@@ -136,6 +137,11 @@ const checkExport = (call: Call) => {
 
   const entities = block.getAllEntities();
   entities.forEach((e) => {
+    if (e.isUse()) {
+      e.entities.forEach((e) => call.parent?.registerEntity(e));
+      return;
+    }
+
     e.isExported = true;
     call.parent?.registerEntity(e);
   });
@@ -143,9 +149,8 @@ const checkExport = (call: Call) => {
   return call;
 };
 
-const checkUse = (use: Call) => {
-  const path = use.argAt(0);
-  if (!path?.isCall()) throw new Error("Expected use path");
+const checkUse = (use: Use) => {
+  const path = use.path;
 
   const entities = resolveUsePath(path);
   if (entities instanceof Array) {
@@ -153,6 +158,7 @@ const checkUse = (use: Call) => {
   } else {
     use.parent?.registerEntity(entities);
   }
+
   return use;
 };
 
