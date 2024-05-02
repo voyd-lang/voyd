@@ -61,11 +61,7 @@ const resolveUseStatement = (list: List) => {
   return new Use({
     ...list.metadata,
     entities: entities instanceof Array ? entities : [entities],
-    path: new Call({
-      ...path.metadata,
-      fnName: path.identifierAt(0),
-      args: list.slice(1),
-    }),
+    path,
   });
 };
 

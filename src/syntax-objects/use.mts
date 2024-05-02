@@ -1,5 +1,5 @@
-import { Call } from "./call.mjs";
 import { Expr } from "./expr.mjs";
+import { List } from "./list.mjs";
 import { NamedEntity } from "./named-entity.mjs";
 import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 
@@ -7,12 +7,12 @@ import { Syntax, SyntaxMetadata } from "./syntax.mjs";
 export class Use extends Syntax {
   readonly syntaxType = "use";
   entities: NamedEntity[];
-  path: Call;
+  path: List;
 
   constructor(
     opts: SyntaxMetadata & {
       entities: NamedEntity[];
-      path: Call;
+      path: List;
     }
   ) {
     super(opts);

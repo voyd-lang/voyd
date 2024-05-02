@@ -162,13 +162,13 @@ const checkUse = (use: Use) => {
   return use;
 };
 
-const resolveUsePath = (path: Call): NamedEntity | NamedEntity[] => {
+const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
   if (!path.calls("::")) {
     throw new Error(`Invalid use statement ${path}`);
   }
 
-  const [left, right] = [path.argAt(0), path.argAt(1)];
-  const resolvedModule = left?.isCall()
+  const [_, left, right] = path.value;
+  const resolvedModule = left?.isList()
     ? resolveUsePath(left)
     : left?.isIdentifier()
     ? resolveUseIdentifier(left)
@@ -183,7 +183,7 @@ const resolveUsePath = (path: Call): NamedEntity | NamedEntity[] => {
   }
 
   const module =
-    resolvedModule.phase < 4
+    resolvedModule.phase < 3
       ? checkModuleTypes(resolvedModule)
       : resolvedModule;
 
