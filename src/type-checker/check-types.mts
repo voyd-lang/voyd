@@ -47,7 +47,7 @@ const checkCallTypes = (call: Call): Call => {
   call.eachArg(checkTypes);
   call.fn = resolveCallFn(call);
   if (!call.fn) {
-    throw new Error(`Could not resolve fn ${call.fnName}`);
+    throw new Error(`Could not resolve fn ${call.fnName} at ${call.location}`);
   }
   call.type = call.fn.getReturnType();
   return call;
@@ -118,14 +118,16 @@ const checkIf = (call: Call) => {
   return call;
 };
 
-// TODO: Maybe type check this??
 const checkBinaryenCall = (call: Call) => {
-  call.type = resolveExprType(call.argAt(2));
+  const returnTypeCall = call.callArgAt(2);
+  call.type = resolveExprType(returnTypeCall.argAt(1));
   return call;
 };
 
 const checkLabeledArg = (call: Call) => {
-  checkTypes(call.argAt(1));
+  const expr = call.argAt(1);
+  checkTypes(expr);
+  call.type = resolveExprType(expr);
   return call;
 };
 
@@ -134,6 +136,8 @@ const checkExport = (call: Call) => {
   if (!block?.isBlock()) {
     throw new Error("Expected export to contain block");
   }
+
+  checkTypes(block);
 
   const entities = block.getAllEntities();
   entities.forEach((e) => {
@@ -224,15 +228,18 @@ const resolveUseIdentifier = (identifier: Identifier) => {
 
 const checkFnTypes = (fn: Fn): Fn => {
   checkParameters(fn.parameters);
-  checkTypes(fn.body);
 
   if (fn.returnTypeExpr) {
-    fn.returnType = resolveExprType(fn.returnType);
+    fn.returnType = resolveExprType(fn.returnTypeExpr);
   }
+
+  checkTypes(fn.body);
 
   const inferredReturnType = resolveExprType(fn.body);
   if (!inferredReturnType) {
-    throw new Error(`Unable to determine fn return type, ${fn.name}`);
+    throw new Error(
+      `Unable to determine fn return type, ${fn.name} ${fn.location}`
+    );
   }
 
   if (!fn.returnType) {
@@ -252,10 +259,12 @@ const checkParameters = (params: Parameter[]) => {
     if (!p.typeExpr) {
       throw new Error(`Unable to determine type for ${p}`);
     }
+
     const type = resolveExprType(p.typeExpr);
     if (!type) {
       throw new Error(`Unable to resolve type for ${p}`);
     }
+
     p.type = type;
   });
 };
@@ -315,7 +324,10 @@ const resolveExprType = (expr?: Expr): Type | undefined => {
   if (expr.isFloat()) return f32;
   if (expr.isBool()) return bool;
   if (expr.isIdentifier()) return getIdentifierType(expr);
-  if (expr.isCall()) return expr.type;
+  if (expr.isCall()) {
+    if (!expr.type) checkTypes(expr);
+    return expr.type;
+  }
   if (expr.isFn()) return expr.getType();
   if (expr.isType()) return expr;
   if (expr.isBlock()) return expr.type;

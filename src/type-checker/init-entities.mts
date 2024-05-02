@@ -7,6 +7,7 @@ import {
   Variable,
   Call,
   Block,
+  TypeAlias,
 } from "../syntax-objects/index.mjs";
 import { TypeChecker } from "./types";
 
@@ -31,6 +32,10 @@ export const initEntities: TypeChecker = (expr) => {
 
   if (expr.calls("declare")) {
     return initDeclaration(expr);
+  }
+
+  if (expr.calls("type")) {
+    return initTypeAlias(expr);
   }
 
   return initCall(expr);
@@ -144,6 +149,18 @@ const initDeclaration = (decl: List) => {
     namespace: namespaceString.value,
     fns,
   });
+};
+
+const initTypeAlias = (type: List) => {
+  const assignment = type.listAt(1);
+  const name = assignment.identifierAt(1);
+  const typeExpr = assignment.at(2);
+
+  if (!name || !typeExpr) {
+    throw new Error(`Invalid type alias ${type.location}`);
+  }
+
+  return new TypeAlias({ ...type.metadata, name, typeExpr });
 };
 
 const initCall = (call: List) => {

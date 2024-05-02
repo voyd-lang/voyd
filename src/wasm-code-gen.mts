@@ -8,6 +8,7 @@ import { Type, Primitive } from "./syntax-objects/types.mjs";
 import { Variable } from "./syntax-objects/variable.mjs";
 import { Block } from "./syntax-objects/block.mjs";
 import { Declaration } from "./syntax-objects/declaration.mjs";
+import { VoidModule } from "./syntax-objects/module.mjs";
 
 export const genWasmCode = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -33,12 +34,24 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isVariable()) return compileVariable({ ...opts, expr });
   if (expr.isBlock()) return compileBlock({ ...opts, expr });
   if (expr.isDeclaration()) return compileDeclaration({ ...opts, expr });
+  if (expr.isModule()) return compileModule({ ...opts, expr });
+  if (expr.isType()) return mod.nop();
+  if (expr.isUse()) return mod.nop();
 
   if (expr.isBool()) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);
   }
 
-  throw new Error(`Unrecognized expression ${expr}`);
+  throw new Error(
+    `Unrecognized expression ${expr.syntaxType} ${expr.location}`
+  );
+};
+
+const compileModule = (opts: CompileExprOpts<VoidModule>) => {
+  return opts.mod.block(
+    opts.expr.id,
+    opts.expr.value.map((expr) => compileExpression({ ...opts, expr }))
+  );
 };
 
 const compileBlock = (opts: CompileExprOpts<Block>) => {
@@ -183,6 +196,7 @@ const getFunctionVarTypes = (fn: Fn) =>
   fn.variables.map((v) => mapBinaryenType(v.type!));
 
 const mapBinaryenType = (type: Type): binaryen.Type => {
+  if (isPrimitiveId(type, "bool")) return binaryen.i32;
   if (isPrimitiveId(type, "i32")) return binaryen.i32;
   if (isPrimitiveId(type, "f32")) return binaryen.f32;
   if (isPrimitiveId(type, "i64")) return binaryen.i64;

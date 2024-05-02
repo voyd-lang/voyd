@@ -53,6 +53,7 @@ export class PrimitiveType extends BaseType {
   }
 
   get size() {
+    if (this.name.value === "bool") return 4;
     if (this.name.value === "i32") return 4;
     if (this.name.value === "f32") return 4;
     if (this.name.value === "i64") return 8;
@@ -243,7 +244,7 @@ export class FnType extends BaseType {
 }
 
 export type StackType = NumericType | ReferenceType;
-export type Primitive = NumericType | ReferenceType | "void";
+export type Primitive = NumericType | ReferenceType | "void" | "bool";
 export type NumericType = "i32" | "f32" | "i64" | "f64";
 export type ReferenceType = "funcref" | "externref";
 
@@ -251,6 +252,6 @@ export const i32 = PrimitiveType.from("i32");
 export const f32 = PrimitiveType.from("f32");
 export const i64 = PrimitiveType.from("i64");
 export const f64 = PrimitiveType.from("f64");
-export const bool = PrimitiveType.from("i32");
+export const bool = PrimitiveType.from("bool");
 export const dVoid = PrimitiveType.from("void");
 export const CDT_ADDRESS_TYPE = i32;
