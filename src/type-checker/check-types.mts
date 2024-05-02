@@ -61,7 +61,7 @@ const checkAssign = (call: Call) => {
 
   const variable = id.resolve();
   if (!variable || !variable.isVariable()) {
-    throw new Error(`Unrecognized variable ${id}`);
+    throw new Error(`Unrecognized variable ${id} at ${id.location}`);
   }
 
   if (!variable.isMutable) {

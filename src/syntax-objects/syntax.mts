@@ -23,19 +23,6 @@ import { ScopedEntity } from "./scoped-entity.mjs";
 import { Declaration } from "./declaration.mjs";
 import { Use } from "./use.mjs";
 
-export type SourceLocation = {
-  /** The exact character index the syntax starts */
-  startIndex: number;
-  /** The exact character index the syntax ends */
-  endIndex: number;
-  /** The line the syntax is located in */
-  line: number;
-  /** The column within the line the syntax begins */
-  column: number;
-
-  filePath: string;
-};
-
 export type SyntaxMetadata = {
   location?: SourceLocation;
   parent?: Expr;
@@ -249,3 +236,34 @@ export type ContextTag =
       /** Syntax object wrapped or transformed by macro expansion, should inherit the normal context (outside the macro context) */
       type: "resume-normal";
     };
+
+export class SourceLocation {
+  /** The exact character index the syntax starts */
+  startIndex: number;
+  /** The exact character index the syntax ends */
+  endIndex: number;
+  /** The line the syntax is located in */
+  line: number;
+  /** The column within the line the syntax begins */
+  column: number;
+
+  filePath: string;
+
+  constructor(opts: {
+    startIndex: number;
+    endIndex: number;
+    line: number;
+    column: number;
+    filePath: string;
+  }) {
+    this.startIndex = opts.startIndex;
+    this.endIndex = opts.endIndex;
+    this.line = opts.line;
+    this.column = opts.column;
+    this.filePath = opts.filePath;
+  }
+
+  toString() {
+    return `${this.filePath}:${this.line}:${this.column}`;
+  }
+}

@@ -1,3 +1,5 @@
+import { SourceLocation } from "../syntax-objects/syntax.mjs";
+
 export class File {
   readonly filePath: string;
   readonly originalSize: number;
@@ -33,6 +35,16 @@ export class File {
 
   get next() {
     return this.value[0];
+  }
+
+  currentSourceLocation() {
+    return new SourceLocation({
+      startIndex: this.position,
+      endIndex: this.originalSize - this.value.length,
+      line: this.line,
+      column: this.column,
+      filePath: this.filePath,
+    });
   }
 
   at(index: number): string | undefined {
