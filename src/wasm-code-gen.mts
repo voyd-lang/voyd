@@ -37,6 +37,7 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isModule()) return compileModule({ ...opts, expr });
   if (expr.isType()) return mod.nop();
   if (expr.isUse()) return mod.nop();
+  if (expr.isMacro()) return mod.nop();
 
   if (expr.isBool()) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);
@@ -85,6 +86,7 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   if (expr.calls("quote")) return (expr.argAt(0) as Int).value; // TODO: This is an ugly hack to get constants that the compiler needs to know at compile time for ex bnr calls;
   if (expr.calls("=")) return compileAssign(opts);
   if (expr.calls("if")) return compileIf(opts);
+  if (expr.calls("export")) return compileExport(opts);
 
   if (expr.calls("binaryen")) {
     return compileBnrCall(opts);
@@ -94,7 +96,16 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
     .toArray()
     .map((expr) => compileExpression({ ...opts, expr }));
 
+  if (!expr.fn) {
+    throw new Error(`No function found for call ${expr.location}`);
+  }
+
   return mod.call(expr.fn!.id, args, mapBinaryenType(expr.fn!.returnType!));
+};
+
+const compileExport = (opts: CompileExprOpts<Call>) => {
+  const expr = opts.expr.exprArgAt(0);
+  return compileExpression({ ...opts, expr });
 };
 
 const compileAssign = (opts: CompileExprOpts<Call>): number => {
@@ -115,9 +126,11 @@ const compileAssign = (opts: CompileExprOpts<Call>): number => {
 
 const compileBnrCall = (opts: CompileExprOpts<Call>): number => {
   const { expr } = opts;
-  const funcId = expr.callArgAt(1).identifierArgAt(1);
-  const args = expr.callArgAt(3).callArgAt(0);
-  const func = (opts.mod as any)[funcId.value];
+  const funcId = expr.labeledArgAt(0) as Identifier;
+  const argTypes = expr.labeledArgAt(1) as Call;
+  const namespace = argTypes.identifierArgAt(0).value;
+  const args = expr.labeledArgAt(3) as Call;
+  const func = (opts.mod as any)[namespace][funcId.value];
   return func(
     ...(args.argArrayMap((expr: Expr) =>
       compileExpression({ ...opts, expr })
@@ -175,8 +188,8 @@ const compileExternFn = (opts: CompileExprOpts<Fn> & { namespace: string }) => {
 const compileIf = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;
   const conditionNode = expr.exprArgAt(0);
-  const ifTrueNode = expr.exprArgAt(1);
-  const ifFalseNode = expr.argAt(2);
+  const ifTrueNode = expr.labeledArgAt(1);
+  const ifFalseNode = expr.optionalLabeledArgAt(2);
   const condition = compileExpression({ ...opts, expr: conditionNode });
   const ifTrue = compileExpression({ ...opts, expr: ifTrueNode });
   const ifFalse =

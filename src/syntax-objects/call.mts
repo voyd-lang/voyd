@@ -45,6 +45,26 @@ export class Call extends Syntax {
     return expr;
   }
 
+  // Returns the value of the labeled argument at the given index
+  labeledArgAt(index: number): Expr {
+    const label = this.args.at(index);
+
+    if (!label?.isCall() || !label?.calls(":")) {
+      throw new Error(`No label found at ${index}`);
+    }
+
+    return label.exprArgAt(1);
+  }
+
+  // Returns the value of the labeled argument at the given index
+  optionalLabeledArgAt(index: number): Expr | undefined {
+    try {
+      return this.labeledArgAt(index);
+    } catch (_e) {
+      return undefined;
+    }
+  }
+
   callArgAt(index: number): Call {
     const call = this.args.at(index);
     if (!call?.isCall()) {
