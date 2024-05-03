@@ -157,7 +157,7 @@ const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   const variableTypes = getFunctionVarTypes(fn); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
 
   mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
-  mod.addFunctionExport(fn.id, fn.id);
+  mod.addFunctionExport(fn.id, fn.name.value === "main" ? "main" : fn.id);
   return mod.nop();
 };
 
