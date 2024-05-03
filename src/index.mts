@@ -12,6 +12,7 @@ import { resolveFileModules } from "./modules.mjs";
 import path from "path";
 import { expandRegularMacros } from "./regular-macros.mjs";
 import { typeCheck } from "./type-checker/index.mjs";
+import binaryen from "binaryen";
 
 main().catch(errorHandler);
 
@@ -83,7 +84,15 @@ async function getMacroAst(index: string) {
 async function getWasmMod(index: string) {
   const ast = await getMacroAst(index);
   const checkedAst = typeCheck(ast);
-  return genWasmCode(checkedAst);
+  const mod = genWasmCode(checkedAst);
+
+  if (getConfig().runBinaryenOptimizationPass) {
+    binaryen.setShrinkLevel(3);
+    binaryen.setOptimizeLevel(3);
+    mod.optimize();
+  }
+
+  return mod;
 }
 
 async function getWasmText(index: string) {
