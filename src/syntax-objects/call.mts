@@ -24,6 +24,7 @@ export class Call extends Syntax {
     this.fnName = opts.fnName;
     this.fn = opts.fn;
     this.args = opts.args;
+    opts.args.parent = this;
   }
 
   eachArg(fn: (expr: Expr) => void) {

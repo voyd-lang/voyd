@@ -12,7 +12,7 @@ pub def_wasm_operator('not', ne, i32, bool)
 pub def_wasm_operator('+', add, i32, i32)
 pub def_wasm_operator('-', sub, i32, i32)
 pub def_wasm_operator('*', mul, i32, i32)
-pub def_wasm_operator('/', div_s, i32, ,i32)
+pub def_wasm_operator('/', div_s, i32, i32)
 
 pub def_wasm_operator('<', lt, f32, bool)
 pub def_wasm_operator('>', gt, f32, bool)

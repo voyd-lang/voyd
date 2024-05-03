@@ -65,7 +65,7 @@ const compileBlock = (opts: CompileExprOpts<Block>) => {
 const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
   const { expr, mod } = opts;
 
-  const entity = expr.resolveEntity(expr);
+  const entity = expr.resolve();
   if (!entity) {
     throw new Error(`Unrecognized symbol ${expr.value}`);
   }
@@ -75,7 +75,8 @@ const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
   // }
 
   if (entity.isVariable() || entity.isParameter()) {
-    return mod.local.get(entity.getIndex(), mapBinaryenType(entity.type!));
+    const type = mapBinaryenType(entity.type!);
+    return mod.local.get(entity.getIndex(), type);
   }
 
   throw new Error(`Cannot compile identifier ${expr}`);
