@@ -1,25 +1,24 @@
-import { ModuleInfo } from "./lib/module-info.mjs";
-import { Expr, Identifier, List, Whitespace } from "./lib/syntax/index.mjs";
+import { Expr, Identifier, List, Whitespace } from "./syntax-objects/index.mjs";
 import { Token } from "./lib/token.mjs";
 import { File } from "./lib/file.mjs";
 import { getReaderMacroForToken } from "./reader-macros/index.mjs";
+import {
+  isDigit,
+  isDigitSign,
+  isTerminator,
+  isWhitespace,
+  isOpChar,
+} from "./lib/grammar.mjs";
 
 export interface ParseOpts {
   nested?: boolean;
   terminator?: string;
-  module: ModuleInfo;
   parent?: Expr;
 }
 
-export function parse(file: File, opts: ParseOpts): List {
+export function parse(file: File, opts: ParseOpts = {}): List {
   const list = new List({
-    location: {
-      startIndex: file.position,
-      endIndex: 0,
-      line: file.line,
-      column: file.column,
-      filePath: file.filePath,
-    },
+    location: file.currentSourceLocation(),
     parent: opts.parent,
   });
 
@@ -31,12 +30,10 @@ export function parse(file: File, opts: ParseOpts): List {
     if (readerMacro) {
       const result = readerMacro(file, {
         token,
-        module: opts.module,
         reader: (file, terminator, parent) =>
           parse(file, {
             nested: true,
             terminator,
-            module: opts.module,
             parent: parent ?? opts.parent,
           }),
       });
@@ -45,7 +42,7 @@ export function parse(file: File, opts: ParseOpts): List {
     }
 
     if (token.is("(")) {
-      list.push(parse(file, { nested: true, module: opts.module }));
+      list.push(parse(file, { nested: true }));
       continue;
     }
 
@@ -78,42 +75,79 @@ export function parse(file: File, opts: ParseOpts): List {
 
 const lexer = (file: File): Token => {
   const token = new Token({
-    line: file.line,
-    column: file.column,
-    startIndex: file.position,
-    endIndex: 0,
-    filePath: file.filePath,
+    location: file.currentSourceLocation(),
   });
 
   while (file.hasCharacters) {
     const char = file.next;
 
-    // Ignore commas for now. They make a nice visual separator
-    if (char === ",") {
-      file.consume();
-      continue;
-    }
-
-    // Handle real numbers
-    if (char === "." && token.isNumber) {
-      token.addChar(file.consume());
-      continue;
-    }
-
-    const isTerminator = /[\{\[\(\}\]\)\s\.\;\:\'\"]/.test(char);
-
-    if (isTerminator && (token.first === "#" || !token.hasChars)) {
-      token.addChar(file.consume());
+    if (!token.hasChars && char === " ") {
+      consumeSpaces(file, token);
       break;
     }
 
-    if (isTerminator) {
+    if (!token.hasChars && nextIsNumber(file)) {
+      consumeNumber(file, token);
       break;
     }
 
-    token.addChar(file.consume());
+    if (!token.hasChars && isOpChar(char)) {
+      consumeOperator(file, token);
+      break;
+    }
+
+    if (!token.hasChars && isTerminator(char)) {
+      token.addChar(file.consumeChar());
+      break;
+    }
+
+    // Support sharp identifiers (Used by reader macros ignores non-whitespace terminators)
+    if (token.first === "#" && !isWhitespace(char)) {
+      token.addChar(file.consumeChar());
+      continue;
+    }
+
+    if (char === "\t") {
+      throw new Error(
+        "Tabs are not supported, use four spaces for indentation"
+      );
+    }
+
+    if (isTerminator(char)) {
+      break;
+    }
+
+    token.addChar(file.consumeChar());
   }
 
   token.location.endIndex = file.position;
   return token;
+};
+
+const consumeOperator = (file: File, token: Token) => {
+  while (isOpChar(file.next)) {
+    token.addChar(file.consumeChar());
+  }
+};
+
+const consumeNumber = (file: File, token: Token) => {
+  const isValidNumber = (str: string) =>
+    /^[+-]?\d*(\.\d+)?[Ee]?[+-]?\d*$/.test(str);
+  const stillConsumingNumber = () =>
+    file.next &&
+    (isValidNumber(token.value + file.next) ||
+      isValidNumber(token.value + file.next + file.at(1)));
+
+  while (stillConsumingNumber()) {
+    token.addChar(file.consumeChar());
+  }
+};
+
+const nextIsNumber = (file: File) =>
+  isDigit(file.next) || (isDigitSign(file.next) && isDigit(file.at(1) ?? ""));
+
+const consumeSpaces = (file: File, token: Token) => {
+  while (file.next === " " && token.span < 2) {
+    token.addChar(file.consumeChar());
+  }
 };

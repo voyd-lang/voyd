@@ -1,21 +1,15 @@
-import { functionalNotation } from "./functional-notation.mjs";
-import { processGreedyOps } from "./greedy-ops.mjs";
-import { infix } from "./infix.mjs";
-import { macro } from "./macro.mjs";
-import { memoryManagement } from "./memory-management.mjs";
-import { moduleSyntaxMacro } from "./module.mjs";
-import { parentheticalElision } from "./parenthetical-elision.mjs";
-import { typeSystem } from "./type-system.mjs";
-import { SyntaxMacro } from "./types.mjs";
+import { ParsedFiles } from "../lib/parse-directory.mjs";
+import { List } from "../syntax-objects/list.mjs";
+import { surfaceLanguage } from "./surface-language/index.mjs";
 
-/** Caution: Order matters */
-export const syntaxMacros: SyntaxMacro[] = [
-  functionalNotation,
-  parentheticalElision,
-  processGreedyOps,
-  (ast) => infix(ast),
-  moduleSyntaxMacro,
-  macro,
-  typeSystem,
-  memoryManagement,
-];
+export const expandSyntaxMacrosOfFiles = (files: ParsedFiles): ParsedFiles => {
+  const expanded: ParsedFiles = {};
+
+  for (const [filePath, ast] of Object.entries(files)) {
+    expanded[filePath] = expandSyntaxMacros(ast);
+  }
+
+  return expanded;
+};
+
+export const expandSyntaxMacros = (ast: List): List => surfaceLanguage(ast);

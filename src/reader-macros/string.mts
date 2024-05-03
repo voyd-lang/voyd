@@ -1,4 +1,4 @@
-import { Identifier, StringLiteral } from "../lib/syntax/index.mjs";
+import { Identifier, StringLiteral } from "../syntax-objects/index.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const stringMacro: ReaderMacro = {
@@ -7,11 +7,11 @@ export const stringMacro: ReaderMacro = {
     const startChar = token.value;
     token.value = "";
     while (file.hasCharacters) {
-      const next = file.consume();
+      const next = file.consumeChar();
 
       if (next === "\\") {
         token.addChar(next);
-        token.addChar(file.consume());
+        token.addChar(file.consumeChar());
         continue;
       }
 

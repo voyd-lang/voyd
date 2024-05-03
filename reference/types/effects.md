@@ -1,0 +1,80 @@
+# Effects
+
+Void language is intended to have full support for, and be largely built on top
+of, algebraic effects.
+
+Largely inspired by the paper ["Structured Asynchrony with Algebraic Effects" by
+Daan
+Leijen](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/05/asynceffects-msr-tr-2017-21.pdf),
+as well as the [Effeckt Language](https://effekt-lang.org/).
+
+## Overview
+
+Effects are interfaces for functions that can be
+
+```
+// An effect is a function that
+effect talk(msg: string) -> string
+
+fn send_messages(): talk -> void
+  print talk("Hey") // prints "Hey there"
+  talk("Goodbye")
+  print talk("Hey") // Does not execute as the handler does not call resume
+
+fn main() -> void
+  handle
+    send_messages()
+  with:
+    talk: (msg: string) =>
+      if msg == "Goodbye" then: return
+      resume msg.concat(" there")
+```
+
+## Defining Effects
+
+```
+effect throw(msg: string) -> void
+```
+
+## Handling An Effect
+
+```
+// Define a function that uses the state effect
+fn bump_state(): State<i32> -> void
+  let state = get()
+  let new_state = set(state + 1)
+  log(new_state)
+
+
+// Define a function that handles the state effect
+fn main(val: i32)
+  var state = 0
+  with handler:
+    get: () => state
+    set: (val) =>
+      state = val
+      resume(state)
+  do:
+    bump_state()
+  print(state) // 5
+```
+
+Define and use generic effect handler (@f is a call by name parameter, see functions for more details)
+```
+fn state_handler<T>({initial: T, @action: ((): State<T> -> T)}) -> T
+  var state = initial
+  with handler:
+    get: () => state
+    set: (val) =>
+      state = val
+      state
+  do:
+    f()
+
+fn main()
+  let state = state_handler initial: 3 action:
+    bump_state()
+    bump_state()
+
+  print(state) // 5
+```

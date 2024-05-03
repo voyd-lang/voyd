@@ -1,0 +1,7 @@
+use super::macros::all
+
+declare "utils"
+  pub fn log(val:i32) -> void
+  pub fn log(val:f32) -> void
+  pub fn log(val:f64) -> void
+  pub fn log(val:i64) -> void

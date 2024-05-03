@@ -1,0 +1,36 @@
+use std::macros::all
+
+type String = i32
+
+declare "strings"
+  pub fn alloc_string() -> String
+
+  pub fn de_alloc_string(str: String) -> void
+
+  pub fn str_len(str: String) -> i32
+
+  // Returns -1 if not found
+  pub fn get_char_code_from_string(charIndex: i32, str:String) -> i32
+
+  pub fn add_char_code_to_string(char:i32, str:String) -> void
+
+  pub fn print_str(str: String) -> void
+
+  pub fn str_equals(a:String, b:String) -> void
+
+  pub fn str_starts_with(str: String, startsWith: String) -> void
+
+  pub fn str_ends_with(str: String, endsWith: String) -> void
+
+  pub fn str_includes(str:String, includes: String) -> void
+
+// Regex test (pass -1 to flags for default (g))
+  pub fn str_test(str: String, regex:String, flags: String) -> void
+
+pub macro string(str)
+  let add_codes = str.split("").map (char) =>
+    ` add_char_code_to_string $(char_to_code char) index
+  `
+    let index: String = alloc_string()
+    $@add_codes
+    index

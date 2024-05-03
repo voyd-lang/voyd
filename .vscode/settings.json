@@ -5,6 +5,7 @@
     "curlys",
     "Defun",
     "Deno",
+    "desugarred",
     "EBNF",
     "elif",
     "elifs",
@@ -19,13 +20,33 @@
     "rotr",
     "Structs",
     "UFCS",
-    "WASM"
+    "WASM",
+    "webassembly"
   ],
   "debug.javascript.terminalOptions": {
     "skipFiles": ["<node_internals>/**"],
     "outFiles": ["${workspaceFolder}/**/*.mjs"]
   },
-  "editor.insertSpaces": false,
+  "editor.insertSpaces": true,
   "editor.tabSize": 2,
-  "editor.wordSeparators": "`~!@#$%^&*()=[{]}\\|;:'\",.<>/?"
+  "editor.wordSeparators": "`~!@#$%^&*()=[{]}\\|;:'\",.<>/?",
+  "[markdown]": {
+    "editor.unicodeHighlight.ambiguousCharacters": false,
+    "editor.unicodeHighlight.invisibleCharacters": false,
+    "diffEditor.ignoreTrimWhitespace": false,
+    "editor.wordWrap": "on",
+    "editor.quickSuggestions": {
+      "comments": "off",
+      "strings": "off",
+      "other": "off"
+    },
+    "editor.useTabStops": true,
+    "editor.tabSize": 2,
+    "cSpell.fixSpellingWithRenameProvider": true,
+    "cSpell.advanced.feature.useReferenceProviderWithRename": true,
+    "cSpell.advanced.feature.useReferenceProviderRemove": "/^#+\\s/"
+  },
+  "[void]": {
+    "editor.tabSize": 2
+  }
 }

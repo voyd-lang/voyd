@@ -1,11 +1,11 @@
-import { SourceLocation } from "./syntax/syntax.mjs";
+import { SourceLocation } from "../syntax-objects/syntax.mjs";
 
 export class Token {
   readonly location: SourceLocation;
   value = "";
 
-  constructor(opts: SourceLocation & { value?: string }) {
-    const { value, ...location } = opts;
+  constructor(opts: { location: SourceLocation; value?: string }) {
+    const { value, location } = opts;
     this.value = value ?? "";
     this.location = location;
   }
@@ -27,7 +27,7 @@ export class Token {
   }
 
   get isWhitespace() {
-    return /^\s$/.test(this.value);
+    return /^\s+$/.test(this.value);
   }
 
   addChar(string: string) {

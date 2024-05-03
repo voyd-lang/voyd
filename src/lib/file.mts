@@ -1,3 +1,5 @@
+import { SourceLocation } from "../syntax-objects/syntax.mjs";
+
 export class File {
   readonly filePath: string;
   readonly originalSize: number;
@@ -35,8 +37,22 @@ export class File {
     return this.value[0];
   }
 
+  currentSourceLocation() {
+    return new SourceLocation({
+      startIndex: this.position,
+      endIndex: this.originalSize - this.value.length,
+      line: this.line,
+      column: this.column,
+      filePath: this.filePath,
+    });
+  }
+
+  at(index: number): string | undefined {
+    return this.value.at(index);
+  }
+
   /** Returns the next character and removes it from the queue */
-  consume(): string {
+  consumeChar(): string {
     const char = this.value.shift();
     if (!char) {
       throw new Error("Out of characters");

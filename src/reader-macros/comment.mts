@@ -1,22 +1,14 @@
+import { noop } from "../syntax-objects/index.mjs";
 import { ReaderMacro } from "./types.mjs";
-import { Comment } from "../lib/index.mjs";
 
 export const comment: ReaderMacro = {
   tag: /^\/\/[^\s]*$/,
-  macro: (file, { token }) => {
-    let comment = "";
-
+  macro: (file) => {
     while (file.hasCharacters) {
       if (file.next === "\n") break;
-      comment += file.consume();
+      file.consumeChar();
     }
 
-    return new Comment({
-      location: {
-        ...token.location,
-        endIndex: file.position,
-      },
-      value: `//${comment}`,
-    });
+    return noop();
   },
 };

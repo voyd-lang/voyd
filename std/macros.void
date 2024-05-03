@@ -1,0 +1,103 @@
+export
+  macro pub()
+    // handle syntax like "pub fn me" and "pub fn(me)"
+    if body.length == 1 and body.extract(0).is_list() then:
+      quote export block($@body)
+    else:
+      quote export block($body)
+
+pub macro `()
+  quote quote $@body
+
+macro let()
+  define equals_expr body.extract(0)
+  ` define $(equals_expr.extract(1)) $(equals_expr.extract(2))
+
+pub macro var()
+  define equals_expr body.extract(0)
+  ` define_mut $(equals_expr.extract(1)) $(equals_expr.extract(2))
+
+pub macro global()
+  let mutability = body.extract(0)
+  let equals_expr = body.extract(1)
+  let function =
+    if mutability == "let" then:
+      ` define_global
+    else:
+      ` define_mut_global
+  `($@function,
+    $(equals_expr.extract(1))
+    $(equals_expr.extract(2))
+
+pub macro ';'()
+  let func = body.extract(0)
+  let block = body.extract(1)
+  let args =
+    if block.extract(0) == "block" then:
+      block.slice(1)
+    else:
+      block
+  if is_list(func) then:
+    func.concat(args)
+  else:
+    `($func).concat(args)
+
+// Extracts typed parameters from a list where index 0 is fn name, and offset_index+ are labeled_expr
+macro_let extract_parameters = (definitions) =>
+  `(parameters).concat definitions.slice(1)
+
+pub macro fn()
+  let definitions = body.extract(0)
+  let identifier = definitions.extract(0)
+  let params = extract_parameters(definitions)
+
+  let type_arrow_index =
+    if body.extract(1) == "->" then:
+      1
+    else:
+      if body.extract(2) == "->" then: 2 else: -1
+
+  let return_type =
+    if type_arrow_index > -1 then:
+      body.slice(type_arrow_index + 1, type_arrow_index + 2)
+    else: `()
+
+  let expressions =
+    if type_arrow_index > -1 then:
+      body.slice(type_arrow_index + 2)
+    else: body.slice(1)
+
+  `(define_function,
+    $identifier,
+    $params,
+    (return_type $@return_type)
+    $(`(block).concat(expressions)))
+
+pub macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
+  let params = `(parameters, left: $arg_type, right: $arg_type)
+  let body = ` binaryen
+    func: $wasm_fn
+    arg_types: [$arg_type, $arg_type]
+    return_type: $return_type
+    args: [left, right]
+
+  ` define_function $op $params return_type($return_type) $body
+
+
+
+pub macro match()
+  log "match"
+  let value_expr = body.extract(0)
+  let cases = body.slice(1)
+  let expand_cases = (cases, index) =>
+    let case = cases.extract(index)
+    if is_list(case) and not(index + 1 >= cases.length) then:
+      ` if $(extract case 0) == match_value
+        then: $(extract case 1)
+        else: $(&lambda cases (index + 1))
+    else: case
+
+  let conditions = expand_cases(cases, 0)
+  `
+    let match_value = $value_expr
+    $conditions
