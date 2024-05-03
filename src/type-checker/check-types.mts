@@ -15,6 +15,7 @@ import {
   Variable,
   VoidModule,
   Parameter,
+  Use,
 } from "../syntax-objects/index.mjs";
 import { NamedEntity } from "../syntax-objects/named-entity.mjs";
 
@@ -26,26 +27,69 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isVariable()) return checkVarTypes(expr);
   if (expr.isModule()) return checkModuleTypes(expr);
   if (expr.isList()) return checkListTypes(expr);
+  if (expr.isIdentifier()) return checkIdentifier(expr);
+  if (expr.isUse()) return checkUse(expr);
   return expr;
 };
 
 const checkBlockTypes = (block: Block): Block => {
-  return block.each(checkTypes);
+  block.each(checkTypes);
+  block.type = resolveExprType(block.lastExpr());
+  return block;
 };
 
 const checkCallTypes = (call: Call): Call => {
   if (call.calls("export")) return checkExport(call);
   if (call.calls("if")) return checkIf(call);
-  if (call.calls("use")) return checkUse(call);
   if (call.calls("binaryen")) return checkBinaryenCall(call);
   if (call.calls(":")) return checkLabeledArg(call);
+  if (call.calls("=")) return checkAssign(call);
   call.eachArg(checkTypes);
   call.fn = resolveCallFn(call);
   if (!call.fn) {
-    throw new Error(`Could not resolve fn ${call.fnName}`);
+    throw new Error(`Could not resolve fn ${call.fnName} at ${call.location}`);
   }
   call.type = call.fn.getReturnType();
   return call;
+};
+
+const checkAssign = (call: Call) => {
+  const id = call.argAt(0);
+  if (!id?.isIdentifier()) {
+    throw new Error(`Can only assign to variables for now ${id}`);
+  }
+
+  const variable = id.resolve();
+  if (!variable || !variable.isVariable()) {
+    throw new Error(`Unrecognized variable ${id} at ${id.location}`);
+  }
+
+  if (!variable.isMutable) {
+    throw new Error(`${id} cannot be re-assigned`);
+  }
+
+  const initType = resolveExprType(call.argAt(1));
+
+  if (!typesAreEquivalent(variable.type, initType)) {
+    throw new Error(`${id} cannot be assigned to ${initType}`);
+  }
+
+  return call;
+};
+
+const checkIdentifier = (id: Identifier) => {
+  const entity = id.resolve();
+  if (!entity) {
+    throw new Error(`Unrecognized identifier, ${id}`);
+  }
+
+  if (entity.isVariable()) {
+    if ((entity.location?.startIndex ?? 0) <= (id.location?.startIndex ?? 0)) {
+      throw new Error(`${id} used before defined`);
+    }
+  }
+
+  return id;
 };
 
 const checkIf = (call: Call) => {
@@ -74,14 +118,16 @@ const checkIf = (call: Call) => {
   return call;
 };
 
-// TODO: Maybe type check this??
 const checkBinaryenCall = (call: Call) => {
-  call.type = resolveExprType(call.argAt(2));
+  const returnTypeCall = call.callArgAt(2);
+  call.type = resolveExprType(returnTypeCall.argAt(1));
   return call;
 };
 
 const checkLabeledArg = (call: Call) => {
-  checkTypes(call.argAt(1));
+  const expr = call.argAt(1);
+  checkTypes(expr);
+  call.type = resolveExprType(expr);
   return call;
 };
 
@@ -91,8 +137,15 @@ const checkExport = (call: Call) => {
     throw new Error("Expected export to contain block");
   }
 
+  checkTypes(block);
+
   const entities = block.getAllEntities();
   entities.forEach((e) => {
+    if (e.isUse()) {
+      e.entities.forEach((e) => call.parent?.registerEntity(e));
+      return;
+    }
+
     e.isExported = true;
     call.parent?.registerEntity(e);
   });
@@ -100,9 +153,8 @@ const checkExport = (call: Call) => {
   return call;
 };
 
-const checkUse = (use: Call) => {
-  const path = use.argAt(0);
-  if (!path?.isCall()) throw new Error("Expected use path");
+const checkUse = (use: Use) => {
+  const path = use.path;
 
   const entities = resolveUsePath(path);
   if (entities instanceof Array) {
@@ -110,16 +162,17 @@ const checkUse = (use: Call) => {
   } else {
     use.parent?.registerEntity(entities);
   }
+
   return use;
 };
 
-const resolveUsePath = (path: Call): NamedEntity | NamedEntity[] => {
+const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
   if (!path.calls("::")) {
     throw new Error(`Invalid use statement ${path}`);
   }
 
-  const [left, right] = [path.argAt(0), path.argAt(1)];
-  const resolvedModule = left?.isCall()
+  const [_, left, right] = path.value;
+  const resolvedModule = left?.isList()
     ? resolveUsePath(left)
     : left?.isIdentifier()
     ? resolveUseIdentifier(left)
@@ -134,7 +187,7 @@ const resolveUsePath = (path: Call): NamedEntity | NamedEntity[] => {
   }
 
   const module =
-    resolvedModule.phase < 4
+    resolvedModule.phase < 3
       ? checkModuleTypes(resolvedModule)
       : resolvedModule;
 
@@ -175,15 +228,18 @@ const resolveUseIdentifier = (identifier: Identifier) => {
 
 const checkFnTypes = (fn: Fn): Fn => {
   checkParameters(fn.parameters);
-  checkTypes(fn.body);
 
   if (fn.returnTypeExpr) {
-    fn.returnType = resolveExprType(fn.returnType);
+    fn.returnType = resolveExprType(fn.returnTypeExpr);
   }
+
+  checkTypes(fn.body);
 
   const inferredReturnType = resolveExprType(fn.body);
   if (!inferredReturnType) {
-    throw new Error(`Unable to determine fn return type, ${fn.name}`);
+    throw new Error(
+      `Unable to determine fn return type, ${fn.name} ${fn.location}`
+    );
   }
 
   if (!fn.returnType) {
@@ -203,10 +259,12 @@ const checkParameters = (params: Parameter[]) => {
     if (!p.typeExpr) {
       throw new Error(`Unable to determine type for ${p}`);
     }
+
     const type = resolveExprType(p.typeExpr);
     if (!type) {
       throw new Error(`Unable to resolve type for ${p}`);
     }
+
     p.type = type;
   });
 };
@@ -266,10 +324,13 @@ const resolveExprType = (expr?: Expr): Type | undefined => {
   if (expr.isFloat()) return f32;
   if (expr.isBool()) return bool;
   if (expr.isIdentifier()) return getIdentifierType(expr);
-  if (expr.isCall()) return expr.type;
+  if (expr.isCall()) {
+    if (!expr.type) checkTypes(expr);
+    return expr.type;
+  }
   if (expr.isFn()) return expr.getType();
   if (expr.isType()) return expr;
-  if (expr.isBlock()) return resolveExprType(expr.lastExpr());
+  if (expr.isBlock()) return expr.type;
 };
 
 const getIdentifierType = (id: Identifier): Type | undefined => {

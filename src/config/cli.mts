@@ -21,7 +21,7 @@ const options: ParseArgsConfig["options"] = {
     type: "boolean",
   },
   /** Tells binaryen to run its standard optimization pass */
-  "bin-opt": {
+  opt: {
     type: "boolean",
   },
   run: {
@@ -58,7 +58,7 @@ export const getConfigFromCli = (): VoidConfig => {
     emitMacroAst: values["emit-macro-ast"] as boolean,
     emitWasm: values["emit-wasm"] as boolean,
     emitWasmText: values["emit-wasm-text"] as boolean,
-    runBinaryenOptimizationPass: values["bin-opt"] as boolean,
+    runBinaryenOptimizationPass: values["opt"] as boolean,
     showHelp: values["help"] as boolean,
     showVersion: values["version"] as boolean,
     run: values["run"] as boolean,

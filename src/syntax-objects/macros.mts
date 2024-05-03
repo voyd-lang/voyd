@@ -38,8 +38,8 @@ export class RegularMacro extends ScopedNamedEntity {
   clone(parent?: Expr | undefined): RegularMacro {
     return new RegularMacro({
       ...super.getCloneOpts(parent),
-      parameters: this.parameters,
-      body: this.body,
+      parameters: this.parameters.map((p) => p.clone()),
+      body: this.body.clone(),
     });
   }
 

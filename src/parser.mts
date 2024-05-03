@@ -18,13 +18,7 @@ export interface ParseOpts {
 
 export function parse(file: File, opts: ParseOpts = {}): List {
   const list = new List({
-    location: {
-      startIndex: file.position,
-      endIndex: 0,
-      line: file.line,
-      column: file.column,
-      filePath: file.filePath,
-    },
+    location: file.currentSourceLocation(),
     parent: opts.parent,
   });
 
@@ -81,11 +75,7 @@ export function parse(file: File, opts: ParseOpts = {}): List {
 
 const lexer = (file: File): Token => {
   const token = new Token({
-    line: file.line,
-    column: file.column,
-    startIndex: file.position,
-    endIndex: 0,
-    filePath: file.filePath,
+    location: file.currentSourceLocation(),
   });
 
   while (file.hasCharacters) {

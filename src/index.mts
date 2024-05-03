@@ -11,6 +11,8 @@ import {
 import { resolveFileModules } from "./modules.mjs";
 import path from "path";
 import { expandRegularMacros } from "./regular-macros.mjs";
+import { typeCheck } from "./type-checker/index.mjs";
+import binaryen from "binaryen";
 
 main().catch(errorHandler);
 
@@ -33,19 +35,16 @@ async function main() {
     return emit(await getMacroAst(config.index));
   }
 
-  const mod = genWasmCode(root.ast);
-  if (!mod.validate()) {
-    throw new Error("Module is invalid");
+  if (config.emitWasmText) {
+    return console.log(await getWasmText(config.index));
   }
 
   if (config.emitWasm) {
-    stdout.write(mod.emitBinary());
-    return;
+    return emitWasm(config.index);
   }
 
   if (config.run) {
-    run(mod);
-    return;
+    return runWasm(config.index);
   }
 
   console.log(
@@ -80,6 +79,43 @@ async function getModuleAst(index: string) {
 async function getMacroAst(index: string) {
   const moduleAst = await getModuleAst(index);
   return expandRegularMacros(moduleAst);
+}
+
+async function getWasmMod(index: string) {
+  const ast = await getMacroAst(index);
+  const checkedAst = typeCheck(ast);
+  const mod = genWasmCode(checkedAst);
+
+  if (getConfig().runBinaryenOptimizationPass) {
+    binaryen.setShrinkLevel(3);
+    binaryen.setOptimizeLevel(3);
+    mod.optimize();
+  }
+
+  return mod;
+}
+
+async function getWasmText(index: string) {
+  const mod = await getWasmMod(index);
+  return mod.emitText();
+}
+
+async function emitWasm(index: string) {
+  const mod = await getWasmMod(index);
+  if (!mod.validate()) {
+    throw new Error("Module is invalid");
+  }
+
+  stdout.write(mod.emitBinary());
+}
+
+async function runWasm(index: string) {
+  const mod = await getWasmMod(index);
+  if (!mod.validate()) {
+    throw new Error("Module is invalid");
+  }
+
+  run(mod);
 }
 
 function emit(json: any) {

@@ -2,6 +2,7 @@ node_modules
 dist
 ast.json
 *output*.json
+*output*.wat
 .env
 test.void
 /playground.*

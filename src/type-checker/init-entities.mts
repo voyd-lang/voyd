@@ -1,3 +1,4 @@
+import { Declaration } from "../syntax-objects/declaration.mjs";
 import {
   List,
   Fn,
@@ -6,6 +7,7 @@ import {
   Variable,
   Call,
   Block,
+  TypeAlias,
 } from "../syntax-objects/index.mjs";
 import { TypeChecker } from "./types";
 
@@ -26,6 +28,14 @@ export const initEntities: TypeChecker = (expr) => {
 
   if (expr.calls("block")) {
     return initBlock(expr);
+  }
+
+  if (expr.calls("declare")) {
+    return initDeclaration(expr);
+  }
+
+  if (expr.calls("type")) {
+    return initTypeAlias(expr);
   }
 
   return initCall(expr);
@@ -119,6 +129,38 @@ const initVar = (varDef: List): Variable => {
     initializer,
     isMutable,
   });
+};
+
+const initDeclaration = (decl: List) => {
+  const namespaceString = decl.at(1);
+
+  if (!namespaceString?.isStringLiteral()) {
+    throw new Error("Expected namespace string");
+  }
+
+  const fns = decl
+    .listAt(2)
+    .sliceAsArray(1)
+    .map(initEntities)
+    .filter((e) => e.isFn()) as Fn[];
+
+  return new Declaration({
+    ...decl.metadata,
+    namespace: namespaceString.value,
+    fns,
+  });
+};
+
+const initTypeAlias = (type: List) => {
+  const assignment = type.listAt(1);
+  const name = assignment.identifierAt(1);
+  const typeExpr = assignment.at(2);
+
+  if (!name || !typeExpr) {
+    throw new Error(`Invalid type alias ${type.location}`);
+  }
+
+  return new TypeAlias({ ...type.metadata, name, typeExpr });
 };
 
 const initCall = (call: List) => {

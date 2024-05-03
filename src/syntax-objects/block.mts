@@ -6,17 +6,17 @@ import { Type } from "./types.mjs";
 export class Block extends ScopedSyntax {
   readonly syntaxType = "block";
   private _body!: List;
-  returnType?: Type;
+  type?: Type;
 
   constructor(
     opts: ScopedSyntaxMetadata & {
       body: List;
-      returnType?: Type;
+      type?: Type;
     }
   ) {
     super(opts);
     this.body = opts.body;
-    this.returnType = opts.returnType;
+    this.type = opts.type;
   }
 
   get body() {
@@ -57,8 +57,8 @@ export class Block extends ScopedSyntax {
   clone(parent?: Expr) {
     return new Block({
       ...this.getCloneOpts(parent),
-      body: this.body,
-      returnType: this.returnType,
+      body: this.body.clone(),
+      type: this.type,
     });
   }
 }

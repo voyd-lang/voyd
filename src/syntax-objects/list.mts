@@ -208,7 +208,10 @@ export class List extends Syntax {
   }
 
   clone(parent?: Expr): List {
-    return new List({ ...super.getCloneOpts(parent), value: this });
+    return new List({
+      ...super.getCloneOpts(parent),
+      value: this.value.map((v) => v.clone()),
+    });
   }
 }
 

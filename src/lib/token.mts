@@ -4,8 +4,8 @@ export class Token {
   readonly location: SourceLocation;
   value = "";
 
-  constructor(opts: SourceLocation & { value?: string }) {
-    const { value, ...location } = opts;
+  constructor(opts: { location: SourceLocation; value?: string }) {
+    const { value, location } = opts;
     this.value = value ?? "";
     this.location = location;
   }

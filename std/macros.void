@@ -1,6 +1,10 @@
 export
   macro pub()
-    quote(export (block $body))
+    // handle syntax like "pub fn me" and "pub fn(me)"
+    if body.length == 1 and body.extract(0).is_list() then:
+      quote export block($@body)
+    else:
+      quote export block($body)
 
 pub macro `()
   quote quote $@body
@@ -70,12 +74,16 @@ pub macro fn()
     $(`(block).concat(expressions)))
 
 pub macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
-  ` fn $op(left: $arg_type, right: $arg_type) -> $return_type
-    binaryen
-      func: $wasm_fn
-      arg_types: [$arg_type, $arg_type]
-      return_type: $return_type
-      args: [left, right]
+  let params = `(parameters, left: $arg_type, right: $arg_type)
+  let body = ` binaryen
+    func: $wasm_fn
+    arg_types: [$arg_type, $arg_type]
+    return_type: $return_type
+    args: [left, right]
+
+  ` define_function $op $params return_type($return_type) $body
+
+
 
 pub macro match()
   log "match"

@@ -43,6 +43,11 @@ const registerModule = ({
     );
   }
 
+  if (!existingModule && name === "index") {
+    parentModule.push(...ast.value);
+    return;
+  }
+
   const module =
     existingModule ??
     new VoidModule({

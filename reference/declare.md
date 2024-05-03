@@ -1,6 +1,5 @@
 
 ```
-declare "namespace" {
+declare "namespace"
   pub fn hey() -> void
-}
 ```
