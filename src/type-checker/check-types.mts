@@ -248,7 +248,9 @@ const checkFnTypes = (fn: Fn): Fn => {
   }
 
   if (!typesAreEquivalent(inferredReturnType, fn.returnType)) {
-    throw new Error(`Fn ${fn.name} return value does not match return type`);
+    throw new Error(
+      `Fn, ${fn.name}, return value type (${inferredReturnType?.name}) is not compatible with annotated return type (${fn.returnType?.name}) at ${fn.location}`
+    );
   }
 
   return fn;
