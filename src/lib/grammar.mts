@@ -111,7 +111,7 @@ export const isGreedyOpIdentifier = (op?: Identifier) =>
   !!op && !op.isQuoted && greedyOps.has(op.value);
 
 export const isContinuationOp = (op?: Expr) =>
-  isInfixOp(op) && !op.is(":") && !greedyOps.has(op.value); // `:` is a hacky exception (Hopefully the only one.)
+  isInfixOp(op) && !op.is(":") && !op.is("&") && !greedyOps.has(op.value); // `:` is a hacky exception (Hopefully the only one.)
 
 function newTest<T>(list: Set<T> | Array<T>) {
   const set = new Set(list);

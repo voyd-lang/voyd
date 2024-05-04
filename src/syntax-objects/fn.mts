@@ -81,7 +81,7 @@ export class Fn extends ScopedNamedEntity {
     );
 
     if (index < 0) {
-      const newIndex = this.variables.push(variable);
+      const newIndex = this.variables.push(variable) - 1;
       return newIndex + this.parameters.length;
     }
 

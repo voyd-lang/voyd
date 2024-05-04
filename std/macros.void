@@ -9,7 +9,7 @@ export
 pub macro `()
   quote quote $@body
 
-macro let()
+pub macro let()
   define equals_expr body.extract(0)
   ` define $(equals_expr.extract(1)) $(equals_expr.extract(2))
 
