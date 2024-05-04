@@ -18,7 +18,7 @@ Void's effect system takes heavy inspiration from:
 - The paper ["Structured Asynchrony with Algebraic Effects" by Daan Leijen"](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/05/asynceffects-msr-tr-2017-21.pdf)
 
 
-## Sketch
+## Defining Effects
 
 ```
 effect Exception
@@ -36,4 +36,44 @@ effect State
 
 // Tail resumptive effects with one function can be defined concisely as
 effect fn get() -> Int
+```
+
+## Using Effects
+
+```
+effect Async
+  ctl resolve(int: i32) -> void
+  ctl reject(msg: String) -> void
+
+fn asyncTask(num: i32): Async -> Int
+  if num > 0
+    Async::resolve(num)
+  else
+    Async::reject("Number must be positive")
+
+fn main()
+  try
+    asyncTask(1)
+  with: {
+    ctl resolve(num) -> void
+      println("Resolved: " + num)
+    ctl reject(msg) -> void
+      println("Rejected: " + msg)
+  }
+
+// Effects are also inferred
+fn asyncTask(num: i32) -> Int // Inferred to be Async -> Int
+  if num > 0
+    Async::resolve(num)
+  else
+    Async::reject("Number must be positive")
+
+// A use statement can may the function a little cleaner
+use Async::{resolve, reject}
+
+fn asyncTask(num: i32) -> Int
+  if num > 0
+    resolve(num)
+  else
+    reject("Number must be positive")
 ```
