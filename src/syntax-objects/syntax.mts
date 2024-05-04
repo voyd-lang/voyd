@@ -33,7 +33,7 @@ export abstract class Syntax {
   /** For tagged unions */
   abstract readonly syntaxType: string;
   readonly syntaxId = getSyntaxId();
-  readonly location?: SourceLocation;
+  location?: SourceLocation;
   contextTag?: ContextTag;
   parent?: Expr;
 

@@ -193,6 +193,7 @@ export const expandMacro = (macro: Macro, call: List): Expr => {
 
   const result = clone.evaluate(evalMacroExpr) ?? nop();
   result.parent = call.parent;
+  result.location = call.location;
   return result;
 };
 

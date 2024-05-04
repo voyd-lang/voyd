@@ -84,7 +84,7 @@ const checkIdentifier = (id: Identifier) => {
   }
 
   if (entity.isVariable()) {
-    if ((entity.location?.startIndex ?? 0) <= (id.location?.startIndex ?? 0)) {
+    if ((id.location?.startIndex ?? 0) <= (entity.location?.startIndex ?? 0)) {
       throw new Error(`${id} used before defined`);
     }
   }

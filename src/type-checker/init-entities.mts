@@ -22,7 +22,7 @@ export const initEntities: TypeChecker = (expr) => {
     return initFn(expr);
   }
 
-  if (expr.calls("define") || expr.calls("define_mutable")) {
+  if (expr.calls("define") || expr.calls("define_mut")) {
     return initVar(expr);
   }
 

@@ -87,11 +87,22 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
       continue;
     }
 
+    if (next !== undefined && !transformed.location) {
+      transformed.location = next.location;
+    }
+
     if (next !== undefined) {
       transformed.push(next);
       list.consume();
       continue;
     }
+  }
+
+  if (
+    transformed.location &&
+    typeof transformed.last()?.location?.endIndex === "number"
+  ) {
+    transformed.location.endIndex = transformed.last()!.location!.endIndex;
   }
 
   if (transformed.value.length === 1) {
