@@ -103,7 +103,7 @@ const getReturnTypeExprForFn = (fn: List, index: number): Expr | undefined => {
 };
 
 const initVar = (varDef: List): Variable => {
-  const isMutable = varDef.calls("define_mutable");
+  const isMutable = varDef.calls("define_mut");
   const identifierExpr = varDef.at(1);
   const [name, typeExpr] =
     identifierExpr?.isList() && identifierExpr.calls(":")
