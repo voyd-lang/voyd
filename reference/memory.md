@@ -34,21 +34,24 @@ fn bump_x(v: &Vec3) -> Vec3
   v.x += 1
 
 fn main()
-  var mutable = Vec3 { x: 1, y: 2, z: 3 }
-
-  // Mutable references must be explicitly borrowed with the & operator
-  bump_x(&mutable)
-
-  // & operator must be used even when using methods
-  &mutable.bump_x()
-  &mutable.x = 5
+  let mutable = &Vec3 { x: 1, y: 2, z: 3 }
+  mutable.bump_x() // OK
+  mutable.x = 5 // OK
 
   // Examples of immutable behavior
   let immutable = Vec3 { x: 1, y: 2, z: 3 }
 
   // ERROR: Cannot borrow immutable reference as mutable
-  &immutable.bump_x()
-  &immutable.x = 5
+  immutable.bump_x()
+  immutable.x = 5
+
+  // Mutable assignment to a mutable reference is converted to an immutable reference unless explicitly borrowed
+  let mutable2 = &Vec3 { x: 1, y: 2, z: 3 }
+  let immutable2 = mutable2
+  immutable2.x = 5 // ERROR: Cannot borrow immutable reference as mutable
+  let mutable3 = &mutable2
+  mutable3.x = 5 // OK
+  mutable2.x = 5 // ERROR ownership of mutable2 has been transferred to mutable3, mutable2 is now immutable
 ```
 
 Mutable references can only be made to object types:
