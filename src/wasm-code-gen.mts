@@ -70,10 +70,6 @@ const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
     throw new Error(`Unrecognized symbol ${expr.value}`);
   }
 
-  // if (entity.isGlobal()) {
-  //   return mod.global.get(entity.id, mapBinaryenType(entity.getType()));
-  // }
-
   if (entity.isVariable() || entity.isParameter()) {
     const type = mapBinaryenType(entity.type!);
     return mod.local.get(entity.getIndex(), type);
@@ -106,7 +102,17 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
 
 const compileExport = (opts: CompileExprOpts<Call>) => {
   const expr = opts.expr.exprArgAt(0);
-  return compileExpression({ ...opts, expr });
+  const result = compileExpression({ ...opts, expr });
+
+  if (expr.parentModule?.isIndex && expr.isBlock()) {
+    expr.getAllEntities().forEach((entity) => {
+      if (entity.isFn()) {
+        opts.mod.addFunctionExport(entity.id, entity.name.value);
+      }
+    });
+  }
+
+  return result;
 };
 
 const compileAssign = (opts: CompileExprOpts<Call>): number => {
@@ -157,11 +163,6 @@ const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   const variableTypes = getFunctionVarTypes(fn); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
 
   mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
-
-  // TODO RESOLVE EXPORTS PROPERLY
-  if (fn.name.is("main")) {
-    mod.addFunctionExport(fn.id, "main");
-  }
 
   return mod.nop();
 };

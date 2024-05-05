@@ -5,8 +5,10 @@ import { VoidModule } from "./syntax-objects/module.mjs";
 export const resolveFileModules = (opts: {
   /** Path to the std lib directory */
   stdPath: string;
-  /** Path to the user source code */
-  srcPath: string;
+  /** Path to the user source code root folder */
+  srcPath?: string;
+  /** Path to the entry index file, which determines what is exported from the package */
+  indexPath: string;
   files: ParsedFiles;
 }): VoidModule => {
   const { stdPath, srcPath, files } = opts;
@@ -14,9 +16,20 @@ export const resolveFileModules = (opts: {
   const rootModule = new VoidModule({ name: "root" });
 
   for (const [filePath, file] of Object.entries(files)) {
-    const resolvedPath = filePathToModulePath(filePath, srcPath, stdPath);
+    const resolvedPath = filePathToModulePath(
+      filePath,
+      srcPath ?? opts.indexPath,
+      stdPath
+    );
+
     const parsedPath = resolvedPath.split("/").filter(Boolean);
-    registerModule({ path: parsedPath, parentModule: rootModule, ast: file });
+
+    registerModule({
+      path: parsedPath,
+      parentModule: rootModule,
+      ast: file,
+      isIndex: filePath === opts.indexPath,
+    });
   }
 
   return rootModule;
@@ -26,10 +39,12 @@ const registerModule = ({
   path,
   parentModule,
   ast,
+  isIndex,
 }: {
   path: string[];
   parentModule: VoidModule;
   ast: List;
+  isIndex?: boolean;
 }): VoidModule | undefined => {
   const [name, ...rest] = path;
 
@@ -53,6 +68,7 @@ const registerModule = ({
     new VoidModule({
       ...(!rest.length ? { ...ast.metadata, value: ast.value } : {}),
       name,
+      isIndex,
     });
   module.isExported = true;
 

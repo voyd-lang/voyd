@@ -14,7 +14,7 @@ export const regularMacrosAst = [
         ],
         [
           "regular-macro",
-          "let#754",
+          "let#764",
           ["parameters"],
           [
             "block",
@@ -38,7 +38,7 @@ export const regularMacrosAst = [
         ],
         [
           "regular-macro",
-          "fn#1011",
+          "fn#1243",
           ["parameters"],
           [
             "block",

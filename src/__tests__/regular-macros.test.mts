@@ -15,6 +15,7 @@ describe("regular macro evaluation", () => {
     const resolvedModules = resolveFileModules({
       files,
       srcPath: path.dirname("test"),
+      indexPath: "test.void",
       stdPath: stdPath,
     });
     const result = expandRegularMacros(resolvedModules);
