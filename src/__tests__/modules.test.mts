@@ -132,6 +132,7 @@ const input = {
     }),
   },
   srcPath: "/Users/drew/projects/void",
+  indexPath: "/Users/drew/projects/void/index.void",
   stdPath: "/Users/drew/projects/void/std",
 };
 

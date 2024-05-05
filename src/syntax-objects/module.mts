@@ -11,6 +11,8 @@ import {
 
 export class VoidModule extends ScopedNamedEntity {
   readonly syntaxType = "module";
+  /** This module is the entry point of the user src code */
+  isIndex = false;
   value: Expr[] = [];
   /**
    * 0 = init,
@@ -25,11 +27,13 @@ export class VoidModule extends ScopedNamedEntity {
     opts: ScopedNamedEntityOpts & {
       value?: ListValue[];
       phase?: number;
+      isIndex?: boolean;
     }
   ) {
     super(opts);
     if (opts.value) this.push(...opts.value);
     this.phase = opts.phase ?? 0;
+    this.isIndex = opts.isIndex ?? false;
   }
 
   getPath(): string[] {

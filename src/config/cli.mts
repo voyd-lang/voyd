@@ -44,11 +44,7 @@ export const getConfigFromCli = (): VoidConfig => {
     allowPositionals: true,
   });
 
-  const index = positionals[0];
-
-  if (typeof index !== "string") {
-    throw new Error("Expected void entry file path");
-  }
+  const index = positionals[0] ?? "./src";
 
   return {
     index,

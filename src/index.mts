@@ -3,16 +3,16 @@ import { stdout } from "process";
 import { getConfig } from "./config/index.mjs";
 import { genWasmCode } from "./wasm-code-gen.mjs";
 import { run } from "./run.mjs";
-import { parseFile, parseStd, stdPath } from "./lib/index.mjs";
+import { parseDirectory, parseFile, parseStd, stdPath } from "./lib/index.mjs";
 import {
   expandSyntaxMacrosOfFiles,
   expandSyntaxMacros,
 } from "./syntax-macros/index.mjs";
 import { resolveFileModules } from "./modules.mjs";
-import path from "path";
 import { expandRegularMacros } from "./regular-macros.mjs";
 import { typeCheck } from "./type-checker/index.mjs";
 import binaryen from "binaryen";
+import { resolveSrc } from "./lib/resolve-src.mjs";
 
 main().catch(errorHandler);
 
@@ -36,15 +36,17 @@ async function main() {
   }
 
   if (config.emitWasmText) {
-    return console.log(await getWasmText(config.index));
+    return console.log(
+      await getWasmText(config.index, config.runBinaryenOptimizationPass)
+    );
   }
 
   if (config.emitWasm) {
-    return emitWasm(config.index);
+    return emitWasm(config.index, config.runBinaryenOptimizationPass);
   }
 
   if (config.run) {
-    return runWasm(config.index);
+    return runWasm(config.index, config.runBinaryenOptimizationPass);
   }
 
   console.log(
@@ -62,16 +64,23 @@ async function getCoreAst(index: string) {
 }
 
 async function getModuleAst(index: string) {
-  const indexFilePath = path.resolve(index);
+  const src = await resolveSrc(index);
+
+  const srcFiles = src.srcRootPath
+    ? await parseDirectory(src.srcRootPath)
+    : { [src.indexPath]: await parseFile(src.indexPath) };
+
   const parsedFiles = {
-    [indexFilePath]: await parseFile(indexFilePath),
+    ...srcFiles,
     ...(await parseStd()),
   };
+
   const files = expandSyntaxMacrosOfFiles(parsedFiles);
 
   return resolveFileModules({
     files,
-    srcPath: path.dirname(indexFilePath),
+    srcPath: src.srcRootPath,
+    indexPath: src.indexPath,
     stdPath: stdPath,
   });
 }
@@ -81,12 +90,12 @@ async function getMacroAst(index: string) {
   return expandRegularMacros(moduleAst);
 }
 
-async function getWasmMod(index: string) {
+async function getWasmMod(index: string, optimize = false) {
   const ast = await getMacroAst(index);
   const checkedAst = typeCheck(ast);
   const mod = genWasmCode(checkedAst);
 
-  if (getConfig().runBinaryenOptimizationPass) {
+  if (optimize) {
     binaryen.setShrinkLevel(3);
     binaryen.setOptimizeLevel(3);
     mod.optimize();
@@ -95,13 +104,14 @@ async function getWasmMod(index: string) {
   return mod;
 }
 
-async function getWasmText(index: string) {
-  const mod = await getWasmMod(index);
+async function getWasmText(index: string, optimize = false) {
+  const mod = await getWasmMod(index, optimize);
   return mod.emitText();
 }
 
-async function emitWasm(index: string) {
-  const mod = await getWasmMod(index);
+async function emitWasm(index: string, optimize = false) {
+  const mod = await getWasmMod(index, optimize);
+
   if (!mod.validate()) {
     throw new Error("Module is invalid");
   }
@@ -109,8 +119,9 @@ async function emitWasm(index: string) {
   stdout.write(mod.emitBinary());
 }
 
-async function runWasm(index: string) {
-  const mod = await getWasmMod(index);
+async function runWasm(index: string, optimize = false) {
+  const mod = await getWasmMod(index, optimize);
+
   if (!mod.validate()) {
     throw new Error("Module is invalid");
   }
