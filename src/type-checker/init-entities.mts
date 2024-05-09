@@ -8,6 +8,7 @@ import {
   Call,
   Block,
   TypeAlias,
+  ObjectType,
 } from "../syntax-objects/index.mjs";
 import { TypeChecker } from "./types";
 
@@ -32,6 +33,10 @@ export const initEntities: TypeChecker = (expr) => {
 
   if (expr.calls("declare")) {
     return initDeclaration(expr);
+  }
+
+  if (expr.calls("object")) {
+    return initObject(expr);
   }
 
   if (expr.calls("type")) {
@@ -175,4 +180,24 @@ const initCall = (call: List) => {
 
   const args = call.slice(1).map(initEntities);
   return new Call({ ...call.metadata, fnName, args });
+};
+
+const initObject = (obj: List) => {
+  return new ObjectType({
+    ...obj.metadata,
+    name: obj.syntaxId.toString(),
+    value: obj.sliceAsArray(1).map((v) => {
+      if (!v.isList()) {
+        throw new Error("Invalid object field");
+      }
+      const name = v.identifierAt(1);
+      const typeExpr = v.at(2);
+
+      if (!name || !typeExpr) {
+        throw new Error("Invalid object field");
+      }
+
+      return { name: name.value, typeExpr };
+    }),
+  });
 };

@@ -155,29 +155,25 @@ export class TupleType extends BaseType {
   }
 }
 
+export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
+
 export class ObjectType extends BaseType {
   readonly kindOfType = "object";
-  value: { name: string; type: Type }[];
+  value: ObjectField[];
 
-  constructor(
-    opts: NamedEntityOpts & { value: { name: string; type: Type }[] }
-  ) {
+  constructor(opts: NamedEntityOpts & { value: ObjectField[] }) {
     super(opts);
     this.value = opts.value;
   }
 
   get size() {
-    let total = 0;
-    for (const field of this.value) {
-      total += field.type.size;
-    }
-    return total;
+    return 4;
   }
 
   toJSON(): TypeJSON {
     return [
       "type",
-      ["object", ...this.value.map(({ name, type }) => [name, type])],
+      ["object", ...this.value.map(({ name, typeExpr }) => [name, typeExpr])],
     ];
   }
 
