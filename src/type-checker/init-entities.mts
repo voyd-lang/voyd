@@ -35,10 +35,6 @@ export const initEntities: TypeChecker = (expr) => {
     return initDeclaration(expr);
   }
 
-  if (expr.calls("object")) {
-    return initObject(expr);
-  }
-
   if (expr.calls("type")) {
     return initTypeAlias(expr);
   }
@@ -84,11 +80,10 @@ const listToParameter = (
   // TODO check for separate external label [: at [: n i32]]
   if (list.identifierAt(0).is(":")) {
     const name = list.identifierAt(1);
-    const typeExpr = list.identifierAt(2);
     return new Parameter({
       ...list.metadata,
       name,
-      typeExpr,
+      typeExpr: initTypeExprEntities(list.at(2)),
       label: labeled ? name : undefined,
     });
   }
@@ -104,7 +99,7 @@ const getReturnTypeExprForFn = (fn: List, index: number): Expr | undefined => {
   const returnDec = fn.at(index);
   if (!returnDec?.isList()) return undefined;
   if (!returnDec.calls("return_type")) return undefined;
-  return returnDec.at(1);
+  return initTypeExprEntities(returnDec.at(1));
 };
 
 const initVar = (varDef: List): Variable => {
@@ -130,7 +125,7 @@ const initVar = (varDef: List): Variable => {
   return new Variable({
     ...varDef.metadata,
     name,
-    typeExpr,
+    typeExpr: initTypeExprEntities(typeExpr),
     initializer,
     isMutable,
   });
@@ -159,7 +154,7 @@ const initDeclaration = (decl: List) => {
 const initTypeAlias = (type: List) => {
   const assignment = type.listAt(1);
   const name = assignment.identifierAt(1);
-  const typeExpr = assignment.at(2);
+  const typeExpr = initTypeExprEntities(assignment.at(2));
 
   if (!name || !typeExpr) {
     throw new Error(`Invalid type alias ${type.location}`);
@@ -182,7 +177,30 @@ const initCall = (call: List) => {
   return new Call({ ...call.metadata, fnName, args });
 };
 
-const initObject = (obj: List) => {
+const initTypeExprEntities = (type?: Expr): Expr | undefined => {
+  if (!type) return undefined;
+
+  if (type.isIdentifier()) {
+    return type;
+  }
+
+  if (type.isType()) {
+    return type;
+  }
+
+  if (!type.isList()) {
+    console.log(JSON.stringify(type, undefined, 2));
+    throw new Error("Invalid type entity");
+  }
+
+  if (type.calls("object")) {
+    return initObjectType(type);
+  }
+
+  throw new Error("Invalid type entity");
+};
+
+const initObjectType = (obj: List) => {
   return new ObjectType({
     ...obj.metadata,
     name: obj.syntaxId.toString(),
