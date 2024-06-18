@@ -15,7 +15,13 @@ import type { MacroVariable } from "./macro-variable.mjs";
 import type { Macro } from "./macros.mjs";
 import type { Parameter } from "./parameter.mjs";
 import type { StringLiteral } from "./string-literal.mjs";
-import type { FnType, PrimitiveType, ObjectType, Type } from "./types.mjs";
+import type {
+  FnType,
+  PrimitiveType,
+  ObjectType,
+  Type,
+  TypeAlias,
+} from "./types.mjs";
 import type { Variable } from "./variable.mjs";
 import type { Whitespace } from "./whitespace.mjs";
 import { NamedEntity } from "./named-entity.mjs";
@@ -202,6 +208,10 @@ export abstract class Syntax {
 
   isType(): this is Type {
     return this.syntaxType === "type";
+  }
+
+  isTypeAlias(): this is TypeAlias {
+    return this.isType() && this.kindOfType === "type-alias";
   }
 
   isBlock(): this is Block {

@@ -27,6 +27,7 @@ export class TypeAlias extends BaseType {
   readonly kindOfType = "type-alias";
   readonly size = 4;
   typeExpr: Expr;
+  type?: Type;
 
   constructor(opts: NamedEntityOpts & { typeExpr: Expr }) {
     super(opts);
@@ -159,11 +160,11 @@ export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
 
 export class ObjectType extends BaseType {
   readonly kindOfType = "object";
-  value: ObjectField[];
+  fields: ObjectField[];
 
   constructor(opts: NamedEntityOpts & { value: ObjectField[] }) {
     super(opts);
-    this.value = opts.value;
+    this.fields = opts.value;
   }
 
   get size() {
@@ -173,12 +174,15 @@ export class ObjectType extends BaseType {
   toJSON(): TypeJSON {
     return [
       "type",
-      ["object", ...this.value.map(({ name, typeExpr }) => [name, typeExpr])],
+      ["object", ...this.fields.map(({ name, typeExpr }) => [name, typeExpr])],
     ];
   }
 
   clone(parent?: Expr): ObjectType {
-    return new ObjectType({ ...super.getCloneOpts(parent), value: this.value });
+    return new ObjectType({
+      ...super.getCloneOpts(parent),
+      value: this.fields,
+    });
   }
 }
 

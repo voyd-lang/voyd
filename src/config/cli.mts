@@ -36,6 +36,9 @@ const options: ParseArgsConfig["options"] = {
     type: "boolean",
     short: "v",
   },
+  "internal-test": {
+    type: "boolean",
+  },
 };
 
 export const getConfigFromCli = (): VoidConfig => {
@@ -58,5 +61,6 @@ export const getConfigFromCli = (): VoidConfig => {
     showHelp: values["help"] as boolean,
     showVersion: values["version"] as boolean,
     run: values["run"] as boolean,
+    internalTest: values["internal-test"] as boolean,
   };
 };

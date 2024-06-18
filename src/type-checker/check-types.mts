@@ -16,6 +16,7 @@ import {
   VoidModule,
   Parameter,
   Use,
+  TypeAlias,
 } from "../syntax-objects/index.mjs";
 import { NamedEntity } from "../syntax-objects/named-entity.mjs";
 
@@ -29,6 +30,8 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isList()) return checkListTypes(expr);
   if (expr.isIdentifier()) return checkIdentifier(expr);
   if (expr.isUse()) return checkUse(expr);
+  if (expr.isObjectType()) return checkObjectType(expr);
+  if (expr.isTypeAlias()) return checkTypeAlias(expr);
   return expr;
 };
 
@@ -320,6 +323,37 @@ const checkVarTypes = (variable: Variable): Variable => {
   return variable;
 };
 
+const checkObjectType = (obj: ObjectType): ObjectType => {
+  obj.fields.forEach((field) => {
+    const type = resolveExprType(field.typeExpr);
+
+    if (!type) {
+      throw new Error(`Unable to determine type for ${field.typeExpr}`);
+    }
+
+    field.type = type;
+  });
+
+  return obj;
+};
+
+const checkTypeAlias = (alias: TypeAlias): TypeAlias => {
+  checkTypes(alias.typeExpr);
+  alias.type = resolveExprType(alias.typeExpr);
+
+  if (!alias.type) {
+    throw new Error(`Unable to determine type for ${alias.typeExpr}`);
+  }
+
+  return alias;
+};
+
+const checkListTypes = (list: List) => {
+  console.log("Unexpected list");
+  console.log(JSON.stringify(list, undefined, 2));
+  return list.map(checkTypes);
+};
+
 const resolveExprType = (expr?: Expr): Type | undefined => {
   if (!expr) return;
   if (expr.isInt()) return i32;
@@ -343,28 +377,7 @@ const getIdentifierType = (id: Identifier): Type | undefined => {
   if (entity.isParameter()) return entity.type;
   if (entity.isFn()) return entity.getType();
   if (entity.isType()) return entity;
-};
-
-/** Takes the expression form of a struct and converts it into type form */
-const getObjectLiteralType = (ast: List): ObjectType =>
-  new ObjectType({
-    ...ast.metadata,
-    name: "literal",
-    value: ast.slice(1).value.map((labeledExpr) => {
-      const list = labeledExpr as List;
-      const identifier = list.at(1) as Identifier;
-      const type = resolveExprType(list.at(2));
-      if (!type) {
-        throw new Error("Could not determine type for struct literal");
-      }
-      return { name: identifier.value, type };
-    }),
-  });
-
-const checkListTypes = (list: List) => {
-  console.log("Unexpected list");
-  console.log(JSON.stringify(list, undefined, 2));
-  return list.map(checkTypes);
+  if (entity.isObjectType()) return entity;
 };
 
 const resolveCallFn = (call: Call): Fn | undefined => {
