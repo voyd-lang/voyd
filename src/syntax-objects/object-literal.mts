@@ -1,8 +1,10 @@
 import { Expr } from "./expr.mjs";
 import { Syntax, SyntaxMetadata } from "./syntax.mjs";
+import { ObjectType, Type } from "./types.mjs";
 
 export class ObjectLiteral extends Syntax {
   readonly syntaxType = "object-literal";
+  type?: ObjectType;
   fields: ObjectLiteralField[];
 
   constructor(opts: SyntaxMetadata & { fields: ObjectLiteralField[] }) {
@@ -26,4 +28,8 @@ export class ObjectLiteral extends Syntax {
   }
 }
 
-export type ObjectLiteralField = { name: string; initializer: Expr };
+export type ObjectLiteralField = {
+  name: string;
+  initializer: Expr;
+  type?: Type;
+};

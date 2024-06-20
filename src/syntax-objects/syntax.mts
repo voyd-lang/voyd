@@ -15,6 +15,7 @@ import type { MacroVariable } from "./macro-variable.mjs";
 import type { Macro } from "./macros.mjs";
 import type { Parameter } from "./parameter.mjs";
 import type { StringLiteral } from "./string-literal.mjs";
+import type { ObjectLiteral } from "./object-literal.mjs";
 import type {
   FnType,
   PrimitiveType,
@@ -224,6 +225,10 @@ export abstract class Syntax {
 
   isUse(): this is Use {
     return this.syntaxType === "use";
+  }
+
+  isObjectLiteral(): this is ObjectLiteral {
+    return this.syntaxType === "object-literal";
   }
 }
 

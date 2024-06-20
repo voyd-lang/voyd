@@ -17,6 +17,7 @@ import {
   Parameter,
   Use,
   TypeAlias,
+  ObjectLiteral,
 } from "../syntax-objects/index.mjs";
 import { NamedEntity } from "../syntax-objects/named-entity.mjs";
 
@@ -32,6 +33,7 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isUse()) return checkUse(expr);
   if (expr.isObjectType()) return checkObjectType(expr);
   if (expr.isTypeAlias()) return checkTypeAlias(expr);
+  if (expr.isObjectLiteral()) return checkObjectLiteralType(expr);
   return expr;
 };
 
@@ -354,6 +356,27 @@ const checkListTypes = (list: List) => {
   return list.map(checkTypes);
 };
 
+const checkObjectLiteralType = (obj: ObjectLiteral) => {
+  obj.fields.forEach((field) => {
+    checkTypes(field.initializer);
+    field.type = resolveExprType(field.initializer);
+  });
+
+  if (!obj.type) {
+    obj.type = new ObjectType({
+      ...obj.metadata,
+      name: `ObjectLiteral-${obj.syntaxId}`,
+      value: obj.fields.map((f) => ({
+        name: f.name,
+        typeExpr: f.initializer,
+        type: f.type,
+      })),
+    });
+  }
+
+  return obj;
+};
+
 const resolveExprType = (expr?: Expr): Type | undefined => {
   if (!expr) return;
   if (expr.isInt()) return i32;
@@ -367,6 +390,7 @@ const resolveExprType = (expr?: Expr): Type | undefined => {
   if (expr.isFn()) return expr.getType();
   if (expr.isType()) return expr;
   if (expr.isBlock()) return expr.type;
+  if (expr.isObjectLiteral()) return expr.type;
 };
 
 const getIdentifierType = (id: Identifier): Type | undefined => {
@@ -377,7 +401,6 @@ const getIdentifierType = (id: Identifier): Type | undefined => {
   if (entity.isParameter()) return entity.type;
   if (entity.isFn()) return entity.getType();
   if (entity.isType()) return entity;
-  if (entity.isObjectType()) return entity;
 };
 
 const resolveCallFn = (call: Call): Fn | undefined => {
@@ -409,8 +432,17 @@ const getExprLabel = (expr?: Expr): string | undefined => {
 
 const typesAreEquivalent = (a?: Type, b?: Type): boolean => {
   if (!a || !b) return false;
+
   if (a.isPrimitiveType() && b.isPrimitiveType()) {
     return a.id === b.id;
   }
+
+  if (a.isObjectType() && b.isObjectType()) {
+    return a.fields.every((field) => {
+      const match = b.fields.find((f) => f.name === field.name);
+      return match && typesAreEquivalent(field.type, match.type);
+    });
+  }
+
   return false;
 };
