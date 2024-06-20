@@ -18,6 +18,7 @@ import { Block } from "./block.mjs";
 import { VoidModule } from "./module.mjs";
 import { Declaration } from "./declaration.mjs";
 import { Use } from "./use.mjs";
+import { ObjectLiteral } from "./object-literal.mjs";
 
 export type Expr =
   | PrimitiveExpr
@@ -33,7 +34,8 @@ export type Expr =
   | Call
   | Block
   | Declaration
-  | Use;
+  | Use
+  | ObjectLiteral;
 
 /**
  * These are the Expr types that must be returned until all macros have been expanded (reader, syntax, and regular)
