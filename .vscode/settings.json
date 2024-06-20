@@ -18,6 +18,7 @@
     "popcnt",
     "printstr",
     "rotr",
+    "structref",
     "Structs",
     "UFCS",
     "WASM",

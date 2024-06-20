@@ -9,6 +9,8 @@ import { Variable } from "./syntax-objects/variable.mjs";
 import { Block } from "./syntax-objects/block.mjs";
 import { Declaration } from "./syntax-objects/declaration.mjs";
 import { VoidModule } from "./syntax-objects/module.mjs";
+import { ObjectLiteral } from "./syntax-objects/object-literal.mjs";
+import { TypeBuilder, gc } from "binaryen-gc";
 
 export const genWasmCode = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -35,6 +37,7 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isBlock()) return compileBlock({ ...opts, expr });
   if (expr.isDeclaration()) return compileDeclaration({ ...opts, expr });
   if (expr.isModule()) return compileModule({ ...opts, expr });
+  if (expr.isObjectLiteral()) return compileObjectLiteral({ ...opts, expr });
   if (expr.isType()) return mod.nop();
   if (expr.isUse()) return mod.nop();
   if (expr.isMacro()) return mod.nop();
@@ -192,6 +195,20 @@ const compileExternFn = (opts: CompileExprOpts<Fn> & { namespace: string }) => {
   return mod.nop();
 };
 
+const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
+  const { expr: obj, mod } = opts;
+
+  const literalType = buildObjectLiteralType(obj);
+
+  return gc.structs.newFromFields(
+    mod,
+    literalType,
+    obj.fields.map((field) =>
+      compileExpression({ ...opts, expr: field.initializer })
+    )
+  );
+};
+
 const compileIf = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;
   const conditionNode = expr.exprArgAt(0);
@@ -222,9 +239,24 @@ const mapBinaryenType = (type: Type): binaryen.Type => {
   if (isPrimitiveId(type, "i64")) return binaryen.i64;
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "void")) return binaryen.none;
-  if (type.isObjectType()) return binaryen.i32;
+  if (type.isObjectType()) return binaryen.structref;
   throw new Error(`Unsupported type ${type}`);
 };
 
 const isPrimitiveId = (type: Type, id: Primitive) =>
   type.isPrimitiveType() && type.name.value === id;
+
+const buildObjectLiteralType = (obj: ObjectLiteral) => {
+  const builder = new TypeBuilder(1);
+  builder.setStructType(
+    0,
+    obj.fields.map((field) => ({
+      type: mapBinaryenType(field.type!),
+      packedType: 0,
+      mutable: true,
+    }))
+  );
+  const types = builder.buildAndDispose();
+  const literalType = types.heapTypes[0];
+  return literalType;
+};
