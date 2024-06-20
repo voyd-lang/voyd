@@ -9,6 +9,7 @@ import {
   Block,
   TypeAlias,
   ObjectType,
+  ObjectLiteral,
 } from "../syntax-objects/index.mjs";
 import { TypeChecker } from "./types";
 
@@ -37,6 +38,10 @@ export const initEntities: TypeChecker = (expr) => {
 
   if (expr.calls("type")) {
     return initTypeAlias(expr);
+  }
+
+  if (expr.calls("object")) {
+    return initObjectLiteral(expr);
   }
 
   return initCall(expr);
@@ -100,6 +105,25 @@ const getReturnTypeExprForFn = (fn: List, index: number): Expr | undefined => {
   if (!returnDec?.isList()) return undefined;
   if (!returnDec.calls("return_type")) return undefined;
   return initTypeExprEntities(returnDec.at(1));
+};
+
+const initObjectLiteral = (obj: List) => {
+  return new ObjectLiteral({
+    ...obj.metadata,
+    fields: obj.sliceAsArray(1).map((f) => {
+      if (!f.isList()) {
+        throw new Error("Invalid object field");
+      }
+      const name = f.identifierAt(1);
+      const initializer = f.at(2);
+
+      if (!name || !initializer) {
+        throw new Error("Invalid object field");
+      }
+
+      return { name: name.value, initializer };
+    }),
+  });
 };
 
 const initVar = (varDef: List): Variable => {
