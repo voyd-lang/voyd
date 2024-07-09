@@ -194,6 +194,10 @@ export class ObjectType extends BaseType {
   getField(name: Id) {
     return this.fields.find((field) => field.name === getIdStr(name));
   }
+
+  getFieldIndex(name: Id) {
+    return this.fields.findIndex((field) => field.name === getIdStr(name));
+  }
 }
 
 export class ArrayType extends BaseType {

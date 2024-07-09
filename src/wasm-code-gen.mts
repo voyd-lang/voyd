@@ -4,7 +4,7 @@ import { Expr } from "./syntax-objects/expr.mjs";
 import { Fn } from "./syntax-objects/fn.mjs";
 import { Identifier } from "./syntax-objects/identifier.mjs";
 import { Int } from "./syntax-objects/int.mjs";
-import { Type, Primitive } from "./syntax-objects/types.mjs";
+import { Type, Primitive, ObjectType } from "./syntax-objects/types.mjs";
 import { Variable } from "./syntax-objects/variable.mjs";
 import { Block } from "./syntax-objects/block.mjs";
 import { Declaration } from "./syntax-objects/declaration.mjs";
@@ -87,6 +87,7 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   if (expr.calls("=")) return compileAssign(opts);
   if (expr.calls("if")) return compileIf(opts);
   if (expr.calls("export")) return compileExport(opts);
+  if (expr.calls("member-access")) return compileObjMemberAccess(opts);
 
   if (expr.calls("binaryen")) {
     return compileBnrCall(opts);
@@ -259,4 +260,21 @@ const buildObjectLiteralType = (obj: ObjectLiteral) => {
   const types = builder.buildAndDispose();
   const literalType = types.heapTypes[0];
   return literalType;
+};
+
+const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
+  const { expr, mod } = opts;
+  const obj = expr.exprArgAt(0);
+  const member = expr.identifierArgAt(1);
+  const objValue = compileExpression({ ...opts, expr: obj });
+  const type = expr.type as ObjectType;
+  const memberIndex = type.getFieldIndex(member);
+  const field = type.getField(member)!;
+  return gc.structs.getMember(
+    mod,
+    objValue,
+    memberIndex,
+    mapBinaryenType(field.type!),
+    true
+  );
 };
