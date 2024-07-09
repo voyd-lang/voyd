@@ -1,6 +1,8 @@
 import { Expr } from "./expr.mjs";
 import { Parameter } from "./parameter.mjs";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
+import { Id } from "./identifier.mjs";
+import { getIdStr } from "./get-id-str.mjs";
 
 export type Type =
   | PrimitiveType
@@ -183,6 +185,14 @@ export class ObjectType extends BaseType {
       ...super.getCloneOpts(parent),
       value: this.fields,
     });
+  }
+
+  hasField(name: Id) {
+    return this.fields.some((field) => field.name === getIdStr(name));
+  }
+
+  getField(name: Id) {
+    return this.fields.find((field) => field.name === getIdStr(name));
   }
 }
 

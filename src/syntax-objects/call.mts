@@ -18,12 +18,14 @@ export class Call extends Syntax {
       fnName: Identifier;
       fn?: Fn;
       args: List;
+      type?: Type;
     }
   ) {
     super(opts);
     this.fnName = opts.fnName;
     this.fn = opts.fn;
     this.args = opts.args;
+    this.type = opts.type;
     opts.args.parent = this;
   }
 

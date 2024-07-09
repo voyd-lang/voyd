@@ -50,12 +50,33 @@ const checkCallTypes = (call: Call): Call => {
   if (call.calls(":")) return checkLabeledArg(call);
   if (call.calls("=")) return checkAssign(call);
   call.eachArg(checkTypes);
+
+  const memberAccessCall = getMemberAccessCall(call);
+  if (memberAccessCall) return memberAccessCall;
+
   call.fn = resolveCallFn(call);
   if (!call.fn) {
     throw new Error(`Could not resolve fn ${call.fnName} at ${call.location}`);
   }
   call.type = call.fn.getReturnType();
   return call;
+};
+
+const getMemberAccessCall = (call: Call): Call | undefined => {
+  if (call.args.length > 1) return;
+  const a1 = call.argAt(0);
+  if (!a1) return;
+  const a1Type = resolveExprType(a1);
+  if (!a1Type || !a1Type.isObjectType() || !a1Type.hasField(call.fnName)) {
+    return;
+  }
+
+  return new Call({
+    ...call.metadata,
+    fnName: Identifier.from("member-access"),
+    args: new List({ value: [a1, call.fnName] }),
+    type: a1Type.getField(call.fnName)?.type,
+  });
 };
 
 const checkAssign = (call: Call) => {
