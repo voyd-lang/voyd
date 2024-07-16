@@ -11,6 +11,7 @@ import { Declaration } from "./syntax-objects/declaration.mjs";
 import { VoidModule } from "./syntax-objects/module.mjs";
 import { ObjectLiteral } from "./syntax-objects/object-literal.mjs";
 import { TypeBuilder, gc } from "binaryen-gc";
+import { resolveExprType } from "./semantics/check-types.mjs";
 
 export const genWasmCode = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -267,7 +268,7 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const obj = expr.exprArgAt(0);
   const member = expr.identifierArgAt(1);
   const objValue = compileExpression({ ...opts, expr: obj });
-  const type = expr.type as ObjectType;
+  const type = resolveExprType(obj) as ObjectType;
   const memberIndex = type.getFieldIndex(member);
   const field = type.getField(member)!;
   return gc.structs.getMember(

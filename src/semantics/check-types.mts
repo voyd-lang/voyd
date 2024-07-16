@@ -38,12 +38,12 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
 };
 
 const checkBlockTypes = (block: Block): Block => {
-  block.each(checkTypes);
+  block.body = block.body.map(checkTypes);
   block.type = resolveExprType(block.lastExpr());
   return block;
 };
 
-const checkCallTypes = (call: Call): Call => {
+const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("export")) return checkExport(call);
   if (call.calls("if")) return checkIf(call);
   if (call.calls("binaryen")) return checkBinaryenCall(call);
@@ -54,12 +54,35 @@ const checkCallTypes = (call: Call): Call => {
   const memberAccessCall = getMemberAccessCall(call);
   if (memberAccessCall) return memberAccessCall;
 
+  const type = getIdentifierType(call.fnName);
+  if (type?.isObjectType()) {
+    return checkObjectLiteralInit(call, type);
+  }
+
   call.fn = resolveCallFn(call);
   if (!call.fn) {
     throw new Error(`Could not resolve fn ${call.fnName} at ${call.location}`);
   }
+
   call.type = call.fn.getReturnType();
   return call;
+};
+
+const checkObjectLiteralInit = (
+  call: Call,
+  type: ObjectType
+): ObjectLiteral => {
+  const literal = call.argAt(0);
+  if (!literal?.isObjectLiteral()) {
+    throw new Error(`Expected object literal, got ${literal}`);
+  }
+
+  if (!typesAreEquivalent(literal.type, type)) {
+    throw new Error(`Object literal type does not match expected type`);
+  }
+
+  literal.type = type;
+  return literal;
 };
 
 const getMemberAccessCall = (call: Call): Call | undefined => {
@@ -259,7 +282,7 @@ const checkFnTypes = (fn: Fn): Fn => {
     fn.returnType = resolveExprType(fn.returnTypeExpr);
   }
 
-  checkTypes(fn.body);
+  fn.body = checkTypes(fn.body);
 
   const inferredReturnType = resolveExprType(fn.body);
   if (!inferredReturnType) {
@@ -323,6 +346,7 @@ const resolveExports = ({
 
 const checkVarTypes = (variable: Variable): Variable => {
   const initializer = checkTypes(variable.initializer);
+  variable.initializer = initializer;
   const inferredType = resolveExprType(initializer);
 
   if (!inferredType) {
@@ -398,7 +422,7 @@ const checkObjectLiteralType = (obj: ObjectLiteral) => {
   return obj;
 };
 
-const resolveExprType = (expr?: Expr): Type | undefined => {
+export const resolveExprType = (expr?: Expr): Type | undefined => {
   if (!expr) return;
   if (expr.isInt()) return i32;
   if (expr.isFloat()) return f32;
@@ -409,6 +433,7 @@ const resolveExprType = (expr?: Expr): Type | undefined => {
     return expr.type;
   }
   if (expr.isFn()) return expr.getType();
+  if (expr.isTypeAlias()) return expr.type;
   if (expr.isType()) return expr;
   if (expr.isBlock()) return expr.type;
   if (expr.isObjectLiteral()) return expr.type;
@@ -421,6 +446,7 @@ const getIdentifierType = (id: Identifier): Type | undefined => {
   if (entity.isGlobal()) return entity.type;
   if (entity.isParameter()) return entity.type;
   if (entity.isFn()) return entity.getType();
+  if (entity.isTypeAlias()) return entity.type;
   if (entity.isType()) return entity;
 };
 

@@ -150,7 +150,7 @@ const initVar = (varDef: List): Variable => {
     ...varDef.metadata,
     name,
     typeExpr: initTypeExprEntities(typeExpr),
-    initializer,
+    initializer: initEntities(initializer),
     isMutable,
   });
 };
