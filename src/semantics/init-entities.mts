@@ -184,6 +184,10 @@ const initTypeAlias = (type: List) => {
     throw new Error(`Invalid type alias ${type.location}`);
   }
 
+  if (typeExpr.isType()) {
+    typeExpr.setName(name.value);
+  }
+
   return new TypeAlias({ ...type.metadata, name, typeExpr });
 };
 

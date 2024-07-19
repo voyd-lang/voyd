@@ -13,7 +13,6 @@ import { expandRegularMacros } from "./regular-macros.mjs";
 import { typeCheck } from "./semantics/index.mjs";
 import binaryen from "binaryen";
 import { resolveSrc } from "./lib/resolve-src.mjs";
-import { internalTest } from "./test.mjs";
 
 main().catch(errorHandler);
 
@@ -48,10 +47,6 @@ async function main() {
 
   if (config.run) {
     return runWasm(config.index, config.runBinaryenOptimizationPass);
-  }
-
-  if (config.internalTest) {
-    return internalTest();
   }
 
   console.log(

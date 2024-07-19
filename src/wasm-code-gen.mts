@@ -206,7 +206,9 @@ const compileExternFn = (opts: CompileExprOpts<Fn> & { namespace: string }) => {
 const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
   const { expr: obj, mod } = opts;
 
-  const literalType = buildObjectLiteralType(mod, obj);
+  const literalType = obj.type?.binaryenHeapType
+    ? obj.type?.binaryenHeapType
+    : buildObjectType(mod, obj.type!);
 
   return initStruct(
     mod,
@@ -254,21 +256,20 @@ const mapBinaryenType = (type: Type): binaryen.Type => {
 const isPrimitiveId = (type: Type, id: Primitive) =>
   type.isPrimitiveType() && type.name.value === id;
 
-const buildObjectLiteralType = (
+const buildObjectType = (
   mod: binaryen.Module,
-  obj: ObjectLiteral
+  obj: ObjectType
 ): HeapTypeRef => {
   const binaryenType = defineStructType(mod, {
-    name: `ObjectLiteral-${obj.syntaxId}`,
+    name: obj.id,
     fields: obj.fields.map((field) => ({
       type: mapBinaryenType(field.type!),
       name: field.name,
     })),
   });
   const binaryenHeapType = binaryenTypeToHeapType(binaryenType);
-  const type = obj.type!;
-  type.binaryenHeapType = binaryenHeapType;
-  type.binaryenType = binaryenType;
+  obj.binaryenHeapType = binaryenHeapType;
+  obj.binaryenType = binaryenType;
   return binaryenHeapType;
 };
 

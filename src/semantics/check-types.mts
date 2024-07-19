@@ -49,7 +49,7 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("binaryen")) return checkBinaryenCall(call);
   if (call.calls(":")) return checkLabeledArg(call);
   if (call.calls("=")) return checkAssign(call);
-  call.eachArg(checkTypes);
+  call.args = call.args.map(checkTypes);
 
   const memberAccessCall = getMemberAccessCall(call);
   if (memberAccessCall) return memberAccessCall;
