@@ -158,4 +158,5 @@ export type AugmentedBinaryen = typeof binaryen & {
     name: unknown
   ): void;
   stringToUTF8OnStack(str: string): number;
+  HEAPU32: Uint32Array;
 };

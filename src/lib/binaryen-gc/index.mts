@@ -82,8 +82,6 @@ export const initStruct = (
 /** Returns a pointer to the allocated array */
 const allocU32Array = (u32s: number[]): number => {
   const ptr = bin._malloc(u32s.length << 2);
-  u32s.forEach((value, index) => {
-    bin.__i32_store(ptr + index * 4, value);
-  });
+  bin.HEAPU32.set(u32s, ptr >>> 2);
   return ptr;
 };
