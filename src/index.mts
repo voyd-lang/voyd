@@ -10,7 +10,7 @@ import {
 } from "./syntax-macros/index.mjs";
 import { resolveFileModules } from "./modules.mjs";
 import { expandRegularMacros } from "./regular-macros.mjs";
-import { typeCheck } from "./type-checker/index.mjs";
+import { typeCheck } from "./semantics/index.mjs";
 import binaryen from "binaryen";
 import { resolveSrc } from "./lib/resolve-src.mjs";
 

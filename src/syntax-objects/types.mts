@@ -1,6 +1,8 @@
 import { Expr } from "./expr.mjs";
 import { Parameter } from "./parameter.mjs";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
+import { Id } from "./identifier.mjs";
+import { getIdStr } from "./get-id-str.mjs";
 
 export type Type =
   | PrimitiveType
@@ -27,6 +29,7 @@ export class TypeAlias extends BaseType {
   readonly kindOfType = "type-alias";
   readonly size = 4;
   typeExpr: Expr;
+  type?: Type;
 
   constructor(opts: NamedEntityOpts & { typeExpr: Expr }) {
     super(opts);
@@ -155,34 +158,49 @@ export class TupleType extends BaseType {
   }
 }
 
+export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
+
 export class ObjectType extends BaseType {
   readonly kindOfType = "object";
-  value: { name: string; type: Type }[];
+  fields: ObjectField[];
+  /** Type used for locals, globals, function return type */
+  binaryenType?: number;
+  /** Type used for initializing the heap type */
+  binaryenHeapType?: number;
 
-  constructor(
-    opts: NamedEntityOpts & { value: { name: string; type: Type }[] }
-  ) {
+  constructor(opts: NamedEntityOpts & { value: ObjectField[] }) {
     super(opts);
-    this.value = opts.value;
+    this.fields = opts.value;
   }
 
   get size() {
-    let total = 0;
-    for (const field of this.value) {
-      total += field.type.size;
-    }
-    return total;
+    return 4;
   }
 
   toJSON(): TypeJSON {
     return [
       "type",
-      ["object", ...this.value.map(({ name, type }) => [name, type])],
+      ["object", ...this.fields.map(({ name, typeExpr }) => [name, typeExpr])],
     ];
   }
 
   clone(parent?: Expr): ObjectType {
-    return new ObjectType({ ...super.getCloneOpts(parent), value: this.value });
+    return new ObjectType({
+      ...super.getCloneOpts(parent),
+      value: this.fields,
+    });
+  }
+
+  hasField(name: Id) {
+    return this.fields.some((field) => field.name === getIdStr(name));
+  }
+
+  getField(name: Id) {
+    return this.fields.find((field) => field.name === getIdStr(name));
+  }
+
+  getFieldIndex(name: Id) {
+    return this.fields.findIndex((field) => field.name === getIdStr(name));
   }
 }
 

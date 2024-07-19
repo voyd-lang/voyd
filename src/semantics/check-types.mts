@@ -16,6 +16,8 @@ import {
   VoidModule,
   Parameter,
   Use,
+  TypeAlias,
+  ObjectLiteral,
 } from "../syntax-objects/index.mjs";
 import { NamedEntity } from "../syntax-objects/named-entity.mjs";
 
@@ -29,28 +31,75 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isList()) return checkListTypes(expr);
   if (expr.isIdentifier()) return checkIdentifier(expr);
   if (expr.isUse()) return checkUse(expr);
+  if (expr.isObjectType()) return checkObjectType(expr);
+  if (expr.isTypeAlias()) return checkTypeAlias(expr);
+  if (expr.isObjectLiteral()) return checkObjectLiteralType(expr);
   return expr;
 };
 
 const checkBlockTypes = (block: Block): Block => {
-  block.each(checkTypes);
+  block.body = block.body.map(checkTypes);
   block.type = resolveExprType(block.lastExpr());
   return block;
 };
 
-const checkCallTypes = (call: Call): Call => {
+const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("export")) return checkExport(call);
   if (call.calls("if")) return checkIf(call);
   if (call.calls("binaryen")) return checkBinaryenCall(call);
   if (call.calls(":")) return checkLabeledArg(call);
   if (call.calls("=")) return checkAssign(call);
-  call.eachArg(checkTypes);
+  call.args = call.args.map(checkTypes);
+
+  const memberAccessCall = getMemberAccessCall(call);
+  if (memberAccessCall) return memberAccessCall;
+
+  const type = getIdentifierType(call.fnName);
+  if (type?.isObjectType()) {
+    return checkObjectLiteralInit(call, type);
+  }
+
   call.fn = resolveCallFn(call);
   if (!call.fn) {
     throw new Error(`Could not resolve fn ${call.fnName} at ${call.location}`);
   }
+
   call.type = call.fn.getReturnType();
   return call;
+};
+
+const checkObjectLiteralInit = (
+  call: Call,
+  type: ObjectType
+): ObjectLiteral => {
+  const literal = call.argAt(0);
+  if (!literal?.isObjectLiteral()) {
+    throw new Error(`Expected object literal, got ${literal}`);
+  }
+
+  if (!typesAreEquivalent(literal.type, type)) {
+    throw new Error(`Object literal type does not match expected type`);
+  }
+
+  literal.type = type;
+  return literal;
+};
+
+const getMemberAccessCall = (call: Call): Call | undefined => {
+  if (call.args.length > 1) return;
+  const a1 = call.argAt(0);
+  if (!a1) return;
+  const a1Type = resolveExprType(a1);
+  if (!a1Type || !a1Type.isObjectType() || !a1Type.hasField(call.fnName)) {
+    return;
+  }
+
+  return new Call({
+    ...call.metadata,
+    fnName: Identifier.from("member-access"),
+    args: new List({ value: [a1, call.fnName] }),
+    type: a1Type.getField(call.fnName)?.type,
+  });
 };
 
 const checkAssign = (call: Call) => {
@@ -233,7 +282,7 @@ const checkFnTypes = (fn: Fn): Fn => {
     fn.returnType = resolveExprType(fn.returnTypeExpr);
   }
 
-  checkTypes(fn.body);
+  fn.body = checkTypes(fn.body);
 
   const inferredReturnType = resolveExprType(fn.body);
   if (!inferredReturnType) {
@@ -297,6 +346,7 @@ const resolveExports = ({
 
 const checkVarTypes = (variable: Variable): Variable => {
   const initializer = checkTypes(variable.initializer);
+  variable.initializer = initializer;
   const inferredType = resolveExprType(initializer);
 
   if (!inferredType) {
@@ -320,7 +370,59 @@ const checkVarTypes = (variable: Variable): Variable => {
   return variable;
 };
 
-const resolveExprType = (expr?: Expr): Type | undefined => {
+const checkObjectType = (obj: ObjectType): ObjectType => {
+  obj.fields.forEach((field) => {
+    const type = resolveExprType(field.typeExpr);
+
+    if (!type) {
+      throw new Error(`Unable to determine type for ${field.typeExpr}`);
+    }
+
+    field.type = type;
+  });
+
+  return obj;
+};
+
+const checkTypeAlias = (alias: TypeAlias): TypeAlias => {
+  checkTypes(alias.typeExpr);
+  alias.type = resolveExprType(alias.typeExpr);
+
+  if (!alias.type) {
+    throw new Error(`Unable to determine type for ${alias.typeExpr}`);
+  }
+
+  return alias;
+};
+
+const checkListTypes = (list: List) => {
+  console.log("Unexpected list");
+  console.log(JSON.stringify(list, undefined, 2));
+  return list.map(checkTypes);
+};
+
+const checkObjectLiteralType = (obj: ObjectLiteral) => {
+  obj.fields.forEach((field) => {
+    checkTypes(field.initializer);
+    field.type = resolveExprType(field.initializer);
+  });
+
+  if (!obj.type) {
+    obj.type = new ObjectType({
+      ...obj.metadata,
+      name: `ObjectLiteral-${obj.syntaxId}`,
+      value: obj.fields.map((f) => ({
+        name: f.name,
+        typeExpr: f.initializer,
+        type: f.type,
+      })),
+    });
+  }
+
+  return obj;
+};
+
+export const resolveExprType = (expr?: Expr): Type | undefined => {
   if (!expr) return;
   if (expr.isInt()) return i32;
   if (expr.isFloat()) return f32;
@@ -331,8 +433,10 @@ const resolveExprType = (expr?: Expr): Type | undefined => {
     return expr.type;
   }
   if (expr.isFn()) return expr.getType();
+  if (expr.isTypeAlias()) return expr.type;
   if (expr.isType()) return expr;
   if (expr.isBlock()) return expr.type;
+  if (expr.isObjectLiteral()) return expr.type;
 };
 
 const getIdentifierType = (id: Identifier): Type | undefined => {
@@ -342,29 +446,8 @@ const getIdentifierType = (id: Identifier): Type | undefined => {
   if (entity.isGlobal()) return entity.type;
   if (entity.isParameter()) return entity.type;
   if (entity.isFn()) return entity.getType();
+  if (entity.isTypeAlias()) return entity.type;
   if (entity.isType()) return entity;
-};
-
-/** Takes the expression form of a struct and converts it into type form */
-const getObjectLiteralType = (ast: List): ObjectType =>
-  new ObjectType({
-    ...ast.metadata,
-    name: "literal",
-    value: ast.slice(1).value.map((labeledExpr) => {
-      const list = labeledExpr as List;
-      const identifier = list.at(1) as Identifier;
-      const type = resolveExprType(list.at(2));
-      if (!type) {
-        throw new Error("Could not determine type for struct literal");
-      }
-      return { name: identifier.value, type };
-    }),
-  });
-
-const checkListTypes = (list: List) => {
-  console.log("Unexpected list");
-  console.log(JSON.stringify(list, undefined, 2));
-  return list.map(checkTypes);
 };
 
 const resolveCallFn = (call: Call): Fn | undefined => {
@@ -396,8 +479,17 @@ const getExprLabel = (expr?: Expr): string | undefined => {
 
 const typesAreEquivalent = (a?: Type, b?: Type): boolean => {
   if (!a || !b) return false;
+
   if (a.isPrimitiveType() && b.isPrimitiveType()) {
     return a.id === b.id;
   }
+
+  if (a.isObjectType() && b.isObjectType()) {
+    return a.fields.every((field) => {
+      const match = b.fields.find((f) => f.name === field.name);
+      return match && typesAreEquivalent(field.type, match.type);
+    });
+  }
+
   return false;
 };

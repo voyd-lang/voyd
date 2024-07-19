@@ -10,8 +10,8 @@ export type NamedEntityOpts = SyntaxMetadata & {
 };
 
 export abstract class NamedEntity extends Syntax {
-  readonly id: string;
-  readonly name: Identifier;
+  id: string;
+  name: Identifier;
   isExported = false;
 
   constructor(opts: NamedEntityOpts) {
@@ -33,6 +33,11 @@ export abstract class NamedEntity extends Syntax {
       name: this.name,
       isExported: this.isExported,
     };
+  }
+
+  setName(name: string) {
+    this.name = Identifier.from(name);
+    this.id = this.genId();
   }
 }
 

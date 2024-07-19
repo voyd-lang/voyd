@@ -21,4 +21,6 @@ export type VoidConfig = {
   run?: boolean;
   /** Specifies the entry void file */
   index: string;
+  /** Run the internal test script */
+  internalTest?: boolean;
 };
