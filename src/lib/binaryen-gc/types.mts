@@ -36,6 +36,11 @@ export type StructField = {
 export type AugmentedBinaryen = typeof binaryen & {
   _BinaryenTypeFromHeapType(heapType: HeapTypeRef, nullable: bool): TypeRef;
   _BinaryenPackedTypeNotPacked(): PackedType;
+  _BinaryenRefCast(
+    module: ModuleRef,
+    ref: ExpressionRef,
+    type: TypeRef
+  ): ExpressionRef;
   _BinaryenTypeGetHeapType(type: TypeRef): HeapTypeRef;
   _BinaryenArrayTypeGetElementType(heapType: HeapTypeRef): TypeRef;
   _BinaryenStructTypeGetNumFields(heapType: HeapTypeRef): Index;

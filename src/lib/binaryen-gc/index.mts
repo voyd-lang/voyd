@@ -49,7 +49,7 @@ export const defineStructType = (mod: binaryen.Module, struct: Struct) => {
 
   annotateStructNames(mod, result, struct);
 
-  return result;
+  return bin._BinaryenTypeFromHeapType(result, false);
 };
 
 export const initStruct = (
@@ -68,14 +68,26 @@ export const initStruct = (
   return structNew;
 };
 
-export const structGetFieldValue = (
-  mod: binaryen.Module,
-  fieldType: number,
-  fieldIndex: number,
-  ref: ExpressionRef,
-  signed: boolean
-): ExpressionRef => {
-  return bin._BinaryenStructGet(mod.ptr, fieldIndex, ref, fieldType, signed);
+export const structGetFieldValue = ({
+  mod,
+  fieldType,
+  fieldIndex,
+  exprRef,
+  signed,
+}: {
+  mod: binaryen.Module;
+  fieldType: number;
+  fieldIndex: number;
+  exprRef: ExpressionRef;
+  signed?: boolean;
+}): ExpressionRef => {
+  return bin._BinaryenStructGet(
+    mod.ptr,
+    fieldIndex,
+    exprRef,
+    fieldType,
+    !!signed
+  );
 };
 
 /** Returns a pointer to the allocated array */
