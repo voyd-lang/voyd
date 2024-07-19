@@ -20,12 +20,18 @@ export type ExpressionRef = number;
 export type Module = binaryen.Module;
 
 export type Struct = {
+  name?: string;
+  fields: StructField[];
+};
+
+export type StructField = {
   type: TypeRef;
+  name?: string;
   /** Defaults to unpacked */
   packedType?: PackedType;
   /** Defaults to immutable */
   mutable?: bool;
-}[];
+};
 
 export type AugmentedBinaryen = typeof binaryen & {
   _BinaryenTypeFromHeapType(heapType: HeapTypeRef, nullable: bool): TypeRef;
@@ -46,6 +52,7 @@ export type AugmentedBinaryen = typeof binaryen & {
   _free(ptr: usize): void;
   __i32_load(ptr: usize): number;
   __i32_store(ptr: usize, value: number): void;
+  __i32_store8(ptr: usize, value: number): void;
   _TypeBuilderSetStructType(
     builder: TypeBuilderRef,
     index: Index,
@@ -139,4 +146,15 @@ export type AugmentedBinaryen = typeof binaryen & {
   ): ExpressionRef;
   _BinaryenArrayToStack(module: ModuleRef, ref: ExpressionRef): ExpressionRef;
   _BinaryenArrayFromStack(module: ModuleRef, ref: ExpressionRef): ExpressionRef;
+  _BinaryenModuleSetTypeName(
+    module: ModuleRef,
+    type: HeapTypeRef,
+    name: unknown
+  ): void;
+  _BinaryenModuleSetFieldName(
+    module: ModuleRef,
+    type: HeapTypeRef,
+    index: number,
+    name: unknown
+  ): void;
 };
