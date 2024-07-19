@@ -22,7 +22,7 @@ fn app() -> JSX::Element
   $<div>
     <h1>TODO</h1>
     <ul>
-      ${todo_items.map i => $<li>{i}</li>}
+      {todo_items.map i => $<li>{i}</li>}
     </ul>
   </div>
 ```
