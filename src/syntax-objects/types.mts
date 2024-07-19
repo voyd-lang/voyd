@@ -163,6 +163,10 @@ export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
 export class ObjectType extends BaseType {
   readonly kindOfType = "object";
   fields: ObjectField[];
+  /** Type used for locals, globals, function return type */
+  binaryenType?: number;
+  /** Type used for initializing the heap type */
+  binaryenHeapType?: number;
 
   constructor(opts: NamedEntityOpts & { value: ObjectField[] }) {
     super(opts);

@@ -4,6 +4,7 @@ import {
   ExpressionRef,
   HeapTypeRef,
   Struct,
+  Type,
 } from "./types.mjs";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
@@ -50,6 +51,10 @@ export const defineStructType = (mod: binaryen.Module, struct: Struct) => {
   annotateStructNames(mod, result, struct);
 
   return bin._BinaryenTypeFromHeapType(result, false);
+};
+
+export const binaryenTypeToHeapType = (type: Type): HeapTypeRef => {
+  return bin._BinaryenTypeGetHeapType(type);
 };
 
 export const initStruct = (

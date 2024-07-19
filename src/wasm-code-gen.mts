@@ -12,9 +12,12 @@ import { VoidModule } from "./syntax-objects/module.mjs";
 import { ObjectLiteral } from "./syntax-objects/object-literal.mjs";
 import { resolveExprType } from "./semantics/check-types.mjs";
 import {
+  binaryenTypeToHeapType,
   defineStructType,
+  initStruct,
   structGetFieldValue,
 } from "./lib/binaryen-gc/index.mjs";
+import { HeapTypeRef } from "./lib/binaryen-gc/types.mjs";
 
 export const genWasmCode = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -203,9 +206,9 @@ const compileExternFn = (opts: CompileExprOpts<Fn> & { namespace: string }) => {
 const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
   const { expr: obj, mod } = opts;
 
-  const literalType = buildObjectLiteralType(obj);
+  const literalType = buildObjectLiteralType(mod, obj);
 
-  return gc.structs.newFromFields(
+  return initStruct(
     mod,
     literalType,
     obj.fields.map((field) =>
@@ -244,21 +247,29 @@ const mapBinaryenType = (type: Type): binaryen.Type => {
   if (isPrimitiveId(type, "i64")) return binaryen.i64;
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "void")) return binaryen.none;
-  if (type.isObjectType()) return binaryen.structref;
+  if (type.isObjectType()) return type.binaryenType!;
   throw new Error(`Unsupported type ${type}`);
 };
 
 const isPrimitiveId = (type: Type, id: Primitive) =>
   type.isPrimitiveType() && type.name.value === id;
 
-const buildObjectLiteralType = (mod: binaryen.Module, obj: ObjectLiteral) => {
-  return defineStructType(mod, {
+const buildObjectLiteralType = (
+  mod: binaryen.Module,
+  obj: ObjectLiteral
+): HeapTypeRef => {
+  const binaryenType = defineStructType(mod, {
     name: `ObjectLiteral-${obj.syntaxId}`,
     fields: obj.fields.map((field) => ({
       type: mapBinaryenType(field.type!),
       name: field.name,
     })),
   });
+  const binaryenHeapType = binaryenTypeToHeapType(binaryenType);
+  const type = obj.type!;
+  type.binaryenHeapType = binaryenHeapType;
+  type.binaryenType = binaryenType;
+  return binaryenHeapType;
 };
 
 const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
@@ -269,5 +280,10 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const type = resolveExprType(obj) as ObjectType;
   const memberIndex = type.getFieldIndex(member);
   const field = type.getField(member)!;
-  return structGetFieldValue(mod, type, memberIndex, objValue, false);
+  return structGetFieldValue({
+    mod,
+    fieldIndex: memberIndex,
+    fieldType: mapBinaryenType(field.type!),
+    exprRef: objValue,
+  });
 };
