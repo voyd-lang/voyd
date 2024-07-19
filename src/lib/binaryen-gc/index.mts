@@ -1,5 +1,10 @@
 import binaryen from "binaryen";
-import { AugmentedBinaryen, ExpressionRef, Struct } from "./types.mjs";
+import {
+  AugmentedBinaryen,
+  ExpressionRef,
+  HeapTypeRef,
+  Struct,
+} from "./types.mjs";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -42,23 +47,7 @@ export const defineStructType = (mod: binaryen.Module, struct: Struct) => {
   const result = bin.__i32_load(out);
   bin._free(out);
 
-  fields.forEach(({ name }, index) => {
-    if (!name) return;
-    bin._BinaryenModuleSetFieldName(
-      mod.ptr,
-      result,
-      index,
-      bin.stringToUTF8OnStack(name)
-    );
-  });
-
-  if (struct.name) {
-    bin._BinaryenModuleSetTypeName(
-      mod.ptr,
-      result,
-      bin.stringToUTF8OnStack(struct.name)
-    );
-  }
+  annotateStructNames(mod, result, struct);
 
   return result;
 };
@@ -79,9 +68,43 @@ export const initStruct = (
   return structNew;
 };
 
+export const structGetFieldValue = (
+  mod: binaryen.Module,
+  fieldType: number,
+  fieldIndex: number,
+  ref: ExpressionRef,
+  signed: boolean
+): ExpressionRef => {
+  return bin._BinaryenStructGet(mod.ptr, fieldIndex, ref, fieldType, signed);
+};
+
 /** Returns a pointer to the allocated array */
 const allocU32Array = (u32s: number[]): number => {
   const ptr = bin._malloc(u32s.length << 2);
   bin.HEAPU32.set(u32s, ptr >>> 2);
   return ptr;
+};
+
+const annotateStructNames = (
+  mod: binaryen.Module,
+  typeRef: HeapTypeRef,
+  struct: Struct
+) => {
+  struct.fields.forEach(({ name }, index) => {
+    if (!name) return;
+    bin._BinaryenModuleSetFieldName(
+      mod.ptr,
+      typeRef,
+      index,
+      bin.stringToUTF8OnStack(name)
+    );
+  });
+
+  if (struct.name) {
+    bin._BinaryenModuleSetTypeName(
+      mod.ptr,
+      typeRef,
+      bin.stringToUTF8OnStack(struct.name)
+    );
+  }
 };
