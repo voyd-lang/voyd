@@ -8,7 +8,6 @@ export function internalTest() {
   // Simple module with a function that returns a Vec, and a main function that reads the x value
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
-
   // Simple Vec type { x: i32, y: i32, z: i32 };
   const vecType = defineStructType(mod, {
     name: "Vec",
@@ -38,12 +37,12 @@ export function internalTest() {
 
   // Simple Vec type { x: i32, y: i32, z: i32 };
   const vecType2 = defineStructType(mod, {
-    name: "Veca",
+    name: "Vec",
     fields: [
       { name: "x", type: bin.i32, mutable: false },
       { name: "y", type: bin.i32, mutable: false },
-      { name: "z", type: bin.i32, mutable: false },
       { name: "f", type: bin.i32, mutable: false },
+      { name: "z", type: bin.i32, mutable: false },
     ],
   });
 

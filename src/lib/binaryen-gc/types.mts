@@ -20,13 +20,13 @@ export type ExpressionRef = number;
 export type Module = binaryen.Module;
 
 export type Struct = {
-  name?: string;
+  name: string;
   fields: StructField[];
 };
 
 export type StructField = {
   type: TypeRef;
-  name?: string;
+  name: string;
   /** Defaults to unpacked */
   packedType?: PackedType;
   /** Defaults to immutable */
@@ -157,4 +157,5 @@ export type AugmentedBinaryen = typeof binaryen & {
     index: number,
     name: unknown
   ): void;
+  stringToUTF8OnStack(str: string): number;
 };

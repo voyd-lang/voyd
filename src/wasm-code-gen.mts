@@ -10,7 +10,6 @@ import { Block } from "./syntax-objects/block.mjs";
 import { Declaration } from "./syntax-objects/declaration.mjs";
 import { VoidModule } from "./syntax-objects/module.mjs";
 import { ObjectLiteral } from "./syntax-objects/object-literal.mjs";
-import { TypeBuilder, gc } from "binaryen-gc";
 import { resolveExprType } from "./semantics/check-types.mjs";
 
 export const genWasmCode = (ast: Expr) => {
@@ -198,17 +197,18 @@ const compileExternFn = (opts: CompileExprOpts<Fn> & { namespace: string }) => {
 };
 
 const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
-  const { expr: obj, mod } = opts;
+  // const { expr: obj, mod } = opts;
 
-  const literalType = buildObjectLiteralType(obj);
+  // const literalType = buildObjectLiteralType(obj);
 
-  return gc.structs.newFromFields(
-    mod,
-    literalType,
-    obj.fields.map((field) =>
-      compileExpression({ ...opts, expr: field.initializer })
-    )
-  );
+  // return gc.structs.newFromFields(
+  //   mod,
+  //   literalType,
+  //   obj.fields.map((field) =>
+  //     compileExpression({ ...opts, expr: field.initializer })
+  //   )
+  // );
+  return 0;
 };
 
 const compileIf = (opts: CompileExprOpts<Call>) => {
@@ -249,33 +249,34 @@ const isPrimitiveId = (type: Type, id: Primitive) =>
   type.isPrimitiveType() && type.name.value === id;
 
 const buildObjectLiteralType = (obj: ObjectLiteral) => {
-  const builder = new TypeBuilder(1);
-  builder.setStructType(
-    0,
-    obj.fields.map((field) => ({
-      type: mapBinaryenType(field.type!),
-      packedType: 0,
-      mutable: true,
-    }))
-  );
-  const types = builder.buildAndDispose();
-  const literalType = types.heapTypes[0];
-  return literalType;
+  // const builder = new TypeBuilder(1);
+  // builder.setStructType(
+  //   0,
+  //   obj.fields.map((field) => ({
+  //     type: mapBinaryenType(field.type!),
+  //     packedType: 0,
+  //     mutable: true,
+  //   }))
+  // );
+  // const types = builder.buildAndDispose();
+  // const literalType = types.heapTypes[0];
+  // return literalType;
 };
 
 const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
-  const { expr, mod } = opts;
-  const obj = expr.exprArgAt(0);
-  const member = expr.identifierArgAt(1);
-  const objValue = compileExpression({ ...opts, expr: obj });
-  const type = resolveExprType(obj) as ObjectType;
-  const memberIndex = type.getFieldIndex(member);
-  const field = type.getField(member)!;
-  return gc.structs.getMember(
-    mod,
-    objValue,
-    memberIndex,
-    mapBinaryenType(field.type!),
-    true
-  );
+  // const { expr, mod } = opts;
+  // const obj = expr.exprArgAt(0);
+  // const member = expr.identifierArgAt(1);
+  // const objValue = compileExpression({ ...opts, expr: obj });
+  // const type = resolveExprType(obj) as ObjectType;
+  // const memberIndex = type.getFieldIndex(member);
+  // const field = type.getField(member)!;
+  // return gc.structs.getMember(
+  //   mod,
+  //   objValue,
+  //   memberIndex,
+  //   mapBinaryenType(field.type!),
+  //   false
+  // );
+  return 0;
 };
