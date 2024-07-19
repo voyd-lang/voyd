@@ -32,19 +32,20 @@ export function main() {
     mod.i32.const(3),
   ]);
 
+  mod.addFunction("createStruct", bin.createType([]), vecType, [], newStruct);
+
   // // // Main function that reads the x value of the Vec
   mod.addFunction(
     "main",
     bin.createType([vecType]),
     bin.i32,
     [],
-    bin._BinaryenStructGet(
-      mod.ptr,
-      0,
-      mod.local.get(0, vecType),
-      bin.i32,
-      false
-    )
+    structGetFieldValue({
+      mod,
+      fieldIndex: 0,
+      fieldType: bin.i32,
+      exprRef: mod.local.get(0, vecType),
+    })
   );
 
   mod.addFunctionExport("main", "main");
