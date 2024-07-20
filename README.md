@@ -71,10 +71,11 @@ voidc path/to/code.void
 
 **Requirements**
 
-Currently requires node v22 nightly
+Currently requires node v22
 
-```
-fnm --node-dist-mirror https://nodejs.org/download/nightly install v22
+```bash
+# Or nvm
+fnm install v22
 ```
 
 # Overview
@@ -90,13 +91,12 @@ fnm --node-dist-mirror https://nodejs.org/download/nightly install v22
 ```rust
 true // Boolean
 false // Boolean
-1 // i32 by default (32 bit integer)
-1.0 // f32 by default (32 bit float)
+1 // i32 by default
+1.0 // f32 by default
 "Hello!" // String, can be multiline, supports interpolation via ${}
-[1, 2, 3] // Tuple literal
+(1, 2, 3) // Tuple literal
+[1, 2, 3] // Array literal
 {x: 2, y: 4} // Object literal
-#[1, 2, 3] // Array
-#{x: 3, y: 4} // Dictionary
 ```
 
 ## Variables

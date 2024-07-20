@@ -16,6 +16,7 @@ add(1, 2)
 With return type inference:
 
 ```void
+// Equal sign is used when the function is written on one line
 fn add(a: i32, b: i32) = a + b
 ```
 
