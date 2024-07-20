@@ -1,4 +1,6 @@
 export const rawParserAST = [
+  "ast",
+  ",",
   "\n",
   "fn",
   " ",

@@ -5,7 +5,7 @@ import { Expr, List } from "../../syntax-objects/index.mjs";
  * Primary surface language syntax macro. Post whitespace interpretation.
  * In charge of operator parsing and precedence.
  */
-export const primary = (list: List): List => list.map(parseExpression);
+export const primary = (list: List): List => parseList(list);
 
 const parseExpression = (expr: Expr): Expr => {
   if (!expr.isList()) return expr;

@@ -1,4 +1,5 @@
 export const desugarredAst = [
+  "ast",
   ["use", ["::", ["::", "std", "macros"], "all"]],
   [
     "use",
@@ -143,6 +144,19 @@ export const desugarredAst = [
       ["+", ["*", "x", "y"], 10],
       ["x"],
       "x",
+      [
+        "let",
+        [
+          "=",
+          "vec",
+          [
+            "object",
+            [":", "x", 10],
+            [":", "y", "Point", ["object", [":", "x", 10], [":", "y", 20]]],
+            [":", "z", ["object", [":", "a", 10], [":", "b", 20]]],
+          ],
+        ],
+      ],
     ],
   ],
 ];

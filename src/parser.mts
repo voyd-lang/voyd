@@ -20,6 +20,7 @@ export function parse(file: File, opts: ParseOpts = {}): List {
   const list = new List({
     location: file.currentSourceLocation(),
     parent: opts.parent,
+    value: !opts.nested ? ["ast", ","] : [],
   });
 
   while (file.hasCharacters) {
