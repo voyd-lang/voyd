@@ -8,12 +8,10 @@ import { intMacro } from "./int.mjs";
 import { scientificENotationMacro } from "./scientific-e-notation.mjs";
 import { stringMacro } from "./string.mjs";
 import { objectLiteralMacro } from "./object-literal.mjs";
-import { tupleLiteralMacro } from "./tuple-literal.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 const macros = [
   objectLiteralMacro,
-  tupleLiteralMacro,
   arrayLiteralMacro,
   dictionaryLiteralMacro,
   intMacro,
