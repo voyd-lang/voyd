@@ -19,10 +19,10 @@ fn main() -> void
 ```tsx
 fn app() -> JSX::Element
   let todo_items = ["wake up", "eat", "code", "sleep"]
-  $<div>
+  <div>
     <h1>TODO</h1>
     <ul>
-      {todo_items.map i => $<li>{i}</li>}
+      {todo_items.map i => <li>{i}</li>}
     </ul>
   </div>
 ```
@@ -97,8 +97,6 @@ false // Boolean
 {x: 2, y: 4} // Object literal
 #[1, 2, 3] // Array
 #{x: 3, y: 4} // Dictionary
-$<div><h1>Hi</h1></div> // JSX element
-$<element /> // Self closing JSX element
 ```
 
 ## Variables
