@@ -372,6 +372,7 @@ const checkVarTypes = (variable: Variable): Variable => {
 
 const checkObjectType = (obj: ObjectType): ObjectType => {
   obj.fields.forEach((field) => {
+    field.typeExpr = checkTypes(field.typeExpr);
     const type = resolveExprType(field.typeExpr);
 
     if (!type) {
@@ -385,7 +386,7 @@ const checkObjectType = (obj: ObjectType): ObjectType => {
 };
 
 const checkTypeAlias = (alias: TypeAlias): TypeAlias => {
-  checkTypes(alias.typeExpr);
+  alias.typeExpr = checkTypes(alias.typeExpr);
   alias.type = resolveExprType(alias.typeExpr);
 
   if (!alias.type) {
@@ -403,7 +404,7 @@ const checkListTypes = (list: List) => {
 
 const checkObjectLiteralType = (obj: ObjectLiteral) => {
   obj.fields.forEach((field) => {
-    checkTypes(field.initializer);
+    field.initializer = checkTypes(field.initializer);
     field.type = resolveExprType(field.initializer);
   });
 

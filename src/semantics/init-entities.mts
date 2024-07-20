@@ -121,7 +121,7 @@ const initObjectLiteral = (obj: List) => {
         throw new Error("Invalid object field");
       }
 
-      return { name: name.value, initializer };
+      return { name: name.value, initializer: initEntities(initializer) };
     }),
   });
 };
@@ -237,7 +237,7 @@ const initObjectType = (obj: List) => {
         throw new Error("Invalid object field");
       }
       const name = v.identifierAt(1);
-      const typeExpr = v.at(2);
+      const typeExpr = initTypeExprEntities(v.at(2));
 
       if (!name || !typeExpr) {
         throw new Error("Invalid object field");
