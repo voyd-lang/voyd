@@ -20,9 +20,17 @@ const parseList = (list: List): List => {
     transformed.push(parsePrecedence(list));
   }
 
-  return !hadSingleListChild && transformed.at(0)?.isList()
-    ? transformed.listAt(0).push(...transformed.rest())
-    : transformed;
+  const result =
+    !hadSingleListChild && transformed.at(0)?.isList()
+      ? transformed.listAt(0).push(...transformed.rest())
+      : transformed;
+
+  // Handle expressions to the right of a label { a: hello there, b: 2 } -> [object [: a [hello there] b [2]]
+  if (result.calls(":") && result.length > 3) {
+    return result.slice(0, 2).push(result.slice(2));
+  }
+
+  return result;
 };
 
 const parseBinaryCall = (left: Expr, list: List): List => {
