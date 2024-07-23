@@ -75,6 +75,12 @@ fn main()
   x * y + 10
   x()
   x
+
+  let vec = {
+    x: 10,
+    y: Point { x: 10, y: 20 },
+    z: { a: 10, b: 20 }
+  }
 `;
 
 export const voidFile = new File(exampleVoidText, "beep/boop");

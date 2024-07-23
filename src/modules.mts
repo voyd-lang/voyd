@@ -27,7 +27,7 @@ export const resolveFileModules = (opts: {
     registerModule({
       path: parsedPath,
       parentModule: rootModule,
-      ast: file,
+      ast: file.slice(1), // Skip the first element (ast)
       isIndex: filePath === opts.indexPath,
     });
   }

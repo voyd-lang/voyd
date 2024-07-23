@@ -16,6 +16,7 @@ const input = {
   files: {
     "/Users/drew/projects/void/example.void": new List({
       value: [
+        "ast",
         ["use", ["::", ["::", "std", "macros"], "all"]],
         [
           "fn",
@@ -104,6 +105,7 @@ const input = {
     }),
     "/Users/drew/projects/void/std/memory.void": new List({
       value: [
+        "ast",
         ["use", ["::", ["::", "super", "macros"], "all"]],
         ["global", "let", ["=", "header-size", 8]],
         ["global", "let", ["=", "size-index", 0]],
@@ -128,7 +130,7 @@ const input = {
       ],
     }),
     "/Users/drew/projects/void/std/index.void": new List({
-      value: [["pub", ["use", ["::", "macros", "all"]]]],
+      value: ["ast", ["pub", ["use", ["::", "macros", "all"]]]],
     }),
   },
   srcPath: "/Users/drew/projects/void",

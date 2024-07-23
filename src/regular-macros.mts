@@ -14,7 +14,6 @@ import {
   VoidModule,
   Block,
   Use,
-  Call,
 } from "./syntax-objects/index.mjs";
 import { NamedEntity } from "./syntax-objects/named-entity.mjs";
 
