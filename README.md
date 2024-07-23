@@ -94,7 +94,6 @@ false // Boolean
 1 // i32 by default
 1.0 // f32 by default
 "Hello!" // String, can be multiline, supports interpolation via ${}
-(1, 2, 3) // Tuple literal
 [1, 2, 3] // Array literal
 {x: 2, y: 4} // Object literal
 ```
