@@ -43,7 +43,9 @@ export function parse(file: File, opts: ParseOpts = {}): List {
     }
 
     if (token.is("(")) {
-      list.push(parse(file, { nested: true }));
+      const subList = parse(file, { nested: true });
+      subList.mayBeTuple = true;
+      list.push(subList);
       continue;
     }
 
