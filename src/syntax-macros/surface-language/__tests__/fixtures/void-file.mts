@@ -40,6 +40,8 @@ let x = my_func(
   3 + 4
 )
 
+let (x, y) = (1, 2)
+
 fn main()
   let a = ...test.hey + &other.now
   let x = 10 +

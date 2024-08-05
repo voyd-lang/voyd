@@ -39,9 +39,18 @@ const parseBinaryCall = (left: Expr, list: List): List => {
   const right = parsePrecedence(list, (infixOpInfo(op) ?? -1) + 1);
 
   // Dot handling should maybe be moved to a macro?
-  return isDotOp(op)
+  const result = isDotOp(op)
     ? parseDot(right, left)
     : new List({ value: [op, left, right] });
+
+  // Remove "tuple" from the list of parameters of a lambda
+  // Functional notation macro isn't smart enough to identify lambda parameters
+  // and so it converts those parameters to a tuple. We remove it here for now.
+  if (isLambdaWithTupleArgs(result)) {
+    return removeTupleFromLambdaParameters(result);
+  }
+
+  return result;
 };
 
 const isDotOp = (op?: Expr): boolean => {
@@ -84,4 +93,13 @@ const infixOpInfo = (op?: Expr): number | undefined => {
 const unaryOpInfo = (op?: Expr): number | undefined => {
   if (!op?.isIdentifier()) return undefined;
   return prefixOps.get(op.value);
+};
+
+const isLambdaWithTupleArgs = (list: List) =>
+  list.calls("=>") && list.at(1)?.isList() && list.listAt(1).calls("tuple");
+
+const removeTupleFromLambdaParameters = (list: List) => {
+  const parameters = list.listAt(1);
+  parameters.remove(0);
+  return list;
 };

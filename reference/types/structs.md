@@ -23,12 +23,12 @@ types. They cannot contain reference types (for now).
 
 Tuple structs are a fixed sequence of values of different types. They
 are defined by listing their types between square braces prefixed with the
-percent sign `%[]`.
+percent sign `%()`.
 
 ```void
-type MyTupleStruct = %[i32, bool]
+type MyTupleStruct = %(i32, bool)
 
-let my_tuple_struct: MyTupleStruct = %[1, true]
+let my_tuple_struct: MyTupleStruct = %(1, true)
 
 let x = my_tuple_struct.0
 ```
@@ -37,7 +37,7 @@ They are effectively syntactic sugar for a struct with incrementing
 integer keys.
 
 ```void
-type MyTupleStruct = %[i32, bool]
+type MyTupleStruct = %(i32, bool)
 
 // Resolves to
 type MyTupleStruct = %{
