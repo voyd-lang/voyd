@@ -81,6 +81,18 @@ export const desugarredAst = [
       ["my_func", ["add", 1, 2], ["=>", [], ["block", ["hello"]]], ["+", 3, 4]],
     ],
   ],
+  [
+    "closure_param_test",
+    1,
+    ["=>", [], "a"],
+    3,
+    ["=>", [], ["block", ["hey", "there"]]],
+    4,
+    ["=>", [], 5],
+    ["=>", [], ["block", 6]],
+    ["=>", [], ["block", 7]],
+    8,
+  ],
   ["let", ["=", ["tuple", "x", "y"], ["tuple", 1, 2]]],
   [
     "fn",

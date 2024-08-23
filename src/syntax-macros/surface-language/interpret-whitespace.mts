@@ -19,6 +19,7 @@ export const interpretWhitespace = (list: List): List => {
 
 export type ElideParensOpts = {
   indentLevel?: number;
+  leaveComma?: boolean; // Do not consume comma
 };
 
 const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
@@ -31,8 +32,11 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
   const pushChildBlock = () => {
     const children = new List({ value: ["block"] });
 
-    while (nextExprIndentLevel(list) > indentLevel) {
-      const child = elideParens(list, { indentLevel: indentLevel + 1 });
+    while (nextLineHasChildExpr()) {
+      const child = elideParens(list, {
+        indentLevel: indentLevel + 1,
+        leaveComma: true,
+      });
       addSibling(child, children);
     }
 
@@ -52,7 +56,10 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
     const isNewline = next?.isWhitespace() && next.isNewline;
     if (isNewline && nextLineHasChildExpr()) {
       if (isContinuationOp(nextNonWhitespace(list, 1))) {
-        const child = elideParens(list, { indentLevel: indentLevel + 1 });
+        const child = elideParens(list, {
+          indentLevel: indentLevel + 1,
+          leaveComma: true,
+        });
         addSibling(child, transformed);
         continue;
       }
@@ -71,7 +78,7 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
     }
 
     if (next?.isIdentifier() && next.is(",")) {
-      list.consume();
+      if (!opts.leaveComma) list.consume();
       break;
     }
 
@@ -83,7 +90,11 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
 
     if (isGreedyOp(next)) {
       transformed.push(list.consume());
-      if (!nextLineHasChildExpr()) transformed.push(elideParens(list, opts));
+
+      if (!nextLineHasChildExpr()) {
+        transformed.push(elideParens(list, { ...opts, leaveComma: true }));
+      }
+
       continue;
     }
 
@@ -112,6 +123,7 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
   return transformed;
 };
 
+/** Will return 0 if the next expression is a comma (performance hack for whitespace block parsing) */
 const nextExprIndentLevel = (list: List, startIndex?: number) => {
   let index = startIndex ?? 0;
   let nextIndentLevel = 0;
@@ -128,6 +140,10 @@ const nextExprIndentLevel = (list: List, startIndex?: number) => {
       nextIndentLevel += 1;
       index += 1;
       continue;
+    }
+
+    if (expr?.isIdentifier() && expr.is(",")) {
+      return 0;
     }
 
     break;

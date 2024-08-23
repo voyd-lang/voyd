@@ -40,6 +40,18 @@ let x = my_func(
   3 + 4
 )
 
+closure_param_test(1, () => a, 3, () =>
+  hey there,
+  4,
+  () => 5,
+  () =>
+    6,
+  () =>
+    7
+  ,
+  8
+)
+
 let (x, y) = (1, 2)
 
 fn main()
