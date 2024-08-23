@@ -54,6 +54,14 @@ closure_param_test(1, () => a, 3, () =>
 
 let (x, y) = (1, 2)
 
+Array<Hey, There>(1, 2, 3) + 3
+
+obj Test<T> {
+  c: i32
+}
+
+fn test<T>(a: 1) -> i32
+
 fn main()
   let a = ...test.hey + &other.now
   let x = 10 +
