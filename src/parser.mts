@@ -23,6 +23,7 @@ export function parse(file: File, opts: ParseOpts = {}): List {
     value: !opts.nested ? ["ast", ","] : [],
   });
 
+  let prev: Token | undefined = undefined;
   while (file.hasCharacters) {
     const token = lexer(file);
 
@@ -38,8 +39,11 @@ export function parse(file: File, opts: ParseOpts = {}): List {
             parent: parent ?? opts.parent,
           }),
       });
-      if (typeof result !== "undefined") list.push(result);
-      continue;
+
+      if (typeof result !== "undefined") {
+        list.push(result);
+        continue;
+      }
     }
 
     if (token.is("(")) {

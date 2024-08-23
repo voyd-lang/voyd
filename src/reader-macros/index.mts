@@ -22,28 +22,8 @@ const macros = [
   booleanMacro,
 ];
 
-const readerMacros = macros.reduce(
-  ({ map, patterns }, reader) => {
-    if (typeof reader.tag === "string") {
-      map.set(reader.tag, reader.macro);
-      return { map, patterns };
-    }
-
-    patterns.push({ pattern: reader.tag, macro: reader.macro });
-    return { map, patterns };
-  },
-  {
-    map: new Map<string, ReaderMacro["macro"]>(),
-    patterns: [] as { pattern: RegExp; macro: ReaderMacro["macro"] }[],
-  }
-);
-
 export const getReaderMacroForToken = (
-  token: Token
-): ReaderMacro["macro"] | undefined => {
-  return (
-    readerMacros.map.get(token.value) ??
-    readerMacros.patterns.find(({ pattern }) => pattern.test(token.value))
-      ?.macro
-  );
-};
+  token: Token,
+  prev?: Token
+): ReaderMacro["macro"] | undefined =>
+  macros.find((m) => m.match(token, prev))?.macro;

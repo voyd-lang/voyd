@@ -3,7 +3,7 @@ import { Expr, List } from "../syntax-objects/index.mjs";
 import { Token } from "../lib/token.mjs";
 
 export interface ReaderMacro {
-  tag: string | RegExp;
+  match: (token: Token, prev?: Token) => boolean;
   macro: (
     file: File,
     opts: {

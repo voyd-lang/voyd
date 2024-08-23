@@ -2,7 +2,7 @@ import { Identifier, List } from "../syntax-objects/index.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const dictionaryLiteralMacro: ReaderMacro = {
-  tag: "#{",
+  match: (t) => t.value === "#{",
   macro: (file, { reader }) => {
     const dict = new Identifier({ value: "dict" });
     const items = reader(file, "}");
