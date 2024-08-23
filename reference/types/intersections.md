@@ -52,14 +52,24 @@ obj Animal {
   name: String
 }
 
-type Cat = Animal & {
-  lives_remaining: i32
+type AnimalWithLives = Animal & {
+  lives: i32
 }
 
-let cat: Cat = Animal { name: "Whiskers", lives_remaining: 9 }
+let newt: Cat = Animal { name: "Whiskers" } & { lives: 3 }
 
-// Error - Object { name: "Whiskers", lives_remaining: 9 } is not an Animal
-let bad_cat: Cat = { name: "Whiskers", lives_remaining: 9 }
+// An implicit AnimalWithLives initializer is also available, to avoid writing out the &
+let newt = AnimalWithLives { name: "Whiskers", lives: 3 }
+
+// We can define a new compatible nominal object
+obj Cat extends Animal {
+  lives: i32
+}
+
+let cat = Cat { name: "Simba", lives: 9 }
+
+// Some form of initializer is needed, this example is missing the Animal nominal parent
+let bad_cat: Cat = { name: "Ghost", lives: 9 } // Error - { name: "Ghost", lives: 9 } is not an Animal
 ```
 
 All object types of an intersection must be a subtype of the previous
@@ -125,4 +135,43 @@ impl Movable for Shape
     self.y += y
 
 let shape: MoveableImage = Shape { image: [Rgb(0, 0, 0)], x: 0, y: 0 }
+```
+## Technical Deep Dive
+
+An intersection is always made up of two parts: It's nominal supertype and its
+structural type. The structural type must always be compatible with the nominal
+type.
+
+```
+<nominal supertype> & <structural type>
+```
+
+Chained intersections always resolve down to those two parts
+```
+obj Animal {
+  name: string
+}
+
+type Cat = Animal & { age: i32 } & { lives: i32 }
+
+// Equivalent too
+type Cat = Animal & {
+  name: string,
+  age: i32,
+  lives: i32
+}
+```
+
+All object literals are an intersection between `Object` and their structure
+```
+let Vec2D = {
+  a: i32,
+  b: i32
+}
+
+// Equivalent to:
+let Vec2D = Object & {
+  a: i32,
+  b: i32
+}
 ```
