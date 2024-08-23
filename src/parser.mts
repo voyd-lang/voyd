@@ -24,26 +24,14 @@ export function parse(file: File, opts: ParseOpts = {}): List {
   });
 
   let prev: Token | undefined = undefined;
+  let cur: Token | undefined = undefined;
   while (file.hasCharacters) {
     const token = lexer(file);
+    prev = cur;
+    cur = token;
 
-    const readerMacro = getReaderMacroForToken(token);
-
-    if (readerMacro) {
-      const result = readerMacro(file, {
-        token,
-        reader: (file, terminator, parent) =>
-          parse(file, {
-            nested: true,
-            terminator,
-            parent: parent ?? opts.parent,
-          }),
-      });
-
-      if (typeof result !== "undefined") {
-        list.push(result);
-        continue;
-      }
+    if (processWithReaderMacro(token, prev, file, opts, list)) {
+      continue;
     }
 
     if (token.is("(")) {
@@ -157,4 +145,31 @@ const consumeSpaces = (file: File, token: Token) => {
   while (file.next === " " && token.span < 2) {
     token.addChar(file.consumeChar());
   }
+};
+
+/** Returns true if token was matched with and processed by a macro  */
+const processWithReaderMacro = (
+  token: Token,
+  prev: Token | undefined,
+  file: File,
+  opts: ParseOpts,
+  list: List
+) => {
+  const readerMacro = getReaderMacroForToken(token, prev);
+  if (!readerMacro) return undefined;
+
+  const result = readerMacro(file, {
+    token,
+    reader: (file, terminator, parent) =>
+      parse(file, {
+        nested: true,
+        terminator,
+        parent: parent ?? opts.parent,
+      }),
+  });
+
+  if (!result) return undefined;
+
+  list.push(result);
+  return true;
 };

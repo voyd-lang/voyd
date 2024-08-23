@@ -9,6 +9,7 @@ import { scientificENotationMacro } from "./scientific-e-notation.mjs";
 import { stringMacro } from "./string.mjs";
 import { objectLiteralMacro } from "./object-literal.mjs";
 import { ReaderMacro } from "./types.mjs";
+import { genericsMacro } from "./generics.mjs";
 
 const macros = [
   objectLiteralMacro,
@@ -20,6 +21,7 @@ const macros = [
   stringMacro,
   comment,
   booleanMacro,
+  genericsMacro,
 ];
 
 export const getReaderMacroForToken = (

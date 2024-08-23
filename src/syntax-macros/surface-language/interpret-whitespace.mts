@@ -197,7 +197,7 @@ const addSibling = (child: Expr, siblings: List) => {
     return;
   }
 
-  if (!olderSibling?.isList()) {
+  if (!olderSibling?.isList() || olderSibling.calls("generics")) {
     siblings.push(child);
     return;
   }
