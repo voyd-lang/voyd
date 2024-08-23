@@ -8,13 +8,13 @@ export const regularMacrosAst = [
       [
         [
           "regular-macro",
-          "`#731",
+          "`#735",
           ["parameters"],
           ["block", ["block", ["quote", "quote", ["$@", "body"]]]],
         ],
         [
           "regular-macro",
-          "let#768",
+          "let#772",
           ["parameters"],
           [
             "block",
@@ -38,7 +38,7 @@ export const regularMacrosAst = [
         ],
         [
           "regular-macro",
-          "fn#1247",
+          "fn#1251",
           ["parameters"],
           [
             "block",

@@ -1,11 +1,11 @@
 import { isContinuationOp, isGreedyOp } from "../../lib/grammar.mjs";
 import { Expr, List } from "../../syntax-objects/index.mjs";
 
-export const interpretWhitespace = (list: List): List => {
+export const interpretWhitespace = (list: List, indentLevel?: number): List => {
   const transformed = new List({ ...list.metadata });
 
   while (list.hasChildren) {
-    const child = elideParens(list);
+    const child = elideParens(list, indentLevel);
     if (child?.isList() && child.value.length === 0) continue;
     addSibling(child, transformed);
   }
@@ -17,15 +17,10 @@ export const interpretWhitespace = (list: List): List => {
   return transformed;
 };
 
-export type ElideParensOpts = {
-  indentLevel?: number;
-  leaveComma?: boolean; // Do not consume comma
-};
-
-const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
+const elideParens = (list: Expr, indentLevel?: number): Expr => {
   if (!list.isList()) return list;
   const transformed = new List({});
-  let indentLevel = opts.indentLevel ?? nextExprIndentLevel(list);
+  indentLevel = indentLevel ?? nextExprIndentLevel(list);
 
   const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;
 
@@ -33,10 +28,7 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
     const children = new List({ value: ["block"] });
 
     while (nextLineHasChildExpr()) {
-      const child = elideParens(list, {
-        indentLevel: indentLevel + 1,
-        leaveComma: true,
-      });
+      const child = elideParens(list, indentLevel + 1);
       addSibling(child, children);
     }
 
@@ -49,26 +41,26 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
     transformed.push(children);
   };
 
+  const pushNestedExpr = () => {
+    if (isContinuationOp(nextNonWhitespace(list, 1))) {
+      const child = elideParens(list, indentLevel + 1);
+      addSibling(child, transformed);
+      return;
+    }
+
+    pushChildBlock();
+  };
+
   consumeLeadingWhitespace(list);
   while (list.hasChildren) {
     const next = list.first();
 
-    const isNewline = next?.isWhitespace() && next.isNewline;
-    if (isNewline && nextLineHasChildExpr()) {
-      if (isContinuationOp(nextNonWhitespace(list, 1))) {
-        const child = elideParens(list, {
-          indentLevel: indentLevel + 1,
-          leaveComma: true,
-        });
-        addSibling(child, transformed);
-        continue;
-      }
-
-      pushChildBlock();
+    if (isNewline(next) && nextLineHasChildExpr()) {
+      pushNestedExpr();
       continue;
     }
 
-    if (isNewline && !isContinuationOp(transformed.at(-1))) {
+    if (isNewline(next) && !isContinuationOp(transformed.at(-1))) {
       break;
     }
 
@@ -78,13 +70,12 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
     }
 
     if (next?.isIdentifier() && next.is(",")) {
-      if (!opts.leaveComma) list.consume();
       break;
     }
 
     if (next?.isList()) {
       list.consume();
-      transformed.push(interpretWhitespace(next));
+      transformed.push(interpretWhitespace(next, indentLevel));
       continue;
     }
 
@@ -92,7 +83,7 @@ const elideParens = (list: Expr, opts: ElideParensOpts = {}): Expr => {
       transformed.push(list.consume());
 
       if (!nextLineHasChildExpr()) {
-        transformed.push(elideParens(list, { ...opts, leaveComma: true }));
+        transformed.push(elideParens(list, indentLevel));
       }
 
       continue;
@@ -165,7 +156,7 @@ const nextNonWhitespace = (list: List, startIndex?: number) => {
 const consumeLeadingWhitespace = (list: List) => {
   while (list.hasChildren) {
     const next = list.first();
-    if (next?.isWhitespace()) {
+    if (next?.isWhitespace() || (next?.isIdentifier() && next.is(","))) {
       list.consume();
       continue;
     }
@@ -173,7 +164,7 @@ const consumeLeadingWhitespace = (list: List) => {
   }
 };
 
-const isNewline = (v: Expr) => v.isWhitespace() && v.isNewline;
+const isNewline = (v?: Expr) => v?.isWhitespace() && v.isNewline;
 const isIndent = (v: Expr) => v.isWhitespace() && v.isIndent;
 
 const isNamedParameter = (v: List) => {
