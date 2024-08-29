@@ -93,7 +93,7 @@ export class Call extends Syntax {
   }
 
   toJSON() {
-    return [this.fnName, ...this.args.value];
+    return [this.fnName, ...this.args.toArray()];
   }
 
   clone(parent?: Expr) {

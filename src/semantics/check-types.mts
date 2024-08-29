@@ -220,7 +220,7 @@ const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
     throw new Error(`Invalid use statement ${path}`);
   }
 
-  const [_, left, right] = path.value;
+  const [_, left, right] = path.toArray();
   const resolvedModule = left?.isList()
     ? resolveUsePath(left)
     : left?.isIdentifier()
@@ -334,7 +334,7 @@ const resolveExports = ({
   exports: List;
   body: List;
 }): void => {
-  body.value.forEach((expr) => {
+  body.each((expr) => {
     if (!expr.isList()) return;
     if (expr.calls("export")) {
       exports.push(expr.at(1) as Identifier);

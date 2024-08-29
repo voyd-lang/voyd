@@ -69,7 +69,7 @@ const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
     throw new Error(`Invalid use statement ${path}`);
   }
 
-  const [_, left, right] = path.value;
+  const [_, left, right] = path.toArray();
   const unexpandedModule = left?.isList()
     ? resolveUsePath(left)
     : left?.isIdentifier()
@@ -298,7 +298,7 @@ const functions: Record<string, MacroFn | undefined> = {
     }
 
     // For now, assumes params are untyped
-    const parameters = params.value.map((p) => {
+    const parameters = params.toArray().map((p) => {
       if (!p.isIdentifier()) {
         throw new Error("Invalid lambda parameter");
       }
@@ -330,7 +330,7 @@ const functions: Record<string, MacroFn | undefined> = {
     return expand(quote);
   },
   if: (args) => {
-    const [condition, ifTrue, ifFalse] = args.value;
+    const [condition, ifTrue, ifFalse] = args.toArray();
 
     if (!condition || !ifTrue) {
       console.log(JSON.stringify(args, undefined, 2));
@@ -377,7 +377,7 @@ const functions: Record<string, MacroFn | undefined> = {
     const list = args.at(0)! as List;
     const start = args.at(1)!;
     const lambda = args.at(2)! as MacroLambda;
-    return list.value.reduce((prev, cur, index, array) => {
+    return list.toArray().reduce((prev, cur, index, array) => {
       const args = new List({
         value: [
           prev,
@@ -397,11 +397,13 @@ const functions: Record<string, MacroFn | undefined> = {
   spread: (args) => {
     const list = args.at(0) as List;
     const val = args.at(1)! as List;
-    return list.push(...val.value);
+    return list.push(...val.toArray());
   },
   concat: (args) => {
     const list = args.listAt(0);
-    return list.push(...args.rest().flatMap((expr) => (expr as List).value));
+    return list.push(
+      ...args.rest().flatMap((expr) => (expr as List).toArray())
+    );
   },
   is_list: (args) => bool(!!args.at(0)?.isList()),
   log: (args) => {
@@ -497,11 +499,14 @@ const getMacroTimeValue = (expr: Expr | undefined): any => {
     if (result) return result;
   }
 
+  if (expr.isList()) {
+    return expr.toArray();
+  }
+
   const hasValue =
     expr.isFloat() ||
     expr.isInt() ||
     expr.isStringLiteral() ||
-    expr.isList() ||
     expr.isBool() ||
     expr.isIdentifier();
 

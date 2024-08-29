@@ -59,14 +59,14 @@ const registerModule = ({
   }
 
   if (!existingModule && name === "index") {
-    parentModule.push(...ast.value);
+    parentModule.push(...ast.toArray());
     return;
   }
 
   const module =
     existingModule ??
     new VoidModule({
-      ...(!rest.length ? { ...ast.metadata, value: ast.value } : {}),
+      ...(!rest.length ? { ...ast.metadata, value: ast.toArray() } : {}),
       name,
       isIndex,
     });

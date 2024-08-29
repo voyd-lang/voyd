@@ -6,11 +6,11 @@ export const interpretWhitespace = (list: List, indentLevel?: number): List => {
 
   while (list.hasChildren) {
     const child = elideParens(list, indentLevel);
-    if (child?.isList() && child.value.length === 0) continue;
+    if (child?.isList() && child.length === 0) continue;
     addSibling(child, transformed);
   }
 
-  if (transformed.value.length === 1 && transformed.first()?.isList()) {
+  if (transformed.length === 1 && transformed.first()?.isList()) {
     return transformed.first() as List;
   }
 
@@ -107,7 +107,7 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
     transformed.location.endIndex = transformed.last()!.location!.endIndex;
   }
 
-  if (transformed.value.length === 1) {
+  if (transformed.length === 1) {
     return transformed.first()!;
   }
 
@@ -193,7 +193,7 @@ const addSibling = (child: Expr, siblings: List) => {
   }
 
   if (isContinuationOp(child.first()) && olderSibling) {
-    siblings.push([siblings.pop()!, ...child.value]);
+    siblings.push([siblings.pop()!, ...child.toArray()]);
     return;
   }
 

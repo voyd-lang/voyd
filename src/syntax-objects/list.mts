@@ -26,14 +26,9 @@ export class List extends Syntax {
     if (!value || value instanceof Array) {
       this.push(...(value ?? []));
     } else {
-      this.push(...value.value);
+      this.push(...value.toArray());
     }
   }
-
-  get value() {
-    return this.store.toArray();
-  }
-
   get hasChildren() {
     return !!this.store.length;
   }
@@ -149,7 +144,7 @@ export class List extends Syntax {
   }
 
   findIndex(cb: (expr: Expr) => boolean) {
-    return this.value.findIndex(cb);
+    return this.toArray().findIndex(cb);
   }
 
   insert(expr: Expr | string, at = 0) {
@@ -167,19 +162,19 @@ export class List extends Syntax {
   filter(fn: (expr: Expr, index: number, array: Expr[]) => boolean): List {
     return new List({
       ...super.getCloneOpts(),
-      value: this.value.filter(fn),
+      value: this.toArray().filter(fn),
     });
   }
 
   each(fn: (expr: Expr, index: number, array: Expr[]) => void): List {
-    this.value.forEach(fn);
+    this.toArray().forEach(fn);
     return this;
   }
 
   map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
     return new List({
       ...super.getCloneOpts(),
-      value: this.value.map(fn),
+      value: this.toArray().map(fn),
     });
   }
 
@@ -188,7 +183,7 @@ export class List extends Syntax {
     fn: (expr: Expr, index: number, array: Expr[]) => Expr | undefined
   ): List {
     const list = new List({ ...super.getCloneOpts() });
-    return this.value.reduce((newList: List, expr, index, array) => {
+    return this.toArray().reduce((newList: List, expr, index, array) => {
       if (!expr) return newList;
       const result = fn(expr, index, array);
       if (!result) return newList;
@@ -208,17 +203,17 @@ export class List extends Syntax {
   }
 
   toArray(): Expr[] {
-    return this.value;
+    return this.store.toArray();
   }
 
   toJSON() {
-    return this.value;
+    return this.toArray();
   }
 
   clone(parent?: Expr): List {
     return new List({
       ...super.getCloneOpts(parent),
-      value: this.value.map((v) => v.clone()),
+      value: this.toArray().map((v) => v.clone()),
       isParentheticalList: this.mayBeTuple,
     });
   }
