@@ -17,10 +17,10 @@ export const interpretWhitespace = (list: List, indentLevel?: number): List => {
   return transformed;
 };
 
-const elideParens = (list: Expr, indentLevel?: number): Expr => {
+const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
   if (!list.isList()) return list;
   const transformed = new List({});
-  indentLevel = indentLevel ?? nextExprIndentLevel(list);
+  const indentLevel = startIndentLevel ?? nextExprIndentLevel(list);
 
   const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;
 
@@ -197,7 +197,7 @@ const addSibling = (child: Expr, siblings: List) => {
     return;
   }
 
-  if (!olderSibling?.isList()) {
+  if (!olderSibling?.isList() || olderSibling.calls("generics")) {
     siblings.push(child);
     return;
   }

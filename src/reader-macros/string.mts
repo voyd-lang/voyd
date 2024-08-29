@@ -2,7 +2,7 @@ import { Identifier, StringLiteral } from "../syntax-objects/index.mjs";
 import { ReaderMacro } from "./types.mjs";
 
 export const stringMacro: ReaderMacro = {
-  tag: /^[\"\']$/,
+  match: (t) => /^[\"\']$/.test(t.value),
   macro: (file, { token }) => {
     const startChar = token.value;
     token.value = "";

@@ -94,6 +94,9 @@ export const desugarredAst = [
     8,
   ],
   ["let", ["=", ["tuple", "x", "y"], ["tuple", 1, 2]]],
+  ["+", ["Array", ["generics", "Hey", "There"], 1, 2, 3], 3],
+  ["obj", ["Test", ["generics", "T"]], ["object", [":", "c", "i32"]]],
+  ["fn", ["test", ["generics", "T"], [":", "a", 1]], "->", "i32"],
   [
     "fn",
     ["main"],
