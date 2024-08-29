@@ -26,8 +26,8 @@ pub macro global()
     else:
       ` define_mut_global
   `($@function,
-    $(equals_expr.extract(1))
-    $(equals_expr.extract(2))
+    $(equals_expr.extract(1)),
+    $(equals_expr.extract(2)))
 
 pub macro ';'()
   let func = body.extract(0)
@@ -67,11 +67,13 @@ pub macro fn()
       body.slice(type_arrow_index + 2)
     else: body.slice(1)
 
-  `(define_function,
+  `(
+    define_function,
     $identifier,
     $params,
-    (return_type $@return_type)
-    $(`(block).concat(expressions)))
+    (return_type $@return_type),
+    $(`(block).concat(expressions))
+  )
 
 pub macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
   let params = `(parameters, left: $arg_type, right: $arg_type)
