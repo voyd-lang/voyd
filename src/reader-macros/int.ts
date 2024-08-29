@@ -1,5 +1,5 @@
-import { Int } from "../syntax-objects/index.mjs";
-import { ReaderMacro } from "./types.mjs";
+import { Int } from "../syntax-objects/index.js";
+import { ReaderMacro } from "./types.js";
 
 export const intMacro: ReaderMacro = {
   match: (t) => /^[+-]?\d+$/.test(t.value),

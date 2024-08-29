@@ -1,6 +1,6 @@
-import { File } from "../lib/file.mjs";
-import { Expr, List } from "../syntax-objects/index.mjs";
-import { Token } from "../lib/token.mjs";
+import { File } from "../lib/file.js";
+import { Expr, List } from "../syntax-objects/index.js";
+import { Token } from "../lib/token.js";
 
 export interface ReaderMacro {
   match: (token: Token, prev?: Token) => boolean;

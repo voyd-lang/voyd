@@ -1,8 +1,8 @@
-import { Expr } from "./expr.mjs";
-import { Parameter } from "./parameter.mjs";
-import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
-import { Id } from "./identifier.mjs";
-import { getIdStr } from "./get-id-str.mjs";
+import { Expr } from "./expr.js";
+import { Parameter } from "./parameter.js";
+import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
+import { Id } from "./identifier.js";
+import { getIdStr } from "./get-id-str.js";
 
 export type Type =
   | PrimitiveType

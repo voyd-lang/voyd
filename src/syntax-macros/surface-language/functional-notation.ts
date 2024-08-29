@@ -1,5 +1,5 @@
-import { isOp } from "../../lib/grammar.mjs";
-import { Expr, List } from "../../syntax-objects/index.mjs";
+import { isOp } from "../../lib/grammar.js";
+import { Expr, List } from "../../syntax-objects/index.js";
 
 export const functionalNotation = (list: List): List => {
   let isTuple = false;

@@ -1,11 +1,11 @@
 import binaryen from "binaryen";
-import { AugmentedBinaryen } from "./types.mjs";
+import { AugmentedBinaryen } from "./types.js";
 import {
   binaryenTypeToHeapType,
   defineStructType,
   initStruct,
   structGetFieldValue,
-} from ".//index.mjs";
+} from ".//index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 

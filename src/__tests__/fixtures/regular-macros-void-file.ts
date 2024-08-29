@@ -1,4 +1,4 @@
-import { File } from "../../lib/file.mjs";
+import { File } from "../../lib/file.js";
 
 export const regularMacrosVoidText = `
 macro \`()

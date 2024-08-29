@@ -1,5 +1,5 @@
-import { infixOps, isPrefixOp, prefixOps } from "../../lib/grammar.mjs";
-import { Expr, List } from "../../syntax-objects/index.mjs";
+import { infixOps, isPrefixOp, prefixOps } from "../../lib/grammar.js";
+import { Expr, List } from "../../syntax-objects/index.js";
 
 /**
  * Primary surface language syntax macro. Post whitespace interpretation.

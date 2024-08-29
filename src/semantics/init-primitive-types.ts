@@ -1,4 +1,4 @@
-import { i32, f32, i64, f64, bool, dVoid } from "../syntax-objects/types.mjs";
+import { i32, f32, i64, f64, bool, dVoid } from "../syntax-objects/types.js";
 import { TypeChecker } from "./types";
 
 export const initPrimitiveTypes: TypeChecker = (expr) => {

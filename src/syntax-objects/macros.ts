@@ -1,7 +1,7 @@
-import { Block } from "./block.mjs";
-import type { Expr } from "./expr.mjs";
-import { Identifier } from "./identifier.mjs";
-import { ScopedNamedEntityOpts, ScopedNamedEntity } from "./named-entity.mjs";
+import { Block } from "./block.js";
+import type { Expr } from "./expr.js";
+import { Identifier } from "./identifier.js";
+import { ScopedNamedEntityOpts, ScopedNamedEntity } from "./named-entity.js";
 
 export type Macro = RegularMacro;
 

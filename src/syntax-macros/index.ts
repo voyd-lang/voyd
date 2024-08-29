@@ -1,6 +1,6 @@
-import { ParsedFiles } from "../lib/parse-directory.mjs";
-import { List } from "../syntax-objects/list.mjs";
-import { surfaceLanguage } from "./surface-language/index.mjs";
+import { ParsedFiles } from "../lib/parse-directory.js";
+import { List } from "../syntax-objects/list.js";
+import { surfaceLanguage } from "./surface-language/index.js";
 
 export const expandSyntaxMacrosOfFiles = (files: ParsedFiles): ParsedFiles => {
   const expanded: ParsedFiles = {};

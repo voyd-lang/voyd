@@ -1,6 +1,6 @@
-import { Expr } from "./expr.mjs";
-import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
-import { Type } from "./types.mjs";
+import { Expr } from "./expr.js";
+import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
+import { Type } from "./types.js";
 
 export class Global extends NamedEntity {
   readonly isMutable: boolean;

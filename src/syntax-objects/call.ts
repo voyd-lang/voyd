@@ -1,9 +1,9 @@
-import { Expr } from "./expr.mjs";
-import { Fn } from "./fn.mjs";
-import { Identifier } from "./identifier.mjs";
-import { List } from "./list.mjs";
-import { Syntax, SyntaxMetadata } from "./syntax.mjs";
-import { Type } from "./types.mjs";
+import { Expr } from "./expr.js";
+import { Fn } from "./fn.js";
+import { Identifier } from "./identifier.js";
+import { List } from "./list.js";
+import { Syntax, SyntaxMetadata } from "./syntax.js";
+import { Type } from "./types.js";
 
 /** Defines a function call */
 export class Call extends Syntax {

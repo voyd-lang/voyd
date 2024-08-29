@@ -1,15 +1,15 @@
-import { ParsedFiles, parseDirectory } from "./lib/parse-directory.mjs";
-import { parseFile } from "./lib/parse-file.mjs";
-import { parseStd, stdPath } from "./lib/parse-std.mjs";
-import { resolveSrc } from "./lib/resolve-src.mjs";
-import { File } from "./lib/file.mjs";
-import { parse } from "./parser.mjs";
-import { expandSyntaxMacrosOfFiles } from "./syntax-macros/index.mjs";
-import { resolveFileModules } from "./modules.mjs";
-import { expandRegularMacros } from "./regular-macros.mjs";
-import { typeCheck } from "./semantics/index.mjs";
+import { ParsedFiles, parseDirectory } from "./lib/parse-directory.js";
+import { parseFile } from "./lib/parse-file.js";
+import { parseStd, stdPath } from "./lib/parse-std.js";
+import { resolveSrc } from "./lib/resolve-src.js";
+import { File } from "./lib/file.js";
+import { parse } from "./parser.js";
+import { expandSyntaxMacrosOfFiles } from "./syntax-macros/index.js";
+import { resolveFileModules } from "./modules.js";
+import { expandRegularMacros } from "./regular-macros.js";
+import { typeCheck } from "./semantics/index.js";
 import binaryen from "binaryen";
-import { genWasmCode } from "./wasm-code-gen.mjs";
+import { genWasmCode } from "./wasm-code-gen.js";
 
 export type ParsedModule = {
   files: ParsedFiles;

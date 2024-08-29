@@ -1,6 +1,6 @@
-import { Expr } from "./expr.mjs";
-import { Syntax, SyntaxMetadata } from "./syntax.mjs";
-import { ObjectType, Type } from "./types.mjs";
+import { Expr } from "./expr.js";
+import { Syntax, SyntaxMetadata } from "./syntax.js";
+import { ObjectType, Type } from "./types.js";
 
 export class ObjectLiteral extends Syntax {
   readonly syntaxType = "object-literal";

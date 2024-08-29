@@ -1,4 +1,4 @@
-import { File } from "../../../../lib/file.mjs";
+import { File } from "../../../../lib/file.js";
 
 export const exampleVoidText = `
 use std::macros::all

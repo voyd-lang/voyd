@@ -1,23 +1,23 @@
 import binaryen from "binaryen";
-import { Call } from "./syntax-objects/call.mjs";
-import { Expr } from "./syntax-objects/expr.mjs";
-import { Fn } from "./syntax-objects/fn.mjs";
-import { Identifier } from "./syntax-objects/identifier.mjs";
-import { Int } from "./syntax-objects/int.mjs";
-import { Type, Primitive, ObjectType } from "./syntax-objects/types.mjs";
-import { Variable } from "./syntax-objects/variable.mjs";
-import { Block } from "./syntax-objects/block.mjs";
-import { Declaration } from "./syntax-objects/declaration.mjs";
-import { VoidModule } from "./syntax-objects/module.mjs";
-import { ObjectLiteral } from "./syntax-objects/object-literal.mjs";
-import { resolveExprType } from "./semantics/check-types.mjs";
+import { Call } from "./syntax-objects/call.js";
+import { Expr } from "./syntax-objects/expr.js";
+import { Fn } from "./syntax-objects/fn.js";
+import { Identifier } from "./syntax-objects/identifier.js";
+import { Int } from "./syntax-objects/int.js";
+import { Type, Primitive, ObjectType } from "./syntax-objects/types.js";
+import { Variable } from "./syntax-objects/variable.js";
+import { Block } from "./syntax-objects/block.js";
+import { Declaration } from "./syntax-objects/declaration.js";
+import { VoidModule } from "./syntax-objects/module.js";
+import { ObjectLiteral } from "./syntax-objects/object-literal.js";
+import { resolveExprType } from "./semantics/check-types.js";
 import {
   binaryenTypeToHeapType,
   defineStructType,
   initStruct,
   structGetFieldValue,
-} from "./lib/binaryen-gc/index.mjs";
-import { HeapTypeRef } from "./lib/binaryen-gc/types.mjs";
+} from "./lib/binaryen-gc/index.js";
+import { HeapTypeRef } from "./lib/binaryen-gc/types.js";
 
 export const genWasmCode = (ast: Expr) => {
   const mod = new binaryen.Module();

@@ -1,4 +1,4 @@
-import { Id } from "./identifier.mjs";
+import { Id } from "./identifier.js";
 
 export const getIdStr = (id: Id) => {
   if (!id) {

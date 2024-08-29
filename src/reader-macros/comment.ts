@@ -1,5 +1,5 @@
-import { noop } from "../syntax-objects/index.mjs";
-import { ReaderMacro } from "./types.mjs";
+import { noop } from "../syntax-objects/index.js";
+import { ReaderMacro } from "./types.js";
 
 export const comment: ReaderMacro = {
   match: (t) => /^\/\/[^\s]*$/.test(t.value),

@@ -1,5 +1,5 @@
-import { Identifier, List, StringLiteral } from "../syntax-objects/index.mjs";
-import { ReaderMacro } from "./types.mjs";
+import { Identifier, List, StringLiteral } from "../syntax-objects/index.js";
+import { ReaderMacro } from "./types.js";
 
 export const scientificENotationMacro: ReaderMacro = {
   /** Regex from Michael Dumas https://regexlib.com/REDetails.aspx?regexp_id=2457 */

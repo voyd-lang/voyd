@@ -1,5 +1,5 @@
-import { Bool } from "../syntax-objects/index.mjs";
-import { ReaderMacro } from "./types.mjs";
+import { Bool } from "../syntax-objects/index.js";
+import { ReaderMacro } from "./types.js";
 
 export const booleanMacro: ReaderMacro = {
   match: (t) => /^true|false$/.test(t.value),

@@ -18,8 +18,8 @@ import {
   Use,
   TypeAlias,
   ObjectLiteral,
-} from "../syntax-objects/index.mjs";
-import { NamedEntity } from "../syntax-objects/named-entity.mjs";
+} from "../syntax-objects/index.js";
+import { NamedEntity } from "../syntax-objects/named-entity.js";
 
 export const checkTypes = (expr: Expr | undefined): Expr => {
   if (!expr) return noop();

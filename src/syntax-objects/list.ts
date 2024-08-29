@@ -1,11 +1,11 @@
-import { FastShiftArray } from "../lib/fast-shift-array.mjs";
-import { Expr } from "./expr.mjs";
-import { Float } from "./float.mjs";
-import { getIdStr } from "./get-id-str.mjs";
-import { Id, Identifier } from "./identifier.mjs";
-import { Int } from "./int.mjs";
-import { NamedEntity } from "./named-entity.mjs";
-import { Syntax, SyntaxMetadata } from "./syntax.mjs";
+import { FastShiftArray } from "../lib/fast-shift-array.js";
+import { Expr } from "./expr.js";
+import { Float } from "./float.js";
+import { getIdStr } from "./get-id-str.js";
+import { Id, Identifier } from "./identifier.js";
+import { Int } from "./int.js";
+import { NamedEntity } from "./named-entity.js";
+import { Syntax, SyntaxMetadata } from "./syntax.js";
 
 export class List extends Syntax {
   readonly syntaxType = "list";

@@ -1,6 +1,6 @@
-export * from "./file.mjs";
-export * from "./token.mjs";
-export * as grammar from "./grammar.mjs";
-export * from "./parse-directory.mjs";
-export * from "./parse-file.mjs";
-export * from "./parse-std.mjs";
+export * from "./file.js";
+export * from "./token.js";
+export * as grammar from "./grammar.js";
+export * from "./parse-directory.js";
+export * from "./parse-file.js";
+export * from "./parse-std.js";

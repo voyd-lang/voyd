@@ -1,7 +1,7 @@
-import { Expr } from "./expr.mjs";
-import { List } from "./list.mjs";
-import { ScopedSyntax, ScopedSyntaxMetadata } from "./scoped-entity.mjs";
-import { Type } from "./types.mjs";
+import { Expr } from "./expr.js";
+import { List } from "./list.js";
+import { ScopedSyntax, ScopedSyntaxMetadata } from "./scoped-entity.js";
+import { Type } from "./types.js";
 
 export class Block extends ScopedSyntax {
   readonly syntaxType = "block";

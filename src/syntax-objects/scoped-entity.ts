@@ -1,6 +1,6 @@
-import { Expr } from "./expr.mjs";
-import { LexicalContext } from "./lexical-context.mjs";
-import { Syntax, SyntaxMetadata } from "./syntax.mjs";
+import { Expr } from "./expr.js";
+import { LexicalContext } from "./lexical-context.js";
+import { Syntax, SyntaxMetadata } from "./syntax.js";
 
 export type ScopedEntity = Expr & {
   lexicon: LexicalContext;

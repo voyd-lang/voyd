@@ -1,6 +1,6 @@
-import { Expr } from "./expr.mjs";
-import { Fn } from "./fn.mjs";
-import { Syntax, SyntaxMetadata } from "./syntax.mjs";
+import { Expr } from "./expr.js";
+import { Fn } from "./fn.js";
+import { Syntax, SyntaxMetadata } from "./syntax.js";
 
 /** Defines a declared namespace for external function imports */
 export class Declaration extends Syntax {

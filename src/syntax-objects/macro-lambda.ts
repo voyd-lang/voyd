@@ -1,7 +1,7 @@
-import { Expr } from "./expr.mjs";
-import { Identifier } from "./identifier.mjs";
-import { List } from "./list.mjs";
-import { ScopedSyntax, ScopedSyntaxMetadata } from "./scoped-entity.mjs";
+import { Expr } from "./expr.js";
+import { Identifier } from "./identifier.js";
+import { List } from "./list.js";
+import { ScopedSyntax, ScopedSyntaxMetadata } from "./scoped-entity.js";
 
 export class MacroLambda extends ScopedSyntax {
   readonly syntaxType = "macro-lambda";

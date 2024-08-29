@@ -1,8 +1,8 @@
-import type { Expr } from "./expr.mjs";
-import { ScopedNamedEntity, ScopedNamedEntityOpts } from "./named-entity.mjs";
-import { Parameter } from "./parameter.mjs";
-import { FnType, Type } from "./types.mjs";
-import { Variable } from "./variable.mjs";
+import type { Expr } from "./expr.js";
+import { ScopedNamedEntity, ScopedNamedEntityOpts } from "./named-entity.js";
+import { Parameter } from "./parameter.js";
+import { FnType, Type } from "./types.js";
+import { Variable } from "./variable.js";
 
 export class Fn extends ScopedNamedEntity {
   readonly syntaxType = "fn";

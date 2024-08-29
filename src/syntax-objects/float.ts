@@ -1,5 +1,5 @@
-import { Expr } from "./expr.mjs";
-import { Syntax, SyntaxMetadata } from "./syntax.mjs";
+import { Expr } from "./expr.js";
+import { Syntax, SyntaxMetadata } from "./syntax.js";
 
 export class Float extends Syntax {
   readonly syntaxType = "float";

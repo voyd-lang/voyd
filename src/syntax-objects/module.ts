@@ -1,13 +1,13 @@
-import { Expr } from "./expr.mjs";
-import { Float } from "./float.mjs";
-import { Identifier } from "./identifier.mjs";
-import { Int } from "./int.mjs";
-import { List, ListValue } from "./list.mjs";
+import { Expr } from "./expr.js";
+import { Float } from "./float.js";
+import { Identifier } from "./identifier.js";
+import { Int } from "./int.js";
+import { List, ListValue } from "./list.js";
 import {
   NamedEntity,
   ScopedNamedEntity,
   ScopedNamedEntityOpts,
-} from "./named-entity.mjs";
+} from "./named-entity.js";
 
 export class VoidModule extends ScopedNamedEntity {
   readonly syntaxType = "module";

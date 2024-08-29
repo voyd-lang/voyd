@@ -1,6 +1,6 @@
-import { checkTypes } from "./check-types.mjs";
-import { initPrimitiveTypes } from "./init-primitive-types.mjs";
-import { initEntities } from "./init-entities.mjs";
+import { checkTypes } from "./check-types.js";
+import { initPrimitiveTypes } from "./init-primitive-types.js";
+import { initEntities } from "./init-entities.js";
 import { TypeChecker } from "./types";
 
 const typePhases: TypeChecker[] = [

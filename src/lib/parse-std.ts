@@ -1,5 +1,5 @@
 import path from "path";
-import { parseDirectory } from "./parse-directory.mjs";
+import { parseDirectory } from "./parse-directory.js";
 import { fileURLToPath } from "url";
 
 export const stdPath = path.resolve(

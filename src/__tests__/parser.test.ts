@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
-import { parse } from "../parser.mjs";
-import { rawParserAST, voidFile } from "./fixtures/index.mjs";
+import { parse } from "../parser.js";
+import { rawParserAST, voidFile } from "./fixtures/index.js";
 import assert from "node:assert";
 
 describe("parser", () => {

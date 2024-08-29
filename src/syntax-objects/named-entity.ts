@@ -1,7 +1,7 @@
-import { Expr } from "./expr.mjs";
-import { Id, Identifier } from "./identifier.mjs";
-import { LexicalContext } from "./lexical-context.mjs";
-import { Syntax, SyntaxMetadata } from "./syntax.mjs";
+import { Expr } from "./expr.js";
+import { Id, Identifier } from "./identifier.js";
+import { LexicalContext } from "./lexical-context.js";
+import { Syntax, SyntaxMetadata } from "./syntax.js";
 
 export type NamedEntityOpts = SyntaxMetadata & {
   name: Id;

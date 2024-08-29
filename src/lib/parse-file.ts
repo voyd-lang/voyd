@@ -1,7 +1,7 @@
 import fs from "node:fs";
-import { parse } from "../parser.mjs";
-import { List } from "../syntax-objects/list.mjs";
-import { File } from "./file.mjs";
+import { parse } from "../parser.js";
+import { List } from "../syntax-objects/list.js";
+import { File } from "./file.js";
 
 export const parseFile = async (path: string): Promise<List> => {
   const file = fs.readFileSync(path, { encoding: "utf8" });

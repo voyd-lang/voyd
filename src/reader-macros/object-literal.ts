@@ -1,4 +1,4 @@
-import { ReaderMacro } from "./types.mjs";
+import { ReaderMacro } from "./types.js";
 
 export const objectLiteralMacro: ReaderMacro = {
   match: (t) => t.value === "{",

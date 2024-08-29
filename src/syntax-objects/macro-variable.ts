@@ -1,5 +1,5 @@
-import { Expr } from "./expr.mjs";
-import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
+import { Expr } from "./expr.js";
+import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
 
 export class MacroVariable extends NamedEntity {
   readonly isMutable: boolean;

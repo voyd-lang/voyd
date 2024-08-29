@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 import { stdout } from "process";
-import { getConfig } from "./config/index.mjs";
-import { genWasmCode } from "./wasm-code-gen.mjs";
-import { run } from "./run.mjs";
-import { parseDirectory, parseFile, parseStd, stdPath } from "./lib/index.mjs";
+import { getConfig } from "./config/index.js";
+import { genWasmCode } from "./wasm-code-gen.js";
+import { run } from "./run.js";
+import { parseDirectory, parseFile, parseStd, stdPath } from "./lib/index.js";
 import {
   expandSyntaxMacrosOfFiles,
   expandSyntaxMacros,
-} from "./syntax-macros/index.mjs";
-import { resolveFileModules } from "./modules.mjs";
-import { expandRegularMacros } from "./regular-macros.mjs";
-import { typeCheck } from "./semantics/index.mjs";
+} from "./syntax-macros/index.js";
+import { resolveFileModules } from "./modules.js";
+import { expandRegularMacros } from "./regular-macros.js";
+import { typeCheck } from "./semantics/index.js";
 import binaryen from "binaryen";
-import { resolveSrc } from "./lib/resolve-src.mjs";
-import { testGc } from "./lib/binaryen-gc/test.mjs";
+import { resolveSrc } from "./lib/resolve-src.js";
+import { testGc } from "./lib/binaryen-gc/test.js";
 
 main().catch(errorHandler);
 

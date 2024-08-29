@@ -1,15 +1,15 @@
-import { Token } from "../lib/token.mjs";
-import { arrayLiteralMacro } from "./array-literal.mjs";
-import { booleanMacro } from "./boolean.mjs";
-import { comment } from "./comment.mjs";
-import { dictionaryLiteralMacro } from "./dictionary-literal.mjs";
-import { floatMacro } from "./float.mjs";
-import { intMacro } from "./int.mjs";
-import { scientificENotationMacro } from "./scientific-e-notation.mjs";
-import { stringMacro } from "./string.mjs";
-import { objectLiteralMacro } from "./object-literal.mjs";
-import { ReaderMacro } from "./types.mjs";
-import { genericsMacro } from "./generics.mjs";
+import { Token } from "../lib/token.js";
+import { arrayLiteralMacro } from "./array-literal.js";
+import { booleanMacro } from "./boolean.js";
+import { comment } from "./comment.js";
+import { dictionaryLiteralMacro } from "./dictionary-literal.js";
+import { floatMacro } from "./float.js";
+import { intMacro } from "./int.js";
+import { scientificENotationMacro } from "./scientific-e-notation.js";
+import { stringMacro } from "./string.js";
+import { objectLiteralMacro } from "./object-literal.js";
+import { ReaderMacro } from "./types.js";
+import { genericsMacro } from "./generics.js";
 
 const macros = [
   objectLiteralMacro,

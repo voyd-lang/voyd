@@ -1,5 +1,5 @@
 import { ParseArgsConfig, parseArgs } from "node:util";
-import { VoidConfig } from "./types.mjs";
+import { VoidConfig } from "./types.js";
 
 const options: ParseArgsConfig["options"] = {
   "emit-parser-ast": {

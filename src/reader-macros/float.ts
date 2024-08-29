@@ -1,5 +1,5 @@
-import { Float } from "../syntax-objects/index.mjs";
-import { ReaderMacro } from "./types.mjs";
+import { Float } from "../syntax-objects/index.js";
+import { ReaderMacro } from "./types.js";
 
 export const floatMacro: ReaderMacro = {
   match: (t) => /^[+-]?\d+\.\d+$/.test(t.value),

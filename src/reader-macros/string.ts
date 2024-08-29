@@ -1,5 +1,5 @@
-import { Identifier, StringLiteral } from "../syntax-objects/index.mjs";
-import { ReaderMacro } from "./types.mjs";
+import { Identifier, StringLiteral } from "../syntax-objects/index.js";
+import { ReaderMacro } from "./types.js";
 
 export const stringMacro: ReaderMacro = {
   match: (t) => /^[\"\']$/.test(t.value),

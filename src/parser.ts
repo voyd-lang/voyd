@@ -1,14 +1,14 @@
-import { Expr, Identifier, List, Whitespace } from "./syntax-objects/index.mjs";
-import { Token } from "./lib/token.mjs";
-import { File } from "./lib/file.mjs";
-import { getReaderMacroForToken } from "./reader-macros/index.mjs";
+import { Expr, Identifier, List, Whitespace } from "./syntax-objects/index.js";
+import { Token } from "./lib/token.js";
+import { File } from "./lib/file.js";
+import { getReaderMacroForToken } from "./reader-macros/index.js";
 import {
   isDigit,
   isDigitSign,
   isTerminator,
   isWhitespace,
   isOpChar,
-} from "./lib/grammar.mjs";
+} from "./lib/grammar.js";
 
 export interface ParseOpts {
   nested?: boolean;

@@ -1,8 +1,8 @@
-import { List } from "../../syntax-objects/index.mjs";
-import { functionalNotation } from "./functional-notation.mjs";
-import { interpretWhitespace } from "./interpret-whitespace.mjs";
-import { SyntaxMacro } from "../types.mjs";
-import { primary } from "./primary.mjs";
+import { List } from "../../syntax-objects/index.js";
+import { functionalNotation } from "./functional-notation.js";
+import { interpretWhitespace } from "./interpret-whitespace.js";
+import { SyntaxMacro } from "../types.js";
+import { primary } from "./primary.js";
 
 /** Caution: Order matters */
 const surfaceLanguageMacros: SyntaxMacro[] = [

@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { StringsTable } from "./lib/host-runtime/strings.mjs";
+import { StringsTable } from "./lib/host-runtime/strings.js";
 
 export function run(mod: binaryen.Module) {
   const binary = mod.emitBinary();

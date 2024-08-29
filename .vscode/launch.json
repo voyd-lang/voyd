@@ -9,9 +9,9 @@
       "request": "launch",
       "name": "Launch Program",
       "skipFiles": ["<node_internals>/**"],
-      "program": "${workspaceFolder}/dist/index.mjs",
+      "program": "${workspaceFolder}/dist/index.js",
       "args": ["example.dm"],
-      "outFiles": ["${workspaceFolder}/**/*.mjs"]
+      "outFiles": ["${workspaceFolder}/**/*.js"]
     }
   ]
 }

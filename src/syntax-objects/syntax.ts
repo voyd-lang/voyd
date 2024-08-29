@@ -1,34 +1,34 @@
-import type { Block } from "./block.mjs";
-import type { Bool } from "./bool.mjs";
-import type { Call } from "./call.mjs";
-import type { Expr } from "./expr.mjs";
-import type { Float } from "./float.mjs";
-import type { Fn } from "./fn.mjs";
-import type { Global } from "./global.mjs";
-import type { Id, Identifier } from "./identifier.mjs";
-import type { Int } from "./int.mjs";
-import type { VoidModule } from "./module.mjs";
-import { LexicalContext } from "./lexical-context.mjs";
-import type { List } from "./list.mjs";
-import type { MacroLambda } from "./macro-lambda.mjs";
-import type { MacroVariable } from "./macro-variable.mjs";
-import type { Macro } from "./macros.mjs";
-import type { Parameter } from "./parameter.mjs";
-import type { StringLiteral } from "./string-literal.mjs";
-import type { ObjectLiteral } from "./object-literal.mjs";
+import type { Block } from "./block.js";
+import type { Bool } from "./bool.js";
+import type { Call } from "./call.js";
+import type { Expr } from "./expr.js";
+import type { Float } from "./float.js";
+import type { Fn } from "./fn.js";
+import type { Global } from "./global.js";
+import type { Id, Identifier } from "./identifier.js";
+import type { Int } from "./int.js";
+import type { VoidModule } from "./module.js";
+import { LexicalContext } from "./lexical-context.js";
+import type { List } from "./list.js";
+import type { MacroLambda } from "./macro-lambda.js";
+import type { MacroVariable } from "./macro-variable.js";
+import type { Macro } from "./macros.js";
+import type { Parameter } from "./parameter.js";
+import type { StringLiteral } from "./string-literal.js";
+import type { ObjectLiteral } from "./object-literal.js";
 import type {
   FnType,
   PrimitiveType,
   ObjectType,
   Type,
   TypeAlias,
-} from "./types.mjs";
-import type { Variable } from "./variable.mjs";
-import type { Whitespace } from "./whitespace.mjs";
-import { NamedEntity } from "./named-entity.mjs";
-import { ScopedEntity } from "./scoped-entity.mjs";
-import { Declaration } from "./declaration.mjs";
-import { Use } from "./use.mjs";
+} from "./types.js";
+import type { Variable } from "./variable.js";
+import type { Whitespace } from "./whitespace.js";
+import { NamedEntity } from "./named-entity.js";
+import { ScopedEntity } from "./scoped-entity.js";
+import { Declaration } from "./declaration.js";
+import { Use } from "./use.js";
 
 export type SyntaxMetadata = {
   location?: SourceLocation;

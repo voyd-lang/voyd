@@ -1,6 +1,6 @@
-import { ParsedFiles } from "./lib/parse-directory.mjs";
-import { List } from "./syntax-objects/list.mjs";
-import { VoidModule } from "./syntax-objects/module.mjs";
+import { ParsedFiles } from "./lib/parse-directory.js";
+import { List } from "./syntax-objects/list.js";
+import { VoidModule } from "./syntax-objects/module.js";
 
 export const resolveFileModules = (opts: {
   /** Path to the std lib directory */

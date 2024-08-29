@@ -1,7 +1,7 @@
-import { Expr } from "./expr.mjs";
-import { Identifier } from "./identifier.mjs";
-import { NamedEntity, NamedEntityOpts } from "./named-entity.mjs";
-import { Type } from "./types.mjs";
+import { Expr } from "./expr.js";
+import { Identifier } from "./identifier.js";
+import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
+import { Type } from "./types.js";
 
 export class Parameter extends NamedEntity {
   readonly syntaxType = "parameter";

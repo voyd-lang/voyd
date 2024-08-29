@@ -1,4 +1,4 @@
-import { boolToInt } from "./bool-to-int.mjs";
+import { boolToInt } from "./bool-to-int.js";
 
 export class StringsTable {
   readonly rotateAfterIndex = 500000;

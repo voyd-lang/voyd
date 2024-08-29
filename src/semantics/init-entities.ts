@@ -1,4 +1,4 @@
-import { Declaration } from "../syntax-objects/declaration.mjs";
+import { Declaration } from "../syntax-objects/declaration.js";
 import {
   List,
   Fn,
@@ -10,7 +10,7 @@ import {
   TypeAlias,
   ObjectType,
   ObjectLiteral,
-} from "../syntax-objects/index.mjs";
+} from "../syntax-objects/index.js";
 import { TypeChecker } from "./types";
 
 export const initEntities: TypeChecker = (expr) => {

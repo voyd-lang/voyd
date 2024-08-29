@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
-import { e2eVoidText } from "./fixtures/e2e-file.mjs";
-import { compileText } from "../api.mjs";
+import { e2eVoidText } from "./fixtures/e2e-file.js";
+import { compileText } from "../api.js";
 import { strict as assert } from "node:assert";
 
 describe("API: E2E", () => {

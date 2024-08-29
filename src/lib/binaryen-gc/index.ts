@@ -5,7 +5,7 @@ import {
   HeapTypeRef,
   Struct,
   Type,
-} from "./types.mjs";
+} from "./types.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 

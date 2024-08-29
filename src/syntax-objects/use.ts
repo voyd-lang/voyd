@@ -1,7 +1,7 @@
-import { Expr } from "./expr.mjs";
-import { List } from "./list.mjs";
-import { NamedEntity } from "./named-entity.mjs";
-import { Syntax, SyntaxMetadata } from "./syntax.mjs";
+import { Expr } from "./expr.js";
+import { List } from "./list.js";
+import { NamedEntity } from "./named-entity.js";
+import { Syntax, SyntaxMetadata } from "./syntax.js";
 
 /** Defines a declared namespace for external function imports */
 export class Use extends Syntax {

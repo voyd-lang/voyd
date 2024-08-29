@@ -1,12 +1,12 @@
 import { describe, it } from "node:test";
-import { parse } from "../parser.mjs";
-import { regularMacrosAst, regularMacrosVoidFile } from "./fixtures/index.mjs";
+import { parse } from "../parser.js";
+import { regularMacrosAst, regularMacrosVoidFile } from "./fixtures/index.js";
 import assert from "node:assert";
 import path from "node:path";
-import { stdPath } from "../lib/parse-std.mjs";
-import { resolveFileModules } from "../modules.mjs";
-import { expandSyntaxMacrosOfFiles } from "../syntax-macros/index.mjs";
-import { expandRegularMacros } from "../regular-macros.mjs";
+import { stdPath } from "../lib/parse-std.js";
+import { resolveFileModules } from "../modules.js";
+import { expandSyntaxMacrosOfFiles } from "../syntax-macros/index.js";
+import { expandRegularMacros } from "../regular-macros.js";
 
 describe("regular macro evaluation", () => {
   it("should evaluate macros of the example file", async () => {

@@ -1,5 +1,5 @@
-import { Identifier, List } from "../syntax-objects/index.mjs";
-import { ReaderMacro } from "./types.mjs";
+import { Identifier, List } from "../syntax-objects/index.js";
+import { ReaderMacro } from "./types.js";
 
 export const dictionaryLiteralMacro: ReaderMacro = {
   match: (t) => t.value === "#{",
