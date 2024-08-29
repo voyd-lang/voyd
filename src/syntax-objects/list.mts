@@ -1,3 +1,4 @@
+import { FastShiftArray } from "../lib/fast-shift-array.mjs";
 import { Expr } from "./expr.mjs";
 import { Float } from "./float.mjs";
 import { getIdStr } from "./get-id-str.mjs";
@@ -10,7 +11,7 @@ export class List extends Syntax {
   readonly syntaxType = "list";
   /** True when the list was defined by the user using parenthesis i.e. (hey, there) */
   mayBeTuple?: boolean;
-  value: Expr[] = [];
+  store: FastShiftArray<Expr> = new FastShiftArray();
 
   constructor(
     opts: SyntaxMetadata & {
@@ -29,20 +30,24 @@ export class List extends Syntax {
     }
   }
 
+  get value() {
+    return this.store.toArray();
+  }
+
   get hasChildren() {
-    return !!this.value.length;
+    return !!this.store.length;
   }
 
   get length() {
-    return this.value.length;
+    return this.store.length;
   }
 
   at(index: number): Expr | undefined {
-    return this.value.at(index);
+    return this.store.at(index);
   }
 
   exprAt(index: number): Expr {
-    const expr = this.value.at(index);
+    const expr = this.store.at(index);
     if (!expr) {
       throw new Error(`No expr at ${index}`);
     }
@@ -68,7 +73,7 @@ export class List extends Syntax {
   set(index: number, expr: Expr | string) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
     result.parent = this;
-    this.value[index] = result;
+    this.store.set(index, result);
     return this;
   }
 
@@ -82,48 +87,42 @@ export class List extends Syntax {
   }
 
   consume(): Expr {
-    const next = this.value.shift();
+    const next = this.store.shift();
     if (!next) throw new Error("No remaining expressions");
     return next;
   }
 
-  consumeRest(): List {
-    const newVal = this.slice(0);
-    this.value = [];
-    return newVal;
-  }
-
   first(): Expr | undefined {
-    return this.value[0];
+    return this.store.at(0);
   }
 
   last(): Expr | undefined {
-    return this.value.at(-1);
+    return this.store.at(-1);
   }
 
   /** Returns all but the first element in an array */
   rest(): Expr[] {
-    return this.value.slice(1);
+    return this.store.toArray().slice(1);
   }
 
   pop(): Expr | undefined {
-    return this.value.pop();
+    return this.store.pop();
   }
 
   push(...expr: ListValue[]) {
     expr.forEach((ex) => {
       if (typeof ex === "string") {
-        this.value.push(new Identifier({ value: ex, parent: this }));
+        this.store.push(new Identifier({ value: ex, parent: this }));
         return;
       }
 
       if (typeof ex === "number" && Number.isInteger(ex)) {
-        this.value.push(new Int({ value: ex, parent: this }));
+        this.store.push(new Int({ value: ex, parent: this }));
         return;
       }
 
       if (typeof ex === "number") {
-        this.value.push(new Float({ value: ex, parent: this }));
+        this.store.push(new Float({ value: ex, parent: this }));
         return;
       }
 
@@ -139,11 +138,11 @@ export class List extends Syntax {
       }
 
       if (ex.isList() && ex.calls("splice_quote")) {
-        this.value.push(...ex.rest());
+        this.store.push(...ex.rest());
         return;
       }
 
-      this.value.push(ex);
+      this.store.push(ex);
     });
 
     return this;
@@ -156,12 +155,12 @@ export class List extends Syntax {
   insert(expr: Expr | string, at = 0) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
     result.parent = this;
-    this.value.splice(at, 0, result);
+    this.store.splice(at, 0, result);
     return this;
   }
 
   remove(index: number, count = 1) {
-    this.value.splice(index, count);
+    this.store.splice(index, count);
     return this;
   }
 
@@ -200,16 +199,16 @@ export class List extends Syntax {
   slice(start?: number, end?: number): List {
     return new List({
       ...super.getCloneOpts(),
-      value: this.value.slice(start, end),
+      value: this.store.slice(start, end),
     });
   }
 
   sliceAsArray(start?: number, end?: number) {
-    return this.value.slice(start, end);
+    return this.store.slice(start, end);
   }
 
   toArray(): Expr[] {
-    return [...this.value];
+    return this.value;
   }
 
   toJSON() {

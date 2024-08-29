@@ -11,7 +11,7 @@ export class File {
   };
 
   constructor(contents: string, filePath: string) {
-    this.value = contents.split("");
+    this.value = contents.split("").reverse();
     this.originalSize = this.value.length;
     this.filePath = filePath;
   }
@@ -34,7 +34,7 @@ export class File {
   }
 
   get next() {
-    return this.value[0];
+    return this.value[this.value.length - 1];
   }
 
   currentSourceLocation() {
@@ -48,12 +48,12 @@ export class File {
   }
 
   at(index: number): string | undefined {
-    return this.value.at(index);
+    return this.value.at(-index - 1);
   }
 
   /** Returns the next character and removes it from the queue */
   consumeChar(): string {
-    const char = this.value.shift();
+    const char = this.value.pop();
     if (!char) {
       throw new Error("Out of characters");
     }
