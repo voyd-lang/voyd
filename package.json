@@ -4,14 +4,16 @@
   "description": "",
   "module": "dist/index.js",
   "type": "module",
+  "types": "./src/index.ts",
+  "exports": "./dist/index.js",
   "scripts": {
     "test": "node --test **/__tests__/**/*.test.js",
     "build": "npx tsc",
     "prepublishOnly": "tsc"
   },
   "bin": {
-    "voidc": "./dist/index.js",
-    "void": "./dist/index.js"
+    "voidc": "./dist/cli.js",
+    "void": "./dist/cli.js"
   },
   "keywords": [],
   "author": "",

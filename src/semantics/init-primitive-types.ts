@@ -1,5 +1,5 @@
 import { i32, f32, i64, f64, bool, dVoid } from "../syntax-objects/types.js";
-import { TypeChecker } from "./types";
+import { TypeChecker } from "./types.js";
 
 export const initPrimitiveTypes: TypeChecker = (expr) => {
   expr.registerEntity(i32);

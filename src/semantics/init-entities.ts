@@ -11,7 +11,7 @@ import {
   ObjectType,
   ObjectLiteral,
 } from "../syntax-objects/index.js";
-import { TypeChecker } from "./types";
+import { TypeChecker } from "./types.js";
 
 export const initEntities: TypeChecker = (expr) => {
   if (expr.isModule()) {
