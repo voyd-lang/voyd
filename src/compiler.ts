@@ -7,7 +7,7 @@ import {
   parseModule,
 } from "./parser/index.js";
 
-export const compileText = async (text: string) => {
+export const compile = async (text: string) => {
   const parsedModule = await parseModule(text);
   return compileParsedModule(parsedModule);
 };

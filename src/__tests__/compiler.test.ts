@@ -1,11 +1,11 @@
 import { describe, it } from "node:test";
 import { e2eVoidText } from "./fixtures/e2e-file.js";
-import { compileText } from "../compiler.js";
+import { compile } from "../compiler.js";
 import { strict as assert } from "node:assert";
 
 describe("Compiler: E2E", () => {
   it("Can compile and run a basic void file", async () => {
-    const mod = await compileText(e2eVoidText);
+    const mod = await compile(e2eVoidText);
     const bin = mod.emitBinary();
     const compiled = new WebAssembly.Module(bin);
     const instance = new WebAssembly.Instance(compiled);
