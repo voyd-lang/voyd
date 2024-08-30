@@ -1,5 +1,3 @@
-import { CharStream } from "../../parser/char-stream.js";
-
 export const regularMacrosVoidFile = `
 macro \`()
   quote quote $@body

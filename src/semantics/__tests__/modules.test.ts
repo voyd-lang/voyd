@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { registerModules } from "../modules.js";
-import { List } from "../syntax-objects/list.js";
+import { List } from "../../syntax-objects/list.js";
 
 describe("modules", () => {
   describe("resolveFileModule", () => {

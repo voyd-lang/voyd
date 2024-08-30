@@ -3,9 +3,7 @@ import { stdout } from "process";
 import { getConfig } from "./lib/config/index.js";
 import { genWasmCode } from "./wasm-code-gen.js";
 import { run } from "./run.js";
-import { registerModules } from "./modules.js";
-import { expandRegularMacros } from "./regular-macros.js";
-import { typeCheck } from "./semantics/index.js";
+import { processSemantics } from "./semantics/index.js";
 import binaryen from "binaryen";
 import { testGc } from "./lib/binaryen-gc/test.js";
 import { parseFile, parseModuleFromSrc } from "./parser/index.js";
@@ -64,17 +62,17 @@ async function getCoreAst(index: string) {
 
 async function getModuleAst(index: string) {
   const module = await parseModuleFromSrc(index);
-  return registerModules(module);
+  return processSemantics(module);
 }
 
 async function getMacroAst(index: string) {
-  const moduleAst = await getModuleAst(index);
-  return expandRegularMacros(moduleAst);
+  const module = await parseModuleFromSrc(index);
+  return processSemantics(module);
 }
 
 async function getWasmMod(index: string, optimize = false) {
-  const ast = await getMacroAst(index);
-  const checkedAst = typeCheck(ast);
+  const module = await parseModuleFromSrc(index);
+  const checkedAst = processSemantics(module);
   const mod = genWasmCode(checkedAst);
 
   if (optimize) {

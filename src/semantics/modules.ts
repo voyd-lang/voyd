@@ -1,6 +1,6 @@
-import { ParsedModule, stdPath } from "./parser/index.js";
-import { List } from "./syntax-objects/list.js";
-import { VoidModule } from "./syntax-objects/module.js";
+import { ParsedModule, stdPath } from "../parser/index.js";
+import { List } from "../syntax-objects/list.js";
+import { VoidModule } from "../syntax-objects/module.js";
 
 /** Registers submodules of a parsed module for future import resolution */
 export const registerModules = (opts: ParsedModule): VoidModule => {

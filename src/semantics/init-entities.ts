@@ -11,9 +11,9 @@ import {
   ObjectType,
   ObjectLiteral,
 } from "../syntax-objects/index.js";
-import { TypeChecker } from "./types.js";
+import { SemanticProcessor } from "./types.js";
 
-export const initEntities: TypeChecker = (expr) => {
+export const initEntities: SemanticProcessor = (expr) => {
   if (expr.isModule()) {
     return expr.applyMap(initEntities);
   }

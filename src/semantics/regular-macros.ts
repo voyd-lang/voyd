@@ -1,4 +1,4 @@
-import { getIdStr } from "./syntax-objects/get-id-str.js";
+import { getIdStr } from "../syntax-objects/get-id-str.js";
 import {
   Bool,
   Expr,
@@ -14,8 +14,8 @@ import {
   VoidModule,
   Block,
   Use,
-} from "./syntax-objects/index.js";
-import { NamedEntity } from "./syntax-objects/named-entity.js";
+} from "../syntax-objects/index.js";
+import { NamedEntity } from "../syntax-objects/named-entity.js";
 
 export const expandRegularMacros = (expr: Expr): Expr => {
   if (expr.isModule()) return expandModuleMacros(expr);
