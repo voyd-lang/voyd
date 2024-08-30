@@ -4,11 +4,9 @@ import { registerModules } from "../modules.js";
 import { List } from "../../syntax-objects/list.js";
 
 describe("modules", () => {
-  describe("resolveFileModule", () => {
-    it("should resolve a file module", () => {
-      const result = registerModules(input);
-      assert.deepStrictEqual(JSON.parse(JSON.stringify(result)), output);
-    });
+  it("should register modules", () => {
+    const result = registerModules(input);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(result)), output);
   });
 });
 
