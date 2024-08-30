@@ -1,4 +1,4 @@
-import { Int } from "../syntax-objects/index.js";
+import { Int } from "../../syntax-objects/index.js";
 import { ReaderMacro } from "./types.js";
 
 export const intMacro: ReaderMacro = {

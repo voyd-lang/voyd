@@ -1,4 +1,4 @@
-import { noop } from "../syntax-objects/index.js";
+import { noop } from "../../syntax-objects/index.js";
 import { ReaderMacro } from "./types.js";
 
 export const comment: ReaderMacro = {

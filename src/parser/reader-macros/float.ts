@@ -1,4 +1,4 @@
-import { Float } from "../syntax-objects/index.js";
+import { Float } from "../../syntax-objects/index.js";
 import { ReaderMacro } from "./types.js";
 
 export const floatMacro: ReaderMacro = {

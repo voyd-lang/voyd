@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { parse } from "../parser.js";
+import { parse } from "../parser/parser.js";
 import { List } from "../syntax-objects/list.js";
 import { File } from "./file.js";
 

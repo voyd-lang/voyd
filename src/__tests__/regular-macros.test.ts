@@ -1,5 +1,5 @@
 import { describe, it } from "node:test";
-import { parse } from "../parser.js";
+import { parse } from "../parser/parser.js";
 import { regularMacrosAst, regularMacrosVoidFile } from "./fixtures/index.js";
 import assert from "node:assert";
 import path from "node:path";

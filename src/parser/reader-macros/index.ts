@@ -1,4 +1,4 @@
-import { Token } from "../lib/token.js";
+import { Token } from "../../lib/token.js";
 import { arrayLiteralMacro } from "./array-literal.js";
 import { booleanMacro } from "./boolean.js";
 import { comment } from "./comment.js";

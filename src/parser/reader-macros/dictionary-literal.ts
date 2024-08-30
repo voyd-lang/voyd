@@ -1,4 +1,4 @@
-import { Identifier, List } from "../syntax-objects/index.js";
+import { Identifier, List } from "../../syntax-objects/index.js";
 import { ReaderMacro } from "./types.js";
 
 export const dictionaryLiteralMacro: ReaderMacro = {

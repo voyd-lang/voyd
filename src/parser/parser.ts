@@ -1,6 +1,6 @@
-import { Expr, Identifier, List, Whitespace } from "./syntax-objects/index.js";
-import { Token } from "./lib/token.js";
-import { File } from "./lib/file.js";
+import { Expr, Identifier, List, Whitespace } from "../syntax-objects/index.js";
+import { Token } from "../lib/token.js";
+import { File } from "../lib/file.js";
 import { getReaderMacroForToken } from "./reader-macros/index.js";
 import {
   isDigit,
@@ -8,7 +8,7 @@ import {
   isTerminator,
   isWhitespace,
   isOpChar,
-} from "./lib/grammar.js";
+} from "../lib/grammar.js";
 
 export interface ParseOpts {
   nested?: boolean;

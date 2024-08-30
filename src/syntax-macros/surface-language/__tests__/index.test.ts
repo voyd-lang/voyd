@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "assert";
 import { desugarredAst } from "./fixtures/desugarred-ast.js";
-import { parse } from "../../../parser.js";
+import { parse } from "../../../parser/parser.js";
 import { voidFile } from "./fixtures/void-file.js";
 import { surfaceLanguage } from "../index.js";
 

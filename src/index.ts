@@ -3,7 +3,7 @@ import { parseFile } from "./lib/parse-file.js";
 import { parseStd, stdPath } from "./lib/parse-std.js";
 import { resolveSrc } from "./lib/resolve-src.js";
 import { File } from "./lib/file.js";
-import { parse } from "./parser.js";
+import { parse } from "./parser/parser.js";
 import { expandSyntaxMacrosOfFiles } from "./syntax-macros/index.js";
 import { resolveFileModules } from "./modules.js";
 import { expandRegularMacros } from "./regular-macros.js";
