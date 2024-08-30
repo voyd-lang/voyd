@@ -19,7 +19,7 @@ import {
 } from "./lib/binaryen-gc/index.js";
 import { HeapTypeRef } from "./lib/binaryen-gc/types.js";
 
-export const genWasmCode = (ast: Expr) => {
+export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
   mod.setMemory(1, 150, "buffer");
   mod.setFeatures(binaryen.Features.All);

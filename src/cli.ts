@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { stdout } from "process";
 import { getConfig } from "./lib/config/index.js";
-import { genWasmCode } from "./wasm-code-gen.js";
+import { assemble } from "./assembler.js";
 import { run } from "./run.js";
 import { processSemantics } from "./semantics/index.js";
 import binaryen from "binaryen";
@@ -73,7 +73,7 @@ async function getMacroAst(index: string) {
 async function getWasmMod(index: string, optimize = false) {
   const module = await parseModuleFromSrc(index);
   const checkedAst = processSemantics(module);
-  const mod = genWasmCode(checkedAst);
+  const mod = assemble(checkedAst);
 
   if (optimize) {
     binaryen.setShrinkLevel(3);

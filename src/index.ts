@@ -2,7 +2,7 @@ import { registerModules } from "./semantics/modules.js";
 import { expandRegularMacros } from "./semantics/regular-macros.js";
 import { processSemantics } from "./semantics/index.js";
 import binaryen from "binaryen";
-import { genWasmCode } from "./wasm-code-gen.js";
+import { assemble } from "./assembler.js";
 import {
   ParsedModule,
   parseModuleFromSrc,
@@ -21,5 +21,5 @@ export const compilePath = async (path: string) => {
 
 export const compileParsedModule = (module: ParsedModule): binaryen.Module => {
   const typeCheckedModule = processSemantics(module);
-  return genWasmCode(typeCheckedModule);
+  return assemble(typeCheckedModule);
 };
