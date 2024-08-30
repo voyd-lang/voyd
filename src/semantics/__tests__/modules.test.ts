@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 import { registerModules } from "../modules.js";
 import { List } from "../../syntax-objects/list.js";
+import { stdPath } from "../../parser/index.js";
 
 describe("modules", () => {
   it("should register modules", () => {
@@ -101,7 +102,7 @@ const input = {
         ],
       ],
     }),
-    "/Users/drew/projects/void/std/memory.void": new List({
+    [`${stdPath}/memory.void`]: new List({
       value: [
         "ast",
         ["use", ["::", ["::", "super", "macros"], "all"]],
@@ -127,13 +128,12 @@ const input = {
         ],
       ],
     }),
-    "/Users/drew/projects/void/std/index.void": new List({
+    [`${stdPath}/index.void`]: new List({
       value: ["ast", ["pub", ["use", ["::", "macros", "all"]]]],
     }),
   },
   srcPath: "/Users/drew/projects/void",
   indexPath: "/Users/drew/projects/void/index.void",
-  stdPath: "/Users/drew/projects/void/std",
 };
 
 const output = [
