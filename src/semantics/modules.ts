@@ -5,6 +5,8 @@ import { VoidModule } from "../syntax-objects/module.js";
 /** Registers submodules of a parsed module for future import resolution */
 export const registerModules = (opts: ParsedModule): VoidModule => {
   const { srcPath, files } = opts;
+  console.log("Std path:");
+  console.log(stdPath);
 
   const rootModule = new VoidModule({ name: "root" });
 

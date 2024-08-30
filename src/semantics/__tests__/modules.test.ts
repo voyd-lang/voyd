@@ -6,10 +6,6 @@ import { List } from "../../syntax-objects/list.js";
 describe("modules", () => {
   it("should register modules", () => {
     const result = registerModules(input);
-    console.log("EXPECTED");
-    console.log(JSON.stringify(output, undefined, 2));
-    console.log("Actual");
-    console.log(JSON.stringify(result, undefined, 2));
     assert.deepStrictEqual(JSON.parse(JSON.stringify(result)), output);
   });
 });
