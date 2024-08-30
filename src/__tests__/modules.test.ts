@@ -1,12 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { resolveFileModules } from "../modules.js";
+import { registerModules } from "../modules.js";
 import { List } from "../syntax-objects/list.js";
 
 describe("modules", () => {
   describe("resolveFileModule", () => {
     it("should resolve a file module", () => {
-      const result = resolveFileModules(input);
+      const result = registerModules(input);
       assert.deepStrictEqual(JSON.parse(JSON.stringify(result)), output);
     });
   });

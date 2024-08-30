@@ -3,15 +3,12 @@ import { stdout } from "process";
 import { getConfig } from "./lib/config/index.js";
 import { genWasmCode } from "./wasm-code-gen.js";
 import { run } from "./run.js";
-import { resolveFileModules } from "./modules.js";
+import { registerModules } from "./modules.js";
 import { expandRegularMacros } from "./regular-macros.js";
 import { typeCheck } from "./semantics/index.js";
 import binaryen from "binaryen";
-import { resolveSrc } from "./lib/resolve-src.js";
 import { testGc } from "./lib/binaryen-gc/test.js";
-import { parseFile } from "./lib/index.js";
-import { parseDirectory } from "./parser/api/parse-directory.js";
-import { parseStd, stdPath } from "./parser/api/parse-std.js";
+import { parseFile, parseModuleFromSrc } from "./parser/index.js";
 
 main().catch(errorHandler);
 
@@ -66,23 +63,8 @@ async function getCoreAst(index: string) {
 }
 
 async function getModuleAst(index: string) {
-  const src = await resolveSrc(index);
-
-  const srcFiles = src.srcRootPath
-    ? await parseDirectory(src.srcRootPath)
-    : { [src.indexPath]: await parseFile(src.indexPath) };
-
-  const files = {
-    ...srcFiles,
-    ...(await parseStd()),
-  };
-
-  return resolveFileModules({
-    files,
-    srcPath: src.srcRootPath,
-    indexPath: src.indexPath,
-    stdPath: stdPath,
-  });
+  const module = await parseModuleFromSrc(index);
+  return registerModules(module);
 }
 
 async function getMacroAst(index: string) {

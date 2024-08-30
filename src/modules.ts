@@ -1,25 +1,17 @@
-import { ParsedFiles } from "./parser/api/parse-directory.js";
+import { ParsedModule, stdPath } from "./parser/index.js";
 import { List } from "./syntax-objects/list.js";
 import { VoidModule } from "./syntax-objects/module.js";
 
-export const resolveFileModules = (opts: {
-  /** Path to the std lib directory */
-  stdPath: string;
-  /** Path to the user source code root folder */
-  srcPath?: string;
-  /** Path to the entry index file, which determines what is exported from the package */
-  indexPath: string;
-  files: ParsedFiles;
-}): VoidModule => {
-  const { stdPath, srcPath, files } = opts;
+/** Registers submodules of a parsed module for future import resolution */
+export const registerModules = (opts: ParsedModule): VoidModule => {
+  const { srcPath, files } = opts;
 
   const rootModule = new VoidModule({ name: "root" });
 
   for (const [filePath, file] of Object.entries(files)) {
     const resolvedPath = filePathToModulePath(
       filePath,
-      srcPath ?? opts.indexPath,
-      stdPath
+      srcPath ?? opts.indexPath
     );
 
     const parsedPath = resolvedPath.split("/").filter(Boolean);
@@ -79,11 +71,7 @@ const registerModule = ({
   return registerModule({ path: rest, parentModule: module, ast });
 };
 
-const filePathToModulePath = (
-  filePath: string,
-  srcPath: string,
-  stdPath: string
-) => {
+const filePathToModulePath = (filePath: string, srcPath: string) => {
   let finalPath = filePath.startsWith(stdPath)
     ? filePath.replace(stdPath, "std")
     : filePath;
