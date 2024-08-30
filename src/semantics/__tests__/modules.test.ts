@@ -6,7 +6,10 @@ import { List } from "../../syntax-objects/list.js";
 describe("modules", () => {
   it("should register modules", () => {
     const result = registerModules(input);
-    assert.deepStrictEqual(JSON.parse(JSON.stringify(result.toJSON())), output);
+    assert.deepStrictEqual(
+      JSON.parse(JSON.stringify(result.toJSON())),
+      JSON.parse(JSON.stringify(output))
+    );
   });
 });
 
