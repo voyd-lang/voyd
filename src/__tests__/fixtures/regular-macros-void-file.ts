@@ -1,6 +1,6 @@
-import { File } from "../../lib/file.js";
+import { CharStream } from "../../parser/char-stream.js";
 
-export const regularMacrosVoidText = `
+export const regularMacrosVoidFile = `
 macro \`()
   quote quote $@body
 
@@ -46,5 +46,3 @@ fn fib(n: i32) -> i32
   else:
     fib(n - 1) + fib(n - 2)
 `;
-
-export const regularMacrosVoidFile = new File(regularMacrosVoidText, "test");

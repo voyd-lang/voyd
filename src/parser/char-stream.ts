@@ -1,6 +1,6 @@
 import { SourceLocation } from "../syntax-objects/syntax.js";
 
-export class File {
+export class CharStream {
   readonly filePath: string;
   readonly originalSize: number;
   readonly value: string[];

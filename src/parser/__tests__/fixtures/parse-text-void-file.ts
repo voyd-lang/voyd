@@ -1,6 +1,6 @@
-import { File } from "../../lib/file.js";
+import { CharStream } from "../../char-stream.js";
 
-export const exampleVoidText = `
+export const parseFileVoidText = `
 fn fib(n: i32) -> i32
   if n <= 1 then:
     n
@@ -35,4 +35,4 @@ fn main()
   let result = fib(n)
 `;
 
-export const voidFile = new File(exampleVoidText, "beep/boop");
+export const voidFile = new CharStream(parseFileVoidText, "beep/boop");

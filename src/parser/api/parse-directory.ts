@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { glob } from "glob";
-import { List } from "../syntax-objects/index.js";
+import { List } from "../../syntax-objects/index.js";
 import { parseFile } from "./parse-file.js";
 
 export type ParsedFiles = { [filePath: string]: List };

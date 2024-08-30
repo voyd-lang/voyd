@@ -1,4 +1,4 @@
-import { ParsedFiles } from "./lib/parse-directory.js";
+import { ParsedFiles } from "./parser/api/parse-directory.js";
 import { List } from "./syntax-objects/list.js";
 import { VoidModule } from "./syntax-objects/module.js";
 

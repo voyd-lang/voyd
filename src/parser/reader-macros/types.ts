@@ -1,14 +1,14 @@
-import { File } from "../../lib/file.js";
+import { CharStream } from "../char-stream.js";
 import { Expr, List } from "../../syntax-objects/index.js";
-import { Token } from "../../lib/token.js";
+import { Token } from "../token.js";
 
 export interface ReaderMacro {
   match: (token: Token, prev?: Token) => boolean;
   macro: (
-    file: File,
+    file: CharStream,
     opts: {
       token: Token;
-      reader: (file: File, terminator?: string, parent?: Expr) => List;
+      reader: (file: CharStream, terminator?: string, parent?: Expr) => List;
     }
   ) => Expr;
 }

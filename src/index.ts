@@ -1,15 +1,14 @@
-import { ParsedFiles, parseDirectory } from "./lib/parse-directory.js";
-import { parseFile } from "./lib/parse-file.js";
-import { parseStd, stdPath } from "./lib/parse-std.js";
+import { parseFile } from "./parser/api/parse-file.js";
 import { resolveSrc } from "./lib/resolve-src.js";
-import { File } from "./lib/file.js";
+import { CharStream } from "./parser/char-stream.js";
 import { parse } from "./parser/parser.js";
-import { expandSyntaxMacrosOfFiles } from "./syntax-macros/index.js";
 import { resolveFileModules } from "./modules.js";
 import { expandRegularMacros } from "./regular-macros.js";
 import { typeCheck } from "./semantics/index.js";
 import binaryen from "binaryen";
 import { genWasmCode } from "./wasm-code-gen.js";
+import { ParsedFiles, parseDirectory } from "./parser/api/parse-directory.js";
+import { stdPath, parseStd } from "./parser/api/parse-std.js";
 
 export type ParsedModule = {
   files: ParsedFiles;
@@ -30,10 +29,8 @@ export const compilePath = async (path: string) => {
 };
 
 export const compileParsedModule = (module: ParsedModule): binaryen.Module => {
-  const syntaxExpandedFiles = expandSyntaxMacrosOfFiles(module.files);
   const moduleResolvedModule = resolveFileModules({
     ...module,
-    files: syntaxExpandedFiles,
     stdPath: stdPath,
   });
   const regularMacroExpandedModule = expandRegularMacros(moduleResolvedModule);
@@ -42,10 +39,9 @@ export const compileParsedModule = (module: ParsedModule): binaryen.Module => {
 };
 
 export const parseText = async (text: string): Promise<ParsedModule> => {
-  const file = new File(text, "index");
   return {
     files: {
-      index: parse(file),
+      index: parse(text),
       ...(await parseStd()),
     },
     indexPath: "index",

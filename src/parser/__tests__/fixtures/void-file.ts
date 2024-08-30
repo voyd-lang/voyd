@@ -1,6 +1,4 @@
-import { File } from "../../../../lib/file.js";
-
-export const exampleVoidText = `
+export const voidFile = `
 use std::macros::all
 use std::io::{ read, write: io_write }
 
@@ -104,5 +102,3 @@ fn main()
     z: { a: 10, b: 20 }
   }
 `;
-
-export const voidFile = new File(exampleVoidText, "beep/boop");

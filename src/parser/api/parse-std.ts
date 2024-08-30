@@ -7,6 +7,7 @@ export const stdPath = path.resolve(
   "..",
   "..",
   "..",
+  "..",
   "std"
 );
 
