@@ -2,12 +2,12 @@
 
 ```ts
 import binaryen from "binaryen";
-import { AugmentedBinaryen } from "./lib/binaryen-gc/types.mjs";
+import { AugmentedBinaryen } from "./lib/binaryen-gc/types.js";
 import {
   defineStructType,
   initStruct,
   structGetFieldValue,
-} from "./lib/binaryen-gc/index.mjs";
+} from "./lib/binaryen-gc/index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
