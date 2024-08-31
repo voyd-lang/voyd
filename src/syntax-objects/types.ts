@@ -199,16 +199,32 @@ export class ObjectType extends BaseType {
     });
   }
 
-  extends(type: ObjectType): boolean {
-    if (this.constructor === type.constructor) {
+  extends(ancestor: ObjectType): boolean {
+    if (this.constructor === ancestor.constructor) {
       return true;
     }
 
     if (this.parentObj) {
-      return this.parentObj.extends(type);
+      return this.parentObj.extends(ancestor);
     }
 
     return false;
+  }
+
+  /**
+   * How closely related this object is to ancestor.
+   * 0 = same type, 1 = ancestor is parent, 2 = ancestor is grandparent, etc
+   */
+  extensionDistance(ancestor: ObjectType, start = 0): number {
+    if (this.constructor === ancestor.constructor) {
+      return start;
+    }
+
+    if (this.parentObj) {
+      return this.parentObj.extensionDistance(ancestor, start + 1);
+    }
+
+    throw new Error(`${this.name} does not extend ${ancestor.name}`);
   }
 
   hasField(name: Id) {
