@@ -163,14 +163,20 @@ export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
 export class ObjectType extends BaseType {
   readonly kindOfType = "object";
   fields: ObjectField[];
+  parentObj?: ObjectType;
   /** Type used for locals, globals, function return type */
   binaryenType?: number;
-  /** Type used for initializing the heap type */
-  binaryenHeapType?: number;
 
-  constructor(opts: NamedEntityOpts & { value: ObjectField[] }) {
+  constructor(
+    opts: NamedEntityOpts & {
+      value: ObjectField[];
+      parentObj?: ObjectType | null;
+    }
+  ) {
     super(opts);
     this.fields = opts.value;
+    this.parentObj =
+      opts.parentObj !== null ? opts.parentObj ?? voidBaseObject : undefined;
   }
 
   get size() {
@@ -189,6 +195,18 @@ export class ObjectType extends BaseType {
       ...super.getCloneOpts(parent),
       value: this.fields,
     });
+  }
+
+  extends(type: ObjectType): boolean {
+    if (this.constructor === type.constructor) {
+      return true;
+    }
+
+    if (this.parentObj) {
+      return this.parentObj.extends(type);
+    }
+
+    return false;
   }
 
   hasField(name: Id) {
@@ -272,4 +290,9 @@ export const i64 = PrimitiveType.from("i64");
 export const f64 = PrimitiveType.from("f64");
 export const bool = PrimitiveType.from("bool");
 export const dVoid = PrimitiveType.from("void");
+export const voidBaseObject = new ObjectType({
+  name: "Object",
+  value: [],
+  parentObj: null,
+});
 export const CDT_ADDRESS_TYPE = i32;
