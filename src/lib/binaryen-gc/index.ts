@@ -5,6 +5,7 @@ import {
   HeapTypeRef,
   Struct,
   Type,
+  TypeRef,
 } from "./types.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
@@ -33,6 +34,12 @@ export const defineStructType = (mod: binaryen.Module, struct: Struct) => {
     fields.length
   );
 
+  if (struct.supertype) {
+    bin._TypeBuilderSetSubType(typeBuilder, structIndex, struct.supertype);
+  }
+
+  bin._TypeBuilderSetOpen(typeBuilder, structIndex);
+
   bin._free(fieldTypesPtr);
   bin._free(fieldPackedTypesPtr);
   bin._free(fieldMutablesPtr);
@@ -57,9 +64,15 @@ export const binaryenTypeToHeapType = (type: Type): HeapTypeRef => {
   return bin._BinaryenTypeGetHeapType(type);
 };
 
+export const refCast = (
+  mod: binaryen.Module,
+  ref: ExpressionRef,
+  type: TypeRef
+): ExpressionRef => bin._BinaryenRefCast(mod.ptr, ref, type);
+
 export const initStruct = (
   mod: binaryen.Module,
-  structType: number,
+  structType: HeapTypeRef,
   values: ExpressionRef[]
 ): ExpressionRef => {
   const structNewArgs = allocU32Array(values);

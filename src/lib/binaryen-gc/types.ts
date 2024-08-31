@@ -22,6 +22,7 @@ export type Module = binaryen.Module;
 export type Struct = {
   name: string;
   fields: StructField[];
+  supertype?: HeapTypeRef;
 };
 
 export type StructField = {
@@ -53,11 +54,11 @@ export type AugmentedBinaryen = typeof binaryen & {
     elementPackedTyype: PackedType,
     elementMutable: bool
   ): void;
-  _malloc(size: usize): usize;
-  _free(ptr: usize): void;
-  __i32_load(ptr: usize): number;
-  __i32_store(ptr: usize, value: number): void;
-  __i32_store8(ptr: usize, value: number): void;
+  _TypeBuilderSetSubType(
+    builder: TypeBuilderRef,
+    index: Index,
+    supertype: HeapTypeRef
+  ): void;
   _TypeBuilderSetStructType(
     builder: TypeBuilderRef,
     index: Index,
@@ -66,6 +67,23 @@ export type AugmentedBinaryen = typeof binaryen & {
     fieldMutables: ArrayRef<bool>,
     numFields: i32
   ): void;
+  _TypeBuilderGetTempHeapType(
+    builder: TypeBuilderRef,
+    index: Index
+  ): HeapTypeRef;
+  _TypeBuilderGetSize(builder: TypeBuilderRef): Index;
+  _TypeBuilderBuildAndDispose(
+    builder: TypeBuilderRef,
+    heapTypes: ArrayRef<HeapTypeRef>,
+    errorIndex: Pointer<Index>,
+    errorReason: Pointer<TypeBuilderErrorReason>
+  ): bool;
+  _TypeBuilderSetOpen(builder: TypeBuilderRef, index: Index): void;
+  _malloc(size: usize): usize;
+  _free(ptr: usize): void;
+  __i32_load(ptr: usize): number;
+  __i32_store(ptr: usize, value: number): void;
+  __i32_store8(ptr: usize, value: number): void;
   _BinaryenStructNew(
     module: ModuleRef,
     operands: ArrayRef<ExpressionRef>,
@@ -85,17 +103,6 @@ export type AugmentedBinaryen = typeof binaryen & {
     ref: ExpressionRef,
     value: ExpressionRef
   ): ExpressionRef;
-  _TypeBuilderGetTempHeapType(
-    builder: TypeBuilderRef,
-    index: Index
-  ): HeapTypeRef;
-  _TypeBuilderGetSize(builder: TypeBuilderRef): Index;
-  _TypeBuilderBuildAndDispose(
-    builder: TypeBuilderRef,
-    heapTypes: ArrayRef<HeapTypeRef>,
-    errorIndex: Pointer<Index>,
-    errorReason: Pointer<TypeBuilderErrorReason>
-  ): bool;
   allocateUTF8OnStack: (s: string) => number;
   _BinaryenArrayNew(
     module: ModuleRef,
