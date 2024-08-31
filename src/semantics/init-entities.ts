@@ -40,8 +40,14 @@ export const initEntities: SemanticProcessor = (expr) => {
     return initTypeAlias(expr);
   }
 
+  // Object literal
   if (expr.calls("object")) {
     return initObjectLiteral(expr);
+  }
+
+  // Nominal object definition
+  if (expr.calls("obj")) {
+    return initNominalObjectType(expr);
   }
 
   return initCall(expr);
@@ -228,22 +234,36 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
   throw new Error("Invalid type entity");
 };
 
+const initNominalObjectType = (obj: List) => {
+  const hasExtension = obj.optionalIdentifierAt(2)?.is("extends");
+  return new ObjectType({
+    ...obj.metadata,
+    name: obj.identifierAt(1),
+    parentObjExpr: hasExtension ? obj.at(3) : undefined,
+    value: extractObjectFields(hasExtension ? obj.listAt(4) : obj.listAt(2)),
+  });
+};
+
 const initObjectType = (obj: List) => {
   return new ObjectType({
     ...obj.metadata,
     name: obj.syntaxId.toString(),
-    value: obj.sliceAsArray(1).map((v) => {
-      if (!v.isList()) {
-        throw new Error("Invalid object field");
-      }
-      const name = v.identifierAt(1);
-      const typeExpr = initTypeExprEntities(v.at(2));
+    value: extractObjectFields(obj),
+  });
+};
 
-      if (!name || !typeExpr) {
-        throw new Error("Invalid object field");
-      }
+const extractObjectFields = (obj: List) => {
+  return obj.sliceAsArray(1).map((v) => {
+    if (!v.isList()) {
+      throw new Error("Invalid object field");
+    }
+    const name = v.identifierAt(1);
+    const typeExpr = initTypeExprEntities(v.at(2));
 
-      return { name: name.value, typeExpr };
-    }),
+    if (!name || !typeExpr) {
+      throw new Error("Invalid object field");
+    }
+
+    return { name: name.value, typeExpr };
   });
 };

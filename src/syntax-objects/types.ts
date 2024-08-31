@@ -163,6 +163,7 @@ export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
 export class ObjectType extends BaseType {
   readonly kindOfType = "object";
   fields: ObjectField[];
+  parentObjExpr?: Expr;
   parentObj?: ObjectType;
   /** Type used for locals, globals, function return type */
   binaryenType?: number;
@@ -170,13 +171,14 @@ export class ObjectType extends BaseType {
   constructor(
     opts: NamedEntityOpts & {
       value: ObjectField[];
-      parentObj?: ObjectType | null;
+      parentObjExpr?: Expr;
+      parentObj?: ObjectType;
     }
   ) {
     super(opts);
     this.fields = opts.value;
-    this.parentObj =
-      opts.parentObj !== null ? opts.parentObj ?? voidBaseObject : undefined;
+    this.parentObj = opts.parentObj;
+    this.parentObjExpr = opts.parentObjExpr;
   }
 
   get size() {
@@ -293,6 +295,5 @@ export const dVoid = PrimitiveType.from("void");
 export const voidBaseObject = new ObjectType({
   name: "Object",
   value: [],
-  parentObj: null,
 });
 export const CDT_ADDRESS_TYPE = i32;
