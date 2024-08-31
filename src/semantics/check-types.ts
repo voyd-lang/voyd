@@ -74,7 +74,8 @@ const checkObjectInit = (call: Call, type: ObjectType): ObjectLiteral => {
     throw new Error(`Expected object literal, got ${literal}`);
   }
 
-  if (!typesAreEquivalent(literal.type, type, true)) {
+  // Check to ensure literal structure is compatible with nominal structure
+  if (!typesAreEquivalent(type, literal.type, true)) {
     throw new Error(`Object literal type does not match expected type`);
   }
 
