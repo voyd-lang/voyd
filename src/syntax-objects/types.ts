@@ -200,7 +200,7 @@ export class ObjectType extends BaseType {
   }
 
   extends(ancestor: ObjectType): boolean {
-    if (this.constructor === ancestor.constructor) {
+    if (this === ancestor) {
       return true;
     }
 
@@ -216,7 +216,7 @@ export class ObjectType extends BaseType {
    * 0 = same type, 1 = ancestor is parent, 2 = ancestor is grandparent, etc
    */
   extensionDistance(ancestor: ObjectType, start = 0): number {
-    if (this.constructor === ancestor.constructor) {
+    if (this === ancestor) {
       return start;
     }
 

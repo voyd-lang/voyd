@@ -56,7 +56,7 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
 
   const type = getIdentifierType(call.fnName);
   if (type?.isObjectType()) {
-    return checkObjectLiteralInit(call, type);
+    return checkObjectInit(call, type);
   }
 
   call.fn = resolveCallFn(call);
@@ -68,16 +68,13 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   return call;
 };
 
-const checkObjectLiteralInit = (
-  call: Call,
-  type: ObjectType
-): ObjectLiteral => {
+const checkObjectInit = (call: Call, type: ObjectType): ObjectLiteral => {
   const literal = call.argAt(0);
   if (!literal?.isObjectLiteral()) {
     throw new Error(`Expected object literal, got ${literal}`);
   }
 
-  if (!typesAreEquivalent(literal.type, type)) {
+  if (!typesAreEquivalent(literal.type, type, true)) {
     throw new Error(`Object literal type does not match expected type`);
   }
 
@@ -512,7 +509,8 @@ const findBestFnMatch = (candidates: Fn[], call: Call): Fn => {
         throw new Error(`Could not determine type. I'm helpful >.<`);
       }
 
-      return (score += argType.extensionDistance(param.type));
+      const distance = argType.extensionDistance(param.type);
+      return score + distance;
     }, 0);
 
     if (lowestScore === undefined) {
@@ -549,7 +547,11 @@ const getExprLabel = (expr?: Expr): string | undefined => {
   return id.value;
 };
 
-const typesAreEquivalent = (a?: Type, b?: Type): boolean => {
+const typesAreEquivalent = (
+  a?: Type,
+  b?: Type,
+  ignoreExtension?: boolean // Hacky
+): boolean => {
   if (!a || !b) return false;
 
   if (a.isPrimitiveType() && b.isPrimitiveType()) {
@@ -558,7 +560,7 @@ const typesAreEquivalent = (a?: Type, b?: Type): boolean => {
 
   if (a.isObjectType() && b.isObjectType()) {
     return (
-      a.extends(b) &&
+      (ignoreExtension || a.extends(b)) &&
       a.fields.every((field) => {
         const match = b.fields.find((f) => f.name === field.name);
         return match && typesAreEquivalent(field.type, match.type);
