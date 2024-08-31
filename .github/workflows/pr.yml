@@ -3,7 +3,7 @@ name: Node.js CI
 on: [pull_request]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
 
     steps:
@@ -13,5 +13,4 @@ jobs:
         with:
           node-version: "22.x"
       - run: npm ci
-      - run: npm run build --if-present
       - run: npm test
