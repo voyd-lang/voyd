@@ -23,6 +23,8 @@ export type Struct = {
   name: string;
   fields: StructField[];
   supertype?: HeapTypeRef;
+  /** Set to true if the struct cannot be extended */
+  final?: boolean;
 };
 
 export type StructField = {

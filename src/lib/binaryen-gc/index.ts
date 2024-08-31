@@ -38,7 +38,7 @@ export const defineStructType = (mod: binaryen.Module, struct: Struct) => {
     bin._TypeBuilderSetSubType(typeBuilder, structIndex, struct.supertype);
   }
 
-  bin._TypeBuilderSetOpen(typeBuilder, structIndex);
+  if (!struct.final) bin._TypeBuilderSetOpen(typeBuilder, structIndex);
 
   bin._free(fieldTypesPtr);
   bin._free(fieldPackedTypesPtr);
