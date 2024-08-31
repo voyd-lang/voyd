@@ -272,8 +272,6 @@ const buildObjectType = (
       name: field.name,
     })),
   });
-  const binaryenHeapType = binaryenTypeToHeapType(binaryenType);
-  obj.binaryenHeapType = binaryenHeapType;
   obj.binaryenType = binaryenType;
   return binaryenType;
 };
