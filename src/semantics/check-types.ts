@@ -75,7 +75,7 @@ const checkObjectInit = (call: Call, type: ObjectType): ObjectLiteral => {
   }
 
   // Check to ensure literal structure is compatible with nominal structure
-  if (!typesAreEquivalent(type, literal.type, true)) {
+  if (!typesAreEquivalent(literal.type, type, true)) {
     throw new Error(`Object literal type does not match expected type`);
   }
 
@@ -486,11 +486,13 @@ const resolveCallFn = (call: Call): Fn | undefined => {
       }
       const argLabel = getExprLabel(arg);
       const labelsMatch = p.label === argLabel;
-      return typesAreEquivalent(p.type!, argType) && labelsMatch;
+      return typesAreEquivalent(argType, p.type!) && labelsMatch;
     });
   });
 
-  if (!candidates) return undefined;
+  if (!candidates.length) {
+    return undefined;
+  }
   if (candidates.length === 1) return candidates[0];
   return findBestFnMatch(candidates, call);
 };
@@ -562,8 +564,8 @@ const typesAreEquivalent = (
   if (a.isObjectType() && b.isObjectType()) {
     return (
       (ignoreExtension || a.extends(b)) &&
-      a.fields.every((field) => {
-        const match = b.fields.find((f) => f.name === field.name);
+      b.fields.every((field) => {
+        const match = a.fields.find((f) => f.name === field.name);
         return match && typesAreEquivalent(field.type, match.type);
       })
     );
