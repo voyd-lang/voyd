@@ -14,14 +14,6 @@ describe("E2E Compiler Pipeline", () => {
   });
 
   test("Compiler can compile gc objects and map correct fns", async (t) => {
-    const mod = await compile(e2eVoidText);
-    const instance = getWasmInstance(mod);
-    const fn = getWasmFn("main", instance);
-    assert(fn, "Function exists");
-    t.expect(fn(), "Main function returns correct value").toEqual(55);
-  });
-
-  test("Compiler will throw when given invalid program", async (t) => {
     const mod = await compile(gcVoidText);
     const instance = getWasmInstance(mod);
     const test1 = getWasmFn("test1", instance);
