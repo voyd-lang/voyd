@@ -57,6 +57,13 @@ export class List extends Syntax {
     return id;
   }
 
+  optionalIdentifierAt(index: number): Identifier | undefined {
+    const id = this.at(index);
+    if (id?.isIdentifier()) {
+      return id;
+    }
+  }
+
   listAt(index: number): List {
     const id = this.at(index);
     if (!id?.isList()) {

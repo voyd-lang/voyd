@@ -163,14 +163,22 @@ export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
 export class ObjectType extends BaseType {
   readonly kindOfType = "object";
   fields: ObjectField[];
+  parentObjExpr?: Expr;
+  parentObj?: ObjectType;
   /** Type used for locals, globals, function return type */
   binaryenType?: number;
-  /** Type used for initializing the heap type */
-  binaryenHeapType?: number;
 
-  constructor(opts: NamedEntityOpts & { value: ObjectField[] }) {
+  constructor(
+    opts: NamedEntityOpts & {
+      value: ObjectField[];
+      parentObjExpr?: Expr;
+      parentObj?: ObjectType;
+    }
+  ) {
     super(opts);
     this.fields = opts.value;
+    this.parentObj = opts.parentObj;
+    this.parentObjExpr = opts.parentObjExpr;
   }
 
   get size() {
@@ -189,6 +197,34 @@ export class ObjectType extends BaseType {
       ...super.getCloneOpts(parent),
       value: this.fields,
     });
+  }
+
+  extends(ancestor: ObjectType): boolean {
+    if (this === ancestor) {
+      return true;
+    }
+
+    if (this.parentObj) {
+      return this.parentObj.extends(ancestor);
+    }
+
+    return false;
+  }
+
+  /**
+   * How closely related this object is to ancestor.
+   * 0 = same type, 1 = ancestor is parent, 2 = ancestor is grandparent, etc
+   */
+  extensionDistance(ancestor: ObjectType, start = 0): number {
+    if (this === ancestor) {
+      return start;
+    }
+
+    if (this.parentObj) {
+      return this.parentObj.extensionDistance(ancestor, start + 1);
+    }
+
+    throw new Error(`${this.name} does not extend ${ancestor.name}`);
   }
 
   hasField(name: Id) {
@@ -272,4 +308,8 @@ export const i64 = PrimitiveType.from("i64");
 export const f64 = PrimitiveType.from("f64");
 export const bool = PrimitiveType.from("bool");
 export const dVoid = PrimitiveType.from("void");
+export const voidBaseObject = new ObjectType({
+  name: "Object",
+  value: [],
+});
 export const CDT_ADDRESS_TYPE = i32;

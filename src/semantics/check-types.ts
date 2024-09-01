@@ -56,7 +56,7 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
 
   const type = getIdentifierType(call.fnName);
   if (type?.isObjectType()) {
-    return checkObjectLiteralInit(call, type);
+    return checkObjectInit(call, type);
   }
 
   call.fn = resolveCallFn(call);
@@ -68,16 +68,14 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   return call;
 };
 
-const checkObjectLiteralInit = (
-  call: Call,
-  type: ObjectType
-): ObjectLiteral => {
+const checkObjectInit = (call: Call, type: ObjectType): ObjectLiteral => {
   const literal = call.argAt(0);
   if (!literal?.isObjectLiteral()) {
     throw new Error(`Expected object literal, got ${literal}`);
   }
 
-  if (!typesAreEquivalent(literal.type, type)) {
+  // Check to ensure literal structure is compatible with nominal structure
+  if (!typesAreEquivalent(literal.type, type, true)) {
     throw new Error(`Object literal type does not match expected type`);
   }
 
@@ -382,8 +380,33 @@ const checkObjectType = (obj: ObjectType): ObjectType => {
     field.type = type;
   });
 
+  if (obj.parentObjExpr) {
+    obj.parentObjExpr = checkTypes(obj.parentObjExpr);
+    const parentType = resolveExprType(obj.parentObjExpr);
+    assertValidExtension(obj, parentType);
+    obj.parentObj = parentType;
+  }
+
   return obj;
 };
+
+function assertValidExtension(
+  child: ObjectType,
+  parent?: Type
+): asserts parent is ObjectType {
+  if (!parent || !parent?.isObjectType()) {
+    throw new Error(`Cannot resolve parent for obj ${child.name}`);
+  }
+
+  const validExtension = parent.fields.every((field) => {
+    const match = child.fields.find((f) => f.name === field.name);
+    return match && typesAreEquivalent(field.type, match.type);
+  });
+
+  if (!validExtension) {
+    throw new Error(`${child.name} does not properly extend ${parent.name}`);
+  }
+}
 
 const checkTypeAlias = (alias: TypeAlias): TypeAlias => {
   alias.typeExpr = checkTypes(alias.typeExpr);
@@ -452,9 +475,7 @@ const getIdentifierType = (id: Identifier): Type | undefined => {
 };
 
 const resolveCallFn = (call: Call): Fn | undefined => {
-  const candidates = call.resolveFns(call.fnName);
-  if (!candidates) return undefined;
-  return candidates.find((candidate) => {
+  const candidates = call.resolveFns(call.fnName).filter((candidate) => {
     const params = candidate.parameters;
     return params.every((p, index) => {
       const arg = call.argAt(index);
@@ -465,9 +486,60 @@ const resolveCallFn = (call: Call): Fn | undefined => {
       }
       const argLabel = getExprLabel(arg);
       const labelsMatch = p.label === argLabel;
-      return typesAreEquivalent(p.type!, argType) && labelsMatch;
+      return typesAreEquivalent(argType, p.type!) && labelsMatch;
     });
   });
+
+  if (!candidates.length) {
+    return undefined;
+  }
+  if (candidates.length === 1) return candidates[0];
+  return findBestFnMatch(candidates, call);
+};
+
+const findBestFnMatch = (candidates: Fn[], call: Call): Fn => {
+  let winner: Fn | undefined = undefined;
+  let tied = false;
+  let lowestScore: number | undefined;
+  for (const candidate of candidates) {
+    const score = candidate.parameters.reduce((score, param, index) => {
+      if (!param.type?.isObjectType()) {
+        return score;
+      }
+
+      const argType = resolveExprType(call.argAt(index));
+      if (!argType || !argType.isObjectType()) {
+        throw new Error(`Could not determine type. I'm helpful >.<`);
+      }
+
+      const distance = argType.extensionDistance(param.type);
+      return score + distance;
+    }, 0);
+
+    if (lowestScore === undefined) {
+      lowestScore = score;
+      winner = candidate;
+    }
+
+    if (score > lowestScore) {
+      continue;
+    }
+
+    if (score < lowestScore) {
+      lowestScore = score;
+      winner = candidate;
+      tied = false;
+      continue;
+    }
+
+    tied = true;
+  }
+
+  if (!winner || tied) {
+    throw new Error(`Ambiguous call ${JSON.stringify(call, null, 2)}`);
+  }
+
+  return winner;
 };
 
 const getExprLabel = (expr?: Expr): string | undefined => {
@@ -478,7 +550,11 @@ const getExprLabel = (expr?: Expr): string | undefined => {
   return id.value;
 };
 
-const typesAreEquivalent = (a?: Type, b?: Type): boolean => {
+const typesAreEquivalent = (
+  a?: Type,
+  b?: Type,
+  ignoreExtension?: boolean // Hacky
+): boolean => {
   if (!a || !b) return false;
 
   if (a.isPrimitiveType() && b.isPrimitiveType()) {
@@ -486,10 +562,13 @@ const typesAreEquivalent = (a?: Type, b?: Type): boolean => {
   }
 
   if (a.isObjectType() && b.isObjectType()) {
-    return a.fields.every((field) => {
-      const match = b.fields.find((f) => f.name === field.name);
-      return match && typesAreEquivalent(field.type, match.type);
-    });
+    return (
+      (ignoreExtension || a.extends(b)) &&
+      b.fields.every((field) => {
+        const match = a.fields.find((f) => f.name === field.name);
+        return match && typesAreEquivalent(field.type, match.type);
+      })
+    );
   }
 
   return false;

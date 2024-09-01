@@ -271,6 +271,9 @@ const buildObjectType = (
       type: mapBinaryenType(mod, field.type!),
       name: field.name,
     })),
+    supertype: obj.parentObj
+      ? binaryenTypeToHeapType(mapBinaryenType(mod, obj.parentObj))
+      : undefined,
   });
   obj.binaryenType = binaryenType;
   return binaryenType;
