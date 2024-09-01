@@ -13,8 +13,9 @@
     "prepublishOnly": "tsc"
   },
   "bin": {
-    "voidc": "./dist/cli.js",
-    "void": "./dist/cli.js"
+    "voidc": "./dist/cli/cli.js",
+    "void": "./dist/cli/cli.js",
+    "vt": "./src/cli/cli-dev.ts"
   },
   "keywords": [],
   "author": "",

@@ -1,14 +1,13 @@
-#!/usr/bin/env node
 import { stdout } from "process";
-import { getConfig } from "./lib/config/index.js";
-import { assemble } from "./assembler.js";
-import { run } from "./run.js";
-import { processSemantics } from "./semantics/index.js";
+import { getConfig } from "../lib/config/index.js";
+import { assemble } from "../assembler.js";
+import { run } from "../run.js";
+import { processSemantics } from "../semantics/index.js";
 import binaryen from "binaryen";
-import { testGc } from "./lib/binaryen-gc/test.js";
-import { parseFile, parseModuleFromSrc } from "./parser/index.js";
+import { testGc } from "../lib/binaryen-gc/test.js";
+import { parseFile, parseModuleFromSrc } from "../parser/index.js";
 
-main().catch(errorHandler);
+export const exec = () => main().catch(errorHandler);
 
 async function main() {
   const config = getConfig();
