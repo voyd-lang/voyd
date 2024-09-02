@@ -6,11 +6,13 @@ import { registerModules } from "./modules.js";
 import { expandRegularMacros } from "./regular-macros.js";
 import { ParsedModule } from "../parser/index.js";
 import { Expr } from "../syntax-objects/expr.js";
+import { resolveTypes } from "./resolution/resolve-types.js";
 
 const semanticPhases: SemanticProcessor[] = [
   expandRegularMacros,
   initPrimitiveTypes,
   initEntities,
+  resolveTypes,
   checkTypes,
 ];
 

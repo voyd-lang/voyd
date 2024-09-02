@@ -3,12 +3,12 @@ import { Fn } from "./fn.js";
 import { Identifier } from "./identifier.js";
 import { List } from "./list.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
-import { Type } from "./types.js";
+import { ObjectType, Type } from "./types.js";
 
 /** Defines a function call */
 export class Call extends Syntax {
   readonly syntaxType = "call";
-  fn?: Fn;
+  fn?: Fn | ObjectType;
   fnName: Identifier;
   args: List;
   type?: Type;

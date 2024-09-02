@@ -6,6 +6,8 @@ export class Variable extends NamedEntity {
   readonly syntaxType = "variable";
   isMutable: boolean;
   type?: Type;
+  inferredType?: Type;
+  annotatedType?: Type;
   typeExpr?: Expr;
   initializer: Expr;
 
