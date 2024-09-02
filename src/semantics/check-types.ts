@@ -186,14 +186,14 @@ const checkFnTypes = (fn: Fn): Fn => {
     checkTypes(fn.returnTypeExpr);
   }
 
-  fn.body = checkTypes(fn.body);
-  const inferredReturnType = fn.inferredReturnType;
-
   if (!fn.returnType) {
     throw new Error(
       `Unable to determine return type for ${fn.name} at ${fn.location}`
     );
   }
+
+  checkTypes(fn.body);
+  const inferredReturnType = fn.inferredReturnType;
 
   if (
     inferredReturnType &&

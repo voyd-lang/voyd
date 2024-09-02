@@ -11,9 +11,7 @@ export const getCallFn = (call: Call): Fn | undefined => {
       const arg = call.argAt(index);
       if (!arg) return false;
       const argType = getExprType(arg);
-      if (!argType) {
-        throw new Error(`Could not determine type for ${arg}`);
-      }
+      if (!argType) return false;
       const argLabel = getExprLabel(arg);
       const labelsMatch = p.label === argLabel;
       return typesAreEquivalent(argType, p.type!) && labelsMatch;
