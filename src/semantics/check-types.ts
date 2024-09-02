@@ -55,6 +55,10 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
     throw new Error(`Could not resolve fn ${call.fnName} at ${call.location}`);
   }
 
+  if (!call.type) {
+    throw new Error(`Could not resolve type for call ${call.fnName}`);
+  }
+
   return call;
 };
 
@@ -264,10 +268,8 @@ const checkObjectType = (obj: ObjectType): ObjectType => {
     }
   });
 
-  if (obj.inferredParentObj) {
-    const parentType = obj.inferredParentObj;
-    assertValidExtension(obj, parentType);
-    obj.parentObj = parentType;
+  if (obj.parentObjExpr) {
+    assertValidExtension(obj, obj.parentObj);
   }
 
   return obj;

@@ -10,12 +10,12 @@ export const resolveFnTypes = (fn: Fn): Fn => {
   }
 
   resolveParameters(fn.parameters);
-  fn.body = resolveTypes(fn.body);
-
   if (fn.returnTypeExpr) {
     fn.annotatedReturnType = getExprType(fn.returnTypeExpr);
+    fn.returnType = fn.annotatedReturnType;
   }
 
+  fn.body = resolveTypes(fn.body);
   fn.inferredReturnType = getExprType(fn.body);
   fn.returnType = fn.annotatedReturnType ?? fn.inferredReturnType;
 

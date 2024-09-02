@@ -164,7 +164,6 @@ export class ObjectType extends BaseType {
   readonly kindOfType = "object";
   fields: ObjectField[];
   parentObjExpr?: Expr;
-  inferredParentObj?: Type;
   parentObj?: ObjectType;
   /** Type used for locals, globals, function return type */
   binaryenType?: number;

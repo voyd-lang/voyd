@@ -1,16 +1,15 @@
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier, List } from "../../syntax-objects/index.js";
-import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { dVoid, ObjectType } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
-import { resolveFnTypes } from "./resolve-fn-type.js";
 import { resolveTypes } from "./resolve-types.js";
 
 export const resolveCallTypes = (call: Call): Call => {
   if (call.calls("export")) return resolveExport(call);
   if (call.calls("if")) return resolveIf(call);
   if (call.calls("binaryen")) return resolveBinaryenCall(call);
+  if (call.calls(":")) return checkLabeledArg(call);
   call.args = call.args.map(resolveTypes);
 
   const memberAccessCall = getMemberAccessCall(call);
@@ -23,13 +22,14 @@ export const resolveCallTypes = (call: Call): Call => {
   }
 
   call.fn = getCallFn(call);
+  call.type = call.fn?.returnType;
+  return call;
+};
 
-  call.type = call.fn?.returnType
-    ? call.fn.returnType
-    : call.fn
-    ? resolveFnTypes(call.fn).returnType
-    : undefined;
-
+export const checkLabeledArg = (call: Call) => {
+  call.args = call.args.map(resolveTypes);
+  const expr = call.argAt(1);
+  call.type = getExprType(expr);
   return call;
 };
 
