@@ -29,6 +29,7 @@ import { NamedEntity } from "./named-entity.js";
 import { ScopedEntity } from "./scoped-entity.js";
 import { Declaration } from "./declaration.js";
 import { Use } from "./use.js";
+import { Match } from "./match.js";
 
 export type SyntaxMetadata = {
   location?: SourceLocation;
@@ -133,6 +134,10 @@ export abstract class Syntax {
 
   isList(): this is List {
     return this.syntaxType === "list";
+  }
+
+  isMatch(): this is Match {
+    return this.syntaxType === "match";
   }
 
   isFloat(): this is Float {

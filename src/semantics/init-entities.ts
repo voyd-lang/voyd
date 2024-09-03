@@ -308,7 +308,7 @@ const initMatchCases = (
       const scopedCaseExpr =
         caseExpr?.isCall() || caseExpr?.isBlock()
           ? caseExpr
-          : new Block({ body: [caseExpr] });
+          : new Block({ ...caseExpr.metadata, body: [caseExpr] });
 
       const mCase = { matchTypeExpr: typeExpr, expr: scopedCaseExpr };
 
