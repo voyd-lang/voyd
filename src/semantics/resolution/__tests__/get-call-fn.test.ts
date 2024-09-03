@@ -1,4 +1,4 @@
-import { describe, expect, test, vi, Mock } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   Call,
   f32,
