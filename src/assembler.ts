@@ -14,6 +14,7 @@ import {
   binaryenTypeToHeapType,
   defineStructType,
   initStruct,
+  refCast,
   refTest,
   structGetFieldValue,
 } from "./lib/binaryen-gc/index.js";
@@ -112,8 +113,12 @@ const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
   }
 
   if (entity.isVariable() || entity.isParameter()) {
-    const type = mapBinaryenType(mod, entity.type!);
-    return mod.local.get(entity.getIndex(), type);
+    const type = mapBinaryenType(mod, entity.originalType ?? entity.type!);
+    const get = mod.local.get(entity.getIndex(), type);
+    if (entity.requiresCast) {
+      return refCast(mod, get, mapBinaryenType(mod, entity.type!));
+    }
+    return get;
   }
 
   throw new Error(`Cannot compile identifier ${expr}`);

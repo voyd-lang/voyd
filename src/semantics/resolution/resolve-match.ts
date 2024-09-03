@@ -1,5 +1,5 @@
 import { Block } from "../../syntax-objects/block.js";
-import { Parameter, Variable } from "../../syntax-objects/index.js";
+import { Call, Parameter, Variable } from "../../syntax-objects/index.js";
 import { Match, MatchCase } from "../../syntax-objects/match.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveTypes } from "./resolve-types.js";
@@ -28,15 +28,13 @@ const resolveCase = (
 ): MatchCase => {
   const type = getExprType(c.matchTypeExpr);
 
-  const caseExpr = resolveTypes(c.expr);
-  const expr =
-    caseExpr?.isCall() || caseExpr?.isBlock()
-      ? caseExpr
-      : new Block({ body: [caseExpr] });
-
   const localBinding = binding.clone();
+  localBinding.originalType = localBinding.type;
   localBinding.type = type;
-  expr.registerEntity(localBinding);
+  localBinding.requiresCast = true;
+  c.expr.registerEntity(localBinding);
+
+  const expr = resolveTypes(c.expr) as Call | Block;
 
   return {
     matchType: type?.isObjectType() ? type : undefined,

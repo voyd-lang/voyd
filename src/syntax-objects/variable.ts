@@ -6,10 +6,12 @@ export class Variable extends NamedEntity {
   readonly syntaxType = "variable";
   isMutable: boolean;
   type?: Type;
+  originalType?: Type;
   inferredType?: Type;
   annotatedType?: Type;
   typeExpr?: Expr;
   initializer: Expr;
+  requiresCast = false;
 
   constructor(
     opts: NamedEntityOpts & {
