@@ -14,10 +14,12 @@ import {
   binaryenTypeToHeapType,
   defineStructType,
   initStruct,
+  refTest,
   structGetFieldValue,
 } from "./lib/binaryen-gc/index.js";
 import { HeapTypeRef } from "./lib/binaryen-gc/types.js";
 import { getExprType } from "./semantics/resolution/get-expr-type.js";
+import { Match, MatchCase } from "./syntax-objects/match.js";
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -49,6 +51,7 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isUse()) return mod.nop();
   if (expr.isMacro()) return mod.nop();
   if (expr.isMacroVariable()) return mod.nop();
+  if (expr.isMatch()) return compileMatch({ ...opts, expr });
 
   if (expr.isBool()) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);
@@ -70,6 +73,33 @@ const compileBlock = (opts: CompileExprOpts<Block>) => {
   return opts.mod.block(
     null,
     opts.expr.body.toArray().map((expr) => compileExpression({ ...opts, expr }))
+  );
+};
+
+const compileMatch = (opts: CompileExprOpts<Match>) => {
+  const { expr } = opts;
+
+  const constructIfChain = (cases: MatchCase[]): number => {
+    const nextCase = cases.shift();
+    if (!nextCase) return opts.mod.unreachable();
+
+    if (!cases.length) {
+      return compileExpression({ ...opts, expr: nextCase.expr });
+    }
+
+    return opts.mod.if(
+      refTest(
+        opts.mod,
+        compileExpression({ ...opts, expr: expr.bindIdentifier }),
+        mapBinaryenType(opts.mod, nextCase.matchType!)
+      ),
+      compileExpression({ ...opts, expr: nextCase.expr }),
+      constructIfChain(cases)
+    );
+  };
+
+  return constructIfChain(
+    expr.defaultCase ? [...expr.cases, expr.defaultCase] : expr.cases
   );
 };
 

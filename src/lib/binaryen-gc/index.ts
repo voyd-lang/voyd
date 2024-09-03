@@ -70,6 +70,12 @@ export const refCast = (
   type: TypeRef
 ): ExpressionRef => bin._BinaryenRefCast(mod.ptr, ref, type);
 
+export const refTest = (
+  mod: binaryen.Module,
+  ref: ExpressionRef,
+  type: TypeRef
+): ExpressionRef => bin._BinaryenRefTest(mod.ptr, ref, type);
+
 export const initStruct = (
   mod: binaryen.Module,
   structType: HeapTypeRef,

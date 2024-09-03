@@ -171,6 +171,11 @@ export type AugmentedBinaryen = typeof binaryen & {
     index: number,
     name: unknown
   ): void;
+  _BinaryenRefTest(
+    module: ModuleRef,
+    ref: ExpressionRef,
+    type: TypeRef
+  ): ExpressionRef;
   stringToUTF8OnStack(str: string): number;
   HEAPU32: Uint32Array;
 };
