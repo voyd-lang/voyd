@@ -84,22 +84,3 @@ pub macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
     args: [left, right]
 
   ` define_function $op $params return_type($return_type) $body
-
-
-
-pub macro match()
-  log "match"
-  let value_expr = body.extract(0)
-  let cases = body.slice(1)
-  let expand_cases = (cases, index) =>
-    let case = cases.extract(index)
-    if is_list(case) and not(index + 1 >= cases.length) then:
-      ` if $(extract case 0) == match_value
-        then: $(extract case 1)
-        else: $(&lambda cases (index + 1))
-    else: case
-
-  let conditions = expand_cases(cases, 0)
-  `
-    let match_value = $value_expr
-    $conditions

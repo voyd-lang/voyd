@@ -10,12 +10,13 @@ export class Block extends ScopedSyntax {
 
   constructor(
     opts: ScopedSyntaxMetadata & {
-      body: List;
+      body: List | Expr[];
       type?: Type;
     }
   ) {
     super(opts);
-    this.body = opts.body;
+    this.body =
+      opts.body instanceof Array ? new List({ value: opts.body }) : opts.body;
     this.type = opts.type;
   }
 

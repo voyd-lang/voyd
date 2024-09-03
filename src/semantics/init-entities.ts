@@ -10,7 +10,11 @@ import {
   TypeAlias,
   ObjectType,
   ObjectLiteral,
+  Identifier,
 } from "../syntax-objects/index.js";
+import { Match, MatchCase } from "../syntax-objects/match.js";
+import { getExprType } from "./resolution/get-expr-type.js";
+import { resolveTypes } from "./resolution/resolve-types.js";
 import { SemanticProcessor } from "./types.js";
 
 export const initEntities: SemanticProcessor = (expr) => {
@@ -48,6 +52,10 @@ export const initEntities: SemanticProcessor = (expr) => {
   // Nominal object definition
   if (expr.calls("obj")) {
     return initNominalObjectType(expr);
+  }
+
+  if (expr.calls("match")) {
+    return initMatch(expr);
   }
 
   return initCall(expr);
@@ -249,6 +257,55 @@ const initObjectType = (obj: List) => {
     ...obj.metadata,
     name: obj.syntaxId.toString(),
     value: extractObjectFields(obj),
+  });
+};
+
+export const initMatch = (match: List): Match => {
+  const operand = initEntities(match.exprAt(1));
+  const arg1 = match.at(2);
+  const identifierIndex = arg1?.isIdentifier() ? 2 : 1;
+  const identifier = match.identifierAt(identifierIndex);
+  const caseExprs = initEntities(match.exprAt(identifierIndex + 1));
+
+  if (!caseExprs?.isBlock()) {
+    throw new Error(`Match cases must be in a block at ${caseExprs?.location}`);
+  }
+
+  const cases = initMatchCases(caseExprs);
+
+  return new Match({
+    ...match.metadata,
+    operand,
+    cases,
+    bindIdentifier: identifier,
+    bindVariable:
+      identifierIndex === 1
+        ? new Variable({
+            name: identifier,
+            location: identifier.location,
+            initializer: operand,
+            isMutable: false,
+          })
+        : undefined,
+  });
+};
+
+const initMatchCases = (block: Block): MatchCase[] => {
+  return block.body.toArray().map((expr) => {
+    if (!expr.isList() || !expr.calls("=>")) {
+      throw new Error(
+        `Match cases must be in the form of => at ${expr.location}`
+      );
+    }
+
+    const typeExpr = initEntities(expr.exprAt(2));
+    const caseExpr = initEntities(expr.exprAt(2));
+    const scopedCaseExpr =
+      caseExpr?.isCall() || caseExpr?.isBlock()
+        ? caseExpr
+        : new Block({ body: [caseExpr] });
+
+    return { matchTypeExpr: typeExpr, expr: scopedCaseExpr };
   });
 };
 

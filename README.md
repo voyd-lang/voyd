@@ -243,7 +243,7 @@ for item in iterable
 ```rust
 let x = 3
 match x
-  1 => print "One"
+  Vec => print "One"
   2 => print "Two"
   3 => print "Three"
   _ =>

@@ -19,6 +19,7 @@ import { VoidModule } from "./module.js";
 import { Declaration } from "./declaration.js";
 import { Use } from "./use.js";
 import { ObjectLiteral } from "./object-literal.js";
+import { Match } from "./match.js";
 
 export type Expr =
   | PrimitiveExpr
@@ -35,7 +36,8 @@ export type Expr =
   | Block
   | Declaration
   | Use
-  | ObjectLiteral;
+  | ObjectLiteral
+  | Match;
 
 /**
  * These are the Expr types that must be returned until all macros have been expanded (reader, syntax, and regular)
