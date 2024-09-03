@@ -10,6 +10,8 @@ export class Fn extends ScopedNamedEntity {
   _parameters: Parameter[] = [];
   returnType?: Type;
   returnTypeExpr?: Expr;
+  inferredReturnType?: Type;
+  annotatedReturnType?: Type;
   private _body?: Expr;
 
   constructor(

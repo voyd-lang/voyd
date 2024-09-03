@@ -10,7 +10,6 @@ import { Block } from "./syntax-objects/block.js";
 import { Declaration } from "./syntax-objects/declaration.js";
 import { VoidModule } from "./syntax-objects/module.js";
 import { ObjectLiteral } from "./syntax-objects/object-literal.js";
-import { resolveExprType } from "./semantics/check-types.js";
 import {
   binaryenTypeToHeapType,
   defineStructType,
@@ -18,6 +17,7 @@ import {
   structGetFieldValue,
 } from "./lib/binaryen-gc/index.js";
 import { HeapTypeRef } from "./lib/binaryen-gc/types.js";
+import { getExprType } from "./semantics/resolution/get-expr-type.js";
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -109,10 +109,29 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
     throw new Error(`No function found for call ${expr.location}`);
   }
 
+  if (expr.fn.isObjectType()) {
+    return compileObjectInit(opts);
+  }
+
   return mod.call(
     expr.fn!.id,
     args,
     mapBinaryenType(mod, expr.fn!.returnType!)
+  );
+};
+
+const compileObjectInit = (opts: CompileExprOpts<Call>) => {
+  const { expr, mod } = opts;
+
+  const objectType = mapBinaryenType(mod, expr.type!);
+  const obj = expr.argAt(0) as ObjectLiteral;
+
+  return initStruct(
+    mod,
+    binaryenTypeToHeapType(objectType),
+    obj.fields.map((field) =>
+      compileExpression({ ...opts, expr: field.initializer })
+    )
   );
 };
 
@@ -284,7 +303,7 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const obj = expr.exprArgAt(0);
   const member = expr.identifierArgAt(1);
   const objValue = compileExpression({ ...opts, expr: obj });
-  const type = resolveExprType(obj) as ObjectType;
+  const type = getExprType(obj) as ObjectType;
   const memberIndex = type.getFieldIndex(member);
   const field = type.getField(member)!;
   return structGetFieldValue({
