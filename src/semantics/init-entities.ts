@@ -276,7 +276,8 @@ export const initMatch = (match: List): Match => {
   return new Match({
     ...match.metadata,
     operand,
-    cases,
+    cases: cases.cases,
+    defaultCase: cases.defaultCase,
     bindIdentifier: identifier,
     bindVariable:
       identifierIndex === 1
@@ -290,23 +291,38 @@ export const initMatch = (match: List): Match => {
   });
 };
 
-const initMatchCases = (block: Block): MatchCase[] => {
-  return block.body.toArray().map((expr) => {
-    if (!expr.isList() || !expr.calls("=>")) {
-      throw new Error(
-        `Match cases must be in the form of => at ${expr.location}`
-      );
+const initMatchCases = (
+  block: Block
+): { cases: MatchCase[]; defaultCase?: MatchCase } => {
+  return block.body.toArray().reduce(
+    ({ cases, defaultCase }, expr) => {
+      if (!expr.isList() || !(expr.calls("=>") || expr.calls("else"))) {
+        throw new Error(
+          `Match cases must be in the form of => at ${expr.location}`
+        );
+      }
+
+      const index = expr.calls("else") ? 1 : 2;
+      const typeExpr = initEntities(expr.exprAt(index));
+      const caseExpr = initEntities(expr.exprAt(index));
+      const scopedCaseExpr =
+        caseExpr?.isCall() || caseExpr?.isBlock()
+          ? caseExpr
+          : new Block({ body: [caseExpr] });
+
+      const mCase = { matchTypeExpr: typeExpr, expr: scopedCaseExpr };
+
+      if (expr.calls("else")) {
+        return { cases, defaultCase: mCase };
+      }
+
+      return { cases: [...cases, mCase], defaultCase };
+    },
+    {
+      cases: [] as MatchCase[],
+      defaultCase: undefined as MatchCase | undefined,
     }
-
-    const typeExpr = initEntities(expr.exprAt(2));
-    const caseExpr = initEntities(expr.exprAt(2));
-    const scopedCaseExpr =
-      caseExpr?.isCall() || caseExpr?.isBlock()
-        ? caseExpr
-        : new Block({ body: [caseExpr] });
-
-    return { matchTypeExpr: typeExpr, expr: scopedCaseExpr };
-  });
+  );
 };
 
 const extractObjectFields = (obj: List) => {

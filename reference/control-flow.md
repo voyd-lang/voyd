@@ -32,6 +32,7 @@ fn main(a: i32, b: i32) -> String
   match(x)
     Some => "The value is ${x}"
     None => "Error: divide by zero"
+    else "Bleh"
 ```
 
 The second signature of match is useful when the value being matched against

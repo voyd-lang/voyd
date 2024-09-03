@@ -9,36 +9,42 @@ export const resolveMatch = (match: Match): Match => {
   match.baseType = getExprType(match.operand);
 
   const binding = getBinding(match);
-  match.cases = resolveCases(binding, match);
+  resolveCases(binding, match);
+  match.type = (match.defaultCase?.expr ?? match.cases[0].expr).type;
 
   return match;
 };
 
-const resolveCases = (
+const resolveCases = (binding: Parameter | Variable, match: Match) => {
+  match.cases = match.cases.map((c) => resolveCase(binding, c));
+  match.defaultCase = match.defaultCase
+    ? resolveCase(binding, match.defaultCase)
+    : undefined;
+};
+
+const resolveCase = (
   binding: Parameter | Variable,
-  match: Match
-): MatchCase[] => {
-  return match.cases.map((c) => {
-    const type = getExprType(c.matchTypeExpr);
+  c: MatchCase
+): MatchCase => {
+  const type = getExprType(c.matchTypeExpr);
 
-    if (!type?.isObjectType()) {
-      throw new Error(
-        `Match case types must be object types at ${type?.location}`
-      );
-    }
+  if (!type?.isObjectType()) {
+    throw new Error(
+      `Match case types must be object types at ${type?.location}`
+    );
+  }
 
-    const caseExpr = resolveTypes(c.expr);
-    const expr =
-      caseExpr?.isCall() || caseExpr?.isBlock()
-        ? caseExpr
-        : new Block({ body: [caseExpr] });
+  const caseExpr = resolveTypes(c.expr);
+  const expr =
+    caseExpr?.isCall() || caseExpr?.isBlock()
+      ? caseExpr
+      : new Block({ body: [caseExpr] });
 
-    const localBinding = binding.clone();
-    localBinding.type = type;
-    expr.registerEntity(localBinding);
+  const localBinding = binding.clone();
+  localBinding.type = type;
+  expr.registerEntity(localBinding);
 
-    return { matchType: type, expr, matchTypeExpr: c.matchTypeExpr };
-  });
+  return { matchType: type, expr, matchTypeExpr: c.matchTypeExpr };
 };
 
 const getBinding = (match: Match): Parameter | Variable => {
