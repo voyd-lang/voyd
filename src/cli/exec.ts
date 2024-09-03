@@ -6,6 +6,7 @@ import { processSemantics } from "../semantics/index.js";
 import binaryen from "binaryen";
 import { testGc } from "../lib/binaryen-gc/test.js";
 import { parseFile, parseModuleFromSrc } from "../parser/index.js";
+import { compileSrc } from "../compiler.js";
 
 export const exec = () => main().catch(errorHandler);
 
@@ -70,9 +71,7 @@ async function getMacroAst(index: string) {
 }
 
 async function getWasmMod(index: string, optimize = false) {
-  const module = await parseModuleFromSrc(index);
-  const checkedAst = processSemantics(module);
-  const mod = assemble(checkedAst);
+  const mod = await compileSrc(index);
 
   if (optimize) {
     binaryen.setShrinkLevel(3);

@@ -4,5 +4,5 @@ import { List } from "../../syntax-objects/list.js";
 
 export const parseFile = async (path: string): Promise<List> => {
   const file = fs.readFileSync(path, { encoding: "utf8" });
-  return parse(file);
+  return parse(file, path);
 };
