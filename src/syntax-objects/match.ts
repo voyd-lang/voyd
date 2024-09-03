@@ -9,7 +9,7 @@ import { Variable } from "./variable.js";
 export type MatchCase = {
   /** The type to match the base type against */
   matchType?: ObjectType;
-  matchTypeExpr: Expr;
+  matchTypeExpr?: Expr;
   expr: Block | Call;
 };
 

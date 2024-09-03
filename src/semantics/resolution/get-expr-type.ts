@@ -18,6 +18,7 @@ export const getExprType = (expr?: Expr): Type | undefined => {
   if (expr.isType()) return expr;
   if (expr.isBlock()) return expr.type;
   if (expr.isObjectLiteral()) return expr.type;
+  if (expr.isMatch()) return expr.type;
 };
 
 export const getIdentifierType = (id: Identifier): Type | undefined => {

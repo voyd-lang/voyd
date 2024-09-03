@@ -118,7 +118,7 @@ export abstract class Syntax {
   abstract clone(parent?: Expr): Expr;
 
   /** Should emit in compliance with core language spec */
-  abstract toJSON(): object;
+  abstract toJSON(): unknown;
 
   isScopedEntity(): this is ScopedEntity {
     return (this as unknown as ScopedEntity).lexicon instanceof LexicalContext;

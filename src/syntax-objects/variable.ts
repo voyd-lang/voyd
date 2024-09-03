@@ -29,7 +29,7 @@ export class Variable extends NamedEntity {
   getIndex(): number {
     const index = this.parentFn?.getIndexOfVariable(this) ?? -1;
 
-    if (index < -1) {
+    if (index < 0) {
       throw new Error(`Variable ${this} is not registered with a function`);
     }
 

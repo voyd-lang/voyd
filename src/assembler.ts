@@ -90,7 +90,7 @@ const compileMatch = (opts: CompileExprOpts<Match>) => {
     return opts.mod.if(
       refTest(
         opts.mod,
-        compileExpression({ ...opts, expr: expr.bindIdentifier }),
+        compileIdentifier({ ...opts, expr: expr.bindIdentifier }),
         mapBinaryenType(opts.mod, nextCase.matchType!)
       ),
       compileExpression({ ...opts, expr: nextCase.expr }),

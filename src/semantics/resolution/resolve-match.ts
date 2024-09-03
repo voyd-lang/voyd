@@ -28,12 +28,6 @@ const resolveCase = (
 ): MatchCase => {
   const type = getExprType(c.matchTypeExpr);
 
-  if (!type?.isObjectType()) {
-    throw new Error(
-      `Match case types must be object types at ${type?.location}`
-    );
-  }
-
   const caseExpr = resolveTypes(c.expr);
   const expr =
     caseExpr?.isCall() || caseExpr?.isBlock()
@@ -44,7 +38,11 @@ const resolveCase = (
   localBinding.type = type;
   expr.registerEntity(localBinding);
 
-  return { matchType: type, expr, matchTypeExpr: c.matchTypeExpr };
+  return {
+    matchType: type?.isObjectType() ? type : undefined,
+    expr,
+    matchTypeExpr: c.matchTypeExpr,
+  };
 };
 
 const getBinding = (match: Match): Parameter | Variable => {

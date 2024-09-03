@@ -326,7 +326,7 @@ const checkMatch = (match: Match) => {
     );
   }
 
-  for (const mCase of [...match.cases, match.defaultCase]) {
+  for (const mCase of match.cases) {
     if (!mCase.matchType) {
       throw new Error(
         `Unable to determine match type for case at ${mCase.expr.location}`
