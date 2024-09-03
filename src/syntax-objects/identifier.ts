@@ -1,7 +1,13 @@
 import { Expr } from "./expr.js";
+import { NamedEntity } from "./named-entity.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
 
 export type Id = string | Identifier;
+
+export type IdentifierOpts = SyntaxMetadata & {
+  value: string;
+  isQuoted?: boolean;
+};
 
 export class Identifier extends Syntax {
   readonly syntaxType = "identifier";
@@ -10,12 +16,7 @@ export class Identifier extends Syntax {
   /** The given name of the identifier */
   value: string;
 
-  constructor(
-    opts: SyntaxMetadata & {
-      value: string;
-      isQuoted?: boolean;
-    }
-  ) {
+  constructor(opts: IdentifierOpts) {
     super(opts);
     this.isQuoted = opts.isQuoted;
     this.value = opts.value;
@@ -62,5 +63,21 @@ export class Identifier extends Syntax {
 
   toJSON() {
     return this.value;
+  }
+}
+
+export class MockIdentifier extends Identifier {
+  private readonly _entity?: NamedEntity;
+  constructor(
+    opts: IdentifierOpts & {
+      entity?: NamedEntity; // The entity this identifier resolves to
+    }
+  ) {
+    super(opts);
+    this._entity = opts.entity;
+  }
+
+  resolve() {
+    return this._entity;
   }
 }
