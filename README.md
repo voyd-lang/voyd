@@ -250,9 +250,9 @@ obj Dog extends Animal
 let dog = Dog {}
 
 match(dog)
-  Dog => print "Woof"
-  Cat => print "Meow"
-  else
+  Dog: print "Woof"
+  Cat: print "Meow"
+  else:
     print "Blurb"
 ```
 

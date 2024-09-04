@@ -30,9 +30,9 @@ fn divide(a: i32, b: i32) -> Optional
 fn main(a: i32, b: i32) -> String
   let x = a.divide(b)
   match(x)
-    Some => "The value is ${x}"
-    None => "Error: divide by zero"
-    else "Bleh"
+    Some: "The value is ${x}"
+    None: "Error: divide by zero"
+    else: "Bleh"
 ```
 
 The second signature of match is useful when the value being matched against
@@ -41,6 +41,6 @@ is not already bound to an identifier (i.e. dot pipelines):
 fn main(a: i32, b: i32) -> String
   a.divide(b)
     .match(x) // Here, match binds the result of the previous expression to x
-      Some => "The value is ${x}"
-      None => "Error: divide by zero"
+      Some: "The value is ${x}"
+      None: "Error: divide by zero"
 ```

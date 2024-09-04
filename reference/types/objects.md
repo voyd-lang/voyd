@@ -229,15 +229,17 @@ obj Some extends Optional {
 
 fn divide(a: i32, b: i32) -> Optional
   if b == 0
-    None {}
+    None { }
   else:
     Some { value: a / b }
 
 fn main(a: i32, b: i32)
   a.divide(b)
     .match(x)
-      Some => log "The value is ${x}"
-      None => log "Error: divide by zero"
+      Some:
+        log "The value is ${x}"
+      None:
+        log "Error: divide by zero"
 ```
 
 # Traits
