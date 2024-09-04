@@ -188,7 +188,11 @@ export class ObjectType extends BaseType {
   toJSON(): TypeJSON {
     return [
       "type",
-      ["object", ...this.fields.map(({ name, typeExpr }) => [name, typeExpr])],
+      [
+        "object",
+        this.id,
+        ...this.fields.map(({ name, typeExpr }) => [name, typeExpr]),
+      ],
     ];
   }
 
@@ -209,6 +213,14 @@ export class ObjectType extends BaseType {
     }
 
     return false;
+  }
+
+  getAncestorIds(start: number[] = []): number[] {
+    start.push(this.idNum);
+    if (this.parentObj) {
+      return this.parentObj.getAncestorIds(start);
+    }
+    return start;
   }
 
   /**

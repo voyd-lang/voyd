@@ -147,19 +147,6 @@ export type AugmentedBinaryen = typeof binaryen & {
     value: ExpressionRef
   ): ExpressionRef;
   _BinaryenArrayLen(module: ModuleRef, ref: ExpressionRef): ExpressionRef;
-  _BinaryenArrayGetPtr(
-    module: ModuleRef,
-    ref: ExpressionRef,
-    index: ExpressionRef
-  ): ExpressionRef;
-  _BinaryenArraySetPtr(
-    module: ModuleRef,
-    ref: ExpressionRef,
-    index: ExpressionRef,
-    value: ExpressionRef
-  ): ExpressionRef;
-  _BinaryenArrayToStack(module: ModuleRef, ref: ExpressionRef): ExpressionRef;
-  _BinaryenArrayFromStack(module: ModuleRef, ref: ExpressionRef): ExpressionRef;
   _BinaryenModuleSetTypeName(
     module: ModuleRef,
     type: HeapTypeRef,
