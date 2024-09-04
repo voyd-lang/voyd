@@ -36,17 +36,21 @@ interface CompileExprOpts<T = Expr> {
   expr: T;
   mod: binaryen.Module;
   extensionHelpers: ReturnType<typeof initExtensionHelpers>;
+  isReturnExpr?: boolean;
 }
 
 const compileExpression = (opts: CompileExprOpts): number => {
-  const { expr, mod } = opts;
-  if (expr.isCall()) return compileCall({ ...opts, expr });
+  const { expr, mod, isReturnExpr } = opts;
+  opts.isReturnExpr = false;
+  // These can take isReturnExpr
+  if (expr.isCall()) return compileCall({ ...opts, expr, isReturnExpr });
+  if (expr.isBlock()) return compileBlock({ ...opts, expr, isReturnExpr });
+  if (expr.isMatch()) return compileMatch({ ...opts, expr, isReturnExpr });
   if (expr.isInt()) return mod.i32.const(expr.value);
   if (expr.isFloat()) return mod.f32.const(expr.value);
   if (expr.isIdentifier()) return compileIdentifier({ ...opts, expr });
   if (expr.isFn()) return compileFunction({ ...opts, expr });
   if (expr.isVariable()) return compileVariable({ ...opts, expr });
-  if (expr.isBlock()) return compileBlock({ ...opts, expr });
   if (expr.isDeclaration()) return compileDeclaration({ ...opts, expr });
   if (expr.isModule()) return compileModule({ ...opts, expr });
   if (expr.isObjectLiteral()) return compileObjectLiteral({ ...opts, expr });
@@ -54,7 +58,6 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isUse()) return mod.nop();
   if (expr.isMacro()) return mod.nop();
   if (expr.isMacroVariable()) return mod.nop();
-  if (expr.isMatch()) return compileMatch({ ...opts, expr });
 
   if (expr.isBool()) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);
@@ -86,7 +89,13 @@ const compileModule = (opts: CompileExprOpts<VoidModule>) => {
 const compileBlock = (opts: CompileExprOpts<Block>) => {
   return opts.mod.block(
     null,
-    opts.expr.body.toArray().map((expr) => compileExpression({ ...opts, expr }))
+    opts.expr.body.toArray().map((expr, index, array) => {
+      if (index === array.length - 1) {
+        return compileExpression({ ...opts, expr, isReturnExpr: true });
+      }
+
+      return compileExpression({ ...opts, expr, isReturnExpr: false });
+    })
   );
 };
 
@@ -146,7 +155,7 @@ const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
 };
 
 const compileCall = (opts: CompileExprOpts<Call>): number => {
-  const { expr, mod } = opts;
+  const { expr, mod, isReturnExpr } = opts;
   if (expr.calls("quote")) return (expr.argAt(0) as Int).value; // TODO: This is an ugly hack to get constants that the compiler needs to know at compile time for ex bnr calls;
   if (expr.calls("=")) return compileAssign(opts);
   if (expr.calls("if")) return compileIf(opts);
@@ -167,13 +176,16 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
 
   const args = expr.args
     .toArray()
-    .map((expr) => compileExpression({ ...opts, expr }));
+    .map((expr) => compileExpression({ ...opts, expr, isReturnExpr: false }));
 
-  return mod.call(
-    expr.fn!.id,
-    args,
-    mapBinaryenType(opts, expr.fn!.returnType!)
-  );
+  const id = expr.fn!.id;
+  const returnType = mapBinaryenType(opts, expr.fn!.returnType!);
+
+  if (isReturnExpr && id === expr.parentFn?.id) {
+    return mod.return_call(id, args, returnType);
+  }
+
+  return mod.call(id, args, returnType);
 };
 
 const compileObjectInit = (opts: CompileExprOpts<Call>) => {
@@ -250,7 +262,13 @@ const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   const { expr: fn, mod } = opts;
   const parameterTypes = getFunctionParameterTypes(opts, fn);
   const returnType = mapBinaryenType(opts, fn.getReturnType());
-  const body = compileExpression({ ...opts, expr: fn.body! });
+
+  const body = compileExpression({
+    ...opts,
+    expr: fn.body!,
+    isReturnExpr: true,
+  });
+
   const variableTypes = getFunctionVarTypes(opts, fn); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
 
   mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
