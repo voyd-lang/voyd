@@ -264,7 +264,7 @@ export const initMatch = (match: List): Match => {
   const operand = initEntities(match.exprAt(1));
   const identifierIndex = match.at(2)?.isIdentifier() ? 2 : 1;
   const identifier = match.identifierAt(identifierIndex);
-  const caseExprs = match.listAt(identifierIndex + 1);
+  const caseExprs = match.sliceAsArray(identifierIndex + 1);
   const cases = initMatchCases(caseExprs);
 
   return new Match({
@@ -287,49 +287,41 @@ export const initMatch = (match: List): Match => {
 };
 
 const initMatchCases = (
-  cases: List
+  cases: Expr[]
 ): { cases: MatchCase[]; defaultCase?: MatchCase } => {
-  if (!cases.calls("block")) {
-    throw new Error(`Match cases must be in a block at ${cases.location}`);
-  }
-
-  return cases
-    .toArray()
-    .slice(1)
-    .reduce(
-      ({ cases, defaultCase }, expr) => {
-        if (!expr.isList() || !(expr.calls("=>") || expr.calls("else"))) {
-          throw new Error(
-            `Match cases must be in the form of => at ${expr.location}`
-          );
-        }
-
-        const typeExpr = !expr.calls("else")
-          ? initEntities(expr.exprAt(1))
-          : undefined;
-
-        const caseExpr = expr.calls("else")
-          ? initEntities(expr.exprAt(1))
-          : initEntities(expr.exprAt(2));
-
-        const scopedCaseExpr =
-          caseExpr?.isCall() || caseExpr?.isBlock()
-            ? caseExpr
-            : new Block({ ...caseExpr.metadata, body: [caseExpr] });
-
-        const mCase = { matchTypeExpr: typeExpr, expr: scopedCaseExpr };
-
-        if (expr.calls("else")) {
-          return { cases, defaultCase: mCase };
-        }
-
-        return { cases: [...cases, mCase], defaultCase };
-      },
-      {
-        cases: [] as MatchCase[],
-        defaultCase: undefined as MatchCase | undefined,
+  return cases.reduce(
+    ({ cases, defaultCase }, expr) => {
+      if (!expr.isList() || !expr.calls(":")) {
+        throw new Error(
+          `Match cases must be in the form of => at ${expr.location}`
+        );
       }
-    );
+
+      const isElse =
+        expr.at(1)?.isIdentifier() && expr.identifierAt(1).is("else");
+
+      const typeExpr = !isElse ? initEntities(expr.exprAt(1)) : undefined;
+
+      const caseExpr = initEntities(expr.exprAt(2));
+
+      const scopedCaseExpr =
+        caseExpr?.isCall() || caseExpr?.isBlock()
+          ? caseExpr
+          : new Block({ ...caseExpr.metadata, body: [caseExpr] });
+
+      const mCase = { matchTypeExpr: typeExpr, expr: scopedCaseExpr };
+
+      if (isElse) {
+        return { cases, defaultCase: mCase };
+      }
+
+      return { cases: [...cases, mCase], defaultCase };
+    },
+    {
+      cases: [] as MatchCase[],
+      defaultCase: undefined as MatchCase | undefined,
+    }
+  );
 };
 
 const extractObjectFields = (obj: List) => {
