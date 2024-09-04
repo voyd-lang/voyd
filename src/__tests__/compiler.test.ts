@@ -1,6 +1,6 @@
-import { e2eVoidText, gcVoidText } from "./fixtures/e2e-file.js";
+import { e2eVoidText, gcVoidText, tcoText } from "./fixtures/e2e-file.js";
 import { compile } from "../compiler.js";
-import { describe, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import assert from "node:assert";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
 
@@ -34,5 +34,11 @@ describe("E2E Compiler Pipeline", () => {
     t.expect(test4(), "test 4 returns correct value").toEqual(52);
     t.expect(test5(), "test 5 returns correct value").toEqual(21);
     t.expect(test6(), "test 6 returns correct value").toEqual(-1);
+  });
+
+  test("Compiler can do tco", async (t) => {
+    const mod = await compile(tcoText);
+    mod.optimize();
+    t.expect(mod.emitText()).toMatchSnapshot();
   });
 });
