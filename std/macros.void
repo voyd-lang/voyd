@@ -67,12 +67,18 @@ pub macro fn()
       body.slice(type_arrow_index + 2)
     else: body.slice(1)
 
+  let fn_body =
+    if expressions.length == 1 then:
+      expressions.extract(0)
+    else:
+      `(block).concat(expressions)
+
   `(
     define_function,
     $identifier,
     $params,
     (return_type $@return_type),
-    $(`(block).concat(expressions))
+    $fn_body
   )
 
 pub macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
