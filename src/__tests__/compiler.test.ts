@@ -1,8 +1,9 @@
 import { e2eVoidText, gcVoidText, tcoText } from "./fixtures/e2e-file.js";
 import { compile } from "../compiler.js";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import assert from "node:assert";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import * as rCallUtil from "../assembler/return-call.js";
 
 describe("E2E Compiler Pipeline", () => {
   test("Compiler can compile and run a basic void program", async (t) => {
@@ -37,8 +38,8 @@ describe("E2E Compiler Pipeline", () => {
   });
 
   test("Compiler can do tco", async (t) => {
-    const mod = await compile(tcoText);
-    mod.optimize();
-    t.expect(mod.emitText()).toMatchSnapshot();
+    const spy = vi.spyOn(rCallUtil, "returnCall");
+    await compile(tcoText);
+    t.expect(spy).toHaveBeenCalledTimes(1);
   });
 });

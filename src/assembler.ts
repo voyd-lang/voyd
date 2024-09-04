@@ -21,6 +21,7 @@ import { HeapTypeRef } from "./lib/binaryen-gc/types.js";
 import { getExprType } from "./semantics/resolution/get-expr-type.js";
 import { Match, MatchCase } from "./syntax-objects/match.js";
 import { initExtensionHelpers } from "./assembler/extension-helpers.js";
+import { returnCall } from "./assembler/return-call.js";
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -182,7 +183,7 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   const returnType = mapBinaryenType(opts, expr.fn!.returnType!);
 
   if (isReturnExpr && id === expr.parentFn?.id) {
-    return mod.return_call(id, args, returnType);
+    return returnCall(mod, id, args, returnType);
   }
 
   return mod.call(id, args, returnType);
