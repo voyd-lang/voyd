@@ -8,10 +8,7 @@ const options: ParseArgsConfig["options"] = {
   "emit-core-ast": {
     type: "boolean",
   },
-  "emit-module-ast": {
-    type: "boolean",
-  },
-  "emit-macro-ast": {
+  "emit-ir-ast": {
     type: "boolean",
   },
   "emit-wasm": {
@@ -53,8 +50,7 @@ export const getConfigFromCli = (): VoidConfig => {
     index,
     emitParserAst: values["emit-parser-ast"] as boolean,
     emitCoreAst: values["emit-core-ast"] as boolean,
-    emitModuleAst: values["emit-module-ast"] as boolean,
-    emitMacroAst: values["emit-macro-ast"] as boolean,
+    emitIrAst: values["emit-ir-ast"] as boolean,
     emitWasm: values["emit-wasm"] as boolean,
     emitWasmText: values["emit-wasm-text"] as boolean,
     runBinaryenOptimizationPass: values["opt"] as boolean,

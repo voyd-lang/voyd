@@ -21,12 +21,8 @@ async function main() {
     return emit(await getCoreAst(config.index));
   }
 
-  if (config.emitModuleAst) {
-    return emit(await getModuleAst(config.index));
-  }
-
-  if (config.emitMacroAst) {
-    return emit(await getMacroAst(config.index));
+  if (config.emitIrAst) {
+    return emit(await getIrAST(config.index));
   }
 
   if (config.emitWasmText) {
@@ -60,12 +56,7 @@ async function getCoreAst(index: string) {
   return await getParserAst(index);
 }
 
-async function getModuleAst(index: string) {
-  const module = await parseModuleFromSrc(index);
-  return processSemantics(module);
-}
-
-async function getMacroAst(index: string) {
+async function getIrAST(index: string) {
   const module = await parseModuleFromSrc(index);
   return processSemantics(module);
 }

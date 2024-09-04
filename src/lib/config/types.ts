@@ -3,10 +3,8 @@ export type VoidConfig = {
   emitParserAst?: boolean;
   /** Write desurfaced AST to stdout */
   emitCoreAst?: boolean;
-  /** Emit full AST with all resolved file modules */
-  emitModuleAst?: boolean;
-  /** Emit ast with regular macros expanded */
-  emitMacroAst?: boolean;
+  /** Emit ast ir expanded (post semantic phases) */
+  emitIrAst?: boolean;
   /** Write wasm bytecode to stdout */
   emitWasm?: boolean;
   /** Write wasm bytecode to stdout (binaryen flavor) */

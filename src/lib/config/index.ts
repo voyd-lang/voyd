@@ -1,4 +1,4 @@
-import { getConfigFromCli } from "./cli.js";
+import { getConfigFromCli } from "./arg-parser.js";
 import { VoidConfig } from "./types.js";
 
 let config: VoidConfig | undefined = undefined;
