@@ -339,7 +339,7 @@ const checkMatch = (match: Match) => {
 
     if (!mCase.matchType.extends(match.baseType)) {
       throw new Error(
-        `Match case type ${mCase.matchType.name} does not extend ${match.baseType.name}`
+        `Match case type ${mCase.matchType.name} does not extend ${match.baseType.name} at ${mCase.expr.location}`
       );
     }
 

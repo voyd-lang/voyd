@@ -79,7 +79,7 @@ const compileInt = (opts: CompileExprOpts<Int>) => {
   const i64Int = val.value;
   const low = Number(i64Int & BigInt(0xffffffff)); // Extract lower 32 bits
   const high = Number((i64Int >> BigInt(32)) & BigInt(0xffffffff)); // Extract higher 32 bits
-  return opts.mod.i64.const(high, low);
+  return opts.mod.i64.const(low, high);
 };
 
 const compileFloat = (opts: CompileExprOpts<Float>) => {

@@ -24,6 +24,10 @@ export class Int extends Syntax {
   }
 
   toJSON() {
-    return this.value;
+    if (typeof this.value === "number") {
+      return this.value;
+    }
+
+    return this.value.value.toString() + "i64";
   }
 }
