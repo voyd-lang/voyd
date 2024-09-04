@@ -1,6 +1,6 @@
 import { e2eVoidText, gcVoidText, tcoText } from "./fixtures/e2e-file.js";
 import { compile } from "../compiler.js";
-import { describe, expect, test, vi } from "vitest";
+import { describe, test, vi } from "vitest";
 import assert from "node:assert";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
 import * as rCallUtil from "../assembler/return-call.js";

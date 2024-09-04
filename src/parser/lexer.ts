@@ -67,7 +67,7 @@ const consumeOperator = (chars: CharStream, token: Token) => {
 
 const consumeNumber = (chars: CharStream, token: Token) => {
   const isValidNumber = (str: string) =>
-    /^[+-]?\d*(\.\d+)?[Ee]?[+-]?\d*$/.test(str);
+    /^[+-]?\d*(\.\d+)?[Ee]?[+-]?\d*n?$/.test(str);
   const stillConsumingNumber = () =>
     chars.next &&
     (isValidNumber(token.value + chars.next) ||
