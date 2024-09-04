@@ -1,31 +1,17 @@
 import binaryen from "binaryen";
-import { AugmentedBinaryen } from "./types.js";
+import { AugmentedBinaryen } from "../lib/binaryen-gc/types.js";
 import {
-  arrayGet,
-  arrayLen,
-  arrayNew,
-  arrayNewFixed,
-  arraySet,
-  binaryenTypeToHeapType,
   defineArrayType,
-} from "./index.js";
-import { run } from "../../run.js";
+  arrayLen,
+  arrayGet,
+  arrayNewFixed,
+  binaryenTypeToHeapType,
+} from "../lib/binaryen-gc/index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
-export function testGc() {
-  const mod = new binaryen.Module();
-  mod.setFeatures(binaryen.Features.All);
-
+export const initExtensionHelpers = (mod: binaryen.Module) => {
   const i32Array = defineArrayType(mod, bin.i32, true);
-
-  const initExtensionArray = (ancestorIds: number[]) => {
-    return arrayNewFixed(
-      mod,
-      binaryenTypeToHeapType(i32Array),
-      ancestorIds.map((id) => mod.i32.const(id))
-    );
-  };
 
   mod.addFunction(
     "__extends",
@@ -61,6 +47,7 @@ export function testGc() {
                   false
                 )
               ),
+
               // If we have, set doesExtend to true and break
               mod.block(null, [
                 mod.local.set(3, mod.i32.const(1)),
@@ -81,32 +68,13 @@ export function testGc() {
     ])
   );
 
-  mod.addGlobal(
-    "extensionArray",
-    i32Array,
-    false,
-    initExtensionArray([1, 2, 3])
-  );
+  const initExtensionArray = (ancestorIds: number[]) => {
+    return arrayNewFixed(
+      mod,
+      binaryenTypeToHeapType(i32Array),
+      ancestorIds.map((id) => mod.i32.const(id))
+    );
+  };
 
-  mod.addFunction(
-    "main",
-    bin.createType([]),
-    bin.i32,
-    [i32Array],
-    mod.block(null, [
-      mod.local.set(0, initExtensionArray([1, 2, 3])),
-      mod.call(
-        "__extends",
-        [mod.i32.const(4), mod.global.get("extensionArray", i32Array)],
-        bin.i32
-      ),
-    ])
-  );
-
-  mod.addFunctionExport("main", "main");
-  mod.autoDrop();
-  mod.validate();
-
-  // console.log(mod.emitText());
-  run(mod);
-}
+  return { initExtensionArray, i32Array };
+};

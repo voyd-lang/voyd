@@ -6,10 +6,12 @@ export class Variable extends NamedEntity {
   readonly syntaxType = "variable";
   isMutable: boolean;
   type?: Type;
+  originalType?: Type;
   inferredType?: Type;
   annotatedType?: Type;
   typeExpr?: Expr;
   initializer: Expr;
+  requiresCast = false;
 
   constructor(
     opts: NamedEntityOpts & {
@@ -29,7 +31,7 @@ export class Variable extends NamedEntity {
   getIndex(): number {
     const index = this.parentFn?.getIndexOfVariable(this) ?? -1;
 
-    if (index < -1) {
+    if (index < 0) {
       throw new Error(`Variable ${this} is not registered with a function`);
     }
 

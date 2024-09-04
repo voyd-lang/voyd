@@ -6,11 +6,13 @@ import { Syntax, SyntaxMetadata } from "./syntax.js";
 export type NamedEntityOpts = SyntaxMetadata & {
   name: Id;
   id?: string;
+  idNum?: number;
   isExported?: boolean;
 };
 
 export abstract class NamedEntity extends Syntax {
   id: string;
+  idNum: number;
   name: Identifier;
   isExported = false;
 
@@ -19,6 +21,7 @@ export abstract class NamedEntity extends Syntax {
     this.name =
       typeof opts.name === "string" ? Identifier.from(opts.name) : opts.name;
     this.id = opts.id ?? this.genId();
+    this.idNum = this.syntaxId;
     this.isExported = opts.isExported ?? false;
   }
 
@@ -30,6 +33,7 @@ export abstract class NamedEntity extends Syntax {
     return {
       ...super.getCloneOpts(parent),
       id: this.id,
+      idNum: this.idNum,
       name: this.name,
       isExported: this.isExported,
     };

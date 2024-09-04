@@ -7,8 +7,10 @@ export class Parameter extends NamedEntity {
   readonly syntaxType = "parameter";
   /** External label the parameter must be called with e.g. myFunc(label: value) */
   label?: Identifier;
+  originalType?: Type;
   type?: Type;
   typeExpr?: Expr;
+  requiresCast = false;
 
   constructor(
     opts: NamedEntityOpts & {

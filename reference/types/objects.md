@@ -216,6 +216,32 @@ obj Cat extends Animal {
 }
 ```
 
+## Object Type Narrowing
+
+```void
+obj Optional
+
+obj None extends Optional
+
+obj Some extends Optional {
+  value: i32
+}
+
+fn divide(a: i32, b: i32) -> Optional
+  if b == 0
+    None { }
+  else:
+    Some { value: a / b }
+
+fn main(a: i32, b: i32)
+  a.divide(b)
+    .match(x)
+      Some:
+        log "The value is ${x}"
+      None:
+        log "Error: divide by zero"
+```
+
 # Traits
 
 Traits are first class types that define the behavior of a nominal object.

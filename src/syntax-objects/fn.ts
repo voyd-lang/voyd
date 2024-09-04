@@ -68,9 +68,7 @@ export class Fn extends ScopedNamedEntity {
   }
 
   getIndexOfParameter(parameter: Parameter) {
-    const index = this.parameters.findIndex(
-      (p) => p.syntaxId === parameter.syntaxId
-    );
+    const index = this.parameters.findIndex((p) => p.id === parameter.id);
     if (index < 0) {
       throw new Error(`Parameter ${parameter} not registered with fn ${this}`);
     }
@@ -78,9 +76,7 @@ export class Fn extends ScopedNamedEntity {
   }
 
   getIndexOfVariable(variable: Variable) {
-    const index = this.variables.findIndex(
-      (v) => v.syntaxId === variable.syntaxId
-    );
+    const index = this.variables.findIndex((v) => v.id === variable.id);
 
     if (index < 0) {
       const newIndex = this.variables.push(variable) - 1;

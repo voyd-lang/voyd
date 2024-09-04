@@ -29,6 +29,7 @@ import { NamedEntity } from "./named-entity.js";
 import { ScopedEntity } from "./scoped-entity.js";
 import { Declaration } from "./declaration.js";
 import { Use } from "./use.js";
+import { Match } from "./match.js";
 
 export type SyntaxMetadata = {
   location?: SourceLocation;
@@ -117,7 +118,7 @@ export abstract class Syntax {
   abstract clone(parent?: Expr): Expr;
 
   /** Should emit in compliance with core language spec */
-  abstract toJSON(): any;
+  abstract toJSON(): unknown;
 
   isScopedEntity(): this is ScopedEntity {
     return (this as unknown as ScopedEntity).lexicon instanceof LexicalContext;
@@ -133,6 +134,10 @@ export abstract class Syntax {
 
   isList(): this is List {
     return this.syntaxType === "list";
+  }
+
+  isMatch(): this is Match {
+    return this.syntaxType === "match";
   }
 
   isFloat(): this is Float {

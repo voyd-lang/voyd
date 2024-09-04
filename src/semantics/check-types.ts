@@ -17,6 +17,7 @@ import {
   TypeAlias,
   ObjectLiteral,
 } from "../syntax-objects/index.js";
+import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
 import { typesAreEquivalent } from "./resolution/index.js";
 
@@ -33,6 +34,7 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isObjectType()) return checkObjectType(expr);
   if (expr.isTypeAlias()) return checkTypeAlias(expr);
   if (expr.isObjectLiteral()) return checkObjectLiteralType(expr);
+  if (expr.isMatch()) return checkMatch(expr);
   return expr;
 };
 
@@ -310,4 +312,39 @@ const checkListTypes = (list: List) => {
 const checkObjectLiteralType = (obj: ObjectLiteral) => {
   obj.fields.forEach((field) => checkTypes(field.initializer));
   return obj;
+};
+
+const checkMatch = (match: Match) => {
+  // (Until unions)
+  if (!match.defaultCase) {
+    throw new Error(`Match must have a default case at ${match.location}`);
+  }
+
+  if (!match.baseType || !match.baseType.isObjectType()) {
+    throw new Error(
+      `Unable to determine base type for match at ${match.location}`
+    );
+  }
+
+  for (const mCase of match.cases) {
+    if (!mCase.matchType) {
+      throw new Error(
+        `Unable to determine match type for case at ${mCase.expr.location}`
+      );
+    }
+
+    if (!mCase.matchType.extends(match.baseType)) {
+      throw new Error(
+        `Match case type ${mCase.matchType.name} does not extend ${match.baseType.name}`
+      );
+    }
+
+    if (!typesAreEquivalent(mCase.expr.type, match.type)) {
+      throw new Error(
+        `All cases must return the same type for now ${mCase.expr.location}`
+      );
+    }
+  }
+
+  return match;
 };

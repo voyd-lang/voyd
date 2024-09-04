@@ -14,16 +14,20 @@ import {
   binaryenTypeToHeapType,
   defineStructType,
   initStruct,
+  refCast,
   structGetFieldValue,
 } from "./lib/binaryen-gc/index.js";
 import { HeapTypeRef } from "./lib/binaryen-gc/types.js";
 import { getExprType } from "./semantics/resolution/get-expr-type.js";
+import { Match, MatchCase } from "./syntax-objects/match.js";
+import { initExtensionHelpers } from "./assembler/extension-helpers.js";
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
   mod.setMemory(1, 150, "buffer");
   mod.setFeatures(binaryen.Features.All);
-  compileExpression({ expr: ast, mod });
+  const extensionHelpers = initExtensionHelpers(mod);
+  compileExpression({ expr: ast, mod, extensionHelpers });
   mod.autoDrop();
   return mod;
 };
@@ -31,6 +35,7 @@ export const assemble = (ast: Expr) => {
 interface CompileExprOpts<T = Expr> {
   expr: T;
   mod: binaryen.Module;
+  extensionHelpers: ReturnType<typeof initExtensionHelpers>;
 }
 
 const compileExpression = (opts: CompileExprOpts): number => {
@@ -49,6 +54,7 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isUse()) return mod.nop();
   if (expr.isMacro()) return mod.nop();
   if (expr.isMacroVariable()) return mod.nop();
+  if (expr.isMatch()) return compileMatch({ ...opts, expr });
 
   if (expr.isBool()) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);
@@ -73,6 +79,41 @@ const compileBlock = (opts: CompileExprOpts<Block>) => {
   );
 };
 
+const compileMatch = (opts: CompileExprOpts<Match>) => {
+  const { expr } = opts;
+
+  const constructIfChain = (cases: MatchCase[]): number => {
+    const nextCase = cases.shift();
+    if (!nextCase) return opts.mod.unreachable();
+
+    if (!cases.length) {
+      return compileExpression({ ...opts, expr: nextCase.expr });
+    }
+
+    return opts.mod.if(
+      opts.mod.call(
+        "__extends",
+        [
+          opts.mod.i32.const(nextCase.matchType!.syntaxId),
+          structGetFieldValue({
+            mod: opts.mod,
+            fieldType: opts.extensionHelpers.i32Array,
+            fieldIndex: 0,
+            exprRef: compileIdentifier({ ...opts, expr: expr.bindIdentifier }),
+          }),
+        ],
+        binaryen.i32
+      ),
+      compileExpression({ ...opts, expr: nextCase.expr }),
+      constructIfChain(cases)
+    );
+  };
+
+  return constructIfChain(
+    expr.defaultCase ? [...expr.cases, expr.defaultCase] : expr.cases
+  );
+};
+
 const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
   const { expr, mod } = opts;
 
@@ -82,8 +123,12 @@ const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
   }
 
   if (entity.isVariable() || entity.isParameter()) {
-    const type = mapBinaryenType(mod, entity.type!);
-    return mod.local.get(entity.getIndex(), type);
+    const type = mapBinaryenType(opts, entity.originalType ?? entity.type!);
+    const get = mod.local.get(entity.getIndex(), type);
+    if (entity.requiresCast) {
+      return refCast(mod, get, mapBinaryenType(opts, entity.type!));
+    }
+    return get;
   }
 
   throw new Error(`Cannot compile identifier ${expr}`);
@@ -116,23 +161,23 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   return mod.call(
     expr.fn!.id,
     args,
-    mapBinaryenType(mod, expr.fn!.returnType!)
+    mapBinaryenType(opts, expr.fn!.returnType!)
   );
 };
 
 const compileObjectInit = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;
 
-  const objectType = mapBinaryenType(mod, expr.type!);
+  const objectType = getExprType(expr) as ObjectType;
+  const objectBinType = mapBinaryenType(opts, objectType);
   const obj = expr.argAt(0) as ObjectLiteral;
 
-  return initStruct(
-    mod,
-    binaryenTypeToHeapType(objectType),
-    obj.fields.map((field) =>
+  return initStruct(mod, binaryenTypeToHeapType(objectBinType), [
+    mod.global.get(`__rtt_${objectType.id}`, opts.extensionHelpers.i32Array),
+    ...obj.fields.map((field) =>
       compileExpression({ ...opts, expr: field.initializer })
-    )
-  );
+    ),
+  ]);
 };
 
 const compileExport = (opts: CompileExprOpts<Call>) => {
@@ -192,10 +237,10 @@ const compileVariable = (opts: CompileExprOpts<Variable>): number => {
 
 const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   const { expr: fn, mod } = opts;
-  const parameterTypes = getFunctionParameterTypes(mod, fn);
-  const returnType = mapBinaryenType(mod, fn.getReturnType());
+  const parameterTypes = getFunctionParameterTypes(opts, fn);
+  const returnType = mapBinaryenType(opts, fn.getReturnType());
   const body = compileExpression({ ...opts, expr: fn.body! });
-  const variableTypes = getFunctionVarTypes(mod, fn); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
+  const variableTypes = getFunctionVarTypes(opts, fn); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
 
   mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
 
@@ -214,14 +259,14 @@ const compileDeclaration = (opts: CompileExprOpts<Declaration>) => {
 
 const compileExternFn = (opts: CompileExprOpts<Fn> & { namespace: string }) => {
   const { expr: fn, mod, namespace } = opts;
-  const parameterTypes = getFunctionParameterTypes(mod, fn);
+  const parameterTypes = getFunctionParameterTypes(opts, fn);
 
   mod.addFunctionImport(
     fn.id,
     namespace,
     fn.getNameStr(),
     parameterTypes,
-    mapBinaryenType(mod, fn.getReturnType())
+    mapBinaryenType(opts, fn.getReturnType())
   );
 
   return mod.nop();
@@ -230,15 +275,15 @@ const compileExternFn = (opts: CompileExprOpts<Fn> & { namespace: string }) => {
 const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
   const { expr: obj, mod } = opts;
 
-  const literalType = mapBinaryenType(mod, obj.type!);
+  const objectType = getExprType(obj) as ObjectType;
+  const literalBinType = mapBinaryenType(opts, objectType);
 
-  return initStruct(
-    mod,
-    binaryenTypeToHeapType(literalType),
-    obj.fields.map((field) =>
+  return initStruct(mod, binaryenTypeToHeapType(literalBinType), [
+    mod.global.get(`__rtt_${objectType.id}`, opts.extensionHelpers.i32Array),
+    ...obj.fields.map((field) =>
       compileExpression({ ...opts, expr: field.initializer })
-    )
-  );
+    ),
+  ]);
 };
 
 const compileIf = (opts: CompileExprOpts<Call>) => {
@@ -256,15 +301,17 @@ const compileIf = (opts: CompileExprOpts<Call>) => {
   return mod.if(condition, ifTrue, ifFalse);
 };
 
-const getFunctionParameterTypes = (mod: binaryen.Module, fn: Fn) => {
-  const types = fn.parameters.map((param) => mapBinaryenType(mod, param.type!));
+const getFunctionParameterTypes = (opts: CompileExprOpts, fn: Fn) => {
+  const types = fn.parameters.map((param) =>
+    mapBinaryenType(opts, param.type!)
+  );
   return binaryen.createType(types);
 };
 
-const getFunctionVarTypes = (mod: binaryen.Module, fn: Fn) =>
-  fn.variables.map((v) => mapBinaryenType(mod, v.type!));
+const getFunctionVarTypes = (opts: CompileExprOpts, fn: Fn) =>
+  fn.variables.map((v) => mapBinaryenType(opts, v.type!));
 
-const mapBinaryenType = (mod: binaryen.Module, type: Type): binaryen.Type => {
+const mapBinaryenType = (opts: CompileExprOpts, type: Type): binaryen.Type => {
   if (isPrimitiveId(type, "bool")) return binaryen.i32;
   if (isPrimitiveId(type, "i32")) return binaryen.i32;
   if (isPrimitiveId(type, "f32")) return binaryen.f32;
@@ -272,7 +319,7 @@ const mapBinaryenType = (mod: binaryen.Module, type: Type): binaryen.Type => {
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "void")) return binaryen.none;
   if (type.isObjectType()) {
-    return type.binaryenType ? type.binaryenType : buildObjectType(mod, type);
+    return type.binaryenType ? type.binaryenType : buildObjectType(opts, type);
   }
   throw new Error(`Unsupported type ${type}`);
 };
@@ -280,20 +327,38 @@ const mapBinaryenType = (mod: binaryen.Module, type: Type): binaryen.Type => {
 const isPrimitiveId = (type: Type, id: Primitive) =>
   type.isPrimitiveType() && type.name.value === id;
 
+/** TODO: Skip building types for object literals that are part of an initializer of an obj */
 const buildObjectType = (
-  mod: binaryen.Module,
+  opts: CompileExprOpts,
   obj: ObjectType
 ): HeapTypeRef => {
+  const mod = opts.mod;
+
   const binaryenType = defineStructType(mod, {
     name: obj.id,
-    fields: obj.fields.map((field) => ({
-      type: mapBinaryenType(mod, field.type!),
-      name: field.name,
-    })),
+    fields: [
+      {
+        type: opts.extensionHelpers.i32Array,
+        name: "ancestors",
+      },
+      ...obj.fields.map((field) => ({
+        type: mapBinaryenType(opts, field.type!),
+        name: field.name,
+      })),
+    ],
     supertype: obj.parentObj
-      ? binaryenTypeToHeapType(mapBinaryenType(mod, obj.parentObj))
+      ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObj))
       : undefined,
   });
+
+  // Set RTT Table (So we don't have to re-calculate it every time)
+  mod.addGlobal(
+    `__rtt_${obj.id}`,
+    opts.extensionHelpers.i32Array,
+    false,
+    opts.extensionHelpers.initExtensionArray(obj.getAncestorIds())
+  );
+
   obj.binaryenType = binaryenType;
   return binaryenType;
 };
@@ -304,12 +369,12 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const member = expr.identifierArgAt(1);
   const objValue = compileExpression({ ...opts, expr: obj });
   const type = getExprType(obj) as ObjectType;
-  const memberIndex = type.getFieldIndex(member);
+  const memberIndex = type.getFieldIndex(member) + 1; // +1 to account for the RTT table
   const field = type.getField(member)!;
   return structGetFieldValue({
     mod,
     fieldIndex: memberIndex,
-    fieldType: mapBinaryenType(mod, field.type!),
+    fieldType: mapBinaryenType(opts, field.type!),
     exprRef: objValue,
   });
 };

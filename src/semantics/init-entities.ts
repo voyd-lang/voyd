@@ -10,7 +10,11 @@ import {
   TypeAlias,
   ObjectType,
   ObjectLiteral,
+  Identifier,
 } from "../syntax-objects/index.js";
+import { Match, MatchCase } from "../syntax-objects/match.js";
+import { getExprType } from "./resolution/get-expr-type.js";
+import { resolveTypes } from "./resolution/resolve-types.js";
 import { SemanticProcessor } from "./types.js";
 
 export const initEntities: SemanticProcessor = (expr) => {
@@ -48,6 +52,10 @@ export const initEntities: SemanticProcessor = (expr) => {
   // Nominal object definition
   if (expr.calls("obj")) {
     return initNominalObjectType(expr);
+  }
+
+  if (expr.calls("match")) {
+    return initMatch(expr);
   }
 
   return initCall(expr);
@@ -250,6 +258,70 @@ const initObjectType = (obj: List) => {
     name: obj.syntaxId.toString(),
     value: extractObjectFields(obj),
   });
+};
+
+export const initMatch = (match: List): Match => {
+  const operand = initEntities(match.exprAt(1));
+  const identifierIndex = match.at(2)?.isIdentifier() ? 2 : 1;
+  const identifier = match.identifierAt(identifierIndex);
+  const caseExprs = match.sliceAsArray(identifierIndex + 1);
+  const cases = initMatchCases(caseExprs);
+
+  return new Match({
+    ...match.metadata,
+    operand,
+    cases: cases.cases,
+    defaultCase: cases.defaultCase,
+    bindIdentifier: identifier,
+    bindVariable:
+      identifierIndex === 2 // We need a new variable if the second argument is an identifier
+        ? new Variable({
+            name: identifier,
+            location: identifier.location,
+            initializer: operand,
+            isMutable: false,
+            parent: match,
+          })
+        : undefined,
+  });
+};
+
+const initMatchCases = (
+  cases: Expr[]
+): { cases: MatchCase[]; defaultCase?: MatchCase } => {
+  return cases.reduce(
+    ({ cases, defaultCase }, expr) => {
+      if (!expr.isList() || !expr.calls(":")) {
+        throw new Error(
+          `Match cases must be in the form of : at ${expr.location}`
+        );
+      }
+
+      const isElse =
+        expr.at(1)?.isIdentifier() && expr.identifierAt(1).is("else");
+
+      const typeExpr = !isElse ? initEntities(expr.exprAt(1)) : undefined;
+
+      const caseExpr = initEntities(expr.exprAt(2));
+
+      const scopedCaseExpr =
+        caseExpr?.isCall() || caseExpr?.isBlock()
+          ? caseExpr
+          : new Block({ ...caseExpr.metadata, body: [caseExpr] });
+
+      const mCase = { matchTypeExpr: typeExpr, expr: scopedCaseExpr };
+
+      if (isElse) {
+        return { cases, defaultCase: mCase };
+      }
+
+      return { cases: [...cases, mCase], defaultCase };
+    },
+    {
+      cases: [] as MatchCase[],
+      defaultCase: undefined as MatchCase | undefined,
+    }
+  );
 };
 
 const extractObjectFields = (obj: List) => {

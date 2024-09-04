@@ -9,6 +9,7 @@ import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveCallTypes } from "./resolve-call-types.js";
 import { resolveFnTypes } from "./resolve-fn-type.js";
+import { resolveMatch } from "./resolve-match.js";
 import { resolveUse } from "./resolve-use.js";
 
 /**
@@ -27,6 +28,7 @@ export const resolveTypes = (expr: Expr | undefined): Expr => {
   if (expr.isObjectType()) return resolveObjectTypeTypes(expr);
   if (expr.isTypeAlias()) return resolveTypeAliasTypes(expr);
   if (expr.isObjectLiteral()) return resolveObjectLiteralTypes(expr);
+  if (expr.isMatch()) return resolveMatch(expr);
   return expr;
 };
 

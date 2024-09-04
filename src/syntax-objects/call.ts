@@ -1,17 +1,20 @@
 import { Expr } from "./expr.js";
 import { Fn } from "./fn.js";
 import { Identifier } from "./identifier.js";
+import { LexicalContext } from "./lexical-context.js";
 import { List } from "./list.js";
-import { Syntax, SyntaxMetadata } from "./syntax.js";
+import { ScopedSyntax } from "./scoped-entity.js";
+import { SyntaxMetadata } from "./syntax.js";
 import { ObjectType, Type } from "./types.js";
 
 /** Defines a function call */
-export class Call extends Syntax {
+export class Call extends ScopedSyntax {
   readonly syntaxType = "call";
   fn?: Fn | ObjectType;
   fnName: Identifier;
   args: List;
   type?: Type;
+  lexicon: LexicalContext;
 
   constructor(
     opts: SyntaxMetadata & {
@@ -19,6 +22,7 @@ export class Call extends Syntax {
       fn?: Fn;
       args: List;
       type?: Type;
+      lexicon?: LexicalContext;
     }
   ) {
     super(opts);
@@ -26,6 +30,7 @@ export class Call extends Syntax {
     this.fn = opts.fn;
     this.args = opts.args;
     this.type = opts.type;
+    this.lexicon = opts.lexicon ?? new LexicalContext();
     opts.args.parent = this;
   }
 
