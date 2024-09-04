@@ -86,3 +86,14 @@ pub fn test6()
   let vec = Bitly { x: 52, y: 2, z: 21 }
   get_num_from_vec_sub_obj(vec)
 `;
+
+export const tcoText = `
+use std::all
+
+// Tail call fib
+pub fn fib(n: i32, a: i32, b: i32) -> i32
+  if n == 0 then:
+    a
+  else:
+    fib(n - 1, b, a + b)
+`;
