@@ -62,7 +62,7 @@ const resolveExport = (call: Call) => {
     throw new Error("Expected export to contain block");
   }
 
-  resolveTypes(block);
+  block.body = block.body.map(resolveTypes);
 
   const entities = block.getAllEntities();
   entities.forEach((e) => {

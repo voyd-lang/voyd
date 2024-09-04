@@ -183,6 +183,7 @@ const checkUse = (use: Use) => {
 
 const checkFnTypes = (fn: Fn): Fn => {
   checkParameters(fn.parameters);
+  checkTypes(fn.body);
 
   if (fn.returnTypeExpr) {
     checkTypes(fn.returnTypeExpr);
@@ -194,7 +195,6 @@ const checkFnTypes = (fn: Fn): Fn => {
     );
   }
 
-  checkTypes(fn.body);
   const inferredReturnType = fn.inferredReturnType;
 
   if (

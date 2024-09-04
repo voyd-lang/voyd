@@ -91,7 +91,9 @@ export class Fn extends ScopedNamedEntity {
       return this.returnType;
     }
 
-    throw new Error(`Return type not yet resolved for fn ${this}`);
+    throw new Error(
+      `Return type not yet resolved for fn ${this.name} at ${this.location}`
+    );
   }
 
   registerLocal(local: Variable | Parameter) {
