@@ -146,10 +146,6 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
     return compileBnrCall(opts);
   }
 
-  const args = expr.args
-    .toArray()
-    .map((expr) => compileExpression({ ...opts, expr }));
-
   if (!expr.fn) {
     throw new Error(`No function found for call ${expr.location}`);
   }
@@ -157,6 +153,10 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   if (expr.fn.isObjectType()) {
     return compileObjectInit(opts);
   }
+
+  const args = expr.args
+    .toArray()
+    .map((expr) => compileExpression({ ...opts, expr }));
 
   return mod.call(
     expr.fn!.id,
