@@ -50,7 +50,7 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isDeclaration()) return compileDeclaration({ ...opts, expr });
   if (expr.isModule()) return compileModule({ ...opts, expr });
   if (expr.isObjectLiteral()) return compileObjectLiteral({ ...opts, expr });
-  if (expr.isType()) return mod.nop();
+  if (expr.isType()) return compileType({ ...opts, expr });
   if (expr.isUse()) return mod.nop();
   if (expr.isMacro()) return mod.nop();
   if (expr.isMacroVariable()) return mod.nop();
@@ -63,6 +63,17 @@ const compileExpression = (opts: CompileExprOpts): number => {
   throw new Error(
     `Unrecognized expression ${expr.syntaxType} ${expr.location}`
   );
+};
+
+const compileType = (opts: CompileExprOpts<Type>) => {
+  const type = opts.expr;
+
+  if (type.isObjectType()) {
+    buildObjectType(opts, type);
+    return opts.mod.nop();
+  }
+
+  return opts.mod.nop();
 };
 
 const compileModule = (opts: CompileExprOpts<VoidModule>) => {
