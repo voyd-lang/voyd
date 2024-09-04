@@ -91,11 +91,6 @@ const compileMatch = (opts: CompileExprOpts<Match>) => {
     }
 
     return opts.mod.if(
-      // refTest(
-      //   opts.mod,
-      //   compileIdentifier({ ...opts, expr: expr.bindIdentifier }),
-      //   mapBinaryenType(opts.mod, nextCase.matchType!)
-      // ),
       opts.mod.call(
         "__extends",
         [
@@ -173,13 +168,12 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
 const compileObjectInit = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;
 
-  const objectType = mapBinaryenType(opts, expr.type!);
+  const objectType = getExprType(expr) as ObjectType;
+  const objectBinType = mapBinaryenType(opts, objectType);
   const obj = expr.argAt(0) as ObjectLiteral;
 
-  return initStruct(mod, binaryenTypeToHeapType(objectType), [
-    opts.extensionHelpers.initExtensionArray(
-      (expr.type as ObjectType).getAncestorIds()
-    ),
+  return initStruct(mod, binaryenTypeToHeapType(objectBinType), [
+    mod.global.get(`__rtt_${objectType.id}`, opts.extensionHelpers.i32Array),
     ...obj.fields.map((field) =>
       compileExpression({ ...opts, expr: field.initializer })
     ),
@@ -281,15 +275,15 @@ const compileExternFn = (opts: CompileExprOpts<Fn> & { namespace: string }) => {
 const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
   const { expr: obj, mod } = opts;
 
-  const literalType = mapBinaryenType(opts, obj.type!);
+  const objectType = getExprType(obj) as ObjectType;
+  const literalBinType = mapBinaryenType(opts, objectType);
 
-  return initStruct(
-    mod,
-    binaryenTypeToHeapType(literalType),
-    obj.fields.map((field) =>
+  return initStruct(mod, binaryenTypeToHeapType(literalBinType), [
+    mod.global.get(`__rtt_${objectType.id}`, opts.extensionHelpers.i32Array),
+    ...obj.fields.map((field) =>
       compileExpression({ ...opts, expr: field.initializer })
-    )
-  );
+    ),
+  ]);
 };
 
 const compileIf = (opts: CompileExprOpts<Call>) => {
@@ -339,6 +333,7 @@ const buildObjectType = (
   obj: ObjectType
 ): HeapTypeRef => {
   const mod = opts.mod;
+
   const binaryenType = defineStructType(mod, {
     name: obj.id,
     fields: [
@@ -355,6 +350,15 @@ const buildObjectType = (
       ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObj))
       : undefined,
   });
+
+  // Set RTT Table (So we don't have to re-calculate it every time)
+  mod.addGlobal(
+    `__rtt_${obj.id}`,
+    opts.extensionHelpers.i32Array,
+    false,
+    opts.extensionHelpers.initExtensionArray(obj.getAncestorIds())
+  );
+
   obj.binaryenType = binaryenType;
   return binaryenType;
 };

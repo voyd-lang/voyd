@@ -2,29 +2,16 @@ import binaryen from "binaryen";
 import { AugmentedBinaryen } from "../lib/binaryen-gc/types.js";
 import {
   defineArrayType,
-  arrayNew,
-  binaryenTypeToHeapType,
-  arraySet,
   arrayLen,
   arrayGet,
+  arrayNewFixed,
+  binaryenTypeToHeapType,
 } from "../lib/binaryen-gc/index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
 export const initExtensionHelpers = (mod: binaryen.Module) => {
   const i32Array = defineArrayType(mod, bin.i32, true);
-
-  mod.addGlobal(
-    "__extensionArrayConstructor",
-    i32Array,
-    true,
-    arrayNew(
-      mod,
-      binaryenTypeToHeapType(i32Array),
-      mod.i32.const(0),
-      mod.i32.const(0)
-    )
-  );
 
   mod.addFunction(
     "__extends",
@@ -82,25 +69,11 @@ export const initExtensionHelpers = (mod: binaryen.Module) => {
   );
 
   const initExtensionArray = (ancestorIds: number[]) => {
-    const init = arrayNew(
+    return arrayNewFixed(
       mod,
       binaryenTypeToHeapType(i32Array),
-      mod.i32.const(ancestorIds.length),
-      mod.i32.const(0)
+      ancestorIds.map((id) => mod.i32.const(id))
     );
-
-    return mod.block(null, [
-      mod.global.set("__extensionArrayConstructor", init),
-      ...ancestorIds.map((id, i) =>
-        arraySet(
-          mod,
-          mod.global.get("__extensionArrayConstructor", i32Array),
-          mod.i32.const(i),
-          mod.i32.const(id)
-        )
-      ),
-      mod.global.get("__extensionArrayConstructor", i32Array),
-    ]);
   };
 
   return { initExtensionArray, i32Array };

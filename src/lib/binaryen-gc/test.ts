@@ -4,6 +4,7 @@ import {
   arrayGet,
   arrayLen,
   arrayNew,
+  arrayNewFixed,
   arraySet,
   binaryenTypeToHeapType,
   defineArrayType,
@@ -18,38 +19,12 @@ export function testGc() {
 
   const i32Array = defineArrayType(mod, bin.i32, true);
 
-  mod.addGlobal(
-    "__extensionArrayConstructor",
-    i32Array,
-    true,
-    arrayNew(
-      mod,
-      binaryenTypeToHeapType(i32Array),
-      mod.i32.const(0),
-      mod.i32.const(0)
-    )
-  );
-
   const initExtensionArray = (ancestorIds: number[]) => {
-    const init = arrayNew(
+    return arrayNewFixed(
       mod,
       binaryenTypeToHeapType(i32Array),
-      mod.i32.const(ancestorIds.length),
-      mod.i32.const(0)
+      ancestorIds.map((id) => mod.i32.const(id))
     );
-
-    return mod.block(null, [
-      mod.global.set("__extensionArrayConstructor", init),
-      ...ancestorIds.map((id, i) =>
-        arraySet(
-          mod,
-          mod.global.get("__extensionArrayConstructor", i32Array),
-          mod.i32.const(i),
-          mod.i32.const(id)
-        )
-      ),
-      mod.global.get("__extensionArrayConstructor", i32Array),
-    ]);
   };
 
   mod.addFunction(
@@ -106,6 +81,13 @@ export function testGc() {
     ])
   );
 
+  mod.addGlobal(
+    "extensionArray",
+    i32Array,
+    false,
+    initExtensionArray([1, 2, 3])
+  );
+
   mod.addFunction(
     "main",
     bin.createType([]),
@@ -115,7 +97,7 @@ export function testGc() {
       mod.local.set(0, initExtensionArray([1, 2, 3])),
       mod.call(
         "__extends",
-        [mod.i32.const(1), mod.local.get(0, i32Array)],
+        [mod.i32.const(4), mod.global.get("extensionArray", i32Array)],
         bin.i32
       ),
     ])

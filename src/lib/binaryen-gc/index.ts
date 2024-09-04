@@ -186,6 +186,22 @@ export const arrayNew = (
   return bin._BinaryenArrayNew(mod.ptr, type, initialLength, init);
 };
 
+export const arrayNewFixed = (
+  mod: binaryen.Module,
+  type: HeapTypeRef,
+  values: ExpressionRef[]
+): ExpressionRef => {
+  const valuesPtr = allocU32Array(values);
+  const result = bin._BinaryenArrayNewFixed(
+    mod.ptr,
+    type,
+    valuesPtr,
+    values.length
+  );
+  bin._free(valuesPtr);
+  return result;
+};
+
 export const arrayCopy = (
   mod: binaryen.Module,
   destRef: ExpressionRef,
