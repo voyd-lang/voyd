@@ -4,7 +4,11 @@ import { noop } from "../../syntax-objects/helpers.js";
 import { List } from "../../syntax-objects/list.js";
 import { VoidModule } from "../../syntax-objects/module.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
-import { ObjectType, TypeAlias } from "../../syntax-objects/types.js";
+import {
+  ObjectType,
+  TypeAlias,
+  voidBaseObject,
+} from "../../syntax-objects/types.js";
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveCallTypes } from "./resolve-call-types.js";
@@ -73,6 +77,8 @@ const resolveObjectTypeTypes = (obj: ObjectType): ObjectType => {
   if (obj.parentObjExpr) {
     const parentType = getExprType(obj.parentObjExpr);
     obj.parentObj = parentType?.isObjectType() ? parentType : undefined;
+  } else {
+    obj.parentObj = voidBaseObject;
   }
 
   return obj;
