@@ -240,17 +240,20 @@ for item in iterable
 
 ### Match Statements
 
+Match statements are used for type narrowing
+
 ```rust
-let x = 3
-match x
-  Vec => print "One"
-  2 => print "Two"
-  3 => print "Three"
-  _ =>
-    // Match statements are exhaustive, they must cover every possible
-    // case. When not every case is covered, a default handler must be
-    // provided.
-    write "A number"
+obj Animal
+obj Cat extends Animal
+obj Dog extends Animal
+
+let dog = Dog {}
+
+match(dog)
+  Dog => print "Woof"
+  Cat => print "Meow"
+  else
+    print "Blurb"
 ```
 
 ## Closures
