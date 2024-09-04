@@ -56,6 +56,7 @@ export const lexer = (chars: CharStream): Token => {
   }
 
   token.location.endIndex = chars.position;
+  token.location.endColumn = chars.column;
   return token;
 };
 

@@ -41,7 +41,7 @@ const parseBinaryCall = (left: Expr, list: List): List => {
   // Dot handling should maybe be moved to a macro?
   const result = isDotOp(op)
     ? parseDot(right, left)
-    : new List({ value: [op, left, right] });
+    : new List({ ...op.metadata, value: [op, left, right] });
 
   // Remove "tuple" from the list of parameters of a lambda
   // Functional notation macro isn't smart enough to identify lambda parameters
