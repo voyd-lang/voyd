@@ -52,9 +52,9 @@ fn get_member(vec: Pointy)
 
 fn get_num_from_vec_sub_obj(vec: Vec)
   match(vec)
-    Pointy => get_member(vec)
-    Point => get_member(vec)
-    else -1
+    Pointy: get_member(vec)
+    Point: get_member(vec)
+    else: -1
 
 // Should return 13
 pub fn test1()

@@ -293,7 +293,7 @@ const initMatchCases = (
     ({ cases, defaultCase }, expr) => {
       if (!expr.isList() || !expr.calls(":")) {
         throw new Error(
-          `Match cases must be in the form of => at ${expr.location}`
+          `Match cases must be in the form of : at ${expr.location}`
         );
       }
 
