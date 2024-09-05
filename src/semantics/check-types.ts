@@ -58,7 +58,9 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   }
 
   if (!call.type) {
-    throw new Error(`Could not resolve type for call ${call.fnName}`);
+    throw new Error(
+      `Could not resolve type for call ${call.fnName} at ${call.location}`
+    );
   }
 
   return call;

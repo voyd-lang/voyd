@@ -1,11 +1,13 @@
 import { Call, Expr, Fn } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreEquivalent } from "./types-are-equivalent.js";
+import { resolveFnTypes } from "./resolve-fn-type.js";
 
 export const getCallFn = (call: Call): Fn | undefined => {
   if (isPrimitiveFnCall(call)) return undefined;
 
   const candidates = call.resolveFns(call.fnName).filter((candidate) => {
+    resolveFnTypes(candidate);
     const params = candidate.parameters;
     return params.every((p, index) => {
       const arg = call.argAt(index);

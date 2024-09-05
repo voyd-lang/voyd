@@ -10,11 +10,8 @@ import {
   TypeAlias,
   ObjectType,
   ObjectLiteral,
-  Identifier,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
-import { getExprType } from "./resolution/get-expr-type.js";
-import { resolveTypes } from "./resolution/resolve-types.js";
 import { SemanticProcessor } from "./types.js";
 
 export const initEntities: SemanticProcessor = (expr) => {

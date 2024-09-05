@@ -4,7 +4,7 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveTypes } from "./resolve-types.js";
 
 export const resolveFnTypes = (fn: Fn): Fn => {
-  if (fn.returnType) {
+  if (fn.resolved) {
     // Already resolved
     return fn;
   }
@@ -15,6 +15,7 @@ export const resolveFnTypes = (fn: Fn): Fn => {
     fn.returnType = fn.annotatedReturnType;
   }
 
+  fn.resolved = true;
   fn.body = resolveTypes(fn.body);
   fn.inferredReturnType = getExprType(fn.body);
   fn.returnType = fn.annotatedReturnType ?? fn.inferredReturnType;
