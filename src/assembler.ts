@@ -204,7 +204,7 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   const id = expr.fn!.id;
   const returnType = mapBinaryenType(opts, expr.fn!.returnType!);
 
-  if (isReturnExpr && id === expr.parentFn?.id) {
+  if (isReturnExpr) {
     return returnCall(mod, id, args, returnType);
   }
 
@@ -244,7 +244,11 @@ const compileExport = (opts: CompileExprOpts<Call>) => {
 const compileAssign = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod } = opts;
   const identifier = expr.argAt(0) as Identifier;
-  const value = compileExpression({ ...opts, expr: expr.argAt(1)! });
+  const value = compileExpression({
+    ...opts,
+    expr: expr.argAt(1)!,
+    isReturnExpr: false,
+  });
   const entity = identifier.resolve();
   if (!entity) {
     throw new Error(`${identifier} not found in scope`);
@@ -343,7 +347,11 @@ const compileIf = (opts: CompileExprOpts<Call>) => {
   const conditionNode = expr.exprArgAt(0);
   const ifTrueNode = expr.labeledArgAt(1);
   const ifFalseNode = expr.optionalLabeledArgAt(2);
-  const condition = compileExpression({ ...opts, expr: conditionNode });
+  const condition = compileExpression({
+    ...opts,
+    expr: conditionNode,
+    isReturnExpr: false,
+  });
   const ifTrue = compileExpression({ ...opts, expr: ifTrueNode });
   const ifFalse =
     ifFalseNode !== undefined
