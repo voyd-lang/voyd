@@ -6,6 +6,7 @@ export class Variable extends NamedEntity {
   readonly syntaxType = "variable";
   isMutable: boolean;
   type?: Type;
+  /** Set before the type was narrowed by the type checker */
   originalType?: Type;
   inferredType?: Type;
   annotatedType?: Type;

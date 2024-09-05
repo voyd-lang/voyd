@@ -58,7 +58,9 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   }
 
   if (!call.type) {
-    throw new Error(`Could not resolve type for call ${call.fnName}`);
+    throw new Error(
+      `Could not resolve type for call ${call.fnName} at ${call.location}`
+    );
   }
 
   return call;
@@ -119,12 +121,16 @@ const checkIdentifier = (id: Identifier) => {
 };
 
 export const checkIf = (call: Call) => {
-  const condType = getExprType(call.argAt(0));
+  const cond = checkTypes(call.argAt(0));
+  const condType = getExprType(cond);
   if (!condType || !typesAreEquivalent(condType, bool)) {
-    throw new Error("If conditions must resolve to a boolean");
+    throw new Error(
+      `If conditions must resolve to a boolean at ${cond.location}`
+    );
   }
-  const thenExpr = call.argAt(1);
-  const elseExpr = call.argAt(2);
+
+  const thenExpr = checkTypes(call.argAt(1));
+  const elseExpr = call.argAt(2) ? checkTypes(call.argAt(2)) : undefined;
 
   // Until unions are supported, return void if no else
   if (!elseExpr) {
@@ -335,7 +341,7 @@ const checkMatch = (match: Match) => {
 
     if (!mCase.matchType.extends(match.baseType)) {
       throw new Error(
-        `Match case type ${mCase.matchType.name} does not extend ${match.baseType.name}`
+        `Match case type ${mCase.matchType.name} does not extend ${match.baseType.name} at ${mCase.expr.location}`
       );
     }
 

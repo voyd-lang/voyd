@@ -49,5 +49,6 @@
   },
   "[void]": {
     "editor.tabSize": 2
-  }
+  },
+  "vitest.nodeExecutable": ""
 }

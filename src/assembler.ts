@@ -22,6 +22,7 @@ import { getExprType } from "./semantics/resolution/get-expr-type.js";
 import { Match, MatchCase } from "./syntax-objects/match.js";
 import { initExtensionHelpers } from "./assembler/extension-helpers.js";
 import { returnCall } from "./assembler/return-call.js";
+import { Float } from "./syntax-objects/float.js";
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -47,8 +48,8 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isCall()) return compileCall({ ...opts, expr, isReturnExpr });
   if (expr.isBlock()) return compileBlock({ ...opts, expr, isReturnExpr });
   if (expr.isMatch()) return compileMatch({ ...opts, expr, isReturnExpr });
-  if (expr.isInt()) return mod.i32.const(expr.value);
-  if (expr.isFloat()) return mod.f32.const(expr.value);
+  if (expr.isInt()) return compileInt({ ...opts, expr });
+  if (expr.isFloat()) return compileFloat({ ...opts, expr });
   if (expr.isIdentifier()) return compileIdentifier({ ...opts, expr });
   if (expr.isFn()) return compileFunction({ ...opts, expr });
   if (expr.isVariable()) return compileVariable({ ...opts, expr });
@@ -67,6 +68,27 @@ const compileExpression = (opts: CompileExprOpts): number => {
   throw new Error(
     `Unrecognized expression ${expr.syntaxType} ${expr.location}`
   );
+};
+
+const compileInt = (opts: CompileExprOpts<Int>) => {
+  const val = opts.expr.value;
+  if (typeof val === "number") {
+    return opts.mod.i32.const(val);
+  }
+
+  const i64Int = val.value;
+  const low = Number(i64Int & BigInt(0xffffffff)); // Extract lower 32 bits
+  const high = Number((i64Int >> BigInt(32)) & BigInt(0xffffffff)); // Extract higher 32 bits
+  return opts.mod.i64.const(low, high);
+};
+
+const compileFloat = (opts: CompileExprOpts<Float>) => {
+  const val = opts.expr.value;
+  if (typeof val === "number") {
+    return opts.mod.f32.const(val);
+  }
+
+  return opts.mod.f64.const(val.value);
 };
 
 const compileType = (opts: CompileExprOpts<Type>) => {
@@ -157,7 +179,7 @@ const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
 
 const compileCall = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod, isReturnExpr } = opts;
-  if (expr.calls("quote")) return (expr.argAt(0) as Int).value; // TODO: This is an ugly hack to get constants that the compiler needs to know at compile time for ex bnr calls;
+  if (expr.calls("quote")) return (expr.argAt(0) as { value: number }).value; // TODO: This is an ugly hack to get constants that the compiler needs to know at compile time for ex bnr calls;
   if (expr.calls("=")) return compileAssign(opts);
   if (expr.calls("if")) return compileIf(opts);
   if (expr.calls("export")) return compileExport(opts);
@@ -182,7 +204,7 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   const id = expr.fn!.id;
   const returnType = mapBinaryenType(opts, expr.fn!.returnType!);
 
-  if (isReturnExpr && id === expr.parentFn?.id) {
+  if (isReturnExpr) {
     return returnCall(mod, id, args, returnType);
   }
 
@@ -222,7 +244,11 @@ const compileExport = (opts: CompileExprOpts<Call>) => {
 const compileAssign = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod } = opts;
   const identifier = expr.argAt(0) as Identifier;
-  const value = compileExpression({ ...opts, expr: expr.argAt(1)! });
+  const value = compileExpression({
+    ...opts,
+    expr: expr.argAt(1)!,
+    isReturnExpr: false,
+  });
   const entity = identifier.resolve();
   if (!entity) {
     throw new Error(`${identifier} not found in scope`);
@@ -321,7 +347,11 @@ const compileIf = (opts: CompileExprOpts<Call>) => {
   const conditionNode = expr.exprArgAt(0);
   const ifTrueNode = expr.labeledArgAt(1);
   const ifFalseNode = expr.optionalLabeledArgAt(2);
-  const condition = compileExpression({ ...opts, expr: conditionNode });
+  const condition = compileExpression({
+    ...opts,
+    expr: conditionNode,
+    isReturnExpr: false,
+  });
   const ifTrue = compileExpression({ ...opts, expr: ifTrueNode });
   const ifFalse =
     ifFalseNode !== undefined

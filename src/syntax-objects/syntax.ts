@@ -249,6 +249,8 @@ export class SourceLocation {
   line: number;
   /** The column within the line the syntax begins */
   column: number;
+  /** The column index in the line where the syntax ends  */
+  endColumn?: number;
 
   filePath: string;
 
@@ -267,6 +269,8 @@ export class SourceLocation {
   }
 
   toString() {
-    return `${this.filePath}:${this.line}:${this.column}`;
+    return `${this.filePath}:${this.line}:${this.column + 1}${
+      this.endColumn ? `-${this.endColumn + 1}` : ""
+    }`;
   }
 }

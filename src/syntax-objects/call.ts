@@ -13,7 +13,7 @@ export class Call extends ScopedSyntax {
   fn?: Fn | ObjectType;
   fnName: Identifier;
   args: List;
-  type?: Type;
+  _type?: Type;
   lexicon: LexicalContext;
 
   constructor(
@@ -29,9 +29,25 @@ export class Call extends ScopedSyntax {
     this.fnName = opts.fnName;
     this.fn = opts.fn;
     this.args = opts.args;
-    this.type = opts.type;
+    this._type = opts.type;
     this.lexicon = opts.lexicon ?? new LexicalContext();
     opts.args.parent = this;
+  }
+
+  set type(type: Type | undefined) {
+    this._type = type;
+  }
+
+  get type() {
+    if (!this._type && this.fn?.isFn()) {
+      this._type = this.fn.returnType;
+    }
+
+    if (!this._type && this.fn?.isObjectType()) {
+      this._type = this.fn;
+    }
+
+    return this._type;
   }
 
   eachArg(fn: (expr: Expr) => void) {

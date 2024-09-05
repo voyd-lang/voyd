@@ -56,6 +56,7 @@ export const lexer = (chars: CharStream): Token => {
   }
 
   token.location.endIndex = chars.position;
+  token.location.endColumn = chars.column;
   return token;
 };
 
@@ -67,7 +68,7 @@ const consumeOperator = (chars: CharStream, token: Token) => {
 
 const consumeNumber = (chars: CharStream, token: Token) => {
   const isValidNumber = (str: string) =>
-    /^[+-]?\d*(\.\d+)?[Ee]?[+-]?\d*$/.test(str);
+    /^[+-]?\d+(?:\.\d+)?([Ee]?[+-]?\d+|(?:i|f)(?:|3|6|32|64))?$/.test(str);
   const stillConsumingNumber = () =>
     chars.next &&
     (isValidNumber(token.value + chars.next) ||
