@@ -1,4 +1,4 @@
-import { Identifier } from "../../../syntax-objects/identifier.js";
+import { List } from "../../../syntax-objects/list.js";
 import { lexer } from "../../lexer.js";
 import { ReaderMacro } from "../types.js";
 import { HTMLParser } from "./html-parser.js";
@@ -20,10 +20,7 @@ export const htmlMacro: ReaderMacro = {
       },
     });
     const start = lexer(file);
-    const json = parser.parse(start.value);
-
-    const id = new Identifier({ value: "html", location: token.location });
-    id.json = json;
-    return id;
+    const html = parser.parse(start.value);
+    return new List({ value: ["html", html], location: token.location });
   },
 };
