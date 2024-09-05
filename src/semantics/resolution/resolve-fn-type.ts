@@ -25,6 +25,10 @@ export const resolveFnTypes = (fn: Fn): Fn => {
 
 const resolveParameters = (params: Parameter[]) => {
   params.forEach((p) => {
+    if (p.type) {
+      return;
+    }
+
     if (!p.typeExpr) {
       throw new Error(`Unable to determine type for ${p}`);
     }

@@ -1,4 +1,9 @@
-import { e2eVoidText, gcVoidText, tcoText } from "./fixtures/e2e-file.js";
+import {
+  e2eVoidText,
+  gcVoidText,
+  goodTypeInferenceText,
+  tcoText,
+} from "./fixtures/e2e-file.js";
 import { compile } from "../compiler.js";
 import { describe, test, vi } from "vitest";
 import assert from "node:assert";
@@ -12,6 +17,14 @@ describe("E2E Compiler Pipeline", () => {
     const fn = getWasmFn("main", instance);
     assert(fn, "Function exists");
     t.expect(fn(), "Main function returns correct value").toEqual(55);
+  });
+
+  test("Compiler has good inference", async (t) => {
+    const mod = await compile(goodTypeInferenceText);
+    const instance = getWasmInstance(mod);
+    const fn = getWasmFn("main", instance);
+    assert(fn, "Function exists");
+    t.expect(fn(), "Main function returns correct value").toEqual(55n);
   });
 
   test("Compiler can compile gc objects and map correct fns", async (t) => {

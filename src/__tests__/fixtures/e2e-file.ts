@@ -97,3 +97,20 @@ pub fn fib(n: i32, a: i32, b: i32) -> i32
   else:
     fib(n - 1, b, a + b)
 `;
+
+export const goodTypeInferenceText = `
+use std::all
+
+// Should infer return type from fib_alias
+fn fib(n: i32, a: i64, b: i64)
+  if n == 0 then:
+    a
+  else:
+    fib_alias(n - 1, b, a + b)
+
+fn fib_alias(n: i32, a: i64, b: i64) -> i64
+  fib(n - 1, b, a + b)
+
+pub fn main() -> i64
+  fib(10, 0i64, 1i64)
+`;

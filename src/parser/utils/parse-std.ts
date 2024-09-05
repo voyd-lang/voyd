@@ -1,5 +1,5 @@
 import path from "path";
-import { parseDirectory } from "./parse-directory.js";
+import { ParsedFiles, parseDirectory } from "./parse-directory.js";
 import { fileURLToPath } from "url";
 
 export const stdPath = path.resolve(
@@ -11,4 +11,21 @@ export const stdPath = path.resolve(
   "std"
 );
 
-export const parseStd = async () => parseDirectory(stdPath);
+let cache: ParsedFiles | undefined = undefined;
+export const parseStd = async () => {
+  if (cache) {
+    return cloneParsedFiles(cache);
+  }
+
+  const parsed = await parseDirectory(stdPath);
+  cache = cloneParsedFiles(parsed);
+  return parsed;
+};
+
+const cloneParsedFiles = (parsed: ParsedFiles) =>
+  Object.entries(parsed).reduce(
+    (acc, [key, value]) => ({ ...acc, [key]: value.clone() }),
+    {} as ParsedFiles
+  );
+
+// Convert the object
