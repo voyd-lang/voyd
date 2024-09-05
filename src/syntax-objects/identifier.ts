@@ -15,6 +15,7 @@ export class Identifier extends Syntax {
   readonly isQuoted?: boolean;
   /** The given name of the identifier */
   value: string;
+  json?: object;
 
   constructor(opts: IdentifierOpts) {
     super(opts);
@@ -62,7 +63,7 @@ export class Identifier extends Syntax {
   }
 
   toJSON() {
-    return this.value;
+    return this.json ? ["html", this.json] : this.value;
   }
 }
 
