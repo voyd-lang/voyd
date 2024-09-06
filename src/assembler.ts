@@ -17,6 +17,7 @@ import {
   refCast,
   structGetFieldValue,
 } from "./lib/binaryen-gc/index.js";
+import * as gc from "./lib/binaryen-gc/index.js";
 import { HeapTypeRef } from "./lib/binaryen-gc/types.js";
 import { getExprType } from "./semantics/resolution/get-expr-type.js";
 import { Match, MatchCase } from "./syntax-objects/match.js";
@@ -264,10 +265,14 @@ const compileAssign = (opts: CompileExprOpts<Call>): number => {
 const compileBnrCall = (opts: CompileExprOpts<Call>): number => {
   const { expr } = opts;
   const funcId = expr.labeledArgAt(0) as Identifier;
-  const argTypes = expr.labeledArgAt(1) as Call;
-  const namespace = argTypes.identifierArgAt(0).value;
+  const namespace = (expr.labeledArgAt(1) as Identifier).value;
   const args = expr.labeledArgAt(3) as Call;
-  const func = (opts.mod as any)[namespace][funcId.value];
+
+  const func =
+    namespace === "gc"
+      ? (...args: unknown[]) => (gc as any)[funcId.value](opts.mod, ...args)
+      : (opts.mod as any)[namespace][funcId.value];
+
   return func(
     ...(args.argArrayMap((expr: Expr) =>
       compileExpression({ ...opts, expr })
