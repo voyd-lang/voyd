@@ -674,3 +674,75 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
   ],
 ]
 `;
+
+exports[`parser supports generics 1`] = `
+[
+  "ast",
+  [
+    "use",
+    [
+      "::",
+      "std",
+      "all",
+    ],
+  ],
+  [
+    "type",
+    [
+      "=",
+      "DSArrayi32",
+      [
+        "DSArray",
+        [
+          "generics",
+          "i32",
+        ],
+      ],
+    ],
+  ],
+  [
+    "pub",
+    "fn",
+    [
+      "main",
+    ],
+    [
+      "block",
+      [
+        "let",
+        [
+          "=",
+          "arr",
+          [
+            "ds_array_init",
+            [
+              "generics",
+              "i32",
+            ],
+            10,
+          ],
+        ],
+      ],
+      [
+        "set",
+        [
+          "generics",
+          "i32",
+        ],
+        "arr",
+        0,
+        1,
+      ],
+      [
+        "get",
+        [
+          "generics",
+          "i32",
+        ],
+        "arr",
+        0,
+      ],
+    ],
+  ],
+]
+`;

@@ -102,3 +102,14 @@ fn main()
     z: { a: 10, b: 20 }
   }
 `;
+
+export const voidFileWithGenerics = `
+use std::all
+
+type DSArrayi32 = DSArray<i32>
+
+pub fn main()
+  let arr = ds_array_init<i32>(10)
+  arr.set<i32>(0, 1)
+  arr.get<i32>(0)
+`;
