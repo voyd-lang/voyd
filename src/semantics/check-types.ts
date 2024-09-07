@@ -47,6 +47,7 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("export")) return checkExport(call);
   if (call.calls("if")) return checkIf(call);
   if (call.calls("binaryen")) return checkBinaryenCall(call);
+  if (call.calls("mod")) return call;
   if (call.calls(":")) return checkLabeledArg(call);
   if (call.calls("=")) return checkAssign(call);
   if (call.calls("member-access")) return call; // TODO

@@ -4,10 +4,8 @@ import { Identifier } from "../../syntax-objects/identifier.js";
 import { List } from "../../syntax-objects/list.js";
 import { VoidModule } from "../../syntax-objects/module.js";
 import { NamedEntity } from "../../syntax-objects/named-entity.js";
-import { dVoid } from "../../syntax-objects/types.js";
 import { Use } from "../../syntax-objects/use.js";
-import { getExprType } from "./get-expr-type.js";
-import { resolveTypes } from "./resolve-types.js";
+import { resolveModuleTypes, resolveTypes } from "./resolve-types.js";
 
 export type ModulePass = (mod: VoidModule) => VoidModule;
 
@@ -91,6 +89,14 @@ export const registerExports = (
   entities.forEach((e) => {
     if (e.isUse()) {
       e.entities.forEach((e) => registerExport(exportExpr, e));
+      return;
+    }
+
+    if (e.isCall() && e.calls("mod")) {
+      registerExports(
+        exportExpr,
+        resolveModulePath(e.callArgAt(0), resolveModuleTypes)
+      );
       return;
     }
 

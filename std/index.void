@@ -3,4 +3,4 @@ pub use macros::all
 pub use operators::all
 pub use utils::all
 pub use strings::all
-pub use array::all
+pub mod array::all
