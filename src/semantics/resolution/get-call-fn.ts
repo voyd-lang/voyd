@@ -24,18 +24,9 @@ const filterCandidates = (call: Call, candidates: Fn[]): Fn[] =>
     }
 
     resolveFnTypes(candidate);
-    const params = candidate.parameters;
-    const paramsMatch = params.every((p, i) => parametersMatch(p, i, call));
-    const typeArgsMatch =
-      call.typeArgs && candidate.appliedTypeArgs
-        ? candidate.appliedTypeArgs.every((t, i) => {
-            const argType = getExprType(call.typeArgs?.at(i));
-            const appliedType = getExprType(t);
-            return typesAreEquivalent(argType, appliedType);
-          })
-        : true;
-    const match = paramsMatch && typeArgsMatch;
-    return match ? candidate : [];
+    return parametersMatch(candidate, call) && typeArgsMatch(call, candidate)
+      ? candidate
+      : [];
   });
 
 const filterCandidateWithGenerics = (call: Call, candidate: Fn): Fn[] => {
@@ -65,15 +56,25 @@ const filterCandidateWithGenerics = (call: Call, candidate: Fn): Fn[] => {
   return filterCandidates(call, candidate.genericInstances);
 };
 
-const parametersMatch = (p: Parameter, index: number, call: Call) => {
-  const arg = call.argAt(index);
-  if (!arg) return false;
-  const argType = getExprType(arg);
-  if (!argType) return false;
-  const argLabel = getExprLabel(arg);
-  const labelsMatch = p.label === argLabel;
-  return typesAreEquivalent(argType, p.type!) && labelsMatch;
-};
+const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
+  call.typeArgs && candidate.appliedTypeArgs
+    ? candidate.appliedTypeArgs.every((t, i) => {
+        const argType = getExprType(call.typeArgs?.at(i));
+        const appliedType = getExprType(t);
+        return typesAreEquivalent(argType, appliedType);
+      })
+    : true;
+
+const parametersMatch = (candidate: Fn, call: Call) =>
+  candidate.parameters.every((p, i) => {
+    const arg = call.argAt(i);
+    if (!arg) return false;
+    const argType = getExprType(arg);
+    if (!argType) return false;
+    const argLabel = getExprLabel(arg);
+    const labelsMatch = p.label === argLabel;
+    return typesAreEquivalent(argType, p.type!) && labelsMatch;
+  });
 
 const findBestFnMatch = (candidates: Fn[], call: Call): Fn => {
   let winner: Fn | undefined = undefined;
