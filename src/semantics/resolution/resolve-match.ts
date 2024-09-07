@@ -32,6 +32,10 @@ const resolveCase = (
   localBinding.originalType = localBinding.type;
   localBinding.type = type;
   localBinding.requiresCast = true;
+
+  // NOTE: This binding is temporary and will be overwritten in the next case.
+  // We may need to introduce an wrapping block and register it to the blocks scope
+  // to avoid this.
   c.expr.registerEntity(localBinding);
 
   const expr = resolveTypes(c.expr) as Call | Block;

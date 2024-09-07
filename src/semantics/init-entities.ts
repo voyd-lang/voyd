@@ -168,6 +168,12 @@ const initVar = (varDef: List): Variable => {
     throw new Error("Invalid variable definition, invalid identifier");
   }
 
+  if (name.resolve()) {
+    throw new Error(
+      `Variable name already in use: ${name} at ${name.location}`
+    );
+  }
+
   const initializer = varDef.at(2);
 
   if (!initializer) {

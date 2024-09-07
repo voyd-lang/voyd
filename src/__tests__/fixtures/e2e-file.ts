@@ -76,13 +76,18 @@ pub fn test4()
   let vec = Point { x: 52, y: 2, z: 21 }
   vec.get_x()
 
-// Test match type guard (Point case), should return 21
+// Test match type guard (Pointy case), should return 52
 pub fn test5()
+  let vec = Pointy { x: 52, y: 2, z: 21 }
+  get_num_from_vec_sub_obj(vec)
+
+// Test match type guard (Point case), should return 21
+pub fn test6()
   let vec = Point { x: 52, y: 2, z: 21 }
   get_num_from_vec_sub_obj(vec)
 
 // Test match type guard (else case), should return -1
-pub fn test6()
+pub fn test7()
   let vec = Bitly { x: 52, y: 2, z: 21 }
   get_num_from_vec_sub_obj(vec)
 `;

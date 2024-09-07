@@ -41,8 +41,11 @@ export class Block extends ScopedSyntax {
     return this;
   }
 
+  /** Sets the parent on each element immediately before the mapping of the next */
   applyMap(fn: (expr: Expr, index: number, array: Expr[]) => Expr) {
-    this.body = this.body.map(fn);
+    const body = this.body;
+    this.body = new List({ ...this.body.metadata, value: [] });
+    body.each((expr, index, array) => this.body.push(fn(expr, index, array)));
     return this;
   }
 
