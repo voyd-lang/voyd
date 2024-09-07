@@ -194,6 +194,11 @@ const checkFnTypes = (fn: Fn): Fn => {
     return fn;
   }
 
+  // If the function has type parameters and not genericInstances, it isn't in use and wont be compiled.
+  if (fn.typeParameters) {
+    return fn;
+  }
+
   checkParameters(fn.parameters);
   checkTypes(fn.body);
 
