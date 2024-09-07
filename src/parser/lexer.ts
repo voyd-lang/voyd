@@ -26,6 +26,11 @@ export const lexer = (chars: CharStream): Token => {
       break;
     }
 
+    if (!token.hasChars && char === ",") {
+      token.addChar(chars.consumeChar());
+      break;
+    }
+
     if (!token.hasChars && isOpChar(char)) {
       consumeOperator(chars, token);
       break;
