@@ -25,8 +25,17 @@ const filterCandidates = (call: Call, candidates: Fn[]): Fn[] =>
 
     resolveFnTypes(candidate);
     const params = candidate.parameters;
-    const matches = params.every((p, i) => parametersMatch(p, i, call));
-    return matches ? candidate : [];
+    const paramsMatch = params.every((p, i) => parametersMatch(p, i, call));
+    const typeArgsMatch =
+      call.typeArgs && candidate.appliedTypeArgs
+        ? candidate.appliedTypeArgs.every((t, i) => {
+            const argType = getExprType(call.typeArgs?.at(i));
+            const appliedType = getExprType(t);
+            return typesAreEquivalent(argType, appliedType);
+          })
+        : true;
+    const match = paramsMatch && typeArgsMatch;
+    return match ? candidate : [];
   });
 
 const filterCandidateWithGenerics = (call: Call, candidate: Fn): Fn[] => {
