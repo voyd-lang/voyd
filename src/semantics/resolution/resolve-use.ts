@@ -1,9 +1,13 @@
 import { Call } from "../../syntax-objects/call.js";
+import { Expr } from "../../syntax-objects/expr.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { List } from "../../syntax-objects/list.js";
 import { VoidModule } from "../../syntax-objects/module.js";
 import { NamedEntity } from "../../syntax-objects/named-entity.js";
+import { dVoid } from "../../syntax-objects/types.js";
 import { Use } from "../../syntax-objects/use.js";
+import { getExprType } from "./get-expr-type.js";
+import { resolveTypes } from "./resolve-types.js";
 
 export type ModulePass = (mod: VoidModule) => VoidModule;
 
@@ -11,7 +15,8 @@ export const resolveUse = (use: Use, runPass?: ModulePass) => {
   const path = use.path;
 
   const entities = resolveModulePath(path, runPass);
-  entities.forEach((e) => use.parent?.registerEntity(e));
+  entities.forEach((e) => use.parentModule?.registerEntity(e));
+  use.entities = [...use.entities, ...entities];
   return use;
 };
 
@@ -67,4 +72,35 @@ const resolveUseIdentifier = (identifier: Identifier) => {
   }
 
   return identifier.resolve();
+};
+
+export const resolveExport = (call: Call) => {
+  const block = call.argAt(0);
+  if (!block?.isBlock()) return call;
+
+  const entities = block.body.toArray().map(resolveTypes);
+  registerExports(call, entities);
+
+  return call;
+};
+
+export const registerExports = (
+  exportExpr: Expr,
+  entities: (Expr | NamedEntity)[]
+) => {
+  entities.forEach((e) => {
+    if (e.isUse()) {
+      e.entities.forEach((e) => registerExport(exportExpr, e));
+      return;
+    }
+
+    if (e instanceof NamedEntity) {
+      registerExport(exportExpr, e);
+    }
+  });
+};
+
+const registerExport = (exportExpr: Expr, entity: NamedEntity) => {
+  exportExpr.parentModule?.registerExport(entity);
+  exportExpr.parent?.registerEntity(entity);
 };

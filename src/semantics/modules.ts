@@ -1,12 +1,12 @@
 import { ParsedModule, stdPath } from "../parser/index.js";
 import { List } from "../syntax-objects/list.js";
-import { VoidModule } from "../syntax-objects/module.js";
+import { RootModule, VoidModule } from "../syntax-objects/module.js";
 
 /** Registers submodules of a parsed module for future import resolution */
 export const registerModules = (opts: ParsedModule): VoidModule => {
   const { srcPath, files } = opts;
 
-  const rootModule = new VoidModule({ name: "root" });
+  const rootModule = new RootModule({});
 
   for (const [filePath, file] of Object.entries(files)) {
     const resolvedPath = filePathToModulePath(

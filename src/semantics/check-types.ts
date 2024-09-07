@@ -168,18 +168,6 @@ const checkExport = (call: Call) => {
   }
 
   checkTypes(block);
-
-  const entities = block.getAllEntities();
-  entities.forEach((e) => {
-    if (e.isUse()) {
-      e.entities.forEach((e) => call.parent?.registerEntity(e));
-      return;
-    }
-
-    e.isExported = true;
-    call.parent?.registerEntity(e);
-  });
-
   return call;
 };
 

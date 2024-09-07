@@ -10,6 +10,13 @@ import {
   ScopedNamedEntityOpts,
 } from "./named-entity.js";
 
+export type VoidModuleOpts = ScopedNamedEntityOpts & {
+  value?: ListValue[];
+  phase?: number;
+  isIndex?: boolean;
+  exports?: LexicalContext;
+};
+
 export class VoidModule extends ScopedNamedEntity {
   readonly syntaxType = "module";
   readonly exports: LexicalContext;
@@ -25,14 +32,7 @@ export class VoidModule extends ScopedNamedEntity {
    */
   phase = 0;
 
-  constructor(
-    opts: ScopedNamedEntityOpts & {
-      value?: ListValue[];
-      phase?: number;
-      isIndex?: boolean;
-      exports?: LexicalContext;
-    }
-  ) {
+  constructor(opts: VoidModuleOpts) {
     super(opts);
     if (opts.value) this.push(...opts.value);
     this.exports = opts.exports ?? new LexicalContext();
@@ -140,5 +140,15 @@ export class VoidModule extends ScopedNamedEntity {
     });
 
     return this;
+  }
+}
+
+export class RootModule extends VoidModule {
+  constructor(opts: Omit<VoidModuleOpts, "name">) {
+    super({ ...opts, name: "root" });
+  }
+
+  getAllExports(): NamedEntity[] {
+    return this.getAllEntities();
   }
 }

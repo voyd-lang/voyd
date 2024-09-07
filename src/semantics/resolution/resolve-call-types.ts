@@ -1,11 +1,10 @@
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier, List } from "../../syntax-objects/index.js";
-import { NamedEntity } from "../../syntax-objects/named-entity.js";
 import { dVoid, ObjectType } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveTypes } from "./resolve-types.js";
-import { resolveModulePath } from "./resolve-use.js";
+import { resolveExport } from "./resolve-use.js";
 
 export const resolveCallTypes = (call: Call): Call => {
   if (call.calls("export")) return resolveExport(call);
@@ -59,40 +58,6 @@ const getMemberAccessCall = (call: Call): Call | undefined => {
     args: new List({ value: [a1, call.fnName] }),
     type: a1Type.getField(call.fnName)?.type,
   });
-};
-
-const resolveExport = (call: Call) => {
-  const block = call.argAt(0);
-  if (!block?.isBlock()) {
-    throw new Error("Expected export to contain block");
-  }
-
-  block.body = block.body.map(resolveTypes);
-
-  const entities = block.getAllEntities();
-  entities.forEach((e) => {
-    if (e.isUse()) {
-      e.entities.forEach((e) => e.parentModule?.registerExport(e));
-      e.entities.forEach((e) => call.parent?.registerEntity(e));
-      return;
-    }
-
-    // if (e.isCall() && e.calls("::")) {
-    //   const me = resolveModulePath(e);
-    //   me.forEach((e) => e.parentModule?.registerExport(e));
-    //   me.forEach((e) => call.parent?.registerEntity(e));
-    // }
-
-    call.parentModule?.registerExport(e);
-    call.parent?.registerEntity(e);
-  });
-
-  return call;
-};
-
-const registerExport = (entity: NamedEntity) => {
-  entity.parentModule?.registerExport(entity);
-  entity.parent?.registerEntity(entity);
 };
 
 export const resolveIf = (call: Call) => {

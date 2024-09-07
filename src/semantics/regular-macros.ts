@@ -16,7 +16,10 @@ import {
   Use,
 } from "../syntax-objects/index.js";
 import { NamedEntity } from "../syntax-objects/named-entity.js";
-import { resolveModulePath } from "./resolution/resolve-use.js";
+import {
+  registerExports,
+  resolveModulePath,
+} from "./resolution/resolve-use.js";
 
 export const expandRegularMacros = (expr: Expr): Expr => {
   if (expr.isModule()) return expandModuleMacros(expr);
@@ -63,18 +66,8 @@ const initUse = (list: List) => {
 const evalExport = (list: List) => {
   const block = list.listAt(1); // export is expected to be passed a block
 
-  const expandedBlock = block.map((exp) => {
-    const expanded = expandRegularMacros(exp);
-    if (expanded instanceof NamedEntity) {
-      expanded.parentModule?.registerExport(expanded);
-    }
-
-    if (expanded.isUse()) {
-      expanded.entities.forEach((e) => e.parentModule?.registerExport(e));
-    }
-
-    return expanded;
-  });
+  const expandedBlock = block.map((exp) => expandRegularMacros(exp));
+  registerExports(list, expandedBlock.toArray());
 
   list.set(1, expandedBlock);
   return list;
