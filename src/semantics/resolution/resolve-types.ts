@@ -29,7 +29,7 @@ export const resolveTypes = (expr: Expr | undefined): Expr => {
   if (expr.isVariable()) return resolveVarTypes(expr);
   if (expr.isModule()) return resolveModuleTypes(expr);
   if (expr.isList()) return resolveListTypes(expr);
-  if (expr.isUse()) return resolveUse(expr);
+  if (expr.isUse()) return resolveUse(expr, resolveModuleTypes);
   if (expr.isObjectType()) return resolveObjectTypeTypes(expr);
   if (expr.isDSArrayType()) return resolveDSArrayTypeTypes(expr);
   if (expr.isTypeAlias()) return resolveTypeAliasTypes(expr);
@@ -58,6 +58,7 @@ const resolveVarTypes = (variable: Variable): Variable => {
 };
 
 export const resolveModuleTypes = (mod: VoidModule): VoidModule => {
+  if (mod.phase >= 3) return mod;
   mod.phase = 3;
   mod.each(resolveTypes);
   mod.phase = 4;

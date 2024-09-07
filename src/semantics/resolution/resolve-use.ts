@@ -1,13 +1,15 @@
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { List } from "../../syntax-objects/list.js";
+import { VoidModule } from "../../syntax-objects/module.js";
 import { NamedEntity } from "../../syntax-objects/named-entity.js";
 import { Use } from "../../syntax-objects/use.js";
-import { resolveModuleTypes } from "./resolve-types.js";
 
-export const resolveUse = (use: Use) => {
+export type ModulePass = (mod: VoidModule) => VoidModule;
+
+export const resolveUse = (use: Use, runPass?: ModulePass) => {
   const path = use.path;
 
-  const entities = resolveUsePath(path);
+  const entities = resolveModulePath(path, runPass);
   if (entities instanceof Array) {
     entities.forEach((e) => use.parent?.registerEntity(e));
   } else {
@@ -17,14 +19,17 @@ export const resolveUse = (use: Use) => {
   return use;
 };
 
-const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
+export const resolveModulePath = (
+  path: List,
+  runPass?: ModulePass
+): NamedEntity | NamedEntity[] => {
   if (!path.calls("::")) {
     throw new Error(`Invalid use statement ${path}`);
   }
 
   const [_, left, right] = path.toArray();
   const resolvedModule = left?.isList()
-    ? resolveUsePath(left)
+    ? resolveModulePath(left, runPass)
     : left?.isIdentifier()
     ? resolveUseIdentifier(left)
     : undefined;
@@ -37,10 +42,7 @@ const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
     throw new Error(`Invalid use statement, not a module ${path}`);
   }
 
-  const module =
-    resolvedModule.phase < 3
-      ? resolveModuleTypes(resolvedModule)
-      : resolvedModule;
+  const module = runPass ? runPass(resolvedModule) : resolvedModule;
 
   if (!right?.isIdentifier()) {
     throw new Error(`Invalid use statement, expected identifier, got ${right}`);
