@@ -24,6 +24,7 @@
     "@types/node": "^22.5.1",
     "@typescript-eslint/eslint-plugin": "^4.4.0",
     "@typescript-eslint/parser": "^4.4.0",
+    "@vitest/ui": "^2.0.5",
     "eslint": "^7.10.0",
     "ts-node": "^10.9.2",
     "typescript": "^4.9.3",

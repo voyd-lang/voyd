@@ -1,7 +1,8 @@
 import { Expr } from "./expr.js";
 import { Float } from "./float.js";
-import { Identifier } from "./identifier.js";
+import { Id, Identifier } from "./identifier.js";
 import { Int } from "./int.js";
+import { LexicalContext } from "./lexical-context.js";
 import { List, ListValue } from "./list.js";
 import {
   NamedEntity,
@@ -11,6 +12,7 @@ import {
 
 export class VoidModule extends ScopedNamedEntity {
   readonly syntaxType = "module";
+  readonly exports: LexicalContext;
   /** This module is the entry point of the user src code */
   isIndex = false;
   value: Expr[] = [];
@@ -28,12 +30,29 @@ export class VoidModule extends ScopedNamedEntity {
       value?: ListValue[];
       phase?: number;
       isIndex?: boolean;
+      exports?: LexicalContext;
     }
   ) {
     super(opts);
     if (opts.value) this.push(...opts.value);
+    this.exports = opts.exports ?? new LexicalContext();
     this.phase = opts.phase ?? 0;
     this.isIndex = opts.isIndex ?? false;
+  }
+
+  registerExport(entity: NamedEntity) {
+    this.exports.registerEntity(entity);
+  }
+
+  resolveExport(name: Id): NamedEntity[] {
+    const start: NamedEntity[] = this.exports.resolveFns(name);
+    const entity = this.exports.resolveEntity(name);
+    if (entity) start.push(entity);
+    return start;
+  }
+
+  getAllExports(): NamedEntity[] {
+    return this.exports.getAllEntities();
   }
 
   getPath(): string[] {
@@ -52,6 +71,7 @@ export class VoidModule extends ScopedNamedEntity {
       value: this.value.map(fn),
       phase: this.phase,
       isIndex: this.isIndex,
+      exports: this.exports,
     });
   }
 
@@ -75,7 +95,12 @@ export class VoidModule extends ScopedNamedEntity {
   }
 
   toJSON() {
-    return ["module", this.name, this.value];
+    return [
+      "module",
+      this.name,
+      ["exports", this.exports.getAllEntities()],
+      this.value,
+    ];
   }
 
   push(...expr: ListValue[]) {

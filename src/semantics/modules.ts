@@ -42,7 +42,7 @@ const registerModule = ({
 
   if (!name) return;
 
-  const existingModule = parentModule.resolveChildEntity(name);
+  const [existingModule] = parentModule.resolveExport(name);
 
   if (existingModule && !existingModule.isModule()) {
     throw new Error(
@@ -62,9 +62,11 @@ const registerModule = ({
       name,
       isIndex,
     });
-  module.isExported = true;
 
-  if (!existingModule) parentModule.push(module);
+  if (!existingModule) {
+    parentModule.push(module);
+    parentModule.registerExport(module);
+  }
 
   if (!rest.length) return;
 

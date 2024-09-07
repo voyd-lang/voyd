@@ -51,12 +51,7 @@ const expandModuleMacros = (module: VoidModule): VoidModule => {
 const initUse = (list: List) => {
   const path = list.listAt(1);
   const entities = resolveModulePath(path, expandModuleMacros);
-
-  if (entities instanceof Array) {
-    entities.forEach((e) => list.parent?.registerEntity(e));
-  } else {
-    list.parent?.registerEntity(entities);
-  }
+  entities.forEach((e) => list.parent?.registerEntity(e));
 
   return new Use({
     ...list.metadata,
@@ -71,12 +66,11 @@ const evalExport = (list: List) => {
   const expandedBlock = block.map((exp) => {
     const expanded = expandRegularMacros(exp);
     if (expanded instanceof NamedEntity) {
-      expanded.isExported = true;
-      list.parent?.registerEntity(expanded);
+      expanded.parentModule?.registerExport(expanded);
     }
 
     if (expanded.isUse()) {
-      expanded.entities.forEach((e) => list.parent?.registerEntity(e));
+      expanded.entities.forEach((e) => e.parentModule?.registerExport(e));
     }
 
     return expanded;
