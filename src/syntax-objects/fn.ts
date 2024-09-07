@@ -10,6 +10,7 @@ export class Fn extends ScopedNamedEntity {
   variables: Variable[] = [];
   _parameters: Parameter[] = [];
   typeParameters?: Identifier[];
+  appliedTypeArgs?: Type[] = [];
   /** When a function has generics, resolved versions of the functions go here */
   genericInstances?: Fn[] = [];
   returnType?: Type;

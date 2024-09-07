@@ -73,6 +73,7 @@ const resolveListTypes = (list: List) => {
 const resolveDSArrayTypeTypes = (arr: DSArrayType): DSArrayType => {
   arr.elemTypeExpr = resolveTypes(arr.elemTypeExpr);
   arr.elemType = getExprType(arr.elemTypeExpr);
+  arr.id = `${arr.id}#${arr.elemType?.id}`;
   return arr;
 };
 

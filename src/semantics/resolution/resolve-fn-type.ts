@@ -78,6 +78,7 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   const newFn = fn.clone();
   newFn.id = fn.id + `#${fn.genericInstances?.length ?? 0}`;
   newFn.typeParameters = undefined;
+  newFn.appliedTypeArgs = [];
 
   /** Register resolved type entities for each type param */
   typeParameters.forEach((typeParam, index) => {
@@ -88,6 +89,7 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
       typeExpr: typeArg,
     });
     type.type = getExprType(typeArg);
+    newFn.appliedTypeArgs?.push(type);
     newFn.registerEntity(type);
   });
 
