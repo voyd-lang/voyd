@@ -10,7 +10,7 @@ export type Type =
   | IntersectionType
   | ObjectType
   | TupleType
-  | ArrayType
+  | DSArrayType
   | FnType
   | TypeAlias;
 
@@ -252,22 +252,30 @@ export class ObjectType extends BaseType {
   }
 }
 
-export class ArrayType extends BaseType {
-  readonly kindOfType = "array";
+export class DSArrayType extends BaseType {
+  readonly kindOfType = "ds-array";
   readonly size = Infinity;
-  value: Type;
+  elemTypeExpr: Expr;
+  elemType?: Type;
+  /** Type used for locals, globals, function return type */
+  binaryenType?: number;
 
-  constructor(opts: NamedEntityOpts & { value: Type }) {
+  constructor(opts: NamedEntityOpts & { elemTypeExpr: Expr; elemType?: Type }) {
     super(opts);
-    this.value = opts.value;
+    this.elemTypeExpr = opts.elemTypeExpr;
+    this.elemType = opts.elemType;
   }
 
-  clone(parent?: Expr): ArrayType {
-    return new ArrayType({ ...super.getCloneOpts(parent), value: this.value });
+  clone(parent?: Expr): DSArrayType {
+    return new DSArrayType({
+      ...super.getCloneOpts(parent),
+      elemTypeExpr: this.elemTypeExpr,
+      elemType: this.elemType,
+    });
   }
 
   toJSON(): TypeJSON {
-    return ["type", ["array", this.value]];
+    return ["type", ["DSArray", this.elemType]];
   }
 }
 

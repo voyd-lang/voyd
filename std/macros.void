@@ -85,7 +85,7 @@ pub macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
   let params = `(parameters, left: $arg_type, right: $arg_type)
   let body = ` binaryen
     func: $wasm_fn
-    arg_types: [$arg_type, $arg_type]
+    namespace: $arg_type
     return_type: $return_type
     args: [left, right]
 

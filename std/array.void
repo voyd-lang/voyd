@@ -1,0 +1,22 @@
+
+fn ds_array_init<T>(size: i32) -> DSArray<T>
+  binarayen
+    func: init
+    namespace: gc
+    return_type: DSArray<T>
+    args: [size]
+
+fn get<T>(arr: DSArray<T>, index: i32) -> T
+  binaryen
+    func: get
+    namespace: gc
+    return_type: T
+    args: [arr, index]
+
+fn set<T>(arr: DSArray<T>, index: i32, value: T) -> DSArray<T>
+  binarayen
+    func: get
+    namespace: gc
+    return_type: void
+    args: [arr, index]
+  arr

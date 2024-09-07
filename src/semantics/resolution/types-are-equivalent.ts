@@ -21,5 +21,9 @@ export const typesAreEquivalent = (
     );
   }
 
+  if (a.isDSArrayType() && b.isDSArrayType()) {
+    return typesAreEquivalent(a.elemType, b.elemType);
+  }
+
   return false;
 };

@@ -5,6 +5,7 @@ import { List } from "../../syntax-objects/list.js";
 import { VoidModule } from "../../syntax-objects/module.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import {
+  DSArrayType,
   ObjectType,
   TypeAlias,
   voidBaseObject,
@@ -30,6 +31,7 @@ export const resolveTypes = (expr: Expr | undefined): Expr => {
   if (expr.isList()) return resolveListTypes(expr);
   if (expr.isUse()) return resolveUse(expr);
   if (expr.isObjectType()) return resolveObjectTypeTypes(expr);
+  if (expr.isDSArrayType()) return resolveDSArrayTypeTypes(expr);
   if (expr.isTypeAlias()) return resolveTypeAliasTypes(expr);
   if (expr.isObjectLiteral()) return resolveObjectLiteralTypes(expr);
   if (expr.isMatch()) return resolveMatch(expr);
@@ -68,10 +70,16 @@ const resolveListTypes = (list: List) => {
   return list.map(resolveTypes);
 };
 
+const resolveDSArrayTypeTypes = (arr: DSArrayType): DSArrayType => {
+  arr.elemTypeExpr = resolveTypes(arr.elemTypeExpr);
+  arr.elemType = getExprType(arr.elemTypeExpr);
+  return arr;
+};
+
 const resolveObjectTypeTypes = (obj: ObjectType): ObjectType => {
   obj.fields.forEach((field) => {
-    const type = getExprType(field.typeExpr);
-    field.type = type;
+    field.typeExpr = resolveTypes(field.typeExpr);
+    field.type = getExprType(field.typeExpr);
   });
 
   if (obj.parentObjExpr) {

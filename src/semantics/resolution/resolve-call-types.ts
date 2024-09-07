@@ -21,6 +21,10 @@ export const resolveCallTypes = (call: Call): Call => {
     return resolveObjectInit(call, type);
   }
 
+  if (call.typeArgs) {
+    call.typeArgs = call.typeArgs.map(resolveTypes);
+  }
+
   call.fn = getCallFn(call);
   call.type = call.fn?.returnType;
   return call;

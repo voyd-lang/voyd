@@ -13,6 +13,7 @@ export class Call extends ScopedSyntax {
   fn?: Fn | ObjectType;
   fnName: Identifier;
   args: List;
+  typeArgs?: List;
   _type?: Type;
   lexicon: LexicalContext;
 
@@ -23,12 +24,14 @@ export class Call extends ScopedSyntax {
       args: List;
       type?: Type;
       lexicon?: LexicalContext;
+      typeArgs?: List;
     }
   ) {
     super(opts);
     this.fnName = opts.fnName;
     this.fn = opts.fn;
     this.args = opts.args;
+    this.typeArgs = opts.typeArgs;
     this._type = opts.type;
     this.lexicon = opts.lexicon ?? new LexicalContext();
     opts.args.parent = this;
@@ -122,6 +125,7 @@ export class Call extends ScopedSyntax {
       ...this.getCloneOpts(parent),
       fnName: this.fnName,
       args: this.args,
+      typeArgs: this.typeArgs,
     });
   }
 }

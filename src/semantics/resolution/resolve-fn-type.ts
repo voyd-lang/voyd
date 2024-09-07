@@ -1,11 +1,30 @@
+import { Call } from "../../syntax-objects/call.js";
 import { Fn } from "../../syntax-objects/fn.js";
+import { List } from "../../syntax-objects/list.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
+import { TypeAlias } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveTypes } from "./resolve-types.js";
 
-export const resolveFnTypes = (fn: Fn): Fn => {
+export type ResolveFnTypesOpts = {
+  typeArgs?: List;
+  args?: List;
+};
+
+/** Pass call to potentially resolve generics */
+export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
   if (fn.resolved) {
     // Already resolved
+    return fn;
+  }
+
+  if (fn.typeParameters && call) {
+    // May want to check if there is already a resolved instance with matching type args here
+    // currently get-call-fn.ts does this, but it may be better to do it here
+    return attemptToResolveFnWithGenerics(fn, call);
+  }
+
+  if (fn.typeParameters && !call) {
     return fn;
   }
 
@@ -40,4 +59,40 @@ const resolveParameters = (params: Parameter[]) => {
 
     p.type = type;
   });
+};
+
+const attemptToResolveFnWithGenerics = (fn: Fn, call: Call): Fn => {
+  if (call.typeArgs) {
+    return resolveGenericsWithTypeArgs(fn, call.typeArgs);
+  }
+
+  // TODO try type inference with args
+  return fn;
+};
+
+const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
+  const typeParameters = fn.typeParameters!;
+
+  if (args.length !== typeParameters.length) {
+    return fn;
+  }
+
+  const newFn = fn.clone();
+  newFn.typeParameters = undefined;
+
+  /** Register resolved type entities for each type param */
+  typeParameters.forEach((typeParam, index) => {
+    const typeArg = args.exprAt(index);
+    const identifier = typeParam.clone();
+    const type = new TypeAlias({
+      name: identifier,
+      typeExpr: typeArg,
+    });
+    type.type = getExprType(typeArg);
+    newFn.registerEntity(type);
+  });
+
+  const resolvedFn = resolveFnTypes(newFn);
+  fn.registerGenericInstance(resolvedFn);
+  return fn;
 };

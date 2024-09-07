@@ -1,4 +1,5 @@
 import type { Expr } from "./expr.js";
+import { Identifier } from "./identifier.js";
 import { ScopedNamedEntity, ScopedNamedEntityOpts } from "./named-entity.js";
 import { Parameter } from "./parameter.js";
 import { FnType, Type } from "./types.js";
@@ -8,6 +9,9 @@ export class Fn extends ScopedNamedEntity {
   readonly syntaxType = "fn";
   variables: Variable[] = [];
   _parameters: Parameter[] = [];
+  typeParameters?: Identifier[] = [];
+  /** When a function has generics, resolved versions of the functions go here */
+  genericInstances?: Fn[] = [];
   returnType?: Type;
   returnTypeExpr?: Expr;
   inferredReturnType?: Type;
@@ -21,6 +25,7 @@ export class Fn extends ScopedNamedEntity {
       returnTypeExpr?: Expr;
       variables?: Variable[];
       parameters: Parameter[];
+      typeParameters?: Identifier[];
       body?: Expr;
     }
   ) {
@@ -28,6 +33,7 @@ export class Fn extends ScopedNamedEntity {
     this.returnType = opts.returnType;
     this.parameters = opts.parameters ?? [];
     this.variables = opts.variables ?? [];
+    this.typeParameters = opts.typeParameters;
     this.returnTypeExpr = opts.returnTypeExpr;
     this.body = opts.body;
   }
@@ -54,6 +60,15 @@ export class Fn extends ScopedNamedEntity {
       p.parent = this;
       this.registerEntity(p);
     });
+  }
+
+  // Register a version of this function with resolved generics
+  registerGenericInstance(fn: Fn) {
+    if (!this.genericInstances) {
+      this.genericInstances = [];
+    }
+
+    this.genericInstances.push(fn);
   }
 
   getNameStr(): string {
@@ -125,6 +140,7 @@ export class Fn extends ScopedNamedEntity {
       "fn",
       this.id,
       ["parameters", ...this.parameters],
+      ["type-parameters", ...(this.typeParameters ?? [])],
       ["return-type", this.returnType],
       this.body,
     ];

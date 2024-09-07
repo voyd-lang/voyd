@@ -292,6 +292,10 @@ const compileVariable = (opts: CompileExprOpts<Variable>): number => {
 
 const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   const { expr: fn, mod } = opts;
+  if (fn.typeParameters) {
+    return mod.nop();
+  }
+
   const parameterTypes = getFunctionParameterTypes(opts, fn);
   const returnType = mapBinaryenType(opts, fn.getReturnType());
 
