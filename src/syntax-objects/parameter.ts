@@ -43,9 +43,8 @@ export class Parameter extends NamedEntity {
   clone(parent?: Expr | undefined): Parameter {
     return new Parameter({
       ...super.getCloneOpts(parent),
-      type: this.type,
       label: this.label,
-      typeExpr: this.typeExpr,
+      typeExpr: this.typeExpr?.clone(),
     });
   }
 

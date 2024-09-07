@@ -141,15 +141,14 @@ export class Fn extends ScopedNamedEntity {
   }
 
   clone(parent?: Expr | undefined): Fn {
+    // Don't clone generic instances
     return new Fn({
       ...super.getCloneOpts(parent),
-      variables: this.variables,
+      variables: this.variables.map((v) => v.clone()),
       parameters: this.parameters.map((p) => p.clone()),
       returnTypeExpr: this.returnTypeExpr?.clone(),
-      returnType: this.returnType,
-      body: this.body,
+      body: this.body?.clone(),
       typeParameters: this.typeParameters?.map((tp) => tp.clone()),
-      genericInstances: this.genericInstances?.map((gi) => gi.clone()),
     });
   }
 

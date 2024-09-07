@@ -29,9 +29,10 @@ export class Call extends Syntax {
     this.fnName = opts.fnName;
     this.fn = opts.fn;
     this.args = opts.args;
+    this.args.parent = this;
     this.typeArgs = opts.typeArgs;
+    if (this.typeArgs) this.typeArgs.parent = this;
     this._type = opts.type;
-    opts.args.parent = this;
   }
 
   set type(type: Type | undefined) {
@@ -120,9 +121,9 @@ export class Call extends Syntax {
   clone(parent?: Expr) {
     return new Call({
       ...this.getCloneOpts(parent),
-      fnName: this.fnName,
-      args: this.args,
-      typeArgs: this.typeArgs,
+      fnName: this.fnName.clone(),
+      args: this.args.clone(),
+      typeArgs: this.typeArgs?.clone(),
     });
   }
 }

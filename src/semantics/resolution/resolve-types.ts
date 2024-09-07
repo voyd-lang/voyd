@@ -39,7 +39,7 @@ export const resolveTypes = (expr: Expr | undefined): Expr => {
 };
 
 const resolveBlockTypes = (block: Block): Block => {
-  block.body = block.body.map(resolveTypes);
+  block.applyMap(resolveTypes);
   block.type = getExprType(block.body.at(-1));
   return block;
 };

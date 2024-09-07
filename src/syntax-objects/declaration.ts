@@ -17,6 +17,7 @@ export class Declaration extends Syntax {
     super(opts);
     this.namespace = opts.namespace;
     this.fns = opts.fns ?? [];
+    this.fns.forEach((fn) => (fn.parent = this));
   }
 
   toJSON() {
@@ -27,7 +28,7 @@ export class Declaration extends Syntax {
     return new Declaration({
       ...this.getCloneOpts(parent),
       namespace: this.namespace,
-      fns: this.fns,
+      fns: this.fns.map((fn) => fn.clone()),
     });
   }
 }

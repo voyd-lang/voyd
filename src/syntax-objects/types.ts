@@ -281,7 +281,6 @@ export class DSArrayType extends BaseType {
     return new DSArrayType({
       ...super.getCloneOpts(parent),
       elemTypeExpr: this.elemTypeExpr.clone(),
-      elemType: this.elemType?.clone(),
     });
   }
 
