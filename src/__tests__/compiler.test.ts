@@ -1,6 +1,7 @@
 import {
   e2eVoidText,
   gcVoidText,
+  genericsText,
   goodTypeInferenceText,
   tcoText,
 } from "./fixtures/e2e-file.js";
@@ -57,5 +58,13 @@ describe("E2E Compiler Pipeline", () => {
     const spy = vi.spyOn(rCallUtil, "returnCall");
     await compile(tcoText);
     t.expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  test("Generic fn compilation", async (t) => {
+    const mod = await compile(genericsText);
+    const instance = getWasmInstance(mod);
+    const main = getWasmFn("main", instance);
+    assert(main, "Main exists");
+    t.expect(main(), "main 1 returns correct value").toEqual(143);
   });
 });

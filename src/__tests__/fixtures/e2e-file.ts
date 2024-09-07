@@ -119,3 +119,18 @@ fn fib_alias(n: i32, a: i64, b: i64) -> i64
 pub fn main() -> i64
   fib(10, 0i64, 1i64)
 `;
+
+export const genericsText = `
+use std::all
+
+type DSArrayI32 = DSArray<i32>
+
+pub fn main()
+  let arr2 = ds_array_init<f64>(10)
+  arr2.set<f64>(0, 1.5)
+  arr2.get<f64>(0)
+
+  let arr: DSArrayI32 = ds_array_init<i32>(10)
+  arr.set<i32>(9, 143)
+  arr.get<i32>(9)
+`;
