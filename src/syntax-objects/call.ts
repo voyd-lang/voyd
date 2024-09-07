@@ -3,18 +3,17 @@ import { Fn } from "./fn.js";
 import { Identifier } from "./identifier.js";
 import { LexicalContext } from "./lexical-context.js";
 import { List } from "./list.js";
-import { ScopedSyntax } from "./scoped-entity.js";
-import { SyntaxMetadata } from "./syntax.js";
+import { Syntax, SyntaxMetadata } from "./syntax.js";
 import { ObjectType, Type } from "./types.js";
 
 /** Defines a function call */
-export class Call extends ScopedSyntax {
+export class Call extends Syntax {
   readonly syntaxType = "call";
   fn?: Fn | ObjectType;
   fnName: Identifier;
   args: List;
+  typeArgs?: List;
   _type?: Type;
-  lexicon: LexicalContext;
 
   constructor(
     opts: SyntaxMetadata & {
@@ -23,15 +22,17 @@ export class Call extends ScopedSyntax {
       args: List;
       type?: Type;
       lexicon?: LexicalContext;
+      typeArgs?: List;
     }
   ) {
     super(opts);
     this.fnName = opts.fnName;
     this.fn = opts.fn;
     this.args = opts.args;
+    this.args.parent = this;
+    this.typeArgs = opts.typeArgs;
+    if (this.typeArgs) this.typeArgs.parent = this;
     this._type = opts.type;
-    this.lexicon = opts.lexicon ?? new LexicalContext();
-    opts.args.parent = this;
   }
 
   set type(type: Type | undefined) {
@@ -120,8 +121,9 @@ export class Call extends ScopedSyntax {
   clone(parent?: Expr) {
     return new Call({
       ...this.getCloneOpts(parent),
-      fnName: this.fnName,
-      args: this.args,
+      fnName: this.fnName.clone(),
+      args: this.args.clone(),
+      typeArgs: this.typeArgs?.clone(),
     });
   }
 }

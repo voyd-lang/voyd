@@ -35,7 +35,7 @@ export class MacroVariable extends NamedEntity {
       ...super.getCloneOpts(parent),
       location: this.location,
       isMutable: this.isMutable,
-      value: this.value,
+      value: this.value?.clone(),
     });
   }
 }

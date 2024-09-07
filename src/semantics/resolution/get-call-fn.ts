@@ -1,4 +1,4 @@
-import { Call, Expr, Fn } from "../../syntax-objects/index.js";
+import { Call, Expr, Fn, Parameter } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreEquivalent } from "./types-are-equivalent.js";
 import { resolveFnTypes } from "./resolve-fn-type.js";
@@ -6,19 +6,8 @@ import { resolveFnTypes } from "./resolve-fn-type.js";
 export const getCallFn = (call: Call): Fn | undefined => {
   if (isPrimitiveFnCall(call)) return undefined;
 
-  const candidates = call.resolveFns(call.fnName).filter((candidate) => {
-    resolveFnTypes(candidate);
-    const params = candidate.parameters;
-    return params.every((p, index) => {
-      const arg = call.argAt(index);
-      if (!arg) return false;
-      const argType = getExprType(arg);
-      if (!argType) return false;
-      const argLabel = getExprLabel(arg);
-      const labelsMatch = p.label === argLabel;
-      return typesAreEquivalent(argType, p.type!) && labelsMatch;
-    });
-  });
+  const unfilteredCandidates = call.resolveFns(call.fnName);
+  const candidates = filterCandidates(call, unfilteredCandidates);
 
   if (!candidates.length) {
     return undefined;
@@ -26,6 +15,64 @@ export const getCallFn = (call: Call): Fn | undefined => {
 
   if (candidates.length === 1) return candidates[0];
   return findBestFnMatch(candidates, call);
+};
+
+const filterCandidates = (call: Call, candidates: Fn[]): Fn[] =>
+  candidates.flatMap((candidate) => {
+    if (candidate.typeParameters) {
+      return filterCandidateWithGenerics(call, candidate);
+    }
+
+    resolveFnTypes(candidate);
+    const params = candidate.parameters;
+    const paramsMatch = params.every((p, i) => parametersMatch(p, i, call));
+    const typeArgsMatch =
+      call.typeArgs && candidate.appliedTypeArgs
+        ? candidate.appliedTypeArgs.every((t, i) => {
+            const argType = getExprType(call.typeArgs?.at(i));
+            const appliedType = getExprType(t);
+            return typesAreEquivalent(argType, appliedType);
+          })
+        : true;
+    const match = paramsMatch && typeArgsMatch;
+    return match ? candidate : [];
+  });
+
+const filterCandidateWithGenerics = (call: Call, candidate: Fn): Fn[] => {
+  // Resolve generics
+  if (!candidate.genericInstances) resolveFnTypes(candidate, call);
+
+  // Fn not compatible with call
+  if (!candidate.genericInstances?.length) return [];
+
+  // First attempt
+  const genericsInstances = filterCandidates(call, candidate.genericInstances);
+
+  // If we have instances, return them
+  if (genericsInstances.length) return genericsInstances;
+
+  // If no instances, attempt to resolve generics with this call, as a compatible instance
+  // is still possible
+  const beforeLen = candidate.genericInstances.length;
+  resolveFnTypes(candidate, call);
+  const afterLen = candidate.genericInstances.length;
+
+  if (beforeLen === afterLen) {
+    // No new instances were created, so this call is not compatible
+    return [];
+  }
+
+  return filterCandidates(call, candidate.genericInstances);
+};
+
+const parametersMatch = (p: Parameter, index: number, call: Call) => {
+  const arg = call.argAt(index);
+  if (!arg) return false;
+  const argType = getExprType(arg);
+  if (!argType) return false;
+  const argLabel = getExprLabel(arg);
+  const labelsMatch = p.label === argLabel;
+  return typesAreEquivalent(argType, p.type!) && labelsMatch;
 };
 
 const findBestFnMatch = (candidates: Fn[], call: Call): Fn => {

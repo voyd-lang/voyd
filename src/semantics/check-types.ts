@@ -51,7 +51,6 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("=")) return checkAssign(call);
   if (call.calls("member-access")) return call; // TODO
   if (call.fn?.isObjectType()) return checkObjectInit(call);
-  call.args = call.args.map(checkTypes);
 
   if (!call.fn) {
     throw new Error(`Could not resolve fn ${call.fnName} at ${call.location}`);
@@ -62,6 +61,8 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
       `Could not resolve type for call ${call.fnName} at ${call.location}`
     );
   }
+
+  call.args = call.args.map(checkTypes);
 
   return call;
 };
@@ -188,6 +189,16 @@ const checkUse = (use: Use) => {
 };
 
 const checkFnTypes = (fn: Fn): Fn => {
+  if (fn.genericInstances) {
+    fn.genericInstances.forEach(checkFnTypes);
+    return fn;
+  }
+
+  // If the function has type parameters and not genericInstances, it isn't in use and wont be compiled.
+  if (fn.typeParameters) {
+    return fn;
+  }
+
   checkParameters(fn.parameters);
   checkTypes(fn.body);
 

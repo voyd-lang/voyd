@@ -2,7 +2,11 @@ import { Expr } from "../syntax-objects/expr.js";
 import { Identifier } from "../syntax-objects/identifier.js";
 
 export const isTerminator = (char: string) =>
-  isWhitespace(char) || isBracket(char) || isQuote(char) || isOpChar(char);
+  isWhitespace(char) ||
+  isBracket(char) ||
+  isQuote(char) ||
+  isOpChar(char) ||
+  char === ",";
 
 export const isQuote = newTest(["'", '"', "`"]);
 
@@ -19,7 +23,6 @@ export const isOpChar = newTest([
   ":",
   "?",
   ".",
-  ",",
   ";",
   "<",
   ">",

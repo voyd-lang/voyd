@@ -51,6 +51,7 @@ export class VoidModule extends ScopedNamedEntity {
       ...super.getCloneOpts(),
       value: this.value.map(fn),
       phase: this.phase,
+      isIndex: this.isIndex,
     });
   }
 
@@ -68,7 +69,7 @@ export class VoidModule extends ScopedNamedEntity {
   clone(parent?: Expr | undefined): VoidModule {
     return new VoidModule({
       ...super.getCloneOpts(parent),
-      value: this.value,
+      value: this.value.map((expr) => expr.clone()),
       phase: this.phase,
     });
   }

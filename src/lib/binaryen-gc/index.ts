@@ -101,6 +101,14 @@ export const binaryenTypeToHeapType = (type: Type): HeapTypeRef => {
   return bin._BinaryenTypeGetHeapType(type);
 };
 
+// So we can use the from compileBnrCall
+export const modBinaryenTypeToHeapType = (
+  _mod: binaryen.Module,
+  type: Type
+): HeapTypeRef => {
+  return bin._BinaryenTypeGetHeapType(type);
+};
+
 export const refCast = (
   mod: binaryen.Module,
   ref: ExpressionRef,

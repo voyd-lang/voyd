@@ -27,8 +27,8 @@ export class MacroLambda extends ScopedSyntax {
   clone(parent?: Expr | undefined): MacroLambda {
     return new MacroLambda({
       ...super.getCloneOpts(parent),
-      parameters: this.parameters,
-      body: this.body,
+      parameters: this.parameters.map((p) => p.clone()),
+      body: this.body.clone(),
     });
   }
 

@@ -23,6 +23,9 @@ export class Parameter extends NamedEntity {
     this.label = opts.label;
     this.type = opts.type;
     this.typeExpr = opts.typeExpr;
+    if (this.typeExpr) {
+      this.typeExpr.parent = this;
+    }
   }
 
   getIndex(): number {
@@ -40,8 +43,8 @@ export class Parameter extends NamedEntity {
   clone(parent?: Expr | undefined): Parameter {
     return new Parameter({
       ...super.getCloneOpts(parent),
-      type: this.type,
       label: this.label,
+      typeExpr: this.typeExpr?.clone(),
     });
   }
 

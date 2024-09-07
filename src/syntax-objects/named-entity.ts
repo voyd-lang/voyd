@@ -60,7 +60,7 @@ export abstract class ScopedNamedEntity extends NamedEntity {
   getCloneOpts(parent?: Expr): ScopedNamedEntityOpts {
     return {
       ...super.getCloneOpts(parent),
-      lexicon: this.lexicon,
+      // lexicon: this.lexicon,
     };
   }
 }

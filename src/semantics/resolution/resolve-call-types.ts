@@ -8,7 +8,6 @@ import { resolveTypes } from "./resolve-types.js";
 export const resolveCallTypes = (call: Call): Call => {
   if (call.calls("export")) return resolveExport(call);
   if (call.calls("if")) return resolveIf(call);
-  if (call.calls("binaryen")) return resolveBinaryenCall(call);
   if (call.calls(":")) return checkLabeledArg(call);
   call.args = call.args.map(resolveTypes);
 
@@ -19,6 +18,10 @@ export const resolveCallTypes = (call: Call): Call => {
   const type = getIdentifierType(call.fnName);
   if (type?.isObjectType()) {
     return resolveObjectInit(call, type);
+  }
+
+  if (call.typeArgs) {
+    call.typeArgs = call.typeArgs.map(resolveTypes);
   }
 
   call.fn = getCallFn(call);
@@ -91,11 +94,5 @@ export const resolveIf = (call: Call) => {
 
   const thenType = getExprType(thenExpr);
   call.type = thenType;
-  return call;
-};
-
-export const resolveBinaryenCall = (call: Call) => {
-  const returnTypeCall = call.callArgAt(2);
-  call.type = getExprType(returnTypeCall.argAt(1));
   return call;
 };
