@@ -30,6 +30,7 @@ export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
 
   resolveParameters(fn.parameters);
   if (fn.returnTypeExpr) {
+    fn.returnTypeExpr = resolveTypes(fn.returnTypeExpr);
     fn.annotatedReturnType = getExprType(fn.returnTypeExpr);
     fn.returnType = fn.annotatedReturnType;
   }
@@ -52,11 +53,8 @@ const resolveParameters = (params: Parameter[]) => {
       throw new Error(`Unable to determine type for ${p}`);
     }
 
+    p.typeExpr = resolveTypes(p.typeExpr);
     const type = getExprType(p.typeExpr);
-    if (!type) {
-      throw new Error(`Unable to resolve type for ${p}`);
-    }
-
     p.type = type;
   });
 };
@@ -78,6 +76,7 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   }
 
   const newFn = fn.clone();
+  newFn.id = fn.id + `#${fn.genericInstances?.length ?? 0}`;
   newFn.typeParameters = undefined;
 
   /** Register resolved type entities for each type param */

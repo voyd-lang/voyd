@@ -4,7 +4,12 @@ import { Expr } from "./syntax-objects/expr.js";
 import { Fn } from "./syntax-objects/fn.js";
 import { Identifier } from "./syntax-objects/identifier.js";
 import { Int } from "./syntax-objects/int.js";
-import { Type, Primitive, ObjectType } from "./syntax-objects/types.js";
+import {
+  Type,
+  Primitive,
+  ObjectType,
+  DSArrayType,
+} from "./syntax-objects/types.js";
 import { Variable } from "./syntax-objects/variable.js";
 import { Block } from "./syntax-objects/block.js";
 import { Declaration } from "./syntax-objects/declaration.js";
@@ -18,7 +23,7 @@ import {
   structGetFieldValue,
 } from "./lib/binaryen-gc/index.js";
 import * as gc from "./lib/binaryen-gc/index.js";
-import { HeapTypeRef } from "./lib/binaryen-gc/types.js";
+import { TypeRef } from "./lib/binaryen-gc/types.js";
 import { getExprType } from "./semantics/resolution/get-expr-type.js";
 import { Match, MatchCase } from "./syntax-objects/match.js";
 import { initExtensionHelpers } from "./assembler/extension-helpers.js";
@@ -266,7 +271,7 @@ const compileBnrCall = (opts: CompileExprOpts<Call>): number => {
   const { expr } = opts;
   const funcId = expr.labeledArgAt(0) as Identifier;
   const namespace = (expr.labeledArgAt(1) as Identifier).value;
-  const args = expr.labeledArgAt(3) as Call;
+  const args = expr.labeledArgAt(2) as Call;
 
   const func =
     namespace === "gc"
@@ -274,9 +279,21 @@ const compileBnrCall = (opts: CompileExprOpts<Call>): number => {
       : (opts.mod as any)[namespace][funcId.value];
 
   return func(
-    ...(args.argArrayMap((expr: Expr) =>
-      compileExpression({ ...opts, expr })
-    ) ?? [])
+    ...(args.argArrayMap((expr: Expr) => {
+      if (expr?.isCall() && expr.calls("BnrType")) {
+        const type = getExprType(expr.typeArgs?.at(0));
+        if (!type) return opts.mod.nop();
+        return mapBinaryenType(opts, type);
+      }
+
+      if (expr?.isCall() && expr.calls("BnrConst")) {
+        const arg = expr.argAt(0);
+        if (!arg) return opts.mod.nop();
+        if ("value" in arg) return arg.value;
+      }
+
+      return compileExpression({ ...opts, expr });
+    }) ?? [])
   );
 };
 
@@ -292,6 +309,13 @@ const compileVariable = (opts: CompileExprOpts<Variable>): number => {
 
 const compileFunction = (opts: CompileExprOpts<Fn>): number => {
   const { expr: fn, mod } = opts;
+  if (fn.genericInstances) {
+    fn.genericInstances.forEach((instance) =>
+      compileFunction({ ...opts, expr: instance })
+    );
+    return mod.nop();
+  }
+
   if (fn.typeParameters) {
     return mod.nop();
   }
@@ -387,20 +411,25 @@ const mapBinaryenType = (opts: CompileExprOpts, type: Type): binaryen.Type => {
   if (isPrimitiveId(type, "i64")) return binaryen.i64;
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "void")) return binaryen.none;
-  if (type.isObjectType()) {
-    return type.binaryenType ? type.binaryenType : buildObjectType(opts, type);
-  }
+  if (type.isObjectType()) return buildObjectType(opts, type);
+  if (type.isDSArrayType()) return buildDSArrayType(opts, type);
   throw new Error(`Unsupported type ${type}`);
 };
 
 const isPrimitiveId = (type: Type, id: Primitive) =>
   type.isPrimitiveType() && type.name.value === id;
 
+const buildDSArrayType = (opts: CompileExprOpts, type: DSArrayType) => {
+  if (type.binaryenType) return type.binaryenType;
+  const mod = opts.mod;
+  const elemType = mapBinaryenType(opts, type.elemType!);
+  type.binaryenType = gc.defineArrayType(mod, elemType, true, type.id);
+  return type.binaryenType;
+};
+
 /** TODO: Skip building types for object literals that are part of an initializer of an obj */
-const buildObjectType = (
-  opts: CompileExprOpts,
-  obj: ObjectType
-): HeapTypeRef => {
+const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
+  if (obj.binaryenType) return obj.binaryenType;
   const mod = opts.mod;
 
   const binaryenType = defineStructType(mod, {

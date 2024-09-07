@@ -177,6 +177,9 @@ export class ObjectType extends BaseType {
   ) {
     super(opts);
     this.fields = opts.value;
+    this.fields.forEach((field) => {
+      field.typeExpr.parent = this;
+    });
     this.parentObj = opts.parentObj;
     this.parentObjExpr = opts.parentObjExpr;
   }
@@ -199,7 +202,13 @@ export class ObjectType extends BaseType {
   clone(parent?: Expr): ObjectType {
     return new ObjectType({
       ...super.getCloneOpts(parent),
-      value: this.fields,
+      value: this.fields.map((field) => ({
+        ...field,
+        typeExpr: field.typeExpr.clone(),
+        type: field.type?.clone(),
+      })),
+      parentObj: this.parentObj,
+      parentObjExpr: this.parentObj?.clone(),
     });
   }
 
@@ -252,6 +261,7 @@ export class ObjectType extends BaseType {
   }
 }
 
+/** Dynamically Sized Array (The raw gc array type) */
 export class DSArrayType extends BaseType {
   readonly kindOfType = "ds-array";
   readonly size = Infinity;
@@ -263,14 +273,15 @@ export class DSArrayType extends BaseType {
   constructor(opts: NamedEntityOpts & { elemTypeExpr: Expr; elemType?: Type }) {
     super(opts);
     this.elemTypeExpr = opts.elemTypeExpr;
+    this.elemTypeExpr.parent = this;
     this.elemType = opts.elemType;
   }
 
   clone(parent?: Expr): DSArrayType {
     return new DSArrayType({
       ...super.getCloneOpts(parent),
-      elemTypeExpr: this.elemTypeExpr,
-      elemType: this.elemType,
+      elemTypeExpr: this.elemTypeExpr.clone(),
+      elemType: this.elemType?.clone(),
     });
   }
 

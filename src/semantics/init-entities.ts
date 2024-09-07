@@ -68,9 +68,6 @@ const initBlock = (block: List): Block => {
 const initFn = (expr: List): Fn => {
   const name = expr.identifierAt(1);
   const parameterList = expr.listAt(2);
-  const parameters = parameterList
-    .sliceAsArray(1)
-    .flatMap((p) => listToParameter(p as List));
 
   const typeParameters =
     parameterList.at(1)?.isList() && parameterList.listAt(1).calls("generics")
@@ -79,6 +76,10 @@ const initFn = (expr: List): Fn => {
           .sliceAsArray(1)
           .flatMap((p) => (p.isIdentifier() ? p : []))
       : undefined;
+
+  const parameters = parameterList
+    .sliceAsArray(typeParameters ? 2 : 1)
+    .flatMap((p) => listToParameter(p as List));
 
   const returnTypeExpr = getReturnTypeExprForFn(expr, 3);
 
@@ -236,7 +237,7 @@ const initCall = (call: List) => {
           .map((expr) => initTypeExprEntities(expr)!)
       : undefined;
 
-  const args = call.slice(1).map(initEntities);
+  const args = call.slice(typeArgs ? 2 : 1).map(initEntities);
   return new Call({ ...call.metadata, fnName, args, typeArgs });
 };
 

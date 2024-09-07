@@ -1,22 +1,25 @@
 
-fn ds_array_init<T>(size: i32) -> DSArray<T>
-  binarayen
-    func: init
+macro bin_type_to_heap_type(type) -> void
+  ` binaryen
+    func: modBinaryenTypeToHeapType
     namespace: gc
-    return_type: DSArray<T>
-    args: [size]
+    args: [BnrType<($type)>]
 
-fn get<T>(arr: DSArray<T>, index: i32) -> T
+pub fn ds_array_init<T>(size: i32) -> DSArray<T>
   binaryen
-    func: get
+    func: arrayNew
     namespace: gc
-    return_type: T
-    args: [arr, index]
+    args: [bin_type_to_heap_type(DSArray<T>), size]
 
-fn set<T>(arr: DSArray<T>, index: i32, value: T) -> DSArray<T>
-  binarayen
-    func: get
+pub fn get<T>(arr: DSArray<T>, index: i32) -> T
+  binaryen
+    func: arrayGet
     namespace: gc
-    return_type: void
-    args: [arr, index]
+    args: [arr, index, BnrType<T>, BnrConst(false)]
+
+pub fn set<T>(arr: DSArray<T>, index: i32, value: T) -> DSArray<T>
+  binaryen
+    func: arraySet
+    namespace: gc
+    args: [arr, index, value]
   arr

@@ -34,7 +34,7 @@ const filterCandidateWithGenerics = (call: Call, candidate: Fn): Fn[] => {
   if (!candidate.genericInstances) resolveFnTypes(candidate, call);
 
   // Fn not compatible with call
-  if (!candidate.genericInstances) return [];
+  if (!candidate.genericInstances?.length) return [];
 
   // First attempt
   const genericsInstances = filterCandidates(call, candidate.genericInstances);
