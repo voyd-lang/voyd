@@ -50,7 +50,7 @@ const registerModule = ({
     );
   }
 
-  if (!existingModule && name === "index") {
+  if (!existingModule && (name === "index" || name === "mod")) {
     parentModule.push(...ast.toArray());
     return;
   }
