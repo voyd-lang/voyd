@@ -102,11 +102,11 @@ export const registerExports = (
 
     if (e instanceof NamedEntity) {
       registerExport(exportExpr, e);
+      e.parentModule?.registerEntity(e);
     }
   });
 };
 
 const registerExport = (exportExpr: Expr, entity: NamedEntity) => {
   exportExpr.parentModule?.registerExport(entity);
-  exportExpr.parent?.registerEntity(entity);
 };
