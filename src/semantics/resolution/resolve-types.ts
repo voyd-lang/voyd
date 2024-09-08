@@ -15,6 +15,7 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveCallTypes } from "./resolve-call-types.js";
 import { resolveFnTypes } from "./resolve-fn-type.js";
 import { resolveMatch } from "./resolve-match.js";
+import { resolveObjectTypeTypes } from "./resolve-object-type.js";
 import { resolveUse } from "./resolve-use.js";
 
 /**
@@ -76,22 +77,6 @@ const resolveDSArrayTypeTypes = (arr: DSArrayType): DSArrayType => {
   arr.elemType = getExprType(arr.elemTypeExpr);
   arr.id = `${arr.id}#${arr.elemType?.id}`;
   return arr;
-};
-
-const resolveObjectTypeTypes = (obj: ObjectType): ObjectType => {
-  obj.fields.forEach((field) => {
-    field.typeExpr = resolveTypes(field.typeExpr);
-    field.type = getExprType(field.typeExpr);
-  });
-
-  if (obj.parentObjExpr) {
-    const parentType = getExprType(obj.parentObjExpr);
-    obj.parentObj = parentType?.isObjectType() ? parentType : undefined;
-  } else {
-    obj.parentObj = voidBaseObject;
-  }
-
-  return obj;
 };
 
 const resolveTypeAliasTypes = (alias: TypeAlias): TypeAlias => {

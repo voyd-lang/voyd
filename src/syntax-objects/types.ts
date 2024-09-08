@@ -1,7 +1,7 @@
 import { Expr } from "./expr.js";
 import { Parameter } from "./parameter.js";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
-import { Id } from "./identifier.js";
+import { Id, Identifier } from "./identifier.js";
 import { getIdStr } from "./get-id-str.js";
 
 export type Type =
@@ -162,6 +162,9 @@ export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
 
 export class ObjectType extends BaseType {
   readonly kindOfType = "object";
+  typeParameters?: Identifier[];
+  appliedTypeArgs?: Type[];
+  genericInstances?: ObjectType[];
   fields: ObjectField[];
   parentObjExpr?: Expr;
   parentObj?: ObjectType;
@@ -222,6 +225,15 @@ export class ObjectType extends BaseType {
     }
 
     return false;
+  }
+
+  // Register a version of this function with resolved generics
+  registerGenericInstance(obj: ObjectType) {
+    if (!this.genericInstances) {
+      this.genericInstances = [];
+    }
+
+    this.genericInstances.push(obj);
   }
 
   getAncestorIds(start: number[] = []): number[] {
