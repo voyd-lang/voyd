@@ -14,7 +14,6 @@ export abstract class NamedEntity extends Syntax {
   id: string;
   idNum: number;
   name: Identifier;
-  isExported = false;
 
   constructor(opts: NamedEntityOpts) {
     super(opts);
@@ -22,7 +21,6 @@ export abstract class NamedEntity extends Syntax {
       typeof opts.name === "string" ? Identifier.from(opts.name) : opts.name;
     this.id = opts.id ?? this.genId();
     this.idNum = this.syntaxId;
-    this.isExported = opts.isExported ?? false;
   }
 
   private genId() {
@@ -35,7 +33,6 @@ export abstract class NamedEntity extends Syntax {
       id: this.id,
       idNum: this.idNum,
       name: this.name,
-      isExported: this.isExported,
     };
   }
 

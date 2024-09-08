@@ -16,7 +16,10 @@ import {
   Use,
 } from "../syntax-objects/index.js";
 import { NamedEntity } from "../syntax-objects/named-entity.js";
-import { resolveModulePath } from "./resolution/resolve-use.js";
+import {
+  registerExports,
+  resolveModulePath,
+} from "./resolution/resolve-use.js";
 
 export const expandRegularMacros = (expr: Expr): Expr => {
   if (expr.isModule()) return expandModuleMacros(expr);
@@ -51,12 +54,7 @@ const expandModuleMacros = (module: VoidModule): VoidModule => {
 const initUse = (list: List) => {
   const path = list.listAt(1);
   const entities = resolveModulePath(path, expandModuleMacros);
-
-  if (entities instanceof Array) {
-    entities.forEach((e) => list.parent?.registerEntity(e));
-  } else {
-    list.parent?.registerEntity(entities);
-  }
+  entities.forEach((e) => list.parent?.registerEntity(e));
 
   return new Use({
     ...list.metadata,
@@ -68,19 +66,8 @@ const initUse = (list: List) => {
 const evalExport = (list: List) => {
   const block = list.listAt(1); // export is expected to be passed a block
 
-  const expandedBlock = block.map((exp) => {
-    const expanded = expandRegularMacros(exp);
-    if (expanded instanceof NamedEntity) {
-      expanded.isExported = true;
-      list.parent?.registerEntity(expanded);
-    }
-
-    if (expanded.isUse()) {
-      expanded.entities.forEach((e) => list.parent?.registerEntity(e));
-    }
-
-    return expanded;
-  });
+  const expandedBlock = block.map((exp) => expandRegularMacros(exp));
+  registerExports(list, expandedBlock.toArray());
 
   list.set(1, expandedBlock);
   return list;

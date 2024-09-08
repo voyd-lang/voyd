@@ -35,6 +35,10 @@ export class Call extends Syntax {
     this._type = opts.type;
   }
 
+  get children() {
+    return [...this.args.toArray(), ...(this.typeArgs?.toArray() ?? [])];
+  }
+
   set type(type: Type | undefined) {
     this._type = type;
   }

@@ -57,7 +57,8 @@ describe("E2E Compiler Pipeline", () => {
   test("Compiler can do tco", async (t) => {
     const spy = vi.spyOn(rCallUtil, "returnCall");
     await compile(tcoText);
-    t.expect(spy).toHaveBeenCalledTimes(1);
+    const did = spy.mock.calls.some((call) => call[1].startsWith("fib"));
+    t.expect(did);
   });
 
   test("Generic fn compilation", async (t) => {

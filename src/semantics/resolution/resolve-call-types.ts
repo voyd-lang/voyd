@@ -4,6 +4,7 @@ import { dVoid, ObjectType } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveTypes } from "./resolve-types.js";
+import { resolveExport } from "./resolve-use.js";
 
 export const resolveCallTypes = (call: Call): Call => {
   if (call.calls("export")) return resolveExport(call);
@@ -57,28 +58,6 @@ const getMemberAccessCall = (call: Call): Call | undefined => {
     args: new List({ value: [a1, call.fnName] }),
     type: a1Type.getField(call.fnName)?.type,
   });
-};
-
-const resolveExport = (call: Call) => {
-  const block = call.argAt(0);
-  if (!block?.isBlock()) {
-    throw new Error("Expected export to contain block");
-  }
-
-  block.body = block.body.map(resolveTypes);
-
-  const entities = block.getAllEntities();
-  entities.forEach((e) => {
-    if (e.isUse()) {
-      e.entities.forEach((e) => call.parent?.registerEntity(e));
-      return;
-    }
-
-    e.isExported = true;
-    call.parent?.registerEntity(e);
-  });
-
-  return call;
 };
 
 export const resolveIf = (call: Call) => {

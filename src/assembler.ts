@@ -189,6 +189,7 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   if (expr.calls("=")) return compileAssign(opts);
   if (expr.calls("if")) return compileIf(opts);
   if (expr.calls("export")) return compileExport(opts);
+  if (expr.calls("mod")) return mod.nop();
   if (expr.calls("member-access")) return compileObjMemberAccess(opts);
 
   if (expr.calls("binaryen")) {

@@ -20,6 +20,10 @@ export class Block extends ScopedSyntax {
     this.type = opts.type;
   }
 
+  get children() {
+    return this.body.toArray();
+  }
+
   get body() {
     return this._body;
   }
