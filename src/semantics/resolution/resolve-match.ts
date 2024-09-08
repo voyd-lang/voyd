@@ -29,7 +29,7 @@ const resolveCase = (
   const type = getExprType(c.matchTypeExpr);
 
   const localBinding = binding.clone();
-  localBinding.originalType = localBinding.type;
+  localBinding.originalType = binding.type;
   localBinding.type = type;
   localBinding.requiresCast = true;
 
