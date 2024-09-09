@@ -8,7 +8,6 @@ import {
   DSArrayType,
   ObjectType,
   TypeAlias,
-  voidBaseObject,
 } from "../../syntax-objects/types.js";
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
