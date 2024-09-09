@@ -23,14 +23,10 @@ export const parseChars = (
     value: !opts.nested ? ["ast", ","] : [],
   });
 
-  let prev: Token | undefined = undefined;
-  let cur: Token | undefined = undefined;
   while (file.hasCharacters) {
     const token = lexer(file);
-    prev = cur;
-    cur = token;
 
-    if (processWithReaderMacro(token, prev, file, opts, list)) {
+    if (processWithReaderMacro(token, list.last(), file, opts, list)) {
       continue;
     }
 
@@ -71,21 +67,20 @@ export const parseChars = (
 /** Returns true if token was matched with and processed by a macro  */
 const processWithReaderMacro = (
   token: Token,
-  prev: Token | undefined,
+  prev: Expr | undefined,
   file: CharStream,
   opts: ParseCharsOpts,
   list: List
 ) => {
-  const readerMacro = getReaderMacroForToken(token, prev);
+  const readerMacro = getReaderMacroForToken(token, prev, file.next);
   if (!readerMacro) return undefined;
 
   const result = readerMacro(file, {
     token,
-    reader: (file, terminator, parent) =>
+    reader: (file, terminator) =>
       parseChars(file, {
         nested: true,
         terminator,
-        parent: parent ?? opts.parent,
       }),
   });
 

@@ -351,10 +351,9 @@ const initMatchCases = (
 
       const caseExpr = initEntities(expr.exprAt(2));
 
-      const scopedCaseExpr =
-        caseExpr?.isCall() || caseExpr?.isBlock()
-          ? caseExpr
-          : new Block({ ...caseExpr.metadata, body: [caseExpr] });
+      const scopedCaseExpr = caseExpr?.isBlock()
+        ? caseExpr
+        : new Block({ ...caseExpr.metadata, body: [caseExpr] });
 
       const mCase = { matchTypeExpr: typeExpr, expr: scopedCaseExpr };
 

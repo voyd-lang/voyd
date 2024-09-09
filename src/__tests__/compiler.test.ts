@@ -31,6 +31,7 @@ describe("E2E Compiler Pipeline", () => {
   test("Compiler can compile gc objects and map correct fns", async (t) => {
     const mod = await compile(gcVoidText);
     const instance = getWasmInstance(mod);
+    t.expect(mod.validate(), "Module is valid");
     const test1 = getWasmFn("test1", instance);
     const test2 = getWasmFn("test2", instance);
     const test3 = getWasmFn("test3", instance);
