@@ -10,6 +10,8 @@ import { stringMacro } from "./string.js";
 import { objectLiteralMacro } from "./object-literal.js";
 import { ReaderMacro } from "./types.js";
 import { genericsMacro } from "./generics.js";
+import { Expr } from "../../syntax-objects/expr.js";
+import { htmlMacro } from "./html/html.js";
 
 const macros = [
   objectLiteralMacro,
@@ -22,10 +24,13 @@ const macros = [
   comment,
   booleanMacro,
   genericsMacro,
+  htmlMacro,
 ];
 
 export const getReaderMacroForToken = (
   token: Token,
-  prev?: Token
+  prev?: Expr,
+  /** Next char */
+  next?: string
 ): ReaderMacro["macro"] | undefined =>
-  macros.find((m) => m.match(token, prev))?.macro;
+  macros.find((m) => m.match(token, prev, next))?.macro;

@@ -3,12 +3,12 @@ import { Expr, List } from "../../syntax-objects/index.js";
 import { Token } from "../token.js";
 
 export interface ReaderMacro {
-  match: (token: Token, prev?: Token) => boolean;
+  match: (token: Token, prev?: Expr, nextChar?: string) => boolean;
   macro: (
     file: CharStream,
     opts: {
       token: Token;
-      reader: (file: CharStream, terminator?: string, parent?: Expr) => List;
+      reader: (file: CharStream, terminator?: string) => List;
     }
   ) => Expr;
 }

@@ -14,12 +14,16 @@ export class List extends Syntax {
   store: FastShiftArray<Expr> = new FastShiftArray();
 
   constructor(
-    opts: SyntaxMetadata & {
-      value?: ListValue[] | List;
-      isParentheticalList?: boolean;
-    }
+    opts:
+      | ListValue[]
+      | (SyntaxMetadata & {
+          value?: ListValue[] | List;
+          isParentheticalList?: boolean;
+        })
   ) {
+    opts = Array.isArray(opts) ? { value: opts } : opts;
     super(opts);
+
     const value = opts.value;
     this.mayBeTuple = opts.isParentheticalList;
 
@@ -157,6 +161,11 @@ export class List extends Syntax {
 
   findIndex(cb: (expr: Expr) => boolean) {
     return this.toArray().findIndex(cb);
+  }
+
+  insertFnCall(name: string) {
+    this.insert(name, 0).insert(",", 1);
+    return this;
   }
 
   insert(expr: Expr | string, at = 0) {

@@ -16,7 +16,11 @@ export class Identifier extends Syntax {
   /** The given name of the identifier */
   value: string;
 
-  constructor(opts: IdentifierOpts) {
+  constructor(opts: string | IdentifierOpts) {
+    if (typeof opts === "string") {
+      opts = { value: opts };
+    }
+
     super(opts);
     this.isQuoted = opts.isQuoted;
     this.value = opts.value;
