@@ -6,3 +6,4 @@ ast.json
 .env
 test.void
 /playground.*
+/playground

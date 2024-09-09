@@ -431,6 +431,7 @@ const buildDSArrayType = (opts: CompileExprOpts, type: DSArrayType) => {
 /** TODO: Skip building types for object literals that are part of an initializer of an obj */
 const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
   if (obj.binaryenType) return obj.binaryenType;
+  if (obj.typeParameters) return opts.mod.nop();
   const mod = opts.mod;
 
   const binaryenType = defineStructType(mod, {
@@ -445,8 +446,8 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
         name: field.name,
       })),
     ],
-    supertype: obj.parentObj
-      ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObj))
+    supertype: obj.parentObjType
+      ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObjType))
       : undefined,
   });
 

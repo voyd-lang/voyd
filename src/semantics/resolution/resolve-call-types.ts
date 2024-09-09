@@ -3,6 +3,7 @@ import { Identifier, List } from "../../syntax-objects/index.js";
 import { dVoid, ObjectType } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
+import { resolveObjectTypeTypes } from "./resolve-object-type.js";
 import { resolveTypes } from "./resolve-types.js";
 import { resolveExport } from "./resolve-use.js";
 
@@ -38,6 +39,7 @@ export const checkLabeledArg = (call: Call) => {
 };
 
 export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
+  type = resolveObjectTypeTypes(type, call);
   call.type = type;
   call.fn = type;
   return call;

@@ -270,6 +270,11 @@ const checkVarTypes = (variable: Variable): Variable => {
 };
 
 const checkObjectType = (obj: ObjectType): ObjectType => {
+  if (obj.genericInstances) {
+    obj.genericInstances.forEach(checkTypes);
+    return obj;
+  }
+
   obj.fields.forEach((field) => {
     if (!field.type) {
       throw new Error(`Unable to determine type for ${field.typeExpr}`);
@@ -277,7 +282,7 @@ const checkObjectType = (obj: ObjectType): ObjectType => {
   });
 
   if (obj.parentObjExpr) {
-    assertValidExtension(obj, obj.parentObj);
+    assertValidExtension(obj, obj.parentObjType);
   }
 
   return obj;
