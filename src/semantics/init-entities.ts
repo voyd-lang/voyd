@@ -10,6 +10,7 @@ import {
   TypeAlias,
   ObjectType,
   ObjectLiteral,
+  DSArrayType,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { SemanticProcessor } from "./types.js";
@@ -66,16 +67,27 @@ const initBlock = (block: List): Block => {
 
 const initFn = (expr: List): Fn => {
   const name = expr.identifierAt(1);
-  const parameters = expr
-    .listAt(2)
-    .sliceAsArray(1)
+  const parameterList = expr.listAt(2);
+
+  const typeParameters =
+    parameterList.at(1)?.isList() && parameterList.listAt(1).calls("generics")
+      ? parameterList
+          .listAt(1)
+          .sliceAsArray(1)
+          .flatMap((p) => (p.isIdentifier() ? p : []))
+      : undefined;
+
+  const parameters = parameterList
+    .sliceAsArray(typeParameters ? 2 : 1)
     .flatMap((p) => listToParameter(p as List));
+
   const returnTypeExpr = getReturnTypeExprForFn(expr, 3);
 
   const fn = new Fn({
     name,
     returnTypeExpr: returnTypeExpr,
     parameters,
+    typeParameters,
     ...expr.metadata,
   });
 
@@ -104,6 +116,11 @@ const listToParameter = (
     });
   }
 
+  if (list.identifierAt(0).is("generics")) {
+    return [];
+  }
+
+  // I think this is for labeled args...
   if (list.identifierAt(0).is("object")) {
     return list.sliceAsArray(1).flatMap((e) => listToParameter(e as List));
   }
@@ -149,6 +166,12 @@ const initVar = (varDef: List): Variable => {
 
   if (!name) {
     throw new Error("Invalid variable definition, invalid identifier");
+  }
+
+  if (name.resolve()) {
+    throw new Error(
+      `Variable name already in use: ${name} at ${name.location}`
+    );
   }
 
   const initializer = varDef.at(2);
@@ -212,8 +235,16 @@ const initCall = (call: List) => {
     throw new Error("Invalid fn call");
   }
 
-  const args = call.slice(1).map(initEntities);
-  return new Call({ ...call.metadata, fnName, args });
+  const typeArgs =
+    call.at(1)?.isList() && call.listAt(1).calls("generics")
+      ? call
+          .listAt(1)
+          .slice(1)
+          .map((expr) => initTypeExprEntities(expr)!)
+      : undefined;
+
+  const args = call.slice(typeArgs ? 2 : 1).map(initEntities);
+  return new Call({ ...call.metadata, fnName, args, typeArgs });
 };
 
 const initTypeExprEntities = (type?: Expr): Expr | undefined => {
@@ -236,7 +267,26 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
     return initObjectType(type);
   }
 
+  if (type.calls("DSArray")) {
+    return initDSArray(type);
+  }
+
   throw new Error("Invalid type entity");
+};
+
+const initDSArray = (type: List) => {
+  const generics = type.listAt(1);
+  const elemTypeExpr = initTypeExprEntities(generics.at(1));
+
+  if (!elemTypeExpr) {
+    throw new Error("Invalid DSArray type");
+  }
+
+  return new DSArrayType({
+    ...type.metadata,
+    elemTypeExpr,
+    name: type.syntaxId.toString(),
+  });
 };
 
 const initNominalObjectType = (obj: List) => {
@@ -301,10 +351,9 @@ const initMatchCases = (
 
       const caseExpr = initEntities(expr.exprAt(2));
 
-      const scopedCaseExpr =
-        caseExpr?.isCall() || caseExpr?.isBlock()
-          ? caseExpr
-          : new Block({ ...caseExpr.metadata, body: [caseExpr] });
+      const scopedCaseExpr = caseExpr?.isBlock()
+        ? caseExpr
+        : new Block({ ...caseExpr.metadata, body: [caseExpr] });
 
       const mCase = { matchTypeExpr: typeExpr, expr: scopedCaseExpr };
 

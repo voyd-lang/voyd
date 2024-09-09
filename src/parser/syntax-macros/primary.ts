@@ -58,6 +58,15 @@ const isDotOp = (op?: Expr): boolean => {
 };
 
 const parseDot = (right: Expr, left: Expr): List => {
+  if (
+    right.isList() &&
+    right.at(1)?.isList() &&
+    right.listAt(1).calls("generics")
+  ) {
+    right.insert(left, 2);
+    return right;
+  }
+
   if (right.isList()) {
     right.insert(left, 1);
     return right;

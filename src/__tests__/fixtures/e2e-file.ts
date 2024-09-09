@@ -76,13 +76,18 @@ pub fn test4()
   let vec = Point { x: 52, y: 2, z: 21 }
   vec.get_x()
 
-// Test match type guard (Point case), should return 21
+// Test match type guard (Pointy case), should return 52
 pub fn test5()
+  let vec = Pointy { x: 52, y: 2, z: 21 }
+  get_num_from_vec_sub_obj(vec)
+
+// Test match type guard (Point case), should return 21
+pub fn test6()
   let vec = Point { x: 52, y: 2, z: 21 }
   get_num_from_vec_sub_obj(vec)
 
 // Test match type guard (else case), should return -1
-pub fn test6()
+pub fn test7()
   let vec = Bitly { x: 52, y: 2, z: 21 }
   get_num_from_vec_sub_obj(vec)
 `;
@@ -113,4 +118,19 @@ fn fib_alias(n: i32, a: i64, b: i64) -> i64
 
 pub fn main() -> i64
   fib(10, 0i64, 1i64)
+`;
+
+export const genericsText = `
+use std::all
+
+type DSArrayI32 = DSArray<i32>
+
+pub fn main()
+  let arr2 = ds_array_init<f64>(10)
+  arr2.set<f64>(0, 1.5)
+  arr2.get<f64>(0)
+
+  let arr: DSArrayI32 = ds_array_init<i32>(10)
+  arr.set<i32>(9, 143)
+  arr.get<i32>(9)
 `;

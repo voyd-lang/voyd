@@ -21,7 +21,6 @@ export abstract class ScopedSyntax extends Syntax {
   getCloneOpts(parent?: Expr | undefined): ScopedSyntaxMetadata {
     return {
       ...super.getCloneOpts(parent),
-      lexicon: this.lexicon,
     };
   }
 }

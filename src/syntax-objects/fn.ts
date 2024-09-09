@@ -1,4 +1,5 @@
 import type { Expr } from "./expr.js";
+import { Identifier } from "./identifier.js";
 import { ScopedNamedEntity, ScopedNamedEntityOpts } from "./named-entity.js";
 import { Parameter } from "./parameter.js";
 import { FnType, Type } from "./types.js";
@@ -8,8 +9,12 @@ export class Fn extends ScopedNamedEntity {
   readonly syntaxType = "fn";
   variables: Variable[] = [];
   _parameters: Parameter[] = [];
+  typeParameters?: Identifier[];
+  appliedTypeArgs?: Type[] = [];
+  /** When a function has generics, resolved versions of the functions go here */
+  genericInstances?: Fn[] = [];
   returnType?: Type;
-  returnTypeExpr?: Expr;
+  _returnTypeExpr?: Expr;
   inferredReturnType?: Type;
   annotatedReturnType?: Type;
   resolved?: boolean;
@@ -21,6 +26,8 @@ export class Fn extends ScopedNamedEntity {
       returnTypeExpr?: Expr;
       variables?: Variable[];
       parameters: Parameter[];
+      typeParameters?: Identifier[];
+      genericInstances?: Fn[];
       body?: Expr;
     }
   ) {
@@ -28,6 +35,8 @@ export class Fn extends ScopedNamedEntity {
     this.returnType = opts.returnType;
     this.parameters = opts.parameters ?? [];
     this.variables = opts.variables ?? [];
+    this.typeParameters = opts.typeParameters;
+    this.genericInstances = opts.genericInstances;
     this.returnTypeExpr = opts.returnTypeExpr;
     this.body = opts.body;
   }
@@ -54,6 +63,27 @@ export class Fn extends ScopedNamedEntity {
       p.parent = this;
       this.registerEntity(p);
     });
+  }
+
+  get returnTypeExpr() {
+    return this._returnTypeExpr;
+  }
+
+  set returnTypeExpr(returnTypeExpr: Expr | undefined) {
+    if (returnTypeExpr) {
+      returnTypeExpr.parent = this;
+    }
+
+    this._returnTypeExpr = returnTypeExpr;
+  }
+
+  // Register a version of this function with resolved generics
+  registerGenericInstance(fn: Fn) {
+    if (!this.genericInstances) {
+      this.genericInstances = [];
+    }
+
+    this.genericInstances.push(fn);
   }
 
   getNameStr(): string {
@@ -111,12 +141,14 @@ export class Fn extends ScopedNamedEntity {
   }
 
   clone(parent?: Expr | undefined): Fn {
+    // Don't clone generic instances
     return new Fn({
       ...super.getCloneOpts(parent),
-      variables: this.variables,
-      parameters: this.parameters,
-      returnType: this.returnType,
-      body: this.body,
+      variables: this.variables.map((v) => v.clone()),
+      parameters: this.parameters.map((p) => p.clone()),
+      returnTypeExpr: this.returnTypeExpr?.clone(),
+      body: this.body?.clone(),
+      typeParameters: this.typeParameters?.map((tp) => tp.clone()),
     });
   }
 
@@ -125,6 +157,7 @@ export class Fn extends ScopedNamedEntity {
       "fn",
       this.id,
       ["parameters", ...this.parameters],
+      ["type-parameters", ...(this.typeParameters ?? [])],
       ["return-type", this.returnType],
       this.body,
     ];

@@ -4,11 +4,11 @@ import { dVoid, ObjectType } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveTypes } from "./resolve-types.js";
+import { resolveExport } from "./resolve-use.js";
 
 export const resolveCallTypes = (call: Call): Call => {
   if (call.calls("export")) return resolveExport(call);
   if (call.calls("if")) return resolveIf(call);
-  if (call.calls("binaryen")) return resolveBinaryenCall(call);
   if (call.calls(":")) return checkLabeledArg(call);
   call.args = call.args.map(resolveTypes);
 
@@ -19,6 +19,10 @@ export const resolveCallTypes = (call: Call): Call => {
   const type = getIdentifierType(call.fnName);
   if (type?.isObjectType()) {
     return resolveObjectInit(call, type);
+  }
+
+  if (call.typeArgs) {
+    call.typeArgs = call.typeArgs.map(resolveTypes);
   }
 
   call.fn = getCallFn(call);
@@ -56,28 +60,6 @@ const getMemberAccessCall = (call: Call): Call | undefined => {
   });
 };
 
-const resolveExport = (call: Call) => {
-  const block = call.argAt(0);
-  if (!block?.isBlock()) {
-    throw new Error("Expected export to contain block");
-  }
-
-  block.body = block.body.map(resolveTypes);
-
-  const entities = block.getAllEntities();
-  entities.forEach((e) => {
-    if (e.isUse()) {
-      e.entities.forEach((e) => call.parent?.registerEntity(e));
-      return;
-    }
-
-    e.isExported = true;
-    call.parent?.registerEntity(e);
-  });
-
-  return call;
-};
-
 export const resolveIf = (call: Call) => {
   call.args = call.args.map(resolveTypes);
   const thenExpr = call.argAt(1);
@@ -91,11 +73,5 @@ export const resolveIf = (call: Call) => {
 
   const thenType = getExprType(thenExpr);
   call.type = thenType;
-  return call;
-};
-
-export const resolveBinaryenCall = (call: Call) => {
-  const returnTypeCall = call.callArgAt(2);
-  call.type = getExprType(returnTypeCall.argAt(1));
   return call;
 };

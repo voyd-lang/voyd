@@ -1,12 +1,12 @@
 import { ParsedModule, stdPath } from "../parser/index.js";
 import { List } from "../syntax-objects/list.js";
-import { VoidModule } from "../syntax-objects/module.js";
+import { RootModule, VoidModule } from "../syntax-objects/module.js";
 
 /** Registers submodules of a parsed module for future import resolution */
 export const registerModules = (opts: ParsedModule): VoidModule => {
   const { srcPath, files } = opts;
 
-  const rootModule = new VoidModule({ name: "root" });
+  const rootModule = new RootModule({});
 
   for (const [filePath, file] of Object.entries(files)) {
     const resolvedPath = filePathToModulePath(
@@ -42,7 +42,7 @@ const registerModule = ({
 
   if (!name) return;
 
-  const existingModule = parentModule.resolveChildEntity(name);
+  const [existingModule] = parentModule.resolveExport(name);
 
   if (existingModule && !existingModule.isModule()) {
     throw new Error(
@@ -50,7 +50,7 @@ const registerModule = ({
     );
   }
 
-  if (!existingModule && name === "index") {
+  if (!existingModule && (name === "index" || name === "mod")) {
     parentModule.push(...ast.toArray());
     return;
   }
@@ -62,9 +62,11 @@ const registerModule = ({
       name,
       isIndex,
     });
-  module.isExported = true;
 
-  if (!existingModule) parentModule.push(module);
+  if (!existingModule) {
+    parentModule.push(module);
+    parentModule.registerExport(module);
+  }
 
   if (!rest.length) return;
 

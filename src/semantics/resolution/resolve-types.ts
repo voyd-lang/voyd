@@ -5,6 +5,7 @@ import { List } from "../../syntax-objects/list.js";
 import { VoidModule } from "../../syntax-objects/module.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import {
+  DSArrayType,
   ObjectType,
   TypeAlias,
   voidBaseObject,
@@ -28,8 +29,9 @@ export const resolveTypes = (expr: Expr | undefined): Expr => {
   if (expr.isVariable()) return resolveVarTypes(expr);
   if (expr.isModule()) return resolveModuleTypes(expr);
   if (expr.isList()) return resolveListTypes(expr);
-  if (expr.isUse()) return resolveUse(expr);
+  if (expr.isUse()) return resolveUse(expr, resolveModuleTypes);
   if (expr.isObjectType()) return resolveObjectTypeTypes(expr);
+  if (expr.isDSArrayType()) return resolveDSArrayTypeTypes(expr);
   if (expr.isTypeAlias()) return resolveTypeAliasTypes(expr);
   if (expr.isObjectLiteral()) return resolveObjectLiteralTypes(expr);
   if (expr.isMatch()) return resolveMatch(expr);
@@ -37,7 +39,7 @@ export const resolveTypes = (expr: Expr | undefined): Expr => {
 };
 
 const resolveBlockTypes = (block: Block): Block => {
-  block.body = block.body.map(resolveTypes);
+  block.applyMap(resolveTypes);
   block.type = getExprType(block.body.at(-1));
   return block;
 };
@@ -56,6 +58,7 @@ const resolveVarTypes = (variable: Variable): Variable => {
 };
 
 export const resolveModuleTypes = (mod: VoidModule): VoidModule => {
+  if (mod.phase >= 3) return mod;
   mod.phase = 3;
   mod.each(resolveTypes);
   mod.phase = 4;
@@ -68,10 +71,17 @@ const resolveListTypes = (list: List) => {
   return list.map(resolveTypes);
 };
 
+const resolveDSArrayTypeTypes = (arr: DSArrayType): DSArrayType => {
+  arr.elemTypeExpr = resolveTypes(arr.elemTypeExpr);
+  arr.elemType = getExprType(arr.elemTypeExpr);
+  arr.id = `${arr.id}#${arr.elemType?.id}`;
+  return arr;
+};
+
 const resolveObjectTypeTypes = (obj: ObjectType): ObjectType => {
   obj.fields.forEach((field) => {
-    const type = getExprType(field.typeExpr);
-    field.type = type;
+    field.typeExpr = resolveTypes(field.typeExpr);
+    field.type = getExprType(field.typeExpr);
   });
 
   if (obj.parentObjExpr) {

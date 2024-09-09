@@ -11,6 +11,7 @@ export class LexicalContext {
   registerEntity(entity: NamedEntity) {
     const idStr = getIdStr(entity.name);
     if (entity.isFn()) {
+      if (this.fnsById.get(entity.id)) return; // Already registered
       const fns = this.fns.get(idStr) ?? [];
       fns.push(entity);
       this.fns.set(idStr, fns);

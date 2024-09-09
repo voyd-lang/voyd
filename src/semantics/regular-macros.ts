@@ -16,11 +16,15 @@ import {
   Use,
 } from "../syntax-objects/index.js";
 import { NamedEntity } from "../syntax-objects/named-entity.js";
+import {
+  registerExports,
+  resolveModulePath,
+} from "./resolution/resolve-use.js";
 
 export const expandRegularMacros = (expr: Expr): Expr => {
   if (expr.isModule()) return expandModuleMacros(expr);
   if (!expr.isList()) return expr;
-  if (expr.calls("use")) return resolveUseStatement(expr);
+  if (expr.calls("use")) return initUse(expr);
   if (expr.calls("export")) return evalExport(expr);
   if (expr.calls("macro")) return evalMacroDef(expr);
   if (expr.calls("macro_let")) return evalMacroLetDef(expr);
@@ -47,15 +51,10 @@ const expandModuleMacros = (module: VoidModule): VoidModule => {
   return module;
 };
 
-const resolveUseStatement = (list: List) => {
+const initUse = (list: List) => {
   const path = list.listAt(1);
-  const entities = resolveUsePath(path);
-
-  if (entities instanceof Array) {
-    entities.forEach((e) => list.parent?.registerEntity(e));
-  } else {
-    list.parent?.registerEntity(entities);
-  }
+  const entities = resolveModulePath(path, expandModuleMacros);
+  entities.forEach((e) => list.parent?.registerEntity(e));
 
   return new Use({
     ...list.metadata,
@@ -64,77 +63,11 @@ const resolveUseStatement = (list: List) => {
   });
 };
 
-const resolveUsePath = (path: List): NamedEntity | NamedEntity[] => {
-  if (!path.calls("::")) {
-    throw new Error(`Invalid use statement ${path}`);
-  }
-
-  const [_, left, right] = path.toArray();
-  const unexpandedModule = left?.isList()
-    ? resolveUsePath(left)
-    : left?.isIdentifier()
-    ? resolveUseIdentifier(left)
-    : undefined;
-
-  if (
-    !unexpandedModule ||
-    unexpandedModule instanceof Array ||
-    !unexpandedModule.isModule()
-  ) {
-    throw new Error(
-      `Invalid use statement, not a module ${JSON.stringify(path.toJSON())}`
-    );
-  }
-
-  const module = expandModuleMacros(unexpandedModule);
-  const identifier = right;
-
-  if (!identifier?.isIdentifier()) {
-    throw new Error(`Invalid use statement, expected identifier, got ${right}`);
-  }
-
-  if (identifier?.is("all")) {
-    return module.getAllEntities().filter((e) => e.isExported);
-  }
-
-  const entity = module.resolveChildEntity(right as Identifier);
-  if (!entity) {
-    throw new Error(
-      `Invalid use statement, macro ${right} not found in module ${module}`
-    );
-  }
-
-  if (!entity.isExported) {
-    throw new Error(`Invalid use statement, entity ${right} is not exported`);
-  }
-
-  return entity;
-};
-
-const resolveUseIdentifier = (identifier: Identifier) => {
-  if (identifier.is("super")) {
-    return identifier.parentModule?.parentModule;
-  }
-
-  return identifier.resolve();
-};
-
 const evalExport = (list: List) => {
   const block = list.listAt(1); // export is expected to be passed a block
 
-  const expandedBlock = block.map((exp) => {
-    const expanded = expandRegularMacros(exp);
-    if (expanded instanceof NamedEntity) {
-      expanded.isExported = true;
-      list.parent?.registerEntity(expanded);
-    }
-
-    if (expanded.isUse()) {
-      expanded.entities.forEach((e) => list.parent?.registerEntity(e));
-    }
-
-    return expanded;
-  });
+  const expandedBlock = block.map((exp) => expandRegularMacros(exp));
+  registerExports(list, expandedBlock.toArray());
 
   list.set(1, expandedBlock);
   return list;

@@ -22,6 +22,7 @@ import type {
   ObjectType,
   Type,
   TypeAlias,
+  DSArrayType,
 } from "./types.js";
 import type { Variable } from "./variable.js";
 import type { Whitespace } from "./whitespace.js";
@@ -158,6 +159,10 @@ export abstract class Syntax {
 
   isObjectType(): this is ObjectType {
     return this.isType() && this.kindOfType === "object";
+  }
+
+  isDSArrayType(): this is DSArrayType {
+    return this.isType() && this.kindOfType === "ds-array";
   }
 
   isPrimitiveType(): this is PrimitiveType {

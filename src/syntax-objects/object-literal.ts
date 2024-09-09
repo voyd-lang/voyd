@@ -15,7 +15,10 @@ export class ObjectLiteral extends Syntax {
   clone(parent?: Expr): ObjectLiteral {
     return new ObjectLiteral({
       ...super.getCloneOpts(parent),
-      fields: this.fields,
+      fields: this.fields.map(({ name, initializer }) => ({
+        name,
+        initializer: initializer.clone(),
+      })),
     });
   }
 

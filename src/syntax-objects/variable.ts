@@ -58,7 +58,7 @@ export class Variable extends NamedEntity {
       ...super.getCloneOpts(parent),
       isMutable: this.isMutable,
       initializer: this.initializer,
-      type: this.type,
+      typeExpr: this.typeExpr?.clone(),
     });
   }
 }

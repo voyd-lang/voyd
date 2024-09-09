@@ -1,7 +1,8 @@
 import { Expr } from "./expr.js";
 import { Float } from "./float.js";
-import { Identifier } from "./identifier.js";
+import { Id, Identifier } from "./identifier.js";
 import { Int } from "./int.js";
+import { LexicalContext } from "./lexical-context.js";
 import { List, ListValue } from "./list.js";
 import {
   NamedEntity,
@@ -9,8 +10,16 @@ import {
   ScopedNamedEntityOpts,
 } from "./named-entity.js";
 
+export type VoidModuleOpts = ScopedNamedEntityOpts & {
+  value?: ListValue[];
+  phase?: number;
+  isIndex?: boolean;
+  exports?: LexicalContext;
+};
+
 export class VoidModule extends ScopedNamedEntity {
   readonly syntaxType = "module";
+  readonly exports: LexicalContext;
   /** This module is the entry point of the user src code */
   isIndex = false;
   value: Expr[] = [];
@@ -23,17 +32,27 @@ export class VoidModule extends ScopedNamedEntity {
    */
   phase = 0;
 
-  constructor(
-    opts: ScopedNamedEntityOpts & {
-      value?: ListValue[];
-      phase?: number;
-      isIndex?: boolean;
-    }
-  ) {
+  constructor(opts: VoidModuleOpts) {
     super(opts);
     if (opts.value) this.push(...opts.value);
+    this.exports = opts.exports ?? new LexicalContext();
     this.phase = opts.phase ?? 0;
     this.isIndex = opts.isIndex ?? false;
+  }
+
+  registerExport(entity: NamedEntity) {
+    this.exports.registerEntity(entity);
+  }
+
+  resolveExport(name: Id): NamedEntity[] {
+    const start: NamedEntity[] = this.exports.resolveFns(name);
+    const entity = this.exports.resolveEntity(name);
+    if (entity) start.push(entity);
+    return start;
+  }
+
+  getAllExports(): NamedEntity[] {
+    return this.exports.getAllEntities();
   }
 
   getPath(): string[] {
@@ -51,6 +70,8 @@ export class VoidModule extends ScopedNamedEntity {
       ...super.getCloneOpts(),
       value: this.value.map(fn),
       phase: this.phase,
+      isIndex: this.isIndex,
+      exports: this.exports,
     });
   }
 
@@ -68,13 +89,18 @@ export class VoidModule extends ScopedNamedEntity {
   clone(parent?: Expr | undefined): VoidModule {
     return new VoidModule({
       ...super.getCloneOpts(parent),
-      value: this.value,
+      value: this.value.map((expr) => expr.clone()),
       phase: this.phase,
     });
   }
 
   toJSON() {
-    return ["module", this.name, this.value];
+    return [
+      "module",
+      this.name,
+      ["exports", this.exports.getAllEntities()],
+      this.value,
+    ];
   }
 
   push(...expr: ListValue[]) {
@@ -114,5 +140,15 @@ export class VoidModule extends ScopedNamedEntity {
     });
 
     return this;
+  }
+}
+
+export class RootModule extends VoidModule {
+  constructor(opts: Omit<VoidModuleOpts, "name">) {
+    super({ ...opts, name: "root" });
+  }
+
+  getAllExports(): NamedEntity[] {
+    return this.getAllEntities();
   }
 }

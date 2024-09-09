@@ -47,11 +47,11 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("export")) return checkExport(call);
   if (call.calls("if")) return checkIf(call);
   if (call.calls("binaryen")) return checkBinaryenCall(call);
+  if (call.calls("mod")) return call;
   if (call.calls(":")) return checkLabeledArg(call);
   if (call.calls("=")) return checkAssign(call);
   if (call.calls("member-access")) return call; // TODO
   if (call.fn?.isObjectType()) return checkObjectInit(call);
-  call.args = call.args.map(checkTypes);
 
   if (!call.fn) {
     throw new Error(`Could not resolve fn ${call.fnName} at ${call.location}`);
@@ -62,6 +62,8 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
       `Could not resolve type for call ${call.fnName} at ${call.location}`
     );
   }
+
+  call.args = call.args.map(checkTypes);
 
   return call;
 };
@@ -167,18 +169,6 @@ const checkExport = (call: Call) => {
   }
 
   checkTypes(block);
-
-  const entities = block.getAllEntities();
-  entities.forEach((e) => {
-    if (e.isUse()) {
-      e.entities.forEach((e) => call.parent?.registerEntity(e));
-      return;
-    }
-
-    e.isExported = true;
-    call.parent?.registerEntity(e);
-  });
-
   return call;
 };
 
@@ -188,6 +178,16 @@ const checkUse = (use: Use) => {
 };
 
 const checkFnTypes = (fn: Fn): Fn => {
+  if (fn.genericInstances) {
+    fn.genericInstances.forEach(checkFnTypes);
+    return fn;
+  }
+
+  // If the function has type parameters and not genericInstances, it isn't in use and wont be compiled.
+  if (fn.typeParameters) {
+    return fn;
+  }
+
   checkParameters(fn.parameters);
   checkTypes(fn.body);
 

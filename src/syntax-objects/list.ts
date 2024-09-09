@@ -33,6 +33,11 @@ export class List extends Syntax {
       this.push(...value.toArray());
     }
   }
+
+  get children() {
+    return this.store.toArray();
+  }
+
   get hasChildren() {
     return !!this.store.length;
   }
