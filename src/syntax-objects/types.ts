@@ -176,6 +176,7 @@ export class ObjectType extends BaseType {
       value: ObjectField[];
       parentObjExpr?: Expr;
       parentObj?: ObjectType;
+      typeParameters?: Identifier[];
     }
   ) {
     super(opts);
@@ -185,6 +186,7 @@ export class ObjectType extends BaseType {
     });
     this.parentObj = opts.parentObj;
     this.parentObjExpr = opts.parentObjExpr;
+    this.typeParameters = opts.typeParameters;
   }
 
   get size() {
@@ -212,6 +214,7 @@ export class ObjectType extends BaseType {
       })),
       parentObj: this.parentObj,
       parentObjExpr: this.parentObj?.clone(),
+      typeParameters: this.typeParameters,
     });
   }
 

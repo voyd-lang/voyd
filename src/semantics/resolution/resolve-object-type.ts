@@ -36,6 +36,7 @@ const resolveGenericObjVersion = (
   call: Call,
   type: ObjectType
 ): ObjectType | undefined => {
+  if (!call.typeArgs) return;
   const existing = type.genericInstances?.find((c) => typeArgsMatch(call, c));
   if (existing) return existing;
   return resolveGenericsWithTypeArgs(type, call.typeArgs!);
@@ -69,9 +70,9 @@ const resolveGenericsWithTypeArgs = (
     newObj.registerEntity(type);
   });
 
-  const resolvedFn = resolveObjectTypeTypes(newObj);
-  obj.registerGenericInstance(resolvedFn);
-  return obj;
+  const resolvedObj = resolveObjectTypeTypes(newObj);
+  obj.registerGenericInstance(resolvedObj);
+  return resolvedObj;
 };
 
 const typeArgsMatch = (call: Call, candidate: ObjectType): boolean =>

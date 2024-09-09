@@ -291,9 +291,24 @@ const initDSArray = (type: List) => {
 
 const initNominalObjectType = (obj: List) => {
   const hasExtension = obj.optionalIdentifierAt(2)?.is("extends");
+  const hasGenerics = obj.at(1)?.isList();
+
+  const name = hasGenerics
+    ? obj.listAt(1).identifierAt(0)
+    : obj.identifierAt(1);
+
+  const typeParameters = hasGenerics
+    ? obj
+        .listAt(1)
+        .listAt(1)
+        .sliceAsArray(1)
+        .flatMap((p) => (p.isIdentifier() ? p : []))
+    : undefined;
+
   return new ObjectType({
     ...obj.metadata,
-    name: obj.identifierAt(1),
+    name,
+    typeParameters,
     parentObjExpr: hasExtension ? obj.at(3) : undefined,
     value: extractObjectFields(hasExtension ? obj.listAt(4) : obj.listAt(2)),
   });
