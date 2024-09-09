@@ -446,8 +446,8 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
         name: field.name,
       })),
     ],
-    supertype: obj.parentObj
-      ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObj))
+    supertype: obj.parentObjType
+      ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObjType))
       : undefined,
   });
 

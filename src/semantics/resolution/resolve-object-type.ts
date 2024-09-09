@@ -24,9 +24,9 @@ export const resolveObjectTypeTypes = (
 
   if (obj.parentObjExpr) {
     const parentType = getExprType(obj.parentObjExpr);
-    obj.parentObj = parentType?.isObjectType() ? parentType : undefined;
+    obj.parentObjType = parentType?.isObjectType() ? parentType : undefined;
   } else {
-    obj.parentObj = voidBaseObject;
+    obj.parentObjType = voidBaseObject;
   }
 
   return obj;

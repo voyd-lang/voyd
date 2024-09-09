@@ -167,7 +167,7 @@ export class ObjectType extends BaseType {
   genericInstances?: ObjectType[];
   fields: ObjectField[];
   parentObjExpr?: Expr;
-  parentObj?: ObjectType;
+  parentObjType?: ObjectType;
   /** Type used for locals, globals, function return type */
   binaryenType?: number;
 
@@ -184,7 +184,7 @@ export class ObjectType extends BaseType {
     this.fields.forEach((field) => {
       field.typeExpr.parent = this;
     });
-    this.parentObj = opts.parentObj;
+    this.parentObjType = opts.parentObj;
     this.parentObjExpr = opts.parentObjExpr;
     this.typeParameters = opts.typeParameters;
   }
@@ -212,8 +212,7 @@ export class ObjectType extends BaseType {
         typeExpr: field.typeExpr.clone(),
         type: field.type?.clone(),
       })),
-      parentObj: this.parentObj,
-      parentObjExpr: this.parentObj?.clone(),
+      parentObjExpr: this.parentObjExpr?.clone(),
       typeParameters: this.typeParameters,
     });
   }
@@ -223,8 +222,8 @@ export class ObjectType extends BaseType {
       return true;
     }
 
-    if (this.parentObj) {
-      return this.parentObj.extends(ancestor);
+    if (this.parentObjType) {
+      return this.parentObjType.extends(ancestor);
     }
 
     return false;
@@ -241,8 +240,8 @@ export class ObjectType extends BaseType {
 
   getAncestorIds(start: number[] = []): number[] {
     start.push(this.idNum);
-    if (this.parentObj) {
-      return this.parentObj.getAncestorIds(start);
+    if (this.parentObjType) {
+      return this.parentObjType.getAncestorIds(start);
     }
     return start;
   }
@@ -256,8 +255,8 @@ export class ObjectType extends BaseType {
       return start;
     }
 
-    if (this.parentObj) {
-      return this.parentObj.extensionDistance(ancestor, start + 1);
+    if (this.parentObjType) {
+      return this.parentObjType.extensionDistance(ancestor, start + 1);
     }
 
     throw new Error(`${this.name} does not extend ${ancestor.name}`);

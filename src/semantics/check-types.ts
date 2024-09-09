@@ -282,7 +282,7 @@ const checkObjectType = (obj: ObjectType): ObjectType => {
   });
 
   if (obj.parentObjExpr) {
-    assertValidExtension(obj, obj.parentObj);
+    assertValidExtension(obj, obj.parentObjType);
   }
 
   return obj;

@@ -12,7 +12,7 @@ pub fn main()
 
 `;
 
-export const gcVoidText = `
+export const kitchenSink = `
 use std::all
 
 obj Vec {
@@ -90,6 +90,32 @@ pub fn test6()
 pub fn test7()
   let vec = Bitly { x: 52, y: 2, z: 21 }
   get_num_from_vec_sub_obj(vec)
+
+type DSArrayI32 = DSArray<i32>
+
+// Test generic functions, should return 143
+pub fn test8()
+  let arr2 = ds_array_init<f64>(10)
+  arr2.set<f64>(0, 1.5)
+  arr2.get<f64>(0)
+
+  let arr: DSArrayI32 = ds_array_init<i32>(10)
+  arr.set<i32>(9, 143)
+  arr.get<i32>(9)
+
+obj VecGeneric<T> {
+  x: T,
+  y: T,
+  z: T
+}
+
+// Test generic object initialization, should return 7.5
+pub fn test9()
+  let vec = VecGeneric<i32> { x: 7, y: 2, z: 3 }
+  vec.x
+
+  let vec2 = VecGeneric<f64> { x: 7.5, y: 2.5, z: 3.5 }
+  vec2.x
 `;
 
 export const tcoText = `
@@ -118,19 +144,4 @@ fn fib_alias(n: i32, a: i64, b: i64) -> i64
 
 pub fn main() -> i64
   fib(10, 0i64, 1i64)
-`;
-
-export const genericsText = `
-use std::all
-
-type DSArrayI32 = DSArray<i32>
-
-pub fn main()
-  let arr2 = ds_array_init<f64>(10)
-  arr2.set<f64>(0, 1.5)
-  arr2.get<f64>(0)
-
-  let arr: DSArrayI32 = ds_array_init<i32>(10)
-  arr.set<i32>(9, 143)
-  arr.get<i32>(9)
 `;
