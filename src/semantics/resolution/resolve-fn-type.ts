@@ -13,7 +13,7 @@ export type ResolveFnTypesOpts = {
 
 /** Pass call to potentially resolve generics */
 export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
-  if (fn.resolved) {
+  if (fn.typesResolved) {
     // Already resolved
     return fn;
   }
@@ -35,7 +35,7 @@ export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
     fn.returnType = fn.annotatedReturnType;
   }
 
-  fn.resolved = true;
+  fn.typesResolved = true;
   fn.body = resolveTypes(fn.body);
   fn.inferredReturnType = getExprType(fn.body);
   fn.returnType = fn.annotatedReturnType ?? fn.inferredReturnType;

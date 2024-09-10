@@ -170,6 +170,7 @@ export class ObjectType extends BaseType {
   parentObjType?: ObjectType;
   /** Type used for locals, globals, function return type */
   binaryenType?: number;
+  typesResolved?: boolean;
 
   constructor(
     opts: NamedEntityOpts & {

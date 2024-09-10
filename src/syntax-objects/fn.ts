@@ -17,7 +17,7 @@ export class Fn extends ScopedNamedEntity {
   _returnTypeExpr?: Expr;
   inferredReturnType?: Type;
   annotatedReturnType?: Type;
-  resolved?: boolean;
+  typesResolved?: boolean;
   private _body?: Expr;
 
   constructor(

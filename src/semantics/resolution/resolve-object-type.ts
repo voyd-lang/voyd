@@ -13,8 +13,10 @@ export const resolveObjectTypeTypes = (
   obj: ObjectType,
   call?: Call
 ): ObjectType => {
-  if (obj.typeParameters && call) {
-    return resolveGenericObjVersion(call, obj) ?? obj;
+  if (obj.typesResolved) return obj;
+
+  if (obj.typeParameters) {
+    return resolveGenericObjVersion(obj, call) ?? obj;
   }
 
   obj.fields.forEach((field) => {
@@ -29,17 +31,18 @@ export const resolveObjectTypeTypes = (
     obj.parentObjType = voidBaseObject;
   }
 
+  obj.typesResolved = true;
   return obj;
 };
 
 const resolveGenericObjVersion = (
-  call: Call,
-  type: ObjectType
+  type: ObjectType,
+  call?: Call
 ): ObjectType | undefined => {
-  if (!call.typeArgs) return;
+  if (!call?.typeArgs) return;
   const existing = type.genericInstances?.find((c) => typeArgsMatch(call, c));
   if (existing) return existing;
-  return resolveGenericsWithTypeArgs(type, call.typeArgs!);
+  return resolveGenericsWithTypeArgs(type, call.typeArgs);
 };
 
 const resolveGenericsWithTypeArgs = (
