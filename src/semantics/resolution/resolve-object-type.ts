@@ -83,6 +83,8 @@ const typeArgsMatch = (call: Call, candidate: ObjectType): boolean =>
     ? candidate.appliedTypeArgs.every((t, i) => {
         const argType = getExprType(call.typeArgs?.at(i));
         const appliedType = getExprType(t);
-        return typesAreEquivalent(argType, appliedType);
+        return typesAreEquivalent(argType, appliedType, {
+          exactNominalMatch: true,
+        });
       })
     : true;
