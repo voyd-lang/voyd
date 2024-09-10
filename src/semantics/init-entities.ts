@@ -309,7 +309,7 @@ const initNominalObjectType = (obj: List) => {
     ...obj.metadata,
     name,
     typeParameters,
-    parentObjExpr: hasExtension ? obj.at(3) : undefined,
+    parentObjExpr: hasExtension ? initEntities(obj.at(3)!) : undefined,
     value: extractObjectFields(hasExtension ? obj.listAt(4) : obj.listAt(2)),
   });
 };
