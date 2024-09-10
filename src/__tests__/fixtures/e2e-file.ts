@@ -116,6 +116,37 @@ pub fn test9()
 
   let vec2 = VecGeneric<f64> { x: 7.5, y: 2.5, z: 3.5 }
   vec2.x
+
+// Test generic object inheritance strictness
+fn generic_get_member<T>(vec: T)
+  vec.get_member()
+
+// Ensure generic instances of an ancestor aren't used in place of a descendant, should return 12
+pub fn test10()
+  let vec = Vec { x: 7, y: 2}
+  generic_get_member<Vec>(vec)
+
+  let point = Point { x: 12, y: 17, z: 4 }
+  generic_get_member<Point>(point)
+
+  let pointy = Pointy { x: 12, y: 17, z: 4 }
+  generic_get_member<Pointy>(pointy)
+
+// Test generic object inheritance strictness
+obj VecBox<T> {
+  box: T
+}
+
+obj PointF extends Vec {
+  x: i32,
+  y: i32,
+  f: i32
+}
+
+pub fn test11()
+  let pf = PointF { x: 12, y: 17, f: 4 }
+  let pf_box = VecBox<PointF> { box: pf }
+  pf_box.box.f
 `;
 
 export const tcoText = `

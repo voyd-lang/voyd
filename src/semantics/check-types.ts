@@ -76,7 +76,7 @@ const checkObjectInit = (call: Call): Call => {
   checkTypes(literal);
 
   // Check to ensure literal structure is compatible with nominal structure
-  if (!typesAreEquivalent(literal.type, call.type, true)) {
+  if (!typesAreEquivalent(literal.type, call.type, { structuralOnly: true })) {
     throw new Error(`Object literal type does not match expected type`);
   }
 
