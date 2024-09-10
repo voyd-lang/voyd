@@ -42,7 +42,7 @@ const registerModule = ({
 
   if (!name) return;
 
-  const [existingModule] = parentModule.resolveExport(name);
+  const existingModule = parentModule.resolveEntity(name);
 
   if (existingModule && !existingModule.isModule()) {
     throw new Error(
@@ -65,7 +65,7 @@ const registerModule = ({
 
   if (!existingModule) {
     parentModule.push(module);
-    parentModule.registerExport(module);
+    // parentModule.registerEntity(module);
   }
 
   if (!rest.length) return;

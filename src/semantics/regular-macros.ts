@@ -15,7 +15,6 @@ import {
   Block,
   Use,
 } from "../syntax-objects/index.js";
-import { NamedEntity } from "../syntax-objects/named-entity.js";
 import {
   registerExports,
   resolveModulePath,
@@ -67,7 +66,7 @@ const evalExport = (list: List) => {
   const block = list.listAt(1); // export is expected to be passed a block
 
   const expandedBlock = block.map((exp) => expandRegularMacros(exp));
-  registerExports(list, expandedBlock.toArray());
+  registerExports(list, expandedBlock.toArray(), expandModuleMacros);
 
   list.set(1, expandedBlock);
   return list;
@@ -82,7 +81,7 @@ const evalMacroLetDef = (list: List) => {
 const evalMacroDef = (list: List): Macro => {
   const signature = list.listAt(1);
   const name = signature.identifierAt(0);
-  const parameters = signature.rest() as Identifier[];
+  const parameters = signature.argsArray() as Identifier[];
   return new RegularMacro({
     ...list.metadata,
     name,
@@ -150,8 +149,8 @@ const evalMacroTimeFnCall = (list: List): Expr => {
 
   const idStr = getIdStr(identifier);
   const argsArr = fnsToSkipArgEval.has(idStr)
-    ? list.rest()
-    : list.rest().map(evalMacroExpr);
+    ? list.argsArray()
+    : list.argsArray().map(evalMacroExpr);
   const args = new List({ ...list.metadata, value: argsArr });
 
   const func = functions[idStr];
@@ -335,7 +334,7 @@ const functions: Record<string, MacroFn | undefined> = {
   concat: (args) => {
     const list = args.listAt(0);
     return list.push(
-      ...args.rest().flatMap((expr) => (expr as List).toArray())
+      ...args.argsArray().flatMap((expr) => (expr as List).toArray())
     );
   },
   is_list: (args) => bool(!!args.at(0)?.isList()),

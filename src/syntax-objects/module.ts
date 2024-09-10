@@ -132,7 +132,7 @@ export class VoidModule extends ScopedNamedEntity {
       }
 
       if (ex.isList() && ex.calls("splice_quote")) {
-        this.value.push(...ex.rest());
+        this.value.push(...ex.argsArray());
         return;
       }
 

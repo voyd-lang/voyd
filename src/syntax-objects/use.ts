@@ -1,4 +1,5 @@
 import { Expr } from "./expr.js";
+import { Identifier } from "./identifier.js";
 import { List } from "./list.js";
 import { NamedEntity } from "./named-entity.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
@@ -7,12 +8,12 @@ import { Syntax, SyntaxMetadata } from "./syntax.js";
 export class Use extends Syntax {
   readonly syntaxType = "use";
   entities: NamedEntity[];
-  path: List;
+  path: List | Identifier;
 
   constructor(
     opts: SyntaxMetadata & {
       entities: NamedEntity[];
-      path: List;
+      path: List | Identifier;
     }
   ) {
     super(opts);

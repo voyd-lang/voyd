@@ -34,7 +34,7 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
 
     const firstChild = children.at(1);
     if (firstChild?.isList() && isNamedParameter(firstChild)) {
-      transformed.push(...children.rest());
+      transformed.push(...children.argsArray());
       return;
     }
 

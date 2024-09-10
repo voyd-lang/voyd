@@ -19,9 +19,22 @@ export const resolveUse = (use: Use, runPass?: ModulePass) => {
 };
 
 export const resolveModulePath = (
-  path: List | Call,
+  path: Expr,
   runPass?: ModulePass
 ): NamedEntity[] => {
+  if (path.isIdentifier()) {
+    const entity = path.resolve();
+    return entity ? [entity] : [];
+  }
+
+  if (!path.isCall() && !path.isList()) {
+    throw new Error("Invalid path statement");
+  }
+
+  if (path.calls("object")) {
+    const imports = path.argsArray();
+  }
+
   if (!path.calls("::")) {
     throw new Error(`Invalid use statement ${path}`);
   }
@@ -41,7 +54,7 @@ export const resolveModulePath = (
     resolvedModule instanceof Array ||
     !resolvedModule.isModule()
   ) {
-    throw new Error(`Invalid use statement, not a module ${path}`);
+    throw new Error(`Invalid use statement, not a module ${path.toJSON()}`);
   }
 
   const module = runPass ? runPass(resolvedModule) : resolvedModule;
@@ -57,7 +70,7 @@ export const resolveModulePath = (
   const entity = module.resolveExport(right);
   if (!entity.length) {
     throw new Error(
-      `Invalid use statement, entity ${right} not is not exported`
+      `Invalid use statement, entity ${right} is not exported at ${right.location}`
     );
   }
 
@@ -65,7 +78,7 @@ export const resolveModulePath = (
 };
 
 const resolveUseIdentifier = (identifier: Identifier) => {
-  if (identifier.is("super")) {
+  if (identifier.is("dir")) {
     return identifier.parentModule?.parentModule;
   }
 
@@ -84,7 +97,8 @@ export const resolveExport = (call: Call) => {
 
 export const registerExports = (
   exportExpr: Expr,
-  entities: (Expr | NamedEntity)[]
+  entities: (Expr | NamedEntity)[],
+  pass = resolveModuleTypes
 ) => {
   entities.forEach((e) => {
     if (e.isUse()) {
@@ -93,10 +107,7 @@ export const registerExports = (
     }
 
     if (e.isCall() && e.calls("mod")) {
-      registerExports(
-        exportExpr,
-        resolveModulePath(e.callArgAt(0), resolveModuleTypes)
-      );
+      registerExports(exportExpr, resolveModulePath(e.exprArgAt(0), pass));
       return;
     }
 

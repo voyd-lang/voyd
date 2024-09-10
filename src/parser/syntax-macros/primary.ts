@@ -22,7 +22,7 @@ const parseList = (list: List): List => {
 
   const result =
     !hadSingleListChild && transformed.at(0)?.isList()
-      ? transformed.listAt(0).push(...transformed.rest())
+      ? transformed.listAt(0).push(...transformed.argsArray())
       : transformed;
 
   // Handle expressions to the right of a label { a: hello there, b: 2 } -> [object [: a [hello there] b [2]]
