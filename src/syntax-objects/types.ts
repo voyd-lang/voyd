@@ -10,7 +10,7 @@ export type Type =
   | IntersectionType
   | ObjectType
   | TupleType
-  | DSArrayType
+  | DsArrayType
   | FnType
   | TypeAlias;
 
@@ -277,7 +277,7 @@ export class ObjectType extends BaseType {
 }
 
 /** Dynamically Sized Array (The raw gc array type) */
-export class DSArrayType extends BaseType {
+export class DsArrayType extends BaseType {
   readonly kindOfType = "ds-array";
   readonly size = Infinity;
   elemTypeExpr: Expr;
@@ -292,15 +292,15 @@ export class DSArrayType extends BaseType {
     this.elemType = opts.elemType;
   }
 
-  clone(parent?: Expr): DSArrayType {
-    return new DSArrayType({
+  clone(parent?: Expr): DsArrayType {
+    return new DsArrayType({
       ...super.getCloneOpts(parent),
       elemTypeExpr: this.elemTypeExpr.clone(),
     });
   }
 
   toJSON(): TypeJSON {
-    return ["type", ["DSArray", this.elemType]];
+    return ["type", ["DsArray", this.elemType]];
   }
 }
 

@@ -91,7 +91,7 @@ pub fn test7()
   let vec = Bitly { x: 52, y: 2, z: 21 }
   get_num_from_vec_sub_obj(vec)
 
-type DSArrayI32 = DSArray<i32>
+type DsArrayI32 = DsArray<i32>
 
 // Test generic functions, should return 143
 pub fn test8()
@@ -99,7 +99,7 @@ pub fn test8()
   arr2.set<f64>(0, 1.5)
   arr2.get<f64>(0)
 
-  let arr: DSArrayI32 = ds_array_init<i32>(10)
+  let arr: DsArrayI32 = ds_array_init<i32>(10)
   arr.set<i32>(9, 143)
   arr.get<i32>(9)
 

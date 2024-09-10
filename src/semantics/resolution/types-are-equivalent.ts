@@ -29,7 +29,7 @@ export const typesAreEquivalent = (
     );
   }
 
-  if (a.isDSArrayType() && b.isDSArrayType()) {
+  if (a.isDsArrayType() && b.isDsArrayType()) {
     return typesAreEquivalent(a.elemType, b.elemType);
   }
 

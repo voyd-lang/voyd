@@ -8,15 +8,15 @@ macro bin_type_to_heap_type(type)
     namespace: gc
     args: [BnrType<($type)>]
 
-pub fn ds_array_init<T>(size: i32) -> DSArray<T>
-  binaryen_gc_call(arrayNew, [bin_type_to_heap_type(DSArray<T>), size])
+pub fn ds_array_init<T>(size: i32) -> DsArray<T>
+  binaryen_gc_call(arrayNew, [bin_type_to_heap_type(DsArray<T>), size])
 
-pub fn get<T>(arr: DSArray<T>, index: i32) -> T
+pub fn get<T>(arr: DsArray<T>, index: i32) -> T
   binaryen_gc_call(
     arrayGet,
     [arr, index, BnrType<T>, BnrConst(false)]
   )
 
-pub fn set<T>(arr: DSArray<T>, index: i32, value: T) -> DSArray<T>
+pub fn set<T>(arr: DsArray<T>, index: i32, value: T) -> DsArray<T>
   binaryen_gc_call(arraySet, [arr, index, value])
   arr

@@ -10,7 +10,7 @@ import {
   TypeAlias,
   ObjectType,
   ObjectLiteral,
-  DSArrayType,
+  DsArrayType,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { SemanticProcessor } from "./types.js";
@@ -267,22 +267,22 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
     return initObjectType(type);
   }
 
-  if (type.calls("DSArray")) {
-    return initDSArray(type);
+  if (type.calls("DsArray")) {
+    return initDsArray(type);
   }
 
   throw new Error("Invalid type entity");
 };
 
-const initDSArray = (type: List) => {
+const initDsArray = (type: List) => {
   const generics = type.listAt(1);
   const elemTypeExpr = initTypeExprEntities(generics.at(1));
 
   if (!elemTypeExpr) {
-    throw new Error("Invalid DSArray type");
+    throw new Error("Invalid DsArray type");
   }
 
-  return new DSArrayType({
+  return new DsArrayType({
     ...type.metadata,
     elemTypeExpr,
     name: type.syntaxId.toString(),

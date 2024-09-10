@@ -8,7 +8,7 @@ import {
   Type,
   Primitive,
   ObjectType,
-  DSArrayType,
+  DsArrayType,
 } from "./syntax-objects/types.js";
 import { Variable } from "./syntax-objects/variable.js";
 import { Block } from "./syntax-objects/block.js";
@@ -413,14 +413,14 @@ const mapBinaryenType = (opts: CompileExprOpts, type: Type): binaryen.Type => {
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "void")) return binaryen.none;
   if (type.isObjectType()) return buildObjectType(opts, type);
-  if (type.isDSArrayType()) return buildDSArrayType(opts, type);
+  if (type.isDsArrayType()) return buildDsArrayType(opts, type);
   throw new Error(`Unsupported type ${type}`);
 };
 
 const isPrimitiveId = (type: Type, id: Primitive) =>
   type.isPrimitiveType() && type.name.value === id;
 
-const buildDSArrayType = (opts: CompileExprOpts, type: DSArrayType) => {
+const buildDsArrayType = (opts: CompileExprOpts, type: DsArrayType) => {
   if (type.binaryenType) return type.binaryenType;
   const mod = opts.mod;
   const elemType = mapBinaryenType(opts, type.elemType!);

@@ -690,9 +690,9 @@ exports[`parser supports generics 1`] = `
     "type",
     [
       "=",
-      "DSArrayi32",
+      "DsArrayi32",
       [
-        "DSArray",
+        "DsArray",
         [
           "generics",
           "i32",

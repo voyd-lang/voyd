@@ -5,7 +5,7 @@ import { List } from "../../syntax-objects/list.js";
 import { VoidModule } from "../../syntax-objects/module.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import {
-  DSArrayType,
+  DsArrayType,
   ObjectType,
   TypeAlias,
 } from "../../syntax-objects/types.js";
@@ -31,7 +31,7 @@ export const resolveTypes = (expr: Expr | undefined): Expr => {
   if (expr.isList()) return resolveListTypes(expr);
   if (expr.isUse()) return resolveUse(expr, resolveModuleTypes);
   if (expr.isObjectType()) return resolveObjectTypeTypes(expr);
-  if (expr.isDSArrayType()) return resolveDSArrayTypeTypes(expr);
+  if (expr.isDsArrayType()) return resolveDsArrayTypeTypes(expr);
   if (expr.isTypeAlias()) return resolveTypeAliasTypes(expr);
   if (expr.isObjectLiteral()) return resolveObjectLiteralTypes(expr);
   if (expr.isMatch()) return resolveMatch(expr);
@@ -71,7 +71,7 @@ const resolveListTypes = (list: List) => {
   return list.map(resolveTypes);
 };
 
-const resolveDSArrayTypeTypes = (arr: DSArrayType): DSArrayType => {
+const resolveDsArrayTypeTypes = (arr: DsArrayType): DsArrayType => {
   arr.elemTypeExpr = resolveTypes(arr.elemTypeExpr);
   arr.elemType = getExprType(arr.elemTypeExpr);
   arr.id = `${arr.id}#${arr.elemType?.id}`;

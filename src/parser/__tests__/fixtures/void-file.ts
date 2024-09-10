@@ -106,7 +106,7 @@ fn main()
 export const voidFileWithGenerics = `
 use std::all
 
-type DSArrayi32 = DSArray<i32>
+type DsArrayi32 = DsArray<i32>
 
 pub fn main()
   let arr = ds_array_init<i32>(10)
