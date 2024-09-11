@@ -6,7 +6,7 @@ import {
   isWhitespace,
   isDigit,
   isDigitSign,
-} from "../lib/grammar.js";
+} from "./grammar.js";
 
 export const lexer = (chars: CharStream): Token => {
   const token = new Token({

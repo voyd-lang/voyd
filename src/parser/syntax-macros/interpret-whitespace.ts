@@ -1,4 +1,4 @@
-import { isContinuationOp, isGreedyOp } from "../../lib/grammar.js";
+import { isContinuationOp, isGreedyOp } from "../grammar.js";
 import { Expr, List } from "../../syntax-objects/index.js";
 
 export const interpretWhitespace = (list: List, indentLevel?: number): List => {

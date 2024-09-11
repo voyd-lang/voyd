@@ -1,4 +1,4 @@
-import { infixOps, isPrefixOp, prefixOps } from "../../lib/grammar.js";
+import { infixOps, isPrefixOp, prefixOps } from "../grammar.js";
 import { Expr, List } from "../../syntax-objects/index.js";
 
 /**
