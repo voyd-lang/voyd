@@ -275,6 +275,10 @@ const checkObjectType = (obj: ObjectType): ObjectType => {
     return obj;
   }
 
+  if (obj.typeParameters) {
+    return obj;
+  }
+
   obj.fields.forEach((field) => {
     if (!field.type) {
       throw new Error(`Unable to determine type for ${field.typeExpr}`);

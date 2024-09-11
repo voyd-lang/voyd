@@ -1,4 +1,4 @@
-use std::macros::all
+use macros::all
 
 type String = i32
 

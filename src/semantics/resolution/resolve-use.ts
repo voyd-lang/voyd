@@ -39,15 +39,14 @@ export const resolveModulePath = (
     throw new Error(`Invalid use statement ${path}`);
   }
 
-  const [_, left, right] = path.isCall()
-    ? [undefined, path.argAt(0), path.argAt(1)]
-    : path.toArray();
+  const [left, right] = path.argsArray();
 
-  const [resolvedModule] = left?.isList()
-    ? resolveModulePath(left, runPass)
-    : left?.isIdentifier()
-    ? [resolveUseIdentifier(left)]
-    : [];
+  const [resolvedModule] =
+    left?.isList() || left?.isCall()
+      ? resolveModulePath(left, runPass)
+      : left?.isIdentifier()
+      ? [left.resolveModule(left)]
+      : [];
 
   if (
     !resolvedModule ||
@@ -77,20 +76,12 @@ export const resolveModulePath = (
   return entity;
 };
 
-const resolveUseIdentifier = (identifier: Identifier) => {
-  if (identifier.is("dir")) {
-    return identifier.parentModule?.parentModule;
-  }
-
-  return identifier.resolve();
-};
-
 export const resolveExport = (call: Call) => {
   const block = call.argAt(0);
   if (!block?.isBlock()) return call;
 
   const entities = block.body.toArray().map(resolveTypes);
-  registerExports(call, entities);
+  registerExports(call, entities, resolveModuleTypes);
 
   return call;
 };
@@ -98,7 +89,7 @@ export const resolveExport = (call: Call) => {
 export const registerExports = (
   exportExpr: Expr,
   entities: (Expr | NamedEntity)[],
-  pass = resolveModuleTypes
+  pass?: ModulePass
 ) => {
   entities.forEach((e) => {
     if (e.isUse()) {
@@ -106,8 +97,8 @@ export const registerExports = (
       return;
     }
 
-    if (e.isCall() && e.calls("mod")) {
-      registerExports(exportExpr, resolveModulePath(e.exprArgAt(0), pass));
+    if ((e.isCall() || e.isList()) && e.calls("mod")) {
+      registerExports(exportExpr, resolveModulePath(e.argsArray()[0], pass));
       return;
     }
 

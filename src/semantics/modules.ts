@@ -51,7 +51,7 @@ const registerModule = ({
   }
 
   if (!existingModule && (name === "index" || name === "mod")) {
-    parentModule.push(...ast.toArray());
+    parentModule.unshift(...ast.toArray());
     return;
   }
 
@@ -64,8 +64,16 @@ const registerModule = ({
     });
 
   if (!existingModule) {
+    registerDefaultImports(module);
     parentModule.push(module);
-    // parentModule.registerEntity(module);
+  }
+
+  if (!existingModule && (module.name.is("src") || module.name.is("std"))) {
+    parentModule.registerExport(module);
+  }
+
+  if (existingModule && !rest.length) {
+    module.unshift(...ast.toArray());
   }
 
   if (!rest.length) return;
@@ -85,4 +93,9 @@ const filePathToModulePath = (filePath: string, srcPath: string) => {
   finalPath = finalPath.replace(".void", "");
 
   return finalPath;
+};
+
+const registerDefaultImports = (module: VoidModule) => {
+  // module.push(new List(["use", ["::", "std", "all"]]));
+  module.unshift(new List(["use", ["::", "root", "all"]]));
 };

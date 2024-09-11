@@ -3,12 +3,13 @@ import { voidBaseObject } from "../syntax-objects/types.js";
 import { SemanticProcessor } from "./types.js";
 
 export const initPrimitiveTypes: SemanticProcessor = (expr) => {
-  expr.registerEntity(i32);
-  expr.registerEntity(f32);
-  expr.registerEntity(i64);
-  expr.registerEntity(f64);
-  expr.registerEntity(bool);
-  expr.registerEntity(dVoid);
-  expr.registerEntity(voidBaseObject);
+  if (!expr.isModule()) return expr;
+  expr.registerExport(i32);
+  expr.registerExport(f32);
+  expr.registerExport(i64);
+  expr.registerExport(f64);
+  expr.registerExport(bool);
+  expr.registerExport(dVoid);
+  expr.registerExport(voidBaseObject);
   return expr;
 };

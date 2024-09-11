@@ -1,3 +1,5 @@
+use macros::all
+
 macro binaryen_gc_call(func, args)
   ` binaryen func: $func namespace: gc args: $args
 

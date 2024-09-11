@@ -1,5 +1,5 @@
 use macros::all
-pub mod macros
+pub mod macros::all
 pub use operators::all
 pub use utils::all
 pub use strings::all

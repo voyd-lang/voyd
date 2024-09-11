@@ -45,7 +45,10 @@ export const expandRegularMacros = (expr: Expr): Expr => {
 const expandModuleMacros = (module: VoidModule): VoidModule => {
   if (module.phase > 0) return module;
   module.phase = 1;
-  module.applyMap((expr) => expandRegularMacros(expr));
+  module.applyMap((expr) => {
+    const result = expandRegularMacros(expr);
+    return result;
+  });
   module.phase = 2;
   return module;
 };
@@ -66,7 +69,7 @@ const evalExport = (list: List) => {
   const block = list.listAt(1); // export is expected to be passed a block
 
   const expandedBlock = block.map((exp) => expandRegularMacros(exp));
-  registerExports(list, expandedBlock.toArray(), expandModuleMacros);
+  registerExports(list, expandedBlock.toArray(), undefined);
 
   list.set(1, expandedBlock);
   return list;

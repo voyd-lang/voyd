@@ -22,7 +22,7 @@ export class Use extends Syntax {
   }
 
   toJSON() {
-    return ["use", this.entities.map((e) => e.name)];
+    return ["use", this.path.toJSON()];
   }
 
   clone(parent?: Expr) {

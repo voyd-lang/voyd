@@ -1,4 +1,4 @@
-use dir::macros::all
+use macros::all
 
 declare "utils"
   pub fn log(val:i32) -> void
