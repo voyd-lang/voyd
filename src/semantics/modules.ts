@@ -64,8 +64,8 @@ const registerModule = ({
     });
 
   if (!existingModule) {
-    registerDefaultImports(module);
     parentModule.push(module);
+    registerDefaultImports(module);
   }
 
   if (!existingModule && (module.name.is("src") || module.name.is("std"))) {
@@ -96,6 +96,8 @@ const filePathToModulePath = (filePath: string, srcPath: string) => {
 };
 
 const registerDefaultImports = (module: VoidModule) => {
-  // module.push(new List(["use", ["::", "std", "all"]]));
   module.unshift(new List(["use", ["::", "root", "all"]]));
+  const mod = module.resolveModule("std");
+  if (mod) return;
+  module.unshift(new List(["use", ["::", "std", "all"]]));
 };
