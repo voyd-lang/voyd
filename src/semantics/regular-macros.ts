@@ -20,10 +20,12 @@ import {
   resolveModulePath,
 } from "./resolution/resolve-use.js";
 
+/** Expands/evaluates macro functions. Also handles use and module declaration initialization */
 export const expandRegularMacros = (expr: Expr): Expr => {
   if (expr.isModule()) return expandModuleMacros(expr);
   if (!expr.isList()) return expr;
   if (expr.calls("use")) return initUse(expr);
+  if (expr.calls("mod")) return initMod(expr);
   if (expr.calls("export")) return evalExport(expr);
   if (expr.calls("macro")) return evalMacroDef(expr);
   if (expr.calls("macro_let")) return evalMacroLetDef(expr);
@@ -54,7 +56,8 @@ const expandModuleMacros = (module: VoidModule): VoidModule => {
 };
 
 const initUse = (list: List) => {
-  const path = list.listAt(1);
+  const path = list.at(1);
+  if (!path?.isIdentifier() && !path?.isList()) return list; // Maybe error here?
   const entities = resolveModulePath(path, expandModuleMacros);
   entities.forEach((e) => list.parent?.registerEntity(e.e, e.alias));
 
@@ -63,6 +66,19 @@ const initUse = (list: List) => {
     entities: entities instanceof Array ? entities : [entities],
     path,
   });
+};
+
+const initMod = (list: List) => {
+  if (list.length < 3) return list; // Maybe error here?
+  const name = list.identifierAt(1);
+  const block = list.listAt(2);
+  const module = new VoidModule({
+    ...list.metadata,
+    name,
+    value: block.argsArray().map(expandRegularMacros),
+  });
+  list.parentModule?.registerEntity(module);
+  return module;
 };
 
 const evalExport = (list: List) => {

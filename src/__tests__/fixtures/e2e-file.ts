@@ -147,6 +147,16 @@ pub fn test11()
   let pf = PointF { x: 12, y: 17, f: 4 }
   let pf_box = VecBox<PointF> { box: pf }
   pf_box.box.f
+
+pub mod m1
+  pub mod m2
+    pub fn test()
+      597
+
+use h1::h2::{ test as hi }
+
+pub fn test12()
+  hi()
 `;
 
 export const tcoText = `

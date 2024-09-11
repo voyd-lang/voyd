@@ -42,6 +42,7 @@ describe("E2E Compiler Pipeline", () => {
     const test9 = getWasmFn("test9", instance);
     const test10 = getWasmFn("test10", instance);
     const test11 = getWasmFn("test11", instance);
+    const test12 = getWasmFn("test12", instance);
     assert(test1, "Test1 exists");
     assert(test2, "Test2 exists");
     assert(test3, "Test3 exists");
@@ -53,6 +54,7 @@ describe("E2E Compiler Pipeline", () => {
     assert(test9, "Test9 exists");
     assert(test10, "Test10 exists");
     assert(test11, "Test11 exists");
+    assert(test12, "Test12 exists");
 
     // Static method resolution tests
     t.expect(test1(), "test 1 returns correct value").toEqual(13);
@@ -72,6 +74,9 @@ describe("E2E Compiler Pipeline", () => {
     t.expect(test9(), "test 9 returns correct value").toEqual(7.5);
     t.expect(test10(), "test 10 returns correct value").toEqual(12);
     t.expect(test11(), "test 11 returns correct value").toEqual(4);
+
+    // Modules
+    t.expect(test12(), "test 12 returns correct value").toEqual(597);
   });
 
   test("Compiler can do tco", async (t) => {
