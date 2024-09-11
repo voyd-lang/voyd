@@ -14,7 +14,7 @@ export const resolveUse = (use: Use, runPass?: ModulePass) => {
 
   const entities = resolveModulePath(path, runPass);
   entities.forEach((e) => use.parentModule?.registerEntity(e));
-  use.entities = [...use.entities, ...entities];
+  use.entities = entities;
   return use;
 };
 

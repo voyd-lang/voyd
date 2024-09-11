@@ -69,7 +69,7 @@ const evalExport = (list: List) => {
   const block = list.listAt(1); // export is expected to be passed a block
 
   const expandedBlock = block.map((exp) => expandRegularMacros(exp));
-  registerExports(list, expandedBlock.toArray(), undefined);
+  registerExports(list, expandedBlock.toArray(), expandModuleMacros);
 
   list.set(1, expandedBlock);
   return list;
