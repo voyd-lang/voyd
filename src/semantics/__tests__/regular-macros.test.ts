@@ -4,10 +4,14 @@ import { registerModules } from "../modules.js";
 import { expandRegularMacros } from "../regular-macros.js";
 import { regularMacrosVoidFile } from "./fixtures/regular-macros-void-file.js";
 import { test } from "vitest";
+import { List } from "../../syntax-objects/list.js";
 
 test("regular macro expansion", async (t) => {
   const parserOutput = parse(regularMacrosVoidFile);
-  const files = { test: parserOutput };
+  const files = {
+    std: new List([]),
+    test: parserOutput,
+  };
   const resolvedModules = registerModules({
     files,
     srcPath: path.dirname("test"),

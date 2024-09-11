@@ -8,7 +8,7 @@ exports[`module registration 1`] = `
     "exports",
     [
       "src#291",
-      "std#308",
+      "std#320",
     ],
   ],
   [
@@ -20,6 +20,14 @@ exports[`module registration 1`] = `
         [],
       ],
       [
+        [
+          "use",
+          [
+            "::",
+            "std",
+            "all",
+          ],
+        ],
         [
           "use",
           [
@@ -36,6 +44,14 @@ exports[`module registration 1`] = `
             [],
           ],
           [
+            [
+              "use",
+              [
+                "::",
+                "std",
+                "all",
+              ],
+            ],
             [
               "use",
               [

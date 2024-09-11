@@ -6,9 +6,29 @@ exports[`regular macro expansion 1`] = `
   "root",
   [
     "exports",
-    [],
+    [
+      "std#726",
+    ],
   ],
   [
+    [
+      "module",
+      "std",
+      [
+        "exports",
+        [],
+      ],
+      [
+        [
+          "use",
+          [
+            "::",
+            "root",
+            "all",
+          ],
+        ],
+      ],
+    ],
     [
       "module",
       "test",
@@ -27,7 +47,7 @@ exports[`regular macro expansion 1`] = `
         ],
         [
           "regular-macro",
-          "\`#744",
+          "\`#755",
           [
             "parameters",
           ],
@@ -48,7 +68,7 @@ exports[`regular macro expansion 1`] = `
         ],
         [
           "regular-macro",
-          "let#781",
+          "let#792",
           [
             "parameters",
           ],
@@ -101,7 +121,7 @@ exports[`regular macro expansion 1`] = `
         ],
         [
           "regular-macro",
-          "fn#1260",
+          "fn#1271",
           [
             "parameters",
           ],
