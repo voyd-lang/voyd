@@ -4,7 +4,8 @@
 
 - UpperCamelCase for Types and Components
   - Acronyms should only capitalize the first letter, i.e `HtmlElement`
-- snake_case for everything else
+- snake_case for everything else (including file names)
+- Parameters beyond the first two should generally be labeled
 
 ## Indentation
 
