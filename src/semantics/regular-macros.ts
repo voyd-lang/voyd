@@ -47,10 +47,7 @@ export const expandRegularMacros = (expr: Expr): Expr => {
 const expandModuleMacros = (module: VoidModule): VoidModule => {
   if (module.phase > 0) return module;
   module.phase = 1;
-  module.applyMap((expr) => {
-    const result = expandRegularMacros(expr);
-    return result;
-  });
+  module.applyMap(expandRegularMacros);
   module.phase = 2;
   return module;
 };
