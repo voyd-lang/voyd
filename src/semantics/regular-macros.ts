@@ -56,7 +56,7 @@ const expandModuleMacros = (module: VoidModule): VoidModule => {
 const initUse = (list: List) => {
   const path = list.listAt(1);
   const entities = resolveModulePath(path, expandModuleMacros);
-  entities.forEach((e) => list.parent?.registerEntity(e));
+  entities.forEach((e) => list.parent?.registerEntity(e.e, e.alias));
 
   return new Use({
     ...list.metadata,

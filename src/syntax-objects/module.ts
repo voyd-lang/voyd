@@ -41,8 +41,8 @@ export class VoidModule extends ScopedNamedEntity {
     this.isIndex = opts.isIndex ?? false;
   }
 
-  registerExport(entity: NamedEntity) {
-    this.exports.registerEntity(entity);
+  registerExport(entity: NamedEntity, alias?: string) {
+    this.exports.registerEntity(entity, alias);
   }
 
   resolveExport(name: Id): NamedEntity[] {

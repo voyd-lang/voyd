@@ -70,9 +70,9 @@ export abstract class Syntax {
     return this.lexicon.getAllEntities();
   }
 
-  registerEntity(v: NamedEntity): void {
-    if (!this.isScopedEntity()) return this.parent?.registerEntity(v);
-    this.lexicon.registerEntity(v);
+  registerEntity(v: NamedEntity, alias?: string): void {
+    if (!this.isScopedEntity()) return this.parent?.registerEntity(v, alias);
+    this.lexicon.registerEntity(v, alias);
   }
 
   /** Will resolve a sibling module, or a direct ancestor */

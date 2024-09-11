@@ -4,15 +4,17 @@ import { List } from "./list.js";
 import { NamedEntity } from "./named-entity.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
 
+export type UseEntities = { e: NamedEntity; alias?: string }[];
+
 /** Defines a declared namespace for external function imports */
 export class Use extends Syntax {
   readonly syntaxType = "use";
-  entities: NamedEntity[];
+  entities: UseEntities;
   path: List | Identifier;
 
   constructor(
     opts: SyntaxMetadata & {
-      entities: NamedEntity[];
+      entities: UseEntities;
       path: List | Identifier;
     }
   ) {
