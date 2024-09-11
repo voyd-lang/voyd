@@ -153,7 +153,7 @@ pub mod m1
     pub fn test()
       597
 
-use h1::h2::{ test as hi }
+use m1::m2::{ test as hi }
 
 pub fn test12()
   hi()
