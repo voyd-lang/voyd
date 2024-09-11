@@ -9,7 +9,7 @@ import { Expr } from "../syntax-objects/expr.js";
 import { resolveTypes } from "./resolution/resolve-types.js";
 
 const semanticPhases: SemanticProcessor[] = [
-  expandRegularMacros,
+  expandRegularMacros, // Also handles use and module declaration initialization
   initPrimitiveTypes,
   initEntities,
   resolveTypes,

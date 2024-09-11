@@ -20,6 +20,7 @@ export type VoidModuleOpts = ScopedNamedEntityOpts & {
 export class VoidModule extends ScopedNamedEntity {
   readonly syntaxType = "module";
   readonly exports: LexicalContext;
+  readonly isRoot: boolean = false;
   /** This module is the entry point of the user src code */
   isIndex = false;
   value: Expr[] = [];
@@ -40,8 +41,8 @@ export class VoidModule extends ScopedNamedEntity {
     this.isIndex = opts.isIndex ?? false;
   }
 
-  registerExport(entity: NamedEntity) {
-    this.exports.registerEntity(entity);
+  registerExport(entity: NamedEntity, alias?: string) {
+    this.exports.registerEntity(entity, alias);
   }
 
   resolveExport(name: Id): NamedEntity[] {
@@ -98,7 +99,7 @@ export class VoidModule extends ScopedNamedEntity {
     return [
       "module",
       this.name,
-      ["exports", this.exports.getAllEntities()],
+      ["exports", this.exports.getAllEntities().map((e) => e.id)],
       this.value,
     ];
   }
@@ -132,7 +133,7 @@ export class VoidModule extends ScopedNamedEntity {
       }
 
       if (ex.isList() && ex.calls("splice_quote")) {
-        this.value.push(...ex.rest());
+        this.value.push(...ex.argsArray());
         return;
       }
 
@@ -141,14 +142,20 @@ export class VoidModule extends ScopedNamedEntity {
 
     return this;
   }
+
+  unshift(...expr: ListValue[]) {
+    const old = this.value;
+    this.value = [];
+    this.push(...expr);
+    this.push(...old);
+    return this;
+  }
 }
 
 export class RootModule extends VoidModule {
+  readonly isRoot = true;
+
   constructor(opts: Omit<VoidModuleOpts, "name">) {
     super({ ...opts, name: "root" });
-  }
-
-  getAllExports(): NamedEntity[] {
-    return this.getAllEntities();
   }
 }

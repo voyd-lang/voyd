@@ -99,6 +99,48 @@ const input = {
         ],
       ],
     }),
+    [`${stdPath}/deep/nested/hey.void`]: new List({
+      value: [
+        "ast",
+        ["use", ["::", ["::", "super", "macros"], "all"]],
+        [
+          "pub",
+          "fn",
+          ["hey", [":", "src", "i32"], [":", "dest", "i32"]],
+          "->",
+          "i32",
+          ["block"],
+        ],
+      ],
+    }),
+    [`${stdPath}/deep/nested.void`]: new List({
+      value: [
+        "ast",
+        ["pub", ["use", ["::", "hey", "all"]]],
+        [
+          "pub",
+          "fn",
+          ["nested", [":", "src", "i32"], [":", "dest", "i32"]],
+          "->",
+          "i32",
+          ["block"],
+        ],
+      ],
+    }),
+    [`${stdPath}/deep/mod.void`]: new List({
+      value: [
+        "ast",
+        ["pub", ["use", ["::", "hey", "all"]]],
+        [
+          "pub",
+          "fn",
+          ["deeply", [":", "src", "i32"], [":", "dest", "i32"]],
+          "->",
+          "i32",
+          ["block"],
+        ],
+      ],
+    }),
     [`${stdPath}/memory.void`]: new List({
       value: [
         "ast",

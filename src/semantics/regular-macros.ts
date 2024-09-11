@@ -15,16 +15,17 @@ import {
   Block,
   Use,
 } from "../syntax-objects/index.js";
-import { NamedEntity } from "../syntax-objects/named-entity.js";
 import {
   registerExports,
   resolveModulePath,
 } from "./resolution/resolve-use.js";
 
+/** Expands/evaluates macro functions. Also handles use and module declaration initialization */
 export const expandRegularMacros = (expr: Expr): Expr => {
   if (expr.isModule()) return expandModuleMacros(expr);
   if (!expr.isList()) return expr;
   if (expr.calls("use")) return initUse(expr);
+  if (expr.calls("mod")) return initMod(expr);
   if (expr.calls("export")) return evalExport(expr);
   if (expr.calls("macro")) return evalMacroDef(expr);
   if (expr.calls("macro_let")) return evalMacroLetDef(expr);
@@ -46,15 +47,16 @@ export const expandRegularMacros = (expr: Expr): Expr => {
 const expandModuleMacros = (module: VoidModule): VoidModule => {
   if (module.phase > 0) return module;
   module.phase = 1;
-  module.applyMap((expr) => expandRegularMacros(expr));
+  module.applyMap(expandRegularMacros);
   module.phase = 2;
   return module;
 };
 
 const initUse = (list: List) => {
-  const path = list.listAt(1);
+  const path = list.at(1);
+  if (!path?.isIdentifier() && !path?.isList()) return list; // Maybe error here?
   const entities = resolveModulePath(path, expandModuleMacros);
-  entities.forEach((e) => list.parent?.registerEntity(e));
+  entities.forEach((e) => list.parent?.registerEntity(e.e, e.alias));
 
   return new Use({
     ...list.metadata,
@@ -63,11 +65,24 @@ const initUse = (list: List) => {
   });
 };
 
+const initMod = (list: List) => {
+  if (list.length < 3) return list; // Maybe error here?
+  const name = list.identifierAt(1);
+  const block = list.listAt(2);
+  const module = new VoidModule({
+    ...list.metadata,
+    name,
+    value: block.argsArray().map(expandRegularMacros),
+  });
+  list.parentModule?.registerEntity(module);
+  return module;
+};
+
 const evalExport = (list: List) => {
   const block = list.listAt(1); // export is expected to be passed a block
 
   const expandedBlock = block.map((exp) => expandRegularMacros(exp));
-  registerExports(list, expandedBlock.toArray());
+  registerExports(list, expandedBlock.toArray(), expandModuleMacros);
 
   list.set(1, expandedBlock);
   return list;
@@ -82,7 +97,7 @@ const evalMacroLetDef = (list: List) => {
 const evalMacroDef = (list: List): Macro => {
   const signature = list.listAt(1);
   const name = signature.identifierAt(0);
-  const parameters = signature.rest() as Identifier[];
+  const parameters = signature.argsArray() as Identifier[];
   return new RegularMacro({
     ...list.metadata,
     name,
@@ -123,8 +138,8 @@ export const expandMacro = (macro: Macro, call: List): Expr => {
     registerMacroVar({ with: clone, name, value: call.at(index + 1)! });
   });
 
-  const result = clone.evaluate(evalMacroExpr) ?? nop();
-  result.parent = call.parent;
+  // We clone to restore the original parent to all children
+  const result = clone.evaluate(evalMacroExpr)?.clone(call.parent) ?? nop();
   result.location = call.location;
   return result;
 };
@@ -150,8 +165,8 @@ const evalMacroTimeFnCall = (list: List): Expr => {
 
   const idStr = getIdStr(identifier);
   const argsArr = fnsToSkipArgEval.has(idStr)
-    ? list.rest()
-    : list.rest().map(evalMacroExpr);
+    ? list.argsArray()
+    : list.argsArray().map(evalMacroExpr);
   const args = new List({ ...list.metadata, value: argsArr });
 
   const func = functions[idStr];
@@ -173,9 +188,7 @@ const callLambda = (lambda: MacroLambda, args: List): Expr => {
     registerMacroVar({ with: clone, name, value: args.at(index)! });
   });
 
-  const result = clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
-  result.parent = args.parent;
-  return result;
+  return clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
 };
 
 type MacroFn = (args: List) => Expr;
@@ -246,13 +259,11 @@ const functions: Record<string, MacroFn | undefined> = {
       body.mapFilter((exp) => {
         if (exp.isList() && exp.calls("$")) {
           const val = exp.at(1) ?? nop();
-          val.parent = body;
           return evalMacroExpr(val);
         }
 
         if (exp.isList() && exp.calls("$@")) {
           const val = exp.at(1) ?? nop();
-          val.parent = body;
           return (evalMacroExpr(val) as List).insert("splice_quote");
         }
 
@@ -335,7 +346,7 @@ const functions: Record<string, MacroFn | undefined> = {
   concat: (args) => {
     const list = args.listAt(0);
     return list.push(
-      ...args.rest().flatMap((expr) => (expr as List).toArray())
+      ...args.argsArray().flatMap((expr) => (expr as List).toArray())
     );
   },
   is_list: (args) => bool(!!args.at(0)?.isList()),

@@ -112,7 +112,7 @@ export class List extends Syntax {
   }
 
   /** Returns all but the first element in an array */
-  rest(): Expr[] {
+  argsArray(): Expr[] {
     return this.store.toArray().slice(1);
   }
 
@@ -149,7 +149,7 @@ export class List extends Syntax {
       }
 
       if (ex.isList() && ex.calls("splice_quote")) {
-        this.store.push(...ex.rest());
+        this.store.push(...ex.argsArray());
         return;
       }
 

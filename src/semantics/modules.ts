@@ -42,7 +42,7 @@ const registerModule = ({
 
   if (!name) return;
 
-  const [existingModule] = parentModule.resolveExport(name);
+  const existingModule = parentModule.resolveEntity(name);
 
   if (existingModule && !existingModule.isModule()) {
     throw new Error(
@@ -51,7 +51,7 @@ const registerModule = ({
   }
 
   if (!existingModule && (name === "index" || name === "mod")) {
-    parentModule.push(...ast.toArray());
+    parentModule.unshift(...ast.toArray());
     return;
   }
 
@@ -65,7 +65,15 @@ const registerModule = ({
 
   if (!existingModule) {
     parentModule.push(module);
+    registerDefaultImports(module);
+  }
+
+  if (!existingModule && (module.name.is("src") || module.name.is("std"))) {
     parentModule.registerExport(module);
+  }
+
+  if (existingModule && !rest.length) {
+    module.unshift(...ast.toArray());
   }
 
   if (!rest.length) return;
@@ -85,4 +93,11 @@ const filePathToModulePath = (filePath: string, srcPath: string) => {
   finalPath = finalPath.replace(".void", "");
 
   return finalPath;
+};
+
+const registerDefaultImports = (module: VoidModule) => {
+  module.unshift(new List(["use", ["::", "root", "all"]]));
+  const mod = module.resolveModule("std");
+  if (mod) return;
+  module.unshift(new List(["use", ["::", "std", "all"]]));
 };

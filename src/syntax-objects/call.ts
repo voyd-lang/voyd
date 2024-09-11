@@ -110,6 +110,10 @@ export class Call extends Syntax {
     return call;
   }
 
+  argsArray(): Expr[] {
+    return this.args.toArray();
+  }
+
   argArrayMap<T>(fn: (expr: Expr) => T): T[] {
     return this.args.toArray().map(fn);
   }

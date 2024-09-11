@@ -35,8 +35,7 @@ fn get_json(address: String): (Async, Throws) -> Dictionary
 
 ## Labeled arguments
 
-Labeled arguments can be defined by wrapping parameters you wish to be labeled
-on call in curly braces.
+Labeled arguments can be defined by wrapping parameters curly braces.
 
 ```rust
 fn add(a: i32, {to: i32}) = a + to
@@ -76,7 +75,7 @@ it might be cleaner to do so. For example, when the variable names match the
 argument labels:
 
 ```rust
-let [x, y, z] = [1, 2, 3]
+let (x, y, z) = (1, 2, 3)
 
 // Object field shorthand allows for this:
 move({ x, y, z })

@@ -7,7 +7,7 @@ import type { Fn } from "./fn.js";
 import type { Global } from "./global.js";
 import type { Id, Identifier } from "./identifier.js";
 import type { Int } from "./int.js";
-import type { VoidModule } from "./module.js";
+import { type VoidModule } from "./module.js";
 import { LexicalContext } from "./lexical-context.js";
 import type { List } from "./list.js";
 import type { MacroLambda } from "./macro-lambda.js";
@@ -70,19 +70,35 @@ export abstract class Syntax {
     return this.lexicon.getAllEntities();
   }
 
-  registerEntity(v: NamedEntity): void {
-    if (!this.isScopedEntity()) return this.parent?.registerEntity(v);
-    this.lexicon.registerEntity(v);
+  registerEntity(v: NamedEntity, alias?: string): void {
+    if (!this.isScopedEntity()) return this.parent?.registerEntity(v, alias);
+    this.lexicon.registerEntity(v, alias);
   }
 
-  resolveChildEntity(name: Id): NamedEntity | undefined {
-    if (!this.isScopedEntity()) return undefined;
-    return this.lexicon.resolveEntity(name);
+  /** Will resolve a sibling module, or a direct ancestor */
+  resolveModule(name: Id, level = 0): VoidModule | undefined {
+    if (!this.isModule()) {
+      return this.parentModule?.resolveModule(name, level);
+    }
+
+    if (this.name.is(name)) return this;
+
+    // We check root module as its where we find src and std
+    if (level < 2 || this.isRoot) {
+      const sibling = this.resolveEntity(name);
+      if (sibling?.isModule()) return sibling;
+    }
+
+    return this.parentModule?.resolveModule(name, level + 1);
   }
 
   /** Recursively searches for the entity up the parent tree */
   resolveEntity(name: Id): NamedEntity | undefined {
     if (!this.isScopedEntity()) return this.parent?.resolveEntity(name);
+
+    if (this.isModule()) return this.lexicon.resolveEntity(name);
+
+    // Crawl up blocks until we hit a module
     return this.lexicon.resolveEntity(name) ?? this.parent?.resolveEntity(name);
   }
 
@@ -95,18 +111,6 @@ export abstract class Syntax {
     start.push(...this.lexicon.resolveFns(id));
     if (this.parent) return this.parent.resolveFns(id, start);
     return start;
-  }
-
-  /** Returns functions with the given name that are a direct child of the scoped entity */
-  resolveChildFns(name: Id): Fn[] {
-    if (!this.isScopedEntity()) return [];
-    return this.lexicon.resolveFns(name);
-  }
-
-  /** Recursively searches for the fn entity up the parent tree */
-  resolveFnById(id: string): Fn | undefined {
-    if (!this.isScopedEntity()) return this.parent?.resolveFnById(id);
-    return this.lexicon.resolveFnById(id) ?? this.parent?.resolveFnById(id);
   }
 
   getCloneOpts(parent?: Expr): SyntaxMetadata {

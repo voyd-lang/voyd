@@ -1,4 +1,4 @@
-import { infixOps, isPrefixOp, prefixOps } from "../../lib/grammar.js";
+import { infixOps, isPrefixOp, prefixOps } from "../grammar.js";
 import { Expr, List } from "../../syntax-objects/index.js";
 
 /**
@@ -22,7 +22,7 @@ const parseList = (list: List): List => {
 
   const result =
     !hadSingleListChild && transformed.at(0)?.isList()
-      ? transformed.listAt(0).push(...transformed.rest())
+      ? transformed.listAt(0).push(...transformed.argsArray())
       : transformed;
 
   // Handle expressions to the right of a label { a: hello there, b: 2 } -> [object [: a [hello there] b [2]]

@@ -26,8 +26,12 @@ export class Identifier extends Syntax {
     this.value = opts.value;
   }
 
-  is(v: string) {
-    return v === this.value;
+  is(v: Id) {
+    if (typeof v === "string") {
+      return v === this.value;
+    }
+
+    return v.value === this.value;
   }
 
   isDefined() {

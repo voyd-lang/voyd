@@ -8,10 +8,10 @@ export class LexicalContext {
   private readonly fnsById: Map<string, Fn> = new Map();
   private readonly entities: Map<string, NamedEntity> = new Map();
 
-  registerEntity(entity: NamedEntity) {
-    const idStr = getIdStr(entity.name);
+  registerEntity(entity: NamedEntity, alias?: string) {
+    const idStr = alias ?? getIdStr(entity.name);
     if (entity.isFn()) {
-      if (this.fnsById.get(entity.id)) return; // Already registered
+      if (!alias && this.fnsById.get(entity.id)) return; // Already registered
       const fns = this.fns.get(idStr) ?? [];
       fns.push(entity);
       this.fns.set(idStr, fns);

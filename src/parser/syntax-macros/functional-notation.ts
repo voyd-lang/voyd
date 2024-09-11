@@ -1,4 +1,4 @@
-import { isOp } from "../../lib/grammar.js";
+import { isOp } from "../grammar.js";
 import { Expr, List } from "../../syntax-objects/index.js";
 
 export const functionalNotation = (list: List): List => {
