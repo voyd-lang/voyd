@@ -81,8 +81,11 @@ let value = { a: a, b: 4 }
 # Tuple literals
 
 ```void
-let value = [5, 4]
+let value = (5, 4)
 let x = value.0 // x will be bound to 5
+
+// Destructuring
+let (a, b) = value
 ```
 
 # Control Flow

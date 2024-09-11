@@ -1,80 +1,79 @@
 # Effects
 
-Void language is intended to have full support for, and be largely built on top
-of, algebraic effects.
+Effects are resumable exceptions. AKA exceptions on steroids, AKA exceptions
+that are actually enjoyable to work with.
 
-Largely inspired by the paper ["Structured Asynchrony with Algebraic Effects" by
-Daan
-Leijen](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/05/asynceffects-msr-tr-2017-21.pdf),
-as well as the [Effeckt Language](https://effekt-lang.org/).
+Effects provide a number benefits to the language, library authors, and users:
+- Type-safe error handling
+- Type-safe dependency injection
+- Type-safe mocking and testing
+- Delimited continuations
+- And more!
 
-## Overview
+Effects are a powerful language abstraction. They allow for features like async/await, exceptions, generators, and coroutines to be implemented **IN THE LANGUAGE**, rather than the implementation. Many features that are traditionally implemented in the compiler can be implemented as libraries in Void. This allows for more flexibility and control over the behavior of these features. It also saves users from having to wait for the language to be updated to get new features. No more waiting on endless bikeshedding discussions about the syntax of async/await!
 
-Effects are interfaces for functions that can be
+Void's effect system takes heavy inspiration from:
+- [Koka Language](https://koka-lang.github.io), which largely inspired the effects syntax
+- [Effeckt Language](https://effekt-lang.org/)
+- The paper ["Structured Asynchrony with Algebraic Effects" by Daan Leijen"](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/05/asynceffects-msr-tr-2017-21.pdf)
 
-```
-// An effect is a function that
-effect talk(msg: string) -> string
-
-fn send_messages(): talk -> void
-  print talk("Hey") // prints "Hey there"
-  talk("Goodbye")
-  print talk("Hey") // Does not execute as the handler does not call resume
-
-fn main() -> void
-  handle
-    send_messages()
-  with:
-    talk: (msg: string) =>
-      if msg == "Goodbye" then: return
-      resume msg.concat(" there")
-```
 
 ## Defining Effects
 
 ```
-effect throw(msg: string) -> void
+effect Exception
+  // An effect that may be resumed by the handler
+  ctl throw(msg: String) -> void
+
+// Effects with one control can be defined concisely as
+effect ctl throw(msg: String) -> void
+
+effect State
+  // Tail resumptive effect, guaranteed to resume once and only once
+  // Are defined like normal functions
+  fn get() -> Int
+  fn set(x: Int) -> void
+
+// Tail resumptive effects with one function can be defined concisely as
+effect fn get() -> Int
 ```
 
-## Handling An Effect
+## Using Effects
 
 ```
-// Define a function that uses the state effect
-fn bump_state(): State<i32> -> void
-  let state = get()
-  let new_state = set(state + 1)
-  log(new_state)
+effect Async
+  ctl resolve(int: i32) -> void
+  ctl reject(msg: String) -> void
 
-
-// Define a function that handles the state effect
-fn main(val: i32)
-  var state = 0
-  with handler:
-    get: () => state
-    set: (val) =>
-      state = val
-      resume(state)
-  do:
-    bump_state()
-  print(state) // 5
-```
-
-Define and use generic effect handler (@f is a call by name parameter, see functions for more details)
-```
-fn state_handler<T>({initial: T, @action: ((): State<T> -> T)}) -> T
-  var state = initial
-  with handler:
-    get: () => state
-    set: (val) =>
-      state = val
-      state
-  do:
-    f()
+fn asyncTask(num: i32): Async -> Int
+  if num > 0
+    Async::resolve(num)
+  else
+    Async::reject("Number must be positive")
 
 fn main()
-  let state = state_handler initial: 3 action:
-    bump_state()
-    bump_state()
+  try
+    asyncTask(1)
+  with: {
+    ctl resolve(num) -> void
+      println("Resolved: " + num)
+    ctl reject(msg) -> void
+      println("Rejected: " + msg)
+  }
 
-  print(state) // 5
+// Effects are also inferred
+fn asyncTask(num: i32) -> Int // Inferred to be Async -> Int
+  if num > 0
+    Async::resolve(num)
+  else
+    Async::reject("Number must be positive")
+
+// A use statement can may the function a little cleaner
+use Async::{resolve, reject}
+
+fn asyncTask(num: i32) -> Int
+  if num > 0
+    resolve(num)
+  else
+    reject("Number must be positive")
 ```

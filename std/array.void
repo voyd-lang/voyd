@@ -1,0 +1,24 @@
+use std::macros::all
+
+macro binaryen_gc_call(func, args)
+  ` binaryen func: $func namespace: gc args: $args
+
+macro bin_type_to_heap_type(type)
+  // binaryen_gc_call(modBinaryenTypeToHeapType, ` [BnrType<($type)>])
+  ` binaryen
+    func: modBinaryenTypeToHeapType
+    namespace: gc
+    args: [BnrType<($type)>]
+
+pub fn ds_array_init<T>(size: i32) -> DsArray<T>
+  binaryen_gc_call(arrayNew, [bin_type_to_heap_type(DsArray<T>), size])
+
+pub fn get<T>(arr: DsArray<T>, index: i32) -> T
+  binaryen_gc_call(
+    arrayGet,
+    [arr, index, BnrType<T>, BnrConst(false)]
+  )
+
+pub fn set<T>(arr: DsArray<T>, index: i32, value: T) -> DsArray<T>
+  binaryen_gc_call(arraySet, [arr, index, value])
+  arr

@@ -9,7 +9,7 @@ export
 pub macro `()
   quote quote $@body
 
-macro let()
+pub macro let()
   define equals_expr body.extract(0)
   ` define $(equals_expr.extract(1)) $(equals_expr.extract(2))
 
@@ -26,8 +26,8 @@ pub macro global()
     else:
       ` define_mut_global
   `($@function,
-    $(equals_expr.extract(1))
-    $(equals_expr.extract(2))
+    $(equals_expr.extract(1)),
+    $(equals_expr.extract(2)))
 
 pub macro ';'()
   let func = body.extract(0)
@@ -67,37 +67,16 @@ pub macro fn()
       body.slice(type_arrow_index + 2)
     else: body.slice(1)
 
-  `(define_function,
+  let fn_body =
+    if expressions.length == 1 then:
+      expressions.extract(0)
+    else:
+      `(block).concat(expressions)
+
+  `(
+    define_function,
     $identifier,
     $params,
-    (return_type $@return_type)
-    $(`(block).concat(expressions)))
-
-pub macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
-  let params = `(parameters, left: $arg_type, right: $arg_type)
-  let body = ` binaryen
-    func: $wasm_fn
-    arg_types: [$arg_type, $arg_type]
-    return_type: $return_type
-    args: [left, right]
-
-  ` define_function $op $params return_type($return_type) $body
-
-
-
-pub macro match()
-  log "match"
-  let value_expr = body.extract(0)
-  let cases = body.slice(1)
-  let expand_cases = (cases, index) =>
-    let case = cases.extract(index)
-    if is_list(case) and not(index + 1 >= cases.length) then:
-      ` if $(extract case 0) == match_value
-        then: $(extract case 1)
-        else: $(&lambda cases (index + 1))
-    else: case
-
-  let conditions = expand_cases(cases, 0)
-  `
-    let match_value = $value_expr
-    $conditions
+    (return_type $@return_type),
+    $fn_body
+  )

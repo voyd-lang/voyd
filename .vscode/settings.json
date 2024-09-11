@@ -18,6 +18,7 @@
     "popcnt",
     "printstr",
     "rotr",
+    "structref",
     "Structs",
     "UFCS",
     "WASM",
@@ -25,7 +26,7 @@
   ],
   "debug.javascript.terminalOptions": {
     "skipFiles": ["<node_internals>/**"],
-    "outFiles": ["${workspaceFolder}/**/*.mjs"]
+    "outFiles": ["${workspaceFolder}/**/*.js"]
   },
   "editor.insertSpaces": true,
   "editor.tabSize": 2,
@@ -48,5 +49,6 @@
   },
   "[void]": {
     "editor.tabSize": 2
-  }
+  },
+  "vitest.nodeExecutable": ""
 }

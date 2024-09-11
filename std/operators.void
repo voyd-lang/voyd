@@ -1,18 +1,41 @@
 use std::macros::all
 
+macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
+  let params = `(parameters, left: $arg_type, right: $arg_type)
+  let body = ` binaryen
+    func: $wasm_fn
+    namespace: $arg_type
+    args: [left, right]
+
+  ` define_function $op $params return_type($return_type) $body
+
 pub def_wasm_operator('<', lt_s, i32, bool)
 pub def_wasm_operator('>', gt_s, i32, bool)
 pub def_wasm_operator('<=', le_s, i32, bool)
 pub def_wasm_operator('>=', ge_s, i32, bool)
 pub def_wasm_operator('==', eq, i32, bool)
-pub def_wasm_operator('and', 'and', i32, bool)
-pub def_wasm_operator('or', 'or', i32, bool)
-pub def_wasm_operator('xor', 'xor', i32, bool)
+pub def_wasm_operator('and', 'and', i32, i32)
+pub def_wasm_operator('or', 'or', i32, i32)
+pub def_wasm_operator('xor', 'xor', i32, i32)
 pub def_wasm_operator('not', ne, i32, bool)
 pub def_wasm_operator('+', add, i32, i32)
 pub def_wasm_operator('-', sub, i32, i32)
 pub def_wasm_operator('*', mul, i32, i32)
 pub def_wasm_operator('/', div_s, i32, i32)
+
+pub def_wasm_operator('<', lt_s, i64, bool)
+pub def_wasm_operator('>', gt_s, i64, bool)
+pub def_wasm_operator('<=', le_s, i64, bool)
+pub def_wasm_operator('>=', ge_s, i64, bool)
+pub def_wasm_operator('==', eq, i64, bool)
+pub def_wasm_operator('and', 'and', i64, i64)
+pub def_wasm_operator('or', 'or', i64, i64)
+pub def_wasm_operator('xor', 'xor', i64, i64)
+pub def_wasm_operator('not', ne, i64, bool)
+pub def_wasm_operator('+', add, i64, i64)
+pub def_wasm_operator('-', sub, i64, i64)
+pub def_wasm_operator('*', mul, i64, i64)
+pub def_wasm_operator('/', div_s, i64, i64)
 
 pub def_wasm_operator('<', lt, f32, bool)
 pub def_wasm_operator('>', gt, f32, bool)

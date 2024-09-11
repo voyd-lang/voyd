@@ -26,7 +26,7 @@ let my_object: MyObject = {
 
 Field shorthand:
 
-```
+```void
 // When a variable has the same name as a field;
 let a = 5
 // The field can be omitted
@@ -35,7 +35,7 @@ let value = { a, b: 4 }
 
 Spread operator:
 
-```
+```void
 type MyObject2 = {
   a: i32,
   b: i32,
@@ -69,7 +69,7 @@ explicitly defined to satisfy it. This is called a nominal type.
 
 For example:
 
-```
+```void
 type BaseballPlayer = {
   has_bat: bool
 }
@@ -95,7 +95,7 @@ cave to hit a ball.
 
 to alleviate this, we can define a nominal subtype of `Object`:
 
-```
+```void
 obj BaseballPlayer {
   has_bat: bool
 }
@@ -118,7 +118,7 @@ While a nominal object can satisfy a structural type with the same fields, the
 reverse is not true. A nominal object can only be used where the type it extends
 is expected.
 
-```
+```void
 obj Animal {
   name: String
 }
@@ -156,7 +156,7 @@ pet_structural(Cat { name: "Whiskers", lives_remaining: 9 })
 Nominal objects have a default initializer that takes the fields of the object
 as arguments.
 
-```
+```void
 obj Animal {
   id: i32
   name: String
@@ -168,7 +168,7 @@ let me = Animal { name: "John", id: 1 }
 You can add a custom initializer by defining a function with the same name as
 the object that accepts different arguments.
 
-```
+```void
 obj Animal {
   id: i32
   name: String
@@ -182,7 +182,7 @@ fn Animal({ name: String }) -> Animal
 
 Methods can be defined on nominal objects using the `impl` keyword.
 
-```
+```void
 obj Animal {
   name: String
 }
@@ -205,7 +205,7 @@ log(me.run()) // "John is running!"
 
 Objects can be defined as final, meaning they cannot be extended.
 
-```
+```void
 final obj Animal {
   name: String
 }
@@ -214,6 +214,32 @@ final obj Animal {
 obj Cat extends Animal {
   lives_remaining: i32
 }
+```
+
+## Object Type Narrowing
+
+```void
+obj Optional
+
+obj None extends Optional
+
+obj Some extends Optional {
+  value: i32
+}
+
+fn divide(a: i32, b: i32) -> Optional
+  if b == 0
+    None { }
+  else:
+    Some { value: a / b }
+
+fn main(a: i32, b: i32)
+  a.divide(b)
+    .match(x)
+      Some:
+        log "The value is ${x}"
+      None:
+        log "Error: divide by zero"
 ```
 
 # Traits

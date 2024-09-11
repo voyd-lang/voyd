@@ -22,7 +22,7 @@ fn app() -> JSX::Element
   <div>
     <h1>TODO</h1>
     <ul>
-      ${todo_items.map i => <li>${i}</li>}
+      {todo_items.map i => <li>{i}</li>}
     </ul>
   </div>
 ```
@@ -71,10 +71,11 @@ voidc path/to/code.void
 
 **Requirements**
 
-Currently requires node v22 nightly
+Currently requires node v22
 
-```
-fnm --node-dist-mirror https://nodejs.org/download/nightly install v22
+```bash
+# Or nvm
+fnm install v22
 ```
 
 # Overview
@@ -90,13 +91,12 @@ fnm --node-dist-mirror https://nodejs.org/download/nightly install v22
 ```rust
 true // Boolean
 false // Boolean
-1 // i32 by default (32 bit integer)
-1.0 // f32 by default (32 bit float)
+1 // i32 by default
+1.0 // f32 by default
 "Hello!" // String, can be multiline, supports interpolation via ${}
-[1, 2, 3] // Tuple literal
+[1, 2, 3] // Array literal
+(1, 2, 3) // Tuple literal
 {x: 2, y: 4} // Object literal
-#[1, 2, 3] // Array
-#{x: 3, y: 4} // Dictionary
 ```
 
 ## Variables
@@ -240,17 +240,20 @@ for item in iterable
 
 ### Match Statements
 
+Match statements are used for type narrowing
+
 ```rust
-let x = 3
-match x
-  1 => print "One"
-  2 => print "Two"
-  3 => print "Three"
-  _ =>
-    // Match statements are exhaustive, they must cover every possible
-    // case. When not every case is covered, a default handler must be
-    // provided.
-    write "A number"
+obj Animal
+obj Cat extends Animal
+obj Dog extends Animal
+
+let dog = Dog {}
+
+match(dog)
+  Dog: print "Woof"
+  Cat: print "Meow"
+  else:
+    print "Blurb"
 ```
 
 ## Closures

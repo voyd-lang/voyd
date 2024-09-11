@@ -2,29 +2,37 @@
   "name": "voidc",
   "version": "0.4.0",
   "description": "",
-  "module": "dist/index.mjs",
+  "module": "dist/index.js",
   "type": "module",
+  "types": "./src/index.ts",
+  "exports": "./dist/index.js",
   "scripts": {
-    "test": "node --test",
+    "test": "vitest",
+    "snapshot": "vitest -u",
+    "build": "npx tsc",
     "prepublishOnly": "tsc"
   },
   "bin": {
-    "voidc": "./dist/index.mjs",
-    "void": "./dist/index.mjs"
+    "voidc": "./dist/cli/cli.js",
+    "void": "./dist/cli/cli.js",
+    "vt": "./src/cli/cli-dev.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@types/node": "^22.5.1",
     "@typescript-eslint/eslint-plugin": "^4.4.0",
     "@typescript-eslint/parser": "^4.4.0",
+    "@vitest/ui": "^2.0.5",
     "eslint": "^7.10.0",
-    "typescript": "^4.9.3"
+    "ts-node": "^10.9.2",
+    "typescript": "^4.9.3",
+    "vitest": "^2.0.5"
   },
   "dependencies": {
-    "@types/node": "^18.11.9",
     "@types/uniqid": "^4.1.3",
-    "binaryen": "^116.0.0",
+    "binaryen": "^118.0.0",
     "commander": "^5.1.0",
     "eventemitter2": "^6.4.2",
     "glob": "^10.3.10",
