@@ -125,8 +125,8 @@ export const expandMacro = (macro: Macro, call: List): Expr => {
     registerMacroVar({ with: clone, name, value: call.at(index + 1)! });
   });
 
-  const result = clone.evaluate(evalMacroExpr) ?? nop();
-  result.parent = call.parent;
+  // We clone to restore the original parent to all children
+  const result = clone.evaluate(evalMacroExpr)?.clone(call.parent) ?? nop();
   result.location = call.location;
   return result;
 };
@@ -175,9 +175,7 @@ const callLambda = (lambda: MacroLambda, args: List): Expr => {
     registerMacroVar({ with: clone, name, value: args.at(index)! });
   });
 
-  const result = clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
-  result.parent = args.parent;
-  return result;
+  return clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
 };
 
 type MacroFn = (args: List) => Expr;
@@ -248,13 +246,11 @@ const functions: Record<string, MacroFn | undefined> = {
       body.mapFilter((exp) => {
         if (exp.isList() && exp.calls("$")) {
           const val = exp.at(1) ?? nop();
-          val.parent = body;
           return evalMacroExpr(val);
         }
 
         if (exp.isList() && exp.calls("$@")) {
           const val = exp.at(1) ?? nop();
-          val.parent = body;
           return (evalMacroExpr(val) as List).insert("splice_quote");
         }
 

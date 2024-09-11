@@ -68,7 +68,7 @@ exports[`regular macro expansion 1`] = `
         ],
         [
           "regular-macro",
-          "let#792",
+          "let#807",
           [
             "parameters",
           ],
@@ -121,7 +121,7 @@ exports[`regular macro expansion 1`] = `
         ],
         [
           "regular-macro",
-          "fn#1271",
+          "fn#1458",
           [
             "parameters",
           ],

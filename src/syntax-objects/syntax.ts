@@ -7,7 +7,7 @@ import type { Fn } from "./fn.js";
 import type { Global } from "./global.js";
 import type { Id, Identifier } from "./identifier.js";
 import type { Int } from "./int.js";
-import { RootModule, type VoidModule } from "./module.js";
+import { type VoidModule } from "./module.js";
 import { LexicalContext } from "./lexical-context.js";
 import type { List } from "./list.js";
 import type { MacroLambda } from "./macro-lambda.js";
