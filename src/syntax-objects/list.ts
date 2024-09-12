@@ -163,11 +163,6 @@ export class List extends Syntax {
     return this.toArray().findIndex(cb);
   }
 
-  insertFnCall(name: string) {
-    this.insert(name, 0).insert(",", 1);
-    return this;
-  }
-
   insert(expr: Expr | string, at = 0) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
     result.parent = this;

@@ -205,6 +205,6 @@ export class HTMLParser {
   }
 }
 
-const dict = () => new List({}).insertFnCall("dict");
+const dict = () => new List({}).insert("dict");
 const dictItem = (key: string, value: Expr) => array().push(key, value);
-const array = () => new List({}).insertFnCall("array");
+const array = () => new List({}).insert("array");
