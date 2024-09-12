@@ -1,4 +1,4 @@
-import { isContinuationOp, isGreedyOp } from "../grammar.js";
+import { idIs, isContinuationOp, isGreedyOp } from "../grammar.js";
 import { Expr, List } from "../../syntax-objects/index.js";
 
 export const interpretWhitespace = (list: List, indentLevel?: number): List => {
@@ -69,7 +69,7 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
       continue;
     }
 
-    if (next?.isIdentifier() && next.is(",")) {
+    if (idIs(next, ",")) {
       break;
     }
 
@@ -133,7 +133,7 @@ const nextExprIndentLevel = (list: List, startIndex?: number) => {
       continue;
     }
 
-    if (expr?.isIdentifier() && expr.is(",")) {
+    if (idIs(expr, ",")) {
       return 0;
     }
 
@@ -156,7 +156,7 @@ const nextNonWhitespace = (list: List, startIndex?: number) => {
 const consumeLeadingWhitespace = (list: List) => {
   while (list.hasChildren) {
     const next = list.first();
-    if (next?.isWhitespace() || (next?.isIdentifier() && next.is(","))) {
+    if (next?.isWhitespace() || idIs(next, ",")) {
       list.consume();
       continue;
     }
