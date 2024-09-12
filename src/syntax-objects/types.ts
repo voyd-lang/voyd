@@ -3,6 +3,7 @@ import { Parameter } from "./parameter.js";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
 import { Id, Identifier } from "./identifier.js";
 import { getIdStr } from "./get-id-str.js";
+import { LexicalContext } from "./lexical-context.js";
 
 export type Type =
   | PrimitiveType
@@ -162,6 +163,7 @@ export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
 
 export class ObjectType extends BaseType {
   readonly kindOfType = "object";
+  namespace: LexicalContext = new LexicalContext();
   typeParameters?: Identifier[];
   appliedTypeArgs?: Type[];
   genericInstances?: ObjectType[];

@@ -86,12 +86,13 @@ export const isInfixOpIdentifier = (op?: Identifier) =>
 export const isOp = (op?: Expr): boolean => isInfixOp(op) || isPrefixOp(op);
 
 export const prefixOps: OpMap = new Map([
-  ["#", 7],
+  ["#", 0],
   ["&", 7],
   ["!", 7],
   ["~", 7],
   ["%", 7],
   ["$", 7],
+  ["@", 7],
   ["$@", 7],
   ["...", 5],
 ]);
