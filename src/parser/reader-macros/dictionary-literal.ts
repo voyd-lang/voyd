@@ -4,6 +4,6 @@ export const dictionaryLiteralMacro: ReaderMacro = {
   match: (t) => t.value === "#{",
   macro: (file, { reader }) => {
     const items = reader(file, "}");
-    return items.insertFnCall("dict");
+    return items.insert("dict");
   },
 };

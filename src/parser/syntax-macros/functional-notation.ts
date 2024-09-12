@@ -1,4 +1,4 @@
-import { isOp } from "../grammar.js";
+import { idIs, isOp } from "../grammar.js";
 import { Expr, List } from "../../syntax-objects/index.js";
 
 export const functionalNotation = (list: List): List => {
@@ -9,11 +9,11 @@ export const functionalNotation = (list: List): List => {
     if (expr.isWhitespace()) return expr;
 
     const nextExpr = array[index + 1];
-    if (nextExpr && nextExpr.isList() && !isOp(expr)) {
+    if (nextExpr && nextExpr.isList() && !(isOp(expr) || idIs(expr, ","))) {
       return processFnCall(expr, nextExpr, array, index);
     }
 
-    if (list.mayBeTuple && expr.isIdentifier() && expr.is(",")) {
+    if (list.mayBeTuple && idIs(expr, ",")) {
       isTuple = true;
     }
 

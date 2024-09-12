@@ -6,6 +6,6 @@ export const genericsMacro: ReaderMacro = {
   },
   macro: (file, { reader }) => {
     const items = reader(file, ">");
-    return items.insert("generics").insert(",", 1);
+    return items.insert("generics");
   },
 };
