@@ -1,6 +1,9 @@
 import { Expr } from "../syntax-objects/expr.js";
 import { Identifier } from "../syntax-objects/identifier.js";
 
+export const idIs = (id: Expr | undefined, value: string) =>
+  id?.isIdentifier() && id.is(value);
+
 export const isTerminator = (char: string) =>
   isWhitespace(char) ||
   isBracket(char) ||
