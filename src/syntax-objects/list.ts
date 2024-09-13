@@ -95,9 +95,7 @@ export class List extends Syntax {
   }
 
   consume(): Expr {
-    const next = this.#store.shift();
-    if (!next) throw new Error("No remaining expressions");
-    return next;
+    return this.#store.consume();
   }
 
   first(): Expr | undefined {
@@ -200,7 +198,7 @@ export class List extends Syntax {
   slice(start?: number, end?: number): List {
     return new List({
       ...super.getCloneOpts(),
-      value: this.#store.slice(start, end).toArray(),
+      value: this.#store.slice(start, end),
     });
   }
 
