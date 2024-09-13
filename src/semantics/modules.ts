@@ -51,7 +51,7 @@ const registerModule = ({
   }
 
   if (!existingModule && (name === "index" || name === "mod")) {
-    parentModule.unshift(...ast.toArray());
+    parentModule.unshift(...ast.toArray().reverse());
     return;
   }
 
@@ -73,7 +73,7 @@ const registerModule = ({
   }
 
   if (existingModule && !rest.length) {
-    module.unshift(...ast.toArray());
+    module.unshift(...ast.toArray().reverse());
   }
 
   if (!rest.length) return;

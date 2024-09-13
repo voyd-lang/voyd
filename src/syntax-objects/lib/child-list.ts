@@ -37,6 +37,13 @@ export class ChildList<T extends Expr = Expr> {
     return this.store.length;
   }
 
+  private registerExpr(expr: T) {
+    expr.parent = this.parent;
+    if (expr instanceof NamedEntity) {
+      this.parent.registerEntity(expr);
+    }
+  }
+
   at(index: number): Expr | undefined {
     return this.store.at(index);
   }
@@ -73,11 +80,7 @@ export class ChildList<T extends Expr = Expr> {
   }
 
   set(index: number, expr: T) {
-    expr.parent = this.parent;
-    if (expr instanceof NamedEntity) {
-      this.parent.registerEntity(expr);
-    }
-
+    this.registerExpr(expr);
     this.store.set(index, expr);
     return this;
   }
@@ -116,14 +119,9 @@ export class ChildList<T extends Expr = Expr> {
 
   push(...expr: T[]) {
     expr.forEach((ex) => {
-      ex.parent = this.parent;
-      if (ex instanceof NamedEntity) {
-        this.parent.registerEntity(ex);
-      }
-
+      this.registerExpr(ex);
       this.store.push(ex);
     });
-
     return this;
   }
 
@@ -132,7 +130,7 @@ export class ChildList<T extends Expr = Expr> {
   }
 
   insert(expr: T, at = 0) {
-    expr.parent = this.parent;
+    this.registerExpr(expr);
     this.store.splice(at, 0, expr);
     return this;
   }
@@ -184,6 +182,19 @@ export class ChildList<T extends Expr = Expr> {
 
   sliceAsArray(start?: number, end?: number) {
     return this.store.slice(start, end);
+  }
+
+  shift(): T | undefined {
+    return this.store.shift();
+  }
+
+  unshift(...expr: T[]) {
+    expr.forEach((ex) => {
+      this.registerExpr(ex);
+      this.store.unshift(ex);
+    });
+
+    return this;
   }
 
   toArray(): T[] {

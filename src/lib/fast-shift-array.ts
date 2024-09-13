@@ -1,3 +1,5 @@
+import { at } from "vitest/dist/chunks/reporters.C_zwCd4j.js";
+
 // TODO: Add map, filter, reduce, amd findIndex
 export class FastShiftArray<T> {
   private items: T[];
@@ -18,15 +20,6 @@ export class FastShiftArray<T> {
     return value;
   }
 
-  unshift(...items: T[]): number {
-    if (items.length === 0) return this.length;
-    this.headIndex = Math.max(this.headIndex - items.length, 0);
-    for (let i = 0; i < items.length; i++) {
-      this.items[this.headIndex + i] = items[i];
-    }
-    return this.length;
-  }
-
   push(...items: T[]): number {
     this.items.push(...items);
     return this.length;
@@ -35,6 +28,11 @@ export class FastShiftArray<T> {
   pop(): T | undefined {
     if (this.length === 0) return undefined;
     return this.items.pop();
+  }
+
+  unshift(...items: T[]): number {
+    this.items.splice(this.headIndex, 0, ...items);
+    return this.length;
   }
 
   at(index: number): T | undefined {

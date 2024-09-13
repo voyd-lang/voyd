@@ -1,4 +1,3 @@
-import { FastShiftArray } from "../lib/fast-shift-array.js";
 import { Expr } from "./expr.js";
 import { Float } from "./float.js";
 import { getIdStr } from "./lib/get-id-str.js";
@@ -6,12 +5,13 @@ import { Id, Identifier } from "./identifier.js";
 import { Int } from "./int.js";
 import { NamedEntity } from "./named-entity.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
+import { ChildList } from "./lib/child-list.js";
 
 export class List extends Syntax {
   readonly syntaxType = "list";
   /** True when the list was defined by the user using parenthesis i.e. (hey, there) */
   mayBeTuple?: boolean;
-  store: FastShiftArray<Expr> = new FastShiftArray();
+  #store = new ChildList(undefined, this);
 
   constructor(
     opts:
@@ -35,23 +35,23 @@ export class List extends Syntax {
   }
 
   get children() {
-    return this.store.toArray();
+    return this.toArray();
   }
 
   get hasChildren() {
-    return !!this.store.length;
+    return !!this.#store.length;
   }
 
   get length() {
-    return this.store.length;
+    return this.#store.length;
   }
 
   at(index: number): Expr | undefined {
-    return this.store.at(index);
+    return this.#store.at(index);
   }
 
   exprAt(index: number): Expr {
-    const expr = this.store.at(index);
+    const expr = this.#store.at(index);
     if (!expr) {
       throw new Error(`No expr at ${index}`);
     }
@@ -84,7 +84,7 @@ export class List extends Syntax {
   set(index: number, expr: Expr | string) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
     result.parent = this;
-    this.store.set(index, result);
+    this.#store.set(index, result);
     return this;
   }
 
@@ -98,42 +98,42 @@ export class List extends Syntax {
   }
 
   consume(): Expr {
-    const next = this.store.shift();
+    const next = this.#store.shift();
     if (!next) throw new Error("No remaining expressions");
     return next;
   }
 
   first(): Expr | undefined {
-    return this.store.at(0);
+    return this.#store.at(0);
   }
 
   last(): Expr | undefined {
-    return this.store.at(-1);
+    return this.#store.at(-1);
   }
 
   /** Returns all but the first element in an array */
   argsArray(): Expr[] {
-    return this.store.toArray().slice(1);
+    return this.#store.toArray().slice(1);
   }
 
   pop(): Expr | undefined {
-    return this.store.pop();
+    return this.#store.pop();
   }
 
   push(...expr: ListValue[]) {
     expr.forEach((ex) => {
       if (typeof ex === "string") {
-        this.store.push(new Identifier({ value: ex, parent: this }));
+        this.#store.push(new Identifier({ value: ex, parent: this }));
         return;
       }
 
       if (typeof ex === "number" && Number.isInteger(ex)) {
-        this.store.push(new Int({ value: ex, parent: this }));
+        this.#store.push(new Int({ value: ex, parent: this }));
         return;
       }
 
       if (typeof ex === "number") {
-        this.store.push(new Float({ value: ex, parent: this }));
+        this.#store.push(new Float({ value: ex, parent: this }));
         return;
       }
 
@@ -149,11 +149,11 @@ export class List extends Syntax {
       }
 
       if (ex.isList() && ex.calls("splice_quote")) {
-        this.store.push(...ex.argsArray());
+        this.#store.push(...ex.argsArray());
         return;
       }
 
-      this.store.push(ex);
+      this.#store.push(ex);
     });
 
     return this;
@@ -165,13 +165,12 @@ export class List extends Syntax {
 
   insert(expr: Expr | string, at = 0) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
-    result.parent = this;
-    this.store.splice(at, 0, result);
+    this.#store.insert(result, at);
     return this;
   }
 
   remove(index: number, count = 1) {
-    this.store.splice(index, count);
+    this.#store.remove(index, count);
     return this;
   }
 
@@ -210,16 +209,16 @@ export class List extends Syntax {
   slice(start?: number, end?: number): List {
     return new List({
       ...super.getCloneOpts(),
-      value: this.store.slice(start, end),
+      value: this.#store.slice(start, end).toArray(),
     });
   }
 
   sliceAsArray(start?: number, end?: number) {
-    return this.store.slice(start, end);
+    return this.children.slice(start, end);
   }
 
   toArray(): Expr[] {
-    return this.store.toArray();
+    return this.#store.toArray();
   }
 
   toJSON() {
