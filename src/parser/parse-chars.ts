@@ -31,7 +31,7 @@ export const parseChars = (
 
     if (token.is("(")) {
       const subList = parseChars(file, { nested: true });
-      subList.mayBeTuple = true;
+      subList.setAttribute("tuple?", true);
       list.push(subList);
       continue;
     }

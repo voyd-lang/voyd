@@ -1,7 +1,7 @@
 import { Expr } from "./expr.js";
 import { Fn } from "./fn.js";
 import { Identifier } from "./identifier.js";
-import { LexicalContext } from "./lexical-context.js";
+import { LexicalContext } from "./lib/lexical-context.js";
 import { List } from "./list.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
 import { ObjectType, Type } from "./types.js";
@@ -13,7 +13,7 @@ export class Call extends Syntax {
   fnName: Identifier;
   args: List;
   typeArgs?: List;
-  _type?: Type;
+  #type?: Type;
 
   constructor(
     opts: SyntaxMetadata & {
@@ -32,7 +32,7 @@ export class Call extends Syntax {
     this.args.parent = this;
     this.typeArgs = opts.typeArgs;
     if (this.typeArgs) this.typeArgs.parent = this;
-    this._type = opts.type;
+    this.#type = opts.type;
   }
 
   get children() {
@@ -40,19 +40,19 @@ export class Call extends Syntax {
   }
 
   set type(type: Type | undefined) {
-    this._type = type;
+    this.#type = type;
   }
 
   get type() {
-    if (!this._type && this.fn?.isFn()) {
-      this._type = this.fn.returnType;
+    if (!this.#type && this.fn?.isFn()) {
+      this.#type = this.fn.returnType;
     }
 
-    if (!this._type && this.fn?.isObjectType()) {
-      this._type = this.fn;
+    if (!this.#type && this.fn?.isObjectType()) {
+      this.#type = this.fn;
     }
 
-    return this._type;
+    return this.#type;
   }
 
   eachArg(fn: (expr: Expr) => void) {

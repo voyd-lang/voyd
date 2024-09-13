@@ -2,8 +2,8 @@ import { Expr } from "./expr.js";
 import { Parameter } from "./parameter.js";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
 import { Id, Identifier } from "./identifier.js";
-import { getIdStr } from "./get-id-str.js";
-import { LexicalContext } from "./lexical-context.js";
+import { getIdStr } from "./lib/get-id-str.js";
+import { LexicalContext } from "./lib/lexical-context.js";
 
 export type Type =
   | PrimitiveType

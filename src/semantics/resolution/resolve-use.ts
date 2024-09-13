@@ -139,7 +139,7 @@ export const resolveExport = (call: Call) => {
   const block = call.argAt(0);
   if (!block?.isBlock()) return call;
 
-  const entities = block.body.toArray().map(resolveTypes);
+  const entities = block.body.map(resolveTypes);
   registerExports(call, entities, resolveModuleTypes);
 
   return call;

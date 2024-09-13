@@ -1,5 +1,7 @@
 import type { Expr } from "./expr.js";
 import { Identifier } from "./identifier.js";
+import { ChildList } from "./lib/child-list.js";
+import { Child } from "./lib/child.js";
 import { ScopedNamedEntity, ScopedNamedEntityOpts } from "./named-entity.js";
 import { Parameter } from "./parameter.js";
 import { FnType, Type } from "./types.js";
@@ -7,83 +9,72 @@ import { Variable } from "./variable.js";
 
 export class Fn extends ScopedNamedEntity {
   readonly syntaxType = "fn";
+  readonly #parameters = new ChildList<Parameter>([], this);
+  readonly #body = new Child<Expr | undefined>(undefined, this);
+  readonly #returnTypeExpr = new Child<Expr | undefined>(undefined, this);
+  readonly #genericInstances = new ChildList<Fn>([], this);
+  #typeParams = new ChildList<Identifier>([], this);
   variables: Variable[] = [];
-  _parameters: Parameter[] = [];
-  typeParameters?: Identifier[];
-  appliedTypeArgs?: Type[] = [];
-  /** When a function has generics, resolved versions of the functions go here */
-  genericInstances?: Fn[] = [];
-  returnType?: Type;
-  _returnTypeExpr?: Expr;
+  returnType?: Type; // When a function has generics, resolved versions of the functions go here
   inferredReturnType?: Type;
   annotatedReturnType?: Type;
+  appliedTypeArgs?: Type[] = [];
   typesResolved?: boolean;
-  private _body?: Expr;
 
   constructor(
     opts: ScopedNamedEntityOpts & {
-      returnType?: Type;
       returnTypeExpr?: Expr;
       variables?: Variable[];
-      parameters: Parameter[];
+      parameters?: Parameter[];
       typeParameters?: Identifier[];
-      genericInstances?: Fn[];
       body?: Expr;
     }
   ) {
     super(opts);
-    this.returnType = opts.returnType;
-    this.parameters = opts.parameters ?? [];
-    this.variables = opts.variables ?? [];
-    this.typeParameters = opts.typeParameters;
-    this.genericInstances = opts.genericInstances;
+    this.#parameters.push(...(opts.parameters ?? []));
+    this.#typeParams.push(...(opts.typeParameters ?? []));
     this.returnTypeExpr = opts.returnTypeExpr;
+    this.variables = opts.variables ?? [];
     this.body = opts.body;
   }
 
   get body() {
-    return this._body;
+    return this.#body.value;
   }
 
   set body(body: Expr | undefined) {
-    if (body) {
-      body.parent = this;
-    }
-
-    this._body = body;
+    this.#body.value = body;
   }
 
   get parameters() {
-    return this._parameters;
-  }
-
-  set parameters(parameters: Parameter[]) {
-    this._parameters = parameters;
-    parameters.forEach((p) => {
-      p.parent = this;
-      this.registerEntity(p);
-    });
+    return this.#parameters.toArray();
   }
 
   get returnTypeExpr() {
-    return this._returnTypeExpr;
+    return this.#returnTypeExpr.value;
   }
 
   set returnTypeExpr(returnTypeExpr: Expr | undefined) {
-    if (returnTypeExpr) {
-      returnTypeExpr.parent = this;
-    }
+    this.#returnTypeExpr.value = returnTypeExpr;
+  }
 
-    this._returnTypeExpr = returnTypeExpr;
+  get genericInstances() {
+    const instances = this.#genericInstances.toArray();
+    return !instances.length ? undefined : instances;
+  }
+
+  get typeParameters() {
+    const params = this.#typeParams.toArray();
+    return !params.length ? undefined : params;
+  }
+
+  set typeParameters(params: Identifier[] | undefined) {
+    this.#typeParams = new ChildList(params ?? [], this);
   }
 
   // Register a version of this function with resolved generics
   registerGenericInstance(fn: Fn) {
-    if (!this.genericInstances) {
-      this.genericInstances = [];
-    }
-
-    this.genericInstances.push(fn);
+    this.#genericInstances.push(fn);
   }
 
   getNameStr(): string {
@@ -127,15 +118,6 @@ export class Fn extends ScopedNamedEntity {
     );
   }
 
-  registerLocal(local: Variable | Parameter) {
-    if (local.syntaxType === "variable") {
-      this.variables.push(local);
-      return;
-    }
-
-    this.parameters.push(local);
-  }
-
   toString() {
     return this.id;
   }
@@ -144,11 +126,11 @@ export class Fn extends ScopedNamedEntity {
     // Don't clone generic instances
     return new Fn({
       ...super.getCloneOpts(parent),
-      variables: this.variables.map((v) => v.clone()),
-      parameters: this.parameters.map((p) => p.clone()),
+      variables: this.variables,
       returnTypeExpr: this.returnTypeExpr?.clone(),
+      parameters: this.#parameters.toClonedArray(),
+      typeParameters: this.#typeParams.toClonedArray(),
       body: this.body?.clone(),
-      typeParameters: this.typeParameters?.map((tp) => tp.clone()),
     });
   }
 
@@ -157,7 +139,7 @@ export class Fn extends ScopedNamedEntity {
       "fn",
       this.id,
       ["parameters", ...this.parameters],
-      ["type-parameters", ...(this.typeParameters ?? [])],
+      ["type-parameters", ...(this.#typeParams.toArray() ?? [])],
       ["return-type", this.returnType],
       this.body,
     ];

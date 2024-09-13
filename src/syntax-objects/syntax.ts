@@ -8,7 +8,7 @@ import type { Global } from "./global.js";
 import type { Id, Identifier } from "./identifier.js";
 import type { Int } from "./int.js";
 import { type VoidModule } from "./module.js";
-import { LexicalContext } from "./lexical-context.js";
+import { LexicalContext } from "./lib/lexical-context.js";
 import type { List } from "./list.js";
 import type { MacroLambda } from "./macro-lambda.js";
 import type { MacroVariable } from "./macro-variable.js";
@@ -32,15 +32,19 @@ import { Declaration } from "./declaration.js";
 import { Use } from "./use.js";
 import { Match } from "./match.js";
 
+export type Attributes = { [key: string]: unknown };
+
 export type SyntaxMetadata = {
   location?: SourceLocation;
   parent?: Expr;
+  attributes?: Attributes;
 };
 
 export abstract class Syntax {
   /** For tagged unions */
   abstract readonly syntaxType: string;
   readonly syntaxId = getSyntaxId();
+  #attributes?: Attributes;
   location?: SourceLocation;
   parent?: Expr;
 
@@ -48,6 +52,7 @@ export abstract class Syntax {
     const { location, parent } = metadata;
     this.location = location;
     this.parent = parent;
+    this.#attributes = metadata.attributes;
   }
 
   get parentFn(): Fn | undefined {
@@ -62,6 +67,7 @@ export abstract class Syntax {
     return {
       location: this.location,
       parent: this.parent,
+      attributes: this.#attributes ? { ...this.#attributes } : undefined,
     };
   }
 
@@ -125,6 +131,21 @@ export abstract class Syntax {
 
   /** Should emit in compliance with core language spec */
   abstract toJSON(): unknown;
+
+  setAttribute(key: string, value: unknown) {
+    if (!this.#attributes) this.#attributes = {};
+    this.#attributes[key] = value;
+  }
+
+  getAttribute(key: string): unknown {
+    if (!this.#attributes) return undefined;
+    return this.#attributes[key];
+  }
+
+  hasAttribute(key: string): boolean {
+    if (!this.#attributes) return false;
+    return this.#attributes[key] !== undefined;
+  }
 
   isScopedEntity(): this is ScopedEntity {
     return (this as unknown as ScopedEntity).lexicon instanceof LexicalContext;
