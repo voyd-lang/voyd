@@ -1,37 +1,21 @@
-import { FastShiftArray } from "../lib/fast-shift-array.js";
-import { Expr } from "./expr.js";
-import { Float } from "./float.js";
-import { getIdStr } from "./lib/get-id-str.js";
-import { Id, Identifier } from "./identifier.js";
-import { Int } from "./int.js";
-import { NamedEntity } from "./named-entity.js";
-import { Syntax, SyntaxMetadata } from "./syntax.js";
+import { FastShiftArray } from "../../lib/fast-shift-array.js";
+import { Expr } from "../expr.js";
+import { Float } from "../float.js";
+import { Id, Identifier } from "../identifier.js";
+import { Int } from "../int.js";
+import { List, ListValue } from "../list.js";
+import { NamedEntity } from "../named-entity.js";
+import { getIdStr } from "./get-id-str.js";
 
-export class List extends Syntax {
-  readonly syntaxType = "list";
-  /** True when the list was defined by the user using parenthesis i.e. (hey, there) */
-  mayBeTuple?: boolean;
-  store: FastShiftArray<Expr> = new FastShiftArray();
+export type ChildListValue = Expr | string | number | ChildListValue[];
 
-  constructor(
-    opts:
-      | ListValue[]
-      | (SyntaxMetadata & {
-          value?: ListValue[] | List;
-          isParentheticalList?: boolean;
-        })
-  ) {
-    opts = Array.isArray(opts) ? { value: opts } : opts;
-    super(opts);
+export class ChildList {
+  private store: FastShiftArray<Expr> = new FastShiftArray();
+  private parent: Expr;
 
-    const value = opts.value;
-    this.mayBeTuple = opts.isParentheticalList;
-
-    if (!value || value instanceof Array) {
-      this.push(...(value ?? []));
-    } else {
-      this.push(...value.toArray());
-    }
+  constructor(children: ChildListValue[] = [], parent: Expr) {
+    this.push(...children);
+    this.parent = parent;
   }
 
   get children() {
@@ -83,7 +67,7 @@ export class List extends Syntax {
 
   set(index: number, expr: Expr | string) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
-    result.parent = this;
+    result.parent = this.parent;
     this.store.set(index, result);
     return this;
   }
@@ -123,29 +107,29 @@ export class List extends Syntax {
   push(...expr: ListValue[]) {
     expr.forEach((ex) => {
       if (typeof ex === "string") {
-        this.store.push(new Identifier({ value: ex, parent: this }));
+        this.store.push(new Identifier({ value: ex, parent: this.parent }));
         return;
       }
 
       if (typeof ex === "number" && Number.isInteger(ex)) {
-        this.store.push(new Int({ value: ex, parent: this }));
+        this.store.push(new Int({ value: ex, parent: this.parent }));
         return;
       }
 
       if (typeof ex === "number") {
-        this.store.push(new Float({ value: ex, parent: this }));
+        this.store.push(new Float({ value: ex, parent: this.parent }));
         return;
       }
 
       if (ex instanceof Array) {
-        this.push(new List({ value: ex, parent: this }));
+        this.push(new List({ value: ex, parent: this.parent }));
         return;
       }
 
-      ex.parent = this;
+      ex.parent = this.parent;
 
       if (ex instanceof NamedEntity) {
-        this.registerEntity(ex);
+        this.parent.registerEntity(ex);
       }
 
       if (ex.isList() && ex.calls("splice_quote")) {
@@ -165,7 +149,7 @@ export class List extends Syntax {
 
   insert(expr: Expr | string, at = 0) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
-    result.parent = this;
+    result.parent = this.parent;
     this.store.splice(at, 0, result);
     return this;
   }
@@ -175,31 +159,25 @@ export class List extends Syntax {
     return this;
   }
 
-  filter(fn: (expr: Expr, index: number, array: Expr[]) => boolean): List {
-    return new List({
-      ...super.getCloneOpts(),
-      value: this.toArray().filter(fn),
-    });
+  filter(fn: (expr: Expr, index: number, array: Expr[]) => boolean): ChildList {
+    return new ChildList(this.toArray().filter(fn), this.parent);
   }
 
-  each(fn: (expr: Expr, index: number, array: Expr[]) => void): List {
+  each(fn: (expr: Expr, index: number, array: Expr[]) => void): ChildList {
     this.toArray().forEach(fn);
     return this;
   }
 
-  map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): List {
-    return new List({
-      ...super.getCloneOpts(),
-      value: this.toArray().map(fn),
-    });
+  map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): ChildList {
+    return new ChildList(this.toArray().map(fn), this.parent);
   }
 
   /** Like a regular map, but omits undefined values returned from the mapper */
   mapFilter(
     fn: (expr: Expr, index: number, array: Expr[]) => Expr | undefined
-  ): List {
-    const list = new List({ ...super.getCloneOpts() });
-    return this.toArray().reduce((newList: List, expr, index, array) => {
+  ): ChildList {
+    const list = new ChildList([], this.parent);
+    return this.toArray().reduce((newList: ChildList, expr, index, array) => {
       if (!expr) return newList;
       const result = fn(expr, index, array);
       if (!result) return newList;
@@ -207,18 +185,15 @@ export class List extends Syntax {
     }, list);
   }
 
-  slice(start?: number, end?: number): List {
-    return new List({
-      ...super.getCloneOpts(),
-      value: this.store.slice(start, end),
-    });
+  slice(start?: number, end?: number): ChildList {
+    return new ChildList(this.store.slice(start, end), this.parent);
   }
 
   sliceAsArray(start?: number, end?: number) {
     return this.store.slice(start, end);
   }
 
-  toArray(): Expr[] {
+  toArray() {
     return this.store.toArray();
   }
 
@@ -226,14 +201,10 @@ export class List extends Syntax {
     return this.toArray();
   }
 
-  /** Clones should return a deep copy of all expressions except for type expressions */
-  clone(parent?: Expr): List {
-    return new List({
-      ...super.getCloneOpts(parent),
-      value: this.toArray().map((v) => v.clone()),
-      isParentheticalList: this.mayBeTuple,
-    });
+  clone(parent?: Expr) {
+    return new ChildList(
+      this.toArray().map((expr) => expr.clone()),
+      parent ?? this.parent
+    );
   }
 }
-
-export type ListValue = Expr | string | number | ListValue[];

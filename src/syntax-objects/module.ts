@@ -2,7 +2,7 @@ import { Expr } from "./expr.js";
 import { Float } from "./float.js";
 import { Id, Identifier } from "./identifier.js";
 import { Int } from "./int.js";
-import { LexicalContext } from "./lexical-context.js";
+import { LexicalContext } from "./lib/lexical-context.js";
 import { List, ListValue } from "./list.js";
 import {
   NamedEntity,

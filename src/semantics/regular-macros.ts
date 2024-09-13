@@ -1,4 +1,4 @@
-import { getIdStr } from "../syntax-objects/get-id-str.js";
+import { getIdStr } from "../syntax-objects/lib/get-id-str.js";
 import {
   Bool,
   Expr,

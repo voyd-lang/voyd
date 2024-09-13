@@ -8,7 +8,7 @@ import type { Global } from "./global.js";
 import type { Id, Identifier } from "./identifier.js";
 import type { Int } from "./int.js";
 import { type VoidModule } from "./module.js";
-import { LexicalContext } from "./lexical-context.js";
+import { LexicalContext } from "./lib/lexical-context.js";
 import type { List } from "./list.js";
 import type { MacroLambda } from "./macro-lambda.js";
 import type { MacroVariable } from "./macro-variable.js";
@@ -35,12 +35,14 @@ import { Match } from "./match.js";
 export type SyntaxMetadata = {
   location?: SourceLocation;
   parent?: Expr;
+  attributes?: Map<string, unknown>;
 };
 
 export abstract class Syntax {
   /** For tagged unions */
   abstract readonly syntaxType: string;
   readonly syntaxId = getSyntaxId();
+  private attributes: Map<string, unknown>;
   location?: SourceLocation;
   parent?: Expr;
 
@@ -48,6 +50,7 @@ export abstract class Syntax {
     const { location, parent } = metadata;
     this.location = location;
     this.parent = parent;
+    this.attributes = metadata.attributes ?? new Map();
   }
 
   get parentFn(): Fn | undefined {
@@ -62,6 +65,7 @@ export abstract class Syntax {
     return {
       location: this.location,
       parent: this.parent,
+      attributes: structuredClone(this.attributes),
     };
   }
 
@@ -125,6 +129,18 @@ export abstract class Syntax {
 
   /** Should emit in compliance with core language spec */
   abstract toJSON(): unknown;
+
+  setAttribute(key: string, value: unknown) {
+    this.attributes.set(key, value);
+  }
+
+  getAttribute(key: string): unknown {
+    return this.attributes.get(key);
+  }
+
+  hasAttribute(key: string): boolean {
+    return this.attributes.has(key);
+  }
 
   isScopedEntity(): this is ScopedEntity {
     return (this as unknown as ScopedEntity).lexicon instanceof LexicalContext;

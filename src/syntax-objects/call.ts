@@ -1,7 +1,7 @@
 import { Expr } from "./expr.js";
 import { Fn } from "./fn.js";
 import { Identifier } from "./identifier.js";
-import { LexicalContext } from "./lexical-context.js";
+import { LexicalContext } from "./lib/lexical-context.js";
 import { List } from "./list.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
 import { ObjectType, Type } from "./types.js";
