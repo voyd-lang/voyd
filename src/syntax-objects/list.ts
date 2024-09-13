@@ -26,7 +26,8 @@ export class List extends Syntax {
     this.mayBeTuple = opts.isParentheticalList;
 
     if (value instanceof ChildList) {
-      this.#store = value.clone(this);
+      this.#store = value;
+      this.#store.parent = this;
       return;
     }
 
@@ -226,7 +227,7 @@ export class List extends Syntax {
   clone(parent?: Expr): List {
     return new List({
       ...super.getCloneOpts(parent),
-      value: this.#store,
+      value: this.#store.clone(),
       isParentheticalList: this.mayBeTuple,
     });
   }
