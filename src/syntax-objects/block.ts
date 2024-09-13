@@ -1,11 +1,12 @@
 import { Expr } from "./expr.js";
+import { Child } from "./lib/child.js";
 import { List } from "./list.js";
 import { ScopedSyntax, ScopedSyntaxMetadata } from "./scoped-entity.js";
 import { Type } from "./types.js";
 
 export class Block extends ScopedSyntax {
   readonly syntaxType = "block";
-  private _body!: List;
+  #body: Child<List>;
   type?: Type;
 
   constructor(
@@ -15,9 +16,9 @@ export class Block extends ScopedSyntax {
     }
   ) {
     super(opts);
-    this.body =
-      opts.body instanceof Array ? new List({ value: opts.body }) : opts.body;
-    this.type = opts.type;
+    const { body, type } = opts;
+    this.#body = new Child(body instanceof Array ? new List(body) : body, this);
+    this.type = type;
   }
 
   get children() {
@@ -25,15 +26,11 @@ export class Block extends ScopedSyntax {
   }
 
   get body() {
-    return this._body;
+    return this.#body.value;
   }
 
   set body(body: List) {
-    if (body) {
-      body.parent = this;
-    }
-
-    this._body = body;
+    this.#body.value = body;
   }
 
   lastExpr() {

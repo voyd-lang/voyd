@@ -1,21 +1,28 @@
 import { FastShiftArray } from "../../lib/fast-shift-array.js";
 import { Expr } from "../expr.js";
-import { Float } from "../float.js";
 import { Id, Identifier } from "../identifier.js";
-import { Int } from "../int.js";
-import { List, ListValue } from "../list.js";
+import { List } from "../list.js";
 import { NamedEntity } from "../named-entity.js";
 import { getIdStr } from "./get-id-str.js";
 
-export type ChildListValue = Expr | string | number | ChildListValue[];
+export class ChildList<T extends Expr = Expr> {
+  private store: FastShiftArray<T> = new FastShiftArray();
+  #parent: Expr;
 
-export class ChildList {
-  private store: FastShiftArray<Expr> = new FastShiftArray();
-  private parent: Expr;
-
-  constructor(children: ChildListValue[] = [], parent: Expr) {
+  constructor(children: T[] = [], parent: Expr) {
+    this.#parent = parent;
     this.push(...children);
-    this.parent = parent;
+  }
+
+  get parent() {
+    return this.#parent;
+  }
+
+  set parent(parent: Expr) {
+    this.#parent = parent;
+    this.store.forEach((expr) => {
+      expr.parent = parent;
+    });
   }
 
   get children() {
@@ -65,10 +72,13 @@ export class ChildList {
     return id;
   }
 
-  set(index: number, expr: Expr | string) {
-    const result = typeof expr === "string" ? Identifier.from(expr) : expr;
-    result.parent = this.parent;
-    this.store.set(index, result);
+  set(index: number, expr: T) {
+    expr.parent = this.parent;
+    if (expr instanceof NamedEntity) {
+      this.parent.registerEntity(expr);
+    }
+
+    this.store.set(index, expr);
     return this;
   }
 
@@ -81,60 +91,34 @@ export class ChildList {
     return v?.isIdentifier() || v?.isStringLiteral() ? v.value : undefined;
   }
 
-  consume(): Expr {
+  consume(): T {
     const next = this.store.shift();
     if (!next) throw new Error("No remaining expressions");
     return next;
   }
 
-  first(): Expr | undefined {
+  first(): T | undefined {
     return this.store.at(0);
   }
 
-  last(): Expr | undefined {
+  last(): T | undefined {
     return this.store.at(-1);
   }
 
   /** Returns all but the first element in an array */
-  argsArray(): Expr[] {
+  argsArray(): T[] {
     return this.store.toArray().slice(1);
   }
 
-  pop(): Expr | undefined {
+  pop(): T | undefined {
     return this.store.pop();
   }
 
-  push(...expr: ListValue[]) {
+  push(...expr: T[]) {
     expr.forEach((ex) => {
-      if (typeof ex === "string") {
-        this.store.push(new Identifier({ value: ex, parent: this.parent }));
-        return;
-      }
-
-      if (typeof ex === "number" && Number.isInteger(ex)) {
-        this.store.push(new Int({ value: ex, parent: this.parent }));
-        return;
-      }
-
-      if (typeof ex === "number") {
-        this.store.push(new Float({ value: ex, parent: this.parent }));
-        return;
-      }
-
-      if (ex instanceof Array) {
-        this.push(new List({ value: ex, parent: this.parent }));
-        return;
-      }
-
       ex.parent = this.parent;
-
       if (ex instanceof NamedEntity) {
         this.parent.registerEntity(ex);
-      }
-
-      if (ex.isList() && ex.calls("splice_quote")) {
-        this.store.push(...ex.argsArray());
-        return;
       }
 
       this.store.push(ex);
@@ -147,10 +131,9 @@ export class ChildList {
     return this.toArray().findIndex(cb);
   }
 
-  insert(expr: Expr | string, at = 0) {
-    const result = typeof expr === "string" ? Identifier.from(expr) : expr;
-    result.parent = this.parent;
-    this.store.splice(at, 0, result);
+  insert(expr: T, at = 0) {
+    expr.parent = this.parent;
+    this.store.splice(at, 0, expr);
     return this;
   }
 
@@ -159,33 +142,36 @@ export class ChildList {
     return this;
   }
 
-  filter(fn: (expr: Expr, index: number, array: Expr[]) => boolean): ChildList {
+  filter(fn: (expr: T, index: number, array: T[]) => boolean): ChildList<T> {
     return new ChildList(this.toArray().filter(fn), this.parent);
   }
 
-  each(fn: (expr: Expr, index: number, array: Expr[]) => void): ChildList {
+  each(fn: (expr: T, index: number, array: T[]) => void): ChildList<T> {
     this.toArray().forEach(fn);
     return this;
   }
 
-  map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): ChildList {
+  map(fn: (expr: T, index: number, array: T[]) => T): ChildList<T> {
     return new ChildList(this.toArray().map(fn), this.parent);
   }
 
   /** Like a regular map, but omits undefined values returned from the mapper */
   mapFilter(
-    fn: (expr: Expr, index: number, array: Expr[]) => Expr | undefined
-  ): ChildList {
+    fn: (expr: T, index: number, array: T[]) => T | undefined
+  ): ChildList<T> {
     const list = new ChildList([], this.parent);
-    return this.toArray().reduce((newList: ChildList, expr, index, array) => {
-      if (!expr) return newList;
-      const result = fn(expr, index, array);
-      if (!result) return newList;
-      return newList.push(result);
-    }, list);
+    return this.toArray().reduce(
+      (newList: ChildList<T>, expr, index, array) => {
+        if (!expr) return newList;
+        const result = fn(expr, index, array);
+        if (!result) return newList;
+        return newList.push(result);
+      },
+      list
+    );
   }
 
-  slice(start?: number, end?: number): ChildList {
+  slice(start?: number, end?: number): ChildList<T> {
     return new ChildList(this.store.slice(start, end), this.parent);
   }
 
@@ -193,7 +179,7 @@ export class ChildList {
     return this.store.slice(start, end);
   }
 
-  toArray() {
+  toArray(): T[] {
     return this.store.toArray();
   }
 
@@ -201,9 +187,9 @@ export class ChildList {
     return this.toArray();
   }
 
-  clone(parent?: Expr) {
-    return new ChildList(
-      this.toArray().map((expr) => expr.clone()),
+  clone(parent?: Expr): ChildList<T> {
+    return new ChildList<T>(
+      this.toArray().map((expr) => expr.clone()) as T[],
       parent ?? this.parent
     );
   }

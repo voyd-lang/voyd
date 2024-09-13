@@ -85,4 +85,8 @@ export class FastShiftArray<T> {
     this.items.splice(0, this.headIndex);
     this.headIndex = 0;
   }
+
+  forEach(callbackfn: (value: T, index: number, array: T[]) => void): void {
+    this.items.slice(this.headIndex).forEach(callbackfn);
+  }
 }

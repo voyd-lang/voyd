@@ -75,17 +75,17 @@ export class Identifier extends Syntax {
 }
 
 export class MockIdentifier extends Identifier {
-  private readonly _entity?: NamedEntity;
+  readonly #entity?: NamedEntity;
   constructor(
     opts: IdentifierOpts & {
       entity?: NamedEntity; // The entity this identifier resolves to
     }
   ) {
     super(opts);
-    this._entity = opts.entity;
+    this.#entity = opts.entity;
   }
 
   resolve() {
-    return this._entity;
+    return this.#entity;
   }
 }
