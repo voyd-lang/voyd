@@ -60,7 +60,7 @@ export class Block extends ScopedSyntax {
   clone(parent?: Expr) {
     return new Block({
       ...this.getCloneOpts(parent),
-      body: this.#body.clone().toArray(),
+      body: this.#body.toClonedArray(),
     });
   }
 }

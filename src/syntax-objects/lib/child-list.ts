@@ -3,6 +3,7 @@ import { Expr } from "../expr.js";
 import { Id, Identifier } from "../identifier.js";
 import { List } from "../list.js";
 import { NamedEntity } from "../named-entity.js";
+import { Syntax } from "../syntax.js";
 import { getIdStr } from "./get-id-str.js";
 
 export class ChildList<T extends Expr = Expr> {
@@ -201,14 +202,11 @@ export class ChildList<T extends Expr = Expr> {
     return this.store.toArray();
   }
 
-  toJSON() {
-    return this.toArray();
+  toClonedArray(parent?: Expr): T[] {
+    return this.toArray().map((expr: T): T => expr.clone() as T);
   }
 
-  clone(parent?: Expr): ChildList<T> {
-    return new ChildList<T>(
-      this.toArray().map((expr) => expr.clone()) as T[],
-      parent ?? this.parent
-    );
+  toJSON() {
+    return this.toArray();
   }
 }
