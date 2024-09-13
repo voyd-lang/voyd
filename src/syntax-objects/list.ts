@@ -9,7 +9,7 @@ import { ChildList } from "./lib/child-list.js";
 type ListOpts =
   | ListValue[]
   | (SyntaxMetadata & {
-      value?: ListValue[] | List;
+      value?: ListValue[] | List | ChildList<Expr>;
       isParentheticalList?: boolean;
     });
 
@@ -17,18 +17,23 @@ export class List extends Syntax {
   readonly syntaxType = "list";
   /** True when the list was defined by the user using parenthesis i.e. (hey, there) */
   mayBeTuple?: boolean;
-  #store = new ChildList(undefined, this);
+  #store: ChildList<Expr>;
 
   constructor(opts: ListOpts) {
     opts = Array.isArray(opts) ? { value: opts } : opts;
     super(opts);
-
     const value = opts.value;
     this.mayBeTuple = opts.isParentheticalList;
 
+    if (value instanceof ChildList) {
+      this.#store = value.clone(this);
+      return;
+    }
+
+    this.#store = new ChildList(undefined, this);
     if (!value || value instanceof Array) {
       this.push(...(value ?? []));
-    } else {
+    } else if (value instanceof List) {
       this.push(...value.toArray());
     }
   }
@@ -221,7 +226,7 @@ export class List extends Syntax {
   clone(parent?: Expr): List {
     return new List({
       ...super.getCloneOpts(parent),
-      value: this.#store.clone().toArray(),
+      value: this.#store,
       isParentheticalList: this.mayBeTuple,
     });
   }
