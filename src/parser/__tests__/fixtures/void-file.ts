@@ -24,6 +24,12 @@ with: () => 0
 10
 + 3
 
+mul(&self, other: Vec<T>)
+mul(
+  &self,
+  other: Vec<T>
+)
+
 let a = array
   .reduce(0) (acc, val) =>
     acc + val

@@ -4,10 +4,12 @@ import { Expr, List } from "../../syntax-objects/index.js";
 export const interpretWhitespace = (list: List, indentLevel?: number): List => {
   const transformed = new List({ ...list.metadata });
 
+  let hadComma = false;
   while (list.hasChildren) {
     const child = elideParens(list, indentLevel);
     if (child?.isList() && child.length === 0) continue;
-    addSibling(child, transformed);
+    addSibling(child, transformed, hadComma);
+    hadComma = nextIsComma(list);
   }
 
   if (transformed.length === 1 && transformed.first()?.isList()) {
@@ -166,6 +168,10 @@ const consumeLeadingWhitespace = (list: List) => {
 
 const isNewline = (v?: Expr) => v?.isWhitespace() && v.isNewline;
 const isIndent = (v: Expr) => v.isWhitespace() && v.isIndent;
+const nextIsComma = (list: List) => {
+  const next = list.first();
+  return !!(next?.isIdentifier() && next.is(","));
+};
 
 const isNamedParameter = (v: List) => {
   const identifier = v.at(0);
@@ -184,10 +190,10 @@ const isNamedParameter = (v: List) => {
   return true;
 };
 
-const addSibling = (child: Expr, siblings: List) => {
+const addSibling = (child: Expr, siblings: List, hadComma?: boolean) => {
   const olderSibling = siblings.at(-1);
 
-  if (!child.isList()) {
+  if (!child.isList() || hadComma) {
     siblings.push(child);
     return;
   }
