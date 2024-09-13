@@ -1,9 +1,7 @@
 import { Expr } from "./expr.js";
-import { Float } from "./float.js";
-import { Id, Identifier } from "./identifier.js";
-import { Int } from "./int.js";
-import { LexicalContext } from "./lexical-context.js";
-import { List, ListValue } from "./list.js";
+import { Id } from "./identifier.js";
+import { ChildList } from "./lib/child-list.js";
+import { LexicalContext } from "./lib/lexical-context.js";
 import {
   NamedEntity,
   ScopedNamedEntity,
@@ -11,7 +9,7 @@ import {
 } from "./named-entity.js";
 
 export type VoidModuleOpts = ScopedNamedEntityOpts & {
-  value?: ListValue[];
+  value?: Expr[];
   phase?: number;
   isIndex?: boolean;
   exports?: LexicalContext;
@@ -23,7 +21,7 @@ export class VoidModule extends ScopedNamedEntity {
   readonly isRoot: boolean = false;
   /** This module is the entry point of the user src code */
   isIndex = false;
-  value: Expr[] = [];
+  #value = new ChildList(undefined, this);
   /**
    * 0 = init,
    * 1 = expanding regular macros,
@@ -39,6 +37,15 @@ export class VoidModule extends ScopedNamedEntity {
     this.exports = opts.exports ?? new LexicalContext();
     this.phase = opts.phase ?? 0;
     this.isIndex = opts.isIndex ?? false;
+  }
+
+  get value() {
+    return this.#value.toArray();
+  }
+
+  set value(value: Expr[]) {
+    this.#value = new ChildList(undefined, this);
+    this.push(...value);
   }
 
   registerExport(entity: NamedEntity, alias?: string) {
@@ -104,50 +111,13 @@ export class VoidModule extends ScopedNamedEntity {
     ];
   }
 
-  push(...expr: ListValue[]) {
-    expr.forEach((ex) => {
-      if (typeof ex === "string") {
-        this.value.push(new Identifier({ value: ex, parent: this }));
-        return;
-      }
-
-      if (ex instanceof Array) {
-        this.push(new List({ value: ex, parent: this }));
-        return;
-      }
-
-      if (typeof ex === "number" && Number.isInteger(ex)) {
-        this.value.push(new Int({ value: ex, parent: this }));
-        return;
-      }
-
-      if (typeof ex === "number") {
-        this.value.push(new Float({ value: ex, parent: this }));
-        return;
-      }
-
-      ex.parent = this;
-
-      if (ex instanceof NamedEntity) {
-        this.registerEntity(ex);
-      }
-
-      if (ex.isList() && ex.calls("splice_quote")) {
-        this.value.push(...ex.argsArray());
-        return;
-      }
-
-      this.value.push(ex);
-    });
-
+  push(...expr: Expr[]) {
+    this.#value.push(...expr);
     return this;
   }
 
-  unshift(...expr: ListValue[]) {
-    const old = this.value;
-    this.value = [];
-    this.push(...expr);
-    this.push(...old);
+  unshift(...expr: Expr[]) {
+    this.#value.unshift(...expr);
     return this;
   }
 }

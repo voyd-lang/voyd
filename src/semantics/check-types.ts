@@ -1,7 +1,7 @@
 import {
   List,
   Expr,
-  noop,
+  nop,
   Identifier,
   ObjectType,
   Type,
@@ -22,7 +22,7 @@ import { getExprType } from "./resolution/get-expr-type.js";
 import { typesAreEquivalent } from "./resolution/index.js";
 
 export const checkTypes = (expr: Expr | undefined): Expr => {
-  if (!expr) return noop();
+  if (!expr) return nop();
   if (expr.isBlock()) return checkBlockTypes(expr);
   if (expr.isCall()) return checkCallTypes(expr);
   if (expr.isFn()) return checkFnTypes(expr);

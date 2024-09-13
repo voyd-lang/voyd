@@ -45,17 +45,14 @@ export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
 
 const resolveParameters = (params: Parameter[]) => {
   params.forEach((p) => {
-    if (p.type) {
-      return;
-    }
+    if (p.type) return;
 
     if (!p.typeExpr) {
       throw new Error(`Unable to determine type for ${p}`);
     }
 
     p.typeExpr = resolveTypes(p.typeExpr);
-    const type = getExprType(p.typeExpr);
-    p.type = type;
+    p.type = getExprType(p.typeExpr);
   });
 };
 

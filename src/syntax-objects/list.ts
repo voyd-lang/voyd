@@ -1,57 +1,52 @@
-import { FastShiftArray } from "../lib/fast-shift-array.js";
 import { Expr } from "./expr.js";
 import { Float } from "./float.js";
-import { getIdStr } from "./get-id-str.js";
+import { getIdStr } from "./lib/get-id-str.js";
 import { Id, Identifier } from "./identifier.js";
 import { Int } from "./int.js";
-import { NamedEntity } from "./named-entity.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
+import { ChildList } from "./lib/child-list.js";
+
+type ListOpts =
+  | ListValue[]
+  | (SyntaxMetadata & {
+      value?: ListValue[] | List | ChildList<Expr>;
+      isParentheticalList?: boolean;
+    });
 
 export class List extends Syntax {
   readonly syntaxType = "list";
-  /** True when the list was defined by the user using parenthesis i.e. (hey, there) */
-  mayBeTuple?: boolean;
-  store: FastShiftArray<Expr> = new FastShiftArray();
+  #store = new ChildList(undefined, this);
 
-  constructor(
-    opts:
-      | ListValue[]
-      | (SyntaxMetadata & {
-          value?: ListValue[] | List;
-          isParentheticalList?: boolean;
-        })
-  ) {
+  constructor(opts: ListOpts) {
     opts = Array.isArray(opts) ? { value: opts } : opts;
     super(opts);
-
     const value = opts.value;
-    this.mayBeTuple = opts.isParentheticalList;
 
     if (!value || value instanceof Array) {
       this.push(...(value ?? []));
-    } else {
+    } else if (value instanceof List) {
       this.push(...value.toArray());
     }
   }
 
   get children() {
-    return this.store.toArray();
+    return this.toArray();
   }
 
   get hasChildren() {
-    return !!this.store.length;
+    return !!this.#store.length;
   }
 
   get length() {
-    return this.store.length;
+    return this.#store.length;
   }
 
   at(index: number): Expr | undefined {
-    return this.store.at(index);
+    return this.#store.at(index);
   }
 
   exprAt(index: number): Expr {
-    const expr = this.store.at(index);
+    const expr = this.#store.at(index);
     if (!expr) {
       throw new Error(`No expr at ${index}`);
     }
@@ -83,8 +78,7 @@ export class List extends Syntax {
 
   set(index: number, expr: Expr | string) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
-    result.parent = this;
-    this.store.set(index, result);
+    this.#store.set(index, result);
     return this;
   }
 
@@ -98,42 +92,40 @@ export class List extends Syntax {
   }
 
   consume(): Expr {
-    const next = this.store.shift();
-    if (!next) throw new Error("No remaining expressions");
-    return next;
+    return this.#store.consume();
   }
 
   first(): Expr | undefined {
-    return this.store.at(0);
+    return this.#store.at(0);
   }
 
   last(): Expr | undefined {
-    return this.store.at(-1);
+    return this.#store.at(-1);
   }
 
   /** Returns all but the first element in an array */
   argsArray(): Expr[] {
-    return this.store.toArray().slice(1);
+    return this.#store.toArray().slice(1);
   }
 
   pop(): Expr | undefined {
-    return this.store.pop();
+    return this.#store.pop();
   }
 
   push(...expr: ListValue[]) {
     expr.forEach((ex) => {
       if (typeof ex === "string") {
-        this.store.push(new Identifier({ value: ex, parent: this }));
+        this.#store.push(new Identifier({ value: ex, parent: this }));
         return;
       }
 
       if (typeof ex === "number" && Number.isInteger(ex)) {
-        this.store.push(new Int({ value: ex, parent: this }));
+        this.#store.push(new Int({ value: ex, parent: this }));
         return;
       }
 
       if (typeof ex === "number") {
-        this.store.push(new Float({ value: ex, parent: this }));
+        this.#store.push(new Float({ value: ex, parent: this }));
         return;
       }
 
@@ -142,18 +134,11 @@ export class List extends Syntax {
         return;
       }
 
-      ex.parent = this;
-
-      if (ex instanceof NamedEntity) {
-        this.registerEntity(ex);
-      }
-
-      if (ex.isList() && ex.calls("splice_quote")) {
-        this.store.push(...ex.argsArray());
+      if (ex.syntaxType === "nop") {
         return;
       }
 
-      this.store.push(ex);
+      this.#store.push(ex);
     });
 
     return this;
@@ -165,21 +150,13 @@ export class List extends Syntax {
 
   insert(expr: Expr | string, at = 0) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
-    result.parent = this;
-    this.store.splice(at, 0, result);
+    this.#store.insert(result, at);
     return this;
   }
 
   remove(index: number, count = 1) {
-    this.store.splice(index, count);
+    this.#store.remove(index, count);
     return this;
-  }
-
-  filter(fn: (expr: Expr, index: number, array: Expr[]) => boolean): List {
-    return new List({
-      ...super.getCloneOpts(),
-      value: this.toArray().filter(fn),
-    });
   }
 
   each(fn: (expr: Expr, index: number, array: Expr[]) => void): List {
@@ -194,32 +171,34 @@ export class List extends Syntax {
     });
   }
 
-  /** Like a regular map, but omits undefined values returned from the mapper */
-  mapFilter(
-    fn: (expr: Expr, index: number, array: Expr[]) => Expr | undefined
+  flatMap(
+    fn: (expr: Expr, index: number, array: Expr[]) => Expr | Expr[]
   ): List {
-    const list = new List({ ...super.getCloneOpts() });
-    return this.toArray().reduce((newList: List, expr, index, array) => {
-      if (!expr) return newList;
-      const result = fn(expr, index, array);
-      if (!result) return newList;
-      return newList.push(result);
-    }, list);
+    return new List({
+      ...super.getCloneOpts(),
+      value: this.toArray().flatMap(fn),
+    });
+  }
+
+  reduce(
+    fn: (acc: List, expr: Expr, index: number, array: Expr[]) => List
+  ): List {
+    return this.toArray().reduce(fn, new List({ ...super.getCloneOpts() }));
   }
 
   slice(start?: number, end?: number): List {
     return new List({
       ...super.getCloneOpts(),
-      value: this.store.slice(start, end),
+      value: this.#store.slice(start, end),
     });
   }
 
   sliceAsArray(start?: number, end?: number) {
-    return this.store.slice(start, end);
+    return this.children.slice(start, end);
   }
 
   toArray(): Expr[] {
-    return this.store.toArray();
+    return this.#store.toArray();
   }
 
   toJSON() {
@@ -230,8 +209,7 @@ export class List extends Syntax {
   clone(parent?: Expr): List {
     return new List({
       ...super.getCloneOpts(parent),
-      value: this.toArray().map((v) => v.clone()),
-      isParentheticalList: this.mayBeTuple,
+      value: this.#store.toClonedArray(),
     });
   }
 }
