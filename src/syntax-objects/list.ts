@@ -3,9 +3,15 @@ import { Float } from "./float.js";
 import { getIdStr } from "./lib/get-id-str.js";
 import { Id, Identifier } from "./identifier.js";
 import { Int } from "./int.js";
-import { NamedEntity } from "./named-entity.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
 import { ChildList } from "./lib/child-list.js";
+
+type ListOpts =
+  | ListValue[]
+  | (SyntaxMetadata & {
+      value?: ListValue[] | List;
+      isParentheticalList?: boolean;
+    });
 
 export class List extends Syntax {
   readonly syntaxType = "list";
@@ -13,14 +19,7 @@ export class List extends Syntax {
   mayBeTuple?: boolean;
   #store = new ChildList(undefined, this);
 
-  constructor(
-    opts:
-      | ListValue[]
-      | (SyntaxMetadata & {
-          value?: ListValue[] | List;
-          isParentheticalList?: boolean;
-        })
-  ) {
+  constructor(opts: ListOpts) {
     opts = Array.isArray(opts) ? { value: opts } : opts;
     super(opts);
 
@@ -83,7 +82,6 @@ export class List extends Syntax {
 
   set(index: number, expr: Expr | string) {
     const result = typeof expr === "string" ? Identifier.from(expr) : expr;
-    result.parent = this;
     this.#store.set(index, result);
     return this;
   }
@@ -140,12 +138,6 @@ export class List extends Syntax {
       if (ex instanceof Array) {
         this.push(new List({ value: ex, parent: this }));
         return;
-      }
-
-      ex.parent = this;
-
-      if (ex instanceof NamedEntity) {
-        this.registerEntity(ex);
       }
 
       if (ex.isList() && ex.calls("splice_quote")) {
@@ -229,7 +221,7 @@ export class List extends Syntax {
   clone(parent?: Expr): List {
     return new List({
       ...super.getCloneOpts(parent),
-      value: this.toArray().map((v) => v.clone()),
+      value: this.#store.clone().toArray(),
       isParentheticalList: this.mayBeTuple,
     });
   }
