@@ -65,7 +65,7 @@ export abstract class Syntax {
     return {
       location: this.location,
       parent: this.parent,
-      attributes: structuredClone(this.attributes),
+      attributes: new Map(this.attributes),
     };
   }
 
