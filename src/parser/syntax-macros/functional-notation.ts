@@ -1,56 +1,86 @@
 import { idIs, isOp } from "../grammar.js";
-import { Expr, List } from "../../syntax-objects/index.js";
+import { Expr, List, ListValue } from "../../syntax-objects/index.js";
 
 export const functionalNotation = (list: List): List => {
+  const array = list.toArray();
   let isTuple = false;
 
-  const result = list.mapFilter((expr, index, array) => {
-    if (expr.isList()) return functionalNotation(expr);
-    if (expr.isWhitespace()) return expr;
+  const { result } = array.reduce(
+    (acc, expr, index) => {
+      if (acc.skip > 0) {
+        acc.skip--;
+        return acc;
+      }
 
-    const nextExpr = array[index + 1];
-    if (nextExpr && nextExpr.isList() && !(isOp(expr) || idIs(expr, ","))) {
-      return processFnCall(expr, nextExpr, array, index);
-    }
+      if (expr.isList()) {
+        acc.result.push(functionalNotation(expr));
+        return acc;
+      }
 
-    if (list.mayBeTuple && idIs(expr, ",")) {
-      isTuple = true;
-    }
+      if (expr.isWhitespace()) {
+        acc.result.push(expr);
+        return acc;
+      }
 
-    return expr;
-  });
+      const nextExpr = array[index + 1];
 
-  if (isTuple) {
-    result.insert("tuple");
-    result.insert(",");
-  }
+      if (nextExpr && nextExpr.isList() && !(isOp(expr) || idIs(expr, ","))) {
+        return handleNextExpression(acc, expr, nextExpr, array, index);
+      }
 
-  return result;
+      if (list.mayBeTuple && idIs(expr, ",")) {
+        isTuple = true;
+      }
+
+      acc.result.push(expr);
+      return acc;
+    },
+    { result: [], skip: 0 } as Accumulator
+  );
+
+  return finalizeResult(result, isTuple);
 };
 
-const processFnCall = (
+type Accumulator = { result: ListValue[]; skip: number };
+
+const handleNextExpression = (
+  acc: Accumulator,
   expr: Expr,
-  nextExpr: List,
+  nextExpr: Expr,
   array: Expr[],
   index: number
-): List => {
-  if (nextExpr.calls("generics")) {
-    return processGenerics(expr, array, index);
+) => {
+  if ((nextExpr as List).calls("generics")) {
+    const generics = nextExpr as List;
+    const nextNextExpr = array[index + 2];
+    if (nextNextExpr && nextNextExpr.isList()) {
+      acc.result.push(processGenerics(expr, generics, nextNextExpr as List));
+      acc.skip = 2; // Skip next two expressions
+    } else {
+      acc.result.push(processGenerics(expr, generics));
+      acc.skip = 1; // Skip next expression
+    }
+  } else {
+    acc.result.push(processParamList(expr, nextExpr as List));
+    acc.skip = 1; // Skip next expression
   }
-
-  return processParamList(expr, array, index);
+  return acc;
 };
 
-const processGenerics = (expr: Expr, array: Expr[], index: number): List => {
-  const generics = array.splice(index + 1, 1)[0] as List;
+const finalizeResult = (result: ListValue[], isTuple: boolean): List => {
+  if (isTuple) {
+    result.unshift(",");
+    result.unshift("tuple");
+  }
+  return new List(result);
+};
+
+const processGenerics = (expr: Expr, generics: List, params?: List): List => {
   generics.mayBeTuple = false;
 
-  const list = array[index + 1]?.isList()
-    ? (array.splice(index + 1, 1)[0] as List)
-    : new List({});
-
-  list.insert(",");
+  const list = params || new List([]);
   list.insert(expr);
+  list.insert(",", 1);
   list.mayBeTuple = false;
   const functional = functionalNotation(list);
 
@@ -59,10 +89,9 @@ const processGenerics = (expr: Expr, array: Expr[], index: number): List => {
   return functional;
 };
 
-const processParamList = (expr: Expr, array: Expr[], index: number): List => {
-  const list = array.splice(index + 1, 1)[0] as List;
-  list.insert(expr);
-  list.insert(",", 1);
-  list.mayBeTuple = false;
-  return functionalNotation(list);
+const processParamList = (expr: Expr, params: List): List => {
+  params.insert(expr);
+  params.insert(",", 1);
+  params.mayBeTuple = false;
+  return functionalNotation(params);
 };
