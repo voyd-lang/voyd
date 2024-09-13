@@ -137,8 +137,7 @@ export class List extends Syntax {
         return;
       }
 
-      if (ex.isList() && ex.calls("splice_quote")) {
-        this.#store.push(...ex.argsArray());
+      if (ex.syntaxType === "nop") {
         return;
       }
 
@@ -163,13 +162,6 @@ export class List extends Syntax {
     return this;
   }
 
-  filter(fn: (expr: Expr, index: number, array: Expr[]) => boolean): List {
-    return new List({
-      ...super.getCloneOpts(),
-      value: this.toArray().filter(fn),
-    });
-  }
-
   each(fn: (expr: Expr, index: number, array: Expr[]) => void): List {
     this.toArray().forEach(fn);
     return this;
@@ -182,17 +174,19 @@ export class List extends Syntax {
     });
   }
 
-  /** Like a regular map, but omits undefined values returned from the mapper */
-  mapFilter(
-    fn: (expr: Expr, index: number, array: Expr[]) => Expr | undefined
+  flatMap(
+    fn: (expr: Expr, index: number, array: Expr[]) => Expr | Expr[]
   ): List {
-    const list = new List({ ...super.getCloneOpts() });
-    return this.toArray().reduce((newList: List, expr, index, array) => {
-      if (!expr) return newList;
-      const result = fn(expr, index, array);
-      if (!result) return newList;
-      return newList.push(result);
-    }, list);
+    return new List({
+      ...super.getCloneOpts(),
+      value: this.toArray().flatMap(fn),
+    });
+  }
+
+  reduce(
+    fn: (acc: List, expr: Expr, index: number, array: Expr[]) => List
+  ): List {
+    return this.toArray().reduce(fn, new List({ ...super.getCloneOpts() }));
   }
 
   slice(start?: number, end?: number): List {

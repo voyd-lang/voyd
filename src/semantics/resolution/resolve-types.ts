@@ -1,6 +1,6 @@
 import { Block } from "../../syntax-objects/block.js";
 import { Expr } from "../../syntax-objects/expr.js";
-import { noop } from "../../syntax-objects/helpers.js";
+import { nop } from "../../syntax-objects/helpers.js";
 import { List } from "../../syntax-objects/list.js";
 import { VoidModule } from "../../syntax-objects/module.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
@@ -22,7 +22,7 @@ import { resolveUse } from "./resolve-use.js";
  * Returned tree not guaranteed to be same as supplied tree
  */
 export const resolveTypes = (expr: Expr | undefined): Expr => {
-  if (!expr) return noop();
+  if (!expr) return nop();
   if (expr.isBlock()) return resolveBlockTypes(expr);
   if (expr.isCall()) return resolveCallTypes(expr);
   if (expr.isFn()) return resolveFnTypes(expr);

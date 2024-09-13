@@ -14,6 +14,7 @@ import {
   VoidModule,
   Block,
   Use,
+  nop,
 } from "../syntax-objects/index.js";
 import {
   registerExports,
@@ -256,7 +257,7 @@ const functions: Record<string, MacroFn | undefined> = {
   },
   quote: (quote: List) => {
     const expand = (body: List): List =>
-      body.mapFilter((exp) => {
+      body.flatMap((exp) => {
         if (exp.isList() && exp.calls("$")) {
           const val = exp.at(1) ?? nop();
           return evalMacroExpr(val);
@@ -264,7 +265,7 @@ const functions: Record<string, MacroFn | undefined> = {
 
         if (exp.isList() && exp.calls("$@")) {
           const val = exp.at(1) ?? nop();
-          return (evalMacroExpr(val) as List).insert("splice_quote");
+          return (evalMacroExpr(val) as List).toArray();
         }
 
         if (exp.isList()) return expand(exp);
@@ -384,8 +385,6 @@ const handleOptionalConditionParenthesis = (expr: Expr): Expr => {
 
   return expr;
 };
-
-const nop = () => new List({}).push(Identifier.from("splice_quote"));
 
 /** Binary logical comparison */
 const bl = (args: List, fn: (l: any, r: any) => boolean) => {

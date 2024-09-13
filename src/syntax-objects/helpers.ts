@@ -1,5 +1,15 @@
-import { List } from "./list.js";
+import { Nop } from "./nop.js";
 import { Whitespace } from "./whitespace.js";
 
 export const newLine = () => new Whitespace({ value: "\n" });
-export const noop = () => new List({ value: ["splice_quote"] });
+
+let nopCache: Nop | undefined = undefined;
+export const nop = () => {
+  if (!nopCache) {
+    const n = new Nop({});
+    nopCache = n;
+    return n;
+  }
+
+  return nopCache;
+};
