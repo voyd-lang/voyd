@@ -28,7 +28,7 @@ export const functionalNotation = (list: List): List => {
         return handleNextExpression(acc, expr, nextExpr, array, index);
       }
 
-      if (list.mayBeTuple && idIs(expr, ",")) {
+      if (list.getAttribute("tuple?") && idIs(expr, ",")) {
         isTuple = true;
       }
 
@@ -76,12 +76,12 @@ const finalizeResult = (result: ListValue[], isTuple: boolean): List => {
 };
 
 const processGenerics = (expr: Expr, generics: List, params?: List): List => {
-  generics.mayBeTuple = false;
+  generics.setAttribute("tuple?", false);
 
   const list = params || new List([]);
   list.insert(expr);
   list.insert(",", 1);
-  list.mayBeTuple = false;
+  list.setAttribute("tuple?", false);
   const functional = functionalNotation(list);
 
   functional.insert(functionalNotation(generics), 2);
@@ -92,6 +92,6 @@ const processGenerics = (expr: Expr, generics: List, params?: List): List => {
 const processParamList = (expr: Expr, params: List): List => {
   params.insert(expr);
   params.insert(",", 1);
-  params.mayBeTuple = false;
+  params.setAttribute("tuple?", false);
   return functionalNotation(params);
 };

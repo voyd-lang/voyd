@@ -15,15 +15,12 @@ type ListOpts =
 
 export class List extends Syntax {
   readonly syntaxType = "list";
-  /** True when the list was defined by the user using parenthesis i.e. (hey, there) */
-  mayBeTuple?: boolean;
   #store = new ChildList(undefined, this);
 
   constructor(opts: ListOpts) {
     opts = Array.isArray(opts) ? { value: opts } : opts;
     super(opts);
     const value = opts.value;
-    this.mayBeTuple = opts.isParentheticalList;
 
     if (!value || value instanceof Array) {
       this.push(...(value ?? []));
@@ -213,7 +210,6 @@ export class List extends Syntax {
     return new List({
       ...super.getCloneOpts(parent),
       value: this.#store.toClonedArray(),
-      isParentheticalList: this.mayBeTuple,
     });
   }
 }
