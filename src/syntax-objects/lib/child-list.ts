@@ -155,6 +155,13 @@ export class ChildList<T extends Expr = Expr> {
     return new ChildList(this.toArray().map(fn), this.parent);
   }
 
+  applyMap(fn: (expr: T, index: number, array: T[]) => T): ChildList<T> {
+    this.store.forEach((expr, index, array) => {
+      this.set(index, fn(expr, index, array));
+    });
+    return this;
+  }
+
   /** Like a regular map, but omits undefined values returned from the mapper */
   mapFilter(
     fn: (expr: T, index: number, array: T[]) => T | undefined
