@@ -56,7 +56,6 @@ const resolveGenericsWithTypeArgs = (
   }
 
   const newObj = obj.clone();
-  newObj.id = obj.id + `#${obj.genericInstances?.length ?? 0}`;
   newObj.typeParameters = undefined;
   newObj.appliedTypeArgs = [];
 

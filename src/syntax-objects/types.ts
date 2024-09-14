@@ -175,6 +175,7 @@ export class ObjectType extends BaseType {
   binaryenType?: number;
   typesResolved?: boolean; // Don't set if type parameters are present
   implementations?: Implementation[] = [];
+  #iteration = 0;
 
   constructor(
     opts: NamedEntityOpts & {
@@ -212,6 +213,7 @@ export class ObjectType extends BaseType {
   clone(parent?: Expr): ObjectType {
     return new ObjectType({
       ...super.getCloneOpts(parent),
+      id: `${this.id}#${this.#iteration++}`,
       value: this.fields.map((field) => ({
         ...field,
         typeExpr: field.typeExpr.clone(),

@@ -83,7 +83,6 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   }
 
   const newFn = fn.clone();
-  newFn.id = fn.id + `#${fn.genericInstances?.length ?? 0}`;
   newFn.typeParameters = undefined;
   newFn.appliedTypeArgs = [];
 
