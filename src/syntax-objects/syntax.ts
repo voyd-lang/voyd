@@ -26,11 +26,12 @@ import type {
 } from "./types.js";
 import type { Variable } from "./variable.js";
 import type { Whitespace } from "./whitespace.js";
-import { NamedEntity } from "./named-entity.js";
-import { ScopedEntity } from "./scoped-entity.js";
-import { Declaration } from "./declaration.js";
-import { Use } from "./use.js";
-import { Match } from "./match.js";
+import { type NamedEntity } from "./named-entity.js";
+import { type ScopedEntity } from "./scoped-entity.js";
+import { type Declaration } from "./declaration.js";
+import { type Use } from "./use.js";
+import { type Match } from "./match.js";
+import { type Implementation } from "./implementation.js";
 
 export type Attributes = { [key: string]: unknown };
 
@@ -183,6 +184,10 @@ export abstract class Syntax {
 
   isWhitespace(): this is Whitespace {
     return this.syntaxType === "whitespace";
+  }
+
+  isImpl(): this is Implementation {
+    return this.syntaxType === "implementation";
   }
 
   isObjectType(): this is ObjectType {

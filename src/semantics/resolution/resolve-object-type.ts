@@ -6,6 +6,7 @@ import {
   voidBaseObject,
 } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
+import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { resolveTypes } from "./resolve-types.js";
 import { typesAreEquivalent } from "./types-are-equivalent.js";
 
@@ -74,6 +75,14 @@ const resolveGenericsWithTypeArgs = (
 
   const resolvedObj = resolveObjectTypeTypes(newObj);
   obj.registerGenericInstance(resolvedObj);
+
+  const implementations = newObj.implementations;
+  newObj.implementations = []; // Clear implementations to avoid duplicates, resolveImpl will re-add them
+
+  implementations
+    .filter((impl) => implIsCompatible(impl, resolvedObj))
+    .map((impl) => resolveImpl(impl, resolvedObj));
+
   return resolvedObj;
 };
 

@@ -174,7 +174,7 @@ export class ObjectType extends BaseType {
   /** Type used for locals, globals, function return type */
   binaryenType?: number;
   typesResolved?: boolean; // Don't set if type parameters are present
-  implementations?: Implementation[] = [];
+  implementations: Implementation[];
   #iteration = 0;
 
   constructor(
@@ -183,6 +183,7 @@ export class ObjectType extends BaseType {
       parentObjExpr?: Expr;
       parentObj?: ObjectType;
       typeParameters?: Identifier[];
+      implementations?: Implementation[];
     }
   ) {
     super(opts);
@@ -193,6 +194,7 @@ export class ObjectType extends BaseType {
     this.parentObjType = opts.parentObj;
     this.parentObjExpr = opts.parentObjExpr;
     this.typeParameters = opts.typeParameters;
+    this.implementations = opts.implementations ?? [];
   }
 
   get size() {
@@ -221,6 +223,7 @@ export class ObjectType extends BaseType {
       })),
       parentObjExpr: this.parentObjExpr?.clone(),
       typeParameters: this.typeParameters,
+      implementations: this.implementations.map((impl) => impl.clone()),
     });
   }
 

@@ -63,6 +63,7 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isModule()) return compileModule({ ...opts, expr });
   if (expr.isObjectLiteral()) return compileObjectLiteral({ ...opts, expr });
   if (expr.isType()) return compileType({ ...opts, expr });
+  if (expr.isImpl()) return mod.nop();
   if (expr.isUse()) return mod.nop();
   if (expr.isMacro()) return mod.nop();
   if (expr.isMacroVariable()) return mod.nop();
@@ -450,6 +451,12 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
       ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObjType))
       : undefined,
   });
+
+  if (obj.implementations?.length) {
+    obj.implementations.forEach((impl) =>
+      impl.methods.each((fn) => compileFunction({ ...opts, expr: fn }))
+    );
+  }
 
   // Set RTT Table (So we don't have to re-calculate it every time)
   mod.addGlobal(

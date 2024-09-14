@@ -3,11 +3,10 @@ import { Fn } from "./fn.js";
 import { Identifier } from "./identifier.js";
 import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
-import { ScopedSyntax } from "./scoped-entity.js";
-import { SyntaxMetadata } from "./syntax.js";
+import { ScopedSyntax, ScopedSyntaxMetadata } from "./scoped-entity.js";
 import { Type } from "./types.js";
 
-export type ImplementationOpts = SyntaxMetadata & {
+export type ImplementationOpts = ScopedSyntaxMetadata & {
   typeParams: Identifier[];
   targetTypeExpr: Expr;
   body: Expr;
@@ -19,8 +18,10 @@ export class Implementation extends ScopedSyntax {
   readonly typeParams: ChildList<Identifier>;
   readonly targetTypeExpr: Child<Expr>;
   readonly exports = new ChildList<Fn>([], this);
+  readonly methods = new ChildList<Fn>([], this); // NO CLONE!
   readonly body: Child<Expr>;
   readonly traitExpr: Child<Expr | undefined>;
+  typesResolved?: boolean;
   targetType?: Type;
   trait?: Type;
 

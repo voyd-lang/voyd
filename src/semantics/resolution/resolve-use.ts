@@ -203,7 +203,7 @@ const registerExport = (
     return;
   }
 
-  if (parent.syntaxType === "implementation" && entity.isFn()) {
+  if (parent.isImpl() && entity.isFn()) {
     parent.exports.push(entity);
     return;
   }
