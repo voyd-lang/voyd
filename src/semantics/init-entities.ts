@@ -1,4 +1,5 @@
 import { Declaration } from "../syntax-objects/declaration.js";
+import { Implementation } from "../syntax-objects/implementation.js";
 import {
   List,
   Fn,
@@ -54,6 +55,10 @@ export const initEntities: SemanticProcessor = (expr) => {
 
   if (expr.calls("match")) {
     return initMatch(expr);
+  }
+
+  if (expr.calls("impl")) {
+    return initImpl(expr);
   }
 
   return initCall(expr);
@@ -398,5 +403,42 @@ const extractObjectFields = (obj: List) => {
     }
 
     return { name: name.value, typeExpr };
+  });
+};
+
+const initImpl = (impl: List): Implementation => {
+  const first = impl.exprAt(1);
+  const generics =
+    first.isList() && first.calls("generics")
+      ? first.sliceAsArray(1).flatMap((p) => (p.isIdentifier() ? p : []))
+      : undefined;
+
+  const possibleTraitIndex = generics ? 2 : 1;
+  const possibleFor = impl.at(possibleTraitIndex + 1);
+  const traitExpr =
+    possibleFor?.isIdentifier() && possibleFor.is("for")
+      ? initEntities(impl.exprAt(possibleTraitIndex))
+      : undefined;
+
+  let targetTypeIndex = 1;
+  if (generics) targetTypeIndex += 1;
+  if (traitExpr) targetTypeIndex += 2;
+
+  const targetTypeExpr = initEntities(impl.exprAt(targetTypeIndex));
+
+  const methods = impl.sliceAsArray(targetTypeIndex + 1).map((expr) => {
+    if (!expr.isList() || !expr.calls("define_function")) {
+      throw new Error("Invalid method definition");
+    }
+
+    return initFn(expr);
+  });
+
+  return new Implementation({
+    ...impl.metadata,
+    typeParams: generics ?? [],
+    targetTypeExpr,
+    methods,
+    traitExpr,
   });
 };

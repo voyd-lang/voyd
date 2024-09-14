@@ -98,7 +98,7 @@ export abstract class Syntax {
     return this.parentModule?.resolveModule(name, level + 1);
   }
 
-  /** Recursively searches for the entity up the parent tree */
+  /** Recursively searches for the entity up the parent tree up to the parent module */
   resolveEntity(name: Id): NamedEntity | undefined {
     if (!this.isScopedEntity()) return this.parent?.resolveEntity(name);
 
