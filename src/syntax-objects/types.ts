@@ -4,6 +4,7 @@ import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
 import { Id, Identifier } from "./identifier.js";
 import { getIdStr } from "./lib/get-id-str.js";
 import { LexicalContext } from "./lib/lexical-context.js";
+import { Implementation } from "./implementation.js";
 
 export type Type =
   | PrimitiveType
@@ -173,6 +174,7 @@ export class ObjectType extends BaseType {
   /** Type used for locals, globals, function return type */
   binaryenType?: number;
   typesResolved?: boolean; // Don't set if type parameters are present
+  implementations?: Implementation[] = [];
 
   constructor(
     opts: NamedEntityOpts & {

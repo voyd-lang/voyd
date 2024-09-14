@@ -1,5 +1,7 @@
 import { Call } from "../../syntax-objects/call.js";
+import { Expr } from "../../syntax-objects/expr.js";
 import { Fn } from "../../syntax-objects/fn.js";
+import { Implementation } from "../../syntax-objects/implementation.js";
 import { List } from "../../syntax-objects/list.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
 import { TypeAlias } from "../../syntax-objects/types.js";
@@ -22,6 +24,14 @@ export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
     // May want to check if there is already a resolved instance with matching type args here
     // currently get-call-fn.ts does this, but it may be better to do it here
     return attemptToResolveFnWithGenerics(fn, call);
+  }
+
+  const parentImpl = getParentImpl(fn);
+  if (parentImpl?.typeParams.hasChildren) {
+    fn.typeParameters = [
+      ...(fn.typeParameters ?? []),
+      ...parentImpl.typeParams.toArray(),
+    ];
   }
 
   if (fn.typeParameters && !call) {
@@ -93,4 +103,10 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   const resolvedFn = resolveFnTypes(newFn);
   fn.registerGenericInstance(resolvedFn);
   return fn;
+};
+
+const getParentImpl = (expr: Expr): Implementation | undefined => {
+  if (expr.syntaxType === "implementation") return expr;
+  if (expr.parent) return getParentImpl(expr.parent);
+  return undefined;
 };

@@ -10,7 +10,7 @@ import { Type } from "./types.js";
 export type ImplementationOpts = SyntaxMetadata & {
   typeParams: Identifier[];
   targetTypeExpr: Expr;
-  methods: Fn[];
+  body: Expr;
   traitExpr?: Expr;
 };
 
@@ -18,10 +18,9 @@ export class Implementation extends ScopedSyntax {
   readonly syntaxType = "implementation";
   readonly typeParams: ChildList<Identifier>;
   readonly targetTypeExpr: Child<Expr>;
-  readonly methods: ChildList<Fn>;
+  readonly exports = new ChildList<Fn>([], this);
+  readonly body: Child<Expr>;
   readonly traitExpr: Child<Expr | undefined>;
-  genericInstances = new ChildList<Implementation>([], this);
-  appliedTypeArgs: Type[] = [];
   targetType?: Type;
   trait?: Type;
 
@@ -29,7 +28,7 @@ export class Implementation extends ScopedSyntax {
     super(opts);
     this.typeParams = new ChildList(opts.typeParams, this);
     this.targetTypeExpr = new Child(opts.targetTypeExpr, this);
-    this.methods = new ChildList(opts.methods, this);
+    this.body = new Child(opts.body, this);
     this.traitExpr = new Child(opts.traitExpr, this);
   }
 
@@ -38,7 +37,7 @@ export class Implementation extends ScopedSyntax {
       ...super.getCloneOpts(parent),
       typeParams: this.typeParams.clone(),
       targetTypeExpr: this.targetTypeExpr.clone(),
-      methods: this.methods.clone(),
+      body: this.body.clone(),
       traitExpr: this.traitExpr.clone(),
     });
   }
@@ -48,7 +47,7 @@ export class Implementation extends ScopedSyntax {
       "impl",
       ["type-params", this.typeParams.toArray()],
       ["target", this.targetTypeExpr.toJSON()],
-      ["methods", this.methods.toJSON()],
+      ["body", this.body.toJSON()],
     ];
   }
 }

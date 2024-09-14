@@ -114,6 +114,8 @@ export abstract class Syntax {
       return this.parent?.resolveFns(id, start) ?? start;
     }
 
+    if (this.isModule()) return start.concat(this.lexicon.resolveFns(id));
+
     start.push(...this.lexicon.resolveFns(id));
     if (this.parent) return this.parent.resolveFns(id, start);
     return start;

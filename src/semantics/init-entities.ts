@@ -426,19 +426,13 @@ const initImpl = (impl: List): Implementation => {
 
   const targetTypeExpr = initEntities(impl.exprAt(targetTypeIndex));
 
-  const methods = impl.sliceAsArray(targetTypeIndex + 1).map((expr) => {
-    if (!expr.isList() || !expr.calls("define_function")) {
-      throw new Error("Invalid method definition");
-    }
-
-    return initFn(expr);
-  });
+  const body = initEntities(impl.exprAt(targetTypeIndex + 1));
 
   return new Implementation({
     ...impl.metadata,
     typeParams: generics ?? [],
     targetTypeExpr,
-    methods,
+    body,
     traitExpr,
   });
 };

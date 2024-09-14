@@ -12,9 +12,26 @@ export const resolveUse = (use: Use, runPass?: ModulePass) => {
   const path = use.path;
 
   const entities = resolveModulePath(path, runPass);
-  entities.forEach((e) => use.parentModule?.registerEntity(e.e, e.alias));
+  entities.forEach((e) => importEntity(use.parentModule, e.e, e.alias));
   use.entities = entities;
   return use;
+};
+
+const importEntity = (
+  module: VoidModule | undefined,
+  entity: NamedEntity,
+  alias?: string
+) => {
+  if (!module) return;
+  module.registerEntity(entity, alias);
+
+  if (entity.isObjectType()) {
+    entity.implementations?.forEach((impl) => {
+      impl.exports.each((m) => {
+        module.registerEntity(m);
+      });
+    });
+  }
 };
 
 export const resolveModulePath = (
@@ -178,5 +195,16 @@ const registerExport = (
   entity: NamedEntity,
   alias?: string
 ) => {
-  exportExpr.parentModule?.registerExport(entity, alias);
+  const parent = exportExpr.parent;
+  if (!parent) return;
+
+  if (parent.isModule()) {
+    parent.registerExport(entity, alias);
+    return;
+  }
+
+  if (parent.syntaxType === "implementation" && entity.isFn()) {
+    parent.exports.push(entity);
+    return;
+  }
 };
