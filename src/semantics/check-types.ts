@@ -53,6 +53,8 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("member-access")) return call; // TODO
   if (call.fn?.isObjectType()) return checkObjectInit(call);
 
+  call.args = call.args.map(checkTypes);
+
   if (!call.fn) {
     throw new Error(`Could not resolve fn ${call.fnName} at ${call.location}`);
   }
@@ -62,8 +64,6 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
       `Could not resolve type for call ${call.fnName} at ${call.location}`
     );
   }
-
-  call.args = call.args.map(checkTypes);
 
   return call;
 };
@@ -110,7 +110,7 @@ export const checkAssign = (call: Call) => {
 const checkIdentifier = (id: Identifier) => {
   const entity = id.resolve();
   if (!entity) {
-    throw new Error(`Unrecognized identifier, ${id}`);
+    throw new Error(`Unrecognized identifier, ${id} at ${id.location}`);
   }
 
   if (entity.isVariable()) {
@@ -284,6 +284,8 @@ const checkObjectType = (obj: ObjectType): ObjectType => {
       throw new Error(`Unable to determine type for ${field.typeExpr}`);
     }
   });
+
+  obj.implementations.forEach((impl) => impl.methods.forEach(checkTypes));
 
   if (obj.parentObjExpr) {
     assertValidExtension(obj, obj.parentObjType);

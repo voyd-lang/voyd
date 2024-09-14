@@ -27,9 +27,7 @@ const importEntity = (
 
   if (entity.isObjectType()) {
     entity.implementations?.forEach((impl) => {
-      impl.exports.each((m) => {
-        module.registerEntity(m);
-      });
+      impl.exports.forEach((m) => module.registerEntity(m));
     });
   }
 };
@@ -204,7 +202,7 @@ const registerExport = (
   }
 
   if (parent.isImpl() && entity.isFn()) {
-    parent.exports.push(entity);
+    parent.registerExport(entity);
     return;
   }
 };

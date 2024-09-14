@@ -8,6 +8,7 @@ import { resolveTypes } from "./resolve-types.js";
 import { resolveExport } from "./resolve-use.js";
 
 export const resolveCallTypes = (call: Call): Call => {
+  if (call.type) return call;
   if (call.calls("export")) return resolveExport(call);
   if (call.calls("if")) return resolveIf(call);
   if (call.calls(":")) return checkLabeledArg(call);

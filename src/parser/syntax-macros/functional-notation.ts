@@ -38,7 +38,7 @@ export const functionalNotation = (list: List): List => {
     { result: [], skip: 0 } as Accumulator
   );
 
-  return finalizeResult(result, isTuple);
+  return finalizeResult(result, isTuple, list);
 };
 
 type Accumulator = { result: ListValue[]; skip: number };
@@ -67,12 +67,16 @@ const handleNextExpression = (
   return acc;
 };
 
-const finalizeResult = (result: ListValue[], isTuple: boolean): List => {
+const finalizeResult = (
+  result: ListValue[],
+  isTuple: boolean,
+  originalList: List
+): List => {
   if (isTuple) {
     result.unshift(",");
     result.unshift("tuple");
   }
-  return new List(result);
+  return new List({ ...originalList.metadata, value: result });
 };
 
 const processGenerics = (expr: Expr, generics: List, params?: List): List => {

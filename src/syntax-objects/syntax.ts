@@ -64,6 +64,10 @@ export abstract class Syntax {
     return this.parent?.isModule() ? this.parent : this.parent?.parentModule;
   }
 
+  get parentImpl(): Implementation | undefined {
+    return this.parent?.isImpl() ? this.parent : this.parent?.parentImpl;
+  }
+
   get metadata() {
     return {
       location: this.location,
@@ -80,6 +84,10 @@ export abstract class Syntax {
   registerEntity(v: NamedEntity, alias?: string): void {
     if (!this.isScopedEntity()) return this.parent?.registerEntity(v, alias);
     this.lexicon.registerEntity(v, alias);
+
+    if (v.isFn() && this.parentImpl) {
+      this.parentImpl.registerMethod(v);
+    }
   }
 
   /** Will resolve a sibling module, or a direct ancestor */

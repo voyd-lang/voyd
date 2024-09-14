@@ -12,6 +12,7 @@ import {
   ObjectType,
   ObjectLiteral,
   DsArrayType,
+  nop,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { SemanticProcessor } from "./types.js";
@@ -84,7 +85,20 @@ const initFn = (expr: List): Fn => {
 
   const parameters = parameterList
     .sliceAsArray(typeParameters ? 2 : 1)
-    .flatMap((p) => listToParameter(p as List));
+    .flatMap((p) => {
+      if (p.isIdentifier()) {
+        return new Parameter({
+          name: p,
+          typeExpr: undefined,
+        });
+      }
+
+      if (!p.isList()) {
+        throw new Error("Invalid parameter");
+      }
+
+      return listToParameter(p);
+    });
 
   const returnTypeExpr = getReturnTypeExprForFn(expr, 3);
 
@@ -426,13 +440,16 @@ const initImpl = (impl: List): Implementation => {
 
   const targetTypeExpr = initEntities(impl.exprAt(targetTypeIndex));
 
-  const body = initEntities(impl.exprAt(targetTypeIndex + 1));
-
-  return new Implementation({
+  const init = new Implementation({
     ...impl.metadata,
     typeParams: generics ?? [],
     targetTypeExpr,
-    body,
+    body: nop(),
     traitExpr,
   });
+
+  const body = impl.exprAt(targetTypeIndex + 1);
+  body.parent = init;
+  init.body.value = initEntities(body);
+  return init;
 };

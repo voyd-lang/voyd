@@ -13,7 +13,7 @@ export const resolveImpl = (
 
   if (!targetType) return impl;
 
-  if (!impl.traitExpr && targetType?.isObjectType()) {
+  if (!impl.traitExpr.value && targetType?.isObjectType()) {
     targetType.implementations?.push(impl);
   }
 
@@ -22,10 +22,9 @@ export const resolveImpl = (
   }
 
   impl.body.value = resolveTypes(impl.body.value);
-  impl.body.value.getAllEntities().forEach((e) => {
-    if (e.isFn()) impl.methods.push(e);
-  });
 
+  const parentModule = impl.parentModule;
+  impl.exports.forEach((m) => parentModule?.registerEntity(m));
   impl.typesResolved = true;
   return impl;
 };

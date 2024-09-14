@@ -26,14 +26,6 @@ export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
     return attemptToResolveFnWithGenerics(fn, call);
   }
 
-  const parentImpl = getParentImpl(fn);
-  if (parentImpl?.typeParams.hasChildren) {
-    fn.typeParameters = [
-      ...(fn.typeParameters ?? []),
-      ...parentImpl.typeParams.toArray(),
-    ];
-  }
-
   if (fn.typeParameters && !call) {
     return fn;
   }
@@ -56,6 +48,20 @@ export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
 const resolveParameters = (params: Parameter[]) => {
   params.forEach((p) => {
     if (p.type) return;
+
+    if (p.name.is("self")) {
+      const impl = getParentImpl(p);
+      if (!impl) {
+        throw new Error(`Unable to resolve self type for ${p}`);
+      }
+
+      if (!impl.targetType) {
+        throw new Error(`Unable to resolve target type for ${impl}`);
+      }
+
+      p.type = impl.targetType;
+      return;
+    }
 
     if (!p.typeExpr) {
       throw new Error(`Unable to determine type for ${p}`);

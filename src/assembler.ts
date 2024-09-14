@@ -229,7 +229,11 @@ const compileObjectInit = (opts: CompileExprOpts<Call>) => {
   return initStruct(mod, binaryenTypeToHeapType(objectBinType), [
     mod.global.get(`__rtt_${objectType.id}`, opts.extensionHelpers.i32Array),
     ...obj.fields.map((field) =>
-      compileExpression({ ...opts, expr: field.initializer })
+      compileExpression({
+        ...opts,
+        expr: field.initializer,
+        isReturnExpr: false,
+      })
     ),
   ]);
 };
@@ -452,12 +456,6 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
       : undefined,
   });
 
-  if (obj.implementations?.length) {
-    obj.implementations.forEach((impl) =>
-      impl.methods.each((fn) => compileFunction({ ...opts, expr: fn }))
-    );
-  }
-
   // Set RTT Table (So we don't have to re-calculate it every time)
   mod.addGlobal(
     `__rtt_${obj.id}`,
@@ -467,6 +465,13 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
   );
 
   obj.binaryenType = binaryenType;
+
+  if (obj.implementations?.length) {
+    obj.implementations.forEach((impl) =>
+      impl.methods.forEach((fn) => compileFunction({ ...opts, expr: fn }))
+    );
+  }
+
   return binaryenType;
 };
 

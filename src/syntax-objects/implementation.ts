@@ -17,10 +17,10 @@ export class Implementation extends ScopedSyntax {
   readonly syntaxType = "implementation";
   readonly typeParams: ChildList<Identifier>;
   readonly targetTypeExpr: Child<Expr>;
-  readonly exports = new ChildList<Fn>([], this);
-  readonly methods = new ChildList<Fn>([], this); // NO CLONE!
   readonly body: Child<Expr>;
   readonly traitExpr: Child<Expr | undefined>;
+  readonly #exports = new Map<string, Fn>(); // NO CLONE!
+  readonly #methods = new Map<string, Fn>(); // NO CLONE!
   typesResolved?: boolean;
   targetType?: Type;
   trait?: Type;
@@ -31,6 +31,24 @@ export class Implementation extends ScopedSyntax {
     this.targetTypeExpr = new Child(opts.targetTypeExpr, this);
     this.body = new Child(opts.body, this);
     this.traitExpr = new Child(opts.traitExpr, this);
+  }
+
+  get exports(): ReadonlyArray<Fn> {
+    return [...this.#exports.values()];
+  }
+
+  get methods(): ReadonlyArray<Fn> {
+    return [...this.#methods.values()];
+  }
+
+  registerExport(v: Fn): Implementation {
+    this.#exports.set(v.id, v as Fn);
+    return this;
+  }
+
+  registerMethod(v: Fn): Implementation {
+    this.#methods.set(v.id, v as Fn);
+    return this;
   }
 
   clone(parent?: Expr) {
