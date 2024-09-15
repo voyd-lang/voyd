@@ -41,8 +41,6 @@ export const resolveImpl = (
   impl.typesResolved = true;
   impl.body.value = resolveTypes(impl.body.value);
 
-  const parentModule = impl.parentModule;
-  impl.exports.forEach((m) => parentModule?.registerEntity(m));
   return impl;
 };
 
