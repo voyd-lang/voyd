@@ -290,7 +290,7 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
     return initDsArray(type);
   }
 
-  throw new Error("Invalid type entity");
+  return initCall(type);
 };
 
 const initDsArray = (type: List) => {

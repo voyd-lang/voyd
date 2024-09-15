@@ -201,8 +201,8 @@ const registerExport = (
     return;
   }
 
-  if (parent.isImpl() && entity.isFn()) {
-    parent.registerExport(entity);
+  if (exportExpr.parentImpl && entity.isFn()) {
+    exportExpr.parentImpl.registerExport(entity);
     return;
   }
 };

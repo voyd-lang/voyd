@@ -26,7 +26,9 @@ export class Variable extends NamedEntity {
     this.isMutable = opts.isMutable;
     this.type = opts.type;
     this.typeExpr = opts.typeExpr;
+    if (this.typeExpr) this.typeExpr.parent = this;
     this.initializer = opts.initializer;
+    this.initializer.parent = this;
   }
 
   getIndex(): number {

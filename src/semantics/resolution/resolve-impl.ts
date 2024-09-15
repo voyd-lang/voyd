@@ -1,5 +1,7 @@
+import { nop } from "../../syntax-objects/helpers.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
-import { ObjectType } from "../../syntax-objects/types.js";
+import { ObjectType, TypeAlias } from "../../syntax-objects/types.js";
+import { getExprType } from "./get-expr-type.js";
 import { resolveObjectTypeTypes } from "./resolve-object-type.js";
 import { resolveTypes } from "./resolve-types.js";
 
@@ -13,6 +15,21 @@ export const resolveImpl = (
 
   if (!targetType) return impl;
 
+  if (targetType.appliedTypeArgs) {
+    targetType.appliedTypeArgs.forEach((arg, index) => {
+      const typeParam = impl.typeParams.at(index);
+      if (!typeParam) {
+        throw new Error(`Type param not found for ${arg} at ${impl.location}`);
+      }
+      const type = new TypeAlias({
+        name: typeParam.clone(),
+        typeExpr: nop(),
+      });
+      type.type = getExprType(arg);
+      impl.registerEntity(type);
+    });
+  }
+
   if (!impl.traitExpr.value && targetType?.isObjectType()) {
     targetType.implementations?.push(impl);
   }
@@ -21,11 +38,11 @@ export const resolveImpl = (
     return impl;
   }
 
+  impl.typesResolved = true;
   impl.body.value = resolveTypes(impl.body.value);
 
   const parentModule = impl.parentModule;
   impl.exports.forEach((m) => parentModule?.registerEntity(m));
-  impl.typesResolved = true;
   return impl;
 };
 

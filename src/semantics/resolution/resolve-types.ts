@@ -93,6 +93,7 @@ const resolveObjectLiteralTypes = (obj: ObjectLiteral) => {
   obj.fields.forEach((field) => {
     field.initializer = resolveTypes(field.initializer);
     field.type = getExprType(field.initializer);
+    return field;
   });
 
   if (!obj.type) {

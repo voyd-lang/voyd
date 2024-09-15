@@ -1,5 +1,6 @@
 import { Expr } from "./expr.js";
 import { Fn } from "./fn.js";
+import { nop } from "./helpers.js";
 import { Identifier } from "./identifier.js";
 import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
@@ -52,13 +53,15 @@ export class Implementation extends ScopedSyntax {
   }
 
   clone(parent?: Expr) {
-    return new Implementation({
+    const impl = new Implementation({
       ...super.getCloneOpts(parent),
       typeParams: this.typeParams.clone(),
       targetTypeExpr: this.targetTypeExpr.clone(),
-      body: this.body.clone(),
+      body: nop(),
       traitExpr: this.traitExpr.clone(),
     });
+    impl.body.value = this.body.clone(impl);
+    return impl;
   }
 
   toJSON(): unknown {

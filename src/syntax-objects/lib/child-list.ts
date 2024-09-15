@@ -41,7 +41,7 @@ export class ChildList<T extends Expr = Expr> {
     }
   }
 
-  at(index: number): Expr | undefined {
+  at(index: number): T | undefined {
     return this.store.at(index);
   }
 

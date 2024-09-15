@@ -1,4 +1,5 @@
 import { Call } from "../../syntax-objects/call.js";
+import { nop } from "../../syntax-objects/helpers.js";
 import { List } from "../../syntax-objects/list.js";
 import {
   ObjectType,
@@ -61,18 +62,21 @@ const resolveGenericsWithTypeArgs = (
   newObj.appliedTypeArgs = [];
 
   /** Register resolved type entities for each type param */
+  let typesNotResolved = false;
   typeParameters.forEach((typeParam, index) => {
     const typeArg = args.exprAt(index);
     const identifier = typeParam.clone();
     const type = new TypeAlias({
       name: identifier,
-      typeExpr: typeArg,
+      typeExpr: nop(),
     });
     type.type = getExprType(typeArg);
+    if (!type.type) typesNotResolved = true;
     newObj.appliedTypeArgs?.push(type);
     newObj.registerEntity(type);
   });
 
+  if (typesNotResolved) return obj;
   const resolvedObj = resolveObjectTypeTypes(newObj);
   obj.registerGenericInstance(resolvedObj);
 

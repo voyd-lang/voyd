@@ -192,7 +192,7 @@ const checkFnTypes = (fn: Fn): Fn => {
   checkTypes(fn.body);
 
   if (fn.returnTypeExpr) {
-    checkTypes(fn.returnTypeExpr);
+    checkTypeExpr(fn.returnTypeExpr);
   }
 
   if (!fn.returnType) {
@@ -220,7 +220,8 @@ const checkParameters = (params: Parameter[]) => {
     if (!p.type) {
       throw new Error(`Unable to determine type for ${p}`);
     }
-    checkTypes(p.typeExpr);
+
+    checkTypeExpr(p.typeExpr);
   });
 };
 
@@ -255,7 +256,7 @@ const checkVarTypes = (variable: Variable): Variable => {
     );
   }
 
-  if (variable.typeExpr) checkTypes(variable.typeExpr);
+  if (variable.typeExpr) checkTypeExpr(variable.typeExpr);
 
   if (
     variable.annotatedType &&
@@ -281,7 +282,9 @@ const checkObjectType = (obj: ObjectType): ObjectType => {
 
   obj.fields.forEach((field) => {
     if (!field.type) {
-      throw new Error(`Unable to determine type for ${field.typeExpr}`);
+      throw new Error(
+        `Unable to determine type for ${field.typeExpr} at ${field.typeExpr.location}`
+      );
     }
   });
 
@@ -311,6 +314,20 @@ export function assertValidExtension(
     throw new Error(`${child.name} does not properly extend ${parent.name}`);
   }
 }
+
+const checkTypeExpr = (expr?: Expr) => {
+  if (!expr) return; // TODO: Throw error? We use nop instead of undefined now (but maybe not everywhere)
+
+  if (expr.isCall() && !expr.type) {
+    throw new Error(`Unable to fully resolve type at ${expr.location}`);
+  }
+
+  if (expr.isCall()) {
+    return;
+  }
+
+  return checkTypes(expr);
+};
 
 const checkTypeAlias = (alias: TypeAlias): TypeAlias => {
   if (!alias.type) {
