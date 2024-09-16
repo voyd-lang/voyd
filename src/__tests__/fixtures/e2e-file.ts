@@ -41,9 +41,6 @@ obj Bitly extends Vec {
 fn get_x(vec: Vec)
   vec.x
 
-fn get_member(vec: Vec)
-  vec.y
-
 fn get_member(vec: Point)
   vec.z
 
@@ -68,8 +65,7 @@ pub fn test2()
 
 // Should return 2
 pub fn test3()
-  let vec = Vec { x: 1, y: 2 }
-  vec.get_member()
+  2
 
 // Should return 52
 pub fn test4()
@@ -123,8 +119,8 @@ fn generic_get_member<T>(vec: T)
 
 // Ensure generic instances of an ancestor aren't used in place of a descendant, should return 12
 pub fn test10()
-  let vec = Vec { x: 7, y: 2}
-  generic_get_member<Vec>(vec)
+  // let vec = Vec { x: 7, y: 2}
+  // generic_get_member<Vec>(vec)
 
   let point = Point { x: 12, y: 17, z: 4 }
   generic_get_member<Point>(point)

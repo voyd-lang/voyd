@@ -256,22 +256,6 @@ export class ObjectType extends BaseType {
     return start;
   }
 
-  /**
-   * How closely related this object is to ancestor.
-   * 0 = same type, 1 = ancestor is parent, 2 = ancestor is grandparent, etc
-   */
-  extensionDistance(ancestor: ObjectType, start = 0): number {
-    if (this === ancestor) {
-      return start;
-    }
-
-    if (this.parentObjType) {
-      return this.parentObjType.extensionDistance(ancestor, start + 1);
-    }
-
-    throw new Error(`${this.name} does not extend ${ancestor.name}`);
-  }
-
   hasField(name: Id) {
     return this.fields.some((field) => field.name === getIdStr(name));
   }
