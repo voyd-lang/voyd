@@ -5,7 +5,7 @@ pairs (fields).
 
 They are defined by listing their fields between curly braces `{}`.
 
-```
+```void
 type MyObject = {
   a: i32,
   b: i32
@@ -17,7 +17,7 @@ type MyObject = {
 An object is initialized using object literal syntax. Listing the fields and
 their corresponding values between curly braces `{}`.
 
-```
+```void
 let my_object: MyObject = {
   a: 5,
   b: 4
@@ -195,26 +195,61 @@ impl Animal
     self.name = name
 
 let me = Animal { name: "John" }
-log(me.run()) // "John is running!"
+log me.run // "John is running!"
 
 // The & prefix must be used to call methods that mutate the object
 &me.change_name("Bob")
 ```
 
-## Final Objects
+### Inheritance
 
-Objects can be defined as final, meaning they cannot be extended.
+Unlike other languages, objects do not inherit methods from their parent
+type by default. Instead, they must be opted in with use statements:
 
 ```void
-final obj Animal {
-  name: String
-}
+obj Dog extends Animal {}
 
-// Error - Animal is final
-obj Cat extends Animal {
-  lives_remaining: i32
-}
+impl Dog
+  use super::{ run } // or `all` to inherit all methods
+
+fn main()
+  let dog = Dog { name: "Dexter" }
+  dog.run() // Dexter is running
 ```
+
+
+Void uses static dispatch for all methods defined on a type. That is, when
+a function is called on a method, the function is determined at compile time.
+
+In practice, this means that compiler will pick the method on the declared type,
+even if a subtype is passed. For example:
+
+```void
+obj Animal {}
+obj Dog extends Animal {}
+
+impl Animal
+  pub fn talk()
+    log "Glub glub"
+
+impl Dog
+  pub fn talk()
+    log "Bark"
+
+fn interact(animal: Animal)
+  animal.talk()
+
+let dog = Dog {}
+
+// Here, because interact only knows it will receive an animal, it calls talk from Animal
+interact(dog) // Glub glub
+
+// Here, the compiler knows dog is Dog, so it calls talk from Dog
+dog.talk() // Bark
+```
+
+The next section will discuss how to coerce a function like `interact` into
+using the methods of a subtype.
 
 ## Object Type Narrowing
 
@@ -242,34 +277,19 @@ fn main(a: i32, b: i32)
         log "Error: divide by zero"
 ```
 
-# Traits
+## Final Objects
 
-Traits are first class types that define the behavior of a nominal object.
+Objects can be defined as final, meaning they cannot be extended.
 
-```
-trait Runnable
-  fn run(self) -> String
-  fn stop(mut self) -> void
-
-obj Car {
-  speed: i32
+```void
+final obj Animal {
+  name: String
 }
 
-impl Runnable for Car
-  fn run(self) -> String
-    "Vroom!"
-
-  fn stop(mut self) -> void
-    self.speed = 0
-
-let car = Car { speed: 10 }
-log(car.run()) // "Vroom!"
-&car.stop()
-
-car is Runnable // true
-
-fn run_thing(thing: Runnable) -> void
-  log(thing.run())
+// Error - Animal is final
+obj Cat extends Animal {
+  lives_remaining: i32
+}
 ```
 
 # Built in Object Types
@@ -281,7 +301,7 @@ grow and shrink in size when defined as a mutable variable.
 
 Type: `String`
 
-```
+```void
 let my_string = String()
 
 // String literals are of type `String`
@@ -294,16 +314,16 @@ Arrays are a growable sequence of values of the same type.
 
 Type: `Array`
 
-```
+```void
 let my_array = Array(1, 2, 3)
 ```
 
-## Dictionaries
+## Maps
 
 Dictionaries are a growable collection of key-value pairs.
 
-Type: `Dictionary`
+Type: `Map`
 
-```
+```void
 let my_dict = Dict { a: 1, b: 2, c: 3 }
 ```

@@ -84,6 +84,17 @@ move({ x, y, z })
 move(x: x, y: y, z: z)
 ```
 
+Labeled arguments also support concise closure sugar on call sites:
+
+```void
+fn try({ do: ((): throws -> void), catch: (e: Error) -> void })
+
+try do():
+  this_may_throw()
+catch(e):
+  log e
+```
+
 [1] The compiler will typically optimize this away, so there is no performance
 penalty for using labeled arguments.
 
@@ -123,25 +134,6 @@ fn add<T: Numeric>(a: T, b: T) -> T
 
 See the chapter on [Generics](./generics.md) for more information.
 
-## Call By Name Parameters
-
-Call by name parameters automatically wrap the passed expression in a closure.
-Call by name parameters are defined by prefixing the parameter type with `@`.
-Their type must always be a function type with no parameters.
-
-```rust
-fn eval_twice(@f: () -> void) -> void
-  f()
-  f()
-
-fn main()
-  var x = 0
-  eval_twice(x = x + 1)
-  print(x) // 2
-```
-
-Use by name parameters very SPARINGLY. And only when the function name makes
-it obvious that the parameter is a function.
 
 ## Parenthetical Elision
 
@@ -226,40 +218,61 @@ See the chapter on [Syntax](./syntax.md) for more information and detailed rules
 
 ## Function Overloading
 
-Void functions can be overloaded. Provided that function overload can be
-unambiguously distinguished via their parameters and return type.
+Void functions can be overloaded. Provided that function overload can be unambiguously distinguished via their parameters and return type.
 
 ```void
 fn sum(a: i32, b: i32)
   print("Def 1")
   a + b
 
-fn sum(vec: {a:i32, b: i32})
+fn sum(vec: { a:i32, b: i32 })
   print("Def 2")
   vec.a + vec.b
 
 sum a: 1, b: 2 // Def 1
 sum { a: 1, b: 2 } // Def 2
-
-// ERROR: sum(numbers: ...Int) overlaps ambiguously with sum(a: Int, b: Int)
-fn sum(numbers: ...Int)
-  print("Def 3")
 ```
 
 This can be especially useful for overloading operators to support a custom
 type:
 
-```
+```void
 fn '+'(a: Vec3, b: Vec3) -> Vec3
   Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
 
 Vec3(1, 2, 3) + Vec3(4, 5, 6) // Vec3(5, 7, 9)
 ```
 
-### Rules
+A function call is considered to be ambiguous when multiple functions in
+the same scope share the same name, and the types of each parameter overlap
+in order.
 
--   A function signature is:
--   Its identifier
--   Its parameters, their name, types, order, and label (if applicable)
--   Each full function signature must be unique in a given scope
--   TBD...
+```void
+fn add(a: i32, b: i32) -> i32
+fn add(d: i32, e: i32) -> i32 // Ambiguous collision
+fn add(f: i32, c: f32) -> i32 // This is fine, the second parameter does not overlap with previous
+```
+
+Object types overlap if one is an extension of the other:
+
+```void
+obj Animal {}
+obj Dog extends Animal {}
+obj Cat extends Animal {}
+
+fn walk(animal: Animal)
+fn walk(dog: Dog) // Ambiguous collision with walk(animal: Animal)
+
+// Sibling types do not overlap
+fn speak(cat: Cat)
+fn speak(dog: Dog) // This is fine
+
+// Labeled parameters can be to add an explicit distinction between two overlapping
+// types, (provided they have different labels)
+fn walk({animal: Animal})
+fn walk({dog: Dog}) // This is fine, the label, dog, distinguishes this function from the previous
+
+walk(dog: dexter) // Woof!
+```
+
+## Function Resolution
