@@ -108,16 +108,47 @@ describe("getCallFn", () => {
     const point = new ObjectType({ name: "Vec", value: [], parentObj: vec });
     const pointy = new ObjectType({ name: "Vec", value: [], parentObj: vec });
 
-    const objIdentifier = new MockIdentifier({ value: "hi", entity: point });
+    const objIdentifier = new MockIdentifier({ value: "hi", entity: pointy });
 
     const candidate1 = new Fn({
       name: fnName,
-      parameters: [new Parameter({ name: pName, type: vec })],
+      parameters: [new Parameter({ name: pName, type: point })],
     });
 
     const candidate2 = new Fn({
       name: fnName,
+      parameters: [new Parameter({ name: pName, type: pointy })],
+    });
+
+    const call = new Call({
+      fnName,
+      args: new List({
+        value: [objIdentifier],
+      }),
+    });
+
+    call.resolveFns = vi.fn().mockReturnValue([candidate1, candidate2]);
+
+    expect(getCallFn(call)).toBe(candidate2);
+  });
+
+  test("subtypes are considered to overlap, and throws ambiguous error", () => {
+    const pName = new Identifier({ value: "arg1" });
+    const fnName = new Identifier({ value: "hi" });
+    const vec = new ObjectType({ name: "Vec", value: [] });
+    const point = new ObjectType({ name: "Vec", value: [], parentObj: vec });
+    const pointy = new ObjectType({ name: "Vec", value: [], parentObj: vec });
+
+    const objIdentifier = new MockIdentifier({ value: "hi", entity: pointy });
+
+    const candidate1 = new Fn({
+      name: fnName,
       parameters: [new Parameter({ name: pName, type: point })],
+    });
+
+    const candidate2 = new Fn({
+      name: fnName,
+      parameters: [new Parameter({ name: pName, type: vec })],
     });
 
     const candidate3 = new Fn({
@@ -136,6 +167,8 @@ describe("getCallFn", () => {
       .fn()
       .mockReturnValue([candidate1, candidate2, candidate3]);
 
-    expect(getCallFn(call)).toBe(candidate2);
+    expect(() => getCallFn(call)).toThrowError(
+      `Ambiguous call ${JSON.stringify(call, null, 2)}`
+    );
   });
 });
