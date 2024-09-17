@@ -113,15 +113,12 @@ pub fn test9()
   let vec2 = VecGeneric<f64> { x: 7.5, y: 2.5, z: 3.5 }
   vec2.x
 
-// Test generic object inheritance strictness
+// Test generics with sibling object types
 fn generic_get_member<T>(vec: T)
   vec.get_member()
 
-// Ensure generic instances of an ancestor aren't used in place of a descendant, should return 12
+// Ensure generic functions with sibling types are called correctly
 pub fn test10()
-  // let vec = Vec { x: 7, y: 2}
-  // generic_get_member<Vec>(vec)
-
   let point = Point { x: 12, y: 17, z: 4 }
   generic_get_member<Point>(point)
 
