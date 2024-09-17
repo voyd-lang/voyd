@@ -20,6 +20,7 @@ export class Fn extends ScopedNamedEntity {
   annotatedReturnType?: Type;
   appliedTypeArgs?: Type[] = [];
   typesResolved?: boolean;
+  #iteration = 0;
 
   constructor(
     opts: ScopedNamedEntityOpts & {
@@ -126,10 +127,10 @@ export class Fn extends ScopedNamedEntity {
     // Don't clone generic instances
     return new Fn({
       ...super.getCloneOpts(parent),
-      variables: this.variables,
+      id: `${this.id}#${this.#iteration++}`,
       returnTypeExpr: this.returnTypeExpr?.clone(),
-      parameters: this.#parameters.toClonedArray(),
-      typeParameters: this.#typeParams.toClonedArray(),
+      parameters: this.#parameters.clone(),
+      typeParameters: this.#typeParams.clone(),
       body: this.body?.clone(),
     });
   }

@@ -4,6 +4,8 @@ import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
 import { Id, Identifier } from "./identifier.js";
 import { getIdStr } from "./lib/get-id-str.js";
 import { LexicalContext } from "./lib/lexical-context.js";
+import { Implementation } from "./implementation.js";
+import { ScopedEntity } from "./scoped-entity.js";
 
 export type Type =
   | PrimitiveType
@@ -161,9 +163,9 @@ export class TupleType extends BaseType {
 
 export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
 
-export class ObjectType extends BaseType {
+export class ObjectType extends BaseType implements ScopedEntity {
   readonly kindOfType = "object";
-  namespace: LexicalContext = new LexicalContext();
+  lexicon: LexicalContext = new LexicalContext();
   typeParameters?: Identifier[];
   appliedTypeArgs?: Type[];
   genericInstances?: ObjectType[];
@@ -172,7 +174,9 @@ export class ObjectType extends BaseType {
   parentObjType?: ObjectType;
   /** Type used for locals, globals, function return type */
   binaryenType?: number;
-  typesResolved?: boolean;
+  typesResolved?: boolean; // Don't set if type parameters are present
+  implementations: Implementation[];
+  #iteration = 0;
 
   constructor(
     opts: NamedEntityOpts & {
@@ -180,6 +184,7 @@ export class ObjectType extends BaseType {
       parentObjExpr?: Expr;
       parentObj?: ObjectType;
       typeParameters?: Identifier[];
+      implementations?: Implementation[];
     }
   ) {
     super(opts);
@@ -190,6 +195,7 @@ export class ObjectType extends BaseType {
     this.parentObjType = opts.parentObj;
     this.parentObjExpr = opts.parentObjExpr;
     this.typeParameters = opts.typeParameters;
+    this.implementations = opts.implementations ?? [];
   }
 
   get size() {
@@ -210,6 +216,7 @@ export class ObjectType extends BaseType {
   clone(parent?: Expr): ObjectType {
     return new ObjectType({
       ...super.getCloneOpts(parent),
+      id: `${this.id}#${this.#iteration++}`,
       value: this.fields.map((field) => ({
         ...field,
         typeExpr: field.typeExpr.clone(),
@@ -217,6 +224,7 @@ export class ObjectType extends BaseType {
       })),
       parentObjExpr: this.parentObjExpr?.clone(),
       typeParameters: this.typeParameters,
+      implementations: this.implementations.map((impl) => impl.clone()),
     });
   }
 
@@ -247,22 +255,6 @@ export class ObjectType extends BaseType {
       return this.parentObjType.getAncestorIds(start);
     }
     return start;
-  }
-
-  /**
-   * How closely related this object is to ancestor.
-   * 0 = same type, 1 = ancestor is parent, 2 = ancestor is grandparent, etc
-   */
-  extensionDistance(ancestor: ObjectType, start = 0): number {
-    if (this === ancestor) {
-      return start;
-    }
-
-    if (this.parentObjType) {
-      return this.parentObjType.extensionDistance(ancestor, start + 1);
-    }
-
-    throw new Error(`${this.name} does not extend ${ancestor.name}`);
   }
 
   hasField(name: Id) {

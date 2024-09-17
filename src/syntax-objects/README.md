@@ -1,7 +1,6 @@
 # Syntax Objects
 
-Syntax objects are data structures that represent concepts within the
-language. Such as functions, function calls, variables etc.
+Syntax objects are data structures that represent void's language constructs. This includes functions, function calls, variables etc.
 
 # Guidelines
 

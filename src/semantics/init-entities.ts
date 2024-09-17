@@ -1,4 +1,5 @@
 import { Declaration } from "../syntax-objects/declaration.js";
+import { Implementation } from "../syntax-objects/implementation.js";
 import {
   List,
   Fn,
@@ -11,6 +12,7 @@ import {
   ObjectType,
   ObjectLiteral,
   DsArrayType,
+  nop,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { SemanticProcessor } from "./types.js";
@@ -56,6 +58,10 @@ export const initEntities: SemanticProcessor = (expr) => {
     return initMatch(expr);
   }
 
+  if (expr.calls("impl")) {
+    return initImpl(expr);
+  }
+
   return initCall(expr);
 };
 
@@ -79,7 +85,20 @@ const initFn = (expr: List): Fn => {
 
   const parameters = parameterList
     .sliceAsArray(typeParameters ? 2 : 1)
-    .flatMap((p) => listToParameter(p as List));
+    .flatMap((p) => {
+      if (p.isIdentifier()) {
+        return new Parameter({
+          name: p,
+          typeExpr: undefined,
+        });
+      }
+
+      if (!p.isList()) {
+        throw new Error("Invalid parameter");
+      }
+
+      return listToParameter(p);
+    });
 
   const returnTypeExpr = getReturnTypeExprForFn(expr, 3);
 
@@ -271,7 +290,7 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
     return initDsArray(type);
   }
 
-  throw new Error("Invalid type entity");
+  return initCall(type);
 };
 
 const initDsArray = (type: List) => {
@@ -399,4 +418,38 @@ const extractObjectFields = (obj: List) => {
 
     return { name: name.value, typeExpr };
   });
+};
+
+const initImpl = (impl: List): Implementation => {
+  const first = impl.exprAt(1);
+  const generics =
+    first.isList() && first.calls("generics")
+      ? first.sliceAsArray(1).flatMap((p) => (p.isIdentifier() ? p : []))
+      : undefined;
+
+  const possibleTraitIndex = generics ? 2 : 1;
+  const possibleFor = impl.at(possibleTraitIndex + 1);
+  const traitExpr =
+    possibleFor?.isIdentifier() && possibleFor.is("for")
+      ? initEntities(impl.exprAt(possibleTraitIndex))
+      : undefined;
+
+  let targetTypeIndex = 1;
+  if (generics) targetTypeIndex += 1;
+  if (traitExpr) targetTypeIndex += 2;
+
+  const targetTypeExpr = initEntities(impl.exprAt(targetTypeIndex));
+
+  const init = new Implementation({
+    ...impl.metadata,
+    typeParams: generics ?? [],
+    targetTypeExpr,
+    body: nop(),
+    traitExpr,
+  });
+
+  const body = impl.exprAt(targetTypeIndex + 1);
+  body.parent = init;
+  init.body.value = initEntities(body);
+  return init;
 };

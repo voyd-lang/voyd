@@ -13,6 +13,7 @@ import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveCallTypes } from "./resolve-call-types.js";
 import { resolveFnTypes } from "./resolve-fn-type.js";
+import { resolveImpl } from "./resolve-impl.js";
 import { resolveMatch } from "./resolve-match.js";
 import { resolveObjectTypeTypes } from "./resolve-object-type.js";
 import { resolveUse } from "./resolve-use.js";
@@ -20,6 +21,9 @@ import { resolveUse } from "./resolve-use.js";
 /**
  * NOTE: Some mapping is preformed on the AST at this stage.
  * Returned tree not guaranteed to be same as supplied tree
+ *
+ * Should probably rename this to resolveEntities and rename getExprType
+ * to resolveType
  */
 export const resolveTypes = (expr: Expr | undefined): Expr => {
   if (!expr) return nop();
@@ -35,6 +39,7 @@ export const resolveTypes = (expr: Expr | undefined): Expr => {
   if (expr.isTypeAlias()) return resolveTypeAliasTypes(expr);
   if (expr.isObjectLiteral()) return resolveObjectLiteralTypes(expr);
   if (expr.isMatch()) return resolveMatch(expr);
+  if (expr.isImpl()) return resolveImpl(expr);
   return expr;
 };
 
@@ -79,6 +84,7 @@ const resolveDsArrayTypeTypes = (arr: DsArrayType): DsArrayType => {
 };
 
 const resolveTypeAliasTypes = (alias: TypeAlias): TypeAlias => {
+  if (alias.type) return alias;
   alias.typeExpr = resolveTypes(alias.typeExpr);
   alias.type = getExprType(alias.typeExpr);
   return alias;
@@ -88,6 +94,7 @@ const resolveObjectLiteralTypes = (obj: ObjectLiteral) => {
   obj.fields.forEach((field) => {
     field.initializer = resolveTypes(field.initializer);
     field.type = getExprType(field.initializer);
+    return field;
   });
 
   if (!obj.type) {

@@ -38,7 +38,7 @@ export class Child<T extends Expr | undefined> {
     return this.#value?.toJSON();
   }
 
-  clone(parent?: Expr) {
-    return new Child(this.#value?.clone(parent), parent ?? this.#parent);
+  clone(parent?: Expr): T {
+    return this.#value?.clone(parent) as T;
   }
 }

@@ -6,7 +6,7 @@ import { resolveFnTypes } from "./resolve-fn-type.js";
 export const getCallFn = (call: Call): Fn | undefined => {
   if (isPrimitiveFnCall(call)) return undefined;
 
-  const unfilteredCandidates = call.resolveFns(call.fnName);
+  const unfilteredCandidates = getCandidates(call);
   const candidates = filterCandidates(call, unfilteredCandidates);
 
   if (!candidates.length) {
@@ -14,7 +14,26 @@ export const getCallFn = (call: Call): Fn | undefined => {
   }
 
   if (candidates.length === 1) return candidates[0];
-  return findBestFnMatch(candidates, call);
+
+  throw new Error(`Ambiguous call ${JSON.stringify(call, null, 2)}`);
+};
+
+const getCandidates = (call: Call): Fn[] => {
+  const fns = call.resolveFns(call.fnName);
+
+  // Check for methods of arg 1
+  const arg1Type = getExprType(call.argAt(0));
+  if (arg1Type?.isObjectType()) {
+    const isInsideImpl = call.parentImpl?.targetType?.id === arg1Type.id;
+    const implFns = isInsideImpl
+      ? [] // internal methods already in scope
+      : arg1Type.implementations
+          ?.flatMap((impl) => impl.exports)
+          .filter((fn) => fn.name.is(call.fnName.value));
+    fns.push(...(implFns ?? []));
+  }
+
+  return fns;
 };
 
 const filterCandidates = (call: Call, candidates: Fn[]): Fn[] =>
@@ -77,51 +96,6 @@ const parametersMatch = (candidate: Fn, call: Call) =>
     const labelsMatch = p.label === argLabel;
     return typesAreEquivalent(argType, p.type!) && labelsMatch;
   });
-
-const findBestFnMatch = (candidates: Fn[], call: Call): Fn => {
-  let winner: Fn | undefined = undefined;
-  let tied = false;
-  let lowestScore: number | undefined;
-  for (const candidate of candidates) {
-    const score = candidate.parameters.reduce((score, param, index) => {
-      if (!param.type?.isObjectType()) {
-        return score;
-      }
-
-      const argType = getExprType(call.argAt(index));
-      if (!argType || !argType.isObjectType()) {
-        throw new Error(`Could not determine type. I'm helpful >.<`);
-      }
-
-      const distance = argType.extensionDistance(param.type);
-      return score + distance;
-    }, 0);
-
-    if (lowestScore === undefined) {
-      lowestScore = score;
-      winner = candidate;
-    }
-
-    if (score > lowestScore) {
-      continue;
-    }
-
-    if (score < lowestScore) {
-      lowestScore = score;
-      winner = candidate;
-      tied = false;
-      continue;
-    }
-
-    tied = true;
-  }
-
-  if (!winner || tied) {
-    throw new Error(`Ambiguous call ${JSON.stringify(call, null, 2)}`);
-  }
-
-  return winner;
-};
 
 const getExprLabel = (expr?: Expr): string | undefined => {
   if (!expr?.isCall()) return;

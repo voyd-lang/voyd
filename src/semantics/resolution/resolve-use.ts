@@ -168,7 +168,7 @@ export const registerExports = (
 
     if (e instanceof NamedEntity) {
       registerExport(exportExpr, e);
-      e.parentModule?.registerEntity(e);
+      if (!e.parentImpl) e.parentModule?.registerEntity(e);
     }
   });
 };
@@ -178,5 +178,16 @@ const registerExport = (
   entity: NamedEntity,
   alias?: string
 ) => {
-  exportExpr.parentModule?.registerExport(entity, alias);
+  const parent = exportExpr.parent;
+  if (!parent) return;
+
+  if (parent.isModule()) {
+    parent.registerExport(entity, alias);
+    return;
+  }
+
+  if (exportExpr.parentImpl && entity.isFn()) {
+    exportExpr.parentImpl.registerExport(entity);
+    return;
+  }
 };

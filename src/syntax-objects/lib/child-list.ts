@@ -41,7 +41,7 @@ export class ChildList<T extends Expr = Expr> {
     }
   }
 
-  at(index: number): Expr | undefined {
+  at(index: number): T | undefined {
     return this.store.at(index);
   }
 
@@ -114,11 +114,16 @@ export class ChildList<T extends Expr = Expr> {
     return this;
   }
 
+  reset(to?: T[]) {
+    this.store = new FastShiftArray(...(to ?? []));
+    return this;
+  }
+
   toArray(): T[] {
     return this.store.toArray();
   }
 
-  toClonedArray(): T[] {
+  clone(): T[] {
     return this.toArray().map((expr: T): T => expr.clone() as T);
   }
 

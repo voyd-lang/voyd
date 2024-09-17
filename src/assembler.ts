@@ -63,6 +63,7 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isModule()) return compileModule({ ...opts, expr });
   if (expr.isObjectLiteral()) return compileObjectLiteral({ ...opts, expr });
   if (expr.isType()) return compileType({ ...opts, expr });
+  if (expr.isImpl()) return mod.nop();
   if (expr.isUse()) return mod.nop();
   if (expr.isMacro()) return mod.nop();
   if (expr.isMacroVariable()) return mod.nop();
@@ -228,7 +229,11 @@ const compileObjectInit = (opts: CompileExprOpts<Call>) => {
   return initStruct(mod, binaryenTypeToHeapType(objectBinType), [
     mod.global.get(`__rtt_${objectType.id}`, opts.extensionHelpers.i32Array),
     ...obj.fields.map((field) =>
-      compileExpression({ ...opts, expr: field.initializer })
+      compileExpression({
+        ...opts,
+        expr: field.initializer,
+        isReturnExpr: false,
+      })
     ),
   ]);
 };
@@ -460,6 +465,13 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
   );
 
   obj.binaryenType = binaryenType;
+
+  if (obj.implementations?.length) {
+    obj.implementations.forEach((impl) =>
+      impl.methods.forEach((fn) => compileFunction({ ...opts, expr: fn }))
+    );
+  }
+
   return binaryenType;
 };
 

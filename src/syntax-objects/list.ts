@@ -63,9 +63,7 @@ export class List extends Syntax {
 
   optionalIdentifierAt(index: number): Identifier | undefined {
     const id = this.at(index);
-    if (id?.isIdentifier()) {
-      return id;
-    }
+    if (id?.isIdentifier()) return id;
   }
 
   listAt(index: number): List {
@@ -209,7 +207,7 @@ export class List extends Syntax {
   clone(parent?: Expr): List {
     return new List({
       ...super.getCloneOpts(parent),
-      value: this.#store.toClonedArray(),
+      value: this.#store.clone(),
     });
   }
 }
