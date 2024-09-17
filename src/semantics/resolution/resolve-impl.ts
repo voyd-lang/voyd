@@ -35,6 +35,8 @@ export const resolveImpl = (
   }
 
   if (targetType?.isObjectType() && targetType.typeParameters?.length) {
+    // Apply impl to existing generic instances
+    targetType.genericInstances?.forEach((obj) => resolveImpl(impl, obj));
     return impl;
   }
 

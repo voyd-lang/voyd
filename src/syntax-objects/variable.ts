@@ -1,4 +1,5 @@
 import { Expr } from "./expr.js";
+import { Child } from "./lib/child.js";
 import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
 import { Type } from "./types.js";
 
@@ -10,8 +11,8 @@ export class Variable extends NamedEntity {
   originalType?: Type;
   inferredType?: Type;
   annotatedType?: Type;
-  typeExpr?: Expr;
-  initializer: Expr;
+  #typeExpr = new Child<Expr | undefined>(undefined, this);
+  #initializer: Child<Expr>;
   requiresCast = false;
 
   constructor(
@@ -26,9 +27,23 @@ export class Variable extends NamedEntity {
     this.isMutable = opts.isMutable;
     this.type = opts.type;
     this.typeExpr = opts.typeExpr;
-    if (this.typeExpr) this.typeExpr.parent = this;
-    this.initializer = opts.initializer;
-    this.initializer.parent = this;
+    this.#initializer = new Child(opts.initializer, this);
+  }
+
+  get typeExpr(): Expr | undefined {
+    return this.#typeExpr.value;
+  }
+
+  set typeExpr(value: Expr | undefined) {
+    this.#typeExpr.value = value;
+  }
+
+  get initializer(): Expr {
+    return this.#initializer.value;
+  }
+
+  set initializer(value: Expr) {
+    this.#initializer.value = value;
   }
 
   getIndex(): number {
@@ -59,8 +74,8 @@ export class Variable extends NamedEntity {
     return new Variable({
       ...super.getCloneOpts(parent),
       isMutable: this.isMutable,
-      initializer: this.initializer,
-      typeExpr: this.typeExpr?.clone(),
+      initializer: this.#initializer.clone(),
+      typeExpr: this.#typeExpr.clone(),
     });
   }
 }

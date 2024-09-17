@@ -128,7 +128,6 @@ export class Fn extends ScopedNamedEntity {
     return new Fn({
       ...super.getCloneOpts(parent),
       id: `${this.id}#${this.#iteration++}`,
-      variables: this.variables,
       returnTypeExpr: this.returnTypeExpr?.clone(),
       parameters: this.#parameters.clone(),
       typeParameters: this.#typeParams.clone(),

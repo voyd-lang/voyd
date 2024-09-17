@@ -153,6 +153,22 @@ use m1::m2::{ test as hi }
 
 pub fn test12()
   hi()
+
+impl<T> VecGeneric<T>
+  fn add(self, v: VecGeneric<T>) -> VecGeneric<T>
+    VecGeneric<T> { x: self.x + v.x, y: self.y + v.y, z: self.z + v.z }
+
+  pub fn do_work(self, v: VecGeneric<T>) -> VecGeneric<T>
+    let b = self.add(v)
+    b
+
+// Test generic impls, should return 9
+pub fn test13()
+  let a = VecGeneric<i32> { x: 1, y: 2, z: 3 }
+  let b = VecGeneric<i32> { x: 4, y: 5, z: 6 }
+  let c = a.do_work(b)
+  c.z // 9
+
 `;
 
 export const tcoText = `

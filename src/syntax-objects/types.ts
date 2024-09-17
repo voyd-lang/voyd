@@ -5,6 +5,7 @@ import { Id, Identifier } from "./identifier.js";
 import { getIdStr } from "./lib/get-id-str.js";
 import { LexicalContext } from "./lib/lexical-context.js";
 import { Implementation } from "./implementation.js";
+import { ScopedEntity } from "./scoped-entity.js";
 
 export type Type =
   | PrimitiveType
@@ -162,9 +163,9 @@ export class TupleType extends BaseType {
 
 export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
 
-export class ObjectType extends BaseType {
+export class ObjectType extends BaseType implements ScopedEntity {
   readonly kindOfType = "object";
-  namespace: LexicalContext = new LexicalContext();
+  lexicon: LexicalContext = new LexicalContext();
   typeParameters?: Identifier[];
   appliedTypeArgs?: Type[];
   genericInstances?: ObjectType[];

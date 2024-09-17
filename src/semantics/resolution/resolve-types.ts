@@ -84,6 +84,7 @@ const resolveDsArrayTypeTypes = (arr: DsArrayType): DsArrayType => {
 };
 
 const resolveTypeAliasTypes = (alias: TypeAlias): TypeAlias => {
+  if (alias.type) return alias;
   alias.typeExpr = resolveTypes(alias.typeExpr);
   alias.type = getExprType(alias.typeExpr);
   return alias;
