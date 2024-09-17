@@ -433,6 +433,9 @@ const buildDsArrayType = (opts: CompileExprOpts, type: DsArrayType) => {
   return type.binaryenType;
 };
 
+// Marks the start of the fields in an object after RTT info fields
+const OBJECT_FIELDS_OFFSET = 2;
+
 /** TODO: Skip building types for object literals that are part of an initializer of an obj */
 const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
   if (obj.binaryenType) return obj.binaryenType;
@@ -442,10 +445,14 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
   const binaryenType = defineStructType(mod, {
     name: obj.id,
     fields: [
+      // Reference to the RTT Ancestors Table
       {
         type: opts.extensionHelpers.i32Array,
-        name: "ancestors",
+        name: "__ancestors",
       },
+      // Reference to the field index lookup function
+      // TODO
+      // Fields
       ...obj.fields.map((field) => ({
         type: mapBinaryenType(opts, field.type!),
         name: field.name,
@@ -481,7 +488,7 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const member = expr.identifierArgAt(1);
   const objValue = compileExpression({ ...opts, expr: obj });
   const type = getExprType(obj) as ObjectType;
-  const memberIndex = type.getFieldIndex(member) + 1; // +1 to account for the RTT table
+  const memberIndex = type.getFieldIndex(member) + OBJECT_FIELDS_OFFSET;
   const field = type.getField(member)!;
   return structGetFieldValue({
     mod,
