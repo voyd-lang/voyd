@@ -161,7 +161,12 @@ export class TupleType extends BaseType {
   }
 }
 
-export type ObjectField = { name: string; typeExpr: Expr; type?: Type };
+export type ObjectField = {
+  name: string;
+  typeExpr: Expr;
+  type?: Type;
+  binaryenAccessorType?: number;
+};
 
 export class ObjectType extends BaseType implements ScopedEntity {
   readonly kindOfType = "object";

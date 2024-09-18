@@ -30,7 +30,6 @@ import { initExtensionHelpers } from "./assembler/extension-helpers.js";
 import { returnCall } from "./assembler/return-call.js";
 import { Float } from "./syntax-objects/float.js";
 import { initFieldLookupHelpers } from "./assembler/field-lookup-helpers.js";
-import { murmurHash3 } from "./lib/murmur-hash.js";
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -43,7 +42,7 @@ export const assemble = (ast: Expr) => {
   return mod;
 };
 
-interface CompileExprOpts<T = Expr> {
+export interface CompileExprOpts<T = Expr> {
   expr: T;
   mod: binaryen.Module;
   extensionHelpers: ReturnType<typeof initExtensionHelpers>;
@@ -51,7 +50,7 @@ interface CompileExprOpts<T = Expr> {
   isReturnExpr?: boolean;
 }
 
-const compileExpression = (opts: CompileExprOpts): number => {
+export const compileExpression = (opts: CompileExprOpts): number => {
   const { expr, mod, isReturnExpr } = opts;
   opts.isReturnExpr = false;
   // These can take isReturnExpr
@@ -230,7 +229,7 @@ const compileObjectInit = (opts: CompileExprOpts<Call>) => {
   const objectBinType = mapBinaryenType(opts, objectType);
   const obj = expr.argAt(0) as ObjectLiteral;
 
-  return initStruct(mod, binaryenTypeToHeapType(objectBinType), [
+  return initStruct(mod, objectBinType, [
     mod.global.get(
       `__ancestors_table_${objectType.id}`,
       opts.extensionHelpers.i32Array
@@ -384,7 +383,7 @@ const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
   const objectType = getExprType(obj) as ObjectType;
   const literalBinType = mapBinaryenType(opts, objectType);
 
-  return initStruct(mod, binaryenTypeToHeapType(literalBinType), [
+  return initStruct(mod, literalBinType, [
     mod.global.get(
       `__ancestors_table_${objectType.id}`,
       opts.extensionHelpers.i32Array
@@ -428,7 +427,10 @@ const getFunctionParameterTypes = (opts: CompileExprOpts, fn: Fn) => {
 const getFunctionVarTypes = (opts: CompileExprOpts, fn: Fn) =>
   fn.variables.map((v) => mapBinaryenType(opts, v.type!));
 
-const mapBinaryenType = (opts: CompileExprOpts, type: Type): binaryen.Type => {
+export const mapBinaryenType = (
+  opts: CompileExprOpts,
+  type: Type
+): binaryen.Type => {
   if (isPrimitiveId(type, "bool")) return binaryen.i32;
   if (isPrimitiveId(type, "i32")) return binaryen.i32;
   if (isPrimitiveId(type, "f32")) return binaryen.f32;
@@ -485,6 +487,8 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
       : undefined,
   });
 
+  obj.binaryenType = binaryenType;
+
   // Set RTT Ancestors Table (So we don't have to re-calculate it every time)
   mod.addGlobal(
     `__ancestors_table_${obj.id}`,
@@ -499,12 +503,8 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
     `__field_index_table_${obj.id}`,
     opts.extensionHelpers.i32Array,
     false,
-    opts.fieldLookupHelpers.initFieldIndexTable(
-      obj.fields.map((field) => murmurHash3(field.name))
-    )
+    opts.fieldLookupHelpers.initFieldIndexTable({ ...opts, expr: obj })
   );
-
-  obj.binaryenType = binaryenType;
 
   if (obj.implementations?.length) {
     obj.implementations.forEach((impl) =>
@@ -521,6 +521,11 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const member = expr.identifierArgAt(1);
   const objValue = compileExpression({ ...opts, expr: obj });
   const type = getExprType(obj) as ObjectType;
+
+  if (type.getAttribute("isStructural")) {
+    return opts.fieldLookupHelpers.getFieldValueByAccessor(opts);
+  }
+
   const memberIndex = type.getFieldIndex(member) + OBJECT_FIELDS_OFFSET;
   const field = type.getField(member)!;
   return structGetFieldValue({

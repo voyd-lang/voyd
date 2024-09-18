@@ -109,8 +109,33 @@ export const modBinaryenTypeToHeapType = (
   return bin._BinaryenTypeGetHeapType(type);
 };
 
-export const refFunc = (mod: binaryen.Module, func: string): ExpressionRef =>
-  bin._BinaryenRefFunc(mod.ptr, func, binaryen.funcref);
+export const callRef = (
+  module: binaryen.Module,
+  target: ExpressionRef,
+  operands: ExpressionRef[],
+  returnType: TypeRef,
+  isReturn = false
+): ExpressionRef => {
+  const operandsPtr = allocU32Array(operands);
+  const result = bin._BinaryenCallRef(
+    module.ptr,
+    target,
+    operandsPtr,
+    operands.length,
+    returnType,
+    isReturn
+  );
+
+  bin._free(operandsPtr);
+  return result;
+};
+
+export const refFunc = (
+  mod: binaryen.Module,
+  func: string,
+  type: TypeRef
+): ExpressionRef =>
+  bin._BinaryenRefFunc(mod.ptr, bin.stringToUTF8OnStack(func), type);
 
 export const refCast = (
   mod: binaryen.Module,

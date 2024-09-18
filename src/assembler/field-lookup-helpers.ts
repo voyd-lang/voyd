@@ -10,10 +10,18 @@ import {
   initStruct,
   structGetFieldValue,
   refFunc,
+  callRef,
+  refCast,
 } from "../lib/binaryen-gc/index.js";
 import { ObjectType } from "../syntax-objects/types.js";
 import { murmurHash3 } from "../lib/murmur-hash.js";
-import { CompileExprOpts, mapBinaryenType } from "../assembler.js";
+import {
+  compileExpression,
+  CompileExprOpts,
+  mapBinaryenType,
+} from "../assembler.js";
+import { Call } from "../syntax-objects/call.js";
+import { getExprType } from "../semantics/resolution/get-expr-type.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -103,7 +111,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
       obj.fields.map((field, index) => {
         const accessorName = `obj_field_accessor_${obj.id}_${field.name}`;
 
-        mod.addFunction(
+        const accessor = mod.addFunction(
           accessorName,
           bin.createType([mapBinaryenType(opts, obj)]),
           mapBinaryenType(opts, field.type!),
@@ -111,18 +119,56 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
           structGetFieldValue({
             mod,
             fieldType: mapBinaryenType(opts, field.type!),
-            fieldIndex: index,
+            fieldIndex: index + 2, // Skip RTT type fields
             exprRef: mod.local.get(0, mapBinaryenType(opts, obj)),
           })
         );
 
+        const funcHeapType = bin._BinaryenFunctionGetType(accessor);
+        const funcType = bin._BinaryenTypeFromHeapType(funcHeapType, false);
+
+        field.binaryenAccessorType = funcType;
+
         return initStruct(mod, fieldAccessorStruct, [
-          murmurHash3(field.name),
-          refFunc(mod, accessorName),
+          mod.i32.const(murmurHash3(field.name)),
+          refFunc(mod, accessorName, funcType),
         ]);
       })
     );
   };
 
-  return { initFieldIndexTable, lookupTableType, LOOKUP_NAME };
+  const getFieldValueByAccessor = (opts: CompileExprOpts<Call>) => {
+    const { expr, mod } = opts;
+    const obj = expr.exprArgAt(0);
+    const member = expr.identifierArgAt(1);
+    const objType = getExprType(obj) as ObjectType;
+
+    const field = objType.getField(member)!;
+    const lookupTable = structGetFieldValue({
+      mod,
+      fieldType: lookupTableType,
+      fieldIndex: 1,
+      exprRef: compileExpression({ ...opts, expr: obj }),
+    });
+
+    const funcRef = mod.call(
+      LOOKUP_NAME,
+      [mod.i32.const(murmurHash3(member.value)), lookupTable],
+      bin.funcref
+    );
+
+    return callRef(
+      mod,
+      refCast(mod, funcRef, field.binaryenAccessorType!),
+      [compileExpression({ ...opts, expr: obj })],
+      mapBinaryenType(opts, field.type!)
+    );
+  };
+
+  return {
+    initFieldIndexTable,
+    lookupTableType,
+    LOOKUP_NAME,
+    getFieldValueByAccessor,
+  };
 };
