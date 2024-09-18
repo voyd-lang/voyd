@@ -29,13 +29,16 @@ import { Match, MatchCase } from "./syntax-objects/match.js";
 import { initExtensionHelpers } from "./assembler/extension-helpers.js";
 import { returnCall } from "./assembler/return-call.js";
 import { Float } from "./syntax-objects/float.js";
+import { initFieldLookupHelpers } from "./assembler/field-lookup-helpers.js";
+import { murmurHash3 } from "./lib/murmur-hash.js";
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
   mod.setMemory(1, 150, "buffer");
   mod.setFeatures(binaryen.Features.All);
   const extensionHelpers = initExtensionHelpers(mod);
-  compileExpression({ expr: ast, mod, extensionHelpers });
+  const fieldLookupHelpers = initFieldLookupHelpers(mod);
+  compileExpression({ expr: ast, mod, extensionHelpers, fieldLookupHelpers });
   mod.autoDrop();
   return mod;
 };
@@ -44,6 +47,7 @@ interface CompileExprOpts<T = Expr> {
   expr: T;
   mod: binaryen.Module;
   extensionHelpers: ReturnType<typeof initExtensionHelpers>;
+  fieldLookupHelpers: ReturnType<typeof initFieldLookupHelpers>;
   isReturnExpr?: boolean;
 }
 
@@ -227,7 +231,14 @@ const compileObjectInit = (opts: CompileExprOpts<Call>) => {
   const obj = expr.argAt(0) as ObjectLiteral;
 
   return initStruct(mod, binaryenTypeToHeapType(objectBinType), [
-    mod.global.get(`__rtt_${objectType.id}`, opts.extensionHelpers.i32Array),
+    mod.global.get(
+      `__ancestors_table_${objectType.id}`,
+      opts.extensionHelpers.i32Array
+    ),
+    mod.global.get(
+      `__field_index_table_${objectType.id}`,
+      opts.extensionHelpers.i32Array
+    ),
     ...obj.fields.map((field) =>
       compileExpression({
         ...opts,
@@ -374,7 +385,14 @@ const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
   const literalBinType = mapBinaryenType(opts, objectType);
 
   return initStruct(mod, binaryenTypeToHeapType(literalBinType), [
-    mod.global.get(`__rtt_${objectType.id}`, opts.extensionHelpers.i32Array),
+    mod.global.get(
+      `__ancestors_table_${objectType.id}`,
+      opts.extensionHelpers.i32Array
+    ),
+    mod.global.get(
+      `__field_index_table_${objectType.id}`,
+      opts.extensionHelpers.i32Array
+    ),
     ...obj.fields.map((field) =>
       compileExpression({ ...opts, expr: field.initializer })
     ),
@@ -448,7 +466,11 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
       // Reference to the RTT Ancestors Table
       {
         type: opts.extensionHelpers.i32Array,
-        name: "__ancestors",
+        name: "__ancestors_table",
+      },
+      {
+        type: opts.fieldLookupHelpers.lookupTableType,
+        name: "__field_index_table",
       },
       // Reference to the field index lookup function
       // TODO
@@ -463,12 +485,23 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
       : undefined,
   });
 
-  // Set RTT Table (So we don't have to re-calculate it every time)
+  // Set RTT Ancestors Table (So we don't have to re-calculate it every time)
   mod.addGlobal(
-    `__rtt_${obj.id}`,
+    `__ancestors_table_${obj.id}`,
     opts.extensionHelpers.i32Array,
     false,
     opts.extensionHelpers.initExtensionArray(obj.getAncestorIds())
+  );
+
+  // Set Field Index Table
+  // Set RTT Table (So we don't have to re-calculate it every time)
+  mod.addGlobal(
+    `__field_index_table_${obj.id}`,
+    opts.extensionHelpers.i32Array,
+    false,
+    opts.fieldLookupHelpers.initFieldIndexTable(
+      obj.fields.map((field) => murmurHash3(field.name))
+    )
   );
 
   obj.binaryenType = binaryenType;
