@@ -44,6 +44,11 @@ export type AugmentedBinaryen = typeof binaryen & {
     ref: ExpressionRef,
     type: TypeRef
   ): ExpressionRef;
+  _BinaryenRefFunc(
+    module: ModuleRef,
+    func: string,
+    type: TypeRef
+  ): ExpressionRef;
   _BinaryenTypeGetHeapType(type: TypeRef): HeapTypeRef;
   _BinaryenArrayTypeGetElementType(heapType: HeapTypeRef): TypeRef;
   _BinaryenStructTypeGetNumFields(heapType: HeapTypeRef): Index;

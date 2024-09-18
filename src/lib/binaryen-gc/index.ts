@@ -109,6 +109,9 @@ export const modBinaryenTypeToHeapType = (
   return bin._BinaryenTypeGetHeapType(type);
 };
 
+export const refFunc = (mod: binaryen.Module, func: string): ExpressionRef =>
+  bin._BinaryenRefFunc(mod.ptr, func, binaryen.funcref);
+
 export const refCast = (
   mod: binaryen.Module,
   ref: ExpressionRef,
@@ -123,7 +126,7 @@ export const refTest = (
 
 export const initStruct = (
   mod: binaryen.Module,
-  structType: HeapTypeRef,
+  structType: TypeRef,
   values: ExpressionRef[]
 ): ExpressionRef => {
   const structNewArgs = allocU32Array(values);
@@ -131,7 +134,7 @@ export const initStruct = (
     mod.ptr,
     structNewArgs,
     values.length,
-    structType
+    binaryenTypeToHeapType(structType)
   );
   bin._free(structNewArgs);
   return structNew;

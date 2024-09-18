@@ -18,10 +18,11 @@ export const typesAreEquivalent = (
   }
 
   if (a.isObjectType() && b.isObjectType()) {
+    const structural = opts.structuralOnly || b.getAttribute("isStructural");
     if (opts.exactNominalMatch) return a.id === b.id;
 
     return (
-      (opts.structuralOnly || a.extends(b)) &&
+      (structural || a.extends(b)) &&
       b.fields.every((field) => {
         const match = a.fields.find((f) => f.name === field.name);
         return match && typesAreEquivalent(field.type, match.type);

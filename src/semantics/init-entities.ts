@@ -334,11 +334,13 @@ const initNominalObjectType = (obj: List) => {
 };
 
 const initObjectType = (obj: List) => {
-  return new ObjectType({
+  const result = new ObjectType({
     ...obj.metadata,
     name: obj.syntaxId.toString(),
     value: extractObjectFields(obj),
   });
+  result.setAttribute("isStructural", true);
+  return result;
 };
 
 export const initMatch = (match: List): Match => {
