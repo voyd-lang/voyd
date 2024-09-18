@@ -236,7 +236,7 @@ const compileObjectInit = (opts: CompileExprOpts<Call>) => {
     ),
     mod.global.get(
       `__field_index_table_${objectType.id}`,
-      opts.extensionHelpers.i32Array
+      opts.fieldLookupHelpers.lookupTableType
     ),
     ...obj.fields.map((field) =>
       compileExpression({
@@ -390,7 +390,7 @@ const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
     ),
     mod.global.get(
       `__field_index_table_${objectType.id}`,
-      opts.extensionHelpers.i32Array
+      opts.fieldLookupHelpers.lookupTableType
     ),
     ...obj.fields.map((field) =>
       compileExpression({ ...opts, expr: field.initializer })
@@ -501,7 +501,7 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
   // Set RTT Table (So we don't have to re-calculate it every time)
   mod.addGlobal(
     `__field_index_table_${obj.id}`,
-    opts.extensionHelpers.i32Array,
+    opts.fieldLookupHelpers.lookupTableType,
     false,
     opts.fieldLookupHelpers.initFieldIndexTable({ ...opts, expr: obj })
   );
