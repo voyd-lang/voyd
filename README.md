@@ -287,6 +287,6 @@ fn add<T>(a: T, b: T) -> T
 With trait constraints
 
 ```rust
-fn add<T impls Numeric>(a: T, b: T) -> T
+fn add<T: Numeric>(a: T, b: T) -> T
   a + b
 ```
