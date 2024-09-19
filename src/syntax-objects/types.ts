@@ -22,21 +22,24 @@ export type TypeJSON = ["type", [string, ...any[]]];
 export abstract class BaseType extends NamedEntity {
   readonly syntaxType = "type";
   abstract readonly kindOfType: string;
-  /** Size in bytes */
-  abstract readonly size: number;
 
   abstract toJSON(): TypeJSON;
 }
 
 export class TypeAlias extends BaseType {
   readonly kindOfType = "type-alias";
-  readonly size = 4;
+  lexicon: LexicalContext = new LexicalContext();
   typeExpr: Expr;
   type?: Type;
+  typeParameters?: Identifier[];
 
-  constructor(opts: NamedEntityOpts & { typeExpr: Expr }) {
+  constructor(
+    opts: NamedEntityOpts & { typeExpr: Expr; typeParameters?: Identifier[] }
+  ) {
     super(opts);
     this.typeExpr = opts.typeExpr;
+    this.typeExpr.parent = this;
+    this.typeParameters = opts.typeParameters;
   }
 
   toJSON(): TypeJSON {
@@ -46,7 +49,8 @@ export class TypeAlias extends BaseType {
   clone(parent?: Expr | undefined): TypeAlias {
     return new TypeAlias({
       ...super.getCloneOpts(parent),
-      typeExpr: this.typeExpr,
+      typeExpr: this.typeExpr.clone(),
+      typeParameters: this.typeParameters,
     });
   }
 }
@@ -89,14 +93,6 @@ export class UnionType extends BaseType {
     this.value = opts.value;
   }
 
-  get size() {
-    let max = 0;
-    for (const type of this.value) {
-      if (type.size > max) max = type.size;
-    }
-    return max;
-  }
-
   clone(parent?: Expr): UnionType {
     return new UnionType({ ...super.getCloneOpts(parent), value: this.value });
   }
@@ -113,14 +109,6 @@ export class IntersectionType extends BaseType {
   constructor(opts: NamedEntityOpts & { value: Type[] }) {
     super(opts);
     this.value = opts.value;
-  }
-
-  get size() {
-    let total = 0;
-    for (const type of this.value) {
-      total += type.size;
-    }
-    return total;
   }
 
   clone(parent?: Expr): IntersectionType {
@@ -142,14 +130,6 @@ export class TupleType extends BaseType {
   constructor(opts: NamedEntityOpts & { value: Type[] }) {
     super(opts);
     this.value = opts.value;
-  }
-
-  get size() {
-    let total = 0;
-    for (const type of this.value) {
-      total += type.size;
-    }
-    return total;
   }
 
   clone(parent?: Expr): TupleType {

@@ -54,6 +54,7 @@ describe("E2E Compiler Pipeline", () => {
       9, // Generic impls
       17,
       82,
+      3,
     ]);
   });
 

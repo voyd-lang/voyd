@@ -9,10 +9,7 @@ export const getExprType = (expr?: Expr): Type | undefined => {
   if (expr.isFloat()) return typeof expr.value === "number" ? f32 : f64;
   if (expr.isBool()) return bool;
   if (expr.isIdentifier()) return getIdentifierType(expr);
-  if (expr.isCall()) {
-    if (!expr.type) getCallType(expr);
-    return expr.type;
-  }
+  if (expr.isCall()) return resolveCallTypes(expr)?.type;
   if (expr.isFn()) return expr.getType();
   if (expr.isTypeAlias()) return expr.type;
   if (expr.isType()) return expr;
@@ -30,8 +27,4 @@ export const getIdentifierType = (id: Identifier): Type | undefined => {
   if (entity.isFn()) return entity.getType();
   if (entity.isTypeAlias()) return entity.type;
   if (entity.isType()) return entity;
-};
-
-export const getCallType = (call: Call): Type | undefined => {
-  return call.type ? call.type : resolveCallTypes(call)?.type;
 };

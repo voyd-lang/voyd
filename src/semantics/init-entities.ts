@@ -77,10 +77,7 @@ const initFn = (expr: List): Fn => {
 
   const typeParameters =
     parameterList.at(1)?.isList() && parameterList.listAt(1).calls("generics")
-      ? parameterList
-          .listAt(1)
-          .sliceAsArray(1)
-          .flatMap((p) => (p.isIdentifier() ? p : []))
+      ? extractTypeParams(parameterList.listAt(1))
       : undefined;
 
   const parameters = parameterList
@@ -230,8 +227,20 @@ const initDeclaration = (decl: List) => {
 
 const initTypeAlias = (type: List) => {
   const assignment = type.listAt(1);
-  const name = assignment.identifierAt(1);
+  const nameExpr = assignment.at(1);
   const typeExpr = initTypeExprEntities(assignment.at(2));
+
+  const nameIsList = nameExpr?.isList();
+
+  const name = nameIsList
+    ? nameExpr.identifierAt(0)
+    : nameExpr?.isIdentifier()
+    ? nameExpr
+    : undefined;
+
+  const typeParameters = nameIsList
+    ? extractTypeParams(nameExpr.listAt(1))
+    : undefined;
 
   if (!name || !typeExpr) {
     throw new Error(`Invalid type alias ${type.location}`);
@@ -241,7 +250,7 @@ const initTypeAlias = (type: List) => {
     typeExpr.setName(name.value);
   }
 
-  return new TypeAlias({ ...type.metadata, name, typeExpr });
+  return new TypeAlias({ ...type.metadata, name, typeExpr, typeParameters });
 };
 
 const initCall = (call: List) => {
@@ -310,18 +319,13 @@ const initDsArray = (type: List) => {
 
 const initNominalObjectType = (obj: List) => {
   const hasExtension = obj.optionalIdentifierAt(2)?.is("extends");
-  const hasGenerics = obj.at(1)?.isList();
+  const typeInitExpr = obj.at(1);
+  const hasGenerics = typeInitExpr?.isList();
 
-  const name = hasGenerics
-    ? obj.listAt(1).identifierAt(0)
-    : obj.identifierAt(1);
+  const name = hasGenerics ? typeInitExpr.identifierAt(0) : obj.identifierAt(1);
 
   const typeParameters = hasGenerics
-    ? obj
-        .listAt(1)
-        .listAt(1)
-        .sliceAsArray(1)
-        .flatMap((p) => (p.isIdentifier() ? p : []))
+    ? extractTypeParams(typeInitExpr.listAt(1))
     : undefined;
 
   return new ObjectType({
@@ -455,3 +459,7 @@ const initImpl = (impl: List): Implementation => {
   init.body.value = initEntities(body);
   return init;
 };
+
+/** Expects ["generics", ...Identifiers] */
+const extractTypeParams = (list: List) =>
+  list.sliceAsArray(1).flatMap((p) => (p.isIdentifier() ? p : []));

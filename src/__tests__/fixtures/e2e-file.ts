@@ -178,6 +178,14 @@ pub fn test14()
 pub fn test15() -> i32
   let point = Point { x: 1, y: 82, z: 3 }
   get_y_field(point)
+
+type GenericStructuralTypeAlias<T> = { x: T, y: T, z: T }
+
+fn get_z_for_gen_str_ta(v: GenericStructuralTypeAlias<i32>) -> i32
+  v.z
+
+pub fn test16() -> i32
+  get_z_for_gen_str_ta({ x: 1, y: 2, z: 3 })
 `;
 
 export const tcoText = `

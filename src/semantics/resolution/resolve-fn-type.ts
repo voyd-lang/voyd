@@ -101,6 +101,7 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
       name: identifier,
       typeExpr: typeArg,
     });
+    type.parent = newFn;
     type.type = getExprType(typeArg);
     newFn.appliedTypeArgs?.push(type);
     newFn.registerEntity(type);

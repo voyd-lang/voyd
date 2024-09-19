@@ -1,6 +1,6 @@
 import { Call } from "../../syntax-objects/call.js";
-import { Identifier, List } from "../../syntax-objects/index.js";
-import { dVoid, ObjectType } from "../../syntax-objects/types.js";
+import { Identifier, List, nop } from "../../syntax-objects/index.js";
+import { dVoid, ObjectType, TypeAlias } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveObjectTypeTypes } from "./resolve-object-type.js";
@@ -16,6 +16,11 @@ export const resolveCallTypes = (call: Call): Call => {
 
   const memberAccessCall = getMemberAccessCall(call);
   if (memberAccessCall) return memberAccessCall;
+
+  const entity = call.fnName.resolve();
+  if (entity?.isTypeAlias()) {
+    return resolveTypeAlias(call, entity);
+  }
 
   // Constructor fn. TODO:
   const type = getIdentifierType(call.fnName);
@@ -43,6 +48,29 @@ export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
   type = resolveObjectTypeTypes(type, call);
   call.type = type;
   call.fn = type;
+  return call;
+};
+
+export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
+  const alias = type.clone();
+
+  if (alias.typeParameters) {
+    alias.typeParameters.forEach((typeParam, index) => {
+      const typeArg = call.typeArgs?.exprAt(index);
+      const identifier = typeParam.clone();
+      const type = new TypeAlias({
+        name: identifier,
+        typeExpr: nop(),
+      });
+      type.type = getExprType(typeArg);
+      alias.registerEntity(type);
+    });
+  }
+
+  alias.typeExpr = resolveTypes(alias.typeExpr);
+  alias.type = getExprType(alias.typeExpr);
+  call.type = alias.type;
+  call.fn = call.type?.isObjectType() ? call.type : undefined;
   return call;
 };
 
