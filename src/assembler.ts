@@ -34,7 +34,6 @@ import { initFieldLookupHelpers } from "./assembler/field-lookup-helpers.js";
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
-  mod.setMemory(1, 150, "buffer");
   mod.setFeatures(binaryen.Features.All);
   const extensionHelpers = initExtensionHelpers(mod);
   const fieldLookupHelpers = initFieldLookupHelpers(mod);
