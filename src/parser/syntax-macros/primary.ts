@@ -1,9 +1,9 @@
-import { infixOps, isPrefixOp, prefixOps } from "../grammar.js";
+import { infixOps, isInfixOp, isPrefixOp, prefixOps } from "../grammar.js";
 import { Expr, List } from "../../syntax-objects/index.js";
 
 /**
  * Primary surface language syntax macro. Post whitespace interpretation.
- * In charge of operator parsing and precedence.
+ * In charge of operator parsing and precedence. Operator-precedence parser
  */
 export const primary = (list: List): List => parseList(list);
 
@@ -15,7 +15,6 @@ const parseExpression = (expr: Expr): Expr => {
 const parseList = (list: List): List => {
   const transformed = new List({ ...list.metadata });
   const hadSingleListChild = list.length === 1 && list.at(0)?.isList();
-
   while (list.hasChildren) {
     transformed.push(parsePrecedence(list));
   }
@@ -25,8 +24,12 @@ const parseList = (list: List): List => {
       ? transformed.listAt(0).push(...transformed.argsArray())
       : transformed;
 
-  // Handle expressions to the right of a label { a: hello there, b: 2 } -> [object [: a [hello there] b [2]]
-  if (result.calls(":") && result.length > 3) {
+  // Handle expressions to the right of an operator { a: hello there, b: 2 } -> [object [: a [hello there] b [2]]
+  if (
+    result.at(0)?.isIdentifier &&
+    isInfixOp(result.identifierAt(0)) &&
+    result.length > 3
+  ) {
     return result.slice(0, 2).push(result.slice(2));
   }
 

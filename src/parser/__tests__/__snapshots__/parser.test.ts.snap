@@ -288,6 +288,29 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
     ],
   ],
   [
+    "let",
+    [
+      "=",
+      "vec",
+      [
+        "object",
+        [
+          ":",
+          "a",
+          [
+            "hey",
+            "there",
+          ],
+        ],
+        [
+          ":",
+          "b",
+          2,
+        ],
+      ],
+    ],
+  ],
+  [
     "closure_param_test",
     1,
     [

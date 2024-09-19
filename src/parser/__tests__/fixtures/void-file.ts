@@ -44,6 +44,8 @@ let x = my_func(
   3 + 4
 )
 
+let vec = { a: hey there, b: 2 }
+
 closure_param_test(1, () => a, 3, () =>
   hey there,
   4,

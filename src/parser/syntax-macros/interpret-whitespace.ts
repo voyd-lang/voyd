@@ -35,7 +35,7 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
     }
 
     const firstChild = children.at(1);
-    if (firstChild?.isList() && isNamedParameter(firstChild)) {
+    if (firstChild?.isList() && isNamedArg(firstChild)) {
       transformed.push(...children.argsArray());
       return;
     }
@@ -173,7 +173,7 @@ const nextIsComma = (list: List) => {
   return !!(next?.isIdentifier() && next.is(","));
 };
 
-const isNamedParameter = (v: List) => {
+const isNamedArg = (v: List) => {
   const identifier = v.at(0);
   const colon = v.at(1);
 
@@ -208,7 +208,7 @@ const addSibling = (child: Expr, siblings: List, hadComma?: boolean) => {
     return;
   }
 
-  if (isNamedParameter(child) && !isNamedParameter(olderSibling)) {
+  if (isNamedArg(child) && !isNamedArg(olderSibling)) {
     olderSibling.push(child);
     return;
   }
