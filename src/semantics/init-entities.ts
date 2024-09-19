@@ -283,7 +283,7 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
   }
 
   if (type.calls("object")) {
-    return initObjectType(type);
+    return initStructuralObjectType(type);
   }
 
   if (type.calls("DsArray")) {
@@ -333,12 +333,14 @@ const initNominalObjectType = (obj: List) => {
   });
 };
 
-const initObjectType = (obj: List) => {
-  return new ObjectType({
+const initStructuralObjectType = (obj: List) => {
+  const result = new ObjectType({
     ...obj.metadata,
     name: obj.syntaxId.toString(),
     value: extractObjectFields(obj),
   });
+  result.setAttribute("isStructural", true);
+  return result;
 };
 
 export const initMatch = (match: List): Match => {

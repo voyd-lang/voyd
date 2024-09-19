@@ -1,6 +1,5 @@
 import { stdout } from "process";
 import { getConfig } from "../lib/config/index.js";
-import { assemble } from "../assembler.js";
 import { run } from "../run.js";
 import { processSemantics } from "../semantics/index.js";
 import binaryen from "binaryen";
