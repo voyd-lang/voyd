@@ -166,6 +166,18 @@ pub fn test13()
   let c = a.do_work(b)
   c.z // 9
 
+// Test structural object field access
+fn get_y_field(obj: { y: i32 }) -> i32
+  obj.y
+
+pub fn test14()
+  let obj = { y: 17, z: 689 }
+  get_y_field(obj)
+
+// Test that structural parameters can accept matching nominal types
+pub fn test15() -> i32
+  let point = Point { x: 1, y: 82, z: 3 }
+  get_y_field(point)
 `;
 
 export const tcoText = `

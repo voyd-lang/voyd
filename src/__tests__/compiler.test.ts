@@ -51,6 +51,9 @@ describe("E2E Compiler Pipeline", () => {
       12,
       4,
       597, // Modules
+      9, // Generic impls
+      17,
+      82,
     ]);
   });
 
