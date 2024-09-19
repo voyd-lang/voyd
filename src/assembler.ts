@@ -9,6 +9,7 @@ import {
   Primitive,
   ObjectType,
   DsArrayType,
+  voidBaseObject,
 } from "./syntax-objects/types.js";
 import { Variable } from "./syntax-objects/variable.js";
 import { Block } from "./syntax-objects/block.js";
@@ -381,7 +382,10 @@ const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
   const { expr: obj, mod } = opts;
 
   const objectType = getExprType(obj) as ObjectType;
-  const literalBinType = mapBinaryenType(opts, objectType);
+  const literalBinType = mapBinaryenType(
+    { ...opts, useOriginalType: true },
+    objectType
+  );
 
   return initStruct(mod, literalBinType, [
     mod.global.get(
@@ -421,14 +425,19 @@ const getFunctionParameterTypes = (opts: CompileExprOpts, fn: Fn) => {
   const types = fn.parameters.map((param) =>
     mapBinaryenType(opts, param.type!)
   );
+
   return binaryen.createType(types);
 };
 
 const getFunctionVarTypes = (opts: CompileExprOpts, fn: Fn) =>
   fn.variables.map((v) => mapBinaryenType(opts, v.type!));
 
+type MapBinTypeOpts = CompileExprOpts & {
+  useOriginalType?: boolean; // Use the original type of the object literal, i.e. to initialize an object literal, who normally returns the base object type
+};
+
 export const mapBinaryenType = (
-  opts: CompileExprOpts,
+  opts: MapBinTypeOpts,
   type: Type
 ): binaryen.Type => {
   if (isPrimitiveId(type, "bool")) return binaryen.i32;
@@ -457,7 +466,11 @@ const buildDsArrayType = (opts: CompileExprOpts, type: DsArrayType) => {
 const OBJECT_FIELDS_OFFSET = 2;
 
 /** TODO: Skip building types for object literals that are part of an initializer of an obj */
-const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
+const buildObjectType = (opts: MapBinTypeOpts, obj: ObjectType): TypeRef => {
+  if (opts.useOriginalType && obj.getAttribute("originalType")) {
+    return obj.getAttribute("originalType") as TypeRef;
+  }
+
   if (obj.binaryenType) return obj.binaryenType;
   if (obj.typeParameters) return opts.mod.nop();
   const mod = opts.mod;
@@ -512,7 +525,13 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
     );
   }
 
-  return binaryenType;
+  if (obj.getAttribute("isStructural")) {
+    obj.setAttribute("originalType", obj.binaryenType);
+    obj.binaryenType = mapBinaryenType(opts, voidBaseObject);
+  }
+
+  if (opts.useOriginalType) return binaryenType;
+  return obj.binaryenType;
 };
 
 const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {

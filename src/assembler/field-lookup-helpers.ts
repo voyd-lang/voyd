@@ -13,7 +13,7 @@ import {
   callRef,
   refCast,
 } from "../lib/binaryen-gc/index.js";
-import { ObjectType } from "../syntax-objects/types.js";
+import { ObjectType, voidBaseObject } from "../syntax-objects/types.js";
 import { murmurHash3 } from "../lib/murmur-hash.js";
 import {
   compileExpression,
@@ -113,14 +113,18 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
 
         const accessor = mod.addFunction(
           accessorName,
-          bin.createType([mapBinaryenType(opts, obj)]),
+          bin.createType([mapBinaryenType(opts, voidBaseObject)]),
           mapBinaryenType(opts, field.type!),
           [],
           structGetFieldValue({
             mod,
             fieldType: mapBinaryenType(opts, field.type!),
             fieldIndex: index + 2, // Skip RTT type fields
-            exprRef: mod.local.get(0, mapBinaryenType(opts, obj)),
+            exprRef: refCast(
+              mod,
+              mod.local.get(0, mapBinaryenType(opts, voidBaseObject)),
+              mapBinaryenType(opts, obj)
+            ),
           })
         );
 
