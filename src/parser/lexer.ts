@@ -67,7 +67,10 @@ export const lexer = (chars: CharStream): Token => {
 
 const consumeOperator = (chars: CharStream, token: Token) => {
   while (isOpChar(chars.next)) {
-    if (token.value === ">" && chars.next === ">") break; // Ugly hack to support generics, means >> is not a valid operator
+    if (token.value === ">" && (chars.next === ">" || chars.next === ":")) {
+      break; // Ugly hack to support generics, means >> is not a valid operator
+    }
+
     token.addChar(chars.consumeChar());
   }
 };
