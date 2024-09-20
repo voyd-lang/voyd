@@ -163,9 +163,22 @@ const compileMatch = (opts: CompileExprOpts<Match>) => {
     );
   };
 
-  return constructIfChain(
+  const ifChain = constructIfChain(
     expr.defaultCase ? [...expr.cases, expr.defaultCase] : expr.cases
   );
+
+  if (expr.bindVariable) {
+    return opts.mod.block(null, [
+      compileVariable({
+        ...opts,
+        isReturnExpr: false,
+        expr: expr.bindVariable,
+      }),
+      ifChain,
+    ]);
+  }
+
+  return ifChain;
 };
 
 const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
@@ -346,7 +359,7 @@ const compileFunction = (opts: CompileExprOpts<Fn>): number => {
     isReturnExpr: true,
   });
 
-  const variableTypes = getFunctionVarTypes(opts, fn); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
+  const variableTypes = getFunctionVarTypes(opts, fn);
 
   mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
 

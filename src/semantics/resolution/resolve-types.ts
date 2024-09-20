@@ -52,7 +52,7 @@ const resolveBlockTypes = (block: Block): Block => {
   return block;
 };
 
-const resolveVarTypes = (variable: Variable): Variable => {
+export const resolveVarTypes = (variable: Variable): Variable => {
   const initializer = resolveTypes(variable.initializer);
   variable.initializer = initializer;
   variable.inferredType = getExprType(initializer);

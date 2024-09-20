@@ -394,9 +394,9 @@ export const initMatch = (match: List): Match => {
     defaultCase: cases.defaultCase,
     bindIdentifier: identifier,
     bindVariable:
-      identifierIndex === 2 // We need a new variable if the second argument is an identifier
+      identifierIndex === 2 // We need a new variable if the second argument is an identifier (to support dot notation)
         ? new Variable({
-            name: identifier,
+            name: identifier.clone(),
             location: identifier.location,
             initializer: operand,
             isMutable: false,

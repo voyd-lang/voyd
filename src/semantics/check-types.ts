@@ -364,6 +364,10 @@ const checkObjectLiteralType = (obj: ObjectLiteral) => {
 };
 
 const checkMatch = (match: Match) => {
+  if (match.bindVariable) {
+    checkVarTypes(match.bindVariable);
+  }
+
   if (match.baseType?.isUnionType()) {
     return checkUnionMatch(match);
   }
