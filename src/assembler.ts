@@ -10,6 +10,7 @@ import {
   ObjectType,
   DsArrayType,
   voidBaseObject,
+  UnionType,
 } from "./syntax-objects/types.js";
 import { Variable } from "./syntax-objects/variable.js";
 import { Block } from "./syntax-objects/block.js";
@@ -446,6 +447,7 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "void")) return binaryen.none;
   if (type.isObjectType()) return buildObjectType(opts, type);
+  if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isDsArrayType()) return buildDsArrayType(opts, type);
   throw new Error(`Unsupported type ${type}`);
 };
@@ -459,6 +461,18 @@ const buildDsArrayType = (opts: CompileExprOpts, type: DsArrayType) => {
   const elemType = mapBinaryenType(opts, type.elemType!);
   type.binaryenType = gc.defineArrayType(mod, elemType, true, type.id);
   return type.binaryenType;
+};
+
+const buildUnionType = (opts: MapBinTypeOpts, union: UnionType): TypeRef => {
+  if (union.hasAttribute("binaryenType")) {
+    return union.getAttribute("binaryenType") as TypeRef;
+  }
+
+  union.types.forEach((type) => mapBinaryenType(opts, type));
+
+  const typeRef = mapBinaryenType(opts, voidBaseObject);
+  union.setAttribute("binaryenType", typeRef);
+  return typeRef;
 };
 
 // Marks the start of the fields in an object after RTT info fields

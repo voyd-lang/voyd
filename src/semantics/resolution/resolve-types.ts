@@ -17,6 +17,7 @@ import { resolveFnTypes } from "./resolve-fn-type.js";
 import { resolveImpl } from "./resolve-impl.js";
 import { resolveMatch } from "./resolve-match.js";
 import { resolveObjectTypeTypes } from "./resolve-object-type.js";
+import { resolveUnion } from "./resolve-union.js";
 import { resolveUse } from "./resolve-use.js";
 
 /**
@@ -41,6 +42,7 @@ export const resolveTypes = (expr: Expr | undefined): Expr => {
   if (expr.isObjectLiteral()) return resolveObjectLiteralTypes(expr);
   if (expr.isMatch()) return resolveMatch(expr);
   if (expr.isImpl()) return resolveImpl(expr);
+  if (expr.isUnionType()) return resolveUnion(expr);
   return expr;
 };
 

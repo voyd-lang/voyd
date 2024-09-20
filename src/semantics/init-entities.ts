@@ -13,6 +13,7 @@ import {
   ObjectLiteral,
   DsArrayType,
   nop,
+  UnionType,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { SemanticProcessor } from "./types.js";
@@ -60,6 +61,10 @@ export const initEntities: SemanticProcessor = (expr) => {
 
   if (expr.calls("impl")) {
     return initImpl(expr);
+  }
+
+  if (expr.calls("|")) {
+    return initPipedUnionType(expr);
   }
 
   return initCall(expr);
@@ -167,6 +172,30 @@ const initObjectLiteral = (obj: List) => {
 
       return { name: name.value, initializer: initEntities(initializer) };
     }),
+  });
+};
+
+const initPipedUnionType = (union: List) => {
+  const children: Expr[] = [];
+
+  const extractChildren = (list: List) => {
+    const child = initEntities(list.exprAt(1));
+    children.push(child);
+
+    if (list.at(2)?.isList() && list.listAt(2).calls("|")) {
+      extractChildren(list.listAt(2));
+      return;
+    }
+
+    children.push(initEntities(list.exprAt(2)));
+  };
+
+  extractChildren(union);
+
+  return new UnionType({
+    ...union.metadata,
+    childTypeExprs: children,
+    name: union.syntaxId.toString(),
   });
 };
 
@@ -297,6 +326,10 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
 
   if (type.calls("DsArray")) {
     return initDsArray(type);
+  }
+
+  if (type.calls("|")) {
+    return initPipedUnionType(type);
   }
 
   return initCall(type);
