@@ -37,6 +37,12 @@ export const typesAreEquivalent = (
     return b.types.some((type) => typesAreEquivalent(a, type, opts));
   }
 
+  if (a.isUnionType() && b.isUnionType()) {
+    return a.types.every((aType) =>
+      b.types.some((bType) => typesAreEquivalent(aType, bType, opts))
+    );
+  }
+
   if (a.isDsArrayType() && b.isDsArrayType()) {
     return typesAreEquivalent(a.elemType, b.elemType);
   }

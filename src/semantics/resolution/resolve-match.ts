@@ -1,5 +1,12 @@
 import { Block } from "../../syntax-objects/block.js";
-import { Call, Parameter, Variable } from "../../syntax-objects/index.js";
+import {
+  Call,
+  ObjectType,
+  Parameter,
+  Type,
+  UnionType,
+  Variable,
+} from "../../syntax-objects/index.js";
 import { Match, MatchCase } from "../../syntax-objects/match.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveTypes } from "./resolve-types.js";
@@ -10,7 +17,7 @@ export const resolveMatch = (match: Match): Match => {
 
   const binding = getBinding(match);
   resolveCases(binding, match);
-  match.type = (match.defaultCase?.expr ?? match.cases[0].expr).type;
+  match.type = resolveMatchReturnType(match);
 
   return match;
 };
@@ -59,4 +66,41 @@ const getBinding = (match: Match): Parameter | Variable => {
   }
 
   return binding;
+};
+
+const resolveMatchReturnType = (match: Match): Type | undefined => {
+  const cases = match.cases
+    .map((c) => c.expr.type)
+    .concat(match.defaultCase?.expr.type)
+    .filter((t) => t !== undefined);
+
+  const firstType = cases[0];
+  if (!cases.length || !firstType?.isObjectType()) {
+    return firstType;
+  }
+
+  let type: ObjectType | UnionType = firstType;
+  for (const mCase of cases.slice(1)) {
+    if (mCase.id === type.id) {
+      continue;
+    }
+
+    if (type.isObjectType() && mCase.isObjectType()) {
+      const union = new UnionType({
+        name: `Union#match#(${match.syntaxId}`,
+      });
+      union.types = [type, mCase];
+      type = union;
+      continue;
+    }
+
+    if (mCase.isObjectType() && type.isUnionType()) {
+      type.types.push(mCase);
+      continue;
+    }
+
+    return undefined;
+  }
+
+  return type;
 };
