@@ -7,6 +7,7 @@ import { LexicalContext } from "./lib/lexical-context.js";
 import { Implementation } from "./implementation.js";
 import { ScopedEntity } from "./scoped-entity.js";
 import { ChildList } from "./lib/child-list.js";
+import { Child } from "./lib/child.js";
 
 export type Type =
   | PrimitiveType
@@ -109,22 +110,39 @@ export class UnionType extends BaseType {
 
 export class IntersectionType extends BaseType {
   readonly kindOfType = "intersection";
-  value: Type[];
+  nominalTypeExpr: Child<Expr>;
+  structuralTypeExpr: Child<Expr>;
+  nominalType?: ObjectType;
+  structuralType?: ObjectType;
 
-  constructor(opts: NamedEntityOpts & { value: Type[] }) {
+  constructor(
+    opts: NamedEntityOpts & {
+      nominalTypeExpr: Expr;
+      structuralTypeExpr: Expr;
+    }
+  ) {
     super(opts);
-    this.value = opts.value;
+    this.nominalTypeExpr = new Child(opts.nominalTypeExpr, this);
+    this.structuralTypeExpr = new Child(opts.structuralTypeExpr, this);
   }
 
   clone(parent?: Expr): IntersectionType {
     return new IntersectionType({
       ...super.getCloneOpts(parent),
-      value: this.value,
+      nominalTypeExpr: this.nominalTypeExpr.clone(),
+      structuralTypeExpr: this.structuralTypeExpr.clone(),
     });
   }
 
   toJSON(): TypeJSON {
-    return ["type", ["intersection", ...this.value]];
+    return [
+      "type",
+      [
+        "intersection",
+        this.nominalTypeExpr.value,
+        this.structuralTypeExpr.value,
+      ],
+    ];
   }
 }
 
