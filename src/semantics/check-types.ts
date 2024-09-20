@@ -269,7 +269,7 @@ const checkVarTypes = (variable: Variable): Variable => {
 
   if (
     variable.annotatedType &&
-    !typesAreEquivalent(variable.annotatedType, variable.inferredType)
+    !typesAreEquivalent(variable.inferredType, variable.annotatedType)
   ) {
     throw new Error(
       `${variable.name} of type ${variable.type} is not assignable to ${variable.inferredType}`

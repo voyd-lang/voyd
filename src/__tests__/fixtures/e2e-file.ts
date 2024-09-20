@@ -186,6 +186,29 @@ fn get_z_for_gen_str_ta(v: GenericStructuralTypeAlias<i32>) -> i32
 
 pub fn test16() -> i32
   get_z_for_gen_str_ta({ x: 1, y: 2, z: 3 })
+
+obj None {}
+obj Some<T> { value: T }
+
+type Optional<T> = Some<T> | None
+
+fn optional_match_chain()
+  let some: Optional<i32> = Some<i32> { value: 39 }
+
+  some
+    .match(x)
+      Some<i32>: Some<i32> { value: x.value + 1 }
+      None: None {}
+    .match(val)
+      Some<i32>: Some<i32> { value: val.value + 2 }
+      None: None {}
+
+pub fn test17()
+  let x = optional_match_chain()
+
+  match(x)
+    Some<i32>: x.value
+    None: -1
 `;
 
 export const tcoText = `
