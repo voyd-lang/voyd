@@ -66,6 +66,10 @@ obj Test<T> {
   c: i32
 }
 
+match(x)
+  Some<i32>: Some<i32> { value: x.value + 1 }
+  None: None {}
+
 fn test<T>(a: 1) -> i32
 
 fn main()

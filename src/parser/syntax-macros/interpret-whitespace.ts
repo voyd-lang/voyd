@@ -174,13 +174,7 @@ const nextIsComma = (list: List) => {
 };
 
 const isNamedArg = (v: List) => {
-  const identifier = v.at(0);
   const colon = v.at(1);
-
-  // First value should be an identifier
-  if (!identifier?.isIdentifier()) {
-    return false;
-  }
 
   // Second value should be an identifier whose value is a colon
   if (!(colon?.isIdentifier() && colon.is(":"))) {

@@ -6,6 +6,7 @@ import { getIdStr } from "./lib/get-id-str.js";
 import { LexicalContext } from "./lib/lexical-context.js";
 import { Implementation } from "./implementation.js";
 import { ScopedEntity } from "./scoped-entity.js";
+import { ChildList } from "./lib/child-list.js";
 
 export type Type =
   | PrimitiveType
@@ -86,19 +87,23 @@ export class PrimitiveType extends BaseType {
 
 export class UnionType extends BaseType {
   readonly kindOfType = "union";
-  value: Type[];
+  childTypeExprs: ChildList<Expr>;
+  types: ObjectType[] = [];
 
-  constructor(opts: NamedEntityOpts & { value: Type[] }) {
+  constructor(opts: NamedEntityOpts & { childTypeExprs?: Expr[] }) {
     super(opts);
-    this.value = opts.value;
+    this.childTypeExprs = new ChildList(opts.childTypeExprs ?? [], this);
   }
 
   clone(parent?: Expr): UnionType {
-    return new UnionType({ ...super.getCloneOpts(parent), value: this.value });
+    return new UnionType({
+      ...super.getCloneOpts(parent),
+      childTypeExprs: this.childTypeExprs.clone(),
+    });
   }
 
   toJSON(): TypeJSON {
-    return ["type", ["union", ...this.value]];
+    return ["type", ["union", ...this.childTypeExprs.toArray()]];
   }
 }
 

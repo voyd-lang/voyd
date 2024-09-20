@@ -404,6 +404,52 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
     ],
   ],
   [
+    "match",
+    "x",
+    [
+      ":",
+      [
+        "Some",
+        [
+          "generics",
+          "i32",
+        ],
+      ],
+      [
+        "Some",
+        [
+          "generics",
+          "i32",
+        ],
+        [
+          "object",
+          [
+            ":",
+            "value",
+            [
+              "+",
+              [
+                "value",
+                "x",
+              ],
+              1,
+            ],
+          ],
+        ],
+      ],
+    ],
+    [
+      ":",
+      "None",
+      [
+        "None",
+        [
+          "object",
+        ],
+      ],
+    ],
+  ],
+  [
     "fn",
     [
       "test",
