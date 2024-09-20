@@ -14,6 +14,7 @@ import {
   DsArrayType,
   nop,
   UnionType,
+  IntersectionType,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { SemanticProcessor } from "./types.js";
@@ -65,6 +66,10 @@ export const initEntities: SemanticProcessor = (expr) => {
 
   if (expr.calls("|")) {
     return initPipedUnionType(expr);
+  }
+
+  if (expr.calls("&")) {
+    return initIntersection(expr);
   }
 
   return initCall(expr);
@@ -199,6 +204,22 @@ const initPipedUnionType = (union: List) => {
   });
 };
 
+const initIntersection = (intersection: List): IntersectionType => {
+  const nominalObjectExpr = initTypeExprEntities(intersection.at(1));
+  const structuralObjectExpr = initTypeExprEntities(intersection.at(2));
+
+  if (!nominalObjectExpr || !structuralObjectExpr) {
+    throw new Error("Invalid intersection type");
+  }
+
+  return new IntersectionType({
+    ...intersection.metadata,
+    name: intersection.syntaxId.toString(),
+    nominalObjectExpr,
+    structuralObjectExpr,
+  });
+};
+
 const initVar = (varDef: List): Variable => {
   const isMutable = varDef.calls("define_mut");
   const identifierExpr = varDef.at(1);
@@ -330,6 +351,10 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
 
   if (type.calls("|")) {
     return initPipedUnionType(type);
+  }
+
+  if (type.calls("&")) {
+    return initIntersection(type);
   }
 
   return initCall(type);

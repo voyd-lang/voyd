@@ -117,20 +117,20 @@ export class IntersectionType extends BaseType {
 
   constructor(
     opts: NamedEntityOpts & {
-      nominalTypeExpr: Expr;
-      structuralTypeExpr: Expr;
+      nominalObjectExpr: Expr;
+      structuralObjectExpr: Expr;
     }
   ) {
     super(opts);
-    this.nominalTypeExpr = new Child(opts.nominalTypeExpr, this);
-    this.structuralTypeExpr = new Child(opts.structuralTypeExpr, this);
+    this.nominalTypeExpr = new Child(opts.nominalObjectExpr, this);
+    this.structuralTypeExpr = new Child(opts.structuralObjectExpr, this);
   }
 
   clone(parent?: Expr): IntersectionType {
     return new IntersectionType({
       ...super.getCloneOpts(parent),
-      nominalTypeExpr: this.nominalTypeExpr.clone(),
-      structuralTypeExpr: this.structuralTypeExpr.clone(),
+      nominalObjectExpr: this.nominalTypeExpr.clone(),
+      structuralObjectExpr: this.structuralTypeExpr.clone(),
     });
   }
 
