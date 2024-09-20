@@ -10,6 +10,7 @@ import {
   ObjectType,
   DsArrayType,
   voidBaseObject,
+  UnionType,
 } from "./syntax-objects/types.js";
 import { Variable } from "./syntax-objects/variable.js";
 import { Block } from "./syntax-objects/block.js";
@@ -162,9 +163,22 @@ const compileMatch = (opts: CompileExprOpts<Match>) => {
     );
   };
 
-  return constructIfChain(
+  const ifChain = constructIfChain(
     expr.defaultCase ? [...expr.cases, expr.defaultCase] : expr.cases
   );
+
+  if (expr.bindVariable) {
+    return opts.mod.block(null, [
+      compileVariable({
+        ...opts,
+        isReturnExpr: false,
+        expr: expr.bindVariable,
+      }),
+      ifChain,
+    ]);
+  }
+
+  return ifChain;
 };
 
 const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
@@ -345,7 +359,7 @@ const compileFunction = (opts: CompileExprOpts<Fn>): number => {
     isReturnExpr: true,
   });
 
-  const variableTypes = getFunctionVarTypes(opts, fn); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
+  const variableTypes = getFunctionVarTypes(opts, fn);
 
   mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
 
@@ -446,6 +460,7 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "void")) return binaryen.none;
   if (type.isObjectType()) return buildObjectType(opts, type);
+  if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isDsArrayType()) return buildDsArrayType(opts, type);
   throw new Error(`Unsupported type ${type}`);
 };
@@ -459,6 +474,18 @@ const buildDsArrayType = (opts: CompileExprOpts, type: DsArrayType) => {
   const elemType = mapBinaryenType(opts, type.elemType!);
   type.binaryenType = gc.defineArrayType(mod, elemType, true, type.id);
   return type.binaryenType;
+};
+
+const buildUnionType = (opts: MapBinTypeOpts, union: UnionType): TypeRef => {
+  if (union.hasAttribute("binaryenType")) {
+    return union.getAttribute("binaryenType") as TypeRef;
+  }
+
+  union.types.forEach((type) => mapBinaryenType(opts, type));
+
+  const typeRef = mapBinaryenType(opts, voidBaseObject);
+  union.setAttribute("binaryenType", typeRef);
+  return typeRef;
 };
 
 // Marks the start of the fields in an object after RTT info fields

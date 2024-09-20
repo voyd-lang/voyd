@@ -16,6 +16,7 @@ import {
   Use,
   TypeAlias,
   ObjectLiteral,
+  UnionType,
 } from "../syntax-objects/index.js";
 import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
@@ -34,6 +35,7 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isObjectType()) return checkObjectType(expr);
   if (expr.isTypeAlias()) return checkTypeAlias(expr);
   if (expr.isObjectLiteral()) return checkObjectLiteralType(expr);
+  if (expr.isUnionType()) return checkUnionType(expr);
   if (expr.isMatch()) return checkMatch(expr);
   return expr;
 };
@@ -267,7 +269,7 @@ const checkVarTypes = (variable: Variable): Variable => {
 
   if (
     variable.annotatedType &&
-    !typesAreEquivalent(variable.annotatedType, variable.inferredType)
+    !typesAreEquivalent(variable.inferredType, variable.annotatedType)
   ) {
     throw new Error(
       `${variable.name} of type ${variable.type} is not assignable to ${variable.inferredType}`
@@ -338,7 +340,13 @@ const checkTypeExpr = (expr?: Expr) => {
 
 const checkTypeAlias = (alias: TypeAlias): TypeAlias => {
   if (!alias.type) {
-    throw new Error(`Unable to determine type for ${alias.typeExpr}`);
+    throw new Error(
+      `Unable to determine type for ${JSON.stringify(
+        alias.typeExpr,
+        undefined,
+        2
+      )}`
+    );
   }
 
   return alias;
@@ -356,7 +364,55 @@ const checkObjectLiteralType = (obj: ObjectLiteral) => {
 };
 
 const checkMatch = (match: Match) => {
-  // (Until unions)
+  if (match.bindVariable) {
+    checkVarTypes(match.bindVariable);
+  }
+
+  if (match.baseType?.isUnionType()) {
+    return checkUnionMatch(match);
+  }
+
+  return checkObjectMatch(match);
+};
+
+const checkUnionMatch = (match: Match) => {
+  const union = match.baseType as UnionType;
+
+  if (match.cases.length !== union.types.length) {
+    throw new Error(
+      `Match does not handle all possibilities of union ${match.location}`
+    );
+  }
+
+  for (const mCase of match.cases) {
+    if (!mCase.matchType) {
+      throw new Error(
+        `Unable to determine match type for case at ${mCase.expr.location}`
+      );
+    }
+
+    if (!typesAreEquivalent(mCase.expr.type, match.type)) {
+      throw new Error(
+        `All cases must return the same type for now ${mCase.expr.location}`
+      );
+    }
+  }
+
+  union.types.forEach((type) => {
+    if (
+      !match.cases.some((mCase) => typesAreEquivalent(mCase.matchType, type))
+    ) {
+      throw new Error(
+        `Match does not handle all possibilities of union ${match.location}`
+      );
+    }
+  });
+
+  return match;
+};
+
+/** Check a match against an object type */
+const checkObjectMatch = (match: Match) => {
   if (!match.defaultCase) {
     throw new Error(`Match must have a default case at ${match.location}`);
   }
@@ -388,4 +444,14 @@ const checkMatch = (match: Match) => {
   }
 
   return match;
+};
+
+const checkUnionType = (union: UnionType) => {
+  union.childTypeExprs.each(checkTypeExpr);
+
+  if (union.types.length !== union.childTypeExprs.length) {
+    throw new Error(`Unable to resolve every type in union ${union.location}`);
+  }
+
+  return union;
 };

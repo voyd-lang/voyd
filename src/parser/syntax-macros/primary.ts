@@ -30,7 +30,7 @@ const parseList = (list: List): List => {
     isInfixOp(result.identifierAt(0)) &&
     result.length > 3
   ) {
-    return result.slice(0, 2).push(result.slice(2));
+    return result.slice(0, 2).push(parseList(result.slice(2)));
   }
 
   return result;

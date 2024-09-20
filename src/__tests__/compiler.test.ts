@@ -55,6 +55,7 @@ describe("E2E Compiler Pipeline", () => {
       17,
       82,
       3,
+      42,
     ]);
   });
 
