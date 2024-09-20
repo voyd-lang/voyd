@@ -26,7 +26,7 @@ const parseList = (list: List): List => {
 
   // Handle expressions to the right of an operator { a: hello there, b: 2 } -> [object [: a [hello there] b [2]]
   if (
-    result.at(0)?.isIdentifier &&
+    result.at(0)?.isIdentifier() &&
     isInfixOp(result.identifierAt(0)) &&
     result.length > 3
   ) {
