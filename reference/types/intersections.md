@@ -1,6 +1,6 @@
 # Intersections
 
-Void uses intersection types to combine the fields of multiple objects into a
+Voyd uses intersection types to combine the fields of multiple objects into a
 single type.
 
 An intersection type is defined by listing the types it is composed of separated

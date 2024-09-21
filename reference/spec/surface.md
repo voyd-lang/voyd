@@ -65,7 +65,7 @@ AnyChar = ? all valid characters (including whitespace) ?;
 
 ## The Syntax Pipeline
 
-In the spirit of lisp, Void language is designed to be hackable. As a result,
+In the spirit of lisp, Voyd language is designed to be hackable. As a result,
 the surface language syntax is implemented entirely in macros. This makes the
 language both easy to maintain, and easy to extend.
 

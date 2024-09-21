@@ -186,7 +186,7 @@ Ideal features:
 
 Open questions:
 
-- Void supports _both_ named parameters _and_ objects and treats each one differently. How should
+- Voyd supports _both_ named parameters _and_ objects and treats each one differently. How should
   this be handled? The best I can think of is that named parameters should be treated as objects
 - Need to define a standard for tagged data structures.
 

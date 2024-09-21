@@ -1,4 +1,4 @@
-# Void Style Guide
+# Voyd Style Guide
 
 ## Naming
 

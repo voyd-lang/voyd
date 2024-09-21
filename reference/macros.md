@@ -48,7 +48,7 @@ backtick.
 > of nested backquote plus some examples.
 > https://lisp-journey.gitlab.io/blog/common-lisp-macros-by-example-tutorial/
 
-Void follows the suggestion of this website and pairs commas with the outermost
+Voyd follows the suggestion of this website and pairs commas with the outermost
 backquote. Which allows one to use a backquote where a quote would normally be
 needed.
 
@@ -128,7 +128,7 @@ fn (fib n:i32) -> i32
 
 ## The Macro Pipeline
 
-In the spirit of lisp, Void language is designed to be hackable. As a result,
+In the spirit of lisp, Voyd language is designed to be hackable. As a result,
 the surface language syntax is implemented entirely in macros. This makes the
 language both easy to maintain, and easy to extend.
 

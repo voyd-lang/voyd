@@ -218,7 +218,7 @@ fn main()
 ```
 
 
-Void uses static dispatch for all methods defined on a type. That is, when
+Voyd uses static dispatch for all methods defined on a type. That is, when
 a function is called on a method, the function is determined at compile time.
 
 In practice, this means that compiler will pick the method on the declared type,

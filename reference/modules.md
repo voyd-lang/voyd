@@ -1,6 +1,6 @@
 # Modules
 
-Void uses a module system that borrows heavily from Rust's module semantics.
+Voyd uses a module system that borrows heavily from Rust's module semantics.
 
 ## Defining Modules
 

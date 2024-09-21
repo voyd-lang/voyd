@@ -1,6 +1,6 @@
-# Void
+# Voyd
 
-Void is a high performance WebAssembly language with an emphasis on full stack web development.
+Voyd is a high performance WebAssembly language with an emphasis on full stack web development.
 
 https://justforfunnoreally.dev/
 
@@ -29,7 +29,7 @@ fn app() -> JSX::Element
 
 **Disclaimer**
 
-Void is in it's very early stages of development. Void is not ready for public
+Voyd is in it's very early stages of development. Voyd is not ready for public
 announcement or use. Some core syntax and semantics are subject to change.
 Expect frequent breaking changes. In addition, many documented features are not
 yet implemented.
@@ -130,7 +130,7 @@ To call a function, use the function name followed by the arguments in parenthes
 add(1, 2)
 ```
 
-Void also supports uniform function call syntax (UFCS), allowing functions to be called on a type as if they were methods of that type.
+Voyd also supports uniform function call syntax (UFCS), allowing functions to be called on a type as if they were methods of that type.
 
 ```rust
 1.add(2)

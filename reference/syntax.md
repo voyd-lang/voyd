@@ -21,7 +21,7 @@ Expression
 
 # Parenthetical Elision
 
-Void language is built around an s-expression syntax, like lisp:
+Voyd language is built around an s-expression syntax, like lisp:
 
 ```voyd
 (if (n < 2)
@@ -213,8 +213,8 @@ let x = my_func(
 
 # Standard Function Call Syntax
 
-To make Void language feel more familiar to users familiar with C style
-languages, Void supports standard function call syntax of the form `f(x)`.
+To make Voyd language feel more familiar to users familiar with C style
+languages, Voyd supports standard function call syntax of the form `f(x)`.
 
 ## Rules
 
@@ -289,7 +289,7 @@ catch(e):
 
 # Infix Notation
 
-Void supports infix notation using a predefined set of infix operators.
+Voyd supports infix notation using a predefined set of infix operators.
 
 Operators, their precedence, and associativity (in typescript):
 

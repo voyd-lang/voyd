@@ -138,7 +138,7 @@ let x = 5 + 3
 let y = add(5, 3)
 ```
 
-Virtually every statement in Void is an expression, including control flow statements.
+Virtually every statement in Voyd is an expression, including control flow statements.
 
 ```voyd
 let x = if true then: 1 else: 2

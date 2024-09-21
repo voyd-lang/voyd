@@ -1,4 +1,4 @@
-# Mutability In Void
+# Mutability In Voyd
 
 ## Variable Mutability
 

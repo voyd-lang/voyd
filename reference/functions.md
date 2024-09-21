@@ -218,7 +218,7 @@ See the chapter on [Syntax](./syntax.md) for more information and detailed rules
 
 ## Function Overloading
 
-Void functions can be overloaded. Provided that function overload can be unambiguously distinguished via their parameters and return type.
+Voyd functions can be overloaded. Provided that function overload can be unambiguously distinguished via their parameters and return type.
 
 ```voyd
 fn sum(a: i32, b: i32)
