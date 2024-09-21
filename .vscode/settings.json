@@ -47,7 +47,7 @@
     "cSpell.advanced.feature.useReferenceProviderWithRename": true,
     "cSpell.advanced.feature.useReferenceProviderRemove": "/^#+\\s/"
   },
-  "[void]": {
+  "[voyd]": {
     "editor.tabSize": 2
   },
   "vitest.nodeExecutable": ""

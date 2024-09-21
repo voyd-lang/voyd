@@ -2,7 +2,7 @@
 
 Tuples are a fixed sequence of values of different types.
 
-```void
+```voyd
 type MyTuple = (i32, String, bool)
 let my_tuple: MyTuple = (1, "hello", true)
 

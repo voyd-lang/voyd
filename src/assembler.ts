@@ -9,7 +9,7 @@ import {
   Primitive,
   ObjectType,
   DsArrayType,
-  voidBaseObject,
+  voydBaseObject,
   UnionType,
   IntersectionType,
 } from "./syntax-objects/types.js";
@@ -469,7 +469,7 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "f32")) return binaryen.f32;
   if (isPrimitiveId(type, "i64")) return binaryen.i64;
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
-  if (isPrimitiveId(type, "void")) return binaryen.none;
+  if (isPrimitiveId(type, "voyd")) return binaryen.none;
   if (type.isObjectType()) return buildObjectType(opts, type);
   if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isDsArrayType()) return buildDsArrayType(opts, type);
@@ -495,7 +495,7 @@ const buildUnionType = (opts: MapBinTypeOpts, union: UnionType): TypeRef => {
 
   union.types.forEach((type) => mapBinaryenType(opts, type));
 
-  const typeRef = mapBinaryenType(opts, voidBaseObject);
+  const typeRef = mapBinaryenType(opts, voydBaseObject);
   union.setAttribute("binaryenType", typeRef);
   return typeRef;
 };
@@ -579,7 +579,7 @@ const buildObjectType = (opts: MapBinTypeOpts, obj: ObjectType): TypeRef => {
 
   if (obj.getAttribute("isStructural")) {
     obj.setAttribute("originalType", obj.binaryenType);
-    obj.binaryenType = mapBinaryenType(opts, voidBaseObject);
+    obj.binaryenType = mapBinaryenType(opts, voydBaseObject);
   }
 
   if (opts.useOriginalType) return binaryenType;

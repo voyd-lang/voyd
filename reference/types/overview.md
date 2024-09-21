@@ -1,6 +1,6 @@
 # Types Overview
 
-The Void type system is structural at its core and supports nominal types
+The Voyd type system is structural at its core and supports nominal types
 through the use of objects and traits.
 
 - [Types Overview](#types-overview)
@@ -16,7 +16,7 @@ A type comes in a few categories:
   implemented by a type
 - `Effect` - Types that represent side effects a function can have
 
-All but effect types in Void are first class, that is they can be passed as
+All but effect types in Voyd are first class, that is they can be passed as
 arguments to functions, returned from functions, and assigned to variables.
 
 # Defining Types
@@ -26,7 +26,7 @@ an equal sign, and a type expression representing how the type is satisfied.
 
 The most basic type definition is an alias for another type:
 
-```void
+```voyd
 type Name = String
 ```
 
@@ -44,7 +44,7 @@ ownership which are detailed in the memory chapter.
 
 ## Primitive Data Types
 
-Primitive data types are the most basic data types in Void. They are value types
+Primitive data types are the most basic data types in Voyd. They are value types
 that act as the building blocks for more complex data types.
 
 They include:
@@ -57,7 +57,7 @@ They include:
 - `v128` - 128 bit SIMD vector
 - `bool` - Boolean (technically an i32 considered to be false when 0 and true
   when non-zero)
-- `void` - The absence of a value
+- `voyd` - The absence of a value
 
 TODO: Add more information about each of these types.
 

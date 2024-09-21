@@ -2,7 +2,7 @@
 
 Traits are first class types that define the behavior of a nominal object.
 
-```void
+```voyd
 trait Run
   fn run(self) -> String
   fn stop(&self) -> void
@@ -39,7 +39,7 @@ Status: Not yet implemented
 Traits can specify default implementations which are automatically applied
 on implementation, but may still be overridden by that impl if desired
 
-```void
+```voyd
 trait One
   fn one() -> i32
     1
@@ -51,7 +51,7 @@ Status: Not yet implemented
 
 Traits can specify that implementors must also implement other traits:
 
-```void
+```voyd
 trait DoWork requires: This & That
 ```
 
@@ -61,7 +61,7 @@ Traits must be in scope to be used. If the `Run` trait were defined
 in a different file (or module), it would have to be imported before its
 methods could be used
 
-```void
+```voyd
 car.run() // Error, no function found for run
 
 use other_file::{ Run }
@@ -71,7 +71,7 @@ car.run() // Vroom!
 
 Trait implementations cannot have overlapping target types:
 
-```void
+```voyd
 obj Animal {}
 obj Dog {}
 

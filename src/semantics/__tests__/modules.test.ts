@@ -10,7 +10,7 @@ test("module registration", (t) => {
 
 const input = {
   files: {
-    "/Users/drew/projects/void/example.void": new List({
+    "/Users/drew/projects/voyd/example.voyd": new List({
       value: [
         "ast",
         ["use", ["::", ["::", "std", "macros"], "all"]],
@@ -99,7 +99,7 @@ const input = {
         ],
       ],
     }),
-    [`${stdPath}/deep/nested/hey.void`]: new List({
+    [`${stdPath}/deep/nested/hey.voyd`]: new List({
       value: [
         "ast",
         ["use", ["::", ["::", "super", "macros"], "all"]],
@@ -113,7 +113,7 @@ const input = {
         ],
       ],
     }),
-    [`${stdPath}/deep/nested.void`]: new List({
+    [`${stdPath}/deep/nested.voyd`]: new List({
       value: [
         "ast",
         ["pub", ["use", ["::", "hey", "all"]]],
@@ -127,7 +127,7 @@ const input = {
         ],
       ],
     }),
-    [`${stdPath}/deep/mod.void`]: new List({
+    [`${stdPath}/deep/mod.voyd`]: new List({
       value: [
         "ast",
         ["pub", ["use", ["::", "hey", "all"]]],
@@ -141,7 +141,7 @@ const input = {
         ],
       ],
     }),
-    [`${stdPath}/memory.void`]: new List({
+    [`${stdPath}/memory.voyd`]: new List({
       value: [
         "ast",
         ["use", ["::", ["::", "super", "macros"], "all"]],
@@ -159,7 +159,7 @@ const input = {
             "block",
             [
               "bnr",
-              ["memory", "copy", "void"],
+              ["memory", "copy", "voyd"],
               ["dest", "src", ["size", "src"]],
             ],
             "dest",
@@ -167,10 +167,10 @@ const input = {
         ],
       ],
     }),
-    [`${stdPath}/index.void`]: new List({
+    [`${stdPath}/index.voyd`]: new List({
       value: ["ast", ["pub", ["use", ["::", "macros", "all"]]]],
     }),
   },
-  srcPath: "/Users/drew/projects/void",
-  indexPath: "/Users/drew/projects/void/index.void",
+  srcPath: "/Users/drew/projects/voyd",
+  indexPath: "/Users/drew/projects/voyd/index.voyd",
 };

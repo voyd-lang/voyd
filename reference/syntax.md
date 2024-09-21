@@ -21,9 +21,9 @@ Expression
 
 # Parenthetical Elision
 
-Void language is built around an s-expression syntax, like lisp:
+Voyd language is built around an s-expression syntax, like lisp:
 
-```void
+```voyd
 (if (n < 2)
   (: then n)
   (: else (+ (fib (- n 1)) (fib (- n 2)))))
@@ -32,7 +32,7 @@ Void language is built around an s-expression syntax, like lisp:
 To reduce visual noise, parenthesis can be elided, using tabs as a mechanism to
 infer where the parenthesis should be inserted:
 
-```void
+```voyd
 if (n < 2)
   then: n
   else: (+ (fib (- n 1)) (fib (- n 2)))
@@ -44,7 +44,7 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
 
 1.  Any line with more than one symbol is wrapped in parenthesis.
 
-  ```void
+  ```voyd
   add 1 2
 
   // Becomes
@@ -54,7 +54,7 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
 2.  Indented lines are grouped together in a block and passed to their parent
   function call, provided the fist line is not a named argument.
 
-  ```void
+  ```voyd
   add 2
     let x = 5
     mul 4 x
@@ -140,7 +140,7 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
 
 5. Arguments already wrapped in parenthesis must be separated by a comma
 
-  ```void
+  ```voyd
   add(1, 2)
 
   // Becomes
@@ -213,8 +213,8 @@ let x = my_func(
 
 # Standard Function Call Syntax
 
-To make Void language feel more familiar to users familiar with C style
-languages, Void supports standard function call syntax of the form `f(x)`.
+To make Voyd language feel more familiar to users familiar with C style
+languages, Voyd supports standard function call syntax of the form `f(x)`.
 
 ## Rules
 
@@ -289,7 +289,7 @@ catch(e):
 
 # Infix Notation
 
-Void supports infix notation using a predefined set of infix operators.
+Voyd supports infix notation using a predefined set of infix operators.
 
 Operators, their precedence, and associativity (in typescript):
 

@@ -1,4 +1,4 @@
-export const voidFile = `
+export const voydFile = `
 use std::macros::all
 use std::io::{ read, write: io_write }
 
@@ -115,7 +115,7 @@ fn main()
   }
 `;
 
-export const voidFileWithGenerics = `
+export const voydFileWithGenerics = `
 use std::all
 
 type DsArrayi32 = DsArray<i32>

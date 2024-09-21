@@ -11,7 +11,7 @@ import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
 import * as rCallUtil from "../assembler/return-call.js";
 
 describe("E2E Compiler Pipeline", () => {
-  test("Compiler can compile and run a basic void program", async (t) => {
+  test("Compiler can compile and run a basic voyd program", async (t) => {
     const mod = await compile(e2eVoidText);
     const instance = getWasmInstance(mod);
     const fn = getWasmFn("main", instance);

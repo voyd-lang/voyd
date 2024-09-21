@@ -2,7 +2,7 @@
 
 ## Function Basics
 
-```void
+```voyd
 fn add(a: i32, b: i32) -> i32
   a + b
 
@@ -15,14 +15,14 @@ add(1, 2)
 
 With return type inference:
 
-```void
+```voyd
 // Equal sign is used when the function is written on one line
 fn add(a: i32, b: i32) = a + b
 ```
 
 With effects:
 
-```void
+```voyd
 fn get_json(address: String): Async -> Dictionary
   let json_text = await fetch(address)
   parse_json(json_text)
@@ -86,7 +86,7 @@ move(x: x, y: y, z: z)
 
 Labeled arguments also support concise closure sugar on call sites:
 
-```void
+```voyd
 fn try({ do: ((): throws -> void), catch: (e: Error) -> void })
 
 try do():
@@ -218,9 +218,9 @@ See the chapter on [Syntax](./syntax.md) for more information and detailed rules
 
 ## Function Overloading
 
-Void functions can be overloaded. Provided that function overload can be unambiguously distinguished via their parameters and return type.
+Voyd functions can be overloaded. Provided that function overload can be unambiguously distinguished via their parameters and return type.
 
-```void
+```voyd
 fn sum(a: i32, b: i32)
   print("Def 1")
   a + b
@@ -236,7 +236,7 @@ sum { a: 1, b: 2 } // Def 2
 This can be especially useful for overloading operators to support a custom
 type:
 
-```void
+```voyd
 fn '+'(a: Vec3, b: Vec3) -> Vec3
   Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
 
@@ -247,7 +247,7 @@ A function call is considered to be ambiguous when multiple functions in
 the same scope share the same name, and the types of each parameter overlap
 in order.
 
-```void
+```voyd
 fn add(a: i32, b: i32) -> i32
 fn add(d: i32, e: i32) -> i32 // Ambiguous collision
 fn add(f: i32, c: f32) -> i32 // This is fine, the second parameter does not overlap with previous
@@ -255,7 +255,7 @@ fn add(f: i32, c: f32) -> i32 // This is fine, the second parameter does not ove
 
 Object types overlap if one is an extension of the other:
 
-```void
+```voyd
 obj Animal {}
 obj Dog extends Animal {}
 obj Cat extends Animal {}

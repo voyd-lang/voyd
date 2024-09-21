@@ -16,7 +16,7 @@ import {
 import {
   IntersectionType,
   ObjectType,
-  voidBaseObject,
+  voydBaseObject,
 } from "../syntax-objects/types.js";
 import { murmurHash3 } from "../lib/murmur-hash.js";
 import {
@@ -117,7 +117,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
 
         const accessor = mod.addFunction(
           accessorName,
-          bin.createType([mapBinaryenType(opts, voidBaseObject)]),
+          bin.createType([mapBinaryenType(opts, voydBaseObject)]),
           mapBinaryenType(opts, field.type!),
           [],
           structGetFieldValue({
@@ -126,7 +126,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
             fieldIndex: index + 2, // Skip RTT type fields
             exprRef: refCast(
               mod,
-              mod.local.get(0, mapBinaryenType(opts, voidBaseObject)),
+              mod.local.get(0, mapBinaryenType(opts, voydBaseObject)),
               mapBinaryenType(opts, obj)
             ),
           })

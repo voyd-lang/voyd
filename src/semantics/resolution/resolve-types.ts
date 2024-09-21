@@ -8,7 +8,7 @@ import {
   DsArrayType,
   ObjectType,
   TypeAlias,
-  voidBaseObject,
+  voydBaseObject,
 } from "../../syntax-objects/types.js";
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
@@ -111,7 +111,7 @@ const resolveObjectLiteralTypes = (obj: ObjectLiteral) => {
         typeExpr: f.initializer,
         type: f.type,
       })),
-      parentObj: voidBaseObject,
+      parentObj: voydBaseObject,
     });
     obj.type.setAttribute("isStructural", true);
   }

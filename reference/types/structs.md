@@ -9,7 +9,7 @@ variable. And they are stored on the stack.
 They are defined by listing their fields between curly braces prefixed with
 the percent sign `%{}`.
 
-```void
+```voyd
 type MyStruct = %{
   a: i32,
   b: i32
@@ -25,7 +25,7 @@ Tuple structs are a fixed sequence of values of different types. They
 are defined by listing their types between square braces prefixed with the
 percent sign `%()`.
 
-```void
+```voyd
 type MyTupleStruct = %(i32, bool)
 
 let my_tuple_struct: MyTupleStruct = %(1, true)
@@ -36,7 +36,7 @@ let x = my_tuple_struct.0
 They are effectively syntactic sugar for a struct with incrementing
 integer keys.
 
-```void
+```voyd
 type MyTupleStruct = %(i32, bool)
 
 // Resolves to

@@ -4,6 +4,6 @@ ast.json
 *output*.json
 *output*.wat
 .env
-test.void
+test.voyd
 /playground.*
 /playground

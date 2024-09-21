@@ -4,7 +4,7 @@ import { List } from "../../syntax-objects/list.js";
 import {
   ObjectType,
   TypeAlias,
-  voidBaseObject,
+  voydBaseObject,
 } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
@@ -30,7 +30,7 @@ export const resolveObjectTypeTypes = (
     const parentType = getExprType(obj.parentObjExpr);
     obj.parentObjType = parentType?.isObjectType() ? parentType : undefined;
   } else {
-    obj.parentObjType = voidBaseObject;
+    obj.parentObjType = voydBaseObject;
   }
 
   obj.typesResolved = true;
