@@ -2,8 +2,6 @@
 
 Voyd is a high performance WebAssembly language with an emphasis on full stack web development.
 
-https://justforfunnoreally.dev/
-
 ```rust
 fn fib(n: i32) -> i32
   if n < 2 then:
