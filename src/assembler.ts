@@ -11,6 +11,7 @@ import {
   DsArrayType,
   voidBaseObject,
   UnionType,
+  IntersectionType,
 } from "./syntax-objects/types.js";
 import { Variable } from "./syntax-objects/variable.js";
 import { Block } from "./syntax-objects/block.js";
@@ -107,6 +108,16 @@ const compileType = (opts: CompileExprOpts<Type>) => {
 
   if (type.isObjectType()) {
     buildObjectType(opts, type);
+    return opts.mod.nop();
+  }
+
+  if (type.isUnionType()) {
+    buildUnionType(opts, type);
+    return opts.mod.nop();
+  }
+
+  if (type.isIntersectionType()) {
+    buildIntersectionType(opts, type);
     return opts.mod.nop();
   }
 
@@ -488,6 +499,20 @@ const buildUnionType = (opts: MapBinTypeOpts, union: UnionType): TypeRef => {
   return typeRef;
 };
 
+const buildIntersectionType = (
+  opts: MapBinTypeOpts,
+  inter: IntersectionType
+): TypeRef => {
+  if (inter.hasAttribute("binaryenType")) {
+    return inter.getAttribute("binaryenType") as TypeRef;
+  }
+
+  const typeRef = mapBinaryenType(opts, inter.nominalType!);
+  mapBinaryenType(opts, inter.structuralType!);
+  inter.setAttribute("binaryenType", typeRef);
+  return typeRef;
+};
+
 // Marks the start of the fields in an object after RTT info fields
 const OBJECT_FIELDS_OFFSET = 2;
 
@@ -565,10 +590,39 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const obj = expr.exprArgAt(0);
   const member = expr.identifierArgAt(1);
   const objValue = compileExpression({ ...opts, expr: obj });
-  const type = getExprType(obj) as ObjectType;
+  const type = getExprType(obj) as ObjectType | IntersectionType;
 
   if (type.getAttribute("isStructural")) {
     return opts.fieldLookupHelpers.getFieldValueByAccessor(opts);
+  }
+
+  if (type.isIntersectionType()) {
+    const nominal = type.nominalType!;
+    const structural = type.structuralType!;
+
+    const nominalMemberIndex = nominal.getFieldIndex(member);
+    if (nominalMemberIndex > -1) {
+      const field = nominal.getField(member)!;
+      return structGetFieldValue({
+        mod,
+        fieldIndex: nominalMemberIndex + OBJECT_FIELDS_OFFSET,
+        fieldType: mapBinaryenType(opts, field.type!),
+        exprRef: objValue,
+      });
+    }
+
+    const structuralMemberIndex = structural.getFieldIndex(member);
+    if (structuralMemberIndex > -1) {
+      const field = structural.getField(member)!;
+      return structGetFieldValue({
+        mod,
+        fieldIndex: structuralMemberIndex + OBJECT_FIELDS_OFFSET,
+        fieldType: mapBinaryenType(opts, field.type!),
+        exprRef: objValue,
+      });
+    }
+
+    throw new Error(`Member ${member} not found in object ${type.id}`);
   }
 
   const memberIndex = type.getFieldIndex(member) + OBJECT_FIELDS_OFFSET;

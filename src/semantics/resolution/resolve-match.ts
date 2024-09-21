@@ -1,6 +1,7 @@
 import { Block } from "../../syntax-objects/block.js";
 import {
   Call,
+  IntersectionType,
   ObjectType,
   Parameter,
   Type,
@@ -79,13 +80,13 @@ const resolveMatchReturnType = (match: Match): Type | undefined => {
     return firstType;
   }
 
-  let type: ObjectType | UnionType = firstType;
+  let type: ObjectType | IntersectionType | UnionType = firstType;
   for (const mCase of cases.slice(1)) {
     if (mCase.id === type.id) {
       continue;
     }
 
-    if (type.isObjectType() && mCase.isObjectType()) {
+    if (isObjectOrIntersection(mCase) && isObjectOrIntersection(type)) {
       const union = new UnionType({
         name: `Union#match#(${match.syntaxId}`,
       });
@@ -94,7 +95,7 @@ const resolveMatchReturnType = (match: Match): Type | undefined => {
       continue;
     }
 
-    if (mCase.isObjectType() && type.isUnionType()) {
+    if (isObjectOrIntersection(mCase) && type.isUnionType()) {
       type.types.push(mCase);
       continue;
     }
@@ -103,4 +104,10 @@ const resolveMatchReturnType = (match: Match): Type | undefined => {
   }
 
   return type;
+};
+
+const isObjectOrIntersection = (
+  type: Type
+): type is ObjectType | IntersectionType => {
+  return type.isObjectType() || type.isIntersectionType();
 };
