@@ -1,6 +1,9 @@
 import { Expr } from "../syntax-objects/expr.js";
 import { Identifier } from "../syntax-objects/identifier.js";
 
+export const idIs = (id: Expr | undefined, value: string) =>
+  id?.isIdentifier() && id.is(value);
+
 export const isTerminator = (char: string) =>
   isWhitespace(char) ||
   isBracket(char) ||
@@ -48,6 +51,7 @@ export const infixOps: OpMap = new Map([
   ["-", 1],
   ["*", 2],
   ["/", 2],
+  ["^", 3],
   ["and", 0],
   ["or", 0],
   ["xor", 0],
@@ -72,6 +76,7 @@ export const infixOps: OpMap = new Map([
   ["/=", 4],
   ["=>", 5],
   [":", 0],
+  ["?:", 0],
   ["::", 0],
   [";", 4],
   ["??", 3],
@@ -86,12 +91,13 @@ export const isInfixOpIdentifier = (op?: Identifier) =>
 export const isOp = (op?: Expr): boolean => isInfixOp(op) || isPrefixOp(op);
 
 export const prefixOps: OpMap = new Map([
-  ["#", 7],
+  ["#", 0],
   ["&", 7],
   ["!", 7],
   ["~", 7],
   ["%", 7],
   ["$", 7],
+  ["@", 7],
   ["$@", 7],
   ["...", 5],
 ]);

@@ -1,5 +1,7 @@
 import { Call } from "../../syntax-objects/call.js";
+import { Expr } from "../../syntax-objects/expr.js";
 import { Fn } from "../../syntax-objects/fn.js";
+import { Implementation } from "../../syntax-objects/implementation.js";
 import { List } from "../../syntax-objects/list.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
 import { TypeAlias } from "../../syntax-objects/types.js";
@@ -39,13 +41,26 @@ export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
   fn.body = resolveTypes(fn.body);
   fn.inferredReturnType = getExprType(fn.body);
   fn.returnType = fn.annotatedReturnType ?? fn.inferredReturnType;
+  fn.parentImpl?.registerMethod(fn); // Maybe do this for module when not in an impl
 
   return fn;
 };
 
 const resolveParameters = (params: Parameter[]) => {
   params.forEach((p) => {
-    if (p.type) {
+    if (p.type) return;
+
+    if (p.name.is("self")) {
+      const impl = getParentImpl(p);
+      if (!impl) {
+        throw new Error(`Unable to resolve self type for ${p}`);
+      }
+
+      if (!impl.targetType) {
+        throw new Error(`Unable to resolve target type for ${impl}`);
+      }
+
+      p.type = impl.targetType;
       return;
     }
 
@@ -54,8 +69,7 @@ const resolveParameters = (params: Parameter[]) => {
     }
 
     p.typeExpr = resolveTypes(p.typeExpr);
-    const type = getExprType(p.typeExpr);
-    p.type = type;
+    p.type = getExprType(p.typeExpr);
   });
 };
 
@@ -76,7 +90,6 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   }
 
   const newFn = fn.clone();
-  newFn.id = fn.id + `#${fn.genericInstances?.length ?? 0}`;
   newFn.typeParameters = undefined;
   newFn.appliedTypeArgs = [];
 
@@ -88,6 +101,7 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
       name: identifier,
       typeExpr: typeArg,
     });
+    type.parent = newFn;
     type.type = getExprType(typeArg);
     newFn.appliedTypeArgs?.push(type);
     newFn.registerEntity(type);
@@ -96,4 +110,10 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   const resolvedFn = resolveFnTypes(newFn);
   fn.registerGenericInstance(resolvedFn);
   return fn;
+};
+
+const getParentImpl = (expr: Expr): Implementation | undefined => {
+  if (expr.syntaxType === "implementation") return expr;
+  if (expr.parent) return getParentImpl(expr.parent);
+  return undefined;
 };

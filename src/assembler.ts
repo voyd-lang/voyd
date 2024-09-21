@@ -9,6 +9,9 @@ import {
   Primitive,
   ObjectType,
   DsArrayType,
+  voidBaseObject,
+  UnionType,
+  IntersectionType,
 } from "./syntax-objects/types.js";
 import { Variable } from "./syntax-objects/variable.js";
 import { Block } from "./syntax-objects/block.js";
@@ -29,25 +32,27 @@ import { Match, MatchCase } from "./syntax-objects/match.js";
 import { initExtensionHelpers } from "./assembler/extension-helpers.js";
 import { returnCall } from "./assembler/return-call.js";
 import { Float } from "./syntax-objects/float.js";
+import { initFieldLookupHelpers } from "./assembler/field-lookup-helpers.js";
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
-  mod.setMemory(1, 150, "buffer");
   mod.setFeatures(binaryen.Features.All);
   const extensionHelpers = initExtensionHelpers(mod);
-  compileExpression({ expr: ast, mod, extensionHelpers });
+  const fieldLookupHelpers = initFieldLookupHelpers(mod);
+  compileExpression({ expr: ast, mod, extensionHelpers, fieldLookupHelpers });
   mod.autoDrop();
   return mod;
 };
 
-interface CompileExprOpts<T = Expr> {
+export interface CompileExprOpts<T = Expr> {
   expr: T;
   mod: binaryen.Module;
   extensionHelpers: ReturnType<typeof initExtensionHelpers>;
+  fieldLookupHelpers: ReturnType<typeof initFieldLookupHelpers>;
   isReturnExpr?: boolean;
 }
 
-const compileExpression = (opts: CompileExprOpts): number => {
+export const compileExpression = (opts: CompileExprOpts): number => {
   const { expr, mod, isReturnExpr } = opts;
   opts.isReturnExpr = false;
   // These can take isReturnExpr
@@ -63,6 +68,7 @@ const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isModule()) return compileModule({ ...opts, expr });
   if (expr.isObjectLiteral()) return compileObjectLiteral({ ...opts, expr });
   if (expr.isType()) return compileType({ ...opts, expr });
+  if (expr.isImpl()) return mod.nop();
   if (expr.isUse()) return mod.nop();
   if (expr.isMacro()) return mod.nop();
   if (expr.isMacroVariable()) return mod.nop();
@@ -105,6 +111,16 @@ const compileType = (opts: CompileExprOpts<Type>) => {
     return opts.mod.nop();
   }
 
+  if (type.isUnionType()) {
+    buildUnionType(opts, type);
+    return opts.mod.nop();
+  }
+
+  if (type.isIntersectionType()) {
+    buildIntersectionType(opts, type);
+    return opts.mod.nop();
+  }
+
   return opts.mod.nop();
 };
 
@@ -118,7 +134,7 @@ const compileModule = (opts: CompileExprOpts<VoidModule>) => {
 const compileBlock = (opts: CompileExprOpts<Block>) => {
   return opts.mod.block(
     null,
-    opts.expr.body.toArray().map((expr, index, array) => {
+    opts.expr.body.map((expr, index, array) => {
       if (index === array.length - 1) {
         return compileExpression({ ...opts, expr, isReturnExpr: true });
       }
@@ -158,9 +174,22 @@ const compileMatch = (opts: CompileExprOpts<Match>) => {
     );
   };
 
-  return constructIfChain(
+  const ifChain = constructIfChain(
     expr.defaultCase ? [...expr.cases, expr.defaultCase] : expr.cases
   );
+
+  if (expr.bindVariable) {
+    return opts.mod.block(null, [
+      compileVariable({
+        ...opts,
+        isReturnExpr: false,
+        expr: expr.bindVariable,
+      }),
+      ifChain,
+    ]);
+  }
+
+  return ifChain;
 };
 
 const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
@@ -225,10 +254,21 @@ const compileObjectInit = (opts: CompileExprOpts<Call>) => {
   const objectBinType = mapBinaryenType(opts, objectType);
   const obj = expr.argAt(0) as ObjectLiteral;
 
-  return initStruct(mod, binaryenTypeToHeapType(objectBinType), [
-    mod.global.get(`__rtt_${objectType.id}`, opts.extensionHelpers.i32Array),
+  return initStruct(mod, objectBinType, [
+    mod.global.get(
+      `__ancestors_table_${objectType.id}`,
+      opts.extensionHelpers.i32Array
+    ),
+    mod.global.get(
+      `__field_index_table_${objectType.id}`,
+      opts.fieldLookupHelpers.lookupTableType
+    ),
     ...obj.fields.map((field) =>
-      compileExpression({ ...opts, expr: field.initializer })
+      compileExpression({
+        ...opts,
+        expr: field.initializer,
+        isReturnExpr: false,
+      })
     ),
   ]);
 };
@@ -330,7 +370,7 @@ const compileFunction = (opts: CompileExprOpts<Fn>): number => {
     isReturnExpr: true,
   });
 
-  const variableTypes = getFunctionVarTypes(opts, fn); // TODO: Vars should probably be registered with the function type rather than body (for consistency).
+  const variableTypes = getFunctionVarTypes(opts, fn);
 
   mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
 
@@ -366,10 +406,20 @@ const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
   const { expr: obj, mod } = opts;
 
   const objectType = getExprType(obj) as ObjectType;
-  const literalBinType = mapBinaryenType(opts, objectType);
+  const literalBinType = mapBinaryenType(
+    { ...opts, useOriginalType: true },
+    objectType
+  );
 
-  return initStruct(mod, binaryenTypeToHeapType(literalBinType), [
-    mod.global.get(`__rtt_${objectType.id}`, opts.extensionHelpers.i32Array),
+  return initStruct(mod, literalBinType, [
+    mod.global.get(
+      `__ancestors_table_${objectType.id}`,
+      opts.extensionHelpers.i32Array
+    ),
+    mod.global.get(
+      `__field_index_table_${objectType.id}`,
+      opts.fieldLookupHelpers.lookupTableType
+    ),
     ...obj.fields.map((field) =>
       compileExpression({ ...opts, expr: field.initializer })
     ),
@@ -399,13 +449,21 @@ const getFunctionParameterTypes = (opts: CompileExprOpts, fn: Fn) => {
   const types = fn.parameters.map((param) =>
     mapBinaryenType(opts, param.type!)
   );
+
   return binaryen.createType(types);
 };
 
 const getFunctionVarTypes = (opts: CompileExprOpts, fn: Fn) =>
   fn.variables.map((v) => mapBinaryenType(opts, v.type!));
 
-const mapBinaryenType = (opts: CompileExprOpts, type: Type): binaryen.Type => {
+type MapBinTypeOpts = CompileExprOpts & {
+  useOriginalType?: boolean; // Use the original type of the object literal, i.e. to initialize an object literal, who normally returns the base object type
+};
+
+export const mapBinaryenType = (
+  opts: MapBinTypeOpts,
+  type: Type
+): binaryen.Type => {
   if (isPrimitiveId(type, "bool")) return binaryen.i32;
   if (isPrimitiveId(type, "i32")) return binaryen.i32;
   if (isPrimitiveId(type, "f32")) return binaryen.f32;
@@ -413,7 +471,9 @@ const mapBinaryenType = (opts: CompileExprOpts, type: Type): binaryen.Type => {
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "void")) return binaryen.none;
   if (type.isObjectType()) return buildObjectType(opts, type);
+  if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isDsArrayType()) return buildDsArrayType(opts, type);
+  if (type.isIntersectionType()) return buildIntersectionType(opts, type);
   throw new Error(`Unsupported type ${type}`);
 };
 
@@ -428,8 +488,41 @@ const buildDsArrayType = (opts: CompileExprOpts, type: DsArrayType) => {
   return type.binaryenType;
 };
 
+const buildUnionType = (opts: MapBinTypeOpts, union: UnionType): TypeRef => {
+  if (union.hasAttribute("binaryenType")) {
+    return union.getAttribute("binaryenType") as TypeRef;
+  }
+
+  union.types.forEach((type) => mapBinaryenType(opts, type));
+
+  const typeRef = mapBinaryenType(opts, voidBaseObject);
+  union.setAttribute("binaryenType", typeRef);
+  return typeRef;
+};
+
+const buildIntersectionType = (
+  opts: MapBinTypeOpts,
+  inter: IntersectionType
+): TypeRef => {
+  if (inter.hasAttribute("binaryenType")) {
+    return inter.getAttribute("binaryenType") as TypeRef;
+  }
+
+  const typeRef = mapBinaryenType(opts, inter.nominalType!);
+  mapBinaryenType(opts, inter.structuralType!);
+  inter.setAttribute("binaryenType", typeRef);
+  return typeRef;
+};
+
+// Marks the start of the fields in an object after RTT info fields
+const OBJECT_FIELDS_OFFSET = 2;
+
 /** TODO: Skip building types for object literals that are part of an initializer of an obj */
-const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
+const buildObjectType = (opts: MapBinTypeOpts, obj: ObjectType): TypeRef => {
+  if (opts.useOriginalType && obj.getAttribute("originalType")) {
+    return obj.getAttribute("originalType") as TypeRef;
+  }
+
   if (obj.binaryenType) return obj.binaryenType;
   if (obj.typeParameters) return opts.mod.nop();
   const mod = opts.mod;
@@ -437,10 +530,18 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
   const binaryenType = defineStructType(mod, {
     name: obj.id,
     fields: [
+      // Reference to the RTT Ancestors Table
       {
         type: opts.extensionHelpers.i32Array,
-        name: "ancestors",
+        name: "__ancestors_table",
       },
+      {
+        type: opts.fieldLookupHelpers.lookupTableType,
+        name: "__field_index_table",
+      },
+      // Reference to the field index lookup function
+      // TODO
+      // Fields
       ...obj.fields.map((field) => ({
         type: mapBinaryenType(opts, field.type!),
         name: field.name,
@@ -451,16 +552,38 @@ const buildObjectType = (opts: CompileExprOpts, obj: ObjectType): TypeRef => {
       : undefined,
   });
 
-  // Set RTT Table (So we don't have to re-calculate it every time)
+  obj.binaryenType = binaryenType;
+
+  // Set RTT Ancestors Table (So we don't have to re-calculate it every time)
   mod.addGlobal(
-    `__rtt_${obj.id}`,
+    `__ancestors_table_${obj.id}`,
     opts.extensionHelpers.i32Array,
     false,
     opts.extensionHelpers.initExtensionArray(obj.getAncestorIds())
   );
 
-  obj.binaryenType = binaryenType;
-  return binaryenType;
+  // Set Field Index Table
+  // Set RTT Table (So we don't have to re-calculate it every time)
+  mod.addGlobal(
+    `__field_index_table_${obj.id}`,
+    opts.fieldLookupHelpers.lookupTableType,
+    false,
+    opts.fieldLookupHelpers.initFieldIndexTable({ ...opts, expr: obj })
+  );
+
+  if (obj.implementations?.length) {
+    obj.implementations.forEach((impl) =>
+      impl.methods.forEach((fn) => compileFunction({ ...opts, expr: fn }))
+    );
+  }
+
+  if (obj.getAttribute("isStructural")) {
+    obj.setAttribute("originalType", obj.binaryenType);
+    obj.binaryenType = mapBinaryenType(opts, voidBaseObject);
+  }
+
+  if (opts.useOriginalType) return binaryenType;
+  return obj.binaryenType;
 };
 
 const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
@@ -468,8 +591,13 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const obj = expr.exprArgAt(0);
   const member = expr.identifierArgAt(1);
   const objValue = compileExpression({ ...opts, expr: obj });
-  const type = getExprType(obj) as ObjectType;
-  const memberIndex = type.getFieldIndex(member) + 1; // +1 to account for the RTT table
+  const type = getExprType(obj) as ObjectType | IntersectionType;
+
+  if (type.getAttribute("isStructural") || type.isIntersectionType()) {
+    return opts.fieldLookupHelpers.getFieldValueByAccessor(opts);
+  }
+
+  const memberIndex = type.getFieldIndex(member) + OBJECT_FIELDS_OFFSET;
   const field = type.getField(member)!;
   return structGetFieldValue({
     mod,

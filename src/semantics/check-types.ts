@@ -1,7 +1,7 @@
 import {
   List,
   Expr,
-  noop,
+  nop,
   Identifier,
   ObjectType,
   Type,
@@ -16,13 +16,15 @@ import {
   Use,
   TypeAlias,
   ObjectLiteral,
+  UnionType,
+  IntersectionType,
 } from "../syntax-objects/index.js";
 import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
-import { typesAreEquivalent } from "./resolution/index.js";
+import { typesAreCompatible } from "./resolution/index.js";
 
 export const checkTypes = (expr: Expr | undefined): Expr => {
-  if (!expr) return noop();
+  if (!expr) return nop();
   if (expr.isBlock()) return checkBlockTypes(expr);
   if (expr.isCall()) return checkCallTypes(expr);
   if (expr.isFn()) return checkFnTypes(expr);
@@ -34,7 +36,9 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isObjectType()) return checkObjectType(expr);
   if (expr.isTypeAlias()) return checkTypeAlias(expr);
   if (expr.isObjectLiteral()) return checkObjectLiteralType(expr);
+  if (expr.isUnionType()) return checkUnionType(expr);
   if (expr.isMatch()) return checkMatch(expr);
+  if (expr.isIntersectionType()) return checkIntersectionType(expr);
   return expr;
 };
 
@@ -53,8 +57,17 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("member-access")) return call; // TODO
   if (call.fn?.isObjectType()) return checkObjectInit(call);
 
+  call.args = call.args.map(checkTypes);
+
   if (!call.fn) {
-    throw new Error(`Could not resolve fn ${call.fnName} at ${call.location}`);
+    const params = call.args
+      .toArray()
+      .map((arg) => getExprType(arg)?.name.value)
+      .join(", ");
+
+    throw new Error(
+      `Could not resolve fn ${call.fnName}(${params}) at ${call.location}`
+    );
   }
 
   if (!call.type) {
@@ -62,8 +75,6 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
       `Could not resolve type for call ${call.fnName} at ${call.location}`
     );
   }
-
-  call.args = call.args.map(checkTypes);
 
   return call;
 };
@@ -76,7 +87,7 @@ const checkObjectInit = (call: Call): Call => {
   checkTypes(literal);
 
   // Check to ensure literal structure is compatible with nominal structure
-  if (!typesAreEquivalent(literal.type, call.type, { structuralOnly: true })) {
+  if (!typesAreCompatible(literal.type, call.type, { structuralOnly: true })) {
     throw new Error(`Object literal type does not match expected type`);
   }
 
@@ -100,7 +111,7 @@ export const checkAssign = (call: Call) => {
 
   const initType = getExprType(call.argAt(1));
 
-  if (!typesAreEquivalent(variable.type, initType)) {
+  if (!typesAreCompatible(variable.type, initType)) {
     throw new Error(`${id} cannot be assigned to ${initType}`);
   }
 
@@ -110,7 +121,7 @@ export const checkAssign = (call: Call) => {
 const checkIdentifier = (id: Identifier) => {
   const entity = id.resolve();
   if (!entity) {
-    throw new Error(`Unrecognized identifier, ${id}`);
+    throw new Error(`Unrecognized identifier, ${id} at ${id.location}`);
   }
 
   if (entity.isVariable()) {
@@ -125,7 +136,7 @@ const checkIdentifier = (id: Identifier) => {
 export const checkIf = (call: Call) => {
   const cond = checkTypes(call.argAt(0));
   const condType = getExprType(cond);
-  if (!condType || !typesAreEquivalent(condType, bool)) {
+  if (!condType || !typesAreCompatible(condType, bool)) {
     throw new Error(
       `If conditions must resolve to a boolean at ${cond.location}`
     );
@@ -144,7 +155,7 @@ export const checkIf = (call: Call) => {
   const elseType = getExprType(elseExpr);
 
   // Until unions are supported, throw an error when types don't match
-  if (!typesAreEquivalent(thenType, elseType)) {
+  if (!typesAreCompatible(thenType, elseType)) {
     throw new Error("If condition clauses do not return same type");
   }
 
@@ -192,7 +203,7 @@ const checkFnTypes = (fn: Fn): Fn => {
   checkTypes(fn.body);
 
   if (fn.returnTypeExpr) {
-    checkTypes(fn.returnTypeExpr);
+    checkTypeExpr(fn.returnTypeExpr);
   }
 
   if (!fn.returnType) {
@@ -205,7 +216,7 @@ const checkFnTypes = (fn: Fn): Fn => {
 
   if (
     inferredReturnType &&
-    !typesAreEquivalent(inferredReturnType, fn.returnType)
+    !typesAreCompatible(inferredReturnType, fn.returnType)
   ) {
     throw new Error(
       `Fn, ${fn.name}, return value type (${inferredReturnType?.name}) is not compatible with annotated return type (${fn.returnType?.name}) at ${fn.location}`
@@ -220,7 +231,8 @@ const checkParameters = (params: Parameter[]) => {
     if (!p.type) {
       throw new Error(`Unable to determine type for ${p}`);
     }
-    checkTypes(p.typeExpr);
+
+    checkTypeExpr(p.typeExpr);
   });
 };
 
@@ -255,11 +267,11 @@ const checkVarTypes = (variable: Variable): Variable => {
     );
   }
 
-  if (variable.typeExpr) checkTypes(variable.typeExpr);
+  if (variable.typeExpr) checkTypeExpr(variable.typeExpr);
 
   if (
     variable.annotatedType &&
-    !typesAreEquivalent(variable.annotatedType, variable.inferredType)
+    !typesAreCompatible(variable.inferredType, variable.annotatedType)
   ) {
     throw new Error(
       `${variable.name} of type ${variable.type} is not assignable to ${variable.inferredType}`
@@ -281,9 +293,13 @@ const checkObjectType = (obj: ObjectType): ObjectType => {
 
   obj.fields.forEach((field) => {
     if (!field.type) {
-      throw new Error(`Unable to determine type for ${field.typeExpr}`);
+      throw new Error(
+        `Unable to determine type for ${field.typeExpr} at ${field.typeExpr.location}`
+      );
     }
   });
+
+  obj.implementations.forEach((impl) => impl.methods.forEach(checkTypes));
 
   if (obj.parentObjExpr) {
     assertValidExtension(obj, obj.parentObjType);
@@ -302,7 +318,7 @@ export function assertValidExtension(
 
   const validExtension = parent.fields.every((field) => {
     const match = child.fields.find((f) => f.name === field.name);
-    return match && typesAreEquivalent(field.type, match.type);
+    return match && typesAreCompatible(field.type, match.type);
   });
 
   if (!validExtension) {
@@ -310,9 +326,29 @@ export function assertValidExtension(
   }
 }
 
+const checkTypeExpr = (expr?: Expr) => {
+  if (!expr) return; // TODO: Throw error? We use nop instead of undefined now (but maybe not everywhere)
+
+  if (expr.isCall() && !expr.type) {
+    throw new Error(`Unable to fully resolve type at ${expr.location}`);
+  }
+
+  if (expr.isCall()) {
+    return;
+  }
+
+  return checkTypes(expr);
+};
+
 const checkTypeAlias = (alias: TypeAlias): TypeAlias => {
   if (!alias.type) {
-    throw new Error(`Unable to determine type for ${alias.typeExpr}`);
+    throw new Error(
+      `Unable to determine type for ${JSON.stringify(
+        alias.typeExpr,
+        undefined,
+        2
+      )}`
+    );
   }
 
   return alias;
@@ -330,7 +366,72 @@ const checkObjectLiteralType = (obj: ObjectLiteral) => {
 };
 
 const checkMatch = (match: Match) => {
-  // (Until unions)
+  if (match.bindVariable) {
+    checkVarTypes(match.bindVariable);
+  }
+
+  if (match.baseType?.isUnionType()) {
+    return checkUnionMatch(match);
+  }
+
+  return checkObjectMatch(match);
+};
+
+const checkIntersectionType = (inter: IntersectionType) => {
+  checkTypeExpr(inter.nominalTypeExpr.value);
+  checkTypeExpr(inter.structuralTypeExpr.value);
+
+  if (!inter.nominalType || !inter.structuralType) {
+    throw new Error(`Unable to resolve intersection type ${inter.location}`);
+  }
+
+  if (!inter.structuralType.getAttribute("isStructural")) {
+    throw new Error(
+      `Structural type must be a structural type ${inter.structuralTypeExpr.value.location}`
+    );
+  }
+
+  return inter;
+};
+
+const checkUnionMatch = (match: Match) => {
+  const union = match.baseType as UnionType;
+
+  if (match.cases.length !== union.types.length) {
+    throw new Error(
+      `Match does not handle all possibilities of union ${match.location}`
+    );
+  }
+
+  for (const mCase of match.cases) {
+    if (!mCase.matchType) {
+      throw new Error(
+        `Unable to determine match type for case at ${mCase.expr.location}`
+      );
+    }
+
+    if (!typesAreCompatible(mCase.expr.type, match.type)) {
+      throw new Error(
+        `All cases must return the same type for now ${mCase.expr.location}`
+      );
+    }
+  }
+
+  union.types.forEach((type) => {
+    if (
+      !match.cases.some((mCase) => typesAreCompatible(mCase.matchType, type))
+    ) {
+      throw new Error(
+        `Match does not handle all possibilities of union ${match.location}`
+      );
+    }
+  });
+
+  return match;
+};
+
+/** Check a match against an object type */
+const checkObjectMatch = (match: Match) => {
   if (!match.defaultCase) {
     throw new Error(`Match must have a default case at ${match.location}`);
   }
@@ -354,7 +455,7 @@ const checkMatch = (match: Match) => {
       );
     }
 
-    if (!typesAreEquivalent(mCase.expr.type, match.type)) {
+    if (!typesAreCompatible(mCase.expr.type, match.type)) {
       throw new Error(
         `All cases must return the same type for now ${mCase.expr.location}`
       );
@@ -362,4 +463,14 @@ const checkMatch = (match: Match) => {
   }
 
   return match;
+};
+
+const checkUnionType = (union: UnionType) => {
+  union.childTypeExprs.each(checkTypeExpr);
+
+  if (union.types.length !== union.childTypeExprs.length) {
+    throw new Error(`Unable to resolve every type in union ${union.location}`);
+  }
+
+  return union;
 };

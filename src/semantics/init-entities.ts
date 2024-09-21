@@ -1,4 +1,5 @@
 import { Declaration } from "../syntax-objects/declaration.js";
+import { Implementation } from "../syntax-objects/implementation.js";
 import {
   List,
   Fn,
@@ -11,6 +12,9 @@ import {
   ObjectType,
   ObjectLiteral,
   DsArrayType,
+  nop,
+  UnionType,
+  IntersectionType,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { SemanticProcessor } from "./types.js";
@@ -56,6 +60,18 @@ export const initEntities: SemanticProcessor = (expr) => {
     return initMatch(expr);
   }
 
+  if (expr.calls("impl")) {
+    return initImpl(expr);
+  }
+
+  if (expr.calls("|")) {
+    return initPipedUnionType(expr);
+  }
+
+  if (expr.calls("&")) {
+    return initIntersection(expr);
+  }
+
   return initCall(expr);
 };
 
@@ -71,15 +87,25 @@ const initFn = (expr: List): Fn => {
 
   const typeParameters =
     parameterList.at(1)?.isList() && parameterList.listAt(1).calls("generics")
-      ? parameterList
-          .listAt(1)
-          .sliceAsArray(1)
-          .flatMap((p) => (p.isIdentifier() ? p : []))
+      ? extractTypeParams(parameterList.listAt(1))
       : undefined;
 
   const parameters = parameterList
     .sliceAsArray(typeParameters ? 2 : 1)
-    .flatMap((p) => listToParameter(p as List));
+    .flatMap((p) => {
+      if (p.isIdentifier()) {
+        return new Parameter({
+          name: p,
+          typeExpr: undefined,
+        });
+      }
+
+      if (!p.isList()) {
+        throw new Error("Invalid parameter");
+      }
+
+      return listToParameter(p);
+    });
 
   const returnTypeExpr = getReturnTypeExprForFn(expr, 3);
 
@@ -154,6 +180,46 @@ const initObjectLiteral = (obj: List) => {
   });
 };
 
+const initPipedUnionType = (union: List) => {
+  const children: Expr[] = [];
+
+  const extractChildren = (list: List) => {
+    const child = initEntities(list.exprAt(1));
+    children.push(child);
+
+    if (list.at(2)?.isList() && list.listAt(2).calls("|")) {
+      extractChildren(list.listAt(2));
+      return;
+    }
+
+    children.push(initEntities(list.exprAt(2)));
+  };
+
+  extractChildren(union);
+
+  return new UnionType({
+    ...union.metadata,
+    childTypeExprs: children,
+    name: union.syntaxId.toString(),
+  });
+};
+
+const initIntersection = (intersection: List): IntersectionType => {
+  const nominalObjectExpr = initTypeExprEntities(intersection.at(1));
+  const structuralObjectExpr = initTypeExprEntities(intersection.at(2));
+
+  if (!nominalObjectExpr || !structuralObjectExpr) {
+    throw new Error("Invalid intersection type");
+  }
+
+  return new IntersectionType({
+    ...intersection.metadata,
+    name: intersection.syntaxId.toString(),
+    nominalObjectExpr,
+    structuralObjectExpr,
+  });
+};
+
 const initVar = (varDef: List): Variable => {
   const isMutable = varDef.calls("define_mut");
   const identifierExpr = varDef.at(1);
@@ -211,8 +277,20 @@ const initDeclaration = (decl: List) => {
 
 const initTypeAlias = (type: List) => {
   const assignment = type.listAt(1);
-  const name = assignment.identifierAt(1);
+  const nameExpr = assignment.at(1);
   const typeExpr = initTypeExprEntities(assignment.at(2));
+
+  const nameIsList = nameExpr?.isList();
+
+  const name = nameIsList
+    ? nameExpr.identifierAt(0)
+    : nameExpr?.isIdentifier()
+    ? nameExpr
+    : undefined;
+
+  const typeParameters = nameIsList
+    ? extractTypeParams(nameExpr.listAt(1))
+    : undefined;
 
   if (!name || !typeExpr) {
     throw new Error(`Invalid type alias ${type.location}`);
@@ -222,7 +300,7 @@ const initTypeAlias = (type: List) => {
     typeExpr.setName(name.value);
   }
 
-  return new TypeAlias({ ...type.metadata, name, typeExpr });
+  return new TypeAlias({ ...type.metadata, name, typeExpr, typeParameters });
 };
 
 const initCall = (call: List) => {
@@ -264,14 +342,22 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
   }
 
   if (type.calls("object")) {
-    return initObjectType(type);
+    return initStructuralObjectType(type);
   }
 
   if (type.calls("DsArray")) {
     return initDsArray(type);
   }
 
-  throw new Error("Invalid type entity");
+  if (type.calls("|")) {
+    return initPipedUnionType(type);
+  }
+
+  if (type.calls("&")) {
+    return initIntersection(type);
+  }
+
+  return initCall(type);
 };
 
 const initDsArray = (type: List) => {
@@ -291,18 +377,13 @@ const initDsArray = (type: List) => {
 
 const initNominalObjectType = (obj: List) => {
   const hasExtension = obj.optionalIdentifierAt(2)?.is("extends");
-  const hasGenerics = obj.at(1)?.isList();
+  const typeInitExpr = obj.at(1);
+  const hasGenerics = typeInitExpr?.isList();
 
-  const name = hasGenerics
-    ? obj.listAt(1).identifierAt(0)
-    : obj.identifierAt(1);
+  const name = hasGenerics ? typeInitExpr.identifierAt(0) : obj.identifierAt(1);
 
   const typeParameters = hasGenerics
-    ? obj
-        .listAt(1)
-        .listAt(1)
-        .sliceAsArray(1)
-        .flatMap((p) => (p.isIdentifier() ? p : []))
+    ? extractTypeParams(typeInitExpr.listAt(1))
     : undefined;
 
   return new ObjectType({
@@ -314,12 +395,14 @@ const initNominalObjectType = (obj: List) => {
   });
 };
 
-const initObjectType = (obj: List) => {
-  return new ObjectType({
+const initStructuralObjectType = (obj: List) => {
+  const result = new ObjectType({
     ...obj.metadata,
     name: obj.syntaxId.toString(),
     value: extractObjectFields(obj),
   });
+  result.setAttribute("isStructural", true);
+  return result;
 };
 
 export const initMatch = (match: List): Match => {
@@ -336,9 +419,9 @@ export const initMatch = (match: List): Match => {
     defaultCase: cases.defaultCase,
     bindIdentifier: identifier,
     bindVariable:
-      identifierIndex === 2 // We need a new variable if the second argument is an identifier
+      identifierIndex === 2 // We need a new variable if the second argument is an identifier (to support dot notation)
         ? new Variable({
-            name: identifier,
+            name: identifier.clone(),
             location: identifier.location,
             initializer: operand,
             isMutable: false,
@@ -400,3 +483,41 @@ const extractObjectFields = (obj: List) => {
     return { name: name.value, typeExpr };
   });
 };
+
+const initImpl = (impl: List): Implementation => {
+  const first = impl.exprAt(1);
+  const generics =
+    first.isList() && first.calls("generics")
+      ? first.sliceAsArray(1).flatMap((p) => (p.isIdentifier() ? p : []))
+      : undefined;
+
+  const possibleTraitIndex = generics ? 2 : 1;
+  const possibleFor = impl.at(possibleTraitIndex + 1);
+  const traitExpr =
+    possibleFor?.isIdentifier() && possibleFor.is("for")
+      ? initEntities(impl.exprAt(possibleTraitIndex))
+      : undefined;
+
+  let targetTypeIndex = 1;
+  if (generics) targetTypeIndex += 1;
+  if (traitExpr) targetTypeIndex += 2;
+
+  const targetTypeExpr = initEntities(impl.exprAt(targetTypeIndex));
+
+  const init = new Implementation({
+    ...impl.metadata,
+    typeParams: generics ?? [],
+    targetTypeExpr,
+    body: nop(),
+    traitExpr,
+  });
+
+  const body = impl.exprAt(targetTypeIndex + 1);
+  body.parent = init;
+  init.body.value = initEntities(body);
+  return init;
+};
+
+/** Expects ["generics", ...Identifiers] */
+const extractTypeParams = (list: List) =>
+  list.sliceAsArray(1).flatMap((p) => (p.isIdentifier() ? p : []));

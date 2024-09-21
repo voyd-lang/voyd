@@ -8,7 +8,7 @@ import type { Global } from "./global.js";
 import type { Id, Identifier } from "./identifier.js";
 import type { Int } from "./int.js";
 import { type VoidModule } from "./module.js";
-import { LexicalContext } from "./lexical-context.js";
+import { LexicalContext } from "./lib/lexical-context.js";
 import type { List } from "./list.js";
 import type { MacroLambda } from "./macro-lambda.js";
 import type { MacroVariable } from "./macro-variable.js";
@@ -23,24 +23,31 @@ import type {
   Type,
   TypeAlias,
   DsArrayType,
+  UnionType,
+  IntersectionType,
 } from "./types.js";
 import type { Variable } from "./variable.js";
 import type { Whitespace } from "./whitespace.js";
-import { NamedEntity } from "./named-entity.js";
-import { ScopedEntity } from "./scoped-entity.js";
-import { Declaration } from "./declaration.js";
-import { Use } from "./use.js";
-import { Match } from "./match.js";
+import { type NamedEntity } from "./named-entity.js";
+import { type ScopedEntity } from "./scoped-entity.js";
+import { type Declaration } from "./declaration.js";
+import { type Use } from "./use.js";
+import { type Match } from "./match.js";
+import { type Implementation } from "./implementation.js";
+
+export type Attributes = { [key: string]: unknown };
 
 export type SyntaxMetadata = {
   location?: SourceLocation;
   parent?: Expr;
+  attributes?: Attributes;
 };
 
 export abstract class Syntax {
   /** For tagged unions */
   abstract readonly syntaxType: string;
   readonly syntaxId = getSyntaxId();
+  #attributes?: Attributes;
   location?: SourceLocation;
   parent?: Expr;
 
@@ -48,6 +55,7 @@ export abstract class Syntax {
     const { location, parent } = metadata;
     this.location = location;
     this.parent = parent;
+    this.#attributes = metadata.attributes;
   }
 
   get parentFn(): Fn | undefined {
@@ -58,10 +66,15 @@ export abstract class Syntax {
     return this.parent?.isModule() ? this.parent : this.parent?.parentModule;
   }
 
+  get parentImpl(): Implementation | undefined {
+    return this.parent?.isImpl() ? this.parent : this.parent?.parentImpl;
+  }
+
   get metadata() {
     return {
       location: this.location,
       parent: this.parent,
+      attributes: this.#attributes ? { ...this.#attributes } : undefined,
     };
   }
 
@@ -92,7 +105,7 @@ export abstract class Syntax {
     return this.parentModule?.resolveModule(name, level + 1);
   }
 
-  /** Recursively searches for the entity up the parent tree */
+  /** Recursively searches for the entity up the parent tree up to the parent module */
   resolveEntity(name: Id): NamedEntity | undefined {
     if (!this.isScopedEntity()) return this.parent?.resolveEntity(name);
 
@@ -107,6 +120,8 @@ export abstract class Syntax {
     if (!this.isScopedEntity()) {
       return this.parent?.resolveFns(id, start) ?? start;
     }
+
+    if (this.isModule()) return start.concat(this.lexicon.resolveFns(id));
 
     start.push(...this.lexicon.resolveFns(id));
     if (this.parent) return this.parent.resolveFns(id, start);
@@ -125,6 +140,21 @@ export abstract class Syntax {
 
   /** Should emit in compliance with core language spec */
   abstract toJSON(): unknown;
+
+  setAttribute(key: string, value: unknown) {
+    if (!this.#attributes) this.#attributes = {};
+    this.#attributes[key] = value;
+  }
+
+  getAttribute(key: string): unknown {
+    if (!this.#attributes) return undefined;
+    return this.#attributes[key];
+  }
+
+  hasAttribute(key: string): boolean {
+    if (!this.#attributes) return false;
+    return this.#attributes[key] !== undefined;
+  }
 
   isScopedEntity(): this is ScopedEntity {
     return (this as unknown as ScopedEntity).lexicon instanceof LexicalContext;
@@ -162,8 +192,20 @@ export abstract class Syntax {
     return this.syntaxType === "whitespace";
   }
 
+  isImpl(): this is Implementation {
+    return this.syntaxType === "implementation";
+  }
+
   isObjectType(): this is ObjectType {
     return this.isType() && this.kindOfType === "object";
+  }
+
+  isUnionType(): this is UnionType {
+    return this.isType() && this.kindOfType === "union";
+  }
+
+  isIntersectionType(): this is IntersectionType {
+    return this.isType() && this.kindOfType === "intersection";
   }
 
   isDsArrayType(): this is DsArrayType {

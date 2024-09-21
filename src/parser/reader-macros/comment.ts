@@ -1,4 +1,4 @@
-import { noop } from "../../syntax-objects/index.js";
+import { nop } from "../../syntax-objects/index.js";
 import { ReaderMacro } from "./types.js";
 
 export const comment: ReaderMacro = {
@@ -9,6 +9,6 @@ export const comment: ReaderMacro = {
       file.consumeChar();
     }
 
-    return noop();
+    return nop();
   },
 };

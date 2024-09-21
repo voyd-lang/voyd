@@ -10,6 +10,7 @@ export class ObjectLiteral extends Syntax {
   constructor(opts: SyntaxMetadata & { fields: ObjectLiteralField[] }) {
     super(opts);
     this.fields = opts.fields;
+    this.fields.forEach((f) => (f.initializer.parent = this));
   }
 
   clone(parent?: Expr): ObjectLiteral {

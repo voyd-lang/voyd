@@ -2,6 +2,8 @@ import { Block } from "./block.js";
 import { Call } from "./call.js";
 import { Expr } from "./expr.js";
 import { Identifier } from "./identifier.js";
+import { LexicalContext } from "./lib/lexical-context.js";
+import { ScopedSyntax } from "./scoped-entity.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
 import { ObjectType, Type } from "./types.js";
 import { Variable } from "./variable.js";
@@ -23,8 +25,9 @@ export type MatchOpts = SyntaxMetadata & {
   bindIdentifier: Identifier;
 };
 
-export class Match extends Syntax {
+export class Match extends Syntax implements ScopedSyntax {
   readonly syntaxType = "match";
+  lexicon = new LexicalContext();
   /** Match expr return type */
   type?: Type;
   /** Type being matched against */
@@ -39,12 +42,30 @@ export class Match extends Syntax {
   constructor(opts: MatchOpts) {
     super(opts);
     this.operand = opts.operand;
-    this.cases = opts.cases;
+    this.operand.parent = this;
+    this.cases = opts.cases.map((c) => {
+      if (c.matchTypeExpr) {
+        c.matchTypeExpr.parent = this;
+      }
+      c.expr.parent = this;
+      return c;
+    });
+
     this.defaultCase = opts.defaultCase;
+    if (this.defaultCase) {
+      this.defaultCase.expr.parent = this;
+    }
+
     this.type = opts.type;
-    this.bindVariable = opts.bindVariable;
     this.baseType = opts.baseType;
     this.bindIdentifier = opts.bindIdentifier;
+    this.bindIdentifier.parent = this;
+
+    if (opts.bindVariable) {
+      opts.bindVariable.parent = this;
+      this.registerEntity(opts.bindVariable);
+      this.bindVariable = opts.bindVariable;
+    }
   }
 
   toJSON(): object {
@@ -68,16 +89,3 @@ export class Match extends Syntax {
     });
   }
 }
-
-/**
- * Notes:
- * - Matches must be exhaustive.
- * When a match type is an object. It must have a default case.
- * When it is a union, it must have a case for each type in the union.
- *
- * - Unions require special handling in the compiler. Each case must
- * bind an identifier to the "dereferenced"* value of the union.
- *
- * *Dereferenced means from the value of the union, not the union itself. The
- * value can still be a reference to an object.
- */

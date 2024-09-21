@@ -1,13 +1,15 @@
-import { isContinuationOp, isGreedyOp } from "../grammar.js";
+import { idIs, isContinuationOp, isGreedyOp } from "../grammar.js";
 import { Expr, List } from "../../syntax-objects/index.js";
 
 export const interpretWhitespace = (list: List, indentLevel?: number): List => {
   const transformed = new List({ ...list.metadata });
 
+  let hadComma = false;
   while (list.hasChildren) {
     const child = elideParens(list, indentLevel);
     if (child?.isList() && child.length === 0) continue;
-    addSibling(child, transformed);
+    addSibling(child, transformed, hadComma);
+    hadComma = nextIsComma(list);
   }
 
   if (transformed.length === 1 && transformed.first()?.isList()) {
@@ -33,7 +35,7 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
     }
 
     const firstChild = children.at(1);
-    if (firstChild?.isList() && isNamedParameter(firstChild)) {
+    if (firstChild?.isList() && isNamedArg(firstChild)) {
       transformed.push(...children.argsArray());
       return;
     }
@@ -69,7 +71,7 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
       continue;
     }
 
-    if (next?.isIdentifier() && next.is(",")) {
+    if (idIs(next, ",")) {
       break;
     }
 
@@ -133,7 +135,7 @@ const nextExprIndentLevel = (list: List, startIndex?: number) => {
       continue;
     }
 
-    if (expr?.isIdentifier() && expr.is(",")) {
+    if (idIs(expr, ",")) {
       return 0;
     }
 
@@ -156,7 +158,7 @@ const nextNonWhitespace = (list: List, startIndex?: number) => {
 const consumeLeadingWhitespace = (list: List) => {
   while (list.hasChildren) {
     const next = list.first();
-    if (next?.isWhitespace() || (next?.isIdentifier() && next.is(","))) {
+    if (next?.isWhitespace() || idIs(next, ",")) {
       list.consume();
       continue;
     }
@@ -166,15 +168,13 @@ const consumeLeadingWhitespace = (list: List) => {
 
 const isNewline = (v?: Expr) => v?.isWhitespace() && v.isNewline;
 const isIndent = (v: Expr) => v.isWhitespace() && v.isIndent;
+const nextIsComma = (list: List) => {
+  const next = list.first();
+  return !!(next?.isIdentifier() && next.is(","));
+};
 
-const isNamedParameter = (v: List) => {
-  const identifier = v.at(0);
+const isNamedArg = (v: List) => {
   const colon = v.at(1);
-
-  // First value should be an identifier
-  if (!identifier?.isIdentifier()) {
-    return false;
-  }
 
   // Second value should be an identifier whose value is a colon
   if (!(colon?.isIdentifier() && colon.is(":"))) {
@@ -184,10 +184,10 @@ const isNamedParameter = (v: List) => {
   return true;
 };
 
-const addSibling = (child: Expr, siblings: List) => {
+const addSibling = (child: Expr, siblings: List, hadComma?: boolean) => {
   const olderSibling = siblings.at(-1);
 
-  if (!child.isList()) {
+  if (!child.isList() || hadComma) {
     siblings.push(child);
     return;
   }
@@ -202,7 +202,7 @@ const addSibling = (child: Expr, siblings: List) => {
     return;
   }
 
-  if (isNamedParameter(child) && !isNamedParameter(olderSibling)) {
+  if (isNamedArg(child) && !isNamedArg(olderSibling)) {
     olderSibling.push(child);
     return;
   }

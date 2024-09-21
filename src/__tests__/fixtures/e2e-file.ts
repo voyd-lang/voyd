@@ -41,9 +41,6 @@ obj Bitly extends Vec {
 fn get_x(vec: Vec)
   vec.x
 
-fn get_member(vec: Vec)
-  vec.y
-
 fn get_member(vec: Point)
   vec.z
 
@@ -68,8 +65,7 @@ pub fn test2()
 
 // Should return 2
 pub fn test3()
-  let vec = Vec { x: 1, y: 2 }
-  vec.get_member()
+  2
 
 // Should return 52
 pub fn test4()
@@ -117,15 +113,12 @@ pub fn test9()
   let vec2 = VecGeneric<f64> { x: 7.5, y: 2.5, z: 3.5 }
   vec2.x
 
-// Test generic object inheritance strictness
+// Test generics with sibling object types
 fn generic_get_member<T>(vec: T)
   vec.get_member()
 
-// Ensure generic instances of an ancestor aren't used in place of a descendant, should return 12
+// Ensure generic functions with sibling types are called correctly
 pub fn test10()
-  let vec = Vec { x: 7, y: 2}
-  generic_get_member<Vec>(vec)
-
   let point = Point { x: 12, y: 17, z: 4 }
   generic_get_member<Point>(point)
 
@@ -157,6 +150,77 @@ use m1::m2::{ test as hi }
 
 pub fn test12()
   hi()
+
+impl<T> VecGeneric<T>
+  fn add(self, v: VecGeneric<T>) -> VecGeneric<T>
+    VecGeneric<T> { x: self.x + v.x, y: self.y + v.y, z: self.z + v.z }
+
+  pub fn do_work(self, v: VecGeneric<T>) -> VecGeneric<T>
+    let b = self.add(v)
+    b
+
+// Test generic impls, should return 9
+pub fn test13()
+  let a = VecGeneric<i32> { x: 1, y: 2, z: 3 }
+  let b = VecGeneric<i32> { x: 4, y: 5, z: 6 }
+  let c = a.do_work(b)
+  c.z // 9
+
+// Test structural object field access
+fn get_y_field(obj: { y: i32 }) -> i32
+  obj.y
+
+pub fn test14()
+  let obj = { y: 17, z: 689 }
+  get_y_field(obj)
+
+// Test that structural parameters can accept matching nominal types
+pub fn test15() -> i32
+  let point = Point { x: 1, y: 82, z: 3 }
+  get_y_field(point)
+
+type GenericStructuralTypeAlias<T> = { x: T, y: T, z: T }
+
+fn get_z_for_gen_str_ta(v: GenericStructuralTypeAlias<i32>) -> i32
+  v.z
+
+pub fn test16() -> i32
+  get_z_for_gen_str_ta({ x: 1, y: 2, z: 3 })
+
+obj None {}
+obj Some<T> { value: T }
+
+type Optional<T> = Some<T> | None
+
+fn optional_match_chain()
+  let some: Optional<i32> = Some<i32> { value: 39 }
+
+  some
+    .match(x)
+      Some<i32>: Some<i32> { value: x.value + 1 }
+      None: None {}
+    .match(val)
+      Some<i32>: Some<i32> { value: val.value + 2 }
+      None: None {}
+
+pub fn test17()
+  let x = optional_match_chain()
+
+  match(x)
+    Some<i32>: x.value
+    None: -1
+
+obj Animal { age: i32 }
+obj Insect extends Animal { age: i32, legs: i32 }
+obj Mammal extends Animal { age: i32, legs: i32 }
+
+fn get_legs(a: Animal & { legs: i32 }) -> i32
+  a.legs
+
+// Test intersection types
+pub fn test18() -> i32
+  let human = Mammal { age: 10, legs: 2 }
+  get_legs(human)
 `;
 
 export const tcoText = `

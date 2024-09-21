@@ -1,4 +1,5 @@
 import { Call } from "../../syntax-objects/call.js";
+import { nop } from "../../syntax-objects/helpers.js";
 import { List } from "../../syntax-objects/list.js";
 import {
   ObjectType,
@@ -6,8 +7,9 @@ import {
   voidBaseObject,
 } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
+import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { resolveTypes } from "./resolve-types.js";
-import { typesAreEquivalent } from "./types-are-equivalent.js";
+import { typesAreCompatible } from "./types-are-compatible.js";
 
 export const resolveObjectTypeTypes = (
   obj: ObjectType,
@@ -56,25 +58,35 @@ const resolveGenericsWithTypeArgs = (
   }
 
   const newObj = obj.clone();
-  newObj.id = obj.id + `#${obj.genericInstances?.length ?? 0}`;
   newObj.typeParameters = undefined;
   newObj.appliedTypeArgs = [];
 
   /** Register resolved type entities for each type param */
+  let typesNotResolved = false;
   typeParameters.forEach((typeParam, index) => {
     const typeArg = args.exprAt(index);
     const identifier = typeParam.clone();
     const type = new TypeAlias({
       name: identifier,
-      typeExpr: typeArg,
+      typeExpr: nop(),
     });
     type.type = getExprType(typeArg);
+    if (!type.type) typesNotResolved = true;
     newObj.appliedTypeArgs?.push(type);
     newObj.registerEntity(type);
   });
 
+  if (typesNotResolved) return obj;
   const resolvedObj = resolveObjectTypeTypes(newObj);
   obj.registerGenericInstance(resolvedObj);
+
+  const implementations = newObj.implementations;
+  newObj.implementations = []; // Clear implementations to avoid duplicates, resolveImpl will re-add them
+
+  implementations
+    .filter((impl) => implIsCompatible(impl, resolvedObj))
+    .map((impl) => resolveImpl(impl, resolvedObj));
+
   return resolvedObj;
 };
 
@@ -83,7 +95,7 @@ const typeArgsMatch = (call: Call, candidate: ObjectType): boolean =>
     ? candidate.appliedTypeArgs.every((t, i) => {
         const argType = getExprType(call.typeArgs?.at(i));
         const appliedType = getExprType(t);
-        return typesAreEquivalent(argType, appliedType, {
+        return typesAreCompatible(argType, appliedType, {
           exactNominalMatch: true,
         });
       })

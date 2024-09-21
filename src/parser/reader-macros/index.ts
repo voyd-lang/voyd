@@ -2,7 +2,7 @@ import { Token } from "../token.js";
 import { arrayLiteralMacro } from "./array-literal.js";
 import { booleanMacro } from "./boolean.js";
 import { comment } from "./comment.js";
-import { dictionaryLiteralMacro } from "./dictionary-literal.js";
+import { mapLiteralMacro } from "./map-literal.js";
 import { floatMacro } from "./float.js";
 import { intMacro } from "./int.js";
 import { scientificENotationMacro } from "./scientific-e-notation.js";
@@ -16,7 +16,7 @@ import { htmlMacro } from "./html/html.js";
 const macros = [
   objectLiteralMacro,
   arrayLiteralMacro,
-  dictionaryLiteralMacro,
+  mapLiteralMacro,
   intMacro,
   floatMacro,
   scientificENotationMacro,

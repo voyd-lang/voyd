@@ -1,9 +1,9 @@
 import { ReaderMacro } from "./types.js";
 
-export const dictionaryLiteralMacro: ReaderMacro = {
+export const mapLiteralMacro: ReaderMacro = {
   match: (t) => t.value === "#{",
   macro: (file, { reader }) => {
     const items = reader(file, "}");
-    return items.insertFnCall("dict");
+    return items.insert("map").insert(",", 1);
   },
 };

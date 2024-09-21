@@ -24,6 +24,12 @@ with: () => 0
 10
 + 3
 
+mul(&self, other: Vec<T>)
+mul(
+  &self,
+  other: Vec<T>
+)
+
 let a = array
   .reduce(0) (acc, val) =>
     acc + val
@@ -37,6 +43,8 @@ let x = my_func(
   ,
   3 + 4
 )
+
+let vec = { a: hey there, b: 2 }
 
 closure_param_test(1, () => a, 3, () =>
   hey there,
@@ -57,6 +65,10 @@ Array<Hey, There>(1, 2, 3) + 3
 obj Test<T> {
   c: i32
 }
+
+match(x)
+  Some<i32>: Some<i32> { value: x.value + 1 }
+  None: None {}
 
 fn test<T>(a: 1) -> i32
 

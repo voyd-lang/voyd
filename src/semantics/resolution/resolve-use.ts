@@ -48,7 +48,13 @@ export const resolveModulePath = (
     resolvedModule instanceof Array ||
     !resolvedModule.isModule()
   ) {
-    throw new Error(`Invalid use statement, not a module ${path.toJSON()}`);
+    throw new Error(
+      `Invalid use statement, not a module ${JSON.stringify(
+        path,
+        null,
+        2
+      )} at ${path.location}`
+    );
   }
 
   const module = runPass ? runPass(resolvedModule) : resolvedModule;
@@ -139,7 +145,7 @@ export const resolveExport = (call: Call) => {
   const block = call.argAt(0);
   if (!block?.isBlock()) return call;
 
-  const entities = block.body.toArray().map(resolveTypes);
+  const entities = block.body.map(resolveTypes);
   registerExports(call, entities, resolveModuleTypes);
 
   return call;
@@ -168,7 +174,7 @@ export const registerExports = (
 
     if (e instanceof NamedEntity) {
       registerExport(exportExpr, e);
-      e.parentModule?.registerEntity(e);
+      if (!e.parentImpl) e.parentModule?.registerEntity(e);
     }
   });
 };
@@ -178,5 +184,16 @@ const registerExport = (
   entity: NamedEntity,
   alias?: string
 ) => {
-  exportExpr.parentModule?.registerExport(entity, alias);
+  const parent = exportExpr.parent;
+  if (!parent) return;
+
+  if (parent.isModule()) {
+    parent.registerExport(entity, alias);
+    return;
+  }
+
+  if (exportExpr.parentImpl && entity.isFn()) {
+    exportExpr.parentImpl.registerExport(entity);
+    return;
+  }
 };

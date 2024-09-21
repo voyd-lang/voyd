@@ -1,7 +1,7 @@
-import type { Fn } from "./fn.js";
+import type { Fn } from "../fn.js";
 import { getIdStr } from "./get-id-str.js";
-import type { Id } from "./identifier.js";
-import { NamedEntity } from "./named-entity.js";
+import type { Id } from "../identifier.js";
+import { NamedEntity } from "../named-entity.js";
 
 export class LexicalContext {
   private readonly fns: Map<string, Fn[]> = new Map();

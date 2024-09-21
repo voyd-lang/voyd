@@ -20,19 +20,18 @@ export const parseChars = (
   const list = new List({
     location: file.currentSourceLocation(),
     parent: opts.parent,
-    value: !opts.nested ? ["ast", ","] : [],
   });
 
   while (file.hasCharacters) {
     const token = lexer(file);
 
-    if (processWithReaderMacro(token, list.last(), file, opts, list)) {
+    if (processWithReaderMacro(token, list.last(), file, list)) {
       continue;
     }
 
     if (token.is("(")) {
       const subList = parseChars(file, { nested: true });
-      subList.mayBeTuple = true;
+      subList.setAttribute("tuple?", true);
       list.push(subList);
       continue;
     }
@@ -61,7 +60,7 @@ export const parseChars = (
   }
 
   list.location!.endIndex = file.position;
-  return list;
+  return opts.nested ? list : new List(["ast", list]);
 };
 
 /** Returns true if token was matched with and processed by a macro  */
@@ -69,7 +68,6 @@ const processWithReaderMacro = (
   token: Token,
   prev: Expr | undefined,
   file: CharStream,
-  opts: ParseCharsOpts,
   list: List
 ) => {
   const readerMacro = getReaderMacroForToken(token, prev, file.next);

@@ -187,6 +187,42 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
     3,
   ],
   [
+    "mul",
+    [
+      "&",
+      "self",
+    ],
+    [
+      ":",
+      "other",
+      [
+        "Vec",
+        [
+          "generics",
+          "T",
+        ],
+      ],
+    ],
+  ],
+  [
+    "mul",
+    [
+      "&",
+      "self",
+    ],
+    [
+      ":",
+      "other",
+      [
+        "Vec",
+        [
+          "generics",
+          "T",
+        ],
+      ],
+    ],
+  ],
+  [
     "let",
     [
       "=",
@@ -247,6 +283,29 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
           "+",
           3,
           4,
+        ],
+      ],
+    ],
+  ],
+  [
+    "let",
+    [
+      "=",
+      "vec",
+      [
+        "object",
+        [
+          ":",
+          "a",
+          [
+            "hey",
+            "there",
+          ],
+        ],
+        [
+          ":",
+          "b",
+          2,
         ],
       ],
     ],
@@ -341,6 +400,52 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
         ":",
         "c",
         "i32",
+      ],
+    ],
+  ],
+  [
+    "match",
+    "x",
+    [
+      ":",
+      [
+        "Some",
+        [
+          "generics",
+          "i32",
+        ],
+      ],
+      [
+        "Some",
+        [
+          "generics",
+          "i32",
+        ],
+        [
+          "object",
+          [
+            ":",
+            "value",
+            [
+              "+",
+              [
+                "value",
+                "x",
+              ],
+              1,
+            ],
+          ],
+        ],
+      ],
+    ],
+    [
+      ":",
+      "None",
+      [
+        "None",
+        [
+          "object",
+        ],
       ],
     ],
   ],

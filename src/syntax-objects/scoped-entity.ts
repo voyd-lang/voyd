@@ -1,8 +1,8 @@
 import { Expr } from "./expr.js";
-import { LexicalContext } from "./lexical-context.js";
+import { LexicalContext } from "./lib/lexical-context.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
 
-export type ScopedEntity = Expr & {
+export type ScopedEntity = Syntax & {
   lexicon: LexicalContext;
 };
 
