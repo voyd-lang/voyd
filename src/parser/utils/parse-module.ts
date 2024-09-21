@@ -6,13 +6,13 @@ import { parseStd } from "./parse-std.js";
 
 export type ParsedModule = {
   files: ParsedFiles;
-  /** Path to src directory (a folder containing index.void that acts as entry) if available */
+  /** Path to src directory (a folder containing index.voyd that acts as entry) if available */
   srcPath?: string;
-  /** Path to root void file */
+  /** Path to root voyd file */
   indexPath: string;
 };
 
-/** Parses void text and std lib into a module unit */
+/** Parses voyd text and std lib into a module unit */
 export const parseModule = async (text: string): Promise<ParsedModule> => {
   return {
     files: {
@@ -23,7 +23,7 @@ export const parseModule = async (text: string): Promise<ParsedModule> => {
   };
 };
 
-/** Parses a void codebase source and std into a module unit */
+/** Parses a voyd codebase source and std into a module unit */
 export const parseModuleFromSrc = async (
   path: string
 ): Promise<ParsedModule> => {

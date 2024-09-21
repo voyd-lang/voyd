@@ -1,5 +1,5 @@
 {
-  "name": "voidc",
+  "name": "voyd",
   "version": "0.6.0",
   "description": "",
   "module": "dist/index.js",
@@ -13,8 +13,7 @@
     "prepublishOnly": "tsc"
   },
   "bin": {
-    "voidc": "./dist/cli/cli.js",
-    "void": "./dist/cli/cli.js",
+    "voyd": "./dist/cli/cli.js",
     "vt": "./src/cli/cli-dev.ts"
   },
   "keywords": [],

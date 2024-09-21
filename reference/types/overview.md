@@ -26,7 +26,7 @@ an equal sign, and a type expression representing how the type is satisfied.
 
 The most basic type definition is an alias for another type:
 
-```void
+```voyd
 type Name = String
 ```
 
@@ -57,7 +57,7 @@ They include:
 - `v128` - 128 bit SIMD vector
 - `bool` - Boolean (technically an i32 considered to be false when 0 and true
   when non-zero)
-- `void` - The absence of a value
+- `voyd` - The absence of a value
 
 TODO: Add more information about each of these types.
 

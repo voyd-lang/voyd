@@ -46,7 +46,7 @@ brought to the fact that a function is an effect?
 
 Background, given:
 ```
-// src/throws.void
+// src/throws.voyd
 effect State<T>
   ctl set(val: T) -> T
   ctl get() -> T
@@ -131,7 +131,7 @@ Effect system implementation ideas:
 
 ```ts
 type Get = () => number;
-type Put = (value: number) => void;
+type Put = (value: number) => voyd;
 
 const loop = (n: number) => {
   if (n === 0) return;
@@ -148,7 +148,7 @@ const put = (value, state, continuation) =>
 const loop2 = (
   n: number,
   state: { value: number },
-  continuation: (state: { value: number }) => void
+  continuation: (state: { value: number }) => voyd
 ) => {
   if (n === 0) return continuation(state, undefined);
 
@@ -182,7 +182,7 @@ Ideal features:
 - Supports ES Module Syntax natively?
 - Handles function overloads cleanly
 - Still easily supports WASM and potentially other sources while still providing a good DX
-- A `module.void` format for configuration and exports etc
+- A `module.voyd` format for configuration and exports etc
 
 Open questions:
 
@@ -197,7 +197,7 @@ Open questions:
 1. (Unchanged) Any line with more than one symbol is wrapped with parenthesis (if it does not
    already have them)
 
-   ```void
+   ```voyd
    add 1 2
 
    // Becomes
@@ -211,7 +211,7 @@ Open questions:
    2. The first child is not a named argument
    3. The parent is not wrapped in parenthesis
 
-   ```void
+   ```voyd
    add 2
      mul 4 x
 

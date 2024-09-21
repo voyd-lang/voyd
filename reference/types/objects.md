@@ -5,7 +5,7 @@ pairs (fields).
 
 They are defined by listing their fields between curly braces `{}`.
 
-```void
+```voyd
 type MyObject = {
   a: i32,
   b: i32
@@ -17,7 +17,7 @@ type MyObject = {
 An object is initialized using object literal syntax. Listing the fields and
 their corresponding values between curly braces `{}`.
 
-```void
+```voyd
 let my_object: MyObject = {
   a: 5,
   b: 4
@@ -26,7 +26,7 @@ let my_object: MyObject = {
 
 Field shorthand:
 
-```void
+```voyd
 // When a variable has the same name as a field;
 let a = 5
 // The field can be omitted
@@ -35,7 +35,7 @@ let value = { a, b: 4 }
 
 Spread operator:
 
-```void
+```voyd
 type MyObject2 = {
   a: i32,
   b: i32,
@@ -52,7 +52,7 @@ let value2: MyObject2 = { ...value, c: 3 }
 The objects we have defined so far were all structural types. That is, they were
 satisfied by any object that had the same fields:
 
-```void
+```voyd
 type Animal = {
   name: string
 }
@@ -69,7 +69,7 @@ explicitly defined to satisfy it. This is called a nominal type.
 
 For example:
 
-```void
+```voyd
 type BaseballPlayer = {
   has_bat: bool
 }
@@ -95,7 +95,7 @@ cave to hit a ball.
 
 to alleviate this, we can define a nominal subtype of `Object`:
 
-```void
+```voyd
 obj BaseballPlayer {
   has_bat: bool
 }
@@ -118,7 +118,7 @@ While a nominal object can satisfy a structural type with the same fields, the
 reverse is not true. A nominal object can only be used where the type it extends
 is expected.
 
-```void
+```voyd
 obj Animal {
   name: String
 }
@@ -156,7 +156,7 @@ pet_structural(Cat { name: "Whiskers", lives_remaining: 9 })
 Nominal objects have a default initializer that takes the fields of the object
 as arguments.
 
-```void
+```voyd
 obj Animal {
   id: i32
   name: String
@@ -168,7 +168,7 @@ let me = Animal { name: "John", id: 1 }
 You can add a custom initializer by defining a function with the same name as
 the object that accepts different arguments.
 
-```void
+```voyd
 obj Animal {
   id: i32
   name: String
@@ -182,7 +182,7 @@ fn Animal({ name: String }) -> Animal
 
 Methods can be defined on nominal objects using the `impl` keyword.
 
-```void
+```voyd
 obj Animal {
   name: String
 }
@@ -206,7 +206,7 @@ log me.run // "John is running!"
 Unlike other languages, objects do not inherit methods from their parent
 type by default. Instead, they must be opted in with use statements:
 
-```void
+```voyd
 obj Dog extends Animal {}
 
 impl Dog
@@ -224,7 +224,7 @@ a function is called on a method, the function is determined at compile time.
 In practice, this means that compiler will pick the method on the declared type,
 even if a subtype is passed. For example:
 
-```void
+```voyd
 obj Animal {}
 obj Dog extends Animal {}
 
@@ -253,7 +253,7 @@ using the methods of a subtype.
 
 ## Object Type Narrowing
 
-```void
+```voyd
 obj Optional
 
 obj None extends Optional
@@ -281,7 +281,7 @@ fn main(a: i32, b: i32)
 
 Objects can be defined as final, meaning they cannot be extended.
 
-```void
+```voyd
 final obj Animal {
   name: String
 }
@@ -301,7 +301,7 @@ grow and shrink in size when defined as a mutable variable.
 
 Type: `String`
 
-```void
+```voyd
 let my_string = String()
 
 // String literals are of type `String`
@@ -314,7 +314,7 @@ Arrays are a growable sequence of values of the same type.
 
 Type: `Array`
 
-```void
+```voyd
 let my_array = Array(1, 2, 3)
 ```
 
@@ -324,6 +324,6 @@ Dictionaries are a growable collection of key-value pairs.
 
 Type: `Map`
 
-```void
+```voyd
 let my_dict = Dict { a: 1, b: 2, c: 3 }
 ```

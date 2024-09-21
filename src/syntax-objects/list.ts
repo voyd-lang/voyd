@@ -157,7 +157,7 @@ export class List extends Syntax {
     return this;
   }
 
-  each(fn: (expr: Expr, index: number, array: Expr[]) => void): List {
+  each(fn: (expr: Expr, index: number, array: Expr[]) => voyd): List {
     this.toArray().forEach(fn);
     return this;
   }

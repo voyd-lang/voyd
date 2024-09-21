@@ -74,5 +74,5 @@ export class Parameter extends NamedEntity {
 }
 ```
 
-Void avoids this common error as the constructor / init function
+Void avoyds this common error as the constructor / init function
 is not defined by the user. This problem still exists on overloaded initializers

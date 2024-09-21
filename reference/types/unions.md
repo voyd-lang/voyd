@@ -5,7 +5,7 @@ Union types represent a value that can be one of a predefined set of types.
 A union type is defined by listing each of the types it may be, separated by the
 pipe operator, `|`.
 
-```void
+```voyd
 type Animal = Cat | Dog
 
 obj Cat {
@@ -22,7 +22,7 @@ obj Dog {
 In some cases, where the nominal object is only ever used as part of a union,
 union sugar can be used
 
-```void
+```voyd
 union Drink
   Coffee { size: Size, sugar: Grams, cream: Grams }
   Tea { size: Size, sugar: Grams, cream: Grams }
@@ -45,7 +45,7 @@ If all objects of a union have a method with the same signature
 (other than self (mutability excluded)). That method can be called
 directly from the union
 
-```void
+```voyd
 type Animal = Cat | Dog
 
 obj Cat {}

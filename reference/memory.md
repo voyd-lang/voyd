@@ -56,7 +56,7 @@ fn main()
 
 Mutable references can only be made to object types:
 
-```void
+```voyd
 // Error cannot borrow primitive type as mutable
 fn bump(x: &i32) -> i32
   x += 1

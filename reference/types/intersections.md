@@ -58,7 +58,7 @@ type AnimalWithLives = Animal & {
 
 let newt: Cat = Animal { name: "Whiskers" } & { lives: 3 }
 
-// An implicit AnimalWithLives initializer is also available, to avoid writing out the &
+// An implicit AnimalWithLives initializer is also available, to avoyd writing out the &
 let newt = AnimalWithLives { name: "Whiskers", lives: 3 }
 
 // We can define a new compatible nominal object

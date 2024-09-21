@@ -4,19 +4,19 @@ Void uses a module system that borrows heavily from Rust's module semantics.
 
 ## Defining Modules
 
-In void modules are defined using files and folders, folders being
+In voyd modules are defined using files and folders, folders being
 the parent module of their files.
 
 **From a file:**
 
-```void
-// src/internal.void
+```voyd
+// src/internal.voyd
 pub fn hey()
   "hey"
 ```
 
-```void
-// src/main.void
+```voyd
+// src/main.voyd
 
 // Bring internal module into scope with a use import
 use internal
@@ -26,22 +26,22 @@ internal::hey()
 
 **From a directory:**
 
-```void
-// cd src/internal/hey.void
+```voyd
+// cd src/internal/hey.voyd
 
 pub fn hey()
   "hey"
 
-// cd src/internal/mod.void
+// cd src/internal/mod.voyd
 pub mod hey::hey // export the hey function from the hey module index (mod) file
 
-// Alternatively, you can define a void file that shares a name
+// Alternatively, you can define a voyd file that shares a name
 // with the directory.
 
-// cd src/internal.void
+// cd src/internal.voyd
 pub mod hey::hey
 
-// cd src/main.void
+// cd src/main.voyd
 use src::internal
 
 internal::hey()
@@ -51,8 +51,8 @@ Modules can also be defined within a file using the `mod` keyword.
 
 **With the mod keyword:**
 
-```void
-// src/main.void
+```voyd
+// src/main.voyd
 
 mod internal
   pub fn hey()
@@ -65,7 +65,7 @@ internal::hey()
 
 The `use` is used to bring other modules and their children into scope.
 
-```void
+```voyd
 use my_module
 
 my_module::hey()
@@ -89,7 +89,7 @@ use my_module::{ self as a_diff_name }
 // Import all exports from my_module
 use my_module::all
 
-// Import the module named logger from the source code root at src/logger.void
+// Import the module named logger from the source code root at src/logger.voyd
 use src::logger
 
 // Import log from the standard library
@@ -100,15 +100,15 @@ Module paths work like directories, except `./` can be omitted, and instead
 of `../`, the folder name is directly used
 
 I.E.
-```void
-// src/utils/hello/world.void <- You are here
-// src/utils/goodbye/jupiter.void <- We want to import this
+```voyd
+// src/utils/hello/world.voyd <- You are here
+// src/utils/goodbye/jupiter.voyd <- We want to import this
 use utils::goodbye::jupiter
 ```
 
 
 Here are more examples of valid and invalid imports given a module hierarchy
-```void
+```voyd
 mod src
   mod utils
     mod vec
@@ -158,7 +158,7 @@ Module commands
 Path keywords:
 - `all` Bring everything exported by the preceding module into scope
 - `self` refers to the module itself, used to bring the module into scope as well as some of its children in the same call
-- `std` The void standard library
+- `std` The voyd standard library
 - `src` The source root
 - `pkg` Module containing installed packages
 
@@ -167,8 +167,8 @@ Note: A module cannot have a keyword for a name
 # Exporting from a module
 
 
-```void
-// src/mod.void
+```voyd
+// src/mod.voyd
 
 // Export everything from the math file module
 pub mod math::all

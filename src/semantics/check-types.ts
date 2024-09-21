@@ -145,7 +145,7 @@ export const checkIf = (call: Call) => {
   const thenExpr = checkTypes(call.argAt(1));
   const elseExpr = call.argAt(2) ? checkTypes(call.argAt(2)) : undefined;
 
-  // Until unions are supported, return void if no else
+  // Until unions are supported, return voyd if no else
   if (!elseExpr) {
     call.type = dVoid;
     return call;

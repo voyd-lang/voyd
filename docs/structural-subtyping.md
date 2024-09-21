@@ -1,6 +1,6 @@
 
 Context:
-```void
+```voyd
 obj A {
   x: i32
 }
@@ -24,7 +24,7 @@ fn main() -> i32
 ```
 
 Implementation (Psuedo VOID / WASM hybrid):
-```void
+```voyd
 // All objects implicitly extend Object
 type Object = {
   // All objects that can be used to access a member of an the object.

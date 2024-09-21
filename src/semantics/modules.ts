@@ -94,7 +94,7 @@ const filePathToModulePath = (filePath: string, srcPath: string) => {
     ? finalPath.replace(srcPath, "src")
     : finalPath;
 
-  finalPath = finalPath.replace(".void", "");
+  finalPath = finalPath.replace(".voyd", "");
 
   return finalPath;
 };

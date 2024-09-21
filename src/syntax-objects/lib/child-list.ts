@@ -85,7 +85,7 @@ export class ChildList<T extends Expr = Expr> {
     return this;
   }
 
-  each(fn: (expr: T, index: number, array: T[]) => void): ChildList<T> {
+  each(fn: (expr: T, index: number, array: T[]) => voyd): ChildList<T> {
     this.toArray().forEach(fn);
     return this;
   }

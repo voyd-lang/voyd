@@ -55,7 +55,7 @@ export class Call extends Syntax {
     return this.#type;
   }
 
-  eachArg(fn: (expr: Expr) => void) {
+  eachArg(fn: (expr: Expr) => voyd) {
     this.args.each(fn);
     return this;
   }

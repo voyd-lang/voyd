@@ -12,7 +12,7 @@ fn match<T extends Object, U>(val: T, bind_identifier: Identifier, body: MatchBl
 ```
 
 Example:
-```void
+```voyd
 obj Optional
 
 obj None extends Optional
@@ -37,7 +37,7 @@ fn main(a: i32, b: i32) -> String
 
 The second signature of match is useful when the value being matched against
 is not already bound to an identifier (i.e. dot pipelines):
-```void
+```voyd
 fn main(a: i32, b: i32) -> String
   a.divide(b)
     .match(x) // Here, match binds the result of the previous expression to x

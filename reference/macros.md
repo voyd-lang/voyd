@@ -1,6 +1,6 @@
 # Macros
 
-There are three types of macros in void, reader macros, regular macros, and
+There are three types of macros in voyd, reader macros, regular macros, and
 syntax macros. All macros are expected to return a syntax object.
 
 Reader macros are used to transform the source code while it is being parsed.
@@ -21,7 +21,7 @@ expression it prefixes. The `@` acts as the `,@` in common lisp and splices the
 list into the current list. Note that these shortcuts only apply to `macro`,
 `define-macro` uses the standard operators of common lisp (`,`, `,@`, etc).
 
-```void
+```voyd
 macro def-wasm-operator(op wasm-fn arg-type return-type)
   defun $op(left:$arg-type right:$arg-type) -> $return-type
     binaryen-mod ($arg-type $wasm-fn) (left right)
@@ -101,7 +101,7 @@ must strictly adhere to the core language specification.
 
 Syntax Macro Pipeline Example:
 
-```void
+```voyd
 fn fib(n:i32) -> i32
   if (n < 2)
     then: n
@@ -139,5 +139,5 @@ There are three types of macros:
   and produce the final ast
 -   Regular Macros: Expanded by a syntax macro
 
-At a high level, the pipeline looks something like this: `file.void -> parser +
+At a high level, the pipeline looks something like this: `file.voyd -> parser +
 reader macros -> syntax macros -> ast (the core language)`

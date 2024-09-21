@@ -596,7 +596,7 @@ exports[`module registration 1`] = `
                   [
                     "memory",
                     "copy",
-                    "void",
+                    "voyd",
                   ],
                   [
                     "dest",

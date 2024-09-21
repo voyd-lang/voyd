@@ -13,11 +13,11 @@ export type VoidConfig = {
   runBinaryenOptimizationPass?: boolean;
   /** Emit CLI usage to stdout */
   showHelp?: boolean;
-  /** Emit void version to stdout */
+  /** Emit voyd version to stdout */
   showVersion?: boolean;
   /** Run the compiled wasm code */
   run?: boolean;
-  /** Specifies the entry void file */
+  /** Specifies the entry voyd file */
   index: string;
   /** Run the internal test script */
   internalTest?: boolean;

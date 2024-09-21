@@ -1,6 +1,6 @@
 # Comments
 
-```void
+```voyd
 // This is a single line comment
 ```
 # Identifiers
@@ -8,7 +8,7 @@
 Identifiers bind names to values, types, and other language constructs. They can
 contain letters, numbers, and underscores, and must start with a letter or underscore.
 
-```void
+```voyd
 hey
 hey_there
 MyType
@@ -17,7 +17,7 @@ MyType2
 
 # Variables
 
-```void
+```voyd
 // Declare an immutable variable
 let x = 5
 
@@ -27,7 +27,7 @@ var y = 3
 
 # String Literals
 
-```void
+```voyd
 // Strings are defined with double quotes
 let name = "John"
 
@@ -42,7 +42,7 @@ let greeting = "Hello, ${name}"
 
 # Numeric Literals
 
-```void
+```voyd
 // Integers
 let x = 5
 
@@ -52,14 +52,14 @@ let y = 3.14
 
 # Boolean Literals
 
-```void
+```voyd
 let x = true
 let y = false
 ```
 
 # Object literals
 
-```void
+```voyd
 let value = {
   a: 5,
   b: 4
@@ -70,7 +70,7 @@ let x = value.a // x will be bound to 5
 
 Field shorthand:
 
-```void
+```voyd
 let a = 5
 let value = { a, b: 4 }
 
@@ -80,7 +80,7 @@ let value = { a: a, b: 4 }
 
 # Tuple literals
 
-```void
+```voyd
 let value = (5, 4)
 let x = value.0 // x will be bound to 5
 
@@ -90,7 +90,7 @@ let (a, b) = value
 
 # Control Flow
 
-```void
+```voyd
 // If statements
 if x > 5 then:
   // Do something
@@ -130,7 +130,7 @@ let y =
 
 Expressions are statements that return a value. They can be used in a variety of contexts, such as variable assignment, function arguments, and more.
 
-```void
+```voyd
 // Binary expressions
 let x = 5 + 3
 
@@ -140,7 +140,7 @@ let y = add(5, 3)
 
 Virtually every statement in Void is an expression, including control flow statements.
 
-```void
+```voyd
 let x = if true then: 1 else: 2
 
 // Blocks are also expressions, returning the result of the last statement

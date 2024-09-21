@@ -6,7 +6,7 @@ import { parseFile } from "./parse-file.js";
 export type ParsedFiles = { [filePath: string]: List };
 
 export const parseDirectory = async (path: string): Promise<ParsedFiles> => {
-  const files = await glob(resolve(path, "**/*.void"));
+  const files = await glob(resolve(path, "**/*.voyd"));
 
   const parsed = await Promise.all(
     files.map(async (filePath) => ({

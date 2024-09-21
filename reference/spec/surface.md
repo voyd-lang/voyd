@@ -1,6 +1,6 @@
 # The Surface Language Specification
 
-This specification defines the language users write, the "surface" void
+This specification defines the language users write, the "surface" voyd
 language.
 
 This surface language spec includes:
@@ -76,14 +76,14 @@ There are three types of macros:
   and produce the final ast
 -   Regular Macros: Expanded by a syntax macro
 
-At a high level, the pipeline looks something like this: `file.void -> parser +
+At a high level, the pipeline looks something like this: `file.voyd -> parser +
 reader macros -> syntax macros -> ast (the core language)`
 
 In the next sections, the different macros will be defined in depth.
 
 # Examples
 
-```void
+```voyd
 // Translated version of a swift example from https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/
 
 let photos = await taskGroup(of: Optional(Data).self) | () =>

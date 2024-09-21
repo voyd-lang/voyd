@@ -115,7 +115,7 @@ export const resolveIf = (call: Call) => {
   const thenExpr = call.argAt(1);
   const elseExpr = call.argAt(2);
 
-  // Until unions are supported, return void if no else
+  // Until unions are supported, return voyd if no else
   if (!elseExpr) {
     call.type = dVoid;
     return call;

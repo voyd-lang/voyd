@@ -60,13 +60,13 @@ yet implemented.
 **Install**
 
 ```
-npm i -g voidc
+npm i -g voydc
 ```
 
 **Usage**
 
 ```
-voidc path/to/code.void
+voydc path/to/code.voyd
 ```
 
 **Requirements**

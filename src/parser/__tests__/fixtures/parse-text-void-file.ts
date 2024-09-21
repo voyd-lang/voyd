@@ -35,4 +35,4 @@ fn main()
   let result = fib(n)
 `;
 
-export const voidFile = new CharStream(parseFileVoidText, "beep/boop");
+export const voydFile = new CharStream(parseFileVoidText, "beep/boop");
