@@ -79,16 +79,35 @@ const getMemberAccessCall = (call: Call): Call | undefined => {
   const a1 = call.argAt(0);
   if (!a1) return;
   const a1Type = getExprType(a1);
-  if (!a1Type || !a1Type.isObjectType() || !a1Type.hasField(call.fnName)) {
-    return;
+
+  if (a1Type && a1Type.isObjectType() && a1Type.hasField(call.fnName)) {
+    return new Call({
+      ...call.metadata,
+      fnName: Identifier.from("member-access"),
+      args: new List({ value: [a1, call.fnName] }),
+      type: a1Type.getField(call.fnName)?.type,
+    });
   }
 
-  return new Call({
-    ...call.metadata,
-    fnName: Identifier.from("member-access"),
-    args: new List({ value: [a1, call.fnName] }),
-    type: a1Type.getField(call.fnName)?.type,
-  });
+  if (
+    a1Type &&
+    a1Type.isIntersectionType() &&
+    (a1Type.nominalType?.hasField(call.fnName) ||
+      a1Type.structuralType?.hasField(call.fnName))
+  ) {
+    const field =
+      a1Type.nominalType?.getField(call.fnName) ??
+      a1Type.structuralType?.getField(call.fnName);
+
+    return new Call({
+      ...call.metadata,
+      fnName: Identifier.from("member-access"),
+      args: new List({ value: [a1, call.fnName] }),
+      type: field?.type,
+    });
+  }
+
+  return undefined;
 };
 
 export const resolveIf = (call: Call) => {

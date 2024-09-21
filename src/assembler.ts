@@ -473,6 +473,7 @@ export const mapBinaryenType = (
   if (type.isObjectType()) return buildObjectType(opts, type);
   if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isDsArrayType()) return buildDsArrayType(opts, type);
+  if (type.isIntersectionType()) return buildIntersectionType(opts, type);
   throw new Error(`Unsupported type ${type}`);
 };
 
@@ -592,37 +593,8 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const objValue = compileExpression({ ...opts, expr: obj });
   const type = getExprType(obj) as ObjectType | IntersectionType;
 
-  if (type.getAttribute("isStructural")) {
+  if (type.getAttribute("isStructural") || type.isIntersectionType()) {
     return opts.fieldLookupHelpers.getFieldValueByAccessor(opts);
-  }
-
-  if (type.isIntersectionType()) {
-    const nominal = type.nominalType!;
-    const structural = type.structuralType!;
-
-    const nominalMemberIndex = nominal.getFieldIndex(member);
-    if (nominalMemberIndex > -1) {
-      const field = nominal.getField(member)!;
-      return structGetFieldValue({
-        mod,
-        fieldIndex: nominalMemberIndex + OBJECT_FIELDS_OFFSET,
-        fieldType: mapBinaryenType(opts, field.type!),
-        exprRef: objValue,
-      });
-    }
-
-    const structuralMemberIndex = structural.getFieldIndex(member);
-    if (structuralMemberIndex > -1) {
-      const field = structural.getField(member)!;
-      return structGetFieldValue({
-        mod,
-        fieldIndex: structuralMemberIndex + OBJECT_FIELDS_OFFSET,
-        fieldType: mapBinaryenType(opts, field.type!),
-        exprRef: objValue,
-      });
-    }
-
-    throw new Error(`Member ${member} not found in object ${type.id}`);
   }
 
   const memberIndex = type.getFieldIndex(member) + OBJECT_FIELDS_OFFSET;
