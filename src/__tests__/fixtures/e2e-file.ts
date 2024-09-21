@@ -209,6 +209,18 @@ pub fn test17()
   match(x)
     Some<i32>: x.value
     None: -1
+
+obj Animal { age: i32 }
+obj Insect extends Animal { age: i32, legs: i32 }
+obj Mammal extends Animal { age: i32, legs: i32 }
+
+fn get_legs(a: Animal & { legs: i32 }) -> i32
+  a.legs
+
+// Test intersection types
+pub fn test18() -> i32
+  let human = Mammal { age: 10, legs: 2 }
+  get_legs(human)
 `;
 
 export const tcoText = `
