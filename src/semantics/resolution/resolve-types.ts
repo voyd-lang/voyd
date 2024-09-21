@@ -15,6 +15,7 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveCallTypes } from "./resolve-call-types.js";
 import { resolveFnTypes } from "./resolve-fn-type.js";
 import { resolveImpl } from "./resolve-impl.js";
+import { resolveIntersection } from "./resolve-intersection.js";
 import { resolveMatch } from "./resolve-match.js";
 import { resolveObjectTypeTypes } from "./resolve-object-type.js";
 import { resolveUnion } from "./resolve-union.js";
@@ -43,6 +44,7 @@ export const resolveTypes = (expr: Expr | undefined): Expr => {
   if (expr.isMatch()) return resolveMatch(expr);
   if (expr.isImpl()) return resolveImpl(expr);
   if (expr.isUnionType()) return resolveUnion(expr);
+  if (expr.isIntersectionType()) return resolveIntersection(expr);
   return expr;
 };
 

@@ -17,6 +17,7 @@ import {
   TypeAlias,
   ObjectLiteral,
   UnionType,
+  IntersectionType,
 } from "../syntax-objects/index.js";
 import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
@@ -37,6 +38,7 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isObjectLiteral()) return checkObjectLiteralType(expr);
   if (expr.isUnionType()) return checkUnionType(expr);
   if (expr.isMatch()) return checkMatch(expr);
+  if (expr.isIntersectionType()) return checkIntersectionType(expr);
   return expr;
 };
 
@@ -373,6 +375,23 @@ const checkMatch = (match: Match) => {
   }
 
   return checkObjectMatch(match);
+};
+
+const checkIntersectionType = (inter: IntersectionType) => {
+  checkTypeExpr(inter.nominalTypeExpr.value);
+  checkTypeExpr(inter.structuralTypeExpr.value);
+
+  if (!inter.nominalType || !inter.structuralType) {
+    throw new Error(`Unable to resolve intersection type ${inter.location}`);
+  }
+
+  if (!inter.structuralType.getAttribute("isStructural")) {
+    throw new Error(
+      `Structural type must be a structural type ${inter.structuralTypeExpr.value.location}`
+    );
+  }
+
+  return inter;
 };
 
 const checkUnionMatch = (match: Match) => {
