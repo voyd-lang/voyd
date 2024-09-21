@@ -1,6 +1,6 @@
 import { Call, Expr, Fn } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
-import { typesAreCompatible } from "./types-are-equivalent.js";
+import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFnTypes } from "./resolve-fn-type.js";
 
 export const getCallFn = (call: Call): Fn | undefined => {

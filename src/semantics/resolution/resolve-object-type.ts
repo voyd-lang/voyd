@@ -9,7 +9,7 @@ import {
 import { getExprType } from "./get-expr-type.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { resolveTypes } from "./resolve-types.js";
-import { typesAreCompatible } from "./types-are-equivalent.js";
+import { typesAreCompatible } from "./types-are-compatible.js";
 
 export const resolveObjectTypeTypes = (
   obj: ObjectType,

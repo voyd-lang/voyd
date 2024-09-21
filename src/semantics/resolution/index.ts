@@ -1,3 +1,3 @@
 export { resolveTypes } from "./resolve-types.js";
-export { typesAreCompatible } from "./types-are-equivalent.js";
+export { typesAreCompatible } from "./types-are-compatible.js";
 export { resolveModulePath } from "./resolve-use.js";
