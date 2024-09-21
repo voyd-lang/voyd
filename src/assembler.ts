@@ -11,6 +11,7 @@ import {
   DsArrayType,
   voidBaseObject,
   UnionType,
+  IntersectionType,
 } from "./syntax-objects/types.js";
 import { Variable } from "./syntax-objects/variable.js";
 import { Block } from "./syntax-objects/block.js";
@@ -107,6 +108,16 @@ const compileType = (opts: CompileExprOpts<Type>) => {
 
   if (type.isObjectType()) {
     buildObjectType(opts, type);
+    return opts.mod.nop();
+  }
+
+  if (type.isUnionType()) {
+    buildUnionType(opts, type);
+    return opts.mod.nop();
+  }
+
+  if (type.isIntersectionType()) {
+    buildIntersectionType(opts, type);
     return opts.mod.nop();
   }
 
@@ -462,6 +473,7 @@ export const mapBinaryenType = (
   if (type.isObjectType()) return buildObjectType(opts, type);
   if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isDsArrayType()) return buildDsArrayType(opts, type);
+  if (type.isIntersectionType()) return buildIntersectionType(opts, type);
   throw new Error(`Unsupported type ${type}`);
 };
 
@@ -485,6 +497,20 @@ const buildUnionType = (opts: MapBinTypeOpts, union: UnionType): TypeRef => {
 
   const typeRef = mapBinaryenType(opts, voidBaseObject);
   union.setAttribute("binaryenType", typeRef);
+  return typeRef;
+};
+
+const buildIntersectionType = (
+  opts: MapBinTypeOpts,
+  inter: IntersectionType
+): TypeRef => {
+  if (inter.hasAttribute("binaryenType")) {
+    return inter.getAttribute("binaryenType") as TypeRef;
+  }
+
+  const typeRef = mapBinaryenType(opts, inter.nominalType!);
+  mapBinaryenType(opts, inter.structuralType!);
+  inter.setAttribute("binaryenType", typeRef);
   return typeRef;
 };
 
@@ -565,9 +591,9 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const obj = expr.exprArgAt(0);
   const member = expr.identifierArgAt(1);
   const objValue = compileExpression({ ...opts, expr: obj });
-  const type = getExprType(obj) as ObjectType;
+  const type = getExprType(obj) as ObjectType | IntersectionType;
 
-  if (type.getAttribute("isStructural")) {
+  if (type.getAttribute("isStructural") || type.isIntersectionType()) {
     return opts.fieldLookupHelpers.getFieldValueByAccessor(opts);
   }
 

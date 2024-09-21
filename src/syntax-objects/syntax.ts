@@ -24,6 +24,7 @@ import type {
   TypeAlias,
   DsArrayType,
   UnionType,
+  IntersectionType,
 } from "./types.js";
 import type { Variable } from "./variable.js";
 import type { Whitespace } from "./whitespace.js";
@@ -201,6 +202,10 @@ export abstract class Syntax {
 
   isUnionType(): this is UnionType {
     return this.isType() && this.kindOfType === "union";
+  }
+
+  isIntersectionType(): this is IntersectionType {
+    return this.isType() && this.kindOfType === "intersection";
   }
 
   isDsArrayType(): this is DsArrayType {

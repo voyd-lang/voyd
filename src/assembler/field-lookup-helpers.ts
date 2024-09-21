@@ -13,7 +13,11 @@ import {
   callRef,
   refCast,
 } from "../lib/binaryen-gc/index.js";
-import { ObjectType, voidBaseObject } from "../syntax-objects/types.js";
+import {
+  IntersectionType,
+  ObjectType,
+  voidBaseObject,
+} from "../syntax-objects/types.js";
 import { murmurHash3 } from "../lib/murmur-hash.js";
 import {
   compileExpression,
@@ -145,9 +149,19 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
     const { expr, mod } = opts;
     const obj = expr.exprArgAt(0);
     const member = expr.identifierArgAt(1);
-    const objType = getExprType(obj) as ObjectType;
+    const objType = getExprType(obj) as ObjectType | IntersectionType;
 
-    const field = objType.getField(member)!;
+    const field = objType.isIntersectionType()
+      ? objType.nominalType?.getField(member) ??
+        objType.structuralType?.getField(member)
+      : objType.getField(member);
+
+    if (!field) {
+      throw new Error(
+        `Field ${member.value} not found on object ${objType.id}`
+      );
+    }
+
     const lookupTable = structGetFieldValue({
       mod,
       fieldType: lookupTableType,

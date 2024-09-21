@@ -9,7 +9,7 @@ import {
 import { getExprType } from "./get-expr-type.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { resolveTypes } from "./resolve-types.js";
-import { typesAreEquivalent } from "./types-are-equivalent.js";
+import { typesAreCompatible } from "./types-are-compatible.js";
 
 export const resolveObjectTypeTypes = (
   obj: ObjectType,
@@ -95,7 +95,7 @@ const typeArgsMatch = (call: Call, candidate: ObjectType): boolean =>
     ? candidate.appliedTypeArgs.every((t, i) => {
         const argType = getExprType(call.typeArgs?.at(i));
         const appliedType = getExprType(t);
-        return typesAreEquivalent(argType, appliedType, {
+        return typesAreCompatible(argType, appliedType, {
           exactNominalMatch: true,
         });
       })

@@ -56,6 +56,7 @@ describe("E2E Compiler Pipeline", () => {
       82,
       3,
       42,
+      2, // IntersectionType tests
     ]);
   });
 

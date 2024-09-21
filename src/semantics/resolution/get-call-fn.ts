@@ -1,6 +1,6 @@
 import { Call, Expr, Fn } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
-import { typesAreEquivalent } from "./types-are-equivalent.js";
+import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFnTypes } from "./resolve-fn-type.js";
 
 export const getCallFn = (call: Call): Fn | undefined => {
@@ -80,7 +80,7 @@ const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
     ? candidate.appliedTypeArgs.every((t, i) => {
         const argType = getExprType(call.typeArgs?.at(i));
         const appliedType = getExprType(t);
-        return typesAreEquivalent(argType, appliedType, {
+        return typesAreCompatible(argType, appliedType, {
           exactNominalMatch: true,
         });
       })
@@ -94,7 +94,7 @@ const parametersMatch = (candidate: Fn, call: Call) =>
     if (!argType) return false;
     const argLabel = getExprLabel(arg);
     const labelsMatch = p.label === argLabel;
-    return typesAreEquivalent(argType, p.type!) && labelsMatch;
+    return typesAreCompatible(argType, p.type!) && labelsMatch;
   });
 
 const getExprLabel = (expr?: Expr): string | undefined => {
