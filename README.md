@@ -11,20 +11,8 @@ fn fib(n: i32) -> i32
   else:
     fib(n - 1) + fib(n - 2)
 
-fn main() -> void
-  for n in range(15)
-    print fib(n)
-```
-
-```tsx
-fn app() -> JSX::Element
-  let todo_items = ["wake up", "eat", "code", "sleep"]
-  <div>
-    <h1>TODO</h1>
-    <ul>
-      {todo_items.map i => <li>{i}</li>}
-    </ul>
-  </div>
+pub fn main()
+  fib(10)
 ```
 
 **Disclaimer**
@@ -42,10 +30,6 @@ yet implemented.
 - First class wasm support
 - Macros and language extensions
 - Uniform function call syntax
-- [Homoiconic](https://en.wikipedia.org/wiki/Homoiconicity)
-- Pythonesque syntax that de-sugars into a lisp like dialect
-  - Parenthesis can be elided in most cases
-  - Infix notation and standard function call notation support
 
 **Guiding Principles**:
 
@@ -369,6 +353,15 @@ trait Walk
 impl Walk for { legs: i32 }
   fn walk(self)
     self.walk
+
+// Traits are first class types
+fn call_walk(walker: Walk)
+  walker.walk
+
+fn do_work(o: Object)
+  // Traits also have runtime types
+  if (o has_trait Walk) then:
+    o.call_walk()
 ```
 
 ## Closures
@@ -438,4 +431,22 @@ effect State
 
 // Tail resumptive effects with one function can be defined more concisely as
 effect fn get() -> Int
+```
+
+## JSX
+
+Status: In Progress
+
+Voyd has built in support for JSX. Useful for rendering websites or creating
+interactive web apps
+
+```voyd
+fn app() -> JSX::Element
+  let todo_items = ["wake up", "eat", "code", "sleep"]
+  <div>
+    <h1>TODO</h1>
+    <ul>
+      {todo_items.map i => <li>{i}</li>}
+    </ul>
+  </div>
 ```
