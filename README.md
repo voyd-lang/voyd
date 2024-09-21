@@ -83,7 +83,7 @@ For a more detailed reference see
 
 ## Primitive Types
 
-```voyd
+```rust
 true // Boolean
 false // Boolean
 1 // i32 by default
@@ -96,7 +96,7 @@ false // Boolean
 
 ## Variables
 
-```voyd
+```rust
 // Immutable variable
 let my_immutable_var = 7
 
@@ -108,14 +108,14 @@ var my_var = 7
 
 A Basic function:
 
-```voyd
+```rust
 fn add(a: i32, b: i32) -> i32
   a + b
 ```
 
 In most cases the return type can be inferred
 
-```voyd
+```rust
 fn add(a:i32, b:i32) = a + b // The equal sign is used when the function is written on one line
 ```
 
@@ -210,14 +210,14 @@ Status: Not yet implemented
 
 While loops are the most basic looping construct
 
-```voyd
+```rust
 while condition
   do_work()
 ```
 
 For loops can iterate through items of an iterable (such as an array)
 
-```voyd
+```rust
 for item in iterable
   print item
 ```
@@ -289,7 +289,7 @@ Intersections combine a nominal type and a structural type to define
 a new type compatible with any subtype of the nominal type that also
 has the fields of the structural type.
 
-```voyd
+```rust
 obj Animal { age: i32 }
 obj Snake extends Animal {}
 obj Mammal extends Animal { legs: i32 }
@@ -308,7 +308,7 @@ pub fn main()
 
 Unions define a type that can be one of a group of types
 
-```voyd
+```rust
 obj Apple {}
 obj Lime {}
 obj Orange {}
@@ -345,7 +345,7 @@ Status: Not yet implemented
 Traits define a set of behavior that can be implemented on any object type
 (nominal, structural, union, or intersection)
 
-```voyd
+```rust
 trait Walk
   fn walk() -> i32
 
@@ -415,7 +415,7 @@ dependency injection, test mocking and much more.
 Think of libraries like TypeScript's [Effect](https://effect.website/) library,
 built directly into the language.
 
-```voyd
+```rust
 effect Exception
   // An effect that may be resumed by the handler
   ctl throw(msg: String) -> void
@@ -440,7 +440,7 @@ Status: In Progress
 Voyd has built in support for JSX. Useful for rendering websites or creating
 interactive web apps
 
-```voyd
+```tsx
 fn app() -> JSX::Element
   let todo_items = ["wake up", "eat", "code", "sleep"]
   <div>
