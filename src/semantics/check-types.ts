@@ -21,7 +21,7 @@ import {
 } from "../syntax-objects/index.js";
 import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
-import { typesAreEquivalent } from "./resolution/index.js";
+import { typesAreCompatible } from "./resolution/index.js";
 
 export const checkTypes = (expr: Expr | undefined): Expr => {
   if (!expr) return nop();
@@ -87,7 +87,7 @@ const checkObjectInit = (call: Call): Call => {
   checkTypes(literal);
 
   // Check to ensure literal structure is compatible with nominal structure
-  if (!typesAreEquivalent(literal.type, call.type, { structuralOnly: true })) {
+  if (!typesAreCompatible(literal.type, call.type, { structuralOnly: true })) {
     throw new Error(`Object literal type does not match expected type`);
   }
 
@@ -111,7 +111,7 @@ export const checkAssign = (call: Call) => {
 
   const initType = getExprType(call.argAt(1));
 
-  if (!typesAreEquivalent(variable.type, initType)) {
+  if (!typesAreCompatible(variable.type, initType)) {
     throw new Error(`${id} cannot be assigned to ${initType}`);
   }
 
@@ -136,7 +136,7 @@ const checkIdentifier = (id: Identifier) => {
 export const checkIf = (call: Call) => {
   const cond = checkTypes(call.argAt(0));
   const condType = getExprType(cond);
-  if (!condType || !typesAreEquivalent(condType, bool)) {
+  if (!condType || !typesAreCompatible(condType, bool)) {
     throw new Error(
       `If conditions must resolve to a boolean at ${cond.location}`
     );
@@ -155,7 +155,7 @@ export const checkIf = (call: Call) => {
   const elseType = getExprType(elseExpr);
 
   // Until unions are supported, throw an error when types don't match
-  if (!typesAreEquivalent(thenType, elseType)) {
+  if (!typesAreCompatible(thenType, elseType)) {
     throw new Error("If condition clauses do not return same type");
   }
 
@@ -216,7 +216,7 @@ const checkFnTypes = (fn: Fn): Fn => {
 
   if (
     inferredReturnType &&
-    !typesAreEquivalent(inferredReturnType, fn.returnType)
+    !typesAreCompatible(inferredReturnType, fn.returnType)
   ) {
     throw new Error(
       `Fn, ${fn.name}, return value type (${inferredReturnType?.name}) is not compatible with annotated return type (${fn.returnType?.name}) at ${fn.location}`
@@ -271,7 +271,7 @@ const checkVarTypes = (variable: Variable): Variable => {
 
   if (
     variable.annotatedType &&
-    !typesAreEquivalent(variable.inferredType, variable.annotatedType)
+    !typesAreCompatible(variable.inferredType, variable.annotatedType)
   ) {
     throw new Error(
       `${variable.name} of type ${variable.type} is not assignable to ${variable.inferredType}`
@@ -318,7 +318,7 @@ export function assertValidExtension(
 
   const validExtension = parent.fields.every((field) => {
     const match = child.fields.find((f) => f.name === field.name);
-    return match && typesAreEquivalent(field.type, match.type);
+    return match && typesAreCompatible(field.type, match.type);
   });
 
   if (!validExtension) {
@@ -410,7 +410,7 @@ const checkUnionMatch = (match: Match) => {
       );
     }
 
-    if (!typesAreEquivalent(mCase.expr.type, match.type)) {
+    if (!typesAreCompatible(mCase.expr.type, match.type)) {
       throw new Error(
         `All cases must return the same type for now ${mCase.expr.location}`
       );
@@ -419,7 +419,7 @@ const checkUnionMatch = (match: Match) => {
 
   union.types.forEach((type) => {
     if (
-      !match.cases.some((mCase) => typesAreEquivalent(mCase.matchType, type))
+      !match.cases.some((mCase) => typesAreCompatible(mCase.matchType, type))
     ) {
       throw new Error(
         `Match does not handle all possibilities of union ${match.location}`
@@ -455,7 +455,7 @@ const checkObjectMatch = (match: Match) => {
       );
     }
 
-    if (!typesAreEquivalent(mCase.expr.type, match.type)) {
+    if (!typesAreCompatible(mCase.expr.type, match.type)) {
       throw new Error(
         `All cases must return the same type for now ${mCase.expr.location}`
       );

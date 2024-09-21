@@ -1,6 +1,6 @@
 import { Type } from "../../syntax-objects/index.js";
 
-export const typesAreEquivalent = (
+export const typesAreCompatible = (
   /** A is the argument type, the type of the value being passed as b */
   a?: Type,
   /** B is the parameter type, what a should be equivalent to */
@@ -26,7 +26,7 @@ export const typesAreEquivalent = (
     if (structural) {
       return b.fields.every((field) => {
         const match = a.fields.find((f) => f.name === field.name);
-        return match && typesAreEquivalent(field.type, match.type);
+        return match && typesAreCompatible(field.type, match.type);
       });
     }
 
@@ -34,17 +34,22 @@ export const typesAreEquivalent = (
   }
 
   if (a.isObjectType() && b.isUnionType()) {
-    return b.types.some((type) => typesAreEquivalent(a, type, opts));
+    return b.types.some((type) => typesAreCompatible(a, type, opts));
   }
 
   if (a.isUnionType() && b.isUnionType()) {
     return a.types.every((aType) =>
-      b.types.some((bType) => typesAreEquivalent(aType, bType, opts))
+      b.types.some((bType) => typesAreCompatible(aType, bType, opts))
     );
   }
 
+  if (a.isObjectType() && b.isIntersectionType()) {
+    if (!b.nominalType || !b.structuralType) return false;
+    return a.extends(b.nominalType) && typesAreCompatible(a, b.structuralType);
+  }
+
   if (a.isDsArrayType() && b.isDsArrayType()) {
-    return typesAreEquivalent(a.elemType, b.elemType);
+    return typesAreCompatible(a.elemType, b.elemType);
   }
 
   return false;
