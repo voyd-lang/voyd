@@ -114,7 +114,8 @@ fn add(a: i32, b: i32) -> i32
 In most cases the return type can be inferred
 
 ```rust
-fn add(a:i32, b:i32) = a + b // The equal sign is used when the function is written on one line
+fn add(a:i32, b:i32)
+  a + h
 ```
 
 To call a function, use the function name followed by the arguments in parenthesis
