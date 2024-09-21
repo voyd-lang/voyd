@@ -335,6 +335,14 @@ exports[`module registration 1`] = `
       ],
       [
         [
+          "use",
+          [
+            "::",
+            "root",
+            "all",
+          ],
+        ],
+        [
           "pub",
           [
             "use",
@@ -346,14 +354,6 @@ exports[`module registration 1`] = `
           ],
         ],
         [
-          "use",
-          [
-            "::",
-            "root",
-            "all",
-          ],
-        ],
-        [
           "module",
           "deep",
           [
@@ -361,6 +361,14 @@ exports[`module registration 1`] = `
             [],
           ],
           [
+            [
+              "use",
+              [
+                "::",
+                "root",
+                "all",
+              ],
+            ],
             [
               "pub",
               [
@@ -392,14 +400,6 @@ exports[`module registration 1`] = `
               "i32",
               [
                 "block",
-              ],
-            ],
-            [
-              "use",
-              [
-                "::",
-                "root",
-                "all",
               ],
             ],
             [

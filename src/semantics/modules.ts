@@ -51,7 +51,11 @@ const registerModule = ({
   }
 
   if (!existingModule && (name === "index" || name === "mod")) {
-    parentModule.unshift(...ast.toArray().reverse());
+    parentModule.value = ast.toArray();
+    registerDefaultImports(parentModule);
+    parentModule.getAllEntities().forEach((e) => {
+      if (e.isModule()) parentModule.push(e);
+    });
     return;
   }
 

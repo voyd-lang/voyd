@@ -48,7 +48,13 @@ export const resolveModulePath = (
     resolvedModule instanceof Array ||
     !resolvedModule.isModule()
   ) {
-    throw new Error(`Invalid use statement, not a module ${path.toJSON()}`);
+    throw new Error(
+      `Invalid use statement, not a module ${JSON.stringify(
+        path,
+        null,
+        2
+      )} at ${path.location}`
+    );
   }
 
   const module = runPass ? runPass(resolvedModule) : resolvedModule;
