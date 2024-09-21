@@ -1,4 +1,4 @@
-export const regularMacrosVoidFile = `
+export const regularMacrosVoydFile = `
 macro \`()
   quote quote $@body
 

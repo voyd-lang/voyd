@@ -68,7 +68,7 @@ export class VoidModule extends ScopedNamedEntity {
     return [...path, this.name.toString()];
   }
 
-  each(fn: (expr: Expr, index: number, array: Expr[]) => voyd): VoidModule {
+  each(fn: (expr: Expr, index: number, array: Expr[]) => void): VoidModule {
     this.value.forEach(fn);
     return this;
   }
