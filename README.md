@@ -59,14 +59,21 @@ yet implemented.
 
 **Install**
 
-```
-npm i -g voydc
+```bash
+npm i -g voyd
 ```
 
-**Usage**
+**Usage Examples**
 
-```
-voydc path/to/code.voyd
+```bash
+# Run the exported main function
+voyd --run script.void
+
+# Compile a directory (containing an index.void) to webassembly
+voyd --emit-wasm src > output.wasm
+
+# Compile a to optimized WebAssembly
+voyd --emit-wasm --opt src > output.wasm
 ```
 
 **Requirements**
@@ -80,6 +87,10 @@ fnm install v22
 
 # Overview
 
+Quick overview of the language. More detailed reference available [here](./reference/)
+
+For a more detailed reference see
+
 ## Comments
 
 ```rust
@@ -88,20 +99,20 @@ fnm install v22
 
 ## Primitive Types
 
-```rust
+```voyd
 true // Boolean
 false // Boolean
 1 // i32 by default
-1.0 // f32 by default
+1.0 // f64 by default
 "Hello!" // String, can be multiline, supports interpolation via ${}
 [1, 2, 3] // Array literal
 (1, 2, 3) // Tuple literal
-{x: 2, y: 4} // Object literal
+{x: 2, y: 4} // Structural object literal
 ```
 
 ## Variables
 
-```rust
+```voyd
 // Immutable variable
 let my_immutable_var = 7
 
@@ -113,20 +124,20 @@ var my_var = 7
 
 A Basic function:
 
-```rust
+```voyd
 fn add(a: i32, b: i32) -> i32
   a + b
 ```
 
 In most cases the return type can be inferred
 
-```rust
+```voyd
 fn add(a:i32, b:i32) = a + b // The equal sign is used when the function is written on one line
 ```
 
 To call a function, use the function name followed by the arguments in parenthesis
 
-```
+```rust
 add(1, 2)
 ```
 
@@ -137,6 +148,8 @@ Voyd also supports uniform function call syntax (UFCS), allowing functions to be
 ```
 
 ### Labeled arguments
+
+Status: Not yet implemented
 
 Labeled arguments can be defined by wrapping parameters you wish to be labeled
 on call in curly braces.
@@ -192,9 +205,7 @@ move(x: x, y: y, z: z)
 penalty for using labeled arguments.
 
 
-## Control flow
-
-### If statements
+## If Expressions
 
 ```rust
 if 3 < val then:
@@ -209,36 +220,119 @@ Ifs are expressions that return a value
 let x = if 3 < val then: "hello" else: "bye"
 ```
 
-### Loops
+## Loops
 
-Basic loops repeat until returned from
+Status: Not yet implemented
 
-```rust
-var a = 0
-loop
-  if a > 10
-    return a
-  a += 1
+While loops are the most basic looping construct
+
+```voyd
+while condition
+  do_work()
 ```
 
-Loops can be labeled
+For loops can iterate through items of an iterable (such as an array)
 
-```rust
-var a = 0
-loop name: "increment"
-  if a > 10
-    return_from "increment" a
-  a += 1
-```
-
-Useful constructs from looping through iterables
-
-```rust
+```voyd
 for item in iterable
   print item
 ```
 
-### Match Statements
+## Structural Objects
+
+Structural objects are types compatible with any other type containing
+at least the same fields as the structure.
+
+```rust
+fn get_x(obj: { x: i32 })
+  obj.x
+
+pub fn main()
+  let vec = {
+    x: 1,
+    y: 2,
+    z: 3
+  }
+
+  vec.get_x() // 1
+```
+
+## Nominal Objects
+
+Nominal objects attach a name (or brand) to a structure, and are only
+compatible with extensions of themselves.
+
+```rust
+obj Animal {
+  age: i32
+}
+
+obj Cat extends Animal {
+  age: i32,
+  lives: i32
+}
+
+obj Dog extends Animal {
+  age: i32,
+  borks: i32
+}
+
+fn get_age(animal: Animal)
+  animal.age
+
+pub fn main()
+  let dog = Dog { age: 3, borks: 0 }
+  dog.get_age() // 3
+  let person = { age: 32 }
+  person.get_age() // Error { age: 32 } is not a type of animal
+```
+
+## Methods
+
+```rust
+obj Animal {
+  age: i32
+}
+
+impl Animal
+  pub fn get_age(animal: Animal)
+    animal.age
+```
+
+## Intersections
+
+Intersections combine a nominal type and a structural type to define
+a new type compatible with any subtype of the nominal type that also
+has the fields of the structural type.
+
+```voyd
+obj Animal { age: i32 }
+obj Snake extends Animal {}
+obj Mammal extends Animal { legs: i32 }
+
+type Walker = Animal & { legs: i32 }
+
+fn get_legs(walker: Walker)
+  walker.legs
+
+pub fn main()
+  let dog = Mammal { age: 2, legs: 4 }
+  dog.get_legs
+```
+
+## Unions
+
+Unions define a type that can be one of a group of types
+
+```voyd
+obj Apple {}
+obj Lime {}
+obj Orange {}
+
+type Produce = Apple | Lime | Orange
+```
+
+## Match Statements
 
 Match statements are used for type narrowing
 
@@ -256,7 +350,30 @@ match(dog)
     print "Blurb"
 ```
 
+Match statements must be exhaustive. When matching against a nominal
+object, they must have an else (default) condition. When matching against
+a union, they must have a case for each object in the union
+
+## Traits
+
+Status: Not yet implemented
+
+Traits define a set of behavior that can be implemented on any object type
+(nominal, structural, union, or intersection)
+
+```voyd
+trait Walk
+  fn walk() -> i32
+
+// Implement walk for any type that contains the field legs: i32
+impl Walk for { legs: i32 }
+  fn walk(self)
+    self.walk
+```
+
 ## Closures
+
+Status: Not yet implemented
 
 ```rust
 let double = n => n * 2
@@ -279,6 +396,9 @@ squared(x)
 
 ## Generics
 
+Status: Basic implementation complete for objects, functions, impls, and type
+aliases. Inference is not yet supported.
+
 ```rust
 fn add<T>(a: T, b: T) -> T
   a + b
@@ -289,4 +409,33 @@ With trait constraints
 ```rust
 fn add<T: Numeric>(a: T, b: T) -> T
   a + b
+```
+
+## Effects
+
+Status: Not yet implemented
+
+Effects (will be) a powerful construct of the voyd type system. Effects
+are useful for a large class of problems including type safe exceptions,
+dependency injection, test mocking and much more.
+
+Think of libraries like TypeScript's [Effect](https://effect.website/) library,
+built directly into the language.
+
+```voyd
+effect Exception
+  // An effect that may be resumed by the handler
+  ctl throw(msg: String) -> void
+
+// Effects with one control can be defined concisely as
+effect ctl throw(msg: String) -> void
+
+effect State
+  // Tail resumptive effect, guaranteed to resume exactly once.
+  // Are defined like normal functions
+  fn get() -> Int
+  fn set(x: Int) -> void
+
+// Tail resumptive effects with one function can be defined more concisely as
+effect fn get() -> Int
 ```

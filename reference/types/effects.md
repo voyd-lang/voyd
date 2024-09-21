@@ -20,7 +20,7 @@ Voyd's effect system takes heavy inspiration from:
 
 ## Defining Effects
 
-```
+```voyd
 effect Exception
   // An effect that may be resumed by the handler
   ctl throw(msg: String) -> void
@@ -29,7 +29,7 @@ effect Exception
 effect ctl throw(msg: String) -> void
 
 effect State
-  // Tail resumptive effect, guaranteed to resume once and only once
+  // Tail resumptive effect, guaranteed to resume exactly once.
   // Are defined like normal functions
   fn get() -> Int
   fn set(x: Int) -> void
@@ -40,7 +40,7 @@ effect fn get() -> Int
 
 ## Using Effects
 
-```
+```voyd
 effect Async
   ctl resolve(int: i32) -> void
   ctl reject(msg: String) -> void
