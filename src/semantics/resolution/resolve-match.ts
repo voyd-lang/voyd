@@ -43,7 +43,7 @@ const resolveCase = (
 
   // NOTE: This binding is temporary and will be overwritten in the next case.
   // We may need to introduce an wrapping block and register it to the blocks scope
-  // to avoyd this.
+  // to avoid this.
   c.expr.registerEntity(localBinding);
 
   const expr = resolveTypes(c.expr) as Call | Block;
