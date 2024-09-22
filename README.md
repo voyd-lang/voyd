@@ -71,8 +71,6 @@ fnm install v22
 
 Quick overview of the language. More detailed reference available [here](./reference/)
 
-For a more detailed reference see
-
 ## Comments
 
 ```rust
