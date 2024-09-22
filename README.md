@@ -54,7 +54,7 @@ voyd --run script.void
 # Compile a directory (containing an index.void) to webassembly
 voyd --emit-wasm src > output.wasm
 
-# Compile a to optimized WebAssembly
+# Compile to optimized WebAssembly
 voyd --emit-wasm --opt src > output.wasm
 ```
 
@@ -175,7 +175,7 @@ it might be cleaner to do so. For example, when the variable names match the
 argument labels:
 
 ```rust
-let [x, y, z] = [1, 2, 3]
+let (x, y, z) = (1, 2, 3)
 
 // Object field shorthand allows for this:
 move({ x, y, z })
@@ -210,14 +210,14 @@ Status: Not yet implemented
 While loops are the most basic looping construct
 
 ```rust
-while condition
+while condition do:
   do_work()
 ```
 
 For loops can iterate through items of an iterable (such as an array)
 
 ```rust
-for item in iterable
+for item in iterable do:
   print item
 ```
 
