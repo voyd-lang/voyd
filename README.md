@@ -221,6 +221,18 @@ for item in iterable do:
   print item
 ```
 
+Voyd is also tail call optimized:
+
+```
+// This function is super speedy and uses very little memory
+pub fn fib(n: i32, a: i32, b: i32) -> i32
+  if n < 1 then: a
+  else: fib(n - 1, b, a + b)
+
+pub fn main() -> i32
+  fib(10, 0, 1)
+```
+
 ## Structural Objects
 
 Structural objects are types compatible with any other type containing
