@@ -221,6 +221,16 @@ fn get_legs(a: Animal & { legs: i32 }) -> i32
 pub fn test18() -> i32
   let human = Mammal { age: 10, legs: 2 }
   get_legs(human)
+
+// Test while loops and breaking, should return 20
+pub fn test19() -> i32
+  var x = 0
+  var i = 0
+  while i < 10 do:
+    x = x + i * 2
+    i = i + 1
+    if i == 5 then: break
+  x
 `;
 
 export const tcoText = `

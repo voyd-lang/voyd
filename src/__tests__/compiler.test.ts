@@ -57,6 +57,7 @@ describe("E2E Compiler Pipeline", () => {
       3,
       42,
       2, // IntersectionType tests
+      20, // While loop
     ]);
   });
 

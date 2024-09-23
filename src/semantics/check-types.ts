@@ -52,8 +52,10 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("if")) return checkIf(call);
   if (call.calls("binaryen")) return checkBinaryenCall(call);
   if (call.calls("mod")) return call;
+  if (call.calls("break")) return call;
   if (call.calls(":")) return checkLabeledArg(call);
   if (call.calls("=")) return checkAssign(call);
+  if (call.calls("while")) return checkWhile(call);
   if (call.calls("member-access")) return call; // TODO
   if (call.fn?.isObjectType()) return checkObjectInit(call);
 
@@ -76,6 +78,19 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
     );
   }
 
+  return call;
+};
+
+const checkWhile = (call: Call) => {
+  const cond = call.argAt(0);
+  const condType = getExprType(cond);
+  if (!cond || !condType || !typesAreCompatible(condType, bool)) {
+    throw new Error(
+      `While conditions must resolve to a boolean at ${cond?.location}`
+    );
+  }
+
+  checkTypes(call.argAt(1));
   return call;
 };
 
@@ -119,6 +134,8 @@ export const checkAssign = (call: Call) => {
 };
 
 const checkIdentifier = (id: Identifier) => {
+  if (id.is("return") || id.is("break")) return id;
+
   const entity = id.resolve();
   if (!entity) {
     throw new Error(`Unrecognized identifier, ${id} at ${id.location}`);

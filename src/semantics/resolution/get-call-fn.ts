@@ -113,6 +113,9 @@ const isPrimitiveFnCall = (call: Call): boolean => {
     name === "return" ||
     name === "binaryen" ||
     name === ":" ||
-    name === "="
+    name === "=" ||
+    name === "while" ||
+    name === "for" ||
+    name === "break"
   );
 };

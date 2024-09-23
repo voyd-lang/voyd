@@ -15,10 +15,9 @@ pub fn main()
 
 **Disclaimer**
 
-Voyd is in it's very early stages of development. Voyd is not ready for public
-announcement or use. Some core syntax and semantics are subject to change.
-Expect frequent breaking changes. In addition, many documented features are not
-yet implemented.
+Voyd is in it's very early stages of development. Voyd is not ready for production use. Some syntax and semantics are still subject to change. Expect frequent breaking changes.
+
+All features documented in README Overview are fully implemented unless otherwise stated. Features documented in the [reference](./reference/) are not yet marked with status and may not be implemented.
 
 **Features**:
 
@@ -84,9 +83,9 @@ true // Boolean
 false // Boolean
 1 // i32 by default
 1.0 // f64 by default
-"Hello!" // String, can be multiline, supports interpolation via ${}
-[1, 2, 3] // Array literal
-(1, 2, 3) // Tuple literal
+"Hello!" // String, can be multiline, supports interpolation via ${} (NOTE: Not yet implemented)
+[1, 2, 3] // Array literal (NOTE: Not yet implemented)
+(1, 2, 3) // Tuple literal  (NOTE: Not yet implemented)
 {x: 2, y: 4} // Structural object literal
 ```
 
@@ -130,7 +129,7 @@ Voyd also supports uniform function call syntax (UFCS), allowing functions to be
 
 ### Labeled arguments
 
-Status: Not yet implemented
+> Status: Not yet implemented
 
 Labeled arguments can be defined by wrapping parameters you wish to be labeled
 on call in curly braces.
@@ -203,7 +202,10 @@ let x = if 3 < val then: "hello" else: "bye"
 
 ## Loops
 
-Status: Not yet implemented
+> Status: Partially implemented.
+> - Tail call optimization fully implemented.
+> - While loops and break partially implemented. Do not yet support returning a value.
+> - For loops not yet implemented.
 
 While loops are the most basic looping construct
 
@@ -337,7 +339,7 @@ a union, they must have a case for each object in the union
 
 ## Traits
 
-Status: Not yet implemented
+> Status: Not yet implemented
 
 Traits define a set of behavior that can be implemented on any object type
 (nominal, structural, union, or intersection)
@@ -363,12 +365,21 @@ fn do_work(o: Object)
 
 ## Closures
 
-Status: Not yet implemented
+> Status: Not yet implemented
 
 ```rust
 let double = n => n * 2
 
 array.map n => n * 2
+```
+
+Void also supports a concise syntax for passing closures to labeled arguments:
+
+```rust
+try do():
+  call_fn_that_has_exception_effect()
+catch:
+  print "Error!"
 ```
 
 ## Dot Notation
@@ -386,8 +397,7 @@ squared(x)
 
 ## Generics
 
-Status: Basic implementation complete for objects, functions, impls, and type
-aliases. Inference is not yet supported.
+> Status: Basic implementation complete for objects, functions, impls, and type aliases. Inference is not yet supported.
 
 ```rust
 fn add<T>(a: T, b: T) -> T
@@ -403,7 +413,7 @@ fn add<T: Numeric>(a: T, b: T) -> T
 
 ## Effects
 
-Status: Not yet implemented
+> Status: Not yet implemented
 
 Effects (will be) a powerful construct of the voyd type system. Effects
 are useful for a large class of problems including type safe exceptions,
@@ -432,7 +442,7 @@ effect fn get() -> Int
 
 ## JSX
 
-Status: In Progress
+> Status: Implementation in progress
 
 Voyd has built in support for JSX. Useful for rendering websites or creating
 interactive web apps
