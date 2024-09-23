@@ -4,7 +4,7 @@ import { dVoid, ObjectType, TypeAlias } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
-import { resolveTypes } from "./resolve-types.js";
+import { resolveEntities } from "./resolve-types.js";
 import { resolveExport } from "./resolve-use.js";
 
 export const resolveCall = (call: Call): Call => {
@@ -13,7 +13,7 @@ export const resolveCall = (call: Call): Call => {
   if (call.calls("if")) return resolveIf(call);
   if (call.calls(":")) return checkLabeledArg(call);
   if (call.calls("while")) return resolveWhile(call);
-  call.args = call.args.map(resolveTypes);
+  call.args = call.args.map(resolveEntities);
 
   const memberAccessCall = getMemberAccessCall(call);
   if (memberAccessCall) return memberAccessCall;
@@ -30,7 +30,7 @@ export const resolveCall = (call: Call): Call => {
   }
 
   if (call.typeArgs) {
-    call.typeArgs = call.typeArgs.map(resolveTypes);
+    call.typeArgs = call.typeArgs.map(resolveEntities);
   }
 
   call.fn = getCallFn(call);
@@ -39,7 +39,7 @@ export const resolveCall = (call: Call): Call => {
 };
 
 export const checkLabeledArg = (call: Call) => {
-  call.args = call.args.map(resolveTypes);
+  call.args = call.args.map(resolveEntities);
   const expr = call.argAt(1);
   call.type = getExprType(expr);
   return call;
@@ -68,7 +68,7 @@ export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
     });
   }
 
-  alias.typeExpr = resolveTypes(alias.typeExpr);
+  alias.typeExpr = resolveEntities(alias.typeExpr);
   alias.type = getExprType(alias.typeExpr);
   call.type = alias.type;
   call.fn = call.type?.isObjectType() ? call.type : undefined;
@@ -112,7 +112,7 @@ const getMemberAccessCall = (call: Call): Call | undefined => {
 };
 
 export const resolveIf = (call: Call) => {
-  call.args = call.args.map(resolveTypes);
+  call.args = call.args.map(resolveEntities);
   const thenExpr = call.argAt(1);
   const elseExpr = call.argAt(2);
 
@@ -128,7 +128,7 @@ export const resolveIf = (call: Call) => {
 };
 
 export const resolveWhile = (call: Call) => {
-  call.args = call.args.map(resolveTypes);
+  call.args = call.args.map(resolveEntities);
   call.type = dVoid;
   return call;
 };

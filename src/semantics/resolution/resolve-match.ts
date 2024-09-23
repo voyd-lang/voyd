@@ -10,10 +10,10 @@ import {
 } from "../../syntax-objects/index.js";
 import { Match, MatchCase } from "../../syntax-objects/match.js";
 import { getExprType } from "./get-expr-type.js";
-import { resolveTypes, resolveVar } from "./resolve-types.js";
+import { resolveEntities, resolveVar } from "./resolve-types.js";
 
 export const resolveMatch = (match: Match): Match => {
-  match.operand = resolveTypes(match.operand);
+  match.operand = resolveEntities(match.operand);
   match.baseType = getExprType(match.operand);
 
   const binding = getBinding(match);
@@ -46,7 +46,7 @@ const resolveCase = (
   // to avoid this.
   c.expr.registerEntity(localBinding);
 
-  const expr = resolveTypes(c.expr) as Call | Block;
+  const expr = resolveEntities(c.expr) as Call | Block;
 
   return {
     matchType: type?.isObjectType() ? type : undefined,

@@ -13,7 +13,7 @@ import {
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveCall } from "./resolve-call-types.js";
-import { resolveFn } from "./resolve-fn-type.js";
+import { resolveFn } from "./resolve-fn.js";
 import { resolveImpl } from "./resolve-impl.js";
 import { resolveIntersectionType } from "./resolve-intersection.js";
 import { resolveMatch } from "./resolve-match.js";
@@ -28,7 +28,7 @@ import { resolveUse } from "./resolve-use.js";
  * Should probably rename this to resolveEntities and separate type resolution
  * into a new resolveTypes function that returns Type | undefined
  */
-export const resolveTypes = (expr: Expr | undefined): Expr => {
+export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (!expr) return nop();
   if (expr.isBlock()) return resolveBlock(expr);
   if (expr.isCall()) return resolveCall(expr);
@@ -49,13 +49,13 @@ export const resolveTypes = (expr: Expr | undefined): Expr => {
 };
 
 const resolveBlock = (block: Block): Block => {
-  block.applyMap(resolveTypes);
+  block.applyMap(resolveEntities);
   block.type = getExprType(block.body.at(-1));
   return block;
 };
 
 export const resolveVar = (variable: Variable): Variable => {
-  const initializer = resolveTypes(variable.initializer);
+  const initializer = resolveEntities(variable.initializer);
   variable.initializer = initializer;
   variable.inferredType = getExprType(initializer);
 
@@ -70,7 +70,7 @@ export const resolveVar = (variable: Variable): Variable => {
 export const resolveModule = (mod: VoidModule): VoidModule => {
   if (mod.phase >= 3) return mod;
   mod.phase = 3;
-  mod.each(resolveTypes);
+  mod.each(resolveEntities);
   mod.phase = 4;
   return mod;
 };
@@ -78,11 +78,11 @@ export const resolveModule = (mod: VoidModule): VoidModule => {
 const resolveListTypes = (list: List) => {
   console.log("Unexpected list");
   console.log(JSON.stringify(list, undefined, 2));
-  return list.map(resolveTypes);
+  return list.map(resolveEntities);
 };
 
 const resolveFixedArrayType = (arr: FixedArrayType): FixedArrayType => {
-  arr.elemTypeExpr = resolveTypes(arr.elemTypeExpr);
+  arr.elemTypeExpr = resolveEntities(arr.elemTypeExpr);
   arr.elemType = getExprType(arr.elemTypeExpr);
   arr.id = `${arr.id}#${arr.elemType?.id}`;
   return arr;
@@ -90,14 +90,14 @@ const resolveFixedArrayType = (arr: FixedArrayType): FixedArrayType => {
 
 const resolveTypeAlias = (alias: TypeAlias): TypeAlias => {
   if (alias.type) return alias;
-  alias.typeExpr = resolveTypes(alias.typeExpr);
+  alias.typeExpr = resolveEntities(alias.typeExpr);
   alias.type = getExprType(alias.typeExpr);
   return alias;
 };
 
 const resolveObjectLiteral = (obj: ObjectLiteral) => {
   obj.fields.forEach((field) => {
-    field.initializer = resolveTypes(field.initializer);
+    field.initializer = resolveEntities(field.initializer);
     field.type = getExprType(field.initializer);
     return field;
   });

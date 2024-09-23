@@ -1,7 +1,7 @@
 import { Call, Expr, Fn } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
-import { resolveFn } from "./resolve-fn-type.js";
+import { resolveFn } from "./resolve-fn.js";
 
 export const getCallFn = (call: Call): Fn | undefined => {
   if (isPrimitiveFnCall(call)) return undefined;

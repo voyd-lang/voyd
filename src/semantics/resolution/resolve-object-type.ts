@@ -8,7 +8,7 @@ import {
 } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
-import { resolveTypes } from "./resolve-types.js";
+import { resolveEntities } from "./resolve-types.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 
 export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
@@ -19,7 +19,7 @@ export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
   }
 
   obj.fields.forEach((field) => {
-    field.typeExpr = resolveTypes(field.typeExpr);
+    field.typeExpr = resolveEntities(field.typeExpr);
     field.type = getExprType(field.typeExpr);
   });
 
