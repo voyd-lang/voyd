@@ -14,7 +14,7 @@ export type ResolveFnTypesOpts = {
 };
 
 /** Pass call to potentially resolve generics */
-export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
+export const resolveFn = (fn: Fn, call?: Call): Fn => {
   if (fn.typesResolved) {
     // Already resolved
     return fn;
@@ -107,7 +107,7 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
     newFn.registerEntity(type);
   });
 
-  const resolvedFn = resolveFnTypes(newFn);
+  const resolvedFn = resolveFn(newFn);
   fn.registerGenericInstance(resolvedFn);
   return fn;
 };

@@ -11,7 +11,7 @@ import {
   TypeAlias,
   ObjectType,
   ObjectLiteral,
-  DsArrayType,
+  FixedArrayType,
   nop,
   UnionType,
   IntersectionType,
@@ -345,8 +345,8 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
     return initStructuralObjectType(type);
   }
 
-  if (type.calls("DsArray")) {
-    return initDsArray(type);
+  if (type.calls("FixedArray")) {
+    return initFixedArrayType(type);
   }
 
   if (type.calls("|")) {
@@ -360,15 +360,15 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
   return initCall(type);
 };
 
-const initDsArray = (type: List) => {
+const initFixedArrayType = (type: List) => {
   const generics = type.listAt(1);
   const elemTypeExpr = initTypeExprEntities(generics.at(1));
 
   if (!elemTypeExpr) {
-    throw new Error("Invalid DsArray type");
+    throw new Error("Invalid FixedArray type");
   }
 
-  return new DsArrayType({
+  return new FixedArrayType({
     ...type.metadata,
     elemTypeExpr,
     name: type.syntaxId.toString(),

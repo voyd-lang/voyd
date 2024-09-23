@@ -10,7 +10,7 @@ import {
 } from "../../syntax-objects/index.js";
 import { Match, MatchCase } from "../../syntax-objects/match.js";
 import { getExprType } from "./get-expr-type.js";
-import { resolveTypes, resolveVarTypes } from "./resolve-types.js";
+import { resolveTypes, resolveVar } from "./resolve-types.js";
 
 export const resolveMatch = (match: Match): Match => {
   match.operand = resolveTypes(match.operand);
@@ -57,7 +57,7 @@ const resolveCase = (
 
 const getBinding = (match: Match): Parameter | Variable => {
   if (match.bindVariable) {
-    return resolveVarTypes(match.bindVariable);
+    return resolveVar(match.bindVariable);
   }
 
   const binding = match.bindIdentifier.resolve();

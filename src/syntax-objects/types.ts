@@ -15,7 +15,7 @@ export type Type =
   | IntersectionType
   | ObjectType
   | TupleType
-  | DsArrayType
+  | FixedArrayType
   | FnType
   | TypeAlias;
 
@@ -279,9 +279,8 @@ export class ObjectType extends BaseType implements ScopedEntity {
 }
 
 /** Dynamically Sized Array (The raw gc array type) */
-export class DsArrayType extends BaseType {
-  readonly kindOfType = "ds-array";
-  readonly size = Infinity;
+export class FixedArrayType extends BaseType {
+  readonly kindOfType = "fixed-array";
   elemTypeExpr: Expr;
   elemType?: Type;
   /** Type used for locals, globals, function return type */
@@ -294,15 +293,15 @@ export class DsArrayType extends BaseType {
     this.elemType = opts.elemType;
   }
 
-  clone(parent?: Expr): DsArrayType {
-    return new DsArrayType({
+  clone(parent?: Expr): FixedArrayType {
+    return new FixedArrayType({
       ...super.getCloneOpts(parent),
       elemTypeExpr: this.elemTypeExpr.clone(),
     });
   }
 
   toJSON(): TypeJSON {
-    return ["type", ["DsArray", this.elemType]];
+    return ["type", ["FixedArray", this.elemType]];
   }
 }
 

@@ -1,7 +1,7 @@
 import { Call, Expr, Fn } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
-import { resolveFnTypes } from "./resolve-fn-type.js";
+import { resolveFn } from "./resolve-fn-type.js";
 
 export const getCallFn = (call: Call): Fn | undefined => {
   if (isPrimitiveFnCall(call)) return undefined;
@@ -42,7 +42,7 @@ const filterCandidates = (call: Call, candidates: Fn[]): Fn[] =>
       return filterCandidateWithGenerics(call, candidate);
     }
 
-    resolveFnTypes(candidate);
+    resolveFn(candidate);
     return parametersMatch(candidate, call) && typeArgsMatch(call, candidate)
       ? candidate
       : [];
@@ -50,7 +50,7 @@ const filterCandidates = (call: Call, candidates: Fn[]): Fn[] =>
 
 const filterCandidateWithGenerics = (call: Call, candidate: Fn): Fn[] => {
   // Resolve generics
-  if (!candidate.genericInstances) resolveFnTypes(candidate, call);
+  if (!candidate.genericInstances) resolveFn(candidate, call);
 
   // Fn not compatible with call
   if (!candidate.genericInstances?.length) return [];
@@ -64,7 +64,7 @@ const filterCandidateWithGenerics = (call: Call, candidate: Fn): Fn[] => {
   // If no instances, attempt to resolve generics with this call, as a compatible instance
   // is still possible
   const beforeLen = candidate.genericInstances.length;
-  resolveFnTypes(candidate, call);
+  resolveFn(candidate, call);
   const afterLen = candidate.genericInstances.length;
 
   if (beforeLen === afterLen) {

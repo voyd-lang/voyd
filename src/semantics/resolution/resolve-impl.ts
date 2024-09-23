@@ -2,7 +2,7 @@ import { nop } from "../../syntax-objects/helpers.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
 import { ObjectType, TypeAlias } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
-import { resolveObjectTypeTypes } from "./resolve-object-type.js";
+import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveTypes } from "./resolve-types.js";
 
 export const resolveImpl = (
@@ -57,7 +57,7 @@ const resolveTargetType = (impl: Implementation): ObjectType | undefined => {
   if (!type || !type.isObjectType()) return;
 
   if (type.typeParameters?.length && expr.isCall()) {
-    const obj = resolveObjectTypeTypes(type, expr);
+    const obj = resolveObjectType(type, expr);
     // Object fully resolved to non-generic version i.e. `Vec<i32>`
     if (!obj.typeParameters?.length) return obj;
   }

@@ -8,7 +8,7 @@ import {
   Type,
   Primitive,
   ObjectType,
-  DsArrayType,
+  FixedArrayType,
   voydBaseObject,
   UnionType,
   IntersectionType,
@@ -505,7 +505,7 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "voyd")) return binaryen.none;
   if (type.isObjectType()) return buildObjectType(opts, type);
   if (type.isUnionType()) return buildUnionType(opts, type);
-  if (type.isDsArrayType()) return buildDsArrayType(opts, type);
+  if (type.isFixedArrayType()) return buildFixedArrayType(opts, type);
   if (type.isIntersectionType()) return buildIntersectionType(opts, type);
   throw new Error(`Unsupported type ${type}`);
 };
@@ -513,7 +513,7 @@ export const mapBinaryenType = (
 const isPrimitiveId = (type: Type, id: Primitive) =>
   type.isPrimitiveType() && type.name.value === id;
 
-const buildDsArrayType = (opts: CompileExprOpts, type: DsArrayType) => {
+const buildFixedArrayType = (opts: CompileExprOpts, type: FixedArrayType) => {
   if (type.binaryenType) return type.binaryenType;
   const mod = opts.mod;
   const elemType = mapBinaryenType(opts, type.elemType!);

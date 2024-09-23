@@ -48,7 +48,7 @@ export const typesAreCompatible = (
     return a.extends(b.nominalType) && typesAreCompatible(a, b.structuralType);
   }
 
-  if (a.isDsArrayType() && b.isDsArrayType()) {
+  if (a.isFixedArrayType() && b.isFixedArrayType()) {
     return typesAreCompatible(a.elemType, b.elemType);
   }
 

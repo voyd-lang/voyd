@@ -2,7 +2,7 @@ import { UnionType } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveTypes } from "./resolve-types.js";
 
-export const resolveUnion = (union: UnionType): UnionType => {
+export const resolveUnionType = (union: UnionType): UnionType => {
   union.childTypeExprs.applyMap((expr) => resolveTypes(expr));
   union.types = union.childTypeExprs.toArray().flatMap((expr) => {
     const type = getExprType(expr);

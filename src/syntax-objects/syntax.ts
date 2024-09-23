@@ -22,7 +22,7 @@ import type {
   ObjectType,
   Type,
   TypeAlias,
-  DsArrayType,
+  FixedArrayType,
   UnionType,
   IntersectionType,
 } from "./types.js";
@@ -208,8 +208,8 @@ export abstract class Syntax {
     return this.isType() && this.kindOfType === "intersection";
   }
 
-  isDsArrayType(): this is DsArrayType {
-    return this.isType() && this.kindOfType === "ds-array";
+  isFixedArrayType(): this is FixedArrayType {
+    return this.isType() && this.kindOfType === "fixed-array";
   }
 
   isPrimitiveType(): this is PrimitiveType {

@@ -11,10 +11,7 @@ import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { resolveTypes } from "./resolve-types.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 
-export const resolveObjectTypeTypes = (
-  obj: ObjectType,
-  call?: Call
-): ObjectType => {
+export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
   if (obj.typesResolved) return obj;
 
   if (obj.typeParameters) {
@@ -77,7 +74,7 @@ const resolveGenericsWithTypeArgs = (
   });
 
   if (typesNotResolved) return obj;
-  const resolvedObj = resolveObjectTypeTypes(newObj);
+  const resolvedObj = resolveObjectType(newObj);
   obj.registerGenericInstance(resolvedObj);
 
   const implementations = newObj.implementations;

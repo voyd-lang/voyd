@@ -91,11 +91,11 @@ type DsArrayI32 = DsArray<i32>
 
 // Test generic functions, should return 143
 pub fn test8()
-  let arr2 = ds_array_init<f64>(10)
+  let arr2 = new_fixed_array<f64>(10)
   arr2.set<f64>(0, 1.5)
   arr2.get<f64>(0)
 
-  let arr: DsArrayI32 = ds_array_init<i32>(10)
+  let arr: DsArrayI32 = new_fixed_array<i32>(10)
   arr.set<i32>(9, 143)
   arr.get<i32>(9)
 

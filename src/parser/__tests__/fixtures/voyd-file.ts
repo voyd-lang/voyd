@@ -121,7 +121,7 @@ use std::all
 type DsArrayi32 = DsArray<i32>
 
 pub fn main()
-  let arr = ds_array_init<i32>(10)
+  let arr = new_fixed_array<i32>(10)
   arr.set<i32>(0, 1)
   arr.get<i32>(0)
 `;
