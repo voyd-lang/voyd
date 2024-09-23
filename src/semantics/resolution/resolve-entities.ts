@@ -12,7 +12,7 @@ import {
 } from "../../syntax-objects/types.js";
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
-import { resolveCall } from "./resolve-call-types.js";
+import { resolveCall } from "./resolve-call.js";
 import { resolveFn } from "./resolve-fn.js";
 import { resolveImpl } from "./resolve-impl.js";
 import { resolveIntersectionType } from "./resolve-intersection.js";

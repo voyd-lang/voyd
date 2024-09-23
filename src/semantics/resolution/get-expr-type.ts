@@ -1,7 +1,7 @@
 import { Expr } from "../../syntax-objects/expr.js";
 import { Call, Identifier } from "../../syntax-objects/index.js";
 import { Type, i32, f32, bool, i64, f64 } from "../../syntax-objects/types.js";
-import { resolveCall } from "./resolve-call-types.js";
+import { resolveCall } from "./resolve-call.js";
 
 export const getExprType = (expr?: Expr): Type | undefined => {
   if (!expr) return;
