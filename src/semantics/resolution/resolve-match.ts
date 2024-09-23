@@ -10,7 +10,7 @@ import {
 } from "../../syntax-objects/index.js";
 import { Match, MatchCase } from "../../syntax-objects/match.js";
 import { getExprType } from "./get-expr-type.js";
-import { resolveEntities, resolveVar } from "./resolve-types.js";
+import { resolveEntities, resolveVar } from "./resolve-entities.js";
 
 export const resolveMatch = (match: Match): Match => {
   match.operand = resolveEntities(match.operand);

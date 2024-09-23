@@ -6,7 +6,7 @@ import { List } from "../../syntax-objects/list.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
 import { TypeAlias } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
-import { resolveEntities } from "./resolve-types.js";
+import { resolveEntities } from "./resolve-entities.js";
 
 export type ResolveFnTypesOpts = {
   typeArgs?: List;

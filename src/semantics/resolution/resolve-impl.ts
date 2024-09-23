@@ -3,7 +3,7 @@ import { Implementation } from "../../syntax-objects/implementation.js";
 import { ObjectType, TypeAlias } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
-import { resolveEntities } from "./resolve-types.js";
+import { resolveEntities } from "./resolve-entities.js";
 
 export const resolveImpl = (
   impl: Implementation,

@@ -4,7 +4,7 @@ import { List } from "../../syntax-objects/list.js";
 import { VoidModule } from "../../syntax-objects/module.js";
 import { NamedEntity } from "../../syntax-objects/named-entity.js";
 import { Use, UseEntities } from "../../syntax-objects/use.js";
-import { resolveModule, resolveEntities } from "./resolve-types.js";
+import { resolveModule, resolveEntities } from "./resolve-entities.js";
 
 export type ModulePass = (mod: VoidModule) => VoidModule;
 

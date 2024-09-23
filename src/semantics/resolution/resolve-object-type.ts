@@ -8,7 +8,7 @@ import {
 } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
-import { resolveEntities } from "./resolve-types.js";
+import { resolveEntities } from "./resolve-entities.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 
 export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {

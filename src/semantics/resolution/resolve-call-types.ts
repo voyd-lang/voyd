@@ -4,7 +4,7 @@ import { dVoid, ObjectType, TypeAlias } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
-import { resolveEntities } from "./resolve-types.js";
+import { resolveEntities } from "./resolve-entities.js";
 import { resolveExport } from "./resolve-use.js";
 
 export const resolveCall = (call: Call): Call => {
