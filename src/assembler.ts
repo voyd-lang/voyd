@@ -50,6 +50,7 @@ export interface CompileExprOpts<T = Expr> {
   extensionHelpers: ReturnType<typeof initExtensionHelpers>;
   fieldLookupHelpers: ReturnType<typeof initFieldLookupHelpers>;
   isReturnExpr?: boolean;
+  loopBreakId?: string;
 }
 
 export const compileExpression = (opts: CompileExprOpts): number => {
@@ -195,6 +196,8 @@ const compileMatch = (opts: CompileExprOpts<Match>) => {
 const compileIdentifier = (opts: CompileExprOpts<Identifier>) => {
   const { expr, mod } = opts;
 
+  if (expr.is("break")) return mod.br(opts.loopBreakId!);
+
   const entity = expr.resolve();
   if (!entity) {
     throw new Error(`Unrecognized symbol ${expr.value}`);
@@ -220,7 +223,8 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   if (expr.calls("export")) return compileExport(opts);
   if (expr.calls("mod")) return mod.nop();
   if (expr.calls("member-access")) return compileObjMemberAccess(opts);
-
+  if (expr.calls("while")) return compileWhile(opts);
+  if (expr.calls("break")) return mod.br(opts.loopBreakId!);
   if (expr.calls("binaryen")) {
     return compileBnrCall(opts);
   }
@@ -245,6 +249,35 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   }
 
   return mod.call(id, args, returnType);
+};
+
+const compileWhile = (opts: CompileExprOpts<Call>) => {
+  const { expr, mod } = opts;
+  const loopId = expr.syntaxId.toString();
+  const breakId = `__break_${loopId}`;
+  return mod.loop(
+    loopId,
+    mod.block(breakId, [
+      mod.br_if(
+        breakId,
+        mod.i32.ne(
+          compileExpression({
+            ...opts,
+            expr: expr.exprArgAt(0),
+            isReturnExpr: false,
+          }),
+          mod.i32.const(1)
+        )
+      ),
+      compileExpression({
+        ...opts,
+        expr: expr.labeledArgAt(1),
+        loopBreakId: breakId,
+        isReturnExpr: false,
+      }),
+      mod.br(loopId),
+    ])
+  );
 };
 
 const compileObjectInit = (opts: CompileExprOpts<Call>) => {

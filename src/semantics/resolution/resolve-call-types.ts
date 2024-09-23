@@ -12,6 +12,7 @@ export const resolveCallTypes = (call: Call): Call => {
   if (call.calls("export")) return resolveExport(call);
   if (call.calls("if")) return resolveIf(call);
   if (call.calls(":")) return checkLabeledArg(call);
+  if (call.calls("while")) return resolveWhile(call);
   call.args = call.args.map(resolveTypes);
 
   const memberAccessCall = getMemberAccessCall(call);
@@ -123,5 +124,11 @@ export const resolveIf = (call: Call) => {
 
   const thenType = getExprType(thenExpr);
   call.type = thenType;
+  return call;
+};
+
+export const resolveWhile = (call: Call) => {
+  call.args = call.args.map(resolveTypes);
+  call.type = dVoid;
   return call;
 };
