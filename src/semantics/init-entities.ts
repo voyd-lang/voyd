@@ -279,10 +279,10 @@ const initVar = (varDef: List): Variable => {
 };
 
 const initDeclaration = (decl: List) => {
-  const namespaceString = decl.at(1);
+  const namespace = decl.at(1);
 
-  if (!namespaceString?.isStringLiteral()) {
-    throw new Error("Expected namespace string");
+  if (!namespace?.isIdentifier()) {
+    throw new Error("Expected namespace identifier");
   }
 
   const fns = decl
@@ -293,7 +293,7 @@ const initDeclaration = (decl: List) => {
 
   return new Declaration({
     ...decl.metadata,
-    namespace: namespaceString.value,
+    namespace: namespace.value,
     fns,
   });
 };
