@@ -225,6 +225,7 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   if (expr.calls("member-access")) return compileObjMemberAccess(opts);
   if (expr.calls("while")) return compileWhile(opts);
   if (expr.calls("break")) return mod.br(opts.loopBreakId!);
+  if (expr.calls("FixedArray")) return compileFixedArray(opts);
   if (expr.calls("binaryen")) {
     return compileBnrCall(opts);
   }
@@ -249,6 +250,15 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   }
 
   return mod.call(id, args, returnType);
+};
+
+const compileFixedArray = (opts: CompileExprOpts<Call>) => {
+  const type = opts.expr.type as FixedArrayType;
+  return gc.arrayNewFixed(
+    opts.mod,
+    gc.binaryenTypeToHeapType(mapBinaryenType(opts, type)),
+    opts.expr.argArrayMap((expr) => compileExpression({ ...opts, expr }))
+  );
 };
 
 const compileWhile = (opts: CompileExprOpts<Call>) => {
