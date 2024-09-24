@@ -41,15 +41,6 @@ export const defineStructType = (
       return acc;
     }, [] as number[])
   );
-  if (struct.name === "StringReader#28474") {
-    console.log(
-      JSON.stringify(
-        fields.map(({ mutable }) => (mutable ? 1 : 0)),
-        undefined,
-        2
-      )
-    );
-  }
 
   bin._TypeBuilderSetStructType(
     typeBuilder,
