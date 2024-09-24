@@ -1,19 +1,26 @@
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier, List, nop } from "../../syntax-objects/index.js";
-import { dVoid, ObjectType, TypeAlias } from "../../syntax-objects/types.js";
+import {
+  dVoid,
+  FixedArrayType,
+  ObjectType,
+  TypeAlias,
+} from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
-import { resolveObjectTypeTypes } from "./resolve-object-type.js";
-import { resolveTypes } from "./resolve-types.js";
+import { resolveObjectType } from "./resolve-object-type.js";
+import { resolveEntities } from "./resolve-entities.js";
 import { resolveExport } from "./resolve-use.js";
+import { combineTypes } from "./combine-types.js";
 
-export const resolveCallTypes = (call: Call): Call => {
+export const resolveCall = (call: Call): Call => {
   if (call.type) return call;
   if (call.calls("export")) return resolveExport(call);
   if (call.calls("if")) return resolveIf(call);
-  if (call.calls(":")) return checkLabeledArg(call);
+  if (call.calls(":")) return resolveLabeledArg(call);
   if (call.calls("while")) return resolveWhile(call);
-  call.args = call.args.map(resolveTypes);
+  if (call.calls("FixedArray")) return resolveFixedArray(call);
+  call.args = call.args.map(resolveEntities);
 
   const memberAccessCall = getMemberAccessCall(call);
   if (memberAccessCall) return memberAccessCall;
@@ -30,7 +37,7 @@ export const resolveCallTypes = (call: Call): Call => {
   }
 
   if (call.typeArgs) {
-    call.typeArgs = call.typeArgs.map(resolveTypes);
+    call.typeArgs = call.typeArgs.map(resolveEntities);
   }
 
   call.fn = getCallFn(call);
@@ -38,15 +45,15 @@ export const resolveCallTypes = (call: Call): Call => {
   return call;
 };
 
-export const checkLabeledArg = (call: Call) => {
-  call.args = call.args.map(resolveTypes);
+export const resolveLabeledArg = (call: Call) => {
+  call.args = call.args.map(resolveEntities);
   const expr = call.argAt(1);
   call.type = getExprType(expr);
   return call;
 };
 
 export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
-  type = resolveObjectTypeTypes(type, call);
+  type = resolveObjectType(type, call);
   call.type = type;
   call.fn = type;
   return call;
@@ -68,10 +75,33 @@ export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
     });
   }
 
-  alias.typeExpr = resolveTypes(alias.typeExpr);
+  alias.typeExpr = resolveEntities(alias.typeExpr);
   alias.type = getExprType(alias.typeExpr);
   call.type = alias.type;
   call.fn = call.type?.isObjectType() ? call.type : undefined;
+  return call;
+};
+
+const resolveFixedArray = (call: Call) => {
+  call.args = call.args.map(resolveEntities);
+
+  const elemTypeExpr =
+    call.typeArgs?.at(0) ??
+    combineTypes(
+      call.args
+        .toArray()
+        .map(getExprType)
+        .filter((t) => !!t)
+    ) ??
+    nop();
+
+  const elemType = getExprType(elemTypeExpr);
+  call.type = new FixedArrayType({
+    ...call.metadata,
+    name: Identifier.from(`FixedArray#${call.syntaxId}`),
+    elemTypeExpr,
+    elemType,
+  });
   return call;
 };
 
@@ -112,7 +142,7 @@ const getMemberAccessCall = (call: Call): Call | undefined => {
 };
 
 export const resolveIf = (call: Call) => {
-  call.args = call.args.map(resolveTypes);
+  call.args = call.args.map(resolveEntities);
   const thenExpr = call.argAt(1);
   const elseExpr = call.argAt(2);
 
@@ -128,7 +158,7 @@ export const resolveIf = (call: Call) => {
 };
 
 export const resolveWhile = (call: Call) => {
-  call.args = call.args.map(resolveTypes);
+  call.args = call.args.map(resolveEntities);
   call.type = dVoid;
   return call;
 };

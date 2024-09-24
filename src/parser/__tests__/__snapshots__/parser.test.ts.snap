@@ -819,7 +819,7 @@ exports[`parser supports generics 1`] = `
           "=",
           "arr",
           [
-            "ds_array_init",
+            "new_fixed_array",
             [
               "generics",
               "i32",

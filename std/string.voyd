@@ -1,0 +1,60 @@
+use std::macros::all
+use array::all
+use operators::all
+
+pub obj String {
+  chars: FixedArray<i32>
+}
+
+impl String
+  pub fn slice(self, start: i32, end: i32) -> String
+    let new_length = end - start
+    let new_chars = new_fixed_array<i32>(new_length)
+    new_chars.copy<i32>({
+      from: self.chars,
+      toIndex: 0,
+      fromIndex: start,
+      count: new_length
+    })
+    String { chars: new_chars }
+
+  pub fn char_code_at(self, index: i32) -> i32
+    if (index < 0) or (index >= self.chars.length<i32>()) then:
+      -1
+    else: self.chars.get<i32>(index)
+
+  pub fn length(self) -> i32
+    self.chars.length<i32>()
+
+  pub fn '+'(self, other: String) -> String
+    let new_length = self.chars.length<i32>() + other.chars.length<i32>()
+    let new_chars = new_fixed_array<i32>(new_length)
+    new_chars.copy<i32>({
+      from: self.chars,
+      toIndex: 0,
+      fromIndex: 0,
+      count: self.chars.length<i32>()
+    })
+    new_chars.copy<i32>({
+      from: other.chars,
+      toIndex: self.chars.length<i32>(),
+      fromIndex: 0,
+      count: other.chars.length<i32>()
+    })
+    String { chars: new_chars }
+
+obj StringReader {
+  str: String,
+  index: i32
+}
+
+pub fn new_string_reader(str: String) -> StringReader
+  StringReader { str: str, index: 0 }
+
+pub fn read_next_char(reader: StringReader) -> i32
+  if reader.index >= reader.str.length() then:
+    -1
+  else:
+    let char = reader.str.char_code_at(reader.index)
+    reader.index = reader.index + 1
+    char

@@ -25,7 +25,21 @@ export const defineStructType = (
     )
   );
   const fieldMutablesPtr = allocU32Array(
-    fields.map(({ mutable }) => (mutable ? 1 : 0))
+    fields.reduce((acc, { mutable }, index) => {
+      // Calculate which u32 slot this boolean belongs to
+      const u32Index = Math.floor(index / 4);
+
+      // Ensure the slot exists and initialize it to 0 if it doesn't
+      if (typeof acc[u32Index] === "undefined") {
+        acc[u32Index] = 0;
+      }
+
+      // Pack the boolean into the appropriate position in the u32
+      const shiftAmount = (index % 4) * 8;
+      acc[u32Index] |= (mutable ? 1 : 0) << shiftAmount;
+
+      return acc;
+    }, [] as number[])
   );
 
   bin._TypeBuilderSetStructType(
@@ -187,6 +201,20 @@ export const structGetFieldValue = ({
   );
 };
 
+export const structSetFieldValue = ({
+  mod,
+  fieldIndex,
+  ref,
+  value,
+}: {
+  mod: binaryen.Module;
+  fieldIndex: number;
+  ref: ExpressionRef;
+  value: ExpressionRef;
+}): ExpressionRef => {
+  return bin._BinaryenStructSet(mod.ptr, fieldIndex, ref, value);
+};
+
 export const arrayGet = (
   mod: binaryen.Module,
   arrayRef: ExpressionRef,
@@ -216,10 +244,10 @@ export const arrayLen = (
 export const arrayNew = (
   mod: binaryen.Module,
   type: HeapTypeRef,
-  initialLength: ExpressionRef,
+  size: ExpressionRef,
   init: ExpressionRef
 ): ExpressionRef => {
-  return bin._BinaryenArrayNew(mod.ptr, type, initialLength, init);
+  return bin._BinaryenArrayNew(mod.ptr, type, size, init);
 };
 
 export const arrayNewFixed = (

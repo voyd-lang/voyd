@@ -58,3 +58,21 @@ pub def_wasm_operator('+', add, f64, f64)
 pub def_wasm_operator('-', sub, f64, f64)
 pub def_wasm_operator('*', mul, f64, f64)
 pub def_wasm_operator('/', div, f64, f64)
+
+pub fn '=='(left: bool, right: bool) -> bool
+  binaryen
+    func: eq
+    namespace: i32
+    args: [left, right]
+
+pub fn 'and'(left: bool, right: bool) -> bool
+  binaryen
+    func: 'and'
+    namespace: i32
+    args: [left, right]
+
+pub fn 'or'(left: bool, right: bool) -> bool
+  binaryen
+    func: 'or'
+    namespace: i32
+    args: [left, right]

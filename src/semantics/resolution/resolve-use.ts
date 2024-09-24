@@ -4,7 +4,7 @@ import { List } from "../../syntax-objects/list.js";
 import { VoidModule } from "../../syntax-objects/module.js";
 import { NamedEntity } from "../../syntax-objects/named-entity.js";
 import { Use, UseEntities } from "../../syntax-objects/use.js";
-import { resolveModuleTypes, resolveTypes } from "./resolve-types.js";
+import { resolveModule, resolveEntities } from "./resolve-entities.js";
 
 export type ModulePass = (mod: VoidModule) => VoidModule;
 
@@ -145,8 +145,8 @@ export const resolveExport = (call: Call) => {
   const block = call.argAt(0);
   if (!block?.isBlock()) return call;
 
-  const entities = block.body.map(resolveTypes);
-  registerExports(call, entities, resolveModuleTypes);
+  const entities = block.body.map(resolveEntities);
+  registerExports(call, entities, resolveModule);
 
   return call;
 };

@@ -8,7 +8,7 @@ import {
   Type,
   Primitive,
   ObjectType,
-  DsArrayType,
+  FixedArrayType,
   voydBaseObject,
   UnionType,
   IntersectionType,
@@ -33,6 +33,7 @@ import { initExtensionHelpers } from "./assembler/extension-helpers.js";
 import { returnCall } from "./assembler/return-call.js";
 import { Float } from "./syntax-objects/float.js";
 import { initFieldLookupHelpers } from "./assembler/field-lookup-helpers.js";
+import { List } from "./syntax-objects/list.js";
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -126,10 +127,20 @@ const compileType = (opts: CompileExprOpts<Type>) => {
 };
 
 const compileModule = (opts: CompileExprOpts<VoidModule>) => {
-  return opts.mod.block(
+  const result = opts.mod.block(
     opts.expr.id,
     opts.expr.value.map((expr) => compileExpression({ ...opts, expr }))
   );
+
+  if (opts.expr.isIndex) {
+    opts.expr.getAllExports().forEach((entity) => {
+      if (entity.isFn()) {
+        opts.mod.addFunctionExport(entity.id, entity.name.value);
+      }
+    });
+  }
+
+  return result;
 };
 
 const compileBlock = (opts: CompileExprOpts<Block>) => {
@@ -225,6 +236,7 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   if (expr.calls("member-access")) return compileObjMemberAccess(opts);
   if (expr.calls("while")) return compileWhile(opts);
   if (expr.calls("break")) return mod.br(opts.loopBreakId!);
+  if (expr.calls("FixedArray")) return compileFixedArray(opts);
   if (expr.calls("binaryen")) {
     return compileBnrCall(opts);
   }
@@ -249,6 +261,15 @@ const compileCall = (opts: CompileExprOpts<Call>): number => {
   }
 
   return mod.call(id, args, returnType);
+};
+
+const compileFixedArray = (opts: CompileExprOpts<Call>) => {
+  const type = opts.expr.type as FixedArrayType;
+  return gc.arrayNewFixed(
+    opts.mod,
+    gc.binaryenTypeToHeapType(mapBinaryenType(opts, type)),
+    opts.expr.argArrayMap((expr) => compileExpression({ ...opts, expr }))
+  );
 };
 
 const compileWhile = (opts: CompileExprOpts<Call>) => {
@@ -309,21 +330,21 @@ const compileObjectInit = (opts: CompileExprOpts<Call>) => {
 const compileExport = (opts: CompileExprOpts<Call>) => {
   const expr = opts.expr.exprArgAt(0);
   const result = compileExpression({ ...opts, expr });
-
-  if (expr.parentModule?.isIndex && expr.isBlock()) {
-    expr.getAllEntities().forEach((entity) => {
-      if (entity.isFn()) {
-        opts.mod.addFunctionExport(entity.id, entity.name.value);
-      }
-    });
-  }
-
   return result;
 };
 
 const compileAssign = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod } = opts;
-  const identifier = expr.argAt(0) as Identifier;
+  const identifier = expr.argAt(0);
+
+  if (identifier?.isCall()) {
+    return compileFieldAssign(opts);
+  }
+
+  if (!identifier?.isIdentifier()) {
+    throw new Error(`Invalid assignment target ${identifier}`);
+  }
+
   const value = compileExpression({
     ...opts,
     expr: expr.argAt(1)!,
@@ -339,6 +360,32 @@ const compileAssign = (opts: CompileExprOpts<Call>): number => {
   }
 
   throw new Error(`${identifier} cannot be re-assigned`);
+};
+
+const compileFieldAssign = (opts: CompileExprOpts<Call>) => {
+  const { expr, mod } = opts;
+  const access = expr.callArgAt(0);
+  const member = access.identifierArgAt(1);
+  const target = access.exprArgAt(0);
+  const value = compileExpression({
+    ...opts,
+    expr: expr.argAt(1)!,
+    isReturnExpr: false,
+  });
+
+  const type = getExprType(target) as ObjectType;
+  const index = type.getFieldIndex(member);
+  if (index === -1) {
+    throw new Error(`Field ${member} not found in ${type.id}`);
+  }
+  const memberIndex = type.getFieldIndex(member) + OBJECT_FIELDS_OFFSET;
+
+  return gc.structSetFieldValue({
+    mod,
+    ref: compileExpression({ ...opts, expr: target }),
+    fieldIndex: memberIndex,
+    value,
+  });
 };
 
 const compileBnrCall = (opts: CompileExprOpts<Call>): number => {
@@ -505,7 +552,7 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "voyd")) return binaryen.none;
   if (type.isObjectType()) return buildObjectType(opts, type);
   if (type.isUnionType()) return buildUnionType(opts, type);
-  if (type.isDsArrayType()) return buildDsArrayType(opts, type);
+  if (type.isFixedArrayType()) return buildFixedArrayType(opts, type);
   if (type.isIntersectionType()) return buildIntersectionType(opts, type);
   throw new Error(`Unsupported type ${type}`);
 };
@@ -513,7 +560,7 @@ export const mapBinaryenType = (
 const isPrimitiveId = (type: Type, id: Primitive) =>
   type.isPrimitiveType() && type.name.value === id;
 
-const buildDsArrayType = (opts: CompileExprOpts, type: DsArrayType) => {
+const buildFixedArrayType = (opts: CompileExprOpts, type: FixedArrayType) => {
   if (type.binaryenType) return type.binaryenType;
   const mod = opts.mod;
   const elemType = mapBinaryenType(opts, type.elemType!);
@@ -578,6 +625,7 @@ const buildObjectType = (opts: MapBinTypeOpts, obj: ObjectType): TypeRef => {
       ...obj.fields.map((field) => ({
         type: mapBinaryenType(opts, field.type!),
         name: field.name,
+        mutable: true,
       })),
     ],
     supertype: obj.parentObjType

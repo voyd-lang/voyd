@@ -6,7 +6,7 @@ import { List } from "../../syntax-objects/list.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
 import { TypeAlias } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
-import { resolveTypes } from "./resolve-types.js";
+import { resolveEntities } from "./resolve-entities.js";
 
 export type ResolveFnTypesOpts = {
   typeArgs?: List;
@@ -14,7 +14,7 @@ export type ResolveFnTypesOpts = {
 };
 
 /** Pass call to potentially resolve generics */
-export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
+export const resolveFn = (fn: Fn, call?: Call): Fn => {
   if (fn.typesResolved) {
     // Already resolved
     return fn;
@@ -32,13 +32,13 @@ export const resolveFnTypes = (fn: Fn, call?: Call): Fn => {
 
   resolveParameters(fn.parameters);
   if (fn.returnTypeExpr) {
-    fn.returnTypeExpr = resolveTypes(fn.returnTypeExpr);
+    fn.returnTypeExpr = resolveEntities(fn.returnTypeExpr);
     fn.annotatedReturnType = getExprType(fn.returnTypeExpr);
     fn.returnType = fn.annotatedReturnType;
   }
 
   fn.typesResolved = true;
-  fn.body = resolveTypes(fn.body);
+  fn.body = resolveEntities(fn.body);
   fn.inferredReturnType = getExprType(fn.body);
   fn.returnType = fn.annotatedReturnType ?? fn.inferredReturnType;
   fn.parentImpl?.registerMethod(fn); // Maybe do this for module when not in an impl
@@ -68,7 +68,7 @@ const resolveParameters = (params: Parameter[]) => {
       throw new Error(`Unable to determine type for ${p}`);
     }
 
-    p.typeExpr = resolveTypes(p.typeExpr);
+    p.typeExpr = resolveEntities(p.typeExpr);
     p.type = getExprType(p.typeExpr);
   });
 };
@@ -107,7 +107,7 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
     newFn.registerEntity(type);
   });
 
-  const resolvedFn = resolveFnTypes(newFn);
+  const resolvedFn = resolveFn(newFn);
   fn.registerGenericInstance(resolvedFn);
   return fn;
 };

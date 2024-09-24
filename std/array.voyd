@@ -10,15 +10,33 @@ macro bin_type_to_heap_type(type)
     namespace: gc
     args: [BnrType<($type)>]
 
-pub fn ds_array_init<T>(size: i32) -> DsArray<T>
-  binaryen_gc_call(arrayNew, [bin_type_to_heap_type(DsArray<T>), size])
+pub fn new_fixed_array<T>(size: i32) -> FixedArray<T>
+  binaryen_gc_call(arrayNew, [bin_type_to_heap_type(FixedArray<T>), size])
 
-pub fn get<T>(arr: DsArray<T>, index: i32) -> T
+pub fn get<T>(arr: FixedArray<T>, index: i32) -> T
   binaryen_gc_call(
     arrayGet,
     [arr, index, BnrType<T>, BnrConst(false)]
   )
 
-pub fn set<T>(arr: DsArray<T>, index: i32, value: T) -> DsArray<T>
+pub fn set<T>(arr: FixedArray<T>, index: i32, value: T) -> FixedArray<T>
   binaryen_gc_call(arraySet, [arr, index, value])
   arr
+
+pub fn copy<T>(destArr: FixedArray<T>, opts: {
+  from: FixedArray<T>,
+  toIndex: i32,
+  fromIndex: i32,
+  count: i32
+}) -> FixedArray<T>
+  binaryen_gc_call(arrayCopy, [
+    destArr,
+    opts.toIndex,
+    opts.from,
+    opts.fromIndex,
+    opts.count
+  ])
+  destArr
+
+pub fn length<T>(arr: FixedArray<T>) -> i32
+  binaryen_gc_call(arrayLen, [arr])

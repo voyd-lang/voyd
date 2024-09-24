@@ -11,10 +11,11 @@ import {
   TypeAlias,
   ObjectType,
   ObjectLiteral,
-  DsArrayType,
+  FixedArrayType,
   nop,
   UnionType,
   IntersectionType,
+  StringLiteral,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { SemanticProcessor } from "./types.js";
@@ -23,6 +24,8 @@ export const initEntities: SemanticProcessor = (expr) => {
   if (expr.isModule()) {
     return expr.applyMap(initEntities);
   }
+
+  if (expr.isStringLiteral()) return initStringLiteral(expr);
 
   if (!expr.isList()) return expr;
 
@@ -256,10 +259,10 @@ const initVar = (varDef: List): Variable => {
 };
 
 const initDeclaration = (decl: List) => {
-  const namespaceString = decl.at(1);
+  const namespace = decl.at(1);
 
-  if (!namespaceString?.isStringLiteral()) {
-    throw new Error("Expected namespace string");
+  if (!namespace?.isIdentifier()) {
+    throw new Error("Expected namespace identifier");
   }
 
   const fns = decl
@@ -270,7 +273,7 @@ const initDeclaration = (decl: List) => {
 
   return new Declaration({
     ...decl.metadata,
-    namespace: namespaceString.value,
+    namespace: namespace.value,
     fns,
   });
 };
@@ -345,8 +348,8 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
     return initStructuralObjectType(type);
   }
 
-  if (type.calls("DsArray")) {
-    return initDsArray(type);
+  if (type.calls("FixedArray")) {
+    return initFixedArrayType(type);
   }
 
   if (type.calls("|")) {
@@ -360,15 +363,15 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
   return initCall(type);
 };
 
-const initDsArray = (type: List) => {
+const initFixedArrayType = (type: List) => {
   const generics = type.listAt(1);
   const elemTypeExpr = initTypeExprEntities(generics.at(1));
 
   if (!elemTypeExpr) {
-    throw new Error("Invalid DsArray type");
+    throw new Error("Invalid FixedArray type");
   }
 
-  return new DsArrayType({
+  return new FixedArrayType({
     ...type.metadata,
     elemTypeExpr,
     name: type.syntaxId.toString(),
@@ -521,3 +524,21 @@ const initImpl = (impl: List): Implementation => {
 /** Expects ["generics", ...Identifiers] */
 const extractTypeParams = (list: List) =>
   list.sliceAsArray(1).flatMap((p) => (p.isIdentifier() ? p : []));
+
+const initStringLiteral = (str: StringLiteral) =>
+  initEntities(
+    new List({
+      ...str.metadata,
+      value: [
+        "String",
+        [
+          "object",
+          [
+            ":",
+            "chars",
+            ["FixedArray", ...str.value.split("").map((c) => c.charCodeAt(0))],
+          ],
+        ],
+      ],
+    })
+  );
