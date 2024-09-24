@@ -15,7 +15,7 @@ import {
   nop,
   UnionType,
   IntersectionType,
-  Identifier,
+  StringLiteral,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { SemanticProcessor } from "./types.js";
@@ -25,27 +25,7 @@ export const initEntities: SemanticProcessor = (expr) => {
     return expr.applyMap(initEntities);
   }
 
-  if (expr.isStringLiteral()) {
-    return initEntities(
-      new List({
-        ...expr.metadata,
-        value: [
-          "String",
-          [
-            "object",
-            [
-              ":",
-              "chars",
-              [
-                "FixedArray",
-                ...expr.value.split("").map((c) => c.charCodeAt(0)),
-              ],
-            ],
-          ],
-        ],
-      })
-    );
-  }
+  if (expr.isStringLiteral()) return initStringLiteral(expr);
 
   if (!expr.isList()) return expr;
 
@@ -544,3 +524,21 @@ const initImpl = (impl: List): Implementation => {
 /** Expects ["generics", ...Identifiers] */
 const extractTypeParams = (list: List) =>
   list.sliceAsArray(1).flatMap((p) => (p.isIdentifier() ? p : []));
+
+const initStringLiteral = (str: StringLiteral) =>
+  initEntities(
+    new List({
+      ...str.metadata,
+      value: [
+        "String",
+        [
+          "object",
+          [
+            ":",
+            "chars",
+            ["FixedArray", ...str.value.split("").map((c) => c.charCodeAt(0))],
+          ],
+        ],
+      ],
+    })
+  );

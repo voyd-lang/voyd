@@ -35,6 +35,15 @@ describe("E2E Compiler Pipeline", () => {
       expectedValues.forEach((v, i) => {
         const test = getWasmFn(`test${i + 1}`, instance);
         assert(test, `Test${i + 1} exists`);
+
+        if (typeof v === "string") {
+          t.expect(
+            readString(test(), instance),
+            `test ${i + 1} returns correct value`
+          ).toEqual(v);
+          return;
+        }
+
         t.expect(test(), `test ${i + 1} returns correct value`).toEqual(v);
       });
 
@@ -58,6 +67,7 @@ describe("E2E Compiler Pipeline", () => {
       42,
       2, // IntersectionType tests
       20, // While loop
+      "Hello, world! This is a test.",
     ]);
   });
 
@@ -68,3 +78,20 @@ describe("E2E Compiler Pipeline", () => {
     t.expect(did);
   });
 });
+
+const readString = (ref: Object, instance: WebAssembly.Instance) => {
+  const newStringReader = getWasmFn("new_string_reader", instance)!;
+  const readNextChar = getWasmFn("read_next_char", instance)!;
+  const reader = newStringReader(ref);
+
+  let str = "";
+  while (true) {
+    const char = readNextChar(reader);
+    if (char < 0) {
+      break;
+    }
+    str += String.fromCharCode(char);
+  }
+
+  return str;
+};

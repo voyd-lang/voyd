@@ -13,7 +13,7 @@ pub fn main()
 `;
 
 export const kitchenSink = `
-use std::all
+pub use std::string::all
 
 obj Vec {
   x: i32,
@@ -231,6 +231,9 @@ pub fn test19() -> i32
     i = i + 1
     if i == 5 then: break
   x
+
+pub fn test20() -> String
+  "Hello, world!" + " " + "This is a test."
 `;
 
 export const tcoText = `
