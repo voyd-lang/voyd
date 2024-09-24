@@ -135,7 +135,7 @@ const checkObjectInit = (call: Call): Call => {
 export const checkAssign = (call: Call) => {
   const id = call.argAt(0);
   if (!id?.isIdentifier()) {
-    throw new Error(`Can only assign to variables for now ${id}`);
+    return call;
   }
 
   const variable = id.resolve();

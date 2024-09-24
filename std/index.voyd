@@ -3,5 +3,5 @@ pub mod macros
 pub mod macros::all
 pub mod operators::all
 pub mod utils::all
-pub mod strings::all
+pub mod string::all
 pub mod array::all

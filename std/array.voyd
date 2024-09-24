@@ -21,4 +21,21 @@ pub fn get<T>(arr: FixedArray<T>, index: i32) -> T
 
 pub fn set<T>(arr: FixedArray<T>, index: i32, value: T) -> FixedArray<T>
   binaryen_gc_call(arraySet, [arr, index, value])
-  arr
+
+pub fn copy<T>(destArr: FixedArray<T>, opts: {
+  from: FixedArray<T>,
+  toIndex: i32,
+  fromIndex: i32,
+  count: i32
+}) -> FixedArray<T>
+  binaryen_gc_call(arrayCopy, [
+    destArr,
+    opts.toIndex,
+    opts.from,
+    opts.fromIndex,
+    opts.count
+  ])
+  destArr
+
+pub fn length<T>(arr: FixedArray<T>) -> i32
+  binaryen_gc_call(arrayLen, [arr])
