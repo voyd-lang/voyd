@@ -59,6 +59,39 @@ pub def_wasm_operator('-', sub, f64, f64)
 pub def_wasm_operator('*', mul, f64, f64)
 pub def_wasm_operator('/', div, f64, f64)
 
+// Bitwise operators
+// i32 bitwise operators
+pub def_wasm_operator(shift_l, shl, i32, i32)
+pub def_wasm_operator(shift_r, shr_s, i32, i32)
+pub def_wasm_operator(shift_lu, shl, i32, i32)
+pub def_wasm_operator(shift_ru, shr_u, i32, i32)
+pub def_wasm_operator(rotate_l, rotl, i32, i32)
+pub def_wasm_operator(rotate_r, rotr, i32, i32)
+pub def_wasm_operator(count_leading_zeros, clz, i32, i32)
+pub def_wasm_operator(count_trailing_zeros, ctz, i32, i32)
+pub def_wasm_operator(pop_count, popcnt, i32, i32)
+pub def_wasm_operator(select, select, i32, i32)
+pub def_wasm_operator(lt_u, lt_u, i32, bool)
+pub def_wasm_operator(gt_u, gt_u, i32, bool)
+pub def_wasm_operator(lte_u, le_u, i32, bool)
+pub def_wasm_operator(gte_u, ge_u, i32, bool)
+
+// i64 bitwise operators
+pub def_wasm_operator(shift_l, shl, i64, i64)
+pub def_wasm_operator(shift_r, shr_s, i64, i64)
+pub def_wasm_operator(shift_lu, shl, i64, i64)
+pub def_wasm_operator(shift_ru, shr_u, i64, i64)
+pub def_wasm_operator(rotate_l, rotl, i64, i64)
+pub def_wasm_operator(rotate_r, rotr, i64, i64)
+pub def_wasm_operator(count_leading_zeros, clz, i64, i64)
+pub def_wasm_operator(count_trailing_zeros, ctz, i64, i64)
+pub def_wasm_operator(pop_count, popcnt, i64, i64)
+pub def_wasm_operator(select, select, i64, i64)
+pub def_wasm_operator(lt_u, lt_u, i64, bool)
+pub def_wasm_operator(gt_u, gt_u, i64, bool)
+pub def_wasm_operator(lte_u, le_u, i64, bool)
+pub def_wasm_operator(gte_u, ge_u, i64, bool)
+
 pub fn '=='(left: bool, right: bool) -> bool
   binaryen
     func: eq
