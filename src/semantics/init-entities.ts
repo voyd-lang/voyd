@@ -15,6 +15,7 @@ import {
   nop,
   UnionType,
   IntersectionType,
+  Identifier,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { SemanticProcessor } from "./types.js";
@@ -22,6 +23,28 @@ import { SemanticProcessor } from "./types.js";
 export const initEntities: SemanticProcessor = (expr) => {
   if (expr.isModule()) {
     return expr.applyMap(initEntities);
+  }
+
+  if (expr.isStringLiteral()) {
+    return initEntities(
+      new List({
+        ...expr.metadata,
+        value: [
+          "String",
+          [
+            "object",
+            [
+              ":",
+              "chars",
+              [
+                "FixedArray",
+                ...expr.value.split("").map((c) => c.charCodeAt(0)),
+              ],
+            ],
+          ],
+        ],
+      })
+    );
   }
 
   if (!expr.isList()) return expr;

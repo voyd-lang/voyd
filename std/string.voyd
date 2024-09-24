@@ -2,7 +2,7 @@ use std::macros::all
 use array::all
 use operators::all
 
-obj String {
+pub obj String {
   chars: FixedArray<i32>
 }
 
@@ -26,7 +26,7 @@ impl String
   pub fn length(self) -> i32
     self.chars.length<i32>()
 
-  pub fn concatenated(self, other: String) -> String
+  pub fn '+'(self, other: String) -> String
     let new_length = self.chars.length<i32>() + other.chars.length<i32>()
     let new_chars = new_fixed_array<i32>(new_length)
     new_chars.copy<i32>({
