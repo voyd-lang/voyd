@@ -18,6 +18,7 @@ import {
   ObjectLiteral,
   UnionType,
   IntersectionType,
+  FixedArrayType,
 } from "../syntax-objects/index.js";
 import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
@@ -37,6 +38,7 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isTypeAlias()) return checkTypeAlias(expr);
   if (expr.isObjectLiteral()) return checkObjectLiteralType(expr);
   if (expr.isUnionType()) return checkUnionType(expr);
+  if (expr.isFixedArrayType()) return checkFixedArrayType(expr);
   if (expr.isMatch()) return checkMatch(expr);
   if (expr.isIntersectionType()) return checkIntersectionType(expr);
   return expr;
@@ -56,6 +58,7 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls(":")) return checkLabeledArg(call);
   if (call.calls("=")) return checkAssign(call);
   if (call.calls("while")) return checkWhile(call);
+  if (call.calls("FixedArray")) return checkFixedArrayInit(call); // TODO
   if (call.calls("member-access")) return call; // TODO
   if (call.fn?.isObjectType()) return checkObjectInit(call);
 
@@ -77,6 +80,26 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
       `Could not resolve type for call ${call.fnName} at ${call.location}`
     );
   }
+
+  return call;
+};
+
+const checkFixedArrayInit = (call: Call) => {
+  const type = call.type;
+
+  if (!type || !type.isFixedArrayType()) {
+    throw new Error(`Expected FixedArray type at ${call.location}`);
+  }
+
+  checkFixedArrayType(type);
+  call.args.each((arg) => {
+    const argType = getExprType(arg);
+    if (!argType || !typesAreCompatible(argType, type.elemType)) {
+      throw new Error(
+        `Expected ${type.elemType?.name} got ${argType?.name} at ${arg.location}`
+      );
+    }
+  });
 
   return call;
 };
@@ -490,4 +513,12 @@ const checkUnionType = (union: UnionType) => {
   }
 
   return union;
+};
+
+const checkFixedArrayType = (array: FixedArrayType) => {
+  if (!array.elemType) {
+    throw new Error(`Unable to determine element type for ${array.location}`);
+  }
+
+  return array;
 };

@@ -1,18 +1,25 @@
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier, List, nop } from "../../syntax-objects/index.js";
-import { dVoid, ObjectType, TypeAlias } from "../../syntax-objects/types.js";
+import {
+  dVoid,
+  FixedArrayType,
+  ObjectType,
+  TypeAlias,
+} from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveExport } from "./resolve-use.js";
+import { combineTypes } from "./combine-types.js";
 
 export const resolveCall = (call: Call): Call => {
   if (call.type) return call;
   if (call.calls("export")) return resolveExport(call);
   if (call.calls("if")) return resolveIf(call);
-  if (call.calls(":")) return checkLabeledArg(call);
+  if (call.calls(":")) return resolveLabeledArg(call);
   if (call.calls("while")) return resolveWhile(call);
+  if (call.calls("FixedArray")) return resolveFixedArray(call);
   call.args = call.args.map(resolveEntities);
 
   const memberAccessCall = getMemberAccessCall(call);
@@ -38,7 +45,7 @@ export const resolveCall = (call: Call): Call => {
   return call;
 };
 
-export const checkLabeledArg = (call: Call) => {
+export const resolveLabeledArg = (call: Call) => {
   call.args = call.args.map(resolveEntities);
   const expr = call.argAt(1);
   call.type = getExprType(expr);
@@ -72,6 +79,29 @@ export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
   alias.type = getExprType(alias.typeExpr);
   call.type = alias.type;
   call.fn = call.type?.isObjectType() ? call.type : undefined;
+  return call;
+};
+
+const resolveFixedArray = (call: Call) => {
+  call.args = call.args.map(resolveEntities);
+
+  const elemTypeExpr =
+    call.typeArgs?.at(0) ??
+    combineTypes(
+      call.args
+        .toArray()
+        .map(getExprType)
+        .filter((t) => !!t)
+    ) ??
+    nop();
+
+  const elemType = getExprType(elemTypeExpr);
+  call.type = new FixedArrayType({
+    ...call.metadata,
+    name: Identifier.from(`FixedArray#${call.syntaxId}`),
+    elemTypeExpr,
+    elemType,
+  });
   return call;
 };
 
