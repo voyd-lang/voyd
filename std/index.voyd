@@ -5,3 +5,4 @@ pub mod operators::all
 pub mod utils::all
 pub mod string::all
 pub mod array::all
+pub mod string
