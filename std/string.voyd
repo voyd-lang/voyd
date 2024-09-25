@@ -2,59 +2,85 @@ use std::macros::all
 use array::all
 use operators::all
 
-pub obj String {
-  chars: FixedArray<i32>
-}
+fn create_new_string(size: i32) -> string
+  binaryen_gc_call(arrayNew, [bin_type_to_heap_type(string), size])
 
-impl String
-  pub fn slice(self, start: i32, end: i32) -> String
-    let new_length = end - start
-    let new_chars = new_fixed_array<i32>(new_length)
-    new_chars.copy<i32>({
-      from: self.chars,
-      toIndex: 0,
-      fromIndex: start,
+fn copy(dest_str: string, opts: {
+  from: string,
+  to_index: i32,
+  from_index: i32,
+  count: i32
+}) -> string
+  binaryen_gc_call(arrayCopy, [
+    dest_str,
+    opts.to_index,
+    opts.from,
+    opts.from_index,
+    opts.count
+  ])
+  dest_str
+
+fn compute_index(index: i32, length: i32) -> i32
+  if index < 0 then: length + index else: index
+
+pub fn slice(str: string, start: i32, end: i32) -> string
+  let computed_start = compute_index(start, str.length)
+  let computed_end = compute_index(end, str.length)
+
+  if (computed_start >= str.length) or (computed_end >= str.length) or (computed_start >= computed_end) then:
+    ""
+  else:
+    let new_length = computed_end - computed_start
+    let new_chars = create_new_string(new_length)
+    new_chars.copy({
+      from: str.chars,
+      to_index: 0,
+      from_index: start,
       count: new_length
     })
-    String { chars: new_chars }
 
-  pub fn char_code_at(self, index: i32) -> i32
-    if (index < 0) or (index >= self.chars.length<i32>()) then:
-      -1
-    else: self.chars.get<i32>(index)
+pub fn char_code_at(str: string, index: i32) -> i32
+  let computed_index = compute_index(index, str.length)
 
-  pub fn length(self) -> i32
-    self.chars.length<i32>()
+  if computed_index >= str.length then:
+    -1
+  else:
+    binaryen_gc_call(
+      arrayGet,
+      [str, computed_index, BnrType<i32>, BnrConst(false)]
+    )
 
-  pub fn '+'(self, other: String) -> String
-    let new_length = self.chars.length<i32>() + other.chars.length<i32>()
-    let new_chars = new_fixed_array<i32>(new_length)
-    new_chars.copy<i32>({
-      from: self.chars,
-      toIndex: 0,
-      fromIndex: 0,
-      count: self.chars.length<i32>()
-    })
-    new_chars.copy<i32>({
-      from: other.chars,
-      toIndex: self.chars.length<i32>(),
-      fromIndex: 0,
-      count: other.chars.length<i32>()
-    })
-    String { chars: new_chars }
+pub fn length(str: string) -> i32
+  binaryen_gc_call(arrayLen, [str])
 
-obj StringReader {
-  str: String,
+pub fn '+'(str: string, other: string) -> String
+  let new_length = str.length + other.length
+  let new_string = create_new_string(new_length)
+  new_string.copy({
+    from: str,
+    to_index: 0,
+    from_index: 0,
+    count: str.length
+  })
+  new_string.copy({
+    from: other,
+    to_index: str.length,
+    from_index: 0,
+    count: other.length
+  })
+
+obj StringIterator {
+  str: string,
   index: i32
 }
 
-pub fn new_string_reader(str: String) -> StringReader
-  StringReader { str: str, index: 0 }
+pub fn new_string_iterator(str: string) -> StringIterator
+  StringIterator { str: str, index: 0 }
 
-pub fn read_next_char(reader: StringReader) -> i32
-  if reader.index >= reader.str.length() then:
+pub fn read_next_char(iterator: StringIterator) -> i32
+  if iterator.index >= iterator.str.length then:
     -1
   else:
-    let char = reader.str.char_code_at(reader.index)
-    reader.index = reader.index + 1
+    let char = iterator.str.char_code_at(iterator.index)
+    iterator.index = iterator.index + 1
     char

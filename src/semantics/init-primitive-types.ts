@@ -1,4 +1,13 @@
-import { i32, f32, i64, f64, bool, dVoid } from "../syntax-objects/types.js";
+import {
+  i32,
+  f32,
+  i64,
+  f64,
+  bool,
+  dVoid,
+  dVoyd,
+  voydString,
+} from "../syntax-objects/types.js";
 import { voydBaseObject } from "../syntax-objects/types.js";
 import { SemanticProcessor } from "./types.js";
 
@@ -10,6 +19,8 @@ export const initPrimitiveTypes: SemanticProcessor = (expr) => {
   expr.registerExport(f64);
   expr.registerExport(bool);
   expr.registerExport(dVoid);
+  expr.registerExport(dVoyd);
+  expr.registerExport(voydString);
   expr.registerExport(voydBaseObject);
   return expr;
 };

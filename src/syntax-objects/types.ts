@@ -307,7 +307,6 @@ export class FixedArrayType extends BaseType {
 
 export class FnType extends BaseType {
   readonly kindOfType = "fn";
-  readonly size = 0;
   readonly parameters: Parameter[];
   readonly returnType: Type;
 
@@ -343,8 +342,14 @@ export class FnType extends BaseType {
   }
 }
 
-export type StackType = NumericType | ReferenceType;
-export type Primitive = NumericType | ReferenceType | "voyd" | "bool";
+export type Primitive =
+  | NumericType
+  | ReferenceType
+  | "void"
+  | "voyd"
+  | "bool"
+  | "string";
+
 export type NumericType = "i32" | "f32" | "i64" | "f64";
 export type ReferenceType = "funcref" | "externref";
 
@@ -353,9 +358,10 @@ export const f32 = PrimitiveType.from("f32");
 export const i64 = PrimitiveType.from("i64");
 export const f64 = PrimitiveType.from("f64");
 export const bool = PrimitiveType.from("bool");
-export const dVoid = PrimitiveType.from("voyd");
+export const dVoid = PrimitiveType.from("void");
+export const dVoyd = PrimitiveType.from("voyd");
+export const voydString = PrimitiveType.from("string");
 export const voydBaseObject = new ObjectType({
   name: "Object",
   value: [],
 });
-export const CDT_ADDRESS_TYPE = i32;
