@@ -154,7 +154,9 @@ export const resolveIf = (call: Call) => {
   }
 
   const thenType = getExprType(thenExpr);
-  call.type = thenType;
+  const elseType = getExprType(elseExpr);
+  call.type =
+    elseType && thenType ? combineTypes([thenType, elseType]) : thenType;
   return call;
 };
 
