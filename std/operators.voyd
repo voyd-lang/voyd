@@ -15,10 +15,6 @@ pub def_wasm_operator('<=', le_s, i32, bool)
 pub def_wasm_operator('>=', ge_s, i32, bool)
 pub def_wasm_operator('==', eq, i32, bool)
 pub def_wasm_operator('!=', ne, i32, bool)
-pub def_wasm_operator('and', 'and', i32, i32)
-pub def_wasm_operator('or', 'or', i32, i32)
-pub def_wasm_operator('xor', 'xor', i32, i32)
-pub def_wasm_operator('not', ne, i32, bool)
 pub def_wasm_operator('+', add, i32, i32)
 pub def_wasm_operator('-', sub, i32, i32)
 pub def_wasm_operator('*', mul, i32, i32)
@@ -32,10 +28,6 @@ pub def_wasm_operator('<=', le_s, i64, bool)
 pub def_wasm_operator('>=', ge_s, i64, bool)
 pub def_wasm_operator('==', eq, i64, bool)
 pub def_wasm_operator('!=', ne, i64, bool)
-pub def_wasm_operator('and', 'and', i64, i64)
-pub def_wasm_operator('or', 'or', i64, i64)
-pub def_wasm_operator('xor', 'xor', i64, i64)
-pub def_wasm_operator('not', ne, i64, bool)
 pub def_wasm_operator('+', add, i64, i64)
 pub def_wasm_operator('-', sub, i64, i64)
 pub def_wasm_operator('*', mul, i64, i64)
@@ -98,6 +90,9 @@ pub def_wasm_operator(lt_u, lt_u, i32, bool)
 pub def_wasm_operator(gt_u, gt_u, i32, bool)
 pub def_wasm_operator(lte_u, le_u, i32, bool)
 pub def_wasm_operator(gte_u, ge_u, i32, bool)
+pub def_wasm_operator(bit_and, 'and', i32, i32)
+pub def_wasm_operator(bit_or, 'or', i32, i32)
+pub def_wasm_operator(bit_xor, 'xor', i32, i32)
 
 // i64 bitwise operators
 pub def_wasm_operator(shift_l, shl, i64, i64)
@@ -113,6 +108,9 @@ pub def_wasm_operator(lt_u, lt_u, i64, bool)
 pub def_wasm_operator(gt_u, gt_u, i64, bool)
 pub def_wasm_operator(lte_u, le_u, i64, bool)
 pub def_wasm_operator(gte_u, ge_u, i64, bool)
+pub def_wasm_operator(bit_and, 'and', i64, i64)
+pub def_wasm_operator(bit_or, 'or', i64, i64)
+pub def_wasm_operator(bit_xor, 'xor', i64, i64)
 
 pub fn '=='(left: bool, right: bool) -> bool
   binaryen
@@ -129,6 +127,12 @@ pub fn 'and'(left: bool, right: bool) -> bool
 pub fn 'or'(left: bool, right: bool) -> bool
   binaryen
     func: 'or'
+    namespace: i32
+    args: [left, right]
+
+pub fn 'xor'(left: bool, right: bool) -> bool
+  binaryen
+    func: 'xor'
     namespace: i32
     args: [left, right]
 
