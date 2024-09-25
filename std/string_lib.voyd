@@ -1,5 +1,5 @@
 use macros::all
-use array::all
+use fixed_array::all
 use operators::all
 
 fn create_string(size: i32) -> string

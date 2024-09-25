@@ -4,5 +4,5 @@ pub mod macros::all
 pub mod operators::all
 pub mod utils::all
 pub mod string_lib::all
-pub mod array::all
+pub mod fixed_array::all
 pub mod string_lib
