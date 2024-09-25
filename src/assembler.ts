@@ -157,7 +157,7 @@ const compileBlock = (opts: CompileExprOpts<Block>) => {
   return opts.mod.block(
     null,
     opts.expr.body.map((expr, index, array) => {
-      if (index === array.length - 1) {
+      if (index === array.length - 1 && opts.isReturnExpr) {
         return compileExpression({ ...opts, expr, isReturnExpr: true });
       }
 
