@@ -37,6 +37,18 @@ export const combineTypes = (types: Type[]): Type | undefined => {
       continue;
     }
 
+    if (type.isUnionType() && isObjectOrIntersection(topType)) {
+      const obj = topType;
+      topType = type;
+      type.types.push(obj);
+      continue;
+    }
+
+    if (type.isUnionType() && topType.isUnionType()) {
+      topType.types.push(...type.types);
+      continue;
+    }
+
     return undefined;
   }
 
