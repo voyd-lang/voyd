@@ -52,12 +52,7 @@ export const infixOps: OpMap = new Map([
   ["*", 2],
   ["/", 2],
   ["^", 3],
-  ["and", 0],
-  ["or", 0],
-  ["xor", 0],
-  ["as", 0],
-  ["is", 0],
-  ["in", 0],
+  ["%", 2],
   ["==", 0],
   ["!=", 0],
   ["<", 0],
@@ -80,6 +75,14 @@ export const infixOps: OpMap = new Map([
   ["::", 0],
   [";", 4],
   ["??", 3],
+  ["and", 0],
+  ["or", 0],
+  ["xor", 0],
+  ["as", 0],
+  ["is", 0],
+  ["is_subtype_of", 0],
+  ["in", 0],
+  ["has_trait", 0],
 ]);
 
 export const isInfixOp = (op?: Expr): op is Identifier =>
