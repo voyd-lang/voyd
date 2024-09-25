@@ -20,6 +20,7 @@ export const resolveCall = (call: Call): Call => {
   if (call.calls(":")) return resolveLabeledArg(call);
   if (call.calls("while")) return resolveWhile(call);
   if (call.calls("FixedArray")) return resolveFixedArray(call);
+  if (call.calls("binaryen")) return resolveBinaryen(call);
   call.args = call.args.map(resolveEntities);
 
   const memberAccessCall = getMemberAccessCall(call);
@@ -160,5 +161,13 @@ export const resolveIf = (call: Call) => {
 export const resolveWhile = (call: Call) => {
   call.args = call.args.map(resolveEntities);
   call.type = dVoid;
+  return call;
+};
+
+export const resolveBinaryen = (call: Call) => {
+  call.args = call.args.map(resolveEntities);
+  const type = call.optionalLabeledArgAt(3);
+  if (!type) return call;
+  call.type = getExprType(type);
   return call;
 };

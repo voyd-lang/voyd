@@ -80,9 +80,9 @@ describe("E2E Compiler Pipeline", () => {
 });
 
 const readString = (ref: Object, instance: WebAssembly.Instance) => {
-  const newStringReader = getWasmFn("new_string_reader", instance)!;
+  const newStringIterator = getWasmFn("new_string_iterator", instance)!;
   const readNextChar = getWasmFn("read_next_char", instance)!;
-  const reader = newStringReader(ref);
+  const reader = newStringIterator(ref);
 
   let str = "";
   while (true) {

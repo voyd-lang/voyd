@@ -1,16 +1,21 @@
 use std::macros::all
 
 pub fn new_fixed_array<T>(size: i32) -> FixedArray<T>
-  binaryen_gc_call(arrayNew, [bin_type_to_heap_type(FixedArray<T>), size])
+  binaryen_gc_call(
+    arrayNew,
+    [bin_type_to_heap_type(FixedArray<T>), size],
+    FixedArray<T>
+  )
 
 pub fn get<T>(arr: FixedArray<T>, index: i32) -> T
   binaryen_gc_call(
     arrayGet,
-    [arr, index, BnrType<T>, BnrConst(false)]
+    [arr, index, BnrType<T>, BnrConst(false)],
+    T
   )
 
 pub fn set<T>(arr: FixedArray<T>, index: i32, value: T) -> FixedArray<T>
-  binaryen_gc_call(arraySet, [arr, index, value])
+  binaryen_gc_call(arraySet, [arr, index, value], FixedArray<T>)
   arr
 
 pub fn copy<T>(dest_array: FixedArray<T>, opts: {
@@ -25,8 +30,8 @@ pub fn copy<T>(dest_array: FixedArray<T>, opts: {
     opts.from,
     opts.from_index,
     opts.count
-  ])
+  ], FixedArray<T>)
   dest_array
 
 pub fn length<T>(arr: FixedArray<T>) -> i32
-  binaryen_gc_call(arrayLen, [arr])
+  binaryen_gc_call(arrayLen, [arr], i32)

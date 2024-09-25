@@ -1,11 +1,11 @@
-use std::macros::all
+use macros::all
 use array::all
 use operators::all
 
-fn create_new_string(size: i32) -> string
-  binaryen_gc_call(arrayNew, [bin_type_to_heap_type(string), size])
+fn create_string(size: i32) -> string
+  binaryen_gc_call(arrayNew, [bin_type_to_heap_type(string), size], string)
 
-fn copy(dest_str: string, opts: {
+fn copy_str(dest_str: string, opts: {
   from: string,
   to_index: i32,
   from_index: i32,
@@ -17,8 +17,11 @@ fn copy(dest_str: string, opts: {
     opts.from,
     opts.from_index,
     opts.count
-  ])
+  ], string)
   dest_str
+
+pub fn length(str: string) -> i32
+  binaryen_gc_call(arrayLen, [str], i32)
 
 fn compute_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
@@ -31,9 +34,9 @@ pub fn slice(str: string, start: i32, end: i32) -> string
     ""
   else:
     let new_length = computed_end - computed_start
-    let new_chars = create_new_string(new_length)
-    new_chars.copy({
-      from: str.chars,
+    let new_chars = create_string(new_length)
+    new_chars.copy_str({
+      from: str,
       to_index: 0,
       from_index: start,
       count: new_length
@@ -47,22 +50,20 @@ pub fn char_code_at(str: string, index: i32) -> i32
   else:
     binaryen_gc_call(
       arrayGet,
-      [str, computed_index, BnrType<i32>, BnrConst(false)]
+      [str, computed_index, BnrType<i32>, BnrConst(false)],
+      i32
     )
 
-pub fn length(str: string) -> i32
-  binaryen_gc_call(arrayLen, [str])
-
-pub fn '+'(str: string, other: string) -> String
+pub fn '+'(str: string, other: string) -> string
   let new_length = str.length + other.length
-  let new_string = create_new_string(new_length)
-  new_string.copy({
+  let new_string = create_string(new_length)
+  new_string.copy_str({
     from: str,
     to_index: 0,
     from_index: 0,
     count: str.length
   })
-  new_string.copy({
+  new_string.copy_str({
     from: other,
     to_index: str.length,
     from_index: 0,

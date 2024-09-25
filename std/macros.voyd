@@ -81,10 +81,10 @@ pub macro fn()
     $fn_body
   )
 
-macro binaryen_gc_call(func, args)
-  ` binaryen func: $func namespace: gc args: $args
+pub macro binaryen_gc_call(func, args, return_type)
+  ` binaryen func: $func namespace: gc args: $args return_type: $return_type
 
-macro bin_type_to_heap_type(type)
+pub macro bin_type_to_heap_type(type)
   // binaryen_gc_call(modBinaryenTypeToHeapType, ` [BnrType<($type)>])
   ` binaryen
     func: modBinaryenTypeToHeapType

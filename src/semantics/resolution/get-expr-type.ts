@@ -1,12 +1,21 @@
 import { Expr } from "../../syntax-objects/expr.js";
 import { Call, Identifier } from "../../syntax-objects/index.js";
-import { Type, i32, f32, bool, i64, f64 } from "../../syntax-objects/types.js";
+import {
+  Type,
+  i32,
+  f32,
+  bool,
+  i64,
+  f64,
+  voydString,
+} from "../../syntax-objects/types.js";
 import { resolveCall } from "./resolve-call.js";
 
 export const getExprType = (expr?: Expr): Type | undefined => {
   if (!expr) return;
   if (expr.isInt()) return typeof expr.value === "number" ? i32 : i64;
   if (expr.isFloat()) return typeof expr.value === "number" ? f32 : f64;
+  if (expr.isStringLiteral()) return voydString;
   if (expr.isBool()) return bool;
   if (expr.isIdentifier()) return getIdentifierType(expr);
   if (expr.isCall()) return resolveCall(expr)?.type;
