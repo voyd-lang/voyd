@@ -83,8 +83,8 @@ true // Boolean
 false // Boolean
 1 // i32 by default
 1.0 // f64 by default
-"Hello!" // String, can be multiline, supports interpolation via ${} (NOTE: Not yet implemented)
-[1, 2, 3] // Array literal (NOTE: Not yet implemented)
+"Hello!" // String, can be multiline, supports interpolation via ${} (NOTE: Interpolation not yet implemented)
+[1, 2, 3]
 (1, 2, 3) // Tuple literal  (NOTE: Not yet implemented)
 {x: 2, y: 4} // Structural object literal
 ```
