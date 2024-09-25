@@ -43,12 +43,13 @@ export class Implementation extends ScopedSyntax {
   }
 
   registerExport(v: Fn): Implementation {
-    this.#exports.set(v.id, v as Fn);
+    this.#exports.set(v.id, v);
+    this.registerEntity(v); // dirty way to make sure it's in the scope
     return this;
   }
 
   registerMethod(v: Fn): Implementation {
-    this.#methods.set(v.id, v as Fn);
+    this.#methods.set(v.id, v);
     return this;
   }
 
