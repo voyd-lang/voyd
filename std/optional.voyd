@@ -1,0 +1,9 @@
+use macros::all
+
+pub obj Some<T> {
+  value: T
+}
+
+pub obj None {}
+
+pub type Optional<T> = Some<T> | None
