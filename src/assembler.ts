@@ -33,7 +33,7 @@ import { initExtensionHelpers } from "./assembler/extension-helpers.js";
 import { returnCall } from "./assembler/return-call.js";
 import { Float } from "./syntax-objects/float.js";
 import { initFieldLookupHelpers } from "./assembler/field-lookup-helpers.js";
-import { List } from "./syntax-objects/list.js";
+import { StringLiteral } from "./syntax-objects/string-literal.js";
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -62,6 +62,7 @@ export const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isBlock()) return compileBlock({ ...opts, expr, isReturnExpr });
   if (expr.isMatch()) return compileMatch({ ...opts, expr, isReturnExpr });
   if (expr.isInt()) return compileInt({ ...opts, expr });
+  if (expr.isStringLiteral()) return compileStringLiteral({ ...opts, expr });
   if (expr.isFloat()) return compileFloat({ ...opts, expr });
   if (expr.isIdentifier()) return compileIdentifier({ ...opts, expr });
   if (expr.isFn()) return compileFunction({ ...opts, expr });
@@ -81,6 +82,15 @@ export const compileExpression = (opts: CompileExprOpts): number => {
 
   throw new Error(
     `Unrecognized expression ${expr.syntaxType} ${expr.location}`
+  );
+};
+
+const compileStringLiteral = (opts: CompileExprOpts<StringLiteral>) => {
+  const { expr, mod } = opts;
+  return gc.arrayNewFixed(
+    mod,
+    binaryenTypeToHeapType(getI32ArrayType(opts.mod)),
+    expr.value.split("").map((char) => mod.i32.const(char.charCodeAt(0)))
   );
 };
 
@@ -550,6 +560,8 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "i64")) return binaryen.i64;
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "voyd")) return binaryen.none;
+  if (isPrimitiveId(type, "string")) return getI32ArrayType(opts.mod);
+
   if (type.isObjectType()) return buildObjectType(opts, type);
   if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isFixedArrayType()) return buildFixedArrayType(opts, type);
@@ -686,4 +698,11 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
     fieldType: mapBinaryenType(opts, field.type!),
     exprRef: objValue,
   });
+};
+
+let i32ArrayType: TypeRef | undefined = undefined;
+const getI32ArrayType = (mod: binaryen.Module) => {
+  if (i32ArrayType) return i32ArrayType;
+  i32ArrayType = gc.defineArrayType(mod, binaryen.i32, true);
+  return i32ArrayType;
 };
