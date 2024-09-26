@@ -68,6 +68,8 @@ describe("E2E Compiler Pipeline", () => {
       2, // IntersectionType tests
       20, // While loop
       "Hello, world! This is a test.",
+      12, // Array  of objects test + advanced match
+      173, // Array test
     ]);
   });
 
