@@ -65,7 +65,7 @@ export const defineStructType = (
 
   annotateStructNames(mod, result, struct);
 
-  return bin._BinaryenTypeFromHeapType(result, false);
+  return bin._BinaryenTypeFromHeapType(result, true); // Has to be nullable for now so initialize an array of ref types
 };
 
 export const defineArrayType = (
@@ -93,7 +93,7 @@ export const defineArrayType = (
     );
   }
 
-  return bin._BinaryenTypeFromHeapType(result, false);
+  return bin._BinaryenTypeFromHeapType(result, true); // Has to be nullable for now so initialize an array of ref types
 };
 
 const typeBuilderBuildAndDispose = (typeBuilder: number): HeapTypeRef => {
@@ -113,6 +113,13 @@ const typeBuilderBuildAndDispose = (typeBuilder: number): HeapTypeRef => {
 
 export const binaryenTypeToHeapType = (type: Type): HeapTypeRef => {
   return bin._BinaryenTypeGetHeapType(type);
+};
+
+export const binaryenTypeFromHeapType = (
+  type: HeapTypeRef,
+  nullable = false
+): HeapTypeRef => {
+  return bin._BinaryenTypeFromHeapType(type, nullable);
 };
 
 // So we can use the from compileBnrCall

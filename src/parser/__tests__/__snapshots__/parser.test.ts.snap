@@ -181,9 +181,9 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
       ],
     ],
   ],
+  10,
   [
     "+",
-    10,
     3,
   ],
   [
@@ -228,32 +228,32 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
       "=",
       "a",
       [
-        "*",
+        "+",
         [
-          "+",
+          "reduce",
+          "array",
+          0,
           [
-            "reduce",
-            "array",
-            0,
+            "=>",
             [
-              "=>",
+              "acc",
+              "val",
+            ],
+            [
+              "block",
               [
+                "+",
                 "acc",
                 "val",
               ],
-              [
-                "block",
-                [
-                  "+",
-                  "acc",
-                  "val",
-                ],
-              ],
             ],
           ],
-          10,
         ],
-        3,
+        [
+          "*",
+          10,
+          3,
+        ],
       ],
     ],
   ],
@@ -446,6 +446,152 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
         [
           "object",
         ],
+      ],
+    ],
+  ],
+  [
+    "match",
+    [
+      "match",
+      [
+        "pop",
+        "arr",
+      ],
+      "val",
+      [
+        ":",
+        [
+          "Some",
+          [
+            "generics",
+            [
+              "Optional",
+              [
+                "generics",
+                "i32",
+              ],
+            ],
+          ],
+        ],
+        [
+          "block",
+          [
+            "value",
+            "val",
+          ],
+        ],
+      ],
+      [
+        ":",
+        "None",
+        [
+          "block",
+          [
+            "None",
+            [
+              "object",
+            ],
+          ],
+        ],
+      ],
+    ],
+    "v",
+    [
+      ":",
+      [
+        "Some",
+        [
+          "generics",
+          "i32",
+        ],
+      ],
+      [
+        "block",
+        [
+          "value",
+          "v",
+        ],
+      ],
+    ],
+    [
+      ":",
+      "None",
+      [
+        "block",
+        -1,
+      ],
+    ],
+  ],
+  [
+    "match",
+    [
+      "match",
+      [
+        "pop",
+        "arr",
+      ],
+      "val",
+      [
+        ":",
+        [
+          "Some",
+          [
+            "generics",
+            [
+              "Optional",
+              [
+                "generics",
+                "i32",
+              ],
+            ],
+          ],
+        ],
+        [
+          "block",
+          [
+            "value",
+            "val",
+          ],
+        ],
+      ],
+      [
+        ":",
+        "None",
+        [
+          "block",
+          [
+            "None",
+            [
+              "object",
+            ],
+          ],
+        ],
+      ],
+    ],
+    "v",
+    [
+      ":",
+      [
+        "Some",
+        [
+          "generics",
+          "i32",
+        ],
+      ],
+      [
+        "block",
+        [
+          "value",
+          "v",
+        ],
+      ],
+    ],
+    [
+      ":",
+      "None",
+      [
+        "block",
+        -1,
       ],
     ],
   ],

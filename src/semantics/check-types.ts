@@ -126,7 +126,9 @@ const checkObjectInit = (call: Call): Call => {
 
   // Check to ensure literal structure is compatible with nominal structure
   if (!typesAreCompatible(literal.type, call.type, { structuralOnly: true })) {
-    throw new Error(`Object literal type does not match expected type`);
+    throw new Error(
+      `Object literal type does not match expected type ${call.type?.name} at ${literal.location}`
+    );
   }
 
   return call;
@@ -182,7 +184,12 @@ export const checkIf = (call: Call) => {
     );
   }
 
-  const thenExpr = checkTypes(call.argAt(1));
+  if (!call.type) {
+    throw new Error(
+      `Unable to determine return type of If at ${call.location}`
+    );
+  }
+
   const elseExpr = call.argAt(2) ? checkTypes(call.argAt(2)) : undefined;
 
   // Until unions are supported, return voyd if no else
@@ -191,17 +198,15 @@ export const checkIf = (call: Call) => {
     return call;
   }
 
-  const thenType = getExprType(thenExpr);
   const elseType = getExprType(elseExpr);
 
   // Until unions are supported, throw an error when types don't match
-  if (!typesAreCompatible(thenType, elseType)) {
+  if (!typesAreCompatible(elseType, call.type)) {
     throw new Error(
       `If condition clauses do not return same type at ${call.location}`
     );
   }
 
-  call.type = thenType;
   return call;
 };
 
@@ -457,6 +462,8 @@ const checkUnionMatch = (match: Match) => {
         `All cases must return the same type for now ${mCase.expr.location}`
       );
     }
+
+    checkTypes(mCase.expr);
   }
 
   union.types.forEach((type) => {
@@ -502,6 +509,8 @@ const checkObjectMatch = (match: Match) => {
         `All cases must return the same type for now ${mCase.expr.location}`
       );
     }
+
+    checkTypes(mCase.expr);
   }
 
   return match;

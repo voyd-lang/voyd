@@ -234,6 +234,33 @@ pub fn test19() -> i32
 
 pub fn test20() -> string
   "Hello, world!" + " " + "This is a test."
+
+pub fn test21()
+  let arr = new_array<Optional<i32>>({ with_size: 4 })
+  arr.push(Some<i32> { value: 12 })
+  arr.pop()
+    .match(val)
+      Some<Optional<i32>>:
+        val.value
+      None:
+        None {}
+    .match(v)
+      Some<i32>:
+        v.value
+      None:
+        -1
+
+pub fn test22()
+  let arr = new_array<i32>({ from: FixedArray(1, 2, 3, 4) })
+  arr.push(5)
+  arr.push(3)
+  arr.push(173)
+  arr.pop()
+    .match(v)
+      Some<i32>:
+        v.value
+      None:
+        -1
 `;
 
 export const tcoText = `

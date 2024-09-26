@@ -1,37 +1,92 @@
-use std::macros::all
+use fixed_array::all
+use macros::all
+use operators::all
+use optional::all
 
-pub fn new_fixed_array<T>(size: i32) -> FixedArray<T>
-  binaryen_gc_call(
-    arrayNew,
-    [bin_type_to_heap_type(FixedArray<T>), size],
-    FixedArray<T>
-  )
-
-pub fn get<T>(arr: FixedArray<T>, index: i32) -> T
-  binaryen_gc_call(
-    arrayGet,
-    [arr, index, BnrType<T>, BnrConst(false)],
-    T
-  )
-
-pub fn set<T>(arr: FixedArray<T>, index: i32, value: T) -> FixedArray<T>
-  binaryen_gc_call(arraySet, [arr, index, value], FixedArray<T>)
-  arr
-
-pub fn copy<T>(dest_array: FixedArray<T>, opts: {
-  from: FixedArray<T>,
-  to_index: i32,
-  from_index: i32,
+pub obj Array<T> {
+  storage: FixedArray<T>,
   count: i32
-}) -> FixedArray<T>
-  binaryen_gc_call(arrayCopy, [
-    dest_array,
-    opts.to_index,
-    opts.from,
-    opts.from_index,
-    opts.count
-  ], FixedArray<T>)
-  dest_array
+}
 
-pub fn length<T>(arr: FixedArray<T>) -> i32
-  binaryen_gc_call(arrayLen, [arr], i32)
+pub fn new_array<T>(opts: { with_size: i32 }) -> Array<T>
+  Array<T> { storage: new_fixed_array<T>(opts.with_size), count: 0 }
+
+pub fn new_array<T>(opts: { from: FixedArray<T> }) -> Array<T>
+  Array<T> { storage: opts.from, count: opts.from.length<T>() }
+
+impl<T> Array<T>
+  fn resize(self) -> Array<T>
+    let new_storage = new_fixed_array<T>(self.storage.length<T>() * 2)
+    new_storage.copy<T>({
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: self.storage.length<T>()
+    })
+    self.storage = new_storage
+    self
+
+  pub fn get(self, index: i32) -> Optional<T>
+    let computed_index = compute_index(index, self.count)
+    Some<T> { value: self.storage.get<T>(index) }
+    // if computed_index >= self.count then:
+    //   None {}
+    // else:
+    //   Some<T> { value: self.storage.get<T>(index) }
+
+  pub fn set(self, index: i32, value: T) -> Array<T>
+    let computed_index = compute_index(index, self.count)
+    if computed_index >= self.storage.length<T>() then:
+      self
+    else:
+      self.storage.set<T>(index, value)
+      self
+
+  pub fn length(self) -> i32
+    self.count
+
+  pub fn push(self, value: T) -> Array<T>
+    if self.count >= self.storage.length<T>() then:
+      self.resize().push(value)
+    else:
+      self.set(self.count, value)
+      self.count = self.count + 1
+      self
+
+  pub fn pop(self) -> Optional<T>
+    if self.count == 0 then:
+      None {}
+    else:
+      let value = self.get(self.count - 1)
+      match(value)
+        Some<T>:
+          self.count = self.count - 1
+          Some<T> { value: value.value }
+        None:
+          None {}
+
+
+  pub fn slice(self, start: i32, end: i32) -> Array<T>
+    let computed_start = compute_index(start, self.count)
+    let computed_end = compute_index(end, self.count)
+
+    if
+      (computed_start >= self.count) or
+      (computed_end >= self.count) or
+      (computed_start >= computed_end)
+    then:
+      Array<T> { storage: new_fixed_array<T>(4), count: 0 }
+    else:
+      let new_length = computed_end - computed_start
+      let new_storage = new_fixed_array<T>(new_length)
+      new_storage.copy<T>({
+        from: self.storage,
+        to_index: 0,
+        from_index: start,
+        count: new_length
+      })
+      Array<T> { storage: new_storage, count: new_length }
+
+
+fn compute_index(index: i32, length: i32) -> i32
+  if index < 0 then: length + index else: index

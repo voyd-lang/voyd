@@ -99,13 +99,17 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
     const identifier = typeParam.clone();
     const type = new TypeAlias({
       name: identifier,
-      typeExpr: typeArg,
+      typeExpr: typeArg.clone(),
     });
     type.parent = newFn;
     type.type = getExprType(typeArg);
     newFn.appliedTypeArgs?.push(type);
     newFn.registerEntity(type);
   });
+
+  if (!newFn.appliedTypeArgs.every((t) => (t as TypeAlias).type)) {
+    throw new Error(`Unable to resolve all type args for ${newFn}`);
+  }
 
   const resolvedFn = resolveFn(newFn);
   fn.registerGenericInstance(resolvedFn);

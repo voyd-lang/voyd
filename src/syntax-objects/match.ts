@@ -76,11 +76,16 @@ export class Match extends Syntax implements ScopedSyntax {
     return new Match({
       ...this.getCloneOpts(parent),
       operand: this.operand.clone(),
-      cases: this.cases.map((c) => ({ ...c, expr: c.expr.clone() })),
+      cases: this.cases.map((c) => ({
+        expr: c.expr.clone(),
+        matchTypeExpr: c.matchTypeExpr?.clone(),
+        matchType: undefined,
+      })),
       defaultCase: this.defaultCase
         ? {
-            ...this.defaultCase,
             expr: this.defaultCase.expr.clone(),
+            matchTypeExpr: this.defaultCase.matchTypeExpr?.clone(),
+            matchType: undefined,
           }
         : undefined,
       type: this.type,
