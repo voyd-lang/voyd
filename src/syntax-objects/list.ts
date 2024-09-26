@@ -22,10 +22,10 @@ export class List extends Syntax {
     super(opts);
     const value = opts.value;
 
-    if (!value || value instanceof Array) {
-      this.push(...(value ?? []));
+    if (value instanceof Array) {
+      value.forEach((v) => this.push(v));
     } else if (value instanceof List) {
-      this.push(...value.toArray());
+      value.toArray().forEach((v) => this.push(v));
     }
   }
 

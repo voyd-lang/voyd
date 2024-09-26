@@ -3,7 +3,7 @@ use fixed_array::all
 use operators::all
 
 fn create_string(size: i32) -> string
-  binaryen_gc_call(arrayNew, [bin_type_to_heap_type(string), size], string)
+  binaryen_gc_call(arrayNew, `(bin_type_to_heap_type(string), size), string)
 
 fn copy_str(dest_str: string, opts: {
   from: string,
@@ -11,17 +11,17 @@ fn copy_str(dest_str: string, opts: {
   from_index: i32,
   count: i32
 }) -> string
-  binaryen_gc_call(arrayCopy, [
+  binaryen_gc_call(arrayCopy, `(
     dest_str,
     opts.to_index,
     opts.from,
     opts.from_index,
     opts.count
-  ], string)
+  ), string)
   dest_str
 
 pub fn length(str: string) -> i32
-  binaryen_gc_call(arrayLen, [str], i32)
+  binaryen_gc_call(arrayLen, `(str), i32)
 
 fn compute_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
@@ -50,7 +50,7 @@ pub fn char_code_at(str: string, index: i32) -> i32
   else:
     binaryen_gc_call(
       arrayGet,
-      [str, computed_index, BnrType<i32>, BnrConst(false)],
+      `(str, computed_index, BnrType<i32>, BnrConst(false)),
       i32
     )
 
