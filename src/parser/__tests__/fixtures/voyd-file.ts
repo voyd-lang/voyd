@@ -70,6 +70,31 @@ match(x)
   Some<i32>: Some<i32> { value: x.value + 1 }
   None: None {}
 
+arr
+  .pop()
+  .match(val)
+    Some<Optional<i32>>:
+      val.value
+    None:
+      None {}
+  .match(v)
+    Some<i32>:
+      v.value
+    None:
+      -1
+
+arr.pop()
+  .match(val)
+    Some<Optional<i32>>:
+      val.value
+    None:
+      None {}
+  .match(v)
+    Some<i32>:
+      v.value
+    None:
+      -1
+
 fn test<T>(a: 1) -> i32
 
 fn main()

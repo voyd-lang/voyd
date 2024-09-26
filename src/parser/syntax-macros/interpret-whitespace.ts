@@ -31,6 +31,18 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
 
     while (nextLineHasChildExpr()) {
       const child = elideParens(list, indentLevel + 1);
+
+      if (
+        children.length === 1 &&
+        child.isList() &&
+        isContinuationOp(child.first())
+      ) {
+        transformed.push(child.consume());
+        if (child.length === 1) transformed.push(child.consume());
+        else transformed.push(child);
+        return;
+      }
+
       addSibling(child, children);
     }
 
@@ -43,22 +55,12 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
     transformed.push(children);
   };
 
-  const pushNestedExpr = () => {
-    if (isContinuationOp(nextNonWhitespace(list, 1))) {
-      const child = elideParens(list, indentLevel + 1);
-      addSibling(child, transformed);
-      return;
-    }
-
-    pushChildBlock();
-  };
-
   consumeLeadingWhitespace(list);
   while (list.hasChildren) {
     const next = list.first();
 
     if (isNewline(next) && nextLineHasChildExpr()) {
-      pushNestedExpr();
+      pushChildBlock();
       continue;
     }
 
@@ -189,11 +191,6 @@ const addSibling = (child: Expr, siblings: List, hadComma?: boolean) => {
 
   if (!child.isList() || hadComma) {
     siblings.push(child);
-    return;
-  }
-
-  if (isContinuationOp(child.first()) && olderSibling) {
-    siblings.push([siblings.pop()!, ...child.toArray()]);
     return;
   }
 
