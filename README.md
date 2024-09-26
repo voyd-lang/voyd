@@ -83,8 +83,8 @@ true // Boolean
 false // Boolean
 1 // i32 by default
 1.0 // f64 by default
-"Hello!" // String, can be multiline, supports interpolation via ${} (NOTE: Interpolation not yet implemented)
-[1, 2, 3]
+"Hello!" // String literal, can be multiline, supports interpolation via ${} (NOTE: Interpolation not yet implemented)
+[1, 2, 3] // Array literal. (NOTE: Not yet implemented. Arrays can be initialized with new_array<T>( from: FixedArray(val1, val2, etc) )
 (1, 2, 3) // Tuple literal  (NOTE: Not yet implemented)
 {x: 2, y: 4} // Structural object literal
 ```
