@@ -89,4 +89,4 @@ pub macro bin_type_to_heap_type(type)
   ` binaryen
     func: modBinaryenTypeToHeapType
     namespace: gc
-    args: [BnrType<($type)>]
+    args: `(BnrType<($type)>)

@@ -5,7 +5,7 @@ macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
   let body = ` binaryen
     func: $wasm_fn
     namespace: $arg_type
-    args: [left, right]
+    args: `(left, right)
 
   ` define_function $op $params return_type($return_type) $body
 
@@ -116,28 +116,28 @@ pub fn '=='(left: bool, right: bool) -> bool
   binaryen
     func: eq
     namespace: i32
-    args: [left, right]
+    args: `(left, right)
 
 pub fn 'and'(left: bool, right: bool) -> bool
   binaryen
     func: 'and'
     namespace: i32
-    args: [left, right]
+    args: `(left, right)
 
 pub fn 'or'(left: bool, right: bool) -> bool
   binaryen
     func: 'or'
     namespace: i32
-    args: [left, right]
+    args: `(left, right)
 
 pub fn 'xor'(left: bool, right: bool) -> bool
   binaryen
     func: 'xor'
     namespace: i32
-    args: [left, right]
+    args: `(left, right)
 
 pub fn not(value: bool) -> bool
   binaryen
     func: eqz
     namespace: i32
-    args: [value]
+    args: `(value)
