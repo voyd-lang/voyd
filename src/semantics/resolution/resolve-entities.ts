@@ -79,7 +79,7 @@ const resolveListTypes = (list: List) => {
 
 const resolveTypeAlias = (alias: TypeAlias): TypeAlias => {
   if (alias.type) return alias;
-  alias.typeExpr = resolveEntities(alias.typeExpr);
+  alias.typeExpr = resolveTypeExpr(alias.typeExpr);
   alias.type = getExprType(alias.typeExpr);
   return alias;
 };
