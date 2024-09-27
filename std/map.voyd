@@ -15,71 +15,77 @@ pub fn new_map<T>() -> Map
 
 impl<T> Map<T>
   fn hash(key: string) -> i32
-    let hashValue = 0
-    let i = 0
+    var hashValue = 0
+    var i = 0
     while i < key.length do:
       hashValue = (hashValue * 31 + key.char_code_at(i)) % self.buckets.length
-      i += 1
+      i = i + 1
     hashValue
 
-  pub fn set(self, key: string, value: T) -> Map<T>
+  fn get_bucket_by_key(self, key: string) -> Optional<Array<{ key: string, value: T }>>
     let index = self.hash(key)
-    let bucket = self.buckets.get(index)
+    self.buckets.get(index)
 
-    let i = 0
-    let exisiting = false
+  fn get_index_of_item_in_bucket(bucket: Array<{ key: string, value: T }>, key: string) -> i32
+    var i = 0
+    var index = -1
     while i < bucket.length do:
-      if bucket.get(i).key == key then:
-        bucket.set(i, { key: key, value: value })
-        exisiting = true
-        break
-      i += 1
+      bucket.get(i).match(v)
+        Some<{ key: string, value: T }>:
+          if v.key == key then:
+            index = i
+            break
+        None:
+          // Do nothing
+      i = i + 1
+    index
 
-    if !exisiting then:
+  pub fn set(self, key: string, value: T) -> Map<T>
+    self.get_bucket_by_key(key).match(bucket)
+      Some<Array<{ key: string, value: T }>>:
+        add_to_bucket(bucket, key, value)
+        self
+      None:
+        let new_bucket = new_array<{ key: string, value: T }>({ with_size: 1 })
+        new_bucket.set(0, { key: key, value: value })
+        self.buckets.set(index, new_bucket)
+        self
+
+  fn add_to_bucket(
+    bucket: Array<{ key: string, value: T }>,
+    key: string,
+    value: T
+  ) -> void
+    let index = get_index_of_item_in_bucket(bucket, key)
+
+    if index < 0 then:
       bucket.push({ key: key, value: value })
-      self
     else:
-      self
+      bucket.set(index, { key: key, value: value })
 
   pub fn get(self, key: string) -> Optional<T>
-    let index = self.hash(key)
-    let bucket = self.buckets.get(index)
+    self.get_bucket_by_key(key).match(bucket)
+      Some<Array<{ key: string, value: T }>>:
+        let index = get_index_of_item_in_bucket(bucket, key)
+        if index < 0 then:
+          None {}
+        else:
+          bucket.get(index)
+      None: None {}
 
-    let i = 0
-    let result: Optional<T> = None {}
-    while i < bucket.length do:
-      if bucket.get(i).key == key then:
-        result = Some<T> { value: bucket.get(i).value }
-        break
-      i += 1
-
-    result
-
-  pub fn delete(self, key: string) -> bool
-    let index = self.hash(key)
-    let bucket = self.buckets.get(index)
-
-    let i = 0
-    let found = false
-    while i < bucket.length do:
-      if bucket.get(i).key == key then:
-        bucket.remove(i, 1)
-        found = true
-        break
-      i = i + 1
-
-    found
+  pub fn delete(self, key: string) -> Map<T>
+    self.get_bucket_by_key(key).match(bucket)
+      Some<Array<{ key: string, value: T }>>:
+        let index = get_index_of_item_in_bucket(bucket, key)
+        if index < 0 then:
+          self
+        else:
+          bucket.remove(index, 1)
+          true
+      None: self
 
   pub fn has(self, key: string) -> bool
-    let index = self.hash(key)
-    let bucket = self.buckets.get(index)
-
-    let i = 0
-    let found = false
-    while i < bucket.length do:
-      if bucket.get(i).key == key then:
-        found = true
-        break
-      i = i + 1
-
-    found
+    self.get_bucket_by_key(key).match(bucket)
+      Some<Array<{ key: string, value: T }>>:
+        get_index_of_item_in_bucket(bucket, key) >= 0
+      None: false
