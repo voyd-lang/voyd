@@ -7,3 +7,18 @@ pub obj Some<T> {
 pub obj None {}
 
 pub type Optional<T> = Some<T> | None
+
+pub fn equals<T>(a: Option<T>, b: Option<T>) -> bool
+  match(a)
+    Some<T>:
+      match(b)
+        Some<T>:
+          a.value == b.value
+        None:
+          false
+    None:
+      match(b)
+        Some<T>:
+          false
+        None:
+          true

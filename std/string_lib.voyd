@@ -85,3 +85,16 @@ pub fn read_next_char(iterator: StringIterator) -> i32
     let char = iterator.str.char_code_at(iterator.index)
     iterator.index = iterator.index + 1
     char
+
+pub fn '=='(a: string, b: string) -> bool
+  if a.length != b.length then:
+    false
+  else:
+    var i = 0
+    var result = true
+    while i < a.length do:
+      if a.char_code_at(i) != b.char_code_at(i) then:
+        result = false
+        break
+      i = i + 1
+    result

@@ -1,0 +1,85 @@
+use macros::all
+use array::all
+use operators::all
+use optional::all
+
+obj Map<T> {
+  buckets: Array<Array<{ key: string, value: T }>>
+}
+
+pub fn new_map<T>() -> Map
+  Map {
+    buckets: new_array<Array<{ key: string, value: T }>>({ with_size: 16 })
+  }
+
+
+impl<T> Map<T>
+  fn hash(key: string) -> i32
+    let hashValue = 0
+    let i = 0
+    while i < key.length do:
+      hashValue = (hashValue * 31 + key.char_code_at(i)) % self.buckets.length
+      i += 1
+    hashValue
+
+  pub fn set(self, key: string, value: T) -> Map<T>
+    let index = self.hash(key)
+    let bucket = self.buckets.get(index)
+
+    let i = 0
+    let exisiting = false
+    while i < bucket.length do:
+      if bucket.get(i).key == key then:
+        bucket.set(i, { key: key, value: value })
+        exisiting = true
+        break
+      i += 1
+
+    if !exisiting then:
+      bucket.push({ key: key, value: value })
+      self
+    else:
+      self
+
+  pub fn get(self, key: string) -> Optional<T>
+    let index = self.hash(key)
+    let bucket = self.buckets.get(index)
+
+    let i = 0
+    let result: Optional<T> = None {}
+    while i < bucket.length do:
+      if bucket.get(i).key == key then:
+        result = Some<T> { value: bucket.get(i).value }
+        break
+      i += 1
+
+    result
+
+  pub fn delete(self, key: string) -> bool
+    let index = self.hash(key)
+    let bucket = self.buckets.get(index)
+
+    let i = 0
+    let found = false
+    while i < bucket.length do:
+      if bucket.get(i).key == key then:
+        bucket.remove(i, 1)
+        found = true
+        break
+      i = i + 1
+
+    found
+
+  pub fn has(self, key: string) -> bool
+    let index = self.hash(key)
+    let bucket = self.buckets.get(index)
+
+    let i = 0
+    let found = false
+    while i < bucket.length do:
+      if bucket.get(i).key == key then:
+        found = true
+        break
+      i = i + 1
+
+    found

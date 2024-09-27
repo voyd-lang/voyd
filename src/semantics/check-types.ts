@@ -146,7 +146,7 @@ export const checkAssign = (call: Call) => {
   }
 
   if (!variable.isMutable) {
-    throw new Error(`${id} cannot be re-assigned`);
+    throw new Error(`${id} cannot be re-assigned at ${id.location}`);
   }
 
   const initType = getExprType(call.argAt(1));
@@ -276,7 +276,7 @@ const checkFnTypes = (fn: Fn): Fn => {
 const checkParameters = (params: Parameter[]) => {
   params.forEach((p) => {
     if (!p.type) {
-      throw new Error(`Unable to determine type for ${p}`);
+      throw new Error(`Unable to determine type for ${p} at ${p.location}`);
     }
 
     checkTypeExpr(p.typeExpr);

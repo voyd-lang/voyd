@@ -28,11 +28,10 @@ impl<T> Array<T>
 
   pub fn get(self, index: i32) -> Optional<T>
     let computed_index = compute_index(index, self.count)
-    Some<T> { value: self.storage.get<T>(index) }
-    // if computed_index >= self.count then:
-    //   None {}
-    // else:
-    //   Some<T> { value: self.storage.get<T>(index) }
+    if computed_index >= self.count then:
+      None {}
+    else:
+      Some<T> { value: self.storage.get<T>(index) }
 
   pub fn set(self, index: i32, value: T) -> Array<T>
     let computed_index = compute_index(index, self.count)
@@ -65,6 +64,55 @@ impl<T> Array<T>
         None:
           None {}
 
+  pub fn remove(self, index: i32) -> Array<T>
+    let computed_index = compute_index(index, self.count)
+    if computed_index >= self.count then:
+      self
+    else:
+      let new_length = self.count - 1
+      let new_storage = new_fixed_array<T>(new_length)
+
+      new_storage.copy<T>({
+        from: self.storage,
+        to_index: 0,
+        from_index: 0,
+        count: computed_index
+      })
+
+      new_storage.copy<T>({
+        from: self.storage,
+        to_index: computed_index,
+        from_index: computed_index + 1,
+        count: new_length - computed_index
+      })
+
+      Array<T> { storage: new_storage, count: new_length }
+
+  pub fn insert(self, index: i32, value: T) -> Array<T>
+    let computed_index = compute_index(index, self.count)
+    if computed_index >= self.count then:
+      self.push(value)
+    else:
+      let new_length = self.count + 1
+      let new_storage = new_fixed_array<T>(new_length)
+
+      new_storage.copy<T>({
+        from: self.storage,
+        to_index: 0,
+        from_index: 0,
+        count: computed_index
+      })
+
+      new_storage.set<T>(computed_index, value)
+
+      new_storage.copy<T>({
+        from: self.storage,
+        to_index: computed_index + 1,
+        from_index: computed_index,
+        count: new_length - computed_index
+      })
+
+      Array<T> { storage: new_storage, count: new_length }
 
   pub fn slice(self, start: i32, end: i32) -> Array<T>
     let computed_start = compute_index(start, self.count)
@@ -86,6 +134,57 @@ impl<T> Array<T>
         count: new_length
       })
       Array<T> { storage: new_storage, count: new_length }
+
+  pub fn splice(self, start: i32, delete_count: i32, items: Array<T>) -> Array<T>
+    let computed_start = compute_index(start, self.count)
+    let computed_delete_count = delete_count
+    let computed_end = computed_start + computed_delete_count
+
+    if
+      (computed_start >= self.count) or
+      (computed_end >= self.count) or
+      (computed_start >= computed_end)
+    then:
+      self
+    else:
+      let new_length = self.count - computed_delete_count + items.count
+      let new_storage = new_fixed_array<T>(new_length)
+
+      new_storage.copy<T>({
+        from: self.storage,
+        to_index: 0,
+        from_index: 0,
+        count: computed_start
+      })
+
+      new_storage.copy<T>({
+        from: items.storage,
+        to_index: computed_start,
+        from_index: 0,
+        count: items.count
+      })
+
+      new_storage.copy<T>({
+        from: self.storage,
+        to_index: computed_start + items.count,
+        from_index: computed_end,
+        count: self.count - computed_end
+      })
+
+      Array<T> { storage: new_storage, count: new_length }
+
+  pub fn '=='(a: Array<T>, b: Array<T>) -> bool
+    if a.count != b.count then:
+      false
+    else:
+      let i = 0
+      let result = true
+      while i < a.count do:
+        if not(equals<T>(a.get(i), b.get(i))) then:
+          result = false
+          break
+        i += 1
+      result
 
 
 fn compute_index(index: i32, length: i32) -> i32
