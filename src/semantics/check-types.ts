@@ -321,7 +321,11 @@ const checkVarTypes = (variable: Variable): Variable => {
     !typesAreCompatible(variable.inferredType, variable.annotatedType)
   ) {
     throw new Error(
-      `${variable.name} of type ${variable.type} is not assignable to ${variable.inferredType}`
+      `${variable.name} of type ${JSON.stringify(
+        variable.type
+      )} is not assignable to ${JSON.stringify(variable.inferredType)} at ${
+        variable.location
+      }`
     );
   }
 

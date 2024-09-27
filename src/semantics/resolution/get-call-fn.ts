@@ -16,7 +16,9 @@ export const getCallFn = (call: Call): Fn | undefined => {
 
   if (candidates.length === 1) return candidates[0];
 
-  throw new Error(`Ambiguous call ${JSON.stringify(call, null, 2)}`);
+  throw new Error(
+    `Ambiguous call ${JSON.stringify(call, null, 2)} at ${call.location}`
+  );
 };
 
 const getCandidates = (call: Call): Fn[] => {
