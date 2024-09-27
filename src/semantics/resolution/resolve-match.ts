@@ -4,6 +4,7 @@ import { Match, MatchCase } from "../../syntax-objects/match.js";
 import { combineTypes } from "./combine-types.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities, resolveVar } from "./resolve-entities.js";
+import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export const resolveMatch = (match: Match): Match => {
   match.operand = resolveEntities(match.operand);
@@ -27,6 +28,7 @@ const resolveCase = (
   binding: Parameter | Variable,
   c: MatchCase
 ): MatchCase => {
+  if (c.matchTypeExpr) resolveTypeExpr(c.matchTypeExpr);
   const type = getExprType(c.matchTypeExpr);
 
   const localBinding = binding.clone();

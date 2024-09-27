@@ -1,4 +1,5 @@
 use macros::all
+use operators::all
 
 pub obj Some<T> {
   value: T
@@ -7,7 +8,9 @@ pub obj Some<T> {
 pub obj None {}
 
 pub type Optional<T> = Some<T> | None
+pub type Option<T> = Optional<T>
 
+// Todo equitable trait constraint
 pub fn equals<T>(a: Option<T>, b: Option<T>) -> bool
   match(a)
     Some<T>:

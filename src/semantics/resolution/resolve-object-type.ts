@@ -10,6 +10,7 @@ import { getExprType } from "./get-expr-type.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
+import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
   if (obj.typesResolved) return obj;
@@ -19,11 +20,12 @@ export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
   }
 
   obj.fields.forEach((field) => {
-    field.typeExpr = resolveEntities(field.typeExpr);
+    field.typeExpr = resolveTypeExpr(field.typeExpr);
     field.type = getExprType(field.typeExpr);
   });
 
   if (obj.parentObjExpr) {
+    obj.parentObjExpr = resolveTypeExpr(obj.parentObjExpr);
     const parentType = getExprType(obj.parentObjExpr);
     obj.parentObjType = parentType?.isObjectType() ? parentType : undefined;
   } else {
@@ -67,6 +69,7 @@ const resolveGenericsWithTypeArgs = (
       name: identifier,
       typeExpr: nop(),
     });
+    resolveTypeExpr(typeArg);
     type.type = getExprType(typeArg);
     if (!type.type) typesNotResolved = true;
     newObj.appliedTypeArgs?.push(type);

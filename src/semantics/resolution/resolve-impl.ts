@@ -4,6 +4,7 @@ import { ObjectType, TypeAlias } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveEntities } from "./resolve-entities.js";
+import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export const resolveImpl = (
   impl: Implementation,
@@ -25,6 +26,7 @@ export const resolveImpl = (
         name: typeParam.clone(),
         typeExpr: nop(),
       });
+      resolveTypeExpr(arg);
       type.type = getExprType(arg);
       impl.registerEntity(type);
     });

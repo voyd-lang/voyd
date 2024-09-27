@@ -2,6 +2,7 @@ import { Call, Expr, Fn } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFn } from "./resolve-fn.js";
+import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export const getCallFn = (call: Call): Fn | undefined => {
   if (isPrimitiveFnCall(call)) return undefined;
@@ -78,7 +79,9 @@ const filterCandidateWithGenerics = (call: Call, candidate: Fn): Fn[] => {
 const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
   call.typeArgs && candidate.appliedTypeArgs
     ? candidate.appliedTypeArgs.every((t, i) => {
-        const argType = getExprType(call.typeArgs?.at(i));
+        const arg = call.typeArgs?.at(i);
+        if (arg) resolveTypeExpr(arg);
+        const argType = getExprType(arg);
         const appliedType = getExprType(t);
         return typesAreCompatible(argType, appliedType, {
           exactNominalMatch: true,

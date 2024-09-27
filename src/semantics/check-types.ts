@@ -377,7 +377,9 @@ const checkTypeExpr = (expr?: Expr) => {
   if (!expr) return; // TODO: Throw error? We use nop instead of undefined now (but maybe not everywhere)
 
   if (expr.isCall() && !expr.type) {
-    throw new Error(`Unable to fully resolve type at ${expr.location}`);
+    throw new Error(
+      `Unable to fully resolve type at ${expr.location ?? expr.fnName.location}`
+    );
   }
 
   if (expr.isCall()) {
@@ -388,13 +390,15 @@ const checkTypeExpr = (expr?: Expr) => {
 };
 
 const checkTypeAlias = (alias: TypeAlias): TypeAlias => {
+  if (alias.typeParameters) return alias;
+
   if (!alias.type) {
     throw new Error(
       `Unable to determine type for ${JSON.stringify(
         alias.typeExpr,
         undefined,
         2
-      )}`
+      )} at ${alias.location}`
     );
   }
 
