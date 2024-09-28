@@ -497,6 +497,8 @@ const checkUnionMatch = (match: Match) => {
   }
 
   for (const mCase of match.cases) {
+    checkTypes(mCase.expr);
+
     if (!mCase.matchType) {
       throw new Error(
         `Unable to determine match type for case at ${mCase.expr.location}`
@@ -508,8 +510,6 @@ const checkUnionMatch = (match: Match) => {
         `All cases must return the same type for now ${mCase.expr.location}`
       );
     }
-
-    checkTypes(mCase.expr);
   }
 
   union.types.forEach((type) => {
@@ -538,6 +538,8 @@ const checkObjectMatch = (match: Match) => {
   }
 
   for (const mCase of match.cases) {
+    checkTypes(mCase.expr);
+
     if (!mCase.matchType) {
       throw new Error(
         `Unable to determine match type for case at ${mCase.expr.location}`
@@ -555,8 +557,6 @@ const checkObjectMatch = (match: Match) => {
         `All cases must return the same type for now ${mCase.expr.location}`
       );
     }
-
-    checkTypes(mCase.expr);
   }
 
   return match;

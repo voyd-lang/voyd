@@ -9,7 +9,10 @@ pub obj Array<T> {
 }
 
 pub fn new_array<T>(opts: { with_size: i32 }) -> Array<T>
-  Array<T> { storage: new_fixed_array<T>(opts.with_size), count: 0 }
+  Array<T> {
+    storage: new_fixed_array<T>(opts.with_size),
+    count: 0
+  }
 
 pub fn new_array<T>(opts: { from: FixedArray<T> }) -> Array<T>
   Array<T> { storage: opts.from, count: opts.from.length<T>() }
@@ -33,6 +36,7 @@ impl<T> Array<T>
     else:
       Some<T> { value: self.storage.get<T>(index) }
 
+  // This is unsafe at the moment
   pub fn set(self, index: i32, value: T) -> Array<T>
     let computed_index = compute_index(index, self.count)
     if computed_index >= self.storage.length<T>() then:

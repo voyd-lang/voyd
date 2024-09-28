@@ -13,8 +13,9 @@ export function run(mod: binaryen.Module) {
   const fns = instance.exports as any;
   const result = fns.main();
 
-  if (result && result instanceof Object) {
+  if (typeof result === "object") {
     console.log(readString(result, instance));
+    return;
   }
 
   console.log(result);

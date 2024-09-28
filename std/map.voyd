@@ -9,10 +9,14 @@ obj Map<T> {
 }
 
 pub fn new_map<T>() -> Map<T>
-  Map<T> {
-    buckets: new_array<Array<{ key: string, value: T }>>({ with_size: 16 })
-  }
+  let buckets = new_array<Array<{ key: string, value: T }>>({ with_size: 16 })
 
+  var i = 0
+  while i < 16 do:
+    buckets.push(new_array<{ key: string, value: T }>({ with_size: 4 }))
+    i = i + 1
+
+  Map<T> { buckets: buckets }
 
 impl<T> Map<T>
   fn hash(self, key: string) -> i32
@@ -73,22 +77,26 @@ impl<T> Map<T>
         if index < 0 then:
           None {}
         else:
-          bucket.value.get(index)
+          bucket.value.get(index).match(v)
+            Some<{ key: string, value: T }>:
+              Some<T> { value: v.value.value }
+            None:
+              None {}
       None: None {}
 
   pub fn delete(self, key: string) -> Map<T>
     self.get_bucket_by_key(key).match(bucket)
       Some<Array<{ key: string, value: T }>>:
-        let index = get_index_of_item_in_bucket(bucket, key)
+        let index = get_index_of_item_in_bucket(bucket.value, key)
         if index < 0 then:
           self
         else:
-          bucket.remove(index, 1)
-          true
+          bucket.value.remove(index)
+          self
       None: self
 
   pub fn has(self, key: string) -> bool
     self.get_bucket_by_key(key).match(bucket)
       Some<Array<{ key: string, value: T }>>:
-        get_index_of_item_in_bucket(bucket, key) >= 0
+        get_index_of_item_in_bucket(bucket.value, key) >= 0
       None: false

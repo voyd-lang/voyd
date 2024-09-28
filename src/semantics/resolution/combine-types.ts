@@ -17,6 +17,7 @@ export const combineTypes = (types: Type[]): Type | undefined => {
     return firstType;
   }
 
+  let isLocalUnion = false;
   let topType: ObjectType | IntersectionType | UnionType = firstType;
   for (const type of types.slice(1)) {
     if (type.id === topType.id) {
@@ -29,22 +30,24 @@ export const combineTypes = (types: Type[]): Type | undefined => {
       });
       union.types = [topType, type];
       topType = union;
+      isLocalUnion = true;
       continue;
     }
 
-    if (isObjectOrIntersection(type) && topType.isUnionType()) {
+    if (isObjectOrIntersection(type) && topType.isUnionType() && isLocalUnion) {
       topType.types.push(type);
       continue;
     }
 
+    // TODO: Fix (V-129)
     if (type.isUnionType() && isObjectOrIntersection(topType)) {
       const obj = topType;
       topType = type;
-      type.types.push(obj);
+      if (isLocalUnion) type.types.push(obj);
       continue;
     }
 
-    if (type.isUnionType() && topType.isUnionType()) {
+    if (type.isUnionType() && topType.isUnionType() && isLocalUnion) {
       topType.types.push(...type.types);
       continue;
     }
