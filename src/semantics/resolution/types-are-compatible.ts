@@ -1,4 +1,5 @@
 import { Type } from "../../syntax-objects/index.js";
+import { getExprType } from "./get-expr-type.js";
 
 export const typesAreCompatible = (
   /** A is the argument type, the type of the value being passed as b */
@@ -21,14 +22,25 @@ export const typesAreCompatible = (
 
   if (a.isObjectType() && b.isObjectType()) {
     const structural = opts.structuralOnly || b.getAttribute("isStructural");
-    if (opts.exactNominalMatch) return a.id === b.id;
 
     if (structural) {
       return b.fields.every((field) => {
         const match = a.fields.find((f) => f.name === field.name);
-        return match && typesAreCompatible(field.type, match.type);
+        return match && typesAreCompatible(field.type, match.type, opts);
       });
     }
+
+    if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
+      return !!a.appliedTypeArgs?.every((arg, index) =>
+        typesAreCompatible(
+          getExprType(arg),
+          getExprType(b.appliedTypeArgs?.[index]),
+          opts
+        )
+      );
+    }
+
+    if (opts.exactNominalMatch) return a.id === b.id;
 
     return a.extends(b);
   }

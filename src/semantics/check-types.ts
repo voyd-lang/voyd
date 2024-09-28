@@ -71,7 +71,9 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
       .join(", ");
 
     throw new Error(
-      `Could not resolve fn ${call.fnName}(${params}) at ${call.location}`
+      `Could not resolve fn ${call.fnName}(${params}) at ${
+        call.location ?? call.fnName.location
+      }`
     );
   }
 
@@ -149,7 +151,9 @@ export const checkAssign = (call: Call) => {
     throw new Error(`${id} cannot be re-assigned at ${id.location}`);
   }
 
-  const initType = getExprType(call.argAt(1));
+  const initExpr = call.argAt(1);
+  checkTypes(initExpr);
+  const initType = getExprType(initExpr);
 
   if (!typesAreCompatible(variable.type, initType)) {
     throw new Error(`${id} cannot be assigned to ${initType}`);
@@ -386,11 +390,45 @@ const checkTypeExpr = (expr?: Expr) => {
     );
   }
 
+  if (expr.isCall() && hasTypeArgs(expr.type)) {
+    throw new Error(
+      `Type args must be resolved at ${expr.location ?? expr.fnName.location}`
+    );
+  }
+
   if (expr.isCall()) {
     return;
   }
 
+  if (expr.isIdentifier()) {
+    const entity = expr.resolve();
+    if (!entity) {
+      throw new Error(`Unrecognized identifier ${expr} at ${expr.location}`);
+    }
+
+    if (!entity.isType()) {
+      throw new Error(
+        `Expected type, got ${entity.name.value} at ${expr.location}`
+      );
+    }
+
+    if (hasTypeArgs(entity)) {
+      throw new Error(
+        `Type args must be resolved for ${entity.name} at ${expr.location}`
+      );
+    }
+  }
+
   return checkTypes(expr);
+};
+
+const hasTypeArgs = (type?: Expr) => {
+  if (!type) return false;
+
+  if (type.isTypeAlias() && type.typeParameters) return true;
+  if (type.isObjectType() && type.typeParameters) return true;
+
+  return false;
 };
 
 const checkTypeAlias = (alias: TypeAlias): TypeAlias => {

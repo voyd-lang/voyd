@@ -10,7 +10,6 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveIntersectionType } from "./resolve-intersection.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveUnionType } from "./resolve-union.js";
-import { resolveEntities } from "./resolve-entities.js";
 
 export const resolveTypeExpr = (typeExpr: Expr): Expr => {
   if (typeExpr.isIdentifier()) return typeExpr;

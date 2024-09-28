@@ -8,3 +8,4 @@ pub mod utils::all
 pub mod string_lib::all
 pub mod fixed_array::all
 pub mod string_lib
+pub mod map::all

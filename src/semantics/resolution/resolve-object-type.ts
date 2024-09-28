@@ -8,7 +8,6 @@ import {
 } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
-import { resolveEntities } from "./resolve-entities.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 
@@ -59,6 +58,7 @@ const resolveGenericsWithTypeArgs = (
   const newObj = obj.clone();
   newObj.typeParameters = undefined;
   newObj.appliedTypeArgs = [];
+  newObj.genericParent = obj;
 
   /** Register resolved type entities for each type param */
   let typesNotResolved = false;

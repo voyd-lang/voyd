@@ -2,25 +2,26 @@ use macros::all
 use array::all
 use operators::all
 use optional::all
+use string_lib::all
 
 obj Map<T> {
   buckets: Array<Array<{ key: string, value: T }>>
 }
 
-pub fn new_map<T>() -> Map
-  Map {
+pub fn new_map<T>() -> Map<T>
+  Map<T> {
     buckets: new_array<Array<{ key: string, value: T }>>({ with_size: 16 })
   }
 
 
 impl<T> Map<T>
-  fn hash(key: string) -> i32
-    var hashValue = 0
+  fn hash(self, key: string) -> i32
+    var hash_value = 0
     var i = 0
     while i < key.length do:
-      hashValue = (hashValue * 31 + key.char_code_at(i)) % self.buckets.length
+      hash_value = (hash_value * 31 + key.char_code_at(i)) % self.buckets.length
       i = i + 1
-    hashValue
+    hash_value
 
   fn get_bucket_by_key(self, key: string) -> Optional<Array<{ key: string, value: T }>>
     let index = self.hash(key)
@@ -32,22 +33,24 @@ impl<T> Map<T>
     while i < bucket.length do:
       bucket.get(i).match(v)
         Some<{ key: string, value: T }>:
-          if v.key == key then:
+          if v.value.key == key then:
             index = i
             break
+          0
         None:
-          // Do nothing
+          0
       i = i + 1
     index
 
   pub fn set(self, key: string, value: T) -> Map<T>
     self.get_bucket_by_key(key).match(bucket)
       Some<Array<{ key: string, value: T }>>:
-        add_to_bucket(bucket, key, value)
+        add_to_bucket(bucket.value, key, value)
         self
       None:
         let new_bucket = new_array<{ key: string, value: T }>({ with_size: 1 })
         new_bucket.set(0, { key: key, value: value })
+        let index = self.hash(key)
         self.buckets.set(index, new_bucket)
         self
 
@@ -55,7 +58,7 @@ impl<T> Map<T>
     bucket: Array<{ key: string, value: T }>,
     key: string,
     value: T
-  ) -> void
+  )
     let index = get_index_of_item_in_bucket(bucket, key)
 
     if index < 0 then:
@@ -66,11 +69,11 @@ impl<T> Map<T>
   pub fn get(self, key: string) -> Optional<T>
     self.get_bucket_by_key(key).match(bucket)
       Some<Array<{ key: string, value: T }>>:
-        let index = get_index_of_item_in_bucket(bucket, key)
+        let index = get_index_of_item_in_bucket(bucket.value, key)
         if index < 0 then:
           None {}
         else:
-          bucket.get(index)
+          bucket.value.get(index)
       None: None {}
 
   pub fn delete(self, key: string) -> Map<T>

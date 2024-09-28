@@ -1,4 +1,5 @@
 import binaryen from "binaryen";
+import { readString } from "./lib/read-string.js";
 
 export function run(mod: binaryen.Module) {
   const binary = mod.emitBinary();
@@ -11,6 +12,10 @@ export function run(mod: binaryen.Module) {
 
   const fns = instance.exports as any;
   const result = fns.main();
+
+  if (result && result instanceof Object) {
+    console.log(readString(result, instance));
+  }
 
   console.log(result);
 }

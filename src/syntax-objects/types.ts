@@ -177,6 +177,8 @@ export class ObjectType extends BaseType implements ScopedEntity {
   typeParameters?: Identifier[];
   appliedTypeArgs?: Type[];
   genericInstances?: ObjectType[];
+  /** If this is a genericInstance of an object, this is the generic version itself that it was generated from */
+  genericParent?: ObjectType;
   fields: ObjectField[];
   parentObjExpr?: Expr;
   parentObjType?: ObjectType;
