@@ -377,13 +377,18 @@ const compileFieldAssign = (opts: CompileExprOpts<Call>) => {
   const access = expr.callArgAt(0);
   const member = access.identifierArgAt(1);
   const target = access.exprArgAt(0);
+  const type = getExprType(target) as ObjectType | IntersectionType;
+
+  if (type.getAttribute("isStructural") || type.isIntersectionType()) {
+    return opts.fieldLookupHelpers.setFieldValueByAccessor(opts);
+  }
+
   const value = compileExpression({
     ...opts,
     expr: expr.argAt(1)!,
     isReturnExpr: false,
   });
 
-  const type = getExprType(target) as ObjectType;
   const index = type.getFieldIndex(member);
   if (index === -1) {
     throw new Error(`Field ${member} not found in ${type.id}`);

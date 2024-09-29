@@ -168,7 +168,8 @@ export type ObjectField = {
   name: string;
   typeExpr: Expr;
   type?: Type;
-  binaryenAccessorType?: number;
+  binaryenGetterType?: number;
+  binaryenSetterType?: number;
 };
 
 export class ObjectType extends BaseType implements ScopedEntity {
