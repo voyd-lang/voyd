@@ -21,10 +21,7 @@ import { resolveUse } from "./resolve-use.js";
 
 /**
  * NOTE: Some mapping is preformed on the AST at this stage.
- * Returned tree not guaranteed to be same as supplied tree
- *
- * Should probably rename this to resolveEntities and separate type resolution
- * into a new resolveTypes function that returns Type | undefined
+ * Returned tree not guaranteed to be same as supplied tree.
  */
 export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (!expr) return nop();
