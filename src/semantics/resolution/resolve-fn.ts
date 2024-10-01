@@ -7,6 +7,7 @@ import { Parameter } from "../../syntax-objects/parameter.js";
 import { TypeAlias } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
+import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export type ResolveFnTypesOpts = {
   typeArgs?: List;
@@ -32,7 +33,7 @@ export const resolveFn = (fn: Fn, call?: Call): Fn => {
 
   resolveParameters(fn.parameters);
   if (fn.returnTypeExpr) {
-    fn.returnTypeExpr = resolveEntities(fn.returnTypeExpr);
+    fn.returnTypeExpr = resolveTypeExpr(fn.returnTypeExpr);
     fn.annotatedReturnType = getExprType(fn.returnTypeExpr);
     fn.returnType = fn.annotatedReturnType;
   }
@@ -68,7 +69,7 @@ const resolveParameters = (params: Parameter[]) => {
       throw new Error(`Unable to determine type for ${p}`);
     }
 
-    p.typeExpr = resolveEntities(p.typeExpr);
+    p.typeExpr = resolveTypeExpr(p.typeExpr);
     p.type = getExprType(p.typeExpr);
   });
 };
@@ -102,6 +103,7 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
       typeExpr: typeArg.clone(),
     });
     type.parent = newFn;
+    resolveTypeExpr(typeArg);
     type.type = getExprType(typeArg);
     newFn.appliedTypeArgs?.push(type);
     newFn.registerEntity(type);

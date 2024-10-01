@@ -12,6 +12,7 @@ import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveExport } from "./resolve-use.js";
 import { combineTypes } from "./combine-types.js";
+import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export const resolveCall = (call: Call): Call => {
   if (call.type) return call;
@@ -26,11 +27,6 @@ export const resolveCall = (call: Call): Call => {
   const memberAccessCall = getMemberAccessCall(call);
   if (memberAccessCall) return memberAccessCall;
 
-  const entity = call.fnName.resolve();
-  if (entity?.isTypeAlias()) {
-    return resolveTypeAlias(call, entity);
-  }
-
   // Constructor fn. TODO:
   const type = getIdentifierType(call.fnName);
   if (type?.isObjectType()) {
@@ -38,7 +34,7 @@ export const resolveCall = (call: Call): Call => {
   }
 
   if (call.typeArgs) {
-    call.typeArgs = call.typeArgs.map(resolveEntities);
+    call.typeArgs = call.typeArgs.map(resolveTypeExpr);
   }
 
   call.fn = getCallFn(call);
@@ -57,29 +53,6 @@ export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
   type = resolveObjectType(type, call);
   call.type = type;
   call.fn = type;
-  return call;
-};
-
-export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
-  const alias = type.clone();
-
-  if (alias.typeParameters) {
-    alias.typeParameters.forEach((typeParam, index) => {
-      const typeArg = call.typeArgs?.exprAt(index);
-      const identifier = typeParam.clone();
-      const type = new TypeAlias({
-        name: identifier,
-        typeExpr: nop(),
-      });
-      type.type = getExprType(typeArg);
-      alias.registerEntity(type);
-    });
-  }
-
-  alias.typeExpr = resolveEntities(alias.typeExpr);
-  alias.type = getExprType(alias.typeExpr);
-  call.type = alias.type;
-  call.fn = call.type?.isObjectType() ? call.type : undefined;
   return call;
 };
 
@@ -170,6 +143,7 @@ export const resolveBinaryen = (call: Call) => {
   call.args = call.args.map(resolveEntities);
   const type = call.optionalLabeledArgAt(3);
   if (!type) return call;
+  resolveTypeExpr(type);
   call.type = getExprType(type);
   return call;
 };

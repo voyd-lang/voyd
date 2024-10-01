@@ -5,7 +5,6 @@ import { List } from "../../syntax-objects/list.js";
 import { VoidModule } from "../../syntax-objects/module.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import {
-  FixedArrayType,
   ObjectType,
   TypeAlias,
   voydBaseObject,
@@ -15,18 +14,14 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveCall } from "./resolve-call.js";
 import { resolveFn } from "./resolve-fn.js";
 import { resolveImpl } from "./resolve-impl.js";
-import { resolveIntersectionType } from "./resolve-intersection.js";
 import { resolveMatch } from "./resolve-match.js";
 import { resolveObjectType } from "./resolve-object-type.js";
-import { resolveUnionType } from "./resolve-union.js";
+import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveUse } from "./resolve-use.js";
 
 /**
  * NOTE: Some mapping is preformed on the AST at this stage.
- * Returned tree not guaranteed to be same as supplied tree
- *
- * Should probably rename this to resolveEntities and separate type resolution
- * into a new resolveTypes function that returns Type | undefined
+ * Returned tree not guaranteed to be same as supplied tree.
  */
 export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (!expr) return nop();
@@ -38,13 +33,10 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (expr.isList()) return resolveListTypes(expr);
   if (expr.isUse()) return resolveUse(expr, resolveModule);
   if (expr.isObjectType()) return resolveObjectType(expr);
-  if (expr.isFixedArrayType()) return resolveFixedArrayType(expr);
   if (expr.isTypeAlias()) return resolveTypeAlias(expr);
   if (expr.isObjectLiteral()) return resolveObjectLiteral(expr);
   if (expr.isMatch()) return resolveMatch(expr);
   if (expr.isImpl()) return resolveImpl(expr);
-  if (expr.isUnionType()) return resolveUnionType(expr);
-  if (expr.isIntersectionType()) return resolveIntersectionType(expr);
   return expr;
 };
 
@@ -60,6 +52,7 @@ export const resolveVar = (variable: Variable): Variable => {
   variable.inferredType = getExprType(initializer);
 
   if (variable.typeExpr) {
+    variable.typeExpr = resolveTypeExpr(variable.typeExpr);
     variable.annotatedType = getExprType(variable.typeExpr);
   }
 
@@ -81,16 +74,9 @@ const resolveListTypes = (list: List) => {
   return list.map(resolveEntities);
 };
 
-const resolveFixedArrayType = (arr: FixedArrayType): FixedArrayType => {
-  arr.elemTypeExpr = resolveEntities(arr.elemTypeExpr);
-  arr.elemType = getExprType(arr.elemTypeExpr);
-  arr.id = `${arr.id}#${arr.elemType?.id}`;
-  return arr;
-};
-
 const resolveTypeAlias = (alias: TypeAlias): TypeAlias => {
   if (alias.type) return alias;
-  alias.typeExpr = resolveEntities(alias.typeExpr);
+  alias.typeExpr = resolveTypeExpr(alias.typeExpr);
   alias.type = getExprType(alias.typeExpr);
   return alias;
 };

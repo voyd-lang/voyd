@@ -64,14 +64,6 @@ export const initEntities: SemanticProcessor = (expr) => {
     return initImpl(expr);
   }
 
-  if (expr.calls("|")) {
-    return initPipedUnionType(expr);
-  }
-
-  if (expr.calls("&")) {
-    return initIntersection(expr);
-  }
-
   return initCall(expr);
 };
 

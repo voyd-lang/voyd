@@ -261,6 +261,23 @@ pub fn test22()
         v.value
       None:
         -1
+
+// Test structural object re-assignment
+pub fn test23()
+  let val = { x: 1, y: 2, z: 3 }
+  val.x = 4
+  val.x
+
+// Test the Map type
+pub fn test24()
+  let map = new_map<string>()
+  map.set("hello", "world")
+  map.set("goodbye", "night")
+  map.get("hello").match(v)
+    Some<string>:
+      v.value
+    None:
+      "not found"
 `;
 
 export const tcoText = `

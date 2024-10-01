@@ -1,12 +1,13 @@
 import { IntersectionType } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
+import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export const resolveIntersectionType = (
   inter: IntersectionType
 ): IntersectionType => {
-  inter.nominalTypeExpr.value = resolveEntities(inter.nominalTypeExpr.value);
-  inter.structuralTypeExpr.value = resolveEntities(
+  inter.nominalTypeExpr.value = resolveTypeExpr(inter.nominalTypeExpr.value);
+  inter.structuralTypeExpr.value = resolveTypeExpr(
     inter.structuralTypeExpr.value
   );
 

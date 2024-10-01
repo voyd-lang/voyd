@@ -9,6 +9,7 @@ import { describe, test, vi } from "vitest";
 import assert from "node:assert";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
 import * as rCallUtil from "../assembler/return-call.js";
+import { readString } from "../lib/read-string.js";
 
 describe("E2E Compiler Pipeline", () => {
   test("Compiler can compile and run a basic voyd program", async (t) => {
@@ -70,6 +71,8 @@ describe("E2E Compiler Pipeline", () => {
       "Hello, world! This is a test.",
       12, // Array  of objects test + advanced match
       173, // Array test
+      4, // Structural object re-assignment
+      "world",
     ]);
   });
 
@@ -80,20 +83,3 @@ describe("E2E Compiler Pipeline", () => {
     t.expect(did);
   });
 });
-
-const readString = (ref: Object, instance: WebAssembly.Instance) => {
-  const newStringIterator = getWasmFn("new_string_iterator", instance)!;
-  const readNextChar = getWasmFn("read_next_char", instance)!;
-  const reader = newStringIterator(ref);
-
-  let str = "";
-  while (true) {
-    const char = readNextChar(reader);
-    if (char < 0) {
-      break;
-    }
-    str += String.fromCharCode(char);
-  }
-
-  return str;
-};

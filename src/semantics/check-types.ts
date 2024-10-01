@@ -71,7 +71,9 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
       .join(", ");
 
     throw new Error(
-      `Could not resolve fn ${call.fnName}(${params}) at ${call.location}`
+      `Could not resolve fn ${call.fnName}(${params}) at ${
+        call.location ?? call.fnName.location
+      }`
     );
   }
 
@@ -146,10 +148,12 @@ export const checkAssign = (call: Call) => {
   }
 
   if (!variable.isMutable) {
-    throw new Error(`${id} cannot be re-assigned`);
+    throw new Error(`${id} cannot be re-assigned at ${id.location}`);
   }
 
-  const initType = getExprType(call.argAt(1));
+  const initExpr = call.argAt(1);
+  checkTypes(initExpr);
+  const initType = getExprType(initExpr);
 
   if (!typesAreCompatible(variable.type, initType)) {
     throw new Error(`${id} cannot be assigned to ${initType}`);
@@ -276,7 +280,7 @@ const checkFnTypes = (fn: Fn): Fn => {
 const checkParameters = (params: Parameter[]) => {
   params.forEach((p) => {
     if (!p.type) {
-      throw new Error(`Unable to determine type for ${p}`);
+      throw new Error(`Unable to determine type for ${p} at ${p.location}`);
     }
 
     checkTypeExpr(p.typeExpr);
@@ -321,7 +325,11 @@ const checkVarTypes = (variable: Variable): Variable => {
     !typesAreCompatible(variable.inferredType, variable.annotatedType)
   ) {
     throw new Error(
-      `${variable.name} of type ${variable.type} is not assignable to ${variable.inferredType}`
+      `${variable.name} of type ${JSON.stringify(
+        variable.type
+      )} is not assignable to ${JSON.stringify(variable.inferredType)} at ${
+        variable.location
+      }`
     );
   }
 
@@ -377,24 +385,62 @@ const checkTypeExpr = (expr?: Expr) => {
   if (!expr) return; // TODO: Throw error? We use nop instead of undefined now (but maybe not everywhere)
 
   if (expr.isCall() && !expr.type) {
-    throw new Error(`Unable to fully resolve type at ${expr.location}`);
+    throw new Error(
+      `Unable to fully resolve type at ${expr.location ?? expr.fnName.location}`
+    );
+  }
+
+  if (expr.isCall() && hasTypeArgs(expr.type)) {
+    throw new Error(
+      `Type args must be resolved at ${expr.location ?? expr.fnName.location}`
+    );
   }
 
   if (expr.isCall()) {
     return;
   }
 
+  if (expr.isIdentifier()) {
+    const entity = expr.resolve();
+    if (!entity) {
+      throw new Error(`Unrecognized identifier ${expr} at ${expr.location}`);
+    }
+
+    if (!entity.isType()) {
+      throw new Error(
+        `Expected type, got ${entity.name.value} at ${expr.location}`
+      );
+    }
+
+    if (hasTypeArgs(entity)) {
+      throw new Error(
+        `Type args must be resolved for ${entity.name} at ${expr.location}`
+      );
+    }
+  }
+
   return checkTypes(expr);
 };
 
+const hasTypeArgs = (type?: Expr) => {
+  if (!type) return false;
+
+  if (type.isTypeAlias() && type.typeParameters) return true;
+  if (type.isObjectType() && type.typeParameters) return true;
+
+  return false;
+};
+
 const checkTypeAlias = (alias: TypeAlias): TypeAlias => {
+  if (alias.typeParameters) return alias;
+
   if (!alias.type) {
     throw new Error(
       `Unable to determine type for ${JSON.stringify(
         alias.typeExpr,
         undefined,
         2
-      )}`
+      )} at ${alias.location}`
     );
   }
 
@@ -451,6 +497,8 @@ const checkUnionMatch = (match: Match) => {
   }
 
   for (const mCase of match.cases) {
+    checkTypes(mCase.expr);
+
     if (!mCase.matchType) {
       throw new Error(
         `Unable to determine match type for case at ${mCase.expr.location}`
@@ -462,8 +510,6 @@ const checkUnionMatch = (match: Match) => {
         `All cases must return the same type for now ${mCase.expr.location}`
       );
     }
-
-    checkTypes(mCase.expr);
   }
 
   union.types.forEach((type) => {
@@ -492,6 +538,8 @@ const checkObjectMatch = (match: Match) => {
   }
 
   for (const mCase of match.cases) {
+    checkTypes(mCase.expr);
+
     if (!mCase.matchType) {
       throw new Error(
         `Unable to determine match type for case at ${mCase.expr.location}`
@@ -509,8 +557,6 @@ const checkObjectMatch = (match: Match) => {
         `All cases must return the same type for now ${mCase.expr.location}`
       );
     }
-
-    checkTypes(mCase.expr);
   }
 
   return match;
