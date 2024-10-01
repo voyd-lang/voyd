@@ -71,6 +71,8 @@ describe("E2E Compiler Pipeline", () => {
       "Hello, world! This is a test.",
       12, // Array  of objects test + advanced match
       173, // Array test
+      4, // Structural object re-assignment
+      "world",
     ]);
   });
 
