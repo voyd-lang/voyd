@@ -69,23 +69,7 @@ export const initTypeCompatibilityHelpers = (mod: binaryen.Module) => {
     binaryen.i32, // bool
     [],
     mod.block(null, [
-      // At this point, if the types aren't the same kind of RTT, they're not compatible, return false
-      mod.if(
-        mod.i32.ne(getRttTypeId(0), getRttTypeId(1)),
-        mod.return(mod.i32.const(0))
-      ),
-
-      // If a and b are a nominal type, check that they're the same nominal type
-      mod.if(
-        mod.i32.and(
-          mod.i32.eq(getRttTypeId(0), mod.i32.const(4)),
-          mod.i32.eq(getRttTypeId(1), mod.i32.const(4))
-        ),
-        mod.i32.eq(getNominalId(0), getNominalId(1))
-      ),
-
-      // If we get here the types are compatible primitive types
-      mod.i32.const(1),
+      // Fill in the blank
     ])
   );
 };
