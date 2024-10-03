@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { AugmentedBinaryen } from "../lib/binaryen-gc/types.js";
+import { AugmentedBinaryen } from "../../lib/binaryen-gc/types.js";
 import {
   defineArrayType,
   arrayLen,
@@ -13,20 +13,20 @@ import {
   callRef,
   refCast,
   structSetFieldValue,
-} from "../lib/binaryen-gc/index.js";
+} from "../../lib/binaryen-gc/index.js";
 import {
   IntersectionType,
   ObjectType,
   voydBaseObject,
-} from "../syntax-objects/types.js";
-import { murmurHash3 } from "../lib/murmur-hash.js";
+} from "../../syntax-objects/types.js";
+import { murmurHash3 } from "../../lib/murmur-hash.js";
 import {
   compileExpression,
   CompileExprOpts,
   mapBinaryenType,
-} from "../assembler.js";
-import { Call } from "../syntax-objects/call.js";
-import { getExprType } from "../semantics/resolution/get-expr-type.js";
+} from "../../assembler.js";
+import { Call } from "../../syntax-objects/call.js";
+import { getExprType } from "../../semantics/resolution/get-expr-type.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 

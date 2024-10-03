@@ -273,6 +273,14 @@ export const arrayNewFixed = (
   return result;
 };
 
+export const initFixedArray = (
+  mod: binaryen.Module,
+  type: TypeRef,
+  values: ExpressionRef[]
+): ExpressionRef => {
+  return arrayNewFixed(mod, binaryenTypeToHeapType(type), values);
+};
+
 export const arrayCopy = (
   mod: binaryen.Module,
   destRef: ExpressionRef,

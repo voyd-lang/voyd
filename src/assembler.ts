@@ -29,10 +29,10 @@ import * as gc from "./lib/binaryen-gc/index.js";
 import { TypeRef } from "./lib/binaryen-gc/types.js";
 import { getExprType } from "./semantics/resolution/get-expr-type.js";
 import { Match, MatchCase } from "./syntax-objects/match.js";
-import { initExtensionHelpers } from "./assembler/extension-helpers.js";
+import { initExtensionHelpers } from "./assembler/rtt/extension.js";
 import { returnCall } from "./assembler/return-call.js";
 import { Float } from "./syntax-objects/float.js";
-import { initFieldLookupHelpers } from "./assembler/field-lookup-helpers.js";
+import { initFieldLookupHelpers } from "./assembler/index.js";
 import { StringLiteral } from "./syntax-objects/string-literal.js";
 
 export const assemble = (ast: Expr) => {
