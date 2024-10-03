@@ -98,8 +98,8 @@ const resolveObjectLiteral = (obj: ObjectLiteral) => {
         type: f.type,
       })),
       parentObj: voydBaseObject,
+      isStructural: true,
     });
-    obj.type.setAttribute("isStructural", true);
   }
 
   return obj;

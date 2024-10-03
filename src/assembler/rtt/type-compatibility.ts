@@ -163,7 +163,7 @@ const initTypeMaker = (mod: binaryen.Module, rtt: RttTypes) => {
             throw new Error(`Unknown primitive type: ${type.name.value}`);
         }
       case "object":
-        if (type.getAttribute("isStructural")) {
+        if (type.isStructural) {
           return newStructuralObject(type.fields);
         }
 

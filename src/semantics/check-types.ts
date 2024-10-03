@@ -478,7 +478,7 @@ const checkIntersectionType = (inter: IntersectionType) => {
     throw new Error(`Unable to resolve intersection type ${inter.location}`);
   }
 
-  if (!inter.structuralType.getAttribute("isStructural")) {
+  if (!inter.structuralType.isStructural) {
     throw new Error(
       `Structural type must be a structural type ${inter.structuralTypeExpr.value.location}`
     );

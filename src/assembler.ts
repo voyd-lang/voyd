@@ -379,7 +379,7 @@ const compileFieldAssign = (opts: CompileExprOpts<Call>) => {
   const target = access.exprArgAt(0);
   const type = getExprType(target) as ObjectType | IntersectionType;
 
-  if (type.getAttribute("isStructural") || type.isIntersectionType()) {
+  if (type.isIntersectionType() || type.isStructural) {
     return opts.fieldLookupHelpers.setFieldValueByAccessor(opts);
   }
 
@@ -673,7 +673,7 @@ const buildObjectType = (opts: MapBinTypeOpts, obj: ObjectType): TypeRef => {
     );
   }
 
-  if (obj.getAttribute("isStructural")) {
+  if (obj.isStructural) {
     obj.setAttribute("originalType", obj.binaryenType);
     obj.binaryenType = mapBinaryenType(opts, voydBaseObject);
   }
@@ -689,7 +689,7 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const objValue = compileExpression({ ...opts, expr: obj });
   const type = getExprType(obj) as ObjectType | IntersectionType;
 
-  if (type.getAttribute("isStructural") || type.isIntersectionType()) {
+  if (type.isIntersectionType() || type.isStructural) {
     return opts.fieldLookupHelpers.getFieldValueByAccessor(opts);
   }
 
