@@ -30,7 +30,6 @@ import { getExprType } from "../../semantics/resolution/get-expr-type.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
-/** DOES NOT ACCOUNT FOR FIELD OFFSET */
 export const initFieldLookupHelpers = (mod: binaryen.Module) => {
   const fieldAccessorStruct = defineStructType(mod, {
     name: "FieldAccessor",

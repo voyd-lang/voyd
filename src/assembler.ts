@@ -636,8 +636,6 @@ const buildObjectType = (opts: MapBinTypeOpts, obj: ObjectType): TypeRef => {
         type: opts.fieldLookupHelpers.lookupTableType,
         name: "__field_index_table",
       },
-      // Reference to the field index lookup function
-      // TODO
       // Fields
       ...obj.fields.map((field) => ({
         type: mapBinaryenType(opts, field.type!),

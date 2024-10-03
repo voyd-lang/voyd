@@ -64,15 +64,6 @@ export class PrimitiveType extends BaseType {
     super(opts);
   }
 
-  get size() {
-    if (this.name.value === "bool") return 4;
-    if (this.name.value === "i32") return 4;
-    if (this.name.value === "f32") return 4;
-    if (this.name.value === "i64") return 8;
-    if (this.name.value === "f64") return 8;
-    return 0;
-  }
-
   static from(name: Primitive) {
     return new PrimitiveType({ name });
   }
