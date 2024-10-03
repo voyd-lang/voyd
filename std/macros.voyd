@@ -67,18 +67,12 @@ pub macro fn()
       body.slice(type_arrow_index + 2)
     else: body.slice(1)
 
-  let fn_body =
-    if expressions.length == 1 then:
-      expressions.extract(0)
-    else:
-      `(block).concat(expressions)
-
   `(
     define_function,
     $identifier,
     $params,
     (return_type $@return_type),
-    $fn_body
+    $@expressions
   )
 
 pub macro binaryen_gc_call(func, args, return_type)
