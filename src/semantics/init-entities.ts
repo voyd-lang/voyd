@@ -17,6 +17,7 @@ import {
   IntersectionType,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
+import { Trait } from "../syntax-objects/trait.js";
 import { SemanticProcessor } from "./types.js";
 
 export const initEntities: SemanticProcessor = (expr) => {
@@ -62,6 +63,10 @@ export const initEntities: SemanticProcessor = (expr) => {
 
   if (expr.calls("impl")) {
     return initImpl(expr);
+  }
+
+  if (expr.calls("trait")) {
+    return initTrait(expr);
   }
 
   return initCall(expr);
@@ -508,6 +513,17 @@ const initImpl = (impl: List): Implementation => {
   body.parent = init;
   init.body.value = initEntities(body);
   return init;
+};
+
+const initTrait = (trait: List) => {
+  const name = trait.identifierAt(1);
+  const methods = trait
+    .listAt(2)
+    .sliceAsArray(1)
+    .map(initEntities)
+    .filter((e) => e.isFn()) as Fn[];
+
+  return new Trait({ ...trait.metadata, name, methods });
 };
 
 /** Expects ["generics", ...Identifiers] */

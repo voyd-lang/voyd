@@ -22,6 +22,7 @@ import { ObjectLiteral } from "./object-literal.js";
 import { Match } from "./match.js";
 import { Nop } from "./nop.js";
 import { Implementation } from "./implementation.js";
+import { Trait } from "./trait.js";
 
 export type Expr =
   | PrimitiveExpr
@@ -41,7 +42,8 @@ export type Expr =
   | ObjectLiteral
   | Match
   | Nop
-  | Implementation;
+  | Implementation
+  | Trait;
 
 /**
  * These are the Expr types that must be returned until all macros have been expanded (reader, syntax, and regular)

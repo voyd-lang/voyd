@@ -7,7 +7,7 @@ import type { Fn } from "./fn.js";
 import type { Global } from "./global.js";
 import type { Id, Identifier } from "./identifier.js";
 import type { Int } from "./int.js";
-import { type VoidModule } from "./module.js";
+import type { VoidModule } from "./module.js";
 import { LexicalContext } from "./lib/lexical-context.js";
 import type { List } from "./list.js";
 import type { MacroLambda } from "./macro-lambda.js";
@@ -28,12 +28,13 @@ import type {
 } from "./types.js";
 import type { Variable } from "./variable.js";
 import type { Whitespace } from "./whitespace.js";
-import { type NamedEntity } from "./named-entity.js";
-import { type ScopedEntity } from "./scoped-entity.js";
-import { type Declaration } from "./declaration.js";
-import { type Use } from "./use.js";
-import { type Match } from "./match.js";
-import { type Implementation } from "./implementation.js";
+import type { NamedEntity } from "./named-entity.js";
+import type { ScopedEntity } from "./scoped-entity.js";
+import type { Declaration } from "./declaration.js";
+import type { Use } from "./use.js";
+import type { Match } from "./match.js";
+import type { Implementation } from "./implementation.js";
+import type { Trait } from "./trait.js";
 
 export type Attributes = { [key: string]: unknown };
 
@@ -194,6 +195,10 @@ export abstract class Syntax {
 
   isImpl(): this is Implementation {
     return this.syntaxType === "implementation";
+  }
+
+  isTrait(): this is Trait {
+    return this.syntaxType === "trait";
   }
 
   isObjectType(): this is ObjectType {
