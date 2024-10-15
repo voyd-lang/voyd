@@ -278,6 +278,31 @@ pub fn test24()
       v.value
     None:
       "not found"
+
+trait Math
+  fn add(self, b: i32) -> self
+  fn sub(self, b: i32) -> self
+  fn mul(self, b: i32) -> self
+
+obj MathBox<T> {
+  value: T
+}
+
+impl<T> Math for MathBox<T>
+  fn add(self, b: i32) -> self
+    MathBox<T> { value: self.value + b }
+
+  fn sub(self, b: i32) -> self
+    MathBox<T> { value: self.value - b }
+
+  fn mul(self, b: i32) -> self
+    MathBox<T> { value: self.value * b }
+
+// Test trait impls, should return 8
+pub fn test25()
+  let a = MathBox<i32> { value: 4 }
+  let b = a.add(4)
+  b.value
 `;
 
 export const tcoText = `

@@ -73,6 +73,7 @@ describe("E2E Compiler Pipeline", () => {
       173, // Array test
       4, // Structural object re-assignment
       "world",
+      8, // trait impls
     ]);
   });
 
