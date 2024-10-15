@@ -7,6 +7,7 @@ import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { Trait } from "../../syntax-objects/trait.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
+import { resolveFn } from "./resolve-fn.js";
 
 export const resolveImpl = (
   impl: Implementation,
@@ -41,7 +42,10 @@ export const resolveImpl = (
 
   if (targetType?.isObjectType() && targetType.typeParameters?.length) {
     // Apply impl to existing generic instances
-    targetType.genericInstances?.forEach((obj) => resolveImpl(impl, obj));
+    targetType.genericInstances?.forEach((obj) =>
+      resolveImpl(impl.clone(), obj)
+    );
+
     return impl;
   }
 
@@ -101,21 +105,7 @@ const resolveDefaultTraitMethods = (impl: Implementation): void => {
     .filter((m) => !!m.body)
     .forEach((m) => {
       const existing = impl.resolveFns(m.name.value);
-      const clone = m.clone();
-
-      clone.parameters.forEach((p) => {
-        if (p.name.is("self")) {
-          p.type = impl.targetType;
-        }
-      });
-
-      if (
-        clone.returnTypeExpr &&
-        clone.returnTypeExpr.isIdentifier() &&
-        clone.returnTypeExpr.is("self")
-      ) {
-        clone.returnType = impl.targetType;
-      }
+      const clone = resolveFn(m.clone(impl));
 
       if (
         !existing.length ||

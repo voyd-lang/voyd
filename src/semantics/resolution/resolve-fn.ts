@@ -31,18 +31,24 @@ export const resolveFn = (fn: Fn, call?: Call): Fn => {
     return fn;
   }
 
-  resolveParameters(fn.parameters);
-  if (fn.returnTypeExpr) {
-    fn.returnTypeExpr = resolveTypeExpr(fn.returnTypeExpr);
-    fn.annotatedReturnType = getExprType(fn.returnTypeExpr);
-    fn.returnType = fn.annotatedReturnType;
-  }
+  resolveFnSignature(fn);
 
   fn.typesResolved = true;
   fn.body = fn.body ? resolveEntities(fn.body) : undefined;
   fn.inferredReturnType = getExprType(fn.body);
   fn.returnType = fn.annotatedReturnType ?? fn.inferredReturnType;
   fn.parentImpl?.registerMethod(fn); // Maybe do this for module when not in an impl
+
+  return fn;
+};
+
+export const resolveFnSignature = (fn: Fn) => {
+  resolveParameters(fn.parameters);
+  if (fn.returnTypeExpr) {
+    fn.returnTypeExpr = resolveTypeExpr(fn.returnTypeExpr);
+    fn.annotatedReturnType = getExprType(fn.returnTypeExpr);
+    fn.returnType = fn.annotatedReturnType;
+  }
 
   return fn;
 };

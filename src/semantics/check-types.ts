@@ -1,3 +1,4 @@
+import { Implementation } from "../syntax-objects/implementation.js";
 import {
   List,
   Expr,
@@ -23,6 +24,7 @@ import {
 import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
 import { typesAreCompatible } from "./resolution/index.js";
+import { resolveFnSignature } from "./resolution/resolve-fn.js";
 
 export const checkTypes = (expr: Expr | undefined): Expr => {
   if (!expr) return nop();
@@ -356,7 +358,20 @@ const checkObjectType = (obj: ObjectType): ObjectType => {
     }
   });
 
-  obj.implementations.forEach((impl) => impl.methods.forEach(checkTypes));
+  const implementedTraits = new Set<string>();
+  obj.implementations.forEach((impl) => {
+    if (!impl.trait) return;
+
+    if (implementedTraits.has(impl.trait.id)) {
+      throw new Error(
+        `Trait ${impl.trait.name} implemented multiple times for obj ${obj.name} at ${obj.location}`
+      );
+    }
+
+    implementedTraits.add(impl.trait.id);
+  });
+
+  obj.implementations.forEach(checkImpl);
 
   if (obj.parentObjExpr) {
     assertValidExtension(obj, obj.parentObjType);
@@ -447,6 +462,30 @@ const checkTypeAlias = (alias: TypeAlias): TypeAlias => {
   }
 
   return alias;
+};
+
+const checkImpl = (impl: Implementation): Implementation => {
+  if (impl.traitExpr.value && !impl.trait) {
+    throw new Error(`Unable to resolve trait for impl at ${impl.location}`);
+  }
+
+  if (!impl.trait) return impl;
+
+  for (const method of impl.trait.methods.toArray()) {
+    const mClone = resolveFnSignature(method.clone(impl));
+
+    if (
+      !impl.exports.some((fn) =>
+        typesAreCompatible(fn.getType(), mClone.getType())
+      )
+    ) {
+      throw new Error(
+        `Impl does not implement ${method.name} at ${impl.location}`
+      );
+    }
+  }
+
+  return impl;
 };
 
 const checkListTypes = (list: List) => {
