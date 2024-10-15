@@ -351,17 +351,17 @@ a union, they must have a case for each object in the union
 
 ## Traits
 
-> Status: Not yet implemented
+> Status: Partially implemented
+> Supported for nominal types. Trait scoping is not yet enforced.
 
-Traits define a set of behavior that can be implemented on any object type
-(nominal, structural, union, or intersection)
+Traits define a set of behavior that can be implemented on any nominal object or intersection.
 
 ```rust
 trait Walk
   fn walk() -> i32
 
-// Implement walk for any type that contains the field legs: i32
-impl Walk for { legs: i32 }
+// Implement walk for any animal that contains the field legs: i32
+impl Walk for Animal & { legs: i32 }
   fn walk(self)
     self.walk
 

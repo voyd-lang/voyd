@@ -31,18 +31,24 @@ export const resolveFn = (fn: Fn, call?: Call): Fn => {
     return fn;
   }
 
+  resolveFnSignature(fn);
+
+  fn.typesResolved = true;
+  fn.body = fn.body ? resolveEntities(fn.body) : undefined;
+  fn.inferredReturnType = getExprType(fn.body);
+  fn.returnType = fn.annotatedReturnType ?? fn.inferredReturnType;
+  fn.parentImpl?.registerMethod(fn); // Maybe do this for module when not in an impl
+
+  return fn;
+};
+
+export const resolveFnSignature = (fn: Fn) => {
   resolveParameters(fn.parameters);
   if (fn.returnTypeExpr) {
     fn.returnTypeExpr = resolveTypeExpr(fn.returnTypeExpr);
     fn.annotatedReturnType = getExprType(fn.returnTypeExpr);
     fn.returnType = fn.annotatedReturnType;
   }
-
-  fn.typesResolved = true;
-  fn.body = resolveEntities(fn.body);
-  fn.inferredReturnType = getExprType(fn.body);
-  fn.returnType = fn.annotatedReturnType ?? fn.inferredReturnType;
-  fn.parentImpl?.registerMethod(fn); // Maybe do this for module when not in an impl
 
   return fn;
 };
@@ -53,15 +59,7 @@ const resolveParameters = (params: Parameter[]) => {
 
     if (p.name.is("self")) {
       const impl = getParentImpl(p);
-      if (!impl) {
-        throw new Error(`Unable to resolve self type for ${p}`);
-      }
-
-      if (!impl.targetType) {
-        throw new Error(`Unable to resolve target type for ${impl}`);
-      }
-
-      p.type = impl.targetType;
+      if (impl) p.type = impl.targetType;
       return;
     }
 

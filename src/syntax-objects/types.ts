@@ -64,15 +64,6 @@ export class PrimitiveType extends BaseType {
     super(opts);
   }
 
-  get size() {
-    if (this.name.value === "bool") return 4;
-    if (this.name.value === "i32") return 4;
-    if (this.name.value === "f32") return 4;
-    if (this.name.value === "i64") return 8;
-    if (this.name.value === "f64") return 8;
-    return 0;
-  }
-
   static from(name: Primitive) {
     return new PrimitiveType({ name });
   }
@@ -187,6 +178,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
   binaryenType?: number;
   typesResolved?: boolean; // Don't set if type parameters are present
   implementations: Implementation[];
+  isStructural = false;
   #iteration = 0;
 
   constructor(
@@ -196,6 +188,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
       parentObj?: ObjectType;
       typeParameters?: Identifier[];
       implementations?: Implementation[];
+      isStructural?: boolean;
     }
   ) {
     super(opts);
@@ -207,6 +200,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
     this.parentObjExpr = opts.parentObjExpr;
     this.typeParameters = opts.typeParameters;
     this.implementations = opts.implementations ?? [];
+    this.isStructural = opts.isStructural ?? false;
   }
 
   get size() {
@@ -236,6 +230,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
       parentObjExpr: this.parentObjExpr?.clone(),
       typeParameters: this.typeParameters,
       implementations: this.implementations.map((impl) => impl.clone()),
+      isStructural: this.isStructural,
     });
   }
 

@@ -29,10 +29,10 @@ import * as gc from "./lib/binaryen-gc/index.js";
 import { TypeRef } from "./lib/binaryen-gc/types.js";
 import { getExprType } from "./semantics/resolution/get-expr-type.js";
 import { Match, MatchCase } from "./syntax-objects/match.js";
-import { initExtensionHelpers } from "./assembler/extension-helpers.js";
+import { initExtensionHelpers } from "./assembler/rtt/extension.js";
 import { returnCall } from "./assembler/return-call.js";
 import { Float } from "./syntax-objects/float.js";
-import { initFieldLookupHelpers } from "./assembler/field-lookup-helpers.js";
+import { initFieldLookupHelpers } from "./assembler/index.js";
 import { StringLiteral } from "./syntax-objects/string-literal.js";
 
 export const assemble = (ast: Expr) => {
@@ -75,6 +75,7 @@ export const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isUse()) return mod.nop();
   if (expr.isMacro()) return mod.nop();
   if (expr.isMacroVariable()) return mod.nop();
+  if (expr.isTrait()) return mod.nop();
 
   if (expr.isBool()) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);
@@ -379,7 +380,7 @@ const compileFieldAssign = (opts: CompileExprOpts<Call>) => {
   const target = access.exprArgAt(0);
   const type = getExprType(target) as ObjectType | IntersectionType;
 
-  if (type.getAttribute("isStructural") || type.isIntersectionType()) {
+  if (type.isIntersectionType() || type.isStructural) {
     return opts.fieldLookupHelpers.setFieldValueByAccessor(opts);
   }
 
@@ -636,8 +637,6 @@ const buildObjectType = (opts: MapBinTypeOpts, obj: ObjectType): TypeRef => {
         type: opts.fieldLookupHelpers.lookupTableType,
         name: "__field_index_table",
       },
-      // Reference to the field index lookup function
-      // TODO
       // Fields
       ...obj.fields.map((field) => ({
         type: mapBinaryenType(opts, field.type!),
@@ -675,7 +674,7 @@ const buildObjectType = (opts: MapBinTypeOpts, obj: ObjectType): TypeRef => {
     );
   }
 
-  if (obj.getAttribute("isStructural")) {
+  if (obj.isStructural) {
     obj.setAttribute("originalType", obj.binaryenType);
     obj.binaryenType = mapBinaryenType(opts, voydBaseObject);
   }
@@ -691,7 +690,7 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const objValue = compileExpression({ ...opts, expr: obj });
   const type = getExprType(obj) as ObjectType | IntersectionType;
 
-  if (type.getAttribute("isStructural") || type.isIntersectionType()) {
+  if (type.isIntersectionType() || type.isStructural) {
     return opts.fieldLookupHelpers.getFieldValueByAccessor(opts);
   }
 

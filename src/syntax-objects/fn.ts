@@ -135,13 +135,13 @@ export class Fn extends ScopedNamedEntity {
     });
   }
 
-  toJSON() {
+  toJSON(): unknown {
     return [
       "fn",
       this.id,
       ["parameters", ...this.parameters],
       ["type-parameters", ...(this.#typeParams.toArray() ?? [])],
-      ["return-type", this.returnType],
+      ["return-type", this.#returnTypeExpr?.toJSON() ?? null],
       this.body,
     ];
   }

@@ -5,14 +5,18 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
+import { Trait } from "../../syntax-objects/trait.js";
+import { typesAreCompatible } from "./types-are-compatible.js";
+import { resolveFn } from "./resolve-fn.js";
 
 export const resolveImpl = (
   impl: Implementation,
   targetType?: ObjectType
 ): Implementation => {
   if (impl.typesResolved) return impl;
-  targetType = targetType ?? resolveTargetType(impl);
+  targetType = targetType ?? getTargetType(impl);
   impl.targetType = targetType;
+  impl.trait = getTrait(impl);
 
   if (!targetType) return impl;
 
@@ -32,23 +36,27 @@ export const resolveImpl = (
     });
   }
 
-  if (!impl.traitExpr.value && targetType?.isObjectType()) {
+  if (targetType?.isObjectType()) {
     targetType.implementations?.push(impl);
   }
 
   if (targetType?.isObjectType() && targetType.typeParameters?.length) {
     // Apply impl to existing generic instances
-    targetType.genericInstances?.forEach((obj) => resolveImpl(impl, obj));
+    targetType.genericInstances?.forEach((obj) =>
+      resolveImpl(impl.clone(), obj)
+    );
+
     return impl;
   }
 
   impl.typesResolved = true;
   impl.body.value = resolveEntities(impl.body.value);
+  resolveDefaultTraitMethods(impl);
 
   return impl;
 };
 
-const resolveTargetType = (impl: Implementation): ObjectType | undefined => {
+const getTargetType = (impl: Implementation): ObjectType | undefined => {
   const expr = impl.targetTypeExpr.value;
   const type = expr.isIdentifier()
     ? expr.resolve()
@@ -70,6 +78,13 @@ const resolveTargetType = (impl: Implementation): ObjectType | undefined => {
   return type;
 };
 
+const getTrait = (impl: Implementation): Trait | undefined => {
+  const expr = impl.traitExpr.value;
+  const type = expr?.isIdentifier() ? expr.resolve() : undefined;
+  if (!type || !type.isTrait()) return;
+  return type;
+};
+
 export const implIsCompatible = (
   impl: Implementation,
   obj: ObjectType
@@ -81,4 +96,29 @@ export const implIsCompatible = (
   if (impl.typeParams.length === obj.appliedTypeArgs?.length) return true; // impl<T> for Vec<i32>
 
   return false;
+};
+
+const resolveDefaultTraitMethods = (impl: Implementation): void => {
+  if (!impl.trait) return;
+  impl.trait.methods
+    .toArray()
+    .filter((m) => !!m.body)
+    .forEach((m) => {
+      const existing = impl.resolveFns(m.name.value);
+      const clone = resolveFn(m.clone(impl));
+
+      if (
+        !existing.length ||
+        !existing.some((fn) =>
+          typesAreCompatible(fn.getType(), clone.getType())
+        )
+      ) {
+        impl.registerMethod(clone);
+        impl.registerExport(clone);
+        return;
+      }
+    });
+
+  // All methods of a trait implementation are exported
+  impl.methods.forEach((m) => impl.registerExport(m));
 };

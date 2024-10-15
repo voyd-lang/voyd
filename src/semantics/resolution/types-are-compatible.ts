@@ -21,7 +21,7 @@ export const typesAreCompatible = (
   }
 
   if (a.isObjectType() && b.isObjectType()) {
-    const structural = opts.structuralOnly || b.getAttribute("isStructural");
+    const structural = opts.structuralOnly || b.isStructural;
 
     if (structural) {
       return b.fields.every((field) => {
@@ -60,8 +60,26 @@ export const typesAreCompatible = (
     return a.extends(b.nominalType) && typesAreCompatible(a, b.structuralType);
   }
 
+  if (a.isIntersectionType() && b.isIntersectionType()) {
+    return (
+      typesAreCompatible(a.nominalType, b.nominalType) &&
+      typesAreCompatible(a.structuralType, b.structuralType)
+    );
+  }
+
   if (a.isFixedArrayType() && b.isFixedArrayType()) {
     return typesAreCompatible(a.elemType, b.elemType);
+  }
+
+  if (a.isFnType() && b.isFnType()) {
+    if (a.parameters.length !== b.parameters.length) return false;
+    if (a.name.value !== b.name.value) return false;
+    return (
+      typesAreCompatible(a.returnType, b.returnType) &&
+      a.parameters.every((p, i) =>
+        typesAreCompatible(p.type, b.parameters[i]?.type)
+      )
+    );
   }
 
   return false;
