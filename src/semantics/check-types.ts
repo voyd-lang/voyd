@@ -280,7 +280,9 @@ const checkFnTypes = (fn: Fn): Fn => {
 const checkParameters = (params: Parameter[]) => {
   params.forEach((p) => {
     if (!p.type) {
-      throw new Error(`Unable to determine type for ${p} at ${p.location}`);
+      throw new Error(
+        `Unable to determine type for ${p} at ${p.name.location}`
+      );
     }
 
     checkTypeExpr(p.typeExpr);
@@ -400,7 +402,7 @@ const checkTypeExpr = (expr?: Expr) => {
     return;
   }
 
-  if (expr.isIdentifier()) {
+  if (expr.isIdentifier() && !expr.is("self")) {
     const entity = expr.resolve();
     if (!entity) {
       throw new Error(`Unrecognized identifier ${expr} at ${expr.location}`);

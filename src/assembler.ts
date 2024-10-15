@@ -75,6 +75,7 @@ export const compileExpression = (opts: CompileExprOpts): number => {
   if (expr.isUse()) return mod.nop();
   if (expr.isMacro()) return mod.nop();
   if (expr.isMacroVariable()) return mod.nop();
+  if (expr.isTrait()) return mod.nop();
 
   if (expr.isBool()) {
     return expr.value ? mod.i32.const(1) : mod.i32.const(0);

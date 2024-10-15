@@ -128,4 +128,7 @@ const resolveDefaultTraitMethods = (impl: Implementation): void => {
         return;
       }
     });
+
+  // All methods of a trait implementation are exported
+  impl.methods.forEach((m) => impl.registerExport(m));
 };
