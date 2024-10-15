@@ -48,7 +48,7 @@ npm i -g voyd
 
 ```bash
 # Run the exported main function
-voyd --run script.void
+voyd --run script.voyd
 
 # Compile a directory (containing an index.void) to webassembly
 voyd --emit-wasm src > output.wasm
