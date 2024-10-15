@@ -5,14 +5,16 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
+import { Trait } from "../../syntax-objects/trait.js";
 
 export const resolveImpl = (
   impl: Implementation,
   targetType?: ObjectType
 ): Implementation => {
   if (impl.typesResolved) return impl;
-  targetType = targetType ?? resolveTargetType(impl);
+  targetType = targetType ?? getTargetType(impl);
   impl.targetType = targetType;
+  impl.trait = getTrait(impl);
 
   if (!targetType) return impl;
 
@@ -32,7 +34,7 @@ export const resolveImpl = (
     });
   }
 
-  if (!impl.traitExpr.value && targetType?.isObjectType()) {
+  if (targetType?.isObjectType() && !targetType.typeParameters?.length) {
     targetType.implementations?.push(impl);
   }
 
@@ -48,7 +50,7 @@ export const resolveImpl = (
   return impl;
 };
 
-const resolveTargetType = (impl: Implementation): ObjectType | undefined => {
+const getTargetType = (impl: Implementation): ObjectType | undefined => {
   const expr = impl.targetTypeExpr.value;
   const type = expr.isIdentifier()
     ? expr.resolve()
@@ -67,6 +69,13 @@ const resolveTargetType = (impl: Implementation): ObjectType | undefined => {
   // Generic impl with generic target type i.e. `impl<T> for Vec<T>`
   if (!implIsCompatible(impl, type)) return undefined;
 
+  return type;
+};
+
+const getTrait = (impl: Implementation): Trait | undefined => {
+  const expr = impl.traitExpr.value;
+  const type = expr?.isIdentifier() ? expr.resolve() : undefined;
+  if (!type || !type.isTrait()) return;
   return type;
 };
 
