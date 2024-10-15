@@ -35,7 +35,7 @@ export const resolveImpl = (
     });
   }
 
-  if (targetType?.isObjectType() && !targetType.typeParameters?.length) {
+  if (targetType?.isObjectType()) {
     targetType.implementations?.push(impl);
   }
 
