@@ -53,15 +53,7 @@ const resolveParameters = (params: Parameter[]) => {
 
     if (p.name.is("self")) {
       const impl = getParentImpl(p);
-      if (!impl) {
-        throw new Error(`Unable to resolve self type for ${p}`);
-      }
-
-      if (!impl.targetType) {
-        throw new Error(`Unable to resolve target type for ${impl}`);
-      }
-
-      p.type = impl.targetType;
+      if (impl) p.type = impl.targetType;
       return;
     }
 

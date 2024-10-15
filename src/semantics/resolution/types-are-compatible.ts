@@ -71,5 +71,15 @@ export const typesAreCompatible = (
     return typesAreCompatible(a.elemType, b.elemType);
   }
 
+  if (a.isFnType() && b.isFnType()) {
+    if (a.parameters.length !== b.parameters.length) return false;
+    return (
+      typesAreCompatible(a.returnType, b.returnType) &&
+      a.parameters.every((p, i) =>
+        typesAreCompatible(p.type, b.parameters[i]?.type)
+      )
+    );
+  }
+
   return false;
 };

@@ -6,6 +6,7 @@ import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { Trait } from "../../syntax-objects/trait.js";
+import { typesAreCompatible } from "./types-are-compatible.js";
 
 export const resolveImpl = (
   impl: Implementation,
@@ -46,6 +47,7 @@ export const resolveImpl = (
 
   impl.typesResolved = true;
   impl.body.value = resolveEntities(impl.body.value);
+  resolveDefaultTraitMethods(impl);
 
   return impl;
 };
@@ -90,4 +92,40 @@ export const implIsCompatible = (
   if (impl.typeParams.length === obj.appliedTypeArgs?.length) return true; // impl<T> for Vec<i32>
 
   return false;
+};
+
+const resolveDefaultTraitMethods = (impl: Implementation): void => {
+  if (!impl.trait) return;
+  impl.trait.methods
+    .toArray()
+    .filter((m) => !!m.body)
+    .forEach((m) => {
+      const existing = impl.resolveFns(m.name.value);
+      const clone = m.clone();
+
+      clone.parameters.forEach((p) => {
+        if (p.name.is("self")) {
+          p.type = impl.targetType;
+        }
+      });
+
+      if (
+        clone.returnTypeExpr &&
+        clone.returnTypeExpr.isIdentifier() &&
+        clone.returnTypeExpr.is("self")
+      ) {
+        clone.returnType = impl.targetType;
+      }
+
+      if (
+        !existing.length ||
+        !existing.some((fn) =>
+          typesAreCompatible(fn.getType(), clone.getType())
+        )
+      ) {
+        impl.registerMethod(clone);
+        impl.registerExport(clone);
+        return;
+      }
+    });
 };
