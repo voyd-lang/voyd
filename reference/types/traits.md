@@ -1,6 +1,8 @@
 # Traits
 
-Traits are first class types that define the behavior of a nominal object.
+> Status: Partially implemented
+
+Traits are first class types that define the behavior of a nominal object or intersection.
 
 ```voyd
 trait Run
@@ -22,7 +24,7 @@ let car = Car { speed: 10 }
 log car.run() // "Vroom!"
 &car.stop()
 
-car can Run // true
+car has_trait Run // true
 
 // Because traits are first class types, they can be used to define parameters
 // that will accept any type that implements the trait
@@ -34,7 +36,7 @@ run_thing(car) // Vroom!
 
 ## Default Implementations
 
-Status: Not yet implemented
+> Status: Complete
 
 Traits can specify default implementations which are automatically applied
 on implementation, but may still be overridden by that impl if desired
@@ -47,7 +49,7 @@ trait One
 
 ## Trait Requirements
 
-Status: Not yet implemented
+> Status: Not yet implemented
 
 Traits can specify that implementors must also implement other traits:
 
@@ -55,7 +57,9 @@ Traits can specify that implementors must also implement other traits:
 trait DoWork requires: This & That
 ```
 
-## Trait limitations
+## Trait Scoping
+
+> Status: Not yet implemented
 
 Traits must be in scope to be used. If the `Run` trait were defined
 in a different file (or module), it would have to be imported before its
@@ -68,6 +72,8 @@ use other_file::{ Run }
 
 car.run() // Vroom!
 ```
+
+## Trait limitations
 
 Trait implementations cannot have overlapping target types:
 
