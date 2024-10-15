@@ -16,6 +16,7 @@ import { resolveFn } from "./resolve-fn.js";
 import { resolveImpl } from "./resolve-impl.js";
 import { resolveMatch } from "./resolve-match.js";
 import { resolveObjectType } from "./resolve-object-type.js";
+import { resolveTrait } from "./resolve-trait.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveUse } from "./resolve-use.js";
 
@@ -37,6 +38,7 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (expr.isObjectLiteral()) return resolveObjectLiteral(expr);
   if (expr.isMatch()) return resolveMatch(expr);
   if (expr.isImpl()) return resolveImpl(expr);
+  if (expr.isTrait()) return resolveTrait(expr);
   return expr;
 };
 
