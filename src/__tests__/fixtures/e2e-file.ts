@@ -1,4 +1,4 @@
-export const e2eVoidText = `
+export const e2eVoydText = `
 use std::all
 
 fn fib(n: i32) -> i32

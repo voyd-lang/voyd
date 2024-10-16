@@ -1,9 +1,9 @@
 import { ParsedModule, stdPath } from "../parser/index.js";
 import { List } from "../syntax-objects/list.js";
-import { RootModule, VoidModule } from "../syntax-objects/module.js";
+import { RootModule, VoydModule } from "../syntax-objects/module.js";
 
 /** Registers submodules of a parsed module for future import resolution */
-export const registerModules = (opts: ParsedModule): VoidModule => {
+export const registerModules = (opts: ParsedModule): VoydModule => {
   const { srcPath, files } = opts;
 
   const rootModule = new RootModule({});
@@ -34,10 +34,10 @@ const registerModule = ({
   isIndex,
 }: {
   path: string[];
-  parentModule: VoidModule;
+  parentModule: VoydModule;
   ast: List;
   isIndex?: boolean;
-}): VoidModule | undefined => {
+}): VoydModule | undefined => {
   const [name, ...rest] = path;
 
   if (!name) return;
@@ -61,7 +61,7 @@ const registerModule = ({
 
   const module =
     existingModule ??
-    new VoidModule({
+    new VoydModule({
       ...(!rest.length ? { ...ast.metadata, value: ast.toArray() } : {}),
       name,
       isIndex,
@@ -99,7 +99,7 @@ const filePathToModulePath = (filePath: string, srcPath: string) => {
   return finalPath;
 };
 
-const registerDefaultImports = (module: VoidModule) => {
+const registerDefaultImports = (module: VoydModule) => {
   module.unshift(new List(["use", ["::", "root", "all"]]));
   const mod = module.resolveModule("std");
   if (mod) return;

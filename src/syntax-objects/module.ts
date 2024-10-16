@@ -8,14 +8,14 @@ import {
   ScopedNamedEntityOpts,
 } from "./named-entity.js";
 
-export type VoidModuleOpts = ScopedNamedEntityOpts & {
+export type VoydModuleOpts = ScopedNamedEntityOpts & {
   value?: Expr[];
   phase?: number;
   isIndex?: boolean;
   exports?: LexicalContext;
 };
 
-export class VoidModule extends ScopedNamedEntity {
+export class VoydModule extends ScopedNamedEntity {
   readonly syntaxType = "module";
   readonly exports: LexicalContext;
   readonly isRoot: boolean = false;
@@ -31,7 +31,7 @@ export class VoidModule extends ScopedNamedEntity {
    */
   phase = 0;
 
-  constructor(opts: VoidModuleOpts) {
+  constructor(opts: VoydModuleOpts) {
     super(opts);
     if (opts.value) this.push(...opts.value);
     this.exports = opts.exports ?? new LexicalContext();
@@ -68,13 +68,13 @@ export class VoidModule extends ScopedNamedEntity {
     return [...path, this.name.toString()];
   }
 
-  each(fn: (expr: Expr, index: number, array: Expr[]) => void): VoidModule {
+  each(fn: (expr: Expr, index: number, array: Expr[]) => void): VoydModule {
     this.value.forEach(fn);
     return this;
   }
 
-  map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoidModule {
-    return new VoidModule({
+  map(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoydModule {
+    return new VoydModule({
       ...super.getCloneOpts(),
       value: this.value.map(fn),
       phase: this.phase,
@@ -83,7 +83,7 @@ export class VoidModule extends ScopedNamedEntity {
     });
   }
 
-  applyMap(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoidModule {
+  applyMap(fn: (expr: Expr, index: number, array: Expr[]) => Expr): VoydModule {
     const old = this.value;
     this.value = [];
     old.forEach((expr, index, arr) => this.push(fn(expr, index, arr)));
@@ -94,8 +94,8 @@ export class VoidModule extends ScopedNamedEntity {
     return this.id;
   }
 
-  clone(parent?: Expr | undefined): VoidModule {
-    return new VoidModule({
+  clone(parent?: Expr | undefined): VoydModule {
+    return new VoydModule({
       ...super.getCloneOpts(parent),
       value: this.value.map((expr) => expr.clone()),
       phase: this.phase,
@@ -122,10 +122,10 @@ export class VoidModule extends ScopedNamedEntity {
   }
 }
 
-export class RootModule extends VoidModule {
+export class RootModule extends VoydModule {
   readonly isRoot = true;
 
-  constructor(opts: Omit<VoidModuleOpts, "name">) {
+  constructor(opts: Omit<VoydModuleOpts, "name">) {
     super({ ...opts, name: "root" });
   }
 }

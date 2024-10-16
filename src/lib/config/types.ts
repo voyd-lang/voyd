@@ -1,4 +1,4 @@
-export type VoidConfig = {
+export type VoydConfig = {
   /** Write raw parser AST to stdout */
   emitParserAst?: boolean;
   /** Write desurfaced AST to stdout */

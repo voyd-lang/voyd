@@ -50,7 +50,7 @@ npm i -g voyd
 # Run the exported main function
 voyd --run script.voyd
 
-# Compile a directory (containing an index.void) to webassembly
+# Compile a directory (containing an index.voyd) to webassembly
 voyd --emit-wasm src > output.wasm
 
 # Compile to optimized WebAssembly
@@ -385,7 +385,7 @@ let double = n => n * 2
 array.map n => n * 2
 ```
 
-Void also supports a concise syntax for passing closures to labeled arguments:
+Voyd also supports a concise syntax for passing closures to labeled arguments:
 
 ```rust
 try do():
