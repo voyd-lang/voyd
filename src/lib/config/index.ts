@@ -1,7 +1,7 @@
 import { getConfigFromCli } from "./arg-parser.js";
-import { VoidConfig } from "./types.js";
+import { VoydConfig } from "./types.js";
 
-let config: VoidConfig | undefined = undefined;
+let config: VoydConfig | undefined = undefined;
 export const getConfig = () => {
   if (config) return config;
   config = getConfigFromCli();

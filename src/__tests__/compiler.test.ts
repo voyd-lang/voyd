@@ -1,5 +1,5 @@
 import {
-  e2eVoidText,
+  e2eVoydText,
   kitchenSink,
   goodTypeInferenceText,
   tcoText,
@@ -13,7 +13,7 @@ import { readString } from "../lib/read-string.js";
 
 describe("E2E Compiler Pipeline", () => {
   test("Compiler can compile and run a basic voyd program", async (t) => {
-    const mod = await compile(e2eVoidText);
+    const mod = await compile(e2eVoydText);
     const instance = getWasmInstance(mod);
     const fn = getWasmFn("main", instance);
     assert(fn, "Function exists");

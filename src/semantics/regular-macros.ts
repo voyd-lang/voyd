@@ -11,7 +11,7 @@ import {
   Macro,
   RegularMacro,
   MacroVariable,
-  VoidModule,
+  VoydModule,
   Block,
   Use,
   nop,
@@ -45,7 +45,7 @@ export const expandRegularMacros = (expr: Expr): Expr => {
   return expr.map(expandRegularMacros);
 };
 
-const expandModuleMacros = (module: VoidModule): VoidModule => {
+const expandModuleMacros = (module: VoydModule): VoydModule => {
   if (module.phase > 0) return module;
   module.phase = 1;
   module.applyMap(expandRegularMacros);
@@ -70,7 +70,7 @@ const initMod = (list: List) => {
   if (list.length < 3) return list; // Maybe error here?
   const name = list.identifierAt(1);
   const block = list.listAt(2);
-  const module = new VoidModule({
+  const module = new VoydModule({
     ...list.metadata,
     name,
     value: block.argsArray().map(expandRegularMacros),

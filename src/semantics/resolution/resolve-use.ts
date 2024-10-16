@@ -1,12 +1,12 @@
 import { Call } from "../../syntax-objects/call.js";
 import { Expr } from "../../syntax-objects/expr.js";
 import { List } from "../../syntax-objects/list.js";
-import { VoidModule } from "../../syntax-objects/module.js";
+import { VoydModule } from "../../syntax-objects/module.js";
 import { NamedEntity } from "../../syntax-objects/named-entity.js";
 import { Use, UseEntities } from "../../syntax-objects/use.js";
 import { resolveModule, resolveEntities } from "./resolve-entities.js";
 
-export type ModulePass = (mod: VoidModule) => VoidModule;
+export type ModulePass = (mod: VoydModule) => VoydModule;
 
 export const resolveUse = (use: Use, runPass?: ModulePass) => {
   const path = use.path;
@@ -83,7 +83,7 @@ export const resolveModulePath = (
   return entities.map((e) => ({ e }));
 };
 
-const resolveObjectPath = (path: Call | List, module: VoidModule) => {
+const resolveObjectPath = (path: Call | List, module: VoydModule) => {
   const entities: UseEntities = [];
 
   const imports = path.argsArray();
