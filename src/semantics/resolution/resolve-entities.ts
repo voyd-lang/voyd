@@ -1,6 +1,6 @@
 import { Block } from "../../syntax-objects/block.js";
 import { Expr } from "../../syntax-objects/expr.js";
-import { nop } from "../../syntax-objects/helpers.js";
+import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
 import { VoidModule } from "../../syntax-objects/module.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";

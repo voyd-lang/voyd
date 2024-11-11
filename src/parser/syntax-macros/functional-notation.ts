@@ -1,6 +1,12 @@
 import { idIs, isOp } from "../grammar.js";
 import { Expr, List, ListValue } from "../../syntax-objects/index.js";
 
+// Note: The current version of this function was modified by GPT o1.
+// I wrote the original version an have made modifications to the version
+// produced by o1. The intent was to have o1 improve the performance. But
+// now I'm not sure the added complexity produced by o1 was worth the cost.
+// Might still be worth re-writing again to something similar to the original.
+
 export const functionalNotation = (list: List): List => {
   const array = list.toArray();
   let isTuple = false;
@@ -46,12 +52,12 @@ type Accumulator = { result: ListValue[]; skip: number };
 const handleNextExpression = (
   acc: Accumulator,
   expr: Expr,
-  nextExpr: Expr,
+  nextExpr: List,
   array: Expr[],
   index: number
 ) => {
-  if ((nextExpr as List).calls("generics")) {
-    const generics = nextExpr as List;
+  if (nextExpr.calls("generics")) {
+    const generics = nextExpr;
     const nextNextExpr = array[index + 2];
     if (nextNextExpr && nextNextExpr.isList()) {
       acc.result.push(processGenerics(expr, generics, nextNextExpr as List));

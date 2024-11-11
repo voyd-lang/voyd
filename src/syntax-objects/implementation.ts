@@ -1,6 +1,6 @@
 import { Expr } from "./expr.js";
 import { Fn } from "./fn.js";
-import { nop } from "./helpers.js";
+import { nop } from "./lib/helpers.js";
 import { Identifier } from "./identifier.js";
 import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
