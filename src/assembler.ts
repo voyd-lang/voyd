@@ -16,7 +16,7 @@ import {
 import { Variable } from "./syntax-objects/variable.js";
 import { Block } from "./syntax-objects/block.js";
 import { Declaration } from "./syntax-objects/declaration.js";
-import { VoidModule } from "./syntax-objects/module.js";
+import { VoydModule } from "./syntax-objects/module.js";
 import { ObjectLiteral } from "./syntax-objects/object-literal.js";
 import {
   binaryenTypeToHeapType,
@@ -137,7 +137,7 @@ const compileType = (opts: CompileExprOpts<Type>) => {
   return opts.mod.nop();
 };
 
-const compileModule = (opts: CompileExprOpts<VoidModule>) => {
+const compileModule = (opts: CompileExprOpts<VoydModule>) => {
   const result = opts.mod.block(
     opts.expr.id,
     opts.expr.value.map((expr) => compileExpression({ ...opts, expr }))

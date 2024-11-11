@@ -12,7 +12,7 @@ import {
   Block,
   Call,
   Variable,
-  VoidModule,
+  VoydModule,
   Parameter,
   Use,
   TypeAlias,
@@ -291,7 +291,7 @@ const checkParameters = (params: Parameter[]) => {
   });
 };
 
-const checkModuleTypes = (mod: VoidModule): VoidModule => {
+const checkModuleTypes = (mod: VoydModule): VoydModule => {
   mod.each(checkTypes);
   return mod;
 };

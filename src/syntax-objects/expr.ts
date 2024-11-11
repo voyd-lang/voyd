@@ -15,7 +15,7 @@ import { Macro } from "./macros.js";
 import { MacroLambda } from "./macro-lambda.js";
 import { Call } from "./call.js";
 import { Block } from "./block.js";
-import { VoidModule } from "./module.js";
+import { VoydModule } from "./module.js";
 import { Declaration } from "./declaration.js";
 import { Use } from "./use.js";
 import { ObjectLiteral } from "./object-literal.js";
@@ -34,7 +34,7 @@ export type Expr =
   | Global
   | MacroVariable
   | MacroLambda
-  | VoidModule
+  | VoydModule
   | Call
   | Block
   | Declaration

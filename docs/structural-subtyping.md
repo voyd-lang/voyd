@@ -23,7 +23,7 @@ fn main() -> i32
 
 ```
 
-Implementation (Psuedo VOID / WASM hybrid):
+Implementation (Psuedo Voyd / WASM hybrid):
 ```voyd
 // All objects implicitly extend Object
 type Object = {

@@ -1,5 +1,5 @@
 import { ParseArgsConfig, parseArgs } from "node:util";
-import { VoidConfig } from "./types.js";
+import { VoydConfig } from "./types.js";
 
 const options: ParseArgsConfig["options"] = {
   "emit-parser-ast": {
@@ -38,7 +38,7 @@ const options: ParseArgsConfig["options"] = {
   },
 };
 
-export const getConfigFromCli = (): VoidConfig => {
+export const getConfigFromCli = (): VoydConfig => {
   const { values, positionals } = parseArgs({
     options,
     allowPositionals: true,

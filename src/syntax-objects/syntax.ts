@@ -7,7 +7,7 @@ import type { Fn } from "./fn.js";
 import type { Global } from "./global.js";
 import type { Id, Identifier } from "./identifier.js";
 import type { Int } from "./int.js";
-import type { VoidModule } from "./module.js";
+import type { VoydModule } from "./module.js";
 import { LexicalContext } from "./lib/lexical-context.js";
 import type { List } from "./list.js";
 import type { MacroLambda } from "./macro-lambda.js";
@@ -63,7 +63,7 @@ export abstract class Syntax {
     return this.parent?.isFn() ? this.parent : this.parent?.parentFn;
   }
 
-  get parentModule(): VoidModule | undefined {
+  get parentModule(): VoydModule | undefined {
     return this.parent?.isModule() ? this.parent : this.parent?.parentModule;
   }
 
@@ -90,7 +90,7 @@ export abstract class Syntax {
   }
 
   /** Will resolve a sibling module, or a direct ancestor */
-  resolveModule(name: Id, level = 0): VoidModule | undefined {
+  resolveModule(name: Id, level = 0): VoydModule | undefined {
     if (!this.isModule()) {
       return this.parentModule?.resolveModule(name, level);
     }
@@ -253,7 +253,7 @@ export abstract class Syntax {
     return this.syntaxType === "macro-lambda";
   }
 
-  isModule(): this is VoidModule {
+  isModule(): this is VoydModule {
     return this.syntaxType === "module";
   }
 
