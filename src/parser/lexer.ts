@@ -68,7 +68,7 @@ export const lexer = (chars: CharStream): Token => {
 const consumeOperator = (chars: CharStream, token: Token) => {
   while (isOpChar(chars.next)) {
     if (token.value === ">" && (chars.next === ">" || chars.next === ":")) {
-      break; // Ugly hack to support generics, means >> is not a valid operator
+      break; // Ugly hack to support generics, means >> is not a valid operator. At least until we write a custom parser for the generics reader macro.
     }
 
     token.addChar(chars.consumeChar());
@@ -93,7 +93,7 @@ const nextIsNumber = (chars: CharStream) =>
   (isDigitSign(chars.next) && isDigit(chars.at(1) ?? ""));
 
 const consumeSpaces = (chars: CharStream, token: Token) => {
-  while (chars.next === " " && token.span < 2) {
+  while (chars.next === " " && token.length < 2) {
     token.addChar(chars.consumeChar());
   }
 };

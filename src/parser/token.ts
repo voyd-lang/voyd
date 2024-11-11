@@ -10,7 +10,7 @@ export class Token {
     this.location = location;
   }
 
-  get span() {
+  get length() {
     return this.value.length;
   }
 

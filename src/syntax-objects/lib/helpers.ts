@@ -1,5 +1,5 @@
-import { Nop } from "./nop.js";
-import { Whitespace } from "./whitespace.js";
+import { Nop } from "../nop.js";
+import { Whitespace } from "../whitespace.js";
 
 export const newLine = () => new Whitespace({ value: "\n" });
 

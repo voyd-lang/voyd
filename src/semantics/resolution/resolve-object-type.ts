@@ -1,5 +1,5 @@
 import { Call } from "../../syntax-objects/call.js";
-import { nop } from "../../syntax-objects/helpers.js";
+import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
 import {
   ObjectType,

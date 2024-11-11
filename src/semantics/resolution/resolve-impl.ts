@@ -1,4 +1,4 @@
-import { nop } from "../../syntax-objects/helpers.js";
+import { nop } from "../../syntax-objects/lib/helpers.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
 import { ObjectType, TypeAlias } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";

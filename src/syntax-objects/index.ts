@@ -2,7 +2,7 @@ export * from "./syntax.js";
 export * from "./bool.js";
 export * from "./expr.js";
 export * from "./float.js";
-export * from "./helpers.js";
+export * from "./lib/helpers.js";
 export * from "./identifier.js";
 export * from "./int.js";
 export * from "./list.js";
