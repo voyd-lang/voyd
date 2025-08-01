@@ -207,10 +207,28 @@ Unlike other languages, objects do not inherit methods from their parent
 type by default. Instead, they must be opted in with use statements:
 
 ```voyd
-obj Dog extends Animal {}
+obj Animal {
+  age: int
+}
 
-impl Dog
-  use super::{ run } // or `all` to inherit all methods
+impl Animal
+  fn breathe()
+    ...
+
+impl Speak for: Animal
+  fn speak()
+
+obj Dog: Animal {
+  age: int // Must have same fields as Animal.
+}
+
+impl Dog with: Animal // or Animal::{ breath } to only inherit specified methods.
+  // Additonal methods
+  fn walk()
+    ...
+
+// Also works with traits
+impl Speak for: Dog, with: Animal::Speak
 
 fn main()
   let dog = Dog { name: "Dexter" }
@@ -272,7 +290,7 @@ fn main(a: i32, b: i32)
   a.divide(b)
     .match(x)
       Some:
-        log "The value is ${x}"
+        log "The value is ${x.value}"
       None:
         log "Error: divide by zero"
 ```
