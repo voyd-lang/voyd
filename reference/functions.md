@@ -257,8 +257,8 @@ Object types overlap if one is an extension of the other:
 
 ```voyd
 obj Animal {}
-obj Dog extends Animal {}
-obj Cat extends Animal {}
+obj Dog: Animal {}
+obj Cat: Animal {}
 
 fn walk(animal: Animal)
 fn walk(dog: Dog) // Ambiguous collision with walk(animal: Animal)

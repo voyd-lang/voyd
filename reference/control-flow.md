@@ -15,9 +15,9 @@ Example:
 ```voyd
 obj Optional
 
-obj None extends Optional
+obj None: Optional
 
-obj Some extends Optional {
+obj Some: Optional {
   value: i32
 }
 

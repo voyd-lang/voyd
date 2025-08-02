@@ -13,7 +13,7 @@ obj Car {
   speed: i32
 }
 
-impl Run for Car
+impl Run for: Car
   fn run(self) -> String
     "Vroom!"
 
@@ -84,9 +84,9 @@ obj Dog {}
 trait Speak
   fn speak() -> void
 
-impl Speak for Animal
+impl Speak for: Animal
   fn speak()
     log "Glub glub"
 
-impl Speak for Dog // ERROR: Speak is already implemented for Dog via parent type Animal
+impl Speak for: Dog // ERROR: Speak is already implemented for Dog via parent type Animal
 ```
