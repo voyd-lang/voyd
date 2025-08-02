@@ -62,7 +62,7 @@ let newt: Cat = Animal { name: "Whiskers" } & { lives: 3 }
 let newt = AnimalWithLives { name: "Whiskers", lives: 3 }
 
 // We can define a new compatible nominal object
-obj Cat extends Animal {
+obj Cat: Animal {
   lives: i32
 }
 
@@ -80,11 +80,11 @@ obj Animal {
   name: String
 }
 
-obj Cat extends Animal {
+obj Cat: Animal {
   lives_remaining: i32
 }
 
-obj Dog extends Animal {
+obj Dog: Animal {
   likes_belly_rubs: bool
 }
 
@@ -125,11 +125,11 @@ obj Shape {
   y: i32
 }
 
-impl Image for Shape
+impl Image for: Shape
   fn draw(self) -> Array<Rgb>
     self.image
 
-impl Movable for Shape
+impl Movable for: Shape
   fn move(&self, x: i32, y: i32) -> void
     self.x += x
     self.y += y

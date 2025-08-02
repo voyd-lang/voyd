@@ -123,11 +123,11 @@ obj Animal {
   name: String
 }
 
-obj Cat extends Animal {
+obj Cat: Animal {
   lives_remaining: i32
 }
 
-obj Dog extends Animal {
+obj Dog: Animal {
   likes_belly_rubs: bool
 }
 
@@ -244,7 +244,7 @@ even if a subtype is passed. For example:
 
 ```voyd
 obj Animal {}
-obj Dog extends Animal {}
+obj Dog: Animal {}
 
 impl Animal
   pub fn talk()
@@ -274,9 +274,9 @@ using the methods of a subtype.
 ```voyd
 obj Optional
 
-obj None extends Optional
+obj None: Optional
 
-obj Some extends Optional {
+obj Some: Optional {
   value: i32
 }
 
@@ -305,7 +305,7 @@ final obj Animal {
 }
 
 // Error - Animal is final
-obj Cat extends Animal {
+obj Cat: Animal {
   lives_remaining: i32
 }
 ```
