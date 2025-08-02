@@ -5,16 +5,16 @@
 ```
 obj Robot
 
-obj ArmRobot extends Robot {
+obj ArmRobot: Robot {
   vise: Vise
 }
 
-obj HumanoidRobot extends Robot {
+obj HumanoidRobot: Robot {
   vise: Vise
   legs: Legs
 }
 
-obj DogRobot extends Robot {
+obj DogRobot: Robot {
   legs: Legs
 }
 
@@ -30,7 +30,7 @@ trait Moveable
   fn move_to(self, location: Location) async -> void
 
 // Provides implementation for ArmRobot and HumanoidRobot
-impl Gripper for Robot & { vise: Vise }
+impl Gripper for: Robot & { vise: Vise }
   fn grip(self) async -> void
     await! self.vise.close()
 
@@ -38,7 +38,7 @@ impl Gripper for Robot & { vise: Vise }
     await! self.vise.open()
 
 // Provides implementation for DogRobot and HumanoidRobot, but not Human as its not a Robot
-impl Moveable for Robot & { legs: Legs }
+impl Moveable for: Robot & { legs: Legs }
   fn grip(self) async -> void
     await! self.vise.close()
 

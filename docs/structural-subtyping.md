@@ -13,7 +13,7 @@ fn sum(b: A & { y: i32 }) -> i32
   // Field y cannot be directly accessed because we do not know the supertype of b that defines y field
   b.y
 
-obj B extends A {
+obj B: A {
   y: i32
 }
 
