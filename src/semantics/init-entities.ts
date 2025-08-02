@@ -373,54 +373,30 @@ const initFixedArrayType = (type: List) => {
 };
 
 const initNominalObjectType = (obj: List) => {
-  let name: ReturnType<typeof obj.identifierAt> | undefined;
-  let typeParameters: ReturnType<typeof extractTypeParams> | undefined;
-  let parentObjExpr: Expr | undefined;
-  let fieldsSource: List | undefined;
+  const header = obj.at(1);
 
-  const second = obj.at(1);
+  const [nameExpr, parentExpr] =
+    header?.isList() && header.calls(":")
+      ? [header.at(1), header.at(2)]
+      : [header, undefined];
 
-  if (second?.isList() && second.calls(":")) {
-    // Inheritance via ':'
-    const colonExpr = second;
+  if (!nameExpr) throw new Error("Invalid object definition: missing name");
 
-    // Extract child name (possibly with generics)
-    const childExpr = colonExpr.at(1);
-    if (childExpr?.isList()) {
-      name = childExpr.identifierAt(0);
-      typeParameters = extractTypeParams(childExpr.listAt(1));
-    } else if (childExpr?.isIdentifier()) {
-      name = childExpr;
-    }
+  const [name, typeParameters] = nameExpr.isList()
+    ? [nameExpr.identifierAt(0), extractTypeParams(nameExpr.listAt(1))]
+    : nameExpr.isIdentifier()
+    ? [nameExpr, undefined]
+    : [undefined, undefined];
 
-    // Parent type expression (third element)
-    parentObjExpr = initEntities(colonExpr.at(2));
-
-    // Fields list appears after the colon expression
-    fieldsSource = obj.listAt(2);
-  } else {
-    // No inheritance
-    if (second?.isList()) {
-      // Generic parameters list e.g. Child<T>
-      name = second.identifierAt(0);
-      typeParameters = extractTypeParams(second.listAt(1));
-    } else if (second?.isIdentifier()) {
-      name = second;
-    }
-
-    fieldsSource = obj.listAt(2);
-  }
-
-  if (!name || !fieldsSource) {
-    throw new Error("Invalid object definition");
-  }
+  if (!name)
+    throw new Error("Invalid object definition: invalid name expression");
 
   return new ObjectType({
     ...obj.metadata,
     name,
     typeParameters,
-    parentObjExpr,
-    value: extractObjectFields(fieldsSource),
+    parentObjExpr: parentExpr ? initEntities(parentExpr) : undefined,
+    value: extractObjectFields(obj.listAt(2)),
   });
 };
 
