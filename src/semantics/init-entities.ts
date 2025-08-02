@@ -373,73 +373,49 @@ const initFixedArrayType = (type: List) => {
 };
 
 const initNominalObjectType = (obj: List) => {
-  // Support two inheritance syntaxes:
-  // 1. Legacy: obj Child extends Parent { ... }
-  // 2. New   : obj Child: Parent { ... }
+  // New syntax: obj Child: Parent { ... }
+  // Or no inheritance: obj Child { ... }
 
-  // Helper vars to be populated depending on detected syntax
-  let name = undefined as ReturnType<typeof obj.identifierAt> | undefined;
+  let name: ReturnType<typeof obj.identifierAt> | undefined;
   let typeParameters: ReturnType<typeof extractTypeParams> | undefined;
   let parentObjExpr: Expr | undefined;
-  let fieldsList: List | undefined;
+  let fieldsSource: List | undefined;
 
   const second = obj.at(1);
 
-  // Case A: New ':' syntax yields a list that calls ':'
   if (second?.isList() && second.calls(":")) {
+    // Inheritance via ':'
     const colonExpr = second;
 
-    // Extract name (which may include generics)
-    const nameExpr = colonExpr.at(1);
-
-    if (nameExpr?.isList()) {
-      // With generics e.g. Child<T>
-      name = nameExpr.identifierAt(0);
-      typeParameters = extractTypeParams(nameExpr.listAt(1));
-    } else if (nameExpr?.isIdentifier()) {
-      name = nameExpr;
+    // Extract child name (possibly with generics)
+    const childExpr = colonExpr.at(1);
+    if (childExpr?.isList()) {
+      name = childExpr.identifierAt(0);
+      typeParameters = extractTypeParams(childExpr.listAt(1));
+    } else if (childExpr?.isIdentifier()) {
+      name = childExpr;
     }
 
-    // Parent expression is the third element of the ':' list
+    // Parent type expression (third element)
     parentObjExpr = initEntities(colonExpr.at(2));
 
-    // Fields start right after the colon expression -> index 2
-    fieldsList = obj.listAt(2);
+    // Fields list appears after the colon expression
+    fieldsSource = obj.listAt(2);
   } else {
-    // Case B: legacy 'extends' syntax (or no inheritance at all)
+    // No inheritance
+    if (second?.isList()) {
+      // Generic parameters list e.g. Child<T>
+      name = second.identifierAt(0);
+      typeParameters = extractTypeParams(second.listAt(1));
+    } else if (second?.isIdentifier()) {
+      name = second;
+    }
 
-    const hasExtension = obj.optionalIdentifierAt(2)?.is("extends");
-
-    const typeInitExpr = second; // obj.at(1)
-    const hasGenerics = typeInitExpr?.isList() && typeInitExpr.calls("generics") === false; // generics list isn't 'extends'
-
-    name = hasGenerics ? typeInitExpr.identifierAt(0) : obj.identifierAt(1);
-
-    typeParameters = hasGenerics
-      ? extractTypeParams(typeInitExpr.listAt(1))
-      : undefined;
-
-    parentObjExpr = hasExtension ? initEntities(obj.at(3)!) : undefined;
-
-    fieldsList = extractObjectFields(
-      hasExtension ? obj.listAt(4) : obj.listAt(2)
-    );
-
-    return new ObjectType({
-      ...obj.metadata,
-      name,
-      typeParameters,
-      parentObjExpr,
-      value: fieldsList,
-    });
+    fieldsSource = obj.listAt(2);
   }
 
-  if (!name) {
-    throw new Error("Invalid object definition, missing name");
-  }
-
-  if (!fieldsList) {
-    fieldsList = obj.listAt(2);
+  if (!name || !fieldsSource) {
+    throw new Error("Invalid object definition");
   }
 
   return new ObjectType({
@@ -447,7 +423,7 @@ const initNominalObjectType = (obj: List) => {
     name,
     typeParameters,
     parentObjExpr,
-    value: extractObjectFields(fieldsList),
+    value: extractObjectFields(fieldsSource),
   });
 };
 
