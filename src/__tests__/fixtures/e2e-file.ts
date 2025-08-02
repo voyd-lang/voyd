@@ -20,19 +20,19 @@ obj Vec {
   y: i32
 }
 
-obj Point extends Vec {
+obj Point: Vec {
   x: i32,
   y: i32,
   z: i32
 }
 
-obj Pointy extends Vec {
+obj Pointy: Vec {
   x: i32,
   y: i32,
   z: i32
 }
 
-obj Bitly extends Vec {
+obj Bitly: Vec {
   x: i32,
   y: i32,
   z: i32
@@ -130,7 +130,7 @@ obj VecBox<T> {
   box: T
 }
 
-obj PointF extends Vec {
+obj PointF: Vec {
   x: i32,
   y: i32,
   f: i32
@@ -211,8 +211,8 @@ pub fn test17()
     None: -1
 
 obj Animal { age: i32 }
-obj Insect extends Animal { age: i32, legs: i32 }
-obj Mammal extends Animal { age: i32, legs: i32 }
+obj Insect: Animal { age: i32, legs: i32 }
+obj Mammal: Animal { age: i32, legs: i32 }
 
 fn get_legs(a: Animal & { legs: i32 }) -> i32
   a.legs

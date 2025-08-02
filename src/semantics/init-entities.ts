@@ -373,22 +373,30 @@ const initFixedArrayType = (type: List) => {
 };
 
 const initNominalObjectType = (obj: List) => {
-  const hasExtension = obj.optionalIdentifierAt(2)?.is("extends");
-  const typeInitExpr = obj.at(1);
-  const hasGenerics = typeInitExpr?.isList();
+  const header = obj.at(1);
 
-  const name = hasGenerics ? typeInitExpr.identifierAt(0) : obj.identifierAt(1);
+  const [nameExpr, parentExpr] =
+    header?.isList() && header.calls(":")
+      ? [header.at(1), header.at(2)]
+      : [header, undefined];
 
-  const typeParameters = hasGenerics
-    ? extractTypeParams(typeInitExpr.listAt(1))
-    : undefined;
+  if (!nameExpr) throw new Error("Invalid object definition: missing name");
+
+  const [name, typeParameters] = nameExpr.isList()
+    ? [nameExpr.identifierAt(0), extractTypeParams(nameExpr.listAt(1))]
+    : nameExpr.isIdentifier()
+    ? [nameExpr, undefined]
+    : [undefined, undefined];
+
+  if (!name)
+    throw new Error("Invalid object definition: invalid name expression");
 
   return new ObjectType({
     ...obj.metadata,
     name,
     typeParameters,
-    parentObjExpr: hasExtension ? initEntities(obj.at(3)!) : undefined,
-    value: extractObjectFields(hasExtension ? obj.listAt(4) : obj.listAt(2)),
+    parentObjExpr: parentExpr ? initEntities(parentExpr) : undefined,
+    value: extractObjectFields(obj.listAt(2)),
   });
 };
 
