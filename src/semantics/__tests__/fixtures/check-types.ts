@@ -1,7 +1,7 @@
 export const throwsWithMissingField = `
 use std::all
 
-obj Point extends Vec {
+obj Point: Vec {
   x: i32,
   y: i32,
   z: i32
