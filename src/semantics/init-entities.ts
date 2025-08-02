@@ -373,9 +373,6 @@ const initFixedArrayType = (type: List) => {
 };
 
 const initNominalObjectType = (obj: List) => {
-  // New syntax: obj Child: Parent { ... }
-  // Or no inheritance: obj Child { ... }
-
   let name: ReturnType<typeof obj.identifierAt> | undefined;
   let typeParameters: ReturnType<typeof extractTypeParams> | undefined;
   let parentObjExpr: Expr | undefined;
