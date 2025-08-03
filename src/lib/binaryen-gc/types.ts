@@ -68,7 +68,7 @@ export type AugmentedBinaryen = typeof binaryen & {
     builder: TypeBuilderRef,
     index: Index,
     elementType: TypeRef,
-    elementPackedTyype: PackedType,
+    elementPackedType: PackedType,
     elementMutable: bool
   ): void;
   _TypeBuilderSetSubType(
