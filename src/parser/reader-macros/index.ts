@@ -12,8 +12,13 @@ import { ReaderMacro } from "./types.js";
 import { genericsMacro } from "./generics.js";
 import { Expr } from "../../syntax-objects/expr.js";
 import { htmlMacro } from "./html/html.js";
+import { listReader } from "./list.js";
+import { whitespaceReader } from "./whitespace.js";
+import { identifierReader } from "./identifier.js";
 
 const macros = [
+  listReader,
+  whitespaceReader,
   objectLiteralMacro,
   arrayLiteralMacro,
   mapLiteralMacro,
@@ -25,6 +30,7 @@ const macros = [
   booleanMacro,
   genericsMacro,
   htmlMacro,
+  identifierReader,
 ];
 
 export const getReaderMacroForToken = (
