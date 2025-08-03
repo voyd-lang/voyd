@@ -2,7 +2,7 @@
 
 ## Hybrid Nominal And Structural Sub-typing
 
-```
+```voyd
 obj Robot
 
 obj ArmRobot: Robot {

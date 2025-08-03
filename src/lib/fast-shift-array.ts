@@ -1,5 +1,3 @@
-import { at } from "vitest/dist/chunks/reporters.C_zwCd4j.js";
-
 // TODO: Add map, filter, reduce, amd findIndex
 export class FastShiftArray<T> {
   private items: T[];
