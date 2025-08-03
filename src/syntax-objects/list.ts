@@ -204,9 +204,6 @@ export class List extends Syntax {
    */
   optionalLabeledArg(label: string): Expr | undefined {
     for (const expr of this.#store.toArray()) {
-      // A labeled argument is parsed as a call where the callee identifier is ':'
-      // and the first argument is the label identifier. The second argument is
-      // the value expression associated with the label.
       if (!expr.isCall()) continue;
       if (!expr.calls(":")) continue;
 
@@ -238,9 +235,6 @@ export class List extends Syntax {
 
   /**
    * Builds and returns a map of all labeled arguments contained in the list.
-   * The computation is performed on every call to keep the implementation
-   * straightforward – performance-critical paths should instead cache the
-   * result if required.
    */
   getLabeledArgs(): Map<string, Expr> {
     const map = new Map<string, Expr>();

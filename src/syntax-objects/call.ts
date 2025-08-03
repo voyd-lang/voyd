@@ -74,24 +74,17 @@ export class Call extends Syntax {
     return expr;
   }
 
-  // Returns the value of the labeled argument at the given index
-  private _labeledArgAtIndex(index: number): Expr {
-    // Deprecated: kept for backward-compatibility when callers still rely on
-    // positional access. Prefer `getLabeledArg(name)` instead.
-    const labelExpr = this.args.at(index);
-    if (!labelExpr?.isCall() || !labelExpr.calls(":")) {
-      throw new Error(`No label found at ${index}`);
-    }
-    return labelExpr.exprArgAt(1);
-  }
-
   /**
    * Returns the expression for the labeled argument at the given zero-based
    * position (same semantics as the previous implementation). Prefer
    * `getLabeledArg` when possible.
    */
   labeledArgAt(index: number): Expr {
-    return this._labeledArgAtIndex(index);
+    const labelExpr = this.args.at(index);
+    if (!labelExpr?.isCall() || !labelExpr.calls(":")) {
+      throw new Error(`No label found at ${index}`);
+    }
+    return labelExpr.exprArgAt(1);
   }
 
   /** Returns the expression associated with a label, e.g. `world` in
@@ -106,7 +99,7 @@ export class Call extends Syntax {
 
   optionalLabeledArgAt(index: number): Expr | undefined {
     try {
-      return this._labeledArgAtIndex(index);
+      return this.labeledArgAt(index);
     } catch {
       return undefined;
     }
