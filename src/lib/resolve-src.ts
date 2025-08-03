@@ -25,8 +25,18 @@ export async function resolveSrc(index: string): Promise<SrcInfo> {
   }
 
   if (indexStats.isDirectory()) {
+    const indexFile = path.join(indexPath, "index.voyd");
+    try {
+      const indexFileStats = await stat(indexFile);
+      if (!indexFileStats.isFile()) {
+        throw new Error();
+      }
+    } catch {
+      throw new Error(`Missing index file at ${indexFile}`);
+    }
+
     return {
-      indexPath: path.join(indexPath, "index.voyd"),
+      indexPath: indexFile,
       srcRootPath: indexPath,
     };
   }
