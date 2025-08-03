@@ -103,11 +103,11 @@ const parametersMatch = (candidate: Fn, call: Call) =>
   });
 
 const getExprLabel = (expr?: Expr): string | undefined => {
-  if (!expr?.isCall()) return;
-  if (!expr.calls(":")) return;
+  if (!expr?.isCall()) return undefined;
+  if (!expr.calls(":")) return undefined;
   const id = expr.argAt(0);
-  if (!id?.isIdentifier()) return;
-  return id.value;
+  if (id?.isIdentifier()) return id.value;
+  return undefined;
 };
 
 const isPrimitiveFnCall = (call: Call): boolean => {

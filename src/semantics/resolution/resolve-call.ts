@@ -141,9 +141,11 @@ export const resolveWhile = (call: Call) => {
 
 export const resolveBinaryen = (call: Call) => {
   call.args = call.args.map(resolveEntities);
-  const type = call.optionalLabeledArgAt(3);
-  if (!type) return call;
-  resolveTypeExpr(type);
-  call.type = getExprType(type);
+  const typeArg = call.optionalLabeledArg("return_type");
+
+  if (!typeArg) return call;
+
+  resolveTypeExpr(typeArg);
+  call.type = getExprType(typeArg);
   return call;
 };
