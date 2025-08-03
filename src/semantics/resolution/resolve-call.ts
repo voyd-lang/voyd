@@ -141,7 +141,7 @@ export const resolveWhile = (call: Call) => {
 
 export const resolveBinaryen = (call: Call) => {
   call.args = call.args.map(resolveEntities);
-  const type = call.optionalLabeledArgAt(3);
+  const type = call.optionalLabeledArg("type");
   if (!type) return call;
   resolveTypeExpr(type);
   call.type = getExprType(type);

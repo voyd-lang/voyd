@@ -195,6 +195,65 @@ export class List extends Syntax {
     return this.children.slice(start, end);
   }
 
+  /**
+   * Returns the expression for a labeled argument, eg. for the list
+   * `[hello, [:, world, 1]]` – which represents `hello(world: 1)` –
+   * `labeledArg("world")` will return the expression `1`.
+   *
+   * If the label is not found, `undefined` is returned.
+   */
+  optionalLabeledArg(label: string): Expr | undefined {
+    for (const expr of this.#store.toArray()) {
+      // A labeled argument is parsed as a call where the callee identifier is ':'
+      // and the first argument is the label identifier. The second argument is
+      // the value expression associated with the label.
+      if (!expr.isCall()) continue;
+      if (!expr.calls(":")) continue;
+
+      const labelId = expr.argAt(0);
+      if (!labelId?.isIdentifier()) continue;
+
+      if (labelId.value === label) {
+        return expr.argAt(1);
+      }
+    }
+
+    return undefined;
+  }
+
+  /** Asserts that a labeled argument exists and returns its expression. */
+  labeledArg(label: string): Expr {
+    const expr = this.optionalLabeledArg(label);
+    if (!expr) throw new Error(`Labeled argument '${label}' not found`);
+    return expr;
+  }
+
+  /**
+   * Returns `true` when the list contains a labeled argument with the provided
+   * name.
+   */
+  hasLabeledArg(label: string): boolean {
+    return this.optionalLabeledArg(label) !== undefined;
+  }
+
+  /**
+   * Builds and returns a map of all labeled arguments contained in the list.
+   * The computation is performed on every call to keep the implementation
+   * straightforward – performance-critical paths should instead cache the
+   * result if required.
+   */
+  getLabeledArgs(): Map<string, Expr> {
+    const map = new Map<string, Expr>();
+    for (const expr of this.#store.toArray()) {
+      if (!expr.isCall() || !expr.calls(":")) continue;
+      const labelId = expr.argAt(0);
+      if (!labelId?.isIdentifier()) continue;
+      const valueExpr = expr.argAt(1);
+      if (valueExpr) map.set(labelId.value, valueExpr);
+    }
+    return map;
+  }
+
   toArray(): Expr[] {
     return this.#store.toArray();
   }

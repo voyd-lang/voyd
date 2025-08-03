@@ -303,7 +303,7 @@ const compileWhile = (opts: CompileExprOpts<Call>) => {
       ),
       compileExpression({
         ...opts,
-        expr: expr.labeledArgAt(1),
+        expr: expr.labeledArg("do"),
         loopBreakId: breakId,
         isReturnExpr: false,
       }),
@@ -406,9 +406,20 @@ const compileFieldAssign = (opts: CompileExprOpts<Call>) => {
 
 const compileBnrCall = (opts: CompileExprOpts<Call>): number => {
   const { expr } = opts;
-  const funcId = expr.labeledArgAt(0) as Identifier;
-  const namespace = (expr.labeledArgAt(1) as Identifier).value;
-  const args = expr.labeledArgAt(2) as Call;
+  const funcIdExpr = expr.labeledArg("func");
+  const namespaceExpr = expr.labeledArg("namespace");
+  const argsExpr = expr.labeledArg("args");
+
+  if (!funcIdExpr?.isIdentifier())
+    throw new Error("binaryen call missing 'func:' identifier");
+  if (!namespaceExpr?.isIdentifier())
+    throw new Error("binaryen call missing 'namespace:' identifier");
+  if (!argsExpr?.isCall())
+    throw new Error("binaryen call missing 'args:' list");
+
+  const funcId = funcIdExpr as Identifier;
+  const namespace = namespaceExpr.value;
+  const args = argsExpr as Call;
 
   const func =
     namespace === "gc"
@@ -525,8 +536,8 @@ const compileObjectLiteral = (opts: CompileExprOpts<ObjectLiteral>) => {
 const compileIf = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;
   const conditionNode = expr.exprArgAt(0);
-  const ifTrueNode = expr.labeledArgAt(1);
-  const ifFalseNode = expr.optionalLabeledArgAt(2);
+  const ifTrueNode = expr.labeledArg("then");
+  const ifFalseNode = expr.optionalLabeledArg("else");
   const condition = compileExpression({
     ...opts,
     expr: conditionNode,
