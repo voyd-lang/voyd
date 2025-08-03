@@ -111,8 +111,8 @@ fn add(a: i32, b: i32) -> i32
 In most cases the return type can be inferred
 
 ```rust
-fn add(a:i32, b:i32)
-  a + h
+fn add(a: i32, b: i32)
+  a + b
 ```
 
 To call a function, use the function name followed by the arguments in parenthesis
