@@ -296,6 +296,23 @@ export abstract class Syntax {
   setEndLocationToEndOf(location?: SourceLocation) {
     this.location?.setEndToEndOf(location);
   }
+
+  toAST(): { type: string; location?: SourceLocation; value: unknown } {
+    const json = this.toJSON();
+    const value =
+      json instanceof Array
+        ? json.map((v) => {
+            if (v instanceof Syntax) return v.toAST();
+            return v;
+          })
+        : json;
+
+    return {
+      type: this.syntaxType,
+      location: this.location,
+      value,
+    };
+  }
 }
 
 let currentSyntaxId = 0;
@@ -352,5 +369,21 @@ export class SourceLocation {
     return `${this.filePath}:${this.line}${
       this.endLine && this.endLine !== this.line ? `-${this.endLine}` : ""
     }:${this.column + 1}${this.endColumn ? `-${this.endColumn + 1}` : ""}`;
+  }
+
+  toJSON() {
+    return {
+      startIndex: this.startIndex,
+      endIndex: this.endIndex,
+      line: this.line,
+      column: this.column,
+      endColumn: this.endColumn,
+      endLine: this.endLine,
+      filePath: this.filePath,
+    };
+  }
+
+  clone() {
+    return new SourceLocation(this.toJSON());
   }
 }
