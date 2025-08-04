@@ -288,6 +288,31 @@ export abstract class Syntax {
   isObjectLiteral(): this is ObjectLiteral {
     return this.syntaxType === "object-literal";
   }
+
+  setEndLocationToStartOf(location?: SourceLocation) {
+    this.location?.setEndToStartOf(location);
+  }
+
+  setEndLocationToEndOf(location?: SourceLocation) {
+    this.location?.setEndToEndOf(location);
+  }
+
+  toAST(): { type: string; location?: SourceLocation; value: unknown } {
+    const json = this.toJSON();
+    const value =
+      json instanceof Array
+        ? json.map((v) => {
+            if (v instanceof Syntax) return v.toAST();
+            return v;
+          })
+        : json;
+
+    return {
+      type: this.syntaxType,
+      location: this.location,
+      value,
+    };
+  }
 }
 
 let currentSyntaxId = 0;
@@ -308,6 +333,7 @@ export class SourceLocation {
   column: number;
   /** The column index in the line where the syntax ends  */
   endColumn?: number;
+  endLine?: number;
 
   filePath: string;
 
@@ -325,9 +351,39 @@ export class SourceLocation {
     this.filePath = opts.filePath;
   }
 
+  setEndToStartOf(location?: SourceLocation) {
+    if (!location) return;
+    this.endIndex = location.startIndex;
+    this.endColumn = location.column;
+    this.endLine = location.line;
+  }
+
+  setEndToEndOf(location?: SourceLocation) {
+    if (!location) return;
+    this.endIndex = location.endIndex;
+    this.endColumn = location.endColumn;
+    this.endLine = location.endLine;
+  }
+
   toString() {
-    return `${this.filePath}:${this.line}:${this.column + 1}${
-      this.endColumn ? `-${this.endColumn + 1}` : ""
-    }`;
+    return `${this.filePath}:${this.line}${
+      this.endLine && this.endLine !== this.line ? `-${this.endLine}` : ""
+    }:${this.column + 1}${this.endColumn ? `-${this.endColumn + 1}` : ""}`;
+  }
+
+  toJSON() {
+    return {
+      startIndex: this.startIndex,
+      endIndex: this.endIndex,
+      line: this.line,
+      column: this.column,
+      endColumn: this.endColumn,
+      endLine: this.endLine,
+      filePath: this.filePath,
+    };
+  }
+
+  clone() {
+    return new SourceLocation(this.toJSON());
   }
 }

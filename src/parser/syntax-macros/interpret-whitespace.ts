@@ -2,7 +2,7 @@ import { idIs, isContinuationOp, isGreedyOp } from "../grammar.js";
 import { Expr, List } from "../../syntax-objects/index.js";
 
 export const interpretWhitespace = (list: List, indentLevel?: number): List => {
-  const transformed = new List({ ...list.metadata });
+  const transformed = new List({ ...list.metadata, dynamicLocation: true });
 
   let hadComma = false;
   while (list.hasChildren) {
@@ -12,22 +12,20 @@ export const interpretWhitespace = (list: List, indentLevel?: number): List => {
     hadComma = nextIsComma(list);
   }
 
-  if (transformed.length === 1 && transformed.first()?.isList()) {
-    return transformed.first() as List;
-  }
-
-  return transformed;
+  return transformed.length === 1 && transformed.first()?.isList()
+    ? (transformed.first() as List)
+    : transformed;
 };
 
 const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
   if (!list.isList()) return list;
-  const transformed = new List({});
+  const transformed = new List({ dynamicLocation: true });
   const indentLevel = startIndentLevel ?? nextExprIndentLevel(list);
 
   const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;
 
   const pushChildBlock = () => {
-    const children = new List({ value: ["block"] });
+    const children = new List({ value: ["block"], dynamicLocation: true });
 
     while (nextLineHasChildExpr()) {
       const child = elideParens(list, indentLevel + 1);
@@ -46,6 +44,7 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
       addSibling(child, children);
     }
 
+    // Handle labeled arguments
     const firstChild = children.at(1);
     if (firstChild?.isList() && isNamedArg(firstChild)) {
       transformed.push(...children.argsArray());
@@ -93,10 +92,6 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
       continue;
     }
 
-    if (next !== undefined && !transformed.location) {
-      transformed.location = next.location;
-    }
-
     if (next !== undefined) {
       transformed.push(next);
       list.consume();
@@ -104,18 +99,7 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
     }
   }
 
-  if (
-    transformed.location &&
-    typeof transformed.last()?.location?.endIndex === "number"
-  ) {
-    transformed.location.endIndex = transformed.last()!.location!.endIndex;
-  }
-
-  if (transformed.length === 1) {
-    return transformed.first()!;
-  }
-
-  return transformed;
+  return transformed.length === 1 ? transformed.first()! : transformed;
 };
 
 /** Will return 0 if the next expression is a comma (performance hack for whitespace block parsing) */
@@ -145,16 +129,6 @@ const nextExprIndentLevel = (list: List, startIndex?: number) => {
   }
 
   return nextIndentLevel;
-};
-
-const nextNonWhitespace = (list: List, startIndex?: number) => {
-  let index = startIndex ?? 0;
-
-  while (list.at(index)?.isWhitespace()) {
-    index += 1;
-  }
-
-  return list.at(index);
 };
 
 const consumeLeadingWhitespace = (list: List) => {

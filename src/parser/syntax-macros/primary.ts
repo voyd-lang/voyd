@@ -13,7 +13,7 @@ const parseExpression = (expr: Expr): Expr => {
 };
 
 const parseList = (list: List): List => {
-  const transformed = new List({ ...list.metadata });
+  const transformed = new List({ ...list.metadata, dynamicLocation: true });
   const hadSingleListChild = list.length === 1 && list.at(0)?.isList();
   while (list.hasChildren) {
     transformed.push(parsePrecedence(list));
@@ -44,7 +44,11 @@ const parseBinaryCall = (left: Expr, list: List): List => {
   // Dot handling should maybe be moved to a macro?
   const result = isDotOp(op)
     ? parseDot(right, left)
-    : new List({ ...op.metadata, value: [op, left, right] });
+    : new List({
+        ...op.metadata,
+        value: [op, left, right],
+        dynamicLocation: true,
+      });
 
   // Remove "tuple" from the list of parameters of a lambda
   // Functional notation macro isn't smart enough to identify lambda parameters
@@ -75,7 +79,7 @@ const parseDot = (right: Expr, left: Expr): List => {
     return right;
   }
 
-  return new List({ value: [right, left] });
+  return new List({ value: [right, left], dynamicLocation: true });
 };
 
 const parsePrecedence = (list: List, minPrecedence = 0): Expr => {
@@ -94,7 +98,7 @@ const parsePrecedence = (list: List, minPrecedence = 0): Expr => {
 const parseUnaryCall = (list: List): List => {
   const op = list.consume();
   const expr = parsePrecedence(list, unaryOpInfo(op) ?? -1);
-  return new List({ value: [op, expr] });
+  return new List({ value: [op, expr], dynamicLocation: true });
 };
 
 const infixOpInfo = (op?: Expr): number | undefined => {

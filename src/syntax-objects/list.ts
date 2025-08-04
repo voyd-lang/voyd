@@ -3,24 +3,26 @@ import { Float } from "./float.js";
 import { getIdStr } from "./lib/get-id-str.js";
 import { Id, Identifier } from "./identifier.js";
 import { Int } from "./int.js";
-import { Syntax, SyntaxMetadata } from "./syntax.js";
+import { SourceLocation, Syntax, SyntaxMetadata } from "./syntax.js";
 import { ChildList } from "./lib/child-list.js";
 
 type ListOpts =
   | ListValue[]
   | (SyntaxMetadata & {
       value?: ListValue[] | List | ChildList<Expr>;
-      isParentheticalList?: boolean;
+      dynamicLocation?: boolean;
     });
 
 export class List extends Syntax {
   readonly syntaxType = "list";
   #store = new ChildList(undefined, this);
+  dynamicLocation?: boolean;
 
   constructor(opts: ListOpts) {
     opts = Array.isArray(opts) ? { value: opts } : opts;
     super(opts);
     const value = opts.value;
+    this.dynamicLocation = opts.dynamicLocation;
 
     if (value instanceof Array) {
       value.forEach((v) => this.push(v));
@@ -136,10 +138,35 @@ export class List extends Syntax {
         return;
       }
 
+      if (this.dynamicLocation) {
+        this.updateLocationFrom(ex);
+      }
+
       this.#store.push(ex);
     });
 
     return this;
+  }
+
+  private updateLocationFrom(ex: Expr) {
+    if (!ex.location) return;
+
+    if (!this.location) {
+      this.location = ex.location.clone();
+    }
+
+    if (this.location.startIndex > ex.location.startIndex) {
+      const nl = ex.location.clone();
+      nl.setEndToEndOf(this.location);
+      this.location = nl;
+    }
+
+    if (
+      !this.location.endColumn ||
+      this.location.endIndex < ex.location.endIndex
+    ) {
+      this.location?.setEndToEndOf(ex.location);
+    }
   }
 
   findIndex(cb: (expr: Expr) => boolean) {
