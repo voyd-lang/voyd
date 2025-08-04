@@ -1,7 +1,5 @@
 import { Expr } from "../syntax-objects/expr.js";
-import { Identifier } from "../syntax-objects/identifier.js";
 import { List } from "../syntax-objects/list.js";
-import { Whitespace } from "../syntax-objects/whitespace.js";
 import { CharStream } from "./char-stream.js";
 import { lexer } from "./lexer.js";
 import { getReaderMacroForToken } from "./reader-macros/index.js";
@@ -25,41 +23,17 @@ export const parseChars = (
   while (file.hasCharacters) {
     const token = lexer(file);
 
+    if (token.value === opts.terminator) {
+      break;
+    }
+
     if (processWithReaderMacro(token, list.last(), file, list)) {
       continue;
     }
-
-    if (token.is("(")) {
-      const subList = parseChars(file, { nested: true });
-      subList.setAttribute("tuple?", true);
-      list.push(subList);
-      continue;
-    }
-
-    if (token.is(")") || token.is(opts.terminator)) {
-      if (opts.nested) break;
-      continue;
-    }
-
-    if (token.isWhitespace) {
-      list.push(
-        new Whitespace({
-          value: token.value,
-          location: token.location,
-        })
-      );
-      continue;
-    }
-
-    list.push(
-      new Identifier({
-        value: token.value,
-        location: token.location,
-      })
-    );
   }
 
   list.location!.endIndex = file.position;
+  list.location!.endColumn = file.column;
   return opts.nested ? list : new List(["ast", list]);
 };
 
@@ -82,8 +56,6 @@ const processWithReaderMacro = (
       }),
   });
 
-  if (!result) return undefined;
-
-  list.push(result);
+  if (result) list.push(result);
   return true;
 };

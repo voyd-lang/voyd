@@ -10,5 +10,5 @@ export interface ReaderMacro {
       token: Token;
       reader: (file: CharStream, terminator?: string) => List;
     }
-  ) => Expr;
+  ) => Expr | undefined;
 }
