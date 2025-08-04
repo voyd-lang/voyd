@@ -12,11 +12,14 @@ export const interpretWhitespace = (list: List, indentLevel?: number): List => {
     hadComma = nextIsComma(list);
   }
 
-  if (transformed.length === 1 && transformed.first()?.isList()) {
-    return transformed.first() as List;
-  }
+  const interpolated =
+    transformed.length === 1 && transformed.first()?.isList()
+      ? (transformed.first() as List)
+      : transformed;
 
-  return transformed;
+  interpolated.setEndLocationToEndOf(interpolated.last()?.location);
+
+  return interpolated;
 };
 
 const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
@@ -32,6 +35,10 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
     while (nextLineHasChildExpr()) {
       const child = elideParens(list, indentLevel + 1);
 
+      if (!children.location && child.location) {
+        children.location = child.location;
+      }
+
       if (
         children.length === 1 &&
         child.isList() &&
@@ -46,9 +53,11 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
       addSibling(child, children);
     }
 
+    // Handle labeled arguments
     const firstChild = children.at(1);
     if (firstChild?.isList() && isNamedArg(firstChild)) {
       transformed.push(...children.argsArray());
+      transformed.setEndLocationToEndOf(transformed.last()?.location);
       return;
     }
 
@@ -79,7 +88,10 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
 
     if (next?.isList()) {
       list.consume();
-      transformed.push(interpretWhitespace(next, indentLevel));
+      const oldLocation = next.location;
+      const interpolated = interpretWhitespace(next, indentLevel);
+      interpolated.location = oldLocation;
+      transformed.push(interpolated);
       continue;
     }
 
@@ -104,18 +116,14 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
     }
   }
 
-  if (
-    transformed.location &&
-    typeof transformed.last()?.location?.endIndex === "number"
-  ) {
-    transformed.location.endIndex = transformed.last()!.location!.endIndex;
+  const interpolated =
+    transformed.length === 1 ? transformed.first()! : transformed;
+
+  if (interpolated?.isList()) {
+    interpolated.setEndLocationToEndOf(interpolated.last()?.location);
   }
 
-  if (transformed.length === 1) {
-    return transformed.first()!;
-  }
-
-  return transformed;
+  return interpolated;
 };
 
 /** Will return 0 if the next expression is a comma (performance hack for whitespace block parsing) */
@@ -145,16 +153,6 @@ const nextExprIndentLevel = (list: List, startIndex?: number) => {
   }
 
   return nextIndentLevel;
-};
-
-const nextNonWhitespace = (list: List, startIndex?: number) => {
-  let index = startIndex ?? 0;
-
-  while (list.at(index)?.isWhitespace()) {
-    index += 1;
-  }
-
-  return list.at(index);
 };
 
 const consumeLeadingWhitespace = (list: List) => {
@@ -201,6 +199,7 @@ const addSibling = (child: Expr, siblings: List, hadComma?: boolean) => {
 
   if (isNamedArg(child) && !isNamedArg(olderSibling)) {
     olderSibling.push(child);
+    olderSibling.location?.setEndToEndOf(child.location);
     return;
   }
 

@@ -37,4 +37,8 @@ export class Token {
   is(string?: string) {
     return this.value === string;
   }
+
+  setEndLocationToStartOf(location?: SourceLocation) {
+    this.location.setEndToStartOf(location);
+  }
 }

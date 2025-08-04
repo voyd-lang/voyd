@@ -256,6 +256,14 @@ export class List extends Syntax {
     return this.toArray();
   }
 
+  toSuperJSON() {
+    return {
+      type: "list",
+      location: this.location,
+      value: this.toArray(),
+    };
+  }
+
   /** Clones should return a deep copy of all expressions except for type expressions */
   clone(parent?: Expr): List {
     return new List({

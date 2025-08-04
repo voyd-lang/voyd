@@ -32,8 +32,7 @@ export const parseChars = (
     }
   }
 
-  list.location!.endIndex = file.position;
-  list.location!.endColumn = file.column;
+  list?.setEndLocationToStartOf(file.currentSourceLocation());
   return opts.nested ? list : new List(["ast", list]);
 };
 
