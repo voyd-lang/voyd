@@ -7,137 +7,27 @@ import {
   Type,
   TypeRef,
 } from "./types.js";
+import { TypeBuilder } from "./type-builder.js";
+export { TypeBuilder } from "./type-builder.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
-
-export const typeBuilderCreate = (size: number): number =>
-  bin._TypeBuilderCreate(size);
-
-export const typeBuilderGetTempRefType = (
-  builder: number,
-  index: number,
-  nullable = true
-): TypeRef => {
-  const heap = bin._TypeBuilderGetTempHeapType(builder, index);
-  return bin._TypeBuilderGetTempRefType(builder, heap, nullable);
-};
-
-export const typeBuilderSetStruct = (
-  builder: number,
-  index: number,
-  struct: Struct
-) => {
-  const fields = struct.fields;
-  const fieldTypesPtr = allocU32Array(fields.map(({ type }) => type));
-  const fieldPackedTypesPtr = allocU32Array(
-    fields.map(
-      ({ packedType }) => packedType ?? bin._BinaryenPackedTypeNotPacked()
-    )
-  );
-  const fieldMutablesPtr = allocU32Array(
-    fields.reduce((acc, { mutable }, i) => {
-      const u32Index = Math.floor(i / 4);
-      if (typeof acc[u32Index] === "undefined") acc[u32Index] = 0;
-      const shiftAmount = (i % 4) * 8;
-      acc[u32Index] |= (mutable ? 1 : 0) << shiftAmount;
-      return acc;
-    }, [] as number[])
-  );
-
-  bin._TypeBuilderSetStructType(
-    builder,
-    index,
-    fieldTypesPtr,
-    fieldPackedTypesPtr,
-    fieldMutablesPtr,
-    fields.length
-  );
-
-  bin._free(fieldTypesPtr);
-  bin._free(fieldPackedTypesPtr);
-  bin._free(fieldMutablesPtr);
-};
-
-export const typeBuilderSetSubType = (
-  builder: number,
-  index: number,
-  supertype: HeapTypeRef
-) => bin._TypeBuilderSetSubType(builder, index, supertype);
-
-export const typeBuilderSetOpen = (builder: number, index: number) =>
-  bin._TypeBuilderSetOpen(builder, index);
-
-export const typeBuilderBuildAndDispose = (builder: number): HeapTypeRef => {
-  const size = bin._TypeBuilderGetSize(builder);
-  const out = bin._malloc(Math.max(4 * size, 8));
-
-  if (!bin._TypeBuilderBuildAndDispose(builder, out, out, out + 4)) {
-    bin._free(out);
-    throw new Error("_TypeBuilderBuildAndDispose failed");
-  }
-
-  const result = bin.__i32_load(out);
-  bin._free(out);
-
-  return result;
-};
 
 export const defineStructType = (
   mod: binaryen.Module,
   struct: Struct
 ): TypeRef => {
-  const fields = struct.fields;
   const structIndex = 0;
-  const typeBuilder = bin._TypeBuilderCreate(1);
-
-  const fieldTypesPtr = allocU32Array(fields.map(({ type }) => type));
-  const fieldPackedTypesPtr = allocU32Array(
-    fields.map(
-      ({ packedType }) => packedType ?? bin._BinaryenPackedTypeNotPacked()
-    )
-  );
-  const fieldMutablesPtr = allocU32Array(
-    fields.reduce((acc, { mutable }, index) => {
-      // Calculate which u32 slot this boolean belongs to
-      const u32Index = Math.floor(index / 4);
-
-      // Ensure the slot exists and initialize it to 0 if it doesn't
-      if (typeof acc[u32Index] === "undefined") {
-        acc[u32Index] = 0;
-      }
-
-      // Pack the boolean into the appropriate position in the u32
-      const shiftAmount = (index % 4) * 8;
-      acc[u32Index] |= (mutable ? 1 : 0) << shiftAmount;
-
-      return acc;
-    }, [] as number[])
-  );
-
-  bin._TypeBuilderSetStructType(
-    typeBuilder,
-    structIndex,
-    fieldTypesPtr,
-    fieldPackedTypesPtr,
-    fieldMutablesPtr,
-    fields.length
-  );
-
-  if (struct.supertype) {
-    bin._TypeBuilderSetSubType(typeBuilder, structIndex, struct.supertype);
+  const builder = new TypeBuilder(1);
+  try {
+    builder.setStruct(structIndex, struct);
+    if (struct.supertype) builder.setSubType(structIndex, struct.supertype);
+    if (!struct.final) builder.setOpen(structIndex);
+    const result = builder.build();
+    annotateStructNames(mod, result, struct);
+    return bin._BinaryenTypeFromHeapType(result, true); // Has to be nullable for now so initialize an array of ref types
+  } finally {
+    builder.dispose();
   }
-
-  if (!struct.final) bin._TypeBuilderSetOpen(typeBuilder, structIndex);
-
-  bin._free(fieldTypesPtr);
-  bin._free(fieldPackedTypesPtr);
-  bin._free(fieldMutablesPtr);
-
-  const result = typeBuilderBuildAndDispose(typeBuilder);
-
-  annotateStructNames(mod, result, struct);
-
-  return bin._BinaryenTypeFromHeapType(result, true); // Has to be nullable for now so initialize an array of ref types
 };
 
 export const defineArrayType = (
@@ -146,26 +36,28 @@ export const defineArrayType = (
   mutable = false,
   name?: string
 ): TypeRef => {
-  const typeBuilder = bin._TypeBuilderCreate(1);
-  bin._TypeBuilderSetArrayType(
-    typeBuilder,
-    0,
-    elementType,
-    bin._BinaryenPackedTypeNotPacked(),
-    mutable
-  );
-
-  const result = typeBuilderBuildAndDispose(typeBuilder);
-
-  if (name) {
-    bin._BinaryenModuleSetTypeName(
-      mod.ptr,
-      result,
-      bin.stringToUTF8OnStack(name)
+  const builder = new TypeBuilder(1);
+  try {
+    builder.setArrayType(
+      0,
+      elementType,
+      bin._BinaryenPackedTypeNotPacked(),
+      mutable
     );
-  }
+    const result = builder.build();
 
-  return bin._BinaryenTypeFromHeapType(result, true); // Has to be nullable for now so initialize an array of ref types
+    if (name) {
+      bin._BinaryenModuleSetTypeName(
+        mod.ptr,
+        result,
+        bin.stringToUTF8OnStack(name)
+      );
+    }
+
+    return bin._BinaryenTypeFromHeapType(result, true); // Has to be nullable for now so initialize an array of ref types
+  } finally {
+    builder.dispose();
+  }
 };
 
 export const binaryenTypeToHeapType = (type: Type): HeapTypeRef => {

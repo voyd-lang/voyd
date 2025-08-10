@@ -11,13 +11,8 @@ import {
 } from "./syntax-objects/types.js";
 import {
   binaryenTypeToHeapType,
-  typeBuilderCreate,
-  typeBuilderGetTempRefType,
-  typeBuilderSetStruct,
-  typeBuilderSetSubType,
-  typeBuilderSetOpen,
-  typeBuilderBuildAndDispose,
   annotateStructNames,
+  TypeBuilder,
 } from "./lib/binaryen-gc/index.js";
 import * as gc from "./lib/binaryen-gc/index.js";
 import { TypeRef } from "./lib/binaryen-gc/types.js";
@@ -181,36 +176,40 @@ export const buildObjectType = (
   if (obj.typeParameters) return opts.mod.nop();
   const mod = opts.mod;
 
-  const builder = typeBuilderCreate(1);
-  const tempRef = typeBuilderGetTempRefType(builder, 0, true);
-  buildingTypePlaceholders.set(obj, tempRef);
+  const builder = new TypeBuilder(1);
+  try {
+    const tempRef = builder.getTempRefType(0, true);
+    buildingTypePlaceholders.set(obj, tempRef);
 
-  const fields = [
-    { type: opts.extensionHelpers.i32Array, name: "__ancestors_table" },
-    {
-      type: opts.fieldLookupHelpers.lookupTableType,
-      name: "__field_index_table",
-    },
-    ...obj.fields.map((field) => ({
-      type: mapBinaryenType(opts, field.type!),
-      name: field.name,
-      mutable: true,
-    })),
-  ];
+    const fields = [
+      { type: opts.extensionHelpers.i32Array, name: "__ancestors_table" },
+      {
+        type: opts.fieldLookupHelpers.lookupTableType,
+        name: "__field_index_table",
+      },
+      ...obj.fields.map((field) => ({
+        type: mapBinaryenType(opts, field.type!),
+        name: field.name,
+        mutable: true,
+      })),
+    ];
 
-  typeBuilderSetStruct(builder, 0, { name: obj.id, fields });
+    builder.setStruct(0, { name: obj.id, fields });
 
-  const supertype = obj.parentObjType
-    ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObjType))
-    : undefined;
-  if (supertype) typeBuilderSetSubType(builder, 0, supertype);
-  typeBuilderSetOpen(builder, 0);
+    const supertype = obj.parentObjType
+      ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObjType))
+      : undefined;
+    if (supertype) builder.setSubType(0, supertype);
+    builder.setOpen(0);
 
-  const heapType = typeBuilderBuildAndDispose(builder);
-  annotateStructNames(mod, heapType, { name: obj.id, fields, supertype });
-  buildingTypePlaceholders.delete(obj);
+    const heapType = builder.build();
+    annotateStructNames(mod, heapType, { name: obj.id, fields, supertype });
 
-  obj.binaryenType = gc.binaryenTypeFromHeapType(heapType, true);
+    obj.binaryenType = gc.binaryenTypeFromHeapType(heapType, true);
+  } finally {
+    buildingTypePlaceholders.delete(obj);
+    builder.dispose();
+  }
 
   mod.addGlobal(
     `__ancestors_table_${obj.id}`,
