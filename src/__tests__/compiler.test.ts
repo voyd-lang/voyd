@@ -74,6 +74,8 @@ describe("E2E Compiler Pipeline", () => {
       4, // Structural object re-assignment
       "world",
       8, // trait impls
+      7, // Recursive heap object type match Some
+      -1, // Recursive heap object type match None
     ]);
   });
 

@@ -77,8 +77,8 @@ const resolveGenericsWithTypeArgs = (
   });
 
   if (typesNotResolved) return obj;
+  obj.registerGenericInstance(newObj);
   const resolvedObj = resolveObjectType(newObj);
-  obj.registerGenericInstance(resolvedObj);
 
   const implementations = newObj.implementations;
   newObj.implementations = []; // Clear implementations to avoid duplicates, resolveImpl will re-add them
