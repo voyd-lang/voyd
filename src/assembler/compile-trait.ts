@@ -1,5 +1,4 @@
 import { CompileExprOpts } from "../assembler.js";
-import { Trait } from "../syntax-objects/trait.js";
+import { TraitType } from "../syntax-objects/types/trait.js";
 
-export const compile = (_: CompileExprOpts<Trait>) => _.mod.nop();
-
+export const compile = (_: CompileExprOpts<TraitType>) => _.mod.nop();

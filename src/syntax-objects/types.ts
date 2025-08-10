@@ -1,6 +1,6 @@
 import { Expr } from "./expr.js";
 import { Parameter } from "./parameter.js";
-import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
+import { NamedEntityOpts } from "./named-entity.js";
 import { Id, Identifier } from "./identifier.js";
 import { getIdStr } from "./lib/get-id-str.js";
 import { LexicalContext } from "./lib/lexical-context.js";
@@ -8,7 +8,8 @@ import { Implementation } from "./implementation.js";
 import { ScopedEntity } from "./scoped-entity.js";
 import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
-import { Trait } from "./trait.js";
+import { TraitType } from "./types/trait.js";
+import { BaseType } from "./types/base-type.js";
 
 export type Type =
   | PrimitiveType
@@ -22,14 +23,6 @@ export type Type =
   | TypeAlias;
 
 export type TypeJSON = ["type", [string, ...any[]]];
-
-export abstract class BaseType extends NamedEntity {
-  readonly syntaxType = "type";
-  abstract readonly kindOfType: string;
-
-  abstract toJSON(): TypeJSON;
-}
-
 export class TypeAlias extends BaseType {
   readonly kindOfType = "type-alias";
   lexicon: LexicalContext = new LexicalContext();
@@ -136,24 +129,6 @@ export class IntersectionType extends BaseType {
         this.structuralTypeExpr.value,
       ],
     ];
-  }
-}
-
-export class TraitType extends BaseType {
-  readonly kindOfType = "trait";
-  trait: Trait;
-
-  constructor(opts: NamedEntityOpts & { trait: Trait }) {
-    super({ ...opts, name: opts.trait.name });
-    this.trait = opts.trait;
-  }
-
-  clone(parent?: Expr): TraitType {
-    return new TraitType({ ...super.getCloneOpts(parent), trait: this.trait });
-  }
-
-  toJSON(): TypeJSON {
-    return ["type", ["trait", this.trait.id]];
   }
 }
 

@@ -86,8 +86,9 @@ export const typesAreCompatible = (
   }
 
   if (a.isObjectType() && b.isTraitType()) {
-    const matchesTrait = a
-      .implementations?.some((impl) => impl.trait?.id === b.trait.id);
+    const matchesTrait = a.implementations?.some(
+      (impl) => impl.trait?.id === b.id
+    );
     if (matchesTrait) return true;
     return a.parentObjType
       ? typesAreCompatible(a.parentObjType, b, opts, visited)
@@ -95,8 +96,9 @@ export const typesAreCompatible = (
   }
 
   if (a.isTraitType() && b.isObjectType()) {
-    const matchesTrait = b
-      .implementations?.some((impl) => impl.trait?.id === a.trait.id);
+    const matchesTrait = b.implementations?.some(
+      (impl) => impl.trait?.id === a.id
+    );
     if (matchesTrait) return true;
     return b.parentObjType
       ? typesAreCompatible(a, b.parentObjType, opts, visited)
@@ -104,7 +106,7 @@ export const typesAreCompatible = (
   }
 
   if (a.isTraitType() && b.isTraitType()) {
-    return a.trait.id === b.trait.id;
+    return a.id === b.id;
   }
 
   if (a.isUnionType() || b.isUnionType()) {
