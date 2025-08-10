@@ -334,6 +334,22 @@ obj NodeSimple<T> {
 pub fn test28() -> i32
   let node = NodeSimple { val: 5 }
   node.val
+
+trait DoWork
+  fn work(self) -> i32
+
+obj Worker {}
+
+impl DoWork for Worker
+  fn work(self) -> i32
+    1
+
+fn takes_worker(w: DoWork) -> i32
+  w.work()
+
+pub fn test29() -> i32
+  let w = Worker {}
+  takes_worker(w)
 `;
 
 export const tcoText = `

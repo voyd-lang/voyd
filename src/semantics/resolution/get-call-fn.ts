@@ -36,6 +36,13 @@ const getCandidates = (call: Call): Fn[] => {
     fns.push(...(implFns ?? []));
   }
 
+  if (arg1Type?.isTraitType()) {
+    const implFns = arg1Type.trait.implementations
+      ?.flatMap((impl) => impl.exports)
+      .filter((fn) => fn.name.is(call.fnName.value));
+    fns.push(...(implFns ?? []));
+  }
+
   return fns;
 };
 

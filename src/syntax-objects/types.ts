@@ -8,11 +8,13 @@ import { Implementation } from "./implementation.js";
 import { ScopedEntity } from "./scoped-entity.js";
 import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
+import { Trait } from "./trait.js";
 
 export type Type =
   | PrimitiveType
   | UnionType
   | IntersectionType
+  | TraitType
   | ObjectType
   | TupleType
   | FixedArrayType
@@ -134,6 +136,24 @@ export class IntersectionType extends BaseType {
         this.structuralTypeExpr.value,
       ],
     ];
+  }
+}
+
+export class TraitType extends BaseType {
+  readonly kindOfType = "trait";
+  trait: Trait;
+
+  constructor(opts: NamedEntityOpts & { trait: Trait }) {
+    super({ ...opts, name: opts.trait.name });
+    this.trait = opts.trait;
+  }
+
+  clone(parent?: Expr): TraitType {
+    return new TraitType({ ...super.getCloneOpts(parent), trait: this.trait });
+  }
+
+  toJSON(): TypeJSON {
+    return ["type", ["trait", this.trait.id]];
   }
 }
 

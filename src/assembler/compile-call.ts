@@ -1,4 +1,5 @@
 import { CompileExprOpts, compileExpression, mapBinaryenType } from "../assembler.js";
+import { refCast } from "../lib/binaryen-gc/index.js";
 import { Call } from "../syntax-objects/call.js";
 import { ObjectLiteral } from "../syntax-objects/object-literal.js";
 import {
@@ -40,7 +41,22 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
 
   const args = expr.args
     .toArray()
-    .map((expr) => compileExpression({ ...opts, expr, isReturnExpr: false }));
+    .map((arg, i) => {
+      let compiled = compileExpression({ ...opts, expr: arg, isReturnExpr: false });
+      const param = expr.fn?.parameters[i];
+      const argType = getExprType(arg);
+      if (
+        param?.type?.isObjectType() &&
+        argType?.isTraitType()
+      ) {
+        compiled = refCast(
+          mod,
+          compiled,
+          mapBinaryenType(opts, param.type)
+        );
+      }
+      return compiled;
+    });
 
   const id = expr.fn!.id;
   const returnType = mapBinaryenType(opts, expr.fn!.returnType!);

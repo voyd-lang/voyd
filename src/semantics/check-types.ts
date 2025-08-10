@@ -423,13 +423,13 @@ const checkTypeExpr = (expr?: Expr) => {
       throw new Error(`Unrecognized identifier ${expr} at ${expr.location}`);
     }
 
-    if (!entity.isType()) {
+    if (!entity.isType() && !entity.isTrait()) {
       throw new Error(
         `Expected type, got ${entity.name.value} at ${expr.location}`
       );
     }
 
-    if (hasTypeArgs(entity)) {
+    if (entity.isType() && hasTypeArgs(entity)) {
       throw new Error(
         `Type args must be resolved for ${entity.name} at ${expr.location}`
       );

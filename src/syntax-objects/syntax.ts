@@ -25,6 +25,7 @@ import type {
   FixedArrayType,
   UnionType,
   IntersectionType,
+  TraitType,
 } from "./types.js";
 import type { Variable } from "./variable.js";
 import type { Whitespace } from "./whitespace.js";
@@ -215,6 +216,10 @@ export abstract class Syntax {
 
   isFixedArrayType(): this is FixedArrayType {
     return this.isType() && this.kindOfType === "fixed-array";
+  }
+
+  isTraitType(): this is TraitType {
+    return this.isType() && this.kindOfType === "trait";
   }
 
   isPrimitiveType(): this is PrimitiveType {

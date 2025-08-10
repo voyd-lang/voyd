@@ -17,6 +17,9 @@ export const resolveImpl = (
   targetType = targetType ?? getTargetType(impl);
   impl.targetType = targetType;
   impl.trait = getTrait(impl);
+  if (impl.trait) {
+    impl.trait.implementations.push(impl);
+  }
 
   if (!targetType) return impl;
 

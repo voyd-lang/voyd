@@ -2,6 +2,7 @@ import { Expr } from "./expr.js";
 import { Fn } from "./fn.js";
 import { ChildList } from "./lib/child-list.js";
 import { ScopedNamedEntity, ScopedNamedEntityOpts } from "./named-entity.js";
+import { Implementation } from "./implementation.js";
 
 export type TraitOpts = ScopedNamedEntityOpts & {
   methods: Fn[];
@@ -10,6 +11,7 @@ export type TraitOpts = ScopedNamedEntityOpts & {
 export class Trait extends ScopedNamedEntity {
   readonly syntaxType = "trait";
   readonly methods: ChildList<Fn>;
+  implementations: Implementation[] = [];
 
   constructor(opts: TraitOpts) {
     super(opts);
