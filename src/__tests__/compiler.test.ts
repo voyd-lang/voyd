@@ -10,6 +10,7 @@ import assert from "node:assert";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
 import * as rCallUtil from "../assembler/return-call.js";
 import { readString } from "../lib/read-string.js";
+import { compilers } from "../assembler.js";
 
 describe("E2E Compiler Pipeline", () => {
   test("Compiler can compile and run a basic voyd program", async (t) => {
@@ -77,6 +78,24 @@ describe("E2E Compiler Pipeline", () => {
       7, // Recursive heap object type match Some
       -1, // Recursive heap object type match None
     ]);
+
+    const expectedSyntaxTypes = [
+      "call",
+      "block",
+      "match",
+      "int",
+      "string-literal",
+      "float",
+      "identifier",
+      "fn",
+      "variable",
+      "module",
+      "object-literal",
+      "type",
+    ];
+    t.expect(Object.keys(compilers)).toEqual(
+      t.expect.arrayContaining(expectedSyntaxTypes)
+    );
   });
 
   test("Compiler can do tco", async (t) => {
