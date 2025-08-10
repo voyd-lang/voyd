@@ -65,7 +65,7 @@ export const resolveVar = (variable: Variable): Variable => {
 export const resolveModule = (mod: VoydModule): VoydModule => {
   if (mod.phase >= 3) return mod;
   mod.phase = 3;
-  mod.each(resolveEntities);
+  mod.applyMap((expr) => resolveEntities(expr));
   mod.phase = 4;
   return mod;
 };

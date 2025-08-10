@@ -51,6 +51,12 @@ export const resolveLabeledArg = (call: Call) => {
 
 export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
   type = resolveObjectType(type, call);
+  type.fields.forEach((field) => {
+    if (!field.type) {
+      field.typeExpr = resolveTypeExpr(field.typeExpr);
+      field.type = getExprType(field.typeExpr);
+    }
+  });
   call.type = type;
   call.fn = type;
   return call;
