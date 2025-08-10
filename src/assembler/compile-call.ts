@@ -1,4 +1,8 @@
-import { CompileExprOpts, compileExpression, mapBinaryenType } from "../assembler.js";
+import {
+  CompileExprOpts,
+  compileExpression,
+  mapBinaryenType,
+} from "../assembler.js";
 import { refCast } from "../lib/binaryen-gc/index.js";
 import { Call } from "../syntax-objects/call.js";
 import { ObjectLiteral } from "../syntax-objects/object-literal.js";
@@ -17,8 +21,7 @@ const OBJECT_FIELDS_OFFSET = 2;
 
 export const compile = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod, isReturnExpr } = opts;
-  if (expr.calls("quote"))
-    return (expr.argAt(0) as { value: number }).value;
+  if (expr.calls("quote")) return (expr.argAt(0) as { value: number }).value;
   if (expr.calls("=")) return compileAssign(opts);
   if (expr.calls("if")) return compileIf(opts);
   if (expr.calls("export")) return compileExport(opts);
@@ -39,24 +42,22 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     return compileObjectInit(opts);
   }
 
-  const args = expr.args
-    .toArray()
-    .map((arg, i) => {
-      let compiled = compileExpression({ ...opts, expr: arg, isReturnExpr: false });
-      const param = expr.fn?.parameters[i];
-      const argType = getExprType(arg);
-      if (
-        param?.type?.isObjectType() &&
-        argType?.isTraitType()
-      ) {
-        compiled = refCast(
-          mod,
-          compiled,
-          mapBinaryenType(opts, param.type)
-        );
-      }
-      return compiled;
+  const args = expr.args.toArray().map((arg, i) => {
+    const compiled = compileExpression({
+      ...opts,
+      expr: arg,
+      isReturnExpr: false,
     });
+
+    if (!expr.fn?.isFn()) return compiled;
+    const param = expr.fn?.parameters[i];
+    const argType = getExprType(arg);
+    if (param?.type?.isObjectType() && argType?.isTraitType()) {
+      return refCast(mod, compiled, mapBinaryenType(opts, param.type));
+    }
+
+    return compiled;
+  });
 
   const id = expr.fn!.id;
   const returnType = mapBinaryenType(opts, expr.fn!.returnType!);
@@ -278,4 +279,3 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
     exprRef: objValue,
   });
 };
-
