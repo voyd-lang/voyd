@@ -5,7 +5,7 @@ import { Identifier } from "./identifier.js";
 import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
 import { ScopedSyntax, ScopedSyntaxMetadata } from "./scoped-entity.js";
-import { Trait } from "./trait.js";
+import { TraitType } from "./types/trait.js";
 import { Type } from "./types.js";
 
 export type ImplementationOpts = ScopedSyntaxMetadata & {
@@ -25,7 +25,7 @@ export class Implementation extends ScopedSyntax {
   readonly #methods = new Map<string, Fn>(); // NO CLONE!
   typesResolved?: boolean;
   targetType?: Type;
-  trait?: Trait;
+  trait?: TraitType;
 
   constructor(opts: ImplementationOpts) {
     super(opts);

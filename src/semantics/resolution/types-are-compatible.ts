@@ -85,6 +85,30 @@ export const typesAreCompatible = (
     return a.extends(b);
   }
 
+  if (a.isObjectType() && b.isTraitType()) {
+    const matchesTrait = a.implementations?.some(
+      (impl) => impl.trait?.id === b.id
+    );
+    if (matchesTrait) return true;
+    return a.parentObjType
+      ? typesAreCompatible(a.parentObjType, b, opts, visited)
+      : false;
+  }
+
+  if (a.isTraitType() && b.isObjectType()) {
+    const matchesTrait = b.implementations?.some(
+      (impl) => impl.trait?.id === a.id
+    );
+    if (matchesTrait) return true;
+    return b.parentObjType
+      ? typesAreCompatible(a, b.parentObjType, opts, visited)
+      : false;
+  }
+
+  if (a.isTraitType() && b.isTraitType()) {
+    return a.id === b.id;
+  }
+
   if (a.isUnionType() || b.isUnionType()) {
     const aTypes = a.isUnionType() ? flattenUnion(a) : [a];
     const bTypes = b.isUnionType() ? flattenUnion(b) : [b];

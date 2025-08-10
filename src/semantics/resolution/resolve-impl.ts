@@ -5,7 +5,7 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
-import { Trait } from "../../syntax-objects/trait.js";
+import { TraitType } from "../../syntax-objects/types/trait.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFn } from "./resolve-fn.js";
 
@@ -17,6 +17,9 @@ export const resolveImpl = (
   targetType = targetType ?? getTargetType(impl);
   impl.targetType = targetType;
   impl.trait = getTrait(impl);
+  if (impl.trait) {
+    impl.trait.implementations.push(impl);
+  }
 
   if (!targetType) return impl;
 
@@ -78,7 +81,7 @@ const getTargetType = (impl: Implementation): ObjectType | undefined => {
   return type;
 };
 
-const getTrait = (impl: Implementation): Trait | undefined => {
+const getTrait = (impl: Implementation): TraitType | undefined => {
   const expr = impl.traitExpr.value;
   const type = expr?.isIdentifier() ? expr.resolve() : undefined;
   if (!type || !type.isTrait()) return;

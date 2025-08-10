@@ -1,6 +1,6 @@
 import { Expr } from "./expr.js";
 import { Parameter } from "./parameter.js";
-import { NamedEntity, NamedEntityOpts } from "./named-entity.js";
+import { NamedEntityOpts } from "./named-entity.js";
 import { Id, Identifier } from "./identifier.js";
 import { getIdStr } from "./lib/get-id-str.js";
 import { LexicalContext } from "./lib/lexical-context.js";
@@ -8,11 +8,14 @@ import { Implementation } from "./implementation.js";
 import { ScopedEntity } from "./scoped-entity.js";
 import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
+import { TraitType } from "./types/trait.js";
+import { BaseType } from "./types/base-type.js";
 
 export type Type =
   | PrimitiveType
   | UnionType
   | IntersectionType
+  | TraitType
   | ObjectType
   | TupleType
   | FixedArrayType
@@ -20,14 +23,6 @@ export type Type =
   | TypeAlias;
 
 export type TypeJSON = ["type", [string, ...any[]]];
-
-export abstract class BaseType extends NamedEntity {
-  readonly syntaxType = "type";
-  abstract readonly kindOfType: string;
-
-  abstract toJSON(): TypeJSON;
-}
-
 export class TypeAlias extends BaseType {
   readonly kindOfType = "type-alias";
   lexicon: LexicalContext = new LexicalContext();

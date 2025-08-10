@@ -34,7 +34,7 @@ import type { Declaration } from "./declaration.js";
 import type { Use } from "./use.js";
 import type { Match } from "./match.js";
 import type { Implementation } from "./implementation.js";
-import type { Trait } from "./trait.js";
+import type { TraitType } from "./types/trait.js";
 
 export type Attributes = { [key: string]: unknown };
 
@@ -197,8 +197,8 @@ export abstract class Syntax {
     return this.syntaxType === "implementation";
   }
 
-  isTrait(): this is Trait {
-    return this.syntaxType === "trait";
+  isTrait(): this is TraitType {
+    return this.isType() && this.kindOfType === "trait";
   }
 
   isObjectType(): this is ObjectType {
@@ -215,6 +215,10 @@ export abstract class Syntax {
 
   isFixedArrayType(): this is FixedArrayType {
     return this.isType() && this.kindOfType === "fixed-array";
+  }
+
+  isTraitType(): this is TraitType {
+    return this.isType() && this.kindOfType === "trait";
   }
 
   isPrimitiveType(): this is PrimitiveType {

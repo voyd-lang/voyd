@@ -1,5 +1,5 @@
 import { Expr } from "../../syntax-objects/expr.js";
-import { Call, Identifier } from "../../syntax-objects/index.js";
+import { Identifier } from "../../syntax-objects/index.js";
 import {
   Type,
   i32,
@@ -37,4 +37,5 @@ export const getIdentifierType = (id: Identifier): Type | undefined => {
   if (entity.isFn()) return entity.getType();
   if (entity.isTypeAlias()) return entity.type;
   if (entity.isType()) return entity;
+  if (entity.isTrait()) return entity;
 };

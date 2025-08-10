@@ -78,6 +78,7 @@ describe("E2E Compiler Pipeline", () => {
       7, // Recursive heap object type match Some
       -1, // Recursive heap object type match None
       5, // Inferred generic object type parameter
+      1, // Trait parameter type
     ]);
 
     const expectedSyntaxTypes = [

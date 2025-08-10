@@ -124,6 +124,7 @@ export const mapBinaryenType = (
     }
     return buildObjectType(opts, type);
   }
+  if (type.isTraitType()) return buildObjectType(opts, voydBaseObject);
   if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isFixedArrayType()) return buildFixedArrayType(opts, type);
   if (type.isIntersectionType()) return buildIntersectionType(opts, type);
