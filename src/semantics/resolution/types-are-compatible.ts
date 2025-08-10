@@ -1,6 +1,30 @@
 import { Type } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 
+const flattenUnion = (type: Type): Type[] => {
+  const result: Type[] = [];
+  const queue: Type[] = [type];
+  const seen = new Set<string>();
+
+  while (queue.length) {
+    const current = queue.pop()!;
+
+    if (current.isUnionType()) {
+      for (const child of current.types) {
+        if (!seen.has(child.id)) {
+          seen.add(child.id);
+          queue.push(child);
+        }
+      }
+      continue;
+    }
+
+    result.push(current);
+  }
+
+  return result;
+};
+
 export const typesAreCompatible = (
   /** A is the argument type, the type of the value being passed as b */
   a?: Type,
@@ -52,18 +76,30 @@ export const typesAreCompatible = (
     return a.extends(b);
   }
 
-  if (a.isObjectType() && b.isUnionType()) {
-    return b.types.some((type) =>
-      typesAreCompatible(a, type, opts, visited)
-    );
-  }
+  if (a.isUnionType() || b.isUnionType()) {
+    const aTypes = a.isUnionType() ? flattenUnion(a) : [a];
+    const bTypes = b.isUnionType() ? flattenUnion(b) : [b];
 
-  if (a.isUnionType() && b.isUnionType()) {
-    return a.types.every((aType) =>
-      b.types.some((bType) =>
-        typesAreCompatible(aType, bType, opts, visited)
-      )
-    );
+    const bMap = new Map<string, Type>();
+    for (const bType of bTypes) {
+      bMap.set(bType.id, bType);
+    }
+
+    for (const aType of aTypes) {
+      if (bMap.has(aType.id)) continue;
+
+      let match = false;
+      for (const bType of bTypes) {
+        if (typesAreCompatible(aType, bType, opts, visited)) {
+          match = true;
+          break;
+        }
+      }
+
+      if (!match) return false;
+    }
+
+    return true;
   }
 
   if (a.isObjectType() && b.isIntersectionType()) {
