@@ -18,6 +18,11 @@ With return type inference:
 ```voyd
 // Equal sign is used when the function is written on one line
 fn add(a: i32, b: i32) = a + b
+
+// = also works with return types and effects
+fn fib() = test()
+fn fib() -> i32 = test()
+fn fib(): effect -> i32 = test()
 ```
 
 With effects:

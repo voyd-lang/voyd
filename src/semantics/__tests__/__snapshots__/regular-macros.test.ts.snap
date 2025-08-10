@@ -7,7 +7,7 @@ exports[`regular macro expansion 1`] = `
   [
     "exports",
     [
-      "std#733",
+      "std#924",
     ],
   ],
   [
@@ -47,7 +47,7 @@ exports[`regular macro expansion 1`] = `
         ],
         [
           "regular-macro",
-          "\`#762",
+          "\`#953",
           [
             "parameters",
           ],
@@ -68,7 +68,7 @@ exports[`regular macro expansion 1`] = `
         ],
         [
           "regular-macro",
-          "let#809",
+          "let#1000",
           [
             "parameters",
           ],
@@ -121,7 +121,7 @@ exports[`regular macro expansion 1`] = `
         ],
         [
           "regular-macro",
-          "fn#1412",
+          "fn#1793",
           [
             "parameters",
           ],
@@ -131,7 +131,7 @@ exports[`regular macro expansion 1`] = `
               "block",
               [
                 "define",
-                "definitions",
+                "first",
                 [
                   "extract",
                   "body",
@@ -140,24 +140,54 @@ exports[`regular macro expansion 1`] = `
               ],
               [
                 "define",
-                "identifier",
+                "is_equals",
                 [
-                  "extract",
-                  "definitions",
-                  0,
+                  "==",
+                  [
+                    "extract",
+                    "first",
+                    0,
+                  ],
+                  [
+                    "string",
+                    "=",
+                  ],
                 ],
               ],
               [
                 "define",
-                "params",
+                "definitions",
                 [
-                  "extract_parameters",
-                  "definitions",
+                  "block",
+                  [
+                    "if",
+                    "is_equals",
+                    [
+                      ":",
+                      "then",
+                      [
+                        "block",
+                        [
+                          "extract",
+                          "first",
+                          1,
+                        ],
+                      ],
+                    ],
+                    [
+                      ":",
+                      "else",
+                      [
+                        "block",
+                        "first",
+                      ],
+                    ],
+                  ],
                 ],
               ],
               [
                 "define",
-                "type_arrow_index",
+                "identifier_list",
                 [
                   "block",
                   [
@@ -166,12 +196,12 @@ exports[`regular macro expansion 1`] = `
                       "==",
                       [
                         "extract",
-                        "body",
-                        1,
+                        "definitions",
+                        0,
                       ],
                       [
                         "string",
-                        "->",
+                        ":",
                       ],
                     ],
                     [
@@ -179,7 +209,11 @@ exports[`regular macro expansion 1`] = `
                       "then",
                       [
                         "block",
-                        1,
+                        [
+                          "extract",
+                          "definitions",
+                          1,
+                        ],
                       ],
                     ],
                     [
@@ -193,8 +227,8 @@ exports[`regular macro expansion 1`] = `
                             "==",
                             [
                               "extract",
-                              "body",
-                              2,
+                              "definitions",
+                              0,
                             ],
                             [
                               "string",
@@ -204,12 +238,22 @@ exports[`regular macro expansion 1`] = `
                           [
                             ":",
                             "then",
-                            2,
+                            [
+                              "block",
+                              [
+                                "extract",
+                                "definitions",
+                                1,
+                              ],
+                            ],
                           ],
                           [
                             ":",
                             "else",
-                            -1,
+                            [
+                              "block",
+                              "definitions",
+                            ],
                           ],
                         ],
                       ],
@@ -225,9 +269,16 @@ exports[`regular macro expansion 1`] = `
                   [
                     "if",
                     [
-                      ">",
-                      "type_arrow_index",
-                      -1,
+                      "==",
+                      [
+                        "extract",
+                        "definitions",
+                        0,
+                      ],
+                      [
+                        "string",
+                        ":",
+                      ],
                     ],
                     [
                       ":",
@@ -236,17 +287,9 @@ exports[`regular macro expansion 1`] = `
                         "block",
                         [
                           "slice",
-                          "body",
-                          [
-                            "+",
-                            "type_arrow_index",
-                            1,
-                          ],
-                          [
-                            "+",
-                            "type_arrow_index",
-                            2,
-                          ],
+                          "definitions",
+                          2,
+                          3,
                         ],
                       ],
                     ],
@@ -254,10 +297,62 @@ exports[`regular macro expansion 1`] = `
                       ":",
                       "else",
                       [
-                        "quote",
+                        "block",
+                        [
+                          "if",
+                          [
+                            "==",
+                            [
+                              "extract",
+                              "definitions",
+                              0,
+                            ],
+                            [
+                              "string",
+                              "->",
+                            ],
+                          ],
+                          [
+                            ":",
+                            "then",
+                            [
+                              "block",
+                              [
+                                "slice",
+                                "definitions",
+                                2,
+                                3,
+                              ],
+                            ],
+                          ],
+                          [
+                            ":",
+                            "else",
+                            [
+                              "quote",
+                            ],
+                          ],
+                        ],
                       ],
                     ],
                   ],
+                ],
+              ],
+              [
+                "define",
+                "identifier",
+                [
+                  "extract",
+                  "identifier_list",
+                  0,
+                ],
+              ],
+              [
+                "define",
+                "params",
+                [
+                  "extract_parameters",
+                  "identifier_list",
                 ],
               ],
               [
@@ -267,11 +362,7 @@ exports[`regular macro expansion 1`] = `
                   "block",
                   [
                     "if",
-                    [
-                      ">",
-                      "type_arrow_index",
-                      -1,
-                    ],
+                    "is_equals",
                     [
                       ":",
                       "then",
@@ -279,12 +370,8 @@ exports[`regular macro expansion 1`] = `
                         "block",
                         [
                           "slice",
-                          "body",
-                          [
-                            "+",
-                            "type_arrow_index",
-                            2,
-                          ],
+                          "first",
+                          2,
                         ],
                       ],
                     ],
@@ -292,9 +379,12 @@ exports[`regular macro expansion 1`] = `
                       ":",
                       "else",
                       [
-                        "slice",
-                        "body",
-                        1,
+                        "block",
+                        [
+                          "slice",
+                          "body",
+                          1,
+                        ],
                       ],
                     ],
                   ],
