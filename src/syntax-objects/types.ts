@@ -220,7 +220,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
       value: this.fields.map((field) => ({
         ...field,
         typeExpr: field.typeExpr.clone(),
-        type: field.type?.clone() as Type | undefined,
+        type: field.type?.clone(),
       })),
       parentObjExpr: this.parentObjExpr?.clone(),
       typeParameters: this.typeParameters,
