@@ -3,7 +3,9 @@ import binaryen from "binaryen";
 export const getWasmInstance = (
   mod: Uint8Array | binaryen.Module
 ): WebAssembly.Instance => {
-  const bin = mod instanceof Uint8Array ? mod : mod.emitBinary();
+  const bin = (
+    mod instanceof Uint8Array ? mod : mod.emitBinary()
+  ) as unknown as BufferSource;
   const compiled = new WebAssembly.Module(bin);
   return new WebAssembly.Instance(compiled);
 };

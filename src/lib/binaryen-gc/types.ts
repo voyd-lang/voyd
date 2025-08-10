@@ -84,6 +84,11 @@ export type AugmentedBinaryen = typeof binaryen & {
     fieldMutables: ArrayRef<bool>,
     numFields: i32
   ): void;
+  _TypeBuilderGetTempRefType(
+    builder: TypeBuilderRef,
+    heapType: HeapTypeRef,
+    nullable: bool
+  ): TypeRef;
   _TypeBuilderGetTempHeapType(
     builder: TypeBuilderRef,
     index: Index

@@ -75,7 +75,7 @@ export class PrimitiveType extends BaseType {
 export class UnionType extends BaseType {
   readonly kindOfType = "union";
   childTypeExprs: ChildList<Expr>;
-  types: (ObjectType | IntersectionType)[] = [];
+  types: (ObjectType | IntersectionType | UnionType)[] = [];
 
   constructor(opts: NamedEntityOpts & { childTypeExprs?: Expr[] }) {
     super(opts);
@@ -220,7 +220,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
       value: this.fields.map((field) => ({
         ...field,
         typeExpr: field.typeExpr.clone(),
-        type: field.type?.clone(),
+        type: field.type?.clone() as Type | undefined,
       })),
       parentObjExpr: this.parentObjExpr?.clone(),
       typeParameters: this.typeParameters,

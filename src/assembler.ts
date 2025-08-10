@@ -198,7 +198,7 @@ export const buildObjectType = (
     })),
   ];
 
-  typeBuilderSetStruct(builder, 0, { fields });
+  typeBuilderSetStruct(builder, 0, { name: obj.id, fields });
 
   const supertype = obj.parentObjType
     ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObjType))
