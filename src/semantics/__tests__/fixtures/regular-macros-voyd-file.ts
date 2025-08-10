@@ -11,26 +11,35 @@ macro_let extract_parameters = (definitions) =>
   \`(parameters).concat definitions.slice(1)
 
 macro fn()
-  let definitions = body.extract(0)
-  let identifier = definitions.extract(0)
-  let params = extract_parameters(definitions)
-
-  let type_arrow_index =
-    if body.extract(1) == "->" then:
-      1
+  let first = body.extract(0)
+  let is_equals = first.extract(0) == "="
+  let definitions =
+    if is_equals then:
+      first.extract(1)
     else:
-      if body.extract(2) == "->" then: 2 else: -1
-
+      first
+  let identifier_list =
+    if definitions.extract(0) == ":" then:
+      definitions.extract(1)
+    else:
+      if definitions.extract(0) == "->" then:
+        definitions.extract(1)
+      else:
+        definitions
   let return_type =
-    if type_arrow_index > -1 then:
-      body.slice(type_arrow_index + 1, type_arrow_index + 2)
-    else: \`()
-
+    if definitions.extract(0) == ":" then:
+      definitions.slice(2, 3)
+    else:
+      if definitions.extract(0) == "->" then:
+        definitions.slice(2, 3)
+      else: \`()
+  let identifier = identifier_list.extract(0)
+  let params = extract_parameters(identifier_list)
   let expressions =
-    if type_arrow_index > -1 then:
-      body.slice(type_arrow_index + 2)
-    else: body.slice(1)
-
+    if is_equals then:
+      first.slice(2)
+    else:
+      body.slice(1)
   \`(define_function,
     $identifier,
     $params,

@@ -38,15 +38,17 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
   [
     "fn",
     [
-      "fib",
+      "->",
       [
-        ":",
-        "n",
-        "i32",
+        "fib",
+        [
+          ":",
+          "n",
+          "i32",
+        ],
       ],
+      "i32",
     ],
-    "->",
-    "i32",
     [
       "block",
       [
@@ -598,19 +600,21 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
   [
     "fn",
     [
-      "test",
+      "->",
       [
-        "generics",
-        "T",
+        "test",
+        [
+          "generics",
+          "T",
+        ],
+        [
+          ":",
+          "a",
+          1,
+        ],
       ],
-      [
-        ":",
-        "a",
-        1,
-      ],
+      "i32",
     ],
-    "->",
-    "i32",
   ],
   [
     "fn",
