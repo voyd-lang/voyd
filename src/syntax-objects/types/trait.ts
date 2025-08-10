@@ -25,7 +25,7 @@ export class TraitType extends BaseType implements ScopedEntity {
     this.methods = new ChildList(opts.methods, this);
   }
 
-  clone(parent?: Expr): Expr {
+  clone(parent?: Expr): TraitType {
     return new TraitType({
       ...super.getCloneOpts(parent),
       methods: this.methods.clone(),

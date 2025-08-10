@@ -2,7 +2,7 @@ import binaryen from "binaryen";
 import { readString } from "./lib/read-string.js";
 
 export function run(mod: binaryen.Module) {
-  const binary = mod.emitBinary();
+  const binary: BufferSource = mod.emitBinary() as unknown as BufferSource;
   const compiled = new WebAssembly.Module(binary);
   const instance = new WebAssembly.Instance(compiled, {
     utils: {

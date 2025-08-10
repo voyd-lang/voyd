@@ -75,7 +75,7 @@ export class PrimitiveType extends BaseType {
 export class UnionType extends BaseType {
   readonly kindOfType = "union";
   childTypeExprs: ChildList<Expr>;
-  types: (ObjectType | IntersectionType)[] = [];
+  types: (ObjectType | IntersectionType | UnionType)[] = [];
 
   constructor(opts: NamedEntityOpts & { childTypeExprs?: Expr[] }) {
     super(opts);
