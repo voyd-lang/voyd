@@ -325,6 +325,15 @@ pub fn test27() -> i32
   root.right.match(n)
     Some<Node<i32>>: n.value.val
     None: -1
+
+// Simple generic object to test type inference
+obj NodeSimple<T> {
+  val: T
+}
+
+pub fn test28() -> i32
+  let node = NodeSimple { val: 5 }
+  node.val
 `;
 
 export const tcoText = `
