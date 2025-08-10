@@ -20,7 +20,13 @@ import { VoydModule } from "./syntax-objects/module.js";
 import { ObjectLiteral } from "./syntax-objects/object-literal.js";
 import {
   binaryenTypeToHeapType,
-  defineStructType,
+  typeBuilderCreate,
+  typeBuilderGetTempRefType,
+  typeBuilderSetStruct,
+  typeBuilderSetSubType,
+  typeBuilderSetOpen,
+  typeBuilderBuildAndDispose,
+  annotateStructNames,
   initStruct,
   refCast,
   structGetFieldValue,
@@ -34,6 +40,8 @@ import { returnCall } from "./assembler/return-call.js";
 import { Float } from "./syntax-objects/float.js";
 import { initFieldLookupHelpers } from "./assembler/index.js";
 import { StringLiteral } from "./syntax-objects/string-literal.js";
+
+const buildingTypePlaceholders = new Map<ObjectType, TypeRef>();
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -579,7 +587,12 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "voyd")) return binaryen.none;
   if (isPrimitiveId(type, "string")) return getI32ArrayType(opts.mod);
 
-  if (type.isObjectType()) return buildObjectType(opts, type);
+  if (type.isObjectType()) {
+    if (buildingTypePlaceholders.has(type)) {
+      return buildingTypePlaceholders.get(type)!;
+    }
+    return buildObjectType(opts, type);
+  }
   if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isFixedArrayType()) return buildFixedArrayType(opts, type);
   if (type.isIntersectionType()) return buildIntersectionType(opts, type);
@@ -601,8 +614,6 @@ const buildUnionType = (opts: MapBinTypeOpts, union: UnionType): TypeRef => {
   if (union.hasAttribute("binaryenType")) {
     return union.getAttribute("binaryenType") as TypeRef;
   }
-
-  union.types.forEach((type) => mapBinaryenType(opts, type));
 
   const typeRef = mapBinaryenType(opts, voydBaseObject);
   union.setAttribute("binaryenType", typeRef);
@@ -636,31 +647,33 @@ const buildObjectType = (opts: MapBinTypeOpts, obj: ObjectType): TypeRef => {
   if (obj.typeParameters) return opts.mod.nop();
   const mod = opts.mod;
 
-  const binaryenType = defineStructType(mod, {
-    name: obj.id,
-    fields: [
-      // Reference to the RTT Ancestors Table
-      {
-        type: opts.extensionHelpers.i32Array,
-        name: "__ancestors_table",
-      },
-      {
-        type: opts.fieldLookupHelpers.lookupTableType,
-        name: "__field_index_table",
-      },
-      // Fields
-      ...obj.fields.map((field) => ({
-        type: mapBinaryenType(opts, field.type!),
-        name: field.name,
-        mutable: true,
-      })),
-    ],
-    supertype: obj.parentObjType
-      ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObjType))
-      : undefined,
-  });
+  const builder = typeBuilderCreate(1);
+  const tempRef = typeBuilderGetTempRefType(builder, 0, true);
+  buildingTypePlaceholders.set(obj, tempRef);
 
-  obj.binaryenType = binaryenType;
+  const fields = [
+    { type: opts.extensionHelpers.i32Array, name: "__ancestors_table" },
+    { type: opts.fieldLookupHelpers.lookupTableType, name: "__field_index_table" },
+    ...obj.fields.map((field) => ({
+      type: mapBinaryenType(opts, field.type!),
+      name: field.name,
+      mutable: true,
+    })),
+  ];
+
+  typeBuilderSetStruct(builder, 0, { fields });
+
+  const supertype = obj.parentObjType
+    ? binaryenTypeToHeapType(mapBinaryenType(opts, obj.parentObjType))
+    : undefined;
+  if (supertype) typeBuilderSetSubType(builder, 0, supertype);
+  typeBuilderSetOpen(builder, 0);
+
+  const heapType = typeBuilderBuildAndDispose(builder);
+  annotateStructNames(mod, heapType, { name: obj.id, fields, supertype });
+  buildingTypePlaceholders.delete(obj);
+
+  obj.binaryenType = gc.binaryenTypeFromHeapType(heapType, true);
 
   // Set RTT Ancestors Table (So we don't have to re-calculate it every time)
   mod.addGlobal(
@@ -685,12 +698,13 @@ const buildObjectType = (opts: MapBinTypeOpts, obj: ObjectType): TypeRef => {
     );
   }
 
+  const finalType = obj.binaryenType;
   if (obj.isStructural) {
-    obj.setAttribute("originalType", obj.binaryenType);
+    obj.setAttribute("originalType", finalType);
     obj.binaryenType = mapBinaryenType(opts, voydBaseObject);
   }
 
-  if (opts.useOriginalType) return binaryenType;
+  if (opts.useOriginalType) return finalType;
   return obj.binaryenType;
 };
 

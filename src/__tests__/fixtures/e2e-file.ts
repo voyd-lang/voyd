@@ -303,6 +303,28 @@ pub fn test25()
   let a = MathBox<i32> { value: 4 }
   let b = a.add(4)
   b.value
+
+obj Node<T> {
+  val: T,
+  left: Optional<Node<T>>,
+  right: Optional<Node<T>>
+}
+
+pub fn test26() -> i32
+  let none: Optional<Node<i32>> = None {}
+  let leaf = Node<i32> { val: 7, left: none, right: none }
+  let leftOpt: Optional<Node<i32>> = Some<Node<i32>> { value: leaf }
+  let root = Node<i32> { val: 5, left: leftOpt, right: none }
+  root.left.match(n)
+    Some<Node<i32>>: n.value.val
+    None: -1
+
+pub fn test27() -> i32
+  let none: Optional<Node<i32>> = None {}
+  let root = Node<i32> { val: 5, left: none, right: none }
+  root.right.match(n)
+    Some<Node<i32>>: n.value.val
+    None: -1
 `;
 
 export const tcoText = `

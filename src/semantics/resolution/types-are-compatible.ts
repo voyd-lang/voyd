@@ -12,9 +12,13 @@ export const typesAreCompatible = (
 
     /** Will ancestors, the type must be the same regardless of inheritance  */
     exactNominalMatch?: boolean;
-  } = {}
+  } = {},
+  visited: Set<string> = new Set()
 ): boolean => {
   if (!a || !b) return false;
+  const key = `${a.id}|${b.id}`;
+  if (visited.has(key)) return true;
+  visited.add(key);
 
   if (a.isPrimitiveType() && b.isPrimitiveType()) {
     return a.id === b.id;
@@ -26,7 +30,9 @@ export const typesAreCompatible = (
     if (structural) {
       return b.fields.every((field) => {
         const match = a.fields.find((f) => f.name === field.name);
-        return match && typesAreCompatible(field.type, match.type, opts);
+        return (
+          match && typesAreCompatible(field.type, match.type, opts, visited)
+        );
       });
     }
 
@@ -35,7 +41,8 @@ export const typesAreCompatible = (
         typesAreCompatible(
           getExprType(arg),
           getExprType(b.appliedTypeArgs?.[index]),
-          opts
+          opts,
+          visited
         )
       );
     }
@@ -46,38 +53,45 @@ export const typesAreCompatible = (
   }
 
   if (a.isObjectType() && b.isUnionType()) {
-    return b.types.some((type) => typesAreCompatible(a, type, opts));
+    return b.types.some((type) =>
+      typesAreCompatible(a, type, opts, visited)
+    );
   }
 
   if (a.isUnionType() && b.isUnionType()) {
     return a.types.every((aType) =>
-      b.types.some((bType) => typesAreCompatible(aType, bType, opts))
+      b.types.some((bType) =>
+        typesAreCompatible(aType, bType, opts, visited)
+      )
     );
   }
 
   if (a.isObjectType() && b.isIntersectionType()) {
     if (!b.nominalType || !b.structuralType) return false;
-    return a.extends(b.nominalType) && typesAreCompatible(a, b.structuralType);
+    return (
+      a.extends(b.nominalType) &&
+      typesAreCompatible(a, b.structuralType, opts, visited)
+    );
   }
 
   if (a.isIntersectionType() && b.isIntersectionType()) {
     return (
-      typesAreCompatible(a.nominalType, b.nominalType) &&
-      typesAreCompatible(a.structuralType, b.structuralType)
+      typesAreCompatible(a.nominalType, b.nominalType, opts, visited) &&
+      typesAreCompatible(a.structuralType, b.structuralType, opts, visited)
     );
   }
 
   if (a.isFixedArrayType() && b.isFixedArrayType()) {
-    return typesAreCompatible(a.elemType, b.elemType);
+    return typesAreCompatible(a.elemType, b.elemType, opts, visited);
   }
 
   if (a.isFnType() && b.isFnType()) {
     if (a.parameters.length !== b.parameters.length) return false;
     if (a.name.value !== b.name.value) return false;
     return (
-      typesAreCompatible(a.returnType, b.returnType) &&
+      typesAreCompatible(a.returnType, b.returnType, opts, visited) &&
       a.parameters.every((p, i) =>
-        typesAreCompatible(p.type, b.parameters[i]?.type)
+        typesAreCompatible(p.type, b.parameters[i]?.type, opts, visited)
       )
     );
   }
