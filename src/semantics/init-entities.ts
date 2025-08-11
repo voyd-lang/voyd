@@ -15,6 +15,8 @@ import {
   nop,
   UnionType,
   IntersectionType,
+  Identifier,
+  ArrayLiteral,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { TraitType } from "../syntax-objects/types/trait.js";
@@ -45,6 +47,11 @@ export const initEntities: SemanticProcessor = (expr) => {
 
   if (expr.calls("type")) {
     return initTypeAlias(expr);
+  }
+
+  // Array literal
+  if (expr.calls("array")) {
+    return initArrayLiteral(expr);
   }
 
   // Object literal
@@ -156,6 +163,13 @@ const getReturnTypeExprForFn = (fn: List, index: number): Expr | undefined => {
   if (!returnDec?.isList()) return undefined;
   if (!returnDec.calls("return_type")) return undefined;
   return initTypeExprEntities(returnDec.at(1));
+};
+
+const initArrayLiteral = (arr: List): ArrayLiteral => {
+  return new ArrayLiteral({
+    ...arr.metadata,
+    elements: arr.sliceAsArray(1).map((e) => initEntities(e)),
+  });
 };
 
 const initObjectLiteral = (obj: List) => {

@@ -22,3 +22,4 @@ export * from "./macros.js";
 export * from "./declaration.js";
 export * from "./use.js";
 export * from "./object-literal.js";
+export * from "./array-literal.js";

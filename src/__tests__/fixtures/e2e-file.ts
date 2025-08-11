@@ -13,6 +13,7 @@ pub fn main()
 `;
 
 export const kitchenSink = `
+use std::all
 pub use std::string_lib::all
 
 obj Vec {
@@ -251,7 +252,7 @@ pub fn test21()
         -1
 
 pub fn test22()
-  let arr = new_array<i32>({ from: FixedArray(1, 2, 3, 4) })
+  let arr = [1, 2, 3, 4]
   arr.push(5)
   arr.push(3)
   arr.push(173)

@@ -4,10 +4,14 @@ import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
 import { VoydModule } from "../../syntax-objects/module.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
+import { Call } from "../../syntax-objects/call.js";
+import { Identifier } from "../../syntax-objects/identifier.js";
+import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
 import {
   ObjectType,
   TypeAlias,
   voydBaseObject,
+  Type,
 } from "../../syntax-objects/types.js";
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
@@ -18,6 +22,7 @@ import { resolveMatch } from "./resolve-match.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveTrait } from "./resolve-trait.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
+import { combineTypes } from "./combine-types.js";
 import { resolveUse } from "./resolve-use.js";
 
 /**
@@ -36,6 +41,7 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (expr.isObjectType()) return resolveObjectType(expr);
   if (expr.isTypeAlias()) return resolveTypeAlias(expr);
   if (expr.isObjectLiteral()) return resolveObjectLiteral(expr);
+  if (expr.isArrayLiteral()) return resolveArrayLiteral(expr);
   if (expr.isMatch()) return resolveMatch(expr);
   if (expr.isImpl()) return resolveImpl(expr);
   if (expr.isTrait()) return resolveTrait(expr);
@@ -105,4 +111,34 @@ const resolveObjectLiteral = (obj: ObjectLiteral) => {
   }
 
   return obj;
+};
+
+const resolveArrayLiteral = (arr: ArrayLiteral): Expr => {
+  arr.elements = arr.elements.map(resolveEntities);
+  const elemTypes = arr.elements
+    .map((e) => getExprType(e))
+    .filter((t): t is Type => !!t);
+  const elemType = combineTypes(elemTypes);
+
+  const fixedArray = new Call({
+    ...arr.metadata,
+    fnName: Identifier.from("FixedArray"),
+    args: new List({ value: arr.elements }),
+    typeArgs: elemType ? new List({ value: [elemType] }) : undefined,
+  });
+
+  const objLiteral = new ObjectLiteral({
+    ...arr.metadata,
+    fields: [{ name: "from", initializer: fixedArray }],
+  });
+
+  const typeArgs = elemType ? new List({ value: [elemType] }) : undefined;
+  const newArrayCall = new Call({
+    ...arr.metadata,
+    fnName: Identifier.from("new_array"),
+    args: new List({ value: [objLiteral] }),
+    typeArgs,
+  });
+
+  return resolveEntities(newArrayCall);
 };

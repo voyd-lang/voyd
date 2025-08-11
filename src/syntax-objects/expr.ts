@@ -23,6 +23,7 @@ import { Match } from "./match.js";
 import { Nop } from "./nop.js";
 import { Implementation } from "./implementation.js";
 import { TraitType } from "./types/trait.js";
+import { ArrayLiteral } from "./array-literal.js";
 
 export type Expr =
   | PrimitiveExpr
@@ -40,6 +41,7 @@ export type Expr =
   | Declaration
   | Use
   | ObjectLiteral
+  | ArrayLiteral
   | Match
   | Nop
   | Implementation
