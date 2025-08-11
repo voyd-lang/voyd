@@ -16,6 +16,7 @@ import type { Macro } from "./macros.js";
 import type { Parameter } from "./parameter.js";
 import type { StringLiteral } from "./string-literal.js";
 import type { ObjectLiteral } from "./object-literal.js";
+import type { ArrayLiteral } from "./array-literal.js";
 import type {
   FnType,
   PrimitiveType,
@@ -291,6 +292,10 @@ export abstract class Syntax {
 
   isObjectLiteral(): this is ObjectLiteral {
     return this.syntaxType === "object-literal";
+  }
+
+  isArrayLiteral(): this is ArrayLiteral {
+    return this.syntaxType === "array-literal";
   }
 
   setEndLocationToStartOf(location?: SourceLocation) {
