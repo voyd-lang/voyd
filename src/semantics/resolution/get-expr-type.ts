@@ -20,6 +20,7 @@ export const getExprType = (expr?: Expr): Type | undefined => {
   if (expr.isIdentifier()) return getIdentifierType(expr);
   if (expr.isCall()) return resolveCall(expr)?.type;
   if (expr.isFn()) return expr.getType();
+   if (expr.isClosure()) return expr.getType();
   if (expr.isTypeAlias()) return expr.type;
   if (expr.isType()) return expr;
   if (expr.isBlock()) return expr.type;

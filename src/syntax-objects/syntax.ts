@@ -11,6 +11,7 @@ import type { VoydModule } from "./module.js";
 import { LexicalContext } from "./lib/lexical-context.js";
 import type { List } from "./list.js";
 import type { MacroLambda } from "./macro-lambda.js";
+import type { Closure } from "./closure.js";
 import type { MacroVariable } from "./macro-variable.js";
 import type { Macro } from "./macros.js";
 import type { Parameter } from "./parameter.js";
@@ -60,8 +61,10 @@ export abstract class Syntax {
     this.#attributes = metadata.attributes;
   }
 
-  get parentFn(): Fn | undefined {
-    return this.parent?.isFn() ? this.parent : this.parent?.parentFn;
+  get parentFn(): Fn | Closure | undefined {
+    return this.parent?.isFn() || this.parent?.isClosure()
+      ? (this.parent as Fn | Closure)
+      : this.parent?.parentFn;
   }
 
   get parentModule(): VoydModule | undefined {
@@ -256,6 +259,10 @@ export abstract class Syntax {
 
   isMacroLambda(): this is MacroLambda {
     return this.syntaxType === "macro-lambda";
+  }
+
+  isClosure(): this is Closure {
+    return this.syntaxType === "closure";
   }
 
   isModule(): this is VoydModule {

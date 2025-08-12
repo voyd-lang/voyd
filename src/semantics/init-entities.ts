@@ -17,6 +17,7 @@ import {
   IntersectionType,
   Identifier,
   ArrayLiteral,
+  Closure,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { TraitType } from "../syntax-objects/types/trait.js";
@@ -76,6 +77,10 @@ export const initEntities: SemanticProcessor = (expr) => {
     return initTrait(expr);
   }
 
+  if (expr.calls("=>")) {
+    return initClosure(expr);
+  }
+
   return initCall(expr);
 };
 
@@ -129,6 +134,36 @@ const initFn = (expr: List): Fn => {
   }
 
   return fn;
+};
+
+const initClosure = (expr: List): Closure => {
+  const paramsExpr = expr.at(1);
+  let parameters: Parameter[] = [];
+
+  if (paramsExpr?.isList()) {
+    parameters = paramsExpr.sliceAsArray().flatMap((p) => {
+      if (p.isIdentifier()) {
+        return new Parameter({ name: p, typeExpr: undefined });
+      }
+      if (!p.isList()) {
+        throw new Error("Invalid parameter");
+      }
+      return listToParameter(p);
+    });
+  } else if (paramsExpr?.isIdentifier()) {
+    parameters = [new Parameter({ name: paramsExpr, typeExpr: undefined })];
+  }
+
+  const bodyExpr = initEntities(expr.exprAt(2));
+  const body = bodyExpr?.isBlock()
+    ? bodyExpr
+    : new Block({ ...(bodyExpr?.metadata ?? {}), body: bodyExpr ? [bodyExpr] : [] });
+
+  return new Closure({
+    ...expr.metadata,
+    parameters,
+    body,
+  });
 };
 
 const listToParameter = (

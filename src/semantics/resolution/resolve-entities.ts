@@ -7,6 +7,7 @@ import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
+import { Closure } from "../../syntax-objects/closure.js";
 import {
   ObjectType,
   TypeAlias,
@@ -16,6 +17,7 @@ import {
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveCall } from "./resolve-call.js";
+import { resolveClosure } from "./resolve-closure.js";
 import { resolveFn } from "./resolve-fn.js";
 import { resolveImpl } from "./resolve-impl.js";
 import { resolveMatch } from "./resolve-match.js";
@@ -34,6 +36,7 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (expr.isBlock()) return resolveBlock(expr);
   if (expr.isCall()) return resolveCall(expr);
   if (expr.isFn()) return resolveFn(expr);
+  if (expr.isClosure()) return resolveClosure(expr);
   if (expr.isVariable()) return resolveVar(expr);
   if (expr.isModule()) return resolveModule(expr);
   if (expr.isList()) return resolveListTypes(expr);

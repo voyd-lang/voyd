@@ -23,3 +23,4 @@ export * from "./declaration.js";
 export * from "./use.js";
 export * from "./object-literal.js";
 export * from "./array-literal.js";
+export * from "./closure.js";
