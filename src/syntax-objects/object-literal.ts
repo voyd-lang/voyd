@@ -23,6 +23,10 @@ export class ObjectLiteral extends Syntax {
     });
   }
 
+  getType() {
+    return this.type;
+  }
+
   toJSON(): object {
     return [
       "object",

@@ -13,7 +13,6 @@ import {
 } from "../syntax-objects/types.js";
 import { Identifier } from "../syntax-objects/identifier.js";
 import { Expr } from "../syntax-objects/expr.js";
-import { getExprType } from "../semantics/resolution/get-expr-type.js";
 import { returnCall } from "./return-call.js";
 import * as gc from "../lib/binaryen-gc/index.js";
 
@@ -64,7 +63,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
 
     if (!expr.fn?.isFn()) return compiled;
     const param = expr.fn?.parameters[i];
-    const argType = getExprType(arg);
+    const argType = arg.getType();
     if (param?.type?.isObjectType() && argType?.isTraitType()) {
       return refCast(mod, compiled, mapBinaryenType(opts, param.type));
     }
@@ -123,7 +122,7 @@ const compileWhile = (opts: CompileExprOpts<Call>) => {
 const compileObjectInit = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;
 
-  const objectType = getExprType(expr) as ObjectType;
+  const objectType = expr.getType() as ObjectType;
   const objectBinType = mapBinaryenType(opts, objectType);
   const obj = expr.argAt(0) as ObjectLiteral;
 
@@ -186,7 +185,7 @@ const compileFieldAssign = (opts: CompileExprOpts<Call>) => {
   const access = expr.callArgAt(0);
   const member = access.identifierArgAt(1);
   const target = access.exprArgAt(0);
-  const type = getExprType(target) as ObjectType | IntersectionType;
+  const type = target.getType() as ObjectType | IntersectionType;
 
   if (type.isIntersectionType() || type.isStructural) {
     return opts.fieldLookupHelpers.setFieldValueByAccessor(opts);
@@ -237,7 +236,7 @@ const compileBnrCall = (opts: CompileExprOpts<Call>): number => {
   return func(
     ...(args.argArrayMap((expr: Expr) => {
       if (expr?.isCall() && expr.calls("BnrType")) {
-        const type = getExprType(expr.typeArgs?.at(0));
+        const type = expr.typeArgs?.at(0)?.getType();
         if (!type) return opts.mod.nop();
         return mapBinaryenType(opts, type);
       }
@@ -277,7 +276,7 @@ const compileObjMemberAccess = (opts: CompileExprOpts<Call>) => {
   const obj = expr.exprArgAt(0);
   const member = expr.identifierArgAt(1);
   const objValue = compileExpression({ ...opts, expr: obj });
-  const type = getExprType(obj) as ObjectType | IntersectionType;
+  const type = obj.getType() as ObjectType | IntersectionType;
 
   if (type.isIntersectionType() || type.isStructural) {
     return opts.fieldLookupHelpers.getFieldValueByAccessor(opts);

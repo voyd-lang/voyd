@@ -146,6 +146,10 @@ export abstract class Syntax {
   /** Should emit in compliance with core language spec */
   abstract toJSON(): unknown;
 
+  getType(): Type | undefined {
+    return (this as unknown as { type?: Type }).type;
+  }
+
   setAttribute(key: string, value: unknown) {
     if (!this.#attributes) this.#attributes = {};
     this.#attributes[key] = value;

@@ -1,6 +1,7 @@
 import { Expr } from "./expr.js";
 import { NamedEntity } from "./named-entity.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
+import type { Type } from "./types.js";
 
 export type Id = string | Identifier;
 
@@ -15,6 +16,7 @@ export class Identifier extends Syntax {
   readonly isQuoted?: boolean;
   /** The given name of the identifier */
   value: string;
+  type?: Type;
 
   constructor(opts: string | IdentifierOpts) {
     if (typeof opts === "string") {
@@ -59,6 +61,10 @@ export class Identifier extends Syntax {
       value: this.value,
       isQuoted: this.isQuoted,
     });
+  }
+
+  getType() {
+    return this.type;
   }
 
   static from(str: string) {

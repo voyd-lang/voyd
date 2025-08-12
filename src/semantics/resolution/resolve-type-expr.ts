@@ -12,7 +12,10 @@ import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveUnionType } from "./resolve-union.js";
 
 export const resolveTypeExpr = (typeExpr: Expr): Expr => {
-  if (typeExpr.isIdentifier()) return typeExpr;
+  if (typeExpr.isIdentifier()) {
+    typeExpr.type = getExprType(typeExpr);
+    return typeExpr;
+  }
   if (typeExpr.isObjectType()) return resolveObjectType(typeExpr);
   if (typeExpr.isIntersectionType()) return resolveIntersectionType(typeExpr);
   if (typeExpr.isUnionType()) return resolveUnionType(typeExpr);

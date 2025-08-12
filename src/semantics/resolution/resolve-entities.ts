@@ -15,7 +15,7 @@ import {
   Type,
 } from "../../syntax-objects/types.js";
 import { Variable } from "../../syntax-objects/variable.js";
-import { getExprType } from "./get-expr-type.js";
+import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveCall } from "./resolve-call.js";
 import { resolveClosure } from "./resolve-closure.js";
 import { resolveFn } from "./resolve-fn.js";
@@ -35,6 +35,7 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (!expr) return nop();
   if (expr.isIdentifier()) {
     captureIdentifier(expr);
+    expr.type = getIdentifierType(expr);
     return expr;
   }
   if (expr.isBlock()) return resolveBlock(expr);
