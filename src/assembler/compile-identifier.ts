@@ -1,6 +1,8 @@
 import { CompileExprOpts, mapBinaryenType } from "../assembler.js";
 import { Identifier } from "../syntax-objects/identifier.js";
 import { refCast } from "../lib/binaryen-gc/index.js";
+import * as gc from "../lib/binaryen-gc/index.js";
+import binaryen from "binaryen";
 
 export const compile = (opts: CompileExprOpts<Identifier>) => {
   const { expr, mod } = opts;
@@ -13,6 +15,21 @@ export const compile = (opts: CompileExprOpts<Identifier>) => {
   }
 
   if (entity.isVariable() || entity.isParameter()) {
+    if (opts.currentClosure?.captureMap.has(entity.id)) {
+      const captureIndex = opts.currentClosure.captureMap.get(entity.id)!;
+      const envRef = refCast(
+        mod,
+        mod.local.get(0, binaryen.eqref),
+        opts.currentClosure.envType
+      );
+      return gc.structGetFieldValue({
+        mod,
+        fieldIndex: captureIndex,
+        fieldType: mapBinaryenType(opts, entity.originalType ?? entity.type!),
+        exprRef: envRef,
+      });
+    }
+
     const type = mapBinaryenType(opts, entity.originalType ?? entity.type!);
     const get = mod.local.get(entity.getIndex(), type);
     if (entity.requiresCast) {

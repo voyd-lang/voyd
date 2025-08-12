@@ -4,12 +4,14 @@ import {
   mapBinaryenType,
 } from "../assembler.js";
 import { refCast } from "../lib/binaryen-gc/index.js";
+import binaryen from "binaryen";
 import { Call } from "../syntax-objects/call.js";
 import { ObjectLiteral } from "../syntax-objects/object-literal.js";
 import {
   ObjectType,
   IntersectionType,
   FixedArrayType,
+  FnType,
 } from "../syntax-objects/types.js";
 import { Identifier } from "../syntax-objects/identifier.js";
 import { Expr } from "../syntax-objects/expr.js";
@@ -35,6 +37,14 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
   }
 
   if (!expr.fn) {
+    const ent = expr.fnName.resolve();
+    if (
+      ent &&
+      (ent.isVariable() || ent.isParameter()) &&
+      ent.type?.isFnType()
+    ) {
+      return compileClosureCall(opts, ent.type as FnType);
+    }
     throw new Error(`No function found for call ${expr.location}`);
   }
 
@@ -67,6 +77,46 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
   }
 
   return mod.call(id, args, returnType);
+};
+
+const compileClosureCall = (
+  opts: CompileExprOpts<Call>,
+  fnType: FnType
+): number => {
+  const { expr, mod, isReturnExpr } = opts;
+  const closureRef = compileExpression({
+    ...opts,
+    expr: expr.fnName,
+    isReturnExpr: false,
+  });
+  const fnRef = gc.structGetFieldValue({
+    mod,
+    fieldIndex: 0,
+    fieldType: binaryen.funcref,
+    exprRef: closureRef,
+  });
+  const envRef = gc.structGetFieldValue({
+    mod,
+    fieldIndex: 1,
+    fieldType: binaryen.eqref,
+    exprRef: closureRef,
+  });
+  const args = expr.args.toArray().map((arg, i) => {
+    const compiled = compileExpression({
+      ...opts,
+      expr: arg,
+      isReturnExpr: false,
+    });
+    const param = fnType.parameters[i];
+    const argType = getExprType(arg);
+    if (param?.type?.isObjectType() && argType?.isTraitType()) {
+      return refCast(mod, compiled, mapBinaryenType(opts, param.type));
+    }
+    return compiled;
+  });
+  const allArgs = [envRef, ...args];
+  const returnType = mapBinaryenType(opts, fnType.returnType);
+  return gc.callRef(mod, fnRef, allArgs, returnType, isReturnExpr);
 };
 
 const compileFixedArray = (opts: CompileExprOpts<Call>) => {

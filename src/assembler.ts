@@ -38,8 +38,25 @@ import { compile as compileUse } from "./assembler/compile-use.js";
 import { compile as compileTrait } from "./assembler/compile-trait.js";
 import { compile as compileMacro } from "./assembler/compile-macro.js";
 import { compile as compileMacroVariable } from "./assembler/compile-macro-variable.js";
+import { compile as compileClosure } from "./assembler/compile-closure.js";
 
 const buildingTypePlaceholders = new Map<ObjectType, TypeRef>();
+
+let closureBinaryenType: TypeRef | undefined;
+export const getClosureBinaryenType = (
+  mod: binaryen.Module
+): TypeRef => {
+  if (closureBinaryenType) return closureBinaryenType;
+  closureBinaryenType = gc.defineStructType(mod, {
+    name: "__closure",
+    fields: [
+      { type: binaryen.funcref, name: "__fn" },
+      { type: binaryen.eqref, name: "__env" },
+    ],
+    final: true,
+  });
+  return closureBinaryenType;
+};
 
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -58,6 +75,10 @@ export interface CompileExprOpts<T = Expr> {
   fieldLookupHelpers: ReturnType<typeof initFieldLookupHelpers>;
   isReturnExpr?: boolean;
   loopBreakId?: string;
+  currentClosure?: {
+    envType: TypeRef;
+    captureMap: Map<string, number>;
+  };
 }
 
 type CompilerFn = (opts: CompileExprOpts<any>) => number;
@@ -82,6 +103,7 @@ export const compilers: Record<string, CompilerFn> = {
   trait: compileTrait,
   macro: compileMacro,
   "macro-variable": compileMacroVariable,
+  closure: compileClosure,
 };
 
 export const compileExpression = (opts: CompileExprOpts): number => {
@@ -123,6 +145,7 @@ export const mapBinaryenType = (
   if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isFixedArrayType()) return buildFixedArrayType(opts, type);
   if (type.isIntersectionType()) return buildIntersectionType(opts, type);
+  if (type.isFnType()) return getClosureBinaryenType(opts.mod);
   throw new Error(`Unsupported type ${type}`);
 };
 

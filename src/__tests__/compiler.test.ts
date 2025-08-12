@@ -29,6 +29,17 @@ describe("E2E Compiler Pipeline", () => {
     t.expect(fn(), "Main function returns correct value").toEqual(55n);
   });
 
+  test("Compiler can compile closures", async (t) => {
+    const text = `use std::all
+pub fn main() -> i32
+  let x = 1
+  let f = () => x
+  0
+`;
+    const mod = await compile(text);
+    t.expect(mod.validate(), "Module is valid");
+  });
+
   test("Compiler kitchen sink", async (t) => {
     const mod = await compile(kitchenSink);
     const instance = getWasmInstance(mod);
