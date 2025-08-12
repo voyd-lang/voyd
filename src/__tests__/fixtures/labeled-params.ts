@@ -19,4 +19,7 @@ pub fn mixed_labels() -> i32
 pub fn move_vec() -> i32
   let vec = { x: 1, y: 2, z: 3 }
   move(vec)
+
+pub fn move_literal() -> i32
+  move({ x: 1, y: 2, z: 3 })
 `;
