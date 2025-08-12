@@ -33,6 +33,10 @@ import { resolveUse } from "./resolve-use.js";
  */
 export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (!expr) return nop();
+  if (expr.isIdentifier()) {
+    captureIdentifier(expr);
+    return expr;
+  }
   if (expr.isBlock()) return resolveBlock(expr);
   if (expr.isCall()) return resolveCall(expr);
   if (expr.isFn()) return resolveFn(expr);
@@ -49,6 +53,20 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (expr.isImpl()) return resolveImpl(expr);
   if (expr.isTrait()) return resolveTrait(expr);
   return expr;
+};
+
+const captureIdentifier = (id: Identifier) => {
+  const parentFn = id.parentFn;
+  if (!parentFn?.isClosure()) return;
+  const entity = id.resolve();
+  if (!entity) return;
+  if (
+    (entity.isVariable() || entity.isParameter()) &&
+    entity.parentFn !== parentFn &&
+    !parentFn.captures.includes(entity)
+  ) {
+    parentFn.captures.push(entity);
+  }
 };
 
 const resolveBlock = (block: Block): Block => {
