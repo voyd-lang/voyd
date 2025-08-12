@@ -1,9 +1,9 @@
-import { CompileExprOpts, compileExpression, mapBinaryenType } from "../assembler.js";
-import { Call } from "../syntax-objects/call.js";
-import { Identifier } from "../syntax-objects/identifier.js";
-import { Expr } from "../syntax-objects/expr.js";
-import { getExprType } from "../semantics/resolution/get-expr-type.js";
-import * as gc from "../lib/binaryen-gc/index.js";
+import { CompileExprOpts, compileExpression, mapBinaryenType } from "../../assembler.js";
+import { Call } from "../../syntax-objects/call.js";
+import { Identifier } from "../../syntax-objects/identifier.js";
+import { Expr } from "../../syntax-objects/expr.js";
+import { getExprType } from "../../semantics/resolution/get-expr-type.js";
+import * as gc from "../../lib/binaryen-gc/index.js";
 
 export const compileBinaryen = (opts: CompileExprOpts<Call>): number => {
   const { expr } = opts;

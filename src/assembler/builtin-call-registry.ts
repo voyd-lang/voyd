@@ -1,12 +1,12 @@
 import { CompileExprOpts, compileExpression } from "../assembler.js";
 import { Call } from "../syntax-objects/call.js";
-import { compileAssign } from "./compile-assign.js";
-import { compileIf } from "./compile-if.js";
-import { compileExport } from "./compile-export.js";
-import { compileMemberAccess } from "./compile-member-access.js";
-import { compileWhile } from "./compile-while.js";
-import { compileFixedArray } from "./compile-fixed-array.js";
-import { compileBinaryen } from "./compile-binaryen.js";
+import { compileAssign } from "./builtin-calls/compile-assign.js";
+import { compileIf } from "./builtin-calls/compile-if.js";
+import { compileExport } from "./builtin-calls/compile-export.js";
+import { compileMemberAccess } from "./builtin-calls/compile-member-access.js";
+import { compileWhile } from "./builtin-calls/compile-while.js";
+import { compileFixedArray } from "./builtin-calls/compile-fixed-array.js";
+import { compileBinaryen } from "./builtin-calls/compile-binaryen.js";
 
 export type CallCompiler = (opts: CompileExprOpts<Call>) => number;
 

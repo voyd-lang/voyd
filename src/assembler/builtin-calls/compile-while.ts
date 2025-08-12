@@ -1,5 +1,5 @@
-import { CompileExprOpts, compileExpression } from "../assembler.js";
-import { Call } from "../syntax-objects/call.js";
+import { CompileExprOpts, compileExpression } from "../../assembler.js";
+import { Call } from "../../syntax-objects/call.js";
 
 export const compileWhile = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;

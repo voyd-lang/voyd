@@ -1,10 +1,10 @@
-import { CompileExprOpts, compileExpression } from "../assembler.js";
-import { Call } from "../syntax-objects/call.js";
-import { Identifier } from "../syntax-objects/identifier.js";
-import { ObjectType, IntersectionType } from "../syntax-objects/types.js";
-import { getExprType } from "../semantics/resolution/get-expr-type.js";
+import { CompileExprOpts, compileExpression } from "../../assembler.js";
+import { Call } from "../../syntax-objects/call.js";
+import { Identifier } from "../../syntax-objects/identifier.js";
+import { ObjectType, IntersectionType } from "../../syntax-objects/types.js";
+import { getExprType } from "../../semantics/resolution/get-expr-type.js";
 import { OBJECT_FIELDS_OFFSET } from "./object-layout.js";
-import * as gc from "../lib/binaryen-gc/index.js";
+import * as gc from "../../lib/binaryen-gc/index.js";
 
 export const compileAssign = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod } = opts;
