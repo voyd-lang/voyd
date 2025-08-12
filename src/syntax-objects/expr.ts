@@ -1,6 +1,7 @@
 import type { Bool } from "./bool.js";
 import type { Float } from "./float.js";
 import type { Fn } from "./fn.js";
+import type { Closure } from "./closure.js";
 import type { Identifier } from "./identifier.js";
 import type { Int } from "./int.js";
 import type { List } from "./list.js";
@@ -45,7 +46,8 @@ export type Expr =
   | Match
   | Nop
   | Implementation
-  | TraitType;
+  | TraitType
+  | Closure;
 
 /**
  * These are the Expr types that must be returned until all macros have been expanded (reader, syntax, and regular)

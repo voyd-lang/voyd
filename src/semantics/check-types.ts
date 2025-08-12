@@ -20,6 +20,7 @@ import {
   UnionType,
   IntersectionType,
   FixedArrayType,
+  Closure,
 } from "../syntax-objects/index.js";
 import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
@@ -31,6 +32,7 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isBlock()) return checkBlockTypes(expr);
   if (expr.isCall()) return checkCallTypes(expr);
   if (expr.isFn()) return checkFnTypes(expr);
+  if (expr.isClosure()) return checkClosureTypes(expr);
   if (expr.isVariable()) return checkVarTypes(expr);
   if (expr.isModule()) return checkModuleTypes(expr);
   if (expr.isList()) return checkListTypes(expr);
@@ -277,6 +279,34 @@ const checkFnTypes = (fn: Fn): Fn => {
   }
 
   return fn;
+};
+
+const checkClosureTypes = (closure: Closure): Closure => {
+  checkParameters(closure.parameters);
+  checkTypes(closure.body);
+
+  if (closure.returnTypeExpr) {
+    checkTypeExpr(closure.returnTypeExpr);
+  }
+
+  if (!closure.returnType) {
+    throw new Error(
+      `Unable to determine return type for closure at ${closure.location}`
+    );
+  }
+
+  const inferredReturnType = closure.inferredReturnType;
+
+  if (
+    inferredReturnType &&
+    !typesAreCompatible(inferredReturnType, closure.returnType)
+  ) {
+    throw new Error(
+      `Closure return value type (${inferredReturnType?.name}) is not compatible with annotated return type (${closure.returnType?.name}) at ${closure.location}`
+    );
+  }
+
+  return closure;
 };
 
 const checkParameters = (params: Parameter[]) => {
