@@ -1,0 +1,36 @@
+[
+  "ast",
+  [
+    "pub",
+    "fn",
+    ["main"],
+    [
+      "block",
+      [
+        "html",
+        [
+          "div",
+          [":", "attributes", ["dict", "array"]],
+          [
+            ":",
+            "children",
+            [
+              "p",
+              [":", "attributes", ["dict", "array"]],
+              [":", "children", ["array", ["string", "Hello there!!\n    "]]],
+              [
+                "p",
+                [":", "attributes", ["dict", "array"]],
+                [
+                  ":",
+                  "children",
+                  ["array", ["string", "How are you today\n    "]]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+]
