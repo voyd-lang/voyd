@@ -55,6 +55,10 @@ export class Call extends Syntax {
     return this.#type;
   }
 
+  getType(): Type | undefined {
+    return this.type;
+  }
+
   eachArg(fn: (expr: Expr) => void) {
     this.args.each(fn);
     return this;

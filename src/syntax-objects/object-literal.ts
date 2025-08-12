@@ -30,6 +30,10 @@ export class ObjectLiteral extends Syntax {
       this.fields.map((f) => [f.name, f.initializer.toJSON()]),
     ];
   }
+
+  getType(): Type | undefined {
+    return this.type;
+  }
 }
 
 export type ObjectLiteralField = {

@@ -140,6 +140,15 @@ export abstract class Syntax {
     };
   }
 
+  /**
+   * Returns the static type resolved for this expression, if available.
+   * Subclasses that carry type information should override this method
+   * and/or populate a `type` property during semantic analysis.
+   */
+  getType(): Type | undefined {
+    return undefined;
+  }
+
   /** Clone this object (Implementations should not carry over resolved type expression) */
   abstract clone(parent?: Expr): Expr;
 

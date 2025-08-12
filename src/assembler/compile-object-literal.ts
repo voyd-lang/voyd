@@ -1,13 +1,12 @@
 import { CompileExprOpts, mapBinaryenType, compileExpression } from "../assembler.js";
 import { ObjectLiteral } from "../syntax-objects/object-literal.js";
 import { ObjectType } from "../syntax-objects/types.js";
-import { getExprType } from "../semantics/resolution/get-expr-type.js";
 import { initStruct } from "../lib/binaryen-gc/index.js";
 
 export const compile = (opts: CompileExprOpts<ObjectLiteral>) => {
   const { expr: obj, mod } = opts;
 
-  const objectType = getExprType(obj) as ObjectType;
+  const objectType = obj.getType() as ObjectType;
   const literalBinType = mapBinaryenType(
     { ...opts, useOriginalType: true },
     objectType

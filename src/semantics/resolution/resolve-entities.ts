@@ -56,10 +56,14 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
 };
 
 const captureIdentifier = (id: Identifier) => {
+  // Populate the identifier's type for downstream consumers
+  id.type = getExprType(id);
+
   const parentFn = id.parentFn;
   if (!parentFn?.isClosure()) return;
   const entity = id.resolve();
   if (!entity) return;
+
   if (
     (entity.isVariable() || entity.isParameter()) &&
     entity.parentFn !== parentFn &&
