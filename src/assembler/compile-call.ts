@@ -51,15 +51,19 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
   }
 
   const args = expr.args.toArray().map((arg, i) => {
+    // Labeled arguments are represented as calls to ':' where the second
+    // argument is the actual expression. In such cases compile the initializer
+    // directly to avoid allocating intermediary objects.
+    const actualArg = arg.isCall() && arg.calls(":") ? arg.argAt(1)! : arg;
     const compiled = compileExpression({
       ...opts,
-      expr: arg,
+      expr: actualArg,
       isReturnExpr: false,
     });
 
     if (!expr.fn?.isFn()) return compiled;
     const param = expr.fn?.parameters[i];
-    const argType = getExprType(arg);
+    const argType = getExprType(actualArg);
     if (param?.type?.isObjectType() && argType?.isTraitType()) {
       return refCast(mod, compiled, mapBinaryenType(opts, param.type));
     }

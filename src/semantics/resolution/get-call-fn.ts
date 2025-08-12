@@ -98,8 +98,27 @@ const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
       })
     : true;
 
-const parametersMatch = (candidate: Fn, call: Call) =>
-  candidate.parameters.every((p, i) => {
+const parametersMatch = (candidate: Fn, call: Call) => {
+  // Special case: call supplies a single object literal while the candidate
+  // expects multiple labeled parameters. Instead of matching by position we
+  // attempt to match each parameter with a field in the object literal.
+  const firstArg = call.argAt(0);
+  if (
+    call.args.length === 1 &&
+    firstArg?.isObjectLiteral() &&
+    candidate.parameters.length > 1 &&
+    candidate.parameters.every((p) => p.label)
+  ) {
+    return candidate.parameters.every((p) => {
+      const field = firstArg.fields.find((f) => f.name === p.label?.value);
+      if (!field) return false;
+      const fieldType = getExprType(field.initializer);
+      if (!fieldType) return false;
+      return typesAreCompatible(fieldType, p.type!);
+    });
+  }
+
+  return candidate.parameters.every((p, i) => {
     const arg = call.argAt(i);
     if (!arg) return false;
     const argType = getExprType(arg);
@@ -108,6 +127,7 @@ const parametersMatch = (candidate: Fn, call: Call) =>
     const labelsMatch = p.label?.value === argLabel;
     return typesAreCompatible(argType, p.type!) && labelsMatch;
   });
+};
 
 const getExprLabel = (expr?: Expr): string | undefined => {
   if (!expr?.isCall()) return undefined;
