@@ -25,7 +25,10 @@ export class Closure extends ScopedSyntax {
   ) {
     super(opts);
     this.parameters = opts.parameters ?? [];
-    this.parameters.forEach((p) => (p.parent = this));
+    this.parameters.forEach((p) => {
+      p.parent = this;
+      this.registerEntity(p);
+    });
     this.body = opts.body;
     this.body.parent = this;
     this.returnTypeExpr = opts.returnTypeExpr;

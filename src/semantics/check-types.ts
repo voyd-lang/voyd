@@ -69,16 +69,30 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   call.args = call.args.map(checkTypes);
 
   if (!call.fn) {
-    const params = call.args
-      .toArray()
-      .map((arg) => getExprType(arg)?.name.value)
-      .join(", ");
+    const fnType = getExprType(call.fnName);
+    if (fnType?.isFnType()) {
+      call.type = call.type ?? fnType.returnType;
+      fnType.parameters.forEach((p, i) => {
+        const arg = call.argAt(i);
+        const argType = getExprType(arg);
+        if (!argType || !typesAreCompatible(argType, p.type!)) {
+          throw new Error(
+            `Expected ${p.type?.name} got ${argType?.name} at ${arg?.location}`
+          );
+        }
+      });
+    } else {
+      const params = call.args
+        .toArray()
+        .map((arg) => getExprType(arg)?.name.value)
+        .join(", ");
 
-    throw new Error(
-      `Could not resolve fn ${call.fnName}(${params}) at ${
-        call.location ?? call.fnName.location
-      }`
-    );
+      throw new Error(
+        `Could not resolve fn ${call.fnName}(${params}) at ${
+          call.location ?? call.fnName.location
+        }`
+      );
+    }
   }
 
   if (!call.type) {
