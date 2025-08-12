@@ -9,6 +9,7 @@ import {
   UnionType,
   IntersectionType,
 } from "./syntax-objects/types.js";
+import { NamedEntity } from "./syntax-objects/named-entity.js";
 import {
   binaryenTypeToHeapType,
   annotateStructNames,
@@ -27,6 +28,7 @@ import { compile as compileStringLiteral } from "./assembler/compile-string-lite
 import { compile as compileFloat } from "./assembler/compile-float.js";
 import { compile as compileIdentifier } from "./assembler/compile-identifier.js";
 import { compile as compileFunction } from "./assembler/compile-function.js";
+import { compile as compileClosure } from "./assembler/compile-closure.js";
 import { compile as compileVariable } from "./assembler/compile-variable.js";
 import { compile as compileDeclaration } from "./assembler/compile-declaration.js";
 import { compile as compileModule } from "./assembler/compile-module.js";
@@ -58,6 +60,10 @@ export interface CompileExprOpts<T = Expr> {
   fieldLookupHelpers: ReturnType<typeof initFieldLookupHelpers>;
   isReturnExpr?: boolean;
   loopBreakId?: string;
+  closureContext?: {
+    envType: number;
+    capturedFieldIndices: Map<NamedEntity, number>;
+  };
 }
 
 type CompilerFn = (opts: CompileExprOpts<any>) => number;
@@ -75,6 +81,7 @@ export const compilers: Record<string, CompilerFn> = {
   declaration: compileDeclaration,
   module: compileModule,
   "object-literal": compileObjectLiteral,
+  closure: compileClosure,
   type: compileType,
   bool: compileBool,
   implementation: compileImpl,
@@ -120,6 +127,13 @@ export const mapBinaryenType = (
     return buildObjectType(opts, type);
   }
   if (type.isTraitType()) return buildObjectType(opts, voydBaseObject);
+  if (type.isFnType()) {
+    if (type.hasAttribute("binaryenType")) {
+      return type.getAttribute("binaryenType") as TypeRef;
+    }
+    // Default to anyref when closure not yet compiled
+    return binaryen.anyref;
+  }
   if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isFixedArrayType()) return buildFixedArrayType(opts, type);
   if (type.isIntersectionType()) return buildIntersectionType(opts, type);
