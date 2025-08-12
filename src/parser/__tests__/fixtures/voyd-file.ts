@@ -138,6 +138,16 @@ fn main()
     y: Point { x: 10, y: 20 },
     z: { a: 10, b: 20 }
   }
+
+  pub fn main()
+    <div>
+      <p>
+        Hello there!!
+      </p>
+      <p>
+        How are you today
+      </p>
+    </div>
 `;
 
 export const voydFileWithGenerics = `
