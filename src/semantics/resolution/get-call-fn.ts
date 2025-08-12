@@ -105,7 +105,7 @@ const parametersMatch = (candidate: Fn, call: Call) =>
     const argType = getExprType(arg);
     if (!argType) return false;
     const argLabel = getExprLabel(arg);
-    const labelsMatch = p.label === argLabel;
+    const labelsMatch = p.label?.value === argLabel;
     return typesAreCompatible(argType, p.type!) && labelsMatch;
   });
 

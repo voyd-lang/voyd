@@ -34,6 +34,14 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     return compileBnrCall(opts);
   }
 
+  if (expr.calls(":")) {
+    return compileExpression({
+      ...opts,
+      expr: expr.argAt(1)!,
+      isReturnExpr,
+    });
+  }
+
   if (!expr.fn) {
     throw new Error(`No function found for call ${expr.location}`);
   }
