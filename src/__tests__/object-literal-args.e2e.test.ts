@@ -12,7 +12,7 @@ describe("object literal call arguments", () => {
     instance = getWasmInstance(mod);
   });
 
-  test("move called with object literal", (t) => {
+  test("move called with object variable", (t) => {
     const fn = getWasmFn("call_move", instance);
     assert(fn, "Function exists");
     t.expect(fn(), "call_move returns correct value").toEqual(6);

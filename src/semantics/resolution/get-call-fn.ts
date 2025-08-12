@@ -99,22 +99,25 @@ const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
     : true;
 
 const parametersMatch = (candidate: Fn, call: Call) => {
-  // Special case: call supplies a single object literal while the candidate
-  // expects multiple labeled parameters. Instead of matching by position we
-  // attempt to match each parameter with a field in the object literal.
+  // Special case: call supplies a single object identifier while the candidate
+  // expects multiple labeled parameters. Match each parameter with the
+  // corresponding field in the object's type.
   const firstArg = call.argAt(0);
   if (
     call.args.length === 1 &&
-    firstArg?.isObjectLiteral() &&
+    firstArg?.isIdentifier() &&
     candidate.parameters.length > 1 &&
     candidate.parameters.every((p) => p.label)
   ) {
+    const argType = getExprType(firstArg);
+    if (!argType?.isObjectType()) return false;
+
     return candidate.parameters.every((p) => {
-      const field = firstArg.fields.find((f) => f.name === p.label?.value);
+      const label = p.label?.value;
+      if (!label) return false;
+      const field = argType.getField(label);
       if (!field) return false;
-      const fieldType = getExprType(field.initializer);
-      if (!fieldType) return false;
-      return typesAreCompatible(fieldType, p.type!);
+      return typesAreCompatible(field.type!, p.type!);
     });
   }
 
