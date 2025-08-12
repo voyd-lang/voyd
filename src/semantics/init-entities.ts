@@ -168,16 +168,16 @@ const initClosure = (expr: List): Closure => {
 
 const listToParameter = (
   list: List,
-  labeled = false
+  labeled = false,
+  labelOverride?: Identifier
 ): Parameter | Parameter[] => {
-  // TODO check for separate external label [: at [: n i32]]
   if (list.identifierAt(0).is(":")) {
     const name = list.identifierAt(1);
     return new Parameter({
       ...list.metadata,
       name,
       typeExpr: initTypeExprEntities(list.at(2)),
-      label: labeled ? name : undefined,
+      label: labelOverride ?? (labeled ? name : undefined),
     });
   }
 
@@ -185,9 +185,16 @@ const listToParameter = (
     return [];
   }
 
-  // I think this is for labeled args...
   if (list.identifierAt(0).is("object")) {
-    return list.sliceAsArray(1).flatMap((e) => listToParameter(e as List));
+    return list
+      .sliceAsArray(1)
+      .flatMap((e) => listToParameter(e as List, true));
+  }
+
+  const first = list.at(0);
+  const second = list.at(1);
+  if (first?.isIdentifier() && second?.isList()) {
+    return listToParameter(second, true, first);
   }
 
   throw new Error("Invalid parameter");
