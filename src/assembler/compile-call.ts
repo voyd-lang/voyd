@@ -5,7 +5,6 @@ import {
 } from "../assembler.js";
 import { refCast } from "../lib/binaryen-gc/index.js";
 import { Call } from "../syntax-objects/call.js";
-import { getExprType } from "../semantics/resolution/get-expr-type.js";
 import { returnCall } from "./return-call.js";
 import { builtinCallCompilers } from "./builtin-call-registry.js";
 import { compileObjectInit } from "./compile-object-init.js";
@@ -35,7 +34,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
 
     if (!expr.fn?.isFn()) return compiled;
     const param = expr.fn?.parameters[i];
-    const argType = getExprType(arg);
+    const argType = arg.getType();
     if (param?.type?.isObjectType() && argType?.isTraitType()) {
       return refCast(mod, compiled, mapBinaryenType(opts, param.type));
     }

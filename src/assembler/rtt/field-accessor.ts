@@ -26,7 +26,6 @@ import {
   mapBinaryenType,
 } from "../../assembler.js";
 import { Call } from "../../syntax-objects/call.js";
-import { getExprType } from "../../semantics/resolution/get-expr-type.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -191,7 +190,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
     const { expr, mod } = opts;
     const obj = expr.exprArgAt(0);
     const member = expr.identifierArgAt(1);
-    const objType = getExprType(obj) as ObjectType | IntersectionType;
+    const objType = obj.getType() as ObjectType | IntersectionType;
 
     const field = objType.isIntersectionType()
       ? objType.nominalType?.getField(member) ??
@@ -235,7 +234,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
       expr: expr.argAt(1)!,
       isReturnExpr: false,
     });
-    const objType = getExprType(target) as ObjectType | IntersectionType;
+    const objType = target.getType() as ObjectType | IntersectionType;
 
     const field = objType.isIntersectionType()
       ? objType.nominalType?.getField(member) ??

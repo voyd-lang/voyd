@@ -96,11 +96,12 @@ const expandObjectArg = (call: Call) => {
   const newArgs = labeledParams.map((p) => {
     const fieldName = p.label!.value;
     const fieldType = structType.getField(fieldName)?.type;
+    const objClone = resolveEntities(objArg.clone());
     const access = new Call({
       ...call.metadata,
       fnName: Identifier.from("member-access"),
       args: new List({
-        value: [objArg.clone(), Identifier.from(fieldName)],
+        value: [objClone, Identifier.from(fieldName)],
       }),
       type: fieldType,
     });
