@@ -15,6 +15,7 @@ export class Closure extends ScopedSyntax {
   annotatedReturnType?: Type;
   typesResolved?: boolean;
   variables: Variable[] = [];
+  private fnType?: FnType;
 
   constructor(
     opts: ScopedSyntaxMetadata & {
@@ -25,7 +26,10 @@ export class Closure extends ScopedSyntax {
   ) {
     super(opts);
     this.parameters = opts.parameters ?? [];
-    this.parameters.forEach((p) => (p.parent = this));
+    this.parameters.forEach((p) => {
+      p.parent = this;
+      this.registerEntity(p);
+    });
     this.body = opts.body;
     this.body.parent = this;
     this.returnTypeExpr = opts.returnTypeExpr;
@@ -33,12 +37,14 @@ export class Closure extends ScopedSyntax {
   }
 
   getType(): FnType {
-    return new FnType({
+    if (this.fnType) return this.fnType;
+    this.fnType = new FnType({
       ...super.getCloneOpts(this.parent),
       name: Identifier.from(`closure#${this.syntaxId}`),
       parameters: this.parameters,
       returnType: this.getReturnType(),
     });
+    return this.fnType;
   }
 
   getIndexOfParameter(parameter: Parameter) {
@@ -46,7 +52,8 @@ export class Closure extends ScopedSyntax {
     if (index < 0) {
       throw new Error(`Parameter ${parameter} not registered with closure`);
     }
-    return index;
+    // account for env parameter at index 0
+    return index + 1;
   }
 
   getIndexOfVariable(variable: Variable) {

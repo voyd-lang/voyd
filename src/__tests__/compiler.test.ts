@@ -3,6 +3,8 @@ import {
   kitchenSink,
   goodTypeInferenceText,
   tcoText,
+  closureNoParamText,
+  closureParamText,
 } from "./fixtures/e2e-file.js";
 import { compile } from "../compiler.js";
 import { describe, test, vi } from "vitest";
@@ -98,6 +100,22 @@ describe("E2E Compiler Pipeline", () => {
     t.expect(Object.keys(compilers)).toEqual(
       t.expect.arrayContaining(expectedSyntaxTypes)
     );
+  });
+
+  test("Compiler can call closures", async (t) => {
+    const mod = await compile(closureNoParamText);
+    const instance = getWasmInstance(mod);
+    const fn = getWasmFn("main", instance);
+    assert(fn, "Function exists");
+    t.expect(fn()).toEqual(5);
+  });
+
+  test("Compiler can call closures with parameters", async (t) => {
+    const mod = await compile(closureParamText);
+    const instance = getWasmInstance(mod);
+    const fn = getWasmFn("main", instance);
+    assert(fn, "Function exists");
+    t.expect(fn()).toEqual(7);
   });
 
   test("Compiler can do tco", async (t) => {

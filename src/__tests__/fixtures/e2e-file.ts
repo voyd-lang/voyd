@@ -380,3 +380,15 @@ fn fib_alias(n: i32, a: i64, b: i64) -> i64
 pub fn main() -> i64
   fib(10, 0i64, 1i64)
 `;
+
+export const closureNoParamText = `
+pub fn main()
+  let x = () => 5
+  x()
+`;
+
+export const closureParamText = `
+pub fn main()
+  let x = (v: i32) => v + 5
+  x(2)
+`;
