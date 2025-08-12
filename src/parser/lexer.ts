@@ -8,6 +8,17 @@ import {
   isDigitSign,
 } from "./grammar.js";
 
+/**
+ * Tracks the current nesting depth of angle brackets during tokenization.
+ * This allows the lexer to differentiate between `>>` used to close generics
+ * and `>>` used as an operator.
+ */
+let angleBracketDepth = 0;
+
+export const resetLexerState = () => {
+  angleBracketDepth = 0;
+};
+
 export const lexer = (chars: CharStream): Token => {
   const token = new Token({
     location: chars.currentSourceLocation(),
@@ -61,16 +72,27 @@ export const lexer = (chars: CharStream): Token => {
   }
 
   token.setEndLocationToStartOf(chars.currentSourceLocation());
+
+  updateAngleBracketDepth(token, chars);
+
   return token;
 };
 
 const consumeOperator = (chars: CharStream, token: Token) => {
   while (isOpChar(chars.next)) {
-    if (token.value === ">" && (chars.next === ">" || chars.next === ":")) {
-      break; // Ugly hack to support generics, means >> is not a valid operator. At least until we write a custom parser for the generics reader macro.
+    if (token.value === ">" && (angleBracketDepth > 0 || chars.next === ":")) {
+      break;
     }
 
     token.addChar(chars.consumeChar());
+  }
+};
+
+const updateAngleBracketDepth = (token: Token, chars: CharStream) => {
+  if (token.value === "<" && !isWhitespace(chars.next)) {
+    angleBracketDepth += 1;
+  } else if (token.value === ">" && angleBracketDepth > 0) {
+    angleBracketDepth -= 1;
   }
 };
 
