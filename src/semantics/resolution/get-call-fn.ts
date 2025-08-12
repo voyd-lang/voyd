@@ -114,15 +114,31 @@ const parametersMatch = (candidate: Fn, call: Call) => {
   // Special case: a single object argument supplying all labeled parameters
   if (call.args.length === 1) {
     const objArg = call.argAt(0);
-    const objType = getExprType(objArg);
-    if (objType?.isObjectType()) {
-      const labeledParams = candidate.parameters.filter((p) => p.label);
+    const labeledParams = candidate.parameters.filter((p) => p.label);
+    if (labeledParams.length === candidate.parameters.length) {
+      // 1. Object literal argument
+      if (objArg?.isObjectLiteral()) {
+        return labeledParams.every((p) => {
+          const field = objArg.fields.find((f) => f.name === p.label!.value);
+          if (!field) return false;
+          const fieldType = getExprType(field.initializer);
+          return typesAreCompatible(fieldType, p.type!);
+        });
+      }
+
+      // 2. Argument with an object type (nominal or structural)
+      const objType = getExprType(objArg);
+      const structType = objType?.isObjectType()
+        ? objType
+        : objType?.isIntersectionType()
+        ? objType.structuralType
+        : undefined;
       if (
-        labeledParams.length === candidate.parameters.length &&
-        labeledParams.every((p) => objType.hasField(p.label!.value))
+        structType &&
+        labeledParams.every((p) => structType.hasField(p.label!.value))
       ) {
         return labeledParams.every((p) => {
-          const field = objType.getField(p.label!.value);
+          const field = structType.getField(p.label!.value);
           return field
             ? typesAreCompatible(field.type, p.type!)
             : false;
