@@ -29,4 +29,12 @@ describe("E2E labeled parameters", () => {
     assert(fn, "Function exists");
     t.expect(fn(), "move_vec returns correct value").toEqual(6);
   });
+
+  test("object literal argument expands into labeled params", (t) => {
+    const fn = getWasmFn("move_literal", instance);
+    assert(fn, "Function exists");
+    t
+      .expect(fn(), "move_literal returns correct value")
+      .toEqual(6);
+  });
 });

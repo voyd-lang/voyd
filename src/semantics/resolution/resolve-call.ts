@@ -49,20 +49,53 @@ const expandObjectArg = (call: Call) => {
   if (!fn?.isFn() || call.args.length !== 1) return;
 
   const objArg = call.argAt(0)!;
-  const objType = getExprType(objArg);
-  if (!objType?.isObjectType()) return;
-
   const params = fn.parameters;
   const labeledParams = params.filter((p) => p.label);
   const allLabeled = labeledParams.length === params.length;
+  if (!allLabeled) return;
+
+  // Case 1: direct object literal supplied
+  if (objArg.isObjectLiteral()) {
+    const coversAll = labeledParams.every((p) =>
+      objArg.fields.some((f) => f.name === p.label!.value)
+    );
+    if (!coversAll) return;
+
+    const newArgs = labeledParams.map((p) => {
+      const fieldName = p.label!.value;
+      const field = objArg.fields.find((f) => f.name === fieldName)!;
+      return new Call({
+        ...call.metadata,
+        fnName: Identifier.from(":"),
+        args: new List({
+          value: [Identifier.from(fieldName), field.initializer.clone()],
+        }),
+        type: getExprType(field.initializer),
+      });
+    });
+
+    call.args = new List({ value: newArgs });
+    call.args.parent = call;
+    return;
+  }
+
+  // Case 2: object reference (nominal or structural type)
+  const objType = getExprType(objArg);
+  const structType = objType?.isObjectType()
+    ? objType
+    : objType?.isIntersectionType()
+    ? objType.structuralType
+    : undefined;
+  if (!structType) return;
+
   const coversAll = labeledParams.every((p) =>
-    objType.hasField(p.label!.value)
+    structType.hasField(p.label!.value)
   );
-  if (!allLabeled || !coversAll) return;
+  if (!coversAll) return;
 
   const newArgs = labeledParams.map((p) => {
     const fieldName = p.label!.value;
-    const fieldType = objType.getField(fieldName)?.type;
+    const fieldType = structType.getField(fieldName)?.type;
     const access = new Call({
       ...call.metadata,
       fnName: Identifier.from("member-access"),

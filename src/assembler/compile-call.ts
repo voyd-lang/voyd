@@ -36,8 +36,9 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
 
   // Labeled arguments (": label expr") are wrappers added during call
   // transformation. Compile the inner expression directly so that, when
-  // labeled parameters are supplied via an object, only the field expressions
-  // are emitted and the object itself is never constructed or passed.
+  // labeled parameters are supplied via an object literal or object
+  // reference, only the field expressions are emitted and the object itself
+  // is never constructed or passed.
   if (expr.calls(":")) {
     return compileExpression({
       ...opts,
