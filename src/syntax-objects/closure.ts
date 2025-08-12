@@ -15,12 +15,14 @@ export class Closure extends ScopedSyntax {
   annotatedReturnType?: Type;
   typesResolved?: boolean;
   variables: Variable[] = [];
+  captures: (Variable | Parameter)[] = [];
 
   constructor(
     opts: ScopedSyntaxMetadata & {
       parameters?: Parameter[];
       body: Expr;
       returnTypeExpr?: Expr;
+      captures?: (Variable | Parameter)[];
     }
   ) {
     super(opts);
@@ -30,6 +32,7 @@ export class Closure extends ScopedSyntax {
     this.body.parent = this;
     this.returnTypeExpr = opts.returnTypeExpr;
     if (this.returnTypeExpr) this.returnTypeExpr.parent = this;
+    this.captures = opts.captures ?? [];
   }
 
   getType(): FnType {
@@ -74,6 +77,7 @@ export class Closure extends ScopedSyntax {
       parameters: this.parameters.map((p) => p.clone()),
       body: this.body.clone(),
       returnTypeExpr: this.returnTypeExpr?.clone(),
+      captures: [...this.captures],
     });
   }
 
