@@ -23,4 +23,10 @@ describe("E2E labeled parameters", () => {
     assert(fn, "Function exists");
     t.expect(fn(), "mixed_labels returns correct value").toEqual(7);
   });
+
+  test("object argument expands into labeled params", (t) => {
+    const fn = getWasmFn("move_vec", instance);
+    assert(fn, "Function exists");
+    t.expect(fn(), "move_vec returns correct value").toEqual(6);
+  });
 });

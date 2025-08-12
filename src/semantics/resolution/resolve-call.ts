@@ -38,6 +38,44 @@ export const resolveCall = (call: Call): Call => {
   }
 
   call.fn = getCallFn(call);
+
+  // Expand a single object argument into labeled field accesses when possible
+  if (call.fn && call.args.length === 1) {
+    const objArg = call.argAt(0)!;
+    const objType = getExprType(objArg);
+    if (objType?.isObjectType()) {
+      const params = call.fn.parameters;
+      const labeledParams = params.filter((p) => p.label);
+      if (
+        labeledParams.length === params.length &&
+        labeledParams.every((p) => objType.hasField(p.label!.value))
+      ) {
+        const newArgs = labeledParams.map((p) => {
+          const fieldName = p.label!.value;
+          const fieldType = objType.getField(fieldName)?.type;
+          const access = new Call({
+            ...call.metadata,
+            fnName: Identifier.from("member-access"),
+            args: new List({
+              value: [objArg.clone(), Identifier.from(fieldName)],
+            }),
+            type: fieldType,
+          });
+          return new Call({
+            ...call.metadata,
+            fnName: Identifier.from(":"),
+            args: new List({
+              value: [Identifier.from(fieldName), access],
+            }),
+            type: fieldType,
+          });
+        });
+        call.args = new List({ value: newArgs });
+        call.args.parent = call;
+      }
+    }
+  }
+
   call.type = call.fn?.returnType;
   return call;
 };
