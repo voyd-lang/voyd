@@ -1,5 +1,5 @@
 import { List } from "../../../syntax-objects/list.js";
-import { lexer } from "../../lexer.js";
+import { Lexer } from "../../lexer.js";
 import { ReaderMacro } from "../types.js";
 import { HTMLParser } from "./html-parser.js";
 
@@ -19,7 +19,7 @@ export const htmlMacro: ReaderMacro = {
         return reader(file, "}");
       },
     });
-    const start = lexer(file);
+    const start = new Lexer().tokenize(file);
     const html = parser.parse(start.value);
     return new List({ value: ["html", html], location: token.location });
   },
