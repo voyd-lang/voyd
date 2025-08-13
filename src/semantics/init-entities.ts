@@ -55,6 +55,11 @@ export const initEntities: SemanticProcessor = (expr) => {
     return initArrayLiteral(expr);
   }
 
+  // Tuple literal
+  if (expr.calls("tuple")) {
+    return initTupleLiteral(expr);
+  }
+
   // Object literal
   if (expr.calls("object")) {
     return initObjectLiteral(expr);
@@ -214,6 +219,16 @@ const initArrayLiteral = (arr: List): ArrayLiteral => {
   });
 };
 
+const initTupleLiteral = (tuple: List): ObjectLiteral => {
+  return new ObjectLiteral({
+    ...tuple.metadata,
+    fields: tuple.sliceAsArray(1).map((e, i) => ({
+      name: i.toString(),
+      initializer: initEntities(e),
+    })),
+  });
+};
+
 const initObjectLiteral = (obj: List) => {
   return new ObjectLiteral({
     ...obj.metadata,
@@ -361,7 +376,12 @@ const initCall = (call: List) => {
     throw new Error("Invalid fn call");
   }
 
-  const fnName = call.at(0);
+  let fnName = call.at(0);
+  if (fnName?.isInt()) {
+    const val = typeof fnName.value === "number" ? fnName.value : fnName.value.value;
+    fnName = Identifier.from(val.toString());
+  }
+
   if (!fnName?.isIdentifier()) {
     throw new Error("Invalid fn call");
   }
@@ -394,6 +414,10 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
     throw new Error("Invalid type entity");
   }
 
+  if (type.calls("tuple")) {
+    return initTupleType(type);
+  }
+
   if (type.calls("object")) {
     return initStructuralObjectType(type);
   }
@@ -411,6 +435,18 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
   }
 
   return initCall(type);
+};
+
+const initTupleType = (tuple: List) => {
+  return new ObjectType({
+    ...tuple.metadata,
+    name: tuple.syntaxId.toString(),
+    value: tuple.sliceAsArray(1).map((t, i) => ({
+      name: i.toString(),
+      typeExpr: initTypeExprEntities(t)!,
+    })),
+    isStructural: true,
+  });
 };
 
 const initFixedArrayType = (type: List) => {

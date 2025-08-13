@@ -351,6 +351,11 @@ fn takes_worker(w: DoWork) -> i32
 pub fn test29() -> i32
   let w = Worker {}
   takes_worker(w)
+
+// Tuple literal and numeric member access
+pub fn test30() -> i32
+  let tup = (1, 2, 3)
+  tup.1
 `;
 
 export const tcoText = `
