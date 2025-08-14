@@ -125,6 +125,16 @@ DOM bindings operate on opaque `VNode` values, which may be native DOM objects, 
 - On updates, diff the new virtual tree against the previous one and patch only the necessary nodes.
 - The diff/patch workflow should aim for performance comparable to JavaScript React.
 
+## Update Strategy
+
+Star.voyd performs a depth-first comparison of the previous and next virtual DOM trees. For each node:
+
+- **Text nodes** update in place when their content changes.
+- **Element nodes** with the same tag reuse the existing DOM node. Attributes are diffed with a shallow object comparison and updated individually. Children are reconciled by index; extra children in the new tree are appended while missing ones are removed.
+- Nodes of different kinds or mismatched tags are replaced entirely.
+
+This naive reconciliation avoids key-based reordering and therefore runs in \(O(n)\) time, where \(n\) is the number of nodes in the larger tree.
+
 ## MVP Scope
 
 - Render functional components to browser DOM or `jsdom`.
