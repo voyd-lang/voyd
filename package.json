@@ -22,6 +22,7 @@
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^22.5.1",
+    "@types/jsdom": "^21.1.7",
     "@typescript-eslint/eslint-plugin": "^4.4.0",
     "@typescript-eslint/parser": "^4.4.0",
     "@vitest/ui": "^3.2.4",
@@ -36,6 +37,7 @@
     "commander": "^5.1.0",
     "eventemitter2": "^6.4.2",
     "glob": "^10.3.10",
+    "jsdom": "^26.1.0",
     "uniqid": "^5.2.0"
   }
 }

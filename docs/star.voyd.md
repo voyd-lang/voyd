@@ -44,6 +44,23 @@ export function setDomBinding(binding: DomBinding): void;
 export function getDomBinding(): DomBinding;
 ```
 
+## Server-side Rendering with jsdom
+
+When running star.voyd on the server, `jsdom` provides the DOM implementation. Use the helper below to set up the binding:
+
+```ts
+import { initJsdomDomBinding } from "../src/star/dom-binding/jsdom.js";
+
+const dom = initJsdomDomBinding();
+// dom.window.document is ready for rendering
+```
+
+Install the dependency with:
+
+```
+npm install jsdom @types/jsdom
+```
+
 The `VNode` family of types is intentionally opaque: a binding may use native DOM objects, numeric handles, or even string IDs. The active binding is registered at runtime via `setDomBinding` and retrieved with `getDomBinding`. This indirection lets components compile once and run in different environments without embedding environment-specific logic.
 
 ## Virtual DOM Expectations
