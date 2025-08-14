@@ -35,6 +35,10 @@ export const initEntities: SemanticProcessor = (expr) => {
   }
 
   if (expr.calls("define") || expr.calls("define_mut")) {
+    const identifierExpr = expr.at(1);
+    if (identifierExpr?.isList() && identifierExpr.calls("tuple")) {
+      return initTupleDestructure(expr, identifierExpr);
+    }
     return initVar(expr);
   }
 
@@ -321,6 +325,30 @@ const initVar = (varDef: List): Variable => {
     initializer: initEntities(initializer),
     isMutable,
   });
+};
+
+const initTupleDestructure = (varDef: List, tuple: List): Block => {
+  const initializer = varDef.at(2);
+
+  if (!initializer) {
+    throw new Error("Invalid variable definition, missing initializer");
+  }
+
+  const vars = tuple.sliceAsArray(1).map((name, index) => {
+    if (!name.isIdentifier()) {
+      throw new Error("Invalid tuple destructure");
+    }
+
+    const accessExpr = new List([index, initializer.clone()]);
+    const varList = new List([
+      varDef.identifierAt(0),
+      name,
+      accessExpr,
+    ]);
+    return initVar(varList);
+  });
+
+  return new Block({ ...varDef.metadata, body: vars });
 };
 
 const initDeclaration = (decl: List) => {
