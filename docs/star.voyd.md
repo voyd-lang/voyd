@@ -56,6 +56,49 @@ These TypeScript methods map to Voyd declarations in the `dom` namespace:
 | `removeChild(parent: VNode, child: VNode): void` | `dom.remove_child(parent: VNode, child: VNode) -> void` |
 | `insertBefore(parent: VNode, child: VNode, ref: VNode \| null): void` | `dom.insert_before(parent: VNode, child: VNode, ref: VNode \| Null) -> void` |
 | `setText(node: VNode, text: string): void` | `dom.set_text(node: VNode, text: string) -> void` |
+## Virtual DOM Node Structure
+
+Star.voyd represents the DOM as a tree of plain objects that can be serialized easily for WebAssembly interop. Nodes are tagged with a numeric `kind` to keep the shape compact:
+
+```ts
+export const enum VNodeKind {
+  Element = 0,
+  Text = 1,
+}
+
+export interface VElement {
+  kind: VNodeKind.Element;
+  tag: string;
+  attrs: Record<string, string>;
+  children: VNode[];
+}
+
+export interface VText {
+  kind: VNodeKind.Text;
+  text: string;
+}
+
+export type VNode = VElement | VText;
+
+export function element(
+  tag: string,
+  attrs: Record<string, string> = {},
+  children: VNode[] = [],
+): VElement;
+
+export function text(content: string): VText;
+```
+
+Example usage:
+
+```ts
+import { element, text } from "../src/star/vdom.js";
+
+const tree = element("div", { class: "greeting" }, [
+  text("hello world"),
+]);
+```
+
 
 ## Server-side Rendering with jsdom
 
@@ -74,7 +117,7 @@ Install the dependency with:
 npm install jsdom @types/jsdom
 ```
 
-The `VNode` family of types is intentionally opaque: a binding may use native DOM objects, numeric handles, or even string IDs. The active binding is registered at runtime via `setDomBinding` and retrieved with `getDomBinding`. This indirection lets components compile once and run in different environments without embedding environment-specific logic.
+DOM bindings operate on opaque `VNode` values, which may be native DOM objects, numeric handles, or even string IDs. The active binding is registered at runtime via `setDomBinding` and retrieved with `getDomBinding`. This indirection lets components compile once and run in different environments without embedding environment-specific logic.
 
 ## Virtual DOM Expectations
 
@@ -92,7 +135,6 @@ The `VNode` family of types is intentionally opaque: a binding may use native DO
 
 - How to handle event listeners and cleanup without hooks.
 - Strategy for hydration when rendering initially on the server.
-- Defining the exact shape and lifetime of the virtual DOM nodes.
 - Error boundaries or handling rendering failures.
 
 ## Browser DOM Binding
