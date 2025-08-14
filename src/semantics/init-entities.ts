@@ -244,17 +244,24 @@ const initObjectLiteral = (obj: List) => {
   return new ObjectLiteral({
     ...obj.metadata,
     fields: obj.sliceAsArray(1).map((f) => {
-      if (!f.isList()) {
-        throw new Error("Invalid object field");
-      }
-      const name = f.identifierAt(1);
-      const initializer = f.at(2);
-
-      if (!name || !initializer) {
-        throw new Error("Invalid object field");
+      // Support object literal field shorthand: `{ a }` becomes
+      // `{ a: a }`
+      if (f.isIdentifier()) {
+        return { name: f.value, initializer: initEntities(f) };
       }
 
-      return { name: name.value, initializer: initEntities(initializer) };
+      if (f.isList()) {
+        const name = f.identifierAt(1);
+        const initializer = f.at(2);
+
+        if (!name || !initializer) {
+          throw new Error("Invalid object field");
+        }
+
+        return { name: name.value, initializer: initEntities(initializer) };
+      }
+
+      throw new Error("Invalid object field");
     }),
   });
 };
