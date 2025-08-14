@@ -94,9 +94,13 @@ export const initEntities: SemanticProcessor = (expr) => {
 };
 
 const initBlock = (block: List): Block => {
-  return new Block({ ...block.metadata, body: block.slice(1) }).applyMap(
-    initEntities
-  );
+  const body = block
+    .sliceAsArray(1)
+    .flatMap((expr) => {
+      const inited = initEntities(expr);
+      return inited.isBlock() ? (inited as Block).body : [inited];
+    });
+  return new Block({ ...block.metadata, body });
 };
 
 const initFn = (expr: List): Fn => {
