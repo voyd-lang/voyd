@@ -98,7 +98,10 @@ const initBlock = (block: List): Block => {
     .sliceAsArray(1)
     .flatMap((expr) => {
       const inited = initEntities(expr);
-      return inited.isBlock() ? (inited as Block).body : [inited];
+      if (inited.isBlock() && inited.hasAttribute("flatten")) {
+        return (inited as Block).body;
+      }
+      return [inited];
     });
   return new Block({ ...block.metadata, body });
 };
@@ -351,8 +354,9 @@ const initTupleDestructure = (varDef: List, tuple: List): Block => {
     ]);
     return initVar(varList);
   });
-
-  return new Block({ ...varDef.metadata, body: vars });
+  const block = new Block({ ...varDef.metadata, body: vars });
+  block.setAttribute("flatten", true);
+  return block;
 };
 
 const initDeclaration = (decl: List) => {
