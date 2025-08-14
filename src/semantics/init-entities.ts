@@ -36,8 +36,13 @@ export const initEntities: SemanticProcessor = (expr) => {
 
   if (expr.calls("define") || expr.calls("define_mut")) {
     const identifierExpr = expr.at(1);
-    if (identifierExpr?.isList() && identifierExpr.calls("tuple")) {
-      return initTupleDestructure(expr, identifierExpr);
+    if (identifierExpr?.isList()) {
+      if (identifierExpr.calls("tuple")) {
+        return initTupleDestructure(expr, identifierExpr);
+      }
+      if (identifierExpr.calls("object")) {
+        return initObjectDestructure(expr, identifierExpr);
+      }
     }
     return initVar(expr);
   }
@@ -361,6 +366,47 @@ const initTupleDestructure = (varDef: List, tuple: List): Block => {
     ]);
     return initVar(varList);
   });
+  const block = new Block({ ...varDef.metadata, body: vars });
+  block.setAttribute("flatten", true);
+  return block;
+};
+
+const initObjectDestructure = (varDef: List, obj: List): Block => {
+  const initializer = varDef.at(2);
+
+  if (!initializer) {
+    throw new Error("Invalid variable definition, missing initializer");
+  }
+
+  const vars = obj.sliceAsArray(1).map((field) => {
+    if (field.isIdentifier()) {
+      const accessExpr = new List([field.clone(), initializer.clone()]);
+      const varList = new List([
+        varDef.identifierAt(0),
+        field,
+        accessExpr,
+      ]);
+      return initVar(varList);
+    }
+
+    if (field.isList() && field.calls(":")) {
+      const propName = field.identifierAt(1);
+      const name = field.at(2);
+      if (!propName?.isIdentifier() || !name?.isIdentifier()) {
+        throw new Error("Invalid object destructure");
+      }
+      const accessExpr = new List([propName.clone(), initializer.clone()]);
+      const varList = new List([
+        varDef.identifierAt(0),
+        name,
+        accessExpr,
+      ]);
+      return initVar(varList);
+    }
+
+    throw new Error("Invalid object destructure");
+  });
+
   const block = new Block({ ...varDef.metadata, body: vars });
   block.setAttribute("flatten", true);
   return block;
