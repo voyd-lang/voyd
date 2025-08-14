@@ -64,3 +64,7 @@ The `VNode` family of types is intentionally opaque: a binding may use native DO
 - Strategy for hydration when rendering initially on the server.
 - Defining the exact shape and lifetime of the virtual DOM nodes.
 - Error boundaries or handling rendering failures.
+
+## Browser DOM Binding
+
+Call `initBrowserDomBinding()` in a browser environment to register the builtin DOM implementation backed by the global `document`. The binding manipulates real DOM nodes directly and thus requires a real browser environment. It will not function in runtimes without `document`, such as Node.js, unless a polyfill like `jsdom` is provided.
