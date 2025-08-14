@@ -35,6 +35,10 @@ export const initEntities: SemanticProcessor = (expr) => {
   }
 
   if (expr.calls("define") || expr.calls("define_mut")) {
+    const identifierExpr = expr.at(1);
+    if (identifierExpr?.isList() && identifierExpr.calls("tuple")) {
+      return initTupleDestructure(expr, identifierExpr);
+    }
     return initVar(expr);
   }
 
@@ -90,9 +94,16 @@ export const initEntities: SemanticProcessor = (expr) => {
 };
 
 const initBlock = (block: List): Block => {
-  return new Block({ ...block.metadata, body: block.slice(1) }).applyMap(
-    initEntities
-  );
+  const body = block
+    .sliceAsArray(1)
+    .flatMap((expr) => {
+      const inited = initEntities(expr);
+      if (inited.isBlock() && inited.hasAttribute("flatten")) {
+        return (inited as Block).body;
+      }
+      return [inited];
+    });
+  return new Block({ ...block.metadata, body });
 };
 
 const initFn = (expr: List): Fn => {
@@ -321,6 +332,31 @@ const initVar = (varDef: List): Variable => {
     initializer: initEntities(initializer),
     isMutable,
   });
+};
+
+const initTupleDestructure = (varDef: List, tuple: List): Block => {
+  const initializer = varDef.at(2);
+
+  if (!initializer) {
+    throw new Error("Invalid variable definition, missing initializer");
+  }
+
+  const vars = tuple.sliceAsArray(1).map((name, index) => {
+    if (!name.isIdentifier()) {
+      throw new Error("Invalid tuple destructure");
+    }
+
+    const accessExpr = new List([index, initializer.clone()]);
+    const varList = new List([
+      varDef.identifierAt(0),
+      name,
+      accessExpr,
+    ]);
+    return initVar(varList);
+  });
+  const block = new Block({ ...varDef.metadata, body: vars });
+  block.setAttribute("flatten", true);
+  return block;
 };
 
 const initDeclaration = (decl: List) => {
