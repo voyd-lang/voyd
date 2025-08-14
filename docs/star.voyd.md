@@ -100,6 +100,24 @@ const tree = element("div", { class: "greeting" }, [
 ```
 
 
+## html Macro
+
+The `html` macro transforms inline HTML syntax into calls that construct
+virtual DOM nodes.
+
+```voyd
+use ::star macros all
+
+fn view() -> VNode
+  html <div class="greeting">hello</div>
+```
+
+Expands to:
+
+```voyd
+element("div", dict("class" "greeting"), (array text("hello")))
+```
+
 ## Server-side Rendering with jsdom
 
 When running star.voyd on the server, `jsdom` provides the DOM implementation. Use the helper below to set up the binding:
