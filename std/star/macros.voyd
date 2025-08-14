@@ -1,0 +1,20 @@
+use std::macros::all
+
+pub macro html()
+  macro_let render = (node) =>
+    if node.is_list() then:
+      if node.extract(0) == "array" then:
+        let first = node.extract(1).extract(1)
+        ` text($first)
+      else:
+        let tag = node.extract(0)
+        let attrs = node.extract(1).extract(2)
+        let children =
+          if node.length > 2 then:
+            node.extract(2).extract(2).map(render)
+          else:
+            `()
+        ` element($tag, $attrs, `(array $@children))
+    else:
+      node
+  render(body.extract(0))
