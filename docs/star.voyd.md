@@ -44,6 +44,19 @@ export function setDomBinding(binding: DomBinding): void;
 export function getDomBinding(): DomBinding;
 ```
 
+These TypeScript methods map to Voyd declarations in the `dom` namespace:
+
+| TypeScript | Voyd |
+| ---------- | ---- |
+| `createElement(tag: string): VElement` | `dom.create_element(tag: string) -> VElement` |
+| `createTextNode(text: string): VText` | `dom.create_text_node(text: string) -> VText` |
+| `setAttribute(el: VElement, name: string, value: string): void` | `dom.set_attribute(el: VElement, name: string, value: string) -> void` |
+| `removeAttribute(el: VElement, name: string): void` | `dom.remove_attribute(el: VElement, name: string) -> void` |
+| `appendChild(parent: VNode, child: VNode): void` | `dom.append_child(parent: VNode, child: VNode) -> void` |
+| `removeChild(parent: VNode, child: VNode): void` | `dom.remove_child(parent: VNode, child: VNode) -> void` |
+| `insertBefore(parent: VNode, child: VNode, ref: VNode \| null): void` | `dom.insert_before(parent: VNode, child: VNode, ref: VNode \| Null) -> void` |
+| `setText(node: VNode, text: string): void` | `dom.set_text(node: VNode, text: string) -> void` |
+
 ## Server-side Rendering with jsdom
 
 When running star.voyd on the server, `jsdom` provides the DOM implementation. Use the helper below to set up the binding:
