@@ -8,20 +8,21 @@ import { VoydHost } from "../bindings.js";
 
   const runtime = new DomRuntime(document.getElementById("root")!);
 
+  let instance: WebAssembly.Instance;
   const imports = {
     env: {
       host_apply_patch_frame: (ptr: number, len: number) => {
-        const bytes = new Uint8Array(instance.exports.memory.buffer, ptr, len);
+        const bytes = new Uint8Array((instance.exports as any).memory.buffer, ptr, len);
         runtime.applyPatchFrame(bytes);
       },
       host_log: (ptr: number, len: number) => {
-        const u8 = new Uint8Array(instance.exports.memory.buffer, ptr, len);
+        const u8 = new Uint8Array((instance.exports as any).memory.buffer, ptr, len);
         console.log(new TextDecoder().decode(u8));
       },
     },
   } as any;
 
-  const instance = await WebAssembly.instantiate(
+  instance = await WebAssembly.instantiate(
     await WebAssembly.compile(wasmBytes),
     imports
   );

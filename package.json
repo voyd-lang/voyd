@@ -11,7 +11,8 @@
     "test:w": "vitest",
     "snapshot": "vitest -u",
     "build": "npx tsc",
-    "prepublishOnly": "tsc"
+    "prepublishOnly": "tsc",
+    "ssr:demo": "node --loader ts-node/esm src/host/node-ssr.ts"
   },
   "bin": {
     "voyd": "./dist/cli/cli.js",
