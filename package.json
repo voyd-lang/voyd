@@ -21,6 +21,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@types/jsdom": "^21.1.7",
     "@types/node": "^22.5.1",
     "@typescript-eslint/eslint-plugin": "^4.4.0",
     "@typescript-eslint/parser": "^4.4.0",
@@ -36,6 +37,8 @@
     "commander": "^5.1.0",
     "eventemitter2": "^6.4.2",
     "glob": "^10.3.10",
+    "jsdom": "^26.1.0",
+    "msgpackr": "^1.11.5",
     "uniqid": "^5.2.0"
   }
 }
