@@ -2,10 +2,65 @@ import { registerModules } from "../modules.js";
 import { List } from "../../syntax-objects/list.js";
 import { stdPath } from "../../parser/index.js";
 import { test } from "vitest";
+import { RootModule, VoydModule } from "../../syntax-objects/module.js";
+import { Fn } from "../../syntax-objects/fn.js";
+import { resolveModulePath } from "../resolution/resolve-use.js";
 
 test("module registration", (t) => {
   const result = registerModules(input);
   t.expect(result).toMatchSnapshot();
+});
+
+test("resolveModulePath handles import variants", (t) => {
+  const root = new RootModule({});
+  const std = new VoydModule({ name: "std", parent: root });
+  const linearMem = new VoydModule({ name: "linear_memory", parent: std });
+
+  const grow = new Fn({ name: "grow", parent: linearMem });
+  const store = new Fn({ name: "store", parent: linearMem });
+  const load = new Fn({ name: "load_i32", parent: linearMem });
+
+  linearMem.registerExport(grow);
+  linearMem.registerExport(store);
+  linearMem.registerExport(load);
+
+  std.registerEntity(linearMem);
+  std.registerExport(linearMem);
+  root.registerEntity(std);
+  root.registerExport(std);
+
+  const multiPath = new List([
+    "::",
+    new List(["::", "std", "linear_memory"]),
+    new List([
+      "object",
+      new List([":", "grow", "grow_linear_mem"]),
+      "store",
+      "load_i32",
+    ]),
+  ]);
+  multiPath.parent = root;
+  const multiEntities = resolveModulePath(multiPath);
+  t.expect(multiEntities.map((e) => e.e.name.value)).toEqual([
+    "grow",
+    "store",
+    "load_i32",
+  ]);
+  t.expect(multiEntities[0].alias).toBe("grow_linear_mem");
+
+  const singlePath = new List([
+    "::",
+    new List(["::", "std", "linear_memory"]),
+    "grow",
+  ]);
+  singlePath.parent = root;
+  const singleEntities = resolveModulePath(singlePath);
+  t.expect(singleEntities[0].e).toBe(grow);
+
+  const modulePath = new List(["::", "std", "linear_memory"]);
+  modulePath.parent = root;
+  const moduleEntities = resolveModulePath(modulePath);
+  t.expect(moduleEntities[0].e).toBe(linearMem);
 });
 
 const input = {

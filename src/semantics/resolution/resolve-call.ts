@@ -4,18 +4,18 @@ import {
   dVoid,
   FixedArrayType,
   ObjectType,
-  TypeAlias,
 } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveEntities } from "./resolve-entities.js";
-import { resolveExport } from "./resolve-use.js";
+import { resolveExport, resolveModulePath } from "./resolve-use.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export const resolveCall = (call: Call): Call => {
   if (call.type) return call;
+  if (call.calls("::")) return resolveModuleAccess(call);
   if (call.calls("export")) return resolveExport(call);
   if (call.calls("if")) return resolveIf(call);
   if (call.calls(":")) return resolveLabeledArg(call);
@@ -37,10 +37,16 @@ export const resolveCall = (call: Call): Call => {
     call.typeArgs = call.typeArgs.map(resolveTypeExpr);
   }
 
-  call.fn = getCallFn(call);
+  if (!call.fn) {
+    call.fn = getCallFn(call);
+  }
   expandObjectArg(call);
 
-  call.type = call.fn?.returnType;
+  call.type = call.fn?.isFn()
+    ? call.fn.returnType
+    : call.fn?.isObjectType()
+    ? call.fn
+    : undefined;
   return call;
 };
 
@@ -115,6 +121,21 @@ const expandObjectArg = (call: Call) => {
 
   call.args = new List({ value: newArgs });
   call.args.parent = call;
+};
+
+export const resolveModuleAccess = (call: Call) => {
+  const [left, right] = call.argsArray();
+  if (right?.isCall()) {
+    const path = new List(["::", left, right.fnName]);
+    path.parent = call.parent ?? call.parentModule;
+    const entity = resolveModulePath(path)[0]?.e;
+    if (entity?.isFn()) {
+      right.fn = entity;
+      right.args = right.args.map(resolveEntities);
+      return resolveCall(right);
+    }
+  }
+  return call;
 };
 
 export const resolveLabeledArg = (call: Call) => {
