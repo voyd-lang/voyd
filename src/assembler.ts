@@ -44,7 +44,7 @@ const buildingTypePlaceholders = new Map<ObjectType, TypeRef>();
 export const assemble = (ast: Expr) => {
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
-  mod.setMemory(0, 0, null, []);
+  mod.setMemory(0, 1, null, []);
   const extensionHelpers = initExtensionHelpers(mod);
   const fieldLookupHelpers = initFieldLookupHelpers(mod);
   compileExpression({ expr: ast, mod, extensionHelpers, fieldLookupHelpers });

@@ -18,11 +18,11 @@ pub fn load_i32(ptr: i32) -> i32
   binaryen
     func: load
     namespace: i32
-    args: `(0, 0, ptr)
+    args: `(BnrConst(0), BnrConst(0), ptr)
 
 pub fn store_i32(ptr: i32, value: i32) -> i32
   binaryen
     func: store
     namespace: i32
-    args: `(0, 0, ptr, value)
+    args: `(BnrConst(0), BnrConst(0), ptr, value)
   value
