@@ -1,88 +1,63 @@
 import { idIs, isOp } from "../grammar.js";
 import { Expr, List, ListValue } from "../../syntax-objects/index.js";
 
-// Note: The current version of this function was modified by GPT o1.
-// I wrote the original version an have made modifications to the version
-// produced by o1. The intent was to have o1 improve the performance. But
-// now I'm not sure the added complexity produced by o1 was worth the cost.
-// Might still be worth re-writing again to something similar to the original.
-
+// Simplified iteration to reduce complexity and improve runtime
+// performance when converting lists that use functional notation.
 export const functionalNotation = (list: List): List => {
   const array = list.toArray();
+  const result: ListValue[] = [];
   let isTuple = false;
 
-  const { result } = array.reduce(
-    (acc, expr, index) => {
-      if (acc.skip > 0) {
-        acc.skip--;
-        return acc;
-      }
+  for (let i = 0; i < array.length; i++) {
+    const expr = array[i];
 
-      if (expr.isList()) {
-        acc.result.push(functionalNotation(expr));
-        return acc;
-      }
-
-      if (expr.isWhitespace()) {
-        acc.result.push(expr);
-        return acc;
-      }
-
-      const nextExpr = array[index + 1];
-
-      if (nextExpr && nextExpr.isList() && !(isOp(expr) || idIs(expr, ","))) {
-        return handleNextExpression(acc, expr, nextExpr, array, index);
-      }
-
-      if (list.getAttribute("tuple?") && idIs(expr, ",")) {
-        isTuple = true;
-      }
-
-      acc.result.push(expr);
-      return acc;
-    },
-    { result: [], skip: 0 } as Accumulator
-  );
-
-  return finalizeResult(result, isTuple, list);
-};
-
-type Accumulator = { result: ListValue[]; skip: number };
-
-const handleNextExpression = (
-  acc: Accumulator,
-  expr: Expr,
-  nextExpr: List,
-  array: Expr[],
-  index: number
-) => {
-  if (nextExpr.calls("generics")) {
-    const generics = nextExpr;
-    const nextNextExpr = array[index + 2];
-    if (nextNextExpr && nextNextExpr.isList()) {
-      acc.result.push(processGenerics(expr, generics, nextNextExpr as List));
-      acc.skip = 2; // Skip next two expressions
-    } else {
-      acc.result.push(processGenerics(expr, generics));
-      acc.skip = 1; // Skip next expression
+    if (expr.isList()) {
+      result.push(functionalNotation(expr));
+      continue;
     }
-  } else {
-    acc.result.push(processParamList(expr, nextExpr as List));
-    acc.skip = 1; // Skip next expression
-  }
-  return acc;
-};
 
-const finalizeResult = (
-  result: ListValue[],
-  isTuple: boolean,
-  originalList: List
-): List => {
-  if (isTuple) {
-    result.unshift(",");
-    result.unshift("tuple");
+    if (expr.isWhitespace()) {
+      result.push(expr);
+      continue;
+    }
+
+    const nextExpr = array[i + 1];
+    if (
+      nextExpr &&
+      nextExpr.isList() &&
+      !(isOp(expr) || idIs(expr, ","))
+    ) {
+      if (nextExpr.calls("generics")) {
+        const generics = nextExpr;
+        const nextNextExpr = array[i + 2];
+        if (nextNextExpr && nextNextExpr.isList()) {
+          result.push(
+            processGenerics(expr, generics, nextNextExpr as List)
+          );
+          i += 2;
+        } else {
+          result.push(processGenerics(expr, generics));
+          i += 1;
+        }
+      } else {
+        result.push(processParamList(expr, nextExpr as List));
+        i += 1;
+      }
+      continue;
+    }
+
+    if (list.getAttribute("tuple?") && idIs(expr, ",")) {
+      isTuple = true;
+    }
+
+    result.push(expr);
   }
-  return new List({ ...originalList.metadata, value: result });
+
+  if (isTuple) {
+    result.unshift(",", "tuple");
+  }
+
+  return new List({ ...list.metadata, value: result });
 };
 
 const processGenerics = (expr: Expr, generics: List, params?: List): List => {
@@ -105,3 +80,4 @@ const processParamList = (expr: Expr, params: List): List => {
   params.setAttribute("tuple?", false);
   return functionalNotation(params);
 };
+
