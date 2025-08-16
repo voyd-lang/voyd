@@ -22,12 +22,10 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
   const transformed = new List({ dynamicLocation: true });
   const indentLevel = startIndentLevel ?? nextExprIndentLevel(list);
 
-  const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;
-
   const pushChildBlock = () => {
     const children = new List({ value: ["block"], dynamicLocation: true });
 
-    while (nextLineHasChildExpr()) {
+    while (nextExprIndentLevel(list) > indentLevel) {
       const child = elideParens(list, indentLevel + 1);
 
       if (
@@ -57,8 +55,9 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
   consumeLeadingWhitespace(list);
   while (list.hasChildren) {
     const next = list.first();
+    const nextIndent = nextExprIndentLevel(list);
 
-    if (isNewline(next) && nextLineHasChildExpr()) {
+    if (isNewline(next) && nextIndent > indentLevel) {
       pushChildBlock();
       continue;
     }
@@ -85,7 +84,7 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
     if (isGreedyOp(next)) {
       transformed.push(list.consume());
 
-      if (!nextLineHasChildExpr()) {
+      if (nextExprIndentLevel(list) <= indentLevel) {
         transformed.push(elideParens(list, indentLevel));
       }
 
@@ -102,28 +101,26 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
   return transformed.length === 1 ? transformed.first()! : transformed;
 };
 
-/** Will return 0 if the next expression is a comma (performance hack for whitespace block parsing) */
-const nextExprIndentLevel = (list: List, startIndex?: number) => {
-  let index = startIndex ?? 0;
+/**
+ * Returns the indentation level of the next expression. Returns `0` if a comma
+ * is encountered, which is a performance hack for whitespace block parsing.
+ */
+const nextExprIndentLevel = (list: List, startIndex = 0) => {
   let nextIndentLevel = 0;
 
-  while (list.at(index)) {
-    const expr = list.at(index)!;
+  for (let i = startIndex; i < list.length; i++) {
+    const expr = list.at(i)!;
     if (isNewline(expr)) {
       nextIndentLevel = 0;
-      index += 1;
       continue;
     }
 
     if (isIndent(expr)) {
       nextIndentLevel += 1;
-      index += 1;
       continue;
     }
 
-    if (idIs(expr, ",")) {
-      return 0;
-    }
+    if (idIs(expr, ",")) return 0;
 
     break;
   }
@@ -132,13 +129,9 @@ const nextExprIndentLevel = (list: List, startIndex?: number) => {
 };
 
 const consumeLeadingWhitespace = (list: List) => {
-  while (list.hasChildren) {
-    const next = list.first();
-    if (next?.isWhitespace() || idIs(next, ",")) {
-      list.consume();
-      continue;
-    }
-    break;
+  let next: Expr | undefined;
+  while ((next = list.first()) && (next.isWhitespace() || idIs(next, ","))) {
+    list.consume();
   }
 };
 
