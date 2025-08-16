@@ -1,18 +1,24 @@
-import { linearMemoryVoyd } from "./fixtures/linear-memory.js";
+import {
+  linearMemoryVoyd,
+  linearMemoryModuleVoyd,
+} from "./fixtures/linear-memory.js";
 import { compile } from "../compiler.js";
-import { beforeAll, describe, test } from "vitest";
+import { describe, test } from "vitest";
 import assert from "node:assert";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
 
 describe("E2E linear memory", () => {
-  let instance: WebAssembly.Instance;
-
-  beforeAll(async () => {
+  test("load/store roundtrip with picked imports", async (t) => {
     const mod = await compile(linearMemoryVoyd);
-    instance = getWasmInstance(mod);
+    const instance = getWasmInstance(mod);
+    const fn = getWasmFn("run", instance);
+    assert(fn, "Function exists");
+    t.expect(fn(), "run returns stored value").toEqual(42);
   });
 
-  test("load/store roundtrip", (t) => {
+  test("load/store roundtrip with module access", async (t) => {
+    const mod = await compile(linearMemoryModuleVoyd);
+    const instance = getWasmInstance(mod);
     const fn = getWasmFn("run", instance);
     assert(fn, "Function exists");
     t.expect(fn(), "run returns stored value").toEqual(42);
