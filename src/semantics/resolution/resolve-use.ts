@@ -88,7 +88,10 @@ const resolveObjectPath = (path: Call | List, module: VoydModule) => {
 
   const imports = path.argsArray();
   for (const imp of imports) {
-    if ((imp.isCall() || imp.isList()) && imp.calls("as")) {
+    if (
+      (imp.isCall() || imp.isList()) &&
+      (imp.calls(":") || imp.calls("as"))
+    ) {
       const args = imp.argsArray();
       const entityId = args.at(0);
       const alias = args.at(1);
