@@ -8,7 +8,8 @@ import {
   isDigitSign,
 } from "./grammar.js";
 
-const NUMBER_REGEX = /^[+-]?\d+(?:\.\d+)?([Ee]?[+-]?\d+|(?:i|f)(?:|3|6|32|64))?$/;
+const NUMBER_REGEX =
+  /^[+-]?\d+(?:\.\d+)?([Ee]?[+-]?\d+|(?:i|f)(?:|3|6|32|64))?$/;
 
 /**
  * Lexer that tracks angle bracket nesting depth so that `>>` can be
@@ -59,7 +60,7 @@ export class Lexer {
 
       if (char === "\t") {
         throw new Error(
-          "Tabs are not supported, use four spaces for indentation",
+          "Tabs are not supported, use four spaces for indentation"
         );
       }
 
@@ -79,7 +80,10 @@ export class Lexer {
 
   private consumeOperator(chars: CharStream, token: Token) {
     while (isOpChar(chars.next)) {
-      if (token.value === ">" && (this.angleBracketDepth > 0 || chars.next === ":")) {
+      if (
+        token.value === ">" &&
+        (this.angleBracketDepth > 0 || chars.next === ":")
+      ) {
         break;
       }
 
@@ -122,4 +126,3 @@ export class Lexer {
     }
   }
 }
-
