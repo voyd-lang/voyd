@@ -11,7 +11,6 @@ export type ParseCharsOpts = {
   terminator?: string;
   parent?: Expr;
   lexer?: Lexer;
-  macros?: ReaderMacro[];
 };
 
 export const parseChars = (
@@ -19,7 +18,6 @@ export const parseChars = (
   opts: ParseCharsOpts = {}
 ): List => {
   const lexer = opts.lexer ?? new Lexer();
-  const { macros } = opts;
   const list = new List({
     location: file.currentSourceLocation(),
     parent: opts.parent,
@@ -32,7 +30,7 @@ export const parseChars = (
       break;
     }
 
-    if (processWithReaderMacro(token, list.last(), file, list, lexer, macros)) {
+    if (processWithReaderMacro(token, list.last(), file, list, lexer)) {
       continue;
     }
   }
@@ -47,10 +45,9 @@ const processWithReaderMacro = (
   prev: Expr | undefined,
   file: CharStream,
   list: List,
-  lexer: Lexer,
-  macros?: ReaderMacro[]
+  lexer: Lexer
 ) => {
-  const readerMacro = getReaderMacroForToken(token, prev, file.next, macros);
+  const readerMacro = getReaderMacroForToken(token, prev, file.next);
   if (!readerMacro) return undefined;
 
   const result = readerMacro(file, {
@@ -60,7 +57,6 @@ const processWithReaderMacro = (
         nested: true,
         terminator,
         lexer,
-        macros,
       }),
   });
 

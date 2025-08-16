@@ -33,26 +33,10 @@ const MACROS = [
   identifierReader,
 ];
 
-export const FAST_MACROS = [
-  listReader,
-  whitespaceReader,
-  objectLiteralMacro,
-  arrayLiteralMacro,
-  mapLiteralMacro,
-  intMacro,
-  floatMacro,
-  stringMacro,
-  comment,
-  booleanMacro,
-  genericsMacro,
-  identifierReader,
-];
-
 export const getReaderMacroForToken = (
   token: Token,
   prev?: Expr,
   /** Next char */
-  next?: string,
-  macros = MACROS
+  next?: string
 ): ReaderMacro["macro"] | undefined =>
-  macros.find((m) => m.match(token, prev, next))?.macro;
+  MACROS.find((m) => m.match(token, prev, next))?.macro;

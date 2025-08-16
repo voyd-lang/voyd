@@ -1,4 +1,4 @@
-export const voydFile = `
+const benchmarkBaseFile = `
 use std::macros::all
 use std::io::{ read, write: io_write }
 
@@ -150,13 +150,4 @@ fn main()
     </div>
 `;
 
-export const voydFileWithGenerics = `
-use std::all
-
-type DsArrayi32 = DsArray<i32>
-
-pub fn main()
-  let arr = new_fixed_array<i32>(10)
-  arr.set<i32>(0, 1)
-  arr.get<i32>(0)
-`;
+export const BENCH_FILE = benchmarkBaseFile.repeat(100); // ~0.19 MB

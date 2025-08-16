@@ -1,19 +1,14 @@
 import { bench } from "vitest";
 import { parse } from "../parser.js";
-import { simplerVoydFile } from "./fixtures/voyd-file.js";
-import { FAST_MACROS } from "../reader-macros/index.js";
+import { BENCH_FILE } from "./fixtures/benchmark-file.js";
+import { CharStream } from "../char-stream.js";
+import { parseChars } from "../parse-chars.js";
 
-const BIG = simplerVoydFile.repeat(500);
+bench("parser performance (excluding syntax-macros)", () => {
+  const chars = new CharStream(BENCH_FILE, "raw");
+  parseChars(chars);
+});
 
-bench(
-  "parser performance",
-  () => {
-    parse(BIG, undefined, FAST_MACROS);
-  },
-  {
-    time: 2000, // measure ~2s
-    warmupTime: 500, // warm JIT
-    iterations: 20,
-    warmupIterations: 5,
-  }
-);
+bench("full parser performance", () => {
+  parse(BENCH_FILE);
+});
