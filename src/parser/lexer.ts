@@ -8,6 +8,8 @@ import {
   isDigitSign,
 } from "./grammar.js";
 
+const NUMBER_REGEX = /^[+-]?\d+(?:\.\d+)?([Ee]?[+-]?\d+|(?:i|f)(?:|3|6|32|64))?$/;
+
 /**
  * Lexer that tracks angle bracket nesting depth so that `>>` can be
  * tokenized either as two closing brackets (inside generics) or as a shift
@@ -94,14 +96,15 @@ export class Lexer {
   }
 
   private consumeNumber(chars: CharStream, token: Token) {
-    const isValidNumber = (str: string) =>
-      /^[+-]?\d+(?:\.\d+)?([Ee]?[+-]?\d+|(?:i|f)(?:|3|6|32|64))?$/.test(str);
-    const stillConsumingNumber = () =>
-      chars.next &&
-      (isValidNumber(token.value + chars.next) ||
-        isValidNumber(token.value + chars.next + chars.at(1)));
-
-    while (stillConsumingNumber()) {
+    while (true) {
+      const next = chars.next;
+      if (
+        !next ||
+        (!NUMBER_REGEX.test(token.value + next) &&
+          !NUMBER_REGEX.test(token.value + next + (chars.at(1) ?? "")))
+      ) {
+        break;
+      }
       token.addChar(chars.consumeChar());
     }
   }
