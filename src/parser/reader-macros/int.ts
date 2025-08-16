@@ -1,8 +1,10 @@
 import { Int } from "../../syntax-objects/index.js";
 import { ReaderMacro } from "./types.js";
 
+const INT = /^[+-]?\d+(?:i64|i32)?$/;
+
 export const intMacro: ReaderMacro = {
-  match: (t) => /^[+-]?\d+(?:i64|i32)?$/.test(t.value),
+  match: (t) => INT.test(t.value),
   macro: (_, { token }) => {
     const value =
       token.value.at(-3) === "i"

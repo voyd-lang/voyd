@@ -3,6 +3,7 @@ import { List } from "../syntax-objects/list.js";
 import { CharStream } from "./char-stream.js";
 import { Lexer } from "./lexer.js";
 import { getReaderMacroForToken } from "./reader-macros/index.js";
+import { ReaderMacro } from "./reader-macros/types.js";
 import { Token } from "./token.js";
 
 export type ParseCharsOpts = {
@@ -44,7 +45,7 @@ const processWithReaderMacro = (
   prev: Expr | undefined,
   file: CharStream,
   list: List,
-  lexer: Lexer,
+  lexer: Lexer
 ) => {
   const readerMacro = getReaderMacroForToken(token, prev, file.next);
   if (!readerMacro) return undefined;

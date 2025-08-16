@@ -1,18 +1,14 @@
 import { bench } from "vitest";
 import { parse } from "../parser.js";
-import { voydFile } from "./fixtures/voyd-file.js";
+import { BENCH_FILE } from "./fixtures/benchmark-file.js";
+import { CharStream } from "../char-stream.js";
+import { parseChars } from "../parse-chars.js";
 
-const BIG = voydFile.repeat(100);
+bench("parser performance (excluding syntax-macros)", () => {
+  const chars = new CharStream(BENCH_FILE, "raw");
+  parseChars(chars);
+});
 
-bench(
-  "parser performance",
-  () => {
-    parse(BIG);
-  },
-  {
-    time: 2000, // measure ~2s
-    warmupTime: 500, // warm JIT
-    iterations: 20,
-    warmupIterations: 5,
-  }
-);
+bench("full parser performance", () => {
+  parse(BENCH_FILE);
+});

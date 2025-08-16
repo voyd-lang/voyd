@@ -16,7 +16,7 @@ import { listReader } from "./list.js";
 import { whitespaceReader } from "./whitespace.js";
 import { identifierReader } from "./identifier.js";
 
-const macros = [
+const MACROS = [
   listReader,
   whitespaceReader,
   objectLiteralMacro,
@@ -39,4 +39,4 @@ export const getReaderMacroForToken = (
   /** Next char */
   next?: string
 ): ReaderMacro["macro"] | undefined =>
-  macros.find((m) => m.match(token, prev, next))?.macro;
+  MACROS.find((m) => m.match(token, prev, next))?.macro;

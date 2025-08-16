@@ -3,13 +3,15 @@ import { Lexer } from "../../lexer.js";
 import { ReaderMacro } from "../types.js";
 import { HTMLParser } from "./html-parser.js";
 
+const W = /\w/;
+
 export const htmlMacro: ReaderMacro = {
   match: (t, prev, nextChar) => {
     return (
       t.value === "<" &&
       !!prev?.isWhitespace() &&
       !!nextChar &&
-      /\w/.test(nextChar)
+      W.test(nextChar)
     );
   },
   macro: (file, { token, reader }) => {

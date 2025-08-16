@@ -2,7 +2,7 @@ import { nop } from "../../syntax-objects/index.js";
 import { ReaderMacro } from "./types.js";
 
 export const comment: ReaderMacro = {
-  match: (t) => /^\/\/[^\s]*$/.test(t.value),
+  match: (t) => t.value === "//",
   macro: (file) => {
     while (file.hasCharacters) {
       if (file.next === "\n") break;

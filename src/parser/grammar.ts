@@ -13,7 +13,8 @@ export const isTerminator = (char: string) =>
 
 export const isQuote = newTest(["'", '"', "`"]);
 
-export const isWhitespace = (char: string) => /\s/.test(char);
+export const isWhitespace = (char: string) =>
+  char === " " || char === "\n" || char === "\r";
 
 export const isBracket = newTest(["{", "[", "(", ")", "]", "}"]);
 
@@ -40,7 +41,7 @@ export const isOpChar = newTest([
   "#",
 ]);
 
-export const isDigit = (char: string) => /[0-9]/.test(char);
+export const isDigit = (char: string) => char >= "0" && char <= "9";
 export const isDigitSign = (char: string) => char === "+" || char === "-";
 
 /** Key is the operator, value is its precedence */

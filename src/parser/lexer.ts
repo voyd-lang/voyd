@@ -8,6 +8,9 @@ import {
   isDigitSign,
 } from "./grammar.js";
 
+const NUMBER_REGEX =
+  /^[+-]?\d+(?:\.\d+)?([Ee]?[+-]?\d+|(?:i|f)(?:|3|6|32|64))?$/;
+
 /**
  * Lexer that tracks angle bracket nesting depth so that `>>` can be
  * tokenized either as two closing brackets (inside generics) or as a shift
@@ -57,7 +60,7 @@ export class Lexer {
 
       if (char === "\t") {
         throw new Error(
-          "Tabs are not supported, use four spaces for indentation",
+          "Tabs are not supported, use four spaces for indentation"
         );
       }
 
@@ -77,7 +80,10 @@ export class Lexer {
 
   private consumeOperator(chars: CharStream, token: Token) {
     while (isOpChar(chars.next)) {
-      if (token.value === ">" && (this.angleBracketDepth > 0 || chars.next === ":")) {
+      if (
+        token.value === ">" &&
+        (this.angleBracketDepth > 0 || chars.next === ":")
+      ) {
         break;
       }
 
@@ -94,14 +100,15 @@ export class Lexer {
   }
 
   private consumeNumber(chars: CharStream, token: Token) {
-    const isValidNumber = (str: string) =>
-      /^[+-]?\d+(?:\.\d+)?([Ee]?[+-]?\d+|(?:i|f)(?:|3|6|32|64))?$/.test(str);
-    const stillConsumingNumber = () =>
-      chars.next &&
-      (isValidNumber(token.value + chars.next) ||
-        isValidNumber(token.value + chars.next + chars.at(1)));
-
-    while (stillConsumingNumber()) {
+    while (true) {
+      const next = chars.next;
+      if (
+        !next ||
+        (!NUMBER_REGEX.test(token.value + next) &&
+          !NUMBER_REGEX.test(token.value + next + (chars.at(1) ?? "")))
+      ) {
+        break;
+      }
       token.addChar(chars.consumeChar());
     }
   }
@@ -119,4 +126,3 @@ export class Lexer {
     }
   }
 }
-

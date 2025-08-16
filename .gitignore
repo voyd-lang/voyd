@@ -7,3 +7,5 @@ ast.json
 test.voyd
 /playground.*
 /playground
+/sb
+/*.sb.*
