@@ -1,4 +1,8 @@
-import { CompileExprOpts, compileExpression, mapBinaryenType } from "../../assembler.js";
+import {
+  CompileExprOpts,
+  compileExpression,
+  mapBinaryenType,
+} from "../../assembler.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { Expr } from "../../syntax-objects/expr.js";
