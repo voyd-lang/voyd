@@ -13,16 +13,20 @@ const parseExpression = (expr: Expr): Expr => {
 };
 
 const parseList = (list: List): List => {
-  const transformed = new List({ ...list.metadata, dynamicLocation: true });
   const hadSingleListChild = list.length === 1 && list.at(0)?.isList();
+  const items: Expr[] = [];
+
   while (list.hasChildren) {
-    transformed.push(parsePrecedence(list));
+    items.push(parsePrecedence(list));
   }
 
-  const result =
-    !hadSingleListChild && transformed.at(0)?.isList()
-      ? transformed.listAt(0).push(...transformed.argsArray())
-      : transformed;
+  let result: List;
+  if (!hadSingleListChild && items[0]?.isList()) {
+    result = items[0] as List;
+    result.push(...items.slice(1));
+  } else {
+    result = new List({ ...list.metadata, value: items, dynamicLocation: true });
+  }
 
   // Handle expressions to the right of an operator { a: hello there, b: 2 } -> [object [: a [hello there] b [2]]
   if (
@@ -30,31 +34,20 @@ const parseList = (list: List): List => {
     isInfixOp(result.identifierAt(0)) &&
     result.length > 3
   ) {
-    return result.slice(0, 2).push(parseList(result.slice(2)));
-  }
+    const head = new List({
+      ...result.metadata,
+      dynamicLocation: true,
+      value: [result.exprAt(0), result.exprAt(1)],
+    });
 
-  return result;
-};
+    const tail = new List({
+      ...result.metadata,
+      dynamicLocation: true,
+      value: result.sliceAsArray(2),
+    });
 
-const parseBinaryCall = (left: Expr, list: List): List => {
-  const op = list.consume();
-
-  const right = parsePrecedence(list, (infixOpInfo(op) ?? -1) + 1);
-
-  // Dot handling should maybe be moved to a macro?
-  const result = isDotOp(op)
-    ? parseDot(right, left)
-    : new List({
-        ...op.metadata,
-        value: [op, left, right],
-        dynamicLocation: true,
-      });
-
-  // Remove "tuple" from the list of parameters of a lambda
-  // Functional notation macro isn't smart enough to identify lambda parameters
-  // and so it converts those parameters to a tuple. We remove it here for now.
-  if (isLambdaWithTupleArgs(result)) {
-    return removeTupleFromLambdaParameters(result);
+    head.push(parseList(tail));
+    return head;
   }
 
   return result;
@@ -83,22 +76,39 @@ const parseDot = (right: Expr, left: Expr): List => {
 };
 
 const parsePrecedence = (list: List, minPrecedence = 0): Expr => {
-  const next = list.at(0);
-  let expr = isPrefixOp(next)
-    ? parseUnaryCall(list)
-    : parseExpression(list.consume());
+  const first = list.first();
+  let expr: Expr;
 
-  while ((infixOpInfo(list.first()) ?? -1) >= minPrecedence) {
-    expr = parseBinaryCall(expr, list);
+  if (isPrefixOp(first)) {
+    const op = list.consume();
+    const right = parsePrecedence(list, unaryOpInfo(op) ?? -1);
+    expr = new List({ value: [op, right], dynamicLocation: true });
+  } else {
+    expr = parseExpression(list.consume());
+  }
+
+  while (list.hasChildren) {
+    const op = list.first()!;
+    const precedence = infixOpInfo(op);
+    if (precedence === undefined || precedence < minPrecedence) break;
+
+    list.consume();
+    const right = parsePrecedence(list, precedence + 1);
+
+    expr = isDotOp(op)
+      ? parseDot(right, expr)
+      : new List({
+          ...op.metadata,
+          value: [op, expr, right],
+          dynamicLocation: true,
+        });
+
+    if (isLambdaWithTupleArgs(expr)) {
+      expr = removeTupleFromLambdaParameters(expr);
+    }
   }
 
   return expr;
-};
-
-const parseUnaryCall = (list: List): List => {
-  const op = list.consume();
-  const expr = parsePrecedence(list, unaryOpInfo(op) ?? -1);
-  return new List({ value: [op, expr], dynamicLocation: true });
 };
 
 const infixOpInfo = (op?: Expr): number | undefined => {
