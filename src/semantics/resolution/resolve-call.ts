@@ -4,7 +4,6 @@ import {
   dVoid,
   FixedArrayType,
   ObjectType,
-  TypeAlias,
 } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
@@ -16,20 +15,7 @@ import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export const resolveCall = (call: Call): Call => {
   if (call.type) return call;
-  if (call.calls("::")) {
-    const [left, right] = call.argsArray();
-    if (right?.isCall()) {
-      const path = new List(["::", left, right.fnName]);
-      path.parent = call.parent ?? call.parentModule;
-      const entity = resolveModulePath(path)[0]?.e;
-      if (entity?.isFn()) {
-        right.fn = entity;
-        right.args = right.args.map(resolveEntities);
-        return resolveCall(right);
-      }
-    }
-    return call;
-  }
+  if (call.calls("::")) return resolveModuleAccess(call);
   if (call.calls("export")) return resolveExport(call);
   if (call.calls("if")) return resolveIf(call);
   if (call.calls(":")) return resolveLabeledArg(call);
@@ -37,20 +23,6 @@ export const resolveCall = (call: Call): Call => {
   if (call.calls("FixedArray")) return resolveFixedArray(call);
   if (call.calls("binaryen")) return resolveBinaryen(call);
   call.args = call.args.map(resolveEntities);
-
-  const moduleArg = call.argAt(0);
-  if (moduleArg?.isIdentifier()) {
-    const moduleEntity = moduleArg.resolve();
-    if (moduleEntity?.isModule()) {
-      const exported = moduleEntity.resolveExport(call.fnName);
-      if (exported.length) {
-        const fnEntity = exported[0];
-        if (fnEntity.isFn()) call.fn = fnEntity;
-        call.args = new List({ value: call.args.toArray().slice(1) });
-        call.args.parent = call;
-      }
-    }
-  }
 
   const memberAccessCall = getMemberAccessCall(call);
   if (memberAccessCall) return memberAccessCall;
@@ -149,6 +121,21 @@ const expandObjectArg = (call: Call) => {
 
   call.args = new List({ value: newArgs });
   call.args.parent = call;
+};
+
+export const resolveModuleAccess = (call: Call) => {
+  const [left, right] = call.argsArray();
+  if (right?.isCall()) {
+    const path = new List(["::", left, right.fnName]);
+    path.parent = call.parent ?? call.parentModule;
+    const entity = resolveModulePath(path)[0]?.e;
+    if (entity?.isFn()) {
+      right.fn = entity;
+      right.args = right.args.map(resolveEntities);
+      return resolveCall(right);
+    }
+  }
+  return call;
 };
 
 export const resolveLabeledArg = (call: Call) => {
