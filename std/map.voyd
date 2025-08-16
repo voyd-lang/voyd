@@ -4,7 +4,7 @@ use operators::all
 use optional::all
 use string_lib::all
 
-obj Map<T> {
+pub obj Map<T> {
   buckets: Array<Array<{ key: string, value: T }>>
 }
 

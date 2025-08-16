@@ -10,3 +10,4 @@ pub mod fixed_array::all
 pub mod linear_memory
 pub mod string_lib
 pub mod map::all
+pub mod json::all
