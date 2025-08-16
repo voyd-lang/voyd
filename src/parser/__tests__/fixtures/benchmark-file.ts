@@ -151,3 +151,4 @@ fn main()
 `;
 
 export const BENCH_FILE = benchmarkBaseFile.repeat(100); // ~0.19 MB
+export const BENCH_FILE_SM = benchmarkBaseFile.repeat(10); // ~0.19 MB
