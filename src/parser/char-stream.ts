@@ -2,8 +2,8 @@ import { SourceLocation } from "../syntax-objects/syntax.js";
 
 export class CharStream {
   readonly filePath: string;
-  readonly originalSize: number;
-  readonly value: string[];
+  readonly value: string;
+  readonly length: number;
   readonly location = {
     index: 0,
     line: 1,
@@ -11,8 +11,8 @@ export class CharStream {
   };
 
   constructor(contents: string, filePath: string) {
-    this.value = contents.split("").reverse();
-    this.originalSize = this.value.length;
+    this.value = contents;
+    this.length = contents.length;
     this.filePath = filePath;
   }
 
@@ -30,17 +30,17 @@ export class CharStream {
   }
 
   get hasCharacters() {
-    return !!this.value.length;
+    return this.position < this.length;
   }
 
   get next() {
-    return this.value[this.value.length - 1];
+    return this.value[this.position];
   }
 
   currentSourceLocation() {
     return new SourceLocation({
       startIndex: this.position,
-      endIndex: this.originalSize - this.value.length,
+      endIndex: this.position,
       line: this.line,
       column: this.column,
       filePath: this.filePath,
@@ -48,13 +48,13 @@ export class CharStream {
   }
 
   at(index: number): string | undefined {
-    return this.value.at(-index - 1);
+    return this.value[this.position + index];
   }
 
-  /** Returns the next character and removes it from the queue */
+  /** Returns the next character and advances the stream */
   consumeChar(): string {
-    const char = this.value.pop();
-    if (!char) {
+    const char = this.next;
+    if (char === undefined) {
       throw new Error("Out of characters");
     }
 
