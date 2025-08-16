@@ -3,6 +3,7 @@ import { List } from "../syntax-objects/list.js";
 import { CharStream } from "./char-stream.js";
 import { Lexer } from "./lexer.js";
 import { getReaderMacroForToken } from "./reader-macros/index.js";
+import { ReaderMacro } from "./reader-macros/types.js";
 import { Token } from "./token.js";
 
 export type ParseCharsOpts = {
@@ -10,6 +11,7 @@ export type ParseCharsOpts = {
   terminator?: string;
   parent?: Expr;
   lexer?: Lexer;
+  macros?: ReaderMacro[];
 };
 
 export const parseChars = (
@@ -17,6 +19,7 @@ export const parseChars = (
   opts: ParseCharsOpts = {}
 ): List => {
   const lexer = opts.lexer ?? new Lexer();
+  const { macros } = opts;
   const list = new List({
     location: file.currentSourceLocation(),
     parent: opts.parent,
@@ -29,7 +32,7 @@ export const parseChars = (
       break;
     }
 
-    if (processWithReaderMacro(token, list.last(), file, list, lexer)) {
+    if (processWithReaderMacro(token, list.last(), file, list, lexer, macros)) {
       continue;
     }
   }
@@ -45,8 +48,9 @@ const processWithReaderMacro = (
   file: CharStream,
   list: List,
   lexer: Lexer,
+  macros?: ReaderMacro[]
 ) => {
-  const readerMacro = getReaderMacroForToken(token, prev, file.next);
+  const readerMacro = getReaderMacroForToken(token, prev, file.next, macros);
   if (!readerMacro) return undefined;
 
   const result = readerMacro(file, {
@@ -56,6 +60,7 @@ const processWithReaderMacro = (
         nested: true,
         terminator,
         lexer,
+        macros,
       }),
   });
 

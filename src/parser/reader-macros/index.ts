@@ -16,7 +16,7 @@ import { listReader } from "./list.js";
 import { whitespaceReader } from "./whitespace.js";
 import { identifierReader } from "./identifier.js";
 
-const macros = [
+const MACROS = [
   listReader,
   whitespaceReader,
   objectLiteralMacro,
@@ -33,10 +33,26 @@ const macros = [
   identifierReader,
 ];
 
+export const FAST_MACROS = [
+  listReader,
+  whitespaceReader,
+  objectLiteralMacro,
+  arrayLiteralMacro,
+  mapLiteralMacro,
+  intMacro,
+  floatMacro,
+  stringMacro,
+  comment,
+  booleanMacro,
+  genericsMacro,
+  identifierReader,
+];
+
 export const getReaderMacroForToken = (
   token: Token,
   prev?: Expr,
   /** Next char */
-  next?: string
+  next?: string,
+  macros = MACROS
 ): ReaderMacro["macro"] | undefined =>
   macros.find((m) => m.match(token, prev, next))?.macro;

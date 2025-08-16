@@ -1,5 +1,7 @@
 import { SourceLocation } from "../syntax-objects/syntax.js";
 
+const WHITESPACE = /^\s+$/;
+
 export class Token {
   readonly location: SourceLocation;
   value = "";
@@ -27,7 +29,7 @@ export class Token {
   }
 
   get isWhitespace() {
-    return /^\s+$/.test(this.value);
+    return WHITESPACE.test(this.value);
   }
 
   addChar(string: string) {
