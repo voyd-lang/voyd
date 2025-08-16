@@ -22,13 +22,21 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
   const transformed = new List({ dynamicLocation: true });
   const indentLevel = startIndentLevel ?? nextExprIndentLevel(list);
 
-  const nextLineHasChildExpr = () => nextExprIndentLevel(list) > indentLevel;
+  consumeLeadingWhitespace(list);
+  let nextIndentLevel = nextExprIndentLevel(list);
+
+  const updateNextIndentLevel = () => {
+    nextIndentLevel = nextExprIndentLevel(list);
+  };
+
+  const nextLineHasChildExpr = () => nextIndentLevel > indentLevel;
 
   const pushChildBlock = () => {
     const children = new List({ value: ["block"], dynamicLocation: true });
 
     while (nextLineHasChildExpr()) {
       const child = elideParens(list, indentLevel + 1);
+      updateNextIndentLevel();
 
       if (
         children.length === 1 &&
@@ -54,12 +62,12 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
     transformed.push(children);
   };
 
-  consumeLeadingWhitespace(list);
   while (list.hasChildren) {
     const next = list.first();
 
     if (isNewline(next) && nextLineHasChildExpr()) {
       pushChildBlock();
+      updateNextIndentLevel();
       continue;
     }
 
@@ -69,6 +77,7 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
 
     if (next?.isWhitespace()) {
       list.consume();
+      updateNextIndentLevel();
       continue;
     }
 
@@ -79,14 +88,17 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
     if (next?.isList()) {
       list.consume();
       transformed.push(interpretWhitespace(next, indentLevel));
+      updateNextIndentLevel();
       continue;
     }
 
     if (isGreedyOp(next)) {
       transformed.push(list.consume());
+      updateNextIndentLevel();
 
       if (!nextLineHasChildExpr()) {
         transformed.push(elideParens(list, indentLevel));
+        updateNextIndentLevel();
       }
 
       continue;
@@ -95,6 +107,7 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
     if (next !== undefined) {
       transformed.push(next);
       list.consume();
+      updateNextIndentLevel();
       continue;
     }
   }
