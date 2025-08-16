@@ -13,27 +13,49 @@ const parseExpression = (expr: Expr): Expr => {
 };
 
 const parseList = (list: List): List => {
-  const transformed = new List({ ...list.metadata, dynamicLocation: true });
   const hadSingleListChild = list.length === 1 && list.at(0)?.isList();
+
+  const finalize = (transformed: List): List => {
+    const result =
+      !hadSingleListChild && transformed.at(0)?.isList()
+        ? transformed.listAt(0).push(...transformed.argsArray())
+        : transformed;
+
+    // Handle expressions to the right of an operator { a: hello there, b: 2 } -> [object [: a [hello there] b [2]]
+    if (
+      result.at(0)?.isIdentifier() &&
+      isInfixOp(result.identifierAt(0)) &&
+      result.length > 3
+    ) {
+      return result.slice(0, 2).push(parseList(result.slice(2)));
+    }
+
+    return result;
+  };
+
+  let hasOp = false;
+  for (let i = 0; i < list.length; i++) {
+    const child = list.at(i);
+    if (child?.isIdentifier() && (isPrefixOp(child) || isInfixOp(child))) {
+      hasOp = true;
+      break;
+    }
+  }
+
+  const transformed = new List({ ...list.metadata, dynamicLocation: true });
+
+  if (!hasOp) {
+    for (let i = 0; i < list.length; i++) {
+      transformed.push(parseExpression(list.at(i)!));
+    }
+    return finalize(transformed);
+  }
+
   while (list.hasChildren) {
     transformed.push(parsePrecedence(list));
   }
 
-  const result =
-    !hadSingleListChild && transformed.at(0)?.isList()
-      ? transformed.listAt(0).push(...transformed.argsArray())
-      : transformed;
-
-  // Handle expressions to the right of an operator { a: hello there, b: 2 } -> [object [: a [hello there] b [2]]
-  if (
-    result.at(0)?.isIdentifier() &&
-    isInfixOp(result.identifierAt(0)) &&
-    result.length > 3
-  ) {
-    return result.slice(0, 2).push(parseList(result.slice(2)));
-  }
-
-  return result;
+  return finalize(transformed);
 };
 
 const parseBinaryCall = (left: Expr, list: List): List => {
@@ -88,7 +110,12 @@ const parsePrecedence = (list: List, minPrecedence = 0): Expr => {
     ? parseUnaryCall(list)
     : parseExpression(list.consume());
 
-  while ((infixOpInfo(list.first()) ?? -1) >= minPrecedence) {
+  let nextPrecedence: number | undefined;
+  while (
+    list.hasChildren &&
+    (nextPrecedence = infixOpInfo(list.first())) !== undefined &&
+    nextPrecedence >= minPrecedence
+  ) {
     expr = parseBinaryCall(expr, list);
   }
 
