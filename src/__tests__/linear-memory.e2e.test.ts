@@ -1,4 +1,4 @@
-import { linearMemoryVoyd } from "./fixtures/memory.js";
+import { linearMemoryVoyd } from "./fixtures/linear-memory.js";
 import { compile } from "../compiler.js";
 import { beforeAll, describe, test } from "vitest";
 import assert from "node:assert";

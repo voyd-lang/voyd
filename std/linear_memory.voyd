@@ -20,9 +20,22 @@ pub fn load_i32(ptr: i32) -> i32
     namespace: i32
     args: `(BnrConst(0), BnrConst(0), ptr)
 
-pub fn store_i32(ptr: i32, value: i32) -> i32
+pub fn load_i64(ptr: i32) -> i64
+  binaryen
+    func: load
+    namespace: i64
+    args: `(BnrConst(0), BnrConst(0), ptr)
+
+pub fn store(ptr: i32, value: i32) -> i32
   binaryen
     func: store
     namespace: i32
+    args: `(BnrConst(0), BnrConst(0), ptr, value)
+  value
+
+pub fn store(ptr: i32, value: i64) -> i64
+  binaryen
+    func: store
+    namespace: i64
     args: `(BnrConst(0), BnrConst(0), ptr, value)
   value
