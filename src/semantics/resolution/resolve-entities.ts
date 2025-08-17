@@ -67,6 +67,7 @@ const captureIdentifier = (id: Identifier) => {
   if (
     (entity.isVariable() || entity.isParameter()) &&
     entity.parentFn !== parentFn &&
+    !(entity.isVariable() && entity.initializer === parentFn) &&
     !parentFn.captures.includes(entity)
   ) {
     parentFn.captures.push(entity);
@@ -80,16 +81,19 @@ const resolveBlock = (block: Block): Block => {
 };
 
 export const resolveVar = (variable: Variable): Variable => {
+  if (variable.typeExpr) {
+    variable.typeExpr = resolveTypeExpr(variable.typeExpr);
+    variable.annotatedType = getExprType(variable.typeExpr);
+    variable.type = variable.annotatedType;
+  }
+
   const initializer = resolveEntities(variable.initializer);
   variable.initializer = initializer;
   variable.inferredType = getExprType(initializer);
 
-  if (variable.typeExpr) {
-    variable.typeExpr = resolveTypeExpr(variable.typeExpr);
-    variable.annotatedType = getExprType(variable.typeExpr);
+  if (!variable.type) {
+    variable.type = variable.inferredType;
   }
-
-  variable.type = variable.annotatedType ?? variable.inferredType;
   return variable;
 };
 
