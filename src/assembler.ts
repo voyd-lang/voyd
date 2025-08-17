@@ -38,6 +38,7 @@ import { compile as compileUse } from "./assembler/compile-use.js";
 import { compile as compileTrait } from "./assembler/compile-trait.js";
 import { compile as compileMacro } from "./assembler/compile-macro.js";
 import { compile as compileMacroVariable } from "./assembler/compile-macro-variable.js";
+import { compile as compileClosure } from "./assembler/compile-closure.js";
 
 const buildingTypePlaceholders = new Map<ObjectType, TypeRef>();
 
@@ -72,6 +73,7 @@ export const compilers: Record<string, CompilerFn> = {
   float: compileFloat,
   identifier: compileIdentifier,
   fn: compileFunction,
+  closure: compileClosure,
   variable: compileVariable,
   declaration: compileDeclaration,
   module: compileModule,
@@ -113,6 +115,9 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "voyd")) return binaryen.none;
   if (isPrimitiveId(type, "string")) return getI32ArrayType(opts.mod);
+  if (type.isFnType()) {
+    return binaryen.eqref;
+  }
 
   if (type.isObjectType()) {
     if (buildingTypePlaceholders.has(type)) {

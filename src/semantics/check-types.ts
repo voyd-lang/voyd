@@ -69,16 +69,12 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   call.args = call.args.map(checkTypes);
 
   if (!call.fn) {
-    const params = call.args
-      .toArray()
-      .map((arg) => getExprType(arg)?.name.value)
-      .join(", ");
-
-    throw new Error(
-      `Could not resolve fn ${call.fnName}(${params}) at ${
-        call.location ?? call.fnName.location
-      }`
-    );
+    const entity = call.fnName.resolve() as any;
+    const fnType = entity?.type;
+    if (fnType && fnType.isFnType && fnType.isFnType()) {
+      call.type = fnType.returnType;
+    }
+    return call;
   }
 
   if (!call.type) {

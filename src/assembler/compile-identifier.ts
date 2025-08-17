@@ -1,6 +1,7 @@
+import binaryen from "binaryen";
 import { CompileExprOpts, mapBinaryenType } from "../assembler.js";
 import { Identifier } from "../syntax-objects/identifier.js";
-import { refCast } from "../lib/binaryen-gc/index.js";
+import { refCast, structGetFieldValue } from "../lib/binaryen-gc/index.js";
 
 export const compile = (opts: CompileExprOpts<Identifier>) => {
   const { expr, mod } = opts;
@@ -13,6 +14,22 @@ export const compile = (opts: CompileExprOpts<Identifier>) => {
   }
 
   if (entity.isVariable() || entity.isParameter()) {
+    if (expr.parentFn?.isClosure() && entity.parentFn !== expr.parentFn) {
+      const closure = expr.parentFn;
+      const closureType = closure.getAttribute("binaryenType") as number;
+      const captureIndex = closure.captures.findIndex((c) => c === entity);
+      const envRef = refCast(
+        mod,
+        mod.local.get(0, binaryen.eqref),
+        closureType
+      );
+      return structGetFieldValue({
+        mod,
+        fieldType: mapBinaryenType(opts, entity.type!),
+        fieldIndex: captureIndex + 1,
+        exprRef: envRef,
+      });
+    }
     const type = mapBinaryenType(opts, entity.originalType ?? entity.type!);
     const get = mod.local.get(entity.getIndex(), type);
     if (entity.requiresCast) {
