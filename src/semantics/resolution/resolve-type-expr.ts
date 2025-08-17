@@ -1,4 +1,3 @@
-import { resolve } from "path";
 import {
   Call,
   Expr,
@@ -11,6 +10,7 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveIntersectionType } from "./resolve-intersection.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveUnionType } from "./resolve-union.js";
+import { resolveTrait } from "./resolve-trait.js";
 
 export const resolveTypeExpr = (typeExpr: Expr): Expr => {
   if (typeExpr.isIdentifier()) return typeExpr;
@@ -36,6 +36,11 @@ const resolveTypeCall = (call: Call): Call => {
   if (type.isObjectType()) {
     call.fn = type;
     call.type = resolveObjectType(type, call);
+    return call;
+  }
+
+  if (type.isTraitType()) {
+    call.type = resolveTrait(type, call);
     return call;
   }
 

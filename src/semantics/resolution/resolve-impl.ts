@@ -16,14 +16,8 @@ export const resolveImpl = (
   if (impl.typesResolved) return impl;
   targetType = targetType ?? getTargetType(impl);
   impl.targetType = targetType;
-  impl.trait = getTrait(impl);
-  if (impl.trait) {
-    impl.trait.implementations.push(impl);
-  }
 
-  if (!targetType) return impl;
-
-  if (targetType.appliedTypeArgs) {
+  if (targetType?.appliedTypeArgs) {
     targetType.appliedTypeArgs.forEach((arg, index) => {
       const typeParam = impl.typeParams.at(index);
       if (!typeParam) {
@@ -38,6 +32,13 @@ export const resolveImpl = (
       impl.registerEntity(type);
     });
   }
+
+  impl.trait = getTrait(impl);
+  if (impl.trait) {
+    impl.trait.implementations.push(impl);
+  }
+
+  if (!targetType) return impl;
 
   if (targetType?.isObjectType()) {
     targetType.implementations?.push(impl);
@@ -83,7 +84,9 @@ const getTargetType = (impl: Implementation): ObjectType | undefined => {
 
 const getTrait = (impl: Implementation): TraitType | undefined => {
   const expr = impl.traitExpr.value;
-  const type = expr?.isIdentifier() ? expr.resolve() : undefined;
+  if (!expr) return;
+  impl.traitExpr.value = resolveTypeExpr(expr);
+  const type = getExprType(impl.traitExpr.value);
   if (!type || !type.isTrait()) return;
   return type;
 };

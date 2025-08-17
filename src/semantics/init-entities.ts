@@ -773,14 +773,18 @@ const initImpl = (impl: List): Implementation => {
 };
 
 const initTrait = (trait: List) => {
-  const name = trait.identifierAt(1);
+  const nameExpr = trait.at(1);
+  const [name, typeParameters] = nameExpr?.isList()
+    ? [nameExpr.identifierAt(0), extractTypeParams(nameExpr.listAt(1))]
+    : [trait.identifierAt(1), undefined];
+
   const methods = trait
     .listAt(2)
     .sliceAsArray(1)
     .map(initEntities)
     .filter((e) => e.isFn()) as Fn[];
 
-  return new TraitType({ ...trait.metadata, name, methods });
+  return new TraitType({ ...trait.metadata, name, methods, typeParameters });
 };
 
 /** Expects ["generics", ...Identifiers] */

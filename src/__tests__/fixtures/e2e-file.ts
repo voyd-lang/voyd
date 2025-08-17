@@ -356,6 +356,24 @@ pub fn test29() -> i32
 pub fn test30() -> i32
   let tup = (1, 2, 3)
   tup.1
+
+trait BoxLike<T>
+  fn get(self) -> T
+
+obj ValueBox<T> {
+  value: T
+}
+
+impl<T> BoxLike<T> for ValueBox<T>
+  fn get(self) -> T
+    self.value
+
+fn takes_box(b: BoxLike<i32>) -> i32
+  1
+
+pub fn test31() -> i32
+  let b = ValueBox<i32> { value: 7 }
+  takes_box(b)
 `;
 
 export const tcoText = `
