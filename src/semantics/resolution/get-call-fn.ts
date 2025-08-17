@@ -3,6 +3,7 @@ import { getExprType } from "./get-expr-type.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFn } from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
+import { resolveEntities } from "./resolve-entities.js";
 
 export const getCallFn = (call: Call): Fn | undefined => {
   if (isPrimitiveFnCall(call)) return undefined;
@@ -25,7 +26,11 @@ const getCandidates = (call: Call): Fn[] => {
   const fns = call.resolveFns(call.fnName);
 
   // Check for methods of arg 1
-  const arg1Type = getExprType(call.argAt(0));
+  const arg1 = call.argAt(0);
+  const arg1Type =
+    arg1?.isClosure() && arg1.parameters.some((p) => !p.type && !p.typeExpr)
+      ? undefined
+      : getExprType(arg1);
   if (arg1Type?.isObjectType()) {
     const isInsideImpl = call.parentImpl?.targetType?.id === arg1Type.id;
     const implFns = isInsideImpl
@@ -103,6 +108,17 @@ const parametersMatch = (candidate: Fn, call: Call) => {
   const directMatch = candidate.parameters.every((p, i) => {
     const arg = call.argAt(i);
     if (!arg) return false;
+
+    if (arg.isClosure() && arg.parameters.some((cp) => !cp.type && !cp.typeExpr)) {
+      const paramType = p.type;
+      if (!paramType?.isFnType()) return false;
+      arg.parameters.forEach((cp, j) => {
+        const expected = paramType.parameters[j]?.type;
+        if (!cp.type && expected) cp.type = expected;
+      });
+      resolveEntities(arg);
+    }
+
     const argType = getExprType(arg);
     if (!argType) return false;
     const argLabel = getExprLabel(arg);

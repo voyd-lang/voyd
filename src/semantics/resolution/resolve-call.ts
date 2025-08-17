@@ -22,9 +22,24 @@ export const resolveCall = (call: Call): Call => {
   if (call.calls("while")) return resolveWhile(call);
   if (call.calls("FixedArray")) return resolveFixedArray(call);
   if (call.calls("binaryen")) return resolveBinaryen(call);
-  call.args = call.args.map(resolveEntities);
+  call.args = call.args.map((arg) => {
+    if (
+      arg.isClosure() &&
+      arg.parameters.some((p) => !p.type && !p.typeExpr)
+    ) {
+      return arg;
+    }
+    return resolveEntities(arg);
+  });
 
-  const memberAccessCall = getMemberAccessCall(call);
+  const firstArg = call.argAt(0);
+  const shouldCheckMemberAccess = !(
+    firstArg?.isClosure() &&
+    firstArg.parameters.some((p) => !p.type && !p.typeExpr)
+  );
+  const memberAccessCall = shouldCheckMemberAccess
+    ? getMemberAccessCall(call)
+    : undefined;
   if (memberAccessCall) return memberAccessCall;
 
   // Constructor fn. TODO:
@@ -43,6 +58,7 @@ export const resolveCall = (call: Call): Call => {
     call.fn = getCallFn(call);
   }
   expandObjectArg(call);
+  inferClosureArgTypes(call);
 
   call.type = call.fn?.isFn()
     ? call.fn.returnType
@@ -125,6 +141,28 @@ const expandObjectArg = (call: Call) => {
 
   call.args = new List({ value: newArgs });
   call.args.parent = call;
+};
+
+const inferClosureArgTypes = (call: Call) => {
+  const fn = call.fn;
+  if (!fn?.isFn()) return;
+  fn.parameters.forEach((param, index) => {
+    const arg = call.argAt(index);
+    if (!arg?.isClosure()) return;
+
+    const paramType = param.type;
+    if (!paramType?.isFnType()) return;
+
+    arg.parameters.forEach((p, i) => {
+      const expected = paramType.parameters[i]?.type;
+      if (!p.type && expected) {
+        p.type = expected;
+      }
+    });
+
+    const resolved = resolveEntities(arg);
+    call.args.set(index, resolved);
+  });
 };
 
 export const resolveModuleAccess = (call: Call) => {
