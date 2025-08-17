@@ -36,9 +36,20 @@ export const getClosureFunctionType = (
 ): TypeRef => {
   const key =
     fnType.parameters.map((p) => p.type!.id).join("_") + "->" + fnType.returnType.id;
-  const typeRef = fnTypeCache.get(key);
+  let typeRef = fnTypeCache.get(key);
   if (!typeRef) {
-    throw new Error(`Closure function type not found for ${key}`);
+    const superType = getClosureSuperType(opts.mod);
+    const paramTypes = binaryen.createType([
+      superType,
+      ...fnType.parameters.map((p) => mapBinaryenType(opts, p.type!)),
+    ]);
+    const returnType = mapBinaryenType(opts, fnType.returnType);
+    const tempName = `__closure_type_${fnTypeCache.size}`;
+    const fnRef = opts.mod.addFunction(tempName, paramTypes, returnType, [], opts.mod.nop());
+    const fnHeapType = bin._BinaryenFunctionGetType(fnRef);
+    typeRef = bin._BinaryenTypeFromHeapType(fnHeapType, false);
+    fnTypeCache.set(key, typeRef);
+    opts.mod.removeFunction(tempName);
   }
   return typeRef;
 };

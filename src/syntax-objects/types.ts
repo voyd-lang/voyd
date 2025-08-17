@@ -301,17 +301,20 @@ export class FixedArrayType extends BaseType {
 export class FnType extends BaseType {
   readonly kindOfType = "fn";
   readonly parameters: Parameter[];
-  readonly returnType: Type;
+  returnType: Type;
+  returnTypeExpr?: Expr;
 
   constructor(
     opts: NamedEntityOpts & {
       parameters: Parameter[];
       returnType: Type;
+      returnTypeExpr?: Expr;
     }
   ) {
     super(opts);
     this.parameters = opts.parameters;
     this.returnType = opts.returnType;
+    this.returnTypeExpr = opts.returnTypeExpr;
   }
 
   clone(parent?: Expr): FnType {
@@ -319,6 +322,7 @@ export class FnType extends BaseType {
       ...super.getCloneOpts(parent),
       returnType: this.returnType,
       parameters: this.parameters,
+      returnTypeExpr: this.returnTypeExpr?.clone(),
     });
   }
 
