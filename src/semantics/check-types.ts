@@ -87,7 +87,11 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
       call.args.each((arg, i) => {
         const param = fnType.parameters[i];
         const argType = getExprType(arg);
-        if (param?.type && argType && !typesAreCompatible(argType, param.type)) {
+        if (
+          param?.type &&
+          argType &&
+          !typesAreCompatible(argType, param.type)
+        ) {
           throw new Error(
             `Expected ${param.type.name} got ${argType.name} at ${arg.location}`
           );

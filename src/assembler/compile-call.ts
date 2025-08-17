@@ -4,12 +4,17 @@ import {
   compileExpression,
   mapBinaryenType,
 } from "../assembler.js";
-import { refCast, structGetFieldValue, callRef } from "../lib/binaryen-gc/index.js";
+import {
+  refCast,
+  structGetFieldValue,
+  callRef,
+} from "../lib/binaryen-gc/index.js";
 import { Call } from "../syntax-objects/call.js";
 import { returnCall } from "./return-call.js";
 import { builtinCallCompilers } from "./builtin-call-registry.js";
 import { compileObjectInit } from "./compile-object-init.js";
 import { getClosureFunctionType } from "./compile-closure.js";
+import { Fn } from "../syntax-objects/fn.js";
 
 export const compile = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod, isReturnExpr } = opts;
@@ -36,9 +41,11 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       const callType = getClosureFunctionType(opts, fnType);
       const args = [
         closureRef,
-        ...expr.args.toArray().map((arg) =>
-          compileExpression({ ...opts, expr: arg, isReturnExpr: false })
-        ),
+        ...expr.args
+          .toArray()
+          .map((arg) =>
+            compileExpression({ ...opts, expr: arg, isReturnExpr: false })
+          ),
       ];
       const returnType = mapBinaryenType(opts, fnType.returnType);
       return callRef(
@@ -73,8 +80,9 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     return compiled;
   });
 
-  const id = expr.fn!.id;
-  const returnType = mapBinaryenType(opts, expr.fn!.returnType!);
+  const fn = expr.fn as Fn;
+  const id = fn.id;
+  const returnType = mapBinaryenType(opts, fn.returnType!);
 
   if (isReturnExpr) {
     return returnCall(mod, id, args, returnType);

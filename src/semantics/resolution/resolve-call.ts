@@ -30,6 +30,7 @@ export const resolveCall = (call: Call): Call => {
   // Constructor fn. TODO:
   const type = getIdentifierType(call.fnName);
   call.fnName.type = type;
+
   if (type?.isObjectType()) {
     return resolveObjectInit(call, type);
   }

@@ -139,9 +139,7 @@ const parametersMatch = (candidate: Fn, call: Call) => {
       ) {
         return labeledParams.every((p) => {
           const field = structType.getField(p.label!.value);
-          return field
-            ? typesAreCompatible(field.type, p.type!)
-            : false;
+          return field ? typesAreCompatible(field.type, p.type!) : false;
         });
       }
     }

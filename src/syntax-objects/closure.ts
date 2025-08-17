@@ -4,12 +4,14 @@ import { Parameter } from "./parameter.js";
 import { FnType, Type } from "./types.js";
 import { Variable } from "./variable.js";
 import { Identifier } from "./identifier.js";
+import { Child } from "./lib/child.js";
+import { ChildList } from "./lib/child-list.js";
 
 export class Closure extends ScopedSyntax {
   readonly syntaxType = "closure";
-  readonly parameters: Parameter[] = [];
-  body: Expr;
-  returnTypeExpr?: Expr;
+  readonly #parameters = new ChildList<Parameter>([], this);
+  readonly #body: Child<Expr>;
+  readonly #returnTypeExpr = new Child<Expr | undefined>(undefined, this);
   returnType?: Type;
   inferredReturnType?: Type;
   annotatedReturnType?: Type;
@@ -26,13 +28,32 @@ export class Closure extends ScopedSyntax {
     }
   ) {
     super(opts);
-    this.parameters = opts.parameters ?? [];
+    this.#parameters.push(...(opts.parameters ?? []));
     this.parameters.forEach((p) => (p.parent = this));
-    this.body = opts.body;
-    this.body.parent = this;
+    this.#body = new Child<Expr>(opts.body, this);
     this.returnTypeExpr = opts.returnTypeExpr;
     if (this.returnTypeExpr) this.returnTypeExpr.parent = this;
     this.captures = opts.captures ?? [];
+  }
+
+  get body() {
+    return this.#body.value;
+  }
+
+  set body(body: Expr) {
+    this.#body.value = body;
+  }
+
+  get parameters() {
+    return this.#parameters.toArray();
+  }
+
+  get returnTypeExpr() {
+    return this.#returnTypeExpr.value;
+  }
+
+  set returnTypeExpr(returnTypeExpr: Expr | undefined) {
+    this.#returnTypeExpr.value = returnTypeExpr;
   }
 
   getType(): FnType {
@@ -68,7 +89,9 @@ export class Closure extends ScopedSyntax {
       return this.returnType;
     }
 
-    throw new Error(`Return type not yet resolved for closure at ${this.location}`);
+    throw new Error(
+      `Return type not yet resolved for closure at ${this.location}`
+    );
   }
 
   clone(parent?: Expr): Closure {
@@ -90,4 +113,3 @@ export class Closure extends ScopedSyntax {
     ];
   }
 }
-
