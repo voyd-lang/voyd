@@ -46,11 +46,12 @@ const resolveGenericTraitVersion = (
   });
 
   trait.registerGenericInstance(newTrait);
+  // Propagate existing implementations to this generic instance. Any future
+  // implementations will be added via resolveImpl when they are resolved.
+  newTrait.implementations = [...trait.implementations];
   // Resolve methods for the new trait
   newTrait.methods.applyMap((fn) => resolveFn(fn));
   newTrait.typesResolved = true;
-  // Clear implementations, resolveImpl will re-add as needed
-  newTrait.implementations = [];
 
   return newTrait;
 };

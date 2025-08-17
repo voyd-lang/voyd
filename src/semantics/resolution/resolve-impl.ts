@@ -36,6 +36,12 @@ export const resolveImpl = (
   impl.trait = getTrait(impl);
   if (impl.trait) {
     impl.trait.implementations.push(impl);
+    // Propagate this implementation to any already resolved generic trait
+    // instances. When a trait generic instance is created before this impl is
+    // resolved, it will have copied the trait's implementations at that time
+    // (which may not have included this one). Updating existing instances here
+    // ensures they can also resolve calls through the trait object.
+    impl.trait.genericInstances?.forEach((t) => t.implementations.push(impl));
   }
 
   if (!targetType) return impl;
