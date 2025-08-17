@@ -24,38 +24,40 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     return compiler(opts);
   }
 
-  if (!expr.fn) {
+  // Compile closure calls. TODO: extract this + make it more clear on the call that we are calling a closure
+  if (!expr.fn && expr.fnName.type?.isFnType()) {
     const fnType = expr.fnName.type;
-    if (fnType?.isFnType()) {
-      const closureRef = compileExpression({
-        ...opts,
-        expr: expr.fnName,
-        isReturnExpr: false,
-      });
-      const funcRef = structGetFieldValue({
-        mod,
-        fieldType: binaryen.funcref,
-        fieldIndex: 0,
-        exprRef: closureRef,
-      });
-      const callType = getClosureFunctionType(opts, fnType);
-      const args = [
-        closureRef,
-        ...expr.args
-          .toArray()
-          .map((arg) =>
-            compileExpression({ ...opts, expr: arg, isReturnExpr: false })
-          ),
-      ];
-      const callExpr = callRef(
-        mod,
-        refCast(mod, funcRef, callType),
-        args,
-        mapBinaryenType(opts, fnType.returnType),
-        false
-      );
-      return isReturnExpr ? mod.return(callExpr) : callExpr;
-    }
+    const closureRef = compileExpression({
+      ...opts,
+      expr: expr.fnName,
+      isReturnExpr: false,
+    });
+    const funcRef = structGetFieldValue({
+      mod,
+      fieldType: binaryen.funcref,
+      fieldIndex: 0,
+      exprRef: closureRef,
+    });
+    const callType = getClosureFunctionType(opts, fnType);
+    const args = [
+      closureRef,
+      ...expr.args
+        .toArray()
+        .map((arg) =>
+          compileExpression({ ...opts, expr: arg, isReturnExpr: false })
+        ),
+    ];
+    const callExpr = callRef(
+      mod,
+      refCast(mod, funcRef, callType),
+      args,
+      mapBinaryenType(opts, fnType.returnType),
+      false
+    );
+    return isReturnExpr ? mod.return(callExpr) : callExpr;
+  }
+
+  if (!expr.fn) {
     throw new Error(`No function found for call ${expr.location}`);
   }
 

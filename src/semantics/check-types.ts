@@ -69,36 +69,9 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   call.args = call.args.map(checkTypes);
 
   if (!call.fn) {
+    // Not having a fn is ok when the call points to a closure. TODO: Make this more explicit on the call
     const entity = call.fnName.resolve();
-    if (entity?.isVariable() && entity.initializer?.isClosure()) {
-      const fnType = entity.initializer.getType();
-      call.type = fnType.returnType;
-      return call;
-    }
-
-    const fnType =
-      call.fnName.type ??
-      (entity && (entity.isVariable() || entity.isParameter())
-        ? entity.type
-        : undefined) ??
-      getExprType(call.fnName);
-    if (fnType?.isFnType()) {
-      // Validate argument types against the closure signature
-      call.args.each((arg, i) => {
-        const param = fnType.parameters[i];
-        const argType = getExprType(arg);
-        if (
-          param?.type &&
-          argType &&
-          !typesAreCompatible(argType, param.type)
-        ) {
-          throw new Error(
-            `Expected ${param.type.name} got ${argType.name} at ${arg.location}`
-          );
-        }
-      });
-
-      call.type = fnType.returnType;
+    if (entity?.isVariable() && entity.type?.isFnType()) {
       return call;
     }
 

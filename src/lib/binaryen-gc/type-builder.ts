@@ -27,7 +27,9 @@ export class TypeBuilder {
     const fields = struct.fields;
     const fieldTypesPtr = this.allocU32Array(fields.map(({ type }) => type));
     const fieldPackedTypesPtr = this.allocU32Array(
-      fields.map(({ packedType }) => packedType ?? bin._BinaryenPackedTypeNotPacked())
+      fields.map(
+        ({ packedType }) => packedType ?? bin._BinaryenPackedTypeNotPacked()
+      )
     );
     const fieldMutablesPtr = this.allocU32Array(
       fields.reduce((acc, { mutable }, i) => {
@@ -78,13 +80,7 @@ export class TypeBuilder {
     // 1. an array of resulting heap types (`size` * 4 bytes)
     // 2. an index to store an error location (4 bytes)
     // 3. a reason code (4 bytes)
-    //
-    // The previous implementation reused the same pointer for all three
-    // locations which meant the builder wrote the error information over the
-    // heap type results. This corrupted memory and caused
-    // `_TypeBuilderBuildAndDispose` to fail when building more complex GC
-    // types such as closures. Allocate separate regions and wire them up
-    // correctly.
+    // Allocate separate regions and wire them up correctly.
     const out = bin._malloc(4 * size + 8);
     const heapTypesPtr = out;
     const errorIndexPtr = out + 4 * size;
