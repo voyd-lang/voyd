@@ -86,8 +86,8 @@ export const typesAreCompatible = (
   }
 
   if (a.isObjectType() && b.isTraitType()) {
-    const matchesTrait = a.implementations?.some(
-      (impl) => impl.trait?.id === b.id
+    const matchesTrait = a.implementations?.some((impl) =>
+      impl.trait ? typesAreCompatible(impl.trait, b, opts, visited) : false
     );
     if (matchesTrait) return true;
     return a.parentObjType
@@ -96,8 +96,8 @@ export const typesAreCompatible = (
   }
 
   if (a.isTraitType() && b.isObjectType()) {
-    const matchesTrait = b.implementations?.some(
-      (impl) => impl.trait?.id === a.id
+    const matchesTrait = b.implementations?.some((impl) =>
+      impl.trait ? typesAreCompatible(a, impl.trait, opts, visited) : false
     );
     if (matchesTrait) return true;
     return b.parentObjType
@@ -106,7 +106,11 @@ export const typesAreCompatible = (
   }
 
   if (a.isTraitType() && b.isTraitType()) {
-    if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
+    if (
+      a.genericParent &&
+      b.genericParent &&
+      a.genericParent.id === b.genericParent.id
+    ) {
       return !!a.appliedTypeArgs?.every((arg, index) =>
         typesAreCompatible(
           getExprType(arg),
@@ -116,6 +120,10 @@ export const typesAreCompatible = (
         )
       );
     }
+
+    if (a.genericParent && a.genericParent.id === b.id) return true;
+    if (b.genericParent && b.genericParent.id === a.id) return true;
+
     return a.id === b.id;
   }
 

@@ -45,7 +45,14 @@ const getCandidates = (call: Call): Fn[] => {
     const implFns = arg1Type.implementations
       ?.flatMap((impl) => impl.exports)
       .filter((fn) => fn.name.is(call.fnName.value));
-    fns.push(...(implFns ?? []));
+    if (implFns?.length) {
+      fns.push(...implFns);
+    } else {
+      const traitFns = arg1Type.methods
+        ?.toArray()
+        .filter((fn) => fn.name.is(call.fnName.value));
+      fns.push(...(traitFns ?? []));
+    }
   }
 
   return fns;
@@ -123,7 +130,7 @@ const parametersMatch = (candidate: Fn, call: Call) => {
     if (!argType) return false;
     const argLabel = getExprLabel(arg);
     const labelsMatch = p.label?.value === argLabel;
-    return typesAreCompatible(argType, p.type!) && labelsMatch;
+    return (!p.type || typesAreCompatible(argType, p.type)) && labelsMatch;
   });
   if (directMatch) return true;
 
