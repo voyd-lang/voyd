@@ -47,14 +47,14 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
             compileExpression({ ...opts, expr: arg, isReturnExpr: false })
           ),
       ];
-      const returnType = mapBinaryenType(opts, fnType.returnType);
-      return callRef(
+      const callExpr = callRef(
         mod,
         refCast(mod, funcRef, callType),
         args,
-        returnType,
-        isReturnExpr
+        mapBinaryenType(opts, fnType.returnType),
+        false
       );
+      return isReturnExpr ? mod.return(callExpr) : callExpr;
     }
     throw new Error(`No function found for call ${expr.location}`);
   }
