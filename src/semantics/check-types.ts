@@ -561,7 +561,7 @@ const checkIntersectionType = (inter: IntersectionType) => {
 const checkUnionMatch = (match: Match) => {
   const union = match.baseType as UnionType;
 
-  if (match.cases.length !== union.types.length) {
+  if (!match.defaultCase && match.cases.length !== union.types.length) {
     throw new Error(
       `Match does not handle all possibilities of union ${match.location}`
     );
@@ -583,15 +583,13 @@ const checkUnionMatch = (match: Match) => {
     }
   }
 
-  union.types.forEach((type) => {
-    if (
-      !match.cases.some((mCase) => typesAreCompatible(mCase.matchType, type))
-    ) {
-      throw new Error(
-        `Match does not handle all possibilities of union ${match.location}`
-      );
-    }
-  });
+  const allGood = match.cases.every((mCase) =>
+    union.types.some((type) => typesAreCompatible(mCase.matchType, type))
+  );
+
+  if (!allGood) {
+    throw new Error(`Match cases mismatch union ${match.location}`);
+  }
 
   return match;
 };
