@@ -123,6 +123,24 @@ const parametersMatch = (candidate: Fn, call: Call) => {
     if (!argType) return false;
     const argLabel = getExprLabel(arg);
     const labelsMatch = p.label?.value === argLabel;
+    // Calling a method on a trait object is resolved by looking up the
+    // implementation methods for that trait. In that scenario the first
+    // parameter of the candidate function will be the concrete
+    // implementation type (e.g. `Array<i32>`), while the argument type is the
+    // trait itself (e.g. `Iterable<i32>`). These are not nominally compatible
+    // and would previously cause the resolution to fail. Since the candidate
+    // was sourced from the trait's implementations we can assume it is valid
+    // for the trait object and skip the compatibility check for this
+    // parameter.
+
+    if (
+      i === 0 &&
+      argType.isTraitType() &&
+      candidate.parentImpl?.trait?.id === argType.id
+    ) {
+      return labelsMatch;
+    }
+
     return typesAreCompatible(argType, p.type!) && labelsMatch;
   });
   if (directMatch) return true;
