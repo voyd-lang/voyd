@@ -27,10 +27,11 @@ export const resolveCall = (call: Call): Call => {
   const memberAccessCall = getMemberAccessCall(call);
   if (memberAccessCall) return memberAccessCall;
 
+  const calleeType = getIdentifierType(call.fnName);
+
   // Constructor fn. TODO:
-  const type = getIdentifierType(call.fnName);
-  if (type?.isObjectType()) {
-    return resolveObjectInit(call, type);
+  if (calleeType?.isObjectType()) {
+    return resolveObjectInit(call, calleeType);
   }
 
   if (call.typeArgs) {
@@ -47,6 +48,11 @@ export const resolveCall = (call: Call): Call => {
     : call.fn?.isObjectType()
     ? call.fn
     : undefined;
+  if (call.fn) return call;
+
+  if (calleeType?.isFnType()) {
+    call.type = calleeType.returnType;
+  }
   return call;
 };
 

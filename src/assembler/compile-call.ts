@@ -3,11 +3,14 @@ import {
   compileExpression,
   mapBinaryenType,
 } from "../assembler.js";
-import { refCast } from "../lib/binaryen-gc/index.js";
+import { refCast, structGetFieldValue } from "../lib/binaryen-gc/index.js";
 import { Call } from "../syntax-objects/call.js";
 import { returnCall } from "./return-call.js";
 import { builtinCallCompilers } from "./builtin-call-registry.js";
 import { compileObjectInit } from "./compile-object-init.js";
+import * as gc from "../lib/binaryen-gc/index.js";
+import { FnType } from "../syntax-objects/types.js";
+import binaryen from "binaryen";
 
 export const compile = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod, isReturnExpr } = opts;
@@ -18,6 +21,10 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
   }
 
   if (!expr.fn) {
+    const fnType = expr.fnName.getType();
+    if (fnType?.isFnType()) {
+      return compileClosureCall({ ...opts, expr }, fnType);
+    }
     throw new Error(`No function found for call ${expr.location}`);
   }
 
@@ -50,4 +57,46 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
   }
 
   return mod.call(id, args, returnType);
+};
+
+const compileClosureCall = (
+  opts: CompileExprOpts<Call>,
+  fnType: FnType
+): number => {
+  const { expr, mod, isReturnExpr } = opts;
+  const closureRef = compileExpression({
+    ...opts,
+    expr: expr.fnName,
+    isReturnExpr: false,
+  });
+
+  const fnRef = gc.structGetFieldValue({
+    mod,
+    fieldType: binaryen.funcref,
+    fieldIndex: 0,
+    exprRef: compileExpression({
+      ...opts,
+      expr: expr.fnName,
+      isReturnExpr: false,
+    }),
+  });
+
+  const typedFnRef = gc.refCast(
+    mod,
+    fnRef,
+    fnType.getAttribute("binaryenFnRefType") as binaryen.Type
+  );
+
+  const args = [
+    closureRef,
+    ...expr.args
+      .toArray()
+      .map((arg) =>
+        compileExpression({ ...opts, expr: arg, isReturnExpr: false })
+      ),
+  ];
+
+  const returnType = mapBinaryenType(opts, fnType.returnType);
+
+  return gc.callRef(mod, typedFnRef, args, returnType, false);
 };
