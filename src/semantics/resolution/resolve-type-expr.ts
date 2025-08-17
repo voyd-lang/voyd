@@ -5,6 +5,7 @@ import {
   FixedArrayType,
   nop,
   TypeAlias,
+  FnType,
 } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveIntersectionType } from "./resolve-intersection.js";
@@ -17,6 +18,7 @@ export const resolveTypeExpr = (typeExpr: Expr): Expr => {
   if (typeExpr.isIntersectionType()) return resolveIntersectionType(typeExpr);
   if (typeExpr.isUnionType()) return resolveUnionType(typeExpr);
   if (typeExpr.isFixedArrayType()) return resolveFixedArrayType(typeExpr);
+  if (typeExpr.isFnType()) return resolveFnType(typeExpr);
   if (typeExpr.isCall()) return resolveTypeCall(typeExpr);
   return typeExpr;
 };
@@ -67,6 +69,23 @@ const resolveFixedArrayType = (arr: FixedArrayType): FixedArrayType => {
   arr.elemType = getExprType(arr.elemTypeExpr);
   arr.id = `${arr.id}#${arr.elemType?.id}`;
   return arr;
+};
+
+const resolveFnType = (fnType: FnType): FnType => {
+  fnType.parameters.forEach((p) => {
+    if (p.typeExpr) {
+      p.typeExpr = resolveTypeExpr(p.typeExpr);
+      p.type = getExprType(p.typeExpr);
+    }
+  });
+
+  if (fnType.returnTypeExpr) {
+    fnType.returnTypeExpr = resolveTypeExpr(fnType.returnTypeExpr);
+    const type = getExprType(fnType.returnTypeExpr);
+    if (type) fnType.returnType = type;
+  }
+
+  return fnType;
 };
 
 export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {

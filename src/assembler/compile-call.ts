@@ -38,7 +38,6 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       fieldIndex: 0,
       exprRef: closureRef,
     });
-    const callType = getClosureFunctionType(opts, fnType);
     const args = [
       closureRef,
       ...expr.args
@@ -47,9 +46,14 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
           compileExpression({ ...opts, expr: arg, isReturnExpr: false })
         ),
     ];
+    let target = funcRef;
+    try {
+      const callType = getClosureFunctionType(opts, fnType);
+      target = refCast(mod, funcRef, callType);
+    } catch {}
     const callExpr = callRef(
       mod,
-      refCast(mod, funcRef, callType),
+      target,
       args,
       mapBinaryenType(opts, fnType.returnType),
       false
