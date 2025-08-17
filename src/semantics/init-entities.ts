@@ -162,15 +162,20 @@ const initClosure = (expr: List): Closure => {
   let parameters: Parameter[] = [];
 
   if (paramsExpr?.isList()) {
-    parameters = paramsExpr.sliceAsArray().flatMap((p) => {
-      if (p.isIdentifier()) {
-        return new Parameter({ name: p, typeExpr: undefined });
-      }
-      if (!p.isList()) {
-        throw new Error("Invalid parameter");
-      }
-      return listToParameter(p);
-    });
+    if (paramsExpr.calls(":")) {
+      const param = listToParameter(paramsExpr);
+      parameters = Array.isArray(param) ? param : [param];
+    } else {
+      parameters = paramsExpr.sliceAsArray().flatMap((p) => {
+        if (p.isIdentifier()) {
+          return new Parameter({ name: p, typeExpr: undefined });
+        }
+        if (!p.isList()) {
+          throw new Error("Invalid parameter");
+        }
+        return listToParameter(p);
+      });
+    }
   } else if (paramsExpr?.isIdentifier()) {
     parameters = [new Parameter({ name: paramsExpr, typeExpr: undefined })];
   }

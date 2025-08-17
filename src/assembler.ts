@@ -38,6 +38,7 @@ import { compile as compileUse } from "./assembler/compile-use.js";
 import { compile as compileTrait } from "./assembler/compile-trait.js";
 import { compile as compileMacro } from "./assembler/compile-macro.js";
 import { compile as compileMacroVariable } from "./assembler/compile-macro-variable.js";
+import { compile as compileClosure, getClosureSuperType } from "./assembler/compile-closure.js";
 
 const buildingTypePlaceholders = new Map<ObjectType, TypeRef>();
 
@@ -83,6 +84,7 @@ export const compilers: Record<string, CompilerFn> = {
   trait: compileTrait,
   macro: compileMacro,
   "macro-variable": compileMacroVariable,
+  closure: compileClosure,
 };
 
 export const compileExpression = (opts: CompileExprOpts): number => {
@@ -120,6 +122,7 @@ export const mapBinaryenType = (
     }
     return buildObjectType(opts, type);
   }
+  if (type.isFnType()) return getClosureSuperType(opts.mod);
   if (type.isTraitType()) return buildObjectType(opts, voydBaseObject);
   if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isFixedArrayType()) return buildFixedArrayType(opts, type);

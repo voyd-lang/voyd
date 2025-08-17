@@ -14,7 +14,8 @@ export const resolveClosure = (closure: Closure): Closure => {
   closure.captures = [];
   closure.body = resolveEntities(closure.body);
   closure.inferredReturnType = getExprType(closure.body);
-  closure.returnType = closure.annotatedReturnType ?? closure.inferredReturnType;
+  closure.returnType =
+    closure.annotatedReturnType ?? closure.inferredReturnType;
   closure.typesResolved = true;
 
   return closure;

@@ -69,6 +69,12 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   call.args = call.args.map(checkTypes);
 
   if (!call.fn) {
+    // Not having a fn is ok when the call points to a closure. TODO: Make this more explicit on the call
+    const entity = call.fnName.resolve();
+    if (entity?.isVariable() && entity.type?.isFnType()) {
+      return call;
+    }
+
     const params = call.args
       .toArray()
       .map((arg) => getExprType(arg)?.name.value)
