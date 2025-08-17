@@ -36,19 +36,10 @@ export const getClosureFunctionType = (
 ): TypeRef => {
   const key =
     fnType.parameters.map((p) => p.type!.id).join("_") + "->" + fnType.returnType.id;
-  if (fnTypeCache.has(key)) return fnTypeCache.get(key)!;
-  const params = [
-    getClosureSuperType(opts.mod),
-    ...fnType.parameters.map((p) => mapBinaryenType(opts, p.type!)),
-  ];
-  const paramType = binaryen.createType(params);
-  const retType = mapBinaryenType(opts, fnType.returnType);
-  const typeRef = (opts.mod as any).addFunctionType(
-    `closure_type_${fnTypeCache.size}`,
-    paramType,
-    retType
-  );
-  fnTypeCache.set(key, typeRef);
+  const typeRef = fnTypeCache.get(key);
+  if (!typeRef) {
+    throw new Error(`Closure function type not found for ${key}`);
+  }
   return typeRef;
 };
 
@@ -58,12 +49,20 @@ export const compile = (opts: CompileExprOpts<Closure>): number => {
   const superType = getClosureSuperType(mod);
   const envType = defineStructType(mod, {
     name: `ClosureEnv#${closure.syntaxId}`,
-    fields: closure.captures.map((c, i) => ({
-      name: `c${i}`,
-      type: mapBinaryenType(opts, c.type!),
-      mutable: false,
-    })),
+    // A closure environment extends the base closure type, which defines the
+    // `__fn` field. When constructing a subtype Binaryen expects the complete
+    // list of fields, including those from the supertype, so start with the
+    // `__fn` field and then append the captured variables.
+    fields: [
+      { name: "__fn", type: bin.funcref, mutable: false },
+      ...closure.captures.map((c, i) => ({
+        name: `c${i}`,
+        type: mapBinaryenType(opts, c.type!),
+        mutable: false,
+      })),
+    ],
     supertype: binaryenTypeToHeapType(superType),
+    final: true,
   });
   envTypeMap.set(closure.syntaxId, envType);
 
@@ -84,6 +83,14 @@ export const compile = (opts: CompileExprOpts<Closure>): number => {
   const fnRef = mod.addFunction(fnName, paramTypes, returnType, varTypes, body);
   const fnHeapType = bin._BinaryenFunctionGetType(fnRef);
   const fnType = bin._BinaryenTypeFromHeapType(fnHeapType, false);
+
+  // Record the function type so that calls to closures with this signature can
+  // cast to the correct type when invoking via `call_ref`.
+  const key =
+    closure.parameters.map((p) => p.type!.id).join("_") +
+    "->" +
+    closure.getReturnType().id;
+  fnTypeCache.set(key, fnType);
 
   const captures = closure.captures.map((c) =>
     mod.local.get(c.getIndex(), mapBinaryenType(opts, c.type!))

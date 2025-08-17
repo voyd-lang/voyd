@@ -70,7 +70,8 @@ export class Closure extends ScopedSyntax {
     if (index < 0) {
       throw new Error(`Parameter ${parameter} not registered with closure`);
     }
-    return index;
+    // Local 0 is reserved for the closure environment, so parameters start at 1.
+    return index + 1;
   }
 
   getIndexOfVariable(variable: Variable) {
@@ -78,10 +79,12 @@ export class Closure extends ScopedSyntax {
 
     if (index < 0) {
       const newIndex = this.variables.push(variable) - 1;
-      return newIndex + this.parameters.length;
+      // Account for the environment parameter at local index 0.
+      return newIndex + this.parameters.length + 1;
     }
 
-    return index + this.parameters.length;
+    // Account for the environment parameter at local index 0.
+    return index + this.parameters.length + 1;
   }
 
   getReturnType(): Type {
