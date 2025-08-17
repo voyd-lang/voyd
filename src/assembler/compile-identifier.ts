@@ -16,6 +16,9 @@ export const compile = (opts: CompileExprOpts<Identifier>) => {
   if (entity.isVariable() || entity.isParameter()) {
     if (expr.parentFn?.isClosure() && entity.parentFn !== expr.parentFn) {
       const closure = expr.parentFn;
+      if (entity.isVariable() && entity.initializer === closure) {
+        return mod.local.get(0, getClosureSuperType(mod));
+      }
       const envType = getClosureEnvType(closure.syntaxId)!;
       const fieldIndex = closure.captures.indexOf(entity) + 1;
       return structGetFieldValue({
