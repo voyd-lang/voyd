@@ -177,7 +177,6 @@ export const typesAreCompatible = (
 
   if (a.isFnType() && b.isFnType()) {
     if (a.parameters.length !== b.parameters.length) return false;
-    if (a.name.value !== b.name.value) return false;
     return (
       typesAreCompatible(a.returnType, b.returnType, opts, visited) &&
       a.parameters.every((p, i) =>

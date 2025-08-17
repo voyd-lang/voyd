@@ -18,10 +18,13 @@ import {
   Identifier,
   ArrayLiteral,
   Closure,
+  FnType,
+  dVoid,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { TraitType } from "../syntax-objects/types/trait.js";
 import { SemanticProcessor } from "./types.js";
+import { getExprType } from "./resolution/get-expr-type.js";
 
 export const initEntities: SemanticProcessor = (expr) => {
   if (expr.isModule()) {
@@ -492,6 +495,63 @@ const initCall = (call: List) => {
   return new Call({ ...call.metadata, fnName, args, typeArgs });
 };
 
+const initFnType = (fn: List): FnType => {
+  const paramsExpr = fn.at(1);
+  let parameters: Parameter[] = [];
+
+  if (paramsExpr?.isList()) {
+    if (paramsExpr.calls(":")) {
+      const param = listToParameter(paramsExpr);
+      parameters = Array.isArray(param) ? param : [param];
+    } else if (paramsExpr.calls("tuple")) {
+      parameters = paramsExpr
+        .sliceAsArray(1)
+        .flatMap((p) => {
+          if (p.isIdentifier()) {
+            return [new Parameter({ name: p, typeExpr: undefined })];
+          }
+          if (!p.isList()) {
+            throw new Error("Invalid parameter");
+          }
+          const param = listToParameter(p);
+          return Array.isArray(param) ? param : [param];
+        });
+    } else {
+      parameters = paramsExpr
+        .sliceAsArray()
+        .flatMap((p) => {
+          if (p.isIdentifier()) {
+            return [new Parameter({ name: p, typeExpr: undefined })];
+          }
+          if (!p.isList()) {
+            throw new Error("Invalid parameter");
+          }
+          const param = listToParameter(p);
+          return Array.isArray(param) ? param : [param];
+        });
+    }
+  } else if (paramsExpr?.isIdentifier()) {
+    parameters = [new Parameter({ name: paramsExpr, typeExpr: undefined })];
+  }
+
+  const returnTypeExpr = initTypeExprEntities(fn.at(2));
+
+  const fnType = new FnType({
+    ...fn.metadata,
+    name: Identifier.from(`FnType#${fn.syntaxId}`),
+    parameters,
+    returnType: dVoid,
+    returnTypeExpr: returnTypeExpr,
+  });
+
+  fnType.parameters.forEach((p) => (p.parent = fnType));
+  if (fnType.returnTypeExpr) {
+    fnType.returnTypeExpr.parent = fnType;
+  }
+
+  return fnType;
+};
+
 const initTypeExprEntities = (type?: Expr): Expr | undefined => {
   if (!type) return undefined;
 
@@ -514,6 +574,10 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
 
   if (type.calls("object")) {
     return initStructuralObjectType(type);
+  }
+
+  if (type.calls("->")) {
+    return initFnType(type);
   }
 
   if (type.calls("FixedArray")) {

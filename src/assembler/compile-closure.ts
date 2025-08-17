@@ -1,5 +1,9 @@
 import binaryen from "binaryen";
-import { CompileExprOpts, compileExpression, mapBinaryenType } from "../assembler.js";
+import {
+  CompileExprOpts,
+  compileExpression,
+  mapBinaryenType,
+} from "../assembler.js";
 import { Closure } from "../syntax-objects/closure.js";
 import { FnType } from "../syntax-objects/types.js";
 import {
@@ -35,10 +39,29 @@ export const getClosureFunctionType = (
   fnType: FnType
 ): TypeRef => {
   const key =
-    fnType.parameters.map((p) => p.type!.id).join("_") + "->" + fnType.returnType.id;
-  const typeRef = fnTypeCache.get(key);
+    fnType.parameters.map((p) => p.type!.id).join("_") +
+    "->" +
+    fnType.returnType.id;
+  let typeRef = fnTypeCache.get(key);
   if (!typeRef) {
-    throw new Error(`Closure function type not found for ${key}`);
+    const superType = getClosureSuperType(opts.mod);
+    const paramTypes = binaryen.createType([
+      superType,
+      ...fnType.parameters.map((p) => mapBinaryenType(opts, p.type!)),
+    ]);
+    const returnType = mapBinaryenType(opts, fnType.returnType);
+    const tempName = `__closure_type_${fnTypeCache.size}`;
+    const fnRef = opts.mod.addFunction(
+      tempName,
+      paramTypes,
+      returnType,
+      [],
+      opts.mod.nop()
+    );
+    const fnHeapType = bin._BinaryenFunctionGetType(fnRef);
+    typeRef = bin._BinaryenTypeFromHeapType(fnHeapType, false);
+    fnTypeCache.set(key, typeRef);
+    opts.mod.removeFunction(tempName);
   }
   return typeRef;
 };
@@ -96,9 +119,5 @@ export const compile = (opts: CompileExprOpts<Closure>): number => {
     mod.local.get(c.getIndex(), mapBinaryenType(opts, c.type!))
   );
 
-  return initStruct(mod, envType, [
-    refFunc(mod, fnName, fnType),
-    ...captures,
-  ]);
+  return initStruct(mod, envType, [refFunc(mod, fnName, fnType), ...captures]);
 };
-
