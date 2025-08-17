@@ -106,6 +106,16 @@ export const typesAreCompatible = (
   }
 
   if (a.isTraitType() && b.isTraitType()) {
+    if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
+      return !!a.appliedTypeArgs?.every((arg, index) =>
+        typesAreCompatible(
+          getExprType(arg),
+          getExprType(b.appliedTypeArgs?.[index]),
+          opts,
+          visited
+        )
+      );
+    }
     return a.id === b.id;
   }
 

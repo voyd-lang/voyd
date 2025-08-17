@@ -80,6 +80,7 @@ describe("E2E Compiler Pipeline", () => {
       5, // Inferred generic object type parameter
       1, // Trait parameter type
       2, // Tuple literal
+      1, // Generic traits trait param
     ]);
 
     const expectedSyntaxTypes = [
