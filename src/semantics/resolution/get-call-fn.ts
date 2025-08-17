@@ -42,7 +42,11 @@ const getCandidates = (call: Call): Fn[] => {
   }
 
   if (arg1Type?.isTraitType()) {
-    const implFns = arg1Type.implementations
+    let impls = arg1Type.implementations;
+    if (!impls?.length && arg1Type.genericParent) {
+      impls = arg1Type.genericParent.implementations;
+    }
+    const implFns = impls
       ?.flatMap((impl) => impl.exports)
       .filter((fn) => fn.name.is(call.fnName.value));
     fns.push(...(implFns ?? []));

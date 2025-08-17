@@ -5,6 +5,7 @@ import { Implementation } from "../../syntax-objects/implementation.js";
 import { List } from "../../syntax-objects/list.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
 import { TypeAlias } from "../../syntax-objects/types.js";
+import { TraitType } from "../../syntax-objects/types/trait.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
@@ -59,7 +60,12 @@ const resolveParameters = (params: Parameter[]) => {
 
     if (p.name.is("self")) {
       const impl = getParentImpl(p);
-      if (impl) p.type = impl.targetType;
+      if (impl) {
+        p.type = impl.targetType;
+      } else {
+        const trait = getParentTrait(p);
+        if (trait) p.type = trait;
+      }
       return;
     }
 
@@ -119,5 +125,11 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
 const getParentImpl = (expr: Expr): Implementation | undefined => {
   if (expr.syntaxType === "implementation") return expr;
   if (expr.parent) return getParentImpl(expr.parent);
+  return undefined;
+};
+
+const getParentTrait = (expr: Expr): TraitType | undefined => {
+  if (expr instanceof TraitType) return expr;
+  if (expr.parent) return getParentTrait(expr.parent);
   return undefined;
 };
