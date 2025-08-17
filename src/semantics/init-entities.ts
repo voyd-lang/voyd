@@ -63,7 +63,7 @@ export const initEntities: SemanticProcessor = (expr) => {
   }
 
   // Array literal
-  if (expr.calls("array")) {
+  if (expr.calls("array") && expr.hasAttribute("array-literal")) {
     return initArrayLiteral(expr);
   }
 
