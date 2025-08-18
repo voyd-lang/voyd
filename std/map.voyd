@@ -3,9 +3,16 @@ use array::all
 use operators::all
 use optional::all
 use string_lib::all
+use iter::all
 
 pub obj Map<T> {
   buckets: Array<Array<{ key: string, value: T }>>
+}
+
+obj MapIterator<T> {
+  map: Map<T>,
+  bucket_index: i32,
+  item_index: i32
 }
 
 pub fn new_map<T>() -> Map<T>
@@ -17,6 +24,33 @@ pub fn new_map<T>() -> Map<T>
     i = i + 1
 
   Map<T> { buckets: buckets }
+
+impl<T> Iterator<{ key: string, value: T }> for MapIterator<T>
+  fn next(self) -> Optional<{ key: string, value: T }>
+    if self.bucket_index >= self.map.buckets.length then:
+      None {}
+    else:
+      self.map.buckets.get(self.bucket_index).match(bucket)
+        Some<Array<{ key: string, value: T }>>:
+          if self.item_index >= bucket.value.length then:
+            self.bucket_index = self.bucket_index + 1
+            self.item_index = 0
+            self.next()
+          else:
+            let r = bucket.value.get(self.item_index)
+            self.item_index = self.item_index + 1
+            match(r)
+              Some<{ key: string, value: T }>:
+                r
+              None:
+                self.next()
+        None:
+          self.bucket_index = self.bucket_index + 1
+          self.next()
+
+impl<T> Iterable<{ key: string, value: T }> for Map<T>
+  fn iterate(self) -> Iterator<{ key: string, value: T }>
+    MapIterator<T> { map: self, bucket_index: 0, item_index: 0 }
 
 impl<T> Map<T>
   fn hash(self, key: string) -> i32

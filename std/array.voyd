@@ -2,10 +2,16 @@ use fixed_array::all
 use macros::all
 use operators::all
 use optional::all
+use iter::all
 
 pub obj Array<T> {
   storage: FixedArray<T>,
   count: i32
+}
+
+obj ArrayIterator<T> {
+  index: i32,
+  array: Array<T>
 }
 
 pub fn new_array<T>(opts: { with_size: i32 }) -> Array<T>
@@ -16,6 +22,19 @@ pub fn new_array<T>(opts: { with_size: i32 }) -> Array<T>
 
 pub fn new_array<T>(opts: { from: FixedArray<T> }) -> Array<T>
   Array<T> { storage: opts.from, count: opts.from.length<T>() }
+
+impl<T> Iterator<T> for ArrayIterator<T>
+  fn next(self) -> Optional<T>
+    if self.index >= self.array.length then:
+      None {}
+    else:
+      let r = self.array.get(self.index)
+      self.index = self.index + 1
+      r
+
+impl<T> Iterable<T> for Array<T>
+  fn iterate(self) -> Iterator<T>
+    ArrayIterator<T> { index: 0, array: self }
 
 impl<T> Array<T>
   fn resize(self) -> Array<T>

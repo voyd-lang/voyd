@@ -1,0 +1,20 @@
+use macros::all
+use array::all
+use optional::all
+
+pub trait Iterator<T>
+  fn next(self) -> Optional<T>
+
+pub trait Iterable<T>
+  fn iterate(self) -> Iterator<T>
+
+pub fn map<I, O>(it: Iterable<I>, f: (I) -> O) -> Array<O>
+  let iterator = it.iterate()
+  let result = new_array<O>({ with_size: 4 })
+  let looper: (Array<O>) -> Array<O> = (acc: Array<O>) =>
+    iterator.next(iterator).match(item)
+      Some<I>:
+        looper(acc.push(f(item.value)))
+      None:
+        acc
+  looper(result)
