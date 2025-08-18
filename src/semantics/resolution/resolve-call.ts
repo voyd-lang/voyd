@@ -12,6 +12,7 @@ import { resolveEntities } from "./resolve-entities.js";
 import { resolveExport, resolveModulePath } from "./resolve-use.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
+import { resolveTrait } from "./resolve-trait.js";
 
 export const resolveCall = (call: Call): Call => {
   if (call.type) return call;
@@ -23,10 +24,7 @@ export const resolveCall = (call: Call): Call => {
   if (call.calls("FixedArray")) return resolveFixedArray(call);
   if (call.calls("binaryen")) return resolveBinaryen(call);
   call.args = call.args.map((arg) => {
-    if (
-      arg.isClosure() &&
-      arg.parameters.some((p) => !p.type && !p.typeExpr)
-    ) {
+    if (arg.isClosure() && arg.parameters.some((p) => !p.type && !p.typeExpr)) {
       return arg;
     }
     return resolveEntities(arg);
@@ -54,9 +52,7 @@ export const resolveCall = (call: Call): Call => {
     call.typeArgs = call.typeArgs.map(resolveTypeExpr);
   }
 
-  if (!call.fn) {
-    call.fn = getCallFn(call);
-  }
+  resolveCallFn(call);
   expandObjectArg(call);
   inferClosureArgTypes(call);
 
@@ -68,6 +64,35 @@ export const resolveCall = (call: Call): Call => {
     ? type.returnType
     : undefined;
   return call;
+};
+
+const resolveCallFn = (call: Call) => {
+  let traitMethod;
+  if (!call.fn) {
+    const arg0 = call.argAt(0);
+    const arg1Type =
+      arg0?.isClosure() && arg0.parameters.some((p) => !p.type && !p.typeExpr)
+        ? undefined
+        : getExprType(arg0);
+    if (arg1Type?.isTraitType()) {
+      const trait = resolveTrait(arg1Type, call);
+      traitMethod = trait.methods
+        .toArray()
+        .find((fn) => fn.name.is(call.fnName.value));
+      if (traitMethod) {
+        call.fn = traitMethod;
+        call.type = traitMethod.returnType;
+      }
+    }
+  }
+
+  if (!call.fn || call.fn === traitMethod) {
+    const resolvedFn = getCallFn(call);
+    if (resolvedFn) {
+      call.fn = resolvedFn;
+      call.type = resolvedFn.returnType;
+    }
+  }
 };
 
 const expandObjectArg = (call: Call) => {
