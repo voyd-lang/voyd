@@ -1,7 +1,7 @@
 import { Call, Expr, Fn } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
-import { resolveFn } from "./resolve-fn.js";
+import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveEntities } from "./resolve-entities.js";
 
@@ -57,10 +57,23 @@ const filterCandidates = (call: Call, candidates: Fn[]): Fn[] =>
       return filterCandidateWithGenerics(call, candidate);
     }
 
-    resolveFn(candidate);
-    return parametersMatch(candidate, call) && typeArgsMatch(call, candidate)
-      ? candidate
-      : [];
+    // Resolve the function signature to check parameter compatibility without
+    // resolving the body yet. This avoids prematurely resolving functions that
+    // may depend on generic instances which have not been created at this
+    // point in the compilation process (e.g. trait implementations for
+    // specific type arguments).
+    resolveFnSignature(candidate);
+
+    if (parametersMatch(candidate, call) && typeArgsMatch(call, candidate)) {
+      // Only fully resolve the function once we've determined that it matches
+      // the call. This ensures that dependent generic instances are available
+      // and prevents resolution from mutating functions that ultimately aren't
+      // invoked.
+      resolveFn(candidate);
+      return candidate;
+    }
+
+    return [];
   });
 
 const filterCandidateWithGenerics = (call: Call, candidate: Fn): Fn[] => {
