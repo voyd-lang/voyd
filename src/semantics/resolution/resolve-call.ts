@@ -24,10 +24,7 @@ export const resolveCall = (call: Call): Call => {
   if (call.calls("FixedArray")) return resolveFixedArray(call);
   if (call.calls("binaryen")) return resolveBinaryen(call);
   call.args = call.args.map((arg) => {
-    if (
-      arg.isClosure() &&
-      arg.parameters.some((p) => !p.type && !p.typeExpr)
-    ) {
+    if (arg.isClosure() && arg.parameters.some((p) => !p.type && !p.typeExpr)) {
       return arg;
     }
     return resolveEntities(arg);
@@ -55,6 +52,21 @@ export const resolveCall = (call: Call): Call => {
     call.typeArgs = call.typeArgs.map(resolveTypeExpr);
   }
 
+  resolveCallFn(call);
+  expandObjectArg(call);
+  inferClosureArgTypes(call);
+
+  call.type = call.fn?.isFn()
+    ? call.fn.returnType
+    : call.fn?.isObjectType()
+    ? call.fn
+    : type?.isFnType()
+    ? type.returnType
+    : undefined;
+  return call;
+};
+
+const resolveCallFn = (call: Call) => {
   let traitMethod;
   if (!call.fn) {
     const arg0 = call.argAt(0);
@@ -81,17 +93,6 @@ export const resolveCall = (call: Call): Call => {
       call.type = resolvedFn.returnType;
     }
   }
-  expandObjectArg(call);
-  inferClosureArgTypes(call);
-
-  call.type = call.fn?.isFn()
-    ? call.fn.returnType
-    : call.fn?.isObjectType()
-    ? call.fn
-    : type?.isFnType()
-    ? type.returnType
-    : undefined;
-  return call;
 };
 
 const expandObjectArg = (call: Call) => {
