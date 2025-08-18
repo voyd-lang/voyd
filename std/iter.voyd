@@ -12,7 +12,7 @@ pub fn map<I, O>(it: Iterable<I>, f: (I) -> O) -> Array<O>
   let iterator = it.iterate()
   let result = new_array<O>({ with_size: 4 })
   let looper: (Array<O>) -> Array<O> = (acc: Array<O>) =>
-    iterator.next(iterator).match(item)
+    iterator.next().match(item)
       Some<I>:
         looper(acc.push(f(item.value)))
       None:
