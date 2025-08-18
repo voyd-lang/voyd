@@ -26,6 +26,7 @@ import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
 import { typesAreCompatible } from "./resolution/index.js";
 import { resolveFnSignature } from "./resolution/resolve-fn.js";
+import { getCallFn } from "./resolution/get-call-fn.js";
 
 export const checkTypes = (expr: Expr | undefined): Expr => {
   if (!expr) return nop();
@@ -69,6 +70,11 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   call.args = call.args.map(checkTypes);
 
   if (!call.fn) {
+    const arg1Type = getExprType(call.argAt(0));
+    if (arg1Type?.isTraitType() && call.type) {
+      // Trait method call may not have a concrete implementation yet
+      return call;
+    }
     // Not having a fn is ok when the call points to a closure. TODO: Make this more explicit on the call
     const entity = call.fnName.resolve();
     if (
@@ -88,6 +94,16 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
         call.location ?? call.fnName.location
       }`
     );
+  }
+
+  if (call.fn?.parent?.isTrait?.()) {
+    try {
+      const resolved = getCallFn(call);
+      if (resolved) {
+        call.fn = resolved;
+        call.type = resolved.returnType;
+      }
+    } catch {}
   }
 
   if (!call.type) {
