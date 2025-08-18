@@ -2,6 +2,7 @@ import { Call } from "../../syntax-objects/call.js";
 import { Expr } from "../../syntax-objects/expr.js";
 import { Fn } from "../../syntax-objects/fn.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
+import { TraitType } from "../../syntax-objects/types/trait.js";
 import { List } from "../../syntax-objects/list.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
 import { TypeAlias } from "../../syntax-objects/types.js";
@@ -59,8 +60,15 @@ const resolveParameters = (params: Parameter[]) => {
 
     if (p.name.is("self")) {
       const impl = getParentImpl(p);
-      if (impl) p.type = impl.targetType;
-      return;
+      if (impl) {
+        p.type = impl.targetType;
+        return;
+      }
+      const trait = getParentTrait(p);
+      if (trait) {
+        p.type = trait;
+        return;
+      }
     }
 
     if (!p.typeExpr) {
@@ -119,5 +127,12 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
 const getParentImpl = (expr: Expr): Implementation | undefined => {
   if (expr.syntaxType === "implementation") return expr;
   if (expr.parent) return getParentImpl(expr.parent);
+  return undefined;
+};
+
+const getParentTrait = (expr: Expr | TraitType): TraitType | undefined => {
+  if (expr instanceof TraitType) return expr;
+  const parent = (expr as any).parent;
+  if (parent) return getParentTrait(parent);
   return undefined;
 };

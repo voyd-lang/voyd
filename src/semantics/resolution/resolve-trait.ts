@@ -7,6 +7,7 @@ import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveImpl } from "./resolve-impl.js";
+import { List } from "../../syntax-objects/list.js";
 
 export const resolveTrait = (trait: TraitType, call?: Call): TraitType => {
   if (trait.typeParameters) {
@@ -52,9 +53,20 @@ const resolveGenericTraitVersion = (
   newTrait.typesResolved = true;
   // Clear implementations, resolveImpl will re-add as needed
   newTrait.implementations = [];
-  trait.implementations.forEach((impl) =>
-    resolveImpl(impl.clone(newTrait))
-  );
+  trait.implementations.forEach((impl) => {
+    const implClone = impl.clone(newTrait);
+    let targetType;
+    const targetExpr = implClone.targetTypeExpr.value;
+    if (targetExpr.isCall() && newTrait.appliedTypeArgs?.length) {
+      targetExpr.typeArgs = new List({
+        value: newTrait.appliedTypeArgs.map((a) => (a as TypeAlias).typeExpr.clone()),
+      });
+      const expr = resolveTypeExpr(targetExpr);
+      const t = getExprType(expr);
+      if (t?.isObjectType()) targetType = t;
+    }
+    resolveImpl(implClone, targetType);
+  });
 
   return newTrait;
 };
