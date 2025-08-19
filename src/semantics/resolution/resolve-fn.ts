@@ -59,7 +59,11 @@ const resolveParameters = (params: Parameter[]) => {
 
     if (p.name.is("self")) {
       const impl = getParentImpl(p);
-      p.type = impl ? impl.targetType : selfType;
+      // Use a Self type that is scoped to the surrounding trait so trait
+      // methods can properly resolve their `Self` parameter. This allows
+      // compatibility checks to detect when a concrete implementation is
+      // providing the first parameter expected by a trait method.
+      p.type = impl ? impl.targetType : selfType.clone(p);
       return;
     }
 
