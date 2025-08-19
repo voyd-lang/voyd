@@ -31,11 +31,10 @@ export const getExprType = (expr?: Expr): Type | undefined => {
 };
 
 export const getIdentifierType = (id: Identifier): Type | undefined => {
-  if (id.is("self") && (id.parentImpl || id.parentTrait)) {
+  const entity = id.resolve();
+  if (!entity && id.is("self") && (id.parentImpl || id.parentTrait)) {
     id.type = selfType;
   }
-
-  const entity = id.resolve();
   if (!entity) return;
   if (entity.isVariable()) return entity.type;
   if (entity.isGlobal()) return entity.type;
