@@ -57,6 +57,14 @@ export const typesAreCompatible = (
     return true;
   }
 
+  // Attempt to get implementation self parameters to match to their trait method. Don't think its working.
+  if (
+    (a.isObjectType() && b.isSelfType() && b.parentTrait) ||
+    (b.isObjectType() && a.isSelfType() && a.parentTrait)
+  ) {
+    return true;
+  }
+
   if (a.isPrimitiveType() && b.isPrimitiveType()) {
     return a.id === b.id;
   }

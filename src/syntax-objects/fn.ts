@@ -83,24 +83,10 @@ export class Fn extends ScopedNamedEntity {
   }
 
   getType(): FnType {
-    const params = this.parameters.map((p) => {
-      if (p.name.is("self")) {
-        const clone = p.clone();
-        clone.type = selfType;
-        return clone;
-      }
-      return p;
-    });
-    const returnType = this.getReturnType();
-    const fnReturnType =
-      this.returnTypeExpr?.isIdentifier() &&
-      this.returnTypeExpr.is("self")
-        ? selfType
-        : returnType;
     return new FnType({
       ...super.getCloneOpts(this.parent),
-      parameters: params,
-      returnType: fnReturnType,
+      parameters: this.parameters,
+      returnType: this.getReturnType(),
     });
   }
 

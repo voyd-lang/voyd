@@ -33,7 +33,7 @@ export const getExprType = (expr?: Expr): Type | undefined => {
 export const getIdentifierType = (id: Identifier): Type | undefined => {
   const entity = id.resolve();
   if (!entity && id.is("self") && (id.parentImpl || id.parentTrait)) {
-    id.type = selfType;
+    id.type = id.parentImpl?.targetType ?? selfType;
   }
   if (!entity) return;
   if (entity.isVariable()) return entity.type;
