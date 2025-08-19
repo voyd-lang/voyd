@@ -23,19 +23,6 @@ pub fn new_array<T>(opts: { with_size: i32 }) -> Array<T>
 pub fn new_array<T>(opts: { from: FixedArray<T> }) -> Array<T>
   Array<T> { storage: opts.from, count: opts.from.length<T>() }
 
-impl<T> Iterator<T> for ArrayIterator<T>
-  fn next(self) -> Optional<T>
-    if self.index >= self.array.length then:
-      None {}
-    else:
-      let r = self.array.get(self.index)
-      self.index = self.index + 1
-      r
-
-impl<T> Iterable<T> for Array<T>
-  fn iterate(self) -> Iterator<T>
-    ArrayIterator<T> { index: 0, array: self }
-
 impl<T> Array<T>
   fn resize(self) -> Array<T>
     let new_storage = new_fixed_array<T>(self.storage.length<T>() * 2)
@@ -196,6 +183,18 @@ impl<T> Array<T>
 
       Array<T> { storage: new_storage, count: new_length }
 
-
 fn compute_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
+
+impl<T> Iterator<T> for ArrayIterator<T>
+  fn next(self) -> Optional<T>
+    if self.index >= self.array.length then:
+      None {}
+    else:
+      let r = self.array.get(self.index)
+      self.index = self.index + 1
+      r
+
+impl<T> Iterable<T> for Array<T>
+  fn iterate(self) -> Iterator<T>
+    ArrayIterator<T> { index: 0, array: self }

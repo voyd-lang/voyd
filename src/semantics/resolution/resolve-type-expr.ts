@@ -13,7 +13,8 @@ import { resolveUnionType } from "./resolve-union.js";
 import { resolveTrait } from "./resolve-trait.js";
 
 export const resolveTypeExpr = (typeExpr: Expr): Expr => {
-  if (typeExpr.isIdentifier()) return typeExpr;
+  if (typeExpr.isIdentifier()) {
+  }
   if (typeExpr.isObjectType()) return resolveObjectType(typeExpr);
   if (typeExpr.isIntersectionType()) return resolveIntersectionType(typeExpr);
   if (typeExpr.isUnionType()) return resolveUnionType(typeExpr);
