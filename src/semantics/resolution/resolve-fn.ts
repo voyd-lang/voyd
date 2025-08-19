@@ -4,7 +4,7 @@ import { Fn } from "../../syntax-objects/fn.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
 import { List } from "../../syntax-objects/list.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
-import { TypeAlias } from "../../syntax-objects/types.js";
+import { TypeAlias, selfType } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
@@ -59,7 +59,11 @@ const resolveParameters = (params: Parameter[]) => {
 
     if (p.name.is("self")) {
       const impl = getParentImpl(p);
-      if (impl) p.type = impl.targetType;
+      // Use a Self type that is scoped to the surrounding trait so trait
+      // methods can properly resolve their `Self` parameter. This allows
+      // compatibility checks to detect when a concrete implementation is
+      // providing the first parameter expected by a trait method.
+      p.type = impl ? impl.targetType : selfType.clone(p);
       return;
     }
 

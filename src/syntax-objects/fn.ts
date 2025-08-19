@@ -4,7 +4,7 @@ import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
 import { ScopedNamedEntity, ScopedNamedEntityOpts } from "./named-entity.js";
 import { Parameter } from "./parameter.js";
-import { FnType, Type } from "./types.js";
+import { FnType, Type, selfType } from "./types.js";
 import { Variable } from "./variable.js";
 
 export class Fn extends ScopedNamedEntity {
