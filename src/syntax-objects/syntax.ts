@@ -76,6 +76,10 @@ export abstract class Syntax {
     return this.parent?.isImpl() ? this.parent : this.parent?.parentImpl;
   }
 
+  get parentTrait(): TraitType | undefined {
+    return this.parent?.isTrait() ? this.parent : this.parent?.parentTrait;
+  }
+
   get metadata() {
     return {
       location: this.location,

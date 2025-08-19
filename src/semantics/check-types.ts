@@ -527,8 +527,6 @@ const checkImpl = (impl: Implementation): Implementation => {
   if (!impl.trait) return impl;
 
   for (const method of impl.trait.methods.toArray()) {
-    resolveFnSignature(method);
-
     if (
       !impl.exports.some((fn) =>
         typesAreCompatible(fn.getType(), method.getType())
