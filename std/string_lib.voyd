@@ -72,8 +72,6 @@ pub fn '+'(str: string, other: string) -> string
     count: other.length
   })
 
-  new_string
-
 obj StringIterator {
   str: string,
   index: i32
