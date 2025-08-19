@@ -1,18 +1,18 @@
 export const traitObjectMultipleParamsVoyd = `
 use std::all
 
-trait Iterator<T>
+trait MyIterator<T>
   fn next(self) -> Optional<T>
 
-trait Iterable<T>
-  fn iterate(self) -> Iterator<T>
+trait MyIterable<T>
+  fn iterate(self) -> MyIterator<T>
 
-obj ArrayIterator<T> {
+obj ArrayMyIterator<T> {
   index: i32,
   array: Array<T>
 }
 
-impl<T> Iterator<T> for ArrayIterator<T>
+impl<T> MyIterator<T> for ArrayMyIterator<T>
   fn next(self) -> Optional<T>
     if self.index >= self.array.length then:
       None {}
@@ -21,16 +21,16 @@ impl<T> Iterator<T> for ArrayIterator<T>
       self.index = self.index + 1
       r
 
-impl<T> Iterable<T> for Array<T>
-  fn iterate(self) -> Iterator<T>
-    ArrayIterator<T> { index: 0, array: self }
+impl<T> MyIterable<T> for Array<T>
+  fn iterate(self) -> MyIterator<T>
+    ArrayMyIterator<T> { index: 0, array: self }
 
 pub fn run() -> i32
   let f_arr = [1.0, 2.0, 3.0]
   let i_arr = [1, 2, 3]
   f_arr.sum2(i_arr)
 
-fn sum_iterable(it: Iterable<i32>) -> i32
+fn sum_iterable(it: MyIterable<i32>) -> i32
   let iterator = it.iterate()
   let looper: (s: i32) -> i32 = (start: i32) =>
     iterator.next().match(opt)
@@ -40,7 +40,7 @@ fn sum_iterable(it: Iterable<i32>) -> i32
         start
   looper(0)
 
-fn sum_iterable(it: Iterable<f64>) -> f64
+fn sum_iterable(it: MyIterable<f64>) -> f64
   let iterator = it.iterate()
   let looper: (s: f64) -> f64 = (start: f64) =>
     iterator.next().match(opt)
@@ -50,7 +50,7 @@ fn sum_iterable(it: Iterable<f64>) -> f64
         start
   looper(0.0)
 
-fn sum2(it1: Iterable<f64>, it2: Iterable<i32>) -> i32
+fn sum2(it1: MyIterable<f64>, it2: MyIterable<i32>) -> i32
   let f_sum = it1.sum_iterable()
   let i_sum = it2.sum_iterable()
   if f_sum > 20.0 then:
