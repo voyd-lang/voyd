@@ -7,7 +7,6 @@ import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
-import { Closure } from "../../syntax-objects/closure.js";
 import {
   ObjectType,
   TypeAlias,
@@ -57,7 +56,9 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
 
 const captureIdentifier = (id: Identifier) => {
   // Populate the identifier's type for downstream consumers
-  id.type = getExprType(id);
+  if (!id.type) {
+    id.type = getExprType(id);
+  }
 
   const parentFn = id.parentFn;
   if (!parentFn?.isClosure()) return;

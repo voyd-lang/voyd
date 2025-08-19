@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ObjectType, UnionType } from "../../../syntax-objects/index.js";
+import { ObjectType, UnionType, SelfType } from "../../../syntax-objects/index.js";
 import { typesAreCompatible } from "../types-are-compatible.js";
 
 describe("typesAreCompatible - unions", () => {
@@ -50,5 +50,9 @@ describe("typesAreCompatible - unions", () => {
     }
 
     expect(typesAreCompatible(current, current)).toBe(true);
+  });
+
+  test("considers self types compatible", () => {
+    expect(typesAreCompatible(new SelfType(), new SelfType())).toBe(true);
   });
 });
