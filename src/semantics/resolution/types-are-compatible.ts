@@ -53,6 +53,10 @@ export const typesAreCompatible = (
   if (visited.has(key)) return true;
   visited.add(key);
 
+  if (a.isSelfType() && b.isSelfType()) {
+    return true;
+  }
+
   if (a.isPrimitiveType() && b.isPrimitiveType()) {
     return a.id === b.id;
   }

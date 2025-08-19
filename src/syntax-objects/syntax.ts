@@ -27,6 +27,7 @@ import type {
   FixedArrayType,
   UnionType,
   IntersectionType,
+  SelfType,
 } from "./types.js";
 import type { Variable } from "./variable.js";
 import type { Whitespace } from "./whitespace.js";
@@ -236,6 +237,10 @@ export abstract class Syntax {
 
   isPrimitiveType(): this is PrimitiveType {
     return this.isType() && this.kindOfType === "primitive";
+  }
+
+  isSelfType(): this is SelfType {
+    return this.isType() && this.kindOfType === "self";
   }
 
   isIdentifier(): this is Identifier {

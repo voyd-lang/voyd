@@ -20,6 +20,7 @@ export type Type =
   | TupleType
   | FixedArrayType
   | FnType
+  | SelfType
   | TypeAlias;
 
 export type TypeJSON = ["type", [string, ...any[]]];
@@ -69,6 +70,22 @@ export class PrimitiveType extends BaseType {
 
   toJSON(): TypeJSON {
     return ["type", ["primitive", this.name]];
+  }
+}
+
+export class SelfType extends BaseType {
+  readonly kindOfType = "self";
+
+  constructor(opts: NamedEntityOpts = { name: "Self" }) {
+    super(opts);
+  }
+
+  clone(parent?: Expr): SelfType {
+    return new SelfType({ ...super.getCloneOpts(parent) });
+  }
+
+  toJSON(): TypeJSON {
+    return ["type", ["self"]];
   }
 }
 
@@ -358,6 +375,7 @@ export const bool = PrimitiveType.from("bool");
 export const dVoid = PrimitiveType.from("void");
 export const dVoyd = PrimitiveType.from("voyd");
 export const voydString = PrimitiveType.from("string");
+export const selfType = new SelfType();
 export const voydBaseObject = new ObjectType({
   name: "Object",
   value: [],

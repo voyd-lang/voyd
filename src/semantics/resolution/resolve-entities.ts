@@ -26,6 +26,7 @@ import { resolveTrait } from "./resolve-trait.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveUse } from "./resolve-use.js";
+import { selfType } from "../../syntax-objects/types.js";
 
 /**
  * NOTE: Some mapping is preformed on the AST at this stage.
@@ -56,8 +57,24 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
 };
 
 const captureIdentifier = (id: Identifier) => {
+  if (id.is("self")) {
+    let parent: Expr | undefined = id.parent;
+    while (parent) {
+      if (parent.isTrait()) {
+        id.type = selfType;
+        break;
+      }
+      if (parent.isImpl()) {
+        break;
+      }
+      parent = parent.parent;
+    }
+  }
+
   // Populate the identifier's type for downstream consumers
-  id.type = getExprType(id);
+  if (!id.type) {
+    id.type = getExprType(id);
+  }
 
   const parentFn = id.parentFn;
   if (!parentFn?.isClosure()) return;

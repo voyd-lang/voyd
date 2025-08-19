@@ -4,7 +4,7 @@ import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
 import { ScopedNamedEntity, ScopedNamedEntityOpts } from "./named-entity.js";
 import { Parameter } from "./parameter.js";
-import { FnType, Type } from "./types.js";
+import { FnType, Type, selfType } from "./types.js";
 import { Variable } from "./variable.js";
 
 export class Fn extends ScopedNamedEntity {
@@ -83,10 +83,24 @@ export class Fn extends ScopedNamedEntity {
   }
 
   getType(): FnType {
+    const params = this.parameters.map((p) => {
+      if (p.name.is("self")) {
+        const clone = p.clone();
+        clone.type = selfType;
+        return clone;
+      }
+      return p;
+    });
+    const returnType = this.getReturnType();
+    const fnReturnType =
+      this.returnTypeExpr?.isIdentifier() &&
+      this.returnTypeExpr.is("self")
+        ? selfType
+        : returnType;
     return new FnType({
       ...super.getCloneOpts(this.parent),
-      parameters: this.parameters,
-      returnType: this.getReturnType(),
+      parameters: params,
+      returnType: fnReturnType,
     });
   }
 

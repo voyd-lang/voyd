@@ -527,11 +527,11 @@ const checkImpl = (impl: Implementation): Implementation => {
   if (!impl.trait) return impl;
 
   for (const method of impl.trait.methods.toArray()) {
-    const mClone = resolveFnSignature(method.clone(impl));
+    resolveFnSignature(method);
 
     if (
       !impl.exports.some((fn) =>
-        typesAreCompatible(fn.getType(), mClone.getType())
+        typesAreCompatible(fn.getType(), method.getType())
       )
     ) {
       throw new Error(
