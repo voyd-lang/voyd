@@ -33,7 +33,10 @@ export const getExprType = (expr?: Expr): Type | undefined => {
 export const getIdentifierType = (id: Identifier): Type | undefined => {
   const entity = id.resolve();
   if (!entity && id.is("self") && (id.parentImpl || id.parentTrait)) {
-    id.type = id.parentImpl?.targetType ?? selfType;
+    // When resolving the type of `self` inside a trait, use a scoped
+    // `Self` type so that later compatibility checks know which trait the
+    // `Self` belongs to. Implementations get their concrete target type.
+    id.type = id.parentImpl?.targetType ?? selfType.clone(id);
   }
   if (!entity) return;
   if (entity.isVariable()) return entity.type;
