@@ -57,13 +57,13 @@ export const typesAreCompatible = (
     return true;
   }
 
-  // Attempt to get implementation self parameters to match to their trait method. Don't think its working.
-  if (
-    (a.isObjectType() && b.isSelfType() && b.parentTrait) ||
-    (b.isObjectType() && a.isSelfType() && a.parentTrait)
-  ) {
-    return true;
-  }
+  // Handle `Self` parameters. When either side is a `SelfType` it should be
+  // considered compatible with any object type. Trait methods will replace the
+  // `SelfType` with the concrete implementation type and object methods always
+  // refer to their target type, so allowing this loose comparison enables
+  // method resolution before all implementations have been fully resolved.
+  if (a.isObjectType() && b.isSelfType()) return true;
+  if (b.isObjectType() && a.isSelfType()) return true;
 
   if (a.isPrimitiveType() && b.isPrimitiveType()) {
     return a.id === b.id;
