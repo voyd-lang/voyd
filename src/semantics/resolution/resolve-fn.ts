@@ -36,6 +36,13 @@ export const resolveFn = (fn: Fn, call?: Call): Fn => {
   fn.typesResolved = true;
   fn.body = fn.body ? resolveEntities(fn.body) : undefined;
   fn.inferredReturnType = getExprType(fn.body);
+  if (
+    fn.annotatedReturnType?.isPrimitiveType() &&
+    (fn.annotatedReturnType.name.value === "void" ||
+      fn.annotatedReturnType.name.value === "voyd")
+  ) {
+    fn.inferredReturnType = fn.annotatedReturnType;
+  }
   fn.returnType = fn.annotatedReturnType ?? fn.inferredReturnType;
   fn.parentImpl?.registerMethod(fn); // Maybe do this for module when not in an impl
 

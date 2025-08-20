@@ -66,6 +66,12 @@ export const typesAreCompatible = (
   }
 
   if (a.isPrimitiveType() && b.isPrimitiveType()) {
+    if (
+      (a.name.value === "void" && b.name.value === "voyd") ||
+      (a.name.value === "voyd" && b.name.value === "void")
+    ) {
+      return true;
+    }
     return a.id === b.id;
   }
 

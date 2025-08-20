@@ -121,7 +121,8 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "f32")) return binaryen.f32;
   if (isPrimitiveId(type, "i64")) return binaryen.i64;
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
-  if (isPrimitiveId(type, "voyd")) return binaryen.none;
+  if (isPrimitiveId(type, "voyd") || isPrimitiveId(type, "void"))
+    return binaryen.none;
   if (isPrimitiveId(type, "string")) return getI32ArrayType(opts.mod);
 
   if (type.isObjectType()) {

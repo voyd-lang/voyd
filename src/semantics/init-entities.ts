@@ -163,9 +163,14 @@ const initFn = (expr: List): Fn => {
 const initClosure = (expr: List): Closure => {
   const paramsExpr = expr.at(1);
   let parameters: Parameter[] = [];
+  let returnTypeExpr: Expr | undefined;
 
   if (paramsExpr?.isList()) {
-    if (paramsExpr.calls(":")) {
+    if (paramsExpr.calls("->")) {
+      const fnType = initFnType(paramsExpr);
+      parameters = fnType.parameters;
+      returnTypeExpr = fnType.returnTypeExpr;
+    } else if (paramsExpr.calls(":")) {
       const param = listToParameter(paramsExpr);
       parameters = Array.isArray(param) ? param : [param];
     } else {
@@ -192,6 +197,7 @@ const initClosure = (expr: List): Closure => {
     ...expr.metadata,
     parameters,
     body,
+    returnTypeExpr,
   });
 };
 
