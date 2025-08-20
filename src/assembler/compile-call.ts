@@ -69,6 +69,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     return compileObjectInit(opts);
   }
 
+  // Trait object handling
   const args = expr.args.toArray().map((arg, i) => {
     const compiled = compileExpression({
       ...opts,
