@@ -40,6 +40,10 @@ export const resolveCall = (call: Call): Call => {
     : undefined;
   if (memberAccessCall) return memberAccessCall;
 
+  // Ensure the call identifier is processed so closures can capture it when
+  // referenced as the callee.
+  call.fnName = resolveEntities(call.fnName) as Identifier;
+
   // Constructor fn. TODO:
   const type = getIdentifierType(call.fnName);
   call.fnName.type = type;
