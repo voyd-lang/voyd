@@ -6,6 +6,10 @@ import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveEntities } from "./resolve-entities.js";
 
 export const getCallFn = (call: Call): Fn | undefined => {
+  if (call.fn?.isFn() && call.fn.parentTrait) {
+    return resolveFn(call.fn);
+  }
+
   if (isPrimitiveFnCall(call)) return undefined;
 
   const unfilteredCandidates = getCandidates(call);
@@ -13,10 +17,6 @@ export const getCallFn = (call: Call): Fn | undefined => {
 
   if (!candidates.length) {
     return undefined;
-  }
-
-  if (call.fn?.isFn() && call.fn.parentTrait) {
-    return call.fn;
   }
 
   if (candidates.length === 1) return candidates[0];
@@ -144,24 +144,6 @@ const parametersMatch = (candidate: Fn, call: Call) => {
     if (!argType) return false;
     const argLabel = getExprLabel(arg);
     const labelsMatch = p.label?.value === argLabel;
-    // Calling a method on a trait object is resolved by looking up the
-    // implementation methods for that trait. In that scenario the first
-    // parameter of the candidate function will be the concrete
-    // implementation type (e.g. `Array<i32>`), while the argument type is the
-    // trait itself (e.g. `Iterable<i32>`). These are not nominally compatible
-    // and would previously cause the resolution to fail. Since the candidate
-    // was sourced from the trait's implementations we can assume it is valid
-    // for the trait object and skip the compatibility check for this
-    // parameter.
-
-    if (i === 0 && argType.isTraitType() && candidate.parentImpl?.trait) {
-      const candidateTrait =
-        candidate.parentImpl.trait.genericParent ?? candidate.parentImpl.trait;
-      const argTrait = argType.genericParent ?? argType;
-      if (candidateTrait.id === argTrait.id) {
-        return labelsMatch;
-      }
-    }
 
     return typesAreCompatible(argType, p.type!) && labelsMatch;
   });
