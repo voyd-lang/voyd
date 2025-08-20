@@ -25,7 +25,11 @@ const parseList = (list: List): List => {
     result = items[0] as List;
     result.push(...items.slice(1));
   } else {
-    result = new List({ ...list.metadata, value: items, dynamicLocation: true });
+    result = new List({
+      ...list.metadata,
+      value: items,
+      dynamicLocation: true,
+    });
   }
 
   // Handle expressions to the right of an operator { a: hello there, b: 2 } -> [object [: a [hello there] b [2]]
@@ -58,6 +62,12 @@ const isDotOp = (op?: Expr): boolean => {
 };
 
 const parseDot = (right: Expr, left: Expr): List => {
+  if (right.isList() && right.calls("=>")) {
+    return new List({
+      value: ["call-closure", right, left],
+      dynamicLocation: true,
+    });
+  }
   if (
     right.isList() &&
     right.at(1)?.isList() &&
