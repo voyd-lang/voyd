@@ -123,12 +123,9 @@ const resolveGenericsWithTypeArgs = (
   obj.registerGenericInstance(newObj);
   const resolvedObj = resolveObjectType(newObj);
 
-  const implementations = newObj.implementations;
-  newObj.implementations = []; // Clear implementations to avoid duplicates, resolveImpl will re-add them
-
-  implementations
-    .filter((impl) => implIsCompatible(impl, resolvedObj))
-    .map((impl) => resolveImpl(impl, resolvedObj));
+  newObj.implementations
+    ?.filter((impl) => implIsCompatible(impl, resolvedObj))
+    .forEach((impl) => resolveImpl(impl, resolvedObj));
 
   return resolvedObj;
 };

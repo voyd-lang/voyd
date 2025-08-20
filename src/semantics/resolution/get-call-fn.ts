@@ -144,22 +144,17 @@ const parametersMatch = (candidate: Fn, call: Call) => {
     // satisfy trait bounds (`Iterable<i32>`).
     if (paramType?.isTraitType() && argType.isObjectType()) {
       const traitId = paramType.id;
-      const hasImpl = argType.implementations?.some(
-        (impl) => impl.trait?.id === traitId
-      );
-      if (!hasImpl) {
-        argType.genericParent?.implementations?.forEach((impl) => {
-          try {
-            // Resolve the generic implementation's trait so we can compare ids
-            resolveImpl(impl);
-            if (impl.trait?.id === traitId) {
-              resolveImpl(impl.clone(), argType);
-            }
-          } catch {
-            /* ignore */
+      argType.genericParent?.implementations?.forEach((impl) => {
+        try {
+          // Resolve the generic implementation's trait so we can compare ids
+          resolveImpl(impl);
+          if (impl.trait?.id === traitId) {
+            resolveImpl(impl.clone(), argType);
           }
-        });
-      }
+        } catch {
+          /* ignore */
+        }
+      });
     }
 
     const argLabel = getExprLabel(arg);

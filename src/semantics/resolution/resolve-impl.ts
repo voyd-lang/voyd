@@ -35,14 +35,33 @@ export const resolveImpl = (
 
   impl.trait = getTrait(impl);
   if (impl.trait) {
-    impl.trait.implementations.push(impl);
+    const traitHasImpl = impl.trait.implementations.some(
+      (existing) =>
+        existing.trait?.id === impl.trait!.id &&
+        existing.targetType?.id === targetType?.id
+    );
+    if (!traitHasImpl) {
+      impl.trait.implementations.push(impl);
+    }
   }
 
-  if (!targetType) return impl;
+  if (!targetType) {
+    impl.typesResolved = true;
+    return impl;
+  }
 
   if (targetType?.isObjectType()) {
-    targetType.implementations?.push(impl);
+    const targetHasImpl = targetType.implementations?.some(
+      (existing) => existing.trait?.id === impl.trait?.id
+    );
+    if (!targetHasImpl) {
+      targetType.implementations?.push(impl);
+    }
   }
+
+  // Mark as resolved before applying to generic instances to prevent
+  // duplicate registration when resolveImpl is invoked recursively.
+  impl.typesResolved = true;
 
   if (targetType?.isObjectType() && targetType.typeParameters?.length) {
     // Apply impl to existing generic instances
@@ -53,7 +72,6 @@ export const resolveImpl = (
     return impl;
   }
 
-  impl.typesResolved = true;
   impl.body.value = resolveEntities(impl.body.value);
   resolveDefaultTraitMethods(impl);
 
