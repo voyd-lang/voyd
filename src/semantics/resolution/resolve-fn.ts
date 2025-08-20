@@ -8,6 +8,8 @@ import { TypeAlias, selfType } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
+import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";
+import { typesAreCompatible } from "./types-are-compatible.js";
 
 export type ResolveFnTypesOpts = {
   typeArgs?: List;
@@ -84,13 +86,41 @@ const resolveParameters = (params: Parameter[]) => {
 };
 
 const attemptToResolveFnWithGenerics = (fn: Fn, call: Call): Fn => {
-  if (call.typeArgs) {
-    return resolveGenericsWithTypeArgs(fn, call.typeArgs);
-  }
+  const args = call.typeArgs ?? inferCallTypeArgs(fn, call);
+  if (!args) return fn;
 
-  // TODO try type inference with args
-  return fn;
+  call.typeArgs = args;
+  const existing = fn.genericInstances?.find((c) =>
+    fnTypeArgsMatch(args, c)
+  );
+  if (existing) return fn;
+
+  return resolveGenericsWithTypeArgs(fn, args);
 };
+
+const inferCallTypeArgs = (fn: Fn, call: Call) => {
+  const pairs: TypeArgInferencePair[] = [];
+
+  fn.parameters.forEach((param, index) => {
+    const arg = call.argAt(index);
+    const val = arg?.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
+    if (!val || !param.typeExpr) return;
+    pairs.push({ typeExpr: param.typeExpr, argExpr: val });
+  });
+
+  return inferTypeArgs(fn.typeParameters, pairs);
+};
+
+const fnTypeArgsMatch = (args: List, candidate: Fn): boolean =>
+  candidate.appliedTypeArgs
+    ? candidate.appliedTypeArgs.every((t, i) => {
+        const argType = getExprType(args.at(i));
+        const appliedType = getExprType(t);
+        return typesAreCompatible(argType, appliedType, {
+          exactNominalMatch: true,
+        });
+      })
+    : false;
 
 const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   const typeParameters = fn.typeParameters!;
