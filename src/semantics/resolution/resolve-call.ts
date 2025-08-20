@@ -19,6 +19,7 @@ export const resolveCall = (call: Call): Call => {
   if (call.calls("::")) return resolveModuleAccess(call);
   if (call.calls("export")) return resolveExport(call);
   if (call.calls("if")) return resolveIf(call);
+  if (call.calls("call")) return resolveClosureCall(call);
   if (call.calls(":")) return resolveLabeledArg(call);
   if (call.calls("while")) return resolveWhile(call);
   if (call.calls("FixedArray")) return resolveFixedArray(call);
@@ -325,5 +326,19 @@ export const resolveBinaryen = (call: Call) => {
 
   resolveTypeExpr(typeArg);
   call.type = getExprType(typeArg);
+  return call;
+};
+
+const resolveClosureCall = (call: Call): Call => {
+  call.args = call.args.map(resolveEntities);
+  const closure = call.argAt(0);
+  if (closure?.isClosure()) {
+    call.type = closure.getReturnType();
+    return call;
+  }
+  const closureType = getExprType(closure);
+  if (closureType?.isFnType()) {
+    call.type = closureType.returnType;
+  }
   return call;
 };

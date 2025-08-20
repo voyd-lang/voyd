@@ -57,6 +57,7 @@ const checkBlockTypes = (block: Block): Block => {
 const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("export")) return checkExport(call);
   if (call.calls("if")) return checkIf(call);
+  if (call.calls("call")) return checkClosureCall(call);
   if (call.calls("binaryen")) return checkBinaryenCall(call);
   if (call.calls("mod")) return call;
   if (call.calls("break")) return call;
@@ -112,6 +113,24 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
     );
   }
 
+  return call;
+};
+
+const checkClosureCall = (call: Call): Call => {
+  call.args = call.args.map(checkTypes);
+  const closure = call.argAt(0);
+  const closureType = getExprType(closure);
+  if (!closureType?.isFnType()) {
+    throw new Error(`First argument must be a closure at ${closure?.location}`);
+  }
+  closureType.parameters.forEach((p, i) => {
+    const arg = call.argAt(i + 1);
+    const argType = getExprType(arg);
+    if (!typesAreCompatible(argType, p.type!)) {
+      throw new Error(`Expected ${p.type?.name} at ${arg?.location}`);
+    }
+  });
+  call.type = closureType.returnType;
   return call;
 };
 

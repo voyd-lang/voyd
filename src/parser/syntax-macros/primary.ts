@@ -58,6 +58,9 @@ const isDotOp = (op?: Expr): boolean => {
 };
 
 const parseDot = (right: Expr, left: Expr): List => {
+  if (right.isList() && right.calls("=>")) {
+    return new List({ value: ["call", right, left], dynamicLocation: true });
+  }
   if (
     right.isList() &&
     right.at(1)?.isList() &&

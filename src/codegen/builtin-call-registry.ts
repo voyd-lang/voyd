@@ -7,6 +7,7 @@ import { compileMemberAccess } from "./builtin-calls/compile-member-access.js";
 import { compileWhile } from "./builtin-calls/compile-while.js";
 import { compileFixedArray } from "./builtin-calls/compile-fixed-array.js";
 import { compileBinaryen } from "./builtin-calls/compile-binaryen.js";
+import { compileCallClosure } from "./builtin-calls/compile-call-closure.js";
 
 export type CallCompiler = (opts: CompileExprOpts<Call>) => number;
 
@@ -21,6 +22,7 @@ export const builtinCallCompilers = new Map<string, CallCompiler>([
   ["break", (opts) => opts.mod.br(opts.loopBreakId!)],
   ["FixedArray", compileFixedArray],
   ["binaryen", compileBinaryen],
+  ["call", compileCallClosure],
   [
     ":",
     (opts) =>
