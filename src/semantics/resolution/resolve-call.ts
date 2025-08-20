@@ -13,6 +13,7 @@ import { resolveExport, resolveModulePath } from "./resolve-use.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveTrait } from "./resolve-trait.js";
+import { resolveImpl } from "./resolve-impl.js";
 
 export const resolveCall = (call: Call): Call => {
   if (call.type) return call;
@@ -67,7 +68,6 @@ export const resolveCall = (call: Call): Call => {
 };
 
 const resolveCallFn = (call: Call) => {
-  let traitMethod;
   if (!call.fn) {
     const arg0 = call.argAt(0);
     const arg1Type =
@@ -76,17 +76,36 @@ const resolveCallFn = (call: Call) => {
         : getExprType(arg0);
     if (arg1Type?.isTraitType()) {
       const trait = resolveTrait(arg1Type, call);
-      traitMethod = trait.methods
+      const traitMethod = trait.methods
         .toArray()
         .find((fn) => fn.name.is(call.fnName.value));
       if (traitMethod) {
         call.fn = traitMethod;
         call.type = traitMethod.returnType;
+        // Trigger side effects from candidate resolution without overriding
+        // the trait method. This ensures trait implementations are
+        // instantiated while preserving the trait method's return type.
+        try {
+          getCallFn(call);
+        } catch {
+          // Ambiguous calls can occur when multiple implementations exist for
+          // a trait method on a trait object. Even if resolution fails, we
+          // still want to ensure that trait implementations are instantiated
+          // for their side effects.
+          arg1Type.implementations?.forEach((impl) => {
+            try {
+              resolveImpl(impl);
+            } catch {
+              /* ignore */
+            }
+          });
+        }
+        return;
       }
     }
   }
 
-  if (!call.fn || call.fn === traitMethod) {
+  if (!call.fn) {
     const resolvedFn = getCallFn(call);
     if (resolvedFn) {
       call.fn = resolvedFn;
