@@ -21,7 +21,7 @@ export const compile = (opts: CompileExprOpts<Fn>): number => {
   const body = compileExpression({
     ...opts,
     expr: fn.body!,
-    isReturnExpr: true,
+    isReturnExpr: returnType !== binaryen.none,
   });
 
   const variableTypes = getFunctionVarTypes(opts, fn);

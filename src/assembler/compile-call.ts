@@ -55,14 +55,11 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       const callType = getClosureFunctionType(opts, fnType);
       target = refCast(mod, funcRef, callType);
     } catch {}
-    const callExpr = callRef(
-      mod,
-      target,
-      args,
-      mapBinaryenType(opts, fnType.returnType),
-      false
-    );
-    return isReturnExpr ? mod.return(callExpr) : callExpr;
+    const returnType = mapBinaryenType(opts, fnType.returnType);
+    const callExpr = callRef(mod, target, args, returnType, false);
+    return isReturnExpr && returnType !== binaryen.none
+      ? mod.return(callExpr)
+      : callExpr;
   }
 
   if (!expr.fn) {
@@ -128,7 +125,9 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     });
     const returnType = mapBinaryenType(opts, traitFn.returnType!);
     const callExpr = callRef(mod, target, args, returnType);
-    return isReturnExpr ? mod.return(callExpr) : callExpr;
+    return isReturnExpr && returnType !== binaryen.none
+      ? mod.return(callExpr)
+      : callExpr;
   }
 
   const args = expr.args.toArray().map((arg, i) =>
