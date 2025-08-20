@@ -131,22 +131,13 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     return isReturnExpr ? mod.return(callExpr) : callExpr;
   }
 
-  const args = expr.args.toArray().map((arg, i) => {
-    const compiled = compileExpression({
+  const args = expr.args.toArray().map((arg, i) =>
+    compileExpression({
       ...opts,
       expr: arg,
       isReturnExpr: false,
-    });
-
-    if (!expr.fn?.isFn()) return compiled;
-    const param = expr.fn?.parameters[i];
-    const argType = arg.getType();
-    if (param?.type?.isObjectType() && argType?.isTraitType()) {
-      return refCast(mod, compiled, mapBinaryenType(opts, param.type));
-    }
-
-    return compiled;
-  });
+    })
+  );
 
   const fn = expr.fn as Fn;
   const id = fn.id;

@@ -35,6 +35,7 @@ const getCandidates = (call: Call): Fn[] => {
     arg1?.isClosure() && arg1.parameters.some((p) => !p.type && !p.typeExpr)
       ? undefined
       : getExprType(arg1);
+
   if (arg1Type?.isObjectType()) {
     const isInsideImpl = call.parentImpl?.targetType?.id === arg1Type.id;
     const implFns = isInsideImpl
@@ -126,7 +127,10 @@ const parametersMatch = (candidate: Fn, call: Call) => {
     const arg = call.argAt(i);
     if (!arg) return false;
 
-    if (arg.isClosure() && arg.parameters.some((cp) => !cp.type && !cp.typeExpr)) {
+    if (
+      arg.isClosure() &&
+      arg.parameters.some((cp) => !cp.type && !cp.typeExpr)
+    ) {
       const paramType = p.type;
       if (!paramType?.isFnType()) return false;
       arg.parameters.forEach((cp, j) => {
