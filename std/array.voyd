@@ -2,10 +2,16 @@ use fixed_array::all
 use macros::all
 use operators::all
 use optional::all
+use iter::all
 
 pub obj Array<T> {
   storage: FixedArray<T>,
   count: i32
+}
+
+obj ArrayIterator<T> {
+  index: i32,
+  array: Array<T>
 }
 
 pub fn new_array<T>(opts: { with_size: i32 }) -> Array<T>
@@ -177,6 +183,18 @@ impl<T> Array<T>
 
       Array<T> { storage: new_storage, count: new_length }
 
-
 fn compute_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
+
+impl<T> Iterator<T> for ArrayIterator<T>
+  fn next(self) -> Optional<T>
+    if self.index >= self.array.length then:
+      None {}
+    else:
+      let r = self.array.get(self.index)
+      self.index = self.index + 1
+      r
+
+impl<T> Iterable<T> for Array<T>
+  fn iterate(self) -> Iterator<T>
+    ArrayIterator<T> { index: 0, array: self }

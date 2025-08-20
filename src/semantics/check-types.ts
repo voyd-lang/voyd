@@ -538,6 +538,10 @@ const checkImpl = (impl: Implementation): Implementation => {
     }
   }
 
+  for (const method of impl.exports) {
+    checkFnTypes(method);
+  }
+
   return impl;
 };
 

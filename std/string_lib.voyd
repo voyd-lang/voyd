@@ -1,6 +1,8 @@
 use macros::all
 use fixed_array::all
 use operators::all
+use iter::all
+use optional::all
 
 fn create_string(size: i32) -> string
   binaryen_gc_call(arrayNew, `(bin_type_to_heap_type(string), size), string)
@@ -85,6 +87,19 @@ pub fn read_next_char(iterator: StringIterator) -> i32
     let char = iterator.str.char_code_at(iterator.index)
     iterator.index = iterator.index + 1
     char
+
+impl Iterator<i32> for StringIterator
+  fn next(self) -> Optional<i32>
+    if self.index >= self.str.length then:
+      None {}
+    else:
+      let char = self.str.char_code_at(self.index)
+      self.index = self.index + 1
+      Some<i32> { value: char }
+
+impl Iterable<i32> for string
+  fn iterate(self) -> Iterator<i32>
+    new_string_iterator(self)
 
 pub fn '=='(a: string, b: string) -> bool
   if a.length != b.length then:
