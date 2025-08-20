@@ -123,9 +123,13 @@ const resolveGenericsWithTypeArgs = (
   obj.registerGenericInstance(newObj);
   const resolvedObj = resolveObjectType(newObj);
 
-  newObj.implementations
+  // Replace any cloned generic implementations with resolved versions specific
+  // to the concrete object instance.
+  resolvedObj.implementations = [];
+
+  obj.implementations
     ?.filter((impl) => implIsCompatible(impl, resolvedObj))
-    .forEach((impl) => resolveImpl(impl, resolvedObj));
+    .forEach((impl) => resolveImpl(impl.clone(), resolvedObj));
 
   return resolvedObj;
 };

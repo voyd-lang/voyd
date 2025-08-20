@@ -4,7 +4,7 @@ import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveEntities } from "./resolve-entities.js";
-import { resolveImpl } from "./resolve-impl.js";
+import { resolveObjectType } from "./resolve-object-type.js";
 
 export const getCallFn = (call: Call): Fn | undefined => {
   if (isPrimitiveFnCall(call)) return undefined;
@@ -135,26 +135,9 @@ const parametersMatch = (candidate: Fn, call: Call) => {
 
     const argType = getExprType(arg);
     if (!argType) return false;
-    const paramType = p.type;
 
-    // If the parameter expects a trait and the argument is a concrete object
-    // type, ensure that the object's trait implementations are instantiated
-    // before performing compatibility checks. Free functions like `map`
-    // require this so that calls with concrete types (e.g. `Array<i32>`) can
-    // satisfy trait bounds (`Iterable<i32>`).
-    if (paramType?.isTraitType() && argType.isObjectType()) {
-      const traitId = paramType.id;
-      argType.genericParent?.implementations?.forEach((impl) => {
-        try {
-          // Resolve the generic implementation's trait so we can compare ids
-          resolveImpl(impl);
-          if (impl.trait?.id === traitId) {
-            resolveImpl(impl.clone(), argType);
-          }
-        } catch {
-          /* ignore */
-        }
-      });
+    if (p.type?.isTraitType() && argType.isObjectType()) {
+      resolveObjectType(argType);
     }
 
     const argLabel = getExprLabel(arg);
