@@ -21,6 +21,10 @@ export const compileObjectInit = (opts: CompileExprOpts<Call>) => {
       `__field_index_table_${objectType.id}`,
       opts.fieldLookupHelpers.lookupTableType
     ),
+    mod.global.get(
+      `__method_table_${objectType.id}`,
+      opts.methodLookupHelpers.lookupTableType
+    ),
     ...obj.fields.map((field) =>
       compileExpression({
         ...opts,

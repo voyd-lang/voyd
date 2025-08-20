@@ -10,6 +10,7 @@ const makeOpts = (expr: Call) => ({
   mod: { nop: () => 0, br: () => 0 } as any,
   extensionHelpers: {} as any,
   fieldLookupHelpers: {} as any,
+  methodLookupHelpers: { LOOKUP_NAME: "", lookupTableType: 0 } as any,
 });
 
 const makeCall = (name: string) =>

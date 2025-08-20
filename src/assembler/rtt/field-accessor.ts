@@ -73,7 +73,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
                   mod,
                   mod.local.get(1, lookupTableType),
                   mod.local.get(3, bin.i32),
-                  bin.i32,
+                  fieldAccessorStruct,
                   false
                 ),
               })
@@ -139,7 +139,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
           structGetFieldValue({
             mod,
             fieldType: mapBinaryenType(opts, field.type!),
-            fieldIndex: index + 2, // Skip RTT type fields
+            fieldIndex: index + 3, // Skip RTT type fields
             exprRef: refCast(
               mod,
               mod.local.get(0, mapBinaryenType(opts, voydBaseObject)),
@@ -158,7 +158,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
           [],
           structSetFieldValue({
             mod,
-            fieldIndex: index + 2, // Skip RTT type fields
+            fieldIndex: index + 3, // Skip RTT type fields
             ref: refCast(
               mod,
               mod.local.get(0, mapBinaryenType(opts, voydBaseObject)),

@@ -15,6 +15,10 @@ import { builtinCallCompilers } from "./builtin-call-registry.js";
 import { compileObjectInit } from "./compile-object-init.js";
 import { getClosureFunctionType } from "./compile-closure.js";
 import { Fn } from "../syntax-objects/fn.js";
+import { voydBaseObject } from "../syntax-objects/types.js";
+import { murmurHash3 } from "../lib/murmur-hash.js";
+import { AugmentedBinaryen } from "../lib/binaryen-gc/types.js";
+const bin = binaryen as unknown as AugmentedBinaryen;
 
 export const compile = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod, isReturnExpr } = opts;
@@ -69,23 +73,71 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     return compileObjectInit(opts);
   }
 
-  // Trait object handling
-  const args = expr.args.toArray().map((arg, i) => {
-    const compiled = compileExpression({
+  if (
+    expr.fn.isFn() &&
+    expr.fn.parentTrait &&
+    expr.argAt(0)?.getType()?.isTraitType()
+  ) {
+    const traitFn = expr.fn as Fn;
+    const obj = expr.argAt(0)!;
+    const lookupTable = structGetFieldValue({
+      mod,
+      fieldType: opts.methodLookupHelpers.lookupTableType,
+      fieldIndex: 2,
+      exprRef: compileExpression({ ...opts, expr: obj, isReturnExpr: false }),
+    });
+    const funcRef = mod.call(
+      opts.methodLookupHelpers.LOOKUP_NAME,
+      [mod.i32.const(murmurHash3(traitFn.id)), lookupTable],
+      binaryen.funcref
+    );
+    let fnType = traitFn.getAttribute("binaryenType") as number | undefined;
+    if (!fnType) {
+      const paramTypes = bin.createType([
+        mapBinaryenType(opts, voydBaseObject),
+        ...traitFn.parameters
+          .slice(1)
+          .map((p) => mapBinaryenType(opts, p.type!)),
+      ]);
+      const retType = mapBinaryenType(opts, traitFn.returnType!);
+      const temp = mod.addFunction(
+        `__tmp_trait_${traitFn.id}`,
+        paramTypes,
+        retType,
+        [],
+        mod.nop()
+      );
+      const heapType = bin._BinaryenFunctionGetType(temp);
+      fnType = bin._BinaryenTypeFromHeapType(heapType, false);
+      traitFn.setAttribute("binaryenType", fnType);
+      mod.removeFunction(`__tmp_trait_${traitFn.id}`);
+    }
+    const target = refCast(mod, funcRef, fnType);
+    const args = expr.args.toArray().map((arg, i) => {
+      const compiled = compileExpression({
+        ...opts,
+        expr: arg,
+        isReturnExpr: false,
+      });
+      const param = traitFn.parameters[i];
+      const argType = arg.getType();
+      if (param?.type?.isObjectType() && argType?.isTraitType()) {
+        return refCast(mod, compiled, mapBinaryenType(opts, param.type));
+      }
+      return compiled;
+    });
+    const returnType = mapBinaryenType(opts, traitFn.returnType!);
+    const callExpr = callRef(mod, target, args, returnType);
+    return isReturnExpr ? mod.return(callExpr) : callExpr;
+  }
+
+  const args = expr.args.toArray().map((arg, i) =>
+    compileExpression({
       ...opts,
       expr: arg,
       isReturnExpr: false,
-    });
-
-    if (!expr.fn?.isFn()) return compiled;
-    const param = expr.fn?.parameters[i];
-    const argType = arg.getType();
-    if (param?.type?.isObjectType() && argType?.isTraitType()) {
-      return refCast(mod, compiled, mapBinaryenType(opts, param.type));
-    }
-
-    return compiled;
-  });
+    })
+  );
 
   const fn = expr.fn as Fn;
   const id = fn.id;
