@@ -2,6 +2,7 @@ import {
   closureParamInferOneVoyd,
   closureParamInferTwoVoyd,
 } from "./fixtures/closure-param-infer.js";
+import { closureParamInferLabeledVoyd } from "./fixtures/closure-param-infer-labeled.js";
 import { compile } from "../compiler.js";
 import { describe, test } from "vitest";
 import assert from "node:assert";
@@ -22,5 +23,13 @@ describe("E2E closure parameter inference", () => {
     const fn = getWasmFn("main", instance);
     assert(fn, "Function exists");
     t.expect(fn(), "main returns correct value").toEqual(7);
+  });
+
+  test("infers labeled closure parameters", async (t) => {
+    const mod = await compile(closureParamInferLabeledVoyd);
+    const instance = getWasmInstance(mod);
+    const fn = getWasmFn("main", instance);
+    assert(fn, "Function exists");
+    t.expect(fn(), "main returns correct value").toEqual(6);
   });
 });
