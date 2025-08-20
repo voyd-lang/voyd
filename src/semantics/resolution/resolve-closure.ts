@@ -14,6 +14,13 @@ export const resolveClosure = (closure: Closure): Closure => {
   closure.captures = [];
   closure.body = resolveEntities(closure.body);
   closure.inferredReturnType = getExprType(closure.body);
+  if (
+    closure.annotatedReturnType?.isPrimitiveType() &&
+    (closure.annotatedReturnType.name.value === "void" ||
+      closure.annotatedReturnType.name.value === "voyd")
+  ) {
+    closure.inferredReturnType = closure.annotatedReturnType;
+  }
   closure.returnType =
     closure.annotatedReturnType ?? closure.inferredReturnType;
   closure.typesResolved = true;
