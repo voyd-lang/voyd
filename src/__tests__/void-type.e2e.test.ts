@@ -9,6 +9,7 @@ describe("E2E void return types", () => {
 
   beforeAll(async () => {
     const mod = await compile(voidTypeVoyd);
+    assert(mod.validate(), "Module is valid");
     instance = getWasmInstance(mod);
   });
 

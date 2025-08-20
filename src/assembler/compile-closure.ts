@@ -98,7 +98,7 @@ export const compile = (opts: CompileExprOpts<Closure>): number => {
   const body = compileExpression({
     ...opts,
     expr: closure.body,
-    isReturnExpr: true,
+    isReturnExpr: returnType !== binaryen.none,
   });
 
   const varTypes = closure.variables.map((v) => mapBinaryenType(opts, v.type!));
