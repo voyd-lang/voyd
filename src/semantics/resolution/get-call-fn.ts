@@ -127,20 +127,27 @@ const parametersMatch = (candidate: Fn, call: Call) => {
     const arg = call.argAt(i);
     if (!arg) return false;
 
+    const val = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
+
     if (
-      arg.isClosure() &&
-      arg.parameters.some((cp) => !cp.type && !cp.typeExpr)
+      val?.isClosure() &&
+      val.parameters.some((cp) => !cp.type && !cp.typeExpr)
     ) {
       const paramType = p.type;
       if (!paramType?.isFnType()) return false;
-      arg.parameters.forEach((cp, j) => {
+      val.parameters.forEach((cp, j) => {
         const expected = paramType.parameters[j]?.type;
         if (!cp.type && expected) cp.type = expected;
       });
-      resolveEntities(arg);
+      const resolvedVal = resolveEntities(val);
+      if (arg.isCall() && arg.calls(":")) {
+        arg.args.set(1, resolvedVal);
+      } else {
+        call.args.set(i, resolvedVal);
+      }
     }
 
-    const argType = getExprType(arg);
+    const argType = getExprType(val);
     if (!argType) return false;
     const argLabel = getExprLabel(arg);
     const labelsMatch = p.label?.value === argLabel;

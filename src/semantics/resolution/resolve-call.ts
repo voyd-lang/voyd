@@ -24,7 +24,11 @@ export const resolveCall = (call: Call): Call => {
   if (call.calls("FixedArray")) return resolveFixedArray(call);
   if (call.calls("binaryen")) return resolveBinaryen(call);
   call.args = call.args.map((arg) => {
-    if (arg.isClosure() && arg.parameters.some((p) => !p.type && !p.typeExpr)) {
+    const inner = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
+    if (
+      inner?.isClosure() &&
+      inner.parameters.some((p) => !p.type && !p.typeExpr)
+    ) {
       return arg;
     }
     return resolveEntities(arg);
@@ -177,20 +181,27 @@ const inferClosureArgTypes = (call: Call) => {
   if (!fn?.isFn()) return;
   fn.parameters.forEach((param, index) => {
     const arg = call.argAt(index);
-    if (!arg?.isClosure()) return;
+    if (!arg) return;
+    const closure = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
+    if (!closure?.isClosure()) return;
 
     const paramType = param.type;
     if (!paramType?.isFnType()) return;
 
-    arg.parameters.forEach((p, i) => {
+    closure.parameters.forEach((p, i) => {
       const expected = paramType.parameters[i]?.type;
       if (!p.type && expected) {
         p.type = expected;
       }
     });
 
-    const resolved = resolveEntities(arg);
-    call.args.set(index, resolved);
+    const resolvedClosure = resolveEntities(closure);
+    if (arg.isCall() && arg.calls(":")) {
+      arg.args.set(1, resolvedClosure);
+      call.args.set(index, resolveEntities(arg));
+    } else {
+      call.args.set(index, resolvedClosure);
+    }
   });
 };
 
