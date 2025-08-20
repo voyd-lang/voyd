@@ -332,15 +332,22 @@ export class FnType extends BaseType {
     this.parameters = opts.parameters;
     this.returnType = opts.returnType;
     this.returnTypeExpr = opts.returnTypeExpr;
+    if (this.returnTypeExpr) {
+      this.returnTypeExpr.parent = this;
+    }
   }
 
   clone(parent?: Expr): FnType {
-    return new FnType({
+    const parameters = this.parameters.map((p) => p.clone());
+    const returnTypeExpr = this.returnTypeExpr?.clone();
+    const clone = new FnType({
       ...super.getCloneOpts(parent),
       returnType: this.returnType,
-      parameters: this.parameters,
-      returnTypeExpr: this.returnTypeExpr?.clone(),
+      parameters,
+      returnTypeExpr,
     });
+    parameters.forEach((p) => (p.parent = clone));
+    return clone;
   }
 
   toJSON(): TypeJSON {
