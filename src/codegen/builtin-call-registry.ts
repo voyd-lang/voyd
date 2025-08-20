@@ -22,7 +22,7 @@ export const builtinCallCompilers = new Map<string, CallCompiler>([
   ["break", (opts) => opts.mod.br(opts.loopBreakId!)],
   ["FixedArray", compileFixedArray],
   ["binaryen", compileBinaryen],
-  ["call", compileCallClosure],
+  ["call-closure", compileCallClosure],
   [
     ":",
     (opts) =>

@@ -25,7 +25,6 @@ import {
 import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
 import { typesAreCompatible } from "./resolution/index.js";
-import { resolveFnSignature } from "./resolution/resolve-fn.js";
 import { getCallFn } from "./resolution/get-call-fn.js";
 
 export const checkTypes = (expr: Expr | undefined): Expr => {
@@ -57,7 +56,7 @@ const checkBlockTypes = (block: Block): Block => {
 const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("export")) return checkExport(call);
   if (call.calls("if")) return checkIf(call);
-  if (call.calls("call")) return checkClosureCall(call);
+  if (call.calls("call-closure")) return checkClosureCall(call);
   if (call.calls("binaryen")) return checkBinaryenCall(call);
   if (call.calls("mod")) return call;
   if (call.calls("break")) return call;
