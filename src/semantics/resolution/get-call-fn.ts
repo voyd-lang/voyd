@@ -15,6 +15,10 @@ export const getCallFn = (call: Call): Fn | undefined => {
     return undefined;
   }
 
+  if (call.fn?.isFn() && call.fn.parentTrait) {
+    return call.fn;
+  }
+
   if (candidates.length === 1) return candidates[0];
 
   throw new Error(

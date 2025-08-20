@@ -1,1 +1,1 @@
-export const OBJECT_FIELDS_OFFSET = 2;
+export const OBJECT_FIELDS_OFFSET = 3;

@@ -17,7 +17,7 @@ import {
 import * as gc from "./lib/binaryen-gc/index.js";
 import { TypeRef } from "./lib/binaryen-gc/types.js";
 import { initExtensionHelpers } from "./assembler/rtt/extension.js";
-import { initFieldLookupHelpers } from "./assembler/index.js";
+import { initFieldLookupHelpers, initMethodLookupHelpers } from "./assembler/index.js";
 
 import { compile as compileCall } from "./assembler/compile-call.js";
 import { compile as compileBlock } from "./assembler/compile-block.js";
@@ -48,7 +48,14 @@ export const assemble = (ast: Expr) => {
   mod.setMemory(0, 1, null, []);
   const extensionHelpers = initExtensionHelpers(mod);
   const fieldLookupHelpers = initFieldLookupHelpers(mod);
-  compileExpression({ expr: ast, mod, extensionHelpers, fieldLookupHelpers });
+  const methodLookupHelpers = initMethodLookupHelpers(mod);
+  compileExpression({
+    expr: ast,
+    mod,
+    extensionHelpers,
+    fieldLookupHelpers,
+    methodLookupHelpers,
+  });
   mod.autoDrop();
   return mod;
 };
@@ -58,6 +65,7 @@ export interface CompileExprOpts<T = Expr> {
   mod: binaryen.Module;
   extensionHelpers: ReturnType<typeof initExtensionHelpers>;
   fieldLookupHelpers: ReturnType<typeof initFieldLookupHelpers>;
+  methodLookupHelpers: ReturnType<typeof initMethodLookupHelpers>;
   isReturnExpr?: boolean;
   loopBreakId?: string;
 }
@@ -124,6 +132,7 @@ export const mapBinaryenType = (
   }
   if (type.isFnType()) return getClosureSuperType(opts.mod);
   if (type.isTraitType()) return buildObjectType(opts, voydBaseObject);
+  if (type.isSelfType()) return buildObjectType(opts, voydBaseObject);
   if (type.isUnionType()) return buildUnionType(opts, type);
   if (type.isFixedArrayType()) return buildFixedArrayType(opts, type);
   if (type.isIntersectionType()) return buildIntersectionType(opts, type);
@@ -191,6 +200,10 @@ export const buildObjectType = (
         type: opts.fieldLookupHelpers.lookupTableType,
         name: "__field_index_table",
       },
+      {
+        type: opts.methodLookupHelpers.lookupTableType,
+        name: "__method_lookup_table",
+      },
       ...obj.fields.map((field) => ({
         type: mapBinaryenType(opts, field.type!),
         name: field.name,
@@ -234,6 +247,13 @@ export const buildObjectType = (
       impl.methods.forEach((fn) => compileFunction({ ...opts, expr: fn }))
     );
   }
+
+  mod.addGlobal(
+    `__method_table_${obj.id}`,
+    opts.methodLookupHelpers.lookupTableType,
+    false,
+    opts.methodLookupHelpers.initMethodTable({ ...opts, expr: obj })
+  );
 
   const finalType = obj.binaryenType;
   if (obj.isStructural) {

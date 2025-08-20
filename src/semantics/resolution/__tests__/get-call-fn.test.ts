@@ -11,6 +11,8 @@ import {
   ObjectType,
   Parameter,
 } from "../../../syntax-objects/index.js";
+import { TraitType } from "../../../syntax-objects/types/trait.js";
+import { Implementation } from "../../../syntax-objects/implementation.js";
 import { getCallFn } from "../get-call-fn.js";
 
 describe("getCallFn", () => {
@@ -170,5 +172,46 @@ describe("getCallFn", () => {
     expect(() => getCallFn(call)).toThrowError(
       `Ambiguous call ${JSON.stringify(call, null, 2)}`
     );
+  });
+
+  test("returns trait method for trait object calls", () => {
+    const objType = new ObjectType({ name: "Obj", value: [] });
+    const traitMethod = new Fn({
+      name: new Identifier({ value: "run" }),
+      parameters: [new Parameter({ name: new Identifier({ value: "self" }) })],
+    });
+    const trait = new TraitType({
+      name: new Identifier({ value: "Runner" }),
+      methods: [traitMethod],
+    });
+    const impl = new Implementation({
+      typeParams: [],
+      targetTypeExpr: new Identifier({ value: "Obj" }),
+      body: new List({ value: [] }),
+      traitExpr: new Identifier({ value: "Runner" }),
+    });
+    const implMethod = new Fn({
+      name: new Identifier({ value: "run" }),
+      parameters: [
+        new Parameter({
+          name: new Identifier({ value: "self" }),
+          type: objType,
+        }),
+      ],
+      parent: impl,
+    });
+    impl.targetType = objType;
+    impl.trait = trait;
+    impl.registerExport(implMethod);
+    trait.implementations = [impl];
+
+    const arg = new MockIdentifier({ value: "r", entity: trait });
+    const call = new Call({
+      fnName: new Identifier({ value: "run" }),
+      args: new List({ value: [arg] }),
+      fn: traitMethod,
+    });
+
+    expect(getCallFn(call)).toBe(traitMethod);
   });
 });
