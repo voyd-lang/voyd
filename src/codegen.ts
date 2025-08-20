@@ -17,7 +17,10 @@ import {
 import * as gc from "./lib/binaryen-gc/index.js";
 import { TypeRef } from "./lib/binaryen-gc/types.js";
 import { initExtensionHelpers } from "./codegen/rtt/extension.js";
-import { initFieldLookupHelpers, initMethodLookupHelpers } from "./codegen/index.js";
+import {
+  initFieldLookupHelpers,
+  initMethodLookupHelpers,
+} from "./codegen/index.js";
 
 import { compile as compileCall } from "./codegen/compile-call.js";
 import { compile as compileBlock } from "./codegen/compile-block.js";
@@ -38,7 +41,10 @@ import { compile as compileUse } from "./codegen/compile-use.js";
 import { compile as compileTrait } from "./codegen/compile-trait.js";
 import { compile as compileMacro } from "./codegen/compile-macro.js";
 import { compile as compileMacroVariable } from "./codegen/compile-macro-variable.js";
-import { compile as compileClosure, getClosureSuperType } from "./codegen/compile-closure.js";
+import {
+  compile as compileClosure,
+  getClosureSuperType,
+} from "./codegen/compile-closure.js";
 
 const buildingTypePlaceholders = new Map<ObjectType, TypeRef>();
 
@@ -97,11 +103,7 @@ export const compilers: Record<string, CompilerFn> = {
 
 export const compileExpression = (opts: CompileExprOpts): number => {
   const compiler = compilers[opts.expr.syntaxType];
-  if (compiler) {
-    const isReturnExpr = opts.isReturnExpr;
-    opts.isReturnExpr = false;
-    return compiler({ ...opts, isReturnExpr } as any);
-  }
+  if (compiler) return compiler(opts);
 
   throw new Error(
     `Unrecognized expression ${opts.expr.syntaxType} ${opts.expr.location}`
@@ -272,4 +274,3 @@ export const getI32ArrayType = (mod: binaryen.Module) => {
   i32ArrayType = gc.defineArrayType(mod, binaryen.i32, true);
   return i32ArrayType;
 };
-
