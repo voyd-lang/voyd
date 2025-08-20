@@ -1,6 +1,6 @@
 import { processSemantics } from "./semantics/index.js";
 import binaryen from "binaryen";
-import { assemble } from "./assembler.js";
+import { codegen } from "./codegen.js";
 import {
   ParsedModule,
   parseModuleFromSrc,
@@ -19,5 +19,5 @@ export const compileSrc = async (path: string) => {
 
 export const compileParsedModule = (module: ParsedModule): binaryen.Module => {
   const typeCheckedModule = processSemantics(module);
-  return assemble(typeCheckedModule);
+  return codegen(typeCheckedModule);
 };
