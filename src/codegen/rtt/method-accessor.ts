@@ -112,7 +112,10 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
               .slice(1)
               .map((p) => mapBinaryenType(opts, p.type!)),
           ]);
-          const returnType = mapBinaryenType(opts, traitMethod.returnType!);
+          const wrapperReturnType = mapBinaryenType(
+            opts,
+            traitMethod.returnType!
+          );
           const body = mod.call(
             implMethod.id,
             [
@@ -127,12 +130,12 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
                   mod.local.get(i + 1, mapBinaryenType(opts, _.type!))
                 ),
             ],
-            returnType
+            mapBinaryenType(opts, implMethod.returnType!)
           );
           const fnRef = mod.addFunction(
             wrapperName,
             paramTypes,
-            returnType,
+            wrapperReturnType,
             [],
             body
           );
