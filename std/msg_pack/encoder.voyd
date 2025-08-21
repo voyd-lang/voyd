@@ -30,11 +30,11 @@ impl Encoder
       self.write_u8(value)
     else:
       // uint 32
-      self.write_u8(0xce)
+      self.write_u8(206)
       self.write_u8(shift_ru(value, 24))
-      self.write_u8(bit_and(shift_ru(value, 16), 0xff))
-      self.write_u8(bit_and(shift_ru(value, 8), 0xff))
-      self.write_u8(bit_and(value, 0xff))
+      self.write_u8(bit_and(shift_ru(value, 16), 255))
+      self.write_u8(bit_and(shift_ru(value, 8), 255))
+      self.write_u8(bit_and(value, 255))
 
 pub fn encode_json(value: i32, ptr: i32) -> i32
   if linear_memory::size() == 0 then:
