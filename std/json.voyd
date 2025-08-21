@@ -1,6 +1,11 @@
 use macros::all
 use array::all
 use map::all
+use linear_memory::all
+
+declare 'json'
+  pub fn write(ptr: i32, value: Json) -> i32
+  pub fn read(ptr: i32, len: i32) -> Json
 
 pub obj JsonNull {}
 pub obj JsonNumber { val: f64 }
