@@ -51,7 +51,7 @@ const buildingTypePlaceholders = new Map<ObjectType, TypeRef>();
 export const codegen = (ast: Expr) => {
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
-  mod.setMemory(0, 1, null, []);
+  mod.setMemory(0, 1, "main_memory", []);
   const extensionHelpers = initExtensionHelpers(mod);
   const fieldLookupHelpers = initFieldLookupHelpers(mod);
   const methodLookupHelpers = initMethodLookupHelpers(mod);

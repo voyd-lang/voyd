@@ -3,6 +3,7 @@ import { compile } from "../compiler.js";
 import { describe, test } from "vitest";
 import assert from "node:assert";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import { decode } from "@msgpack/msgpack";
 
 describe("E2E msg pack encode", () => {
   test("encodes number into memory", async (t) => {
@@ -18,6 +19,8 @@ describe("E2E msg pack encode", () => {
     const instance = getWasmInstance(mod);
     const fn = getWasmFn("run_string", instance);
     assert(fn, "Function exists");
-    t.expect(fn(), "encoded string written").toEqual(1667391907);
+    fn();
+    const memory = instance.exports["main_memory"] as WebAssembly.Memory;
+    t.expect(decode(memory.buffer.slice(0, 4))).toEqual("abc");
   });
 });
