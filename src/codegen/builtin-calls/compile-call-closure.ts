@@ -15,7 +15,7 @@ import { getClosureFunctionType } from "../compile-closure.js";
 export const compileCallClosure = (
   opts: CompileExprOpts<Call>
 ): number => {
-  const { expr, mod, isReturnExpr } = opts;
+  const { expr, mod, tailCallType } = opts;
   const closure = expr.argAt(0)!;
   const closureType = closure.getType();
   if (!closureType || !closureType.isFnType()) {
@@ -24,7 +24,7 @@ export const compileCallClosure = (
   const closureRef = compileExpression({
     ...opts,
     expr: closure,
-    isReturnExpr: false,
+    isReturnExpr: true,
   });
   const funcRef = structGetFieldValue({
     mod,
@@ -34,7 +34,9 @@ export const compileCallClosure = (
   });
   const argRefs = expr.args
     .sliceAsArray(1)
-    .map((arg) => compileExpression({ ...opts, expr: arg, isReturnExpr: false }));
+    .map((arg) =>
+      compileExpression({ ...opts, expr: arg, isReturnExpr: true })
+    );
   const args = [closureRef, ...argRefs];
   let target = funcRef;
   try {
@@ -42,8 +44,15 @@ export const compileCallClosure = (
     target = refCast(mod, funcRef, callType);
   } catch {}
   const returnType = mapBinaryenType(opts, closureType.returnType);
-  const callExpr = callRef(mod, target, args, returnType, false);
-  return isReturnExpr && returnType !== binaryen.none
-    ? mod.return(callExpr)
-    : callExpr;
+  const callExpr = callRef(
+    mod,
+    target,
+    args,
+    returnType,
+    tailCallType !== undefined && tailCallType === returnType
+  );
+  if (tailCallType !== undefined && tailCallType !== returnType) {
+    return mod.return(callExpr);
+  }
+  return callExpr;
 };

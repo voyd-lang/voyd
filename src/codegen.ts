@@ -73,6 +73,7 @@ export interface CompileExprOpts<T = Expr> {
   methodLookupHelpers: ReturnType<typeof initMethodLookupHelpers>;
   isReturnExpr?: boolean;
   loopBreakId?: string;
+  tailCallType?: binaryen.Type;
 }
 
 type CompilerFn = (opts: CompileExprOpts<any>) => number;

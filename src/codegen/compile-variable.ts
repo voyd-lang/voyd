@@ -6,7 +6,11 @@ export const compile = (opts: CompileExprOpts<Variable>) => {
   return mod.local.set(
     expr.getIndex(),
     expr.initializer
-      ? compileExpression({ ...opts, expr: expr.initializer })
+      ? compileExpression({
+          ...opts,
+          expr: expr.initializer,
+          isReturnExpr: true,
+        })
       : mod.nop()
   );
 };

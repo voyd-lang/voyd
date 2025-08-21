@@ -10,6 +10,7 @@ export const compile = (opts: CompileExprOpts<Block>) => {
       ...opts,
       expr,
       isReturnExpr: opts.isReturnExpr && isLast,
+      tailCallType: opts.tailCallType && isLast ? opts.tailCallType : undefined,
     });
     return !opts.isReturnExpr || !isLast ? asStmt(opts.mod, child) : child;
   });

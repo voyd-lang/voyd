@@ -207,7 +207,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
       mod,
       fieldType: lookupTableType,
       fieldIndex: 1,
-      exprRef: compileExpression({ ...opts, expr: obj }),
+      exprRef: compileExpression({ ...opts, expr: obj, isReturnExpr: true }),
     });
 
     const funcRef = mod.call(
@@ -219,7 +219,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
     return callRef(
       mod,
       refCast(mod, funcRef, field.binaryenGetterType!),
-      [compileExpression({ ...opts, expr: obj })],
+      [compileExpression({ ...opts, expr: obj, isReturnExpr: true })],
       mapBinaryenType(opts, field.type!)
     );
   };
@@ -232,7 +232,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
     const value = compileExpression({
       ...opts,
       expr: expr.argAt(1)!,
-      isReturnExpr: false,
+      isReturnExpr: true,
     });
     const objType = target.getType() as ObjectType | IntersectionType;
 
@@ -251,7 +251,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
       mod,
       fieldType: lookupTableType,
       fieldIndex: 1,
-      exprRef: compileExpression({ ...opts, expr: target }),
+      exprRef: compileExpression({ ...opts, expr: target, isReturnExpr: true }),
     });
 
     const funcRef = mod.call(
@@ -263,7 +263,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
     return callRef(
       mod,
       refCast(mod, funcRef, field.binaryenSetterType!),
-      [compileExpression({ ...opts, expr: target }), value],
+      [compileExpression({ ...opts, expr: target, isReturnExpr: true }), value],
       mapBinaryenType(opts, field.type!)
     );
   };

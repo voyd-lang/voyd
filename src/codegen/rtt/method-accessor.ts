@@ -165,7 +165,7 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
       mod,
       fieldType: lookupTableType,
       fieldIndex: 2,
-      exprRef: compileExpression({ ...opts, expr: obj, isReturnExpr: false }),
+      exprRef: compileExpression({ ...opts, expr: obj, isReturnExpr: true }),
     });
 
     const funcRef = mod.call(
@@ -176,7 +176,9 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
     const target = refCast(mod, funcRef, fn.getAttribute("binaryenType") as number);
     const args = expr.args
       .toArray()
-      .map((arg) => compileExpression({ ...opts, expr: arg, isReturnExpr: false }));
+      .map((arg) =>
+        compileExpression({ ...opts, expr: arg, isReturnExpr: true })
+      );
     return callRef(mod, target, args, mapBinaryenType(opts, fn.returnType!));
   };
 

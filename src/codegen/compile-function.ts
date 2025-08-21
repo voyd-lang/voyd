@@ -23,6 +23,7 @@ export const compile = (opts: CompileExprOpts<Fn>): number => {
     ...opts,
     expr: fn.body!,
     isReturnExpr: returnType !== binaryen.none,
+    tailCallType: returnType !== binaryen.none ? returnType : undefined,
   });
   if (returnType === binaryen.none) {
     body = asStmt(mod, body);

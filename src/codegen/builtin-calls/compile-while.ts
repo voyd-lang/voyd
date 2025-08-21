@@ -15,7 +15,7 @@ export const compileWhile = (opts: CompileExprOpts<Call>) => {
           compileExpression({
             ...opts,
             expr: expr.exprArgAt(0),
-            isReturnExpr: false,
+            isReturnExpr: true,
           }),
           mod.i32.const(1)
         )

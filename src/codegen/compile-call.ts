@@ -21,7 +21,7 @@ import { AugmentedBinaryen } from "../lib/binaryen-gc/types.js";
 const bin = binaryen as unknown as AugmentedBinaryen;
 
 export const compile = (opts: CompileExprOpts<Call>): number => {
-  const { expr, mod, isReturnExpr } = opts;
+  const { expr, mod, tailCallType } = opts;
 
   const compiler = builtinCallCompilers.get(expr.fnName.value);
   if (compiler) {
@@ -34,7 +34,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     const closureRef = compileExpression({
       ...opts,
       expr: expr.fnName,
-      isReturnExpr: false,
+      isReturnExpr: true,
     });
     const funcRef = structGetFieldValue({
       mod,
@@ -47,7 +47,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       ...expr.args
         .toArray()
         .map((arg) =>
-          compileExpression({ ...opts, expr: arg, isReturnExpr: false })
+          compileExpression({ ...opts, expr: arg, isReturnExpr: true })
         ),
     ];
     let target = funcRef;
@@ -56,10 +56,17 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       target = refCast(mod, funcRef, callType);
     } catch {}
     const returnType = mapBinaryenType(opts, fnType.returnType);
-    const callExpr = callRef(mod, target, args, returnType, false);
-    return isReturnExpr && returnType !== binaryen.none
-      ? mod.return(callExpr)
-      : callExpr;
+    const callExpr = callRef(
+      mod,
+      target,
+      args,
+      returnType,
+      tailCallType !== undefined && tailCallType === returnType
+    );
+    if (tailCallType !== undefined && tailCallType !== returnType) {
+      return mod.return(callExpr);
+    }
+    return callExpr;
   }
 
   if (!expr.fn) {
@@ -81,7 +88,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       mod,
       fieldType: opts.methodLookupHelpers.lookupTableType,
       fieldIndex: 2,
-      exprRef: compileExpression({ ...opts, expr: obj, isReturnExpr: false }),
+      exprRef: compileExpression({ ...opts, expr: obj, isReturnExpr: true }),
     });
     const funcRef = mod.call(
       opts.methodLookupHelpers.LOOKUP_NAME,
@@ -114,7 +121,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       const compiled = compileExpression({
         ...opts,
         expr: arg,
-        isReturnExpr: false,
+        isReturnExpr: true,
       });
       const param = traitFn.parameters[i];
       const argType = arg.getType();
@@ -124,27 +131,30 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       return compiled;
     });
     const returnType = mapBinaryenType(opts, traitFn.returnType!);
-    const callExpr = callRef(mod, target, args, returnType);
-    return isReturnExpr && returnType !== binaryen.none
-      ? mod.return(callExpr)
-      : callExpr;
+    const callExpr = callRef(
+      mod,
+      target,
+      args,
+      returnType,
+      tailCallType !== undefined && tailCallType === returnType
+    );
+    if (tailCallType !== undefined && tailCallType !== returnType) {
+      return mod.return(callExpr);
+    }
+    return callExpr;
   }
 
-  const args = expr.args.toArray().map((arg, i) =>
-    compileExpression({
-      ...opts,
-      expr: arg,
-      isReturnExpr: false,
-    })
-  );
+  const args = expr.args
+    .toArray()
+    .map((arg, i) => compileExpression({ ...opts, expr: arg, isReturnExpr: true }));
 
   const fn = expr.fn as Fn;
   const id = fn.id;
   const returnType = mapBinaryenType(opts, fn.returnType!);
 
-  if (isReturnExpr) {
+  if (tailCallType !== undefined && tailCallType === returnType) {
     return returnCall(mod, id, args, returnType);
   }
-
-  return mod.call(id, args, returnType);
+  const callExpr = mod.call(id, args, returnType);
+  return tailCallType !== undefined ? mod.return(callExpr) : callExpr;
 };

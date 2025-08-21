@@ -21,7 +21,7 @@ export const compileAssign = (opts: CompileExprOpts<Call>): number => {
   const value = compileExpression({
     ...opts,
     expr: expr.argAt(1)!,
-    isReturnExpr: false,
+    isReturnExpr: true,
   });
 
   const entity = (identifier as Identifier).resolve();
@@ -50,7 +50,7 @@ const compileFieldAssign = (opts: CompileExprOpts<Call>) => {
   const value = compileExpression({
     ...opts,
     expr: expr.argAt(1)!,
-    isReturnExpr: false,
+    isReturnExpr: true,
   });
 
   const index = type.getFieldIndex(member);
@@ -61,7 +61,7 @@ const compileFieldAssign = (opts: CompileExprOpts<Call>) => {
 
   return gc.structSetFieldValue({
     mod,
-    ref: compileExpression({ ...opts, expr: target }),
+    ref: compileExpression({ ...opts, expr: target, isReturnExpr: true }),
     fieldIndex: memberIndex,
     value,
   });

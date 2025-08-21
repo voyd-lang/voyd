@@ -29,7 +29,7 @@ export const compileObjectInit = (opts: CompileExprOpts<Call>) => {
       compileExpression({
         ...opts,
         expr: field.initializer,
-        isReturnExpr: false,
+        isReturnExpr: true,
       })
     ),
   ]);

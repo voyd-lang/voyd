@@ -10,7 +10,7 @@ export const compileIf = (opts: CompileExprOpts<Call>) => {
   const condition = compileExpression({
     ...opts,
     expr: conditionNode,
-    isReturnExpr: false,
+    isReturnExpr: true,
   });
   const ifTrue = compileExpression({
     ...opts,
