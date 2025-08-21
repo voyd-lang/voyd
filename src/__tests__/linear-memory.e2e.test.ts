@@ -1,6 +1,7 @@
 import {
   linearMemoryVoyd,
   linearMemoryModuleVoyd,
+  linearMemorySizeVoyd,
 } from "./fixtures/linear-memory.js";
 import { compile } from "../compiler.js";
 import { describe, test } from "vitest";
@@ -22,5 +23,13 @@ describe("E2E linear memory", () => {
     const fn = getWasmFn("run", instance);
     assert(fn, "Function exists");
     t.expect(fn(), "run returns stored value").toEqual(42);
+  });
+
+  test("size returns bytes", async (t) => {
+    const mod = await compile(linearMemorySizeVoyd);
+    const instance = getWasmInstance(mod);
+    const fn = getWasmFn("run", instance);
+    assert(fn, "Function exists");
+    t.expect(fn(), "run returns memory bytes").toEqual(0);
   });
 });
