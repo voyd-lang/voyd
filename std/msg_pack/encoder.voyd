@@ -24,7 +24,7 @@ impl Encoder
       args: `(BnrConst(0), BnrConst(0), self.ptr + self.pos, value)
     self.pos = self.pos + 1
 
-  fn encode_number(self, value: i32) -> void
+  pub fn encode_number(self, value: i32) -> void
     if value >= 0 and value < 128 then:
       // positive fixint
       self.write_u8(value)
@@ -40,5 +40,5 @@ pub fn encode_json(value: i32, ptr: i32) -> i32
   if linear_memory::size() == 0 then:
     linear_memory::grow(1)
   let enc = Encoder { ptr: ptr, pos: 0 }
-  Encoder::encode_number(enc, value)
+  enc.encode_number(value)
   enc.pos
