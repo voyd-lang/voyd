@@ -1,8 +1,11 @@
 use std::macros::all
-use encoder::{ encode_json: internal_encode_json }
+use encoder::{ encode_json_i32, encode_json_string }
 
 pub fn encode_json(value: i32, ptr: i32) -> i32
-  internal_encode_json(value, ptr)
+  encode_json_i32(value, ptr)
+
+pub fn encode_string(value: string, ptr: i32) -> i32
+  encode_json_string(value, ptr)
 
 pub fn decode_json(ptr: i32, len: i32) -> i32
   // not yet implemented

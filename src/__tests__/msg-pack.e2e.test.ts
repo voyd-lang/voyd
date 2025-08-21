@@ -12,4 +12,12 @@ describe("E2E msg pack encode", () => {
     assert(fn, "Function exists");
     t.expect(fn(), "encoded number written").toEqual(42);
   });
+
+  test("encodes string into memory", async (t) => {
+    const mod = await compile(msgPackVoyd);
+    const instance = getWasmInstance(mod);
+    const fn = getWasmFn("run_string", instance);
+    assert(fn, "Function exists");
+    t.expect(fn(), "encoded string written").toEqual(1667391907);
+  });
 });
