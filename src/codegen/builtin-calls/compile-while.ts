@@ -1,5 +1,6 @@
 import { CompileExprOpts, compileExpression } from "../../codegen.js";
 import { Call } from "../../syntax-objects/call.js";
+import { asStmt } from "../../lib/binaryen-gc/index.js";
 
 export const compileWhile = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;
@@ -19,12 +20,15 @@ export const compileWhile = (opts: CompileExprOpts<Call>) => {
           mod.i32.const(1)
         )
       ),
-      compileExpression({
-        ...opts,
-        expr: expr.labeledArg("do"),
-        loopBreakId: breakId,
-        isReturnExpr: false,
-      }),
+      asStmt(
+        mod,
+        compileExpression({
+          ...opts,
+          expr: expr.labeledArg("do"),
+          loopBreakId: breakId,
+          isReturnExpr: false,
+        })
+      ),
       mod.br(loopId),
     ])
   );

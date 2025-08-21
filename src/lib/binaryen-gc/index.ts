@@ -278,3 +278,16 @@ export const annotateStructNames = (
     );
   }
 };
+
+export const asStmt = (
+  mod: binaryen.Module,
+  e: ExpressionRef
+): ExpressionRef => {
+  const t =
+    binaryen.getExpressionType(e) ?? binaryen.getExpressionInfo(e).type;
+
+  if (t === binaryen.none || t === binaryen.unreachable) return e;
+
+  const parts = binaryen.expandType ? binaryen.expandType(t) : [t];
+  return parts.length > 1 ? (mod as any).tuple.drop(e) : mod.drop(e);
+};
