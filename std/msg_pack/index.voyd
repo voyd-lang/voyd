@@ -1,0 +1,9 @@
+use std::macros::all
+use encoder::{ encode_json: internal_encode_json }
+
+pub fn encode_json(value: i32, ptr: i32) -> i32
+  internal_encode_json(value, ptr)
+
+pub fn decode_json(ptr: i32, len: i32) -> i32
+  // not yet implemented
+  0

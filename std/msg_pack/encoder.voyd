@@ -1,15 +1,44 @@
 use std::all
 use std::linear_memory
 
-pub obj Encoder {
+obj Encoder {
   ptr: i32,
   pos: i32,
 }
-
-pub fn test(a: i32, b: i32)
-  a * b
 
 impl Encoder
   fn ensure_capacity(self, add: i32) -> void
     let required = self.ptr + self.pos + add
     let current_bytes = linear_memory::size() * 65536
+    if required >= current_bytes then:
+      let needed = required - current_bytes
+      // compute pages to grow
+      let pages = (needed / 65536) + 1
+      linear_memory::grow(pages)
+
+  fn write_u8(self, value: i32) -> void
+    self.ensure_capacity(1)
+    binaryen
+      func: store8
+      namespace: i32
+      args: `(BnrConst(0), BnrConst(0), self.ptr + self.pos, value)
+    self.pos = self.pos + 1
+
+  pub fn encode_number(self, value: i32) -> void
+    if value >= 0 and value < 128 then:
+      // positive fixint
+      self.write_u8(value)
+    else:
+      // uint 32
+      self.write_u8(206)
+      self.write_u8(shift_ru(value, 24))
+      self.write_u8(bit_and(shift_ru(value, 16), 255))
+      self.write_u8(bit_and(shift_ru(value, 8), 255))
+      self.write_u8(bit_and(value, 255))
+
+pub fn encode_json(value: i32, ptr: i32) -> i32
+  if linear_memory::size() == 0 then:
+    linear_memory::grow(1)
+  let enc = Encoder { ptr: ptr, pos: 0 }
+  enc.encode_number(value)
+  enc.pos
