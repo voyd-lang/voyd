@@ -1,0 +1,15 @@
+use std::all
+use std::linear_memory
+
+pub obj Encoder {
+  ptr: i32,
+  pos: i32,
+}
+
+pub fn test(a: i32, b: i32)
+  a * b
+
+impl Encoder
+  fn ensure_capacity(self, add: i32) -> void
+    let required = self.ptr + self.pos + add
+    let current_bytes = linear_memory::size() * 65536
