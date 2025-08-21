@@ -1,16 +1,17 @@
-import { CompileExprOpts, compileExpression } from "../codegen.js";
+import binaryen from "binaryen";
+import { CompileExprOpts, compileExpression, asStmt } from "../codegen.js";
 import { Block } from "../syntax-objects/block.js";
 
 export const compile = (opts: CompileExprOpts<Block>) => {
-  return opts.mod.block(
-    null,
-    opts.expr.body.map((expr, index, array) => {
-      if (index === array.length - 1 && opts.isReturnExpr) {
-        return compileExpression({ ...opts, expr, isReturnExpr: true });
-      }
-
-      return compileExpression({ ...opts, expr, isReturnExpr: false });
-    })
-  );
+  const { expr, mod } = opts;
+  const children = expr.body.map((child, index, array) => {
+    const compiled = compileExpression({
+      ...opts,
+      expr: child,
+      isReturnExpr: opts.isReturnExpr && index === array.length - 1,
+    });
+    return index === array.length - 1 ? compiled : asStmt(mod, compiled);
+  });
+  return mod.block(null, children, binaryen.auto);
 };
 

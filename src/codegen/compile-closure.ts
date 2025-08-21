@@ -3,6 +3,7 @@ import {
   CompileExprOpts,
   compileExpression,
   mapBinaryenType,
+  asStmt,
 } from "../codegen.js";
 import { Closure } from "../syntax-objects/closure.js";
 import { FnType } from "../syntax-objects/types.js";
@@ -95,11 +96,12 @@ export const compile = (opts: CompileExprOpts<Closure>): number => {
   ]);
   const returnType = mapBinaryenType(opts, closure.getReturnType());
 
-  const body = compileExpression({
+  const bodyExpr = compileExpression({
     ...opts,
     expr: closure.body,
     isReturnExpr: returnType !== binaryen.none,
   });
+  const body = returnType === binaryen.none ? asStmt(mod, bodyExpr) : bodyExpr;
 
   const varTypes = closure.variables.map((v) => mapBinaryenType(opts, v.type!));
   const fnName = `__closure_${closure.syntaxId}`;
