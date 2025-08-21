@@ -1,4 +1,10 @@
-import { CompileExprOpts, compileExpression } from "../../codegen.js";
+import binaryen from "binaryen";
+import {
+  CompileExprOpts,
+  compileExpression,
+  asStmt,
+  mapBinaryenType,
+} from "../../codegen.js";
 import { Call } from "../../syntax-objects/call.js";
 
 export const compileIf = (opts: CompileExprOpts<Call>) => {
@@ -16,6 +22,15 @@ export const compileIf = (opts: CompileExprOpts<Call>) => {
     ifFalseNode !== undefined
       ? compileExpression({ ...opts, expr: ifFalseNode })
       : undefined;
-
+  const returnType = expr.getType()
+    ? mapBinaryenType(opts, expr.getType()!)
+    : binaryen.none;
+  if (returnType === binaryen.none) {
+    return mod.if(
+      condition,
+      asStmt(mod, ifTrue),
+      ifFalse !== undefined ? asStmt(mod, ifFalse) : undefined
+    );
+  }
   return mod.if(condition, ifTrue, ifFalse);
 };

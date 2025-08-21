@@ -1,16 +1,19 @@
-import { CompileExprOpts, compileExpression } from "../codegen.js";
+import binaryen from "binaryen";
+import { CompileExprOpts, compileExpression, asStmt } from "../codegen.js";
 import { VoydModule } from "../syntax-objects/module.js";
 
 export const compile = (opts: CompileExprOpts<VoydModule>) => {
-  const result = opts.mod.block(
-    opts.expr.id,
-    opts.expr.value.map((expr) => compileExpression({ ...opts, expr }))
+  const { mod, expr } = opts;
+  const result = mod.block(
+    expr.id,
+    expr.value.map((e) => asStmt(mod, compileExpression({ ...opts, expr: e }))),
+    binaryen.none
   );
 
-  if (opts.expr.isIndex) {
-    opts.expr.getAllExports().forEach((entity) => {
+  if (expr.isIndex) {
+    expr.getAllExports().forEach((entity) => {
       if (entity.isFn()) {
-        opts.mod.addFunctionExport(entity.id, entity.name.value);
+        mod.addFunctionExport(entity.id, entity.name.value);
       }
     });
   }
