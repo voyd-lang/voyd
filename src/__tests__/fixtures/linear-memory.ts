@@ -15,3 +15,10 @@ pub fn run() -> i32
   linear_memory::store(0, 42)
   linear_memory::load_i32(0)
 `;
+
+export const linearMemorySizeVoyd = `
+use std::linear_memory
+
+pub fn run() -> i32
+  linear_memory::size() * 65536
+`;
