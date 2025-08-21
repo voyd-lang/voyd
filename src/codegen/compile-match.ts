@@ -1,22 +1,30 @@
 import binaryen from "binaryen";
-import { CompileExprOpts, compileExpression } from "../codegen.js";
+import {
+  CompileExprOpts,
+  compileExpression,
+  asStmt,
+  mapBinaryenType,
+} from "../codegen.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { compile as compileVariable } from "./compile-variable.js";
 import { compile as compileIdentifier } from "./compile-identifier.js";
 import { structGetFieldValue } from "../lib/binaryen-gc/index.js";
 
 export const compile = (opts: CompileExprOpts<Match>) => {
-  const { expr } = opts;
+  const { expr, mod } = opts;
+  const returnType = expr.type ? mapBinaryenType(opts, expr.type) : binaryen.none;
+  const wrap = (e: number) =>
+    returnType === binaryen.none ? asStmt(mod, e) : e;
 
   const constructIfChain = (cases: MatchCase[]): number => {
     const nextCase = cases.shift();
     if (!nextCase) return opts.mod.unreachable();
 
     if (!cases.length) {
-      return compileExpression({ ...opts, expr: nextCase.expr });
+      return wrap(compileExpression({ ...opts, expr: nextCase.expr }));
     }
 
-    return opts.mod.if(
+    return mod.if(
       opts.mod.call(
         "__extends",
         [
@@ -30,8 +38,8 @@ export const compile = (opts: CompileExprOpts<Match>) => {
         ],
         binaryen.i32
       ),
-      compileExpression({ ...opts, expr: nextCase.expr }),
-      constructIfChain(cases)
+      wrap(compileExpression({ ...opts, expr: nextCase.expr })),
+      returnType === binaryen.none ? asStmt(mod, constructIfChain(cases)) : constructIfChain(cases)
     );
   };
 
@@ -40,16 +48,20 @@ export const compile = (opts: CompileExprOpts<Match>) => {
   );
 
   if (expr.bindVariable) {
-    return opts.mod.block(null, [
-      compileVariable({
-        ...opts,
-        isReturnExpr: false,
-        expr: expr.bindVariable,
-      }),
-      ifChain,
-    ]);
+    const compiledVar = compileVariable({
+      ...opts,
+      isReturnExpr: false,
+      expr: expr.bindVariable,
+    });
+    return mod.block(
+      null,
+      returnType === binaryen.none
+        ? [asStmt(mod, compiledVar), asStmt(mod, ifChain)]
+        : [asStmt(mod, compiledVar), ifChain],
+      returnType === binaryen.none ? binaryen.none : binaryen.auto
+    );
   }
 
-  return ifChain;
+  return returnType === binaryen.none ? asStmt(mod, ifChain) : ifChain;
 };
 

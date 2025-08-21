@@ -62,8 +62,14 @@ export const codegen = (ast: Expr) => {
     fieldLookupHelpers,
     methodLookupHelpers,
   });
-  mod.autoDrop();
   return mod;
+};
+
+export const asStmt = (mod: binaryen.Module, expr: number) => {
+  const type = binaryen.getExpressionType(expr);
+  return type === binaryen.none || type === binaryen.unreachable
+    ? expr
+    : mod.drop(expr);
 };
 
 export interface CompileExprOpts<T = Expr> {
