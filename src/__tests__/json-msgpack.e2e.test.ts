@@ -1,14 +1,20 @@
+import assert from "node:assert";
 import { describe, test } from "vitest";
-import { readJson, writeJson } from "../lib/json.js";
+import { compile } from "../compiler.js";
+import { readJson } from "../lib/json.js";
+import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import { jsonMsgpackVoyd } from "./fixtures/json-msgpack.js";
 
 describe("JSON MessagePack via linear memory", () => {
-  test("roundtrip", (t) => {
-    const memory = new WebAssembly.Memory({ initial: 1 });
-    const instance = { exports: { memory } } as unknown as WebAssembly.Instance;
-    const value = { a: 1, b: [true, "hi"], c: null };
+  test("roundtrip", async (t) => {
+    const mod = await compile(jsonMsgpackVoyd);
+    const instance = getWasmInstance(mod);
+    const fn = getWasmFn("run", instance);
+    assert(fn, "Function exists");
     const ptr = 0;
-    const len = writeJson(value, instance, ptr);
-    const result = readJson<typeof value>(ptr, len, instance);
-    t.expect(result).toEqual(value);
+    const expected = { a: 1, b: [true, "hi"], c: null };
+    const len = fn(ptr);
+    const result = readJson<typeof expected>(ptr, len, instance);
+    t.expect(result).toEqual(expected);
   });
 });
