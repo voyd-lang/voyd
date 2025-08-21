@@ -1,4 +1,9 @@
-import { CompileExprOpts, mapBinaryenType, compileExpression } from "../codegen.js";
+import {
+  CompileExprOpts,
+  mapBinaryenType,
+  compileExpression,
+  asStmt,
+} from "../codegen.js";
 import { Fn } from "../syntax-objects/fn.js";
 import binaryen from "binaryen";
 
@@ -18,11 +23,12 @@ export const compile = (opts: CompileExprOpts<Fn>): number => {
   const parameterTypes = getFunctionParameterTypes(opts, fn);
   const returnType = mapBinaryenType(opts, fn.getReturnType());
 
-  const body = compileExpression({
+  const bodyExpr = compileExpression({
     ...opts,
     expr: fn.body!,
     isReturnExpr: returnType !== binaryen.none,
   });
+  const body = returnType === binaryen.none ? asStmt(mod, bodyExpr) : bodyExpr;
 
   const variableTypes = getFunctionVarTypes(opts, fn);
 
