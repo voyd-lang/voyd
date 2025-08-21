@@ -62,7 +62,6 @@ export const codegen = (ast: Expr) => {
     fieldLookupHelpers,
     methodLookupHelpers,
   });
-  mod.autoDrop();
   return mod;
 };
 
