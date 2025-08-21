@@ -12,3 +12,4 @@ pub mod linear_memory
 pub mod string_lib
 pub mod map::all
 pub mod json::all
+pub mod msg_pack
