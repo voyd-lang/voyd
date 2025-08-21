@@ -1,11 +1,14 @@
+import binaryen from "binaryen";
 import { CompileExprOpts, compileExpression } from "../codegen.js";
+import { asStmt } from "../lib/as-stmt.js";
 import { VoydModule } from "../syntax-objects/module.js";
 
 export const compile = (opts: CompileExprOpts<VoydModule>) => {
-  const result = opts.mod.block(
-    opts.expr.id,
-    opts.expr.value.map((expr) => compileExpression({ ...opts, expr }))
+  const { mod, expr } = opts;
+  const statements = expr.value.map((expr) =>
+    asStmt(mod, compileExpression({ ...opts, expr, isReturnExpr: false }))
   );
+  const result = mod.block(expr.id, statements, binaryen.none);
 
   if (opts.expr.isIndex) {
     opts.expr.getAllExports().forEach((entity) => {

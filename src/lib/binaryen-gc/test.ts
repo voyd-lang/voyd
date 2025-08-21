@@ -104,7 +104,6 @@ export function testGc() {
   );
 
   mod.addFunctionExport("main", "main");
-  mod.autoDrop();
   mod.validate();
 
   // console.log(mod.emitText());
