@@ -541,12 +541,16 @@ const checkImpl = (impl: Implementation): Implementation => {
   if (impl.traitExpr.value && !impl.trait) {
     throw new Error(`Unable to resolve trait for impl at ${impl.location}`);
   }
+  // Always validate method bodies
+  for (const method of impl.methods) {
+    checkFnTypes(method);
+  }
 
   if (!impl.trait) return impl;
 
   for (const method of impl.trait.methods.toArray()) {
     if (
-      !impl.exports.some((fn) =>
+      !impl.methods.some((fn) =>
         typesAreCompatible(fn.getType(), method.getType())
       )
     ) {
@@ -554,10 +558,6 @@ const checkImpl = (impl: Implementation): Implementation => {
         `Impl does not implement ${method.name} at ${impl.location}`
       );
     }
-  }
-
-  for (const method of impl.exports) {
-    checkFnTypes(method);
   }
 
   return impl;
