@@ -31,6 +31,7 @@ export const getExprType = (expr?: Expr): Type | undefined => {
 };
 
 export const getIdentifierType = (id: Identifier): Type | undefined => {
+  if (id.type) return id.type;
   const entity = id.resolve();
   if (!entity && id.is("self") && (id.parentImpl || id.parentTrait)) {
     // When resolving the type of `self` inside a trait, use a scoped
@@ -44,7 +45,11 @@ export const getIdentifierType = (id: Identifier): Type | undefined => {
   if (entity.isParameter()) return entity.type;
   if (entity.isFn()) return entity.getType();
   if (entity.isClosure()) return entity.getType();
-  if (entity.isTypeAlias()) return entity.type;
+  if (entity.isTypeAlias()) {
+    return (
+      entity.type ?? (entity.typeExpr?.isType() ? entity.typeExpr : undefined)
+    );
+  }
   if (entity.isType()) return entity;
   if (entity.isTrait()) return entity;
 };
