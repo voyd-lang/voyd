@@ -76,3 +76,7 @@ pub fn encode_json(value: string, ptr: i32) -> i32
   let enc = Encoder { ptr: ptr, pos: 0 }
   enc.encode_string(value)
   enc.pos
+
+pub fn encode_json(value: Array<Json>) -> i32
+  // Stub
+  0
