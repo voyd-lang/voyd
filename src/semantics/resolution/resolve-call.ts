@@ -295,10 +295,13 @@ const getMemberAccessCall = (call: Call): Call | undefined => {
 };
 
 export const resolveIf = (call: Call) => {
-  // When `elif` clauses are present, rewrite them into nested `if` expressions
-  if (call.args.hasLabeledArg("elif")) {
+  if (!call.args.hasLabeledArg("elif")) return resolveBasicIf(call);
+
+  type Pair = { cond: Expr; thenExpr: Expr };
+
+  const parseClauses = (): { pairs: Pair[]; elseExpr?: Expr } => {
     const args = call.args.toArray();
-    const pairs: { cond: Expr; thenExpr: Expr }[] = [];
+    const pairs: Pair[] = [];
 
     const firstCond = args[0];
     const firstThen = args[1];
@@ -327,15 +330,17 @@ export const resolveIf = (call: Call) => {
           }
         }
       }
-      if (labelId.value === "else") {
-        elseExpr = labelCall.argAt(1);
-      }
+      if (labelId.value === "else") elseExpr = labelCall.argAt(1);
     }
 
-    let builtElse = elseExpr;
-    for (let i = pairs.length - 1; i > 0; i--) {
+    return { pairs, elseExpr };
+  };
+
+  const buildChain = (pairs: Pair[], elseExpr?: Expr): Call => {
+    let acc = elseExpr;
+    for (let i = pairs.length - 1; i >= 0; i--) {
       const { cond, thenExpr } = pairs[i];
-      builtElse = new Call({
+      acc = new Call({
         ...call.metadata,
         fnName: Identifier.from("if"),
         args: new List({
@@ -348,13 +353,13 @@ export const resolveIf = (call: Call) => {
                 value: [Identifier.from("then"), thenExpr],
               }),
             }),
-            ...(builtElse
+            ...(acc
               ? [
                   new Call({
                     ...call.metadata,
                     fnName: Identifier.from(":"),
                     args: new List({
-                      value: [Identifier.from("else"), builtElse],
+                      value: [Identifier.from("else"), acc],
                     }),
                   }),
                 ]
@@ -363,44 +368,19 @@ export const resolveIf = (call: Call) => {
         }),
       });
     }
+    return acc as Call;
+  };
 
-    const { cond, thenExpr } = pairs[0];
-    const transformed = new Call({
-      ...call.metadata,
-      fnName: Identifier.from("if"),
-      args: new List({
-        value: [
-          cond,
-          new Call({
-            ...call.metadata,
-            fnName: Identifier.from(":"),
-            args: new List({
-              value: [Identifier.from("then"), thenExpr],
-            }),
-          }),
-          ...(builtElse
-            ? [
-                new Call({
-                  ...call.metadata,
-                  fnName: Identifier.from(":"),
-                  args: new List({
-                    value: [Identifier.from("else"), builtElse],
-                  }),
-                }),
-              ]
-            : []),
-        ],
-      }),
-    });
+  const { pairs, elseExpr } = parseClauses();
+  const transformed = buildChain(pairs, elseExpr);
+  return resolveEntities(transformed) as Call;
+};
 
-    return resolveEntities(transformed) as Call;
-  }
-
+const resolveBasicIf = (call: Call) => {
   call.args = call.args.map(resolveEntities);
   const thenExpr = call.argAt(1);
   const elseExpr = call.argAt(2);
 
-  // Until unions are supported, return voyd if no else
   if (!elseExpr) {
     call.type = dVoid;
     return call;
@@ -408,8 +388,7 @@ export const resolveIf = (call: Call) => {
 
   const thenType = getExprType(thenExpr);
   const elseType = getExprType(elseExpr);
-  call.type =
-    elseType && thenType ? combineTypes([thenType, elseType]) : thenType;
+  call.type = elseType && thenType ? combineTypes([thenType, elseType]) : thenType;
   return call;
 };
 
