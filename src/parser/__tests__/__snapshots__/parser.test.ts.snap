@@ -148,6 +148,44 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
     ],
   ],
   [
+    "if",
+    [
+      "<",
+      "x",
+      {
+        "type": "f64",
+        "value": 0,
+      },
+    ],
+    [
+      ":",
+      "then",
+      -1,
+    ],
+    [
+      ":",
+      "elif",
+      [
+        "<",
+        "x",
+        {
+          "type": "f64",
+          "value": 2,
+        },
+      ],
+    ],
+    [
+      ":",
+      "then",
+      0,
+    ],
+    [
+      ":",
+      "else",
+      2,
+    ],
+  ],
+  [
     "reduce",
     "array",
     0,

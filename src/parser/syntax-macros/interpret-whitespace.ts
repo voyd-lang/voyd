@@ -167,9 +167,24 @@ const addSibling = (child: Expr, siblings: List, hadComma?: boolean) => {
   }
 
   if (isNamedArg(child) && !isNamedArg(olderSibling)) {
-    olderSibling.push(child);
+    olderSibling.push(...splitNamedArgs(child));
     return;
   }
 
   siblings.push(child);
+};
+
+const splitNamedArgs = (list: List): List[] => {
+  const result: List[] = [];
+  let start = 0;
+  for (let i = 2; i < list.length; i += 1) {
+    const expr = list.at(i);
+    const next = list.at(i + 1);
+    if (expr?.isIdentifier() && next?.isIdentifier() && next.is(":")) {
+      result.push(list.slice(start, i));
+      start = i;
+    }
+  }
+  result.push(list.slice(start));
+  return result;
 };

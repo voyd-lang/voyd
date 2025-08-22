@@ -16,6 +16,10 @@ if x > 10 then:
 else:
   20
 
+if x < 0.0 then: -1
+elif: x < 2.0 then: 0
+else: 2
+
 array.reduce(0, 1, 2) hey: () =>
   log val
   acc + val
