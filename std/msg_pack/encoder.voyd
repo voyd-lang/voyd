@@ -41,24 +41,22 @@ impl Encoder
     if len < 32 then:
       // fixstr
       self.write_u8(160 + len)
+    elif: len < 256 then:
+      // str 8
+      self.write_u8(217)
+      self.write_u8(len)
+    elif: len < 65536 then:
+      // str 16
+      self.write_u8(218)
+      self.write_u8(shift_ru(len, 8))
+      self.write_u8(bit_and(len, 255))
     else:
-      if len < 256 then:
-        // str 8
-        self.write_u8(217)
-        self.write_u8(len)
-      else:
-        if len < 65536 then:
-          // str 16
-          self.write_u8(218)
-          self.write_u8(shift_ru(len, 8))
-          self.write_u8(bit_and(len, 255))
-        else:
-          // str 32
-          self.write_u8(219)
-          self.write_u8(shift_ru(len, 24))
-          self.write_u8(bit_and(shift_ru(len, 16), 255))
-          self.write_u8(bit_and(shift_ru(len, 8), 255))
-          self.write_u8(bit_and(len, 255))
+      // str 32
+      self.write_u8(219)
+      self.write_u8(shift_ru(len, 24))
+      self.write_u8(bit_and(shift_ru(len, 16), 255))
+      self.write_u8(bit_and(shift_ru(len, 8), 255))
+      self.write_u8(bit_and(len, 255))
 
     var i = 0
     while i < len do:
