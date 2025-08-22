@@ -82,7 +82,7 @@ export const typesAreCompatible = (
       return b.fields.every((field) => {
         const match = a.fields.find((f) => f.name === field.name);
         return (
-          match && typesAreCompatible(field.type, match.type, opts, visited)
+          match && typesAreCompatible(match.type, field.type, opts, visited)
         );
       });
     }
