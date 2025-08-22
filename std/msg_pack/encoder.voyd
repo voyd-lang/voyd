@@ -63,14 +63,14 @@ impl Encoder
       self.write_u8(value.char_code_at(i))
       i = i + 1
 
-pub fn encode_json_i32(value: i32, ptr: i32) -> i32
+pub fn encode_json(value: i32, ptr: i32) -> i32
   if linear_memory::size() == 0 then:
     linear_memory::grow(1)
   let enc = Encoder { ptr: ptr, pos: 0 }
   enc.encode_number(value)
   enc.pos
 
-pub fn encode_json_string(value: string, ptr: i32) -> i32
+pub fn encode_json(value: string, ptr: i32) -> i32
   if linear_memory::size() == 0 then:
     linear_memory::grow(1)
   let enc = Encoder { ptr: ptr, pos: 0 }

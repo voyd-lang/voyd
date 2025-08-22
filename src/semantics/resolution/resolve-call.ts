@@ -1,5 +1,5 @@
 import { Call } from "../../syntax-objects/call.js";
-import { Identifier, List, nop, Expr } from "../../syntax-objects/index.js";
+import { Identifier, List, nop, Expr, Fn } from "../../syntax-objects/index.js";
 import {
   dVoid,
   FixedArrayType,
@@ -14,7 +14,7 @@ import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveTrait } from "./resolve-trait.js";
 
-export const resolveCall = (call: Call): Call => {
+export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   if (call.type) return call;
   if (call.calls("::")) return resolveModuleAccess(call);
   if (call.calls("export")) return resolveExport(call);
@@ -61,7 +61,7 @@ export const resolveCall = (call: Call): Call => {
     call.typeArgs = call.typeArgs.map(resolveTypeExpr);
   }
 
-  resolveCallFn(call);
+  resolveCallFn(call, candidateFns);
   expandObjectArg(call);
   inferClosureArgTypes(call);
 
@@ -75,32 +75,31 @@ export const resolveCall = (call: Call): Call => {
   return call;
 };
 
-const resolveCallFn = (call: Call) => {
-  let traitMethod;
-  if (!call.fn) {
-    const arg0 = call.argAt(0);
-    const arg1Type =
-      arg0?.isClosure() && arg0.parameters.some((p) => !p.type && !p.typeExpr)
-        ? undefined
-        : getExprType(arg0);
-    if (arg1Type?.isTraitType()) {
-      const trait = resolveTrait(arg1Type, call);
-      traitMethod = trait.methods
-        .toArray()
-        .find((fn) => fn.name.is(call.fnName.value));
-      if (traitMethod) {
-        call.fn = traitMethod;
-        call.type = traitMethod.returnType;
-      }
+const resolveCallFn = (call: Call, candidateFns?: Fn[]) => {
+  if (call.fn) return;
+
+  const arg0 = call.argAt(0);
+  const arg1Type =
+    arg0?.isClosure() && arg0.parameters.some((p) => !p.type && !p.typeExpr)
+      ? undefined
+      : getExprType(arg0);
+
+  if (arg1Type?.isTraitType()) {
+    const trait = resolveTrait(arg1Type, call);
+    const traitMethod = trait.methods
+      .toArray()
+      .find((fn) => fn.name.is(call.fnName.value));
+    if (traitMethod) {
+      call.fn = traitMethod;
+      call.type = traitMethod.returnType;
+      return;
     }
   }
 
-  if (!call.fn || call.fn === traitMethod) {
-    const resolvedFn = getCallFn(call);
-    if (resolvedFn) {
-      call.fn = resolvedFn;
-      call.type = resolvedFn.returnType;
-    }
+  const resolvedFn = getCallFn(call, candidateFns);
+  if (resolvedFn) {
+    call.fn = resolvedFn;
+    call.type = resolvedFn.returnType;
   }
 };
 
@@ -208,16 +207,18 @@ const inferClosureArgTypes = (call: Call) => {
 
 export const resolveModuleAccess = (call: Call) => {
   const [left, right] = call.argsArray();
+
   if (right?.isCall()) {
     const path = new List(["::", left, right.fnName]);
     path.parent = call.parent ?? call.parentModule;
-    const entity = resolveModulePath(path)[0]?.e;
-    if (entity?.isFn()) {
-      right.fn = entity;
-      right.args = right.args.map(resolveEntities);
-      return resolveCall(right);
-    }
+
+    const candidates = resolveModulePath(path)
+      .map(({ e }) => e)
+      .filter((e) => e.isFn());
+
+    return resolveCall(right, candidates);
   }
+
   return call;
 };
 
@@ -388,7 +389,8 @@ const resolveBasicIf = (call: Call) => {
 
   const thenType = getExprType(thenExpr);
   const elseType = getExprType(elseExpr);
-  call.type = elseType && thenType ? combineTypes([thenType, elseType]) : thenType;
+  call.type =
+    elseType && thenType ? combineTypes([thenType, elseType]) : thenType;
   return call;
 };
 
