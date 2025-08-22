@@ -1,5 +1,5 @@
 import { Call } from "../../syntax-objects/call.js";
-import { Identifier, List, nop } from "../../syntax-objects/index.js";
+import { Identifier, List, nop, Expr } from "../../syntax-objects/index.js";
 import {
   dVoid,
   FixedArrayType,
@@ -295,11 +295,92 @@ const getMemberAccessCall = (call: Call): Call | undefined => {
 };
 
 export const resolveIf = (call: Call) => {
+  if (!call.args.hasLabeledArg("elif")) return resolveBasicIf(call);
+
+  type Pair = { cond: Expr; thenExpr: Expr };
+
+  const parseClauses = (): { pairs: Pair[]; elseExpr?: Expr } => {
+    const args = call.args.toArray();
+    const pairs: Pair[] = [];
+
+    const firstCond = args[0];
+    const firstThen = args[1];
+    if (firstCond && firstThen?.isCall() && firstThen.calls(":")) {
+      const firstThenLabel = firstThen.argAt(0);
+      if (firstThenLabel?.isIdentifier() && firstThenLabel.value === "then") {
+        pairs.push({ cond: firstCond, thenExpr: firstThen.argAt(1)! });
+      }
+    }
+
+    let elseExpr: Expr | undefined;
+    for (let i = 2; i < args.length; i++) {
+      const labelCall = args[i];
+      if (!labelCall?.isCall() || !labelCall.calls(":")) continue;
+      const labelId = labelCall.argAt(0);
+      if (!labelId?.isIdentifier()) continue;
+      if (labelId.value === "elif") {
+        const cond = labelCall.argAt(1)!;
+        const thenCall = args[i + 1];
+        if (thenCall?.isCall() && thenCall.calls(":")) {
+          const thenLabel = thenCall.argAt(0);
+          if (thenLabel?.isIdentifier() && thenLabel.value === "then") {
+            pairs.push({ cond, thenExpr: thenCall.argAt(1)! });
+            i++;
+            continue;
+          }
+        }
+      }
+      if (labelId.value === "else") elseExpr = labelCall.argAt(1);
+    }
+
+    return { pairs, elseExpr };
+  };
+
+  const buildChain = (pairs: Pair[], elseExpr?: Expr): Call => {
+    let acc = elseExpr;
+    for (let i = pairs.length - 1; i >= 0; i--) {
+      const { cond, thenExpr } = pairs[i];
+      acc = new Call({
+        ...call.metadata,
+        fnName: Identifier.from("if"),
+        args: new List({
+          value: [
+            cond,
+            new Call({
+              ...call.metadata,
+              fnName: Identifier.from(":"),
+              args: new List({
+                value: [Identifier.from("then"), thenExpr],
+              }),
+            }),
+            ...(acc
+              ? [
+                  new Call({
+                    ...call.metadata,
+                    fnName: Identifier.from(":"),
+                    args: new List({
+                      value: [Identifier.from("else"), acc],
+                    }),
+                  }),
+                ]
+              : []),
+          ],
+        }),
+      });
+    }
+    return acc as Call;
+  };
+
+  const { pairs, elseExpr } = parseClauses();
+  const transformed = buildChain(pairs, elseExpr);
+  return resolveEntities(transformed) as Call;
+};
+
+const resolveBasicIf = (call: Call) => {
   call.args = call.args.map(resolveEntities);
   const thenExpr = call.argAt(1);
   const elseExpr = call.argAt(2);
 
-  // Until unions are supported, return voyd if no else
   if (!elseExpr) {
     call.type = dVoid;
     return call;
@@ -307,8 +388,7 @@ export const resolveIf = (call: Call) => {
 
   const thenType = getExprType(thenExpr);
   const elseType = getExprType(elseExpr);
-  call.type =
-    elseType && thenType ? combineTypes([thenType, elseType]) : thenType;
+  call.type = elseType && thenType ? combineTypes([thenType, elseType]) : thenType;
   return call;
 };
 

@@ -1,5 +1,17 @@
 # Control Flow
 
+## If
+
+If expressions support any number of `elif` branches and an optional `else`.
+
+```voyd
+if x < 0 then: -1
+elif: x < 10 then: 0
+else: 1
+```
+
+When the `else` branch is omitted, the result of the expression is `voyd`.
+
 ## Match
 
 Used to narrow types. Can operate on object to narrow

@@ -94,8 +94,10 @@ let (a, b) = value
 // If statements
 if x > 5 then:
   // Do something
-else:
+elif: x > 2 then:
   // Do something else
+else:
+  // Fallback
 
 // When else is not needed both `then:` and `else:` can be omitted
 if x > 5
