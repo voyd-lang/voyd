@@ -28,17 +28,34 @@ export class TypeAlias extends BaseType {
   readonly kindOfType = "type-alias";
   resolutionPhase = 0; // No clone
   lexicon: LexicalContext = new LexicalContext();
-  typeExpr: Expr;
+  #typeExpr: Child<Expr>;
   type?: Type;
-  typeParameters?: Identifier[];
+  #typeParameters = new ChildList<Identifier>([], this);
 
   constructor(
     opts: NamedEntityOpts & { typeExpr: Expr; typeParameters?: Identifier[] }
   ) {
     super(opts);
-    this.typeExpr = opts.typeExpr;
+    this.#typeExpr = new Child(opts.typeExpr, this);
     this.typeExpr.parent = this;
     this.typeParameters = opts.typeParameters;
+  }
+
+  get typeExpr() {
+    return this.#typeExpr.value;
+  }
+
+  set typeExpr(v: Expr) {
+    this.#typeExpr.value = v;
+  }
+
+  get typeParameters() {
+    const params = this.#typeParameters.toArray();
+    return !params.length ? undefined : params;
+  }
+
+  set typeParameters(params: Identifier[] | undefined) {
+    this.#typeParameters = new ChildList(params ?? [], this);
   }
 
   toJSON(): TypeJSON {
@@ -48,8 +65,8 @@ export class TypeAlias extends BaseType {
   clone(parent?: Expr | undefined): TypeAlias {
     return new TypeAlias({
       ...super.getCloneOpts(parent),
-      typeExpr: this.typeExpr.clone(),
-      typeParameters: this.typeParameters,
+      typeExpr: this.#typeExpr.clone(),
+      typeParameters: this.#typeParameters.clone(),
     });
   }
 }
