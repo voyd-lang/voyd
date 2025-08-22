@@ -4,11 +4,11 @@ import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export const resolveUnionType = (union: UnionType): UnionType => {
-  if (union.hasAttribute("type-resolution-started")) return union;
-  union.setAttribute("type-resolution-started", true);
-  union.childTypeExprs.applyMap((expr) => resolveEntities(expr));
+  if (union.resolutionPhase > 0) return union;
+  union.resolutionPhase = 1;
   union.types = union.childTypeExprs.toArray().flatMap((expr) => {
-    const type = getExprType(resolveTypeExpr(expr));
+    const resolved = resolveTypeExpr(expr);
+    const type = getExprType(resolved);
 
     // TODO: Better string object check
     if (!type?.isObjectType() && !(type === voydString)) {
@@ -19,6 +19,5 @@ export const resolveUnionType = (union: UnionType): UnionType => {
 
     return type?.isObjectType() ? [type] : [];
   });
-
   return union;
 };

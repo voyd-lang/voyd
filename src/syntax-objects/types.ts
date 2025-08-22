@@ -26,6 +26,7 @@ export type Type =
 export type TypeJSON = ["type", [string, ...any[]]];
 export class TypeAlias extends BaseType {
   readonly kindOfType = "type-alias";
+  resolutionPhase = 0; // No clone
   lexicon: LexicalContext = new LexicalContext();
   typeExpr: Expr;
   type?: Type;
@@ -91,6 +92,7 @@ export class SelfType extends BaseType {
 
 export class UnionType extends BaseType {
   readonly kindOfType = "union";
+  resolutionPhase = 0; // No clone
   childTypeExprs: ChildList<Expr>;
   types: (ObjectType | IntersectionType | UnionType)[] = [];
 

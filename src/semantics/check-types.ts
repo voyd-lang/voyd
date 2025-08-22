@@ -251,7 +251,6 @@ export const checkIf = (call: Call) => {
 
   const elseType = getExprType(elseExpr);
 
-  // Until unions are supported, throw an error when types don't match
   if (!typesAreCompatible(elseType, call.type)) {
     throw new Error(
       `If condition clauses do not return same type at ${call.location}`

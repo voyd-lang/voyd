@@ -1,14 +1,8 @@
-import { Type } from "../../syntax-objects/index.js";
+import { Type, UnionType } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
-
-const flattenCache = new WeakMap<Type, Type[]>();
-const unionMapCache = new WeakMap<Type, Map<string, Type>>();
 
 const flattenUnion = (type: Type): Type[] => {
   if (!type.isUnionType()) return [type];
-
-  const cached = flattenCache.get(type);
-  if (cached) return cached;
 
   const result: Type[] = [];
   const queue: Type[] = [type];
@@ -30,7 +24,6 @@ const flattenUnion = (type: Type): Type[] => {
     result.push(current);
   }
 
-  flattenCache.set(type, result);
   return result;
 };
 
@@ -138,40 +131,49 @@ export const typesAreCompatible = (
   }
 
   if (a.isUnionType() || b.isUnionType()) {
-    const aTypes = a.isUnionType() ? flattenUnion(a) : [a];
-    const bTypes = b.isUnionType() ? flattenUnion(b) : [b];
+    if (a.isUnionType() && b.isUnionType()) {
+      // This is for handling recursive union types. It may *not* work for generic type aliases. Hopefully no dragons.
+      // We may only want to do this when the union's types have not yet been resolved
+      if (a.syntaxId === b.syntaxId) return true;
 
-    let bMap: Map<string, Type>;
-    if (b.isUnionType()) {
-      const cached = unionMapCache.get(b);
-      if (cached) {
-        bMap = cached;
-      } else {
-        bMap = new Map<string, Type>();
-        for (const bType of bTypes) {
-          bMap.set(bType.id, bType);
-        }
-        unionMapCache.set(b, bMap);
-      }
-    } else {
-      bMap = new Map([[b.id, b]]);
-    }
+      const aTypes = flattenUnion(a);
+      const bTypes = flattenUnion(b);
 
-    for (const aType of aTypes) {
-      if (bMap.has(aType.id)) continue;
-
-      let match = false;
+      let bMap: Map<string, Type>;
+      bMap = new Map<string, Type>();
       for (const bType of bTypes) {
-        if (typesAreCompatible(aType, bType, opts, visited)) {
-          match = true;
-          break;
-        }
+        bMap.set(bType.id, bType);
       }
 
-      if (!match) return false;
+      for (const aType of aTypes) {
+        if (!b.isUnionType() && bMap.has(aType.id)) return true;
+        if (bMap.has(aType.id)) continue;
+
+        let match = false;
+        for (const bType of bTypes) {
+          if (typesAreCompatible(aType, bType, opts, visited)) {
+            match = true;
+            break;
+          }
+        }
+
+        if (!match) return false;
+      }
+
+      return true;
     }
 
-    return true;
+    const [unionType, nonUnionType] = a.isUnionType()
+      ? [a as UnionType, b]
+      : [b as UnionType, a];
+
+    if (!nonUnionType.isObjectType() && !nonUnionType.isIntersectionType()) {
+      return false;
+    }
+
+    return unionType.types.some((t) =>
+      typesAreCompatible(nonUnionType, t, opts, visited)
+    );
   }
 
   if (a.isObjectType() && b.isIntersectionType()) {
