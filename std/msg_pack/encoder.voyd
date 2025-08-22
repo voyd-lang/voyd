@@ -1,6 +1,8 @@
 use std::all
 use std::linear_memory
 
+type Json = string
+
 obj Encoder {
   ptr: i32,
   pos: i32,
@@ -63,6 +65,32 @@ impl Encoder
       self.write_u8(value.char_code_at(i))
       i = i + 1
 
+  fn encode_array(self, value: Array<Json>) -> void
+    let len = value.length
+    if len < 16 then:
+      self.write_u8(144 + len)
+    elif: len < 65536 then:
+      self.write_u8(220)
+      self.write_u8(shift_ru(len, 8))
+      self.write_u8(bit_and(len, 255))
+    else:
+      self.write_u8(221)
+      self.write_u8(shift_ru(len, 24))
+      self.write_u8(bit_and(shift_ru(len, 16), 255))
+      self.write_u8(bit_and(shift_ru(len, 8), 255))
+      self.write_u8(bit_and(len, 255))
+
+    var i = 0
+    while i < len do:
+      value.get(i).match(item)
+        Some<Json>:
+          let s: string = item.value
+          self.encode_string(s)
+          0
+        None:
+          0
+      i = i + 1
+
 pub fn encode_json(value: i32, ptr: i32) -> i32
   if linear_memory::size() == 0 then:
     linear_memory::grow(1)
@@ -78,5 +106,8 @@ pub fn encode_json(value: string, ptr: i32) -> i32
   enc.pos
 
 pub fn encode_json(value: Array<Json>) -> i32
-  // Stub
-  0
+  if linear_memory::size() == 0 then:
+    linear_memory::grow(1)
+  let enc = Encoder { ptr: 0, pos: 0 }
+  enc.encode_array(value)
+  enc.pos
