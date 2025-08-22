@@ -25,4 +25,8 @@ describe("E2E msg pack encode", async () => {
   test("encodes string into memory", async (t) => {
     t.expect(call("run_string")).toEqual("abc");
   });
+
+  test("encodes array into memory", async (t) => {
+    t.expect(call("run_array")).toEqual(["hey", "there"]);
+  });
 });
