@@ -40,12 +40,12 @@ export const resolveTypeExpr = (typeExpr: Expr): Expr => {
 /** Resolves type calls */
 const resolveTypeCall = (call: Call): Call => {
   // Avoid infinite recursion when resolving recursive type calls
-  if ((call as any).__resolving) return call;
-  (call as any).__resolving = true;
+  if (call.hasTmpAttribute("resolving")) return call;
+  call.setTmpAttribute("resolving", true);
   const type = call.fnName.resolve();
 
   if (!type?.isType()) {
-    (call as any).__resolving = false;
+    call.setTmpAttribute("resolving", undefined);
     return call;
   }
 
@@ -56,43 +56,42 @@ const resolveTypeCall = (call: Call): Call => {
   if (type.isObjectType()) {
     call.fn = type;
     call.type = resolveObjectType(type, call);
-    (call as any).__resolving = false;
+    call.setTmpAttribute("resolving", undefined);
     return call;
   }
 
   if (type.isTraitType()) {
     call.type = resolveTrait(type, call);
-    (call as any).__resolving = false;
+    call.setTmpAttribute("resolving", undefined);
     return call;
   }
 
   if (type.isFixedArrayType()) {
     call.type = resolveFixedArrayType(type);
-    (call as any).__resolving = false;
+    call.setTmpAttribute("resolving", undefined);
     return call;
   }
 
   if (type.isUnionType()) {
     call.type = resolveUnionType(type);
-     (call as any).__resolving = false;
-     return call;
+    call.setTmpAttribute("resolving", undefined);
+    return call;
   }
 
   if (type.isIntersectionType()) {
     call.type = resolveIntersectionType(type);
-    (call as any).__resolving = false;
+    call.setTmpAttribute("resolving", undefined);
     return call;
   }
 
   if (type.isTypeAlias()) {
     call = resolveTypeAlias(call, type);
-    (call as any).__resolving = false;
+    call.setTmpAttribute("resolving", undefined);
     return call;
   }
 
   call.type = type;
-
-  (call as any).__resolving = false;
+  call.setTmpAttribute("resolving", undefined);
   return call;
 };
 
