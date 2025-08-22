@@ -1,5 +1,5 @@
 import { Call } from "../../syntax-objects/call.js";
-import { Identifier, List, nop } from "../../syntax-objects/index.js";
+import { Identifier, List, nop, Expr } from "../../syntax-objects/index.js";
 import {
   dVoid,
   FixedArrayType,
@@ -295,6 +295,107 @@ const getMemberAccessCall = (call: Call): Call | undefined => {
 };
 
 export const resolveIf = (call: Call) => {
+  // When `elif` clauses are present, rewrite them into nested `if` expressions
+  if (call.args.hasLabeledArg("elif")) {
+    const args = call.args.toArray();
+    const pairs: { cond: Expr; thenExpr: Expr }[] = [];
+
+    const firstCond = args[0];
+    const firstThen = args[1];
+    if (firstCond && firstThen?.isCall() && firstThen.calls(":")) {
+      const firstThenLabel = firstThen.argAt(0);
+      if (firstThenLabel?.isIdentifier() && firstThenLabel.value === "then") {
+        pairs.push({ cond: firstCond, thenExpr: firstThen.argAt(1)! });
+      }
+    }
+
+    let elseExpr: Expr | undefined;
+    for (let i = 2; i < args.length; i++) {
+      const labelCall = args[i];
+      if (!labelCall?.isCall() || !labelCall.calls(":")) continue;
+      const labelId = labelCall.argAt(0);
+      if (!labelId?.isIdentifier()) continue;
+      if (labelId.value === "elif") {
+        const cond = labelCall.argAt(1)!;
+        const thenCall = args[i + 1];
+        if (thenCall?.isCall() && thenCall.calls(":")) {
+          const thenLabel = thenCall.argAt(0);
+          if (thenLabel?.isIdentifier() && thenLabel.value === "then") {
+            pairs.push({ cond, thenExpr: thenCall.argAt(1)! });
+            i++;
+            continue;
+          }
+        }
+      }
+      if (labelId.value === "else") {
+        elseExpr = labelCall.argAt(1);
+      }
+    }
+
+    let builtElse = elseExpr;
+    for (let i = pairs.length - 1; i > 0; i--) {
+      const { cond, thenExpr } = pairs[i];
+      builtElse = new Call({
+        ...call.metadata,
+        fnName: Identifier.from("if"),
+        args: new List({
+          value: [
+            cond,
+            new Call({
+              ...call.metadata,
+              fnName: Identifier.from(":"),
+              args: new List({
+                value: [Identifier.from("then"), thenExpr],
+              }),
+            }),
+            ...(builtElse
+              ? [
+                  new Call({
+                    ...call.metadata,
+                    fnName: Identifier.from(":"),
+                    args: new List({
+                      value: [Identifier.from("else"), builtElse],
+                    }),
+                  }),
+                ]
+              : []),
+          ],
+        }),
+      });
+    }
+
+    const { cond, thenExpr } = pairs[0];
+    const transformed = new Call({
+      ...call.metadata,
+      fnName: Identifier.from("if"),
+      args: new List({
+        value: [
+          cond,
+          new Call({
+            ...call.metadata,
+            fnName: Identifier.from(":"),
+            args: new List({
+              value: [Identifier.from("then"), thenExpr],
+            }),
+          }),
+          ...(builtElse
+            ? [
+                new Call({
+                  ...call.metadata,
+                  fnName: Identifier.from(":"),
+                  args: new List({
+                    value: [Identifier.from("else"), builtElse],
+                  }),
+                }),
+              ]
+            : []),
+        ],
+      }),
+    });
+
+    return resolveEntities(transformed) as Call;
+  }
+
   call.args = call.args.map(resolveEntities);
   const thenExpr = call.argAt(1);
   const elseExpr = call.argAt(2);
