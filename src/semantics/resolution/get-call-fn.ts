@@ -5,14 +5,14 @@ import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveEntities } from "./resolve-entities.js";
 
-export const getCallFn = (call: Call): Fn | undefined => {
+export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
   if (call.fn?.isFn() && call.fn.parentTrait) {
     return resolveFn(call.fn);
   }
 
   if (isPrimitiveFnCall(call)) return undefined;
 
-  const unfilteredCandidates = getCandidates(call);
+  const unfilteredCandidates = candidateFns ?? getCandidates(call);
   const candidates = filterCandidates(call, unfilteredCandidates);
 
   if (!candidates.length) {
