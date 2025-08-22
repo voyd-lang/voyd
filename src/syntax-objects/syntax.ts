@@ -52,6 +52,7 @@ export abstract class Syntax {
   abstract readonly syntaxType: string;
   readonly syntaxId = getSyntaxId();
   #attributes?: Attributes;
+  #tmpAttributes?: Attributes;
   location?: SourceLocation;
   parent?: Expr;
 
@@ -86,6 +87,29 @@ export abstract class Syntax {
       parent: this.parent,
       attributes: this.#attributes ? { ...this.#attributes } : undefined,
     };
+  }
+
+  setTmpAttribute(key: string, value: unknown): void {
+    if (value === undefined) {
+      if (this.#tmpAttributes) {
+        delete this.#tmpAttributes[key];
+        if (Object.keys(this.#tmpAttributes).length === 0) {
+          this.#tmpAttributes = undefined;
+        }
+      }
+      return;
+    }
+
+    if (!this.#tmpAttributes) this.#tmpAttributes = {};
+    this.#tmpAttributes[key] = value;
+  }
+
+  hasTmpAttribute(key: string): boolean {
+    return this.#tmpAttributes ? key in this.#tmpAttributes : false;
+  }
+
+  getTmpAttribute<T>(key: string): T | undefined {
+    return this.#tmpAttributes?.[key] as T | undefined;
   }
 
   getAllEntities(): NamedEntity[] {
