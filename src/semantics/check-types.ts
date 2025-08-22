@@ -21,6 +21,7 @@ import {
   IntersectionType,
   FixedArrayType,
   Closure,
+  voydString,
 } from "../syntax-objects/index.js";
 import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
@@ -251,7 +252,6 @@ export const checkIf = (call: Call) => {
 
   const elseType = getExprType(elseExpr);
 
-  // Until unions are supported, throw an error when types don't match
   if (!typesAreCompatible(elseType, call.type)) {
     throw new Error(
       `If condition clauses do not return same type at ${call.location}`
@@ -682,6 +682,19 @@ const checkUnionType = (union: UnionType) => {
   if (union.types.length !== union.childTypeExprs.length) {
     throw new Error(`Unable to resolve every type in union ${union.location}`);
   }
+
+  union.types.forEach((t) => {
+    const isObjectType =
+      t.isObjectType() ||
+      t.isIntersectionType() ||
+      t.isUnionType() ||
+      t === voydString;
+    if (!isObjectType) {
+      throw new Error(
+        `Union must be made up of object types ${union.location}`
+      );
+    }
+  });
 
   return union;
 };

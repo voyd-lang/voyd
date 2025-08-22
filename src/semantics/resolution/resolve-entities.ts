@@ -113,7 +113,8 @@ const resolveListTypes = (list: List) => {
 };
 
 const resolveTypeAlias = (alias: TypeAlias): TypeAlias => {
-  if (alias.type) return alias;
+  if (alias.type || alias.resolutionPhase > 0) return alias;
+  alias.resolutionPhase = 1;
   alias.typeExpr = resolveTypeExpr(alias.typeExpr);
   alias.type = getExprType(alias.typeExpr);
   return alias;
