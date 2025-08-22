@@ -91,6 +91,22 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
   (if (x > y)
     (: then 3)
     (: else 5))
+
+  // Example with elif
+  if x < 0 then:
+    -1
+  elif: x < 2 then:
+    0
+  else:
+    2
+
+  // Becomes
+  (if (< x 0)
+    (: then -1)
+    (: else
+      (if (< x 2)
+        (: then 0)
+        (: else 2))))
   ```
 
 4.  Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special

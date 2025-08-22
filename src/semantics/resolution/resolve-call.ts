@@ -4,6 +4,7 @@ import {
   dVoid,
   FixedArrayType,
   ObjectType,
+  Type,
 } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
@@ -296,19 +297,31 @@ const getMemberAccessCall = (call: Call): Call | undefined => {
 
 export const resolveIf = (call: Call) => {
   call.args = call.args.map(resolveEntities);
-  const thenExpr = call.argAt(1);
-  const elseExpr = call.argAt(2);
 
-  // Until unions are supported, return voyd if no else
-  if (!elseExpr) {
+  const args = call.args.toArray();
+  const thenTypes: Type[] = [];
+  let elseType: Type | undefined;
+
+  for (let i = 1; i < args.length; i++) {
+    const labelCall = args[i];
+    if (!labelCall.isCall() || !labelCall.calls(":")) continue;
+    const labelId = labelCall.argAt(0);
+    const value = labelCall.argAt(1);
+    if (!labelId?.isIdentifier()) continue;
+    if (labelId.value === "then") {
+      const t = getExprType(value);
+      if (t) thenTypes.push(t);
+    } else if (labelId.value === "else") {
+      elseType = getExprType(value);
+    }
+  }
+
+  if (!elseType) {
     call.type = dVoid;
     return call;
   }
 
-  const thenType = getExprType(thenExpr);
-  const elseType = getExprType(elseExpr);
-  call.type =
-    elseType && thenType ? combineTypes([thenType, elseType]) : thenType;
+  call.type = combineTypes([...thenTypes, elseType]);
   return call;
 };
 

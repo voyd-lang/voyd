@@ -190,6 +190,8 @@ penalty for using labeled arguments.
 ```rust
 if 3 < val then:
   "hello" // true case
+elif: 3 == val then:
+  "maybe"
 else:
   "bye" // false case (optional)
 ```
@@ -197,7 +199,7 @@ else:
 Ifs are expressions that return a value
 
 ```rust
-let x = if 3 < val then: "hello" else: "bye"
+let x = if 3 < val then: "hello" elif: 3 == val then: "maybe" else: "bye"
 ```
 
 ## Loops

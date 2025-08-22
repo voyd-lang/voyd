@@ -97,6 +97,14 @@ if x > 5 then:
 else:
   // Do something else
 
+// Else if chains are supported
+if x < 0 then:
+  -1
+elif: x < 2 then:
+  0
+else:
+  2
+
 // When else is not needed both `then:` and `else:` can be omitted
 if x > 5
   // Do something

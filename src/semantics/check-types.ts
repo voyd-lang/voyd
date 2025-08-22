@@ -227,11 +227,12 @@ const checkIdentifier = (id: Identifier) => {
 };
 
 export const checkIf = (call: Call) => {
-  const cond = checkTypes(call.argAt(0));
-  const condType = getExprType(cond);
-  if (!condType || !typesAreCompatible(condType, bool)) {
+  const args = call.args.toArray();
+  const firstCond = checkTypes(args[0]);
+  const firstCondType = getExprType(firstCond);
+  if (!firstCondType || !typesAreCompatible(firstCondType, bool)) {
     throw new Error(
-      `If conditions must resolve to a boolean at ${cond.location}`
+      `If conditions must resolve to a boolean at ${firstCond.location}`
     );
   }
 
@@ -241,22 +242,48 @@ export const checkIf = (call: Call) => {
     );
   }
 
-  const elseExpr = call.argAt(2) ? checkTypes(call.argAt(2)) : undefined;
+  const thenExprs: Expr[] = [];
+  let elseExpr: Expr | undefined;
+  for (let i = 1; i < args.length; i++) {
+    const labelCall = args[i];
+    if (!labelCall.isCall() || !labelCall.calls(":")) continue;
+    const labelId = labelCall.argAt(0);
+    const value = checkTypes(labelCall.argAt(1));
+    if (!labelId?.isIdentifier()) continue;
+    if (labelId.value === "elif") {
+      const condType = getExprType(value);
+      if (!condType || !typesAreCompatible(condType, bool)) {
+        throw new Error(
+          `If conditions must resolve to a boolean at ${value.location}`
+        );
+      }
+    } else if (labelId.value === "then") {
+      thenExprs.push(value);
+    } else if (labelId.value === "else") {
+      elseExpr = value;
+    }
+  }
 
-  // Until unions are supported, return voyd if no else
   if (!elseExpr) {
     call.type = dVoid;
     return call;
   }
 
   const elseType = getExprType(elseExpr);
-
-  // Until unions are supported, throw an error when types don't match
   if (!typesAreCompatible(elseType, call.type)) {
     throw new Error(
       `If condition clauses do not return same type at ${call.location}`
     );
   }
+
+  thenExprs.forEach((expr) => {
+    const t = getExprType(expr);
+    if (!typesAreCompatible(t, call.type)) {
+      throw new Error(
+        `If condition clauses do not return same type at ${expr.location}`
+      );
+    }
+  });
 
   return call;
 };
