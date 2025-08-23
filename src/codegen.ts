@@ -6,6 +6,7 @@ import {
   ObjectType,
   FixedArrayType,
   voydBaseObject,
+  voydString,
   UnionType,
   IntersectionType,
 } from "./syntax-objects/types.js";
@@ -131,7 +132,7 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "voyd") || isPrimitiveId(type, "void"))
     return binaryen.none;
-  if (isPrimitiveId(type, "string")) return getI32ArrayType(opts.mod);
+  if (type === voydString) return getI32ArrayType(opts.mod);
 
   if (type.isObjectType()) {
     if (buildingTypePlaceholders.has(type)) {

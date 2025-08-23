@@ -359,8 +359,7 @@ export abstract class Syntax {
       this.isObjectType() ||
       this.isIntersectionType() ||
       this.isUnionType() ||
-      this.isTupleType() ||
-      (this.isPrimitiveType() && this.name.is("string"))
+      this.isTupleType()
     );
   }
 
