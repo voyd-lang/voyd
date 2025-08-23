@@ -6,19 +6,14 @@ import {
   TypeAlias,
   FnType,
 } from "../../syntax-objects/index.js";
-import { getExprType, getIdentifierType } from "./get-expr-type.js";
+import { getExprType } from "./get-expr-type.js";
 import { resolveIntersectionType } from "./resolve-intersection.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveUnionType } from "./resolve-union.js";
 import { resolveTrait } from "./resolve-trait.js";
 
 export const resolveTypeExpr = (typeExpr: Expr): Expr => {
-  if (typeExpr.isIdentifier()) {
-    const typeEntity = getIdentifierType(typeExpr);
-    if (typeEntity) resolveTypeExpr(typeEntity);
-    typeExpr.type = typeEntity;
-    return typeExpr;
-  }
+  if (typeExpr.isIdentifier()) return typeExpr;
   if (typeExpr.isTypeAlias()) {
     if (typeExpr.type || !typeExpr.typeExpr) return typeExpr;
     if (typeExpr.resolutionPhase > 0) return typeExpr;

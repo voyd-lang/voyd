@@ -63,6 +63,7 @@ const resolveGenericObjVersion = (
 
   if (!call.typeArgs) return;
 
+  // THAR BE DRAGONS HERE. We don't check for multiple existing matches, which means that unions may sometimes overlap.
   const existing = type.genericInstances?.find((c) => typeArgsMatch(call, c));
   if (existing) return existing;
   return resolveGenericsWithTypeArgs(type, call.typeArgs);

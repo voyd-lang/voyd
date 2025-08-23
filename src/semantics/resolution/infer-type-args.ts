@@ -1,8 +1,10 @@
 import { Expr } from "../../syntax-objects/expr.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
+import { nop } from "../../syntax-objects/index.js";
 import { List } from "../../syntax-objects/list.js";
-import { Type } from "../../syntax-objects/types.js";
+import { Type, TypeAlias } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
+import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export type TypeArgInferencePair = {
   typeExpr: Expr;
@@ -22,7 +24,12 @@ export const inferTypeArgs = (
 
     for (const { typeExpr, argExpr } of pairs) {
       if (typeExpr.isIdentifier() && typeExpr.is(tp)) {
-        inferredType = getExprType(argExpr);
+        inferredType = new TypeAlias({
+          name: typeExpr.clone(),
+          typeExpr: nop(),
+        });
+        resolveTypeExpr(argExpr);
+        inferredType.type = getExprType(argExpr);
         break;
       }
     }

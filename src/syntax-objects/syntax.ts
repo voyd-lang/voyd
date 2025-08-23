@@ -28,6 +28,8 @@ import type {
   UnionType,
   IntersectionType,
   SelfType,
+  VoydRefType,
+  TupleType,
 } from "./types.js";
 import type { Variable } from "./variable.js";
 import type { Whitespace } from "./whitespace.js";
@@ -243,6 +245,10 @@ export abstract class Syntax {
     return this.isType() && this.kindOfType === "trait";
   }
 
+  isTupleType(): this is TupleType {
+    return this.isType() && this.kindOfType === "tuple";
+  }
+
   isObjectType(): this is ObjectType {
     return this.isType() && this.kindOfType === "object";
   }
@@ -345,6 +351,17 @@ export abstract class Syntax {
 
   isArrayLiteral(): this is ArrayLiteral {
     return this.syntaxType === "array-literal";
+  }
+
+  isRefType(): this is VoydRefType {
+    // TODO: Make this more efficient
+    return (
+      this.isObjectType() ||
+      this.isIntersectionType() ||
+      this.isUnionType() ||
+      this.isTupleType() ||
+      (this.isPrimitiveType() && this.name.is("string"))
+    );
   }
 
   setEndLocationToStartOf(location?: SourceLocation) {

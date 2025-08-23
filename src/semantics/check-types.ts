@@ -660,12 +660,6 @@ const checkObjectMatch = (match: Match) => {
       );
     }
 
-    if (!mCase.matchType.extends(match.baseType)) {
-      throw new Error(
-        `Match case type ${mCase.matchType.name} does not extend ${match.baseType.name} at ${mCase.expr.location}`
-      );
-    }
-
     if (!typesAreCompatible(mCase.expr.type, match.type)) {
       throw new Error(
         `All cases must return the same type for now ${mCase.expr.location}`

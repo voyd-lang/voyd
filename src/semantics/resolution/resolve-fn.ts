@@ -90,9 +90,7 @@ const attemptToResolveFnWithGenerics = (fn: Fn, call: Call): Fn => {
   if (!args) return fn;
 
   call.typeArgs = args;
-  const existing = fn.genericInstances?.find((c) =>
-    fnTypeArgsMatch(args, c)
-  );
+  const existing = fn.genericInstances?.find((c) => fnTypeArgsMatch(args, c));
   if (existing) return fn;
 
   return resolveGenericsWithTypeArgs(fn, args);
