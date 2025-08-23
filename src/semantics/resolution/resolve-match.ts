@@ -44,7 +44,7 @@ const resolveCase = (
   const expr = resolveEntities(c.expr) as Call | Block;
 
   return {
-    matchType: type?.isObjectType() ? type : undefined,
+    matchType: type?.isRefType() ? type : undefined,
     expr,
     matchTypeExpr: c.matchTypeExpr,
   };

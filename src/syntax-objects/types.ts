@@ -111,7 +111,7 @@ export class UnionType extends BaseType {
   readonly kindOfType = "union";
   resolutionPhase = 0; // No clone
   childTypeExprs: ChildList<Expr>;
-  types: (ObjectType | IntersectionType | UnionType)[] = [];
+  types: VoydRefType[] = [];
 
   constructor(opts: NamedEntityOpts & { childTypeExprs?: Expr[] }) {
     super(opts);
@@ -406,3 +406,10 @@ export const voydBaseObject = new ObjectType({
   name: "Object",
   value: [],
 });
+
+export type VoydRefType =
+  | ObjectType
+  | UnionType
+  | IntersectionType
+  | TupleType
+  | PrimitiveType; // string only. TODO: Make string something else idk. This is not very dev friendly

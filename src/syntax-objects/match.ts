@@ -5,12 +5,12 @@ import { Identifier } from "./identifier.js";
 import { LexicalContext } from "./lib/lexical-context.js";
 import { ScopedSyntax } from "./scoped-entity.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
-import { ObjectType, Type } from "./types.js";
+import { VoydRefType, Type } from "./types.js";
 import { Variable } from "./variable.js";
 
 export type MatchCase = {
   /** The type to match the base type against */
-  matchType?: ObjectType;
+  matchType?: VoydRefType;
   matchTypeExpr?: Expr;
   expr: Block | Call;
 };
