@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { ObjectType, UnionType, SelfType } from "../../../syntax-objects/index.js";
+import {
+  ObjectType,
+  UnionType,
+  SelfType,
+  PrimitiveType,
+} from "../../../syntax-objects/index.js";
 import { typesAreCompatible } from "../types-are-compatible.js";
 
 describe("typesAreCompatible - unions", () => {
@@ -54,5 +59,18 @@ describe("typesAreCompatible - unions", () => {
 
   test("considers self types compatible", () => {
     expect(typesAreCompatible(new SelfType(), new SelfType())).toBe(true);
+  });
+
+  test("handles primitives within unions", () => {
+    const strOrNum = new UnionType({ name: "StrOrNum", childTypeExprs: [] });
+    const str = PrimitiveType.from("string");
+    const num = PrimitiveType.from("i32");
+    strOrNum.types = [str, num];
+
+    expect(typesAreCompatible(str, strOrNum)).toBe(true);
+    const bool = PrimitiveType.from("bool");
+    const boolOrNum = new UnionType({ name: "BoolOrNum", childTypeExprs: [] });
+    boolOrNum.types = [bool, num];
+    expect(typesAreCompatible(str, boolOrNum)).toBe(false);
   });
 });
