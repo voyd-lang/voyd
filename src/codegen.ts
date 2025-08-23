@@ -167,7 +167,11 @@ export const buildUnionType = (
     return union.getAttribute("binaryenType") as TypeRef;
   }
 
-  const typeRef = mapBinaryenType(opts, voydBaseObject);
+  const allObjects = union.types.every((t) => t.isObjectType());
+  const typeRef = allObjects
+    ? mapBinaryenType(opts, voydBaseObject)
+    : binaryen.anyref;
+
   union.setAttribute("binaryenType", typeRef);
   return typeRef;
 };
