@@ -107,8 +107,9 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
  */
 const nextExprIndentLevel = (list: List, startIndex = 0) => {
   let nextIndentLevel = 0;
+  let i = startIndex;
 
-  for (let i = startIndex; i < list.length; i++) {
+  for (; i < list.length; i++) {
     const expr = list.at(i)!;
     if (isNewline(expr)) {
       nextIndentLevel = 0;
@@ -124,6 +125,8 @@ const nextExprIndentLevel = (list: List, startIndex = 0) => {
 
     break;
   }
+
+  if (i >= list.length) return 0;
 
   return nextIndentLevel;
 };
