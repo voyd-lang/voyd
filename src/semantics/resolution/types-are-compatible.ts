@@ -167,7 +167,7 @@ export const typesAreCompatible = (
       ? [a as UnionType, b]
       : [b as UnionType, a];
 
-    if (!nonUnionType.isObjectType() && !nonUnionType.isIntersectionType()) {
+    if (!nonUnionType.isRefType()) {
       return false;
     }
 
