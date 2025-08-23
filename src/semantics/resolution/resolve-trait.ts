@@ -5,7 +5,7 @@ import { TypeAlias } from "../../syntax-objects/types.js";
 import { resolveFn } from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { getExprType } from "./get-expr-type.js";
-import { typesAreCompatible } from "./types-are-compatible.js";
+import { typesAreEqual } from "./types-are-equal.js";
 import { resolveImpl } from "./resolve-impl.js";
 
 export const resolveTrait = (trait: TraitType, call?: Call): TraitType => {
@@ -62,10 +62,6 @@ const resolveGenericTraitVersion = (
 const typeArgsMatch = (call: Call, candidate: TraitType): boolean =>
   call.typeArgs && candidate.appliedTypeArgs
     ? candidate.appliedTypeArgs.every((t, i) =>
-        typesAreCompatible(
-          getExprType(call.typeArgs!.at(i)),
-          getExprType(t),
-          { exactNominalMatch: true }
-        )
+        typesAreEqual(getExprType(call.typeArgs!.at(i)), getExprType(t))
       )
     : true;

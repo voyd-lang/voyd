@@ -9,7 +9,7 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";
-import { typesAreCompatible } from "./types-are-compatible.js";
+import { typesAreEqual } from "./types-are-equal.js";
 
 export type ResolveFnTypesOpts = {
   typeArgs?: List;
@@ -114,9 +114,7 @@ const fnTypeArgsMatch = (args: List, candidate: Fn): boolean =>
     ? candidate.appliedTypeArgs.every((t, i) => {
         const argType = getExprType(args.at(i));
         const appliedType = getExprType(t);
-        return typesAreCompatible(argType, appliedType, {
-          exactNominalMatch: true,
-        });
+        return typesAreEqual(argType, appliedType);
       })
     : false;
 
