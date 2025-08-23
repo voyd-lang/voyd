@@ -167,7 +167,33 @@ export const buildUnionType = (
     return union.getAttribute("binaryenType") as TypeRef;
   }
 
-  const typeRef = mapBinaryenType(opts, voydBaseObject);
+  const bin = binaryen as any;
+  const baseType = mapBinaryenType(opts, voydBaseObject);
+  const baseHeap = binaryenTypeToHeapType(baseType);
+  union.setAttribute("binaryenType", baseType);
+
+  if (buildingTypePlaceholders.size > 0) {
+    return baseType;
+  }
+
+  const memberTypes = union.types.map((t) => mapBinaryenType(opts, t));
+
+  const isValueType = (t: TypeRef) =>
+    t === binaryen.i32 ||
+    t === binaryen.i64 ||
+    t === binaryen.f32 ||
+    t === binaryen.f64 ||
+    t === binaryen.v128 ||
+    t === binaryen.none ||
+    t === binaryen.unreachable;
+
+  const allSubtypes = memberTypes.every((t) => {
+    if (isValueType(t)) return false;
+    const heap = binaryenTypeToHeapType(t);
+    return bin._BinaryenHeapTypeIsSubType(heap, baseHeap);
+  });
+
+  const typeRef = allSubtypes ? baseType : binaryen.anyref;
   union.setAttribute("binaryenType", typeRef);
   return typeRef;
 };
