@@ -64,7 +64,12 @@ const resolveGenericObjVersion = (
   if (!call.typeArgs) return;
 
   // THAR BE DRAGONS HERE. We don't check for multiple existing matches, which means that unions may sometimes overlap.
-  const existing = type.genericInstances?.find((c) => typeArgsMatch(call, c));
+  const existing = type.genericInstances?.find(
+    (c) =>
+      c.appliedTypeArgs?.length === call.typeArgs?.length &&
+      instanceInScope(call, c) &&
+      typeArgsMatch(call, c)
+  );
   if (existing) return existing;
   return resolveGenericsWithTypeArgs(type, call.typeArgs);
 };
@@ -124,3 +129,13 @@ const typeArgsMatch = (call: Call, candidate: ObjectType): boolean =>
         });
       })
     : true;
+
+const instanceInScope = (call: Call, candidate: ObjectType): boolean =>
+  candidate.appliedTypeArgs?.every((t, i) => {
+    const argType = getExprType(call.typeArgs?.at(i));
+    const applied = getExprType(t);
+    const argAlias = argType?.parent?.isTypeAlias() ? argType.parent : undefined;
+    const appliedAlias = applied?.parent?.isTypeAlias() ? applied.parent : undefined;
+    if (appliedAlias && argAlias) return appliedAlias.id === argAlias.id;
+    return true;
+  }) ?? true;
