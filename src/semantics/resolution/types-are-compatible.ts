@@ -167,10 +167,6 @@ export const typesAreCompatible = (
       ? [a as UnionType, b]
       : [b as UnionType, a];
 
-    if (!nonUnionType.isObjectType() && !nonUnionType.isIntersectionType()) {
-      return false;
-    }
-
     return unionType.types.some((t) =>
       typesAreCompatible(nonUnionType, t, opts, visited)
     );

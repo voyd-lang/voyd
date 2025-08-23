@@ -1,6 +1,7 @@
 import { Call, Expr, Fn } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
+import { typesAreEqual } from "./types-are-equal.js";
 import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveEntities } from "./resolve-entities.js";
@@ -115,9 +116,7 @@ const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
         if (arg) resolveTypeExpr(arg);
         const argType = getExprType(arg);
         const appliedType = getExprType(t);
-        return typesAreCompatible(argType, appliedType, {
-          exactNominalMatch: true,
-        });
+        return typesAreEqual(argType, appliedType);
       })
     : true;
 
