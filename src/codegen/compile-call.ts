@@ -130,15 +130,20 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       : callExpr;
   }
 
-  const args = expr.args.toArray().map((arg, i) =>
-    compileExpression({
+  const fn = expr.fn as Fn;
+  const args = expr.args.toArray().map((arg, i) => {
+    const compiled = compileExpression({
       ...opts,
       expr: arg,
       isReturnExpr: false,
-    })
-  );
+    });
+    const param = fn.parameters[i];
+    if (param?.type?.isUnionType()) {
+      return refCast(mod, compiled, mapBinaryenType(opts, param.type));
+    }
+    return compiled;
+  });
 
-  const fn = expr.fn as Fn;
   const id = fn.id;
   const returnType = mapBinaryenType(opts, fn.returnType!);
 
