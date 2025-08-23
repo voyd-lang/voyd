@@ -31,7 +31,7 @@ export class Call extends Syntax {
     this.fn = opts.fn;
     this.args = opts.args;
     this.args.parent = this;
-    this.typeArgs = opts.typeArgs?.clone(this);
+    this.typeArgs = opts.typeArgs;
     if (this.typeArgs) this.typeArgs.parent = this;
     this.#type = opts.type;
   }
