@@ -138,8 +138,14 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       isReturnExpr: false,
     });
     const param = fn.parameters[i];
-    if (param?.type?.isUnionType()) {
-      return refCast(mod, compiled, mapBinaryenType(opts, param.type));
+    const paramType = param?.type;
+    if (
+      paramType &&
+      (paramType.isUnionType() ||
+        paramType.isObjectType() ||
+        paramType.isFixedArrayType())
+    ) {
+      return refCast(mod, compiled, mapBinaryenType(opts, paramType));
     }
     return compiled;
   });

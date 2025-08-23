@@ -25,12 +25,27 @@ export const compileObjectInit = (opts: CompileExprOpts<Call>) => {
       `__method_table_${objectType.id}`,
       opts.methodLookupHelpers.lookupTableType
     ),
-    ...obj.fields.map((field) =>
-      compileExpression({
+    ...obj.fields.map((field, i) => {
+      const fieldType = objectType.fields[i]?.type;
+      if (
+        fieldType?.isFixedArrayType() &&
+        field.initializer.isCall() &&
+        field.initializer.fnName.is("FixedArray")
+      ) {
+        field.initializer.type = fieldType;
+      }
+      const compiled = compileExpression({
         ...opts,
         expr: field.initializer,
         isReturnExpr: false,
-      })
-    ),
+      });
+      if (
+        fieldType &&
+        (fieldType.isRefType() || fieldType.isFixedArrayType())
+      ) {
+        return gc.refCast(mod, compiled, mapBinaryenType(opts, fieldType));
+      }
+      return compiled;
+    }),
   ]);
 };

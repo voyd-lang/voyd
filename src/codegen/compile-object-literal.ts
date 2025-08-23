@@ -1,7 +1,7 @@
 import { CompileExprOpts, mapBinaryenType, compileExpression } from "../codegen.js";
 import { ObjectLiteral } from "../syntax-objects/object-literal.js";
 import { ObjectType } from "../syntax-objects/types.js";
-import { initStruct } from "../lib/binaryen-gc/index.js";
+import { initStruct, refCast } from "../lib/binaryen-gc/index.js";
 
 export const compile = (opts: CompileExprOpts<ObjectLiteral>) => {
   const { expr: obj, mod } = opts;
@@ -25,9 +25,24 @@ export const compile = (opts: CompileExprOpts<ObjectLiteral>) => {
       `__method_table_${objectType.id}`,
       opts.methodLookupHelpers.lookupTableType
     ),
-    ...obj.fields.map((field) =>
-      compileExpression({ ...opts, expr: field.initializer })
-    ),
+    ...obj.fields.map((field, i) => {
+      const fieldType = objectType.fields[i]?.type;
+      if (
+        fieldType?.isFixedArrayType() &&
+        field.initializer.isCall() &&
+        field.initializer.fnName.is("FixedArray")
+      ) {
+        field.initializer.type = fieldType;
+      }
+      const compiled = compileExpression({ ...opts, expr: field.initializer });
+      if (
+        fieldType &&
+        (fieldType.isRefType() || fieldType.isFixedArrayType())
+      ) {
+        return refCast(mod, compiled, mapBinaryenType(opts, fieldType));
+      }
+      return compiled;
+    }),
   ]);
 };
 
