@@ -119,8 +119,10 @@ const typeArgsMatch = (call: Call, candidate: ObjectType): boolean =>
     ? candidate.appliedTypeArgs.every((t, i) => {
         const argType = getExprType(call.typeArgs?.at(i));
         const appliedType = getExprType(t);
-        return typesAreCompatible(argType, appliedType, {
-          exactNominalMatch: true,
-        });
+        if (!argType || !appliedType) return false;
+        if (argType.id === appliedType.id) return true;
+        const argExpr = call.typeArgs?.at(i);
+        if (argExpr?.isIdentifier()) return false;
+        return typesAreCompatible(argType, appliedType, { exactNominalMatch: true });
       })
     : true;
