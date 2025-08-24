@@ -1,62 +1,44 @@
-import { ParseArgsConfig, parseArgs } from "node:util";
+import { Command } from "commander";
+import { createRequire } from "node:module";
 import { VoydConfig } from "./types.js";
 
-const options: ParseArgsConfig["options"] = {
-  "emit-parser-ast": {
-    type: "boolean",
-  },
-  "emit-core-ast": {
-    type: "boolean",
-  },
-  "emit-ir-ast": {
-    type: "boolean",
-  },
-  "emit-wasm": {
-    type: "boolean",
-  },
-  "emit-wasm-text": {
-    type: "boolean",
-  },
-  /** Tells binaryen to run its standard optimization pass */
-  opt: {
-    type: "boolean",
-  },
-  run: {
-    type: "boolean",
-    short: "r",
-  },
-  help: {
-    type: "boolean",
-    short: "h",
-  },
-  version: {
-    type: "boolean",
-    short: "v",
-  },
-  "internal-test": {
-    type: "boolean",
-  },
-};
+const require = createRequire(import.meta.url);
+const { version } = require("../../../package.json") as { version: string };
 
 export const getConfigFromCli = (): VoydConfig => {
-  const { values, positionals } = parseArgs({
-    options,
-    allowPositionals: true,
-  });
+  const program = new Command();
 
-  const index = positionals[0] ?? "./src";
+  program
+    .name("voyd")
+    .description("Voyd programming language CLI")
+    .version(version, "-v, --version", "display the current version")
+    .argument("[index]", "entry voyd file", "./src")
+    .option("--emit-parser-ast", "write raw parser AST to stdout")
+    .option("--emit-core-ast", "write desurfaced AST to stdout")
+    .option("--emit-ir-ast", "emit expanded IR AST after semantic phases")
+    .option("--emit-wasm", "write wasm bytecode to stdout")
+    .option(
+      "--emit-wasm-text",
+      "write wasm text format (binaryen flavor) to stdout"
+    )
+    .option("--opt", "have binaryen run its standard optimization pass")
+    .option("-r, --run", "run the compiled wasm code")
+    .option("--internal-test", "run the internal test script")
+    .helpOption("-h, --help", "display help for command");
+
+  program.parse();
+  const opts = program.opts();
+  const [index] = program.args as [string?];
 
   return {
-    index,
-    emitParserAst: values["emit-parser-ast"] as boolean,
-    emitCoreAst: values["emit-core-ast"] as boolean,
-    emitIrAst: values["emit-ir-ast"] as boolean,
-    emitWasm: values["emit-wasm"] as boolean,
-    emitWasmText: values["emit-wasm-text"] as boolean,
-    runBinaryenOptimizationPass: values["opt"] as boolean,
-    showHelp: values["help"] as boolean,
-    showVersion: values["version"] as boolean,
-    run: values["run"] as boolean,
-    internalTest: values["internal-test"] as boolean,
+    index: index ?? "./src",
+    emitParserAst: opts.emitParserAst,
+    emitCoreAst: opts.emitCoreAst,
+    emitIrAst: opts.emitIrAst,
+    emitWasm: opts.emitWasm,
+    emitWasmText: opts.emitWasmText,
+    runBinaryenOptimizationPass: opts.opt,
+    run: opts.run,
+    internalTest: opts.internalTest,
   };
 };
