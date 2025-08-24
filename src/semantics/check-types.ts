@@ -26,6 +26,7 @@ import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
 import { typesAreCompatible } from "./resolution/index.js";
 import { getCallFn } from "./resolution/get-call-fn.js";
+import { resolveUnionType } from "./resolution/resolve-union.js";
 
 export const checkTypes = (expr: Expr | undefined): Expr => {
   if (!expr) return nop();
@@ -143,7 +144,27 @@ const checkFixedArrayInit = (call: Call) => {
   checkFixedArrayType(type);
   call.args.each((arg) => {
     const argType = getExprType(arg);
-    if (!argType || !typesAreCompatible(argType, type.elemType)) {
+    if (!argType) {
+      throw new Error(`Unable to resolve type for ${arg.location}`);
+    }
+
+    if (type.elemType?.isUnionType()) {
+      resolveUnionType(type.elemType);
+      if (type.elemType.types.length === 0) {
+        return;
+      }
+      const match = type.elemType.types.some((t) =>
+        typesAreCompatible(argType, t)
+      );
+      if (!match) {
+        throw new Error(
+          `Expected ${type.elemType.name} got ${argType.name} at ${arg.location}`
+        );
+      }
+      return;
+    }
+
+    if (!typesAreCompatible(argType, type.elemType)) {
       throw new Error(
         `Expected ${type.elemType?.name} got ${argType?.name} at ${arg.location}`
       );

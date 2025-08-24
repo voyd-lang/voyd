@@ -91,6 +91,8 @@ export const typesAreCompatible = (
       );
     }
 
+    if (a.idNum === b.idNum) return true;
+
     if (opts.exactNominalMatch) return a.id === b.id;
 
     return a.extends(b);
