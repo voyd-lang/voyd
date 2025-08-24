@@ -5,6 +5,7 @@ import {
   dVoid,
   FixedArrayType,
   ObjectType,
+  Type,
 } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
@@ -125,10 +126,20 @@ const resolveArrayArgs = (call: Call) => {
   call.args.each((arg: Expr, index: number) => {
     const param = fn?.parameters[index];
     const paramType = param?.type;
-    const elemType =
-      paramType && paramType.isObjectType()
-        ? getArrayElemType(paramType)
-        : undefined;
+
+    let elemType: Type | undefined;
+    if (paramType) {
+      if (paramType.isObjectType()) {
+        elemType = getArrayElemType(paramType);
+      } else if (paramType.isUnionType()) {
+        const arrayMember = paramType.types.find((t) =>
+          t.isObjectType() && getArrayElemType(t)
+        );
+        if (arrayMember && arrayMember.isObjectType()) {
+          elemType = getArrayElemType(arrayMember);
+        }
+      }
+    }
 
     const isLabeled = arg.isCall() && arg.calls(":");
     const inner = isLabeled ? arg.argAt(1) : arg;
