@@ -349,13 +349,17 @@ export abstract class Syntax {
   }
 
   isRefType(): this is VoydRefType {
-    // TODO: Make this more efficient
-    return (
-      this.isObjectType() ||
-      this.isIntersectionType() ||
-      this.isUnionType() ||
-      this.isTupleType()
-    );
+    if (!this.isType()) return false;
+
+    switch (this.kindOfType) {
+      case "object":
+      case "intersection":
+      case "union":
+      case "tuple":
+        return true;
+      default:
+        return false;
+    }
   }
 
   setEndLocationToStartOf(location?: SourceLocation) {
