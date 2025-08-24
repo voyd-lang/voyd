@@ -4,7 +4,7 @@ import { describe, test, beforeAll } from "vitest";
 import assert from "node:assert";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
 
-describe("E2E inline array arg type widening", () => {
+describe("E2E recursive array arg type widening", () => {
   let instance: WebAssembly.Instance;
 
   beforeAll(async () => {
@@ -12,9 +12,9 @@ describe("E2E inline array arg type widening", () => {
     instance = getWasmInstance(mod);
   });
 
-  test("run accepts array literal for Array<MiniJson>", (t) => {
-    const fn = getWasmFn("run", instance);
+  test("main accepts nested array literal for Array<MiniJson>", (t) => {
+    const fn = getWasmFn("main", instance);
     assert(fn, "Function exists");
-    t.expect(fn(), "run returns correct value").toEqual(1);
+    t.expect(fn(), "main returns correct value").toEqual(10);
   });
 });

@@ -162,7 +162,15 @@ export const resolveArrayLiteral = (
   arr: ArrayLiteral,
   expectedElemType?: Type
 ): Expr => {
-  arr.elements = arr.elements.map(resolveEntities);
+  const original = arr.clone();
+
+  arr.elements = arr.elements.map((elem) => {
+    if (expectedElemType && elem.isArrayLiteral()) {
+      const childExpected = getArrayElemType(expectedElemType) ?? expectedElemType;
+      return resolveArrayLiteral(elem, childExpected);
+    }
+    return resolveEntities(elem);
+  });
   const elemType =
     expectedElemType ??
     combineTypes(
@@ -190,6 +198,6 @@ export const resolveArrayLiteral = (
     args: new List({ value: [objLiteral] }),
     typeArgs,
   });
-  newArrayCall.setTmpAttribute("arrayLiteral", arr.clone());
+  newArrayCall.setTmpAttribute("arrayLiteral", original);
   return resolveEntities(newArrayCall);
 };
