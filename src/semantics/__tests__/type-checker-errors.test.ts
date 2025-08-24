@@ -1,5 +1,5 @@
 import { expect, test, describe } from "vitest";
-import { compile } from "../compiler.js";
+import { compile } from "../../compiler.js";
 
 describe("Type checker error messages", () => {
   test("reports variable initialization type mismatch clearly", async (t) => {
@@ -36,6 +36,22 @@ pub fn main()
 `;
     await expect(compile(source)).rejects.toThrow(
       /Available overloads: add\(a: i32, b: i32\) -> i32/
+    );
+  });
+
+  test("reports object literal init mismatches clearly", async () => {
+    const code = `
+obj Point {
+  x: i32,
+  y: bool,
+  w: f64
+}
+
+pub fn main()
+  Point { x: 1, y: 2, z: 3 }
+`;
+    await expect(compile(code)).rejects.toThrow(
+      /Missing fields: w\. Fields with wrong types: y \(expected bool, got i32\)\. Extra fields: z/
     );
   });
 });
