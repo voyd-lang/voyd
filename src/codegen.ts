@@ -26,7 +26,6 @@ import { compile as compileCall } from "./codegen/compile-call.js";
 import { compile as compileBlock } from "./codegen/compile-block.js";
 import { compile as compileMatch } from "./codegen/compile-match.js";
 import { compile as compileInt } from "./codegen/compile-int.js";
-import { compile as compileStringLiteral } from "./codegen/compile-string-literal.js";
 import { compile as compileFloat } from "./codegen/compile-float.js";
 import { compile as compileIdentifier } from "./codegen/compile-identifier.js";
 import { compile as compileFunction } from "./codegen/compile-function.js";
@@ -89,7 +88,6 @@ export const compilers: Record<string, CompilerFn> = {
   block: compileBlock,
   match: compileMatch,
   int: compileInt,
-  "string-literal": compileStringLiteral,
   float: compileFloat,
   identifier: compileIdentifier,
   fn: compileFunction,
@@ -131,7 +129,6 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "f64")) return binaryen.f64;
   if (isPrimitiveId(type, "voyd") || isPrimitiveId(type, "void"))
     return binaryen.none;
-  if (isPrimitiveId(type, "string")) return getI32ArrayType(opts.mod);
 
   if (type.isObjectType()) {
     if (buildingTypePlaceholders.has(type)) {

@@ -36,7 +36,7 @@ impl Encoder
       self.write_u8(bit_and(shift_ru(value, 8), 255))
       self.write_u8(bit_and(value, 255))
 
-  pub fn encode_string(self, value: string) -> void
+  pub fn encode_string(self, value: String) -> void
     let len = value.length
     if len < 32 then:
       // fixstr
@@ -63,7 +63,7 @@ impl Encoder
       self.write_u8(value.char_code_at(i))
       i = i + 1
 
-  pub fn encode_array(self, value: Array<string>) -> void
+  pub fn encode_array(self, value: Array<String>) -> void
     let len = value.length
     if len < 16 then:
       self.write_u8(144 + len)
@@ -81,7 +81,7 @@ impl Encoder
     var i = 0
     while i < len do:
       value.get(i).match(item)
-        Some<string>:
+        Some<String>:
           self.encode_string(item.value)
           0
         None:
@@ -95,14 +95,14 @@ pub fn encode_json(value: i32, ptr: i32) -> i32
   enc.encode_number(value)
   enc.pos
 
-pub fn encode_json(value: string, ptr: i32) -> i32
+pub fn encode_json(value: String, ptr: i32) -> i32
   if linear_memory::size() == 0 then:
     linear_memory::grow(1)
   let enc = Encoder { ptr: ptr, pos: 0 }
   enc.encode_string(value)
   enc.pos
 
-pub fn encode_json(value: Array<string>) -> i32
+pub fn encode_json(value: Array<String>) -> i32
   if linear_memory::size() == 0 then:
     linear_memory::grow(1)
   let enc = Encoder { ptr: 0, pos: 0 }

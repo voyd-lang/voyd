@@ -14,7 +14,7 @@ pub fn main()
 
 export const kitchenSink = `
 use std::all
-pub use std::string_lib::all
+pub use std::string::all
 
 obj Vec {
   x: i32,
@@ -233,7 +233,7 @@ pub fn test19() -> i32
     if i == 5 then: break
   x
 
-pub fn test20() -> string
+pub fn test20() -> String
   "Hello, world!" + " " + "This is a test."
 
 pub fn test21()
@@ -271,11 +271,11 @@ pub fn test23()
 
 // Test the Map type
 pub fn test24()
-  let map = new_map<string>()
+  let map = new_map<String>()
   map.set("hello", "world")
   map.set("goodbye", "night")
   map.get("hello").match(v)
-    Some<string>:
+    Some<String>:
       v.value
     None:
       "not found"

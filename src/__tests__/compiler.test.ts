@@ -88,7 +88,6 @@ describe("E2E Compiler Pipeline", () => {
       "block",
       "match",
       "int",
-      "string-literal",
       "float",
       "identifier",
       "fn",

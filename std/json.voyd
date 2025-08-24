@@ -5,4 +5,4 @@ use map::all
 pub obj JsonNull {}
 pub obj JsonNumber { val: f64 }
 
-pub type Json = Map<Json> | Array<Json> | JsonNumber | JsonNull | string
+pub type Json = Map<Json> | Array<Json> | JsonNumber | JsonNull | String

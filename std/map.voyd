@@ -2,11 +2,11 @@ use macros::all
 use array::all
 use operators::all
 use optional::all
-use string_lib::all
+use string::all
 use iter::all
 
 pub obj Map<T> {
-  buckets: Array<Array<{ key: string, value: T }>>
+  buckets: Array<Array<{ key: String, value: T }>>
 }
 
 obj MapIterator<T> {
@@ -16,22 +16,22 @@ obj MapIterator<T> {
 }
 
 pub fn new_map<T>() -> Map<T>
-  let buckets = new_array<Array<{ key: string, value: T }>>({ with_size: 16 })
+  let buckets = new_array<Array<{ key: String, value: T }>>({ with_size: 16 })
 
   var i = 0
   while i < 16 do:
-    buckets.push(new_array<{ key: string, value: T }>({ with_size: 4 }))
+    buckets.push(new_array<{ key: String, value: T }>({ with_size: 4 }))
     i = i + 1
 
   Map<T> { buckets: buckets }
 
-impl<T> Iterator<{ key: string, value: T }> for MapIterator<T>
-  fn next(self) -> Optional<{ key: string, value: T }>
+impl<T> Iterator<{ key: String, value: T }> for MapIterator<T>
+  fn next(self) -> Optional<{ key: String, value: T }>
     if self.bucket_index >= self.map.buckets.length then:
       None {}
     else:
       self.map.buckets.get(self.bucket_index).match(bucket)
-        Some<Array<{ key: string, value: T }>>:
+        Some<Array<{ key: String, value: T }>>:
           if self.item_index >= bucket.value.length then:
             self.bucket_index = self.bucket_index + 1
             self.item_index = 0
@@ -40,7 +40,7 @@ impl<T> Iterator<{ key: string, value: T }> for MapIterator<T>
             let r = bucket.value.get(self.item_index)
             self.item_index = self.item_index + 1
             match(r)
-              Some<{ key: string, value: T }>:
+              Some<{ key: String, value: T }>:
                 r
               None:
                 self.next()
@@ -48,12 +48,12 @@ impl<T> Iterator<{ key: string, value: T }> for MapIterator<T>
           self.bucket_index = self.bucket_index + 1
           self.next()
 
-impl<T> Iterable<{ key: string, value: T }> for Map<T>
-  fn iterate(self) -> Iterator<{ key: string, value: T }>
+impl<T> Iterable<{ key: String, value: T }> for Map<T>
+  fn iterate(self) -> Iterator<{ key: String, value: T }>
     MapIterator<T> { map: self, bucket_index: 0, item_index: 0 }
 
 impl<T> Map<T>
-  fn hash(self, key: string) -> i32
+  fn hash(self, key: String) -> i32
     var hash_value = 0
     var i = 0
     while i < key.length do:
@@ -61,16 +61,16 @@ impl<T> Map<T>
       i = i + 1
     hash_value
 
-  fn get_bucket_by_key(self, key: string) -> Optional<Array<{ key: string, value: T }>>
+  fn get_bucket_by_key(self, key: String) -> Optional<Array<{ key: String, value: T }>>
     let index = self.hash(key)
     self.buckets.get(index)
 
-  fn get_index_of_item_in_bucket(bucket: Array<{ key: string, value: T }>, key: string) -> i32
+  fn get_index_of_item_in_bucket(bucket: Array<{ key: String, value: T }>, key: String) -> i32
     var i = 0
     var index = -1
     while i < bucket.length do:
       bucket.get(i).match(v)
-        Some<{ key: string, value: T }>:
+        Some<{ key: String, value: T }>:
           if v.value.key == key then:
             index = i
             break
@@ -80,21 +80,21 @@ impl<T> Map<T>
       i = i + 1
     index
 
-  pub fn set(self, key: string, value: T) -> Map<T>
+  pub fn set(self, key: String, value: T) -> Map<T>
     self.get_bucket_by_key(key).match(bucket)
-      Some<Array<{ key: string, value: T }>>:
+      Some<Array<{ key: String, value: T }>>:
         add_to_bucket(bucket.value, key, value)
         self
       None:
-        let new_bucket = new_array<{ key: string, value: T }>({ with_size: 1 })
+        let new_bucket = new_array<{ key: String, value: T }>({ with_size: 1 })
         new_bucket.set(0, { key: key, value: value })
         let index = self.hash(key)
         self.buckets.set(index, new_bucket)
         self
 
   fn add_to_bucket(
-    bucket: Array<{ key: string, value: T }>,
-    key: string,
+    bucket: Array<{ key: String, value: T }>,
+    key: String,
     value: T
   )
     let index = get_index_of_item_in_bucket(bucket, key)
@@ -104,23 +104,23 @@ impl<T> Map<T>
     else:
       bucket.set(index, { key: key, value: value })
 
-  pub fn get(self, key: string) -> Optional<T>
+  pub fn get(self, key: String) -> Optional<T>
     self.get_bucket_by_key(key).match(bucket)
-      Some<Array<{ key: string, value: T }>>:
+      Some<Array<{ key: String, value: T }>>:
         let index = get_index_of_item_in_bucket(bucket.value, key)
         if index < 0 then:
           None {}
         else:
           bucket.value.get(index).match(v)
-            Some<{ key: string, value: T }>:
+            Some<{ key: String, value: T }>:
               Some<T> { value: v.value.value }
             None:
               None {}
       None: None {}
 
-  pub fn delete(self, key: string) -> Map<T>
+  pub fn delete(self, key: String) -> Map<T>
     self.get_bucket_by_key(key).match(bucket)
-      Some<Array<{ key: string, value: T }>>:
+      Some<Array<{ key: String, value: T }>>:
         let index = get_index_of_item_in_bucket(bucket.value, key)
         if index < 0 then:
           self
@@ -129,8 +129,8 @@ impl<T> Map<T>
           self
       None: self
 
-  pub fn has(self, key: string) -> bool
+  pub fn has(self, key: String) -> bool
     self.get_bucket_by_key(key).match(bucket)
-      Some<Array<{ key: string, value: T }>>:
+      Some<Array<{ key: String, value: T }>>:
         get_index_of_item_in_bucket(bucket.value, key) >= 0
       None: false

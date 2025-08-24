@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 import {
   ObjectType,
   UnionType,
-  PrimitiveType,
   Identifier,
   TypeAlias,
 } from "../../../syntax-objects/index.js";
@@ -10,7 +9,7 @@ import { typesAreEqual } from "../types-are-equal.js";
 
 describe("typesAreEqual", () => {
   test("treats different generic args as distinct", () => {
-    const string = PrimitiveType.from("string");
+    const string = new ObjectType({ name: "String", value: [] });
     const jsonObj = new ObjectType({ name: "JsonObj", value: [] });
 
     const json = new UnionType({ name: "Json", childTypeExprs: [] });

@@ -6,10 +6,10 @@ pub mod operators::all
 pub mod optional::all
 pub mod iter::all
 pub mod utils::all
-pub mod string_lib::all
+pub mod string::all
 pub mod fixed_array::all
 pub mod linear_memory
-pub mod string_lib
+pub mod string
 pub mod map::all
 pub mod json
 pub mod msg_pack

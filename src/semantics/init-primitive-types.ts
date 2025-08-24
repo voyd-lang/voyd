@@ -6,7 +6,6 @@ import {
   bool,
   dVoid,
   dVoyd,
-  voydString,
 } from "../syntax-objects/types.js";
 import { voydBaseObject } from "../syntax-objects/types.js";
 import { SemanticProcessor } from "./types.js";
@@ -20,7 +19,6 @@ export const initPrimitiveTypes: SemanticProcessor = (expr) => {
   expr.registerExport(bool);
   expr.registerExport(dVoid);
   expr.registerExport(dVoyd);
-  expr.registerExport(voydString);
   expr.registerExport(voydBaseObject);
   return expr;
 };

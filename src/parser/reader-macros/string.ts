@@ -31,9 +31,14 @@ export const stringMacro: ReaderMacro = {
       });
     }
 
-    return new StringLiteral({
+    const literal = new StringLiteral({
       value: token.value,
       location: token.location,
     });
+    literal.setAttribute(
+      "charCodes",
+      token.value.split("").map((c) => c.charCodeAt(0))
+    );
+    return literal;
   },
 };
