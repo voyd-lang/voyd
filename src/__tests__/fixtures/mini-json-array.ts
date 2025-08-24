@@ -13,15 +13,16 @@ fn work(val: Array<MiniJson>, sum: i32) -> i32
       Some<MiniJson>:
         opt.value.match(json)
           Array<MiniJson>:
-            work(json, sum)
+            reducer(work(json, sum))
           JsonNumber:
             reducer(json.val + sum)
       None:
         sum
-  reducer(0)
+  reducer(sum)
 
 pub fn main() -> i32
-  work([JsonNumber { val: 23 },
+  work([
+    JsonNumber { val: 23 },
     [
       JsonNumber { val: 10 }
     ]
