@@ -8,6 +8,10 @@ export class FastShiftArray<T> {
     this.headIndex = 0;
   }
 
+  private resolveIndex(index: number): number {
+    return this.headIndex + (index < 0 ? this.length + index : index);
+  }
+
   shift(): T | undefined {
     if (this.headIndex >= this.items.length) {
       return undefined;
@@ -34,18 +38,15 @@ export class FastShiftArray<T> {
   }
 
   at(index: number): T | undefined {
-    if (index < 0) {
-      index = this.length + index;
-    }
-    return this.items[this.headIndex + index];
+    return this.items[this.resolveIndex(index)];
   }
 
   set(index: number, value: T): boolean {
-    const targetIndex = index < 0 ? this.length + index : index;
-    if (targetIndex < 0 || targetIndex >= this.length) {
+    const actual = this.resolveIndex(index);
+    if (actual < this.headIndex || actual >= this.items.length) {
       return false; // Index out of bounds
     }
-    this.items[this.headIndex + targetIndex] = value;
+    this.items[actual] = value;
     return true;
   }
 
@@ -55,19 +56,14 @@ export class FastShiftArray<T> {
 
   slice(start?: number, end?: number): T[] {
     const actualStart =
-      start !== undefined
-        ? this.headIndex + (start < 0 ? this.length + start : start)
-        : this.headIndex;
+      start !== undefined ? this.resolveIndex(start) : this.headIndex;
     const actualEnd =
-      end !== undefined
-        ? this.headIndex + (end < 0 ? this.length + end : end)
-        : this.items.length;
+      end !== undefined ? this.resolveIndex(end) : this.items.length;
     return this.items.slice(actualStart, actualEnd);
   }
 
   splice(start: number, deleteCount: number = 0, ...items: T[]): T[] {
-    const actualStart =
-      this.headIndex + (start < 0 ? this.length + start : start);
+    const actualStart = this.resolveIndex(start);
     return this.items.splice(actualStart, deleteCount, ...items);
   }
 
