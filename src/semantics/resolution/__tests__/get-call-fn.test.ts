@@ -99,7 +99,7 @@ describe("getCallFn", () => {
     call.resolveFns = vi.fn().mockReturnValue([candidate1, candidate2]);
 
     expect(() => getCallFn(call)).toThrowError(
-      `Ambiguous call ${JSON.stringify(call, null, 2)}`
+      /Ambiguous call hi\(i32\).*hi\(arg1: i32\).*hi\(arg2: i32\)/
     );
   });
 
@@ -170,7 +170,7 @@ describe("getCallFn", () => {
       .mockReturnValue([candidate1, candidate2, candidate3]);
 
     expect(() => getCallFn(call)).toThrowError(
-      `Ambiguous call ${JSON.stringify(call, null, 2)}`
+      /Ambiguous call hi\(Vec\).*hi\(arg1: Vec\)/
     );
   });
 

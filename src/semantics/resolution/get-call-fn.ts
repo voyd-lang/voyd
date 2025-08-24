@@ -1,5 +1,6 @@
 import { Call, Expr, Fn, Parameter } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
+import { formatFnSignature } from "../fn-signature.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
@@ -22,8 +23,13 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
 
   if (candidates.length === 1) return candidates[0];
 
+  const argTypes = call.args
+    .toArray()
+    .map((arg) => getExprType(arg)?.name.value)
+    .join(", ");
+  const signatures = candidates.map(formatFnSignature).join(", ");
   throw new Error(
-    `Ambiguous call ${JSON.stringify(call, null, 2)} at ${call.location}`
+    `Ambiguous call ${call.fnName}(${argTypes}) at ${call.location}. Candidates: ${signatures}`
   );
 };
 
