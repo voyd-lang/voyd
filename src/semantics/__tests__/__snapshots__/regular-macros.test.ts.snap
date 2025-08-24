@@ -148,10 +148,7 @@ exports[`regular macro expansion 1`] = `
                     "first",
                     0,
                   ],
-                  [
-                    "string",
-                    "=",
-                  ],
+                  "=",
                 ],
               ],
               [
@@ -199,10 +196,7 @@ exports[`regular macro expansion 1`] = `
                         "definitions",
                         0,
                       ],
-                      [
-                        "string",
-                        ":",
-                      ],
+                      ":",
                     ],
                     [
                       ":",
@@ -230,10 +224,7 @@ exports[`regular macro expansion 1`] = `
                               "definitions",
                               0,
                             ],
-                            [
-                              "string",
-                              "->",
-                            ],
+                            "->",
                           ],
                           [
                             ":",
@@ -275,10 +266,7 @@ exports[`regular macro expansion 1`] = `
                         "definitions",
                         0,
                       ],
-                      [
-                        "string",
-                        ":",
-                      ],
+                      ":",
                     ],
                     [
                       ":",
@@ -307,10 +295,7 @@ exports[`regular macro expansion 1`] = `
                               "definitions",
                               0,
                             ],
-                            [
-                              "string",
-                              "->",
-                            ],
+                            "->",
                           ],
                           [
                             ":",

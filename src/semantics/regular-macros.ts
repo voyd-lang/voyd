@@ -6,7 +6,6 @@ import {
   Identifier,
   Int,
   List,
-  StringLiteral,
   MacroLambda,
   Macro,
   RegularMacro,
@@ -353,7 +352,7 @@ const functions: Record<string, MacroFn | undefined> = {
   is_list: (args) => bool(!!args.at(0)?.isList()),
   log: (args) => {
     const arg = args.first();
-    if (arg?.isStringLiteral()) {
+    if (arg?.isIdentifier() && arg.isQuoted) {
       console.error(arg.value);
       return args;
     }
@@ -362,8 +361,8 @@ const functions: Record<string, MacroFn | undefined> = {
     return args;
   },
   split: (args) => {
-    const str = args.at(0) as StringLiteral;
-    const splitter = args.at(0) as StringLiteral;
+    const str = args.at(0) as Identifier;
+    const splitter = args.at(1) as Identifier;
     return new List({
       value: str.value.split(splitter.value),
       ...args.metadata,
@@ -372,7 +371,7 @@ const functions: Record<string, MacroFn | undefined> = {
   expand_macros: (args) => expandRegularMacros(args.at(0)!),
   char_to_code: (args) =>
     new Int({
-      value: String((args.at(0) as StringLiteral).value).charCodeAt(0),
+      value: String((args.at(0) as Identifier).value).charCodeAt(0),
     }),
 };
 
@@ -416,7 +415,7 @@ const ba = (args: List, fn: (l: number, r: number) => number) => {
 
   // TODO Only allow numbers here. Yucky. What was I thinking, concatenating strings with +
   if (typeof value === "string") {
-    return new StringLiteral({ value });
+    return new Identifier({ value, isQuoted: true });
   }
 
   if (typeof value === "undefined") {
@@ -449,7 +448,6 @@ const getMacroTimeValue = (expr: Expr | undefined): any => {
   const hasValue =
     expr.isFloat() ||
     expr.isInt() ||
-    expr.isStringLiteral() ||
     expr.isBool() ||
     expr.isIdentifier();
 

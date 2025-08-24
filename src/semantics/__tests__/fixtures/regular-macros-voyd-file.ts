@@ -12,25 +12,25 @@ macro_let extract_parameters = (definitions) =>
 
 macro fn()
   let first = body.extract(0)
-  let is_equals = first.extract(0) == "="
+  let is_equals = first.extract(0) == '='
   let definitions =
     if is_equals then:
       first.extract(1)
     else:
       first
   let identifier_list =
-    if definitions.extract(0) == ":" then:
+    if definitions.extract(0) == ':' then:
       definitions.extract(1)
     else:
-      if definitions.extract(0) == "->" then:
+      if definitions.extract(0) == '->' then:
         definitions.extract(1)
       else:
         definitions
   let return_type =
-    if definitions.extract(0) == ":" then:
+    if definitions.extract(0) == ':' then:
       definitions.slice(2, 3)
     else:
-      if definitions.extract(0) == "->" then:
+      if definitions.extract(0) == '->' then:
         definitions.slice(2, 3)
       else: \`()
   let identifier = identifier_list.extract(0)

@@ -1,4 +1,5 @@
-import { Identifier, StringLiteral } from "../../syntax-objects/index.js";
+import { Identifier } from "../../syntax-objects/index.js";
+import { makeString } from "../../syntax-objects/lib/make-string.js";
 import { ReaderMacro } from "./types.js";
 
 export const stringMacro: ReaderMacro = {
@@ -31,14 +32,6 @@ export const stringMacro: ReaderMacro = {
       });
     }
 
-    const literal = new StringLiteral({
-      value: token.value,
-      location: token.location,
-    });
-    literal.setAttribute(
-      "charCodes",
-      token.value.split("").map((c) => c.charCodeAt(0))
-    );
-    return literal;
+    return makeString(token.value, { location: token.location });
   },
 };

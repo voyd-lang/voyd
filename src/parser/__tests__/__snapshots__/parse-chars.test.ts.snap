@@ -220,8 +220,29 @@ exports[`should parse the example file into a raw ast 1`] = `
     "log",
     [
       [
-        "string",
-        "Hey there!",
+        "new_string",
+        [
+          "object",
+          "ObjectLiteral-222",
+          [
+            [
+              "from",
+              [
+                "FixedArray",
+                72,
+                101,
+                121,
+                32,
+                116,
+                104,
+                101,
+                114,
+                101,
+                33,
+              ],
+            ],
+          ],
+        ],
       ],
     ],
     "

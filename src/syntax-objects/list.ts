@@ -88,7 +88,7 @@ export class List extends Syntax {
 
   getIdStrAt(index: number): string | undefined {
     const v = this.at(index);
-    return v?.isIdentifier() || v?.isStringLiteral() ? v.value : undefined;
+    return v?.isIdentifier() ? v.value : undefined;
   }
 
   consume(): Expr {

@@ -7,14 +7,11 @@ import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
-import { StringLiteral } from "../../syntax-objects/string-literal.js";
-import { Int } from "../../syntax-objects/int.js";
 import {
   ObjectType,
   TypeAlias,
   voydBaseObject,
   Type,
-  i32,
 } from "../../syntax-objects/types.js";
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
@@ -51,7 +48,6 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (expr.isTypeAlias()) return resolveTypeAlias(expr);
   if (expr.isObjectLiteral()) return resolveObjectLiteral(expr);
   if (expr.isArrayLiteral()) return resolveArrayLiteral(expr);
-  if (expr.isStringLiteral()) return resolveStringLiteral(expr);
   if (expr.isMatch()) return resolveMatch(expr);
   if (expr.isImpl()) return resolveImpl(expr);
   if (expr.isTrait()) return resolveTrait(expr);
@@ -258,28 +254,3 @@ export const resolveArrayLiteral = (
   return resolveEntities(newArrayCall);
 };
 
-const resolveStringLiteral = (str: StringLiteral): Expr => {
-  const codes: Int[] = (str.getAttribute("charCodes") as number[] | undefined)
-    ?.map((c) => new Int({ ...str.metadata, value: c })) ??
-    str.value.split("").map((c) => new Int({ ...str.metadata, value: c.charCodeAt(0) }));
-
-  const fixedArray = new Call({
-    ...str.metadata,
-    fnName: Identifier.from("FixedArray"),
-    args: new List({ value: codes }),
-    typeArgs: new List({ value: [i32.clone()] }),
-  });
-
-  const objLiteral = new ObjectLiteral({
-    ...str.metadata,
-    fields: [{ name: "from", initializer: fixedArray }],
-  });
-
-  const newStringCall = new Call({
-    ...str.metadata,
-    fnName: Identifier.from("new_string"),
-    args: new List({ value: [objLiteral] }),
-  });
-
-  return resolveEntities(newStringCall);
-};

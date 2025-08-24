@@ -1,4 +1,4 @@
-import { Identifier, List, StringLiteral } from "../../syntax-objects/index.js";
+import { Identifier, List } from "../../syntax-objects/index.js";
 import { ReaderMacro } from "./types.js";
 
 const SCI = /^[+-]?\d(\.\d+)?[Ee][+-]?\d+$/;
@@ -10,9 +10,10 @@ export const scientificENotationMacro: ReaderMacro = {
     new List({ location: token.location })
       .push(new Identifier({ value: "scientific-e-notion" }))
       .push(
-        new StringLiteral({
+        new Identifier({
           value: token.value,
           location: token.location,
+          isQuoted: true,
         })
       ),
 };

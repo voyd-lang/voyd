@@ -15,7 +15,6 @@ import type { Closure } from "./closure.js";
 import type { MacroVariable } from "./macro-variable.js";
 import type { Macro } from "./macros.js";
 import type { Parameter } from "./parameter.js";
-import type { StringLiteral } from "./string-literal.js";
 import type { ObjectLiteral } from "./object-literal.js";
 import type { ArrayLiteral } from "./array-literal.js";
 import type {
@@ -207,10 +206,6 @@ export abstract class Syntax {
 
   isExpr(): this is Expr {
     return true;
-  }
-
-  isStringLiteral(): this is StringLiteral {
-    return this.syntaxType === "string-literal";
   }
 
   isList(): this is List {
