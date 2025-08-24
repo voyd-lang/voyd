@@ -1,5 +1,6 @@
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier, List, nop, Expr, Fn } from "../../syntax-objects/index.js";
+import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
 import {
   dVoid,
   FixedArrayType,
@@ -8,7 +9,11 @@ import {
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
-import { resolveEntities } from "./resolve-entities.js";
+import {
+  resolveEntities,
+  resolveArrayLiteral,
+  resolveObjectLiteral,
+} from "./resolve-entities.js";
 import { resolveExport, resolveModulePath } from "./resolve-use.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
@@ -54,6 +59,10 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   call.fnName.type = type;
 
   if (type?.isObjectType()) {
+    const objArg = call.argAt(0);
+    if (objArg?.isObjectLiteral()) {
+      call.args.set(0, resolveObjectLiteral(objArg, type));
+    }
     return resolveObjectInit(call, type);
   }
 
@@ -62,6 +71,7 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   }
 
   resolveCallFn(call, candidateFns);
+  resolveArrayArgs(call);
   expandObjectArg(call);
   inferClosureArgTypes(call);
 
@@ -101,6 +111,42 @@ const resolveCallFn = (call: Call, candidateFns?: Fn[]) => {
     call.fn = resolvedFn;
     call.type = resolvedFn.returnType;
   }
+};
+
+const getArrayElemType = (type?: ObjectType) => {
+  if (!type) return;
+  if (!type.name.is("Array") && !type.genericParent?.name.is("Array")) return;
+  const arg = type.appliedTypeArgs?.[0];
+  return arg && arg.isTypeAlias() ? arg.type : undefined;
+};
+
+const resolveArrayArgs = (call: Call) => {
+  const fn = call.fn?.isFn() ? call.fn : undefined;
+  call.args.each((arg: Expr, index: number) => {
+    const param = fn?.parameters[index];
+    const paramType = param?.type;
+    const elemType =
+      paramType && paramType.isObjectType()
+        ? getArrayElemType(paramType)
+        : undefined;
+
+    const isLabeled = arg.isCall() && arg.calls(":");
+    const inner = isLabeled ? arg.argAt(1) : arg;
+    const arrayCall =
+      inner?.isCall() && inner.hasTmpAttribute("arrayLiteral")
+        ? (inner as Call)
+        : undefined;
+    if (!arrayCall) return;
+
+    const arr = arrayCall.getTmpAttribute<ArrayLiteral>("arrayLiteral")!.clone();
+    const resolved = resolveArrayLiteral(arr, elemType);
+    if (isLabeled) {
+      arg.args.set(1, resolved);
+      call.args.set(index, resolveEntities(arg));
+      return;
+    }
+    call.args.set(index, resolved);
+  });
 };
 
 const expandObjectArg = (call: Call) => {

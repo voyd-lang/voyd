@@ -81,6 +81,14 @@ const resolveBlock = (block: Block): Block => {
   return block;
 };
 
+const getArrayElemType = (type?: Type): Type | undefined => {
+  if (!type?.isObjectType()) return;
+  const parent = type.genericParent;
+  if (!type.name.is("Array") && !parent?.name.is("Array")) return;
+  const arg = type.appliedTypeArgs?.[0];
+  return arg && arg.isTypeAlias() ? arg.type : undefined;
+};
+
 export const resolveVar = (variable: Variable): Variable => {
   if (variable.typeExpr) {
     variable.typeExpr = resolveTypeExpr(variable.typeExpr);
@@ -88,9 +96,16 @@ export const resolveVar = (variable: Variable): Variable => {
     variable.type = variable.annotatedType;
   }
 
-  const initializer = resolveEntities(variable.initializer);
-  variable.initializer = initializer;
-  variable.inferredType = getExprType(initializer);
+  let init = variable.initializer;
+  if (variable.type) {
+    init = resolveWithExpected(init, variable.type);
+  } else if (init.isArrayLiteral()) {
+    init = resolveArrayLiteral(init);
+  } else {
+    init = resolveEntities(init);
+  }
+  variable.initializer = init;
+  variable.inferredType = getExprType(init);
 
   if (!variable.type) {
     variable.type = variable.inferredType;
@@ -120,9 +135,60 @@ const resolveTypeAlias = (alias: TypeAlias): TypeAlias => {
   return alias;
 };
 
-const resolveObjectLiteral = (obj: ObjectLiteral) => {
+const unwrapAlias = (type?: Type): Type | undefined => {
+  return type?.isTypeAlias() ? type.type ?? type : type;
+};
+
+const findObjectType = (
+  type: Type | undefined,
+  name: Identifier
+): ObjectType | undefined => {
+  const matches: ObjectType[] = [];
+  const search = (t?: Type) => {
+    t = unwrapAlias(t);
+    if (!t) return;
+    if (t.isObjectType()) {
+      if (t.name.is(name) || t.genericParent?.name.is(name)) matches.push(t);
+      return;
+    }
+    if (t.isUnionType()) t.types.forEach(search);
+  };
+  search(type);
+  return matches.length === 1 ? matches[0] : undefined;
+};
+
+const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
+  if (!expected) return resolveEntities(expr);
+  const unwrapped = unwrapAlias(expected);
+  if (expr.isArrayLiteral()) {
+    const elem = getArrayElemType(unwrapped);
+    return resolveArrayLiteral(expr, elem);
+  }
+  if (expr.isCall()) {
+    const resolved = resolveCall(expr);
+    const objType = findObjectType(unwrapped, resolved.fnName);
+    if (objType) {
+      resolved.fn = objType;
+      resolved.type = objType;
+      resolved.fnName.type = objType;
+      const objArg = resolved.argAt(0);
+      if (objArg?.isObjectLiteral()) {
+        resolved.args.set(0, resolveObjectLiteral(objArg, objType));
+      }
+      return resolved;
+    }
+    return resolved;
+  }
+  if (expr.isObjectLiteral() && unwrapped?.isObjectType()) {
+    return resolveObjectLiteral(expr, unwrapped);
+  }
+  return resolveEntities(expr);
+};
+
+export const resolveObjectLiteral = (obj: ObjectLiteral, expected?: ObjectType) => {
   obj.fields.forEach((field) => {
-    field.initializer = resolveEntities(field.initializer);
+    const expectedField = expected?.getField(field.name)?.type;
+    field.initializer = resolveWithExpected(field.initializer, expectedField);
     field.type = getExprType(field.initializer);
     return field;
   });
@@ -144,12 +210,26 @@ const resolveObjectLiteral = (obj: ObjectLiteral) => {
   return obj;
 };
 
-const resolveArrayLiteral = (arr: ArrayLiteral): Expr => {
-  arr.elements = arr.elements.map(resolveEntities);
-  const elemTypes = arr.elements
-    .map((e) => getExprType(e))
-    .filter((t): t is Type => !!t);
-  const elemType = combineTypes(elemTypes);
+export const resolveArrayLiteral = (
+  arr: ArrayLiteral,
+  expectedElemType?: Type
+): Expr => {
+  const original = arr.clone();
+
+  arr.elements = arr.elements.map((elem) => {
+    if (expectedElemType && elem.isArrayLiteral()) {
+      const childExpected = getArrayElemType(expectedElemType) ?? expectedElemType;
+      return resolveArrayLiteral(elem, childExpected);
+    }
+    return resolveEntities(elem);
+  });
+  const elemType =
+    expectedElemType ??
+    combineTypes(
+      arr.elements
+        .map((e) => getExprType(e))
+        .filter((t): t is Type => !!t)
+    );
 
   const fixedArray = new Call({
     ...arr.metadata,
@@ -170,6 +250,6 @@ const resolveArrayLiteral = (arr: ArrayLiteral): Expr => {
     args: new List({ value: [objLiteral] }),
     typeArgs,
   });
-
+  newArrayCall.setTmpAttribute("arrayLiteral", original);
   return resolveEntities(newArrayCall);
 };
