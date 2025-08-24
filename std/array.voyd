@@ -14,17 +14,17 @@ obj ArrayIterator<T> {
   array: Array<T>
 }
 
-pub fn new_array<T>(opts: { with_size: i32 }) -> Array<T>
-  Array<T> {
+pub fn new_array<T>(opts: { with_size: i32 }) -> &Array<T>
+  &Array<T> {
     storage: new_fixed_array<T>(opts.with_size),
     count: 0
   }
 
-pub fn new_array<T>(opts: { from: FixedArray<T> }) -> Array<T>
-  Array<T> { storage: opts.from, count: opts.from.length<T>() }
+pub fn new_array<T>(opts: { from: FixedArray<T> }) -> &Array<T>
+  &Array<T> { storage: opts.from, count: opts.from.length<T>() }
 
 impl<T> Array<T>
-  fn resize(self) -> Array<T>
+  fn resize(&self) -> Array<T>
     let new_storage = new_fixed_array<T>(self.storage.length<T>() * 2)
     new_storage.copy<T>({
       from: self.storage,
@@ -43,7 +43,7 @@ impl<T> Array<T>
       Some<T> { value: self.storage.get<T>(index) }
 
   // This is unsafe at the moment
-  pub fn set(self, index: i32, value: T) -> Array<T>
+  pub fn set(&self, index: i32, value: T) -> Array<T>
     let computed_index = compute_index(index, self.count)
     if computed_index >= self.storage.length<T>() then:
       self
@@ -54,7 +54,7 @@ impl<T> Array<T>
   pub fn length(self) -> i32
     self.count
 
-  pub fn push(self, value: T) -> Array<T>
+  pub fn push(&self, value: T) -> Array<T>
     if self.count >= self.storage.length<T>() then:
       self.resize().push(value)
     else:
@@ -62,7 +62,7 @@ impl<T> Array<T>
       self.count = self.count + 1
       self
 
-  pub fn pop(self) -> Optional<T>
+  pub fn pop(&self) -> Optional<T>
     if self.count == 0 then:
       None {}
     else:
@@ -74,7 +74,7 @@ impl<T> Array<T>
         None:
           None {}
 
-  pub fn remove(self, index: i32) -> Array<T>
+  pub fn remove(&self, index: i32) -> Array<T>
     let computed_index = compute_index(index, self.count)
     if computed_index >= self.count then:
       self
@@ -98,7 +98,7 @@ impl<T> Array<T>
 
       Array<T> { storage: new_storage, count: new_length }
 
-  pub fn insert(self, index: i32, value: T) -> Array<T>
+  pub fn insert(&self, index: i32, value: T) -> Array<T>
     let computed_index = compute_index(index, self.count)
     if computed_index >= self.count then:
       self.push(value)
@@ -187,7 +187,7 @@ fn compute_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
 
 impl<T> Iterator<T> for ArrayIterator<T>
-  fn next(self) -> Optional<T>
+  fn next(&self) -> Optional<T>
     if self.index >= self.array.length then:
       None {}
     else:

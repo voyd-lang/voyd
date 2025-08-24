@@ -7,7 +7,7 @@ obj Encoder {
 }
 
 impl Encoder
-  fn ensure_capacity(self, add: i32) -> void
+  fn ensure_capacity(&self, add: i32) -> void
     let required = self.ptr + self.pos + add
     let current_bytes = linear_memory::size() * 65536
     if required >= current_bytes then:
@@ -16,7 +16,7 @@ impl Encoder
       let pages = (needed / 65536) + 1
       linear_memory::grow(pages)
 
-  fn write_u8(self, value: i32) -> void
+  fn write_u8(&self, value: i32) -> void
     self.ensure_capacity(1)
     binaryen
       func: store8
@@ -24,7 +24,7 @@ impl Encoder
       args: `(BnrConst(0), BnrConst(0), self.ptr + self.pos, value)
     self.pos = self.pos + 1
 
-  pub fn encode_number(self, value: i32) -> void
+  pub fn encode_number(&self, value: i32) -> void
     if value >= 0 and value < 128 then:
       // positive fixint
       self.write_u8(value)
@@ -36,7 +36,7 @@ impl Encoder
       self.write_u8(bit_and(shift_ru(value, 8), 255))
       self.write_u8(bit_and(value, 255))
 
-  pub fn encode_string(self, value: String) -> void
+  pub fn encode_string(&self, value: String) -> void
     let len = value.length
     if len < 32 then:
       // fixstr
@@ -63,7 +63,7 @@ impl Encoder
       self.write_u8(value.char_code_at(i))
       i = i + 1
 
-  pub fn encode_array(self, value: Array<String>) -> void
+  pub fn encode_array(&self, value: Array<String>) -> void
     let len = value.length
     if len < 16 then:
       self.write_u8(144 + len)

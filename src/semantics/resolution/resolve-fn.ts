@@ -72,7 +72,11 @@ const resolveParameters = (params: Parameter[]) => {
       // methods can properly resolve their `Self` parameter. This allows
       // compatibility checks to detect when a concrete implementation is
       // providing the first parameter expected by a trait method.
-      p.type = impl ? impl.targetType : selfType.clone(p);
+      const base = impl ? impl.targetType : selfType.clone(p);
+      p.type = base!.clone(p);
+      if (p.hasAttribute("mutable")) {
+        p.type.setAttribute("mutable", true);
+      }
       return;
     }
 
@@ -82,6 +86,10 @@ const resolveParameters = (params: Parameter[]) => {
 
     p.typeExpr = resolveTypeExpr(p.typeExpr);
     p.type = getExprType(p.typeExpr);
+    if (p.hasAttribute("mutable")) {
+      p.type = p.type?.clone(p);
+      p.type?.setAttribute("mutable", true);
+    }
   });
 };
 

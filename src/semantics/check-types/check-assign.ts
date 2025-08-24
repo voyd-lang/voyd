@@ -4,31 +4,49 @@ import { typesAreCompatible } from "../resolution/index.js";
 import { checkTypes } from "./check-types.js";
 
 export const checkAssign = (call: Call) => {
-  const id = call.argAt(0);
-  if (!id?.isIdentifier()) {
+  const target = call.argAt(0);
+  checkTypes(target);
+
+  if (target?.isIdentifier()) {
+    const variable = target.resolve();
+    if (!variable || !variable.isVariable()) {
+      throw new Error(`Unrecognized variable ${target} at ${target.location}`);
+    }
+
+    if (!variable.isMutable) {
+      throw new Error(`${target} cannot be re-assigned at ${target.location}`);
+    }
+
+    const initExpr = call.argAt(1);
+    checkTypes(initExpr);
+    const initType = getExprType(initExpr);
+
+    if (!typesAreCompatible(variable.type, initType)) {
+      const variableTypeName = variable.type?.name.value ?? "unknown";
+      const initTypeName = initType?.name.value ?? "unknown";
+      const location = call.location ?? target.location;
+      throw new Error(
+        `Cannot assign ${initTypeName} to variable ${target} of type ${variableTypeName} at ${location}`
+      );
+    }
+
     return call;
   }
 
-  const variable = id.resolve();
-  if (!variable || !variable.isVariable()) {
-    throw new Error(`Unrecognized variable ${id} at ${id.location}`);
-  }
-
-  if (!variable.isMutable) {
-    throw new Error(`${id} cannot be re-assigned at ${id.location}`);
-  }
-
-  const initExpr = call.argAt(1);
-  checkTypes(initExpr);
-  const initType = getExprType(initExpr);
-
-  if (!typesAreCompatible(variable.type, initType)) {
-    const variableTypeName = variable.type?.name.value ?? "unknown";
-    const initTypeName = initType?.name.value ?? "unknown";
-    const location = call.location ?? id.location;
-    throw new Error(
-      `Cannot assign ${initTypeName} to variable ${id} of type ${variableTypeName} at ${location}`
-    );
+  if (target?.isCall() && target.calls("member-access")) {
+    const initExpr = call.argAt(1);
+    checkTypes(initExpr);
+    const fieldType = getExprType(target);
+    const initType = getExprType(initExpr);
+    if (!typesAreCompatible(fieldType, initType)) {
+      const fieldTypeName = fieldType?.name.value ?? "unknown";
+      const initTypeName = initType?.name.value ?? "unknown";
+      const location = call.location ?? target.location;
+      throw new Error(
+        `Cannot assign ${initTypeName} to field of type ${fieldTypeName} at ${location}`
+      );
+    }
+    return call;
   }
 
   return call;

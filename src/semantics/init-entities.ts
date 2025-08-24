@@ -33,6 +33,17 @@ export const initEntities: SemanticProcessor = (expr) => {
 
   if (!expr.isList()) return expr;
 
+  if (expr.calls("&")) {
+    const inner =
+      expr.length === 2
+        ? initEntities(expr.at(1)!)
+        : initEntities(
+            new List({ ...expr.metadata, value: expr.sliceAsArray(1) })
+          );
+    inner.setAttribute("mutable", true);
+    return inner;
+  }
+
   if (expr.calls("define_function")) {
     return initFn(expr);
   }
@@ -126,18 +137,25 @@ const initFn = (expr: List): Fn => {
   const parameters = parameterList
     .sliceAsArray(typeParameters ? 2 : 1)
     .flatMap((p) => {
-      if (p.isIdentifier()) {
-        return new Parameter({
-          name: p,
+      const inited = p.isList() && p.calls("&") ? initEntities(p) : p;
+      if (inited.isIdentifier()) {
+        const param = new Parameter({
+          name: inited,
           typeExpr: undefined,
         });
+        if (inited.hasAttribute("mutable")) param.setAttribute("mutable", true);
+        return param;
       }
 
-      if (!p.isList()) {
+      if (!inited.isList()) {
         throw new Error("Invalid parameter");
       }
 
-      return listToParameter(p);
+      const param = listToParameter(inited);
+      if (!Array.isArray(param) && inited.hasAttribute("mutable")) {
+        param.setAttribute("mutable", true);
+      }
+      return param;
     });
 
   const returnTypeExpr = getReturnTypeExprForFn(expr, 3);
@@ -595,6 +613,11 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
   }
 
   if (type.calls("&")) {
+    if (type.length === 2) {
+      const inner = initTypeExprEntities(type.at(1));
+      if (inner) inner.setAttribute("mutable", true);
+      return inner;
+    }
     return initIntersection(type);
   }
 

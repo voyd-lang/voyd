@@ -24,7 +24,7 @@ export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("=")) return checkAssign(call);
   if (call.calls("while")) return checkWhile(call);
   if (call.calls("FixedArray")) return checkFixedArrayInit(call);
-  if (call.calls("member-access")) return call; // TODO
+  if (call.calls("member-access")) return checkMemberAccess(call);
   if (call.fn?.isObjectType()) return checkObjectInit(call);
 
   call.args = call.args.map(checkTypes);
@@ -97,6 +97,20 @@ const checkClosureCall = (call: Call): Call => {
     }
   });
   call.type = closureType.returnType;
+  return call;
+};
+
+const checkMemberAccess = (call: Call): Call => {
+  const obj = checkTypes(call.argAt(0));
+  call.args.set(0, obj);
+  const objType = getExprType(obj);
+  let parent = call.parent;
+  while (parent && !parent.isCall()) parent = parent.parent;
+  const isAssignTarget = parent?.isCall() && parent.calls("=") && parent.argAt(0) === call;
+  if (isAssignTarget && objType && !objType.hasAttribute("mutable")) {
+    const loc = obj?.location ?? call.location;
+    throw new Error(`${obj} is not mutable at ${loc}`);
+  }
   return call;
 };
 

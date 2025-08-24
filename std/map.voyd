@@ -15,7 +15,7 @@ obj MapIterator<T> {
   item_index: i32
 }
 
-pub fn new_map<T>() -> Map<T>
+pub fn new_map<T>() -> &Map<T>
   let buckets = new_array<Array<{ key: String, value: T }>>({ with_size: 16 })
 
   var i = 0
@@ -23,10 +23,10 @@ pub fn new_map<T>() -> Map<T>
     buckets.push(new_array<{ key: String, value: T }>({ with_size: 4 }))
     i = i + 1
 
-  Map<T> { buckets: buckets }
+  &Map<T> { buckets: buckets }
 
 impl<T> Iterator<{ key: String, value: T }> for MapIterator<T>
-  fn next(self) -> Optional<{ key: String, value: T }>
+  fn next(&self) -> Optional<{ key: String, value: T }>
     if self.bucket_index >= self.map.buckets.length then:
       None {}
     else:
@@ -80,10 +80,10 @@ impl<T> Map<T>
       i = i + 1
     index
 
-  pub fn set(self, key: String, value: T) -> Map<T>
+  pub fn set(&self, key: String, value: T) -> Map<T>
     self.get_bucket_by_key(key).match(bucket)
       Some<Array<{ key: String, value: T }>>:
-        add_to_bucket(bucket.value, key, value)
+        add_to_bucket(&bucket.value, key, value)
         self
       None:
         let new_bucket = new_array<{ key: String, value: T }>({ with_size: 1 })
@@ -93,7 +93,7 @@ impl<T> Map<T>
         self
 
   fn add_to_bucket(
-    bucket: Array<{ key: String, value: T }>,
+    bucket: &Array<{ key: String, value: T }>,
     key: String,
     value: T
   )
@@ -118,7 +118,7 @@ impl<T> Map<T>
               None {}
       None: None {}
 
-  pub fn delete(self, key: String) -> Map<T>
+  pub fn delete(&self, key: String) -> Map<T>
     self.get_bucket_by_key(key).match(bucket)
       Some<Array<{ key: String, value: T }>>:
         let index = get_index_of_item_in_bucket(bucket.value, key)

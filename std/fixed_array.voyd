@@ -44,7 +44,7 @@ obj FixedArrayIterator<T> {
 }
 
 impl<T> Iterator<T> for FixedArrayIterator<T>
-  fn next(self) -> Optional<T>
+  fn next(&self) -> Optional<T>
     if self.index >= self.array.length<T>() then:
       None {}
     else:
