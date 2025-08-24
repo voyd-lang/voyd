@@ -6,7 +6,7 @@ obj Box { val: i32 }
 type Html = Array<Html> | String
 
 fn work(html: Array<Html>, sum: i32) -> i32
-  let it = html.iterate()
+  let it = &html.iterate()
   let reducer: (sum: i32) -> i32 = (sum: i32) -> i32 =>
     it.next().match(opt)
       Some<Html>:

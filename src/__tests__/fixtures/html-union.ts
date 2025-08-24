@@ -6,7 +6,7 @@ type Html = Array<Html> | String
 fn work(html: Html, sum: i32) -> i32
   match(html)
     Array<Html>:
-      let it = html.iterate()
+      let it = &html.iterate()
       let reducer: (acc: i32) -> i32 = (acc: i32) -> i32 =>
         it.next().match(opt)
           Some<Html>:
