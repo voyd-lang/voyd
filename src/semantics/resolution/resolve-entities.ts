@@ -253,3 +253,4 @@ export const resolveArrayLiteral = (
   newArrayCall.setTmpAttribute("arrayLiteral", original);
   return resolveEntities(newArrayCall);
 };
+

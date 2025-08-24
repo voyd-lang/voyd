@@ -6,7 +6,6 @@ import type { Identifier } from "./identifier.js";
 import type { Int } from "./int.js";
 import type { List } from "./list.js";
 import { Parameter } from "./parameter.js";
-import type { StringLiteral } from "./string-literal.js";
 import type { Type } from "./types.js";
 import { Variable } from "./variable.js";
 import type { Whitespace } from "./whitespace.js";
@@ -56,7 +55,6 @@ export type PrimitiveExpr =
   | Bool
   | Int
   | Float
-  | StringLiteral
   | Identifier
   | Whitespace
   | List;

@@ -8,7 +8,7 @@ pub fn map_iter_sum() -> i32
   let iterator = m.iterate()
   let looper: (s: i32) -> i32 = (acc: i32) =>
     iterator.next().match(item)
-      Some<{ key: string, value: i32 }>:
+      Some<{ key: String, value: i32 }>:
         looper(acc + item.value.value)
       None:
         acc

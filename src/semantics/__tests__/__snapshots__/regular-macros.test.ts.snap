@@ -7,7 +7,7 @@ exports[`regular macro expansion 1`] = `
   [
     "exports",
     [
-      "std#904",
+      "std#902",
     ],
   ],
   [
@@ -47,7 +47,7 @@ exports[`regular macro expansion 1`] = `
         ],
         [
           "regular-macro",
-          "\`#933",
+          "\`#931",
           [
             "parameters",
           ],
@@ -68,7 +68,7 @@ exports[`regular macro expansion 1`] = `
         ],
         [
           "regular-macro",
-          "let#980",
+          "let#978",
           [
             "parameters",
           ],
@@ -121,7 +121,7 @@ exports[`regular macro expansion 1`] = `
         ],
         [
           "regular-macro",
-          "fn#1773",
+          "fn#1771",
           [
             "parameters",
           ],
@@ -148,10 +148,7 @@ exports[`regular macro expansion 1`] = `
                     "first",
                     0,
                   ],
-                  [
-                    "string",
-                    "=",
-                  ],
+                  "=",
                 ],
               ],
               [
@@ -199,10 +196,7 @@ exports[`regular macro expansion 1`] = `
                         "definitions",
                         0,
                       ],
-                      [
-                        "string",
-                        ":",
-                      ],
+                      ":",
                     ],
                     [
                       ":",
@@ -230,10 +224,7 @@ exports[`regular macro expansion 1`] = `
                               "definitions",
                               0,
                             ],
-                            [
-                              "string",
-                              "->",
-                            ],
+                            "->",
                           ],
                           [
                             ":",
@@ -275,10 +266,7 @@ exports[`regular macro expansion 1`] = `
                         "definitions",
                         0,
                       ],
-                      [
-                        "string",
-                        ":",
-                      ],
+                      ":",
                     ],
                     [
                       ":",
@@ -307,10 +295,7 @@ exports[`regular macro expansion 1`] = `
                               "definitions",
                               0,
                             ],
-                            [
-                              "string",
-                              "->",
-                            ],
+                            "->",
                           ],
                           [
                             ":",

@@ -1,7 +1,7 @@
 import { Bool } from "../../../syntax-objects/bool.js";
 import { Expr } from "../../../syntax-objects/expr.js";
 import { List } from "../../../syntax-objects/list.js";
-import { StringLiteral } from "../../../syntax-objects/string-literal.js";
+import { makeString } from "../../../syntax-objects/lib/make-string.js";
 import { CharStream } from "../../char-stream.js";
 
 /**
@@ -132,7 +132,7 @@ export class HTMLParser {
       text += this.stream.consumeChar();
     }
     this.stream.consumeChar(); // Consume the closing quote
-    return new StringLiteral({ value: text });
+    return makeString(text);
   }
 
   private parseChildren(tagName: string): Expr[] {
@@ -183,7 +183,7 @@ export class HTMLParser {
     let text = "";
     while (this.stream.hasCharacters && this.stream.next !== "<") {
       if (this.stream.next === "{") {
-        if (text) node.push(new StringLiteral({ value: text }));
+        if (text) node.push(makeString(text));
         text = "";
         const expr = this.options.onUnescapedCurlyBrace(this.stream);
         if (expr) node.push(expr);
@@ -192,7 +192,7 @@ export class HTMLParser {
       text += this.stream.consumeChar();
     }
 
-    if (text) node.push(new StringLiteral({ value: text }));
+    if (text) node.push(makeString(text));
     node.location.endColumn = this.stream.column;
     node.location.endIndex = this.stream.position;
     return node;

@@ -21,7 +21,6 @@ import {
   IntersectionType,
   FixedArrayType,
   Closure,
-  voydString,
 } from "../syntax-objects/index.js";
 import { Match } from "../syntax-objects/match.js";
 import { getExprType } from "./resolution/get-expr-type.js";
@@ -671,8 +670,7 @@ const checkUnionType = (union: UnionType) => {
     const isObjectType =
       t.isObjectType() ||
       t.isIntersectionType() ||
-      t.isUnionType() ||
-      t === voydString;
+      t.isUnionType();
     if (!isObjectType) {
       throw new Error(
         `Union must be made up of object types ${union.location}`

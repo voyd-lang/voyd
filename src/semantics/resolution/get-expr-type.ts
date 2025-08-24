@@ -7,7 +7,6 @@ import {
   bool,
   i64,
   f64,
-  voydString,
   selfType,
 } from "../../syntax-objects/types.js";
 import { resolveCall } from "./resolve-call.js";
@@ -16,7 +15,6 @@ export const getExprType = (expr?: Expr): Type | undefined => {
   if (!expr) return;
   if (expr.isInt()) return typeof expr.value === "number" ? i32 : i64;
   if (expr.isFloat()) return typeof expr.value === "number" ? f32 : f64;
-  if (expr.isStringLiteral()) return voydString;
   if (expr.isBool()) return bool;
   if (expr.isIdentifier()) return getIdentifierType(expr);
   if (expr.isCall()) return resolveCall(expr)?.type;

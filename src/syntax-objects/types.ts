@@ -387,8 +387,7 @@ export type Primitive =
   | ReferenceType
   | "void"
   | "voyd"
-  | "bool"
-  | "string";
+  | "bool";
 
 export type NumericType = "i32" | "f32" | "i64" | "f64";
 export type ReferenceType = "funcref" | "externref";
@@ -400,7 +399,6 @@ export const f64 = PrimitiveType.from("f64");
 export const bool = PrimitiveType.from("bool");
 export const dVoid = PrimitiveType.from("void");
 export const dVoyd = PrimitiveType.from("voyd");
-export const voydString = PrimitiveType.from("string");
 export const selfType = new SelfType();
 export const voydBaseObject = new ObjectType({
   name: "Object",
@@ -411,5 +409,4 @@ export type VoydRefType =
   | ObjectType
   | UnionType
   | IntersectionType
-  | TupleType
-  | PrimitiveType; // string only. TODO: Make string something else idk. This is not very dev friendly
+  | TupleType;

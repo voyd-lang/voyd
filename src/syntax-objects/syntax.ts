@@ -15,7 +15,6 @@ import type { Closure } from "./closure.js";
 import type { MacroVariable } from "./macro-variable.js";
 import type { Macro } from "./macros.js";
 import type { Parameter } from "./parameter.js";
-import type { StringLiteral } from "./string-literal.js";
 import type { ObjectLiteral } from "./object-literal.js";
 import type { ArrayLiteral } from "./array-literal.js";
 import type {
@@ -209,10 +208,6 @@ export abstract class Syntax {
     return true;
   }
 
-  isStringLiteral(): this is StringLiteral {
-    return this.syntaxType === "string-literal";
-  }
-
   isList(): this is List {
     return this.syntaxType === "list";
   }
@@ -359,8 +354,7 @@ export abstract class Syntax {
       this.isObjectType() ||
       this.isIntersectionType() ||
       this.isUnionType() ||
-      this.isTupleType() ||
-      (this.isPrimitiveType() && this.name.is("string"))
+      this.isTupleType()
     );
   }
 

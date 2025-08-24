@@ -6,7 +6,6 @@ export * from "./lib/helpers.js";
 export * from "./identifier.js";
 export * from "./int.js";
 export * from "./list.js";
-export * from "./string-literal.js";
 export * from "./types.js";
 export * from "./whitespace.js";
 export * from "./fn.js";
