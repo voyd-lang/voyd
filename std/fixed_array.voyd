@@ -1,4 +1,6 @@
 use std::macros::all
+use optional::all
+use iter::all
 
 pub fn new_fixed_array<T>(size: i32) -> FixedArray<T>
   binaryen_gc_call(
@@ -35,3 +37,21 @@ pub fn copy<T>(dest_array: FixedArray<T>, opts: {
 
 pub fn length<T>(arr: FixedArray<T>) -> i32
   binaryen_gc_call(arrayLen, `(arr), i32)
+
+obj FixedArrayIterator<T> {
+  index: i32,
+  array: FixedArray<T>
+}
+
+impl<T> Iterator<T> for FixedArrayIterator<T>
+  fn next(self) -> Optional<T>
+    if self.index >= self.array.length<T>() then:
+      None {}
+    else:
+      let value = self.array.get<T>(self.index)
+      self.index = self.index + 1
+      Some<T> { value: value }
+
+impl<T> Iterable<T> for FixedArray<T>
+  fn iterate(self) -> Iterator<T>
+    FixedArrayIterator<T> { index: 0, array: self }
