@@ -105,7 +105,7 @@ impl<T> Map<T>
       bucket.set(index, { key: key, value: value })
 
   pub fn get(self, key: String) -> Optional<T>
-    self.get_bucket_by_key(key).match(bucket)
+    self.get_bucket_by_key(key).match(&bucket)
       Some<Array<{ key: String, value: T }>>:
         let index = get_index_of_item_in_bucket(bucket.value, key)
         if index < 0 then:
@@ -119,7 +119,7 @@ impl<T> Map<T>
       None: None {}
 
   pub fn delete(&self, key: String) -> Map<T>
-    self.get_bucket_by_key(key).match(bucket)
+    self.get_bucket_by_key(key).match(&bucket)
       Some<Array<{ key: String, value: T }>>:
         let index = get_index_of_item_in_bucket(bucket.value, key)
         if index < 0 then:

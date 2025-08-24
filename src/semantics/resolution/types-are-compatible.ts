@@ -42,104 +42,111 @@ export const typesAreCompatible = (
   visited: Set<string> = new Set()
 ): boolean => {
   if (!a || !b) return false;
-  const key = `${a.id}|${b.id}`;
+  let aa = a;
+  let bb = b;
+  if (aa.hasAttribute("mutable") && !bb.hasAttribute("mutable")) {
+    aa = aa.clone();
+    aa.setAttribute("mutable", undefined);
+  }
+  if (!aa.hasAttribute("mutable") && bb.hasAttribute("mutable")) return false;
+  const key = `${aa.id}|${bb.id}`;
   if (visited.has(key)) return true;
   visited.add(key);
 
-  if (a.isSelfType() && b.isSelfType()) {
+  if (aa.isSelfType() && bb.isSelfType()) {
     return true;
   }
 
   // Attempt to get implementation self parameters to match to their trait method. Don't think its working.
   if (
-    (a.isObjectType() && b.isSelfType() && b.parentTrait) ||
-    (b.isObjectType() && a.isSelfType() && a.parentTrait)
+    (aa.isObjectType() && bb.isSelfType() && bb.parentTrait) ||
+    (bb.isObjectType() && aa.isSelfType() && aa.parentTrait)
   ) {
     return true;
   }
 
-  if (a.isPrimitiveType() && b.isPrimitiveType()) {
+  if (aa.isPrimitiveType() && bb.isPrimitiveType()) {
     if (
-      (a.name.value === "void" && b.name.value === "voyd") ||
-      (a.name.value === "voyd" && b.name.value === "void")
+      (aa.name.value === "void" && bb.name.value === "voyd") ||
+      (aa.name.value === "voyd" && bb.name.value === "void")
     ) {
       return true;
     }
-    return a.id === b.id;
+    return aa.id === bb.id;
   }
 
-  if (a.isObjectType() && b.isObjectType()) {
-    const structural = opts.structuralOnly || b.isStructural;
+  if (aa.isObjectType() && bb.isObjectType()) {
+    const structural = opts.structuralOnly || bb.isStructural;
 
     if (structural) {
-      return b.fields.every((field) => {
-        const match = a.fields.find((f) => f.name === field.name);
+      return bb.fields.every((field) => {
+        const match = aa.fields.find((f) => f.name === field.name);
         return (
           match && typesAreCompatible(field.type, match.type, opts, visited)
         );
       });
     }
 
-    if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
-      return !!a.appliedTypeArgs?.every((arg, index) =>
+    if (aa.genericParent && aa.genericParent.id === bb.genericParent?.id) {
+      return !!aa.appliedTypeArgs?.every((arg, index) =>
         typesAreCompatible(
           getExprType(arg),
-          getExprType(b.appliedTypeArgs?.[index]),
+          getExprType(bb.appliedTypeArgs?.[index]),
           opts,
           visited
         )
       );
     }
 
-    if (a.idNum === b.idNum) return true;
+    if (aa.idNum === bb.idNum) return true;
 
-    if (opts.exactNominalMatch) return a.id === b.id;
+    if (opts.exactNominalMatch) return aa.id === bb.id;
 
-    return a.extends(b);
+    return aa.extends(bb);
   }
 
-  if (a.isObjectType() && b.isTraitType()) {
-    const matchesTrait = a.implementations?.some(
-      (impl) => impl.trait?.id === b.id
+  if (aa.isObjectType() && bb.isTraitType()) {
+    const matchesTrait = aa.implementations?.some(
+      (impl) => impl.trait?.id === bb.id
     );
     if (matchesTrait) return true;
-    return a.parentObjType
-      ? typesAreCompatible(a.parentObjType, b, opts, visited)
+    return aa.parentObjType
+      ? typesAreCompatible(aa.parentObjType, bb, opts, visited)
       : false;
   }
 
-  if (a.isTraitType() && b.isObjectType()) {
-    const matchesTrait = b.implementations?.some(
-      (impl) => impl.trait?.id === a.id
+  if (aa.isTraitType() && bb.isObjectType()) {
+    const matchesTrait = bb.implementations?.some(
+      (impl) => impl.trait?.id === aa.id
     );
     if (matchesTrait) return true;
-    return b.parentObjType
-      ? typesAreCompatible(a, b.parentObjType, opts, visited)
+    return bb.parentObjType
+      ? typesAreCompatible(aa, bb.parentObjType, opts, visited)
       : false;
   }
 
-  if (a.isTraitType() && b.isTraitType()) {
-    if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
-      return !!a.appliedTypeArgs?.every((arg, index) =>
+  if (aa.isTraitType() && bb.isTraitType()) {
+    if (aa.genericParent && aa.genericParent.id === bb.genericParent?.id) {
+      return !!aa.appliedTypeArgs?.every((arg, index) =>
         typesAreCompatible(
           getExprType(arg),
-          getExprType(b.appliedTypeArgs?.[index]),
+          getExprType(bb.appliedTypeArgs?.[index]),
           opts,
           visited
         )
       );
     }
-    return a.id === b.id;
+    return aa.id === bb.id;
   }
 
-  if (a.isUnionType() || b.isUnionType()) {
-    if (a.isUnionType() && b.isUnionType()) {
+  if (aa.isUnionType() || bb.isUnionType()) {
+    if (aa.isUnionType() && bb.isUnionType()) {
       // This is for handling recursive union types. It may *not* work for generic type aliases. Hopefully no dragons.
       // We may only want to do this when the union's types have not yet been resolved
       if (a.syntaxId === b.syntaxId) return true;
 
-      const aTypes = flattenUnion(a);
-      const bTypes = flattenUnion(b);
+      const aTypes = flattenUnion(aa);
+      const bTypes = flattenUnion(bb);
 
       let bMap: Map<string, Type>;
       bMap = new Map<string, Type>();
@@ -148,7 +155,7 @@ export const typesAreCompatible = (
       }
 
       for (const aType of aTypes) {
-        if (!b.isUnionType() && bMap.has(aType.id)) return true;
+        if (!bb.isUnionType() && bMap.has(aType.id)) return true;
         if (bMap.has(aType.id)) continue;
 
         let match = false;
@@ -165,9 +172,9 @@ export const typesAreCompatible = (
       return true;
     }
 
-    const [unionType, nonUnionType] = a.isUnionType()
-      ? [a as UnionType, b]
-      : [b as UnionType, a];
+    const [unionType, nonUnionType] = aa.isUnionType()
+      ? [aa as UnionType, bb]
+      : [bb as UnionType, aa];
 
     if (!nonUnionType.isObjectType() && !nonUnionType.isIntersectionType()) {
       return false;
@@ -178,26 +185,26 @@ export const typesAreCompatible = (
     );
   }
 
-  if (a.isObjectType() && b.isIntersectionType()) {
-    if (!b.nominalType || !b.structuralType) return false;
+  if (aa.isObjectType() && bb.isIntersectionType()) {
+    if (!bb.nominalType || !bb.structuralType) return false;
     return (
-      a.extends(b.nominalType) &&
-      typesAreCompatible(a, b.structuralType, opts, visited)
+      aa.extends(bb.nominalType) &&
+      typesAreCompatible(aa, bb.structuralType, opts, visited)
     );
   }
 
-  if (a.isIntersectionType() && b.isIntersectionType()) {
+  if (aa.isIntersectionType() && bb.isIntersectionType()) {
     return (
-      typesAreCompatible(a.nominalType, b.nominalType, opts, visited) &&
-      typesAreCompatible(a.structuralType, b.structuralType, opts, visited)
+      typesAreCompatible(aa.nominalType, bb.nominalType, opts, visited) &&
+      typesAreCompatible(aa.structuralType, bb.structuralType, opts, visited)
     );
   }
 
-  if (a.isFixedArrayType() && b.isFixedArrayType()) {
-    return typesAreCompatible(a.elemType, b.elemType, opts, visited);
+  if (aa.isFixedArrayType() && bb.isFixedArrayType()) {
+    return typesAreCompatible(aa.elemType, bb.elemType, opts, visited);
   }
 
-  if (a.isFnType() && b.isFnType()) {
+  if (aa.isFnType() && bb.isFnType()) {
     if (a.parameters.length !== b.parameters.length) return false;
     return (
       typesAreCompatible(a.returnType, b.returnType, opts, visited) &&

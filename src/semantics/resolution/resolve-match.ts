@@ -34,6 +34,10 @@ const resolveCase = (
   const localBinding = binding.clone();
   localBinding.originalType = binding.type;
   localBinding.type = type;
+  if (localBinding.isMutable && localBinding.type && !localBinding.type.hasAttribute("mutable")) {
+    localBinding.type = localBinding.type.clone(localBinding);
+    localBinding.type.setAttribute("mutable", true);
+  }
   localBinding.requiresCast = true;
 
   // NOTE: This binding is temporary and will be overwritten in the next case.

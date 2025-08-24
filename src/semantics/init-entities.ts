@@ -34,12 +34,20 @@ export const initEntities: SemanticProcessor = (expr) => {
   if (!expr.isList()) return expr;
 
   if (expr.calls("&")) {
-    const inner =
-      expr.length === 2
-        ? initEntities(expr.at(1)!)
-        : initEntities(
-            new List({ ...expr.metadata, value: expr.sliceAsArray(1) })
-          );
+    const first = expr.at(1)!;
+    if (expr.length === 2) {
+      const inner = initEntities(first);
+      inner.setAttribute("mutable", true);
+      return inner;
+    }
+
+    const rest = expr.sliceAsArray(2);
+    const innerListValue = first.isList()
+      ? [...first.sliceAsArray(), ...rest]
+      : [first, ...rest];
+    const inner = initEntities(
+      new List({ ...expr.metadata, value: innerListValue })
+    );
     inner.setAttribute("mutable", true);
     return inner;
   }
@@ -690,8 +698,19 @@ const initStructuralObjectType = (obj: List) => {
 
 export const initMatch = (match: List): Match => {
   const operand = initEntities(match.exprAt(1));
-  const identifierIndex = match.at(2)?.isIdentifier() ? 2 : 1;
-  const identifier = match.identifierAt(identifierIndex);
+  const identifierCandidate = match.at(2);
+  const hasSecondArgIdentifier =
+    identifierCandidate?.isIdentifier() ||
+    (identifierCandidate?.isList() && identifierCandidate.calls("&"));
+  const identifierIndex = hasSecondArgIdentifier ? 2 : 1;
+  const identifierExpr = match.at(identifierIndex);
+  let identifier: Identifier;
+  if (identifierExpr?.isList() && identifierExpr.calls("&")) {
+    identifier = identifierExpr.identifierAt(1);
+    identifier.setAttribute("mutable", true);
+  } else {
+    identifier = match.identifierAt(identifierIndex);
+  }
   const caseExprs = match.sliceAsArray(identifierIndex + 1);
   const cases = initMatchCases(caseExprs);
 
@@ -707,7 +726,7 @@ export const initMatch = (match: List): Match => {
             name: identifier.clone(),
             location: identifier.location,
             initializer: operand,
-            isMutable: false,
+            isMutable: identifier.hasAttribute("mutable"),
             parent: match,
           })
         : undefined,

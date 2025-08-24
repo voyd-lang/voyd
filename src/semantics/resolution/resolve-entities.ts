@@ -110,6 +110,10 @@ export const resolveVar = (variable: Variable): Variable => {
   if (!variable.type) {
     variable.type = variable.inferredType;
   }
+  if (variable.isMutable && variable.type && !variable.type.hasAttribute("mutable")) {
+    variable.type = variable.type.clone(variable);
+    variable.type.setAttribute("mutable", true);
+  }
   return variable;
 };
 
