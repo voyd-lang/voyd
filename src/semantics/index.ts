@@ -1,4 +1,4 @@
-import { checkTypes } from "./check-types.js";
+import { checkTypes } from "./check-types/index.js";
 import { initPrimitiveTypes } from "./init-primitive-types.js";
 import { initEntities } from "./init-entities.js";
 import { SemanticProcessor } from "./types.js";

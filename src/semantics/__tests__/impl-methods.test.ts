@@ -8,7 +8,7 @@ import { Block } from "../../syntax-objects/block.js";
 import { Call } from "../../syntax-objects/call.js";
 import { List } from "../../syntax-objects/list.js";
 import { Int } from "../../syntax-objects/int.js";
-import { checkTypes } from "../check-types.js";
+import { checkTypes } from "../check-types/index.js";
 
 // Regression test for ensuring unresolved calls within methods are detected
 // during type checking.
