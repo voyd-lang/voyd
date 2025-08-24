@@ -34,7 +34,10 @@ const resolveCase = (
   const localBinding = binding.clone();
   localBinding.originalType = binding.type;
   localBinding.type = type;
-  if (localBinding.isMutable && localBinding.type && !localBinding.type.hasAttribute("mutable")) {
+  const isMutable =
+    ("isMutable" in localBinding && (localBinding as Variable).isMutable) ||
+    localBinding.hasAttribute("mutable");
+  if (isMutable && localBinding.type && !localBinding.type.hasAttribute("mutable")) {
     localBinding.type = localBinding.type.clone(localBinding);
     localBinding.type.setAttribute("mutable", true);
   }

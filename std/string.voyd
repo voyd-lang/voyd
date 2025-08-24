@@ -17,17 +17,17 @@ obj StringIterator {
 pub fn new_string(opts: { from: FixedArray<i32> }) -> String
   String {
     storage: opts.from,
-    count: opts.from.length()
+    count: opts.from.length<i32>()
   }
 
 impl String
   fn resize(&self) -> String
-      let new_storage = new_fixed_array<i32>(self.storage.length() * 2)
+      let new_storage = new_fixed_array<i32>(self.storage.length<i32>() * 2)
     new_storage.copy<i32>({
       from: self.storage,
       to_index: 0,
       from_index: 0,
-        count: self.storage.length()
+        count: self.storage.length<i32>()
     })
     self.storage = new_storage
     self
@@ -43,7 +43,7 @@ impl String
       self.storage.get<i32>(computed_index)
 
   pub fn push(&self, char: i32) -> String
-    if self.count >= self.storage.length() then:
+    if self.count >= self.storage.length<i32>() then:
       self.resize().push(char)
     else:
       self.storage.set<i32>(self.count, char)

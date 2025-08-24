@@ -81,7 +81,7 @@ impl<T> Map<T>
     index
 
   pub fn set(&self, key: String, value: T) -> Map<T>
-    self.get_bucket_by_key(key).match(bucket)
+    self.get_bucket_by_key(key).match(&bucket)
       Some<Array<{ key: String, value: T }>>:
         add_to_bucket(&bucket.value, key, value)
         self

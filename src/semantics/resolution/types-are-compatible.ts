@@ -205,11 +205,11 @@ export const typesAreCompatible = (
   }
 
   if (aa.isFnType() && bb.isFnType()) {
-    if (a.parameters.length !== b.parameters.length) return false;
+    if (aa.parameters.length !== bb.parameters.length) return false;
     return (
-      typesAreCompatible(a.returnType, b.returnType, opts, visited) &&
-      a.parameters.every((p, i) =>
-        typesAreCompatible(p.type, b.parameters[i]?.type, opts, visited)
+      typesAreCompatible(aa.returnType, bb.returnType, opts, visited) &&
+      aa.parameters.every((p, i) =>
+        typesAreCompatible(p.type, bb.parameters[i]?.type, opts, visited)
       )
     );
   }
