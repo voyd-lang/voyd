@@ -44,7 +44,7 @@ impl<T> MyIterable<T> for Array<T>
     ArrayMyIterator<T> { index: 0, array: self }
 
 fn sum_iterable(it: MyIterable<i32>) -> i32
-  let iterator = it.iterate()
+  let iterator = &it.iterate()
   let looper: (s: i32) -> i32 = (start: i32) =>
     iterator.next().match(opt)
       Some<i32>:
@@ -54,7 +54,7 @@ fn sum_iterable(it: MyIterable<i32>) -> i32
   looper(0)
 
 fn sum_iterable(it: MyIterable<f64>) -> f64
-  let iterator = it.iterate()
+  let iterator = &it.iterate()
   let looper: (s: f64) -> f64 = (start: f64) =>
     iterator.next().match(opt)
       Some<f64>:
@@ -108,7 +108,7 @@ impl<T> MyIterable<T> for Box<T>
     self
 
 fn call_iterator(it: MyIterable<i32>) -> i32
-  let iterator = it.iterate()
+  let iterator = &it.iterate()
   iterator.next().match(o)
     Some<i32>:
       o.value

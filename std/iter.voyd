@@ -3,10 +3,10 @@ use array::all
 use optional::all
 
 pub trait Iterator<T>
-  fn next(self) -> Optional<T>
+  fn next(&self) -> Optional<T>
 
 pub trait Iterable<T>
-  fn iterate(self) -> Iterator<T>
+  fn iterate(self) -> &Iterator<T>
 
 pub fn map<I, O>(it: Iterable<I>, f: (v: I) -> O) -> Array<O>
   let iterator = it.iterate()
