@@ -103,14 +103,6 @@ const checkClosureCall = (call: Call): Call => {
 const checkMemberAccess = (call: Call): Call => {
   const obj = checkTypes(call.argAt(0));
   call.args.set(0, obj);
-  const objType = getExprType(obj);
-  let parent = call.parent;
-  while (parent && !parent.isCall()) parent = parent.parent;
-  const isAssignTarget = parent?.isCall() && parent.calls("=") && parent.argAt(0) === call;
-  if (isAssignTarget && objType && !objType.hasAttribute("mutable")) {
-    const loc = obj?.location ?? call.location;
-    throw new Error(`${obj} is not mutable at ${loc}`);
-  }
   return call;
 };
 

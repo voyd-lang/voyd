@@ -34,6 +34,7 @@ export const checkAssign = (call: Call) => {
   }
 
   if (target?.isCall() && target.calls("member-access")) {
+    ensureMemberAccessIsMutable(target);
     const initExpr = call.argAt(1);
     checkTypes(initExpr);
     const fieldType = getExprType(target);
@@ -50,5 +51,18 @@ export const checkAssign = (call: Call) => {
   }
 
   return call;
+};
+
+const ensureMemberAccessIsMutable = (access: Call) => {
+  let current: Call | undefined = access;
+  while (current && current.calls("member-access")) {
+    const obj = current.argAt(0);
+    const objType = getExprType(obj);
+    if (objType && !objType.hasAttribute("mutable")) {
+      const loc = obj?.location ?? current.location;
+      throw new Error(`${obj} is not mutable at ${loc}`);
+    }
+    current = obj?.isCall() && obj.calls("member-access") ? obj : undefined;
+  }
 };
 
