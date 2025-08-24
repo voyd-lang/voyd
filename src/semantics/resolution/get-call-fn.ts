@@ -48,14 +48,19 @@ const getCandidates = (call: Call): Fn[] => {
     const implFns = isInsideImpl
       ? [] // internal methods already in scope
       : arg1Type.implementations
-          ?.flatMap((impl) => impl.exports)
+          ?.flatMap((impl) =>
+            // Trait implementations expose all methods, even when not
+            // explicitly exported.  Non-trait implementations continue to
+            // expose only their public exports.
+            impl.trait ? impl.methods : impl.exports
+          )
           .filter((fn) => fn.name.is(call.fnName.value));
     fns.push(...(implFns ?? []));
   }
 
   if (arg1Type?.isTraitType()) {
     const implFns = arg1Type.implementations
-      ?.flatMap((impl) => impl.exports)
+      ?.flatMap((impl) => impl.methods)
       .filter((fn) => fn.name.is(call.fnName.value));
     fns.push(...(implFns ?? []));
   }
