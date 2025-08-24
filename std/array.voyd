@@ -196,5 +196,5 @@ impl<T> Iterator<T> for ArrayIterator<T>
       r
 
 impl<T> Iterable<T> for Array<T>
-  fn iterate(self) -> Iterator<T>
-    ArrayIterator<T> { index: 0, array: self }
+  fn iterate(self) -> &Iterator<T>
+    &ArrayIterator<T> { index: 0, array: self }

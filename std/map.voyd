@@ -49,8 +49,8 @@ impl<T> Iterator<{ key: String, value: T }> for MapIterator<T>
           self.next()
 
 impl<T> Iterable<{ key: String, value: T }> for Map<T>
-  fn iterate(self) -> Iterator<{ key: String, value: T }>
-    MapIterator<T> { map: self, bucket_index: 0, item_index: 0 }
+  fn iterate(self) -> &Iterator<{ key: String, value: T }>
+    &MapIterator<T> { map: self, bucket_index: 0, item_index: 0 }
 
 impl<T> Map<T>
   fn hash(self, key: String) -> i32
