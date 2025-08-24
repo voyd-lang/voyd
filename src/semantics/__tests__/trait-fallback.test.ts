@@ -4,7 +4,7 @@ import { Fn, Parameter, Call, Identifier, List, Block } from "../../syntax-objec
 import { VoydModule } from "../../syntax-objects/module.js";
 import { i32 } from "../../syntax-objects/types.js";
 import { resolveEntities } from "../resolution/resolve-entities.js";
-import { checkTypes } from "../check-types.js";
+import { checkTypes } from "../check-types/index.js";
 
 test("trait method calls resolve via fallback", (t) => {
   const runFn = new Fn({
