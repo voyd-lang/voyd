@@ -193,7 +193,9 @@ export const resolveObjectLiteral = (obj: ObjectLiteral, expected?: ObjectType) 
     return field;
   });
 
-  if (!obj.type) {
+  if (expected?.isStructural) {
+    obj.type = expected;
+  } else if (!obj.type) {
     obj.type = new ObjectType({
       ...obj.metadata,
       name: `ObjectLiteral-${obj.syntaxId}`,
