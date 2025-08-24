@@ -8,7 +8,7 @@ import {
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
-import { resolveEntities } from "./resolve-entities.js";
+import { resolveArrayLiteral, resolveEntities } from "./resolve-entities.js";
 import { resolveExport, resolveModulePath } from "./resolve-use.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
@@ -24,6 +24,7 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   if (call.calls("while")) return resolveWhile(call);
   if (call.calls("FixedArray")) return resolveFixedArray(call);
   if (call.calls("binaryen")) return resolveBinaryen(call);
+  const originalArgs = call.args.toArray();
   call.args = call.args.map((arg) => {
     const inner = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
     if (
@@ -62,6 +63,28 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   }
 
   resolveCallFn(call, candidateFns);
+
+  const fn = call.fn?.isFn() ? call.fn : undefined;
+  if (fn) {
+    fn.parameters.forEach((param, index) => {
+      const origArg = originalArgs[index];
+      const curArg = call.argAt(index);
+      const paramType = param.type;
+      if (!origArg || !paramType?.isObjectType() || !paramType.name.is("Array"))
+        return;
+      const innerOrig = origArg.isCall() && origArg.calls(":") ? origArg.argAt(1) : origArg;
+      if (!innerOrig?.isArrayLiteral()) return;
+      const expected = paramType.appliedTypeArgs?.[0];
+      const resolved = resolveArrayLiteral(innerOrig, expected);
+      if (curArg?.isCall() && curArg.calls(":")) {
+        curArg.args.set(1, resolved);
+        call.args.set(index, resolveEntities(curArg));
+      } else {
+        call.args.set(index, resolved);
+      }
+    });
+  }
+
   expandObjectArg(call);
   inferClosureArgTypes(call);
 

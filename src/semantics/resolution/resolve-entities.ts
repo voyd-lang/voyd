@@ -88,7 +88,17 @@ export const resolveVar = (variable: Variable): Variable => {
     variable.type = variable.annotatedType;
   }
 
-  const initializer = resolveEntities(variable.initializer);
+  let initializer = variable.initializer;
+  if (
+    initializer?.isArrayLiteral() &&
+    variable.type?.isObjectType() &&
+    variable.type.name.is("Array")
+  ) {
+    const expected = variable.type.appliedTypeArgs?.[0];
+    initializer = resolveArrayLiteral(initializer, expected);
+  } else {
+    initializer = resolveEntities(initializer);
+  }
   variable.initializer = initializer;
   variable.inferredType = getExprType(initializer);
 
@@ -144,12 +154,18 @@ const resolveObjectLiteral = (obj: ObjectLiteral) => {
   return obj;
 };
 
-const resolveArrayLiteral = (arr: ArrayLiteral): Expr => {
+export const resolveArrayLiteral = (
+  arr: ArrayLiteral,
+  expectedElemType?: Type
+): Expr => {
   arr.elements = arr.elements.map(resolveEntities);
-  const elemTypes = arr.elements
-    .map((e) => getExprType(e))
-    .filter((t): t is Type => !!t);
-  const elemType = combineTypes(elemTypes);
+  const elemType = expectedElemType
+    ? expectedElemType
+    : combineTypes(
+        arr.elements
+          .map((e) => getExprType(e))
+          .filter((t): t is Type => !!t)
+      );
 
   const fixedArray = new Call({
     ...arr.metadata,
