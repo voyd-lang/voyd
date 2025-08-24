@@ -9,7 +9,11 @@ import {
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
-import { resolveEntities, resolveArrayLiteral } from "./resolve-entities.js";
+import {
+  resolveEntities,
+  resolveArrayLiteral,
+  resolveObjectLiteral,
+} from "./resolve-entities.js";
 import { resolveExport, resolveModulePath } from "./resolve-use.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
@@ -55,6 +59,10 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   call.fnName.type = type;
 
   if (type?.isObjectType()) {
+    const objArg = call.argAt(0);
+    if (objArg?.isObjectLiteral()) {
+      call.args.set(0, resolveObjectLiteral(objArg, type));
+    }
     return resolveObjectInit(call, type);
   }
 
