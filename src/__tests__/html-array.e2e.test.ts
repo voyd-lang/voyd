@@ -15,6 +15,6 @@ describe("E2E html array", () => {
   test("main returns correct value", (t) => {
     const fn = getWasmFn("main", instance);
     assert(fn, "Function exists");
-    t.expect(fn(), "main returns correct value").toEqual(1);
+    t.expect(fn(), "main returns correct value").toEqual(5);
   });
 });
