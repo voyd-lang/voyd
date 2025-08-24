@@ -204,6 +204,50 @@ const checkObjectInit = (call: Call): Call => {
 
   // Check to ensure literal structure is compatible with nominal structure
   if (!typesAreCompatible(literal.type, call.type, { structuralOnly: true })) {
+    const expected = call.type?.isObjectType() ? call.type : undefined;
+    const provided = literal.type?.isObjectType() ? literal.type : undefined;
+
+    if (expected && provided) {
+      const missing = expected.fields
+        .filter((f) => !provided.fields.some((pf) => pf.name === f.name))
+        .map((f) => f.name);
+
+      const wrong = expected.fields
+        .map((f) => {
+          const match = provided.fields.find((pf) => pf.name === f.name);
+          if (!match) return undefined;
+          return typesAreCompatible(match.type, f.type)
+            ? undefined
+            : {
+                name: f.name,
+                expected: f.type?.name.value ?? "unknown",
+                actual: match.type?.name.value ?? "unknown",
+              };
+        })
+        .filter((f): f is { name: string; expected: string; actual: string } =>
+          Boolean(f)
+        );
+
+      const extra = provided.fields
+        .filter((pf) => !expected.fields.some((f) => f.name === pf.name))
+        .map((f) => f.name);
+
+      const parts: string[] = [];
+      if (missing.length) parts.push(`Missing fields: ${missing.join(", ")}`);
+      if (wrong.length)
+        parts.push(
+          `Fields with wrong types: ${wrong
+            .map((w) => `${w.name} (expected ${w.expected}, got ${w.actual})`)
+            .join(", ")}`
+        );
+      if (extra.length) parts.push(`Extra fields: ${extra.join(", ")}`);
+
+      const details = parts.length ? ` ${parts.join(". ")}.` : "";
+      throw new Error(
+        `Object literal type does not match expected type ${expected.name} at ${literal.location}.${details}`
+      );
+    }
+
     throw new Error(
       `Object literal type does not match expected type ${call.type?.name} at ${literal.location}`
     );
@@ -595,8 +639,6 @@ const checkImpl = (impl: Implementation): Implementation => {
 };
 
 const checkListTypes = (list: List) => {
-  console.log("Unexpected list");
-  console.log(JSON.stringify(list, undefined, 2));
   return list.map(checkTypes);
 };
 
