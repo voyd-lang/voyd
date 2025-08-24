@@ -27,6 +27,7 @@ import { getExprType } from "./resolution/get-expr-type.js";
 import { typesAreCompatible } from "./resolution/index.js";
 import { getCallFn } from "./resolution/get-call-fn.js";
 import { resolveUnionType } from "./resolution/resolve-union.js";
+import { formatFnSignature } from "./fn-signature.js";
 
 export const checkTypes = (expr: Expr | undefined): Expr => {
   if (!expr) return nop();
@@ -90,10 +91,17 @@ const checkCallTypes = (call: Call): Call | ObjectLiteral => {
       .map((arg) => getExprType(arg)?.name.value)
       .join(", ");
 
+    const location = call.location ?? call.fnName.location;
+    const candidates = call.resolveFns(call.fnName);
+    if (candidates.length) {
+      const signatures = candidates.map(formatFnSignature).join(", ");
+      throw new Error(
+        `No overload matches ${call.fnName}(${params}) at ${location}. Available overloads: ${signatures}`
+      );
+    }
+
     throw new Error(
-      `Could not resolve fn ${call.fnName}(${params}) at ${
-        call.location ?? call.fnName.location
-      }`
+      `Could not resolve fn ${call.fnName}(${params}) at ${location}`
     );
   }
 
