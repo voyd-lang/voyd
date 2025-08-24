@@ -232,7 +232,12 @@ export const checkAssign = (call: Call) => {
   const initType = getExprType(initExpr);
 
   if (!typesAreCompatible(variable.type, initType)) {
-    throw new Error(`${id} cannot be assigned to ${initType}`);
+    const variableTypeName = variable.type?.name.value ?? "unknown";
+    const initTypeName = initType?.name.value ?? "unknown";
+    const location = call.location ?? id.location;
+    throw new Error(
+      `Cannot assign ${initTypeName} to variable ${id} of type ${variableTypeName} at ${location}`
+    );
   }
 
   return call;
@@ -429,12 +434,10 @@ const checkVarTypes = (variable: Variable): Variable => {
     variable.annotatedType &&
     !typesAreCompatible(variable.inferredType, variable.annotatedType)
   ) {
+    const annotatedName = variable.annotatedType.name.value;
+    const inferredName = variable.inferredType.name.value;
     throw new Error(
-      `${variable.name} of type ${JSON.stringify(
-        variable.type
-      )} is not assignable to ${JSON.stringify(variable.inferredType)} at ${
-        variable.location
-      }`
+      `${variable.name} is declared as ${annotatedName} but initialized with ${inferredName} at ${variable.location}`
     );
   }
 
