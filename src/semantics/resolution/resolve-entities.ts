@@ -81,6 +81,14 @@ const resolveBlock = (block: Block): Block => {
   return block;
 };
 
+const getArrayElemType = (type?: Type): Type | undefined => {
+  if (!type?.isObjectType()) return;
+  const parent = type.genericParent;
+  if (!type.name.is("Array") && !parent?.name.is("Array")) return;
+  const arg = type.appliedTypeArgs?.[0];
+  return arg && arg.isTypeAlias() ? arg.type : undefined;
+};
+
 export const resolveVar = (variable: Variable): Variable => {
   if (variable.typeExpr) {
     variable.typeExpr = resolveTypeExpr(variable.typeExpr);
@@ -88,9 +96,15 @@ export const resolveVar = (variable: Variable): Variable => {
     variable.type = variable.annotatedType;
   }
 
-  const initializer = resolveEntities(variable.initializer);
-  variable.initializer = initializer;
-  variable.inferredType = getExprType(initializer);
+  const expected = getArrayElemType(variable.type);
+  let init = variable.initializer;
+  if (init.isArrayLiteral()) {
+    init = resolveArrayLiteral(init, expected);
+  } else {
+    init = resolveEntities(init);
+  }
+  variable.initializer = init;
+  variable.inferredType = getExprType(init);
 
   if (!variable.type) {
     variable.type = variable.inferredType;
@@ -144,12 +158,18 @@ const resolveObjectLiteral = (obj: ObjectLiteral) => {
   return obj;
 };
 
-const resolveArrayLiteral = (arr: ArrayLiteral): Expr => {
+export const resolveArrayLiteral = (
+  arr: ArrayLiteral,
+  expectedElemType?: Type
+): Expr => {
   arr.elements = arr.elements.map(resolveEntities);
-  const elemTypes = arr.elements
-    .map((e) => getExprType(e))
-    .filter((t): t is Type => !!t);
-  const elemType = combineTypes(elemTypes);
+  const elemType =
+    expectedElemType ??
+    combineTypes(
+      arr.elements
+        .map((e) => getExprType(e))
+        .filter((t): t is Type => !!t)
+    );
 
   const fixedArray = new Call({
     ...arr.metadata,
@@ -170,6 +190,6 @@ const resolveArrayLiteral = (arr: ArrayLiteral): Expr => {
     args: new List({ value: [objLiteral] }),
     typeArgs,
   });
-
+  newArrayCall.setTmpAttribute("arrayLiteral", arr.clone());
   return resolveEntities(newArrayCall);
 };
