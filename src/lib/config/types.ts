@@ -11,10 +11,6 @@ export type VoydConfig = {
   emitWasmText?: boolean;
   /** Have binaryen run an optimization pass */
   runBinaryenOptimizationPass?: boolean;
-  /** Emit CLI usage to stdout */
-  showHelp?: boolean;
-  /** Emit voyd version to stdout */
-  showVersion?: boolean;
   /** Run the compiled wasm code */
   run?: boolean;
   /** Specifies the entry voyd file */
