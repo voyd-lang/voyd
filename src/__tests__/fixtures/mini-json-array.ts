@@ -6,7 +6,6 @@ pub obj JsonNumber: JsonNull { val: i32 }
 
 type MiniJson = Array<MiniJson> | JsonNumber
 
-// val is a Structural type, will accept any Array whos values can be either a string or another Array<MiniJson>
 fn work(val: Array<MiniJson>, sum: i32) -> i32
   let it = val.iterate()
   let reducer: (sum: i32) -> i32 = (sum: i32) -> i32 =>
