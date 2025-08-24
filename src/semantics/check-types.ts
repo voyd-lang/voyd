@@ -682,13 +682,15 @@ const checkMatchCases = (match: Match) => {
 
     if (!mCase.matchType) {
       throw new Error(
-        `Unable to determine match type for case at ${mCase.expr.location}`
+        `Cannot resolve type for match case at ${mCase.expr.location}`
       );
     }
 
     if (!typesAreCompatible(mCase.expr.type, match.type)) {
+      const expected = match.type?.name.value ?? "unknown";
+      const actual = mCase.expr.type?.name.value ?? "unknown";
       throw new Error(
-        `All cases must return the same type for now ${mCase.expr.location}`
+        `Match case at ${mCase.expr.location} returns ${actual} but expected ${expected}`
       );
     }
   }
@@ -697,20 +699,32 @@ const checkMatchCases = (match: Match) => {
 const checkUnionMatch = (match: Match) => {
   const union = match.baseType as UnionType;
 
-  if (!match.defaultCase && match.cases.length !== union.types.length) {
-    throw new Error(
-      `Match does not handle all possibilities of union ${match.location}`
-    );
+  const matched = match.cases
+    .map((c) => c.matchType?.name.value)
+    .filter((n): n is string => !!n);
+  const unionTypes = union.types.map((t) => t.name.value);
+
+  if (!match.defaultCase) {
+    const missing = unionTypes.filter((t) => !matched.includes(t));
+    if (missing.length) {
+      throw new Error(
+        `Match on ${union.name.value} is not exhaustive at ${match.location}. Missing cases: ${missing.join(", ")}`
+      );
+    }
   }
 
   checkMatchCases(match);
 
-  const allGood = match.cases.every((mCase) =>
-    union.types.some((type) => typesAreCompatible(mCase.matchType, type))
+  const badCase = match.cases.find(
+    (mCase) =>
+      !union.types.some((type) => typesAreCompatible(mCase.matchType, type))
   );
 
-  if (!allGood) {
-    throw new Error(`Match cases mismatch union ${match.location}`);
+  if (badCase) {
+    const caseName = badCase.matchType?.name.value ?? "unknown";
+    throw new Error(
+      `Match case ${caseName} is not part of union ${union.name.value} at ${match.location}`
+    );
   }
 
   return match;
@@ -718,13 +732,17 @@ const checkUnionMatch = (match: Match) => {
 
 /** Check a match against an object type */
 const checkObjectMatch = (match: Match) => {
+  const baseName = match.baseType?.name.value ?? "object";
+
   if (!match.defaultCase) {
-    throw new Error(`Match must have a default case at ${match.location}`);
+    throw new Error(
+      `Match on ${baseName} must have a default case at ${match.location}`
+    );
   }
 
   if (!match.baseType || !match.baseType.isObjectType()) {
     throw new Error(
-      `Unable to determine base type for match at ${match.location}`
+      `Cannot determine type of value being matched at ${match.location}`
     );
   }
 

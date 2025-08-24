@@ -68,7 +68,7 @@ pub fn main()
     A: 1
 `;
     await expect(compile(code)).rejects.toThrow(
-      /Match does not handle all possibilities of union/,
+      /Match on AB is not exhaustive.*Missing cases: B/,
     );
   });
 
@@ -88,7 +88,7 @@ pub fn main()
     else: 0
 `;
     await expect(compile(code)).rejects.toThrow(
-      /Match cases mismatch union/,
+      /Match case C is not part of union AB/,
     );
   });
 
@@ -102,7 +102,7 @@ pub fn main()
     Point: 1
 `;
     await expect(compile(code)).rejects.toThrow(
-      /Match must have a default case/,
+      /Match on Point must have a default case/,
     );
   });
 
@@ -120,7 +120,7 @@ pub fn main()
     B: 1.5
 `;
     await expect(compile(code)).rejects.toThrow(
-      /All cases must return the same type/,
+      /returns f64 but expected i32/,
     );
   });
 });
