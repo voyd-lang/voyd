@@ -17,7 +17,6 @@ export type Type =
   | IntersectionType
   | TraitType
   | ObjectType
-  | TupleType
   | FixedArrayType
   | FnType
   | SelfType
@@ -165,24 +164,6 @@ export class IntersectionType extends BaseType {
         this.structuralTypeExpr.value,
       ],
     ];
-  }
-}
-
-export class TupleType extends BaseType {
-  readonly kindOfType = "tuple";
-  value: Type[];
-
-  constructor(opts: NamedEntityOpts & { value: Type[] }) {
-    super(opts);
-    this.value = opts.value;
-  }
-
-  clone(parent?: Expr): TupleType {
-    return new TupleType({ ...super.getCloneOpts(parent), value: this.value });
-  }
-
-  toJSON(): TypeJSON {
-    return ["type", ["tuple", ...this.value]];
   }
 }
 
@@ -382,12 +363,7 @@ export class FnType extends BaseType {
   }
 }
 
-export type Primitive =
-  | NumericType
-  | ReferenceType
-  | "void"
-  | "voyd"
-  | "bool";
+export type Primitive = NumericType | ReferenceType | "void" | "voyd" | "bool";
 
 export type NumericType = "i32" | "f32" | "i64" | "f64";
 export type ReferenceType = "funcref" | "externref";
@@ -405,8 +381,4 @@ export const voydBaseObject = new ObjectType({
   value: [],
 });
 
-export type VoydRefType =
-  | ObjectType
-  | UnionType
-  | IntersectionType
-  | TupleType;
+export type VoydRefType = ObjectType | UnionType | IntersectionType;

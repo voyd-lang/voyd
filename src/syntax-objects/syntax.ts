@@ -28,7 +28,6 @@ import type {
   IntersectionType,
   SelfType,
   VoydRefType,
-  TupleType,
 } from "./types.js";
 import type { Variable } from "./variable.js";
 import type { Whitespace } from "./whitespace.js";
@@ -240,10 +239,6 @@ export abstract class Syntax {
     return this.isType() && this.kindOfType === "trait";
   }
 
-  isTupleType(): this is TupleType {
-    return this.isType() && this.kindOfType === "tuple";
-  }
-
   isObjectType(): this is ObjectType {
     return this.isType() && this.kindOfType === "object";
   }
@@ -355,7 +350,6 @@ export abstract class Syntax {
       case "object":
       case "intersection":
       case "union":
-      case "tuple":
         return true;
       default:
         return false;
