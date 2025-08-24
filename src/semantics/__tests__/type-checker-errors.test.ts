@@ -35,7 +35,7 @@ pub fn main()
   add(true, 2)
 `;
     await expect(compile(source)).rejects.toThrow(
-      /Available overloads: add\(a: i32, b: i32\) -> i32/
+      /Available overloads: add\(a: i32, b: i32\) -> i32/,
     );
   });
 
@@ -51,7 +51,76 @@ pub fn main()
   Point { x: 1, y: 2, z: 3 }
 `;
     await expect(compile(code)).rejects.toThrow(
-      /Missing fields: w\. Fields with wrong types: y \(expected bool, got i32\)\. Extra fields: z/
+      /Missing fields: w\. Fields with wrong types: y \(expected bool, got i32\)\. Extra fields: z/,
+    );
+  });
+
+  test("reports when match on union is not exhaustive", async () => {
+    const code = `
+obj A { x: i32 }
+obj B { x: i32 }
+
+type AB = A | B
+
+pub fn main()
+  let v: AB = A { x: 1 }
+  match(v)
+    A: 1
+`;
+    await expect(compile(code)).rejects.toThrow(
+      /Match does not handle all possibilities of union/,
+    );
+  });
+
+  test("reports union match cases mismatch union", async () => {
+    const code = `
+obj A { x: i32 }
+obj B { x: i32 }
+obj C { x: i32 }
+
+type AB = A | B
+
+pub fn main()
+  let v: AB = A { x: 1 }
+  match(v)
+    A: 1
+    C: 2
+    else: 0
+`;
+    await expect(compile(code)).rejects.toThrow(
+      /Match cases mismatch union/,
+    );
+  });
+
+  test("requires default case in object match", async () => {
+    const code = `
+obj Point { x: i32 }
+
+pub fn main()
+  let p = Point { x: 1 }
+  match(p)
+    Point: 1
+`;
+    await expect(compile(code)).rejects.toThrow(
+      /Match must have a default case/,
+    );
+  });
+
+  test("requires all match cases to return the same type", async () => {
+    const code = `
+obj A { x: i32 }
+obj B { x: i32 }
+
+type AB = A | B
+
+pub fn main()
+  let v: AB = A { x: 1 }
+  match(v)
+    A: 1
+    B: 1.5
+`;
+    await expect(compile(code)).rejects.toThrow(
+      /All cases must return the same type/,
     );
   });
 });
