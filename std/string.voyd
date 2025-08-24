@@ -83,8 +83,8 @@ impl String
       })
       String { storage: new_storage, count: new_length }
 
-pub fn new_string_iterator(str: String) -> StringIterator
-  StringIterator { str: str, index: 0 }
+pub fn new_string_iterator(str: String) -> &StringIterator
+  &StringIterator { str: str, index: 0 }
 
 pub fn read_next_char(iterator: &StringIterator) -> i32
   if iterator.index >= iterator.str.length then:
@@ -104,7 +104,7 @@ impl Iterator<i32> for StringIterator
       Some<i32> { value: char }
 
 impl Iterable<i32> for String
-  fn iterate(self) -> Iterator<i32>
+  fn iterate(self) -> &Iterator<i32>
     new_string_iterator(self)
 
 pub fn '=='(a: String, b: String) -> bool
