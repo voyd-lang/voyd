@@ -1,4 +1,4 @@
-import { Call, Expr, Fn } from "../../syntax-objects/index.js";
+import { Call, Expr, Fn, Parameter } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { typesAreEqual } from "./types-are-equal.js";
@@ -120,76 +120,71 @@ const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
       })
     : true;
 
-const parametersMatch = (candidate: Fn, call: Call) => {
-  // First attempt a direct positional/label match
-  const directMatch = candidate.parameters.every((p, i) => {
-    const arg = call.argAt(i);
-    if (!arg) return false;
+const parametersMatch = (candidate: Fn, call: Call) =>
+  paramsDirectlyMatch(candidate, call) ||
+  objectArgSuppliesLabeledParams(candidate, call);
 
-    const val = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
+const paramsDirectlyMatch = (candidate: Fn, call: Call) =>
+  candidate.parameters.every((p, i) =>
+    argumentMatchesParam(call, p, i)
+  );
 
-    if (
-      val?.isClosure() &&
-      val.parameters.some((cp) => !cp.type && !cp.typeExpr)
-    ) {
-      const paramType = p.type;
-      if (!paramType?.isFnType()) return false;
-      val.parameters.forEach((cp, j) => {
-        const expected = paramType.parameters[j]?.type;
-        if (!cp.type && expected) cp.type = expected;
-      });
-      const resolvedVal = resolveEntities(val);
-      if (arg.isCall() && arg.calls(":")) {
-        arg.args.set(1, resolvedVal);
-      } else {
-        call.args.set(i, resolvedVal);
-      }
-    }
+const argumentMatchesParam = (
+  call: Call,
+  param: Parameter,
+  index: number
+): boolean => {
+  const arg = call.argAt(index);
+  if (!arg) return false;
 
-    const argType = getExprType(val);
-    if (!argType) return false;
-    const argLabel = getExprLabel(arg);
-    const labelsMatch = p.label?.value === argLabel;
-
-    return typesAreCompatible(argType, p.type!) && labelsMatch;
-  });
-  if (directMatch) return true;
-
-  // Special case: a single object argument supplying all labeled parameters
-  if (call.args.length === 1) {
-    const objArg = call.argAt(0);
-    const labeledParams = candidate.parameters.filter((p) => p.label);
-    if (labeledParams.length === candidate.parameters.length) {
-      // 1. Object literal argument
-      if (objArg?.isObjectLiteral()) {
-        return labeledParams.every((p) => {
-          const field = objArg.fields.find((f) => f.name === p.label!.value);
-          if (!field) return false;
-          const fieldType = getExprType(field.initializer);
-          return typesAreCompatible(fieldType, p.type!);
-        });
-      }
-
-      // 2. Argument with an object type (nominal or structural)
-      const objType = getExprType(objArg);
-      const structType = objType?.isObjectType()
-        ? objType
-        : objType?.isIntersectionType()
-        ? objType.structuralType
-        : undefined;
-      if (
-        structType &&
-        labeledParams.every((p) => structType.hasField(p.label!.value))
-      ) {
-        return labeledParams.every((p) => {
-          const field = structType.getField(p.label!.value);
-          return field ? typesAreCompatible(field.type, p.type!) : false;
-        });
-      }
-    }
+  const val = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
+  if (val?.isClosure() && val.parameters.some((cp) => !cp.type && !cp.typeExpr)) {
+    const paramType = param.type;
+    if (!paramType?.isFnType()) return false;
+    val.parameters.forEach((cp, j) => {
+      const expected = paramType.parameters[j]?.type;
+      if (!cp.type && expected) cp.type = expected;
+    });
+    const resolvedVal = resolveEntities(val);
+    if (arg.isCall() && arg.calls(":")) arg.args.set(1, resolvedVal);
+    else call.args.set(index, resolvedVal);
   }
 
-  return false;
+  const argType = getExprType(val);
+  if (!argType) return false;
+  const argLabel = getExprLabel(arg);
+  const labelsMatch = param.label?.value === argLabel;
+  return typesAreCompatible(argType, param.type!) && labelsMatch;
+};
+
+const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
+  if (call.args.length !== 1) return false;
+  const objArg = call.argAt(0);
+  const labeledParams = candidate.parameters.filter((p) => p.label);
+  if (labeledParams.length !== candidate.parameters.length) return false;
+
+  if (objArg?.isObjectLiteral()) {
+    return labeledParams.every((p) => {
+      const field = objArg.fields.find((f) => f.name === p.label!.value);
+      if (!field) return false;
+      const fieldType = getExprType(field.initializer);
+      return typesAreCompatible(fieldType, p.type!);
+    });
+  }
+
+  const objType = getExprType(objArg);
+  const structType =
+    objType?.isObjectType()
+      ? objType
+      : objType?.isIntersectionType()
+      ? objType.structuralType
+      : undefined;
+  if (!structType) return false;
+  if (!labeledParams.every((p) => structType.hasField(p.label!.value))) return false;
+  return labeledParams.every((p) => {
+    const field = structType.getField(p.label!.value);
+    return field ? typesAreCompatible(field.type, p.type!) : false;
+  });
 };
 
 const getExprLabel = (expr?: Expr): string | undefined => {
