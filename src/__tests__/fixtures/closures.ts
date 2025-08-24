@@ -33,7 +33,7 @@ pub fn param_infer_labeled() -> i32
   call_with_reducer start: 1 reducer: (acc, current) => acc + current
 
 pub fn calls_closure() -> i32
-  let sum = { val: 0 }
+  let sum = &{ val: 0 }
   let set: (v: i32) -> i32 = (v: i32) =>
     sum.val = v
     0

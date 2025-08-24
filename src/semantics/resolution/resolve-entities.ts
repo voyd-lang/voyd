@@ -6,6 +6,7 @@ import { VoydModule } from "../../syntax-objects/module.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
+import { Fn } from "../../syntax-objects/fn.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
 import {
   ObjectType,
@@ -254,7 +255,14 @@ export const resolveArrayLiteral = (
     args: new List({ value: [objLiteral] }),
     typeArgs,
   });
+  let candidates: Fn[] = arr.resolveFns(Identifier.from("new_array"));
+  if (!candidates.length) {
+    const arrayModule =
+      arr.resolveModule("array") ?? arr.resolveModule("std")?.resolveModule("array");
+    const exports = arrayModule?.resolveExport("new_array") ?? [];
+    candidates = exports.filter((e): e is Fn => e.isFn());
+  }
   newArrayCall.setTmpAttribute("arrayLiteral", original);
-  return resolveEntities(newArrayCall);
+  return resolveCall(newArrayCall, candidates);
 };
 

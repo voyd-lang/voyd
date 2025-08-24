@@ -5,7 +5,7 @@ fn call_it(it: (v: i32) -> voyd) -> voyd
   it(5)
 
 pub fn main() -> i32
-  let sum = { val: 0 }
+  let sum = &{ val: 0 }
 
   let set = (v: i32) -> voyd =>
     sum.val = v
