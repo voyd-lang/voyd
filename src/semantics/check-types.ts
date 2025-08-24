@@ -603,15 +603,7 @@ const checkIntersectionType = (inter: IntersectionType) => {
   return inter;
 };
 
-const checkUnionMatch = (match: Match) => {
-  const union = match.baseType as UnionType;
-
-  if (!match.defaultCase && match.cases.length !== union.types.length) {
-    throw new Error(
-      `Match does not handle all possibilities of union ${match.location}`
-    );
-  }
-
+const checkMatchCases = (match: Match) => {
   for (const mCase of match.cases) {
     checkTypes(mCase.expr);
 
@@ -627,6 +619,18 @@ const checkUnionMatch = (match: Match) => {
       );
     }
   }
+};
+
+const checkUnionMatch = (match: Match) => {
+  const union = match.baseType as UnionType;
+
+  if (!match.defaultCase && match.cases.length !== union.types.length) {
+    throw new Error(
+      `Match does not handle all possibilities of union ${match.location}`
+    );
+  }
+
+  checkMatchCases(match);
 
   const allGood = match.cases.every((mCase) =>
     union.types.some((type) => typesAreCompatible(mCase.matchType, type))
@@ -651,21 +655,7 @@ const checkObjectMatch = (match: Match) => {
     );
   }
 
-  for (const mCase of match.cases) {
-    checkTypes(mCase.expr);
-
-    if (!mCase.matchType) {
-      throw new Error(
-        `Unable to determine match type for case at ${mCase.expr.location}`
-      );
-    }
-
-    if (!typesAreCompatible(mCase.expr.type, match.type)) {
-      throw new Error(
-        `All cases must return the same type for now ${mCase.expr.location}`
-      );
-    }
-  }
+  checkMatchCases(match);
 
   return match;
 };
