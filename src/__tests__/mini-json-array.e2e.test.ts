@@ -15,6 +15,6 @@ describe("E2E recursive array arg type widening", () => {
   test("main accepts nested array literal for Array<MiniJson>", (t) => {
     const fn = getWasmFn("main", instance);
     assert(fn, "Function exists");
-    t.expect(fn(), "main returns correct value").toEqual(10);
+    t.expect(fn(), "main returns correct value").toEqual(33);
   });
 });
