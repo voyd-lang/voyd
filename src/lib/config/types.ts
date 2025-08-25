@@ -13,6 +13,7 @@ export type VoydConfig = {
   runBinaryenOptimizationPass?: boolean;
   /** Run the compiled wasm code */
   run?: boolean;
+  decodeMsgPackResponse?: boolean;
   /** Specifies the entry voyd file */
   index: string;
   /** Run the internal test script */

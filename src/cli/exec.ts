@@ -35,7 +35,11 @@ async function main() {
   }
 
   if (config.run) {
-    return runWasm(config.index, config.runBinaryenOptimizationPass);
+    return runWasm(
+      config.index,
+      config.runBinaryenOptimizationPass,
+      config.decodeMsgPackResponse
+    );
   }
 
   if (config.internalTest) {
@@ -87,14 +91,14 @@ async function emitWasm(index: string, optimize = false) {
   stdout.write(mod.emitBinary());
 }
 
-async function runWasm(index: string, optimize = false) {
+async function runWasm(index: string, optimize = false, decodeMsgPack = false) {
   const mod = await getWasmMod(index, optimize);
 
   if (!mod.validate()) {
     throw new Error("Module is invalid");
   }
 
-  run(mod);
+  run(mod, decodeMsgPack);
 }
 
 function emit(json: any) {
