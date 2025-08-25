@@ -24,7 +24,7 @@ export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("=")) return checkAssign(call);
   if (call.calls("while")) return checkWhile(call);
   if (call.calls("FixedArray")) return checkFixedArrayInit(call);
-  if (call.calls("member-access")) return call; // TODO
+  if (call.calls("member-access")) return checkMemberAccess(call);
   if (call.fn?.isObjectType()) return checkObjectInit(call);
 
   call.args = call.args.map(checkTypes);
@@ -137,6 +137,19 @@ const checkFixedArrayInit = (call: Call) => {
     }
   });
 
+  return call;
+};
+
+const checkMemberAccess = (call: Call): Call => {
+  const obj = call.argAt(0);
+  if (obj) checkTypes(obj);
+  const identifier = obj?.isIdentifier() ? obj : undefined;
+  const entity = identifier?.resolve();
+  if (entity?.isVariable() || entity?.isParameter()) {
+    if (!entity.hasAttribute("mutable")) {
+      console.warn(`${identifier} is not mutable at ${identifier?.location}`);
+    }
+  }
   return call;
 };
 
