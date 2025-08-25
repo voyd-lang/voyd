@@ -102,15 +102,13 @@ export const initEntities: SemanticProcessor = (expr) => {
 };
 
 const initBlock = (block: List): Block => {
-  const body = block
-    .sliceAsArray(1)
-    .flatMap((expr) => {
-      const inited = initEntities(expr);
-      if (inited.isBlock() && inited.hasAttribute("flatten")) {
-        return (inited as Block).body;
-      }
-      return [inited];
-    });
+  const body = block.sliceAsArray(1).flatMap((expr) => {
+    const inited = initEntities(expr);
+    if (inited.isBlock() && inited.hasAttribute("flatten")) {
+      return (inited as Block).body;
+    }
+    return [inited];
+  });
   return new Block({ ...block.metadata, body });
 };
 
@@ -191,7 +189,10 @@ const initClosure = (expr: List): Closure => {
   const bodyExpr = initEntities(expr.exprAt(2));
   const body = bodyExpr?.isBlock()
     ? bodyExpr
-    : new Block({ ...(bodyExpr?.metadata ?? {}), body: bodyExpr ? [bodyExpr] : [] });
+    : new Block({
+        ...(bodyExpr?.metadata ?? {}),
+        body: bodyExpr ? [bodyExpr] : [],
+      });
 
   return new Closure({
     ...expr.metadata,
@@ -373,11 +374,7 @@ const initTupleDestructure = (varDef: List, tuple: List): Block => {
     }
 
     const accessExpr = new List([index, initializer.clone()]);
-    const varList = new List([
-      varDef.identifierAt(0),
-      name,
-      accessExpr,
-    ]);
+    const varList = new List([varDef.identifierAt(0), name, accessExpr]);
     return initVar(varList);
   });
   const block = new Block({ ...varDef.metadata, body: vars });
@@ -395,11 +392,7 @@ const initObjectDestructure = (varDef: List, obj: List): Block => {
   const vars = obj.sliceAsArray(1).map((field) => {
     if (field.isIdentifier()) {
       const accessExpr = new List([field.clone(), initializer.clone()]);
-      const varList = new List([
-        varDef.identifierAt(0),
-        field,
-        accessExpr,
-      ]);
+      const varList = new List([varDef.identifierAt(0), field, accessExpr]);
       return initVar(varList);
     }
 
@@ -410,11 +403,7 @@ const initObjectDestructure = (varDef: List, obj: List): Block => {
         throw new Error("Invalid object destructure");
       }
       const accessExpr = new List([propName.clone(), initializer.clone()]);
-      const varList = new List([
-        varDef.identifierAt(0),
-        name,
-        accessExpr,
-      ]);
+      const varList = new List([varDef.identifierAt(0), name, accessExpr]);
       return initVar(varList);
     }
 
@@ -481,7 +470,8 @@ const initCall = (call: List) => {
 
   let fnName = call.at(0);
   if (fnName?.isInt()) {
-    const val = typeof fnName.value === "number" ? fnName.value : fnName.value.value;
+    const val =
+      typeof fnName.value === "number" ? fnName.value : fnName.value.value;
     fnName = Identifier.from(val.toString());
   }
 
@@ -510,31 +500,27 @@ const initFnType = (fn: List): FnType => {
       const param = listToParameter(paramsExpr);
       parameters = Array.isArray(param) ? param : [param];
     } else if (paramsExpr.calls("tuple")) {
-      parameters = paramsExpr
-        .sliceAsArray(1)
-        .flatMap((p) => {
-          if (p.isIdentifier()) {
-            return [new Parameter({ name: p, typeExpr: undefined })];
-          }
-          if (!p.isList()) {
-            throw new Error("Invalid parameter");
-          }
-          const param = listToParameter(p);
-          return Array.isArray(param) ? param : [param];
-        });
+      parameters = paramsExpr.sliceAsArray(1).flatMap((p) => {
+        if (p.isIdentifier()) {
+          return [new Parameter({ name: p, typeExpr: undefined })];
+        }
+        if (!p.isList()) {
+          throw new Error("Invalid parameter");
+        }
+        const param = listToParameter(p);
+        return Array.isArray(param) ? param : [param];
+      });
     } else {
-      parameters = paramsExpr
-        .sliceAsArray()
-        .flatMap((p) => {
-          if (p.isIdentifier()) {
-            return [new Parameter({ name: p, typeExpr: undefined })];
-          }
-          if (!p.isList()) {
-            throw new Error("Invalid parameter");
-          }
-          const param = listToParameter(p);
-          return Array.isArray(param) ? param : [param];
-        });
+      parameters = paramsExpr.sliceAsArray().flatMap((p) => {
+        if (p.isIdentifier()) {
+          return [new Parameter({ name: p, typeExpr: undefined })];
+        }
+        if (!p.isList()) {
+          throw new Error("Invalid parameter");
+        }
+        const param = listToParameter(p);
+        return Array.isArray(param) ? param : [param];
+      });
     }
   } else if (paramsExpr?.isIdentifier()) {
     parameters = [new Parameter({ name: paramsExpr, typeExpr: undefined })];
@@ -594,7 +580,7 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
     return initPipedUnionType(type);
   }
 
-  if (type.calls("&")) {
+  if (type.calls("+")) {
     return initIntersection(type);
   }
 
