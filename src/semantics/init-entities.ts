@@ -24,7 +24,6 @@ import {
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { TraitType } from "../syntax-objects/types/trait.js";
 import { SemanticProcessor } from "./types.js";
-import { getExprType } from "./resolution/get-expr-type.js";
 
 export const initEntities: SemanticProcessor = (expr) => {
   if (expr.isModule()) {
@@ -135,7 +134,7 @@ const initFn = (expr: List): Fn => {
         throw new Error("Invalid parameter");
       }
 
-      return listToParameter(p);
+      return initParameter(p);
     });
 
   const returnTypeExpr = getReturnTypeExprForFn(expr, 3);
@@ -169,7 +168,7 @@ const initClosure = (expr: List): Closure => {
       parameters = fnType.parameters;
       returnTypeExpr = fnType.returnTypeExpr;
     } else if (paramsExpr.calls(":")) {
-      const param = listToParameter(paramsExpr);
+      const param = initParameter(paramsExpr);
       parameters = Array.isArray(param) ? param : [param];
     } else {
       parameters = paramsExpr.sliceAsArray().flatMap((p) => {
@@ -179,7 +178,7 @@ const initClosure = (expr: List): Closure => {
         if (!p.isList()) {
           throw new Error("Invalid parameter");
         }
-        return listToParameter(p);
+        return initParameter(p);
       });
     }
   } else if (paramsExpr?.isIdentifier()) {
@@ -202,38 +201,35 @@ const initClosure = (expr: List): Closure => {
   });
 };
 
-const listToParameter = (
+const initParameter = (
   list: List,
   labeled = false,
   labelOverride?: Identifier
 ): Parameter | Parameter[] => {
-  if (list.identifierAt(0).is(":")) {
-    const name = list.identifierAt(1);
-    return new Parameter({
-      ...list.metadata,
-      name,
-      typeExpr: initTypeExprEntities(list.at(2)),
-      label: labelOverride ?? (labeled ? name : undefined),
-    });
-  }
-
   if (list.identifierAt(0).is("generics")) {
     return [];
   }
 
   if (list.identifierAt(0).is("object")) {
-    return list
-      .sliceAsArray(1)
-      .flatMap((e) => listToParameter(e as List, true));
+    return list.sliceAsArray(1).flatMap((e) => initParameter(e as List, true));
   }
 
   const first = list.at(0);
   const second = list.at(1);
-  if (first?.isIdentifier() && second?.isList()) {
-    return listToParameter(second, true, first);
+  if (first?.isIdentifier() && second?.isList() && second.calls(":")) {
+    return initParameter(second, true, first);
   }
 
-  throw new Error("Invalid parameter");
+  const { name, typeExpr, isMutableRef } = unwrapVariableIdentifier(list);
+
+  if (!name) throw new Error("Invalid parameter");
+  return new Parameter({
+    ...list.metadata,
+    name,
+    typeExpr,
+    label: labelOverride ?? (labeled ? name : undefined),
+    attributes: { isMutableRef },
+  });
 };
 
 const getReturnTypeExprForFn = (fn: List, index: number): Expr | undefined => {
@@ -328,13 +324,8 @@ const initIntersection = (intersection: List): IntersectionType => {
 
 const initVar = (varDef: List): Variable => {
   const isMutable = varDef.calls("define_mut");
-  const identifierExpr = varDef.at(1);
-  const [name, typeExpr] =
-    identifierExpr?.isList() && identifierExpr.calls(":")
-      ? [identifierExpr.identifierAt(1), identifierExpr.at(2)]
-      : identifierExpr?.isIdentifier()
-      ? [identifierExpr]
-      : [];
+  const idExpr = varDef.at(1);
+  const { name, typeExpr, isMutableRef } = unwrapVariableIdentifier(idExpr);
 
   if (!name) {
     throw new Error("Invalid variable definition, invalid identifier");
@@ -355,10 +346,28 @@ const initVar = (varDef: List): Variable => {
   return new Variable({
     ...varDef.metadata,
     name,
-    typeExpr: initTypeExprEntities(typeExpr),
+    typeExpr,
     initializer: initEntities(initializer),
     isMutable,
+    attributes: { isMutableRef },
   });
+};
+
+const unwrapVariableIdentifier = (expr?: Expr) => {
+  if (expr?.isIdentifier()) return { name: expr };
+  if (!expr?.isList()) return {};
+
+  const [nameExpr, typeExpr] = expr.calls(":")
+    ? [expr.at(1), initTypeExprEntities(expr.at(2))]
+    : [expr];
+
+  if (nameExpr?.isList() && nameExpr.calls("&")) {
+    const name = nameExpr.optionalIdentifierAt(1);
+    return { name, isMutableRef: true, typeExpr };
+  }
+
+  if (nameExpr?.isIdentifier()) return { name: nameExpr, typeExpr };
+  return {};
 };
 
 const initTupleDestructure = (varDef: List, tuple: List): Block => {
@@ -497,7 +506,7 @@ const initFnType = (fn: List): FnType => {
 
   if (paramsExpr?.isList()) {
     if (paramsExpr.calls(":")) {
-      const param = listToParameter(paramsExpr);
+      const param = initParameter(paramsExpr);
       parameters = Array.isArray(param) ? param : [param];
     } else if (paramsExpr.calls("tuple")) {
       parameters = paramsExpr.sliceAsArray(1).flatMap((p) => {
@@ -507,7 +516,7 @@ const initFnType = (fn: List): FnType => {
         if (!p.isList()) {
           throw new Error("Invalid parameter");
         }
-        const param = listToParameter(p);
+        const param = initParameter(p);
         return Array.isArray(param) ? param : [param];
       });
     } else {
@@ -518,7 +527,7 @@ const initFnType = (fn: List): FnType => {
         if (!p.isList()) {
           throw new Error("Invalid parameter");
         }
-        const param = listToParameter(p);
+        const param = initParameter(p);
         return Array.isArray(param) ? param : [param];
       });
     }
