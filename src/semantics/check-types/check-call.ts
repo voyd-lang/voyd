@@ -1,8 +1,7 @@
 import { Call } from "../../syntax-objects/call.js";
-import { ObjectLiteral, bool } from "../../syntax-objects/index.js";
+import { Fn, ObjectLiteral, bool } from "../../syntax-objects/index.js";
 import { getExprType } from "../resolution/get-expr-type.js";
 import { typesAreCompatible } from "../resolution/index.js";
-import { getCallFn } from "../resolution/get-call-fn.js";
 import { resolveUnionType } from "../resolution/resolve-union.js";
 import { formatFnSignature } from "../fn-signature.js";
 
@@ -63,14 +62,19 @@ export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
     );
   }
 
-  if (call.fn?.parent?.isTrait?.()) {
-    try {
-      const resolved = getCallFn(call);
-      if (resolved) {
-        call.fn = resolved;
-        call.type = resolved.returnType;
+  if (call.fn.isFn()) {
+    call.args.each((arg, i) => {
+      if (!arg.isIdentifier()) return;
+      const p = (call.fn as Fn)!.parameters[i];
+      if (
+        p.getAttribute("isMutableRef") &&
+        !arg.resolve()?.getAttribute("isMutableRef")
+      ) {
+        console.warn(
+          `Passing immutable argument ref to mutable parameter at ${arg.location}`
+        );
       }
-    } catch {}
+    });
   }
 
   if (!call.type) {
@@ -182,9 +186,8 @@ const checkObjectInit = (call: Call): Call => {
                 actual: match.type?.name.value ?? "unknown",
               };
         })
-        .filter(
-          (f): f is { name: string; expected: string; actual: string } =>
-            Boolean(f)
+        .filter((f): f is { name: string; expected: string; actual: string } =>
+          Boolean(f)
         );
 
       const extra = provided.fields
