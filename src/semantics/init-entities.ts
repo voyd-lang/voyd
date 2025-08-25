@@ -24,18 +24,6 @@ import {
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { TraitType } from "../syntax-objects/types/trait.js";
 import { SemanticProcessor } from "./types.js";
-import { getExprType } from "./resolution/get-expr-type.js";
-
-const unwrapMutable = (expr: Expr): { expr: Expr; isMutable: boolean } => {
-  let current = expr;
-  let isMutable = false;
-  while (current.isList() && current.calls("&")) {
-    isMutable = true;
-    current = current.exprAt(1);
-  }
-  if (isMutable) current.setAttribute("mutable", true);
-  return { expr: current, isMutable };
-};
 
 export const initEntities: SemanticProcessor = (expr) => {
   if (expr.isModule()) {
@@ -43,12 +31,6 @@ export const initEntities: SemanticProcessor = (expr) => {
   }
 
   if (!expr.isList()) return expr;
-
-  if (expr.calls("&")) {
-    const child = initEntities(expr.exprAt(1));
-    child.setAttribute("mutable", true);
-    return child;
-  }
 
   if (expr.calls("define_function")) {
     return initFn(expr);
@@ -119,15 +101,13 @@ export const initEntities: SemanticProcessor = (expr) => {
 };
 
 const initBlock = (block: List): Block => {
-  const body = block
-    .sliceAsArray(1)
-    .flatMap((expr) => {
-      const inited = initEntities(expr);
-      if (inited.isBlock() && inited.hasAttribute("flatten")) {
-        return (inited as Block).body;
-      }
-      return [inited];
-    });
+  const body = block.sliceAsArray(1).flatMap((expr) => {
+    const inited = initEntities(expr);
+    if (inited.isBlock() && inited.hasAttribute("flatten")) {
+      return (inited as Block).body;
+    }
+    return [inited];
+  });
   return new Block({ ...block.metadata, body });
 };
 
@@ -154,7 +134,7 @@ const initFn = (expr: List): Fn => {
         throw new Error("Invalid parameter");
       }
 
-      return listToParameter(p);
+      return initParameter(p);
     });
 
   const returnTypeExpr = getReturnTypeExprForFn(expr, 3);
@@ -188,7 +168,7 @@ const initClosure = (expr: List): Closure => {
       parameters = fnType.parameters;
       returnTypeExpr = fnType.returnTypeExpr;
     } else if (paramsExpr.calls(":")) {
-      const param = listToParameter(paramsExpr);
+      const param = initParameter(paramsExpr);
       parameters = Array.isArray(param) ? param : [param];
     } else {
       parameters = paramsExpr.sliceAsArray().flatMap((p) => {
@@ -198,7 +178,7 @@ const initClosure = (expr: List): Closure => {
         if (!p.isList()) {
           throw new Error("Invalid parameter");
         }
-        return listToParameter(p);
+        return initParameter(p);
       });
     }
   } else if (paramsExpr?.isIdentifier()) {
@@ -208,7 +188,10 @@ const initClosure = (expr: List): Closure => {
   const bodyExpr = initEntities(expr.exprAt(2));
   const body = bodyExpr?.isBlock()
     ? bodyExpr
-    : new Block({ ...(bodyExpr?.metadata ?? {}), body: bodyExpr ? [bodyExpr] : [] });
+    : new Block({
+        ...(bodyExpr?.metadata ?? {}),
+        body: bodyExpr ? [bodyExpr] : [],
+      });
 
   return new Closure({
     ...expr.metadata,
@@ -218,41 +201,35 @@ const initClosure = (expr: List): Closure => {
   });
 };
 
-const listToParameter = (
+const initParameter = (
   list: List,
   labeled = false,
   labelOverride?: Identifier
 ): Parameter | Parameter[] => {
-  if (list.identifierAt(0).is(":")) {
-    const { expr: nameExpr, isMutable } = unwrapMutable(list.exprAt(1));
-    const name = nameExpr.isIdentifier() ? nameExpr : list.identifierAt(1);
-    const param = new Parameter({
-      ...list.metadata,
-      name,
-      typeExpr: initTypeExprEntities(list.at(2)),
-      label: labelOverride ?? (labeled ? name : undefined),
-    });
-    if (isMutable) param.setAttribute("mutable", true);
-    return param;
-  }
-
   if (list.identifierAt(0).is("generics")) {
     return [];
   }
 
   if (list.identifierAt(0).is("object")) {
-    return list
-      .sliceAsArray(1)
-      .flatMap((e) => listToParameter(e as List, true));
+    return list.sliceAsArray(1).flatMap((e) => initParameter(e as List, true));
   }
 
   const first = list.at(0);
   const second = list.at(1);
-  if (first?.isIdentifier() && second?.isList()) {
-    return listToParameter(second, true, first);
+  if (first?.isIdentifier() && second?.isList() && second.calls(":")) {
+    return initParameter(second, true, first);
   }
 
-  throw new Error("Invalid parameter");
+  const { name, typeExpr, isMutableRef } = unwrapVariableIdentifier(list);
+
+  if (!name) throw new Error("Invalid parameter");
+  return new Parameter({
+    ...list.metadata,
+    name,
+    typeExpr,
+    label: labelOverride ?? (labeled ? name : undefined),
+    attributes: { isMutableRef },
+  });
 };
 
 const getReturnTypeExprForFn = (fn: List, index: number): Expr | undefined => {
@@ -347,28 +324,8 @@ const initIntersection = (intersection: List): IntersectionType => {
 
 const initVar = (varDef: List): Variable => {
   const isMutable = varDef.calls("define_mut");
-  let identifierExpr = varDef.at(1);
-  if (!identifierExpr) {
-    throw new Error("Invalid variable definition, invalid identifier");
-  }
-
-  // Strip & from the identifier expression
-  const outer = unwrapMutable(identifierExpr);
-  identifierExpr = outer.expr;
-  let isRefMutable = outer.isMutable;
-
-  let name: Identifier | undefined;
-  let typeExpr: Expr | undefined;
-
-  if (identifierExpr.isList() && identifierExpr.calls(":")) {
-    const inner = unwrapMutable(identifierExpr.exprAt(1));
-    identifierExpr.set(1, inner.expr);
-    isRefMutable = isRefMutable || inner.isMutable;
-    name = identifierExpr.identifierAt(1);
-    typeExpr = identifierExpr.at(2);
-  } else if (identifierExpr.isIdentifier()) {
-    name = identifierExpr;
-  }
+  const idExpr = varDef.at(1);
+  const { name, typeExpr, isMutableRef } = unwrapVariableIdentifier(idExpr);
 
   if (!name) {
     throw new Error("Invalid variable definition, invalid identifier");
@@ -386,15 +343,31 @@ const initVar = (varDef: List): Variable => {
     throw new Error("Invalid variable definition, missing initializer");
   }
 
-  const variable = new Variable({
+  return new Variable({
     ...varDef.metadata,
     name,
-    typeExpr: initTypeExprEntities(typeExpr),
+    typeExpr,
     initializer: initEntities(initializer),
     isMutable,
+    attributes: { isMutableRef },
   });
-  if (isRefMutable) variable.setAttribute("mutable", true);
-  return variable;
+};
+
+const unwrapVariableIdentifier = (expr?: Expr) => {
+  if (expr?.isIdentifier()) return { name: expr };
+  if (!expr?.isList()) return {};
+
+  const [nameExpr, typeExpr] = expr.calls(":")
+    ? [expr.at(1), initTypeExprEntities(expr.at(2))]
+    : [expr];
+
+  if (nameExpr?.isList() && nameExpr.calls("&")) {
+    const name = nameExpr.optionalIdentifierAt(1);
+    return { name, isMutableRef: true, typeExpr };
+  }
+
+  if (nameExpr?.isIdentifier()) return { name: nameExpr, typeExpr };
+  return {};
 };
 
 const initTupleDestructure = (varDef: List, tuple: List): Block => {
@@ -410,11 +383,7 @@ const initTupleDestructure = (varDef: List, tuple: List): Block => {
     }
 
     const accessExpr = new List([index, initializer.clone()]);
-    const varList = new List([
-      varDef.identifierAt(0),
-      name,
-      accessExpr,
-    ]);
+    const varList = new List([varDef.identifierAt(0), name, accessExpr]);
     return initVar(varList);
   });
   const block = new Block({ ...varDef.metadata, body: vars });
@@ -432,11 +401,7 @@ const initObjectDestructure = (varDef: List, obj: List): Block => {
   const vars = obj.sliceAsArray(1).map((field) => {
     if (field.isIdentifier()) {
       const accessExpr = new List([field.clone(), initializer.clone()]);
-      const varList = new List([
-        varDef.identifierAt(0),
-        field,
-        accessExpr,
-      ]);
+      const varList = new List([varDef.identifierAt(0), field, accessExpr]);
       return initVar(varList);
     }
 
@@ -447,11 +412,7 @@ const initObjectDestructure = (varDef: List, obj: List): Block => {
         throw new Error("Invalid object destructure");
       }
       const accessExpr = new List([propName.clone(), initializer.clone()]);
-      const varList = new List([
-        varDef.identifierAt(0),
-        name,
-        accessExpr,
-      ]);
+      const varList = new List([varDef.identifierAt(0), name, accessExpr]);
       return initVar(varList);
     }
 
@@ -518,7 +479,8 @@ const initCall = (call: List) => {
 
   let fnName = call.at(0);
   if (fnName?.isInt()) {
-    const val = typeof fnName.value === "number" ? fnName.value : fnName.value.value;
+    const val =
+      typeof fnName.value === "number" ? fnName.value : fnName.value.value;
     fnName = Identifier.from(val.toString());
   }
 
@@ -544,34 +506,30 @@ const initFnType = (fn: List): FnType => {
 
   if (paramsExpr?.isList()) {
     if (paramsExpr.calls(":")) {
-      const param = listToParameter(paramsExpr);
+      const param = initParameter(paramsExpr);
       parameters = Array.isArray(param) ? param : [param];
     } else if (paramsExpr.calls("tuple")) {
-      parameters = paramsExpr
-        .sliceAsArray(1)
-        .flatMap((p) => {
-          if (p.isIdentifier()) {
-            return [new Parameter({ name: p, typeExpr: undefined })];
-          }
-          if (!p.isList()) {
-            throw new Error("Invalid parameter");
-          }
-          const param = listToParameter(p);
-          return Array.isArray(param) ? param : [param];
-        });
+      parameters = paramsExpr.sliceAsArray(1).flatMap((p) => {
+        if (p.isIdentifier()) {
+          return [new Parameter({ name: p, typeExpr: undefined })];
+        }
+        if (!p.isList()) {
+          throw new Error("Invalid parameter");
+        }
+        const param = initParameter(p);
+        return Array.isArray(param) ? param : [param];
+      });
     } else {
-      parameters = paramsExpr
-        .sliceAsArray()
-        .flatMap((p) => {
-          if (p.isIdentifier()) {
-            return [new Parameter({ name: p, typeExpr: undefined })];
-          }
-          if (!p.isList()) {
-            throw new Error("Invalid parameter");
-          }
-          const param = listToParameter(p);
-          return Array.isArray(param) ? param : [param];
-        });
+      parameters = paramsExpr.sliceAsArray().flatMap((p) => {
+        if (p.isIdentifier()) {
+          return [new Parameter({ name: p, typeExpr: undefined })];
+        }
+        if (!p.isList()) {
+          throw new Error("Invalid parameter");
+        }
+        const param = initParameter(p);
+        return Array.isArray(param) ? param : [param];
+      });
     }
   } else if (paramsExpr?.isIdentifier()) {
     parameters = [new Parameter({ name: paramsExpr, typeExpr: undefined })];
@@ -631,7 +589,7 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
     return initPipedUnionType(type);
   }
 
-  if (type.calls("&")) {
+  if (type.calls("+")) {
     return initIntersection(type);
   }
 

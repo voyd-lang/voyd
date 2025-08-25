@@ -13,8 +13,20 @@ fn reduce<T>(arr: Array<T>, { start: T, reducer cb: (acc: T, current: T) -> T })
 fn add<T>(a: T, b: T)
   a + b
 
-pub fn main() -> i32
+pub fn main2() -> i32
   [1, 2, 3]
     .reduce start: 0 reducer: (acc, current) =>
       acc + current
     .add(3)
+
+obj Test {
+  x: i32
+}
+
+fn plus(&t: Test) -> voyd
+  t.x = t.x + 1
+
+pub fn main()
+  let &t = Test { x: 2 }
+  plus(t)
+  t.x

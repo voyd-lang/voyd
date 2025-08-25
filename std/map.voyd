@@ -26,7 +26,7 @@ pub fn new_map<T>() -> Map<T>
   Map<T> { buckets: buckets }
 
 impl<T> Iterator<{ key: String, value: T }> for MapIterator<T>
-  fn next(self) -> Optional<{ key: String, value: T }>
+  fn next(&self) -> Optional<{ key: String, value: T }>
     if self.bucket_index >= self.map.buckets.length then:
       None {}
     else:

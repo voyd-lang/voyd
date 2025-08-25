@@ -1,8 +1,7 @@
 import { Call } from "../../syntax-objects/call.js";
-import { ObjectLiteral, bool } from "../../syntax-objects/index.js";
+import { Fn, ObjectLiteral, bool } from "../../syntax-objects/index.js";
 import { getExprType } from "../resolution/get-expr-type.js";
 import { typesAreCompatible } from "../resolution/index.js";
-import { getCallFn } from "../resolution/get-call-fn.js";
 import { resolveUnionType } from "../resolution/resolve-union.js";
 import { formatFnSignature } from "../fn-signature.js";
 
@@ -24,7 +23,7 @@ export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("=")) return checkAssign(call);
   if (call.calls("while")) return checkWhile(call);
   if (call.calls("FixedArray")) return checkFixedArrayInit(call);
-  if (call.calls("member-access")) return checkMemberAccess(call);
+  if (call.calls("member-access")) return call; // TODO
   if (call.fn?.isObjectType()) return checkObjectInit(call);
 
   call.args = call.args.map(checkTypes);
@@ -63,14 +62,19 @@ export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
     );
   }
 
-  if (call.fn?.parent?.isTrait?.()) {
-    try {
-      const resolved = getCallFn(call);
-      if (resolved) {
-        call.fn = resolved;
-        call.type = resolved.returnType;
+  if (call.fn.isFn()) {
+    call.args.each((arg, i) => {
+      if (!arg.isIdentifier()) return;
+      const p = (call.fn as Fn)!.parameters[i];
+      if (
+        p.getAttribute("isMutableRef") &&
+        !arg.resolve()?.getAttribute("isMutableRef")
+      ) {
+        console.warn(
+          `Passing immutable argument ref to mutable parameter at ${arg.location}`
+        );
       }
-    } catch {}
+    });
   }
 
   if (!call.type) {
@@ -140,19 +144,6 @@ const checkFixedArrayInit = (call: Call) => {
   return call;
 };
 
-const checkMemberAccess = (call: Call): Call => {
-  const obj = call.argAt(0);
-  if (obj) checkTypes(obj);
-  const identifier = obj?.isIdentifier() ? obj : undefined;
-  const entity = identifier?.resolve();
-  if (entity?.isVariable() || entity?.isParameter()) {
-    if (!entity.hasAttribute("mutable")) {
-      console.warn(`${identifier} is not mutable at ${identifier?.location}`);
-    }
-  }
-  return call;
-};
-
 const checkWhile = (call: Call) => {
   const cond = call.argAt(0);
   const condType = getExprType(cond);
@@ -195,9 +186,8 @@ const checkObjectInit = (call: Call): Call => {
                 actual: match.type?.name.value ?? "unknown",
               };
         })
-        .filter(
-          (f): f is { name: string; expected: string; actual: string } =>
-            Boolean(f)
+        .filter((f): f is { name: string; expected: string; actual: string } =>
+          Boolean(f)
         );
 
       const extra = provided.fields

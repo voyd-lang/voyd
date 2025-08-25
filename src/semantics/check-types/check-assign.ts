@@ -6,6 +6,10 @@ import { checkTypes } from "./check-types.js";
 export const checkAssign = (call: Call) => {
   const id = call.argAt(0);
   if (!id?.isIdentifier()) {
+    if (id?.isCall() && id.calls("member-access")) {
+      checkFieldAssignmentMutability(id);
+    }
+
     return call;
   }
 
@@ -34,3 +38,16 @@ export const checkAssign = (call: Call) => {
   return call;
 };
 
+// Check to see if this is a member access assignment to a non-mutable reference
+const checkFieldAssignmentMutability = (call: Call): Call => {
+  const obj = call.argAt(0);
+  if (obj) checkTypes(obj);
+  const identifier = obj?.isIdentifier() ? obj : undefined;
+  const entity = identifier?.resolve();
+  if (entity?.isVariable() || entity?.isParameter()) {
+    if (!entity.getAttribute("isMutableRef")) {
+      console.warn(`${identifier} is not mutable at ${identifier?.location}`);
+    }
+  }
+  return call;
+};

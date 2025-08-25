@@ -215,7 +215,7 @@ obj Animal { age: i32 }
 obj Insect: Animal { age: i32, legs: i32 }
 obj Mammal: Animal { age: i32, legs: i32 }
 
-fn get_legs(a: Animal & { legs: i32 }) -> i32
+fn get_legs(a: Animal + { legs: i32 }) -> i32
   a.legs
 
 // Test intersection types
