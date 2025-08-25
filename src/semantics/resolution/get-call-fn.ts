@@ -15,7 +15,9 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
   if (isPrimitiveFnCall(call)) return undefined;
 
   const unfilteredCandidates = candidateFns ?? getCandidates(call);
-  const candidates = filterCandidates(call, unfilteredCandidates);
+  const candidates = dedupeCandidates(
+    filterCandidates(call, unfilteredCandidates)
+  );
 
   if (!candidates.length) {
     return undefined;
@@ -61,6 +63,15 @@ const getCandidates = (call: Call): Fn[] => {
   }
 
   return fns;
+};
+
+const dedupeCandidates = (fns: Fn[]): Fn[] => {
+  const unique = new Map<string, Fn>();
+  fns.forEach((fn) => {
+    const key = `${fn.location?.toString() ?? fn.id}:${formatFnSignature(fn)}`;
+    if (!unique.has(key)) unique.set(key, fn);
+  });
+  return [...unique.values()];
 };
 
 const filterCandidates = (call: Call, candidates: Fn[]): Fn[] =>
