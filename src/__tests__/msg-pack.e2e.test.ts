@@ -29,4 +29,8 @@ describe("E2E msg pack encode", async () => {
   test("encodes array into memory", async (t) => {
     t.expect(call("run_array")).toEqual(["hey", "there"]);
   });
+
+  test("encodes map into memory", async (t) => {
+    t.expect(call("run_map")).toEqual({ hello: "world" });
+  });
 });
