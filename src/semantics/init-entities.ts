@@ -33,6 +33,10 @@ export const initEntities: SemanticProcessor = (expr) => {
 
   if (!expr.isList()) return expr;
 
+  if (expr.calls("&")) {
+    return initMutable(expr);
+  }
+
   if (expr.calls("define_function")) {
     return initFn(expr);
   }
@@ -112,6 +116,16 @@ const initBlock = (block: List): Block => {
       return [inited];
     });
   return new Block({ ...block.metadata, body });
+};
+
+const initMutable = (expr: List): Expr => {
+  const child =
+    expr.length === 2
+      ? expr.at(1)!
+      : new List({ ...expr.metadata, value: expr.sliceAsArray(1) });
+  const inited = initEntities(child);
+  inited.setAttribute("mutable", true);
+  return inited;
 };
 
 const initFn = (expr: List): Fn => {
@@ -206,14 +220,38 @@ const listToParameter = (
   labeled = false,
   labelOverride?: Identifier
 ): Parameter | Parameter[] => {
-  if (list.identifierAt(0).is(":")) {
-    const name = list.identifierAt(1);
-    return new Parameter({
+  if (list.calls("&")) {
+    const nameExpr = initEntities(list);
+    if (!nameExpr.isIdentifier()) {
+      throw new Error("Invalid parameter");
+    }
+    const param = new Parameter({
       ...list.metadata,
-      name,
-      typeExpr: initTypeExprEntities(list.at(2)),
-      label: labelOverride ?? (labeled ? name : undefined),
+      name: nameExpr,
+      typeExpr: undefined,
+      label: labelOverride ?? (labeled ? nameExpr : undefined),
     });
+    if (nameExpr.hasAttribute("mutable")) {
+      param.setAttribute("mutable", true);
+    }
+    return param;
+  }
+
+  if (list.identifierAt(0).is(":")) {
+    const nameExpr = initEntities(list.at(1)!);
+    if (!nameExpr?.isIdentifier()) {
+      throw new Error("Invalid parameter");
+    }
+    const param = new Parameter({
+      ...list.metadata,
+      name: nameExpr,
+      typeExpr: initTypeExprEntities(list.at(2)),
+      label: labelOverride ?? (labeled ? nameExpr : undefined),
+    });
+    if (nameExpr.hasAttribute("mutable")) {
+      param.setAttribute("mutable", true);
+    }
+    return param;
   }
 
   if (list.identifierAt(0).is("generics")) {
@@ -328,12 +366,24 @@ const initIntersection = (intersection: List): IntersectionType => {
 const initVar = (varDef: List): Variable => {
   const isMutable = varDef.calls("define_mut");
   const identifierExpr = varDef.at(1);
-  const [name, typeExpr] =
-    identifierExpr?.isList() && identifierExpr.calls(":")
-      ? [identifierExpr.identifierAt(1), identifierExpr.at(2)]
-      : identifierExpr?.isIdentifier()
-      ? [identifierExpr]
-      : [];
+
+  let name: Identifier | undefined;
+  let typeExpr: Expr | undefined;
+
+  if (identifierExpr?.isList() && identifierExpr.calls(":")) {
+    const nameExpr = initEntities(identifierExpr.at(1)!);
+    if (!nameExpr.isIdentifier()) {
+      throw new Error("Invalid variable definition, invalid identifier");
+    }
+    name = nameExpr;
+    typeExpr = identifierExpr.at(2) ?? undefined;
+  } else if (identifierExpr) {
+    const nameExpr = initEntities(identifierExpr);
+    if (!nameExpr.isIdentifier()) {
+      throw new Error("Invalid variable definition, invalid identifier");
+    }
+    name = nameExpr;
+  }
 
   if (!name) {
     throw new Error("Invalid variable definition, invalid identifier");
@@ -351,13 +401,19 @@ const initVar = (varDef: List): Variable => {
     throw new Error("Invalid variable definition, missing initializer");
   }
 
-  return new Variable({
+  const variable = new Variable({
     ...varDef.metadata,
     name,
     typeExpr: initTypeExprEntities(typeExpr),
     initializer: initEntities(initializer),
     isMutable,
   });
+
+  if (name.hasAttribute("mutable")) {
+    variable.setAttribute("mutable", true);
+  }
+
+  return variable;
 };
 
 const initTupleDestructure = (varDef: List, tuple: List): Block => {

@@ -12,6 +12,7 @@ import { checkIf } from "./check-if.js";
 import { checkBinaryenCall } from "./check-binaryen-call.js";
 import { checkLabeledArg } from "./check-labeled-arg.js";
 import { checkFixedArrayType } from "./check-fixed-array-type.js";
+import { checkMemberAccess } from "./check-member-access.js";
 
 export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("export")) return checkExport(call);
@@ -24,7 +25,7 @@ export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("=")) return checkAssign(call);
   if (call.calls("while")) return checkWhile(call);
   if (call.calls("FixedArray")) return checkFixedArrayInit(call);
-  if (call.calls("member-access")) return call; // TODO
+  if (call.calls("member-access")) return checkMemberAccess(call);
   if (call.fn?.isObjectType()) return checkObjectInit(call);
 
   call.args = call.args.map(checkTypes);

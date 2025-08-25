@@ -5,6 +5,10 @@ import { checkTypes } from "./check-types.js";
 
 export const checkAssign = (call: Call) => {
   const id = call.argAt(0);
+  if (id?.isCall() && id.calls("member-access")) {
+    checkTypes(id);
+    return call;
+  }
   if (!id?.isIdentifier()) {
     return call;
   }
