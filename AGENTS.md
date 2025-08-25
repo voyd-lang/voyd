@@ -9,10 +9,8 @@ compiles to webassembly.
 This repo uses vitest for testing. You can run the full test
 suite with `npm test`.
 
-There is also a command line you can execute with tsx `src/cli/cli-dev.ts`.
-You can use it to parse voyd files, or run any voyd file that exports a `main`
-function. See `src/cli/exec.ts` for a list of commands, (camel case is converted
-to cli friendly form. `emitParserAst` becomes `--emit-parser-ast` for example).
+There is also a command line you can execute with tsx `❯ npx tsx src/cli/cli-dev.ts`.
+You can use it to parse voyd files, or run any voyd file that exports a `pub fn main`. Example `npx tsx src/cli/cli-dev.ts --run sb/array.voyd`. Use `--emit-parser-ast` to view the output of the parser.
 
 You should generally add unit tests (especially e2e ones like those in
 `src/__tests__) when adding new features or fixing bugs.

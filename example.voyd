@@ -1,34 +1,20 @@
-use std::macros::all
+use std::all
 
-fn fib(n: i32) -> i32
-  if n <= 1 then:
-    n
-  else:
-    fib(n - 1) + fib(n - 2)
+fn reduce<T>(arr: Array<T>, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T
+  let iterator = arr.iterate()
+  let reducer: (acc: T) -> T = (acc: T) -> T =>
+    iterator.next().match(opt)
+      Some<T>:
+        reducer(cb(acc, opt.value))
+      None:
+        acc
+  reducer(start)
 
-fn main()
-  let x = 10 +
-    20 +
-    30
+fn add<T>(a: T, b: T)
+  a + b
 
-  let y = if x > 10
-    then:
-      10
-    else:
-      20
-
-  call this while () => if x > 10 then:
-    x -= 1
-  else:
-    x += 1
-
-  let n = if args.len() > 1 then:
-    console.log("Hey there!")
-    args.at(1).parseInt().unwrap()
-  else:
-    10
-
-  let x2 = 10
-  let z = nothing()
-  let test_spacing = fib n
-  let result = fib(n)
+pub fn main() -> i32
+  [1, 2, 3]
+    .reduce start: 0 reducer: (acc, current) =>
+      acc + current
+    .add(3)
