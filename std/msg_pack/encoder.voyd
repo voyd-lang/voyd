@@ -6,6 +6,8 @@ obj Encoder {
   pos: i32,
 }
 
+type MiniJson = Array<MiniJson> | String
+
 impl Encoder
   fn ensure_capacity(self, add: i32) -> void
     let required = self.ptr + self.pos + add
@@ -63,7 +65,7 @@ impl Encoder
       self.write_u8(value.char_code_at(i))
       i = i + 1
 
-  pub fn encode_array(&self, value: Array<String>) -> void
+  pub fn encode_array(&self, value: Array<MiniJson>) -> void
     let len = value.length
     if len < 16 then:
       self.write_u8(144 + len)
@@ -81,8 +83,12 @@ impl Encoder
     var i = 0
     while i < len do:
       value.get(i).match(item)
-        Some<String>:
-          self.encode_string(item.value)
+        Some<MiniJson>:
+          item.value.match(json)
+            String:
+              self.encode_string(json)
+            Array<MiniJson>:
+              self.encode_array(json)
           0
         None:
           0
@@ -102,7 +108,7 @@ pub fn encode_json(value: String, ptr: i32) -> i32
   enc.encode_string(value)
   enc.pos
 
-pub fn encode_json(value: Array<String>) -> i32
+pub fn encode_json(value: Array<MiniJson>) -> i32
   if linear_memory::size() == 0 then:
     linear_memory::grow(1)
   let &enc = Encoder { ptr: 0, pos: 0 }
