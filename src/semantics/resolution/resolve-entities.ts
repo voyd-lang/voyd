@@ -194,17 +194,19 @@ export const resolveObjectLiteral = (obj: ObjectLiteral, expected?: ObjectType) 
   });
 
   if (!obj.type) {
-    obj.type = new ObjectType({
-      ...obj.metadata,
-      name: `ObjectLiteral-${obj.syntaxId}`,
-      value: obj.fields.map((f) => ({
-        name: f.name,
-        typeExpr: f.initializer,
-        type: f.type,
-      })),
-      parentObj: voydBaseObject,
-      isStructural: true,
-    });
+    obj.type =
+      expected ??
+      new ObjectType({
+        ...obj.metadata,
+        name: `ObjectLiteral-${obj.syntaxId}`,
+        value: obj.fields.map((f) => ({
+          name: f.name,
+          typeExpr: f.initializer,
+          type: f.type,
+        })),
+        parentObj: voydBaseObject,
+        isStructural: true,
+      });
   }
 
   return obj;
@@ -218,8 +220,12 @@ export const resolveArrayLiteral = (
 
   arr.elements = arr.elements.map((elem) => {
     if (expectedElemType && elem.isArrayLiteral()) {
-      const childExpected = getArrayElemType(expectedElemType) ?? expectedElemType;
+      const childExpected =
+        getArrayElemType(expectedElemType) ?? expectedElemType;
       return resolveArrayLiteral(elem, childExpected);
+    }
+    if (elem.isObjectLiteral()) {
+      return resolveWithExpected(elem, expectedElemType);
     }
     return resolveEntities(elem);
   });
