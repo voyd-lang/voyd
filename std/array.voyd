@@ -14,9 +14,9 @@ obj ArrayIterator<T> {
   array: Array<T>
 }
 
-pub fn new_array<T>(opts: { with_size: i32 }) -> Array<T>
+pub fn new_array<T>({ with_size: i32 }) -> Array<T>
   Array<T> {
-    storage: new_fixed_array<T>(opts.with_size),
+    storage: new_fixed_array<T>(with_size),
     count: 0
   }
 

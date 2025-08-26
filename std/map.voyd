@@ -16,11 +16,11 @@ obj MapIterator<T> {
 }
 
 pub fn new_map<T>() -> Map<T>
-  let buckets = new_array<Array<{ key: String, value: T }>>({ with_size: 16 })
+  let &buckets = new_array<Array<{ key: String, value: T }>>(with_size: 16)
 
   var i = 0
   while i < 16 do:
-    buckets.push(new_array<{ key: String, value: T }>({ with_size: 4 }))
+    buckets.push(new_array<{ key: String, value: T }>(with_size: 4))
     i = i + 1
 
   Map<T> { buckets: buckets }
@@ -53,6 +53,30 @@ impl<T> Iterable<{ key: String, value: T }> for Map<T>
     MapIterator<T> { map: self, bucket_index: 0, item_index: 0 }
 
 impl<T> Map<T>
+  pub fn init(pairs: Array<(String, T)>) -> Map<T>
+    var m = new_map<T>()
+    var i = 0
+    while i < pairs.length do:
+      pairs.get(i).match(pair)
+        Some<(String, T)>:
+          let key = pair.value.0
+          let value = pair.value.1
+          m.get_bucket_by_key(key).match(bucket)
+            Some<Array<{ key: String, value: T }>>:
+              add_to_bucket(bucket.value, key, value)
+              0
+            None:
+              let new_bucket = new_array<{ key: String, value: T }>({ with_size: 1 })
+              new_bucket.set(0, { key: key, value: value })
+              let index = m.hash(key)
+              m.buckets.set(index, new_bucket)
+              0
+          0
+        None:
+          0
+      i = i + 1
+    m
+
   fn hash(self, key: String) -> i32
     var hash_value = 0
     var i = 0
