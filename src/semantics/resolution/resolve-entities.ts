@@ -86,7 +86,7 @@ const getArrayElemType = (type?: Type): Type | undefined => {
   const parent = type.genericParent;
   if (!type.name.is("Array") && !parent?.name.is("Array")) return;
   const arg = type.appliedTypeArgs?.[0];
-  return arg && arg.isTypeAlias() ? arg.type : undefined;
+  return arg ? unwrapAlias(arg) : undefined;
 };
 
 export const resolveVar = (variable: Variable): Variable => {
