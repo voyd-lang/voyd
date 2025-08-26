@@ -64,7 +64,13 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
     if (objArg?.isObjectLiteral()) {
       call.args.set(0, resolveObjectLiteral(objArg, type));
     }
-    return resolveObjectInit(call, type);
+    const resolved = resolveObjectInit(call, type);
+    if (resolved.fn?.isFn()) {
+      resolveArrayArgs(resolved);
+      expandObjectArg(resolved);
+      inferClosureArgTypes(resolved);
+    }
+    return resolved;
   }
 
   if (call.typeArgs) {
@@ -288,6 +294,30 @@ export const resolveLabeledArg = (call: Call) => {
 
 export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
   type = resolveObjectType(type, call);
+
+  const initFns =
+    type.implementations
+      ?.filter((impl) => !impl.trait)
+      .flatMap((impl) =>
+        impl.exports.filter((fn) => fn.name.is("init"))
+      ) ?? [];
+
+  if (initFns.length) {
+    const fn = getCallFn(call, initFns);
+    if (fn) {
+      call.fn = fn;
+      call.type = fn.returnType;
+      return call;
+    }
+  }
+
+  const arg0 = call.argAt(0);
+  if (arg0?.isObjectLiteral()) {
+    call.type = type;
+    call.fn = type;
+    return call;
+  }
+
   call.type = type;
   call.fn = type;
   return call;

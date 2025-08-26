@@ -53,6 +53,9 @@ impl<T> Iterable<{ key: String, value: T }> for Map<T>
     MapIterator<T> { map: self, bucket_index: 0, item_index: 0 }
 
 impl<T> Map<T>
+  pub fn init(buckets: Array<Array<{ key: String, value: T }>>) -> Map<T>
+    Map<T> { buckets: buckets }
+
   fn hash(self, key: String) -> i32
     var hash_value = 0
     var i = 0
