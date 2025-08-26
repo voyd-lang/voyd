@@ -7,10 +7,10 @@ export const compile = (opts: CompileExprOpts<ObjectLiteral>) => {
   const { expr: obj, mod } = opts;
 
   const objectType = obj.getType() as ObjectType;
-  const literalBinType = mapBinaryenType(
-    { ...opts, useOriginalType: true },
-    objectType
-  );
+  // Build the struct type for this object literal and retrieve the original
+  // binaryen type directly from the freshly created ObjectType instance.
+  mapBinaryenType(opts, objectType);
+  const literalBinType = objectType.getAttribute("originalType") as number;
 
   return initStruct(mod, literalBinType, [
     mod.global.get(

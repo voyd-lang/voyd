@@ -185,7 +185,10 @@ const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
   return resolveEntities(expr);
 };
 
-export const resolveObjectLiteral = (obj: ObjectLiteral, expected?: ObjectType) => {
+export const resolveObjectLiteral = (
+  obj: ObjectLiteral,
+  expected?: ObjectType
+) => {
   obj.fields.forEach((field) => {
     const expectedField = expected?.getField(field.name)?.type;
     field.initializer = resolveWithExpected(field.initializer, expectedField);
@@ -193,19 +196,19 @@ export const resolveObjectLiteral = (obj: ObjectLiteral, expected?: ObjectType) 
     return field;
   });
 
-  if (!obj.type) {
-    obj.type = new ObjectType({
-      ...obj.metadata,
-      name: `ObjectLiteral-${obj.syntaxId}`,
-      value: obj.fields.map((f) => ({
-        name: f.name,
-        typeExpr: f.initializer,
-        type: f.type,
-      })),
-      parentObj: voydBaseObject,
-      isStructural: true,
-    });
-  }
+  // Always create a fresh object type for anonymous object literals to avoid
+  // accidentally reusing a structural type from another expression.
+  obj.type = new ObjectType({
+    ...obj.metadata,
+    name: `ObjectLiteral-${obj.syntaxId}`,
+    value: obj.fields.map((f) => ({
+      name: f.name,
+      typeExpr: f.initializer,
+      type: f.type,
+    })),
+    parentObj: voydBaseObject,
+    isStructural: true,
+  });
 
   return obj;
 };
