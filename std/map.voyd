@@ -16,11 +16,11 @@ obj MapIterator<T> {
 }
 
 pub fn new_map<T>() -> Map<T>
-  let buckets = new_array<Array<{ key: String, value: T }>>({ with_size: 16 })
+  let &buckets = new_array<Array<{ key: String, value: T }>>(with_size: 16)
 
   var i = 0
   while i < 16 do:
-    buckets.push(new_array<{ key: String, value: T }>({ with_size: 4 }))
+    buckets.push(new_array<{ key: String, value: T }>(with_size: 4))
     i = i + 1
 
   Map<T> { buckets: buckets }
