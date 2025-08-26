@@ -46,6 +46,7 @@ import {
 } from "./codegen/compile-closure.js";
 
 const buildingTypePlaceholders = new Map<ObjectType, TypeRef>();
+const fixedArrayTypeCache = new Map<string, TypeRef>();
 
 export const codegen = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -150,10 +151,17 @@ const isPrimitiveId = (type: Type, id: Primitive) =>
 
 const buildFixedArrayType = (opts: CompileExprOpts, type: FixedArrayType) => {
   if (type.binaryenType) return type.binaryenType;
+  const cached = fixedArrayTypeCache.get(type.id);
+  if (cached) {
+    type.binaryenType = cached;
+    return cached;
+  }
   const mod = opts.mod;
-  const elemType = mapBinaryenType(opts, type.elemType!);
-  type.binaryenType = gc.defineArrayType(mod, elemType, true, type.id);
-  return type.binaryenType;
+  const elemType = mapBinaryenType({ ...opts, useOriginalType: false }, type.elemType!);
+  const arrType = gc.defineArrayType(mod, elemType, true, type.id);
+  fixedArrayTypeCache.set(type.id, arrType);
+  type.binaryenType = arrType;
+  return arrType;
 };
 
 export const buildUnionType = (
