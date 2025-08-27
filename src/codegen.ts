@@ -45,7 +45,12 @@ import {
   getClosureSuperType,
 } from "./codegen/compile-closure.js";
 
-const buildingTypePlaceholders = new Map<ObjectType, TypeRef>();
+// Structural object types may be cloned and therefore have different object
+// identities even if they represent the same logical type. Cache entries are
+// keyed by the object's id to ensure stable lookups.
+const buildingTypePlaceholders = new Map<string | ObjectType, TypeRef>();
+const getPlaceholderKey = (obj: ObjectType) =>
+  obj.isStructural ? obj.id : obj;
 
 export const codegen = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -114,9 +119,7 @@ export const compileExpression = (opts: CompileExprOpts): number => {
   );
 };
 
-type MapBinTypeOpts = CompileExprOpts & {
-  useOriginalType?: boolean; // Use the original type of the object literal
-};
+type MapBinTypeOpts = CompileExprOpts;
 
 export const mapBinaryenType = (
   opts: MapBinTypeOpts,
@@ -131,8 +134,9 @@ export const mapBinaryenType = (
     return binaryen.none;
 
   if (type.isObjectType()) {
-    if (buildingTypePlaceholders.has(type)) {
-      return buildingTypePlaceholders.get(type)!;
+    const key = getPlaceholderKey(type);
+    if (buildingTypePlaceholders.has(key)) {
+      return buildingTypePlaceholders.get(key)!;
     }
     return buildObjectType(opts, type);
   }
@@ -187,10 +191,6 @@ export const buildObjectType = (
   opts: MapBinTypeOpts,
   obj: ObjectType
 ): TypeRef => {
-  if (opts.useOriginalType && obj.getAttribute("originalType")) {
-    return obj.getAttribute("originalType") as TypeRef;
-  }
-
   if (obj.binaryenType) return obj.binaryenType;
   if (obj.typeParameters) return opts.mod.nop();
   const mod = opts.mod;
@@ -198,7 +198,8 @@ export const buildObjectType = (
   const builder = new TypeBuilder(1);
   try {
     const tempRef = builder.getTempRefType(0, true);
-    buildingTypePlaceholders.set(obj, tempRef);
+    const key = getPlaceholderKey(obj);
+    buildingTypePlaceholders.set(key, tempRef);
 
     const fields = [
       { type: opts.extensionHelpers.i32Array, name: "__ancestors_table" },
@@ -230,7 +231,8 @@ export const buildObjectType = (
 
     obj.binaryenType = gc.binaryenTypeFromHeapType(heapType, true);
   } finally {
-    buildingTypePlaceholders.delete(obj);
+    const key = getPlaceholderKey(obj);
+    buildingTypePlaceholders.delete(key);
     builder.dispose();
   }
 
@@ -267,7 +269,6 @@ export const buildObjectType = (
     obj.binaryenType = mapBinaryenType(opts, voydBaseObject);
   }
 
-  if (opts.useOriginalType) return finalType;
   return obj.binaryenType;
 };
 

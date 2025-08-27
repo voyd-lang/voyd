@@ -185,7 +185,10 @@ const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
   return resolveEntities(expr);
 };
 
-export const resolveObjectLiteral = (obj: ObjectLiteral, expected?: ObjectType) => {
+export const resolveObjectLiteral = (
+  obj: ObjectLiteral,
+  expected?: ObjectType
+) => {
   obj.fields.forEach((field) => {
     const expectedField = expected?.getField(field.name)?.type;
     field.initializer = resolveWithExpected(field.initializer, expectedField);
@@ -193,19 +196,17 @@ export const resolveObjectLiteral = (obj: ObjectLiteral, expected?: ObjectType) 
     return field;
   });
 
-  if (!obj.type) {
-    obj.type = new ObjectType({
-      ...obj.metadata,
-      name: `ObjectLiteral-${obj.syntaxId}`,
-      value: obj.fields.map((f) => ({
-        name: f.name,
-        typeExpr: f.initializer,
-        type: f.type,
-      })),
-      parentObj: voydBaseObject,
-      isStructural: true,
-    });
-  }
+  obj.type = new ObjectType({
+    ...obj.metadata,
+    name: `ObjectLiteral-${obj.syntaxId}`,
+    value: obj.fields.map((f) => ({
+      name: f.name,
+      typeExpr: f.initializer,
+      type: f.type,
+    })),
+    parentObj: voydBaseObject,
+    isStructural: true,
+  });
 
   return obj;
 };
@@ -218,7 +219,8 @@ export const resolveArrayLiteral = (
 
   arr.elements = arr.elements.map((elem) => {
     if (expectedElemType && elem.isArrayLiteral()) {
-      const childExpected = getArrayElemType(expectedElemType) ?? expectedElemType;
+      const childExpected =
+        getArrayElemType(expectedElemType) ?? expectedElemType;
       return resolveArrayLiteral(elem, childExpected);
     }
     return resolveEntities(elem);
@@ -226,9 +228,7 @@ export const resolveArrayLiteral = (
   const elemType =
     expectedElemType ??
     combineTypes(
-      arr.elements
-        .map((e) => getExprType(e))
-        .filter((t): t is Type => !!t)
+      arr.elements.map((e) => getExprType(e)).filter((t): t is Type => !!t)
     );
 
   const fixedArray = new Call({
@@ -253,4 +253,3 @@ export const resolveArrayLiteral = (
   newArrayCall.setTmpAttribute("arrayLiteral", original);
   return resolveEntities(newArrayCall);
 };
-
