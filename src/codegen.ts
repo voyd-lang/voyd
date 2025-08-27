@@ -45,13 +45,6 @@ import {
   getClosureSuperType,
 } from "./codegen/compile-closure.js";
 
-// Structural object types may be cloned and therefore have different object
-// identities even if they represent the same logical type. Cache entries are
-// keyed by the object's id to ensure stable lookups.
-const buildingTypePlaceholders = new Map<string | ObjectType, TypeRef>();
-const getPlaceholderKey = (obj: ObjectType) =>
-  obj.isStructural ? obj.id : obj;
-
 export const codegen = (ast: Expr) => {
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
@@ -121,6 +114,13 @@ export const compileExpression = (opts: CompileExprOpts): number => {
 
 type MapBinTypeOpts = CompileExprOpts;
 
+// Structural object types may be cloned and therefore have different object
+// identities even if they represent the same logical type. Cache entries are
+// keyed by the object's id to ensure stable lookups.
+const buildingTypePlaceholders = new Map<string | ObjectType, TypeRef>();
+const getPlaceholderKey = (obj: ObjectType) =>
+  obj.isStructural ? obj.id : obj;
+
 export const mapBinaryenType = (
   opts: MapBinTypeOpts,
   type: Type
@@ -152,12 +152,20 @@ export const mapBinaryenType = (
 const isPrimitiveId = (type: Type, id: Primitive) =>
   type.isPrimitiveType() && type.name.value === id;
 
+const fixedArrayTypeCache = new Map<string, TypeRef>();
 const buildFixedArrayType = (opts: CompileExprOpts, type: FixedArrayType) => {
   if (type.binaryenType) return type.binaryenType;
+  const cached = fixedArrayTypeCache.get(type.id);
+  if (cached) {
+    type.binaryenType = cached;
+    return cached;
+  }
   const mod = opts.mod;
   const elemType = mapBinaryenType(opts, type.elemType!);
-  type.binaryenType = gc.defineArrayType(mod, elemType, true, type.id);
-  return type.binaryenType;
+  const arrType = gc.defineArrayType(mod, elemType, true, type.id);
+  fixedArrayTypeCache.set(type.id, arrType);
+  type.binaryenType = arrType;
+  return arrType;
 };
 
 export const buildUnionType = (

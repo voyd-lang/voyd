@@ -90,10 +90,11 @@ const resolveTypeCall = (call: Call): Call => {
   return call;
 };
 
-const resolveFixedArrayType = (arr: FixedArrayType): FixedArrayType => {
+export const resolveFixedArrayType = (arr: FixedArrayType): FixedArrayType => {
   arr.elemTypeExpr = resolveTypeExpr(arr.elemTypeExpr);
   arr.elemType = getExprType(arr.elemTypeExpr);
-  arr.id = `${arr.id}#${arr.elemType?.id}`;
+  arr.setName("FixedArray");
+  arr.id = `FixedArray#${arr.elemType?.id}`;
   return arr;
 };
 

@@ -38,10 +38,7 @@ export const compile = (opts: CompileExprOpts<Fn>): number => {
 };
 
 export const getFunctionParameterTypes = (opts: CompileExprOpts, fn: Fn) => {
-  const types = fn.parameters.map((param) =>
-    mapBinaryenType(opts, param.type!)
-  );
-
+  const types = fn.parameters.map((param) => mapBinaryenType(opts, param.type!));
   return binaryen.createType(types);
 };
 

@@ -17,7 +17,7 @@ import {
 } from "./resolve-entities.js";
 import { resolveExport, resolveModulePath } from "./resolve-use.js";
 import { combineTypes } from "./combine-types.js";
-import { resolveTypeExpr } from "./resolve-type-expr.js";
+import { resolveTypeExpr, resolveFixedArrayType } from "./resolve-type-expr.js";
 import { resolveTrait } from "./resolve-trait.js";
 
 export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
@@ -336,13 +336,15 @@ const resolveFixedArray = (call: Call) => {
     ) ??
     nop();
 
-  const elemType = getExprType(elemTypeExpr);
-  call.type = new FixedArrayType({
-    ...call.metadata,
-    name: Identifier.from(`FixedArray#${call.syntaxId}`),
-    elemTypeExpr,
-    elemType,
-  });
+  const arr = resolveFixedArrayType(
+    new FixedArrayType({
+      ...call.metadata,
+      name: Identifier.from("FixedArray"),
+      elemTypeExpr,
+    })
+  );
+
+  call.type = arr;
   return call;
 };
 
