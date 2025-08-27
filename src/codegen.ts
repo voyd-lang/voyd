@@ -119,9 +119,7 @@ export const compileExpression = (opts: CompileExprOpts): number => {
   );
 };
 
-type MapBinTypeOpts = CompileExprOpts & {
-  useOriginalType?: boolean; // Use the original type of the object literal
-};
+type MapBinTypeOpts = CompileExprOpts;
 
 export const mapBinaryenType = (
   opts: MapBinTypeOpts,
@@ -193,10 +191,6 @@ export const buildObjectType = (
   opts: MapBinTypeOpts,
   obj: ObjectType
 ): TypeRef => {
-  if (opts.useOriginalType && obj.getAttribute("originalType")) {
-    return obj.getAttribute("originalType") as TypeRef;
-  }
-
   if (obj.binaryenType) return obj.binaryenType;
   if (obj.typeParameters) return opts.mod.nop();
   const mod = opts.mod;
@@ -275,7 +269,6 @@ export const buildObjectType = (
     obj.binaryenType = mapBinaryenType(opts, voydBaseObject);
   }
 
-  if (opts.useOriginalType) return finalType;
   return obj.binaryenType;
 };
 

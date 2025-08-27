@@ -196,8 +196,6 @@ export const resolveObjectLiteral = (
     return field;
   });
 
-  // Always create a fresh object type for anonymous object literals to avoid
-  // accidentally reusing a structural type from another expression.
   obj.type = new ObjectType({
     ...obj.metadata,
     name: `ObjectLiteral-${obj.syntaxId}`,
@@ -221,7 +219,8 @@ export const resolveArrayLiteral = (
 
   arr.elements = arr.elements.map((elem) => {
     if (expectedElemType && elem.isArrayLiteral()) {
-      const childExpected = getArrayElemType(expectedElemType) ?? expectedElemType;
+      const childExpected =
+        getArrayElemType(expectedElemType) ?? expectedElemType;
       return resolveArrayLiteral(elem, childExpected);
     }
     return resolveEntities(elem);
@@ -229,9 +228,7 @@ export const resolveArrayLiteral = (
   const elemType =
     expectedElemType ??
     combineTypes(
-      arr.elements
-        .map((e) => getExprType(e))
-        .filter((t): t is Type => !!t)
+      arr.elements.map((e) => getExprType(e)).filter((t): t is Type => !!t)
     );
 
   const fixedArray = new Call({
@@ -256,4 +253,3 @@ export const resolveArrayLiteral = (
   newArrayCall.setTmpAttribute("arrayLiteral", original);
   return resolveEntities(newArrayCall);
 };
-
