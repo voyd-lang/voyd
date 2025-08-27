@@ -160,7 +160,7 @@ const checkWhile = (call: Call) => {
 const checkObjectInit = (call: Call): Call => {
   const literal = call.argAt(0);
   if (!literal?.isObjectLiteral()) {
-    throw new Error(`Expected object literal, got ${literal}`);
+    throw new Error(`Expected object literal, got ${JSON.stringify(literal)}`);
   }
   checkTypes(literal);
 
