@@ -174,6 +174,29 @@ const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
       const objArg = resolved.argAt(0);
       if (objArg?.isObjectLiteral()) {
         resolved.args.set(0, resolveObjectLiteral(objArg, objType));
+      } else if (objArg) {
+        // Expand non-literal object arg into a literal via member-access, so
+        // nominal constructors can be type-checked and compiled uniformly.
+        const objArgType = getExprType(objArg);
+        const structType = objArgType?.isObjectType()
+          ? objArgType
+          : objArgType?.isIntersectionType()
+          ? objArgType.structuralType
+          : undefined;
+        if (structType) {
+          const fields = objType.fields.map((f) => ({
+            name: f.name,
+            initializer: new Call({
+              ...resolved.metadata,
+              fnName: Identifier.from("member-access"),
+              args: new List({
+                value: [resolveEntities(objArg.clone()), Identifier.from(f.name)],
+              }),
+            }),
+          }));
+          const expanded = new ObjectLiteral({ ...resolved.metadata, fields });
+          resolved.args.set(0, resolveObjectLiteral(expanded, objType));
+        }
       }
       return resolved;
     }

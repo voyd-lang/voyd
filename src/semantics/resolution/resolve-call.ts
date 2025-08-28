@@ -20,6 +20,7 @@ import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr, resolveFixedArrayType } from "./resolve-type-expr.js";
 import { resolveTrait } from "./resolve-trait.js";
 import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
+import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 
 export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   if (call.type) return call;
@@ -31,6 +32,25 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   if (call.calls("while")) return resolveWhile(call);
   if (call.calls("FixedArray")) return resolveFixedArray(call);
   if (call.calls("binaryen")) return resolveBinaryen(call);
+  if (call.calls("member-access")) {
+    // Resolve args and set the type based on the object's field type
+    call.args = call.args.map(resolveEntities);
+    const recv = call.argAt(0);
+    const member = call.argAt(1);
+    const recvType = getExprType(recv);
+    if (recvType?.isObjectType()) {
+      call.type = recvType.getField(member as Identifier)?.type;
+      return call;
+    }
+    if (recvType?.isIntersectionType()) {
+      const field =
+        recvType.nominalType?.getField(member as Identifier) ??
+        recvType.structuralType?.getField(member as Identifier);
+      call.type = field?.type;
+      return call;
+    }
+    return call;
+  }
   call.args = call.args.map((arg) => {
     const inner = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
     return hasUntypedClosure(inner) ? arg : resolveEntities(arg);
@@ -58,6 +78,35 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
     }
     // Will set call.fn/type in-place (init fn or constructor)
     resolveObjectInit(call, type);
+
+    // If we resolved to a nominal constructor (no init fn matched) and the
+    // argument is not a literal, expand it into a literal using member-access
+    // so downstream type checking and codegen can proceed uniformly.
+    if (call.fn?.isObjectType()) {
+      const arg0 = call.argAt(0);
+      if (arg0 && !arg0.isObjectLiteral()) {
+        const objType = getExprType(arg0);
+        const structType = objType?.isObjectType()
+          ? objType
+          : objType?.isIntersectionType()
+          ? objType.structuralType
+          : undefined;
+        if (structType) {
+          const fields = type.fields.map((f) => ({
+            name: f.name,
+            initializer: new Call({
+              ...call.metadata,
+              fnName: Identifier.from("member-access"),
+              args: new List({
+                value: [resolveEntities(arg0.clone()), Identifier.from(f.name)],
+              }),
+            }),
+          }));
+          const expanded = new ObjectLiteral({ ...call.metadata, fields });
+          call.args.set(0, resolveObjectLiteral(expanded, type));
+        }
+      }
+    }
   }
 
   if (call.typeArgs) {
