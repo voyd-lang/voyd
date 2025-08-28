@@ -36,85 +36,105 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   if (call.calls("while")) return resolveWhile(call);
   if (call.calls("FixedArray")) return resolveFixedArray(call);
   if (call.calls("binaryen")) return resolveBinaryen(call);
-  if (call.calls("member-access")) {
-    // Resolve args and set the type based on the object's field type
-    call.args = call.args.map(resolveEntities);
-    const recv = call.argAt(0);
-    const member = call.argAt(1);
-    const recvType = getExprType(recv);
-    if (recvType?.isObjectType()) {
-      call.type = recvType.getField(member as Identifier)?.type;
-      return call;
-    }
-    if (recvType?.isIntersectionType()) {
-      const field =
-        recvType.nominalType?.getField(member as Identifier) ??
-        recvType.structuralType?.getField(member as Identifier);
-      call.type = field?.type;
-      return call;
-    }
+  if (call.calls("member-access")) return resolveMemberAccessDirect(call);
+
+  // Resolve arguments conservatively (avoid resolving closures with untyped params)
+  preprocessArgs(call);
+
+  // Optional sugar: obj.member -> member-access(obj, "member")
+  const sugared = maybeResolveMemberAccessSugar(call);
+  if (sugared) return sugared;
+
+  // Ensure the callee is resolved so closures can capture it
+  const calleeType = resolveCalleeAndGetType(call);
+
+  // Constructors (object types by name)
+  if (calleeType?.isObjectType()) handleObjectConstruction(call, calleeType);
+
+  // Resolve and apply type args for the call if present
+  if (call.typeArgs) call.typeArgs = call.typeArgs.map(resolveTypeExpr);
+
+  // Bind function and normalize args
+  resolveCallFn(call, candidateFns);
+  normalizeArgsForResolvedFn(call);
+
+  // Compute resulting type
+  call.type = computeCallReturnType(call, calleeType);
+  return call;
+};
+
+const resolveMemberAccessDirect = (call: Call): Call => {
+  call.args = call.args.map(resolveEntities);
+  const recv = call.argAt(0);
+  const member = call.argAt(1);
+  const recvType = getExprType(recv);
+  if (recvType?.isObjectType()) {
+    call.type = recvType.getField(member as Identifier)?.type;
     return call;
   }
+  if (recvType?.isIntersectionType()) {
+    const field =
+      recvType.nominalType?.getField(member as Identifier) ??
+      recvType.structuralType?.getField(member as Identifier);
+    call.type = field?.type;
+  }
+  return call;
+};
+
+const preprocessArgs = (call: Call): void => {
   call.args = call.args.map((arg) => {
     const inner = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
     return hasUntypedClosure(inner) ? arg : resolveEntities(arg);
   });
+};
 
+const maybeResolveMemberAccessSugar = (call: Call): Call | undefined => {
   const firstArg = call.argAt(0);
   const shouldCheckMemberAccess = !hasUntypedClosure(firstArg);
-  const memberAccessCall = shouldCheckMemberAccess
-    ? tryResolveMemberAccessSugar(call)
-    : undefined;
-  if (memberAccessCall) return memberAccessCall;
+  return shouldCheckMemberAccess ? tryResolveMemberAccessSugar(call) : undefined;
+};
 
+const resolveCalleeAndGetType = (call: Call) => {
   // Ensure the call identifier is processed so closures can capture it when
   // referenced as the callee.
   call.fnName = resolveEntities(call.fnName) as Identifier;
-
-  // Constructor fn. TODO:
   const type = getIdentifierType(call.fnName);
   call.fnName.type = type;
+  return type;
+};
 
-  if (type?.isObjectType()) {
-    const objArg = call.argAt(0);
-    if (objArg?.isObjectLiteral()) {
-      call.args.set(0, resolveObjectLiteral(objArg, type));
-    }
-    // Will set call.fn/type in-place (init fn or constructor)
-    resolveObjectInit(call, type);
+const handleObjectConstruction = (call: Call, type: ObjectType): void => {
+  const objArg = call.argAt(0);
+  if (objArg?.isObjectLiteral()) {
+    call.args.set(0, resolveObjectLiteral(objArg, type));
+  }
+  // Will set call.fn/type in-place (init fn or constructor)
+  resolveObjectInit(call, type);
 
-    // If we resolved to a nominal constructor (no init fn matched) and the
-    // argument is not a literal, expand it into a literal using member-access
-    // so downstream type checking and codegen can proceed uniformly.
-    if (call.fn?.isObjectType()) {
-      const arg0 = call.argAt(0);
-      if (arg0 && !arg0.isObjectLiteral()) {
-        const expanded = maybeExpandObjectArg(
-          resolveEntities(arg0.clone()),
-          type,
-          call.metadata
-        );
-        if (expanded) call.args.set(0, resolveObjectLiteral(expanded, type));
-      }
+  // If we resolved to a nominal constructor (no init fn matched) and the
+  // argument is not a literal, expand it into a literal using member-access
+  // so downstream type checking and codegen can proceed uniformly.
+  if (call.fn?.isObjectType()) {
+    const arg0 = call.argAt(0);
+    if (arg0 && !arg0.isObjectLiteral()) {
+      const expanded = maybeExpandObjectArg(
+        resolveEntities(arg0.clone()),
+        type,
+        call.metadata
+      );
+      if (expanded) call.args.set(0, resolveObjectLiteral(expanded, type));
     }
   }
+};
 
-  if (call.typeArgs) {
-    call.typeArgs = call.typeArgs.map(resolveTypeExpr);
-  }
-
-  resolveCallFn(call, candidateFns);
-  normalizeArgsForResolvedFn(call);
-
-  call.type = call.fn?.isFn()
+const computeCallReturnType = (call: Call, calleeType?: Type): Type | undefined =>
+  call.fn?.isFn()
     ? call.fn.returnType
     : call.fn?.isObjectType()
     ? call.fn
-    : type?.isFnType()
-    ? type.returnType
+    : calleeType?.isFnType()
+    ? calleeType.returnType
     : undefined;
-  return call;
-};
 
 const resolveCallFn = (call: Call, candidateFns?: Fn[]) => {
   if (call.fn) return;
