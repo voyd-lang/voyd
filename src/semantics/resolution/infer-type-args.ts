@@ -75,9 +75,11 @@ export const unifyTypeParams = (
 
     // Generic object types expressed as type calls (e.g. Array<T>)
     if (p.isCall()) {
-      const call = resolveTypeExpr(p.clone());
-      if (!call.isCall()) return false;
-      const genericName = call.fnName.value;
+      // IMPORTANT: Do not resolve the parameter-side call; resolving can create
+      // real generic instances with unresolved type parameters and introduce
+      // cycles. Instead, compare by the callee identifier and unify children
+      // structurally against the argument's applied type arguments.
+      const genericName = p.fnName.value;
 
       // Try to find the nominal object on the argument side
       const argObj = arg.isObjectType()
@@ -92,7 +94,7 @@ export const unifyTypeParams = (
         : argObj.name.value;
       if (genericName !== argGenericName) return false;
 
-      const paramArgs = call.typeArgs?.toArray() ?? [];
+      const paramArgs = p.typeArgs?.toArray() ?? [];
       const applied = argObj.appliedTypeArgs ?? [];
       if (paramArgs.length !== applied.length) return false;
 

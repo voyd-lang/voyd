@@ -63,6 +63,51 @@ const resolveGenericObjVersion = (
 
   if (!call.typeArgs) return;
 
+  // If any type argument contains an unresolved type identifier (e.g., a
+  // function's generic parameter like `T`), defer instantiation. This is a
+  // targeted check: it avoids the heavy requirement that nested field types
+  // must already be fully resolved (which breaks common cases like
+  // Some<Node<i32>> where Node's own fields reference Optional<Node<i32>>).
+  const containsUnresolvedTypeId = (expr: any): boolean => {
+    const visitExpr = (e: any): boolean => {
+      if (!e) return false;
+      if (e.isIdentifier && e.isIdentifier()) {
+        const entity = e.resolve?.();
+        const ty = getExprType(e);
+        // Unbound type identifier: no entity and no resolvable type.
+        return !entity && !ty;
+      }
+      if (e.isCall && e.isCall()) {
+        if (e.typeArgs) return e.typeArgs.toArray().some(visitExpr);
+        return false;
+      }
+      if (e.isType && e.isType()) {
+        if (e.isObjectType && e.isObjectType()) {
+          return e.fields.some((f: any) => visitExpr(f.typeExpr));
+        }
+        if (e.isIntersectionType && e.isIntersectionType()) {
+          return visitExpr(e.nominalTypeExpr?.value) || visitExpr(e.structuralTypeExpr?.value);
+        }
+        if (e.isFixedArrayType && e.isFixedArrayType()) {
+          return visitExpr(e.elemTypeExpr);
+        }
+        if (e.isFnType && e.isFnType()) {
+          return (
+            e.parameters.some((p: any) => visitExpr(p.typeExpr)) ||
+            (!!e.returnTypeExpr && visitExpr(e.returnTypeExpr))
+          );
+        }
+        return false;
+      }
+      if (e.isList && e.isList()) return e.toArray().some(visitExpr);
+      return false;
+    };
+    return visitExpr(expr);
+  };
+
+  const hasUnresolved = call.typeArgs.toArray().some((arg) => containsUnresolvedTypeId(arg));
+  if (hasUnresolved) return;
+
   // THAR BE DRAGONS HERE. We don't check for multiple existing matches, which means that unions may sometimes overlap.
   const existing = type.genericInstances?.find((c) => typeArgsMatch(call, c));
   if (existing) return existing;

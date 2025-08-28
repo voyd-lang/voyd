@@ -6,10 +6,12 @@ import {
   FixedArrayType,
   ObjectType,
   Type,
+  TypeAlias,
 } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
+import { resolveImpl } from "./resolve-impl.js";
 import {
   resolveEntities,
   resolveArrayLiteral,
@@ -19,6 +21,7 @@ import { resolveExport, resolveModulePath } from "./resolve-use.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr, resolveFixedArrayType } from "./resolve-type-expr.js";
 import { resolveTrait } from "./resolve-trait.js";
+import { resolveFn } from "./resolve-fn.js";
 import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 
@@ -304,22 +307,98 @@ export const resolveLabeledArg = (call: Call) => {
 };
 
 export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
+  // Ensure the object's implementations and field types are resolved so that
+  // init functions are discoverable and comparable.
   type = resolveObjectType(type, call);
+  // Proactively resolve implementations so their exports (e.g., `init`) are available.
+  type.implementations?.forEach((impl) => resolveImpl(impl, type));
 
+  // If this is a generic object construction without explicit type args, try
+  // to infer them directly from the constructor argument when it’s a
+  // homogeneous Array of tuple pairs (String, T), and re-resolve the object
+  // type with inferred type arguments to surface specialized impl methods.
+  // If no explicit type args are supplied, try to infer them from the
+  // supplied object literal.
+
+  // Ensure impl.methods include inline function declarations (including those
+  // wrapped in `export` blocks) without forcing full resolution.
+  type.implementations
+    ?.filter((impl) => !impl.trait)
+    .forEach((impl) => {
+      const block = impl.body.value;
+      const gather = (b: Expr | undefined) => {
+        if (!b || !b.isBlock()) return;
+        b.body.forEach((e) => {
+          if (e.isFn()) impl.registerMethod(e);
+          else if (e.isCall() && e.calls(":")) {
+            // labeled arg is irrelevant here
+          } else if (e.isCall() && e.calls("export")) gather(e.argAt(0));
+        });
+      };
+      gather(block);
+    });
   const initFns =
     type.implementations
       ?.filter((impl) => !impl.trait)
       .flatMap((impl) =>
-        impl.exports.filter((fn) => fn.name.is("init"))
+        (impl.methods as ReadonlyArray<Fn>).filter((fn) => fn.name.is("init"))
       ) ?? [];
+  if (process.env.DEBUG_MAP_INIT === "1" && type.name.is("Map")) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[resolveObjectInit] initFns=${initFns.map((f) => f.name.value + (f.typeParameters?.length ? "<T>" : "")).join(",")} count=${initFns.length}`
+    );
+    type.implementations?.forEach((impl, i) => {
+      // eslint-disable-next-line no-console
+      console.log(
+        `  impl[${i}] methods=${impl.methods.map((m) => m.name.value).join(", ")}`
+      );
+    });
+  }
 
   if (initFns.length) {
-    const fn = getCallFn(call, initFns);
+    // Proactively specialize generic init fns using this call so that
+    // candidate matching can consider parameterized instances directly.
+    const specialized: Fn[] = [];
+    for (const f of initFns) {
+      const before = f.genericInstances?.length ?? 0;
+      resolveFn(f, call);
+      const after = f.genericInstances?.length ?? 0;
+      if (after > before && f.genericInstances) {
+        specialized.push(...f.genericInstances);
+      }
+    }
+
+    const pool = specialized.length ? specialized : initFns;
+
+    // Try a synthetic call with a labeled argument matching the single
+    // parameter name when the init function takes exactly one parameter.
+    let fn = getCallFn(call, pool);
+    if (!fn && pool.length) {
+      const single = pool.find((f) => f.parameters.length === 1);
+      const arg0 = call.argAt(0)?.clone();
+      if (single && arg0) {
+        const label = single.parameters[0]!.name.clone();
+        const labeled = new Call({
+          ...call.metadata,
+          fnName: Identifier.from(":"),
+          args: new List({ value: [label, arg0] }),
+        });
+        const synthetic = new Call({
+          ...call.metadata,
+          fnName: call.fnName.clone(),
+          args: new List({ value: [labeled] }),
+        });
+        fn = getCallFn(synthetic, pool);
+      }
+    }
     if (fn) {
       call.fn = fn;
       call.type = fn.returnType;
       return call;
     }
+
+    // leave fallback to nominal constructor if not matched
   }
 
   const arg0 = call.argAt(0);
