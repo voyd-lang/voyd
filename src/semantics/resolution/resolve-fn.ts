@@ -145,7 +145,9 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   });
 
   if (!newFn.appliedTypeArgs.every((t) => (t as TypeAlias).type)) {
-    throw new Error(`Unable to resolve all type args for ${newFn}`);
+    // Do not create an unresolved instance; let caller continue without
+    // specializing this generic function.
+    return fn;
   }
 
   const resolvedFn = resolveFn(newFn);

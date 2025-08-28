@@ -99,7 +99,6 @@ const resolveGenericsWithTypeArgs = (
     newObj.appliedTypeArgs?.push(type);
     newObj.registerEntity(type);
   });
-
   if (typesNotResolved) return obj;
   obj.registerGenericInstance(newObj);
   const resolvedObj = resolveObjectType(newObj);

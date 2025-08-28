@@ -91,7 +91,7 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
           : objType?.isIntersectionType()
           ? objType.structuralType
           : undefined;
-        if (structType) {
+        if (structType && type.fields.every((f) => structType.hasField(f.name))) {
           const fields = type.fields.map((f) => ({
             name: f.name,
             initializer: new Call({

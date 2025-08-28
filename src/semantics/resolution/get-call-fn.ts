@@ -138,7 +138,8 @@ const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
     : true;
 
 const parametersMatch = (candidate: Fn, call: Call) =>
-  paramsDirectlyMatch(candidate, call) ||
+  (call.args.length === candidate.parameters.length &&
+    paramsDirectlyMatch(candidate, call)) ||
   objectArgSuppliesLabeledParams(candidate, call);
 
 const paramsDirectlyMatch = (candidate: Fn, call: Call) =>
@@ -178,7 +179,11 @@ const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
   if (call.args.length !== 1) return false;
   const objArg = call.argAt(0);
   const labeledParams = candidate.parameters.filter((p) => p.label);
-  if (labeledParams.length !== candidate.parameters.length) return false;
+  if (
+    labeledParams.length === 0 ||
+    labeledParams.length !== candidate.parameters.length
+  )
+    return false;
 
   if (objArg?.isObjectLiteral()) {
     return labeledParams.every((p) => {

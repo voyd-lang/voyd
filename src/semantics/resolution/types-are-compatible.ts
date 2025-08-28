@@ -42,6 +42,10 @@ export const typesAreCompatible = (
   visited: Set<string> = new Set()
 ): boolean => {
   if (!a || !b) return false;
+  // Treat unresolved type aliases as compatible placeholders.
+  // Note: Do not treat unresolved type aliases as compatible here. Generic
+  // matching should occur via specialized inference paths to avoid masking
+  // real type errors.
   const key = `${a.id}|${b.id}`;
   if (visited.has(key)) return true;
   visited.add(key);

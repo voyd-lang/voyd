@@ -183,7 +183,7 @@ const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
           : objArgType?.isIntersectionType()
           ? objArgType.structuralType
           : undefined;
-        if (structType) {
+        if (structType && objType.fields.every((f) => structType.hasField(f.name))) {
           const fields = objType.fields.map((f) => ({
             name: f.name,
             initializer: new Call({
