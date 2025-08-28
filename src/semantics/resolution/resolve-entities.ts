@@ -25,6 +25,7 @@ import { resolveTrait } from "./resolve-trait.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveUse } from "./resolve-use.js";
+import { maybeExpandObjectArg } from "./object-arg-utils.js";
 
 /**
  * NOTE: Some mapping is preformed on the AST at this stage.
@@ -121,11 +122,7 @@ export const resolveModule = (mod: VoydModule): VoydModule => {
   return mod;
 };
 
-const resolveListTypes = (list: List) => {
-  console.log("Unexpected list");
-  console.log(JSON.stringify(list, undefined, 2));
-  return list.map(resolveEntities);
-};
+const resolveListTypes = (list: List) => list.map(resolveEntities);
 
 const resolveTypeAlias = (alias: TypeAlias): TypeAlias => {
   if (alias.type || alias.resolutionPhase > 0) return alias;
@@ -177,24 +174,12 @@ const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
       } else if (objArg) {
         // Expand non-literal object arg into a literal via member-access, so
         // nominal constructors can be type-checked and compiled uniformly.
-        const objArgType = getExprType(objArg);
-        const structType = objArgType?.isObjectType()
-          ? objArgType
-          : objArgType?.isIntersectionType()
-          ? objArgType.structuralType
-          : undefined;
-        if (structType && objType.fields.every((f) => structType.hasField(f.name))) {
-          const fields = objType.fields.map((f) => ({
-            name: f.name,
-            initializer: new Call({
-              ...resolved.metadata,
-              fnName: Identifier.from("member-access"),
-              args: new List({
-                value: [resolveEntities(objArg.clone()), Identifier.from(f.name)],
-              }),
-            }),
-          }));
-          const expanded = new ObjectLiteral({ ...resolved.metadata, fields });
+        const expanded = maybeExpandObjectArg(
+          resolveEntities(objArg.clone()),
+          objType,
+          resolved.metadata
+        );
+        if (expanded) {
           resolved.args.set(0, resolveObjectLiteral(expanded, objType));
         }
       }
