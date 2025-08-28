@@ -19,6 +19,7 @@ import { resolveExport, resolveModulePath } from "./resolve-use.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr, resolveFixedArrayType } from "./resolve-type-expr.js";
 import { resolveTrait } from "./resolve-trait.js";
+import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
 
 export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   if (call.type) return call;
@@ -32,22 +33,13 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   if (call.calls("binaryen")) return resolveBinaryen(call);
   call.args = call.args.map((arg) => {
     const inner = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
-    if (
-      inner?.isClosure() &&
-      inner.parameters.some((p) => !p.type && !p.typeExpr)
-    ) {
-      return arg;
-    }
-    return resolveEntities(arg);
+    return hasUntypedClosure(inner) ? arg : resolveEntities(arg);
   });
 
   const firstArg = call.argAt(0);
-  const shouldCheckMemberAccess = !(
-    firstArg?.isClosure() &&
-    firstArg.parameters.some((p) => !p.type && !p.typeExpr)
-  );
+  const shouldCheckMemberAccess = !hasUntypedClosure(firstArg);
   const memberAccessCall = shouldCheckMemberAccess
-    ? getMemberAccessCall(call)
+    ? tryResolveMemberAccessSugar(call)
     : undefined;
   if (memberAccessCall) return memberAccessCall;
 
@@ -64,13 +56,8 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
     if (objArg?.isObjectLiteral()) {
       call.args.set(0, resolveObjectLiteral(objArg, type));
     }
-    const resolved = resolveObjectInit(call, type);
-    if (resolved.fn?.isFn()) {
-      resolveArrayArgs(resolved);
-      expandObjectArg(resolved);
-      inferClosureArgTypes(resolved);
-    }
-    return resolved;
+    // Will set call.fn/type in-place (init fn or constructor)
+    resolveObjectInit(call, type);
   }
 
   if (call.typeArgs) {
@@ -78,9 +65,7 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   }
 
   resolveCallFn(call, candidateFns);
-  resolveArrayArgs(call);
-  expandObjectArg(call);
-  inferClosureArgTypes(call);
+  normalizeArgsForResolvedFn(call);
 
   call.type = call.fn?.isFn()
     ? call.fn.returnType
@@ -239,33 +224,10 @@ const expandObjectArg = (call: Call) => {
   call.args.parent = call;
 };
 
-const inferClosureArgTypes = (call: Call) => {
-  const fn = call.fn;
-  if (!fn?.isFn()) return;
-  fn.parameters.forEach((param, index) => {
-    const arg = call.argAt(index);
-    if (!arg) return;
-    const closure = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
-    if (!closure?.isClosure()) return;
-
-    const paramType = param.type;
-    if (!paramType?.isFnType()) return;
-
-    closure.parameters.forEach((p, i) => {
-      const expected = paramType.parameters[i]?.type;
-      if (!p.type && expected) {
-        p.type = expected;
-      }
-    });
-
-    const resolvedClosure = resolveEntities(closure);
-    if (arg.isCall() && arg.calls(":")) {
-      arg.args.set(1, resolvedClosure);
-      call.args.set(index, resolveEntities(arg));
-    } else {
-      call.args.set(index, resolvedClosure);
-    }
-  });
+const normalizeArgsForResolvedFn = (call: Call) => {
+  // Only meaningful when call.fn is a function; each helper guards internally
+  resolveArrayArgs(call);
+  expandObjectArg(call);
 };
 
 export const resolveModuleAccess = (call: Call) => {
@@ -348,41 +310,7 @@ const resolveFixedArray = (call: Call) => {
   return call;
 };
 
-const getMemberAccessCall = (call: Call): Call | undefined => {
-  if (call.args.length > 1) return;
-  const a1 = call.argAt(0);
-  if (!a1) return;
-  const a1Type = getExprType(a1);
-
-  if (a1Type && a1Type.isObjectType() && a1Type.hasField(call.fnName)) {
-    return new Call({
-      ...call.metadata,
-      fnName: Identifier.from("member-access"),
-      args: new List({ value: [a1, call.fnName] }),
-      type: a1Type.getField(call.fnName)?.type,
-    });
-  }
-
-  if (
-    a1Type &&
-    a1Type.isIntersectionType() &&
-    (a1Type.nominalType?.hasField(call.fnName) ||
-      a1Type.structuralType?.hasField(call.fnName))
-  ) {
-    const field =
-      a1Type.nominalType?.getField(call.fnName) ??
-      a1Type.structuralType?.getField(call.fnName);
-
-    return new Call({
-      ...call.metadata,
-      fnName: Identifier.from("member-access"),
-      args: new List({ value: [a1, call.fnName] }),
-      type: field?.type,
-    });
-  }
-
-  return undefined;
-};
+// moved to ./resolve-member-access.ts as tryResolveMemberAccessSugar
 
 export const resolveIf = (call: Call) => {
   if (!call.args.hasLabeledArg("elif")) return resolveBasicIf(call);
@@ -513,3 +441,7 @@ const resolveClosureCall = (call: Call): Call => {
   }
   return call;
 };
+
+// Helpers
+const hasUntypedClosure = (expr: Expr | undefined): boolean =>
+  !!(expr?.isClosure() && expr.parameters.some((p) => !p.type && !p.typeExpr));
