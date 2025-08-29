@@ -4,7 +4,7 @@ import { describe, test, beforeAll } from "vitest";
 import assert from "node:assert";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
 
-describe("E2E array functional helpers (map/filter/reduce/each)", () => {
+describe("E2E array functional helpers (map/filter/reduce/find/some/every/each)", () => {
   let instance: WebAssembly.Instance;
 
   beforeAll(async () => {
@@ -12,7 +12,7 @@ describe("E2E array functional helpers (map/filter/reduce/each)", () => {
     instance = getWasmInstance(mod);
   });
 
-  const expecteds = [14, 6, 6, 2];
+  const expecteds = [14, 6, 6, 2, 3, 1, 0];
 
   for (let i = 0; i < expecteds.length; i++) {
     test(`test${i + 1} returns expected`, (t) => {
@@ -22,4 +22,3 @@ describe("E2E array functional helpers (map/filter/reduce/each)", () => {
     });
   }
 });
-
