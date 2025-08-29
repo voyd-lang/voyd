@@ -12,10 +12,12 @@ describe("E2E union generic inference", () => {
     instance = getWasmInstance(mod);
   });
 
-  test("infers T from (Array<T> | String) given (Array<i32> | String)", (t) => {
-    const fn = getWasmFn("test1", instance);
-    assert(fn, "test1 exists");
-    t.expect(fn()).toEqual(7);
-  });
+  const expecteds = [7, 9];
+  for (let i = 0; i < expecteds.length; i++) {
+    test(`test${i + 1} returns expected`, (t) => {
+      const fn = getWasmFn(`test${i + 1}`, instance);
+      assert(fn, `test${i + 1} exists`);
+      t.expect(fn()).toEqual(expecteds[i]);
+    });
+  }
 });
-

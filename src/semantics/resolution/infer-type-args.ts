@@ -76,6 +76,12 @@ export const unifyTypeParams = (
 
     // Generic object types expressed as type calls (e.g. Array<T>)
     if (p.isCall()) {
+      // If this is a type alias call that resolves to a union (e.g., Html<T> = Array<T> | String),
+      // delegate to the union unification logic using the resolved type.
+      const resolvedPType = getExprType(p);
+      if (resolvedPType?.isUnionType()) {
+        return unify(resolvedPType, arg);
+      }
       // IMPORTANT: Do not resolve the parameter-side call; resolving can create
       // real generic instances with unresolved type parameters and introduce
       // cycles. Instead, compare by the callee identifier and unify children
@@ -137,18 +143,75 @@ export const unifyTypeParams = (
       return unify(resolveTypeExpr(structExpr), arg);
     }
 
-    // Basic union support: pairwise unify each variant when both sides are
-    // unions. Requires matching variant counts and order.
+    // Union support: attempt to match variants by nominal "head" (e.g.
+    // Array<T> matches Array<i32>) in an order-insensitive manner. We first
+    // try to match identifiable heads uniquely, and then bind any remaining
+    // generic-only variants to the remaining argument variants. This remains
+    // conservative by failing on ambiguity.
     if (p.isUnionType()) {
       const argUnion = arg.isUnionType() ? resolveUnionType(arg) : undefined;
       if (!argUnion || !argUnion.types.length) return false;
-      const paramMembers = p.childTypeExprs.toArray();
+
+      const paramMembers = p.childTypeExprs.toArray().map((e) => resolveTypeExpr(e));
       const argMembers = argUnion.types;
-      if (paramMembers.length !== argMembers.length) return false;
-      for (let i = 0; i < paramMembers.length; i++) {
-        const paramMember = resolveTypeExpr(paramMembers[i]!);
-        const argMember = argMembers[i]!;
-        if (!unify(paramMember, argMember)) return false;
+
+      // Helper: compute a nominal head key for matching
+      const headKeyFromType = (t: Type | undefined): string | undefined => {
+        if (!t) return undefined;
+        if (t.isObjectType()) {
+          const obj = t;
+          return obj.genericParent ? obj.genericParent.name.value : obj.name.value;
+        }
+        if (t.isPrimitiveType()) return t.name.value;
+        if (t.isTraitType()) return t.name.value;
+        if (t.isFixedArrayType()) return "FixedArray";
+        if (t.isFnType()) return "Fn";
+        if (t.isIntersectionType()) return headKeyFromType(t.nominalType ?? t.structuralType);
+        if (t.isTypeAlias()) return headKeyFromType(t.type);
+        return t.name.value;
+      };
+      const headKeyFromExpr = (e: Expr): string | undefined => {
+        if (e.isCall()) return e.fnName.value;
+        if (e.isIdentifier()) {
+          // Treat generic params as keyless so they are handled in a second pass
+          if (typeParamSet.has(e.value)) return undefined;
+          const resolved = getExprType(resolveTypeExpr(e));
+          return headKeyFromType(resolved);
+        }
+        if (e.isTypeAlias()) return headKeyFromExpr(e.typeExpr ?? e);
+        if (e.isType()) return headKeyFromType(e);
+        return undefined;
+      };
+
+      const used = new Array<boolean>(argMembers.length).fill(false);
+      const deferred: Expr[] = [];
+
+      // First pass: match variants with identifiable heads
+      for (const member of paramMembers) {
+        const key = headKeyFromExpr(member);
+        if (!key) {
+          deferred.push(member);
+          continue;
+        }
+        const candidates: number[] = [];
+        for (let j = 0; j < argMembers.length; j++) {
+          if (used[j]) continue;
+          const head = headKeyFromType(argMembers[j]!);
+          if (head && head === key) candidates.push(j);
+        }
+        if (candidates.length === 0) return false; // missing required variant
+        if (candidates.length > 1) return false; // ambiguous head match
+        const idx = candidates[0]!;
+        if (!unify(member, argMembers[idx]!)) return false;
+        used[idx] = true;
+      }
+
+      // Second pass: bind remaining generic-only variants to remaining args
+      const remainingArgs: Type[] = [];
+      for (let j = 0; j < argMembers.length; j++) if (!used[j]) remainingArgs.push(argMembers[j]!);
+      if (deferred.length !== remainingArgs.length) return false; // require 1-1
+      for (let k = 0; k < deferred.length; k++) {
+        if (!unify(deferred[k]!, remainingArgs[k]!)) return false;
       }
       return true;
     }
