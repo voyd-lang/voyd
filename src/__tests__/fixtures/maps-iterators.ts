@@ -1,7 +1,8 @@
-export const mapStringIteratorVoyd = `
+export const mapsIteratorsVoyd = `
 use std::all
 
-pub fn map_iter_sum() -> i32
+// 1) Map iterator sums values
+pub fn test1() -> i32
   let m = new_map<i32>()
   m.set("a", 1)
   m.set("b", 2)
@@ -14,7 +15,8 @@ pub fn map_iter_sum() -> i32
         acc
   looper(0)
 
-pub fn string_iter_sum() -> i32
+// 2) String iterator sums char codes
+pub fn test2() -> i32
   let iterator = new_string_iterator("ab")
   let looper: (s: i32) -> i32 = (acc: i32) =>
     iterator.next().match(ch)
@@ -23,4 +25,17 @@ pub fn string_iter_sum() -> i32
       None:
         acc
   looper(0)
+
+// 3) Map init from pairs
+pub fn test3() -> i32
+  let m = Map<i32>([
+    ("a", 1),
+    ("b", 2)
+  ])
+  m.get("a").match(v)
+    Some<i32>:
+      v.value
+    None:
+      -1
 `;
+
