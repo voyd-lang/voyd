@@ -5,6 +5,7 @@ import { Implementation } from "../../syntax-objects/implementation.js";
 import { List } from "../../syntax-objects/list.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
 import { TypeAlias, selfType } from "../../syntax-objects/types.js";
+import { nop } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
@@ -30,6 +31,9 @@ export const resolveFn = (fn: Fn, call?: Call): Fn => {
   }
 
   if (fn.typeParameters && !call) {
+    // Even if we can't resolve a generic function without a call, make sure
+    // it's discoverable on its parent implementation for candidate selection.
+    fn.parentImpl?.registerMethod(fn);
     return fn;
   }
 
@@ -88,8 +92,6 @@ const resolveParameters = (params: Parameter[]) => {
 const attemptToResolveFnWithGenerics = (fn: Fn, call: Call): Fn => {
   const args = call.typeArgs ?? inferCallTypeArgs(fn, call);
   if (!args) return fn;
-
-  call.typeArgs = args;
   const existing = fn.genericInstances?.find((c) => fnTypeArgsMatch(args, c));
   if (existing) return fn;
 
@@ -106,7 +108,18 @@ const inferCallTypeArgs = (fn: Fn, call: Call) => {
     pairs.push({ typeExpr: param.typeExpr, argExpr: val });
   });
 
-  return inferTypeArgs(fn.typeParameters, pairs);
+  const inferred = inferTypeArgs(fn.typeParameters, pairs);
+  if (!inferred) return undefined;
+
+  // Convert inferred aliases into concrete type expressions for the call
+  // to avoid attaching alias objects to the call node (which can create
+  // cyclic structures during cloning in some cases). Preserve order.
+  const typeExprs = inferred
+    .toArray()
+    .map((alias) => (alias as TypeAlias).type ?? (alias as TypeAlias).typeExpr)
+    .filter((t): t is Expr => !!t);
+
+  return new List({ value: typeExprs });
 };
 
 const fnTypeArgsMatch = (args: List, candidate: Fn): boolean =>
@@ -133,10 +146,7 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   typeParameters.forEach((typeParam, index) => {
     const typeArg = args.exprAt(index);
     const identifier = typeParam.clone();
-    const type = new TypeAlias({
-      name: identifier,
-      typeExpr: typeArg.clone(),
-    });
+    const type = new TypeAlias({ name: identifier, typeExpr: nop() });
     type.parent = newFn;
     resolveTypeExpr(typeArg);
     type.type = getExprType(typeArg);
@@ -145,7 +155,9 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   });
 
   if (!newFn.appliedTypeArgs.every((t) => (t as TypeAlias).type)) {
-    throw new Error(`Unable to resolve all type args for ${newFn}`);
+    // Do not create an unresolved instance; let caller continue without
+    // specializing this generic function.
+    return fn;
   }
 
   const resolvedFn = resolveFn(newFn);

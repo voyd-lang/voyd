@@ -8,6 +8,7 @@ import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFn } from "./resolve-fn.js";
+import { resolveExport } from "./resolve-use.js";
 
 export const resolveImpl = (
   impl: Implementation,

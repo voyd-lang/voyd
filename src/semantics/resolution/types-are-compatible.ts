@@ -42,6 +42,9 @@ export const typesAreCompatible = (
   visited: Set<string> = new Set()
 ): boolean => {
   if (!a || !b) return false;
+  // Note: Do not treat unresolved type aliases as compatible here. Generic
+  // matching should occur via specialized inference paths to avoid masking
+  // real type errors.
   const key = `${a.id}|${b.id}`;
   if (visited.has(key)) return true;
   visited.add(key);
@@ -134,23 +137,16 @@ export const typesAreCompatible = (
 
   if (a.isUnionType() || b.isUnionType()) {
     if (a.isUnionType() && b.isUnionType()) {
-      // This is for handling recursive union types. It may *not* work for generic type aliases. Hopefully no dragons.
-      // We may only want to do this when the union's types have not yet been resolved
+      // Handle recursive union types (same syntax node) quickly
       if (a.syntaxId === b.syntaxId) return true;
 
       const aTypes = flattenUnion(a);
       const bTypes = flattenUnion(b);
-
-      let bMap: Map<string, Type>;
-      bMap = new Map<string, Type>();
-      for (const bType of bTypes) {
-        bMap.set(bType.id, bType);
-      }
+      const bMap = new Map<string, Type>();
+      for (const t of bTypes) bMap.set(t.id, t);
 
       for (const aType of aTypes) {
-        if (!b.isUnionType() && bMap.has(aType.id)) return true;
         if (bMap.has(aType.id)) continue;
-
         let match = false;
         for (const bType of bTypes) {
           if (typesAreCompatible(aType, bType, opts, visited)) {
@@ -158,10 +154,8 @@ export const typesAreCompatible = (
             break;
           }
         }
-
         if (!match) return false;
       }
-
       return true;
     }
 

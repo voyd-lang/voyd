@@ -36,6 +36,47 @@ export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
   return obj;
 };
 
+// Detects whether a type-argument expression contains an unresolved type
+// identifier (e.g., an unbound generic name like `T`).
+const containsUnresolvedTypeId = (expr: any): boolean => {
+  const visitExpr = (e: any): boolean => {
+    if (!e) return false;
+    if (e.isIdentifier && e.isIdentifier()) {
+      const entity = e.resolve?.();
+      const ty = getExprType(e);
+      return !entity && !ty;
+    }
+    if (e.isCall && e.isCall()) {
+      if (e.typeArgs) return e.typeArgs.toArray().some(visitExpr);
+      return false;
+    }
+    if (e.isType && e.isType()) {
+      if (e.isObjectType && e.isObjectType()) {
+        return e.fields.some((f: any) => visitExpr(f.typeExpr));
+      }
+      if (e.isIntersectionType && e.isIntersectionType()) {
+        return (
+          visitExpr(e.nominalTypeExpr?.value) ||
+          visitExpr(e.structuralTypeExpr?.value)
+        );
+      }
+      if (e.isFixedArrayType && e.isFixedArrayType()) {
+        return visitExpr(e.elemTypeExpr);
+      }
+      if (e.isFnType && e.isFnType()) {
+        return (
+          e.parameters.some((p: any) => visitExpr(p.typeExpr)) ||
+          (!!e.returnTypeExpr && visitExpr(e.returnTypeExpr))
+        );
+      }
+      return false;
+    }
+    if (e.isList && e.isList()) return e.toArray().some(visitExpr);
+    return false;
+  };
+  return visitExpr(expr);
+};
+
 const resolveGenericObjVersion = (
   type: ObjectType,
   call?: Call
@@ -62,6 +103,9 @@ const resolveGenericObjVersion = (
   }
 
   if (!call.typeArgs) return;
+
+  const hasUnresolved = call.typeArgs.toArray().some((arg) => containsUnresolvedTypeId(arg));
+  if (hasUnresolved) return;
 
   // THAR BE DRAGONS HERE. We don't check for multiple existing matches, which means that unions may sometimes overlap.
   const existing = type.genericInstances?.find((c) => typeArgsMatch(call, c));
@@ -99,7 +143,6 @@ const resolveGenericsWithTypeArgs = (
     newObj.appliedTypeArgs?.push(type);
     newObj.registerEntity(type);
   });
-
   if (typesNotResolved) return obj;
   obj.registerGenericInstance(newObj);
   const resolvedObj = resolveObjectType(newObj);

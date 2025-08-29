@@ -9,7 +9,7 @@ export const compileMemberAccess = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;
   const obj = expr.exprArgAt(0);
   const member = expr.identifierArgAt(1);
-  const objValue = compileExpression({ ...opts, expr: obj });
+  const objValue = compileExpression({ ...opts, expr: obj, isReturnExpr: false });
   const type = getExprType(obj) as ObjectType | IntersectionType;
 
   if (type.isIntersectionType() || type.isStructural) {

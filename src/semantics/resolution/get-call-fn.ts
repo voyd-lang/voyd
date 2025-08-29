@@ -14,10 +14,9 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
 
   if (isPrimitiveFnCall(call)) return undefined;
 
-  const unfilteredCandidates = candidateFns ?? getCandidates(call);
-  const candidates = dedupeCandidates(
-    filterCandidates(call, unfilteredCandidates)
-  );
+  const baseCandidates = candidateFns ?? getCandidates(call);
+  const expanded = expandGenericCandidates(call, baseCandidates);
+  const candidates = dedupeCandidates(filterResolvedCandidates(call, expanded));
 
   if (!candidates.length) {
     return undefined;
@@ -74,56 +73,33 @@ const dedupeCandidates = (fns: Fn[]): Fn[] => {
   return [...unique.values()];
 };
 
-const filterCandidates = (call: Call, candidates: Fn[]): Fn[] =>
-  candidates.flatMap((candidate) => {
-    if (candidate.typeParameters) {
-      return filterCandidateWithGenerics(call, candidate);
+const expandGenericCandidates = (call: Call, candidates: Fn[]): Fn[] => {
+  const out: Fn[] = [];
+  for (const c of candidates) {
+    if (!c.typeParameters) {
+      out.push(c);
+      continue;
     }
+    // Attempt to specialize generics with this call to surface compatible instances
+    resolveFn(c, call);
+    if (c.genericInstances?.length) out.push(...c.genericInstances);
+  }
+  return out;
+};
 
+const filterResolvedCandidates = (call: Call, candidates: Fn[]): Fn[] => {
+  return candidates.flatMap((candidate) => {
     // Resolve the function signature to check parameter compatibility without
-    // resolving the body yet. This avoids prematurely resolving functions that
-    // may depend on generic instances which have not been created at this
-    // point in the compilation process (e.g. trait implementations for
-    // specific type arguments).
+    // resolving the body yet.
     resolveFnSignature(candidate);
 
     if (parametersMatch(candidate, call) && typeArgsMatch(call, candidate)) {
-      // Only fully resolve the function once we've determined that it matches
-      // the call. This ensures that dependent generic instances are available
-      // and prevents resolution from mutating functions that ultimately aren't
-      // invoked.
+      // Now fully resolve since we will use it
       resolveFn(candidate);
       return candidate;
     }
-
     return [];
   });
-
-const filterCandidateWithGenerics = (call: Call, candidate: Fn): Fn[] => {
-  // Resolve generics
-  if (!candidate.genericInstances) resolveFn(candidate, call);
-
-  // Fn not compatible with call
-  if (!candidate.genericInstances?.length) return [];
-
-  // First attempt
-  const genericsInstances = filterCandidates(call, candidate.genericInstances);
-
-  // If we have instances, return them
-  if (genericsInstances.length) return genericsInstances;
-
-  // If no instances, attempt to resolve generics with this call, as a compatible instance
-  // is still possible
-  const beforeLen = candidate.genericInstances.length;
-  resolveFn(candidate, call);
-  const afterLen = candidate.genericInstances.length;
-
-  if (beforeLen === afterLen) {
-    // No new instances were created, so this call is not compatible
-    return [];
-  }
-
-  return filterCandidates(call, candidate.genericInstances);
 };
 
 const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
@@ -138,7 +114,8 @@ const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
     : true;
 
 const parametersMatch = (candidate: Fn, call: Call) =>
-  paramsDirectlyMatch(candidate, call) ||
+  (call.args.length === candidate.parameters.length &&
+    paramsDirectlyMatch(candidate, call)) ||
   objectArgSuppliesLabeledParams(candidate, call);
 
 const paramsDirectlyMatch = (candidate: Fn, call: Call) =>
@@ -178,7 +155,11 @@ const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
   if (call.args.length !== 1) return false;
   const objArg = call.argAt(0);
   const labeledParams = candidate.parameters.filter((p) => p.label);
-  if (labeledParams.length !== candidate.parameters.length) return false;
+  if (
+    labeledParams.length === 0 ||
+    labeledParams.length !== candidate.parameters.length
+  )
+    return false;
 
   if (objArg?.isObjectLiteral()) {
     return labeledParams.every((p) => {
