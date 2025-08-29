@@ -98,7 +98,7 @@ impl<T> Array<T>
 
       Array<T> { storage: new_storage, count: new_length }
 
-  pub fn insert(self, index: i32, value: T) -> Array<T>
+  pub fn insert(&self, index: i32, value: T) -> Array<T>
     let computed_index = compute_index(index, self.count)
     if computed_index >= self.count then:
       self.push(value)
@@ -210,7 +210,7 @@ pub fn map<I, O>(it: Iterable<I>, f: (v: I) -> O) -> Array<O>
   acc
 
 pub fn filter<I>(it: Iterable<I>, pred: (v: I) -> bool) -> Array<I>
-  let acc = new_array<I>(with_size: 4)
+  let &acc = new_array<I>(with_size: 4)
 
   it.each<I> item =>
     if pred(item) then:

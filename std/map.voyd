@@ -117,7 +117,7 @@ impl<T> Map<T>
         self
 
   fn add_to_bucket(
-    bucket: Array<{ key: String, value: T }>,
+    &bucket: Array<{ key: String, value: T }>,
     key: String,
     value: T
   )
