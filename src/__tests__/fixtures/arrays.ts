@@ -47,5 +47,20 @@ pub fn test5() -> i32
   let _a = [A { x: 1 }]
   let _b = [{ x: 1, y: 2 }]
   1
+
+// 6) Generic array of tuple infers type arg
+fn test_pairs_generic<T>(arr: Array<(String, T)>) -> Optional<T>
+  let map = Map<T>(arr)
+  map.get("a")
+
+pub fn test6() -> i32
+  test_pairs_generic([
+    ("a", 1),
+    ("b", 2)
+  ]).match(v)
+    Some<i32>:
+      v.value
+    None:
+      -1
 `;
 
