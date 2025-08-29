@@ -8,6 +8,8 @@ import {
   i64,
   f64,
   selfType,
+  dVoid,
+  dVoyd,
 } from "../../syntax-objects/types.js";
 import { resolveCall } from "./resolve-call.js";
 
@@ -29,7 +31,12 @@ export const getExprType = (expr?: Expr): Type | undefined => {
 };
 
 export const getIdentifierType = (id: Identifier): Type | undefined => {
+  // Treat control-flow keywords with meaningful types when used as expressions
+  if (id.is("break")) return dVoid;
   if (id.type) return id.type;
+  // Value-level `void` placeholder in expression position
+  if (id.is("void") && !id.hasTmpAttribute("type-context")) return dVoyd;
+
   const entity = id.resolve();
   if (!entity && id.is("self") && (id.parentImpl || id.parentTrait)) {
     // When resolving the type of `self` inside a trait, use a scoped

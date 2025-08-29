@@ -13,7 +13,12 @@ import { resolveUnionType } from "./resolve-union.js";
 import { resolveTrait } from "./resolve-trait.js";
 
 export const resolveTypeExpr = (typeExpr: Expr): Expr => {
-  if (typeExpr.isIdentifier()) return typeExpr;
+  if (typeExpr.isIdentifier()) {
+    // Mark identifier as used in type context so name like `void` are resolved
+    // as types (not value-level placeholders)
+    typeExpr.setTmpAttribute("type-context", true);
+    return typeExpr;
+  }
   if (typeExpr.isTypeAlias()) {
     if (typeExpr.type || !typeExpr.typeExpr) return typeExpr;
     if (typeExpr.resolutionPhase > 0) return typeExpr;
