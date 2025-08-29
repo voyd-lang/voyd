@@ -198,3 +198,59 @@ impl<T> Iterator<T> for ArrayIterator<T>
 impl<T> Iterable<T> for Array<T>
   fn iterate(self) -> Iterator<T>
     ArrayIterator<T> { index: 0, array: self }
+
+// Functional iterator helpers
+pub fn map<I, O>(it: Iterable<I>, f: (v: I) -> O) -> Array<O>
+  let iterator = it.iterate()
+  var acc = new_array<O>({ with_size: 4 })
+  var running = true
+  while running do:
+    iterator.next().match(item)
+      Some<I>:
+        acc = acc.push(f(item.value))
+        void
+      None:
+        running = false
+        void
+  acc
+
+pub fn filter<I>(it: Iterable<I>, pred: (v: I) -> bool) -> Array<I>
+  let iterator = it.iterate()
+  var acc = new_array<I>({ with_size: 4 })
+  var running = true
+  while running do:
+    iterator.next().match(item)
+      Some<I>:
+        if pred(item.value) then:
+          acc = acc.push(item.value)
+          void
+        else:
+          void
+      None:
+        running = false
+        void
+  acc
+
+pub fn reduce<I, O>(it: Iterable<I>, init: O, f: (acc: O, v: I) -> O) -> O
+  let iterator = it.iterate()
+  var acc = init
+  var running = true
+  while running do:
+    iterator.next().match(item)
+      Some<I>:
+        acc = f(acc, item.value)
+        void
+      None:
+        running = false
+        void
+  acc
+
+pub fn each<I>(it: Iterable<I>, f: (v: I) -> void) -> void
+  let iterator = it.iterate()
+  while true do:
+    iterator.next().match(item)
+      Some<I>:
+        f(item.value)
+        void
+      None:
+        break
