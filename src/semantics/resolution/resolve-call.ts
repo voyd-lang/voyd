@@ -26,43 +26,6 @@ import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
 
-export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
-  if (call.type) return call;
-  if (call.calls("::")) return resolveModuleAccess(call);
-  if (call.calls("export")) return resolveExport(call);
-  if (call.calls("if")) return resolveIf(call);
-  if (call.calls("call-closure")) return resolveClosureCall(call);
-  if (call.calls(":")) return resolveLabeledArg(call);
-  if (call.calls("while")) return resolveWhile(call);
-  if (call.calls("FixedArray")) return resolveFixedArray(call);
-  if (call.calls("binaryen")) return resolveBinaryen(call);
-  if (call.calls("member-access")) return resolveMemberAccessDirect(call);
-
-  // Resolve arguments conservatively (avoid resolving closures with untyped params)
-  preprocessArgs(call);
-
-  // Optional sugar: obj.member -> member-access(obj, "member")
-  const sugared = maybeResolveMemberAccessSugar(call);
-  if (sugared) return sugared;
-
-  // Ensure the callee is resolved so closures can capture it
-  const calleeType = resolveCalleeAndGetType(call);
-
-  // Constructors (object types by name)
-  if (calleeType?.isObjectType()) handleObjectConstruction(call, calleeType);
-
-  // Resolve and apply type args for the call if present
-  if (call.typeArgs) call.typeArgs = call.typeArgs.map(resolveTypeExpr);
-
-  // Bind function and normalize args
-  resolveCallFn(call, candidateFns);
-  normalizeArgsForResolvedFn(call);
-
-  // Compute resulting type
-  call.type = computeCallReturnType(call, calleeType);
-  return call;
-};
-
 const resolveMemberAccessDirect = (call: Call): Call => {
   call.args = call.args.map(resolveEntities);
   const recv = call.argAt(0);
@@ -164,30 +127,24 @@ const resolveCallFn = (call: Call, candidateFns?: Fn[]) => {
   }
 };
 
-const getArrayElemType = (type?: ObjectType) => {
+const arrayElemType = (type?: Type): Type | undefined => {
   if (!type) return;
-  if (!type.name.is("Array") && !type.genericParent?.name.is("Array")) return;
-  const arg = type.appliedTypeArgs?.[0];
-  return arg && arg.isTypeAlias() ? arg.type : undefined;
-};
-
-const paramArrayElemType = (paramType?: Type): Type | undefined => {
-  if (!paramType) return undefined;
-  if (paramType.isObjectType()) return getArrayElemType(paramType);
-  if (!paramType.isUnionType()) return undefined;
-  const arrayMember = paramType.types.find(
-    (t) => t.isObjectType() && getArrayElemType(t)
-  );
-  return arrayMember && arrayMember.isObjectType()
-    ? getArrayElemType(arrayMember)
-    : undefined;
+  if (type.isObjectType()) {
+    if (!type.name.is("Array") && !type.genericParent?.name.is("Array")) return;
+    const arg = type.appliedTypeArgs?.[0];
+    return arg && arg.isTypeAlias() ? arg.type : undefined;
+  }
+  if (!type.isUnionType()) return;
+  return type.types
+    .map(arrayElemType)
+    .find((t): t is Type => !!t);
 };
 
 const resolveArrayArgs = (call: Call) => {
   const fn = call.fn?.isFn() ? call.fn : undefined;
   call.args.each((arg: Expr, index: number) => {
     const param = fn?.parameters[index];
-    const elemType = paramArrayElemType(param?.type);
+    const elemType = arrayElemType(param?.type);
 
     const isLabeled = arg.isCall() && arg.calls(":");
     const inner = isLabeled ? arg.argAt(1) : arg;
@@ -573,3 +530,46 @@ const resolveClosureCall = (call: Call): Call => {
 // Helpers
 const hasUntypedClosure = (expr: Expr | undefined): boolean =>
   !!(expr?.isClosure() && expr.parameters.some((p) => !p.type && !p.typeExpr));
+
+const specialCallResolvers: Record<string, (c: Call) => Call> = {
+  "::": resolveModuleAccess,
+  export: resolveExport,
+  if: resolveIf,
+  "call-closure": resolveClosureCall,
+  ":": resolveLabeledArg,
+  while: resolveWhile,
+  FixedArray: resolveFixedArray,
+  binaryen: resolveBinaryen,
+  "member-access": resolveMemberAccessDirect,
+};
+
+export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
+  if (call.type) return call;
+
+  const resolver = specialCallResolvers[call.fnName.value];
+  if (resolver) return resolver(call);
+
+  // Resolve arguments conservatively (avoid resolving closures with untyped params)
+  preprocessArgs(call);
+
+  // Optional sugar: obj.member -> member-access(obj, "member")
+  const sugared = maybeResolveMemberAccessSugar(call);
+  if (sugared) return sugared;
+
+  // Ensure the callee is resolved so closures can capture it
+  const calleeType = resolveCalleeAndGetType(call);
+
+  // Constructors (object types by name)
+  if (calleeType?.isObjectType()) handleObjectConstruction(call, calleeType);
+
+  // Resolve and apply type args for the call if present
+  if (call.typeArgs) call.typeArgs = call.typeArgs.map(resolveTypeExpr);
+
+  // Bind function and normalize args
+  resolveCallFn(call, candidateFns);
+  normalizeArgsForResolvedFn(call);
+
+  // Compute resulting type
+  call.type = computeCallReturnType(call, calleeType);
+  return call;
+};
