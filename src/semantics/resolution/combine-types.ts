@@ -4,6 +4,7 @@ import {
   Type,
   UnionType,
 } from "../../syntax-objects/types.js";
+import { typesAreEqual } from "./types-are-equal.js";
 
 /**
  * Combines types into their least common denominator.
@@ -12,22 +13,17 @@ import {
  * If types are mixed and not all object types, it returns undefined.
  */
 export const combineTypes = (types: Type[]): Type | undefined => {
-  const firstType = types[0];
-  if (!types.length || !firstType?.isObjectType()) {
-    return firstType;
-  }
+  const unique = types.filter(
+    (t, i) => !types.slice(0, i).some((u) => typesAreEqual(t, u))
+  );
+  const firstType = unique[0];
+  if (!unique.length || !firstType?.isObjectType()) return firstType;
 
   let isLocalUnion = false;
   let topType: ObjectType | IntersectionType | UnionType = firstType;
-  for (const type of types.slice(1)) {
-    if (type.id === topType.id) {
-      continue;
-    }
-
+  for (const type of unique.slice(1)) {
     if (isObjectOrIntersection(type) && isObjectOrIntersection(topType)) {
-      const union = new UnionType({
-        name: `CombinedTypeUnion`,
-      });
+      const union = new UnionType({ name: `CombinedTypeUnion` });
       union.types = [topType, type];
       topType = union;
       isLocalUnion = true;
@@ -48,7 +44,13 @@ export const combineTypes = (types: Type[]): Type | undefined => {
     }
 
     if (type.isUnionType() && topType.isUnionType() && isLocalUnion) {
-      topType.types.push(...type.types);
+      const union = topType as UnionType;
+      for (const child of type.types) {
+        if (!union.types.some((t) => typesAreEqual(t, child))) {
+          union.types.push(child);
+        }
+      }
+      topType = union;
       continue;
     }
 
