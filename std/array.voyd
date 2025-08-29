@@ -201,49 +201,34 @@ impl<T> Iterable<T> for Array<T>
 
 // Functional iterator helpers
 pub fn map<I, O>(it: Iterable<I>, f: (v: I) -> O) -> Array<O>
-  let iterator = it.iterate()
-  var acc = new_array<O>({ with_size: 4 })
-  var running = true
-  while running do:
-    iterator.next().match(item)
-      Some<I>:
-        acc = acc.push(f(item.value))
-        void
-      None:
-        running = false
-        void
+  let &acc = new_array<O>({ with_size: 4 })
+
+  it.each<I> item =>
+    acc.push(f(item))
+    void
+
   acc
 
 pub fn filter<I>(it: Iterable<I>, pred: (v: I) -> bool) -> Array<I>
-  let iterator = it.iterate()
-  var acc = new_array<I>({ with_size: 4 })
-  var running = true
-  while running do:
-    iterator.next().match(item)
-      Some<I>:
-        if pred(item.value) then:
-          acc = acc.push(item.value)
-          void
-        else:
-          void
-      None:
-        running = false
-        void
+  let acc = new_array<I>(with_size: 4)
+
+  it.each<I> item =>
+    if pred(item) then:
+      acc.push(item) // TODO: Find out why this doesn't trigger an immutable argument error
+      void
+    else:
+      void
+
   acc
 
 pub fn reduce<I, O>(it: Iterable<I>, init: O, f: (acc: O, v: I) -> O) -> O
-  let iterator = it.iterate()
-  var acc = init
-  var running = true
-  while running do:
-    iterator.next().match(item)
-      Some<I>:
-        acc = f(acc, item.value)
-        void
-      None:
-        running = false
-        void
-  acc
+  let &state = { val: init }
+
+  it.each<I> item =>
+    state.val = f(state.val, item)
+    void
+
+  state.val
 
 pub fn each<I>(it: Iterable<I>, f: (v: I) -> void) -> void
   let iterator = it.iterate()
