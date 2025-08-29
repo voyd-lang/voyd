@@ -122,7 +122,7 @@ const handleObjectConstruction = (call: Call, type: ObjectType): void => {
         type,
         call.metadata
       );
-      if (expanded) call.args.set(0, resolveObjectLiteral(expanded, type));
+      if (expanded) call.args.set(0, resolveEntities(expanded));
     }
   }
 };

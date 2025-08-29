@@ -180,7 +180,7 @@ const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
           resolved.metadata
         );
         if (expanded) {
-          resolved.args.set(0, resolveObjectLiteral(expanded, objType));
+          resolved.args.set(0, resolveEntities(expanded));
         }
       }
       return resolved;
