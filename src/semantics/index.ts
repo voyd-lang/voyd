@@ -7,6 +7,7 @@ import { expandRegularMacros } from "./regular-macros.js";
 import { ParsedModule } from "../parser/index.js";
 import { Expr } from "../syntax-objects/expr.js";
 import { resolveEntities } from "./resolution/resolve-entities.js";
+import { VoydModule } from "../syntax-objects/module.js";
 
 const semanticPhases: SemanticProcessor[] = [
   expandRegularMacros, // Also handles use and module declaration initialization
@@ -16,7 +17,10 @@ const semanticPhases: SemanticProcessor[] = [
   checkTypes,
 ];
 
-export const processSemantics = (parsedModule: ParsedModule): Expr => {
-  const expr = registerModules(parsedModule);
+export const processSemantics = (
+  parsedModule: ParsedModule,
+  rootModule?: VoydModule
+): Expr => {
+  const expr = registerModules(parsedModule, rootModule);
   return semanticPhases.reduce((e, checker) => checker(e), expr as Expr);
 };

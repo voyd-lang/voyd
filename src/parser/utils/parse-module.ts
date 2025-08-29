@@ -13,11 +13,14 @@ export type ParsedModule = {
 };
 
 /** Parses voyd text and std lib into a module unit */
-export const parseModule = async (text: string): Promise<ParsedModule> => {
+export const parseModule = async (
+  text: string,
+  opts: { includeStd?: boolean } = {}
+): Promise<ParsedModule> => {
   return {
     files: {
       index: parse(text),
-      ...(await parseStd()),
+      ...(opts.includeStd === false ? {} : await parseStd()),
     },
     indexPath: "index",
   };
@@ -25,7 +28,8 @@ export const parseModule = async (text: string): Promise<ParsedModule> => {
 
 /** Parses a voyd codebase source and std into a module unit */
 export const parseModuleFromSrc = async (
-  path: string
+  path: string,
+  opts: { includeStd?: boolean } = {}
 ): Promise<ParsedModule> => {
   const src = await resolveSrc(path);
 
@@ -36,7 +40,7 @@ export const parseModuleFromSrc = async (
   return {
     files: {
       ...srcFiles,
-      ...(await parseStd()),
+      ...(opts.includeStd === false ? {} : await parseStd()),
     },
     srcPath: src.srcRootPath,
     indexPath: src.indexPath,

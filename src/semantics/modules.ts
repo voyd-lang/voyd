@@ -3,10 +3,11 @@ import { List } from "../syntax-objects/list.js";
 import { RootModule, VoydModule } from "../syntax-objects/module.js";
 
 /** Registers submodules of a parsed module for future import resolution */
-export const registerModules = (opts: ParsedModule): VoydModule => {
+export const registerModules = (
+  opts: ParsedModule,
+  rootModule: VoydModule = new RootModule({})
+): VoydModule => {
   const { srcPath, files } = opts;
-
-  const rootModule = new RootModule({});
 
   for (const [filePath, file] of Object.entries(files)) {
     const resolvedPath = filePathToModulePath(

@@ -6,13 +6,16 @@ import {
   parseModuleFromSrc,
   parseModule,
 } from "./parser/index.js";
+import { getStdLib } from "./lib/std-cache.js";
 
 export const compile = async (text: string) => {
+  await getStdLib();
   const parsedModule = await parseModule(text);
   return compileParsedModule(parsedModule);
 };
 
 export const compileSrc = async (path: string) => {
+  await getStdLib();
   const parsedModule = await parseModuleFromSrc(path);
   return compileParsedModule(parsedModule);
 };
