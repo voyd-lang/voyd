@@ -272,15 +272,37 @@ export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
   // Ensure the object's implementations and field types are resolved so that
   // init functions are discoverable and comparable.
   type = resolveObjectType(type, call);
-  // Proactively resolve implementations so their exports (e.g., `init`) are available.
-  type.implementations?.forEach((impl) => resolveImpl(impl, type));
 
   // If this is a generic object construction without explicit type args, try
   // to infer them directly from the constructor argument when it’s a
   // homogeneous Array of tuple pairs (String, T), and re-resolve the object
   // type with inferred type arguments to surface specialized impl methods.
+  if (type.typeParameters && !call.typeArgs) {
+    const arg0 = call.argAt(0);
+    const elem = arrayElemType(getExprType(arg0));
+    const tuple =
+      elem?.isObjectType()
+        ? elem
+        : elem?.isIntersectionType()
+        ? elem.structuralType ?? elem.nominalType
+        : undefined;
+    const key = tuple?.getField("0")?.type;
+    const valExpr = tuple?.getField("1")?.typeExpr;
+    if (
+      key?.isObjectType() &&
+      key.name.is("String") &&
+      valExpr
+    ) {
+      call.typeArgs = new List({ value: [valExpr.clone()] });
+      type = resolveObjectType(type, call);
+    }
+  }
+
   // If no explicit type args are supplied, try to infer them from the
   // supplied object literal.
+
+  // Proactively resolve implementations so their exports (e.g., `init`) are available.
+  type.implementations?.forEach((impl) => resolveImpl(impl, type));
 
   // Gather all inline methods and identify candidate init functions
   const initFns = collectInitFns(type);
