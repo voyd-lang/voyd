@@ -146,7 +146,7 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   typeParameters.forEach((typeParam, index) => {
     const typeArg = args.exprAt(index);
     const identifier = typeParam.clone();
-    const type = new TypeAlias({ name: identifier, typeExpr: nop() });
+    const type = new TypeAlias({ name: identifier, typeExpr: typeArg.clone() });
     type.parent = newFn;
     resolveTypeExpr(typeArg);
     type.type = getExprType(typeArg);

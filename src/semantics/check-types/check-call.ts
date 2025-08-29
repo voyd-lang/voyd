@@ -4,6 +4,7 @@ import { getExprType } from "../resolution/get-expr-type.js";
 import { typesAreCompatible } from "../resolution/index.js";
 import { resolveUnionType } from "../resolution/resolve-union.js";
 import { formatFnSignature } from "../fn-signature.js";
+import { formatTypeName } from "../type-format.js";
 
 import { checkTypes } from "./check-types.js";
 import { checkAssign } from "./check-assign.js";
@@ -45,7 +46,7 @@ export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
 
     const params = call.args
       .toArray()
-      .map((arg) => getExprType(arg)?.name.value)
+      .map((arg) => formatTypeName(getExprType(arg)))
       .join(", ");
 
     const location = call.location ?? call.fnName.location;

@@ -38,7 +38,7 @@ const resolveGenericTraitVersion = (
   trait.typeParameters?.forEach((typeParam, index) => {
     const typeArg = call.typeArgs!.exprAt(index);
     const identifier = typeParam.clone();
-    const alias = new TypeAlias({ name: identifier, typeExpr: nop() });
+    const alias = new TypeAlias({ name: identifier, typeExpr: typeArg.clone() });
     alias.parent = newTrait;
     resolveTypeExpr(typeArg);
     alias.type = getExprType(typeArg);
