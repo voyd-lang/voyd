@@ -6,6 +6,7 @@ import { Type, TypeAlias } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { typesAreEqual } from "./types-are-equal.js";
+import { resolveUnionType } from "./resolve-union.js";
 
 export type TypeArgInferencePair = {
   typeExpr: Expr;
@@ -136,11 +137,20 @@ export const unifyTypeParams = (
       return unify(resolveTypeExpr(structExpr), arg);
     }
 
-    // Unions and other constructs are not supported for structural inference
-    // beyond trivial exact matches.
+    // Basic union support: pairwise unify each variant when both sides are
+    // unions. Requires matching variant counts and order.
     if (p.isUnionType()) {
-      const pType = getExprType(resolveTypeExpr(p));
-      return pType ? typesAreEqual(pType, arg) : false;
+      const argUnion = arg.isUnionType() ? resolveUnionType(arg) : undefined;
+      if (!argUnion || !argUnion.types.length) return false;
+      const paramMembers = p.childTypeExprs.toArray();
+      const argMembers = argUnion.types;
+      if (paramMembers.length !== argMembers.length) return false;
+      for (let i = 0; i < paramMembers.length; i++) {
+        const paramMember = resolveTypeExpr(paramMembers[i]!);
+        const argMember = argMembers[i]!;
+        if (!unify(paramMember, argMember)) return false;
+      }
+      return true;
     }
 
     // Parameter is itself a fully-formed Type object. Require strict
