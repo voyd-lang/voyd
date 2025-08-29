@@ -12,7 +12,7 @@ describe("E2E arrays (grouped)", () => {
     instance = getWasmInstance(mod);
   });
 
-  const expecteds = [1, 1, 1, 42, 1];
+  const expecteds = [1, 1, 1, 42, 1, 1];
 
   for (let i = 0; i < expecteds.length; i++) {
     test(`test${i + 1} returns expected`, (t) => {
