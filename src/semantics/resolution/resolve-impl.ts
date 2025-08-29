@@ -1,6 +1,8 @@
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
 import { ObjectType, TypeAlias } from "../../syntax-objects/types.js";
+import { Fn } from "../../syntax-objects/fn.js";
+import { Expr } from "../../syntax-objects/expr.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveEntities } from "./resolve-entities.js";
@@ -17,6 +19,12 @@ export const resolveImpl = (
   if (impl.typesResolved) return impl;
   targetType = targetType ?? getTargetType(impl);
   impl.targetType = targetType;
+
+  // Pre-register methods so sibling calls inside nested scopes (e.g., match arms)
+  // can resolve them even before the impl body is fully resolved. This mirrors
+  // how module-level exports are discoverable early and avoids timing holes
+  // where lexical lookup yields zero candidates during resolve.
+  preRegisterImplMethods(impl);
 
   if (targetType?.appliedTypeArgs) {
     targetType.appliedTypeArgs.forEach((arg, index) => {
@@ -59,6 +67,37 @@ export const resolveImpl = (
   resolveDefaultTraitMethods(impl);
 
   return impl;
+};
+
+const preRegisterImplMethods = (impl: Implementation): void => {
+  const seen = new Set<string>();
+  const register = (fn: Fn, exported: boolean) => {
+    if (seen.has(fn.id)) return;
+    seen.add(fn.id);
+    if (exported) impl.registerExport(fn);
+    // Ensure methods are addressable within the impl even if not exported
+    impl.registerMethod(fn);
+    impl.registerEntity(fn);
+  };
+
+  const visit = (expr: Expr | undefined, exported = false) => {
+    if (!expr) return;
+    if (expr.isFn()) {
+      register(expr, exported);
+      return;
+    }
+    if (expr.isBlock()) {
+      expr.body.forEach((e: Expr) => visit(e, exported));
+      return;
+    }
+    if (expr.isCall() || expr.isList()) {
+      const isExportLike = expr.calls("export") || expr.calls("pub");
+      expr.argsArray().forEach((a: Expr) => visit(a, exported || isExportLike));
+      return;
+    }
+  };
+
+  visit(impl.body.value);
 };
 
 const getTargetType = (impl: Implementation): ObjectType | undefined => {

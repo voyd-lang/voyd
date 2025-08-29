@@ -135,7 +135,9 @@ const resolveGenericsWithTypeArgs = (
     const identifier = typeParam.clone();
     const type = new TypeAlias({
       name: identifier,
-      typeExpr: nop(),
+      // Preserve the original type arg expression (e.g., MiniJson) for
+      // readable formatting of applied generics without expanding recursively.
+      typeExpr: typeArg.clone(),
     });
     resolveTypeExpr(typeArg);
     type.type = getExprType(typeArg);

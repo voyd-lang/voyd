@@ -1,6 +1,7 @@
 import { Call, Expr, Fn, Parameter } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { formatFnSignature } from "../fn-signature.js";
+import { formatTypeName } from "../type-format.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
@@ -26,7 +27,7 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
 
   const argTypes = call.args
     .toArray()
-    .map((arg) => getExprType(arg)?.name.value)
+    .map((arg) => formatTypeName(getExprType(arg)))
     .join(", ");
   const signatures = candidates.map(formatFnSignature).join(", ");
   throw new Error(

@@ -7,6 +7,7 @@ export const compile = (opts: CompileExprOpts<Identifier>) => {
   const { expr, mod } = opts;
 
   if (expr.is("break")) return mod.br(opts.loopBreakId!);
+  if (expr.is("void")) return mod.nop();
 
   const entity = expr.resolve();
   if (!entity) {
@@ -43,4 +44,3 @@ export const compile = (opts: CompileExprOpts<Identifier>) => {
 
   throw new Error(`Cannot compile identifier ${expr}`);
 };
-

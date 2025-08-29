@@ -563,6 +563,10 @@ const specialCallResolvers: Record<string, (c: Call) => Call> = {
   FixedArray: resolveFixedArray,
   binaryen: resolveBinaryen,
   "member-access": resolveMemberAccessDirect,
+  break: (c: Call) => {
+    c.type = dVoid;
+    return c;
+  },
 };
 
 export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {

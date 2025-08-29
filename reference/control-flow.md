@@ -12,6 +12,30 @@ else: 1
 
 When the `else` branch is omitted, the result of the expression is `voyd`.
 
+### Value-level `void`
+
+Voyd provides a value-level placeholder `void` usable in expression position
+whenever you need to produce no value (historically this was done with `0`).
+This compiles to a no-op and type-checks as `voyd`, which is compatible with
+`void` return types.
+
+```voyd
+fn noop() -> void
+  void
+```
+
+### `break` type
+
+`break` is treated as a `void`-typed expression. This allows using `break`
+inside expression contexts such as match arms without adding filler values.
+
+```voyd
+while cond do:
+  match(x)
+    CaseA: void   // any void-like work
+    CaseB: break  // exits the loop; type-checks as void
+```
+
 ## Match
 
 Used to narrow types. Can operate on object to narrow
@@ -46,6 +70,10 @@ fn main(a: i32, b: i32) -> String
     None: "Error: divide by zero"
     else: "Bleh"
 ```
+
+Match arm types must be compatible with the overall match expression type.
+When used as a statement (e.g., inside a loop body), both a value-level
+`void` and `break` satisfy `void` cases.
 
 The second signature of match is useful when the value being matched against
 is not already bound to an identifier (i.e. dot pipelines):
