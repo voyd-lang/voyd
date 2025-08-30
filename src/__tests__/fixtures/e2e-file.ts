@@ -415,20 +415,20 @@ pub fn test3() -> i32
     sum = sum + x.value
   sum
 
-// If optional unwrap (?=): returns 5
+// If optional unwrap (:=): returns 5
 pub fn test4() -> i32
   let opt: Optional<i32> = Some<i32> { value: 5 }
-  if x ?= opt then:
+  if x := opt then:
     x
   else:
     -1
 
-// While optional unwrap (?=): sum 1+2+3 = 6
+// While optional unwrap (:=): sum 1+2+3 = 6
 pub fn test5() -> i32
   let a = [1, 2, 3]
   let iterator = a.iterate()
   var sum = 0
-  while n ?= iterator.next() do:
+  while n := iterator.next() do:
     sum = sum + n
   sum
 

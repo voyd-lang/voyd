@@ -122,10 +122,10 @@ let structure = {
 // Optional coalesce
 let value: Some<i32> = a?.b?.c // 5
 
-if x ?= opt then:
+if x := opt then:
   x // x is i32 here, not Some<i32>
 
-while n ?= iterator.next() do:
+while n := iterator.next() do:
   sum = sum + n
 
 // Iterator specific sugar

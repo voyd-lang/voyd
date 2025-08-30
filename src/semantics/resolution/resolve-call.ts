@@ -459,7 +459,7 @@ export const resolveIf = (call: Call) => {
   const lowered = maybeLowerIfMatchSugar(call);
   if (lowered) return lowered as unknown as Call;
 
-  // Handle Optional unwrap sugar: `if x ?= opt then: ... [else: ...]`
+  // Handle Optional unwrap sugar: `if x := opt then: ... [else: ...]`
   const loweredOpt = maybeLowerIfOptionalUnwrapSugar(call);
   if (loweredOpt) return loweredOpt as unknown as Call;
 
@@ -632,7 +632,7 @@ const findSomeVariant = (type?: Type) => {
 const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
   const cond = call.argAt(0);
   const thenCall = call.argAt(1);
-  if (!cond?.isCall() || !cond.calls("?=")) return;
+  if (!cond?.isCall() || !cond.calls(":=")) return;
   const binder = cond.argAt(0);
   const operand = cond.argAt(1);
   if (!binder?.isIdentifier() || !operand) return;
@@ -988,7 +988,7 @@ const maybeLowerWhileMatchSugar = (call: Call): Expr | undefined => {
 const maybeLowerWhileOptionalUnwrapSugar = (call: Call): Expr | undefined => {
   const cond = call.argAt(0);
   const doArg = call.argAt(1);
-  if (!cond?.isCall() || !cond.calls("?=")) return;
+  if (!cond?.isCall() || !cond.calls(":=")) return;
   if (!(doArg?.isCall() && doArg.calls(":"))) return;
   const doLabel = doArg.argAt(0);
   if (!(doLabel?.isIdentifier() && doLabel.value === "do")) return;
@@ -1092,7 +1092,7 @@ const maybeLowerWhileInSugar = (call: Call): Expr | undefined => {
     parent: call.parent ?? call.parentModule,
   });
 
-  // while binder ?= __iter_N.next() do: body
+  // while binder := __iter_N.next() do: body
   const nextCall = new Call({
     ...call.metadata,
     fnName: Identifier.from("next"),
@@ -1100,7 +1100,7 @@ const maybeLowerWhileInSugar = (call: Call): Expr | undefined => {
   });
   const condUnwrap = new Call({
     ...call.metadata,
-    fnName: Identifier.from("?="),
+    fnName: Identifier.from(":="),
     args: new List({ value: [binder.clone(), nextCall] }),
   });
   const newWhile = new Call({
