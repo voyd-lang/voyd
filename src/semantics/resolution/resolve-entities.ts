@@ -23,6 +23,8 @@ import { resolveMatch } from "./resolve-match.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveTrait } from "./resolve-trait.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
+import { lightweightTypeArgExpr } from "./typeargs.js";
+import { canonicalTypeExprFromType } from "./canonical-type-expr.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveUse } from "./resolve-use.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
@@ -209,12 +211,21 @@ export const resolveObjectLiteral = (
   obj.type = new ObjectType({
     ...obj.metadata,
     name: `ObjectLiteral-${obj.syntaxId}`,
-    value: obj.fields.map((f) => ({
-      name: f.name,
-      // Preserve initializer as the field's type expression (pre-canonicalization behavior)
-      typeExpr: f.initializer,
-      type: f.type,
-    })),
+    value: obj.fields.map((f) => {
+      const canonStructEnabled = !!process.env.VOYD_CANON_STRUCT;
+      const trivial =
+        f.type?.isPrimitiveType() ||
+        f.type?.isTypeAlias() ||
+        (f.type?.isObjectType() && !f.type.isStructural);
+      const shouldCanonicalize = canonStructEnabled || trivial;
+      return {
+        name: f.name,
+        typeExpr: shouldCanonicalize
+          ? (canonicalTypeExprFromType(f.type) ?? f.initializer)
+          : f.initializer,
+        type: f.type,
+      };
+    }),
     parentObj: voydBaseObject,
     isStructural: true,
   });

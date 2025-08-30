@@ -35,6 +35,7 @@ import { resolveTypeExpr, resolveFixedArrayType } from "./resolve-type-expr.js";
 import { resolveTrait } from "./resolve-trait.js";
 import { resolveFn } from "./resolve-fn.js";
 import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
+import { lightweightTypeArgExpr } from "./typeargs.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
 
 const resolveMemberAccessDirect = (call: Call): Call => {
@@ -866,7 +867,9 @@ function resolveOptionalCoalesce(call: Call): Expr {
       new Call({
         ...call.metadata,
         fnName: Identifier.from("Some"),
-        typeArgs: accessType ? new List({ value: [accessType] }) : undefined,
+        typeArgs: accessType
+          ? new List({ value: [lightweightTypeArgExpr(accessType) as Expr] })
+          : undefined,
         args: new List({
           value: [
             new ObjectLiteral({
@@ -911,7 +914,9 @@ function resolveOptionalCoalesce(call: Call): Expr {
     : new Call({
         ...call.metadata,
         fnName: Identifier.from("Some"),
-        typeArgs: accessType ? new List({ value: [accessType] }) : undefined,
+        typeArgs: accessType
+          ? new List({ value: [lightweightTypeArgExpr(accessType) as Expr] })
+          : undefined,
         args: new List({
           value: [
             new ObjectLiteral({

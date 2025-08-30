@@ -11,6 +11,7 @@ import { resolveIntersectionType } from "./resolve-intersection.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveUnionType } from "./resolve-union.js";
 import { resolveTrait } from "./resolve-trait.js";
+import { sanitizeTypeArgs } from "./typeargs.js";
 
 export const resolveTypeExpr = (typeExpr: Expr): Expr => {
   if (typeExpr.isIdentifier()) {
