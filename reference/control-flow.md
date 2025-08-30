@@ -112,11 +112,9 @@ while iterator.next().match(x, Some<i32>) do:
 
 
 let structure = {
-  a: Some {
-    value: {
-      b: Some {
-        value: { c: 5 }
-      }
+  a: some {
+    b: some {
+      c: 5
     }
   }
 }
