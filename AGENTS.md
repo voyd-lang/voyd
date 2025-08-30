@@ -14,6 +14,12 @@ Helpful commands:
 - `vt --run <path-to-voyd-file>` // runs the pub fn main of the file
 - `vt --emit-wasm-text --opt <path-to-voyd-file>` // Careful, this can be large
 
+- VOYD_DEBUG_CLONE: enable clone profiling for type clones. Prints a compact summary on process exit.
+  - Example: `VOYD_DEBUG_CLONE=1 npx vitest run src/__tests__/map-init-infer.e2e.test.ts`
+- VOYD_DEBUG_INFER: enable inference trace logs for type-arg unification.
+  - Example: `VOYD_DEBUG_INFER=1 npx vitest run src/__tests__/map-init-infer.e2e.test.ts`
+
+
 # Testing
 
 This repo uses vitest for testing. You can run the full test
