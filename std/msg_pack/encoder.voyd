@@ -6,9 +6,12 @@ obj Encoder {
   pos: i32,
 }
 
-type MiniJson = Array<MiniJson> | String
+pub type MsgPack = Map<MsgPack> | Array<MsgPack> | String
 
 impl Encoder
+  pub fn init(ptr: i32)
+    Encoder { ptr, pos: 0 }
+
   fn ensure_capacity(self, add: i32) -> void
     let required = self.ptr + self.pos + add
     let current_bytes = linear_memory::size() * 65536
@@ -65,7 +68,26 @@ impl Encoder
       self.write_u8(value.char_code_at(i))
       i = i + 1
 
-  pub fn encode_array(&self, value: Array<MiniJson>) -> void
+  pub fn encode_map(&self, value: Map<MsgPack>) -> void
+    let len = map_length(value)
+    if len < 16 then:
+      self.write_u8(128 + len)
+    elif: len < 65536 then:
+      self.write_u8(222)
+      self.write_u8(shift_ru(len, 8))
+      self.write_u8(bit_and(len, 255))
+    else:
+      self.write_u8(223)
+      self.write_u8(shift_ru(len, 24))
+      self.write_u8(bit_and(shift_ru(len, 16), 255))
+      self.write_u8(bit_and(shift_ru(len, 8), 255))
+      self.write_u8(bit_and(len, 255))
+
+    while item in value do:
+      self.encode_string(item.key)
+      self.encode_any(item.value)
+
+  pub fn encode_array(&self, value: Array<MsgPack>) -> void
     let len = value.length
     if len < 16 then:
       self.write_u8(144 + len)
@@ -80,31 +102,59 @@ impl Encoder
       self.write_u8(bit_and(shift_ru(len, 8), 255))
       self.write_u8(bit_and(len, 255))
 
-    value.each<MiniJson> item =>
-      item.match(json)
-        String:
-          self.encode_string(json)
-        Array<MiniJson>:
-          self.encode_array(json)
+    while item in value do:
+      self.encode_any(item)
+
+  fn encode_any(&self, value: MsgPack) -> void
+    value.match(json)
+      String:
+        self.encode_string(json)
+      Array<MsgPack>:
+        self.encode_array(json)
+      Map<MsgPack>:
+        self.encode_map(json)
 
 
-pub fn encode_json(value: i32, ptr: i32) -> i32
+pub fn encode(value: i32, ptr: i32) -> i32
   if linear_memory::size() == 0 then:
     linear_memory::grow(1)
-  let &enc = Encoder { ptr: ptr, pos: 0 }
+  let &enc = Encoder(ptr)
   enc.encode_number(value)
   enc.pos
 
-pub fn encode_json(value: String, ptr: i32) -> i32
+pub fn encode(value: String, ptr: i32) -> i32
   if linear_memory::size() == 0 then:
     linear_memory::grow(1)
-  let &enc = Encoder { ptr: ptr, pos: 0 }
+  let &enc = Encoder(ptr)
   enc.encode_string(value)
   enc.pos
 
-pub fn encode_json(value: Array<MiniJson>) -> i32
+pub fn encode(value: Array<MsgPack>, ptr: i32) -> i32
   if linear_memory::size() == 0 then:
     linear_memory::grow(1)
-  let &enc = Encoder { ptr: 0, pos: 0 }
+  let &enc = Encoder(ptr)
   enc.encode_array(value)
   enc.pos
+
+pub fn encode(value: Array<MsgPack>) -> i32
+  encode(value, 0)
+
+pub fn encode(value: Map<MsgPack>, ptr: i32) -> i32
+  if linear_memory::size() == 0 then:
+    linear_memory::grow(1)
+  let &enc = Encoder(ptr)
+  enc.encode_map(value)
+  enc.pos
+
+pub fn encode(value: Map<MsgPack>) -> i32
+  encode(value, 0)
+
+// --------
+// Helpers
+// --------
+
+fn map_length(value: Map<MsgPack>) -> i32
+  var count = 0
+  while _item in value do:
+    count = count + 1
+  count

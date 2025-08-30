@@ -4,12 +4,12 @@ import { Type, TypeAlias } from "../syntax-objects/types.js";
 export const formatTypeName = (t?: Type | TypeAlias): string => {
   if (!t) return "unknown";
 
-  // TypeAlias may either be a named alias (e.g., MiniJson) or a placeholder
+  // TypeAlias may either be a named alias (e.g., MsgPack) or a placeholder
   // for a resolved generic parameter (e.g., T with .type set). Prefer the
   // resolved target when present; otherwise, show the alias name.
   if (t.isTypeAlias?.()) {
     // Prefer a simple identifier from the alias' type expression when present
-    // (e.g., MiniJson), which is safe and avoids recursive expansion.
+    // (e.g., MsgPack), which is safe and avoids recursive expansion.
     const te: any = (t as any).typeExpr;
     if (te?.isIdentifier?.()) return te.toString();
     if (te?.isTypeAlias?.()) return te.name.toString();
@@ -21,7 +21,9 @@ export const formatTypeName = (t?: Type | TypeAlias): string => {
     const base = t.name.toString();
     const args = t.appliedTypeArgs ?? [];
     if (!args.length) return base;
-    const inner = args.map((a) => formatTypeName(a as Type | TypeAlias)).join(", ");
+    const inner = args
+      .map((a) => formatTypeName(a as Type | TypeAlias))
+      .join(", ");
     return `${base}<${inner}>`;
   }
 
@@ -45,7 +47,10 @@ export const formatTypeName = (t?: Type | TypeAlias): string => {
   if (t.isIntersectionType?.()) {
     const l = t.nominalType ?? t.structuralType;
     const r = t.structuralType && t.nominalType ? t.structuralType : undefined;
-    return [formatTypeName(l as Type), r ? formatTypeName(r as Type) : undefined]
+    return [
+      formatTypeName(l as Type),
+      r ? formatTypeName(r as Type) : undefined,
+    ]
       .filter(Boolean)
       .join(" & ");
   }

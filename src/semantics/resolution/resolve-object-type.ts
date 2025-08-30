@@ -104,7 +104,9 @@ const resolveGenericObjVersion = (
 
   if (!call.typeArgs) return;
 
-  const hasUnresolved = call.typeArgs.toArray().some((arg) => containsUnresolvedTypeId(arg));
+  const hasUnresolved = call.typeArgs
+    .toArray()
+    .some((arg) => containsUnresolvedTypeId(arg));
   if (hasUnresolved) return;
 
   // THAR BE DRAGONS HERE. We don't check for multiple existing matches, which means that unions may sometimes overlap.
@@ -135,7 +137,7 @@ const resolveGenericsWithTypeArgs = (
     const identifier = typeParam.clone();
     const type = new TypeAlias({
       name: identifier,
-      // Preserve the original type arg expression (e.g., MiniJson) for
+      // Preserve the original type arg expression (e.g., MsgPack) for
       // readable formatting of applied generics without expanding recursively.
       typeExpr: typeArg.clone(),
     });
