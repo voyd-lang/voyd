@@ -576,7 +576,6 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
   }
 
   if (!type.isList()) {
-    // Provide a clear error without noisy console logging
     const rendered = JSON.stringify(type, undefined, 2);
     throw new Error(`Invalid type entity: ${rendered}`);
   }
