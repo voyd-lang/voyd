@@ -16,7 +16,8 @@ export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
   if (obj.typesResolved) return obj;
 
   if (obj.typeParameters) {
-    return resolveGenericObjVersion(obj, call) ?? obj;
+    const resolved = resolveGenericObjVersion(obj, call);
+    return resolved ?? obj;
   }
 
   obj.fields.forEach((field) => {
@@ -43,6 +44,9 @@ const containsUnresolvedTypeId = (expr: any): boolean => {
     if (!e) return false;
     if (e.isIdentifier && e.isIdentifier()) {
       const entity = e.resolve?.();
+      // Treat known type aliases as resolved even if their inner `type` has
+      // not been computed yet; downstream resolution will handle it lazily.
+      if (entity?.isTypeAlias?.()) return false;
       const ty = getExprType(e);
       return !entity && !ty;
     }

@@ -83,6 +83,7 @@ export const typesAreCompatible = (
       });
     }
 
+    // Allow instance-vs-instance generic comparison by parent
     if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
       return !!a.appliedTypeArgs?.every((arg, index) =>
         typesAreCompatible(
@@ -92,6 +93,16 @@ export const typesAreCompatible = (
           visited
         )
       );
+    }
+
+    // If the parameter side is an unspecialized generic object (has
+    // typeParameters) and the argument side is a specialized instance of that
+    // generic (genericParent equals b), treat them as compatible. This helps
+    // recursive union aliases where generic members cannot be fully
+    // specialized yet (e.g., MsgPack includes Array<MsgPack> while resolving
+    // its own definition).
+    if (b.typeParameters?.length && a.genericParent && a.genericParent.id === b.id) {
+      return true;
     }
 
     if (a.idNum === b.idNum) return true;
@@ -167,6 +178,7 @@ export const typesAreCompatible = (
       return false;
     }
 
+    // Debug instrumentation for MsgPack/Html union membership under canonicalization flag
     return unionType.types.some((t) =>
       typesAreCompatible(nonUnionType, t, opts, visited)
     );

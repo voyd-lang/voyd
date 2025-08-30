@@ -181,7 +181,15 @@ const resolveArrayArgs = (call: Call) => {
   const fn = call.fn?.isFn() ? call.fn : undefined;
   call.args.each((arg: Expr, index: number) => {
     const param = fn?.parameters[index];
-    const elemType = arrayElemType(param?.type);
+    let elemType = arrayElemType(param?.type);
+    if (!elemType && (param as any)?.typeExpr?.isCall?.()) {
+      const texpr = (param as any).typeExpr as Call;
+      if (texpr.fnName.is("Array") && texpr.typeArgs?.length) {
+        const targ = texpr.typeArgs.exprAt(0);
+        elemType = getExprType(resolveTypeExpr(targ));
+        // no-op
+      }
+    }
 
     const isLabeled = arg.isCall() && arg.calls(":");
     const inner = isLabeled ? arg.argAt(1) : arg;

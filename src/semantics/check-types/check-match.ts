@@ -39,6 +39,8 @@ const checkMatchCases = (match: Match) => {
 const checkUnionMatch = (match: Match) => {
   const union = match.baseType as UnionType;
 
+  // no-op
+
   const matched = match.cases
     .map((c) => c.matchType?.name.value)
     .filter((n): n is string => !!n);
@@ -55,11 +57,31 @@ const checkUnionMatch = (match: Match) => {
 
   checkMatchCases(match);
 
-  const badCase = match.cases.find((mCase) =>
-    !union.types.some((type: Type) =>
-      typesAreCompatible(mCase.matchType, type)
+  const sourceMemberNames: string[] = union.childTypeExprs
+    .toArray()
+    .map((e) =>
+      (e as any).isCall?.()
+        ? (e as any).fnName?.value
+        : (e as any).isIdentifier?.()
+        ? (e as any).value
+        : (e as any).isType?.()
+        ? (e as any).name?.value
+        : undefined
     )
-  );
+    .filter((n): n is string => !!n);
+
+  const badCase = match.cases.find((mCase) => {
+    const matchesByType = union.types.some((type: Type) =>
+      typesAreCompatible(mCase.matchType, type)
+    );
+    if (matchesByType) return false;
+    const caseName = mCase.matchType?.name.value;
+    // Fallback for unions still resolving: allow name-based match when the
+    // union's child expressions include the case by name (e.g., Html includes
+    // String but its Type not yet linked at this phase under canonicalized
+    // resolution ordering).
+    return !(caseName && sourceMemberNames.includes(caseName));
+  });
 
   if (badCase) {
     const caseName = badCase.matchType?.name.value ?? "unknown";
