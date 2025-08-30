@@ -1,5 +1,6 @@
 import { Call } from "../../syntax-objects/call.js";
-import { Identifier, List, nop, Expr, Fn } from "../../syntax-objects/index.js";
+import { Identifier, List, nop, Expr, Fn, Block, Variable } from "../../syntax-objects/index.js";
+import { Match } from "../../syntax-objects/match.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
 import {
   dVoid,
@@ -420,6 +421,11 @@ const resolveFixedArray = (call: Call) => {
 // moved to ./resolve-member-access.ts as tryResolveMemberAccessSugar
 
 export const resolveIf = (call: Call) => {
+  // Handle if-match sugar: `if x.match(Type) then: expr [else: expr]`
+  // and `if x.match(name, Type) then: expr [else: expr]`
+  const lowered = maybeLowerIfMatchSugar(call);
+  if (lowered) return lowered as unknown as Call;
+
   if (!call.args.hasLabeledArg("elif")) return resolveBasicIf(call);
 
   type Pair = { cond: Expr; thenExpr: Expr };
@@ -516,6 +522,70 @@ const resolveBasicIf = (call: Call) => {
   call.type =
     elseType && thenType ? combineTypes([thenType, elseType]) : thenType;
   return call;
+};
+
+const maybeLowerIfMatchSugar = (call: Call): Expr | undefined => {
+  const cond = call.argAt(0);
+  const thenCall = call.argAt(1);
+  if (!cond?.isCall() || !cond.calls("match")) return;
+
+  // Extract operand, optional binder, and match type expression
+  const operand = cond.argAt(0);
+  if (!operand) return;
+
+  const second = cond.argAt(1);
+  const hasBinder = !!second?.isIdentifier() && !!cond.argAt(2);
+  const binder = hasBinder ? (second as Identifier) : undefined;
+  const typeExpr = hasBinder ? cond.argAt(2) : cond.argAt(1);
+  if (!typeExpr) return;
+
+  // Ensure we have a `then:` arm
+  if (!(thenCall?.isCall() && thenCall.calls(":"))) return;
+  const thenLabel = thenCall.argAt(0);
+  if (!(thenLabel?.isIdentifier() && thenLabel.value === "then")) return;
+  const thenExpr = thenCall.argAt(1)!;
+
+  // Optional else arm
+  const elseCall = call.argAt(2);
+  const elseExpr = (() => {
+    if (!(elseCall?.isCall() && elseCall.calls(":"))) return undefined;
+    const l = elseCall.argAt(0);
+    return l?.isIdentifier() && l.is("else") ? elseCall.argAt(1) : undefined;
+  })();
+
+  // Build match expression equivalent
+  const toBlock = (e: Expr): Block => (e.isBlock() ? e : new Block({ ...e.metadata, body: [e] }));
+
+  // When no binder is specified, require the operand to be an identifier so
+  // we can narrow it in the then-arm.
+  const bindIdentifier = binder ?? (operand.isIdentifier() ? (operand as Identifier) : undefined);
+  if (!bindIdentifier) return;
+
+  const cases = [
+    {
+      matchTypeExpr: typeExpr,
+      expr: toBlock(thenExpr),
+    },
+  ];
+
+  const match = new Match({
+    ...call.metadata,
+    operand,
+    cases,
+    defaultCase: elseExpr ? { expr: toBlock(elseExpr) } : undefined,
+    bindIdentifier: bindIdentifier,
+    bindVariable: binder
+      ? new Variable({
+          name: binder.clone(),
+          location: binder.location,
+          initializer: operand,
+          isMutable: false,
+          parent: call.parent ?? call.parentModule,
+        })
+      : undefined,
+  });
+
+  return resolveEntities(match);
 };
 
 export const resolveWhile = (call: Call) => {

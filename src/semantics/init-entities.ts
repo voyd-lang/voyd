@@ -82,7 +82,18 @@ export const initEntities: SemanticProcessor = (expr) => {
   }
 
   if (expr.calls("match")) {
-    return initMatch(expr);
+    // Only treat `match(...)` as a match-expression when followed by one or
+    // more labeled cases (":" entries). This lets predicate-style usages like
+    // `if opt.match(Some<T>) then:` pass through as a normal call so they can
+    // be lowered later during resolution (e.g., if/while sugar).
+    const hasBinder = !!expr.at(2)?.isIdentifier();
+    const casesStart = hasBinder ? 3 : 2;
+    const hasCases = expr
+      .sliceAsArray(casesStart)
+      .some((e) => e.isList() && e.calls(":"));
+
+    if (hasCases) return initMatch(expr);
+    // Fall through to generic call init when no cases are present
   }
 
   if (expr.calls("impl")) {
