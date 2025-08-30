@@ -9,6 +9,7 @@ compiles to webassembly.
 A command line tool is available installable with `npm link`
 
 Helpful commands:
+- `npx vitest run <path-to-test-files>` Prefer running specific tests until feature implemented, then `npx vitest` to run the full suite to verify at the end.
 - `vt --emit-parser-ast <path-to-voyd-file>`
 - `vt --run <path-to-voyd-file>` // runs the pub fn main of the file
 - `vt --emit-wasm-text --opt <path-to-voyd-file>` // Careful, this can be large
