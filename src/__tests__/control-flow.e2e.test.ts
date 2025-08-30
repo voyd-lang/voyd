@@ -35,5 +35,18 @@ pub fn main() -> i32
 `;
     await compile(src);
   });
-});
 
+  test("compiles while-match with binder", async () => {
+    const src = `use std::all
+
+pub fn main() -> i32
+  let a = [1, 2, 3]
+  let iterator = a.iterate()
+  var sum = 0
+  while iterator.next().match(x, Some<i32>) do:
+    sum = sum + x.value
+  sum
+`;
+    await compile(src);
+  });
+});

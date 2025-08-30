@@ -1,5 +1,5 @@
 import { Call } from "../../syntax-objects/call.js";
-import { Identifier, List, nop, Expr, Fn, Block, Variable } from "../../syntax-objects/index.js";
+import { Identifier, List, nop, Expr, Fn, Block, Variable, Bool } from "../../syntax-objects/index.js";
 import { Match } from "../../syntax-objects/match.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
 import {
@@ -589,6 +589,10 @@ const maybeLowerIfMatchSugar = (call: Call): Expr | undefined => {
 };
 
 export const resolveWhile = (call: Call) => {
+  // Handle while-match sugar by lowering to `while true do: match(...) ... else: break`
+  const lowered = maybeLowerWhileMatchSugar(call);
+  if (lowered) return lowered;
+
   call.args = call.args.map(resolveEntities);
   call.type = dVoid;
   return call;
@@ -667,5 +671,72 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
 
   // Compute resulting type
   call.type = computeCallReturnType(call, calleeType);
+  return call;
+};
+
+const maybeLowerWhileMatchSugar = (call: Call): Call | undefined => {
+  const cond = call.argAt(0);
+  const doArg = call.argAt(1);
+  if (!cond?.isCall() || !cond.calls("match")) return;
+  if (!(doArg?.isCall() && doArg.calls(":"))) return;
+  const doLabel = doArg.argAt(0);
+  if (!(doLabel?.isIdentifier() && doLabel.value === "do")) return;
+
+  const operand = cond.argAt(0);
+  if (!operand) return;
+
+  const possibleBinder = cond.argAt(1);
+  const hasBinder = !!possibleBinder?.isIdentifier() && !!cond.argAt(2);
+  const binder = hasBinder ? (possibleBinder as Identifier) : undefined;
+  const typeExpr = hasBinder ? cond.argAt(2) : cond.argAt(1);
+  if (!typeExpr) return;
+
+  const bodyExpr = doArg.argAt(1)!;
+  const toBlock = (e: Expr): Block => (e.isBlock() ? e : new Block({ ...e.metadata, body: [e] }));
+  // Ensure then-arm is void-typed by appending value-level `void` sentinel.
+  const thenBlock = new Block({
+    ...bodyExpr.metadata,
+    body: [
+      ...(bodyExpr.isBlock() ? bodyExpr.body : [bodyExpr]),
+      Identifier.from("void"),
+    ],
+  });
+
+  const bindIdentifier = binder ?? (operand.isIdentifier() ? (operand as Identifier) : undefined);
+  if (!bindIdentifier) return; // cannot bind when operand is not an identifier and no binder was provided
+
+  const match = new Match({
+    ...call.metadata,
+    operand,
+    cases: [
+      {
+        matchTypeExpr: typeExpr,
+        expr: thenBlock,
+      },
+    ],
+    defaultCase: {
+      expr: toBlock(Identifier.from("break")),
+    },
+    bindIdentifier,
+    bindVariable: binder
+      ? new Variable({
+          name: binder.clone(),
+          location: binder.location,
+          initializer: operand,
+          isMutable: false,
+          parent: call.parent ?? call.parentModule,
+        })
+      : undefined,
+  });
+
+  const newDo = new Call({
+    ...call.metadata,
+    fnName: Identifier.from(":"),
+    args: new List({ value: [Identifier.from("do"), resolveEntities(match)] }),
+    type: dVoid,
+  });
+
+  call.args = new List({ value: [new Bool({ value: true, location: call.location }), newDo] });
+  call.args.parent = call;
   return call;
 };
