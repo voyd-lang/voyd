@@ -10,7 +10,9 @@ import { getExprType } from "./get-expr-type.js";
 export const lightweightTypeArgExpr = (e: Expr | undefined): Expr | undefined => {
   if (!e) return undefined;
   if (e.isType && e.isType()) {
-    return (canonicalTypeExprFromType(e) ?? e) as Expr;
+    // Preserve unions to avoid altering member resolution order/identity
+    if ((e as any).isUnionType?.() && (e as any).isUnionType()) return e as Expr;
+    return (canonicalTypeExprFromType(e as any) ?? (e as any)) as Expr;
   }
   if (e.isObjectLiteral?.() || e.isArrayLiteral?.() || e.isBlock?.() || e.isFn?.()) {
     const t = getExprType(e);
@@ -23,4 +25,3 @@ export const sanitizeTypeArgs = (list?: List): List | undefined => {
   if (!list) return undefined;
   return list.map((e) => lightweightTypeArgExpr(e) ?? e);
 };
-

@@ -260,9 +260,10 @@ export const resolveArrayLiteral = (
     typeArgs: elemType
       ? new List({
           value: [
-            process.env.VOYD_ARRAY_LIGHTARGS
-              ? ((lightweightTypeArgExpr(elemType) as Expr) ?? elemType)
-              : elemType,
+            process.env.VOYD_ARRAY_LIGHTARGS === "0" ||
+            process.env.VOYD_ARRAY_LIGHTARGS === "false"
+              ? elemType
+              : ((lightweightTypeArgExpr(elemType) as Expr) ?? elemType),
           ],
         })
       : undefined,
@@ -276,9 +277,10 @@ export const resolveArrayLiteral = (
   const typeArgs = elemType
     ? new List({
         value: [
-          process.env.VOYD_ARRAY_LIGHTARGS
-            ? ((lightweightTypeArgExpr(elemType) as Expr) ?? elemType)
-            : elemType,
+          process.env.VOYD_ARRAY_LIGHTARGS === "0" ||
+          process.env.VOYD_ARRAY_LIGHTARGS === "false"
+            ? elemType
+            : ((lightweightTypeArgExpr(elemType) as Expr) ?? elemType),
         ],
       })
     : undefined;
