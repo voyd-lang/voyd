@@ -8,9 +8,15 @@ export const checkVarTypes = (variable: Variable): Variable => {
   checkTypes(variable.initializer);
 
   if (!variable.inferredType) {
-    throw new Error(
-      `Enable to determine variable initializer return type ${variable.name}`
-    );
+    // Attempt a late type resolution in case upstream resolution left this
+    // initializer partially unresolved (e.g., for control-flow sugar).
+    const late = getExprType(variable.initializer);
+    if (!late) {
+      throw new Error(
+        `Enable to determine variable initializer return type ${variable.name}`
+      );
+    }
+    variable.inferredType = late;
   }
 
   if (variable.typeExpr) checkTypeExpr(variable.typeExpr);
@@ -28,4 +34,3 @@ export const checkVarTypes = (variable: Variable): Variable => {
 
   return variable;
 };
-

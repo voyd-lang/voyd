@@ -387,6 +387,83 @@ pub fn fib(n: i32, a: i32, b: i32) -> i32
     fib(n - 1, b, a + b)
 `;
 
+export const controlFlowText = `
+use std::all
+
+// If-match without binder: returns 4
+pub fn test1() -> i32
+  let opt: Optional<i32> = Some<i32> { value: 4 }
+  if opt.match(Some<i32>) then:
+    opt.value
+  else:
+    -1
+
+// If-match with binder: returns 7
+pub fn test2() -> i32
+  let opt: Optional<i32> = Some<i32> { value: 7 }
+  if opt.match(x, Some<i32>) then:
+    x.value
+  else:
+    -1
+
+// While-match with binder: sum 1+2+3 = 6
+pub fn test3() -> i32
+  let a = [1, 2, 3]
+  let iterator = a.iterate()
+  var sum = 0
+  while iterator.next().match(x, Some<i32>) do:
+    sum = sum + x.value
+  sum
+
+// If optional unwrap (:=): returns 5
+pub fn test4() -> i32
+  let opt: Optional<i32> = Some<i32> { value: 5 }
+  if x := opt then:
+    x
+  else:
+    -1
+
+// While optional unwrap (:=): sum 1+2+3 = 6
+pub fn test5() -> i32
+  let a = [1, 2, 3]
+  let iterator = a.iterate()
+  var sum = 0
+  while n := iterator.next() do:
+    sum = sum + n
+  sum
+
+// while-in sugar over array values: sum 1+2+3 = 6
+pub fn test6() -> i32
+  var sum = 0
+  while n in [1, 2, 3] do:
+    sum = sum + n
+  sum
+
+// Optional coalesce: nested chain returns 5
+pub fn test7() -> i32
+  let structure = {
+    a: some { b: some { c: 5 } }
+  }
+  let v: Some<i32> = structure.a?.b?.c
+  v.value
+
+// If-match without else: returns 4
+pub fn test8() -> i32
+  let opt: Optional<i32> = Some<i32> { value: 4 }
+  var v = -1
+  if opt.match(Some<i32>) then:
+    v = opt.value
+  v
+
+pub fn test9() -> i32
+  let a: Optional<i32> = none()
+
+  let x = if v := a then: a
+  match(x)
+    Some<i32>: x.value
+    None: -1
+`;
+
 export const goodTypeInferenceText = `
 use std::all
 

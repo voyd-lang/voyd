@@ -81,6 +81,55 @@ is not already bound to an identifier (i.e. dot pipelines):
 fn main(a: i32, b: i32) -> String
   a.divide(b)
     .match(x) // Here, match binds the result of the previous expression to x
-      Some: "The value is ${x}"
+      Some<i32>: "The value is ${x}"
       None: "Error: divide by zero"
+```
+
+## Pattern Matching Sugar
+
+voyd provides some features to make pattern matching more ergonomic in places where using a match would be a bit awkward
+
+```voyd
+let opt = Some { value: 4 }
+
+// If match, useful when you don't care about exhaustiveness
+if opt.match(Some<i32>) then:
+  opt.value
+
+// Match can also optionally bind to a new variable name
+if opt.match(x, Some<i32>) then:
+  x.value
+
+// Works for while loops too
+let a = [1, 2, 3]
+let iterator = a.iterate()
+
+var sum = 0
+while iterator.next().match(x, Some<i32>) do:
+  sum = sum + x
+
+// Optional<T> specific sugar
+
+
+let structure = {
+  a: some {
+    b: some {
+      c: 5
+    }
+  }
+}
+
+// Optional coalesce
+let value: Some<i32> = a?.b?.c // 5
+
+if x := opt then:
+  x // x is i32 here, not Some<i32>
+
+while n := iterator.next() do:
+  sum = sum + n
+
+// Iterator specific sugar
+
+while n in [1, 2, 3] do:
+  sum = sum + n
 ```
