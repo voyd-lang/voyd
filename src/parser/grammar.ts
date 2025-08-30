@@ -77,6 +77,7 @@ export const infixOps: OpMap = new Map([
   ["::", 6],
   [";", 4],
   ["??", 3],
+  ["?.", 6],
   ["and", 0],
   ["or", 0],
   ["xor", 0],

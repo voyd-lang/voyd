@@ -431,6 +431,13 @@ pub fn test5() -> i32
   while n ?= iterator.next() do:
     sum = sum + n
   sum
+
+// while-in sugar over array values: sum 1+2+3 = 6
+pub fn test6() -> i32
+  var sum = 0
+  while n in [1, 2, 3] do:
+    sum = sum + n
+  sum
 `;
 
 export const goodTypeInferenceText = `

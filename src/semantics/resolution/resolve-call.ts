@@ -1,5 +1,7 @@
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier, List, nop, Expr, Fn, Block, Variable, Bool } from "../../syntax-objects/index.js";
+import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
+import { SourceLocation } from "../../syntax-objects/syntax.js";
 import { Match } from "../../syntax-objects/match.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
 import {
@@ -24,7 +26,6 @@ import { resolveTypeExpr, resolveFixedArrayType } from "./resolve-type-expr.js";
 import { resolveTrait } from "./resolve-trait.js";
 import { resolveFn } from "./resolve-fn.js";
 import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
-import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
 
 const resolveMemberAccessDirect = (call: Call): Call => {
@@ -670,7 +671,10 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
 
 export const resolveWhile = (call: Call) => {
   // Handle while-match sugar by lowering to `while true do: match(...) ... else: break`
-  const lowered = maybeLowerWhileMatchSugar(call) ?? maybeLowerWhileOptionalUnwrapSugar(call);
+  const lowered =
+    maybeLowerWhileInSugar(call) ||
+    maybeLowerWhileMatchSugar(call) ||
+    maybeLowerWhileOptionalUnwrapSugar(call);
   if (lowered) return lowered;
 
   call.args = call.args.map(resolveEntities);
@@ -707,6 +711,80 @@ const resolveClosureCall = (call: Call): Call => {
 const hasUntypedClosure = (expr: Expr | undefined): boolean =>
   !!(expr?.isClosure() && expr.parameters.some((p) => !p.type && !p.typeExpr));
 
+// Helper: lower optional coalesce `lhs ?. field` to a match that returns Optional<field>
+function resolveOptionalCoalesce(call: Call): Call {
+  const lhs = call.argAt(0);
+  const member = call.argAt(1);
+  if (!lhs || !member?.isIdentifier()) return call;
+
+  const tmp = Identifier.from(`__opt_co_${call.syntaxId}`);
+  const tmpVar = new Variable({
+    name: tmp.clone(),
+    location: tmp.location,
+    initializer: resolveEntities(lhs),
+    isMutable: false,
+    parent: call.parent ?? call.parentModule,
+  });
+
+  const accessValue = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("member-access"),
+    args: new List({ value: [tmp.clone(), Identifier.from("value")] }),
+  });
+
+  const accessField = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("member-access"),
+    args: new List({ value: [accessValue, member.clone()] }),
+  });
+  const fieldType = getExprType(accessField);
+
+  const someCtor = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("Some"),
+    args: new List({
+      value: [new ObjectLiteral({ ...call.metadata, fields: [{ name: "value", initializer: accessField }] })],
+    }),
+  });
+
+  const noneCtor = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("None"),
+    args: new List({ value: [new ObjectLiteral({ ...call.metadata, fields: [] })] }),
+  });
+
+  // If the field is already Optional (i.e., Some/None union) or explicitly a Some<T>,
+  // then the then-arm should yield the field as-is; otherwise wrap in Some { value: field }.
+  const fieldLooksOptional =
+    (fieldType?.isObjectType() &&
+      (fieldType.name.is("Some") || fieldType.genericParent?.name.is("Some"))) ||
+    (fieldType?.isUnionType() &&
+      fieldType.types.some(
+        (t) => t.isObjectType() && (t.name.is("Some") || t.genericParent?.name.is("Some"))
+      ));
+
+  const thenExpr = fieldLooksOptional ? accessField : someCtor;
+
+  const baseType = getExprType(lhs);
+  const someVariant = findSomeVariant(baseType) ?? Identifier.from("Some");
+
+  const match = new Match({
+    ...call.metadata,
+    operand: resolveEntities(lhs),
+    cases: [
+      {
+        matchTypeExpr: someVariant,
+        expr: thenExpr,
+      },
+    ],
+    defaultCase: { expr: noneCtor },
+    bindIdentifier: tmp.clone(),
+    bindVariable: tmpVar,
+  });
+
+  return resolveEntities(match) as unknown as Call;
+}
+
 const specialCallResolvers: Record<string, (c: Call) => Call> = {
   "::": resolveModuleAccess,
   export: resolveExport,
@@ -714,6 +792,7 @@ const specialCallResolvers: Record<string, (c: Call) => Call> = {
   "call-closure": resolveClosureCall,
   ":": resolveLabeledArg,
   while: resolveWhile,
+  "?.": resolveOptionalCoalesce,
   FixedArray: resolveFixedArray,
   binaryen: resolveBinaryen,
   "member-access": resolveMemberAccessDirect,
@@ -898,3 +977,63 @@ const maybeLowerWhileOptionalUnwrapSugar = (call: Call): Call | undefined => {
   call.args.parent = call;
   return call;
 };
+
+const maybeLowerWhileInSugar = (call: Call): Call | undefined => {
+  const cond = call.argAt(0);
+  const doArg = call.argAt(1);
+  if (!cond?.isCall() || !cond.calls("in")) return;
+  if (!(doArg?.isCall() && doArg.calls(":"))) return;
+  const doLabel = doArg.argAt(0);
+  if (!(doLabel?.isIdentifier() && doLabel.value === "do")) return;
+
+  const binder = cond.argAt(0);
+  const iterable = cond.argAt(1);
+  if (!binder?.isIdentifier() || !iterable) return;
+
+  // let __iter_N = iterable.iterate()
+  const iterId = Identifier.from(`__iter_${call.syntaxId}`);
+  const iterateCall = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("iterate"),
+    args: new List({ value: [resolveEntities(iterable)] }),
+  });
+  const iterVar = new Variable({
+    name: iterId.clone(),
+    location: new SourceLocation({
+      startIndex: -1,
+      endIndex: -1,
+      line: 0,
+      column: 0,
+      filePath: call.location?.filePath ?? "raw",
+    }),
+    initializer: iterateCall,
+    isMutable: false,
+    parent: call.parent ?? call.parentModule,
+  });
+
+  // while binder ?= __iter_N.next() do: body
+  const nextCall = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("next"),
+    args: new List({ value: [iterId.clone()] }),
+  });
+  const condUnwrap = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("?="),
+    args: new List({ value: [binder.clone(), nextCall] }),
+  });
+  const newWhile = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("while"),
+    args: new List({ value: [condUnwrap, doArg.clone()] }),
+  });
+
+  const block = new Block({
+    ...call.metadata,
+    body: [iterVar, newWhile],
+  });
+
+  return resolveEntities(block) as unknown as Call;
+};
+
+// (moved above)
