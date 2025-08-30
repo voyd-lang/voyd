@@ -22,7 +22,7 @@ import {
 } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
-import { resolveObjectType } from "./resolve-object-type.js";
+import { resolveObjectType, containsUnresolvedTypeId } from "./resolve-object-type.js";
 import { resolveImpl } from "./resolve-impl.js";
 import {
   resolveEntities,
@@ -102,6 +102,30 @@ const resolveCalleeAndGetType = (call: Call) => {
 };
 
 const handleObjectConstruction = (call: Call, type: ObjectType): void => {
+  // If explicit type args contain unknown identifiers, avoid generic
+  // specialization to prevent infinite recursion. Defer to later type
+  // checking to report the unknown type.
+  if (call.typeArgs) {
+    const unknownIds: string[] = [];
+    const visit = (e: Expr | undefined) => {
+      if (!e) return;
+      if (e.isIdentifier() && !getExprType(e)) unknownIds.push(e.value);
+      else if (e.isCall() && e.typeArgs)
+        e.typeArgs.toArray().forEach((a) => visit(a));
+      else if (e.isList()) e.toArray().forEach((a) => visit(a));
+    };
+    call.typeArgs.toArray().forEach((a) => visit(a));
+    if (
+      unknownIds.length ||
+      call.typeArgs.toArray().some((arg) => containsUnresolvedTypeId(arg))
+    ) {
+      throw new Error(
+        `Unrecognized identifier(s) ${
+          unknownIds.length ? unknownIds.join(", ") : "in type arguments"
+        } for ${type.name} at ${call.location}`
+      );
+    }
+  }
   const objArg = call.argAt(0);
   if (objArg?.isObjectLiteral()) {
     call.args.set(0, resolveObjectLiteral(objArg, type));

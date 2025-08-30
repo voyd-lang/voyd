@@ -38,13 +38,24 @@ export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
 
 // Detects whether a type-argument expression contains an unresolved type
 // identifier (e.g., an unbound generic name like `T`).
-const containsUnresolvedTypeId = (expr: any): boolean => {
+export const containsUnresolvedTypeId = (expr: any): boolean => {
+  const unwrapAlias = (t: any): any => {
+    let cur = t;
+    const seen = new Set<any>();
+    while (cur && cur.isType && cur.isType() && cur.isTypeAlias && cur.isTypeAlias()) {
+      if (seen.has(cur)) return undefined; // cycle
+      seen.add(cur);
+      if (!cur.type) return undefined;
+      cur = cur.type;
+    }
+    return cur;
+  };
+
   const visitExpr = (e: any): boolean => {
     if (!e) return false;
     if (e.isIdentifier && e.isIdentifier()) {
-      const entity = e.resolve?.();
-      const ty = getExprType(e);
-      return !entity && !ty;
+      const ty = unwrapAlias(getExprType(e));
+      return !ty;
     }
     if (e.isCall && e.isCall()) {
       if (e.typeArgs) return e.typeArgs.toArray().some(visitExpr);
@@ -103,6 +114,8 @@ const resolveGenericObjVersion = (
   }
 
   if (!call.typeArgs) return;
+
+  // no-op debug removed
 
   const hasUnresolved = call.typeArgs
     .toArray()
