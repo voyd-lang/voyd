@@ -455,6 +455,13 @@ pub fn test8() -> i32
     v = opt.value
   v
 
+pub fn test9() -> i32
+  let a: Optional<i32> = none()
+
+  let x = if v := a then: a
+  match(x)
+    Some<i32>: x.value
+    None: -1
 `;
 
 export const goodTypeInferenceText = `
