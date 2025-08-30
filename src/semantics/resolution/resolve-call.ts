@@ -52,6 +52,20 @@ const preprocessArgs = (call: Call): void => {
   });
 };
 
+// Normalize any expression to a block expression
+const toBlock = (e: Expr): Block => (e.isBlock() ? e : new Block({ ...e.metadata, body: [e] }));
+
+// Extract `label: expr` value if the node is a labeled arg call
+const getLabeledExpr = (maybe: Expr | undefined, label: string): Expr | undefined => {
+  if (!maybe?.isCall() || !maybe.calls(":")) return undefined;
+  const id = maybe.argAt(0);
+  return id?.isIdentifier() && id.is(label) ? maybe.argAt(1) : undefined;
+};
+
+// Build a labeled arg call `label: expr`
+const makeLabeled = (label: string, expr: Expr, meta: any): Call =>
+  new Call({ ...meta, fnName: Identifier.from(":"), args: new List({ value: [Identifier.from(label), expr] }) });
+
 const maybeResolveMemberAccessSugar = (call: Call): Call | undefined => {
   const firstArg = call.argAt(0);
   const shouldCheckMemberAccess = !hasUntypedClosure(firstArg);
@@ -550,15 +564,9 @@ const maybeLowerIfMatchSugar = (call: Call): Expr | undefined => {
   const thenExpr = thenCall.argAt(1)!;
 
   // Optional else arm
-  const elseCall = call.argAt(2);
-  const elseExpr = (() => {
-    if (!(elseCall?.isCall() && elseCall.calls(":"))) return undefined;
-    const l = elseCall.argAt(0);
-    return l?.isIdentifier() && l.is("else") ? elseCall.argAt(1) : undefined;
-  })();
+  const elseExpr = getLabeledExpr(call.argAt(2), "else");
 
   // Build match expression equivalent
-  const toBlock = (e: Expr): Block => (e.isBlock() ? e : new Block({ ...e.metadata, body: [e] }));
 
   // When no binder is specified, require the operand to be an identifier so
   // we can narrow it in the then-arm.
@@ -614,14 +622,8 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
   const someType = findSomeVariant(baseType);
   if (!someType) return;
 
-  const elseCall = call.argAt(2);
-  const elseExpr = (() => {
-    if (!(elseCall?.isCall() && elseCall.calls(":"))) return undefined;
-    const l = elseCall.argAt(0);
-    return l?.isIdentifier() && l.is("else") ? elseCall.argAt(1) : undefined;
-  })();
+  const elseExpr = getLabeledExpr(call.argAt(2), "else");
 
-  const toBlock = (e: Expr): Block => (e.isBlock() ? e : new Block({ ...e.metadata, body: [e] }));
   const thenExpr = thenCall.argAt(1)!;
 
   // Temporary binder for operand within match arm
@@ -711,7 +713,7 @@ const hasUntypedClosure = (expr: Expr | undefined): boolean =>
   !!(expr?.isClosure() && expr.parameters.some((p) => !p.type && !p.typeExpr));
 
 
-const specialCallResolvers: Record<string, (c: Call) => Call> = {
+const specialCallResolvers: Record<string, (c: Call) => Expr> = {
   "::": resolveModuleAccess,
   export: resolveExport,
   if: resolveIf,
@@ -727,7 +729,7 @@ const specialCallResolvers: Record<string, (c: Call) => Call> = {
   },
 };
 
-export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
+export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
   if (call.type) return call;
 
   const resolver = specialCallResolvers[call.fnName.value];
@@ -758,7 +760,7 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Call => {
   return call;
 };
 
-const maybeLowerWhileMatchSugar = (call: Call): Call | undefined => {
+const maybeLowerWhileMatchSugar = (call: Call): Expr | undefined => {
   const cond = call.argAt(0);
   const doArg = call.argAt(1);
   if (!cond?.isCall() || !cond.calls("match")) return;
@@ -776,7 +778,6 @@ const maybeLowerWhileMatchSugar = (call: Call): Call | undefined => {
   if (!typeExpr) return;
 
   const bodyExpr = doArg.argAt(1)!;
-  const toBlock = (e: Expr): Block => (e.isBlock() ? e : new Block({ ...e.metadata, body: [e] }));
   // Ensure then-arm is void-typed by appending value-level `void` sentinel.
   const thenBlock = new Block({
     ...bodyExpr.metadata,
@@ -813,19 +814,15 @@ const maybeLowerWhileMatchSugar = (call: Call): Call | undefined => {
       : undefined,
   });
 
-  const newDo = new Call({
-    ...call.metadata,
-    fnName: Identifier.from(":"),
-    args: new List({ value: [Identifier.from("do"), resolveEntities(match)] }),
-    type: dVoid,
-  });
+  const newDo = makeLabeled("do", resolveEntities(match), call.metadata);
+  newDo.type = dVoid;
 
   call.args = new List({ value: [new Bool({ value: true, location: call.location }), newDo] });
   call.args.parent = call;
   return call;
 };
 
-const maybeLowerWhileOptionalUnwrapSugar = (call: Call): Call | undefined => {
+const maybeLowerWhileOptionalUnwrapSugar = (call: Call): Expr | undefined => {
   const cond = call.argAt(0);
   const doArg = call.argAt(1);
   if (!cond?.isCall() || !cond.calls("?=")) return;
@@ -842,8 +839,6 @@ const maybeLowerWhileOptionalUnwrapSugar = (call: Call): Call | undefined => {
   if (!someType) return;
 
   const bodyExpr = doArg.argAt(1)!;
-  const toBlock = (e: Expr): Block => (e.isBlock() ? e : new Block({ ...e.metadata, body: [e] }));
-
   // Temporary binder for operand within match arm
   const tmp = Identifier.from(`__opt_${call.syntaxId}`);
   const tmpVar = new Variable({
@@ -891,19 +886,15 @@ const maybeLowerWhileOptionalUnwrapSugar = (call: Call): Call | undefined => {
     bindVariable: tmpVar,
   });
 
-  const newDo = new Call({
-    ...call.metadata,
-    fnName: Identifier.from(":"),
-    args: new List({ value: [Identifier.from("do"), resolveEntities(match)] }),
-    type: dVoid,
-  });
+  const newDo = makeLabeled("do", resolveEntities(match), call.metadata);
+  newDo.type = dVoid;
 
   call.args = new List({ value: [new Bool({ value: true, location: call.location }), newDo] });
   call.args.parent = call;
   return call;
 };
 
-const maybeLowerWhileInSugar = (call: Call): Call | undefined => {
+const maybeLowerWhileInSugar = (call: Call): Expr | undefined => {
   const cond = call.argAt(0);
   const doArg = call.argAt(1);
   if (!cond?.isCall() || !cond.calls("in")) return;
@@ -958,7 +949,7 @@ const maybeLowerWhileInSugar = (call: Call): Call | undefined => {
     body: [iterVar, newWhile],
   });
 
-  return resolveEntities(block) as unknown as Call;
+  return resolveEntities(block);
 };
 
 // (moved above)

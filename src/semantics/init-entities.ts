@@ -576,8 +576,9 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
   }
 
   if (!type.isList()) {
-    console.log(JSON.stringify(type, undefined, 2));
-    throw new Error("Invalid type entity");
+    // Provide a clear error without noisy console logging
+    const rendered = JSON.stringify(type, undefined, 2);
+    throw new Error(`Invalid type entity: ${rendered}`);
   }
 
   if (type.calls("tuple")) {

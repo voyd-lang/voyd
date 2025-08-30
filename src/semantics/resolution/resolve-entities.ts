@@ -162,7 +162,9 @@ const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
     return resolveArrayLiteral(expr, elem);
   }
   if (expr.isCall()) {
-    const resolved = resolveCall(expr);
+    const resolvedExpr = resolveCall(expr);
+    if (!resolvedExpr.isCall()) return resolvedExpr;
+    const resolved = resolvedExpr;
     const objType = findObjectType(unwrapped, resolved.fnName);
     if (objType) {
       resolved.fn = objType;

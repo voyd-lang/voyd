@@ -277,8 +277,9 @@ const functions: Record<string, MacroFn | undefined> = {
     const [condition, ifTrue, ifFalse] = args.toArray();
 
     if (!condition || !ifTrue) {
-      console.log(JSON.stringify(args, undefined, 2));
-      throw new Error("Invalid if expr");
+      // Throw with context; avoid stray console logging in library code
+      const rendered = JSON.stringify(args, undefined, 2);
+      throw new Error(`Invalid if expr: ${rendered}`);
     }
 
     const condResult = evalMacroExpr(

@@ -19,7 +19,10 @@ export const getExprType = (expr?: Expr): Type | undefined => {
   if (expr.isFloat()) return typeof expr.value === "number" ? f32 : f64;
   if (expr.isBool()) return bool;
   if (expr.isIdentifier()) return getIdentifierType(expr);
-  if (expr.isCall()) return resolveCall(expr)?.type;
+  if (expr.isCall()) {
+    const resolved = resolveCall(expr);
+    return resolved.isCall() ? resolved.type : getExprType(resolved);
+  }
   if (expr.isFn()) return expr.getType();
   if (expr.isClosure()) return expr.getType();
   if (expr.isTypeAlias()) return expr.type;
