@@ -387,6 +387,52 @@ pub fn fib(n: i32, a: i32, b: i32) -> i32
     fib(n - 1, b, a + b)
 `;
 
+export const controlFlowText = `
+use std::all
+
+// If-match without binder: returns 4
+pub fn test1() -> i32
+  let opt: Optional<i32> = Some<i32> { value: 4 }
+  if opt.match(Some<i32>) then:
+    opt.value
+  else:
+    -1
+
+// If-match with binder: returns 7
+pub fn test2() -> i32
+  let opt: Optional<i32> = Some<i32> { value: 7 }
+  if opt.match(x, Some<i32>) then:
+    x.value
+  else:
+    -1
+
+// While-match with binder: sum 1+2+3 = 6
+pub fn test3() -> i32
+  let a = [1, 2, 3]
+  let iterator = a.iterate()
+  var sum = 0
+  while iterator.next().match(x, Some<i32>) do:
+    sum = sum + x.value
+  sum
+
+// If optional unwrap (?=): returns 5
+pub fn test4() -> i32
+  let opt: Optional<i32> = Some<i32> { value: 5 }
+  if x ?= opt then:
+    x
+  else:
+    -1
+
+// While optional unwrap (?=): sum 1+2+3 = 6
+pub fn test5() -> i32
+  let a = [1, 2, 3]
+  let iterator = a.iterate()
+  var sum = 0
+  while n ?= iterator.next() do:
+    sum = sum + n
+  sum
+`;
+
 export const goodTypeInferenceText = `
 use std::all
 
