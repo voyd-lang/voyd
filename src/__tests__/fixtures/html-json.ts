@@ -52,15 +52,15 @@ pub fn test2() -> i32
 pub obj JsonNull {}
 pub obj JsonNumber: JsonNull { val: i32 }
 
-type MiniJson = Array<MiniJson> | JsonNumber
+type MsgPack = Array<MsgPack> | JsonNumber
 
-fn work_mini(val: Array<MiniJson>, sum: i32) -> i32
+fn work_mini(val: Array<MsgPack>, sum: i32) -> i32
   let it = val.iterate()
   let reducer: (sum: i32) -> i32 = (sum: i32) -> i32 =>
     it.next().match(opt)
-      Some<MiniJson>:
+      Some<MsgPack>:
         opt.value.match(json)
-          Array<MiniJson>:
+          Array<MsgPack>:
             reducer(work_mini(json, sum))
           JsonNumber:
             reducer(json.val + sum)
@@ -76,4 +76,3 @@ pub fn test3() -> i32
     ]
   ], 0)
 `;
-

@@ -15,8 +15,8 @@ describe("typesAreEqual", () => {
     const json = new UnionType({ name: "Json", childTypeExprs: [] });
     json.types = [jsonObj, string];
 
-    const miniJson = new UnionType({ name: "MiniJson", childTypeExprs: [] });
-    miniJson.types = [string];
+    const MsgPack = new UnionType({ name: "MsgPack", childTypeExprs: [] });
+    MsgPack.types = [string];
 
     const array = new ObjectType({
       name: "Array",
@@ -37,9 +37,9 @@ describe("typesAreEqual", () => {
     arrMini.genericParent = array;
     const argMini = new TypeAlias({
       name: new Identifier({ value: "T" }),
-      typeExpr: new Identifier({ value: "MiniJson" }),
+      typeExpr: new Identifier({ value: "MsgPack" }),
     });
-    argMini.type = miniJson;
+    argMini.type = MsgPack;
     arrMini.appliedTypeArgs = [argMini];
 
     expect(typesAreEqual(arrJson, arrMini)).toBe(false);
