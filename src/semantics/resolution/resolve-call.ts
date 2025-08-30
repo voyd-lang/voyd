@@ -301,6 +301,7 @@ export const resolveModuleAccess = (call: Call) => {
     const candidates = resolveModulePath(path)
       .map(({ e }) => e)
       .filter((e) => e.isFn());
+    // candidates resolved from module path
 
     return resolveCall(right, candidates);
   }

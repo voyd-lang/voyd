@@ -85,14 +85,11 @@ export const typesAreCompatible = (
 
     // Allow instance-vs-instance generic comparison by parent
     if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
-      return !!a.appliedTypeArgs?.every((arg, index) =>
-        typesAreCompatible(
-          getExprType(arg),
-          getExprType(b.appliedTypeArgs?.[index]),
-          opts,
-          visited
-        )
-      );
+      return !!a.appliedTypeArgs?.every((arg, index) => {
+        const ta = getExprType(arg);
+        const tb = getExprType(b.appliedTypeArgs?.[index]);
+        return typesAreCompatible(ta, tb, opts, visited);
+      });
     }
 
     // If the parameter side is an unspecialized generic object (has

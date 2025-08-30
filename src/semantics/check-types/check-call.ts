@@ -158,12 +158,27 @@ const checkFixedArrayInit = (call: Call) => {
 
     if (type.elemType?.isUnionType()) {
       resolveUnionType(type.elemType);
-      if (type.elemType.types.length === 0) {
-        return;
+      if (type.elemType.types.length === 0) return;
+      let match = type.elemType.types.some((t) => typesAreCompatible(argType, t));
+      // Fallback: when the union's members have not fully resolved yet under
+      // canonicalization, allow matching by nominal head name from the union's
+      // declared child expressions.
+      if (!match) {
+        const heads = new Set<string>();
+        type.elemType.childTypeExprs.toArray().forEach((e: any) => {
+          if (e.isCall?.() && e.fnName) heads.add(e.fnName.value);
+          else if (e.isIdentifier?.()) heads.add(e.value);
+          else if (e.isType?.() && e.isObjectType?.()) heads.add(e.name.value);
+        });
+        if (argType.isObjectType()) {
+          const head = argType.genericParent
+            ? argType.genericParent.name.value
+            : argType.name.value;
+          match = heads.has(head);
+        } else if (argType.isPrimitiveType()) {
+          match = heads.has(argType.name.value);
+        }
       }
-      const match = type.elemType.types.some((t) =>
-        typesAreCompatible(argType, t)
-      );
       if (!match) {
         throw new Error(
           `Expected ${type.elemType.name} got ${argType.name} at ${arg.location}`

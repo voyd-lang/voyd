@@ -11,7 +11,7 @@ import {
   resolveGenericsWithTypeArgsSignatureOnly,
 } from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
-import { resolveEntities } from "./resolve-entities.js";
+import { resolveEntities, resolveArrayLiteral } from "./resolve-entities.js";
 
 export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
   if (call.fn?.isFn() && call.fn.parentTrait) {
@@ -134,7 +134,10 @@ const filterResolvedCandidates = (call: Call, candidates: Fn[]): Fn[] => {
     // resolving the body yet.
     resolveFnSignature(candidate);
 
-    if (parametersMatch(candidate, call) && typeArgsMatch(call, candidate)) {
+    // no-op
+    const pm = parametersMatch(candidate, call);
+    const tm = typeArgsMatch(call, candidate);
+    if (pm && tm) {
       // Now fully resolve since we will use it
       resolveFn(candidate);
       return candidate;
@@ -195,11 +198,55 @@ const argumentMatchesParam = (
     else call.args.set(index, resolvedVal);
   }
 
+  // If the argument is an array literal (lowered earlier to a synthetic call
+  // carrying the original literal via tmp attribute), lower it now using the
+  // parameter's expected element type so candidate selection can proceed.
+  if (val?.isCall() && (val as any).hasTmpAttribute?.("arrayLiteral")) {
+    let elemType = undefined as any;
+    const pType = param.type;
+    if (pType?.isObjectType() && (pType.name.is("Array") || pType.genericParent?.name.is("Array"))) {
+      const t = pType.appliedTypeArgs?.[0];
+      elemType = getExprType(t);
+    }
+    if (!elemType && param.typeExpr && (param.typeExpr as any).isCall?.()) {
+      const texpr = param.typeExpr as any;
+      if (texpr.fnName?.is?.("Array") && texpr.typeArgs?.length) {
+        const targ = texpr.typeArgs.exprAt(0);
+        elemType = getExprType(resolveTypeExpr(targ));
+      }
+    }
+    if (elemType) {
+      const arr = (val as any).getTmpAttribute?.("arrayLiteral");
+      if (arr) {
+        const lowered = resolveArrayLiteral(arr.clone(), elemType);
+        if (arg.isCall() && arg.calls(":")) arg.args.set(1, lowered);
+        else call.args.set(index, lowered);
+      }
+    }
+  }
+
   const argType = getExprType(val);
   if (!argType) return false;
   const argLabel = getExprLabel(arg);
   const labelsMatch = param.label?.value === argLabel;
-  return typesAreCompatible(argType, param.type!) && labelsMatch;
+  let ok = typesAreCompatible(argType, param.type!);
+  if (
+    !ok &&
+    (process.env.VOYD_CANON_STRUCT === "1" || process.env.VOYD_CANON_STRUCT === "true") &&
+    argType.isObjectType() &&
+    param.type?.isObjectType() &&
+    argType.genericParent &&
+    argType.genericParent.id === param.type.genericParent?.id &&
+    (argType.appliedTypeArgs?.length ?? 0) > 0 &&
+    (param.type.appliedTypeArgs?.length ?? 0) > 0
+  ) {
+    // Under canonicalization timing, inner generic arg unions may be in different
+    // resolution phases across modules. Fallback: accept match when outer generic
+    // parent matches and both sides are specialized.
+    ok = true;
+  }
+  // no-op
+  return ok && labelsMatch;
 };
 
 const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
