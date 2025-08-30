@@ -257,7 +257,15 @@ export const resolveArrayLiteral = (
     ...arr.metadata,
     fnName: Identifier.from("FixedArray"),
     args: new List({ value: arr.elements }),
-    typeArgs: elemType ? new List({ value: [elemType] }) : undefined,
+    typeArgs: elemType
+      ? new List({
+          value: [
+            process.env.VOYD_ARRAY_LIGHTARGS
+              ? ((lightweightTypeArgExpr(elemType) as Expr) ?? elemType)
+              : elemType,
+          ],
+        })
+      : undefined,
   });
 
   const objLiteral = new ObjectLiteral({
@@ -265,7 +273,15 @@ export const resolveArrayLiteral = (
     fields: [{ name: "from", initializer: fixedArray }],
   });
 
-  const typeArgs = elemType ? new List({ value: [elemType] }) : undefined;
+  const typeArgs = elemType
+    ? new List({
+        value: [
+          process.env.VOYD_ARRAY_LIGHTARGS
+            ? ((lightweightTypeArgExpr(elemType) as Expr) ?? elemType)
+            : elemType,
+        ],
+      })
+    : undefined;
   const newArrayCall = new Call({
     ...arr.metadata,
     fnName: Identifier.from("new_array"),

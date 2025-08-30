@@ -9,7 +9,7 @@ import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
-import { resolveFn } from "./resolve-fn.js";
+import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { resolveExport } from "./resolve-use.js";
 
 export const resolveImpl = (
@@ -65,6 +65,53 @@ export const resolveImpl = (
   impl.typesResolved = true;
   impl.body.value = resolveEntities(impl.body.value);
   resolveDefaultTraitMethods(impl);
+
+  return impl;
+};
+
+/**
+ * Resolve only method signatures and generic type bindings for an
+ * implementation. Avoids resolving the impl body and default trait methods.
+ * Used during candidate discovery to keep specialization lazy.
+ */
+export const resolveImplSignatures = (
+  impl: Implementation,
+  targetType?: ObjectType
+): Implementation => {
+  // Bind target type and generic aliases if provided so parameter typeExprs
+  // can reference concrete type arguments (e.g., T -> i32).
+  targetType = targetType ?? getTargetType(impl);
+  impl.targetType = targetType;
+
+  if (targetType?.appliedTypeArgs) {
+    targetType.appliedTypeArgs.forEach((arg, index) => {
+      const typeParam = impl.typeParams.at(index);
+      if (!typeParam) return;
+      const alias = new TypeAlias({ name: typeParam.clone(), typeExpr: nop() });
+      resolveTypeExpr(arg);
+      alias.type = getExprType(arg);
+      impl.registerEntity(alias);
+    });
+  }
+
+  // Pre-register and resolve only signatures for methods in this impl
+  preRegisterImplMethods(impl);
+  impl.methods.forEach((m) => resolveFnSignature(m));
+
+  // Resolve and attach trait (do not resolve default methods here)
+  impl.trait = getTrait(impl);
+  if (impl.trait) {
+    impl.trait.implementations.push(impl);
+  }
+
+  // Ensure the implementation is attached to the target type so that
+  // candidate discovery can find its methods.
+  if (targetType?.isObjectType()) {
+    if (!targetType.implementations) targetType.implementations = [];
+    if (!targetType.implementations.includes(impl)) {
+      targetType.implementations.push(impl);
+    }
+  }
 
   return impl;
 };

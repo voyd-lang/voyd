@@ -23,7 +23,7 @@ import {
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
-import { resolveImpl } from "./resolve-impl.js";
+import { resolveImpl, resolveImplSignatures } from "./resolve-impl.js";
 import {
   resolveEntities,
   resolveArrayLiteral,
@@ -335,8 +335,9 @@ export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
   // If no explicit type args are supplied, try to infer them from the
   // supplied object literal.
 
-  // Proactively resolve implementations so their exports (e.g., `init`) are available.
-  type.implementations?.forEach((impl) => resolveImpl(impl, type));
+  // Proactively resolve implementation signatures so `init` candidates are discoverable
+  // without resolving bodies yet.
+  type.implementations?.forEach((impl) => resolveImplSignatures(impl, type));
 
   // Gather all inline methods and identify candidate init functions
   const initFns = collectInitFns(type);
