@@ -13,6 +13,8 @@ import { checkBinaryenCall } from "./check-binaryen-call.js";
 import { checkLabeledArg } from "./check-labeled-arg.js";
 import { checkFixedArrayType } from "./check-fixed-array-type.js";
 import { resolveFnSignature } from "../resolution/resolve-fn.js";
+import { resolveObjectLiteral } from "../resolution/resolve-entities.js";
+import { resolveObjectType } from "../resolution/resolve-object-type.js";
 import { getCallFn } from "../resolution/get-call-fn.js";
 
 export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
@@ -29,19 +31,33 @@ export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("member-access")) return call; // TODO
   if (call.fn?.isObjectType()) return checkObjectInit(call);
 
-  call.args = call.args.map(checkTypes);
+  // Early handle nominal constructor calls when lazy expansion is enabled
   if (
     !call.fn &&
     (process.env.VOYD_LAZY_FN_EXPANSION === "1" ||
       process.env.VOYD_LAZY_FN_EXPANSION === "true")
   ) {
-    const candidates = call.resolveFns(call.fnName);
-    if (candidates.length) {
-      const cand = getCallFn(call, candidates);
-      if (cand) {
-        call.fn = cand;
-        call.type = cand.returnType;
+    const ent = call.fnName.resolve();
+    if (ent?.isObjectType()) {
+      const expected = resolveObjectType(ent, call);
+      call.fn = expected;
+      call.type = expected;
+      const objArg = call.argAt(0);
+      if (objArg?.isObjectLiteral()) {
+        call.args.set(0, resolveObjectLiteral(objArg, expected));
       }
+      return checkObjectInit(call);
+    }
+  }
+
+  call.args = call.args.map(checkTypes);
+  if (!call.fn) {
+    const lazy =
+      process.env.VOYD_LAZY_FN_EXPANSION === "1" ||
+      process.env.VOYD_LAZY_FN_EXPANSION === "true";
+    if (lazy) {
+      // Do not attempt general candidate selection here; leave non-constructor
+      // calls to the resolution pass to avoid double-resolve during checking.
     }
   }
   // No fallback to resolve here; semantics should have picked a candidate.
@@ -187,7 +203,15 @@ const checkObjectInit = (call: Call): Call => {
   checkTypes(literal);
 
   // Check to ensure literal structure is compatible with nominal structure
-  if (!typesAreCompatible(literal.type, call.type, { structuralOnly: true })) {
+  const lazy =
+    process.env.VOYD_LAZY_FN_EXPANSION === "1" ||
+    process.env.VOYD_LAZY_FN_EXPANSION === "true";
+  const expectedObj = call.type?.isObjectType() ? call.type : undefined;
+  // Under lazy expansion, allow constructing generic objects where field types
+  // aren’t fully resolved yet (e.g., Array<T> within a generic function body).
+  if (
+    !lazy || !expectedObj?.typeParameters?.length
+  ) if (!typesAreCompatible(literal.type, call.type, { structuralOnly: true })) {
     const expected = call.type?.isObjectType() ? call.type : undefined;
     const provided = literal.type?.isObjectType() ? literal.type : undefined;
 
