@@ -1,6 +1,5 @@
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier, List, nop, Expr, Fn, Block, Variable, Bool } from "../../syntax-objects/index.js";
-import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { SourceLocation } from "../../syntax-objects/syntax.js";
 import { Match } from "../../syntax-objects/match.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
@@ -711,79 +710,6 @@ const resolveClosureCall = (call: Call): Call => {
 const hasUntypedClosure = (expr: Expr | undefined): boolean =>
   !!(expr?.isClosure() && expr.parameters.some((p) => !p.type && !p.typeExpr));
 
-// Helper: lower optional coalesce `lhs ?. field` to a match that returns Optional<field>
-function resolveOptionalCoalesce(call: Call): Call {
-  const lhs = call.argAt(0);
-  const member = call.argAt(1);
-  if (!lhs || !member?.isIdentifier()) return call;
-
-  const tmp = Identifier.from(`__opt_co_${call.syntaxId}`);
-  const tmpVar = new Variable({
-    name: tmp.clone(),
-    location: tmp.location,
-    initializer: resolveEntities(lhs),
-    isMutable: false,
-    parent: call.parent ?? call.parentModule,
-  });
-
-  const accessValue = new Call({
-    ...call.metadata,
-    fnName: Identifier.from("member-access"),
-    args: new List({ value: [tmp.clone(), Identifier.from("value")] }),
-  });
-
-  const accessField = new Call({
-    ...call.metadata,
-    fnName: Identifier.from("member-access"),
-    args: new List({ value: [accessValue, member.clone()] }),
-  });
-  const fieldType = getExprType(accessField);
-
-  const someCtor = new Call({
-    ...call.metadata,
-    fnName: Identifier.from("Some"),
-    args: new List({
-      value: [new ObjectLiteral({ ...call.metadata, fields: [{ name: "value", initializer: accessField }] })],
-    }),
-  });
-
-  const noneCtor = new Call({
-    ...call.metadata,
-    fnName: Identifier.from("None"),
-    args: new List({ value: [new ObjectLiteral({ ...call.metadata, fields: [] })] }),
-  });
-
-  // If the field is already Optional (i.e., Some/None union) or explicitly a Some<T>,
-  // then the then-arm should yield the field as-is; otherwise wrap in Some { value: field }.
-  const fieldLooksOptional =
-    (fieldType?.isObjectType() &&
-      (fieldType.name.is("Some") || fieldType.genericParent?.name.is("Some"))) ||
-    (fieldType?.isUnionType() &&
-      fieldType.types.some(
-        (t) => t.isObjectType() && (t.name.is("Some") || t.genericParent?.name.is("Some"))
-      ));
-
-  const thenExpr = fieldLooksOptional ? accessField : someCtor;
-
-  const baseType = getExprType(lhs);
-  const someVariant = findSomeVariant(baseType) ?? Identifier.from("Some");
-
-  const match = new Match({
-    ...call.metadata,
-    operand: resolveEntities(lhs),
-    cases: [
-      {
-        matchTypeExpr: someVariant,
-        expr: thenExpr,
-      },
-    ],
-    defaultCase: { expr: noneCtor },
-    bindIdentifier: tmp.clone(),
-    bindVariable: tmpVar,
-  });
-
-  return resolveEntities(match) as unknown as Call;
-}
 
 const specialCallResolvers: Record<string, (c: Call) => Call> = {
   "::": resolveModuleAccess,
@@ -792,7 +718,6 @@ const specialCallResolvers: Record<string, (c: Call) => Call> = {
   "call-closure": resolveClosureCall,
   ":": resolveLabeledArg,
   while: resolveWhile,
-  "?.": resolveOptionalCoalesce,
   FixedArray: resolveFixedArray,
   binaryen: resolveBinaryen,
   "member-access": resolveMemberAccessDirect,

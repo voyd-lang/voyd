@@ -438,6 +438,7 @@ pub fn test6() -> i32
   while n in [1, 2, 3] do:
     sum = sum + n
   sum
+
 `;
 
 export const goodTypeInferenceText = `
