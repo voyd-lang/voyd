@@ -36,7 +36,7 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
 };
 
 const getCandidates = (call: Call): Fn[] => {
-  const fns = call.resolveFns(call.fnName);
+  let fns = call.resolveFns(call.fnName);
 
   // Check for methods of arg 1
   const arg1 = call.argAt(0);
@@ -47,12 +47,34 @@ const getCandidates = (call: Call): Fn[] => {
 
   if (arg1Type?.isObjectType()) {
     const isInsideImpl = call.parentImpl?.targetType?.id === arg1Type.id;
-    const implFns = isInsideImpl
-      ? [] // internal methods already in scope
-      : arg1Type.implementations
-          ?.flatMap((impl) => impl.exports)
-          .filter((fn) => fn.name.is(call.fnName.value));
-    fns.push(...(implFns ?? []));
+    const arg0 = call.argAt(0);
+    const isObjectArgForm = !!(arg0 && arg0.isCall() && arg0.calls(":"));
+    const implFns = arg1Type.implementations
+      ?.flatMap((impl) => {
+        // Include both exported methods and internal methods so resolution
+        // works regardless of export mechanics or ordering
+        const methods: Fn[] = [];
+        methods.push(...impl.exports);
+        // Some implementations (non-trait) may not register exports for `pub fn`
+        // early; include impl.methods as well to avoid timing holes.
+        impl.methods.forEach((m) => methods.push(m));
+        return methods;
+      })
+      .filter((fn) => fn.name.is(call.fnName.value))
+      // When inside an impl body, its methods are already in lexical scope via
+      // pre-registration. Avoid duplicate candidates from the same impl.
+      .filter((fn) => (isInsideImpl ? fn.parentImpl !== call.parentImpl : true));
+    if (implFns && implFns.length && !isObjectArgForm) {
+      // Prefer receiver methods over same-named top-level functions in
+      // method-call position (arg1 is an object type). Drop non-method
+      // candidates to avoid ambiguity.
+      fns = fns.filter((fn) => !!fn.parentImpl);
+      fns.push(...implFns);
+    } else if (implFns && implFns.length) {
+      // In object-arg form (labeled params), don't drop top-level functions;
+      // include both so labeled-arg overloads can match.
+      fns.push(...implFns);
+    }
   }
 
   if (arg1Type?.isTraitType()) {

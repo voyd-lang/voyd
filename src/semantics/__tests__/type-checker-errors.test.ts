@@ -123,4 +123,19 @@ pub fn main()
       /returns f64 but expected i32/,
     );
   });
+
+  test("disallows assignment to captured variable inside closure", async () => {
+    const code = `
+pub fn main()
+  var acc: i32 = 0
+  let f = (v: i32) -> void =>
+    acc = v
+    void
+  f(1)
+  acc
+`;
+    await expect(compile(code)).rejects.toThrow(
+      /Cannot assign to captured variable/
+    );
+  });
 });
