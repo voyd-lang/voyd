@@ -7,6 +7,18 @@ import {
 import { Fn } from "../syntax-objects/fn.js";
 import binaryen from "binaryen";
 
+// Track functions already emitted per module to avoid duplicate additions
+// This is a band-aid for a bug in the impl resolver.
+const compiledFns = new WeakMap<object, Set<string>>();
+const getCompiledSet = (mod: object): Set<string> => {
+  let set = compiledFns.get(mod);
+  if (!set) {
+    set = new Set();
+    compiledFns.set(mod, set);
+  }
+  return set;
+};
+
 export const compile = (opts: CompileExprOpts<Fn>): number => {
   const { expr: fn, mod } = opts;
   if (fn.genericInstances) {
@@ -32,16 +44,20 @@ export const compile = (opts: CompileExprOpts<Fn>): number => {
 
   const variableTypes = getFunctionVarTypes(opts, fn);
 
+  const compiledSet = getCompiledSet(mod);
+  if (compiledSet.has(fn.id)) return mod.nop();
   mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
+  compiledSet.add(fn.id);
 
   return mod.nop();
 };
 
 export const getFunctionParameterTypes = (opts: CompileExprOpts, fn: Fn) => {
-  const types = fn.parameters.map((param) => mapBinaryenType(opts, param.type!));
+  const types = fn.parameters.map((param) =>
+    mapBinaryenType(opts, param.type!)
+  );
   return binaryen.createType(types);
 };
 
 export const getFunctionVarTypes = (opts: CompileExprOpts, fn: Fn) =>
   fn.variables.map((v) => mapBinaryenType(opts, v.type!));
-

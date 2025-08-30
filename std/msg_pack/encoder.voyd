@@ -80,19 +80,13 @@ impl Encoder
       self.write_u8(bit_and(shift_ru(len, 8), 255))
       self.write_u8(bit_and(len, 255))
 
-    var i = 0
-    while i < len do:
-      value.get(i).match(item)
-        Some<MiniJson>:
-          item.value.match(json)
-            String:
-              self.encode_string(json)
-            Array<MiniJson>:
-              self.encode_array(json)
-          0
-        None:
-          0
-      i = i + 1
+    value.each<MiniJson> item =>
+      item.match(json)
+        String:
+          self.encode_string(json)
+        Array<MiniJson>:
+          self.encode_array(json)
+
 
 pub fn encode_json(value: i32, ptr: i32) -> i32
   if linear_memory::size() == 0 then:

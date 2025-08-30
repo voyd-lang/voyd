@@ -19,6 +19,7 @@ export const checkIf = (call: Call) => {
     );
   }
 
+  const thenExpr = call.argAt(1) ? checkTypes(call.argAt(1)) : undefined;
   const elseExpr = call.argAt(2) ? checkTypes(call.argAt(2)) : undefined;
 
   // Until unions are supported, return voyd if no else
@@ -28,6 +29,7 @@ export const checkIf = (call: Call) => {
   }
 
   const elseType = getExprType(elseExpr);
+  const thenType = getExprType(thenExpr);
 
   if (!typesAreCompatible(elseType, call.type)) {
     throw new Error(
@@ -35,6 +37,11 @@ export const checkIf = (call: Call) => {
     );
   }
 
+  if (!typesAreCompatible(thenType, call.type)) {
+    throw new Error(
+      `If condition clauses do not return same type at ${call.location}`
+    );
+  }
+
   return call;
 };
-

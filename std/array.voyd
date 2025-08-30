@@ -14,6 +14,10 @@ obj ArrayIterator<T> {
   array: Array<T>
 }
 
+impl<T> Iterable<T> for Array<T>
+  fn iterate(self) -> Iterator<T>
+    ArrayIterator<T> { index: 0, array: self }
+
 pub fn new_array<T>({ with_size: i32 }) -> Array<T>
   Array<T> {
     storage: new_fixed_array<T>(with_size),
@@ -98,7 +102,7 @@ impl<T> Array<T>
 
       Array<T> { storage: new_storage, count: new_length }
 
-  pub fn insert(self, index: i32, value: T) -> Array<T>
+  pub fn insert(&self, index: i32, value: T) -> Array<T>
     let computed_index = compute_index(index, self.count)
     if computed_index >= self.count then:
       self.push(value)
@@ -183,18 +187,107 @@ impl<T> Array<T>
 
       Array<T> { storage: new_storage, count: new_length }
 
+  // Functional helpers as Array methods
+  pub fn each(self, f: (v: T) -> void) -> void
+    let iterator = self.iterate()
+    while true do:
+      iterator.next().match(item)
+        Some<T>:
+          f(item.value)
+          void
+        None:
+          break
+
+  pub fn filter(self, pred: (v: T) -> bool) -> Array<T>
+    let iterator = self.iterate()
+    let &acc = new_array<T>({ with_size: 4 })
+
+    while true do:
+      iterator.next().match(item)
+        Some<T>:
+          if pred(item.value) then:
+            acc.push(item.value)
+            void
+          else:
+            void
+        None:
+          break
+    acc
+
+  pub fn map<O>(self, f: (v: T) -> O) -> Array<O>
+    let iterator = self.iterate()
+    let &acc = new_array<O>({ with_size: 4 })
+    while true do:
+      iterator.next().match(item)
+        Some<T>:
+          acc.push(f(item.value))
+          void
+        None:
+          break
+    acc
+
+  pub fn reduce<O>(self, init: O, f: (acc: O, v: T) -> O) -> O
+    let iterator = self.iterate()
+    var acc = init
+    while true do:
+      iterator.next().match(item)
+        Some<T>:
+          acc = f(acc, item.value)
+          void
+        None:
+          break
+    acc
+
+  pub fn find(self, pred: (v: T) -> bool) -> Optional<T>
+    let iterator = self.iterate()
+    var res: Optional<T> = None {}
+    while true do:
+      iterator.next().match(item)
+        Some<T>:
+          if pred(item.value) then:
+            res = Some<T> { value: item.value }
+            break
+        None:
+          break
+    res
+
+  pub fn some(self, pred: (v: T) -> bool) -> bool
+    let iterator = self.iterate()
+    var found = false
+    while true do:
+      iterator.next().match(item)
+        Some<T>:
+          if pred(item.value) then:
+            found = true
+            break
+        None:
+          void
+    found
+
+  pub fn every(self, pred: (v: T) -> bool) -> bool
+    let iterator = self.iterate()
+    var ok = true
+    while true do:
+      iterator.next().match(item)
+        Some<T>:
+          if pred(item.value) then:
+            void
+          else:
+            ok = false
+            break
+        None:
+          break
+    ok
+
+
 fn compute_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
 
 impl<T> Iterator<T> for ArrayIterator<T>
   fn next(&self) -> Optional<T>
-    if self.index >= self.array.length then:
+    if self.index >= self.array.count then:
       None {}
     else:
-      let r = self.array.get(self.index)
+      let v = self.array.storage.get<T>(self.index)
       self.index = self.index + 1
-      r
-
-impl<T> Iterable<T> for Array<T>
-  fn iterate(self) -> Iterator<T>
-    ArrayIterator<T> { index: 0, array: self }
+      Some<T> { value: v }

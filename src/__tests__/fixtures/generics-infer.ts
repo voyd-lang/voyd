@@ -25,7 +25,7 @@ pub fn test3() -> i32
   wrap(arr)
 
 // 4) Generic array reduce
-fn reduce<T>({ arr: Array<T>, start: T, reducer cb: (acc: T, current: T) -> T }) -> T
+fn reduce_test<T>({ arr: Array<T>, start: T, reducer cb: (acc: T, current: T) -> T }) -> T
   let iterator = arr.iterate()
   let reducer: (acc: T) -> T = (acc: T) =>
     iterator.next().match(opt)
@@ -37,6 +37,5 @@ fn reduce<T>({ arr: Array<T>, start: T, reducer cb: (acc: T, current: T) -> T })
 
 pub fn test4() -> i32
   let arr: Array<i32> = [1, 2, 3]
-  reduce<i32> arr: arr start: 0 reducer: (acc: i32, current: i32) => acc + current
+  reduce_test<i32> arr: arr start: 0 reducer: (acc: i32, current: i32) => acc + current
 `;
-

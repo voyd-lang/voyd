@@ -237,7 +237,7 @@ pub fn test20() -> String
   "Hello, world!" + " " + "This is a test."
 
 pub fn test21()
-  let arr = new_array<Optional<i32>>({ with_size: 4 })
+  let &arr = new_array<Optional<i32>>({ with_size: 4 })
   arr.push(Some<i32> { value: 12 })
   arr.pop()
     .match(val)
@@ -252,7 +252,7 @@ pub fn test21()
         -1
 
 pub fn test22()
-  let arr = [1, 2, 3, 4]
+  let &arr = [1, 2, 3, 4]
   arr.push(5)
   arr.push(3)
   arr.push(173)
@@ -265,7 +265,7 @@ pub fn test22()
 
 // Test structural object re-assignment
 pub fn test23()
-  let val = { x: 1, y: 2, z: 3 }
+  let &val = { x: 1, y: 2, z: 3 }
   val.x = 4
   val.x
 
