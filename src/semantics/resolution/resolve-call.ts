@@ -426,6 +426,10 @@ export const resolveIf = (call: Call) => {
   const lowered = maybeLowerIfMatchSugar(call);
   if (lowered) return lowered as unknown as Call;
 
+  // Handle Optional unwrap sugar: `if x ?= opt then: ... [else: ...]`
+  const loweredOpt = maybeLowerIfOptionalUnwrapSugar(call);
+  if (loweredOpt) return loweredOpt as unknown as Call;
+
   if (!call.args.hasLabeledArg("elif")) return resolveBasicIf(call);
 
   type Pair = { cond: Expr; thenExpr: Expr };
@@ -588,9 +592,85 @@ const maybeLowerIfMatchSugar = (call: Call): Expr | undefined => {
   return resolveEntities(match);
 };
 
+const findSomeVariant = (type?: Type) => {
+  if (!type?.isUnionType()) return undefined;
+  return type.types.find(
+    (t) => t.isObjectType() && (t.name.is("Some") || t.genericParent?.name.is("Some"))
+  );
+};
+
+const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
+  const cond = call.argAt(0);
+  const thenCall = call.argAt(1);
+  if (!cond?.isCall() || !cond.calls("?=")) return;
+  const binder = cond.argAt(0);
+  const operand = cond.argAt(1);
+  if (!binder?.isIdentifier() || !operand) return;
+  if (!(thenCall?.isCall() && thenCall.calls(":"))) return;
+  const thenLabel = thenCall.argAt(0);
+  if (!(thenLabel?.isIdentifier() && thenLabel.value === "then")) return;
+
+  const baseType = getExprType(operand);
+  const someType = findSomeVariant(baseType);
+  if (!someType) return;
+
+  const elseCall = call.argAt(2);
+  const elseExpr = (() => {
+    if (!(elseCall?.isCall() && elseCall.calls(":"))) return undefined;
+    const l = elseCall.argAt(0);
+    return l?.isIdentifier() && l.is("else") ? elseCall.argAt(1) : undefined;
+  })();
+
+  const toBlock = (e: Expr): Block => (e.isBlock() ? e : new Block({ ...e.metadata, body: [e] }));
+  const thenExpr = thenCall.argAt(1)!;
+
+  // Temporary binder for operand within match arm
+  const tmp = Identifier.from(`__opt_${call.syntaxId}`);
+  const tmpVar = new Variable({
+    name: tmp.clone(),
+    location: tmp.location,
+    initializer: operand,
+    isMutable: false,
+    parent: call.parent ?? call.parentModule,
+  });
+
+  // let binder = tmp.value
+  const valueAccess = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("member-access"),
+    args: new List({ value: [tmp.clone(), Identifier.from("value")] }),
+  });
+  const unwrap = new Variable({
+    name: binder.clone(),
+    location: binder.location,
+    initializer: valueAccess,
+    isMutable: false,
+    parent: call.parent ?? call.parentModule,
+  });
+
+  const thenBlock = toBlock(thenExpr);
+  thenBlock.body = [unwrap, ...thenBlock.body];
+
+  const match = new Match({
+    ...call.metadata,
+    operand,
+    cases: [
+      {
+        matchTypeExpr: someType,
+        expr: thenBlock,
+      },
+    ],
+    defaultCase: elseExpr ? { expr: toBlock(elseExpr) } : { expr: toBlock(Identifier.from("void")) },
+    bindIdentifier: tmp,
+    bindVariable: tmpVar,
+  });
+
+  return resolveEntities(match);
+};
+
 export const resolveWhile = (call: Call) => {
   // Handle while-match sugar by lowering to `while true do: match(...) ... else: break`
-  const lowered = maybeLowerWhileMatchSugar(call);
+  const lowered = maybeLowerWhileMatchSugar(call) ?? maybeLowerWhileOptionalUnwrapSugar(call);
   if (lowered) return lowered;
 
   call.args = call.args.map(resolveEntities);
@@ -727,6 +807,84 @@ const maybeLowerWhileMatchSugar = (call: Call): Call | undefined => {
           parent: call.parent ?? call.parentModule,
         })
       : undefined,
+  });
+
+  const newDo = new Call({
+    ...call.metadata,
+    fnName: Identifier.from(":"),
+    args: new List({ value: [Identifier.from("do"), resolveEntities(match)] }),
+    type: dVoid,
+  });
+
+  call.args = new List({ value: [new Bool({ value: true, location: call.location }), newDo] });
+  call.args.parent = call;
+  return call;
+};
+
+const maybeLowerWhileOptionalUnwrapSugar = (call: Call): Call | undefined => {
+  const cond = call.argAt(0);
+  const doArg = call.argAt(1);
+  if (!cond?.isCall() || !cond.calls("?=")) return;
+  if (!(doArg?.isCall() && doArg.calls(":"))) return;
+  const doLabel = doArg.argAt(0);
+  if (!(doLabel?.isIdentifier() && doLabel.value === "do")) return;
+
+  const binder = cond.argAt(0);
+  const operand = cond.argAt(1);
+  if (!binder?.isIdentifier() || !operand) return;
+
+  const baseType = getExprType(operand);
+  const someType = findSomeVariant(baseType);
+  if (!someType) return;
+
+  const bodyExpr = doArg.argAt(1)!;
+  const toBlock = (e: Expr): Block => (e.isBlock() ? e : new Block({ ...e.metadata, body: [e] }));
+
+  // Temporary binder for operand within match arm
+  const tmp = Identifier.from(`__opt_${call.syntaxId}`);
+  const tmpVar = new Variable({
+    name: tmp.clone(),
+    location: tmp.location,
+    initializer: operand,
+    isMutable: false,
+    parent: call.parent ?? call.parentModule,
+  });
+
+  // let binder = tmp.value
+  const valueAccess = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("member-access"),
+    args: new List({ value: [tmp.clone(), Identifier.from("value")] }),
+  });
+  const unwrap = new Variable({
+    name: binder.clone(),
+    location: binder.location,
+    initializer: valueAccess,
+    isMutable: false,
+    parent: call.parent ?? call.parentModule,
+  });
+
+  const thenBlock = new Block({
+    ...bodyExpr.metadata,
+    body: [
+      unwrap,
+      ...(bodyExpr.isBlock() ? bodyExpr.body : [bodyExpr]),
+      Identifier.from("void"),
+    ],
+  });
+
+  const match = new Match({
+    ...call.metadata,
+    operand,
+    cases: [
+      {
+        matchTypeExpr: someType,
+        expr: thenBlock,
+      },
+    ],
+    defaultCase: { expr: toBlock(Identifier.from("break")) },
+    bindIdentifier: tmp,
+    bindVariable: tmpVar,
   });
 
   const newDo = new Call({
