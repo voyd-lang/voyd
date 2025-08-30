@@ -1,5 +1,15 @@
 import { Call } from "../../syntax-objects/call.js";
-import { Identifier, List, nop, Expr, Fn, Block, Variable, Bool } from "../../syntax-objects/index.js";
+import {
+  Identifier,
+  List,
+  nop,
+  Expr,
+  Fn,
+  Block,
+  Variable,
+  Bool,
+  ObjectLiteral,
+} from "../../syntax-objects/index.js";
 import { SourceLocation } from "../../syntax-objects/syntax.js";
 import { Match } from "../../syntax-objects/match.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
@@ -53,10 +63,14 @@ const preprocessArgs = (call: Call): void => {
 };
 
 // Normalize any expression to a block expression
-const toBlock = (e: Expr): Block => (e.isBlock() ? e : new Block({ ...e.metadata, body: [e] }));
+const toBlock = (e: Expr): Block =>
+  e.isBlock() ? e : new Block({ ...e.metadata, body: [e] });
 
 // Extract `label: expr` value if the node is a labeled arg call
-const getLabeledExpr = (maybe: Expr | undefined, label: string): Expr | undefined => {
+const getLabeledExpr = (
+  maybe: Expr | undefined,
+  label: string
+): Expr | undefined => {
   if (!maybe?.isCall() || !maybe.calls(":")) return undefined;
   const id = maybe.argAt(0);
   return id?.isIdentifier() && id.is(label) ? maybe.argAt(1) : undefined;
@@ -64,12 +78,18 @@ const getLabeledExpr = (maybe: Expr | undefined, label: string): Expr | undefine
 
 // Build a labeled arg call `label: expr`
 const makeLabeled = (label: string, expr: Expr, meta: any): Call =>
-  new Call({ ...meta, fnName: Identifier.from(":"), args: new List({ value: [Identifier.from(label), expr] }) });
+  new Call({
+    ...meta,
+    fnName: Identifier.from(":"),
+    args: new List({ value: [Identifier.from(label), expr] }),
+  });
 
 const maybeResolveMemberAccessSugar = (call: Call): Call | undefined => {
   const firstArg = call.argAt(0);
   const shouldCheckMemberAccess = !hasUntypedClosure(firstArg);
-  return shouldCheckMemberAccess ? tryResolveMemberAccessSugar(call) : undefined;
+  return shouldCheckMemberAccess
+    ? tryResolveMemberAccessSugar(call)
+    : undefined;
 };
 
 const resolveCalleeAndGetType = (call: Call) => {
@@ -105,7 +125,10 @@ const handleObjectConstruction = (call: Call, type: ObjectType): void => {
   }
 };
 
-const computeCallReturnType = (call: Call, calleeType?: Type): Type | undefined =>
+const computeCallReturnType = (
+  call: Call,
+  calleeType?: Type
+): Type | undefined =>
   call.fn?.isFn()
     ? call.fn.returnType
     : call.fn?.isObjectType()
@@ -150,9 +173,7 @@ const arrayElemType = (type?: Type): Type | undefined => {
     return arg && arg.isTypeAlias() ? arg.type : undefined;
   }
   if (!type.isUnionType()) return;
-  return type.types
-    .map(arrayElemType)
-    .find((t): t is Type => !!t);
+  return type.types.map(arrayElemType).find((t): t is Type => !!t);
 };
 
 const resolveArrayArgs = (call: Call) => {
@@ -169,7 +190,9 @@ const resolveArrayArgs = (call: Call) => {
         : undefined;
     if (!arrayCall) return;
 
-    const arr = arrayCall.getTmpAttribute<ArrayLiteral>("arrayLiteral")!.clone();
+    const arr = arrayCall
+      .getTmpAttribute<ArrayLiteral>("arrayLiteral")!
+      .clone();
     const resolved = resolveArrayLiteral(arr, elemType);
     if (isLabeled) {
       arg.args.set(1, resolved);
@@ -295,19 +318,14 @@ export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
   if (type.typeParameters && !call.typeArgs) {
     const arg0 = call.argAt(0);
     const elem = arrayElemType(getExprType(arg0));
-    const tuple =
-      elem?.isObjectType()
-        ? elem
-        : elem?.isIntersectionType()
-        ? elem.structuralType ?? elem.nominalType
-        : undefined;
+    const tuple = elem?.isObjectType()
+      ? elem
+      : elem?.isIntersectionType()
+      ? elem.structuralType ?? elem.nominalType
+      : undefined;
     const key = tuple?.getField("0")?.type;
     const valExpr = tuple?.getField("1")?.typeExpr;
-    if (
-      key?.isObjectType() &&
-      key.name.is("String") &&
-      valExpr
-    ) {
+    if (key?.isObjectType() && key.name.is("String") && valExpr) {
       call.typeArgs = new List({ value: [valExpr.clone()] });
       type = resolveObjectType(type, call);
     }
@@ -379,7 +397,8 @@ const specializeGenericInitFns = (fns: Fn[], call: Call): Fn[] => {
     const before = f.genericInstances?.length ?? 0;
     resolveFn(f, call);
     const after = f.genericInstances?.length ?? 0;
-    if (after > before && f.genericInstances) specialized.push(...f.genericInstances);
+    if (after > before && f.genericInstances)
+      specialized.push(...f.genericInstances);
   }
   return specialized.length ? specialized : fns;
 };
@@ -570,7 +589,8 @@ const maybeLowerIfMatchSugar = (call: Call): Expr | undefined => {
 
   // When no binder is specified, require the operand to be an identifier so
   // we can narrow it in the then-arm.
-  const bindIdentifier = binder ?? (operand.isIdentifier() ? (operand as Identifier) : undefined);
+  const bindIdentifier =
+    binder ?? (operand.isIdentifier() ? (operand as Identifier) : undefined);
   if (!bindIdentifier) return;
 
   const cases = [
@@ -603,7 +623,9 @@ const maybeLowerIfMatchSugar = (call: Call): Expr | undefined => {
 const findSomeVariant = (type?: Type) => {
   if (!type?.isUnionType()) return undefined;
   return type.types.find(
-    (t) => t.isObjectType() && (t.name.is("Some") || t.genericParent?.name.is("Some"))
+    (t) =>
+      t.isObjectType() &&
+      (t.name.is("Some") || t.genericParent?.name.is("Some"))
   );
 };
 
@@ -662,7 +684,9 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
         expr: thenBlock,
       },
     ],
-    defaultCase: elseExpr ? { expr: toBlock(elseExpr) } : { expr: toBlock(Identifier.from("void")) },
+    defaultCase: elseExpr
+      ? { expr: toBlock(elseExpr) }
+      : { expr: toBlock(Identifier.from("void")) },
     bindIdentifier: tmp,
     bindVariable: tmpVar,
   });
@@ -712,10 +736,10 @@ const resolveClosureCall = (call: Call): Call => {
 const hasUntypedClosure = (expr: Expr | undefined): boolean =>
   !!(expr?.isClosure() && expr.parameters.some((p) => !p.type && !p.typeExpr));
 
-
 const specialCallResolvers: Record<string, (c: Call) => Expr> = {
   "::": resolveModuleAccess,
   export: resolveExport,
+  "?.": resolveOptionalCoalesce,
   if: resolveIf,
   "call-closure": resolveClosureCall,
   ":": resolveLabeledArg,
@@ -760,6 +784,142 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
   return call;
 };
 
+// Optional coalesce: a?.b
+const isSomeObject = (type?: Type): boolean =>
+  !!(
+    type?.isObjectType() &&
+    (type.name.is("Some") || type.genericParent?.name.is("Some"))
+  );
+
+function resolveOptionalCoalesce(call: Call): Expr {
+  const left = resolveEntities(call.argAt(0));
+  const right = call.argAt(1);
+
+  if (!right?.isIdentifier()) {
+    // Fallback: resolve args and leave as-is if unsupported rhs
+    call.args = new List({ value: [left, resolveEntities(right ?? nop())] });
+    return call;
+  }
+
+  const baseType = getExprType(left);
+  const someVariant = findSomeVariant(baseType);
+  const someObj = isSomeObject(baseType);
+
+  // Non-optional and not a Some<T> object: degrade to normal member access
+  if (!someVariant && !someObj) {
+    return new Call({
+      ...call.metadata,
+      fnName: Identifier.from("member-access"),
+      args: new List({ value: [left, right.clone()] }),
+    });
+  }
+
+  // If LHS is a Some<T> object (present), unwrap `.value` directly and wrap
+  // the access result into Some<...> unless it is already Optional.
+  if (!someVariant && someObj) {
+    const valueAccess = new Call({
+      ...call.metadata,
+      fnName: Identifier.from("member-access"),
+      args: new List({ value: [left, Identifier.from("value")] }),
+    });
+    const access = new Call({
+      ...call.metadata,
+      fnName: Identifier.from("member-access"),
+      args: new List({ value: [resolveEntities(valueAccess), right.clone()] }),
+    });
+    const resolvedAccess = resolveEntities(access);
+    const accessType = getExprType(resolvedAccess);
+    const alreadyOptional =
+      !!findSomeVariant(accessType) || isSomeObject(accessType);
+    if (alreadyOptional) return resolvedAccess;
+
+    return resolveEntities(
+      new Call({
+        ...call.metadata,
+        fnName: Identifier.from("Some"),
+        typeArgs: accessType ? new List({ value: [accessType] }) : undefined,
+        args: new List({
+          value: [
+            new ObjectLiteral({
+              ...call.metadata,
+              fields: [{ name: "value", initializer: resolvedAccess }],
+            }),
+          ],
+        }),
+      })
+    );
+  }
+
+  // tmp = left
+  const tmp = Identifier.from(`__opc_${call.syntaxId}`);
+  const tmpVar = new Variable({
+    name: tmp.clone(),
+    location: tmp.location,
+    initializer: left,
+    isMutable: false,
+    parent: call.parent ?? call.parentModule,
+  });
+
+  // access = (tmp.value).right
+  const valueAccess = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("member-access"),
+    args: new List({ value: [tmp.clone(), Identifier.from("value")] }),
+  });
+  const access = new Call({
+    ...call.metadata,
+    fnName: Identifier.from("member-access"),
+    args: new List({ value: [valueAccess, right.clone()] }),
+  });
+
+  const resolvedAccess = resolveEntities(access);
+  const accessType = getExprType(resolvedAccess);
+  const isAlreadyOptional = !!findSomeVariant(accessType);
+
+  // then: return access (if optional) or Some<type> { value: access }
+  const thenExpr: Expr = isAlreadyOptional
+    ? resolvedAccess
+    : new Call({
+        ...call.metadata,
+        fnName: Identifier.from("Some"),
+        typeArgs: accessType ? new List({ value: [accessType] }) : undefined,
+        args: new List({
+          value: [
+            new ObjectLiteral({
+              ...call.metadata,
+              fields: [{ name: "value", initializer: resolvedAccess }],
+            }),
+          ],
+        }),
+      });
+
+  const match = new Match({
+    ...call.metadata,
+    operand: tmp.clone(),
+    cases: [
+      {
+        matchTypeExpr: someVariant,
+        expr: toBlock(thenExpr),
+      },
+    ],
+    defaultCase: {
+      expr: toBlock(
+        new Call({
+          ...call.metadata,
+          fnName: Identifier.from("None"),
+          args: new List({
+            value: [new ObjectLiteral({ ...call.metadata, fields: [] })],
+          }),
+        })
+      ),
+    },
+    bindIdentifier: tmp,
+    bindVariable: tmpVar,
+  });
+
+  return resolveEntities(match);
+}
+
 const maybeLowerWhileMatchSugar = (call: Call): Expr | undefined => {
   const cond = call.argAt(0);
   const doArg = call.argAt(1);
@@ -787,7 +947,8 @@ const maybeLowerWhileMatchSugar = (call: Call): Expr | undefined => {
     ],
   });
 
-  const bindIdentifier = binder ?? (operand.isIdentifier() ? (operand as Identifier) : undefined);
+  const bindIdentifier =
+    binder ?? (operand.isIdentifier() ? (operand as Identifier) : undefined);
   if (!bindIdentifier) return; // cannot bind when operand is not an identifier and no binder was provided
 
   const match = new Match({
@@ -817,7 +978,9 @@ const maybeLowerWhileMatchSugar = (call: Call): Expr | undefined => {
   const newDo = makeLabeled("do", resolveEntities(match), call.metadata);
   newDo.type = dVoid;
 
-  call.args = new List({ value: [new Bool({ value: true, location: call.location }), newDo] });
+  call.args = new List({
+    value: [new Bool({ value: true, location: call.location }), newDo],
+  });
   call.args.parent = call;
   return call;
 };
@@ -889,7 +1052,9 @@ const maybeLowerWhileOptionalUnwrapSugar = (call: Call): Expr | undefined => {
   const newDo = makeLabeled("do", resolveEntities(match), call.metadata);
   newDo.type = dVoid;
 
-  call.args = new List({ value: [new Bool({ value: true, location: call.location }), newDo] });
+  call.args = new List({
+    value: [new Bool({ value: true, location: call.location }), newDo],
+  });
   call.args.parent = call;
   return call;
 };

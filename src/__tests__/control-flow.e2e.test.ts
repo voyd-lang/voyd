@@ -21,5 +21,6 @@ describe("Control Flow sugar", () => {
     expect("test4", 5);
     expect("test5", 6);
     expect("test6", 6);
+    expect("test7", 5);
   });
 });

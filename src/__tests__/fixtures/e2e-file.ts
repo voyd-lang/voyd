@@ -439,6 +439,14 @@ pub fn test6() -> i32
     sum = sum + n
   sum
 
+// Optional coalesce: nested chain returns 5
+pub fn test7() -> i32
+  let structure = {
+    a: Some { value: { b: Some { value: { c: 5 } } } }
+  }
+  let v: Some<i32> = structure.a?.b?.c
+  v.value
+
 `;
 
 export const goodTypeInferenceText = `
