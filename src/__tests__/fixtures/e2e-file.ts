@@ -447,6 +447,14 @@ pub fn test7() -> i32
   let v: Some<i32> = structure.a?.b?.c
   v.value
 
+// If-match without else: returns 4
+pub fn test8() -> i32
+  let opt: Optional<i32> = Some<i32> { value: 4 }
+  var v = -1
+  if opt.match(Some<i32>) then:
+    v = opt.value
+  v
+
 `;
 
 export const goodTypeInferenceText = `

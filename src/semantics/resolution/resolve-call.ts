@@ -593,10 +593,20 @@ const maybeLowerIfMatchSugar = (call: Call): Expr | undefined => {
     binder ?? (operand.isIdentifier() ? (operand as Identifier) : undefined);
   if (!bindIdentifier) return;
 
+  const thenBlock = elseExpr
+    ? toBlock(thenExpr)
+    : new Block({
+        ...thenExpr.metadata,
+        body: [
+          ...(thenExpr.isBlock() ? thenExpr.body : [thenExpr]),
+          Identifier.from("void"),
+        ],
+      });
+
   const cases = [
     {
       matchTypeExpr: typeExpr,
-      expr: toBlock(thenExpr),
+      expr: thenBlock,
     },
   ];
 
@@ -604,7 +614,9 @@ const maybeLowerIfMatchSugar = (call: Call): Expr | undefined => {
     ...call.metadata,
     operand,
     cases,
-    defaultCase: elseExpr ? { expr: toBlock(elseExpr) } : undefined,
+    defaultCase: elseExpr
+      ? { expr: toBlock(elseExpr) }
+      : { expr: toBlock(Identifier.from("void")) },
     bindIdentifier: bindIdentifier,
     bindVariable: binder
       ? new Variable({
@@ -686,7 +698,22 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
     ],
     defaultCase: elseExpr
       ? { expr: toBlock(elseExpr) }
-      : { expr: toBlock(Identifier.from("void")) },
+      : {
+          expr: toBlock(
+            new Call({
+              ...call.metadata,
+              fnName: Identifier.from("None"),
+              args: new List({
+                value: [
+                  new ObjectLiteral({
+                    ...call.metadata,
+                    fields: [],
+                  }),
+                ],
+              }),
+            })
+          ),
+        },
     bindIdentifier: tmp,
     bindVariable: tmpVar,
   });
@@ -807,11 +834,13 @@ function resolveOptionalCoalesce(call: Call): Expr {
 
   // Non-optional and not a Some<T> object: degrade to normal member access
   if (!someVariant && !someObj) {
-    return new Call({
-      ...call.metadata,
-      fnName: Identifier.from("member-access"),
-      args: new List({ value: [left, right.clone()] }),
-    });
+    return resolveEntities(
+      new Call({
+        ...call.metadata,
+        fnName: Identifier.from("member-access"),
+        args: new List({ value: [left, right.clone()] }),
+      })
+    );
   }
 
   // If LHS is a Some<T> object (present), unwrap `.value` directly and wrap
