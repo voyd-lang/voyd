@@ -3,6 +3,7 @@ import { Identifier } from "../../syntax-objects/identifier.js";
 import { nop } from "../../syntax-objects/index.js";
 import { List } from "../../syntax-objects/list.js";
 import { Type, TypeAlias } from "../../syntax-objects/types.js";
+import { logInfer, popInfer, pushInfer } from "../../diagnostics/infer-debug.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { typesAreEqual } from "./types-are-equal.js";
@@ -25,6 +26,7 @@ export const unifyTypeParams = (
   paramTypeExpr: Expr,
   argType: Type
 ): Map<string, Type> | undefined => {
+  pushInfer(`unify params=${typeParams.map((t) => t.value).join(",")} against argType=${argType.name.value}`);
   const typeParamSet = new Set(typeParams.map((t) => t.value));
 
   // Helper to unwrap type aliases on the argument side
@@ -225,7 +227,10 @@ export const unifyTypeParams = (
     return false;
   };
 
-  return unify(resolveTypeExpr(paramTypeExpr), argType) ? bindings : undefined;
+  const ok = unify(resolveTypeExpr(paramTypeExpr), argType);
+  logInfer(`result=${ok ? "ok" : "fail"} bindings=[${[...bindings.keys()].join(",")}]`);
+  popInfer();
+  return ok ? bindings : undefined;
 };
 
 export const inferTypeArgs = (
@@ -233,6 +238,7 @@ export const inferTypeArgs = (
   pairs: TypeArgInferencePair[]
 ): List | undefined => {
   if (!typeParams?.length) return;
+  pushInfer(`infer ${typeParams.length} params from ${pairs.length} pairs`);
 
   // Merge unification results from all provided pairs, ensuring consistency
   // across bindings for the same type parameter.
@@ -241,7 +247,11 @@ export const inferTypeArgs = (
   for (const { typeExpr, argExpr } of pairs) {
     // Resolve the argument type. If not resolvable, inference fails.
     const argType = getExprType(argExpr);
-    if (!argType) return undefined;
+    if (!argType) {
+      logInfer("arg type unresolved");
+      popInfer();
+      return undefined;
+    }
 
     const result = unifyTypeParams(typeParams, typeExpr, argType);
     if (!result) return undefined;
@@ -249,6 +259,8 @@ export const inferTypeArgs = (
     for (const [k, v] of result.entries()) {
       const existing = merged.get(k);
       if (existing && !typesAreEqual(existing, v)) {
+        logInfer(`conflict on ${k}`);
+        popInfer();
         return undefined; // conflicting inference
       }
       merged.set(k, v);
@@ -259,11 +271,18 @@ export const inferTypeArgs = (
   const inferred: TypeAlias[] = [];
   for (const tp of typeParams) {
     const ty = merged.get(tp.value);
-    if (!ty) return undefined;
+    if (!ty) {
+      logInfer(`missing inference for ${tp.value}`);
+      popInfer();
+      return undefined;
+    }
     const alias = new TypeAlias({ name: tp.clone(), typeExpr: nop() });
     alias.type = ty;
     inferred.push(alias);
   }
 
-  return new List({ value: inferred });
+  const out = new List({ value: inferred });
+  logInfer(`inferred [${inferred.map((a) => a.name.value).join(",")}]`);
+  popInfer();
+  return out;
 };

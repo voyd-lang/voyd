@@ -9,6 +9,7 @@ export const resolveUnionType = (union: UnionType): UnionType => {
   union.types = union.childTypeExprs.toArray().flatMap((expr) => {
     const resolved = resolveTypeExpr(expr);
     const type = getExprType(resolved);
+    
     if (!type) return [];
     return type.isUnionType() ? type.types : type.isRefType() ? [type] : [];
   });

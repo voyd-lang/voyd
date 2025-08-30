@@ -211,6 +211,7 @@ export const resolveObjectLiteral = (
     name: `ObjectLiteral-${obj.syntaxId}`,
     value: obj.fields.map((f) => ({
       name: f.name,
+      // Preserve initializer as the field's type expression (pre-canonicalization behavior)
       typeExpr: f.initializer,
       type: f.type,
     })),
