@@ -442,7 +442,7 @@ pub fn test6() -> i32
 // Optional coalesce: nested chain returns 5
 pub fn test7() -> i32
   let structure = {
-    a: Some { value: { b: Some { value: { c: 5 } } } }
+    a: some { b: some { c: 5 } }
   }
   let v: Some<i32> = structure.a?.b?.c
   v.value

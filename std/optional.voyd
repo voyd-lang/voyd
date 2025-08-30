@@ -10,6 +10,12 @@ pub obj None {}
 pub type Optional<T> = Some<T> | None
 pub type Option<T> = Optional<T>
 
+pub fn some<T>(v: T) -> Some<T>
+  Some { value: v }
+
+pub fn none() -> None
+  None {}
+
 // Todo equitable trait constraint
 pub fn equals<T>(a: Option<T>, b: Option<T>) -> bool
   match(a)
