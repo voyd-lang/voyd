@@ -1,10 +1,15 @@
-import { Call, Expr, Fn, Parameter } from "../../syntax-objects/index.js";
+import { Call, Expr, Fn, Identifier, Parameter } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { formatFnSignature } from "../fn-signature.js";
 import { formatTypeName } from "../type-format.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { typesAreEqual } from "./types-are-equal.js";
-import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
+import {
+  resolveFn,
+  resolveFnSignature,
+  inferCallTypeArgs,
+  resolveGenericsWithTypeArgsSignatureOnly,
+} from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveEntities } from "./resolve-entities.js";
 
@@ -16,8 +21,21 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
   if (isPrimitiveFnCall(call)) return undefined;
 
   const baseCandidates = candidateFns ?? getCandidates(call);
-  const expanded = expandGenericCandidates(call, baseCandidates);
-  const candidates = dedupeCandidates(filterResolvedCandidates(call, expanded));
+  const useSigOnly =
+    process.env.VOYD_LAZY_FN_EXPANSION === "1" ||
+    process.env.VOYD_LAZY_FN_EXPANSION === "true";
+
+  const expanded = useSigOnly
+    ? expandGenericCandidatesSignatureOnly(call, baseCandidates)
+    : expandGenericCandidates(call, baseCandidates);
+
+  let candidates = dedupeCandidates(filterResolvedCandidates(call, expanded));
+
+  // Fallback: if the flag is on but produced no candidates, try full expansion
+  if (useSigOnly && !candidates.length) {
+    const full = expandGenericCandidates(call, baseCandidates);
+    candidates = dedupeCandidates(filterResolvedCandidates(call, full));
+  }
 
   if (!candidates.length) {
     return undefined;
@@ -132,6 +150,16 @@ const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
         if (arg) resolveTypeExpr(arg);
         const argType = getExprType(arg);
         const appliedType = getExprType(t);
+        // If the call supplies a bare type-parameter identifier (e.g. `T`) and
+        // the candidate applied type is an alias with the same name, consider
+        // them a match even if no concrete Type has been bound yet.
+        if (
+          !argType &&
+          arg?.isIdentifier?.() &&
+          appliedType?.isTypeAlias() &&
+          appliedType.name.is(arg as Identifier)
+        )
+          return true;
         return typesAreEqual(argType, appliedType);
       })
     : true;
@@ -233,3 +261,31 @@ const isPrimitiveFnCall = (call: Call): boolean => {
     name === "::"
   );
 };
+
+// Create signature-only instances for generic candidates using either explicit
+// type-args on the call or inference from parameter types. Avoids resolving
+// function bodies during candidate discovery.
+const expandGenericCandidatesSignatureOnly = (
+  call: Call,
+  candidates: Fn[]
+): Fn[] => {
+  const out: Fn[] = [];
+  for (const c of candidates) {
+    if (!c.typeParameters) {
+      out.push(c);
+      continue;
+    }
+    const args = call.typeArgs ?? inferCallTypeArgs(c, call);
+    if (args) {
+      resolveGenericsWithTypeArgsSignatureOnly(c, args);
+      if (c.genericInstances?.length) out.push(...c.genericInstances);
+      else out.push(c);
+      continue;
+    }
+    out.push(c);
+  }
+  return out;
+};
+
+// Signature-only expansion intentionally not used here to avoid risking
+// under-specified type-arg contexts; full specialization handles enumeration.

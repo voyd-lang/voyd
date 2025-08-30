@@ -98,7 +98,7 @@ const attemptToResolveFnWithGenerics = (fn: Fn, call: Call): Fn => {
   return resolveGenericsWithTypeArgs(fn, args);
 };
 
-const inferCallTypeArgs = (fn: Fn, call: Call) => {
+export const inferCallTypeArgs = (fn: Fn, call: Call) => {
   const pairs: TypeArgInferencePair[] = [];
 
   fn.parameters.forEach((param, index) => {
@@ -162,6 +162,41 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
 
   const resolvedFn = resolveFn(newFn);
   fn.registerGenericInstance(resolvedFn);
+  return fn;
+};
+
+// Signature-only specialization for candidate discovery
+export const resolveGenericsWithTypeArgsSignatureOnly = (
+  fn: Fn,
+  args: List
+): Fn => {
+  const typeParameters = fn.typeParameters!;
+
+  if (args.length !== typeParameters.length) {
+    return fn;
+  }
+
+  const newFn = fn.clone();
+  newFn.typeParameters = undefined;
+  newFn.appliedTypeArgs = [];
+
+  typeParameters.forEach((typeParam, index) => {
+    const typeArg = args.exprAt(index);
+    const identifier = typeParam.clone();
+    const type = new TypeAlias({ name: identifier, typeExpr: typeArg.clone() });
+    type.parent = newFn;
+    resolveTypeExpr(typeArg);
+    type.type = getExprType(typeArg);
+    newFn.appliedTypeArgs?.push(type);
+    newFn.registerEntity(type);
+  });
+
+  if (!newFn.appliedTypeArgs.every((t) => (t as TypeAlias).type)) {
+    return fn;
+  }
+
+  resolveFnSignature(newFn);
+  fn.registerGenericInstance(newFn);
   return fn;
 };
 

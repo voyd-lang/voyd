@@ -214,4 +214,122 @@ describe("getCallFn", () => {
 
     expect(getCallFn(call)).toBe(traitMethod);
   });
+
+  test("trait-object discovery stays lazy and does not resolve unrelated impls", () => {
+    const traitMethod = new Fn({
+      name: new Identifier({ value: "run" }),
+      parameters: [new Parameter({ name: new Identifier({ value: "self" }) })],
+    });
+    const trait = new TraitType({
+      name: new Identifier({ value: "Runner" }),
+      methods: [traitMethod],
+    });
+
+    // impl for ObjA
+    const objA = new ObjectType({ name: "ObjA", value: [] });
+    const implA = new Implementation({
+      typeParams: [],
+      targetTypeExpr: new Identifier({ value: "ObjA" }),
+      body: new List({ value: [] }),
+      traitExpr: new Identifier({ value: "Runner" }),
+    });
+    const mA = new Fn({
+      name: new Identifier({ value: "run" }),
+      parameters: [
+        new Parameter({ name: new Identifier({ value: "self" }), type: objA }),
+      ],
+      body: new List({ value: [] }),
+      parent: implA,
+    });
+    implA.targetType = objA;
+    implA.trait = trait;
+    implA.registerExport(mA);
+
+    // impl for ObjB (unrelated)
+    const objB = new ObjectType({ name: "ObjB", value: [] });
+    const implB = new Implementation({
+      typeParams: [],
+      targetTypeExpr: new Identifier({ value: "ObjB" }),
+      body: new List({ value: [] }),
+      traitExpr: new Identifier({ value: "Runner" }),
+    });
+    const mB = new Fn({
+      name: new Identifier({ value: "run" }),
+      parameters: [
+        new Parameter({ name: new Identifier({ value: "self" }), type: objB }),
+      ],
+      body: new List({ value: [] }),
+      parent: implB,
+    });
+    implB.targetType = objB;
+    implB.trait = trait;
+    implB.registerExport(mB);
+
+    trait.implementations = [implA, implB];
+
+    const arg = new MockIdentifier({ value: "r", entity: trait });
+    const call = new Call({
+      fnName: new Identifier({ value: "run" }),
+      args: new List({ value: [arg] }),
+      fn: traitMethod,
+    });
+
+    const selected = getCallFn(call);
+    expect(selected).toBe(traitMethod);
+    // Ensure we haven't resolved bodies of impl methods or impls themselves
+    expect(mA.typesResolved).not.toBe(true);
+    expect(mB.typesResolved).not.toBe(true);
+    expect(implA.typesResolved).not.toBe(true);
+    expect(implB.typesResolved).not.toBe(true);
+  });
+
+  test("lazy specialization: only selected generic fn resolves body", () => {
+    const fnName = new Identifier({ value: "foo" });
+
+    // Matching generic candidate: <T>(arg: T)
+    const match = new Fn({
+      name: fnName.clone(),
+      typeParameters: [new Identifier({ value: "T" })],
+      parameters: [
+        new Parameter({
+          name: new Identifier({ value: "arg" }),
+          typeExpr: new Identifier({ value: "T" }),
+        }),
+      ],
+      // dummy body
+      body: new List({ value: [] }),
+    });
+
+    // Non-matching generic candidate: <T>(arr: Array<T>)
+    const nonMatch = new Fn({
+      name: fnName.clone(),
+      typeParameters: [new Identifier({ value: "T" })],
+      parameters: [
+        new Parameter({
+          name: new Identifier({ value: "arr" }),
+          typeExpr: new Call({
+            fnName: new Identifier({ value: "Array" }),
+            args: new List({ value: [] }),
+            typeArgs: new List({ value: [new Identifier({ value: "T" })] }),
+          }),
+        }),
+      ],
+      body: new List({ value: [] }),
+    });
+
+    const call = new Call({
+      fnName: fnName.clone(),
+      args: new List({ value: [new Int({ value: 42 })] }),
+    });
+
+    call.resolveFns = vi.fn().mockReturnValue([match, nonMatch]);
+
+    const selected = getCallFn(call)!;
+    expect(selected).toBeDefined();
+    expect(selected.name.value).toBe("foo");
+    // Winner resolves body (typesResolved true)
+    expect(selected.typesResolved).toBe(true);
+    // Non-matching generic should not have resolved its body
+    expect(nonMatch.typesResolved).not.toBe(true);
+  });
 });

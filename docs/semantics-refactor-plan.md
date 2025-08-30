@@ -15,7 +15,7 @@ This revised plan slices the work into smaller, verifiable phases with crisp suc
 - Laziness: resolve only what’s needed early; specialize bodies later.
 - Stability: preserve error messages and behavior unless explicitly called out.
 
-## Current Symptoms and Root Causes (unchanged)
+## Current Symptoms and Root Causes
 
 - Runaway clones and stack overflows when deep value trees leak into structural type-exprs and then into generics.
 
@@ -99,11 +99,24 @@ This revised plan slices the work into smaller, verifiable phases with crisp suc
 
 ---
 
-## Phase 5 — Lazy Specialization (Functions)
+## Phase 5 — Lazy Specialization (Functions, Expanded)
 
-- Scope: extend signature-only specialization to function overloads.
+- Scope: extend lazy specialization to function overloads so we avoid resolving generic bodies during candidate discovery.
+- Changes:
+  - Added signature-only generic instance creation using bound type aliases (no body resolution) via `resolveGenericsWithTypeArgsSignatureOnly`.
+  - Candidate filtering resolves signatures for comparison and resolves only the selected winner fully.
+  - Decision: keep generic expansion using full specialization for now due to a FixedArray param resolution edge case; signature-only expansion remains available for future gating once the edge case is addressed.
+- Tasks:
+  - Signature-only specialization utility for functions (done).
+  - Candidate filtering resolves only signatures; winner resolves body (done).
+  - Tests: ensure non-selected generic functions are not fully resolved (done).
+  - Tests: trait-object discovery does not prematurely resolve unrelated impls (done).
 - Success:
-  - Same correctness; lower clone/specialization costs in overload-heavy cases.
+  - Overload results unchanged; non-selected generics remain unresolved in discovery tests; trait-object path remains lazy.
+
+Notes
+- Rationale for deferring signature-only expansion in getCallFn: a regression was observed when specializing `new_fixed_array<T>(size: i32)` using only signature info in expansion; parameter types formatted as `unknown` in error reporting under certain module contexts. Keeping full expansion in the expansion step avoids the regression while preserving laziness because only the ultimately selected candidate resolves its body.
+- An opt-in `VOYD_LAZY_FN_EXPANSION` flag is now available to switch candidate expansion to signature-only with a safe fallback to full expansion if no candidates match. Default remains off until we add coverage for FixedArray/Array scenarios.
 
 ---
 
@@ -162,3 +175,25 @@ This revised plan slices the work into smaller, verifiable phases with crisp suc
 - Risks:
   - Diagnostic diffs: mitigate with pretty-printer (Phase 7) and snapshot updates.
   - Specialization order sensitivity: keep enumeration deterministic and prefer signature-only artifacts until selection.
+---
+
+## Phase 9 — Candidate Enumeration & Determinism
+
+- Scope: ensure deterministic candidate order and stable behavior.
+- Changes:
+  - Stabilize enumeration order (receiver methods prioritized in method position; otherwise preserve lexical/module order).
+  - Use stable keys for deduplication and deterministic tie-breaking in ambiguous errors.
+- Tasks:
+  - Audit candidate enumeration and add secondary sort when needed.
+  - Add unit tests to assert deterministic ambiguous-error text and candidate sets.
+
+---
+
+## Diagnostics & Developer Ergonomics
+
+- Add targeted tests per phase (done for 1a, 1c, 3, 4, 5; more to add for 9).
+- Document env flags and defaults:
+  - VOYD_CANON_STRUCT: off by default (turn on to canonicalize structural field types).
+  - VOYD_ARRAY_LIGHTARGS: off by default (turn on to pass lightweight array element type-args).
+  - VOYD_LAZY_FN_EXPANSION: off by default. When on, getCallFn expands generic candidates using signature-only specialization during candidate discovery, with a fallback to full expansion if no candidates match. Useful to experiment with Phase 5 laziness.
+- Provide a maintainer guide for canonicalization rules, lazy specialization, and array-lowering hygiene.

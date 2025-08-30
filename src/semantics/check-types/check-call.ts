@@ -12,6 +12,8 @@ import { checkIf } from "./check-if.js";
 import { checkBinaryenCall } from "./check-binaryen-call.js";
 import { checkLabeledArg } from "./check-labeled-arg.js";
 import { checkFixedArrayType } from "./check-fixed-array-type.js";
+import { resolveFnSignature } from "../resolution/resolve-fn.js";
+import { getCallFn } from "../resolution/get-call-fn.js";
 
 export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("export")) return checkExport(call);
@@ -28,6 +30,23 @@ export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.fn?.isObjectType()) return checkObjectInit(call);
 
   call.args = call.args.map(checkTypes);
+  if (
+    !call.fn &&
+    (process.env.VOYD_LAZY_FN_EXPANSION === "1" ||
+      process.env.VOYD_LAZY_FN_EXPANSION === "true")
+  ) {
+    const candidates = call.resolveFns(call.fnName);
+    if (candidates.length) {
+      const cand = getCallFn(call, candidates);
+      if (cand) {
+        call.fn = cand;
+        call.type = cand.returnType;
+      }
+    }
+  }
+  // No fallback to resolve here; semantics should have picked a candidate.
+
+  // (Keep resolution in the semantics pass; this stage only checks.)
 
   if (!call.fn) {
     const arg1Type = getExprType(call.argAt(0));
@@ -52,6 +71,8 @@ export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
     const location = call.location ?? call.fnName.location;
     const candidates = call.resolveFns(call.fnName);
     if (candidates.length) {
+      // Ensure parameters are typed for readable signatures
+      candidates.forEach(resolveFnSignature);
       const signatures = candidates.map(formatFnSignature).join(", ");
       throw new Error(
         `No overload matches ${call.fnName}(${params}) at ${location}. Available overloads: ${signatures}`
