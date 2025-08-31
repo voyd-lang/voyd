@@ -29,6 +29,7 @@ import {
   resolveArrayLiteral,
   resolveObjectLiteral,
 } from "./resolve-entities.js";
+import { resolveWithExpected } from "./resolve-entities.js";
 import { resolveExport, resolveModulePath } from "./resolve-use.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr, resolveFixedArrayType } from "./resolve-type-expr.js";
@@ -451,6 +452,8 @@ const findCompatibleInitForCall = (call: Call, pool: Fn[]): Fn | undefined => {
 };
 
 const resolveFixedArray = (call: Call) => {
+  // First resolve elements normally; we will re-apply expected element typing
+  // below once we know or infer the element type.
   call.args = call.args.map(resolveEntities);
 
   const elemTypeExpr =
@@ -470,6 +473,13 @@ const resolveFixedArray = (call: Call) => {
       elemTypeExpr,
     })
   );
+
+  // Propagate the resolved element type back into elements so structural
+  // literals (e.g., tuples) adopt the expected field types instead of their
+  // initializer-inferred types.
+  if (arr.elemType) {
+    call.args = call.args.map((e) => resolveWithExpected(e, arr.elemType));
+  }
 
   call.type = arr;
   return call;

@@ -179,12 +179,13 @@ const checkObjectInit = (call: Call): Call => {
         .map((f) => {
           const match = provided.fields.find((pf) => pf.name === f.name);
           if (!match) return undefined;
-          return typesAreCompatible(match.type, f.type)
+          const actualType = getExprType(match.typeExpr);
+          return typesAreCompatible(actualType, f.type)
             ? undefined
             : {
                 name: f.name,
                 expected: f.type?.name.value ?? "unknown",
-                actual: match.type?.name.value ?? "unknown",
+                actual: actualType?.name.value ?? "unknown",
               };
         })
         .filter((f): f is { name: string; expected: string; actual: string } =>

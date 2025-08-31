@@ -154,7 +154,7 @@ const findObjectType = (
   return matches.length === 1 ? matches[0] : undefined;
 };
 
-const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
+export const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
   if (!expected) return resolveEntities(expr);
   const unwrapped = unwrapAlias(expected);
   if (expr.isArrayLiteral()) {
@@ -199,10 +199,24 @@ export const resolveObjectLiteral = (
   obj: ObjectLiteral,
   expected?: ObjectType
 ) => {
+  // Ensure expected structural type (incl. tuples) is resolved so its field
+  // types are available for propagation.
+  if (expected) expected = resolveObjectType(expected);
+
   obj.fields.forEach((field) => {
     const expectedField = expected?.getField(field.name)?.type;
+    // DEBUG: trace tuple expected propagation
+    if (process.env.VOYD_DEBUG?.includes("tuple-prop") && expected && (field.name === "0" || field.name === "1")) {
+      console.log(
+        `resolveObjectLiteral: expected ${expected.id} field ${field.name} -> ${expectedField?.id}`
+      );
+    }
     field.initializer = resolveWithExpected(field.initializer, expectedField);
-    field.type = getExprType(field.initializer);
+    // Prefer the expected type for the field when provided to ensure
+    // structural literals (incl. tuples) adopt the expected shape instead of
+    // the initializer's narrower inferred type. This avoids accessor type
+    // mismatches at runtime (e.g., tuple value typed as MsgPack vs String).
+    field.type = expectedField ?? getExprType(field.initializer);
     return field;
   });
 
@@ -228,10 +242,22 @@ export const resolveArrayLiteral = (
   const original = arr.clone();
 
   arr.elements = arr.elements.map((elem) => {
-    if (expectedElemType && elem.isArrayLiteral()) {
-      const childExpected =
-        getArrayElemType(expectedElemType) ?? expectedElemType;
-      return resolveArrayLiteral(elem, childExpected);
+    if (expectedElemType) {
+      // If nested arrays, push down the element type recursively; otherwise
+      // resolve this element against the expected element type (covers tuple
+      // and structural object elements as well).
+      if (elem.isArrayLiteral()) {
+        const childExpected =
+          getArrayElemType(expectedElemType) ?? expectedElemType;
+        return resolveArrayLiteral(elem, childExpected);
+      }
+      // DEBUG: trace array element expected propagation
+      if (process.env.VOYD_DEBUG?.includes("tuple-prop")) {
+        console.log(
+          `resolveArrayLiteral: expected elemType ${expectedElemType.id}`
+        );
+      }
+      return resolveWithExpected(elem, expectedElemType);
     }
     return resolveEntities(elem);
   });
