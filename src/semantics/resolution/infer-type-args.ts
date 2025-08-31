@@ -115,17 +115,16 @@ export const unifyTypeParams = (
       return true;
     }
 
-    // Tuple/structural object types: unify field-by-field against the
-    // structural side of the argument when available.
+    // Tuple/structural object types: unify the parameter fields against
+    // the structural portion of the argument. Extra fields on the
+    // argument side are permitted, enabling structural subtyping
+    // (i.e. the argument may be a superset of the parameter).
     if (p.isObjectType()) {
       const paramObj = p;
       const target = arg.isIntersectionType()
         ? arg.structuralType ?? arg.nominalType // prefer structural, but fall back to nominal if provided
         : arg;
       if (!target || !target.isObjectType()) return false;
-
-      // For now require exact field correspondence (tuple-like behavior).
-      if (paramObj.fields.length !== target.fields.length) return false;
 
       for (const field of paramObj.fields) {
         const match = target.getField(field.name);
