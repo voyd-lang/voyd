@@ -39,11 +39,12 @@ export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
 // Detects whether a type-argument expression contains an unresolved type
 // identifier (e.g., an unbound generic name like `T`).
 export const containsUnresolvedTypeId = (expr: any): boolean => {
+  // Follows TypeAlias chains to the underlying resolved type (if any).
   const unwrapAlias = (t: any): any => {
     let cur = t;
     const seen = new Set<any>();
-    while (cur && cur.isType && cur.isType() && cur.isTypeAlias && cur.isTypeAlias()) {
-      if (seen.has(cur)) return undefined; // cycle
+    while (cur && cur.isType?.() && cur.isTypeAlias?.()) {
+      if (seen.has(cur)) return undefined; // cycle guard
       seen.add(cur);
       if (!cur.type) return undefined;
       cur = cur.type;
@@ -51,41 +52,46 @@ export const containsUnresolvedTypeId = (expr: any): boolean => {
     return cur;
   };
 
-  const visitExpr = (e: any): boolean => {
-    if (!e) return false;
-    if (e.isIdentifier && e.isIdentifier()) {
+  const stack = [expr];
+  while (stack.length) {
+    const e = stack.pop();
+    if (!e) continue;
+
+    // Unbound generic like `T`
+    if (e.isIdentifier?.()) {
       const ty = unwrapAlias(getExprType(e));
-      return !ty;
+      if (!ty) return true;
+      continue;
     }
-    if (e.isCall && e.isCall()) {
-      if (e.typeArgs) return e.typeArgs.toArray().some(visitExpr);
-      return false;
+
+    if (e.isCall?.()) {
+      if (e.typeArgs) stack.push(...e.typeArgs.toArray());
+      continue;
     }
-    if (e.isType && e.isType()) {
-      if (e.isObjectType && e.isObjectType()) {
-        return e.fields.some((f: any) => visitExpr(f.typeExpr));
+
+    if (e.isType?.()) {
+      if (e.isObjectType?.()) {
+        stack.push(...e.fields.map((f: any) => f.typeExpr));
+        continue;
       }
-      if (e.isIntersectionType && e.isIntersectionType()) {
-        return (
-          visitExpr(e.nominalTypeExpr?.value) ||
-          visitExpr(e.structuralTypeExpr?.value)
-        );
+      if (e.isIntersectionType?.()) {
+        stack.push(e.nominalTypeExpr?.value, e.structuralTypeExpr?.value);
+        continue;
       }
-      if (e.isFixedArrayType && e.isFixedArrayType()) {
-        return visitExpr(e.elemTypeExpr);
+      if (e.isFixedArrayType?.()) {
+        stack.push(e.elemTypeExpr);
+        continue;
       }
-      if (e.isFnType && e.isFnType()) {
-        return (
-          e.parameters.some((p: any) => visitExpr(p.typeExpr)) ||
-          (!!e.returnTypeExpr && visitExpr(e.returnTypeExpr))
-        );
+      if (e.isFnType?.()) {
+        stack.push(...e.parameters.map((p: any) => p.typeExpr));
+        if (e.returnTypeExpr) stack.push(e.returnTypeExpr);
+        continue;
       }
-      return false;
     }
-    if (e.isList && e.isList()) return e.toArray().some(visitExpr);
-    return false;
-  };
-  return visitExpr(expr);
+
+    if (e.isList?.()) stack.push(...e.toArray());
+  }
+  return false;
 };
 
 const resolveGenericObjVersion = (
@@ -114,8 +120,6 @@ const resolveGenericObjVersion = (
   }
 
   if (!call.typeArgs) return;
-
-  // no-op debug removed
 
   const hasUnresolved = call.typeArgs
     .toArray()

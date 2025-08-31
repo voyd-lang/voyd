@@ -5,6 +5,7 @@ import {
   nop,
   TypeAlias,
   FnType,
+  Type,
 } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveIntersectionType } from "./resolve-intersection.js";
@@ -39,60 +40,31 @@ export const resolveTypeExpr = (typeExpr: Expr): Expr => {
 
 /** Resolves type calls */
 const resolveTypeCall = (call: Call): Call => {
+  const finish = (type?: Type, fn?: any) => {
+    if (fn) call.fn = fn;
+    if (type) call.type = type;
+    call.setTmpAttribute("resolving", undefined);
+    return call;
+  };
+
   // Avoid infinite recursion when resolving recursive type calls
   if (call.hasTmpAttribute("resolving")) return call;
   call.setTmpAttribute("resolving", true);
   const type = call.fnName.resolve();
+  if (!type?.isType()) return finish();
 
-  if (!type?.isType()) {
-    call.setTmpAttribute("resolving", undefined);
-    return call;
-  }
+  if (call.typeArgs) call.typeArgs = call.typeArgs.map(resolveTypeExpr);
 
-  if (call.typeArgs) {
-    call.typeArgs = call.typeArgs.map(resolveTypeExpr);
-  }
-
-  if (type.isObjectType()) {
-    call.fn = type;
-    call.type = resolveObjectType(type, call);
-    call.setTmpAttribute("resolving", undefined);
-    return call;
-  }
-
-  if (type.isTraitType()) {
-    call.type = resolveTrait(type, call);
-    call.setTmpAttribute("resolving", undefined);
-    return call;
-  }
-
-  if (type.isFixedArrayType()) {
-    call.type = resolveFixedArrayType(type);
-    call.setTmpAttribute("resolving", undefined);
-    return call;
-  }
-
-  if (type.isUnionType()) {
-    call.type = resolveUnionType(type);
-    call.setTmpAttribute("resolving", undefined);
-    return call;
-  }
-
-  if (type.isIntersectionType()) {
-    call.type = resolveIntersectionType(type);
-    call.setTmpAttribute("resolving", undefined);
-    return call;
-  }
-
+  if (type.isObjectType()) return finish(resolveObjectType(type, call), type);
+  if (type.isTraitType()) return finish(resolveTrait(type, call));
+  if (type.isFixedArrayType()) return finish(resolveFixedArrayType(type));
+  if (type.isUnionType()) return finish(resolveUnionType(type));
+  if (type.isIntersectionType()) return finish(resolveIntersectionType(type));
   if (type.isTypeAlias()) {
-    call = resolveTypeAlias(call, type);
-    call.setTmpAttribute("resolving", undefined);
-    return call;
+    resolveTypeAlias(call, type);
+    return finish(call.type, call.fn);
   }
-
-  call.type = type;
-  call.setTmpAttribute("resolving", undefined);
-  return call;
+  return finish(type);
 };
 
 export const resolveFixedArrayType = (arr: FixedArrayType): FixedArrayType => {
