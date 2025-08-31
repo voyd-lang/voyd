@@ -38,21 +38,37 @@ export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
 
 // Detects whether a type-argument expression contains an unresolved type
 // identifier (e.g., an unbound generic name like `T`).
-const containsUnresolvedTypeId = (expr: any): boolean => {
+export const containsUnresolvedTypeId = (expr: any): boolean => {
+  // Follows TypeAlias chains to the underlying resolved type (if any).
+  const unwrapAlias = (t: any): any => {
+    let cur = t;
+    const seen = new Set<any>();
+    while (cur && cur.isType?.() && cur.isTypeAlias?.()) {
+      if (seen.has(cur)) return undefined; // cycle guard
+      seen.add(cur);
+      if (!cur.type) return undefined;
+      cur = cur.type;
+    }
+    return cur;
+  };
+
   const stack = [expr];
   while (stack.length) {
     const e = stack.pop();
     if (!e) continue;
+
+    // Unbound generic like `T`
     if (e.isIdentifier?.()) {
-      const entity = e.resolve?.();
-      const ty = getExprType(e);
-      if (!entity && !ty) return true;
+      const ty = unwrapAlias(getExprType(e));
+      if (!ty) return true;
       continue;
     }
+
     if (e.isCall?.()) {
       if (e.typeArgs) stack.push(...e.typeArgs.toArray());
       continue;
     }
+
     if (e.isType?.()) {
       if (e.isObjectType?.()) {
         stack.push(...e.fields.map((f: any) => f.typeExpr));
@@ -72,6 +88,7 @@ const containsUnresolvedTypeId = (expr: any): boolean => {
         continue;
       }
     }
+
     if (e.isList?.()) stack.push(...e.toArray());
   }
   return false;
