@@ -63,6 +63,9 @@ export class HTMLParser {
     fields.push(new List({ value: [":", "children", children] }));
 
     const obj = new List({ value: ["object", ...fields] });
+    // Mark this object-arg so resolution can defer array literal coercion
+    // until after labeled param expansion (avoids premature FixedArray typing).
+    obj.setAttribute("vsx-create-element-args", true);
     obj.location = this.stream.currentSourceLocation();
 
     return new List({
@@ -220,6 +223,9 @@ const array = () => new List({}).insert("array");
 const arrayLiteral = (items: Expr[]) => {
   const arr = new List({ value: ["array", ",", ...items] });
   arr.setAttribute("array-literal", true);
+  // Mark VSX arrays so resolution can defer coercion until after
+  // labeled-parameter expansion.
+  arr.setAttribute("vsx-array", true);
   return arr;
 };
 const tuple = (a: Expr, b: Expr) => new List({ value: ["tuple", a, b] });

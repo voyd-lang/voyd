@@ -203,6 +203,7 @@ export const resolveObjectLiteral = (
   // types are available for propagation.
   if (expected) expected = resolveObjectType(expected);
 
+  const isVsxCreateArgs = !!obj.getAttribute("vsx-create-element-args");
   obj.fields.forEach((field) => {
     const expectedField = expected?.getField(field.name)?.type;
     // DEBUG: trace tuple expected propagation
@@ -210,6 +211,13 @@ export const resolveObjectLiteral = (
       console.log(
         `resolveObjectLiteral: expected ${expected.id} field ${field.name} -> ${expectedField?.id}`
       );
+    }
+    // For VSX create_element args, defer resolving array literals here so
+    // they can be coerced later with the proper expected element types.
+    if (isVsxCreateArgs && field.initializer.isArrayLiteral()) {
+      // Leave as-is; normalizeArgsForResolvedFn will handle it
+      field.type = expectedField;
+      return field;
     }
     field.initializer = resolveWithExpected(field.initializer, expectedField);
     // Prefer the expected type for the field when provided to ensure
@@ -239,6 +247,13 @@ export const resolveArrayLiteral = (
   arr: ArrayLiteral,
   expectedElemType?: Type
 ): Expr => {
+  // Defer resolving VSX arrays without an expected element type so we avoid
+  // constructing a FixedArray with unknown element type. These will be
+  // coerced later once parameter types are known.
+  if (arr.getAttribute("vsx-array") && !expectedElemType) {
+    arr.elements = arr.elements.map(resolveEntities);
+    return arr;
+  }
   const original = arr.clone();
 
   arr.elements = arr.elements.map((elem) => {
@@ -286,6 +301,11 @@ export const resolveArrayLiteral = (
     args: new List({ value: [objLiteral] }),
     typeArgs,
   });
+  if (!elemType && process.env.VOYD_DEBUG?.includes("vsx")) {
+    console.warn(
+      `resolveArrayLiteral: missing elemType for FixedArray at ${fixedArray.location}`
+    );
+  }
   newArrayCall.setTmpAttribute("arrayLiteral", original);
   return resolveEntities(newArrayCall);
 };

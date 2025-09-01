@@ -204,6 +204,12 @@ const arrayElemType = (type?: Type): Type | undefined => {
 
 const resolveArrayArgs = (call: Call) => {
   const fn = call.fn?.isFn() ? call.fn : undefined;
+  const isVsxCreate = !!(fn && fn.name.is("create_element"));
+  if (isVsxCreate) {
+    console.warn(
+      `resolveArrayArgs: inspecting create_element args at ${call.location}`
+    );
+  }
   call.args.each((arg: Expr, index: number) => {
     const param = fn?.parameters[index];
     const elemType = arrayElemType(param?.type);
@@ -214,16 +220,25 @@ const resolveArrayArgs = (call: Call) => {
       inner?.isCall() && inner.hasTmpAttribute("arrayLiteral")
         ? (inner as Call)
         : undefined;
-    if (!arrayCall) return;
+    const arrayLiteral = inner?.isArrayLiteral() ? (inner as ArrayLiteral) : undefined;
+    if (isVsxCreate) {
+      console.warn(
+        `  arg[${index}] labeled=${isLabeled} isCall=${inner?.isCall?.()} tmpArr=${
+          !!arrayCall
+        } elemType=${elemType?.name ?? "unknown"}`
+      );
+    }
+    if (!arrayCall && !arrayLiteral) return;
 
     const arr = arrayCall
-      .getTmpAttribute<ArrayLiteral>("arrayLiteral")!
-      .clone();
+      ? arrayCall.getTmpAttribute<ArrayLiteral>("arrayLiteral")!.clone()
+      : arrayLiteral!
+          .clone();
     const resolved = resolveArrayLiteral(arr, elemType);
-    if (call.fn?.isFn() && call.fn.name.is("create_element")) {
+    if (isVsxCreate) {
       const label = isLabeled ? (arg as any).argAt(0)?.toString?.() : undefined;
       console.warn(
-        `resolveArrayArgs: coerced ${label ?? index} to Array of ${
+        `  coerced ${label ?? index} to Array of ${
           elemType?.name ?? "unknown"
         } at ${call.location}`
       );
@@ -257,11 +272,24 @@ const expandObjectArg = (call: Call) => {
     const newArgs = labeledParams.map((p) => {
       const fieldName = p.label!.value;
       const field = objArg.fields.find((f) => f.name === fieldName)!;
+      // Preserve any temporary attributes (like arrayLiteral) when cloning the
+      // initializer so downstream coercion (resolveArrayArgs) can detect and
+      // re-resolve array literals with expected element types.
+      const clonedInit = field.initializer.clone();
+      if (
+        field.initializer.isCall() &&
+        field.initializer.hasTmpAttribute("arrayLiteral")
+      ) {
+        clonedInit.setTmpAttribute(
+          "arrayLiteral",
+          field.initializer.getTmpAttribute("arrayLiteral")
+        );
+      }
       return new Call({
         ...call.metadata,
         fnName: Identifier.from(":"),
         args: new List({
-          value: [Identifier.from(fieldName), field.initializer.clone()],
+          value: [Identifier.from(fieldName), clonedInit],
         }),
         type: getExprType(field.initializer),
       });
@@ -312,8 +340,10 @@ const expandObjectArg = (call: Call) => {
 
 const normalizeArgsForResolvedFn = (call: Call) => {
   // Only meaningful when call.fn is a function; each helper guards internally
-  resolveArrayArgs(call);
+  // Expand object-arg into labeled args first so array literals inside
+  // labeled params can be coerced with the correct element types.
   expandObjectArg(call);
+  resolveArrayArgs(call);
 };
 
 export const resolveModuleAccess = (call: Call) => {
@@ -830,6 +860,42 @@ const specialCallResolvers: Record<string, (c: Call) => Expr> = {
 
 export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
   if (call.type) return call;
+
+  // VSX: Proactively expand create_element({ name, attributes, children })
+  // into labeled params before generic preprocessing so that candidate
+  // selection and array coercion operate on normalized arguments.
+  if (call.fnName.is("create_element") && call.args.length === 1) {
+    const objArg = call.argAt(0);
+    if (objArg?.isObjectLiteral()) {
+      const need = ["name", "attributes", "children"];
+      const hasAll = need.every((n) => objArg.fields.some((f) => f.name === n));
+      if (hasAll) {
+        const makeLabeledArg = (fieldName: string) => {
+          const field = objArg.fields.find((f) => f.name === fieldName)!;
+          const cloned = field.initializer.clone();
+          if (
+            field.initializer.isCall() &&
+            field.initializer.hasTmpAttribute("arrayLiteral")
+          ) {
+            cloned.setTmpAttribute(
+              "arrayLiteral",
+              field.initializer.getTmpAttribute("arrayLiteral")
+            );
+          }
+          return new Call({
+            ...call.metadata,
+            fnName: Identifier.from(":"),
+            args: new List({
+              value: [Identifier.from(fieldName), cloned],
+            }),
+          });
+        };
+        call.args = new List({
+          value: need.map((n) => makeLabeledArg(n)),
+        });
+      }
+    }
+  }
 
   const resolver = specialCallResolvers[call.fnName.value];
   if (resolver) return resolver(call);
