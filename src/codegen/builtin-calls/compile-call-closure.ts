@@ -11,6 +11,7 @@ import {
   callRef,
 } from "../../lib/binaryen-gc/index.js";
 import { getClosureFunctionType } from "../compile-closure.js";
+import { FnType } from "../../syntax-objects/types.js";
 
 export const compileCallClosure = (
   opts: CompileExprOpts<Call>
@@ -36,12 +37,21 @@ export const compileCallClosure = (
     .sliceAsArray(1)
     .map((arg) => compileExpression({ ...opts, expr: arg, isReturnExpr: false }));
   const args = [closureRef, ...argRefs];
+  const unwrapAlias = (t: any) => {
+    let cur = t;
+    while (cur?.isTypeAlias?.() && cur.type) cur = cur.type;
+    return cur;
+  };
+  const concreteReturn = unwrapAlias(expr.type) ?? closureType.returnType;
   let target = funcRef;
   try {
-    const callType = getClosureFunctionType(opts, closureType);
+    const callType = getClosureFunctionType(
+      opts,
+      { ...closureType, returnType: concreteReturn } as FnType
+    );
     target = refCast(mod, funcRef, callType);
   } catch {}
-  const returnType = mapBinaryenType(opts, closureType.returnType);
+  const returnType = mapBinaryenType(opts, concreteReturn);
   const callExpr = callRef(mod, target, args, returnType, false);
   return isReturnExpr && returnType !== binaryen.none
     ? mod.return(callExpr)

@@ -15,7 +15,7 @@ import { builtinCallCompilers } from "./builtin-call-registry.js";
 import { compileObjectInit } from "./compile-object-init.js";
 import { getClosureFunctionType } from "./compile-closure.js";
 import { Fn } from "../syntax-objects/fn.js";
-import { voydBaseObject } from "../syntax-objects/types.js";
+import { voydBaseObject, FnType } from "../syntax-objects/types.js";
 import { murmurHash3 } from "../lib/murmur-hash.js";
 import { AugmentedBinaryen } from "../lib/binaryen-gc/types.js";
 const bin = binaryen as unknown as AugmentedBinaryen;
@@ -50,12 +50,21 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
           compileExpression({ ...opts, expr: arg, isReturnExpr: false })
         ),
     ];
+    const unwrapAlias = (t: any) => {
+      let cur = t;
+      while (cur?.isTypeAlias?.() && cur.type) cur = cur.type;
+      return cur;
+    };
+    const concreteReturn = unwrapAlias(expr.type) ?? fnType.returnType;
     let target = funcRef;
     try {
-      const callType = getClosureFunctionType(opts, fnType);
+      const callType = getClosureFunctionType(
+        opts,
+        { ...fnType, returnType: concreteReturn } as FnType
+      );
       target = refCast(mod, funcRef, callType);
     } catch {}
-    const returnType = mapBinaryenType(opts, fnType.returnType);
+    const returnType = mapBinaryenType(opts, concreteReturn);
     const callExpr = callRef(mod, target, args, returnType, false);
     return isReturnExpr && returnType !== binaryen.none
       ? mod.return(callExpr)
