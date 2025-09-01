@@ -11,7 +11,6 @@ pub mod fixed_array::all
 pub mod linear_memory
 pub mod string
 pub mod map::all
-pub mod json
 pub mod msg_pack
 pub mod vsx::all
 pub mod vsx
