@@ -41,6 +41,39 @@ import { maybeExpandObjectArg } from "./object-arg-utils.js";
 
 const resolveMemberAccessDirect = (call: Call): Call => {
   call.args = call.args.map(resolveEntities);
+
+  // VSX: If array elements include unresolved `create_element` calls
+  // (e.g., when nested inside literals before imports are applied in scope),
+  // try resolving them explicitly via std::vsx to unblock element type
+  // inference for the fixed array.
+  call.args.each((arg, idx) => {
+    if (!arg.isCall() || arg.fn || getExprType(arg)) return;
+    if (arg.fnName.value !== "create_element") return;
+    const root = call.parentModule;
+    try {
+      if (!root) {
+        console.warn(`resolveFixedArray: no parentModule for ${call.location}`);
+      }
+      const std = root?.resolveModule("std");
+      const vsx = std?.resolveModule("vsx");
+      const candidates = vsx?.resolveExport(Identifier.from("create_element"));
+      const fn = candidates?.find((e) => e.isFn());
+      if (fn?.isFn()) {
+        arg.fn = fn;
+        arg.type = fn.returnType;
+        arg.fnName.type = fn.getType();
+      }
+      if (!arg.fn) {
+        const modFns = root?.resolveFns(Identifier.from("create_element"));
+        const fallback = modFns?.find((f) => f.isFn());
+        if (fallback?.isFn()) {
+          arg.fn = fallback;
+          arg.type = fallback.returnType;
+          arg.fnName.type = fallback.getType();
+        }
+      }
+    } catch {}
+  });
   const recv = call.argAt(0);
   const member = call.argAt(1);
   const recvType = getExprType(recv);
@@ -188,6 +221,10 @@ const resolveCallFn = (call: Call, candidateFns?: Fn[]) => {
   if (resolvedFn) {
     call.fn = resolvedFn;
     call.type = resolvedFn.returnType;
+  } else if (call.fnName.value === "create_element") {
+    console.warn(
+      `resolveCallFn: could not resolve create_element at ${call.location}`
+    );
   }
 };
 
@@ -310,9 +347,37 @@ const expandObjectArg = (call: Call) => {
   call.args.parent = call;
 };
 
+const applyExpectedArgTypes = (call: Call) => {
+  const fn = call.fn?.isFn() ? call.fn : undefined;
+  if (!fn) return;
+
+  call.args.each((arg, index) => {
+    const param = fn.parameters[index];
+    const expected = param?.type;
+    if (!expected) return;
+
+    const isLabeled = arg.isCall() && arg.calls(":");
+    const inner = isLabeled ? arg.argAt(1) : arg;
+    if (!inner) return;
+
+    const coerced = resolveWithExpected(inner, expected);
+    if (isLabeled) {
+      // Update the inner expression and re-resolve the labeled wrapper
+      arg.args.set(1, coerced);
+      call.args.set(index, resolveEntities(arg));
+    } else {
+      call.args.set(index, coerced);
+    }
+  });
+};
+
 const normalizeArgsForResolvedFn = (call: Call) => {
   // Only meaningful when call.fn is a function; each helper guards internally
+  // 1) Propagate expected parameter types into arguments (incl. object/array fields)
+  applyExpectedArgTypes(call);
+  // 2) Coerce any remaining top-level array literals using parameter element types
   resolveArrayArgs(call);
+  // 3) Expand object arguments into labeled args when all params are labeled
   expandObjectArg(call);
 };
 
@@ -479,6 +544,22 @@ const resolveFixedArray = (call: Call) => {
         .filter((t) => !!t)
     ) ??
     nop();
+
+  if ((elemTypeExpr as any).syntaxType === "nop") {
+    const argTypes = call.args
+      .toArray()
+      .map((a) => getExprType(a)?.name?.toString?.() ?? "<unknown>")
+      .join(", ");
+    try {
+      const firstJson = JSON.stringify(call.argAt(0)?.toJSON?.());
+      console.warn(
+        `resolveFixedArray: first arg json ${firstJson} at ${call.argAt(0)?.location}`
+      );
+    } catch {}
+    console.warn(
+      `resolveFixedArray: unknown elemType at ${call.location}; arg types: [${argTypes}]`
+    );
+  }
 
   const arr = resolveFixedArrayType(
     new FixedArrayType({

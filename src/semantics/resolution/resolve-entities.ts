@@ -157,6 +157,18 @@ const findObjectType = (
 export const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
   if (!expected) return resolveEntities(expr);
   const unwrapped = unwrapAlias(expected);
+  // If this expression was originally an array literal lowered to `new_array`
+  // (it carries the original ArrayLiteral on a tmp attribute), and the
+  // expected type is an Array, re-resolve the original literal with the
+  // expected element type so inner FixedArray types adopt the right element
+  // type eagerly.
+  if (expr.isCall() && expr.hasTmpAttribute("arrayLiteral")) {
+    const elem = getArrayElemType(unwrapped);
+    if (elem) {
+      const lit = expr.getTmpAttribute<ArrayLiteral>("arrayLiteral")!.clone();
+      return resolveArrayLiteral(lit, elem);
+    }
+  }
   if (expr.isArrayLiteral()) {
     const elem = getArrayElemType(unwrapped);
     return resolveArrayLiteral(expr, elem);
@@ -266,6 +278,13 @@ export const resolveArrayLiteral = (
     combineTypes(
       arr.elements.map((e) => getExprType(e)).filter((t): t is Type => !!t)
     );
+
+  if (!elemType && arr.elements.length === 0) {
+    // Helpful trace for debugging empty array literals without expected type
+    console.warn(
+      `resolveArrayLiteral: empty literal with unknown element type at ${arr.location}`
+    );
+  }
 
   const fixedArray = new Call({
     ...arr.metadata,

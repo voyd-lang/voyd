@@ -112,6 +112,12 @@ const checkFixedArrayInit = (call: Call) => {
     throw new Error(`Expected FixedArray type at ${call.location}`);
   }
 
+  if (!type.elemType) {
+    const argCount = call.args.length;
+    console.warn(
+      `checkFixedArrayInit: missing elemType for FixedArray at ${call.location} with ${argCount} elements`
+    );
+  }
   checkFixedArrayType(type);
   call.args.each((arg) => {
     const argType = getExprType(arg);

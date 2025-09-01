@@ -65,9 +65,16 @@ export class HTMLParser {
     const obj = new List({ value: ["object", ...fields] });
     obj.location = this.stream.currentSourceLocation();
 
-    return new List({
+    // Fully-qualify to std::vsx::create_element to avoid scope timing issues
+    // during resolution when nested inside literals.
+    const right = new List({
       location: this.stream.currentSourceLocation(),
       value: ["create_element", obj],
+    });
+    const leftInner = new List({ value: ["::", "std", "vsx"] });
+    return new List({
+      location: this.stream.currentSourceLocation(),
+      value: ["::", leftInner, right],
     });
   }
 
