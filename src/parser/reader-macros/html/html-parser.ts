@@ -197,8 +197,7 @@ export class HTMLParser {
     let text = "";
     while (this.stream.hasCharacters && this.stream.next !== "<") {
       if (this.stream.next === "{") {
-        const trimmed = text.trim();
-        if (trimmed) node.push(makeString(trimmed));
+        if (text.trim()) node.push(makeString(text));
         text = "";
         const expr = this.options.onUnescapedCurlyBrace(this.stream);
         if (expr) node.push(expr);
@@ -208,8 +207,7 @@ export class HTMLParser {
       text += this.stream.consumeChar();
     }
 
-    const trimmed = text.trim();
-    if (trimmed) node.push(makeString(trimmed));
+    if (text.trim()) node.push(makeString(text));
     node.location.endColumn = this.stream.column;
     node.location.endIndex = this.stream.position;
     return node;

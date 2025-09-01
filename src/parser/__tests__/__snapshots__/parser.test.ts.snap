@@ -1082,7 +1082,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                                   "new_string",
                                   [
                                     "object",
-                                    "ObjectLiteral-1139",
+                                    "ObjectLiteral-1146",
                                     [
                                       [
                                         "from",
@@ -1101,6 +1101,13 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                                           101,
                                           33,
                                           33,
+                                          10,
+                                          32,
+                                          32,
+                                          32,
+                                          32,
+                                          32,
+                                          32,
                                         ],
                                       ],
                                     ],
@@ -1127,7 +1134,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                                     "new_string",
                                     [
                                       "object",
-                                      "ObjectLiteral-1168",
+                                      "ObjectLiteral-1175",
                                       [
                                         [
                                           "from",
@@ -1156,7 +1163,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                                       "new_string",
                                       [
                                         "object",
-                                        "ObjectLiteral-1202",
+                                        "ObjectLiteral-1216",
                                         [
                                           [
                                             "from",
@@ -1179,6 +1186,13 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                                               100,
                                               97,
                                               121,
+                                              10,
+                                              32,
+                                              32,
+                                              32,
+                                              32,
+                                              32,
+                                              32,
                                             ],
                                           ],
                                         ],
