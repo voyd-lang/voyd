@@ -6,21 +6,9 @@ pub fn create_element(
   attributes: Array<(String, MsgPack)>,
   children: Array<MsgPack>
 ) -> Map<MsgPack>
+  let attributeMap = Map<MsgPack>(attributes)
   Map<MsgPack>([
     ("name", name),
-    ("attributes", attrs_to_map(attributes)),
+    ("attributes", attributeMap),
     ("children", children)
   ])
-
-fn attrs_to_map(pairs: Array<(String, MsgPack)>) -> Map<MsgPack>
-  var m = new_map<MsgPack>()
-  var i = 0
-  while i < pairs.length do:
-    pairs.get(i).match(pair)
-      Some<(String, MsgPack)>:
-        m.set(pair.value.0, pair.value.1)
-        0
-      None:
-        0
-    i = i + 1
-  m
