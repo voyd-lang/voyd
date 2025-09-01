@@ -337,14 +337,6 @@ export const resolveModuleAccess = (call: Call) => {
     const candidates = resolveModulePath(path, resolveModule)
       .map(({ e }) => e)
       .filter((e) => e.isFn());
-    if (!candidates.length) {
-      // Debug: surface module access resolution issues
-      console.warn(
-        `resolveModuleAccess: no candidates for ${left?.toString?.()}::${
-          right.fnName
-        } at ${call.location}`
-      );
-    }
     return resolveCall(right, candidates);
   }
 
