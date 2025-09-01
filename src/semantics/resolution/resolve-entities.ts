@@ -206,7 +206,11 @@ export const resolveObjectLiteral = (
   obj.fields.forEach((field) => {
     const expectedField = expected?.getField(field.name)?.type;
     // DEBUG: trace tuple expected propagation
-    if (process.env.VOYD_DEBUG?.includes("tuple-prop") && expected && (field.name === "0" || field.name === "1")) {
+    if (
+      process.env.VOYD_DEBUG?.includes("tuple-prop") &&
+      expected &&
+      (field.name === "0" || field.name === "1")
+    ) {
       console.log(
         `resolveObjectLiteral: expected ${expected.id} field ${field.name} -> ${expectedField?.id}`
       );
@@ -286,6 +290,6 @@ export const resolveArrayLiteral = (
     args: new List({ value: [objLiteral] }),
     typeArgs,
   });
-  newArrayCall.setTmpAttribute("arrayLiteral", original);
+  newArrayCall.setAttribute("arrayLiteral", original);
   return resolveEntities(newArrayCall);
 };

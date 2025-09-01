@@ -214,14 +214,14 @@ const resolveArrayArgs = (call: Call) => {
     const isLabeled = arg.isCall() && arg.calls(":");
     const inner = isLabeled ? arg.argAt(1) : arg;
     const arrayCall =
-      inner?.isCall() && inner.hasTmpAttribute("arrayLiteral")
+      inner?.isCall() && inner.hasAttribute("arrayLiteral")
         ? (inner as Call)
         : undefined;
     if (!arrayCall) return;
 
-    const arr = arrayCall
-      .getTmpAttribute<ArrayLiteral>("arrayLiteral")!
-      .clone();
+    const arr = (
+      arrayCall.getAttribute("arrayLiteral") as ArrayLiteral
+    ).clone();
     const resolved = resolveArrayLiteral(arr, elemType);
     if (isLabeled) {
       arg.args.set(1, resolved);
@@ -242,17 +242,6 @@ const expandObjectArg = (call: Call) => {
   const allLabeled = labeledParams.length === params.length;
   if (!allLabeled) return;
 
-  const clonePreservingArrayLiteralTmp = (expr: Expr): Expr => {
-    const cloned = expr.clone();
-    if (expr.isCall() && expr.hasTmpAttribute("arrayLiteral")) {
-      cloned.setTmpAttribute(
-        "arrayLiteral",
-        expr.getTmpAttribute("arrayLiteral")
-      );
-    }
-    return cloned;
-  };
-
   // Case 1: direct object literal supplied
   if (objArg.isObjectLiteral()) {
     const coversAll = labeledParams.every((p) =>
@@ -267,10 +256,7 @@ const expandObjectArg = (call: Call) => {
         ...call.metadata,
         fnName: Identifier.from(":"),
         args: new List({
-          value: [
-            Identifier.from(fieldName),
-            clonePreservingArrayLiteralTmp(field.initializer),
-          ],
+          value: [Identifier.from(fieldName), field.initializer],
         }),
         type: getExprType(field.initializer),
       });
