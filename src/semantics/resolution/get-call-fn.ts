@@ -65,11 +65,11 @@ const getCandidates = (call: Call): Fn[] => {
       // pre-registration. Avoid duplicate candidates from the same impl.
       .filter((fn) => (isInsideImpl ? fn.parentImpl !== call.parentImpl : true));
     if (implFns && implFns.length && !isObjectArgForm) {
-      // Prefer receiver methods over same-named top-level functions in
-      // method-call position (arg1 is an object type). Drop non-method
-      // candidates to avoid ambiguity.
-      fns = fns.filter((fn) => !!fn.parentImpl);
-      fns.push(...implFns);
+      // Prefer receiver methods in method-call position. When arg1 is an
+      // object type and we are not using object-arg form, restrict candidates
+      // to only the receiver's methods. This avoids ambiguity with generic
+      // instances from other scopes whose `self` type hasn't been specialized.
+      fns = [...implFns];
     } else if (implFns && implFns.length) {
       // In object-arg form (labeled params), don't drop top-level functions;
       // include both so labeled-arg overloads can match.
