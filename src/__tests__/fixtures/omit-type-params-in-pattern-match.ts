@@ -1,4 +1,4 @@
-export const msgPackOptionalOmitVoyd = `
+export const omitTypeParamsInPatternMatch = `
 use std::all
 use std::msg_pack::MsgPack
 
@@ -13,4 +13,3 @@ pub fn main() -> i32
     None:
       -1
 `;
-

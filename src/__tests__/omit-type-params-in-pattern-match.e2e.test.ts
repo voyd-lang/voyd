@@ -1,4 +1,4 @@
-import { msgPackOptionalOmitVoyd } from "./fixtures/msg-pack-optional-omit.js";
+import { omitTypeParamsInPatternMatch } from "./fixtures/omit-type-params-in-pattern-match.js";
 import { compile } from "../compiler.js";
 import { describe, test, beforeAll } from "vitest";
 import assert from "node:assert";
@@ -8,7 +8,7 @@ describe("E2E Optional<T> match with omitted type param", () => {
   let instance: WebAssembly.Instance;
 
   beforeAll(async () => {
-    const mod = await compile(msgPackOptionalOmitVoyd);
+    const mod = await compile(omitTypeParamsInPatternMatch);
     instance = getWasmInstance(mod);
   });
 
@@ -18,4 +18,3 @@ describe("E2E Optional<T> match with omitted type param", () => {
     t.expect(fn()).toEqual(1);
   });
 });
-
