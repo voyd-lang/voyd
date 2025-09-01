@@ -36,9 +36,7 @@ export const functionalNotation = (list: List): List => {
         const generics = nextExpr;
         const nextNextExpr = array[index + 2];
         if (nextNextExpr && nextNextExpr.isList()) {
-          result.push(
-            processGenerics(expr, generics, nextNextExpr as List)
-          );
+          result.push(processGenerics(expr, generics, nextNextExpr as List));
           skip = 2;
         } else {
           result.push(processGenerics(expr, generics));

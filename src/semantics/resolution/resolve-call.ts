@@ -22,7 +22,10 @@ import {
 } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
-import { resolveObjectType, containsUnresolvedTypeId } from "./resolve-object-type.js";
+import {
+  resolveObjectType,
+  containsUnresolvedTypeId,
+} from "./resolve-object-type.js";
 import { resolveImpl } from "./resolve-impl.js";
 import {
   resolveEntities,
@@ -31,10 +34,11 @@ import {
 } from "./resolve-entities.js";
 import { resolveWithExpected } from "./resolve-entities.js";
 import { resolveExport, resolveModulePath } from "./resolve-use.js";
+import { resolveModule } from "./resolve-entities.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr, resolveFixedArrayType } from "./resolve-type-expr.js";
 import { resolveTrait } from "./resolve-trait.js";
-import { resolveFn } from "./resolve-fn.js";
+import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
 
@@ -192,6 +196,8 @@ const resolveCallFn = (call: Call, candidateFns?: Fn[]) => {
 
 const arrayElemType = (type?: Type): Type | undefined => {
   if (!type) return;
+  // Unwrap aliases eagerly
+  if (type.isTypeAlias()) return arrayElemType(type.type);
   if (type.isObjectType()) {
     if (!type.name.is("Array") && !type.genericParent?.name.is("Array")) return;
     const arg = type.appliedTypeArgs?.[0];
@@ -203,22 +209,39 @@ const arrayElemType = (type?: Type): Type | undefined => {
 
 const resolveArrayArgs = (call: Call) => {
   const fn = call.fn?.isFn() ? call.fn : undefined;
+  // Fall back to candidate functions when unresolved to infer expected element types.
+  const candidates = !fn ? call.resolveFns(call.fnName) : [];
+  if (!fn) {
+    // Ensure candidate signatures are ready
+    candidates.forEach((c) => resolveFnSignature(c));
+  }
   call.args.each((arg: Expr, index: number) => {
     const param = fn?.parameters[index];
-    const elemType = arrayElemType(param?.type);
+    let elemType = arrayElemType(param?.type);
+    if (!elemType && candidates.length) {
+      const elems = candidates
+        .map((c) => arrayElemType(c.parameters[index]?.type))
+        .filter((t): t is Type => !!t);
+      if (elems.length === 1) elemType = elems[0];
+      else if (elems.length > 1) elemType = combineTypes(elems);
+    }
 
     const isLabeled = arg.isCall() && arg.calls(":");
     const inner = isLabeled ? arg.argAt(1) : arg;
     const arrayCall =
-      inner?.isCall() && inner.hasTmpAttribute("arrayLiteral")
+      inner?.isCall() && inner.hasAttribute("arrayLiteral")
         ? (inner as Call)
         : undefined;
     if (!arrayCall) return;
 
-    const arr = arrayCall
-      .getTmpAttribute<ArrayLiteral>("arrayLiteral")!
-      .clone();
-    const resolved = resolveArrayLiteral(arr, elemType);
+    const arr = (
+      arrayCall.getAttribute("arrayLiteral") as ArrayLiteral
+    ).clone();
+    // Only use candidate-derived elemType when the array is empty to avoid
+    // masking helpful overload errors on mismatched non-empty arrays.
+    const effectiveElemType =
+      arr.elements.length === 0 ? elemType : arrayElemType(param?.type);
+    const resolved = resolveArrayLiteral(arr, effectiveElemType);
     if (isLabeled) {
       arg.args.set(1, resolved);
       call.args.set(index, resolveEntities(arg));
@@ -252,7 +275,7 @@ const expandObjectArg = (call: Call) => {
         ...call.metadata,
         fnName: Identifier.from(":"),
         args: new List({
-          value: [Identifier.from(fieldName), field.initializer.clone()],
+          value: [Identifier.from(fieldName), field.initializer],
         }),
         type: getExprType(field.initializer),
       });
@@ -303,8 +326,10 @@ const expandObjectArg = (call: Call) => {
 
 const normalizeArgsForResolvedFn = (call: Call) => {
   // Only meaningful when call.fn is a function; each helper guards internally
-  resolveArrayArgs(call);
+  // Expand object-arg into labeled args first so array literals inside
+  // labeled params can be coerced with the correct element types.
   expandObjectArg(call);
+  resolveArrayArgs(call);
 };
 
 export const resolveModuleAccess = (call: Call) => {
@@ -314,10 +339,9 @@ export const resolveModuleAccess = (call: Call) => {
     const path = new List(["::", left, right.fnName]);
     path.parent = call.parent ?? call.parentModule;
 
-    const candidates = resolveModulePath(path)
+    const candidates = resolveModulePath(path, resolveModule)
       .map(({ e }) => e)
       .filter((e) => e.isFn());
-
     return resolveCall(right, candidates);
   }
 

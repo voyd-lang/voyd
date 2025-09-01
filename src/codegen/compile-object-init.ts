@@ -1,4 +1,8 @@
-import { CompileExprOpts, compileExpression, mapBinaryenType } from "../codegen.js";
+import {
+  CompileExprOpts,
+  compileExpression,
+  mapBinaryenType,
+} from "../codegen.js";
 import { Call } from "../syntax-objects/call.js";
 import { ObjectLiteral } from "../syntax-objects/object-literal.js";
 import { ObjectType } from "../syntax-objects/types.js";

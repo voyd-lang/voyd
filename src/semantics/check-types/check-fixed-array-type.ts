@@ -7,4 +7,3 @@ export const checkFixedArrayType = (array: FixedArrayType) => {
 
   return array;
 };
-

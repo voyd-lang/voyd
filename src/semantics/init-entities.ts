@@ -30,6 +30,14 @@ export const initEntities: SemanticProcessor = (expr) => {
     return expr.applyMap(initEntities);
   }
 
+  // If the parser produced a Call node directly (e.g., by a reader macro),
+  // initialize its arguments so nested list constructs (like array literals)
+  // are converted into their typed forms before resolution.
+  if (expr.isCall()) {
+    expr.args = expr.args.map(initEntities);
+    return expr;
+  }
+
   if (!expr.isList()) return expr;
 
   if (expr.calls("define_function")) {

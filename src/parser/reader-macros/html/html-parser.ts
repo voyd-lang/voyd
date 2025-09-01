@@ -1,5 +1,7 @@
 import { Bool } from "../../../syntax-objects/bool.js";
 import { Expr } from "../../../syntax-objects/expr.js";
+import { Call } from "../../../syntax-objects/call.js";
+import { Identifier } from "../../../syntax-objects/identifier.js";
 import { List } from "../../../syntax-objects/list.js";
 import { makeString } from "../../../syntax-objects/lib/make-string.js";
 import { CharStream } from "../../char-stream.js";
@@ -21,13 +23,10 @@ export class HTMLParser {
     this.options = options;
   }
 
-  parse(startElement?: string): List {
-    const nodes = new List({});
+  parse(startElement?: string): Expr {
     const node = this.parseNode(startElement);
-    if (node) {
-      nodes.push(node);
-    }
-    return nodes;
+    if (!node) throw new Error("Expected HTML node");
+    return node;
   }
 
   private parseNode(startElement?: string): Expr | null {
@@ -43,7 +42,7 @@ export class HTMLParser {
     }
   }
 
-  private parseElement(startElement?: string): List | null {
+  private parseElement(startElement?: string): Expr | null {
     if (!startElement && this.stream.consumeChar() !== "<") return null;
 
     const tagName = startElement ?? this.parseTagName();
@@ -58,17 +57,14 @@ export class HTMLParser {
       throw new Error("Malformed tag");
     }
 
-    const elementNode = new List({
+    // Build positional call: create_element("div", [(k, v), ...], [...])
+    const nameExpr = makeString(tagName);
+    const children = selfClosing ? arrayLiteral([]) : this.parseChildren(tagName);
+    return new Call({
       location: this.stream.currentSourceLocation(),
-      value: [tagName, ["attributes", ":", attributes]],
+      fnName: Identifier.from("create_element"),
+      args: new List({ value: [nameExpr, attributes, children] }),
     });
-
-    if (!selfClosing) {
-      const children = this.parseChildren(tagName);
-      elementNode.push(["children", ":", children]);
-    }
-
-    return elementNode;
   }
 
   private parseTagName(): string {
@@ -80,23 +76,24 @@ export class HTMLParser {
   }
 
   private parseAttributes(): List {
-    const attributes = dict();
-    const args = array();
-    attributes.push(args);
+    // Attributes: Array<(String, String)> represented as array-literal of tuple-literals
+    const items: Expr[] = [];
     while (this.stream.next !== ">" && this.stream.next !== "/") {
       this.consumeWhitespace();
       const name = this.parseAttributeName();
+      if (!name) break;
       if (this.stream.next === "=") {
         this.stream.consumeChar(); // Consume '='
         const value = this.parseAttributeValue();
-        args.push(dictItem(name, value));
+        items.push(tuple(makeString(name), value));
       } else {
-        args.push(dictItem(name, new Bool({ value: true })));
+        // Boolean attribute -> "true" string
+        items.push(tuple(makeString(name), makeString("true")));
       }
       this.consumeWhitespace();
     }
 
-    return attributes;
+    return arrayLiteral(items);
   }
 
   private parseAttributeName(): string {
@@ -135,7 +132,7 @@ export class HTMLParser {
     return makeString(text);
   }
 
-  private parseChildren(tagName: string): Expr[] {
+  private parseChildren(tagName: string): List {
     this.consumeWhitespace();
     const children: Expr[] = [];
     while (
@@ -151,7 +148,13 @@ export class HTMLParser {
 
       const node = this.parseNode();
       if (node) {
-        children.push(node);
+        // Flatten text-array nodes
+        if (node.isList() && (node as List).calls("array")) {
+          const arr = node as List;
+          arr.sliceAsArray(1).forEach((e) => children.push(e));
+        } else {
+          children.push(node);
+        }
       }
 
       this.consumeWhitespace();
@@ -173,7 +176,7 @@ export class HTMLParser {
       }
     }
 
-    return children;
+    return arrayLiteral(children);
   }
 
   private parseText(): Expr {
@@ -183,16 +186,19 @@ export class HTMLParser {
     let text = "";
     while (this.stream.hasCharacters && this.stream.next !== "<") {
       if (this.stream.next === "{") {
-        if (text) node.push(makeString(text));
+        const trimmed = text.trim();
+        if (trimmed) node.push(makeString(trimmed));
         text = "";
         const expr = this.options.onUnescapedCurlyBrace(this.stream);
         if (expr) node.push(expr);
+        continue;
       }
 
       text += this.stream.consumeChar();
     }
 
-    if (text) node.push(makeString(text));
+    const trimmed = text.trim();
+    if (trimmed) node.push(makeString(trimmed));
     node.location.endColumn = this.stream.column;
     node.location.endIndex = this.stream.position;
     return node;
@@ -205,6 +211,14 @@ export class HTMLParser {
   }
 }
 
-const dict = () => new List({}).insert("dict");
-const dictItem = (key: string, value: Expr) => array().push(key, value);
+// Helpers
 const array = () => new List({}).insert("array");
+const arrayLiteral = (items: Expr[]) => {
+  // Build array literal in the same shape the array literal reader macro
+  // eventually expects, but omit the comma placeholder since initArrayLiteral
+  // slices past the head label anyway.
+  const arr = new List({ value: ["array", ...items] });
+  arr.setAttribute("array-literal", true);
+  return arr;
+};
+const tuple = (a: Expr, b: Expr) => new List({ value: ["tuple", a, b] });

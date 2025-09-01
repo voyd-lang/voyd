@@ -5,4 +5,3 @@ export const checkObjectLiteralType = (obj: ObjectLiteral) => {
   obj.fields.forEach((field) => checkTypes(field.initializer));
   return obj;
 };
-

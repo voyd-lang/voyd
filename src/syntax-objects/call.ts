@@ -1,6 +1,7 @@
 import { Expr } from "./expr.js";
 import { Fn } from "./fn.js";
 import { Identifier } from "./identifier.js";
+import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
 import { LexicalContext } from "./lib/lexical-context.js";
 import { List } from "./list.js";
@@ -12,8 +13,8 @@ export class Call extends Syntax {
   readonly syntaxType = "call";
   fn?: Fn | ObjectType;
   #fnName: Child<Identifier>;
-  args: List;
-  typeArgs?: List;
+  #args: Child<List>;
+  #typeArgs = new Child<List | undefined>(undefined, this);
   #type?: Type;
 
   constructor(
@@ -29,11 +30,26 @@ export class Call extends Syntax {
     super(opts);
     this.#fnName = new Child(opts.fnName, this);
     this.fn = opts.fn;
-    this.args = opts.args;
-    this.args.parent = this;
+    this.#args = new Child(opts.args, this);
     this.typeArgs = opts.typeArgs;
     if (this.typeArgs) this.typeArgs.parent = this;
     this.#type = opts.type;
+  }
+
+  get args() {
+    return this.#args.value;
+  }
+
+  set args(v: List) {
+    this.#args.value = v;
+  }
+
+  get typeArgs() {
+    return this.#typeArgs.value;
+  }
+
+  set typeArgs(v: List | undefined) {
+    this.#typeArgs.value = v;
   }
 
   get fnName() {
