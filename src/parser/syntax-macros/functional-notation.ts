@@ -31,7 +31,19 @@ export const functionalNotation = (list: List): List => {
 
     const nextExpr = array[index + 1];
 
-    if (nextExpr && nextExpr.isList() && !(isOp(expr) || idIs(expr, ","))) {
+    // Avoid interpreting label-value pairs inside a ':' list as function calls.
+    // For lists like [":", label, valueList], the label (at index 1) may be
+    // followed by a list (the value). This is not a function call and should
+    // remain as-is so object fields and named args preserve their shape.
+    const parentIsColonList = array[0]?.isIdentifier() && array[0].is(":");
+    const isLabelPositionInColonList = parentIsColonList && index === 1;
+
+    if (
+      nextExpr &&
+      nextExpr.isList() &&
+      !(isOp(expr) || idIs(expr, ",")) &&
+      !isLabelPositionInColonList
+    ) {
       if (nextExpr.calls("generics")) {
         const generics = nextExpr;
         const nextNextExpr = array[index + 2];

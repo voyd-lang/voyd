@@ -1020,15 +1020,15 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
               ],
               [
                 ":",
+                "attributes",
                 [
-                  "attributes",
                   "array",
                 ],
               ],
               [
                 ":",
+                "children",
                 [
-                  "children",
                   "array",
                   [
                     "create_element",
@@ -1056,15 +1056,15 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                       ],
                       [
                         ":",
+                        "attributes",
                         [
-                          "attributes",
                           "array",
                         ],
                       ],
                       [
                         ":",
+                        "children",
                         [
-                          "children",
                           "array",
                           [
                             "new_string",
@@ -1123,15 +1123,15 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                         ],
                         [
                           ":",
+                          "attributes",
                           [
-                            "attributes",
                             "array",
                           ],
                         ],
                         [
                           ":",
+                          "children",
                           [
-                            "children",
                             "array",
                             [
                               "new_string",

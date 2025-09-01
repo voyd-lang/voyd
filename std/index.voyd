@@ -13,4 +13,5 @@ pub mod string
 pub mod map::all
 pub mod json
 pub mod msg_pack
+pub mod vsx::all
 pub mod vsx
