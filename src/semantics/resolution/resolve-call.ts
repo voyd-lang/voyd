@@ -22,7 +22,10 @@ import {
 } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
-import { resolveObjectType, containsUnresolvedTypeId } from "./resolve-object-type.js";
+import {
+  resolveObjectType,
+  containsUnresolvedTypeId,
+} from "./resolve-object-type.js";
 import { resolveImpl } from "./resolve-impl.js";
 import {
   resolveEntities,
@@ -239,6 +242,17 @@ const expandObjectArg = (call: Call) => {
   const allLabeled = labeledParams.length === params.length;
   if (!allLabeled) return;
 
+  const clonePreservingArrayLiteralTmp = (expr: Expr): Expr => {
+    const cloned = expr.clone();
+    if (expr.isCall() && expr.hasTmpAttribute("arrayLiteral")) {
+      cloned.setTmpAttribute(
+        "arrayLiteral",
+        expr.getTmpAttribute("arrayLiteral")
+      );
+    }
+    return cloned;
+  };
+
   // Case 1: direct object literal supplied
   if (objArg.isObjectLiteral()) {
     const coversAll = labeledParams.every((p) =>
@@ -253,7 +267,10 @@ const expandObjectArg = (call: Call) => {
         ...call.metadata,
         fnName: Identifier.from(":"),
         args: new List({
-          value: [Identifier.from(fieldName), field.initializer.clone()],
+          value: [
+            Identifier.from(fieldName),
+            clonePreservingArrayLiteralTmp(field.initializer),
+          ],
         }),
         type: getExprType(field.initializer),
       });
@@ -323,7 +340,9 @@ export const resolveModuleAccess = (call: Call) => {
     if (!candidates.length) {
       // Debug: surface module access resolution issues
       console.warn(
-        `resolveModuleAccess: no candidates for ${left?.toString?.()}::${right.fnName} at ${call.location}`
+        `resolveModuleAccess: no candidates for ${left?.toString?.()}::${
+          right.fnName
+        } at ${call.location}`
       );
     }
     return resolveCall(right, candidates);
@@ -824,42 +843,6 @@ const specialCallResolvers: Record<string, (c: Call) => Expr> = {
 
 export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
   if (call.type) return call;
-
-  // VSX: Proactively expand create_element({ name, attributes, children })
-  // into labeled params before generic preprocessing so that candidate
-  // selection and array coercion operate on normalized arguments.
-  if (call.fnName.is("create_element") && call.args.length === 1) {
-    const objArg = call.argAt(0);
-    if (objArg?.isObjectLiteral()) {
-      const need = ["name", "attributes", "children"];
-      const hasAll = need.every((n) => objArg.fields.some((f) => f.name === n));
-      if (hasAll) {
-        const makeLabeledArg = (fieldName: string) => {
-          const field = objArg.fields.find((f) => f.name === fieldName)!;
-          const cloned = field.initializer.clone();
-          if (
-            field.initializer.isCall() &&
-            field.initializer.hasTmpAttribute("arrayLiteral")
-          ) {
-            cloned.setTmpAttribute(
-              "arrayLiteral",
-              field.initializer.getTmpAttribute("arrayLiteral")
-            );
-          }
-          return new Call({
-            ...call.metadata,
-            fnName: Identifier.from(":"),
-            args: new List({
-              value: [Identifier.from(fieldName), cloned],
-            }),
-          });
-        };
-        call.args = new List({
-          value: need.map((n) => makeLabeledArg(n)),
-        });
-      }
-    }
-  }
 
   const resolver = specialCallResolvers[call.fnName.value];
   if (resolver) return resolver(call);
