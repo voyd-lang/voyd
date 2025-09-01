@@ -389,6 +389,7 @@ pub fn fib(n: i32, a: i32, b: i32) -> i32
 
 export const controlFlowText = `
 use std::all
+use std::msg_pack::MsgPack
 
 // If-match without binder: returns 4
 pub fn test1() -> i32
@@ -462,6 +463,35 @@ pub fn test9() -> i32
   match(x)
     Some<i32>: x.value
     None: -1
+
+// Test omission of type params in union matching where the object only appears once
+pub fn test10() -> i32
+  let m = Map<MsgPack>([
+    ("hey", "hi"),
+    ("goodbye", "hey")
+  ])
+  m.get("hey").match(v)
+    Some:
+      1
+    None:
+      -1
+
+// If-match without else: returns 4
+pub fn test11() -> i32
+  let opt: Optional<i32> = Some<i32> { value: 4 }
+  var v = -1
+  if opt.match(Some) then:
+    v = opt.value
+  v
+
+// While-match with binder: sum 2+4+6 = 12 (type param omitted)
+pub fn test12() -> i32
+  let a = [2, 4, 6]
+  let iterator = a.iterate()
+  var sum = 0
+  while iterator.next().match(x, Some) do:
+    sum = sum + x.value
+  sum
 `;
 
 export const goodTypeInferenceText = `
