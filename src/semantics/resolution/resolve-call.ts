@@ -33,6 +33,7 @@ import {
   resolveObjectLiteral,
 } from "./resolve-entities.js";
 import { resolveWithExpected } from "./resolve-entities.js";
+import { resolveClosure } from "./resolve-closure.js";
 import { resolveExport, resolveModulePath } from "./resolve-use.js";
 import { resolveModule } from "./resolve-entities.js";
 import { combineTypes } from "./combine-types.js";
@@ -251,6 +252,44 @@ const resolveArrayArgs = (call: Call) => {
   });
 };
 
+const resolveClosureArgs = (call: Call) => {
+  const fn = call.fn;
+  if (!fn?.isFn()) return;
+  call.args.each((arg: Expr, index: number) => {
+    const paramType = fn.parameters[index]?.type;
+    const isLabeled = arg.isCall() && arg.calls(":");
+    const inner = isLabeled ? arg.argAt(1) : arg;
+    if (!inner?.isClosure()) return;
+    const expected = paramType?.isTypeAlias() ? paramType.type : paramType;
+    if (expected?.isFnType()) {
+      inner.parameters.forEach((p, i) => {
+        const exp = expected.parameters[i]?.type;
+        if (!p.type && !p.typeExpr && exp) p.type = exp;
+      });
+      if (!inner.returnTypeExpr && !inner.annotatedReturnType) {
+        const ret = expected.returnType.isTypeAlias()
+          ? expected.returnType.type ?? expected.returnType
+          : expected.returnType;
+        inner.annotatedReturnType = ret;
+      }
+    }
+    const resolved = resolveClosure(inner);
+    if (expected?.isFnType()) {
+      const ret = expected.returnType.isTypeAlias()
+        ? expected.returnType.type ?? expected.returnType
+        : expected.returnType;
+      resolved.inferredReturnType = ret;
+      resolved.returnType = ret;
+    }
+    if (isLabeled) {
+      arg.args.set(1, resolved);
+      call.args.set(index, resolveEntities(arg));
+      return;
+    }
+    call.args.set(index, resolved);
+  });
+};
+
 const expandObjectArg = (call: Call) => {
   const fn = call.fn;
   if (!fn?.isFn() || call.args.length !== 1) return;
@@ -330,6 +369,7 @@ const normalizeArgsForResolvedFn = (call: Call) => {
   // labeled params can be coerced with the correct element types.
   expandObjectArg(call);
   resolveArrayArgs(call);
+  resolveClosureArgs(call);
 };
 
 export const resolveModuleAccess = (call: Call) => {
