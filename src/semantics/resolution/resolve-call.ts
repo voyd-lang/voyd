@@ -278,7 +278,6 @@ const resolveClosureArgs = (call: Call) => {
       const ret = expected.returnType.isTypeAlias()
         ? expected.returnType.type ?? expected.returnType
         : expected.returnType;
-      resolved.inferredReturnType = ret;
       resolved.returnType = ret;
     }
     if (isLabeled) {
