@@ -23,6 +23,6 @@ export const htmlMacro: ReaderMacro = {
     });
     const start = new Lexer().tokenize(file);
     const html = parser.parse(start.value);
-    return new List({ value: ["html", html], location: token.location });
+    return html;
   },
 };

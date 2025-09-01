@@ -993,40 +993,80 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
         [
           "block",
           [
-            "html",
+            "create_element",
             [
-              "div",
+              ":",
+              "name",
               [
-                ":",
-                "attributes",
+                "new_string",
                 [
-                  "dict",
-                  "array",
+                  "object",
+                  "ObjectLiteral-1090",
+                  [
+                    [
+                      "from",
+                      [
+                        "FixedArray",
+                        100,
+                        105,
+                        118,
+                      ],
+                    ],
+                  ],
                 ],
               ],
+            ],
+            [
+              ":",
               [
-                ":",
+                "attributes",
+                "array",
+              ],
+            ],
+            [
+              ":",
+              [
                 "children",
+                "array",
                 [
-                  "p",
+                  "create_element",
                   [
                     ":",
-                    "attributes",
+                    "name",
                     [
-                      "dict",
+                      "new_string",
+                      [
+                        "object",
+                        "ObjectLiteral-1111",
+                        [
+                          [
+                            "from",
+                            [
+                              "FixedArray",
+                              112,
+                            ],
+                          ],
+                        ],
+                      ],
+                    ],
+                  ],
+                  [
+                    ":",
+                    [
+                      "attributes",
                       "array",
                     ],
                   ],
                   [
                     ":",
-                    "children",
                     [
+                      "children",
                       "array",
                       [
                         "new_string",
                         [
                           "object",
-                          "ObjectLiteral-1125",
+                          "ObjectLiteral-1143",
                           [
                             [
                               "from",
@@ -1045,13 +1085,6 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                                 101,
                                 33,
                                 33,
-                                10,
-                                32,
-                                32,
-                                32,
-                                32,
-                                32,
-                                32,
                               ],
                             ],
                           ],
@@ -1060,25 +1093,44 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                     ],
                   ],
                   [
-                    "p",
+                    "create_element",
                     [
                       ":",
-                      "attributes",
+                      "name",
                       [
-                        "dict",
+                        "new_string",
+                        [
+                          "object",
+                          "ObjectLiteral-1162",
+                          [
+                            [
+                              "from",
+                              [
+                                "FixedArray",
+                                112,
+                              ],
+                            ],
+                          ],
+                        ],
+                      ],
+                    ],
+                    [
+                      ":",
+                      [
+                        "attributes",
                         "array",
                       ],
                     ],
                     [
                       ":",
-                      "children",
                       [
+                        "children",
                         "array",
                         [
                           "new_string",
                           [
                             "object",
-                            "ObjectLiteral-1173",
+                            "ObjectLiteral-1198",
                             [
                               [
                                 "from",
@@ -1101,13 +1153,6 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                                   100,
                                   97,
                                   121,
-                                  10,
-                                  32,
-                                  32,
-                                  32,
-                                  32,
-                                  32,
-                                  32,
                                 ],
                               ],
                             ],
