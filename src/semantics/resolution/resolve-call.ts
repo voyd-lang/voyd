@@ -204,12 +204,6 @@ const arrayElemType = (type?: Type): Type | undefined => {
 
 const resolveArrayArgs = (call: Call) => {
   const fn = call.fn?.isFn() ? call.fn : undefined;
-  const isVsxCreate = !!(fn && fn.name.is("create_element"));
-  if (isVsxCreate) {
-    console.warn(
-      `resolveArrayArgs: inspecting create_element args at ${call.location}`
-    );
-  }
   call.args.each((arg: Expr, index: number) => {
     const param = fn?.parameters[index];
     const elemType = arrayElemType(param?.type);
@@ -220,29 +214,12 @@ const resolveArrayArgs = (call: Call) => {
       inner?.isCall() && inner.hasTmpAttribute("arrayLiteral")
         ? (inner as Call)
         : undefined;
-    const arrayLiteral = inner?.isArrayLiteral() ? (inner as ArrayLiteral) : undefined;
-    if (isVsxCreate) {
-      console.warn(
-        `  arg[${index}] labeled=${isLabeled} isCall=${inner?.isCall?.()} tmpArr=${
-          !!arrayCall
-        } elemType=${elemType?.name ?? "unknown"}`
-      );
-    }
-    if (!arrayCall && !arrayLiteral) return;
+    if (!arrayCall) return;
 
     const arr = arrayCall
-      ? arrayCall.getTmpAttribute<ArrayLiteral>("arrayLiteral")!.clone()
-      : arrayLiteral!
-          .clone();
+      .getTmpAttribute<ArrayLiteral>("arrayLiteral")!
+      .clone();
     const resolved = resolveArrayLiteral(arr, elemType);
-    if (isVsxCreate) {
-      const label = isLabeled ? (arg as any).argAt(0)?.toString?.() : undefined;
-      console.warn(
-        `  coerced ${label ?? index} to Array of ${
-          elemType?.name ?? "unknown"
-        } at ${call.location}`
-      );
-    }
     if (isLabeled) {
       arg.args.set(1, resolved);
       call.args.set(index, resolveEntities(arg));
@@ -272,24 +249,11 @@ const expandObjectArg = (call: Call) => {
     const newArgs = labeledParams.map((p) => {
       const fieldName = p.label!.value;
       const field = objArg.fields.find((f) => f.name === fieldName)!;
-      // Preserve any temporary attributes (like arrayLiteral) when cloning the
-      // initializer so downstream coercion (resolveArrayArgs) can detect and
-      // re-resolve array literals with expected element types.
-      const clonedInit = field.initializer.clone();
-      if (
-        field.initializer.isCall() &&
-        field.initializer.hasTmpAttribute("arrayLiteral")
-      ) {
-        clonedInit.setTmpAttribute(
-          "arrayLiteral",
-          field.initializer.getTmpAttribute("arrayLiteral")
-        );
-      }
       return new Call({
         ...call.metadata,
         fnName: Identifier.from(":"),
         args: new List({
-          value: [Identifier.from(fieldName), clonedInit],
+          value: [Identifier.from(fieldName), field.initializer.clone()],
         }),
         type: getExprType(field.initializer),
       });

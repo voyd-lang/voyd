@@ -1,5 +1,7 @@
 import { Bool } from "../../../syntax-objects/bool.js";
 import { Expr } from "../../../syntax-objects/expr.js";
+import { Call } from "../../../syntax-objects/call.js";
+import { Identifier } from "../../../syntax-objects/identifier.js";
 import { List } from "../../../syntax-objects/list.js";
 import { makeString } from "../../../syntax-objects/lib/make-string.js";
 import { CharStream } from "../../char-stream.js";
@@ -55,22 +57,13 @@ export class HTMLParser {
       throw new Error("Malformed tag");
     }
 
-    // Build: create_element(name: "div", attributes: [(k, v), ...], children: [...])
-    const fields: Expr[] = [];
-    fields.push(new List({ value: [":", "name", makeString(tagName)] }));
-    fields.push(new List({ value: [":", "attributes", attributes] }));
+    // Build positional call: create_element("div", [(k, v), ...], [...])
+    const nameExpr = makeString(tagName);
     const children = selfClosing ? arrayLiteral([]) : this.parseChildren(tagName);
-    fields.push(new List({ value: [":", "children", children] }));
-
-    const obj = new List({ value: ["object", ...fields] });
-    // Mark this object-arg so resolution can defer array literal coercion
-    // until after labeled param expansion (avoids premature FixedArray typing).
-    obj.setAttribute("vsx-create-element-args", true);
-    obj.location = this.stream.currentSourceLocation();
-
-    return new List({
+    return new Call({
       location: this.stream.currentSourceLocation(),
-      value: ["create_element", obj],
+      fnName: Identifier.from("create_element"),
+      args: new List({ value: [nameExpr, attributes, children] }),
     });
   }
 
@@ -221,11 +214,11 @@ export class HTMLParser {
 // Helpers
 const array = () => new List({}).insert("array");
 const arrayLiteral = (items: Expr[]) => {
-  const arr = new List({ value: ["array", ",", ...items] });
+  // Build array literal in the same shape the array literal reader macro
+  // eventually expects, but omit the comma placeholder since initArrayLiteral
+  // slices past the head label anyway.
+  const arr = new List({ value: ["array", ...items] });
   arr.setAttribute("array-literal", true);
-  // Mark VSX arrays so resolution can defer coercion until after
-  // labeled-parameter expansion.
-  arr.setAttribute("vsx-array", true);
   return arr;
 };
 const tuple = (a: Expr, b: Expr) => new List({ value: ["tuple", a, b] });

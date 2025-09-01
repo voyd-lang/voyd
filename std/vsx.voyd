@@ -1,15 +1,16 @@
 use std::all
 use std::msg_pack::MsgPack
 
-pub fn create_element({
+pub fn create_element(
   name: String,
   attributes: Array<(String, MsgPack)>,
   children: Array<MsgPack>
-}) -> MsgPack
-  new_map<MsgPack>()
-    .set("name", name)
-    .set("attributes", attrs_to_map(attributes))
-    .set("children", children)
+) -> Map<MsgPack>
+  Map<MsgPack>([
+    ("name", name),
+    ("attributes", attrs_to_map(attributes)),
+    ("children", children)
+  ])
 
 fn attrs_to_map(pairs: Array<(String, MsgPack)>) -> Map<MsgPack>
   var m = new_map<MsgPack>()

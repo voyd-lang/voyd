@@ -995,23 +995,75 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
           [
             "create_element",
             [
-              "object",
+              "new_string",
               [
-                ":",
-                "name",
+                "object",
+                "ObjectLiteral-1089",
+                [
+                  [
+                    "from",
+                    [
+                      "FixedArray",
+                      100,
+                      105,
+                      118,
+                    ],
+                  ],
+                ],
+              ],
+            ],
+            [
+              "array",
+            ],
+            [
+              "array",
+              [
+                "create_element",
                 [
                   "new_string",
                   [
                     "object",
-                    "ObjectLiteral-1090",
+                    "ObjectLiteral-1101",
                     [
                       [
                         "from",
                         [
                           "FixedArray",
-                          100,
-                          105,
-                          118,
+                          112,
+                        ],
+                      ],
+                    ],
+                  ],
+                ],
+                [
+                  "array",
+                ],
+                [
+                  "array",
+                  [
+                    "new_string",
+                    [
+                      "object",
+                      "ObjectLiteral-1125",
+                      [
+                        [
+                          "from",
+                          [
+                            "FixedArray",
+                            72,
+                            101,
+                            108,
+                            108,
+                            111,
+                            32,
+                            116,
+                            104,
+                            101,
+                            114,
+                            101,
+                            33,
+                            33,
+                          ],
                         ],
                       ],
                     ],
@@ -1019,152 +1071,55 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                 ],
               ],
               [
-                ":",
-                "attributes",
+                "create_element",
                 [
-                  "array",
-                ],
-              ],
-              [
-                ":",
-                "children",
-                [
-                  "array",
+                  "new_string",
                   [
-                    "create_element",
+                    "object",
+                    "ObjectLiteral-1142",
                     [
-                      "object",
                       [
-                        ":",
-                        "name",
+                        "from",
                         [
-                          "new_string",
-                          [
-                            "object",
-                            "ObjectLiteral-1109",
-                            [
-                              [
-                                "from",
-                                [
-                                  "FixedArray",
-                                  112,
-                                ],
-                              ],
-                            ],
-                          ],
-                        ],
-                      ],
-                      [
-                        ":",
-                        "attributes",
-                        [
-                          "array",
-                        ],
-                      ],
-                      [
-                        ":",
-                        "children",
-                        [
-                          "array",
-                          [
-                            "new_string",
-                            [
-                              "object",
-                              "ObjectLiteral-1139",
-                              [
-                                [
-                                  "from",
-                                  [
-                                    "FixedArray",
-                                    72,
-                                    101,
-                                    108,
-                                    108,
-                                    111,
-                                    32,
-                                    116,
-                                    104,
-                                    101,
-                                    114,
-                                    101,
-                                    33,
-                                    33,
-                                  ],
-                                ],
-                              ],
-                            ],
-                          ],
+                          "FixedArray",
+                          112,
                         ],
                       ],
                     ],
+                  ],
+                ],
+                [
+                  "array",
+                ],
+                [
+                  "array",
+                  [
+                    "new_string",
                     [
-                      "create_element",
+                      "object",
+                      "ObjectLiteral-1170",
                       [
-                        "object",
                         [
-                          ":",
-                          "name",
+                          "from",
                           [
-                            "new_string",
-                            [
-                              "object",
-                              "ObjectLiteral-1162",
-                              [
-                                [
-                                  "from",
-                                  [
-                                    "FixedArray",
-                                    112,
-                                  ],
-                                ],
-                              ],
-                            ],
-                          ],
-                        ],
-                        [
-                          ":",
-                          "attributes",
-                          [
-                            "array",
-                          ],
-                        ],
-                        [
-                          ":",
-                          "children",
-                          [
-                            "array",
-                            [
-                              "new_string",
-                              [
-                                "object",
-                                "ObjectLiteral-1196",
-                                [
-                                  [
-                                    "from",
-                                    [
-                                      "FixedArray",
-                                      72,
-                                      111,
-                                      119,
-                                      32,
-                                      97,
-                                      114,
-                                      101,
-                                      32,
-                                      121,
-                                      111,
-                                      117,
-                                      32,
-                                      116,
-                                      111,
-                                      100,
-                                      97,
-                                      121,
-                                    ],
-                                  ],
-                                ],
-                              ],
-                            ],
+                            "FixedArray",
+                            72,
+                            111,
+                            119,
+                            32,
+                            97,
+                            114,
+                            101,
+                            32,
+                            121,
+                            111,
+                            117,
+                            32,
+                            116,
+                            111,
+                            100,
+                            97,
+                            121,
                           ],
                         ],
                       ],
