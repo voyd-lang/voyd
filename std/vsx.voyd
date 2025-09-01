@@ -1,0 +1,13 @@
+use std::all
+use std::msg_pack::MsgPack
+
+pub fn create_element({
+  name: String,
+  attributes: Array<(String, String)>,
+  children: Array<MsgPack>
+}) -> MsgPack
+  Map<MsgPack>([
+    ("name", name),
+    ("attributes", Map<MsgPack>(attributes)),
+    ("children", children)
+  ])
