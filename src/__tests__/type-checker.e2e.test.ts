@@ -15,3 +15,16 @@ pub fn main()
       /Available overloads: takes\(arr: Array<String>\) -> void/s
     );
 });
+
+test("rejects closure with incompatible return type", async (t) => {
+  const source = `use std::all
+
+fn takes(cb: () -> i32) -> void 0
+
+pub fn main()
+  takes(() => "str")
+`;
+  await t
+    .expect(compile(source))
+    .rejects.toThrow(/No overload matches/);
+});
