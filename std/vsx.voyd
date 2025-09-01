@@ -3,11 +3,24 @@ use std::msg_pack::MsgPack
 
 pub fn create_element({
   name: String,
-  attributes: Array<(String, String)>,
+  attributes: Array<(String, MsgPack)>,
   children: Array<MsgPack>
 }) -> MsgPack
   Map<MsgPack>([
     ("name", name),
-    ("attributes", Map<MsgPack>(attributes)),
+    ("attributes", attrs_to_map(attributes)),
     ("children", children)
   ])
+
+fn attrs_to_map(pairs: Array<(String, MsgPack)>) -> Map<MsgPack>
+  var m = new_map<MsgPack>()
+  var i = 0
+  while i < pairs.length do:
+    pairs.get(i).match(pair)
+      Some<(String, MsgPack)>:
+        m.set(pair.value.0, pair.value.1)
+        0
+      None:
+        0
+    i = i + 1
+  m

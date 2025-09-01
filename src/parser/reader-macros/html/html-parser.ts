@@ -56,22 +56,19 @@ export class HTMLParser {
     }
 
     // Build: create_element(name: "div", attributes: [(k, v), ...], children: [...])
-    const labeled = (name: string, value: Expr) =>
-      new List({ value: [":", name, value] });
-
-    const elementNode = new List({
-      location: this.stream.currentSourceLocation(),
-      value: [
-        "create_element",
-        labeled("name", makeString(tagName)),
-        labeled("attributes", attributes),
-      ],
-    });
-
+    const fields: Expr[] = [];
+    fields.push(new List({ value: [":", "name", makeString(tagName)] }));
+    fields.push(new List({ value: [":", "attributes", attributes] }));
     const children = selfClosing ? arrayLiteral([]) : this.parseChildren(tagName);
-    elementNode.push(labeled("children", children));
+    fields.push(new List({ value: [":", "children", children] }));
 
-    return elementNode;
+    const obj = new List({ value: ["object", ...fields] });
+    obj.location = this.stream.currentSourceLocation();
+
+    return new List({
+      location: this.stream.currentSourceLocation(),
+      value: ["create_element", obj],
+    });
   }
 
   private parseTagName(): string {

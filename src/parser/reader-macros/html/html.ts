@@ -3,7 +3,9 @@ import { Lexer } from "../../lexer.js";
 import { ReaderMacro } from "../types.js";
 import { HTMLParser } from "./html-parser.js";
 
-const W = /\w/;
+// Only trigger HTML parsing when a tag starts with a letter.
+// This avoids matching numeric comparisons like "< 32" or generics.
+const TAG_START = /[A-Za-z]/;
 
 export const htmlMacro: ReaderMacro = {
   match: (t, prev, nextChar) => {
@@ -11,7 +13,7 @@ export const htmlMacro: ReaderMacro = {
       t.value === "<" &&
       !!prev?.isWhitespace() &&
       !!nextChar &&
-      W.test(nextChar)
+      TAG_START.test(nextChar)
     );
   },
   macro: (file, { token, reader }) => {

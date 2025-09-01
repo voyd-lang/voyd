@@ -31,6 +31,7 @@ import {
 } from "./resolve-entities.js";
 import { resolveWithExpected } from "./resolve-entities.js";
 import { resolveExport, resolveModulePath } from "./resolve-use.js";
+import { resolveModule } from "./resolve-entities.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveTypeExpr, resolveFixedArrayType } from "./resolve-type-expr.js";
 import { resolveTrait } from "./resolve-trait.js";
@@ -219,6 +220,14 @@ const resolveArrayArgs = (call: Call) => {
       .getTmpAttribute<ArrayLiteral>("arrayLiteral")!
       .clone();
     const resolved = resolveArrayLiteral(arr, elemType);
+    if (call.fn?.isFn() && call.fn.name.is("create_element")) {
+      const label = isLabeled ? (arg as any).argAt(0)?.toString?.() : undefined;
+      console.warn(
+        `resolveArrayArgs: coerced ${label ?? index} to Array of ${
+          elemType?.name ?? "unknown"
+        } at ${call.location}`
+      );
+    }
     if (isLabeled) {
       arg.args.set(1, resolved);
       call.args.set(index, resolveEntities(arg));
@@ -314,10 +323,15 @@ export const resolveModuleAccess = (call: Call) => {
     const path = new List(["::", left, right.fnName]);
     path.parent = call.parent ?? call.parentModule;
 
-    const candidates = resolveModulePath(path)
+    const candidates = resolveModulePath(path, resolveModule)
       .map(({ e }) => e)
       .filter((e) => e.isFn());
-
+    if (!candidates.length) {
+      // Debug: surface module access resolution issues
+      console.warn(
+        `resolveModuleAccess: no candidates for ${left?.toString?.()}::${right.fnName} at ${call.location}`
+      );
+    }
     return resolveCall(right, candidates);
   }
 

@@ -11,6 +11,14 @@ export const compileObjectInit = (opts: CompileExprOpts<Call>) => {
   const objectType = getExprType(expr) as ObjectType;
   const objectBinType = mapBinaryenType(opts, objectType);
   const obj = expr.argAt(0) as ObjectLiteral;
+  if (!obj?.isObjectLiteral?.()) {
+    const fnName = expr.fn?.isObjectType?.() ? expr.fn.name.toString() : expr.fnName.toString();
+    throw new Error(
+      `Expected object literal for ${fnName} init, got ${JSON.stringify(
+        expr.argAt(0)
+      )} at ${expr.location}`
+    );
+  }
 
   return gc.initStruct(mod, objectBinType, [
     mod.global.get(
