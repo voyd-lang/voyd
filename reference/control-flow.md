@@ -85,6 +85,29 @@ fn main(a: i32, b: i32) -> String
       None: "Error: divide by zero"
 ```
 
+### Omitting Type Parameters in Match Arms
+
+When matching against a union, you can omit generic type parameters in a case
+label if the referenced object appears exactly once among the union variants.
+This removes redundancy while remaining unambiguous.
+
+Example: `Optional<T> = Some<T> | None` has only one `Some` variant, so you can
+write:
+
+```voyd
+use std::all
+use std::optional::Optional
+
+fn main() -> i32
+  let m = Map<i32>([("hey", 5), ("bye", 1)])
+  m.get("hey").match(v)
+    Some: 1   // OK: `Some` appears once in Optional<T>
+    None: -1
+```
+
+If the same head appears multiple times in the union (e.g., `Some<A> | Some<B>`),
+you must specify the type parameters to disambiguate: `Some<A>:`.
+
 ## Pattern Matching Sugar
 
 voyd provides some features to make pattern matching more ergonomic in places where using a match would be a bit awkward
