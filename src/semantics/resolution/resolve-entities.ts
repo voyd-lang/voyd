@@ -205,16 +205,6 @@ export const resolveObjectLiteral = (
 
   obj.fields.forEach((field) => {
     const expectedField = expected?.getField(field.name)?.type;
-    // DEBUG: trace tuple expected propagation
-    if (
-      process.env.VOYD_DEBUG?.includes("tuple-prop") &&
-      expected &&
-      (field.name === "0" || field.name === "1")
-    ) {
-      console.log(
-        `resolveObjectLiteral: expected ${expected.id} field ${field.name} -> ${expectedField?.id}`
-      );
-    }
     field.initializer = resolveWithExpected(field.initializer, expectedField);
     // Prefer the expected type for the field when provided to ensure
     // structural literals (incl. tuples) adopt the expected shape instead of
