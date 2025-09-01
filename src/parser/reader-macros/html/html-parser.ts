@@ -59,7 +59,9 @@ export class HTMLParser {
 
     // Build positional call: create_element("div", [(k, v), ...], [...])
     const nameExpr = makeString(tagName);
-    const children = selfClosing ? arrayLiteral([]) : this.parseChildren(tagName);
+    const children = selfClosing
+      ? arrayLiteral([])
+      : this.parseChildren(tagName);
     return new Call({
       location: this.stream.currentSourceLocation(),
       fnName: Identifier.from("create_element"),
