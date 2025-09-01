@@ -43,7 +43,9 @@ export const functionalNotation = (list: List): List => {
           skip = 1;
         }
       } else {
-        result.push(processParamList(expr, nextExpr as List));
+        const call = processParamList(expr, nextExpr as List);
+        call.setAttribute("isCall", true);
+        result.push(call);
         skip = 1;
       }
       continue;

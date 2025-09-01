@@ -117,7 +117,7 @@ export class HTMLParser {
         );
       }
 
-      return expr;
+      return unwrapInlineExpr(expr);
     }
 
     if (quote !== '"' && quote !== "'") {
@@ -143,7 +143,7 @@ export class HTMLParser {
     ) {
       if (this.stream.next === "{") {
         const expr = this.options.onUnescapedCurlyBrace(this.stream);
-        if (expr) children.push(expr);
+        if (expr) children.push(unwrapInlineExpr(expr));
         this.consumeWhitespace();
         continue;
       }
@@ -192,7 +192,7 @@ export class HTMLParser {
         if (trimmed) node.push(makeString(trimmed));
         text = "";
         const expr = this.options.onUnescapedCurlyBrace(this.stream);
-        if (expr) node.push(expr);
+        if (expr) node.push(unwrapInlineExpr(expr));
         continue;
       }
 
@@ -224,3 +224,14 @@ const arrayLiteral = (items: Expr[]) => {
   return arr;
 };
 const tuple = (a: Expr, b: Expr) => new List({ value: ["tuple", a, b] });
+
+const unwrapInlineExpr = (expr: Expr): Expr => {
+  if (expr.isList()) {
+    const list = expr as List;
+    if (list.length === 1 && !list.hasAttribute("isCall")) {
+      const only = list.at(0);
+      if (only && !only.isList()) return only;
+    }
+  }
+  return expr;
+};
