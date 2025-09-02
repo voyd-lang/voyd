@@ -7,6 +7,7 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveUnionType } from "./resolve-union.js";
+import { resolveEntities } from "./resolve-entities.js";
 
 export type TypeArgInferencePair = {
   typeExpr: Expr;
@@ -151,7 +152,9 @@ export const unifyTypeParams = (
       const argUnion = arg.isUnionType() ? resolveUnionType(arg) : undefined;
       if (!argUnion || !argUnion.types.length) return false;
 
-      const paramMembers = p.childTypeExprs.toArray().map((e) => resolveTypeExpr(e));
+      const paramMembers = p.childTypeExprs
+        .toArray()
+        .map((e) => resolveTypeExpr(e));
       const argMembers = argUnion.types;
 
       // Helper: compute a nominal head key for matching
@@ -159,13 +162,16 @@ export const unifyTypeParams = (
         if (!t) return undefined;
         if (t.isObjectType()) {
           const obj = t;
-          return obj.genericParent ? obj.genericParent.name.value : obj.name.value;
+          return obj.genericParent
+            ? obj.genericParent.name.value
+            : obj.name.value;
         }
         if (t.isPrimitiveType()) return t.name.value;
         if (t.isTraitType()) return t.name.value;
         if (t.isFixedArrayType()) return "FixedArray";
         if (t.isFnType()) return "Fn";
-        if (t.isIntersectionType()) return headKeyFromType(t.nominalType ?? t.structuralType);
+        if (t.isIntersectionType())
+          return headKeyFromType(t.nominalType ?? t.structuralType);
         if (t.isTypeAlias()) return headKeyFromType(t.type);
         return t.name.value;
       };
@@ -207,7 +213,8 @@ export const unifyTypeParams = (
 
       // Second pass: bind remaining generic-only variants to remaining args
       const remainingArgs: Type[] = [];
-      for (let j = 0; j < argMembers.length; j++) if (!used[j]) remainingArgs.push(argMembers[j]!);
+      for (let j = 0; j < argMembers.length; j++)
+        if (!used[j]) remainingArgs.push(argMembers[j]!);
       if (deferred.length !== remainingArgs.length) return false; // require 1-1
       for (let k = 0; k < deferred.length; k++) {
         if (!unify(deferred[k]!, remainingArgs[k]!)) return false;
@@ -238,11 +245,16 @@ export const inferTypeArgs = (
   const merged = new Map<string, Type>();
 
   for (const { typeExpr, argExpr } of pairs) {
-    // Resolve the argument type. If not resolvable, inference fails.
-    const argType = getExprType(argExpr);
+    const resolvedTypeExpr = resolveTypeExpr(typeExpr);
+    if (argExpr.isClosure() && resolvedTypeExpr.isFnType()) {
+      argExpr.setAttribute("parameterFnType", resolvedTypeExpr);
+    }
+
+    const resolveArgExpr = resolveEntities(argExpr);
+    const argType = getExprType(resolveArgExpr);
     if (!argType) return undefined;
 
-    const result = unifyTypeParams(typeParams, typeExpr, argType);
+    const result = unifyTypeParams(typeParams, resolvedTypeExpr, argType);
     if (!result) return undefined;
 
     for (const [k, v] of result.entries()) {

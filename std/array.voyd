@@ -219,7 +219,7 @@ impl<T> Array<T>
     let &acc = new_array<O>({ with_size: 4 })
     while true do:
       iterator.next().match(item)
-        Some<T>:
+        Some:
           acc.push(f(item.value))
           void
         None:
