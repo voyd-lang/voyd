@@ -42,7 +42,7 @@ export const getClosureFunctionType = (
   const key =
     fnType.parameters.map((p) => p.type!.id).join("_") +
     "->" +
-    fnType.returnType.id;
+    fnType.returnType!.id;
   let typeRef = fnTypeCache.get(key);
   if (!typeRef) {
     const superType = getClosureSuperType(opts.mod);
@@ -50,7 +50,7 @@ export const getClosureFunctionType = (
       superType,
       ...fnType.parameters.map((p) => mapBinaryenType(opts, p.type!)),
     ]);
-    const returnType = mapBinaryenType(opts, fnType.returnType);
+    const returnType = mapBinaryenType(opts, fnType.returnType!);
     const tempName = `__closure_type_${fnTypeCache.size}`;
     const fnRef = opts.mod.addFunction(
       tempName,

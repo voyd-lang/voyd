@@ -337,13 +337,13 @@ export class FixedArrayType extends BaseType {
 export class FnType extends BaseType {
   readonly kindOfType = "fn";
   readonly parameters: Parameter[];
-  returnType: Type;
+  returnType?: Type;
   returnTypeExpr?: Expr;
 
   constructor(
     opts: NamedEntityOpts & {
       parameters: Parameter[];
-      returnType: Type;
+      returnType?: Type;
       returnTypeExpr?: Expr;
     }
   ) {
@@ -382,12 +382,7 @@ export class FnType extends BaseType {
   }
 }
 
-export type Primitive =
-  | NumericType
-  | ReferenceType
-  | "void"
-  | "voyd"
-  | "bool";
+export type Primitive = NumericType | ReferenceType | "void" | "voyd" | "bool";
 
 export type NumericType = "i32" | "f32" | "i64" | "f64";
 export type ReferenceType = "funcref" | "externref";
@@ -405,8 +400,4 @@ export const voydBaseObject = new ObjectType({
   value: [],
 });
 
-export type VoydRefType =
-  | ObjectType
-  | UnionType
-  | IntersectionType
-  | TupleType;
+export type VoydRefType = ObjectType | UnionType | IntersectionType | TupleType;

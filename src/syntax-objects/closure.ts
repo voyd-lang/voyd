@@ -61,7 +61,7 @@ export class Closure extends ScopedSyntax {
       ...super.getCloneOpts(this.parent),
       name: Identifier.from(`closure#${this.syntaxId}`),
       parameters: this.parameters,
-      returnType: this.getReturnType(),
+      returnType: this.returnType,
     });
   }
 

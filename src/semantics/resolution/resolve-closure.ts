@@ -24,7 +24,8 @@ export const resolveClosure = (closure: Closure): Closure => {
   }
   closure.returnType =
     closure.annotatedReturnType ?? closure.inferredReturnType;
-  closure.typesResolved = true;
+  closure.typesResolved =
+    closure.returnType && closure.parameters.every((p) => p.type);
 
   return closure;
 };
@@ -54,9 +55,7 @@ const resolveParameters = (params: Parameter[]) => {
       if (p.type) return;
     }
 
-    if (!p.typeExpr) {
-      throw new Error(`Unable to determine type for ${p}`);
-    }
+    if (!p.typeExpr) return;
 
     p.typeExpr = resolveTypeExpr(p.typeExpr);
     p.type = getExprType(p.typeExpr);

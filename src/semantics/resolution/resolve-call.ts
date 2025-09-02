@@ -62,10 +62,7 @@ const resolveMemberAccessDirect = (call: Call): Call => {
 };
 
 const preprocessArgs = (call: Call): void => {
-  call.args = call.args.map((arg) => {
-    const inner = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
-    return hasUntypedClosure(inner) ? arg : resolveEntities(arg);
-  });
+  call.args = call.args.map(resolveEntities);
 };
 
 // Normalize any expression to a block expression
@@ -267,7 +264,7 @@ const resolveClosureArgs = (call: Call) => {
         if (!p.type && !p.typeExpr && exp) p.type = exp;
       });
       if (!inner.returnTypeExpr && !inner.annotatedReturnType) {
-        const ret = expected.returnType.isTypeAlias()
+        const ret = expected.returnType?.isTypeAlias()
           ? expected.returnType.type ?? expected.returnType
           : expected.returnType;
         inner.annotatedReturnType = ret;
@@ -275,7 +272,7 @@ const resolveClosureArgs = (call: Call) => {
     }
     const resolved = resolveClosure(inner);
     if (expected?.isFnType()) {
-      const ret = expected.returnType.isTypeAlias()
+      const ret = expected.returnType?.isTypeAlias()
         ? expected.returnType.type ?? expected.returnType
         : expected.returnType;
       resolved.returnType = ret;
@@ -883,7 +880,6 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
   const resolver = specialCallResolvers[call.fnName.value];
   if (resolver) return resolver(call);
 
-  // Resolve arguments conservatively (avoid resolving closures with untyped params)
   preprocessArgs(call);
 
   // Optional sugar: obj.member -> member-access(obj, "member")
