@@ -39,23 +39,24 @@ export const getClosureFunctionType = (
   opts: CompileExprOpts,
   fnType: FnType
 ): TypeRef => {
-  const key =
-    fnType.parameters.map((p) => p.type!.id).join("_") +
-    "->" +
-    fnType.returnType!.id;
+  const superType = getClosureSuperType(opts.mod);
+  const paramBinTypes = [
+    superType,
+    ...fnType.parameters.map((p) => mapBinaryenType(opts, p.type!)),
+  ];
+  const returnBinType = mapBinaryenType(opts, fnType.returnType!);
+  const key = `${paramBinTypes.join(",")}->${returnBinType}`;
+  if (process.env.VOYD_DEBUG?.includes("closure-types")) {
+    console.log("[voyd] getClosureFunctionType", key);
+  }
   let typeRef = fnTypeCache.get(key);
   if (!typeRef) {
-    const superType = getClosureSuperType(opts.mod);
-    const paramTypes = binaryen.createType([
-      superType,
-      ...fnType.parameters.map((p) => mapBinaryenType(opts, p.type!)),
-    ]);
-    const returnType = mapBinaryenType(opts, fnType.returnType!);
+    const paramTypes = binaryen.createType(paramBinTypes);
     const tempName = `__closure_type_${fnTypeCache.size}`;
     const fnRef = opts.mod.addFunction(
       tempName,
       paramTypes,
-      returnType,
+      returnBinType,
       [],
       opts.mod.nop()
     );
@@ -111,10 +112,13 @@ export const compile = (opts: CompileExprOpts<Closure>): number => {
 
   // Record the function type so that calls to closures with this signature can
   // cast to the correct type when invoking via `call_ref`.
-  const key =
-    closure.parameters.map((p) => p.type!.id).join("_") +
-    "->" +
-    closure.getReturnType().id;
+  const key = `${[
+    superType,
+    ...closure.parameters.map((p) => mapBinaryenType(opts, p.type!)),
+  ].join(",")}->${returnType}`;
+  if (process.env.VOYD_DEBUG?.includes("closure-types")) {
+    console.log("[voyd] recordClosureFunctionType", key);
+  }
   fnTypeCache.set(key, fnType);
 
   const captures = closure.captures.map((c) =>

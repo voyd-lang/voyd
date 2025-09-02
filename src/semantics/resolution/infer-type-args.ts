@@ -222,6 +222,21 @@ export const unifyTypeParams = (
       return true;
     }
 
+    // Function types: unify parameter and return positions structurally so
+    // generic placeholders (e.g., O) in the signature bind to concrete
+    // types from the argument closure/function type.
+    if (p.isType() && p.isFnType()) {
+      const argFn = arg.isFnType() ? arg : undefined;
+      if (!argFn) return false;
+
+      // Only unify the return type. Parameter positions should already be
+      // enforced by candidate matching and closure parameter propagation.
+      const retExpr = p.returnTypeExpr ?? p.returnType;
+      const argRet = argFn.returnType;
+      if (!retExpr || !argRet) return false;
+      return unify(retExpr, argRet);
+    }
+
     // Parameter is itself a fully-formed Type object. Require strict
     // equality when comparing against the argument type.
     if (p.isType()) {
