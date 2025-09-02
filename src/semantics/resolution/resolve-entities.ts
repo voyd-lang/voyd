@@ -162,6 +162,10 @@ export const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
     return resolveArrayLiteral(expr, elem);
   }
   if (expr.isCall()) {
+    // Attach expected type to the call so downstream generic inference can
+    // prefer contextual return typing (e.g., map<O> returning Array<O> inside
+    // a context expecting MsgPack, where we want O to be MsgPack).
+    if (unwrapped) expr.setAttribute("expectedType", unwrapped);
     const resolvedExpr = resolveCall(expr);
     if (!resolvedExpr.isCall()) return resolvedExpr;
     const resolved = resolvedExpr;
