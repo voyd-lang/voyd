@@ -31,7 +31,7 @@ impl<T> Iterator<{ key: String, value: T }> for MapIterator<T>
       None {}
     else:
       self.map.buckets.get(self.bucket_index).match(bucket)
-        Some<Array<{ key: String, value: T }>>:
+        Some:
           if self.item_index >= bucket.value.length then:
             self.bucket_index = self.bucket_index + 1
             self.item_index = 0
@@ -40,7 +40,7 @@ impl<T> Iterator<{ key: String, value: T }> for MapIterator<T>
             let r = bucket.value.get(self.item_index)
             self.item_index = self.item_index + 1
             match(r)
-              Some<{ key: String, value: T }>:
+              Some:
                 r
               None:
                 self.next()
@@ -55,26 +55,19 @@ impl<T> Iterable<{ key: String, value: T }> for Map<T>
 impl<T> Map<T>
   pub fn init(pairs: Array<(String, T)>) -> Map<T>
     var m = new_map<T>()
-    var i = 0
-    while i < pairs.length do:
-      pairs.get(i).match(pair)
-        Some<(String, T)>:
-          let key = pair.value.0
-          let value = pair.value.1
-          m.get_bucket_by_key(key).match(bucket)
-            Some<Array<{ key: String, value: T }>>:
-              add_to_bucket(bucket.value, key, value)
-              0
-            None:
-              let new_bucket = new_array<{ key: String, value: T }>({ with_size: 1 })
-              new_bucket.set(0, { key: key, value: value })
-              let index = m.hash(key)
-              m.buckets.set(index, new_bucket)
-              0
-          0
+    while pair in pairs do:
+      let key = pair.0
+      let value = pair.1
+      m.get_bucket_by_key(key).match(bucket)
+        Some:
+          add_to_bucket(bucket.value, key, value)
+          void
         None:
-          0
-      i = i + 1
+          let new_bucket = new_array<{ key: String, value: T }>({ with_size: 1 })
+          new_bucket.set(0, { key: key, value: value })
+          let index = m.hash(key)
+          m.buckets.set(index, new_bucket)
+          void
     m
 
   fn hash(self, key: String) -> i32
