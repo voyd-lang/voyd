@@ -11,6 +11,7 @@ export const checkTypeExpr = (expr?: Expr) => {
   }
 
   if (expr.isCall() && hasTypeArgs(expr.type)) {
+    // no-op
     throw new Error(
       `Type args must be resolved at ${expr.location ?? expr.fnName.location}`
     );
@@ -46,7 +47,13 @@ const hasTypeArgs = (type?: Expr) => {
   if (!type) return false;
 
   if (type.isTypeAlias() && type.typeParameters) return true;
-  if (type.isObjectType() && type.typeParameters) return true;
+  if (type.isObjectType()) {
+    // Consider an object type "resolved enough" when it has concrete applied
+    // generic arguments. Only flag unresolved when type parameters exist and
+    // no applied type args have been provided.
+    if (!type.typeParameters) return false;
+    return !(type.appliedTypeArgs && type.appliedTypeArgs.length > 0);
+  }
 
   return false;
 };
