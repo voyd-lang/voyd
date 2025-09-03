@@ -198,6 +198,31 @@ Ifs are expressions that return a value
 
 ```rust
 let x = if 3 < val then: "hello" else: "bye"
+
+# VSX DOM Client (Browser)
+
+Voyd can encode VSX element trees as MsgPack from Wasm. A tiny client renderer mounts these trees to the DOM.
+
+- Import: `import { render } from 'voyd/vsx-dom/client'`
+- Call your component export (e.g. `run`) to write MsgPack into Wasm memory and return its byte length
+- Pass either the `WebAssembly.Instance` or `WebAssembly.Memory` so the renderer can decode the buffer
+
+Example (bundler-friendly):
+
+```ts
+import { render } from 'voyd/vsx-dom/client'
+
+// Assume you already have Wasm bytes from a compiled Voyd module
+const module = new WebAssembly.Module(wasmBytes)
+const instance = new WebAssembly.Instance(module)
+
+// Component function exported by Voyd module, which returns MsgPack length
+const component = instance.exports.run as () => number
+
+// Mount into the DOM
+const container = document.getElementById('app')!
+render(component, container, { instance })
+```
 ```
 
 ## Loops

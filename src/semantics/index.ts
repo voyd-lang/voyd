@@ -4,7 +4,7 @@ import { initEntities } from "./init-entities.js";
 import { SemanticProcessor } from "./types.js";
 import { registerModules } from "./modules.js";
 import { expandRegularMacros } from "./regular-macros.js";
-import { ParsedModule } from "../parser/index.js";
+import type { ParsedModule } from "../parser/utils/parse-module.js";
 import { Expr } from "../syntax-objects/expr.js";
 import { resolveEntities } from "./resolution/resolve-entities.js";
 

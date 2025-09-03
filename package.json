@@ -2,10 +2,26 @@
   "name": "voyd",
   "version": "0.9.0",
   "description": "",
-  "module": "dist/index.js",
   "type": "module",
-  "types": "./src/index.ts",
-  "exports": "./dist/index.js",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "browser": "./dist/browser/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "browser": "./dist/browser/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./src/browser.ts",
+      "default": "./dist/browser/index.js"
+    },
+    "./vsx-dom/client": {
+      "types": "./src/lib/vsx-dom/client.ts",
+      "default": "./dist/lib/vsx-dom/client.js"
+    }
+  },
   "scripts": {
     "test": "tsc --noEmit && vitest run",
     "test:w": "vitest",
@@ -13,6 +29,7 @@
     "bench:w": "vitest bench",
     "snapshot": "vitest -u",
     "build": "npx tsc",
+    "build:browser": "vite build",
     "prepublishOnly": "tsc"
   },
   "bin": {
@@ -30,6 +47,7 @@
     "eslint": "^7.10.0",
     "tsx": "^4.20.4",
     "typescript": "^5.6.2",
+    "vite": "^5.4.8",
     "vite-node": "^3.2.4",
     "vitest": "^3.2.4"
   },
@@ -38,7 +56,6 @@
     "@types/uniqid": "^4.1.3",
     "binaryen": "^123.0.0",
     "commander": "^14.0.0",
-    "eventemitter2": "^6.4.2",
     "glob": "^10.3.10",
     "uniqid": "^5.2.0"
   }

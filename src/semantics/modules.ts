@@ -1,4 +1,5 @@
-import { ParsedModule, stdPath } from "../parser/index.js";
+import type { ParsedModule } from "../parser/utils/parse-module.js";
+import { stdPath } from "../parser/utils/parse-std.js";
 import { List } from "../syntax-objects/list.js";
 import { RootModule, VoydModule } from "../syntax-objects/module.js";
 
