@@ -189,94 +189,53 @@ impl<T> Array<T>
 
   // Functional helpers as Array methods
   pub fn each(self, f: (v: T) -> void) -> void
-    let iterator = self.iterate()
-    while true do:
-      iterator.next().match(item)
-        Some<T>:
-          f(item.value)
-          void
-        None:
-          break
+    while item in self do:
+      f(item)
 
   pub fn filter(self, pred: (v: T) -> bool) -> Array<T>
-    let iterator = self.iterate()
     let &acc = new_array<T>({ with_size: 4 })
 
-    while true do:
-      iterator.next().match(item)
-        Some<T>:
-          if pred(item.value) then:
-            acc.push(item.value)
-            void
-          else:
-            void
-        None:
-          break
+    while item in self do:
+      if pred(item) then: acc.push(item)
+
     acc
 
   pub fn map<O>(self, f: (v: T) -> O) -> Array<O>
-    let iterator = self.iterate()
     let &acc = new_array<O>({ with_size: 4 })
-    while true do:
-      iterator.next().match(item)
-        Some:
-          acc.push(f(item.value))
-          void
-        None:
-          break
+    while item in self do:
+      acc.push(f(item))
     acc
 
   pub fn reduce<O>(self, init: O, f: (acc: O, v: T) -> O) -> O
-    let iterator = self.iterate()
     var acc = init
-    while true do:
-      iterator.next().match(item)
-        Some<T>:
-          acc = f(acc, item.value)
-          void
-        None:
-          break
+    while item in self do:
+      acc = f(acc, item)
     acc
 
   pub fn find(self, pred: (v: T) -> bool) -> Optional<T>
-    let iterator = self.iterate()
     var res: Optional<T> = None {}
-    while true do:
-      iterator.next().match(item)
-        Some<T>:
-          if pred(item.value) then:
-            res = Some<T> { value: item.value }
-            break
-        None:
-          break
+    while item in self do:
+      if pred(item) then:
+        res = Some<T> { value: item }
+        break
     res
 
   pub fn some(self, pred: (v: T) -> bool) -> bool
-    let iterator = self.iterate()
     var found = false
-    while true do:
-      iterator.next().match(item)
-        Some<T>:
-          if pred(item.value) then:
-            found = true
-            break
-        None:
-          void
+    while item in self do:
+      if pred(item) then:
+        found = true
+        break
     found
 
   pub fn every(self, pred: (v: T) -> bool) -> bool
-    let iterator = self.iterate()
     var ok = true
-    while true do:
-      iterator.next().match(item)
-        Some<T>:
-          if pred(item.value) then:
-            void
-          else:
-            ok = false
-            break
-        None:
-          break
+    while item in self do:
+      if pred(item) then:
+        void
+      else:
+        ok = false
+        break
     ok
 
 
