@@ -46,9 +46,6 @@ export const getClosureFunctionType = (
   ];
   const returnBinType = mapBinaryenType(opts, fnType.returnType!);
   const key = `${paramBinTypes.join(",")}->${returnBinType}`;
-  if (process.env.VOYD_DEBUG?.includes("closure-types")) {
-    console.log("[voyd] getClosureFunctionType", key);
-  }
   let typeRef = fnTypeCache.get(key);
   if (!typeRef) {
     const paramTypes = binaryen.createType(paramBinTypes);
@@ -116,9 +113,6 @@ export const compile = (opts: CompileExprOpts<Closure>): number => {
     superType,
     ...closure.parameters.map((p) => mapBinaryenType(opts, p.type!)),
   ].join(",")}->${returnType}`;
-  if (process.env.VOYD_DEBUG?.includes("closure-types")) {
-    console.log("[voyd] recordClosureFunctionType", key);
-  }
   fnTypeCache.set(key, fnType);
 
   const captures = closure.captures.map((c) =>
