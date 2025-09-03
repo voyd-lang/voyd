@@ -9,8 +9,10 @@ import { nop } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
-import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";
+import { inferTypeArgs, TypeArgInferencePair, unifyTypeParams } from "./infer-type-args.js";
 import { typesAreEqual } from "./types-are-equal.js";
+import { typesAreCompatible } from "./types-are-compatible.js";
+import { Type } from "../../syntax-objects/types.js";
 
 export type ResolveFnTypesOpts = {
   typeArgs?: List;
@@ -108,18 +110,80 @@ const inferCallTypeArgs = (fn: Fn, call: Call) => {
     pairs.push({ typeExpr: param.typeExpr, argExpr: val });
   });
 
+  // Base inference from parameter positions
   const inferred = inferTypeArgs(fn.typeParameters, pairs);
-  if (!inferred) return undefined;
+  const paramMap = new Map<string, Type>();
+  if (inferred) {
+    inferred.toArray().forEach((a) => {
+      const alias = a as TypeAlias;
+      if (alias.name && alias.type) paramMap.set(alias.name.value, alias.type);
+    });
+  }
 
-  // Convert inferred aliases into concrete type expressions for the call
-  // to avoid attaching alias objects to the call node (which can create
-  // cyclic structures during cloning in some cases). Preserve order.
-  const typeExprs = inferred
-    .toArray()
-    .map((alias) => (alias as TypeAlias).type ?? (alias as TypeAlias).typeExpr)
-    .filter((t): t is Expr => !!t);
+  // Contextual return-type inference: If the call has an expected type and the
+  // function has a return type expression (e.g., Array<O>), prefer binding O to
+  // the contextual branch when it matches by nominal head (e.g., Array in
+  // MsgPack = Map | Array | String).
+  const expected = call.getAttribute("expectedType") as Type | undefined;
+  let retMap: Map<string, Type> | undefined;
+  if (expected && fn.returnTypeExpr) {
+    // Helper: compute the nominal head key
+    const headKeyFromType = (t?: Type): string | undefined => {
+      if (!t) return undefined;
+      if (t.isObjectType()) {
+        return t.genericParent ? t.genericParent.name.value : t.name.value;
+      }
+      if (t.isPrimitiveType()) return t.name.value;
+      if (t.isTraitType()) return t.name.value;
+      if (t.isFixedArrayType()) return "FixedArray";
+      if (t.isIntersectionType())
+        return headKeyFromType(t.nominalType ?? t.structuralType);
+      if (t.isTypeAlias()) return headKeyFromType(t.type);
+      return t.name.value;
+    };
+    const headKeyFromReturnExpr = (): string | undefined => {
+      const r = fn.returnTypeExpr!;
+      if (r.isCall()) return r.fnName.value;
+      if (r.isIdentifier()) return r.value;
+      if (r.isType()) return headKeyFromType(r);
+      return undefined;
+    };
 
-  return new List({ value: typeExprs });
+    const returnHead = headKeyFromReturnExpr();
+    let expectedForReturn: Type | undefined = expected;
+    if (expected.isUnionType() && returnHead) {
+      expectedForReturn = expected.types.find(
+        (t) => headKeyFromType(t) === returnHead
+      );
+    }
+
+    if (expectedForReturn) {
+      // Reuse core unifier for a single synthetic pair (return type vs expected)
+      retMap = unifyTypeParams(
+        fn.typeParameters ?? [],
+        fn.returnTypeExpr,
+        expectedForReturn
+      );
+    }
+  }
+
+  // Merge: prefer contextual return binding when it widens the param-based one
+  const chosen: Expr[] = [];
+  if (!fn.typeParameters || fn.typeParameters.length === 0) return undefined;
+  for (const tp of fn.typeParameters) {
+    const name = tp.value;
+    const p = paramMap.get(name);
+    const r = retMap?.get(name);
+    let pick: Type | undefined = r ?? p;
+    if (r && p && !typesAreEqual(r, p)) {
+      pick = typesAreCompatible(p, r) ? r : p;
+    }
+    if (!pick) return undefined;
+    // Use the Type object directly as a type expression; resolver accepts Types as Exprs
+    chosen.push(pick as unknown as Expr);
+  }
+
+  return new List({ value: chosen });
 };
 
 const fnTypeArgsMatch = (args: List, candidate: Fn): boolean =>

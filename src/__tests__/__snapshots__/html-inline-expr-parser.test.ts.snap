@@ -1,0 +1,47 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`HTML inline expressions unwrap identifiers > {item} is not wrapped as a list 1`] = `
+[
+  "create_element",
+  [
+    "new_string",
+    [
+      "object",
+      "ObjectLiteral-130",
+      [
+        [
+          "from",
+          [
+            "FixedArray",
+            112,
+          ],
+        ],
+      ],
+    ],
+  ],
+  [
+    "array",
+  ],
+  [
+    "array",
+    [
+      "new_string",
+      [
+        "object",
+        "ObjectLiteral-143",
+        [
+          [
+            "from",
+            [
+              "FixedArray",
+              104,
+              105,
+            ],
+          ],
+        ],
+      ],
+    ],
+    "item",
+  ],
+]
+`;

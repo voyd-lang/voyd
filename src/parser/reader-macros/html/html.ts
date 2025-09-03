@@ -1,5 +1,6 @@
 import { List } from "../../../syntax-objects/list.js";
 import { Lexer } from "../../lexer.js";
+import { expandSyntaxMacros } from "../../syntax-macros/index.js";
 import { ReaderMacro } from "../types.js";
 import { HTMLParser } from "./html-parser.js";
 
@@ -20,7 +21,8 @@ export const htmlMacro: ReaderMacro = {
     const parser = new HTMLParser(file, {
       onUnescapedCurlyBrace: () => {
         file.consumeChar();
-        return reader(file, "}");
+        const list = reader(file, "}");
+        if (list) return expandSyntaxMacros(list);
       },
     });
     const start = new Lexer().tokenize(file);

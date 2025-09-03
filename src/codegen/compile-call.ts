@@ -55,7 +55,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       const callType = getClosureFunctionType(opts, fnType);
       target = refCast(mod, funcRef, callType);
     } catch {}
-    const returnType = mapBinaryenType(opts, fnType.returnType);
+    const returnType = mapBinaryenType(opts, fnType.returnType!);
     const callExpr = callRef(mod, target, args, returnType, false);
     return isReturnExpr && returnType !== binaryen.none
       ? mod.return(callExpr)

@@ -25,6 +25,47 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
 
   if (candidates.length === 1) return candidates[0];
 
+  // Tie-break using contextual expected return type if available. Prefer the
+  // candidate whose return type exactly matches the expected branch (by
+  // nominal head) when the expected type is a union alias like MsgPack.
+  const expected = call.getAttribute && (call.getAttribute("expectedType") as any);
+  if (expected) {
+    const headKeyFromType = (t: any): string | undefined => {
+      if (!t) return undefined;
+      if (t.isObjectType && t.isObjectType()) {
+        return t.genericParent ? t.genericParent.name.value : t.name.value;
+      }
+      if (t.isPrimitiveType && t.isPrimitiveType()) return t.name.value;
+      if (t.isTraitType && t.isTraitType()) return t.name.value;
+      if (t.isFixedArrayType && t.isFixedArrayType()) return "FixedArray";
+      if (t.isIntersectionType && t.isIntersectionType())
+        return headKeyFromType(t.nominalType ?? t.structuralType);
+      if (t.isTypeAlias && t.isTypeAlias()) return headKeyFromType(t.type);
+      return t.name?.value;
+    };
+    const expectedBranch = (() => {
+      if (expected.isUnionType && expected.isUnionType()) {
+        // Pick branch matching candidate head if all candidates share the same head
+        const heads = new Set(
+          candidates
+            .map((c) => headKeyFromType(c.returnType))
+            .filter((h): h is string => !!h)
+        );
+        const single = heads.size === 1 ? [...heads][0] : undefined;
+        return single
+          ? expected.types.find((t: any) => headKeyFromType(t) === single)
+          : undefined;
+      }
+      return expected;
+    })();
+    if (expectedBranch) {
+      const exact = candidates.filter((c) =>
+        typesAreEqual(c.returnType, expectedBranch)
+      );
+      if (exact.length === 1) return exact[0];
+    }
+  }
+
   const argTypes = call.args
     .toArray()
     .map((arg) => formatTypeName(getExprType(arg)))
@@ -65,11 +106,11 @@ const getCandidates = (call: Call): Fn[] => {
       // pre-registration. Avoid duplicate candidates from the same impl.
       .filter((fn) => (isInsideImpl ? fn.parentImpl !== call.parentImpl : true));
     if (implFns && implFns.length && !isObjectArgForm) {
-      // Prefer receiver methods over same-named top-level functions in
-      // method-call position (arg1 is an object type). Drop non-method
-      // candidates to avoid ambiguity.
-      fns = fns.filter((fn) => !!fn.parentImpl);
-      fns.push(...implFns);
+      // Prefer receiver methods in method-call position. When arg1 is an
+      // object type and we are not using object-arg form, restrict candidates
+      // to only the receiver's methods. This avoids ambiguity with generic
+      // instances from other scopes whose `self` type hasn't been specialized.
+      fns = [...implFns];
     } else if (implFns && implFns.length) {
       // In object-arg form (labeled params), don't drop top-level functions;
       // include both so labeled-arg overloads can match.

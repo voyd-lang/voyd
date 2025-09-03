@@ -1,5 +1,6 @@
 import { Closure } from "../../syntax-objects/closure.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
+import { FnType } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
@@ -23,7 +24,8 @@ export const resolveClosure = (closure: Closure): Closure => {
   }
   closure.returnType =
     closure.annotatedReturnType ?? closure.inferredReturnType;
-  closure.typesResolved = true;
+  closure.typesResolved =
+    closure.returnType && closure.parameters.every((p) => p.type);
 
   return closure;
 };
@@ -40,12 +42,20 @@ export const resolveClosureSignature = (closure: Closure) => {
 };
 
 const resolveParameters = (params: Parameter[]) => {
-  params.forEach((p) => {
+  params.forEach((p, i) => {
     if (p.type) return;
 
-    if (!p.typeExpr) {
-      throw new Error(`Unable to determine type for ${p}`);
+    const callSiteSignature = p.parentFn?.getAttribute("parameterFnType") as
+      | FnType
+      | undefined;
+
+    if (!p.typeExpr && callSiteSignature) {
+      const csp = callSiteSignature.parameters.at(i);
+      p.type = csp?.type;
+      if (p.type) return;
     }
+
+    if (!p.typeExpr) return;
 
     p.typeExpr = resolveTypeExpr(p.typeExpr);
     p.type = getExprType(p.typeExpr);
