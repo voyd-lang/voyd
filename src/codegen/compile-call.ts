@@ -53,12 +53,6 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     let target = funcRef;
     try {
       const callType = getClosureFunctionType(opts, fnType);
-      if (process.env.VOYD_DEBUG?.includes("closure-types")) {
-        console.log(
-          "[voyd] castClosure",
-          `${fnType.parameters.map((p) => p.type!.id).join("_")}->${fnType.returnType!.id}`
-        );
-      }
       target = refCast(mod, funcRef, callType);
     } catch {}
     const returnType = mapBinaryenType(opts, fnType.returnType!);
