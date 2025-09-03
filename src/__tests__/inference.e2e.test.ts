@@ -146,8 +146,8 @@ describe("E2E Inference (kitchen sink)", () => {
       attributes: {},
       children: [
         [
-          { name: "p", attributes: {}, children: ["hi", "Alex"] },
-          { name: "p", attributes: {}, children: ["hi", "Abby"] },
+          { name: "p", attributes: {}, children: ["hi ", "Alex"] },
+          { name: "p", attributes: {}, children: ["hi ", "Abby"] },
         ],
       ],
     });
@@ -163,8 +163,8 @@ describe("E2E Inference (kitchen sink)", () => {
       attributes: {},
       children: [
         [
-          { name: "p", attributes: {}, children: ["hi", "Alex"] },
-          { name: "p", attributes: {}, children: ["hi", "Abby"] },
+          { name: "p", attributes: {}, children: ["hi ", "Alex"] },
+          { name: "p", attributes: {}, children: ["hi ", "Abby"] },
         ],
       ],
     });

@@ -46,8 +46,8 @@ describe("VSX <ul> children map", () => {
           attributes: {},
           children: [
             [
-              { name: "li", attributes: {}, children: ["hi", "Alex"] },
-              { name: "li", attributes: {}, children: ["hi", "Abby"] },
+              { name: "li", attributes: {}, children: ["hi ", "Alex"] },
+              { name: "li", attributes: {}, children: ["hi ", "Abby"] },
             ],
           ],
         },

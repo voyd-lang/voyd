@@ -27,15 +27,14 @@ describe("E2E HTML reader macro -> vsx::create_element", () => {
         {
           name: "p",
           attributes: { class: "prose" },
-          children: ["Hello World!"],
+          children: ["Hello World! "],
         },
         {
           name: "p",
           attributes: { class: "prose" },
-          children: ["I am M87"],
+          children: ["I am M87 "],
         },
       ],
     });
   });
 });
-
