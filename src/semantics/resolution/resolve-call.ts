@@ -447,9 +447,9 @@ const normalizeArgsForResolvedFn = (call: Call) => {
   // Expand object-arg into labeled args first so array literals inside
   // labeled params can be coerced with the correct element types.
   expandObjectArg(call);
-  resolveOptionalArgs(call);
   resolveArrayArgs(call);
   resolveClosureArgs(call);
+  resolveOptionalArgs(call);
 };
 
 export const resolveModuleAccess = (call: Call) => {
