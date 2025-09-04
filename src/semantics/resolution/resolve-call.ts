@@ -332,8 +332,7 @@ const resolveOptionalArgs = (call: Call) => {
       const toInsert = label
         ? resolveEntities(makeLabeled(label, noneCall, call.metadata))
         : noneCall;
-      if (label) call.args.push(toInsert);
-      else call.args.insert(toInsert, index);
+      call.args.insert(toInsert, index);
       return;
     }
 
@@ -368,25 +367,32 @@ const expandObjectArg = (call: Call) => {
   const allLabeled = labeledParams.length === params.length;
   if (!allLabeled) return;
 
+  const requiredParams = labeledParams.filter(
+    (p) => !(p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional"))
+  );
+
   // Case 1: direct object literal supplied
   if (objArg.isObjectLiteral()) {
-    const coversAll = labeledParams.every((p) =>
+    const coversRequired = requiredParams.every((p) =>
       objArg.fields.some((f) => f.name === p.label!.value)
     );
-    if (!coversAll) return;
+    if (!coversRequired) return;
 
-    const newArgs = labeledParams.map((p) => {
-      const fieldName = p.label!.value;
-      const field = objArg.fields.find((f) => f.name === fieldName)!;
-      return new Call({
-        ...call.metadata,
-        fnName: Identifier.from(":"),
-        args: new List({
-          value: [Identifier.from(fieldName), field.initializer],
-        }),
-        type: getExprType(field.initializer),
-      });
-    });
+    const newArgs = labeledParams
+      .map((p) => {
+        const fieldName = p.label!.value;
+        const field = objArg.fields.find((f) => f.name === fieldName);
+        if (!field) return undefined;
+        return new Call({
+          ...call.metadata,
+          fnName: Identifier.from(":"),
+          args: new List({
+            value: [Identifier.from(fieldName), field.initializer],
+          }),
+          type: getExprType(field.initializer),
+        });
+      })
+      .filter((a): a is Call => !!a);
 
     call.args = new List({ value: newArgs });
     call.args.parent = call;
@@ -402,30 +408,35 @@ const expandObjectArg = (call: Call) => {
     : undefined;
   if (!structType) return;
 
-  const coversAll = labeledParams.every((p) =>
-    structType.hasField(p.label!.value)
+  const coversRequired = requiredParams.every(
+    (p) =>
+      structType.hasField(p.label!.value) ||
+      (p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional"))
   );
-  if (!coversAll) return;
+  if (!coversRequired) return;
 
-  const newArgs = labeledParams.map((p) => {
-    const fieldName = p.label!.value;
-    const fieldType = structType.getField(fieldName)?.type;
-    const objClone = resolveEntities(objArg.clone());
-    const access = new Call({
-      ...call.metadata,
-      fnName: Identifier.from("member-access"),
-      args: new List({
-        value: [objClone, Identifier.from(fieldName)],
-      }),
-      type: fieldType,
-    });
-    return new Call({
-      ...call.metadata,
-      fnName: Identifier.from(":"),
-      args: new List({ value: [Identifier.from(fieldName), access] }),
-      type: fieldType,
-    });
-  });
+  const newArgs = labeledParams
+    .map((p) => {
+      const fieldName = p.label!.value;
+      if (!structType.hasField(fieldName)) return undefined;
+      const fieldType = structType.getField(fieldName)?.type;
+      const objClone = resolveEntities(objArg.clone());
+      const access = new Call({
+        ...call.metadata,
+        fnName: Identifier.from("member-access"),
+        args: new List({
+          value: [objClone, Identifier.from(fieldName)],
+        }),
+        type: fieldType,
+      });
+      return new Call({
+        ...call.metadata,
+        fnName: Identifier.from(":"),
+        args: new List({ value: [Identifier.from(fieldName), access] }),
+        type: fieldType,
+      });
+    })
+    .filter((a): a is Call => !!a);
 
   call.args = new List({ value: newArgs });
   call.args.parent = call;
