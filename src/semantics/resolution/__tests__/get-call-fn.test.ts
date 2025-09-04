@@ -11,6 +11,8 @@ import {
   ObjectType,
   Parameter,
 } from "../../../syntax-objects/index.js";
+import { UnionType } from "../../../syntax-objects/types.js";
+import { resolveUnionType } from "../resolve-union.js";
 import { TraitType } from "../../../syntax-objects/types/trait.js";
 import { Implementation } from "../../../syntax-objects/implementation.js";
 import { getCallFn } from "../get-call-fn.js";
@@ -232,6 +234,42 @@ describe("getCallFn", () => {
     expect(() => getCallFn(call)).toThrow(
       /Ambiguous call hi\(i32\).*hi\(arg1: i32\) -> i32.*hi\(arg2: i32\) -> i32/
     );
+  });
+
+  test("selects candidate whose return type union covers others", () => {
+    const label = new Identifier({ value: "arg1" });
+    const fnName = new Identifier({ value: "hi" });
+
+    const objA = new ObjectType({ name: new Identifier({ value: "A" }), value: [] });
+    const objB = new ObjectType({ name: new Identifier({ value: "B" }), value: [] });
+
+    const candidate1 = new Fn({
+      name: fnName,
+      parameters: [new Parameter({ name: label, type: i32 })],
+    });
+    candidate1.returnType = objA;
+    candidate1.annotatedReturnType = objA;
+
+    const union = new UnionType({
+      name: new Identifier({ value: "U" }),
+      childTypeExprs: [objA, objB],
+    });
+    resolveUnionType(union);
+
+    const candidate2 = new Fn({
+      name: fnName,
+      parameters: [new Parameter({ name: label, type: i32 })],
+    });
+    candidate2.returnType = union;
+    candidate2.annotatedReturnType = union;
+
+    const call = new Call({
+      fnName,
+      args: new List({ value: [new Int({ value: 2 })] }),
+    });
+    call.resolveFns = vi.fn().mockReturnValue([candidate1, candidate2]);
+
+    expect(getCallFn(call)).toBe(candidate2);
   });
 
   test("returns trait method for trait object calls", () => {

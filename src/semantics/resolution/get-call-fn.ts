@@ -144,23 +144,20 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
   });
   if (concreteReturn.length === 1) return concreteReturn[0];
 
-  // Final fallback: prefer the candidate with the most specific formatted
-  // return type, which biases toward concretely-applied generics like
-  // Array<MsgPack> over Array<T> when other tie-breakers remain inconclusive.
-  const bySpecificity = [...candidates].sort(
-    (a, b) =>
-      formatTypeName(a.returnType).length - formatTypeName(b.returnType).length
+  // Prefer a candidate whose return type union covers all other return types.
+  const covers = (a: any, b: any): boolean => {
+    if (!a || !b) return false;
+    const toBranches = (t: any) => (t?.isUnionType?.() ? t.types : [t]);
+    const aBranches = toBranches(a);
+    const bBranches = toBranches(b);
+    return bBranches.every((bt: any) =>
+      aBranches.some((at: any) => typesAreEqual(at, bt))
+    );
+  };
+  const covering = candidates.filter((c) =>
+    candidates.every((o) => c === o || covers(c.returnType, o.returnType))
   );
-  const mostSpecific = bySpecificity.at(-1);
-  const next = bySpecificity.at(-2);
-  if (
-    mostSpecific &&
-    (!next ||
-      formatTypeName(mostSpecific.returnType).length >
-        formatTypeName(next.returnType).length)
-  ) {
-    return mostSpecific;
-  }
+  if (covering.length === 1) return covering[0];
 
   const argTypes = call.args
     .toArray()
