@@ -294,13 +294,20 @@ const parametersMatch = (candidate: Fn, call: Call) =>
     paramsDirectlyMatch(candidate, call)) ||
   objectArgSuppliesLabeledParams(candidate, call);
 
-const paramsDirectlyMatch = (candidate: Fn, call: Call) =>
-  candidate.parameters.every((p, i) => {
-    const arg = call.argAt(i);
+const paramsDirectlyMatch = (candidate: Fn, call: Call) => {
+  let argIndex = 0;
+  return candidate.parameters.every((p) => {
+    const arg = call.argAt(argIndex);
     if (!arg)
       return p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional");
-    return argumentMatchesParam(call, p, i);
+    const argLabel = getExprLabel(arg);
+    if (argLabel && argLabel !== p.label?.value)
+      return p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional");
+    const matches = argumentMatchesParam(call, p, argIndex);
+    if (matches) argIndex++;
+    return matches;
   });
+};
 
 const argumentMatchesParam = (
   call: Call,

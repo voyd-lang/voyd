@@ -22,6 +22,12 @@ describe("optional parameters", () => {
     t.expect(withoutMiddle()).toEqual(1);
   });
 
+  test("skipping optional parameter before labeled arg", (t) => {
+    const skip = getWasmFn("skip_optional_labeled", instance);
+    assert(skip, "Function exists");
+    t.expect(skip()).toEqual(3);
+  });
+
   test("labeled optional parameter", (t) => {
     const withSub = getWasmFn("banner_with_subtitle", instance);
     assert(withSub, "Function exists");
