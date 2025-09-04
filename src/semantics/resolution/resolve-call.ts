@@ -299,8 +299,7 @@ const resolveOptionalArgs = (call: Call) => {
   const fn = call.fn;
   if (!fn?.isFn()) return;
   fn.parameters.forEach((param, index) => {
-    const paramTypeExpr = param.typeExpr;
-    if (!paramTypeExpr?.isCall() || !paramTypeExpr.fnName.is("Optional")) return;
+    if (!param.isOptional) return;
     const label = param.label?.value;
 
     let argIndex = index;
@@ -376,9 +375,7 @@ const expandObjectArg = (call: Call) => {
   const allLabeled = labeledParams.length === params.length;
   if (!allLabeled) return;
 
-  const requiredParams = labeledParams.filter(
-    (p) => !(p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional"))
-  );
+  const requiredParams = labeledParams.filter((p) => !p.isOptional);
 
   // Case 1: direct object literal supplied
   if (objArg.isObjectLiteral()) {
@@ -417,10 +414,8 @@ const expandObjectArg = (call: Call) => {
     : undefined;
   if (!structType) return;
 
-  const coversRequired = requiredParams.every(
-    (p) =>
-      structType.hasField(p.label!.value) ||
-      (p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional"))
+  const coversRequired = requiredParams.every((p) =>
+    structType.hasField(p.label!.value)
   );
   if (!coversRequired) return;
 

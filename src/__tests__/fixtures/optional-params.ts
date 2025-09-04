@@ -54,3 +54,17 @@ fn sum(a: i32, b?: i32, {c: i32}) -> i32
 pub fn leftover_arg() -> i32
   sum(1, c: 2, 3)
 `;
+
+export const requiredOptionalVoyd = `
+use std::all
+
+fn expects(opt: Optional<String>) -> i32
+  match(opt)
+    Some<String>:
+      1
+    None:
+      0
+
+pub fn call_missing_opt() -> i32
+  expects()
+`;
