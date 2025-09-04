@@ -332,8 +332,7 @@ const resolveOptionalArgs = (call: Call) => {
       const toInsert = label
         ? resolveEntities(makeLabeled(label, noneCall, call.metadata))
         : noneCall;
-      if (label) call.args.push(toInsert);
-      else call.args.insert(toInsert, index);
+      call.args.insert(toInsert, index);
       return;
     }
 
