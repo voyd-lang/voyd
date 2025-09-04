@@ -298,11 +298,9 @@ const paramsDirectlyMatch = (candidate: Fn, call: Call) => {
   let argIndex = 0;
   const matches = candidate.parameters.every((p) => {
     const arg = call.argAt(argIndex);
-    if (!arg)
-      return p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional");
+    if (!arg) return p.isOptional;
     const argLabel = getExprLabel(arg);
-    if (argLabel && argLabel !== p.label?.value)
-      return p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional");
+    if (argLabel && argLabel !== p.label?.value) return p.isOptional;
     const matches = argumentMatchesParam(call, p, argIndex);
     if (matches) argIndex++;
     return matches;
@@ -339,6 +337,7 @@ const argumentMatchesParam = (
   const argLabel = getExprLabel(arg);
   const labelsMatch = param.label?.value === argLabel;
   if (
+    param.isOptional &&
     param.typeExpr?.isCall() &&
     param.typeExpr.fnName.is("Optional") &&
     typesAreCompatible(argType, getExprType(param.typeExpr.typeArgs?.at(0)))
@@ -361,8 +360,7 @@ const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
   if (objArg?.isObjectLiteral()) {
     return labeledParams.every((p) => {
       const field = objArg.fields.find((f) => f.name === p.label!.value);
-      if (!field)
-        return p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional");
+      if (!field) return p.isOptional;
       const fieldType = getExprType(field.initializer);
       return typesAreCompatible(fieldType, p.type!);
     });
@@ -377,9 +375,7 @@ const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
   if (!structType) return false;
   if (
     labeledParams.some(
-      (p) =>
-        !structType.hasField(p.label!.value) &&
-        !(p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional"))
+      (p) => !structType.hasField(p.label!.value) && !p.isOptional
     )
   )
     return false;

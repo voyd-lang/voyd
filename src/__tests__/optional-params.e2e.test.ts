@@ -1,6 +1,7 @@
 import {
   optionalParamsVoyd,
   leftoverArgVoyd,
+  requiredOptionalVoyd,
 } from "./fixtures/optional-params.js";
 import { compile } from "../compiler.js";
 import { describe, test, beforeAll } from "vitest";
@@ -33,6 +34,10 @@ describe("optional parameters", () => {
 
   test("reject leftover argument after skipping optional", async (t) => {
     await t.expect(compile(leftoverArgVoyd)).rejects.toThrow();
+  });
+
+  test("required Optional<T> parameter is not optional", async (t) => {
+    await t.expect(compile(requiredOptionalVoyd)).rejects.toThrow();
   });
 
   test("labeled optional parameter", (t) => {
