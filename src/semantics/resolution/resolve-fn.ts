@@ -4,6 +4,7 @@ import { Fn } from "../../syntax-objects/fn.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
 import { List } from "../../syntax-objects/list.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
+import { Identifier } from "../../syntax-objects/identifier.js";
 import { TypeAlias, selfType } from "../../syntax-objects/types.js";
 import { nop } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
@@ -84,6 +85,15 @@ const resolveParameters = (params: Parameter[]) => {
 
     if (!p.typeExpr) {
       throw new Error(`Unable to determine type for ${p}`);
+    }
+
+    if (p.isOptional) {
+      p.typeExpr = new Call({
+        ...p.typeExpr.metadata,
+        fnName: Identifier.from("Optional"),
+        args: new List({ value: [] }),
+        typeArgs: new List({ value: [p.typeExpr] }),
+      });
     }
 
     p.typeExpr = resolveTypeExpr(p.typeExpr);

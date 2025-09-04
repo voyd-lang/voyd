@@ -290,12 +290,17 @@ const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
     : true;
 
 const parametersMatch = (candidate: Fn, call: Call) =>
-  (call.args.length === candidate.parameters.length &&
+  (call.args.length <= candidate.parameters.length &&
     paramsDirectlyMatch(candidate, call)) ||
   objectArgSuppliesLabeledParams(candidate, call);
 
 const paramsDirectlyMatch = (candidate: Fn, call: Call) =>
-  candidate.parameters.every((p, i) => argumentMatchesParam(call, p, i));
+  candidate.parameters.every((p, i) => {
+    const arg = call.argAt(i);
+    if (!arg)
+      return p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional");
+    return argumentMatchesParam(call, p, i);
+  });
 
 const argumentMatchesParam = (
   call: Call,
@@ -325,6 +330,13 @@ const argumentMatchesParam = (
   if (!argType) return false;
   const argLabel = getExprLabel(arg);
   const labelsMatch = param.label?.value === argLabel;
+  if (
+    param.typeExpr?.isCall() &&
+    param.typeExpr.fnName.is("Optional") &&
+    typesAreCompatible(argType, getExprType(param.typeExpr.typeArgs?.at(0)))
+  ) {
+    return labelsMatch;
+  }
   return typesAreCompatible(argType, param.type!) && labelsMatch;
 };
 
@@ -341,7 +353,8 @@ const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
   if (objArg?.isObjectLiteral()) {
     return labeledParams.every((p) => {
       const field = objArg.fields.find((f) => f.name === p.label!.value);
-      if (!field) return false;
+      if (!field)
+        return p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional");
       const fieldType = getExprType(field.initializer);
       return typesAreCompatible(fieldType, p.type!);
     });
@@ -354,11 +367,18 @@ const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
     ? objType.structuralType
     : undefined;
   if (!structType) return false;
-  if (!labeledParams.every((p) => structType.hasField(p.label!.value)))
+  if (
+    labeledParams.some(
+      (p) =>
+        !structType.hasField(p.label!.value) &&
+        !(p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional"))
+    )
+  )
     return false;
   return labeledParams.every((p) => {
     const field = structType.getField(p.label!.value);
-    return field ? typesAreCompatible(field.type, p.type!) : false;
+    if (!field) return true;
+    return typesAreCompatible(field.type, p.type!);
   });
 };
 

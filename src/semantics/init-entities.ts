@@ -239,7 +239,7 @@ const initParameter = (
     return initParameter(second, true, first);
   }
 
-  const { name, typeExpr, isMutableRef } = unwrapVariableIdentifier(list);
+  const { name, typeExpr, isMutableRef, isOptional } = unwrapVariableIdentifier(list);
 
   if (!name) throw new Error("Invalid parameter");
   return new Parameter({
@@ -248,6 +248,7 @@ const initParameter = (
     typeExpr,
     label: labelOverride ?? (labeled ? name : undefined),
     attributes: { isMutableRef },
+    isOptional,
   });
 };
 
@@ -376,16 +377,27 @@ const unwrapVariableIdentifier = (expr?: Expr) => {
   if (expr?.isIdentifier()) return { name: expr };
   if (!expr?.isList()) return {};
 
-  const [nameExpr, typeExpr] = expr.calls(":")
-    ? [expr.at(1), initTypeExprEntities(expr.at(2))]
-    : [expr];
+  let nameExpr: Expr | undefined;
+  let typeExpr: Expr | undefined;
+  let isOptional = false;
+
+  if (expr.calls("?:")) {
+    nameExpr = expr.at(1);
+    typeExpr = initTypeExprEntities(expr.at(2));
+    isOptional = true;
+  } else if (expr.calls(":")) {
+    nameExpr = expr.at(1);
+    typeExpr = initTypeExprEntities(expr.at(2));
+  } else {
+    nameExpr = expr;
+  }
 
   if (nameExpr?.isList() && nameExpr.calls("&")) {
     const name = nameExpr.optionalIdentifierAt(1);
-    return { name, isMutableRef: true, typeExpr };
+    return { name, isMutableRef: true, typeExpr, isOptional };
   }
 
-  if (nameExpr?.isIdentifier()) return { name: nameExpr, typeExpr };
+  if (nameExpr?.isIdentifier()) return { name: nameExpr, typeExpr, isOptional };
   return {};
 };
 

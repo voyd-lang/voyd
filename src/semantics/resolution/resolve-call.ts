@@ -42,6 +42,7 @@ import { resolveTrait } from "./resolve-trait.js";
 import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
+import { typesAreCompatible } from "./types-are-compatible.js";
 
 const resolveMemberAccessDirect = (call: Call): Call => {
   call.args = call.args.map(resolveEntities);
@@ -286,6 +287,69 @@ const resolveClosureArgs = (call: Call) => {
   });
 };
 
+const resolveOptionalArgs = (call: Call) => {
+  const fn = call.fn;
+  if (!fn?.isFn()) return;
+  fn.parameters.forEach((param, index) => {
+    const paramTypeExpr = param.typeExpr;
+    if (!paramTypeExpr?.isCall() || !paramTypeExpr.fnName.is("Optional")) return;
+    const label = param.label?.value;
+
+    let argIndex = index;
+    let argExpr: Expr | undefined;
+    let wrapper: Call | undefined;
+
+    if (label) {
+      argIndex = call.args.findIndex((e) => {
+        if (!e.isCall() || !e.calls(":")) return false;
+        const id = e.argAt(0);
+        return !!(id?.isIdentifier() && id.is(label));
+      });
+      if (argIndex !== -1) {
+        wrapper = call.args.at(argIndex) as Call;
+        argExpr = wrapper.argAt(1);
+      }
+    } else {
+      argExpr = call.args.at(index);
+    }
+
+    if (!argExpr) {
+      const noneCall = resolveEntities(
+        new Call({
+          ...call.metadata,
+          fnName: Identifier.from("none"),
+          args: new List({ value: [] }),
+        })
+      );
+      const toInsert = label
+        ? resolveEntities(makeLabeled(label, noneCall, call.metadata))
+        : noneCall;
+      if (label) call.args.push(toInsert);
+      else call.args.insert(toInsert, index);
+      return;
+    }
+
+    const argType = getExprType(argExpr);
+    const paramType = param.type;
+    if (typesAreCompatible(argType, paramType)) return;
+
+    const someCall = resolveEntities(
+      new Call({
+        ...argExpr.metadata,
+        fnName: Identifier.from("some"),
+        args: new List({ value: [argExpr] }),
+      })
+    );
+
+    if (label && wrapper) {
+      wrapper.args.set(1, someCall);
+      call.args.set(argIndex, resolveEntities(wrapper));
+    } else {
+      call.args.set(index, someCall);
+    }
+  });
+};
+
 const expandObjectArg = (call: Call) => {
   const fn = call.fn;
   if (!fn?.isFn() || call.args.length !== 1) return;
@@ -366,6 +430,7 @@ const normalizeArgsForResolvedFn = (call: Call) => {
   expandObjectArg(call);
   resolveArrayArgs(call);
   resolveClosureArgs(call);
+  resolveOptionalArgs(call);
 };
 
 export const resolveModuleAccess = (call: Call) => {
