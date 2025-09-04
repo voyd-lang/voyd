@@ -83,7 +83,7 @@ true // Boolean
 false // Boolean
 1 // i32 by default
 1.0 // f64 by default
-"Hello!" // String literal, can be multiline, supports interpolation via ${} (NOTE: Interpolation not yet implemented)
+"Hello!" // String literal, can be multiline, supports interpolation via ${}
 [1, 2, 3] // Array literal. (NOTE: Not yet implemented. Arrays can be initialized with new_array<T>({ from: FixedArray(val1, val2, etc) })
 (1, 2, 3) // Tuple literal  (NOTE: Not yet implemented)
 {x: 2, y: 4} // Structural object literal
@@ -239,12 +239,7 @@ while condition do:
   do_work()
 ```
 
-For loops can iterate through items of an iterable (such as an array)
-
-```rust
-for item in iterable do:
-  print item
-```
+For loops are planned but not yet implemented.
 
 Voyd is also tail call optimized:
 

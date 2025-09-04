@@ -46,9 +46,9 @@ effect Async
   ctl reject(msg: String) -> void
 
 fn asyncTask(num: i32): Async -> Int
-  if num > 0
+  if num > 0 then:
     Async::resolve(num)
-  else
+  else:
     Async::reject("Number must be positive")
 
 fn main()
@@ -63,17 +63,17 @@ fn main()
 
 // Effects are also inferred
 fn asyncTask(num: i32) -> Int // Inferred to be Async -> Int
-  if num > 0
+  if num > 0 then:
     Async::resolve(num)
-  else
+  else:
     Async::reject("Number must be positive")
 
 // A use statement can may the function a little cleaner
 use Async::{resolve, reject}
 
 fn asyncTask(num: i32) -> Int
-  if num > 0
+  if num > 0 then:
     resolve(num)
-  else
+  else:
     reject("Number must be positive")
 ```

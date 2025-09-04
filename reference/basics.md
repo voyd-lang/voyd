@@ -36,7 +36,7 @@ let address = "
 123 Main St
 Anytown, USA
 "
-// String interpolation is also supported by double quotes and the {} syntax
+// String interpolation is supported by double quotes and the ${} syntax
 let greeting = "Hello, ${name}"
 ```
 
@@ -99,17 +99,11 @@ elif: x > 2 then:
 else:
   // Fallback
 
-// When else is not needed both `then:` and `else:` can be omitted
-if x > 5
-  // Do something
-
 // While loops
-while x > 5
+while x > 5 do:
   // Do something
 
-// For loops
-for i in 0..10
-  // Do something
+// For loops are planned but not yet implemented
 
 // Blocks*
 let y = ${
@@ -121,8 +115,7 @@ let y = ${
 
 // Blocks are implicitly defined by 2 space indentation, so this is also valid.
 let y =
-  let x =
-  2 + 3
+  let x = 2 + 3
   x + 3 // y will be bound to 8
 ```
 
