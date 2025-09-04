@@ -121,23 +121,6 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
   });
   if (concreteReturn.length === 1) return concreteReturn[0];
 
-  // Fallback heuristic: prefer the candidate with the most specific (longest)
-  // formatted return type. This biases toward concretely-applied generics like
-  // Array<MsgPack> over Array<O> when other tie-breakers fail.
-  const bySpecificity = [...candidates].sort((a, b) =>
-    formatTypeName(a.returnType).length - formatTypeName(b.returnType).length
-  );
-  const mostSpecific = bySpecificity.at(-1);
-  const next = bySpecificity.at(-2);
-  if (
-    mostSpecific &&
-    (!next ||
-      formatTypeName(mostSpecific.returnType).length >
-        formatTypeName(next.returnType).length)
-  ) {
-    return mostSpecific;
-  }
-
   const argTypes = call.args
     .toArray()
     .map((arg) => formatTypeName(getExprType(arg)))

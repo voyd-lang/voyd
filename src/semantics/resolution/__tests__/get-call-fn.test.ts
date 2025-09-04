@@ -174,6 +174,35 @@ describe("getCallFn", () => {
     );
   });
 
+  test("throws error when overloads only differ by return type", () => {
+    const label = new Identifier({ value: "arg1" });
+    const fnName = new Identifier({ value: "hi" });
+
+    const candidate1 = new Fn({
+      name: fnName,
+      parameters: [new Parameter({ name: label, type: i32 })],
+    });
+    candidate1.returnType = i32;
+    candidate1.annotatedReturnType = i32;
+
+    const candidate2 = new Fn({
+      name: fnName,
+      parameters: [new Parameter({ name: label, type: i32 })],
+    });
+    candidate2.returnType = f32;
+    candidate2.annotatedReturnType = f32;
+
+    const call = new Call({
+      fnName,
+      args: new List({ value: [new Int({ value: 2 })] }),
+    });
+    call.resolveFns = vi.fn().mockReturnValue([candidate1, candidate2]);
+
+    expect(() => getCallFn(call)).toThrow(
+      /Ambiguous call hi\(i32\).*hi\(arg1: i32\) -> i32.*hi\(arg1: i32\) -> f32/
+    );
+  });
+
   test("returns trait method for trait object calls", () => {
     const objType = new ObjectType({ name: "Obj", value: [] });
     const traitMethod = new Fn({
