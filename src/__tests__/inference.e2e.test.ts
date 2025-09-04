@@ -114,10 +114,21 @@ pub fn test10() -> i32
 
 // ---- msg-pack map with preceding HTML element ----
 pub fn component11() -> Map<MsgPack>
-  let a = ["Alex", "Abby"]
   <div>
-    <div><p>hi</p></div>
-    {a.map(item => <span style="boop">{item}</span>)}
+    <div>
+      <div></div>
+      <h2>Voyd + VSX</h2>
+    </div>
+
+    <p>
+      Build reactive UIs with clean, minimal syntax.
+    </p>
+
+    <div>
+      {["No virtual DOM", "WASM speed", "Composable", "Tiny footprint"].map(tag =>
+        <span>{tag}</span>
+      )}
+    </div>
   </div>
 
 pub fn test11() -> i32
@@ -187,14 +198,58 @@ describe("E2E Inference (kitchen sink)", () => {
     const index = fn();
     const decoded = decode(memory.buffer.slice(0, index));
     t.expect(decoded).toEqual({
-      name: "div",
       attributes: {},
+      name: "div",
       children: [
-        { name: "div", attributes: {}, children: [{ name: "p", attributes: {}, children: ["hi"] }] },
-        [
-          { name: "span", attributes: { style: "boop" }, children: ["Alex"] },
-          { name: "span", attributes: { style: "boop" }, children: ["Abby"] },
-        ],
+        {
+          attributes: {},
+          name: "div",
+          children: [
+            {
+              attributes: {},
+              name: "div",
+              children: [],
+            },
+            {
+              attributes: {},
+              name: "h2",
+              children: ["Voyd + VSX"],
+            },
+          ],
+        },
+        {
+          attributes: {},
+          name: "p",
+          children: ["Build reactive UIs with clean, minimal syntax. "],
+        },
+        {
+          attributes: {},
+          name: "div",
+          children: [
+            [
+              {
+                attributes: {},
+                name: "span",
+                children: ["No virtual DOM"],
+              },
+              {
+                attributes: {},
+                name: "span",
+                children: ["WASM speed"],
+              },
+              {
+                attributes: {},
+                name: "span",
+                children: ["Composable"],
+              },
+              {
+                attributes: {},
+                name: "span",
+                children: ["Tiny footprint"],
+              },
+            ],
+          ],
+        },
       ],
     });
   });
