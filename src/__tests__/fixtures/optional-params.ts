@@ -30,6 +30,12 @@ pub fn banner_without_subtitle() -> i32
 pub fn banner_obj_without_subtitle() -> i32
   banner({ title: "Hi" })
 
+fn sum(a: i32, b?: i32, {c: i32}) -> i32
+  a + c
+
+pub fn skip_optional_labeled() -> i32
+  sum(1, c: 2)
+
 pub fn closure_with_arg() -> i32
   let f = (name: String, middle?: String) => greet(name, middle)
   f("John", "Quincy")
@@ -37,4 +43,14 @@ pub fn closure_with_arg() -> i32
 pub fn closure_without_arg() -> i32
   let f = (name: String, middle?: String) => greet(name, middle)
   f("John")
+`;
+
+export const leftoverArgVoyd = `
+use std::all
+
+fn sum(a: i32, b?: i32, {c: i32}) -> i32
+  a + c
+
+pub fn leftover_arg() -> i32
+  sum(1, c: 2, 3)
 `;

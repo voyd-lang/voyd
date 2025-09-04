@@ -1,4 +1,7 @@
-import { optionalParamsVoyd } from "./fixtures/optional-params.js";
+import {
+  optionalParamsVoyd,
+  leftoverArgVoyd,
+} from "./fixtures/optional-params.js";
 import { compile } from "../compiler.js";
 import { describe, test, beforeAll } from "vitest";
 import assert from "node:assert";
@@ -20,6 +23,16 @@ describe("optional parameters", () => {
     const withoutMiddle = getWasmFn("greet_without_middle", instance);
     assert(withoutMiddle, "Function exists");
     t.expect(withoutMiddle()).toEqual(1);
+  });
+
+  test("skipping optional parameter before labeled arg", (t) => {
+    const skip = getWasmFn("skip_optional_labeled", instance);
+    assert(skip, "Function exists");
+    t.expect(skip()).toEqual(3);
+  });
+
+  test("reject leftover argument after skipping optional", async (t) => {
+    await t.expect(compile(leftoverArgVoyd)).rejects.toThrow();
   });
 
   test("labeled optional parameter", (t) => {

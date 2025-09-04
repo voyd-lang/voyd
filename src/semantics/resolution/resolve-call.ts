@@ -318,7 +318,16 @@ const resolveOptionalArgs = (call: Call) => {
         argExpr = wrapper.argAt(1);
       }
     } else {
-      argExpr = call.args.at(index);
+      const candidate = call.args.at(index);
+      const labelExpr =
+        candidate?.isCall() && candidate.calls(":")
+          ? candidate.argAt(0)
+          : undefined;
+      argExpr =
+        labelExpr?.isIdentifier() &&
+        fn.parameters.some((p, i) => i >= index && p.label?.is(labelExpr))
+          ? undefined
+          : candidate;
     }
 
     if (!argExpr) {
