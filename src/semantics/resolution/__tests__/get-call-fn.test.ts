@@ -272,6 +272,43 @@ describe("getCallFn", () => {
     expect(getCallFn(call)).toBe(candidate2);
   });
 
+  test("selects candidate whose parameter type union covers others", () => {
+    const label = new Identifier({ value: "arg1" });
+    const fnName = new Identifier({ value: "hi" });
+
+    const objA = new ObjectType({ name: new Identifier({ value: "A" }), value: [] });
+    const objB = new ObjectType({ name: new Identifier({ value: "B" }), value: [] });
+
+    const union = new UnionType({
+      name: new Identifier({ value: "U" }),
+      childTypeExprs: [objA, objB],
+    });
+    resolveUnionType(union);
+
+    const candidate1 = new Fn({
+      name: fnName,
+      parameters: [new Parameter({ name: label, type: objA })],
+    });
+    candidate1.returnType = i32;
+    candidate1.annotatedReturnType = i32;
+
+    const candidate2 = new Fn({
+      name: fnName,
+      parameters: [new Parameter({ name: label, type: union })],
+    });
+    candidate2.returnType = i32;
+    candidate2.annotatedReturnType = i32;
+
+    const arg = new MockIdentifier({ value: "a", entity: objA });
+    const call = new Call({
+      fnName,
+      args: new List({ value: [arg] }),
+    });
+    call.resolveFns = vi.fn().mockReturnValue([candidate1, candidate2]);
+
+    expect(getCallFn(call)).toBe(candidate2);
+  });
+
   test("returns trait method for trait object calls", () => {
     const objType = new ObjectType({ name: "Obj", value: [] });
     const traitMethod = new Fn({

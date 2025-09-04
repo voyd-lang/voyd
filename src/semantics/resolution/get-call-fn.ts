@@ -1,4 +1,4 @@
-import { Call, Expr, Fn, Parameter } from "../../syntax-objects/index.js";
+import { Call, Expr, Fn, Parameter, Type } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { formatFnSignature } from "../fn-signature.js";
 import { formatTypeName } from "../type-format.js";
@@ -46,24 +46,29 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
     }
   }
 
+  const unwrapAlias = (t: Type): Type =>
+    t.isTypeAlias?.() ? t.type ?? t : t;
+
   // Tie-break using contextual expected return type if available. Prefer the
   // candidate whose return type exactly matches the expected branch (by
   // nominal head) when the expected type is a union alias like MsgPack.
   const expected =
-    call.getAttribute && (call.getAttribute("expectedType") as any);
+    call.getAttribute &&
+    (call.getAttribute("expectedType") as Type | undefined);
   if (expected) {
-    const headKeyFromType = (t: any): string | undefined => {
-      if (!t) return undefined;
-      if (t.isObjectType && t.isObjectType()) {
-        return t.genericParent ? t.genericParent.name.value : t.name.value;
+    const headKeyFromType = (t: Type | undefined): string | undefined => {
+      const u = t ? unwrapAlias(t) : undefined;
+      if (!u) return undefined;
+      if (u.isObjectType && u.isObjectType()) {
+        return u.genericParent ? u.genericParent.name.value : u.name.value;
       }
-      if (t.isPrimitiveType && t.isPrimitiveType()) return t.name.value;
-      if (t.isTraitType && t.isTraitType()) return t.name.value;
-      if (t.isFixedArrayType && t.isFixedArrayType()) return "FixedArray";
-      if (t.isIntersectionType && t.isIntersectionType())
-        return headKeyFromType(t.nominalType ?? t.structuralType);
-      if (t.isTypeAlias && t.isTypeAlias()) return headKeyFromType(t.type);
-      return t.name?.value;
+      if (u.isPrimitiveType && u.isPrimitiveType()) return u.name.value;
+      if (u.isTraitType && u.isTraitType()) return u.name.value;
+      if (u.isFixedArrayType && u.isFixedArrayType()) return "FixedArray";
+      if (u.isIntersectionType && u.isIntersectionType())
+        return headKeyFromType(u.nominalType ?? u.structuralType);
+      if (u.isTypeAlias && u.isTypeAlias()) return headKeyFromType(u.type);
+      return u.name?.value;
     };
     const expectedBranch = (() => {
       if (expected.isUnionType && expected.isUnionType()) {
@@ -75,7 +80,7 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
         );
         const single = heads.size === 1 ? [...heads][0] : undefined;
         return single
-          ? expected.types.find((t: any) => headKeyFromType(t) === single)
+          ? expected.types.find((t) => headKeyFromType(t) === single)
           : undefined;
       }
       return expected;
@@ -87,9 +92,9 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
       if (exact.length === 1) return exact[0];
 
       // Rank candidates by closeness to expected branch.
-      const rank = (ret: any): number => {
+      const rank = (ret: Type | undefined): number => {
         if (typesAreEqual(ret, expectedBranch)) return 3;
-        if (typesAreCompatible(ret, expectedBranch)) {
+        if (ret && typesAreCompatible(ret, expectedBranch)) {
           // When both are Array<...> or the same nominal head, prefer the one
           // whose applied type arguments exactly match the expected branch's
           // applied type arguments.
@@ -102,14 +107,9 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
             ret.isObjectType?.() &&
             expectedBranch.isObjectType?.()
           ) {
-            const ra = (ret.appliedTypeArgs ?? []).map((a: any) => a.type ?? a);
-            const ea = (expectedBranch.appliedTypeArgs ?? []).map(
-              (a: any) => a.type ?? a
-            );
-            if (
-              ra.length === ea.length &&
-              ra.every((t: any, i: number) => typesAreEqual(t, ea[i]))
-            )
+            const ra = (ret.appliedTypeArgs ?? []).map(unwrapAlias);
+            const ea = (expectedBranch.appliedTypeArgs ?? []).map(unwrapAlias);
+            if (ra.length === ea.length && ra.every((t, i) => typesAreEqual(t, ea[i])))
               return 2;
           }
           return 1;
@@ -145,19 +145,32 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
   if (concreteReturn.length === 1) return concreteReturn[0];
 
   // Prefer a candidate whose return type union covers all other return types.
-  const covers = (a: any, b: any): boolean => {
+  const toBranches = (t: Type): Type[] => {
+    const u = unwrapAlias(t);
+    return u.isUnionType?.() ? u.types : [u];
+  };
+  const covers = (a?: Type, b?: Type): boolean => {
     if (!a || !b) return false;
-    const toBranches = (t: any) => (t?.isUnionType?.() ? t.types : [t]);
     const aBranches = toBranches(a);
     const bBranches = toBranches(b);
-    return bBranches.every((bt: any) =>
-      aBranches.some((at: any) => typesAreEqual(at, bt))
+    return bBranches.every((bt) =>
+      aBranches.some((at) => typesAreEqual(at, bt))
     );
   };
   const covering = candidates.filter((c) =>
     candidates.every((o) => c === o || covers(c.returnType, o.returnType))
   );
   if (covering.length === 1) return covering[0];
+
+  // Prefer a candidate whose parameter type unions cover all other candidates'.
+  const argCovering = candidates.filter((c) =>
+    candidates.every(
+      (o) =>
+        c === o ||
+        c.parameters.every((p, i) => covers(p.type, o.parameters[i]?.type))
+    )
+  );
+  if (argCovering.length === 1) return argCovering[0];
 
   const argTypes = call.args
     .toArray()
