@@ -103,6 +103,27 @@ catch(e):
 [1] The compiler will typically optimize this away, so there is no performance
 penalty for using labeled arguments.
 
+## Optional parameters
+
+Parameters may be marked optional by adding `?` before the colon. The parameter's
+type becomes [`Optional`](./types/objects.md#optional) of the specified type.
+
+```voyd
+fn greet(name: String, middle?: String)
+  // middle has type Optional<String>
+  match(middle)
+    Some<String>:
+      name + " " + middle.value
+    None:
+      name
+
+greet("Ada")          // middle -> none()
+greet("Ada", "Lovelace") // middle -> some("Lovelace")
+```
+
+When an optional parameter is omitted, `none()` is inserted automatically. When a
+non-optional value is supplied, it is wrapped with `some(...)` at the call site.
+
 ## Uniform Function Call Syntax (Dot Notation)
 
 The dot (or period) operator applies the expression on the left as an argument

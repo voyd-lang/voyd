@@ -10,6 +10,7 @@ export class Parameter extends NamedEntity {
   originalType?: Type;
   type?: Type;
   typeExpr?: Expr;
+  isOptional?: boolean;
   requiresCast = false;
 
   constructor(
@@ -17,12 +18,14 @@ export class Parameter extends NamedEntity {
       label?: Identifier;
       type?: Type;
       typeExpr?: Expr;
+      isOptional?: boolean;
     }
   ) {
     super(opts);
     this.label = opts.label;
     this.type = opts.type;
     this.typeExpr = opts.typeExpr;
+    this.isOptional = opts.isOptional;
     if (this.typeExpr) {
       this.typeExpr.parent = this;
     }
@@ -45,10 +48,17 @@ export class Parameter extends NamedEntity {
       ...super.getCloneOpts(parent),
       label: this.label,
       typeExpr: this.typeExpr?.clone(),
+      isOptional: this.isOptional,
     });
   }
 
   toJSON() {
-    return ["define-parameter", this.name, ["label", this.label], this.type];
+    return [
+      "define-parameter",
+      this.name,
+      ["label", this.label],
+      this.type,
+      ["is-optional", this.isOptional],
+    ];
   }
 }

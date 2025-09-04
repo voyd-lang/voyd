@@ -9,6 +9,7 @@ import {
   Variable,
   Bool,
   ObjectLiteral,
+  Parameter,
 } from "../../syntax-objects/index.js";
 import { SourceLocation } from "../../syntax-objects/syntax.js";
 import { Match } from "../../syntax-objects/match.js";
@@ -42,6 +43,7 @@ import { resolveTrait } from "./resolve-trait.js";
 import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
+import { typesAreCompatible } from "./types-are-compatible.js";
 
 const resolveMemberAccessDirect = (call: Call): Call => {
   call.args = call.args.map(resolveEntities);
@@ -64,6 +66,14 @@ const resolveMemberAccessDirect = (call: Call): Call => {
 const preprocessArgs = (call: Call): void => {
   call.args = call.args.map(resolveEntities);
 };
+
+const cloneParams = (params: Parameter[]): Parameter[] =>
+  params.map((p) => {
+    const cloned = p.clone();
+    cloned.type = p.type;
+    cloned.isOptional = p.isOptional;
+    return cloned;
+  });
 
 // Normalize any expression to a block expression
 const toBlock = (e: Expr): Block =>
@@ -286,6 +296,76 @@ const resolveClosureArgs = (call: Call) => {
   });
 };
 
+const resolveOptionalArgs = (call: Call) => {
+  const fn = call.fn;
+  if (!fn?.isFn()) return;
+  fn.parameters.forEach((param, index) => {
+    if (!param.isOptional) return;
+    const label = param.label?.value;
+
+    let argIndex = index;
+    let argExpr: Expr | undefined;
+    let wrapper: Call | undefined;
+
+    if (label) {
+      argIndex = call.args.findIndex((e) => {
+        if (!e.isCall() || !e.calls(":")) return false;
+        const id = e.argAt(0);
+        return !!(id?.isIdentifier() && id.is(label));
+      });
+      if (argIndex !== -1) {
+        wrapper = call.args.at(argIndex) as Call;
+        argExpr = wrapper.argAt(1);
+      }
+    } else {
+      const candidate = call.args.at(index);
+      const labelExpr =
+        candidate?.isCall() && candidate.calls(":")
+          ? candidate.argAt(0)
+          : undefined;
+      argExpr =
+        labelExpr?.isIdentifier() &&
+        fn.parameters.some((p, i) => i >= index && p.label?.is(labelExpr))
+          ? undefined
+          : candidate;
+    }
+
+    if (!argExpr) {
+      const noneCall = resolveEntities(
+        new Call({
+          ...call.metadata,
+          fnName: Identifier.from("none"),
+          args: new List({ value: [] }),
+        })
+      );
+      const toInsert = label
+        ? resolveEntities(makeLabeled(label, noneCall, call.metadata))
+        : noneCall;
+      call.args.insert(toInsert, index);
+      return;
+    }
+
+    const argType = getExprType(argExpr);
+    const paramType = param.type;
+    if (typesAreCompatible(argType, paramType)) return;
+
+    const someCall = resolveEntities(
+      new Call({
+        ...argExpr.metadata,
+        fnName: Identifier.from("some"),
+        args: new List({ value: [argExpr] }),
+      })
+    );
+
+    if (label && wrapper) {
+      wrapper.args.set(1, someCall);
+      call.args.set(argIndex, resolveEntities(wrapper));
+    } else {
+      call.args.set(index, someCall);
+    }
+  });
+};
+
 const expandObjectArg = (call: Call) => {
   const fn = call.fn;
   if (!fn?.isFn() || call.args.length !== 1) return;
@@ -296,25 +376,30 @@ const expandObjectArg = (call: Call) => {
   const allLabeled = labeledParams.length === params.length;
   if (!allLabeled) return;
 
+  const requiredParams = labeledParams.filter((p) => !p.isOptional);
+
   // Case 1: direct object literal supplied
   if (objArg.isObjectLiteral()) {
-    const coversAll = labeledParams.every((p) =>
+    const coversRequired = requiredParams.every((p) =>
       objArg.fields.some((f) => f.name === p.label!.value)
     );
-    if (!coversAll) return;
+    if (!coversRequired) return;
 
-    const newArgs = labeledParams.map((p) => {
-      const fieldName = p.label!.value;
-      const field = objArg.fields.find((f) => f.name === fieldName)!;
-      return new Call({
-        ...call.metadata,
-        fnName: Identifier.from(":"),
-        args: new List({
-          value: [Identifier.from(fieldName), field.initializer],
-        }),
-        type: getExprType(field.initializer),
-      });
-    });
+    const newArgs = labeledParams
+      .map((p) => {
+        const fieldName = p.label!.value;
+        const field = objArg.fields.find((f) => f.name === fieldName);
+        if (!field) return undefined;
+        return new Call({
+          ...call.metadata,
+          fnName: Identifier.from(":"),
+          args: new List({
+            value: [Identifier.from(fieldName), field.initializer],
+          }),
+          type: getExprType(field.initializer),
+        });
+      })
+      .filter((a): a is Call => !!a);
 
     call.args = new List({ value: newArgs });
     call.args.parent = call;
@@ -330,30 +415,33 @@ const expandObjectArg = (call: Call) => {
     : undefined;
   if (!structType) return;
 
-  const coversAll = labeledParams.every((p) =>
+  const coversRequired = requiredParams.every((p) =>
     structType.hasField(p.label!.value)
   );
-  if (!coversAll) return;
+  if (!coversRequired) return;
 
-  const newArgs = labeledParams.map((p) => {
-    const fieldName = p.label!.value;
-    const fieldType = structType.getField(fieldName)?.type;
-    const objClone = resolveEntities(objArg.clone());
-    const access = new Call({
-      ...call.metadata,
-      fnName: Identifier.from("member-access"),
-      args: new List({
-        value: [objClone, Identifier.from(fieldName)],
-      }),
-      type: fieldType,
-    });
-    return new Call({
-      ...call.metadata,
-      fnName: Identifier.from(":"),
-      args: new List({ value: [Identifier.from(fieldName), access] }),
-      type: fieldType,
-    });
-  });
+  const newArgs = labeledParams
+    .map((p) => {
+      const fieldName = p.label!.value;
+      if (!structType.hasField(fieldName)) return undefined;
+      const fieldType = structType.getField(fieldName)?.type;
+      const objClone = resolveEntities(objArg.clone());
+      const access = new Call({
+        ...call.metadata,
+        fnName: Identifier.from("member-access"),
+        args: new List({
+          value: [objClone, Identifier.from(fieldName)],
+        }),
+        type: fieldType,
+      });
+      return new Call({
+        ...call.metadata,
+        fnName: Identifier.from(":"),
+        args: new List({ value: [Identifier.from(fieldName), access] }),
+        type: fieldType,
+      });
+    })
+    .filter((a): a is Call => !!a);
 
   call.args = new List({ value: newArgs });
   call.args.parent = call;
@@ -366,6 +454,7 @@ const normalizeArgsForResolvedFn = (call: Call) => {
   expandObjectArg(call);
   resolveArrayArgs(call);
   resolveClosureArgs(call);
+  resolveOptionalArgs(call);
 };
 
 export const resolveModuleAccess = (call: Call) => {
@@ -842,14 +931,42 @@ export const resolveBinaryen = (call: Call) => {
 const resolveClosureCall = (call: Call): Call => {
   call.args = call.args.map(resolveEntities);
   const closure = call.argAt(0);
-  if (closure?.isClosure()) {
+  if (!closure) return call;
+
+  const closureType = closure.isClosure()
+    ? closure.getType()
+    : getExprType(closure);
+  const params = closure.isClosure()
+    ? closure.parameters
+    : closureType?.isFnType()
+    ? closureType.parameters
+    : [];
+
+  if (params.length) {
+    const tmpFn = new Fn({
+      ...call.metadata,
+      name: Identifier.from("closure"),
+      parameters: cloneParams(params),
+    });
+    const tmpArgs = new List({ value: call.args.toArray().slice(1) });
+    const tmpCall = new Call({
+      ...call.metadata,
+      fnName: call.fnName.clone(),
+      fn: tmpFn,
+      args: tmpArgs,
+    });
+    normalizeArgsForResolvedFn(tmpCall);
+    call.args = new List({ value: [closure, ...tmpCall.args.toArray()] });
+    call.args.parent = call;
+    call.fnName.parent = call;
+  }
+
+  if (closure.isClosure()) {
     call.type = closure.getReturnType();
     return call;
   }
-  const closureType = getExprType(closure);
-  if (closureType?.isFnType()) {
-    call.type = closureType.returnType;
-  }
+
+  if (closureType?.isFnType()) call.type = closureType.returnType;
   return call;
 };
 
@@ -897,7 +1014,25 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
 
   // Bind function and normalize args
   resolveCallFn(call, candidateFns);
-  normalizeArgsForResolvedFn(call);
+  if (!call.fn && calleeType?.isFnType()) {
+    const tmpFn = new Fn({
+      ...call.metadata,
+      name: Identifier.from("closure"),
+      parameters: cloneParams(calleeType.parameters),
+    });
+    const tmpCall = new Call({
+      ...call.metadata,
+      fnName: call.fnName.clone(),
+      fn: tmpFn,
+      args: call.args,
+    });
+    normalizeArgsForResolvedFn(tmpCall);
+    call.args = tmpCall.args;
+    call.args.parent = call;
+    call.fnName.parent = call;
+  } else {
+    normalizeArgsForResolvedFn(call);
+  }
 
   // Compute resulting type
   call.type = computeCallReturnType(call, calleeType);

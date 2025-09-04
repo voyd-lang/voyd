@@ -1,6 +1,9 @@
 import { Closure } from "../../syntax-objects/closure.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
 import { FnType } from "../../syntax-objects/types.js";
+import { Call } from "../../syntax-objects/call.js";
+import { Identifier } from "../../syntax-objects/identifier.js";
+import { List } from "../../syntax-objects/list.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
@@ -56,6 +59,14 @@ const resolveParameters = (params: Parameter[]) => {
     }
 
     if (!p.typeExpr) return;
+    if (p.isOptional) {
+      p.typeExpr = new Call({
+        ...p.typeExpr.metadata,
+        fnName: Identifier.from("Optional"),
+        args: new List({ value: [] }),
+        typeArgs: new List({ value: [p.typeExpr] }),
+      });
+    }
 
     p.typeExpr = resolveTypeExpr(p.typeExpr);
     p.type = getExprType(p.typeExpr);
