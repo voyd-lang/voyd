@@ -31,4 +31,14 @@ describe("optional parameters", () => {
     assert(withoutSub, "Function exists");
     t.expect(withoutSub()).toEqual(1);
   });
+
+  test("closure optional parameter", (t) => {
+    const withArg = getWasmFn("closure_with_arg", instance);
+    assert(withArg, "Function exists");
+    t.expect(withArg()).toEqual(2);
+
+    const withoutArg = getWasmFn("closure_without_arg", instance);
+    assert(withoutArg, "Function exists");
+    t.expect(withoutArg()).toEqual(1);
+  });
 });
