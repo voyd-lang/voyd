@@ -2,7 +2,8 @@ import type { ParsedFiles } from "./parse-directory.js";
 import { parse } from "../parser.js";
 
 // Runtime env detection without relying on DOM types
-const isBrowser = () => typeof (globalThis as any).window !== "undefined";
+const isBrowser = () =>
+  typeof (globalThis as any).process?.versions?.node === "undefined";
 
 // Compute stdPath per environment:
 // - Node: absolute filesystem path to std directory
