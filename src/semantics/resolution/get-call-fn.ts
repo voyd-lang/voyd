@@ -296,7 +296,7 @@ const parametersMatch = (candidate: Fn, call: Call) =>
 
 const paramsDirectlyMatch = (candidate: Fn, call: Call) => {
   let argIndex = 0;
-  return candidate.parameters.every((p) => {
+  const matches = candidate.parameters.every((p) => {
     const arg = call.argAt(argIndex);
     if (!arg)
       return p.typeExpr?.isCall() && p.typeExpr.fnName.is("Optional");
@@ -307,6 +307,7 @@ const paramsDirectlyMatch = (candidate: Fn, call: Call) => {
     if (matches) argIndex++;
     return matches;
   });
+  return matches && argIndex === call.args.length;
 };
 
 const argumentMatchesParam = (
