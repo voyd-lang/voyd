@@ -30,6 +30,13 @@ describe("optional parameters", () => {
     const withoutSub = getWasmFn("banner_without_subtitle", instance);
     assert(withoutSub, "Function exists");
     t.expect(withoutSub()).toEqual(1);
+
+    const withoutSubObj = getWasmFn(
+      "banner_obj_without_subtitle",
+      instance
+    );
+    assert(withoutSubObj, "Function exists");
+    t.expect(withoutSubObj()).toEqual(1);
   });
 
   test("closure optional parameter", (t) => {

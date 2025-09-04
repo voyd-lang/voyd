@@ -27,6 +27,9 @@ pub fn banner_with_subtitle() -> i32
 pub fn banner_without_subtitle() -> i32
   banner(title: "Hi")
 
+pub fn banner_obj_without_subtitle() -> i32
+  banner({ title: "Hi" })
+
 pub fn closure_with_arg() -> i32
   let f = (name: String, middle?: String) => greet(name, middle)
   f("John", "Quincy")
