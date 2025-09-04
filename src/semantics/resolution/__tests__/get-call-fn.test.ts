@@ -203,6 +203,37 @@ describe("getCallFn", () => {
     );
   });
 
+  test("keeps ambiguity when ranked return types tie", () => {
+    const label1 = new Identifier({ value: "arg1" });
+    const label2 = new Identifier({ value: "arg2" });
+    const fnName = new Identifier({ value: "hi" });
+
+    const candidate1 = new Fn({
+      name: fnName,
+      parameters: [new Parameter({ name: label1, type: i32 })],
+    });
+    candidate1.returnType = i32;
+    candidate1.annotatedReturnType = i32;
+
+    const candidate2 = new Fn({
+      name: fnName,
+      parameters: [new Parameter({ name: label2, type: i32 })],
+    });
+    candidate2.returnType = i32;
+    candidate2.annotatedReturnType = i32;
+
+    const call = new Call({
+      fnName,
+      args: new List({ value: [new Int({ value: 2 })] }),
+    });
+    call.resolveFns = vi.fn().mockReturnValue([candidate1, candidate2]);
+    call.getAttribute = vi.fn().mockReturnValue(i32);
+
+    expect(() => getCallFn(call)).toThrow(
+      /Ambiguous call hi\(i32\).*hi\(arg1: i32\) -> i32.*hi\(arg2: i32\) -> i32/
+    );
+  });
+
   test("returns trait method for trait object calls", () => {
     const objType = new ObjectType({ name: "Obj", value: [] });
     const traitMethod = new Fn({

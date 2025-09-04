@@ -95,16 +95,18 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
         }
         return 0;
       };
-      let best: Fn | undefined;
+      let best: Fn[] = [];
       let bestScore = -1;
       for (const c of candidates) {
         const score = rank(c.returnType);
         if (score > bestScore) {
-          best = c;
+          best = [c];
           bestScore = score;
+        } else if (score === bestScore) {
+          best.push(c);
         }
       }
-      if (best && bestScore > 0) return best;
+      if (bestScore > 0 && best.length === 1) return best[0];
     }
   }
 
