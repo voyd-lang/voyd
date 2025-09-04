@@ -17,6 +17,10 @@ type ParseOptions = {
 export class HTMLParser {
   private stream: CharStream;
   private options: ParseOptions;
+  // Controls how text-node whitespace is handled. Defaults to HTML's normal mode
+  // (collapse sequences to a single space). Certain tags like <pre> | <textarea>
+  // switch this to 'pre' within their children, preserving all whitespace.
+  private whitespaceMode: "normal" | "pre" = "normal";
 
   constructor(stream: CharStream, options: ParseOptions) {
     this.stream = stream;
@@ -34,7 +38,7 @@ export class HTMLParser {
       return this.parseElement(startElement);
     }
 
-    this.consumeWhitespace();
+    if (this.whitespaceMode === "normal") this.consumeWhitespace();
     if (this.stream.next === "<") {
       return this.parseElement();
     } else {
@@ -135,7 +139,13 @@ export class HTMLParser {
   }
 
   private parseChildren(tagName: string): List {
-    this.consumeWhitespace();
+    const lower = tagName.toLowerCase();
+    const preserve = lower === "pre" || lower === "textarea";
+
+    const prevMode = this.whitespaceMode;
+    this.whitespaceMode = preserve ? "pre" : "normal";
+
+    if (!preserve) this.consumeWhitespace();
     const children: Expr[] = [];
     while (
       this.stream.hasCharacters &&
@@ -144,7 +154,7 @@ export class HTMLParser {
       if (this.stream.next === "{") {
         const expr = this.options.onUnescapedCurlyBrace(this.stream);
         if (expr) children.push(unwrapInlineExpr(expr));
-        this.consumeWhitespace();
+        if (!preserve) this.consumeWhitespace();
         continue;
       }
 
@@ -159,7 +169,7 @@ export class HTMLParser {
         }
       }
 
-      this.consumeWhitespace();
+      if (!preserve) this.consumeWhitespace();
     }
 
     if (this.stream.hasCharacters && this.stream.next === `<`) {
@@ -178,7 +188,11 @@ export class HTMLParser {
       }
     }
 
-    return arrayLiteral(children);
+    const result = arrayLiteral(children);
+
+    // Restore mode on exiting children
+    this.whitespaceMode = prevMode;
+    return result;
   }
 
   private parseText(): Expr {
@@ -188,8 +202,8 @@ export class HTMLParser {
     let text = "";
     while (this.stream.hasCharacters && this.stream.next !== "<") {
       if (this.stream.next === "{") {
-        const trimmed = text.trim();
-        if (trimmed) node.push(makeString(trimmed));
+        const normalized = this.normalizeText(text);
+        if (normalized) node.push(makeString(normalized));
         text = "";
         const expr = this.options.onUnescapedCurlyBrace(this.stream);
         if (expr) node.push(unwrapInlineExpr(expr));
@@ -199,8 +213,8 @@ export class HTMLParser {
       text += this.stream.consumeChar();
     }
 
-    const trimmed = text.trim();
-    if (trimmed) node.push(makeString(trimmed));
+    const normalized = this.normalizeText(text);
+    if (normalized) node.push(makeString(normalized));
     node.location.endColumn = this.stream.column;
     node.location.endIndex = this.stream.position;
     return node;
@@ -210,6 +224,20 @@ export class HTMLParser {
     while (/\s/.test(this.stream.next)) {
       this.stream.consumeChar();
     }
+  }
+
+  // HTML whitespace handling
+  // - normal: collapse all consecutive whitespace (including newlines, tabs)
+  //           into a single space, preserving leading/trailing spaces when
+  //           they exist in the original sequence.
+  // - pre:    preserve text exactly as written
+  private normalizeText(text: string): string {
+    if (!text) return "";
+    if (this.whitespaceMode === "pre") return text;
+    // Collapse any run of whitespace to a single space
+    const collapsed = text.replace(/\s+/g, " ");
+    // Keep as-is (including leading/trailing space) but drop if empty
+    return collapsed.length > 0 ? collapsed : "";
   }
 }
 

@@ -28,7 +28,8 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
   // Tie-break using contextual expected return type if available. Prefer the
   // candidate whose return type exactly matches the expected branch (by
   // nominal head) when the expected type is a union alias like MsgPack.
-  const expected = call.getAttribute && (call.getAttribute("expectedType") as any);
+  const expected =
+    call.getAttribute && (call.getAttribute("expectedType") as any);
   if (expected) {
     const headKeyFromType = (t: any): string | undefined => {
       if (!t) return undefined;
@@ -63,8 +64,29 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
         typesAreEqual(c.returnType, expectedBranch)
       );
       if (exact.length === 1) return exact[0];
+
+      // Fallback: prefer the single candidate whose return type is compatible
+      // with the expected branch (e.g., Array<Map<MsgPack>> compatible with
+      // Array<MsgPack>) when it uniquely matches.
+      const compat = candidates.filter((c) =>
+        typesAreCompatible(c.returnType, expectedBranch)
+      );
+      if (compat.length === 1) return compat[0];
     }
   }
+
+  // Heuristic: when multiple specialized instances remain and they differ
+  // only by whether the return type still references a generic placeholder
+  // (e.g., Array<O> vs Array<MsgPack>), prefer the one with a concrete
+  // (non-placeholder) return type.
+  const concreteReturn = candidates.filter((c) => {
+    const ret = formatTypeName(c.returnType);
+    const applied = (c.appliedTypeArgs ?? []).map((a) => formatTypeName(a));
+    // If any applied type alias name remains verbatim in the return type, treat it as genericy
+    // TODO: There has got to be a better way to do this. Maybe we mark identifiers as generic type params or something in the attribute
+    return !applied.some((name) => ret.includes(`<${name}>`) || ret === name);
+  });
+  if (concreteReturn.length === 1) return concreteReturn[0];
 
   const argTypes = call.args
     .toArray()
@@ -104,7 +126,9 @@ const getCandidates = (call: Call): Fn[] => {
       .filter((fn) => fn.name.is(call.fnName.value))
       // When inside an impl body, its methods are already in lexical scope via
       // pre-registration. Avoid duplicate candidates from the same impl.
-      .filter((fn) => (isInsideImpl ? fn.parentImpl !== call.parentImpl : true));
+      .filter((fn) =>
+        isInsideImpl ? fn.parentImpl !== call.parentImpl : true
+      );
     if (implFns && implFns.length && !isObjectArgForm) {
       // Prefer receiver methods in method-call position. When arg1 is an
       // object type and we are not using object-arg form, restrict candidates
@@ -183,9 +207,7 @@ const parametersMatch = (candidate: Fn, call: Call) =>
   objectArgSuppliesLabeledParams(candidate, call);
 
 const paramsDirectlyMatch = (candidate: Fn, call: Call) =>
-  candidate.parameters.every((p, i) =>
-    argumentMatchesParam(call, p, i)
-  );
+  candidate.parameters.every((p, i) => argumentMatchesParam(call, p, i));
 
 const argumentMatchesParam = (
   call: Call,
@@ -196,7 +218,10 @@ const argumentMatchesParam = (
   if (!arg) return false;
 
   const val = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
-  if (val?.isClosure() && val.parameters.some((cp) => !cp.type && !cp.typeExpr)) {
+  if (
+    val?.isClosure() &&
+    val.parameters.some((cp) => !cp.type && !cp.typeExpr)
+  ) {
     const paramType = param.type;
     if (!paramType?.isFnType()) return false;
     val.parameters.forEach((cp, j) => {
@@ -235,14 +260,14 @@ const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
   }
 
   const objType = getExprType(objArg);
-  const structType =
-    objType?.isObjectType()
-      ? objType
-      : objType?.isIntersectionType()
-      ? objType.structuralType
-      : undefined;
+  const structType = objType?.isObjectType()
+    ? objType
+    : objType?.isIntersectionType()
+    ? objType.structuralType
+    : undefined;
   if (!structType) return false;
-  if (!labeledParams.every((p) => structType.hasField(p.label!.value))) return false;
+  if (!labeledParams.every((p) => structType.hasField(p.label!.value)))
+    return false;
   return labeledParams.every((p) => {
     const field = structType.getField(p.label!.value);
     return field ? typesAreCompatible(field.type, p.type!) : false;

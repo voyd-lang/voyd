@@ -161,18 +161,18 @@ async function main() {
     debugger;
   }
 
-  if (opts.pause) {
-    console.log(
-      "Attach your debugger (e.g., chrome://inspect), then press Enter to start..."
-    );
-    await new Promise<void>((res) => {
-      process.stdin.setEncoding("utf8");
-      process.stdin.once("data", () => {
-        console.log("Starting");
-        return res();
-      });
-    });
-  }
+  // if (opts.pause) {
+  //   console.log(
+  //     "Attach your debugger (e.g., chrome://inspect), then press Enter to start..."
+  //   );
+  //   await new Promise<void>((res) => {
+  //     process.stdin.setEncoding("utf8");
+  //     process.stdin.once("data", () => {
+  //       console.log("Starting");
+  //       return res();
+  //     });
+  //   });
+  // }
 
   const runAndReport = async () => {
     const times = runBenchmark(opts.iterations, opts.warmup);

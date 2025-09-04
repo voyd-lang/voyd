@@ -249,12 +249,6 @@ export const resolveArrayLiteral = (
           getArrayElemType(expectedElemType) ?? expectedElemType;
         return resolveArrayLiteral(elem, childExpected);
       }
-      // DEBUG: trace array element expected propagation
-      if (process.env.VOYD_DEBUG?.includes("tuple-prop")) {
-        console.log(
-          `resolveArrayLiteral: expected elemType ${expectedElemType.id}`
-        );
-      }
       return resolveWithExpected(elem, expectedElemType);
     }
     return resolveEntities(elem);

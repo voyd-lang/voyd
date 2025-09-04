@@ -28,7 +28,7 @@ exports[`HTML inline expressions unwrap identifiers > {item} is not wrapped as a
       "new_string",
       [
         "object",
-        "ObjectLiteral-143",
+        "ObjectLiteral-144",
         [
           [
             "from",
@@ -36,6 +36,7 @@ exports[`HTML inline expressions unwrap identifiers > {item} is not wrapped as a
               "FixedArray",
               104,
               105,
+              32,
             ],
           ],
         ],
