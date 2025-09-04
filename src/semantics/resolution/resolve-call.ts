@@ -71,6 +71,7 @@ const cloneParams = (params: Parameter[]): Parameter[] =>
   params.map((p) => {
     const cloned = p.clone();
     cloned.type = p.type;
+    cloned.isOptional = p.isOptional;
     return cloned;
   });
 
