@@ -25,6 +25,27 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
 
   if (candidates.length === 1) return candidates[0];
 
+  // If the call supplies explicit type arguments, first restrict to candidates
+  // whose applied type arguments exactly match. This avoids ambiguity between
+  // a base generic and its specialized instances.
+  if (call.typeArgs) {
+    const appliedExact = candidates.filter((cand) =>
+      cand.appliedTypeArgs?.every((t, i) => {
+        const arg = call.typeArgs!.at(i);
+        if (arg) resolveTypeExpr(arg);
+        const argType = getExprType(arg);
+        const appliedType = getExprType(t);
+        return typesAreEqual(argType, appliedType);
+      })
+    );
+    if (appliedExact.length === 1) return appliedExact[0];
+    if (appliedExact.length > 1) {
+      // Prefer specialized instances over base generics
+      const specialized = appliedExact.filter((c) => !!c.appliedTypeArgs);
+      if (specialized.length === 1) return specialized[0];
+    }
+  }
+
   // Tie-break using contextual expected return type if available. Prefer the
   // candidate whose return type exactly matches the expected branch (by
   // nominal head) when the expected type is a union alias like MsgPack.
@@ -122,6 +143,24 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
     return !applied.some((name) => ret.includes(`<${name}>`) || ret === name);
   });
   if (concreteReturn.length === 1) return concreteReturn[0];
+
+  // Final fallback: prefer the candidate with the most specific formatted
+  // return type, which biases toward concretely-applied generics like
+  // Array<MsgPack> over Array<T> when other tie-breakers remain inconclusive.
+  const bySpecificity = [...candidates].sort(
+    (a, b) =>
+      formatTypeName(a.returnType).length - formatTypeName(b.returnType).length
+  );
+  const mostSpecific = bySpecificity.at(-1);
+  const next = bySpecificity.at(-2);
+  if (
+    mostSpecific &&
+    (!next ||
+      formatTypeName(mostSpecific.returnType).length >
+        formatTypeName(next.returnType).length)
+  ) {
+    return mostSpecific;
+  }
 
   const argTypes = call.args
     .toArray()
