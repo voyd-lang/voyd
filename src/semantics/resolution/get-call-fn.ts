@@ -65,13 +65,46 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
       );
       if (exact.length === 1) return exact[0];
 
-      // Fallback: prefer the single candidate whose return type is compatible
-      // with the expected branch (e.g., Array<Map<MsgPack>> compatible with
-      // Array<MsgPack>) when it uniquely matches.
-      const compat = candidates.filter((c) =>
-        typesAreCompatible(c.returnType, expectedBranch)
-      );
-      if (compat.length === 1) return compat[0];
+      // Rank candidates by closeness to expected branch.
+      const rank = (ret: any): number => {
+        if (typesAreEqual(ret, expectedBranch)) return 3;
+        if (typesAreCompatible(ret, expectedBranch)) {
+          // When both are Array<...> or the same nominal head, prefer the one
+          // whose applied type arguments exactly match the expected branch's
+          // applied type arguments.
+          const head = headKeyFromType(ret);
+          const expHead = headKeyFromType(expectedBranch);
+          if (
+            head &&
+            expHead &&
+            head === expHead &&
+            ret.isObjectType?.() &&
+            expectedBranch.isObjectType?.()
+          ) {
+            const ra = (ret.appliedTypeArgs ?? []).map((a: any) => a.type ?? a);
+            const ea = (expectedBranch.appliedTypeArgs ?? []).map(
+              (a: any) => a.type ?? a
+            );
+            if (
+              ra.length === ea.length &&
+              ra.every((t: any, i: number) => typesAreEqual(t, ea[i]))
+            )
+              return 2;
+          }
+          return 1;
+        }
+        return 0;
+      };
+      let best: Fn | undefined;
+      let bestScore = -1;
+      for (const c of candidates) {
+        const score = rank(c.returnType);
+        if (score > bestScore) {
+          best = c;
+          bestScore = score;
+        }
+      }
+      if (best && bestScore > 0) return best;
     }
   }
 
@@ -87,6 +120,23 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
     return !applied.some((name) => ret.includes(`<${name}>`) || ret === name);
   });
   if (concreteReturn.length === 1) return concreteReturn[0];
+
+  // Fallback heuristic: prefer the candidate with the most specific (longest)
+  // formatted return type. This biases toward concretely-applied generics like
+  // Array<MsgPack> over Array<O> when other tie-breakers fail.
+  const bySpecificity = [...candidates].sort((a, b) =>
+    formatTypeName(a.returnType).length - formatTypeName(b.returnType).length
+  );
+  const mostSpecific = bySpecificity.at(-1);
+  const next = bySpecificity.at(-2);
+  if (
+    mostSpecific &&
+    (!next ||
+      formatTypeName(mostSpecific.returnType).length >
+        formatTypeName(next.returnType).length)
+  ) {
+    return mostSpecific;
+  }
 
   const argTypes = call.args
     .toArray()

@@ -111,6 +111,17 @@ pub fn component10() -> Map<MsgPack>
 
 pub fn test10() -> i32
   msg_pack::encode(component10())
+
+// ---- msg-pack map with preceding HTML element ----
+pub fn component11() -> Map<MsgPack>
+  let a = ["Alex", "Abby"]
+  <div>
+    <div><p>hi</p></div>
+    {a.map(item => <span style="boop">{item}</span>)}
+  </div>
+
+pub fn test11() -> i32
+  msg_pack::encode(component11())
 `;
 
 describe("E2E Inference (kitchen sink)", () => {
@@ -165,6 +176,24 @@ describe("E2E Inference (kitchen sink)", () => {
         [
           { name: "p", attributes: {}, children: ["hi ", "Alex"] },
           { name: "p", attributes: {}, children: ["hi ", "Abby"] },
+        ],
+      ],
+    });
+  });
+
+  test("msg-pack array.map works when preceded by an HTML element", (t) => {
+    const fn = getWasmFn("test11", instance);
+    assert(fn, "test11 exists");
+    const index = fn();
+    const decoded = decode(memory.buffer.slice(0, index));
+    t.expect(decoded).toEqual({
+      name: "div",
+      attributes: {},
+      children: [
+        { name: "div", attributes: {}, children: [{ name: "p", attributes: {}, children: ["hi"] }] },
+        [
+          { name: "span", attributes: { style: "boop" }, children: ["Alex"] },
+          { name: "span", attributes: { style: "boop" }, children: ["Abby"] },
         ],
       ],
     });
