@@ -9,6 +9,7 @@ import {
   Variable,
   Bool,
   ObjectLiteral,
+  Parameter,
 } from "../../syntax-objects/index.js";
 import { SourceLocation } from "../../syntax-objects/syntax.js";
 import { Match } from "../../syntax-objects/match.js";
@@ -65,6 +66,13 @@ const resolveMemberAccessDirect = (call: Call): Call => {
 const preprocessArgs = (call: Call): void => {
   call.args = call.args.map(resolveEntities);
 };
+
+const cloneParams = (params: Parameter[]): Parameter[] =>
+  params.map((p) => {
+    const cloned = p.clone();
+    cloned.type = p.type;
+    return cloned;
+  });
 
 // Normalize any expression to a block expression
 const toBlock = (e: Expr): Block =>
@@ -907,14 +915,42 @@ export const resolveBinaryen = (call: Call) => {
 const resolveClosureCall = (call: Call): Call => {
   call.args = call.args.map(resolveEntities);
   const closure = call.argAt(0);
-  if (closure?.isClosure()) {
+  if (!closure) return call;
+
+  const closureType = closure.isClosure()
+    ? closure.getType()
+    : getExprType(closure);
+  const params = closure.isClosure()
+    ? closure.parameters
+    : closureType?.isFnType()
+    ? closureType.parameters
+    : [];
+
+  if (params.length) {
+    const tmpFn = new Fn({
+      ...call.metadata,
+      name: Identifier.from("closure"),
+      parameters: cloneParams(params),
+    });
+    const tmpArgs = new List({ value: call.args.toArray().slice(1) });
+    const tmpCall = new Call({
+      ...call.metadata,
+      fnName: call.fnName.clone(),
+      fn: tmpFn,
+      args: tmpArgs,
+    });
+    normalizeArgsForResolvedFn(tmpCall);
+    call.args = new List({ value: [closure, ...tmpCall.args.toArray()] });
+    call.args.parent = call;
+    call.fnName.parent = call;
+  }
+
+  if (closure.isClosure()) {
     call.type = closure.getReturnType();
     return call;
   }
-  const closureType = getExprType(closure);
-  if (closureType?.isFnType()) {
-    call.type = closureType.returnType;
-  }
+
+  if (closureType?.isFnType()) call.type = closureType.returnType;
   return call;
 };
 
@@ -962,7 +998,25 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
 
   // Bind function and normalize args
   resolveCallFn(call, candidateFns);
-  normalizeArgsForResolvedFn(call);
+  if (!call.fn && calleeType?.isFnType()) {
+    const tmpFn = new Fn({
+      ...call.metadata,
+      name: Identifier.from("closure"),
+      parameters: cloneParams(calleeType.parameters),
+    });
+    const tmpCall = new Call({
+      ...call.metadata,
+      fnName: call.fnName.clone(),
+      fn: tmpFn,
+      args: call.args,
+    });
+    normalizeArgsForResolvedFn(tmpCall);
+    call.args = tmpCall.args;
+    call.args.parent = call;
+    call.fnName.parent = call;
+  } else {
+    normalizeArgsForResolvedFn(call);
+  }
 
   // Compute resulting type
   call.type = computeCallReturnType(call, calleeType);
