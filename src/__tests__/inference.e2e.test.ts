@@ -111,6 +111,28 @@ pub fn component10() -> Map<MsgPack>
 
 pub fn test10() -> i32
   msg_pack::encode(component10())
+
+// ---- msg-pack map with preceding HTML element ----
+pub fn component11() -> Map<MsgPack>
+  <div>
+    <div>
+      <div></div>
+      <h2>Voyd + VSX</h2>
+    </div>
+
+    <p>
+      Build reactive UIs with clean, minimal syntax.
+    </p>
+
+    <div>
+      {["No virtual DOM", "WASM speed", "Composable", "Tiny footprint"].map(tag =>
+        <span>{tag}</span>
+      )}
+    </div>
+  </div>
+
+pub fn test11() -> i32
+  msg_pack::encode(component11())
 `;
 
 describe("E2E Inference (kitchen sink)", () => {
@@ -166,6 +188,68 @@ describe("E2E Inference (kitchen sink)", () => {
           { name: "p", attributes: {}, children: ["hi ", "Alex"] },
           { name: "p", attributes: {}, children: ["hi ", "Abby"] },
         ],
+      ],
+    });
+  });
+
+  test("msg-pack array.map works when preceded by an HTML element", (t) => {
+    const fn = getWasmFn("test11", instance);
+    assert(fn, "test11 exists");
+    const index = fn();
+    const decoded = decode(memory.buffer.slice(0, index));
+    t.expect(decoded).toEqual({
+      attributes: {},
+      name: "div",
+      children: [
+        {
+          attributes: {},
+          name: "div",
+          children: [
+            {
+              attributes: {},
+              name: "div",
+              children: [],
+            },
+            {
+              attributes: {},
+              name: "h2",
+              children: ["Voyd + VSX"],
+            },
+          ],
+        },
+        {
+          attributes: {},
+          name: "p",
+          children: ["Build reactive UIs with clean, minimal syntax. "],
+        },
+        {
+          attributes: {},
+          name: "div",
+          children: [
+            [
+              {
+                attributes: {},
+                name: "span",
+                children: ["No virtual DOM"],
+              },
+              {
+                attributes: {},
+                name: "span",
+                children: ["WASM speed"],
+              },
+              {
+                attributes: {},
+                name: "span",
+                children: ["Composable"],
+              },
+              {
+                attributes: {},
+                name: "span",
+                children: ["Tiny footprint"],
+              },
+            ],
+          ],
+        },
       ],
     });
   });

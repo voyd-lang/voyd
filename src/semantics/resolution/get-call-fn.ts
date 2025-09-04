@@ -1,4 +1,4 @@
-import { Call, Expr, Fn, Parameter } from "../../syntax-objects/index.js";
+import { Call, Expr, Fn, Parameter, Type } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { formatFnSignature } from "../fn-signature.js";
 import { formatTypeName } from "../type-format.js";
@@ -25,24 +25,50 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
 
   if (candidates.length === 1) return candidates[0];
 
+  // If the call supplies explicit type arguments, first restrict to candidates
+  // whose applied type arguments exactly match. This avoids ambiguity between
+  // a base generic and its specialized instances.
+  if (call.typeArgs) {
+    const appliedExact = candidates.filter((cand) =>
+      cand.appliedTypeArgs?.every((t, i) => {
+        const arg = call.typeArgs!.at(i);
+        if (arg) resolveTypeExpr(arg);
+        const argType = getExprType(arg);
+        const appliedType = getExprType(t);
+        return typesAreEqual(argType, appliedType);
+      })
+    );
+    if (appliedExact.length === 1) return appliedExact[0];
+    if (appliedExact.length > 1) {
+      // Prefer specialized instances over base generics
+      const specialized = appliedExact.filter((c) => !!c.appliedTypeArgs);
+      if (specialized.length === 1) return specialized[0];
+    }
+  }
+
+  const unwrapAlias = (t: Type): Type =>
+    t.isTypeAlias?.() ? t.type ?? t : t;
+
   // Tie-break using contextual expected return type if available. Prefer the
   // candidate whose return type exactly matches the expected branch (by
   // nominal head) when the expected type is a union alias like MsgPack.
   const expected =
-    call.getAttribute && (call.getAttribute("expectedType") as any);
+    call.getAttribute &&
+    (call.getAttribute("expectedType") as Type | undefined);
   if (expected) {
-    const headKeyFromType = (t: any): string | undefined => {
-      if (!t) return undefined;
-      if (t.isObjectType && t.isObjectType()) {
-        return t.genericParent ? t.genericParent.name.value : t.name.value;
+    const headKeyFromType = (t: Type | undefined): string | undefined => {
+      const u = t ? unwrapAlias(t) : undefined;
+      if (!u) return undefined;
+      if (u.isObjectType && u.isObjectType()) {
+        return u.genericParent ? u.genericParent.name.value : u.name.value;
       }
-      if (t.isPrimitiveType && t.isPrimitiveType()) return t.name.value;
-      if (t.isTraitType && t.isTraitType()) return t.name.value;
-      if (t.isFixedArrayType && t.isFixedArrayType()) return "FixedArray";
-      if (t.isIntersectionType && t.isIntersectionType())
-        return headKeyFromType(t.nominalType ?? t.structuralType);
-      if (t.isTypeAlias && t.isTypeAlias()) return headKeyFromType(t.type);
-      return t.name?.value;
+      if (u.isPrimitiveType && u.isPrimitiveType()) return u.name.value;
+      if (u.isTraitType && u.isTraitType()) return u.name.value;
+      if (u.isFixedArrayType && u.isFixedArrayType()) return "FixedArray";
+      if (u.isIntersectionType && u.isIntersectionType())
+        return headKeyFromType(u.nominalType ?? u.structuralType);
+      if (u.isTypeAlias && u.isTypeAlias()) return headKeyFromType(u.type);
+      return u.name?.value;
     };
     const expectedBranch = (() => {
       if (expected.isUnionType && expected.isUnionType()) {
@@ -54,7 +80,7 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
         );
         const single = heads.size === 1 ? [...heads][0] : undefined;
         return single
-          ? expected.types.find((t: any) => headKeyFromType(t) === single)
+          ? expected.types.find((t) => headKeyFromType(t) === single)
           : undefined;
       }
       return expected;
@@ -65,13 +91,43 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
       );
       if (exact.length === 1) return exact[0];
 
-      // Fallback: prefer the single candidate whose return type is compatible
-      // with the expected branch (e.g., Array<Map<MsgPack>> compatible with
-      // Array<MsgPack>) when it uniquely matches.
-      const compat = candidates.filter((c) =>
-        typesAreCompatible(c.returnType, expectedBranch)
-      );
-      if (compat.length === 1) return compat[0];
+      // Rank candidates by closeness to expected branch.
+      const rank = (ret: Type | undefined): number => {
+        if (typesAreEqual(ret, expectedBranch)) return 3;
+        if (ret && typesAreCompatible(ret, expectedBranch)) {
+          // When both are Array<...> or the same nominal head, prefer the one
+          // whose applied type arguments exactly match the expected branch's
+          // applied type arguments.
+          const head = headKeyFromType(ret);
+          const expHead = headKeyFromType(expectedBranch);
+          if (
+            head &&
+            expHead &&
+            head === expHead &&
+            ret.isObjectType?.() &&
+            expectedBranch.isObjectType?.()
+          ) {
+            const ra = (ret.appliedTypeArgs ?? []).map(unwrapAlias);
+            const ea = (expectedBranch.appliedTypeArgs ?? []).map(unwrapAlias);
+            if (ra.length === ea.length && ra.every((t, i) => typesAreEqual(t, ea[i])))
+              return 2;
+          }
+          return 1;
+        }
+        return 0;
+      };
+      let best: Fn[] = [];
+      let bestScore = -1;
+      for (const c of candidates) {
+        const score = rank(c.returnType);
+        if (score > bestScore) {
+          best = [c];
+          bestScore = score;
+        } else if (score === bestScore) {
+          best.push(c);
+        }
+      }
+      if (bestScore > 0 && best.length === 1) return best[0];
     }
   }
 
@@ -87,6 +143,34 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
     return !applied.some((name) => ret.includes(`<${name}>`) || ret === name);
   });
   if (concreteReturn.length === 1) return concreteReturn[0];
+
+  // Prefer a candidate whose return type union covers all other return types.
+  const toBranches = (t: Type): Type[] => {
+    const u = unwrapAlias(t);
+    return u.isUnionType?.() ? u.types : [u];
+  };
+  const covers = (a?: Type, b?: Type): boolean => {
+    if (!a || !b) return false;
+    const aBranches = toBranches(a);
+    const bBranches = toBranches(b);
+    return bBranches.every((bt) =>
+      aBranches.some((at) => typesAreEqual(at, bt))
+    );
+  };
+  const covering = candidates.filter((c) =>
+    candidates.every((o) => c === o || covers(c.returnType, o.returnType))
+  );
+  if (covering.length === 1) return covering[0];
+
+  // Prefer a candidate whose parameter type unions cover all other candidates'.
+  const argCovering = candidates.filter((c) =>
+    candidates.every(
+      (o) =>
+        c === o ||
+        c.parameters.every((p, i) => covers(p.type, o.parameters[i]?.type))
+    )
+  );
+  if (argCovering.length === 1) return argCovering[0];
 
   const argTypes = call.args
     .toArray()
