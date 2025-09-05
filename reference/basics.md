@@ -36,7 +36,7 @@ let address = "
 123 Main St
 Anytown, USA
 "
-// String interpolation is supported by double quotes and the ${} syntax
+// String interpolation will also be supported by double quotes and the ${} syntax (not yet implemented)
 let greeting = "Hello, ${name}"
 ```
 
@@ -103,24 +103,11 @@ else:
 while x > 5 do:
   // Do something
 
-// For loops are planned but not yet implemented
-
-// Blocks*
-let y = ${
-  let x = 5
-
-  // The result of the block is the result of the last statement, y will be bound to 8
-  x + 3
-}
-
-// Blocks are implicitly defined by 2 space indentation, so this is also valid.
+// Blocks are defined by 2 space indentation
 let y =
   let x = 2 + 3
   x + 3 // y will be bound to 8
 ```
-
-* The ${} syntax is useful to restore indentation sensitivity in non-indentation sensitive contexts, such as in function arguments, string literals, object literals etc. See the syntax reference for more details.
-
 # Expressions
 
 Expressions are statements that return a value. They can be used in a variety of contexts, such as variable assignment, function arguments, and more.

@@ -230,7 +230,6 @@ render(component, container, { instance })
 > Status: Partially implemented.
 > - Tail call optimization fully implemented.
 > - While loops and break partially implemented. Do not yet support returning a value.
-> - For loops not yet implemented.
 
 While loops are the most basic looping construct
 
@@ -238,8 +237,6 @@ While loops are the most basic looping construct
 while condition do:
   do_work()
 ```
-
-For loops are planned but not yet implemented.
 
 Voyd is also tail call optimized:
 
