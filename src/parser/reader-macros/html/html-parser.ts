@@ -51,7 +51,8 @@ export class HTMLParser {
     if (!startElement && this.stream.consumeChar() !== "<") return null;
 
     const tagName = startElement ?? this.parseTagName();
-    const isComponent = /[A-Z]/.test(tagName[0] ?? "");
+    const lastSegment = tagName.split("::").pop() ?? "";
+    const isComponent = /^[A-Z]/.test(lastSegment);
     // Parse attributes/props before closing the tag
     const propsOrAttrs = isComponent
       ? this.parseComponentPropsObject()
@@ -68,6 +69,7 @@ export class HTMLParser {
         const children = this.parseChildren(tagName);
         if (children.sliceAsArray(1).length > 0) {
           props.fields.push({ name: "children", initializer: children });
+          reparent(children, props);
         }
       }
 
@@ -333,4 +335,15 @@ const buildModulePathLeft = (segments: string[]) => {
     left = new List({ value: ["::", left, Identifier.from(segments[i]!)] });
   }
   return left;
+};
+
+const reparent = (expr: Expr, parent: Expr): void => {
+  expr.parent = parent;
+  if (expr.isList()) {
+    expr.children.forEach((c) => reparent(c, expr));
+    return;
+  }
+  if (expr.isObjectLiteral()) {
+    expr.fields.forEach(({ initializer }) => reparent(initializer, expr));
+  }
 };

@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { parse } from "../parser/parser.js";
+import { List, Call, ObjectLiteral } from "../syntax-objects/index.js";
 import { vsxComponentsVoyd } from "./fixtures/vsx.js";
 
 describe("HTML parser supports capitalized component calls", () => {
@@ -37,5 +38,17 @@ describe("HTML parser supports capitalized component calls", () => {
     const fieldNames = new Set(fields.map((f) => (Array.isArray(f) ? f[0] : "")));
     expect(fieldNames.has("name")).toBe(true);
     expect(fieldNames.has("children")).toBe(true);
+  });
+
+  test("nested component children maintain parent chain", () => {
+    const ast = parse("pub fn App() <Card><Button /></Card>");
+    const fnList = ast.at(1) as List;
+    const cardCall = fnList.at(3) as Call;
+    const props = cardCall.args.at(0) as ObjectLiteral;
+    const children = props.fields.find((f) => f.name === "children")
+      ?.initializer as List;
+    const buttonCall = children.at(1);
+    expect(buttonCall?.parent).toBe(children);
+    expect(children.parent).toBe(props);
   });
 });
