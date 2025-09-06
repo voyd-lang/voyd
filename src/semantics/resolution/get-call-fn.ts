@@ -151,8 +151,26 @@ const toBranches = (t: Type): Type[] => {
   return u.isUnionType?.() ? u.types : [u];
 };
 
+// Determine whether type `a` covers type `b`:
+// - For unions: every branch of `b` appears in `a`.
+// - For function types: parameters are equal and `a`'s return type covers `b`'s.
+// - Otherwise: exact equality.
 const covers = (a?: Type, b?: Type): boolean => {
   if (!a || !b) return false;
+
+  // Handle function types specially: identical parameters and covering returns
+  if ((a as any).isFnType?.() && (b as any).isFnType?.()) {
+    const fa: any = a as any;
+    const fb: any = b as any;
+    if (fa.parameters.length !== fb.parameters.length) return false;
+    for (let i = 0; i < fa.parameters.length; i++) {
+      const pa = fa.parameters[i]?.type;
+      const pb = fb.parameters[i]?.type;
+      if (!typesAreEqual(pa, pb)) return false;
+    }
+    return covers(fa.returnType, fb.returnType);
+  }
+
   const aBranches = toBranches(a);
   const bBranches = toBranches(b);
   return bBranches.every((bt) => aBranches.some((at) => typesAreEqual(at, bt)));
@@ -411,4 +429,3 @@ const isPrimitiveFnCall = (call: Call): boolean => {
     name === "::"
   );
 };
-
