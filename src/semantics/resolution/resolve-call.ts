@@ -870,6 +870,14 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
   const thenBlock = toBlock(thenExpr);
   thenBlock.body = [unwrap, ...thenBlock.body];
 
+  // If an else branch exists, try to resolve it against the expected type
+  // from the Some<T>.value field so empty literals (e.g., []) can be typed.
+  const expectedThenType =
+    someType && (someType as any).isObjectType?.() ? (someType as any).getField("value")?.type : undefined;
+  const resolvedElseExpr = elseExpr && expectedThenType
+    ? resolveWithExpected(elseExpr, expectedThenType)
+    : elseExpr;
+
   const match = new Match({
     ...call.metadata,
     operand,
@@ -879,8 +887,8 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
         expr: thenBlock,
       },
     ],
-    defaultCase: elseExpr
-      ? { expr: toBlock(elseExpr) }
+    defaultCase: resolvedElseExpr
+      ? { expr: toBlock(resolvedElseExpr) }
       : {
           expr: toBlock(
             new Call({
