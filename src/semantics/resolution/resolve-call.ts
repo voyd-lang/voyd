@@ -222,6 +222,9 @@ const resolveArrayArgs = (call: Call) => {
   if (!fn) {
     // Ensure candidate signatures are ready
     candidates.forEach((c) => resolveFnSignature(c));
+  } else {
+    // Ensure resolved function's parameter types are available
+    resolveFnSignature(fn);
   }
   call.args.each((arg: Expr, index: number) => {
     const param = fn?.parameters[index];

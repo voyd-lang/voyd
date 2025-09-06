@@ -70,6 +70,24 @@ export class HTMLParser {
           props.fields.push({ name: "children", initializer: children });
         }
       }
+
+      // Namespaced component: e.g., UI::Card or UI::Elements::Card
+      if (tagName.includes("::")) {
+        const parts = tagName.split("::").filter(Boolean);
+        const last = parts.pop()!;
+        const left = buildModulePathLeft(parts);
+        const inner = new Call({
+          location: this.stream.currentSourceLocation(),
+          fnName: Identifier.from(last),
+          args: new List({ value: [props] }),
+        });
+        return new Call({
+          location: this.stream.currentSourceLocation(),
+          fnName: Identifier.from("::"),
+          args: new List({ value: [left, inner] }),
+        });
+      }
+
       return new Call({
         location: this.stream.currentSourceLocation(),
         fnName: Identifier.from(tagName),
@@ -92,7 +110,7 @@ export class HTMLParser {
 
   private parseTagName(): string {
     let tagName = "";
-    while (/[a-zA-Z0-9]/.test(this.stream.next)) {
+    while (/[a-zA-Z0-9:]/.test(this.stream.next)) {
       tagName += this.stream.consumeChar();
     }
     return tagName;
@@ -305,4 +323,14 @@ const unwrapInlineExpr = (expr: Expr): Expr => {
     }
   }
   return expr;
+};
+
+// Build nested left side for a module path (e.g., ["::", ["::", A, B], C])
+const buildModulePathLeft = (segments: string[]) => {
+  if (segments.length === 0) return Identifier.from("");
+  let left: Expr = Identifier.from(segments[0]!);
+  for (let i = 1; i < segments.length; i++) {
+    left = new List({ value: ["::", left, Identifier.from(segments[i]!)] });
+  }
+  return left;
 };
