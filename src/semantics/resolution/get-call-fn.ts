@@ -378,10 +378,14 @@ const argumentMatchesParam = (
       const expected = paramType.parameters[j]?.type;
       if (!cp.type && expected) cp.type = expected;
     });
-    // Do NOT resolve the closure body here; just assume the contextual
-    // function type’s return type so compatibility can be checked without
-    // forcing body resolution (which may depend on the chosen overload).
-    cloned.returnType = paramType.returnType;
+    // Resolve the cloned closure so compatibility uses its real return type
+    // without mutating the original argument. If resolution fails (e.g. due to
+    // complex inference), fall back to the contextual return type.
+    try {
+      resolveClosure(cloned);
+    } catch {
+      cloned.returnType = paramType.returnType;
+    }
     probeVal = cloned;
   }
 
