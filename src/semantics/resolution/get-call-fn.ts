@@ -7,6 +7,7 @@ import { typesAreEqual } from "./types-are-equal.js";
 import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveEntities } from "./resolve-entities.js";
+import { resolveClosure } from "./resolve-closure.js";
 
 export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
   if (call.fn?.isFn() && call.fn.parentTrait) return resolveFn(call.fn);
@@ -21,7 +22,8 @@ export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
     selectByExpectedReturnType(call, candidates) ??
     selectByConcreteReturn(candidates) ??
     selectReturnCovering(candidates) ??
-    selectArgCovering(candidates);
+    selectArgCovering(candidates) ??
+    selectUnionMemberTiebreak(candidates);
 
   return result ?? throwAmbiguous(call, candidates);
 };
@@ -115,7 +117,10 @@ const selectByExpectedReturnType = (
       ) {
         const ra = (ret.appliedTypeArgs ?? []).map(unwrapAlias);
         const ea = (expectedBranch.appliedTypeArgs ?? []).map(unwrapAlias);
-        if (ra.length === ea.length && ra.every((t, i) => typesAreEqual(t, ea[i])))
+        if (
+          ra.length === ea.length &&
+          ra.every((t, i) => typesAreEqual(t, ea[i]))
+        )
           return 2;
       }
       return 1;
@@ -185,12 +190,41 @@ const selectReturnCovering = (candidates: Fn[]): Fn | undefined => {
 
 const selectArgCovering = (candidates: Fn[]): Fn | undefined => {
   const argCovering = candidates.filter((c) =>
-    candidates.every((o) =>
-      c === o ||
-      c.parameters.every((p, i) => covers(p.type, o.parameters[i]?.type))
+    candidates.every(
+      (o) =>
+        c === o ||
+        c.parameters.every((p, i) => covers(p.type, o.parameters[i]?.type))
     )
   );
   return argCovering.length === 1 ? argCovering[0] : undefined;
+};
+
+// Targeted tie-breaker: if there are exactly two overloads and they differ by
+// exactly one parameter where one takes a union type that contains the other's
+// type as a member, prefer the union-parameter overload. This preserves
+// previous behavior for cases like Array.push where both String and MsgPack
+// overloads exist and the receiver element type is MsgPack.
+const selectUnionMemberTiebreak = (candidates: Fn[]): Fn | undefined => {
+  if (candidates.length !== 2) return undefined;
+  const [a, b] = candidates;
+  if (a.parameters.length !== b.parameters.length) return undefined;
+  const unionPositions: number[] = [];
+  for (let i = 0; i < a.parameters.length; i++) {
+    const ta = a.parameters[i]?.type;
+    const tb = b.parameters[i]?.type;
+    const ua = ta?.isUnionType?.() ? ta : undefined;
+    const ub = tb?.isUnionType?.() ? tb : undefined;
+    if (!!ua === !!ub) continue;
+    const unionT = (ua ?? ub)!;
+    const memberT = ua ? tb : ta;
+    if (!memberT || !unionT.isUnionType?.()) continue;
+    const includes = unionT.types.some((t) => typesAreEqual(t, memberT));
+    if (includes) unionPositions.push(i);
+  }
+  if (unionPositions.length !== 1) return undefined;
+  const idx = unionPositions[0]!;
+  const isUnionAAtIdx = !!a.parameters[idx]?.type?.isUnionType?.();
+  return isUnionAAtIdx ? a : b;
 };
 
 const throwAmbiguous = (call: Call, candidates: Fn[]): never => {
@@ -235,17 +269,10 @@ const getCandidates = (call: Call): Fn[] => {
       .filter((fn) =>
         isInsideImpl ? fn.parentImpl !== call.parentImpl : true
       );
-    if (implFns && implFns.length && !isObjectArgForm) {
-      // Prefer receiver methods in method-call position. When arg1 is an
-      // object type and we are not using object-arg form, restrict candidates
-      // to only the receiver's methods. This avoids ambiguity with generic
-      // instances from other scopes whose `self` type hasn't been specialized.
-      fns = [...implFns];
-    } else if (implFns && implFns.length) {
-      // In object-arg form (labeled params), don't drop top-level functions;
-      // include both so labeled-arg overloads can match.
-      fns.push(...implFns);
-    }
+    // Include implementation methods, but do not drop top-level functions.
+    // Keeping both preserves prior resolution behavior and avoids missing
+    // module-level overloads that are not receiver methods.
+    if (implFns && implFns.length) fns.push(...implFns);
   }
 
   if (arg1Type?.isTraitType()) {
@@ -335,22 +362,30 @@ const argumentMatchesParam = (
   if (!arg) return false;
 
   const val = arg.isCall() && arg.calls(":") ? arg.argAt(1) : arg;
+
+  // Important: Do not mutate the original call when probing candidates.
+  // Clone and resolve closure arguments in isolation so earlier candidate
+  // checks don't leak inferred parameter types into later ones.
+  let probeVal = val;
   if (
     val?.isClosure() &&
     val.parameters.some((cp) => !cp.type && !cp.typeExpr)
   ) {
     const paramType = param.type;
     if (!paramType?.isFnType()) return false;
-    val.parameters.forEach((cp, j) => {
+    const cloned = val.clone();
+    cloned.parameters.forEach((cp, j) => {
       const expected = paramType.parameters[j]?.type;
       if (!cp.type && expected) cp.type = expected;
     });
-    const resolvedVal = resolveEntities(val);
-    if (arg.isCall() && arg.calls(":")) arg.args.set(1, resolvedVal);
-    else call.args.set(index, resolvedVal);
+    // Do NOT resolve the closure body here; just assume the contextual
+    // function type’s return type so compatibility can be checked without
+    // forcing body resolution (which may depend on the chosen overload).
+    cloned.returnType = paramType.returnType;
+    probeVal = cloned;
   }
 
-  const argType = getExprType(val);
+  const argType = getExprType(probeVal);
   if (!argType) return false;
   const argLabel = getExprLabel(arg);
   const labelsMatch = param.label?.value === argLabel;
