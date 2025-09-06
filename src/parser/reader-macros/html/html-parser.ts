@@ -51,7 +51,8 @@ export class HTMLParser {
     if (!startElement && this.stream.consumeChar() !== "<") return null;
 
     const tagName = startElement ?? this.parseTagName();
-    const isComponent = /[A-Z]/.test(tagName[0] ?? "");
+    const lastSegment = tagName.split("::").pop() ?? "";
+    const isComponent = /^[A-Z]/.test(lastSegment);
     // Parse attributes/props before closing the tag
     const propsOrAttrs = isComponent
       ? this.parseComponentPropsObject()
