@@ -226,3 +226,37 @@ pub fn App()
     );
   });
 });
+
+describe("HTML parser handles built-in tags with internal capitals", () => {
+  test("<foreignObject> remains a built-in element", () => {
+    const text = `
+use std::all
+use std::vsx::create_element
+
+pub fn App()
+  <svg>
+    <foreignObject />
+  </svg>
+`;
+
+    const astJson = parse(text).toJSON();
+    const plain = JSON.parse(JSON.stringify(astJson));
+
+    const calls: unknown[] = [];
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        calls.push(node);
+        node.forEach(walk);
+      } else if (node && typeof node === "object") {
+        Object.values(node as Record<string, unknown>).forEach(walk);
+      }
+    };
+    walk(plain);
+
+    const componentCall = (calls as unknown[][]).find(
+      (c) => c[0] === "foreignObject",
+    );
+
+    expect(componentCall, "No foreignObject component call").toBeUndefined();
+  });
+});
