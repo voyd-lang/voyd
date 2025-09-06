@@ -222,6 +222,9 @@ const resolveArrayArgs = (call: Call) => {
   if (!fn) {
     // Ensure candidate signatures are ready
     candidates.forEach((c) => resolveFnSignature(c));
+  } else {
+    // Ensure resolved function's parameter types are available
+    resolveFnSignature(fn);
   }
   call.args.each((arg: Expr, index: number) => {
     const param = fn?.parameters[index];
@@ -236,15 +239,21 @@ const resolveArrayArgs = (call: Call) => {
 
     const isLabeled = arg.isCall() && arg.calls(":");
     const inner = isLabeled ? arg.argAt(1) : arg;
-    const arrayCall =
-      inner?.isCall() && inner.hasAttribute("arrayLiteral")
-        ? (inner as Call)
-        : undefined;
-    if (!arrayCall) return;
 
-    const arr = (
-      arrayCall.getAttribute("arrayLiteral") as ArrayLiteral
-    ).clone();
+    // Support both early-resolved array arguments (new_array call carrying
+    // the original ArrayLiteral via the 'arrayLiteral' attribute) and raw
+    // ArrayLiteral nodes when preprocessArgs skipped resolution.
+    let originalArr: ArrayLiteral | undefined;
+    if (inner?.isCall() && inner.hasAttribute("arrayLiteral")) {
+      originalArr = (inner as Call).getAttribute(
+        "arrayLiteral"
+      ) as ArrayLiteral;
+    } else if (inner?.isArrayLiteral()) {
+      originalArr = inner as ArrayLiteral;
+    }
+    if (!originalArr) return;
+
+    const arr = originalArr.clone();
     // Only use candidate-derived elemType when the array is empty to avoid
     // masking helpful overload errors on mismatched non-empty arrays.
     const effectiveElemType =
@@ -870,6 +879,17 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
   const thenBlock = toBlock(thenExpr);
   thenBlock.body = [unwrap, ...thenBlock.body];
 
+  // If an else branch exists, try to resolve it against the expected type
+  // from the Some<T>.value field so empty literals (e.g., []) can be typed.
+  const expectedThenType =
+    someType && (someType as any).isObjectType?.()
+      ? (someType as any).getField("value")?.type
+      : undefined;
+  const resolvedElseExpr =
+    elseExpr && expectedThenType
+      ? resolveWithExpected(elseExpr, expectedThenType)
+      : elseExpr;
+
   const match = new Match({
     ...call.metadata,
     operand,
@@ -879,8 +899,8 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
         expr: thenBlock,
       },
     ],
-    defaultCase: elseExpr
-      ? { expr: toBlock(elseExpr) }
+    defaultCase: resolvedElseExpr
+      ? { expr: toBlock(resolvedElseExpr) }
       : {
           expr: toBlock(
             new Call({
