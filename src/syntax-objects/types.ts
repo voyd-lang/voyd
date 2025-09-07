@@ -287,7 +287,14 @@ export class ObjectType extends BaseType implements ScopedEntity {
   }
 
   getAncestorIds(start: number[] = []): number[] {
+    // Always include this object's id
     start.push(this.idNum);
+    // For generic instances, also include the generic parent id so that
+    // runtime extends checks (used by union matching, e.g., MsgPack cases)
+    // succeed across all instantiations of the same nominal type.
+    if (this.genericParent) {
+      start.push(this.genericParent.idNum);
+    }
     if (this.parentObjType) {
       return this.parentObjType.getAncestorIds(start);
     }

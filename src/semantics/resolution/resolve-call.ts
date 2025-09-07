@@ -276,10 +276,29 @@ const resolveClosureArgs = (call: Call) => {
     const isLabeled = arg.isCall() && arg.calls(":");
     const inner = isLabeled ? arg.argAt(1) : arg;
     if (!inner?.isClosure()) return;
-    const expected = paramType ? canonicalType(paramType) : undefined;
+    // Derive expected closure type either from a resolved parameter type or
+    // by resolving the parameter's type expression when the type has not yet
+    // been materialized (common for generics).
+    let expected = paramType ? canonicalType(paramType) : undefined;
+    if (!expected) {
+      const paramTypeExpr = fn.parameters[index]?.typeExpr;
+      const resolvedExprType = paramTypeExpr
+        ? getExprType(resolveTypeExpr(paramTypeExpr))
+        : undefined;
+      expected = resolvedExprType ? canonicalType(resolvedExprType) : undefined;
+    }
     if (expected?.isFnType()) {
+      // Attach the expected function type on the closure so codegen can
+      // align the compiled function-reference heap type with the caller's
+      // expectation, avoiding ref.cast traps.
+      inner.setAttribute("parameterFnType", expected);
       inner.parameters.forEach((p, i) => {
-        const exp = expected.parameters[i]?.type;
+        const expParam = expected.parameters[i];
+        const exp =
+          expParam?.type ??
+          (expParam?.typeExpr
+            ? getExprType(resolveTypeExpr(expParam.typeExpr))
+            : undefined);
         if (!p.type && !p.typeExpr && exp) p.type = canonicalType(exp);
       });
       if (!inner.returnTypeExpr && !inner.annotatedReturnType) {
@@ -958,6 +977,9 @@ const resolveClosureCall = (call: Call): Call => {
   const closureType = closure.isClosure()
     ? closure.getType()
     : getExprType(closure);
+  // Propagate the expected function type identity to the callee identifier so
+  // codegen can align the call_ref heap type with the closure's compiled type.
+  if (closureType?.isFnType()) closure.setAttribute("parameterFnType", closureType);
   const params = closure.isClosure()
     ? closure.parameters
     : closureType?.isFnType()
