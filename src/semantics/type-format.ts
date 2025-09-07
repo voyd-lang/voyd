@@ -1,8 +1,13 @@
 import { Type, TypeAlias } from "../syntax-objects/types.js";
 
 // Format a type name including applied generic type parameters, when present.
-export const formatTypeName = (t?: Type | TypeAlias): string => {
+export const formatTypeName = (
+  t?: Type | TypeAlias,
+  seen: Set<Type | TypeAlias> = new Set()
+): string => {
   if (!t) return "unknown";
+  if (seen.has(t)) return (t as any).name?.toString?.() ?? "unknown";
+  seen.add(t);
 
   // TypeAlias may either be a named alias (e.g., MsgPack) or a placeholder
   // for a resolved generic parameter (e.g., T with .type set). Prefer the
@@ -22,7 +27,7 @@ export const formatTypeName = (t?: Type | TypeAlias): string => {
     const args = t.appliedTypeArgs ?? [];
     if (!args.length) return base;
     const inner = args
-      .map((a) => formatTypeName(a as Type | TypeAlias))
+      .map((a) => formatTypeName(a as Type | TypeAlias, seen))
       .join(", ");
     return `${base}<${inner}>`;
   }
@@ -33,14 +38,14 @@ export const formatTypeName = (t?: Type | TypeAlias): string => {
     const args = trait.appliedTypeArgs ?? [];
     if (!args.length) return base;
     const inner = args
-      .map((a: any) => formatTypeName(a as Type | TypeAlias))
+      .map((a: any) => formatTypeName(a as Type | TypeAlias, seen))
       .join(", ");
     return `${base}<${inner}>`;
   }
 
   if (t.isUnionType?.()) {
     // Flatten unions for helpful display: A | B | C
-    const parts = t.types.map((tt) => formatTypeName(tt as Type));
+    const parts = t.types.map((tt) => formatTypeName(tt as Type, seen));
     return parts.join(" | ");
   }
 
@@ -48,8 +53,8 @@ export const formatTypeName = (t?: Type | TypeAlias): string => {
     const l = t.nominalType ?? t.structuralType;
     const r = t.structuralType && t.nominalType ? t.structuralType : undefined;
     return [
-      formatTypeName(l as Type),
-      r ? formatTypeName(r as Type) : undefined,
+      formatTypeName(l as Type, seen),
+      r ? formatTypeName(r as Type, seen) : undefined,
     ]
       .filter(Boolean)
       .join(" & ");
@@ -57,9 +62,9 @@ export const formatTypeName = (t?: Type | TypeAlias): string => {
 
   if (t.isFnType?.()) {
     const params = t.parameters
-      .map((p) => (p.type ? formatTypeName(p.type) : "unknown"))
+      .map((p) => (p.type ? formatTypeName(p.type, seen) : "unknown"))
       .join(", ");
-    const ret = formatTypeName(t.returnType as Type);
+    const ret = formatTypeName(t.returnType as Type, seen);
     return `fn(${params}) -> ${ret}`;
   }
 

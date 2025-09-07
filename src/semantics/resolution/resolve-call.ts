@@ -44,6 +44,7 @@ import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
+import { canonicalType } from "../types/canonicalize.js";
 
 const resolveMemberAccessDirect = (call: Call): Call => {
   call.args = call.args.map(resolveEntities);
@@ -204,15 +205,14 @@ const resolveCallFn = (call: Call, candidateFns?: Fn[]) => {
 
 const arrayElemType = (type?: Type): Type | undefined => {
   if (!type) return;
-  // Unwrap aliases eagerly
-  if (type.isTypeAlias()) return arrayElemType(type.type);
-  if (type.isObjectType()) {
-    if (!type.name.is("Array") && !type.genericParent?.name.is("Array")) return;
-    const arg = type.appliedTypeArgs?.[0];
-    return arg && arg.isTypeAlias() ? arg.type : undefined;
+  const t = canonicalType(type);
+  if (t.isObjectType()) {
+    if (!t.name.is("Array") && !t.genericParent?.name.is("Array")) return;
+    const arg = t.appliedTypeArgs?.[0];
+    return arg ? canonicalType(arg) : undefined;
   }
-  if (!type.isUnionType()) return;
-  return type.types.map(arrayElemType).find((t): t is Type => !!t);
+  if (!t.isUnionType()) return;
+  return t.types.map(arrayElemType).find((tt): tt is Type => !!tt);
 };
 
 const resolveArrayArgs = (call: Call) => {
@@ -276,25 +276,21 @@ const resolveClosureArgs = (call: Call) => {
     const isLabeled = arg.isCall() && arg.calls(":");
     const inner = isLabeled ? arg.argAt(1) : arg;
     if (!inner?.isClosure()) return;
-    const expected = paramType?.isTypeAlias() ? paramType.type : paramType;
+    const expected = paramType ? canonicalType(paramType) : undefined;
     if (expected?.isFnType()) {
       inner.parameters.forEach((p, i) => {
         const exp = expected.parameters[i]?.type;
-        if (!p.type && !p.typeExpr && exp) p.type = exp;
+        if (!p.type && !p.typeExpr && exp) p.type = canonicalType(exp);
       });
       if (!inner.returnTypeExpr && !inner.annotatedReturnType) {
-        const ret = expected.returnType?.isTypeAlias()
-          ? expected.returnType.type ?? expected.returnType
-          : expected.returnType;
-        inner.annotatedReturnType = ret;
+        inner.annotatedReturnType =
+          expected.returnType && canonicalType(expected.returnType);
       }
     }
     const resolved = resolveClosure(inner);
     if (expected?.isFnType()) {
-      const ret = expected.returnType?.isTypeAlias()
-        ? expected.returnType.type ?? expected.returnType
-        : expected.returnType;
-      resolved.returnType = ret;
+      resolved.returnType =
+        expected.returnType && canonicalType(expected.returnType);
     }
     if (isLabeled) {
       arg.args.set(1, resolved);
@@ -356,7 +352,13 @@ const resolveOptionalArgs = (call: Call) => {
 
     const argType = getExprType(argExpr);
     const paramType = param.type;
-    if (typesAreCompatible(argType, paramType)) return;
+    if (
+      typesAreCompatible(
+        argType && canonicalType(argType),
+        paramType && canonicalType(paramType)
+      )
+    )
+      return;
 
     const someCall = resolveEntities(
       new Call({

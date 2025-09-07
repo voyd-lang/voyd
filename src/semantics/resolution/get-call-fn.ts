@@ -7,6 +7,7 @@ import { typesAreEqual } from "./types-are-equal.js";
 import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { resolveEntities } from "./resolve-entities.js";
+import { canonicalType } from "../types/canonicalize.js";
 
 export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
   if (call.fn?.isFn() && call.fn.parentTrait) return resolveFn(call.fn);
@@ -43,7 +44,10 @@ const selectByExplicitTypeArgs = (
       if (arg) resolveTypeExpr(arg);
       const argType = getExprType(arg);
       const appliedType = getExprType(t);
-      return typesAreEqual(argType, appliedType);
+      return typesAreEqual(
+        argType && canonicalType(argType),
+        appliedType && canonicalType(appliedType)
+      );
     })
   );
   if (appliedExact.length === 1) return appliedExact[0];
@@ -53,8 +57,6 @@ const selectByExplicitTypeArgs = (
   }
   return undefined;
 };
-
-const unwrapAlias = (t: Type): Type => (t.isTypeAlias?.() ? t.type ?? t : t);
 
 const selectByExpectedReturnType = (
   call: Call,
@@ -66,7 +68,7 @@ const selectByExpectedReturnType = (
   if (!expected) return;
 
   const headKeyFromType = (t: Type | undefined): string | undefined => {
-    const u = t ? unwrapAlias(t) : undefined;
+    const u = t ? canonicalType(t) : undefined;
     if (!u) return undefined;
     if (u.isObjectType && u.isObjectType())
       return u.genericParent ? u.genericParent.name.value : u.name.value;
@@ -75,35 +77,46 @@ const selectByExpectedReturnType = (
     if (u.isFixedArrayType && u.isFixedArrayType()) return "FixedArray";
     if (u.isIntersectionType && u.isIntersectionType())
       return headKeyFromType(u.nominalType ?? u.structuralType);
-    if (u.isTypeAlias && u.isTypeAlias()) return headKeyFromType(u.type);
     return u.name?.value;
   };
 
-  const expectedBranch =
-    expected.isUnionType && expected.isUnionType()
-      ? (() => {
-          const heads = new Set(
-            candidates
-              .map((c) => headKeyFromType(c.returnType))
-              .filter((h): h is string => !!h)
-          );
-          const single = heads.size === 1 ? [...heads][0] : undefined;
-          return single
-            ? expected.types.find((t) => headKeyFromType(t) === single)
-            : undefined;
-        })()
-      : expected;
+  const canonExpected = canonicalType(expected);
+  const expectedBranch = canonExpected.isUnionType?.()
+    ? (() => {
+        const heads = new Set(
+          candidates
+            .map((c) => headKeyFromType(c.returnType))
+            .filter((h): h is string => !!h)
+        );
+        const single = heads.size === 1 ? [...heads][0] : undefined;
+        return single
+          ? canonExpected.types.find((t) => headKeyFromType(t) === single)
+          : undefined;
+      })()
+    : canonExpected;
 
   if (!expectedBranch) return;
 
   const exact = candidates.filter((c) =>
-    typesAreEqual(c.returnType, expectedBranch)
+    typesAreEqual(
+      c.returnType && canonicalType(c.returnType),
+      expectedBranch && canonicalType(expectedBranch)
+    )
   );
   if (exact.length === 1) return exact[0];
 
   const rank = (ret: Type | undefined): number => {
-    if (typesAreEqual(ret, expectedBranch)) return 3;
-    if (ret && typesAreCompatible(ret, expectedBranch)) {
+    if (
+      typesAreEqual(
+        ret && canonicalType(ret),
+        expectedBranch && canonicalType(expectedBranch)
+      )
+    )
+      return 3;
+    if (
+      ret &&
+      typesAreCompatible(canonicalType(ret), canonicalType(expectedBranch))
+    ) {
       const head = headKeyFromType(ret);
       const expHead = headKeyFromType(expectedBranch);
       if (
@@ -113,9 +126,14 @@ const selectByExpectedReturnType = (
         ret.isObjectType?.() &&
         expectedBranch.isObjectType?.()
       ) {
-        const ra = (ret.appliedTypeArgs ?? []).map(unwrapAlias);
-        const ea = (expectedBranch.appliedTypeArgs ?? []).map(unwrapAlias);
-        if (ra.length === ea.length && ra.every((t, i) => typesAreEqual(t, ea[i])))
+        const ra = (ret.appliedTypeArgs ?? []).map((t) => canonicalType(t));
+        const ea = (expectedBranch.appliedTypeArgs ?? []).map((t) =>
+          canonicalType(t)
+        );
+        if (
+          ra.length === ea.length &&
+          ra.every((t, i) => typesAreEqual(canonicalType(t), canonicalType(ea[i])))
+        )
           return 2;
       }
       return 1;
@@ -147,7 +165,7 @@ const selectByConcreteReturn = (candidates: Fn[]): Fn | undefined => {
 };
 
 const toBranches = (t: Type): Type[] => {
-  const u = unwrapAlias(t);
+  const u = canonicalType(t);
   return u.isUnionType?.() ? u.types : [u];
 };
 
@@ -159,6 +177,8 @@ const covers = (a?: Type, b?: Type): boolean => {
   if (!a || !b) return false;
 
   // Handle function types specially: identical parameters and covering returns
+  a = canonicalType(a);
+  b = canonicalType(b);
   if ((a as any).isFnType?.() && (b as any).isFnType?.()) {
     const fa: any = a as any;
     const fb: any = b as any;
@@ -166,14 +186,24 @@ const covers = (a?: Type, b?: Type): boolean => {
     for (let i = 0; i < fa.parameters.length; i++) {
       const pa = fa.parameters[i]?.type;
       const pb = fb.parameters[i]?.type;
-      if (!typesAreEqual(pa, pb)) return false;
+      if (
+        !typesAreEqual(
+          pa && canonicalType(pa),
+          pb && canonicalType(pb)
+        )
+      )
+        return false;
     }
     return covers(fa.returnType, fb.returnType);
   }
 
   const aBranches = toBranches(a);
   const bBranches = toBranches(b);
-  return bBranches.every((bt) => aBranches.some((at) => typesAreEqual(at, bt)));
+  return bBranches.every((bt) =>
+    aBranches.some((at) =>
+      typesAreEqual(canonicalType(at), canonicalType(bt))
+    )
+  );
 };
 
 const selectReturnCovering = (candidates: Fn[]): Fn | undefined => {
@@ -303,7 +333,10 @@ const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
         if (arg) resolveTypeExpr(arg);
         const argType = getExprType(arg);
         const appliedType = getExprType(t);
-        return typesAreEqual(argType, appliedType);
+        return typesAreEqual(
+          argType && canonicalType(argType),
+          appliedType && canonicalType(appliedType)
+        );
       })
     : true;
 
@@ -358,11 +391,22 @@ const argumentMatchesParam = (
     param.isOptional &&
     param.typeExpr?.isCall() &&
     param.typeExpr.fnName.is("Optional") &&
-    typesAreCompatible(argType, getExprType(param.typeExpr.typeArgs?.at(0)))
+    typesAreCompatible(
+      canonicalType(argType),
+      (() => {
+        const inner = getExprType(param.typeExpr.typeArgs?.at(0));
+        return inner && canonicalType(inner);
+      })()
+    )
   ) {
     return labelsMatch;
   }
-  return typesAreCompatible(argType, param.type!) && labelsMatch;
+  return (
+    typesAreCompatible(
+      canonicalType(argType),
+      param.type && canonicalType(param.type)
+    ) && labelsMatch
+  );
 };
 
 const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
@@ -380,7 +424,10 @@ const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
       const field = objArg.fields.find((f) => f.name === p.label!.value);
       if (!field) return p.isOptional;
       const fieldType = getExprType(field.initializer);
-      return typesAreCompatible(fieldType, p.type!);
+      return typesAreCompatible(
+        fieldType && canonicalType(fieldType),
+        p.type && canonicalType(p.type)
+      );
     });
   }
 
@@ -400,7 +447,10 @@ const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
   return labeledParams.every((p) => {
     const field = structType.getField(p.label!.value);
     if (!field) return true;
-    return typesAreCompatible(field.type, p.type!);
+    return typesAreCompatible(
+      field.type && canonicalType(field.type),
+      p.type && canonicalType(p.type)
+    );
   });
 };
 
