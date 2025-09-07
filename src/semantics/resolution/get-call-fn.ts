@@ -97,43 +97,28 @@ const selectByExpectedReturnType = (
 
   if (!expectedBranch) return;
 
+  const canonExpectedBranch = canonicalType(expectedBranch);
   const exact = candidates.filter((c) =>
-    typesAreEqual(
-      c.returnType && canonicalType(c.returnType),
-      expectedBranch && canonicalType(expectedBranch)
-    )
+    typesAreEqual(c.returnType && canonicalType(c.returnType), canonExpectedBranch)
   );
   if (exact.length === 1) return exact[0];
 
   const rank = (ret: Type | undefined): number => {
-    if (
-      typesAreEqual(
-        ret && canonicalType(ret),
-        expectedBranch && canonicalType(expectedBranch)
-      )
-    )
-      return 3;
-    if (
-      ret &&
-      typesAreCompatible(canonicalType(ret), canonicalType(expectedBranch))
-    ) {
-      const head = headKeyFromType(ret);
-      const expHead = headKeyFromType(expectedBranch);
+    const cRet = ret && canonicalType(ret);
+    if (typesAreEqual(cRet, canonExpectedBranch)) return 3;
+    if (cRet && typesAreCompatible(cRet, canonExpectedBranch)) {
+      const head = headKeyFromType(cRet);
+      const expHead = headKeyFromType(canonExpectedBranch);
       if (
         head &&
         expHead &&
         head === expHead &&
-        ret.isObjectType?.() &&
-        expectedBranch.isObjectType?.()
+        cRet.isObjectType?.() &&
+        canonExpectedBranch.isObjectType?.()
       ) {
-        const ra = (ret.appliedTypeArgs ?? []).map((t) => canonicalType(t));
-        const ea = (expectedBranch.appliedTypeArgs ?? []).map((t) =>
-          canonicalType(t)
-        );
-        if (
-          ra.length === ea.length &&
-          ra.every((t, i) => typesAreEqual(canonicalType(t), canonicalType(ea[i])))
-        )
+        const ra = cRet.appliedTypeArgs ?? [];
+        const ea = canonExpectedBranch.appliedTypeArgs ?? [];
+        if (ra.length === ea.length && ra.every((t, i) => typesAreEqual(t, ea[i])))
           return 2;
       }
       return 1;
@@ -331,12 +316,11 @@ const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
     ? candidate.appliedTypeArgs.every((t, i) => {
         const arg = call.typeArgs?.at(i);
         if (arg) resolveTypeExpr(arg);
-        const argType = getExprType(arg);
+        const argType = arg && getExprType(arg);
         const appliedType = getExprType(t);
-        return typesAreEqual(
-          argType && canonicalType(argType),
-          appliedType && canonicalType(appliedType)
-        );
+        const canonArg = argType && canonicalType(argType);
+        const canonApplied = appliedType && canonicalType(appliedType);
+        return typesAreEqual(canonArg, canonApplied);
       })
     : true;
 

@@ -160,4 +160,39 @@ describe("call resolution canonicalization", () => {
     expect(canon.types).toHaveLength(1);
     expect(canon.types[0]).toBe(obj);
   });
+
+  test("matches generic object with alias type arg", () => {
+    const base = new ObjectType({
+      name: "Box",
+      value: [],
+      typeParameters: [Identifier.from("T")],
+    });
+    const boxI32 = base.clone();
+    boxI32.genericParent = base;
+    boxI32.appliedTypeArgs = [i32];
+
+    const alias = new TypeAlias({
+      name: Identifier.from("Alias"),
+      typeExpr: Identifier.from("i32"),
+    });
+    alias.type = i32;
+    const boxAlias = base.clone();
+    boxAlias.genericParent = base;
+    boxAlias.appliedTypeArgs = [alias];
+
+    const fnName = Identifier.from("useBox");
+    const fn = new Fn({
+      name: fnName,
+      parameters: [new Parameter({ name: Identifier.from("p"), type: boxI32 })],
+    });
+    const arg = new MockIdentifier({ value: "b", entity: boxAlias });
+    const call = new Call({
+      fnName,
+      args: new List({ value: [arg] }),
+    });
+    call.resolveFns = vi.fn().mockReturnValue([fn]);
+
+    resolveCall(call);
+    expect(call.fn).toBe(fn);
+  });
 });

@@ -11,6 +11,7 @@ import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
+import { canonicalType } from "../types/canonicalize.js";
 
 export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
   if (obj.typesResolved) return obj;
@@ -183,6 +184,8 @@ const typeArgsMatch = (call: Call, candidate: ObjectType): boolean =>
     ? candidate.appliedTypeArgs.every((t, i) => {
         const argType = getExprType(call.typeArgs?.at(i));
         const appliedType = getExprType(t);
-        return typesAreEqual(argType, appliedType);
+        const canonArg = argType && canonicalType(argType);
+        const canonApplied = appliedType && canonicalType(appliedType);
+        return typesAreEqual(canonArg, canonApplied);
       })
     : true;

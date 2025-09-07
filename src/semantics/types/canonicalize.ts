@@ -53,6 +53,35 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
     return t;
   }
 
+  if (t.isObjectType?.()) {
+    if (t.appliedTypeArgs?.length) {
+      const copy = Object.assign(
+        Object.create(Object.getPrototypeOf(t)),
+        t,
+        { id: `${t.id}#canon` }
+      );
+      copy.appliedTypeArgs = t.appliedTypeArgs.map((arg) =>
+        canonicalType(arg, seen)
+      );
+      return copy;
+    }
+    return t;
+  }
+
+  if (t.isTraitType?.()) {
+    if (t.appliedTypeArgs?.length) {
+      const copy = Object.assign(
+        Object.create(Object.getPrototypeOf(t)),
+        t
+      );
+      copy.appliedTypeArgs = t.appliedTypeArgs.map((arg) =>
+        canonicalType(arg, seen)
+      );
+      return copy;
+    }
+    return t;
+  }
+
   return t;
 };
 
