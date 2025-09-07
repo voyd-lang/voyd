@@ -42,6 +42,47 @@ fn component() -> Map<MsgPack>
 
 pub fn test_ul_map() -> i32
   msg_pack::encode(component())
+
+// ---- VSX children in component props (regression for array-literal in ObjectLiteral) ----
+fn Title2({ children: Array<MsgPack> })
+  <h2 style="
+    margin: 0 0 8px 0;
+    font-size: 20px;
+    background: linear-gradient(90deg, #60a5fa, #a78bfa);
+    background-clip: text;
+    color: transparent;
+  ">
+    {children}
+  </h2>
+
+fn Card2({ children: Array<MsgPack> })
+  <div style="
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    margin: 8px;
+    padding: 16px;
+    border-radius: 12px;
+    background: #0b1020;
+    color: #e5e7eb;
+    border: 1px solid rgba(255,255,255,0.08);
+  ">
+    {children}
+  </div>
+
+fn List2({ value: Array<String> })
+  <ul style="margin: 0; padding-left: 16px;">
+    {value.map(f => <li style="line-height: 1.6;">{f}</li>)}
+  </ul>
+
+fn App_features()
+  let features = ["WASM speed", "Tiny runtime", "Clean syntax"]
+  <Card2>
+    <Title2>Voyd + VSX</Title2>
+    <p style="margin: 0 0 10px 0; color: #cbd5e1;">Build clean UIs in language, no extensions required</p>
+    <List2 value={features} />
+  </Card2>
+
+pub fn features_run() -> i32
+  msg_pack::encode(App_features())
 `;
 
 describe("Combined VSX e2e (single WASM instance)", () => {
@@ -121,6 +162,62 @@ describe("Combined VSX e2e (single WASM instance)", () => {
             ],
           ],
         },
+      ],
+    });
+  });
+
+  test("component children array literal inside props initializes correctly", () => {
+    const fn = getWasmFn("features_run", instance);
+    assert(fn, "features_run exists");
+    const index = fn();
+    const decoded = decode(memory.buffer.slice(0, index));
+    expect(decoded).toEqual({
+      name: "div",
+      attributes: {
+        style:
+          "\n    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;\n    margin: 8px;\n    padding: 16px;\n    border-radius: 12px;\n    background: #0b1020;\n    color: #e5e7eb;\n    border: 1px solid rgba(255,255,255,0.08);\n  ",
+      },
+      children: [
+        [
+          {
+            name: "h2",
+            attributes: {
+              style:
+                "\n    margin: 0 0 8px 0;\n    font-size: 20px;\n    background: linear-gradient(90deg, #60a5fa, #a78bfa);\n    background-clip: text;\n    color: transparent;\n  ",
+            },
+            children: [["Voyd + VSX"]],
+          },
+          {
+            name: "p",
+            attributes: { style: "margin: 0 0 10px 0; color: #cbd5e1;" },
+            children: [
+              "Build clean UIs in language, no extensions required",
+            ],
+          },
+          {
+            name: "ul",
+            attributes: { style: "margin: 0; padding-left: 16px;" },
+            children: [
+              [
+                {
+                  name: "li",
+                  attributes: { style: "line-height: 1.6;" },
+                  children: ["WASM speed"],
+                },
+                {
+                  name: "li",
+                  attributes: { style: "line-height: 1.6;" },
+                  children: ["Tiny runtime"],
+                },
+                {
+                  name: "li",
+                  attributes: { style: "line-height: 1.6;" },
+                  children: ["Clean syntax"],
+                },
+              ],
+            ],
+          },
+        ],
       ],
     });
   });
