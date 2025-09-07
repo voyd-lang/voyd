@@ -11,7 +11,9 @@ const isBrowser = () =>
 export const stdPath: string = isBrowser()
   ? "std"
   : decodeURIComponent(
-      new URL("../../../std/", import.meta.url).pathname
+      // The std path is only used at runtime in Node.
+      // Vite warns about non-existent paths at build-time; suppress transformation.
+      new URL(/* @vite-ignore */ "../../../std/", import.meta.url).pathname
     ).replace(/\/$/, "");
 
 let cache: ParsedFiles | undefined = undefined;

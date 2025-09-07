@@ -28,9 +28,9 @@
     "bench": "vitest bench --run",
     "bench:w": "vitest bench",
     "snapshot": "vitest -u",
-    "build": "npx tsc",
+    "build": "tsc && npm run build:browser",
     "build:browser": "vite build",
-    "prepublishOnly": "tsc"
+    "prepublishOnly": "npm test && npm run build"
   },
   "bin": {
     "voyd": "./dist/cli/cli.js",
