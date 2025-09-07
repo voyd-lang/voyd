@@ -49,18 +49,6 @@ export const codegen = (ast: Expr) => {
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   mod.setMemory(0, 1, "main_memory", []);
-  // Optional debug instrumentation import for cast logging. Only added when
-  // VOYD_DEBUG_CASTS=1 is set to avoid breaking tests that instantiate
-  // without imports.
-  if (process.env.VOYD_DEBUG_CASTS === "1") {
-    mod.addFunctionImport(
-      "__voyd_debug_log",
-      "utils",
-      "log",
-      binaryen.createType([binaryen.i32]),
-      binaryen.none
-    );
-  }
   const extensionHelpers = initExtensionHelpers(mod);
   const fieldLookupHelpers = initFieldLookupHelpers(mod);
   const methodLookupHelpers = initMethodLookupHelpers(mod);
