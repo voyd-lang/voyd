@@ -15,6 +15,7 @@ describe("canonicalType", () => {
 
     const canon = canonicalType(inst) as ObjectType;
     expect(canon.appliedTypeArgs?.[0]).toBe(i32);
+    expect(() => canon.clone()).not.toThrow();
   });
 
   test("resolves applied args on trait types", () => {
@@ -27,5 +28,7 @@ describe("canonicalType", () => {
 
     const canon = canonicalType(inst) as TraitType;
     expect(canon.appliedTypeArgs?.[0]).toBe(i32);
+    expect(() => canon.clone()).not.toThrow();
+    expect(canon.id).toBe(inst.id);
   });
 });
