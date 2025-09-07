@@ -6,6 +6,7 @@ import {
 } from "../codegen.js";
 import {
   refCast,
+  refTest,
   structGetFieldValue,
   callRef,
 } from "../lib/binaryen-gc/index.js";
@@ -15,9 +16,10 @@ import { builtinCallCompilers } from "./builtin-call-registry.js";
 import { compileObjectInit } from "./compile-object-init.js";
 import { getClosureFunctionType } from "./compile-closure.js";
 import { Fn } from "../syntax-objects/fn.js";
-import { voydBaseObject } from "../syntax-objects/types.js";
+import { voydBaseObject, Type } from "../syntax-objects/types.js";
 import { murmurHash3 } from "../lib/murmur-hash.js";
 import { AugmentedBinaryen } from "../lib/binaryen-gc/types.js";
+import { canonicalType } from "../semantics/types/canonicalize.js";
 const bin = binaryen as unknown as AugmentedBinaryen;
 
 export const compile = (opts: CompileExprOpts<Call>): number => {
@@ -30,6 +32,9 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
 
   // Compile closure calls. TODO: extract this + make it more clear on the call that we are calling a closure
   if (!expr.fn && expr.fnName.type?.isFnType()) {
+    // Normalize the function type to avoid subtle mismatches (e.g., unions)
+    // causing ref.cast traps between the callee's expected signature and the
+    // closure's compiled function type.
     const fnType = expr.fnName.type;
     const closureRef = compileExpression({
       ...opts,
@@ -50,13 +55,55 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
           compileExpression({ ...opts, expr: arg, isReturnExpr: false })
         ),
     ];
-    let target = funcRef;
-    try {
-      const callType = getClosureFunctionType(opts, fnType);
-      target = refCast(mod, funcRef, callType);
-    } catch {}
-    const returnType = mapBinaryenType(opts, fnType.returnType!);
-    const callExpr = callRef(mod, target, args, returnType, false);
+    // Prefer the call-site expected type if present to align heap identity.
+    const expectedType =
+      ((expr.fnName as any).getAttribute?.("parameterFnType") as any) || fnType;
+    const primaryType = getClosureFunctionType(opts, expectedType);
+    let secondaryType: number | undefined;
+    if (expectedType !== fnType) {
+      secondaryType = getClosureFunctionType(opts, fnType);
+    }
+    // Normalize return to base object when objectish (object/union/intersection/alias)
+    const retType: Type = expectedType.returnType!;
+    const retCanon = canonicalType(retType) as any;
+    const isObjectish =
+      retCanon?.isObjectType?.() ||
+      retCanon?.isUnionType?.() ||
+      retCanon?.isIntersectionType?.() ||
+      retCanon?.isTypeAlias?.();
+    const returnType = isObjectish
+      ? mapBinaryenType(opts, voydBaseObject)
+      : mapBinaryenType(opts, expectedType.returnType!);
+    let callExpr: number;
+    if (secondaryType && secondaryType !== primaryType) {
+      const thenCall = callRef(
+        mod,
+        refCast(mod, funcRef, primaryType),
+        args,
+        returnType,
+        false
+      );
+      const elseCall = callRef(
+        mod,
+        refCast(mod, funcRef, secondaryType),
+        args,
+        returnType,
+        false
+      );
+      callExpr = mod.if(refTest(mod, funcRef, primaryType), thenCall, elseCall);
+    } else {
+      let target = funcRef;
+      try {
+        target = refCast(mod, funcRef, primaryType);
+      } catch {}
+      callExpr = callRef(mod, target, args, returnType, false);
+    }
+    // Refine return to the precise expected type so downstream static typing
+    // matches call_ref's declared result.
+    if (isObjectish) {
+      const preciseRet = mapBinaryenType(opts, expectedType.returnType!);
+      callExpr = refCast(mod, callExpr, preciseRet);
+    }
     return isReturnExpr && returnType !== binaryen.none
       ? mod.return(callExpr)
       : callExpr;
@@ -109,7 +156,8 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       traitFn.setAttribute("binaryenType", fnType);
       mod.removeFunction(`__tmp_trait_${traitFn.id}`);
     }
-    const target = refCast(mod, funcRef, fnType);
+    const fnTypeFinal = fnType as number;
+    const target = refCast(mod, funcRef, fnTypeFinal);
     const args = expr.args.toArray().map((arg, i) => {
       const compiled = compileExpression({
         ...opts,

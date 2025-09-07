@@ -111,7 +111,21 @@ export const refCast = (
   mod: binaryen.Module,
   ref: ExpressionRef,
   type: TypeRef
-): ExpressionRef => bin._BinaryenRefCast(mod.ptr, ref, type);
+): ExpressionRef => {
+  if (process.env.VOYD_DEBUG_CASTS !== "1") {
+    return bin._BinaryenRefCast(mod.ptr, ref, type);
+  }
+  // Debug mode: guard cast and log failing site id via imported utils.log
+  // The import is added in codegen.ts when VOYD_DEBUG_CASTS=1
+  const siteId = nextRefCastSiteId();
+  const thenExpr = bin._BinaryenRefCast(mod.ptr, ref, type);
+  const log = mod.call("__voyd_debug_log", [mod.i32.const(siteId)], binaryen.none);
+  const elseExpr = mod.block(null, [log, mod.unreachable()]);
+  return mod.if(refTest(mod, ref, type), thenExpr, elseExpr);
+};
+
+let __refCastSiteCounter = 0;
+const nextRefCastSiteId = () => __refCastSiteCounter++;
 
 export const refTest = (
   mod: binaryen.Module,
