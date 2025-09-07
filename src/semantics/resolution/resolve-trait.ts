@@ -7,6 +7,7 @@ import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveImpl } from "./resolve-impl.js";
+import { canonicalType } from "../types/canonicalize.js";
 
 export const resolveTrait = (trait: TraitType, call?: Call): TraitType => {
   if (trait.typeParameters) {
@@ -61,7 +62,11 @@ const resolveGenericTraitVersion = (
 
 const typeArgsMatch = (call: Call, candidate: TraitType): boolean =>
   call.typeArgs && candidate.appliedTypeArgs
-    ? candidate.appliedTypeArgs.every((t, i) =>
-        typesAreEqual(getExprType(call.typeArgs!.at(i)), getExprType(t))
-      )
+    ? candidate.appliedTypeArgs.every((t, i) => {
+        const argType = getExprType(call.typeArgs!.at(i));
+        const appliedType = getExprType(t);
+        const canonArg = argType && canonicalType(argType);
+        const canonApplied = appliedType && canonicalType(appliedType);
+        return typesAreEqual(canonArg, canonApplied);
+      })
     : true;
