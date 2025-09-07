@@ -6,7 +6,7 @@ import {
   asStmt,
 } from "../codegen.js";
 import { Closure } from "../syntax-objects/closure.js";
-import { FnType } from "../syntax-objects/types.js";
+import { FnType, voydBaseObject } from "../syntax-objects/types.js";
 import {
   defineStructType,
   initStruct,
@@ -14,6 +14,7 @@ import {
   binaryenTypeToHeapType,
 } from "../lib/binaryen-gc/index.js";
 import { AugmentedBinaryen, TypeRef } from "../lib/binaryen-gc/types.js";
+import { normalizeClosureFnType } from "./helpers/closure-type.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -40,11 +41,9 @@ export const getClosureFunctionType = (
   fnType: FnType
 ): TypeRef => {
   const superType = getClosureSuperType(opts.mod);
-  const paramBinTypes = [
-    superType,
-    ...fnType.parameters.map((p) => mapBinaryenType(opts, p.type!)),
-  ];
-  const returnBinType = mapBinaryenType(opts, fnType.returnType!);
+  const norm = normalizeClosureFnType(opts, fnType);
+  const paramBinTypes = [superType, ...norm.paramBinTypes.slice(1)];
+  const returnBinType = norm.returnBinType;
   const key = `${paramBinTypes.join(",")}->${returnBinType}`;
   let typeRef = fnTypeCache.get(key);
   if (!typeRef) {
@@ -88,11 +87,17 @@ export const compile = (opts: CompileExprOpts<Closure>): number => {
   });
   envTypeMap.set(closure.syntaxId, envType);
 
-  const paramTypes = binaryen.createType([
-    superType,
-    ...closure.parameters.map((p) => mapBinaryenType(opts, p.type!)),
-  ]);
-  const returnType = mapBinaryenType(opts, closure.getReturnType());
+  // Prefer the call-site function signature when available to guarantee the
+  // function-reference type identity matches the caller's expected type. This
+  // avoids ref.cast traps when generics/contextual typing pick slightly
+  // different but compatible shapes.
+  const callSiteSig = closure.getAttribute(
+    "parameterFnType"
+  ) as FnType | undefined;
+  const sigSource = callSiteSig ?? closure.getType();
+  const norm = normalizeClosureFnType(opts, sigSource);
+  const paramTypes = binaryen.createType([superType, ...norm.paramBinTypes.slice(1)]);
+  const returnType = norm.returnBinType;
 
   const bodyExpr = compileExpression({
     ...opts,
@@ -103,21 +108,18 @@ export const compile = (opts: CompileExprOpts<Closure>): number => {
 
   const varTypes = closure.variables.map((v) => mapBinaryenType(opts, v.type!));
   const fnName = `__closure_${closure.syntaxId}`;
-  const fnRef = mod.addFunction(fnName, paramTypes, returnType, varTypes, body);
-  const fnHeapType = bin._BinaryenFunctionGetType(fnRef);
-  const fnType = bin._BinaryenTypeFromHeapType(fnHeapType, false);
+  mod.addFunction(fnName, paramTypes, returnType, varTypes, body);
 
-  // Record the function type so that calls to closures with this signature can
-  // cast to the correct type when invoking via `call_ref`.
-  const key = `${[
-    superType,
-    ...closure.parameters.map((p) => mapBinaryenType(opts, p.type!)),
-  ].join(",")}->${returnType}`;
-  fnTypeCache.set(key, fnType);
+  // Use a stable, cached typed function reference identity derived from the
+  // call-site (when provided) so casts at call sites use the same heap type.
+  const desiredFnType = getClosureFunctionType(opts, sigSource);
 
   const captures = closure.captures.map((c) =>
     mod.local.get(c.getIndex(), mapBinaryenType(opts, c.type!))
   );
 
-  return initStruct(mod, envType, [refFunc(mod, fnName, fnType), ...captures]);
+  return initStruct(mod, envType, [
+    refFunc(mod, fnName, desiredFnType),
+    ...captures,
+  ]);
 };
