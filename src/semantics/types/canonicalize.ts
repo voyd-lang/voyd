@@ -19,7 +19,14 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
       if ((c as any).isUnionType?.()) parts.push(...((c as any).types as Type[]));
       else parts.push(c);
     });
-    t.types = parts as any;
+    const unique: Type[] = [];
+    const ids = new Set<string>();
+    parts.forEach((p) => {
+      if (ids.has(p.id)) return;
+      ids.add(p.id);
+      unique.push(p);
+    });
+    t.types = unique as any;
     return t;
   }
 

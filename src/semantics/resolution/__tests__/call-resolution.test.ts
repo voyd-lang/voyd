@@ -17,6 +17,7 @@ import {
   f32,
 } from "../../../syntax-objects/types.js";
 import { resolveCall } from "../resolve-call.js";
+import { canonicalType } from "../../types/canonicalize.js";
 
 describe("call resolution canonicalization", () => {
   test("resolves calls with alias parameters", () => {
@@ -116,5 +117,47 @@ describe("call resolution canonicalization", () => {
 
     resolveCall(call);
     expect(call.fn).toBe(fn);
+  });
+
+  test("collapses duplicate union aliases", () => {
+    const obj = new ObjectType({ name: "Obj", value: [] });
+    const alias1 = new TypeAlias({
+      name: Identifier.from("Alias1"),
+      typeExpr: Identifier.from("Obj"),
+    });
+    alias1.type = obj;
+    const alias2 = new TypeAlias({
+      name: Identifier.from("Alias2"),
+      typeExpr: Identifier.from("Obj"),
+    });
+    alias2.type = obj;
+
+    const union = new UnionType({ name: "Union", childTypeExprs: [] });
+    union.types = [alias1.type as ObjectType, alias2.type as ObjectType];
+    const unionAlias = new TypeAlias({
+      name: Identifier.from("UnionAlias"),
+      typeExpr: Identifier.from("Union"),
+    });
+    unionAlias.type = union;
+
+    const fnName = Identifier.from("dup");
+    const fn = new Fn({
+      name: fnName,
+      parameters: [new Parameter({ name: Identifier.from("p"), type: unionAlias })],
+    });
+
+    const arg = new MockIdentifier({ value: "o", entity: obj });
+    const call = new Call({
+      fnName,
+      args: new List({ value: [arg] }),
+    });
+    call.resolveFns = vi.fn().mockReturnValue([fn]);
+
+    resolveCall(call);
+    expect(call.fn).toBe(fn);
+
+    const canon = canonicalType(unionAlias.type as UnionType) as UnionType;
+    expect(canon.types).toHaveLength(1);
+    expect(canon.types[0]).toBe(obj);
   });
 });
