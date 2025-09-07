@@ -13,6 +13,7 @@ import {
   UnionType,
   IntersectionType,
   ObjectType,
+  FnType,
   i32,
   f32,
 } from "../../../syntax-objects/types.js";
@@ -194,5 +195,27 @@ describe("call resolution canonicalization", () => {
 
     resolveCall(call);
     expect(call.fn).toBe(fn);
+  });
+
+  test("canonicalType does not mutate reused types", () => {
+    const a = new ObjectType({ name: "A", value: [] });
+    const b = new ObjectType({ name: "B", value: [] });
+    const union = new UnionType({ name: "AB", childTypeExprs: [] });
+    union.types = [a, b, a];
+
+    canonicalType(union);
+    canonicalType(union);
+    expect(union.types).toHaveLength(3);
+
+    const fnType = new FnType({
+      name: "Fn",
+      parameters: [new Parameter({ name: Identifier.from("p"), type: union })],
+      returnType: union,
+    });
+
+    canonicalType(fnType);
+    canonicalType(fnType);
+    expect(fnType.returnType).toBe(union);
+    expect(fnType.parameters[0].type).toBe(union);
   });
 });

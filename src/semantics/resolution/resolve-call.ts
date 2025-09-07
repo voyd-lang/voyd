@@ -277,21 +277,18 @@ const resolveClosureArgs = (call: Call) => {
     const inner = isLabeled ? arg.argAt(1) : arg;
     if (!inner?.isClosure()) return;
     const expected = paramType ? canonicalType(paramType) : undefined;
+    const expectedRet =
+      expected?.isFnType() && expected.returnType ? expected.returnType : undefined;
     if (expected?.isFnType()) {
       inner.parameters.forEach((p, i) => {
         const exp = expected.parameters[i]?.type;
-        if (!p.type && !p.typeExpr && exp) p.type = canonicalType(exp);
+        if (!p.type && !p.typeExpr && exp) p.type = exp;
       });
-      if (!inner.returnTypeExpr && !inner.annotatedReturnType) {
-        inner.annotatedReturnType =
-          expected.returnType && canonicalType(expected.returnType);
-      }
+      if (!inner.returnTypeExpr && !inner.annotatedReturnType)
+        inner.annotatedReturnType = expectedRet;
     }
     const resolved = resolveClosure(inner);
-    if (expected?.isFnType()) {
-      resolved.returnType =
-        expected.returnType && canonicalType(expected.returnType);
-    }
+    if (expectedRet) resolved.returnType = expectedRet;
     if (isLabeled) {
       arg.args.set(1, resolved);
       call.args.set(index, resolveEntities(arg));
