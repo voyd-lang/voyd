@@ -273,6 +273,26 @@ const functions: Record<string, MacroFn | undefined> = {
       });
     return expand(quote);
   },
+  quote2: (args: List) => {
+    const expand = (body: List): List =>
+      body.flatMap((exp) => {
+        if (exp.isList() && exp.calls("$")) {
+          const val = exp.at(1) ?? nop();
+          return evalMacroExpr(val);
+        }
+
+        if (exp.isList() && exp.calls("$@")) {
+          const val = exp.at(1) ?? nop();
+          return (evalMacroExpr(val) as List).toArray();
+        }
+
+        if (exp.isList()) return expand(exp);
+
+        return exp;
+      });
+
+    return new List({ ...args.metadata, value: ["quote", expand(args)] });
+  },
   if: (args) => {
     const [condition, ifTrue, ifFalse] = args.toArray();
 
@@ -375,7 +395,7 @@ const functions: Record<string, MacroFn | undefined> = {
     }),
 };
 
-const fnsToSkipArgEval = new Set(["if", "quote", "=>", "define", "="]);
+const fnsToSkipArgEval = new Set(["if", "quote", "quote2", "=>", "define", "="]);
 
 const handleOptionalConditionParenthesis = (expr: Expr): Expr => {
   if (expr.isList() && expr.first()?.isList()) {
