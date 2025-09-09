@@ -197,13 +197,6 @@ const functions: Record<string, MacroFn | undefined> = {
   block: (args) => args.at(-1)!,
   length: (args) => new Int({ value: args.listAt(0).length }),
   define: (args) => evalMacroVarDef(args.insert("define")),
-  Identifier: (args) => {
-    const nameDef = args.at(0);
-    const name = nameDef?.isList()
-      ? (evalMacroExpr(nameDef.identifierAt(2)) as Identifier)
-      : (nameDef as Identifier);
-    return new Identifier({ value: name.value as string });
-  },
   "=": (args) => {
     const identifier = args.first();
     if (!identifier?.isIdentifier()) {
@@ -295,7 +288,6 @@ const functions: Record<string, MacroFn | undefined> = {
 
     return nop();
   },
-  array: (args) => args,
   slice: (args) => {
     const list = args.listAt(0);
     const start = getMacroTimeValue(args.at(1)) as number | undefined;
@@ -368,7 +360,6 @@ const functions: Record<string, MacroFn | undefined> = {
       ...args.metadata,
     });
   },
-  expand_macros: (args) => expandFunctionalMacros(args.at(0)!),
   char_to_code: (args) =>
     new Int({
       value: String((args.at(0) as Identifier).value).charCodeAt(0),
