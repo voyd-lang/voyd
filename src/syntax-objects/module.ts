@@ -24,8 +24,8 @@ export class VoydModule extends ScopedNamedEntity {
   #value = new ChildList(undefined, this);
   /**
    * 0 = init,
-   * 1 = expanding regular macros,
-   * 2 = regular macros expanded,
+   * 1 = expanding functional macros,
+   * 2 = functional macros expanded,
    * 3 = checking types,
    * 4 = types checked
    */

@@ -8,7 +8,7 @@ import {
   List,
   MacroLambda,
   Macro,
-  RegularMacro,
+  FunctionalMacro,
   MacroVariable,
   VoydModule,
   Block,
@@ -21,7 +21,7 @@ import {
 } from "./resolution/resolve-use.js";
 
 /** Expands/evaluates macro functions. Also handles use and module declaration initialization */
-export const expandRegularMacros = (expr: Expr): Expr => {
+export const expandFunctionalMacros = (expr: Expr): Expr => {
   if (expr.isModule()) return expandModuleMacros(expr);
   if (!expr.isList()) return expr;
   if (expr.calls("use")) return initUse(expr);
@@ -32,22 +32,22 @@ export const expandRegularMacros = (expr: Expr): Expr => {
 
   const identifier = expr.first();
   if (!identifier?.isIdentifier()) {
-    return expr.map(expandRegularMacros);
+    return expr.map(expandFunctionalMacros);
   }
 
   const macro = identifier.resolve();
   if (macro?.isMacro()) {
-    const after = expandRegularMacros(expandMacro(macro, expr));
+    const after = expandFunctionalMacros(expandMacro(macro, expr));
     return after;
   }
 
-  return expr.map(expandRegularMacros);
+  return expr.map(expandFunctionalMacros);
 };
 
 const expandModuleMacros = (module: VoydModule): VoydModule => {
   if (module.phase > 0) return module;
   module.phase = 1;
-  module.applyMap(expandRegularMacros);
+  module.applyMap(expandFunctionalMacros);
   module.phase = 2;
   return module;
 };
@@ -72,7 +72,7 @@ const initMod = (list: List) => {
   const module = new VoydModule({
     ...list.metadata,
     name,
-    value: block.argsArray().map(expandRegularMacros),
+    value: block.argsArray().map(expandFunctionalMacros),
   });
   list.parentModule?.registerEntity(module);
   return module;
@@ -81,7 +81,7 @@ const initMod = (list: List) => {
 const evalExport = (list: List) => {
   const block = list.listAt(1); // export is expected to be passed a block
 
-  const expandedBlock = block.map((exp) => expandRegularMacros(exp));
+  const expandedBlock = block.map((exp) => expandFunctionalMacros(exp));
   registerExports(list, expandedBlock.toArray(), expandModuleMacros);
 
   list.set(1, expandedBlock);
@@ -89,7 +89,7 @@ const evalExport = (list: List) => {
 };
 
 const evalMacroLetDef = (list: List) => {
-  const expanded = expandRegularMacros(list.set(0, "let")) as List;
+  const expanded = expandFunctionalMacros(list.set(0, "let")) as List;
   return evalMacroVarDef(expanded);
 };
 
@@ -98,7 +98,7 @@ const evalMacroDef = (list: List): Macro => {
   const signature = list.listAt(1);
   const name = signature.identifierAt(0);
   const parameters = signature.argsArray() as Identifier[];
-  return new RegularMacro({
+  return new FunctionalMacro({
     ...list.metadata,
     name,
     parameters,
@@ -106,7 +106,7 @@ const evalMacroDef = (list: List): Macro => {
       ...list.metadata,
       body: list
         .slice(2)
-        .map(expandRegularMacros)
+        .map(expandFunctionalMacros)
         .map((expr) => {
           if (expr.isList() && expr.calls("quote")) return expr;
           return initializeMacroBlocks(expr);
@@ -368,7 +368,7 @@ const functions: Record<string, MacroFn | undefined> = {
       ...args.metadata,
     });
   },
-  expand_macros: (args) => expandRegularMacros(args.at(0)!),
+  expand_macros: (args) => expandFunctionalMacros(args.at(0)!),
   char_to_code: (args) =>
     new Int({
       value: String((args.at(0) as Identifier).value).charCodeAt(0),

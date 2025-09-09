@@ -1,4 +1,4 @@
-export const regularMacrosAst = [
+export const functionalMacrosAst = [
   "module",
   "root",
   [
@@ -7,13 +7,13 @@ export const regularMacrosAst = [
       "test",
       [
         [
-          "regular-macro",
+          "functional-macro",
           "`#735",
           ["parameters"],
           ["block", ["block", ["quote", "quote", ["$@", "body"]]]],
         ],
         [
-          "regular-macro",
+          "functional-macro",
           "let#772",
           ["parameters"],
           [
@@ -37,7 +37,7 @@ export const regularMacrosAst = [
           ["is-mutable", false],
         ],
         [
-          "regular-macro",
+          "functional-macro",
           "fn#1251",
           ["parameters"],
           [

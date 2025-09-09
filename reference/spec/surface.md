@@ -74,7 +74,7 @@ There are three types of macros:
 -   Reader Macros: Expanded during parsing, emit am ast
 -   Syntax Macros: Expanded after parsing, are passed the ast from the parser
   and produce the final ast
--   Regular Macros: Expanded by a syntax macro
+-   Functional Macros: Expanded by a syntax macro
 
 At a high level, the pipeline looks something like this: `file.voyd -> parser +
 reader macros -> syntax macros -> ast (the core language)`

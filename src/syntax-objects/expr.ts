@@ -49,7 +49,7 @@ export type Expr =
   | Closure;
 
 /**
- * These are the Expr types that must be returned until all macros have been expanded (reader, syntax, and regular)
+ * These are the Expr types that must be returned until all macros have been expanded (reader, syntax, and functional)
  */
 export type PrimitiveExpr =
   | Bool
