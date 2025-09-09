@@ -229,7 +229,7 @@ const functions: Record<string, MacroFn | undefined> = {
   "<": (args) => bl(args, (l, r) => l < r),
   "<=": (args) => bl(args, (l, r) => l <= r),
   and: (args) => bl(args, (l, r) => !!(l && r)),
-  or: (args) => bl(args, (l, r) => !(l || r)),
+  or: (args) => bl(args, (l, r) => !!(l || r)),
   not: (args) => bool(!getMacroTimeValue(args.first())),
   "+": (args) => ba(args, (l, r) => l + r),
   "-": (args) => ba(args, (l, r) => l - r),
@@ -446,10 +446,7 @@ const getMacroTimeValue = (expr: Expr | undefined): any => {
   }
 
   const hasValue =
-    expr.isFloat() ||
-    expr.isInt() ||
-    expr.isBool() ||
-    expr.isIdentifier();
+    expr.isFloat() || expr.isInt() || expr.isBool() || expr.isIdentifier();
 
   if (hasValue) return expr.value;
   return expr;
