@@ -3,11 +3,11 @@ import type { Expr } from "./expr.js";
 import { Identifier } from "./identifier.js";
 import { ScopedNamedEntityOpts, ScopedNamedEntity } from "./named-entity.js";
 
-export type Macro = RegularMacro;
+export type Macro = FunctionalMacro;
 
-export class RegularMacro extends ScopedNamedEntity {
+export class FunctionalMacro extends ScopedNamedEntity {
   readonly syntaxType = "macro";
-  readonly macroType = "regular";
+  readonly macroType = "functional";
   readonly parameters: Identifier[] = [];
   readonly body: Block;
 
@@ -35,8 +35,8 @@ export class RegularMacro extends ScopedNamedEntity {
     return this.id;
   }
 
-  clone(parent?: Expr | undefined): RegularMacro {
-    return new RegularMacro({
+  clone(parent?: Expr | undefined): FunctionalMacro {
+    return new FunctionalMacro({
       ...super.getCloneOpts(parent),
       parameters: this.parameters.map((p) => p.clone()),
       body: this.body.clone(),
@@ -45,7 +45,7 @@ export class RegularMacro extends ScopedNamedEntity {
 
   toJSON() {
     return [
-      "regular-macro",
+      "functional-macro",
       this.id,
       ["parameters", ...this.parameters],
       this.body,

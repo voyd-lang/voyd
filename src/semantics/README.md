@@ -1,7 +1,7 @@
 # Semantic Processing
 
 - Resolves Modules
-- Expands Regular (Function) Macros
+- Expands Functional Macros
 - Resolves Entities (Types, Functions, Variables, etc)
 - Checks Types
 
