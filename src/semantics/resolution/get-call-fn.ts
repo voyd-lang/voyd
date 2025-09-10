@@ -220,8 +220,13 @@ const getCandidates = (call: Call): Fn[] => {
 
   if (arg1Type?.isObjectType()) {
     const isInsideImpl = call.parentImpl?.targetType?.id === arg1Type.id;
-    const arg0 = call.argAt(0);
-    const isObjectArgForm = !!(arg0 && arg0.isCall() && arg0.calls(":"));
+    // Determine if the call is using object-arg form by checking for any
+    // labeled arguments beyond the receiver. When such labels are present we
+    // should consider both top-level functions and methods; otherwise we limit
+    // candidates to receiver methods.
+    const isObjectArgForm = call.args
+      .toArray()
+      .some((a, i) => i > 0 && a.isCall() && a.calls(":"));
     const implFns = arg1Type.implementations
       ?.flatMap((impl) => {
         // Include both exported methods and internal methods so resolution
