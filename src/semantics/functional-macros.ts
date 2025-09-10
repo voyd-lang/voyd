@@ -37,8 +37,7 @@ export const expandFunctionalMacros = (expr: Expr): Expr => {
 
   const macro = identifier.resolve();
   if (macro?.isMacro()) {
-    const after = expandFunctionalMacros(expandMacro(macro, expr));
-    return after;
+    return expandFunctionalMacros(expandMacro(macro, expr));
   }
 
   return expr.map(expandFunctionalMacros);
@@ -144,11 +143,15 @@ export const expandMacro = (macro: Macro, call: List): Expr => {
   return result;
 };
 
-const evalMacroExpr = (expr: Expr) => {
+type EvalOpts = { skipBuiltins?: Set<string> };
+
+const evalMacroExpr = (expr: Expr, opts: EvalOpts = {}): Expr => {
   if (expr.isIdentifier()) return evalIdentifier(expr);
-  if (expr.isBlock()) return expr.evaluate(evalMacroExpr) ?? nop();
+  if (expr.isBlock()) {
+    return expr.evaluate((e) => evalMacroExpr(e, opts)) ?? nop();
+  }
   if (!expr.isList()) return expr;
-  return evalMacroTimeFnCall(expr);
+  return evalMacroTimeFnCall(expr, opts);
 };
 
 const evalIdentifier = (expr: Identifier): Expr => {
@@ -159,20 +162,20 @@ const evalIdentifier = (expr: Identifier): Expr => {
   return entity.value;
 };
 
-const evalMacroTimeFnCall = (list: List): Expr => {
+const evalMacroTimeFnCall = (list: List, opts: EvalOpts): Expr => {
   const identifier = list.first();
   if (!identifier?.isIdentifier()) return list;
 
   const idStr = getIdStr(identifier);
   const argsArr = fnsToSkipArgEval.has(idStr)
     ? list.argsArray()
-    : list.argsArray().map(evalMacroExpr);
+    : list.argsArray().map((arg) => evalMacroExpr(arg, opts));
   const args = new List({ ...list.metadata, value: argsArr });
 
   const func = functions[idStr];
-  if (func) return func(args);
+  if (func && !opts.skipBuiltins?.has(idStr)) return func(args);
 
-  const lambda = evalMacroExpr(identifier);
+  const lambda = evalMacroExpr(identifier, opts);
   if (lambda.syntaxType === "macro-lambda") {
     return callLambda(lambda, args);
   }
@@ -260,7 +263,9 @@ const functions: Record<string, MacroFn | undefined> = {
 
         if (exp.isList() && exp.calls("$@")) {
           const val = exp.at(1) ?? nop();
-          const evaluated = evalMacroExpr(val);
+          const evaluated = evalMacroExpr(val, {
+            skipBuiltins: new Set([":"]),
+          });
           const expanded =
             evaluated.isList() && evaluated.calls("use")
               ? evaluated
@@ -272,6 +277,7 @@ const functions: Record<string, MacroFn | undefined> = {
 
         return exp;
       });
+
     return expand(quote);
   },
   if: (args) => {

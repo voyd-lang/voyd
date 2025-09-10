@@ -24,7 +24,7 @@ export const compileBinaryen = (opts: CompileExprOpts<Call>): number => {
 
   const funcId = funcIdExpr as Identifier;
   const namespace = namespaceExpr.value;
-  const args = argsExpr as Call;
+  const args = argsExpr as Call; // Note: We don't actually care what this is calling, it can be foo for all we care. It just needs to be a call and shouldn't be type checked (yet)
 
   const func =
     namespace === "gc"

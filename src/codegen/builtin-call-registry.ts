@@ -12,7 +12,6 @@ import { compileCallClosure } from "./builtin-calls/compile-call-closure.js";
 export type CallCompiler = (opts: CompileExprOpts<Call>) => number;
 
 export const builtinCallCompilers = new Map<string, CallCompiler>([
-  ["quote", (opts) => (opts.expr.argAt(0) as any).value],
   ["=", compileAssign],
   ["if", compileIf],
   ["export", compileExport],
