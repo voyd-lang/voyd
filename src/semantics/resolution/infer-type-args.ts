@@ -263,6 +263,10 @@ export const inferTypeArgs = (
     const resolvedTypeExpr = resolveTypeExpr(typeExpr);
     if (argExpr.isClosure() && resolvedTypeExpr.isFnType()) {
       argExpr.setAttribute("parameterFnType", resolvedTypeExpr);
+      const untyped = argExpr.parameters.some(
+        (p) => !p.type && !p.typeExpr
+      );
+      if (untyped) continue;
     }
 
     const resolveArgExpr = resolveEntities(argExpr);
@@ -274,9 +278,7 @@ export const inferTypeArgs = (
 
     for (const [k, v] of result.entries()) {
       const existing = merged.get(k);
-      if (existing && !typesAreEqual(existing, v)) {
-        return undefined; // conflicting inference
-      }
+      if (existing && !typesAreEqual(existing, v)) return undefined;
       merged.set(k, v);
     }
   }
