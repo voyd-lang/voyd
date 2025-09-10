@@ -197,13 +197,6 @@ const functions: Record<string, MacroFn | undefined> = {
   block: (args) => args.at(-1)!,
   length: (args) => new Int({ value: args.listAt(0).length }),
   define: (args) => evalMacroVarDef(args.insert("define")),
-  Identifier: (args) => {
-    const nameDef = args.at(0);
-    const name = nameDef?.isList()
-      ? (evalMacroExpr(nameDef.identifierAt(2)) as Identifier)
-      : (nameDef as Identifier);
-    return new Identifier({ value: name.value as string });
-  },
   "=": (args) => {
     const identifier = args.first();
     if (!identifier?.isIdentifier()) {
@@ -229,7 +222,7 @@ const functions: Record<string, MacroFn | undefined> = {
   "<": (args) => bl(args, (l, r) => l < r),
   "<=": (args) => bl(args, (l, r) => l <= r),
   and: (args) => bl(args, (l, r) => !!(l && r)),
-  or: (args) => bl(args, (l, r) => !(l || r)),
+  or: (args) => bl(args, (l, r) => !!(l || r)),
   not: (args) => bool(!getMacroTimeValue(args.first())),
   "+": (args) => ba(args, (l, r) => l + r),
   "-": (args) => ba(args, (l, r) => l - r),
@@ -303,7 +296,6 @@ const functions: Record<string, MacroFn | undefined> = {
 
     return nop();
   },
-  array: (args) => args,
   slice: (args) => {
     const list = args.listAt(0);
     const start = getMacroTimeValue(args.at(1)) as number | undefined;
@@ -376,7 +368,6 @@ const functions: Record<string, MacroFn | undefined> = {
       ...args.metadata,
     });
   },
-  expand_macros: (args) => expandFunctionalMacros(args.at(0)!),
   char_to_code: (args) =>
     new Int({
       value: String((args.at(0) as Identifier).value).charCodeAt(0),
@@ -454,10 +445,7 @@ const getMacroTimeValue = (expr: Expr | undefined): any => {
   }
 
   const hasValue =
-    expr.isFloat() ||
-    expr.isInt() ||
-    expr.isBool() ||
-    expr.isIdentifier();
+    expr.isFloat() || expr.isInt() || expr.isBool() || expr.isIdentifier();
 
   if (hasValue) return expr.value;
   return expr;
