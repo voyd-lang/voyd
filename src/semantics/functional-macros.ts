@@ -37,8 +37,7 @@ export const expandFunctionalMacros = (expr: Expr): Expr => {
 
   const macro = identifier.resolve();
   if (macro?.isMacro()) {
-    const after = expandFunctionalMacros(expandMacro(macro, expr));
-    return after;
+    return expandFunctionalMacros(expandMacro(macro, expr));
   }
 
   return expr.map(expandFunctionalMacros);
@@ -272,7 +271,13 @@ const functions: Record<string, MacroFn | undefined> = {
 
         return exp;
       });
-    return expand(quote);
+
+    const result = expand(quote);
+    if (result.length === 1 && result.at(0)?.isList()) {
+      return result.at(0)!;
+    }
+
+    return result;
   },
   if: (args) => {
     const [condition, ifTrue, ifFalse] = args.toArray();

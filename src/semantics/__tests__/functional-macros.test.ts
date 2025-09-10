@@ -46,6 +46,6 @@ bin_type_to_heap_type(FixedArray<Int>)\n`;
     "binaryen",
     "modBinaryenTypeToHeapType",
     "gc",
-    [["BnrType", ["generics", ["FixedArray", ["generics", "Int"]]]]],
+    ["BnrType", ["generics", ["FixedArray", ["generics", "Int"]]]],
   ]);
 });
