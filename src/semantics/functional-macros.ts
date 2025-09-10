@@ -259,33 +259,20 @@ const functions: Record<string, MacroFn | undefined> = {
       body.flatMap((exp) => {
         if (exp.isList() && exp.calls("$")) {
           const val = exp.at(1) ?? nop();
-          return evalMacroExpr(val);
+          const evaluated = evalMacroExpr(val);
+          return evaluated.isList() && evaluated.calls("use")
+            ? evaluated
+            : expandFunctionalMacros(evaluated);
         }
 
         if (exp.isList() && exp.calls("$@")) {
           const val = exp.at(1) ?? nop();
-          return (evalMacroExpr(val) as List).toArray();
-        }
-
-        if (exp.isList()) return expand(exp);
-
-        return exp;
-      });
-    return expand(quote);
-  },
-  quote2: (quote: List) => {
-    const expand = (body: List): List =>
-      body.flatMap((exp) => {
-        if (exp.isList() && exp.calls("$")) {
-          const val = exp.at(1) ?? nop();
-          return expandFunctionalMacros(evalMacroExpr(val));
-        }
-
-        if (exp.isList() && exp.calls("$@")) {
-          const val = exp.at(1) ?? nop();
-          return (
-            expandFunctionalMacros(evalMacroExpr(val)) as List
-          ).toArray();
+          const evaluated = evalMacroExpr(val);
+          const expanded =
+            evaluated.isList() && evaluated.calls("use")
+              ? evaluated
+              : expandFunctionalMacros(evaluated);
+          return (expanded as List).toArray();
         }
 
         if (exp.isList()) return expand(exp);
@@ -396,7 +383,7 @@ const functions: Record<string, MacroFn | undefined> = {
     }),
 };
 
-const fnsToSkipArgEval = new Set(["if", "quote", "quote2", "=>", "define", "="]);
+const fnsToSkipArgEval = new Set(["if", "quote", "=>", "define", "="]);
 
 const handleOptionalConditionParenthesis = (expr: Expr): Expr => {
   if (expr.isList() && expr.first()?.isList()) {

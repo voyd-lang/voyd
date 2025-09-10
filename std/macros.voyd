@@ -7,7 +7,7 @@ export
       quote export block($body)
 
 pub macro `()
-  quote quote2 $@body
+  quote quote $@body
 
 pub macro let()
   define equals_expr body.extract(0)
