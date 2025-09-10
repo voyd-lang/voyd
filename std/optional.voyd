@@ -16,18 +16,25 @@ pub fn some<T>(v: T) -> Some<T>
 pub fn none() -> None
   None {}
 
-// Todo equitable trait constraint
-pub fn equals<T>(a: Option<T>, b: Option<T>) -> bool
-  match(a)
+// Convenience function overloads for lifting values when method resolution is not available
+pub fn lift<T>(v: T) -> Optional<T>
+  some(v)
+
+pub fn lift<T>(v: Optional<T>) -> Optional<T>
+  v
+
+// Optional chaining operator macro: l?.r
+// Expands to: if __opc := l.lift() then: __opc.r.lift() else: none()
+pub macro '?.'(l, r)
+  ` if
+    (:= __opc $l)
+    (: then (lift (member-access __opc $r)))
+    (: else (none))
+
+// Helper to chain over Optional values
+pub fn opt_chain<T, O>(opt: Optional<T>, f: (v: T) -> Optional<O>) -> Optional<O>
+  match(opt)
     Some<T>:
-      match(b)
-        Some<T>:
-          a.value == b.value
-        None:
-          false
+      f(opt.value)
     None:
-      match(b)
-        Some<T>:
-          false
-        None:
-          true
+      none()
