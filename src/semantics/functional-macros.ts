@@ -177,7 +177,7 @@ const evalMacroTimeFnCall = (list: List): Expr => {
     return callLambda(lambda, args);
   }
 
-  return list;
+  return new List({ ...list.metadata, value: [identifier, ...argsArr] });
 };
 
 const callLambda = (lambda: MacroLambda, args: List): Expr => {
@@ -259,12 +259,20 @@ const functions: Record<string, MacroFn | undefined> = {
       body.flatMap((exp) => {
         if (exp.isList() && exp.calls("$")) {
           const val = exp.at(1) ?? nop();
-          return evalMacroExpr(val);
+          const evaluated = evalMacroExpr(val);
+          return evaluated.isList() && evaluated.calls("use")
+            ? evaluated
+            : expandFunctionalMacros(evaluated);
         }
 
         if (exp.isList() && exp.calls("$@")) {
           const val = exp.at(1) ?? nop();
-          return (evalMacroExpr(val) as List).toArray();
+          const evaluated = evalMacroExpr(val);
+          const expanded =
+            evaluated.isList() && evaluated.calls("use")
+              ? evaluated
+              : expandFunctionalMacros(evaluated);
+          return (expanded as List).toArray();
         }
 
         if (exp.isList()) return expand(exp);

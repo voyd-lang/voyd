@@ -68,7 +68,7 @@ exports[`functional macro expansion 1`] = `
         ],
         [
           "functional-macro",
-          "let#978",
+          "let#983",
           [
             "parameters",
           ],
@@ -121,7 +121,7 @@ exports[`functional macro expansion 1`] = `
         ],
         [
           "functional-macro",
-          "fn#1771",
+          "fn#1847",
           [
             "parameters",
           ],
