@@ -979,7 +979,8 @@ const resolveClosureCall = (call: Call): Call => {
     : getExprType(closure);
   // Propagate the expected function type identity to the callee identifier so
   // codegen can align the call_ref heap type with the closure's compiled type.
-  if (closureType?.isFnType()) closure.setAttribute("parameterFnType", closureType);
+  if (closureType?.isFnType())
+    closure.setAttribute("parameterFnType", closureType);
   const params = closure.isClosure()
     ? closure.parameters
     : closureType?.isFnType()
@@ -1021,7 +1022,7 @@ const hasUntypedClosure = (expr: Expr | undefined): boolean =>
 const specialCallResolvers: Record<string, (c: Call) => Expr> = {
   "::": resolveModuleAccess,
   export: resolveExport,
-  "?.": resolveOptionalCoalesce,
+  "?.": resolveOptionalChain,
   if: resolveIf,
   "call-closure": resolveClosureCall,
   ":": resolveLabeledArg,
@@ -1083,14 +1084,14 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
   return call;
 };
 
-// Optional coalesce: a?.b
+// Optional chaining: a?.b
 const isSomeObject = (type?: Type): boolean =>
   !!(
     type?.isObjectType() &&
     (type.name.is("Some") || type.genericParent?.name.is("Some"))
   );
 
-function resolveOptionalCoalesce(call: Call): Expr {
+function resolveOptionalChain(call: Call): Expr {
   const left = resolveEntities(call.argAt(0));
   const right = call.argAt(1);
 

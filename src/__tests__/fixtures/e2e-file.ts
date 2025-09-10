@@ -440,7 +440,7 @@ pub fn test6() -> i32
     sum = sum + n
   sum
 
-// Optional coalesce: nested chain returns 5
+// Optional chaining: nested chain returns 5
 pub fn test7() -> i32
   let structure = {
     a: some { b: some { c: 5 } }
