@@ -33,9 +33,9 @@ pub fn test3() -> i32
   let arr: Array<(String, i32)> = [("a", 42)]
   wrap(arr)
 
-fn reduce_test<T>({ arr: Array<T>, start: T, reducer cb: (acc: T, current: T) -> T }) -> T
+fn reduce_2<T>(arr: Array<T>, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T
   let iterator = arr.iterate()
-  let reducer: (acc: T) -> T = (acc: T) =>
+  let reducer: (acc: T) -> T = (acc: T) -> T =>
     iterator.next().match(opt)
       Some<T>:
         reducer(cb(acc, opt.value))
@@ -44,8 +44,9 @@ fn reduce_test<T>({ arr: Array<T>, start: T, reducer cb: (acc: T, current: T) ->
   reducer(start)
 
 pub fn test4() -> i32
-  let arr: Array<i32> = [1, 2, 3]
-  reduce_test<i32> arr: arr start: 0 reducer: (acc: i32, current: i32) => acc + current
+  [1, 2, 3]
+    .reduce_2 start: 0 reducer: (acc, current) =>
+      acc + current
 
 // ---- generics-union-infer ----
 fn use_union<T>(val: Array<T> | String) -> i32
