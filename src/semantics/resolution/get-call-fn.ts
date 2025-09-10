@@ -220,8 +220,9 @@ const getCandidates = (call: Call): Fn[] => {
 
   if (arg1Type?.isObjectType()) {
     const isInsideImpl = call.parentImpl?.targetType?.id === arg1Type.id;
-    const arg0 = call.argAt(0);
-    const isObjectArgForm = !!(arg0 && arg0.isCall() && arg0.calls(":"));
+    const hasLabeledArgs = call.args
+      .toArray()
+      .some((a) => a.isCall() && a.calls(":"));
     const implFns = arg1Type.implementations
       ?.flatMap((impl) => {
         // Include both exported methods and internal methods so resolution
@@ -239,15 +240,14 @@ const getCandidates = (call: Call): Fn[] => {
       .filter((fn) =>
         isInsideImpl ? fn.parentImpl !== call.parentImpl : true
       );
-    if (implFns && implFns.length && !isObjectArgForm) {
-      // Prefer receiver methods in method-call position. When arg1 is an
-      // object type and we are not using object-arg form, restrict candidates
-      // to only the receiver's methods. This avoids ambiguity with generic
-      // instances from other scopes whose `self` type hasn't been specialized.
+    if (implFns && implFns.length && !hasLabeledArgs) {
+      // Prefer receiver methods in method-call position when there are no
+      // labeled arguments. This avoids ambiguity with generic instances from
+      // other scopes whose `self` type hasn't been specialized.
       fns = [...implFns];
     } else if (implFns && implFns.length) {
-      // In object-arg form (labeled params), don't drop top-level functions;
-      // include both so labeled-arg overloads can match.
+      // When labeled arguments are present, keep both top-level functions and
+      // methods so that labeled-arg overloads can match.
       fns.push(...implFns);
     }
   }
