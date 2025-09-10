@@ -49,3 +49,36 @@ bin_type_to_heap_type(FixedArray<Int>)\n`;
     ["BnrType", ["generics", ["FixedArray", ["generics", "Int"]]]],
   ]);
 });
+
+test("splicing macro preserves labels", async (t) => {
+  const code = `\
+macro binaryen_gc_call_1(func, args)\n\
+  quote binaryen func: $func namespace: gc args: $args\n\
+macro bin_type_to_heap_type_1(type)\n\
+  quote $@(binaryen_gc_call_1(modBinaryenTypeToHeapType, list(quote (BnrType<($type)>))))\n\
+bin_type_to_heap_type_1(FixedArray<Int>)\n`;
+  const parserOutput = parse(code);
+  const files = {
+    std: new List([]),
+    test: parserOutput,
+  };
+  const resolvedModules = registerModules({
+    files,
+    srcPath: path.dirname("test"),
+    indexPath: "test.voyd",
+  });
+  const result = expandFunctionalMacros(resolvedModules) as any;
+  const testModule = (result as any).value.at(-1) as any;
+  const last = testModule.value.at(-1) as List;
+  const rendered = JSON.parse(JSON.stringify(last));
+  t.expect(rendered).toEqual([
+    "binaryen",
+    [":", "func", "modBinaryenTypeToHeapType"],
+    [":", "namespace", "gc"],
+    [
+      ":",
+      "args",
+      ["list", ["BnrType", ["generics", ["FixedArray", ["generics", "Int"]]]]],
+    ],
+  ]);
+});

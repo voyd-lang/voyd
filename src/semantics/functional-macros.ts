@@ -143,11 +143,14 @@ export const expandMacro = (macro: Macro, call: List): Expr => {
   return result;
 };
 
-const evalMacroExpr = (expr: Expr) => {
+type EvalOpts = { preserveLabels?: boolean };
+
+const evalMacroExpr = (expr: Expr, opts: EvalOpts = {}): Expr => {
   if (expr.isIdentifier()) return evalIdentifier(expr);
-  if (expr.isBlock()) return expr.evaluate(evalMacroExpr) ?? nop();
+  if (expr.isBlock())
+    return expr.evaluate((e) => evalMacroExpr(e, opts)) ?? nop();
   if (!expr.isList()) return expr;
-  return evalMacroTimeFnCall(expr);
+  return evalMacroTimeFnCall(expr, opts);
 };
 
 const evalIdentifier = (expr: Identifier): Expr => {
@@ -158,28 +161,32 @@ const evalIdentifier = (expr: Identifier): Expr => {
   return entity.value;
 };
 
-const evalMacroTimeFnCall = (list: List): Expr => {
+const evalMacroTimeFnCall = (list: List, opts: EvalOpts): Expr => {
   const identifier = list.first();
   if (!identifier?.isIdentifier()) return list;
 
   const idStr = getIdStr(identifier);
   const argsArr = fnsToSkipArgEval.has(idStr)
     ? list.argsArray()
-    : list.argsArray().map(evalMacroExpr);
+    : list.argsArray().map((arg) => evalMacroExpr(arg, opts));
   const args = new List({ ...list.metadata, value: argsArr });
 
-  const func = functions[idStr];
-  if (func) return func(args);
+  if (opts.preserveLabels && idStr === ":") {
+    return new List({ ...list.metadata, value: [identifier, ...argsArr] });
+  }
 
-  const lambda = evalMacroExpr(identifier);
+  const func = functions[idStr];
+  if (func) return func(args, opts);
+
+  const lambda = evalMacroExpr(identifier, opts);
   if (lambda.syntaxType === "macro-lambda") {
-    return callLambda(lambda, args);
+    return callLambda(lambda, args, opts);
   }
 
   return new List({ ...list.metadata, value: [identifier, ...argsArr] });
 };
 
-const callLambda = (lambda: MacroLambda, args: List): Expr => {
+const callLambda = (lambda: MacroLambda, args: List, opts: EvalOpts): Expr => {
   const clone = lambda.clone();
 
   registerMacroVar({ with: clone, name: "&lambda", value: clone.clone() });
@@ -187,16 +194,16 @@ const callLambda = (lambda: MacroLambda, args: List): Expr => {
     registerMacroVar({ with: clone, name, value: args.at(index)! });
   });
 
-  return clone.body.map((exp) => evalMacroExpr(exp)).at(-1) ?? nop();
+  return clone.body.map((exp) => evalMacroExpr(exp, opts)).at(-1) ?? nop();
 };
 
-type MacroFn = (args: List) => Expr;
+type MacroFn = (args: List, opts: EvalOpts) => Expr;
 
 const functions: Record<string, MacroFn | undefined> = {
   block: (args) => args.at(-1)!,
   length: (args) => new Int({ value: args.listAt(0).length }),
-  define: (args) => evalMacroVarDef(args.insert("define")),
-  "=": (args) => {
+  define: (args, opts) => evalMacroVarDef(args.insert("define")),
+  "=": (args, opts) => {
     const identifier = args.first();
     if (!identifier?.isIdentifier()) {
       throw new Error(`Expected identifier, got ${identifier}`);
@@ -211,7 +218,7 @@ const functions: Record<string, MacroFn | undefined> = {
       throw new Error(`Variable ${identifier} is not mutable`);
     }
 
-    info.value = evalMacroExpr(args.at(1)!);
+    info.value = evalMacroExpr(args.at(1)!, opts);
     return nop();
   },
   ":": (args) => args.at(1) ?? nop(),
@@ -246,12 +253,12 @@ const functions: Record<string, MacroFn | undefined> = {
 
     return new MacroLambda({ parameters, body });
   },
-  quote: (quote: List) => {
+  quote: (quote: List, opts) => {
     const expand = (body: List): List =>
       body.flatMap((exp) => {
         if (exp.isList() && exp.calls("$")) {
           const val = exp.at(1) ?? nop();
-          const evaluated = evalMacroExpr(val);
+          const evaluated = evalMacroExpr(val, opts);
           return evaluated.isList() && evaluated.calls("use")
             ? evaluated
             : expandFunctionalMacros(evaluated);
@@ -259,7 +266,10 @@ const functions: Record<string, MacroFn | undefined> = {
 
         if (exp.isList() && exp.calls("$@")) {
           const val = exp.at(1) ?? nop();
-          const evaluated = evalMacroExpr(val);
+          const evaluated = evalMacroExpr(val, {
+            ...opts,
+            preserveLabels: true,
+          });
           const expanded =
             evaluated.isList() && evaluated.calls("use")
               ? evaluated
@@ -279,7 +289,7 @@ const functions: Record<string, MacroFn | undefined> = {
 
     return result;
   },
-  if: (args) => {
+  if: (args, opts) => {
     const [condition, ifTrue, ifFalse] = args.toArray();
 
     if (!condition || !ifTrue) {
@@ -288,15 +298,16 @@ const functions: Record<string, MacroFn | undefined> = {
     }
 
     const condResult = evalMacroExpr(
-      handleOptionalConditionParenthesis(condition)
+      handleOptionalConditionParenthesis(condition),
+      opts
     );
 
     if (getMacroTimeValue(condResult)) {
-      return evalMacroExpr(ifTrue);
+      return evalMacroExpr(ifTrue, opts);
     }
 
     if (ifFalse) {
-      return evalMacroExpr(ifFalse);
+      return evalMacroExpr(ifFalse, opts);
     }
 
     return nop();
@@ -312,17 +323,17 @@ const functions: Record<string, MacroFn | undefined> = {
     const index = getMacroTimeValue(args.at(1)) as number;
     return list.at(index) ?? nop();
   },
-  map: (args) => {
+  map: (args, opts) => {
     const list = args.first()! as List;
     const lambda = args.at(1)! as MacroLambda;
     return list.map((val, index, array) => {
       const lambdaArgs = new List({
         value: [val, new Int({ value: index }), new List({ value: array })],
       });
-      return callLambda(lambda, lambdaArgs);
+      return callLambda(lambda, lambdaArgs, opts);
     });
   },
-  reduce: (args) => {
+  reduce: (args, opts) => {
     const list = args.at(0)! as List;
     const start = args.at(1)!;
     const lambda = args.at(2)! as MacroLambda;
@@ -335,8 +346,8 @@ const functions: Record<string, MacroFn | undefined> = {
           new List({ value: array }),
         ],
       });
-      return callLambda(lambda, args);
-    }, evalMacroExpr(start));
+      return callLambda(lambda, args, opts);
+    }, evalMacroExpr(start, opts));
   },
   push: (args) => {
     const list = args.at(0) as List;
