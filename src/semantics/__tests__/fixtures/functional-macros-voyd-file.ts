@@ -1,6 +1,6 @@
 export const functionalMacrosVoydFile = `
 macro \`()
-  quote quote $@body
+  quote quote2 $@body
 
 macro let()
   define equals_expr body.extract(0)
