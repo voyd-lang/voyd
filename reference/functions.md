@@ -124,6 +124,28 @@ greet("Ada", "Lovelace") // middle -> some("Lovelace")
 When an optional parameter is omitted, `none()` is inserted automatically. When a
 non-optional value is supplied, it is wrapped with `some(...)` at the call site.
 
+Optional parameters can appear before labeled arguments. When skipped, later
+arguments must be labeled:
+
+```voyd
+fn sum(a: i32, b?: i32, { c: i32 }) -> i32
+  a + c
+
+sum(1, c: 2) // b is omitted
+```
+
+Providing a leftover positional argument after skipping an optional one causes
+a compile error, and parameters typed as `Optional<T>` without `?` remain
+required.
+
+Closures support optional parameters using the same syntax:
+
+```voyd
+let f = (name: String, middle?: String) => greet(name, middle)
+f("John")
+f("John", "Quincy")
+```
+
 ## Uniform Function Call Syntax (Dot Notation)
 
 The dot (or period) operator applies the expression on the left as an argument
@@ -300,5 +322,3 @@ fn walk({dog: Dog}) // This is fine, the label, dog, distinguishes this function
 
 walk(dog: dexter) // Woof!
 ```
-
-## Function Resolution

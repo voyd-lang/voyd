@@ -135,7 +135,7 @@ Labeled arguments can be defined by wrapping parameters you wish to be labeled
 on call in curly braces.
 
 ```rust
-fn add(a: i32, {to: i32}) = a + to
+fn add(a: i32, { to: i32 }) = a + to
 
 add(1, to: 2)
 ```
@@ -144,7 +144,7 @@ By default, the argument label is the same as the parameter name. You can
 override this by specifying the label before the argument name.
 
 ```rust
-fn add(a: i32, {to:b: i32}) = a + b
+fn add(a: i32, { to b: i32 }) = a + b
 
 add(1, to: 2)
 ```
@@ -198,8 +198,9 @@ Ifs are expressions that return a value
 
 ```rust
 let x = if 3 < val then: "hello" else: "bye"
+```
 
-# VSX DOM Client (Browser)
+## VSX DOM Client (Browser)
 
 Voyd can encode VSX element trees as MsgPack from Wasm. A tiny client renderer mounts these trees to the DOM.
 
@@ -223,32 +224,26 @@ const component = instance.exports.run as () => number
 const container = document.getElementById('app')!
 render(component, container, { instance })
 ```
-```
 
 ## Loops
 
 > Status: Partially implemented.
 > - Tail call optimization fully implemented.
 > - While loops and break partially implemented. Do not yet support returning a value.
-> - For loops not yet implemented.
 
 While loops are the most basic looping construct
 
 ```rust
 while condition do:
   do_work()
-```
 
-For loops can iterate through items of an iterable (such as an array)
-
-```rust
-for item in iterable do:
-  print item
+while item in array do:
+  print(item)
 ```
 
 Voyd is also tail call optimized:
 
-```
+```rust
 // This function is super speedy and uses very little memory
 pub fn fib(n: i32, a: i32, b: i32) -> i32
   if n < 1 then: a
@@ -410,7 +405,7 @@ let double = n => n * 2
 array.map n => n * 2
 ```
 
-Voyd also supports a concise syntax for passing closures to labeled arguments:
+Voyd also supports a concise syntax for passing closures to labeled arguments (not yet implemented):
 
 ```rust
 try do():
@@ -441,7 +436,7 @@ fn add<T>(a: T, b: T) -> T
   a + b
 ```
 
-With trait constraints
+With trait constraints (not yet implemented)
 
 ```rust
 fn add<T: Numeric>(a: T, b: T) -> T
@@ -475,22 +470,4 @@ effect State
 
 // Tail resumptive effects with one function can be defined more concisely as
 effect fn get() -> Int
-```
-
-## JSX
-
-> Status: Implementation in progress
-
-Voyd has built in support for JSX. Useful for rendering websites or creating
-interactive web apps
-
-```tsx
-fn app() -> JSX::Element
-  let todo_items = ["wake up", "eat", "code", "sleep"]
-  <div>
-    <h1>TODO</h1>
-    <ul>
-      {todo_items.map i => <li>{i}</li>}
-    </ul>
-  </div>
 ```

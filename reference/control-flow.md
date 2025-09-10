@@ -58,7 +58,7 @@ obj Some: Optional {
 }
 
 fn divide(a: i32, b: i32) -> Optional
-  if b == 0
+  if b == 0 then:
     None {}
   else:
     Some { value: a / b }
