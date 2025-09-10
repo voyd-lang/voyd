@@ -44,6 +44,7 @@ import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
+import { canonicalType } from "../types/canonicalize.js";
 
 const resolveMemberAccessDirect = (call: Call): Call => {
   call.args = call.args.map(resolveEntities);
@@ -204,15 +205,14 @@ const resolveCallFn = (call: Call, candidateFns?: Fn[]) => {
 
 const arrayElemType = (type?: Type): Type | undefined => {
   if (!type) return;
-  // Unwrap aliases eagerly
-  if (type.isTypeAlias()) return arrayElemType(type.type);
-  if (type.isObjectType()) {
-    if (!type.name.is("Array") && !type.genericParent?.name.is("Array")) return;
-    const arg = type.appliedTypeArgs?.[0];
-    return arg && arg.isTypeAlias() ? arg.type : undefined;
+  const t = canonicalType(type);
+  if (t.isObjectType()) {
+    if (!t.name.is("Array") && !t.genericParent?.name.is("Array")) return;
+    const arg = t.appliedTypeArgs?.[0];
+    return arg ? canonicalType(arg) : undefined;
   }
-  if (!type.isUnionType()) return;
-  return type.types.map(arrayElemType).find((t): t is Type => !!t);
+  if (!t.isUnionType()) return;
+  return t.types.map(arrayElemType).find((tt): tt is Type => !!tt);
 };
 
 const resolveArrayArgs = (call: Call) => {
@@ -222,6 +222,9 @@ const resolveArrayArgs = (call: Call) => {
   if (!fn) {
     // Ensure candidate signatures are ready
     candidates.forEach((c) => resolveFnSignature(c));
+  } else {
+    // Ensure resolved function's parameter types are available
+    resolveFnSignature(fn);
   }
   call.args.each((arg: Expr, index: number) => {
     const param = fn?.parameters[index];
@@ -236,15 +239,21 @@ const resolveArrayArgs = (call: Call) => {
 
     const isLabeled = arg.isCall() && arg.calls(":");
     const inner = isLabeled ? arg.argAt(1) : arg;
-    const arrayCall =
-      inner?.isCall() && inner.hasAttribute("arrayLiteral")
-        ? (inner as Call)
-        : undefined;
-    if (!arrayCall) return;
 
-    const arr = (
-      arrayCall.getAttribute("arrayLiteral") as ArrayLiteral
-    ).clone();
+    // Support both early-resolved array arguments (new_array call carrying
+    // the original ArrayLiteral via the 'arrayLiteral' attribute) and raw
+    // ArrayLiteral nodes when preprocessArgs skipped resolution.
+    let originalArr: ArrayLiteral | undefined;
+    if (inner?.isCall() && inner.hasAttribute("arrayLiteral")) {
+      originalArr = (inner as Call).getAttribute(
+        "arrayLiteral"
+      ) as ArrayLiteral;
+    } else if (inner?.isArrayLiteral()) {
+      originalArr = inner as ArrayLiteral;
+    }
+    if (!originalArr) return;
+
+    const arr = originalArr.clone();
     // Only use candidate-derived elemType when the array is empty to avoid
     // masking helpful overload errors on mismatched non-empty arrays.
     const effectiveElemType =
@@ -267,25 +276,40 @@ const resolveClosureArgs = (call: Call) => {
     const isLabeled = arg.isCall() && arg.calls(":");
     const inner = isLabeled ? arg.argAt(1) : arg;
     if (!inner?.isClosure()) return;
-    const expected = paramType?.isTypeAlias() ? paramType.type : paramType;
+    // Derive expected closure type either from a resolved parameter type or
+    // by resolving the parameter's type expression when the type has not yet
+    // been materialized (common for generics).
+    let expected = paramType ? canonicalType(paramType) : undefined;
+    if (!expected) {
+      const paramTypeExpr = fn.parameters[index]?.typeExpr;
+      const resolvedExprType = paramTypeExpr
+        ? getExprType(resolveTypeExpr(paramTypeExpr))
+        : undefined;
+      expected = resolvedExprType ? canonicalType(resolvedExprType) : undefined;
+    }
     if (expected?.isFnType()) {
+      // Attach the expected function type on the closure so codegen can
+      // align the compiled function-reference heap type with the caller's
+      // expectation, avoiding ref.cast traps.
+      inner.setAttribute("parameterFnType", expected);
       inner.parameters.forEach((p, i) => {
-        const exp = expected.parameters[i]?.type;
-        if (!p.type && !p.typeExpr && exp) p.type = exp;
+        const expParam = expected.parameters[i];
+        const exp =
+          expParam?.type ??
+          (expParam?.typeExpr
+            ? getExprType(resolveTypeExpr(expParam.typeExpr))
+            : undefined);
+        if (!p.type && !p.typeExpr && exp) p.type = canonicalType(exp);
       });
       if (!inner.returnTypeExpr && !inner.annotatedReturnType) {
-        const ret = expected.returnType?.isTypeAlias()
-          ? expected.returnType.type ?? expected.returnType
-          : expected.returnType;
-        inner.annotatedReturnType = ret;
+        inner.annotatedReturnType =
+          expected.returnType && canonicalType(expected.returnType);
       }
     }
     const resolved = resolveClosure(inner);
     if (expected?.isFnType()) {
-      const ret = expected.returnType?.isTypeAlias()
-        ? expected.returnType.type ?? expected.returnType
-        : expected.returnType;
-      resolved.returnType = ret;
+      resolved.returnType =
+        expected.returnType && canonicalType(expected.returnType);
     }
     if (isLabeled) {
       arg.args.set(1, resolved);
@@ -347,7 +371,13 @@ const resolveOptionalArgs = (call: Call) => {
 
     const argType = getExprType(argExpr);
     const paramType = param.type;
-    if (typesAreCompatible(argType, paramType)) return;
+    if (
+      typesAreCompatible(
+        argType && canonicalType(argType),
+        paramType && canonicalType(paramType)
+      )
+    )
+      return;
 
     const someCall = resolveEntities(
       new Call({
@@ -870,6 +900,17 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
   const thenBlock = toBlock(thenExpr);
   thenBlock.body = [unwrap, ...thenBlock.body];
 
+  // If an else branch exists, try to resolve it against the expected type
+  // from the Some<T>.value field so empty literals (e.g., []) can be typed.
+  const expectedThenType =
+    someType && (someType as any).isObjectType?.()
+      ? (someType as any).getField("value")?.type
+      : undefined;
+  const resolvedElseExpr =
+    elseExpr && expectedThenType
+      ? resolveWithExpected(elseExpr, expectedThenType)
+      : elseExpr;
+
   const match = new Match({
     ...call.metadata,
     operand,
@@ -879,8 +920,8 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
         expr: thenBlock,
       },
     ],
-    defaultCase: elseExpr
-      ? { expr: toBlock(elseExpr) }
+    defaultCase: resolvedElseExpr
+      ? { expr: toBlock(resolvedElseExpr) }
       : {
           expr: toBlock(
             new Call({
@@ -936,6 +977,9 @@ const resolveClosureCall = (call: Call): Call => {
   const closureType = closure.isClosure()
     ? closure.getType()
     : getExprType(closure);
+  // Propagate the expected function type identity to the callee identifier so
+  // codegen can align the call_ref heap type with the closure's compiled type.
+  if (closureType?.isFnType()) closure.setAttribute("parameterFnType", closureType);
   const params = closure.isClosure()
     ? closure.parameters
     : closureType?.isFnType()

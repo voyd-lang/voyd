@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`regular macro expansion 1`] = `
+exports[`functional macro expansion 1`] = `
 [
   "module",
   "root",
@@ -46,7 +46,7 @@ exports[`regular macro expansion 1`] = `
           ],
         ],
         [
-          "regular-macro",
+          "functional-macro",
           "\`#931",
           [
             "parameters",
@@ -67,8 +67,8 @@ exports[`regular macro expansion 1`] = `
           ],
         ],
         [
-          "regular-macro",
-          "let#978",
+          "functional-macro",
+          "let#983",
           [
             "parameters",
           ],
@@ -120,8 +120,8 @@ exports[`regular macro expansion 1`] = `
           ],
         ],
         [
-          "regular-macro",
-          "fn#1771",
+          "functional-macro",
+          "fn#1847",
           [
             "parameters",
           ],

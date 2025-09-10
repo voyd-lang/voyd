@@ -14,6 +14,7 @@ import { inferTypeArgs, TypeArgInferencePair, unifyTypeParams } from "./infer-ty
 import { typesAreEqual } from "./types-are-equal.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { Type } from "../../syntax-objects/types.js";
+import { canonicalType } from "../types/canonicalize.js";
 
 export type ResolveFnTypesOpts = {
   typeArgs?: List;
@@ -201,7 +202,9 @@ const fnTypeArgsMatch = (args: List, candidate: Fn): boolean =>
     ? candidate.appliedTypeArgs.every((t, i) => {
         const argType = getExprType(args.at(i));
         const appliedType = getExprType(t);
-        return typesAreEqual(argType, appliedType);
+        const canonArg = argType && canonicalType(argType);
+        const canonApplied = appliedType && canonicalType(appliedType);
+        return typesAreEqual(canonArg, canonApplied);
       })
     : false;
 

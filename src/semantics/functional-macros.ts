@@ -8,7 +8,7 @@ import {
   List,
   MacroLambda,
   Macro,
-  RegularMacro,
+  FunctionalMacro,
   MacroVariable,
   VoydModule,
   Block,
@@ -21,7 +21,7 @@ import {
 } from "./resolution/resolve-use.js";
 
 /** Expands/evaluates macro functions. Also handles use and module declaration initialization */
-export const expandRegularMacros = (expr: Expr): Expr => {
+export const expandFunctionalMacros = (expr: Expr): Expr => {
   if (expr.isModule()) return expandModuleMacros(expr);
   if (!expr.isList()) return expr;
   if (expr.calls("use")) return initUse(expr);
@@ -32,22 +32,21 @@ export const expandRegularMacros = (expr: Expr): Expr => {
 
   const identifier = expr.first();
   if (!identifier?.isIdentifier()) {
-    return expr.map(expandRegularMacros);
+    return expr.map(expandFunctionalMacros);
   }
 
   const macro = identifier.resolve();
   if (macro?.isMacro()) {
-    const after = expandRegularMacros(expandMacro(macro, expr));
-    return after;
+    return expandFunctionalMacros(expandMacro(macro, expr));
   }
 
-  return expr.map(expandRegularMacros);
+  return expr.map(expandFunctionalMacros);
 };
 
 const expandModuleMacros = (module: VoydModule): VoydModule => {
   if (module.phase > 0) return module;
   module.phase = 1;
-  module.applyMap(expandRegularMacros);
+  module.applyMap(expandFunctionalMacros);
   module.phase = 2;
   return module;
 };
@@ -72,7 +71,7 @@ const initMod = (list: List) => {
   const module = new VoydModule({
     ...list.metadata,
     name,
-    value: block.argsArray().map(expandRegularMacros),
+    value: block.argsArray().map(expandFunctionalMacros),
   });
   list.parentModule?.registerEntity(module);
   return module;
@@ -81,7 +80,7 @@ const initMod = (list: List) => {
 const evalExport = (list: List) => {
   const block = list.listAt(1); // export is expected to be passed a block
 
-  const expandedBlock = block.map((exp) => expandRegularMacros(exp));
+  const expandedBlock = block.map((exp) => expandFunctionalMacros(exp));
   registerExports(list, expandedBlock.toArray(), expandModuleMacros);
 
   list.set(1, expandedBlock);
@@ -89,7 +88,7 @@ const evalExport = (list: List) => {
 };
 
 const evalMacroLetDef = (list: List) => {
-  const expanded = expandRegularMacros(list.set(0, "let")) as List;
+  const expanded = expandFunctionalMacros(list.set(0, "let")) as List;
   return evalMacroVarDef(expanded);
 };
 
@@ -98,7 +97,7 @@ const evalMacroDef = (list: List): Macro => {
   const signature = list.listAt(1);
   const name = signature.identifierAt(0);
   const parameters = signature.argsArray() as Identifier[];
-  return new RegularMacro({
+  return new FunctionalMacro({
     ...list.metadata,
     name,
     parameters,
@@ -106,7 +105,7 @@ const evalMacroDef = (list: List): Macro => {
       ...list.metadata,
       body: list
         .slice(2)
-        .map(expandRegularMacros)
+        .map(expandFunctionalMacros)
         .map((expr) => {
           if (expr.isList() && expr.calls("quote")) return expr;
           return initializeMacroBlocks(expr);
@@ -144,11 +143,15 @@ export const expandMacro = (macro: Macro, call: List): Expr => {
   return result;
 };
 
-const evalMacroExpr = (expr: Expr) => {
+type EvalOpts = { skipBuiltins?: Set<string> };
+
+const evalMacroExpr = (expr: Expr, opts: EvalOpts = {}): Expr => {
   if (expr.isIdentifier()) return evalIdentifier(expr);
-  if (expr.isBlock()) return expr.evaluate(evalMacroExpr) ?? nop();
+  if (expr.isBlock()) {
+    return expr.evaluate((e) => evalMacroExpr(e, opts)) ?? nop();
+  }
   if (!expr.isList()) return expr;
-  return evalMacroTimeFnCall(expr);
+  return evalMacroTimeFnCall(expr, opts);
 };
 
 const evalIdentifier = (expr: Identifier): Expr => {
@@ -159,25 +162,25 @@ const evalIdentifier = (expr: Identifier): Expr => {
   return entity.value;
 };
 
-const evalMacroTimeFnCall = (list: List): Expr => {
+const evalMacroTimeFnCall = (list: List, opts: EvalOpts): Expr => {
   const identifier = list.first();
   if (!identifier?.isIdentifier()) return list;
 
   const idStr = getIdStr(identifier);
   const argsArr = fnsToSkipArgEval.has(idStr)
     ? list.argsArray()
-    : list.argsArray().map(evalMacroExpr);
+    : list.argsArray().map((arg) => evalMacroExpr(arg, opts));
   const args = new List({ ...list.metadata, value: argsArr });
 
   const func = functions[idStr];
-  if (func) return func(args);
+  if (func && !opts.skipBuiltins?.has(idStr)) return func(args);
 
-  const lambda = evalMacroExpr(identifier);
+  const lambda = evalMacroExpr(identifier, opts);
   if (lambda.syntaxType === "macro-lambda") {
     return callLambda(lambda, args);
   }
 
-  return list;
+  return new List({ ...list.metadata, value: [identifier, ...argsArr] });
 };
 
 const callLambda = (lambda: MacroLambda, args: List): Expr => {
@@ -197,13 +200,6 @@ const functions: Record<string, MacroFn | undefined> = {
   block: (args) => args.at(-1)!,
   length: (args) => new Int({ value: args.listAt(0).length }),
   define: (args) => evalMacroVarDef(args.insert("define")),
-  Identifier: (args) => {
-    const nameDef = args.at(0);
-    const name = nameDef?.isList()
-      ? (evalMacroExpr(nameDef.identifierAt(2)) as Identifier)
-      : (nameDef as Identifier);
-    return new Identifier({ value: name.value as string });
-  },
   "=": (args) => {
     const identifier = args.first();
     if (!identifier?.isIdentifier()) {
@@ -229,7 +225,7 @@ const functions: Record<string, MacroFn | undefined> = {
   "<": (args) => bl(args, (l, r) => l < r),
   "<=": (args) => bl(args, (l, r) => l <= r),
   and: (args) => bl(args, (l, r) => !!(l && r)),
-  or: (args) => bl(args, (l, r) => !(l || r)),
+  or: (args) => bl(args, (l, r) => !!(l || r)),
   not: (args) => bool(!getMacroTimeValue(args.first())),
   "+": (args) => ba(args, (l, r) => l + r),
   "-": (args) => ba(args, (l, r) => l - r),
@@ -259,18 +255,29 @@ const functions: Record<string, MacroFn | undefined> = {
       body.flatMap((exp) => {
         if (exp.isList() && exp.calls("$")) {
           const val = exp.at(1) ?? nop();
-          return evalMacroExpr(val);
+          const evaluated = evalMacroExpr(val);
+          return evaluated.isList() && evaluated.calls("use")
+            ? evaluated
+            : expandFunctionalMacros(evaluated);
         }
 
         if (exp.isList() && exp.calls("$@")) {
           const val = exp.at(1) ?? nop();
-          return (evalMacroExpr(val) as List).toArray();
+          const evaluated = evalMacroExpr(val, {
+            skipBuiltins: new Set([":"]),
+          });
+          const expanded =
+            evaluated.isList() && evaluated.calls("use")
+              ? evaluated
+              : expandFunctionalMacros(evaluated);
+          return (expanded as List).toArray();
         }
 
         if (exp.isList()) return expand(exp);
 
         return exp;
       });
+
     return expand(quote);
   },
   if: (args) => {
@@ -295,7 +302,6 @@ const functions: Record<string, MacroFn | undefined> = {
 
     return nop();
   },
-  array: (args) => args,
   slice: (args) => {
     const list = args.listAt(0);
     const start = getMacroTimeValue(args.at(1)) as number | undefined;
@@ -368,7 +374,6 @@ const functions: Record<string, MacroFn | undefined> = {
       ...args.metadata,
     });
   },
-  expand_macros: (args) => expandRegularMacros(args.at(0)!),
   char_to_code: (args) =>
     new Int({
       value: String((args.at(0) as Identifier).value).charCodeAt(0),
@@ -446,10 +451,7 @@ const getMacroTimeValue = (expr: Expr | undefined): any => {
   }
 
   const hasValue =
-    expr.isFloat() ||
-    expr.isInt() ||
-    expr.isBool() ||
-    expr.isIdentifier();
+    expr.isFloat() || expr.isInt() || expr.isBool() || expr.isIdentifier();
 
   if (hasValue) return expr.value;
   return expr;

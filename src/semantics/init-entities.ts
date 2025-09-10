@@ -38,6 +38,28 @@ export const initEntities: SemanticProcessor = (expr) => {
     return expr;
   }
 
+  // HTML and other reader macros can construct typed syntax objects directly
+  // (e.g., ObjectLiteral for component props) that may still contain raw list
+  // forms like ["array", ...] inside their children. Recurse into these
+  // containers so nested lists are initialized before type checking.
+  if (expr.isObjectLiteral()) {
+    expr.fields.forEach((f) => {
+      const inited = initEntities(f.initializer);
+      f.initializer = inited;
+      f.initializer.parent = expr;
+    });
+    return expr;
+  }
+
+  if (expr.isArrayLiteral?.()) {
+    expr.elements = expr.elements.map((e) => {
+      const inited = initEntities(e);
+      inited.parent = expr;
+      return inited;
+    });
+    return expr;
+  }
+
   if (!expr.isList()) return expr;
 
   if (expr.calls("define_function")) {

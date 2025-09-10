@@ -1,6 +1,6 @@
 # Macros
 
-There are three types of macros in voyd, reader macros, regular macros, and
+There are three types of macros in voyd, reader macros, functional macros, and
 syntax macros. All macros are expected to return a syntax object.
 
 Reader macros are used to transform the source code while it is being parsed.
@@ -9,10 +9,10 @@ They are fed the source code as a stream of tokens.
 Syntax macros are used to transform the syntax tree after it has been parsed but
 before it is type checked. They are fed the entire syntax tree.
 
-Regular macros are called like functions directly in the source code. They are
+Functional macros are called like functions directly in the source code. They are
 fed the syntax object of their arguments.
 
-# Regular Macros
+# Functional Macros
 
 The `macro` macro is designed to make defining simple expansion macros easy and
 with minimal boiler plate. The body of a `macro` is automatically surrounded by
@@ -137,7 +137,7 @@ There are three types of macros:
 -   Reader Macros: Expanded during parsing, emit am ast
 -   Syntax Macros: Expanded after parsing, are passed the ast from the parser
   and produce the final ast
--   Regular Macros: Expanded by a syntax macro
+-   Functional Macros: Expanded by a syntax macro
 
 At a high level, the pipeline looks something like this: `file.voyd -> parser +
 reader macros -> syntax macros -> ast (the core language)`

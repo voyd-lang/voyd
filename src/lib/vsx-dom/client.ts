@@ -2,9 +2,9 @@ import { decode } from "@msgpack/msgpack";
 
 export type VoydComponentFn = () => number;
 
-export type RenderOptions =
-  | { instance: WebAssembly.Instance; memory?: undefined }
-  | { instance?: undefined; memory: WebAssembly.Memory };
+type RenderOptions = {
+  callOptions: CallOptions;
+};
 
 /**
  * Render a compiled Voyd component onto a DOM element.
@@ -19,6 +19,24 @@ export function render(
   container: HTMLElement,
   options: RenderOptions
 ) {
+  const tree = callComponentFn(componentFn, options.callOptions);
+  renderMsgPackNode(tree, container);
+}
+
+export function renderMsgPackNode(tree: MsgPackNode, container: HTMLElement) {
+  const dom = toDom(tree);
+  container.textContent = "";
+  container.appendChild(dom);
+}
+
+export type CallOptions =
+  | { instance: WebAssembly.Instance; memory?: undefined }
+  | { instance?: undefined; memory: WebAssembly.Memory };
+
+export function callComponentFn(
+  componentFn: VoydComponentFn,
+  options: CallOptions
+): MsgPackNode {
   const memory = resolveMemory(options);
   if (!memory) {
     throw new Error(
@@ -27,15 +45,12 @@ export function render(
   }
 
   const length = componentFn();
-  const view = memory.buffer.slice(0, length);
-  const tree = decode(view) as MsgPackNode;
 
-  const dom = toDom(tree);
-  container.textContent = "";
-  container.appendChild(dom);
+  const view = memory.buffer.slice(0, length);
+  return decode(view) as MsgPackNode;
 }
 
-function resolveMemory(options: RenderOptions) {
+function resolveMemory(options: CallOptions) {
   if ("memory" in options && options.memory) return options.memory;
   if ("instance" in options && options.instance?.exports) {
     const mem = (options.instance.exports as any)["main_memory"];
