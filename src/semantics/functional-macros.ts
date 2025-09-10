@@ -147,7 +147,9 @@ type EvalOpts = { skipBuiltins?: Set<string> };
 
 const evalMacroExpr = (expr: Expr, opts: EvalOpts = {}): Expr => {
   if (expr.isIdentifier()) return evalIdentifier(expr);
-  if (expr.isBlock()) return expr.evaluate((e) => evalMacroExpr(e, opts)) ?? nop();
+  if (expr.isBlock()) {
+    return expr.evaluate((e) => evalMacroExpr(e, opts)) ?? nop();
+  }
   if (!expr.isList()) return expr;
   return evalMacroTimeFnCall(expr, opts);
 };
@@ -261,7 +263,9 @@ const functions: Record<string, MacroFn | undefined> = {
 
         if (exp.isList() && exp.calls("$@")) {
           const val = exp.at(1) ?? nop();
-          const evaluated = evalMacroExpr(val, { skipBuiltins: new Set([":"]) });
+          const evaluated = evalMacroExpr(val, {
+            skipBuiltins: new Set([":"]),
+          });
           const expanded =
             evaluated.isList() && evaluated.calls("use")
               ? evaluated
@@ -274,12 +278,7 @@ const functions: Record<string, MacroFn | undefined> = {
         return exp;
       });
 
-    const result = expand(quote);
-    if (result.length === 1 && result.at(0)?.isList()) {
-      return result.at(0)!;
-    }
-
-    return result;
+    return expand(quote);
   },
   if: (args) => {
     const [condition, ifTrue, ifFalse] = args.toArray();
