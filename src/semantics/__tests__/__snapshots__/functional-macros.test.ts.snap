@@ -7,7 +7,7 @@ exports[`functional macro expansion 1`] = `
   [
     "exports",
     [
-      "std#902",
+      "std#900",
     ],
   ],
   [
@@ -47,7 +47,7 @@ exports[`functional macro expansion 1`] = `
         ],
         [
           "functional-macro",
-          "\`#931",
+          "\`#928",
           [
             "parameters",
           ],
@@ -58,17 +58,14 @@ exports[`functional macro expansion 1`] = `
               [
                 "quote",
                 "quote",
-                [
-                  "$@",
-                  "body",
-                ],
+                "~~body",
               ],
             ],
           ],
         ],
         [
           "functional-macro",
-          "let#983",
+          "let#979",
           [
             "parameters",
           ],
@@ -89,7 +86,7 @@ exports[`functional macro expansion 1`] = `
                 "quote",
                 "define",
                 [
-                  "$",
+                  "~",
                   [
                     "extract",
                     "equals_expr",
@@ -97,7 +94,7 @@ exports[`functional macro expansion 1`] = `
                   ],
                 ],
                 [
-                  "$",
+                  "~",
                   [
                     "extract",
                     "equals_expr",
@@ -121,7 +118,7 @@ exports[`functional macro expansion 1`] = `
         ],
         [
           "functional-macro",
-          "fn#1847",
+          "fn#1827",
           [
             "parameters",
           ],
@@ -378,23 +375,14 @@ exports[`functional macro expansion 1`] = `
               [
                 "quote",
                 "define_function",
-                [
-                  "$",
-                  "identifier",
-                ],
-                [
-                  "$",
-                  "params",
-                ],
+                "~identifier",
+                "~params",
                 [
                   "return_type",
-                  [
-                    "$@",
-                    "return_type",
-                  ],
+                  "~~return_type",
                 ],
                 [
-                  "$",
+                  "~",
                   [
                     "concat",
                     [

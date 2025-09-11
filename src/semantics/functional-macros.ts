@@ -253,7 +253,19 @@ const functions: Record<string, MacroFn | undefined> = {
   quote: (quote: List) => {
     const expand = (body: List): List =>
       body.flatMap((exp) => {
-        if (exp.isList() && exp.calls("$")) {
+        if (exp.isList() && exp.calls("~~")) {
+          const val = exp.at(1) ?? nop();
+          const evaluated = evalMacroExpr(val, {
+            skipBuiltins: new Set([":"]),
+          });
+          const expanded =
+            evaluated.isList() && evaluated.calls("use")
+              ? evaluated
+              : expandFunctionalMacros(evaluated);
+          return (expanded as List).toArray();
+        }
+
+        if (exp.isList() && exp.calls("~")) {
           const val = exp.at(1) ?? nop();
           const evaluated = evalMacroExpr(val);
           return evaluated.isList() && evaluated.calls("use")
@@ -261,11 +273,12 @@ const functions: Record<string, MacroFn | undefined> = {
             : expandFunctionalMacros(evaluated);
         }
 
-        if (exp.isList() && exp.calls("$@")) {
-          const val = exp.at(1) ?? nop();
-          const evaluated = evalMacroExpr(val, {
-            skipBuiltins: new Set([":"]),
+        if (exp.isIdentifier() && exp.value.startsWith("~~")) {
+          const identifier = new Identifier({
+            value: exp.value.slice(2),
+            ...exp.metadata,
           });
+          const evaluated = evalMacroExpr(identifier);
           const expanded =
             evaluated.isList() && evaluated.calls("use")
               ? evaluated
@@ -289,7 +302,13 @@ const functions: Record<string, MacroFn | undefined> = {
         return exp;
       });
 
-    return expand(quote);
+    const result = expand(quote);
+
+    if (result.length === 1 && result.at(0)?.isList()) {
+      return result.at(0)!;
+    }
+
+    return result;
   },
   if: (args) => {
     const [condition, ifTrue, ifFalse] = args.toArray();
@@ -320,6 +339,12 @@ const functions: Record<string, MacroFn | undefined> = {
     return list.slice(start, end);
   },
   extract: (args) => {
+    // TODO: Deprecate in favor of get
+    const list = args.listAt(0);
+    const index = getMacroTimeValue(args.at(1)) as number;
+    return list.at(index) ?? nop();
+  },
+  get: (args) => {
     const list = args.listAt(0);
     const index = getMacroTimeValue(args.at(1)) as number;
     return list.at(index) ?? nop();

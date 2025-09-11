@@ -24,7 +24,7 @@ test("functional macro expansion", async (t) => {
 test("nested functional macro expansion", async (t) => {
   const code = `\
 macro binaryen_gc_call(func, args)\n\
-  quote binaryen func: $func namespace: gc args: $args\n\
+  quote binaryen func: ~func namespace: gc args: ~args\n\
 macro bin_type_to_heap_type(type)\n\
   binaryen_gc_call(modBinaryenTypeToHeapType, BnrType<type>)\n\
 bin_type_to_heap_type(FixedArray<Int>)\n`;
@@ -50,12 +50,12 @@ bin_type_to_heap_type(FixedArray<Int>)\n`;
   ]);
 });
 
-test("$@ preserves labeled args", async (t) => {
+test("~~ preserves labeled args", async (t) => {
   const code = `\
 macro binaryen_gc_call_1(func, args)\n\
-  quote binaryen func: $func namespace: gc args: $args\n\
+  quote binaryen func: ~func namespace: gc args: ~args\n\
 macro wrap()\n\
-  quote $@(binaryen_gc_call_1(modBinaryenTypeToHeapType, quote arg))\n\
+  quote ~~(binaryen_gc_call_1(modBinaryenTypeToHeapType, quote arg))\n\
 wrap()\n`;
   const parserOutput = parse(code);
   const files = {

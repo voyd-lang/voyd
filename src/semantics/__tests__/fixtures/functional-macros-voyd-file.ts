@@ -1,10 +1,10 @@
 export const functionalMacrosVoydFile = `
 macro \`()
-  quote quote $@body
+  quote quote ~~body
 
 macro let()
   define equals_expr body.extract(0)
-  \` define $(equals_expr.extract(1)) $(equals_expr.extract(2))
+  \` define ~(equals_expr.extract(1)) ~(equals_expr.extract(2))
 
 // Extracts typed parameters from a list where index 0 is fn name, and offset_index+ are labeled_expr
 macro_let extract_parameters = (definitions) =>
@@ -41,10 +41,10 @@ macro fn()
     else:
       body.slice(1)
   \`(define_function,
-    $identifier,
-    $params,
-    (return_type $@return_type),
-    $(\`(block).concat(expressions)))
+    ~identifier,
+    ~params,
+    (return_type ~~return_type),
+    ~(\`(block).concat(expressions)))
 
 fn fib(n: i32) -> i32
   let base = 1
