@@ -273,6 +273,17 @@ const functions: Record<string, MacroFn | undefined> = {
           return (expanded as List).toArray();
         }
 
+        if (exp.isIdentifier() && exp.value.startsWith("~")) {
+          const identifier = new Identifier({
+            value: exp.value.slice(1),
+            ...exp.metadata,
+          });
+          const evaluated = evalMacroExpr(identifier);
+          return evaluated.isList() && evaluated.calls("use")
+            ? evaluated
+            : expandFunctionalMacros(evaluated);
+        }
+
         if (exp.isList()) return expand(exp);
 
         return exp;

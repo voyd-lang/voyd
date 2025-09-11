@@ -36,9 +36,9 @@ export const isOpChar = newTest([
   "%",
   "^",
   "&",
-  "~",
   "\\",
   "#",
+  "|",
 ]);
 
 export const isDigit = (char: string) => char >= "0" && char <= "9";
@@ -100,7 +100,6 @@ export const prefixOps: OpMap = new Map([
   ["#", 0],
   ["&", 7],
   ["!", 7],
-  ["~", 7],
   ["%", 7],
   ["$", 7],
   ["@", 7],

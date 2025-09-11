@@ -443,10 +443,10 @@ pub fn test6() -> i32
 // Optional chaining: nested chain returns 5
 pub fn test7() -> i32
   let structure = {
-    a: some { b: some { c: 5 } }
+    a: some { b: some { c: some 5 } }
   }
-  let v: Some<i32> = structure.a?.b?.c
-  v.value
+  let v = structure.a?.b?.c
+  if a := v then: a else: -1
 
 // If-match without else: returns 4
 pub fn test8() -> i32

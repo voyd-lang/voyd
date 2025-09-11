@@ -17,31 +17,6 @@ pub macro var()
   define equals_expr body.extract(0)
   ` define_mut $(equals_expr.extract(1)) $(equals_expr.extract(2))
 
-pub macro global()
-  let mutability = body.extract(0)
-  let equals_expr = body.extract(1)
-  let function =
-    if mutability == 'let' then:
-      ` define_global
-    else:
-      ` define_mut_global
-  `($@function,
-    $(equals_expr.extract(1)),
-    $(equals_expr.extract(2)))
-
-pub macro ';'()
-  let func = body.extract(0)
-  let block = body.extract(1)
-  let args =
-    if block.extract(0) == 'block' then:
-      block.slice(1)
-    else:
-      block
-  if is_list(func) then:
-    func.concat(args)
-  else:
-    `($func).concat(args)
-
 // Extracts typed parameters from a list where index 0 is fn name, and offset_index+ are labeled_expr
 macro_let extract_parameters = (definitions) =>
   `(parameters).concat definitions.slice(1)
