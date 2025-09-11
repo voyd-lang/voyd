@@ -2,12 +2,12 @@ export
   macro pub()
     // handle syntax like "pub fn me" and "pub fn(me)"
     if body.length == 1 and body.extract(0).is_list() then:
-      quote export block(~~body)
+      syntax_template export block(~~body)
     else:
-      quote export block(~body)
+      syntax_template export block(~body)
 
 pub macro `()
-  quote quote ~~body
+  syntax_template syntax_template ~~body
 
 pub macro let()
   define equals_expr body.extract(0)

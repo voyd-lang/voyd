@@ -107,7 +107,7 @@ const evalMacroDef = (list: List): Macro => {
         .slice(2)
         .map(expandFunctionalMacros)
         .map((expr) => {
-          if (expr.isList() && expr.calls("quote")) return expr;
+          if (expr.isList() && expr.calls("syntax_template")) return expr;
           return initializeMacroBlocks(expr);
         }),
     }),
@@ -116,7 +116,7 @@ const evalMacroDef = (list: List): Macro => {
 
 const initializeMacroBlocks = (list: Expr): Expr => {
   if (!list.isList()) return list;
-  if (list.calls("quote")) return list;
+  if (list.calls("syntax_template")) return list;
 
   if (list.calls("block")) {
     return new Block({
@@ -250,7 +250,7 @@ const functions: Record<string, MacroFn | undefined> = {
 
     return new MacroLambda({ parameters, body });
   },
-  quote: (quote: List) => {
+  syntax_template: (template: List) => {
     const expand = (body: List): List =>
       body.flatMap((exp) => {
         if (exp.isList() && exp.calls("~~")) {
@@ -302,7 +302,7 @@ const functions: Record<string, MacroFn | undefined> = {
         return exp;
       });
 
-    const result = expand(quote);
+    const result = expand(template);
 
     if (result.length === 1 && result.at(0)?.isList()) {
       return result.at(0)!;
@@ -416,7 +416,13 @@ const functions: Record<string, MacroFn | undefined> = {
     }),
 };
 
-const fnsToSkipArgEval = new Set(["if", "quote", "=>", "define", "="]);
+const fnsToSkipArgEval = new Set([
+  "if",
+  "syntax_template",
+  "=>",
+  "define",
+  "=",
+]);
 
 const handleOptionalConditionParenthesis = (expr: Expr): Expr => {
   if (expr.isList() && expr.first()?.isList()) {

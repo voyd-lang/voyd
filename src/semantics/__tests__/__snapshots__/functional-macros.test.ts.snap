@@ -56,8 +56,8 @@ exports[`functional macro expansion 1`] = `
             [
               "block",
               [
-                "quote",
-                "quote",
+                "syntax_template",
+                "syntax_template",
                 "~~body",
               ],
             ],
@@ -83,7 +83,7 @@ exports[`functional macro expansion 1`] = `
                 ],
               ],
               [
-                "quote",
+                "syntax_template",
                 "define",
                 [
                   "~",
@@ -311,7 +311,7 @@ exports[`functional macro expansion 1`] = `
                             ":",
                             "else",
                             [
-                              "quote",
+                              "syntax_template",
                             ],
                           ],
                         ],
@@ -373,7 +373,7 @@ exports[`functional macro expansion 1`] = `
                 ],
               ],
               [
-                "quote",
+                "syntax_template",
                 "define_function",
                 "~identifier",
                 "~params",
@@ -386,7 +386,7 @@ exports[`functional macro expansion 1`] = `
                   [
                     "concat",
                     [
-                      "quote",
+                      "syntax_template",
                       "block",
                     ],
                     "expressions",
