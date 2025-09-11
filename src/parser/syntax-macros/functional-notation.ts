@@ -1,4 +1,4 @@
-import { idIs, isOp } from "../grammar.js";
+import { idIs, isOp, isPrefixOp } from "../grammar.js";
 import { Expr, List, ListValue } from "../../syntax-objects/index.js";
 
 // Simplified and optimized version of functional notation parsing.

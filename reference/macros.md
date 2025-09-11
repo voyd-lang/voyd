@@ -15,42 +15,66 @@ fed the syntax object of their arguments.
 # Functional Macros
 
 The `macro` macro is designed to make defining simple expansion macros easy and
-with minimal boiler plate. The body of a `macro` is automatically surrounded by
-a `quote` block. The `$` acts as the `,` in common lisp and evaluates the
-expression it prefixes. The `@` acts as the `,@` in common lisp and splices the
-list into the current list. Note that these shortcuts only apply to `macro`,
-`define-macro` uses the standard operators of common lisp (`,`, `,@`, etc).
+with minimal boiler plate. Functional work like normal functions, but are only
+evaluated at compile time and always return a syntax template.
+
+Functional macros operate directly on the AST.
+
+Syntax templates can be constructed with the backtick (\`). Any identifier
+prefixed with `~` will be evaluated when the macro is called and replaced
+with it's value.
+
 
 ```voyd
-macro def-wasm-operator(op wasm-fn arg-type return-type)
-  defun $op(left:$arg-type right:$arg-type) -> $return-type
-    binaryen-mod ($arg-type $wasm-fn) (left right)
+macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
+  ` fn ~op(left: ~arg_type, right: ~arg_type) -> ~return_type
+    binaryen_mod (~arg_type, ~wasm_fn) (left, right)
 
-def-wasm-operator('<' lt_s i32 i32)
+def_wasm_operator('<', lt_s, i32, i32)
 
 // Expands into
-defun '<'(left:i32 right:i32) -> i32
-  binaryen-mod (i32 lt_s) (left right)
+fn '<'(left: i32, right: i32) -> i32
+  binaryen_mod (i32, lt_s) (left, right)
 ```
 
-## Quotes
+You can also use the `~~` prefix to splice a list in place:
 
-Note: Unlike common lisp, the single quote is not a macro for `quote`. Only the
-backtick.
+```voyd
+macro foo(foo_call)
+  let args = foo_call.slice(1)
+  if foo_call.get(0) == bar then:
+    ` you_chose_bar(~~args)
+  else:
+    ` you_chose_something_else(~~args)
 
-> Second, one might wonder what happens if a backquote expression occurs inside
-> another backquote. The answer is that the backquote becomes essentially
-> unreadable and unwriteable; using nested backquote is usually a tedious
-> debugging exercise. The reason, in my not-so-humble opinion, is that backquote
-> is defined wrong. A comma pairs up with the innermost backquote when the
-> default should be that it pairs up with the outermost. But this is not the
-> place for a rant; consult your favorite Lisp reference for the exact behavior
-> of nested backquote plus some examples.
-> https://lisp-journey.gitlab.io/blog/common-lisp-macros-by-example-tutorial/
+foo bar(1, 2, 3) // or foo(bar(1, 2, 3))
 
-Voyd follows the suggestion of this website and pairs commas with the outermost
-backquote. Which allows one to use a backquote where a quote would normally be
-needed.
+// Turns into
+you_chose_bar(1, 2, 3)
+```
+
+You can also use `~` and `~~` to evaluate and insert expressions. Just
+call them like a function with a single parameter:
+
+```voyd
+macro foo(foo_call)
+  if foo_call.get(0) == bar then:
+    ` you_chose_bar(~~(foo_call.slice(1) ))
+  else:
+    ` unknown_function_name(~(foo_call.get(0)))
+
+foo baz(1, 2, 3) // or foo(bar(1, 2, 3))
+
+// Turns into
+unknown_function_name(baz)
+```
+
+(For lisp users)
+Syntax templates work similarly to backquotes. The `~` acts as the `,` in
+common lisp and the `~~` acts as the `,@`.
+
+
+# Outdated info below
 
 ## Macro Input
 

@@ -142,7 +142,7 @@ let structure = {
   }
 }
 
-// Optional coalesce
+// Optional chain
 let value: Some<i32> = a?.b?.c // 5
 
 if x := opt then:

@@ -143,6 +143,9 @@ fn main()
     z: { a: 10, b: 20 }
   }
 
+  hi there(what): is(up)
+  what(): is(up)
+
   pub fn main()
     <div>
       <p>

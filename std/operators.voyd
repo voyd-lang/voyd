@@ -1,13 +1,13 @@
 use std::macros::all
 
 macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
-  let params = `(parameters, left: $arg_type, right: $arg_type)
+  let params = `(parameters, left: ~arg_type, right: ~arg_type)
   let body = ` binaryen
-    func: $wasm_fn
-    namespace: $arg_type
+    func: ~wasm_fn
+    namespace: ~arg_type
     args: list(left, right)
 
-  ` define_function $op $params return_type($return_type) $body
+  ` define_function ~op ~params return_type(~return_type) ~body
 
 pub def_wasm_operator('<', lt_s, i32, bool)
 pub def_wasm_operator('>', gt_s, i32, bool)
