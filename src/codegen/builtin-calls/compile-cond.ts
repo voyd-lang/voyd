@@ -19,7 +19,7 @@ export const compileCond = (opts: CompileExprOpts<Call>) => {
     ? mapBinaryenType(opts, expr.getType()!)
     : binaryen.none;
 
-  let elseNode =
+  let ifNode =
     defaultExpr !== undefined
       ? compileExpression({ ...opts, expr: defaultExpr })
       : undefined;
@@ -34,15 +34,15 @@ export const compileCond = (opts: CompileExprOpts<Call>) => {
       isReturnExpr: false,
     });
     const ifTrue = compileExpression({ ...opts, expr: thenExpr });
-    elseNode =
+    ifNode =
       returnType === binaryen.none
         ? mod.if(
             condition,
             asStmt(mod, ifTrue),
-            elseNode !== undefined ? asStmt(mod, elseNode) : undefined
+            ifNode !== undefined ? asStmt(mod, ifNode) : undefined
           )
-        : mod.if(condition, ifTrue, elseNode);
+        : mod.if(condition, ifTrue, ifNode);
   }
 
-  return elseNode!;
+  return ifNode!;
 };
