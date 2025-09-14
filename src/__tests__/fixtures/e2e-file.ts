@@ -9,7 +9,6 @@ fn fib(n: i32) -> i32
 
 pub fn main()
   fib(10)
-
 `;
 
 export const kitchenSink = `
@@ -391,21 +390,15 @@ export const controlFlowText = `
 use std::all
 use std::msg_pack::MsgPack
 
-// If-match without binder: returns 4
+// Match without binder, default case
 pub fn test1() -> i32
   let opt: Optional<i32> = Some<i32> { value: 4 }
-  if opt.match(Some<i32>) then:
-    opt.value
-  else:
-    -1
+  opt.match Some: opt.value else: -1
 
-// If-match with binder: returns 7
+// Optional coalescing operator
 pub fn test2() -> i32
   let opt: Optional<i32> = Some<i32> { value: 7 }
-  if opt.match(x, Some<i32>) then:
-    x.value
-  else:
-    -1
+  opt ?? -1
 
 // While-match with binder: sum 1+2+3 = 6
 pub fn test3() -> i32
