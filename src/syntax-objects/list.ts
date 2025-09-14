@@ -222,9 +222,19 @@ export class List extends Syntax {
     return this.children.slice(start, end);
   }
 
+  /** Offset by + 1, assumes first item in list is the function name */
+  argAt(index: number) {
+    return this.at(index + 1);
+  }
+
+  /** Offset by + 1, assumes first item in list is the function name */
+  exprArgAt(index: number) {
+    this.exprAt(index + 1);
+  }
+
   // TODO: Move this to call?
   private getArgIfLabel(expr: Expr, label: string) {
-    if (!expr.isCall()) return;
+    if (!expr.isCall() && !expr.isList()) return;
     if (!expr.calls(":")) return;
     const labelId = expr.argAt(0);
     if (!labelId?.isIdentifier()) return;
