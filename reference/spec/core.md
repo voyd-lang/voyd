@@ -39,7 +39,7 @@ Multiple conditions
 Syntax:
 
 ```lisp
-(cond ($condition:Boolean result:Expr)*)
+(cond (case: $condition:Boolean do: $expr:Expr)* (default: $expr:Expr)?)
 ```
 
 ## BNR

@@ -947,6 +947,83 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
   return resolveEntities(match);
 };
 
+export const resolveCond = (call: Call) => {
+  const args = call.args.toArray();
+  const pairs: Expr[] = [];
+  let defaultExpr: Expr | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg.isCall() || !arg.calls(":")) continue;
+    const label = arg.argAt(0);
+    const value = arg.argAt(1);
+    if (!label?.isIdentifier() || !value) continue;
+    if (label.value === "case") {
+      const next = args[i + 1];
+      if (next?.isCall()) {
+        const nextLabel = next.argAt(0);
+        if (
+          next.calls(":") &&
+          nextLabel?.isIdentifier() &&
+          nextLabel.value === "do"
+        ) {
+          pairs.push(
+            new ObjectLiteral({
+              ...call.metadata,
+              fields: [
+                { name: "case", initializer: value },
+                { name: "do", initializer: next.argAt(1)! },
+              ],
+            })
+          );
+          i++;
+        }
+      }
+    } else if (label.value === "default") {
+      defaultExpr = value;
+      defaultExpr.setAttribute("condDefault", true);
+    }
+  }
+
+  call.args = new List({
+    value: [...pairs, ...(defaultExpr ? [defaultExpr] : [])],
+  });
+  call.args.parent = call;
+  call.args = call.args.map(resolveEntities);
+  const resolvedArgs = call.args.toArray();
+  if (defaultExpr) resolvedArgs.at(-1)?.setAttribute("condDefault", true);
+
+  const hasDefault = defaultExpr !== undefined;
+
+  const branchTypes: Type[] = [];
+  resolvedArgs.forEach((arg) => {
+    if (arg.isObjectLiteral() && !arg.hasAttribute("condDefault")) {
+      const blockField = arg.fields.find((f) => f.name === "do");
+      if (blockField) {
+        let expr = blockField.initializer;
+        if (!expr.isBlock()) {
+          const block = toBlock(expr);
+          block.parent = arg;
+          blockField.initializer = resolveEntities(block) as Block;
+          expr = blockField.initializer;
+        }
+        const t = getExprType(expr);
+        if (t) branchTypes.push(t);
+      }
+      return;
+    }
+    const t = getExprType(arg);
+    if (t) branchTypes.push(t);
+  });
+
+  call.type = hasDefault
+    ? branchTypes.length > 1
+      ? combineTypes(branchTypes)
+      : branchTypes[0]
+    : dVoid;
+  return call;
+};
+
 export const resolveWhile = (call: Call) => {
   // Handle while-match sugar by lowering to `while true do: match(...) ... else: break`
   const lowered =
@@ -1025,6 +1102,7 @@ const specialCallResolvers: Record<string, (c: Call) => Expr> = {
   "::": resolveModuleAccess,
   export: resolveExport,
   if: resolveIf,
+  cond: resolveCond,
   "call-closure": resolveClosureCall,
   ":": resolveLabeledArg,
   while: resolveWhile,
