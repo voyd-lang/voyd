@@ -222,6 +222,18 @@ export class List extends Syntax {
     return this.children.slice(start, end);
   }
 
+  // TODO: Move this to call?
+  private getArgIfLabel(expr: Expr, label: string) {
+    if (!expr.isCall()) return;
+    if (!expr.calls(":")) return;
+    const labelId = expr.argAt(0);
+    if (!labelId?.isIdentifier()) return;
+
+    if (labelId.value === label) {
+      return expr.argAt(1);
+    }
+  }
+
   /**
    * Returns the expression for a labeled argument, eg. for the list
    * `[hello, [:, world, 1]]` – which represents `hello(world: 1)` –
@@ -231,18 +243,25 @@ export class List extends Syntax {
    */
   optionalLabeledArg(label: string): Expr | undefined {
     for (const expr of this.#store.toArray()) {
-      if (!expr.isCall()) continue;
-      if (!expr.calls(":")) continue;
-
-      const labelId = expr.argAt(0);
-      if (!labelId?.isIdentifier()) continue;
-
-      if (labelId.value === label) {
-        return expr.argAt(1);
-      }
+      const arg = this.getArgIfLabel(expr, label);
+      if (arg) return arg;
     }
 
     return undefined;
+  }
+
+  /**
+   * Returns all args with the same label, useful for functions like
+   * if -- with multiple elif:
+   */
+  argsWithLabel(label: string): Expr[] {
+    const args: Expr[] = [];
+    for (const expr of this.#store.toArray()) {
+      const arg = this.getArgIfLabel(expr, label);
+      if (arg) args.push(arg);
+    }
+
+    return args;
   }
 
   /** Asserts that a labeled argument exists and returns its expression. */
