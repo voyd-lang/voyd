@@ -778,6 +778,8 @@ const maybeLowerIfMatchSugar = (call: Call): Expr | undefined => {
   const cond = call.argAt(0);
   const thenCall = call.argAt(1);
   if (!cond?.isCall() || !cond.calls("match")) return;
+  // Debug: log when lowering if-match sugar
+  // console.error("Lowering if-match sugar", JSON.stringify(cond.toJSON?.(), null, 2));
 
   // Extract operand, optional binder, and match type expression
   const operand = cond.argAt(0);
@@ -979,7 +981,8 @@ const resolveClosureCall = (call: Call): Call => {
     : getExprType(closure);
   // Propagate the expected function type identity to the callee identifier so
   // codegen can align the call_ref heap type with the closure's compiled type.
-  if (closureType?.isFnType()) closure.setAttribute("parameterFnType", closureType);
+  if (closureType?.isFnType())
+    closure.setAttribute("parameterFnType", closureType);
   const params = closure.isClosure()
     ? closure.parameters
     : closureType?.isFnType()
@@ -1021,7 +1024,6 @@ const hasUntypedClosure = (expr: Expr | undefined): boolean =>
 const specialCallResolvers: Record<string, (c: Call) => Expr> = {
   "::": resolveModuleAccess,
   export: resolveExport,
-  "?.": resolveOptionalCoalesce,
   if: resolveIf,
   "call-closure": resolveClosureCall,
   ":": resolveLabeledArg,
@@ -1083,143 +1085,8 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
   return call;
 };
 
-// Optional coalesce: a?.b
-const isSomeObject = (type?: Type): boolean =>
-  !!(
-    type?.isObjectType() &&
-    (type.name.is("Some") || type.genericParent?.name.is("Some"))
-  );
-
-function resolveOptionalCoalesce(call: Call): Expr {
-  const left = resolveEntities(call.argAt(0));
-  const right = call.argAt(1);
-
-  if (!right?.isIdentifier()) {
-    // Fallback: resolve args and leave as-is if unsupported rhs
-    call.args = new List({ value: [left, resolveEntities(right ?? nop())] });
-    return call;
-  }
-
-  const baseType = getExprType(left);
-  const someVariant = findSomeVariant(baseType);
-  const someObj = isSomeObject(baseType);
-
-  // Non-optional and not a Some<T> object: degrade to normal member access
-  if (!someVariant && !someObj) {
-    return resolveEntities(
-      new Call({
-        ...call.metadata,
-        fnName: Identifier.from("member-access"),
-        args: new List({ value: [left, right.clone()] }),
-      })
-    );
-  }
-
-  // If LHS is a Some<T> object (present), unwrap `.value` directly and wrap
-  // the access result into Some<...> unless it is already Optional.
-  if (!someVariant && someObj) {
-    const valueAccess = new Call({
-      ...call.metadata,
-      fnName: Identifier.from("member-access"),
-      args: new List({ value: [left, Identifier.from("value")] }),
-    });
-    const access = new Call({
-      ...call.metadata,
-      fnName: Identifier.from("member-access"),
-      args: new List({ value: [resolveEntities(valueAccess), right.clone()] }),
-    });
-    const resolvedAccess = resolveEntities(access);
-    const accessType = getExprType(resolvedAccess);
-    const alreadyOptional =
-      !!findSomeVariant(accessType) || isSomeObject(accessType);
-    if (alreadyOptional) return resolvedAccess;
-
-    return resolveEntities(
-      new Call({
-        ...call.metadata,
-        fnName: Identifier.from("Some"),
-        typeArgs: accessType ? new List({ value: [accessType] }) : undefined,
-        args: new List({
-          value: [
-            new ObjectLiteral({
-              ...call.metadata,
-              fields: [{ name: "value", initializer: resolvedAccess }],
-            }),
-          ],
-        }),
-      })
-    );
-  }
-
-  // tmp = left
-  const tmp = Identifier.from(`__opc_${call.syntaxId}`);
-  const tmpVar = new Variable({
-    name: tmp.clone(),
-    location: tmp.location,
-    initializer: left,
-    isMutable: false,
-    parent: call.parent ?? call.parentModule,
-  });
-
-  // access = (tmp.value).right
-  const valueAccess = new Call({
-    ...call.metadata,
-    fnName: Identifier.from("member-access"),
-    args: new List({ value: [tmp.clone(), Identifier.from("value")] }),
-  });
-  const access = new Call({
-    ...call.metadata,
-    fnName: Identifier.from("member-access"),
-    args: new List({ value: [valueAccess, right.clone()] }),
-  });
-
-  const resolvedAccess = resolveEntities(access);
-  const accessType = getExprType(resolvedAccess);
-  const isAlreadyOptional = !!findSomeVariant(accessType);
-
-  // then: return access (if optional) or Some<type> { value: access }
-  const thenExpr: Expr = isAlreadyOptional
-    ? resolvedAccess
-    : new Call({
-        ...call.metadata,
-        fnName: Identifier.from("Some"),
-        typeArgs: accessType ? new List({ value: [accessType] }) : undefined,
-        args: new List({
-          value: [
-            new ObjectLiteral({
-              ...call.metadata,
-              fields: [{ name: "value", initializer: resolvedAccess }],
-            }),
-          ],
-        }),
-      });
-
-  const match = new Match({
-    ...call.metadata,
-    operand: tmp.clone(),
-    cases: [
-      {
-        matchTypeExpr: someVariant,
-        expr: toBlock(thenExpr),
-      },
-    ],
-    defaultCase: {
-      expr: toBlock(
-        new Call({
-          ...call.metadata,
-          fnName: Identifier.from("None"),
-          args: new List({
-            value: [new ObjectLiteral({ ...call.metadata, fields: [] })],
-          }),
-        })
-      ),
-    },
-    bindIdentifier: tmp,
-    bindVariable: tmpVar,
-  });
-
-  return resolveEntities(match);
-}
+// Optional chaining was previously hardcoded. It is now implemented as a
+// functional macro in std/optional.voyd.
 
 const maybeLowerWhileMatchSugar = (call: Call): Expr | undefined => {
   const cond = call.argAt(0);

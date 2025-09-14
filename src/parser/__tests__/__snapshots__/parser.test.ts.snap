@@ -985,6 +985,32 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
         ],
       ],
       [
+        "hi",
+        [
+          ":",
+          [
+            "there",
+            "what",
+          ],
+          "is",
+        ],
+        [
+          "up",
+        ],
+        [
+          ":",
+          [
+            "what",
+          ],
+          [
+            "is",
+            [
+              "up",
+            ],
+          ],
+        ],
+      ],
+      [
         "pub",
         "fn",
         [
@@ -998,7 +1024,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
               "new_string",
               [
                 "object",
-                "ObjectLiteral-1089",
+                "ObjectLiteral-1111",
                 [
                   [
                     "from",
@@ -1023,7 +1049,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                   "new_string",
                   [
                     "object",
-                    "ObjectLiteral-1101",
+                    "ObjectLiteral-1123",
                     [
                       [
                         "from",
@@ -1044,7 +1070,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                     "new_string",
                     [
                       "object",
-                      "ObjectLiteral-1126",
+                      "ObjectLiteral-1148",
                       [
                         [
                           "from",
@@ -1077,7 +1103,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                   "new_string",
                   [
                     "object",
-                    "ObjectLiteral-1143",
+                    "ObjectLiteral-1165",
                     [
                       [
                         "from",
@@ -1098,7 +1124,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                     "new_string",
                     [
                       "object",
-                      "ObjectLiteral-1172",
+                      "ObjectLiteral-1194",
                       [
                         [
                           "from",
