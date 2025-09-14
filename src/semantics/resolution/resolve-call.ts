@@ -947,6 +947,46 @@ const maybeLowerIfOptionalUnwrapSugar = (call: Call): Expr | undefined => {
   return resolveEntities(match);
 };
 
+export const resolveCond = (call: Call) => {
+  const defaultExpr = call.optionalLabeledArg("default");
+  if (defaultExpr) defaultExpr.setAttribute("condDefault", true);
+  const cases = call.argsWithLabel("case");
+  const dos = call.argsWithLabel("do");
+  const pairs = cases.map((arg, index) => {
+    const caseDo = dos[index];
+    if (!caseDo) throw new Error(`Expected do after case at ${arg.location}`);
+    return new List([arg, caseDo]);
+  });
+
+  call.args = new List({
+    value: [...pairs, ...(defaultExpr ? [defaultExpr] : [])],
+  });
+  call.args.parent = call;
+  call.args = call.args.map(resolveEntities);
+  const resolvedArgs = call.args.toArray();
+
+  const hasDefault = defaultExpr !== undefined;
+
+  const branchTypes: Type[] = [];
+  resolvedArgs.forEach((arg) => {
+    if (arg.isList() && !arg.hasAttribute("condDefault")) {
+      const blockField = arg.at(1);
+      const t = getExprType(blockField);
+      if (t) branchTypes.push(t);
+      return;
+    }
+    const t = getExprType(arg);
+    if (t) branchTypes.push(t);
+  });
+
+  call.type = hasDefault
+    ? branchTypes.length > 1
+      ? combineTypes(branchTypes)
+      : branchTypes[0]
+    : dVoid;
+  return call;
+};
+
 export const resolveWhile = (call: Call) => {
   // Handle while-match sugar by lowering to `while true do: match(...) ... else: break`
   const lowered =
@@ -1025,6 +1065,7 @@ const specialCallResolvers: Record<string, (c: Call) => Expr> = {
   "::": resolveModuleAccess,
   export: resolveExport,
   if: resolveIf,
+  cond: resolveCond,
   "call-closure": resolveClosureCall,
   ":": resolveLabeledArg,
   while: resolveWhile,

@@ -485,6 +485,21 @@ pub fn test12() -> i32
   while iterator.next().match(x, Some) do:
     sum = sum + x.value
   sum
+
+pub fn test13() -> i32
+  let x = 5
+  cond case: x > 5 do: 1 case: x < 5 do: 2 default: 3
+
+pub fn test14() -> i32
+  var res = 0
+  let x = 6
+  cond case: x > 5 do: (res = 1) case: x < 5 do: (res = 2)
+  res
+
+pub fn test15() -> i32
+  let x = 5
+  let obj = cond case: x > 5 do: { a: 1 } case: x < 5 do: { a: 2 } default: { a: 3 }
+  obj.a
 `;
 
 export const goodTypeInferenceText = `

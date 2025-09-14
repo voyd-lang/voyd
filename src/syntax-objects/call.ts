@@ -93,6 +93,10 @@ export class Call extends Syntax {
     return this.args.at(index);
   }
 
+  argsWithLabel(label: string) {
+    return this.args.argsWithLabel(label);
+  }
+
   exprArgAt(index: number): Expr {
     const expr = this.argAt(index);
 
