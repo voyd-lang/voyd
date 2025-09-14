@@ -9,6 +9,7 @@ import { formatTypeName } from "../type-format.js";
 import { checkTypes } from "./check-types.js";
 import { checkAssign } from "./check-assign.js";
 import { checkIf } from "./check-if.js";
+import { checkCond } from "./check-cond.js";
 import { checkBinaryenCall } from "./check-binaryen-call.js";
 import { checkLabeledArg } from "./check-labeled-arg.js";
 import { checkFixedArrayType } from "./check-fixed-array-type.js";
@@ -16,6 +17,7 @@ import { checkFixedArrayType } from "./check-fixed-array-type.js";
 export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("export")) return checkExport(call);
   if (call.calls("if")) return checkIf(call);
+  if (call.calls("cond")) return checkCond(call);
   if (call.calls("call-closure")) return checkClosureCall(call);
   if (call.calls("binaryen")) return checkBinaryenCall(call);
   if (call.calls("mod")) return call;
