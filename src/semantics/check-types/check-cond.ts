@@ -11,17 +11,15 @@ export const checkCond = (call: Call) => {
   let hasDefault = false;
 
   args.forEach((arg) => {
-    if (arg.isObjectLiteral() && !arg.hasAttribute("condDefault")) {
-      const cond = checkTypes(
-        arg.fields.find((f) => f.name === "case")?.initializer
-      );
+    if (arg.isList() && !arg.hasAttribute("condDefault")) {
+      const cond = checkTypes(arg.at(0));
       const condType = getExprType(cond);
       if (!cond || !condType || !typesAreCompatible(condType, bool)) {
         throw new Error(
           `Cond conditions must resolve to a boolean at ${cond?.location}`
         );
       }
-      const thenExpr = arg.fields.find((f) => f.name === "do")?.initializer;
+      const thenExpr = arg.at(1);
       if (thenExpr) branchExprs.push(checkTypes(thenExpr));
     } else {
       hasDefault = true;
@@ -30,7 +28,9 @@ export const checkCond = (call: Call) => {
   });
 
   if (!call.type) {
-    throw new Error(`Unable to determine return type of cond at ${call.location}`);
+    throw new Error(
+      `Unable to determine return type of cond at ${call.location}`
+    );
   }
 
   if (!hasDefault) {

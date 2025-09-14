@@ -955,13 +955,7 @@ export const resolveCond = (call: Call) => {
   const pairs = cases.map((arg, index) => {
     const caseDo = dos[index];
     if (!caseDo) throw new Error(`Expected do after case at ${arg.location}`);
-    return new ObjectLiteral({
-      ...call.metadata,
-      fields: [
-        { name: "case", initializer: arg },
-        { name: "do", initializer: caseDo },
-      ],
-    });
+    return new List([arg, caseDo]);
   });
 
   call.args = new List({
@@ -975,13 +969,10 @@ export const resolveCond = (call: Call) => {
 
   const branchTypes: Type[] = [];
   resolvedArgs.forEach((arg) => {
-    if (arg.isObjectLiteral() && !arg.hasAttribute("condDefault")) {
-      const blockField = arg.fields.find((f) => f.name === "do");
-      if (blockField) {
-        let expr = blockField.initializer;
-        const t = getExprType(expr);
-        if (t) branchTypes.push(t);
-      }
+    if (arg.isList() && !arg.hasAttribute("condDefault")) {
+      const blockField = arg.at(1);
+      const t = getExprType(blockField);
+      if (t) branchTypes.push(t);
       return;
     }
     const t = getExprType(arg);

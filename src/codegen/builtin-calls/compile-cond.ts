@@ -6,7 +6,7 @@ import {
   mapBinaryenType,
 } from "../../codegen.js";
 import { Call } from "../../syntax-objects/call.js";
-import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
+import { List } from "../../syntax-objects/list.js";
 
 export const compileCond = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;
@@ -25,9 +25,9 @@ export const compileCond = (opts: CompileExprOpts<Call>) => {
       : undefined;
 
   for (let i = args.length - 1; i >= 0; i--) {
-    const pair = args[i] as ObjectLiteral;
-    const condExpr = pair.fields.find((f) => f.name === "case")!.initializer;
-    const thenExpr = pair.fields.find((f) => f.name === "do")!.initializer;
+    const pair = args[i] as List;
+    const condExpr = pair.exprAt(0);
+    const thenExpr = pair.exprAt(1);
     const condition = compileExpression({
       ...opts,
       expr: condExpr,
