@@ -19,3 +19,6 @@ pub fn none() -> None
 
 pub macro '?.'(l, r)
   ` if __opc := ~l then: __opc.~r else: none()
+
+pub macro '??'(l, r)
+  ` if __opc := ~l then: __opc else: ~r
