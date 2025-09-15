@@ -31,3 +31,4 @@ the code than to have the work thrown away.
 - Break down large functions into smaller ones
 - Use functional style programming
 - Prefer ternary conditionals to if statements for initializing vars
+- Files should be ordered by importance. Imports at the top, then the most important (or main) export just below the imports.

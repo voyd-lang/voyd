@@ -6,12 +6,8 @@ import {
   Expr,
   Fn,
   Block,
-  Variable,
-  Bool,
   Parameter,
 } from "../../syntax-objects/index.js";
-import { SourceLocation } from "../../syntax-objects/syntax.js";
-import { Match } from "../../syntax-objects/match.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
 import {
   dVoid,
@@ -43,6 +39,54 @@ import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { canonicalType } from "../types/canonicalize.js";
+
+export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
+  if (call.type) return call;
+
+  const resolver = specialCallResolvers[call.fnName.value];
+  if (resolver) return resolver(call);
+
+  preprocessArgs(call);
+
+  // Optional sugar: obj.member -> member-access(obj, "member")
+  const sugared = maybeResolveMemberAccessSugar(call);
+  if (sugared) return sugared;
+
+  // Ensure the callee is resolved so closures can capture it
+  const calleeType = resolveCalleeAndGetType(call);
+
+  // Constructors (object types by name)
+  if (calleeType?.isObjectType()) handleObjectConstruction(call, calleeType);
+
+  // Resolve and apply type args for the call if present
+  if (call.typeArgs) call.typeArgs = call.typeArgs.map(resolveTypeExpr);
+
+  // Bind function and normalize args
+  resolveCallFn(call, candidateFns);
+  if (!call.fn && calleeType?.isFnType()) {
+    const tmpFn = new Fn({
+      ...call.metadata,
+      name: Identifier.from("closure"),
+      parameters: cloneParams(calleeType.parameters),
+    });
+    const tmpCall = new Call({
+      ...call.metadata,
+      fnName: call.fnName.clone(),
+      fn: tmpFn,
+      args: call.args,
+    });
+    normalizeArgsForResolvedFn(tmpCall);
+    call.args = tmpCall.args;
+    call.args.parent = call;
+    call.fnName.parent = call;
+  } else {
+    normalizeArgsForResolvedFn(call);
+  }
+
+  // Compute resulting type
+  call.type = computeCallReturnType(call, calleeType);
+  return call;
+};
 
 const resolveMemberAccessDirect = (call: Call): Call => {
   call.args = call.args.map(resolveEntities);
@@ -702,13 +746,6 @@ export const resolveCond = (call: Call) => {
 };
 
 export const resolveWhile = (call: Call) => {
-  // Handle while-match sugar by lowering to `while true do: match(...) ... else: break`
-  const lowered =
-    maybeLowerWhileInSugar(call) ||
-    maybeLowerWhileMatchSugar(call) ||
-    maybeLowerWhileOptionalUnwrapSugar(call);
-  if (lowered) return lowered;
-
   call.args = call.args.map(resolveEntities);
   call.type = dVoid;
   return call;
@@ -790,253 +827,3 @@ const specialCallResolvers: Record<string, (c: Call) => Expr> = {
     return c;
   },
 };
-
-export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
-  if (call.type) return call;
-
-  const resolver = specialCallResolvers[call.fnName.value];
-  if (resolver) return resolver(call);
-
-  preprocessArgs(call);
-
-  // Optional sugar: obj.member -> member-access(obj, "member")
-  const sugared = maybeResolveMemberAccessSugar(call);
-  if (sugared) return sugared;
-
-  // Ensure the callee is resolved so closures can capture it
-  const calleeType = resolveCalleeAndGetType(call);
-
-  // Constructors (object types by name)
-  if (calleeType?.isObjectType()) handleObjectConstruction(call, calleeType);
-
-  // Resolve and apply type args for the call if present
-  if (call.typeArgs) call.typeArgs = call.typeArgs.map(resolveTypeExpr);
-
-  // Bind function and normalize args
-  resolveCallFn(call, candidateFns);
-  if (!call.fn && calleeType?.isFnType()) {
-    const tmpFn = new Fn({
-      ...call.metadata,
-      name: Identifier.from("closure"),
-      parameters: cloneParams(calleeType.parameters),
-    });
-    const tmpCall = new Call({
-      ...call.metadata,
-      fnName: call.fnName.clone(),
-      fn: tmpFn,
-      args: call.args,
-    });
-    normalizeArgsForResolvedFn(tmpCall);
-    call.args = tmpCall.args;
-    call.args.parent = call;
-    call.fnName.parent = call;
-  } else {
-    normalizeArgsForResolvedFn(call);
-  }
-
-  // Compute resulting type
-  call.type = computeCallReturnType(call, calleeType);
-  return call;
-};
-
-// Optional chaining was previously hardcoded. It is now implemented as a
-// functional macro in std/optional.voyd.
-
-const maybeLowerWhileMatchSugar = (call: Call): Expr | undefined => {
-  const cond = call.argAt(0);
-  const doArg = call.argAt(1);
-  if (!cond?.isCall() || !cond.calls("match")) return;
-  if (!(doArg?.isCall() && doArg.calls(":"))) return;
-  const doLabel = doArg.argAt(0);
-  if (!(doLabel?.isIdentifier() && doLabel.value === "do")) return;
-
-  const operand = cond.argAt(0);
-  if (!operand) return;
-
-  const possibleBinder = cond.argAt(1);
-  const hasBinder = !!possibleBinder?.isIdentifier() && !!cond.argAt(2);
-  const binder = hasBinder ? (possibleBinder as Identifier) : undefined;
-  const typeExpr = hasBinder ? cond.argAt(2) : cond.argAt(1);
-  if (!typeExpr) return;
-
-  const bodyExpr = doArg.argAt(1)!;
-  // Ensure then-arm is void-typed by appending value-level `void` sentinel.
-  const thenBlock = new Block({
-    ...bodyExpr.metadata,
-    body: [
-      ...(bodyExpr.isBlock() ? bodyExpr.body : [bodyExpr]),
-      Identifier.from("void"),
-    ],
-  });
-
-  const bindIdentifier =
-    binder ?? (operand.isIdentifier() ? (operand as Identifier) : undefined);
-  if (!bindIdentifier) return; // cannot bind when operand is not an identifier and no binder was provided
-
-  const match = new Match({
-    ...call.metadata,
-    operand,
-    cases: [
-      {
-        matchTypeExpr: typeExpr,
-        expr: thenBlock,
-      },
-    ],
-    defaultCase: {
-      expr: toBlock(Identifier.from("break")),
-    },
-    bindIdentifier,
-    bindVariable: binder
-      ? new Variable({
-          name: binder.clone(),
-          location: binder.location,
-          initializer: operand,
-          isMutable: false,
-          parent: call.parent ?? call.parentModule,
-        })
-      : undefined,
-  });
-
-  const newDo = makeLabeled("do", resolveEntities(match), call.metadata);
-  newDo.type = dVoid;
-
-  call.args = new List({
-    value: [new Bool({ value: true, location: call.location }), newDo],
-  });
-  call.args.parent = call;
-  return call;
-};
-
-const maybeLowerWhileOptionalUnwrapSugar = (call: Call): Expr | undefined => {
-  const cond = call.argAt(0);
-  const doArg = call.argAt(1);
-  if (!cond?.isCall() || !cond.calls(":=")) return;
-  if (!(doArg?.isCall() && doArg.calls(":"))) return;
-  const doLabel = doArg.argAt(0);
-  if (!(doLabel?.isIdentifier() && doLabel.value === "do")) return;
-
-  const binder = cond.argAt(0);
-  const operand = cond.argAt(1);
-  if (!binder?.isIdentifier() || !operand) return;
-
-  const baseType = getExprType(operand);
-  const someType = findSomeVariant(baseType);
-  if (!someType) return;
-
-  const bodyExpr = doArg.argAt(1)!;
-  // Temporary binder for operand within match arm
-  const tmp = Identifier.from(`__opt_${call.syntaxId}`);
-  const tmpVar = new Variable({
-    name: tmp.clone(),
-    location: tmp.location,
-    initializer: operand,
-    isMutable: false,
-    parent: call.parent ?? call.parentModule,
-  });
-
-  // let binder = tmp.value
-  const valueAccess = new Call({
-    ...call.metadata,
-    fnName: Identifier.from("member-access"),
-    args: new List({ value: [tmp.clone(), Identifier.from("value")] }),
-  });
-  const unwrap = new Variable({
-    name: binder.clone(),
-    location: binder.location,
-    initializer: valueAccess,
-    isMutable: false,
-    parent: call.parent ?? call.parentModule,
-  });
-
-  const thenBlock = new Block({
-    ...bodyExpr.metadata,
-    body: [
-      unwrap,
-      ...(bodyExpr.isBlock() ? bodyExpr.body : [bodyExpr]),
-      Identifier.from("void"),
-    ],
-  });
-
-  const match = new Match({
-    ...call.metadata,
-    operand,
-    cases: [
-      {
-        matchTypeExpr: someType,
-        expr: thenBlock,
-      },
-    ],
-    defaultCase: { expr: toBlock(Identifier.from("break")) },
-    bindIdentifier: tmp,
-    bindVariable: tmpVar,
-  });
-
-  const newDo = makeLabeled("do", resolveEntities(match), call.metadata);
-  newDo.type = dVoid;
-
-  call.args = new List({
-    value: [new Bool({ value: true, location: call.location }), newDo],
-  });
-  call.args.parent = call;
-  return call;
-};
-
-const maybeLowerWhileInSugar = (call: Call): Expr | undefined => {
-  const cond = call.argAt(0);
-  const doArg = call.argAt(1);
-  if (!cond?.isCall() || !cond.calls("in")) return;
-  if (!(doArg?.isCall() && doArg.calls(":"))) return;
-  const doLabel = doArg.argAt(0);
-  if (!(doLabel?.isIdentifier() && doLabel.value === "do")) return;
-
-  const binder = cond.argAt(0);
-  const iterable = cond.argAt(1);
-  if (!binder?.isIdentifier() || !iterable) return;
-
-  // let __iter_N = iterable.iterate()
-  const iterId = Identifier.from(`__iter_${call.syntaxId}`);
-  const iterateCall = new Call({
-    ...call.metadata,
-    fnName: Identifier.from("iterate"),
-    args: new List({ value: [resolveEntities(iterable)] }),
-  });
-  const iterVar = new Variable({
-    name: iterId.clone(),
-    location: new SourceLocation({
-      startIndex: -1,
-      endIndex: -1,
-      line: 0,
-      column: 0,
-      filePath: call.location?.filePath ?? "raw",
-    }),
-    initializer: iterateCall,
-    isMutable: false,
-    parent: call.parent ?? call.parentModule,
-  });
-
-  // while binder := __iter_N.next() do: body
-  const nextCall = new Call({
-    ...call.metadata,
-    fnName: Identifier.from("next"),
-    args: new List({ value: [iterId.clone()] }),
-  });
-  const condUnwrap = new Call({
-    ...call.metadata,
-    fnName: Identifier.from(":="),
-    args: new List({ value: [binder.clone(), nextCall] }),
-  });
-  const newWhile = new Call({
-    ...call.metadata,
-    fnName: Identifier.from("while"),
-    args: new List({ value: [condUnwrap, doArg.clone()] }),
-  });
-
-  const block = new Block({
-    ...call.metadata,
-    body: [iterVar, newWhile],
-  });
-
-  return resolveEntities(block);
-};
-
-// (moved above)
