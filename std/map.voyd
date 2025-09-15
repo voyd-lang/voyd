@@ -55,7 +55,7 @@ impl<T> Iterable<{ key: String, value: T }> for Map<T>
 impl<T> Map<T>
   pub fn init(pairs: Array<(String, T)>) -> Map<T>
     var m = new_map<T>()
-    while pair in pairs do:
+    for pair in pairs do:
       let key = pair.0
       let value = pair.1
       m.get_bucket_by_key(key).match(bucket)

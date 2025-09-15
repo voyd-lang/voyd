@@ -83,7 +83,7 @@ impl Encoder
       self.write_u8(bit_and(shift_ru(len, 8), 255))
       self.write_u8(bit_and(len, 255))
 
-    while item in value do:
+    for item in value do:
       self.encode_string(item.key)
       self.encode_any(item.value)
 
@@ -102,7 +102,7 @@ impl Encoder
       self.write_u8(bit_and(shift_ru(len, 8), 255))
       self.write_u8(bit_and(len, 255))
 
-    while item in value do:
+    for item in value do:
       self.encode_any(item)
 
   fn encode_any(&self, value: MsgPack) -> void
@@ -155,6 +155,6 @@ pub fn encode(value: Map<MsgPack>) -> i32
 
 fn map_length(value: Map<MsgPack>) -> i32
   var count = 0
-  while _item in value do:
+  for _item in value do:
     count = count + 1
   count

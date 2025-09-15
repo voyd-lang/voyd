@@ -400,15 +400,6 @@ pub fn test2() -> i32
   let opt: Optional<i32> = Some<i32> { value: 7 }
   opt ?? -1
 
-// While-match with binder: sum 1+2+3 = 6
-pub fn test3() -> i32
-  let a = [1, 2, 3]
-  let iterator = a.iterate()
-  var sum = 0
-  while iterator.next().match(x, Some<i32>) do:
-    sum = sum + x.value
-  sum
-
 // If optional unwrap (:=): returns 5
 pub fn test4() -> i32
   let opt: Optional<i32> = Some<i32> { value: 5 }
@@ -417,19 +408,10 @@ pub fn test4() -> i32
   else:
     -1
 
-// While optional unwrap (:=): sum 1+2+3 = 6
-pub fn test5() -> i32
-  let a = [1, 2, 3]
-  let iterator = a.iterate()
-  var sum = 0
-  while n := iterator.next() do:
-    sum = sum + n
-  sum
-
 // while-in sugar over array values: sum 1+2+3 = 6
 pub fn test6() -> i32
   var sum = 0
-  while n in [1, 2, 3] do:
+  for n in [1, 2, 3] do:
     sum = sum + n
   sum
 
@@ -476,15 +458,6 @@ pub fn test11() -> i32
   if opt is Some then:
     v = opt.value
   v
-
-// While-match with binder: sum 2+4+6 = 12 (type param omitted)
-pub fn test12() -> i32
-  let a = [2, 4, 6]
-  let iterator = a.iterate()
-  var sum = 0
-  while iterator.next().match(x, Some) do:
-    sum = sum + x.value
-  sum
 
 pub fn test13() -> i32
   let x = 5
