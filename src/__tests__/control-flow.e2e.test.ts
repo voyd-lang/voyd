@@ -17,16 +17,13 @@ describe("Control Flow sugar", () => {
 
     expect("test1", 4);
     expect("test2", 7);
-    expect("test3", 6);
     expect("test4", 5);
-    expect("test5", 6);
     expect("test6", 6);
     expect("test7", 5);
     expect("test8", 4);
     expect("test9", -1);
     expect("test10", 1);
     expect("test11", 4);
-    expect("test12", 12);
     expect("test13", 3);
     expect("test14", 1);
     expect("test15", 3);

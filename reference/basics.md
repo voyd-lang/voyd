@@ -103,6 +103,10 @@ else:
 while x > 5 do:
   // Do something
 
+// For-in loops
+for item in [1, 2, 3] do:
+  // Do something with item
+
 // Blocks are defined by 2 space indentation
 let y =
   let x = 2 + 3
