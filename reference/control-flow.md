@@ -110,7 +110,7 @@ you must specify the type parameters to disambiguate: `Some<A>:`.
 
 ## Pattern Matching Sugar
 
-voyd provides some features to make pattern matching more ergonomic in places where using a match would be a bit awkward
+voyd provides some features to make pattern matching more ergonomic in places where using a match would be a bit awkward.
 
 ```voyd
 let opt = Some { value: 4 }
@@ -122,37 +122,29 @@ if opt.match(Some<i32>) then:
 // Match can also optionally bind to a new variable name
 if opt.match(x, Some<i32>) then:
   x.value
+```
 
-// Works for while loops too
-let a = [1, 2, 3]
-let iterator = a.iterate()
+`Optional<T>` specific sugar
 
-var sum = 0
-while iterator.next().match(x, Some<i32>) do:
-  sum = sum + x
-
-// Optional<T> specific sugar
-
-
+```voyd
+// Optional chain
 let structure = {
   a: some {
     b: some {
-      c: 5
+      c: some 5
     }
   }
 }
 
-// Optional chain
 let value: Some<i32> = a?.b?.c // 5
 
+// Optional unwrap
 if x := opt then:
   x // x is i32 here, not Some<i32>
 
-while n := iterator.next() do:
-  sum = sum + n
-
-// Iterator specific sugar
-
-while n in [1, 2, 3] do:
+// Iteration
+let a = [1, 2, 3]
+var sum = 0
+for n in a do:
   sum = sum + n
 ```

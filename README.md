@@ -231,13 +231,17 @@ render(component, container, { instance })
 > - Tail call optimization fully implemented.
 > - While loops and break partially implemented. Do not yet support returning a value.
 
-While loops are the most basic looping construct
+Basic while loop:
 
 ```rust
 while condition do:
   do_work()
+```
 
-while item in array do:
+For-in loops iterate over arrays and iterables:
+
+```rust
+for item in array do:
   print(item)
 ```
 
