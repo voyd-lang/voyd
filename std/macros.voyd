@@ -121,13 +121,12 @@ pub macro for(cond, do)
 
   `
     let ~iterator_id = ~iterable.iterate()
-    var ~iterator_val_id = ~iterator_id.next()
     while true do:
+      let ~iterator_val_id = ~iterator_id.next()
       ~iterator_val_id.match
         Some:
           let ~binding = ~iterator_val_id.value
           ~(do.get(2))
-          ~iterator_val_id = ~iterator_id.next()
           void
         None:
           break
