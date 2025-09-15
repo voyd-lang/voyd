@@ -255,6 +255,7 @@ const functions: Record<string, MacroFn | undefined> = {
     });
   },
   calls: (args) => {
+    if (!args.at(0)?.isList()) return bool(false);
     const list = args.listAt(0);
     const targetId = args.identifierAt(1);
     const suppliedId = list.optionalIdentifierAt(0);
@@ -295,19 +296,12 @@ const functions: Record<string, MacroFn | undefined> = {
           const evaluated = evalMacroExpr(val, {
             skipBuiltins: new Set([":"]),
           });
-          const expanded =
-            evaluated.isList() && evaluated.calls("use")
-              ? evaluated
-              : expandFunctionalMacros(evaluated);
-          return (expanded as List).toArray();
+          return (evaluated as List).toArray();
         }
 
         if (exp.isList() && exp.calls("~")) {
           const val = exp.at(1) ?? nop();
-          const evaluated = evalMacroExpr(val);
-          return evaluated.isList() && evaluated.calls("use")
-            ? evaluated
-            : expandFunctionalMacros(evaluated);
+          return evalMacroExpr(val);
         }
 
         if (exp.isIdentifier() && exp.value.startsWith("~~")) {
@@ -316,11 +310,7 @@ const functions: Record<string, MacroFn | undefined> = {
             ...exp.metadata,
           });
           const evaluated = evalMacroExpr(identifier);
-          const expanded =
-            evaluated.isList() && evaluated.calls("use")
-              ? evaluated
-              : expandFunctionalMacros(evaluated);
-          return (expanded as List).toArray();
+          return (evaluated as List).toArray();
         }
 
         if (exp.isIdentifier() && exp.value.startsWith("~")) {
@@ -328,10 +318,7 @@ const functions: Record<string, MacroFn | undefined> = {
             value: exp.value.slice(1),
             ...exp.metadata,
           });
-          const evaluated = evalMacroExpr(identifier);
-          return evaluated.isList() && evaluated.calls("use")
-            ? evaluated
-            : expandFunctionalMacros(evaluated);
+          return evalMacroExpr(identifier);
         }
 
         if (exp.isList()) return expand(exp);

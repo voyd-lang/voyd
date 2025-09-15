@@ -441,11 +441,11 @@ pub fn test7() -> i32
   let v = structure.a?.b?.c
   if a := v then: a else: -1
 
-// If-match without else: returns 4
+// If is without else: returns 4
 pub fn test8() -> i32
   let opt: Optional<i32> = Some<i32> { value: 4 }
   var v = -1
-  if opt.match(Some<i32>) then:
+  if opt is Some then:
     v = opt.value
   v
 
@@ -469,11 +469,11 @@ pub fn test10() -> i32
     None:
       -1
 
-// If-match without else: returns 4
+// If is without else: returns 4
 pub fn test11() -> i32
   let opt: Optional<i32> = Some<i32> { value: 4 }
   var v = -1
-  if opt.match(Some) then:
+  if opt is Some then:
     v = opt.value
   v
 

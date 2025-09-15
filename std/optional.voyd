@@ -18,7 +18,11 @@ pub fn none() -> None
 
 
 pub macro '?.'(l, r)
-  ` if __opc := ~l then: __opc.~r else: none()
+  let result = ` if __opc := ~l then: __opc.~r else: none()
+  log qdot
+  log result
+  log qdone
+  result
 
 pub macro '??'(l, r)
   ` if __opc := ~l then: __opc else: ~r

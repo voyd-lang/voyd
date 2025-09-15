@@ -65,7 +65,7 @@ pub macro binaryen_gc_call(func, args, return_type)
 pub macro bin_type_to_heap_type(type)
   ` binaryen_gc_call(modBinaryenTypeToHeapType, list(BnrType<~type>))
 
-pub macro ify()
+pub macro if()
   let cond = body.get(0)
   // Note: we call it main_then to avoid preventing the then in body.argsWithLabel(then) from being turned into a list. Need a better way to pass a label then passing an identifier that may or may not be bound to a var
   let main_then = body.argWithLabel(then)
@@ -73,36 +73,39 @@ pub macro ify()
   let thens = body.argsWithLabel(then).slice(1)
   let main_else = body.optionalArgWithLabel(else)
 
-  let result =
-    if cond.calls('is') then:
+  if cond.calls('is') then:
+    let l = cond.get(1)
+    let r = cond.get(2)
+
+    if main_else then:
+      ` ~l.match(~r: ~main_then, else: ~main_else)
+    else:
+      ` ~l.match(~r: block(~main_then, void), else: void)
+  else: // TODO: Add support for elifs to functional macro runtime
+    if cond.calls(':=') then:
       let l = cond.get(1)
       let r = cond.get(2)
-      let match = ` ~l.match(~r: ~main_then)
-
-      if main_else then:
-        let elseExpr = ` else: ~main_else
-        match.push(elseExpr)
-
-      match
-    else: // TODO: Add support for elifs to functional macro runtime
-      if cond.calls(':=') then:
-        let l = cond.get(1)
-        let r = cond.get(2)
-        let default = if main_else then: main_else else: ` block(void)
-        l.mark_moved()
-        `
-          ~r.match
-            Some:
-              let ~l = ~r.value
-              ~main_then
-            else: ~default
-      else:
-        let expr = ` cond(case: ~cond, do: ~main_then))
-        elifs.map (elif, index) =>
-          let elifThen = thens.get(index)
-          let case = ` case: ~elif
-          expr.push(case)
-          let do = ` do: ~elifThen
-          expr.push(do)
-        if main_else then: expr.push(`(default: ~main_else))
-  result
+      let default = if main_else then: main_else else: `(block(none()))
+      l.mark_moved()
+      // log a
+      let temp = identifier(match_temp)
+      let result = `
+        let ~temp = ~r
+        ~temp.match
+          Some:
+            let ~l = ~temp.value
+            ~main_then
+          else: ~default
+      // log result
+      // log b
+      result
+    else:
+      let expr = ` cond(case: ~cond, do: ~main_then))
+      elifs.map (elif, index) =>
+        let elifThen = thens.get(index)
+        let case = ` case: ~elif
+        expr.push(case)
+        let do = ` do: ~elifThen
+        expr.push(do)
+      if main_else then: expr.push(`(default: ~main_else))
+      expr
