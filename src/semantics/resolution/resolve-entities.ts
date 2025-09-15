@@ -237,6 +237,14 @@ export const resolveArrayLiteral = (
   arr: ArrayLiteral,
   expectedElemType?: Type
 ): Expr => {
+  if (expectedElemType) {
+    arr.setAttribute?.("inferredElemType", expectedElemType);
+  } else {
+    const cached = arr.getAttribute?.("inferredElemType");
+    if (cached) expectedElemType = cached as Type;
+  }
+
+  // no-op
   const original = arr.clone();
 
   arr.elements = arr.elements.map((elem) => {

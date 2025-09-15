@@ -3,7 +3,11 @@ import { Call, Parameter, Type, Variable } from "../../syntax-objects/index.js";
 import { Match, MatchCase } from "../../syntax-objects/match.js";
 import { combineTypes } from "./combine-types.js";
 import { getExprType } from "./get-expr-type.js";
-import { resolveEntities, resolveVar } from "./resolve-entities.js";
+import {
+  resolveEntities,
+  resolveVar,
+  resolveWithExpected,
+} from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { UnionType, ObjectType } from "../../syntax-objects/types.js";
 import { resolveUnionType } from "./resolve-union.js";
@@ -18,6 +22,33 @@ export const resolveMatch = (match: Match): Match => {
   // `Some<T>`.
   maybeFillOmittedCaseTypes(match);
 
+  // If this match originated from optional unwrap sugar (Some<T> branch),
+  // resolve the default (else) branch against the expected value type T so
+  // empty literals (e.g., []) can be typed contextually.
+  try {
+    const someVariant = findSomeVariant(match.baseType);
+    const expectedThenType = someVariant?.getField("value")?.type;
+    if (expectedThenType && match.defaultCase?.expr) {
+      const def = match.defaultCase.expr;
+      if ((def as any).isBlock?.()) {
+        const block = def as unknown as Block;
+        const n = block.body.length;
+        if (n > 0) {
+          const last = block.body.at(n - 1)!;
+          block.body[n - 1] = resolveWithExpected(
+            last,
+            expectedThenType
+          ) as any;
+        }
+      } else {
+        match.defaultCase.expr = new Block({
+          ...(def as any).metadata,
+          body: [resolveWithExpected(def as any, expectedThenType) as any],
+        });
+      }
+    }
+  } catch {}
+
   const binding = getBinding(match);
   resolveCases(binding, match);
   match.type = resolveMatchReturnType(match);
@@ -26,15 +57,21 @@ export const resolveMatch = (match: Match): Match => {
 };
 
 const resolveCases = (binding: Parameter | Variable, match: Match) => {
-  match.cases = match.cases.map((c) => resolveCase(binding, c));
+  const someVariant = findSomeVariant(match.baseType);
+  const expectedThenType = someVariant?.getField("value")?.type;
+  match.cases = match.cases.map((c) =>
+    resolveCase(binding, c, expectedThenType, false)
+  );
   match.defaultCase = match.defaultCase
-    ? resolveCase(binding, match.defaultCase)
+    ? resolveCase(binding, match.defaultCase, expectedThenType, true)
     : undefined;
 };
 
 const resolveCase = (
   binding: Parameter | Variable,
-  c: MatchCase
+  c: MatchCase,
+  expectedDefaultType?: Type,
+  isDefault: boolean = false
 ): MatchCase => {
   if (c.matchTypeExpr) resolveTypeExpr(c.matchTypeExpr);
   const type = getExprType(c.matchTypeExpr);
@@ -49,7 +86,24 @@ const resolveCase = (
   // to avoid this.
   c.expr.registerEntity(localBinding);
 
-  const expr = resolveEntities(c.expr) as Call | Block;
+  let expr = c.expr as Call | Block;
+  if (isDefault && expectedDefaultType) {
+    if ((expr as any).isBlock?.()) {
+      const block = expr as unknown as Block;
+      const n = block.body.length;
+      if (n > 0)
+        block.body[n - 1] = resolveWithExpected(
+          block.body[n - 1],
+          expectedDefaultType
+        ) as any;
+    } else {
+      expr = new Block({
+        ...(expr as any).metadata,
+        body: [resolveWithExpected(expr as any, expectedDefaultType) as any],
+      });
+    }
+  }
+  expr = resolveEntities(expr) as Call | Block;
 
   return {
     matchType: type?.isRefType() ? type : undefined,
@@ -82,6 +136,15 @@ const resolveMatchReturnType = (match: Match): Type | undefined => {
 };
 
 // Helpers
+const findSomeVariant = (type?: Type) => {
+  if (!type?.isUnionType()) return undefined;
+  return type.types.find(
+    (t) =>
+      t.isObjectType() &&
+      (t.name.is("Some") || t.genericParent?.name.is("Some"))
+  ) as ObjectType | undefined;
+};
+
 const typeHead = (t?: Type): string | undefined => {
   if (!t) return undefined;
   if (t.isObjectType()) {

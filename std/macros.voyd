@@ -100,7 +100,7 @@ pub macro if()
       // log b
       result
     else:
-      let expr = ` cond(case: ~cond, do: ~main_then))
+      let expr = ` cond(case: ~cond, do: ~main_then)
       elifs.map (elif, index) =>
         let elifThen = thens.get(index)
         let case = ` case: ~elif
