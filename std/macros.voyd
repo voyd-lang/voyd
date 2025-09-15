@@ -109,3 +109,25 @@ pub macro if()
         expr.push(do)
       if main_else then: expr.push(`(default: ~main_else))
       expr
+
+pub macro for(cond, do)
+  let binding = cond.get(1)
+  let iterable = cond.get(2)
+  let iterator_id = identifier(__iterable)
+  let iterator_val_id = identifier(__iterable_val)
+  let result_id = identifier(__loop_result)
+
+  binding.mark_moved()
+
+  `
+    let ~iterator_id = ~iterable.iterate()
+    var ~iterator_val_id = ~iterator_id.next()
+    while true do:
+      ~iterator_val_id.match
+        Some:
+          let ~binding = ~iterator_val_id.value
+          ~(do.get(2))
+          ~iterator_val_id = ~iterator_id.next()
+          void
+        None:
+          break

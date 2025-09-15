@@ -8,7 +8,6 @@ import {
   Block,
   Variable,
   Bool,
-  ObjectLiteral,
   Parameter,
 } from "../../syntax-objects/index.js";
 import { SourceLocation } from "../../syntax-objects/syntax.js";
@@ -19,7 +18,6 @@ import {
   FixedArrayType,
   ObjectType,
   Type,
-  TypeAlias,
 } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
@@ -79,16 +77,6 @@ const cloneParams = (params: Parameter[]): Parameter[] =>
 // Normalize any expression to a block expression
 const toBlock = (e: Expr): Block =>
   e.isBlock() ? e : new Block({ ...e.metadata, body: [e] });
-
-// Extract `label: expr` value if the node is a labeled arg call
-const getLabeledExpr = (
-  maybe: Expr | undefined,
-  label: string
-): Expr | undefined => {
-  if (!maybe?.isCall() || !maybe.calls(":")) return undefined;
-  const id = maybe.argAt(0);
-  return id?.isIdentifier() && id.is(label) ? maybe.argAt(1) : undefined;
-};
 
 // Build a labeled arg call `label: expr`
 const makeLabeled = (label: string, expr: Expr, meta: any): Call =>

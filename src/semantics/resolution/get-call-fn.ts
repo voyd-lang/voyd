@@ -189,9 +189,10 @@ const selectReturnCovering = (candidates: Fn[]): Fn | undefined => {
 
 const selectArgCovering = (candidates: Fn[]): Fn | undefined => {
   const argCovering = candidates.filter((c) =>
-    candidates.every((o) =>
-      c === o ||
-      c.parameters.every((p, i) => covers(p.type, o.parameters[i]?.type))
+    candidates.every(
+      (o) =>
+        c === o ||
+        c.parameters.every((p, i) => covers(p.type, o.parameters[i]?.type))
     )
   );
   return argCovering.length === 1 ? argCovering[0] : undefined;
@@ -431,7 +432,6 @@ const isPrimitiveFnCall = (call: Call): boolean => {
     name === ":" ||
     name === "=" ||
     name === "while" ||
-    name === "for" ||
     name === "break" ||
     name === "mod" ||
     name === "continue" ||

@@ -280,6 +280,7 @@ const functions: Record<string, MacroFn | undefined> = {
     const prefix = args.identifierAt(0);
     return new Identifier({
       value: `${prefix.value}$macro_id$${getSyntaxId()}`,
+      attributes: { moved: true },
     });
   },
   // Will disable "use before defined" error
