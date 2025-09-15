@@ -8,7 +8,7 @@ export const checkIdentifier = (id: Identifier) => {
     throw new Error(`Unrecognized identifier, ${id} at ${id.location}`);
   }
 
-  if (entity.isVariable()) {
+  if (entity.isVariable() && !entity.name.hasAttribute("moved")) {
     if ((id.location?.startIndex ?? 0) <= (entity.location?.startIndex ?? 0)) {
       throw new Error(`${id} used before defined`);
     }
@@ -16,4 +16,3 @@ export const checkIdentifier = (id: Identifier) => {
 
   return id;
 };
-

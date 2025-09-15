@@ -14,6 +14,7 @@ import {
   Block,
   Use,
   nop,
+  getSyntaxId,
 } from "../syntax-objects/index.js";
 import {
   registerExports,
@@ -235,7 +236,7 @@ const functions: Record<string, MacroFn | undefined> = {
     const params = args.first();
     const body = args.at(1);
 
-    if (!params?.isList() || !body?.isList()) {
+    if (!params?.isList() || !(body?.isList() || body?.isBlock())) {
       throw new Error("invalid lambda expression");
     }
 
@@ -248,7 +249,44 @@ const functions: Record<string, MacroFn | undefined> = {
       return p;
     });
 
-    return new MacroLambda({ parameters, body });
+    return new MacroLambda({
+      parameters,
+      body: body.isList() ? body : new List(body.body),
+    });
+  },
+  calls: (args) => {
+    if (!args.at(0)?.isList()) return bool(false);
+    const list = args.listAt(0);
+    const targetId = args.identifierAt(1);
+    const suppliedId = list.optionalIdentifierAt(0);
+    return bool(targetId.value === suppliedId?.value);
+  },
+  argWithLabel: (args) => {
+    const call = args.listAt(0);
+    const label = args.identifierAt(1);
+    return call.labeledArg(label.value);
+  },
+  optionalArgWithLabel: (args) => {
+    const call = args.listAt(0);
+    const label = args.identifierAt(1);
+    return call.optionalLabeledArg(label.value) ?? bool(false);
+  },
+  argsWithLabel: (args) => {
+    const call = args.listAt(0);
+    const label = args.identifierAt(1);
+    return new List(call.argsWithLabel(label.value));
+  },
+  identifier: (args) => {
+    const prefix = args.identifierAt(0);
+    return new Identifier({
+      value: `${prefix.value}$macro_id$${getSyntaxId()}`,
+    });
+  },
+  // Will disable "use before defined" error
+  mark_moved: (args) => {
+    const variable = args.identifierAt(0);
+    variable.setAttribute("moved", true);
+    return variable;
   },
   syntax_template: (template: List) => {
     const expand = (body: List): List =>
@@ -258,19 +296,12 @@ const functions: Record<string, MacroFn | undefined> = {
           const evaluated = evalMacroExpr(val, {
             skipBuiltins: new Set([":"]),
           });
-          const expanded =
-            evaluated.isList() && evaluated.calls("use")
-              ? evaluated
-              : expandFunctionalMacros(evaluated);
-          return (expanded as List).toArray();
+          return (evaluated as List).toArray();
         }
 
         if (exp.isList() && exp.calls("~")) {
           const val = exp.at(1) ?? nop();
-          const evaluated = evalMacroExpr(val);
-          return evaluated.isList() && evaluated.calls("use")
-            ? evaluated
-            : expandFunctionalMacros(evaluated);
+          return evalMacroExpr(val);
         }
 
         if (exp.isIdentifier() && exp.value.startsWith("~~")) {
@@ -279,11 +310,7 @@ const functions: Record<string, MacroFn | undefined> = {
             ...exp.metadata,
           });
           const evaluated = evalMacroExpr(identifier);
-          const expanded =
-            evaluated.isList() && evaluated.calls("use")
-              ? evaluated
-              : expandFunctionalMacros(evaluated);
-          return (expanded as List).toArray();
+          return (evaluated as List).toArray();
         }
 
         if (exp.isIdentifier() && exp.value.startsWith("~")) {
@@ -291,10 +318,7 @@ const functions: Record<string, MacroFn | undefined> = {
             value: exp.value.slice(1),
             ...exp.metadata,
           });
-          const evaluated = evalMacroExpr(identifier);
-          return evaluated.isList() && evaluated.calls("use")
-            ? evaluated
-            : expandFunctionalMacros(evaluated);
+          return evalMacroExpr(identifier);
         }
 
         if (exp.isList()) return expand(exp);

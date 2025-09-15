@@ -389,7 +389,7 @@ export abstract class Syntax {
 }
 
 let currentSyntaxId = 0;
-const getSyntaxId = () => {
+export const getSyntaxId = () => {
   const current = currentSyntaxId;
   currentSyntaxId += 1;
   return current;
