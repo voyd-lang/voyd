@@ -15,10 +15,11 @@ impl Decoder
 
   fn read_u8(&self) -> i32
     let next = self.ptr + self.pos
-    if next >= self.end then:
+    let memory_end = linear_memory::size() * 65536
+    if next >= self.end or next >= memory_end then:
       0
     else:
-      let value = bit_and(linear_memory::load_i32(next), 255)
+      let value = linear_memory::load_u8(next)
       self.pos = self.pos + 1
       value
 
