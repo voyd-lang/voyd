@@ -27,6 +27,31 @@ const flattenUnion = (type: Type): Type[] => {
   return result;
 };
 
+const canonicalUnionMemberIds = (
+  union: UnionType,
+  visited: Set<number> = new Set()
+): number[] | undefined => {
+  if (!union.types.length) return undefined;
+  if (visited.has(union.idNum)) return [];
+  visited.add(union.idNum);
+
+  const members = new Set<number>();
+
+  for (const member of union.types) {
+    if (!member) continue;
+    if (member.isUnionType()) {
+      const nested = canonicalUnionMemberIds(member, visited);
+      if (!nested) return undefined;
+      nested.forEach((id) => members.add(id));
+      continue;
+    }
+
+    members.add(member.idNum);
+  }
+
+  return Array.from(members).sort((a, b) => a - b);
+};
+
 export const typesAreCompatible = (
   /** A is the argument type, the type of the value being passed as b */
   a?: Type,
@@ -137,8 +162,19 @@ export const typesAreCompatible = (
 
   if (a.isUnionType() || b.isUnionType()) {
     if (a.isUnionType() && b.isUnionType()) {
-      // Handle recursive union types (same syntax node) quickly
-      if (a.syntaxId === b.syntaxId || a.id === b.id) return true;
+      // Handle recursive union types (same syntax node) quickly when resolved
+      if (a.syntaxId === b.syntaxId || a.id === b.id) {
+        const aMembers = canonicalUnionMemberIds(a);
+        const bMembers = canonicalUnionMemberIds(b);
+        if (
+          aMembers &&
+          bMembers &&
+          aMembers.length === bMembers.length &&
+          aMembers.every((id, index) => id === bMembers[index])
+        ) {
+          return true;
+        }
+      }
 
       const aTypes = flattenUnion(a);
       const bTypes = flattenUnion(b);

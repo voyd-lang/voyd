@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { ObjectType, UnionType, SelfType } from "../../../syntax-objects/index.js";
+import {
+  ObjectType,
+  UnionType,
+  SelfType,
+  Identifier,
+} from "../../../syntax-objects/index.js";
 import { typesAreCompatible } from "../types-are-compatible.js";
 
 describe("typesAreCompatible - unions", () => {
@@ -54,5 +59,42 @@ describe("typesAreCompatible - unions", () => {
 
   test("considers self types compatible", () => {
     expect(typesAreCompatible(new SelfType(), new SelfType())).toBe(true);
+  });
+
+  test("rejects union aliases with mismatched generic args", () => {
+    const payload = new ObjectType({ name: "Payload", value: [] });
+    const altPayload = new ObjectType({ name: "AltPayload", value: [] });
+
+    const someGeneric = new ObjectType({
+      name: "Some",
+      value: [],
+      typeParameters: [Identifier.from("T")],
+    });
+
+    const makeSomeInstance = (typeArg: ObjectType): ObjectType => {
+      const inst = someGeneric.clone();
+      inst.genericParent = someGeneric;
+      inst.appliedTypeArgs = [typeArg];
+      return inst;
+    };
+
+    const somePayload = makeSomeInstance(payload);
+    const someAltPayload = makeSomeInstance(altPayload);
+    const none = new ObjectType({ name: "None", value: [] });
+
+    const optionAlias = new UnionType({ name: "Option", childTypeExprs: [] });
+
+    const optionPayload = optionAlias.clone();
+    optionPayload.types = [somePayload, none];
+
+    const optionAlt = optionAlias.clone();
+    optionAlt.types = [someAltPayload, none];
+
+    const optionPayloadDup = optionAlias.clone();
+    optionPayloadDup.types = [somePayload, none];
+
+    expect(typesAreCompatible(optionPayload, optionAlt)).toBe(false);
+    expect(typesAreCompatible(optionAlt, optionPayload)).toBe(false);
+    expect(typesAreCompatible(optionPayload, optionPayloadDup)).toBe(true);
   });
 });
