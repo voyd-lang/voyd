@@ -138,7 +138,7 @@ export const typesAreCompatible = (
   if (a.isUnionType() || b.isUnionType()) {
     if (a.isUnionType() && b.isUnionType()) {
       // Handle recursive union types (same syntax node) quickly
-      if (a.syntaxId === b.syntaxId) return true;
+      if (a.syntaxId === b.syntaxId || a.id === b.id) return true;
 
       const aTypes = flattenUnion(a);
       const bTypes = flattenUnion(b);

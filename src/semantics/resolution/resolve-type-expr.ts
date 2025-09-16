@@ -9,7 +9,12 @@ import {
 } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveIntersectionType } from "./resolve-intersection.js";
-import { resolveObjectType } from "./resolve-object-type.js";
+import {
+  canonicalizeAliasUsages,
+  finalizeAliasTypeBindings,
+  registerAliasTypeBinding,
+  resolveObjectType,
+} from "./resolve-object-type.js";
 import { resolveUnionType } from "./resolve-union.js";
 import { resolveTrait } from "./resolve-trait.js";
 
@@ -25,7 +30,11 @@ export const resolveTypeExpr = (typeExpr: Expr): Expr => {
     if (typeExpr.resolutionPhase > 0) return typeExpr;
     typeExpr.resolutionPhase = 1;
     typeExpr.typeExpr = resolveTypeExpr(typeExpr.typeExpr);
-    typeExpr.type = getExprType(typeExpr.typeExpr);
+    typeExpr.type = typeExpr.typeExpr?.isType?.()
+      ? (typeExpr.typeExpr as any as Type)
+      : getExprType(typeExpr.typeExpr);
+    canonicalizeAliasUsages(typeExpr.type);
+    finalizeAliasTypeBindings(typeExpr);
     typeExpr.resolutionPhase = 2;
     return typeExpr;
   }
@@ -104,6 +113,7 @@ export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
         typeExpr: nop(),
       });
       type.type = getExprType(typeArg);
+      if (typeArg) registerAliasTypeBinding(typeArg, type);
       alias.registerEntity(type);
     });
   }

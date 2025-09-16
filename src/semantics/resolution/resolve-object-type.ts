@@ -3,6 +3,7 @@ import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
 import {
   ObjectType,
+  Type,
   TypeAlias,
   voydBaseObject,
 } from "../../syntax-objects/types.js";
@@ -12,6 +13,82 @@ import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { canonicalType } from "../types/canonicalize.js";
+
+const PENDING_ALIAS_BINDINGS_KEY = "__voydPendingAliasBindings";
+
+const getAliasEntityFromArg = (typeArg: any): TypeAlias | undefined => {
+  if (!typeArg?.isIdentifier?.()) return undefined;
+  const resolved = typeArg.resolve?.();
+  return resolved?.isTypeAlias?.() ? (resolved as TypeAlias) : undefined;
+};
+
+const canonicalizeAppliedAliasArgs = (obj: ObjectType): void => {
+  obj.appliedTypeArgs?.forEach((applied) => {
+    if (!applied.isTypeAlias?.()) return;
+    const aliasArg = applied as TypeAlias;
+    const expr = aliasArg.typeExpr;
+    const resolved = expr?.isIdentifier?.()
+      ? expr.resolve?.()
+      : expr?.isTypeAlias?.()
+        ? expr
+        : undefined;
+    if (!resolved?.isTypeAlias?.()) return;
+    const alias = resolved as TypeAlias;
+    const canonical = alias.typeExpr?.isType?.()
+      ? alias.typeExpr
+      : alias.type;
+    if (canonical) aliasArg.type = canonical;
+  });
+};
+
+export const canonicalizeAliasUsages = (type?: Type): void => {
+  if (!type) return;
+  if (type.isObjectType?.()) canonicalizeAppliedAliasArgs(type);
+  if (type.isUnionType?.()) type.types.forEach((child) => canonicalizeAliasUsages(child));
+  if (type.isIntersectionType?.()) {
+    canonicalizeAliasUsages(type.nominalType);
+    canonicalizeAliasUsages(type.structuralType);
+  }
+  if (type.isFixedArrayType?.()) canonicalizeAliasUsages(type.elemType);
+  if (type.isFnType?.()) {
+    type.parameters.forEach((param) => canonicalizeAliasUsages(param.type));
+    canonicalizeAliasUsages(type.returnType);
+  }
+};
+
+export const registerAliasTypeBinding = (
+  typeArg: any,
+  placeholder: TypeAlias
+): void => {
+  const alias = getAliasEntityFromArg(typeArg);
+  if (!alias) return;
+  resolveTypeExpr(alias);
+  const aliasType =
+    alias.type ?? (alias.typeExpr?.isType?.() ? alias.typeExpr : undefined);
+  if (aliasType) {
+    canonicalizeAliasUsages(aliasType);
+    placeholder.type = aliasType;
+    return;
+  }
+  const pending =
+    alias.getTmpAttribute<TypeAlias[]>(PENDING_ALIAS_BINDINGS_KEY);
+  if (pending) {
+    if (!pending.includes(placeholder)) pending.push(placeholder);
+  } else {
+    alias.setTmpAttribute(PENDING_ALIAS_BINDINGS_KEY, [placeholder]);
+  }
+};
+
+export const finalizeAliasTypeBindings = (alias: TypeAlias): void => {
+  const pending =
+    alias.getTmpAttribute<TypeAlias[]>(PENDING_ALIAS_BINDINGS_KEY);
+  if (!pending?.length || !alias.type) return;
+  canonicalizeAliasUsages(alias.type);
+  pending.forEach((placeholder) => {
+    placeholder.type = alias.type;
+  });
+  alias.setTmpAttribute(PENDING_ALIAS_BINDINGS_KEY, undefined);
+};
 
 export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
   if (obj.typesResolved) return obj;
@@ -129,7 +206,10 @@ const resolveGenericObjVersion = (
 
   // THAR BE DRAGONS HERE. We don't check for multiple existing matches, which means that unions may sometimes overlap.
   const existing = type.genericInstances?.find((c) => typeArgsMatch(call, c));
-  if (existing) return existing;
+  if (existing) {
+    canonicalizeAppliedAliasArgs(existing);
+    return existing;
+  }
   return resolveGenericsWithTypeArgs(type, call.typeArgs);
 };
 
@@ -161,6 +241,7 @@ const resolveGenericsWithTypeArgs = (
     });
     resolveTypeExpr(typeArg);
     type.type = getExprType(typeArg);
+    registerAliasTypeBinding(typeArg, type);
     if (!type.type) typesNotResolved = true;
     newObj.appliedTypeArgs?.push(type);
     newObj.registerEntity(type);
@@ -176,6 +257,7 @@ const resolveGenericsWithTypeArgs = (
     .filter((impl) => implIsCompatible(impl, resolvedObj))
     .map((impl) => resolveImpl(impl, resolvedObj));
 
+  canonicalizeAppliedAliasArgs(resolvedObj);
   return resolvedObj;
 };
 
