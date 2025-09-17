@@ -1,7 +1,6 @@
 use std::macros::all
 pub use encoder::encode
 pub use encoder::MsgPack
-pub use encoder::MsgPackNumber
 pub use decoder::decode
 pub use decoder::decode_array
 pub use decoder::decode_i32

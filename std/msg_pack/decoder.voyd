@@ -1,7 +1,6 @@
 use std::all
 use std::linear_memory
 use encoder::MsgPack
-use encoder::MsgPackNumber
 
 obj Decoder {
   ptr: i32,
@@ -81,8 +80,6 @@ impl Decoder
       key.match(decoded_key)
         String:
           result.set(decoded_key, value)
-        MsgPackNumber:
-          result
         Array<MsgPack>:
           result
         Map<MsgPack>:
@@ -139,7 +136,8 @@ impl Decoder
       let len = self.read_u32()
       self.decode_map(len)
     else:
-      MsgPackNumber { value: self.decode_number(prefix) }
+      // MsgPackNumber { value: self.decode_number(prefix) } // TODO
+      "Number"
 
   fn decode_any(&self) -> MsgPack
     let prefix = self.read_u8()

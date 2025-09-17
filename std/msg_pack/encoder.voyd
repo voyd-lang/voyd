@@ -6,9 +6,7 @@ obj Encoder {
   pos: i32,
 }
 
-pub obj MsgPackNumber { value: i32 }
-
-pub type MsgPack = Map<MsgPack> | Array<MsgPack> | String | MsgPackNumber
+pub type MsgPack = Map<MsgPack> | Array<MsgPack> | String
 
 impl Encoder
   pub fn init(ptr: i32)
@@ -115,8 +113,6 @@ impl Encoder
         self.encode_array(json)
       Map<MsgPack>:
         self.encode_map(json)
-      MsgPackNumber:
-        self.encode_number(json.value)
 
 
 pub fn encode(value: i32, ptr: i32) -> i32
