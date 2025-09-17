@@ -11,12 +11,19 @@ import { TraitType } from "../../syntax-objects/types/trait.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFn } from "./resolve-fn.js";
 import { resolveExport } from "./resolve-use.js";
+import { registerTypeParamAliases } from "./register-type-param-aliases.js";
+import type { ScopedEntity } from "../../syntax-objects/scoped-entity.js";
 
 export const resolveImpl = (
   impl: Implementation,
   targetType?: ObjectType
 ): Implementation => {
   if (impl.typesResolved) return impl;
+
+  registerTypeParamAliases(
+    impl as unknown as Expr & ScopedEntity,
+    impl.typeParams.toArray()
+  );
   targetType = targetType ?? getTargetType(impl);
   impl.targetType = targetType;
 

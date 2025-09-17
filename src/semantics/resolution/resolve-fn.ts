@@ -15,6 +15,8 @@ import { typesAreEqual } from "./types-are-equal.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { Type } from "../../syntax-objects/types.js";
 import { canonicalType } from "../types/canonicalize.js";
+import { registerTypeParamAliases } from "./register-type-param-aliases.js";
+import type { ScopedEntity } from "../../syntax-objects/scoped-entity.js";
 
 export type ResolveFnTypesOpts = {
   typeArgs?: List;
@@ -27,6 +29,8 @@ export const resolveFn = (fn: Fn, call?: Call): Fn => {
     // Already resolved
     return fn;
   }
+
+  registerTypeParamAliases(fn as unknown as Expr & ScopedEntity, fn.typeParameters);
 
   if (fn.typeParameters && call) {
     // May want to check if there is already a resolved instance with matching type args here

@@ -1,6 +1,7 @@
 import { Call } from "../../syntax-objects/call.js";
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
+import { Expr } from "../../syntax-objects/expr.js";
 import {
   ObjectType,
   TypeAlias,
@@ -12,8 +13,14 @@ import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { canonicalType } from "../types/canonicalize.js";
+import { registerTypeParamAliases } from "./register-type-param-aliases.js";
+import type { ScopedEntity } from "../../syntax-objects/scoped-entity.js";
 
 export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
+  registerTypeParamAliases(
+    obj as unknown as Expr & ScopedEntity,
+    obj.typeParameters
+  );
   if (obj.typesResolved) return obj;
 
   if (obj.typeParameters) {
@@ -47,7 +54,9 @@ export const containsUnresolvedTypeId = (expr: any): boolean => {
     while (cur && cur.isType?.() && cur.isTypeAlias?.()) {
       if (seen.has(cur)) return undefined; // cycle guard
       seen.add(cur);
-      if (!cur.type) return undefined;
+      if (!cur.type) {
+        return cur.getAttribute("is-type-param") ? cur : undefined;
+      }
       cur = cur.type;
     }
     return cur;
