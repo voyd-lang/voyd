@@ -7,12 +7,14 @@ import { expandFunctionalMacros } from "./functional-macros.js";
 import type { ParsedModule } from "../parser/utils/parse-module.js";
 import { Expr } from "../syntax-objects/expr.js";
 import { resolveEntities } from "./resolution/resolve-entities.js";
+import { canonicalizeTypesPhase } from "./resolution/canonicalize-types.js";
 
 const semanticPhases: SemanticProcessor[] = [
   expandFunctionalMacros, // Also handles use and module declaration initialization
   initPrimitiveTypes,
   initEntities,
   resolveEntities,
+  canonicalizeTypesPhase,
   checkTypes,
 ];
 
