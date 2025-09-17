@@ -136,8 +136,8 @@ impl Decoder
       let len = self.read_u32()
       self.decode_map(len)
     else:
-      // MsgPackNumber { value: self.decode_number(prefix) } // TODO
-      "Number"
+      self.decode_number(prefix)
+      new_array<MsgPack>({ with_size: 1 })
 
   fn decode_any(&self) -> MsgPack
     let prefix = self.read_u8()
