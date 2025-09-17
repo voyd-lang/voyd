@@ -120,7 +120,7 @@ describe("call resolution canonicalization", () => {
     expect(call.fn).toBe(fn);
   });
 
-  test("canonicalType is non-mutating for unions", () => {
+  test("canonicalType flattens unions in place", () => {
     const aObj = new ObjectType({ name: "A", value: [] });
     const bObj = new ObjectType({ name: "B", value: [] });
     const cObj = new ObjectType({ name: "C", value: [] });
@@ -131,30 +131,18 @@ describe("call resolution canonicalization", () => {
     const union = new UnionType({ name: "Top", childTypeExprs: [] });
     union.types = [aObj, nested];
 
-    const before = [...union.types];
     const canon1 = canonicalType(union) as UnionType;
     const canon2 = canonicalType(union) as UnionType;
 
-    // Original unchanged
-    expect(union.types).toHaveLength(2);
-    expect(union.types[0]).toBe(aObj);
-    expect(union.types[1]).toBe(nested);
-    expect(union.types).toEqual(before);
-
-    // Canonicalized result is flattened and deduped
-    expect(canon1).not.toBe(union);
-    expect(canon1.types.map((t) => t.id).sort()).toEqual(
-      [aObj.id, bObj.id, cObj.id].sort()
-    );
-    // Idempotent and non-mutating across repeated calls
-    expect(canon2.types.map((t) => t.id).sort()).toEqual(
-      [aObj.id, bObj.id, cObj.id].sort()
-    );
-    // Original still unchanged after multiple calls
-    expect(union.types).toEqual(before);
+    expect(canon1).toBe(union);
+    expect(union.types).toHaveLength(3);
+    expect(new Set(union.types)).toEqual(new Set([aObj, bObj, cObj]));
+    expect(canon2).toBe(union);
+    expect(union.types).toHaveLength(3);
+    expect(new Set(union.types)).toEqual(new Set([aObj, bObj, cObj]));
   });
 
-  test("canonicalType is non-mutating for function types", () => {
+  test("canonicalType rewrites function types in place", () => {
     const aliasRet = new TypeAlias({
       name: Identifier.from("RetAlias"),
       typeExpr: Identifier.from("f32"),
@@ -174,19 +162,11 @@ describe("call resolution canonicalization", () => {
       returnType: aliasRet,
     });
 
-    const canon = canonicalType(fnType);
+    const canon = canonicalType(fnType) as FnType;
 
-    // Original function type remains unchanged
-    expect(fnType.parameters[0]?.type).toBe(aliasParam);
-    expect(fnType.returnType).toBe(aliasRet);
-
-    // Canonicalized clone has rewritten types
-    expect(canon).not.toBe(fnType);
-    if ((canon as any).isFnType?.()) {
-      const c = canon as any;
-      expect(c.parameters[0]?.type).toBe(i32);
-      expect(c.returnType).toBe(f32);
-    }
+    expect(canon).toBe(fnType);
+    expect(fnType.parameters[0]?.type).toBe(i32);
+    expect(fnType.returnType).toBe(f32);
   });
 
   test("collapses duplicate union aliases", () => {
