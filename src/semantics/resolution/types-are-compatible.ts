@@ -109,14 +109,16 @@ export const typesAreCompatible = (
     }
 
     if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
-      return !!a.appliedTypeArgs?.every((arg, index) =>
-        typesAreCompatible(
-          getExprType(arg),
-          getExprType(b.appliedTypeArgs?.[index]),
-          opts,
-          visited
-        )
-      );
+      const aArgs = a.appliedTypeArgs ?? [];
+      const bArgs = b.appliedTypeArgs ?? [];
+      if (aArgs.length !== bArgs.length) return false;
+      return aArgs.every((arg, index) => {
+        const aType = getExprType(arg);
+        const bType = getExprType(bArgs[index]);
+        if (!aType || !bType) return false;
+        if (aType.id === bType.id) return true;
+        return typesAreCompatible(aType, bType, opts, visited);
+      });
     }
 
     if (a.idNum === b.idNum) return true;
@@ -148,14 +150,16 @@ export const typesAreCompatible = (
 
   if (a.isTraitType() && b.isTraitType()) {
     if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
-      return !!a.appliedTypeArgs?.every((arg, index) =>
-        typesAreCompatible(
-          getExprType(arg),
-          getExprType(b.appliedTypeArgs?.[index]),
-          opts,
-          visited
-        )
-      );
+      const aArgs = a.appliedTypeArgs ?? [];
+      const bArgs = b.appliedTypeArgs ?? [];
+      if (aArgs.length !== bArgs.length) return false;
+      return aArgs.every((arg, index) => {
+        const aType = getExprType(arg);
+        const bType = getExprType(bArgs[index]);
+        if (!aType || !bType) return false;
+        if (aType.id === bType.id) return true;
+        return typesAreCompatible(aType, bType, opts, visited);
+      });
     }
     return a.id === b.id;
   }
