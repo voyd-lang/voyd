@@ -46,7 +46,8 @@ impl Decoder
     if value >= 32768 then: value - 65536 else: value
 
   fn read_i32(&self) -> i32
-    self.read_u32()
+    let value = self.read_u32()
+    if value >= 2147483648 then: value - 4294967296 else: value
 
   fn decode_string(&self, length: i32) -> String
     if length <= 0 then:
