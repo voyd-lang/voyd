@@ -8,8 +8,14 @@ import { getExprType } from "./get-expr-type.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveImpl } from "./resolve-impl.js";
 import { canonicalType } from "../types/canonicalize.js";
+import { registerTypeParamAliases } from "./register-type-param-aliases.js";
+import type { ScopedEntity } from "../../syntax-objects/scoped-entity.js";
 
 export const resolveTrait = (trait: TraitType, call?: Call): TraitType => {
+  registerTypeParamAliases(
+    trait as unknown as TraitType & ScopedEntity,
+    trait.typeParameters
+  );
   if (trait.typeParameters) {
     return resolveGenericTraitVersion(trait, call) ?? trait;
   }

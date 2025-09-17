@@ -54,6 +54,7 @@ export const getIdentifierType = (id: Identifier): Type | undefined => {
   if (entity.isFn()) return entity.getType();
   if (entity.isClosure()) return entity.getType();
   if (entity.isTypeAlias()) {
+    if (!entity.type && entity.getAttribute("is-type-param")) return entity;
     return (
       entity.type ?? (entity.typeExpr?.isType() ? entity.typeExpr : undefined)
     );
