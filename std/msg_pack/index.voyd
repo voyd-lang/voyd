@@ -1,7 +1,8 @@
 use std::macros::all
 pub use encoder::encode
 pub use encoder::MsgPack
-
-pub fn decode_json(ptr: i32, len: i32) -> i32
-  // not yet implemented
-  0
+pub use decoder::decode
+pub use decoder::decode_array
+pub use decoder::decode_i32
+pub use decoder::decode_map
+pub use decoder::decode_string

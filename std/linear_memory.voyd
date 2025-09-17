@@ -20,6 +20,12 @@ pub fn load_i32(ptr: i32) -> i32
     namespace: i32
     args: list(BnrConst(0), BnrConst(0), ptr)
 
+pub fn load_u8(ptr: i32) -> i32
+  binaryen
+    func: load8_u
+    namespace: i32
+    args: list(BnrConst(0), BnrConst(0), ptr)
+
 pub fn load_i64(ptr: i32) -> i64
   binaryen
     func: load
