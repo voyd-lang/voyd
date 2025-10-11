@@ -345,12 +345,16 @@ export class CanonicalTypeTable {
 
     if ((type as ObjectType).isObjectType?.()) {
       const obj = type as ObjectType;
-      if (!obj.typeParameters?.length && obj.typesResolved !== true) {
+      if (
+        !obj.isStructural &&
+        !obj.typeParameters?.length &&
+        obj.typesResolved !== true
+      ) {
         throw new Error(
           `[CanonicalTypeTable] attempted to ${phase} unresolved object type ${obj.name.toString()}`
         );
       }
-      if (!obj.lexicon) {
+      if (!obj.isStructural && !obj.lexicon) {
         throw new Error(
           `[CanonicalTypeTable] object type ${obj.name.toString()} missing lexicon during ${phase}`
         );

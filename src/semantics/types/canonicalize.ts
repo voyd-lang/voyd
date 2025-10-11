@@ -88,7 +88,7 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
   }
 
   if (t.isObjectType?.()) {
-    if (t.appliedTypeArgs?.length) {
+    if (t.appliedTypeArgs?.length || t.parentObjType) {
       const copy = new (t.constructor as any)({
         name: t.name,
         value: [],
@@ -99,10 +99,13 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
         isStructural: t.isStructural,
       });
       Object.assign(copy, t);
-      copy.id = `${t.id}#canon`;
-      copy.appliedTypeArgs = t.appliedTypeArgs.map((arg) =>
-        canonicalType(arg, seen)
-      );
+      copy.id = t.genericParent ? t.genericParent.id : t.id;
+      if (t.parentObjType) {
+        copy.parentObjType = canonicalType(t.parentObjType, seen) as ObjectType;
+      }
+      copy.appliedTypeArgs = t.appliedTypeArgs
+        ? t.appliedTypeArgs.map((arg) => canonicalType(arg, seen))
+        : undefined;
       return copy;
     }
     return t;
@@ -118,6 +121,7 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
         lexicon: t.lexicon,
       });
       Object.assign(copy, t);
+      copy.id = t.genericParent ? t.genericParent.id : t.id;
       copy.appliedTypeArgs = t.appliedTypeArgs.map((arg) =>
         canonicalType(arg, seen)
       );
