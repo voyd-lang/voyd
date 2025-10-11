@@ -29,14 +29,16 @@ export type RecursiveUnion = {
   arrayInstance: ObjectType;
 };
 
-export const createRecursiveUnion = (): RecursiveUnion => {
+export const createRecursiveUnion = (
+  name = "RecType"
+): RecursiveUnion => {
   const union = new UnionType({
-    name: Identifier.from("RecType"),
+    name: Identifier.from(name),
     childTypeExprs: [],
   });
 
   const alias = new TypeAlias({
-    name: Identifier.from("RecType"),
+    name: Identifier.from(name),
     typeExpr: union,
   });
 

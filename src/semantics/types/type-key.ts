@@ -14,69 +14,70 @@ import { Expr } from "../../syntax-objects/expr.js";
 import { getExprType } from "../resolution/get-expr-type.js";
 import { resolveTypeExpr } from "../resolution/resolve-type-expr.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
+import {
+  emitTypeKeyTrace,
+  getTraceLabel,
+  shouldTraceTypeKey,
+  TraceLabel,
+} from "./type-key-trace.js";
+import { VoydModule } from "../../syntax-objects/module.js";
+
+type StackFrame = {
+  type: Type;
+  cycleId: string;
+  depth: number;
+};
 
 type TypeKeyContext = {
   memo: Map<Type, string>;
-  stack: Map<Type, string>;
-  nextCycle: number;
+  stack: Map<Type, StackFrame>;
+  frames: StackFrame[];
+  depths: Map<Type, number>;
 };
 
 const createContext = (): TypeKeyContext => ({
   memo: new Map(),
   stack: new Map(),
-  nextCycle: 0,
+  frames: [],
+  depths: new Map(),
 });
 
 const computeKey = (type: Type, ctx: TypeKeyContext): string => {
-  if (ctx.memo.has(type)) return ctx.memo.get(type)!;
+  const memoized = ctx.memo.get(type);
+  if (memoized) return memoized;
 
-  const cycleId = ctx.stack.get(type);
-  if (cycleId) {
-    if ((type as TypeAlias).isTypeAlias?.()) {
-      const alias = type as TypeAlias;
-      return `alias-cycle:${alias.name.value}`;
-    }
-    if ((type as UnionType).isUnionType?.()) {
-      const union = type as UnionType;
-      return `union-cycle:${union.name.value}`;
-    }
-    return `cycle:${cycleId}`;
+  const inProgress = ctx.stack.get(type);
+  if (inProgress) {
+    return buildCycleMarker(type, inProgress);
   }
 
   if ((type as TypeAlias).isTypeAlias?.()) {
     const alias = type as TypeAlias;
+    const frame = pushFrame(ctx, alias);
     const target = alias.type;
-    if (target) return computeKey(target, ctx);
-    return `alias:${alias.name.value}`;
+    const key = target
+      ? computeKey(target, ctx)
+      : `alias:${alias.name.toString()}`;
+    ctx.memo.set(alias, key);
+    traceComputedKey(alias, key, ctx, frame);
+    popFrame(ctx, frame);
+    return key;
   }
 
-  const currentCycle = `${ctx.nextCycle++}`;
-  ctx.stack.set(type, currentCycle);
-
-  const keyFor = (resolved?: Type, expr?: Expr): string => {
-    if (resolved) return computeKey(resolved, ctx);
-    if (!expr) return "unknown";
-    const resolvedExpr = resolveTypeExpr(expr);
-    const resolvedType = getExprType(resolvedExpr);
-    return resolvedType ? computeKey(resolvedType, ctx) : "unknown";
-  };
-
+  const frame = pushFrame(ctx, type);
   let key: string;
+
   if ((type as UnionType).isUnionType?.()) {
     const union = type as UnionType;
-    const parts = union.types.map((child) => {
-      const childKey = computeKey(child, ctx);
-      return childKey.startsWith("union{")
-        ? `union-cycle:${union.name.value}`
-        : childKey;
-    });
+    const parts = union.types.map((child) => computeKey(child, ctx));
     const unique = Array.from(new Set(parts)).sort();
     key = `union{${unique.join("|")}}`;
   } else if ((type as IntersectionType).isIntersectionType?.()) {
     const inter = type as IntersectionType;
     const parts: string[] = [];
     if (inter.nominalType) parts.push(computeKey(inter.nominalType, ctx));
-    if (inter.structuralType) parts.push(computeKey(inter.structuralType, ctx));
+    if (inter.structuralType)
+      parts.push(computeKey(inter.structuralType, ctx));
     const unique = Array.from(new Set(parts)).sort();
     key = `intersection{${unique.join("&")}}`;
   } else if ((type as TupleType).isTupleType?.()) {
@@ -86,21 +87,21 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
       .join(",")}]`;
   } else if ((type as FixedArrayType).isFixedArrayType?.()) {
     const arr = type as FixedArrayType;
-    key = `fixed[${keyFor(arr.elemType, arr.elemTypeExpr)}]`;
+    key = `fixed[${keyFor(ctx, arr.elemType, arr.elemTypeExpr)}]`;
   } else if ((type as FnType).isFnType?.()) {
     const fn = type as FnType;
     const params = fn.parameters.map((param) => {
-      const paramKey = keyFor(param.type, param.typeExpr);
+      const paramKey = keyFor(ctx, param.type, param.typeExpr);
       return param.isOptional ? `?${paramKey}` : paramKey;
     });
-    const retKey = keyFor(fn.returnType, fn.returnTypeExpr);
+    const retKey = keyFor(ctx, fn.returnType, fn.returnTypeExpr);
     key = `fn(${params.join(",")})=>${retKey}`;
   } else if ((type as ObjectType).isObjectType?.()) {
     const obj = type as ObjectType;
     if (obj.isStructural) {
       const fieldKeys = obj.fields
         .map((field) => {
-          return `${field.name}:${keyFor(field.type, field.typeExpr)}`;
+          return `${field.name}:${keyFor(ctx, field.type, field.typeExpr)}`;
         })
         .sort();
       const parentKey = obj.parentObjType
@@ -111,13 +112,9 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
       const baseId = obj.genericParent ? obj.genericParent.idNum : obj.idNum;
       const applied = obj.appliedTypeArgs?.length
         ? `<${obj.appliedTypeArgs
-            .map((arg) => {
-              const argKey = computeKey(arg, ctx);
-              if (argKey.startsWith("union{")) {
-                return `union-cycle:${(arg as UnionType).name.value}`;
-              }
-              return argKey;
-            })
+            .map((arg) =>
+              normalizeUnionArgKey(ctx, arg, computeKey(arg, ctx))
+            )
             .join(",")}>`
         : "";
       const parentKey = obj.parentObjType
@@ -141,12 +138,186 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
   } else if ((type as SelfType).isSelfType?.()) {
     key = "self";
   } else {
-    key = `${type.kindOfType ?? "type"}#${type.idNum ?? type.id ?? "anon"}`;
+    key = `${type.kindOfType ?? "type"}#${type.idNum ?? (type as any).id ?? "anon"}`;
   }
 
-  ctx.stack.delete(type);
   ctx.memo.set(type, key);
+  traceComputedKey(type, key, ctx, frame);
+  popFrame(ctx, frame);
   return key;
+};
+
+const keyFor = (
+  ctx: TypeKeyContext,
+  resolved?: Type,
+  expr?: Expr
+): string => {
+  if (resolved) return computeKey(resolved, ctx);
+  if (!expr) return "unknown";
+  const resolvedExpr = resolveTypeExpr(expr);
+  const resolvedType = getExprType(resolvedExpr);
+  return resolvedType ? computeKey(resolvedType, ctx) : "unknown";
+};
+
+const pushFrame = (ctx: TypeKeyContext, type: Type): StackFrame => {
+  const currentDepth = ctx.depths.get(type) ?? 0;
+  ctx.depths.set(type, currentDepth + 1);
+
+  const frame: StackFrame = {
+    type,
+    cycleId: `${currentDepth}`,
+    depth: currentDepth,
+  };
+  ctx.stack.set(type, frame);
+  ctx.frames.push(frame);
+  return frame;
+};
+
+const popFrame = (ctx: TypeKeyContext, frame: StackFrame): void => {
+  const last = ctx.frames.pop();
+  if (last && last.type !== frame.type) {
+    throw new Error("typeKey stack invariant violated");
+  }
+  ctx.stack.delete(frame.type);
+  const depth = ctx.depths.get(frame.type);
+  if (depth !== undefined) {
+    if (depth <= 1) {
+      ctx.depths.delete(frame.type);
+    } else {
+      ctx.depths.set(frame.type, depth - 1);
+    }
+  }
+};
+
+const buildCycleMarker = (type: Type, frame: StackFrame): string => {
+  const depthSuffix = `@${frame.depth}`;
+  const cycleSuffix = `#${frame.cycleId}`;
+
+  if ((type as TypeAlias).isTypeAlias?.()) {
+    const alias = type as TypeAlias;
+    return `alias-cycle:${stableAliasId(alias)}${cycleSuffix}${depthSuffix}`;
+  }
+
+  if ((type as UnionType).isUnionType?.()) {
+    const union = type as UnionType;
+    return `union-cycle:${stableUnionId(union)}${cycleSuffix}${depthSuffix}`;
+  }
+
+  return `cycle:${stableTypeToken(type)}${cycleSuffix}${depthSuffix}`;
+};
+
+const stableAliasId = (alias: TypeAlias): string => {
+  const modulePath = modulePathFor(alias.parentModule);
+  const name = alias.name.toString();
+  return modulePath ? `${modulePath}::${name}` : name;
+};
+
+const stableUnionId = (union: UnionType): string => {
+  const aliasParent = (union.parent as TypeAlias | undefined)?.isTypeAlias?.()
+    ? (union.parent as TypeAlias)
+    : undefined;
+  const modulePath = modulePathFor(union.parentModule);
+  const name =
+    aliasParent?.name?.toString?.() ??
+    union.name?.toString?.() ??
+    union.name?.value ??
+    `${union.kindOfType ?? "union"}#${union.idNum}`;
+
+  if (aliasParent) {
+    return stableAliasId(aliasParent);
+  }
+
+  return modulePath ? `${modulePath}::${name}` : name;
+};
+
+const modulePathFor = (module?: VoydModule): string | undefined => {
+  if (!module) return undefined;
+  const path = module.getPath();
+  if (!path.length) return undefined;
+  const filtered = module.isRoot ? path.slice(1) : path;
+  return filtered.length ? filtered.join("::") : undefined;
+};
+
+const stableTypeToken = (type: Type): string => {
+  if ((type as any).name?.toString) {
+    return (type as any).name.toString();
+  }
+  if ((type as any).name?.value) {
+    return (type as any).name.value;
+  }
+  return `${type.kindOfType ?? "type"}#${type.idNum ?? (type as any).id ?? "anon"}`;
+};
+
+const normalizeUnionArgKey = (
+  ctx: TypeKeyContext,
+  arg: Type,
+  argKey: string
+): string => {
+  if (
+    argKey.startsWith("alias-cycle:") ||
+    argKey.startsWith("union-cycle:")
+  ) {
+    return argKey;
+  }
+
+  if ((arg as UnionType).isUnionType?.() && argKey.startsWith("union{")) {
+    const union = arg as UnionType;
+    return `union-cycle:${stableUnionId(union)}${cycleSuffixForFallback(
+      ctx,
+      union
+    )}`;
+  }
+
+  return argKey;
+};
+
+const cycleSuffixForFallback = (
+  ctx: TypeKeyContext,
+  union: UnionType
+): string => {
+  const activeFrame = ctx.stack.get(union);
+  if (activeFrame) {
+    return `#${activeFrame.cycleId}@${activeFrame.depth}`;
+  }
+
+  const nearestUnion = [...ctx.frames]
+    .reverse()
+    .find((frame) => (frame.type as UnionType).isUnionType?.());
+
+  if (nearestUnion) {
+    return `#${nearestUnion.cycleId}@${nearestUnion.depth}`;
+  }
+
+  return "#0@0";
+};
+
+const traceComputedKey = (
+  type: Type,
+  fingerprint: string,
+  ctx: TypeKeyContext,
+  frame: StackFrame
+) => {
+  const label = getTraceLabel(type);
+  if (!label) return;
+  if (!shouldTraceTypeKey(label)) return;
+  emitTypeKeyTrace({
+    type,
+    fingerprint,
+    kind: label.kind,
+    name: label.name,
+    modulePath: label.modulePath,
+    qualifiedName: label.qualifiedName,
+    depth: frame.depth,
+    stack: ctx.frames
+      .map((f) => traceLabelForFrame(f))
+      .filter((value): value is string => value !== undefined),
+  });
+};
+
+const traceLabelForFrame = (frame: StackFrame): string | undefined => {
+  const label: TraceLabel | undefined = getTraceLabel(frame.type);
+  if (!label) return undefined;
+  return label.qualifiedName;
 };
 
 export const typeKey = (type: Type): string => {
