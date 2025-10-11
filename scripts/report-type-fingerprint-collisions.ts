@@ -10,10 +10,6 @@ import { Identifier } from "../src/syntax-objects/index.js";
 import { VoydModule } from "../src/syntax-objects/module.js";
 import { Type, TypeAlias, UnionType } from "../src/syntax-objects/types.js";
 import { typeKey } from "../src/semantics/types/type-key.js";
-import {
-  configureTypeKeyTrace,
-  getActiveTypeKeyTraceConfig,
-} from "../src/semantics/types/type-key-trace.js";
 
 type CollisionEntry = {
   fingerprint: string;
@@ -23,22 +19,7 @@ type CollisionEntry = {
   id: string;
 };
 
-const args = process.argv.slice(2);
-const traceIndex = args.findIndex((arg) => arg === "--trace");
-if (traceIndex !== -1) {
-  const value = args[traceIndex + 1];
-  const names =
-    value && !value.startsWith("--")
-      ? value.split(",").map((part) => part.trim()).filter(Boolean)
-      : undefined;
-  configureTypeKeyTrace({ names });
-}
-
 const main = async () => {
-if (!getActiveTypeKeyTraceConfig()) {
-  configureTypeKeyTrace({});
-  }
-
   const parsed = await parseModule("use std::all");
   let expr = registerModules(parsed) as unknown as VoydModule;
   expr = expandFunctionalMacros(expr) as VoydModule;

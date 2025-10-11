@@ -3,6 +3,8 @@ import { Implementation } from "../../syntax-objects/implementation.js";
 import { typesAreCompatible } from "../resolution/index.js";
 import { checkTypes } from "./check-types.js";
 import { checkFnTypes } from "./check-fn.js";
+import { canonicalType } from "../types/canonicalize.js";
+import { typeKey } from "../types/type-key.js";
 
 export const checkObjectType = (obj: ObjectType): ObjectType => {
   if (obj.genericInstances) {
@@ -74,11 +76,39 @@ const checkImpl = (impl: Implementation): Implementation => {
   if (!impl.trait) return impl;
 
   for (const method of impl.trait.methods.toArray()) {
-    if (
-      !impl.methods.some((fn) =>
-        typesAreCompatible(fn.getType(), method.getType())
-      )
-    ) {
+    const implMethod = impl.methods.find(
+      (fn) => fn.name?.value === method.name?.value
+    );
+    if (!implMethod) {
+      throw new Error(
+        `Impl does not implement ${method.name} at ${impl.location}`
+      );
+    }
+
+    const implType = implMethod.getType();
+    const traitType = method.getType();
+
+    const paramsCompatible = traitType.parameters.every((param, idx) => {
+      const implParam = implType.parameters[idx]?.type;
+      if (!param.type) return !implParam;
+      if (param.type.isSelfType()) return true;
+      if (!implParam) return false;
+      if (typesAreCompatible(implParam, param.type)) return true;
+      const canonicalImplParam = canonicalType(implParam);
+      const canonicalTraitParam = canonicalType(param.type);
+      return (
+        typeKey(canonicalImplParam) === typeKey(canonicalTraitParam)
+      );
+    });
+
+    const returnsCompatible =
+      typesAreCompatible(implType.returnType, traitType.returnType) ||
+      (implType.returnType &&
+        traitType.returnType &&
+        typeKey(canonicalType(implType.returnType)) ===
+          typeKey(canonicalType(traitType.returnType)));
+
+    if (!paramsCompatible || !returnsCompatible) {
       throw new Error(
         `Impl does not implement ${method.name} at ${impl.location}`
       );
@@ -87,4 +117,3 @@ const checkImpl = (impl: Implementation): Implementation => {
 
   return impl;
 };
-

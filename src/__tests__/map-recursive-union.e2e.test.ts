@@ -2,10 +2,6 @@ import { describe, test } from "vitest";
 import { parseModule } from "../parser/index.js";
 import { processSemantics } from "../semantics/index.js";
 import { mapRecursiveUnionVoyd } from "./fixtures/map-recursive-union.js";
-import {
-  withCanonicalization,
-  setCanonicalizationOverride,
-} from "../semantics/types/canonicalization-feature.js";
 import { CanonicalTypeTable } from "../semantics/types/canonical-type-table.js";
 import { canonicalizeResolvedTypes } from "../semantics/types/canonicalize-resolved-types.js";
 import { VoydModule } from "../syntax-objects/module.js";
@@ -20,6 +16,12 @@ import { Fn } from "../syntax-objects/fn.js";
 import { Expr } from "../syntax-objects/expr.js";
 import { Call } from "../syntax-objects/call.js";
 import { typeKey } from "../semantics/types/type-key.js";
+import { registerModules } from "../semantics/modules.js";
+import { expandFunctionalMacros } from "../semantics/functional-macros.js";
+import { initPrimitiveTypes } from "../semantics/init-primitive-types.js";
+import { initEntities } from "../semantics/init-entities.js";
+import { resolveEntities } from "../semantics/resolution/resolve-entities.js";
+import { checkTypes } from "../semantics/check-types/index.js";
 
 type DedupeStats = {
   total: number;
@@ -35,13 +37,21 @@ type RecTypeSnapshot = {
   mapCallKey?: string;
 };
 
-const loadRootModule = async (
-  canonicalizationEnabled: boolean
-): Promise<VoydModule> => {
+const loadModuleWithoutCanonicalization = async (): Promise<VoydModule> => {
   const parsedModule = await parseModule(mapRecursiveUnionVoyd);
-  return (await withCanonicalization(canonicalizationEnabled, () =>
-    processSemantics(parsedModule)
-  )) as VoydModule;
+  const registered = registerModules(parsedModule);
+  const resolved = [
+    expandFunctionalMacros,
+    initPrimitiveTypes,
+    initEntities,
+    resolveEntities,
+  ].reduce((acc, phase) => phase(acc), registered as Expr);
+  return checkTypes(resolved as VoydModule) as VoydModule;
+};
+
+const loadCanonicalizedModule = async (): Promise<VoydModule> => {
+  const parsedModule = await parseModule(mapRecursiveUnionVoyd);
+  return processSemantics(parsedModule) as VoydModule;
 };
 
 const analyzeDedupeStats = (root: VoydModule): DedupeStats => {
@@ -146,9 +156,10 @@ const captureRecTypeSnapshot = (root: VoydModule): RecTypeSnapshot => {
         (type as ObjectType).name?.is?.("Map"))
   ) as ObjectType | undefined;
 
-  const [makeMap] = srcModule.resolveFns(Identifier.from("make_map")) as
+  const makeMapFns = srcModule.resolveFns(Identifier.from("make_map")) as
     | Fn[]
     | undefined;
+  const makeMap = makeMapFns?.[0];
 
   const mapCall = makeMap
     ? collectCalls(makeMap.body as Expr).find((call) => call.fnName.is("Map"))
@@ -167,7 +178,7 @@ const captureRecTypeSnapshot = (root: VoydModule): RecTypeSnapshot => {
 
 describe("map-recursive-union canonicalization integration", () => {
   test("manual canonicalization unwraps RecType alias and dedupes Map<RecType>", async (t) => {
-    const root = await loadRootModule(false);
+    const root = await loadModuleWithoutCanonicalization();
     const before = captureRecTypeSnapshot(root);
     t.expect(before.mapVariantArg?.kindOfType).toBe("type-alias");
 
@@ -188,18 +199,16 @@ describe("map-recursive-union canonicalization integration", () => {
   });
 
   test("pipeline canonicalization reduces duplicate type fingerprints", async (t) => {
-    const rootWithout = await loadRootModule(false);
+    const rootWithout = await loadModuleWithoutCanonicalization();
     const statsWithout = analyzeDedupeStats(rootWithout);
 
-    const rootWith = await loadRootModule(true);
+    const rootWith = await loadCanonicalizedModule();
     const statsWith = analyzeDedupeStats(rootWith);
     const snapshotWith = captureRecTypeSnapshot(rootWith);
 
     t.expect(statsWithout.total).toBeGreaterThan(statsWith.total);
     t.expect(statsWithout.total - statsWith.total).toBeGreaterThan(100);
     t.expect(statsWith.someCount).toBeGreaterThanOrEqual(1);
+    t.expect(snapshotWith.mapVariantArg?.kindOfType).toBe("union");
   });
 });
-
-// Ensure global override is cleared if tests mutate it.
-setCanonicalizationOverride(undefined);

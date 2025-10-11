@@ -54,7 +54,10 @@ export const typesAreEqual = (
         })
       );
     }
-    if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
+    if (
+      a.genericParent &&
+      a.genericParent.idNum === b.genericParent?.idNum
+    ) {
       return !!a.appliedTypeArgs?.every((arg, index) =>
         typesAreEqual(
           getExprType(arg),
@@ -63,11 +66,14 @@ export const typesAreEqual = (
         )
       );
     }
-    return a.id === b.id;
+    return a.idNum === b.idNum;
   }
 
   if (a.isTraitType() && b.isTraitType()) {
-    if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
+    if (
+      a.genericParent &&
+      a.genericParent.idNum === b.genericParent?.idNum
+    ) {
       return !!a.appliedTypeArgs?.every((arg, index) =>
         typesAreEqual(
           getExprType(arg),
@@ -76,7 +82,7 @@ export const typesAreEqual = (
         )
       );
     }
-    return a.id === b.id;
+    return a.idNum === b.idNum;
   }
 
   if (a.isUnionType() && b.isUnionType()) {
@@ -118,4 +124,3 @@ export const typesAreEqual = (
 
   return false;
 };
-

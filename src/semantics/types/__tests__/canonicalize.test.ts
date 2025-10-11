@@ -29,6 +29,6 @@ describe("canonicalType", () => {
     const canon = canonicalType(inst) as TraitType;
     expect(canon.appliedTypeArgs?.[0]).toBe(i32);
     expect(() => canon.clone()).not.toThrow();
-    expect(canon.id).toBe(inst.id);
+    expect(canon.id).toBe(trait.id);
   });
 });

@@ -1,5 +1,8 @@
 import { Type, UnionType } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
+import { typesAreEqual } from "./types-are-equal.js";
+import { canonicalType } from "../types/canonicalize.js";
+import { typeKey } from "../types/type-key.js";
 
 const flattenUnion = (type: Type): Type[] => {
   if (!type.isUnionType()) return [type];
@@ -77,21 +80,47 @@ export const typesAreCompatible = (
     if (structural) {
       return b.fields.every((field) => {
         const match = a.fields.find((f) => f.name === field.name);
-        return (
-          match && typesAreCompatible(field.type, match.type, opts, visited)
+        if (!match) return false;
+        const compatible = typesAreCompatible(
+          field.type,
+          match.type,
+          opts,
+          visited
         );
+        if (!compatible && typesAreEqual(field.type, match.type)) {
+          return true;
+        }
+        if (compatible) return true;
+        const expectedCanonical = field.type
+          ? canonicalType(field.type)
+          : undefined;
+        const actualCanonical = match.type
+          ? canonicalType(match.type)
+          : undefined;
+        if (
+          expectedCanonical &&
+          actualCanonical &&
+          typeKey(expectedCanonical) === typeKey(actualCanonical)
+        ) {
+          return true;
+        }
+        return typesAreEqual(field.type, match.type);
       });
     }
 
-    if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
-      return !!a.appliedTypeArgs?.every((arg, index) =>
-        typesAreCompatible(
-          getExprType(arg),
-          getExprType(b.appliedTypeArgs?.[index]),
+    if (a.genericParent && a.genericParent.idNum === b.genericParent?.idNum) {
+      return !!a.appliedTypeArgs?.every((arg, index) => {
+        const left = getExprType(arg) ?? ((arg as unknown) as Type | undefined);
+        const right =
+          getExprType(b.appliedTypeArgs?.[index]) ??
+          ((b.appliedTypeArgs?.[index] as unknown) as Type | undefined);
+        return typesAreCompatible(
+          left ? canonicalType(left) : undefined,
+          right ? canonicalType(right) : undefined,
           opts,
           visited
-        )
-      );
+        );
+      });
     }
 
     if (a.idNum === b.idNum) return true;
@@ -103,7 +132,7 @@ export const typesAreCompatible = (
 
   if (a.isObjectType() && b.isTraitType()) {
     const matchesTrait = a.implementations?.some(
-      (impl) => impl.trait?.id === b.id
+      (impl) => impl.trait?.idNum === b.idNum
     );
     if (matchesTrait) return true;
     return a.parentObjType
@@ -113,7 +142,7 @@ export const typesAreCompatible = (
 
   if (a.isTraitType() && b.isObjectType()) {
     const matchesTrait = b.implementations?.some(
-      (impl) => impl.trait?.id === a.id
+      (impl) => impl.trait?.idNum === a.idNum
     );
     if (matchesTrait) return true;
     return b.parentObjType
@@ -122,17 +151,24 @@ export const typesAreCompatible = (
   }
 
   if (a.isTraitType() && b.isTraitType()) {
-    if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
-      return !!a.appliedTypeArgs?.every((arg, index) =>
-        typesAreCompatible(
-          getExprType(arg),
-          getExprType(b.appliedTypeArgs?.[index]),
+    if (
+      a.genericParent &&
+      a.genericParent.idNum === b.genericParent?.idNum
+    ) {
+      return !!a.appliedTypeArgs?.every((arg, index) => {
+        const left = getExprType(arg) ?? ((arg as unknown) as Type | undefined);
+        const right =
+          getExprType(b.appliedTypeArgs?.[index]) ??
+          ((b.appliedTypeArgs?.[index] as unknown) as Type | undefined);
+        return typesAreCompatible(
+          left ? canonicalType(left) : undefined,
+          right ? canonicalType(right) : undefined,
           opts,
           visited
-        )
-      );
+        );
+      });
     }
-    return a.id === b.id;
+    return a.idNum === b.idNum;
   }
 
   if (a.isUnionType() || b.isUnionType()) {
@@ -167,8 +203,16 @@ export const typesAreCompatible = (
       return false;
     }
 
+    const canonicalNonUnion = nonUnionType
+      ? canonicalType(nonUnionType)
+      : undefined;
     return unionType.types.some((t) =>
-      typesAreCompatible(nonUnionType, t, opts, visited)
+      typesAreCompatible(
+        canonicalNonUnion as Type,
+        canonicalType(t) as Type,
+        opts,
+        visited
+      )
     );
   }
 

@@ -266,7 +266,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
   }
 
   extends(ancestor: ObjectType): boolean {
-    if (this === ancestor) {
+    if (this === ancestor || this.idNum === ancestor.idNum) {
       return true;
     }
 

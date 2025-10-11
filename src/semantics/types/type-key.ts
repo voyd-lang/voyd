@@ -14,12 +14,6 @@ import { Expr } from "../../syntax-objects/expr.js";
 import { getExprType } from "../resolution/get-expr-type.js";
 import { resolveTypeExpr } from "../resolution/resolve-type-expr.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
-import {
-  emitTypeKeyTrace,
-  getTraceLabel,
-  shouldTraceTypeKey,
-  TraceLabel,
-} from "./type-key-trace.js";
 import { VoydModule } from "../../syntax-objects/module.js";
 
 type StackFrame = {
@@ -59,7 +53,6 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
       ? computeKey(target, ctx)
       : `alias:${alias.name.toString()}`;
     ctx.memo.set(alias, key);
-    traceComputedKey(alias, key, ctx, frame);
     popFrame(ctx, frame);
     return key;
   }
@@ -142,7 +135,6 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
   }
 
   ctx.memo.set(type, key);
-  traceComputedKey(type, key, ctx, frame);
   popFrame(ctx, frame);
   return key;
 };
@@ -289,35 +281,6 @@ const cycleSuffixForFallback = (
   }
 
   return "#0@0";
-};
-
-const traceComputedKey = (
-  type: Type,
-  fingerprint: string,
-  ctx: TypeKeyContext,
-  frame: StackFrame
-) => {
-  const label = getTraceLabel(type);
-  if (!label) return;
-  if (!shouldTraceTypeKey(label)) return;
-  emitTypeKeyTrace({
-    type,
-    fingerprint,
-    kind: label.kind,
-    name: label.name,
-    modulePath: label.modulePath,
-    qualifiedName: label.qualifiedName,
-    depth: frame.depth,
-    stack: ctx.frames
-      .map((f) => traceLabelForFrame(f))
-      .filter((value): value is string => value !== undefined),
-  });
-};
-
-const traceLabelForFrame = (frame: StackFrame): string | undefined => {
-  const label: TraceLabel | undefined = getTraceLabel(frame.type);
-  if (!label) return undefined;
-  return label.qualifiedName;
 };
 
 export const typeKey = (type: Type): string => {

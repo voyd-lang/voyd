@@ -3,6 +3,8 @@ import { UnionType, Type } from "../../syntax-objects/types.js";
 import { typesAreCompatible } from "../resolution/index.js";
 import { checkVarTypes } from "./check-var.js";
 import { checkTypes } from "./check-types.js";
+import { typeKey } from "../types/type-key.js";
+import { canonicalType } from "../types/canonicalize.js";
 
 export const checkMatch = (match: Match) => {
   if (match.bindVariable) {
@@ -56,9 +58,13 @@ const checkUnionMatch = (match: Match) => {
   checkMatchCases(match);
 
   const badCase = match.cases.find((mCase) =>
-    !union.types.some((type: Type) =>
-      typesAreCompatible(mCase.matchType, type)
-    )
+    !union.types.some((type: Type) => {
+      if (typesAreCompatible(mCase.matchType, type)) return true;
+      if (!mCase.matchType) return false;
+      const caseCanonical = canonicalType(mCase.matchType);
+      const unionCanonical = canonicalType(type);
+      return typeKey(caseCanonical) === typeKey(unionCanonical);
+    })
   );
 
   if (badCase) {
@@ -91,4 +97,3 @@ const checkObjectMatch = (match: Match) => {
 
   return match;
 };
-

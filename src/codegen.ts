@@ -52,12 +52,14 @@ export const codegen = (ast: Expr) => {
   const extensionHelpers = initExtensionHelpers(mod);
   const fieldLookupHelpers = initFieldLookupHelpers(mod);
   const methodLookupHelpers = initMethodLookupHelpers(mod);
+  const addedGlobals = new Set<string>();
   compileExpression({
     expr: ast,
     mod,
     extensionHelpers,
     fieldLookupHelpers,
     methodLookupHelpers,
+    addedGlobals,
   });
   return mod;
 };
@@ -75,6 +77,7 @@ export interface CompileExprOpts<T = Expr> {
   extensionHelpers: ReturnType<typeof initExtensionHelpers>;
   fieldLookupHelpers: ReturnType<typeof initFieldLookupHelpers>;
   methodLookupHelpers: ReturnType<typeof initMethodLookupHelpers>;
+  addedGlobals: Set<string>;
   isReturnExpr?: boolean;
   loopBreakId?: string;
 }
@@ -244,19 +247,27 @@ export const buildObjectType = (
     builder.dispose();
   }
 
-  mod.addGlobal(
-    `__ancestors_table_${obj.id}`,
-    opts.extensionHelpers.i32Array,
-    false,
-    opts.extensionHelpers.initExtensionArray(obj.getAncestorIds())
-  );
+  const ancestorsGlobal = `__ancestors_table_${obj.id}`;
+  if (!opts.addedGlobals.has(ancestorsGlobal)) {
+    mod.addGlobal(
+      ancestorsGlobal,
+      opts.extensionHelpers.i32Array,
+      false,
+      opts.extensionHelpers.initExtensionArray(obj.getAncestorIds())
+    );
+    opts.addedGlobals.add(ancestorsGlobal);
+  }
 
-  mod.addGlobal(
-    `__field_index_table_${obj.id}`,
-    opts.fieldLookupHelpers.lookupTableType,
-    false,
-    opts.fieldLookupHelpers.initFieldIndexTable({ ...opts, expr: obj })
-  );
+  const fieldIndexGlobal = `__field_index_table_${obj.id}`;
+  if (!opts.addedGlobals.has(fieldIndexGlobal)) {
+    mod.addGlobal(
+      fieldIndexGlobal,
+      opts.fieldLookupHelpers.lookupTableType,
+      false,
+      opts.fieldLookupHelpers.initFieldIndexTable({ ...opts, expr: obj })
+    );
+    opts.addedGlobals.add(fieldIndexGlobal);
+  }
 
   if (obj.implementations?.length) {
     obj.implementations.forEach((impl) =>
@@ -264,12 +275,16 @@ export const buildObjectType = (
     );
   }
 
-  mod.addGlobal(
-    `__method_table_${obj.id}`,
-    opts.methodLookupHelpers.lookupTableType,
-    false,
-    opts.methodLookupHelpers.initMethodTable({ ...opts, expr: obj })
-  );
+  const methodTableGlobal = `__method_table_${obj.id}`;
+  if (!opts.addedGlobals.has(methodTableGlobal)) {
+    mod.addGlobal(
+      methodTableGlobal,
+      opts.methodLookupHelpers.lookupTableType,
+      false,
+      opts.methodLookupHelpers.initMethodTable({ ...opts, expr: obj })
+    );
+    opts.addedGlobals.add(methodTableGlobal);
+  }
 
   const finalType = obj.binaryenType;
   if (obj.isStructural) {

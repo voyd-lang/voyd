@@ -11,6 +11,7 @@ const makeOpts = (expr: Call) => ({
   extensionHelpers: {} as any,
   fieldLookupHelpers: {} as any,
   methodLookupHelpers: { LOOKUP_NAME: "", lookupTableType: 0 } as any,
+  addedGlobals: new Set<string>(),
 });
 
 const makeCall = (name: string) =>
