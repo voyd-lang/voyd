@@ -31,7 +31,17 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
   if (ctx.memo.has(type)) return ctx.memo.get(type)!;
 
   const cycleId = ctx.stack.get(type);
-  if (cycleId) return `cycle:${cycleId}`;
+  if (cycleId) {
+    if ((type as TypeAlias).isTypeAlias?.()) {
+      const alias = type as TypeAlias;
+      return `alias-cycle:${alias.name.value}`;
+    }
+    if ((type as UnionType).isUnionType?.()) {
+      const union = type as UnionType;
+      return `union-cycle:${union.name.value}`;
+    }
+    return `cycle:${cycleId}`;
+  }
 
   if ((type as TypeAlias).isTypeAlias?.()) {
     const alias = type as TypeAlias;
@@ -54,7 +64,12 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
   let key: string;
   if ((type as UnionType).isUnionType?.()) {
     const union = type as UnionType;
-    const parts = union.types.map((child) => computeKey(child, ctx));
+    const parts = union.types.map((child) => {
+      const childKey = computeKey(child, ctx);
+      return childKey.startsWith("union{")
+        ? `union-cycle:${union.name.value}`
+        : childKey;
+    });
     const unique = Array.from(new Set(parts)).sort();
     key = `union{${unique.join("|")}}`;
   } else if ((type as IntersectionType).isIntersectionType?.()) {
@@ -96,7 +111,13 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
       const baseId = obj.genericParent ? obj.genericParent.idNum : obj.idNum;
       const applied = obj.appliedTypeArgs?.length
         ? `<${obj.appliedTypeArgs
-            .map((arg) => computeKey(arg, ctx))
+            .map((arg) => {
+              const argKey = computeKey(arg, ctx);
+              if (argKey.startsWith("union{")) {
+                return `union-cycle:${(arg as UnionType).name.value}`;
+              }
+              return argKey;
+            })
             .join(",")}>`
         : "";
       const parentKey = obj.parentObjType
