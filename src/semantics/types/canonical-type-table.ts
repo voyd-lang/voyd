@@ -13,6 +13,12 @@ import { typeKey } from "./type-key.js";
 import canonicalType from "./canonicalize.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
 
+export type CanonicalTypeDedupeEvent = {
+  fingerprint: string;
+  canonical: Type;
+  reused: Type;
+};
+
 const dedupe = <T>(values: T[]): T[] => {
   const seen = new Set<T>();
   const result: T[] = [];
@@ -24,12 +30,38 @@ const dedupe = <T>(values: T[]): T[] => {
   return result;
 };
 
+type FingerprintFn = (type: Type) => string;
+
+type CanonicalTypeTableOptions = {
+  fingerprint?: FingerprintFn;
+  recordEvents?: boolean;
+  onDedupe?: (event: CanonicalTypeDedupeEvent) => void;
+};
+
 export class CanonicalTypeTable {
   #cache = new Map<Type, Type>();
   #byFingerprint = new Map<string, Type>();
   #inProgress = new Set<Type>();
+  #pending = new Set<Type>();
+  #dedupeLog: CanonicalTypeDedupeEvent[] = [];
+  #drainingPending = false;
+  #fingerprint: FingerprintFn;
+  #recordEvents: boolean;
+  #onDedupe?: (event: CanonicalTypeDedupeEvent) => void;
 
-  constructor(private readonly fingerprint = typeKey) {}
+  constructor(
+    fingerprintOrOptions: FingerprintFn | CanonicalTypeTableOptions = typeKey
+  ) {
+    if (typeof fingerprintOrOptions === "function") {
+      this.#fingerprint = fingerprintOrOptions;
+      this.#recordEvents = true;
+      return;
+    }
+
+    this.#fingerprint = fingerprintOrOptions.fingerprint ?? typeKey;
+    this.#recordEvents = fingerprintOrOptions.recordEvents ?? true;
+    this.#onDedupe = fingerprintOrOptions.onDedupe;
+  }
 
   canonicalize<T extends Type | undefined>(type: T): T {
     if (!type) return type;
@@ -38,13 +70,26 @@ export class CanonicalTypeTable {
 
   getCanonical(type: Type): Type {
     const snapshot = canonicalType(type);
-    const key = this.fingerprint(snapshot);
+    const key = this.#fingerprint(snapshot);
     return this.#byFingerprint.get(key) ?? type;
+  }
+
+  getDedupeEvents(): CanonicalTypeDedupeEvent[] {
+    return [...this.#dedupeLog];
+  }
+
+  clearDedupeEvents(): void {
+    this.#dedupeLog = [];
   }
 
   #canonicalize(type: Type): Type {
     const cached = this.#cache.get(type);
-    if (cached) return cached;
+    if (cached) {
+      if (this.#pending.has(type) && !this.#inProgress.has(type)) {
+        return this.#finalizePending(type);
+      }
+      return cached;
+    }
 
     if (this.#inProgress.has(type)) {
       if ((type as TypeAlias).isTypeAlias?.()) {
@@ -65,6 +110,7 @@ export class CanonicalTypeTable {
         alias.type = normalized;
         this.#cache.set(alias, normalized);
         this.#inProgress.delete(type);
+        this.#flushPending();
         return normalized;
       }
       this.#cache.set(alias, alias);
@@ -157,19 +203,265 @@ export class CanonicalTypeTable {
   }
 
   #register<T extends Type>(type: T): T {
+    if (this.#shouldDefer(type)) {
+      this.#defer(type);
+      return type;
+    }
+
+    const canonical = this.#finalize(type);
+    this.#flushPending();
+    return canonical as T;
+  }
+
+  #finalizePending(type: Type): Type {
+    if (this.#shouldDefer(type)) return type;
+    const canonical = this.#finalize(type);
+    this.#flushPending();
+    return canonical;
+  }
+
+  #finalize<T extends Type>(type: T): T {
     const snapshot = canonicalType(type);
-    const key = this.fingerprint(snapshot);
+    const key = this.#fingerprint(snapshot);
     const existing = this.#byFingerprint.get(key);
     if (existing) {
+      this.#assertCanonicalReady(existing, "reuse");
+      this.#copyMetadata(existing, type);
       this.#cache.set(type, existing);
       this.#inProgress.delete(type);
+      if (this.#pending.has(type)) this.#pending.delete(type);
+      this.#recordDedupe({ fingerprint: key, canonical: existing, reused: type });
       return existing as T;
     }
 
     this.#byFingerprint.set(key, type);
     this.#cache.set(type, type);
     this.#inProgress.delete(type);
+    if (this.#pending.has(type)) this.#pending.delete(type);
     return type;
+  }
+
+  #recordDedupe(event: CanonicalTypeDedupeEvent): void {
+    if (this.#recordEvents) {
+      this.#dedupeLog = [...this.#dedupeLog, event];
+    }
+    if (this.#onDedupe) this.#onDedupe(event);
+  }
+
+  #defer(type: Type): void {
+    this.#pending.add(type);
+    this.#cache.set(type, type);
+    this.#inProgress.delete(type);
+  }
+
+  #flushPending(): void {
+    if (this.#drainingPending) return;
+    if (!this.#pending.size) return;
+    this.#drainingPending = true;
+    try {
+      let progressed = true;
+      while (progressed) {
+        progressed = false;
+        const pending = Array.from(this.#pending);
+        pending.forEach((candidate) => {
+          if (this.#shouldDefer(candidate)) return;
+          this.#pending.delete(candidate);
+          this.#finalize(candidate);
+          progressed = true;
+        });
+      }
+    } finally {
+      this.#drainingPending = false;
+    }
+  }
+
+  #shouldDefer(type: Type): boolean {
+    const children = this.#collectChildTypes(type);
+    return children.some((child) => {
+      if (!child) return false;
+      if (child === type) return false;
+      if (this.#inProgress.has(child)) return true;
+      return false;
+    });
+  }
+
+  #collectChildTypes(type: Type): Type[] {
+    if ((type as UnionType).isUnionType?.()) {
+      return (type as UnionType).types;
+    }
+
+    if ((type as IntersectionType).isIntersectionType?.()) {
+      const inter = type as IntersectionType;
+      const result: Type[] = [];
+      if (inter.nominalType) result.push(inter.nominalType);
+      if (inter.structuralType) result.push(inter.structuralType);
+      return result;
+    }
+
+    if ((type as TupleType).isTupleType?.()) {
+      return [...(type as TupleType).value];
+    }
+
+    if ((type as FixedArrayType).isFixedArrayType?.()) {
+      const arr = type as FixedArrayType;
+      return arr.elemType ? [arr.elemType] : [];
+    }
+
+    if ((type as FnType).isFnType?.()) {
+      const fn = type as FnType;
+      const params = fn.parameters
+        .flatMap((param) =>
+          [param.type, param.originalType].filter(
+            (child): child is Type => !!child
+          )
+        )
+        .filter((child): child is Type => !!child);
+      return fn.returnType ? [fn.returnType, ...params] : [...params];
+    }
+
+    if ((type as ObjectType).isObjectType?.()) {
+      const obj = type as ObjectType;
+      const appliedArgs = obj.appliedTypeArgs ?? [];
+      const fieldTypes = obj.fields
+        .map((field) => field.type)
+        .filter((child): child is Type => !!child);
+      const genericInstances = obj.genericInstances ?? [];
+      const parent = obj.parentObjType ? [obj.parentObjType] : [];
+      return [...appliedArgs, ...fieldTypes, ...parent, ...genericInstances];
+    }
+
+    if ((type as TraitType).isTraitType?.()) {
+      const trait = type as TraitType;
+      const appliedArgs = trait.appliedTypeArgs ?? [];
+      const genericInstances = trait.genericInstances ?? [];
+      return [...appliedArgs, ...genericInstances];
+    }
+
+    return [];
+  }
+
+  #assertCanonicalReady(type: Type, phase: "register" | "reuse") {
+    if (phase !== "reuse") return;
+
+    if ((type as ObjectType).isObjectType?.()) {
+      const obj = type as ObjectType;
+      if (!obj.typeParameters?.length && obj.typesResolved !== true) {
+        throw new Error(
+          `[CanonicalTypeTable] attempted to ${phase} unresolved object type ${obj.name.toString()}`
+        );
+      }
+      if (!obj.lexicon) {
+        throw new Error(
+          `[CanonicalTypeTable] object type ${obj.name.toString()} missing lexicon during ${phase}`
+        );
+      }
+    }
+
+    if ((type as TraitType).isTraitType?.()) {
+      const trait = type as TraitType;
+      if (!trait.typeParameters?.length && trait.typesResolved !== true) {
+        throw new Error(
+          `[CanonicalTypeTable] attempted to ${phase} unresolved trait ${trait.name.toString()}`
+        );
+      }
+      if (!trait.lexicon) {
+        throw new Error(
+          `[CanonicalTypeTable] trait ${trait.name.toString()} missing lexicon during ${phase}`
+        );
+      }
+    }
+  }
+
+  #copyMetadata(target: Type, source: Type): void {
+    if ((target as ObjectType).isObjectType?.() && (source as ObjectType).isObjectType?.()) {
+      this.#mergeObjectMetadata(target as ObjectType, source as ObjectType);
+      return;
+    }
+
+    if ((target as TraitType).isTraitType?.() && (source as TraitType).isTraitType?.()) {
+      this.#mergeTraitMetadata(target as TraitType, source as TraitType);
+    }
+  }
+
+  #mergeObjectMetadata(target: ObjectType, source: ObjectType): void {
+    if (source.typesResolved === true && target.typesResolved !== true) {
+      target.typesResolved = true;
+    }
+
+    if (
+      source.binaryenType !== undefined &&
+      target.binaryenType === undefined
+    ) {
+      target.binaryenType = source.binaryenType;
+    }
+
+    if (source.appliedTypeArgs?.length) {
+      if (!target.appliedTypeArgs?.length) {
+        target.appliedTypeArgs = [...source.appliedTypeArgs];
+      }
+    }
+
+    if (source.genericParent && !target.genericParent) {
+      target.genericParent = source.genericParent;
+    }
+
+    if (source.genericInstances?.length) {
+      const existing = new Set(target.genericInstances ?? []);
+      const merged = target.genericInstances ? [...target.genericInstances] : [];
+      source.genericInstances.forEach((inst) => {
+        if (existing.has(inst)) return;
+        existing.add(inst);
+        merged.push(inst);
+      });
+      if (merged.length) target.genericInstances = merged;
+    }
+
+    if (source.implementations?.length) {
+      const seen = new Set(target.implementations);
+      const merged = [...target.implementations];
+      source.implementations.forEach((impl) => {
+        if (seen.has(impl)) return;
+        seen.add(impl);
+        merged.push(impl);
+      });
+      target.implementations = merged;
+    }
+  }
+
+  #mergeTraitMetadata(target: TraitType, source: TraitType): void {
+    if (source.typesResolved === true && target.typesResolved !== true) {
+      target.typesResolved = true;
+    }
+
+    if (source.appliedTypeArgs?.length && !target.appliedTypeArgs?.length) {
+      target.appliedTypeArgs = [...source.appliedTypeArgs];
+    }
+
+    if (source.genericParent && !target.genericParent) {
+      target.genericParent = source.genericParent;
+    }
+
+    if (source.genericInstances?.length) {
+      const existing = new Set(target.genericInstances ?? []);
+      const merged = target.genericInstances ? [...target.genericInstances] : [];
+      source.genericInstances.forEach((inst) => {
+        if (existing.has(inst)) return;
+        existing.add(inst);
+        merged.push(inst);
+      });
+      if (merged.length) target.genericInstances = merged;
+    }
+
+    if (source.implementations?.length) {
+      const seen = new Set(target.implementations);
+      const merged = [...target.implementations];
+      source.implementations.forEach((impl) => {
+        if (seen.has(impl)) return;
+        seen.add(impl);
+        merged.push(impl);
+      });
+      target.implementations = merged;
+    }
   }
 }
 

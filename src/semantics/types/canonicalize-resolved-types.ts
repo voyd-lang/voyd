@@ -30,9 +30,27 @@ type CanonicalizeCtx = {
   visitedTypes: Set<Type>;
 };
 
-export const canonicalizeResolvedTypes = (module: VoydModule): VoydModule => {
+const dedupeByRef = <T>(values: T[]): T[] => {
+  const seen = new Set<T>();
+  const result: T[] = [];
+  values.forEach((value) => {
+    if (seen.has(value)) return;
+    seen.add(value);
+    result.push(value);
+  });
+  return result;
+};
+
+type CanonicalizeResolvedTypesOpts = {
+  table?: CanonicalTypeTable;
+};
+
+export const canonicalizeResolvedTypes = (
+  module: VoydModule,
+  opts?: CanonicalizeResolvedTypesOpts
+): VoydModule => {
   const ctx: CanonicalizeCtx = {
-    table: new CanonicalTypeTable(),
+    table: opts?.table ?? new CanonicalTypeTable(),
     visitedExpr: new Set(),
     visitedTypes: new Set(),
   };
@@ -307,6 +325,7 @@ const canonicalizeTypeNode = (
     union.types = union.types.map(
       (child) => canonicalTypeRef(ctx, child) as any
     );
+    union.types = dedupeByRef(union.types);
     union.types.forEach((child) => canonicalizeTypeNode(ctx, child));
     return union;
   }
