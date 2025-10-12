@@ -1,4 +1,4 @@
-import { describe, test } from "vitest";
+import { describe, test, beforeAll } from "vitest";
 import { parseModule } from "../parser/index.js";
 import { processSemantics } from "../semantics/index.js";
 import { mapRecursiveUnionVoyd } from "./fixtures/map-recursive-union.js";
@@ -22,6 +22,9 @@ import { initPrimitiveTypes } from "../semantics/init-primitive-types.js";
 import { initEntities } from "../semantics/init-entities.js";
 import { resolveEntities } from "../semantics/resolution/resolve-entities.js";
 import { checkTypes } from "../semantics/check-types/index.js";
+import { compile } from "../compiler.js";
+import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import assert from "node:assert";
 
 type DedupeStats = {
   total: number;
@@ -177,6 +180,15 @@ const captureRecTypeSnapshot = (root: VoydModule): RecTypeSnapshot => {
 };
 
 describe("map-recursive-union canonicalization integration", () => {
+  let wasmInstance: WebAssembly.Instance;
+  let wasmText: string;
+
+  beforeAll(async () => {
+    const mod = await compile(mapRecursiveUnionVoyd);
+    wasmInstance = getWasmInstance(mod);
+    wasmText = mod.emitText();
+  });
+
   test("manual canonicalization unwraps RecType alias and dedupes Map<RecType>", async (t) => {
     const root = await loadModuleWithoutCanonicalization();
     const before = captureRecTypeSnapshot(root);
@@ -210,5 +222,27 @@ describe("map-recursive-union canonicalization integration", () => {
     t.expect(statsWithout.total - statsWith.total).toBeGreaterThan(100);
     t.expect(statsWith.someCount).toBeGreaterThanOrEqual(1);
     t.expect(snapshotWith.mapVariantArg?.kindOfType).toBe("union");
+    t.expect(snapshotWith.mapCallArg?.kindOfType).toBe("union");
+    t.expect(snapshotWith.mapCallKey).toBe(snapshotWith.mapVariantKey);
+  });
+
+  test("wasm module executes main without trapping", (t) => {
+    const main = getWasmFn("main", wasmInstance);
+    assert(main, "main export should exist");
+    t.expect(main()).toEqual(1);
+  });
+
+  test("wasm module emits a single Map struct", (t) => {
+    const mapStructNames = [
+      ...wasmText.matchAll(/\(type \$([^\s()]*Map[^\s()]*)/g),
+    ]
+      .map(([, name]) => name)
+      .filter((name) => name.startsWith("Map#"));
+    t.expect(new Set(mapStructNames).size).toBe(1);
+    t.expect(mapStructNames).toMatchInlineSnapshot(`
+      [
+        "Map#146251#0",
+      ]
+    `);
   });
 });

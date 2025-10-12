@@ -20,6 +20,7 @@ import { typesAreEqual } from "./types-are-equal.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { Type } from "../../syntax-objects/types.js";
 import { canonicalType } from "../types/canonicalize.js";
+import { containsUnresolvedTypeId } from "./resolve-object-type.js";
 
 export type ResolveFnTypesOpts = {
   typeArgs?: List;
@@ -33,39 +34,54 @@ const resolveFnBody = (
 ): Expr | undefined => {
   if (!body) return undefined;
   const resolved = resolveWithExpected(body, undefined);
-  if (expected) applyExpectedToTail(resolved, expected, aliasArg);
-  return resolved;
+  return expected
+    ? applyExpectedToTail(resolved, expected, aliasArg)
+    : resolved;
 };
 
 const applyExpectedToTail = (
-  expr: Expr | undefined,
+  expr: Expr,
   expected: Type,
   aliasArg?: TypeAlias
-): void => {
-  if (!expr) return;
+): Expr => {
   if (expr.isBlock?.()) {
     const block = expr as Block;
+    const lastIndex = block.body.length - 1;
+    block.applyMap((child, index) =>
+      index === lastIndex
+        ? resolveTailWithExpected(child, expected, aliasArg)
+        : child
+    );
     const last = block.lastExpr();
-    applyExpectedToTail(last, expected, aliasArg);
-    block.type = getExprType(last);
-    return;
+    block.type = last ? getExprType(last) : undefined;
+    return block;
   }
-  if (expr.isCall?.()) {
-    expr.setAttribute?.("expectedType", expected);
-    (expr as any).type = expected;
-    if (aliasArg && expected.isObjectType?.()) {
-      const callType = expr.type;
-      if (callType?.isObjectType?.()) {
-        const aliasClone = aliasArg.clone();
-        aliasClone.type = aliasArg.type;
-        callType.appliedTypeArgs = [aliasClone];
+  return resolveTailWithExpected(expr, expected, aliasArg);
+};
+
+const resolveTailWithExpected = (
+  expr: Expr,
+  expected: Type,
+  aliasArg?: TypeAlias
+): Expr => {
+  const resolved = resolveWithExpected(expr, expected);
+  if (aliasArg && resolved.isCall?.()) {
+    const call = resolved as Call;
+    const callType = call.type;
+    if (callType?.isObjectType?.()) {
+      callType.appliedTypeArgs = [aliasArg];
+      if (!call.typeArgs) {
+        const identifier = aliasArg.name.clone();
+        identifier.parent = call;
+        call.typeArgs = new List({ value: [identifier] });
       }
     }
-    return;
   }
-
-  // TODO: Properly type this. (This is a good example of an issue with how we've structured Expr, something to think about if we do a refactor)
-  (expr as any).type = expected;
+  const currentType = getExprType(resolved);
+  if (!currentType) {
+    (resolved as any).type = expected;
+  }
+  return resolved;
 };
 
 const extractReturnAlias = (fn: Fn): TypeAlias | undefined => {
@@ -104,13 +120,16 @@ export const resolveFn = (fn: Fn, call?: Call): Fn => {
   const traitGenericCount = fn.parentTrait?.typeParameters?.length ?? 0;
   const hasFnGenerics = fn.typeParameters && fn.typeParameters.length > 0;
   const isModuleLevelFn = fn.parent?.isModule?.() ?? false;
+  const returnTypeHasFreeParams =
+    !!fn.returnTypeExpr && containsUnresolvedTypeId(fn.returnTypeExpr);
   const canThreadExpected =
     !!fn.annotatedReturnType &&
     !hasFnGenerics &&
     implGenericCount === 0 &&
     traitGenericCount === 0 &&
     isModuleLevelFn &&
-    isConcreteType(fn.annotatedReturnType);
+    isConcreteType(fn.annotatedReturnType) &&
+    !returnTypeHasFreeParams;
   const expectedReturnType = canThreadExpected
     ? fn.annotatedReturnType
     : undefined;

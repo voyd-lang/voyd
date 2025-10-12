@@ -91,14 +91,18 @@ async function emitWasm(index: string, optimize = false) {
   stdout.write(mod.emitBinary());
 }
 
-async function runWasm(index: string, optimize = false, decodeMsgPack = false) {
+export async function runWasm(
+  index: string,
+  optimize = false,
+  decodeMsgPack = false
+) {
   const mod = await getWasmMod(index, optimize);
 
   if (!mod.validate()) {
     throw new Error("Module is invalid");
   }
 
-  run(mod, decodeMsgPack);
+  return run(mod, decodeMsgPack);
 }
 
 function emit(json: any) {

@@ -15,11 +15,11 @@ export function run(mod: binaryen.Module, decodeMsgPack = false) {
 
   if (decodeMsgPack) {
     const memory = instance.exports["main_memory"] as WebAssembly.Memory;
-    console.log(
-      JSON.stringify(decode(memory.buffer.slice(0, result)), undefined, 2)
-    );
-    return;
+    const decoded = decode(memory.buffer.slice(0, result));
+    console.log(JSON.stringify(decoded, undefined, 2));
+    return decoded;
   }
 
   console.log(result);
+  return result;
 }

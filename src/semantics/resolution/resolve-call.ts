@@ -55,11 +55,11 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
   // Ensure the callee is resolved so closures can capture it
   const calleeType = resolveCalleeAndGetType(call);
 
-  // Constructors (object types by name)
-  if (calleeType?.isObjectType()) handleObjectConstruction(call, calleeType);
-
   // Resolve and apply type args for the call if present
   if (call.typeArgs) call.typeArgs = call.typeArgs.map(resolveTypeExpr);
+
+  // Constructors (object types by name)
+  if (calleeType?.isObjectType()) handleObjectConstruction(call, calleeType);
 
   // Bind function and normalize args
   resolveCallFn(call, candidateFns);
@@ -161,15 +161,15 @@ const handleObjectConstruction = (call: Call, type: ObjectType): void => {
       else if (e.isList()) e.toArray().forEach((a) => visit(a));
     };
     call.typeArgs.toArray().forEach((a) => visit(a));
-    if (
-      unknownIds.length ||
-      call.typeArgs.toArray().some((arg) => containsUnresolvedTypeId(arg))
-    ) {
+    if (unknownIds.length) {
       throw new Error(
-        `Unrecognized identifier(s) ${
-          unknownIds.length ? unknownIds.join(", ") : "in type arguments"
-        } for ${type.name} at ${call.location}`
+        `Unrecognized identifier(s) ${unknownIds.join(", ")} for ${
+          type.name
+        } at ${call.location}`
       );
+    }
+    if (call.typeArgs.toArray().some((arg) => containsUnresolvedTypeId(arg))) {
+      return;
     }
   }
   const objArg = call.argAt(0);

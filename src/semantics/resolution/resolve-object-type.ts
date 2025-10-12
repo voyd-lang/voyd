@@ -7,6 +7,7 @@ import {
   TypeAlias,
   voydBaseObject,
 } from "../../syntax-objects/types.js";
+import { Identifier } from "../../syntax-objects/identifier.js";
 import { getExprType } from "./get-expr-type.js";
 import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
@@ -40,7 +41,10 @@ export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
 
 // Detects whether a type-argument expression contains an unresolved type
 // identifier (e.g., an unbound generic name like `T`).
-export const containsUnresolvedTypeId = (expr: any): boolean => {
+export const containsUnresolvedTypeId = (
+  expr: any,
+  allowed: Set<string> = new Set()
+): boolean => {
   // Follows TypeAlias chains to the underlying resolved type (if any).
   const unwrapAlias = (t: any): any => {
     let cur = t;
@@ -61,6 +65,7 @@ export const containsUnresolvedTypeId = (expr: any): boolean => {
 
     // Unbound generic like `T`
     if (e.isIdentifier?.()) {
+      if (allowed.has(e.value)) continue;
       const ty = unwrapAlias(getExprType(e));
       if (!ty) return true;
       continue;

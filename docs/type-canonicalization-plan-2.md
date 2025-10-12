@@ -23,17 +23,28 @@
 - Add targeted unit coverage around alias-equivalent unions (e.g., `RecType` vs `MsgPack`) to prevent regressions and confirm the new fingerprinting behaviour.
 
 ### Phase 7 – Regression Hardening
-- Add a focused assertion in `map-recursive-union.e2e.test.ts` that verifies the `Map` constructor within the fixture ends up with the canonical `RecType` union argument.
-- Extend the test to compile and run the `main` function from `mapRecursiveUnionVoyd`, asserting the numeric result (`1`) to lock in runtime behaviour.
-- Introduce an executable regression (vitest or CLI harness) that compiles `test.voyd`, runs it via `runWasm`, and fails if the runtime throws.
-- Capture the wasm text or binaryen type ids in a snapshot to ensure only a single `Map#...` struct is emitted after canonicalization.
+- Completed: instrument `map-recursive-union.e2e.test.ts` to assert the `Map` constructor resolves to `Map<RecType>`, execute the compiled wasm, and snapshot the emitted `Map#...` struct id.
+- Completed: add `run-wasm-regression.e2e.test.ts` that shells through `runWasm(test.voyd)` and fails on runtime traps.
+- Outstanding: both end-to-end tests still abort with an illegal cast even though the canonical `Map` id now matches. Root cause is duplicated optional variants (`Some#...`) that survive canonicalization and clash at runtime.
 
-### Phase 8 – Verification & Cleanup
+### Phase 8 – Optional/Some Canonicalization
+- Extend alias fingerprinting so `Optional<RecType>` collapses with `Optional<String>` when their canonical element types match.
+- Ensure `typeKey` normalises applied generic arguments after contextual inference so cached `Some<T>`/`None<T>` instances reuse a single canonical id.
+- Update `CanonicalTypeTable` dedupe heuristics to merge option constructors and reassign method/field metadata without losing trait bindings.
+- Add focused unit coverage around `Optional` to prevent future divergence (e.g., compare `Some<RecType>` vs `Some<String>`).
+
+### Phase 9 – Runtime Revalidation
+- Re-run `map-recursive-union.e2e.test.ts` and `run-wasm-regression.e2e.test.ts` once optional canonicalization lands; both must execute `main` without traps.
+- Scrape the wasm text for duplicate `Some#`/`Optional#` struct ids and snapshot the canonical set to guard against regressions.
+- Double-check other recursive fixtures (`recursive-union.e2e.test.ts`, `msg-pack` encoder/decoder) for new dedupe behaviour; add assertions if they surfaced fresh ids.
+
+### Phase 10 – Verification & Cleanup
 - Run the full `npm test` suite plus manual `vt --run test.voyd` to confirm the illegal cast is gone.
-- Audit the new contextual inference to make sure it doesn’t double-resolve functions without annotations or break closures capturing `self`.
-- Update docs (`docs/type-canonicalization-pass.md`) with a short note about the contextual inference requirement and why it matters for recursive unions.
+- Audit the contextual return threading to ensure we don’t re-resolve generic impls or leak alias arguments into unrelated functions.
+- Update docs (`docs/type-canonicalization-pass.md`) with a summary of the contextual inference plus optional dedupe work and add guidance on writing regression tests that execute wasm.
 
 ## Risks & Mitigations
 - **Double resolution loops:** Guard `resolveFn` so we only re-enter bodies once; reuse existing `typesResolved` flags.
 - **Overly eager inference:** Ensure we still support functions that purposely return broader types by checking compatibility before replacing inferred type args.
 - **Test flakiness:** Running the wasm in tests can be slow; isolate the regression under a single targeted test to keep the suite reliable.
+- **Alias churn:** Collapsing optionals may ripple into msgpack/iter tests; snapshot the relevant ids and adjust fixtures incrementally instead of bulk-updating wasm text.
