@@ -55,6 +55,14 @@ We need a post-resolution pass that walks the IR, deduplicates structurally equi
 - Re-run `canonicalizeResolvedTypes` on a problematic module with a fresh `CanonicalTypeTable` to confirm the pass is idempotent and to inspect dedupe events.
 - Execute `vitest run src/__tests__/map-recursive-union.e2e.test.ts` to validate that recursive alias scenarios continue to collapse to canonical forms.
 
+## Audit Findings – Optional Constructors
+- Instrumentation added in `canonicalize-resolved-types.ts` now logs whenever an optional constructor or alias survives in a non-canonical form. Running `npx vitest run src/__tests__/semantics/map-recursive-union-optional.audit.test.ts` emits repeated warnings such as:
+  - `alias retained non-canonical target at Fn(get).appliedTypeArgs[0]` for the stdlib `Map`/`Array` helpers, showing that `Fn.appliedTypeArgs` still point at alias snapshots like `RecType#143181`.
+  - `non-canonical Optional constructor detected at dedupeCanonicalInstances(Some#144032#…)` indicating that `ObjectType.genericInstances` continues to spawn fresh `Some` clones instead of reusing the shared instance.
+- A focused crawler (`collectOptionalSomeAudit`) over the canonicalized `map-recursive-union` module reports **15 distinct `Some#144032…` ids** still reachable from the AST, all hanging off `std::Map` implementations (see `src/__tests__/semantics/map-recursive-union-optional.audit.test.ts` for the reproduction). These instances are nested inside trait implementations for map iteration (`find`, `next`, `iterate`) and bucket helpers, confirming that optional constructors embedded in generic method metadata bypass Phase 8 rewrites.
+- The new audit test adds a skipped assertion (`test.skip("…collapses Optional Some constructors…")`) and an active canary that currently asserts `someIds.size > 1`. Once Phases 2–3 land, unskip the regression and flip the canary to require a single `Some` id.
+- Follow-up work needs to (a) rewrite `Fn.appliedTypeArgs`, `genericInstances`, and trait method caches to the canonical objects and (b) merge Binaryen caches (`binaryenType` / `originalType`) so instrumentation stops flagging mismatched `T#… → RecType#…` aliases during canonicalization.
+
 ## Considerations
 
 - Primitives, `Self`, and other singleton types already have unique identities; the pass can short-circuit for them.
