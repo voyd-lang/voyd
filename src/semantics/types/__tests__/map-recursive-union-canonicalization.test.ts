@@ -62,6 +62,8 @@ type OptionalScanResult = {
   some: Set<ObjectType>;
   none: Set<ObjectType>;
   unions: Set<UnionType>;
+  edges: Map<ObjectType, Set<ObjectType>>;
+  parentByInstance: Map<ObjectType, ObjectType>;
 };
 
 const collectOptionalConstructors = (root: Expr): OptionalScanResult => {
@@ -70,6 +72,19 @@ const collectOptionalConstructors = (root: Expr): OptionalScanResult => {
   const some = new Set<ObjectType>();
   const none = new Set<ObjectType>();
   const unions = new Set<UnionType>();
+  const edges = new Map<ObjectType, Set<ObjectType>>();
+  const parentByInstance = new Map<ObjectType, ObjectType>();
+
+  const registerOptionalEdge = (
+    parent: ObjectType | undefined,
+    instance: ObjectType | undefined
+  ): void => {
+    if (!parent || !instance) return;
+    const set = edges.get(parent) ?? new Set<ObjectType>();
+    set.add(instance);
+    edges.set(parent, set);
+    parentByInstance.set(instance, parent);
+  };
 
   const visitList = (list?: List): void => {
     if (!list) return;
@@ -177,6 +192,22 @@ const collectOptionalConstructors = (root: Expr): OptionalScanResult => {
       const obj = type as ObjectType;
       if (isOptionalSomeConstructor(obj)) some.add(obj);
       if (isOptionalNoneConstructor(obj)) none.add(obj);
+      if (
+        (isOptionalSomeConstructor(obj) || isOptionalNoneConstructor(obj)) &&
+        obj.genericParent
+      ) {
+        registerOptionalEdge(obj.genericParent, obj);
+      }
+      if (
+        matchesName(obj.name, SOME_CONSTRUCTOR_NAME) ||
+        matchesName(obj.name, NONE_CONSTRUCTOR_NAME)
+      ) {
+        obj.genericInstances?.forEach((inst) => {
+          if (isOptionalSomeConstructor(inst) || isOptionalNoneConstructor(inst)) {
+            registerOptionalEdge(obj, inst);
+          }
+        });
+      }
       visitType(obj.parentObjType);
       if (obj.parentObjExpr) visitExpr(obj.parentObjExpr);
       obj.appliedTypeArgs?.forEach((arg) => visitType(arg));
@@ -321,7 +352,7 @@ const collectOptionalConstructors = (root: Expr): OptionalScanResult => {
   };
 
   visitExpr(root);
-  return { some, none, unions };
+  return { some, none, unions, edges, parentByInstance };
 };
 
 describe("map-recursive-union optional constructor canonicalization", () => {
@@ -396,6 +427,83 @@ describe("map-recursive-union optional constructor canonicalization", () => {
         );
       });
     expect(optionalDedupeEvents).toHaveLength(0);
+  });
+
+  test("Some generic parent dedupes RecType specialization", async () => {
+    const parsed = await parseModule(mapRecursiveUnionVoyd);
+    const canonicalRoot = processSemantics(parsed) as VoydModule;
+    const srcModule = canonicalRoot.resolveModule(Identifier.from("src")) as
+      | VoydModule
+      | undefined;
+    expect(srcModule).toBeDefined();
+
+    const {
+      some,
+      unions,
+      edges,
+      parentByInstance,
+    } = collectOptionalConstructors(srcModule ?? canonicalRoot);
+
+    const recAlias = srcModule?.resolveEntity(Identifier.from("RecType")) as
+      | TypeAlias
+      | undefined;
+    expect(recAlias?.type?.isUnionType?.()).toBe(true);
+
+    const recUnion = recAlias?.type as UnionType;
+    const recOptional = [...unions].find((union) =>
+      union.types.some((candidate) => {
+        if (!(candidate as ObjectType).isObjectType?.()) return false;
+        const obj = candidate as ObjectType;
+        return (
+          isOptionalSomeConstructor(obj) && obj.appliedTypeArgs?.[0] === recUnion
+        );
+      })
+    );
+
+    expect(recOptional).toBeDefined();
+
+    const recSomeVariant = recOptional?.types.find(
+      (candidate) =>
+        (candidate as ObjectType).isObjectType?.() &&
+        isOptionalSomeConstructor(candidate as ObjectType)
+    ) as ObjectType | undefined;
+    expect(recSomeVariant).toBeDefined();
+    const recSome = recSomeVariant!;
+
+    const recNoneVariant = recOptional?.types.find(
+      (candidate) =>
+        (candidate as ObjectType).isObjectType?.() &&
+        isOptionalNoneConstructor(candidate as ObjectType)
+    ) as ObjectType | undefined;
+    expect(recNoneVariant).toBeDefined();
+
+    const parent = recSome.genericParent;
+    expect(parent).toBeDefined();
+    const parentObj = parent!;
+    expect(parentByInstance.get(recSome)).toBe(parentObj);
+
+    const parentInstances = parentObj.genericInstances ?? [];
+    const recInstances = parentInstances.filter(
+      (candidate) => candidate.appliedTypeArgs?.[0] === recUnion
+    );
+    expect(recInstances).toHaveLength(1);
+    expect(recInstances[0]).toBe(recSome);
+
+    const parentEdges = edges.get(parentObj);
+    expect(parentEdges).toBeDefined();
+    const recEdgeInstances = [...(parentEdges ?? [])].filter(
+      (candidate) => candidate.appliedTypeArgs?.[0] === recUnion
+    );
+    expect(recEdgeInstances).toHaveLength(1);
+    expect(recEdgeInstances[0]).toBe(recSome);
+
+    const recSomeInstances = [...some].filter(
+      (candidate) =>
+        candidate.appliedTypeArgs?.[0] === recUnion &&
+        candidate.genericParent === parentObj
+    );
+    expect(recSomeInstances).toHaveLength(1);
+    expect(recSomeInstances[0]).toBe(recSome);
   });
 
   test("optional constructors keep Binaryen caches after codegen", async () => {

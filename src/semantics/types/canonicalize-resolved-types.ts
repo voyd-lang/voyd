@@ -143,7 +143,13 @@ const dedupeCanonicalInstances = (
     if (!instance) return;
     const canonical = canonicalTypeRef(ctx, instance) as ObjectType | undefined;
     if (!canonical) return;
-    if (seen.has(canonical)) return;
+    if (seen.has(canonical)) {
+      if (instance !== canonical) {
+        instance.genericInstances = [];
+        instance.genericParent = undefined;
+      }
+      return;
+    }
     seen.add(canonical);
     result.push(canonical);
   });
@@ -162,19 +168,22 @@ const attachInstanceToParent = (
     | undefined;
   if (!canonicalParent) return;
 
-  instance.genericParent = canonicalParent;
   const canonicalInstance = canonicalTypeRef(ctx, instance) as
     | ObjectType
     | undefined;
   if (!canonicalInstance) return;
 
+  canonicalInstance.genericParent = canonicalParent;
+  if (canonicalInstance !== instance) {
+    instance.genericParent = undefined;
+    instance.genericInstances = [];
+  }
+
   const merged = dedupeCanonicalInstances(ctx, [
     ...(canonicalParent.genericInstances ?? []),
     canonicalInstance,
   ]);
-  if (merged.length) {
-    canonicalParent.genericInstances = merged;
-  }
+  canonicalParent.genericInstances = merged;
 
   canonicalizeTypeNode(ctx, canonicalParent);
 };

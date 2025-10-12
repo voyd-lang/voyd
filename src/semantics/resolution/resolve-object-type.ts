@@ -200,11 +200,15 @@ const resolveGenericsWithTypeArgs = (
     newObj.registerEntity(type);
   });
   if (typesNotResolved) return obj;
-  obj.registerGenericInstance(newObj);
-  const resolvedObj = resolveObjectType(newObj);
-
   const implementations = newObj.implementations;
   newObj.implementations = []; // Clear implementations to avoid duplicates, resolveImpl will re-add them
+
+  const registered = obj.registerGenericInstance(newObj);
+  const resolvedObj = resolveObjectType(registered);
+
+  if (registered !== newObj) {
+    return resolvedObj;
+  }
 
   implementations
     .filter((impl) => implIsCompatible(impl, resolvedObj))

@@ -277,13 +277,25 @@ export class ObjectType extends BaseType implements ScopedEntity {
     return false;
   }
 
-  // Register a version of this function with resolved generics
-  registerGenericInstance(obj: ObjectType) {
+  // Register a version of this object with resolved generics
+  registerGenericInstance(obj: ObjectType): ObjectType {
     if (!this.genericInstances) {
       this.genericInstances = [];
     }
 
+    const existing = this.genericInstances.find((instance) =>
+      genericInstanceArgsMatch(instance, obj)
+    );
+    if (existing) {
+      if (existing.genericParent !== this) {
+        existing.genericParent = this;
+      }
+      return existing;
+    }
+
+    obj.genericParent = this;
     this.genericInstances.push(obj);
+    return obj;
   }
 
   getAncestorIds(start: number[] = []): number[] {
@@ -313,6 +325,36 @@ export class ObjectType extends BaseType implements ScopedEntity {
     return this.fields.findIndex((field) => field.name === getIdStr(name));
   }
 }
+
+const resolveAppliedType = (type: Type | undefined): Type | undefined => {
+  if (!type) return undefined;
+  if ((type as TypeAlias).isTypeAlias?.()) {
+    const alias = type as TypeAlias;
+    return alias.type ?? alias;
+  }
+  return type;
+};
+
+const genericInstanceArgsMatch = (
+  left: ObjectType,
+  right: ObjectType
+): boolean => {
+  const leftArgs = left.appliedTypeArgs ?? [];
+  const rightArgs = right.appliedTypeArgs ?? [];
+  if (leftArgs.length !== rightArgs.length) return false;
+  return leftArgs.every(
+    (candidate, index) => {
+      const leftResolved = resolveAppliedType(candidate);
+      const rightResolved = resolveAppliedType(rightArgs[index]);
+      if (!leftResolved || !rightResolved) {
+        return leftResolved === rightResolved;
+      }
+      if (leftResolved === rightResolved) return true;
+      if (leftResolved.id === rightResolved.id) return true;
+      return leftResolved.idNum === rightResolved.idNum;
+    }
+  );
+};
 
 /** Dynamically Sized Array (The raw gc array type) */
 export class FixedArrayType extends BaseType {
