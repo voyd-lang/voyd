@@ -12,6 +12,8 @@ import {
 import { typeKey } from "./type-key.js";
 import canonicalType from "./canonicalize.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
+import { Implementation } from "../../syntax-objects/implementation.js";
+import { Fn } from "../../syntax-objects/fn.js";
 
 export type CanonicalTypeDedupeEvent = {
   fingerprint: string;
@@ -184,6 +186,10 @@ export class CanonicalTypeTable {
       obj.fields.forEach((field) => {
         if (field.type) field.type = this.#canonicalize(field.type);
       });
+      obj.implementations = this.#mergeImplementationLists(
+        obj.implementations ?? [],
+        []
+      );
       return this.#register(obj);
     }
 
@@ -194,6 +200,10 @@ export class CanonicalTypeTable {
           this.#canonicalize(arg)
         );
       }
+      trait.implementations = this.#mergeImplementationLists(
+        trait.implementations ?? [],
+        []
+      );
       return this.#register(trait);
     }
 
@@ -409,6 +419,59 @@ export class CanonicalTypeTable {
     return false;
   }
 
+  #implementationKey(impl: Implementation): string {
+    if (impl.trait) return `trait:${impl.trait.id}`;
+    return `inherent:${impl.syntaxId}`;
+  }
+
+  #mergeImplementationLists(
+    baseline: Implementation[] = [],
+    incoming: Implementation[] = []
+  ): Implementation[] {
+    const merged: Implementation[] = [];
+    const seen = new Map<string, Implementation>();
+    const insert = (impl: Implementation) => {
+      const key = this.#implementationKey(impl);
+      const existing = seen.get(key);
+      if (existing) {
+        this.#mergeImplementationMetadata(existing, impl);
+        return;
+      }
+      seen.set(key, impl);
+      merged.push(impl);
+    };
+    baseline.forEach(insert);
+    incoming.forEach(insert);
+    return merged;
+  }
+
+  #mergeImplementationMetadata(target: Implementation, source: Implementation): void {
+    source.methods.forEach((method) => {
+      const existing = target.methods.find((m) => m.name.is(method.name));
+      if (existing) {
+        this.#mergeFnMetadata(existing, method);
+        return;
+      }
+      target.registerMethod(method);
+    });
+    source.exports.forEach((exp) => {
+      if (target.exports.some((fn) => fn.id === exp.id)) return;
+      target.registerExport(exp);
+    });
+  }
+
+  #mergeFnMetadata(target: Fn, source: Fn): void {
+    const targetInstances = target.genericInstances ?? [];
+    const incoming = source.genericInstances ?? [];
+    if (!incoming?.length) return;
+    const seen = new Set(targetInstances);
+    incoming.forEach((inst) => {
+      if (seen.has(inst)) return;
+      seen.add(inst);
+      target.registerGenericInstance(inst);
+    });
+  }
+
   #mergeObjectMetadata(target: ObjectType, source: ObjectType): void {
     if (source.typesResolved === true && target.typesResolved !== true) {
       target.typesResolved = true;
@@ -448,16 +511,10 @@ export class CanonicalTypeTable {
       if (merged.length) target.genericInstances = merged;
     }
 
-    if (source.implementations?.length) {
-      const seen = new Set(target.implementations);
-      const merged = [...target.implementations];
-      source.implementations.forEach((impl) => {
-        if (seen.has(impl)) return;
-        seen.add(impl);
-        merged.push(impl);
-      });
-      target.implementations = merged;
-    }
+    target.implementations = this.#mergeImplementationLists(
+      target.implementations ?? [],
+      source.implementations ?? []
+    );
   }
 
   #mergeTraitMetadata(target: TraitType, source: TraitType): void {
@@ -492,16 +549,10 @@ export class CanonicalTypeTable {
       if (merged.length) target.genericInstances = merged;
     }
 
-    if (source.implementations?.length) {
-      const seen = new Set(target.implementations);
-      const merged = [...target.implementations];
-      source.implementations.forEach((impl) => {
-        if (seen.has(impl)) return;
-        seen.add(impl);
-        merged.push(impl);
-      });
-      target.implementations = merged;
-    }
+    target.implementations = this.#mergeImplementationLists(
+      target.implementations ?? [],
+      source.implementations ?? []
+    );
   }
 }
 

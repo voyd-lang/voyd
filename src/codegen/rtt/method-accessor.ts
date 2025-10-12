@@ -92,10 +92,15 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
 
   const initMethodTable = (opts: CompileExprOpts<ObjectType>) => {
     const { mod, expr: obj } = opts;
+    const seenTraits = new Set<string>();
+    const seenWrappers = new Set<string>();
     const accessors = obj.implementations
       ?.flatMap((impl) => {
         if (!impl.trait) return [] as number[];
-        return impl.trait.methods.toArray().map((traitMethod) => {
+        const traitKey = impl.trait.id;
+        if (seenTraits.has(traitKey)) return [] as number[];
+        seenTraits.add(traitKey);
+        return impl.trait.methods.toArray().flatMap((traitMethod) => {
           const implMethod = impl.methods.find((m) =>
             m.name.is(traitMethod.name.value)
           );
@@ -106,6 +111,8 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
           }
 
           const wrapperName = `obj_method_${obj.id}_${traitMethod.id}`;
+          if (seenWrappers.has(wrapperName)) return [] as number[];
+          seenWrappers.add(wrapperName);
           const paramTypes = bin.createType([
             mapBinaryenType(opts, voydBaseObject),
             ...traitMethod.parameters
@@ -143,10 +150,12 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
           const fnType = bin._BinaryenTypeFromHeapType(heapType, false);
           traitMethod.setAttribute("binaryenType", fnType);
 
-          return initStruct(mod, methodAccessorStruct, [
-            mod.i32.const(murmurHash3(traitMethod.id)),
-            refFunc(mod, wrapperName, fnType),
-          ]);
+          return [
+            initStruct(mod, methodAccessorStruct, [
+              mod.i32.const(murmurHash3(traitMethod.id)),
+              refFunc(mod, wrapperName, fnType),
+            ]),
+          ];
         });
       }) ?? [];
 
@@ -182,4 +191,3 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
 
   return { initMethodTable, lookupTableType, LOOKUP_NAME, callMethodByAccessor };
 };
-

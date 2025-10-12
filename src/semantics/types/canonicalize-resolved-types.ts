@@ -41,6 +41,21 @@ const dedupeByRef = <T>(values: T[]): T[] => {
   return result;
 };
 
+const dedupeImplementations = (
+  impls: Implementation[] | undefined
+): Implementation[] | undefined => {
+  if (!impls?.length) return impls;
+  const seen = new Set<string>();
+  const result: Implementation[] = [];
+  impls.forEach((impl) => {
+    const key = impl.trait ? `trait:${impl.trait.id}` : `inherent:${impl.syntaxId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(impl);
+  });
+  return result;
+};
+
 type CanonicalizeResolvedTypesOpts = {
   table?: CanonicalTypeTable;
 };
@@ -376,16 +391,25 @@ const canonicalizeTypeNode = (
       ) as ObjectType;
     if (obj.parentObjExpr) canonicalizeExpr(ctx, obj.parentObjExpr);
     if (obj.appliedTypeArgs?.length) {
-      obj.appliedTypeArgs = obj.appliedTypeArgs.map(
-        (arg) => canonicalTypeRef(ctx, arg)!
-      );
+      obj.appliedTypeArgs = obj.appliedTypeArgs
+        .map((arg) => canonicalTypeRef(ctx, arg))
+        .filter((arg): arg is Type => !!arg);
     }
     obj.fields.forEach((field) => {
       if (field.type) field.type = canonicalTypeRef(ctx, field.type);
       if (field.typeExpr) canonicalizeExpr(ctx, field.typeExpr);
     });
-    obj.implementations.forEach((impl) => canonicalizeExpr(ctx, impl));
-    obj.genericInstances?.forEach((inst) => canonicalizeTypeNode(ctx, inst));
+    obj.implementations = dedupeImplementations(obj.implementations);
+    obj.implementations?.forEach((impl) => canonicalizeExpr(ctx, impl));
+    if (obj.genericInstances?.length) {
+      const canonicalInstances = obj.genericInstances
+        .map((inst) => canonicalTypeRef(ctx, inst))
+        .filter(
+          (inst): inst is ObjectType =>
+            !!inst && (inst as ObjectType).isObjectType?.()
+        );
+      obj.genericInstances = dedupeByRef(canonicalInstances);
+    }
     obj.typeParameters?.forEach((param) => canonicalizeExpr(ctx, param));
     return obj;
   }
@@ -393,12 +417,22 @@ const canonicalizeTypeNode = (
   if ((canonical as TraitType).isTraitType?.()) {
     const trait = canonical as TraitType;
     if (trait.appliedTypeArgs?.length) {
-      trait.appliedTypeArgs = trait.appliedTypeArgs.map(
-        (arg) => canonicalTypeRef(ctx, arg)!
-      );
+      trait.appliedTypeArgs = trait.appliedTypeArgs
+        .map((arg) => canonicalTypeRef(ctx, arg))
+        .filter((arg): arg is Type => !!arg);
     }
     trait.methods.toArray().forEach((method) => canonicalizeExpr(ctx, method));
-    trait.genericInstances?.forEach((inst) => canonicalizeTypeNode(ctx, inst));
+    trait.implementations = dedupeImplementations(trait.implementations);
+    trait.implementations?.forEach((impl) => canonicalizeExpr(ctx, impl));
+    if (trait.genericInstances?.length) {
+      const canonicalInstances = trait.genericInstances
+        .map((inst) => canonicalTypeRef(ctx, inst))
+        .filter(
+          (inst): inst is TraitType =>
+            !!inst && (inst as TraitType).isTraitType?.()
+        );
+      trait.genericInstances = dedupeByRef(canonicalInstances);
+    }
     trait.typeParameters?.forEach((param) => canonicalizeExpr(ctx, param));
     return trait;
   }
