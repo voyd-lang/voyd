@@ -5,7 +5,7 @@ import { Call } from "../../syntax-objects/call.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { List } from "../../syntax-objects/list.js";
 import { getExprType } from "./get-expr-type.js";
-import { resolveEntities } from "./resolve-entities.js";
+import { resolveWithExpected } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export const resolveClosure = (closure: Closure): Closure => {
@@ -16,7 +16,7 @@ export const resolveClosure = (closure: Closure): Closure => {
   resolveClosureSignature(closure);
 
   closure.captures = [];
-  closure.body = resolveEntities(closure.body);
+  closure.body = resolveWithExpected(closure.body, closure.annotatedReturnType);
   closure.inferredReturnType = getExprType(closure.body);
   if (
     closure.annotatedReturnType?.isPrimitiveType() &&

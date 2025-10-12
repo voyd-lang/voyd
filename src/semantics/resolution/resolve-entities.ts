@@ -76,6 +76,77 @@ const captureIdentifier = (id: Identifier) => {
   }
 };
 
+export function isConcreteType(
+  type?: Type,
+  seen: Set<Type> = new Set()
+): boolean {
+  if (!type) return false;
+  if (seen.has(type)) return true;
+  seen.add(type);
+
+  if ((type as TypeAlias).isTypeAlias?.()) {
+    const alias = type as TypeAlias;
+    if (!alias.type) return false;
+    return isConcreteType(alias.type, seen);
+  }
+
+  if (type.isSelfType?.()) return false;
+
+  if (type.isUnionType?.()) {
+    return type.types.every((child) => isConcreteType(child, seen));
+  }
+
+  if (type.isIntersectionType?.()) {
+    const nominalOk =
+      !type.nominalType || isConcreteType(type.nominalType, seen);
+    const structuralOk =
+      !type.structuralType || isConcreteType(type.structuralType, seen);
+    return nominalOk && structuralOk;
+  }
+
+  if (type.isTupleType?.()) {
+    return type.value.every((entry) => isConcreteType(entry, seen));
+  }
+
+  if (type.isFixedArrayType?.()) {
+    return type.elemType ? isConcreteType(type.elemType, seen) : false;
+  }
+
+  if (type.isFnType?.()) {
+    if (type.returnType && !isConcreteType(type.returnType, seen)) return false;
+    return type.parameters.every((param) => {
+      const paramTypeConcrete =
+        !param.type || isConcreteType(param.type, seen);
+      const originalTypeConcrete =
+        !param.originalType || isConcreteType(param.originalType, seen);
+      return paramTypeConcrete && originalTypeConcrete;
+    });
+  }
+
+  if (type.isObjectType?.()) {
+    if (
+      type.appliedTypeArgs?.some((arg) => !isConcreteType(arg as Type, seen))
+    ) {
+      return false;
+    }
+    if (type.parentObjType && !isConcreteType(type.parentObjType, seen)) {
+      return false;
+    }
+    return true;
+  }
+
+  if (type.isTraitType?.()) {
+    if (
+      type.appliedTypeArgs?.some((arg) => !isConcreteType(arg as Type, seen))
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  return true;
+}
+
 const resolveBlock = (block: Block): Block => {
   block.applyMap(resolveEntities);
   block.type = getExprType(block.body.at(-1));
@@ -171,12 +242,11 @@ export const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
     const resolved = resolvedExpr;
     const objType = findObjectType(unwrapped, resolved.fnName);
     if (objType) {
-      resolved.fn = objType;
-      resolved.type = objType;
-      resolved.fnName.type = objType;
+      let rewired = false;
       const objArg = resolved.argAt(0);
       if (objArg?.isObjectLiteral()) {
         resolved.args.set(0, resolveObjectLiteral(objArg, objType));
+        rewired = true;
       } else if (objArg) {
         // Expand non-literal object arg into a literal via member-access, so
         // nominal constructors can be type-checked and compiled uniformly.
@@ -187,7 +257,13 @@ export const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
         );
         if (expanded) {
           resolved.args.set(0, resolveEntities(expanded));
+          rewired = true;
         }
+      }
+      resolved.type = objType;
+      resolved.fnName.type = objType;
+      if (rewired) {
+        resolved.fn = objType;
       }
       return resolved;
     }

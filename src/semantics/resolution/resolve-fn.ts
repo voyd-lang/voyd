@@ -8,9 +8,14 @@ import { Identifier } from "../../syntax-objects/identifier.js";
 import { TypeAlias, selfType } from "../../syntax-objects/types.js";
 import { nop } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
-import { resolveEntities } from "./resolve-entities.js";
+import { Block } from "../../syntax-objects/block.js";
+import { resolveWithExpected, isConcreteType } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
-import { inferTypeArgs, TypeArgInferencePair, unifyTypeParams } from "./infer-type-args.js";
+import {
+  inferTypeArgs,
+  TypeArgInferencePair,
+  unifyTypeParams,
+} from "./infer-type-args.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { Type } from "../../syntax-objects/types.js";
@@ -19,6 +24,57 @@ import { canonicalType } from "../types/canonicalize.js";
 export type ResolveFnTypesOpts = {
   typeArgs?: List;
   args?: List;
+};
+
+const resolveFnBody = (
+  body: Expr | undefined,
+  expected?: Type,
+  aliasArg?: TypeAlias
+): Expr | undefined => {
+  if (!body) return undefined;
+  const resolved = resolveWithExpected(body, undefined);
+  if (expected) applyExpectedToTail(resolved, expected, aliasArg);
+  return resolved;
+};
+
+const applyExpectedToTail = (
+  expr: Expr | undefined,
+  expected: Type,
+  aliasArg?: TypeAlias
+): void => {
+  if (!expr) return;
+  if (expr.isBlock?.()) {
+    const block = expr as Block;
+    const last = block.lastExpr();
+    applyExpectedToTail(last, expected, aliasArg);
+    block.type = getExprType(last);
+    return;
+  }
+  if (expr.isCall?.()) {
+    expr.setAttribute?.("expectedType", expected);
+    (expr as any).type = expected;
+    if (aliasArg && expected.isObjectType?.()) {
+      const callType = expr.type;
+      if (callType?.isObjectType?.()) {
+        const aliasClone = aliasArg.clone();
+        aliasClone.type = aliasArg.type;
+        callType.appliedTypeArgs = [aliasClone];
+      }
+    }
+    return;
+  }
+
+  // TODO: Properly type this. (This is a good example of an issue with how we've structured Expr, something to think about if we do a refactor)
+  (expr as any).type = expected;
+};
+
+const extractReturnAlias = (fn: Fn): TypeAlias | undefined => {
+  const returnExpr = fn.returnTypeExpr;
+  if (!returnExpr?.isCall?.()) return undefined;
+  const firstArg = returnExpr.typeArgs?.exprAt(0);
+  if (!firstArg?.isIdentifier?.()) return undefined;
+  const resolved = firstArg.resolve();
+  return resolved?.isTypeAlias?.() ? (resolved as TypeAlias) : undefined;
 };
 
 /** Pass call to potentially resolve generics */
@@ -44,7 +100,22 @@ export const resolveFn = (fn: Fn, call?: Call): Fn => {
   resolveFnSignature(fn);
 
   fn.typesResolved = true;
-  fn.body = fn.body ? resolveEntities(fn.body) : undefined;
+  const implGenericCount = fn.parentImpl?.typeParams.length ?? 0;
+  const traitGenericCount = fn.parentTrait?.typeParameters?.length ?? 0;
+  const hasFnGenerics = fn.typeParameters && fn.typeParameters.length > 0;
+  const isModuleLevelFn = fn.parent?.isModule?.() ?? false;
+  const canThreadExpected =
+    !!fn.annotatedReturnType &&
+    !hasFnGenerics &&
+    implGenericCount === 0 &&
+    traitGenericCount === 0 &&
+    isModuleLevelFn &&
+    isConcreteType(fn.annotatedReturnType);
+  const expectedReturnType = canThreadExpected
+    ? fn.annotatedReturnType
+    : undefined;
+  const explicitAlias = expectedReturnType ? extractReturnAlias(fn) : undefined;
+  fn.body = resolveFnBody(fn.body, expectedReturnType, explicitAlias);
   fn.inferredReturnType = getExprType(fn.body);
   if (
     fn.annotatedReturnType?.isPrimitiveType() &&

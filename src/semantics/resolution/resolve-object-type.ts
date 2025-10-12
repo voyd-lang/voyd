@@ -1,4 +1,5 @@
 import { Call } from "../../syntax-objects/call.js";
+import { Expr } from "../../syntax-objects/expr.js";
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
 import {
@@ -101,6 +102,26 @@ const resolveGenericObjVersion = (
 ): ObjectType | undefined => {
   if (!call) return;
 
+  if (!call.typeArgs) {
+    const expected = call.getAttribute("expectedType") as Type | undefined;
+    if (expected?.isObjectType?.() && expected.appliedTypeArgs?.length) {
+      const synthesized = expected.appliedTypeArgs
+        .map((arg) => {
+          if ((arg as TypeAlias).isTypeAlias?.()) {
+            const alias = arg as TypeAlias;
+            const identifier = Identifier.from(alias.name.toString());
+            identifier.parent = call;
+            return resolveTypeExpr(identifier);
+          }
+          return undefined;
+        })
+        .filter((expr): expr is Expr => !!expr);
+      if (synthesized.length === expected.appliedTypeArgs.length) {
+        call.typeArgs = new List({ value: synthesized });
+      }
+    }
+  }
+
   // If no explicit type args are supplied, try to infer them from the
   // supplied object literal.
   if (!call.typeArgs) {
@@ -160,7 +181,15 @@ const resolveGenericsWithTypeArgs = (
       typeExpr: typeArg.clone(),
     });
     resolveTypeExpr(typeArg);
-    type.type = getExprType(typeArg);
+    const resolvedType = getExprType(typeArg);
+    if (resolvedType) {
+      type.type = resolvedType;
+    } else if (typeArg.isIdentifier?.()) {
+      const resolvedAlias = typeArg.resolve?.();
+      if (resolvedAlias?.isTypeAlias?.() && resolvedAlias.type) {
+        type.type = resolvedAlias.type;
+      }
+    }
     if (!type.type) typesNotResolved = true;
     newObj.appliedTypeArgs?.push(type);
     newObj.registerEntity(type);
