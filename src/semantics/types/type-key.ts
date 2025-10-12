@@ -47,6 +47,22 @@ const createContext = (): TypeKeyContext => ({
   serial: 0,
 });
 
+const normalizeTypeForKey = (
+  type: Type,
+  seen: Set<Type> = new Set()
+): Type => {
+  if (seen.has(type)) return type;
+  seen.add(type);
+
+  if ((type as TypeAlias).isTypeAlias?.()) {
+    const alias = type as TypeAlias;
+    if (!alias.type) return alias;
+    return normalizeTypeForKey(alias.type, seen);
+  }
+
+  return type;
+};
+
 const computeKey = (type: Type, ctx: TypeKeyContext): string => {
   const memoized = ctx.memo.get(type);
   if (memoized) return memoized;
@@ -59,7 +75,7 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
   if ((type as TypeAlias).isTypeAlias?.()) {
     const alias = type as TypeAlias;
     const frame = pushFrame(ctx, alias);
-    const target = alias.type;
+    const target = alias.type ? normalizeTypeForKey(alias.type) : undefined;
     const key = target
       ? computeKey(target, ctx)
       : `alias:${alias.name.toString()}`;
@@ -116,13 +132,18 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
       const baseId = obj.genericParent ? obj.genericParent.idNum : obj.idNum;
       const applied = obj.appliedTypeArgs?.length
         ? `<${obj.appliedTypeArgs
-            .map((arg) =>
-              normalizeUnionArgKey(ctx, arg, computeKey(arg, ctx))
-            )
+            .map((arg) => {
+              const normalized = normalizeTypeForKey(arg);
+              const argKey = computeKey(normalized, ctx);
+              return normalizeUnionArgKey(ctx, arg, argKey);
+            })
             .join(",")}>`
         : "";
       const parentKey = obj.parentObjType
-        ? `:parent=${computeKey(obj.parentObjType, ctx)}`
+        ? `:parent=${computeKey(
+            normalizeTypeForKey(obj.parentObjType),
+            ctx
+          )}`
         : "";
       key = `object#${baseId}${parentKey}${applied}`;
     }
@@ -133,7 +154,7 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
       : trait.idNum;
     const applied = trait.appliedTypeArgs?.length
       ? `<${trait.appliedTypeArgs
-          .map((arg) => computeKey(arg, ctx))
+          .map((arg) => computeKey(normalizeTypeForKey(arg), ctx))
           .join(",")}>`
       : "";
     key = `trait#${baseId}${applied}`;
@@ -252,8 +273,8 @@ const normalizeUnionArgKey = (
     const union = arg as UnionType;
     const suffix = cycleSuffixForFallback(ctx, union);
     const normalized = suffix.startsWith("#") ? suffix.slice(1) : suffix;
-    const [id, depth] = normalized.split("@");
-    return cycleMarker("union-cycle", id ?? "0", depth ?? "0");
+    const [, depth] = normalized.split("@");
+    return cycleMarker("union-cycle", "0", depth ?? "0");
   }
 
   return argKey;

@@ -30,6 +30,47 @@ type CanonicalizeCtx = {
   visitedTypes: Set<Type>;
 };
 
+const SOME_CONSTRUCTOR_NAME = "Some";
+const NONE_CONSTRUCTOR_NAME = "None";
+
+const matchesName = (value: unknown, expected: string): boolean => {
+  if (!value) return false;
+  if (typeof value === "string") return value === expected;
+  if (typeof value === "object") {
+    const candidate = value as { is?: (input: string) => boolean; toString?: () => string; value?: string };
+    if (typeof candidate.is === "function") {
+      return candidate.is(expected);
+    }
+    if (typeof candidate.value === "string") {
+      return candidate.value === expected;
+    }
+    if (typeof candidate.toString === "function") {
+      return candidate.toString() === expected;
+    }
+  }
+  return false;
+};
+
+const isOptionalSomeConstructor = (obj: ObjectType | undefined): obj is ObjectType =>
+  !!obj &&
+  (matchesName(obj.name, SOME_CONSTRUCTOR_NAME) ||
+    matchesName(obj.genericParent?.name, SOME_CONSTRUCTOR_NAME));
+
+const isOptionalNoneConstructor = (obj: ObjectType | undefined): obj is ObjectType =>
+  !!obj &&
+  (matchesName(obj.name, NONE_CONSTRUCTOR_NAME) ||
+    matchesName(obj.genericParent?.name, NONE_CONSTRUCTOR_NAME));
+
+const isOptionalConstructor = (obj: ObjectType | undefined): obj is ObjectType =>
+  isOptionalSomeConstructor(obj) || isOptionalNoneConstructor(obj);
+
+const unionHasOptionalConstructors = (union: UnionType): boolean =>
+  union.types.some(
+    (candidate) =>
+      (candidate as ObjectType).isObjectType?.() &&
+      isOptionalConstructor(candidate as ObjectType)
+  );
+
 const dedupeByRef = <T>(values: T[]): T[] => {
   const seen = new Set<T>();
   const result: T[] = [];
@@ -54,6 +95,49 @@ const dedupeImplementations = (
     result.push(impl);
   });
   return result;
+};
+
+const dedupeCanonicalInstances = (
+  ctx: CanonicalizeCtx,
+  instances: (ObjectType | undefined)[]
+): ObjectType[] => {
+  if (!instances.length) return [];
+  const seen = new Set<ObjectType>();
+  const result: ObjectType[] = [];
+  instances.forEach((instance) => {
+    if (!instance) return;
+    const canonical = canonicalTypeRef(ctx, instance) as ObjectType | undefined;
+    if (!canonical) return;
+    if (seen.has(canonical)) return;
+    seen.add(canonical);
+    result.push(canonical);
+  });
+  return result;
+};
+
+const attachInstanceToParent = (
+  ctx: CanonicalizeCtx,
+  instance: ObjectType
+): void => {
+  const parent = instance.genericParent;
+  if (!parent) return;
+
+  const canonicalParent = canonicalTypeRef(ctx, parent) as ObjectType | undefined;
+  if (!canonicalParent) return;
+
+  instance.genericParent = canonicalParent;
+  const canonicalInstance = canonicalTypeRef(ctx, instance) as ObjectType | undefined;
+  if (!canonicalInstance) return;
+
+  const merged = dedupeCanonicalInstances(ctx, [
+    ...(canonicalParent.genericInstances ?? []),
+    canonicalInstance,
+  ]);
+  if (merged.length) {
+    canonicalParent.genericInstances = merged;
+  }
+
+  canonicalizeTypeNode(ctx, canonicalParent);
 };
 
 type CanonicalizeResolvedTypesOpts = {
@@ -337,11 +421,26 @@ const canonicalizeTypeNode = (
 
   if ((canonical as UnionType).isUnionType?.()) {
     const union = canonical as UnionType;
-    union.types = union.types.map(
-      (child) => canonicalTypeRef(ctx, child) as any
-    );
+    union.types = union.types
+      .map((child) => canonicalTypeRef(ctx, child))
+      .filter((child): child is Type => !!child);
     union.types = dedupeByRef(union.types);
-    union.types.forEach((child) => canonicalizeTypeNode(ctx, child));
+    union.types.forEach((child) => {
+      if ((child as ObjectType).isObjectType?.() && isOptionalConstructor(child as ObjectType)) {
+        attachInstanceToParent(ctx, child as ObjectType);
+      }
+      canonicalizeTypeNode(ctx, child);
+    });
+    if (unionHasOptionalConstructors(union)) {
+      union.types = union.types
+        .map((child) =>
+          (child as ObjectType).isObjectType?.() && isOptionalConstructor(child as ObjectType)
+            ? (canonicalTypeRef(ctx, child) as Type)
+            : child
+        )
+        .filter((child): child is Type => !!child);
+      union.types = dedupeByRef(union.types);
+    }
     return union;
   }
 
@@ -401,6 +500,9 @@ const canonicalizeTypeNode = (
     });
     obj.implementations = dedupeImplementations(obj.implementations);
     obj.implementations?.forEach((impl) => canonicalizeExpr(ctx, impl));
+    if (obj.genericParent) {
+      attachInstanceToParent(ctx, obj);
+    }
     if (obj.genericInstances?.length) {
       const canonicalInstances = obj.genericInstances
         .map((inst) => canonicalTypeRef(ctx, inst))

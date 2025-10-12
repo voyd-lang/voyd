@@ -3,7 +3,7 @@ import { VoydModule } from "../../../syntax-objects/module.js";
 import { Fn } from "../../../syntax-objects/fn.js";
 import { Block } from "../../../syntax-objects/block.js";
 import { Identifier } from "../../../syntax-objects/index.js";
-import { UnionType, ObjectType } from "../../../syntax-objects/types.js";
+import { UnionType, ObjectType, Type, TypeAlias } from "../../../syntax-objects/types.js";
 import { TraitType } from "../../../syntax-objects/types/trait.js";
 import { canonicalizeResolvedTypes } from "../canonicalize-resolved-types.js";
 import { CanonicalTypeTable } from "../canonical-type-table.js";
@@ -244,9 +244,271 @@ describe("canonicalizeResolvedTypes", () => {
     expect(
       events.some(
         (event) =>
-          event.canonical.isObjectType?.() &&
-          (event.canonical as ObjectType).genericParent?.name.is("Map")
-      )
+      event.canonical.isObjectType?.() &&
+      (event.canonical as ObjectType).genericParent?.name.is("Map")
+    )
     ).toBe(true);
+  });
+
+  test("dedupes optional constructors when element aliases share canonical unions", () => {
+    const rec = createRecursiveUnion("RecType");
+    const someBase = new ObjectType({
+      name: Identifier.from("Some"),
+      value: [
+        {
+          name: "value",
+          typeExpr: Identifier.from("T"),
+        },
+      ],
+      typeParameters: [Identifier.from("T")],
+    });
+    const noneBase = new ObjectType({
+      name: Identifier.from("None"),
+      value: [],
+    });
+    noneBase.typesResolved = true;
+    noneBase.binaryenType = 54;
+
+    const createSomeInstance = (arg: Type) => {
+      const some = someBase.clone();
+      some.genericParent = someBase;
+      some.typeParameters = undefined;
+      some.appliedTypeArgs = [arg];
+      some.fields[0].type = arg;
+      some.typesResolved = true;
+      return some;
+    };
+
+    const optionalFromAlias = new UnionType({
+      name: Identifier.from("OptionalAlias"),
+      childTypeExprs: [],
+    });
+    const someAlias = createSomeInstance(rec.alias);
+    optionalFromAlias.types = [someAlias, noneBase];
+
+    const optionalFromUnion = new UnionType({
+      name: Identifier.from("OptionalUnion"),
+      childTypeExprs: [],
+    });
+    const someUnion = createSomeInstance(rec.union);
+    optionalFromUnion.types = [someUnion, noneBase];
+
+    someBase.genericInstances = [someAlias, someUnion];
+
+    const fnAlias = createFnWithReturn("fromAlias", optionalFromAlias);
+    const fnUnion = createFnWithReturn("fromUnion", optionalFromUnion);
+
+    const module = new VoydModule({
+      name: Identifier.from("OptionalModule"),
+      value: [rec.alias, fnAlias, fnUnion],
+    });
+
+    canonicalizeResolvedTypes(module);
+
+    const aliasReturn = fnAlias.returnType as UnionType;
+    const unionReturn = fnUnion.returnType as UnionType;
+    expect(aliasReturn).toBe(unionReturn);
+
+    const instances = someBase.genericInstances ?? [];
+    expect(instances).toHaveLength(1);
+    const canonicalSome = instances[0];
+    const appliedArg = canonicalSome.appliedTypeArgs?.[0];
+    expect(appliedArg).toBeDefined();
+    const canonicalElement = rec.alias.type as UnionType;
+    expect(typeKey(appliedArg!)).toBe(typeKey(canonicalElement));
+    expect(canonicalSome.fields[0].type).toBeDefined();
+    expect(typeKey(canonicalSome.fields[0].type!)).toBe(
+      typeKey(canonicalElement)
+    );
+  });
+
+  test("rewrites optional unions to canonical constructors across containers", () => {
+    const rec = createRecursiveUnion("RecType");
+
+    const someBase = new ObjectType({
+      name: Identifier.from("Some"),
+      value: [
+        {
+          name: "value",
+          typeExpr: Identifier.from("T"),
+        },
+      ],
+      typeParameters: [Identifier.from("T")],
+    });
+
+    const noneBase = new ObjectType({
+      name: Identifier.from("None"),
+      value: [],
+    });
+
+    const createSomeInstance = (arg: Type): ObjectType => {
+      const some = someBase.clone();
+      some.genericParent = someBase;
+      some.typeParameters = undefined;
+      some.appliedTypeArgs = [arg];
+      some.fields[0].type = arg;
+      some.typesResolved = true;
+      return some;
+    };
+
+    const someFromAlias = createSomeInstance(rec.alias);
+    const someFromUnion = createSomeInstance(rec.union);
+    someFromAlias.fields[0].binaryenGetterType = 19;
+    someFromUnion.fields[0].binaryenSetterType = 27;
+    someFromUnion.binaryenType = 88;
+
+    const optionalFromAlias = new UnionType({
+      name: Identifier.from("OptionalAlias"),
+      childTypeExprs: [],
+    });
+    optionalFromAlias.types = [someFromAlias, noneBase];
+
+    const optionalAlias = new TypeAlias({
+      name: Identifier.from("OptionalAlias"),
+      typeExpr: optionalFromAlias,
+    });
+    optionalAlias.type = optionalFromAlias;
+    optionalFromAlias.parent = optionalAlias;
+
+    const optionalFromUnion = new UnionType({
+      name: Identifier.from("OptionalUnion"),
+      childTypeExprs: [],
+    });
+    optionalFromUnion.types = [someFromUnion, noneBase];
+
+    someBase.genericInstances = [someFromAlias, someFromUnion];
+
+    const arrayBase = new ObjectType({
+      name: Identifier.from("Array"),
+      value: [
+        {
+          name: "items",
+          typeExpr: Identifier.from("T"),
+        },
+      ],
+      typeParameters: [Identifier.from("T")],
+    });
+
+    const createArrayInstance = (arg: Type): ObjectType => {
+      const array = arrayBase.clone();
+      array.genericParent = arrayBase;
+      array.typeParameters = undefined;
+      array.appliedTypeArgs = [arg];
+      array.fields[0].type = arg;
+      return array;
+    };
+
+    const arrayAlias = createArrayInstance(optionalAlias);
+    const arrayUnion = createArrayInstance(optionalFromUnion);
+    arrayAlias.fields[0].binaryenGetterType = 31;
+    arrayUnion.fields[0].binaryenSetterType = 49;
+    arrayUnion.binaryenType = 61;
+    arrayAlias.typesResolved = true;
+    arrayUnion.typesResolved = true;
+
+    const mapBase = new ObjectType({
+      name: Identifier.from("Map"),
+      value: [
+        {
+          name: "keys",
+          typeExpr: Identifier.from("K"),
+        },
+        {
+          name: "values",
+          typeExpr: Identifier.from("V"),
+        },
+      ],
+      typeParameters: [Identifier.from("K"), Identifier.from("V")],
+    });
+
+    const createMapInstance = (valueType: Type): ObjectType => {
+      const map = mapBase.clone();
+      map.genericParent = mapBase;
+      map.typeParameters = undefined;
+      map.appliedTypeArgs = [rec.union, valueType];
+      map.fields[0].type = rec.union;
+      map.fields[1].type = valueType;
+      return map;
+    };
+
+    const mapAlias = createMapInstance(optionalAlias);
+    const mapUnion = createMapInstance(optionalFromUnion);
+    mapAlias.fields[1].binaryenGetterType = 71;
+    mapUnion.fields[1].binaryenSetterType = 83;
+    mapUnion.binaryenType = 97;
+    mapAlias.typesResolved = true;
+    mapUnion.typesResolved = true;
+
+    const fnOptionalAlias = createFnWithReturn("optionalAlias", optionalAlias);
+    const fnOptionalUnion = createFnWithReturn("optionalUnion", optionalFromUnion);
+    const fnArrayAlias = createFnWithReturn("arrayAlias", arrayAlias);
+    const fnArrayUnion = createFnWithReturn("arrayUnion", arrayUnion);
+    const fnMapAlias = createFnWithReturn("mapAlias", mapAlias);
+    const fnMapUnion = createFnWithReturn("mapUnion", mapUnion);
+
+    const module = new VoydModule({
+      name: Identifier.from("OptionalContainers"),
+      value: [
+        rec.alias,
+        fnOptionalAlias,
+        fnOptionalUnion,
+        fnArrayAlias,
+        fnArrayUnion,
+        fnMapAlias,
+        fnMapUnion,
+      ],
+    });
+
+    canonicalizeResolvedTypes(module);
+
+    const canonicalOptional = fnOptionalAlias.returnType as UnionType;
+    const unionOptional = fnOptionalUnion.returnType as UnionType;
+    expect(canonicalOptional).toBe(unionOptional);
+
+    const canonicalSome = canonicalOptional.types.find(
+      (type) =>
+        type.isObjectType?.() &&
+        ((type as ObjectType).name.is("Some") ||
+          (type as ObjectType).genericParent?.name.is("Some"))
+    ) as ObjectType | undefined;
+    expect(canonicalSome).toBeDefined();
+
+    const canonicalNone = canonicalOptional.types.find(
+      (type) =>
+        type.isObjectType?.() &&
+        ((type as ObjectType).name.is("None") ||
+          (type as ObjectType).genericParent?.name.is("None"))
+    ) as ObjectType | undefined;
+    expect(canonicalNone).toBeDefined();
+    expect(canonicalNone).toBe(noneBase);
+
+    expect(someBase.genericInstances).toHaveLength(1);
+    expect(someBase.genericInstances?.[0]).toBe(canonicalSome);
+
+    const canonicalElement = rec.alias.type as UnionType;
+    expect(canonicalSome?.appliedTypeArgs?.[0]).toBe(canonicalElement);
+    const valueField = canonicalSome?.fields[0];
+    expect(valueField?.type).toBe(canonicalElement);
+    expect(valueField?.binaryenGetterType).toBe(19);
+    expect(valueField?.binaryenSetterType).toBe(27);
+    expect(canonicalSome?.binaryenType).toBe(88);
+
+    const canonicalArray = fnArrayAlias.returnType as ObjectType;
+    expect(canonicalArray).toBe(fnArrayUnion.returnType);
+    expect(canonicalArray.appliedTypeArgs?.[0]).toBe(canonicalOptional);
+    const arrayField = canonicalArray.fields[0];
+    expect(arrayField.type).toBe(canonicalOptional);
+    expect(arrayField.binaryenGetterType).toBe(31);
+    expect(arrayField.binaryenSetterType).toBe(49);
+    expect(canonicalArray.binaryenType).toBe(61);
+
+    const canonicalMap = fnMapAlias.returnType as ObjectType;
+    expect(canonicalMap).toBe(fnMapUnion.returnType);
+    expect(canonicalMap.appliedTypeArgs?.[1]).toBe(canonicalOptional);
+    const mapField = canonicalMap.fields[1];
+    expect(mapField.type).toBe(canonicalOptional);
+    expect(mapField.binaryenGetterType).toBe(71);
+    expect(mapField.binaryenSetterType).toBe(83);
+    expect(canonicalMap.binaryenType).toBe(97);
   });
 });

@@ -2,7 +2,12 @@ import { describe, expect, test } from "vitest";
 import { typeKey } from "../type-key.js";
 import { createRecursiveUnion } from "./helpers/rec-type.js";
 import { Identifier } from "../../../syntax-objects/index.js";
-import { ObjectType, PrimitiveType } from "../../../syntax-objects/types.js";
+import {
+  ObjectType,
+  PrimitiveType,
+  Type,
+  UnionType,
+} from "../../../syntax-objects/types.js";
 
 describe("typeKey", () => {
   test("produces identical fingerprints for recursive map/array unions", () => {
@@ -56,5 +61,58 @@ describe("typeKey", () => {
     otherInstance.appliedTypeArgs = [PrimitiveType.from("i32")];
 
     expect(typeKey(instance)).not.toBe(typeKey(otherInstance));
+  });
+
+  const createOptionalFactory = () => {
+    const someBase = new ObjectType({
+      name: Identifier.from("Some"),
+      value: [],
+      typeParameters: [Identifier.from("T")],
+    });
+    const noneBase = new ObjectType({
+      name: Identifier.from("None"),
+      value: [],
+    });
+
+    const createSomeInstance = (arg: Type): ObjectType => {
+      const some = someBase.clone();
+      some.genericParent = someBase;
+      some.typeParameters = undefined;
+      some.appliedTypeArgs = [arg];
+      return some;
+    };
+
+    const createOptionalUnion = (arg: Type): UnionType => {
+      const union = new UnionType({
+        name: Identifier.from("Optional"),
+        childTypeExprs: [],
+      });
+      union.types = [createSomeInstance(arg), noneBase];
+      return union;
+    };
+
+    return { createSomeInstance, createOptionalUnion };
+  };
+
+  test("normalizes Some<T> fingerprints once element aliases canonicalize", () => {
+    const { createSomeInstance } = createOptionalFactory();
+    const recType = createRecursiveUnion("RecType");
+    const msgPack = createRecursiveUnion("MsgPack");
+
+    const someFromAlias = createSomeInstance(recType.alias);
+    const someFromMsgPack = createSomeInstance(msgPack.alias);
+
+    expect(typeKey(someFromAlias)).toBe(typeKey(someFromMsgPack));
+  });
+
+  test("produces identical Optional<T> fingerprints when element unions match", () => {
+    const { createOptionalUnion } = createOptionalFactory();
+    const recType = createRecursiveUnion("RecType");
+    const msgPack = createRecursiveUnion("MsgPack");
+
+    const optionalFromAlias = createOptionalUnion(recType.alias);
+    const optionalFromMsgPack = createOptionalUnion(msgPack.alias);
+
+    expect(typeKey(optionalFromAlias)).toBe(typeKey(optionalFromMsgPack));
   });
 });

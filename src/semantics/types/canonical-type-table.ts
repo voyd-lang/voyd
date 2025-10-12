@@ -477,6 +477,8 @@ export class CanonicalTypeTable {
       target.typesResolved = true;
     }
 
+    this.#mergeObjectFields(target, source);
+
     if (
       source.binaryenType !== undefined &&
       target.binaryenType === undefined
@@ -514,6 +516,12 @@ export class CanonicalTypeTable {
     target.implementations = this.#mergeImplementationLists(
       target.implementations ?? [],
       source.implementations ?? []
+    );
+
+    this.#repointGenericInstance(
+      source.genericParent ?? target.genericParent,
+      source,
+      target
     );
   }
 
@@ -553,6 +561,91 @@ export class CanonicalTypeTable {
       target.implementations ?? [],
       source.implementations ?? []
     );
+
+    this.#repointTraitInstance(
+      source.genericParent ?? target.genericParent,
+      source,
+      target
+    );
+  }
+
+  #mergeObjectFields(target: ObjectType, source: ObjectType): void {
+    if (!source.fields?.length) return;
+    source.fields.forEach((field, index) => {
+      const dest = target.fields[index];
+      if (!dest) return;
+      if (this.#shouldReplaceAppliedArg(dest.type as Type | undefined, field.type as Type | undefined)) {
+        dest.type = field.type;
+      } else if (!dest.type && field.type) {
+        dest.type = field.type;
+      }
+      if (
+        dest.binaryenGetterType === undefined &&
+        field.binaryenGetterType !== undefined
+      ) {
+        dest.binaryenGetterType = field.binaryenGetterType;
+      }
+      if (
+        dest.binaryenSetterType === undefined &&
+        field.binaryenSetterType !== undefined
+      ) {
+        dest.binaryenSetterType = field.binaryenSetterType;
+      }
+    });
+  }
+
+  #repointGenericInstance(
+    parent: ObjectType | undefined,
+    previous: ObjectType,
+    canonical: ObjectType
+  ): void {
+    if (!parent?.genericInstances?.length) return;
+    const updated: ObjectType[] = [];
+    const seen = new Set<ObjectType>();
+    let replaced = false;
+    parent.genericInstances.forEach((instance) => {
+      const next = instance === previous ? canonical : instance;
+      if (instance === previous) replaced = true;
+      if (seen.has(next)) return;
+      seen.add(next);
+      if (next === canonical) canonical.genericParent = parent;
+      updated.push(next);
+    });
+    if (!seen.has(canonical)) {
+      updated.push(canonical);
+      seen.add(canonical);
+      canonical.genericParent = parent;
+    }
+    if (replaced || updated.length !== parent.genericInstances.length) {
+      parent.genericInstances = updated;
+    }
+  }
+
+  #repointTraitInstance(
+    parent: TraitType | undefined,
+    previous: TraitType,
+    canonical: TraitType
+  ): void {
+    if (!parent?.genericInstances?.length) return;
+    const updated: TraitType[] = [];
+    const seen = new Set<TraitType>();
+    let replaced = false;
+    parent.genericInstances.forEach((instance) => {
+      const next = instance === previous ? canonical : instance;
+      if (instance === previous) replaced = true;
+      if (seen.has(next)) return;
+      seen.add(next);
+      if (next === canonical) canonical.genericParent = parent;
+      updated.push(next);
+    });
+    if (!seen.has(canonical)) {
+      updated.push(canonical);
+      seen.add(canonical);
+      canonical.genericParent = parent;
+    }
+    if (replaced || updated.length !== parent.genericInstances.length) {
+      parent.genericInstances = updated;
+    }
   }
 }
 
