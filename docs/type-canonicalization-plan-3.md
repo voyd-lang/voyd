@@ -41,7 +41,9 @@ We stay entirely within semantics. The workflow is:
 ### Phase 3 – AST Rewriting & Cache Sanitization
 - Extend `canonicalize-resolved-types.ts` to:
   - Rewrite `expr.type`, `expr.inferredType`, `field.type`, `parameter.type`, `variable.type`, `objectLiteral.type`, `call.type`, `match` arms, and any cached `genericInstances` to the canonical object.
+  - Include tuple/array/alias surfaces that Phase 1 flagged (`TupleType.value`, `FixedArrayType.elemType`, `TypeAlias.type`, etc.) so every cachey holder described in the audit is covered, not just optional constructors.
   - Clear outdated `binaryenType` fields on replaced objects to force consistent rebuilds.
+  - When clearing caches, preserve the canonical instance’s `binaryenType`/`originalType` that Phase 2 already migrated—only wipe the stale copies on deprecated objects.
   - Ensure optional constructor instantiations reference the same canonical object as their union arm (no per-call clones).
 - Add a semantic integration test that validates the canonical AST only contains a single `Some`/`None` instance id even across nested generics and map literals.
 
@@ -50,6 +52,7 @@ We stay entirely within semantics. The workflow is:
   - `src/__tests__/map-recursive-union.e2e.test.ts` (`wasm module executes main without trapping`).
   - The test defined in phase 1
   - src/__tests__/semantics/map-recursive-union-optional.audit.test.ts:49
+- Add a quick regression asserting the canonical `Some`/`None` objects still expose the Binaryen caches Phase 2 re-homed (guard against Phase 3 over-clearing).
 - Add a new check in that test (or a helper) that parses the emitted wasm text and asserts only one `struct.new $Some#…` and `struct.new $None#…` appear.
 - Run `npx vitest run src/__tests__/run-wasm-regression.e2e.test.ts` and the broader recursive/MsgPack fixtures, updating snapshots as needed once the runtime stabilizes.
 - Capture a small postmortem in `docs/type-canonicalization-pass.md` summarizing the semantic rewrite and the new regression guard rails.
