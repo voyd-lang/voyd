@@ -44,8 +44,8 @@ We need a post-resolution pass that walks the IR, deduplicates structurally equi
 - Add an idempotence test—apply the pass twice and ensure no further changes occur.
 
 ## Fingerprint Format Reference
-- `TypeAlias` fingerprints resolve to their target type; recursive aliases emit `alias-cycle:<module::name>#<id>@<depth>` markers so distinct aliases never collide.
-- `UnionType` members are fingerprinted recursively, deduped, and sorted; recursive unions fall back to `union-cycle:<module::name>#<id>@<depth>`.
+- `TypeAlias` fingerprints resolve to their target type; recursive aliases emit structural markers (`alias-cycle:<frameId>@<depth>`) so identical recursion graphs collapse even when aliases live under different modules.
+- `UnionType` members are fingerprinted recursively, deduped, and sorted; recursive unions fall back to structural markers (`union-cycle:<frameId>@<depth>`).
 - Nominal `ObjectType`/`TraitType` fingerprints include the generic parent id and the canonicalized fingerprints of applied arguments. Structural objects sort field fingerprints and include parent links.
 - `FnType`, tuples, and fixed arrays serialize their child fingerprints in declaration order. Optional parameters are prefixed with `?`.
 - Primitive and `Self` types keep their stable names, while all other residual nodes fall back to `<kind>#<id>` to guarantee uniqueness.

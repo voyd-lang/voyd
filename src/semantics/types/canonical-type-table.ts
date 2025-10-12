@@ -227,6 +227,9 @@ export class CanonicalTypeTable {
     if (existing) {
       this.#assertCanonicalReady(existing, "reuse");
       this.#copyMetadata(existing, type);
+      if ((existing as UnionType).isUnionType?.() && (type as UnionType).isUnionType?.()) {
+        this.#repointAliasToCanonical(type as UnionType, existing as UnionType);
+      }
       this.#cache.set(type, existing);
       this.#inProgress.delete(type);
       if (this.#pending.has(type)) this.#pending.delete(type);
@@ -387,6 +390,25 @@ export class CanonicalTypeTable {
     }
   }
 
+  #repointAliasToCanonical(reused: UnionType, canonical: UnionType): void {
+    const aliasParent = (reused.parent as TypeAlias | undefined)?.isTypeAlias?.()
+      ? (reused.parent as TypeAlias)
+      : undefined;
+    if (!aliasParent) return;
+    if (aliasParent.type === reused) {
+      aliasParent.type = canonical;
+    }
+  }
+
+  #shouldReplaceAppliedArg(current?: Type, incoming?: Type): boolean {
+    if (!incoming) return false;
+    if (!current) return true;
+    const currentAlias = (current as TypeAlias).isTypeAlias?.();
+    const incomingAlias = (incoming as TypeAlias).isTypeAlias?.();
+    if (currentAlias && !incomingAlias) return true;
+    return false;
+  }
+
   #mergeObjectMetadata(target: ObjectType, source: ObjectType): void {
     if (source.typesResolved === true && target.typesResolved !== true) {
       target.typesResolved = true;
@@ -400,9 +422,15 @@ export class CanonicalTypeTable {
     }
 
     if (source.appliedTypeArgs?.length) {
-      if (!target.appliedTypeArgs?.length) {
-        target.appliedTypeArgs = [...source.appliedTypeArgs];
-      }
+      const merged = target.appliedTypeArgs ? [...target.appliedTypeArgs] : [];
+      source.appliedTypeArgs.forEach((arg, index) => {
+        if (this.#shouldReplaceAppliedArg(merged[index], arg)) {
+          merged[index] = arg;
+        } else if (!merged[index]) {
+          merged[index] = arg;
+        }
+      });
+      if (merged.length) target.appliedTypeArgs = merged;
     }
 
     if (source.genericParent && !target.genericParent) {
@@ -437,8 +465,16 @@ export class CanonicalTypeTable {
       target.typesResolved = true;
     }
 
-    if (source.appliedTypeArgs?.length && !target.appliedTypeArgs?.length) {
-      target.appliedTypeArgs = [...source.appliedTypeArgs];
+    if (source.appliedTypeArgs?.length) {
+      const merged = target.appliedTypeArgs ? [...target.appliedTypeArgs] : [];
+      source.appliedTypeArgs.forEach((arg, index) => {
+        if (this.#shouldReplaceAppliedArg(merged[index], arg)) {
+          merged[index] = arg;
+        } else if (!merged[index]) {
+          merged[index] = arg;
+        }
+      });
+      if (merged.length) target.appliedTypeArgs = merged;
     }
 
     if (source.genericParent && !target.genericParent) {

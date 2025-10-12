@@ -18,9 +18,18 @@ describe("typeKey", () => {
     expect(unionKeyA).toBe(unionKeyB);
   });
 
-  test("differentiates recursive aliases with distinct ancestry", () => {
+  test("collapses recursive aliases with distinct ancestry once structures match", () => {
     const recType = createRecursiveUnion("RecType");
     const msgPack = createRecursiveUnion("MsgPack");
+
+    expect(typeKey(recType.alias)).toBe(typeKey(msgPack.alias));
+    expect(typeKey(recType.union)).toBe(typeKey(msgPack.union));
+  });
+
+  test("distinguishes recursive aliases when structure diverges", () => {
+    const recType = createRecursiveUnion("RecType");
+    const msgPack = createRecursiveUnion("MsgPack");
+    msgPack.union.types.push(PrimitiveType.from("bool"));
 
     expect(typeKey(recType.alias)).not.toBe(typeKey(msgPack.alias));
     expect(typeKey(recType.union)).not.toBe(typeKey(msgPack.union));

@@ -59,6 +59,28 @@ describe("canonicalizeResolvedTypes", () => {
     expect(arrayType?.appliedTypeArgs?.[0]).toBe(retA);
   });
 
+  test("dedupes recursive unions from aliases with different names", () => {
+    const recType = createRecursiveUnion("RecType");
+    const msgPack = createRecursiveUnion("MsgPack");
+    const fnRec = createFnWithReturn("fromRec", recType.alias);
+    const fnMsg = createFnWithReturn("fromMsg", msgPack.alias);
+
+    const module = new VoydModule({
+      name: Identifier.from("MixedAliases"),
+      value: [recType.alias, msgPack.alias, fnRec, fnMsg],
+    });
+
+    canonicalizeResolvedTypes(module);
+
+    const retRec = fnRec.returnType as UnionType;
+    const retMsg = fnMsg.returnType as UnionType;
+
+    expect(typeKey(recType.alias)).toBe(typeKey(msgPack.alias));
+    expect(retRec).toBe(retMsg);
+    expect(recType.alias.type).toBe(retRec);
+    expect(msgPack.alias.type).toBe(retRec);
+  });
+
   test("is idempotent across repeated runs", () => {
     const rec = createRecursiveUnion();
     const fn = createFnWithReturn("fnIdem", rec.alias);

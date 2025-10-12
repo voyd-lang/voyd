@@ -27,13 +27,24 @@ type TypeKeyContext = {
   stack: Map<Type, StackFrame>;
   frames: StackFrame[];
   depths: Map<Type, number>;
+  serial: number;
 };
+
+const cycleMarker = (
+  prefix: string,
+  id: string,
+  depth: number | string
+): string => `${prefix}:${id}@${depth}`;
+
+const cycleMarkerForFrame = (prefix: string, frame: StackFrame): string =>
+  cycleMarker(prefix, frame.cycleId, frame.depth);
 
 const createContext = (): TypeKeyContext => ({
   memo: new Map(),
   stack: new Map(),
   frames: [],
   depths: new Map(),
+  serial: 0,
 });
 
 const computeKey = (type: Type, ctx: TypeKeyContext): string => {
@@ -157,7 +168,7 @@ const pushFrame = (ctx: TypeKeyContext, type: Type): StackFrame => {
 
   const frame: StackFrame = {
     type,
-    cycleId: `${currentDepth}`,
+    cycleId: `${ctx.serial++}`,
     depth: currentDepth,
   };
   ctx.stack.set(type, frame);
@@ -187,12 +198,15 @@ const buildCycleMarker = (type: Type, frame: StackFrame): string => {
 
   if ((type as TypeAlias).isTypeAlias?.()) {
     const alias = type as TypeAlias;
-    return `alias-cycle:${stableAliasId(alias)}${cycleSuffix}${depthSuffix}`;
+    if (!alias.type) {
+      return cycleMarker("alias-cycle", stableAliasId(alias), frame.depth);
+    }
+    return cycleMarkerForFrame("alias-cycle", frame);
   }
 
   if ((type as UnionType).isUnionType?.()) {
     const union = type as UnionType;
-    return `union-cycle:${stableUnionId(union)}${cycleSuffix}${depthSuffix}`;
+    return cycleMarkerForFrame("union-cycle", frame);
   }
 
   return `cycle:${stableTypeToken(type)}${cycleSuffix}${depthSuffix}`;
@@ -201,24 +215,6 @@ const buildCycleMarker = (type: Type, frame: StackFrame): string => {
 const stableAliasId = (alias: TypeAlias): string => {
   const modulePath = modulePathFor(alias.parentModule);
   const name = alias.name.toString();
-  return modulePath ? `${modulePath}::${name}` : name;
-};
-
-const stableUnionId = (union: UnionType): string => {
-  const aliasParent = (union.parent as TypeAlias | undefined)?.isTypeAlias?.()
-    ? (union.parent as TypeAlias)
-    : undefined;
-  const modulePath = modulePathFor(union.parentModule);
-  const name =
-    aliasParent?.name?.toString?.() ??
-    union.name?.toString?.() ??
-    union.name?.value ??
-    `${union.kindOfType ?? "union"}#${union.idNum}`;
-
-  if (aliasParent) {
-    return stableAliasId(aliasParent);
-  }
-
   return modulePath ? `${modulePath}::${name}` : name;
 };
 
@@ -254,10 +250,10 @@ const normalizeUnionArgKey = (
 
   if ((arg as UnionType).isUnionType?.() && argKey.startsWith("union{")) {
     const union = arg as UnionType;
-    return `union-cycle:${stableUnionId(union)}${cycleSuffixForFallback(
-      ctx,
-      union
-    )}`;
+    const suffix = cycleSuffixForFallback(ctx, union);
+    const normalized = suffix.startsWith("#") ? suffix.slice(1) : suffix;
+    const [id, depth] = normalized.split("@");
+    return cycleMarker("union-cycle", id ?? "0", depth ?? "0");
   }
 
   return argKey;
