@@ -11,6 +11,9 @@ import {
 } from "../../syntax-objects/object-literal.js";
 import { Match, MatchCase } from "../../syntax-objects/match.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
+import { Macro } from "../../syntax-objects/macros.js";
+import { MacroLambda } from "../../syntax-objects/macro-lambda.js";
+import { MacroVariable } from "../../syntax-objects/macro-variable.js";
 import {
   FixedArrayType,
   FnType,
@@ -21,7 +24,10 @@ import {
   TypeAlias,
   UnionType,
 } from "../../syntax-objects/types.js";
-import { CanonicalTypeTable } from "./canonical-type-table.js";
+import {
+  CanonicalTypeTable,
+  type CanonicalTypeDedupeEvent,
+} from "./canonical-type-table.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
 
 type CanonicalizeCtx = {
@@ -37,7 +43,11 @@ const matchesName = (value: unknown, expected: string): boolean => {
   if (!value) return false;
   if (typeof value === "string") return value === expected;
   if (typeof value === "object") {
-    const candidate = value as { is?: (input: string) => boolean; toString?: () => string; value?: string };
+    const candidate = value as {
+      is?: (input: string) => boolean;
+      toString?: () => string;
+      value?: string;
+    };
     if (typeof candidate.is === "function") {
       return candidate.is(expected);
     }
@@ -51,17 +61,23 @@ const matchesName = (value: unknown, expected: string): boolean => {
   return false;
 };
 
-const isOptionalSomeConstructor = (obj: ObjectType | undefined): obj is ObjectType =>
+const isOptionalSomeConstructor = (
+  obj: ObjectType | undefined
+): obj is ObjectType =>
   !!obj &&
   (matchesName(obj.name, SOME_CONSTRUCTOR_NAME) ||
     matchesName(obj.genericParent?.name, SOME_CONSTRUCTOR_NAME));
 
-const isOptionalNoneConstructor = (obj: ObjectType | undefined): obj is ObjectType =>
+const isOptionalNoneConstructor = (
+  obj: ObjectType | undefined
+): obj is ObjectType =>
   !!obj &&
   (matchesName(obj.name, NONE_CONSTRUCTOR_NAME) ||
     matchesName(obj.genericParent?.name, NONE_CONSTRUCTOR_NAME));
 
-const isOptionalConstructor = (obj: ObjectType | undefined): obj is ObjectType =>
+const isOptionalConstructor = (
+  obj: ObjectType | undefined
+): obj is ObjectType =>
   isOptionalSomeConstructor(obj) || isOptionalNoneConstructor(obj);
 
 const unionHasOptionalConstructors = (union: UnionType): boolean =>
@@ -82,6 +98,23 @@ const dedupeByRef = <T>(values: T[]): T[] => {
   return result;
 };
 
+const clearTypeCaches = (type: Type, canonical: Type): void => {
+  if (type === canonical) return;
+
+  type.setAttribute?.("binaryenType", undefined);
+  type.setAttribute?.("originalType", undefined);
+
+  if ((type as ObjectType).isObjectType?.()) {
+    const obj = type as ObjectType;
+    obj.binaryenType = undefined;
+  }
+
+  if ((type as FixedArrayType).isFixedArrayType?.()) {
+    const arr = type as FixedArrayType;
+    arr.binaryenType = undefined;
+  }
+};
+
 const dedupeImplementations = (
   impls: Implementation[] | undefined
 ): Implementation[] | undefined => {
@@ -89,7 +122,9 @@ const dedupeImplementations = (
   const seen = new Set<string>();
   const result: Implementation[] = [];
   impls.forEach((impl) => {
-    const key = impl.trait ? `trait:${impl.trait.id}` : `inherent:${impl.syntaxId}`;
+    const key = impl.trait
+      ? `trait:${impl.trait.id}`
+      : `inherent:${impl.syntaxId}`;
     if (seen.has(key)) return;
     seen.add(key);
     result.push(impl);
@@ -122,11 +157,15 @@ const attachInstanceToParent = (
   const parent = instance.genericParent;
   if (!parent) return;
 
-  const canonicalParent = canonicalTypeRef(ctx, parent) as ObjectType | undefined;
+  const canonicalParent = canonicalTypeRef(ctx, parent) as
+    | ObjectType
+    | undefined;
   if (!canonicalParent) return;
 
   instance.genericParent = canonicalParent;
-  const canonicalInstance = canonicalTypeRef(ctx, instance) as ObjectType | undefined;
+  const canonicalInstance = canonicalTypeRef(ctx, instance) as
+    | ObjectType
+    | undefined;
   if (!canonicalInstance) return;
 
   const merged = dedupeCanonicalInstances(ctx, [
@@ -140,6 +179,59 @@ const attachInstanceToParent = (
   canonicalizeTypeNode(ctx, canonicalParent);
 };
 
+const dedupeTraitInstances = (
+  ctx: CanonicalizeCtx,
+  instances: (TraitType | undefined)[]
+): TraitType[] => {
+  if (!instances.length) return [];
+  const seen = new Set<TraitType>();
+  const result: TraitType[] = [];
+  instances.forEach((instance) => {
+    if (!instance) return;
+    const canonical = canonicalTypeRef(ctx, instance) as TraitType | undefined;
+    if (!canonical) return;
+    if (!(canonical as TraitType).isTraitType?.()) return;
+    const trait = canonical as TraitType;
+    if (seen.has(trait)) return;
+    seen.add(trait);
+    result.push(trait);
+  });
+  return result;
+};
+
+const attachTraitInstanceToParent = (
+  ctx: CanonicalizeCtx,
+  instance: TraitType
+): void => {
+  const parent = instance.genericParent;
+  if (!parent) return;
+
+  const canonicalParent = canonicalTypeRef(ctx, parent) as
+    | TraitType
+    | undefined;
+  if (!canonicalParent) return;
+  if (!(canonicalParent as TraitType).isTraitType?.()) return;
+  const traitParent = canonicalParent as TraitType;
+
+  instance.genericParent = traitParent;
+  const canonicalInstance = canonicalTypeRef(ctx, instance) as
+    | TraitType
+    | undefined;
+  if (!canonicalInstance) return;
+  if (!(canonicalInstance as TraitType).isTraitType?.()) return;
+  const traitInstance = canonicalInstance as TraitType;
+
+  const merged = dedupeTraitInstances(ctx, [
+    ...(traitParent.genericInstances ?? []),
+    traitInstance,
+  ]);
+  if (merged.length) {
+    traitParent.genericInstances = merged;
+  }
+
+  canonicalizeTypeNode(ctx, traitParent);
+};
+
 type CanonicalizeResolvedTypesOpts = {
   table?: CanonicalTypeTable;
 };
@@ -148,13 +240,42 @@ export const canonicalizeResolvedTypes = (
   module: VoydModule,
   opts?: CanonicalizeResolvedTypesOpts
 ): VoydModule => {
+  const table = opts?.table ?? new CanonicalTypeTable();
   const ctx: CanonicalizeCtx = {
-    table: opts?.table ?? new CanonicalTypeTable(),
+    table,
     visitedExpr: new Set(),
     visitedTypes: new Set(),
   };
 
-  canonicalizeExpr(ctx, module);
+  const runPass = () => {
+    ctx.visitedExpr.clear();
+    ctx.visitedTypes.clear();
+    canonicalizeExpr(ctx, module);
+  };
+
+  const aggregatedEvents: CanonicalTypeDedupeEvent[] = [];
+  const recordIterationEvents = (): CanonicalTypeDedupeEvent[] => {
+    const events = table.getDedupeEvents();
+    if (events.length) {
+      aggregatedEvents.push(...events);
+    }
+    return events;
+  };
+
+  table.clearDedupeEvents();
+  runPass();
+
+  let dedupeEvents = recordIterationEvents();
+  let iterations = 0;
+  while (dedupeEvents.length > 0 && iterations < 5) {
+    iterations += 1;
+    table.clearDedupeEvents();
+    runPass();
+    dedupeEvents = recordIterationEvents();
+  }
+
+  table.setDedupeEvents(aggregatedEvents);
+
   return module;
 };
 
@@ -164,8 +285,12 @@ const canonicalTypeRef = (
 ): Type | undefined => {
   const canonical = ctx.table.canonicalize(type);
   if (canonical) {
-    canonicalizeTypeNode(ctx, canonical);
-    return ctx.table.getCanonical(canonical);
+    const canonicalRef = ctx.table.getCanonical(canonical);
+    if (type && canonicalRef) {
+      clearTypeCaches(type, canonicalRef);
+    }
+    if (canonicalRef) canonicalizeTypeNode(ctx, canonicalRef);
+    return canonicalRef;
   }
   return canonical;
 };
@@ -186,6 +311,21 @@ const canonicalizeExpr = (ctx: CanonicalizeCtx, expr?: Expr): void => {
 
   if (expr.isClosure()) {
     canonicalizeClosure(ctx, expr);
+    return;
+  }
+
+  if (expr.isMacro()) {
+    canonicalizeMacro(ctx, expr);
+    return;
+  }
+
+  if (expr.isMacroLambda()) {
+    canonicalizeMacroLambda(ctx, expr);
+    return;
+  }
+
+  if (expr.isMacroVariable()) {
+    canonicalizeMacroVariable(ctx, expr);
     return;
   }
 
@@ -376,6 +516,26 @@ const canonicalizeClosure = (ctx: CanonicalizeCtx, closure: Closure): void => {
   canonicalizeExpr(ctx, closure.body);
 };
 
+const canonicalizeMacro = (ctx: CanonicalizeCtx, macro: Macro): void => {
+  macro.parameters.forEach((param) => canonicalizeExpr(ctx, param));
+  canonicalizeExpr(ctx, macro.body);
+};
+
+const canonicalizeMacroLambda = (
+  ctx: CanonicalizeCtx,
+  lambda: MacroLambda
+): void => {
+  lambda.parameters.forEach((param) => canonicalizeExpr(ctx, param));
+  canonicalizeList(ctx, lambda.body);
+};
+
+const canonicalizeMacroVariable = (
+  ctx: CanonicalizeCtx,
+  variable: MacroVariable
+): void => {
+  if (variable.value) canonicalizeExpr(ctx, variable.value);
+};
+
 const canonicalizeParameter = (
   ctx: CanonicalizeCtx,
   parameter: Parameter
@@ -421,12 +581,18 @@ const canonicalizeTypeNode = (
 
   if ((canonical as UnionType).isUnionType?.()) {
     const union = canonical as UnionType;
+    union.childTypeExprs
+      .toArray()
+      .forEach((expr) => canonicalizeExpr(ctx, expr));
     union.types = union.types
       .map((child) => canonicalTypeRef(ctx, child))
       .filter((child): child is Type => !!child);
     union.types = dedupeByRef(union.types);
     union.types.forEach((child) => {
-      if ((child as ObjectType).isObjectType?.() && isOptionalConstructor(child as ObjectType)) {
+      if (
+        (child as ObjectType).isObjectType?.() &&
+        isOptionalConstructor(child as ObjectType)
+      ) {
         attachInstanceToParent(ctx, child as ObjectType);
       }
       canonicalizeTypeNode(ctx, child);
@@ -434,7 +600,8 @@ const canonicalizeTypeNode = (
     if (unionHasOptionalConstructors(union)) {
       union.types = union.types
         .map((child) =>
-          (child as ObjectType).isObjectType?.() && isOptionalConstructor(child as ObjectType)
+          (child as ObjectType).isObjectType?.() &&
+          isOptionalConstructor(child as ObjectType)
             ? (canonicalTypeRef(ctx, child) as Type)
             : child
         )
@@ -456,6 +623,10 @@ const canonicalizeTypeNode = (
         ctx,
         inter.structuralType
       ) as ObjectType;
+    const nominalExpr = inter.nominalTypeExpr?.value;
+    if (nominalExpr) canonicalizeExpr(ctx, nominalExpr);
+    const structuralExpr = inter.structuralTypeExpr?.value;
+    if (structuralExpr) canonicalizeExpr(ctx, structuralExpr);
     return inter;
   }
 
@@ -527,13 +698,13 @@ const canonicalizeTypeNode = (
     trait.implementations = dedupeImplementations(trait.implementations);
     trait.implementations?.forEach((impl) => canonicalizeExpr(ctx, impl));
     if (trait.genericInstances?.length) {
-      const canonicalInstances = trait.genericInstances
-        .map((inst) => canonicalTypeRef(ctx, inst))
-        .filter(
-          (inst): inst is TraitType =>
-            !!inst && (inst as TraitType).isTraitType?.()
-        );
-      trait.genericInstances = dedupeByRef(canonicalInstances);
+      trait.genericInstances = dedupeTraitInstances(
+        ctx,
+        trait.genericInstances
+      );
+    }
+    if (trait.genericParent) {
+      attachTraitInstanceToParent(ctx, trait);
     }
     trait.typeParameters?.forEach((param) => canonicalizeExpr(ctx, param));
     return trait;

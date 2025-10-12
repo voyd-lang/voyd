@@ -84,6 +84,10 @@ export class CanonicalTypeTable {
     this.#dedupeLog = [];
   }
 
+  setDedupeEvents(events: CanonicalTypeDedupeEvent[]): void {
+    this.#dedupeLog = [...events];
+  }
+
   #canonicalize(type: Type): Type {
     const cached = this.#cache.get(type);
     if (cached) {
