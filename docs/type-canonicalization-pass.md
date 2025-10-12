@@ -56,12 +56,18 @@ We need a post-resolution pass that walks the IR, deduplicates structurally equi
 - Execute `vitest run src/__tests__/map-recursive-union.e2e.test.ts` to validate that recursive alias scenarios continue to collapse to canonical forms.
 
 ## Audit Findings – Optional Constructors
-- Instrumentation added in `canonicalize-resolved-types.ts` now logs whenever an optional constructor or alias survives in a non-canonical form. Running `npx vitest run src/__tests__/semantics/map-recursive-union-optional.audit.test.ts` emits repeated warnings such as:
+- Instrumentation added in `canonicalize-resolved-types.ts` now logs whenever an optional constructor or alias survives in a non-canonical form. Running `npx vitest run src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts` emits repeated warnings such as:
   - `alias retained non-canonical target at Fn(get).appliedTypeArgs[0]` for the stdlib `Map`/`Array` helpers, showing that `Fn.appliedTypeArgs` still point at alias snapshots like `RecType#143181`.
   - `non-canonical Optional constructor detected at dedupeCanonicalInstances(Some#144032#…)` indicating that `ObjectType.genericInstances` continues to spawn fresh `Some` clones instead of reusing the shared instance.
-- A focused crawler (`collectOptionalSomeAudit`) over the canonicalized `map-recursive-union` module reports **15 distinct `Some#144032…` ids** still reachable from the AST, all hanging off `std::Map` implementations (see `src/__tests__/semantics/map-recursive-union-optional.audit.test.ts` for the reproduction). These instances are nested inside trait implementations for map iteration (`find`, `next`, `iterate`) and bucket helpers, confirming that optional constructors embedded in generic method metadata bypass Phase 8 rewrites.
-- The new audit test adds a skipped assertion (`test.skip("…collapses Optional Some constructors…")`) and an active canary that currently asserts `someIds.size > 1`. Once Phases 2–3 land, unskip the regression and flip the canary to require a single `Some` id.
+- The initial crawler run (`collectOptionalSomeAudit`) over the canonicalized `map-recursive-union` module surfaced **15 distinct `Some#144032…` ids** hanging off `std::Map` implementations (see `src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts` for the reproduction). Those instances lived inside trait implementations for map iteration (`find`, `next`, `iterate`) and bucket helpers, confirming that optional constructors embedded in generic method metadata bypassed Phase 8 rewrites.
+- The regression now enforces a single canonical `Some`/`None` instance for `RecType`, verifies that optional constructors keep their Binaryen caches after codegen, and fails fast if any audit crawler rediscovers duplicate heap ids.
 - Follow-up work needs to (a) rewrite `Fn.appliedTypeArgs`, `genericInstances`, and trait method caches to the canonical objects and (b) merge Binaryen caches (`binaryenType` / `originalType`) so instrumentation stops flagging mismatched `T#… → RecType#…` aliases during canonicalization.
+
+## Phase 4 Postmortem
+- Re-enabled the wasm regressions (`src/__tests__/map-recursive-union.e2e.test.ts` and `src/__tests__/run-wasm-regression.e2e.test.ts`), keeping the runtime focused on the canonical Optional constructors.
+- Added a wasm text guard that ensures only one `struct.new $Some#…` and `struct.new $None#…` survives in the compiled module, catching future duplication before execution.
+- Fortified `src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts` with a Binaryen cache check so canonical `Some`/`None` retain `binaryenType` / `originalType` metadata even after codegen.
+- Locked the regression crawler to expect a single Optional heap id, preventing silent regressions if canonicalization ever reintroduces duplicate constructors.
 
 ## Considerations
 

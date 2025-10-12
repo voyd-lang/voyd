@@ -20,6 +20,7 @@ import { voydBaseObject, Type } from "../syntax-objects/types.js";
 import { murmurHash3 } from "../lib/murmur-hash.js";
 import { AugmentedBinaryen } from "../lib/binaryen-gc/types.js";
 import { canonicalType } from "../semantics/types/canonicalize.js";
+import { compile as compileFunction } from "./compile-function.js";
 const bin = binaryen as unknown as AugmentedBinaryen;
 
 export const compile = (opts: CompileExprOpts<Call>): number => {
@@ -123,6 +124,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     expr.argAt(0)?.getType()?.isTraitType()
   ) {
     const traitFn = expr.fn as Fn;
+    compileFunction({ ...opts, expr: traitFn });
     const obj = expr.argAt(0)!;
     const lookupTable = structGetFieldValue({
       mod,
@@ -188,6 +190,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
 
   const fn = expr.fn as Fn;
   const id = fn.id;
+  compileFunction({ ...opts, expr: fn });
   const returnType = mapBinaryenType(opts, fn.returnType!);
 
   if (isReturnExpr) {

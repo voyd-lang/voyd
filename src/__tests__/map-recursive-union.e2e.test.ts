@@ -226,8 +226,7 @@ describe("map-recursive-union canonicalization integration", () => {
     t.expect(snapshotWith.mapCallKey).toBe(snapshotWith.mapVariantKey);
   });
 
-  // TODO(Phase 9): Re-enable once optional canonicalization + codegen reuse prevent wasm traps.
-  test.skip("wasm module executes main without trapping", (t) => {
+  test("wasm module executes main without trapping", (t) => {
     const main = getWasmFn("main", wasmInstance);
     assert(main, "main export should exist");
     t.expect(main()).toEqual(1);
@@ -245,5 +244,19 @@ describe("map-recursive-union canonicalization integration", () => {
         "Map#146251#0",
       ]
     `);
+  });
+
+  test("wasm text instantiates Optional constructors once", (t) => {
+    const constructorNews = [
+      ...wasmText.matchAll(/struct\.new \$([^\s()]+)/g),
+    ].map(([, name]) => name);
+
+    const someNews = constructorNews.filter((name) => name.startsWith("Some#"));
+    const noneNews = constructorNews.filter((name) => name.startsWith("None#"));
+
+    t.expect(new Set(someNews).size).toBe(1);
+    t.expect(new Set(noneNews).size).toBe(1);
+    t.expect(someNews.length).toBe(1);
+    t.expect(noneNews.length).toBe(1);
   });
 });

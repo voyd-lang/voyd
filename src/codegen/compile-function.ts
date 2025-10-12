@@ -32,22 +32,33 @@ export const compile = (opts: CompileExprOpts<Fn>): number => {
     return mod.nop();
   }
 
+  if (!fn.body) {
+    return mod.nop();
+  }
+
   const parameterTypes = getFunctionParameterTypes(opts, fn);
   const returnType = mapBinaryenType(opts, fn.getReturnType());
 
-  const bodyExpr = compileExpression({
-    ...opts,
-    expr: fn.body!,
-    isReturnExpr: returnType !== binaryen.none,
-  });
-  const body = returnType === binaryen.none ? asStmt(mod, bodyExpr) : bodyExpr;
-
-  const variableTypes = getFunctionVarTypes(opts, fn);
-
   const compiledSet = getCompiledSet(mod);
   if (compiledSet.has(fn.id)) return mod.nop();
-  mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
   compiledSet.add(fn.id);
+
+  try {
+    const bodyExpr = compileExpression({
+      ...opts,
+      expr: fn.body!,
+      isReturnExpr: returnType !== binaryen.none,
+    });
+    const body =
+      returnType === binaryen.none ? asStmt(mod, bodyExpr) : bodyExpr;
+
+    const variableTypes = getFunctionVarTypes(opts, fn);
+
+    mod.addFunction(fn.id, parameterTypes, returnType, variableTypes, body);
+  } catch (error) {
+    compiledSet.delete(fn.id);
+    throw error;
+  }
 
   return mod.nop();
 };

@@ -57,8 +57,26 @@ We stay entirely within semantics. The workflow is:
 - Run `npx vitest run src/__tests__/run-wasm-regression.e2e.test.ts` and the broader recursive/MsgPack fixtures, updating snapshots as needed once the runtime stabilizes.
 - Capture a small postmortem in `docs/type-canonicalization-pass.md` summarizing the semantic rewrite and the new regression guard rails.
 
-### Phase 5 - Cleanup
-- Remove all instrumentation code related to / added for completing the canonicalization work that is no longer required.
+### Phase 5 – Optional Instance Canonicalization Fix
+- Isolate the remaining `Some#…` / `None#…` duplicates by extending the Phase 3 crawler to dump every `genericParent` / `genericInstances` edge for Optional constructors (map the exact creation site for `Some#144032#0/#7/#14/#15`).
+- Update `resolveObjectType` / `registerGenericInstance` so Optional constructors are never cloned per-call: prefer reusing the canonical `Some`/`None` instance when `appliedTypeArgs[0]` already matches the target union.
+- Harden `canonicalTypeTable.attachInstanceToParent` and the optional-specific dedupe path so:
+  - `genericParent` always points at the canonical base object.
+  - `genericInstances` is de-duplicated by reference before returning, guaranteeing a single entry per `Some<T>` instantiation.
+  - Any “losing” duplicate has its `binaryenType`, `originalType`, and `genericInstances` cleared to avoid reintroduction during subsequent passes.
+- Add a targeted semantic test that reprocesses `map-recursive-union` and asserts `Some.genericParent.genericInstances` only contains the canonical `RecType` specialization (ideally living alongside the current optional constructor regression suite).
+- Re-run the wasm text inspection to ensure the struct emitter now reports a single `$Some#…` / `$None#…` definition before moving on.
+
+### Phase 6 – Codegen / Runtime Alignment
+- Audit every callsite that can materialize Optional helpers (trait dispatch, iterator utilities, closure emissions) and force eager compilation of the backing functions so Binaryen never requests RTTs for stale clones—extend the new `compileFunction` guard with focused tests that assert no new wasm functions are emitted when a module is compiled twice.
+- Add a regression that compiles `map-recursive-union` and walks the Binaryen module to confirm no `iterate#…` or `Some#…` functions/structs are duplicated; fail fast when unexpected suffixes (`#7/#14/#15`) appear.
+- Ensure `canonicalize-resolved-types` wipes any residual `binaryenType` on non-canonical Optional constructors immediately after they are re-pointed to the base instance so codegen cannot observe stale caches.
+
+### Phase 7 – Final Regression & Cleanup
+- Re-run the full e2e matrix (`map-recursive-union`, `run-wasm-regression`, MsgPack suites, VSX smoke) with wasm execution enabled and update snapshots or fixture expectations where canonical ids shift.
+- Capture the resolved optional canonicalization story in `docs/type-canonicalization-pass.md` (new “Optional Constructor Postmortem” subsection) including the final invariants around `genericInstances`, Binaryen caches, and wasm text guards.
+- Remove any temporary logging/assertions introduced in Phases 5–6 once the regression suite passes green.
+- Submit a final diff review checklist covering semantics (canonicalization + table), codegen (function compilation ordering), tests, and documentation so Phase 4 outcomes remain locked in.
 
 ## Risks & Mitigations
 - **Hidden metadata leaks:** Binaryen caches scattered on old instances can be easy to miss. Mitigation: audit `ObjectType` and `TraitType` properties and add assertions that stale instances never hold `binaryenType` after canonicalization.

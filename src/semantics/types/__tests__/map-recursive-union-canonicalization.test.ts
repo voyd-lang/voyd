@@ -24,6 +24,7 @@ import { Match, MatchCase } from "../../../syntax-objects/match.js";
 import { Implementation } from "../../../syntax-objects/implementation.js";
 import { CanonicalTypeTable } from "../canonical-type-table.js";
 import { canonicalizeResolvedTypes } from "../canonicalize-resolved-types.js";
+import { codegen } from "../../../codegen.js";
 
 const SOME_CONSTRUCTOR_NAME = "Some";
 const NONE_CONSTRUCTOR_NAME = "None";
@@ -396,5 +397,67 @@ describe("map-recursive-union optional constructor canonicalization", () => {
       });
     expect(optionalDedupeEvents).toHaveLength(0);
   });
-});
 
+  test("optional constructors keep Binaryen caches after codegen", async () => {
+    const parsed = await parseModule(mapRecursiveUnionVoyd);
+    const canonicalRoot = processSemantics(parsed) as VoydModule;
+    const module = codegen(canonicalRoot);
+
+    try {
+      const srcModule = canonicalRoot.resolveModule(Identifier.from("src")) as
+        | VoydModule
+        | undefined;
+      expect(srcModule).toBeDefined();
+
+      const { some, none, unions } = collectOptionalConstructors(
+        srcModule ?? canonicalRoot
+      );
+
+      const recAlias = srcModule?.resolveEntity(Identifier.from("RecType")) as
+        | TypeAlias
+        | undefined;
+      expect(recAlias?.type?.isUnionType?.()).toBe(true);
+
+      const recUnion = recAlias?.type as UnionType;
+      const recOptional = [...unions].find((union) =>
+        union.types.some((candidate) => {
+          if (!(candidate as ObjectType).isObjectType?.()) return false;
+          const obj = candidate as ObjectType;
+          return (
+            isOptionalSomeConstructor(obj) &&
+            obj.appliedTypeArgs?.[0] === recUnion
+          );
+        })
+      );
+      expect(recOptional).toBeDefined();
+
+      const recSomeVariant = recOptional?.types.find(
+        (candidate) =>
+          (candidate as ObjectType).isObjectType?.() &&
+          isOptionalSomeConstructor(candidate as ObjectType)
+      ) as ObjectType | undefined;
+      const recNoneVariant = recOptional?.types.find(
+        (candidate) =>
+          (candidate as ObjectType).isObjectType?.() &&
+          isOptionalNoneConstructor(candidate as ObjectType)
+      ) as ObjectType | undefined;
+
+      expect(recSomeVariant).toBeDefined();
+      expect(recNoneVariant).toBeDefined();
+
+      const recSomeInstances = [...some].filter(
+        (candidate) => candidate === recSomeVariant
+      );
+      const recNoneInstances = [...none].filter(
+        (candidate) => candidate === recNoneVariant
+      );
+      expect(recSomeInstances).toHaveLength(1);
+      expect(recNoneInstances).toHaveLength(1);
+
+      expect(recSomeVariant?.binaryenType).not.toBeUndefined();
+      expect(recNoneVariant?.binaryenType).not.toBeUndefined();
+    } finally {
+      module.dispose();
+    }
+  });
+});
