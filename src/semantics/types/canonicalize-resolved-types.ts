@@ -145,6 +145,7 @@ const dedupeCanonicalInstances = (
     if (!canonical) return;
     if (seen.has(canonical)) {
       if (instance !== canonical) {
+        clearTypeCaches(instance, canonical);
         instance.genericInstances = [];
         instance.genericParent = undefined;
       }
@@ -175,6 +176,7 @@ const attachInstanceToParent = (
 
   canonicalInstance.genericParent = canonicalParent;
   if (canonicalInstance !== instance) {
+    clearTypeCaches(instance, canonicalInstance);
     instance.genericParent = undefined;
     instance.genericInstances = [];
   }

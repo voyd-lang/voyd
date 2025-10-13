@@ -15,9 +15,14 @@ import {
 } from "../../lib/binaryen-gc/index.js";
 import { ObjectType, voydBaseObject } from "../../syntax-objects/types.js";
 import { murmurHash3 } from "../../lib/murmur-hash.js";
-import { CompileExprOpts, mapBinaryenType, compileExpression } from "../../codegen.js";
+import {
+  CompileExprOpts,
+  mapBinaryenType,
+  compileExpression,
+} from "../../codegen.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Fn } from "../../syntax-objects/fn.js";
+import { compile as compileFunction } from "../compile-function.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -109,6 +114,7 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
               `Method ${traitMethod.name.value} not implemented for trait ${impl.trait!.name}`
             );
           }
+          compileFunction({ ...opts, expr: implMethod });
 
           const wrapperName = `obj_method_${obj.id}_${traitMethod.id}`;
           if (seenWrappers.has(wrapperName)) return [] as number[];

@@ -72,7 +72,13 @@ We stay entirely within semantics. The workflow is:
 - Add a regression that compiles `map-recursive-union` and walks the Binaryen module to confirm no `iterate#…` or `Some#…` functions/structs are duplicated; fail fast when unexpected suffixes (`#7/#14/#15`) appear.
 - Ensure `canonicalize-resolved-types` wipes any residual `binaryenType` on non-canonical Optional constructors immediately after they are re-pointed to the base instance so codegen cannot observe stale caches.
 
-### Phase 7 – Final Regression & Cleanup
+### Phase 7 – Optional Instance Reattachment
+- Leverage the new `scripts/inspect-optional-constructors.ts` probe to snapshot the canonical AST and wasm output; the current run shows 15 `Some#…` nodes, five of which (`Some#144032#7/#8/#9/#10/#11`) lost their `genericParent` during canonicalization and therefore bypass `Some#144032.genericInstances`.
+- Patch `canonicalize-resolved-types` so any deduped Optional constructor is reattached to `Some#144032` (or the relevant base) and merged back into the parent’s `genericInstances` array after caches are cleared; fall back to the canonical instance whenever Binaryen lowering requests the orphaned ids.
+- Guard the regression: after reattachment, rerun the inspector script to confirm every `Some#…` reports `parent=Some#144032` and observe that the wasm text collapses to a single Optional struct id with one `struct.new` emission.
+- Extend the canonicalization unit tests to assert that all Optional constructors detected by the walker have a populated `genericParent`, and that `Some#144032.genericInstances` exactly matches the set of RecType specialisations.
+
+### Phase 8 – Final Regression & Cleanup
 - Re-run the full e2e matrix (`map-recursive-union`, `run-wasm-regression`, MsgPack suites, VSX smoke) with wasm execution enabled and update snapshots or fixture expectations where canonical ids shift.
 - Capture the resolved optional canonicalization story in `docs/type-canonicalization-pass.md` (new “Optional Constructor Postmortem” subsection) including the final invariants around `genericInstances`, Binaryen caches, and wasm text guards.
 - Remove any temporary logging/assertions introduced in Phases 5–6 once the regression suite passes green.

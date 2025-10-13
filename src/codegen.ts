@@ -9,6 +9,7 @@ import {
   UnionType,
   IntersectionType,
 } from "./syntax-objects/types.js";
+import { TraitType } from "./syntax-objects/types/trait.js";
 import {
   binaryenTypeToHeapType,
   annotateStructNames,
@@ -128,6 +129,12 @@ export const mapBinaryenType = (
   opts: MapBinTypeOpts,
   type: Type
 ): binaryen.Type => {
+  if (type.isObjectType()) {
+    type = ensureCanonicalObjectInstance(type);
+  }
+  if (type.isTraitType()) {
+    type = ensureCanonicalTraitInstance(type);
+  }
   if (isPrimitiveId(type, "bool")) return binaryen.i32;
   if (isPrimitiveId(type, "i32")) return binaryen.i32;
   if (isPrimitiveId(type, "f32")) return binaryen.f32;
@@ -150,6 +157,20 @@ export const mapBinaryenType = (
   if (type.isFixedArrayType()) return buildFixedArrayType(opts, type);
   if (type.isIntersectionType()) return buildIntersectionType(opts, type);
   throw new Error(`Unsupported type ${type}`);
+};
+
+const ensureCanonicalObjectInstance = (obj: ObjectType): ObjectType => {
+  const parent = obj.genericParent;
+  if (!parent) return obj;
+  const canonical = parent.registerGenericInstance(obj);
+  return canonical ?? obj;
+};
+
+const ensureCanonicalTraitInstance = (trait: TraitType): TraitType => {
+  const parent = trait.genericParent;
+  if (!parent) return trait;
+  const canonical = parent.registerGenericInstance(trait);
+  return canonical ?? trait;
 };
 
 const isPrimitiveId = (type: Type, id: Primitive) =>

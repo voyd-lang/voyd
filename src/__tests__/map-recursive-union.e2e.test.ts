@@ -23,6 +23,7 @@ import { initEntities } from "../semantics/init-entities.js";
 import { resolveEntities } from "../semantics/resolution/resolve-entities.js";
 import { checkTypes } from "../semantics/check-types/index.js";
 import { compile } from "../compiler.js";
+import { codegen } from "../codegen.js";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
 import assert from "node:assert";
 
@@ -179,6 +180,19 @@ const captureRecTypeSnapshot = (root: VoydModule): RecTypeSnapshot => {
   };
 };
 
+const collectWasmFunctionNames = (wasmText: string): string[] =>
+  [...wasmText.matchAll(/\(func \$([^\s()]+)/g)].map(([, name]) => name);
+
+const collectWasmTypeNames = (wasmText: string): string[] =>
+  [...wasmText.matchAll(/\(type \$([^\s()]+)/g)].map(([, name]) => name);
+
+const hasDuplicateSuffix = (name: string): boolean => /#\d+#\d+$/.test(name);
+
+const isOptionalOrIteratorArtifact = (name: string): boolean =>
+  name.startsWith("Some#") ||
+  name.startsWith("None#") ||
+  name.startsWith("iterate#");
+
 describe("map-recursive-union canonicalization integration", () => {
   let wasmInstance: WebAssembly.Instance;
   let wasmText: string;
@@ -258,5 +272,42 @@ describe("map-recursive-union canonicalization integration", () => {
     t.expect(new Set(noneNews).size).toBe(1);
     t.expect(someNews.length).toBe(1);
     t.expect(noneNews.length).toBe(1);
+  });
+
+  test("wasm text omits duplicated Optional helpers", (t) => {
+    const functionNames = collectWasmFunctionNames(wasmText);
+    const structNames = collectWasmTypeNames(wasmText);
+    const duplicatedFunctions = functionNames.filter(
+      (name) => isOptionalOrIteratorArtifact(name) && hasDuplicateSuffix(name)
+    );
+    const duplicatedStructs = structNames.filter(
+      (name) => isOptionalOrIteratorArtifact(name) && hasDuplicateSuffix(name)
+    );
+
+    t.expect(duplicatedFunctions).toEqual([]);
+    t.expect(duplicatedStructs).toEqual([]);
+  });
+
+  test("compiling map-recursive-union twice emits an identical wasm function set", async (t) => {
+    const parsed = await parseModule(mapRecursiveUnionVoyd);
+    const canonicalRoot = processSemantics(parsed) as VoydModule;
+    const firstModule = codegen(canonicalRoot);
+    const firstText = firstModule.emitText();
+    firstModule.dispose?.();
+    const secondModule = codegen(canonicalRoot);
+    const secondText = secondModule.emitText();
+
+    try {
+      const firstFunctions = collectWasmFunctionNames(firstText).sort();
+      const secondFunctions = collectWasmFunctionNames(secondText).sort();
+      t.expect(secondFunctions).toEqual(firstFunctions);
+      const extraFunctions = secondFunctions.filter(
+        (name) =>
+          isOptionalOrIteratorArtifact(name) && hasDuplicateSuffix(name)
+      );
+      t.expect(extraFunctions).toEqual([]);
+    } finally {
+      secondModule.dispose?.();
+    }
   });
 });
