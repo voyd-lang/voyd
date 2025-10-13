@@ -23,6 +23,7 @@ import {
   Type,
   TypeAlias,
   UnionType,
+  VoydRefType,
 } from "../../syntax-objects/types.js";
 import {
   CanonicalTypeTable,
@@ -97,6 +98,9 @@ const dedupeByRef = <T>(values: T[]): T[] => {
   });
   return result;
 };
+
+const isVoydRefType = (value: Type | undefined): value is VoydRefType =>
+  !!value?.isRefType?.();
 
 const clearTypeCaches = (type: Type, canonical: Type): void => {
   if (type === canonical) return;
@@ -595,10 +599,10 @@ const canonicalizeTypeNode = (
     union.childTypeExprs
       .toArray()
       .forEach((expr) => canonicalizeExpr(ctx, expr));
-    union.types = union.types
+    const canonicalChildren = union.types
       .map((child) => canonicalTypeRef(ctx, child))
-      .filter((child): child is Type => !!child);
-    union.types = dedupeByRef(union.types);
+      .filter(isVoydRefType);
+    union.types = dedupeByRef(canonicalChildren);
     union.types.forEach((child) => {
       if (
         (child as ObjectType).isObjectType?.() &&
@@ -609,15 +613,15 @@ const canonicalizeTypeNode = (
       canonicalizeTypeNode(ctx, child);
     });
     if (unionHasOptionalConstructors(union)) {
-      union.types = union.types
+      const normalized = union.types
         .map((child) =>
           (child as ObjectType).isObjectType?.() &&
           isOptionalConstructor(child as ObjectType)
-            ? (canonicalTypeRef(ctx, child) as Type)
+            ? canonicalTypeRef(ctx, child)
             : child
         )
-        .filter((child): child is Type => !!child);
-      union.types = dedupeByRef(union.types);
+        .filter(isVoydRefType);
+      union.types = dedupeByRef(normalized);
     }
     return union;
   }
@@ -680,8 +684,12 @@ const canonicalizeTypeNode = (
       if (field.type) field.type = canonicalTypeRef(ctx, field.type);
       if (field.typeExpr) canonicalizeExpr(ctx, field.typeExpr);
     });
-    obj.implementations = dedupeImplementations(obj.implementations);
-    obj.implementations?.forEach((impl) => canonicalizeExpr(ctx, impl));
+    const dedupedImplementations =
+      dedupeImplementations(obj.implementations) ??
+      obj.implementations ??
+      [];
+    obj.implementations = dedupedImplementations;
+    obj.implementations.forEach((impl) => canonicalizeExpr(ctx, impl));
     if (obj.genericParent) {
       attachInstanceToParent(ctx, obj);
     }
@@ -706,8 +714,12 @@ const canonicalizeTypeNode = (
         .filter((arg): arg is Type => !!arg);
     }
     trait.methods.toArray().forEach((method) => canonicalizeExpr(ctx, method));
-    trait.implementations = dedupeImplementations(trait.implementations);
-    trait.implementations?.forEach((impl) => canonicalizeExpr(ctx, impl));
+    const dedupedTraitImplementations =
+      dedupeImplementations(trait.implementations) ??
+      trait.implementations ??
+      [];
+    trait.implementations = dedupedTraitImplementations;
+    trait.implementations.forEach((impl) => canonicalizeExpr(ctx, impl));
     if (trait.genericInstances?.length) {
       trait.genericInstances = dedupeTraitInstances(
         ctx,

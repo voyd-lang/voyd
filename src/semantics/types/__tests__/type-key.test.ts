@@ -34,7 +34,11 @@ describe("typeKey", () => {
   test("distinguishes recursive aliases when structure diverges", () => {
     const recType = createRecursiveUnion("RecType");
     const msgPack = createRecursiveUnion("MsgPack");
-    msgPack.union.types.push(PrimitiveType.from("bool"));
+    const boolWrapper = new ObjectType({
+      name: Identifier.from("BoolWrapper"),
+      value: [],
+    });
+    msgPack.union.types.push(boolWrapper);
 
     expect(typeKey(recType.alias)).not.toBe(typeKey(msgPack.alias));
     expect(typeKey(recType.union)).not.toBe(typeKey(msgPack.union));

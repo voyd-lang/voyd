@@ -2,11 +2,7 @@ import { Call } from "../../syntax-objects/call.js";
 import { Expr } from "../../syntax-objects/expr.js";
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
-import {
-  ObjectType,
-  TypeAlias,
-  voydBaseObject,
-} from "../../syntax-objects/types.js";
+import { ObjectType, Type, TypeAlias, voydBaseObject } from "../../syntax-objects/types.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { getExprType } from "./get-expr-type.js";
 import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";

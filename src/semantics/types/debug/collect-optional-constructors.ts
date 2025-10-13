@@ -125,7 +125,6 @@ export const collectOptionalConstructors = (
   const visitParameter = (parameter: Parameter): void => {
     visitType(parameter.type);
     visitType(parameter.originalType);
-    visitType(parameter.inferredType);
     if (parameter.typeExpr) visitExpr(parameter.typeExpr);
   };
 
