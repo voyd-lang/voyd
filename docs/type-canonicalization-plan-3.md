@@ -45,7 +45,12 @@ We stay entirely within semantics. The workflow is:
   - Clear outdated `binaryenType` fields on replaced objects to force consistent rebuilds.
   - When clearing caches, preserve the canonical instance’s `binaryenType`/`originalType` that Phase 2 already migrated—only wipe the stale copies on deprecated objects.
   - Ensure optional constructor instantiations reference the same canonical object as their union arm (no per-call clones).
-- Add a semantic integration test that validates the canonical AST only contains a single `Some`/`None` instance id even across nested generics and map literals.
+  - Add a semantic integration test that validates the canonical AST only contains a single `Some`/`None` instance id even across nested generics and map literals.
+
+#### Plan 4 Phase 2 Addendum – Coverage Closure
+- `canonicalize-resolved-types` now explicitly rewrites type references carried by `Fn.genericInstances`, `Implementation.methods`, trait method lists, and cached call handles (`expectedType`, `parameterFnType`, and `inferredElemType`).
+- A new debug helper, `assertCanonicalTypeRef`, now fails fast (under `CANON_DEBUG`) when a lookup fails to return the canonical instance, giving us a quick signal when new surfaces escape the pass.
+- Unit coverage (`canonicalize-resolved-types.test.ts`) constructs representative functions, trait tables, and calls to assert identity convergence across these newly audited surfaces.
 
 ### Phase 4 – Runtime Revalidation
 - Re-enable the skipped assertions in:

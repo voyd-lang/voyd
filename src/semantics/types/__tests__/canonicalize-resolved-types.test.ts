@@ -3,7 +3,17 @@ import { VoydModule } from "../../../syntax-objects/module.js";
 import { Fn } from "../../../syntax-objects/fn.js";
 import { Block } from "../../../syntax-objects/block.js";
 import { Identifier } from "../../../syntax-objects/index.js";
-import { UnionType, ObjectType, Type, TypeAlias } from "../../../syntax-objects/types.js";
+import {
+  UnionType,
+  ObjectType,
+  Type,
+  TypeAlias,
+  FnType,
+} from "../../../syntax-objects/types.js";
+import { Call } from "../../../syntax-objects/call.js";
+import { List } from "../../../syntax-objects/list.js";
+import { Implementation } from "../../../syntax-objects/implementation.js";
+import { Closure } from "../../../syntax-objects/closure.js";
 import { TraitType } from "../../../syntax-objects/types/trait.js";
 import { canonicalizeResolvedTypes } from "../canonicalize-resolved-types.js";
 import { CanonicalTypeTable } from "../canonical-type-table.js";
@@ -511,4 +521,85 @@ describe("canonicalizeResolvedTypes", () => {
     expect(mapField.binaryenSetterType).toBe(83);
     expect(canonicalMap.binaryenType).toBe(97);
   });
+
+  test(
+    "canonicalizes fn instances, impl methods, trait tables, and call caches",
+    () => {
+      const recPrimary = createRecursiveUnion("RecPrimary");
+      const recClone = createRecursiveUnion("RecPrimaryClone");
+
+      const fnBase = createFnWithReturn("build", recPrimary.alias);
+      const specialized = createFnWithReturn("buildClone", recClone.alias);
+      specialized.inferredReturnType = recClone.alias;
+      specialized.annotatedReturnType = recClone.alias;
+      fnBase.registerGenericInstance(specialized);
+
+      const closure = new Closure({
+        body: new Block({ body: [] }),
+      });
+      closure.returnType = recClone.alias;
+      closure.annotatedReturnType = recClone.alias;
+      const closureFnType = new FnType({
+        name: Identifier.from("closureType"),
+        parameters: [],
+        returnType: recClone.alias,
+      });
+      closure.setAttribute("parameterFnType", closureFnType);
+
+      const call = new Call({
+        fnName: Identifier.from("Map"),
+        args: new List({ value: [closure] }),
+        fn: recClone.mapInstance,
+        type: recClone.mapInstance,
+      });
+      call.setAttribute("expectedType", recClone.union);
+
+      fnBase.body = new Block({ body: [closure, call] });
+
+      const traitMethod = createFnWithReturn("iterate", recClone.alias);
+      const trait = new TraitType({
+        name: Identifier.from("Iterable"),
+        methods: [traitMethod],
+        typeParameters: [Identifier.from("T")],
+      });
+      trait.appliedTypeArgs = [recClone.alias];
+
+      const implMethod = createFnWithReturn("iterateImpl", recClone.alias);
+      const impl = new Implementation({
+        typeParams: [],
+        targetTypeExpr: Identifier.from("Target"),
+        body: new Block({ body: [] }),
+        traitExpr: trait,
+      });
+      impl.trait = trait;
+      impl.targetType = recClone.mapInstance;
+      impl.registerMethod(implMethod);
+
+      const module = new VoydModule({
+        name: Identifier.from("Coverage"),
+        value: [recPrimary.alias, recClone.alias, fnBase, trait, impl],
+      });
+
+      canonicalizeResolvedTypes(module);
+
+      const canonicalUnion = fnBase.returnType as UnionType;
+      const canonicalMap = findNominal(canonicalUnion, "Map")!;
+      const expectedType = call.getAttribute("expectedType") as UnionType;
+      const closureAttr = closure.getAttribute("parameterFnType") as FnType;
+
+      expect(specialized.returnType).toBe(canonicalUnion);
+      expect(specialized.inferredReturnType).toBe(canonicalUnion);
+      expect(specialized.annotatedReturnType).toBe(canonicalUnion);
+      expect(closure.returnType).toBe(canonicalUnion);
+      expect(closure.annotatedReturnType).toBe(canonicalUnion);
+      expect(closureAttr.returnType).toBe(canonicalUnion);
+      expect(expectedType).toBe(canonicalUnion);
+      expect(call.type).toBe(canonicalMap);
+      expect(call.fn).toBe(canonicalMap);
+      expect(traitMethod.returnType).toBe(canonicalUnion);
+      expect(implMethod.returnType).toBe(canonicalUnion);
+      expect(impl.targetType).toBe(canonicalMap);
+      expect(trait.appliedTypeArgs?.[0]).toBe(canonicalUnion);
+    }
+  );
 });

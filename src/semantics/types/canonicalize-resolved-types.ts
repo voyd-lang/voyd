@@ -30,6 +30,7 @@ import {
   type CanonicalTypeDedupeEvent,
 } from "./canonical-type-table.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
+import { assertCanonicalTypeRef } from "./debug/assert-canonical-type-ref.js";
 
 type CanonicalizeCtx = {
   table: CanonicalTypeTable;
@@ -414,6 +415,9 @@ const canonicalTypeRef = (
       clearTypeCaches(type, canonicalRef);
     }
     if (canonicalRef) {
+      if (CANON_DEBUG && type) {
+        assertCanonicalTypeRef(ctx.table, type, canonicalRef, "canonicalTypeRef");
+      }
       if (CANON_DEBUG && (canonicalRef as ObjectType).isObjectType?.()) {
         const obj = canonicalRef as ObjectType;
         const parent = obj.genericParent as ObjectType | undefined;
@@ -496,6 +500,13 @@ const canonicalizeExpr = (ctx: CanonicalizeCtx, expr?: Expr): void => {
   if (expr.isCall()) {
     const type = canonicalTypeRef(ctx, expr.type);
     expr.type = type;
+    const expected = expr.getAttribute?.("expectedType") as Type | undefined;
+    if (expected) {
+      const canonicalExpected = canonicalTypeRef(ctx, expected);
+      if (canonicalExpected) {
+        expr.setAttribute("expectedType", canonicalExpected);
+      }
+    }
     canonicalizeExpr(ctx, expr.fnName);
     canonicalizeList(ctx, expr.args);
     canonicalizeList(ctx, expr.typeArgs ?? undefined);
@@ -515,6 +526,13 @@ const canonicalizeExpr = (ctx: CanonicalizeCtx, expr?: Expr): void => {
   }
 
   if (expr.isArrayLiteral()) {
+    const inferred = expr.getAttribute?.("inferredElemType") as Type | undefined;
+    if (inferred) {
+      const canonicalInferred = canonicalTypeRef(ctx, inferred);
+      if (canonicalInferred) {
+        expr.setAttribute("inferredElemType", canonicalInferred);
+      }
+    }
     expr.elements.forEach((element) => canonicalizeExpr(ctx, element));
     return;
   }
@@ -636,7 +654,30 @@ const canonicalizeFn = (ctx: CanonicalizeCtx, fn: Fn): void => {
   fn.typeParameters?.forEach((param) => canonicalizeExpr(ctx, param));
 
   const instances = fn.genericInstances;
-  if (instances) instances.forEach((inst) => canonicalizeExpr(ctx, inst));
+  if (instances) {
+    instances.forEach((inst) => {
+      canonicalizeExpr(ctx, inst);
+      const returnType = inst.returnType;
+      if (returnType) {
+        const canonicalReturn = canonicalTypeRef(ctx, returnType);
+        if (canonicalReturn) {
+          inst.returnType = canonicalReturn;
+        }
+      }
+      if (inst.inferredReturnType) {
+        inst.inferredReturnType = canonicalTypeRef(
+          ctx,
+          inst.inferredReturnType
+        );
+      }
+      if (inst.annotatedReturnType) {
+        inst.annotatedReturnType = canonicalTypeRef(
+          ctx,
+          inst.annotatedReturnType
+        );
+      }
+    });
+  }
 
   if (fn.body) canonicalizeExpr(ctx, fn.body);
   if (fn.returnTypeExpr) canonicalizeExpr(ctx, fn.returnTypeExpr);
@@ -655,6 +696,16 @@ const canonicalizeClosure = (ctx: CanonicalizeCtx, closure: Closure): void => {
       ctx,
       closure.annotatedReturnType
     );
+
+  const parameterFnType = closure.getAttribute?.(
+    "parameterFnType"
+  ) as Type | undefined;
+  if (parameterFnType) {
+    const canonicalFnType = canonicalTypeRef(ctx, parameterFnType);
+    if (canonicalFnType) {
+      closure.setAttribute("parameterFnType", canonicalFnType);
+    }
+  }
 
   closure.parameters.forEach((param) => canonicalizeParameter(ctx, param));
   closure.variables.forEach((variable) => canonicalizeVariable(ctx, variable));

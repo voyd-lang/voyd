@@ -81,3 +81,31 @@
 - Optional constructor counts: 15 `Some`, 1 `None`; 5 `Some` instances remain orphaned from the parent list.
 - Duplicate Optional helpers: 14 extra `iterate#…` exports; wasm function sets still diverge (715 vs. 270 functions).
 - Instrumentation available: set `CANON_DEBUG=1` to surface missing parent/child registrations during canonicalization.
+
+## Phase 2 – Canonical Reference Coverage Audit (Plan 4)
+
+### Summary
+- Extended `canonicalize-resolved-types` so function generic instances, implementation method tables, trait method lists, and cached call metadata (`expectedType`, `parameterFnType`, `inferredElemType`) all resolve through `canonicalTypeRef`.
+- Added `assertCanonicalTypeRef` under `CANON_DEBUG` to fail fast when a lookup does not resolve to the canonical node; no violations fired during the current run.
+- New unit coverage exercises the added surfaces (function generics, closure caches, trait/impl methods) to ensure their identities converge on the canonical instances.
+
+### Validation
+- `npx vitest run src/semantics/types/__tests__/canonicalize-resolved-types.test.ts`
+- `npx vitest run src/__tests__/map-recursive-union.e2e.test.ts` (still failing at the known optional regression, but no new errors surfaced).
+
+### Coverage Map
+| Field / Cache | Canonicalization Hook |
+| --- | --- |
+| `Fn.genericInstances[*].returnType` / `inferredReturnType` / `annotatedReturnType` | `canonicalizeFn` iterates instances and re-applies `canonicalTypeRef` |
+| `Implementation.methods` | `canonicalizeImplementation` walks each method function |
+| `TraitType.methods` | `canonicalizeTypeNode` for trait nodes |
+| `Call.type` / `Call.fn` / `Call.expectedType` attribute | `canonicalizeExpr` call branch |
+| `Closure.parameterFnType` attribute | `canonicalizeClosure` |
+| `ArrayLiteral.inferredElemType` attribute | `canonicalizeExpr` array literal branch |
+
+### Open Questions
+- `expectedType` attributes set on non-call expressions remain rare; continue to watch for other attribute keys that may cache types outside the audited set.
+
+### Handoff Notes
+- Remaining uncertainty: cached attributes attached by downstream passes (`parameterFnType` on non-closure expressions, potential Binaryen caches) still merit a follow-up audit while reconciling generic instance metadata in Phase 3.
+- The coverage map above can seed a regression checklist; any new fields added to the AST should be appended here and routed through `canonicalTypeRef`.
