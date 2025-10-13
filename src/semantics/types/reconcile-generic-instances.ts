@@ -1,5 +1,16 @@
 import { ObjectType, Type } from "../../syntax-objects/types.js";
 
+const CANON_DEBUG = Boolean(process.env.CANON_DEBUG);
+
+const debugTypeId = (type: Type | undefined): string => {
+  if (!type) return "∅";
+  const anyType = type as any;
+  if (typeof anyType.id === "string" && anyType.id.length) return anyType.id;
+  const name = anyType.name?.toString?.();
+  if (typeof name === "string" && name.length) return name;
+  return type.constructor?.name ?? "Type";
+};
+
 export type ReconcileGenericInstancesOptions = {
   canonicalizeType?: (type: Type | undefined) => Type | undefined;
   resolveCanonicalInstance?: (instance: ObjectType) => ObjectType | undefined;
@@ -27,24 +38,69 @@ const mergeInstanceMetadata = (
     target.typesResolved = true;
   }
 
-  if (target.binaryenType === undefined && source.binaryenType !== undefined) {
-    target.binaryenType = source.binaryenType;
+  if (source.binaryenType !== undefined) {
+    if (target.binaryenType === undefined) {
+      target.binaryenType = source.binaryenType;
+    } else if (
+      target.binaryenType !== source.binaryenType &&
+      CANON_DEBUG
+    ) {
+      console.warn(
+        "[CANON_DEBUG] conflicting binaryenType while merging generic instances",
+        {
+          canonicalType: debugTypeId(target),
+          incomingType: debugTypeId(source),
+          canonicalBinaryenType: target.binaryenType,
+          incomingBinaryenType: source.binaryenType,
+        }
+      );
+    }
   }
 
+  const getAttribute = (candidate: ObjectType, key: string): unknown =>
+    typeof candidate.getAttribute === "function"
+      ? candidate.getAttribute(key)
+      : undefined;
+  const setAttribute = (candidate: ObjectType, key: string, value: unknown): void => {
+    if (typeof candidate.setAttribute === "function") {
+      candidate.setAttribute(key, value);
+    }
+  };
+
   const sourceBinaryenAttr = source.getAttribute?.("binaryenType");
-  if (
-    target.getAttribute?.("binaryenType") === undefined &&
-    sourceBinaryenAttr !== undefined
-  ) {
-    target.setAttribute?.("binaryenType", sourceBinaryenAttr);
+  if (sourceBinaryenAttr !== undefined) {
+    const targetBinaryenAttr = getAttribute(target, "binaryenType");
+    if (targetBinaryenAttr === undefined) {
+      setAttribute(target, "binaryenType", sourceBinaryenAttr);
+    } else if (targetBinaryenAttr !== sourceBinaryenAttr && CANON_DEBUG) {
+      console.warn(
+        "[CANON_DEBUG] conflicting binaryenType attribute while merging generic instances",
+        {
+          canonicalType: debugTypeId(target),
+          incomingType: debugTypeId(source),
+          canonicalValue: targetBinaryenAttr,
+          incomingValue: sourceBinaryenAttr,
+        }
+      );
+    }
   }
 
   const sourceOriginalAttr = source.getAttribute?.("originalType");
-  if (
-    target.getAttribute?.("originalType") === undefined &&
-    sourceOriginalAttr !== undefined
-  ) {
-    target.setAttribute?.("originalType", sourceOriginalAttr);
+  if (sourceOriginalAttr !== undefined) {
+    const targetOriginalAttr = getAttribute(target, "originalType");
+    if (targetOriginalAttr === undefined) {
+      setAttribute(target, "originalType", sourceOriginalAttr);
+    } else if (targetOriginalAttr !== sourceOriginalAttr && CANON_DEBUG) {
+      console.warn(
+        "[CANON_DEBUG] conflicting originalType attribute while merging generic instances",
+        {
+          canonicalType: debugTypeId(target),
+          incomingType: debugTypeId(source),
+          canonicalValue: targetOriginalAttr,
+          incomingValue: sourceOriginalAttr,
+        }
+      );
+    }
   }
 };
 

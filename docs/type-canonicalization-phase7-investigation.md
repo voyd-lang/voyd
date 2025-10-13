@@ -94,14 +94,14 @@
 - `npx vitest run src/__tests__/map-recursive-union.e2e.test.ts` (still failing at the known optional regression, but no new errors surfaced).
 
 ### Coverage Map
-| Field / Cache | Canonicalization Hook |
-| --- | --- |
+| Field / Cache                                                                      | Canonicalization Hook                                                 |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `Fn.genericInstances[*].returnType` / `inferredReturnType` / `annotatedReturnType` | `canonicalizeFn` iterates instances and re-applies `canonicalTypeRef` |
-| `Implementation.methods` | `canonicalizeImplementation` walks each method function |
-| `TraitType.methods` | `canonicalizeTypeNode` for trait nodes |
-| `Call.type` / `Call.fn` / `Call.expectedType` attribute | `canonicalizeExpr` call branch |
-| `Closure.parameterFnType` attribute | `canonicalizeClosure` |
-| `ArrayLiteral.inferredElemType` attribute | `canonicalizeExpr` array literal branch |
+| `Implementation.methods`                                                           | `canonicalizeImplementation` walks each method function               |
+| `TraitType.methods`                                                                | `canonicalizeTypeNode` for trait nodes                                |
+| `Call.type` / `Call.fn` / `Call.expectedType` attribute                            | `canonicalizeExpr` call branch                                        |
+| `Closure.parameterFnType` attribute                                                | `canonicalizeClosure`                                                 |
+| `ArrayLiteral.inferredElemType` attribute                                          | `canonicalizeExpr` array literal branch                               |
 
 ### Open Questions
 - `expectedType` attributes set on non-call expressions remain rare; continue to watch for other attribute keys that may cache types outside the audited set.
@@ -156,7 +156,37 @@
 - `CANON_DEBUG=1 npx tsx scripts/inspect-optional-constructors.ts` completes without `assertCanonicalTypeRef` failures. Orphan diagnostics still log (by design) while the command succeeds.
 - `npx vitest run src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts`
 
+## Phase 4 – Metadata Status (2025-10-13)
+- Canonical metadata merges now move Binaryen caches (`binaryenType`, `originalType`) before clearing aliases. `CanonicalTypeTable` exposes `#transferTypeCaches` and `#clearTypeCaches`, so every reuse path lifts caches onto the canonical instance and wipes the loser immediately afterwards.
+- `reconcile-generic-instances` and `canonicalize-resolved-types` respect the new ownership contract: if both sides already hold caches we keep the canonical values and log conflicts behind `CANON_DEBUG`.
+- New guardrails:
+  - Non-canonical instances no longer retain `binaryenType`; both the table and the pass clear fields and attributes once the alias is registered.
+  - Under `CANON_DEBUG`, conflicting cache merges surface warnings with the participating type ids.
+- Added wasm regression coverage (`map-recursive-union.e2e.test.ts`) that parses struct definitions and verifies each Optional payload shape (`i32`, object/union, array, string) corresponds to a single wasm heap type; it also checks the generated constructor calls stay within that set.
+- Validation snapshot (`npx tsx scripts/inspect-optional-constructors.ts`):
+
+  | Measurement                         | Before Phase 4           | After Phase 4           |
+  | ----------------------------------- | ------------------------ | ----------------------- |
+  | Canonical AST `Some` constructors   | 12                       | 12                      |
+  | Canonical AST `None` constructors   | 1                        | 1                       |
+  | Wasm `struct.new $Some#…` totals    | 36 / 11 / 1 (per id)     | 36 / 11 / 1 (unchanged) |
+  | Wasm `struct.new $None#…` totals    | 71                       | 71                      |
+  | Optional struct definitions in wasm | 4× `Some#…`, 1× `None#…` | unchanged               |
+
+  The cache work prevents freshly-created aliases from reintroducing extra heap ids, but existing optional permutations still materialise distinct Binaryen structs because their field payload types differ. We need a follow-up reconciliation pass to funnel those generics through the canonical heap id.
+
+- Binaryen cache ownership rules (post Phase 4):
+  1. Only canonical `Type` instances may carry `binaryenType`/`originalType`.
+  2. When deduping, move caches onto the canonical node, warn (under `CANON_DEBUG`) if both sides disagree, then wipe the loser.
+  3. `clearTypeCaches` is idempotent and safe to call whenever an alias is registered; callers do not need to guard on structural type kind beyond object/fixed-array.
+- Optional struct audit: parsing the emitted wasm struct definitions shows four `Some` payload variants remain, but each is structurally distinct:
+  - `Some#144032#0` → `value: i32`
+  - `Some#144032#13` → `value: (ref null $Object#16)` (map/union payloads)
+  - `Some#144032#14` → `value: (ref null $Array#…)`
+  - `Some#144032#15` → `value: (ref null $String#…)`
+  `None#…` appears once with a reused heap id. The e2e guard now ensures we keep exactly one struct per payload shape (rather than erroneously forcing a single Optional struct).
+
 ### Remaining Risk / Next Focus
-- Binaryen still emits four Optional struct definitions (`Some#…#0/#13/#14/#15`, `None#…#0`) even though the canonical AST now holds a single set of registered instances. Follow-on work in Phase 4 should reuse the canonical heap ids once metadata reconciliation propagates caches.
-- Optional constructor unions normalise correctly, but we still surface multiple wasm `struct.new` counts (36/11/1). Phase 4 needs to route Binaryen cache transfer before re-running the e2e guard.
-- The orphan snapshot metadata is proving useful; consider keeping it (behind `CANON_DEBUG`) once Phase 4 stabilises so future regressions can short-circuit earlier in the pipeline.
+- Optional generics still compile to four distinct wasm struct definitions (`Some#…#0/#13/#14/#15`) plus `None#…#0`. Each maps to a different payload family (i32, base object/union, array, string), so the follow-up work should focus on coalescing only truly identical payloads rather than forcing a single Optional heap id.
+- Wasm constructor counts remain inflated (36/11/1 `Some`, 71 `None`). The new e2e guard fails as expected; once cache normalisation propagates through codegen the test should flip green.
+- Orphan snapshot metadata continues to provide useful diagnostics; keep it (gated by `CANON_DEBUG`) until we can prove the optional sweep is exhaustive.

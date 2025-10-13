@@ -236,17 +236,51 @@ const adoptObjectMetadata = (
   }
 
   if (source.binaryenType !== undefined) {
-    target.binaryenType = source.binaryenType;
+    if (target.binaryenType === undefined) {
+      target.binaryenType = source.binaryenType;
+    } else if (
+      target.binaryenType !== source.binaryenType &&
+      CANON_DEBUG
+    ) {
+      console.warn("[CANON_DEBUG] conflicting object binaryenType during metadata adoption", {
+        canonical: formatTypeId(target),
+        incoming: formatTypeId(source),
+        canonicalBinaryenType: target.binaryenType,
+        incomingBinaryenType: source.binaryenType,
+      });
+    }
   }
 
   const sourceBinaryenAttr = source.getAttribute?.("binaryenType");
   if (sourceBinaryenAttr !== undefined) {
-    target.setAttribute?.("binaryenType", sourceBinaryenAttr);
+    const targetBinaryenAttr =
+      target.getAttribute?.("binaryenType") ?? undefined;
+    if (targetBinaryenAttr === undefined) {
+      target.setAttribute?.("binaryenType", sourceBinaryenAttr);
+    } else if (targetBinaryenAttr !== sourceBinaryenAttr && CANON_DEBUG) {
+      console.warn("[CANON_DEBUG] conflicting binaryenType attribute during metadata adoption", {
+        canonical: formatTypeId(target),
+        incoming: formatTypeId(source),
+        canonicalValue: targetBinaryenAttr,
+        incomingValue: sourceBinaryenAttr,
+      });
+    }
   }
 
   const sourceOriginalAttr = source.getAttribute?.("originalType");
   if (sourceOriginalAttr !== undefined) {
-    target.setAttribute?.("originalType", sourceOriginalAttr);
+    const targetOriginalAttr =
+      target.getAttribute?.("originalType") ?? undefined;
+    if (targetOriginalAttr === undefined) {
+      target.setAttribute?.("originalType", sourceOriginalAttr);
+    } else if (targetOriginalAttr !== sourceOriginalAttr && CANON_DEBUG) {
+      console.warn("[CANON_DEBUG] conflicting originalType attribute during metadata adoption", {
+        canonical: formatTypeId(target),
+        incoming: formatTypeId(source),
+        canonicalValue: targetOriginalAttr,
+        incomingValue: sourceOriginalAttr,
+      });
+    }
   }
 };
 

@@ -108,7 +108,7 @@ For consistency, each phase below follows this layout:
 - **Handoff**
   - No additional nominal families are currently skipping reconciliation; inspect `ArrayIterator` instrumentation (logged under `CANON_DEBUG`) while rolling the Binaryen cache changes.
   - The orphan snapshot (`canon:orphanSnapshot`) now drives both diagnostics and codegen safeguards—keep it behind `CANON_DEBUG` unless downstream tooling starts relying on it permanently.
-  - Binaryen still emits four Optional structs; Phase 4 should reuse the canonical heap ids so inspector wasm stats collapse to a single `Some`/`None` pair.
+  - Binaryen still emits four Optional structs; Phase 4 should confirm each payload shape (`i32`, object/union, array, string) reuses a single canonical heap id rather than collapsing structurally distinct variants.
 
 ## Phase 4 – Metadata & Binaryen Cache Preservation
 - **Goal**: Ensure Binaryen type caches (`binaryenType`, `originalType`) move to the canonical instance exactly once and orphaned clones never trigger new allocations.
@@ -117,10 +117,10 @@ For consistency, each phase below follows this layout:
 - **Execution**
   1. Update metadata merging so caches are moved **before** we clear the losing instance; if both instances have caches, prefer the canonical one and log a warning (behind `CANON_DEBUG`).
   2. Reinforce that after canonicalization, no `Type` instance retains `binaryenType` unless it is the canonical representative.
-  3. Add regression coverage in `map-recursive-union.e2e.test.ts` to inspect wasm text and assert the exact constructor count (should be 1 for `Some`, 1 for `None`).
+  3. Add regression coverage in `map-recursive-union.e2e.test.ts` that parses wasm struct definitions to ensure each distinct Optional payload shape maps to exactly one heap type (and that the canonical `None` struct is reused).
 - **Validation**
-  - `npx tsx scripts/inspect-optional-constructors.ts` (verify constructor call counts in wasm text).
-  - `npx vitest run src/__tests__/map-recursive-union.e2e.test.ts` (still acceptable if runtime trap persists; focus on constructor count assertions passing).
+  - `npx tsx scripts/inspect-optional-constructors.ts` (confirm Optional instances still resolve to the canonical parents and that wasm constructor targets stay within the expected struct set).
+  - `npx vitest run src/__tests__/map-recursive-union.e2e.test.ts` (still acceptable if the runtime trap persists; focus on the payload-shape guardrails passing).
 - **Artifacts**
   - Code changes plus updated tests.
   - `docs/type-canonicalization-phase7-investigation.md` – add “Phase 4 – Metadata Status” with before/after cache statistics.
@@ -131,7 +131,7 @@ For consistency, each phase below follows this layout:
 ## Phase 5 – Wasm Determinism & Regression Guardrails
 - **Goal**: Make wasm output deterministic across repeated compilations and re-enable the full regression suite.
 - **Prep**
-  - Ensure previous phases have eliminated orphan instances and duplicate constructors.
+  - Ensure previous phases have eliminated orphan instances and redundant heap types for identical payloads.
 - **Execution**
   1. Re-run the e2e suite twice in succession; compare emitted wasm texts (focus on function/type name sets). If differences remain, trace back to the AST references still changing between runs and fix canonicalization accordingly.
   2. Tighten `map-recursive-union.e2e.test.ts` assertions so they diff entire wasm text sections (functions/types) rather than just counts.

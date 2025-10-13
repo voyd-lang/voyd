@@ -16,6 +16,17 @@ import { Implementation } from "../../syntax-objects/implementation.js";
 import { Fn } from "../../syntax-objects/fn.js";
 import { reconcileGenericInstances } from "./reconcile-generic-instances.js";
 
+const CANON_DEBUG = Boolean(process.env.CANON_DEBUG);
+
+const debugTypeId = (type: Type | undefined): string => {
+  if (!type) return "∅";
+  const anyType = type as any;
+  if (typeof anyType.id === "string" && anyType.id.length) return anyType.id;
+  const name = anyType.name?.toString?.();
+  if (typeof name === "string" && name.length) return name;
+  return type.constructor?.name ?? "Type";
+};
+
 export type CanonicalTypeDedupeEvent = {
   fingerprint: string;
   canonical: Type;
@@ -254,6 +265,9 @@ export class CanonicalTypeTable {
     if (existing) {
       this.#assertCanonicalReady(existing, "reuse");
       this.#copyMetadata(existing, type);
+      if (existing !== type) {
+        this.#clearTypeCaches(type);
+      }
       if ((existing as UnionType).isUnionType?.() && (type as UnionType).isUnionType?.()) {
         this.#repointAliasToCanonical(type as UnionType, existing as UnionType);
       }
@@ -407,6 +421,9 @@ export class CanonicalTypeTable {
   }
 
   #copyMetadata(target: Type, source: Type): void {
+    if (target === source) return;
+    this.#transferTypeCaches(target, source);
+
     if ((target as ObjectType).isObjectType?.() && (source as ObjectType).isObjectType?.()) {
       this.#mergeObjectMetadata(target as ObjectType, source as ObjectType);
       return;
@@ -414,6 +431,96 @@ export class CanonicalTypeTable {
 
     if ((target as TraitType).isTraitType?.() && (source as TraitType).isTraitType?.()) {
       this.#mergeTraitMetadata(target as TraitType, source as TraitType);
+    }
+  }
+
+  #transferTypeCaches(target: Type, source: Type): void {
+    this.#transferAttributeCache(target, source, "binaryenType");
+    this.#transferAttributeCache(target, source, "originalType");
+
+    const targetObject = (target as ObjectType).isObjectType?.()
+      ? (target as ObjectType)
+      : undefined;
+    const sourceObject = (source as ObjectType).isObjectType?.()
+      ? (source as ObjectType)
+      : undefined;
+    if (targetObject && sourceObject) {
+      this.#transferBinaryenField(targetObject, sourceObject, target, source);
+      return;
+    }
+
+    const targetArray = (target as FixedArrayType).isFixedArrayType?.()
+      ? (target as FixedArrayType)
+      : undefined;
+    const sourceArray = (source as FixedArrayType).isFixedArrayType?.()
+      ? (source as FixedArrayType)
+      : undefined;
+    if (targetArray && sourceArray) {
+      this.#transferBinaryenField(targetArray, sourceArray, target, source);
+    }
+  }
+
+  #transferAttributeCache(target: Type, source: Type, key: string): void {
+    const getAttribute = (candidate: Type): unknown =>
+      typeof candidate.getAttribute === "function"
+        ? candidate.getAttribute(key)
+        : undefined;
+    const setAttribute = (candidate: Type, value: unknown): void => {
+      if (typeof candidate.setAttribute === "function") {
+        candidate.setAttribute(key, value);
+      }
+    };
+
+    const sourceValue = getAttribute(source);
+    if (sourceValue === undefined) return;
+    const targetValue = getAttribute(target);
+    if (targetValue === undefined) {
+      setAttribute(target, sourceValue);
+      return;
+    }
+    if (targetValue !== sourceValue && CANON_DEBUG) {
+      console.warn("[CANON_DEBUG] conflicting cache attribute during canonicalization", {
+        attribute: key,
+        canonical: debugTypeId(target),
+        incoming: debugTypeId(source),
+        canonicalValue: targetValue,
+        incomingValue: sourceValue,
+      });
+    }
+  }
+
+  #transferBinaryenField(
+    target: { binaryenType?: number },
+    source: { binaryenType?: number },
+    targetType: Type,
+    sourceType: Type
+  ): void {
+    const sourceBinaryen = source.binaryenType;
+    if (sourceBinaryen === undefined) return;
+    if (target.binaryenType === undefined) {
+      target.binaryenType = sourceBinaryen;
+      return;
+    }
+    if (target.binaryenType !== sourceBinaryen && CANON_DEBUG) {
+      console.warn("[CANON_DEBUG] conflicting binaryenType during canonicalization", {
+        canonicalBinaryenType: target.binaryenType,
+        incomingBinaryenType: sourceBinaryen,
+        canonicalType: debugTypeId(targetType),
+        incomingType: debugTypeId(sourceType),
+      });
+    }
+  }
+
+  #clearTypeCaches(type: Type): void {
+    type.setAttribute?.("binaryenType", undefined);
+    type.setAttribute?.("originalType", undefined);
+
+    if ((type as ObjectType).isObjectType?.()) {
+      (type as ObjectType).binaryenType = undefined;
+    }
+
+    if ((type as FixedArrayType).isFixedArrayType?.()) {
+      (type as FixedArrayType).binaryenType = undefined;
     }
   }
 
@@ -496,13 +603,6 @@ export class CanonicalTypeTable {
 
     this.#mergeObjectFields(target, source);
 
-    if (
-      source.binaryenType !== undefined &&
-      target.binaryenType === undefined
-    ) {
-      target.binaryenType = source.binaryenType;
-    }
-
     if (source.appliedTypeArgs?.length) {
       const merged = target.appliedTypeArgs ? [...target.appliedTypeArgs] : [];
       source.appliedTypeArgs.forEach((arg, index) => {
@@ -542,9 +642,7 @@ export class CanonicalTypeTable {
         if (orphan === canonical) return;
         orphan.genericParent = canonical.genericParent ?? target;
         orphan.genericInstances = [];
-        orphan.binaryenType = undefined;
-        orphan.setAttribute?.("binaryenType", undefined);
-        orphan.setAttribute?.("originalType", undefined);
+        this.#clearTypeCaches(orphan);
       });
     } else if (target.genericInstances) {
       target.genericInstances = [];

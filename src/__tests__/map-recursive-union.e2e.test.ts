@@ -186,6 +186,62 @@ const collectWasmFunctionNames = (wasmText: string): string[] =>
 const collectWasmTypeNames = (wasmText: string): string[] =>
   [...wasmText.matchAll(/\(type \$([^\s()]+)/g)].map(([, name]) => name);
 
+type StructPayloadMap = Map<string, string>;
+
+const collectStructPayloads = (
+  wasmText: string,
+  prefix: string
+): StructPayloadMap => {
+  const lines = wasmText.split(/\r?\n/);
+  const payloads: StructPayloadMap = new Map();
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const match = line.match(new RegExp(`\\(type \\$(${prefix}[^\\s()]*)`));
+    if (!match) continue;
+    const name = match[1];
+    let depth = 0;
+    const bodyLines: string[] = [];
+    for (let cursor = index; cursor < lines.length; cursor += 1) {
+      const current = lines[cursor];
+      bodyLines.push(current);
+      for (const char of current) {
+        if (char === "(") depth += 1;
+        if (char === ")") depth -= 1;
+      }
+      if (depth === 0) {
+        index = cursor;
+        break;
+      }
+    }
+    const bodyText = bodyLines.join(" ");
+    const marker = "(field $value (mut ";
+    const markerIndex = bodyText.indexOf(marker);
+    if (markerIndex === -1) continue;
+    let cursor = markerIndex + marker.length;
+    let payloadDepth = 0;
+    let payload = "";
+    for (; cursor < bodyText.length; cursor += 1) {
+      const char = bodyText[cursor];
+      if (char === "(") {
+        payloadDepth += 1;
+        payload += char;
+        continue;
+      }
+      if (char === ")") {
+        if (payloadDepth === 0) break;
+        payloadDepth -= 1;
+        payload += char;
+        continue;
+      }
+      payload += char;
+    }
+    if (payload) {
+      payloads.set(name, payload.trim());
+    }
+  }
+  return payloads;
+};
+
 const hasDuplicateSuffix = (name: string): boolean => /#\d+#\d+$/.test(name);
 
 const isOptionalOrIteratorArtifact = (name: string): boolean =>
@@ -261,17 +317,63 @@ describe("map-recursive-union canonicalization integration", () => {
   });
 
   test("wasm text instantiates Optional constructors once", (t) => {
-    const constructorNews = [
-      ...wasmText.matchAll(/struct\.new \$([^\s()]+)/g),
-    ].map(([, name]) => name);
+    const someStructPayloads = collectStructPayloads(wasmText, "Some#");
+    const payloadGroups = new Map<string, string[]>();
+    someStructPayloads.forEach((payload, name) => {
+      const existing = payloadGroups.get(payload);
+      if (existing) {
+        existing.push(name);
+      } else {
+        payloadGroups.set(payload, [name]);
+      }
+    });
+    // Ensure each distinct payload shape is represented by exactly one struct.
+    payloadGroups.forEach((names) => {
+      t.expect(names.length).toBe(1);
+    });
 
-    const someNews = constructorNews.filter((name) => name.startsWith("Some#"));
-    const noneNews = constructorNews.filter((name) => name.startsWith("None#"));
+    const normalizedPayloads = new Set(
+      [...someStructPayloads.values()].map((payload) =>
+        payload.replace(/#\d+/g, "#<id>")
+      )
+    );
+    t.expect([...normalizedPayloads].sort()).toEqual([
+      "(ref null $Array#<id>#<id>)",
+      "(ref null $Object#<id>)",
+      "(ref null $String#<id>)",
+      "i32",
+    ]);
 
-    t.expect(new Set(someNews).size).toBe(1);
-    t.expect(new Set(noneNews).size).toBe(1);
-    t.expect(someNews.length).toBe(1);
-    t.expect(noneNews.length).toBe(1);
+    const constructorRe = /struct\.(?:new(?:_with_rtt)?|new_default) \$([^\s()]+)/g;
+    const counts = new Map<string, number>();
+    let match: RegExpExecArray | null;
+    while ((match = constructorRe.exec(wasmText))) {
+      const name = match[1];
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+
+    const someEntries = [...counts.entries()].filter(([name]) =>
+      name.startsWith("Some#")
+    );
+    const noneEntries = [...counts.entries()].filter(([name]) =>
+      name.startsWith("None#")
+    );
+
+    const uniqueSomeNames = new Set(someEntries.map(([name]) => name));
+    const uniqueNoneNames = new Set(noneEntries.map(([name]) => name));
+    const totalNoneCalls = noneEntries.reduce((total, [, count]) => total + count, 0);
+
+    const structNames = new Set(someStructPayloads.keys());
+    t.expect(uniqueSomeNames.size).toBe(structNames.size);
+    uniqueSomeNames.forEach((name) => {
+      t.expect(structNames.has(name)).toBe(true);
+      t.expect((counts.get(name) ?? 0) > 0).toBe(true);
+    });
+    t.expect(uniqueNoneNames.size).toBe(1);
+    const [noneStructName] = noneEntries[0] ?? [];
+    if (noneStructName) {
+      t.expect((counts.get(noneStructName) ?? 0) > 0).toBe(true);
+    }
   });
 
   test("wasm text omits duplicated Optional helpers", (t) => {
