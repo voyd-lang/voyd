@@ -19,6 +19,35 @@ const identityInstanceResolver = (
   instance: ObjectType
 ): ObjectType | undefined => instance;
 
+const mergeInstanceMetadata = (
+  target: ObjectType,
+  source: ObjectType
+): void => {
+  if (source.typesResolved === true && target.typesResolved !== true) {
+    target.typesResolved = true;
+  }
+
+  if (target.binaryenType === undefined && source.binaryenType !== undefined) {
+    target.binaryenType = source.binaryenType;
+  }
+
+  const sourceBinaryenAttr = source.getAttribute?.("binaryenType");
+  if (
+    target.getAttribute?.("binaryenType") === undefined &&
+    sourceBinaryenAttr !== undefined
+  ) {
+    target.setAttribute?.("binaryenType", sourceBinaryenAttr);
+  }
+
+  const sourceOriginalAttr = source.getAttribute?.("originalType");
+  if (
+    target.getAttribute?.("originalType") === undefined &&
+    sourceOriginalAttr !== undefined
+  ) {
+    target.setAttribute?.("originalType", sourceOriginalAttr);
+  }
+};
+
 export const reconcileGenericInstances = (
   parent: ObjectType,
   rawInstances: (ObjectType | undefined)[],
@@ -90,6 +119,7 @@ export const reconcileGenericInstances = (
     const key = keyForArgs(canonical);
     const existing = canonicalByKey.get(key);
     if (existing) {
+      mergeInstanceMetadata(existing, canonical);
       if (existing === canonical) return;
       orphans.push({ orphan: canonical, canonical: existing });
       return;

@@ -121,6 +121,29 @@ const formatTypeId = (type: ObjectType | undefined): string => {
   return type.id ?? type.name?.toString?.() ?? "<anonymous object>";
 };
 
+const adoptObjectMetadata = (
+  target: ObjectType,
+  source: ObjectType
+): void => {
+  if (source.typesResolved === true && target.typesResolved !== true) {
+    target.typesResolved = true;
+  }
+
+  if (source.binaryenType !== undefined) {
+    target.binaryenType = source.binaryenType;
+  }
+
+  const sourceBinaryenAttr = source.getAttribute?.("binaryenType");
+  if (sourceBinaryenAttr !== undefined) {
+    target.setAttribute?.("binaryenType", sourceBinaryenAttr);
+  }
+
+  const sourceOriginalAttr = source.getAttribute?.("originalType");
+  if (sourceOriginalAttr !== undefined) {
+    target.setAttribute?.("originalType", sourceOriginalAttr);
+  }
+};
+
 const debugCheckParentRegistration = (
   instance: ObjectType,
   canonicalInstance: ObjectType,
@@ -279,6 +302,7 @@ const resolveCanonicalObject = (
     }
   }
   if (candidate !== canonical) {
+    adoptObjectMetadata(canonical, candidate);
     clearTypeCaches(candidate, canonical);
   }
   return canonical;
@@ -501,49 +525,73 @@ const canonicalTypeRef = (
 ): Type | undefined => {
   const canonical = ctx.table.canonicalize(type);
   if (canonical) {
-    const canonicalRef = ctx.table.getCanonical(canonical);
-    if (type && canonicalRef) {
-      clearTypeCaches(type, canonicalRef);
+    let canonicalRef = ctx.table.getCanonical(canonical);
+    if (!canonicalRef) canonicalRef = canonical;
+    let resolvedRef: Type | undefined = canonicalRef;
+    let losingRef: Type | undefined;
+    if ((resolvedRef as ObjectType).isObjectType?.()) {
+      const obj = resolvedRef as ObjectType;
+      const canonicalInstance = findCanonicalParentInstance(ctx, obj);
+      if (canonicalInstance && canonicalInstance !== obj) {
+        losingRef = obj;
+        resolvedRef = canonicalInstance;
+      }
     }
-    if (canonicalRef) {
-      let resolvedRef = canonicalRef;
-      if ((resolvedRef as ObjectType).isObjectType?.()) {
-        const obj = resolvedRef as ObjectType;
-        const canonicalInstance = findCanonicalParentInstance(ctx, obj);
-        if (canonicalInstance && canonicalInstance !== obj) {
-          clearTypeCaches(obj, canonicalInstance);
-          resolvedRef = canonicalInstance;
+    if (
+      type &&
+      resolvedRef &&
+      type !== resolvedRef &&
+      (type as ObjectType).isObjectType?.() &&
+      (resolvedRef as ObjectType).isObjectType?.()
+    ) {
+      adoptObjectMetadata(resolvedRef as ObjectType, type as ObjectType);
+    }
+    if (type && resolvedRef && type !== resolvedRef) {
+      clearTypeCaches(type, resolvedRef);
+    }
+    if (
+      losingRef &&
+      resolvedRef &&
+      (losingRef as ObjectType).isObjectType?.() &&
+      (resolvedRef as ObjectType).isObjectType?.()
+    ) {
+      adoptObjectMetadata(
+        resolvedRef as ObjectType,
+        losingRef as ObjectType
+      );
+    }
+    if (losingRef && resolvedRef && losingRef !== resolvedRef) {
+      clearTypeCaches(losingRef, resolvedRef);
+    }
+    if (CANON_DEBUG && type && resolvedRef) {
+      assertCanonicalTypeRef(ctx.table, type, resolvedRef, "canonicalTypeRef");
+    }
+    if (CANON_DEBUG && resolvedRef && (resolvedRef as ObjectType).isObjectType?.()) {
+      const obj = resolvedRef as ObjectType;
+      const parent = obj.genericParent as ObjectType | undefined;
+      if (parent) {
+        const canonicalParent = ctx.table.getCanonical(parent) as ObjectType | undefined;
+        const parentRef = canonicalParent ?? parent;
+        const registeredChildren = parentRef.genericInstances ?? [];
+        const isRegistered = registeredChildren.includes(obj);
+        const parentMismatch = obj.genericParent && obj.genericParent !== parentRef;
+        if (!isRegistered || parentMismatch) {
+          const payload = {
+            canonicalInstance: formatTypeId(obj),
+            instanceParent: formatTypeId(obj.genericParent as ObjectType | undefined),
+            canonicalParent: formatTypeId(parentRef),
+            registeredChildren: registeredChildren.map((child) =>
+              formatTypeId(child as ObjectType | undefined)
+            ),
+          };
+          console.warn(`[CANON_DEBUG] canonical lookup missing registered child`, payload);
         }
       }
-      if (CANON_DEBUG && type) {
-        assertCanonicalTypeRef(ctx.table, type, resolvedRef, "canonicalTypeRef");
-      }
-      if (CANON_DEBUG && (resolvedRef as ObjectType).isObjectType?.()) {
-        const obj = resolvedRef as ObjectType;
-        const parent = obj.genericParent as ObjectType | undefined;
-        if (parent) {
-          const canonicalParent = ctx.table.getCanonical(parent) as ObjectType | undefined;
-          const parentRef = canonicalParent ?? parent;
-          const registeredChildren = parentRef.genericInstances ?? [];
-          const isRegistered = registeredChildren.includes(obj);
-          const parentMismatch = obj.genericParent && obj.genericParent !== parentRef;
-          if (!isRegistered || parentMismatch) {
-            const payload = {
-              canonicalInstance: formatTypeId(obj),
-              instanceParent: formatTypeId(obj.genericParent as ObjectType | undefined),
-              canonicalParent: formatTypeId(parentRef),
-              registeredChildren: registeredChildren.map((child) =>
-                formatTypeId(child as ObjectType | undefined)
-              ),
-            };
-            console.warn(`[CANON_DEBUG] canonical lookup missing registered child`, payload);
-          }
-        }
-      }
+    }
+    if (resolvedRef) {
       canonicalizeTypeNode(ctx, resolvedRef);
-      return resolvedRef;
     }
-    return canonicalRef;
+    return resolvedRef;
   }
   return canonical;
 };
