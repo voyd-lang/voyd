@@ -57,3 +57,27 @@
 2. When Binaryen lowering encounters an orphan id, explicitly swap it for the canonical parent entry rather than letting Binaryen allocate a fresh struct.
 3. Add targeted coverage that asserts `parent.genericInstances` contains every optional clone seen by the AST walker; this will prevent the orphan scenario from silently returning.
 4. Once orphans are eliminated, re-run `npx vitest run` and verify the wasm guards (constructor counts, helper name sets, and deterministic compilation) pass before moving on to subsequent phases.
+
+## Phase 1 Snapshot (Plan 4)
+
+### Test Failures
+- `npx vitest run src/__tests__/run-wasm-regression.e2e.test.ts` still fails: the regression harness looks for `test.voyd`, but the file is missing so the run aborts before wasm execution (`ENOENT` from `stat('/workspace/voyd/test.voyd')`).
+- `npx vitest run src/__tests__/map-recursive-union.e2e.test.ts` continues to report four failing guards:
+  - Runtime trap persists (`RuntimeError: illegal cast`).
+  - Optional constructor guard sees four `Some` instantiations instead of one.
+  - Optional helper dedupe guard finds 14 duplicate helper exports (all `iterate#…` variants).
+  - Determinism guard still diffs 715 vs. 270 wasm functions between two compiles of the same program.
+
+### Optional Constructor Audit
+- `npx tsx scripts/inspect-optional-constructors.ts` enumerates **15** `Some#144032#…` constructors and **1** `None#144037`, matching the previously observed inflation.
+- Only 10 of the `Some` variants remain attached to `Some#144032.genericInstances`, leaving **5** orphans reachable only by direct references.
+- Union nodes referencing Optionals still materialize 15 edges, so Binaryen keeps allocating fresh heap types for the orphans.
+
+### Instrumentation
+- Added a `CANON_DEBUG` flag to `canonicalize-resolved-types.ts`. When enabled, the pass now logs any `ObjectType` whose canonical parent omits it from `genericInstances` or whose `genericParent` pointer drifts away from the canonical parent.
+- `debugCheckParentRegistration` fires during instance attachment, and an additional check inside `canonicalTypeRef` warns whenever a canonical lookup observes a missing parent/child registration. The default behavior remains unchanged when `CANON_DEBUG` is unset, so existing tests still fail in the same manner.
+
+### Handoff Notes
+- Optional constructor counts: 15 `Some`, 1 `None`; 5 `Some` instances remain orphaned from the parent list.
+- Duplicate Optional helpers: 14 extra `iterate#…` exports; wasm function sets still diverge (715 vs. 270 functions).
+- Instrumentation available: set `CANON_DEBUG=1` to surface missing parent/child registrations during canonicalization.

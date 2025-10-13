@@ -40,6 +40,8 @@ type CanonicalizeCtx = {
 const SOME_CONSTRUCTOR_NAME = "Some";
 const NONE_CONSTRUCTOR_NAME = "None";
 
+const CANON_DEBUG = Boolean(process.env.CANON_DEBUG);
+
 const matchesName = (value: unknown, expected: string): boolean => {
   if (!value) return false;
   if (typeof value === "string") return value === expected;
@@ -110,6 +112,43 @@ const getOptionalBaseId = (obj: ObjectType): string | undefined => {
   return `${parts[0]}#${parts[1]}`;
 };
 
+const formatTypeId = (type: ObjectType | undefined): string => {
+  if (!type) return "<unknown>";
+  return type.id ?? type.name?.toString?.() ?? "<anonymous object>";
+};
+
+const debugCheckParentRegistration = (
+  instance: ObjectType,
+  canonicalInstance: ObjectType,
+  canonicalParent: ObjectType
+): void => {
+  if (!CANON_DEBUG) return;
+
+  const parentChildren = canonicalParent.genericInstances ?? [];
+  const isRegistered = parentChildren.includes(canonicalInstance);
+  const canonicalParentMismatch =
+    canonicalInstance.genericParent && canonicalInstance.genericParent !== canonicalParent;
+  const instanceParentMismatch =
+    instance.genericParent && instance.genericParent !== canonicalParent;
+
+  if (!isRegistered || canonicalParentMismatch || instanceParentMismatch) {
+    const payload = {
+      canonicalParent: formatTypeId(canonicalParent),
+      canonicalInstance: formatTypeId(canonicalInstance),
+      instance: formatTypeId(instance),
+      canonicalInstanceParent: formatTypeId(
+        canonicalInstance.genericParent as ObjectType | undefined
+      ),
+      instanceParent: formatTypeId(instance.genericParent as ObjectType | undefined),
+      registeredChildren: parentChildren.map((child) =>
+        formatTypeId(child as ObjectType | undefined)
+      ),
+    };
+
+    console.warn(`[CANON_DEBUG] orphaned generic instance detected`, payload);
+  }
+};
+
 const resolveOptionalGenericParent = (
   ctx: CanonicalizeCtx,
   instance: ObjectType,
@@ -160,6 +199,8 @@ const ensureOptionalAttachment = (
       instance.genericParent = canonicalParent;
     }
   });
+
+  debugCheckParentRegistration(original, canonical, canonicalParent);
 };
 
 const clearTypeCaches = (type: Type, canonical: Type): void => {
@@ -256,6 +297,8 @@ const attachInstanceToParent = (
     canonicalParent
   );
   canonicalParent.genericInstances = merged;
+
+  debugCheckParentRegistration(instance, canonicalInstance, canonicalParent);
 
   canonicalizeTypeNode(ctx, canonicalParent);
 };
@@ -370,7 +413,31 @@ const canonicalTypeRef = (
     if (type && canonicalRef) {
       clearTypeCaches(type, canonicalRef);
     }
-    if (canonicalRef) canonicalizeTypeNode(ctx, canonicalRef);
+    if (canonicalRef) {
+      if (CANON_DEBUG && (canonicalRef as ObjectType).isObjectType?.()) {
+        const obj = canonicalRef as ObjectType;
+        const parent = obj.genericParent as ObjectType | undefined;
+        if (parent) {
+          const canonicalParent = ctx.table.getCanonical(parent) as ObjectType | undefined;
+          const parentRef = canonicalParent ?? parent;
+          const registeredChildren = parentRef.genericInstances ?? [];
+          const isRegistered = registeredChildren.includes(obj);
+          const parentMismatch = obj.genericParent && obj.genericParent !== parentRef;
+          if (!isRegistered || parentMismatch) {
+            const payload = {
+              canonicalInstance: formatTypeId(obj),
+              instanceParent: formatTypeId(obj.genericParent as ObjectType | undefined),
+              canonicalParent: formatTypeId(parentRef),
+              registeredChildren: registeredChildren.map((child) =>
+                formatTypeId(child as ObjectType | undefined)
+              ),
+            };
+            console.warn(`[CANON_DEBUG] canonical lookup missing registered child`, payload);
+          }
+        }
+      }
+      canonicalizeTypeNode(ctx, canonicalRef);
+    }
     return canonicalRef;
   }
   return canonical;
