@@ -135,3 +135,28 @@
 - New helper: `src/semantics/types/reconcile-generic-instances.ts`; canonicalization relies on it, and the canonical type table registers orphan aliases automatically.
 - Debugging aids: set `CANON_TRACE_RECONCILE=1` to log reconciliation inputs/outputs; the optional constructor script now emits detailed sibling listings if it encounters any gaps.
 - New instrumentation: set `CANON_TRACE_OPTIONAL_REGISTRATION=1` to trace `ObjectType.registerGenericInstance` calls for Optional constructors (payload includes prior parents, applied type args, and a trimmed stack); use `CANON_TRACE_GENERIC_REGISTRATION=1` to lift the filter and log every generic registration site.
+
+## Phase 3b – Optional Orphan Sweep
+- `reconcileObjectGenericInstances` now records an orphan snapshot on every losing instance (id/key/applied args plus parent chain) and tags the canonical survivor. We reuse that metadata in both the canonicalizer and downstream tooling.
+- Union canonicalization aggressively normalises optional children: every optional branch is reconciled against its canonical parent, aliased in the type table, and replaced in-place so no union retains a stale clone.
+- `collectOptionalConstructors` consumes the orphan snapshot. When it encounters an alias, it rewrites the instance back to the canonical parent’s registered child before emitting it in the result sets, guaranteeing that inspector counts match `genericInstances`.
+- Codegen now respects the orphan snapshot as well. `ensureCanonicalObjectInstance` prefers the canonical instance recorded during reconciliation, so Binaryen never re-registers dropped clones.
+
+### Validation (2025-10-12)
+- `npx tsx scripts/inspect-optional-constructors.ts`
+
+  ```
+  Some constructors in canonical AST: 12
+  None constructors in canonical AST: 1
+  Base Some#144032 generic instances (12): Some#144032#0, Some#144032#1, Some#144032#12, Some#144032#13, Some#144032#14, Some#144032#15, Some#144032#3, Some#144032#4, Some#144032#5, Some#144032#6, Some#144032#8, Some#144032#9
+  Optional constructor edges:
+    Some#144032 -> [Some#144032#0, Some#144032#1, Some#144032#12, Some#144032#13, Some#144032#14, Some#144032#15, Some#144032#3, Some#144032#4, Some#144032#5, Some#144032#6, Some#144032#8, Some#144032#9]
+  ```
+
+- `CANON_DEBUG=1 npx tsx scripts/inspect-optional-constructors.ts` completes without `assertCanonicalTypeRef` failures. Orphan diagnostics still log (by design) while the command succeeds.
+- `npx vitest run src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts`
+
+### Remaining Risk / Next Focus
+- Binaryen still emits four Optional struct definitions (`Some#…#0/#13/#14/#15`, `None#…#0`) even though the canonical AST now holds a single set of registered instances. Follow-on work in Phase 4 should reuse the canonical heap ids once metadata reconciliation propagates caches.
+- Optional constructor unions normalise correctly, but we still surface multiple wasm `struct.new` counts (36/11/1). Phase 4 needs to route Binaryen cache transfer before re-running the e2e guard.
+- The orphan snapshot metadata is proving useful; consider keeping it (behind `CANON_DEBUG`) once Phase 4 stabilises so future regressions can short-circuit earlier in the pipeline.

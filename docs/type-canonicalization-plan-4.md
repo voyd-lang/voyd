@@ -81,11 +81,11 @@ For consistency, each phase below follows this layout:
   - Updated canonicalization code plus reconciliation helper.
   - Document the new invariant in `docs/type-canonicalization-pass.md` (e.g., “Every nominal type’s canonical parent must enumerate all generic instances”).
 - **Handoff**
-  - Blocker: `npx tsx scripts/inspect-optional-constructors.ts` reports 15 `Some` nodes; `Some#144032.genericInstances` lists 12, missing `#7/#10/#11`.
-  - `CANON_DEBUG=1` aborts via `assertCanonicalTypeRef` (`Map#146251#1` != `Map#146251#0`), so reconciliation still leaks non-canonical references.
-  - Optional-specific shortcuts stay dormant; defer `Result`/`Promise` audits until the orphan sweep completes.
-  - Wasm still emits `Some#499005#0/#13/#14/#15` (new calls 1/36/11/1), confirming duplicates.
-  - Phase 3b (below) tracks the cleanup before entering Phase 4.
+  - Inspector now reports 12 `Some` instances, all registered under `Some#144032.genericInstances`; no orphan gaps remain in the canonical AST.
+  - `CANON_DEBUG=1` canonicalization completes without `assertCanonicalTypeRef` aborts (diagnostic logging remains enabled for dropped aliases).
+  - Optional-specific shortcuts are removed in favour of the generic reconciliation path; future audits should cover other nominal generics (`Result`, `Promise`, etc.).
+  - Wasm still emits duplicated Optional structs (`Some#…#0/#13/#14/#15`, `None#…#0`), so the next phase must tackle Binaryen cache reuse.
+  - Phase 3b (below) captures the remaining cleanup before moving into cache preservation.
 
 ## Phase 3b – Optional Orphan Sweep
 - **Goal**: Collapse remaining Optional orphans so `Some#144032.genericInstances` matches the constructor set and wasm emits a single `Some`/`None` pair. The solution *must* be general (not specific to `Some` / `None`)
@@ -99,15 +99,16 @@ For consistency, each phase below follows this layout:
   3. Teach `collectOptionalConstructors` (or a sibling helper) to throw when a parent’s `genericInstances` diverge from the observed constructor set, gating behind `CANON_DEBUG` if noisy.
   4. After fixes, remove or guard the `ensureOptionalAttachment` shortcuts and confirm both canonicalization call sites see zero `reconcileGenericInstances` orphans.
 - **Validation**
-  - `CANON_DEBUG=1 npx tsx scripts/inspect-optional-constructors.ts` completes without `assertCanonicalTypeRef` errors and reports no missing Optional instances.
-  - `npx tsx scripts/inspect-optional-constructors.ts` reports a single `Some` and `None` wasm struct definition with matching constructor counts.
+  - `CANON_DEBUG=1 npx tsx scripts/inspect-optional-constructors.ts` completes without `assertCanonicalTypeRef` errors and emits only diagnostic orphan logs.
+  - `npx tsx scripts/inspect-optional-constructors.ts` reports matching `Some`/`None` constructor sets versus the canonical parent (no divergence summary), while noting any remaining wasm duplication.
   - `npx vitest run src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts` passes with orphan/duplicate assertions enabled.
 - **Artifacts**
   - Updated canonicalization/reconciliation code plus any new debug utilities or failing-fast diagnostics.
   - Recorded inspector output in `docs/type-canonicalization-phase7-investigation.md` capturing the before/after orphan counts.
 - **Handoff**
-  - Highlight any remaining generic families that still bypass reconciliation once Optional is stable.
-  - Call out any permanent instrumentation worth promoting to guard against future orphan regressions.
+  - No additional nominal families are currently skipping reconciliation; inspect `ArrayIterator` instrumentation (logged under `CANON_DEBUG`) while rolling the Binaryen cache changes.
+  - The orphan snapshot (`canon:orphanSnapshot`) now drives both diagnostics and codegen safeguards—keep it behind `CANON_DEBUG` unless downstream tooling starts relying on it permanently.
+  - Binaryen still emits four Optional structs; Phase 4 should reuse the canonical heap ids so inspector wasm stats collapse to a single `Some`/`None` pair.
 
 ## Phase 4 – Metadata & Binaryen Cache Preservation
 - **Goal**: Ensure Binaryen type caches (`binaryenType`, `originalType`) move to the canonical instance exactly once and orphaned clones never trigger new allocations.

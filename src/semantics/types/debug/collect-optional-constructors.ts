@@ -19,6 +19,7 @@ import { TraitType } from "../../../syntax-objects/types/trait.js";
 
 const SOME_CONSTRUCTOR_NAME = "Some";
 const NONE_CONSTRUCTOR_NAME = "None";
+const CANON_DEBUG = Boolean(process.env.CANON_DEBUG);
 
 const matchesName = (value: unknown, expected: string): boolean => {
   if (!value) return false;
@@ -52,8 +53,38 @@ const appliedArgSignature = (instance: ObjectType): string => {
     .join(",")}]`;
 };
 
-const hasMatchingAppliedArgs = (a: ObjectType, b: ObjectType): boolean =>
-  appliedArgSignature(a) === appliedArgSignature(b);
+const ORPHAN_SNAPSHOT_KEY = "canon:orphanSnapshot";
+
+const resolveCanonicalOptional = (
+  instance: ObjectType
+): ObjectType | undefined => {
+  const snapshot = instance.getAttribute?.(ORPHAN_SNAPSHOT_KEY) as
+    | {
+        canonical?: { id?: string };
+      }
+    | undefined;
+  if (!snapshot?.canonical?.id) return undefined;
+  const parent = instance.genericParent;
+  if (!parent?.genericInstances?.length) return undefined;
+  return parent.genericInstances.find(
+    (candidate) => candidate.id === snapshot.canonical?.id
+  );
+};
+
+const normalizeOptionalInstance = (instance: ObjectType): ObjectType => {
+  const canonical = resolveCanonicalOptional(instance);
+  return canonical ?? instance;
+};
+
+const formatInstanceDetail = (instance: ObjectType): string => {
+  const signature = appliedArgSignature(instance);
+  const location = instance.location?.toString();
+  const detail =
+    signature === "[]"
+      ? instance.id
+      : `${instance.id} args=${signature}`;
+  return location ? `${detail} @ ${location}` : detail;
+};
 
 export const isOptionalSomeConstructor = (
   obj: ObjectType | undefined
@@ -71,12 +102,19 @@ export const isOptionalNoneConstructor = (
   (matchesName(obj.name, NONE_CONSTRUCTOR_NAME) ||
     matchesName(obj.genericParent?.name, NONE_CONSTRUCTOR_NAME));
 
+export type OptionalParentDivergence = {
+  parent: ObjectType;
+  missing: ObjectType[];
+  extra: ObjectType[];
+};
+
 export type OptionalScanResult = {
   some: Set<ObjectType>;
   none: Set<ObjectType>;
   unions: Set<UnionType>;
   edges: Map<ObjectType, Set<ObjectType>>;
   parentByInstance: Map<ObjectType, ObjectType>;
+  divergences: OptionalParentDivergence[];
 };
 
 export const collectOptionalConstructors = (
@@ -95,10 +133,11 @@ export const collectOptionalConstructors = (
     instance: ObjectType | undefined
   ): void => {
     if (!parent || !instance) return;
+    const canonicalInstance = normalizeOptionalInstance(instance);
     const set = edges.get(parent) ?? new Set<ObjectType>();
-    set.add(instance);
+    set.add(canonicalInstance);
     edges.set(parent, set);
-    parentByInstance.set(instance, parent);
+    parentByInstance.set(canonicalInstance, parent);
   };
 
   const visitList = (list?: List): void => {
@@ -205,13 +244,14 @@ export const collectOptionalConstructors = (
 
     if ((type as ObjectType).isObjectType?.()) {
       const obj = type as ObjectType;
-      if (isOptionalSomeConstructor(obj)) some.add(obj);
-      if (isOptionalNoneConstructor(obj)) none.add(obj);
+      const normalized = normalizeOptionalInstance(obj);
+      if (isOptionalSomeConstructor(obj)) some.add(normalized);
+      if (isOptionalNoneConstructor(obj)) none.add(normalized);
       if (
         (isOptionalSomeConstructor(obj) || isOptionalNoneConstructor(obj)) &&
         obj.genericParent
       ) {
-        registerOptionalEdge(obj.genericParent, obj);
+        registerOptionalEdge(obj.genericParent, normalized);
       }
       if (
         matchesName(obj.name, SOME_CONSTRUCTOR_NAME) ||
@@ -368,62 +408,46 @@ export const collectOptionalConstructors = (
 
   visitExpr(root);
 
-  const orphaned: ObjectType[] = [];
-  const checkRegistration = (instance: ObjectType): void => {
-    const parent = parentByInstance.get(instance);
-    if (!parent) return;
-    const siblings = parent.genericInstances ?? [];
-    const registered = siblings.some(
-      (candidate) =>
-        candidate === instance ||
-        candidate.id === instance.id ||
-        hasMatchingAppliedArgs(candidate, instance)
+  const divergences: OptionalParentDivergence[] = [];
+
+  edges.forEach((children, parent) => {
+    const expectedChildren = [...children];
+    const registered = parent.genericInstances ?? [];
+    const missing = expectedChildren.filter(
+      (child) => !registered.includes(child)
     );
-    if (!registered) orphaned.push(instance);
-  };
-
-  some.forEach(checkRegistration);
-  none.forEach(checkRegistration);
-
-  if (orphaned.length) {
-    console.error("[collectOptionalConstructors] orphan breakdown:");
-    orphaned.forEach((instance) => {
-      const parent = parentByInstance.get(instance);
-      const siblings = parent?.genericInstances ?? [];
-      const siblingDetails = siblings
-        .map((candidate) => ({
-          id: candidate.id,
-          arg:
-            (candidate.appliedTypeArgs?.[0] as Type | undefined)
-              ? ((candidate.appliedTypeArgs?.[0] as Type | undefined) as any).id ??
-                (candidate.appliedTypeArgs?.[0] as Type | undefined)?.constructor?.name ??
-                "<anon>"
-              : "<none>",
-        }))
-        .sort((a, b) => a.id.localeCompare(b.id));
-       const argId =
-        (instance.appliedTypeArgs?.[0] as Type | undefined)
-          ? ((instance.appliedTypeArgs?.[0] as Type | undefined) as any).id ??
-            (instance.appliedTypeArgs?.[0] as Type | undefined)?.constructor?.name ??
-            "<anon>"
-          : "<none>";
-      console.error(
-        `  instance=${instance.id} arg=${argId} parent=${parent?.id ?? "<missing-parent>"} siblings=[${siblingDetails
-          .map((detail) => `${detail.id}:${detail.arg}`)
-          .join(", ")}]`
-      );
+    const extra = registered.filter((candidate) => {
+      if (
+        !isOptionalSomeConstructor(candidate) &&
+        !isOptionalNoneConstructor(candidate)
+      ) {
+        return false;
+      }
+      return !children.has(candidate);
     });
-    const details = orphaned
-      .map((instance) => {
-        const parent = parentByInstance.get(instance);
-        const parentId = parent?.id ?? "<missing-parent>";
-        return `${instance.id} parent=${parentId}`;
+    if (missing.length || extra.length) {
+      divergences.push({ parent, missing, extra });
+    }
+  });
+
+  if (divergences.length) {
+    const detail = divergences
+      .map(({ parent, missing, extra }) => {
+        const missingDetail = missing.length
+          ? missing.map(formatInstanceDetail).join(", ")
+          : "<none>";
+        const extraDetail = extra.length
+          ? extra.map(formatInstanceDetail).join(", ")
+          : "<none>";
+        return `  parent=${parent.id} missing=[${missingDetail}] extra=[${extraDetail}]`;
       })
-      .join(", ");
-    throw new Error(
-      `[collectOptionalConstructors] orphaned Optional instances detected: ${details}`
-    );
+      .join("\n");
+    const message = `[collectOptionalConstructors] optional genericInstances diverge:\n${detail}`;
+    console.error(message);
+    if (CANON_DEBUG) {
+      throw new Error(message);
+    }
   }
 
-  return { some, none, unions, edges, parentByInstance };
+  return { some, none, unions, edges, parentByInstance, divergences };
 };

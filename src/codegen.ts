@@ -162,6 +162,19 @@ export const mapBinaryenType = (
 const ensureCanonicalObjectInstance = (obj: ObjectType): ObjectType => {
   const parent = obj.genericParent;
   if (!parent) return obj;
+
+  const orphanSnapshot = obj.getAttribute?.("canon:orphanSnapshot") as
+    | {
+        canonical?: { id?: string };
+      }
+    | undefined;
+  if (orphanSnapshot?.canonical?.id && parent.genericInstances?.length) {
+    const canonicalMatch = parent.genericInstances.find(
+      (candidate) => candidate.id === orphanSnapshot.canonical?.id
+    );
+    if (canonicalMatch) return canonicalMatch;
+  }
+
   const canonical = parent.registerGenericInstance(obj);
   return canonical ?? obj;
 };

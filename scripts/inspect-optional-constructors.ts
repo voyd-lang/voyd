@@ -46,7 +46,7 @@ const main = async () => {
   const parsed = await parseModule(mapRecursiveUnionVoyd);
   const canonical = processSemantics(parsed);
 
-  const { some, none, unions, edges, parentByInstance } =
+  const { some, none, unions, edges, parentByInstance, divergences } =
     collectOptionalConstructors(canonical);
 
   const summarize = (label: string, set: Set<ObjectType>) => {
@@ -62,6 +62,20 @@ const main = async () => {
           )}`
         );
       });
+  };
+
+  const describeOptionalInstance = (obj: ObjectType): string => {
+    const arg = obj.appliedTypeArgs?.[0];
+    const core = `${obj.id} arg=${describeType(arg as Type | undefined)}`;
+    const location = obj.location?.toString?.();
+    const snapshot = (obj.getAttribute?.("canon:orphanSnapshot") as
+      | {
+          canonical?: { id?: string };
+        }
+      | undefined) ?? {};
+    const canonicalId = snapshot?.canonical?.id;
+    const suffix = canonicalId ? ` canonical=${canonicalId}` : "";
+    return location ? `${core}${suffix} @ ${location}` : `${core}${suffix}`;
   };
 
   summarize("Some constructors in canonical AST", some);
@@ -91,6 +105,21 @@ const main = async () => {
     console.log("\nOptional constructor edges:");
     edgeEntries.forEach(({ parent, children }) => {
       console.log(`  ${parent} -> [${children.join(", ")}]`);
+    });
+  }
+
+  if (divergences.length) {
+    console.log("\nOptional genericInstance divergences:");
+    divergences.forEach(({ parent, missing, extra }) => {
+      const missingDetail = missing.length
+        ? missing.map(describeOptionalInstance).join(", ")
+        : "<none>";
+      const extraDetail = extra.length
+        ? extra.map(describeOptionalInstance).join(", ")
+        : "<none>";
+      console.log(`  parent=${parent.id}`);
+      console.log(`    missing: ${missingDetail}`);
+      console.log(`    extra: ${extraDetail}`);
     });
   }
 

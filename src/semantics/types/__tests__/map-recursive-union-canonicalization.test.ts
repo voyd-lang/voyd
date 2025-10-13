@@ -23,9 +23,11 @@ describe("map-recursive-union optional constructor canonicalization", () => {
       | undefined;
     expect(srcModule).toBeDefined();
 
-    const { some, none, unions } = collectOptionalConstructors(
+    const { some, none, unions, divergences } = collectOptionalConstructors(
       srcModule ?? canonicalRoot
     );
+
+    expect(divergences).toHaveLength(0);
 
     const recAlias = srcModule?.resolveEntity(Identifier.from("RecType")) as
       | TypeAlias
@@ -101,7 +103,10 @@ describe("map-recursive-union optional constructor canonicalization", () => {
       unions,
       edges,
       parentByInstance,
+      divergences,
     } = collectOptionalConstructors(srcModule ?? canonicalRoot);
+
+    expect(divergences).toHaveLength(0);
 
     const recAlias = srcModule?.resolveEntity(Identifier.from("RecType")) as
       | TypeAlias
@@ -179,9 +184,11 @@ describe("map-recursive-union optional constructor canonicalization", () => {
       | undefined;
     expect(srcModule).toBeDefined();
 
-    const { some, none, parentByInstance } = collectOptionalConstructors(
+    const { some, none, parentByInstance, divergences } = collectOptionalConstructors(
       srcModule ?? canonicalRoot
     );
+
+    expect(divergences).toHaveLength(0);
 
     const clonedOptionals = [...some, ...none].filter(
       (candidate) => candidate.id.split("#").length > 2
@@ -236,9 +243,11 @@ describe("map-recursive-union optional constructor canonicalization", () => {
         | undefined;
       expect(srcModule).toBeDefined();
 
-      const { some, none, unions } = collectOptionalConstructors(
+      const { some, none, unions, divergences } = collectOptionalConstructors(
         srcModule ?? canonicalRoot
       );
+
+      expect(divergences).toHaveLength(0);
 
       const recAlias = srcModule?.resolveEntity(Identifier.from("RecType")) as
         | TypeAlias
