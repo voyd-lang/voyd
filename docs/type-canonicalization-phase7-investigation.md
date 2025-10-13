@@ -117,6 +117,11 @@
 - Added a lightweight alias facility to `CanonicalTypeTable` so orphan instances collapse to their canonical representative on subsequent lookups; the canonicalization pass now reruns automatically whenever reconciliation drops orphans.
 - Hardened `collectOptionalConstructors` to fail fast when an optional specialization is missing from its parent list, while still tolerating legacy clones that point to the same canonical `appliedTypeArgs`. The script now reports the canonical Optional graph without tripping the orphan guard.
 
+### Instrumentation Snapshot (CANON_TRACE_OPTIONAL_REGISTRATION=1, CANON_TRACE_RECONCILE=1)
+- `ObjectType.registerGenericInstance` logs show the semantic resolver (`resolveGenericsWithTypeArgs`) registers **16** `Some` specializations in sequence (`Some#144032#0…#15`), with `instanceCount` incrementing on every call—so the duplicates are fully attached to `Some#144032` when they are created.
+- During canonicalization, `reconcileObjectGenericInstances` repeatedly prunes `Some#144032.genericInstances` down to **12** canonical entries (`#0, #1, #3, #4, #5, #6, #8, #9, #12, #13, #14, #15`). The pass never reattaches the dropped clones (`#7`, `#10`, `#11`), leaving them as AST-local orphans even though their `genericParent` still points at `Some#144032`.
+- The final inspector output confirms the mismatch: “Some constructors in canonical AST: 15” versus “Base Some#144032 generic instances (12)”, and the missing ids line up with the clones trimmed by the reconciling pass. This pins the orphan creation on the canonicalization stage (lossy reconciliation), not on semantic instantiation.
+
 ### Validation
 - `npx tsx scripts/inspect-optional-constructors.ts`
 - `npx vitest run src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts`
@@ -124,7 +129,9 @@
 ### Open Questions
 - We still materialize multiple Optional constructor ids (15 `Some`, 1 `None`) because wasm emission has not been normalized yet; the remaining wasm constructor count regression is expected to be addressed in Phase 4.
 - Binaryen struct statistics (`struct.new` totals) remain inflated, indicating follow-up work is required once metadata reconciliation propagates through codegen.
+- Even after aliasing raw clones to their canonical parents, `scripts/inspect-optional-constructors.ts` still reports orphan optional objects (`Some#144032#7/#10/#11`) because scoped blocks retain the old instances; we need a follow-up sweep to replace those block-local references so the inspector sees exactly one `Some`/`None` per specialization.
 
 ### Handoff Notes
 - New helper: `src/semantics/types/reconcile-generic-instances.ts`; canonicalization relies on it, and the canonical type table registers orphan aliases automatically.
 - Debugging aids: set `CANON_TRACE_RECONCILE=1` to log reconciliation inputs/outputs; the optional constructor script now emits detailed sibling listings if it encounters any gaps.
+- New instrumentation: set `CANON_TRACE_OPTIONAL_REGISTRATION=1` to trace `ObjectType.registerGenericInstance` calls for Optional constructors (payload includes prior parents, applied type args, and a trimmed stack); use `CANON_TRACE_GENERIC_REGISTRATION=1` to lift the filter and log every generic registration site.

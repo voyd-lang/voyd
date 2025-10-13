@@ -11,6 +11,24 @@ import { Child } from "./lib/child.js";
 import { TraitType } from "./types/trait.js";
 import { BaseType } from "./types/base-type.js";
 
+const flagEnabled = (value: string | undefined): boolean => {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized === "0" || normalized === "false" || normalized === "off") {
+    return false;
+  }
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+};
+
+const CANON_TRACE_GENERIC_REGISTRATION = flagEnabled(
+  process.env.CANON_TRACE_GENERIC_REGISTRATION
+);
+
+const CANON_TRACE_OPTIONAL_REGISTRATION = flagEnabled(
+  process.env.CANON_TRACE_OPTIONAL_REGISTRATION
+);
+
 export type Type =
   | PrimitiveType
   | UnionType
@@ -283,10 +301,20 @@ export class ObjectType extends BaseType implements ScopedEntity {
       this.genericInstances = [];
     }
 
+    const previousParent = obj.genericParent;
     const existing = this.genericInstances.find((instance) =>
       genericInstanceArgsMatch(instance, obj)
     );
     if (existing) {
+      const existingParentBefore = existing.genericParent;
+      traceGenericInstanceRegistration({
+        outcome: "reuse",
+        parent: this,
+        candidate: obj,
+        existing,
+        candidatePreviousParent: previousParent,
+        existingPreviousParent: existingParentBefore,
+      });
       if (existing.genericParent !== this) {
         existing.genericParent = this;
       }
@@ -295,6 +323,12 @@ export class ObjectType extends BaseType implements ScopedEntity {
 
     obj.genericParent = this;
     this.genericInstances.push(obj);
+    traceGenericInstanceRegistration({
+      outcome: "register",
+      parent: this,
+      candidate: obj,
+      candidatePreviousParent: previousParent,
+    });
     return obj;
   }
 
@@ -354,6 +388,192 @@ const genericInstanceArgsMatch = (
       return leftResolved.idNum === rightResolved.idNum;
     }
   );
+};
+
+type GenericInstanceTraceOutcome = "register" | "reuse";
+
+type GenericInstanceTraceParams = {
+  outcome: GenericInstanceTraceOutcome;
+  parent: ObjectType;
+  candidate: ObjectType;
+  existing?: ObjectType;
+  candidatePreviousParent?: ObjectType;
+  existingPreviousParent?: ObjectType;
+};
+
+const traceGenericInstanceRegistration = (
+  params: GenericInstanceTraceParams
+): void => {
+  if (
+    !shouldTraceGenericInstance(
+      params.parent,
+      params.candidate,
+      params.existing
+    )
+  ) {
+    return;
+  }
+
+  const optionalVariant =
+    detectOptionalVariant(params.candidate) ??
+    detectOptionalVariant(params.parent) ??
+    detectOptionalVariant(params.existing);
+
+  const label =
+    optionalVariant && !CANON_TRACE_GENERIC_REGISTRATION
+      ? "[CANON_TRACE_OPTIONAL_REGISTRATION]"
+      : "[CANON_TRACE_GENERIC_REGISTRATION]";
+
+  const event = {
+    outcome: params.outcome,
+    optionalVariant,
+    parent: {
+      ...buildRegistrationSnapshot(params.parent),
+      instanceCount: params.parent.genericInstances?.length ?? 0,
+    },
+    candidate: {
+      ...buildRegistrationSnapshot(params.candidate),
+      previousParent: formatObjectRef(params.candidatePreviousParent),
+      appliedTypeArgs: formatAppliedTypeArgs(params.candidate),
+    },
+    existing: params.existing
+      ? {
+          ...buildRegistrationSnapshot(params.existing),
+          previousParent: formatObjectRef(params.existingPreviousParent),
+          reusedCandidate: params.existing === params.candidate,
+          appliedTypeArgs: formatAppliedTypeArgs(params.existing),
+        }
+      : undefined,
+    stack: formatTraceStack(),
+  };
+
+  console.warn(`${label} ${params.outcome}`, event);
+};
+
+const shouldTraceGenericInstance = (
+  parent: ObjectType,
+  candidate: ObjectType,
+  existing?: ObjectType
+): boolean => {
+  if (CANON_TRACE_GENERIC_REGISTRATION) {
+    return true;
+  }
+
+  if (!CANON_TRACE_OPTIONAL_REGISTRATION) {
+    return false;
+  }
+
+  return (
+    detectOptionalVariant(parent) !== undefined ||
+    detectOptionalVariant(candidate) !== undefined ||
+    detectOptionalVariant(existing) !== undefined
+  );
+};
+
+const detectOptionalVariant = (
+  type: ObjectType | undefined
+): "Some" | "None" | undefined => {
+  if (!type) return undefined;
+  const visited = new Set<ObjectType>();
+  let current: ObjectType | undefined = type;
+
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    const id = current.id;
+    if (typeof id === "string" && id.length) {
+      if (id === "Some" || id.startsWith("Some#")) {
+        return "Some";
+      }
+      if (id === "None" || id.startsWith("None#")) {
+        return "None";
+      }
+    }
+
+    const identifier = getObjectIdentifierName(current);
+    if (identifier === "Some" || identifier === "None") {
+      return identifier;
+    }
+
+    current = current.genericParent;
+  }
+
+  return undefined;
+};
+
+const buildRegistrationSnapshot = (type: ObjectType | undefined) => {
+  if (!type) return undefined;
+  return {
+    id: formatObjectRef(type),
+    name: getObjectIdentifierName(type),
+    genericParent: formatObjectRef(type.genericParent),
+  };
+};
+
+const getObjectIdentifierName = (
+  entity: { name?: unknown } | undefined
+): string | undefined => {
+  if (!entity?.name) return undefined;
+  const { name } = entity;
+  if (typeof name === "string" && name.length) {
+    return name;
+  }
+
+  const candidate = name as { value?: string; toString?: () => string };
+  if (typeof candidate.value === "string" && candidate.value.length) {
+    return candidate.value;
+  }
+
+  if (typeof candidate.toString === "function") {
+    const str = candidate.toString();
+    if (typeof str === "string" && str.length) {
+      return str;
+    }
+  }
+
+  return undefined;
+};
+
+const formatObjectRef = (obj: ObjectType | undefined): string | undefined => {
+  if (!obj) return undefined;
+  if (typeof obj.id === "string" && obj.id.length) {
+    return obj.id;
+  }
+  const name = getObjectIdentifierName(obj);
+  if (name) return name;
+  if (typeof obj.idNum === "number") {
+    return `ObjectType#${obj.idNum}`;
+  }
+  return undefined;
+};
+
+const formatAppliedTypeArgs = (instance: ObjectType): string[] => {
+  const args = instance.appliedTypeArgs ?? [];
+  if (!args.length) return [];
+  return args.map((arg) => formatTypeRef(arg));
+};
+
+const formatTypeRef = (type: Type | undefined): string => {
+  if (!type) return "<undefined>";
+  const id = (type as any).id;
+  if (typeof id === "string" && id.length) {
+    return id;
+  }
+  const name = getObjectIdentifierName(type as any);
+  if (name) {
+    return name;
+  }
+  const kind = (type as any).kindOfType;
+  if (typeof kind === "string" && kind.length) {
+    return `<${kind}>`;
+  }
+  return `<Type>`;
+};
+
+const formatTraceStack = (): string | undefined => {
+  const stack = new Error().stack;
+  if (!stack) return undefined;
+  const lines = stack.split("\n").slice(2, 8);
+  return lines.join("\n");
 };
 
 /** Dynamically Sized Array (The raw gc array type) */

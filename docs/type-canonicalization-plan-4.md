@@ -71,17 +71,43 @@ For consistency, each phase below follows this layout:
      - Reassigns `genericParent` to the canonical parent.
      - Ensures `parent.genericInstances` contains **exactly** the canonical instances.
   2. Call the helper from both `canonicalize-resolved-types.ts` (post canonicalization of child nodes) and `CanonicalTypeTable.#copyMetadata` to keep runtime metadata in sync.
-  3. Remove Optional-only dedupe shortcuts (`ensureOptionalAttachment`, etc.) once the generic path covers the same behavior; keep the functions but gate them behind assertions to confirm they’re no longer needed.
-  4. Extend `collectOptionalConstructors` (or add a new diagnostic script) to assert that every optional instance is present in its parent list; fail fast if orphaned clones remain.
+ 3. Remove Optional-only dedupe shortcuts (`ensureOptionalAttachment`, etc.) once the generic path covers the same behavior; keep the functions but gate them behind assertions to confirm they’re no longer needed.
+ 4. Extend `collectOptionalConstructors` (or add a new diagnostic script) to assert that every optional instance is present in its parent list; fail fast if orphaned clones remain. Add a companion invariant that detects duplicate specializations (multiple instances with equivalent `appliedTypeArgs`) so the phase proves out the general reconciliation strategy.
 - **Validation**
-  - `npx tsx scripts/inspect-optional-constructors.ts` should now report exactly one `Some`/`None` instance per specialization and zero orphans.
-  - `npx vitest run src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts` must pass.
+  - `npx tsx scripts/inspect-optional-constructors.ts` reports exactly one `Some` plus one `None` instance per specialization, zero orphan logs, and a single `(struct.new $Some…)` / `(struct.new $None…)` in wasm text.
+  - `npx vitest run src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts` must pass with new duplicate-detection assertions enabled.
+  - No Optional-specific escape hatches trigger under `CANON_DEBUG`; the helper reconciles arbitrary nominal generics (spot-check with at least one non-Optional generic in a unit test or instrumentation output).
 - **Artifacts**
   - Updated canonicalization code plus reconciliation helper.
   - Document the new invariant in `docs/type-canonicalization-pass.md` (e.g., “Every nominal type’s canonical parent must enumerate all generic instances”).
 - **Handoff**
-  - Note any TODOs for future constructor families (e.g., `Result` patterns).
-  - Record the canonical Optional counts after reconciliation (expected: 1 per specialization).
+  - Blocker: `npx tsx scripts/inspect-optional-constructors.ts` reports 15 `Some` nodes; `Some#144032.genericInstances` lists 12, missing `#7/#10/#11`.
+  - `CANON_DEBUG=1` aborts via `assertCanonicalTypeRef` (`Map#146251#1` != `Map#146251#0`), so reconciliation still leaks non-canonical references.
+  - Optional-specific shortcuts stay dormant; defer `Result`/`Promise` audits until the orphan sweep completes.
+  - Wasm still emits `Some#499005#0/#13/#14/#15` (new calls 1/36/11/1), confirming duplicates.
+  - Phase 3b (below) tracks the cleanup before entering Phase 4.
+
+## Phase 3b – Optional Orphan Sweep
+- **Goal**: Collapse remaining Optional orphans so `Some#144032.genericInstances` matches the constructor set and wasm emits a single `Some`/`None` pair. The solution *must* be general (not specific to `Some` / `None`)
+- **Prep**
+  - Run `npx tsx scripts/inspect-optional-constructors.ts` and stash the output in `docs/type-canonicalization-phase7-investigation.md`.
+  - Use `CANON_DEBUG=1` (and optionally `CANON_TRACE_RECONCILE=1`) to capture orphan logs from `reconcileGenericInstances`.
+  - Review `collectOptionalConstructors` and `canonicalize-resolved-types.ts` instrumentation so new assertions can trigger cleanly.
+- **Execution**
+  1. Instrument reconciliation to tag each orphan with the AST location that spawned it and log the three `Some#144032#7/#10/#11` cases.
+  2. Trace the `Map#146251#0/#1` pair flagged by `assertCanonicalTypeRef`; ensure the registration site uses the canonical object from `resolveCanonicalObject` before pushing to `genericInstances`.
+  3. Teach `collectOptionalConstructors` (or a sibling helper) to throw when a parent’s `genericInstances` diverge from the observed constructor set, gating behind `CANON_DEBUG` if noisy.
+  4. After fixes, remove or guard the `ensureOptionalAttachment` shortcuts and confirm both canonicalization call sites see zero `reconcileGenericInstances` orphans.
+- **Validation**
+  - `CANON_DEBUG=1 npx tsx scripts/inspect-optional-constructors.ts` completes without `assertCanonicalTypeRef` errors and reports no missing Optional instances.
+  - `npx tsx scripts/inspect-optional-constructors.ts` reports a single `Some` and `None` wasm struct definition with matching constructor counts.
+  - `npx vitest run src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts` passes with orphan/duplicate assertions enabled.
+- **Artifacts**
+  - Updated canonicalization/reconciliation code plus any new debug utilities or failing-fast diagnostics.
+  - Recorded inspector output in `docs/type-canonicalization-phase7-investigation.md` capturing the before/after orphan counts.
+- **Handoff**
+  - Highlight any remaining generic families that still bypass reconciliation once Optional is stable.
+  - Call out any permanent instrumentation worth promoting to guard against future orphan regressions.
 
 ## Phase 4 – Metadata & Binaryen Cache Preservation
 - **Goal**: Ensure Binaryen type caches (`binaryenType`, `originalType`) move to the canonical instance exactly once and orphaned clones never trigger new allocations.
