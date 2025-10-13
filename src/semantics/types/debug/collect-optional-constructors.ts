@@ -37,6 +37,24 @@ const matchesName = (value: unknown, expected: string): boolean => {
   return false;
 };
 
+const appliedArgSignature = (instance: ObjectType): string => {
+  const args = instance.appliedTypeArgs ?? [];
+  if (!args.length) return "[]";
+  return `[${args
+    .map((arg) => {
+      if (!arg) return "<undefined>";
+      const candidateId = (arg as any).id;
+      if (typeof candidateId === "string" && candidateId.length) return candidateId;
+      const name = (arg as any).name?.toString?.();
+      if (typeof name === "string" && name.length) return name;
+      return arg.constructor?.name ?? "<anon>";
+    })
+    .join(",")}]`;
+};
+
+const hasMatchingAppliedArgs = (a: ObjectType, b: ObjectType): boolean =>
+  appliedArgSignature(a) === appliedArgSignature(b);
+
 export const isOptionalSomeConstructor = (
   obj: ObjectType | undefined
 ): obj is ObjectType =>
@@ -349,5 +367,63 @@ export const collectOptionalConstructors = (
   };
 
   visitExpr(root);
+
+  const orphaned: ObjectType[] = [];
+  const checkRegistration = (instance: ObjectType): void => {
+    const parent = parentByInstance.get(instance);
+    if (!parent) return;
+    const siblings = parent.genericInstances ?? [];
+    const registered = siblings.some(
+      (candidate) =>
+        candidate === instance ||
+        candidate.id === instance.id ||
+        hasMatchingAppliedArgs(candidate, instance)
+    );
+    if (!registered) orphaned.push(instance);
+  };
+
+  some.forEach(checkRegistration);
+  none.forEach(checkRegistration);
+
+  if (orphaned.length) {
+    console.error("[collectOptionalConstructors] orphan breakdown:");
+    orphaned.forEach((instance) => {
+      const parent = parentByInstance.get(instance);
+      const siblings = parent?.genericInstances ?? [];
+      const siblingDetails = siblings
+        .map((candidate) => ({
+          id: candidate.id,
+          arg:
+            (candidate.appliedTypeArgs?.[0] as Type | undefined)
+              ? ((candidate.appliedTypeArgs?.[0] as Type | undefined) as any).id ??
+                (candidate.appliedTypeArgs?.[0] as Type | undefined)?.constructor?.name ??
+                "<anon>"
+              : "<none>",
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id));
+       const argId =
+        (instance.appliedTypeArgs?.[0] as Type | undefined)
+          ? ((instance.appliedTypeArgs?.[0] as Type | undefined) as any).id ??
+            (instance.appliedTypeArgs?.[0] as Type | undefined)?.constructor?.name ??
+            "<anon>"
+          : "<none>";
+      console.error(
+        `  instance=${instance.id} arg=${argId} parent=${parent?.id ?? "<missing-parent>"} siblings=[${siblingDetails
+          .map((detail) => `${detail.id}:${detail.arg}`)
+          .join(", ")}]`
+      );
+    });
+    const details = orphaned
+      .map((instance) => {
+        const parent = parentByInstance.get(instance);
+        const parentId = parent?.id ?? "<missing-parent>";
+        return `${instance.id} parent=${parentId}`;
+      })
+      .join(", ");
+    throw new Error(
+      `[collectOptionalConstructors] orphaned Optional instances detected: ${details}`
+    );
+  }
+
   return { some, none, unions, edges, parentByInstance };
 };

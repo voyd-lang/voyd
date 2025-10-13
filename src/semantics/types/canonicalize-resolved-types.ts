@@ -31,17 +31,20 @@ import {
 } from "./canonical-type-table.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
 import { assertCanonicalTypeRef } from "./debug/assert-canonical-type-ref.js";
+import { reconcileGenericInstances } from "./reconcile-generic-instances.js";
 
 type CanonicalizeCtx = {
   table: CanonicalTypeTable;
   visitedExpr: Set<Expr>;
   visitedTypes: Set<Type>;
+  requiresRevisit: boolean;
 };
 
 const SOME_CONSTRUCTOR_NAME = "Some";
 const NONE_CONSTRUCTOR_NAME = "None";
 
 const CANON_DEBUG = Boolean(process.env.CANON_DEBUG);
+const CANON_TRACE_RECONCILE = Boolean(process.env.CANON_TRACE_RECONCILE);
 
 const matchesName = (value: unknown, expected: string): boolean => {
   if (!value) return false;
@@ -150,58 +153,67 @@ const debugCheckParentRegistration = (
   }
 };
 
-const resolveOptionalGenericParent = (
-  ctx: CanonicalizeCtx,
-  instance: ObjectType,
-  hintParent?: ObjectType
-): ObjectType | undefined => {
-  const directParent = hintParent ?? instance.genericParent;
-  if (directParent) {
-    return canonicalTypeRef(ctx, directParent) as ObjectType | undefined;
-  }
-  if (!isOptionalConstructor(instance)) return undefined;
-  const baseId = getOptionalBaseId(instance);
-  if (!baseId) return undefined;
-  const resolved = instance.lexicon?.resolveEntity?.(baseId);
-  if (!(resolved as ObjectType)?.isObjectType?.()) return undefined;
-  return canonicalTypeRef(ctx, resolved as ObjectType) as ObjectType | undefined;
+const optionalFallback = (label: string): void => {
+  if (!CANON_DEBUG) return;
+  throw new Error(
+    `[CANON_DEBUG] reached deprecated Optional shortcut (${label}) after generic reconciliation`
+  );
 };
 
-const ensureOptionalAttachment = (
+const resolveOptionalGenericParent = (): ObjectType | undefined => {
+  optionalFallback("resolveOptionalGenericParent");
+  return undefined;
+};
+
+const ensureOptionalAttachment = (): void => {
+  optionalFallback("ensureOptionalAttachment");
+};
+
+const canonicalizeTypeViaTable = (
   ctx: CanonicalizeCtx,
-  original: ObjectType,
-  canonical: ObjectType,
-  parentHint?: ObjectType
-): void => {
-  if (!isOptionalConstructor(canonical)) return;
+  type?: Type
+): Type | undefined => {
+  if (!type) return undefined;
+  const canonicalized = ctx.table.canonicalize(type);
+  const canonical = ctx.table.getCanonical(canonicalized);
+  return canonical ?? canonicalized;
+};
 
-  const parentCandidate =
-    resolveOptionalGenericParent(ctx, canonical, parentHint) ??
-    resolveOptionalGenericParent(ctx, original, parentHint);
-  if (!parentCandidate) return;
+const canonicalArgKeyCache = new WeakMap<Type, string>();
+let canonicalArgKeyCounter = 0;
 
-  const canonicalParent = canonicalTypeRef(ctx, parentCandidate) as
-    | ObjectType
-    | undefined;
-  if (!canonicalParent) return;
-  if (canonicalParent === canonical) return;
-
-  canonical.genericParent = canonicalParent;
-  if (original !== canonical) {
-    original.genericParent = canonicalParent;
+const getAppliedArgKey = (ctx: CanonicalizeCtx, type?: Type): string => {
+  if (!type) return "∅";
+  const canonical = canonicalizeTypeViaTable(ctx, type) ?? type;
+  if (canonicalArgKeyCache.has(canonical)) {
+    return canonicalArgKeyCache.get(canonical)!;
   }
+  const id =
+    ((canonical as any).id as string | undefined) ??
+    (canonical as any).name?.toString?.() ??
+    `type#${canonicalArgKeyCounter++}`;
+  canonicalArgKeyCache.set(canonical, id);
+  return id;
+};
 
-  const existing = canonicalParent.genericInstances ?? [];
-  const next = dedupeByRef([...(existing ?? []), canonical]);
-  canonicalParent.genericInstances = next;
+const getInstanceKey = (ctx: CanonicalizeCtx, instance: ObjectType): string => {
+  const args = instance.appliedTypeArgs ?? [];
+  if (!args.length) return "[]";
+  const parts = args.map((arg) => getAppliedArgKey(ctx, arg));
+  return `[${parts.join(",")}]`;
+};
 
-  next.forEach((instance) => {
-    if (instance.genericParent !== canonicalParent) {
-      instance.genericParent = canonicalParent;
-    }
+const findCanonicalParentInstance = (
+  ctx: CanonicalizeCtx,
+  instance: ObjectType
+): ObjectType | undefined => {
+  const parent = instance.genericParent as ObjectType | undefined;
+  if (!parent?.genericInstances?.length) return undefined;
+  const targetKey = getInstanceKey(ctx, instance);
+  return parent.genericInstances.find((candidate) => {
+    if (candidate === instance) return candidate;
+    return getInstanceKey(ctx, candidate) === targetKey;
   });
-
-  debugCheckParentRegistration(original, canonical, canonicalParent);
 };
 
 const clearTypeCaches = (type: Type, canonical: Type): void => {
@@ -238,70 +250,147 @@ const dedupeImplementations = (
   return result;
 };
 
-const dedupeCanonicalInstances = (
-  ctx: CanonicalizeCtx,
-  instances: (ObjectType | undefined)[],
-  parent?: ObjectType
-): ObjectType[] => {
-  if (!instances.length) return [];
-  const seen = new Set<ObjectType>();
-  const result: ObjectType[] = [];
-  instances.forEach((instance) => {
-    if (!instance) return;
-    const canonical = canonicalTypeRef(ctx, instance) as ObjectType | undefined;
-    if (!canonical) return;
-    ensureOptionalAttachment(ctx, instance, canonical, parent);
-    if (seen.has(canonical)) {
-      if (instance !== canonical) {
-        clearTypeCaches(instance, canonical);
-        instance.genericInstances = [];
-      }
-      return;
-    }
-    seen.add(canonical);
-    result.push(canonical);
-  });
-  return result;
+const dedupeCanonicalInstances = (): ObjectType[] => {
+  optionalFallback("dedupeCanonicalInstances");
+  return [];
 };
 
-const attachInstanceToParent = (
+const attachInstanceToParent = (): void => {
+  optionalFallback("attachInstanceToParent");
+};
+
+const resolveCanonicalObject = (
+  ctx: CanonicalizeCtx,
+  candidate?: ObjectType
+): ObjectType | undefined => {
+  if (!candidate) return undefined;
+  const resolved = canonicalizeTypeViaTable(ctx, candidate) as
+    | ObjectType
+    | undefined;
+  if (!resolved || !(resolved as ObjectType).isObjectType?.()) return undefined;
+  const canonical = resolved as ObjectType;
+  if (canonical.appliedTypeArgs?.length) {
+    const canonicalArgs = canonical.appliedTypeArgs
+      .map((arg) => canonicalizeTypeViaTable(ctx, arg))
+      .filter((arg): arg is Type => !!arg);
+    canonical.appliedTypeArgs = canonicalArgs;
+    if (candidate !== canonical) {
+      candidate.appliedTypeArgs = [...canonicalArgs];
+    }
+  }
+  if (candidate !== canonical) {
+    clearTypeCaches(candidate, canonical);
+  }
+  return canonical;
+};
+
+const reconcileObjectGenericInstances = (
+  ctx: CanonicalizeCtx,
+  parent: ObjectType,
+  extraCandidates: ObjectType[] = []
+): void => {
+  const canonicalParent = resolveCanonicalObject(ctx, parent);
+  if (!canonicalParent) return;
+
+  const baseline = canonicalParent.genericInstances ?? [];
+  const candidates = [...baseline, ...extraCandidates];
+  if (!candidates.length) {
+    canonicalParent.genericInstances = [];
+    return;
+  }
+
+  const canonicalCandidates = candidates
+    .map((instance) => resolveCanonicalObject(ctx, instance))
+    .filter(
+      (instance): instance is ObjectType =>
+        !!instance && (instance as ObjectType).isObjectType?.()
+    );
+
+  if (CANON_TRACE_RECONCILE) {
+    console.log("[CANON_TRACE_RECONCILE] reconcileObjectGenericInstances", {
+      parent: formatTypeId(canonicalParent),
+      candidates: canonicalCandidates.map((instance) => ({
+        id: formatTypeId(instance),
+        key: getInstanceKey(ctx, instance),
+      })),
+    });
+  }
+
+  const { canonicalInstances, orphans } = reconcileGenericInstances(
+    canonicalParent,
+    canonicalCandidates,
+    {
+      canonicalizeType: (type) => canonicalizeTypeViaTable(ctx, type),
+      resolveCanonicalInstance: (instance) => instance,
+    }
+  );
+
+  if (orphans.length) {
+    ctx.requiresRevisit = true;
+  }
+
+  orphans.forEach(({ orphan, canonical }) => {
+    ctx.table.registerAlias(orphan, canonical);
+    clearTypeCaches(orphan, canonical);
+    orphan.genericInstances = [];
+    orphan.genericParent = canonical.genericParent ?? canonicalParent;
+    if (CANON_DEBUG) {
+      console.warn(
+        `[CANON_DEBUG] reconcileObjectGenericInstances dropped orphan`,
+        {
+          orphan: formatTypeId(orphan),
+          canonical: formatTypeId(canonical),
+          parent: formatTypeId(canonicalParent),
+        }
+      );
+    }
+    if (CANON_TRACE_RECONCILE) {
+      console.log("[CANON_TRACE_RECONCILE] orphan", {
+        orphan: formatTypeId(orphan),
+        canonical: formatTypeId(canonical),
+        key: getInstanceKey(ctx, orphan),
+      });
+    }
+  });
+
+  canonicalInstances.forEach((instance) => {
+    instance.genericParent = canonicalParent;
+    debugCheckParentRegistration(instance, instance, canonicalParent);
+  });
+
+  canonicalParent.genericInstances = canonicalInstances;
+  canonicalizeTypeNode(ctx, canonicalParent);
+  if (CANON_TRACE_RECONCILE) {
+    console.log("[CANON_TRACE_RECONCILE] reconciledInstances", {
+      parent: formatTypeId(canonicalParent),
+      instances: canonicalInstances.map((instance) => ({
+        id: formatTypeId(instance),
+        key: getInstanceKey(ctx, instance),
+      })),
+    });
+  }
+};
+
+const reconcileInstanceWithParent = (
   ctx: CanonicalizeCtx,
   instance: ObjectType
 ): void => {
-  const parent = resolveOptionalGenericParent(ctx, instance) ?? instance.genericParent;
+  const parent = instance.genericParent as ObjectType | undefined;
   if (!parent) return;
-
-  const canonicalParent = canonicalTypeRef(ctx, parent) as
-    | ObjectType
-    | undefined;
+  const canonicalParent = resolveCanonicalObject(ctx, parent);
   if (!canonicalParent) return;
 
-  const canonicalInstance = canonicalTypeRef(ctx, instance) as
-    | ObjectType
-    | undefined;
+  const canonicalInstance = resolveCanonicalObject(ctx, instance);
   if (!canonicalInstance) return;
 
-  ensureOptionalAttachment(ctx, instance, canonicalInstance, canonicalParent);
   canonicalInstance.genericParent = canonicalParent;
   if (canonicalInstance !== instance) {
-    clearTypeCaches(instance, canonicalInstance);
     instance.genericParent = canonicalParent;
     instance.genericInstances = [];
   }
 
-  const merged = dedupeCanonicalInstances(
-    ctx,
-    [
-      ...(canonicalParent.genericInstances ?? []),
-      canonicalInstance,
-    ],
-    canonicalParent
-  );
-  canonicalParent.genericInstances = merged;
-
+  reconcileObjectGenericInstances(ctx, canonicalParent, [canonicalInstance]);
   debugCheckParentRegistration(instance, canonicalInstance, canonicalParent);
-
-  canonicalizeTypeNode(ctx, canonicalParent);
 };
 
 const dedupeTraitInstances = (
@@ -370,11 +459,13 @@ export const canonicalizeResolvedTypes = (
     table,
     visitedExpr: new Set(),
     visitedTypes: new Set(),
+    requiresRevisit: false,
   };
 
   const runPass = () => {
     ctx.visitedExpr.clear();
     ctx.visitedTypes.clear();
+    ctx.requiresRevisit = false;
     canonicalizeExpr(ctx, module);
   };
 
@@ -392,7 +483,7 @@ export const canonicalizeResolvedTypes = (
 
   let dedupeEvents = recordIterationEvents();
   let iterations = 0;
-  while (dedupeEvents.length > 0 && iterations < 5) {
+  while ((dedupeEvents.length > 0 || ctx.requiresRevisit) && iterations < 5) {
     iterations += 1;
     table.clearDedupeEvents();
     runPass();
@@ -415,11 +506,20 @@ const canonicalTypeRef = (
       clearTypeCaches(type, canonicalRef);
     }
     if (canonicalRef) {
-      if (CANON_DEBUG && type) {
-        assertCanonicalTypeRef(ctx.table, type, canonicalRef, "canonicalTypeRef");
+      let resolvedRef = canonicalRef;
+      if ((resolvedRef as ObjectType).isObjectType?.()) {
+        const obj = resolvedRef as ObjectType;
+        const canonicalInstance = findCanonicalParentInstance(ctx, obj);
+        if (canonicalInstance && canonicalInstance !== obj) {
+          clearTypeCaches(obj, canonicalInstance);
+          resolvedRef = canonicalInstance;
+        }
       }
-      if (CANON_DEBUG && (canonicalRef as ObjectType).isObjectType?.()) {
-        const obj = canonicalRef as ObjectType;
+      if (CANON_DEBUG && type) {
+        assertCanonicalTypeRef(ctx.table, type, resolvedRef, "canonicalTypeRef");
+      }
+      if (CANON_DEBUG && (resolvedRef as ObjectType).isObjectType?.()) {
+        const obj = resolvedRef as ObjectType;
         const parent = obj.genericParent as ObjectType | undefined;
         if (parent) {
           const canonicalParent = ctx.table.getCanonical(parent) as ObjectType | undefined;
@@ -440,7 +540,8 @@ const canonicalTypeRef = (
           }
         }
       }
-      canonicalizeTypeNode(ctx, canonicalRef);
+      canonicalizeTypeNode(ctx, resolvedRef);
+      return resolvedRef;
     }
     return canonicalRef;
   }
@@ -792,7 +893,7 @@ const canonicalizeTypeNode = (
         (child as ObjectType).isObjectType?.() &&
         isOptionalConstructor(child as ObjectType)
       ) {
-        attachInstanceToParent(ctx, child as ObjectType);
+        reconcileInstanceWithParent(ctx, child as ObjectType);
       }
       canonicalizeTypeNode(ctx, child);
     });
@@ -875,20 +976,14 @@ const canonicalizeTypeNode = (
     obj.implementations = dedupedImplementations;
     obj.implementations.forEach((impl) => canonicalizeExpr(ctx, impl));
     if (obj.genericParent) {
-      attachInstanceToParent(ctx, obj);
+      reconcileInstanceWithParent(ctx, obj);
     }
-    if (obj.genericInstances?.length) {
-      const canonicalInstances = obj.genericInstances
-        .map((inst) => canonicalTypeRef(ctx, inst))
-        .filter(
-          (inst): inst is ObjectType =>
-            !!inst && (inst as ObjectType).isObjectType?.()
-        );
-      obj.genericInstances = dedupeCanonicalInstances(
-        ctx,
-        canonicalInstances,
-        obj
-      );
+    if (obj.genericInstances) {
+      if (obj.genericInstances.length) {
+        reconcileObjectGenericInstances(ctx, obj);
+      } else {
+        obj.genericInstances = [];
+      }
     }
     obj.typeParameters?.forEach((param) => canonicalizeExpr(ctx, param));
     return obj;

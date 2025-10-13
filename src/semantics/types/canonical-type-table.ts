@@ -14,6 +14,7 @@ import canonicalType from "./canonicalize.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
 import { Fn } from "../../syntax-objects/fn.js";
+import { reconcileGenericInstances } from "./reconcile-generic-instances.js";
 
 export type CanonicalTypeDedupeEvent = {
   fingerprint: string;
@@ -71,9 +72,16 @@ export class CanonicalTypeTable {
   }
 
   getCanonical(type: Type): Type {
+    const cached = this.#cache.get(type);
+    if (cached) return cached;
     const snapshot = canonicalType(type);
     const key = this.#fingerprint(snapshot);
-    return this.#byFingerprint.get(key) ?? type;
+    const canonical = this.#byFingerprint.get(key);
+    if (canonical) {
+      this.#cache.set(type, canonical);
+      return canonical;
+    }
+    return type;
   }
 
   getDedupeEvents(): CanonicalTypeDedupeEvent[] {
@@ -86,6 +94,11 @@ export class CanonicalTypeTable {
 
   setDedupeEvents(events: CanonicalTypeDedupeEvent[]): void {
     this.#dedupeLog = [...events];
+  }
+
+  registerAlias(source: Type, canonical: Type): void {
+    if (source === canonical) return;
+    this.#cache.set(source, canonical);
   }
 
   #canonicalize(type: Type): Type {
@@ -506,21 +519,45 @@ export class CanonicalTypeTable {
       target.genericParent = source.genericParent;
     }
 
-    if (source.genericInstances?.length) {
-      const existing = new Set(target.genericInstances ?? []);
-      const merged = target.genericInstances ? [...target.genericInstances] : [];
-      source.genericInstances.forEach((inst) => {
-        if (existing.has(inst)) return;
-        existing.add(inst);
-        merged.push(inst);
+    const candidates = [
+      ...(target.genericInstances ?? []),
+      ...(source.genericInstances ?? []),
+    ];
+    if (candidates.length) {
+      const { canonicalInstances, orphans } = reconcileGenericInstances(
+        target,
+        candidates,
+        {
+          canonicalizeType: (type) => (type ? this.#canonicalize(type) : undefined),
+          resolveCanonicalInstance: (instance) => {
+            const canonical = this.#canonicalize(instance) as ObjectType;
+            const lookup = this.getCanonical(canonical) as ObjectType | undefined;
+            return lookup ?? canonical;
+          },
+        }
+      );
+      target.genericInstances = canonicalInstances;
+      orphans.forEach(({ orphan, canonical }) => {
+        this.registerAlias(orphan, canonical);
+        if (orphan === canonical) return;
+        orphan.genericParent = canonical.genericParent ?? target;
+        orphan.genericInstances = [];
+        orphan.binaryenType = undefined;
+        orphan.setAttribute?.("binaryenType", undefined);
+        orphan.setAttribute?.("originalType", undefined);
       });
-      if (merged.length) target.genericInstances = merged;
+    } else if (target.genericInstances) {
+      target.genericInstances = [];
     }
 
     target.implementations = this.#mergeImplementationLists(
       target.implementations ?? [],
       source.implementations ?? []
     );
+
+    if (source !== target) {
+      this.registerAlias(source, target);
+    }
 
     this.#repointGenericInstance(
       source.genericParent ?? target.genericParent,

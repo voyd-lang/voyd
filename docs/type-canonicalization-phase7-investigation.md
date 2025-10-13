@@ -109,3 +109,22 @@
 ### Handoff Notes
 - Remaining uncertainty: cached attributes attached by downstream passes (`parameterFnType` on non-closure expressions, potential Binaryen caches) still merit a follow-up audit while reconciling generic instance metadata in Phase 3.
 - The coverage map above can seed a regression checklist; any new fields added to the AST should be appended here and routed through `canonicalTypeRef`.
+
+## Phase 3 – Generic Instance Reconciliation (Plan 4)
+
+### Summary
+- Introduced `reconcileGenericInstances` and invoked it from both the canonicalization pass and `CanonicalTypeTable.#copyMetadata`, ensuring canonical parents rebuild their `genericInstances` arrays and merge clones sharing identical `appliedTypeArgs`.
+- Added a lightweight alias facility to `CanonicalTypeTable` so orphan instances collapse to their canonical representative on subsequent lookups; the canonicalization pass now reruns automatically whenever reconciliation drops orphans.
+- Hardened `collectOptionalConstructors` to fail fast when an optional specialization is missing from its parent list, while still tolerating legacy clones that point to the same canonical `appliedTypeArgs`. The script now reports the canonical Optional graph without tripping the orphan guard.
+
+### Validation
+- `npx tsx scripts/inspect-optional-constructors.ts`
+- `npx vitest run src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts`
+
+### Open Questions
+- We still materialize multiple Optional constructor ids (15 `Some`, 1 `None`) because wasm emission has not been normalized yet; the remaining wasm constructor count regression is expected to be addressed in Phase 4.
+- Binaryen struct statistics (`struct.new` totals) remain inflated, indicating follow-up work is required once metadata reconciliation propagates through codegen.
+
+### Handoff Notes
+- New helper: `src/semantics/types/reconcile-generic-instances.ts`; canonicalization relies on it, and the canonical type table registers orphan aliases automatically.
+- Debugging aids: set `CANON_TRACE_RECONCILE=1` to log reconciliation inputs/outputs; the optional constructor script now emits detailed sibling listings if it encounters any gaps.

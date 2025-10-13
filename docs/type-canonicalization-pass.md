@@ -63,6 +63,12 @@ We need a post-resolution pass that walks the IR, deduplicates structurally equi
 - The regression now enforces a single canonical `Some`/`None` instance for `RecType`, verifies that optional constructors keep their Binaryen caches after codegen, and fails fast if any audit crawler rediscovers duplicate heap ids.
 - Follow-up work needs to (a) rewrite `Fn.appliedTypeArgs`, `genericInstances`, and trait method caches to the canonical objects and (b) merge Binaryen caches (`binaryenType` / `originalType`) so instrumentation stops flagging mismatched `T#… → RecType#…` aliases during canonicalization.
 
+## Generic Instance Reconciliation
+- `reconcileGenericInstances(parent, instances)` rebuilds every nominal type’s `genericInstances` array after canonicalization, merging clones that share identical `appliedTypeArgs` and reassigning their `genericParent` pointers to the canonical parent.
+- The canonicalization pass now invokes reconciliation for both parent objects and their children, while `CanonicalTypeTable.#copyMetadata` mirrors the same logic during table reuse so runtime metadata stays consistent.
+- Orphaned clones detected during reconciliation have their Binaryen caches cleared and their instance lists emptied, preventing stale wasm type ids from reappearing.
+- `collectOptionalConstructors` aborts if an optional specialization is missing from its parent’s `genericInstances` list, providing a hard guardrail against future orphan regressions.
+
 ## Phase 4 Postmortem
 - Re-enabled the wasm regressions (`src/__tests__/map-recursive-union.e2e.test.ts` and `src/__tests__/run-wasm-regression.e2e.test.ts`), keeping the runtime focused on the canonical Optional constructors.
 - Added a wasm text guard that ensures only one `struct.new $Some#…` and `struct.new $None#…` survives in the compiled module, catching future duplication before execution.
