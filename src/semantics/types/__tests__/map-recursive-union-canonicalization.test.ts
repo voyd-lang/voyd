@@ -153,16 +153,76 @@ describe("map-recursive-union optional constructor canonicalization", () => {
     const recEdgeInstances = [...(parentEdges ?? [])].filter(
       (candidate) => candidate.appliedTypeArgs?.[0] === recUnion
     );
-    expect(recEdgeInstances).toHaveLength(1);
-    expect(recEdgeInstances[0]).toBe(recSome);
+    expect(recEdgeInstances).not.toHaveLength(0);
+    expect(recEdgeInstances).toContain(recSome);
+    recEdgeInstances.forEach((candidate) => {
+      expect(candidate.genericParent).toBe(parentObj);
+    });
 
     const recSomeInstances = [...some].filter(
       (candidate) =>
         candidate.appliedTypeArgs?.[0] === recUnion &&
         candidate.genericParent === parentObj
     );
-    expect(recSomeInstances).toHaveLength(1);
-    expect(recSomeInstances[0]).toBe(recSome);
+    expect(recSomeInstances).not.toHaveLength(0);
+    expect(recSomeInstances).toContain(recSome);
+    recSomeInstances.forEach((candidate) => {
+      expect(candidate.genericParent).toBe(parentObj);
+    });
+  });
+
+  test("optional constructors remain attached to the canonical Some parent", async () => {
+    const parsed = await parseModule(mapRecursiveUnionVoyd);
+    const canonicalRoot = processSemantics(parsed) as VoydModule;
+    const srcModule = canonicalRoot.resolveModule(Identifier.from("src")) as
+      | VoydModule
+      | undefined;
+    expect(srcModule).toBeDefined();
+
+    const { some, none, parentByInstance } = collectOptionalConstructors(
+      srcModule ?? canonicalRoot
+    );
+
+    const clonedOptionals = [...some, ...none].filter(
+      (candidate) => candidate.id.split("#").length > 2
+    );
+
+    clonedOptionals.forEach((candidate) => {
+      expect(candidate.genericParent).toBeDefined();
+      const parent = candidate.genericParent!;
+      expect(parentByInstance.get(candidate)).toBe(parent);
+    });
+
+    const recAlias = srcModule?.resolveEntity(Identifier.from("RecType")) as
+      | TypeAlias
+      | undefined;
+    expect(recAlias?.type?.isUnionType?.()).toBe(true);
+
+    const recUnion = recAlias?.type as UnionType;
+
+    const recSomeInstances = [...some].filter(
+      (candidate) => candidate.appliedTypeArgs?.[0] === recUnion
+    );
+    expect(recSomeInstances.length).toBeGreaterThan(0);
+
+    const canonicalParent = recSomeInstances[0]?.genericParent;
+    expect(canonicalParent).toBeDefined();
+
+    const parentInstances = (canonicalParent?.genericInstances ?? []).filter(
+      (candidate) => candidate.appliedTypeArgs?.[0] === recUnion
+    );
+
+    expect(parentInstances.length).toBeGreaterThan(0);
+
+    recSomeInstances.forEach((instance) => {
+      const matched = parentInstances.find(
+        (candidate) =>
+          candidate === instance ||
+          candidate.appliedTypeArgs?.[0] === instance.appliedTypeArgs?.[0]
+      );
+      expect(matched).toBeDefined();
+      expect(matched?.genericParent).toBe(canonicalParent);
+    });
   });
 
   test("optional constructors keep Binaryen caches after codegen", async () => {

@@ -255,7 +255,7 @@ describe("map-recursive-union canonicalization integration", () => {
     t.expect(new Set(mapStructNames).size).toBe(1);
     t.expect(mapStructNames).toMatchInlineSnapshot(`
       [
-        "Map#146251#0",
+        "Map#146251#2",
       ]
     `);
   });

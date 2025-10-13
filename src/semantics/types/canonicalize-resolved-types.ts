@@ -102,6 +102,66 @@ const dedupeByRef = <T>(values: T[]): T[] => {
 const isVoydRefType = (value: Type | undefined): value is VoydRefType =>
   !!value?.isRefType?.();
 
+const getOptionalBaseId = (obj: ObjectType): string | undefined => {
+  const id = obj.id ?? obj.name?.toString?.();
+  if (!id) return undefined;
+  const parts = id.split("#");
+  if (parts.length <= 2) return undefined;
+  return `${parts[0]}#${parts[1]}`;
+};
+
+const resolveOptionalGenericParent = (
+  ctx: CanonicalizeCtx,
+  instance: ObjectType,
+  hintParent?: ObjectType
+): ObjectType | undefined => {
+  const directParent = hintParent ?? instance.genericParent;
+  if (directParent) {
+    return canonicalTypeRef(ctx, directParent) as ObjectType | undefined;
+  }
+  if (!isOptionalConstructor(instance)) return undefined;
+  const baseId = getOptionalBaseId(instance);
+  if (!baseId) return undefined;
+  const resolved = instance.lexicon?.resolveEntity?.(baseId);
+  if (!(resolved as ObjectType)?.isObjectType?.()) return undefined;
+  return canonicalTypeRef(ctx, resolved as ObjectType) as ObjectType | undefined;
+};
+
+const ensureOptionalAttachment = (
+  ctx: CanonicalizeCtx,
+  original: ObjectType,
+  canonical: ObjectType,
+  parentHint?: ObjectType
+): void => {
+  if (!isOptionalConstructor(canonical)) return;
+
+  const parentCandidate =
+    resolveOptionalGenericParent(ctx, canonical, parentHint) ??
+    resolveOptionalGenericParent(ctx, original, parentHint);
+  if (!parentCandidate) return;
+
+  const canonicalParent = canonicalTypeRef(ctx, parentCandidate) as
+    | ObjectType
+    | undefined;
+  if (!canonicalParent) return;
+  if (canonicalParent === canonical) return;
+
+  canonical.genericParent = canonicalParent;
+  if (original !== canonical) {
+    original.genericParent = canonicalParent;
+  }
+
+  const existing = canonicalParent.genericInstances ?? [];
+  const next = dedupeByRef([...(existing ?? []), canonical]);
+  canonicalParent.genericInstances = next;
+
+  next.forEach((instance) => {
+    if (instance.genericParent !== canonicalParent) {
+      instance.genericParent = canonicalParent;
+    }
+  });
+};
+
 const clearTypeCaches = (type: Type, canonical: Type): void => {
   if (type === canonical) return;
 
@@ -138,7 +198,8 @@ const dedupeImplementations = (
 
 const dedupeCanonicalInstances = (
   ctx: CanonicalizeCtx,
-  instances: (ObjectType | undefined)[]
+  instances: (ObjectType | undefined)[],
+  parent?: ObjectType
 ): ObjectType[] => {
   if (!instances.length) return [];
   const seen = new Set<ObjectType>();
@@ -147,11 +208,11 @@ const dedupeCanonicalInstances = (
     if (!instance) return;
     const canonical = canonicalTypeRef(ctx, instance) as ObjectType | undefined;
     if (!canonical) return;
+    ensureOptionalAttachment(ctx, instance, canonical, parent);
     if (seen.has(canonical)) {
       if (instance !== canonical) {
         clearTypeCaches(instance, canonical);
         instance.genericInstances = [];
-        instance.genericParent = undefined;
       }
       return;
     }
@@ -165,7 +226,7 @@ const attachInstanceToParent = (
   ctx: CanonicalizeCtx,
   instance: ObjectType
 ): void => {
-  const parent = instance.genericParent;
+  const parent = resolveOptionalGenericParent(ctx, instance) ?? instance.genericParent;
   if (!parent) return;
 
   const canonicalParent = canonicalTypeRef(ctx, parent) as
@@ -178,17 +239,22 @@ const attachInstanceToParent = (
     | undefined;
   if (!canonicalInstance) return;
 
+  ensureOptionalAttachment(ctx, instance, canonicalInstance, canonicalParent);
   canonicalInstance.genericParent = canonicalParent;
   if (canonicalInstance !== instance) {
     clearTypeCaches(instance, canonicalInstance);
-    instance.genericParent = undefined;
+    instance.genericParent = canonicalParent;
     instance.genericInstances = [];
   }
 
-  const merged = dedupeCanonicalInstances(ctx, [
-    ...(canonicalParent.genericInstances ?? []),
-    canonicalInstance,
-  ]);
+  const merged = dedupeCanonicalInstances(
+    ctx,
+    [
+      ...(canonicalParent.genericInstances ?? []),
+      canonicalInstance,
+    ],
+    canonicalParent
+  );
   canonicalParent.genericInstances = merged;
 
   canonicalizeTypeNode(ctx, canonicalParent);
@@ -700,7 +766,11 @@ const canonicalizeTypeNode = (
           (inst): inst is ObjectType =>
             !!inst && (inst as ObjectType).isObjectType?.()
         );
-      obj.genericInstances = dedupeByRef(canonicalInstances);
+      obj.genericInstances = dedupeCanonicalInstances(
+        ctx,
+        canonicalInstances,
+        obj
+      );
     }
     obj.typeParameters?.forEach((param) => canonicalizeExpr(ctx, param));
     return obj;
