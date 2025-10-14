@@ -8,8 +8,21 @@ import {
   voydBaseObject,
   UnionType,
   IntersectionType,
+  FnType,
+  TupleType,
+  TypeAlias,
 } from "./syntax-objects/types.js";
 import { TraitType } from "./syntax-objects/types/trait.js";
+import { List } from "./syntax-objects/list.js";
+import { Parameter } from "./syntax-objects/parameter.js";
+import { Variable } from "./syntax-objects/variable.js";
+import { Implementation } from "./syntax-objects/implementation.js";
+import {
+  ObjectLiteral,
+  ObjectLiteralField,
+} from "./syntax-objects/object-literal.js";
+import { MatchCase } from "./syntax-objects/match.js";
+import { Fn } from "./syntax-objects/fn.js";
 import {
   binaryenTypeToHeapType,
   annotateStructNames,
@@ -44,9 +57,338 @@ import { compile as compileMacroVariable } from "./codegen/compile-macro-variabl
 import {
   compile as compileClosure,
   getClosureSuperType,
+  resetClosureTypeCaches,
 } from "./codegen/compile-closure.js";
 
+let currentCodegenRun = 0;
+const BINARYEN_MODULE_ATTR = "binaryen:moduleId";
+
+const recordModuleId = (
+  subject: { setAttribute?: (key: string, value: unknown) => void },
+  moduleId: number
+): void => {
+  subject.setAttribute?.(BINARYEN_MODULE_ATTR, moduleId);
+};
+
+const readModuleId = (
+  subject: { getAttribute?: (key: string) => unknown }
+): number | undefined => {
+  const value = subject.getAttribute?.(BINARYEN_MODULE_ATTR);
+  return typeof value === "number" ? value : undefined;
+};
+
+export const cacheFnBinaryenType = (fn: Fn, typeRef: number): void => {
+  fn.setAttribute?.("binaryenType", typeRef);
+  fn.setAttribute?.("binaryenTypeModule", currentCodegenRun);
+};
+
+export const getCachedFnBinaryenType = (fn: Fn): number | undefined => {
+  const moduleId = fn.getAttribute?.("binaryenTypeModule");
+  if (moduleId === currentCodegenRun) {
+    return fn.getAttribute?.("binaryenType") as number | undefined;
+  }
+  return undefined;
+};
+
+const prepareForCodegen = (ast: Expr): void => {
+  currentCodegenRun += 1;
+  buildingTypePlaceholders.clear();
+  fixedArrayTypeCache.clear();
+  i32ArrayType = undefined;
+  resetClosureTypeCaches();
+  clearBinaryenTypeAttributes(voydBaseObject);
+  voydBaseObject.binaryenType = undefined;
+  if (Array.isArray(voydBaseObject.fields)) {
+    voydBaseObject.fields.forEach((field) => {
+      field.binaryenGetterType = undefined;
+      field.binaryenSetterType = undefined;
+    });
+  }
+  clearBinaryenArtifacts(ast);
+};
+
+const clearBinaryenTypeAttributes = (type: Type): void => {
+  type.setAttribute?.("binaryenType", undefined);
+  type.setAttribute?.("originalType", undefined);
+};
+
+const clearFieldBinaryenMetadata = (field: ObjectLiteralField | ObjectType["fields"][number]): void => {
+  if (!field) return;
+  (field as any).binaryenGetterType = undefined;
+  (field as any).binaryenSetterType = undefined;
+};
+
+const clearBinaryenArtifacts = (root: Expr): void => {
+  const visitedExpr = new Set<Expr>();
+  const visitedTypes = new Set<Type>();
+  const visitedParameters = new Set<Parameter>();
+  const visitedVariables = new Set<Variable>();
+  const visitedImplementations = new Set<Implementation>();
+
+  const visitList = (list?: List<Expr>): void => {
+    if (!list) return;
+    list.each((item) => visitExpr(item));
+  };
+
+  const visitMatchCase = (caseItem: MatchCase): void => {
+    clearType(caseItem.matchType as Type | undefined);
+    if (caseItem.matchTypeExpr) visitExpr(caseItem.matchTypeExpr);
+    visitExpr(caseItem.expr);
+  };
+
+  const visitImplementation = (impl: Implementation): void => {
+    if (visitedImplementations.has(impl)) return;
+    visitedImplementations.add(impl);
+    clearType(impl.targetType);
+    clearType(impl.trait as Type | undefined);
+    visitExpr(impl.targetTypeExpr.value);
+    visitExpr(impl.body.value);
+    visitExpr(impl.traitExpr.value);
+    impl.typeParams.toArray().forEach((param) => visitExpr(param));
+    impl.exports.forEach((fn) => visitExpr(fn));
+    impl.methods.forEach((fn) => visitExpr(fn));
+  };
+
+  const visitObjectLiteral = (literal: ObjectLiteral): void => {
+    clearType(literal.type as Type | undefined);
+    literal.fields.forEach((field) => {
+      clearFieldBinaryenMetadata(field);
+      clearType(field.type as Type | undefined);
+      visitExpr(field.initializer);
+    });
+  };
+
+  const visitVariable = (variable: Variable): void => {
+    if (visitedVariables.has(variable)) return;
+    visitedVariables.add(variable);
+    clearType(variable.type);
+    clearType(variable.originalType);
+    clearType(variable.annotatedType);
+    clearType(variable.inferredType);
+    if (variable.typeExpr) visitExpr(variable.typeExpr);
+    visitExpr(variable.initializer);
+  };
+
+  const visitParameter = (parameter: Parameter): void => {
+    if (visitedParameters.has(parameter)) return;
+    visitedParameters.add(parameter);
+    clearType(parameter.type);
+    clearType(parameter.originalType);
+    if (parameter.typeExpr) visitExpr(parameter.typeExpr);
+  };
+
+  const clearObjectType = (obj: ObjectType): void => {
+    clearBinaryenTypeAttributes(obj);
+    obj.binaryenType = undefined;
+    obj.appliedTypeArgs?.forEach((arg) => clearType(arg));
+    obj.fields.forEach((field) => {
+      clearFieldBinaryenMetadata(field);
+      clearType(field.type as Type | undefined);
+    });
+    clearType(obj.parentObjType);
+    if (obj.parentObjExpr) visitExpr(obj.parentObjExpr);
+    obj.genericInstances?.forEach((inst) => clearType(inst));
+    clearType(obj.genericParent);
+    obj.typeParameters?.forEach((param) => visitExpr(param));
+    obj.implementations?.forEach((impl) => visitExpr(impl));
+  };
+
+  const clearTraitType = (trait: TraitType): void => {
+    clearBinaryenTypeAttributes(trait);
+    trait.appliedTypeArgs?.forEach((arg) => clearType(arg));
+    trait.genericInstances?.forEach((inst) => clearType(inst));
+    clearType(trait.genericParent);
+    trait.methods.toArray().forEach((method) => visitExpr(method));
+    trait.implementations?.forEach((impl) => visitExpr(impl));
+    trait.typeParameters?.forEach((param) => visitExpr(param));
+  };
+
+  const clearType = (type?: Type): void => {
+    if (!type || visitedTypes.has(type)) return;
+    visitedTypes.add(type);
+    clearBinaryenTypeAttributes(type);
+
+    if ((type as TypeAlias).isTypeAlias?.()) {
+      const alias = type as TypeAlias;
+      if (alias.typeExpr) visitExpr(alias.typeExpr);
+      clearType(alias.type);
+      return;
+    }
+
+    if ((type as UnionType).isUnionType?.()) {
+      const union = type as UnionType;
+      union.types.forEach((child) => clearType(child));
+      return;
+    }
+
+    if ((type as IntersectionType).isIntersectionType?.()) {
+      const inter = type as IntersectionType;
+      clearType(inter.nominalType);
+      clearType(inter.structuralType);
+      if (inter.nominalTypeExpr) visitExpr(inter.nominalTypeExpr.value);
+      if (inter.structuralTypeExpr) visitExpr(inter.structuralTypeExpr.value);
+      return;
+    }
+
+    if ((type as TupleType).isTupleType?.()) {
+      const tuple = type as TupleType;
+      tuple.value.forEach((entry) => clearType(entry));
+      return;
+    }
+
+    if ((type as FixedArrayType).isFixedArrayType?.()) {
+      const arr = type as FixedArrayType;
+      arr.binaryenType = undefined;
+      clearType(arr.elemType);
+      visitExpr(arr.elemTypeExpr);
+      return;
+    }
+
+    if ((type as FnType).isFnType?.()) {
+      const fnType = type as FnType;
+      clearType(fnType.returnType);
+      fnType.parameters.forEach((param) => visitParameter(param));
+      if (fnType.returnTypeExpr) visitExpr(fnType.returnTypeExpr);
+      return;
+    }
+
+    if ((type as ObjectType).isObjectType?.()) {
+      clearObjectType(type as ObjectType);
+      return;
+    }
+
+    if ((type as TraitType).isTraitType?.()) {
+      clearTraitType(type as TraitType);
+    }
+  };
+
+  const visitExpr = (expr?: Expr): void => {
+    if (!expr || visitedExpr.has(expr)) return;
+    visitedExpr.add(expr);
+
+    if (expr.isModule()) {
+      expr.each((child) => visitExpr(child));
+      return;
+    }
+
+    if (expr.isFn()) {
+      expr.setAttribute?.("binaryenType", undefined);
+      clearType(expr.returnType);
+      clearType(expr.inferredReturnType);
+      clearType(expr.annotatedReturnType);
+      expr.appliedTypeArgs?.forEach((arg) => clearType(arg));
+      expr.parameters.forEach((param) => visitParameter(param));
+      expr.variables.forEach((variable) => visitVariable(variable));
+      expr.typeParameters?.forEach((param) => visitExpr(param));
+      expr.genericInstances?.forEach((inst) => visitExpr(inst));
+      visitExpr(expr.body ?? undefined);
+      if (expr.returnTypeExpr) visitExpr(expr.returnTypeExpr);
+      return;
+    }
+
+    if (expr.isClosure()) {
+      clearType(expr.returnType);
+      clearType(expr.inferredReturnType);
+      clearType(expr.annotatedReturnType);
+      expr.parameters.forEach((param) => visitParameter(param));
+      expr.variables.forEach((variable) => visitVariable(variable));
+      expr.captures.forEach((capture) => visitExpr(capture));
+      if (expr.returnTypeExpr) visitExpr(expr.returnTypeExpr);
+      visitExpr(expr.body);
+      return;
+    }
+
+    if (expr.isVariable()) {
+      visitVariable(expr);
+      return;
+    }
+
+    if (expr.isParameter()) {
+      visitParameter(expr);
+      return;
+    }
+
+    if (expr.isBlock()) {
+      clearType(expr.type);
+      expr.body.forEach((child) => visitExpr(child));
+      return;
+    }
+
+    if (expr.isCall()) {
+      clearType(expr.type);
+      visitExpr(expr.fnName);
+      visitList(expr.args);
+      visitList(expr.typeArgs ?? undefined);
+      const fn = expr.fn;
+      if (fn) {
+        if (fn.isFn?.()) visitExpr(fn as unknown as Expr);
+        if ((fn as ObjectType).isObjectType?.()) clearType(fn as ObjectType);
+      }
+      return;
+    }
+
+    if (expr.isObjectLiteral()) {
+      visitObjectLiteral(expr);
+      return;
+    }
+
+    if (expr.isArrayLiteral()) {
+      expr.elements.forEach((element) => visitExpr(element));
+      return;
+    }
+
+    if (expr.isMatch()) {
+      clearType(expr.type);
+      clearType(expr.baseType);
+      visitExpr(expr.operand);
+      if (expr.bindVariable) visitVariable(expr.bindVariable);
+      visitExpr(expr.bindIdentifier);
+      expr.cases.forEach((caseItem) => visitMatchCase(caseItem));
+      if (expr.defaultCase) visitMatchCase(expr.defaultCase);
+      return;
+    }
+
+    if (expr.isImpl()) {
+      visitImplementation(expr);
+      return;
+    }
+
+    if (expr.isDeclaration()) {
+      expr.fns.forEach((fn) => visitExpr(fn));
+      return;
+    }
+
+    if (expr.isGlobal()) {
+      clearType(expr.type);
+      visitExpr(expr.initializer);
+      return;
+    }
+
+    if (expr.isTrait()) {
+      clearType(expr);
+      return;
+    }
+
+    if (expr.isType()) {
+      clearType(expr);
+      return;
+    }
+
+    if (expr.isIdentifier()) {
+      clearType(expr.type);
+      return;
+    }
+
+    if (expr.isList()) {
+      visitList(expr);
+    }
+  };
+
+  visitExpr(root);
+};
+
 export const codegen = (ast: Expr) => {
+  prepareForCodegen(ast);
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   mod.setMemory(0, 1, "main_memory", []);
@@ -131,6 +473,12 @@ export const mapBinaryenType = (
 ): binaryen.Type => {
   if (type.isObjectType()) {
     type = ensureCanonicalObjectInstance(type);
+    if (
+      type.binaryenType !== undefined &&
+      readModuleId(type) === currentCodegenRun
+    ) {
+      return type.binaryenType;
+    }
   }
   if (type.isTraitType()) {
     type = ensureCanonicalTraitInstance(type);
@@ -144,6 +492,10 @@ export const mapBinaryenType = (
     return binaryen.none;
 
   if (type.isObjectType()) {
+    if (readModuleId(type) !== currentCodegenRun) {
+      type.binaryenType = undefined;
+      recordModuleId(type, currentCodegenRun);
+    }
     const key = getPlaceholderKey(type);
     if (buildingTypePlaceholders.has(key)) {
       return buildingTypePlaceholders.get(key)!;
@@ -191,10 +543,17 @@ const isPrimitiveId = (type: Type, id: Primitive) =>
 
 const fixedArrayTypeCache = new Map<string, TypeRef>();
 const buildFixedArrayType = (opts: CompileExprOpts, type: FixedArrayType) => {
-  if (type.binaryenType) return type.binaryenType;
+  if (
+    type.binaryenType !== undefined &&
+    readModuleId(type) === currentCodegenRun
+  ) {
+    return type.binaryenType;
+  }
+  type.binaryenType = undefined;
   const cached = fixedArrayTypeCache.get(type.id);
   if (cached) {
     type.binaryenType = cached;
+    recordModuleId(type, currentCodegenRun);
     return cached;
   }
   const mod = opts.mod;
@@ -202,6 +561,7 @@ const buildFixedArrayType = (opts: CompileExprOpts, type: FixedArrayType) => {
   const arrType = gc.defineArrayType(mod, elemType, true, type.id);
   fixedArrayTypeCache.set(type.id, arrType);
   type.binaryenType = arrType;
+  recordModuleId(type, currentCodegenRun);
   return arrType;
 };
 
@@ -209,12 +569,16 @@ export const buildUnionType = (
   opts: MapBinTypeOpts,
   union: UnionType
 ): TypeRef => {
-  if (union.hasAttribute("binaryenType")) {
+  if (
+    union.hasAttribute("binaryenType") &&
+    union.getAttribute("binaryenTypeModule") === currentCodegenRun
+  ) {
     return union.getAttribute("binaryenType") as TypeRef;
   }
 
   const typeRef = mapBinaryenType(opts, voydBaseObject);
   union.setAttribute("binaryenType", typeRef);
+  union.setAttribute("binaryenTypeModule", currentCodegenRun);
   return typeRef;
 };
 
@@ -222,13 +586,17 @@ export const buildIntersectionType = (
   opts: MapBinTypeOpts,
   inter: IntersectionType
 ): TypeRef => {
-  if (inter.hasAttribute("binaryenType")) {
+  if (
+    inter.hasAttribute("binaryenType") &&
+    inter.getAttribute("binaryenTypeModule") === currentCodegenRun
+  ) {
     return inter.getAttribute("binaryenType") as TypeRef;
   }
 
   const typeRef = mapBinaryenType(opts, inter.nominalType!);
   mapBinaryenType(opts, inter.structuralType!);
   inter.setAttribute("binaryenType", typeRef);
+  inter.setAttribute("binaryenTypeModule", currentCodegenRun);
   return typeRef;
 };
 
@@ -275,6 +643,7 @@ export const buildObjectType = (
     annotateStructNames(mod, heapType, { name: obj.id, fields, supertype });
 
     obj.binaryenType = gc.binaryenTypeFromHeapType(heapType, true);
+    recordModuleId(obj, currentCodegenRun);
   } finally {
     const key = getPlaceholderKey(obj);
     buildingTypePlaceholders.delete(key);

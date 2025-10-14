@@ -3,6 +3,8 @@ import {
   CompileExprOpts,
   compileExpression,
   mapBinaryenType,
+  getCachedFnBinaryenType,
+  cacheFnBinaryenType,
 } from "../codegen.js";
 import {
   refCast,
@@ -137,7 +139,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       [mod.i32.const(murmurHash3(traitFn.id)), lookupTable],
       binaryen.funcref
     );
-    let fnType = traitFn.getAttribute("binaryenType") as number | undefined;
+    let fnType = getCachedFnBinaryenType(traitFn);
     if (!fnType) {
       const paramTypes = bin.createType([
         mapBinaryenType(opts, voydBaseObject),
@@ -155,11 +157,10 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       );
       const heapType = bin._BinaryenFunctionGetType(temp);
       fnType = bin._BinaryenTypeFromHeapType(heapType, false);
-      traitFn.setAttribute("binaryenType", fnType);
+      cacheFnBinaryenType(traitFn, fnType);
       mod.removeFunction(`__tmp_trait_${traitFn.id}`);
     }
-    const fnTypeFinal = fnType as number;
-    const target = refCast(mod, funcRef, fnTypeFinal);
+    const target = refCast(mod, funcRef, fnType);
     const args = expr.args.toArray().map((arg, i) => {
       const compiled = compileExpression({
         ...opts,

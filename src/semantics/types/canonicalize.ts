@@ -99,6 +99,16 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
         isStructural: t.isStructural,
       });
       Object.assign(copy, t);
+      copy.binaryenType = undefined;
+      copy.setAttribute?.("binaryenType", undefined);
+      copy.setAttribute?.("originalType", undefined);
+      if (Array.isArray(copy.fields)) {
+        copy.fields.forEach((field: any) => {
+          if (!field) return;
+          field.binaryenGetterType = undefined;
+          field.binaryenSetterType = undefined;
+        });
+      }
       copy.id = t.genericParent ? t.genericParent.id : t.id;
       if (t.parentObjType) {
         copy.parentObjType = canonicalType(t.parentObjType, seen) as ObjectType;
@@ -121,6 +131,7 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
         lexicon: t.lexicon,
       });
       Object.assign(copy, t);
+      copy.setAttribute?.("binaryenType", undefined);
       copy.id = t.genericParent ? t.genericParent.id : t.id;
       copy.appliedTypeArgs = t.appliedTypeArgs.map((arg) =>
         canonicalType(arg, seen)

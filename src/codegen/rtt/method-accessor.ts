@@ -19,6 +19,8 @@ import {
   CompileExprOpts,
   mapBinaryenType,
   compileExpression,
+  cacheFnBinaryenType,
+  getCachedFnBinaryenType,
 } from "../../codegen.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Fn } from "../../syntax-objects/fn.js";
@@ -154,7 +156,7 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
           );
           const heapType = bin._BinaryenFunctionGetType(fnRef);
           const fnType = bin._BinaryenTypeFromHeapType(heapType, false);
-          traitMethod.setAttribute("binaryenType", fnType);
+          cacheFnBinaryenType(traitMethod, fnType);
 
           return [
             initStruct(mod, methodAccessorStruct, [
@@ -188,7 +190,11 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
       [mod.i32.const(murmurHash3(fn.id)), lookupTable],
       bin.funcref
     );
-    const target = refCast(mod, funcRef, fn.getAttribute("binaryenType") as number);
+    const cachedFnType = getCachedFnBinaryenType(fn);
+    if (!cachedFnType) {
+      throw new Error(`Missing binaryen type cache for method ${fn.id}`);
+    }
+    const target = refCast(mod, funcRef, cachedFnType);
     const args = expr.args
       .toArray()
       .map((arg) => compileExpression({ ...opts, expr: arg, isReturnExpr: false }));

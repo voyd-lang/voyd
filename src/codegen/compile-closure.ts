@@ -22,6 +22,12 @@ let closureSuperType: TypeRef | undefined;
 const envTypeMap = new Map<number, TypeRef>();
 const fnTypeCache = new Map<string, TypeRef>();
 
+export const resetClosureTypeCaches = (): void => {
+  closureSuperType = undefined;
+  envTypeMap.clear();
+  fnTypeCache.clear();
+};
+
 export const getClosureSuperType = (mod: binaryen.Module): TypeRef => {
   if (closureSuperType) return closureSuperType;
   closureSuperType = defineStructType(mod, {
