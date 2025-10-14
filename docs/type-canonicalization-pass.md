@@ -55,6 +55,12 @@ We need a post-resolution pass that walks the IR, deduplicates structurally equi
 - Re-run `canonicalizeResolvedTypes` on a problematic module with a fresh `CanonicalTypeTable` to confirm the pass is idempotent and to inspect dedupe events.
 - Execute `vitest run src/__tests__/map-recursive-union.e2e.test.ts` to validate that recursive alias scenarios continue to collapse to canonical forms.
 
+## Phase 1 Baseline Snapshot (2025-10-13)
+- `vt --emit-wasm-text --opt test.voyd` confirms union lowering still funnels every arm through `$Object#16`, then scatters into four Optional payload structs: `$Some#144054#0` (i32), `$Some#144054#7` (ref `$Object#16`), `$Some#144054#14` (ref `$Array#147653#3`), and `$None#144059`.
+- The `main` match loop repeatedly performs `__extends(144054, …)` checks against the `$Object#16` base and immediately `ref.cast` into whichever `$Some#144054#…` variant it just constructed (see `tmp/test-phase1.wat:2238` and `tmp/test-phase1.wat:2260`).
+- Binaryen instrumentation (`npx tsx scripts/inspect-optional-constructors.ts`) mirrors those heap types and counts the constructor calls: 36 for `$Some#498987#7`, 11 for `$Some#498987#14`, 1 for `$Some#498987#0`, and 71 for `$None#498992`.
+- Recorded hash for this snapshot: `b47ef00b9bba2e93f6545b6d171537a97a9b29d1  tmp/test-phase1.wat`; retain it for comparisons once the interner lands.
+
 ## Audit Findings – Optional Constructors
 - Instrumentation added in `canonicalize-resolved-types.ts` now logs whenever an optional constructor or alias survives in a non-canonical form. Running `npx vitest run src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts` emits repeated warnings such as:
   - `alias retained non-canonical target at Fn(get).appliedTypeArgs[0]` for the stdlib `Map`/`Array` helpers, showing that `Fn.appliedTypeArgs` still point at alias snapshots like `RecType#143181`.

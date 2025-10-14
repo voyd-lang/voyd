@@ -14,6 +14,20 @@
 - `npx vitest run src/__tests__/run-wasm-regression.e2e.test.ts` fails with the same `RuntimeError: illegal cast`, confirming the wasm module remains invalid at runtime.
 - These results match the pre-phase-5 baseline, providing a clean starting point for the type interner work in Plan 5.
 
+## Phase 1 – Baseline Snapshot (2025-10-13)
+- Collected fresh e2e failures immediately after the rollback baseline:
+  - `npx vitest run src/__tests__/map-recursive-union.e2e.test.ts` fails 3/7 guards. The wasm execution trap surfaces as `RuntimeError: illegal cast` (`wasm:/wasm/0002848e:1:21097 → src/__tests__/map-recursive-union.e2e.test.ts:302`). The duplicate helper assertion logs fifteen iterator helpers (`iterate#147658#0 … iterate#147658#11`). The determinism check reports 270 functions on the first compile vs 755 on the second (`src/__tests__/map-recursive-union.e2e.test.ts:405`).
+  - `npx vitest run src/__tests__/run-wasm-regression.e2e.test.ts` reproduces the same `RuntimeError: illegal cast` (`wasm:/wasm/0002848e:1:21097 → run src/run.ts:14`).
+- Optional constructor audit (`npx tsx scripts/inspect-optional-constructors.ts`):
+  - Canonical AST still carries **12** `Some#144032#…` instances and **1** `None#144037`.
+  - Union participation count remains **14**, signalling that every recursive Optional arm reappears during lowering.
+  - Binaryen heap stats echo this: `Some#498987#7` (36 constructor calls), `Some#498987#14` (11), `Some#498987#0` (1), and `None#498992` (71).
+- Union lowering snapshot:
+  - `vt --emit-wasm-text --opt test.voyd > tmp/test-phase1.wat` captures four distinct Optional struct definitions layered on top of `$Object#16` (`$Some#144054#0/#7/#14`, `$None#144059`).
+  - The `main` body repeatedly performs `__extends(144054, …)` on the `$Object#16` base then `ref.cast` into the active `$Some#144054#…` variant before unboxing (see `tmp/test-phase1.wat:2238` and `tmp/test-phase1.wat:2260`).
+  - File hash `b47ef00b9bba2e93f6545b6d171537a97a9b29d1  tmp/test-phase1.wat` recorded for later diffing.
+- No source edits were made—worktree stayed clean after running the commands above.
+
 ## Test Status
 - `npx vitest run src/__tests__/run-wasm-regression.e2e.test.ts` → fails with `RuntimeError: illegal cast`.
 - `npx vitest run` → `map-recursive-union.e2e.test.ts` reports four regressions (duplicate optional constructors/functions and wasm nondeterminism).
