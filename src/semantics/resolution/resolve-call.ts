@@ -163,13 +163,42 @@ const handleObjectConstruction = (call: Call, type: ObjectType): void => {
     };
     call.typeArgs.toArray().forEach((a) => visit(a));
     if (unknownIds.length) {
-      throw new Error(
-        `Unrecognized identifier(s) ${unknownIds.join(", ")} for ${
-          type.name
-        } at ${call.location}`
+      const allowedNames = new Set<string>();
+      type.typeParameters?.forEach((param) => allowedNames.add(param.value));
+      call.parentFn?.typeParameters?.forEach((param) =>
+        allowedNames.add(param.value)
       );
+      call.parentImpl
+        ?.typeParams?.toArray()
+        .forEach((param) => allowedNames.add(param.value));
+      call.parentTrait?.typeParameters?.forEach((param) =>
+        allowedNames.add(param.value)
+      );
+      const unresolved = unknownIds.filter(
+        (name) => !allowedNames.has(name)
+      );
+      if (unresolved.length) {
+        throw new Error(
+          `Unrecognized identifier(s) ${unresolved.join(", ")} for ${
+            type.name
+          } at ${call.location}`
+        );
+      }
     }
-    if (call.typeArgs.toArray().some((arg) => containsUnresolvedTypeId(arg))) {
+    const allowedTypeParams = new Set<string>();
+    type.typeParameters?.forEach((param) =>
+      allowedTypeParams.add(param.value)
+    );
+    call.parentFn?.typeParameters?.forEach((param) =>
+      allowedTypeParams.add(param.value)
+    );
+    call.parentImpl
+      ?.typeParams?.toArray()
+      .forEach((param) => allowedTypeParams.add(param.value));
+    call.parentTrait?.typeParameters?.forEach((param) =>
+      allowedTypeParams.add(param.value)
+    );
+    if (call.typeArgs.toArray().some((arg) => containsUnresolvedTypeId(arg, allowedTypeParams))) {
       return;
     }
   }

@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { runWasm } from "../cli/exec.js";
+import { parseModule } from "../parser/index.js";
+import { processSemantics } from "../semantics/index.js";
 import { runTypeInternerFromSource } from "../semantics/types/type-interner-harness.js";
 
 const runWasmFixtureUrl = new URL(
@@ -28,4 +30,23 @@ describe("type interner e2e harness", () => {
   test("baseline wasm execution still traps with illegal cast", async () => {
     await expect(runWasm(runWasmFixturePath)).rejects.toThrow(/illegal cast/i);
   });
+
+  test(
+    "processSemantics with the interner reports the object literal mismatch (no ArrayIterator crash)",
+    async () => {
+      const source = await readFile(runWasmFixturePath, "utf8");
+      const parsed = await parseModule(source);
+      let error: unknown;
+      try {
+        processSemantics(parsed, { useTypeInterner: true });
+      } catch (err) {
+        error = err;
+      }
+      expect(error).toBeDefined();
+      const message = String(error ?? "");
+      expect(message).toMatch(/object literal/i);
+      expect(message).not.toMatch(/ArrayIterator/i);
+    },
+    60_000
+  );
 });

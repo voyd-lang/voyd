@@ -295,7 +295,9 @@ describe("type interner feature flag", () => {
       }) as VoydModule;
     } catch (error) {
       threw = true;
-      t.expect(String(error)).toMatch(/unrecognized identifier/i);
+      const message = String(error);
+      t.expect(message).toMatch(/object literal/i);
+      t.expect(message).not.toMatch(/unrecognized identifier/i);
     }
 
     t.expect(telemetry).toHaveLength(1);

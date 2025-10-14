@@ -9,6 +9,7 @@ import {
 } from "../../syntax-objects/index.js";
 import {
   finalizeTypeAlias,
+  markTypeAliasPending,
   registerTypeInstance,
 } from "../../syntax-objects/type-context.js";
 import { getExprType } from "./get-expr-type.js";
@@ -107,15 +108,17 @@ export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
     alias.typeParameters.forEach((typeParam, index) => {
       const typeArg = call.typeArgs?.exprAt(index);
       const identifier = typeParam.clone();
-      const typeAlias = registerTypeInstance(
+      const pendingAlias = markTypeAliasPending(
         new TypeAlias({
           name: identifier,
           typeExpr: nop(),
         })
       );
+      const typeAlias = registerTypeInstance(pendingAlias);
       const resolvedArgType = getExprType(typeArg);
       if (resolvedArgType) {
         typeAlias.type = registerTypeInstance(resolvedArgType);
+        finalizeTypeAlias(typeAlias);
       }
       alias.registerEntity(typeAlias);
     });

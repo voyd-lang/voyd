@@ -87,6 +87,24 @@ Deliver a robust, maintainable type system for Voyd’s hybrid nominal + str
   4. **Update inference paths.** Audit generic specialization helpers (`resolveGenericsWithTypeArgs`, trait impl registration, iterator construction) to call the new “alias resolved” hook right after filling `.type`. Add regression coverage that toggles `VOYD_USE_TYPE_INTERNER=1` for the inference kitchen-sink suite and ArrayIterator pathways.
 - **Deliverables:** Interner-compatible alias lifecycle with no recursion guards, telemetry confirming aliases converge to canonical targets, and tests exercising ArrayIterator / generic inference in both legacy and interner modes.
 
+### Phase 5.6 – Interner Failure Investigation
+- **Goal:** Diagnose the remaining blocker surfaced once alias finalization landed: with `VOYD_USE_TYPE_INTERNER=1`, the pipeline now fails with `Expected object literal…` when `Map<T>.init` should run, even though it previously crashed inside `ArrayIterator`. Confirm whether init specialization, structural literal expansion, or alias reuse is responsible so Phase 5 can complete safely.
+- **Work:**
+  1. Reproduce the failure using `npx vitest run src/__tests__/type-interner.e2e.test.ts` and the feature-flagged `map-recursive-union.e2e.test.ts`, noting that the ArrayIterator crash is gone.
+  2. Inspect `resolveObjectInit`, `maybeExpandObjectArg`, `getCallFn`, and related telemetry to see why `Map<T>.init` is bypassed (e.g., interner collapsing array aliases, structural dedupe changing fingerprints).
+  3. Capture `TypeContextTelemetry` and interner events around the failing call to determine whether canonical handles diverge between legacy and interner runs.
+  4. Document findings, hypotheses, and candidate fixes in this plan so Phase 5.7 can act decisively. Append this documentation to the beginning of 5.7.
+- **Deliverables:** Investigation notes summarizing reproduction steps, suspected root causes, and recommended remediation paths for the `Map<T>.init` mismatch that now manifests under the interner flag.
+
+### Phase 5.7 – Complete Phase 5 With Investigation Outcomes
+- **Goal:** Apply the Phase 5.6 findings to finish Phase 5: restore `Map<T>.init` behaviour under the interner, keep the ArrayIterator regression closed, and ensure feature-flag telemetry matches expectations before promoting the interner further.
+- **Work:**
+  1. Implement the chosen fix (e.g., adjust init matching or structural literal rewriting) so `processSemantics(..., { useTypeInterner: true })` passes the interner harness without the object-literal error.
+  2. Update tests (`type-interner.e2e.test.ts`, `map-recursive-union.e2e.test.ts`) to assert the corrected behaviour in both legacy and interner modes.
+  3. Re-run the expanded vitest suites and collect telemetry snapshots confirming alias reuse, optional constructor counts, and wasm determinism remain stable.
+  4. Record the resolved state in `docs/type-canonicalization-pass.md` and mark Phase 5 as complete.
+- **Deliverables:** Green interner-mode tests, refreshed documentation, and a Phase 5 handoff ready to proceed to Phase 6.
+
 ### Phase 6 – Activate the Interner & Consolidate Metadata
 - **Goal:** Make the interner the default, remove the legacy cloning path, and ensure every semantic metadata table hangs off canonical handles.
 - **Work:**
