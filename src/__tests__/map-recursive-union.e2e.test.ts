@@ -2,6 +2,7 @@ import { describe, test, beforeAll } from "vitest";
 import { parseModule } from "../parser/index.js";
 import { processSemantics } from "../semantics/index.js";
 import { mapRecursiveUnionVoyd } from "./fixtures/map-recursive-union.js";
+import { mapRecursiveUnionNorthStarVoyd } from "./fixtures/map-recursive-union-north-star.js";
 import { CanonicalTypeTable } from "../semantics/types/canonical-type-table.js";
 import { canonicalizeResolvedTypes } from "../semantics/types/canonicalize-resolved-types.js";
 import { VoydModule } from "../syntax-objects/module.js";
@@ -26,6 +27,7 @@ import { compile } from "../compiler.js";
 import { codegen } from "../codegen.js";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
 import assert from "node:assert";
+import fs from "node:fs";
 
 type DedupeStats = {
   total: number;
@@ -41,8 +43,10 @@ type RecTypeSnapshot = {
   mapCallKey?: string;
 };
 
-const loadModuleWithoutCanonicalization = async (): Promise<VoydModule> => {
-  const parsedModule = await parseModule(mapRecursiveUnionVoyd);
+const loadModuleWithoutCanonicalization = async (
+  source: string = mapRecursiveUnionVoyd
+): Promise<VoydModule> => {
+  const parsedModule = await parseModule(source);
   const registered = registerModules(parsedModule);
   const resolved = [
     expandFunctionalMacros,
@@ -53,8 +57,10 @@ const loadModuleWithoutCanonicalization = async (): Promise<VoydModule> => {
   return checkTypes(resolved as VoydModule) as VoydModule;
 };
 
-const loadCanonicalizedModule = async (): Promise<VoydModule> => {
-  const parsedModule = await parseModule(mapRecursiveUnionVoyd);
+const loadCanonicalizedModule = async (
+  source: string = mapRecursiveUnionVoyd
+): Promise<VoydModule> => {
+  const parsedModule = await parseModule(source);
   return processSemantics(parsedModule) as VoydModule;
 };
 
@@ -178,6 +184,19 @@ const captureRecTypeSnapshot = (root: VoydModule): RecTypeSnapshot => {
     mapVariantKey: mapVariant ? typeKey(mapVariant) : undefined,
     mapCallKey: mapCall?.type ? typeKey(mapCall.type) : undefined,
   };
+};
+
+const resolveTypeAlias = (
+  root: VoydModule,
+  name: string
+): TypeAlias | undefined => {
+  const srcModule = root.resolveModule(Identifier.from("src")) as
+    | VoydModule
+    | undefined;
+  if (!srcModule) return undefined;
+  return srcModule.resolveEntity(Identifier.from(name)) as
+    | TypeAlias
+    | undefined;
 };
 
 const collectWasmFunctionNames = (wasmText: string): string[] =>
@@ -411,5 +430,107 @@ describe("map-recursive-union canonicalization integration", () => {
     } finally {
       secondModule.dispose?.();
     }
+  });
+
+  describe("north-star recursive union regression (phase 2 fixtures)", () => {
+    const wasmSnapshotPath = new URL(
+      "./fixtures/snapshots/map-recursive-union-north-star.wat",
+      import.meta.url
+    );
+
+    test.skip(
+      "PHASE 7: canonical handles unify LeftNode and RightNode",
+      async (t) => {
+        const root = await loadModuleWithoutCanonicalization(
+          mapRecursiveUnionNorthStarVoyd
+        );
+        const table = new CanonicalTypeTable({ recordEvents: true });
+        canonicalizeResolvedTypes(root, { table });
+
+        const leftAlias = resolveTypeAlias(root, "LeftNode");
+        const rightAlias = resolveTypeAlias(root, "RightNode");
+
+        t.expect(leftAlias?.type).toBeDefined();
+        t.expect(rightAlias?.type).toBeDefined();
+        // Phase 7 re-enable: LeftNode and RightNode should share the same canonical reference.
+        t.expect(leftAlias?.type).toBe(rightAlias?.type);
+      }
+    );
+
+    test.skip(
+      "PHASE 7: wasm execution for the hybrid fixture returns 13",
+      async (t) => {
+        const module = await compile(mapRecursiveUnionNorthStarVoyd);
+        try {
+          const instance = getWasmInstance(module);
+          const main = getWasmFn("main", instance);
+          // Phase 7 re-enable: the hybrid fixture should execute without trapping and return 13.
+          t.expect(main?.()).toEqual(13);
+        } finally {
+          module.dispose?.();
+        }
+      }
+    );
+
+    test.skip(
+      "PHASE 7: optional constructors dedupe for the hybrid fixture",
+      async (t) => {
+        const module = await compile(mapRecursiveUnionNorthStarVoyd);
+        try {
+          const wasmText = module.emitText();
+          const someStructPayloads = collectStructPayloads(
+            wasmText,
+            "Some#"
+          );
+          const payloadGroups = new Map<string, string[]>();
+          someStructPayloads.forEach((payload, name) => {
+            const existing = payloadGroups.get(payload);
+            if (existing) {
+              existing.push(name);
+            } else {
+              payloadGroups.set(payload, [name]);
+            }
+          });
+          // Phase 7 re-enable: every Optional payload should collapse to a single struct.
+          payloadGroups.forEach((names) => {
+            t.expect(names.length).toBe(1);
+          });
+        } finally {
+          module.dispose?.();
+        }
+      }
+    );
+
+    test.skip(
+      "PHASE 7: union lowering matches the north-star wasm snapshot",
+      async (t) => {
+        const module = await compile(mapRecursiveUnionNorthStarVoyd);
+        try {
+          const wasmText = module.emitText();
+          const somePayloads = collectStructPayloads(wasmText, "Some#");
+          const mapPayloads = collectStructPayloads(wasmText, "Map#");
+          const summaryLines: string[] = [];
+          [...somePayloads.entries()]
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .forEach(([name, payload]) => {
+              summaryLines.push(`Some ${name} => ${payload}`);
+            });
+          [...mapPayloads.entries()]
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .forEach(([name, payload]) => {
+              summaryLines.push(`Map ${name} => ${payload}`);
+            });
+          const currentSummary = summaryLines.join("\n");
+          const goldenSummary = await fs.promises.readFile(
+            wasmSnapshotPath,
+            "utf8"
+          );
+          // Phase 7 re-enable: wasm lowering should stabilize and match the captured snapshot.
+          t.expect(currentSummary.trim()).toBe(goldenSummary.trim());
+        } finally {
+          module.dispose?.();
+        }
+      }
+    );
   });
 });

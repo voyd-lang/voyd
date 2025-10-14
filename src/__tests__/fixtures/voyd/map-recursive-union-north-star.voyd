@@ -1,0 +1,71 @@
+use std::all
+
+pub type LeftNode = Map<LeftNode> | String
+pub type RightNode = Map<RightNode> | String
+pub type HybridNode = Map<HybridNode> | String | { tag: String, child: LeftNode }
+
+fn make_left_branch() -> LeftNode
+  Map([
+    ("leaf", "done"),
+  ])
+
+fn make_right_branch() -> RightNode
+  Map([
+    ("leaf", "done"),
+  ])
+
+fn wrap_left() -> HybridNode
+  { tag: "left", child: make_left_branch() }
+
+fn wrap_alt() -> HybridNode
+  { tag: "alt", child: make_left_branch() }
+
+fn make_hybrid_root() -> HybridNode
+  Map([
+    ("child", wrap_left()),
+    ("fallback", wrap_alt()),
+  ])
+
+pub fn main() -> i32
+  let root: HybridNode = make_hybrid_root()
+  let mirror: RightNode = make_right_branch()
+  let left: LeftNode = make_left_branch()
+
+  let mirrorScore =
+    mirror.match(branch)
+      Map:
+        branch.get("leaf").match(opt)
+          Some<RightNode>:
+            1
+          None:
+            -1
+      else:
+        -2
+
+  let leftScore =
+    left.match(branch)
+      Map:
+        branch.get("leaf").match(opt)
+          Some<LeftNode>:
+            2
+          None:
+            -3
+      else:
+        -4
+
+  let rootScore =
+    root.match(node)
+      Map:
+        node.get("child").match(childOpt)
+          Some<HybridNode>:
+            node.get("fallback").match(altOpt)
+              Some<HybridNode>:
+                10
+              None:
+                -10
+          None:
+            -5
+      else:
+        -6
+
+  mirrorScore + leftScore + rootScore
