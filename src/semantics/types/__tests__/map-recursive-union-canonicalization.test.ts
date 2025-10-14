@@ -4,7 +4,14 @@ import { processSemantics } from "../../index.js";
 import { mapRecursiveUnionVoyd } from "../../../__tests__/fixtures/map-recursive-union.js";
 import { VoydModule } from "../../../syntax-objects/module.js";
 import { Identifier } from "../../../syntax-objects/index.js";
-import { ObjectType, TypeAlias, UnionType } from "../../../syntax-objects/types.js";
+import {
+  ObjectType,
+  TypeAlias,
+  UnionType,
+  i32,
+  type Type,
+} from "../../../syntax-objects/types.js";
+import { TraitType } from "../../../syntax-objects/types/trait.js";
 import { CanonicalTypeTable } from "../canonical-type-table.js";
 import { canonicalizeResolvedTypes } from "../canonicalize-resolved-types.js";
 import { codegen } from "../../../codegen.js";
@@ -13,8 +20,101 @@ import {
   isOptionalNoneConstructor,
   isOptionalSomeConstructor,
 } from "../debug/collect-optional-constructors.js";
+import {
+  createTypeContext,
+  internTypeImmediately,
+  withTypeContext,
+} from "../type-context.js";
+
+const collectModules = (root: VoydModule): VoydModule[] => {
+  const visited = new Set<VoydModule>();
+  const queue: VoydModule[] = [root];
+  const modules: VoydModule[] = [];
+  while (queue.length) {
+    const module = queue.pop()!;
+    if (visited.has(module)) continue;
+    visited.add(module);
+    modules.push(module);
+    module.each((expr) => {
+      if (expr.isModule?.()) {
+        queue.push(expr as unknown as VoydModule);
+      }
+    });
+  }
+  return modules;
+};
+
+const collectGenericOwners = (
+  root: VoydModule
+): { objectTypes: ObjectType[]; traitTypes: TraitType[] } => {
+  const modules = collectModules(root);
+  const objects = new Set<ObjectType>();
+  const traits = new Set<TraitType>();
+  modules.forEach((module) => {
+    module.lexicon.getAllEntities().forEach((entity) => {
+      const candidate = entity as Type;
+      if (candidate?.isObjectType?.()) {
+        const obj = candidate as ObjectType;
+        objects.add(obj);
+        obj.genericInstances?.forEach((instance) => {
+          if (instance?.isObjectType?.()) objects.add(instance as ObjectType);
+        });
+      }
+      if ((candidate as TraitType)?.isTraitType?.()) {
+        const trait = candidate as TraitType;
+        traits.add(trait);
+        trait.genericInstances?.forEach((instance) => {
+          if ((instance as TraitType)?.isTraitType?.()) {
+            traits.add(instance as TraitType);
+          }
+        });
+      }
+    });
+  });
+  return { objectTypes: [...objects], traitTypes: [...traits] };
+};
 
 describe("map-recursive-union optional constructor canonicalization", () => {
+  test("ObjectType registerGenericInstance keeps canonical instances", () => {
+    const base = new ObjectType({
+      name: Identifier.from("Some"),
+      value: [],
+      typeParameters: [Identifier.from("T")],
+    });
+
+    const context = createTypeContext();
+    withTypeContext(context, () => {
+      const buildAlias = () => {
+        const alias = new TypeAlias({
+          name: Identifier.from("T"),
+          typeExpr: Identifier.from("T"),
+        });
+        alias.type = i32;
+        return alias;
+      };
+
+      const freshInstance = () => {
+        const inst = base.clone();
+        inst.typeParameters = undefined;
+        inst.genericParent = base;
+        inst.appliedTypeArgs = [buildAlias()];
+        return inst;
+      };
+
+      const canonicalFirst = internTypeImmediately(freshInstance()) as ObjectType;
+      const registeredFirst = base.registerGenericInstance(canonicalFirst);
+      expect(registeredFirst).toBe(canonicalFirst);
+
+      const canonicalSecond = internTypeImmediately(freshInstance()) as ObjectType;
+      const registeredSecond = base.registerGenericInstance(canonicalSecond);
+
+      expect(registeredSecond).toBe(canonicalFirst);
+      expect(base.genericInstances).toHaveLength(1);
+      expect(base.genericInstances?.[0]).toBe(canonicalFirst);
+      expect(canonicalFirst.genericParent).toBe(base);
+    });
+  });
+
   test.skip(
     "reuses canonical Some/None instances across generics (Phase 7)",
     async () => {
@@ -180,6 +280,37 @@ describe("map-recursive-union optional constructor canonicalization", () => {
     });
   });
 
+  test("generic parents expose canonical metadata", async () => {
+    const parsed = await parseModule(mapRecursiveUnionVoyd);
+    const canonicalRoot = processSemantics(parsed) as VoydModule;
+    const srcModule = canonicalRoot.resolveModule(Identifier.from("src")) as
+      | VoydModule
+      | undefined;
+    expect(srcModule).toBeDefined();
+
+    const { objectTypes, traitTypes } = collectGenericOwners(
+      srcModule ?? canonicalRoot
+    );
+
+    objectTypes.forEach((obj) => {
+      const instances = obj.genericInstances ?? [];
+      const unique = new Set(instances);
+      expect(unique.size).toBe(instances.length);
+      instances.forEach((instance) => {
+        expect(instance.genericParent).toBe(obj);
+      });
+    });
+
+    traitTypes.forEach((trait) => {
+      const instances = trait.genericInstances ?? [];
+      const unique = new Set(instances);
+      expect(unique.size).toBe(instances.length);
+      instances.forEach((instance) => {
+        expect(instance.genericParent).toBe(trait);
+      });
+    });
+  });
+
   test.skip(
     "optional constructors remain attached to the canonical Some parent (Phase 7)",
     async () => {
@@ -226,6 +357,11 @@ describe("map-recursive-union optional constructor canonicalization", () => {
     );
 
     expect(parentInstances.length).toBeGreaterThan(0);
+
+    parentInstances.forEach((instance) => {
+      expect(instance.genericParent).toBe(canonicalParent);
+      expect(parentByInstance.get(instance)).toBe(canonicalParent);
+    });
 
     recSomeInstances.forEach((instance) => {
       const matched = parentInstances.find(

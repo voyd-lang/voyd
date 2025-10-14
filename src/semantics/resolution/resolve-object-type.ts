@@ -15,7 +15,10 @@ import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { canonicalType } from "../types/canonicalize.js";
-import { internTypeWithContext } from "../types/type-context.js";
+import {
+  internTypeImmediately,
+  internTypeWithContext,
+} from "../types/type-context.js";
 
 export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
   if (obj.typesResolved) return internTypeWithContext(obj) as ObjectType;
@@ -196,10 +199,11 @@ const resolveGenericsWithTypeArgs = (
   const implementations = newObj.implementations;
   newObj.implementations = [];
 
-  const registered = obj.registerGenericInstance(newObj);
+  const canonicalInstance = internTypeImmediately(newObj) as ObjectType;
+  const registered = obj.registerGenericInstance(canonicalInstance);
   const resolvedObj = resolveObjectType(registered);
 
-  if (registered !== newObj) {
+  if (registered !== canonicalInstance) {
     return resolvedObj;
   }
 

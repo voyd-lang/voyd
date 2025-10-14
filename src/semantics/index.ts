@@ -17,8 +17,8 @@ import { type TypeInternerOptions } from "./types/type-interner.js";
 
 export type ProcessSemanticsOptions = {
   types?: {
-    useInterner?: boolean;
     internerOptions?: TypeInternerOptions;
+    internDuringResolution?: boolean;
     onTelemetry?: (telemetry: TypeContextTelemetry) => void;
   };
 };
@@ -28,8 +28,8 @@ export const processSemantics = (
   options: ProcessSemanticsOptions = {}
 ): Expr => {
   const typeContext = createTypeContext({
-    useInterner: options.types?.useInterner ?? false,
     internerOptions: options.types?.internerOptions,
+    internDuringResolution: options.types?.internDuringResolution,
   });
 
   const result = withTypeContext(typeContext, () => {
@@ -42,14 +42,12 @@ export const processSemantics = (
     ].reduce((acc, phase) => phase(acc), expr as Expr);
     const checked = checkTypes(resolved as VoydModule);
     canonicalizeResolvedTypes(checked as VoydModule, {
-      onType: typeContext.useInterner
-        ? (type) => typeContext.internType(type)
-        : undefined,
+      onType: (type) => typeContext.internType(type),
     });
     return checked as VoydModule;
   });
 
-  if (typeContext.useInterner && options.types?.onTelemetry) {
+  if (options.types?.onTelemetry) {
     const telemetry = typeContext.getTelemetry();
     if (telemetry) options.types.onTelemetry(telemetry);
   }

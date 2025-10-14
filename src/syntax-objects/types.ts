@@ -228,7 +228,6 @@ export class ObjectType extends BaseType implements ScopedEntity {
   typesResolved?: boolean; // Don't set if type parameters are present
   implementations: Implementation[];
   isStructural = false;
-  #iteration = 0;
 
   constructor(
     opts: NamedEntityOpts & {
@@ -270,7 +269,6 @@ export class ObjectType extends BaseType implements ScopedEntity {
   clone(parent?: Expr): ObjectType {
     return new ObjectType({
       ...super.getCloneOpts(parent),
-      id: `${this.id}#${this.#iteration++}`,
       value: this.fields.map((field) => ({
         ...field,
         typeExpr: field.typeExpr.clone(),
@@ -302,9 +300,11 @@ export class ObjectType extends BaseType implements ScopedEntity {
     }
 
     const previousParent = obj.genericParent;
-    const existing = this.genericInstances.find((instance) =>
-      genericInstanceArgsMatch(instance, obj)
-    );
+    const existing =
+      this.genericInstances.find((instance) => instance === obj) ??
+      this.genericInstances.find((instance) =>
+        genericInstanceArgsMatch(instance, obj)
+      );
     if (existing) {
       const existingParentBefore = existing.genericParent;
       traceGenericInstanceRegistration({
