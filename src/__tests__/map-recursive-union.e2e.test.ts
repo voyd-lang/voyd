@@ -26,8 +26,10 @@ import { checkTypes } from "../semantics/check-types/index.js";
 import { compile } from "../compiler.js";
 import { codegen } from "../codegen.js";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import { runWasm } from "../cli/exec.js";
 import assert from "node:assert";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
 type DedupeStats = {
   total: number;
@@ -199,6 +201,10 @@ const resolveTypeAlias = (
     | undefined;
 };
 
+const runWasmFixturePath = fileURLToPath(
+  new URL("./fixtures/voyd/run-wasm-regression.voyd", import.meta.url)
+);
+
 const collectWasmFunctionNames = (wasmText: string): string[] =>
   [...wasmText.matchAll(/\(func \$([^\s()]+)/g)].map(([, name]) => name);
 
@@ -269,6 +275,23 @@ const isOptionalOrIteratorArtifact = (name: string): boolean =>
   name.startsWith("iterate#");
 
 describe("map-recursive-union canonicalization integration", () => {
+  test("runWasm executes the simple regression fixture", async (t) => {
+    const logs: unknown[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.length > 1 ? args : args[0]);
+    };
+
+    try {
+      const result = await runWasm(runWasmFixturePath);
+      t.expect(result).toEqual(1);
+    } finally {
+      console.log = originalLog;
+    }
+
+    t.expect(logs).toContain(1);
+  });
+
   let wasmInstance: WebAssembly.Instance;
   let wasmText: string;
 
