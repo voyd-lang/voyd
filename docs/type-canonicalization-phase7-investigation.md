@@ -5,6 +5,15 @@
 - Phase 7’s goal (“reattach orphaned Optional instances and make Binaryen reuse the canonical heap ids”) is not met. After canonicalization there are still multiple `Some#…` objects for the same specialization, and they are **not** re-registered under the canonical parent.
 - These orphaned Optionals leak into codegen, yielding 46 `struct.new $Some#…` calls (expected 1) and non-idempotent function name sets, so we continue chasing the same runtime failure.
 
+## Phase 0 – Rollback Snapshot (2025-10-13)
+- Reverted commit `e6bb294fb646` to remove Binaryen cache mutations and post-hoc AST rewrites in codegen/canonicalization.
+- `npx vitest run src/__tests__/map-recursive-union.e2e.test.ts` now reproduces the earlier failure pattern:
+  - `RuntimeError: illegal cast` when executing `main`.
+  - Map struct snapshot mismatch (`Map#146251#0` emitted vs expected `Map#146251#2`).
+  - Optional helper guards report duplicated iterator helpers (`iterate#…` suffixes) and nondeterministic function sets.
+- `npx vitest run src/__tests__/run-wasm-regression.e2e.test.ts` fails with the same `RuntimeError: illegal cast`, confirming the wasm module remains invalid at runtime.
+- These results match the pre-phase-5 baseline, providing a clean starting point for the type interner work in Plan 5.
+
 ## Test Status
 - `npx vitest run src/__tests__/run-wasm-regression.e2e.test.ts` → fails with `RuntimeError: illegal cast`.
 - `npx vitest run` → `map-recursive-union.e2e.test.ts` reports four regressions (duplicate optional constructors/functions and wasm nondeterminism).
