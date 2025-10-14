@@ -19,7 +19,7 @@
 ## Integration Points
 
 - `processSemantics` now invokes the validator for its side effects only and returns the original `VoydModule`. Nothing downstream depends on canonical identities yet.
-- A feature flag (`processSemantics(parsed, { types: { useInterner: true } })`) threads the standalone interner through the resolver. When enabled, the validator feeds every discovered `Type` through the interner and reports `{ stats, events }` telemetry via the optional `onTelemetry` callback so tests can compare legacy and interned graphs without mutating production defaults.
+- The semantics pipeline instantiates the type interner by default. Every type encountered during resolution (and again during validation) flows through `TypeContext.internType`, and callers can opt-in to `{ stats, events }` telemetry via the optional `onTelemetry` callback without flipping any feature flags.
 - Unit tests can observe duplicates by either:
   1. Passing `onDuplicate` to accumulate `CanonicalizationIssue` objects (see `canonicalize-resolved-types.test.ts`), or
   2. Supplying a `CanonicalTypeTable` and reading `table.getDedupeEvents()` after validation (used by the e2e harness).
@@ -53,7 +53,7 @@ The example above keeps the module untouched but provides enough context to reas
 ## Looking Ahead
 
 - **Phase 4:** Introduce a real type interner so duplicates are prevented at construction time instead of being diagnosed after the fact.
-- **Phase 5–6:** Migrate metadata ownership (Binaryen caches, trait method tables, generic instance lists) to the canonical handles emitted by the interner.
+- **Phase 5:** Migrate metadata ownership (Binaryen caches, trait method tables, generic instance lists) to the canonical handles emitted by the interner.
 - **Phase 7:** Re-enable the skipped tests and demonstrate that the recursive-union regressions disappear once codegen consumes canonical instances exclusively.
 
 ## Historical Context (Pre-Phase 3)
@@ -101,3 +101,12 @@ console.log("observed", stats.observed, "canonical", stats.canonical);
 ```
 
 The snippet keeps the semantics pipeline untouched while exercising the interner on a fully resolved module. The resulting stats can be snapshot in tests or logged during investigation runs. Early runs against the wasm regression fixture report roughly 1 300 observed types with ~1 100 reuse hits, providing a quantitative baseline for later phases.
+
+# Interner Default Activation (Phase 6)
+
+Phase 6 removes the legacy clone-based type path entirely. The semantics pipeline now wires the interner through every construction site and treats the canonical handle as the source of truth for metadata.
+
+- **No more feature flag.** `processSemantics` always constructs a `TypeContext` with an active interner. The optional `internDuringResolution` toggle remains available for tests, but production builds intern during resolution and validation automatically.
+- **Canonical metadata only.** `ObjectType.registerGenericInstance` and `TraitType.registerGenericInstance` record canonical instances exclusively, delegating dedupe to the interner and refusing to attach loser clones to `genericInstances`.
+- **Optional tooling hard-fails on divergence.** `scripts/inspect-optional-constructors.ts` now throws when Optional constructors drift from their canonical parents, and `collectOptionalConstructors` no longer normalizes via orphan snapshots.
+- **Regression guardrails.** `map-recursive-union` integration tests assert that every Optional specialization remains registered on the canonical parent, preventing the resolver from leaking duplicate constructor nodes back into the AST.

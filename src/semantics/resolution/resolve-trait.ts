@@ -7,7 +7,10 @@ import { getExprType } from "./get-expr-type.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveImpl } from "./resolve-impl.js";
 import { canonicalType } from "../types/canonicalize.js";
-import { internTypeWithContext } from "../types/type-context.js";
+import {
+  internTypeImmediately,
+  internTypeWithContext,
+} from "../types/type-context.js";
 
 export const resolveTrait = (trait: TraitType, call?: Call): TraitType => {
   if (trait.typeParameters) {
@@ -48,15 +51,20 @@ const resolveGenericTraitVersion = (
     newTrait.registerEntity(alias);
   });
 
-  trait.registerGenericInstance(newTrait);
-  newTrait.methods.applyMap((fn) => resolveFn(fn));
-  newTrait.typesResolved = true;
-  newTrait.implementations = [];
+  const canonicalTrait = internTypeImmediately(newTrait) as TraitType;
+  const registered = trait.registerGenericInstance(canonicalTrait);
+  if (registered !== canonicalTrait) {
+    return registered;
+  }
+
+  canonicalTrait.methods.applyMap((fn) => resolveFn(fn));
+  canonicalTrait.typesResolved = true;
+  canonicalTrait.implementations = [];
   trait.implementations.forEach((impl) =>
-    resolveImpl(impl.clone(newTrait))
+    resolveImpl(impl.clone(canonicalTrait))
   );
 
-  return internTypeWithContext(newTrait) as TraitType;
+  return canonicalTrait;
 };
 
 const typeArgsMatch = (call: Call, candidate: TraitType): boolean =>

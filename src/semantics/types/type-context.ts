@@ -12,14 +12,12 @@ export type TypeContextTelemetry = {
 };
 
 export type TypeContextOptions = {
-  useInterner?: boolean;
   internerOptions?: TypeInternerOptions;
   internDuringResolution?: boolean;
 };
 
 export type TypeContext = {
-  readonly useInterner: boolean;
-  readonly interner?: TypeInterner;
+  readonly interner: TypeInterner;
   readonly internDuringResolution: boolean;
   internType<T extends Type | undefined>(type: T): T;
   getTelemetry(): TypeContextTelemetry | undefined;
@@ -30,22 +28,16 @@ let activeContext: TypeContext | undefined;
 export const createTypeContext = (
   options: TypeContextOptions = {}
 ): TypeContext => {
-  const {
-    useInterner = false,
-    internerOptions,
-    internDuringResolution = false,
-  } = options;
-  const interner = useInterner ? new TypeInterner(internerOptions) : undefined;
+  const { internerOptions, internDuringResolution = false } = options;
+  const interner = new TypeInterner(internerOptions);
   return {
-    useInterner: Boolean(interner),
     interner,
     internDuringResolution,
     internType<T extends Type | undefined>(type: T): T {
-      if (!interner || !type) return type;
+      if (!type) return type;
       return interner.intern(type) as T;
     },
     getTelemetry(): TypeContextTelemetry | undefined {
-      if (!interner) return undefined;
       return {
         stats: interner.getStats(),
         events: interner.getEvents(),
@@ -71,9 +63,15 @@ export const getActiveTypeContext = (): TypeContext | undefined => activeContext
 
 export const internTypeWithContext = <T extends Type | undefined>(type: T): T => {
   const context = getActiveTypeContext();
-  if (!context || !context.useInterner || !context.internDuringResolution) {
+  if (!context || !context.internDuringResolution) {
     return type;
   }
+  return context.internType(type);
+};
+
+export const internTypeImmediately = <T extends Type | undefined>(type: T): T => {
+  const context = getActiveTypeContext();
+  if (!context) return type;
   return context.internType(type);
 };
 

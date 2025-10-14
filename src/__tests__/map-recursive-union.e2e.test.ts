@@ -275,17 +275,12 @@ const isOptionalOrIteratorArtifact = (name: string): boolean =>
   name.startsWith("None#") ||
   name.startsWith("iterate#");
 
-describe("processSemantics type interner flag", () => {
-  test("runs canonicalization in legacy and interner modes", async (t) => {
-    const baselineParsed = await parseModule(mapRecursiveUnionVoyd);
-    const baseline = processSemantics(baselineParsed) as VoydModule;
-    t.expect(baseline).toBeDefined();
-
-    const internerParsed = await parseModule(mapRecursiveUnionVoyd);
+describe("processSemantics type interner", () => {
+  test("reports canonicalization telemetry by default", async (t) => {
+    const parsed = await parseModule(mapRecursiveUnionVoyd);
     let telemetry: TypeContextTelemetry | undefined;
-    const withInterner = processSemantics(internerParsed, {
+    const canonical = processSemantics(parsed, {
       types: {
-        useInterner: true,
         internerOptions: { recordEvents: true },
         onTelemetry: (value) => {
           telemetry = value;
@@ -293,7 +288,7 @@ describe("processSemantics type interner flag", () => {
       },
     }) as VoydModule;
 
-    t.expect(withInterner).toBeDefined();
+    t.expect(canonical).toBeDefined();
     t.expect(telemetry).toBeDefined();
     t.expect(telemetry?.stats.observed).toBeGreaterThan(0);
     t.expect(telemetry?.stats.canonical).toBeGreaterThan(0);

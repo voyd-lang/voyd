@@ -302,9 +302,11 @@ export class ObjectType extends BaseType implements ScopedEntity {
     }
 
     const previousParent = obj.genericParent;
-    const existing = this.genericInstances.find((instance) =>
-      genericInstanceArgsMatch(instance, obj)
-    );
+    const existing =
+      this.genericInstances.find((instance) => instance === obj) ??
+      this.genericInstances.find((instance) =>
+        genericInstanceArgsMatch(instance, obj)
+      );
     if (existing) {
       const existingParentBefore = existing.genericParent;
       traceGenericInstanceRegistration({

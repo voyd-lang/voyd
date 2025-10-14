@@ -68,14 +68,7 @@ const main = async () => {
     const arg = obj.appliedTypeArgs?.[0];
     const core = `${obj.id} arg=${describeType(arg as Type | undefined)}`;
     const location = obj.location?.toString?.();
-    const snapshot = (obj.getAttribute?.("canon:orphanSnapshot") as
-      | {
-          canonical?: { id?: string };
-        }
-      | undefined) ?? {};
-    const canonicalId = snapshot?.canonical?.id;
-    const suffix = canonicalId ? ` canonical=${canonicalId}` : "";
-    return location ? `${core}${suffix} @ ${location}` : `${core}${suffix}`;
+    return location ? `${core} @ ${location}` : core;
   };
 
   summarize("Some constructors in canonical AST", some);
@@ -121,6 +114,9 @@ const main = async () => {
       console.log(`    missing: ${missingDetail}`);
       console.log(`    extra: ${extraDetail}`);
     });
+    throw new Error(
+      "Optional constructor metadata diverges from canonical registrations"
+    );
   }
 
   const lookupParent = (id: string) => {

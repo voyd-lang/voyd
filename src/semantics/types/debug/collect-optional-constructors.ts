@@ -53,29 +53,6 @@ const appliedArgSignature = (instance: ObjectType): string => {
     .join(",")}]`;
 };
 
-const ORPHAN_SNAPSHOT_KEY = "canon:orphanSnapshot";
-
-const resolveCanonicalOptional = (
-  instance: ObjectType
-): ObjectType | undefined => {
-  const snapshot = instance.getAttribute?.(ORPHAN_SNAPSHOT_KEY) as
-    | {
-        canonical?: { id?: string };
-      }
-    | undefined;
-  if (!snapshot?.canonical?.id) return undefined;
-  const parent = instance.genericParent;
-  if (!parent?.genericInstances?.length) return undefined;
-  return parent.genericInstances.find(
-    (candidate) => candidate.id === snapshot.canonical?.id
-  );
-};
-
-const normalizeOptionalInstance = (instance: ObjectType): ObjectType => {
-  const canonical = resolveCanonicalOptional(instance);
-  return canonical ?? instance;
-};
-
 const formatInstanceDetail = (instance: ObjectType): string => {
   const signature = appliedArgSignature(instance);
   const location = instance.location?.toString();
@@ -133,11 +110,10 @@ export const collectOptionalConstructors = (
     instance: ObjectType | undefined
   ): void => {
     if (!parent || !instance) return;
-    const canonicalInstance = normalizeOptionalInstance(instance);
     const set = edges.get(parent) ?? new Set<ObjectType>();
-    set.add(canonicalInstance);
+    set.add(instance);
     edges.set(parent, set);
-    parentByInstance.set(canonicalInstance, parent);
+    parentByInstance.set(instance, parent);
   };
 
   const visitList = (list?: List): void => {
@@ -244,14 +220,13 @@ export const collectOptionalConstructors = (
 
     if ((type as ObjectType).isObjectType?.()) {
       const obj = type as ObjectType;
-      const normalized = normalizeOptionalInstance(obj);
-      if (isOptionalSomeConstructor(obj)) some.add(normalized);
-      if (isOptionalNoneConstructor(obj)) none.add(normalized);
+      if (isOptionalSomeConstructor(obj)) some.add(obj);
+      if (isOptionalNoneConstructor(obj)) none.add(obj);
       if (
         (isOptionalSomeConstructor(obj) || isOptionalNoneConstructor(obj)) &&
         obj.genericParent
       ) {
-        registerOptionalEdge(obj.genericParent, normalized);
+        registerOptionalEdge(obj.genericParent, obj);
       }
       if (
         matchesName(obj.name, SOME_CONSTRUCTOR_NAME) ||
