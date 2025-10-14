@@ -3,6 +3,7 @@ import { Expr } from "../../syntax-objects/expr.js";
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
 import { ObjectType, Type, TypeAlias, voydBaseObject } from "../../syntax-objects/types.js";
+import { registerTypeInstance } from "../../syntax-objects/type-context.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { getExprType } from "./get-expr-type.js";
 import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";
@@ -175,25 +176,27 @@ const resolveGenericsWithTypeArgs = (
   typeParameters.forEach((typeParam, index) => {
     const typeArg = args.exprAt(index);
     const identifier = typeParam.clone();
-    const type = new TypeAlias({
-      name: identifier,
-      // Preserve the original type arg expression (e.g., MsgPack) for
-      // readable formatting of applied generics without expanding recursively.
-      typeExpr: typeArg.clone(),
-    });
+    const typeAlias = registerTypeInstance(
+      new TypeAlias({
+        name: identifier,
+        // Preserve the original type arg expression (e.g., MsgPack) for
+        // readable formatting of applied generics without expanding recursively.
+        typeExpr: typeArg.clone(),
+      })
+    );
     resolveTypeExpr(typeArg);
     const resolvedType = getExprType(typeArg);
     if (resolvedType) {
-      type.type = resolvedType;
+      typeAlias.type = registerTypeInstance(resolvedType);
     } else if (typeArg.isIdentifier?.()) {
       const resolvedAlias = typeArg.resolve?.();
       if (resolvedAlias?.isTypeAlias?.() && resolvedAlias.type) {
-        type.type = resolvedAlias.type;
+        typeAlias.type = registerTypeInstance(resolvedAlias.type);
       }
     }
-    if (!type.type) typesNotResolved = true;
-    newObj.appliedTypeArgs?.push(type);
-    newObj.registerEntity(type);
+    if (!typeAlias.type) typesNotResolved = true;
+    newObj.appliedTypeArgs?.push(typeAlias);
+    newObj.registerEntity(typeAlias);
   });
   if (typesNotResolved) return obj;
   const implementations = newObj.implementations;

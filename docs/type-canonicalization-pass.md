@@ -100,3 +100,36 @@ console.log("observed", stats.observed, "canonical", stats.canonical);
 ```
 
 The snippet keeps the semantics pipeline untouched while exercising the interner on a fully resolved module. The resulting stats can be snapshot in tests or logged during investigation runs. Early runs against the wasm regression fixture report roughly 1 300 observed types with ~1 100 reuse hits, providing a quantitative baseline for later phases.
+
+# Type Interner Feature Flag (Phase 5)
+
+## Overview
+
+- `processSemantics` can now execute behind a feature flag that swaps the legacy clone-based semantics pipeline for the interner-backed flow without touching downstream stages.
+- `createTypeContext({ useInterner, recordEvents })` produces an injectable context that both construction sites and the validator consult through `registerTypeInstance` / `registerTypeList` hooks.
+- When the context is active, every newly constructed `Type` (objects, traits, unions, optionals, inference aliases) funnels through the interner immediately; when disabled the hooks fall back to no-ops.
+- Telemetry is emitted through `onTypeContextTelemetry`, exposing aggregate stats plus optional reuse/divergence summaries so investigations can diff legacy vs interner behaviour.
+
+## Toggling the Flag
+
+- **Programmatic:** pass `useTypeInterner: true` to `processSemantics(parsed, { useTypeInterner, recordTypeInternerEvents, onTypeContextTelemetry })`. Setting `recordTypeInternerEvents: true` enables per-fingerprint reuse summaries in the telemetry payload.
+- **Environment:** export `VOYD_USE_TYPE_INTERNER=1` to enable the interner globally. Set `VOYD_TYPE_INTERNER_EVENTS=1` alongside it to capture event logs for diagnostics.
+- **Telemetry hook:**
+
+  ```ts
+  const telemetryReports: TypeContextTelemetry[] = [];
+  processSemantics(parsedModule, {
+    useTypeInterner: true,
+    recordTypeInternerEvents: true,
+    onTypeContextTelemetry: (report) => telemetryReports.push(report),
+  });
+  console.log(telemetryReports[0]?.stats);
+  ```
+
+- **Default behaviour:** with no flag the pipeline stays identical to earlier phases—types still clone freely, and telemetry reports `{ enabled: false }`.
+
+## Legacy Parity
+
+- All semantics modules construct types via `registerTypeInstance`, ensuring the same code paths work whether the interner is active or not.
+- `canonicalizeResolvedTypes` still runs as a validator, but in interner mode it calls back into the context so legacy references are deduped without mutating the AST directly.
+- Existing tests now execute key fixtures in both modes; legacy runs confirm compatibility, while interner runs capture stats to track progress toward Phase 6.

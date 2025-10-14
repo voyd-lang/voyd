@@ -10,6 +10,10 @@ import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
 import { TraitType } from "./types/trait.js";
 import { BaseType } from "./types/base-type.js";
+import {
+  registerTypeInstance,
+  registerTypeList,
+} from "./type-context.js";
 
 const flagEnabled = (value: string | undefined): boolean => {
   if (!value) return false;
@@ -81,11 +85,12 @@ export class TypeAlias extends BaseType {
   }
 
   clone(parent?: Expr | undefined): TypeAlias {
-    return new TypeAlias({
+    const clone = new TypeAlias({
       ...super.getCloneOpts(parent),
       typeExpr: this.#typeExpr.clone(),
       typeParameters: this.#typeParameters.clone(),
     });
+    return registerTypeInstance(clone);
   }
 }
 
@@ -137,10 +142,11 @@ export class UnionType extends BaseType {
   }
 
   clone(parent?: Expr): UnionType {
-    return new UnionType({
+    const clone = new UnionType({
       ...super.getCloneOpts(parent),
       childTypeExprs: this.childTypeExprs.clone(),
     });
+    return registerTypeInstance(clone);
   }
 
   toJSON(): TypeJSON {
@@ -167,11 +173,12 @@ export class IntersectionType extends BaseType {
   }
 
   clone(parent?: Expr): IntersectionType {
-    return new IntersectionType({
+    const clone = new IntersectionType({
       ...super.getCloneOpts(parent),
       nominalObjectExpr: this.nominalTypeExpr.clone(),
       structuralObjectExpr: this.structuralTypeExpr.clone(),
     });
+    return registerTypeInstance(clone);
   }
 
   toJSON(): TypeJSON {
@@ -196,7 +203,11 @@ export class TupleType extends BaseType {
   }
 
   clone(parent?: Expr): TupleType {
-    return new TupleType({ ...super.getCloneOpts(parent), value: this.value });
+    const clone = new TupleType({
+      ...super.getCloneOpts(parent),
+      value: registerTypeList(this.value),
+    });
+    return registerTypeInstance(clone);
   }
 
   toJSON(): TypeJSON {
@@ -268,7 +279,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
   }
 
   clone(parent?: Expr): ObjectType {
-    return new ObjectType({
+    const clone = new ObjectType({
       ...super.getCloneOpts(parent),
       id: `${this.id}#${this.#iteration++}`,
       value: this.fields.map((field) => ({
@@ -281,6 +292,24 @@ export class ObjectType extends BaseType implements ScopedEntity {
       implementations: this.implementations.map((impl) => impl.clone()),
       isStructural: this.isStructural,
     });
+
+    if (this.appliedTypeArgs?.length) {
+      clone.appliedTypeArgs = registerTypeList(this.appliedTypeArgs);
+    }
+
+    if (this.parentObjType) {
+      clone.parentObjType = registerTypeInstance(this.parentObjType);
+    }
+
+    if (this.genericParent) {
+      clone.genericParent = registerTypeInstance(this.genericParent);
+    }
+
+    if (this.genericInstances?.length) {
+      clone.genericInstances = registerTypeList(this.genericInstances) as ObjectType[];
+    }
+
+    return registerTypeInstance(clone);
   }
 
   extends(ancestor: ObjectType): boolean {
@@ -592,10 +621,11 @@ export class FixedArrayType extends BaseType {
   }
 
   clone(parent?: Expr): FixedArrayType {
-    return new FixedArrayType({
+    const clone = new FixedArrayType({
       ...super.getCloneOpts(parent),
       elemTypeExpr: this.elemTypeExpr.clone(),
     });
+    return registerTypeInstance(clone);
   }
 
   toJSON(): TypeJSON {
@@ -630,12 +660,16 @@ export class FnType extends BaseType {
     const returnTypeExpr = this.returnTypeExpr?.clone();
     const clone = new FnType({
       ...super.getCloneOpts(parent),
-      returnType: this.returnType,
+      returnType: registerTypeInstance(this.returnType),
       parameters,
       returnTypeExpr,
     });
-    parameters.forEach((p) => (p.parent = clone));
-    return clone;
+    const canonical = registerTypeInstance(clone);
+    canonical.parameters.forEach((p) => (p.parent = canonical));
+    if (canonical.returnTypeExpr) {
+      canonical.returnTypeExpr.parent = canonical;
+    }
+    return canonical;
   }
 
   toJSON(): TypeJSON {

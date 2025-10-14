@@ -8,6 +8,7 @@ import { getExprType } from "./get-expr-type.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveImpl } from "./resolve-impl.js";
 import { canonicalType } from "../types/canonicalize.js";
+import { registerTypeInstance } from "../../syntax-objects/type-context.js";
 
 export const resolveTrait = (trait: TraitType, call?: Call): TraitType => {
   if (trait.typeParameters) {
@@ -39,10 +40,15 @@ const resolveGenericTraitVersion = (
   trait.typeParameters?.forEach((typeParam, index) => {
     const typeArg = call.typeArgs!.exprAt(index);
     const identifier = typeParam.clone();
-    const alias = new TypeAlias({ name: identifier, typeExpr: typeArg.clone() });
+    const alias = registerTypeInstance(
+      new TypeAlias({ name: identifier, typeExpr: typeArg.clone() })
+    );
     alias.parent = newTrait;
     resolveTypeExpr(typeArg);
-    alias.type = getExprType(typeArg);
+    const resolved = getExprType(typeArg);
+    if (resolved) {
+      alias.type = registerTypeInstance(resolved);
+    }
     newTrait.appliedTypeArgs?.push(alias);
     newTrait.registerEntity(alias);
   });

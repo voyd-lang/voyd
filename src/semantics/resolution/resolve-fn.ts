@@ -21,6 +21,7 @@ import { typesAreCompatible } from "./types-are-compatible.js";
 import { Type } from "../../syntax-objects/types.js";
 import { canonicalType } from "../types/canonicalize.js";
 import { containsUnresolvedTypeId } from "./resolve-object-type.js";
+import { registerTypeInstance } from "../../syntax-objects/type-context.js";
 
 export type ResolveFnTypesOpts = {
   typeArgs?: List;
@@ -313,12 +314,17 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   typeParameters.forEach((typeParam, index) => {
     const typeArg = args.exprAt(index);
     const identifier = typeParam.clone();
-    const type = new TypeAlias({ name: identifier, typeExpr: typeArg.clone() });
-    type.parent = newFn;
+    const typeAlias = registerTypeInstance(
+      new TypeAlias({ name: identifier, typeExpr: typeArg.clone() })
+    );
+    typeAlias.parent = newFn;
     resolveTypeExpr(typeArg);
-    type.type = getExprType(typeArg);
-    newFn.appliedTypeArgs?.push(type);
-    newFn.registerEntity(type);
+    const resolved = getExprType(typeArg);
+    if (resolved) {
+      typeAlias.type = registerTypeInstance(resolved);
+    }
+    newFn.appliedTypeArgs?.push(typeAlias);
+    newFn.registerEntity(typeAlias);
   });
 
   if (!newFn.appliedTypeArgs.every((t) => (t as TypeAlias).type)) {

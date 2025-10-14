@@ -5,6 +5,7 @@ import {
   UnionType,
 } from "../../syntax-objects/types.js";
 import { typesAreEqual } from "./types-are-equal.js";
+import { registerTypeInstance } from "../../syntax-objects/type-context.js";
 
 /**
  * Combines types into their least common denominator.
@@ -25,7 +26,7 @@ export const combineTypes = (types: Type[]): Type | undefined => {
     if (isObjectOrIntersection(type) && isObjectOrIntersection(topType)) {
       const union = new UnionType({ name: `CombinedTypeUnion` });
       union.types = [topType, type];
-      topType = union;
+      topType = registerTypeInstance(union);
       isLocalUnion = true;
       continue;
     }

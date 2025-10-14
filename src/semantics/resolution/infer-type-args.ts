@@ -3,6 +3,7 @@ import { Identifier } from "../../syntax-objects/identifier.js";
 import { nop } from "../../syntax-objects/index.js";
 import { List } from "../../syntax-objects/list.js";
 import { Type, TypeAlias } from "../../syntax-objects/types.js";
+import { registerTypeInstance } from "../../syntax-objects/type-context.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { typesAreEqual } from "./types-are-equal.js";
@@ -288,8 +289,10 @@ export const inferTypeArgs = (
   for (const tp of typeParams) {
     const ty = merged.get(tp.value);
     if (!ty) return undefined;
-    const alias = new TypeAlias({ name: tp.clone(), typeExpr: nop() });
-    alias.type = ty;
+    const alias = registerTypeInstance(
+      new TypeAlias({ name: tp.clone(), typeExpr: nop() })
+    );
+    alias.type = registerTypeInstance(ty);
     inferred.push(alias);
   }
 

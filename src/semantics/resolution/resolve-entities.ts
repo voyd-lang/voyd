@@ -13,6 +13,7 @@ import {
   voydBaseObject,
   Type,
 } from "../../syntax-objects/types.js";
+import { registerTypeInstance } from "../../syntax-objects/type-context.js";
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveCall } from "./resolve-call.js";
@@ -294,7 +295,7 @@ export const resolveObjectLiteral = (
     return field;
   });
 
-  obj.type = new ObjectType({
+  const literalType = new ObjectType({
     ...obj.metadata,
     name: `ObjectLiteral-${obj.syntaxId}`,
     value: obj.fields.map((f) => ({
@@ -305,6 +306,8 @@ export const resolveObjectLiteral = (
     parentObj: voydBaseObject,
     isStructural: true,
   });
+
+  obj.type = registerTypeInstance(literalType);
 
   return obj;
 };

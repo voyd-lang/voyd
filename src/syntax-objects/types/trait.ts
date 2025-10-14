@@ -8,6 +8,10 @@ import { ScopedEntity } from "../scoped-entity.js";
 import { LexicalContext } from "../lib/lexical-context.js";
 import { Type, TypeJSON } from "../types.js";
 import { Identifier } from "../identifier.js";
+import {
+  registerTypeInstance,
+  registerTypeList,
+} from "../type-context.js";
 
 export type TraitOpts = ScopedNamedEntityOpts & {
   methods: Fn[];
@@ -37,13 +41,23 @@ export class TraitType extends BaseType implements ScopedEntity {
   }
 
   clone(parent?: Expr): TraitType {
-    return new TraitType({
+    const clone = new TraitType({
       ...super.getCloneOpts(parent),
       id: `${this.id}#${this.#iteration++}`,
       methods: this.methods.clone(),
       typeParameters: this.typeParameters,
       implementations: [],
     });
+    if (this.appliedTypeArgs?.length) {
+      clone.appliedTypeArgs = registerTypeList(this.appliedTypeArgs);
+    }
+    if (this.genericParent) {
+      clone.genericParent = registerTypeInstance(this.genericParent);
+    }
+    if (this.genericInstances?.length) {
+      clone.genericInstances = registerTypeList(this.genericInstances) as TraitType[];
+    }
+    return registerTypeInstance(clone);
   }
 
   toJSON(): TypeJSON {

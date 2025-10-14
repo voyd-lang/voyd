@@ -13,6 +13,7 @@ import {
 import { TraitType } from "../../syntax-objects/types/trait.js";
 import canonicalType from "./canonicalize.js";
 import { typeKey } from "./type-key.js";
+import { runWithoutTypeContext } from "../../syntax-objects/type-context.js";
 
 type FingerprintFn = (type: Type) => string;
 
@@ -118,7 +119,9 @@ export class TypeInterner {
     path.add(type);
     this.#stats.observed += 1;
 
-    const fingerprint = this.#fingerprint(canonicalType(type));
+    const fingerprint = runWithoutTypeContext(() =>
+      this.#fingerprint(canonicalType(type))
+    );
     const canonical = this.#byFingerprint.get(fingerprint);
     if (canonical) {
       this.#aliases.set(type, canonical);

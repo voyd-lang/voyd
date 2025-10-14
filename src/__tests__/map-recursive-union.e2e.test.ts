@@ -30,6 +30,7 @@ import { runWasm } from "../cli/exec.js";
 import assert from "node:assert";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { type TypeContextTelemetry } from "../semantics/types/type-context.js";
 
 type DedupeStats = {
   total: number;
@@ -205,6 +206,12 @@ const runWasmFixturePath = fileURLToPath(
   new URL("./fixtures/voyd/run-wasm-regression.voyd", import.meta.url)
 );
 
+const telemetryVoyd = `
+pub fn main() -> i32
+  let x = 1
+  x
+`;
+
 const collectWasmFunctionNames = (wasmText: string): string[] =>
   [...wasmText.matchAll(/\(func \$([^\s()]+)/g)].map(([, name]) => name);
 
@@ -273,6 +280,47 @@ const isOptionalOrIteratorArtifact = (name: string): boolean =>
   name.startsWith("Some#") ||
   name.startsWith("None#") ||
   name.startsWith("iterate#");
+
+describe("type interner feature flag", () => {
+  test("processSemantics reports telemetry when enabled", async (t) => {
+    const telemetry: TypeContextTelemetry[] = [];
+    const parsed = await parseModule(telemetryVoyd);
+    let module: VoydModule | undefined;
+    let threw = false;
+    try {
+      module = processSemantics(parsed, {
+        useTypeInterner: true,
+        recordTypeInternerEvents: true,
+        onTypeContextTelemetry: (report) => telemetry.push(report),
+      }) as VoydModule;
+    } catch (error) {
+      threw = true;
+      t.expect(String(error)).toMatch(/unrecognized identifier/i);
+    }
+
+    t.expect(telemetry).toHaveLength(1);
+    const report = telemetry[0]!;
+    t.expect(report.enabled).toBe(true);
+    t.expect(report.stats?.observed ?? 0).toBeGreaterThan(0);
+    t.expect(report.stats?.canonical ?? 0).toBeGreaterThan(0);
+    t.expect(report.reuseSummary).toBeDefined();
+    if (!threw) {
+      t.expect(module).toBeDefined();
+    }
+  });
+
+  test("processSemantics disables telemetry when feature flag is off", async (t) => {
+    const telemetry: TypeContextTelemetry[] = [];
+    const parsed = await parseModule(telemetryVoyd);
+    processSemantics(parsed, {
+      useTypeInterner: false,
+      onTypeContextTelemetry: (report) => telemetry.push(report),
+    });
+
+    t.expect(telemetry).toHaveLength(1);
+    t.expect(telemetry[0]?.enabled).toBe(false);
+  });
+});
 
 describe("map-recursive-union canonicalization integration", () => {
   test.skip("runWasm executes the simple regression fixture", async (t) => {

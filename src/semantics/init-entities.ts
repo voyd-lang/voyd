@@ -24,6 +24,7 @@ import {
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { TraitType } from "../syntax-objects/types/trait.js";
 import { SemanticProcessor } from "./types.js";
+import { registerTypeInstance } from "../syntax-objects/type-context.js";
 
 export const initEntities: SemanticProcessor = (expr) => {
   if (expr.isModule()) {
@@ -341,11 +342,12 @@ const initPipedUnionType = (union: List) => {
 
   extractChildren(union);
 
-  return new UnionType({
+  const unionType = new UnionType({
     ...union.metadata,
     childTypeExprs: children,
     name: union.syntaxId.toString(),
   });
+  return registerTypeInstance(unionType);
 };
 
 const initIntersection = (intersection: List): IntersectionType => {
@@ -356,12 +358,13 @@ const initIntersection = (intersection: List): IntersectionType => {
     throw new Error("Invalid intersection type");
   }
 
-  return new IntersectionType({
+  const intersectionType = new IntersectionType({
     ...intersection.metadata,
     name: intersection.syntaxId.toString(),
     nominalObjectExpr,
     structuralObjectExpr,
   });
+  return registerTypeInstance(intersectionType);
 };
 
 const initVar = (varDef: List): Variable => {
@@ -522,7 +525,13 @@ const initTypeAlias = (type: List) => {
     typeExpr.setName(name.value);
   }
 
-  return new TypeAlias({ ...type.metadata, name, typeExpr, typeParameters });
+  const alias = new TypeAlias({
+    ...type.metadata,
+    name,
+    typeExpr,
+    typeParameters,
+  });
+  return registerTypeInstance(alias);
 };
 
 const initCall = (call: List) => {
@@ -594,16 +603,17 @@ const initFnType = (fn: List): FnType => {
     ...fn.metadata,
     name: Identifier.from(`FnType#${fn.syntaxId}`),
     parameters,
-    returnType: dVoid,
-    returnTypeExpr: returnTypeExpr,
+    returnType: registerTypeInstance(dVoid),
+    returnTypeExpr,
   });
 
-  fnType.parameters.forEach((p) => (p.parent = fnType));
-  if (fnType.returnTypeExpr) {
-    fnType.returnTypeExpr.parent = fnType;
+  const canonicalFnType = registerTypeInstance(fnType);
+  canonicalFnType.parameters.forEach((p) => (p.parent = canonicalFnType));
+  if (canonicalFnType.returnTypeExpr) {
+    canonicalFnType.returnTypeExpr.parent = canonicalFnType;
   }
 
-  return fnType;
+  return canonicalFnType;
 };
 
 const initTypeExprEntities = (type?: Expr): Expr | undefined => {
@@ -650,7 +660,7 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
 };
 
 const initTupleType = (tuple: List) => {
-  return new ObjectType({
+  const tupleType = new ObjectType({
     ...tuple.metadata,
     name: tuple.syntaxId.toString(),
     value: tuple.sliceAsArray(1).map((t, i) => ({
@@ -659,6 +669,7 @@ const initTupleType = (tuple: List) => {
     })),
     isStructural: true,
   });
+  return registerTypeInstance(tupleType);
 };
 
 const initFixedArrayType = (type: List) => {
@@ -669,11 +680,12 @@ const initFixedArrayType = (type: List) => {
     throw new Error("Invalid FixedArray type");
   }
 
-  return new FixedArrayType({
+  const fixedArray = new FixedArrayType({
     ...type.metadata,
     elemTypeExpr,
     name: type.syntaxId.toString(),
   });
+  return registerTypeInstance(fixedArray);
 };
 
 const initNominalObjectType = (obj: List) => {
@@ -695,22 +707,24 @@ const initNominalObjectType = (obj: List) => {
   if (!name)
     throw new Error("Invalid object definition: invalid name expression");
 
-  return new ObjectType({
+  const objectType = new ObjectType({
     ...obj.metadata,
     name,
     typeParameters,
     parentObjExpr: parentExpr ? initEntities(parentExpr) : undefined,
     value: extractObjectFields(obj.listAt(2)),
   });
+  return registerTypeInstance(objectType);
 };
 
 const initStructuralObjectType = (obj: List) => {
-  return new ObjectType({
+  const objectType = new ObjectType({
     ...obj.metadata,
     name: obj.syntaxId.toString(),
     value: extractObjectFields(obj),
     isStructural: true,
   });
+  return registerTypeInstance(objectType);
 };
 
 export const initMatch = (match: List): Match => {
@@ -838,7 +852,13 @@ const initTrait = (trait: List) => {
     .map(initEntities)
     .filter((e) => e.isFn()) as Fn[];
 
-  return new TraitType({ ...trait.metadata, name, methods, typeParameters });
+  const traitType = new TraitType({
+    ...trait.metadata,
+    name,
+    methods,
+    typeParameters,
+  });
+  return registerTypeInstance(traitType);
 };
 
 /** Expects ["generics", ...Identifiers] */

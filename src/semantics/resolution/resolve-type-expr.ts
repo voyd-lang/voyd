@@ -7,6 +7,7 @@ import {
   FnType,
   Type,
 } from "../../syntax-objects/index.js";
+import { registerTypeInstance } from "../../syntax-objects/type-context.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveIntersectionType } from "./resolve-intersection.js";
 import { resolveObjectType } from "./resolve-object-type.js";
@@ -99,12 +100,17 @@ export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
     alias.typeParameters.forEach((typeParam, index) => {
       const typeArg = call.typeArgs?.exprAt(index);
       const identifier = typeParam.clone();
-      const type = new TypeAlias({
-        name: identifier,
-        typeExpr: nop(),
-      });
-      type.type = getExprType(typeArg);
-      alias.registerEntity(type);
+      const typeAlias = registerTypeInstance(
+        new TypeAlias({
+          name: identifier,
+          typeExpr: nop(),
+        })
+      );
+      const resolvedArgType = getExprType(typeArg);
+      if (resolvedArgType) {
+        typeAlias.type = registerTypeInstance(resolvedArgType);
+      }
+      alias.registerEntity(typeAlias);
     });
   }
 

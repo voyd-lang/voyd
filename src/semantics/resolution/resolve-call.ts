@@ -38,6 +38,7 @@ import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
+import { registerTypeInstance } from "../../syntax-objects/type-context.js";
 import { canonicalType } from "../types/canonicalize.js";
 
 export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
@@ -677,13 +678,15 @@ const resolveFixedArray = (call: Call) => {
     ) ??
     nop();
 
-  const arr = resolveFixedArrayType(
+  const fixedArray = resolveFixedArrayType(
     new FixedArrayType({
       ...call.metadata,
       name: Identifier.from("FixedArray"),
       elemTypeExpr,
     })
   );
+
+  const arr = registerTypeInstance(fixedArray);
 
   // Propagate the resolved element type back into elements so structural
   // literals (e.g., tuples) adopt the expected field types instead of their

@@ -14,6 +14,10 @@ import {
   type TypeInternerOptions,
   type TypeInternerStats,
 } from "./type-interner.js";
+import {
+  createTypeContext,
+  runWithTypeContext,
+} from "./type-context.js";
 
 export type TypeInternerHarnessResult = {
   root: VoydModule;
@@ -40,9 +44,12 @@ export const runTypeInternerOnModule = (
   module: VoydModule,
   options: TypeInternerOptions = {}
 ): TypeInternerHarnessResult => {
-  const interner = new TypeInterner(options);
-  canonicalizeResolvedTypes(module, {
-    onType: (type) => interner.intern(type),
+  const context = createTypeContext({ useInterner: true, recordEvents: options.recordEvents });
+  const interner = context.interner ?? new TypeInterner(options);
+  runWithTypeContext(context, () => {
+    canonicalizeResolvedTypes(module, {
+      onType: (type) => context.register(type),
+    });
   });
   return {
     root: module,

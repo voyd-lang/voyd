@@ -11,6 +11,7 @@ import { TraitType } from "../../syntax-objects/types/trait.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFn } from "./resolve-fn.js";
 import { resolveExport } from "./resolve-use.js";
+import { registerTypeInstance } from "../../syntax-objects/type-context.js";
 
 export const resolveImpl = (
   impl: Implementation,
@@ -32,12 +33,17 @@ export const resolveImpl = (
       if (!typeParam) {
         throw new Error(`Type param not found for ${arg} at ${impl.location}`);
       }
-      const type = new TypeAlias({
-        name: typeParam.clone(),
-        typeExpr: nop(),
-      });
+      const type = registerTypeInstance(
+        new TypeAlias({
+          name: typeParam.clone(),
+          typeExpr: nop(),
+        })
+      );
       resolveTypeExpr(arg);
-      type.type = getExprType(arg);
+      const resolved = getExprType(arg);
+      if (resolved) {
+        type.type = registerTypeInstance(resolved);
+      }
       impl.registerEntity(type);
     });
   }
