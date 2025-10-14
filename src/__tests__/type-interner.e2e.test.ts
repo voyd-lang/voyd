@@ -21,7 +21,7 @@ describe("type interner e2e harness", () => {
     ).size;
     expect(stats.observed).toBeGreaterThan(1000);
     expect(stats.canonical).toBeGreaterThan(200);
-    expect(stats.reused).toBeGreaterThan(1000);
+    expect(stats.reused).toBeGreaterThan(950);
     expect(fingerprintCount).toBeGreaterThan(30);
   });
 

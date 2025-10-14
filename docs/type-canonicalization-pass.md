@@ -66,6 +66,7 @@ Earlier iterations of `canonicalizeResolvedTypes` attempted to rewrite the AST i
 `TypeInterner` replaces the ad-hoc post-processing experiments with a self-contained dedupe module. Instead of mutating the AST in place, it maintains a fingerprint → canonical map keyed by `typeKey` snapshots and keeps a per-instance alias cache so clone objects immediately reuse the first canonical handle.
 
 - **Cycle aware.** Calls to `intern()` track the visitation stack and short-circuit when a type is already being resolved, preventing recursive unions from exploding the traversal.
+- **Alias normalization.** `TypeAlias` nodes delegate to their resolved target before fingerprinting, so the canonical owner for a union fingerprint is always the union itself rather than an alias wrapper.
 - **Pure stats surface.** `getStats()` reports `{ observed, canonical, reused }` so callers can monitor how many types the interner touched, while `getEvents()` exposes the exact reuse events (fingerprint plus winner/loser references) for debugging.
 - **No legacy metadata hooks.** The module does not merge Binaryen caches, generic instance arrays, or trait metadata. It focuses solely on returning stable references; follow-on phases will migrate metadata once the interner is wired through semantics.
 

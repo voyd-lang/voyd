@@ -106,6 +106,15 @@ export class TypeInterner {
     if (cached) return cached;
 
     if (path.has(type)) return type;
+
+    if (type instanceof TypeAlias && type.type) {
+      path.add(type);
+      const canonicalTarget = this.#resolve(type.type, path);
+      this.#aliases.set(type, canonicalTarget);
+      path.delete(type);
+      return canonicalTarget;
+    }
+
     path.add(type);
     this.#stats.observed += 1;
 

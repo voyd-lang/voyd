@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { Identifier } from "../../../syntax-objects/index.js";
 import { VoydModule } from "../../../syntax-objects/module.js";
-import { ObjectType, bool } from "../../../syntax-objects/types.js";
+import { ObjectType, TypeAlias, bool } from "../../../syntax-objects/types.js";
 import { TypeInterner } from "../type-interner.js";
 import { runTypeInternerOnModule } from "../type-interner-harness.js";
 import { createRecursiveUnion } from "./helpers/rec-type.js";
@@ -43,6 +43,30 @@ describe("TypeInterner", () => {
     expect(stats.canonical).toBeGreaterThanOrEqual(2);
     expect(stats.reused).toBeGreaterThanOrEqual(1);
     expect(interner.getEvents().length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("aliases resolve to canonical union handles", () => {
+    const rec = createRecursiveUnion("RecAlias");
+
+    const interner = new TypeInterner({ recordEvents: true });
+    const canonicalFromAlias = interner.intern(rec.alias);
+
+    expect(canonicalFromAlias).toBe(rec.union);
+
+    const canonicalDirect = interner.intern(rec.union);
+    expect(canonicalDirect).toBe(canonicalFromAlias);
+
+    const aliasSecondPass = interner.intern(rec.alias);
+    expect(aliasSecondPass).toBe(canonicalDirect);
+
+    const additionalAlias = new TypeAlias({
+      name: Identifier.from("RecAliasSecondary"),
+      typeExpr: rec.union,
+    });
+    additionalAlias.type = rec.union;
+
+    const canonicalFromAdditionalAlias = interner.intern(additionalAlias);
+    expect(canonicalFromAdditionalAlias).toBe(canonicalDirect);
   });
 
   test("reuses structural object snapshots", () => {
