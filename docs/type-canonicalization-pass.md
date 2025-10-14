@@ -1,115 +1,60 @@
-# Canonical Type Consolidation Pass
+# Type Canonicalization Validator (Phase 3)
 
-## Motivation
+## Current Role
 
-Type resolution currently creates many `Type` objects that are structurally identical but distinct by identity (e.g., separate `Map<RecType>` instances). Later stages still rely on object identity—casts, union matching, and runtime type checks compare `Type.idNum`. When two logically identical types diverge in identity, a value may pass static checks but fail at runtime (as in the `illegal cast` seen when matching `RecType`).
+`canonicalizeResolvedTypes` now runs purely as a validation pass. It no longer rewrites the IR or attempts to collapse duplicate `Type` instances. Instead, the visitor traverses the resolved module, fingerprints every `VoydRefType`, and records structural collisions so later phases can introduce a real interner.
 
-We need a post-resolution pass that walks the IR, deduplicates structurally equivalent types, and rewrites all references to share a single canonical instance.
-
-## Objectives
-
-1. Run after semantic resolution/inference so every expression already has an assigned `Type`.
-2. Compute a stable structural fingerprint for each type and maintain a global canonical table.
-3. Traverse the IR, replacing each `Type` reference with the canonical representative.
-4. Make the pass idempotent, cycle-safe, and transparent to existing metadata (ancestor tables, method tables, etc.).
+- **Read-only traversal.** Every `Type`, `Expr`, and metadata list is walked, but no collections are mutated and no references are swapped.
+- **Fingerprint tracking.** The pass uses `typeKey` to build a fingerprint map. Whenever two distinct objects share a fingerprint, it records a `CanonicalTypeDedupeEvent`.
+- **Diagnostics only.** Callers can supply a `CanonicalTypeTable` to retrieve the recorded events or attach an `onDuplicate` callback for ad‑hoc reporting. No alias registration or metadata merging occurs.
+- **Idempotent validation.** Running the validator multiple times is effectively a no-op beyond re-emitting diagnostics; the module object graph remains untouched.
 
 ## Workflow Overview
 
-### 1. Fingerprint computation
-- Implement `typeKey(type: Type): string` that produces a stable hash of the type’s structure.
-- Unwrap `TypeAlias` nodes to their target type when building the key.
-- Nominal generics include the generic parent id and canonicalized keys for applied arguments.
-- Structural types (tuples/structural objects) serialize fields/signatures; unions/intersections sort member keys to keep order-independent.
-- Detect recursion with a memo/stack to emit repeatable cycle markers (e.g., `cycle:<id>`).
+1. **Traversal (`validateExpr`).** Walk every `Expr` in the module, following return types, parameter types, generic instances, trait implementations, and literal fields.
+2. **Type validation (`validateType`).** For each `Type`, register the fingerprint, recurse into child types and type expressions, and capture contextual traces for debugging.
+3. **Duplicate reporting.** When a fingerprint collision is discovered, the validator records a `CanonicalTypeDedupeEvent`, hydrates an optional issue callback, and (when `CANON_DEBUG` is set) logs a warning that includes the syntax ancestry for both contenders.
+4. **Optional table integration.** If a `CanonicalTypeTable` is provided, the pass clears any previous log and replaces it with the collected events so downstream tools can analyse collisions without mutating the table’s cache.
 
-### 2. Canonical table
-- Introduce `CanonicalTypeTable` (Map from fingerprint -> canonical `Type`).
-- `getOrInsert(type)` canonicalizes children first, then either returns the existing representative or records the current instance as canonical.
+## Integration Points
 
-### 3. IR traversal
-- Add `canonicalizeResolvedTypes(module: VoydModule)` executed post-resolution.
-- Walk modules, functions, impls, traits, expressions, and literals:
-  * canonicalize `expr.type`, parameter types, return types, field types, applied type args, trait targets, etc.
-  * reuse a visited set so each `Type` is processed once; reassign properties to the canonical instance.
-- Ensure canonical instances already have their metadata resolved (ancestor tables, method lookup tables) before reuse.
+- `processSemantics` now invokes the validator for its side effects only and returns the original `VoydModule`. Nothing downstream depends on canonical identities yet.
+- Unit tests can observe duplicates by either:
+  1. Passing `onDuplicate` to accumulate `CanonicalizationIssue` objects (see `canonicalize-resolved-types.test.ts`), or
+  2. Supplying a `CanonicalTypeTable` and reading `table.getDedupeEvents()` after validation (used by the e2e harness).
+- The validator respects `CANON_DEBUG`, emitting descriptive console warnings without mutating the graph.
 
-### 4. Integration point
-- After `checkTypes` completes (in `processSemantics`), run canonicalization so downstream codegen consumes canonical instances. Because the pass is idempotent, rerunning it in tests or tooling remains safe.
-- The pass now runs on every build; no environment flag or override is required.
-- The pass remains idempotent, so subsequent invocations detect that everything is already canonical.
+## Testing Status
 
-### 5. Testing strategy
-- Extend the existing regression (`test.voyd` / `map-recursive-union`) to confirm the illegal cast disappears once canonicalization is active.
-- Write targeted unit tests constructing duplicate `Type` graphs, run the pass, and assert object identity convergence (`typeA === typeB`).
-- Add an idempotence test—apply the pass twice and ensure no further changes occur.
+- `src/semantics/types/__tests__/canonicalize-resolved-types.test.ts` now asserts that duplicate fingerprints are detected while the original references remain distinct.
+- Canonical north-star suites (`map-recursive-union` variants) are locked behind `test.skip` with explicit “Phase 7” comments. They document the desired post-interner behaviour but intentionally remain inactive while the validator is read-only.
+- E2E tests that previously relied on the mutation pass have been marked as future work; they still collect diagnostics (via tables) to monitor how many duplicates exist today.
 
-## Fingerprint Format Reference
-- `TypeAlias` fingerprints resolve to their target type; recursive aliases emit structural markers (`alias-cycle:<frameId>@<depth>`) so identical recursion graphs collapse even when aliases live under different modules.
-- `UnionType` members are fingerprinted recursively, deduped, and sorted; recursive unions fall back to structural markers (`union-cycle:<frameId>@<depth>`).
-- Nominal `ObjectType`/`TraitType` fingerprints include the generic parent id and the canonicalized fingerprints of applied arguments. Structural objects sort field fingerprints and include parent links.
-- `FnType`, tuples, and fixed arrays serialize their child fingerprints in declaration order. Optional parameters are prefixed with `?`.
-- Primitive and `Self` types keep their stable names, while all other residual nodes fall back to `<kind>#<id>` to guarantee uniqueness.
+## Using the Diagnostics
 
-## Troubleshooting
-- Run `scripts/report-type-fingerprint-collisions.ts` to list any duplicate fingerprints across the std library or a target module.
-- Re-run `canonicalizeResolvedTypes` on a problematic module with a fresh `CanonicalTypeTable` to confirm the pass is idempotent and to inspect dedupe events.
-- Execute `vitest run src/__tests__/map-recursive-union.e2e.test.ts` to validate that recursive alias scenarios continue to collapse to canonical forms.
+```ts
+const table = new CanonicalTypeTable({ recordEvents: true });
+const issues: CanonicalizationIssue[] = [];
 
-## Phase 1 Baseline Snapshot (2025-10-13)
-- `vt --emit-wasm-text --opt test.voyd` confirms union lowering still funnels every arm through `$Object#16`, then scatters into four Optional payload structs: `$Some#144054#0` (i32), `$Some#144054#7` (ref `$Object#16`), `$Some#144054#14` (ref `$Array#147653#3`), and `$None#144059`.
-- The `main` match loop repeatedly performs `__extends(144054, …)` checks against the `$Object#16` base and immediately `ref.cast` into whichever `$Some#144054#…` variant it just constructed (see `tmp/test-phase1.wat:2238` and `tmp/test-phase1.wat:2260`).
-- Binaryen instrumentation (`npx tsx scripts/inspect-optional-constructors.ts`) mirrors those heap types and counts the constructor calls: 36 for `$Some#498987#7`, 11 for `$Some#498987#14`, 1 for `$Some#498987#0`, and 71 for `$None#498992`.
-- Recorded hash for this snapshot: `b47ef00b9bba2e93f6545b6d171537a97a9b29d1  tmp/test-phase1.wat`; retain it for comparisons once the interner lands.
+canonicalizeResolvedTypes(module, {
+  table,
+  onDuplicate: (issue) => issues.push(issue),
+});
 
-## Audit Findings – Optional Constructors
-- Instrumentation added in `canonicalize-resolved-types.ts` now logs whenever an optional constructor or alias survives in a non-canonical form. Running `npx vitest run src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts` emits repeated warnings such as:
-  - `alias retained non-canonical target at Fn(get).appliedTypeArgs[0]` for the stdlib `Map`/`Array` helpers, showing that `Fn.appliedTypeArgs` still point at alias snapshots like `RecType#143181`.
-  - `non-canonical Optional constructor detected at dedupeCanonicalInstances(Some#144032#…)` indicating that `ObjectType.genericInstances` continues to spawn fresh `Some` clones instead of reusing the shared instance.
-- The initial crawler run (`collectOptionalSomeAudit`) over the canonicalized `map-recursive-union` module surfaced **15 distinct `Some#144032…` ids** hanging off `std::Map` implementations (see `src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts` for the reproduction). Those instances lived inside trait implementations for map iteration (`find`, `next`, `iterate`) and bucket helpers, confirming that optional constructors embedded in generic method metadata bypassed Phase 8 rewrites.
-- The regression now enforces a single canonical `Some`/`None` instance for `RecType`, verifies that optional constructors keep their Binaryen caches after codegen, and fails fast if any audit crawler rediscovers duplicate heap ids.
-- Follow-up work needs to (a) rewrite `Fn.appliedTypeArgs`, `genericInstances`, and trait method caches to the canonical objects and (b) merge Binaryen caches (`binaryenType` / `originalType`) so instrumentation stops flagging mismatched `T#… → RecType#…` aliases during canonicalization.
-
-## Generic Instance Reconciliation
-- `reconcileGenericInstances(parent, instances)` rebuilds every nominal type’s `genericInstances` array after canonicalization, merging clones that share identical `appliedTypeArgs` and reassigning their `genericParent` pointers to the canonical parent.
-- The canonicalization pass now invokes reconciliation for both parent objects and their children, while `CanonicalTypeTable.#copyMetadata` mirrors the same logic during table reuse so runtime metadata stays consistent.
-- Orphaned clones detected during reconciliation have their Binaryen caches cleared and their instance lists emptied, preventing stale wasm type ids from reappearing.
-- `collectOptionalConstructors` aborts if an optional specialization is missing from its parent’s `genericInstances` list, providing a hard guardrail against future orphan regressions.
-
-## Phase 4 Postmortem
-- Re-enabled the wasm regressions (`src/__tests__/map-recursive-union.e2e.test.ts` and `src/__tests__/run-wasm-regression.e2e.test.ts`), keeping the runtime focused on the canonical Optional constructors.
-- Added a wasm text guard that ensures only one `struct.new $Some#…` and `struct.new $None#…` survives in the compiled module, catching future duplication before execution.
-- Fortified `src/semantics/types/__tests__/map-recursive-union-canonicalization.test.ts` with a Binaryen cache check so canonical `Some`/`None` retain `binaryenType` / `originalType` metadata even after codegen.
-- Locked the regression crawler to expect a single Optional heap id, preventing silent regressions if canonicalization ever reintroduces duplicate constructors.
-
-## Considerations
-
-- Primitives, `Self`, and other singleton types already have unique identities; the pass can short-circuit for them.
-- Skip or fully resolve any type still mid-resolution (e.g., `resolutionPhase < 2`) before canonicalizing.
-- Memoize fingerprints to avoid quadratic recomputation for large unions.
-- When canonicalizing unions/intersections, be careful to reuse the canonical union instance rather than rebuilding arrays, so downstream code sees the same object identity.
-
-With this pass, all identical generic instantiations collapse to a single runtime type, eliminating mismatched casts stemming from divergent `Type` identities while preserving the rest of the pipeline unchanged.
-
-test.voyd:
+console.log(table.getDedupeEvents().length, "duplicate fingerprints detected");
+issues.forEach(({ fingerprint, canonicalContext, duplicateContext }) => {
+  console.warn("collision", fingerprint, { canonicalContext, duplicateContext });
+});
 ```
-use std::all
 
-pub type RecType = Map<RecType> | Array<RecType> | String
+The example above keeps the module untouched but provides enough context to reason about which sites are still generating non-canonical copies.
 
-fn a() -> RecType
-  Map([
-    ("a", "b"),
-  ])
+## Looking Ahead
 
-pub fn main()
-  let r = a()
-  r.match(b)
-    Map:
-      b.get("a").match(v)
-        Some:
-          1
-        else:
-          -1
-    else:
-      -3
-```
+- **Phase 4:** Introduce a real type interner so duplicates are prevented at construction time instead of being diagnosed after the fact.
+- **Phase 5–6:** Migrate metadata ownership (Binaryen caches, trait method tables, generic instance lists) to the canonical handles emitted by the interner.
+- **Phase 7:** Re-enable the skipped tests and demonstrate that the recursive-union regressions disappear once codegen consumes canonical instances exclusively.
+
+## Historical Context (Pre-Phase 3)
+
+Earlier iterations of `canonicalizeResolvedTypes` attempted to rewrite the AST in place—merging metadata, reparenting generic instances, and updating `expr.type` references. That approach made it difficult to reason about mutation ordering, produced Binaryen cache corruption, and obscured the real sources of duplicate types. Phase 3 deliberately rolled the pass back to a validator so the next phases can rebuild canonicalization on top of a single, well-defined interner.

@@ -16,5 +16,6 @@ export const processSemantics = (parsedModule: ParsedModule): Expr => {
     expr as Expr
   );
   const checked = checkTypes(resolved as VoydModule);
-  return canonicalizeResolvedTypes(checked as VoydModule);
+  canonicalizeResolvedTypes(checked as VoydModule);
+  return checked as VoydModule;
 };

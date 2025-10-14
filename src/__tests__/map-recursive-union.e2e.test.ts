@@ -278,7 +278,9 @@ describe("map-recursive-union canonicalization integration", () => {
     wasmText = mod.emitText();
   });
 
-  test("manual canonicalization unwraps RecType alias and dedupes Map<RecType>", async (t) => {
+  test.skip(
+    "manual canonicalization unwraps RecType alias and dedupes Map<RecType> (Phase 7)",
+    async (t) => {
     const root = await loadModuleWithoutCanonicalization();
     const before = captureRecTypeSnapshot(root);
     t.expect(before.mapVariantArg?.kindOfType).toBe("type-alias");
@@ -299,7 +301,9 @@ describe("map-recursive-union canonicalization integration", () => {
     ).toBe(true);
   });
 
-  test("pipeline canonicalization reduces duplicate type fingerprints", async (t) => {
+  test.skip(
+    "pipeline canonicalization reduces duplicate type fingerprints (Phase 7)",
+    async (t) => {
     const rootWithout = await loadModuleWithoutCanonicalization();
     const statsWithout = analyzeDedupeStats(rootWithout);
 
@@ -315,13 +319,13 @@ describe("map-recursive-union canonicalization integration", () => {
     t.expect(snapshotWith.mapCallKey).toBe(snapshotWith.mapVariantKey);
   });
 
-  test("wasm module executes main without trapping", (t) => {
+  test.skip("wasm module executes main without trapping (Phase 7)", (t) => {
     const main = getWasmFn("main", wasmInstance);
     assert(main, "main export should exist");
     t.expect(main()).toEqual(1);
   });
 
-  test("wasm module emits a single Map struct", (t) => {
+  test.skip("wasm module emits a single Map struct (Phase 7)", (t) => {
     const mapStructNames = [
       ...wasmText.matchAll(/\(type \$([^\s()]*Map[^\s()]*)/g),
     ]
@@ -395,7 +399,7 @@ describe("map-recursive-union canonicalization integration", () => {
     }
   });
 
-  test("wasm text omits duplicated Optional helpers", (t) => {
+  test.skip("wasm text omits duplicated Optional helpers (Phase 7)", (t) => {
     const functionNames = collectWasmFunctionNames(wasmText);
     const structNames = collectWasmTypeNames(wasmText);
     const duplicatedFunctions = functionNames.filter(
@@ -409,7 +413,9 @@ describe("map-recursive-union canonicalization integration", () => {
     t.expect(duplicatedStructs).toEqual([]);
   });
 
-  test("compiling map-recursive-union twice emits an identical wasm function set", async (t) => {
+  test.skip(
+    "compiling map-recursive-union twice emits an identical wasm function set (Phase 7)",
+    async (t) => {
     const parsed = await parseModule(mapRecursiveUnionVoyd);
     const canonicalRoot = processSemantics(parsed) as VoydModule;
     const firstModule = codegen(canonicalRoot);

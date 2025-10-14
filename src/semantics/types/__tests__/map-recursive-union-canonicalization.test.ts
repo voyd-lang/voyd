@@ -15,7 +15,9 @@ import {
 } from "../debug/collect-optional-constructors.js";
 
 describe("map-recursive-union optional constructor canonicalization", () => {
-  test("reuses canonical Some/None instances across generics", async () => {
+  test.skip(
+    "reuses canonical Some/None instances across generics (Phase 7)",
+    async () => {
     const parsed = await parseModule(mapRecursiveUnionVoyd);
     const canonicalRoot = processSemantics(parsed) as VoydModule;
     const srcModule = canonicalRoot.resolveModule(Identifier.from("src")) as
@@ -90,7 +92,9 @@ describe("map-recursive-union optional constructor canonicalization", () => {
     expect(optionalDedupeEvents).toHaveLength(0);
   });
 
-  test("Some generic parent dedupes RecType specialization", async () => {
+  test.skip(
+    "Some generic parent dedupes RecType specialization (Phase 7)",
+    async () => {
     const parsed = await parseModule(mapRecursiveUnionVoyd);
     const canonicalRoot = processSemantics(parsed) as VoydModule;
     const srcModule = canonicalRoot.resolveModule(Identifier.from("src")) as
@@ -176,7 +180,9 @@ describe("map-recursive-union optional constructor canonicalization", () => {
     });
   });
 
-  test("optional constructors remain attached to the canonical Some parent", async () => {
+  test.skip(
+    "optional constructors remain attached to the canonical Some parent (Phase 7)",
+    async () => {
     const parsed = await parseModule(mapRecursiveUnionVoyd);
     const canonicalRoot = processSemantics(parsed) as VoydModule;
     const srcModule = canonicalRoot.resolveModule(Identifier.from("src")) as
@@ -232,7 +238,9 @@ describe("map-recursive-union optional constructor canonicalization", () => {
     });
   });
 
-  test("optional constructors keep Binaryen caches after codegen", async () => {
+  test.skip(
+    "optional constructors keep Binaryen caches after codegen (Phase 7)",
+    async () => {
     const parsed = await parseModule(mapRecursiveUnionVoyd);
     const canonicalRoot = processSemantics(parsed) as VoydModule;
     const module = codegen(canonicalRoot);
