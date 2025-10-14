@@ -2,7 +2,7 @@ import binaryen from "binaryen";
 import { Expr } from "./syntax-objects/expr.js";
 import {
   Type,
-  Primitive,
+  PrimitiveType,
   ObjectType,
   FixedArrayType,
   voydBaseObject,
@@ -163,7 +163,7 @@ export const mapBinaryenType = (
   throw new Error(`Unsupported type ${type}`);
 };
 
-const mapPrimitiveType = (type: Primitive): TypeRef => {
+const mapPrimitiveType = (type: PrimitiveType): TypeRef => {
   switch (type.name.value) {
     case "void":
       return binaryen.none;

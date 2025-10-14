@@ -37,7 +37,12 @@ describe("TypeInterner", () => {
     const canonicalMapB = interner.intern(recB.mapInstance);
 
     expect(canonicalMapA).toBe(canonicalMapB);
-    expect(canonicalMapA.appliedTypeArgs?.[0]).toBe(canonicalUnionA);
+    const appliedAlias = canonicalMapA.appliedTypeArgs?.[0];
+    expect(appliedAlias?.isTypeAlias?.()).toBe(true);
+    if (!appliedAlias?.isTypeAlias?.()) {
+      throw new Error("applied alias should resolve to a TypeAlias");
+    }
+    expect(appliedAlias.type).toBe(canonicalUnionA);
 
     const stats = interner.getStats();
     expect(stats.canonical).toBeGreaterThanOrEqual(2);

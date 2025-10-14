@@ -21,7 +21,11 @@ import { typesAreCompatible } from "./types-are-compatible.js";
 import { Type } from "../../syntax-objects/types.js";
 import { canonicalType } from "../types/canonicalize.js";
 import { containsUnresolvedTypeId } from "./resolve-object-type.js";
-import { registerTypeInstance } from "../../syntax-objects/type-context.js";
+import {
+  finalizeTypeAlias,
+  markTypeAliasPending,
+  registerTypeInstance,
+} from "../../syntax-objects/type-context.js";
 
 export type ResolveFnTypesOpts = {
   typeArgs?: List;
@@ -197,7 +201,7 @@ const attemptToResolveFnWithGenerics = (fn: Fn, call: Call): Fn => {
   const args = call.typeArgs ?? inferCallTypeArgs(fn, call);
   if (!args) return fn;
   const existing = fn.genericInstances?.find((c) => fnTypeArgsMatch(args, c));
-  if (existing) return fn;
+  if (existing) return existing;
 
   return resolveGenericsWithTypeArgs(fn, args);
 };
@@ -288,11 +292,22 @@ const inferCallTypeArgs = (fn: Fn, call: Call) => {
   return new List({ value: chosen });
 };
 
+const resolveFnTypeArg = (value: Expr | Type | undefined): Type | undefined => {
+  if (!value) return undefined;
+  const maybeType = value as Type;
+  if (typeof maybeType === "object" && maybeType?.kindOfType) {
+    return canonicalType(maybeType);
+  }
+  const expr = value as Expr;
+  resolveTypeExpr(expr);
+  return getExprType(expr);
+};
+
 const fnTypeArgsMatch = (args: List, candidate: Fn): boolean =>
   candidate.appliedTypeArgs
     ? candidate.appliedTypeArgs.every((t, i) => {
-        const argType = getExprType(args.at(i));
-        const appliedType = getExprType(t);
+        const argType = resolveFnTypeArg(args.at(i));
+        const appliedType = resolveFnTypeArg(t);
         const canonArg = argType && canonicalType(argType);
         const canonApplied = appliedType && canonicalType(appliedType);
         return typesAreEqual(canonArg, canonApplied);
@@ -311,10 +326,11 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
   newFn.appliedTypeArgs = [];
 
   /** Register resolved type entities for each type param */
+  let unresolved = false;
   typeParameters.forEach((typeParam, index) => {
     const typeArg = args.exprAt(index);
     const identifier = typeParam.clone();
-    const typeAlias = registerTypeInstance(
+    const typeAlias = markTypeAliasPending(
       new TypeAlias({ name: identifier, typeExpr: typeArg.clone() })
     );
     typeAlias.parent = newFn;
@@ -322,20 +338,35 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
     const resolved = getExprType(typeArg);
     if (resolved) {
       typeAlias.type = registerTypeInstance(resolved);
+      finalizeTypeAlias(typeAlias);
+    }
+    if (!typeAlias.type) {
+      unresolved = true;
     }
     newFn.appliedTypeArgs?.push(typeAlias);
     newFn.registerEntity(typeAlias);
   });
 
-  if (!newFn.appliedTypeArgs.every((t) => (t as TypeAlias).type)) {
+  if (unresolved) {
     // Do not create an unresolved instance; let caller continue without
     // specializing this generic function.
     return fn;
   }
 
   const resolvedFn = resolveFn(newFn);
+  const existing = fn.genericInstances?.find((candidate) => {
+    if (!candidate.appliedTypeArgs || !resolvedFn.appliedTypeArgs) return false;
+    if (candidate.appliedTypeArgs.length !== resolvedFn.appliedTypeArgs.length)
+      return false;
+    return candidate.appliedTypeArgs.every((arg, index) =>
+      typesAreEqual(canonicalType(arg), canonicalType(resolvedFn.appliedTypeArgs![index]))
+    );
+  });
+  if (existing) {
+    return existing;
+  }
   fn.registerGenericInstance(resolvedFn);
-  return fn;
+  return resolvedFn;
 };
 
 const getParentImpl = (expr: Expr): Implementation | undefined => {

@@ -7,7 +7,10 @@ import {
   FnType,
   Type,
 } from "../../syntax-objects/index.js";
-import { registerTypeInstance } from "../../syntax-objects/type-context.js";
+import {
+  finalizeTypeAlias,
+  registerTypeInstance,
+} from "../../syntax-objects/type-context.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveIntersectionType } from "./resolve-intersection.js";
 import { resolveObjectType } from "./resolve-object-type.js";
@@ -26,7 +29,11 @@ export const resolveTypeExpr = (typeExpr: Expr): Expr => {
     if (typeExpr.resolutionPhase > 0) return typeExpr;
     typeExpr.resolutionPhase = 1;
     typeExpr.typeExpr = resolveTypeExpr(typeExpr.typeExpr);
-    typeExpr.type = getExprType(typeExpr.typeExpr);
+    const resolved = getExprType(typeExpr.typeExpr);
+    if (resolved) {
+      typeExpr.type = registerTypeInstance(resolved);
+      finalizeTypeAlias(typeExpr);
+    }
     typeExpr.resolutionPhase = 2;
     return typeExpr;
   }

@@ -1,8 +1,10 @@
-import type { Type } from "./types.js";
+import type { Type, TypeAlias } from "./types.js";
 
 export type TypeContextHooks = {
   register<T extends Type>(type: T): T;
   registerMany?(types: Iterable<Type | undefined>): Type[];
+  markAliasPending?(alias: TypeAlias): void;
+  resolveAlias?(alias: TypeAlias): Type | undefined;
 };
 
 const contextStack: TypeContextHooks[] = [];
@@ -48,4 +50,19 @@ export const runWithoutTypeContext = <T>(fn: () => T): T => {
   } finally {
     contextStack.push(current);
   }
+};
+
+export const markTypeAliasPending = <T extends TypeAlias>(alias: T): T => {
+  const context = getCurrentContext();
+  context?.markAliasPending?.(alias);
+  return alias;
+};
+
+export const finalizeTypeAlias = (alias: TypeAlias): Type => {
+  const context = getCurrentContext();
+  if (!context?.resolveAlias) {
+    return alias.type ?? alias;
+  }
+  const resolved = context.resolveAlias(alias);
+  return resolved ?? alias.type ?? alias;
 };

@@ -1,4 +1,4 @@
-import type { Type } from "../../syntax-objects/types.js";
+import type { Type, TypeAlias } from "../../syntax-objects/types.js";
 import {
   withTypeContext as runWithSyntaxContext,
   type TypeContextHooks,
@@ -42,6 +42,7 @@ export type TypeContextTelemetry = {
   stats?: TypeInternerStats;
   divergences?: DivergenceRecord[];
   reuseSummary?: TypeReuseSummary;
+  pendingAliases?: number;
 };
 
 export type TypeContextOptions = {
@@ -114,6 +115,8 @@ export const createTypeContext = (
       registerMany: (types) =>
         [...types].filter((value): value is Type => value !== undefined),
       getTelemetry: () => ({ enabled: false }),
+      markAliasPending: () => undefined,
+      resolveAlias: () => undefined,
     };
   }
 
@@ -122,14 +125,30 @@ export const createTypeContext = (
   };
 
   const interner = new TypeInterner(internerOptions);
+  const pendingAliases = new Set<TypeAlias>();
 
   const context: SemanticsTypeContext = {
     useInterner: true,
     interner,
     register: (type) => interner.intern(type),
     registerMany: (types) => interner.internList(types),
-    getTelemetry: () =>
-      buildTelemetry(context, internerOptions.recordEvents ? interner.getEvents() : undefined),
+    getTelemetry: () => {
+      const events = internerOptions.recordEvents ? interner.getEvents() : undefined;
+      const telemetry = buildTelemetry(context, events);
+      telemetry.pendingAliases = pendingAliases.size;
+      return telemetry;
+    },
+    markAliasPending: (alias: TypeAlias) => {
+      pendingAliases.add(alias);
+    },
+    resolveAlias: (alias: TypeAlias) => {
+      pendingAliases.delete(alias);
+      if (!alias.type) return undefined;
+      const canonical = interner.intern(alias.type);
+      alias.type = canonical;
+      interner.intern(alias);
+      return canonical;
+    },
   };
 
   return context;

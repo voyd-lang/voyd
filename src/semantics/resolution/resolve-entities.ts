@@ -346,11 +346,17 @@ export const resolveArrayLiteral = (
       arr.elements.map((e) => getExprType(e)).filter((t): t is Type => !!t)
     );
 
+  const canonicalElemType = elemType
+    ? registerTypeInstance(elemType)
+    : undefined;
+
   const fixedArray = new Call({
     ...arr.metadata,
     fnName: Identifier.from("FixedArray"),
     args: new List({ value: arr.elements }),
-    typeArgs: elemType ? new List({ value: [elemType] }) : undefined,
+    typeArgs: canonicalElemType
+      ? new List({ value: [canonicalElemType] })
+      : undefined,
   });
 
   const objLiteral = new ObjectLiteral({
@@ -358,7 +364,9 @@ export const resolveArrayLiteral = (
     fields: [{ name: "from", initializer: fixedArray }],
   });
 
-  const typeArgs = elemType ? new List({ value: [elemType] }) : undefined;
+  const typeArgs = canonicalElemType
+    ? new List({ value: [canonicalElemType] })
+    : undefined;
   const newArrayCall = new Call({
     ...arr.metadata,
     fnName: Identifier.from("new_array"),
@@ -366,5 +374,8 @@ export const resolveArrayLiteral = (
     typeArgs,
   });
   newArrayCall.setAttribute("arrayLiteral", original);
+  if (canonicalElemType) {
+    newArrayCall.setAttribute("expectedArrayElemType", canonicalElemType);
+  }
   return resolveEntities(newArrayCall);
 };

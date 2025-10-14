@@ -292,9 +292,30 @@ const resolveArrayArgs = (call: Call) => {
     const effectiveElemType =
       arr.elements.length === 0 ? elemType : arrayElemType(param?.type);
     const resolved = resolveArrayLiteral(arr, effectiveElemType);
+    const canonicalElem = effectiveElemType
+      ? registerTypeInstance(effectiveElemType)
+      : undefined;
+    if (
+      resolved?.isCall?.() &&
+      resolved.fnName.is("new_array") &&
+      canonicalElem
+    ) {
+      resolved.setAttribute("expectedArrayElemType", canonicalElem);
+    }
     if (isLabeled) {
       arg.args.set(1, resolved);
-      call.args.set(index, resolveEntities(arg));
+      const normalized = resolveEntities(arg);
+      if (
+        normalized?.isCall?.() &&
+        normalized.calls(":") &&
+        canonicalElem
+      ) {
+        const innerCall = normalized.argAt(1);
+        if (innerCall?.isCall?.() && innerCall.fnName.is("new_array")) {
+          innerCall.setAttribute("expectedArrayElemType", canonicalElem);
+        }
+      }
+      call.args.set(index, normalized);
       return;
     }
     call.args.set(index, resolved);

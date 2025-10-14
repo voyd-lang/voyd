@@ -24,7 +24,10 @@ import {
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { TraitType } from "../syntax-objects/types/trait.js";
 import { SemanticProcessor } from "./types.js";
-import { registerTypeInstance } from "../syntax-objects/type-context.js";
+import {
+  registerTypeInstance,
+  markTypeAliasPending,
+} from "../syntax-objects/type-context.js";
 
 export const initEntities: SemanticProcessor = (expr) => {
   if (expr.isModule()) {
@@ -531,7 +534,7 @@ const initTypeAlias = (type: List) => {
     typeExpr,
     typeParameters,
   });
-  return registerTypeInstance(alias);
+  return markTypeAliasPending(alias);
 };
 
 const initCall = (call: List) => {

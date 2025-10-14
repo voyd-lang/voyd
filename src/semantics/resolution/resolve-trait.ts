@@ -1,14 +1,18 @@
 import { Call } from "../../syntax-objects/call.js";
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
-import { TypeAlias } from "../../syntax-objects/types.js";
+import { Type, TypeAlias } from "../../syntax-objects/types.js";
 import { resolveFn } from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveImpl } from "./resolve-impl.js";
 import { canonicalType } from "../types/canonicalize.js";
-import { registerTypeInstance } from "../../syntax-objects/type-context.js";
+import {
+  finalizeTypeAlias,
+  markTypeAliasPending,
+  registerTypeInstance,
+} from "../../syntax-objects/type-context.js";
 
 export const resolveTrait = (trait: TraitType, call?: Call): TraitType => {
   if (trait.typeParameters) {
@@ -40,7 +44,7 @@ const resolveGenericTraitVersion = (
   trait.typeParameters?.forEach((typeParam, index) => {
     const typeArg = call.typeArgs!.exprAt(index);
     const identifier = typeParam.clone();
-    const alias = registerTypeInstance(
+    const alias = markTypeAliasPending(
       new TypeAlias({ name: identifier, typeExpr: typeArg.clone() })
     );
     alias.parent = newTrait;
@@ -48,6 +52,7 @@ const resolveGenericTraitVersion = (
     const resolved = getExprType(typeArg);
     if (resolved) {
       alias.type = registerTypeInstance(resolved);
+      finalizeTypeAlias(alias);
     }
     newTrait.appliedTypeArgs?.push(alias);
     newTrait.registerEntity(alias);

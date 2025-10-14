@@ -226,8 +226,8 @@ export class TypeInterner {
       }
 
       if (type.appliedTypeArgs?.length) {
-        type.appliedTypeArgs = type.appliedTypeArgs.map((arg) =>
-          this.#resolveReference(arg, path)
+        type.appliedTypeArgs = type.appliedTypeArgs.map(
+          (arg) => this.#resolveReference(arg, path) ?? arg
         );
       }
 
@@ -261,8 +261,8 @@ export class TypeInterner {
       }
 
       if (type.appliedTypeArgs?.length) {
-        type.appliedTypeArgs = type.appliedTypeArgs.map((arg) =>
-          this.#resolveReference(arg, path)
+        type.appliedTypeArgs = type.appliedTypeArgs.map(
+          (arg) => this.#resolveReference(arg, path) ?? arg
         );
       }
 
@@ -293,8 +293,10 @@ export class TypeInterner {
       if (type.type) {
         const resolved = this.#resolve(type.type, path);
         type.type = resolved;
-        return resolved;
+        this.#aliases.set(type, resolved);
+        return type;
       }
+      this.#aliases.set(type, type);
       return type;
     }
 

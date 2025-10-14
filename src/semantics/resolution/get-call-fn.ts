@@ -13,6 +13,28 @@ const canon = (t?: Type) => (t ? canonicalType(t) : undefined);
 const eq = (a?: Type, b?: Type) => typesAreEqual(canon(a), canon(b));
 const compat = (a?: Type, b?: Type) => typesAreCompatible(canon(a), canon(b));
 
+const resolveCallTypeArg = (arg: Expr | Type | undefined): Type | undefined => {
+  if (!arg) return undefined;
+  const maybeType = arg as Type;
+  if (typeof maybeType === "object" && maybeType?.kindOfType) {
+    return canonicalType(maybeType);
+  }
+  resolveTypeExpr(arg as Expr);
+  return getExprType(arg as Expr);
+};
+
+const inferArrayElemTypeFromCall = (call: Call): Type | undefined => {
+  const obj = call.argAt(0);
+  if (!obj?.isObjectLiteral?.()) return undefined;
+  const fromField = obj.fields.find((f) => f.name === "from");
+  const initializer = fromField?.initializer;
+  if (!initializer?.isCall?.()) return undefined;
+  const fixedArrayCall = initializer as Call;
+  if (!fixedArrayCall.fnName.is("FixedArray")) return undefined;
+  const typeArg = fixedArrayCall.typeArgs?.at(0);
+  return resolveCallTypeArg(typeArg);
+};
+
 export const getCallFn = (call: Call, candidateFns?: Fn[]): Fn | undefined => {
   if (call.fn?.isFn() && call.fn.parentTrait) return resolveFn(call.fn);
   if (isPrimitiveFnCall(call)) return undefined;
@@ -44,10 +66,8 @@ const selectByExplicitTypeArgs = (
   if (!call.typeArgs) return;
   const appliedExact = candidates.filter((cand) =>
     cand.appliedTypeArgs?.every((t, i) => {
-      const arg = call.typeArgs!.at(i);
-      if (arg) resolveTypeExpr(arg);
-      const argType = arg && getExprType(arg);
-      const appliedType = getExprType(t);
+      const argType = resolveCallTypeArg(call.typeArgs!.at(i));
+      const appliedType = resolveCallTypeArg(t);
       return eq(argType, appliedType);
     })
   );
@@ -66,6 +86,28 @@ const selectByExpectedReturnType = (
   const expected =
     call.getAttribute &&
     (call.getAttribute("expectedType") as Type | undefined);
+  if (!expected) {
+    const elemType =
+      call.getAttribute &&
+      (call.getAttribute("expectedArrayElemType") as Type | undefined);
+    if (elemType) {
+      const matches = candidates.filter(
+        (cand) =>
+          cand.appliedTypeArgs?.length === 1 &&
+          eq(cand.appliedTypeArgs[0], elemType)
+      );
+      if (matches.length === 1) return matches[0];
+    }
+    const inferredElem = inferArrayElemTypeFromCall(call);
+    if (inferredElem) {
+      const matches = candidates.filter(
+        (cand) =>
+          cand.appliedTypeArgs?.length === 1 &&
+          eq(cand.appliedTypeArgs[0], inferredElem)
+      );
+      if (matches.length === 1) return matches[0];
+    }
+  }
   if (!expected) return;
 
   const headKeyFromType = (t: Type | undefined): string | undefined => {
@@ -198,7 +240,39 @@ const selectArgCovering = (candidates: Fn[]): Fn | undefined => {
   return argCovering.length === 1 ? argCovering[0] : undefined;
 };
 
-const throwAmbiguous = (call: Call, candidates: Fn[]): never => {
+const throwAmbiguous = (call: Call, candidates: Fn[]): Fn | never => {
+  const fallbackByElem = (() => {
+    const attr =
+      call.getAttribute &&
+      (call.getAttribute("expectedArrayElemType") as Type | undefined);
+    const inferred = attr ?? inferArrayElemTypeFromCall(call);
+    if (!inferred) return undefined;
+    const matches = candidates.filter(
+      (cand) =>
+        cand.appliedTypeArgs?.length === 1 &&
+        eq(cand.appliedTypeArgs[0], inferred)
+    );
+    return matches.length === 1 ? matches[0] : undefined;
+  })();
+  if (fallbackByElem) return fallbackByElem;
+  if (process.env.DEBUG_VOYD_INTERNER?.toLowerCase?.() === "1") {
+    const typeArgs = call.typeArgs
+      ?.toArray()
+      .map((arg) => formatTypeName(resolveCallTypeArg(arg)));
+    const candidateSummary = candidates.map((candidate) => ({
+      name: candidate.name.value,
+      returnType: formatTypeName(candidate.returnType),
+      applied: (candidate.appliedTypeArgs ?? []).map((arg) =>
+        formatTypeName(resolveCallTypeArg(arg))
+      ),
+    }));
+    console.error("[INTERNER_DEBUG] ambiguous call", {
+      fn: call.fnName.value,
+      location: call.location?.toString?.(),
+      typeArgs,
+      candidates: candidateSummary,
+    });
+  }
   const argTypes = call.args
     .toArray()
     .map((arg) => formatTypeName(getExprType(arg)))
@@ -286,7 +360,16 @@ const expandGenericCandidates = (call: Call, candidates: Fn[]): Fn[] => {
     }
     // Attempt to specialize generics with this call to surface compatible instances
     resolveFn(c, call);
-    if (c.genericInstances?.length) out.push(...c.genericInstances);
+    if (c.genericInstances?.length) {
+      const matchingInstances = c.genericInstances.filter((inst) =>
+        typeArgsMatch(call, inst)
+      );
+      if (matchingInstances.length) {
+        out.push(...matchingInstances);
+        continue;
+      }
+      out.push(...c.genericInstances);
+    }
   }
   return out;
 };
@@ -309,10 +392,8 @@ const filterResolvedCandidates = (call: Call, candidates: Fn[]): Fn[] => {
 const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
   call.typeArgs && candidate.appliedTypeArgs
     ? candidate.appliedTypeArgs.every((t, i) => {
-        const arg = call.typeArgs?.at(i);
-        if (arg) resolveTypeExpr(arg);
-        const argType = arg && getExprType(arg);
-        const appliedType = getExprType(t);
+        const argType = resolveCallTypeArg(call.typeArgs?.at(i));
+        const appliedType = resolveCallTypeArg(t);
         return eq(argType, appliedType);
       })
     : true;

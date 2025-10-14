@@ -3,7 +3,11 @@ import { Expr } from "../../syntax-objects/expr.js";
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
 import { ObjectType, Type, TypeAlias, voydBaseObject } from "../../syntax-objects/types.js";
-import { registerTypeInstance } from "../../syntax-objects/type-context.js";
+import {
+  finalizeTypeAlias,
+  markTypeAliasPending,
+  registerTypeInstance,
+} from "../../syntax-objects/type-context.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { getExprType } from "./get-expr-type.js";
 import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";
@@ -176,7 +180,7 @@ const resolveGenericsWithTypeArgs = (
   typeParameters.forEach((typeParam, index) => {
     const typeArg = args.exprAt(index);
     const identifier = typeParam.clone();
-    const typeAlias = registerTypeInstance(
+    const typeAlias = markTypeAliasPending(
       new TypeAlias({
         name: identifier,
         // Preserve the original type arg expression (e.g., MsgPack) for
@@ -188,10 +192,12 @@ const resolveGenericsWithTypeArgs = (
     const resolvedType = getExprType(typeArg);
     if (resolvedType) {
       typeAlias.type = registerTypeInstance(resolvedType);
+      finalizeTypeAlias(typeAlias);
     } else if (typeArg.isIdentifier?.()) {
       const resolvedAlias = typeArg.resolve?.();
       if (resolvedAlias?.isTypeAlias?.() && resolvedAlias.type) {
         typeAlias.type = registerTypeInstance(resolvedAlias.type);
+        finalizeTypeAlias(typeAlias);
       }
     }
     if (!typeAlias.type) typesNotResolved = true;
