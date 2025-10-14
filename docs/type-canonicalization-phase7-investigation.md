@@ -159,6 +159,14 @@
 - Debugging aids: set `CANON_TRACE_RECONCILE=1` to log reconciliation inputs/outputs; the optional constructor script now emits detailed sibling listings if it encounters any gaps.
 - New instrumentation: set `CANON_TRACE_OPTIONAL_REGISTRATION=1` to trace `ObjectType.registerGenericInstance` calls for Optional constructors (payload includes prior parents, applied type args, and a trimmed stack); use `CANON_TRACE_GENERIC_REGISTRATION=1` to lift the filter and log every generic registration site.
 
+## Phase 4 – Standalone Interner Snapshot (2025-04-03)
+- Added `TypeInterner` plus a resolver harness that routes every resolved type through the new interner by piggybacking on the validator’s traversal. The module records alias mappings only; metadata reconciliation remains deferred to later phases.
+- Running the harness against `run-wasm-regression.voyd` observes **1 319** type visits, produces **236** canonical handles, and logs **1 083** reuse events. The raw fingerprint set currently spans **133** unique entries (mostly Optional/Map specialisations), giving us a quantitative baseline before wiring the interner into semantics.
+- New coverage:
+  - `src/semantics/types/__tests__/type-interner.test.ts` asserts that recursive unions and structural clones reuse the same handles and that applied type args point back at the canonical union.
+  - `src/__tests__/type-interner.e2e.test.ts` runs the harness on the wasm regression fixture, asserts the stats above, and documents that `runWasm(run-wasm-regression.voyd)` still throws `RuntimeError: illegal cast`. The latter keeps the runtime failure visible while the interner remains out-of-band.
+- The validator (`canonicalizeResolvedTypes`) now accepts an `onType` callback so the harness can reuse the existing traversal without copying its logic. This hook is intentionally opt-in to avoid mutating modules during normal semantics runs.
+
 ## Phase 3b – Optional Orphan Sweep
 - `reconcileObjectGenericInstances` now records an orphan snapshot on every losing instance (id/key/applied args plus parent chain) and tags the canonical survivor. We reuse that metadata in both the canonicalizer and downstream tooling.
 - Union canonicalization aggressively normalises optional children: every optional branch is reconciled against its canonical parent, aliased in the type table, and replaced in-place so no union retains a stale clone.

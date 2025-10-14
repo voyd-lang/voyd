@@ -58,3 +58,44 @@ The example above keeps the module untouched but provides enough context to reas
 ## Historical Context (Pre-Phase 3)
 
 Earlier iterations of `canonicalizeResolvedTypes` attempted to rewrite the AST in place—merging metadata, reparenting generic instances, and updating `expr.type` references. That approach made it difficult to reason about mutation ordering, produced Binaryen cache corruption, and obscured the real sources of duplicate types. Phase 3 deliberately rolled the pass back to a validator so the next phases can rebuild canonicalization on top of a single, well-defined interner.
+
+# Type Interner Prototype (Phase 4)
+
+## Module Overview
+
+`TypeInterner` replaces the ad-hoc post-processing experiments with a self-contained dedupe module. Instead of mutating the AST in place, it maintains a fingerprint → canonical map keyed by `typeKey` snapshots and keeps a per-instance alias cache so clone objects immediately reuse the first canonical handle.
+
+- **Cycle aware.** Calls to `intern()` track the visitation stack and short-circuit when a type is already being resolved, preventing recursive unions from exploding the traversal.
+- **Pure stats surface.** `getStats()` reports `{ observed, canonical, reused }` so callers can monitor how many types the interner touched, while `getEvents()` exposes the exact reuse events (fingerprint plus winner/loser references) for debugging.
+- **No legacy metadata hooks.** The module does not merge Binaryen caches, generic instance arrays, or trait metadata. It focuses solely on returning stable references; follow-on phases will migrate metadata once the interner is wired through semantics.
+
+## Harness
+
+Two harness helpers make it easy to exercise the interner without touching the production pipeline:
+
+- `runTypeInternerOnModule(module, opts)` traverses an in-memory `VoydModule`, feeding every encountered `Type` through the interner by way of the validator’s new `onType` callback.
+- `runTypeInternerFromSource(source, opts)` parses a `.voyd` program, runs the existing resolver stack, and then returns `{ root, interner, stats, events }` so tests can assert on the dedupe results.
+
+Both helpers default to `recordEvents: true`, which keeps the event log available for assertions and debugging.
+
+## Test Coverage
+
+- **Unit tests.** `src/semantics/types/__tests__/type-interner.test.ts` verifies that identical recursive unions and structural objects collapse to shared instances, and that the harness can walk a synthetic module without touching codegen.
+- **E2E guard.** `src/__tests__/type-interner.e2e.test.ts` runs the harness against `run-wasm-regression.voyd`, asserting that the interner observes >1 000 types, canonically dedupes a few hundred of them, and records the corresponding fingerprint reuse events. The same suite still executes `runWasm` to document the current `RuntimeError: illegal cast` failure, keeping Phase 4 honest about outstanding runtime gaps.
+
+## Usage Example
+
+```ts
+import { canonicalizeResolvedTypes } from "../semantics/types/canonicalize-resolved-types.js";
+import { TypeInterner } from "../semantics/types/type-interner.js";
+
+const interner = new TypeInterner({ recordEvents: true });
+canonicalizeResolvedTypes(module, {
+  onType: (type) => interner.intern(type),
+});
+
+const stats = interner.getStats();
+console.log("observed", stats.observed, "canonical", stats.canonical);
+```
+
+The snippet keeps the semantics pipeline untouched while exercising the interner on a fully resolved module. The resulting stats can be snapshot in tests or logged during investigation runs. Early runs against the wasm regression fixture report roughly 1 300 observed types with ~1 100 reuse hits, providing a quantitative baseline for later phases.

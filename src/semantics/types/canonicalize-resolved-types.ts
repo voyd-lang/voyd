@@ -44,6 +44,7 @@ export type CanonicalizationIssue = {
 type CanonicalizeResolvedTypesOpts = {
   table?: CanonicalTypeTable;
   onDuplicate?: (issue: CanonicalizationIssue) => void;
+  onType?: (type: Type) => void;
 };
 
 type CanonicalizeCtx = {
@@ -54,6 +55,7 @@ type CanonicalizeCtx = {
   events: CanonicalTypeDedupeEvent[];
   table?: CanonicalTypeTable;
   onDuplicate?: (issue: CanonicalizationIssue) => void;
+  onType?: (type: Type) => void;
 };
 
 const describeSyntaxNode = (node: Expr | undefined): string | undefined => {
@@ -145,11 +147,12 @@ export const canonicalizeResolvedTypes = (
     visitedExpr: new Set(),
     visitedTypes: new Set(),
     fingerprintOwners: new Map(),
-    issues: [],
-    events: [],
-    table: opts.table,
-    onDuplicate: opts.onDuplicate,
-  };
+  issues: [],
+  events: [],
+  table: opts.table,
+  onDuplicate: opts.onDuplicate,
+  onType: opts.onType,
+};
 
   validateExpr(ctx, module);
 
@@ -431,6 +434,7 @@ const validateType = (ctx: CanonicalizeCtx, type?: Type): void => {
   ctx.visitedTypes.add(type);
 
   registerTypeFingerprint(ctx, type);
+  ctx.onType?.(type);
 
   if ((type as TypeAlias).isTypeAlias?.()) {
     const alias = type as TypeAlias;
