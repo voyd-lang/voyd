@@ -4,20 +4,17 @@ import {
   Type,
   UnionType,
 } from "../../syntax-objects/types.js";
+import { internTypeWithContext } from "../types/type-context.js";
 import { typesAreEqual } from "./types-are-equal.js";
 
-/**
- * Combines types into their least common denominator.
- * If all types are the same, it returns that type.
- * If all types are different (but still object types), it returns a UnionType.
- * If types are mixed and not all object types, it returns undefined.
- */
 export const combineTypes = (types: Type[]): Type | undefined => {
+  if (!types.length) return undefined;
+
   const unique = types.filter(
     (t, i) => !types.slice(0, i).some((u) => typesAreEqual(t, u))
   );
   const firstType = unique[0];
-  if (!unique.length || !firstType?.isObjectType()) return firstType;
+  if (!firstType?.isObjectType()) return internTypeWithContext(firstType);
 
   let isLocalUnion = false;
   let topType: ObjectType | IntersectionType | UnionType = firstType;
@@ -35,7 +32,6 @@ export const combineTypes = (types: Type[]): Type | undefined => {
       continue;
     }
 
-    // TODO: Fix (V-129)
     if (type.isUnionType() && isObjectOrIntersection(topType)) {
       const obj = topType;
       topType = type;
@@ -57,7 +53,7 @@ export const combineTypes = (types: Type[]): Type | undefined => {
     return undefined;
   }
 
-  return topType;
+  return internTypeWithContext(topType);
 };
 
 const isObjectOrIntersection = (

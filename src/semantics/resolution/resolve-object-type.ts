@@ -2,7 +2,12 @@ import { Call } from "../../syntax-objects/call.js";
 import { Expr } from "../../syntax-objects/expr.js";
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
-import { ObjectType, Type, TypeAlias, voydBaseObject } from "../../syntax-objects/types.js";
+import {
+  ObjectType,
+  Type,
+  TypeAlias,
+  voydBaseObject,
+} from "../../syntax-objects/types.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { getExprType } from "./get-expr-type.js";
 import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";
@@ -10,12 +15,14 @@ import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { canonicalType } from "../types/canonicalize.js";
+import { internTypeWithContext } from "../types/type-context.js";
 
 export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
-  if (obj.typesResolved) return obj;
+  if (obj.typesResolved) return internTypeWithContext(obj) as ObjectType;
 
   if (obj.typeParameters) {
-    return resolveGenericObjVersion(obj, call) ?? obj;
+    const resolved = resolveGenericObjVersion(obj, call) ?? obj;
+    return internTypeWithContext(resolved) as ObjectType;
   }
 
   obj.fields.forEach((field) => {
@@ -32,21 +39,18 @@ export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
   }
 
   obj.typesResolved = true;
-  return obj;
+  return internTypeWithContext(obj) as ObjectType;
 };
 
-// Detects whether a type-argument expression contains an unresolved type
-// identifier (e.g., an unbound generic name like `T`).
 export const containsUnresolvedTypeId = (
   expr: any,
   allowed: Set<string> = new Set()
 ): boolean => {
-  // Follows TypeAlias chains to the underlying resolved type (if any).
   const unwrapAlias = (t: any): any => {
     let cur = t;
     const seen = new Set<any>();
     while (cur && cur.isType?.() && cur.isTypeAlias?.()) {
-      if (seen.has(cur)) return undefined; // cycle guard
+      if (seen.has(cur)) return undefined;
       seen.add(cur);
       if (!cur.type) return undefined;
       cur = cur.type;
@@ -59,7 +63,6 @@ export const containsUnresolvedTypeId = (
     const e = stack.pop();
     if (!e) continue;
 
-    // Unbound generic like `T`
     if (e.isIdentifier?.()) {
       if (allowed.has(e.value)) continue;
       const ty = unwrapAlias(getExprType(e));
@@ -123,8 +126,6 @@ const resolveGenericObjVersion = (
     }
   }
 
-  // If no explicit type args are supplied, try to infer them from the
-  // supplied object literal.
   if (!call.typeArgs) {
     const objLiteral = call.argAt(0);
     if (objLiteral?.isObjectLiteral()) {
@@ -149,7 +150,6 @@ const resolveGenericObjVersion = (
     .some((arg) => containsUnresolvedTypeId(arg));
   if (hasUnresolved) return;
 
-  // THAR BE DRAGONS HERE. We don't check for multiple existing matches, which means that unions may sometimes overlap.
   const existing = type.genericInstances?.find((c) => typeArgsMatch(call, c));
   if (existing) return existing;
   return resolveGenericsWithTypeArgs(type, call.typeArgs);
@@ -170,15 +170,12 @@ const resolveGenericsWithTypeArgs = (
   newObj.appliedTypeArgs = [];
   newObj.genericParent = obj;
 
-  /** Register resolved type entities for each type param */
   let typesNotResolved = false;
   typeParameters.forEach((typeParam, index) => {
     const typeArg = args.exprAt(index);
     const identifier = typeParam.clone();
     const type = new TypeAlias({
       name: identifier,
-      // Preserve the original type arg expression (e.g., MsgPack) for
-      // readable formatting of applied generics without expanding recursively.
       typeExpr: typeArg.clone(),
     });
     resolveTypeExpr(typeArg);
@@ -197,7 +194,7 @@ const resolveGenericsWithTypeArgs = (
   });
   if (typesNotResolved) return obj;
   const implementations = newObj.implementations;
-  newObj.implementations = []; // Clear implementations to avoid duplicates, resolveImpl will re-add them
+  newObj.implementations = [];
 
   const registered = obj.registerGenericInstance(newObj);
   const resolvedObj = resolveObjectType(registered);

@@ -1,5 +1,4 @@
 import { Call } from "../../syntax-objects/call.js";
-import { nop } from "../../syntax-objects/lib/helpers.js";
 import { TraitType } from "../../syntax-objects/types/trait.js";
 import { TypeAlias } from "../../syntax-objects/types.js";
 import { resolveFn } from "./resolve-fn.js";
@@ -8,16 +7,18 @@ import { getExprType } from "./get-expr-type.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveImpl } from "./resolve-impl.js";
 import { canonicalType } from "../types/canonicalize.js";
+import { internTypeWithContext } from "../types/type-context.js";
 
 export const resolveTrait = (trait: TraitType, call?: Call): TraitType => {
   if (trait.typeParameters) {
-    return resolveGenericTraitVersion(trait, call) ?? trait;
+    const resolved = resolveGenericTraitVersion(trait, call) ?? trait;
+    return internTypeWithContext(resolved) as TraitType;
   }
 
-  if (trait.typesResolved) return trait;
+  if (trait.typesResolved) return internTypeWithContext(trait) as TraitType;
   trait.methods.applyMap((fn) => resolveFn(fn));
   trait.typesResolved = true;
-  return trait;
+  return internTypeWithContext(trait) as TraitType;
 };
 
 const resolveGenericTraitVersion = (
@@ -48,16 +49,14 @@ const resolveGenericTraitVersion = (
   });
 
   trait.registerGenericInstance(newTrait);
-  // Resolve methods for the new trait
   newTrait.methods.applyMap((fn) => resolveFn(fn));
   newTrait.typesResolved = true;
-  // Clear implementations, resolveImpl will re-add as needed
   newTrait.implementations = [];
   trait.implementations.forEach((impl) =>
     resolveImpl(impl.clone(newTrait))
   );
 
-  return newTrait;
+  return internTypeWithContext(newTrait) as TraitType;
 };
 
 const typeArgsMatch = (call: Call, candidate: TraitType): boolean =>

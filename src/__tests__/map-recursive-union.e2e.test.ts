@@ -23,6 +23,7 @@ import { initPrimitiveTypes } from "../semantics/init-primitive-types.js";
 import { initEntities } from "../semantics/init-entities.js";
 import { resolveEntities } from "../semantics/resolution/resolve-entities.js";
 import { checkTypes } from "../semantics/check-types/index.js";
+import { type TypeContextTelemetry } from "../semantics/types/type-context.js";
 import { compile } from "../compiler.js";
 import { codegen } from "../codegen.js";
 import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
@@ -273,6 +274,33 @@ const isOptionalOrIteratorArtifact = (name: string): boolean =>
   name.startsWith("Some#") ||
   name.startsWith("None#") ||
   name.startsWith("iterate#");
+
+describe("processSemantics type interner flag", () => {
+  test("runs canonicalization in legacy and interner modes", async (t) => {
+    const baselineParsed = await parseModule(mapRecursiveUnionVoyd);
+    const baseline = processSemantics(baselineParsed) as VoydModule;
+    t.expect(baseline).toBeDefined();
+
+    const internerParsed = await parseModule(mapRecursiveUnionVoyd);
+    let telemetry: TypeContextTelemetry | undefined;
+    const withInterner = processSemantics(internerParsed, {
+      types: {
+        useInterner: true,
+        internerOptions: { recordEvents: true },
+        onTelemetry: (value) => {
+          telemetry = value;
+        },
+      },
+    }) as VoydModule;
+
+    t.expect(withInterner).toBeDefined();
+    t.expect(telemetry).toBeDefined();
+    t.expect(telemetry?.stats.observed).toBeGreaterThan(0);
+    t.expect(telemetry?.stats.canonical).toBeGreaterThan(0);
+    t.expect(telemetry?.stats.reused).toBeGreaterThan(0);
+    t.expect(new Set(telemetry?.events.map((event) => event.fingerprint)).size).toBeGreaterThan(0);
+  });
+});
 
 describe("map-recursive-union canonicalization integration", () => {
   test.skip("runWasm executes the simple regression fixture", async (t) => {

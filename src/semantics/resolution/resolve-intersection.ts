@@ -1,6 +1,6 @@
 import { IntersectionType } from "../../syntax-objects/types.js";
+import { internTypeWithContext } from "../types/type-context.js";
 import { getExprType } from "./get-expr-type.js";
-import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 
 export const resolveIntersectionType = (
@@ -14,11 +14,10 @@ export const resolveIntersectionType = (
   const nominalType = getExprType(inter.nominalTypeExpr.value);
   const structuralType = getExprType(inter.structuralTypeExpr.value);
 
-  // TODO Error if not correct type
   inter.nominalType = nominalType?.isObjectType() ? nominalType : undefined;
   inter.structuralType = structuralType?.isObjectType()
     ? structuralType
     : undefined;
 
-  return inter;
+  return internTypeWithContext(inter) as IntersectionType;
 };

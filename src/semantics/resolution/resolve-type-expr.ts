@@ -12,11 +12,10 @@ import { resolveIntersectionType } from "./resolve-intersection.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveUnionType } from "./resolve-union.js";
 import { resolveTrait } from "./resolve-trait.js";
+import { internTypeWithContext } from "../types/type-context.js";
 
 export const resolveTypeExpr = (typeExpr: Expr): Expr => {
   if (typeExpr.isIdentifier()) {
-    // Mark identifier as used in type context so name like `void` are resolved
-    // as types (not value-level placeholders)
     typeExpr.setTmpAttribute("type-context", true);
     return typeExpr;
   }
@@ -38,16 +37,15 @@ export const resolveTypeExpr = (typeExpr: Expr): Expr => {
   return typeExpr;
 };
 
-/** Resolves type calls */
 const resolveTypeCall = (call: Call): Call => {
   const finish = (type?: Type, fn?: any) => {
+    const canonicalType = internTypeWithContext(type);
     if (fn) call.fn = fn;
-    if (type) call.type = type;
+    if (canonicalType) call.type = canonicalType;
     call.setTmpAttribute("resolving", undefined);
     return call;
   };
 
-  // Avoid infinite recursion when resolving recursive type calls
   if (call.hasTmpAttribute("resolving")) return call;
   call.setTmpAttribute("resolving", true);
   const type = call.fnName.resolve();
@@ -72,7 +70,7 @@ export const resolveFixedArrayType = (arr: FixedArrayType): FixedArrayType => {
   arr.elemType = getExprType(arr.elemTypeExpr);
   arr.setName("FixedArray");
   arr.id = `FixedArray#${arr.elemType?.id}`;
-  return arr;
+  return internTypeWithContext(arr) as FixedArrayType;
 };
 
 const resolveFnType = (fnType: FnType): FnType => {
@@ -89,7 +87,7 @@ const resolveFnType = (fnType: FnType): FnType => {
     if (type) fnType.returnType = type;
   }
 
-  return fnType;
+  return internTypeWithContext(fnType) as FnType;
 };
 
 export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
@@ -99,18 +97,19 @@ export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
     alias.typeParameters.forEach((typeParam, index) => {
       const typeArg = call.typeArgs?.exprAt(index);
       const identifier = typeParam.clone();
-      const type = new TypeAlias({
+      const aliasType = new TypeAlias({
         name: identifier,
         typeExpr: nop(),
       });
-      type.type = getExprType(typeArg);
-      alias.registerEntity(type);
+      aliasType.type = getExprType(typeArg);
+      alias.registerEntity(aliasType);
     });
   }
 
   alias.typeExpr = resolveTypeExpr(alias.typeExpr);
   alias.type = getExprType(alias.typeExpr);
-  call.type = alias.type;
-  call.fn = call.type?.isObjectType() ? call.type : undefined;
+  const canonicalType = internTypeWithContext(alias.type);
+  call.type = canonicalType;
+  call.fn = canonicalType?.isObjectType() ? canonicalType : undefined;
   return call;
 };

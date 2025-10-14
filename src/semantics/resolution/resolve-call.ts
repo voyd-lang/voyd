@@ -39,6 +39,7 @@ import { tryResolveMemberAccessSugar } from "./resolve-member-access.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { canonicalType } from "../types/canonicalize.js";
+import { internTypeWithContext } from "../types/type-context.js";
 
 export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
   if (call.type) return call;
@@ -84,7 +85,7 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
   }
 
   // Compute resulting type
-  call.type = computeCallReturnType(call, calleeType);
+  call.type = internTypeWithContext(computeCallReturnType(call, calleeType));
   return call;
 };
 
@@ -94,14 +95,16 @@ const resolveMemberAccessDirect = (call: Call): Call => {
   const member = call.argAt(1);
   const recvType = getExprType(recv);
   if (recvType?.isObjectType()) {
-    call.type = recvType.getField(member as Identifier)?.type;
+    call.type = internTypeWithContext(
+      recvType.getField(member as Identifier)?.type
+    );
     return call;
   }
   if (recvType?.isIntersectionType()) {
     const field =
       recvType.nominalType?.getField(member as Identifier) ??
       recvType.structuralType?.getField(member as Identifier);
-    call.type = field?.type;
+    call.type = internTypeWithContext(field?.type);
   }
   return call;
 };
@@ -161,9 +164,15 @@ const handleObjectConstruction = (call: Call, type: ObjectType): void => {
       else if (e.isList()) e.toArray().forEach((a) => visit(a));
     };
     call.typeArgs.toArray().forEach((a) => visit(a));
-    if (unknownIds.length) {
+    const typeParamNames = new Set(
+      (type.typeParameters ?? []).map((param) => param.value)
+    );
+    const unresolved = unknownIds.filter(
+      (name) => !typeParamNames.has(name)
+    );
+    if (unresolved.length) {
       throw new Error(
-        `Unrecognized identifier(s) ${unknownIds.join(", ")} for ${
+        `Unrecognized identifier(s) ${unresolved.join(", ")} for ${
           type.name
         } at ${call.location}`
       );
@@ -223,7 +232,7 @@ const resolveCallFn = (call: Call, candidateFns?: Fn[]) => {
       .find((fn) => fn.name.is(call.fnName.value));
     if (traitMethod) {
       call.fn = traitMethod;
-      call.type = traitMethod.returnType;
+      call.type = internTypeWithContext(traitMethod.returnType);
       return;
     }
   }
@@ -231,7 +240,7 @@ const resolveCallFn = (call: Call, candidateFns?: Fn[]) => {
   const resolvedFn = getCallFn(call, candidateFns);
   if (resolvedFn) {
     call.fn = resolvedFn;
-    call.type = resolvedFn.returnType;
+    call.type = internTypeWithContext(resolvedFn.returnType);
   }
 };
 

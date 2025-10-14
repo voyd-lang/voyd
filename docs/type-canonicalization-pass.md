@@ -19,6 +19,7 @@
 ## Integration Points
 
 - `processSemantics` now invokes the validator for its side effects only and returns the original `VoydModule`. Nothing downstream depends on canonical identities yet.
+- A feature flag (`processSemantics(parsed, { types: { useInterner: true } })`) threads the standalone interner through the resolver. When enabled, the validator feeds every discovered `Type` through the interner and reports `{ stats, events }` telemetry via the optional `onTelemetry` callback so tests can compare legacy and interned graphs without mutating production defaults.
 - Unit tests can observe duplicates by either:
   1. Passing `onDuplicate` to accumulate `CanonicalizationIssue` objects (see `canonicalize-resolved-types.test.ts`), or
   2. Supplying a `CanonicalTypeTable` and reading `table.getDedupeEvents()` after validation (used by the e2e harness).
