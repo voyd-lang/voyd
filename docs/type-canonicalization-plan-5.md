@@ -78,6 +78,15 @@ Deliver a robust, maintainable type system for Voyd’s hybrid nominal + str
   4. Extend the vitest suites to execute critical scenarios (including the new e2e fixture) in both modes, skipping only the assertions that still require full integration.
 - **Deliverables:** Feature-flagged wiring with parity telemetry, updated tests running in legacy and interner modes, documentation on how to toggle the flag.
 
+### Phase 5.5 – Alias Finalization & Interner Synchronization
+- **Goal:** Remove the “skip unresolved aliases” guard by ensuring placeholder `TypeAlias` nodes only hit the interner after their `.type` field is populated, so generic inference keeps lexical aliases while canonical handles converge deterministically.
+- **Work:**
+  1. **Defer alias registration.** Stop passing freshly minted inference aliases (`resolve-object-type`, `resolve-fn`, `resolve-trait`, `init-entities`, etc.) through `registerTypeInstance` at creation time. Hold them in place until inference or resolution assigns a concrete `type`.
+  2. **Re-intern on resolution.** Once an alias receives a real target, immediately hand it to the active type context (e.g. `context.register(alias)`) so the interner maps the alias fingerprint to its canonical payload. Ensure aliases created pre-Phase 5 remain untouched when the flag is off.
+  3. **Track pending placeholders.** Extend the type context to keep a lightweight table of unresolved aliases keyed by lexical id. When `.type` transitions from `undefined` to a concrete `Type`, re-run interning so the placeholder collapses to the canonical target. Fingerprint unresolved aliases by `(alias.id, alias.name)` purely for collision detection—never substitute them before they complete.
+  4. **Update inference paths.** Audit generic specialization helpers (`resolveGenericsWithTypeArgs`, trait impl registration, iterator construction) to call the new “alias resolved” hook right after filling `.type`. Add regression coverage that toggles `VOYD_USE_TYPE_INTERNER=1` for the inference kitchen-sink suite and ArrayIterator pathways.
+- **Deliverables:** Interner-compatible alias lifecycle with no recursion guards, telemetry confirming aliases converge to canonical targets, and tests exercising ArrayIterator / generic inference in both legacy and interner modes.
+
 ### Phase 6 – Activate the Interner & Consolidate Metadata
 - **Goal:** Make the interner the default, remove the legacy cloning path, and ensure every semantic metadata table hangs off canonical handles.
 - **Work:**
