@@ -60,25 +60,35 @@ Deliver a robust, maintainable type system for Voyd’s hybrid nominal + str
   5. Refresh docs describing the canonicalization pass to emphasize its new “validate only” role.
 - **Deliverables:** Lean validator pass, code references cleaned, documentation updated.
 
-### Phase 4 – Introduce the Type Interner
-- **Goal:** Provide a central `TypeStore` (or revamped `CanonicalTypeTable`) that interns structures at creation time.
+### Phase 4 – Standalone Type Interner & Coverage
+- **Goal:** Deliver a production-ready interner module plus exhaustive tests—unit and e2e—that exercise it with real Voyd programs while keeping it isolated from the main pipeline.
 - **Work:**
-  1. Define an interner API keyed by structural fingerprints (leveraging `typeKey`) with cycle-safe handling.
-  2. Integrate the interner into all type creation sites (object literals, unions, optionals, trait instantiation, contextual inference).
-  3. Remove `ObjectType.clone`’s `#iteration` suffix and redirect `registerGenericInstance` to the interner so duplicates never materialize.
-  4. Add unit tests verifying identity reuse for identical structures and stability for recursive graphs.
-- **Deliverables:** Interner implementation, constructor callsites updated, green semantic/unit tests.
+  1. Implement a `TypeInterner` (or revamped `TypeStore`) keyed by `typeKey` fingerprints with cycle-aware storage, keeping the API free of any legacy mutation hooks.
+  2. Build a thin test harness that instantiates the interner alongside today’s resolver so unit tests can assert canonical identity without touching codegen.
+  3. Add rich coverage: unit tests for structural/recursive reuse and an e2e fixture that drives `vt --run` against a real `.voyd` module compiled with the experimental interner, capturing canonicalization stats as artifacts.
+  4. Document the interner’s data model and invariants in `docs/type-canonicalization-pass.md`, including guidance for future debugging hooks.
+- **Deliverables:** Interner module, accompanying harness, green unit tests, and e2e coverage demonstrating deterministic canonical handles.
 
-### Phase 5 – Rewire Generic Instantiation & Metadata
-- **Goal:** Ensure generic instances and metadata (Binaryen caches, method tables) belong exclusively to canonical handles.
+### Phase 5 – Transition Wiring & Feature Flag
+- **Goal:** Thread the interner through the existing semantics pipeline behind an opt-in flag so we can validate behaviour without destabilizing current builds.
 - **Work:**
-  1. Replace remaining clone-based generic instantiation logic with interner lookups.
-  2. Centralize Binaryen cache ownership on canonical instances; purge caches from losers at registration time.
-  3. Update optional constructor collectors and diagnostics to rely on canonical handles.
-  4. Extend tests to assert that `genericParent.genericInstances` only contains canonical references.
-- **Deliverables:** Stable generic metadata model, updated documentation on ownership rules.
+  1. Introduce injectable factories (e.g. `createTypeContext({ useInterner })`) so every type construction site can choose between the legacy clones and the new interner.
+  2. Ensure all creation points (objects, unions, optionals, traits, inference) call the interner when the flag is enabled, while preserving the current default.
+  3. Add dual-run diagnostics that compare old/new handles, logging divergences and heap-id reuse metrics for the investigation doc.
+  4. Extend the vitest suites to execute critical scenarios (including the new e2e fixture) in both modes, skipping only the assertions that still require full integration.
+- **Deliverables:** Feature-flagged wiring with parity telemetry, updated tests running in legacy and interner modes, documentation on how to toggle the flag.
 
-### Phase 6 – Align Codegen With Canonical Handles
+### Phase 6 – Activate the Interner & Consolidate Metadata
+- **Goal:** Make the interner the default, remove the legacy cloning path, and ensure every semantic metadata table hangs off canonical handles.
+- **Work:**
+  1. Flip the feature flag, delete the clone-based constructors, and remove `ObjectType.clone`’s `#iteration` suffix so duplicates can no longer materialize.
+  2. Redirect `registerGenericInstance`, trait caches, and optional constructor bookkeeping to the interner; clear out any loser-specific cache stores.
+  3. Update diagnostics and tooling (`inspect-optional-constructors`, CANON_DEBUG readouts) to assert canonical ownership invariants.
+  4. Lock in tests that assert `genericParent.genericInstances` and related registries only contain canonical references.
+  5. Refresh design docs to describe the new default flow and any migration hooks that remain.
+- **Deliverables:** Interner-enabled semantics with canonical-only metadata, feature flag removed, comprehensive tests covering canonical ownership.
+
+### Phase 7 – Align Codegen With Canonical Handles
 - **Goal:** Ensure codegen consumes canonical types exclusively and no longer introduces divergent heap ids.
 - **Work:**
   1. Remove `ensureCanonicalObjectInstance`/trait equivalents and rely on interner-produced handles.
@@ -87,7 +97,7 @@ Deliver a robust, maintainable type system for Voyd’s hybrid nominal + str
   4. Confirm emitting wasm twice from the same module yields identical type/function sets.
 - **Deliverables:** Simplified codegen, deterministic wasm output, updated regression coverage.
 
-### Phase 7 – Re-enable Canonicalization Guards & E2E Tests
+### Phase 8 – Re-enable Canonicalization Guards & E2E Tests
 - **Goal:** Turn the skipped tests back on and demonstrate that illegal casts are resolved.
 - **Work:**
   1. Gradually re-enable assertions in the map-recursive-union suite (constructor counts → wasm determinism → runtime execution).
@@ -97,6 +107,6 @@ Deliver a robust, maintainable type system for Voyd’s hybrid nominal + str
 - **Deliverables:** All suites green, wasm runtime validated, documentation refreshed.
 
 ## Supporting Notes
-- Maintain `CANON_DEBUG` instrumentation through Phases 3–6 for surgical diagnostics; ensure it is silent when unset.
+- Maintain `CANON_DEBUG` instrumentation through Phases 3–7 for surgical diagnostics; ensure it is silent when unset.
 - Any temporary skips must reference the responsible phase so future contributors can clear them deliberately.
 - Keep updating `docs/type-canonicalization-phase7-investigation.md` as phases progress—especially after union or optional constructor milestones.
