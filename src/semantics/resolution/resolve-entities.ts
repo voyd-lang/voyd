@@ -18,7 +18,7 @@ import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveCall } from "./resolve-call.js";
 import { resolveClosure } from "./resolve-closure.js";
-import { resolveFn } from "./resolve-fn.js";
+import { resolveFn, resolveFnSignature } from "./resolve-fn.js";
 import { resolveImpl } from "./resolve-impl.js";
 import { resolveMatch } from "./resolve-match.js";
 import { resolveObjectType } from "./resolve-object-type.js";
@@ -377,5 +377,31 @@ export const resolveArrayLiteral = (
   if (canonicalElemType) {
     newArrayCall.setAttribute("expectedArrayElemType", canonicalElemType);
   }
-  return resolveEntities(newArrayCall);
+  const resolvedCall = resolveEntities(newArrayCall);
+  if (
+    resolvedCall?.isCall?.() &&
+    resolvedCall.fnName.is("new_array") &&
+    !resolvedCall.fn
+  ) {
+    const arg = resolvedCall.argAt(0);
+    const objectArg = arg?.isObjectLiteral?.() ? arg : undefined;
+    const fields = objectArg
+      ? new Set(objectArg.fields.map((field) => field.name))
+      : undefined;
+    const candidates = resolvedCall.resolveFns(resolvedCall.fnName);
+    for (const candidate of candidates) {
+      resolveFnSignature(candidate);
+      const param = candidate.parameters[0];
+      const paramType = param?.type;
+      if (!paramType?.isObjectType?.()) continue;
+      const expected = new Set(paramType.fields.map((field) => field.name));
+      if (!fields || [...fields].every((name) => expected.has(name))) {
+        resolveFn(candidate);
+        resolvedCall.fn = candidate;
+        resolvedCall.type = candidate.returnType;
+        break;
+      }
+    }
+  }
+  return resolvedCall;
 };

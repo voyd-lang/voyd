@@ -1,4 +1,4 @@
-import { Type, UnionType } from "../../syntax-objects/index.js";
+import { Type, TypeAlias, UnionType } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { canonicalType } from "../types/canonicalize.js";
@@ -52,6 +52,18 @@ export const typesAreCompatible = (
   if (visited.has(key)) return true;
   visited.add(key);
 
+  if ((b as TypeAlias).isTypeAlias?.()) {
+    const alias = b as TypeAlias;
+    const target = alias.type;
+    if (target) return typesAreCompatible(a, target, opts, visited);
+  }
+
+  if ((a as TypeAlias).isTypeAlias?.()) {
+    const alias = a as TypeAlias;
+    const target = alias.type;
+    if (target) return typesAreCompatible(target, b, opts, visited);
+  }
+
   if (a.isSelfType() && b.isSelfType()) {
     return true;
   }
@@ -81,6 +93,12 @@ export const typesAreCompatible = (
       return b.fields.every((field) => {
         const match = a.fields.find((f) => f.name === field.name);
         if (!match) return false;
+        if (
+          field.type?.isTypeAlias?.() &&
+          !(field.type as TypeAlias).type
+        ) {
+          return true;
+        }
         const compatible = typesAreCompatible(
           field.type,
           match.type,
@@ -106,6 +124,17 @@ export const typesAreCompatible = (
         }
         return typesAreEqual(field.type, match.type);
       });
+    }
+
+    const bIsGenericPlaceholder =
+      (b.typeParameters?.length ?? 0) > 0 &&
+      (!b.appliedTypeArgs || b.appliedTypeArgs.length === 0);
+    if (
+      bIsGenericPlaceholder &&
+      ((a.genericParent && a.genericParent.idNum === b.idNum) ||
+        a.idNum === b.idNum)
+    ) {
+      return true;
     }
 
     if (a.genericParent && a.genericParent.idNum === b.genericParent?.idNum) {
@@ -185,6 +214,12 @@ export const typesAreCompatible = (
         if (bMap.has(aType.id)) continue;
         let match = false;
         for (const bType of bTypes) {
+          const keyA = typeKey(canonicalType(aType));
+          const keyB = typeKey(canonicalType(bType));
+          if (keyA === keyB || keyA.includes(keyB) || keyB.includes(keyA)) {
+            match = true;
+            break;
+          }
           if (typesAreCompatible(aType, bType, opts, visited)) {
             match = true;
             break;
@@ -206,14 +241,25 @@ export const typesAreCompatible = (
     const canonicalNonUnion = nonUnionType
       ? canonicalType(nonUnionType)
       : undefined;
-    return unionType.types.some((t) =>
-      typesAreCompatible(
+    return unionType.types.some((t) => {
+      const canonicalBranch = canonicalType(t) as Type;
+      const keyBranch = typeKey(canonicalBranch);
+      const keyNonUnion = canonicalNonUnion
+        ? typeKey(canonicalNonUnion as Type)
+        : undefined;
+      if (
+        canonicalNonUnion &&
+        (keyBranch === keyNonUnion ||
+          (keyNonUnion && keyBranch.includes(keyNonUnion)))
+      )
+        return true;
+      return typesAreCompatible(
         canonicalNonUnion as Type,
-        canonicalType(t) as Type,
+        canonicalBranch,
         opts,
         visited
-      )
-    );
+      );
+    });
   }
 
   if (a.isObjectType() && b.isIntersectionType()) {

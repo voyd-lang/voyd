@@ -78,7 +78,7 @@ const computeKey = (type: Type, ctx: TypeKeyContext): string => {
     const target = alias.type ? normalizeTypeForKey(alias.type) : undefined;
     const key = target
       ? computeKey(target, ctx)
-      : `alias:${alias.name.toString()}`;
+      : `alias:${alias.id}`;
     ctx.memo.set(alias, key);
     popFrame(ctx, frame);
     return key;

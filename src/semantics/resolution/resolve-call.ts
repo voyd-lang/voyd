@@ -630,7 +630,17 @@ export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
   if (initFns.length) {
     const pool = specializeGenericInitFns(initFns, call);
     const found = findCompatibleInitForCall(call, pool);
-    if (found) {
+    if (!found) {
+      const uniquePool = Array.from(
+        new Map(pool.map((fn) => [fn.id, fn])).values()
+      );
+      const fallback = uniquePool.length === 1 ? uniquePool[0] : undefined;
+      if (fallback) {
+        call.fn = fallback;
+        call.type = fallback.returnType;
+        return call;
+      }
+    } else {
       call.fn = found;
       call.type = found.returnType;
       return call;

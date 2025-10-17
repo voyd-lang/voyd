@@ -41,13 +41,17 @@ const checkMatchCases = (match: Match) => {
 const checkUnionMatch = (match: Match) => {
   const union = match.baseType as UnionType;
 
-  const matched = match.cases
-    .map((c) => c.matchType?.name.value)
-    .filter((n): n is string => !!n);
-  const unionTypes = union.types.map((t: Type) => t.name.value);
+  const unionKeys = union.types.map((t: Type) =>
+    typeKey(canonicalType(t))
+  );
+  const matchedKeys = match.cases
+    .map((c) => (c.matchType ? typeKey(canonicalType(c.matchType)) : undefined))
+    .filter((key): key is string => !!key);
 
   if (!match.defaultCase) {
-    const missing = unionTypes.filter((t: string) => !matched.includes(t));
+    const missing = unionKeys.filter(
+      (key: string) => !matchedKeys.some((mk) => mk === key || mk.includes(key))
+    );
     if (missing.length) {
       throw new Error(
         `Match on ${union.name.value} is not exhaustive at ${match.location}. Missing cases: ${missing.join(", ")}`
@@ -61,9 +65,12 @@ const checkUnionMatch = (match: Match) => {
     !union.types.some((type: Type) => {
       if (typesAreCompatible(mCase.matchType, type)) return true;
       if (!mCase.matchType) return false;
-      const caseCanonical = canonicalType(mCase.matchType);
-      const unionCanonical = canonicalType(type);
-      return typeKey(caseCanonical) === typeKey(unionCanonical);
+      const caseKey = typeKey(canonicalType(mCase.matchType));
+      const unionKey = typeKey(canonicalType(type));
+      if (caseKey === unionKey || caseKey.includes(unionKey) || unionKey.includes(caseKey)) {
+        return true;
+      }
+      return false;
     })
   );
 

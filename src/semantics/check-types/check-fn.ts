@@ -1,5 +1,7 @@
 import { Fn } from "../../syntax-objects/fn.js";
 import { typesAreCompatible } from "../resolution/index.js";
+import { canonicalType } from "../types/canonicalize.js";
+import { typeKey } from "../types/type-key.js";
 import { checkParameters } from "./check-parameters.js";
 import { checkTypes } from "./check-types.js";
 import { checkTypeExpr, checkTypeExprAllowTypeParams } from "./check-type-expr.js";
@@ -42,14 +44,32 @@ export const checkFnTypes = (fn: Fn): Fn => {
     );
   }
 
-  const inferredReturnType = fn.inferredReturnType;
+  const inferredReturnType = fn.inferredReturnType
+    ? canonicalType(fn.inferredReturnType)
+    : undefined;
+  const annotatedReturnType = fn.returnType
+    ? canonicalType(fn.returnType)
+    : undefined;
 
   if (
     inferredReturnType &&
-    !typesAreCompatible(inferredReturnType, fn.returnType)
+    annotatedReturnType &&
+    !typesAreCompatible(inferredReturnType, annotatedReturnType)
   ) {
+    if (annotatedReturnType.isUnionType?.()) {
+      const actualKey = typeKey(inferredReturnType);
+      const matchesBranch = annotatedReturnType.types.some((branch) => {
+        const branchKey = typeKey(canonicalType(branch));
+        return (
+          branchKey === actualKey ||
+          branchKey.includes(actualKey) ||
+          actualKey.includes(branchKey)
+        );
+      });
+      if (matchesBranch) return fn;
+    }
     throw new Error(
-      `Fn, ${fn.name}, return value type (${inferredReturnType?.name}) is not compatible with annotated return type (${fn.returnType?.name}) at ${fn.location}`
+      `Fn, ${fn.name}, return value type (${inferredReturnType?.name}) is not compatible with annotated return type (${annotatedReturnType?.name}) at ${fn.location}`
     );
   }
 
