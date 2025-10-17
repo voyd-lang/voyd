@@ -16,7 +16,7 @@ export type Type =
   | UnionType
   | IntersectionType
   | TraitType
-  | ObjectType
+  | Obj
   | TupleType
   | FixedArrayType
   | FnType
@@ -134,8 +134,8 @@ export class IntersectionType extends BaseType {
   readonly kindOfType = "intersection";
   nominalTypeExpr: Child<Expr>;
   structuralTypeExpr: Child<Expr>;
-  nominalType?: ObjectType;
-  structuralType?: ObjectType;
+  nominalType?: Obj;
+  structuralType?: Obj;
 
   constructor(
     opts: NamedEntityOpts & {
@@ -197,17 +197,17 @@ export type ObjectField = {
   binaryenSetterType?: number;
 };
 
-export class ObjectType extends BaseType implements ScopedEntity {
+export class Obj extends BaseType implements ScopedEntity {
   readonly kindOfType = "object";
   lexicon: LexicalContext = new LexicalContext();
   typeParameters?: Identifier[];
   resolvedTypeArgs?: Type[];
-  genericInstances?: ObjectType[];
+  genericInstances?: Obj[];
   /** If this is a genericInstance of an object, this is the generic version itself that it was generated from */
-  genericParent?: ObjectType;
+  genericParent?: Obj;
   fields: ObjectField[];
   parentObjExpr?: Expr;
-  parentObjType?: ObjectType;
+  parentObjType?: Obj;
   /** Type used for locals, globals, function return type */
   binaryenType?: number;
   typesResolved?: boolean; // Don't set if type parameters are present
@@ -219,7 +219,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
     opts: NamedEntityOpts & {
       fields: ObjectField[];
       parentObjExpr?: Expr;
-      parentObj?: ObjectType;
+      parentObj?: Obj;
       typeParameters?: Identifier[];
       implementations?: Implementation[];
       isStructural?: boolean;
@@ -252,8 +252,8 @@ export class ObjectType extends BaseType implements ScopedEntity {
     ];
   }
 
-  clone(parent?: Expr): ObjectType {
-    return new ObjectType({
+  clone(parent?: Expr): Obj {
+    return new Obj({
       ...super.getCloneOpts(parent),
       id: `${this.id}#${this.#iteration++}`,
       fields: this.fields.map((field) => ({
@@ -268,7 +268,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
     });
   }
 
-  extends(ancestor: ObjectType): boolean {
+  extends(ancestor: Obj): boolean {
     if (this === ancestor) {
       return true;
     }
@@ -281,7 +281,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
   }
 
   // Register a version of this function with resolved generics
-  registerGenericInstance(obj: ObjectType) {
+  registerGenericInstance(obj: Obj) {
     if (!this.genericInstances) {
       this.genericInstances = [];
     }
@@ -405,9 +405,9 @@ export const bool = PrimitiveType.from("bool");
 export const dVoid = PrimitiveType.from("void");
 export const dVoyd = PrimitiveType.from("voyd");
 export const selfType = new SelfType();
-export const voydBaseObject = new ObjectType({
+export const voydBaseObject = new Obj({
   name: "Object",
   fields: [],
 });
 
-export type VoydRefType = ObjectType | UnionType | IntersectionType | TupleType;
+export type VoydRefType = Obj | UnionType | IntersectionType | TupleType;

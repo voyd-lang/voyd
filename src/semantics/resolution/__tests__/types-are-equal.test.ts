@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  ObjectType,
+  Obj,
   UnionType,
   Identifier,
   TypeAlias,
@@ -9,8 +9,8 @@ import { typesAreEqual } from "../types-are-equal.js";
 
 describe("typesAreEqual", () => {
   test("treats different generic args as distinct", () => {
-    const string = new ObjectType({ name: "String", fields: [] });
-    const jsonObj = new ObjectType({ name: "JsonObj", fields: [] });
+    const string = new Obj({ name: "String", fields: [] });
+    const jsonObj = new Obj({ name: "JsonObj", fields: [] });
 
     const json = new UnionType({ name: "Json", childTypeExprs: [] });
     json.resolvedMemberTypes = [jsonObj, string];
@@ -18,7 +18,7 @@ describe("typesAreEqual", () => {
     const MsgPack = new UnionType({ name: "MsgPack", childTypeExprs: [] });
     MsgPack.resolvedMemberTypes = [string];
 
-    const array = new ObjectType({
+    const array = new Obj({
       name: "Array",
       fields: [],
       typeParameters: [new Identifier({ value: "T" })],

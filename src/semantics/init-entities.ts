@@ -9,7 +9,7 @@ import {
   Call,
   Block,
   TypeAlias,
-  ObjectType,
+  Obj,
   ObjectLiteral,
   FixedArrayType,
   nop,
@@ -651,7 +651,7 @@ const initTypeExprEntities = (type?: Expr): Expr | undefined => {
 };
 
 const initTupleType = (tuple: List) => {
-  return new ObjectType({
+  return new Obj({
     ...tuple.metadata,
     name: tuple.syntaxId.toString(),
     fields: tuple.sliceAsArray(1).map((t, i) => ({
@@ -696,7 +696,7 @@ const initNominalObjectType = (obj: List) => {
   if (!name)
     throw new Error("Invalid object definition: invalid name expression");
 
-  return new ObjectType({
+  return new Obj({
     ...obj.metadata,
     name,
     typeParameters,
@@ -706,7 +706,7 @@ const initNominalObjectType = (obj: List) => {
 };
 
 const initStructuralObjectType = (obj: List) => {
-  return new ObjectType({
+  return new Obj({
     ...obj.metadata,
     name: obj.syntaxId.toString(),
     fields: extractObjectFields(obj),

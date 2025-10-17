@@ -12,7 +12,7 @@ import {
   TypeAlias,
   UnionType,
   IntersectionType,
-  ObjectType,
+  Obj,
   FnType,
   i32,
   f32,
@@ -45,8 +45,8 @@ describe("call resolution canonicalization", () => {
   });
 
   test("handles union aliases", () => {
-    const aObj = new ObjectType({ name: "A", fields: [] });
-    const bObj = new ObjectType({ name: "B", fields: [] });
+    const aObj = new Obj({ name: "A", fields: [] });
+    const bObj = new Obj({ name: "B", fields: [] });
     const union = new UnionType({ name: "AB", childTypeExprs: [] });
     union.resolvedMemberTypes = [aObj, bObj];
     const alias = new TypeAlias({
@@ -73,8 +73,8 @@ describe("call resolution canonicalization", () => {
   });
 
   test("handles intersection aliases", () => {
-    const nominal = new ObjectType({ name: "Nom", fields: [] });
-    const structural = new ObjectType({
+    const nominal = new Obj({ name: "Nom", fields: [] });
+    const structural = new Obj({
       name: "Struct",
       fields: [{ name: "x", typeExpr: Identifier.from("i32"), type: i32 }],
       isStructural: true,
@@ -93,7 +93,7 @@ describe("call resolution canonicalization", () => {
     });
     alias.resolvedType = inter;
 
-    const child = new ObjectType({
+    const child = new Obj({
       name: "Child",
       fields: [{ name: "x", typeExpr: Identifier.from("i32"), type: i32 }],
       parentObj: nominal,
@@ -117,9 +117,9 @@ describe("call resolution canonicalization", () => {
   });
 
   test("canonicalType is non-mutating for unions", () => {
-    const aObj = new ObjectType({ name: "A", fields: [] });
-    const bObj = new ObjectType({ name: "B", fields: [] });
-    const cObj = new ObjectType({ name: "C", fields: [] });
+    const aObj = new Obj({ name: "A", fields: [] });
+    const bObj = new Obj({ name: "B", fields: [] });
+    const cObj = new Obj({ name: "C", fields: [] });
 
     const nested = new UnionType({ name: "Nested", childTypeExprs: [] });
     nested.resolvedMemberTypes = [bObj, cObj];
@@ -186,7 +186,7 @@ describe("call resolution canonicalization", () => {
   });
 
   test("collapses duplicate union aliases", () => {
-    const obj = new ObjectType({ name: "Obj", fields: [] });
+    const obj = new Obj({ name: "Obj", fields: [] });
     const alias1 = new TypeAlias({
       name: Identifier.from("Alias1"),
       typeExpr: Identifier.from("Obj"),
@@ -200,8 +200,8 @@ describe("call resolution canonicalization", () => {
 
     const union = new UnionType({ name: "Union", childTypeExprs: [] });
     union.resolvedMemberTypes = [
-      alias1.resolvedType as ObjectType,
-      alias2.resolvedType as ObjectType,
+      alias1.resolvedType as Obj,
+      alias2.resolvedType as Obj,
     ];
     const unionAlias = new TypeAlias({
       name: Identifier.from("UnionAlias"),
@@ -235,7 +235,7 @@ describe("call resolution canonicalization", () => {
   });
 
   test("matches generic object with alias type arg", () => {
-    const base = new ObjectType({
+    const base = new Obj({
       name: "Box",
       fields: [],
       typeParameters: [Identifier.from("T")],

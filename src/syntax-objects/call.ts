@@ -6,12 +6,12 @@ import { Child } from "./lib/child.js";
 import { LexicalContext } from "./lib/lexical-context.js";
 import { List } from "./list.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
-import { ObjectType, Type } from "./types.js";
+import { Obj, Type } from "./types.js";
 
 /** Defines a function call */
 export class Call extends Syntax {
   readonly syntaxType = "call";
-  fn?: Fn | ObjectType;
+  fn?: Fn | Obj;
   #fnName: Child<Identifier>;
   #args: Child<List>;
   #typeArgs = new Child<List | undefined>(undefined, this);

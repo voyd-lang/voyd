@@ -1,10 +1,10 @@
 import { Expr } from "./expr.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
-import { ObjectType, Type } from "./types.js";
+import { Obj, Type } from "./types.js";
 
 export class ObjectLiteral extends Syntax {
   readonly syntaxType = "object-literal";
-  type?: ObjectType;
+  type?: Obj;
   fields: ObjectLiteralField[];
 
   constructor(opts: SyntaxMetadata & { fields: ObjectLiteralField[] }) {

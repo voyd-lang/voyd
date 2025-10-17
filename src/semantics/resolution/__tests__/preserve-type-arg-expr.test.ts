@@ -5,7 +5,7 @@ import {
   List,
   Parameter,
 } from "../../../syntax-objects/index.js";
-import { ObjectType, TypeAlias } from "../../../syntax-objects/types.js";
+import { Obj, TypeAlias } from "../../../syntax-objects/types.js";
 import { RootModule } from "../../../syntax-objects/module.js";
 import { Call } from "../../../syntax-objects/call.js";
 import { resolveFn } from "../resolve-fn.js";
@@ -33,7 +33,7 @@ describe("Preserve type-arg expressions on specialization", () => {
       parent: mod,
     });
     // Register 'String' type in module scope so both fn and clones can resolve it
-    const stringType = new ObjectType({
+    const stringType = new Obj({
       name: Identifier.from("String"),
       fields: [],
     });
@@ -66,7 +66,7 @@ describe("Preserve type-arg expressions on specialization", () => {
     // Register 'String' in a root module so the cloned trait instance can resolve
     const tmod = new RootModule({});
     tmod.registerEntity(
-      new ObjectType({ name: Identifier.from("String"), fields: [] })
+      new Obj({ name: Identifier.from("String"), fields: [] })
     );
     trait.parent = tmod;
 

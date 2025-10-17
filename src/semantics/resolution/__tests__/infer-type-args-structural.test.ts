@@ -1,12 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { inferTypeArgs } from "../infer-type-args.js";
 import { Call, Identifier, List } from "../../../syntax-objects/index.js";
-import {
-  ObjectType,
-  TypeAlias,
-  i32,
-  f32,
-} from "../../../syntax-objects/types.js";
+import { Obj, TypeAlias, i32, f32 } from "../../../syntax-objects/types.js";
 
 /**
  * Helper: build a type-call expression like Array<...> for parameter side.
@@ -21,20 +16,20 @@ const typeCall = (name: string, typeArgs: any[] = []) =>
 describe("inferTypeArgs structural unification", () => {
   test("infers T from Array<(String, T)> given Array<(String, i32)>", () => {
     // Generic object type Array<T>
-    const arrayGeneric = new ObjectType({
+    const arrayGeneric = new Obj({
       name: Identifier.from("Array"),
       fields: [],
       typeParameters: [Identifier.from("T")],
     });
 
     // Reuse the same String type instance on both sides for equality
-    const stringType = new ObjectType({
+    const stringType = new Obj({
       name: Identifier.from("String"),
       fields: [],
     });
 
     // Parameter side: Array<(String, T)>
-    const paramTuple = new ObjectType({
+    const paramTuple = new Obj({
       name: Identifier.from("Tuple"),
       fields: [
         { name: "0", typeExpr: stringType },
@@ -45,7 +40,7 @@ describe("inferTypeArgs structural unification", () => {
     const paramTypeExpr = typeCall("Array", [paramTuple]);
 
     // Argument side: Array<(String, i32)>
-    const argTupleType = new ObjectType({
+    const argTupleType = new Obj({
       name: Identifier.from("Tuple"),
       fields: [
         { name: "0", typeExpr: stringType, type: stringType },
@@ -75,17 +70,17 @@ describe("inferTypeArgs structural unification", () => {
   });
 
   test("conflicting occurrences of T return undefined", () => {
-    const arrayGeneric = new ObjectType({
+    const arrayGeneric = new Obj({
       name: Identifier.from("Array"),
       fields: [],
       typeParameters: [Identifier.from("T")],
     });
-    const stringType = new ObjectType({
+    const stringType = new Obj({
       name: Identifier.from("String"),
       fields: [],
     });
 
-    const paramTuple = new ObjectType({
+    const paramTuple = new Obj({
       name: Identifier.from("Tuple"),
       fields: [
         { name: "0", typeExpr: stringType },
@@ -96,7 +91,7 @@ describe("inferTypeArgs structural unification", () => {
     const paramTypeExpr = typeCall("Array", [paramTuple]);
 
     // First arg: Array<(String, i32)>
-    const tupleI32 = new ObjectType({
+    const tupleI32 = new Obj({
       name: Identifier.from("Tuple"),
       fields: [
         { name: "0", typeExpr: stringType, type: stringType },
@@ -114,7 +109,7 @@ describe("inferTypeArgs structural unification", () => {
     arrayI32.resolvedTypeArgs = [appliedI32];
 
     // Second arg: Array<(String, f32)> to conflict with T inferred as i32
-    const tupleF32 = new ObjectType({
+    const tupleF32 = new Obj({
       name: Identifier.from("Tuple"),
       fields: [
         { name: "0", typeExpr: stringType, type: stringType },

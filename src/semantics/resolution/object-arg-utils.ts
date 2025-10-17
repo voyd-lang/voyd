@@ -3,10 +3,10 @@ import { Block } from "../../syntax-objects/block.js";
 import { Expr, Identifier, List } from "../../syntax-objects/index.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { Variable } from "../../syntax-objects/variable.js";
-import { ObjectType, Type } from "../../syntax-objects/types.js";
+import { Obj, Type } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 
-const getStructuralType = (t?: Type): ObjectType | undefined => {
+const getStructuralType = (t?: Type): Obj | undefined => {
   if (!t) return undefined;
   if (t.isObjectType()) return t;
   if (t.isIntersectionType()) return t.structuralType ?? undefined;
@@ -21,7 +21,7 @@ const getStructuralType = (t?: Type): ObjectType | undefined => {
  */
 export const maybeExpandObjectArg = (
   objArg: Expr,
-  expected: ObjectType,
+  expected: Obj,
   metadata: Record<string, unknown>
 ): Expr | undefined => {
   if (objArg.isObjectLiteral()) return undefined;
@@ -59,4 +59,3 @@ export const maybeExpandObjectArg = (
   const obj = makeLiteral(tmpId);
   return new Block({ ...metadata, body: [tmpVar, obj] });
 };
-

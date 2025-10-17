@@ -20,7 +20,7 @@ import type { ArrayLiteral } from "./array-literal.js";
 import type {
   FnType,
   PrimitiveType,
-  ObjectType,
+  Obj,
   Type,
   TypeAlias,
   FixedArrayType,
@@ -244,7 +244,7 @@ export abstract class Syntax {
     return this.isType() && this.kindOfType === "tuple";
   }
 
-  isObjectType(): this is ObjectType {
+  isObjectType(): this is Obj {
     return this.isType() && this.kindOfType === "object";
   }
 

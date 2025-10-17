@@ -3,7 +3,7 @@ import {
   UnionType,
   IntersectionType,
   FnType,
-  ObjectType,
+  Obj,
   VoydRefType,
 } from "../../syntax-objects/types.js";
 import { TraitType } from "../../syntax-objects/trait.js";
@@ -60,8 +60,8 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
       : undefined;
     const clone = (t as IntersectionType).clone();
     // Prevent self references
-    clone.nominalType = nom === t ? undefined : (nom as ObjectType);
-    clone.structuralType = str === t ? undefined : (str as ObjectType);
+    clone.nominalType = nom === t ? undefined : (nom as Obj);
+    clone.structuralType = str === t ? undefined : (str as Obj);
     if (!clone.nominalType) return clone.structuralType as Type;
     if (!clone.structuralType) return clone.nominalType;
     return clone;
@@ -90,7 +90,7 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
 
   if (t.isObjectType?.()) {
     if (t.resolvedTypeArgs?.length) {
-      const copy = new ObjectType({
+      const copy = new Obj({
         name: t.name,
         fields: [],
         parentObjExpr: t.parentObjExpr,

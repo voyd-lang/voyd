@@ -1,10 +1,10 @@
-import { ObjectType, Type, ObjectField } from "../../syntax-objects/types.js";
+import { Obj, Type, ObjectField } from "../../syntax-objects/types.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
 import { typesAreCompatible } from "../resolution/index.js";
 import { checkTypes } from "./check-types.js";
 import { checkFnTypes } from "./check-fn.js";
 
-export const checkObjectType = (obj: ObjectType): ObjectType => {
+export const checkObjectType = (obj: Obj): Obj => {
   if (obj.genericInstances) {
     obj.genericInstances.forEach(checkTypes);
     return obj;
@@ -45,9 +45,9 @@ export const checkObjectType = (obj: ObjectType): ObjectType => {
 };
 
 export function assertValidExtension(
-  child: ObjectType,
+  child: Obj,
   parent?: Type
-): asserts parent is ObjectType {
+): asserts parent is Obj {
   if (!parent || !parent?.isObjectType()) {
     throw new Error(`Cannot resolve parent for obj ${child.name}`);
   }
@@ -87,4 +87,3 @@ const checkImpl = (impl: Implementation): Implementation => {
 
   return impl;
 };
-

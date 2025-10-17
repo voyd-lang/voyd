@@ -1,6 +1,6 @@
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
-import { ObjectType, TypeAlias } from "../../syntax-objects/types.js";
+import { Obj, TypeAlias } from "../../syntax-objects/types.js";
 import { Fn } from "../../syntax-objects/fn.js";
 import { Expr } from "../../syntax-objects/expr.js";
 import { getExprType } from "./get-expr-type.js";
@@ -14,7 +14,7 @@ import { resolveExport } from "./resolve-use.js";
 
 export const resolveImpl = (
   impl: Implementation,
-  targetType?: ObjectType
+  targetType?: Obj
 ): Implementation => {
   if (impl.typesResolved) return impl;
   targetType = targetType ?? getTargetType(impl);
@@ -100,7 +100,7 @@ const preRegisterImplMethods = (impl: Implementation): void => {
   visit(impl.body.value);
 };
 
-const getTargetType = (impl: Implementation): ObjectType | undefined => {
+const getTargetType = (impl: Implementation): Obj | undefined => {
   const expr = impl.targetTypeExpr.value;
   const type = expr.isIdentifier()
     ? expr.resolve()
@@ -131,10 +131,7 @@ const getTrait = (impl: Implementation): TraitType | undefined => {
   return type;
 };
 
-export const implIsCompatible = (
-  impl: Implementation,
-  obj: ObjectType
-): boolean => {
+export const implIsCompatible = (impl: Implementation, obj: Obj): boolean => {
   if (!impl.typeParameters.length && !obj.typeParameters?.length) return true;
 
   // For now, only handles generic impls with no constraints that match the type arg length of the target type.

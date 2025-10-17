@@ -9,7 +9,7 @@ import {
   resolveWithExpected,
 } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
-import { UnionType, ObjectType } from "../../syntax-objects/types.js";
+import { UnionType, Obj } from "../../syntax-objects/types.js";
 import { resolveUnionType } from "./resolve-union.js";
 
 export const resolveMatch = (match: Match): Match => {
@@ -139,13 +139,13 @@ const findSomeVariant = (type?: Type) => {
     (t) =>
       t.isObjectType() &&
       (t.name.is("Some") || t.genericParent?.name.is("Some"))
-  ) as ObjectType | undefined;
+  ) as Obj | undefined;
 };
 
 const typeHead = (t?: Type): string | undefined => {
   if (!t) return undefined;
   if (t.isObjectType()) {
-    const obj = t as ObjectType;
+    const obj = t as Obj;
     return obj.genericParent ? obj.genericParent.name.value : obj.name.value;
   }
   return t.name.value;
@@ -160,13 +160,13 @@ const maybeFillOmittedCaseTypes = (match: Match) => {
   const union = resolveUnionType(base as UnionType);
   if (!union.resolvedMemberTypes.length) return;
 
-  const headMap = new Map<string, ObjectType[]>();
+  const headMap = new Map<string, Obj[]>();
   for (const t of union.resolvedMemberTypes) {
     if (!t.isObjectType()) continue;
     const key = typeHead(t);
     if (!key) continue;
     const arr = headMap.get(key) ?? [];
-    arr.push(t as ObjectType);
+    arr.push(t as Obj);
     headMap.set(key, arr);
   }
 

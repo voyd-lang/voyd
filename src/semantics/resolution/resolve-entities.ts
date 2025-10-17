@@ -8,7 +8,7 @@ import { Call } from "../../syntax-objects/call.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
 import {
-  ObjectType,
+  Obj,
   TypeAlias,
   voydBaseObject,
   Type,
@@ -139,8 +139,8 @@ const unwrapAlias = (type?: Type): Type | undefined => {
 const findObjectType = (
   type: Type | undefined,
   name: Identifier
-): ObjectType | undefined => {
-  const matches: ObjectType[] = [];
+): Obj | undefined => {
+  const matches: Obj[] = [];
   const search = (t?: Type) => {
     t = unwrapAlias(t);
     if (!t) return;
@@ -199,10 +199,7 @@ export const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
   return resolveEntities(expr);
 };
 
-export const resolveObjectLiteral = (
-  obj: ObjectLiteral,
-  expected?: ObjectType
-) => {
+export const resolveObjectLiteral = (obj: ObjectLiteral, expected?: Obj) => {
   // Ensure expected structural type (incl. tuples) is resolved so its field
   // types are available for propagation.
   if (expected) expected = resolveObjectType(expected);
@@ -218,7 +215,7 @@ export const resolveObjectLiteral = (
     return field;
   });
 
-  obj.type = new ObjectType({
+  obj.type = new Obj({
     ...obj.metadata,
     name: `ObjectLiteral-${obj.syntaxId}`,
     fields: obj.fields.map((f) => ({

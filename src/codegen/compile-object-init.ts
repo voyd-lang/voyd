@@ -5,14 +5,14 @@ import {
 } from "../codegen.js";
 import { Call } from "../syntax-objects/call.js";
 import { ObjectLiteral } from "../syntax-objects/object-literal.js";
-import { ObjectType } from "../syntax-objects/types.js";
+import { Obj } from "../syntax-objects/types.js";
 import { getExprType } from "../semantics/resolution/get-expr-type.js";
 import * as gc from "../lib/binaryen-gc/index.js";
 
 export const compileObjectInit = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;
 
-  const objectType = getExprType(expr) as ObjectType;
+  const objectType = getExprType(expr) as Obj;
   const objectBinType = mapBinaryenType(opts, objectType);
   const obj = expr.argAt(0) as ObjectLiteral;
 

@@ -12,7 +12,7 @@ import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
 import {
   dVoid,
   FixedArrayType,
-  ObjectType,
+  Obj,
   Type,
 } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
@@ -147,7 +147,7 @@ const resolveCalleeAndGetType = (call: Call) => {
   return type;
 };
 
-const handleObjectConstruction = (call: Call, type: ObjectType): void => {
+const handleObjectConstruction = (call: Call, type: Obj): void => {
   // If explicit type args contain unknown identifiers, avoid generic
   // specialization to prevent infinite recursion. Defer to later type
   // checking to report the unknown type.
@@ -544,7 +544,7 @@ export const resolveLabeledArg = (call: Call) => {
   return call;
 };
 
-export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
+export const resolveObjectInit = (call: Call, type: Obj): Call => {
   // Ensure the object's implementations and field types are resolved so that
   // init functions are discoverable and comparable.
   type = resolveObjectType(type, call);
@@ -602,7 +602,7 @@ export const resolveObjectInit = (call: Call, type: ObjectType): Call => {
 };
 
 // Extracted helpers to keep resolveObjectInit flat and readable
-const collectInitFns = (type: ObjectType): Fn[] => {
+const collectInitFns = (type: Obj): Fn[] => {
   // Ensure impl.methods include inline function declarations (including those
   // wrapped in `export` blocks) without forcing full resolution.
   type.implementations

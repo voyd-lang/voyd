@@ -4,13 +4,13 @@ import {
   compileExpression,
 } from "../codegen.js";
 import { ObjectLiteral } from "../syntax-objects/object-literal.js";
-import { ObjectType } from "../syntax-objects/types.js";
+import { Obj } from "../syntax-objects/types.js";
 import { initStruct } from "../lib/binaryen-gc/index.js";
 
 export const compile = (opts: CompileExprOpts<ObjectLiteral>) => {
   const { expr: obj, mod } = opts;
 
-  const objectType = obj.getType() as ObjectType;
+  const objectType = obj.getType() as Obj;
   mapBinaryenType(opts, objectType);
   // mapBinaryenType will return the type for voydBaseObject for structural types, so we fetch the actual type here
   const literalBinType = objectType.getAttribute("originalType") as number;
