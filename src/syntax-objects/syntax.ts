@@ -21,7 +21,6 @@ import type {
   FnType,
   PrimitiveType,
   Type,
-  TypeAlias,
   FixedArrayType,
   UnionType,
   IntersectionType,
@@ -39,6 +38,7 @@ import type { Match } from "./match.js";
 import type { Implementation } from "./implementation.js";
 import type { TraitType } from "./trait.js";
 import { Obj } from "./obj.js";
+import { TypeAlias } from "./type-alias.js";
 
 export type Attributes = { [key: string]: unknown };
 
