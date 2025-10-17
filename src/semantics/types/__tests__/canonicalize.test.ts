@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { ObjectType, TypeAlias, i32 } from "../../../syntax-objects/types.js";
-import { TraitType } from "../../../syntax-objects/types/trait.js";
+import { TraitType } from "../../../syntax-objects/trait.js";
 import { Identifier } from "../../../syntax-objects/index.js";
 import { canonicalType } from "../canonicalize.js";
 

@@ -6,7 +6,7 @@ import {
   ObjectType,
   VoydRefType,
 } from "../../syntax-objects/types.js";
-import { TraitType } from "../../syntax-objects/types/trait.js";
+import { TraitType } from "../../syntax-objects/trait.js";
 import { getExprType } from "../resolution/get-expr-type.js";
 import { resolveTypeExpr } from "../resolution/resolve-type-expr.js";
 

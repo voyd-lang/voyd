@@ -8,7 +8,7 @@ import { Implementation } from "./implementation.js";
 import { ScopedEntity } from "./scoped-entity.js";
 import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
-import { TraitType } from "./types/trait.js";
+import { TraitType } from "./trait.js";
 import { BaseType } from "./types/base-type.js";
 
 export type Type =

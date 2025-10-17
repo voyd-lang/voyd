@@ -1,6 +1,6 @@
 import { Call } from "../../syntax-objects/call.js";
 import { nop } from "../../syntax-objects/lib/helpers.js";
-import { TraitType } from "../../syntax-objects/types/trait.js";
+import { TraitType } from "../../syntax-objects/trait.js";
 import { TypeAlias } from "../../syntax-objects/types.js";
 import { resolveFn } from "./resolve-fn.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";

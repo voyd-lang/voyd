@@ -9,7 +9,7 @@ import { ObjectType, TypeAlias } from "../../../syntax-objects/types.js";
 import { RootModule } from "../../../syntax-objects/module.js";
 import { Call } from "../../../syntax-objects/call.js";
 import { resolveFn } from "../resolve-fn.js";
-import { TraitType } from "../../../syntax-objects/types/trait.js";
+import { TraitType } from "../../../syntax-objects/trait.js";
 import { resolveTrait } from "../resolve-trait.js";
 
 describe("Preserve type-arg expressions on specialization", () => {

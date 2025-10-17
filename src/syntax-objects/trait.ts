@@ -1,13 +1,13 @@
-import { Expr } from "../expr.js";
-import { Fn } from "../fn.js";
-import { ChildList } from "../lib/child-list.js";
-import { ScopedNamedEntityOpts } from "../named-entity.js";
-import { Implementation } from "../implementation.js";
-import { BaseType } from "./base-type.js";
-import { ScopedEntity } from "../scoped-entity.js";
-import { LexicalContext } from "../lib/lexical-context.js";
-import { Type, TypeJSON } from "../types.js";
-import { Identifier } from "../identifier.js";
+import { Expr } from "./expr.js";
+import { Fn } from "./fn.js";
+import { ChildList } from "./lib/child-list.js";
+import { ScopedNamedEntityOpts } from "./named-entity.js";
+import { Implementation } from "./implementation.js";
+import { BaseType } from "./types/base-type.js";
+import { ScopedEntity } from "./scoped-entity.js";
+import { LexicalContext } from "./lib/lexical-context.js";
+import { Type, TypeJSON } from "./types.js";
+import { Identifier } from "./identifier.js";
 
 export type TraitOpts = ScopedNamedEntityOpts & {
   methods: Fn[];

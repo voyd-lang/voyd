@@ -13,7 +13,7 @@ import {
 } from "../../../syntax-objects/index.js";
 import { UnionType } from "../../../syntax-objects/types.js";
 import { resolveUnionType } from "../resolve-union.js";
-import { TraitType } from "../../../syntax-objects/types/trait.js";
+import { TraitType } from "../../../syntax-objects/trait.js";
 import { Implementation } from "../../../syntax-objects/implementation.js";
 import { getCallFn } from "../get-call-fn.js";
 

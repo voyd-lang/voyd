@@ -7,7 +7,7 @@ import { getExprType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
-import { TraitType } from "../../syntax-objects/types/trait.js";
+import { TraitType } from "../../syntax-objects/trait.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFn } from "./resolve-fn.js";
 import { resolveExport } from "./resolve-use.js";

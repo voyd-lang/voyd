@@ -1,6 +1,13 @@
 import { test } from "vitest";
-import { TraitType } from "../../syntax-objects/types/trait.js";
-import { Fn, Parameter, Call, Identifier, List, Block } from "../../syntax-objects/index.js";
+import { TraitType } from "../../syntax-objects/trait.js";
+import {
+  Fn,
+  Parameter,
+  Call,
+  Identifier,
+  List,
+  Block,
+} from "../../syntax-objects/index.js";
 import { VoydModule } from "../../syntax-objects/module.js";
 import { i32 } from "../../syntax-objects/types.js";
 import { resolveEntities } from "../resolution/resolve-entities.js";
@@ -13,7 +20,10 @@ test("trait method calls resolve via fallback", (t) => {
     returnTypeExpr: i32,
     body: new Block({ body: [] }),
   });
-  const trait = new TraitType({ name: Identifier.from("Run"), methods: [runFn] });
+  const trait = new TraitType({
+    name: Identifier.from("Run"),
+    methods: [runFn],
+  });
 
   const param = new Parameter({ name: Identifier.from("r"), type: trait });
   const callExpr = new Call({
@@ -38,4 +48,3 @@ test("trait method calls resolve via fallback", (t) => {
 
   t.expect(() => checkTypes(fn)).not.toThrow();
 });
-

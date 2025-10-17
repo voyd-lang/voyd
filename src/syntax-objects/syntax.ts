@@ -38,7 +38,7 @@ import type { Declaration } from "./declaration.js";
 import type { Use } from "./use.js";
 import type { Match } from "./match.js";
 import type { Implementation } from "./implementation.js";
-import type { TraitType } from "./types/trait.js";
+import type { TraitType } from "./trait.js";
 
 export type Attributes = { [key: string]: unknown };
 

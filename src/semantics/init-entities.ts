@@ -22,7 +22,7 @@ import {
   dVoid,
 } from "../syntax-objects/index.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
-import { TraitType } from "../syntax-objects/types/trait.js";
+import { TraitType } from "../syntax-objects/trait.js";
 import { SemanticProcessor } from "./types.js";
 
 export const initEntities: SemanticProcessor = (expr) => {
