@@ -1,5 +1,11 @@
 import { Block } from "../../syntax-objects/block.js";
-import { Call, Parameter, Type, Variable } from "../../syntax-objects/index.js";
+import {
+  Call,
+  Parameter,
+  Type,
+  Variable,
+  Obj,
+} from "../../syntax-objects/index.js";
 import { Match, MatchCase } from "../../syntax-objects/match.js";
 import { combineTypes } from "./combine-types.js";
 import { getExprType } from "./get-expr-type.js";
@@ -9,7 +15,7 @@ import {
   resolveWithExpected,
 } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
-import { UnionType, Obj } from "../../syntax-objects/types.js";
+import { UnionType } from "../../syntax-objects/types.js";
 import { resolveUnionType } from "./resolve-union.js";
 
 export const resolveMatch = (match: Match): Match => {

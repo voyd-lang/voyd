@@ -1,9 +1,9 @@
 import { Call } from "../../syntax-objects/call.js";
 import { Block } from "../../syntax-objects/block.js";
-import { Expr, Identifier, List } from "../../syntax-objects/index.js";
+import { Expr, Identifier, List, Obj } from "../../syntax-objects/index.js";
 import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { Variable } from "../../syntax-objects/variable.js";
-import { Obj, Type } from "../../syntax-objects/types.js";
+import { Type } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 
 const getStructuralType = (t?: Type): Obj | undefined => {

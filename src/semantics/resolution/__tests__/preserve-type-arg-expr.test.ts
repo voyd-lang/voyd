@@ -4,8 +4,9 @@ import {
   Identifier,
   List,
   Parameter,
+  Obj,
 } from "../../../syntax-objects/index.js";
-import { Obj, TypeAlias } from "../../../syntax-objects/types.js";
+import { TypeAlias } from "../../../syntax-objects/types.js";
 import { RootModule } from "../../../syntax-objects/module.js";
 import { Call } from "../../../syntax-objects/call.js";
 import { resolveFn } from "../resolve-fn.js";

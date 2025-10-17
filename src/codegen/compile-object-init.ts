@@ -5,9 +5,9 @@ import {
 } from "../codegen.js";
 import { Call } from "../syntax-objects/call.js";
 import { ObjectLiteral } from "../syntax-objects/object-literal.js";
-import { Obj } from "../syntax-objects/types.js";
 import { getExprType } from "../semantics/resolution/get-expr-type.js";
 import * as gc from "../lib/binaryen-gc/index.js";
+import { Obj } from "../syntax-objects/index.js";
 
 export const compileObjectInit = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;

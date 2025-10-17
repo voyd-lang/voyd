@@ -7,12 +7,12 @@ import {
   List,
   Parameter,
   MockIdentifier,
+  Obj,
 } from "../../../syntax-objects/index.js";
 import {
   TypeAlias,
   UnionType,
   IntersectionType,
-  Obj,
   FnType,
   i32,
   f32,

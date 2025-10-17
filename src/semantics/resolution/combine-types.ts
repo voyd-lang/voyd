@@ -1,6 +1,6 @@
+import { Obj } from "../../syntax-objects/obj.js";
 import {
   IntersectionType,
-  Obj,
   Type,
   UnionType,
 } from "../../syntax-objects/types.js";

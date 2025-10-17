@@ -16,7 +16,6 @@ import {
 } from "../../lib/binaryen-gc/index.js";
 import {
   IntersectionType,
-  Obj,
   voydBaseObject,
 } from "../../syntax-objects/types.js";
 import { murmurHash3 } from "../../lib/murmur-hash.js";
@@ -26,6 +25,7 @@ import {
   mapBinaryenType,
 } from "../../codegen.js";
 import { Call } from "../../syntax-objects/call.js";
+import { Obj } from "../../syntax-objects/index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 

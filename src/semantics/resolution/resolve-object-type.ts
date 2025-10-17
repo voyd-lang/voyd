@@ -1,7 +1,6 @@
 import { Call } from "../../syntax-objects/call.js";
-import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
-import { Obj, TypeAlias, voydBaseObject } from "../../syntax-objects/types.js";
+import { TypeAlias, voydBaseObject } from "../../syntax-objects/types.js";
 import { getExprType } from "./get-expr-type.js";
 import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
@@ -9,6 +8,7 @@ import { typesAreEqual } from "./types-are-equal.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { canonicalType } from "../types/canonicalize.js";
 import { Expr } from "../../syntax-objects/expr.js";
+import { Obj } from "../../syntax-objects/obj.js";
 
 export const resolveObjectType = (obj: Obj, call?: Call): Obj => {
   if (obj.typesResolved) return obj;

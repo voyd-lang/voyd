@@ -7,12 +7,7 @@ import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
-import {
-  Obj,
-  TypeAlias,
-  voydBaseObject,
-  Type,
-} from "../../syntax-objects/types.js";
+import { TypeAlias, voydBaseObject, Type } from "../../syntax-objects/types.js";
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveCall } from "./resolve-call.js";
@@ -26,6 +21,7 @@ import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveUse } from "./resolve-use.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
+import { Obj } from "../../syntax-objects/index.js";
 
 /**
  * NOTE: Some mapping is preformed on the AST at this stage.

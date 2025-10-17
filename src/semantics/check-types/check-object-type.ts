@@ -1,8 +1,9 @@
-import { Obj, Type, ObjectField } from "../../syntax-objects/types.js";
+import { Type } from "../../syntax-objects/types.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
 import { typesAreCompatible } from "../resolution/index.js";
 import { checkTypes } from "./check-types.js";
 import { checkFnTypes } from "./check-fn.js";
+import { Obj, ObjectField } from "../../syntax-objects/index.js";
 
 export const checkObjectType = (obj: Obj): Obj => {
   if (obj.genericInstances) {

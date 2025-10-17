@@ -1,5 +1,5 @@
 import { test } from "vitest";
-import { Obj, i32 } from "../../syntax-objects/types.js";
+import { i32 } from "../../syntax-objects/types.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
 import { Fn } from "../../syntax-objects/fn.js";
@@ -9,6 +9,7 @@ import { Call } from "../../syntax-objects/call.js";
 import { List } from "../../syntax-objects/list.js";
 import { Int } from "../../syntax-objects/int.js";
 import { checkTypes } from "../check-types/index.js";
+import { Obj } from "../../syntax-objects/obj.js";
 
 // Regression test for ensuring unresolved calls within methods are detected
 // during type checking.

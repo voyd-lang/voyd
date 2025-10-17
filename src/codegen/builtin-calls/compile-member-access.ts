@@ -4,10 +4,11 @@ import {
   mapBinaryenType,
 } from "../../codegen.js";
 import { Call } from "../../syntax-objects/call.js";
-import { Obj, IntersectionType } from "../../syntax-objects/types.js";
+import { IntersectionType } from "../../syntax-objects/types.js";
 import { getExprType } from "../../semantics/resolution/get-expr-type.js";
 import { OBJECT_FIELDS_OFFSET } from "./object-layout.js";
 import * as gc from "../../lib/binaryen-gc/index.js";
+import { Obj } from "../../syntax-objects/index.js";
 
 export const compileMemberAccess = (opts: CompileExprOpts<Call>) => {
   const { expr, mod } = opts;

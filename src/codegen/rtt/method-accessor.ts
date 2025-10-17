@@ -13,7 +13,7 @@ import {
   refCast,
   callRef,
 } from "../../lib/binaryen-gc/index.js";
-import { Obj, voydBaseObject } from "../../syntax-objects/types.js";
+import { voydBaseObject } from "../../syntax-objects/types.js";
 import { murmurHash3 } from "../../lib/murmur-hash.js";
 import {
   CompileExprOpts,
@@ -22,6 +22,7 @@ import {
 } from "../../codegen.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Fn } from "../../syntax-objects/fn.js";
+import { Obj } from "../../syntax-objects/index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 

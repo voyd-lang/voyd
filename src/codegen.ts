@@ -3,7 +3,6 @@ import { Expr } from "./syntax-objects/expr.js";
 import {
   Type,
   Primitive,
-  Obj,
   FixedArrayType,
   voydBaseObject,
   UnionType,
@@ -44,6 +43,7 @@ import {
   compile as compileClosure,
   getClosureSuperType,
 } from "./codegen/compile-closure.js";
+import { Obj } from "./syntax-objects/obj.js";
 
 export const codegen = (ast: Expr) => {
   const mod = new binaryen.Module();

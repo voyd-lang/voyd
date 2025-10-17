@@ -7,14 +7,10 @@ import {
   Fn,
   Block,
   Parameter,
+  Obj,
 } from "../../syntax-objects/index.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
-import {
-  dVoid,
-  FixedArrayType,
-  Obj,
-  Type,
-} from "../../syntax-objects/types.js";
+import { dVoid, FixedArrayType, Type } from "../../syntax-objects/types.js";
 import { getCallFn } from "./get-call-fn.js";
 import { getExprType, getIdentifierType } from "./get-expr-type.js";
 import {

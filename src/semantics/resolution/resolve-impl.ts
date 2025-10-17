@@ -1,6 +1,6 @@
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
-import { Obj, TypeAlias } from "../../syntax-objects/types.js";
+import { TypeAlias } from "../../syntax-objects/types.js";
 import { Fn } from "../../syntax-objects/fn.js";
 import { Expr } from "../../syntax-objects/expr.js";
 import { getExprType } from "./get-expr-type.js";
@@ -10,7 +10,7 @@ import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { TraitType } from "../../syntax-objects/trait.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFn } from "./resolve-fn.js";
-import { resolveExport } from "./resolve-use.js";
+import { Obj } from "../../syntax-objects/index.js";
 
 export const resolveImpl = (
   impl: Implementation,

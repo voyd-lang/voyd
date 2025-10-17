@@ -20,7 +20,6 @@ import type { ArrayLiteral } from "./array-literal.js";
 import type {
   FnType,
   PrimitiveType,
-  Obj,
   Type,
   TypeAlias,
   FixedArrayType,
@@ -39,6 +38,7 @@ import type { Use } from "./use.js";
 import type { Match } from "./match.js";
 import type { Implementation } from "./implementation.js";
 import type { TraitType } from "./trait.js";
+import { Obj } from "./obj.js";
 
 export type Attributes = { [key: string]: unknown };
 

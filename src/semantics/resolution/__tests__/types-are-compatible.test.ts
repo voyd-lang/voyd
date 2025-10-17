@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { Obj, UnionType, SelfType } from "../../../syntax-objects/index.js";
+import { UnionType, SelfType, Obj } from "../../../syntax-objects/index.js";
 import { typesAreCompatible } from "../types-are-compatible.js";
 
 describe("typesAreCompatible - unions", () => {
