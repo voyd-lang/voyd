@@ -146,7 +146,7 @@ const inferCallTypeArgs = (fn: Fn, call: Call) => {
     // Helper: compute the nominal head key
     const headKeyFromType = (t?: Type): string | undefined => {
       if (!t) return undefined;
-      if (t.isObjectType()) {
+      if (t.isObj()) {
         return t.genericParent ? t.genericParent.name.value : t.name.value;
       }
       if (t.isPrimitiveType()) return t.name.value;

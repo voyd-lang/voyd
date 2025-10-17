@@ -136,15 +136,13 @@ const resolveMatchReturnType = (match: Match): Type | undefined => {
 const findSomeVariant = (type?: Type) => {
   if (!type?.isUnionType()) return undefined;
   return type.resolvedMemberTypes.find(
-    (t) =>
-      t.isObjectType() &&
-      (t.name.is("Some") || t.genericParent?.name.is("Some"))
+    (t) => t.isObj() && (t.name.is("Some") || t.genericParent?.name.is("Some"))
   ) as Obj | undefined;
 };
 
 const typeHead = (t?: Type): string | undefined => {
   if (!t) return undefined;
-  if (t.isObjectType()) {
+  if (t.isObj()) {
     const obj = t as Obj;
     return obj.genericParent ? obj.genericParent.name.value : obj.name.value;
   }
@@ -162,7 +160,7 @@ const maybeFillOmittedCaseTypes = (match: Match) => {
 
   const headMap = new Map<string, Obj[]>();
   for (const t of union.resolvedMemberTypes) {
-    if (!t.isObjectType()) continue;
+    if (!t.isObj()) continue;
     const key = typeHead(t);
     if (!key) continue;
     const arr = headMap.get(key) ?? [];

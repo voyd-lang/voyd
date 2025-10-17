@@ -15,7 +15,7 @@ export type NormalizedClosureFn = {
 const isObjectish = (t?: Type): boolean => {
   if (!t) return false;
   const c = canonicalType(t);
-  if (c.isObjectType?.()) return true;
+  if (c.isObj?.()) return true;
   if (c.isUnionType?.()) return true;
   if (c.isIntersectionType?.()) return true;
   // Treat unresolved aliases conservatively as object-ish for typed identity

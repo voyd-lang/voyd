@@ -90,7 +90,7 @@ export const unifyTypeParams = (
       const genericName = p.fnName.value;
 
       // Try to find the nominal object on the argument side
-      const argObj = arg.isObjectType()
+      const argObj = arg.isObj()
         ? arg
         : arg.isIntersectionType()
         ? arg.nominalType
@@ -120,12 +120,12 @@ export const unifyTypeParams = (
     // the structural portion of the argument. Extra fields on the
     // argument side are permitted, enabling structural subtyping
     // (i.e. the argument may be a superset of the parameter).
-    if (p.isObjectType()) {
+    if (p.isObj()) {
       const paramObj = p;
       const target = arg.isIntersectionType()
         ? arg.structuralType ?? arg.nominalType // prefer structural, but fall back to nominal if provided
         : arg;
-      if (!target || !target.isObjectType()) return false;
+      if (!target || !target.isObj()) return false;
 
       for (const field of paramObj.fields) {
         const match = target.getField(field.name);
@@ -160,7 +160,7 @@ export const unifyTypeParams = (
       // Helper: compute a nominal head key for matching
       const headKeyFromType = (t: Type | undefined): string | undefined => {
         if (!t) return undefined;
-        if (t.isObjectType()) {
+        if (t.isObj()) {
           const obj = t;
           return obj.genericParent
             ? obj.genericParent.name.value

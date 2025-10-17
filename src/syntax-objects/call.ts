@@ -73,7 +73,7 @@ export class Call extends Syntax {
       this.#type = this.fn.returnType;
     }
 
-    if (!this.#type && this.fn?.isObjectType()) {
+    if (!this.#type && this.fn?.isObj()) {
       this.#type = this.fn;
     }
 

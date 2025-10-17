@@ -9,7 +9,7 @@ import { Type } from "../syntax-objects/types.js";
 export const compile = (opts: CompileExprOpts<Type>) => {
   const type = opts.expr;
 
-  if (type.isObjectType()) {
+  if (type.isObj()) {
     buildObjectType(opts, type);
     return opts.mod.nop();
   }
@@ -26,4 +26,3 @@ export const compile = (opts: CompileExprOpts<Type>) => {
 
   return opts.mod.nop();
 };
-

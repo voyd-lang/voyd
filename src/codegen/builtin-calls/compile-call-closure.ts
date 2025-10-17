@@ -52,7 +52,7 @@ export const compileCallClosure = (opts: CompileExprOpts<Call>): number => {
   const retType: Type = expectedType.returnType!;
   const retCanon = canonicalType(retType);
   const isObjectish =
-    retCanon?.isObjectType?.() ||
+    retCanon?.isObj?.() ||
     retCanon?.isUnionType?.() ||
     retCanon?.isIntersectionType?.() ||
     retCanon?.isTypeAlias?.();

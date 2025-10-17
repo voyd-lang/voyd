@@ -8,6 +8,7 @@ import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { canonicalType } from "../types/canonicalize.js";
+import { Expr } from "../../syntax-objects/expr.js";
 
 export const resolveObjectType = (obj: Obj, call?: Call): Obj => {
   if (obj.typesResolved) return obj;
@@ -24,7 +25,7 @@ export const resolveObjectType = (obj: Obj, call?: Call): Obj => {
   if (obj.parentObjExpr) {
     obj.parentObjExpr = resolveTypeExpr(obj.parentObjExpr);
     const parentType = getExprType(obj.parentObjExpr);
-    obj.parentObjType = parentType?.isObjectType() ? parentType : undefined;
+    obj.parentObjType = parentType?.isObj() ? parentType : undefined;
   } else {
     obj.parentObjType = voydBaseObject;
   }
@@ -35,7 +36,7 @@ export const resolveObjectType = (obj: Obj, call?: Call): Obj => {
 
 // Detects whether a type-argument expression contains an unresolved type
 // identifier (e.g., an unbound generic name like `T`).
-export const containsUnresolvedTypeId = (expr: any): boolean => {
+export const containsUnresolvedTypeId = (expr: Expr): boolean => {
   // Follows TypeAlias chains to the underlying resolved type (if any).
   const unwrapAlias = (t: any): any => {
     let cur = t;
@@ -67,7 +68,7 @@ export const containsUnresolvedTypeId = (expr: any): boolean => {
     }
 
     if (e.isType?.()) {
-      if (e.isObjectType?.()) {
+      if (e.isObj?.()) {
         stack.push(...e.fields.map((f: any) => f.typeExpr));
         continue;
       }

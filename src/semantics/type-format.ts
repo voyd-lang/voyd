@@ -22,7 +22,7 @@ export const formatTypeName = (
     return t.name.toString();
   }
 
-  if (t.isObjectType?.()) {
+  if (t.isObj?.()) {
     const base = t.name.toString();
     const args = t.resolvedTypeArgs ?? [];
     if (!args.length) return base;

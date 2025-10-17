@@ -45,7 +45,7 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (expr.isModule()) return resolveModule(expr);
   if (expr.isList()) return resolveListTypes(expr);
   if (expr.isUse()) return resolveUse(expr, resolveModule);
-  if (expr.isObjectType()) return resolveObjectType(expr);
+  if (expr.isObj()) return resolveObjectType(expr);
   if (expr.isTypeAlias()) return resolveTypeAlias(expr);
   if (expr.isObjectLiteral()) return resolveObjectLiteral(expr);
   if (expr.isArrayLiteral()) return resolveArrayLiteral(expr);
@@ -83,7 +83,7 @@ const resolveBlock = (block: Block): Block => {
 };
 
 const getArrayElemType = (type?: Type): Type | undefined => {
-  if (!type?.isObjectType()) return;
+  if (!type?.isObj()) return;
   const parent = type.genericParent;
   if (!type.name.is("Array") && !parent?.name.is("Array")) return;
   const arg = type.resolvedTypeArgs?.[0];
@@ -144,7 +144,7 @@ const findObjectType = (
   const search = (t?: Type) => {
     t = unwrapAlias(t);
     if (!t) return;
-    if (t.isObjectType()) {
+    if (t.isObj()) {
       if (t.name.is(name) || t.genericParent?.name.is(name)) matches.push(t);
       return;
     }
@@ -193,7 +193,7 @@ export const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
     }
     return resolved;
   }
-  if (expr.isObjectLiteral() && unwrapped?.isObjectType()) {
+  if (expr.isObjectLiteral() && unwrapped?.isObj()) {
     return resolveObjectLiteral(expr, unwrapped);
   }
   return resolveEntities(expr);

@@ -9,8 +9,7 @@ export const checkUnionType = (union: UnionType) => {
   }
 
   union.resolvedMemberTypes.forEach((t: Type) => {
-    const isObjectType =
-      t.isObjectType() || t.isIntersectionType() || t.isUnionType();
+    const isObjectType = t.isObj() || t.isIntersectionType() || t.isUnionType();
     if (!isObjectType) {
       throw new Error(
         `Union must be made up of object types ${union.location}`

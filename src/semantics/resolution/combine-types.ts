@@ -17,7 +17,7 @@ export const combineTypes = (types: Type[]): Type | undefined => {
     (t, i) => !types.slice(0, i).some((u) => typesAreEqual(t, u))
   );
   const firstType = unique[0];
-  if (!unique.length || !firstType?.isObjectType()) return firstType;
+  if (!unique.length || !firstType?.isObj()) return firstType;
 
   let isLocalUnion = false;
   let topType: Obj | IntersectionType | UnionType = firstType;
@@ -61,5 +61,5 @@ export const combineTypes = (types: Type[]): Type | undefined => {
 };
 
 const isObjectOrIntersection = (type: Type): type is Obj | IntersectionType => {
-  return type.isObjectType() || type.isIntersectionType();
+  return type.isObj() || type.isIntersectionType();
 };

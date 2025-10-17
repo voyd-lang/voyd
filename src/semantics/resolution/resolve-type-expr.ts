@@ -29,7 +29,7 @@ export const resolveTypeExpr = (typeExpr: Expr): Expr => {
     typeExpr.resolutionPhase = 2;
     return typeExpr;
   }
-  if (typeExpr.isObjectType()) return resolveObjectType(typeExpr);
+  if (typeExpr.isObj()) return resolveObjectType(typeExpr);
   if (typeExpr.isIntersectionType()) return resolveIntersectionType(typeExpr);
   if (typeExpr.isUnionType()) return resolveUnionType(typeExpr);
   if (typeExpr.isFixedArrayType()) return resolveFixedArrayType(typeExpr);
@@ -55,7 +55,7 @@ const resolveTypeCall = (call: Call): Call => {
 
   if (call.typeArgs) call.typeArgs = call.typeArgs.map(resolveTypeExpr);
 
-  if (type.isObjectType()) return finish(resolveObjectType(type, call), type);
+  if (type.isObj()) return finish(resolveObjectType(type, call), type);
   if (type.isTraitType()) return finish(resolveTrait(type, call));
   if (type.isFixedArrayType()) return finish(resolveFixedArrayType(type));
   if (type.isUnionType()) return finish(resolveUnionType(type));
@@ -111,6 +111,6 @@ export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
   alias.typeExpr = resolveTypeExpr(alias.typeExpr);
   alias.resolvedType = getExprType(alias.typeExpr);
   call.type = alias.resolvedType;
-  call.fn = call.type?.isObjectType() ? call.type : undefined;
+  call.fn = call.type?.isObj() ? call.type : undefined;
   return call;
 };

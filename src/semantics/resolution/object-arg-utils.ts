@@ -8,7 +8,7 @@ import { getExprType } from "./get-expr-type.js";
 
 const getStructuralType = (t?: Type): Obj | undefined => {
   if (!t) return undefined;
-  if (t.isObjectType()) return t;
+  if (t.isObj()) return t;
   if (t.isIntersectionType()) return t.structuralType ?? undefined;
   return undefined;
 };

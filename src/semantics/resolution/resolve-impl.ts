@@ -49,11 +49,11 @@ export const resolveImpl = (
 
   if (!targetType) return impl;
 
-  if (targetType?.isObjectType()) {
+  if (targetType?.isObj()) {
     targetType.implementations?.push(impl);
   }
 
-  if (targetType?.isObjectType() && targetType.typeParameters?.length) {
+  if (targetType?.isObj() && targetType.typeParameters?.length) {
     // Apply impl to existing generic instances
     targetType.genericInstances?.forEach((obj) =>
       resolveImpl(impl.clone(), obj)
@@ -108,7 +108,7 @@ const getTargetType = (impl: Implementation): Obj | undefined => {
     ? expr.fnName.resolve()
     : undefined;
 
-  if (!type || !type.isObjectType()) return;
+  if (!type || !type.isObj()) return;
 
   if (type.typeParameters?.length && expr.isCall()) {
     const obj = resolveObjectType(type, expr);

@@ -48,7 +48,7 @@ export function assertValidExtension(
   child: Obj,
   parent?: Type
 ): asserts parent is Obj {
-  if (!parent || !parent?.isObjectType()) {
+  if (!parent || !parent?.isObj()) {
     throw new Error(`Cannot resolve parent for obj ${child.name}`);
   }
 

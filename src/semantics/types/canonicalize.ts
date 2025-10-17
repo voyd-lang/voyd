@@ -88,7 +88,7 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
     return clone;
   }
 
-  if (t.isObjectType?.()) {
+  if (t.isObj?.()) {
     if (t.resolvedTypeArgs?.length) {
       const copy = new Obj({
         name: t.name,

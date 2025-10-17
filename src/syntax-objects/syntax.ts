@@ -244,7 +244,7 @@ export abstract class Syntax {
     return this.isType() && this.kindOfType === "tuple";
   }
 
-  isObjectType(): this is Obj {
+  isObj(): this is Obj {
     return this.isType() && this.kindOfType === "object";
   }
 

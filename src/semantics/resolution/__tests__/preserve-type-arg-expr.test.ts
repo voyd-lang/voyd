@@ -52,7 +52,7 @@ describe("Preserve type-arg expressions on specialization", () => {
     const applied = inst.resolvedTypeArgs?.[0];
     expect(applied?.isTypeAlias?.()).toBe(true);
     expect((applied as TypeAlias)?.typeExpr?.isType?.()).toBe(true);
-    expect((applied as TypeAlias)?.resolvedType?.isObjectType?.()).toBe(true);
+    expect((applied as TypeAlias)?.resolvedType?.isObj?.()).toBe(true);
     expect((applied as TypeAlias)?.resolvedType?.name?.value).toBe("String");
   });
 

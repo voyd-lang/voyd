@@ -56,7 +56,7 @@ export const resolveCall = (call: Call, candidateFns?: Fn[]): Expr => {
   const calleeType = resolveCalleeAndGetType(call);
 
   // Constructors (object types by name)
-  if (calleeType?.isObjectType()) handleObjectConstruction(call, calleeType);
+  if (calleeType?.isObj()) handleObjectConstruction(call, calleeType);
 
   // Resolve and apply type args for the call if present
   if (call.typeArgs) call.typeArgs = call.typeArgs.map(resolveTypeExpr);
@@ -93,7 +93,7 @@ const resolveMemberAccessDirect = (call: Call): Call => {
   const recv = call.argAt(0);
   const member = call.argAt(1);
   const recvType = getExprType(recv);
-  if (recvType?.isObjectType()) {
+  if (recvType?.isObj()) {
     call.type = recvType.getField(member as Identifier)?.type;
     return call;
   }
@@ -182,7 +182,7 @@ const handleObjectConstruction = (call: Call, type: Obj): void => {
   // If we resolved to a nominal constructor (no init fn matched) and the
   // argument is not a literal, expand it into a literal using member-access
   // so downstream type checking and codegen can proceed uniformly.
-  if (call.fn?.isObjectType()) {
+  if (call.fn?.isObj()) {
     const arg0 = call.argAt(0);
     if (arg0 && !arg0.isObjectLiteral()) {
       const expanded = maybeExpandObjectArg(
@@ -201,7 +201,7 @@ const computeCallReturnType = (
 ): Type | undefined =>
   call.fn?.isFn()
     ? call.fn.returnType
-    : call.fn?.isObjectType()
+    : call.fn?.isObj()
     ? call.fn
     : calleeType?.isFnType()
     ? calleeType.returnType
@@ -238,7 +238,7 @@ const resolveCallFn = (call: Call, candidateFns?: Fn[]) => {
 const arrayElemType = (type?: Type): Type | undefined => {
   if (!type) return;
   const t = canonicalType(type);
-  if (t.isObjectType()) {
+  if (t.isObj()) {
     if (!t.name.is("Array") && !t.genericParent?.name.is("Array")) return;
     const arg = t.resolvedTypeArgs?.[0];
     return arg ? canonicalType(arg) : undefined;
@@ -472,7 +472,7 @@ const expandObjectArg = (call: Call) => {
 
   // Case 2: object reference (nominal or structural type)
   const objType = getExprType(objArg);
-  const structType = objType?.isObjectType()
+  const structType = objType?.isObj()
     ? objType
     : objType?.isIntersectionType()
     ? objType.structuralType
@@ -556,14 +556,14 @@ export const resolveObjectInit = (call: Call, type: Obj): Call => {
   if (type.typeParameters && !call.typeArgs) {
     const arg0 = call.argAt(0);
     const elem = arrayElemType(getExprType(arg0));
-    const tuple = elem?.isObjectType()
+    const tuple = elem?.isObj()
       ? elem
       : elem?.isIntersectionType()
       ? elem.structuralType ?? elem.nominalType
       : undefined;
     const key = tuple?.getField("0")?.type;
     const valExpr = tuple?.getField("1")?.typeExpr;
-    if (key?.isObjectType() && key.name.is("String") && valExpr) {
+    if (key?.isObj() && key.name.is("String") && valExpr) {
       call.typeArgs = new List({ value: [valExpr.clone()] });
       type = resolveObjectType(type, call);
     }
@@ -701,9 +701,7 @@ const resolveFixedArray = (call: Call) => {
 const findSomeVariant = (type?: Type) => {
   if (!type?.isUnionType()) return undefined;
   return type.resolvedMemberTypes.find(
-    (t) =>
-      t.isObjectType() &&
-      (t.name.is("Some") || t.genericParent?.name.is("Some"))
+    (t) => t.isObj() && (t.name.is("Some") || t.genericParent?.name.is("Some"))
   );
 };
 

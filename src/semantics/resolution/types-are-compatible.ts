@@ -55,8 +55,8 @@ export const typesAreCompatible = (
 
   // Attempt to get implementation self parameters to match to their trait method. Don't think its working.
   if (
-    (a.isObjectType() && b.isSelfType() && b.parentTrait) ||
-    (b.isObjectType() && a.isSelfType() && a.parentTrait)
+    (a.isObj() && b.isSelfType() && b.parentTrait) ||
+    (b.isObj() && a.isSelfType() && a.parentTrait)
   ) {
     return true;
   }
@@ -71,7 +71,7 @@ export const typesAreCompatible = (
     return a.id === b.id;
   }
 
-  if (a.isObjectType() && b.isObjectType()) {
+  if (a.isObj() && b.isObj()) {
     const structural = opts.structuralOnly || b.isStructural;
 
     if (structural) {
@@ -101,7 +101,7 @@ export const typesAreCompatible = (
     return a.extends(b);
   }
 
-  if (a.isObjectType() && b.isTraitType()) {
+  if (a.isObj() && b.isTraitType()) {
     const matchesTrait = a.implementations?.some(
       (impl) => impl.trait?.id === b.id
     );
@@ -111,7 +111,7 @@ export const typesAreCompatible = (
       : false;
   }
 
-  if (a.isTraitType() && b.isObjectType()) {
+  if (a.isTraitType() && b.isObj()) {
     const matchesTrait = b.implementations?.some(
       (impl) => impl.trait?.id === a.id
     );
@@ -163,7 +163,7 @@ export const typesAreCompatible = (
       ? [a as UnionType, b]
       : [b as UnionType, a];
 
-    if (!nonUnionType.isObjectType() && !nonUnionType.isIntersectionType()) {
+    if (!nonUnionType.isObj() && !nonUnionType.isIntersectionType()) {
       return false;
     }
 
@@ -172,7 +172,7 @@ export const typesAreCompatible = (
     );
   }
 
-  if (a.isObjectType() && b.isIntersectionType()) {
+  if (a.isObj() && b.isIntersectionType()) {
     if (!b.nominalType || !b.structuralType) return false;
     return (
       a.extends(b.nominalType) &&

@@ -132,7 +132,7 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "voyd") || isPrimitiveId(type, "void"))
     return binaryen.none;
 
-  if (type.isObjectType()) {
+  if (type.isObj()) {
     const key = getPlaceholderKey(type);
     if (buildingTypePlaceholders.has(key)) {
       return buildingTypePlaceholders.get(key)!;

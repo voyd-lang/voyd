@@ -15,10 +15,8 @@ export const resolveIntersectionType = (
   const structuralType = getExprType(inter.structuralTypeExpr.value);
 
   // TODO Error if not correct type
-  inter.nominalType = nominalType?.isObjectType() ? nominalType : undefined;
-  inter.structuralType = structuralType?.isObjectType()
-    ? structuralType
-    : undefined;
+  inter.nominalType = nominalType?.isObj() ? nominalType : undefined;
+  inter.structuralType = structuralType?.isObj() ? structuralType : undefined;
 
   return inter;
 };

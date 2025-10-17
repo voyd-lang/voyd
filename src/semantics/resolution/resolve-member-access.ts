@@ -13,7 +13,7 @@ export const tryResolveMemberAccessSugar = (call: Call): Call | undefined => {
   if (!recv) return;
   const recvType = getExprType(recv);
 
-  if (recvType && recvType.isObjectType() && recvType.hasField(call.fnName)) {
+  if (recvType && recvType.isObj() && recvType.hasField(call.fnName)) {
     return new Call({
       ...call.metadata,
       fnName: Identifier.from("member-access"),
@@ -42,4 +42,3 @@ export const tryResolveMemberAccessSugar = (call: Call): Call | undefined => {
 
   return undefined;
 };
-

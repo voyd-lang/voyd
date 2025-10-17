@@ -20,7 +20,7 @@ export const compile = (opts: CompileExprOpts<Match>) => {
     returnType === binaryen.none ? asStmt(mod, e) : e;
 
   const getHeadKey = (t?: Type): string | undefined => {
-    if (!t?.isObjectType()) return undefined;
+    if (!t?.isObj()) return undefined;
     const obj = t as unknown as Obj;
     return obj.genericParent ? obj.genericParent.id : obj.id;
   };
@@ -38,7 +38,7 @@ export const compile = (opts: CompileExprOpts<Match>) => {
 
   const matchIdForCase = (t: Type | undefined): number => {
     if (!t) return 0;
-    if (!t.isObjectType()) return t.syntaxId;
+    if (!t.isObj()) return t.syntaxId;
     const obj = t as unknown as Obj;
     const headKey = getHeadKey(t);
     const count = headKey ? headCounts.get(headKey) ?? 0 : 0;
