@@ -21,11 +21,11 @@ export const resolveTypeExpr = (typeExpr: Expr): Expr => {
     return typeExpr;
   }
   if (typeExpr.isTypeAlias()) {
-    if (typeExpr.type || !typeExpr.typeExpr) return typeExpr;
+    if (typeExpr.resolvedType || !typeExpr.typeExpr) return typeExpr;
     if (typeExpr.resolutionPhase > 0) return typeExpr;
     typeExpr.resolutionPhase = 1;
     typeExpr.typeExpr = resolveTypeExpr(typeExpr.typeExpr);
-    typeExpr.type = getExprType(typeExpr.typeExpr);
+    typeExpr.resolvedType = getExprType(typeExpr.typeExpr);
     typeExpr.resolutionPhase = 2;
     return typeExpr;
   }
@@ -103,14 +103,14 @@ export const resolveTypeAlias = (call: Call, type: TypeAlias): Call => {
         name: identifier,
         typeExpr: nop(),
       });
-      type.type = getExprType(typeArg);
+      type.resolvedType = getExprType(typeArg);
       alias.registerEntity(type);
     });
   }
 
   alias.typeExpr = resolveTypeExpr(alias.typeExpr);
-  alias.type = getExprType(alias.typeExpr);
-  call.type = alias.type;
+  alias.resolvedType = getExprType(alias.typeExpr);
+  call.type = alias.resolvedType;
   call.fn = call.type?.isObjectType() ? call.type : undefined;
   return call;
 };

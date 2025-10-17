@@ -17,7 +17,7 @@ export type ImplementationOpts = ScopedSyntaxMetadata & {
 
 export class Implementation extends ScopedSyntax {
   readonly syntaxType = "implementation";
-  readonly typeParams: ChildList<Identifier>;
+  readonly typeParameters: ChildList<Identifier>;
   readonly targetTypeExpr: Child<Expr>;
   readonly body: Child<Expr>;
   readonly traitExpr: Child<Expr | undefined>;
@@ -29,7 +29,7 @@ export class Implementation extends ScopedSyntax {
 
   constructor(opts: ImplementationOpts) {
     super(opts);
-    this.typeParams = new ChildList(opts.typeParams, this);
+    this.typeParameters = new ChildList(opts.typeParams, this);
     this.targetTypeExpr = new Child(opts.targetTypeExpr, this);
     this.body = new Child(opts.body, this);
     this.traitExpr = new Child(opts.traitExpr, this);
@@ -57,7 +57,7 @@ export class Implementation extends ScopedSyntax {
   clone(parent?: Expr) {
     const impl = new Implementation({
       ...super.getCloneOpts(parent),
-      typeParams: this.typeParams.clone(),
+      typeParams: this.typeParameters.clone(),
       targetTypeExpr: this.targetTypeExpr.clone(),
       body: nop(),
       traitExpr: this.traitExpr.clone(),
@@ -69,7 +69,7 @@ export class Implementation extends ScopedSyntax {
   toJSON(): unknown {
     return [
       "impl",
-      ["type-params", this.typeParams.toArray()],
+      ["type-params", this.typeParameters.toArray()],
       ["target", this.targetTypeExpr.toJSON()],
       ["body", this.body.toJSON()],
     ];

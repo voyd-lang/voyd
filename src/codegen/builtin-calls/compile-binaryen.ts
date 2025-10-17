@@ -42,7 +42,8 @@ export const compileBinaryen = (opts: CompileExprOpts<Call>): number => {
       if (expr?.isCall() && expr.calls("BnrConst")) {
         const arg = expr.argAt(0);
         if (!arg) return opts.mod.nop();
-        if ("value" in arg) return (arg as any).value;
+        // TODO: Standardize value
+        if ("value" in arg) return arg.value;
       }
 
       return compileExpression({ ...opts, expr });

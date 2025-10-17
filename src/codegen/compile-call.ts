@@ -16,7 +16,7 @@ import { builtinCallCompilers } from "./builtin-call-registry.js";
 import { compileObjectInit } from "./compile-object-init.js";
 import { getClosureFunctionType } from "./compile-closure.js";
 import { Fn } from "../syntax-objects/fn.js";
-import { voydBaseObject, Type } from "../syntax-objects/types.js";
+import { voydBaseObject, Type, FnType } from "../syntax-objects/types.js";
 import { murmurHash3 } from "../lib/murmur-hash.js";
 import { AugmentedBinaryen } from "../lib/binaryen-gc/types.js";
 import { canonicalType } from "../semantics/types/canonicalize.js";
@@ -57,7 +57,8 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     ];
     // Prefer the call-site expected type if present to align heap identity.
     const expectedType =
-      ((expr.fnName as any).getAttribute?.("parameterFnType") as any) || fnType;
+      (expr.fnName.getAttribute?.("parameterFnType") as FnType | undefined) ||
+      fnType;
     const primaryType = getClosureFunctionType(opts, expectedType);
     let secondaryType: number | undefined;
     if (expectedType !== fnType) {

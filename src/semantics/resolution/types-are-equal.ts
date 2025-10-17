@@ -12,7 +12,7 @@ const flattenUnion = (type: Type): Type[] => {
     const current = queue.pop()!;
 
     if (current.isUnionType()) {
-      for (const child of current.types) {
+      for (const child of current.resolvedMemberTypes) {
         if (!seen.has(child.id)) {
           seen.add(child.id);
           queue.push(child);
@@ -55,10 +55,10 @@ export const typesAreEqual = (
       );
     }
     if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
-      return !!a.appliedTypeArgs?.every((arg, index) =>
+      return !!a.resolvedTypeArgs?.every((arg, index) =>
         typesAreEqual(
           getExprType(arg),
-          getExprType(b.appliedTypeArgs?.[index]),
+          getExprType(b.resolvedTypeArgs?.[index]),
           visited
         )
       );
@@ -68,10 +68,10 @@ export const typesAreEqual = (
 
   if (a.isTraitType() && b.isTraitType()) {
     if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
-      return !!a.appliedTypeArgs?.every((arg, index) =>
+      return !!a.resolvedTypeArgs?.every((arg, index) =>
         typesAreEqual(
           getExprType(arg),
-          getExprType(b.appliedTypeArgs?.[index]),
+          getExprType(b.resolvedTypeArgs?.[index]),
           visited
         )
       );
@@ -118,4 +118,3 @@ export const typesAreEqual = (
 
   return false;
 };
-

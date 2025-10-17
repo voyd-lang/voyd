@@ -30,20 +30,17 @@ export const resolveMatch = (match: Match): Match => {
     const expectedThenType = someVariant?.getField("value")?.type;
     if (expectedThenType && match.defaultCase?.expr) {
       const def = match.defaultCase.expr;
-      if ((def as any).isBlock?.()) {
+      if (def.isBlock?.()) {
         const block = def as unknown as Block;
         const n = block.body.length;
         if (n > 0) {
           const last = block.body.at(n - 1)!;
-          block.body[n - 1] = resolveWithExpected(
-            last,
-            expectedThenType
-          ) as any;
+          block.body[n - 1] = resolveWithExpected(last, expectedThenType);
         }
       } else {
         match.defaultCase.expr = new Block({
-          ...(def as any).metadata,
-          body: [resolveWithExpected(def as any, expectedThenType) as any],
+          ...def.metadata,
+          body: [resolveWithExpected(def, expectedThenType)],
         });
       }
     }
@@ -88,18 +85,18 @@ const resolveCase = (
 
   let expr = c.expr as Call | Block;
   if (isDefault && expectedDefaultType) {
-    if ((expr as any).isBlock?.()) {
+    if (expr.isBlock?.()) {
       const block = expr as unknown as Block;
       const n = block.body.length;
       if (n > 0)
         block.body[n - 1] = resolveWithExpected(
           block.body[n - 1],
           expectedDefaultType
-        ) as any;
+        );
     } else {
       expr = new Block({
-        ...(expr as any).metadata,
-        body: [resolveWithExpected(expr as any, expectedDefaultType) as any],
+        ...expr.metadata,
+        body: [resolveWithExpected(expr, expectedDefaultType)],
       });
     }
   }
@@ -138,7 +135,7 @@ const resolveMatchReturnType = (match: Match): Type | undefined => {
 // Helpers
 const findSomeVariant = (type?: Type) => {
   if (!type?.isUnionType()) return undefined;
-  return type.types.find(
+  return type.resolvedMemberTypes.find(
     (t) =>
       t.isObjectType() &&
       (t.name.is("Some") || t.genericParent?.name.is("Some"))
@@ -161,10 +158,10 @@ const maybeFillOmittedCaseTypes = (match: Match) => {
   const base = match.baseType;
   if (!base?.isUnionType()) return;
   const union = resolveUnionType(base as UnionType);
-  if (!union.types.length) return;
+  if (!union.resolvedMemberTypes.length) return;
 
   const headMap = new Map<string, ObjectType[]>();
-  for (const t of union.types) {
+  for (const t of union.resolvedMemberTypes) {
     if (!t.isObjectType()) continue;
     const key = typeHead(t);
     if (!key) continue;

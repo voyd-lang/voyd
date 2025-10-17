@@ -42,23 +42,26 @@ const checkUnionMatch = (match: Match) => {
   const matched = match.cases
     .map((c) => c.matchType?.name.value)
     .filter((n): n is string => !!n);
-  const unionTypes = union.types.map((t: Type) => t.name.value);
+  const unionTypes = union.resolvedMemberTypes.map((t: Type) => t.name.value);
 
   if (!match.defaultCase) {
     const missing = unionTypes.filter((t: string) => !matched.includes(t));
     if (missing.length) {
       throw new Error(
-        `Match on ${union.name.value} is not exhaustive at ${match.location}. Missing cases: ${missing.join(", ")}`
+        `Match on ${union.name.value} is not exhaustive at ${
+          match.location
+        }. Missing cases: ${missing.join(", ")}`
       );
     }
   }
 
   checkMatchCases(match);
 
-  const badCase = match.cases.find((mCase) =>
-    !union.types.some((type: Type) =>
-      typesAreCompatible(mCase.matchType, type)
-    )
+  const badCase = match.cases.find(
+    (mCase) =>
+      !union.resolvedMemberTypes.some((type: Type) =>
+        typesAreCompatible(mCase.matchType, type)
+      )
   );
 
   if (badCase) {
@@ -91,4 +94,3 @@ const checkObjectMatch = (match: Match) => {
 
   return match;
 };
-

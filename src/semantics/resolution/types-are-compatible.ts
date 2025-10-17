@@ -12,7 +12,7 @@ const flattenUnion = (type: Type): Type[] => {
     const current = queue.pop()!;
 
     if (current.isUnionType()) {
-      for (const child of current.types) {
+      for (const child of current.resolvedMemberTypes) {
         if (!seen.has(child.id)) {
           seen.add(child.id);
           queue.push(child);
@@ -84,10 +84,10 @@ export const typesAreCompatible = (
     }
 
     if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
-      return !!a.appliedTypeArgs?.every((arg, index) =>
+      return !!a.resolvedTypeArgs?.every((arg, index) =>
         typesAreCompatible(
           getExprType(arg),
-          getExprType(b.appliedTypeArgs?.[index]),
+          getExprType(b.resolvedTypeArgs?.[index]),
           opts,
           visited
         )
@@ -123,10 +123,10 @@ export const typesAreCompatible = (
 
   if (a.isTraitType() && b.isTraitType()) {
     if (a.genericParent && a.genericParent.id === b.genericParent?.id) {
-      return !!a.appliedTypeArgs?.every((arg, index) =>
+      return !!a.resolvedTypeArgs?.every((arg, index) =>
         typesAreCompatible(
           getExprType(arg),
-          getExprType(b.appliedTypeArgs?.[index]),
+          getExprType(b.resolvedTypeArgs?.[index]),
           opts,
           visited
         )
@@ -167,7 +167,7 @@ export const typesAreCompatible = (
       return false;
     }
 
-    return unionType.types.some((t) =>
+    return unionType.resolvedMemberTypes.some((t) =>
       typesAreCompatible(nonUnionType, t, opts, visited)
     );
   }

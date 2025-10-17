@@ -43,7 +43,7 @@ const selectByExplicitTypeArgs = (
 ): Fn | undefined => {
   if (!call.typeArgs) return;
   const appliedExact = candidates.filter((cand) =>
-    cand.appliedTypeArgs?.every((t, i) => {
+    cand.resolvedTypeArgs?.every((t, i) => {
       const arg = call.typeArgs!.at(i);
       if (arg) resolveTypeExpr(arg);
       const argType = arg && getExprType(arg);
@@ -53,7 +53,7 @@ const selectByExplicitTypeArgs = (
   );
   if (appliedExact.length === 1) return appliedExact[0];
   if (appliedExact.length > 1) {
-    const specialized = appliedExact.filter((c) => !!c.appliedTypeArgs);
+    const specialized = appliedExact.filter((c) => !!c.resolvedTypeArgs);
     if (specialized.length === 1) return specialized[0];
   }
   return undefined;
@@ -91,7 +91,9 @@ const selectByExpectedReturnType = (
         );
         const single = heads.size === 1 ? [...heads][0] : undefined;
         return single
-          ? canonExpected.types.find((t) => headKeyFromType(t) === single)
+          ? canonExpected.resolvedMemberTypes.find(
+              (t) => headKeyFromType(t) === single
+            )
           : undefined;
       })()
     : canonExpected;
@@ -115,8 +117,8 @@ const selectByExpectedReturnType = (
         cRet.isObjectType?.() &&
         canonExpectedBranch.isObjectType?.()
       ) {
-        const ra = cRet.appliedTypeArgs ?? [];
-        const ea = canonExpectedBranch.appliedTypeArgs ?? [];
+        const ra = cRet.resolvedTypeArgs ?? [];
+        const ea = canonExpectedBranch.resolvedTypeArgs ?? [];
         if (ra.length === ea.length && ra.every((t, i) => eq(t, ea[i])))
           return 2;
       }
@@ -142,7 +144,7 @@ const selectByExpectedReturnType = (
 const selectByConcreteReturn = (candidates: Fn[]): Fn | undefined => {
   const concreteReturn = candidates.filter((c) => {
     const ret = formatTypeName(c.returnType);
-    const applied = (c.appliedTypeArgs ?? []).map((a) => formatTypeName(a));
+    const applied = (c.resolvedTypeArgs ?? []).map((a) => formatTypeName(a));
     return !applied.some((name) => ret.includes(`<${name}>`) || ret === name);
   });
   return concreteReturn.length === 1 ? concreteReturn[0] : undefined;
@@ -150,7 +152,7 @@ const selectByConcreteReturn = (candidates: Fn[]): Fn | undefined => {
 
 const toBranches = (t: Type): Type[] => {
   const u = canon(t)!;
-  return u.isUnionType?.() ? u.types : [u];
+  return u.isUnionType?.() ? u.resolvedMemberTypes : [u];
 };
 
 // Determine whether type `a` covers type `b`:
@@ -163,9 +165,9 @@ const covers = (a?: Type, b?: Type): boolean => {
   // Handle function types specially: identical parameters and covering returns
   a = canon(a)!;
   b = canon(b)!;
-  if ((a as any).isFnType?.() && (b as any).isFnType?.()) {
-    const fa: any = a;
-    const fb: any = b;
+  if (a.isFnType?.() && b.isFnType?.()) {
+    const fa = a;
+    const fb = b;
     if (fa.parameters.length !== fb.parameters.length) return false;
     for (let i = 0; i < fa.parameters.length; i++) {
       const pa = fa.parameters[i]?.type;
@@ -307,8 +309,8 @@ const filterResolvedCandidates = (call: Call, candidates: Fn[]): Fn[] => {
 };
 
 const typeArgsMatch = (call: Call, candidate: Fn): boolean =>
-  call.typeArgs && candidate.appliedTypeArgs
-    ? candidate.appliedTypeArgs.every((t, i) => {
+  call.typeArgs && candidate.resolvedTypeArgs
+    ? candidate.resolvedTypeArgs.every((t, i) => {
         const arg = call.typeArgs?.at(i);
         if (arg) resolveTypeExpr(arg);
         const argType = arg && getExprType(arg);

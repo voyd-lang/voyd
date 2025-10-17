@@ -32,9 +32,9 @@ export const unifyTypeParams = (
   const unwrap = (t: Type | undefined): Type | undefined => {
     let cur = t;
     const guard = new Set<string>();
-    while (cur?.isTypeAlias() && cur.type && !guard.has(cur.id)) {
+    while (cur?.isTypeAlias() && cur.resolvedType && !guard.has(cur.id)) {
       guard.add(cur.id);
-      cur = cur.type;
+      cur = cur.resolvedType;
     }
     return cur;
   };
@@ -103,7 +103,7 @@ export const unifyTypeParams = (
       if (genericName !== argGenericName) return false;
 
       const paramArgs = p.typeArgs?.toArray() ?? [];
-      const applied = argObj.appliedTypeArgs ?? [];
+      const applied = argObj.resolvedTypeArgs ?? [];
       if (paramArgs.length !== applied.length) return false;
 
       for (let i = 0; i < paramArgs.length; i++) {
@@ -150,12 +150,12 @@ export const unifyTypeParams = (
     // conservative by failing on ambiguity.
     if (p.isUnionType()) {
       const argUnion = arg.isUnionType() ? resolveUnionType(arg) : undefined;
-      if (!argUnion || !argUnion.types.length) return false;
+      if (!argUnion || !argUnion.resolvedMemberTypes.length) return false;
 
-      const paramMembers = p.childTypeExprs
+      const paramMembers = p.memberTypeExprs
         .toArray()
         .map((e) => resolveTypeExpr(e));
-      const argMembers = argUnion.types;
+      const argMembers = argUnion.resolvedMemberTypes;
 
       // Helper: compute a nominal head key for matching
       const headKeyFromType = (t: Type | undefined): string | undefined => {
@@ -172,7 +172,7 @@ export const unifyTypeParams = (
         if (t.isFnType()) return "Fn";
         if (t.isIntersectionType())
           return headKeyFromType(t.nominalType ?? t.structuralType);
-        if (t.isTypeAlias()) return headKeyFromType(t.type);
+        if (t.isTypeAlias()) return headKeyFromType(t.resolvedType);
         return t.name.value;
       };
       const headKeyFromExpr = (e: Expr): string | undefined => {
@@ -263,9 +263,7 @@ export const inferTypeArgs = (
     const resolvedTypeExpr = resolveTypeExpr(typeExpr);
     if (argExpr.isClosure() && resolvedTypeExpr.isFnType()) {
       argExpr.setAttribute("parameterFnType", resolvedTypeExpr);
-      const untyped = argExpr.parameters.some(
-        (p) => !p.type && !p.typeExpr
-      );
+      const untyped = argExpr.parameters.some((p) => !p.type && !p.typeExpr);
       if (untyped) continue;
     }
 
@@ -289,7 +287,7 @@ export const inferTypeArgs = (
     const ty = merged.get(tp.value);
     if (!ty) return undefined;
     const alias = new TypeAlias({ name: tp.clone(), typeExpr: nop() });
-    alias.type = ty;
+    alias.resolvedType = ty;
     inferred.push(alias);
   }
 
