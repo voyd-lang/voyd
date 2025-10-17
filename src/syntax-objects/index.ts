@@ -24,3 +24,4 @@ export * from "./object-literal.js";
 export * from "./array-literal.js";
 export * from "./closure.js";
 export * from "./obj.js";
+export * from "./type-alias.js";

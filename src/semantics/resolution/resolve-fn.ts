@@ -5,8 +5,7 @@ import { Implementation } from "../../syntax-objects/implementation.js";
 import { List } from "../../syntax-objects/list.js";
 import { Parameter } from "../../syntax-objects/parameter.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
-import { TypeAlias, selfType } from "../../syntax-objects/types.js";
-import { nop } from "../../syntax-objects/index.js";
+import { Type, TypeAlias, selfType, nop } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
@@ -17,7 +16,6 @@ import {
 } from "./infer-type-args.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
-import { Type } from "../../syntax-objects/types.js";
 import { canonicalType } from "../types/canonicalize.js";
 
 export type ResolveFnTypesOpts = {

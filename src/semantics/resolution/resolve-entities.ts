@@ -7,7 +7,7 @@ import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
-import { TypeAlias, voydBaseObject, Type } from "../../syntax-objects/types.js";
+import { TypeAlias, voydBaseObject, Type } from "../../syntax-objects/index.js";
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveCall } from "./resolve-call.js";

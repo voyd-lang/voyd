@@ -2,7 +2,7 @@ import { Expr } from "../../syntax-objects/expr.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { nop } from "../../syntax-objects/index.js";
 import { List } from "../../syntax-objects/list.js";
-import { Type, TypeAlias } from "../../syntax-objects/types.js";
+import { Type, TypeAlias } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { typesAreEqual } from "./types-are-equal.js";

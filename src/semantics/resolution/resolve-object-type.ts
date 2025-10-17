@@ -1,6 +1,6 @@
 import { Call } from "../../syntax-objects/call.js";
 import { List } from "../../syntax-objects/list.js";
-import { TypeAlias, voydBaseObject } from "../../syntax-objects/types.js";
+import { TypeAlias, voydBaseObject } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";

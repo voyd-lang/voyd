@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { inferTypeArgs } from "../infer-type-args.js";
 import { Call, Identifier, List, Obj } from "../../../syntax-objects/index.js";
-import { TypeAlias, i32, f32 } from "../../../syntax-objects/types.js";
+import { TypeAlias, i32, f32 } from "../../../syntax-objects/index.js";
 
 /**
  * Helper: build a type-call expression like Array<...> for parameter side.

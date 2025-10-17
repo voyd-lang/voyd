@@ -1,6 +1,6 @@
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
-import { TypeAlias } from "../../syntax-objects/types.js";
+import { TypeAlias } from "../../syntax-objects/index.js";
 import { Fn } from "../../syntax-objects/fn.js";
 import { Expr } from "../../syntax-objects/expr.js";
 import { getExprType } from "./get-expr-type.js";

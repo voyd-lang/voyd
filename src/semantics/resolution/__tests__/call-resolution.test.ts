@@ -16,7 +16,7 @@ import {
   FnType,
   i32,
   f32,
-} from "../../../syntax-objects/types.js";
+} from "../../../syntax-objects/index.js";
 import { resolveCall } from "../resolve-call.js";
 import { canonicalType } from "../../types/canonicalize.js";
 

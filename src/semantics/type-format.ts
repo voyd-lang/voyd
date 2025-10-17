@@ -1,4 +1,4 @@
-import { Type, TypeAlias } from "../syntax-objects/types.js";
+import { Type, TypeAlias } from "../syntax-objects/index.js";
 
 // Format a type name including applied generic type parameters, when present.
 export const formatTypeName = (

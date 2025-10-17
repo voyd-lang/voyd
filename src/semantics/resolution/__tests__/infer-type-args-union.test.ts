@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { inferTypeArgs } from "../infer-type-args.js";
 import { Identifier, Call, List, Obj } from "../../../syntax-objects/index.js";
-import { TypeAlias, UnionType, f32 } from "../../../syntax-objects/types.js";
+import { TypeAlias, UnionType, f32 } from "../../../syntax-objects/index.js";
 import { resolveUnionType } from "../resolve-union.js";
 
 const typeCall = (name: string, typeArgs: any[] = []) =>

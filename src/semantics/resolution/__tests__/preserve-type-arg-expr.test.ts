@@ -6,7 +6,7 @@ import {
   Parameter,
   Obj,
 } from "../../../syntax-objects/index.js";
-import { TypeAlias } from "../../../syntax-objects/types.js";
+import { TypeAlias } from "../../../syntax-objects/index.js";
 import { RootModule } from "../../../syntax-objects/module.js";
 import { Call } from "../../../syntax-objects/call.js";
 import { resolveFn } from "../resolve-fn.js";
