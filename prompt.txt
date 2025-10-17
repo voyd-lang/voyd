@@ -1,0 +1,9 @@
+Audit *all* of the syntax objects in src/syntax-objects to find divergences in how their types are accessed. Most have a `.type` field, which is what I'd like to norm on.
+
+Find an
+
+---
+
+Should I separate the definition of a type from their instantiations?
+Similar to how fn has Fn and FnType? Examples: Trait, TypeAlias, Object.
+The main point of confusion being generics

@@ -52,7 +52,7 @@ const hasTypeArgs = (type?: Expr) => {
     // generic arguments. Only flag unresolved when type parameters exist and
     // no applied type args have been provided.
     if (!type.typeParameters) return false;
-    return !(type.appliedTypeArgs && type.appliedTypeArgs.length > 0);
+    return !(type.resolvedTypeArgs && type.resolvedTypeArgs.length > 0);
   }
 
   return false;
@@ -81,7 +81,9 @@ export const checkTypeExprAllowTypeParams = (
         throw new Error(`Unrecognized identifier ${e} at ${e.location}`);
       }
       if (!entity.isType()) {
-        throw new Error(`Expected type, got ${entity.name.value} at ${e.location}`);
+        throw new Error(
+          `Expected type, got ${entity.name.value} at ${e.location}`
+        );
       }
       return;
     }
@@ -125,7 +127,7 @@ export const checkTypeExprAllowTypeParams = (
       return;
     }
     if (e.isUnionType()) {
-      e.childTypeExprs.toArray().forEach(visit);
+      e.memberTypeExprs.toArray().forEach(visit);
       return;
     }
   };

@@ -26,7 +26,7 @@ describe("call resolution canonicalization", () => {
       name: Identifier.from("Alias"),
       typeExpr: Identifier.from("i32"),
     });
-    alias.type = i32;
+    alias.resolvedType = i32;
 
     const fnName = Identifier.from("foo");
     const fn = new Fn({
@@ -45,15 +45,15 @@ describe("call resolution canonicalization", () => {
   });
 
   test("handles union aliases", () => {
-    const aObj = new ObjectType({ name: "A", value: [] });
-    const bObj = new ObjectType({ name: "B", value: [] });
+    const aObj = new ObjectType({ name: "A", fields: [] });
+    const bObj = new ObjectType({ name: "B", fields: [] });
     const union = new UnionType({ name: "AB", childTypeExprs: [] });
-    union.types = [aObj, bObj];
+    union.resolvedMemberTypes = [aObj, bObj];
     const alias = new TypeAlias({
       name: Identifier.from("ABAlias"),
       typeExpr: Identifier.from("AB"),
     });
-    alias.type = union;
+    alias.resolvedType = union;
 
     const fnName = Identifier.from("bar");
     const fn = new Fn({
@@ -73,12 +73,10 @@ describe("call resolution canonicalization", () => {
   });
 
   test("handles intersection aliases", () => {
-    const nominal = new ObjectType({ name: "Nom", value: [] });
+    const nominal = new ObjectType({ name: "Nom", fields: [] });
     const structural = new ObjectType({
       name: "Struct",
-      value: [
-        { name: "x", typeExpr: Identifier.from("i32"), type: i32 },
-      ],
+      fields: [{ name: "x", typeExpr: Identifier.from("i32"), type: i32 }],
       isStructural: true,
     });
     const inter = new IntersectionType({
@@ -93,13 +91,11 @@ describe("call resolution canonicalization", () => {
       name: Identifier.from("AliasBoth"),
       typeExpr: Identifier.from("Both"),
     });
-    alias.type = inter;
+    alias.resolvedType = inter;
 
     const child = new ObjectType({
       name: "Child",
-      value: [
-        { name: "x", typeExpr: Identifier.from("i32"), type: i32 },
-      ],
+      fields: [{ name: "x", typeExpr: Identifier.from("i32"), type: i32 }],
       parentObj: nominal,
     });
     const arg = new MockIdentifier({ value: "c", entity: child });
@@ -121,37 +117,37 @@ describe("call resolution canonicalization", () => {
   });
 
   test("canonicalType is non-mutating for unions", () => {
-    const aObj = new ObjectType({ name: "A", value: [] });
-    const bObj = new ObjectType({ name: "B", value: [] });
-    const cObj = new ObjectType({ name: "C", value: [] });
+    const aObj = new ObjectType({ name: "A", fields: [] });
+    const bObj = new ObjectType({ name: "B", fields: [] });
+    const cObj = new ObjectType({ name: "C", fields: [] });
 
     const nested = new UnionType({ name: "Nested", childTypeExprs: [] });
-    nested.types = [bObj, cObj];
+    nested.resolvedMemberTypes = [bObj, cObj];
 
     const union = new UnionType({ name: "Top", childTypeExprs: [] });
-    union.types = [aObj, nested];
+    union.resolvedMemberTypes = [aObj, nested];
 
-    const before = [...union.types];
+    const before = [...union.resolvedMemberTypes];
     const canon1 = canonicalType(union) as UnionType;
     const canon2 = canonicalType(union) as UnionType;
 
     // Original unchanged
-    expect(union.types).toHaveLength(2);
-    expect(union.types[0]).toBe(aObj);
-    expect(union.types[1]).toBe(nested);
-    expect(union.types).toEqual(before);
+    expect(union.resolvedMemberTypes).toHaveLength(2);
+    expect(union.resolvedMemberTypes[0]).toBe(aObj);
+    expect(union.resolvedMemberTypes[1]).toBe(nested);
+    expect(union.resolvedMemberTypes).toEqual(before);
 
     // Canonicalized result is flattened and deduped
     expect(canon1).not.toBe(union);
-    expect(canon1.types.map((t) => t.id).sort()).toEqual(
+    expect(canon1.resolvedMemberTypes.map((t) => t.id).sort()).toEqual(
       [aObj.id, bObj.id, cObj.id].sort()
     );
     // Idempotent and non-mutating across repeated calls
-    expect(canon2.types.map((t) => t.id).sort()).toEqual(
+    expect(canon2.resolvedMemberTypes.map((t) => t.id).sort()).toEqual(
       [aObj.id, bObj.id, cObj.id].sort()
     );
     // Original still unchanged after multiple calls
-    expect(union.types).toEqual(before);
+    expect(union.resolvedMemberTypes).toEqual(before);
   });
 
   test("canonicalType is non-mutating for function types", () => {
@@ -159,12 +155,12 @@ describe("call resolution canonicalization", () => {
       name: Identifier.from("RetAlias"),
       typeExpr: Identifier.from("f32"),
     });
-    aliasRet.type = f32;
+    aliasRet.resolvedType = f32;
     const aliasParam = new TypeAlias({
       name: Identifier.from("ParamAlias"),
       typeExpr: Identifier.from("i32"),
     });
-    aliasParam.type = i32;
+    aliasParam.resolvedType = i32;
 
     const fnType = new FnType({
       name: Identifier.from("FnT"),
@@ -182,38 +178,43 @@ describe("call resolution canonicalization", () => {
 
     // Canonicalized clone has rewritten types
     expect(canon).not.toBe(fnType);
-    if ((canon as any).isFnType?.()) {
-      const c = canon as any;
+    if (canon.isFnType?.()) {
+      const c = canon;
       expect(c.parameters[0]?.type).toBe(i32);
       expect(c.returnType).toBe(f32);
     }
   });
 
   test("collapses duplicate union aliases", () => {
-    const obj = new ObjectType({ name: "Obj", value: [] });
+    const obj = new ObjectType({ name: "Obj", fields: [] });
     const alias1 = new TypeAlias({
       name: Identifier.from("Alias1"),
       typeExpr: Identifier.from("Obj"),
     });
-    alias1.type = obj;
+    alias1.resolvedType = obj;
     const alias2 = new TypeAlias({
       name: Identifier.from("Alias2"),
       typeExpr: Identifier.from("Obj"),
     });
-    alias2.type = obj;
+    alias2.resolvedType = obj;
 
     const union = new UnionType({ name: "Union", childTypeExprs: [] });
-    union.types = [alias1.type as ObjectType, alias2.type as ObjectType];
+    union.resolvedMemberTypes = [
+      alias1.resolvedType as ObjectType,
+      alias2.resolvedType as ObjectType,
+    ];
     const unionAlias = new TypeAlias({
       name: Identifier.from("UnionAlias"),
       typeExpr: Identifier.from("Union"),
     });
-    unionAlias.type = union;
+    unionAlias.resolvedType = union;
 
     const fnName = Identifier.from("dup");
     const fn = new Fn({
       name: fnName,
-      parameters: [new Parameter({ name: Identifier.from("p"), type: unionAlias })],
+      parameters: [
+        new Parameter({ name: Identifier.from("p"), type: unionAlias }),
+      ],
     });
 
     const arg = new MockIdentifier({ value: "o", entity: obj });
@@ -226,29 +227,31 @@ describe("call resolution canonicalization", () => {
     resolveCall(call);
     expect(call.fn).toBe(fn);
 
-    const canon = canonicalType(unionAlias.type as UnionType) as UnionType;
-    expect(canon.types).toHaveLength(1);
-    expect(canon.types[0]).toBe(obj);
+    const canon = canonicalType(
+      unionAlias.resolvedType as UnionType
+    ) as UnionType;
+    expect(canon.resolvedMemberTypes).toHaveLength(1);
+    expect(canon.resolvedMemberTypes[0]).toBe(obj);
   });
 
   test("matches generic object with alias type arg", () => {
     const base = new ObjectType({
       name: "Box",
-      value: [],
+      fields: [],
       typeParameters: [Identifier.from("T")],
     });
     const boxI32 = base.clone();
     boxI32.genericParent = base;
-    boxI32.appliedTypeArgs = [i32];
+    boxI32.resolvedTypeArgs = [i32];
 
     const alias = new TypeAlias({
       name: Identifier.from("Alias"),
       typeExpr: Identifier.from("i32"),
     });
-    alias.type = i32;
+    alias.resolvedType = i32;
     const boxAlias = base.clone();
     boxAlias.genericParent = base;
-    boxAlias.appliedTypeArgs = [alias];
+    boxAlias.resolvedTypeArgs = [alias];
 
     const fnName = Identifier.from("useBox");
     const fn = new Fn({

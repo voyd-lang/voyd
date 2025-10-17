@@ -6,7 +6,7 @@ export const formatTypeName = (
   seen: Set<Type | TypeAlias> = new Set()
 ): string => {
   if (!t) return "unknown";
-  if (seen.has(t)) return (t as any).name?.toString?.() ?? "unknown";
+  if (seen.has(t)) return t.name?.toString?.() ?? "unknown";
   seen.add(t);
 
   // TypeAlias may either be a named alias (e.g., MsgPack) or a placeholder
@@ -15,7 +15,7 @@ export const formatTypeName = (
   if (t.isTypeAlias?.()) {
     // Prefer a simple identifier from the alias' type expression when present
     // (e.g., MsgPack), which is safe and avoids recursive expansion.
-    const te: any = (t as any).typeExpr;
+    const te: any = t.typeExpr;
     if (te?.isIdentifier?.()) return te.toString();
     if (te?.isTypeAlias?.()) return te.name.toString();
     // Fallback to the alias name (e.g., T)
@@ -24,7 +24,7 @@ export const formatTypeName = (
 
   if (t.isObjectType?.()) {
     const base = t.name.toString();
-    const args = t.appliedTypeArgs ?? [];
+    const args = t.resolvedTypeArgs ?? [];
     if (!args.length) return base;
     const inner = args
       .map((a) => formatTypeName(a as Type | TypeAlias, seen))
@@ -32,20 +32,22 @@ export const formatTypeName = (
     return `${base}<${inner}>`;
   }
 
-  if ((t as any).isTraitType?.()) {
-    const trait: any = t as any;
+  if (t.isTraitType?.()) {
+    const trait = t;
     const base = trait.name.toString();
-    const args = trait.appliedTypeArgs ?? [];
+    const args = trait.resolvedTypeArgs ?? [];
     if (!args.length) return base;
     const inner = args
-      .map((a: any) => formatTypeName(a as Type | TypeAlias, seen))
+      .map((a) => formatTypeName(a as Type | TypeAlias, seen))
       .join(", ");
     return `${base}<${inner}>`;
   }
 
   if (t.isUnionType?.()) {
     // Flatten unions for helpful display: A | B | C
-    const parts = t.types.map((tt) => formatTypeName(tt as Type, seen));
+    const parts = t.resolvedMemberTypes.map((tt) =>
+      formatTypeName(tt as Type, seen)
+    );
     return parts.join(" | ");
   }
 
@@ -69,5 +71,5 @@ export const formatTypeName = (
   }
 
   // Fallback to simple name
-  return (t as any).name?.toString?.() ?? "unknown";
+  return t.name?.toString?.() ?? "unknown";
 };

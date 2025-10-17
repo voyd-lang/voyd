@@ -25,7 +25,7 @@ export const getExprType = (expr?: Expr): Type | undefined => {
   }
   if (expr.isFn()) return expr.getType();
   if (expr.isClosure()) return expr.getType();
-  if (expr.isTypeAlias()) return expr.type;
+  if (expr.isTypeAlias()) return expr.resolvedType;
   if (expr.isType()) return expr;
   if (expr.isBlock()) return expr.type;
   if (expr.isObjectLiteral()) return expr.type;
@@ -55,7 +55,8 @@ export const getIdentifierType = (id: Identifier): Type | undefined => {
   if (entity.isClosure()) return entity.getType();
   if (entity.isTypeAlias()) {
     return (
-      entity.type ?? (entity.typeExpr?.isType() ? entity.typeExpr : undefined)
+      entity.resolvedType ??
+      (entity.typeExpr?.isType() ? entity.typeExpr : undefined)
     );
   }
   if (entity.isType()) return entity;

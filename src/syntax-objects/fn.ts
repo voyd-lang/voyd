@@ -18,7 +18,7 @@ export class Fn extends ScopedNamedEntity {
   returnType?: Type; // When a function has generics, resolved versions of the functions go here
   inferredReturnType?: Type;
   annotatedReturnType?: Type;
-  appliedTypeArgs?: Type[] = [];
+  resolvedTypeArgs?: Type[] = [];
   typesResolved?: boolean;
   #iteration = 0;
 
@@ -73,6 +73,10 @@ export class Fn extends ScopedNamedEntity {
     this.#typeParams = new ChildList(params ?? [], this);
   }
 
+  get type() {
+    return this.#getType();
+  }
+
   // Register a version of this function with resolved generics
   registerGenericInstance(fn: Fn) {
     this.#genericInstances.push(fn);
@@ -82,12 +86,17 @@ export class Fn extends ScopedNamedEntity {
     return this.name.value;
   }
 
-  getType(): FnType {
+  #getType(): FnType {
     return new FnType({
       ...super.getCloneOpts(this.parent),
       parameters: this.parameters,
       returnType: this.getReturnType(),
     });
+  }
+
+  /** @deprecated - Use type field */
+  getType(): FnType {
+    return this.#getType();
   }
 
   getIndexOfParameter(parameter: Parameter) {

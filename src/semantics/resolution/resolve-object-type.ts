@@ -145,7 +145,7 @@ const resolveGenericsWithTypeArgs = (
 
   const newObj = obj.clone();
   newObj.typeParameters = undefined;
-  newObj.appliedTypeArgs = [];
+  newObj.resolvedTypeArgs = [];
   newObj.genericParent = obj;
 
   /** Register resolved type entities for each type param */
@@ -160,9 +160,9 @@ const resolveGenericsWithTypeArgs = (
       typeExpr: typeArg.clone(),
     });
     resolveTypeExpr(typeArg);
-    type.type = getExprType(typeArg);
-    if (!type.type) typesNotResolved = true;
-    newObj.appliedTypeArgs?.push(type);
+    type.resolvedType = getExprType(typeArg);
+    if (!type.resolvedType) typesNotResolved = true;
+    newObj.resolvedTypeArgs?.push(type);
     newObj.registerEntity(type);
   });
   if (typesNotResolved) return obj;
@@ -180,8 +180,8 @@ const resolveGenericsWithTypeArgs = (
 };
 
 const typeArgsMatch = (call: Call, candidate: ObjectType): boolean =>
-  call.typeArgs && candidate.appliedTypeArgs
-    ? candidate.appliedTypeArgs.every((t, i) => {
+  call.typeArgs && candidate.resolvedTypeArgs
+    ? candidate.resolvedTypeArgs.every((t, i) => {
         const argType = getExprType(call.typeArgs?.at(i));
         const appliedType = getExprType(t);
         const canonArg = argType && canonicalType(argType);

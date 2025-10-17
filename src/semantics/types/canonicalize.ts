@@ -4,7 +4,9 @@ import {
   IntersectionType,
   FnType,
   ObjectType,
+  VoydRefType,
 } from "../../syntax-objects/types.js";
+import { TraitType } from "../../syntax-objects/types/trait.js";
 import { getExprType } from "../resolution/get-expr-type.js";
 import { resolveTypeExpr } from "../resolution/resolve-type-expr.js";
 
@@ -22,31 +24,30 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
   if (seen.has(t)) return t;
   seen.add(t);
   if (t.isTypeAlias?.()) {
-    const target = t.type;
+    const target = t.resolvedType;
     // Avoid infinite recursion on self-referential aliases
     if (!target || seen.has(target)) return t;
     return canonicalType(target, seen);
   }
 
   if (t.isUnionType?.()) {
-    const parts: Type[] = [];
-    t.types.forEach((child) => {
+    const parts: VoydRefType[] = [];
+    t.resolvedMemberTypes.forEach((child) => {
       const c = canonicalType(child, seen) as Type;
       // Skip self references which can appear when an alias resolves to this union
       if (c === t) return;
-      if ((c as any).isUnionType?.())
-        parts.push(...((c as any).types as Type[]));
-      else parts.push(c);
+      if (c.isUnionType?.()) parts.push(...c.resolvedMemberTypes);
+      else parts.push(c as VoydRefType);
     });
-    const unique: Type[] = [];
+    const unique: VoydRefType[] = [];
     const ids = new Set<string>();
     parts.forEach((p) => {
       if (ids.has(p.id)) return;
       ids.add(p.id);
       unique.push(p);
     });
-    const clone = (t as UnionType).clone();
-    (clone as UnionType).types = unique as any;
+    const clone = t.clone();
+    clone.resolvedMemberTypes = unique;
     return clone;
   }
 
@@ -88,10 +89,10 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
   }
 
   if (t.isObjectType?.()) {
-    if (t.appliedTypeArgs?.length) {
-      const copy = new (t.constructor as any)({
+    if (t.resolvedTypeArgs?.length) {
+      const copy = new ObjectType({
         name: t.name,
-        value: [],
+        fields: [],
         parentObjExpr: t.parentObjExpr,
         parentObj: t.parentObjType,
         typeParameters: t.typeParameters,
@@ -100,7 +101,7 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
       });
       Object.assign(copy, t);
       copy.id = `${t.id}#canon`;
-      copy.appliedTypeArgs = t.appliedTypeArgs.map((arg) =>
+      copy.resolvedTypeArgs = t.resolvedTypeArgs.map((arg) =>
         canonicalType(arg, seen)
       );
       return copy;
@@ -109,8 +110,8 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
   }
 
   if (t.isTraitType?.()) {
-    if (t.appliedTypeArgs?.length) {
-      const copy = new (t.constructor as any)({
+    if (t.resolvedTypeArgs?.length) {
+      const copy = new TraitType({
         name: t.name,
         methods: [],
         typeParameters: t.typeParameters,
@@ -118,7 +119,7 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
         lexicon: t.lexicon,
       });
       Object.assign(copy, t);
-      copy.appliedTypeArgs = t.appliedTypeArgs.map((arg) =>
+      copy.resolvedTypeArgs = t.resolvedTypeArgs.map((arg) =>
         canonicalType(arg, seen)
       );
       return copy;

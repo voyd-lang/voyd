@@ -22,7 +22,7 @@ export class TraitType extends BaseType implements ScopedEntity {
   readonly lexicon: LexicalContext;
   implementations: Implementation[] = [];
   typeParameters?: Identifier[];
-  appliedTypeArgs?: Type[];
+  resolvedTypeArgs?: Type[];
   genericInstances?: TraitType[];
   genericParent?: TraitType;
   typesResolved?: boolean;

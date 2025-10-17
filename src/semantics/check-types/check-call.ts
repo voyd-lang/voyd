@@ -123,10 +123,10 @@ const checkFixedArrayInit = (call: Call) => {
 
     if (type.elemType?.isUnionType()) {
       resolveUnionType(type.elemType);
-      if (type.elemType.types.length === 0) {
+      if (type.elemType.resolvedMemberTypes.length === 0) {
         return;
       }
-      const match = type.elemType.types.some((t) =>
+      const match = type.elemType.resolvedMemberTypes.some((t) =>
         typesAreCompatible(argType, t)
       );
       if (!match) {

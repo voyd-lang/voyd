@@ -261,7 +261,8 @@ const initParameter = (
     return initParameter(second, true, first);
   }
 
-  const { name, typeExpr, isMutableRef, isOptional } = unwrapVariableIdentifier(list);
+  const { name, typeExpr, isMutableRef, isOptional } =
+    unwrapVariableIdentifier(list);
 
   if (!name) throw new Error("Invalid parameter");
   return new Parameter({
@@ -653,7 +654,7 @@ const initTupleType = (tuple: List) => {
   return new ObjectType({
     ...tuple.metadata,
     name: tuple.syntaxId.toString(),
-    value: tuple.sliceAsArray(1).map((t, i) => ({
+    fields: tuple.sliceAsArray(1).map((t, i) => ({
       name: i.toString(),
       typeExpr: initTypeExprEntities(t)!,
     })),
@@ -700,7 +701,7 @@ const initNominalObjectType = (obj: List) => {
     name,
     typeParameters,
     parentObjExpr: parentExpr ? initEntities(parentExpr) : undefined,
-    value: extractObjectFields(obj.listAt(2)),
+    fields: extractObjectFields(obj.listAt(2)),
   });
 };
 
@@ -708,7 +709,7 @@ const initStructuralObjectType = (obj: List) => {
   return new ObjectType({
     ...obj.metadata,
     name: obj.syntaxId.toString(),
-    value: extractObjectFields(obj),
+    fields: extractObjectFields(obj),
     isStructural: true,
   });
 };

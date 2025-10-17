@@ -15,7 +15,7 @@ import { checkTypes } from "../check-types/index.js";
 test("unresolved fn calls inside methods throw", (t) => {
   const obj = new ObjectType({
     name: Identifier.from("Test"),
-    value: [{ name: "a", typeExpr: i32, type: i32 }],
+    fields: [{ name: "a", typeExpr: i32, type: i32 }],
     implementations: [],
   });
 

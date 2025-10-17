@@ -9,18 +9,18 @@ import { typesAreEqual } from "../types-are-equal.js";
 
 describe("typesAreEqual", () => {
   test("treats different generic args as distinct", () => {
-    const string = new ObjectType({ name: "String", value: [] });
-    const jsonObj = new ObjectType({ name: "JsonObj", value: [] });
+    const string = new ObjectType({ name: "String", fields: [] });
+    const jsonObj = new ObjectType({ name: "JsonObj", fields: [] });
 
     const json = new UnionType({ name: "Json", childTypeExprs: [] });
-    json.types = [jsonObj, string];
+    json.resolvedMemberTypes = [jsonObj, string];
 
     const MsgPack = new UnionType({ name: "MsgPack", childTypeExprs: [] });
-    MsgPack.types = [string];
+    MsgPack.resolvedMemberTypes = [string];
 
     const array = new ObjectType({
       name: "Array",
-      value: [],
+      fields: [],
       typeParameters: [new Identifier({ value: "T" })],
     });
 
@@ -30,8 +30,8 @@ describe("typesAreEqual", () => {
       name: new Identifier({ value: "T" }),
       typeExpr: new Identifier({ value: "Json" }),
     });
-    argJson.type = json;
-    arrJson.appliedTypeArgs = [argJson];
+    argJson.resolvedType = json;
+    arrJson.resolvedTypeArgs = [argJson];
 
     const arrMini = array.clone();
     arrMini.genericParent = array;
@@ -39,8 +39,8 @@ describe("typesAreEqual", () => {
       name: new Identifier({ value: "T" }),
       typeExpr: new Identifier({ value: "MsgPack" }),
     });
-    argMini.type = MsgPack;
-    arrMini.appliedTypeArgs = [argMini];
+    argMini.resolvedType = MsgPack;
+    arrMini.resolvedTypeArgs = [argMini];
 
     expect(typesAreEqual(arrJson, arrMini)).toBe(false);
   });

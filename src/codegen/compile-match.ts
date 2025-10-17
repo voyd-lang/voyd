@@ -1,5 +1,10 @@
 import binaryen from "binaryen";
-import { CompileExprOpts, compileExpression, asStmt, mapBinaryenType } from "../codegen.js";
+import {
+  CompileExprOpts,
+  compileExpression,
+  asStmt,
+  mapBinaryenType,
+} from "../codegen.js";
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { compile as compileVariable } from "./compile-variable.js";
 import { compile as compileIdentifier } from "./compile-identifier.js";
@@ -8,7 +13,9 @@ import { structGetFieldValue } from "../lib/binaryen-gc/index.js";
 
 export const compile = (opts: CompileExprOpts<Match>) => {
   const { expr, mod } = opts;
-  const returnType = expr.type ? mapBinaryenType(opts, expr.type) : binaryen.none;
+  const returnType = expr.type
+    ? mapBinaryenType(opts, expr.type)
+    : binaryen.none;
   const wrap = (e: number) =>
     returnType === binaryen.none ? asStmt(mod, e) : e;
 
@@ -22,7 +29,7 @@ export const compile = (opts: CompileExprOpts<Match>) => {
   const headCounts = new Map<string, number>();
   if (base?.isUnionType()) {
     const u = base as unknown as UnionType;
-    u.types.forEach((t: any) => {
+    u.resolvedMemberTypes.forEach((t) => {
       const key = getHeadKey(t as Type);
       if (!key) return;
       headCounts.set(key, (headCounts.get(key) ?? 0) + 1);
@@ -31,7 +38,7 @@ export const compile = (opts: CompileExprOpts<Match>) => {
 
   const matchIdForCase = (t: Type | undefined): number => {
     if (!t) return 0;
-    if (!t.isObjectType()) return (t as any).syntaxId;
+    if (!t.isObjectType()) return t.syntaxId;
     const obj = t as unknown as ObjectType;
     const headKey = getHeadKey(t);
     const count = headKey ? headCounts.get(headKey) ?? 0 : 0;
@@ -40,7 +47,7 @@ export const compile = (opts: CompileExprOpts<Match>) => {
     // otherwise, match by the concrete instantiation id to distinguish cases
     // like Box<Recursive> vs Box<i32>.
     if (count === 1 && obj.genericParent) return obj.genericParent.idNum;
-    return (t as any).syntaxId;
+    return t.syntaxId;
   };
 
   const constructIfChain = (cases: MatchCase[]): number => {
@@ -54,7 +61,7 @@ export const compile = (opts: CompileExprOpts<Match>) => {
     // Use the generic parent's id for generics (e.g., Array<T>, Map<T>) so
     // union matching recognizes any instantiation of the same nominal type.
     const cond = (() => {
-      const id = matchIdForCase(nextCase.matchType as any);
+      const id = matchIdForCase(nextCase.matchType);
       return opts.mod.call(
         "__extends",
         [
@@ -72,7 +79,9 @@ export const compile = (opts: CompileExprOpts<Match>) => {
     return mod.if(
       cond,
       wrap(compileExpression({ ...opts, expr: nextCase.expr })),
-      returnType === binaryen.none ? asStmt(mod, constructIfChain(cases)) : constructIfChain(cases)
+      returnType === binaryen.none
+        ? asStmt(mod, constructIfChain(cases))
+        : constructIfChain(cases)
     );
   };
 

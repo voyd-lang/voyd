@@ -10,7 +10,11 @@ import { nop } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
-import { inferTypeArgs, TypeArgInferencePair, unifyTypeParams } from "./infer-type-args.js";
+import {
+  inferTypeArgs,
+  TypeArgInferencePair,
+  unifyTypeParams,
+} from "./infer-type-args.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { Type } from "../../syntax-objects/types.js";
@@ -127,7 +131,8 @@ const inferCallTypeArgs = (fn: Fn, call: Call) => {
   if (inferred) {
     inferred.toArray().forEach((a) => {
       const alias = a as TypeAlias;
-      if (alias.name && alias.type) paramMap.set(alias.name.value, alias.type);
+      if (alias.name && alias.resolvedType)
+        paramMap.set(alias.name.value, alias.resolvedType);
     });
   }
 
@@ -149,7 +154,7 @@ const inferCallTypeArgs = (fn: Fn, call: Call) => {
       if (t.isFixedArrayType()) return "FixedArray";
       if (t.isIntersectionType())
         return headKeyFromType(t.nominalType ?? t.structuralType);
-      if (t.isTypeAlias()) return headKeyFromType(t.type);
+      if (t.isTypeAlias()) return headKeyFromType(t.resolvedType);
       return t.name.value;
     };
     const headKeyFromReturnExpr = (): string | undefined => {
@@ -163,7 +168,7 @@ const inferCallTypeArgs = (fn: Fn, call: Call) => {
     const returnHead = headKeyFromReturnExpr();
     let expectedForReturn: Type | undefined = expected;
     if (expected.isUnionType() && returnHead) {
-      expectedForReturn = expected.types.find(
+      expectedForReturn = expected.resolvedMemberTypes.find(
         (t) => headKeyFromType(t) === returnHead
       );
     }
@@ -198,8 +203,8 @@ const inferCallTypeArgs = (fn: Fn, call: Call) => {
 };
 
 const fnTypeArgsMatch = (args: List, candidate: Fn): boolean =>
-  candidate.appliedTypeArgs
-    ? candidate.appliedTypeArgs.every((t, i) => {
+  candidate.resolvedTypeArgs
+    ? candidate.resolvedTypeArgs.every((t, i) => {
         const argType = getExprType(args.at(i));
         const appliedType = getExprType(t);
         const canonArg = argType && canonicalType(argType);
@@ -217,7 +222,7 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
 
   const newFn = fn.clone();
   newFn.typeParameters = undefined;
-  newFn.appliedTypeArgs = [];
+  newFn.resolvedTypeArgs = [];
 
   /** Register resolved type entities for each type param */
   typeParameters.forEach((typeParam, index) => {
@@ -226,12 +231,12 @@ const resolveGenericsWithTypeArgs = (fn: Fn, args: List): Fn => {
     const type = new TypeAlias({ name: identifier, typeExpr: typeArg.clone() });
     type.parent = newFn;
     resolveTypeExpr(typeArg);
-    type.type = getExprType(typeArg);
-    newFn.appliedTypeArgs?.push(type);
+    type.resolvedType = getExprType(typeArg);
+    newFn.resolvedTypeArgs?.push(type);
     newFn.registerEntity(type);
   });
 
-  if (!newFn.appliedTypeArgs.every((t) => (t as TypeAlias).type)) {
+  if (!newFn.resolvedTypeArgs.every((t) => (t as TypeAlias).resolvedType)) {
     // Do not create an unresolved instance; let caller continue without
     // specializing this generic function.
     return fn;

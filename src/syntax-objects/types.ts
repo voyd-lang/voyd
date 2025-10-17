@@ -29,7 +29,7 @@ export class TypeAlias extends BaseType {
   resolutionPhase = 0; // No clone
   lexicon: LexicalContext = new LexicalContext();
   #typeExpr: Child<Expr>;
-  type?: Type;
+  resolvedType?: Type;
   #typeParameters = new ChildList<Identifier>([], this);
 
   constructor(
@@ -110,23 +110,23 @@ export class SelfType extends BaseType {
 export class UnionType extends BaseType {
   readonly kindOfType = "union";
   resolutionPhase = 0; // No clone
-  childTypeExprs: ChildList<Expr>;
-  types: VoydRefType[] = [];
+  memberTypeExprs: ChildList<Expr>;
+  resolvedMemberTypes: VoydRefType[] = [];
 
   constructor(opts: NamedEntityOpts & { childTypeExprs?: Expr[] }) {
     super(opts);
-    this.childTypeExprs = new ChildList(opts.childTypeExprs ?? [], this);
+    this.memberTypeExprs = new ChildList(opts.childTypeExprs ?? [], this);
   }
 
   clone(parent?: Expr): UnionType {
     return new UnionType({
       ...super.getCloneOpts(parent),
-      childTypeExprs: this.childTypeExprs.clone(),
+      childTypeExprs: this.memberTypeExprs.clone(),
     });
   }
 
   toJSON(): TypeJSON {
-    return ["type", ["union", ...this.childTypeExprs.toArray()]];
+    return ["type", ["union", ...this.memberTypeExprs.toArray()]];
   }
 }
 
@@ -170,19 +170,22 @@ export class IntersectionType extends BaseType {
 
 export class TupleType extends BaseType {
   readonly kindOfType = "tuple";
-  value: Type[];
+  elementTypes: Type[];
 
   constructor(opts: NamedEntityOpts & { value: Type[] }) {
     super(opts);
-    this.value = opts.value;
+    this.elementTypes = opts.value;
   }
 
   clone(parent?: Expr): TupleType {
-    return new TupleType({ ...super.getCloneOpts(parent), value: this.value });
+    return new TupleType({
+      ...super.getCloneOpts(parent),
+      value: this.elementTypes,
+    });
   }
 
   toJSON(): TypeJSON {
-    return ["type", ["tuple", ...this.value]];
+    return ["type", ["tuple", ...this.elementTypes]];
   }
 }
 
@@ -198,7 +201,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
   readonly kindOfType = "object";
   lexicon: LexicalContext = new LexicalContext();
   typeParameters?: Identifier[];
-  appliedTypeArgs?: Type[];
+  resolvedTypeArgs?: Type[];
   genericInstances?: ObjectType[];
   /** If this is a genericInstance of an object, this is the generic version itself that it was generated from */
   genericParent?: ObjectType;
@@ -214,7 +217,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
 
   constructor(
     opts: NamedEntityOpts & {
-      value: ObjectField[];
+      fields: ObjectField[];
       parentObjExpr?: Expr;
       parentObj?: ObjectType;
       typeParameters?: Identifier[];
@@ -223,7 +226,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
     }
   ) {
     super(opts);
-    this.fields = opts.value;
+    this.fields = opts.fields;
     this.fields.forEach((field) => {
       field.typeExpr.parent = this;
     });
@@ -253,7 +256,7 @@ export class ObjectType extends BaseType implements ScopedEntity {
     return new ObjectType({
       ...super.getCloneOpts(parent),
       id: `${this.id}#${this.#iteration++}`,
-      value: this.fields.map((field) => ({
+      fields: this.fields.map((field) => ({
         ...field,
         typeExpr: field.typeExpr.clone(),
         type: field.type?.clone(),
@@ -404,7 +407,7 @@ export const dVoyd = PrimitiveType.from("voyd");
 export const selfType = new SelfType();
 export const voydBaseObject = new ObjectType({
   name: "Object",
-  value: [],
+  fields: [],
 });
 
 export type VoydRefType = ObjectType | UnionType | IntersectionType | TupleType;

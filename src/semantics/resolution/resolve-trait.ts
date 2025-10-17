@@ -26,24 +26,25 @@ const resolveGenericTraitVersion = (
 ): TraitType | undefined => {
   if (!call?.typeArgs) return;
 
-  const existing = trait.genericInstances?.find((t) =>
-    typeArgsMatch(call, t)
-  );
+  const existing = trait.genericInstances?.find((t) => typeArgsMatch(call, t));
   if (existing) return existing;
 
   const newTrait = trait.clone();
   newTrait.typeParameters = undefined;
-  newTrait.appliedTypeArgs = [];
+  newTrait.resolvedTypeArgs = [];
   newTrait.genericParent = trait;
 
   trait.typeParameters?.forEach((typeParam, index) => {
     const typeArg = call.typeArgs!.exprAt(index);
     const identifier = typeParam.clone();
-    const alias = new TypeAlias({ name: identifier, typeExpr: typeArg.clone() });
+    const alias = new TypeAlias({
+      name: identifier,
+      typeExpr: typeArg.clone(),
+    });
     alias.parent = newTrait;
     resolveTypeExpr(typeArg);
-    alias.type = getExprType(typeArg);
-    newTrait.appliedTypeArgs?.push(alias);
+    alias.resolvedType = getExprType(typeArg);
+    newTrait.resolvedTypeArgs?.push(alias);
     newTrait.registerEntity(alias);
   });
 
@@ -53,16 +54,14 @@ const resolveGenericTraitVersion = (
   newTrait.typesResolved = true;
   // Clear implementations, resolveImpl will re-add as needed
   newTrait.implementations = [];
-  trait.implementations.forEach((impl) =>
-    resolveImpl(impl.clone(newTrait))
-  );
+  trait.implementations.forEach((impl) => resolveImpl(impl.clone(newTrait)));
 
   return newTrait;
 };
 
 const typeArgsMatch = (call: Call, candidate: TraitType): boolean =>
-  call.typeArgs && candidate.appliedTypeArgs
-    ? candidate.appliedTypeArgs.every((t, i) => {
+  call.typeArgs && candidate.resolvedTypeArgs
+    ? candidate.resolvedTypeArgs.every((t, i) => {
         const argType = getExprType(call.typeArgs!.at(i));
         const appliedType = getExprType(t);
         const canonArg = argType && canonicalType(argType);

@@ -108,9 +108,9 @@ describe("getCallFn", () => {
   test("matches to the best function given an object hierarchy", () => {
     const pName = new Identifier({ value: "arg1" });
     const fnName = new Identifier({ value: "hi" });
-    const vec = new ObjectType({ name: "Vec", value: [] });
-    const point = new ObjectType({ name: "Vec", value: [], parentObj: vec });
-    const pointy = new ObjectType({ name: "Vec", value: [], parentObj: vec });
+    const vec = new ObjectType({ name: "Vec", fields: [] });
+    const point = new ObjectType({ name: "Vec", fields: [], parentObj: vec });
+    const pointy = new ObjectType({ name: "Vec", fields: [], parentObj: vec });
 
     const objIdentifier = new MockIdentifier({ value: "hi", entity: pointy });
 
@@ -139,9 +139,9 @@ describe("getCallFn", () => {
   test("subtypes are considered to overlap, and throws ambiguous error", () => {
     const pName = new Identifier({ value: "arg1" });
     const fnName = new Identifier({ value: "hi" });
-    const vec = new ObjectType({ name: "Vec", value: [] });
-    const point = new ObjectType({ name: "Vec", value: [], parentObj: vec });
-    const pointy = new ObjectType({ name: "Vec", value: [], parentObj: vec });
+    const vec = new ObjectType({ name: "Vec", fields: [] });
+    const point = new ObjectType({ name: "Vec", fields: [], parentObj: vec });
+    const pointy = new ObjectType({ name: "Vec", fields: [], parentObj: vec });
 
     const objIdentifier = new MockIdentifier({ value: "hi", entity: pointy });
 
@@ -240,8 +240,14 @@ describe("getCallFn", () => {
     const label = new Identifier({ value: "arg1" });
     const fnName = new Identifier({ value: "hi" });
 
-    const objA = new ObjectType({ name: new Identifier({ value: "A" }), value: [] });
-    const objB = new ObjectType({ name: new Identifier({ value: "B" }), value: [] });
+    const objA = new ObjectType({
+      name: new Identifier({ value: "A" }),
+      fields: [],
+    });
+    const objB = new ObjectType({
+      name: new Identifier({ value: "B" }),
+      fields: [],
+    });
 
     const candidate1 = new Fn({
       name: fnName,
@@ -276,8 +282,14 @@ describe("getCallFn", () => {
     const label = new Identifier({ value: "arg1" });
     const fnName = new Identifier({ value: "hi" });
 
-    const objA = new ObjectType({ name: new Identifier({ value: "A" }), value: [] });
-    const objB = new ObjectType({ name: new Identifier({ value: "B" }), value: [] });
+    const objA = new ObjectType({
+      name: new Identifier({ value: "A" }),
+      fields: [],
+    });
+    const objB = new ObjectType({
+      name: new Identifier({ value: "B" }),
+      fields: [],
+    });
 
     const union = new UnionType({
       name: new Identifier({ value: "U" }),
@@ -310,7 +322,7 @@ describe("getCallFn", () => {
   });
 
   test("returns trait method for trait object calls", () => {
-    const objType = new ObjectType({ name: "Obj", value: [] });
+    const objType = new ObjectType({ name: "Obj", fields: [] });
     const traitMethod = new Fn({
       name: new Identifier({ value: "run" }),
       parameters: [new Parameter({ name: new Identifier({ value: "self" }) })],

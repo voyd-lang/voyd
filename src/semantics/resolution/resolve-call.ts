@@ -240,11 +240,13 @@ const arrayElemType = (type?: Type): Type | undefined => {
   const t = canonicalType(type);
   if (t.isObjectType()) {
     if (!t.name.is("Array") && !t.genericParent?.name.is("Array")) return;
-    const arg = t.appliedTypeArgs?.[0];
+    const arg = t.resolvedTypeArgs?.[0];
     return arg ? canonicalType(arg) : undefined;
   }
   if (!t.isUnionType()) return;
-  return t.types.map(arrayElemType).find((tt): tt is Type => !!tt);
+  return t.resolvedMemberTypes
+    .map(arrayElemType)
+    .find((tt): tt is Type => !!tt);
 };
 
 const resolveArrayArgs = (call: Call) => {
@@ -698,7 +700,7 @@ const resolveFixedArray = (call: Call) => {
 
 const findSomeVariant = (type?: Type) => {
   if (!type?.isUnionType()) return undefined;
-  return type.types.find(
+  return type.resolvedMemberTypes.find(
     (t) =>
       t.isObjectType() &&
       (t.name.is("Some") || t.genericParent?.name.is("Some"))

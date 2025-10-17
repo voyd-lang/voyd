@@ -86,8 +86,8 @@ const getArrayElemType = (type?: Type): Type | undefined => {
   if (!type?.isObjectType()) return;
   const parent = type.genericParent;
   if (!type.name.is("Array") && !parent?.name.is("Array")) return;
-  const arg = type.appliedTypeArgs?.[0];
-  return arg && arg.isTypeAlias() ? arg.type : undefined;
+  const arg = type.resolvedTypeArgs?.[0];
+  return arg && arg.isTypeAlias() ? arg.resolvedType : undefined;
 };
 
 export const resolveVar = (variable: Variable): Variable => {
@@ -125,15 +125,15 @@ export const resolveModule = (mod: VoydModule): VoydModule => {
 const resolveListTypes = (list: List) => list.map(resolveEntities);
 
 const resolveTypeAlias = (alias: TypeAlias): TypeAlias => {
-  if (alias.type || alias.resolutionPhase > 0) return alias;
+  if (alias.resolvedType || alias.resolutionPhase > 0) return alias;
   alias.resolutionPhase = 1;
   alias.typeExpr = resolveTypeExpr(alias.typeExpr);
-  alias.type = getExprType(alias.typeExpr);
+  alias.resolvedType = getExprType(alias.typeExpr);
   return alias;
 };
 
 const unwrapAlias = (type?: Type): Type | undefined => {
-  return type?.isTypeAlias() ? type.type ?? type : type;
+  return type?.isTypeAlias() ? type.resolvedType ?? type : type;
 };
 
 const findObjectType = (
@@ -148,7 +148,7 @@ const findObjectType = (
       if (t.name.is(name) || t.genericParent?.name.is(name)) matches.push(t);
       return;
     }
-    if (t.isUnionType()) t.types.forEach(search);
+    if (t.isUnionType()) t.resolvedMemberTypes.forEach(search);
   };
   search(type);
   return matches.length === 1 ? matches[0] : undefined;
@@ -221,7 +221,7 @@ export const resolveObjectLiteral = (
   obj.type = new ObjectType({
     ...obj.metadata,
     name: `ObjectLiteral-${obj.syntaxId}`,
-    value: obj.fields.map((f) => ({
+    fields: obj.fields.map((f) => ({
       name: f.name,
       typeExpr: f.initializer,
       type: f.type,

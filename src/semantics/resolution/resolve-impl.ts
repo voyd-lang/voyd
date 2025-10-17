@@ -26,9 +26,9 @@ export const resolveImpl = (
   // where lexical lookup yields zero candidates during resolve.
   preRegisterImplMethods(impl);
 
-  if (targetType?.appliedTypeArgs) {
-    targetType.appliedTypeArgs.forEach((arg, index) => {
-      const typeParam = impl.typeParams.at(index);
+  if (targetType?.resolvedTypeArgs) {
+    targetType.resolvedTypeArgs.forEach((arg, index) => {
+      const typeParam = impl.typeParameters.at(index);
       if (!typeParam) {
         throw new Error(`Type param not found for ${arg} at ${impl.location}`);
       }
@@ -37,7 +37,7 @@ export const resolveImpl = (
         typeExpr: nop(),
       });
       resolveTypeExpr(arg);
-      type.type = getExprType(arg);
+      type.resolvedType = getExprType(arg);
       impl.registerEntity(type);
     });
   }
@@ -135,11 +135,11 @@ export const implIsCompatible = (
   impl: Implementation,
   obj: ObjectType
 ): boolean => {
-  if (!impl.typeParams.length && !obj.typeParameters?.length) return true;
+  if (!impl.typeParameters.length && !obj.typeParameters?.length) return true;
 
   // For now, only handles generic impls with no constraints that match the type arg length of the target type.
-  if (impl.typeParams.length === obj.typeParameters?.length) return true; // impl<T> for Vec<T>
-  if (impl.typeParams.length === obj.appliedTypeArgs?.length) return true; // impl<T> for Vec<i32>
+  if (impl.typeParameters.length === obj.typeParameters?.length) return true; // impl<T> for Vec<T>
+  if (impl.typeParameters.length === obj.resolvedTypeArgs?.length) return true; // impl<T> for Vec<i32>
 
   return false;
 };

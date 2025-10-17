@@ -24,14 +24,14 @@ export const combineTypes = (types: Type[]): Type | undefined => {
   for (const type of unique.slice(1)) {
     if (isObjectOrIntersection(type) && isObjectOrIntersection(topType)) {
       const union = new UnionType({ name: `CombinedTypeUnion` });
-      union.types = [topType, type];
+      union.resolvedMemberTypes = [topType, type];
       topType = union;
       isLocalUnion = true;
       continue;
     }
 
     if (isObjectOrIntersection(type) && topType.isUnionType() && isLocalUnion) {
-      topType.types.push(type);
+      topType.resolvedMemberTypes.push(type);
       continue;
     }
 
@@ -39,15 +39,15 @@ export const combineTypes = (types: Type[]): Type | undefined => {
     if (type.isUnionType() && isObjectOrIntersection(topType)) {
       const obj = topType;
       topType = type;
-      if (isLocalUnion) type.types.push(obj);
+      if (isLocalUnion) type.resolvedMemberTypes.push(obj);
       continue;
     }
 
     if (type.isUnionType() && topType.isUnionType() && isLocalUnion) {
       const union = topType as UnionType;
-      for (const child of type.types) {
-        if (!union.types.some((t) => typesAreEqual(t, child))) {
-          union.types.push(child);
+      for (const child of type.resolvedMemberTypes) {
+        if (!union.resolvedMemberTypes.some((t) => typesAreEqual(t, child))) {
+          union.resolvedMemberTypes.push(child);
         }
       }
       topType = union;

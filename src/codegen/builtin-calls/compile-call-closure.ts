@@ -12,13 +12,14 @@ import {
   callRef,
 } from "../../lib/binaryen-gc/index.js";
 import { getClosureFunctionType } from "../compile-closure.js";
-import { Type, voydBaseObject } from "../../syntax-objects/types.js";
+import { FnType, Type, voydBaseObject } from "../../syntax-objects/types.js";
 import { canonicalType } from "../../semantics/types/canonicalize.js";
 
 export const compileCallClosure = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod, isReturnExpr } = opts;
   const closure = expr.argAt(0)!;
-  const expectedType = (closure.getAttribute("parameterFnType") as any) ||
+  const expectedType =
+    (closure.getAttribute("parameterFnType") as FnType | undefined) ||
     closure.getType();
   if (!expectedType || !expectedType.isFnType()) {
     throw new Error("Invalid closure call");
@@ -49,7 +50,7 @@ export const compileCallClosure = (opts: CompileExprOpts<Call>): number => {
   }
   // Normalize return to base object when objectish (object/union/intersection/alias)
   const retType: Type = expectedType.returnType!;
-  const retCanon = canonicalType(retType) as any;
+  const retCanon = canonicalType(retType);
   const isObjectish =
     retCanon?.isObjectType?.() ||
     retCanon?.isUnionType?.() ||
