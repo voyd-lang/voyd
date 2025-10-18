@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { AugmentedBinaryen, TypeRef } from "../../lib/binaryen-gc/types.js";
+import { AugmentedBinaryen, TypeRef } from "@lib/binaryen-gc/types.js";
 import { CompileExprOpts, mapBinaryenType } from "../../codegen.js";
 import { FnType, Type, voydBaseObject } from "../../syntax-objects/types.js";
 import { canonicalType } from "../../semantics/types/canonicalize.js";

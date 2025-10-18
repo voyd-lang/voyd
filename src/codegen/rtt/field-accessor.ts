@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { AugmentedBinaryen } from "../../lib/binaryen-gc/types.js";
+import { AugmentedBinaryen } from "@lib/binaryen-gc/types.js";
 import {
   defineArrayType,
   arrayLen,
@@ -13,12 +13,12 @@ import {
   callRef,
   refCast,
   structSetFieldValue,
-} from "../../lib/binaryen-gc/index.js";
+} from "@lib/binaryen-gc/index.js";
 import {
   IntersectionType,
   voydBaseObject,
 } from "../../syntax-objects/types.js";
-import { murmurHash3 } from "../../lib/murmur-hash.js";
+import { murmurHash3 } from "@lib/murmur-hash.js";
 import {
   compileExpression,
   CompileExprOpts,

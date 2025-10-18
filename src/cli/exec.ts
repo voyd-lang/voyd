@@ -1,9 +1,9 @@
 import { stdout } from "process";
-import { getConfig } from "../lib/config/index.js";
+import { getConfig } from "@lib/config/index.js";
 import { run } from "../run.js";
 import { processSemantics } from "../semantics/index.js";
 import binaryen from "binaryen";
-import { testGc } from "../lib/binaryen-gc/test.js";
+import { testGc } from "@lib/binaryen-gc/test.js";
 import { parseFile, parseModuleFromSrc } from "../parser/index.js";
 import { compileSrc } from "../compiler.js";
 
