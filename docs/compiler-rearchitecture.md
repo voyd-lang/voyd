@@ -62,7 +62,7 @@
 4. **Type-lowering to HIR**: build a semantic High-Level IR where expressions reference symbols (`SymbolId`) instead of syntax nodes. HIR nodes include normalized constructs (e.g., desugared array/object literals) and record source spans for error reporting.
 5. **Type inference & checking**: operate on HIR using a `TypeArena` storing canonical `TypeId` instances. Implement constraint solving, generic instantiation, and variance here. Record results in a `TypeTable` keyed by HIR IDs.
 6. **Effect analysis**: run after typing to compute effect rows per expression. Store results in an `EffectTable` for later phases.
-7. **Optimization & MIR**: lower typed HIR into a mid-level IR tailored for WebAssembly codegen, using the type/effect tables to drive GC layout and calling conventions.
+7. **Optimization & MIR**: lower typed HIR into a mid-level IR tailored for WebAssembly codegen, using the type/effect tables to drive calling conventions.
 8. **Codegen**: translate MIR to WASM text/binary. Type/Effect tables remain as references for runtime metadata.
 
 ### Macro expansion strategy
@@ -111,25 +111,25 @@
 - Detailed specifications for the `SymbolTable`, `TypeArena`, and `EffectTable` live under `docs/proposals/`. Review those documents for API definitions, terminology, and usage notes that underpin the `src_next` rewrite.
 
 ## Migration Strategy
-1. **Bootstrap `src_next`**  
+1. **Bootstrap `src_next`**
    - Create a clean `src_next` workspace that reuses only the parser and CLI harness entry points. Wire a feature flag (`VT_NEXT=1`) so the CLI can dispatch to the new pipeline while keeping the legacy compiler intact for reference.
    - Stand up shared utilities (`NodeId`, `SymbolId`, `TypeId`, effect row IDs) inside `src_next/lib`, ensuring they do not mutate legacy syntax objects.
-2. **Rebuild front-end passes in `src_next`**  
+2. **Rebuild front-end passes in `src_next`**
    - Implement the new macro expander against parser output, emitting the expanded AST plus a module graph snapshot.
    - Build the binder on top of the proposed `SymbolTable` API, producing scope and import/export tables stored in `src_next/binder`.
-3. **Introduce semantic IR and typing**  
+3. **Introduce semantic IR and typing**
    - Lower expanded AST into HIR nodes housed in `src_next/hir`. Populate the `TypeArena` and `EffectTable` to power type inference, algebraic effect analysis, and trait resolution without touching legacy semantics.
    - Port standard-library type descriptors gradually, prioritizing dependencies needed for smoke tests (Option, Result, collections).
-4. **Code generation pipeline**  
+4. **Code generation pipeline**
    - Implement MIR lowering and WebAssembly codegen under `src_next/codegen`, reusing runtime helpers where possible. Compare emitted WAT against legacy output for selected fixtures.
-5. **Bridge CLI and tests**  
+5. **Bridge CLI and tests**
    - Add a CLI switch to run both compilers, defaulting to `src_next` once core language features pass. Mirror critical tests into `src_next/__tests__`, expanding coverage as features land.
    - Retire legacy compiler once `src_next` matches behaviour on the full test suite and new architecture-specific scenarios (effects, structural typing) pass.
 
 Throughout the rewrite, keep legacy `src` read-only for reference; all new development happens in `src_next`. Use integration snapshots to verify parity and to catch regressions early.
 
 ## Next Steps
-1. Validate the proposed `SymbolTable`, `TypeArena`, and `EffectTable` interfaces with the team and finalize the `src_next` project layout.  
-2. Implement the macro expander prototype inside `src_next` and exercise it on a handful of modules to shake out module-graph requirements.  
-3. Stand up the new binder using the agreed interfaces, wiring it into a thin CLI path guarded by `VT_NEXT`.  
+1. Validate the proposed `SymbolTable`, `TypeArena`, and `EffectTable` interfaces with the team and finalize the `src_next` project layout.
+2. Implement the macro expander prototype inside `src_next` and exercise it on a handful of modules to shake out module-graph requirements.
+3. Stand up the new binder using the agreed interfaces, wiring it into a thin CLI path guarded by `VT_NEXT`.
 4. Define exit criteria for switching the default compiler (feature coverage, performance, diagnostics), including regression tests for the illegal cast bug and upcoming effect semantics.
