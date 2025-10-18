@@ -1,14 +1,13 @@
 import {
   Type,
-  UnionType,
   IntersectionType,
   FnType,
-  ObjectType,
   VoydRefType,
 } from "../../syntax-objects/types.js";
-import { TraitType } from "../../syntax-objects/types/trait.js";
+import { TraitType } from "../../syntax-objects/trait.js";
 import { getExprType } from "../resolution/get-expr-type.js";
 import { resolveTypeExpr } from "../resolution/resolve-type-expr.js";
+import { Obj } from "../../syntax-objects/index.js";
 
 /**
  * Produce a canonicalized view of a type without mutating the input.
@@ -60,8 +59,8 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
       : undefined;
     const clone = (t as IntersectionType).clone();
     // Prevent self references
-    clone.nominalType = nom === t ? undefined : (nom as ObjectType);
-    clone.structuralType = str === t ? undefined : (str as ObjectType);
+    clone.nominalType = nom === t ? undefined : (nom as Obj);
+    clone.structuralType = str === t ? undefined : (str as Obj);
     if (!clone.nominalType) return clone.structuralType as Type;
     if (!clone.structuralType) return clone.nominalType;
     return clone;
@@ -88,9 +87,9 @@ export const canonicalType = (t: Type, seen: Set<Type> = new Set()): Type => {
     return clone;
   }
 
-  if (t.isObjectType?.()) {
+  if (t.isObj?.()) {
     if (t.resolvedTypeArgs?.length) {
-      const copy = new ObjectType({
+      const copy = new Obj({
         name: t.name,
         fields: [],
         parentObjExpr: t.parentObjExpr,

@@ -27,7 +27,7 @@ export const checkCallTypes = (call: Call): Call | ObjectLiteral => {
   if (call.calls("while")) return checkWhile(call);
   if (call.calls("FixedArray")) return checkFixedArrayInit(call);
   if (call.calls("member-access")) return call; // TODO
-  if (call.fn?.isObjectType()) return checkObjectInit(call);
+  if (call.fn?.isObj()) return checkObjectInit(call);
 
   call.args = call.args.map(checkTypes);
 
@@ -173,8 +173,8 @@ const checkObjectInit = (call: Call): Call => {
 
   // Check to ensure literal structure is compatible with nominal structure
   if (!typesAreCompatible(literal.type, call.type, { structuralOnly: true })) {
-    const expected = call.type?.isObjectType() ? call.type : undefined;
-    const provided = literal.type?.isObjectType() ? literal.type : undefined;
+    const expected = call.type?.isObj() ? call.type : undefined;
+    const provided = literal.type?.isObj() ? literal.type : undefined;
 
     if (expected && provided) {
       const missing = expected.fields

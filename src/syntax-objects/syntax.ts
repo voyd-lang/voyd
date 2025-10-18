@@ -20,9 +20,7 @@ import type { ArrayLiteral } from "./array-literal.js";
 import type {
   FnType,
   PrimitiveType,
-  ObjectType,
   Type,
-  TypeAlias,
   FixedArrayType,
   UnionType,
   IntersectionType,
@@ -38,7 +36,9 @@ import type { Declaration } from "./declaration.js";
 import type { Use } from "./use.js";
 import type { Match } from "./match.js";
 import type { Implementation } from "./implementation.js";
-import type { TraitType } from "./types/trait.js";
+import type { TraitType } from "./trait.js";
+import { Obj } from "./obj.js";
+import { TypeAlias } from "./type-alias.js";
 
 export type Attributes = { [key: string]: unknown };
 
@@ -244,7 +244,7 @@ export abstract class Syntax {
     return this.isType() && this.kindOfType === "tuple";
   }
 
-  isObjectType(): this is ObjectType {
+  isObj(): this is Obj {
     return this.isType() && this.kindOfType === "object";
   }
 

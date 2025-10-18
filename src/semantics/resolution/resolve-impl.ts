@@ -1,20 +1,20 @@
 import { nop } from "../../syntax-objects/lib/helpers.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
-import { ObjectType, TypeAlias } from "../../syntax-objects/types.js";
+import { TypeAlias } from "../../syntax-objects/index.js";
 import { Fn } from "../../syntax-objects/fn.js";
 import { Expr } from "../../syntax-objects/expr.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveObjectType } from "./resolve-object-type.js";
 import { resolveEntities } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
-import { TraitType } from "../../syntax-objects/types/trait.js";
+import { TraitType } from "../../syntax-objects/trait.js";
 import { typesAreCompatible } from "./types-are-compatible.js";
 import { resolveFn } from "./resolve-fn.js";
-import { resolveExport } from "./resolve-use.js";
+import { Obj } from "../../syntax-objects/index.js";
 
 export const resolveImpl = (
   impl: Implementation,
-  targetType?: ObjectType
+  targetType?: Obj
 ): Implementation => {
   if (impl.typesResolved) return impl;
   targetType = targetType ?? getTargetType(impl);
@@ -49,11 +49,11 @@ export const resolveImpl = (
 
   if (!targetType) return impl;
 
-  if (targetType?.isObjectType()) {
+  if (targetType?.isObj()) {
     targetType.implementations?.push(impl);
   }
 
-  if (targetType?.isObjectType() && targetType.typeParameters?.length) {
+  if (targetType?.isObj() && targetType.typeParameters?.length) {
     // Apply impl to existing generic instances
     targetType.genericInstances?.forEach((obj) =>
       resolveImpl(impl.clone(), obj)
@@ -100,7 +100,7 @@ const preRegisterImplMethods = (impl: Implementation): void => {
   visit(impl.body.value);
 };
 
-const getTargetType = (impl: Implementation): ObjectType | undefined => {
+const getTargetType = (impl: Implementation): Obj | undefined => {
   const expr = impl.targetTypeExpr.value;
   const type = expr.isIdentifier()
     ? expr.resolve()
@@ -108,7 +108,7 @@ const getTargetType = (impl: Implementation): ObjectType | undefined => {
     ? expr.fnName.resolve()
     : undefined;
 
-  if (!type || !type.isObjectType()) return;
+  if (!type || !type.isObj()) return;
 
   if (type.typeParameters?.length && expr.isCall()) {
     const obj = resolveObjectType(type, expr);
@@ -131,10 +131,7 @@ const getTrait = (impl: Implementation): TraitType | undefined => {
   return type;
 };
 
-export const implIsCompatible = (
-  impl: Implementation,
-  obj: ObjectType
-): boolean => {
+export const implIsCompatible = (impl: Implementation, obj: Obj): boolean => {
   if (!impl.typeParameters.length && !obj.typeParameters?.length) return true;
 
   // For now, only handles generic impls with no constraints that match the type arg length of the target type.

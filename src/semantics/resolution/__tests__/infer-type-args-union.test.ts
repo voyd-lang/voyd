@@ -1,12 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { inferTypeArgs } from "../infer-type-args.js";
-import { Identifier, Call, List } from "../../../syntax-objects/index.js";
-import {
-  ObjectType,
-  TypeAlias,
-  UnionType,
-  f32,
-} from "../../../syntax-objects/types.js";
+import { Identifier, Call, List, Obj } from "../../../syntax-objects/index.js";
+import { TypeAlias, UnionType, f32 } from "../../../syntax-objects/index.js";
 import { resolveUnionType } from "../resolve-union.js";
 
 const typeCall = (name: string, typeArgs: any[] = []) =>
@@ -18,12 +13,12 @@ const typeCall = (name: string, typeArgs: any[] = []) =>
 
 describe("inferTypeArgs union", () => {
   test("infers T from (Array<T> | String) given (Array<f32> | String)", () => {
-    const arrayGeneric = new ObjectType({
+    const arrayGeneric = new Obj({
       name: Identifier.from("Array"),
       fields: [],
       typeParameters: [Identifier.from("T")],
     });
-    const stringType = new ObjectType({
+    const stringType = new Obj({
       name: Identifier.from("String"),
       fields: [],
     });

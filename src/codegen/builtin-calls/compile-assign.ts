@@ -1,10 +1,11 @@
 import { CompileExprOpts, compileExpression } from "../../codegen.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
-import { ObjectType, IntersectionType } from "../../syntax-objects/types.js";
+import { IntersectionType } from "../../syntax-objects/types.js";
 import { getExprType } from "../../semantics/resolution/get-expr-type.js";
 import { OBJECT_FIELDS_OFFSET } from "./object-layout.js";
 import * as gc from "../../lib/binaryen-gc/index.js";
+import { Obj } from "../../syntax-objects/index.js";
 
 export const compileAssign = (opts: CompileExprOpts<Call>): number => {
   const { expr, mod } = opts;
@@ -41,7 +42,7 @@ const compileFieldAssign = (opts: CompileExprOpts<Call>) => {
   const access = expr.callArgAt(0);
   const member = access.identifierArgAt(1);
   const target = access.exprArgAt(0);
-  const type = getExprType(target) as ObjectType | IntersectionType;
+  const type = getExprType(target) as Obj | IntersectionType;
 
   if (type.isIntersectionType() || type.isStructural) {
     return opts.fieldLookupHelpers.setFieldValueByAccessor(opts);

@@ -3,7 +3,6 @@ import { Expr } from "./syntax-objects/expr.js";
 import {
   Type,
   Primitive,
-  ObjectType,
   FixedArrayType,
   voydBaseObject,
   UnionType,
@@ -44,6 +43,7 @@ import {
   compile as compileClosure,
   getClosureSuperType,
 } from "./codegen/compile-closure.js";
+import { Obj } from "./syntax-objects/obj.js";
 
 export const codegen = (ast: Expr) => {
   const mod = new binaryen.Module();
@@ -117,9 +117,8 @@ type MapBinTypeOpts = CompileExprOpts;
 // Structural object types may be cloned and therefore have different object
 // identities even if they represent the same logical type. Cache entries are
 // keyed by the object's id to ensure stable lookups.
-const buildingTypePlaceholders = new Map<string | ObjectType, TypeRef>();
-const getPlaceholderKey = (obj: ObjectType) =>
-  obj.isStructural ? obj.id : obj;
+const buildingTypePlaceholders = new Map<string | Obj, TypeRef>();
+const getPlaceholderKey = (obj: Obj) => (obj.isStructural ? obj.id : obj);
 
 export const mapBinaryenType = (
   opts: MapBinTypeOpts,
@@ -133,7 +132,7 @@ export const mapBinaryenType = (
   if (isPrimitiveId(type, "voyd") || isPrimitiveId(type, "void"))
     return binaryen.none;
 
-  if (type.isObjectType()) {
+  if (type.isObj()) {
     const key = getPlaceholderKey(type);
     if (buildingTypePlaceholders.has(key)) {
       return buildingTypePlaceholders.get(key)!;
@@ -195,10 +194,7 @@ export const buildIntersectionType = (
   return typeRef;
 };
 
-export const buildObjectType = (
-  opts: MapBinTypeOpts,
-  obj: ObjectType
-): TypeRef => {
+export const buildObjectType = (opts: MapBinTypeOpts, obj: Obj): TypeRef => {
   if (obj.binaryenType) return obj.binaryenType;
   if (obj.typeParameters) return opts.mod.nop();
   const mod = opts.mod;

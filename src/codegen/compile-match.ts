@@ -8,8 +8,9 @@ import {
 import { Match, MatchCase } from "../syntax-objects/match.js";
 import { compile as compileVariable } from "./compile-variable.js";
 import { compile as compileIdentifier } from "./compile-identifier.js";
-import { Type, ObjectType, UnionType } from "../syntax-objects/types.js";
+import { Type, UnionType } from "../syntax-objects/types.js";
 import { structGetFieldValue } from "../lib/binaryen-gc/index.js";
+import { Obj } from "../syntax-objects/index.js";
 
 export const compile = (opts: CompileExprOpts<Match>) => {
   const { expr, mod } = opts;
@@ -20,8 +21,8 @@ export const compile = (opts: CompileExprOpts<Match>) => {
     returnType === binaryen.none ? asStmt(mod, e) : e;
 
   const getHeadKey = (t?: Type): string | undefined => {
-    if (!t?.isObjectType()) return undefined;
-    const obj = t as unknown as ObjectType;
+    if (!t?.isObj()) return undefined;
+    const obj = t as unknown as Obj;
     return obj.genericParent ? obj.genericParent.id : obj.id;
   };
 
@@ -38,8 +39,8 @@ export const compile = (opts: CompileExprOpts<Match>) => {
 
   const matchIdForCase = (t: Type | undefined): number => {
     if (!t) return 0;
-    if (!t.isObjectType()) return t.syntaxId;
-    const obj = t as unknown as ObjectType;
+    if (!t.isObj()) return t.syntaxId;
+    const obj = t as unknown as Obj;
     const headKey = getHeadKey(t);
     const count = headKey ? headCounts.get(headKey) ?? 0 : 0;
     // If this head appears exactly once in the union, match by the head's

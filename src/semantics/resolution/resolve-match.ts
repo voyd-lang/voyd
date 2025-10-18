@@ -1,5 +1,11 @@
 import { Block } from "../../syntax-objects/block.js";
-import { Call, Parameter, Type, Variable } from "../../syntax-objects/index.js";
+import {
+  Call,
+  Parameter,
+  Type,
+  Variable,
+  Obj,
+} from "../../syntax-objects/index.js";
 import { Match, MatchCase } from "../../syntax-objects/match.js";
 import { combineTypes } from "./combine-types.js";
 import { getExprType } from "./get-expr-type.js";
@@ -9,7 +15,7 @@ import {
   resolveWithExpected,
 } from "./resolve-entities.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
-import { UnionType, ObjectType } from "../../syntax-objects/types.js";
+import { UnionType } from "../../syntax-objects/types.js";
 import { resolveUnionType } from "./resolve-union.js";
 
 export const resolveMatch = (match: Match): Match => {
@@ -136,16 +142,14 @@ const resolveMatchReturnType = (match: Match): Type | undefined => {
 const findSomeVariant = (type?: Type) => {
   if (!type?.isUnionType()) return undefined;
   return type.resolvedMemberTypes.find(
-    (t) =>
-      t.isObjectType() &&
-      (t.name.is("Some") || t.genericParent?.name.is("Some"))
-  ) as ObjectType | undefined;
+    (t) => t.isObj() && (t.name.is("Some") || t.genericParent?.name.is("Some"))
+  ) as Obj | undefined;
 };
 
 const typeHead = (t?: Type): string | undefined => {
   if (!t) return undefined;
-  if (t.isObjectType()) {
-    const obj = t as ObjectType;
+  if (t.isObj()) {
+    const obj = t as Obj;
     return obj.genericParent ? obj.genericParent.name.value : obj.name.value;
   }
   return t.name.value;
@@ -160,13 +164,13 @@ const maybeFillOmittedCaseTypes = (match: Match) => {
   const union = resolveUnionType(base as UnionType);
   if (!union.resolvedMemberTypes.length) return;
 
-  const headMap = new Map<string, ObjectType[]>();
+  const headMap = new Map<string, Obj[]>();
   for (const t of union.resolvedMemberTypes) {
-    if (!t.isObjectType()) continue;
+    if (!t.isObj()) continue;
     const key = typeHead(t);
     if (!key) continue;
     const arr = headMap.get(key) ?? [];
-    arr.push(t as ObjectType);
+    arr.push(t as Obj);
     headMap.set(key, arr);
   }
 

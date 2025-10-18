@@ -13,11 +13,16 @@ import {
   refCast,
   callRef,
 } from "../../lib/binaryen-gc/index.js";
-import { ObjectType, voydBaseObject } from "../../syntax-objects/types.js";
+import { voydBaseObject } from "../../syntax-objects/types.js";
 import { murmurHash3 } from "../../lib/murmur-hash.js";
-import { CompileExprOpts, mapBinaryenType, compileExpression } from "../../codegen.js";
+import {
+  CompileExprOpts,
+  mapBinaryenType,
+  compileExpression,
+} from "../../codegen.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Fn } from "../../syntax-objects/fn.js";
+import { Obj } from "../../syntax-objects/index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -90,10 +95,10 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
     ])
   );
 
-  const initMethodTable = (opts: CompileExprOpts<ObjectType>) => {
+  const initMethodTable = (opts: CompileExprOpts<Obj>) => {
     const { mod, expr: obj } = opts;
-    const accessors = obj.implementations
-      ?.flatMap((impl) => {
+    const accessors =
+      obj.implementations?.flatMap((impl) => {
         if (!impl.trait) return [] as number[];
         return impl.trait.methods.toArray().map((traitMethod) => {
           const implMethod = impl.methods.find((m) =>
@@ -101,7 +106,9 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
           );
           if (!implMethod) {
             throw new Error(
-              `Method ${traitMethod.name.value} not implemented for trait ${impl.trait!.name}`
+              `Method ${traitMethod.name.value} not implemented for trait ${
+                impl.trait!.name
+              }`
             );
           }
 
@@ -173,13 +180,23 @@ export const initMethodLookupHelpers = (mod: binaryen.Module) => {
       [mod.i32.const(murmurHash3(fn.id)), lookupTable],
       bin.funcref
     );
-    const target = refCast(mod, funcRef, fn.getAttribute("binaryenType") as number);
+    const target = refCast(
+      mod,
+      funcRef,
+      fn.getAttribute("binaryenType") as number
+    );
     const args = expr.args
       .toArray()
-      .map((arg) => compileExpression({ ...opts, expr: arg, isReturnExpr: false }));
+      .map((arg) =>
+        compileExpression({ ...opts, expr: arg, isReturnExpr: false })
+      );
     return callRef(mod, target, args, mapBinaryenType(opts, fn.returnType!));
   };
 
-  return { initMethodTable, lookupTableType, LOOKUP_NAME, callMethodByAccessor };
+  return {
+    initMethodTable,
+    lookupTableType,
+    LOOKUP_NAME,
+    callMethodByAccessor,
+  };
 };
-

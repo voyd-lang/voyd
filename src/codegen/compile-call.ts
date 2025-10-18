@@ -66,9 +66,9 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     }
     // Normalize return to base object when objectish (object/union/intersection/alias)
     const retType: Type = expectedType.returnType!;
-    const retCanon = canonicalType(retType) as any;
+    const retCanon = canonicalType(retType);
     const isObjectish =
-      retCanon?.isObjectType?.() ||
+      retCanon?.isObj?.() ||
       retCanon?.isUnionType?.() ||
       retCanon?.isIntersectionType?.() ||
       retCanon?.isTypeAlias?.();
@@ -114,7 +114,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
     throw new Error(`No function found for call ${expr.location}`);
   }
 
-  if (expr.fn.isObjectType()) {
+  if (expr.fn.isObj()) {
     return compileObjectInit(opts);
   }
 
@@ -167,7 +167,7 @@ export const compile = (opts: CompileExprOpts<Call>): number => {
       });
       const param = traitFn.parameters[i];
       const argType = arg.getType();
-      if (param?.type?.isObjectType() && argType?.isTraitType()) {
+      if (param?.type?.isObj() && argType?.isTraitType()) {
         return refCast(mod, compiled, mapBinaryenType(opts, param.type));
       }
       return compiled;

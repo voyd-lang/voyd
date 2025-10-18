@@ -1,22 +1,19 @@
 import { Expr } from "./expr.js";
 import { Parameter } from "./parameter.js";
 import { NamedEntityOpts } from "./named-entity.js";
-import { Id, Identifier } from "./identifier.js";
-import { getIdStr } from "./lib/get-id-str.js";
-import { LexicalContext } from "./lib/lexical-context.js";
-import { Implementation } from "./implementation.js";
-import { ScopedEntity } from "./scoped-entity.js";
 import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
-import { TraitType } from "./types/trait.js";
+import { TraitType } from "./trait.js";
 import { BaseType } from "./types/base-type.js";
+import { Obj } from "./obj.js";
+import { TypeAlias } from "./type-alias.js";
 
 export type Type =
   | PrimitiveType
   | UnionType
   | IntersectionType
   | TraitType
-  | ObjectType
+  | Obj
   | TupleType
   | FixedArrayType
   | FnType
@@ -24,52 +21,6 @@ export type Type =
   | TypeAlias;
 
 export type TypeJSON = ["type", [string, ...any[]]];
-export class TypeAlias extends BaseType {
-  readonly kindOfType = "type-alias";
-  resolutionPhase = 0; // No clone
-  lexicon: LexicalContext = new LexicalContext();
-  #typeExpr: Child<Expr>;
-  resolvedType?: Type;
-  #typeParameters = new ChildList<Identifier>([], this);
-
-  constructor(
-    opts: NamedEntityOpts & { typeExpr: Expr; typeParameters?: Identifier[] }
-  ) {
-    super(opts);
-    this.#typeExpr = new Child(opts.typeExpr, this);
-    this.typeExpr.parent = this;
-    this.typeParameters = opts.typeParameters;
-  }
-
-  get typeExpr() {
-    return this.#typeExpr.value;
-  }
-
-  set typeExpr(v: Expr) {
-    this.#typeExpr.value = v;
-  }
-
-  get typeParameters() {
-    const params = this.#typeParameters.toArray();
-    return !params.length ? undefined : params;
-  }
-
-  set typeParameters(params: Identifier[] | undefined) {
-    this.#typeParameters = new ChildList(params ?? [], this);
-  }
-
-  toJSON(): TypeJSON {
-    return ["type", ["type-alias", this.typeExpr]];
-  }
-
-  clone(parent?: Expr | undefined): TypeAlias {
-    return new TypeAlias({
-      ...super.getCloneOpts(parent),
-      typeExpr: this.#typeExpr.clone(),
-      typeParameters: this.#typeParameters.clone(),
-    });
-  }
-}
 
 export class PrimitiveType extends BaseType {
   readonly kindOfType = "primitive";
@@ -134,8 +85,8 @@ export class IntersectionType extends BaseType {
   readonly kindOfType = "intersection";
   nominalTypeExpr: Child<Expr>;
   structuralTypeExpr: Child<Expr>;
-  nominalType?: ObjectType;
-  structuralType?: ObjectType;
+  nominalType?: Obj;
+  structuralType?: Obj;
 
   constructor(
     opts: NamedEntityOpts & {
@@ -186,134 +137,6 @@ export class TupleType extends BaseType {
 
   toJSON(): TypeJSON {
     return ["type", ["tuple", ...this.elementTypes]];
-  }
-}
-
-export type ObjectField = {
-  name: string;
-  typeExpr: Expr;
-  type?: Type;
-  binaryenGetterType?: number;
-  binaryenSetterType?: number;
-};
-
-export class ObjectType extends BaseType implements ScopedEntity {
-  readonly kindOfType = "object";
-  lexicon: LexicalContext = new LexicalContext();
-  typeParameters?: Identifier[];
-  resolvedTypeArgs?: Type[];
-  genericInstances?: ObjectType[];
-  /** If this is a genericInstance of an object, this is the generic version itself that it was generated from */
-  genericParent?: ObjectType;
-  fields: ObjectField[];
-  parentObjExpr?: Expr;
-  parentObjType?: ObjectType;
-  /** Type used for locals, globals, function return type */
-  binaryenType?: number;
-  typesResolved?: boolean; // Don't set if type parameters are present
-  implementations: Implementation[];
-  isStructural = false;
-  #iteration = 0;
-
-  constructor(
-    opts: NamedEntityOpts & {
-      fields: ObjectField[];
-      parentObjExpr?: Expr;
-      parentObj?: ObjectType;
-      typeParameters?: Identifier[];
-      implementations?: Implementation[];
-      isStructural?: boolean;
-    }
-  ) {
-    super(opts);
-    this.fields = opts.fields;
-    this.fields.forEach((field) => {
-      field.typeExpr.parent = this;
-    });
-    this.parentObjType = opts.parentObj;
-    this.parentObjExpr = opts.parentObjExpr;
-    this.typeParameters = opts.typeParameters;
-    this.implementations = opts.implementations ?? [];
-    this.isStructural = opts.isStructural ?? false;
-  }
-
-  get size() {
-    return 4;
-  }
-
-  toJSON(): TypeJSON {
-    return [
-      "type",
-      [
-        "object",
-        this.id,
-        ...this.fields.map(({ name, typeExpr }) => [name, typeExpr]),
-      ],
-    ];
-  }
-
-  clone(parent?: Expr): ObjectType {
-    return new ObjectType({
-      ...super.getCloneOpts(parent),
-      id: `${this.id}#${this.#iteration++}`,
-      fields: this.fields.map((field) => ({
-        ...field,
-        typeExpr: field.typeExpr.clone(),
-        type: field.type?.clone(),
-      })),
-      parentObjExpr: this.parentObjExpr?.clone(),
-      typeParameters: this.typeParameters,
-      implementations: this.implementations.map((impl) => impl.clone()),
-      isStructural: this.isStructural,
-    });
-  }
-
-  extends(ancestor: ObjectType): boolean {
-    if (this === ancestor) {
-      return true;
-    }
-
-    if (this.parentObjType) {
-      return this.parentObjType.extends(ancestor);
-    }
-
-    return false;
-  }
-
-  // Register a version of this function with resolved generics
-  registerGenericInstance(obj: ObjectType) {
-    if (!this.genericInstances) {
-      this.genericInstances = [];
-    }
-
-    this.genericInstances.push(obj);
-  }
-
-  getAncestorIds(start: number[] = []): number[] {
-    // Always include this object's id
-    start.push(this.idNum);
-    // For generic instances, also include the generic parent id so that
-    // runtime extends checks (used by union matching, e.g., MsgPack cases)
-    // succeed across all instantiations of the same nominal type.
-    if (this.genericParent) {
-      start.push(this.genericParent.idNum);
-    }
-    if (this.parentObjType) {
-      return this.parentObjType.getAncestorIds(start);
-    }
-    return start;
-  }
-
-  hasField(name: Id) {
-    return this.fields.some((field) => field.name === getIdStr(name));
-  }
-
-  getField(name: Id) {
-    return this.fields.find((field) => field.name === getIdStr(name));
-  }
-
-  getFieldIndex(name: Id) {
-    return this.fields.findIndex((field) => field.name === getIdStr(name));
   }
 }
 
@@ -405,9 +228,9 @@ export const bool = PrimitiveType.from("bool");
 export const dVoid = PrimitiveType.from("void");
 export const dVoyd = PrimitiveType.from("voyd");
 export const selfType = new SelfType();
-export const voydBaseObject = new ObjectType({
+export const voydBaseObject = new Obj({
   name: "Object",
   fields: [],
 });
 
-export type VoydRefType = ObjectType | UnionType | IntersectionType | TupleType;
+export type VoydRefType = Obj | UnionType | IntersectionType | TupleType;

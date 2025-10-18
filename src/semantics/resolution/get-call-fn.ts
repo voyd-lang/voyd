@@ -71,7 +71,7 @@ const selectByExpectedReturnType = (
   const headKeyFromType = (t: Type | undefined): string | undefined => {
     const u = canon(t);
     if (!u) return undefined;
-    if (u.isObjectType && u.isObjectType())
+    if (u.isObj && u.isObj())
       return u.genericParent ? u.genericParent.name.value : u.name.value;
     if (u.isPrimitiveType && u.isPrimitiveType()) return u.name.value;
     if (u.isTraitType && u.isTraitType()) return u.name.value;
@@ -114,8 +114,8 @@ const selectByExpectedReturnType = (
         head &&
         expHead &&
         head === expHead &&
-        cRet.isObjectType?.() &&
-        canonExpectedBranch.isObjectType?.()
+        cRet.isObj?.() &&
+        canonExpectedBranch.isObj?.()
       ) {
         const ra = cRet.resolvedTypeArgs ?? [];
         const ea = canonExpectedBranch.resolvedTypeArgs ?? [];
@@ -221,7 +221,7 @@ const getCandidates = (call: Call): Fn[] => {
       ? undefined
       : getExprType(arg1);
 
-  if (arg1Type?.isObjectType()) {
+  if (arg1Type?.isObj()) {
     const isInsideImpl = call.parentImpl?.targetType?.id === arg1Type.id;
     // Determine if the call is using object-arg form by checking for any
     // labeled arguments beyond the receiver. When such labels are present we
@@ -397,7 +397,7 @@ const objectArgSuppliesLabeledParams = (candidate: Fn, call: Call): boolean => {
   }
 
   const objType = getExprType(objArg);
-  const structType = objType?.isObjectType()
+  const structType = objType?.isObj()
     ? objType
     : objType?.isIntersectionType()
     ? objType.structuralType

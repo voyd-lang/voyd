@@ -47,7 +47,7 @@ const hasTypeArgs = (type?: Expr) => {
   if (!type) return false;
 
   if (type.isTypeAlias() && type.typeParameters) return true;
-  if (type.isObjectType()) {
+  if (type.isObj()) {
     // Consider an object type "resolved enough" when it has concrete applied
     // generic arguments. Only flag unresolved when type parameters exist and
     // no applied type args have been provided.
@@ -101,7 +101,7 @@ export const checkTypeExprAllowTypeParams = (
     }
 
     // Object/tuple type: validate field types
-    if (e.isObjectType()) {
+    if (e.isObj()) {
       e.fields.forEach((f) => visit(f.typeExpr));
       if (e.parentObjExpr) visit(e.parentObjExpr);
       return;

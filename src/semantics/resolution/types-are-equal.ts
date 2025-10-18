@@ -43,7 +43,7 @@ export const typesAreEqual = (
     return a.id === b.id;
   }
 
-  if (a.isObjectType() && b.isObjectType()) {
+  if (a.isObj() && b.isObj()) {
     const structural = a.isStructural || b.isStructural;
     if (structural) {
       return (

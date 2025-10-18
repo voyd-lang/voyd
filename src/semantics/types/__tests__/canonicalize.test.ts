@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { ObjectType, TypeAlias, i32 } from "../../../syntax-objects/types.js";
-import { TraitType } from "../../../syntax-objects/types/trait.js";
-import { Identifier } from "../../../syntax-objects/index.js";
+import { TypeAlias, i32 } from "../../../syntax-objects/index.js";
+import { TraitType } from "../../../syntax-objects/trait.js";
+import { Identifier, Obj } from "../../../syntax-objects/index.js";
 import { canonicalType } from "../canonicalize.js";
 
 describe("canonicalType", () => {
   test("resolves applied args on object types", () => {
-    const obj = new ObjectType({
+    const obj = new Obj({
       name: "Box",
       fields: [],
       typeParameters: [Identifier.from("T")],
@@ -20,7 +20,7 @@ describe("canonicalType", () => {
     inst.genericParent = obj;
     inst.resolvedTypeArgs = [alias];
 
-    const canon = canonicalType(inst) as ObjectType;
+    const canon = canonicalType(inst) as Obj;
     expect(canon.resolvedTypeArgs?.[0]).toBe(i32);
     expect(() => canon.clone()).not.toThrow();
   });

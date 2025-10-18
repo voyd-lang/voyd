@@ -28,7 +28,7 @@ export const checkTypes = (expr: Expr | undefined): Expr => {
   if (expr.isList()) return checkListTypes(expr);
   if (expr.isIdentifier()) return checkIdentifier(expr);
   if (expr.isUse()) return checkUse(expr);
-  if (expr.isObjectType()) return checkObjectType(expr);
+  if (expr.isObj()) return checkObjectType(expr);
   if (expr.isTypeAlias()) return checkTypeAlias(expr);
   if (expr.isObjectLiteral()) return checkObjectLiteralType(expr);
   if (expr.isUnionType()) return checkUnionType(expr);

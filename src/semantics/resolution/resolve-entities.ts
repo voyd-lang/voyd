@@ -7,12 +7,7 @@ import { ObjectLiteral } from "../../syntax-objects/object-literal.js";
 import { Call } from "../../syntax-objects/call.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { ArrayLiteral } from "../../syntax-objects/array-literal.js";
-import {
-  ObjectType,
-  TypeAlias,
-  voydBaseObject,
-  Type,
-} from "../../syntax-objects/types.js";
+import { TypeAlias, voydBaseObject, Type } from "../../syntax-objects/index.js";
 import { Variable } from "../../syntax-objects/variable.js";
 import { getExprType } from "./get-expr-type.js";
 import { resolveCall } from "./resolve-call.js";
@@ -26,6 +21,7 @@ import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { combineTypes } from "./combine-types.js";
 import { resolveUse } from "./resolve-use.js";
 import { maybeExpandObjectArg } from "./object-arg-utils.js";
+import { Obj } from "../../syntax-objects/index.js";
 
 /**
  * NOTE: Some mapping is preformed on the AST at this stage.
@@ -45,7 +41,7 @@ export const resolveEntities = (expr: Expr | undefined): Expr => {
   if (expr.isModule()) return resolveModule(expr);
   if (expr.isList()) return resolveListTypes(expr);
   if (expr.isUse()) return resolveUse(expr, resolveModule);
-  if (expr.isObjectType()) return resolveObjectType(expr);
+  if (expr.isObj()) return resolveObjectType(expr);
   if (expr.isTypeAlias()) return resolveTypeAlias(expr);
   if (expr.isObjectLiteral()) return resolveObjectLiteral(expr);
   if (expr.isArrayLiteral()) return resolveArrayLiteral(expr);
@@ -83,7 +79,7 @@ const resolveBlock = (block: Block): Block => {
 };
 
 const getArrayElemType = (type?: Type): Type | undefined => {
-  if (!type?.isObjectType()) return;
+  if (!type?.isObj()) return;
   const parent = type.genericParent;
   if (!type.name.is("Array") && !parent?.name.is("Array")) return;
   const arg = type.resolvedTypeArgs?.[0];
@@ -139,12 +135,12 @@ const unwrapAlias = (type?: Type): Type | undefined => {
 const findObjectType = (
   type: Type | undefined,
   name: Identifier
-): ObjectType | undefined => {
-  const matches: ObjectType[] = [];
+): Obj | undefined => {
+  const matches: Obj[] = [];
   const search = (t?: Type) => {
     t = unwrapAlias(t);
     if (!t) return;
-    if (t.isObjectType()) {
+    if (t.isObj()) {
       if (t.name.is(name) || t.genericParent?.name.is(name)) matches.push(t);
       return;
     }
@@ -193,16 +189,13 @@ export const resolveWithExpected = (expr: Expr, expected?: Type): Expr => {
     }
     return resolved;
   }
-  if (expr.isObjectLiteral() && unwrapped?.isObjectType()) {
+  if (expr.isObjectLiteral() && unwrapped?.isObj()) {
     return resolveObjectLiteral(expr, unwrapped);
   }
   return resolveEntities(expr);
 };
 
-export const resolveObjectLiteral = (
-  obj: ObjectLiteral,
-  expected?: ObjectType
-) => {
+export const resolveObjectLiteral = (obj: ObjectLiteral, expected?: Obj) => {
   // Ensure expected structural type (incl. tuples) is resolved so its field
   // types are available for propagation.
   if (expected) expected = resolveObjectType(expected);
@@ -218,7 +211,7 @@ export const resolveObjectLiteral = (
     return field;
   });
 
-  obj.type = new ObjectType({
+  obj.type = new Obj({
     ...obj.metadata,
     name: `ObjectLiteral-${obj.syntaxId}`,
     fields: obj.fields.map((f) => ({

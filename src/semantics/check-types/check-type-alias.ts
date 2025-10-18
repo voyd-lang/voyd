@@ -1,4 +1,4 @@
-import { TypeAlias } from "../../syntax-objects/types.js";
+import { TypeAlias } from "../../syntax-objects/index.js";
 
 export const checkTypeAlias = (alias: TypeAlias): TypeAlias => {
   if (alias.typeParameters) return alias;

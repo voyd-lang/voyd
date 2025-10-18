@@ -84,7 +84,7 @@ const checkObjectMatch = (match: Match) => {
     );
   }
 
-  if (!match.baseType || !match.baseType.isObjectType()) {
+  if (!match.baseType || !match.baseType.isObj()) {
     throw new Error(
       `Cannot determine type of value being matched at ${match.location}`
     );

@@ -1,5 +1,5 @@
 import { test } from "vitest";
-import { ObjectType, i32 } from "../../syntax-objects/types.js";
+import { i32 } from "../../syntax-objects/types.js";
 import { Identifier } from "../../syntax-objects/identifier.js";
 import { Implementation } from "../../syntax-objects/implementation.js";
 import { Fn } from "../../syntax-objects/fn.js";
@@ -9,11 +9,12 @@ import { Call } from "../../syntax-objects/call.js";
 import { List } from "../../syntax-objects/list.js";
 import { Int } from "../../syntax-objects/int.js";
 import { checkTypes } from "../check-types/index.js";
+import { Obj } from "../../syntax-objects/obj.js";
 
 // Regression test for ensuring unresolved calls within methods are detected
 // during type checking.
 test("unresolved fn calls inside methods throw", (t) => {
-  const obj = new ObjectType({
+  const obj = new Obj({
     name: Identifier.from("Test"),
     fields: [{ name: "a", typeExpr: i32, type: i32 }],
     implementations: [],

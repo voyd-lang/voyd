@@ -16,7 +16,6 @@ import {
 } from "../../lib/binaryen-gc/index.js";
 import {
   IntersectionType,
-  ObjectType,
   voydBaseObject,
 } from "../../syntax-objects/types.js";
 import { murmurHash3 } from "../../lib/murmur-hash.js";
@@ -26,6 +25,7 @@ import {
   mapBinaryenType,
 } from "../../codegen.js";
 import { Call } from "../../syntax-objects/call.js";
+import { Obj } from "../../syntax-objects/index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -122,7 +122,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
     ])
   );
 
-  const initFieldIndexTable = (opts: CompileExprOpts<ObjectType>) => {
+  const initFieldIndexTable = (opts: CompileExprOpts<Obj>) => {
     const { mod, expr: obj } = opts;
     return arrayNewFixed(
       mod,
@@ -190,7 +190,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
     const { expr, mod } = opts;
     const obj = expr.exprArgAt(0);
     const member = expr.identifierArgAt(1);
-    const objType = obj.getType() as ObjectType | IntersectionType;
+    const objType = obj.getType() as Obj | IntersectionType;
 
     const field = objType.isIntersectionType()
       ? objType.nominalType?.getField(member) ??
@@ -234,7 +234,7 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
       expr: expr.argAt(1)!,
       isReturnExpr: false,
     });
-    const objType = target.getType() as ObjectType | IntersectionType;
+    const objType = target.getType() as Obj | IntersectionType;
 
     const field = objType.isIntersectionType()
       ? objType.nominalType?.getField(member) ??

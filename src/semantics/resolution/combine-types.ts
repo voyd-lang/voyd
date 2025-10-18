@@ -1,6 +1,6 @@
+import { Obj } from "../../syntax-objects/obj.js";
 import {
   IntersectionType,
-  ObjectType,
   Type,
   UnionType,
 } from "../../syntax-objects/types.js";
@@ -17,10 +17,10 @@ export const combineTypes = (types: Type[]): Type | undefined => {
     (t, i) => !types.slice(0, i).some((u) => typesAreEqual(t, u))
   );
   const firstType = unique[0];
-  if (!unique.length || !firstType?.isObjectType()) return firstType;
+  if (!unique.length || !firstType?.isObj()) return firstType;
 
   let isLocalUnion = false;
-  let topType: ObjectType | IntersectionType | UnionType = firstType;
+  let topType: Obj | IntersectionType | UnionType = firstType;
   for (const type of unique.slice(1)) {
     if (isObjectOrIntersection(type) && isObjectOrIntersection(topType)) {
       const union = new UnionType({ name: `CombinedTypeUnion` });
@@ -60,8 +60,6 @@ export const combineTypes = (types: Type[]): Type | undefined => {
   return topType;
 };
 
-const isObjectOrIntersection = (
-  type: Type
-): type is ObjectType | IntersectionType => {
-  return type.isObjectType() || type.isIntersectionType();
+const isObjectOrIntersection = (type: Type): type is Obj | IntersectionType => {
+  return type.isObj() || type.isIntersectionType();
 };

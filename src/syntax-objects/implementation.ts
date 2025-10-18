@@ -5,7 +5,7 @@ import { Identifier } from "./identifier.js";
 import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
 import { ScopedSyntax, ScopedSyntaxMetadata } from "./scoped-entity.js";
-import { TraitType } from "./types/trait.js";
+import { TraitType } from "./trait.js";
 import { Type } from "./types.js";
 
 export type ImplementationOpts = ScopedSyntaxMetadata & {

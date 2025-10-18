@@ -1,17 +1,17 @@
 import { Expr } from "./expr.js";
 import { Fn } from "./fn.js";
 import { Identifier } from "./identifier.js";
-import { ChildList } from "./lib/child-list.js";
 import { Child } from "./lib/child.js";
 import { LexicalContext } from "./lib/lexical-context.js";
 import { List } from "./list.js";
+import { Obj } from "./obj.js";
 import { Syntax, SyntaxMetadata } from "./syntax.js";
-import { ObjectType, Type } from "./types.js";
+import { Type } from "./types.js";
 
 /** Defines a function call */
 export class Call extends Syntax {
   readonly syntaxType = "call";
-  fn?: Fn | ObjectType;
+  fn?: Fn | Obj;
   #fnName: Child<Identifier>;
   #args: Child<List>;
   #typeArgs = new Child<List | undefined>(undefined, this);
@@ -73,7 +73,7 @@ export class Call extends Syntax {
       this.#type = this.fn.returnType;
     }
 
-    if (!this.#type && this.fn?.isObjectType()) {
+    if (!this.#type && this.fn?.isObj()) {
       this.#type = this.fn;
     }
 

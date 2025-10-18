@@ -1,19 +1,16 @@
 import { Call } from "../../syntax-objects/call.js";
-import { nop } from "../../syntax-objects/lib/helpers.js";
 import { List } from "../../syntax-objects/list.js";
-import {
-  ObjectType,
-  TypeAlias,
-  voydBaseObject,
-} from "../../syntax-objects/types.js";
+import { TypeAlias, voydBaseObject } from "../../syntax-objects/index.js";
 import { getExprType } from "./get-expr-type.js";
 import { inferTypeArgs, TypeArgInferencePair } from "./infer-type-args.js";
 import { implIsCompatible, resolveImpl } from "./resolve-impl.js";
 import { typesAreEqual } from "./types-are-equal.js";
 import { resolveTypeExpr } from "./resolve-type-expr.js";
 import { canonicalType } from "../types/canonicalize.js";
+import { Expr } from "../../syntax-objects/expr.js";
+import { Obj } from "../../syntax-objects/obj.js";
 
-export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
+export const resolveObjectType = (obj: Obj, call?: Call): Obj => {
   if (obj.typesResolved) return obj;
 
   if (obj.typeParameters) {
@@ -28,7 +25,7 @@ export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
   if (obj.parentObjExpr) {
     obj.parentObjExpr = resolveTypeExpr(obj.parentObjExpr);
     const parentType = getExprType(obj.parentObjExpr);
-    obj.parentObjType = parentType?.isObjectType() ? parentType : undefined;
+    obj.parentObjType = parentType?.isObj() ? parentType : undefined;
   } else {
     obj.parentObjType = voydBaseObject;
   }
@@ -39,7 +36,7 @@ export const resolveObjectType = (obj: ObjectType, call?: Call): ObjectType => {
 
 // Detects whether a type-argument expression contains an unresolved type
 // identifier (e.g., an unbound generic name like `T`).
-export const containsUnresolvedTypeId = (expr: any): boolean => {
+export const containsUnresolvedTypeId = (expr: Expr): boolean => {
   // Follows TypeAlias chains to the underlying resolved type (if any).
   const unwrapAlias = (t: any): any => {
     let cur = t;
@@ -71,7 +68,7 @@ export const containsUnresolvedTypeId = (expr: any): boolean => {
     }
 
     if (e.isType?.()) {
-      if (e.isObjectType?.()) {
+      if (e.isObj?.()) {
         stack.push(...e.fields.map((f: any) => f.typeExpr));
         continue;
       }
@@ -95,10 +92,7 @@ export const containsUnresolvedTypeId = (expr: any): boolean => {
   return false;
 };
 
-const resolveGenericObjVersion = (
-  type: ObjectType,
-  call?: Call
-): ObjectType | undefined => {
+const resolveGenericObjVersion = (type: Obj, call?: Call): Obj | undefined => {
   if (!call) return;
 
   // If no explicit type args are supplied, try to infer them from the
@@ -133,10 +127,7 @@ const resolveGenericObjVersion = (
   return resolveGenericsWithTypeArgs(type, call.typeArgs);
 };
 
-const resolveGenericsWithTypeArgs = (
-  obj: ObjectType,
-  args: List
-): ObjectType => {
+const resolveGenericsWithTypeArgs = (obj: Obj, args: List): Obj => {
   const typeParameters = obj.typeParameters!;
 
   if (args.length !== typeParameters.length) {
@@ -179,7 +170,7 @@ const resolveGenericsWithTypeArgs = (
   return resolvedObj;
 };
 
-const typeArgsMatch = (call: Call, candidate: ObjectType): boolean =>
+const typeArgsMatch = (call: Call, candidate: Obj): boolean =>
   call.typeArgs && candidate.resolvedTypeArgs
     ? candidate.resolvedTypeArgs.every((t, i) => {
         const argType = getExprType(call.typeArgs?.at(i));

@@ -1,4 +1,4 @@
-import { Type, TypeAlias } from "../syntax-objects/types.js";
+import { Type, TypeAlias } from "../syntax-objects/index.js";
 
 // Format a type name including applied generic type parameters, when present.
 export const formatTypeName = (
@@ -22,7 +22,7 @@ export const formatTypeName = (
     return t.name.toString();
   }
 
-  if (t.isObjectType?.()) {
+  if (t.isObj?.()) {
     const base = t.name.toString();
     const args = t.resolvedTypeArgs ?? [];
     if (!args.length) return base;

@@ -1,23 +1,19 @@
 import { describe, expect, test } from "vitest";
-import {
-  ObjectType,
-  UnionType,
-  SelfType,
-} from "../../../syntax-objects/index.js";
+import { UnionType, SelfType, Obj } from "../../../syntax-objects/index.js";
 import { typesAreCompatible } from "../types-are-compatible.js";
 
 describe("typesAreCompatible - unions", () => {
   test("handles large unions", () => {
-    const objsA: ObjectType[] = [];
-    const objsB: ObjectType[] = [];
+    const objsA: Obj[] = [];
+    const objsB: Obj[] = [];
 
     for (let i = 0; i < 100; i++) {
-      const obj = new ObjectType({ name: `Obj${i}`, fields: [] });
+      const obj = new Obj({ name: `Obj${i}`, fields: [] });
       objsA.push(obj);
       objsB.push(obj);
     }
     // Add an extra type to B so that B is a superset of A
-    objsB.push(new ObjectType({ name: "Extra", fields: [] }));
+    objsB.push(new Obj({ name: "Extra", fields: [] }));
 
     const unionA = new UnionType({ name: "UnionA", childTypeExprs: [] });
     unionA.resolvedMemberTypes = objsA;
@@ -30,8 +26,8 @@ describe("typesAreCompatible - unions", () => {
   });
 
   test("handles cyclic unions", () => {
-    const a = new ObjectType({ name: "A", fields: [] });
-    const b = new ObjectType({ name: "B", fields: [] });
+    const a = new Obj({ name: "A", fields: [] });
+    const b = new Obj({ name: "B", fields: [] });
 
     const u1 = new UnionType({ name: "U1", childTypeExprs: [] });
     const u2 = new UnionType({ name: "U2", childTypeExprs: [] });
@@ -46,11 +42,11 @@ describe("typesAreCompatible - unions", () => {
     const depth = 200;
     let current = new UnionType({ name: `U${depth}`, childTypeExprs: [] });
     current.resolvedMemberTypes = [
-      new ObjectType({ name: `Obj${depth}`, fields: [] }),
+      new Obj({ name: `Obj${depth}`, fields: [] }),
     ];
     for (let i = depth - 1; i >= 0; i--) {
       const next = new UnionType({ name: `U${i}`, childTypeExprs: [] });
-      const obj = new ObjectType({ name: `Obj${i}`, fields: [] });
+      const obj = new Obj({ name: `Obj${i}`, fields: [] });
       next.resolvedMemberTypes = [obj, current];
       current = next;
     }
