@@ -34,6 +34,7 @@ export class Atom extends Syntax {
     return {
       type: "atom",
       location: this.location?.toJSON(),
+      attributes: this.attributes,
       value: this.value,
     };
   }

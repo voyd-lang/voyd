@@ -1,3 +1,5 @@
+import { Atom } from "./atom.js";
 import { Form } from "./form.js";
 
-export type AST = Form;
+export type Expr = Form | Atom;
+export type AST = Expr;

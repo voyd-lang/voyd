@@ -12,6 +12,10 @@ export abstract class Syntax {
   abstract toJSON(): unknown;
   abstract toVerboseJSON(): VerboseJSON;
 
+  get attributes() {
+    return this.#attributes;
+  }
+
   setAttribute(key: string, value: unknown) {
     if (!this.#attributes) this.#attributes = {};
     this.#attributes[key] = value;
@@ -49,6 +53,10 @@ export abstract class Syntax {
   getTmpAttribute<T>(key: string): T | undefined {
     return this.#tmpAttributes?.[key] as T | undefined;
   }
+
+  setEndLocationToStartOf(loc: SourceLocation) {
+    this.location?.setEndToStartOf(loc);
+  }
 }
 
 export type Attributes = { [key: string]: unknown };
@@ -56,6 +64,7 @@ export type Attributes = { [key: string]: unknown };
 export type VerboseJSON = {
   type: string;
   location?: SourceLocationJSON;
+  attributes?: { [key: string]: unknown };
   [key: string]: unknown;
 };
 
@@ -131,9 +140,7 @@ export class SourceLocation {
   }
 }
 
-type SyntaxConstructor<T extends Syntax> = abstract new (
-  ...args: unknown[]
-) => T;
+type SyntaxConstructor<T extends Syntax> = abstract new (...args: any[]) => T;
 
 export function is<T extends Syntax>(
   syntax: Syntax | null | undefined,

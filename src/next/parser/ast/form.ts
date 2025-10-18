@@ -1,32 +1,47 @@
 import { FastShiftArray } from "@lib/fast-shift-array.js";
-import { AST } from "./ast.js";
-import { SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
+import { Expr } from "./ast.js";
+import { is, SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
+import { Atom } from "./atom.js";
 
 export type FormOpts = {
   location?: SourceLocation;
-  elements?: AST[];
+  elements?: (Expr | string)[];
 };
 
 export class Form extends Syntax {
-  #elements: FastShiftArray<AST>;
+  #elements = new FastShiftArray<Expr>();
 
-  constructor(opts: FormOpts | AST[] = []) {
+  constructor(opts: FormOpts | (Expr | string)[] = []) {
     if (Array.isArray(opts)) {
       super();
-      this.#elements = new FastShiftArray(...opts);
+      this.push(...opts);
       return;
     }
 
     super(opts);
-    this.#elements = new FastShiftArray(...(opts.elements ?? []));
+    this.push(...(opts.elements ?? []));
   }
 
-  at(index: number): AST | undefined {
+  get last() {
+    return this.#elements.at(-1);
+  }
+
+  calls(name: Atom | string): boolean {
+    const first = this.#elements.at(0);
+    if (!is(first, Atom)) return false;
+    return typeof name === "string"
+      ? first.value === name
+      : name.value === first.value;
+  }
+
+  at(index: number): Expr | undefined {
     return this.#elements.at(index);
   }
 
-  push(...elements: AST[]) {
-    this.#elements.push(...elements);
+  push(...elements: (Expr | string)[]) {
+    this.#elements.push(
+      ...elements.map((e) => (typeof e === "string" ? new Atom(e) : e))
+    );
   }
 
   clone(): Form {
@@ -36,7 +51,7 @@ export class Form extends Syntax {
     });
   }
 
-  toArray(): AST[] {
+  toArray(): Expr[] {
     return this.#elements.toArray();
   }
 
@@ -48,6 +63,7 @@ export class Form extends Syntax {
     return {
       type: "form",
       location: this.location?.toJSON(),
+      attributes: this.attributes,
       elements: this.#elements.toArray().map((e) => e.toVerboseJSON()),
     };
   }
