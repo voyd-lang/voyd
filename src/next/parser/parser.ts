@@ -1,4 +1,4 @@
-import { Expr } from "./ast/ast.js";
+import { Expr } from "./ast/expr.js";
 import { CharStream } from "./char-stream.js";
 import { parseChars } from "./parse-chars.js";
 import { expandSyntaxMacros } from "./syntax-macros/index.js";

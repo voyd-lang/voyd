@@ -1,17 +1,19 @@
 import { FastShiftArray } from "@lib/fast-shift-array.js";
-import { Expr } from "./ast.js";
+import { Expr } from "./expr.js";
 import { is, SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
 import { Atom } from "./atom.js";
 
 export type FormOpts = {
   location?: SourceLocation;
-  elements?: (Expr | string)[];
+  elements?: FormElementInit;
 };
+
+export type FormElementInit = (Expr | string | FormElementInit)[];
 
 export class Form extends Syntax {
   #elements = new FastShiftArray<Expr>();
 
-  constructor(opts: FormOpts | (Expr | string)[] = []) {
+  constructor(opts: FormOpts | FormElementInit = []) {
     if (Array.isArray(opts)) {
       super();
       this.push(...opts);
@@ -26,6 +28,18 @@ export class Form extends Syntax {
     return this.#elements.at(-1);
   }
 
+  private push(...elements: FormElementInit) {
+    this.#elements.push(
+      ...elements.map((e) =>
+        typeof e === "string"
+          ? new Atom(e)
+          : e instanceof Array
+          ? new Form(e)
+          : e
+      )
+    );
+  }
+
   calls(name: Atom | string): boolean {
     const first = this.#elements.at(0);
     if (!is(first, Atom)) return false;
@@ -36,12 +50,6 @@ export class Form extends Syntax {
 
   at(index: number): Expr | undefined {
     return this.#elements.at(index);
-  }
-
-  push(...elements: (Expr | string)[]) {
-    this.#elements.push(
-      ...elements.map((e) => (typeof e === "string" ? new Atom(e) : e))
-    );
   }
 
   clone(): Form {

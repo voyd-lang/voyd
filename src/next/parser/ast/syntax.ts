@@ -2,7 +2,6 @@ export abstract class Syntax {
   readonly syntaxId = getSyntaxId();
   readonly location?: SourceLocation;
   #attributes?: Attributes;
-  #tmpAttributes?: Attributes;
 
   constructor(opts: { location?: SourceLocation } = {}) {
     this.location = opts.location;
@@ -16,55 +15,50 @@ export abstract class Syntax {
     return this.#attributes;
   }
 
-  setAttribute(key: string, value: unknown) {
+  setAttribute<T extends AttributeKey>(key: T, value: Attributes[T]) {
     if (!this.#attributes) this.#attributes = {};
     this.#attributes[key] = value;
+    return this;
   }
 
-  getAttribute(key: string): unknown {
+  getAttribute<T extends AttributeKey>(key: T): Attributes[T] {
     if (!this.#attributes) return undefined;
     return this.#attributes[key];
   }
 
-  hasAttribute(key: string): boolean {
+  hasAttribute(key: AttributeKey): boolean {
     if (!this.#attributes) return false;
     return this.#attributes[key] !== undefined;
   }
 
-  setTmpAttribute(key: string, value: unknown): void {
-    if (value === undefined) {
-      if (this.#tmpAttributes) {
-        delete this.#tmpAttributes[key];
-        if (Object.keys(this.#tmpAttributes).length === 0) {
-          this.#tmpAttributes = undefined;
-        }
-      }
-      return;
-    }
-
-    if (!this.#tmpAttributes) this.#tmpAttributes = {};
-    this.#tmpAttributes[key] = value;
-  }
-
-  hasTmpAttribute(key: string): boolean {
-    return this.#tmpAttributes ? key in this.#tmpAttributes : false;
-  }
-
-  getTmpAttribute<T>(key: string): T | undefined {
-    return this.#tmpAttributes?.[key] as T | undefined;
-  }
-
   setEndLocationToStartOf(loc: SourceLocation) {
     this.location?.setEndToStartOf(loc);
+    return this;
   }
 }
 
-export type Attributes = { [key: string]: unknown };
+export type Attributes = {
+  isComment?: boolean;
+  isBool?: boolean;
+  isIdentifier?: boolean;
+  isFloat?: boolean;
+  floatType?: "f32" | "f64";
+  isInt?: boolean;
+  intType?: "i32" | "i64";
+  isString?: boolean;
+  isQuoted?: boolean;
+  isArrayLiteral?: boolean;
+  isWhitespace?: boolean;
+  mightBeTuple?: boolean;
+  scientificENotation?: boolean;
+};
+
+export type AttributeKey = keyof Attributes;
 
 export type VerboseJSON = {
   type: string;
   location?: SourceLocationJSON;
-  attributes?: { [key: string]: unknown };
+  attributes?: Attributes;
   [key: string]: unknown;
 };
 
