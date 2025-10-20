@@ -1,4 +1,4 @@
-import { Atom } from "../ast/atom.js";
+import { FloatAtom } from "../ast/atom.js";
 import { ReaderMacro } from "./types.js";
 
 const FLOAT = /^[+-]?\d+\.\d+(?:f64|f32)?$/;
@@ -10,8 +10,8 @@ export const floatMacro: ReaderMacro = {
     const value =
       token.value.at(-3) === "f" ? token.value.slice(0, -3) : token.value;
 
-    return new Atom({ value, location: token.location })
-      .setAttribute("isFloat", true)
-      .setAttribute("floatType", floatType);
+    return new FloatAtom({ value, location: token.location }).setType(
+      floatType
+    );
   },
 };

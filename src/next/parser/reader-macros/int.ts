@@ -1,4 +1,4 @@
-import { Atom } from "../ast/atom.js";
+import { IntAtom } from "../ast/atom.js";
 import { ReaderMacro } from "./types.js";
 
 const INT = /^[+-]?\d+(?:i64|i32)?$/;
@@ -10,8 +10,6 @@ export const intMacro: ReaderMacro = {
     const value =
       token.value.at(-3) === "i" ? token.value.slice(0, -3) : token.value;
 
-    return new Atom({ value, location: token.location })
-      .setAttribute("isFloat", true)
-      .setAttribute("intType", intType);
+    return new IntAtom({ value, location: token.location }).setType(intType);
   },
 };

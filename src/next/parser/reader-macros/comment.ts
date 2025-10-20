@@ -1,3 +1,4 @@
+import { CommentAtom } from "../ast/atom.js";
 import { ReaderMacro } from "./types.js";
 
 export const comment: ReaderMacro = {
@@ -9,6 +10,6 @@ export const comment: ReaderMacro = {
     }
 
     token.setEndLocationToStartOf(file.currentSourceLocation());
-    return token.toAtom().setAttribute("isComment", true);
+    return new CommentAtom(token);
   },
 };

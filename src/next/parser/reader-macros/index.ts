@@ -11,13 +11,13 @@ import { objectLiteralMacro } from "./object-literal.js";
 import { ReaderMacro } from "./types.js";
 import { genericsMacro } from "./generics.js";
 import { htmlMacro } from "./html/html.js";
-import { formReader } from "./form.js";
+import { parenReader } from "./paren.js";
 import { whitespaceReader } from "./whitespace.js";
 import { identifierReader } from "./identifier.js";
 import { Expr } from "../ast/expr.js";
 
 const MACROS = [
-  formReader,
+  parenReader,
   whitespaceReader,
   objectLiteralMacro,
   arrayLiteralMacro,

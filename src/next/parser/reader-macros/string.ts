@@ -1,7 +1,5 @@
 import { ReaderMacro } from "./types.js";
-import { Atom } from "../ast/atom.js";
-import { Form } from "../ast/form.js";
-import { SourceLocation } from "../ast/syntax.js";
+import { identifier, string } from "../ast/initializers.js";
 
 export const stringMacro: ReaderMacro = {
   match: (t) => t.value === '"' || t.value === "'",
@@ -26,37 +24,9 @@ export const stringMacro: ReaderMacro = {
     token.setEndLocationToStartOf(file.currentSourceLocation());
 
     if (startChar === "'") {
-      return token
-        .toAtom()
-        .setAttribute("isIdentifier", true)
-        .setAttribute("isQuoted", true);
+      return identifier(token.value).setLocation(token.location);
     }
 
-    return makeString(token.value, token.location);
+    return string(token.value).setLocation(token.location);
   },
-};
-
-export const makeString = (value: string, location?: SourceLocation) => {
-  const codes = value
-    .split("")
-    .map((c) =>
-      new Atom(String(c.charCodeAt(0)))
-        .setAttribute("isInt", true)
-        .setAttribute("intType", "i32")
-    );
-
-  return new Form({
-    location,
-    elements: [
-      "new_string",
-      ",",
-      [
-        "object",
-        ",",
-        "from",
-        ":",
-        ["FixedArray", ",", ["generics", ",", "i32"], ...codes],
-      ],
-    ],
-  });
 };

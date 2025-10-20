@@ -1,7 +1,7 @@
 export abstract class Syntax {
+  abstract readonly syntaxType: string;
   readonly syntaxId = getSyntaxId();
-  readonly location?: SourceLocation;
-  #attributes?: Attributes;
+  location?: SourceLocation;
 
   constructor(opts: { location?: SourceLocation } = {}) {
     this.location = opts.location;
@@ -11,24 +11,9 @@ export abstract class Syntax {
   abstract toJSON(): unknown;
   abstract toVerboseJSON(): VerboseJSON;
 
-  get attributes() {
-    return this.#attributes;
-  }
-
-  setAttribute<T extends AttributeKey>(key: T, value: Attributes[T]) {
-    if (!this.#attributes) this.#attributes = {};
-    this.#attributes[key] = value;
+  setLocation(loc: SourceLocation) {
+    this.location = loc;
     return this;
-  }
-
-  getAttribute<T extends AttributeKey>(key: T): Attributes[T] {
-    if (!this.#attributes) return undefined;
-    return this.#attributes[key];
-  }
-
-  hasAttribute(key: AttributeKey): boolean {
-    if (!this.#attributes) return false;
-    return this.#attributes[key] !== undefined;
   }
 
   setEndLocationToStartOf(loc: SourceLocation) {
@@ -37,26 +22,11 @@ export abstract class Syntax {
   }
 }
 
-export type Attributes = {
-  isComment?: boolean;
-  isBool?: boolean;
-  isIdentifier?: boolean;
-  isFloat?: boolean;
-  floatType?: "f32" | "f64";
-  isInt?: boolean;
-  intType?: "i32" | "i64";
-  isString?: boolean;
-  isQuoted?: boolean;
-  isArrayLiteral?: boolean;
-  isWhitespace?: boolean;
-  mightBeTuple?: boolean;
-  scientificENotation?: boolean;
-};
-
-export type AttributeKey = keyof Attributes;
+export type Attributes = { [key: string]: unknown };
 
 export type VerboseJSON = {
   type: string;
+  id: number;
   location?: SourceLocationJSON;
   attributes?: Attributes;
   [key: string]: unknown;
@@ -137,7 +107,7 @@ export class SourceLocation {
 type SyntaxConstructor<T extends Syntax> = abstract new (...args: any[]) => T;
 
 export function is<T extends Syntax>(
-  syntax: Syntax | null | undefined,
+  syntax: unknown,
   ctor: SyntaxConstructor<T>
 ): syntax is T {
   if (!syntax) return false;

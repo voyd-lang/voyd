@@ -1,8 +1,8 @@
-import { Atom } from "./ast/atom.js";
+import { Atom, IdentifierAtom } from "./ast/atom.js";
 import { is, Syntax } from "./ast/syntax.js";
 
-export const isIdentifier = (op?: Syntax): op is Atom =>
-  is(op, Atom) && !!op.getAttribute("isIdentifier");
+export const isIdentifier = (op?: Syntax): op is IdentifierAtom =>
+  is(op, IdentifierAtom);
 
 export const identifierIs = (
   op: Syntax | undefined,
@@ -56,7 +56,7 @@ export const infixOps: OpMap = new Map([
 ]);
 
 const isUnquotedIdentifier = (op?: Syntax): op is Atom =>
-  isIdentifier(op) && !op.hasAttribute("isQuoted");
+  isIdentifier(op) && !op.isQuoted;
 
 export const isInfixOp = (op?: Syntax): op is Atom =>
   isUnquotedIdentifier(op) && infixOps.has(op.value);

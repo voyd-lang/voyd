@@ -1,13 +1,13 @@
-import { Form } from "../ast/form.js";
+import { CallForm } from "../ast/form.js";
 import { ReaderMacro } from "./types.js";
 
 export const objectLiteralMacro: ReaderMacro = {
   match: (t) => t.value === "{",
   macro: (dream, { reader }) => {
     const items = reader(dream, "}");
-    return new Form({
+    return new CallForm({
       location: items.location,
-      elements: ["object", ",", ...items.toArray()],
+      elements: ["object", ...items.toArray()],
     });
   },
 };

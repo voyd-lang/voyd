@@ -1,19 +1,21 @@
 import { FastShiftArray } from "@lib/fast-shift-array.js";
 import { Expr } from "./expr.js";
 import { is, SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
-import { Atom } from "./atom.js";
+import { IdentifierAtom } from "./atom.js";
 
 export type FormOpts = {
   location?: SourceLocation;
-  elements?: FormElementInit;
+  elements?: FormElementInitVal;
 };
 
-export type FormElementInit = (Expr | string | FormElementInit)[];
+export type FormElementInitVal = (Expr | string | FormElementInitVal)[];
+export type FormInit = FormOpts | FormElementInitVal;
 
 export class Form extends Syntax {
+  readonly syntaxType: string = "form";
   #elements = new FastShiftArray<Expr>();
 
-  constructor(opts: FormOpts | FormElementInit = []) {
+  constructor(opts: FormInit = []) {
     if (Array.isArray(opts)) {
       super();
       this.push(...opts);
@@ -24,15 +26,23 @@ export class Form extends Syntax {
     this.push(...(opts.elements ?? []));
   }
 
+  get length() {
+    return this.#elements.length;
+  }
+
+  get first() {
+    return this.#elements.at(0);
+  }
+
   get last() {
     return this.#elements.at(-1);
   }
 
-  private push(...elements: FormElementInit) {
+  push(...elements: FormElementInitVal) {
     this.#elements.push(
       ...elements.map((e) =>
         typeof e === "string"
-          ? new Atom(e)
+          ? new IdentifierAtom(e)
           : e instanceof Array
           ? new Form(e)
           : e
@@ -40,20 +50,18 @@ export class Form extends Syntax {
     );
   }
 
-  calls(name: Atom | string): boolean {
-    const first = this.#elements.at(0);
-    if (!is(first, Atom)) return false;
-    return typeof name === "string"
-      ? first.value === name
-      : name.value === first.value;
-  }
-
   at(index: number): Expr | undefined {
     return this.#elements.at(index);
   }
 
-  clone(): Form {
-    return new Form({
+  private get ctor(): new (opts: FormOpts | FormElementInitVal) => this {
+    return this.constructor as new (
+      opts: FormOpts | FormElementInitVal
+    ) => this;
+  }
+
+  clone(): this {
+    return new this.ctor({
       location: this.location?.clone(),
       elements: this.#elements.toArray().map((e) => e.clone()),
     });
@@ -69,10 +77,42 @@ export class Form extends Syntax {
 
   toVerboseJSON(): VerboseJSON {
     return {
-      type: "form",
+      type: this.syntaxType,
+      id: this.syntaxId,
       location: this.location?.toJSON(),
-      attributes: this.attributes,
       elements: this.#elements.toArray().map((e) => e.toVerboseJSON()),
     };
   }
+}
+
+export class CallForm extends Form {
+  readonly syntaxType = "call";
+
+  calls(name: IdentifierAtom | string): boolean {
+    const first = this.at(0);
+    if (!is(first, IdentifierAtom)) return false;
+    return typeof name === "string"
+      ? first.value === name
+      : name.value === first.value;
+  }
+}
+
+export class ParenForm extends Form {
+  readonly syntaxType = "paren";
+}
+
+export class TupleForm extends Form {
+  readonly syntaxType = "tuple";
+}
+
+export class ArrayLiteralForm extends Form {
+  readonly syntaxType = "array-literal";
+}
+
+export class LabelForm extends Form {
+  readonly syntaxType = "label";
+}
+
+export class ObjectLiteralForm extends Form {
+  readonly syntaxType = "object-literal";
 }

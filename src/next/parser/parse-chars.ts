@@ -12,9 +12,10 @@ export type ParseCharsOpts = {
 export const parseChars = (
   file: CharStream,
   opts: ParseCharsOpts = {}
-): Expr => {
+): Form => {
   const lexer = new Lexer();
-  const form = new Form({ location: file.currentSourceLocation() });
+  const location = file.currentSourceLocation();
+  const elements: Expr[] = [];
 
   while (file.hasCharacters) {
     const token = lexer.tokenize(file);
@@ -23,21 +24,25 @@ export const parseChars = (
       break;
     }
 
-    if (processWithReaderMacro(token, file, form)) {
-      continue;
-    }
+    const result = processWithReaderMacro(token, file, elements.at(-1));
+    if (result) elements.push(result);
   }
 
-  form?.setEndLocationToStartOf(file.currentSourceLocation());
+  location.setEndToStartOf(file.currentSourceLocation());
+  const form = new Form({ location, elements });
   return opts.nested ? form : new Form(["ast", form]);
 };
 
 /** Returns true if token was matched with and processed by a macro  */
-const processWithReaderMacro = (token: Token, file: CharStream, form: Form) => {
-  const readerMacro = getReaderMacroForToken(token, form.last, file.next);
+const processWithReaderMacro = (
+  token: Token,
+  file: CharStream,
+  last?: Expr
+) => {
+  const readerMacro = getReaderMacroForToken(token, last, file.next);
   if (!readerMacro) return undefined;
 
-  const result = readerMacro(file, {
+  return readerMacro(file, {
     token,
     reader: (file, terminator) =>
       parseChars(file, {
@@ -45,7 +50,4 @@ const processWithReaderMacro = (token: Token, file: CharStream, form: Form) => {
         terminator,
       }),
   });
-
-  if (result) form.push(result);
-  return true;
 };

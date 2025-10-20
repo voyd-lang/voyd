@@ -1,6 +1,7 @@
-import { List } from "../../../syntax-objects/list.js";
+import { WhitespaceAtom } from "../../ast/atom.js";
+import { is } from "../../ast/index.js";
 import { Lexer } from "../../lexer.js";
-import { expandSyntaxMacros } from "../../syntax-macros/index.js";
+// import { expandSyntaxMacros } from "../../syntax-macros/index.js";
 import { ReaderMacro } from "../types.js";
 import { HTMLParser } from "./html-parser.js";
 
@@ -12,7 +13,7 @@ export const htmlMacro: ReaderMacro = {
   match: (t, prev, nextChar) => {
     return (
       t.value === "<" &&
-      !!prev?.isWhitespace() &&
+      !!is(prev, WhitespaceAtom) &&
       !!nextChar &&
       TAG_START.test(nextChar)
     );
@@ -22,7 +23,8 @@ export const htmlMacro: ReaderMacro = {
       onUnescapedCurlyBrace: () => {
         file.consumeChar();
         const list = reader(file, "}");
-        if (list) return expandSyntaxMacros(list);
+        // if (list) return expandSyntaxMacros(list);
+        return list;
       },
     });
     const start = new Lexer().tokenize(file);

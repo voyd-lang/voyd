@@ -1,6 +1,20 @@
-import { Expr, Form } from "../../ast/index.js";
+import {
+  ArrayLiteralForm,
+  CallForm,
+  LabelForm,
+  ObjectLiteralForm,
+} from "../../ast/form.js";
+import { Expr, Form, is } from "../../ast/index.js";
+import {
+  arrayLiteral,
+  call,
+  identifier,
+  label,
+  objectLiteral,
+  string,
+  tuple,
+} from "../../ast/initializers.js";
 import { CharStream } from "../../char-stream.js";
-import { makeString } from "../string.js";
 
 type ParseOptions = {
   onUnescapedCurlyBrace: (stream: CharStream) => Expr | undefined;
@@ -55,13 +69,10 @@ export class HTMLParser {
 
     // Component: translate to function call with props object and children
     if (isComponent) {
-      const props = propsOrAttrs as ObjectLiteral;
-      if (!selfClosing) {
+      const props = propsOrAttrs;
+      if (!selfClosing && is(props, ObjectLiteralForm)) {
         const children = this.parseChildren(tagName);
-        if (children.sliceAsArray(1).length > 0) {
-          props.fields.push({ name: "children", initializer: children });
-          reparent(children, props);
-        }
+        props.push(label("children", children));
       }
 
       // Namespaced component: e.g., UI::Card or UI::Elements::Card
@@ -69,36 +80,26 @@ export class HTMLParser {
         const parts = tagName.split("::").filter(Boolean);
         const last = parts.pop()!;
         const left = buildModulePathLeft(parts);
-        const inner = new Call({
-          location: this.stream.currentSourceLocation(),
-          fnName: Identifier.from(last),
-          args: new List({ value: [props] }),
-        });
-        return new Call({
-          location: this.stream.currentSourceLocation(),
-          fnName: Identifier.from("::"),
-          args: new List({ value: [left, inner] }),
-        });
+        const inner = call(last, props).setLocation(
+          this.stream.currentSourceLocation()
+        );
+        return call("::", left, inner).setLocation(
+          this.stream.currentSourceLocation()
+        );
       }
 
-      return new Call({
-        location: this.stream.currentSourceLocation(),
-        fnName: Identifier.from(tagName),
-        args: new List({ value: [props] }),
-      });
+      return call(tagName, props).setLocation(
+        this.stream.currentSourceLocation()
+      );
     }
 
     // Built-in element: create_element("div", [(k, v), ...], [...])
-    const nameExpr = makeString(tagName);
-    const attributes = propsOrAttrs as Form;
-    const children = selfClosing
-      ? arrayLiteral([])
-      : this.parseChildren(tagName);
-    return new Call({
-      location: this.stream.currentSourceLocation(),
-      fnName: Identifier.from("create_element"),
-      args: new List({ value: [nameExpr, attributes, children] }),
-    });
+    const nameExpr = string(tagName);
+    const attributes = propsOrAttrs;
+    const children = selfClosing ? arrayLiteral() : this.parseChildren(tagName);
+    return call("create_element", nameExpr, attributes, children).setLocation(
+      this.stream.currentSourceLocation()
+    );
   }
 
   private parseTagName(): string {
@@ -109,7 +110,7 @@ export class HTMLParser {
     return tagName;
   }
 
-  private parseAttributes(): List {
+  private parseAttributes() {
     // Attributes: Array<(String, String)> represented as array-literal of tuple-literals
     const items: Expr[] = [];
     while (this.stream.next !== ">" && this.stream.next !== "/") {
@@ -119,10 +120,10 @@ export class HTMLParser {
       if (this.stream.next === "=") {
         this.stream.consumeChar(); // Consume '='
         const value = this.parseAttributeValue();
-        items.push(tuple(makeString(name), value));
+        items.push(tuple(string(name), value));
       } else {
         // Boolean attribute -> "true" string
-        items.push(tuple(makeString(name), makeString("true")));
+        items.push(tuple(string(name), string("true")));
       }
       this.consumeWhitespace();
     }
@@ -131,8 +132,8 @@ export class HTMLParser {
   }
 
   // Parse attributes into an object-literal for component calls
-  private parseComponentPropsObject(): ObjectLiteral {
-    const fields: { name: string; initializer: Expr }[] = [];
+  private parseComponentPropsObject() {
+    const fields: LabelForm[] = [];
     while (this.stream.next !== ">" && this.stream.next !== "/") {
       this.consumeWhitespace();
       const name = this.parseAttributeName();
@@ -144,16 +145,15 @@ export class HTMLParser {
         value = this.parseAttributeValue();
       } else {
         // Boolean attribute -> "true" string (consistent with HTML attributes)
-        value = makeString("true");
+        value = string("true");
       }
 
-      fields.push({ name, initializer: value });
+      fields.push(label(name, value));
       this.consumeWhitespace();
     }
-    return new ObjectLiteral({
-      ...this.stream.currentSourceLocation(),
-      fields,
-    });
+    return objectLiteral(...fields).setLocation(
+      this.stream.currentSourceLocation()
+    );
   }
 
   private parseAttributeName(): string {
@@ -189,10 +189,10 @@ export class HTMLParser {
       text += this.stream.consumeChar();
     }
     this.stream.consumeChar(); // Consume the closing quote
-    return makeString(text);
+    return string(text);
   }
 
-  private parseChildren(tagName: string): List {
+  private parseChildren(tagName: string) {
     const lower = tagName.toLowerCase();
     const preserve = lower === "pre" || lower === "textarea";
 
@@ -215,9 +215,8 @@ export class HTMLParser {
       const node = this.parseNode();
       if (node) {
         // Flatten text-array nodes
-        if (node.isList() && (node as List).calls("array")) {
-          const arr = node as List;
-          arr.sliceAsArray(1).forEach((e) => children.push(e));
+        if (is(node, ArrayLiteralForm)) {
+          node.toArray().forEach((e) => children.push(e));
         } else {
           children.push(node);
         }
@@ -250,14 +249,14 @@ export class HTMLParser {
   }
 
   private parseText(): Expr {
-    const node = array();
-    node.location = this.stream.currentSourceLocation();
+    const node: Expr[] = [];
+    const location = this.stream.currentSourceLocation();
 
     let text = "";
     while (this.stream.hasCharacters && this.stream.next !== "<") {
       if (this.stream.next === "{") {
         const normalized = this.normalizeText(text);
-        if (normalized) node.push(makeString(normalized));
+        if (normalized) node.push(string(normalized));
         text = "";
         const expr = this.options.onUnescapedCurlyBrace(this.stream);
         if (expr) node.push(unwrapInlineExpr(expr));
@@ -268,10 +267,10 @@ export class HTMLParser {
     }
 
     const normalized = this.normalizeText(text);
-    if (normalized) node.push(makeString(normalized));
-    node.location.endColumn = this.stream.column;
-    node.location.endIndex = this.stream.position;
-    return node;
+    if (normalized) node.push(string(normalized));
+    location.setEndToStartOf(this.stream.currentSourceLocation());
+
+    return arrayLiteral(...node).setLocation(location);
   }
 
   private consumeWhitespace(): void {
@@ -295,24 +294,11 @@ export class HTMLParser {
   }
 }
 
-// Helpers
-const array = () => new List({}).insert("array");
-const arrayLiteral = (items: Expr[]) => {
-  // Build array literal in the same shape the array literal reader macro
-  // eventually expects, but omit the comma placeholder since initArrayLiteral
-  // slices past the head label anyway.
-  const arr = new List({ value: ["array", ...items] });
-  arr.setAttribute("array-literal", true);
-  return arr;
-};
-const tuple = (a: Expr, b: Expr) => new List({ value: ["tuple", a, b] });
-
 const unwrapInlineExpr = (expr: Expr): Expr => {
-  if (expr.isList()) {
-    const list = expr as List;
-    if (list.length === 1 && !list.hasAttribute("isCall")) {
-      const only = list.at(0);
-      if (only && !only.isList()) return only;
+  if (is(expr, Form)) {
+    if (expr.length === 1 && !is(expr, CallForm)) {
+      const only = expr.at(0);
+      if (only && !is(only, Form)) return only;
     }
   }
   return expr;
@@ -320,21 +306,10 @@ const unwrapInlineExpr = (expr: Expr): Expr => {
 
 // Build nested left side for a module path (e.g., ["::", ["::", A, B], C])
 const buildModulePathLeft = (segments: string[]) => {
-  if (segments.length === 0) return Identifier.from("");
-  let left: Expr = Identifier.from(segments[0]!);
+  if (segments.length === 0) return identifier("");
+  let left: Expr = identifier(segments[0]!);
   for (let i = 1; i < segments.length; i++) {
-    left = new List({ value: ["::", left, Identifier.from(segments[i]!)] });
+    left = call("::", left, identifier(segments[i]!));
   }
   return left;
-};
-
-const reparent = (expr: Expr, parent: Expr): void => {
-  expr.parent = parent;
-  if (expr.isList()) {
-    expr.children.forEach((c) => reparent(c, expr));
-    return;
-  }
-  if (expr.isObjectLiteral()) {
-    expr.fields.forEach(({ initializer }) => reparent(initializer, expr));
-  }
 };

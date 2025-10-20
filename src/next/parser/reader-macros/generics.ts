@@ -1,4 +1,4 @@
-import { Form } from "../ast/form.js";
+import { CallForm } from "../ast/form.js";
 import { isIdentifier } from "../grammar.js";
 import { ReaderMacro } from "./types.js";
 
@@ -8,9 +8,9 @@ export const genericsMacro: ReaderMacro = {
   },
   macro: (file, { reader }) => {
     const items = reader(file, ">");
-    return new Form({
+    return new CallForm({
       location: items.location,
-      elements: ["generics", ",", ...items.toArray()],
+      elements: ["generics", ...items.toArray()],
     });
   },
 };

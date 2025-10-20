@@ -1,4 +1,3 @@
-import { Atom } from "./ast/atom.js";
 import { SourceLocation } from "./ast/syntax.js";
 
 const WHITESPACE = /^\s+$/;
@@ -43,12 +42,5 @@ export class Token {
 
   setEndLocationToStartOf(location?: SourceLocation) {
     this.location.setEndToStartOf(location);
-  }
-
-  toAtom() {
-    return new Atom({
-      location: this.location,
-      value: this.value,
-    });
   }
 }
