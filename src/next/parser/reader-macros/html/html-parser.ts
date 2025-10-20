@@ -69,11 +69,10 @@ export class HTMLParser {
 
     // Component: translate to function call with props object and children
     if (isComponent) {
-      const props = propsOrAttrs;
-      if (!selfClosing && is(props, ObjectLiteralForm)) {
-        const children = this.parseChildren(tagName);
-        props.push(label("children", children));
-      }
+      const props =
+        !selfClosing && is(propsOrAttrs, ObjectLiteralForm)
+          ? this.withChildrenProp(propsOrAttrs, tagName)
+          : propsOrAttrs;
 
       // Namespaced component: e.g., UI::Card or UI::Elements::Card
       if (tagName.includes("::")) {
@@ -291,6 +290,14 @@ export class HTMLParser {
     const collapsed = text.replace(/\s+/g, " ");
     // Keep as-is (including leading/trailing space) but drop if empty
     return collapsed.length > 0 ? collapsed : "";
+  }
+
+  private withChildrenProp(props: ObjectLiteralForm, tagName: string) {
+    const children = this.parseChildren(tagName);
+    const fields = props.toArray() as LabelForm[];
+    const nextProps = objectLiteral(...fields, label("children", children));
+    const location = props.location?.clone();
+    return location ? nextProps.setLocation(location) : nextProps;
   }
 }
 

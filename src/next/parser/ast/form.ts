@@ -38,7 +38,7 @@ export class Form extends Syntax {
     return this.#elements.at(-1);
   }
 
-  push(...elements: FormElementInitVal) {
+  private push(...elements: FormElementInitVal) {
     this.#elements.push(
       ...elements.map((e) =>
         typeof e === "string"

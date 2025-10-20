@@ -24,7 +24,9 @@ export const stringMacro: ReaderMacro = {
     token.setEndLocationToStartOf(file.currentSourceLocation());
 
     if (startChar === "'") {
-      return identifier(token.value).setLocation(token.location);
+      return identifier(token.value)
+        .setLocation(token.location)
+        .setIsQuoted(true);
     }
 
     return string(token.value).setLocation(token.location);

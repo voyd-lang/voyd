@@ -7,13 +7,14 @@ import { Token } from "./token.js";
 export type ParseCharsOpts = {
   nested?: boolean;
   terminator?: string;
+  lexer?: Lexer;
 };
 
 export const parseChars = (
   file: CharStream,
   opts: ParseCharsOpts = {}
 ): Form => {
-  const lexer = new Lexer();
+  const lexer = opts.lexer ?? new Lexer();
   const location = file.currentSourceLocation();
   const elements: Expr[] = [];
 
@@ -24,7 +25,7 @@ export const parseChars = (
       break;
     }
 
-    const result = processWithReaderMacro(token, file, elements.at(-1));
+    const result = processWithReaderMacro(token, file, lexer, elements.at(-1));
     if (result) elements.push(result);
   }
 
@@ -37,6 +38,7 @@ export const parseChars = (
 const processWithReaderMacro = (
   token: Token,
   file: CharStream,
+  lexer: Lexer,
   last?: Expr
 ) => {
   const readerMacro = getReaderMacroForToken(token, last, file.next);
@@ -48,6 +50,7 @@ const processWithReaderMacro = (
       parseChars(file, {
         nested: true,
         terminator,
+        lexer,
       }),
   });
 };
