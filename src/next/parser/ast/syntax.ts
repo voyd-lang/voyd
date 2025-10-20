@@ -11,7 +11,7 @@ export abstract class Syntax {
   abstract toJSON(): unknown;
   abstract toVerboseJSON(): VerboseJSON;
 
-  setLocation(loc: SourceLocation) {
+  setLocation(loc?: SourceLocation) {
     this.location = loc;
     return this;
   }

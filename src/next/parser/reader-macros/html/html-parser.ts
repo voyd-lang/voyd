@@ -1,11 +1,9 @@
+import { Expr, Form, is } from "../../ast/index.js";
 import {
   ArrayLiteralForm,
   CallForm,
   LabelForm,
   ObjectLiteralForm,
-} from "../../ast/form.js";
-import { Expr, Form, is } from "../../ast/index.js";
-import {
   arrayLiteral,
   call,
   identifier,
@@ -13,7 +11,7 @@ import {
   objectLiteral,
   string,
   tuple,
-} from "../../ast/initializers.js";
+} from "../../ast/index.js";
 import { CharStream } from "../../char-stream.js";
 
 type ParseOptions = {

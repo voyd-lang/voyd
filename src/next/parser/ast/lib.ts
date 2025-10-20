@@ -9,6 +9,7 @@ import {
   ParenForm,
   TupleForm,
 } from "./form.js";
+import { is } from "./index.js";
 
 export const call = (
   fn: IdentifierAtom | string,
@@ -47,3 +48,6 @@ export const string = (value: string) => {
     )
   );
 };
+
+export const idIs = (id?: unknown, value: string) =>
+  is(id, IdentifierAtom) && id.value === value;
