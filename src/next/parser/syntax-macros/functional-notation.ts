@@ -1,20 +1,23 @@
-import { CallForm, Form, FormElementInitVal, ParenForm } from "../ast/form.js";
-import {
-  call,
-  IdentifierAtom,
-  idIs,
-  is,
-  tuple,
-  WhitespaceAtom,
-} from "../ast/index.js";
+import { CallForm, Form, ParenForm } from "../ast/form.js";
+import { Expr } from "../ast/expr.js";
+import { idIs, is, tuple, WhitespaceAtom } from "../ast/index.js";
+import { SourceLocation } from "../ast/syntax.js";
 import { isOp } from "../grammar.js";
 
 // Simplified and optimized version of functional notation parsing.
 // Uses a single pass with a basic for-loop to minimize overhead.
 
-export const functionalNotation = (list: Form): Form => {
+type FunctionalNotationOptions = {
+  allowParenTuple?: boolean;
+};
+
+export const functionalNotation = (
+  list: Form,
+  options: FunctionalNotationOptions = {}
+): Form => {
+  const allowParenTuple = options.allowParenTuple ?? true;
   const array = list.toArray();
-  const result: FormElementInitVal = [];
+  const result: Expr[] = [];
 
   let skip = 0;
   let isTuple = false;
@@ -51,43 +54,110 @@ export const functionalNotation = (list: Form): Form => {
           skip = 1;
         }
       } else {
-        const call = processParamList(expr as IdentifierAtom, nextExpr); // TODO: IdentifierAtom assertion
+        const call = processParamList(expr, nextExpr);
         result.push(call);
         skip = 1;
       }
       continue;
     }
 
-    if (is(list, ParenForm) && idIs(expr, ",")) {
+    if (allowParenTuple && is(list, ParenForm) && idIs(expr, ",")) {
       isTuple = true;
     }
 
     result.push(expr);
   }
 
-  if (isTuple) {
-    return tuple(...result).setLocation(list.location);
+  if (allowParenTuple && isTuple) {
+    const tupleElements = result.filter(
+      (expr) => !idIs(expr, ",") && !is(expr, WhitespaceAtom)
+    );
+    return tuple(...tupleElements).setLocation(list.location);
   }
 
-  return new List({ ...list.metadata, value: result });
+  return recreateForm(list, result);
 };
 
 const processGenerics = (
   expr: Expr,
   generics: CallForm,
-  params?: List
-): List => {
-  const list = params || new List([]);
-  list.insert(expr);
-  list.insert(",", 1);
-  list.setAttribute("tuple?", false);
-  const functional = functionalNotation(list);
-
-  functional.insert(functionalNotation(generics), 2);
-  functional.insert(",", 3);
-  return functional;
+  params?: Form
+): CallForm => {
+  const processedGenerics = functionalNotation(generics);
+  const args = params ? collectCallArguments(params) : [];
+  return createCall(expr, [processedGenerics, ...args], params, generics);
 };
 
-const processParamList = (expr: IdentifierAtom, params: Form): CallForm => {
-  return call(expr, ...functionalNotation(params).toArray());
+const processParamList = (expr: Expr, params: Form): CallForm => {
+  const args = collectCallArguments(params);
+  return createCall(expr, args, params);
+};
+
+const collectCallArguments = (params: Form): Expr[] => {
+  const argumentList = is(params, ParenForm)
+    ? new Form({
+        location: params.location?.clone(),
+        elements: params.toArray(),
+      })
+    : params;
+
+  const processed = functionalNotation(argumentList, {
+    allowParenTuple: false,
+  }).toArray();
+
+  return processed.filter(
+    (expr) => !idIs(expr, ",") && !is(expr, WhitespaceAtom)
+  );
+};
+
+const recreateForm = (list: Form, elements: Expr[]): Form => {
+  const Ctor = list.constructor as new (opts?: {
+    location?: SourceLocation;
+    elements?: Expr[];
+  }) => Form;
+
+  return new Ctor({
+    location: list.location?.clone(),
+    elements,
+  });
+};
+
+const createCall = (
+  callee: Expr,
+  tail: Expr[],
+  ...locationSources: (Expr | Form | undefined)[]
+): CallForm => {
+  const location = mergeLocations(callee, ...locationSources);
+  return new CallForm({
+    location,
+    elements: [callee, ...tail],
+  });
+};
+
+const mergeLocations = (
+  ...sources: (Expr | Form | undefined)[]
+): SourceLocation | undefined => {
+  const locations = sources
+    .map((source) => source?.location)
+    .filter((loc): loc is SourceLocation => !!loc);
+
+  if (locations.length === 0) return undefined;
+
+  const merged = locations[0].clone();
+
+  for (const location of locations.slice(1)) {
+    if (location.startIndex < merged.startIndex) {
+      merged.startIndex = location.startIndex;
+      merged.startColumn = location.startColumn;
+      merged.startLine = location.startLine;
+    }
+
+    if (location.endIndex > merged.endIndex) {
+      merged.endIndex = location.endIndex;
+      merged.endColumn = location.endColumn;
+      merged.endLine = location.endLine;
+    }
+  }
+
+  return merged;
 };
