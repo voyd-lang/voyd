@@ -33,7 +33,7 @@ const elideParens = (list: Expr[], startIndentLevel?: number): Expr => {
   const indentLevel = startIndentLevel ?? nextExprIndentLevel(list);
 
   const pushChildBlock = () => {
-    const children: Expr[] = [];
+    const children: Expr[] = [new IdentifierAtom("block")];
 
     while (nextExprIndentLevel(list) > indentLevel) {
       const child = elideParens(list, indentLevel + 1);
@@ -44,10 +44,9 @@ const elideParens = (list: Expr[], startIndentLevel?: number): Expr => {
         is(child, Form) &&
         isContinuationOp(child.first)
       ) {
-        const ca = child.toArray();
-        transformed.push(ca.shift()!);
-        if (child.length === 1) transformed.push(ca.shift()!);
-        else transformed.push(child);
+        transformed.push(child.first);
+        if (child.length === 2 && child.at(1)) transformed.push(child.at(1)!);
+        else transformed.push(child.slice(1));
         return;
       }
 
@@ -161,7 +160,7 @@ const nextIsComma = (list: Expr[]) => {
 
 const isNamedArg = (v: Form) => {
   // Second value should be an identifier whose value is a colon
-  if (!idIs(v.first, ":")) {
+  if (!idIs(v.at(1), ":")) {
     return false;
   }
 
