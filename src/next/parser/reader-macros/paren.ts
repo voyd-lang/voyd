@@ -1,4 +1,4 @@
-import { ParenForm } from "../ast/form.js";
+import { paren } from "./lib/init-helpers.js";
 import { ReaderMacro } from "./types.js";
 
 export const parenReader: ReaderMacro = {
@@ -6,7 +6,7 @@ export const parenReader: ReaderMacro = {
   macro: (file, { token, reader }) => {
     if (token.value === "(") {
       const v = reader(file, ")");
-      return new ParenForm({ location: v.location, elements: v.toArray() });
+      return paren(...v.toArray());
     }
 
     return undefined; // discard closing paren

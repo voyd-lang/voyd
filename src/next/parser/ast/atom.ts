@@ -62,6 +62,11 @@ export class IdentifierAtom extends Atom {
   }
 }
 
+/** Represents an identifier created by a macro or the compiler */
+export class InternalIdentifierAtom extends Atom {
+  readonly syntaxType = "identifier";
+}
+
 export class BoolAtom extends Atom {
   readonly syntaxType = "bool";
 }
@@ -96,4 +101,16 @@ export class FloatAtom extends Atom {
 
 export class WhitespaceAtom extends Atom {
   readonly syntaxType = "whitespace";
+
+  get isNewline() {
+    return this.value === "\n";
+  }
+
+  get isSpace() {
+    return !this.isNewline && !this.isIndent;
+  }
+
+  get isIndent() {
+    return this.value === "  ";
+  }
 }

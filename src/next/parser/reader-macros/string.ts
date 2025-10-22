@@ -1,5 +1,5 @@
 import { ReaderMacro } from "./types.js";
-import { identifier, string } from "../ast/lib.js";
+import { identifier, string } from "./lib/init-helpers.js";
 
 export const stringMacro: ReaderMacro = {
   match: (t) => t.value === '"' || t.value === "'",

@@ -1,15 +1,15 @@
 import { Atom, IdentifierAtom } from "./ast/atom.js";
 import { is, Syntax } from "./ast/syntax.js";
 
-export const isIdentifier = (op?: Syntax): op is IdentifierAtom =>
+export const isIdentifier = (op?: unknown): op is IdentifierAtom =>
   is(op, IdentifierAtom);
 
 export const identifierIs = (
-  op: Syntax | undefined,
+  op: unknown | undefined,
   value: string
 ): op is Atom => isIdentifier(op) && op.value === value;
 
-export const isOp = (op?: Syntax): boolean => isInfixOp(op) || isPrefixOp(op);
+export const isOp = (op?: unknown): boolean => isInfixOp(op) || isPrefixOp(op);
 
 /** Key is the operator, value is its precedence */
 export type OpMap = Map<string, number>;
@@ -55,10 +55,10 @@ export const infixOps: OpMap = new Map([
   ["has_trait", 0],
 ]);
 
-const isUnquotedIdentifier = (op?: Syntax): op is Atom =>
+const isUnquotedIdentifier = (op?: unknown): op is Atom =>
   isIdentifier(op) && !op.isQuoted;
 
-export const isInfixOp = (op?: Syntax): op is Atom =>
+export const isInfixOp = (op?: unknown): op is Atom =>
   isUnquotedIdentifier(op) && infixOps.has(op.value);
 
 export const prefixOps: OpMap = new Map([
@@ -72,12 +72,12 @@ export const prefixOps: OpMap = new Map([
   ["...", 5],
 ]);
 
-export const isPrefixOp = (op?: Syntax): op is Atom =>
+export const isPrefixOp = (op?: unknown): op is Atom =>
   isUnquotedIdentifier(op) && prefixOps.has(op.value);
 
 export const greedyOps = new Set(["=>", "=", "<|", ";", "|"]);
 
-export const isGreedyOp = (op?: Syntax): op is Atom =>
+export const isGreedyOp = (op?: unknown): op is Atom =>
   isUnquotedIdentifier(op) && greedyOps.has(op.value);
 
-export const isContinuationOp = (op?: Syntax) => isInfixOp(op);
+export const isContinuationOp = (op?: unknown) => isInfixOp(op);

@@ -1,5 +1,5 @@
-import { CallForm } from "../ast/form.js";
 import { isIdentifier } from "../grammar.js";
+import { call } from "./lib/init-helpers.js";
 import { ReaderMacro } from "./types.js";
 
 export const genericsMacro: ReaderMacro = {
@@ -8,9 +8,6 @@ export const genericsMacro: ReaderMacro = {
   },
   macro: (file, { reader }) => {
     const items = reader(file, ">");
-    return new CallForm({
-      location: items.location,
-      elements: ["generics", ...items.toArray()],
-    });
+    return call("generics", ...items.toArray());
   },
 };

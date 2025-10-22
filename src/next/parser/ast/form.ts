@@ -1,15 +1,16 @@
 import { FastShiftArray } from "@lib/fast-shift-array.js";
 import { Expr } from "./expr.js";
 import { is, SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
-import { IdentifierAtom } from "./atom.js";
+import { IdentifierAtom, InternalIdentifierAtom } from "./atom.js";
 
 export type FormOpts = {
   location?: SourceLocation;
-  elements?: FormElementInitVal;
+  elements?: FormInitElements;
 };
 
-export type FormElementInitVal = (Expr | string | FormElementInitVal)[];
-export type FormInit = FormOpts | FormElementInitVal;
+export type FormInitElements = FormInitElement[];
+export type FormInitElement = Expr | string | FormInitElement[];
+export type FormInit = FormOpts | FormInitElements;
 
 export class Form extends Syntax {
   readonly syntaxType: string = "form";
@@ -38,7 +39,7 @@ export class Form extends Syntax {
     return this.#elements.at(-1);
   }
 
-  private push(...elements: FormElementInitVal) {
+  private push(...elements: FormInitElements) {
     this.#elements.push(
       ...elements.map((e) =>
         typeof e === "string"
@@ -50,14 +51,28 @@ export class Form extends Syntax {
     );
   }
 
+  calls(name: IdentifierAtom | string): boolean {
+    const first = this.at(0);
+    if (!is(first, IdentifierAtom)) return false;
+    return typeof name === "string"
+      ? first.value === name
+      : name.value === first.value;
+  }
+
+  callsInternal(name: InternalIdentifierAtom | string): boolean {
+    const first = this.at(0);
+    if (!is(first, InternalIdentifierAtom)) return false;
+    return typeof name === "string"
+      ? first.value === name
+      : name.value === first.value;
+  }
+
   at(index: number): Expr | undefined {
     return this.#elements.at(index);
   }
 
-  private get ctor(): new (opts: FormOpts | FormElementInitVal) => this {
-    return this.constructor as new (
-      opts: FormOpts | FormElementInitVal
-    ) => this;
+  private get ctor(): new (opts: FormOpts | FormInitElement) => this {
+    return this.constructor as new (opts: FormOpts | FormInitElement) => this;
   }
 
   clone(): this {
@@ -65,6 +80,10 @@ export class Form extends Syntax {
       location: this.location?.clone(),
       elements: this.#elements.toArray().map((e) => e.clone()),
     });
+  }
+
+  slice(start?: number, end?: number): Form {
+    return new Form(this.toArray().slice(start, end));
   }
 
   toArray(): Expr[] {
@@ -83,36 +102,4 @@ export class Form extends Syntax {
       elements: this.#elements.toArray().map((e) => e.toVerboseJSON()),
     };
   }
-}
-
-export class CallForm extends Form {
-  readonly syntaxType = "call";
-
-  calls(name: IdentifierAtom | string): boolean {
-    const first = this.at(0);
-    if (!is(first, IdentifierAtom)) return false;
-    return typeof name === "string"
-      ? first.value === name
-      : name.value === first.value;
-  }
-}
-
-export class ParenForm extends Form {
-  readonly syntaxType = "paren";
-}
-
-export class TupleForm extends Form {
-  readonly syntaxType = "tuple";
-}
-
-export class ArrayLiteralForm extends Form {
-  readonly syntaxType = "array-literal";
-}
-
-export class LabelForm extends Form {
-  readonly syntaxType = "label";
-}
-
-export class ObjectLiteralForm extends Form {
-  readonly syntaxType = "object-literal";
 }
