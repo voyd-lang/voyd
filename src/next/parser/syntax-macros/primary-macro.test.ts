@@ -16,10 +16,10 @@ const expand = (code: string) => {
 
 describe("primary syntax macro", () => {
   it("respects operator precedence", () => {
-    const ast = expand("pub fn main() { 1 + 2 * 3 }");
+    const ast = expand("pub fn main() 1 + 2 * 3");
     expect(ast).toEqual([
       "ast",
-      ["pub", "fn", ["main"], ["object_literal", ["+", "1", ["*", "2", "3"]]]],
+      ["pub", "fn", ["main"], ["+", "1", ["*", "2", "3"]]],
     ]);
   });
 
