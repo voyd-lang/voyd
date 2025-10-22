@@ -37,7 +37,7 @@ export const functionalNotation = (form: Form): Form => {
     const nextExpr = array[index + 1];
 
     if (nextExpr && is(nextExpr, Form) && !(isOp(expr) || idIs(expr, ","))) {
-      if (nextExpr.calls("generics")) {
+      if (nextExpr.callsInternal("generics")) {
         const generics = nextExpr;
         const nextNextExpr = array[index + 2];
         if (nextNextExpr && is(nextNextExpr, Form)) {
@@ -63,20 +63,40 @@ export const functionalNotation = (form: Form): Form => {
   }
 
   if (isTuple) {
-    return new Form({ location: form.location, elements: ["tuple", ","] });
+    return new Form({
+      location: form.location,
+      elements: ["tuple", ",", ...result],
+    });
   }
 
   return new Form({ location: form.location, elements: result });
 };
 
 const processGenerics = (expr: Expr, generics: Form, params?: Form): Form => {
-  const list = new Form([expr, ",", (params || new Form([])).toArray()]);
+  const normalizedParams = normalizeParams(params);
+  const location = params?.location ?? generics.location ?? expr.location;
+  const list = new Form({
+    elements: [expr, ",", ...(normalizedParams?.toArray() ?? [])],
+    location,
+  });
   const functional = functionalNotation(list).toArray();
-  functional.splice((functionalNotation(generics), 2));
-  functional.splice((new IdentifierAtom(","), 3));
-  return new Form(functional);
+  functional.splice(2, 0, functionalNotation(generics));
+  functional.splice(3, 0, new IdentifierAtom(","));
+  return new Form({ elements: functional, location });
 };
 
 const processParamList = (expr: Expr, params: Form): Form => {
-  return functionalNotation(new Form([expr, ",", ...params.toArray()]));
+  const normalizedParams = normalizeParams(params);
+  const location = params.location ?? normalizedParams?.location ?? expr.location;
+  return functionalNotation(
+    new Form({
+      elements: [expr, ",", ...(normalizedParams?.toArray() ?? [])],
+      location,
+    })
+  );
+};
+
+const normalizeParams = (params?: Form): Form | undefined => {
+  if (!params) return undefined;
+  return params.callsInternal("paren") ? (params.at(1) as Form) : params;
 };
