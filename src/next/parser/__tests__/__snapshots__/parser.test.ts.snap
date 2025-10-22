@@ -456,9 +456,9 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
           "i32",
         ],
         [
-          ":",
           "object_literal",
           [
+            ":",
             "value",
             [
               "+",
@@ -498,10 +498,12 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
           "Some",
           [
             "generics",
-            "Optional",
             [
-              "generics",
-              "i32",
+              "Optional",
+              [
+                "generics",
+                "i32",
+              ],
             ],
           ],
         ],
@@ -569,10 +571,12 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
           "Some",
           [
             "generics",
-            "Optional",
             [
-              "generics",
-              "i32",
+              "Optional",
+              [
+                "generics",
+                "i32",
+              ],
             ],
           ],
         ],
@@ -754,23 +758,27 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                       "new_string",
                       [
                         "object_literal",
-                        "label",
-                        "from",
                         [
-                          "FixedArray",
+                          "label",
                           [
-                            "generics",
-                            "i32",
-                            "72",
-                            "101",
-                            "121",
-                            "32",
-                            "116",
-                            "104",
-                            "101",
-                            "114",
-                            "101",
-                            "33",
+                            "from",
+                            [
+                              "FixedArray",
+                              [
+                                "generics",
+                                "i32",
+                                "72",
+                                "101",
+                                "121",
+                                "32",
+                                "116",
+                                "104",
+                                "101",
+                                "114",
+                                "101",
+                                "33",
+                              ],
+                            ],
                           ],
                         ],
                       ],
@@ -1014,131 +1022,151 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
               "new_string",
               [
                 "object_literal",
-                "label",
-                "from",
                 [
-                  "FixedArray",
+                  "label",
                   [
-                    "generics",
-                    "i32",
-                    "100",
-                    "105",
-                    "118",
-                  ],
-                ],
-              ],
-            ],
-            [
-              "array_literal",
-            ],
-            [
-              "array_literal",
-              [
-                "create_element",
-                [
-                  "new_string",
-                  [
-                    "object_literal",
-                    "label",
                     "from",
                     [
                       "FixedArray",
                       [
                         "generics",
                         "i32",
-                        "112",
+                        "100",
+                        "105",
+                        "118",
                       ],
                     ],
                   ],
                 ],
+              ],
+              [
+                "array_literal",
+              ],
+              [
+                "array_literal",
                 [
-                  "array_literal",
-                ],
-                [
-                  "array_literal",
+                  "create_element",
                   [
                     "new_string",
                     [
                       "object_literal",
-                      "label",
-                      "from",
                       [
-                        "FixedArray",
+                        "label",
                         [
-                          "generics",
-                          "i32",
-                          "72",
-                          "101",
-                          "108",
-                          "108",
-                          "111",
-                          "32",
-                          "116",
-                          "104",
-                          "101",
-                          "114",
-                          "101",
-                          "33",
-                          "33",
-                          "32",
+                          "from",
+                          [
+                            "FixedArray",
+                            [
+                              "generics",
+                              "i32",
+                              "112",
+                            ],
+                          ],
+                        ],
+                      ],
+                    ],
+                    [
+                      "array_literal",
+                    ],
+                    [
+                      "array_literal",
+                      [
+                        "new_string",
+                        [
+                          "object_literal",
+                          [
+                            "label",
+                            [
+                              "from",
+                              [
+                                "FixedArray",
+                                [
+                                  "generics",
+                                  "i32",
+                                  "72",
+                                  "101",
+                                  "108",
+                                  "108",
+                                  "111",
+                                  "32",
+                                  "116",
+                                  "104",
+                                  "101",
+                                  "114",
+                                  "101",
+                                  "33",
+                                  "33",
+                                  "32",
+                                ],
+                              ],
+                            ],
+                          ],
                         ],
                       ],
                     ],
                   ],
-                ],
-              ],
-              [
-                "create_element",
-                [
-                  "new_string",
                   [
-                    "object_literal",
-                    "label",
-                    "from",
+                    "create_element",
                     [
-                      "FixedArray",
+                      "new_string",
                       [
-                        "generics",
-                        "i32",
-                        "112",
-                      ],
-                    ],
-                  ],
-                ],
-                [
-                  "array_literal",
-                ],
-                [
-                  "array_literal",
-                  [
-                    "new_string",
-                    [
-                      "object_literal",
-                      "label",
-                      "from",
-                      [
-                        "FixedArray",
+                        "object_literal",
                         [
-                          "generics",
-                          "i32",
-                          "72",
-                          "111",
-                          "119",
-                          "32",
-                          "97",
-                          "114",
-                          "101",
-                          "32",
-                          "121",
-                          "111",
-                          "117",
-                          "32",
-                          "116",
-                          "111",
-                          "100",
-                          "97",
-                          "121",
-                          "32",
+                          "label",
+                          [
+                            "from",
+                            [
+                              "FixedArray",
+                              [
+                                "generics",
+                                "i32",
+                                "112",
+                              ],
+                            ],
+                          ],
+                        ],
+                      ],
+                      [
+                        "array_literal",
+                      ],
+                      [
+                        "array_literal",
+                        [
+                          "new_string",
+                          [
+                            "object_literal",
+                            [
+                              "label",
+                              [
+                                "from",
+                                [
+                                  "FixedArray",
+                                  [
+                                    "generics",
+                                    "i32",
+                                    "72",
+                                    "111",
+                                    "119",
+                                    "32",
+                                    "97",
+                                    "114",
+                                    "101",
+                                    "32",
+                                    "121",
+                                    "111",
+                                    "117",
+                                    "32",
+                                    "116",
+                                    "111",
+                                    "100",
+                                    "97",
+                                    "121",
+                                    "32",
+                                  ],
+                                ],
+                              ],
+                            ],
+                          ],
                         ],
                       ],
                     ],

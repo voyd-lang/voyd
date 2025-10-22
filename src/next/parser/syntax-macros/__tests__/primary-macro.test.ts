@@ -24,10 +24,15 @@ describe("primary syntax macro", () => {
   });
 
   it("parses method calls with arguments", () => {
-    const ast = expand("pub fn main() { foo.bar(x) }");
+    const ast = expand("pub fn main() foo.bar(x)");
+    expect(ast).toEqual(["ast", ["pub", "fn", ["main"], ["bar", "foo", "x"]]]);
+  });
+
+  it("parses tuple destructuring", () => {
+    const ast = expand("let (x, y) = (1, 2)");
     expect(ast).toEqual([
       "ast",
-      ["pub", "fn", ["main"], ["object_literal", ["bar", "foo", "x"]]],
+      ["let", ["=", ["tuple", "x", "y"], ["tuple", "1", "2"]]],
     ]);
   });
 

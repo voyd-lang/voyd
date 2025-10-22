@@ -22,10 +22,7 @@ const flattenElements = (form: Form): Expr[] => {
   if (form.length === 2) {
     const first = form.at(0);
     const second = form.at(1);
-    if (
-      is(first, InternalIdentifierAtom) &&
-      is(second, Form)
-    ) {
+    if (is(first, InternalIdentifierAtom) && is(second, Form)) {
       if (
         second.length === 2 &&
         is(second.at(0), InternalIdentifierAtom) &&
@@ -40,7 +37,31 @@ const flattenElements = (form: Form): Expr[] => {
         ];
       }
 
-      return [first!, ...second.toArray()];
+      const args: Expr[] = [];
+      const elements = second.toArray();
+      let group: Expr[] = [];
+
+      const pushGroup = () => {
+        if (!group.length) return;
+        args.push(
+          group.length === 1
+            ? group[0]!
+            : new Form({ elements: group, location: second.location })
+        );
+        group = [];
+      };
+
+      for (const element of elements) {
+        if (is(element, IdentifierAtom) && element.value === ",") {
+          pushGroup();
+          continue;
+        }
+        group.push(element);
+      }
+
+      pushGroup();
+
+      return [first!, ...args];
     }
   }
 
