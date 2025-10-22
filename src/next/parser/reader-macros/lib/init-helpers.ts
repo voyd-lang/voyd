@@ -25,7 +25,7 @@ export const arrayLiteral = (...args: FormInitElements) =>
   call("array_literal", ...args);
 
 export const objectLiteral = (...args: FormInitElements) =>
-  call("object_literal", args);
+  call("object_literal", ...args);
 
 export const label = (label: IdentifierAtom | string, value: Expr) =>
   call("label", label, value);

@@ -64,7 +64,7 @@ export class HTMLParser {
     // Component: translate to function call with props object and children
     if (isComponent) {
       const props =
-        !selfClosing && is(propsOrAttrs, ObjectLiteralForm)
+        !selfClosing && isCallTo(propsOrAttrs, "object_literal")
           ? this.withChildrenProp(propsOrAttrs, tagName)
           : propsOrAttrs;
 
@@ -121,12 +121,12 @@ export class HTMLParser {
       this.consumeWhitespace();
     }
 
-    return arrayLiteral(items);
+    return arrayLiteral(...items);
   }
 
   // Parse attributes into an object-literal for component calls
   private parseComponentPropsObject() {
-    const fields: LabelForm[] = [];
+    const fields: Form[] = [];
     while (this.stream.next !== ">" && this.stream.next !== "/") {
       this.consumeWhitespace();
       const name = this.parseAttributeName();
@@ -208,8 +208,9 @@ export class HTMLParser {
       const node = this.parseNode();
       if (node) {
         // Flatten text-array nodes
-        if (is(node, ArrayLiteralForm)) {
-          node.toArray().forEach((e) => children.push(e));
+        if (isCallTo(node, "array_literal")) {
+          const args = callArgs(node);
+          if (args) args.forEach((e) => children.push(e));
         } else {
           children.push(node);
         }
@@ -234,7 +235,7 @@ export class HTMLParser {
       }
     }
 
-    const result = arrayLiteral(children);
+    const result = arrayLiteral(...children);
 
     // Restore mode on exiting children
     this.whitespaceMode = prevMode;
@@ -286,21 +287,24 @@ export class HTMLParser {
     return collapsed.length > 0 ? collapsed : "";
   }
 
-  private withChildrenProp(props: ObjectLiteralForm, tagName: string) {
+  private withChildrenProp(props: Form, tagName: string) {
     const children = this.parseChildren(tagName);
-    const fields = props.toArray() as LabelForm[];
+    const prevArgsForm = callArgsForm(props);
+    const fields = prevArgsForm?.toArray() ?? [];
     const nextProps = objectLiteral(...fields, label("children", children));
+    const nextArgsForm = callArgsForm(nextProps);
+    if (prevArgsForm?.location && nextArgsForm) {
+      nextArgsForm.setLocation(prevArgsForm.location.clone());
+    }
     const location = props.location?.clone();
     return location ? nextProps.setLocation(location) : nextProps;
   }
 }
 
 const unwrapInlineExpr = (expr: Expr): Expr => {
-  if (is(expr, Form)) {
-    if (expr.length === 1 && !is(expr, CallForm)) {
-      const only = expr.at(0);
-      if (only && !is(only, Form)) return only;
-    }
+  if (is(expr, Form) && expr.length === 1) {
+    const only = expr.at(0);
+    if (only && !is(only, Form)) return only;
   }
   return expr;
 };
@@ -314,3 +318,16 @@ const buildModulePathLeft = (segments: string[]) => {
   }
   return left;
 };
+
+function isCallTo(expr: Expr | undefined, name: string): expr is Form {
+  return is(expr, Form) && expr.callsInternal(name);
+}
+
+function callArgsForm(form: Form): Form | undefined {
+  const second = form.at(1);
+  return is(second, Form) ? second : undefined;
+}
+
+function callArgs(form: Form): Expr[] | undefined {
+  return callArgsForm(form)?.toArray();
+}

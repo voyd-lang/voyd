@@ -1,10 +1,10 @@
 import { describe, it } from "vitest";
 import { expect } from "vitest";
-import { CharStream } from "../char-stream.js";
-import { parseChars } from "../parse-chars.js";
-import { functionalNotation } from "./functional-notation.js";
-import { interpretWhitespace } from "./interpret-whitespace.js";
-import { primary } from "./primary.js";
+import { CharStream } from "../../char-stream.js";
+import { parseChars } from "../../parse-chars.js";
+import { functionalNotation } from "../functional-notation.js";
+import { interpretWhitespace } from "../interpret-whitespace.js";
+import { primary } from "../primary.js";
 
 const expand = (code: string) => {
   const parsed = parseChars(new CharStream(code, "test"));

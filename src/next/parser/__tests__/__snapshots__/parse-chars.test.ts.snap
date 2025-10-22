@@ -246,30 +246,28 @@ exports[`should parse the example file into a raw ast 1`] = `
               "object_literal",
               [
                 [
+                  "label",
                   [
-                    "label",
+                    "from",
                     [
-                      "from",
+                      "FixedArray",
                       [
-                        "FixedArray",
                         [
+                          "generics",
                           [
-                            "generics",
-                            [
-                              "i32",
-                            ],
+                            "i32",
                           ],
-                          "72",
-                          "101",
-                          "121",
-                          "32",
-                          "116",
-                          "104",
-                          "101",
-                          "114",
-                          "101",
-                          "33",
                         ],
+                        "72",
+                        "101",
+                        "121",
+                        "32",
+                        "116",
+                        "104",
+                        "101",
+                        "114",
+                        "101",
+                        "33",
                       ],
                     ],
                   ],
