@@ -1,40 +1,52 @@
-import { idIs, isContinuationOp, isGreedyOp } from "../grammar.js";
-import { Expr, List } from "../../syntax-objects/index.js";
+import { Form, FormInitElements } from "../ast/form.js";
+import {
+  Expr,
+  IdentifierAtom,
+  idIs,
+  is,
+  WhitespaceAtom,
+} from "../ast/index.js";
+import { isContinuationOp, isGreedyOp } from "../grammar.js";
 
-export const interpretWhitespace = (list: List, indentLevel?: number): List => {
-  const transformed = new List({ ...list.metadata, dynamicLocation: true });
+// TODO: Update top location by between first child and end child (to replace dynamicLocation)
+// TODO: We may need to use FastShiftArray if this is too slow.
+export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
+  const processing = form.toArray();
+  const transformed: Expr[] = [];
 
   let hadComma = false;
-  while (list.hasChildren) {
-    const child = elideParens(list, indentLevel);
-    if (child?.isList() && child.length === 0) continue;
+  while (processing.length) {
+    const child = elideParens(processing, indentLevel);
+    if (is(child, Form) && !child.length) continue;
     addSibling(child, transformed, hadComma);
-    hadComma = nextIsComma(list);
+    hadComma = nextIsComma(processing);
   }
 
-  return transformed.length === 1 && transformed.first()?.isList()
-    ? (transformed.first() as List)
-    : transformed;
+  const newForm = new Form({ location: form.location, elements: transformed });
+  return newForm.length === 1 && is(newForm.first, Form)
+    ? newForm.first
+    : newForm;
 };
 
-const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
-  if (!list.isList()) return list;
-  const transformed = new List({ dynamicLocation: true });
+const elideParens = (list: Expr[], startIndentLevel?: number): Expr => {
+  const transformed: FormInitElements = [];
   const indentLevel = startIndentLevel ?? nextExprIndentLevel(list);
 
   const pushChildBlock = () => {
-    const children = new List({ value: ["block"], dynamicLocation: true });
+    const children: Expr[] = [];
 
     while (nextExprIndentLevel(list) > indentLevel) {
       const child = elideParens(list, indentLevel + 1);
 
+      // Handle lines that start with an infix op
       if (
         children.length === 1 &&
-        child.isList() &&
-        isContinuationOp(child.first())
+        is(child, Form) &&
+        isContinuationOp(child.first)
       ) {
-        transformed.push(child.consume());
-        if (child.length === 1) transformed.push(child.consume());
+        const ca = child.toArray();
+        transformed.push(ca.shift()!);
+        if (child.length === 1) transformed.push(ca.shift()!);
         else transformed.push(child);
         return;
       }
@@ -44,8 +56,8 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
 
     // Handle labeled arguments
     const firstChild = children.at(1);
-    if (firstChild?.isList() && isNamedArg(firstChild)) {
-      transformed.push(...children.argsArray());
+    if (is(firstChild, Form) && isNamedArg(firstChild)) {
+      transformed.push(...children.slice(1));
       return;
     }
 
@@ -53,8 +65,8 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
   };
 
   consumeLeadingWhitespace(list);
-  while (list.hasChildren) {
-    const next = list.first();
+  while (list.length) {
+    const next = list.at(0);
     const nextIndent = nextExprIndentLevel(list);
 
     if (isNewline(next) && nextIndent > indentLevel) {
@@ -66,8 +78,8 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
       break;
     }
 
-    if (next?.isWhitespace()) {
-      list.consume();
+    if (is(next, WhitespaceAtom)) {
+      list.shift();
       continue;
     }
 
@@ -75,14 +87,15 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
       break;
     }
 
-    if (next?.isList()) {
-      list.consume();
+    if (is(next, Form)) {
+      list.shift();
       transformed.push(interpretWhitespace(next, indentLevel));
       continue;
     }
 
     if (isGreedyOp(next)) {
-      transformed.push(list.consume());
+      transformed.push(next);
+      list.shift();
 
       if (nextExprIndentLevel(list) <= indentLevel) {
         transformed.push(elideParens(list, indentLevel));
@@ -93,19 +106,20 @@ const elideParens = (list: Expr, startIndentLevel?: number): Expr => {
 
     if (next !== undefined) {
       transformed.push(next);
-      list.consume();
+      list.shift();
       continue;
     }
   }
 
-  return transformed.length === 1 ? transformed.first()! : transformed;
+  const newForm = new Form(transformed);
+  return newForm.length === 1 ? newForm.first! : newForm;
 };
 
 /**
  * Returns the indentation level of the next expression. Returns `0` if a comma
  * is encountered, which is a performance hack for whitespace block parsing.
  */
-const nextExprIndentLevel = (list: List, startIndex = 0) => {
+const nextExprIndentLevel = (list: Expr[], startIndex = 0) => {
   let nextIndentLevel = 0;
   let i = startIndex;
 
@@ -131,59 +145,60 @@ const nextExprIndentLevel = (list: List, startIndex = 0) => {
   return nextIndentLevel;
 };
 
-const consumeLeadingWhitespace = (list: List) => {
+const consumeLeadingWhitespace = (list: Expr[]) => {
   let next: Expr | undefined;
-  while ((next = list.first()) && (next.isWhitespace() || idIs(next, ","))) {
-    list.consume();
+  while ((next = list.at(0)) && (is(next, WhitespaceAtom) || idIs(next, ","))) {
+    list.shift();
   }
 };
 
-const isNewline = (v?: Expr) => v?.isWhitespace() && v.isNewline;
-const isIndent = (v: Expr) => v.isWhitespace() && v.isIndent;
-const nextIsComma = (list: List) => {
-  const next = list.first();
-  return !!(next?.isIdentifier() && next.is(","));
+const isNewline = (v?: Expr) => is(v, WhitespaceAtom) && v.isNewline;
+const isIndent = (v: Expr) => is(v, WhitespaceAtom) && v.isIndent;
+const nextIsComma = (list: Expr[]) => {
+  const next = list.at(0);
+  return idIs(next, ",");
 };
 
-const isNamedArg = (v: List) => {
-  const colon = v.at(1);
-
+const isNamedArg = (v: Form) => {
   // Second value should be an identifier whose value is a colon
-  if (!(colon?.isIdentifier() && colon.is(":"))) {
+  if (!idIs(v.first, ":")) {
     return false;
   }
 
   return true;
 };
 
-const addSibling = (child: Expr, siblings: List, hadComma?: boolean) => {
+const addSibling = (child: Expr, siblings: Expr[], hadComma?: boolean) => {
   const olderSibling = siblings.at(-1);
 
-  if (!child.isList() || hadComma) {
+  if (!is(child, Form) || hadComma) {
     siblings.push(child);
     return;
   }
 
-  if (!olderSibling?.isList() || olderSibling.calls("generics")) {
+  if (!is(olderSibling, Form) || olderSibling.calls("generics")) {
     siblings.push(child);
     return;
   }
 
   if (isNamedArg(child) && !isNamedArg(olderSibling)) {
-    olderSibling.push(...splitNamedArgs(child));
+    siblings.pop();
+    siblings.push(
+      new Form([...olderSibling.toArray(), ...splitNamedArgs(child)])
+    );
     return;
   }
 
   siblings.push(child);
 };
 
-const splitNamedArgs = (list: List): List[] => {
-  const result: List[] = [];
+const splitNamedArgs = (list: Form): Expr[] => {
+  const result: Expr[] = [];
   let start = 0;
   for (let i = 2; i < list.length; i += 1) {
     const expr = list.at(i);
     const next = list.at(i + 1);
-    if (expr?.isIdentifier() && next?.isIdentifier() && next.is(":")) {
+    if (is(expr, IdentifierAtom) && idIs(next, ":")) {
       result.push(list.slice(start, i));
       start = i;
     }
