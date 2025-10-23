@@ -1,4 +1,11 @@
-import { Expr, Form, elementsOf, is } from "../../ast/index.js";
+import {
+  Expr,
+  Form,
+  elementsOf,
+  getCallArgsForm,
+  is,
+  updateCallArgs,
+} from "../../ast/index.js";
 import {
   arrayLiteral,
   call,
@@ -209,7 +216,9 @@ export class HTMLParser {
       if (node) {
         // Flatten text-array nodes
         if (isCallTo(node, "array_literal")) {
-          elementsOf(callArgsForm(node)).forEach((expr) => children.push(expr));
+          elementsOf(getCallArgsForm(node)).forEach((expr) =>
+            children.push(expr)
+          );
           continue;
         }
 
@@ -289,15 +298,10 @@ export class HTMLParser {
 
   private withChildrenProp(props: Form, tagName: string) {
     const children = this.parseChildren(tagName);
-    const prevArgsForm = callArgsForm(props);
-    const fields = elementsOf(prevArgsForm);
-    const nextProps = objectLiteral(...fields, label("children", children));
-    const nextArgsForm = callArgsForm(nextProps);
-    if (prevArgsForm?.location && nextArgsForm) {
-      nextArgsForm.setLocation(prevArgsForm.location.clone());
-    }
-    const location = props.location?.clone();
-    return location ? nextProps.setLocation(location) : nextProps;
+    return updateCallArgs(props, (args) => {
+      const fields = elementsOf(args);
+      return objectLiteral(...fields, label("children", children));
+    });
   }
 }
 
@@ -321,9 +325,4 @@ const buildModulePathLeft = (segments: string[]) => {
 
 function isCallTo(expr: Expr | undefined, name: string): expr is Form {
   return is(expr, Form) && expr.callsInternal(name);
-}
-
-function callArgsForm(form: Form): Form | undefined {
-  const second = form.at(1);
-  return is(second, Form) ? second : undefined;
 }

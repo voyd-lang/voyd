@@ -63,3 +63,33 @@ export const consumeDelimiter = (cursor: FormCursor, delimiter = ",") => {
   }
   return false;
 };
+
+export const getCallArgsForm = (form: Form | undefined): Form | undefined => {
+  if (!form) return undefined;
+  const second = form.at(1);
+  return is(second, Form) ? second : undefined;
+};
+
+export const updateCallArgs = (
+  call: Form,
+  transform: (args: Form) => Form
+): Form => {
+  const argsForm = getCallArgsForm(call) ?? new Form();
+  const nextArgs = transform(argsForm);
+  const elements = call.toArray();
+  const nextElements =
+    elements.length >= 2
+      ? [elements[0]!, nextArgs, ...elements.slice(2)]
+      : [elements[0]!, nextArgs];
+
+  const result = new Form({
+    elements: nextElements,
+    location: call.location,
+  });
+
+  if (argsForm.location && nextArgs.location === argsForm.location) {
+    nextArgs.setLocation(argsForm.location.clone());
+  }
+
+  return result;
+};
