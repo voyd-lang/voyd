@@ -2,6 +2,7 @@ import { InternalIdentifierAtom } from "../ast/atom.js";
 import { Form } from "../ast/form.js";
 import {
   Expr,
+  FormCursor,
   IdentifierAtom,
   SourceLocation,
   is,
@@ -12,11 +13,6 @@ import {
   isPrefixOp,
   prefixOps,
 } from "../grammar.js";
-
-type ParseResult = {
-  expr: Expr;
-  nextIndex: number;
-};
 
 const flattenElements = (form: Form): Expr[] => {
   if (form.length === 2) {
@@ -83,12 +79,10 @@ const parseForm = (form: Form): Form => {
   }
 
   const items: Expr[] = [];
-  let index = 0;
+  const cursor = new FormCursor(elements);
 
-  while (index < elements.length) {
-    const result = parsePrecedence(elements, index, 0, form.location);
-    items.push(result.expr);
-    index = result.nextIndex;
+  while (!cursor.done) {
+    items.push(parsePrecedence(cursor, 0, form.location));
   }
 
   let result: Form;
@@ -110,55 +104,35 @@ const parseForm = (form: Form): Form => {
 };
 
 const parsePrecedence = (
-  elements: Expr[],
-  startIndex: number,
+  cursor: FormCursor,
   minPrecedence = 0,
   fallbackLocation?: SourceLocation
-): ParseResult => {
-  let index = startIndex;
-  const first = elements.at(index);
+): Expr => {
+  const first = cursor.peek();
   if (!first) {
-    return {
-      expr: new Form({ location: cloneLocation(fallbackLocation) }),
-      nextIndex: index,
-    };
+    return new Form({ location: cloneLocation(fallbackLocation) });
   }
 
   let expr: Expr;
 
   if (isPrefixOp(first)) {
-    const op = first;
-    index += 1;
-    const rightResult = parsePrecedence(
-      elements,
-      index,
-      unaryOpInfo(op) ?? -1,
-      fallbackLocation
-    );
+    const op = cursor.consume()!;
+    const right = parsePrecedence(cursor, unaryOpInfo(op) ?? -1, fallbackLocation);
     expr = new Form({
-      elements: [op, rightResult.expr],
-      location: mergeLocations(fallbackLocation, op, rightResult.expr),
+      elements: [op, right],
+      location: mergeLocations(fallbackLocation, op, right),
     });
-    index = rightResult.nextIndex;
   } else {
-    expr = parseExpression(first);
-    index += 1;
+    expr = parseExpression(cursor.consume()!);
   }
 
-  while (index < elements.length) {
-    const op = elements.at(index);
+  while (!cursor.done) {
+    const op = cursor.peek();
     const precedence = infixOpInfo(op);
     if (precedence === undefined || precedence < minPrecedence) break;
 
-    index += 1;
-    const rightResult = parsePrecedence(
-      elements,
-      index,
-      precedence + 1,
-      fallbackLocation
-    );
-    const right = rightResult.expr;
-    index = rightResult.nextIndex;
+    cursor.consume();
+    const right = parsePrecedence(cursor, precedence + 1, fallbackLocation);
 
     expr = isDotOp(op)
       ? parseDot(expr, right, op, fallbackLocation)
@@ -172,7 +146,7 @@ const parsePrecedence = (
     }
   }
 
-  return { expr, nextIndex: index };
+  return expr;
 };
 
 const isDotOp = (op?: Expr): op is IdentifierAtom =>
