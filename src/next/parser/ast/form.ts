@@ -102,4 +102,55 @@ export class Form extends Syntax {
       elements: this.#elements.toArray().map((e) => e.toVerboseJSON()),
     };
   }
+
+  static elementsOf(form?: Form): Expr[] {
+    return form ? form.toArray() : [];
+  }
+
+  splitOnDelimiter(delimiter = ","): Expr[][] {
+    const groups: Expr[][] = [];
+    let current: Expr[] = [];
+
+    for (const element of this.toArray()) {
+      if (is(element, IdentifierAtom) && element.value === delimiter) {
+        if (current.length) groups.push(current);
+        current = [];
+        continue;
+      }
+      current.push(element);
+    }
+
+    if (current.length) groups.push(current);
+    return groups;
+  }
+
+  callArgs(): Form | undefined {
+    const second = this.at(1);
+    return is(second, Form) ? second : undefined;
+  }
+
+  updateCallArgs(transform: (args: Form) => Form): Form {
+    const originalArgs = this.callArgs();
+    const baseArgs = originalArgs ?? new Form();
+    const nextArgs = transform(baseArgs);
+
+    if (originalArgs && nextArgs === originalArgs) {
+      return this;
+    }
+
+    if (originalArgs?.location && nextArgs.location === originalArgs.location) {
+      nextArgs.setLocation(originalArgs.location.clone());
+    }
+
+    const elements = this.toArray();
+    const nextElements =
+      elements.length >= 2
+        ? [elements[0]!, nextArgs, ...elements.slice(2)]
+        : [elements[0]!, nextArgs];
+
+    return new Form({
+      elements: nextElements,
+      location: this.location,
+    });
+  }
 }

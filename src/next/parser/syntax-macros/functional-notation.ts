@@ -3,7 +3,6 @@ import {
   Expr,
   FormCursor,
   IdentifierAtom,
-  elementsOf,
   idIs,
   is,
   WhitespaceAtom,
@@ -68,7 +67,7 @@ export const functionalNotation = (form: Form): Form => {
 const processGenerics = (expr: Expr, generics: Form, params?: Form): Form => {
   const normalizedParams = normalizeParams(params);
   const location = params?.location ?? generics.location ?? expr.location;
-  const paramElements = elementsOf(normalizedParams);
+  const paramElements = Form.elementsOf(normalizedParams);
   const list = new Form({
     elements: [expr, ",", ...paramElements],
     location,
@@ -82,7 +81,7 @@ const processGenerics = (expr: Expr, generics: Form, params?: Form): Form => {
 const processParamList = (expr: Expr, params: Form): Form => {
   const normalizedParams = normalizeParams(params);
   const location = params.location ?? normalizedParams?.location ?? expr.location;
-  const paramElements = elementsOf(normalizedParams);
+  const paramElements = Form.elementsOf(normalizedParams);
   return functionalNotation(
     new Form({
       elements: [expr, ",", ...paramElements],

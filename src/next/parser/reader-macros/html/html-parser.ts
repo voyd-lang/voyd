@@ -1,11 +1,4 @@
-import {
-  Expr,
-  Form,
-  elementsOf,
-  getCallArgsForm,
-  is,
-  updateCallArgs,
-} from "../../ast/index.js";
+import { Expr, Form, is } from "../../ast/index.js";
 import {
   arrayLiteral,
   call,
@@ -216,9 +209,7 @@ export class HTMLParser {
       if (node) {
         // Flatten text-array nodes
         if (isCallTo(node, "array_literal")) {
-          elementsOf(getCallArgsForm(node)).forEach((expr) =>
-            children.push(expr)
-          );
+          Form.elementsOf(node.callArgs()).forEach((expr) => children.push(expr));
           continue;
         }
 
@@ -298,8 +289,8 @@ export class HTMLParser {
 
   private withChildrenProp(props: Form, tagName: string) {
     const children = this.parseChildren(tagName);
-    return updateCallArgs(props, (args) => {
-      const fields = elementsOf(args);
+    return props.updateCallArgs((args) => {
+      const fields = Form.elementsOf(args);
       return objectLiteral(...fields, label("children", children));
     });
   }
