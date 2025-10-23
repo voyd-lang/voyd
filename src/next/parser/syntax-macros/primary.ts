@@ -6,6 +6,7 @@ import {
   IdentifierAtom,
   SourceLocation,
   is,
+  splitOnDelimiter,
 } from "../ast/index.js";
 import {
   infixOps,
@@ -34,28 +35,14 @@ const flattenElements = (form: Form): Expr[] => {
       }
 
       const args: Expr[] = [];
-      const elements = second.toArray();
-      let group: Expr[] = [];
-
-      const pushGroup = () => {
-        if (!group.length) return;
+      for (const group of splitOnDelimiter(second)) {
+        if (!group.length) continue;
         args.push(
           group.length === 1
             ? group[0]!
             : new Form({ elements: group, location: second.location })
         );
-        group = [];
-      };
-
-      for (const element of elements) {
-        if (is(element, IdentifierAtom) && element.value === ",") {
-          pushGroup();
-          continue;
-        }
-        group.push(element);
       }
-
-      pushGroup();
 
       return [first!, ...args];
     }

@@ -1,4 +1,4 @@
-import { Expr, Form, is } from "../../ast/index.js";
+import { Expr, Form, elementsOf, is } from "../../ast/index.js";
 import {
   arrayLiteral,
   call,
@@ -209,11 +209,11 @@ export class HTMLParser {
       if (node) {
         // Flatten text-array nodes
         if (isCallTo(node, "array_literal")) {
-          const args = callArgs(node);
-          if (args) args.forEach((e) => children.push(e));
-        } else {
-          children.push(node);
+          elementsOf(callArgsForm(node)).forEach((expr) => children.push(expr));
+          continue;
         }
+
+        children.push(node);
       }
 
       if (!preserve) this.consumeWhitespace();
@@ -290,7 +290,7 @@ export class HTMLParser {
   private withChildrenProp(props: Form, tagName: string) {
     const children = this.parseChildren(tagName);
     const prevArgsForm = callArgsForm(props);
-    const fields = prevArgsForm?.toArray() ?? [];
+    const fields = elementsOf(prevArgsForm);
     const nextProps = objectLiteral(...fields, label("children", children));
     const nextArgsForm = callArgsForm(nextProps);
     if (prevArgsForm?.location && nextArgsForm) {
@@ -326,8 +326,4 @@ function isCallTo(expr: Expr | undefined, name: string): expr is Form {
 function callArgsForm(form: Form): Form | undefined {
   const second = form.at(1);
   return is(second, Form) ? second : undefined;
-}
-
-function callArgs(form: Form): Expr[] | undefined {
-  return callArgsForm(form)?.toArray();
 }
