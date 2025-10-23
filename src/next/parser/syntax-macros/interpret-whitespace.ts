@@ -1,6 +1,7 @@
 import { Form, FormInitElements } from "../ast/form.js";
 import {
   Expr,
+  FormCursor,
   IdentifierAtom,
   idIs,
   is,
@@ -9,17 +10,16 @@ import {
 import { isContinuationOp, isGreedyOp } from "../grammar.js";
 
 // TODO: Update top location by between first child and end child (to replace dynamicLocation)
-// TODO: We may need to use FastShiftArray if this is too slow.
 export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
-  const processing = form.toArray();
+  const cursor = FormCursor.fromForm(form);
   const transformed: Expr[] = [];
 
   let hadComma = false;
-  while (processing.length) {
-    const child = elideParens(processing, indentLevel);
+  while (!cursor.done) {
+    const child = elideParens(cursor, indentLevel);
     if (is(child, Form) && !child.length) continue;
     addSibling(child, transformed, hadComma);
-    hadComma = nextIsComma(processing);
+    hadComma = nextIsComma(cursor);
   }
 
   const newForm = new Form({ location: form.location, elements: transformed });
@@ -28,15 +28,18 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
     : newForm;
 };
 
-const elideParens = (list: Expr[], startIndentLevel?: number): Expr => {
+const elideParens = (
+  cursor: FormCursor,
+  startIndentLevel?: number
+): Expr => {
   const transformed: FormInitElements = [];
-  const indentLevel = startIndentLevel ?? nextExprIndentLevel(list);
+  const indentLevel = startIndentLevel ?? nextExprIndentLevel(cursor);
 
   const pushChildBlock = () => {
     const children: Expr[] = [new IdentifierAtom("block")];
 
-    while (nextExprIndentLevel(list) > indentLevel) {
-      const child = elideParens(list, indentLevel + 1);
+    while (nextExprIndentLevel(cursor) > indentLevel) {
+      const child = elideParens(cursor, indentLevel + 1);
 
       // Handle lines that start with an infix op
       if (
@@ -44,9 +47,17 @@ const elideParens = (list: Expr[], startIndentLevel?: number): Expr => {
         is(child, Form) &&
         isContinuationOp(child.first)
       ) {
-        transformed.push(child.first);
-        if (child.length === 2 && child.at(1)) transformed.push(child.at(1)!);
-        else transformed.push(child.slice(1));
+        const elements = child.toArray();
+        const head = elements.at(0);
+        if (head) transformed.push(head);
+        const tail = elements.slice(1);
+        if (tail.length === 1) {
+          transformed.push(tail[0]!);
+        } else if (tail.length > 1) {
+          transformed.push(
+            new Form({ elements: tail, location: child.location })
+          );
+        }
         return;
       }
 
@@ -63,10 +74,10 @@ const elideParens = (list: Expr[], startIndentLevel?: number): Expr => {
     transformed.push(children);
   };
 
-  consumeLeadingWhitespace(list);
-  while (list.length) {
-    const next = list.at(0);
-    const nextIndent = nextExprIndentLevel(list);
+  consumeLeadingWhitespace(cursor);
+  while (!cursor.done) {
+    const next = cursor.peek();
+    const nextIndent = nextExprIndentLevel(cursor);
 
     if (isNewline(next) && nextIndent > indentLevel) {
       pushChildBlock();
@@ -78,7 +89,7 @@ const elideParens = (list: Expr[], startIndentLevel?: number): Expr => {
     }
 
     if (is(next, WhitespaceAtom)) {
-      list.shift();
+      cursor.consume();
       continue;
     }
 
@@ -87,27 +98,25 @@ const elideParens = (list: Expr[], startIndentLevel?: number): Expr => {
     }
 
     if (is(next, Form)) {
-      list.shift();
+      cursor.consume();
       transformed.push(interpretWhitespace(next, indentLevel));
       continue;
     }
 
     if (isGreedyOp(next)) {
-      transformed.push(next);
-      list.shift();
+      const op = cursor.consume()!;
+      transformed.push(op);
 
-      if (nextExprIndentLevel(list) <= indentLevel) {
-        transformed.push(elideParens(list, indentLevel));
+      if (nextExprIndentLevel(cursor) <= indentLevel) {
+        transformed.push(elideParens(cursor, indentLevel));
       }
 
       continue;
     }
 
-    if (next !== undefined) {
-      transformed.push(next);
-      list.shift();
-      continue;
-    }
+    const consumed = cursor.consume();
+    if (!consumed) break;
+    transformed.push(consumed);
   }
 
   const newForm = new Form(transformed);
@@ -118,12 +127,15 @@ const elideParens = (list: Expr[], startIndentLevel?: number): Expr => {
  * Returns the indentation level of the next expression. Returns `0` if a comma
  * is encountered, which is a performance hack for whitespace block parsing.
  */
-const nextExprIndentLevel = (list: Expr[], startIndex = 0) => {
+const nextExprIndentLevel = (cursor: FormCursor) => {
   let nextIndentLevel = 0;
-  let i = startIndex;
+  const probe = cursor.fork();
+  let exhausted = true;
 
-  for (; i < list.length; i++) {
-    const expr = list.at(i)!;
+  while (!probe.done) {
+    const expr = probe.consume();
+    if (!expr) break;
+
     if (isNewline(expr)) {
       nextIndentLevel = 0;
       continue;
@@ -136,26 +148,25 @@ const nextExprIndentLevel = (list: Expr[], startIndex = 0) => {
 
     if (idIs(expr, ",")) return 0;
 
+    exhausted = false;
     break;
   }
 
-  if (i >= list.length) return 0;
+  if (exhausted) return 0;
 
   return nextIndentLevel;
 };
 
-const consumeLeadingWhitespace = (list: Expr[]) => {
-  let next: Expr | undefined;
-  while ((next = list.at(0)) && (is(next, WhitespaceAtom) || idIs(next, ","))) {
-    list.shift();
-  }
+const consumeLeadingWhitespace = (cursor: FormCursor) => {
+  cursor.consumeWhile(
+    (expr) => !!expr && (is(expr, WhitespaceAtom) || idIs(expr, ","))
+  );
 };
 
 const isNewline = (v?: Expr) => is(v, WhitespaceAtom) && v.isNewline;
-const isIndent = (v: Expr) => is(v, WhitespaceAtom) && v.isIndent;
-const nextIsComma = (list: Expr[]) => {
-  const next = list.at(0);
-  return idIs(next, ",");
+const isIndent = (v?: Expr) => is(v, WhitespaceAtom) && v.isIndent;
+const nextIsComma = (cursor: FormCursor) => {
+  return idIs(cursor.peek(), ",");
 };
 
 const isNamedArg = (v: Form) => {
