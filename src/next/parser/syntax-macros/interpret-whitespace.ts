@@ -19,7 +19,7 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
     const child = elideParens(cursor, indentLevel);
     if (is(child, Form) && !child.length) continue;
     addSibling(child, transformed, hadComma);
-    hadComma = nextIsComma(cursor);
+    hadComma = idIs(cursor.peek(), ",");
   }
 
   const newForm = new Form({ location: form.location, elements: transformed });
@@ -28,10 +28,7 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
     : newForm;
 };
 
-const elideParens = (
-  cursor: FormCursor,
-  startIndentLevel?: number
-): Expr => {
+const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
   const transformed: FormInitElements = [];
   const indentLevel = startIndentLevel ?? nextExprIndentLevel(cursor);
 
@@ -41,23 +38,7 @@ const elideParens = (
     while (nextExprIndentLevel(cursor) > indentLevel) {
       const child = elideParens(cursor, indentLevel + 1);
 
-      // Handle lines that start with an infix op
-      if (
-        children.length === 1 &&
-        is(child, Form) &&
-        isContinuationOp(child.first)
-      ) {
-        const elements = child.toArray();
-        const head = elements.at(0);
-        if (head) transformed.push(head);
-        const tail = elements.slice(1);
-        if (tail.length === 1) {
-          transformed.push(tail[0]!);
-        } else if (tail.length > 1) {
-          transformed.push(
-            new Form({ elements: tail, location: child.location })
-          );
-        }
+      if (handleLeadingContinuationOp(child, children, transformed)) {
         return;
       }
 
@@ -165,14 +146,42 @@ const consumeLeadingWhitespace = (cursor: FormCursor) => {
 
 const isNewline = (v?: Expr) => is(v, WhitespaceAtom) && v.isNewline;
 const isIndent = (v?: Expr) => is(v, WhitespaceAtom) && v.isIndent;
-const nextIsComma = (cursor: FormCursor) => {
-  return idIs(cursor.peek(), ",");
-};
 
 const isNamedArg = (v: Form) => {
   // Second value should be an identifier whose value is a colon
   if (!idIs(v.at(1), ":")) {
     return false;
+  }
+
+  return true;
+};
+
+const handleLeadingContinuationOp = (
+  child: Expr,
+  children: Expr[],
+  transformed: FormInitElements
+): boolean => {
+  if (
+    children.length !== 1 ||
+    !is(child, Form) ||
+    !isContinuationOp(child.first)
+  ) {
+    return false;
+  }
+
+  const elements = child.toArray();
+  const head = elements.at(0);
+  if (head) transformed.push(head);
+  const tail = elements.slice(1);
+
+  if (tail.length === 1) {
+    transformed.push(tail[0]!);
+    return true;
+  }
+
+  if (tail.length > 1) {
+    transformed.push(new Form({ elements: tail, location: child.location }));
+    return true;
   }
 
   return true;
@@ -205,6 +214,7 @@ const addSibling = (child: Expr, siblings: Expr[], hadComma?: boolean) => {
 const splitNamedArgs = (list: Form): Expr[] => {
   const result: Expr[] = [];
   let start = 0;
+
   for (let i = 2; i < list.length; i += 1) {
     const expr = list.at(i);
     const next = list.at(i + 1);
@@ -213,6 +223,7 @@ const splitNamedArgs = (list: Form): Expr[] => {
       start = i;
     }
   }
+
   result.push(list.slice(start));
   return result;
 };
