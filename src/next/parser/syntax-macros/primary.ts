@@ -7,12 +7,7 @@ import {
   SourceLocation,
   is,
 } from "../ast/index.js";
-import {
-  infixOps,
-  isInfixOp,
-  isPrefixOp,
-  prefixOps,
-} from "../grammar.js";
+import { infixOps, isInfixOp, isPrefixOp, prefixOps } from "../grammar.js";
 
 const flattenElements = (form: Form): Expr[] => {
   if (form.length === 2) {
@@ -28,7 +23,7 @@ const flattenElements = (form: Form): Expr[] => {
           first!,
           new Form({
             elements: flattenElements(second),
-            location: second.location,
+            location: second.location?.clone(),
           }),
         ];
       }
@@ -39,7 +34,10 @@ const flattenElements = (form: Form): Expr[] => {
         args.push(
           group.length === 1
             ? group[0]!
-            : new Form({ elements: group, location: second.location })
+            : new Form({
+                elements: group,
+                location: second.location?.clone(),
+              })
         );
       }
 
@@ -50,7 +48,6 @@ const flattenElements = (form: Form): Expr[] => {
   return form.toArray();
 };
 
-// TODO: Update top location by between first child and end child (to replace dynamicLocation)
 export const primary = (form: Form): Form => parseForm(form);
 
 const parseExpression = (expr: Expr): Expr =>
@@ -61,7 +58,7 @@ const parseForm = (form: Form): Form => {
   const hadSingleFormChild = form.length === 1 && is(form.at(0), Form);
 
   if (!elements.length) {
-    return new Form({ location: cloneLocation(form.location) });
+    return new Form({ location: form.location?.clone() });
   }
 
   const items: Expr[] = [];
@@ -75,18 +72,12 @@ const parseForm = (form: Form): Form => {
   if (!hadSingleFormChild && items.length && is(items[0], Form)) {
     const head = items[0] as Form;
     const rest = items.slice(1);
-    result = new Form({
-      elements: [...head.toArray(), ...rest],
-      location: mergeLocations(form.location, head, ...rest),
-    });
+    result = new Form([...head.toArray(), ...rest]);
   } else {
-    result = new Form({
-      elements: items,
-      location: mergeLocations(form.location, ...items),
-    });
+    result = new Form(items);
   }
 
-  return restructureOperatorTail(result, form.location);
+  return restructureOperatorTail(result);
 };
 
 const parsePrecedence = (
@@ -96,18 +87,19 @@ const parsePrecedence = (
 ): Expr => {
   const first = cursor.peek();
   if (!first) {
-    return new Form({ location: cloneLocation(fallbackLocation) });
+    return new Form({ location: fallbackLocation?.clone() });
   }
 
   let expr: Expr;
 
   if (isPrefixOp(first)) {
     const op = cursor.consume()!;
-    const right = parsePrecedence(cursor, unaryOpInfo(op) ?? -1, fallbackLocation);
-    expr = new Form({
-      elements: [op, right],
-      location: mergeLocations(fallbackLocation, op, right),
-    });
+    const right = parsePrecedence(
+      cursor,
+      unaryOpInfo(op) ?? -1,
+      fallbackLocation
+    );
+    expr = new Form([op, right]);
   } else {
     expr = parseExpression(cursor.consume()!);
   }
@@ -120,12 +112,7 @@ const parsePrecedence = (
     cursor.consume();
     const right = parsePrecedence(cursor, precedence + 1, fallbackLocation);
 
-    expr = isDotOp(op)
-      ? parseDot(expr, right, op, fallbackLocation)
-      : new Form({
-          elements: [op!, expr, right],
-          location: mergeLocations(fallbackLocation, expr, op, right),
-        });
+    expr = isDotOp(op) ? parseDot(expr, right) : new Form([op!, expr, right]);
 
     if (is(expr, Form) && isLambdaWithTupleArgs(expr)) {
       expr = removeTupleFromLambdaParameters(expr);
@@ -138,19 +125,9 @@ const parsePrecedence = (
 const isDotOp = (op?: Expr): op is IdentifierAtom =>
   is(op, IdentifierAtom) && op.value === ".";
 
-const parseDot = (
-  left: Expr,
-  right: Expr,
-  op: Expr | undefined,
-  fallbackLocation?: SourceLocation
-): Form => {
-  const location = mergeLocations(fallbackLocation, left, op, right);
-
+const parseDot = (left: Expr, right: Expr): Form => {
   if (is(right, Form) && right.calls("=>")) {
-    return new Form({
-      elements: ["call-closure", right, left],
-      location,
-    });
+    return new Form(["call-closure", right, left]);
   }
 
   if (
@@ -159,29 +136,20 @@ const parseDot = (
     (right.at(1) as Form).callsInternal("generics")
   ) {
     const rightElements = right.toArray();
-    return new Form({
-      elements: [
-        rightElements[0]!,
-        rightElements[1]!,
-        left,
-        ...rightElements.slice(2),
-      ],
-      location,
-    });
+    return new Form([
+      rightElements[0]!,
+      rightElements[1]!,
+      left,
+      ...rightElements.slice(2),
+    ]);
   }
 
   if (is(right, Form)) {
     const rightElements = right.toArray();
-    return new Form({
-      elements: [rightElements[0]!, left, ...rightElements.slice(1)],
-      location,
-    });
+    return new Form([rightElements[0]!, left, ...rightElements.slice(1)]);
   }
 
-  return new Form({
-    elements: [right, left],
-    location,
-  });
+  return new Form([right, left]);
 };
 
 const infixOpInfo = (op?: Expr): number | undefined => {
@@ -205,20 +173,14 @@ const removeTupleFromLambdaParameters = (form: Form): Form => {
 
   const normalizedParams = new Form({
     elements: params.toArray().slice(1),
-    location: params.location,
+    location: params.location?.clone(),
   });
 
   const elements = form.toArray();
-  return new Form({
-    elements: [elements[0]!, normalizedParams, ...elements.slice(2)],
-    location: form.location,
-  });
+  return new Form([elements[0]!, normalizedParams, ...elements.slice(2)]);
 };
 
-const restructureOperatorTail = (
-  form: Form,
-  fallbackLocation?: SourceLocation
-): Form => {
+const restructureOperatorTail = (form: Form): Form => {
   const op = form.at(0);
   if (
     !is(op, IdentifierAtom) ||
@@ -233,42 +195,8 @@ const restructureOperatorTail = (
   if (!left) return form;
 
   const tailElements = form.toArray().slice(2);
-  const tail = new Form({
-    elements: tailElements,
-    location: mergeLocations(form.location ?? fallbackLocation, ...tailElements),
-  });
+  const tail = new Form(tailElements);
 
   const parsedTail = parseForm(tail);
-  return new Form({
-    elements: [op, left, parsedTail],
-    location: mergeLocations(
-      form.location ?? fallbackLocation,
-      op,
-      left,
-      parsedTail
-    ),
-  });
+  return new Form([op, left, parsedTail]);
 };
-
-const mergeLocations = (
-  fallback: SourceLocation | undefined,
-  ...sources: (Expr | SourceLocation | undefined)[]
-): SourceLocation | undefined => {
-  const locations = sources
-    .map(getLocation)
-    .filter((loc): loc is SourceLocation => !!loc);
-
-  if (!locations.length) return cloneLocation(fallback);
-
-  const first = locations[0]!.clone();
-  const last = locations[locations.length - 1]!;
-  first.setEndToEndOf(last);
-  return first;
-};
-
-const getLocation = (source?: Expr | SourceLocation) => {
-  if (!source) return undefined;
-  return source instanceof SourceLocation ? source : source.location;
-};
-
-const cloneLocation = (loc?: SourceLocation) => loc?.clone();

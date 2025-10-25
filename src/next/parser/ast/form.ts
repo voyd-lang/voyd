@@ -2,6 +2,7 @@ import { FastShiftArray } from "@lib/fast-shift-array.js";
 import { Expr } from "./expr.js";
 import { is, SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
 import { IdentifierAtom, InternalIdentifierAtom } from "./atom.js";
+import { FormCursor } from "./form-cursor.js";
 
 export type FormOpts = {
   location?: SourceLocation;
@@ -17,14 +18,15 @@ export class Form extends Syntax {
   #elements = new FastShiftArray<Expr>();
 
   constructor(opts: FormInit = []) {
-    if (Array.isArray(opts)) {
-      super();
-      this.push(...opts);
-      return;
-    }
+    const normalized: FormOpts = Array.isArray(opts)
+      ? { elements: opts }
+      : opts;
+    super(normalized);
+    this.push(...(normalized.elements ?? []));
 
-    super(opts);
-    this.push(...(opts.elements ?? []));
+    if (!this.location) {
+      this.location = deriveLocation(this.#elements);
+    }
   }
 
   get length() {
@@ -40,15 +42,14 @@ export class Form extends Syntax {
   }
 
   private push(...elements: FormInitElements) {
-    this.#elements.push(
-      ...elements.map((e) =>
-        typeof e === "string"
-          ? new IdentifierAtom(e)
-          : e instanceof Array
-          ? new Form(e)
-          : e
-      )
+    const normalized = elements.map((e) =>
+      typeof e === "string"
+        ? new IdentifierAtom(e)
+        : e instanceof Array
+        ? new Form(e)
+        : e
     );
+    this.#elements.push(...normalized);
   }
 
   calls(name: IdentifierAtom | string): boolean {
@@ -83,7 +84,8 @@ export class Form extends Syntax {
   }
 
   slice(start?: number, end?: number): Form {
-    return new Form(this.toArray().slice(start, end));
+    const elements = this.toArray().slice(start, end);
+    return new Form(elements);
   }
 
   toArray(): Expr[] {
@@ -150,7 +152,24 @@ export class Form extends Syntax {
 
     return new Form({
       elements: nextElements,
-      location: this.location,
+      location: this.location?.clone(),
     });
   }
+
+  cursor() {
+    return FormCursor.fromForm(this);
+  }
 }
+
+const deriveLocation = (
+  elements: FastShiftArray<Expr>
+): SourceLocation | undefined => {
+  const firstWithLocation = elements.find((expr) => !!expr.location)?.location;
+  const lastWithLocation = elements.reverseFind(
+    (expr) => !!expr.location
+  )?.location;
+  if (!firstWithLocation) return undefined;
+  const location = firstWithLocation.clone();
+  location.setEndToEndOf(lastWithLocation ?? firstWithLocation);
+  return location;
+};

@@ -9,9 +9,8 @@ import {
 } from "../ast/index.js";
 import { isContinuationOp, isGreedyOp } from "../grammar.js";
 
-// TODO: Update top location by between first child and end child (to replace dynamicLocation)
 export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
-  const cursor = FormCursor.fromForm(form);
+  const cursor = form.cursor();
   const transformed: Expr[] = [];
 
   let hadComma = false;
@@ -22,7 +21,7 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
     hadComma = idIs(cursor.peek(), ",");
   }
 
-  const newForm = new Form({ location: form.location, elements: transformed });
+  const newForm = new Form(transformed);
   return newForm.length === 1 && is(newForm.first, Form)
     ? newForm.first
     : newForm;
@@ -111,12 +110,9 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
 const nextExprIndentLevel = (cursor: FormCursor) => {
   let nextIndentLevel = 0;
   const probe = cursor.fork();
-  let exhausted = true;
 
   while (!probe.done) {
     const expr = probe.consume();
-    if (!expr) break;
-
     if (isNewline(expr)) {
       nextIndentLevel = 0;
       continue;
@@ -129,13 +125,10 @@ const nextExprIndentLevel = (cursor: FormCursor) => {
 
     if (idIs(expr, ",")) return 0;
 
-    exhausted = false;
-    break;
+    return nextIndentLevel;
   }
 
-  if (exhausted) return 0;
-
-  return nextIndentLevel;
+  return 0;
 };
 
 const consumeLeadingWhitespace = (cursor: FormCursor) => {
@@ -180,7 +173,7 @@ const handleLeadingContinuationOp = (
   }
 
   if (tail.length > 1) {
-    transformed.push(new Form({ elements: tail, location: child.location }));
+    transformed.push(tail);
     return true;
   }
 
