@@ -10,10 +10,7 @@ export type ParseCharsOpts = {
   lexer?: Lexer;
 };
 
-export const parseChars = (
-  file: CharStream,
-  opts: ParseCharsOpts = {}
-): Form => {
+export const read = (file: CharStream, opts: ParseCharsOpts = {}): Form => {
   const lexer = opts.lexer ?? new Lexer();
   const location = file.currentSourceLocation();
   const elements: Expr[] = [];
@@ -47,7 +44,7 @@ const processWithReaderMacro = (
   return readerMacro(file, {
     token,
     reader: (file, terminator) =>
-      parseChars(file, {
+      read(file, {
         nested: true,
         terminator,
         lexer,

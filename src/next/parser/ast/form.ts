@@ -90,8 +90,8 @@ export class Form extends Syntax {
     return this.#elements.toArray();
   }
 
-  toJSON() {
-    return this.toArray();
+  toJSON(): unknown {
+    return this.toArray().map((e) => e.toJSON());
   }
 
   toVerboseJSON(): VerboseJSON {
