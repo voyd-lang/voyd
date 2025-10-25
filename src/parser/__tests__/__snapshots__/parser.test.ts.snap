@@ -1161,6 +1161,53 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
       ],
     ],
   ],
+  [
+    "pub",
+    "fn",
+    [
+      "->",
+      [
+        "pipe",
+      ],
+      "i32",
+    ],
+    [
+      "block",
+      [
+        "call-closure",
+        [
+          "=>",
+          [
+            ":",
+            "x",
+            "i32",
+          ],
+          [
+            "*",
+            "x",
+            5,
+          ],
+        ],
+        [
+          "call-closure",
+          [
+            "=>",
+            [
+              ":",
+              "x",
+              "i32",
+            ],
+            [
+              "+",
+              "x",
+              3,
+            ],
+          ],
+          2,
+        ],
+      ],
+    ],
+  ],
 ]
 `;
 

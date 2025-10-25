@@ -5,7 +5,7 @@ import {
 } from "../codegen.js";
 import { ObjectLiteral } from "../syntax-objects/object-literal.js";
 import { Obj } from "../syntax-objects/index.js";
-import { initStruct } from "../lib/binaryen-gc/index.js";
+import { initStruct } from "@lib/binaryen-gc/index.js";
 
 export const compile = (opts: CompileExprOpts<ObjectLiteral>) => {
   const { expr: obj, mod } = opts;

@@ -1,7 +1,11 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, mergeConfig } from "vitest/config";
+import viteConfig from "./vite.config.js";
 
-export default defineConfig({
-  test: {
-    pool: "threads", // or: 'vmThreads'
-  },
-});
+export default mergeConfig(
+  viteConfig,
+  defineConfig({
+    test: {
+      pool: "threads", // or: 'vmThreads'
+    },
+  }),
+);
