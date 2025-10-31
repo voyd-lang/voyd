@@ -1038,6 +1038,89 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
             ],
             [
               "array_literal",
+              [
+                "tuple",
+                [
+                  "new_string",
+                  [
+                    "object_literal",
+                    [
+                      "label",
+                      "from",
+                      [
+                        "FixedArray",
+                        [
+                          "generics",
+                          "i32",
+                        ],
+                        "104",
+                        "105",
+                      ],
+                    ],
+                  ],
+                  [
+                    "new_string",
+                    [
+                      "object_literal",
+                      [
+                        "label",
+                        "from",
+                        [
+                          "FixedArray",
+                          [
+                            "generics",
+                            "i32",
+                          ],
+                          "116",
+                          "114",
+                          "117",
+                          "101",
+                        ],
+                      ],
+                    ],
+                  ],
+                ],
+              ],
+              [
+                "tuple",
+                [
+                  "new_string",
+                  [
+                    "object_literal",
+                    [
+                      "label",
+                      "from",
+                      [
+                        "FixedArray",
+                        [
+                          "generics",
+                          "i32",
+                        ],
+                        "105",
+                      ],
+                    ],
+                  ],
+                  [
+                    "new_string",
+                    [
+                      "object_literal",
+                      [
+                        "label",
+                        "from",
+                        [
+                          "FixedArray",
+                          [
+                            "generics",
+                            "i32",
+                          ],
+                          "97",
+                          "109",
+                        ],
+                      ],
+                    ],
+                  ],
+                ],
+              ],
             ],
             [
               "array_literal",
@@ -1063,6 +1146,52 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                 ],
                 [
                   "array_literal",
+                  [
+                    "tuple",
+                    [
+                      "new_string",
+                      [
+                        "object_literal",
+                        [
+                          "label",
+                          "from",
+                          [
+                            "FixedArray",
+                            [
+                              "generics",
+                              "i32",
+                            ],
+                            "114",
+                            "101",
+                            "97",
+                            "100",
+                            "121",
+                          ],
+                        ],
+                      ],
+                      [
+                        "new_string",
+                        [
+                          "object_literal",
+                          [
+                            "label",
+                            "from",
+                            [
+                              "FixedArray",
+                              [
+                                "generics",
+                                "i32",
+                              ],
+                              "116",
+                              "114",
+                              "117",
+                              "101",
+                            ],
+                          ],
+                        ],
+                      ],
+                    ],
+                  ],
                 ],
                 [
                   "array_literal",

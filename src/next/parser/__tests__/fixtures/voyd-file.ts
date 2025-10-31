@@ -147,8 +147,8 @@ fn main()
   what(): is(up)
 
   pub fn main()
-    <div>
-      <p>
+    <div hi i="am">
+      <p ready="true">
         Hello there!!
       </p>
       <p>
