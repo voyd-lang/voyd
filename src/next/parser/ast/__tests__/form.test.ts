@@ -20,18 +20,6 @@ describe("Form helpers", () => {
     ]);
   });
 
-  it("splitOnDelimiter splits on commas by default", () => {
-    const form = new Form(["a", ",", "b", ",", "c"]);
-    const groups = form.splitOnDelimiter();
-    expect(groupToJSON(groups)).toEqual([["a"], ["b"], ["c"]]);
-  });
-
-  it("splitOnDelimiter ignores trailing delimiter", () => {
-    const form = new Form(["a", ",", "b", ","]);
-    const groups = form.splitOnDelimiter();
-    expect(groupToJSON(groups)).toEqual([["a"], ["b"]]);
-  });
-
   it("callArgs returns the second element when it is a form", () => {
     const args = new Form(["x"]);
     const call = new Form(["foo", args, "rest"]);
@@ -53,15 +41,17 @@ describe("Form helpers", () => {
   it("updateCallArgs inserts new args when none exist", () => {
     const call = new Form(["foo"]);
     const updated = call.updateCallArgs(() => new Form(["x"]));
-    expect(Form.elementsOf(updated.callArgs()).map((expr) => expr.toJSON())).toEqual(["x"]);
+    expect(
+      Form.elementsOf(updated.callArgs()).map((expr) => expr.toJSON())
+    ).toEqual(["x"]);
     expect(call.callArgs()).toBeUndefined();
   });
 
   it("updateCallArgs preserves existing elements after update", () => {
     const args = new Form(["x"]);
     const call = new Form(["foo", args, "tail"]);
-    const updated = call.updateCallArgs((current) =>
-      new Form([...current.toArray(), "y"])
+    const updated = call.updateCallArgs(
+      (current) => new Form([...current.toArray(), "y"])
     );
 
     expect(updated).not.toBe(call);
@@ -87,10 +77,7 @@ describe("Form helpers", () => {
     const b = new IdentifierAtom({ value: "b", location: loc(2, 3) });
     const c = new IdentifierAtom({ value: "c", location: loc(4, 7) });
 
-    const form = new Form({
-      elements: [a, b, c],
-      dynamicLocation: true,
-    });
+    const form = new Form([a, b, c]);
 
     expect(form.location).not.toBeUndefined();
     expect(form.location).not.toBe(a.location);
@@ -114,10 +101,7 @@ describe("Form helpers", () => {
     const b = new IdentifierAtom({ value: "b", location: loc(2, 4) });
     const c = new IdentifierAtom({ value: "c", location: loc(5, 8) });
 
-    const form = new Form({
-      elements: [a, b, c],
-      dynamicLocation: true,
-    });
+    const form = new Form([a, b, c]);
 
     const sliced = form.slice(1);
 

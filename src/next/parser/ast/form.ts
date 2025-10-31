@@ -109,23 +109,6 @@ export class Form extends Syntax {
     return form ? form.toArray() : [];
   }
 
-  splitOnDelimiter(delimiter = ","): Expr[][] {
-    const groups: Expr[][] = [];
-    let current: Expr[] = [];
-
-    for (const element of this.toArray()) {
-      if (is(element, IdentifierAtom) && element.value === delimiter) {
-        if (current.length) groups.push(current);
-        current = [];
-        continue;
-      }
-      current.push(element);
-    }
-
-    if (current.length) groups.push(current);
-    return groups;
-  }
-
   callArgs(): Form | undefined {
     const second = this.at(1);
     return is(second, Form) ? second : undefined;
