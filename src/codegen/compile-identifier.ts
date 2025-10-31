@@ -1,6 +1,6 @@
 import { CompileExprOpts, mapBinaryenType } from "../codegen.js";
 import { Identifier } from "../syntax-objects/identifier.js";
-import { refCast, structGetFieldValue } from "../lib/binaryen-gc/index.js";
+import { refCast, structGetFieldValue } from "@lib/binaryen-gc/index.js";
 import { getClosureEnvType, getClosureSuperType } from "./compile-closure.js";
 
 export const compile = (opts: CompileExprOpts<Identifier>) => {

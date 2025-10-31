@@ -12,8 +12,8 @@ import {
   initStruct,
   refFunc,
   binaryenTypeToHeapType,
-} from "../lib/binaryen-gc/index.js";
-import { AugmentedBinaryen, TypeRef } from "../lib/binaryen-gc/types.js";
+} from "@lib/binaryen-gc/index.js";
+import { AugmentedBinaryen, TypeRef } from "@lib/binaryen-gc/types.js";
 import { normalizeClosureFnType } from "./helpers/closure-type.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;

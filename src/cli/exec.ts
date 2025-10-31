@@ -1,16 +1,23 @@
 import { stdout } from "process";
-import { getConfig } from "../lib/config/index.js";
+import { getConfig } from "@lib/config/index.js";
 import { run } from "../run.js";
 import { processSemantics } from "../semantics/index.js";
 import binaryen from "binaryen";
-import { testGc } from "../lib/binaryen-gc/test.js";
+import { testGc } from "@lib/binaryen-gc/test.js";
 import { parseFile, parseModuleFromSrc } from "../parser/index.js";
 import { compileSrc } from "../compiler.js";
+import { parse as newParse } from "../next/parser/parser.js";
+import { readFileSync } from "fs";
 
 export const exec = () => main().catch(errorHandler);
 
 async function main() {
   const config = getConfig();
+
+  if (config.canonical && config.emitParserAst) {
+    const file = readFileSync(config.index, { encoding: "utf8" });
+    return emit(newParse(file, config.index));
+  }
 
   if (config.emitParserAst) {
     return emit(await getParserAst(config.index));

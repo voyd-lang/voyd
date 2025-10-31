@@ -2,7 +2,7 @@ import { closuresVoyd } from "./fixtures/closures.js";
 import { compile } from "../compiler.js";
 import { describe, test, beforeAll } from "vitest";
 import assert from "node:assert";
-import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import { getWasmFn, getWasmInstance } from "@lib/wasm.js";
 
 describe("E2E closures", () => {
   let instance: WebAssembly.Instance;

@@ -155,6 +155,11 @@ fn main()
         How are you today
       </p>
     </div>
+
+pub fn pipe() -> i32
+  2
+    .(x: i32) => x + 3
+    .(x: i32) => x * 5
 `;
 
 export const voydFileWithGenerics = `

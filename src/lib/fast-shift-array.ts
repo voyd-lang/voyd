@@ -81,4 +81,26 @@ export class FastShiftArray<T> {
   forEach(callbackfn: (value: T, index: number, array: T[]) => void): void {
     this.items.slice(this.headIndex).forEach(callbackfn);
   }
+
+  find(
+    predicate: (value: T, index: number, array: T[]) => boolean
+  ): T | undefined {
+    const array = this.toArray();
+    for (let index = 0; index < array.length; index++) {
+      const value = array[index];
+      if (predicate(value, index, array)) return value;
+    }
+    return undefined;
+  }
+
+  reverseFind(
+    predicate: (value: T, index: number, array: T[]) => boolean
+  ): T | undefined {
+    const array = this.toArray();
+    for (let index = array.length - 1; index >= 0; index--) {
+      const value = array[index];
+      if (predicate(value, index, array)) return value;
+    }
+    return undefined;
+  }
 }

@@ -1,7 +1,7 @@
 import { describe, test, beforeAll } from "vitest";
 import assert from "node:assert";
 import { compile } from "../compiler.js";
-import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import { getWasmFn, getWasmInstance } from "@lib/wasm.js";
 import { genericsUnionInferNegativeVoyd } from "./fixtures/generics-union-infer-negative.js";
 import { decode } from "@msgpack/msgpack";
 

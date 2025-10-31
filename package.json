@@ -23,7 +23,8 @@
     }
   },
   "scripts": {
-    "test": "tsc --noEmit && vitest run",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "test:w": "vitest",
     "bench": "vitest bench --run",
     "bench:w": "vitest bench",

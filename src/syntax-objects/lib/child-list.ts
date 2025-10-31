@@ -1,4 +1,4 @@
-import { FastShiftArray } from "../../lib/fast-shift-array.js";
+import { FastShiftArray } from "@lib/fast-shift-array.js";
 import { Expr } from "../expr.js";
 import { NamedEntity } from "../named-entity.js";
 
