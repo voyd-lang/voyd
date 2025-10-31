@@ -1,5 +1,5 @@
 import { isIdentifier } from "../grammar.js";
-import { call } from "./lib/init-helpers.js";
+import { prefixCall } from "./lib/init-helpers.js";
 import { ReaderMacro } from "./types.js";
 
 export const genericsMacro: ReaderMacro = {
@@ -8,6 +8,6 @@ export const genericsMacro: ReaderMacro = {
   },
   macro: (file, { reader }) => {
     const items = reader(file, ">");
-    return call("generics", ...items.toArray());
+    return prefixCall("generics", ...items.toArray());
   },
 };

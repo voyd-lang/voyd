@@ -1,4 +1,4 @@
-import { paren } from "./lib/init-helpers.js";
+import { prefixParen } from "./lib/init-helpers.js";
 import { ReaderMacro } from "./types.js";
 
 export const parenReader: ReaderMacro = {
@@ -6,7 +6,7 @@ export const parenReader: ReaderMacro = {
   macro: (file, { token, reader }) => {
     if (token.value === "(") {
       const v = reader(file, ")");
-      return paren(...v.toArray());
+      return prefixParen(...v.toArray());
     }
 
     return undefined; // discard closing paren

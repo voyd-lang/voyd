@@ -1,52 +1,6 @@
-import { InternalIdentifierAtom } from "../ast/atom.js";
 import { Form } from "../ast/form.js";
-import {
-  Expr,
-  FormCursor,
-  IdentifierAtom,
-  SourceLocation,
-  is,
-} from "../ast/index.js";
+import { Expr, FormCursor, IdentifierAtom, is } from "../ast/index.js";
 import { infixOps, isInfixOp, isPrefixOp, prefixOps } from "../grammar.js";
-
-const flattenElements = (form: Form): Expr[] => {
-  if (form.length === 2) {
-    const first = form.at(0);
-    const second = form.at(1);
-    if (is(first, InternalIdentifierAtom) && is(second, Form)) {
-      if (
-        second.length === 2 &&
-        is(second.at(0), InternalIdentifierAtom) &&
-        is(second.at(1), Form)
-      ) {
-        return [
-          first!,
-          new Form({
-            elements: flattenElements(second),
-            location: second.location?.clone(),
-          }),
-        ];
-      }
-
-      const args: Expr[] = [];
-      for (const group of second.splitOnDelimiter()) {
-        if (!group.length) continue;
-        args.push(
-          group.length === 1
-            ? group[0]!
-            : new Form({
-                elements: group,
-                location: second.location?.clone(),
-              })
-        );
-      }
-
-      return [first!, ...args];
-    }
-  }
-
-  return form.toArray();
-};
 
 export const primary = (form: Form): Form => parseForm(form);
 
@@ -54,18 +8,17 @@ const parseExpression = (expr: Expr): Expr =>
   is(expr, Form) ? parseForm(expr) : expr;
 
 const parseForm = (form: Form): Form => {
-  const elements = flattenElements(form);
   const hadSingleFormChild = form.length === 1 && is(form.at(0), Form);
 
-  if (!elements.length) {
+  if (!form.length) {
     return new Form({ location: form.location?.clone() });
   }
 
   const items: Expr[] = [];
-  const cursor = new FormCursor(elements);
+  const cursor = form.cursor();
 
   while (!cursor.done) {
-    items.push(parsePrecedence(cursor, 0, form.location));
+    items.push(parsePrecedence(cursor, 0));
   }
 
   let result: Form;
@@ -80,25 +33,15 @@ const parseForm = (form: Form): Form => {
   return restructureOperatorTail(result);
 };
 
-const parsePrecedence = (
-  cursor: FormCursor,
-  minPrecedence = 0,
-  fallbackLocation?: SourceLocation
-): Expr => {
+const parsePrecedence = (cursor: FormCursor, minPrecedence = 0): Expr => {
   const first = cursor.peek();
-  if (!first) {
-    return new Form({ location: fallbackLocation?.clone() });
-  }
+  if (!first) return new Form();
 
   let expr: Expr;
 
   if (isPrefixOp(first)) {
     const op = cursor.consume()!;
-    const right = parsePrecedence(
-      cursor,
-      unaryOpInfo(op) ?? -1,
-      fallbackLocation
-    );
+    const right = parsePrecedence(cursor, unaryOpInfo(op) ?? -1);
     expr = new Form([op, right]);
   } else {
     expr = parseExpression(cursor.consume()!);
@@ -110,7 +53,7 @@ const parsePrecedence = (
     if (precedence === undefined || precedence < minPrecedence) break;
 
     cursor.consume();
-    const right = parsePrecedence(cursor, precedence + 1, fallbackLocation);
+    const right = parsePrecedence(cursor, precedence + 1);
 
     expr = isDotOp(op) ? parseDot(expr, right) : new Form([op!, expr, right]);
 
@@ -171,11 +114,7 @@ const removeTupleFromLambdaParameters = (form: Form): Form => {
   const params = form.at(1);
   if (!is(params, Form)) return form;
 
-  const normalizedParams = new Form({
-    elements: params.toArray().slice(1),
-    location: params.location?.clone(),
-  });
-
+  const normalizedParams = params.slice(1);
   const elements = form.toArray();
   return new Form([elements[0]!, normalizedParams, ...elements.slice(2)]);
 };
@@ -194,9 +133,6 @@ const restructureOperatorTail = (form: Form): Form => {
   const left = form.at(1);
   if (!left) return form;
 
-  const tailElements = form.toArray().slice(2);
-  const tail = new Form(tailElements);
-
-  const parsedTail = parseForm(tail);
+  const parsedTail = parseForm(form.slice(2));
   return new Form([op, left, parsedTail]);
 };

@@ -10,7 +10,7 @@ import { isOp } from "../grammar.js";
 
 export const functionalNotation = (form: Form): Form => {
   const callsParen = form.callsInternal("paren");
-  const cursor = (callsParen ? (form.at(1) as Form) : form).cursor();
+  const cursor = normalizeParams(form)!.cursor();
   const result: Expr[] = [];
   let isTuple = false;
 
@@ -82,5 +82,12 @@ const processParamList = (expr: Expr, params: Form): Form => {
 
 const normalizeParams = (params?: Form): Form | undefined => {
   if (!params) return undefined;
-  return params.callsInternal("paren") ? (params.at(1) as Form) : params;
+  if (!params.callsInternal("paren")) return params;
+  const inner = params.at(1);
+  if (is(inner, Form)) return inner;
+
+  return new Form({
+    elements: params.toArray().slice(2),
+    location: params.location?.clone(),
+  });
 };

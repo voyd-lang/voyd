@@ -14,21 +14,42 @@ export const call = (
 ) =>
   new Form([
     typeof fn === "string" ? new InternalIdentifierAtom(fn) : fn,
-    args,
+    ...(args.length ? [new Form(separateWithCommas(args))] : []),
   ]);
 
-export const paren = (...args: FormInitElements) => call("paren", ...args);
+export const prefixCall = (
+  fn: string | IdentifierAtom | InternalIdentifierAtom,
+  ...args: FormInitElements
+) =>
+  new Form([
+    typeof fn === "string" ? new InternalIdentifierAtom(fn) : fn,
+    ",",
+    ...args,
+  ]);
 
-export const tuple = (...args: FormInitElements) => call("tuple", ...args);
+export const prefixParen = (...args: FormInitElements) =>
+  prefixCall("paren", ...args);
+
+export const prefixTuple = (...args: FormInitElements) =>
+  prefixCall("tuple", ...args);
 
 export const arrayLiteral = (...args: FormInitElements) =>
   call("array_literal", ...args);
 
+export const prefixArrayLiteral = (...args: FormInitElements) =>
+  prefixCall("array_literal", ...args);
+
 export const objectLiteral = (...args: FormInitElements) =>
   call("object_literal", ...args);
 
+export const prefixObjectLiteral = (...args: FormInitElements) =>
+  prefixCall("object_literal", ...args);
+
 export const label = (label: IdentifierAtom | string, value: Expr) =>
   call("label", label, value);
+
+export const prefixLabel = (label: IdentifierAtom | string, value: Expr) =>
+  prefixCall("label", label, value);
 
 export const identifier = (id: string) => new IdentifierAtom(id);
 
@@ -54,3 +75,10 @@ export const string = (value: string) => {
 
 export const idIs = (id: unknown, value: string) =>
   is(id, IdentifierAtom) && id.value === value;
+
+const separateWithCommas = (values: FormInitElements): FormInitElements =>
+  values.reduce<FormInitElements>((acc, value, index) => {
+    acc.push(value);
+    if (index < values.length - 1) acc.push(",");
+    return acc;
+  }, []);

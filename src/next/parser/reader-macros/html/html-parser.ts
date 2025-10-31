@@ -6,7 +6,7 @@ import {
   label,
   objectLiteral,
   string,
-  tuple,
+  prefixTuple,
 } from "../../ast/index.js";
 import { CharStream } from "../../char-stream.js";
 
@@ -113,10 +113,10 @@ export class HTMLParser {
       if (this.stream.next === "=") {
         this.stream.consumeChar(); // Consume '='
         const value = this.parseAttributeValue();
-        items.push(tuple(string(name), value));
+        items.push(prefixTuple(string(name), value));
       } else {
         // Boolean attribute -> "true" string
-        items.push(tuple(string(name), string("true")));
+        items.push(prefixTuple(string(name), string("true")));
       }
       this.consumeWhitespace();
     }
@@ -209,7 +209,9 @@ export class HTMLParser {
       if (node) {
         // Flatten text-array nodes
         if (isCallTo(node, "array_literal")) {
-          Form.elementsOf(node.callArgs()).forEach((expr) => children.push(expr));
+          Form.elementsOf(node.callArgs()).forEach((expr) =>
+            children.push(expr)
+          );
           continue;
         }
 
