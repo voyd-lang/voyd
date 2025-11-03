@@ -2,10 +2,7 @@ import { describe, it, expect } from "vitest";
 import { functionalNotation } from "../functional-notation.js";
 import { interpretWhitespace } from "../interpret-whitespace.js";
 import { Form } from "../../ast/form.js";
-import {
-  IdentifierAtom,
-  InternalIdentifierAtom,
-} from "../../ast/atom.js";
+import { IdentifierAtom, InternalIdentifierAtom } from "../../ast/atom.js";
 import { SourceLocation } from "../../ast/syntax.js";
 
 const makeLocation = (start: number, end: number) =>
@@ -29,10 +26,7 @@ describe("syntax macro locations", () => {
       value: "x",
       location: makeLocation(4, 5),
     });
-    const args = new Form({
-      elements: [arg],
-      dynamicLocation: true,
-    });
+    const args = new Form([arg]);
     const paren = new Form({
       elements: [new InternalIdentifierAtom({ value: "paren" }), args],
       location: makeLocation(3, 6),

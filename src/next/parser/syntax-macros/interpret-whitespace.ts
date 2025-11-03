@@ -14,12 +14,10 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
   const cursor = form.cursor();
   const transformed: Expr[] = [];
 
-  let hadComma = false;
   while (!cursor.done) {
     const child = elideParens(cursor, indentLevel);
     if (isForm(child) && !child.length) continue;
-    addSibling(child, transformed, hadComma);
-    hadComma = !!atomEq(cursor.peek(), ",");
+    addSibling(child, transformed);
   }
 
   const newForm = new Form(transformed);
@@ -124,8 +122,6 @@ const nextExprIndentLevel = (cursor: FormCursor) => {
       continue;
     }
 
-    if (atomEq(expr, ",")) return 0;
-
     return nextIndentLevel;
   }
 
@@ -133,7 +129,7 @@ const nextExprIndentLevel = (cursor: FormCursor) => {
 };
 
 const consumeLeadingWhitespace = (cursor: FormCursor) => {
-  cursor.consumeWhile((expr) => isWhitespaceAtom(expr) || atomEq(expr, ","));
+  cursor.consumeWhile((expr) => isWhitespaceAtom(expr));
 };
 
 const isNewline = (v?: Expr) => isWhitespaceAtom(v) && v.isNewline;
@@ -179,10 +175,10 @@ const handleLeadingContinuationOp = (
   return true;
 };
 
-const addSibling = (child: Expr, siblings: Expr[], hadComma?: boolean) => {
+const addSibling = (child: Expr, siblings: Expr[]) => {
   const olderSibling = siblings.at(-1);
 
-  if (!isForm(child) || hadComma) {
+  if (!isForm(child)) {
     siblings.push(child);
     return;
   }

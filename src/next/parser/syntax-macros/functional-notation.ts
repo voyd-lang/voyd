@@ -1,18 +1,14 @@
 import { Form } from "../ast/form.js";
-import {
-  Expr,
-  IdentifierAtom,
-  InternalIdentifierAtom,
-  isForm,
-  isWhitespaceAtom,
-} from "../ast/index.js";
+import { Expr, isForm, isWhitespaceAtom } from "../ast/index.js";
 import { isOp } from "../grammar.js";
 
 export const functionalNotation = (form: Form): Form => {
-  const callsParen = form.callsInternal("paren");
-  const cursor = normalizeParams(form)!.cursor();
+  const cursor = form.cursor();
   const result: Expr[] = [];
-  let isTuple = false;
+
+  if (isParams(form)) {
+    result.push(cursor.consume()!);
+  }
 
   while (!cursor.done) {
     const expr = cursor.consume();
@@ -29,65 +25,36 @@ export const functionalNotation = (form: Form): Form => {
     }
 
     const nextExpr = cursor.peek();
-
-    if (nextExpr && isForm(nextExpr) && !(isOp(expr) || expr.eq(","))) {
-      if (nextExpr.callsInternal("generics")) {
-        const generics = cursor.consume() as Form;
-        const params = cursor.peek();
-        if (params && isForm(params)) {
-          result.push(
-            processGenerics(expr, generics, cursor.consume() as Form)
-          );
-        } else {
-          result.push(processGenerics(expr, generics));
-        }
-      } else {
-        result.push(processParamList(expr, cursor.consume() as Form));
-      }
+    if (isOp(expr) || !isForm(nextExpr)) {
+      result.push(expr);
       continue;
     }
 
-    if (callsParen && expr.eq(",")) {
-      isTuple = true;
+    if (nextExpr.callsInternal("generics")) {
+      cursor.consume();
+      const params = cursor.peek();
+      if (isParams(params)) cursor.consume();
+      result.push(
+        new Form([
+          expr,
+          nextExpr,
+          ...(isParams(params) ? functionalNotation(params).rest : []),
+        ])
+      );
+      continue;
+    }
+
+    if (isParams(nextExpr)) {
+      cursor.consume();
+      result.push(functionalNotation(nextExpr).replaceFirst(expr));
+      continue;
     }
 
     result.push(expr);
   }
 
-  if (isTuple) {
-    return new Form({
-      location: form.location?.clone(),
-      elements: [new InternalIdentifierAtom("tuple"), ",", ...result],
-    });
-  }
-
   return new Form({ location: form.location?.clone(), elements: result });
 };
 
-const processGenerics = (expr: Expr, generics: Form, params?: Form): Form => {
-  const normalizedParams = normalizeParams(params);
-  const paramElements = Form.elementsOf(normalizedParams);
-  const list = new Form([expr, ",", ...paramElements]);
-  const functional = functionalNotation(list).toArray();
-  functional.splice(2, 0, functionalNotation(generics));
-  functional.splice(3, 0, new IdentifierAtom(","));
-  return new Form({ elements: functional });
-};
-
-const processParamList = (expr: Expr, params: Form): Form => {
-  const normalizedParams = normalizeParams(params);
-  const paramElements = Form.elementsOf(normalizedParams);
-  return functionalNotation(new Form([expr, ",", ...paramElements]));
-};
-
-const normalizeParams = (params?: Form): Form | undefined => {
-  if (!params) return undefined;
-  if (!params.callsInternal("paren")) return params;
-  const inner = params.at(1);
-  if (isForm(inner)) return inner;
-
-  return new Form({
-    elements: params.toArray().slice(2),
-    location: params.location?.clone(),
-  });
-};
+const isParams = (expr: unknown): expr is Form =>
+  isForm(expr) && (expr.iCall("paren") || expr.iCall("tuple"));
