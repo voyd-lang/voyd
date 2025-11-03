@@ -1,4 +1,5 @@
 import { Token } from "../token.js";
+import { Internal } from "./internals.js";
 import { SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
 
 export type AtomOpts = {
@@ -69,6 +70,10 @@ export class IdentifierAtom extends Atom {
 /** Represents an identifier created by a macro or the compiler */
 export class InternalIdentifierAtom extends Atom {
   readonly syntaxType = "identifier";
+
+  constructor(value: (AtomOpts & { value?: Internal }) | Internal) {
+    super(value);
+  }
 }
 
 export class BoolAtom extends Atom {

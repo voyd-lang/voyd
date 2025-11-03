@@ -21,9 +21,7 @@ test("keeps angle bracket lexer state when parsing nested generics", ({
       "Foo",
       [
         "generics",
-        ",",
-        "Option",
-        ["generics", ",", "Result", ["generics", ",", "int", ",", " ", "int"]],
+        ["Option", ["generics", ["Result", ["generics", "int", [" ", "int"]]]]],
       ],
     ],
   ]);

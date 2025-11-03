@@ -8,6 +8,7 @@ import {
   isIdentifierAtom,
   isInternalIdentifierAtom,
 } from "./predicates.js";
+import { Internal } from "./internals.js";
 
 export type FormOpts = {
   location?: SourceLocation;
@@ -42,6 +43,10 @@ export class Form extends Syntax {
     return this.#elements.at(0);
   }
 
+  get rest() {
+    return this.#elements.slice(1);
+  }
+
   get last() {
     return this.#elements.at(-1);
   }
@@ -62,9 +67,14 @@ export class Form extends Syntax {
     return this.first.eq(name);
   }
 
-  callsInternal(name: InternalIdentifierAtom | string): boolean {
+  callsInternal(name: InternalIdentifierAtom | Internal): boolean {
     if (!isInternalIdentifierAtom(this.first)) return false;
     return this.first.eq(name);
+  }
+
+  /** Alias for callsInternal */
+  iCall(name: InternalIdentifierAtom | Internal) {
+    return this.callsInternal(name);
   }
 
   at(index: number): Expr | undefined {
@@ -87,21 +97,51 @@ export class Form extends Syntax {
     return new Form(elements);
   }
 
-  splitOnDelimiter(delimiter = ","): Form {
-    const groups: Expr[][] = [];
+  append(expr: Expr): Form {
+    return new Form([...this.toArray(), expr]);
+  }
+
+  insert(expr: Expr | Internal, at = 0): Form {
+    if (typeof expr === "string") expr = new InternalIdentifierAtom(expr);
+    return new Form(this.toArray().toSpliced(at, 0, expr));
+  }
+
+  split(delimiter = ","): Form {
+    const groups: (Expr[] | Expr)[] = [];
     let current: Expr[] = [];
 
     for (const element of this.toArray()) {
       if (isIdentifierAtom(element) && element.eq(delimiter)) {
-        if (current.length) groups.push(current);
+        if (current.length) groups.push(unwrapArray(current));
         current = [];
         continue;
       }
+
       current.push(element);
     }
 
-    if (current.length) groups.push(current);
+    if (current.length) groups.push(unwrapArray(current));
     return new Form(groups);
+  }
+
+  replaceFirst(expr: Expr) {
+    return new Form({
+      location: this.location,
+      elements: [expr, ...this.rest],
+    });
+  }
+
+  /** If this Form only contains a single child that itself is a form, returns the child, otherwise returns this form */
+  unwrap(): Form {
+    if (this.length === 1 && isForm(this.first)) return this.first;
+    return this;
+  }
+
+  /**
+   * Converts the Form into a function call of the provided name by separating
+   * parameters between commas and inserting the name as the first element */
+  toCallOf(name: Internal): Form {
+    return this.split().insert(name);
   }
 
   toArray(): Expr[] {
@@ -121,42 +161,12 @@ export class Form extends Syntax {
     };
   }
 
-  static elementsOf(form?: Form): Expr[] {
-    return form ? form.toArray() : [];
-  }
-
-  callArgs(): Form | undefined {
-    const second = this.at(1);
-    return isForm(second) ? second : undefined;
-  }
-
-  updateCallArgs(transform: (args: Form) => Form): Form {
-    const originalArgs = this.callArgs();
-    const baseArgs = originalArgs ?? new Form();
-    const nextArgs = transform(baseArgs);
-
-    if (originalArgs && nextArgs === originalArgs) {
-      return this;
-    }
-
-    if (originalArgs?.location && nextArgs.location === originalArgs.location) {
-      nextArgs.setLocation(originalArgs.location.clone());
-    }
-
-    const elements = this.toArray();
-    const nextElements =
-      elements.length >= 2
-        ? [elements[0]!, nextArgs, ...elements.slice(2)]
-        : [elements[0]!, nextArgs];
-
-    return new Form({
-      elements: nextElements,
-      location: this.location?.clone(),
-    });
-  }
-
   cursor() {
     return FormCursor.fromForm(this);
+  }
+
+  static elementsOf(form?: Form): Expr[] {
+    return form ? form.toArray() : [];
   }
 }
 
@@ -171,4 +181,13 @@ const deriveLocation = (
   const location = firstWithLocation.clone();
   location.setEndToEndOf(lastWithLocation ?? firstWithLocation);
   return location;
+};
+
+/** Turns [[]] -> [] and keeps [[], []] as [[], []] */
+const unwrapArray = <T>(arr: T[]): T | T[] => {
+  if (arr.length === 1) {
+    return arr.at(0)!;
+  }
+
+  return arr;
 };

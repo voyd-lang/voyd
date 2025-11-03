@@ -1,5 +1,6 @@
 import { isWhitespaceAtom } from "../../ast/predicates.js";
 import { Lexer } from "../../lexer.js";
+import { expandSyntaxMacros } from "../../syntax-macros/index.js";
 import { ReaderMacro } from "../types.js";
 import { HTMLParser } from "./html-parser.js";
 
@@ -21,7 +22,7 @@ export const htmlMacro: ReaderMacro = {
       onUnescapedCurlyBrace: () => {
         file.consumeChar();
         const list = reader(file, "}");
-        // if (list) return expandSyntaxMacros(list);
+        if (list) return expandSyntaxMacros(list); // TODO add test coverage and verify against old parser
         return list;
       },
     });

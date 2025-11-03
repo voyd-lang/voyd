@@ -11,11 +11,12 @@ exports[`should parse the example file into a raw ast 1`] = `
     "fib",
     [
       "paren",
-      ",",
-      "n",
-      ":",
-      " ",
-      "i32",
+      [
+        "n",
+        ":",
+        " ",
+        "i32",
+      ],
     ],
     " ",
     "->",
@@ -51,12 +52,13 @@ exports[`should parse the example file into a raw ast 1`] = `
     "fib",
     [
       "paren",
-      ",",
-      "n",
-      " ",
-      "-",
-      " ",
-      "1",
+      [
+        "n",
+        " ",
+        "-",
+        " ",
+        "1",
+      ],
     ],
     " ",
     "+",
@@ -64,12 +66,13 @@ exports[`should parse the example file into a raw ast 1`] = `
     "fib",
     [
       "paren",
-      ",",
-      "n",
-      " ",
-      "-",
-      " ",
-      "2",
+      [
+        "n",
+        " ",
+        "-",
+        " ",
+        "2",
+      ],
     ],
     "
 ",
@@ -80,7 +83,6 @@ exports[`should parse the example file into a raw ast 1`] = `
     "main",
     [
       "paren",
-      ",",
     ],
     "
 ",
@@ -161,7 +163,6 @@ exports[`should parse the example file into a raw ast 1`] = `
     " ",
     [
       "paren",
-      ",",
     ],
     " ",
     "=>",
@@ -217,7 +218,6 @@ exports[`should parse the example file into a raw ast 1`] = `
     "len",
     [
       "paren",
-      ",",
     ],
     " ",
     ">",
@@ -235,51 +235,29 @@ exports[`should parse the example file into a raw ast 1`] = `
     "log",
     [
       "paren",
-      ",",
       [
         "new_string",
         [
+          "object_literal",
           [
-            "object_literal",
+            "label",
+            "from",
             [
+              "FixedArray",
               [
-                "label",
-                [
-                  "from",
-                  ",",
-                  [
-                    "FixedArray",
-                    [
-                      [
-                        "generics",
-                        [
-                          "i32",
-                        ],
-                      ],
-                      ",",
-                      "72",
-                      ",",
-                      "101",
-                      ",",
-                      "121",
-                      ",",
-                      "32",
-                      ",",
-                      "116",
-                      ",",
-                      "104",
-                      ",",
-                      "101",
-                      ",",
-                      "114",
-                      ",",
-                      "101",
-                      ",",
-                      "33",
-                    ],
-                  ],
-                ],
+                "generics",
+                "i32",
               ],
+              "72",
+              "101",
+              "121",
+              "32",
+              "116",
+              "104",
+              "101",
+              "114",
+              "101",
+              "33",
             ],
           ],
         ],
@@ -294,20 +272,17 @@ exports[`should parse the example file into a raw ast 1`] = `
     "at",
     [
       "paren",
-      ",",
       "1",
     ],
     ".",
     "parseInt",
     [
       "paren",
-      ",",
     ],
     ".",
     "unwrap",
     [
       "paren",
-      ",",
     ],
     "
 ",
@@ -343,7 +318,6 @@ exports[`should parse the example file into a raw ast 1`] = `
     "nothing",
     [
       "paren",
-      ",",
     ],
     "
 ",
@@ -369,7 +343,6 @@ exports[`should parse the example file into a raw ast 1`] = `
     "fib",
     [
       "paren",
-      ",",
       "n",
     ],
     "

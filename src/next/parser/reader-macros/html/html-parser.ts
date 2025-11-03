@@ -1,4 +1,10 @@
-import { Expr, Form, formCallsInternal, isForm } from "../../ast/index.js";
+import {
+  Expr,
+  Form,
+  formCallsInternal,
+  isForm,
+  surfaceCall,
+} from "../../ast/index.js";
 import {
   arrayLiteral,
   call,
@@ -6,7 +12,7 @@ import {
   label,
   objectLiteral,
   string,
-  prefixTuple,
+  tuple,
 } from "../../ast/index.js";
 import { CharStream } from "../../char-stream.js";
 
@@ -73,15 +79,15 @@ export class HTMLParser {
         const parts = tagName.split("::").filter(Boolean);
         const last = parts.pop()!;
         const left = buildModulePathLeft(parts);
-        const inner = call(last, props).setLocation(
+        const inner = call(identifier(last), props).setLocation(
           this.stream.currentSourceLocation()
         );
-        return call("::", left, inner).setLocation(
+        return surfaceCall("::", left, inner).setLocation(
           this.stream.currentSourceLocation()
         );
       }
 
-      return call(tagName, props).setLocation(
+      return surfaceCall(tagName, props).setLocation(
         this.stream.currentSourceLocation()
       );
     }
@@ -90,9 +96,12 @@ export class HTMLParser {
     const nameExpr = string(tagName);
     const attributes = propsOrAttrs;
     const children = selfClosing ? arrayLiteral() : this.parseChildren(tagName);
-    return call("create_element", nameExpr, attributes, children).setLocation(
-      this.stream.currentSourceLocation()
-    );
+    return surfaceCall(
+      "create_element",
+      nameExpr,
+      attributes,
+      children
+    ).setLocation(this.stream.currentSourceLocation());
   }
 
   private parseTagName(): string {
@@ -113,10 +122,10 @@ export class HTMLParser {
       if (this.stream.next === "=") {
         this.stream.consumeChar(); // Consume '='
         const value = this.parseAttributeValue();
-        items.push(prefixTuple(string(name), value));
+        items.push(tuple(string(name), value));
       } else {
         // Boolean attribute -> "true" string
-        items.push(prefixTuple(string(name), string("true")));
+        items.push(tuple(string(name), string("true")));
       }
       this.consumeWhitespace();
     }
@@ -209,9 +218,7 @@ export class HTMLParser {
       if (node) {
         // Flatten text-array nodes
         if (isForm(node) && node.callsInternal("array_literal")) {
-          Form.elementsOf(node.callArgs()).forEach((expr) =>
-            children.push(expr)
-          );
+          node.rest.forEach((expr) => children.push(expr));
           continue;
         }
 
@@ -291,10 +298,7 @@ export class HTMLParser {
 
   private withChildrenProp(props: Form, tagName: string) {
     const children = this.parseChildren(tagName);
-    return props.updateCallArgs((args) => {
-      const fields = Form.elementsOf(args);
-      return objectLiteral(...fields, label("children", children));
-    });
+    return props.append(label("children", children));
   }
 }
 
@@ -311,7 +315,7 @@ const buildModulePathLeft = (segments: string[]) => {
   if (segments.length === 0) return identifier("");
   let left: Expr = identifier(segments[0]!);
   for (let i = 1; i < segments.length; i++) {
-    left = call("::", left, identifier(segments[i]!));
+    left = surfaceCall("::", left, identifier(segments[i]!));
   }
   return left;
 };
