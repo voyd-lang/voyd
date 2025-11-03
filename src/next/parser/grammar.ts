@@ -1,13 +1,8 @@
-import { Atom, IdentifierAtom } from "./ast/atom.js";
-import { is, Syntax } from "./ast/syntax.js";
+import { Atom } from "./ast/atom.js";
+import { isIdentifierAtom } from "./ast/predicates.js";
 
-export const isIdentifier = (op?: unknown): op is IdentifierAtom =>
-  is(op, IdentifierAtom);
-
-export const identifierIs = (
-  op: unknown | undefined,
-  value: string
-): op is Atom => isIdentifier(op) && op.value === value;
+export const identifierIs = (op: unknown, value: string): op is Atom =>
+  isIdentifierAtom(op) && op.eq(value);
 
 export const isOp = (op?: unknown): boolean => isInfixOp(op) || isPrefixOp(op);
 
@@ -56,7 +51,7 @@ export const infixOps: OpMap = new Map([
 ]);
 
 const isUnquotedIdentifier = (op?: unknown): op is Atom =>
-  isIdentifier(op) && !op.isQuoted;
+  isIdentifierAtom(op) && !op.isQuoted;
 
 export const isInfixOp = (op?: unknown): op is Atom =>
   isUnquotedIdentifier(op) && infixOps.has(op.value);

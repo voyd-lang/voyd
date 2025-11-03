@@ -2,9 +2,9 @@ import { Form } from "../ast/form.js";
 import {
   Expr,
   IdentifierAtom,
-  idIs,
-  is,
-  WhitespaceAtom,
+  InternalIdentifierAtom,
+  isForm,
+  isWhitespaceAtom,
 } from "../ast/index.js";
 import { isOp } from "../grammar.js";
 
@@ -18,23 +18,23 @@ export const functionalNotation = (form: Form): Form => {
     const expr = cursor.consume();
     if (!expr) break;
 
-    if (is(expr, Form)) {
+    if (isForm(expr)) {
       result.push(functionalNotation(expr));
       continue;
     }
 
-    if (is(expr, WhitespaceAtom)) {
+    if (isWhitespaceAtom(expr)) {
       result.push(expr);
       continue;
     }
 
     const nextExpr = cursor.peek();
 
-    if (nextExpr && is(nextExpr, Form) && !(isOp(expr) || idIs(expr, ","))) {
+    if (nextExpr && isForm(nextExpr) && !(isOp(expr) || expr.eq(","))) {
       if (nextExpr.callsInternal("generics")) {
         const generics = cursor.consume() as Form;
         const params = cursor.peek();
-        if (params && is(params, Form)) {
+        if (params && isForm(params)) {
           result.push(
             processGenerics(expr, generics, cursor.consume() as Form)
           );
@@ -47,7 +47,7 @@ export const functionalNotation = (form: Form): Form => {
       continue;
     }
 
-    if (callsParen && idIs(expr, ",")) {
+    if (callsParen && expr.eq(",")) {
       isTuple = true;
     }
 
@@ -57,7 +57,7 @@ export const functionalNotation = (form: Form): Form => {
   if (isTuple) {
     return new Form({
       location: form.location?.clone(),
-      elements: ["tuple", ",", ...result],
+      elements: [new InternalIdentifierAtom("tuple"), ",", ...result],
     });
   }
 
@@ -84,7 +84,7 @@ const normalizeParams = (params?: Form): Form | undefined => {
   if (!params) return undefined;
   if (!params.callsInternal("paren")) return params;
   const inner = params.at(1);
-  if (is(inner, Form)) return inner;
+  if (isForm(inner)) return inner;
 
   return new Form({
     elements: params.toArray().slice(2),

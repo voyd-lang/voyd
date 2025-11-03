@@ -1,4 +1,4 @@
-import { Expr, Form, is } from "../../ast/index.js";
+import { Expr, Form, formCallsInternal, isForm } from "../../ast/index.js";
 import {
   arrayLiteral,
   call,
@@ -64,7 +64,7 @@ export class HTMLParser {
     // Component: translate to function call with props object and children
     if (isComponent) {
       const props =
-        !selfClosing && isCallTo(propsOrAttrs, "object_literal")
+        !selfClosing && formCallsInternal(propsOrAttrs, "object_literal")
           ? this.withChildrenProp(propsOrAttrs, tagName)
           : propsOrAttrs;
 
@@ -208,7 +208,7 @@ export class HTMLParser {
       const node = this.parseNode();
       if (node) {
         // Flatten text-array nodes
-        if (isCallTo(node, "array_literal")) {
+        if (isForm(node) && node.callsInternal("array_literal")) {
           Form.elementsOf(node.callArgs()).forEach((expr) =>
             children.push(expr)
           );
@@ -299,9 +299,9 @@ export class HTMLParser {
 }
 
 const unwrapInlineExpr = (expr: Expr): Expr => {
-  if (is(expr, Form) && expr.length === 1) {
+  if (isForm(expr) && expr.length === 1) {
     const only = expr.at(0);
-    if (only && !is(only, Form)) return only;
+    if (only && !isForm(only)) return only;
   }
   return expr;
 };
@@ -315,7 +315,3 @@ const buildModulePathLeft = (segments: string[]) => {
   }
   return left;
 };
-
-function isCallTo(expr: Expr | undefined, name: string): expr is Form {
-  return is(expr, Form) && expr.callsInternal(name);
-}

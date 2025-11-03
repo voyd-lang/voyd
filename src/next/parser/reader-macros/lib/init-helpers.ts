@@ -6,7 +6,6 @@ import {
 } from "../../ast/atom.js";
 import { Expr } from "../../ast/expr.js";
 import { Form, FormInitElements } from "../../ast/form.js";
-import { is } from "../../ast/index.js";
 
 export const call = (
   fn: string | IdentifierAtom | InternalIdentifierAtom,
@@ -72,9 +71,6 @@ export const string = (value: string) => {
     )
   );
 };
-
-export const idIs = (id: unknown, value: string) =>
-  is(id, IdentifierAtom) && id.value === value;
 
 const separateWithCommas = (values: FormInitElements): FormInitElements =>
   values.reduce<FormInitElements>((acc, value, index) => {

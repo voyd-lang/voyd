@@ -1,8 +1,13 @@
 import { FastShiftArray } from "@lib/fast-shift-array.js";
 import { Expr } from "./expr.js";
-import { is, SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
+import { SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
 import { IdentifierAtom, InternalIdentifierAtom } from "./atom.js";
 import { FormCursor } from "./form-cursor.js";
+import {
+  isForm,
+  isIdentifierAtom,
+  isInternalIdentifierAtom,
+} from "./predicates.js";
 
 export type FormOpts = {
   location?: SourceLocation;
@@ -53,19 +58,13 @@ export class Form extends Syntax {
   }
 
   calls(name: IdentifierAtom | string): boolean {
-    const first = this.at(0);
-    if (!is(first, IdentifierAtom)) return false;
-    return typeof name === "string"
-      ? first.value === name
-      : name.value === first.value;
+    if (!isIdentifierAtom(this.first)) return false;
+    return this.first.eq(name);
   }
 
   callsInternal(name: InternalIdentifierAtom | string): boolean {
-    const first = this.at(0);
-    if (!is(first, InternalIdentifierAtom)) return false;
-    return typeof name === "string"
-      ? first.value === name
-      : name.value === first.value;
+    if (!isInternalIdentifierAtom(this.first)) return false;
+    return this.first.eq(name);
   }
 
   at(index: number): Expr | undefined {
@@ -86,6 +85,23 @@ export class Form extends Syntax {
   slice(start?: number, end?: number): Form {
     const elements = this.toArray().slice(start, end);
     return new Form(elements);
+  }
+
+  splitOnDelimiter(delimiter = ","): Form {
+    const groups: Expr[][] = [];
+    let current: Expr[] = [];
+
+    for (const element of this.toArray()) {
+      if (isIdentifierAtom(element) && element.eq(delimiter)) {
+        if (current.length) groups.push(current);
+        current = [];
+        continue;
+      }
+      current.push(element);
+    }
+
+    if (current.length) groups.push(current);
+    return new Form(groups);
   }
 
   toArray(): Expr[] {
@@ -111,7 +127,7 @@ export class Form extends Syntax {
 
   callArgs(): Form | undefined {
     const second = this.at(1);
-    return is(second, Form) ? second : undefined;
+    return isForm(second) ? second : undefined;
   }
 
   updateCallArgs(transform: (args: Form) => Form): Form {

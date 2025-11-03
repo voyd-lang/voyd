@@ -31,6 +31,10 @@ export class Atom extends Syntax {
     return this.constructor as new (opts: AtomOpts) => this;
   }
 
+  eq(val: Atom | string): boolean {
+    return val instanceof Atom ? this.value === val.value : this.value === val;
+  }
+
   clone(): this {
     return new this.ctor({
       location: this.location?.clone(),

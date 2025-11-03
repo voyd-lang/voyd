@@ -1,4 +1,4 @@
-import { List } from "../../syntax-objects/list.js";
+import { Form } from "../ast/form.js";
 import { functionalNotation } from "./functional-notation.js";
 import { interpretWhitespace } from "./interpret-whitespace.js";
 import { primary } from "./primary.js";
@@ -11,5 +11,5 @@ const syntaxMacros: SyntaxMacro[] = [
   primary,
 ];
 
-export const expandSyntaxMacros = (expr: List): List =>
+export const expandSyntaxMacros = (expr: Form): Form =>
   syntaxMacros.reduce((ast, macro) => macro(ast), expr);

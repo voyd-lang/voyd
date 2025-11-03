@@ -1,10 +1,10 @@
-import { isIdentifier } from "../grammar.js";
+import { isIdentifierAtom } from "../ast/predicates.js";
 import { prefixCall } from "./lib/init-helpers.js";
 import { ReaderMacro } from "./types.js";
 
 export const genericsMacro: ReaderMacro = {
   match: (t, prev) => {
-    return t.value === "<" && !!isIdentifier(prev);
+    return t.value === "<" && !!isIdentifierAtom(prev);
   },
   macro: (file, { reader }) => {
     const items = reader(file, ">");

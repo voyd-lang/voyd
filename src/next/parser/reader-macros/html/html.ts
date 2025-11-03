@@ -1,7 +1,5 @@
-import { WhitespaceAtom } from "../../ast/atom.js";
-import { is } from "../../ast/index.js";
+import { isWhitespaceAtom } from "../../ast/predicates.js";
 import { Lexer } from "../../lexer.js";
-// import { expandSyntaxMacros } from "../../syntax-macros/index.js";
 import { ReaderMacro } from "../types.js";
 import { HTMLParser } from "./html-parser.js";
 
@@ -13,7 +11,7 @@ export const htmlMacro: ReaderMacro = {
   match: (t, prev, nextChar) => {
     return (
       t.value === "<" &&
-      !!is(prev, WhitespaceAtom) &&
+      !!isWhitespaceAtom(prev) &&
       !!nextChar &&
       TAG_START.test(nextChar)
     );

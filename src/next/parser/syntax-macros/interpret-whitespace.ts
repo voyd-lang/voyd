@@ -1,11 +1,12 @@
 import { Form, FormInitElements } from "../ast/form.js";
 import {
+  atomEq,
   Expr,
   FormCursor,
   IdentifierAtom,
-  idIs,
-  is,
-  WhitespaceAtom,
+  isForm,
+  isIdentifierAtom,
+  isWhitespaceAtom,
 } from "../ast/index.js";
 import { isContinuationOp, isGreedyOp } from "../grammar.js";
 
@@ -16,13 +17,13 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
   let hadComma = false;
   while (!cursor.done) {
     const child = elideParens(cursor, indentLevel);
-    if (is(child, Form) && !child.length) continue;
+    if (isForm(child) && !child.length) continue;
     addSibling(child, transformed, hadComma);
-    hadComma = idIs(cursor.peek(), ",");
+    hadComma = !!atomEq(cursor.peek(), ",");
   }
 
   const newForm = new Form(transformed);
-  return newForm.length === 1 && is(newForm.first, Form)
+  return newForm.length === 1 && isForm(newForm.first)
     ? newForm.first
     : newForm;
 };
@@ -46,7 +47,7 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
 
     // Handle labeled arguments
     const firstChild = children.at(1);
-    if (is(firstChild, Form) && isNamedArg(firstChild)) {
+    if (isForm(firstChild) && isNamedArg(firstChild)) {
       transformed.push(...children.slice(1));
       return;
     }
@@ -68,16 +69,16 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
       break;
     }
 
-    if (is(next, WhitespaceAtom)) {
+    if (isWhitespaceAtom(next)) {
       cursor.consume();
       continue;
     }
 
-    if (idIs(next, ",")) {
+    if (atomEq(next, ",")) {
       break;
     }
 
-    if (is(next, Form)) {
+    if (isForm(next)) {
       cursor.consume();
       transformed.push(interpretWhitespace(next, indentLevel));
       continue;
@@ -123,7 +124,7 @@ const nextExprIndentLevel = (cursor: FormCursor) => {
       continue;
     }
 
-    if (idIs(expr, ",")) return 0;
+    if (atomEq(expr, ",")) return 0;
 
     return nextIndentLevel;
   }
@@ -132,17 +133,15 @@ const nextExprIndentLevel = (cursor: FormCursor) => {
 };
 
 const consumeLeadingWhitespace = (cursor: FormCursor) => {
-  cursor.consumeWhile(
-    (expr) => !!expr && (is(expr, WhitespaceAtom) || idIs(expr, ","))
-  );
+  cursor.consumeWhile((expr) => isWhitespaceAtom(expr) || atomEq(expr, ","));
 };
 
-const isNewline = (v?: Expr) => is(v, WhitespaceAtom) && v.isNewline;
-const isIndent = (v?: Expr) => is(v, WhitespaceAtom) && v.isIndent;
+const isNewline = (v?: Expr) => isWhitespaceAtom(v) && v.isNewline;
+const isIndent = (v?: Expr) => isWhitespaceAtom(v) && v.isIndent;
 
 const isNamedArg = (v: Form) => {
   // Second value should be an identifier whose value is a colon
-  if (!idIs(v.at(1), ":")) {
+  if (!atomEq(v.at(1), ":")) {
     return false;
   }
 
@@ -156,7 +155,7 @@ const handleLeadingContinuationOp = (
 ): boolean => {
   if (
     children.length !== 1 ||
-    !is(child, Form) ||
+    !isForm(child) ||
     !isContinuationOp(child.first)
   ) {
     return false;
@@ -183,12 +182,12 @@ const handleLeadingContinuationOp = (
 const addSibling = (child: Expr, siblings: Expr[], hadComma?: boolean) => {
   const olderSibling = siblings.at(-1);
 
-  if (!is(child, Form) || hadComma) {
+  if (!isForm(child) || hadComma) {
     siblings.push(child);
     return;
   }
 
-  if (!is(olderSibling, Form) || olderSibling.calls("generics")) {
+  if (!isForm(olderSibling) || olderSibling.callsInternal("generics")) {
     siblings.push(child);
     return;
   }
@@ -211,7 +210,7 @@ const splitNamedArgs = (list: Form): Expr[] => {
   for (let i = 2; i < list.length; i += 1) {
     const expr = list.at(i);
     const next = list.at(i + 1);
-    if (is(expr, IdentifierAtom) && idIs(next, ":")) {
+    if (isIdentifierAtom(expr) && atomEq(next, ":")) {
       result.push(list.slice(start, i));
       start = i;
     }

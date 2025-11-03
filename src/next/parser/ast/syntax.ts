@@ -104,16 +104,6 @@ export class SourceLocation {
   }
 }
 
-type SyntaxConstructor<T extends Syntax> = abstract new (...args: any[]) => T;
-
-export function is<T extends Syntax>(
-  syntax: unknown,
-  ctor: SyntaxConstructor<T>
-): syntax is T {
-  if (!syntax) return false;
-  return syntax instanceof ctor;
-}
-
 let currentSyntaxId = 0;
 export const getSyntaxId = () => {
   const current = currentSyntaxId;
