@@ -1,33 +1,34 @@
-import { BlockForm, Form, FormInitElements, LabelForm } from "../ast/form.js";
-import {
-  atomEq,
-  Expr,
-  FormCursor,
-  IdentifierAtom,
-  isCallForm,
-  isForm,
-  isIdentifierAtom,
-  isWhitespaceAtom,
-} from "../ast/index.js";
+import { CallForm, Form, FormInitElements } from "../ast/form.js";
+import { Expr, FormCursor, IdentifierAtom } from "../ast/index.js";
+import * as p from "../ast/predicates.js";
 import { isContinuationOp, isGreedyOp } from "../grammar.js";
 
 export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
+  const result = interpretWhitespaceExpr(form, indentLevel);
+  return p.isForm(result) ? result : new Form([result]);
+};
+
+const interpretWhitespaceExpr = (form: Form, indentLevel?: number): Expr => {
   const cursor = form.cursor();
   const transformed: Expr[] = [];
 
   while (!cursor.done) {
     const child = elideParens(cursor, indentLevel);
-    if (isForm(child) && !child.length) continue;
+    if (p.isForm(child) && !child.length) continue;
     addSibling(child, transformed);
   }
 
   const newForm = new Form(transformed);
-  return newForm.length === 1 && isForm(newForm.first)
-    ? newForm.first
-    : newForm;
+  const normalizedForm =
+    newForm.length === 1 && p.isForm(newForm.first) ? newForm.first : newForm;
+
+  const preserved =
+    form instanceof CallForm ? normalizedForm.toCall() : normalizedForm;
+
+  return preserved.unwrap();
 };
 
-const elideParens = (cursor: FormCursor, startIndentLevel?: number): Form => {
+const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
   const transformed: FormInitElements = [];
   const indentLevel = startIndentLevel ?? nextExprIndentLevel(cursor);
 
@@ -35,7 +36,7 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Form => {
     const children: Expr[] = [new IdentifierAtom("block")];
 
     while (nextExprIndentLevel(cursor) > indentLevel) {
-      const child = elideParens(cursor, indentLevel + 1).unwrap();
+      const child = elideParens(cursor, indentLevel + 1);
 
       if (handleLeadingContinuationOp(child, children, transformed)) {
         return;
@@ -46,12 +47,12 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Form => {
 
     // Handle labeled arguments
     const firstChild = children.at(1);
-    if (isForm(firstChild) && isNamedArg(firstChild)) {
+    if (p.isForm(firstChild) && isNamedArg(firstChild)) {
       transformed.push(...children.slice(1));
       return;
     }
 
-    transformed.push(new BlockForm(children));
+    transformed.push(new CallForm(children));
   };
 
   consumeLeadingWhitespace(cursor);
@@ -68,33 +69,21 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Form => {
       break;
     }
 
-    if (isWhitespaceAtom(next)) {
+    if (p.isWhitespaceAtom(next)) {
       cursor.consume();
       continue;
     }
 
-    if (atomEq(next, ",")) {
-      break;
-    }
-
-    if (isForm(next) && next.callsInternal("paren")) {
+    if (p.isForm(next) && next.callsInternal("paren")) {
       cursor.consume();
       const result = elideParens(next.slice(1).cursor(), indentLevel);
-      transformed.push(result.unwrap());
+      transformed.push(result);
       continue;
     }
 
-    if (isCallForm(next)) {
+    if (p.isForm(next)) {
       cursor.consume();
-      const result = interpretWhitespace(next, indentLevel);
-      transformed.push(result.toCall());
-      continue;
-    }
-
-    if (isForm(next)) {
-      cursor.consume();
-      const result = interpretWhitespace(next, indentLevel);
-      transformed.push(result.unwrap());
+      transformed.push(interpretWhitespaceExpr(next, indentLevel));
       continue;
     }
 
@@ -103,7 +92,7 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Form => {
       transformed.push(op);
 
       if (nextExprIndentLevel(cursor) <= indentLevel) {
-        transformed.push(elideParens(cursor, indentLevel).unwrap());
+        transformed.push(elideParens(cursor, indentLevel));
       }
 
       continue;
@@ -114,7 +103,7 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Form => {
     transformed.push(consumed);
   }
 
-  return new Form(transformed);
+  return new Form(transformed).unwrap();
 };
 
 /**
@@ -144,15 +133,15 @@ const nextExprIndentLevel = (cursor: FormCursor) => {
 };
 
 const consumeLeadingWhitespace = (cursor: FormCursor) => {
-  cursor.consumeWhile((expr) => isWhitespaceAtom(expr));
+  cursor.consumeWhile((expr) => p.isWhitespaceAtom(expr));
 };
 
-const isNewline = (v?: Expr) => isWhitespaceAtom(v) && v.isNewline;
-const isIndent = (v?: Expr) => isWhitespaceAtom(v) && v.isIndent;
+const isNewline = (v?: Expr) => p.isWhitespaceAtom(v) && v.isNewline;
+const isIndent = (v?: Expr) => p.isWhitespaceAtom(v) && v.isIndent;
 
 const isNamedArg = (v: Form) => {
   // Second value should be an identifier whose value is a colon
-  if (!atomEq(v.at(1), ":")) {
+  if (!p.atomEq(v.at(1), ":")) {
     return false;
   }
 
@@ -166,7 +155,7 @@ const handleLeadingContinuationOp = (
 ): boolean => {
   if (
     children.length !== 1 ||
-    !isForm(child) ||
+    !p.isForm(child) ||
     !isContinuationOp(child.first)
   ) {
     return false;
@@ -191,7 +180,7 @@ const handleLeadingContinuationOp = (
 };
 
 const unwrapSyntheticCall = (expr: Expr): Expr => {
-  if (isForm(expr)) return expr.unwrap();
+  if (p.isForm(expr)) return expr.unwrap();
   return expr;
 };
 
@@ -199,16 +188,12 @@ const addSibling = (child: Expr, siblings: Expr[]) => {
   let normalizedChild = unwrapSyntheticCall(child);
   const olderSibling = siblings.at(-1);
 
-  if (!isForm(normalizedChild)) {
+  if (!p.isForm(normalizedChild)) {
     siblings.push(normalizedChild);
     return;
   }
 
-  if (isNamedArg(normalizedChild) && !(normalizedChild instanceof LabelForm)) {
-    normalizedChild = new LabelForm(normalizedChild.toArray());
-  }
-
-  if (!isForm(olderSibling) || olderSibling.callsInternal("generics")) {
+  if (!p.isForm(olderSibling) || olderSibling.callsInternal("generics")) {
     siblings.push(normalizedChild);
     return;
   }
@@ -231,7 +216,7 @@ const splitNamedArgs = (list: Form): Expr[] => {
   for (let i = 2; i < list.length; i += 1) {
     const expr = list.at(i);
     const next = list.at(i + 1);
-    if (isIdentifierAtom(expr) && atomEq(next, ":")) {
+    if (p.isIdentifierAtom(expr) && p.atomEq(next, ":")) {
       result.push(list.slice(start, i));
       start = i;
     }

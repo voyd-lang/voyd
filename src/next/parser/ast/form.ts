@@ -4,7 +4,7 @@ import { SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
 import { IdentifierAtom, InternalIdentifierAtom } from "./atom.js";
 import { FormCursor } from "./form-cursor.js";
 import {
-  isForm,
+  isCallForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
 } from "./predicates.js";
@@ -179,17 +179,9 @@ export class Form extends Syntax {
 export class CallForm extends Form {
   syntaxType = "call-form";
 
-  override unwrap(): Expr {
-    return this;
+  override unwrap(): CallForm {
+    return this.length === 1 && isCallForm(this.first) ? this.first : this;
   }
-}
-
-export class BlockForm extends Form {
-  syntaxType = "block-form";
-}
-
-export class LabelForm extends Form {
-  syntaxType = "block-form";
 }
 
 const deriveLocation = (
