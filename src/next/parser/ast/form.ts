@@ -173,6 +173,14 @@ export class CallForm extends Form {
   syntaxType = "call-form";
 }
 
+export class BlockForm extends Form {
+  syntaxType = "block-form";
+}
+
+export class LabelForm extends Form {
+  syntaxType = "block-form";
+}
+
 const deriveLocation = (
   elements: FastShiftArray<Expr>
 ): SourceLocation | undefined => {
