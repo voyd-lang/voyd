@@ -136,11 +136,18 @@ export class Form extends Syntax {
     return this;
   }
 
+  toCall(): CallForm {
+    const newCall = new CallForm();
+    newCall.setLocation(this.location);
+    newCall.#elements = this.#elements;
+    return newCall;
+  }
+
   /**
    * Converts the Form into a function call of the provided name by separating
    * parameters between commas and inserting the name as the first element */
   splitInto(name: Internal): Form {
-    return this.split().insert(name);
+    return this.split().insert(name).toCall();
   }
 
   toArray(): Expr[] {
@@ -171,6 +178,10 @@ export class Form extends Syntax {
 
 export class CallForm extends Form {
   syntaxType = "call-form";
+
+  override unwrap(): Expr {
+    return this;
+  }
 }
 
 export class BlockForm extends Form {

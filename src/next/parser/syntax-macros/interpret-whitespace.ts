@@ -1,16 +1,12 @@
-import { CallForm, Form, FormInitElements } from "../ast/form.js";
+import { BlockForm, Form, FormInitElements, LabelForm } from "../ast/form.js";
 import {
   atomEq,
   Expr,
   FormCursor,
   IdentifierAtom,
-  isBoolAtom,
   isCallForm,
-  isFloatAtom,
   isForm,
   isIdentifierAtom,
-  isIntAtom,
-  isStringAtom,
   isWhitespaceAtom,
 } from "../ast/index.js";
 import { isContinuationOp, isGreedyOp } from "../grammar.js";
@@ -31,10 +27,7 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
     : newForm;
 };
 
-const elideParens = (
-  cursor: FormCursor,
-  startIndentLevel?: number
-): CallForm => {
+const elideParens = (cursor: FormCursor, startIndentLevel?: number): Form => {
   const transformed: FormInitElements = [];
   const indentLevel = startIndentLevel ?? nextExprIndentLevel(cursor);
 
@@ -58,7 +51,7 @@ const elideParens = (
       return;
     }
 
-    transformed.push(children);
+    transformed.push(new BlockForm(children));
   };
 
   consumeLeadingWhitespace(cursor);
@@ -87,14 +80,21 @@ const elideParens = (
     if (isForm(next) && next.callsInternal("paren")) {
       cursor.consume();
       const result = elideParens(next.slice(1).cursor(), indentLevel);
-      transformed.push(unwrapNonCalls(next, result));
+      transformed.push(result.unwrap());
+      continue;
+    }
+
+    if (isCallForm(next)) {
+      cursor.consume();
+      const result = interpretWhitespace(next, indentLevel);
+      transformed.push(result.toCall());
       continue;
     }
 
     if (isForm(next)) {
       cursor.consume();
       const result = interpretWhitespace(next, indentLevel);
-      transformed.push(unwrapNonCalls(next, result));
+      transformed.push(result.unwrap());
       continue;
     }
 
@@ -114,7 +114,7 @@ const elideParens = (
     transformed.push(consumed);
   }
 
-  return new CallForm(transformed);
+  return new Form(transformed);
 };
 
 /**
@@ -191,39 +191,21 @@ const handleLeadingContinuationOp = (
 };
 
 const unwrapSyntheticCall = (expr: Expr): Expr => {
-  let current = expr;
-
-  while (isCallForm(current) && current.length === 1) {
-    const first = current.first;
-    if (!first) break;
-
-    if (isForm(first)) {
-      current = first;
-      continue;
-    }
-
-    if (
-      isBoolAtom(first) ||
-      isIntAtom(first) ||
-      isFloatAtom(first) ||
-      isStringAtom(first)
-    ) {
-      return first;
-    }
-
-    break;
-  }
-
-  return current;
+  if (isForm(expr)) return expr.unwrap();
+  return expr;
 };
 
 const addSibling = (child: Expr, siblings: Expr[]) => {
-  const normalizedChild = unwrapSyntheticCall(child);
+  let normalizedChild = unwrapSyntheticCall(child);
   const olderSibling = siblings.at(-1);
 
   if (!isForm(normalizedChild)) {
     siblings.push(normalizedChild);
     return;
+  }
+
+  if (isNamedArg(normalizedChild) && !(normalizedChild instanceof LabelForm)) {
+    normalizedChild = new LabelForm(normalizedChild.toArray());
   }
 
   if (!isForm(olderSibling) || olderSibling.callsInternal("generics")) {
@@ -258,8 +240,3 @@ const splitNamedArgs = (list: Form): Expr[] => {
   result.push(list.slice(start));
   return result;
 };
-
-const unwrapNonCalls = (source: unknown, transformed: Expr): Expr =>
-  !isCallForm(source) && isForm(transformed) && !isCallForm(transformed)
-    ? transformed.unwrap()
-    : transformed;
