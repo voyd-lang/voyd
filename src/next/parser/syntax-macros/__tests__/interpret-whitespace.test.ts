@@ -32,3 +32,8 @@ test("it correctly handles implicit labeled arguments to a generic function", as
   const form = await runFixture("generics_with_labels.voyd");
   expect(form).toMatchSnapshot();
 });
+
+test("it correctly handles the kitchen sink", async () => {
+  const form = await runFixture("sink.voyd");
+  expect(form).toMatchSnapshot();
+});

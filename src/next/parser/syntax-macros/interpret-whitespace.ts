@@ -4,9 +4,13 @@ import {
   Expr,
   FormCursor,
   IdentifierAtom,
+  isBoolAtom,
   isCallForm,
+  isFloatAtom,
   isForm,
   isIdentifierAtom,
+  isIntAtom,
+  isStringAtom,
   isWhitespaceAtom,
 } from "../ast/index.js";
 import { isContinuationOp, isGreedyOp } from "../grammar.js";
@@ -186,28 +190,56 @@ const handleLeadingContinuationOp = (
   return true;
 };
 
+const unwrapSyntheticCall = (expr: Expr): Expr => {
+  let current = expr;
+
+  while (isCallForm(current) && current.length === 1) {
+    const first = current.first;
+    if (!first) break;
+
+    if (isForm(first)) {
+      current = first;
+      continue;
+    }
+
+    if (
+      isBoolAtom(first) ||
+      isIntAtom(first) ||
+      isFloatAtom(first) ||
+      isStringAtom(first)
+    ) {
+      return first;
+    }
+
+    break;
+  }
+
+  return current;
+};
+
 const addSibling = (child: Expr, siblings: Expr[]) => {
+  const normalizedChild = unwrapSyntheticCall(child);
   const olderSibling = siblings.at(-1);
 
-  if (!isForm(child)) {
-    siblings.push(child);
+  if (!isForm(normalizedChild)) {
+    siblings.push(normalizedChild);
     return;
   }
 
   if (!isForm(olderSibling) || olderSibling.callsInternal("generics")) {
-    siblings.push(child);
+    siblings.push(normalizedChild);
     return;
   }
 
-  if (isNamedArg(child) && !isNamedArg(olderSibling)) {
+  if (isNamedArg(normalizedChild) && !isNamedArg(olderSibling)) {
     siblings.pop();
     siblings.push(
-      new Form([...olderSibling.toArray(), ...splitNamedArgs(child)])
+      new Form([...olderSibling.toArray(), ...splitNamedArgs(normalizedChild)])
     );
     return;
   }
 
-  siblings.push(child);
+  siblings.push(normalizedChild);
 };
 
 const splitNamedArgs = (list: Form): Expr[] => {
@@ -228,6 +260,6 @@ const splitNamedArgs = (list: Form): Expr[] => {
 };
 
 const unwrapNonCalls = (source: unknown, transformed: Expr): Expr =>
-  !isCallForm(source) && isForm(transformed)
+  !isCallForm(source) && isForm(transformed) && !isCallForm(transformed)
     ? transformed.unwrap()
     : transformed;
