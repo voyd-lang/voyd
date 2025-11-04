@@ -78,9 +78,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
       "::",
       [
         "object_literal",
-        [
-          "read",
-        ],
+        "read",
         [
           "write",
           ":",
@@ -147,9 +145,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
       "extract_parameters",
       "=",
       [
-        [
-          "definitions",
-        ],
+        "definitions",
         "=>",
         [
           "block",
@@ -306,9 +302,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
           [
             "tuple",
             "acc",
-            [
-              "val",
-            ],
+            "val",
           ],
           "=>",
           [
@@ -422,9 +416,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
       [
         "tuple",
         "x",
-        [
-          "y",
-        ],
+        "y",
       ],
       "=",
       [
@@ -439,9 +431,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
         [
           "generics",
           "Hey",
-          [
-            "There",
-          ],
+          "There",
         ],
         "1",
         "2",
@@ -906,24 +896,18 @@ exports[`it correctly handles the kitchen sink 1`] = `
         ],
         [
           "$@",
-          [
-            "hey",
-          ],
+          "hey",
+        ],
+        [
+          "$",
+          "hey",
         ],
         [
           "$",
           [
-            "hey",
-          ],
-        ],
-        [
-          "$",
-          [
-            [
-              "extract",
-              "equals_expr",
-              "2",
-            ],
+            "extract",
+            "equals_expr",
+            "2",
           ],
         ],
         [
@@ -1010,18 +994,14 @@ exports[`it correctly handles the kitchen sink 1`] = `
           ],
           ":",
           "is",
-          [
-            "up",
-          ],
+          "up",
           [
             [
               "what",
             ],
             ":",
             "is",
-            [
-              "up",
-            ],
+            "up",
           ],
         ],
         [
@@ -1347,11 +1327,9 @@ exports[`it correctly handles the kitchen sink 1`] = `
           ".",
           [
             [
-              [
-                "x",
-                ":",
-                "i32",
-              ],
+              "x",
+              ":",
+              "i32",
             ],
             "=>",
             [
@@ -1363,11 +1341,9 @@ exports[`it correctly handles the kitchen sink 1`] = `
           ".",
           [
             [
-              [
-                "x",
-                ":",
-                "i32",
-              ],
+              "x",
+              ":",
+              "i32",
             ],
             "=>",
             [
