@@ -1,9 +1,10 @@
-import { Form, FormInitElements } from "../ast/form.js";
+import { CallForm, Form, FormInitElements } from "../ast/form.js";
 import {
   atomEq,
   Expr,
   FormCursor,
   IdentifierAtom,
+  isCallForm,
   isForm,
   isIdentifierAtom,
   isWhitespaceAtom,
@@ -26,7 +27,10 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
     : newForm;
 };
 
-const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
+const elideParens = (
+  cursor: FormCursor,
+  startIndentLevel?: number
+): CallForm => {
   const transformed: FormInitElements = [];
   const indentLevel = startIndentLevel ?? nextExprIndentLevel(cursor);
 
@@ -34,7 +38,7 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
     const children: Expr[] = [new IdentifierAtom("block")];
 
     while (nextExprIndentLevel(cursor) > indentLevel) {
-      const child = elideParens(cursor, indentLevel + 1);
+      const child = elideParens(cursor, indentLevel + 1).unwrap();
 
       if (handleLeadingContinuationOp(child, children, transformed)) {
         return;
@@ -76,9 +80,17 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
       break;
     }
 
+    if (isForm(next) && next.callsInternal("paren")) {
+      cursor.consume();
+      const result = elideParens(next.slice(1).cursor(), indentLevel);
+      transformed.push(unwrapNonCalls(next, result));
+      continue;
+    }
+
     if (isForm(next)) {
       cursor.consume();
-      transformed.push(interpretWhitespace(next, indentLevel));
+      const result = interpretWhitespace(next, indentLevel);
+      transformed.push(unwrapNonCalls(next, result));
       continue;
     }
 
@@ -87,7 +99,7 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
       transformed.push(op);
 
       if (nextExprIndentLevel(cursor) <= indentLevel) {
-        transformed.push(elideParens(cursor, indentLevel));
+        transformed.push(elideParens(cursor, indentLevel).unwrap());
       }
 
       continue;
@@ -98,8 +110,7 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
     transformed.push(consumed);
   }
 
-  const newForm = new Form(transformed);
-  return newForm.length === 1 ? newForm.first! : newForm;
+  return new CallForm(transformed);
 };
 
 /**
@@ -215,3 +226,8 @@ const splitNamedArgs = (list: Form): Expr[] => {
   result.push(list.slice(start));
   return result;
 };
+
+const unwrapNonCalls = (source: unknown, transformed: Expr): Expr =>
+  !isCallForm(source) && isForm(transformed)
+    ? transformed.unwrap()
+    : transformed;

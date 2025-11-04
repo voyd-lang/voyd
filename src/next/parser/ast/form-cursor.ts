@@ -16,6 +16,10 @@ export class FormCursor {
     return new FormCursor(form.toArray());
   }
 
+  get length() {
+    return this.#elements.length;
+  }
+
   get done() {
     return this.#index >= this.#elements.length;
   }

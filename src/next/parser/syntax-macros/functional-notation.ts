@@ -1,4 +1,4 @@
-import { Form } from "../ast/form.js";
+import { CallForm, Form } from "../ast/form.js";
 import { Expr, isForm, isWhitespaceAtom } from "../ast/index.js";
 import { isOp } from "../grammar.js";
 
@@ -35,7 +35,7 @@ export const functionalNotation = (form: Form): Form => {
       const params = cursor.peek();
       if (isParams(params)) cursor.consume();
       result.push(
-        new Form([
+        new CallForm([
           expr,
           nextExpr,
           ...(isParams(params) ? functionalNotation(params).rest : []),
@@ -46,7 +46,7 @@ export const functionalNotation = (form: Form): Form => {
 
     if (isParams(nextExpr)) {
       cursor.consume();
-      result.push(functionalNotation(nextExpr).replaceFirst(expr));
+      result.push(new CallForm([expr, ...functionalNotation(nextExpr).rest]));
       continue;
     }
 
@@ -57,4 +57,4 @@ export const functionalNotation = (form: Form): Form => {
 };
 
 const isParams = (expr: unknown): expr is Form =>
-  isForm(expr) && (expr.iCall("paren") || expr.iCall("tuple"));
+  isForm(expr) && (expr.callsInternal("paren") || expr.callsInternal("tuple"));

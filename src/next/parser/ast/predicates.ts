@@ -9,12 +9,15 @@ import {
   StringAtom,
   WhitespaceAtom,
 } from "./atom.js";
-import { Form } from "./form.js";
+import { CallForm, Form } from "./form.js";
+import { Internal } from "./internals.js";
 import { Syntax } from "./syntax.js";
 
 export const isSyntax = (value: unknown): value is Syntax =>
   value instanceof Syntax;
 export const isForm = (value: unknown): value is Form => value instanceof Form;
+export const isCallForm = (value: unknown): value is CallForm =>
+  value instanceof CallForm;
 export const isAtom = (value: unknown): value is Atom => value instanceof Atom;
 export const isIdentifierAtom = (value: unknown): value is IdentifierAtom =>
   value instanceof IdentifierAtom;
@@ -42,5 +45,5 @@ export const formCalls = (form: unknown, value: string | IdentifierAtom) =>
 
 export const formCallsInternal = (
   form: unknown,
-  value: string | InternalIdentifierAtom
+  value: Internal | InternalIdentifierAtom
 ) => isForm(form) && form.callsInternal(value);

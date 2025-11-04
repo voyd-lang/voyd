@@ -7,6 +7,6 @@ export const genericsMacro: ReaderMacro = {
   },
   macro: (file, { reader }) => {
     const items = reader(file, ">");
-    return items.toCallOf("generics");
+    return items.splitInto("generics");
   },
 };

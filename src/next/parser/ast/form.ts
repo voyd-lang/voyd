@@ -72,11 +72,6 @@ export class Form extends Syntax {
     return this.first.eq(name);
   }
 
-  /** Alias for callsInternal */
-  iCall(name: InternalIdentifierAtom | Internal) {
-    return this.callsInternal(name);
-  }
-
   at(index: number): Expr | undefined {
     return this.#elements.at(index);
   }
@@ -106,9 +101,13 @@ export class Form extends Syntax {
     return new Form(this.toArray().toSpliced(at, 0, expr));
   }
 
+  map(fn: (expr: Expr) => Expr): Form {
+    return new Form(this.toArray().map((expr) => fn(expr)));
+  }
+
   split(delimiter = ","): Form {
-    const groups: (Expr[] | Expr)[] = [];
-    let current: Expr[] = [];
+    const groups: FormInitElements = [];
+    let current: FormInitElements = [];
 
     for (const element of this.toArray()) {
       if (isIdentifierAtom(element) && element.eq(delimiter)) {
@@ -131,16 +130,16 @@ export class Form extends Syntax {
     });
   }
 
-  /** If this Form only contains a single child that itself is a form, returns the child, otherwise returns this form */
-  unwrap(): Form {
-    if (this.length === 1 && isForm(this.first)) return this.first;
+  /** If this Form only contains a single child, returns the child, otherwise returns this form */
+  unwrap(): Expr {
+    if (this.length === 1 && this.first) return this.first;
     return this;
   }
 
   /**
    * Converts the Form into a function call of the provided name by separating
    * parameters between commas and inserting the name as the first element */
-  toCallOf(name: Internal): Form {
+  splitInto(name: Internal): Form {
     return this.split().insert(name);
   }
 
@@ -168,6 +167,10 @@ export class Form extends Syntax {
   static elementsOf(form?: Form): Expr[] {
     return form ? form.toArray() : [];
   }
+}
+
+export class CallForm extends Form {
+  syntaxType = "call-form";
 }
 
 const deriveLocation = (

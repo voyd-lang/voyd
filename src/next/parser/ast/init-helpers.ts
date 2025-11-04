@@ -5,14 +5,14 @@ import {
   InternalIdentifierAtom,
 } from "./atom.js";
 import { Expr } from "./expr.js";
-import { Form, FormInitElements } from "./form.js";
+import { CallForm, FormInitElements } from "./form.js";
 import { Internal } from "./internals.js";
 
 export const call = (
   fn: Internal | IdentifierAtom | InternalIdentifierAtom,
   ...args: FormInitElements
 ) =>
-  new Form([
+  new CallForm([
     typeof fn === "string" ? new InternalIdentifierAtom(fn) : fn,
     ...args,
   ]);
