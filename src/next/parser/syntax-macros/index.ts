@@ -8,7 +8,7 @@ import { SyntaxMacro } from "./types.js";
 const SYNTAX_MACROS: SyntaxMacro[] = [
   functionalNotation,
   interpretWhitespace,
-  // primary,
+  primary,
 ];
 
 export const expandSyntaxMacros = (

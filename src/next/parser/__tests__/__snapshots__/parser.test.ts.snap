@@ -14,785 +14,705 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
       ],
       "all",
     ],
-  ],
-  [
-    "use",
     [
-      "::",
+      "use",
       [
         "::",
-        "std",
-        "io",
-      ],
-      [
-        "object_literal",
-        "read",
         [
-          ":",
-          "write",
-          "io_write",
-        ],
-      ],
-    ],
-  ],
-  [
-    "fn",
-    [
-      "->",
-      [
-        "fib",
-        [
-          ":",
-          "n",
-          "i32",
-        ],
-      ],
-      "i32",
-    ],
-    [
-      "block",
-      [
-        "if",
-        [
-          "<=",
-          "n",
-          "1",
+          "::",
+          "std",
+          "io",
         ],
         [
-          ":",
-          "then",
+          "object_literal",
+          "read",
           [
-            "block",
+            ":",
+            "write",
+            "io_write",
+          ],
+        ],
+      ],
+    ],
+    [
+      "fn",
+      [
+        "->",
+        [
+          "fib",
+          [
+            ":",
             "n",
+            "i32",
           ],
         ],
-        [
-          ":",
-          "else",
-          [
-            "block",
-            [
-              "+",
-              [
-                "fib",
-                [
-                  "-",
-                  "n",
-                  "1",
-                ],
-              ],
-              [
-                "fib",
-                [
-                  "-",
-                  "n",
-                  "2",
-                ],
-              ],
-            ],
-          ],
-        ],
+        "i32",
       ],
-    ],
-  ],
-  [
-    "macro_let",
-    [
-      "=",
-      "extract_parameters",
-      [
-        "=>",
-        [
-          "definitions",
-        ],
-        [
-          "block",
-          [
-            "concat",
-            [
-              "\`",
-              "parameters",
-            ],
-            [
-              "slice",
-              "definitions",
-              "1",
-            ],
-          ],
-        ],
-      ],
-    ],
-  ],
-  [
-    "if",
-    [
-      ">",
-      "x",
-      "10",
-    ],
-    [
-      ":",
-      "then",
       [
         "block",
-        "10",
-      ],
-    ],
-    [
-      ":",
-      "else",
-      [
-        "block",
-        "20",
-      ],
-    ],
-  ],
-  [
-    "if",
-    [
-      "<",
-      "x",
-      "0.0",
-    ],
-    [
-      ":",
-      "then",
-      "-1",
-    ],
-    [
-      ":",
-      "elif",
-      [
-        "<",
-        "x",
-        "2.0",
-      ],
-    ],
-    [
-      ":",
-      "then",
-      "0",
-    ],
-    [
-      ":",
-      "else",
-      "2",
-    ],
-  ],
-  [
-    "reduce",
-    "array",
-    "0",
-    "1",
-    "2",
-    [
-      ":",
-      "hey",
-      [
-        "=>",
-        [],
         [
-          "block",
+          "if",
           [
-            "log",
-            "val",
+            "<=",
+            "n",
+            "1",
           ],
           [
-            "+",
-            "acc",
-            "val",
-          ],
-        ],
-      ],
-    ],
-    [
-      ":",
-      "with",
-      [
-        "=>",
-        [],
-        "0",
-      ],
-    ],
-  ],
-  "10",
-  [
-    "+",
-    "3",
-  ],
-  [
-    "mul",
-    [
-      "&",
-      "self",
-    ],
-    [
-      ":",
-      "other",
-      [
-        "Vec",
-        [
-          "generics",
-          "T",
-        ],
-      ],
-    ],
-  ],
-  [
-    "mul",
-    [
-      "&",
-      "self",
-    ],
-    [
-      ":",
-      "other",
-      [
-        "Vec",
-        [
-          "generics",
-          "T",
-        ],
-      ],
-    ],
-  ],
-  [
-    "let",
-    [
-      "=",
-      "a",
-      [
-        "+",
-        [
-          "reduce",
-          "array",
-          "0",
-          [
-            "=>",
+            ":",
+            "then",
             [
-              "acc",
-              "val",
+              "block",
+              "n",
             ],
+          ],
+          [
+            ":",
+            "else",
             [
               "block",
               [
                 "+",
-                "acc",
-                "val",
+                [
+                  "fib",
+                  [
+                    "-",
+                    "n",
+                    "1",
+                  ],
+                ],
+                [
+                  "fib",
+                  [
+                    "-",
+                    "n",
+                    "2",
+                  ],
+                ],
               ],
             ],
           ],
         ],
+      ],
+    ],
+    [
+      "macro_let",
+      [
+        "=",
+        "extract_parameters",
         [
-          "*",
-          "10",
-          "3",
+          "=>",
+          "definitions",
+          [
+            "block",
+            [
+              "concat",
+              [
+                "\`",
+                "parameters",
+              ],
+              [
+                "slice",
+                "definitions",
+                "1",
+              ],
+            ],
+          ],
         ],
       ],
     ],
-  ],
-  [
-    "let",
     [
-      "=",
-      "x",
+      "if",
       [
-        "my_func",
+        ">",
+        "x",
+        "10",
+      ],
+      [
+        ":",
+        "then",
         [
-          "add",
-          "1",
-          "2",
+          "block",
+          "10",
         ],
+      ],
+      [
+        ":",
+        "else",
+        [
+          "block",
+          "20",
+        ],
+      ],
+    ],
+    [
+      "if",
+      [
+        "<",
+        "x",
+        "0.0",
+      ],
+      [
+        ":",
+        "then",
+        "-1",
+      ],
+      [
+        ":",
+        "elif",
+        [
+          "<",
+          "x",
+          "2.0",
+        ],
+      ],
+      [
+        ":",
+        "then",
+        "0",
+      ],
+      [
+        ":",
+        "else",
+        "2",
+      ],
+    ],
+    [
+      "reduce",
+      "array",
+      "0",
+      "1",
+      "2",
+      [
+        ":",
+        "hey",
         [
           "=>",
           [],
           [
             "block",
             [
-              "hello",
+              "log",
+              "val",
+            ],
+            [
+              "+",
+              "acc",
+              "val",
             ],
           ],
         ],
+      ],
+      [
+        ":",
+        "with",
         [
-          "+",
-          "3",
-          "4",
+          "=>",
+          [],
+          "0",
         ],
       ],
     ],
-  ],
-  [
-    "let",
+    "10",
     [
-      "=",
-      "vec",
+      "+",
+      "3",
+    ],
+    [
+      "mul",
       [
-        "object_literal",
+        "&",
+        "self",
+      ],
+      [
+        ":",
+        "other",
         [
-          ":",
-          "a",
+          "Vec",
+          [
+            "generics",
+            "T",
+          ],
+        ],
+      ],
+    ],
+    [
+      "mul",
+      [
+        "&",
+        "self",
+      ],
+      [
+        ":",
+        "other",
+        [
+          "Vec",
+          [
+            "generics",
+            "T",
+          ],
+        ],
+      ],
+    ],
+    [
+      "let",
+      [
+        "=",
+        "a",
+        [
+          "+",
+          [
+            "reduce",
+            "array",
+            "0",
+            [
+              "=>",
+              [
+                "acc",
+                "val",
+              ],
+              [
+                "block",
+                [
+                  "+",
+                  "acc",
+                  "val",
+                ],
+              ],
+            ],
+          ],
+          [
+            "*",
+            "10",
+            "3",
+          ],
+        ],
+      ],
+    ],
+    [
+      "let",
+      [
+        "=",
+        "x",
+        [
+          "my_func",
+          [
+            "add",
+            "1",
+            "2",
+          ],
+          [
+            "=>",
+            [],
+            [
+              "block",
+              [
+                "hello",
+              ],
+            ],
+          ],
+          [
+            "+",
+            "3",
+            "4",
+          ],
+        ],
+      ],
+    ],
+    [
+      "let",
+      [
+        "=",
+        "vec",
+        [
+          "object_literal",
+          [
+            ":",
+            "a",
+            [
+              "hey",
+              "there",
+            ],
+          ],
+          [
+            ":",
+            "b",
+            "2",
+          ],
+        ],
+      ],
+    ],
+    [
+      "closure_param_test",
+      "1",
+      [
+        "=>",
+        [],
+        "a",
+      ],
+      "3",
+      [
+        "=>",
+        [],
+        [
+          "block",
           [
             "hey",
             "there",
           ],
         ],
+      ],
+      "4",
+      [
+        "=>",
+        [],
+        "5",
+      ],
+      [
+        "=>",
+        [],
         [
-          ":",
-          "b",
+          "block",
+          "6",
+        ],
+      ],
+      [
+        "=>",
+        [],
+        [
+          "block",
+          "7",
+        ],
+      ],
+      "8",
+    ],
+    [
+      "let",
+      [
+        "=",
+        [
+          "tuple",
+          "x",
+          "y",
+        ],
+        [
+          "tuple",
+          "1",
           "2",
         ],
       ],
     ],
-  ],
-  [
-    "closure_param_test",
-    "1",
     [
-      "=>",
-      [],
-      "a",
-    ],
-    "3",
-    [
-      "=>",
-      [],
+      "+",
       [
-        "block",
+        "Array",
         [
-          "hey",
-          "there",
+          "generics",
+          "Hey",
+          "There",
         ],
-      ],
-    ],
-    "4",
-    [
-      "=>",
-      [],
-      "5",
-    ],
-    [
-      "=>",
-      [],
-      [
-        "block",
-        "6",
-      ],
-    ],
-    [
-      "=>",
-      [],
-      [
-        "block",
-        "7",
-      ],
-    ],
-    "8",
-  ],
-  [
-    "let",
-    [
-      "=",
-      [
-        "tuple",
-        "x",
-        "y",
-      ],
-      [
-        "tuple",
         "1",
         "2",
+        "3",
       ],
-    ],
-  ],
-  [
-    "+",
-    [
-      "Array",
-      [
-        "generics",
-        "Hey",
-        "There",
-      ],
-      "1",
-      "2",
       "3",
     ],
-    "3",
-  ],
-  [
-    "obj",
     [
-      "Test",
+      "obj",
       [
-        "generics",
-        "T",
-      ],
-    ],
-    [
-      "object_literal",
-      [
-        ":",
-        "c",
-        "i32",
-      ],
-    ],
-  ],
-  [
-    "match",
-    "x",
-    [
-      ":",
-      [
-        "Some",
-        [
-          "generics",
-          "i32",
-        ],
-      ],
-      [
-        "Some",
-        [
-          "generics",
-          "i32",
-        ],
-        [
-          "object_literal",
-          [
-            ":",
-            "value",
-            [
-              "+",
-              [
-                "value",
-                "x",
-              ],
-              "1",
-            ],
-          ],
-        ],
-      ],
-    ],
-    [
-      ":",
-      "None",
-      [
-        "None",
-        [
-          "object_literal",
-        ],
-      ],
-    ],
-  ],
-  [
-    "match",
-    [
-      "match",
-      [
-        "pop",
-        "arr",
-      ],
-      "val",
-      [
-        ":",
-        [
-          "Some",
-          [
-            "generics",
-            [
-              "Optional",
-              [
-                "generics",
-                "i32",
-              ],
-            ],
-          ],
-        ],
-        [
-          "block",
-          [
-            "value",
-            "val",
-          ],
-        ],
-      ],
-      [
-        ":",
-        "None",
-        [
-          "block",
-          [
-            "None",
-            [
-              "object_literal",
-            ],
-          ],
-        ],
-      ],
-    ],
-    "v",
-    [
-      ":",
-      [
-        "Some",
-        [
-          "generics",
-          "i32",
-        ],
-      ],
-      [
-        "block",
-        [
-          "value",
-          "v",
-        ],
-      ],
-    ],
-    [
-      ":",
-      "None",
-      [
-        "block",
-        "-1",
-      ],
-    ],
-  ],
-  [
-    "match",
-    [
-      "match",
-      [
-        "pop",
-        "arr",
-      ],
-      "val",
-      [
-        ":",
-        [
-          "Some",
-          [
-            "generics",
-            [
-              "Optional",
-              [
-                "generics",
-                "i32",
-              ],
-            ],
-          ],
-        ],
-        [
-          "block",
-          [
-            "value",
-            "val",
-          ],
-        ],
-      ],
-      [
-        ":",
-        "None",
-        [
-          "block",
-          [
-            "None",
-            [
-              "object_literal",
-            ],
-          ],
-        ],
-      ],
-    ],
-    "v",
-    [
-      ":",
-      [
-        "Some",
-        [
-          "generics",
-          "i32",
-        ],
-      ],
-      [
-        "block",
-        [
-          "value",
-          "v",
-        ],
-      ],
-    ],
-    [
-      ":",
-      "None",
-      [
-        "block",
-        "-1",
-      ],
-    ],
-  ],
-  [
-    "fn",
-    [
-      "->",
-      [
-        "test",
+        "Test",
         [
           "generics",
           "T",
         ],
+      ],
+      [
+        "object_literal",
         [
           ":",
-          "a",
-          "1",
+          "c",
+          "i32",
         ],
       ],
-      "i32",
-    ],
-  ],
-  [
-    "fn",
-    [
-      "main",
     ],
     [
-      "block",
+      "match",
+      "x",
       [
-        "let",
+        ":",
         [
-          "=",
-          "a",
+          "Some",
           [
-            "+",
-            [
-              "...",
-              [
-                "hey",
-                "test",
-              ],
-            ],
-            [
-              "now",
-              [
-                "&",
-                "other",
-              ],
-            ],
+            "generics",
+            "i32",
           ],
         ],
-      ],
-      [
-        "let",
         [
-          "=",
-          "x",
+          "Some",
           [
-            "+",
-            "10",
+            "generics",
+            "i32",
+          ],
+          [
+            "object_literal",
             [
-              "block",
+              ":",
+              "value",
               [
                 "+",
-                "20",
-                "30",
+                [
+                  "value",
+                  "x",
+                ],
+                "1",
               ],
             ],
           ],
         ],
       ],
       [
-        "let",
+        ":",
+        "None",
         [
-          "=",
-          "y",
+          "None",
           [
-            "if",
-            [
-              ">",
-              "x",
-              "10",
-            ],
-            [
-              ":",
-              "then",
-              [
-                "block",
-                "10",
-              ],
-            ],
-            [
-              ":",
-              "else",
-              [
-                "block",
-                "20",
-              ],
-            ],
+            "object_literal",
           ],
         ],
       ],
+    ],
+    [
+      "match",
       [
-        "let",
+        "match",
         [
-          "=",
-          "n",
+          "pop",
+          "arr",
+        ],
+        "val",
+        [
+          ":",
+          [
+            "Some",
+            [
+              "generics",
+              [
+                "Optional",
+                [
+                  "generics",
+                  "i32",
+                ],
+              ],
+            ],
+          ],
           [
             "block",
+            [
+              "value",
+              "val",
+            ],
+          ],
+        ],
+        [
+          ":",
+          "None",
+          [
+            "block",
+            [
+              "None",
+              [
+                "object_literal",
+              ],
+            ],
+          ],
+        ],
+      ],
+      "v",
+      [
+        ":",
+        [
+          "Some",
+          [
+            "generics",
+            "i32",
+          ],
+        ],
+        [
+          "block",
+          [
+            "value",
+            "v",
+          ],
+        ],
+      ],
+      [
+        ":",
+        "None",
+        [
+          "block",
+          "-1",
+        ],
+      ],
+    ],
+    [
+      "match",
+      [
+        "match",
+        [
+          "pop",
+          "arr",
+        ],
+        "val",
+        [
+          ":",
+          [
+            "Some",
+            [
+              "generics",
+              [
+                "Optional",
+                [
+                  "generics",
+                  "i32",
+                ],
+              ],
+            ],
+          ],
+          [
+            "block",
+            [
+              "value",
+              "val",
+            ],
+          ],
+        ],
+        [
+          ":",
+          "None",
+          [
+            "block",
+            [
+              "None",
+              [
+                "object_literal",
+              ],
+            ],
+          ],
+        ],
+      ],
+      "v",
+      [
+        ":",
+        [
+          "Some",
+          [
+            "generics",
+            "i32",
+          ],
+        ],
+        [
+          "block",
+          [
+            "value",
+            "v",
+          ],
+        ],
+      ],
+      [
+        ":",
+        "None",
+        [
+          "block",
+          "-1",
+        ],
+      ],
+    ],
+    [
+      "fn",
+      [
+        "->",
+        [
+          "test",
+          [
+            "generics",
+            "T",
+          ],
+          [
+            ":",
+            "a",
+            "1",
+          ],
+        ],
+        "i32",
+      ],
+    ],
+    [
+      "fn",
+      [
+        "main",
+      ],
+      [
+        "block",
+        [
+          "let",
+          [
+            "=",
+            "a",
+            [
+              "+",
+              [
+                "...",
+                [
+                  "hey",
+                  "test",
+                ],
+              ],
+              [
+                "now",
+                [
+                  "&",
+                  "other",
+                ],
+              ],
+            ],
+          ],
+        ],
+        [
+          "let",
+          [
+            "=",
+            "x",
+            [
+              "+",
+              "10",
+              [
+                "block",
+                [
+                  "+",
+                  "20",
+                  "30",
+                ],
+              ],
+            ],
+          ],
+        ],
+        [
+          "let",
+          [
+            "=",
+            "y",
             [
               "if",
               [
                 ">",
-                [
-                  "len",
-                  "args",
-                ],
-                "1",
+                "x",
+                "10",
               ],
               [
                 ":",
                 "then",
                 [
                   "block",
-                  [
-                    "log",
-                    "console",
-                    [
-                      "new_string",
-                      [
-                        "object_literal",
-                        [
-                          "label",
-                          "from",
-                          [
-                            "FixedArray",
-                            [
-                              "generics",
-                              "i32",
-                            ],
-                            "72",
-                            "101",
-                            "121",
-                            "32",
-                            "116",
-                            "104",
-                            "101",
-                            "114",
-                            "101",
-                            "33",
-                          ],
-                        ],
-                      ],
-                    ],
-                  ],
-                  [
-                    "unwrap",
-                    [
-                      "parseInt",
-                      [
-                        "at",
-                        "args",
-                        "1",
-                      ],
-                    ],
-                  ],
+                  "10",
                 ],
               ],
               [
@@ -800,246 +720,313 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                 "else",
                 [
                   "block",
-                  "10",
-                ],
-              ],
-            ],
-          ],
-        ],
-      ],
-      [
-        "let",
-        [
-          "=",
-          "x2",
-          "10",
-        ],
-      ],
-      [
-        "let",
-        [
-          "=",
-          "z",
-          [
-            "nothing",
-          ],
-        ],
-      ],
-      [
-        "let",
-        [
-          "=",
-          "a",
-          [
-            "boop",
-            "hello",
-            "1",
-          ],
-        ],
-      ],
-      [
-        "let",
-        [
-          "=",
-          "test_spacing",
-          [
-            "fib",
-            "n",
-          ],
-        ],
-      ],
-      [
-        "let",
-        [
-          "=",
-          "result",
-          [
-            "fib",
-            "n",
-          ],
-        ],
-      ],
-      [
-        "let",
-        [
-          "=",
-          "x",
-          [
-            "&",
-            "hey",
-          ],
-        ],
-      ],
-      [
-        "$",
-        "hey",
-      ],
-      [
-        "$@",
-        [
-          "hey",
-        ],
-      ],
-      [
-        "$",
-        [
-          "hey",
-        ],
-      ],
-      [
-        "$",
-        [
-          "extract",
-          "equals_expr",
-          "2",
-        ],
-      ],
-      [
-        "block",
-        [
-          "$",
-          "body",
-        ],
-      ],
-      [
-        "+",
-        "x",
-        "5",
-      ],
-      [
-        "+",
-        [
-          "+",
-          "x",
-          "y",
-        ],
-        "10",
-      ],
-      [
-        "+",
-        [
-          "*",
-          "x",
-          "y",
-        ],
-        "10",
-      ],
-      [
-        "x",
-      ],
-      "x",
-      [
-        "let",
-        [
-          "=",
-          "vec",
-          [
-            "object_literal",
-            [
-              ":",
-              "x",
-              "10",
-            ],
-            [
-              ":",
-              "y",
-              [
-                "Point",
-                [
-                  "object_literal",
-                  [
-                    ":",
-                    "x",
-                    "10",
-                  ],
-                  [
-                    ":",
-                    "y",
-                    "20",
-                  ],
-                ],
-              ],
-            ],
-            [
-              ":",
-              "z",
-              [
-                "object_literal",
-                [
-                  ":",
-                  "a",
-                  "10",
-                ],
-                [
-                  ":",
-                  "b",
                   "20",
                 ],
               ],
             ],
           ],
         ],
-      ],
-      [
-        "hi",
         [
-          ":",
+          "let",
           [
-            "there",
-            "what",
-          ],
-          "is",
-        ],
-        [
-          "up",
-        ],
-        [
-          ":",
-          [
-            "what",
-          ],
-          [
-            "is",
+            "=",
+            "n",
             [
-              "up",
-            ],
-          ],
-        ],
-      ],
-      [
-        "pub",
-        "fn",
-        [
-          "main",
-        ],
-        [
-          "block",
-          [
-            "create_element",
-            [
-              "new_string",
+              "block",
               [
-                "object_literal",
+                "if",
                 [
-                  "label",
-                  "from",
+                  ">",
                   [
-                    "FixedArray",
+                    "len",
+                    "args",
+                  ],
+                  "1",
+                ],
+                [
+                  ":",
+                  "then",
+                  [
+                    "block",
                     [
-                      "generics",
-                      "i32",
+                      "log",
+                      "console",
+                      [
+                        "new_string",
+                        [
+                          "object_literal",
+                          [
+                            "label",
+                            "from",
+                            [
+                              "FixedArray",
+                              [
+                                "generics",
+                                "i32",
+                              ],
+                              "72",
+                              "101",
+                              "121",
+                              "32",
+                              "116",
+                              "104",
+                              "101",
+                              "114",
+                              "101",
+                              "33",
+                            ],
+                          ],
+                        ],
+                      ],
                     ],
-                    "100",
-                    "105",
-                    "118",
+                    [
+                      "unwrap",
+                      [
+                        "parseInt",
+                        [
+                          "at",
+                          "args",
+                          "1",
+                        ],
+                      ],
+                    ],
+                  ],
+                ],
+                [
+                  ":",
+                  "else",
+                  [
+                    "block",
+                    "10",
                   ],
                 ],
               ],
             ],
+          ],
+        ],
+        [
+          "let",
+          [
+            "=",
+            "x2",
+            "10",
+          ],
+        ],
+        [
+          "let",
+          [
+            "=",
+            "z",
             [
-              "array_literal",
+              "nothing",
+            ],
+          ],
+        ],
+        [
+          "let",
+          [
+            "=",
+            "a",
+            [
+              "boop",
+              "hello",
+              "1",
+            ],
+          ],
+        ],
+        [
+          "let",
+          [
+            "=",
+            "test_spacing",
+            [
+              "fib",
+              "n",
+            ],
+          ],
+        ],
+        [
+          "let",
+          [
+            "=",
+            "result",
+            [
+              "fib",
+              "n",
+            ],
+          ],
+        ],
+        [
+          "let",
+          [
+            "=",
+            "x",
+            [
+              "&",
+              "hey",
+            ],
+          ],
+        ],
+        [
+          "$",
+          "hey",
+        ],
+        [
+          "$@",
+          "hey",
+        ],
+        [
+          "$",
+          "hey",
+        ],
+        [
+          "$",
+          [
+            "extract",
+            "equals_expr",
+            "2",
+          ],
+        ],
+        [
+          "block",
+          [
+            "$",
+            "body",
+          ],
+        ],
+        [
+          "+",
+          "x",
+          "5",
+        ],
+        [
+          "+",
+          [
+            "+",
+            "x",
+            "y",
+          ],
+          "10",
+        ],
+        [
+          "+",
+          [
+            "*",
+            "x",
+            "y",
+          ],
+          "10",
+        ],
+        [
+          "x",
+        ],
+        "x",
+        [
+          "let",
+          [
+            "=",
+            "vec",
+            [
+              "object_literal",
               [
-                "tuple",
+                ":",
+                "x",
+                "10",
+              ],
+              [
+                ":",
+                "y",
+                [
+                  "Point",
+                  [
+                    "object_literal",
+                    [
+                      ":",
+                      "x",
+                      "10",
+                    ],
+                    [
+                      ":",
+                      "y",
+                      "20",
+                    ],
+                  ],
+                ],
+              ],
+              [
+                ":",
+                "z",
+                [
+                  "object_literal",
+                  [
+                    ":",
+                    "a",
+                    "10",
+                  ],
+                  [
+                    ":",
+                    "b",
+                    "20",
+                  ],
+                ],
+              ],
+            ],
+          ],
+        ],
+        [
+          "hi",
+          [
+            ":",
+            [
+              "there",
+              "what",
+            ],
+            "is",
+          ],
+          "up",
+          [
+            ":",
+            [
+              "what",
+            ],
+            [
+              "is",
+              "up",
+            ],
+          ],
+        ],
+        [
+          "pub",
+          "fn",
+          [
+            "main",
+          ],
+          [
+            "block",
+            [
+              "create_element",
+              [
+                "new_string",
+                [
+                  "object_literal",
+                  [
+                    "label",
+                    "from",
+                    [
+                      "FixedArray",
+                      [
+                        "generics",
+                        "i32",
+                      ],
+                      "100",
+                      "105",
+                      "118",
+                    ],
+                  ],
+                ],
+              ],
+              [
+                "array_literal",
                 [
                   "new_string",
                   [
@@ -1058,31 +1045,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                       ],
                     ],
                   ],
-                  [
-                    "new_string",
-                    [
-                      "object_literal",
-                      [
-                        "label",
-                        "from",
-                        [
-                          "FixedArray",
-                          [
-                            "generics",
-                            "i32",
-                          ],
-                          "116",
-                          "114",
-                          "117",
-                          "101",
-                        ],
-                      ],
-                    ],
-                  ],
                 ],
-              ],
-              [
-                "tuple",
                 [
                   "new_string",
                   [
@@ -1096,7 +1059,31 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                           "generics",
                           "i32",
                         ],
-                        "105",
+                        "116",
+                        "114",
+                        "117",
+                        "101",
+                      ],
+                    ],
+                  ],
+                ],
+                [
+                  "tuple",
+                  [
+                    "new_string",
+                    [
+                      "object_literal",
+                      [
+                        "label",
+                        "from",
+                        [
+                          "FixedArray",
+                          [
+                            "generics",
+                            "i32",
+                          ],
+                          "105",
+                        ],
                       ],
                     ],
                   ],
@@ -1121,33 +1108,30 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                   ],
                 ],
               ],
-            ],
-            [
-              "array_literal",
               [
-                "create_element",
+                "array_literal",
                 [
-                  "new_string",
+                  "create_element",
                   [
-                    "object_literal",
+                    "new_string",
                     [
-                      "label",
-                      "from",
+                      "object_literal",
                       [
-                        "FixedArray",
+                        "label",
+                        "from",
                         [
-                          "generics",
-                          "i32",
+                          "FixedArray",
+                          [
+                            "generics",
+                            "i32",
+                          ],
+                          "112",
                         ],
-                        "112",
                       ],
                     ],
                   ],
-                ],
-                [
-                  "array_literal",
                   [
-                    "tuple",
+                    "array_literal",
                     [
                       "new_string",
                       [
@@ -1169,24 +1153,58 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                           ],
                         ],
                       ],
+                    ],
+                    [
+                      "new_string",
                       [
-                        "new_string",
+                        "object_literal",
                         [
-                          "object_literal",
+                          "label",
+                          "from",
                           [
-                            "label",
-                            "from",
+                            "FixedArray",
                             [
-                              "FixedArray",
-                              [
-                                "generics",
-                                "i32",
-                              ],
-                              "116",
-                              "114",
-                              "117",
-                              "101",
+                              "generics",
+                              "i32",
                             ],
+                            "116",
+                            "114",
+                            "117",
+                            "101",
+                          ],
+                        ],
+                      ],
+                    ],
+                  ],
+                  [
+                    "array_literal",
+                    [
+                      "new_string",
+                      [
+                        "object_literal",
+                        [
+                          "label",
+                          "from",
+                          [
+                            "FixedArray",
+                            [
+                              "generics",
+                              "i32",
+                            ],
+                            "72",
+                            "101",
+                            "108",
+                            "108",
+                            "111",
+                            "32",
+                            "116",
+                            "104",
+                            "101",
+                            "114",
+                            "101",
+                            "33",
+                            "33",
+                            "32",
                           ],
                         ],
                       ],
@@ -1194,7 +1212,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                   ],
                 ],
                 [
-                  "array_literal",
+                  "create_element",
                   [
                     "new_string",
                     [
@@ -1208,82 +1226,48 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                             "generics",
                             "i32",
                           ],
-                          "72",
-                          "101",
-                          "108",
-                          "108",
-                          "111",
-                          "32",
-                          "116",
-                          "104",
-                          "101",
-                          "114",
-                          "101",
-                          "33",
-                          "33",
-                          "32",
+                          "112",
                         ],
                       ],
                     ],
                   ],
-                ],
-              ],
-              [
-                "create_element",
-                [
-                  "new_string",
                   [
-                    "object_literal",
-                    [
-                      "label",
-                      "from",
-                      [
-                        "FixedArray",
-                        [
-                          "generics",
-                          "i32",
-                        ],
-                        "112",
-                      ],
-                    ],
+                    "array_literal",
                   ],
-                ],
-                [
-                  "array_literal",
-                ],
-                [
-                  "array_literal",
                   [
-                    "new_string",
+                    "array_literal",
                     [
-                      "object_literal",
+                      "new_string",
                       [
-                        "label",
-                        "from",
+                        "object_literal",
                         [
-                          "FixedArray",
+                          "label",
+                          "from",
                           [
-                            "generics",
-                            "i32",
+                            "FixedArray",
+                            [
+                              "generics",
+                              "i32",
+                            ],
+                            "72",
+                            "111",
+                            "119",
+                            "32",
+                            "97",
+                            "114",
+                            "101",
+                            "32",
+                            "121",
+                            "111",
+                            "117",
+                            "32",
+                            "116",
+                            "111",
+                            "100",
+                            "97",
+                            "121",
+                            "32",
                           ],
-                          "72",
-                          "111",
-                          "119",
-                          "32",
-                          "97",
-                          "114",
-                          "101",
-                          "32",
-                          "121",
-                          "111",
-                          "117",
-                          "32",
-                          "116",
-                          "111",
-                          "100",
-                          "97",
-                          "121",
-                          "32",
                         ],
                       ],
                     ],
@@ -1295,34 +1279,18 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
         ],
       ],
     ],
-  ],
-  [
-    "pub",
-    "fn",
     [
-      "->",
+      "pub",
+      "fn",
       [
-        "pipe",
-      ],
-      "i32",
-    ],
-    [
-      "block",
-      [
-        "call-closure",
+        "->",
         [
-          "=>",
-          [
-            ":",
-            "x",
-            "i32",
-          ],
-          [
-            "*",
-            "x",
-            "5",
-          ],
+          "pipe",
         ],
+        "i32",
+      ],
+      [
+        "block",
         [
           "call-closure",
           [
@@ -1333,12 +1301,28 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
               "i32",
             ],
             [
-              "+",
+              "*",
               "x",
-              "3",
+              "5",
             ],
           ],
-          "2",
+          [
+            "call-closure",
+            [
+              "=>",
+              [
+                ":",
+                "x",
+                "i32",
+              ],
+              [
+                "+",
+                "x",
+                "3",
+              ],
+            ],
+            "2",
+          ],
         ],
       ],
     ],
@@ -1356,62 +1340,62 @@ exports[`parser supports generics 1`] = `
       "std",
       "all",
     ],
-  ],
-  [
-    "type",
     [
-      "=",
-      "DsArrayi32",
+      "type",
       [
-        "DsArray",
+        "=",
+        "DsArrayi32",
         [
-          "generics",
-          "i32",
-        ],
-      ],
-    ],
-  ],
-  [
-    "pub",
-    "fn",
-    [
-      "main",
-    ],
-    [
-      "block",
-      [
-        "let",
-        [
-          "=",
-          "arr",
+          "DsArray",
           [
-            "new_fixed_array",
-            [
-              "generics",
-              "i32",
-            ],
-            "10",
+            "generics",
+            "i32",
           ],
         ],
       ],
+    ],
+    [
+      "pub",
+      "fn",
       [
-        "set",
-        [
-          "generics",
-          "i32",
-        ],
-        "arr",
-        "0",
-        "1",
+        "main",
       ],
       [
-        "get",
+        "block",
         [
-          "generics",
-          "i32",
+          "let",
+          [
+            "=",
+            "arr",
+            [
+              "new_fixed_array",
+              [
+                "generics",
+                "i32",
+              ],
+              "10",
+            ],
+          ],
         ],
-        "arr",
-        "0",
+        [
+          "set",
+          [
+            "generics",
+            "i32",
+          ],
+          "arr",
+          "0",
+          "1",
+        ],
+        [
+          "get",
+          [
+            "generics",
+            "i32",
+          ],
+          "arr",
+          "0",
+        ],
       ],
     ],
   ],
