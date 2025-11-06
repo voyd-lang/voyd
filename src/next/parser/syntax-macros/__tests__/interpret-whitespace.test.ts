@@ -1,16 +1,14 @@
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CharStream } from "../../char-stream.js";
 import { read } from "../../reader.js";
 import { interpretWhitespace } from "../interpret-whitespace.js";
 import { expect, test } from "vitest";
 import { expandSyntaxMacros } from "../index.js";
+import { readVoyd } from "../../lib/read-voyd.js";
 
 const runFixture = async (name: string) => {
   const path = resolve(import.meta.dirname, "__fixtures__", name);
-  const file = await readFile(path, { encoding: "utf-8" });
-  const chars = new CharStream(file, path);
-  const readerOutput = read(chars);
+  const readerOutput = await readVoyd(path);
   return expandSyntaxMacros(readerOutput, [interpretWhitespace]);
 };
 
