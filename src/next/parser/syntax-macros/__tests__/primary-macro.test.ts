@@ -2,14 +2,12 @@ import { describe, it } from "vitest";
 import { expect } from "vitest";
 import { CharStream } from "../../char-stream.js";
 import { read } from "../../reader.js";
-import { functionalNotation } from "../functional-notation.js";
 import { interpretWhitespace } from "../interpret-whitespace.js";
 import { primary } from "../primary.js";
 
 const expand = (code: string) => {
   const parsed = read(new CharStream(code, "test"));
-  const functional = functionalNotation(parsed);
-  const whitespace = interpretWhitespace(functional);
+  const whitespace = interpretWhitespace(parsed);
   const result = primary(whitespace);
   return JSON.parse(JSON.stringify(result));
 };

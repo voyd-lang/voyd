@@ -1501,3 +1501,95 @@ exports[`it correctly passes inline closure parameters 1`] = `
   ],
 ]
 `;
+
+exports[`it normalizes function calls 1`] = `
+[
+  "ast",
+  [
+    [
+      "fib",
+      [
+        "n",
+        "-",
+        "1",
+      ],
+      "hi",
+    ],
+    [
+      "fib",
+      [
+        "tuple",
+        [
+          "n",
+          "-",
+          "1",
+        ],
+        "hi",
+      ],
+    ],
+    [
+      "fib",
+      [
+        "generics",
+        "i32",
+      ],
+      [
+        "n",
+        "-",
+        "1",
+      ],
+      "hi",
+    ],
+    [
+      "fib",
+      [
+        "generics",
+        "i32",
+      ],
+      [
+        "tuple",
+        [
+          "n",
+          "-",
+          "1",
+        ],
+        "hi",
+      ],
+    ],
+    [
+      "n",
+      "-",
+      "1",
+    ],
+    [
+      "tuple",
+      [
+        "n",
+        "-",
+        "1",
+      ],
+      "hi",
+    ],
+    [
+      "fib",
+      [
+        "n",
+        "-",
+        "1",
+      ],
+    ],
+    [
+      "fib",
+      [
+        "tuple",
+        [
+          "n",
+          "-",
+          "1",
+        ],
+        "4",
+      ],
+    ],
+  ],
+]
+`;

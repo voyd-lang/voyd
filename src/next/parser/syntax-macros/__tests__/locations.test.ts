@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { functionalNotation } from "../functional-notation.js";
 import { interpretWhitespace } from "../interpret-whitespace.js";
 import { Form } from "../../ast/form.js";
 import { IdentifierAtom, InternalIdentifierAtom } from "../../ast/atom.js";
@@ -17,7 +16,7 @@ const makeLocation = (start: number, end: number) =>
   });
 
 describe("syntax macro locations", () => {
-  it("functionalNotation clones form locations", () => {
+  it("interpretWhitespace clones form locations when normalizing calls", () => {
     const foo = new IdentifierAtom({
       value: "foo",
       location: makeLocation(0, 3),
@@ -37,7 +36,7 @@ describe("syntax macro locations", () => {
       location: formLocation,
     });
 
-    const result = functionalNotation(original);
+    const result = interpretWhitespace(original);
 
     expect(result.location).not.toBe(formLocation);
     expect(result.location?.toJSON()).toEqual(formLocation.toJSON());
