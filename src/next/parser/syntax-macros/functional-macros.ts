@@ -13,7 +13,7 @@ import {
   isBoolAtom,
   isStringAtom,
 } from "../ast/index.js";
-import { getSyntaxId } from "../ast/syntax.js";
+import { getSyntaxId, Syntax } from "../ast/syntax.js";
 import { SyntaxMacro } from "./types.js";
 
 type MacroEvalResult = Expr | MacroLambdaValue;
@@ -96,21 +96,19 @@ export const functionalMacros: SyntaxMacro = (form: Form): Form => {
 const expandExpr = (expr: Expr, scope: MacroScope): Expr => {
   if (!isForm(expr)) return expr;
 
+  if (expr.calls("macro")) {
+    return expandMacroDefinition(expr, scope);
+  }
+
+  if (expr.calls("macro_let")) {
+    return expandMacroLet(expr, scope);
+  }
+
   const head = expr.at(0);
-  if (isIdentifierAtom(head)) {
-    if (head.value === "macro") {
-      return expandMacroDefinition(expr, scope);
-    }
-
-    if (head.value === "macro_let") {
-      return expandMacroLet(expr, scope);
-    }
-
-    const macro = scope.getMacro(head.value);
-    if (macro) {
-      const expanded = expandMacroCall(expr, macro, scope);
-      return expandExpr(expanded, scope);
-    }
+  const macro = isIdentifierAtom(head) ? scope.getMacro(head.value) : undefined;
+  if (macro) {
+    const expanded = expandMacroCall(expr, macro, scope);
+    return expandExpr(expanded, scope);
   }
 
   return expandForm(expr, scope);
@@ -227,7 +225,7 @@ const expandMacroCall = (
     result = evalMacroExpr(cloneExpr(expr), invocationScope);
   });
 
-  const normalized = ensureExpr(result);
+  const normalized = expectExpr(result, "macro expansion result");
   if (call.location) normalized.setLocation(call.location.clone());
   return normalized;
 };
@@ -287,9 +285,14 @@ type BuiltinContext = {
 type BuiltinFn = (ctx: BuiltinContext) => MacroEvalResult;
 
 const builtins: Record<string, BuiltinFn | undefined> = {
-  block: ({ args }) => ensureExpr(args.at(-1) ?? new IdentifierAtom("nop")),
+  block: ({ args }) => {
+    const value = args.at(-1);
+    return value
+      ? expectExpr(value, "block result")
+      : new IdentifierAtom("nop");
+  },
   length: ({ args }) => {
-    const list = expectForm(ensureExpr(args.at(0)), "length target");
+    const list = expectForm(args.at(0), "length target");
     return createInt(list.length);
   },
   define: ({ originalArgs, scope }) => {
@@ -311,7 +314,10 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     scope.assignVariable(identifier.value, cloneMacroEvalResult(value));
     return new IdentifierAtom("nop");
   },
-  ":": ({ args }) => ensureExpr(args.at(1) ?? new IdentifierAtom("nop")),
+  ":": ({ args }) => {
+    const value = args.at(1);
+    return value ? expectExpr(value, "label value") : new IdentifierAtom("nop");
+  },
   "==": (ctx) => bool(binaryLogic(ctx, (l, r) => l === r)),
   ">": (ctx) => bool(binaryLogic(ctx, (l, r) => l > r)),
   ">=": (ctx) => bool(binaryLogic(ctx, (l, r) => l >= r)),
@@ -333,9 +339,7 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     if (!bodyExpr) throw new Error("Lambda requires a body");
 
     const parameters = normalizeLambdaParameters(paramsExpr);
-    const body = normalizeLambdaBody(bodyExpr).map((expr) =>
-      ensureExpr(cloneExpr(expr))
-    );
+    const body = normalizeLambdaBody(bodyExpr).map((expr) => cloneExpr(expr));
 
     return {
       kind: "macro-lambda",
@@ -346,56 +350,38 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     };
   },
   calls: ({ args }) => {
-    const call = expectForm(ensureExpr(args.at(0)), "calls target");
-    const label = expectIdentifier(ensureExpr(args.at(1)), "calls identifier");
+    const call = expectForm(args.at(0), "calls target");
+    const label = expectIdentifier(args.at(1), "calls identifier");
     const target = call.at(0);
     if (!isIdentifierAtom(target)) return bool(false);
     return bool(target.value === label.value);
   },
   argWithLabel: ({ args }) => {
-    const call = expectForm(ensureExpr(args.at(0)), "argWithLabel call");
-    const label = expectIdentifier(
-      ensureExpr(args.at(1)),
-      "argWithLabel label"
-    );
+    const call = expectForm(args.at(0), "argWithLabel call");
+    const label = expectIdentifier(args.at(1), "argWithLabel label");
     return cloneExpr(expectFormLabel(call, label.value, true));
   },
   optionalArgWithLabel: ({ args }) => {
-    const call = expectForm(
-      ensureExpr(args.at(0)),
-      "optionalArgWithLabel call"
-    );
-    const label = expectIdentifier(
-      ensureExpr(args.at(1)),
-      "optionalArgWithLabel label"
-    );
+    const call = expectForm(args.at(0), "optionalArgWithLabel call");
+    const label = expectIdentifier(args.at(1), "optionalArgWithLabel label");
     const result = expectFormLabel(call, label.value, false);
     return result ? cloneExpr(result) : bool(false);
   },
   argsWithLabel: ({ args }) => {
-    const call = expectForm(ensureExpr(args.at(0)), "argsWithLabel call");
-    const label = expectIdentifier(
-      ensureExpr(args.at(1)),
-      "argsWithLabel label"
-    );
+    const call = expectForm(args.at(0), "argsWithLabel call");
+    const label = expectIdentifier(args.at(1), "argsWithLabel label");
     const values = collectFormLabels(call, label.value);
     return new Form(values.map(cloneExpr));
   },
   identifier: ({ args }) => {
-    const prefix = expectIdentifier(
-      ensureExpr(args.at(0)),
-      "identifier prefix"
-    );
+    const prefix = expectIdentifier(args.at(0), "identifier prefix");
     const identifier = new IdentifierAtom(
       `${prefix.value}$macro_id$${getSyntaxId()}`
     );
     return identifier;
   },
   mark_moved: ({ args }) => {
-    const variable = expectIdentifier(
-      ensureExpr(args.at(0)),
-      "mark_moved target"
-    ).clone();
+    const variable = expectIdentifier(args.at(0), "mark_moved target").clone();
     return variable;
   },
   syntax_template: ({ originalArgs, scope }) => {
@@ -443,13 +429,12 @@ const builtins: Record<string, BuiltinFn | undefined> = {
         "extract args",
         JSON.stringify(
           {
-            evaluated: args.map((arg) =>
-              isForm(arg)
-                ? arg.toJSON()
-                : isMacroLambdaValue(arg)
-                ? { lambda: true }
-                : ensureExpr(arg).toJSON?.() ?? ensureExpr(arg)
-            ),
+            evaluated: args.map((arg) => {
+              if (isForm(arg)) return arg.toJSON();
+              if (isMacroLambdaValue(arg)) return { lambda: true };
+              const expr = expectExpr(arg, "extract debug value");
+              return expr.toJSON?.() ?? expr;
+            }),
             original: originalArgs.map((arg) =>
               isForm(arg) ? arg.toJSON() : arg?.toJSON?.() ?? arg
             ),
@@ -479,12 +464,12 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     return cloneExpr(list.at(index) ?? new IdentifierAtom("nop"));
   },
   map: ({ args, scope }) => {
-    const list = expectForm(ensureExpr(args.at(0)), "map target");
+    const list = expectForm(args.at(0), "map target");
     const lambdaCandidate = args.at(1);
     const lambda = isMacroLambdaValue(lambdaCandidate)
       ? lambdaCandidate
       : evalMacroExpr(
-          ensureExpr(lambdaCandidate ?? new IdentifierAtom("nop")),
+          expectExpr(lambdaCandidate ?? new IdentifierAtom("nop")),
           scope
         );
     if (!isMacroLambdaValue(lambda)) {
@@ -499,17 +484,17 @@ const builtins: Record<string, BuiltinFn | undefined> = {
           new Form(array.map(cloneExpr)),
         ])
       )
-      .map((res) => ensureExpr(res));
+      .map((res) => expectExpr(res));
     return new Form(mapped.map(cloneExpr));
   },
   reduce: ({ args, scope }) => {
-    const list = expectForm(ensureExpr(args.at(0)), "reduce target");
-    const start = cloneExpr(ensureExpr(args.at(1)!));
+    const list = expectForm(args.at(0), "reduce target");
+    const start = cloneExpr(expectExpr(args.at(1)));
     const lambdaCandidate = args.at(2);
     const lambdaResult = isMacroLambdaValue(lambdaCandidate)
       ? lambdaCandidate
       : evalMacroExpr(
-          ensureExpr(lambdaCandidate ?? new IdentifierAtom("nop")),
+          expectExpr(lambdaCandidate ?? new IdentifierAtom("nop")),
           scope
         );
     if (!isMacroLambdaValue(lambdaResult)) {
@@ -519,7 +504,7 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     let accumulator: MacroEvalResult = start;
     list.toArray().forEach((value, index, array) => {
       accumulator = callLambda(lambdaResult, [
-        ensureExpr(accumulator),
+        expectExpr(accumulator),
         cloneExpr(value),
         createInt(index),
         new Form(array.map(cloneExpr)),
@@ -529,46 +514,43 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     return accumulator;
   },
   push: ({ args }) => {
-    const list = expectForm(ensureExpr(args.at(0)), "push target");
+    const list = expectForm(args.at(0), "push target");
     const value = args.at(1);
-    const rest = args.slice(2).map((arg) => ensureExpr(arg));
+    const rest = args.slice(2).map((arg) => expectExpr(arg));
     const elements = [
       ...list.toArray(),
-      ...(value ? [ensureExpr(value)] : []),
+      ...(value ? [expectExpr(value)] : []),
       ...rest,
     ];
     return new Form(elements.map(cloneExpr));
   },
   spread: ({ args }) => {
-    const list = expectForm(ensureExpr(args.at(0)), "spread target");
-    const value = expectForm(ensureExpr(args.at(1)), "spread source");
+    const list = expectForm(args.at(0), "spread target");
+    const value = expectForm(args.at(1), "spread source");
     return new Form([...list.toArray(), ...value.toArray()].map(cloneExpr));
   },
   concat: ({ args }) => {
-    const first = ensureExpr(args.at(0));
+    const first = expectExpr(args.at(0));
     const list = isForm(first)
       ? first
       : isIdentifierAtom(first)
       ? new Form([cloneExpr(first)])
       : expectForm(first, "concat target");
     const values = args.slice(1).flatMap((expr) => {
-      const item = ensureExpr(expr);
+      const item = expectExpr(expr);
       return isForm(item) ? item.toArray() : [item];
     });
     return new Form([...list.toArray(), ...values].map(cloneExpr));
   },
-  is_list: ({ args }) => bool(isForm(ensureExpr(args.at(0)))),
+  is_list: ({ args }) => bool(isForm(expectExpr(args.at(0)))),
   log: ({ args, scope }) => {
     const value = getMacroTimeValue(args.at(0), scope);
     console.error(JSON.stringify(value));
-    return new Form(args.map((arg) => cloneExpr(ensureExpr(arg))));
+    return new Form(args.map((arg) => cloneExpr(expectExpr(arg))));
   },
   split: ({ args }) => {
-    const target = expectIdentifier(ensureExpr(args.at(0)), "split target");
-    const delimiter = expectIdentifier(
-      ensureExpr(args.at(1)),
-      "split delimiter"
-    );
+    const target = expectIdentifier(args.at(0), "split target");
+    const delimiter = expectIdentifier(args.at(1), "split delimiter");
     return new Form(
       target.value.split(delimiter.value).map((part) => {
         const atom = new IdentifierAtom(part);
@@ -578,7 +560,7 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     );
   },
   char_to_code: ({ args }) => {
-    const atom = ensureExpr(args.at(0));
+    const atom = expectExpr(args.at(0));
     if (!atom) throw new Error("char_to_code requires a value");
     if (isIdentifierAtom(atom)) {
       return createInt(atom.value.codePointAt(0) ?? 0);
@@ -599,7 +581,7 @@ const evalCall = (
   if (!isIdentifierAtom(head)) {
     const evaluated = form
       .toArray()
-      .map((expr) => ensureExpr(evalMacroExpr(expr, scope, opts)));
+      .map((expr) => expectExpr(evalMacroExpr(expr, scope, opts)));
     return recreateForm(form, evaluated);
   }
 
@@ -627,11 +609,14 @@ const evalCall = (
 
   const evaluatedHead = evalMacroExpr(head, scope, opts);
   if (isMacroLambdaValue(evaluatedHead)) {
-    return callLambda(evaluatedHead, args);
+    return callLambda(
+      evaluatedHead,
+      args.filter((e) => e instanceof Syntax)
+    );
   }
 
-  const normalizedArgs = args.map((arg) => ensureExpr(arg));
-  return recreateForm(form, [ensureExpr(evaluatedHead), ...normalizedArgs]);
+  const normalizedArgs = args.map((arg) => expectExpr(arg));
+  return recreateForm(form, [expectExpr(evaluatedHead), ...normalizedArgs]);
 };
 
 const callLambda = (
@@ -667,9 +652,8 @@ const callLambda = (
   return result;
 };
 
-const isMacroLambdaValue = (
-  value: MacroEvalResult
-): value is MacroLambdaValue =>
+const isMacroLambdaValue = (value: unknown): value is MacroLambdaValue =>
+  typeof value === "object" &&
   (value as MacroLambdaValue)?.kind === "macro-lambda";
 
 const renderFunctionalMacro = (macro: MacroDefinition): Form =>
@@ -731,14 +715,27 @@ const cloneMacroEvalResult = (value: MacroEvalResult): MacroEvalResult => {
   return cloneExpr(value);
 };
 
-const ensureExpr = (value: MacroEvalResult): Expr => {
-  if (isMacroLambdaValue(value)) {
-    throw new Error("Expected expression, received macro lambda");
+const expectExpr = (
+  value: MacroEvalResult | undefined,
+  context = "macro evaluation"
+): Expr => {
+  if (!value) {
+    throw new Error(`Expected expression for ${context}`);
   }
+
+  if (isMacroLambdaValue(value)) {
+    throw new Error(
+      `Expected expression for ${context}, received macro lambda`
+    );
+  }
+
   return value;
 };
 
-const expectForm = (expr: Expr | undefined, context: string): Form => {
+const expectForm = (
+  expr: MacroEvalResult | undefined,
+  context: string
+): Form => {
   if (!isForm(expr)) {
     throw new Error(`Expected form for ${context}`);
   }
@@ -746,7 +743,7 @@ const expectForm = (expr: Expr | undefined, context: string): Form => {
 };
 
 const expectIdentifier = (
-  expr: Expr | undefined,
+  expr: MacroEvalResult | undefined,
   context: string
 ): IdentifierAtom => {
   if (!isIdentifierAtom(expr)) {
@@ -854,21 +851,20 @@ const expandSyntaxTemplate = (args: Expr[], scope: MacroScope): Expr[] => {
   const expand = (exprs: Expr[]): Expr[] =>
     exprs.flatMap((expr) => {
       if (isForm(expr) && isIdentifierAtom(expr.at(0))) {
-        const head = expr.at(0) as IdentifierAtom;
-        if (head.value === "~~") {
+        if (expr.calls("~~")) {
           const value = expr.at(1) ?? new IdentifierAtom("nop");
           const evaluated = evalMacroExpr(value, scope, {
             skipBuiltins: new Set([":"]),
           });
-          const normalized = ensureExpr(evaluated);
+          const normalized = expectExpr(evaluated);
           return isForm(normalized)
             ? normalized.toArray().map(cloneExpr)
             : [cloneExpr(normalized)];
         }
 
-        if (head.value === "~") {
+        if (expr.calls("~")) {
           const value = expr.at(1) ?? new IdentifierAtom("nop");
-          return [ensureExpr(evalMacroExpr(value, scope))];
+          return [expectExpr(evalMacroExpr(value, scope))];
         }
       }
 
@@ -876,7 +872,7 @@ const expandSyntaxTemplate = (args: Expr[], scope: MacroScope): Expr[] => {
         if (expr.value.startsWith("~~")) {
           const identifier = new IdentifierAtom(expr.value.slice(2));
           const evaluated = evalMacroExpr(identifier, scope);
-          const normalized = ensureExpr(evaluated);
+          const normalized = expectExpr(evaluated);
           return isForm(normalized)
             ? normalized.toArray().map(cloneExpr)
             : [cloneExpr(normalized)];
@@ -885,15 +881,13 @@ const expandSyntaxTemplate = (args: Expr[], scope: MacroScope): Expr[] => {
         if (expr.value.startsWith("~")) {
           const identifier = new IdentifierAtom(expr.value.slice(1));
           const evaluated = evalMacroExpr(identifier, scope);
-          return [ensureExpr(evaluated)];
+          return [expectExpr(evaluated)];
         }
       }
 
       if (isForm(expr)) {
         const expanded = expand(expr.toArray());
-        return [
-          new Form(expanded.map((item) => cloneExpr(item))),
-        ];
+        return [new Form(expanded.map((item) => cloneExpr(item)))];
       }
 
       return expr;
@@ -980,13 +974,13 @@ const resolveForm = (
   context: string
 ): Form => {
   if (evaluated) {
-    const expr = evaluated instanceof Form ? evaluated : ensureExpr(evaluated);
+    const expr = evaluated instanceof Form ? evaluated : expectExpr(evaluated);
     if (isForm(expr)) return expr;
   }
 
   if (original) {
     const result = evalMacroExpr(cloneExpr(original), scope);
-    const expr = ensureExpr(result);
+    const expr = expectExpr(result);
     if (isForm(expr)) return expr;
   }
 
