@@ -1,4 +1,4 @@
-import { CallForm, Expr, Form } from "./ast/index.js";
+import { call, Expr, Form } from "./ast/index.js";
 import { CharStream } from "./char-stream.js";
 import { Lexer } from "./lexer.js";
 import { getReaderMacroForToken } from "./reader-macros/index.js";
@@ -28,7 +28,7 @@ export const read = (file: CharStream, opts: ParseCharsOpts = {}): Form => {
 
   location.setEndToStartOf(file.currentSourceLocation());
   const form = new Form({ location, elements });
-  return opts.nested ? form : new CallForm(["ast", form]);
+  return opts.nested ? form : call("ast", ...form.toArray());
 };
 
 /** Returns true if token was matched with and processed by a macro  */

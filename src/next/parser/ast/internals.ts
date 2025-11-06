@@ -1,5 +1,6 @@
 /** Defines all internal fn calls */
 export type Internal =
+  | "ast"
   | "tuple"
   | "paren"
   | "array_literal"
@@ -8,5 +9,4 @@ export type Internal =
   | "new_string"
   | "generics"
   | "map"
-  | "scientific_e_notation"
-  | "::";
+  | "scientific_e_notation";

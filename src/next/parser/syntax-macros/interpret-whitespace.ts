@@ -1,5 +1,6 @@
 import { CallForm, Form, FormInitElements } from "../ast/form.js";
 import {
+  call,
   Expr,
   FormCursor,
   IdentifierAtom,
@@ -11,6 +12,11 @@ import * as p from "../ast/predicates.js";
 import { isContinuationOp, isGreedyOp, isOp } from "../grammar.js";
 
 export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
+  if (form.callsInternal("ast")) {
+    const result = interpretWhitespace(form.slice(1), indentLevel);
+    return call("ast", ...(isForm(result.at(0)) ? result.toArray() : [result]));
+  }
+
   const functional = applyFunctionalNotation(form);
   const result = interpretWhitespaceExpr(functional, indentLevel);
   return p.isForm(result) ? result : new Form([result]);

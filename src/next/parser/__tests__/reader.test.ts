@@ -17,12 +17,10 @@ test("keeps angle bracket lexer state when parsing nested generics", ({
   const json = JSON.parse(JSON.stringify(parsed));
   expect(json).toEqual([
     "ast",
+    "Foo",
     [
-      "Foo",
-      [
-        "generics",
-        ["Option", ["generics", ["Result", ["generics", "int", [" ", "int"]]]]],
-      ],
+      "generics",
+      ["Option", ["generics", ["Result", ["generics", "int", [" ", "int"]]]]],
     ],
   ]);
 });

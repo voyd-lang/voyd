@@ -143,17 +143,17 @@ const expandMacroDefinition = (form: Form, scope: MacroScope): Expr => {
   }
   const signature = expectForm(form.at(1), "macro signature");
   const name = expectIdentifier(signature.at(0), "macro name");
-  const parameters = signature.toArray().slice(1).map((expr, index) =>
-    expectIdentifier(
-      expr,
-      `macro parameter ${index + 1} for ${name.value ?? "anonymous macro"}`
-    ).clone()
-  );
-
-  const bodyExpressions = form
+  const parameters = signature
     .toArray()
-    .slice(2)
-    .map(cloneExpr);
+    .slice(1)
+    .map((expr, index) =>
+      expectIdentifier(
+        expr,
+        `macro parameter ${index + 1} for ${name.value ?? "anonymous macro"}`
+      ).clone()
+    );
+
+  const bodyExpressions = form.toArray().slice(2).map(cloneExpr);
 
   const macro: MacroDefinition = {
     name: name.clone(),
@@ -173,10 +173,7 @@ const expandMacroLet = (form: Form, scope: MacroScope): Expr => {
   if (!isIdentifierAtom(operator) || operator.value !== "=") {
     throw new Error("macro_let expects an assignment expression");
   }
-  const identifier = expectIdentifier(
-    assignment.at(1),
-    "macro let identifier"
-  );
+  const identifier = expectIdentifier(assignment.at(1), "macro let identifier");
   const initializer = assignment.at(2);
   if (!initializer) {
     throw new Error("macro_let requires an initializer");
@@ -251,8 +248,7 @@ const evalMacroExpr = (
 
   if (!isForm(expr)) return expr;
 
-  const head = expr.at(0);
-  if (isIdentifierAtom(head) && head.value === "block") {
+  if (expr.calls("block")) {
     return evalBlock(expr, scope);
   }
 
@@ -273,7 +269,13 @@ const evalBlock = (block: Form, scope: MacroScope): MacroEvalResult => {
   return result;
 };
 
-const fnsToSkipArgEval = new Set(["if", "syntax_template", "=>", "define", "="]);
+const fnsToSkipArgEval = new Set([
+  "if",
+  "syntax_template",
+  "=>",
+  "define",
+  "=",
+]);
 
 type BuiltinContext = {
   call: Form;
@@ -287,10 +289,7 @@ type BuiltinFn = (ctx: BuiltinContext) => MacroEvalResult;
 const builtins: Record<string, BuiltinFn | undefined> = {
   block: ({ args }) => ensureExpr(args.at(-1) ?? new IdentifierAtom("nop")),
   length: ({ args }) => {
-    const list = expectForm(
-      ensureExpr(args.at(0)),
-      "length target"
-    );
+    const list = expectForm(ensureExpr(args.at(0)), "length target");
     return createInt(list.length);
   },
   define: ({ originalArgs, scope }) => {
@@ -304,7 +303,10 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     return new IdentifierAtom("nop");
   },
   "=": ({ originalArgs, scope }) => {
-    const identifier = expectIdentifier(originalArgs.at(0), "assignment target");
+    const identifier = expectIdentifier(
+      originalArgs.at(0),
+      "assignment target"
+    );
     const value = evalMacroExpr(cloneExpr(originalArgs.at(1)!), scope);
     scope.assignVariable(identifier.value, cloneMacroEvalResult(value));
     return new IdentifierAtom("nop");
@@ -423,7 +425,12 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     return new IdentifierAtom("nop");
   },
   slice: ({ args, originalArgs, scope }) => {
-    const list = resolveForm(args.at(0), originalArgs.at(0), scope, "slice target");
+    const list = resolveForm(
+      args.at(0),
+      originalArgs.at(0),
+      scope,
+      "slice target"
+    );
     const start = Number(getMacroTimeValue(args.at(1), scope));
     const endVal = args.at(2)
       ? Number(getMacroTimeValue(args.at(2), scope))
@@ -431,6 +438,27 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     return new Form(list.toArray().slice(start, endVal).map(cloneExpr));
   },
   extract: ({ args, originalArgs, scope }) => {
+    if (process.env.DEBUG_EXTRACT) {
+      console.error(
+        "extract args",
+        JSON.stringify(
+          {
+            evaluated: args.map((arg) =>
+              isForm(arg)
+                ? arg.toJSON()
+                : isMacroLambdaValue(arg)
+                ? { lambda: true }
+                : ensureExpr(arg).toJSON?.() ?? ensureExpr(arg)
+            ),
+            original: originalArgs.map((arg) =>
+              isForm(arg) ? arg.toJSON() : arg?.toJSON?.() ?? arg
+            ),
+          },
+          null,
+          2
+        )
+      );
+    }
     const list = resolveForm(
       args.at(0),
       originalArgs.at(0),
@@ -441,7 +469,12 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     return cloneExpr(list.at(index) ?? new IdentifierAtom("nop"));
   },
   get: ({ args, originalArgs, scope }) => {
-    const list = resolveForm(args.at(0), originalArgs.at(0), scope, "get target");
+    const list = resolveForm(
+      args.at(0),
+      originalArgs.at(0),
+      scope,
+      "get target"
+    );
     const index = Number(getMacroTimeValue(args.at(1), scope));
     return cloneExpr(list.at(index) ?? new IdentifierAtom("nop"));
   },
@@ -450,7 +483,10 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     const lambdaCandidate = args.at(1);
     const lambda = isMacroLambdaValue(lambdaCandidate)
       ? lambdaCandidate
-      : evalMacroExpr(ensureExpr(lambdaCandidate ?? new IdentifierAtom("nop")), scope);
+      : evalMacroExpr(
+          ensureExpr(lambdaCandidate ?? new IdentifierAtom("nop")),
+          scope
+        );
     if (!isMacroLambdaValue(lambda)) {
       throw new Error("map requires a macro lambda as the second argument");
     }
@@ -472,7 +508,10 @@ const builtins: Record<string, BuiltinFn | undefined> = {
     const lambdaCandidate = args.at(2);
     const lambdaResult = isMacroLambdaValue(lambdaCandidate)
       ? lambdaCandidate
-      : evalMacroExpr(ensureExpr(lambdaCandidate ?? new IdentifierAtom("nop")), scope);
+      : evalMacroExpr(
+          ensureExpr(lambdaCandidate ?? new IdentifierAtom("nop")),
+          scope
+        );
     if (!isMacroLambdaValue(lambdaResult)) {
       throw new Error("reduce requires a macro lambda as the third argument");
     }
@@ -507,9 +546,12 @@ const builtins: Record<string, BuiltinFn | undefined> = {
   },
   concat: ({ args }) => {
     const first = ensureExpr(args.at(0));
-    const rest = args.slice(1);
-    const list = expectForm(first, "concat target");
-    const values = rest.flatMap((expr) => {
+    const list = isForm(first)
+      ? first
+      : isIdentifierAtom(first)
+      ? new Form([cloneExpr(first)])
+      : expectForm(first, "concat target");
+    const values = args.slice(1).flatMap((expr) => {
       const item = ensureExpr(expr);
       return isForm(item) ? item.toArray() : [item];
     });
@@ -555,7 +597,9 @@ const evalCall = (
 ): MacroEvalResult => {
   const head = form.at(0);
   if (!isIdentifierAtom(head)) {
-    const evaluated = form.toArray().map((expr) => ensureExpr(evalMacroExpr(expr, scope, opts)));
+    const evaluated = form
+      .toArray()
+      .map((expr) => ensureExpr(evalMacroExpr(expr, scope, opts)));
     return recreateForm(form, evaluated);
   }
 
@@ -590,7 +634,10 @@ const evalCall = (
   return recreateForm(form, [ensureExpr(evaluatedHead), ...normalizedArgs]);
 };
 
-const callLambda = (lambda: MacroLambdaValue, args: Expr[]): MacroEvalResult => {
+const callLambda = (
+  lambda: MacroLambdaValue,
+  args: Expr[]
+): MacroEvalResult => {
   const lambdaScope = new MacroScope(lambda.scope);
   lambdaScope.defineVariable({
     name: new IdentifierAtom("&lambda"),
@@ -620,7 +667,9 @@ const callLambda = (lambda: MacroLambdaValue, args: Expr[]): MacroEvalResult => 
   return result;
 };
 
-const isMacroLambdaValue = (value: MacroEvalResult): value is MacroLambdaValue =>
+const isMacroLambdaValue = (
+  value: MacroEvalResult
+): value is MacroLambdaValue =>
   (value as MacroLambdaValue)?.kind === "macro-lambda";
 
 const renderFunctionalMacro = (macro: MacroDefinition): Form =>
@@ -631,10 +680,7 @@ const renderFunctionalMacro = (macro: MacroDefinition): Form =>
       new IdentifierAtom("parameters"),
       ...macro.parameters.map((param) => param.clone()),
     ]),
-    new Form([
-      new IdentifierAtom("block"),
-      ...macro.body.map(cloneExpr),
-    ]),
+    new Form([new IdentifierAtom("block"), ...macro.body.map(cloneExpr)]),
   ]);
 
 const renderMacroVariable = (binding: MacroVariableBinding): Form =>
@@ -644,7 +690,9 @@ const renderMacroVariable = (binding: MacroVariableBinding): Form =>
     new Form([new IdentifierAtom("reserved-for-type")]),
     new Form([
       new IdentifierAtom("is-mutable"),
-      binding.mutable ? new IdentifierAtom("true") : new IdentifierAtom("false"),
+      binding.mutable
+        ? new IdentifierAtom("true")
+        : new IdentifierAtom("false"),
     ]),
   ]);
 
@@ -664,7 +712,8 @@ const recreateForm = (form: Form, elements: Expr[]): Form =>
     elements,
   });
 
-const ensureForm = (expr: Expr): Form => (isForm(expr) ? expr : new Form([expr]));
+const ensureForm = (expr: Expr): Form =>
+  isForm(expr) ? expr : new Form([expr]);
 
 const cloneExpr = (expr: Expr): Expr => expr.clone();
 
@@ -743,9 +792,7 @@ const arithmetic = (
   return identifier;
 };
 
-const normalizeLambdaParameters = (
-  expr?: Expr
-): IdentifierAtom[] => {
+const normalizeLambdaParameters = (expr?: Expr): IdentifierAtom[] => {
   if (!expr) return [];
   if (isIdentifierAtom(expr)) return [expr.clone()];
   if (!isForm(expr)) {
@@ -763,7 +810,11 @@ const normalizeLambdaParameters = (
         .map((identifier) => identifier.clone());
     }
   }
-  if (elements.length && isIdentifierAtom(elements[0]) && elements[0].value === "tuple") {
+  if (
+    elements.length &&
+    isIdentifierAtom(elements[0]) &&
+    elements[0].value === "tuple"
+  ) {
     return elements
       .slice(1)
       .map((item, index) =>
@@ -778,16 +829,17 @@ const normalizeLambdaParameters = (
 };
 
 const normalizeLambdaBody = (expr: Expr): Expr[] => {
-  if (isForm(expr) && isIdentifierAtom(expr.at(0)) && expr.at(0)!.value === "block") {
+  if (
+    isForm(expr) &&
+    isIdentifierAtom(expr.at(0)) &&
+    expr.at(0)!.value === "block"
+  ) {
     return expr.toArray().slice(1);
   }
   return [expr];
 };
 
-const expandSyntaxTemplate = (
-  args: Expr[],
-  scope: MacroScope
-): Expr[] => {
+const expandSyntaxTemplate = (args: Expr[], scope: MacroScope): Expr[] => {
   const expand = (exprs: Expr[]): Expr[] =>
     exprs.flatMap((expr) => {
       if (isForm(expr) && isIdentifierAtom(expr.at(0))) {
