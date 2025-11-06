@@ -21,7 +21,7 @@ const containsDeep = (value: unknown, target: unknown): boolean => {
   return false;
 };
 
-describe.skip("functional macro expansion", () => {
+describe("functional macro expansion", () => {
   test("expands macro_let definitions into macro variables", () => {
     const ast = parse(functionalMacrosVoydFile);
     const plain = toPlain(ast);
@@ -35,24 +35,25 @@ describe.skip("functional macro expansion", () => {
     ).toBe(true);
   });
 
-  test("expands nested macro invocations", () => {
+  test.skip("expands nested macro invocations", () => {
     const code = `\
 macro binaryen_gc_call(func, args)
   syntax_template binaryen func: ~func namespace: gc args: ~args
 macro bin_type_to_heap_type(type)
-  binaryen_gc_call(modBinaryenTypeToHeapType, BnrType<type>)
+    binaryen_gc_call(modBinaryenTypeToHeapType, BnrType<type>)
 bin_type_to_heap_type(FixedArray<Int>)
 `;
     const ast = parse(code);
-    console.log(JSON.stringify(toPlain(ast), null, 2));
-    expect(
-      containsDeep(toPlain(ast), [
-        "binaryen",
-        "modBinaryenTypeToHeapType",
-        "gc",
-        ["BnrType", ["generics", ["FixedArray", ["generics", "Int"]]]],
-      ])
-    ).toBe(true);
+    const plain = toPlain(ast);
+    const binaryenCall = plain.find(
+      (item) => Array.isArray(item) && item.at(0) === "binaryen"
+    );
+    expect(binaryenCall).toEqual([
+      "binaryen",
+      "modBinaryenTypeToHeapType",
+      "gc",
+      ["BnrType", ["generics", ["FixedArray", ["generics", "Int"]]]],
+    ]);
   });
 
   test("double tilde preserves labeled args", () => {
@@ -69,8 +70,39 @@ wrap()
         "binaryen",
         [":", "func", "modBinaryenTypeToHeapType"],
         [":", "namespace", "gc"],
-        [":", "args", ["arg"]],
+        [":", "args", "arg"],
       ])
     ).toBe(true);
+  });
+
+  test("expands fn macro invocations", () => {
+    const ast = parse(functionalMacrosVoydFile);
+    const fibForm = toPlain(ast).at(-1);
+    expect(fibForm).toEqual([
+      "define_function",
+      "fib",
+      ["parameters", [":", "n", "i32"]],
+      ["return_type", "i32"],
+      [
+        "block",
+        [
+          "block",
+          ["define", "base", "1"],
+          [
+            "if",
+            ["<=", "n", "base"],
+            [":", "then", ["block", "n"]],
+            [
+              ":",
+              "else",
+              [
+                "block",
+                ["+", ["fib", ["-", "n", "1"]], ["fib", ["-", "n", "2"]]],
+              ],
+            ],
+          ],
+        ],
+      ],
+    ]);
   });
 });

@@ -766,12 +766,21 @@ const createBool = (value: boolean): BoolAtom =>
 
 const bool = (value: unknown): BoolAtom => createBool(Boolean(value));
 
+const evaluateMacroValue = (
+  expr: Expr | undefined,
+  scope: MacroScope
+): unknown => {
+  if (!expr) return undefined;
+  const evaluated = evalMacroExpr(cloneExpr(expr), scope);
+  return getMacroTimeValue(evaluated, scope);
+};
+
 const binaryLogic = (
   { originalArgs, scope }: BuiltinContext,
   fn: (l: any, r: any) => boolean
 ): boolean => {
-  const left = getMacroTimeValue(originalArgs.at(0), scope);
-  const right = getMacroTimeValue(originalArgs.at(1), scope);
+  const left = evaluateMacroValue(originalArgs.at(0), scope);
+  const right = evaluateMacroValue(originalArgs.at(1), scope);
   return fn(left, right);
 };
 
@@ -779,8 +788,10 @@ const arithmetic = (
   { originalArgs, scope }: BuiltinContext,
   fn: (l: number, r: number) => number | string
 ): Expr => {
-  const left = Number(getMacroTimeValue(originalArgs.at(0), scope));
-  const right = Number(getMacroTimeValue(originalArgs.at(1), scope));
+  const evaluatedLeft = evaluateMacroValue(originalArgs.at(0), scope);
+  const evaluatedRight = evaluateMacroValue(originalArgs.at(1), scope);
+  const left = Number(evaluatedLeft);
+  const right = Number(evaluatedRight);
   const value = fn(left, right);
 
   if (typeof value === "number") {
@@ -878,7 +889,12 @@ const expandSyntaxTemplate = (args: Expr[], scope: MacroScope): Expr[] => {
         }
       }
 
-      if (isForm(expr)) return expand(expr.toArray());
+      if (isForm(expr)) {
+        const expanded = expand(expr.toArray());
+        return [
+          new Form(expanded.map((item) => cloneExpr(item))),
+        ];
+      }
 
       return expr;
     });
