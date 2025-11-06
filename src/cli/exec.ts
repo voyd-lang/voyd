@@ -16,7 +16,8 @@ async function main() {
 
   if (config.canonical && config.emitParserAst) {
     const file = readFileSync(config.index, { encoding: "utf8" });
-    return emit(newParse(file, config.index).at(1));
+    const parsed = newParse(file, config.index);
+    return emit(parsed.toJSON());
   }
 
   if (config.emitParserAst) {
