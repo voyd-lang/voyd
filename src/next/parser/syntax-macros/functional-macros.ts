@@ -153,7 +153,6 @@ const expandMacroDefinition = (form: Form, scope: MacroScope): Expr => {
   const bodyExpressions = form
     .toArray()
     .slice(2)
-    .map((expr) => expandExpr(expr, scope))
     .map(cloneExpr);
 
   const macro: MacroDefinition = {
@@ -333,7 +332,7 @@ const builtins: Record<string, BuiltinFn | undefined> = {
 
     const parameters = normalizeLambdaParameters(paramsExpr);
     const body = normalizeLambdaBody(bodyExpr).map((expr) =>
-      ensureExpr(evalMacroExpr(cloneExpr(expr), scope))
+      ensureExpr(cloneExpr(expr))
     );
 
     return {
@@ -561,6 +560,12 @@ const evalCall = (
   }
 
   const id = head.value;
+  const macro = scope.getMacro(id);
+  if (macro) {
+    const expanded = expandMacroCall(form, macro, scope);
+    return evalMacroExpr(expanded, scope, opts);
+  }
+
   const argExprs = form.toArray().slice(1);
   const args: MacroEvalResult[] = fnsToSkipArgEval.has(id)
     ? argExprs
