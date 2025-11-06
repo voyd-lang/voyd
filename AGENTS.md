@@ -4,9 +4,11 @@ This repository contains the implementation of the voyd programming language.
 voyd is a level between rust and typescript in terms of abstraction. It
 compiles to webassembly.
 
+Any form of git network commands are forbidden. Including `git push` & `git pull`
+
 # Debugging
 
-A command line tool is available installable with `npm link`
+A cli is available after `npm link`
 
 Helpful commands:
 - `vt --emit-parser-ast <path-to-voyd-file>`
@@ -15,20 +17,17 @@ Helpful commands:
 
 # Testing
 
-This repo uses vitest for testing. You can run the full test
-suite with `npm test`. Prefer `vitest run` to `vitest`.
+- `npm test` (runs vitest suite)
+- `npx vitest <path-to-test>`
 
 You should generally add unit tests (especially e2e ones like those in
 `src/__tests__) when adding new features or fixing bugs.
 
-Note: If tests fail and you are out of time, commit your results anyway and
-inform the user of the test failure. Its better to be able to try and debug
-the code than to have the work thrown away.
-
 # Style Guide
 
-- Use flat code with early returns
-- Break down large functions into smaller ones
-- Use functional style programming
-- Prefer ternary conditionals to if statements for initializing vars
-- Files should be ordered by importance. Imports at the top, then the most important (or main) export just below the imports.
+- Prefer functional style
+- Keep functions small
+- Prefer early returns to else ifs
+- Use `const` whenever possible
+- Use ternary conditionals for conditional variable init
+- Files should be ordered by importance. The main export of a file at the top.
