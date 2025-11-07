@@ -72,6 +72,8 @@
 - **Isolated evaluation**: macro-time evaluation uses an explicit environment of macro bindings rather than `Identifier.resolve()`, preventing cross-contamination between compile-time and runtime scopes.
 - **Early diagnostics**: macro expansion emits its own errors (undefined macro, invalid module reference) before binding, so later phases can assume the expanded AST respects syntactic invariants and module topology.
 
+TODO: Add support for matching, sanitary macros
+
 ### Data model details
 - **Node IDs**: assign every AST node a stable `NodeId`. HIR nodes retain the originating AST `NodeId` for diagnostics.
 - **SymbolTable**: hierarchical scopes with explicit parents. Symbols carry metadata (kind, generics, trait/impl context). Replaces implicit `lexicon` maps on syntax objects.
