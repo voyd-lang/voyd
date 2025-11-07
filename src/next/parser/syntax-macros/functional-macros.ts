@@ -359,12 +359,12 @@ const builtins: Record<string, BuiltinFn | undefined> = {
   argWithLabel: ({ args }) => {
     const call = expectForm(args.at(0), "argWithLabel call");
     const label = expectIdentifier(args.at(1), "argWithLabel label");
-    return cloneExpr(expectFormLabel(call, label.value, true));
+    return cloneExpr(expectFormLabel(call, label.value));
   },
   optionalArgWithLabel: ({ args }) => {
     const call = expectForm(args.at(0), "optionalArgWithLabel call");
     const label = expectIdentifier(args.at(1), "optionalArgWithLabel label");
-    const result = expectFormLabel(call, label.value, false);
+    const result = getOptionalFormLabel(call, label.value);
     return result ? cloneExpr(result) : bool(false);
   },
   argsWithLabel: ({ args }) => {
@@ -837,11 +837,7 @@ const normalizeLambdaParameters = (expr?: Expr): IdentifierAtom[] => {
 };
 
 const normalizeLambdaBody = (expr: Expr): Expr[] => {
-  if (
-    isForm(expr) &&
-    isIdentifierAtom(expr.at(0)) &&
-    expr.at(0)!.value === "block"
-  ) {
+  if (isForm(expr) && expr.calls("block")) {
     return expr.toArray().slice(1);
   }
   return [expr];
@@ -943,7 +939,7 @@ const collectFormLabels = (form: Form, label: string): Expr[] => {
   const result: Expr[] = [];
   args.forEach((expr) => {
     if (!isForm(expr)) return;
-    if (!isIdentifierAtom(expr.at(0)) || expr.at(0)!.value !== ":") return;
+    if (!expr.calls(":")) return;
     const labelExpr = expr.at(1);
     if (!isIdentifierAtom(labelExpr)) return;
     if (labelExpr.value === label) {
@@ -954,17 +950,16 @@ const collectFormLabels = (form: Form, label: string): Expr[] => {
   return result;
 };
 
-const expectFormLabel = (
-  form: Form,
-  label: string,
-  required: boolean
-): Expr | undefined => {
+const getOptionalFormLabel = (form: Form, label: string): Expr | undefined => {
   const args = collectFormLabels(form, label);
-  if (!args.length) {
-    if (required) throw new Error(`Labeled argument '${label}' not found`);
-    return undefined;
-  }
   return args.at(0);
+};
+
+const expectFormLabel = (form: Form, label: string): Expr => {
+  const args = collectFormLabels(form, label);
+  const labelExpr = args.at(0);
+  if (!labelExpr) throw new Error(`Labeled argument '${label}' not found`);
+  return labelExpr;
 };
 
 const resolveForm = (
