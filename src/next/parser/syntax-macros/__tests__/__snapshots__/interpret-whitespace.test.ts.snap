@@ -779,7 +779,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                     [
                       "object_literal",
                       [
-                        "label",
+                        ":",
                         "from",
                         [
                           [
@@ -1016,7 +1016,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
               [
                 "object_literal",
                 [
-                  "label",
+                  ":",
                   "from",
                   [
                     [
@@ -1041,7 +1041,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                   [
                     "object_literal",
                     [
-                      "label",
+                      ":",
                       "from",
                       [
                         [
@@ -1062,7 +1062,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                   [
                     "object_literal",
                     [
-                      "label",
+                      ":",
                       "from",
                       [
                         [
@@ -1088,7 +1088,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                   [
                     "object_literal",
                     [
-                      "label",
+                      ":",
                       "from",
                       [
                         [
@@ -1108,7 +1108,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                   [
                     "object_literal",
                     [
-                      "label",
+                      ":",
                       "from",
                       [
                         [
@@ -1135,7 +1135,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                   [
                     "object_literal",
                     [
-                      "label",
+                      ":",
                       "from",
                       [
                         [
@@ -1157,7 +1157,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                     [
                       "object_literal",
                       [
-                        "label",
+                        ":",
                         "from",
                         [
                           [
@@ -1181,7 +1181,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                     [
                       "object_literal",
                       [
-                        "label",
+                        ":",
                         "from",
                         [
                           [
@@ -1207,7 +1207,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                     [
                       "object_literal",
                       [
-                        "label",
+                        ":",
                         "from",
                         [
                           [
@@ -1244,7 +1244,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                   [
                     "object_literal",
                     [
-                      "label",
+                      ":",
                       "from",
                       [
                         [
@@ -1269,7 +1269,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                     [
                       "object_literal",
                       [
-                        "label",
+                        ":",
                         "from",
                         [
                           [

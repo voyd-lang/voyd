@@ -239,7 +239,7 @@ exports[`should parse the example file into a raw ast 1`] = `
       [
         "object_literal",
         [
-          "label",
+          ":",
           "from",
           [
             "FixedArray",

@@ -30,7 +30,7 @@ export const objectLiteral = (...args: FormInitElements) =>
   call("object_literal", ...args);
 
 export const label = (label: IdentifierAtom | string, value: Expr) =>
-  call("label", label, value);
+  call(new IdentifierAtom(":"), label, value);
 
 export const identifier = (id: string) => new IdentifierAtom(id);
 
