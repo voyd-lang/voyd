@@ -65,12 +65,6 @@ const expandForm = (form: Form, scope: MacroScope): Form => {
 };
 
 const expandMacroDefinition = (form: Form, scope: MacroScope): Expr => {
-  if (process.env.VITEST) {
-    console.log(
-      "expandMacroDefinition:",
-      JSON.stringify(form.toJSON(), null, 2)
-    );
-  }
   const signature = expectForm(form.at(1), "macro signature");
   const name = expectIdentifier(signature.at(0), "macro name");
   const parameters = signature

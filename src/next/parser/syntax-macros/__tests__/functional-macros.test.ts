@@ -38,7 +38,7 @@ describe("functional macro expansion", () => {
     ).toBe(true);
   });
 
-  test.skip("expands nested macro invocations", () => {
+  test("expands nested macro invocations", () => {
     const code = `\
 macro binaryen_gc_call(func, args)
   syntax_template binaryen func: ~func namespace: gc args: ~args
