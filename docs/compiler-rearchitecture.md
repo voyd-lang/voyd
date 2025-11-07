@@ -65,14 +65,44 @@
 7. **Optimization & MIR**: lower typed HIR into a mid-level IR tailored for WebAssembly codegen, using the type/effect tables to drive calling conventions.
 8. **Codegen**: translate MIR to WASM text/binary. Type/Effect tables remain as references for runtime metadata.
 
+### Phase contracts
+| Phase                        | Consumes                                          | Produces                                                  | Invalidates/Notes                                                             |
+| ---------------------------- | ------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Parser (already implemented) | Source text, reader macro config                  | Immutable AST + parent pointers + raw diagnostics         | Re-run when file contents or reader macro config changes.                     |
+| Macro expansion              | Parser AST, module registry snapshot, macro cache | Expanded AST, macro metadata (expansion map, hygiene IDs) | Invalidated by macro source edits, module graph changes, or parser AST churn. |
+| Binder                       | Expanded AST, macro metadata                      | `SymbolTable`, scope graph, import/export graph           | Rebuild when expanded AST or module graph diff; consumers only read tables.   |
+| HIR lowering                 | Expanded AST, `SymbolTable`                       | HIR nodes keyed by `NodeId`, HIR ↔ AST map                | Invalidate when syntax or binding info changes; other phases never touch AST. |
+| Type inference/checking      | HIR, `SymbolTable`, `TypeArena` seeds             | `TypeTable`, substitutions, constraint diagnostics        | Only mutates inference state; rerun when HIR or symbol definitions differ.    |
+| Effect analysis              | HIR, `TypeTable`                                  | `EffectTable`, effect diagnostics                         | Depends solely on typed HIR; incremental updates possible per function.       |
+| Optimization & MIR           | HIR, `TypeTable`, `EffectTable`                   | MIR, layout metadata for codegen                          | MIR invalidated when upstream tables change.                                  |
+| Codegen                      | MIR, runtime config                               | WASM text/binary artifacts, debug info                    | Re-run when MIR or target settings change.                                    |
+
 ### Macro expansion strategy
+- Parser, reader macros, syntax macros, and the functional macro expander are already implemented. The tasks below focus on wiring that existing surface area into the new pipeline without regressing determinism or isolation.
 - **Dedicated macro IR**: represent macro definitions and environments separately from runtime entities. Macro scopes draw from a `MacroModuleGraph`, avoiding mutations to runtime symbol tables during expansion.
 - **Module graph integration**: seed the expander with a read-only module registry derived from parsing. `use` forms consult this graph instead of recursively resolving modules at runtime (`src/semantics/functional-macros.ts:55`), and the resulting imports are persisted for the binder.
 - **Pure output**: expansion yields a new AST with consistent parent pointers and `NodeId`s, leaving the original syntax untouched. This makes macro expansion re-runnable and simplifies incremental compilation.
 - **Isolated evaluation**: macro-time evaluation uses an explicit environment of macro bindings rather than `Identifier.resolve()`, preventing cross-contamination between compile-time and runtime scopes.
 - **Early diagnostics**: macro expansion emits its own errors (undefined macro, invalid module reference) before binding, so later phases can assume the expanded AST respects syntactic invariants and module topology.
+- **Deterministic IDs & cache invalidation**: assign `NodeId`s by hashing `(module path, syntactic position)` so unchanged regions keep their IDs across rebuilds. Store the module graph snapshot alongside a macro cache keyed by `(macro source hash, argument hash)`; expansion reuses cached output unless either part changes.
+- **Hygiene & pattern matching**: encode hygiene IDs on every macro expansion site, threading them through bindings so the binder can distinguish hygienic names from user-written ones. Pattern-matching macros use declarative matchers that capture AST slices explicitly and reject ambiguous captures up front, retiring the previous placeholder work-item.
 
-TODO: Add support for matching, sanitary macros
+### Syntax phase implementation plan
+1. **ModuleGraphBuilder**
+   - Reuse the parsed modules to build a deterministic module graph (`ModId`, dependency edges, reader-macro config). Persist it per module hash so syntax-only edits trigger the minimum recompute.
+   - Validate graph invariants early (no cycles in `use`, module path uniqueness) and surface diagnostics before macro expansion runs.
+2. **NodeId allocator**
+   - Walk parser output to assign stable IDs by combining the module graph ID with pre-order positions. Capture these in a side table so downstream phases can map AST spans back to IDs without mutating the nodes.
+   - Provide a `NodeIdMap` API that macro expansion and later phases consume instead of embedding IDs directly.
+3. **Macro expander driver**
+   - Hook the existing functional macro expander into a pure driver that accepts `(AST, ModuleGraphBuilder snapshot, NodeId allocator)` and emits a new AST plus macro metadata (expansion traces, hygiene scopes, `use` manifests).
+   - Ensure syntax macros register their outputs via callbacks so the expander never mutates the original AST.
+4. **Syntax metadata surfaces**
+   - Emit an `ExpansionMap` recording `(expansion site NodeId → generated NodeIds)` and a `UseManifest` enumerating imports/exports discovered during expansion. These become inputs for the binder.
+   - Record reader/syntax macro diagnostics separately so CLI consumers can toggle whether they block compilation or downgrade to warnings.
+5. **Validation harness**
+   - Add `vt --emit-parser-ast` equivalents for the expanded AST plus macro metadata, enabling golden tests under `src/next/parser/syntax-macros/__tests__`.
+   - Gate syntax-phase completion on matching legacy compiler expansion for std modules and on deterministic NodeId snapshots across two consecutive runs.
 
 ### Data model details
 - **Node IDs**: assign every AST node a stable `NodeId`. HIR nodes retain the originating AST `NodeId` for diagnostics.
@@ -87,7 +117,7 @@ TODO: Add support for matching, sanitary macros
 - **Type aliases**: represent as `TypeScheme`s; aliases no longer wrap syntax nodes. Expansion is demand-driven via the `TypeArena`.
 - **Unions**: maintain normalized variant sets keyed by nominal head and shape. Resolution produces canonical `UnionTypeId` entries without mutating original syntax.
 - **Generics and inference**: use constraint solving with substitution maps. `infer<T>` operations produce substitution results stored per call site, eliminating the need to mutate the callee or arguments.
-- **GC integration**: tie every nominal type to a layout descriptor derived from the `TypeArena`. Structural types compile to transient layouts or wrapper objects with caching keyed by structural shape hashes.
+- **WASM GC integration**: map each canonical `TypeId` that requires runtime storage to a WebAssembly GC `struct`/`array` declaration, caching the association so identical shapes share the same Wasm type index. MIR lowers closures/records by referencing these cached type handles instead of inventing ad-hoc layouts.
 
 ### Effect system blueprint
 - Model effects as row-polymorphic sets (`{op: EffectOp, region?: RegionId}`) with an open row variable for polymorphism.
@@ -116,17 +146,22 @@ TODO: Add support for matching, sanitary macros
 1. **Bootstrap `src_next`**
    - Create a clean `src_next` workspace that reuses only the parser and CLI harness entry points. Wire a feature flag (`VT_NEXT=1`) so the CLI can dispatch to the new pipeline while keeping the legacy compiler intact for reference.
    - Stand up shared utilities (`NodeId`, `SymbolId`, `TypeId`, effect row IDs) inside `src_next/lib`, ensuring they do not mutate legacy syntax objects.
+   - **Exit criteria**: `vt --emit-parser-ast` can target both compilers behind the flag, and golden snapshots show identical parser output for the stdlib modules.
 2. **Rebuild front-end passes in `src_next`**
    - Implement the new macro expander against parser output, emitting the expanded AST plus a module graph snapshot.
    - Build the binder on top of the proposed `SymbolTable` API, producing scope and import/export tables stored in `src_next/binder`.
+   - **Exit criteria**: expanded AST + binder tables for std modules remain deterministic across two runs, and binder-powered name resolution matches the legacy compiler on the current test suite.
 3. **Introduce semantic IR and typing**
    - Lower expanded AST into HIR nodes housed in `src_next/hir`. Populate the `TypeArena` and `EffectTable` to power type inference, algebraic effect analysis, and trait resolution without touching legacy semantics.
    - Port standard-library type descriptors gradually, prioritizing dependencies needed for smoke tests (Option, Result, collections).
+   - **Exit criteria**: HIR diff tests stabilize, type inference reproduces Map/Option scenarios without the illegal cast, and effect inference reports rows for the existing async/effect examples.
 4. **Code generation pipeline**
    - Implement MIR lowering and WebAssembly codegen under `src_next/codegen`, reusing runtime helpers where possible. Compare emitted WAT against legacy output for selected fixtures.
+   - **Exit criteria**: MIR fuzz tests cover control-flow constructs, and generated WAT passes `wasm-validate` plus matches runtime behaviour on `vt --run` fixtures.
 5. **Bridge CLI and tests**
    - Add a CLI switch to run both compilers, defaulting to `src_next` once core language features pass. Mirror critical tests into `src_next/__tests__`, expanding coverage as features land.
    - Retire legacy compiler once `src_next` matches behaviour on the full test suite and new architecture-specific scenarios (effects, structural typing) pass.
+   - **Exit criteria**: CI runs both pipelines in parallel, `npm test` exercises `src_next` e2e tests, and release gating includes regression coverage for illegal cast + effect programs.
 
 Throughout the rewrite, keep legacy `src` read-only for reference; all new development happens in `src_next`. Use integration snapshots to verify parity and to catch regressions early.
 
