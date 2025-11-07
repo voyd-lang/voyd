@@ -73,7 +73,7 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
   2. The labeled argument is on the same indentation level, or 1 child
      indentation level as the preceding function call.
 
-  ```
+  ```voyd
   if x > y then: 3
   else: 5
 
@@ -96,10 +96,9 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
 4.  Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special
   handling.
 
-  1.  Greedy operators consume indented child blocks, rather than the parent
-    function call
+  1.  Greedy operators consume indented child blocks, rather than the parent function call
 
-    ```
+    ```voyd
     let x =
       if (x > y)
         then: 3
@@ -113,11 +112,9 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
         (: else 5)))))
     ```
 
-  2.  If an expression follows a greedy operator on the same line, a new line
-    is inserted after the operator and each child line has an additional
-    level of indentation supplied.
+  2. If an expression follows a greedy operator on the same line, a new line is inserted after the operator and each child line has an additional level of indentation supplied.
 
-      ```
+      ```voyd
       let z = if x > y
         then: 3
         else: 5
@@ -155,7 +152,7 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
 
 Examples:
 
-```
+```voyd
 if x > 3 then:
   do_work()
   blah()
@@ -221,7 +218,7 @@ languages, Voyd supports standard function call syntax of the form `f(x)`.
 1.  Any identifier placed directly next to a list is inserted as the first
   argument of that list
 
-```
+```voyd
 add(1 2)
 
 // Becomes
@@ -239,7 +236,7 @@ add (1 2)
 The dot (or period) operator applies the expression on the left as an argument
 of the expression on the right.
 
-```
+```voyd
 5.add(1)
 
 // Becomes
@@ -259,7 +256,7 @@ Labeled arguments have syntactic sugar that make passing lambda's much cleaner.
 When the left hand side of the `:` operator is a list, the first identifier in
 that list is treated as the name, additional identifiers become parameters.
 
-```
+```voyd
 fn call(cb: fn(v: i32) -> void)
   cb(5)
 
@@ -274,7 +271,7 @@ call cb: (v) =>
 This works nicely with the rules of labeled arguments to support a trailing
 lambda syntax similar to that of swift or koka.
 
-```
+```voyd
 try this():
   this_throws_an_error()
 catch(e):

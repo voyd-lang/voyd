@@ -9,7 +9,7 @@ import {
   refTest,
   structGetFieldValue,
   callRef,
-} from "../lib/binaryen-gc/index.js";
+} from "@lib/binaryen-gc/index.js";
 import { Call } from "../syntax-objects/call.js";
 import { returnCall } from "./return-call.js";
 import { builtinCallCompilers } from "./builtin-call-registry.js";
@@ -17,8 +17,8 @@ import { compileObjectInit } from "./compile-object-init.js";
 import { getClosureFunctionType } from "./compile-closure.js";
 import { Fn } from "../syntax-objects/fn.js";
 import { voydBaseObject, Type, FnType } from "../syntax-objects/types.js";
-import { murmurHash3 } from "../lib/murmur-hash.js";
-import { AugmentedBinaryen } from "../lib/binaryen-gc/types.js";
+import { murmurHash3 } from "@lib/murmur-hash.js";
+import { AugmentedBinaryen } from "@lib/binaryen-gc/types.js";
 import { canonicalType } from "../semantics/types/canonicalize.js";
 const bin = binaryen as unknown as AugmentedBinaryen;
 

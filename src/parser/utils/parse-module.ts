@@ -1,4 +1,4 @@
-import { resolveSrc } from "../../lib/resolve-src.js";
+import { resolveSrc } from "@lib/resolve-src.js";
 import { parse } from "../parser.js";
 import { ParsedFiles, parseDirectory } from "./parse-directory.js";
 import { parseFile } from "./parse-file.js";

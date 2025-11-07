@@ -18,4 +18,6 @@ export type VoydConfig = {
   index: string;
   /** Run the internal test script */
   internalTest?: boolean;
+  /** Use the new canonical pipeline */
+  canonical?: boolean;
 };

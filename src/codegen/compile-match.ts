@@ -9,7 +9,7 @@ import { Match, MatchCase } from "../syntax-objects/match.js";
 import { compile as compileVariable } from "./compile-variable.js";
 import { compile as compileIdentifier } from "./compile-identifier.js";
 import { Type, UnionType } from "../syntax-objects/types.js";
-import { structGetFieldValue } from "../lib/binaryen-gc/index.js";
+import { structGetFieldValue } from "@lib/binaryen-gc/index.js";
 import { Obj } from "../syntax-objects/index.js";
 
 export const compile = (opts: CompileExprOpts<Match>) => {

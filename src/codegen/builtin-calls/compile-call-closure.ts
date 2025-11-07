@@ -10,7 +10,7 @@ import {
   refTest,
   structGetFieldValue,
   callRef,
-} from "../../lib/binaryen-gc/index.js";
+} from "@lib/binaryen-gc/index.js";
 import { getClosureFunctionType } from "../compile-closure.js";
 import { FnType, Type, voydBaseObject } from "../../syntax-objects/types.js";
 import { canonicalType } from "../../semantics/types/canonicalize.js";

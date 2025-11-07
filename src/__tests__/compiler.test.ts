@@ -7,9 +7,9 @@ import {
 import { compile } from "../compiler.js";
 import { describe, test, vi } from "vitest";
 import assert from "node:assert";
-import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import { getWasmFn, getWasmInstance } from "@lib/wasm.js";
 import * as rCallUtil from "../codegen/return-call.js";
-import { readString } from "../lib/read-string.js";
+import { readString } from "@lib/read-string.js";
 import { compilers } from "../codegen.js";
 
 describe("E2E Compiler Pipeline", () => {

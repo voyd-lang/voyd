@@ -1,0 +1,8 @@
+use std::all
+
+type DsArrayi32 = DsArray<i32>
+
+pub fn main()
+  let arr = new_fixed_array<i32>(10)
+  arr.set<i32>(0, 1)
+  arr.get<i32>(0)

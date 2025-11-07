@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { ExpressionRef, TypeRef } from "../lib/binaryen-gc/types.js";
+import { ExpressionRef, TypeRef } from "@lib/binaryen-gc/types.js";
 
 export const returnCall = (
   mod: binaryen.Module,

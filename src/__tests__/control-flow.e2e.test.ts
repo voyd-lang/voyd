@@ -1,7 +1,7 @@
 import { describe, test } from "vitest";
 import { compile } from "../compiler.js";
 import { controlFlowText } from "./fixtures/e2e-file.js";
-import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import { getWasmFn, getWasmInstance } from "@lib/wasm.js";
 import assert from "node:assert";
 
 describe("Control Flow sugar", () => {

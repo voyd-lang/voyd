@@ -2,7 +2,7 @@ import { msgPackVoyd } from "./fixtures/msg-pack.js";
 import { compile } from "../compiler.js";
 import { describe, test } from "vitest";
 import assert from "node:assert";
-import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import { getWasmFn, getWasmInstance } from "@lib/wasm.js";
 import { decode, encode } from "@msgpack/msgpack";
 
 describe("E2E msg pack encode", async () => {

@@ -1,7 +1,7 @@
 import { describe, test, beforeAll, expect } from "vitest";
 import assert from "node:assert";
 import { compile } from "../compiler.js";
-import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import { getWasmFn, getWasmInstance } from "@lib/wasm.js";
 import { decode } from "@msgpack/msgpack";
 import { parse } from "../parser/parser.js";
 

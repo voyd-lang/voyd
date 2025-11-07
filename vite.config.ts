@@ -1,7 +1,16 @@
 import { defineConfig } from "vite";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const projectRoot = fileURLToPath(new URL(".", import.meta.url));
 
 // Build a browser-friendly ESM bundle that avoids Node-only paths.
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@lib": resolve(projectRoot, "src/lib"),
+    },
+  },
   build: {
     lib: {
       entry: "src/browser.ts",

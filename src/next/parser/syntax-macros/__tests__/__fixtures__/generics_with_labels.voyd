@@ -1,0 +1,8 @@
+foo<Option>
+  then: work()
+
+Foo<T: Display>
+  else: 0
+
+bar<Option>
+  then: baz()

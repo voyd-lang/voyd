@@ -2,7 +2,7 @@ import { msgPackTupleMapVoyd } from "./fixtures/msg-pack-tuple-map.js";
 import { compile } from "../compiler.js";
 import { describe, test, beforeAll } from "vitest";
 import assert from "node:assert";
-import { getWasmFn, getWasmInstance } from "../lib/wasm.js";
+import { getWasmFn, getWasmInstance } from "@lib/wasm.js";
 
 describe("E2E Map<MsgPack> from Array<(String, MsgPack)>", () => {
   let instance: WebAssembly.Instance;
