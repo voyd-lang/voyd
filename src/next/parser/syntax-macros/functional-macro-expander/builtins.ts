@@ -240,7 +240,10 @@ export const createBuiltins = (
     return result;
   };
 
-  const getOptionalFormLabel = (form: Form, label: string): Expr | undefined => {
+  const getOptionalFormLabel = (
+    form: Form,
+    label: string
+  ): Expr | undefined => {
     const args = collectFormLabels(form, label);
     return args.at(0);
   };
@@ -259,7 +262,8 @@ export const createBuiltins = (
     context: string
   ): Form => {
     if (evaluated) {
-      const expr = evaluated instanceof Form ? evaluated : expectExpr(evaluated);
+      const expr =
+        evaluated instanceof Form ? evaluated : expectExpr(evaluated);
       if (isForm(expr)) return expr;
     }
 
@@ -304,7 +308,9 @@ export const createBuiltins = (
     },
     ":": ({ args }) => {
       const value = args.at(1);
-      return value ? expectExpr(value, "label value") : new IdentifierAtom("nop");
+      return value
+        ? expectExpr(value, "label value")
+        : new IdentifierAtom("nop");
     },
     "==": (ctx) => bool(binaryLogic(ctx, (l, r) => l === r)),
     ">": (ctx) => bool(binaryLogic(ctx, (l, r) => l > r)),
@@ -369,7 +375,10 @@ export const createBuiltins = (
       return identifier;
     },
     mark_moved: ({ args }) => {
-      const variable = expectIdentifier(args.at(0), "mark_moved target").clone();
+      const variable = expectIdentifier(
+        args.at(0),
+        "mark_moved target"
+      ).clone();
       return variable;
     },
     syntax_template: ({ originalArgs, scope }) => {
@@ -412,26 +421,6 @@ export const createBuiltins = (
       return new Form(list.toArray().slice(start, endVal).map(cloneExpr));
     },
     extract: ({ args, originalArgs, scope }) => {
-      if (process.env.DEBUG_EXTRACT) {
-        console.error(
-          "extract args",
-          JSON.stringify(
-            {
-              evaluated: args.map((arg) => {
-                if (isForm(arg)) return arg.toJSON();
-                if (isMacroLambdaValue(arg)) return { lambda: true };
-                const expr = expectExpr(arg, "extract debug value");
-                return expr.toJSON?.() ?? expr;
-              }),
-              original: originalArgs.map((arg) =>
-                isForm(arg) ? arg.toJSON() : arg?.toJSON?.() ?? arg
-              ),
-            },
-            null,
-            2
-          )
-        );
-      }
       const list = resolveForm(
         args.at(0),
         originalArgs.at(0),
