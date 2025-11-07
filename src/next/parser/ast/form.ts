@@ -101,10 +101,7 @@ export class Form extends Syntax {
     return new Form(this.toArray().toSpliced(at, 0, expr));
   }
 
-  map(fn: (expr: Expr) => Expr): Form {
-    return new Form(this.toArray().map((expr) => fn(expr)));
-  }
-
+  /** TODO: Maybe decouple this */
   split(delimiter = ","): Form {
     const groups: FormInitElements = [];
     let current: FormInitElements = [];
@@ -123,13 +120,6 @@ export class Form extends Syntax {
     return new Form(groups);
   }
 
-  replaceFirst(expr: Expr) {
-    return new Form({
-      location: this.location,
-      elements: [expr, ...this.rest],
-    });
-  }
-
   /** If this Form only contains a single child, returns the child, otherwise returns this form */
   unwrap(): Expr {
     if (this.length === 1 && this.first) return this.first;
@@ -145,7 +135,10 @@ export class Form extends Syntax {
 
   /**
    * Converts the Form into a function call of the provided name by separating
-   * parameters between commas and inserting the name as the first element */
+   * parameters between commas and inserting the name as the first element
+   *
+   * TODO: Maybe decouple this
+   */
   splitInto(name: Internal): Form {
     return this.split().insert(name).toCall();
   }
@@ -169,10 +162,6 @@ export class Form extends Syntax {
 
   cursor() {
     return FormCursor.fromForm(this);
-  }
-
-  static elementsOf(form?: Form): Expr[] {
-    return form ? form.toArray() : [];
   }
 }
 

@@ -5,18 +5,6 @@ import { IdentifierAtom } from "../atom.js";
 import { SourceLocation } from "../syntax.js";
 
 describe("Form helpers", () => {
-  it("elementsOf returns empty array for undefined", () => {
-    expect(Form.elementsOf(undefined)).toEqual([]);
-  });
-
-  it("elementsOf returns element list for a form", () => {
-    const form = new Form(["a", "b"]);
-    expect(Form.elementsOf(form).map((expr) => expr.toJSON())).toEqual([
-      "a",
-      "b",
-    ]);
-  });
-
   it("dynamicLocation derives span from child locations", () => {
     const loc = (start: number, end: number) =>
       new SourceLocation({
