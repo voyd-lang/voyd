@@ -8,6 +8,7 @@ export type ScopeId = number;
 export type SymbolId = number;
 
 export type HirId = number;
+export type HirItemId = HirId;
 export type HirExprId = HirId;
 export type HirStmtId = HirId;
 

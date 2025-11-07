@@ -1,45 +1,77 @@
 import type {
   HirExpression,
+  HirExportEntry,
   HirFunction,
+  HirItem,
   HirModule,
   HirNode,
   HirStatement,
 } from "./nodes.js";
-import type { HirExprId, HirId, HirStmtId } from "../ids.js";
+import type {
+  HirExprId,
+  HirId,
+  HirItemId,
+  HirStmtId,
+  NodeId,
+  SourceSpan,
+  SymbolId,
+} from "../ids.js";
 
 type WithoutId<T extends { id: HirId }> = Omit<T, "id">;
 
 export interface HirGraph {
   module: HirModule;
-  functions: readonly HirFunction[];
+  items: ReadonlyMap<HirItemId, HirItem>;
   statements: ReadonlyMap<HirStmtId, HirStatement>;
   expressions: ReadonlyMap<HirExprId, HirExpression>;
+}
+
+interface HirBuilderInit {
+  path: string;
+  scope: SymbolId;
+  ast: NodeId;
+  span: SourceSpan;
+  items?: readonly HirItemId[];
+  exports?: readonly HirExportEntry[];
 }
 
 export interface HirBuilder {
   readonly module: HirModule;
   addStatement(statement: WithoutId<HirStatement>): HirStmtId;
   addExpression(expression: WithoutId<HirExpression>): HirExprId;
-  addFunction(fn: WithoutId<HirFunction>): HirId;
-  setModuleBody(body: readonly HirStmtId[]): void;
+  addItem(
+    item: WithoutId<HirItem>,
+    options?: { moduleScoped?: boolean }
+  ): HirItemId;
+  addFunction(
+    fn: WithoutId<HirFunction>,
+    options?: { moduleScoped?: boolean }
+  ): HirItemId;
+  recordExport(entry: Omit<HirExportEntry, "item"> & { item: HirItemId }): void;
+  setModuleItems(items: readonly HirItemId[]): void;
   getNode(id: HirId): HirNode | undefined;
   finalize(): HirGraph;
 }
 
 export const createHirBuilder = (
-  init: WithoutId<HirModule> & { body?: readonly HirStmtId[] }
+  init: HirBuilderInit
 ): HirBuilder => {
   let nextId: HirId = 0;
 
   const expressions = new Map<HirExprId, HirExpression>();
   const statements = new Map<HirStmtId, HirStatement>();
-  const functions: HirFunction[] = [];
+  const items = new Map<HirItemId, HirItem>();
   const nodes = new Map<HirId, HirNode>();
 
   const module: HirModule = {
-    ...init,
+    kind: "module",
     id: nextId++,
-    body: [...(init.body ?? [])],
+    path: init.path,
+    scope: init.scope,
+    ast: init.ast,
+    span: init.span,
+    items: [...(init.items ?? [])],
+    exports: [...(init.exports ?? [])],
   };
   nodes.set(module.id, module);
 
@@ -63,23 +95,47 @@ export const createHirBuilder = (
     return id;
   };
 
-  const addFunction = (fn: WithoutId<HirFunction>): HirId => {
+  const pushModuleItem = (id: HirItemId): void => {
+    module.items = [...module.items, id];
+  };
+
+  const addItem = (
+    item: WithoutId<HirItem>,
+    options: { moduleScoped?: boolean } = {}
+  ): HirItemId => {
     const id = nextId++;
-    const node = { ...fn, id };
-    functions.push(node);
+    const node = { ...item, id } as HirItem;
+    items.set(id, node);
     nodes.set(id, node);
+    if (options.moduleScoped !== false) {
+      pushModuleItem(id);
+    }
     return id;
   };
 
-  const setModuleBody = (body: readonly HirStmtId[]): void => {
-    module.body = [...body];
+  const addFunction = (
+    fn: WithoutId<HirFunction>,
+    options?: { moduleScoped?: boolean }
+  ): HirItemId => addItem(fn, options);
+
+  const recordExport = (
+    entry: Omit<HirExportEntry, "item"> & { item: HirItemId }
+  ): void => {
+    module.exports = [
+      ...module.exports,
+      { ...entry, item: entry.item },
+    ];
+  };
+
+  const setModuleItems = (nextItems: readonly HirItemId[]): void => {
+    module.items = [...nextItems];
   };
 
   const getNode = (id: HirId): HirNode | undefined => nodes.get(id);
 
   const finalize = (): HirGraph => ({
     module: cloneNode(module),
-    functions: functions.map(cloneNode),
+    items: new Map(items),
     statements: new Map(statements),
     expressions: new Map(expressions),
   });
@@ -89,7 +145,9 @@ export const createHirBuilder = (
     addStatement,
     addExpression,
     addFunction,
-    setModuleBody,
+    addItem,
+    recordExport,
+    setModuleItems,
     getNode,
     finalize,
   };

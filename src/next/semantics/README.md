@@ -46,14 +46,14 @@ For background see `docs/compiler-rearchitecture.md` and the language guides in
 
 ## HIR structure
 
-* `hir/nodes.ts` enumerates node/statement/expression variants that matter to
-  type inference: literals, identifiers, calls, blocks, control flow, object
-  literals, and assignments. Each node stores the originating `NodeId` plus a
+* `hir/nodes.ts` enumerates module items (use/type/object/trait/impl/effect) and
+  expression forms the pipeline depends on. Items capture `HirVisibility`,
+  generics, and export data; expressions cover native control flow such as
+  `while`, `cond`, and `break`. Each node stores the originating `NodeId` plus a
   `SourceSpan` for diagnostics.
-* `hir/builder.ts` offers a minimal `HirBuilder` that allocates stable `HirId`s,
-  keeps `Map`s of statements/expressions, and surfaces `finalize()` to freeze a
-  `HirGraph`. Lowering passes can remain pure by constructing builders locally
-  and then returning the graph snapshot.
+* `hir/builder.ts` exposes helpers to allocate every node kind (`addItem`,
+  `addFunction`, `recordExport`, etc.), guaranteeing deterministic `HirId`s and
+  snapshot-friendly maps for items, statements, and expressions.
 
 ## Typing components
 

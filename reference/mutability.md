@@ -22,7 +22,7 @@ or not.
 Note that variable mutability is different from object mutability. A mutable
 variable can still hold an immutable object and vice versa.
 
-```
+```voyd
 obj Point {
   x: i32,
   y: i32
