@@ -26,7 +26,11 @@ export interface HirTypeExprBase {
 export type HirTypeExpr =
   | HirNamedTypeExpr
   | HirObjectTypeExpr
-  | HirTupleTypeExpr;
+  | HirTupleTypeExpr
+  | HirUnionTypeExpr
+  | HirIntersectionTypeExpr
+  | HirFunctionTypeExpr
+  | HirSelfTypeExpr;
 
 export interface HirNamedTypeExpr extends HirTypeExprBase {
   typeKind: "named";
@@ -56,6 +60,28 @@ export interface HirTupleTypeExpr extends HirTypeExprBase {
   elements: readonly HirTypeExpr[];
 }
 
+export interface HirUnionTypeExpr extends HirTypeExprBase {
+  typeKind: "union";
+  members: readonly HirTypeExpr[];
+}
+
+export interface HirIntersectionTypeExpr extends HirTypeExprBase {
+  typeKind: "intersection";
+  members: readonly HirTypeExpr[];
+}
+
+export interface HirFunctionTypeExpr extends HirTypeExprBase {
+  typeKind: "function";
+  typeParameters?: readonly HirTypeParameter[];
+  parameters: readonly HirTypeExpr[];
+  returnType: HirTypeExpr;
+  effectType?: HirTypeExpr;
+}
+
+export interface HirSelfTypeExpr extends HirTypeExprBase {
+  typeKind: "self";
+}
+
 export interface HirTypeParameter {
   symbol: SymbolId;
   span: SourceSpan;
@@ -81,6 +107,7 @@ export interface HirModule extends HirNodeBase {
 
 export type HirItem =
   | HirUseItem
+  | HirModuleDecl
   | HirFunction
   | HirTypeAlias
   | HirObjectDecl
@@ -104,6 +131,15 @@ export interface HirUseEntry {
   span: SourceSpan;
 }
 
+export interface HirModuleDecl extends HirItemBase {
+  kind: "module-decl";
+  symbol: SymbolId;
+  path: string;
+  scope: SymbolId;
+  items: readonly HirItemId[];
+  exports: readonly HirExportEntry[];
+}
+
 export interface HirFunction extends HirItemBase {
   kind: "function";
   symbol: SymbolId;
@@ -124,30 +160,43 @@ export interface HirParameter {
   defaultValue?: HirExprId;
 }
 
+export type HirBindingKind = "value" | "mutable-ref" | "immutable-ref";
+
+export interface HirPatternBase {
+  bindingKind?: HirBindingKind;
+}
+
 export type HirPattern =
   | HirIdentifierPattern
   | HirDestructurePattern
   | HirTuplePattern
-  | HirWildcardPattern;
+  | HirWildcardPattern
+  | HirTypePattern;
 
-export interface HirIdentifierPattern {
+export interface HirIdentifierPattern extends HirPatternBase {
   kind: "identifier";
   symbol: SymbolId;
 }
 
-export interface HirDestructurePattern {
+export interface HirDestructurePattern extends HirPatternBase {
   kind: "destructure";
   fields: readonly { name: string; pattern: HirPattern }[];
   spread?: HirPattern;
 }
 
-export interface HirTuplePattern {
+export interface HirTuplePattern extends HirPatternBase {
   kind: "tuple";
   elements: readonly HirPattern[];
 }
 
-export interface HirWildcardPattern {
+export interface HirWildcardPattern extends HirPatternBase {
   kind: "wildcard";
+}
+
+export interface HirTypePattern extends HirPatternBase {
+  kind: "type";
+  type: HirTypeExpr;
+  binding?: HirPattern;
 }
 
 export interface HirTypeAlias extends HirItemBase {
@@ -189,6 +238,7 @@ export interface HirMethodParameter {
   span: SourceSpan;
   type?: HirTypeExpr;
   mutable: boolean;
+  bindingKind?: HirBindingKind;
 }
 
 export interface HirTraitDecl extends HirItemBase {
@@ -274,9 +324,12 @@ export type HirExpression =
   | HirIdentifierExpr
   | HirCallExpr
   | HirBlockExpr
+  | HirLoopExpr
   | HirWhileExpr
   | HirCondExpr
   | HirMatchExpr
+  | HirLambdaExpr
+  | HirEffectHandlerExpr
   | HirObjectLiteralExpr
   | HirFieldAccessExpr
   | HirAssignExpr
@@ -294,11 +347,12 @@ export type HirExprKind =
   | "identifier"
   | "call"
   | "block"
-  | "if"
   | "loop"
   | "while"
   | "cond"
   | "match"
+  | "lambda"
+  | "effect-handler"
   | "object-literal"
   | "field-access"
   | "assign"
@@ -328,6 +382,10 @@ export interface HirBlockExpr extends HirExpressionBase {
   statements: readonly HirStmtId[];
   value?: HirExprId;
 }
+export interface HirLoopExpr extends HirExpressionBase {
+  exprKind: "loop";
+  body: HirExprId;
+}
 
 export interface HirWhileExpr extends HirExpressionBase {
   exprKind: "while";
@@ -356,6 +414,30 @@ export interface HirMatchArm {
   pattern: HirPattern;
   guard?: HirExprId;
   value: HirExprId;
+}
+
+export interface HirLambdaExpr extends HirExpressionBase {
+  exprKind: "lambda";
+  typeParameters?: readonly HirTypeParameter[];
+  parameters: readonly HirParameter[];
+  returnType?: HirTypeExpr;
+  effectType?: HirTypeExpr;
+  body: HirExprId;
+}
+
+export interface HirEffectHandlerClause {
+  operation: SymbolId;
+  effect?: SymbolId;
+  resumable: "ctl" | "fn";
+  parameters: readonly HirMethodParameter[];
+  body: HirExprId;
+}
+
+export interface HirEffectHandlerExpr extends HirExpressionBase {
+  exprKind: "effect-handler";
+  body: HirExprId;
+  handlers: readonly HirEffectHandlerClause[];
+  finallyBranch?: HirExprId;
 }
 
 export interface HirObjectLiteralExpr extends HirExpressionBase {
