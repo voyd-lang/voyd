@@ -1,9 +1,12 @@
 import { describe, expect, test } from "vitest";
 import { parse } from "../../parser.js";
-import { Form, Expr } from "../../ast/index.js";
+import { Form } from "../../ast/index.js";
 import { functionalMacrosVoydFile } from "../../../../semantics/__tests__/fixtures/functional-macros-voyd-file.js";
 
-const toPlain = (form: Form) => JSON.parse(JSON.stringify(form.toJSON()));
+type Plain = (string | Plain)[];
+
+const toPlain = (form: Form): Plain =>
+  JSON.parse(JSON.stringify(form.toJSON()));
 
 const containsDeep = (value: unknown, target: unknown): boolean => {
   if (Array.isArray(value) && Array.isArray(target)) {
