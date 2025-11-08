@@ -1,0 +1,73 @@
+pub macro binaryen_gc_call(func, args, return_type)
+  ` binaryen func: ~func namespace: gc args: ~args return_type: ~return_type
+
+pub macro bin_type_to_heap_type(type)
+  ` binaryen_gc_call(modBinaryenTypeToHeapType, list(BnrType<~type>))
+
+// TODO: Remove and turn into a unit test.
+// CTX: This will be represented natively in HIR
+pub macro my_if()
+  let cond = body.get(0)
+  // Note: we call it main_then to avoid preventing the then in body.argsWithLabel(then) from being turned into a list. Need a better way to pass a label then passing an identifier that may or may not be bound to a var
+  let main_then = body.argWithLabel(then)
+  let elifs = body.argsWithLabel(elif)
+  let thens = body.argsWithLabel(then).slice(1)
+  let main_else = body.optionalArgWithLabel(else)
+
+  if cond.calls('is') then:
+    let l = cond.get(1)
+    let r = cond.get(2)
+
+    if main_else then:
+      ` ~l.match(~r: ~main_then, else: ~main_else)
+    else:
+      ` ~l.match(~r: block(~main_then, void), else: void)
+  else: // TODO: Add support for elifs to functional macro runtime
+    if cond.calls(':=') then:
+      let l = cond.get(1)
+      let r = cond.get(2)
+      let default = if main_else then: main_else else: `(block(none()))
+      l.mark_moved()
+      // log a
+      let temp = identifier(match_temp)
+      let result = `
+        let ~temp = ~r
+        ~temp.match
+          Some:
+            let ~l = ~temp.value
+            ~main_then
+          else: ~default
+      // log result
+      // log b
+      result
+    else:
+      let expr = ` cond(case: ~cond, do: ~main_then)
+      elifs.map (elif, index) =>
+        let elifThen = thens.get(index)
+        let case = ` case: ~elif
+        expr.push(case)
+        let do = ` do: ~elifThen
+        expr.push(do)
+      if main_else then: expr.push(`(default: ~main_else))
+      expr
+
+pub macro for(cond, do)
+  let binding = cond.get(1)
+  let iterable = cond.get(2)
+  let iterator_id = identifier(__iterable)
+  let iterator_val_id = identifier(__iterable_val)
+  let result_id = identifier(__loop_result)
+
+  binding.mark_moved()
+
+  `
+    let ~iterator_id = ~iterable.iterate()
+    while true do:
+      let ~iterator_val_id = ~iterator_id.next()
+      ~iterator_val_id.match
+        Some:
+          let ~binding = ~iterator_val_id.value
+          ~(do.get(2))
+          void
+        None:
+          break

@@ -1,0 +1,11 @@
+use macros::all
+use optional::all
+
+pub trait Iterator<T>
+  fn next(self) -> Optional<T>
+
+pub trait Iterable<T>
+  fn iterate(self) -> Iterator<T>
+
+// Note: Higher-order operations like map are defined in std/array to avoid
+// cyclic dependencies during module resolution.

@@ -1,0 +1,143 @@
+use std::macros::all
+
+macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
+  let params = `(parameters, left: ~arg_type, right: ~arg_type)
+  let body = ` binaryen
+    func: ~wasm_fn
+    namespace: ~arg_type
+    args: list(left, right)
+
+  ` define_function ~op ~params return_type(~return_type) ~body
+
+pub def_wasm_operator('<', lt_s, i32, bool)
+pub def_wasm_operator('>', gt_s, i32, bool)
+pub def_wasm_operator('<=', le_s, i32, bool)
+pub def_wasm_operator('>=', ge_s, i32, bool)
+pub def_wasm_operator('==', eq, i32, bool)
+pub def_wasm_operator('!=', ne, i32, bool)
+pub def_wasm_operator('+', add, i32, i32)
+pub def_wasm_operator('-', sub, i32, i32)
+pub def_wasm_operator('*', mul, i32, i32)
+pub def_wasm_operator('/', div_s, i32, i32)
+pub def_wasm_operator('%', rem_s, i32, i32)
+pub def_wasm_operator('rem_u', rem_u, i32, i32)
+
+pub def_wasm_operator('<', lt_s, i64, bool)
+pub def_wasm_operator('>', gt_s, i64, bool)
+pub def_wasm_operator('<=', le_s, i64, bool)
+pub def_wasm_operator('>=', ge_s, i64, bool)
+pub def_wasm_operator('==', eq, i64, bool)
+pub def_wasm_operator('!=', ne, i64, bool)
+pub def_wasm_operator('+', add, i64, i64)
+pub def_wasm_operator('-', sub, i64, i64)
+pub def_wasm_operator('*', mul, i64, i64)
+pub def_wasm_operator('/', div_s, i64, i64)
+pub def_wasm_operator('%', rem_s, i64, i64)
+pub def_wasm_operator('rem_u', rem_u, i64, i64)
+
+// Floating-point operators for f32
+pub def_wasm_operator('<', lt, f32, bool)
+pub def_wasm_operator('>', gt, f32, bool)
+pub def_wasm_operator('<=', le, f32, bool)
+pub def_wasm_operator('>=', ge, f32, bool)
+pub def_wasm_operator('==', eq, f32, bool)
+pub def_wasm_operator('!=', ne, f32, bool)
+pub def_wasm_operator('+', add, f32, f32)
+pub def_wasm_operator('-', sub, f32, f32)
+pub def_wasm_operator('*', mul, f32, f32)
+pub def_wasm_operator('/', div, f32, f32)
+pub def_wasm_operator(sqrt, sqrt, f32, f32)
+pub def_wasm_operator(trunc, trunc, f32, f32)
+pub def_wasm_operator(floor, floor, f32, f32)
+pub def_wasm_operator(ceil, ceil, f32, f32)
+pub def_wasm_operator(nearest, nearest, f32, f32)
+pub def_wasm_operator(min, min, f32, f32)
+pub def_wasm_operator(max, max, f32, f32)
+pub def_wasm_operator(copysign, copysign, f32, f32)
+
+// Floating-point operators for f64
+pub def_wasm_operator('<', lt, f64, bool)
+pub def_wasm_operator('>', gt, f64, bool)
+pub def_wasm_operator('<=', le, f64, bool)
+pub def_wasm_operator('>=', ge, f64, bool)
+pub def_wasm_operator('==', eq, f64, bool)
+pub def_wasm_operator('!=', ne, f64, bool)
+pub def_wasm_operator('+', add, f64, f64)
+pub def_wasm_operator('-', sub, f64, f64)
+pub def_wasm_operator('*', mul, f64, f64)
+pub def_wasm_operator('/', div, f64, f64)
+pub def_wasm_operator(sqrt, sqrt, f64, f64)
+pub def_wasm_operator(trunc, trunc, f64, f64)
+pub def_wasm_operator(floor, floor, f64, f64)
+pub def_wasm_operator(ceil, ceil, f64, f64)
+pub def_wasm_operator(nearest, nearest, f64, f64)
+pub def_wasm_operator(min, min, f64, f64)
+pub def_wasm_operator(max, max, f64, f64)
+pub def_wasm_operator(copysign, copysign, f64, f64)
+
+// Bitwise operators
+// i32 bitwise operators
+pub def_wasm_operator(shift_l, shl, i32, i32)
+pub def_wasm_operator(shift_r, shr_s, i32, i32)
+pub def_wasm_operator(shift_lu, shl, i32, i32)
+pub def_wasm_operator(shift_ru, shr_u, i32, i32)
+pub def_wasm_operator(rotate_l, rotl, i32, i32)
+pub def_wasm_operator(rotate_r, rotr, i32, i32)
+pub def_wasm_operator(count_leading_zeros, clz, i32, i32)
+pub def_wasm_operator(count_trailing_zeros, ctz, i32, i32)
+pub def_wasm_operator(pop_count, popcnt, i32, i32)
+pub def_wasm_operator(lt_u, lt_u, i32, bool)
+pub def_wasm_operator(gt_u, gt_u, i32, bool)
+pub def_wasm_operator(lte_u, le_u, i32, bool)
+pub def_wasm_operator(gte_u, ge_u, i32, bool)
+pub def_wasm_operator(bit_and, 'and', i32, i32)
+pub def_wasm_operator(bit_or, 'or', i32, i32)
+pub def_wasm_operator(bit_xor, 'xor', i32, i32)
+
+// i64 bitwise operators
+pub def_wasm_operator(shift_l, shl, i64, i64)
+pub def_wasm_operator(shift_r, shr_s, i64, i64)
+pub def_wasm_operator(shift_lu, shl, i64, i64)
+pub def_wasm_operator(shift_ru, shr_u, i64, i64)
+pub def_wasm_operator(rotate_l, rotl, i64, i64)
+pub def_wasm_operator(rotate_r, rotr, i64, i64)
+pub def_wasm_operator(count_leading_zeros, clz, i64, i64)
+pub def_wasm_operator(count_trailing_zeros, ctz, i64, i64)
+pub def_wasm_operator(pop_count, popcnt, i64, i64)
+pub def_wasm_operator(lt_u, lt_u, i64, bool)
+pub def_wasm_operator(gt_u, gt_u, i64, bool)
+pub def_wasm_operator(lte_u, le_u, i64, bool)
+pub def_wasm_operator(gte_u, ge_u, i64, bool)
+pub def_wasm_operator(bit_and, 'and', i64, i64)
+pub def_wasm_operator(bit_or, 'or', i64, i64)
+pub def_wasm_operator(bit_xor, 'xor', i64, i64)
+
+pub fn '=='(left: bool, right: bool) -> bool
+  binaryen
+    func: eq
+    namespace: i32
+    args: list(left, right)
+
+pub fn 'and'(left: bool, right: bool) -> bool
+  binaryen
+    func: 'and'
+    namespace: i32
+    args: list(left, right)
+
+pub fn 'or'(left: bool, right: bool) -> bool
+  binaryen
+    func: 'or'
+    namespace: i32
+    args: list(left, right)
+
+pub fn 'xor'(left: bool, right: bool) -> bool
+  binaryen
+    func: 'xor'
+    namespace: i32
+    args: list(left, right)
+
+pub fn not(value: bool) -> bool
+  binaryen
+    func: eqz
+    namespace: i32
+    args: list(value)
