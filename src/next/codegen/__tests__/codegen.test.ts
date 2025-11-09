@@ -6,11 +6,17 @@ import { codegen } from "../index.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 
+const loadAst = (fixtureName: string) => {
+  const source = readFileSync(
+    resolve(import.meta.dirname, "__fixtures__", fixtureName),
+    "utf8"
+  );
+  return parse(source, fixtureName);
+};
+
 describe("next codegen", () => {
   it("emits wasm for the fib sample and runs main()", () => {
-    const relPath = "sb/fib.voyd";
-    const source = readFileSync(resolve(process.cwd(), relPath), "utf8");
-    const ast = parse(source, relPath);
+    const ast = loadAst("fib.voyd");
     const semantics = semanticsPipeline(ast);
     const { module } = codegen(semantics);
     const instance = getWasmInstance(module);
