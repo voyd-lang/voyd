@@ -10,7 +10,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 31,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 30,
       },
       "symbol": 4,
@@ -22,7 +22,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 29,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 28,
       },
       "symbol": 2,
@@ -35,7 +35,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "literalKind": "i32",
       "span": {
         "end": 33,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 32,
       },
       "value": "2",
@@ -52,7 +52,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 33,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 30,
       },
     },
@@ -63,7 +63,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 45,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 44,
       },
       "symbol": 2,
@@ -75,7 +75,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 45,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 44,
       },
       "statements": [],
@@ -88,7 +88,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 70,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 69,
       },
       "symbol": 5,
@@ -100,7 +100,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 61,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 58,
       },
       "symbol": 1,
@@ -112,7 +112,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 65,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 64,
       },
       "symbol": 6,
@@ -124,7 +124,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 63,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 62,
       },
       "symbol": 2,
@@ -137,7 +137,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "literalKind": "i32",
       "span": {
         "end": 67,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 66,
       },
       "value": "1",
@@ -154,7 +154,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 67,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 64,
       },
     },
@@ -169,7 +169,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 67,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 58,
       },
     },
@@ -180,7 +180,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 74,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 71,
       },
       "symbol": 1,
@@ -192,7 +192,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 78,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 77,
       },
       "symbol": 6,
@@ -204,7 +204,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 76,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 75,
       },
       "symbol": 2,
@@ -217,7 +217,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "literalKind": "i32",
       "span": {
         "end": 80,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 79,
       },
       "value": "2",
@@ -234,7 +234,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 80,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 77,
       },
     },
@@ -249,7 +249,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 80,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 71,
       },
     },
@@ -265,7 +265,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 80,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 69,
       },
     },
@@ -276,7 +276,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 80,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 69,
       },
       "statements": [],
@@ -296,7 +296,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 80,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 25,
       },
     },
@@ -307,7 +307,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 80,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 25,
       },
       "statements": [],
@@ -320,7 +320,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 109,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 106,
       },
       "symbol": 1,
@@ -333,7 +333,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "literalKind": "i32",
       "span": {
         "end": 112,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 110,
       },
       "value": "10",
@@ -349,7 +349,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 112,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 106,
       },
     },
@@ -360,7 +360,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "expr",
       "span": {
         "end": 112,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 106,
       },
       "statements": [],
@@ -382,7 +382,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           },
           "span": {
             "end": 9,
-            "file": "sb/fib.voyd",
+            "file": "fib.voyd",
             "start": 8,
           },
           "symbol": 2,
@@ -393,7 +393,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
             ],
             "span": {
               "end": 14,
-              "file": "sb/fib.voyd",
+              "file": "fib.voyd",
               "start": 11,
             },
             "typeKind": "named",
@@ -407,14 +407,14 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         ],
         "span": {
           "end": 22,
-          "file": "sb/fib.voyd",
+          "file": "fib.voyd",
           "start": 19,
         },
         "typeKind": "named",
       },
       "span": {
         "end": 80,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 1,
       },
       "symbol": 1,
@@ -433,14 +433,14 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         ],
         "span": {
           "end": 103,
-          "file": "sb/fib.voyd",
+          "file": "fib.voyd",
           "start": 100,
         },
         "typeKind": "named",
       },
       "span": {
         "end": 112,
-        "file": "sb/fib.voyd",
+        "file": "fib.voyd",
         "start": 83,
       },
       "symbol": 3,
@@ -454,7 +454,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         "item": 29,
         "span": {
           "end": 112,
-          "file": "sb/fib.voyd",
+          "file": "fib.voyd",
           "start": 83,
         },
         "symbol": 3,
@@ -467,11 +467,11 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       29,
     ],
     "kind": "module",
-    "path": "sb/fib.voyd",
+    "path": "fib.voyd",
     "scope": 0,
     "span": {
       "end": 112,
-      "file": "sb/fib.voyd",
+      "file": "fib.voyd",
       "start": 1,
     },
   },
@@ -534,7 +534,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
       "id": 0,
       "kind": "module",
       "metadata": undefined,
-      "name": "sb/fib.voyd",
+      "name": "fib.voyd",
       "scope": 0,
     },
     {

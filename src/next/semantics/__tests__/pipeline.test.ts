@@ -1,7 +1,4 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "../../parser/index.js";
 import {
   type HirBlockExpr,
   type HirFunction,
@@ -9,16 +6,16 @@ import {
   type HirNamedTypeExpr,
 } from "../hir/nodes.js";
 import { semanticsPipeline } from "../pipeline.js";
+import { loadAst } from "./load-ast.js";
 
 describe("semanticsPipeline", () => {
   it("binds and lowers the fib sample module", () => {
-    const relPath = "sb/fib.voyd";
-    const source = readFileSync(resolve(process.cwd(), relPath), "utf8");
-    const ast = parse(source, relPath);
+    const name = "fib.voyd";
+    const ast = loadAst(name);
     const result = semanticsPipeline(ast);
 
     const { symbolTable, hir, typing } = result;
-    expect(hir.module.path).toBe(relPath);
+    expect(hir.module.path).toBe(name);
     expect(hir.module.items).toHaveLength(2);
 
     const rootScope = symbolTable.rootScope;
@@ -55,7 +52,9 @@ describe("semanticsPipeline", () => {
     expect(ifNode.branches[0]?.condition).toBeDefined();
     expect(ifNode.branches[0]?.value).toBeDefined();
     expect(ifNode.defaultBranch).toBeDefined();
-    const ifConditionType = typing.table.getExprType(ifNode.branches[0]!.condition);
+    const ifConditionType = typing.table.getExprType(
+      ifNode.branches[0]!.condition
+    );
     expect(ifConditionType).toBeDefined();
     expect(typing.arena.get(ifConditionType!)).toMatchObject({
       kind: "primitive",
@@ -110,9 +109,7 @@ describe("semanticsPipeline", () => {
   });
 
   it("binds and lowers the fib sample module", () => {
-    const relPath = "sb/fib.voyd";
-    const source = readFileSync(resolve(process.cwd(), relPath), "utf8");
-    const ast = parse(source, relPath);
+    const ast = loadAst("fib.voyd");
     const result = semanticsPipeline(ast);
     expect(result.hir).toMatchSnapshot();
     expect(result.symbolTable.snapshot()).toMatchSnapshot();
