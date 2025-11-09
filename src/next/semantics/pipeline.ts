@@ -4,11 +4,13 @@ import { runBindingPipeline } from "./binding/pipeline.js";
 import type { HirGraph } from "./hir/index.js";
 import { createHirBuilder } from "./hir/index.js";
 import { runLoweringPipeline } from "./lowering/pipeline.js";
+import { runTypingPipeline, type TypingResult } from "./typing/pipeline.js";
 import { toSourceSpan } from "./utils.js";
 
 export interface SemanticsPipelineResult {
   symbolTable: SymbolTable;
   hir: HirGraph;
+  typing: TypingResult;
 }
 
 export const semanticsPipeline = (form: Form): SemanticsPipelineResult => {
@@ -42,5 +44,10 @@ export const semanticsPipeline = (form: Form): SemanticsPipelineResult => {
     moduleNodeId: form.syntaxId,
   });
 
-  return { symbolTable, hir };
+  const typing = runTypingPipeline({
+    symbolTable,
+    hir,
+  });
+
+  return { symbolTable, hir, typing };
 };
