@@ -363,7 +363,15 @@ export type HirExprKind =
 
 export interface HirLiteralExpr extends HirExpressionBase {
   exprKind: "literal";
-  literalKind: "number" | "string" | "boolean" | "null" | "void" | "symbol";
+  literalKind:
+    | "i32"
+    | "i64"
+    | "f32"
+    | "f64"
+    | "string"
+    | "boolean"
+    | "void"
+    | "symbol";
   value: string;
 }
 
