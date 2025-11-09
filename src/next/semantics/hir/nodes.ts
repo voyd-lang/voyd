@@ -327,6 +327,7 @@ export type HirExpression =
   | HirLoopExpr
   | HirWhileExpr
   | HirCondExpr
+  | HirIfExpr
   | HirMatchExpr
   | HirLambdaExpr
   | HirEffectHandlerExpr
@@ -350,6 +351,7 @@ export type HirExprKind =
   | "loop"
   | "while"
   | "cond"
+  | "if"
   | "match"
   | "lambda"
   | "effect-handler"
@@ -391,6 +393,12 @@ export interface HirWhileExpr extends HirExpressionBase {
   exprKind: "while";
   condition: HirExprId;
   body: HirExprId;
+}
+
+export interface HirIfExpr extends HirExpressionBase {
+  exprKind: "if";
+  branches: readonly HirCondBranch[];
+  defaultBranch?: HirExprId;
 }
 
 export interface HirCondExpr extends HirExpressionBase {

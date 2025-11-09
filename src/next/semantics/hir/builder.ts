@@ -17,7 +17,9 @@ import type {
   SymbolId,
 } from "../ids.js";
 
-type WithoutId<T extends { id: HirId }> = Omit<T, "id">;
+type WithoutId<T extends { id: HirId }> = T extends unknown
+  ? Omit<T, "id">
+  : never;
 
 export interface HirGraph {
   module: HirModule;
@@ -53,9 +55,7 @@ export interface HirBuilder {
   finalize(): HirGraph;
 }
 
-export const createHirBuilder = (
-  init: HirBuilderInit
-): HirBuilder => {
+export const createHirBuilder = (init: HirBuilderInit): HirBuilder => {
   let nextId: HirId = 0;
 
   const expressions = new Map<HirExprId, HirExpression>();
@@ -85,9 +85,7 @@ export const createHirBuilder = (
     return id;
   };
 
-  const addExpression = (
-    expression: WithoutId<HirExpression>
-  ): HirExprId => {
+  const addExpression = (expression: WithoutId<HirExpression>): HirExprId => {
     const id = nextId++;
     const node = { ...expression, id } as HirExpression;
     expressions.set(id, node);
@@ -121,10 +119,7 @@ export const createHirBuilder = (
   const recordExport = (
     entry: Omit<HirExportEntry, "item"> & { item: HirItemId }
   ): void => {
-    module.exports = [
-      ...module.exports,
-      { ...entry, item: entry.item },
-    ];
+    module.exports = [...module.exports, { ...entry, item: entry.item }];
   };
 
   const setModuleItems = (nextItems: readonly HirItemId[]): void => {
