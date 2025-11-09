@@ -10,12 +10,19 @@ import {
   isStringAtom,
 } from "../../parser/index.js";
 import type { SymbolTable } from "../binder/index.js";
-import type { HirExprId, HirStmtId, NodeId, ScopeId, SymbolId } from "../ids.js";
+import type {
+  HirExprId,
+  HirStmtId,
+  NodeId,
+  ScopeId,
+  SymbolId,
+} from "../ids.js";
 import type {
   HirBuilder,
   HirCondBranch,
   HirGraph,
   HirParameter,
+  HirPattern,
   HirTypeExpr,
 } from "../hir/index.js";
 import type { BoundFunction, BindingResult } from "../binding/pipeline.js";
@@ -104,7 +111,11 @@ const createLowerScopeStack = (initial: ScopeId): LowerScopeStack => {
   };
 };
 
-const lowerExpr = (expr: Expr | undefined, ctx: LowerContext, scopes: LowerScopeStack): HirExprId => {
+const lowerExpr = (
+  expr: Expr | undefined,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
   if (!expr) {
     throw new Error("expected expression");
   }
@@ -173,13 +184,30 @@ const lowerExpr = (expr: Expr | undefined, ctx: LowerContext, scopes: LowerScope
       return lowerIf(expr, ctx, scopes);
     }
 
+    if (expr.calls("while")) {
+      return lowerWhile(expr, ctx, scopes);
+    }
+
+    // TODO: tuple should probably be consistently *not* internal
+    if (expr.calls("tuple") || expr.callsInternal("tuple")) {
+      return lowerTupleExpr(expr, ctx, scopes);
+    }
+
+    if (expr.calls("=")) {
+      return lowerAssignment(expr, ctx, scopes);
+    }
+
     return lowerCall(expr, ctx, scopes);
   }
 
   throw new Error(`unsupported expression node: ${expr}`);
 };
 
-const lowerBlock = (form: Form, ctx: LowerContext, scopes: LowerScopeStack): HirExprId => {
+const lowerBlock = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
   const scopeId = ctx.scopeByNode.get(form.syntaxId);
   if (scopeId !== undefined) {
     scopes.push(scopeId);
@@ -190,8 +218,16 @@ const lowerBlock = (form: Form, ctx: LowerContext, scopes: LowerScopeStack): Hir
   const entries = form.rest;
 
   entries.forEach((entry, index) => {
+    const isStatementForm =
+      isForm(entry) && (entry.calls("var") || entry.calls("let"));
+    if (isStatementForm) {
+      statements.push(lowerLetStatement(entry, ctx, scopes));
+      return;
+    }
+
     const exprId = lowerExpr(entry, ctx, scopes);
-    if (index < entries.length - 1) {
+    const isLast = index === entries.length - 1;
+    if (!isLast) {
       const entrySyntax = entry as Syntax | undefined;
       statements.push(
         ctx.builder.addStatement({
@@ -220,7 +256,11 @@ const lowerBlock = (form: Form, ctx: LowerContext, scopes: LowerScopeStack): Hir
   });
 };
 
-const lowerIf = (form: Form, ctx: LowerContext, scopes: LowerScopeStack): HirExprId => {
+const lowerIf = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
   const conditionExpr = form.at(1);
   if (!conditionExpr) {
     throw new Error("if expression missing condition");
@@ -264,7 +304,11 @@ const lowerIf = (form: Form, ctx: LowerContext, scopes: LowerScopeStack): HirExp
   });
 };
 
-const lowerCall = (form: Form, ctx: LowerContext, scopes: LowerScopeStack): HirExprId => {
+const lowerCall = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
   const callee = form.at(0);
   if (!callee) {
     throw new Error("call expression missing callee");
@@ -283,7 +327,149 @@ const lowerCall = (form: Form, ctx: LowerContext, scopes: LowerScopeStack): HirE
   });
 };
 
-const lowerTypeExpr = (expr: Expr | undefined, ctx: LowerContext): HirTypeExpr | undefined => {
+const lowerLetStatement = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirStmtId => {
+  const isVar = form.calls("var");
+  const isLet = form.calls("let");
+  const assignment = form.at(1);
+  if (!isForm(assignment) || !assignment.calls("=")) {
+    throw new Error("let/var statement expects an assignment");
+  }
+
+  const patternExpr = assignment.at(1);
+  const initializerExpr = assignment.at(2);
+  if (!initializerExpr) {
+    throw new Error("let/var statement missing initializer");
+  }
+
+  const pattern = lowerPattern(patternExpr, ctx, scopes);
+  const initializer = lowerExpr(initializerExpr, ctx, scopes);
+
+  return ctx.builder.addStatement({
+    kind: "let",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    mutable: isVar && !isLet,
+    pattern,
+    initializer,
+  });
+};
+
+const lowerPattern = (
+  pattern: Expr | undefined,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirPattern => {
+  if (!pattern) {
+    throw new Error("missing pattern");
+  }
+
+  if (isIdentifierAtom(pattern)) {
+    if (pattern.value === "_") {
+      return { kind: "wildcard" };
+    }
+    const symbol = resolveSymbol(pattern.value, scopes.current(), ctx);
+    return {
+      kind: "identifier",
+      symbol,
+    };
+  }
+
+  if (
+    isForm(pattern) &&
+    (pattern.calls("tuple") || pattern.callsInternal("tuple"))
+  ) {
+    const elements = pattern.rest.map((entry) =>
+      lowerPattern(entry, ctx, scopes)
+    );
+    return { kind: "tuple", elements };
+  }
+
+  throw new Error("unsupported pattern form");
+};
+
+const lowerTupleExpr = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
+  const elements = form.rest.map((entry) => lowerExpr(entry, ctx, scopes));
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "tuple",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    elements,
+  });
+};
+
+const lowerAssignment = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
+  const targetExpr = form.at(1);
+  const valueExpr = form.at(2);
+  if (!targetExpr || !valueExpr) {
+    throw new Error("assignment requires target and value");
+  }
+
+  let target: HirExprId | undefined;
+  let pattern: HirPattern | undefined;
+
+  if (
+    isForm(targetExpr) &&
+    (targetExpr.calls("tuple") || targetExpr.callsInternal("tuple"))
+  ) {
+    pattern = lowerPattern(targetExpr, ctx, scopes);
+  } else {
+    target = lowerExpr(targetExpr, ctx, scopes);
+  }
+
+  const value = lowerExpr(valueExpr, ctx, scopes);
+
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "assign",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    target,
+    pattern,
+    value,
+  });
+};
+
+const lowerWhile = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
+  const conditionExpr = form.at(1);
+  const bodyExpr = form.at(2);
+  if (!conditionExpr || !bodyExpr) {
+    throw new Error("while expression requires condition and body");
+  }
+
+  const condition = lowerExpr(conditionExpr, ctx, scopes);
+  const body = lowerExpr(bodyExpr, ctx, scopes);
+
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "while",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    condition,
+    body,
+  });
+};
+
+const lowerTypeExpr = (
+  expr: Expr | undefined,
+  ctx: LowerContext
+): HirTypeExpr | undefined => {
   if (!expr) return undefined;
 
   if (isIdentifierAtom(expr)) {
@@ -298,7 +484,11 @@ const lowerTypeExpr = (expr: Expr | undefined, ctx: LowerContext): HirTypeExpr |
   throw new Error("unsupported type expression");
 };
 
-const resolveSymbol = (name: string, scope: ScopeId, ctx: LowerContext): SymbolId => {
+const resolveSymbol = (
+  name: string,
+  scope: ScopeId,
+  ctx: LowerContext
+): SymbolId => {
   const resolved = ctx.symbolTable.resolve(name, scope);
   if (typeof resolved === "number") {
     return resolved;

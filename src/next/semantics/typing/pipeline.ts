@@ -1,15 +1,18 @@
 import type { SymbolTable } from "../binder/index.js";
 import type {
+  HirAssignExpr,
   HirBlockExpr,
   HirCallExpr,
   HirExpression,
   HirFunction,
   HirGraph,
   HirIfExpr,
+  HirLetStatement,
   HirLiteralExpr,
-  HirStatement,
+  HirPattern,
   HirTypeExpr,
   HirNamedTypeExpr,
+  HirWhileExpr,
 } from "../hir/index.js";
 import type {
   EffectRowId,
@@ -18,14 +21,8 @@ import type {
   SymbolId,
   TypeId,
 } from "../ids.js";
-import {
-  createTypeArena,
-  type TypeArena,
-} from "./type-arena.js";
-import {
-  createTypeTable,
-  type TypeTable,
-} from "./type-table.js";
+import { createTypeArena, type TypeArena } from "./type-arena.js";
+import { createTypeTable, type TypeTable } from "./type-table.js";
 
 interface TypingInputs {
   symbolTable: SymbolTable;
@@ -35,6 +32,7 @@ interface TypingInputs {
 export interface TypingResult {
   arena: TypeArena;
   table: TypeTable;
+  valueTypes: ReadonlyMap<SymbolId, TypeId>;
 }
 
 interface FunctionSignature {
@@ -88,7 +86,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     typeFunction(item, ctx);
   }
 
-  return { arena, table };
+  return { arena, table, valueTypes: new Map(ctx.valueTypes) };
 };
 
 const seedPrimitiveTypes = (ctx: TypingContext): void => {
@@ -149,7 +147,31 @@ const typeFunction = (fn: HirFunction, ctx: TypingContext): void => {
       signature.returnType,
       `function ${getSymbolName(fn.symbol, ctx)} return type`
     );
+    return;
   }
+
+  finalizeFunctionReturnType(fn, signature, bodyType, ctx);
+};
+
+const finalizeFunctionReturnType = (
+  fn: HirFunction,
+  signature: FunctionSignature,
+  inferred: TypeId,
+  ctx: TypingContext
+): void => {
+  signature.returnType = inferred;
+  const functionType = ctx.arena.internFunction({
+    parameters: signature.parameterTypes.map((type) => ({
+      type,
+      optional: false,
+    })),
+    returnType: inferred,
+    effects: ctx.defaultEffectRow,
+  });
+  signature.typeId = functionType;
+  ctx.valueTypes.set(fn.symbol, functionType);
+  const scheme = ctx.arena.newScheme([], functionType);
+  ctx.table.setSymbolScheme(fn.symbol, scheme);
 };
 
 const typeExpression = (exprId: HirExprId, ctx: TypingContext): TypeId => {
@@ -179,6 +201,15 @@ const typeExpression = (exprId: HirExprId, ctx: TypingContext): TypeId => {
       break;
     case "if":
       type = typeIfExpr(expr, ctx);
+      break;
+    case "tuple":
+      type = typeTupleExpr(expr, ctx);
+      break;
+    case "while":
+      type = typeWhileExpr(expr, ctx);
+      break;
+    case "assign":
+      type = typeAssignExpr(expr, ctx);
       break;
     default:
       throw new Error(`unsupported expression kind: ${expr.exprKind}`);
@@ -229,11 +260,7 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
   expr.args.forEach((argId, index) => {
     const argType = typeExpression(argId, ctx);
     const param = calleeDesc.parameters[index];
-    ensureTypeMatches(
-      argType,
-      param.type,
-      `call argument ${index + 1}`
-    );
+    ensureTypeMatches(argType, param.type, `call argument ${index + 1}`);
   });
 
   return calleeDesc.returnType;
@@ -263,13 +290,23 @@ const typeStatement = (stmtId: HirStmtId, ctx: TypingContext): void => {
       }
       return;
     case "let":
-      typeExpression(stmt.initializer, ctx);
+      typeLetStatement(stmt, ctx);
       return;
     default: {
       const unreachable: never = stmt;
       throw new Error("unsupported statement kind");
     }
   }
+};
+
+const typeLetStatement = (stmt: HirLetStatement, ctx: TypingContext): void => {
+  if (stmt.pattern.kind === "tuple") {
+    bindTuplePatternFromExpr(stmt.pattern, stmt.initializer, ctx, "declare");
+    return;
+  }
+
+  const initializerType = typeExpression(stmt.initializer, ctx);
+  recordPatternType(stmt.pattern, initializerType, ctx, "declare");
 };
 
 const typeIfExpr = (expr: HirIfExpr, ctx: TypingContext): TypeId => {
@@ -291,10 +328,49 @@ const typeIfExpr = (expr: HirIfExpr, ctx: TypingContext): TypeId => {
   return branchType ?? ctx.voidType;
 };
 
-const mergeBranchType = (
-  acc: TypeId | undefined,
-  next: TypeId
+const typeTupleExpr = (
+  expr: HirExpression & { exprKind: "tuple"; elements: readonly HirExprId[] },
+  ctx: TypingContext
 ): TypeId => {
+  expr.elements.forEach((elementId) => typeExpression(elementId, ctx));
+  return ctx.unknownType;
+};
+
+const typeWhileExpr = (expr: HirWhileExpr, ctx: TypingContext): TypeId => {
+  const conditionType = typeExpression(expr.condition, ctx);
+  ensureTypeMatches(conditionType, ctx.boolType, "while condition");
+  typeExpression(expr.body, ctx);
+  return ctx.voidType;
+};
+
+const typeAssignExpr = (expr: HirAssignExpr, ctx: TypingContext): TypeId => {
+  if (expr.pattern) {
+    typeTupleAssignment(expr.pattern, expr.value, ctx);
+    return ctx.voidType;
+  }
+
+  if (typeof expr.target !== "number") {
+    throw new Error("assignment missing target expression");
+  }
+
+  const targetType = typeExpression(expr.target, ctx);
+  const valueType = typeExpression(expr.value, ctx);
+  ensureTypeMatches(valueType, targetType, "assignment target");
+  return ctx.voidType;
+};
+
+const typeTupleAssignment = (
+  pattern: HirPattern,
+  valueExpr: HirExprId,
+  ctx: TypingContext
+): void => {
+  if (pattern.kind !== "tuple") {
+    throw new Error("tuple assignment requires a tuple pattern");
+  }
+  bindTuplePatternFromExpr(pattern, valueExpr, ctx, "assign");
+};
+
+const mergeBranchType = (acc: TypeId | undefined, next: TypeId): TypeId => {
   if (typeof acc === "number" && acc !== next) {
     throw new Error("branch type mismatch");
   }
@@ -433,6 +509,73 @@ const getPrimitiveType = (ctx: TypingContext, name: string): TypeId => {
     return cached;
   }
   return registerPrimitive(ctx, name);
+};
+
+type PatternBindingMode = "declare" | "assign";
+
+const bindTuplePatternFromExpr = (
+  pattern: HirPattern & { kind: "tuple" },
+  exprId: HirExprId,
+  ctx: TypingContext,
+  mode: PatternBindingMode
+): void => {
+  const tupleExpr = getTupleExpression(exprId, ctx);
+  if (tupleExpr.elements.length !== pattern.elements.length) {
+    throw new Error("tuple pattern length mismatch");
+  }
+
+  pattern.elements.forEach((subPattern, index) => {
+    const elementExprId = tupleExpr.elements[index]!;
+    if (subPattern.kind === "tuple") {
+      bindTuplePatternFromExpr(subPattern, elementExprId, ctx, mode);
+      return;
+    }
+    const elementType = typeExpression(elementExprId, ctx);
+    recordPatternType(subPattern, elementType, ctx, mode);
+  });
+};
+
+const recordPatternType = (
+  pattern: HirPattern,
+  type: TypeId,
+  ctx: TypingContext,
+  mode: PatternBindingMode
+): void => {
+  switch (pattern.kind) {
+    case "identifier": {
+      if (mode === "declare" || !ctx.valueTypes.has(pattern.symbol)) {
+        ctx.valueTypes.set(pattern.symbol, type);
+        return;
+      }
+      const existing = ctx.valueTypes.get(pattern.symbol);
+      if (typeof existing !== "number") {
+        throw new Error(
+          `missing type for identifier ${getSymbolName(pattern.symbol, ctx)}`
+        );
+      }
+      ensureTypeMatches(
+        type,
+        existing,
+        `assignment to ${getSymbolName(pattern.symbol, ctx)}`
+      );
+      return;
+    }
+    case "wildcard":
+      return;
+    default:
+      throw new Error(`unsupported pattern kind ${pattern.kind}`);
+  }
+};
+
+const getTupleExpression = (
+  exprId: HirExprId,
+  ctx: TypingContext
+): HirExpression & { exprKind: "tuple"; elements: readonly HirExprId[] } => {
+  const expr = ctx.hir.expressions.get(exprId);
+  if (!expr || expr.exprKind !== "tuple") {
+    throw new Error("tuple pattern requires a tuple initializer");
+  }
+  return expr;
 };
 
 const ensureTypeMatches = (

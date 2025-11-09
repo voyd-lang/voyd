@@ -324,6 +324,7 @@ export type HirExpression =
   | HirIdentifierExpr
   | HirCallExpr
   | HirBlockExpr
+  | HirTupleExpr
   | HirLoopExpr
   | HirWhileExpr
   | HirCondExpr
@@ -348,6 +349,7 @@ export type HirExprKind =
   | "identifier"
   | "call"
   | "block"
+  | "tuple"
   | "loop"
   | "while"
   | "cond"
@@ -391,6 +393,11 @@ export interface HirBlockExpr extends HirExpressionBase {
   exprKind: "block";
   statements: readonly HirStmtId[];
   value?: HirExprId;
+}
+
+export interface HirTupleExpr extends HirExpressionBase {
+  exprKind: "tuple";
+  elements: readonly HirExprId[];
 }
 export interface HirLoopExpr extends HirExpressionBase {
   exprKind: "loop";
@@ -489,7 +496,8 @@ export interface HirFieldAccessExpr extends HirExpressionBase {
 
 export interface HirAssignExpr extends HirExpressionBase {
   exprKind: "assign";
-  target: HirExprId;
+  target?: HirExprId;
+  pattern?: HirPattern;
   value: HirExprId;
 }
 

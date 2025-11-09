@@ -1,12 +1,16 @@
 import binaryen from "binaryen";
 import type { SymbolTable } from "../semantics/binder/index.js";
 import type {
+  HirAssignExpr,
   HirBlockExpr,
   HirCallExpr,
   HirExpression,
   HirFunction,
   HirGraph,
   HirIfExpr,
+  HirLetStatement,
+  HirPattern,
+  HirWhileExpr,
 } from "../semantics/hir/index.js";
 import type {
   HirExprId,
@@ -53,6 +57,7 @@ interface LocalBinding {
 interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;
   locals: binaryen.Type[];
+  nextLocalIndex: number;
 }
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
@@ -149,6 +154,7 @@ const compileFunctionItem = (fn: HirFunction, ctx: CodegenContext): void => {
   const fnCtx: FunctionContext = {
     bindings: new Map(),
     locals: [],
+    nextLocalIndex: meta.paramTypes.length,
   };
 
   fn.parameters.forEach((param, index) => {
@@ -209,6 +215,12 @@ const compileExpression = (
       return compileBlockExpr(expr, ctx, fnCtx);
     case "if":
       return compileIfExpr(expr, ctx, fnCtx);
+    case "while":
+      return compileWhileExpr(expr, ctx, fnCtx);
+    case "assign":
+      return compileAssignExpr(expr, ctx, fnCtx);
+    case "tuple":
+      throw new Error("tuple expressions cannot be evaluated directly");
     default:
       throw new Error(`codegen does not support ${expr.exprKind} expressions yet`);
   }
@@ -336,9 +348,31 @@ const compileStatement = (
         return ctx.mod.return(compileExpression(stmt.value, ctx, fnCtx));
       }
       return ctx.mod.return();
+    case "let":
+      return compileLetStatement(stmt, ctx, fnCtx);
     default:
       throw new Error(`codegen cannot lower statement kind ${stmt.kind}`);
   }
+};
+
+const compileLetStatement = (
+  stmt: HirLetStatement,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): binaryen.ExpressionRef => {
+  const ops: binaryen.ExpressionRef[] = [];
+  compilePatternInitialization(
+    stmt.pattern,
+    stmt.initializer,
+    ctx,
+    fnCtx,
+    ops,
+    { declare: true }
+  );
+  if (ops.length === 0) {
+    return ctx.mod.nop();
+  }
+  return ctx.mod.block(null, ops, binaryen.none);
 };
 
 const compileIfExpr = (
@@ -368,6 +402,183 @@ const compileIfExpr = (
   }
 
   return fallback;
+};
+
+const compileWhileExpr = (
+  expr: HirWhileExpr,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): binaryen.ExpressionRef => {
+  const loopLabel = `while_loop_${expr.id}`;
+  const breakLabel = `${loopLabel}_break`;
+
+  const conditionCheck = ctx.mod.if(
+    ctx.mod.i32.eqz(
+      compileExpression(expr.condition, ctx, fnCtx)
+    ),
+    ctx.mod.br(breakLabel)
+  );
+
+  const body = asStatement(ctx, compileExpression(expr.body, ctx, fnCtx));
+  const loopBody = ctx.mod.block(null, [
+    conditionCheck,
+    body,
+    ctx.mod.br(loopLabel),
+  ]);
+
+  return ctx.mod.block(
+    breakLabel,
+    [ctx.mod.loop(loopLabel, loopBody)],
+    binaryen.none
+  );
+};
+
+const compileAssignExpr = (
+  expr: HirAssignExpr,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): binaryen.ExpressionRef => {
+  if (expr.pattern) {
+    const ops: binaryen.ExpressionRef[] = [];
+    compilePatternInitialization(expr.pattern, expr.value, ctx, fnCtx, ops, {
+      declare: false,
+    });
+    return ops.length === 1
+      ? ops[0]!
+      : ctx.mod.block(null, ops, binaryen.none);
+  }
+
+  if (typeof expr.target !== "number") {
+    throw new Error("assignment missing target expression");
+  }
+
+  const targetExpr = ctx.hir.expressions.get(expr.target);
+  if (!targetExpr || targetExpr.exprKind !== "identifier") {
+    throw new Error("only identifier assignments are supported today");
+  }
+
+  const binding = getRequiredBinding(targetExpr.symbol, ctx, fnCtx);
+  return ctx.mod.local.set(
+    binding.index,
+    compileExpression(expr.value, ctx, fnCtx)
+  );
+};
+
+interface PatternInitOptions {
+  declare: boolean;
+}
+
+const compilePatternInitialization = (
+  pattern: HirPattern,
+  initializer: HirExprId,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  ops: binaryen.ExpressionRef[],
+  options: PatternInitOptions
+): void => {
+  if (pattern.kind === "tuple") {
+    compileTuplePattern(pattern, initializer, ctx, fnCtx, ops, options);
+    return;
+  }
+
+  if (pattern.kind === "wildcard") {
+    ops.push(asStatement(ctx, compileExpression(initializer, ctx, fnCtx)));
+    return;
+  }
+
+  if (pattern.kind !== "identifier") {
+    throw new Error(`unsupported pattern kind ${pattern.kind}`);
+  }
+
+  const binding = options.declare
+    ? declareLocal(pattern.symbol, ctx, fnCtx)
+    : getRequiredBinding(pattern.symbol, ctx, fnCtx);
+
+  ops.push(
+    ctx.mod.local.set(binding.index, compileExpression(initializer, ctx, fnCtx))
+  );
+};
+
+interface PendingTupleAssignment {
+  pattern: Extract<HirPattern, { kind: "identifier" }>;
+  tempIndex: number;
+  tempType: binaryen.Type;
+}
+
+const compileTuplePattern = (
+  pattern: HirPattern & { kind: "tuple" },
+  initializer: HirExprId,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  ops: binaryen.ExpressionRef[],
+  options: PatternInitOptions
+): void => {
+  const pending = collectTupleAssignments(pattern, initializer, ctx, fnCtx, ops);
+  pending.forEach(({ pattern: subPattern, tempIndex, tempType }) => {
+    const binding = options.declare
+      ? declareLocal(subPattern.symbol, ctx, fnCtx)
+      : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
+    ops.push(
+      ctx.mod.local.set(
+        binding.index,
+        ctx.mod.local.get(tempIndex, tempType)
+      )
+    );
+  });
+};
+
+const collectTupleAssignments = (
+  pattern: HirPattern,
+  exprId: HirExprId,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  ops: binaryen.ExpressionRef[]
+): PendingTupleAssignment[] => {
+  if (pattern.kind === "tuple") {
+    const tupleExpr = getTupleExpression(exprId, ctx);
+    if (tupleExpr.elements.length !== pattern.elements.length) {
+      throw new Error("tuple pattern arity mismatch");
+    }
+    const collected: PendingTupleAssignment[] = [];
+    tupleExpr.elements.forEach((elementExprId, index) => {
+      collected.push(
+        ...collectTupleAssignments(
+          pattern.elements[index]!,
+          elementExprId,
+          ctx,
+          fnCtx,
+          ops
+        )
+      );
+    });
+    return collected;
+  }
+
+  if (pattern.kind === "wildcard") {
+    ops.push(asStatement(ctx, compileExpression(exprId, ctx, fnCtx)));
+    return [];
+  }
+
+  if (pattern.kind !== "identifier") {
+    throw new Error(`unsupported tuple sub-pattern ${pattern.kind}`);
+  }
+
+  const elementTypeId = ctx.typing.table.getExprType(exprId);
+  if (typeof elementTypeId !== "number") {
+    throw new Error("missing type for tuple element");
+  }
+
+  const temp = allocateTempLocal(wasmTypeFor(elementTypeId, ctx), fnCtx);
+  ops.push(
+    ctx.mod.local.set(temp.index, compileExpression(exprId, ctx, fnCtx))
+  );
+  return [
+    {
+      pattern,
+      tempIndex: temp.index,
+      tempType: temp.type,
+    },
+  ];
 };
 
 const compileIntrinsicCall = (
@@ -427,6 +638,74 @@ const asStatement = (
   }
   return ctx.mod.drop(expr);
 };
+
+const declareLocal = (
+  symbol: SymbolId,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): LocalBinding => {
+  const existing = fnCtx.bindings.get(symbol);
+  if (existing) {
+    return existing;
+  }
+
+  const typeId = getSymbolTypeId(symbol, ctx);
+  const wasmType = wasmTypeFor(typeId, ctx);
+  const binding = allocateTempLocal(wasmType, fnCtx);
+  fnCtx.bindings.set(symbol, binding);
+  return binding;
+};
+
+const getRequiredBinding = (
+  symbol: SymbolId,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): LocalBinding => {
+  const binding = fnCtx.bindings.get(symbol);
+  if (!binding) {
+    throw new Error(
+      `codegen missing binding for symbol ${getSymbolName(symbol, ctx)}`
+    );
+  }
+  return binding;
+};
+
+const allocateTempLocal = (
+  type: binaryen.Type,
+  fnCtx: FunctionContext
+): LocalBinding => {
+  const binding: LocalBinding = {
+    index: fnCtx.nextLocalIndex,
+    type,
+  };
+  fnCtx.nextLocalIndex += 1;
+  fnCtx.locals.push(type);
+  return binding;
+};
+
+const getSymbolTypeId = (symbol: SymbolId, ctx: CodegenContext): TypeId => {
+  const typeId = ctx.typing.valueTypes.get(symbol);
+  if (typeof typeId === "number") {
+    return typeId;
+  }
+  throw new Error(
+    `codegen missing type information for symbol ${getSymbolName(symbol, ctx)}`
+  );
+};
+
+const getTupleExpression = (
+  exprId: HirExprId,
+  ctx: CodegenContext
+): HirExpression & { exprKind: "tuple"; elements: readonly HirExprId[] } => {
+  const expr = ctx.hir.expressions.get(exprId);
+  if (!expr || expr.exprKind !== "tuple") {
+    throw new Error("tuple pattern requires a tuple initializer expression");
+  }
+  return expr;
+};
+
+const getSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
+  ctx.symbolTable.getSymbol(symbol).name;
 
 const getExprBinaryenType = (
   exprId: HirExprId,

@@ -90,7 +90,9 @@ const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     if (!isForm(entry)) continue;
     const parsed = parseFunctionDecl(entry);
     if (!parsed) {
-      throw new Error("unsupported top-level form; expected a function declaration");
+      throw new Error(
+        "unsupported top-level form; expected a function declaration"
+      );
     }
     bindFunctionDecl(parsed, ctx, tracker);
   }
@@ -100,7 +102,9 @@ const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   }
 };
 
-const createBinderScopeTracker = (symbolTable: SymbolTable): BinderScopeTracker => {
+const createBinderScopeTracker = (
+  symbolTable: SymbolTable
+): BinderScopeTracker => {
   const stack: ScopeId[] = [symbolTable.rootScope];
 
   return {
@@ -151,7 +155,10 @@ const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
     throw new Error("fn missing body expression");
   }
 
-  const signatureForm = ensureForm(signatureExpr, "fn signature must be a form");
+  const signatureForm = ensureForm(
+    signatureExpr,
+    "fn signature must be a form"
+  );
   const signature = parseFunctionSignature(signatureForm);
 
   return {
@@ -273,7 +280,11 @@ const bindFunctionDecl = (
   });
 };
 
-const bindExpr = (expr: Expr | undefined, ctx: BindingContext, tracker: BinderScopeTracker): void => {
+const bindExpr = (
+  expr: Expr | undefined,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
   if (!expr || !isForm(expr)) return;
 
   if (expr.calls("block")) {
@@ -286,12 +297,26 @@ const bindExpr = (expr: Expr | undefined, ctx: BindingContext, tracker: BinderSc
     return;
   }
 
+  if (expr.calls("while")) {
+    bindWhile(expr, ctx, tracker);
+    return;
+  }
+
+  if (expr.calls("var") || expr.calls("let")) {
+    bindVar(expr, ctx, tracker);
+    return;
+  }
+
   for (const child of expr.toArray()) {
     bindExpr(child, ctx, tracker);
   }
 };
 
-const bindBlock = (form: Form, ctx: BindingContext, tracker: BinderScopeTracker): void => {
+const bindBlock = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
   const scope = ctx.symbolTable.createScope({
     parent: tracker.current(),
     kind: "block",
@@ -309,7 +334,11 @@ const bindBlock = (form: Form, ctx: BindingContext, tracker: BinderScopeTracker)
   }
 };
 
-const bindIf = (form: Form, ctx: BindingContext, tracker: BinderScopeTracker): void => {
+const bindIf = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
   bindExpr(form.at(1), ctx, tracker);
   for (let i = 2; i < form.length; i += 1) {
     const branch = form.at(i);
@@ -321,7 +350,66 @@ const bindIf = (form: Form, ctx: BindingContext, tracker: BinderScopeTracker): v
   }
 };
 
-const ensureForm = (expr: Expr, message: string): Form => {
+const bindWhile = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  bindExpr(form.at(1), ctx, tracker);
+  bindExpr(form.at(2), ctx, tracker);
+};
+
+const bindVar = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  const assignment = ensureForm(
+    form.at(1),
+    "var statement expects an assignment"
+  );
+  if (!assignment.calls("=")) {
+    throw new Error("var statement must be an assignment form");
+  }
+
+  const patternExpr = assignment.at(1);
+  const initializer = assignment.at(2);
+  declarePatternBindings(patternExpr, ctx);
+  bindExpr(initializer, ctx, tracker);
+};
+
+const declarePatternBindings = (
+  pattern: Expr | undefined,
+  ctx: BindingContext
+): void => {
+  if (!pattern) {
+    throw new Error("missing pattern");
+  }
+
+  if (isIdentifierAtom(pattern)) {
+    if (pattern.value === "_") {
+      return;
+    }
+    ctx.symbolTable.declare({
+      name: pattern.value,
+      kind: "value",
+      declaredAt: pattern.syntaxId,
+    });
+    return;
+  }
+
+  if (
+    isForm(pattern) &&
+    (pattern.calls("tuple") || pattern.callsInternal("tuple"))
+  ) {
+    pattern.rest.forEach((entry) => declarePatternBindings(entry, ctx));
+    return;
+  }
+
+  throw new Error("unsupported pattern form in declaration");
+};
+
+const ensureForm = (expr: Expr | undefined, message: string): Form => {
   if (!isForm(expr)) {
     throw new Error(message);
   }
