@@ -195,8 +195,7 @@ const lowerBlock = (form: Form, ctx: LowerContext, scopes: LowerScopeStack): Hir
       const entrySyntax = entry as Syntax | undefined;
       statements.push(
         ctx.builder.addStatement({
-          kind: "stmt",
-          stmtKind: "expr",
+          kind: "expr-stmt",
           ast: entrySyntax?.syntaxId ?? form.syntaxId,
           span: toSourceSpan(entrySyntax),
           expr: exprId,

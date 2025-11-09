@@ -222,7 +222,12 @@ const compileLiteralExpr = (
     case "i32":
       return ctx.mod.i32.const(Number.parseInt(expr.value, 10));
     case "i64":
-      return ctx.mod.i64.const(BigInt(expr.value));
+      {
+        const value = BigInt(expr.value);
+        const low = Number(value & BigInt(0xffffffff));
+        const high = Number((value >> BigInt(32)) & BigInt(0xffffffff));
+        return ctx.mod.i64.const(low, high);
+      }
     case "f32":
       return ctx.mod.f32.const(Number.parseFloat(expr.value));
     case "f64":

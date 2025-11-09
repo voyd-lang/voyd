@@ -94,6 +94,9 @@ describe("semanticsPipeline", () => {
     const fibFnType = typing.arena.instantiate(fibScheme!, []);
     const fibFnDesc = typing.arena.get(fibFnType);
     expect(fibFnDesc.kind).toBe("function");
+    if (fibFnDesc.kind !== "function") {
+      throw new Error("expected fib scheme to produce a function type");
+    }
     expect(fibFnDesc.parameters).toHaveLength(1);
     const fibParamType = typing.arena.get(fibFnDesc.parameters[0]!.type);
     expect(fibParamType).toMatchObject({

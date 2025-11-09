@@ -17,7 +17,7 @@ describe("HirBuilder", () => {
       exprKind: "literal",
       ast: 2,
       span,
-      literalKind: "number",
+      literalKind: "i32",
       value: "0",
     });
 

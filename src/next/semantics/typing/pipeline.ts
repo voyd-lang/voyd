@@ -253,23 +253,23 @@ const typeStatement = (stmtId: HirStmtId, ctx: TypingContext): void => {
     throw new Error(`missing HirStatement ${stmtId}`);
   }
 
-  if (stmt.kind === "expr-stmt") {
-    typeExpression(stmt.expr, ctx);
-    return;
-  }
-
-  if (stmt.kind === "stmt") {
-    const exprStmt = stmt as HirStatement & {
-      stmtKind?: string;
-      expr?: HirExprId;
-    };
-    if (exprStmt.stmtKind === "expr" && typeof exprStmt.expr === "number") {
-      typeExpression(exprStmt.expr, ctx);
+  switch (stmt.kind) {
+    case "expr-stmt":
+      typeExpression(stmt.expr, ctx);
       return;
+    case "return":
+      if (typeof stmt.value === "number") {
+        typeExpression(stmt.value, ctx);
+      }
+      return;
+    case "let":
+      typeExpression(stmt.initializer, ctx);
+      return;
+    default: {
+      const unreachable: never = stmt;
+      throw new Error("unsupported statement kind");
     }
   }
-
-  throw new Error(`unsupported statement kind: ${stmt.kind}`);
 };
 
 const typeIfExpr = (expr: HirIfExpr, ctx: TypingContext): TypeId => {
