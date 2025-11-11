@@ -34,4 +34,14 @@ describe("next codegen", () => {
     expect(typeof main).toBe("function");
     expect((main as () => number)()).toBe(55);
   });
+
+  it("emits wasm for the recursive inference sample and runs main()", () => {
+    const ast = loadAst("recursive_inference.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module } = codegen(semantics);
+    const instance = getWasmInstance(module);
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(120);
+  });
 });

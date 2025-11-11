@@ -8,6 +8,7 @@ import type {
 export interface TypeTable {
   setExprType(id: HirExprId, type: TypeId): void;
   getExprType(id: HirExprId): TypeId | undefined;
+  clearExprTypes(): void;
   setSymbolScheme(symbol: SymbolId, scheme: TypeSchemeId): void;
   getSymbolScheme(symbol: SymbolId): TypeSchemeId | undefined;
   entries(): Iterable<[HirExprId, TypeId]>;
@@ -24,6 +25,10 @@ export const createTypeTable = (): TypeTable => {
   const getExprType = (id: HirExprId): TypeId | undefined =>
     exprTypes.get(id);
 
+  const clearExprTypes = (): void => {
+    exprTypes.clear();
+  };
+
   const setSymbolScheme = (symbol: SymbolId, scheme: TypeSchemeId): void => {
     symbolSchemes.set(symbol, scheme);
   };
@@ -37,6 +42,7 @@ export const createTypeTable = (): TypeTable => {
   return {
     setExprType,
     getExprType,
+    clearExprTypes,
     setSymbolScheme,
     getSymbolScheme,
     entries,

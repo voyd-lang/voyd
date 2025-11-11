@@ -1,12 +1,43 @@
 import { describe, expect, it } from "vitest";
 import {
   type HirBlockExpr,
+  type HirCallExpr,
   type HirFunction,
   type HirIfExpr,
   type HirNamedTypeExpr,
 } from "../hir/nodes.js";
 import { semanticsPipeline } from "../pipeline.js";
+import type { SymbolId, TypeId } from "../ids.js";
+import type { TypingResult } from "../typing/pipeline.js";
 import { loadAst } from "./load-ast.js";
+
+const expectPrimitiveType = (
+  typing: TypingResult,
+  typeId: TypeId | undefined,
+  name: string
+): void => {
+  expect(typeId).toBeDefined();
+  expect(typing.arena.get(typeId!)).toMatchObject({
+    kind: "primitive",
+    name,
+  });
+};
+
+const expectFunctionReturnPrimitive = (
+  typing: TypingResult,
+  symbol: SymbolId,
+  name: string
+): void => {
+  const scheme = typing.table.getSymbolScheme(symbol);
+  expect(scheme).toBeDefined();
+  const fnType = typing.arena.instantiate(scheme!, []);
+  const fnDesc = typing.arena.get(fnType);
+  expect(fnDesc.kind).toBe("function");
+  if (fnDesc.kind !== "function") {
+    throw new Error("expected function type");
+  }
+  expectPrimitiveType(typing, fnDesc.returnType, name);
+};
 
 describe("semanticsPipeline", () => {
   it("binds and lowers the fib sample module", () => {
@@ -106,6 +137,60 @@ describe("semanticsPipeline", () => {
       kind: "primitive",
       name: "i32",
     });
+  });
+
+  it("infers return types for forward references", () => {
+    const ast = loadAst("forward_inference.voyd");
+    const result = semanticsPipeline(ast);
+    const { symbolTable, hir, typing } = result;
+    const rootScope = symbolTable.rootScope;
+    const mainSymbol = symbolTable.resolve("main", rootScope);
+    const helperSymbol = symbolTable.resolve("helper", rootScope);
+    expect(mainSymbol).toBeDefined();
+    expect(helperSymbol).toBeDefined();
+
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+
+    const mainBlock = hir.expressions.get(mainFn!.body);
+    expect(mainBlock?.exprKind).toBe("block");
+    const callExprId = (mainBlock as HirBlockExpr).value;
+    expect(callExprId).toBeDefined();
+    const callType = typing.table.getExprType(callExprId!);
+    expectPrimitiveType(typing, callType, "i32");
+
+    expectFunctionReturnPrimitive(typing, mainSymbol!, "i32");
+    expectFunctionReturnPrimitive(typing, helperSymbol!, "i32");
+  });
+
+  it("infers return types for recursive functions", () => {
+    const ast = loadAst("recursive_inference.voyd");
+    const result = semanticsPipeline(ast);
+    const { symbolTable, hir, typing } = result;
+    const rootScope = symbolTable.rootScope;
+    const factSymbol = symbolTable.resolve("fact", rootScope);
+    const mainSymbol = symbolTable.resolve("main", rootScope);
+    expect(factSymbol).toBeDefined();
+    expect(mainSymbol).toBeDefined();
+
+    const recursiveCall = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") {
+          return false;
+        }
+        const callee = hir.expressions.get(expr.callee);
+        return callee?.exprKind === "identifier" && callee.symbol === factSymbol;
+      }
+    );
+    expect(recursiveCall).toBeDefined();
+    const recursiveCallType = typing.table.getExprType(recursiveCall!.id);
+    expectPrimitiveType(typing, recursiveCallType, "i32");
+
+    expectFunctionReturnPrimitive(typing, factSymbol!, "i32");
+    expectFunctionReturnPrimitive(typing, mainSymbol!, "i32");
   });
 
   it("binds and lowers the fib sample module", () => {

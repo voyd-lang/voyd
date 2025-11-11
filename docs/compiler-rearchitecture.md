@@ -37,6 +37,11 @@
 - `resolveEntities` both captures identifiers for closures and registers on-the-fly `TypeAlias` objects in impls and generics (`src/semantics/resolution/resolve-impl.ts:20`). Because scopes are stored on syntax nodes, cloning or moving nodes risks leaking symbol registrations or losing captures.
 - Module registration and entity initialization happen before semantic resolution, but macros can still introduce complex forms that escape initialization, forcing later passes to defensively re-run initialization helpers.
 
+### Function inference depends on concrete operator signatures
+- The new HIR-based pipeline infers return types for functions (including recursive ones such as `fact` in `src/next/codegen/__tests__/__fixtures__/recursive_inference.voyd`) by running a relaxed pass that treats unknown types as placeholders and a strict pass that re-validates once concrete types are known.
+- That approach currently assumes every operator/call resolves to a single intrinsic function signature (e.g., `* : (i32, i32) -> i32`), so branch expressions inside the relaxed pass still produce real types.
+- **All functions may be overloaded in the future**, so re-architecture plans must account for overload resolution feeding concrete result types (or type variables + constraints) into the inference pass; otherwise, recursive definitions will stall at `unknown` and never converge.
+
 ### Impact on the illegal cast bug
 - The specialized `Some<String>` vs `Some<RecType>` mismatch arises because array literals are rewritten into constructor calls using inferred element types before `Map`’s generic instantiation is fully resolved. Subsequent passes assume the nominal wrapper uses the map’s declared value type, but the stored instances retain the narrower inferred type, leading to the invalid `ref.cast` described in `docs/illegal-cast-root-cause.md`.
 - Without a canonical semantic IR or type table, there is no single source of truth to reconcile the element type stored in the map with the instantiation expected at retrieval time.

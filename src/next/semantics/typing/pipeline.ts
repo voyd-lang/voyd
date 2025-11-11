@@ -42,6 +42,8 @@ interface FunctionSignature {
   hasExplicitReturn: boolean;
 }
 
+type TypeCheckMode = "relaxed" | "strict";
+
 interface TypingContext {
   symbolTable: SymbolTable;
   hir: HirGraph;
@@ -55,6 +57,7 @@ interface TypingContext {
   voidType: TypeId;
   unknownType: TypeId;
   defaultEffectRow: EffectRowId;
+  typeCheckMode: TypeCheckMode;
 }
 
 const DEFAULT_EFFECT_ROW: EffectRowId = 0;
@@ -76,15 +79,14 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     voidType: 0,
     unknownType: 0,
     defaultEffectRow: DEFAULT_EFFECT_ROW,
+    typeCheckMode: "relaxed",
   };
 
   seedPrimitiveTypes(ctx);
   registerFunctionSignatures(ctx);
 
-  for (const item of inputs.hir.items.values()) {
-    if (item.kind !== "function") continue;
-    typeFunction(item, ctx);
-  }
+  runInferencePass(ctx);
+  runStrictTypeCheck(ctx);
 
   return { arena, table, valueTypes: new Map(ctx.valueTypes) };
 };
@@ -113,7 +115,7 @@ const registerFunctionSignatures = (ctx: TypingContext): void => {
 
     const hasExplicitReturn = Boolean(item.returnType);
     const declaredReturn =
-      resolveTypeExpr(item.returnType, ctx, ctx.voidType) ?? ctx.voidType;
+      resolveTypeExpr(item.returnType, ctx, ctx.unknownType) ?? ctx.unknownType;
 
     const functionType = ctx.arena.internFunction({
       parameters: parameterTypes.map((type) => ({ type, optional: false })),
@@ -134,7 +136,47 @@ const registerFunctionSignatures = (ctx: TypingContext): void => {
   }
 };
 
-const typeFunction = (fn: HirFunction, ctx: TypingContext): void => {
+const runInferencePass = (ctx: TypingContext): void => {
+  ctx.typeCheckMode = "relaxed";
+  let changed: boolean;
+  do {
+    ctx.table.clearExprTypes();
+    changed = typeAllFunctions(ctx, { collectChanges: true });
+  } while (changed);
+
+  const unresolved = Array.from(ctx.functionSignatures.entries()).filter(
+    ([, signature]) => !signature.hasExplicitReturn
+  );
+  if (unresolved.length > 0) {
+    const names = unresolved.map(([symbol]) => getSymbolName(symbol, ctx));
+    throw new Error(
+      `could not infer return type for function(s): ${names.join(", ")}`
+    );
+  }
+};
+
+const runStrictTypeCheck = (ctx: TypingContext): void => {
+  ctx.typeCheckMode = "strict";
+  ctx.table.clearExprTypes();
+  typeAllFunctions(ctx, { collectChanges: false });
+};
+
+const typeAllFunctions = (
+  ctx: TypingContext,
+  options: { collectChanges: boolean }
+): boolean => {
+  let changed = false;
+  for (const item of ctx.hir.items.values()) {
+    if (item.kind !== "function") continue;
+    const updated = typeFunction(item, ctx);
+    if (options.collectChanges) {
+      changed = updated || changed;
+    }
+  }
+  return options.collectChanges ? changed : false;
+};
+
+const typeFunction = (fn: HirFunction, ctx: TypingContext): boolean => {
   const signature = ctx.functionSignatures.get(fn.symbol);
   if (!signature) {
     throw new Error(`missing type signature for function symbol ${fn.symbol}`);
@@ -145,12 +187,18 @@ const typeFunction = (fn: HirFunction, ctx: TypingContext): void => {
     ensureTypeMatches(
       bodyType,
       signature.returnType,
+      ctx,
       `function ${getSymbolName(fn.symbol, ctx)} return type`
     );
-    return;
+    return false;
+  }
+
+  if (bodyType === ctx.unknownType) {
+    return false;
   }
 
   finalizeFunctionReturnType(fn, signature, bodyType, ctx);
+  return true;
 };
 
 const finalizeFunctionReturnType = (
@@ -172,6 +220,7 @@ const finalizeFunctionReturnType = (
   ctx.valueTypes.set(fn.symbol, functionType);
   const scheme = ctx.arena.newScheme([], functionType);
   ctx.table.setSymbolScheme(fn.symbol, scheme);
+  signature.hasExplicitReturn = true;
 };
 
 const typeExpression = (exprId: HirExprId, ctx: TypingContext): TypeId => {
@@ -260,7 +309,7 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
   expr.args.forEach((argId, index) => {
     const argType = typeExpression(argId, ctx);
     const param = calleeDesc.parameters[index];
-    ensureTypeMatches(argType, param.type, `call argument ${index + 1}`);
+    ensureTypeMatches(argType, param.type, ctx, `call argument ${index + 1}`);
   });
 
   return calleeDesc.returnType;
@@ -314,7 +363,12 @@ const typeIfExpr = (expr: HirIfExpr, ctx: TypingContext): TypeId => {
 
   expr.branches.forEach((branch, index) => {
     const conditionType = typeExpression(branch.condition, ctx);
-    ensureTypeMatches(conditionType, ctx.boolType, `if condition ${index + 1}`);
+    ensureTypeMatches(
+      conditionType,
+      ctx.boolType,
+      ctx,
+      `if condition ${index + 1}`
+    );
 
     const valueType = typeExpression(branch.value, ctx);
     branchType = mergeBranchType(branchType, valueType);
@@ -338,7 +392,7 @@ const typeTupleExpr = (
 
 const typeWhileExpr = (expr: HirWhileExpr, ctx: TypingContext): TypeId => {
   const conditionType = typeExpression(expr.condition, ctx);
-  ensureTypeMatches(conditionType, ctx.boolType, "while condition");
+  ensureTypeMatches(conditionType, ctx.boolType, ctx, "while condition");
   typeExpression(expr.body, ctx);
   return ctx.voidType;
 };
@@ -355,7 +409,7 @@ const typeAssignExpr = (expr: HirAssignExpr, ctx: TypingContext): TypeId => {
 
   const targetType = typeExpression(expr.target, ctx);
   const valueType = typeExpression(expr.value, ctx);
-  ensureTypeMatches(valueType, targetType, "assignment target");
+  ensureTypeMatches(valueType, targetType, ctx, "assignment target");
   return ctx.voidType;
 };
 
@@ -556,6 +610,7 @@ const recordPatternType = (
       ensureTypeMatches(
         type,
         existing,
+        ctx,
         `assignment to ${getSymbolName(pattern.symbol, ctx)}`
       );
       return;
@@ -581,11 +636,21 @@ const getTupleExpression = (
 const ensureTypeMatches = (
   actual: TypeId,
   expected: TypeId,
+  ctx: TypingContext,
   reason: string
 ): void => {
-  if (actual !== expected) {
-    throw new Error(`type mismatch for ${reason}`);
+  if (actual === expected) {
+    return;
   }
+
+  if (
+    ctx.typeCheckMode === "relaxed" &&
+    (actual === ctx.unknownType || expected === ctx.unknownType)
+  ) {
+    return;
+  }
+
+  throw new Error(`type mismatch for ${reason}`);
 };
 
 const getSymbolName = (symbol: SymbolId, ctx: TypingContext): string =>
