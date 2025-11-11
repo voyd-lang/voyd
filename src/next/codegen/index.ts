@@ -102,7 +102,9 @@ const registerFunctionMetadata = (ctx: CodegenContext): void => {
 
     const scheme = ctx.typing.table.getSymbolScheme(item.symbol);
     if (typeof scheme !== "number") {
-      throw new Error(`codegen missing type scheme for function ${item.symbol}`);
+      throw new Error(
+        `codegen missing type scheme for function ${item.symbol}`
+      );
     }
 
     const typeId = ctx.typing.arena.instantiate(scheme, []);
@@ -131,7 +133,9 @@ const registerFunctionMetadata = (ctx: CodegenContext): void => {
 
 const makeFunctionName = (fn: HirFunction, ctx: CodegenContext): string => {
   const moduleLabel = sanitizeIdentifier(ctx.hir.module.path);
-  const symbolName = sanitizeIdentifier(ctx.symbolTable.getSymbol(fn.symbol).name);
+  const symbolName = sanitizeIdentifier(
+    ctx.symbolTable.getSymbol(fn.symbol).name
+  );
   return `${moduleLabel}__${symbolName}_${fn.symbol}`;
 };
 
@@ -222,24 +226,29 @@ const compileExpression = (
     case "tuple":
       throw new Error("tuple expressions cannot be evaluated directly");
     default:
-      throw new Error(`codegen does not support ${expr.exprKind} expressions yet`);
+      throw new Error(
+        `codegen does not support ${expr.exprKind} expressions yet`
+      );
   }
 };
 
 const compileLiteralExpr = (
-  expr: HirExpression & { exprKind: "literal"; literalKind: string; value: string },
+  expr: HirExpression & {
+    exprKind: "literal";
+    literalKind: string;
+    value: string;
+  },
   ctx: CodegenContext
 ): binaryen.ExpressionRef => {
   switch (expr.literalKind) {
     case "i32":
       return ctx.mod.i32.const(Number.parseInt(expr.value, 10));
-    case "i64":
-      {
-        const value = BigInt(expr.value);
-        const low = Number(value & BigInt(0xffffffff));
-        const high = Number((value >> BigInt(32)) & BigInt(0xffffffff));
-        return ctx.mod.i64.const(low, high);
-      }
+    case "i64": {
+      const value = BigInt(expr.value);
+      const low = Number(value & BigInt(0xffffffff));
+      const high = Number((value >> BigInt(32)) & BigInt(0xffffffff));
+      return ctx.mod.i64.const(low, high);
+    }
     case "f32":
       return ctx.mod.f32.const(Number.parseFloat(expr.value));
     case "f64":
@@ -249,7 +258,9 @@ const compileLiteralExpr = (
     case "void":
       return ctx.mod.nop();
     default:
-      throw new Error(`codegen does not support literal kind ${expr.literalKind}`);
+      throw new Error(
+        `codegen does not support literal kind ${expr.literalKind}`
+      );
   }
 };
 
@@ -316,11 +327,7 @@ const compileBlockExpr = (
     }
 
     statements.push(valueExpr);
-    return ctx.mod.block(
-      null,
-      statements,
-      getExprBinaryenType(expr.id, ctx)
-    );
+    return ctx.mod.block(null, statements, getExprBinaryenType(expr.id, ctx));
   }
 
   if (statements.length === 0) {
@@ -351,7 +358,8 @@ const compileStatement = (
     case "let":
       return compileLetStatement(stmt, ctx, fnCtx);
     default:
-      throw new Error(`codegen cannot lower statement kind ${stmt.kind}`);
+      const unreachable: never = stmt;
+      throw new Error(`codegen cannot lower statement kind ${stmt}`);
   }
 };
 
@@ -413,9 +421,7 @@ const compileWhileExpr = (
   const breakLabel = `${loopLabel}_break`;
 
   const conditionCheck = ctx.mod.if(
-    ctx.mod.i32.eqz(
-      compileExpression(expr.condition, ctx, fnCtx)
-    ),
+    ctx.mod.i32.eqz(compileExpression(expr.condition, ctx, fnCtx)),
     ctx.mod.br(breakLabel)
   );
 
@@ -443,9 +449,7 @@ const compileAssignExpr = (
     compilePatternInitialization(expr.pattern, expr.value, ctx, fnCtx, ops, {
       declare: false,
     });
-    return ops.length === 1
-      ? ops[0]!
-      : ctx.mod.block(null, ops, binaryen.none);
+    return ops.length === 1 ? ops[0]! : ctx.mod.block(null, ops, binaryen.none);
   }
 
   if (typeof expr.target !== "number") {
@@ -513,16 +517,19 @@ const compileTuplePattern = (
   ops: binaryen.ExpressionRef[],
   options: PatternInitOptions
 ): void => {
-  const pending = collectTupleAssignments(pattern, initializer, ctx, fnCtx, ops);
+  const pending = collectTupleAssignments(
+    pattern,
+    initializer,
+    ctx,
+    fnCtx,
+    ops
+  );
   pending.forEach(({ pattern: subPattern, tempIndex, tempType }) => {
     const binding = options.declare
       ? declareLocal(subPattern.symbol, ctx, fnCtx)
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
-      ctx.mod.local.set(
-        binding.index,
-        ctx.mod.local.get(tempIndex, tempType)
-      )
+      ctx.mod.local.set(binding.index, ctx.mod.local.get(tempIndex, tempType))
     );
   });
 };
