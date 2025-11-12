@@ -1,0 +1,596 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
+{
+  "expressions": Map {
+    1 => {
+      "ast": 460,
+      "exprKind": "identifier",
+      "id": 1,
+      "kind": "expr",
+      "span": {
+        "end": 31,
+        "file": "fib.voyd",
+        "start": 30,
+      },
+      "symbol": 4,
+    },
+    2 => {
+      "ast": 458,
+      "exprKind": "identifier",
+      "id": 2,
+      "kind": "expr",
+      "span": {
+        "end": 29,
+        "file": "fib.voyd",
+        "start": 28,
+      },
+      "symbol": 2,
+    },
+    3 => {
+      "ast": 462,
+      "exprKind": "literal",
+      "id": 3,
+      "kind": "expr",
+      "literalKind": "i32",
+      "span": {
+        "end": 33,
+        "file": "fib.voyd",
+        "start": 32,
+      },
+      "value": "2",
+    },
+    4 => {
+      "args": [
+        2,
+        3,
+      ],
+      "ast": 616,
+      "callee": 1,
+      "exprKind": "call",
+      "id": 4,
+      "kind": "expr",
+      "span": {
+        "end": 33,
+        "file": "fib.voyd",
+        "start": 30,
+      },
+    },
+    5 => {
+      "ast": 469,
+      "exprKind": "identifier",
+      "id": 5,
+      "kind": "expr",
+      "span": {
+        "end": 45,
+        "file": "fib.voyd",
+        "start": 44,
+      },
+      "symbol": 2,
+    },
+    6 => {
+      "ast": 617,
+      "exprKind": "block",
+      "id": 6,
+      "kind": "expr",
+      "span": {
+        "end": 45,
+        "file": "fib.voyd",
+        "start": 44,
+      },
+      "statements": [],
+      "value": 5,
+    },
+    7 => {
+      "ast": 489,
+      "exprKind": "identifier",
+      "id": 7,
+      "kind": "expr",
+      "span": {
+        "end": 70,
+        "file": "fib.voyd",
+        "start": 69,
+      },
+      "symbol": 5,
+    },
+    8 => {
+      "ast": 477,
+      "exprKind": "identifier",
+      "id": 8,
+      "kind": "expr",
+      "span": {
+        "end": 61,
+        "file": "fib.voyd",
+        "start": 58,
+      },
+      "symbol": 1,
+    },
+    9 => {
+      "ast": 480,
+      "exprKind": "identifier",
+      "id": 9,
+      "kind": "expr",
+      "span": {
+        "end": 65,
+        "file": "fib.voyd",
+        "start": 64,
+      },
+      "symbol": 6,
+    },
+    10 => {
+      "ast": 478,
+      "exprKind": "identifier",
+      "id": 10,
+      "kind": "expr",
+      "span": {
+        "end": 63,
+        "file": "fib.voyd",
+        "start": 62,
+      },
+      "symbol": 2,
+    },
+    11 => {
+      "ast": 482,
+      "exprKind": "literal",
+      "id": 11,
+      "kind": "expr",
+      "literalKind": "i32",
+      "span": {
+        "end": 67,
+        "file": "fib.voyd",
+        "start": 66,
+      },
+      "value": "1",
+    },
+    12 => {
+      "args": [
+        10,
+        11,
+      ],
+      "ast": 619,
+      "callee": 9,
+      "exprKind": "call",
+      "id": 12,
+      "kind": "expr",
+      "span": {
+        "end": 67,
+        "file": "fib.voyd",
+        "start": 64,
+      },
+    },
+    13 => {
+      "args": [
+        12,
+      ],
+      "ast": 620,
+      "callee": 8,
+      "exprKind": "call",
+      "id": 13,
+      "kind": "expr",
+      "span": {
+        "end": 67,
+        "file": "fib.voyd",
+        "start": 58,
+      },
+    },
+    14 => {
+      "ast": 491,
+      "exprKind": "identifier",
+      "id": 14,
+      "kind": "expr",
+      "span": {
+        "end": 74,
+        "file": "fib.voyd",
+        "start": 71,
+      },
+      "symbol": 1,
+    },
+    15 => {
+      "ast": 494,
+      "exprKind": "identifier",
+      "id": 15,
+      "kind": "expr",
+      "span": {
+        "end": 78,
+        "file": "fib.voyd",
+        "start": 77,
+      },
+      "symbol": 6,
+    },
+    16 => {
+      "ast": 492,
+      "exprKind": "identifier",
+      "id": 16,
+      "kind": "expr",
+      "span": {
+        "end": 76,
+        "file": "fib.voyd",
+        "start": 75,
+      },
+      "symbol": 2,
+    },
+    17 => {
+      "ast": 496,
+      "exprKind": "literal",
+      "id": 17,
+      "kind": "expr",
+      "literalKind": "i32",
+      "span": {
+        "end": 80,
+        "file": "fib.voyd",
+        "start": 79,
+      },
+      "value": "2",
+    },
+    18 => {
+      "args": [
+        16,
+        17,
+      ],
+      "ast": 621,
+      "callee": 15,
+      "exprKind": "call",
+      "id": 18,
+      "kind": "expr",
+      "span": {
+        "end": 80,
+        "file": "fib.voyd",
+        "start": 77,
+      },
+    },
+    19 => {
+      "args": [
+        18,
+      ],
+      "ast": 622,
+      "callee": 14,
+      "exprKind": "call",
+      "id": 19,
+      "kind": "expr",
+      "span": {
+        "end": 80,
+        "file": "fib.voyd",
+        "start": 71,
+      },
+    },
+    20 => {
+      "args": [
+        13,
+        19,
+      ],
+      "ast": 623,
+      "callee": 7,
+      "exprKind": "call",
+      "id": 20,
+      "kind": "expr",
+      "span": {
+        "end": 80,
+        "file": "fib.voyd",
+        "start": 69,
+      },
+    },
+    21 => {
+      "ast": 624,
+      "exprKind": "block",
+      "id": 21,
+      "kind": "expr",
+      "span": {
+        "end": 80,
+        "file": "fib.voyd",
+        "start": 69,
+      },
+      "statements": [],
+      "value": 20,
+    },
+    22 => {
+      "ast": 626,
+      "branches": [
+        {
+          "condition": 4,
+          "value": 6,
+        },
+      ],
+      "defaultBranch": 21,
+      "exprKind": "if",
+      "id": 22,
+      "kind": "expr",
+      "span": {
+        "end": 80,
+        "file": "fib.voyd",
+        "start": 25,
+      },
+    },
+    23 => {
+      "ast": 627,
+      "exprKind": "block",
+      "id": 23,
+      "kind": "expr",
+      "span": {
+        "end": 80,
+        "file": "fib.voyd",
+        "start": 25,
+      },
+      "statements": [],
+      "value": 22,
+    },
+    25 => {
+      "ast": 519,
+      "exprKind": "identifier",
+      "id": 25,
+      "kind": "expr",
+      "span": {
+        "end": 109,
+        "file": "fib.voyd",
+        "start": 106,
+      },
+      "symbol": 1,
+    },
+    26 => {
+      "ast": 520,
+      "exprKind": "literal",
+      "id": 26,
+      "kind": "expr",
+      "literalKind": "i32",
+      "span": {
+        "end": 112,
+        "file": "fib.voyd",
+        "start": 110,
+      },
+      "value": "10",
+    },
+    27 => {
+      "args": [
+        26,
+      ],
+      "ast": 631,
+      "callee": 25,
+      "exprKind": "call",
+      "id": 27,
+      "kind": "expr",
+      "span": {
+        "end": 112,
+        "file": "fib.voyd",
+        "start": 106,
+      },
+    },
+    28 => {
+      "ast": 632,
+      "exprKind": "block",
+      "id": 28,
+      "kind": "expr",
+      "span": {
+        "end": 112,
+        "file": "fib.voyd",
+        "start": 106,
+      },
+      "statements": [],
+      "value": 27,
+    },
+  },
+  "items": Map {
+    24 => {
+      "ast": 628,
+      "body": 23,
+      "id": 24,
+      "kind": "function",
+      "parameters": [
+        {
+          "mutable": false,
+          "pattern": {
+            "kind": "identifier",
+            "symbol": 2,
+          },
+          "span": {
+            "end": 9,
+            "file": "fib.voyd",
+            "start": 8,
+          },
+          "symbol": 2,
+          "type": {
+            "ast": 444,
+            "path": [
+              "i32",
+            ],
+            "span": {
+              "end": 14,
+              "file": "fib.voyd",
+              "start": 11,
+            },
+            "typeKind": "named",
+          },
+        },
+      ],
+      "returnType": {
+        "ast": 453,
+        "path": [
+          "i32",
+        ],
+        "span": {
+          "end": 22,
+          "file": "fib.voyd",
+          "start": 19,
+        },
+        "typeKind": "named",
+      },
+      "span": {
+        "end": 80,
+        "file": "fib.voyd",
+        "start": 1,
+      },
+      "symbol": 1,
+      "visibility": "module",
+    },
+    29 => {
+      "ast": 633,
+      "body": 28,
+      "id": 29,
+      "kind": "function",
+      "parameters": [],
+      "returnType": {
+        "ast": 516,
+        "path": [
+          "i32",
+        ],
+        "span": {
+          "end": 103,
+          "file": "fib.voyd",
+          "start": 100,
+        },
+        "typeKind": "named",
+      },
+      "span": {
+        "end": 112,
+        "file": "fib.voyd",
+        "start": 83,
+      },
+      "symbol": 3,
+      "visibility": "public",
+    },
+  },
+  "module": {
+    "ast": 634,
+    "exports": [
+      {
+        "item": 29,
+        "span": {
+          "end": 112,
+          "file": "fib.voyd",
+          "start": 83,
+        },
+        "symbol": 3,
+        "visibility": "public",
+      },
+    ],
+    "id": 0,
+    "items": [
+      24,
+      29,
+    ],
+    "kind": "module",
+    "path": "fib.voyd",
+    "scope": 0,
+    "span": {
+      "end": 112,
+      "file": "fib.voyd",
+      "start": 1,
+    },
+  },
+  "statements": Map {},
+}
+`;
+
+exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
+{
+  "nextScope": 7,
+  "nextSymbol": 7,
+  "payload": undefined,
+  "scopes": [
+    {
+      "id": 0,
+      "kind": "module",
+      "owner": 634,
+      "parent": null,
+    },
+    {
+      "id": 1,
+      "kind": "function",
+      "owner": 628,
+      "parent": 0,
+    },
+    {
+      "id": 2,
+      "kind": "block",
+      "owner": 627,
+      "parent": 1,
+    },
+    {
+      "id": 3,
+      "kind": "block",
+      "owner": 617,
+      "parent": 2,
+    },
+    {
+      "id": 4,
+      "kind": "block",
+      "owner": 624,
+      "parent": 2,
+    },
+    {
+      "id": 5,
+      "kind": "function",
+      "owner": 633,
+      "parent": 0,
+    },
+    {
+      "id": 6,
+      "kind": "block",
+      "owner": 632,
+      "parent": 5,
+    },
+  ],
+  "symbols": [
+    {
+      "declaredAt": 634,
+      "id": 0,
+      "kind": "module",
+      "metadata": undefined,
+      "name": "fib.voyd",
+      "scope": 0,
+    },
+    {
+      "declaredAt": 628,
+      "id": 1,
+      "kind": "value",
+      "metadata": undefined,
+      "name": "fib",
+      "scope": 0,
+    },
+    {
+      "declaredAt": 441,
+      "id": 2,
+      "kind": "parameter",
+      "metadata": undefined,
+      "name": "n",
+      "scope": 1,
+    },
+    {
+      "declaredAt": 633,
+      "id": 3,
+      "kind": "value",
+      "metadata": undefined,
+      "name": "main",
+      "scope": 0,
+    },
+    {
+      "declaredAt": 634,
+      "id": 4,
+      "kind": "value",
+      "metadata": {
+        "intrinsic": true,
+      },
+      "name": "<",
+      "scope": 0,
+    },
+    {
+      "declaredAt": 634,
+      "id": 5,
+      "kind": "value",
+      "metadata": {
+        "intrinsic": true,
+      },
+      "name": "+",
+      "scope": 0,
+    },
+    {
+      "declaredAt": 634,
+      "id": 6,
+      "kind": "value",
+      "metadata": {
+        "intrinsic": true,
+      },
+      "name": "-",
+      "scope": 0,
+    },
+  ],
+}
+`;

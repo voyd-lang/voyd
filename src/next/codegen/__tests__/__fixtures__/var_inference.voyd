@@ -1,0 +1,11 @@
+
+fn f(n: i32)
+  var (a, b) = (0, 1)
+  var i = 0
+  while i < n
+    (a, b) = (b, a + b)
+    i = i + 1
+  a
+
+pub fn main()
+  f(10)

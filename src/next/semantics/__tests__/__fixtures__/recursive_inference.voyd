@@ -1,0 +1,8 @@
+fn fact(n: i32)
+  if n <= 1 then:
+    1
+  else:
+    n * fact(n - 1)
+
+pub fn main()
+  fact(5)
