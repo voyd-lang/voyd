@@ -58,7 +58,7 @@ interface TypingContext {
   unknownType: TypeId;
   defaultEffectRow: EffectRowId;
   typeCheckMode: TypeCheckMode;
-  returnTypeStack: TypeId[];
+  currentFunctionReturnType: TypeId | undefined;
 }
 
 const DEFAULT_EFFECT_ROW: EffectRowId = 0;
@@ -81,7 +81,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     unknownType: 0,
     defaultEffectRow: DEFAULT_EFFECT_ROW,
     typeCheckMode: "relaxed",
-    returnTypeStack: [],
+    currentFunctionReturnType: undefined,
   };
 
   seedPrimitiveTypes(ctx);
@@ -184,12 +184,13 @@ const typeFunction = (fn: HirFunction, ctx: TypingContext): boolean => {
     throw new Error(`missing type signature for function symbol ${fn.symbol}`);
   }
 
-  ctx.returnTypeStack.push(signature.returnType);
+  const previousReturnType = ctx.currentFunctionReturnType;
+  ctx.currentFunctionReturnType = signature.returnType;
   let bodyType: TypeId;
   try {
     bodyType = typeExpression(fn.body, ctx);
   } finally {
-    ctx.returnTypeStack.pop();
+    ctx.currentFunctionReturnType = previousReturnType;
   }
   if (signature.hasExplicitReturn) {
     ensureTypeMatches(
@@ -342,11 +343,11 @@ const typeStatement = (stmtId: HirStmtId, ctx: TypingContext): void => {
       typeExpression(stmt.expr, ctx);
       return;
     case "return":
-      if (ctx.returnTypeStack.length === 0) {
+      if (typeof ctx.currentFunctionReturnType !== "number") {
         throw new Error("return statement outside of function");
       }
 
-      const expectedReturnType = ctx.returnTypeStack[ctx.returnTypeStack.length - 1];
+      const expectedReturnType = ctx.currentFunctionReturnType;
       if (typeof stmt.value === "number") {
         const valueType = typeExpression(stmt.value, ctx);
         ensureTypeMatches(valueType, expectedReturnType, ctx, "return statement");
