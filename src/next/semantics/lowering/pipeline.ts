@@ -9,11 +9,12 @@ import {
   isIntAtom,
   isStringAtom,
 } from "../../parser/index.js";
-import type { SymbolRecord, SymbolTable } from "../binder/index.js";
+import type { SymbolTable } from "../binder/index.js";
 import type {
   HirExprId,
   HirStmtId,
   NodeId,
+  OverloadSetId,
   ScopeId,
   SymbolId,
 } from "../ids.js";
@@ -46,11 +47,12 @@ interface LowerContext {
   scopeByNode: Map<NodeId, ScopeId>;
   intrinsicSymbols: Map<string, SymbolId>;
   moduleNodeId: NodeId;
+  overloadBySymbol: ReadonlyMap<SymbolId, OverloadSetId>;
 }
 
 type IdentifierResolution =
   | { kind: "symbol"; symbol: SymbolId; name: string }
-  | { kind: "overload-set"; name: string; symbols: readonly SymbolId[] };
+  | { kind: "overload-set"; name: string; set: OverloadSetId };
 
 export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
   const intrinsicSymbols = new Map<string, SymbolId>();
@@ -62,6 +64,7 @@ export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
       scopeByNode: inputs.binding.scopeByNode,
       intrinsicSymbols,
       moduleNodeId: inputs.moduleNodeId,
+      overloadBySymbol: inputs.binding.overloadBySymbol,
     });
   }
 
@@ -186,7 +189,7 @@ const lowerExpr = (
       ast: expr.syntaxId,
       span: toSourceSpan(expr),
       name: resolution.name,
-      options: resolution.symbols,
+      set: resolution.set,
     });
   }
 
@@ -504,8 +507,8 @@ const resolveIdentifierValue = (
   scope: ScopeId,
   ctx: LowerContext
 ): IdentifierResolution => {
-  const hits = ctx.symbolTable.resolveAll(name, scope);
-  if (hits.length === 0) {
+  const resolved = ctx.symbolTable.resolve(name, scope);
+  if (typeof resolved !== "number") {
     return {
       kind: "symbol",
       name,
@@ -513,27 +516,12 @@ const resolveIdentifierValue = (
     };
   }
 
-  const firstRecord = ctx.symbolTable.getSymbol(hits[0]!);
-  const scopeBoundary = firstRecord.scope;
-  const sameScope: { id: SymbolId; record: SymbolRecord }[] = [];
-
-  for (const candidate of hits) {
-    const record = ctx.symbolTable.getSymbol(candidate);
-    if (record.scope !== scopeBoundary) {
-      break;
-    }
-    sameScope.push({ id: candidate, record });
+  const overloadSetId = ctx.overloadBySymbol.get(resolved);
+  if (typeof overloadSetId === "number") {
+    return { kind: "overload-set", name, set: overloadSetId };
   }
 
-  const overloads = sameScope
-    .filter(({ record }) => isFunctionRecord(record))
-    .map(({ id }) => id);
-
-  if (overloads.length > 1 && overloads.length === sameScope.length) {
-    return { kind: "overload-set", name, symbols: overloads };
-  }
-
-  return { kind: "symbol", name, symbol: sameScope[0]!.id };
+  return { kind: "symbol", name, symbol: resolved };
 };
 
 const resolveSymbol = (
@@ -566,9 +554,4 @@ const resolveIntrinsicSymbol = (
   });
   ctx.intrinsicSymbols.set(name, intrinsic);
   return intrinsic;
-};
-
-const isFunctionRecord = (record: SymbolRecord): boolean => {
-  const metadata = (record.metadata ?? {}) as { entity?: string };
-  return metadata.entity === "function";
 };

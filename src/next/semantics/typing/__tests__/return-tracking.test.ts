@@ -114,6 +114,7 @@ describe("return tracking", () => {
     const typing = runTypingPipeline({
       symbolTable: ctx.symbolTable,
       hir,
+      overloads: new Map(),
     });
 
     const scheme = typing.table.getSymbolScheme(fnSymbol);
@@ -147,6 +148,7 @@ describe("return tracking", () => {
     const typing = runTypingPipeline({
       symbolTable: ctx.symbolTable,
       hir,
+      overloads: new Map(),
     });
 
     const scheme = typing.table.getSymbolScheme(fnSymbol);
@@ -182,6 +184,7 @@ describe("return tracking", () => {
       runTypingPipeline({
         symbolTable: ctx.symbolTable,
         hir,
+        overloads: new Map(),
       })
     ).toThrow(/return statement/);
   });

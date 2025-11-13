@@ -3,13 +3,24 @@ import {
   type Form,
   type IdentifierAtom,
   type Syntax,
+  isBoolAtom,
+  isFloatAtom,
   isForm,
   isIdentifierAtom,
+  isIntAtom,
+  isStringAtom,
 } from "../../parser/index.js";
-import type { SymbolTable } from "../binder/index.js";
-import type { NodeId, ScopeId, SymbolId } from "../ids.js";
+import type { SymbolRecord, SymbolTable } from "../binder/index.js";
+import type {
+  Diagnostic,
+  NodeId,
+  ScopeId,
+  SourceSpan,
+  SymbolId,
+  OverloadSetId,
+} from "../ids.js";
 import type { HirVisibility } from "../hir/index.js";
-import { isIdentifierWithValue } from "../utils.js";
+import { isIdentifierWithValue, toSourceSpan } from "../utils.js";
 
 export interface BindingInputs {
   moduleForm: Form;
@@ -20,9 +31,13 @@ export interface BindingResult {
   symbolTable: SymbolTable;
   scopeByNode: Map<NodeId, ScopeId>;
   functions: BoundFunction[];
+  overloads: Map<OverloadSetId, BoundOverloadSet>;
+  overloadBySymbol: Map<SymbolId, OverloadSetId>;
+  diagnostics: Diagnostic[];
 }
 
 export interface BoundFunction {
+  name: string;
   form: Form;
   visibility: HirVisibility;
   symbol: SymbolId;
@@ -30,6 +45,14 @@ export interface BoundFunction {
   params: BoundParameter[];
   returnTypeExpr?: Expr;
   body: Expr;
+  overloadSetId?: OverloadSetId;
+}
+
+export interface BoundOverloadSet {
+  id: OverloadSetId;
+  name: string;
+  scope: ScopeId;
+  functions: readonly BoundFunction[];
 }
 
 export interface BoundParameter {
@@ -65,7 +88,19 @@ interface BinderScopeTracker {
   depth(): number;
 }
 
-interface BindingContext extends BindingResult {}
+interface OverloadBucket {
+  scope: ScopeId;
+  name: string;
+  functions: BoundFunction[];
+  signatureIndex: Map<string, BoundFunction>;
+  nonFunctionConflictReported: boolean;
+}
+
+interface BindingContext extends BindingResult {
+  overloadBuckets: Map<string, OverloadBucket>;
+  nextOverloadSetId: OverloadSetId;
+  syntaxByNode: Map<NodeId, Syntax>;
+}
 
 export const runBindingPipeline = ({
   moduleForm,
@@ -75,9 +110,16 @@ export const runBindingPipeline = ({
     symbolTable,
     scopeByNode: new Map([[moduleForm.syntaxId, symbolTable.rootScope]]),
     functions: [],
+    overloads: new Map(),
+    overloadBySymbol: new Map(),
+    diagnostics: [],
+    overloadBuckets: new Map(),
+    nextOverloadSetId: 0,
+    syntaxByNode: new Map([[moduleForm.syntaxId, moduleForm]]),
   };
 
   bindModule(moduleForm, bindingContext);
+  finalizeOverloadSets(bindingContext);
 
   return bindingContext;
 };
@@ -233,6 +275,8 @@ const bindFunctionDecl = (
   ctx: BindingContext,
   tracker: BinderScopeTracker
 ) => {
+  const declarationScope = tracker.current();
+  rememberSyntax(decl.form, ctx);
   const fnSymbol = ctx.symbolTable.declare({
     name: decl.signature.name.value,
     kind: "value",
@@ -257,6 +301,7 @@ const bindFunctionDecl = (
         kind: "parameter",
         declaredAt: param.ast.syntaxId,
       });
+      rememberSyntax(param.ast, ctx);
       boundParams.push({
         name: param.name,
         symbol: paramSymbol,
@@ -271,6 +316,7 @@ const bindFunctionDecl = (
   }
 
   ctx.functions.push({
+    name: decl.signature.name.value,
     form: decl.form,
     visibility: decl.visibility,
     symbol: fnSymbol,
@@ -279,6 +325,7 @@ const bindFunctionDecl = (
     returnTypeExpr: decl.signature.returnType,
     body: decl.body,
   });
+  recordFunctionOverload(ctx.functions.at(-1)!, declarationScope, ctx);
 };
 
 const bindExpr = (
@@ -375,13 +422,14 @@ const bindVar = (
 
   const patternExpr = assignment.at(1);
   const initializer = assignment.at(2);
-  declarePatternBindings(patternExpr, ctx);
+  declarePatternBindings(patternExpr, ctx, tracker.current());
   bindExpr(initializer, ctx, tracker);
 };
 
 const declarePatternBindings = (
   pattern: Expr | undefined,
-  ctx: BindingContext
+  ctx: BindingContext,
+  scope: ScopeId
 ): void => {
   if (!pattern) {
     throw new Error("missing pattern");
@@ -391,6 +439,8 @@ const declarePatternBindings = (
     if (pattern.value === "_") {
       return;
     }
+    rememberSyntax(pattern, ctx);
+    reportOverloadNameCollision(pattern.value, scope, pattern, ctx);
     ctx.symbolTable.declare({
       name: pattern.value,
       kind: "value",
@@ -403,11 +453,201 @@ const declarePatternBindings = (
     isForm(pattern) &&
     (pattern.calls("tuple") || pattern.callsInternal("tuple"))
   ) {
-    pattern.rest.forEach((entry) => declarePatternBindings(entry, ctx));
+    pattern.rest.forEach((entry) => declarePatternBindings(entry, ctx, scope));
     return;
   }
 
   throw new Error("unsupported pattern form in declaration");
+};
+
+const rememberSyntax = (
+  syntax: Syntax | undefined,
+  ctx: Pick<BindingContext, "syntaxByNode">
+): void => {
+  if (!syntax) {
+    return;
+  }
+  ctx.syntaxByNode.set(syntax.syntaxId, syntax);
+};
+
+const spanForNode = (nodeId: NodeId, ctx: BindingContext): SourceSpan =>
+  toSourceSpan(ctx.syntaxByNode.get(nodeId));
+
+const makeOverloadBucketKey = (scope: ScopeId, name: string): string =>
+  `${scope}:${name}`;
+
+const recordFunctionOverload = (
+  fn: BoundFunction,
+  declarationScope: ScopeId,
+  ctx: BindingContext
+): void => {
+  const key = makeOverloadBucketKey(declarationScope, fn.name);
+  let bucket = ctx.overloadBuckets.get(key);
+  if (!bucket) {
+    bucket = {
+      scope: declarationScope,
+      name: fn.name,
+      functions: [],
+      signatureIndex: new Map(),
+      nonFunctionConflictReported: false,
+    };
+    ctx.overloadBuckets.set(key, bucket);
+  }
+
+  const signature = createOverloadSignature(fn);
+  const duplicate = bucket.signatureIndex.get(signature.key);
+  if (duplicate) {
+    ctx.diagnostics.push({
+      code: "binding.overload.duplicate",
+      message: `function ${fn.name} already defines overload ${signature.label}`,
+      severity: "error",
+      span: toSourceSpan(fn.form),
+      related: [
+        {
+          code: "binding.overload.previous",
+          message: "previous overload declared here",
+          severity: "note",
+          span: toSourceSpan(duplicate.form),
+        },
+      ],
+    });
+  } else {
+    bucket.signatureIndex.set(signature.key, fn);
+  }
+
+  bucket.functions.push(fn);
+
+  const conflict = findNonFunctionDeclaration(
+    fn.name,
+    declarationScope,
+    fn.symbol,
+    ctx
+  );
+  if (conflict && !bucket.nonFunctionConflictReported) {
+    ctx.diagnostics.push({
+      code: "binding.overload.name-conflict",
+      message: `cannot overload ${fn.name}; ${conflict.kind} with the same name already exists`,
+      severity: "error",
+      span: toSourceSpan(fn.form),
+      related: [
+        {
+          code: "binding.overload.conflict",
+          message: "conflicting declaration here",
+          severity: "note",
+          span: spanForNode(conflict.declaredAt, ctx),
+        },
+      ],
+    });
+    bucket.nonFunctionConflictReported = true;
+  }
+};
+
+const createOverloadSignature = (
+  fn: BoundFunction
+): { key: string; label: string } => {
+  const paramAnnotations = fn.params.map((param) =>
+    formatTypeAnnotation(param.typeExpr)
+  );
+  const paramLabels = fn.params.map(
+    (param, index) => `${param.name}: ${paramAnnotations[index]}`
+  );
+  const returnAnnotation = formatTypeAnnotation(fn.returnTypeExpr);
+  return {
+    key: `${fn.params.length}|${paramAnnotations.join(",")}|${returnAnnotation}`,
+    label: `${fn.name}(${paramLabels.join(", ")}) -> ${returnAnnotation}`,
+  };
+};
+
+const formatTypeAnnotation = (expr?: Expr): string => {
+  if (!expr) {
+    return "<inferred>";
+  }
+  if (isIdentifierAtom(expr)) {
+    return expr.value;
+  }
+  if (isIntAtom(expr) || isFloatAtom(expr)) {
+    return expr.value;
+  }
+  if (isStringAtom(expr)) {
+    return JSON.stringify(expr.value);
+  }
+  if (isBoolAtom(expr)) {
+    return String(expr.value);
+  }
+  if (isForm(expr)) {
+    return `(${expr.toArray().map((entry) => formatTypeAnnotation(entry)).join(" ")})`;
+  }
+  return "<expr>";
+};
+
+const finalizeOverloadSets = (ctx: BindingContext): void => {
+  for (const bucket of ctx.overloadBuckets.values()) {
+    if (bucket.functions.length < 2) {
+      continue;
+    }
+    const id = ctx.nextOverloadSetId++;
+    const functions = [...bucket.functions];
+    functions.forEach((fn) => {
+      fn.overloadSetId = id;
+      ctx.overloadBySymbol.set(fn.symbol, id);
+    });
+    ctx.overloads.set(id, {
+      id,
+      name: bucket.name,
+      scope: bucket.scope,
+      functions,
+    });
+  }
+};
+
+const findNonFunctionDeclaration = (
+  name: string,
+  scope: ScopeId,
+  skipSymbol: SymbolId,
+  ctx: BindingContext
+): SymbolRecord | undefined => {
+  for (const symbolId of ctx.symbolTable.symbolsInScope(scope)) {
+    if (symbolId === skipSymbol) {
+      continue;
+    }
+    const record = ctx.symbolTable.getSymbol(symbolId);
+    if (record.name !== name) {
+      continue;
+    }
+    const metadata = (record.metadata ?? {}) as { entity?: string };
+    if (metadata.entity === "function") {
+      continue;
+    }
+    return record;
+  }
+  return undefined;
+};
+
+const reportOverloadNameCollision = (
+  name: string,
+  scope: ScopeId,
+  syntax: Syntax,
+  ctx: BindingContext
+): void => {
+  const bucket = ctx.overloadBuckets.get(makeOverloadBucketKey(scope, name));
+  if (!bucket || bucket.functions.length === 0 || bucket.nonFunctionConflictReported) {
+    return;
+  }
+  ctx.diagnostics.push({
+    code: "binding.overload.name-conflict",
+    message: `cannot declare ${name}; overloads with this name already exist in the current scope`,
+    severity: "error",
+    span: toSourceSpan(syntax),
+    related: [
+      {
+        code: "binding.overload.conflict",
+        message: "conflicting overload declared here",
+        severity: "note",
+        span: toSourceSpan(bucket.functions[0]!.form),
+      },
+    ],
+  });
+  bucket.nonFunctionConflictReported = true;
 };
 
 const ensureForm = (expr: Expr | undefined, message: string): Form => {

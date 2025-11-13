@@ -1,13 +1,17 @@
 import type { Form } from "../parser/index.js";
 import { SymbolTable } from "./binder/index.js";
 import { runBindingPipeline } from "./binding/pipeline.js";
+import type { BindingResult, BoundOverloadSet } from "./binding/pipeline.js";
 import type { HirGraph } from "./hir/index.js";
 import { createHirBuilder } from "./hir/index.js";
 import { runLoweringPipeline } from "./lowering/pipeline.js";
 import { runTypingPipeline, type TypingResult } from "./typing/pipeline.js";
+import { specializeOverloadCallees } from "./typing/specialize-overloads.js";
 import { toSourceSpan } from "./utils.js";
+import type { OverloadSetId, SymbolId } from "./ids.js";
 
 export interface SemanticsPipelineResult {
+  binding: BindingResult;
   symbolTable: SymbolTable;
   hir: HirGraph;
   typing: TypingResult;
@@ -28,10 +32,11 @@ export const semanticsPipeline = (form: Form): SemanticsPipelineResult => {
     declaredAt: form.syntaxId,
   });
 
-  const binding = runBindingPipeline({
+  const binding: BindingResult = runBindingPipeline({
     moduleForm: form,
     symbolTable,
   });
+  ensureNoBindingErrors(binding);
 
   const builder = createHirBuilder({
     path: modulePath,
@@ -49,7 +54,40 @@ export const semanticsPipeline = (form: Form): SemanticsPipelineResult => {
   const typing = runTypingPipeline({
     symbolTable,
     hir,
+    overloads: collectOverloadOptions(binding.overloads),
   });
 
-  return { symbolTable, hir, typing };
+  specializeOverloadCallees(hir, typing);
+
+  return { binding, symbolTable, hir, typing };
 };
+
+const ensureNoBindingErrors = (binding: BindingResult): void => {
+  const errors = binding.diagnostics.filter(
+    (diag) => diag.severity === "error"
+  );
+  if (errors.length === 0) {
+    return;
+  }
+
+  const message =
+    errors.length === 1
+      ? errors[0]!.message
+      : errors
+          .map(
+            (diag) =>
+              `${diag.message} (${diag.span.file}:${diag.span.start})`
+          )
+          .join("\n");
+  throw new Error(message);
+};
+
+const collectOverloadOptions = (
+  overloads: ReadonlyMap<OverloadSetId, BoundOverloadSet>
+): Map<OverloadSetId, readonly SymbolId[]> =>
+  new Map(
+    Array.from(overloads.entries()).map(([id, set]) => [
+      id,
+      set.functions.map((fn) => fn.symbol),
+    ])
+  );

@@ -19,6 +19,7 @@ import type {
   EffectRowId,
   HirExprId,
   HirStmtId,
+  OverloadSetId,
   SymbolId,
   TypeId,
 } from "../ids.js";
@@ -28,6 +29,7 @@ import { createTypeTable, type TypeTable } from "./type-table.js";
 interface TypingInputs {
   symbolTable: SymbolTable;
   hir: HirGraph;
+  overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
 }
 
 export interface TypingResult {
@@ -49,6 +51,7 @@ type TypeCheckMode = "relaxed" | "strict";
 interface TypingContext {
   symbolTable: SymbolTable;
   hir: HirGraph;
+  overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
   arena: TypeArena;
   table: TypeTable;
   functionSignatures: Map<SymbolId, FunctionSignature>;
@@ -73,6 +76,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   const ctx: TypingContext = {
     symbolTable: inputs.symbolTable,
     hir: inputs.hir,
+    overloads: inputs.overloads,
     arena,
     table,
     functionSignatures: new Map(),
@@ -316,14 +320,13 @@ const typeOverloadSetExpr = (
   expr: HirExpression & {
     exprKind: "overload-set";
     name: string;
-    options: readonly SymbolId[];
+    set: OverloadSetId;
   },
   ctx: TypingContext
 ): TypeId => {
-  if (expr.options.length === 0) {
-    throw new Error(`overload set for ${expr.name} has no candidates`);
-  }
-  return ctx.unknownType;
+  throw new Error(
+    `overload set ${expr.name} cannot be used outside of a call expression`
+  );
 };
 
 const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
@@ -336,11 +339,13 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
   if (!calleeExpr) {
     throw new Error(`missing callee expression ${expr.callee}`);
   }
-  const calleeType = typeExpression(expr.callee, ctx);
 
   if (calleeExpr.exprKind === "overload-set") {
+    ctx.table.setExprType(calleeExpr.id, ctx.unknownType);
     return typeOverloadedCall(expr, calleeExpr, argTypes, ctx);
   }
+
+  const calleeType = typeExpression(expr.callee, ctx);
 
   if (calleeExpr.exprKind === "identifier") {
     const record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
@@ -498,7 +503,14 @@ const typeOverloadedCall = (
   argTypes: readonly TypeId[],
   ctx: TypingContext
 ): TypeId => {
-  const matches = callee.options
+  const options = ctx.overloads.get(callee.set);
+  if (!options) {
+    throw new Error(
+      `missing overload metadata for ${callee.name} (set ${callee.set})`
+    );
+  }
+
+  const matches = options
     .map((symbol) => {
       const signature = ctx.functionSignatures.get(symbol);
       if (!signature) {

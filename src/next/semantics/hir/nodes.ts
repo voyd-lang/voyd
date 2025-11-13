@@ -5,6 +5,7 @@ import type {
   HirItemId,
   HirStmtId,
   NodeId,
+  OverloadSetId,
   SourceSpan,
   SymbolId,
   TypeId,
@@ -387,7 +388,7 @@ export interface HirIdentifierExpr extends HirExpressionBase {
 export interface HirOverloadSetExpr extends HirExpressionBase {
   exprKind: "overload-set";
   name: string;
-  options: readonly SymbolId[];
+  set: OverloadSetId;
 }
 
 export interface HirCallExpr extends HirExpressionBase {

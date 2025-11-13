@@ -6,6 +6,7 @@
 export type NodeId = number;
 export type ScopeId = number;
 export type SymbolId = number;
+export type OverloadSetId = number;
 
 export type HirId = number;
 export type HirItemId = HirId;

@@ -1,0 +1,9 @@
+fn add(a: i32, b: i32)
+  a + b
+
+fn add(a: f64, b: f64)
+  a + b
+
+pub fn capture_overload()
+  let saved = add
+  0

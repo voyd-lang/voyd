@@ -3,6 +3,7 @@ import {
   type HirBlockExpr,
   type HirCallExpr,
   type HirFunction,
+  type HirIdentifierExpr,
   type HirIfExpr,
   type HirNamedTypeExpr,
 } from "../hir/nodes.js";
@@ -10,6 +11,8 @@ import { semanticsPipeline } from "../pipeline.js";
 import type { SymbolId, TypeId } from "../ids.js";
 import type { TypingResult } from "../typing/pipeline.js";
 import { loadAst } from "./load-ast.js";
+import { SymbolTable } from "../binder/index.js";
+import { runBindingPipeline, type BindingResult } from "../binding/pipeline.js";
 
 const expectPrimitiveType = (
   typing: TypingResult,
@@ -182,7 +185,9 @@ describe("semanticsPipeline", () => {
           return false;
         }
         const callee = hir.expressions.get(expr.callee);
-        return callee?.exprKind === "identifier" && callee.symbol === factSymbol;
+        return (
+          callee?.exprKind === "identifier" && callee.symbol === factSymbol
+        );
       }
     );
     expect(recursiveCall).toBeDefined();
@@ -243,7 +248,10 @@ describe("semanticsPipeline", () => {
           continue;
         }
         const paramDesc = typing.arena.get(firstParam.type);
-        if (paramDesc.kind === "primitive" && paramDesc.name === expectedParamType) {
+        if (
+          paramDesc.kind === "primitive" &&
+          paramDesc.name === expectedParamType
+        ) {
           return symbol;
         }
       }
@@ -266,6 +274,9 @@ describe("semanticsPipeline", () => {
       const callExpr = hir.expressions.get(callExprId!);
       expect(callExpr?.exprKind).toBe("call");
       expect(typing.callTargets.get(callExpr!.id)).toBe(expectedTarget);
+      const callee = hir.expressions.get((callExpr as HirCallExpr)!.callee);
+      expect(callee?.exprKind).toBe("identifier");
+      expect((callee as HirIdentifierExpr).symbol).toBe(expectedTarget);
       const callType = typing.table.getExprType(callExpr!.id);
       expectPrimitiveType(typing, callType, expectedType);
     };
@@ -273,4 +284,51 @@ describe("semanticsPipeline", () => {
     expectCallResolution(callIntSymbol, intAddSymbol, "i32");
     expectCallResolution(callFloatSymbol, floatAddSymbol, "f64");
   });
+
+  it("rejects ambiguous overloaded calls", () => {
+    const ast = loadAst("function_overloads_ambiguous.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(/ambiguous overload for add/);
+  });
+
+  it("rejects overload sets that escape call sites", () => {
+    const ast = loadAst("function_overloads_capture.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /cannot be used outside of a call expression/
+    );
+  });
+
+  it("exposes binder overload metadata", () => {
+    const binding = bindFixture("function_overloads.voyd");
+    expect(binding.overloads.size).toBe(1);
+    const [setId, overloadSet] = binding.overloads.entries().next().value!;
+    expect(overloadSet.functions).toHaveLength(2);
+    overloadSet.functions.forEach((fn) => {
+      expect(binding.overloadBySymbol.get(fn.symbol)).toBe(setId);
+      expect(fn.overloadSetId).toBe(setId);
+    });
+    expect(binding.diagnostics).toHaveLength(0);
+  });
+
+  it("reports duplicate overload signatures during binding", () => {
+    const binding = bindFixture("function_overloads_duplicate.voyd");
+    expect(
+      binding.diagnostics.some((diag) =>
+        diag.message.includes("already defines overload")
+      )
+    ).toBe(true);
+  });
 });
+
+const bindFixture = (fixtureName: string): BindingResult => {
+  const ast = loadAst(fixtureName);
+  const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+  symbolTable.declare({
+    name: fixtureName,
+    kind: "module",
+    declaredAt: ast.syntaxId,
+  });
+  return runBindingPipeline({
+    moduleForm: ast,
+    symbolTable,
+  });
+};
