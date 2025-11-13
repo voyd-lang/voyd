@@ -553,7 +553,7 @@ const createOverloadSignature = (
   );
   const returnAnnotation = formatTypeAnnotation(fn.returnTypeExpr);
   return {
-    key: `${fn.params.length}|${paramAnnotations.join(",")}|${returnAnnotation}`,
+    key: `${fn.params.length}|${paramAnnotations.join(",")}`,
     label: `${fn.name}(${paramLabels.join(", ")}) -> ${returnAnnotation}`,
   };
 };

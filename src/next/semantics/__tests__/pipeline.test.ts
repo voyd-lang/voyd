@@ -317,6 +317,17 @@ describe("semanticsPipeline", () => {
       )
     ).toBe(true);
   });
+
+  it("rejects overloads that differ only by return type", () => {
+    const binding = bindFixture(
+      "function_overloads_return_type_duplicate.voyd"
+    );
+    expect(
+      binding.diagnostics.some((diag) =>
+        diag.message.includes("already defines overload add(a: i32, b: i32)")
+      )
+    ).toBe(true);
+  });
 });
 
 const bindFixture = (fixtureName: string): BindingResult => {
