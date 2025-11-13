@@ -1,0 +1,8 @@
+fn convert(a: i32) -> i32
+  a
+
+fn convert(a: i32) -> f64
+  1.0
+
+pub fn call_convert()
+  convert(1)

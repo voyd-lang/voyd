@@ -319,12 +319,19 @@ describe("semanticsPipeline", () => {
   });
 
   it("rejects overloads that differ only by return type", () => {
-    const binding = bindFixture(
-      "function_overloads_return_type_duplicate.voyd"
-    );
+    const binding = bindFixture("function_overloads_return_type.voyd");
     expect(
       binding.diagnostics.some((diag) =>
-        diag.message.includes("already defines overload add(a: i32, b: i32)")
+        diag.message.includes("already defines overload convert(a: i32)")
+      )
+    ).toBe(true);
+  });
+
+  it("requires parameter annotations for overloaded functions", () => {
+    const binding = bindFixture("function_overloads_missing_annotation.voyd");
+    expect(
+      binding.diagnostics.some((diag) =>
+        diag.message.includes("must declare a type")
       )
     ).toBe(true);
   });
