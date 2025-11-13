@@ -3,6 +3,7 @@ import {
   type HirBlockExpr,
   type HirCallExpr,
   type HirFunction,
+  type HirIdentifierExpr,
   type HirIfExpr,
   type HirNamedTypeExpr,
 } from "../hir/nodes.js";
@@ -10,6 +11,8 @@ import { semanticsPipeline } from "../pipeline.js";
 import type { SymbolId, TypeId } from "../ids.js";
 import type { TypingResult } from "../typing/pipeline.js";
 import { loadAst } from "./load-ast.js";
+import { SymbolTable } from "../binder/index.js";
+import { runBindingPipeline, type BindingResult } from "../binding/pipeline.js";
 
 const expectPrimitiveType = (
   typing: TypingResult,
@@ -182,7 +185,9 @@ describe("semanticsPipeline", () => {
           return false;
         }
         const callee = hir.expressions.get(expr.callee);
-        return callee?.exprKind === "identifier" && callee.symbol === factSymbol;
+        return (
+          callee?.exprKind === "identifier" && callee.symbol === factSymbol
+        );
       }
     );
     expect(recursiveCall).toBeDefined();
@@ -199,4 +204,142 @@ describe("semanticsPipeline", () => {
     expect(result.hir).toMatchSnapshot();
     expect(result.symbolTable.snapshot()).toMatchSnapshot();
   });
+
+  it("resolves overloaded functions based on argument types", () => {
+    const ast = loadAst("function_overloads.voyd");
+    const result = semanticsPipeline(ast);
+    const { symbolTable, hir, typing } = result;
+    const rootScope = symbolTable.rootScope;
+
+    const addSymbols = symbolTable.resolveAll("add", rootScope);
+    expect(addSymbols).toHaveLength(2);
+
+    const resolveFunction = (name: string): SymbolId => {
+      const symbol = symbolTable.resolve(name, rootScope);
+      expect(symbol).toBeDefined();
+      return symbol!;
+    };
+
+    const callIntSymbol = resolveFunction("call_int");
+    const callFloatSymbol = resolveFunction("call_float");
+
+    const getFunctionItem = (symbol: SymbolId): HirFunction => {
+      const fn = Array.from(hir.items.values()).find(
+        (item): item is HirFunction =>
+          item.kind === "function" && item.symbol === symbol
+      );
+      if (!fn) {
+        throw new Error(`missing function item for symbol ${symbol}`);
+      }
+      return fn;
+    };
+
+    const getAddSymbolFor = (expectedParamType: string): SymbolId => {
+      for (const symbol of addSymbols) {
+        const scheme = typing.table.getSymbolScheme(symbol);
+        expect(scheme).toBeDefined();
+        const instantiated = typing.arena.instantiate(scheme!, []);
+        const descriptor = typing.arena.get(instantiated);
+        if (descriptor.kind !== "function") {
+          continue;
+        }
+        const firstParam = descriptor.parameters[0];
+        if (!firstParam) {
+          continue;
+        }
+        const paramDesc = typing.arena.get(firstParam.type);
+        if (
+          paramDesc.kind === "primitive" &&
+          paramDesc.name === expectedParamType
+        ) {
+          return symbol;
+        }
+      }
+      throw new Error(`missing add overload for ${expectedParamType}`);
+    };
+
+    const intAddSymbol = getAddSymbolFor("i32");
+    const floatAddSymbol = getAddSymbolFor("f64");
+
+    const expectCallResolution = (
+      fnSymbol: SymbolId,
+      expectedTarget: SymbolId,
+      expectedType: string
+    ) => {
+      const fn = getFunctionItem(fnSymbol);
+      const block = hir.expressions.get(fn.body);
+      expect(block?.exprKind).toBe("block");
+      const callExprId = (block as HirBlockExpr).value;
+      expect(callExprId).toBeDefined();
+      const callExpr = hir.expressions.get(callExprId!);
+      expect(callExpr?.exprKind).toBe("call");
+      expect(typing.callTargets.get(callExpr!.id)).toBe(expectedTarget);
+      const callee = hir.expressions.get((callExpr as HirCallExpr)!.callee);
+      expect(callee?.exprKind).toBe("identifier");
+      expect((callee as HirIdentifierExpr).symbol).toBe(expectedTarget);
+      const callType = typing.table.getExprType(callExpr!.id);
+      expectPrimitiveType(typing, callType, expectedType);
+    };
+
+    expectCallResolution(callIntSymbol, intAddSymbol, "i32");
+    expectCallResolution(callFloatSymbol, floatAddSymbol, "f64");
+  });
+
+  it("rejects ambiguous overloaded calls", () => {
+    const ast = loadAst("function_overloads_ambiguous.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(/ambiguous overload for add/);
+  });
+
+  it("rejects overload sets that escape call sites", () => {
+    const ast = loadAst("function_overloads_capture.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /cannot be used outside of a call expression/
+    );
+  });
+
+  it("exposes binder overload metadata", () => {
+    const binding = bindFixture("function_overloads.voyd");
+    expect(binding.overloads.size).toBe(1);
+    const [setId, overloadSet] = binding.overloads.entries().next().value!;
+    expect(overloadSet.functions).toHaveLength(2);
+    overloadSet.functions.forEach((fn) => {
+      expect(binding.overloadBySymbol.get(fn.symbol)).toBe(setId);
+      expect(fn.overloadSetId).toBe(setId);
+    });
+    expect(binding.diagnostics).toHaveLength(0);
+  });
+
+  it("reports duplicate overload signatures during binding", () => {
+    const binding = bindFixture("function_overloads_duplicate.voyd");
+    expect(
+      binding.diagnostics.some((diag) =>
+        diag.message.includes("already defines overload")
+      )
+    ).toBe(true);
+  });
+
+  it("rejects overloads that differ only by return type", () => {
+    const binding = bindFixture(
+      "function_overloads_return_type_duplicate.voyd"
+    );
+    expect(
+      binding.diagnostics.some((diag) =>
+        diag.message.includes("already defines overload add(a: i32, b: i32)")
+      )
+    ).toBe(true);
+  });
 });
+
+const bindFixture = (fixtureName: string): BindingResult => {
+  const ast = loadAst(fixtureName);
+  const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+  symbolTable.declare({
+    name: fixtureName,
+    kind: "module",
+    declaredAt: ast.syntaxId,
+  });
+  return runBindingPipeline({
+    moduleForm: ast,
+    symbolTable,
+  });
+};

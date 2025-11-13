@@ -44,4 +44,19 @@ describe("next codegen", () => {
     expect(typeof main).toBe("function");
     expect((main as () => number)()).toBe(120);
   });
+
+  it("emits wasm for the function overloads sample and runs both call sites", () => {
+    const ast = loadAst("function_overloads.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module } = codegen(semantics);
+    const instance = getWasmInstance(module);
+
+    const callInt = instance.exports.call_int;
+    expect(typeof callInt).toBe("function");
+    expect((callInt as () => number)()).toBe(3);
+
+    const callFloat = instance.exports.call_float;
+    expect(typeof callFloat).toBe("function");
+    expect((callFloat as () => number)()).toBeCloseTo(3);
+  });
 });

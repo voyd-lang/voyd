@@ -14,6 +14,7 @@ import type {
   HirExprId,
   HirStmtId,
   NodeId,
+  OverloadSetId,
   ScopeId,
   SymbolId,
 } from "../ids.js";
@@ -46,7 +47,12 @@ interface LowerContext {
   scopeByNode: Map<NodeId, ScopeId>;
   intrinsicSymbols: Map<string, SymbolId>;
   moduleNodeId: NodeId;
+  overloadBySymbol: ReadonlyMap<SymbolId, OverloadSetId>;
 }
+
+type IdentifierResolution =
+  | { kind: "symbol"; symbol: SymbolId; name: string }
+  | { kind: "overload-set"; name: string; set: OverloadSetId };
 
 export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
   const intrinsicSymbols = new Map<string, SymbolId>();
@@ -58,6 +64,7 @@ export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
       scopeByNode: inputs.binding.scopeByNode,
       intrinsicSymbols,
       moduleNodeId: inputs.moduleNodeId,
+      overloadBySymbol: inputs.binding.overloadBySymbol,
     });
   }
 
@@ -165,13 +172,24 @@ const lowerExpr = (
   }
 
   if (isIdentifierAtom(expr)) {
-    const symbol = resolveSymbol(expr.value, scopes.current(), ctx);
+    const resolution = resolveIdentifierValue(expr.value, scopes.current(), ctx);
+    if (resolution.kind === "symbol") {
+      return ctx.builder.addExpression({
+        kind: "expr",
+        exprKind: "identifier",
+        ast: expr.syntaxId,
+        span: toSourceSpan(expr),
+        symbol: resolution.symbol,
+      });
+    }
+
     return ctx.builder.addExpression({
       kind: "expr",
-      exprKind: "identifier",
+      exprKind: "overload-set",
       ast: expr.syntaxId,
       span: toSourceSpan(expr),
-      symbol,
+      name: resolution.name,
+      set: resolution.set,
     });
   }
 
@@ -484,6 +502,28 @@ const lowerTypeExpr = (
   throw new Error("unsupported type expression");
 };
 
+const resolveIdentifierValue = (
+  name: string,
+  scope: ScopeId,
+  ctx: LowerContext
+): IdentifierResolution => {
+  const resolved = ctx.symbolTable.resolve(name, scope);
+  if (typeof resolved !== "number") {
+    return {
+      kind: "symbol",
+      name,
+      symbol: resolveIntrinsicSymbol(name, ctx),
+    };
+  }
+
+  const overloadSetId = ctx.overloadBySymbol.get(resolved);
+  if (typeof overloadSetId === "number") {
+    return { kind: "overload-set", name, set: overloadSetId };
+  }
+
+  return { kind: "symbol", name, symbol: resolved };
+};
+
 const resolveSymbol = (
   name: string,
   scope: ScopeId,
@@ -494,6 +534,13 @@ const resolveSymbol = (
     return resolved;
   }
 
+  return resolveIntrinsicSymbol(name, ctx);
+};
+
+const resolveIntrinsicSymbol = (
+  name: string,
+  ctx: LowerContext
+): SymbolId => {
   let intrinsic = ctx.intrinsicSymbols.get(name);
   if (typeof intrinsic === "number") {
     return intrinsic;

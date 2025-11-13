@@ -213,6 +213,8 @@ const compileExpression = (
       return compileLiteralExpr(expr, ctx);
     case "identifier":
       return compileIdentifierExpr(expr, ctx, fnCtx);
+    case "overload-set":
+      throw new Error("overload sets cannot be evaluated directly");
     case "call":
       return compileCallExpr(expr, ctx, fnCtx);
     case "block":
@@ -284,29 +286,52 @@ const compileCallExpr = (
   fnCtx: FunctionContext
 ): binaryen.ExpressionRef => {
   const callee = ctx.hir.expressions.get(expr.callee);
-  if (!callee || callee.exprKind !== "identifier") {
-    throw new Error("codegen only supports direct identifier calls today");
+  if (!callee) {
+    throw new Error(`codegen missing callee expression ${expr.callee}`);
   }
 
   const args = expr.args.map((arg) => compileExpression(arg, ctx, fnCtx));
+
+  if (callee.exprKind === "overload-set") {
+    const targetSymbol = ctx.typing.callTargets.get(expr.id);
+    if (typeof targetSymbol !== "number") {
+      throw new Error("codegen missing overload resolution for indirect call");
+    }
+    return emitResolvedCall(targetSymbol, args, expr.id, ctx);
+  }
+
+  if (callee.exprKind !== "identifier") {
+    throw new Error("codegen only supports direct identifier calls today");
+  }
+
   const symbolRecord = ctx.symbolTable.getSymbol(callee.symbol);
   const metadata = (symbolRecord.metadata ?? {}) as {
     intrinsic?: boolean;
   };
 
   if (metadata.intrinsic) {
-    return compileIntrinsicCall(symbolRecord.name, args, ctx);
+    return compileIntrinsicCall(symbolRecord.name, expr, args, ctx);
   }
 
-  const targetMeta = ctx.functions.get(callee.symbol);
+  return emitResolvedCall(callee.symbol, args, expr.id, ctx);
+};
+
+const emitResolvedCall = (
+  symbol: SymbolId,
+  args: readonly binaryen.ExpressionRef[],
+  callId: HirExprId,
+  ctx: CodegenContext
+): binaryen.ExpressionRef => {
+  const symbolRecord = ctx.symbolTable.getSymbol(symbol);
+  const targetMeta = ctx.functions.get(symbol);
   if (!targetMeta) {
     throw new Error(`codegen cannot call symbol ${symbolRecord.name}`);
   }
 
   return ctx.mod.call(
     targetMeta.wasmName,
-    args,
-    getExprBinaryenType(expr.id, ctx)
+    args as number[],
+    getExprBinaryenType(callId, ctx)
   );
 };
 
@@ -590,37 +615,194 @@ const collectTupleAssignments = (
 
 const compileIntrinsicCall = (
   name: string,
+  call: HirCallExpr,
   args: readonly binaryen.ExpressionRef[],
   ctx: CodegenContext
 ): binaryen.ExpressionRef => {
   switch (name) {
     case "+":
-      assertArgCount(name, args, 2);
-      return ctx.mod.i32.add(args[0]!, args[1]!);
     case "-":
-      assertArgCount(name, args, 2);
-      return ctx.mod.i32.sub(args[0]!, args[1]!);
     case "*":
+    case "/": {
       assertArgCount(name, args, 2);
-      return ctx.mod.i32.mul(args[0]!, args[1]!);
-    case "/":
-      assertArgCount(name, args, 2);
-      return ctx.mod.i32.div_s(args[0]!, args[1]!);
+      const operandKind = requireHomogeneousNumericKind(call.args, ctx);
+      return emitArithmeticIntrinsic(name, operandKind, args, ctx);
+    }
     case "<":
-      assertArgCount(name, args, 2);
-      return ctx.mod.i32.lt_s(args[0]!, args[1]!);
     case "<=":
-      assertArgCount(name, args, 2);
-      return ctx.mod.i32.le_s(args[0]!, args[1]!);
     case ">":
+    case ">=": {
       assertArgCount(name, args, 2);
-      return ctx.mod.i32.gt_s(args[0]!, args[1]!);
-    case ">=":
-      assertArgCount(name, args, 2);
-      return ctx.mod.i32.ge_s(args[0]!, args[1]!);
+      const operandKind = requireHomogeneousNumericKind(call.args, ctx);
+      return emitComparisonIntrinsic(name, operandKind, args, ctx);
+    }
     default:
       throw new Error(`unsupported intrinsic ${name}`);
   }
+};
+
+type NumericKind = "i32" | "i64" | "f32" | "f64";
+
+const emitArithmeticIntrinsic = (
+  op: "+" | "-" | "*" | "/",
+  kind: NumericKind,
+  args: readonly binaryen.ExpressionRef[],
+  ctx: CodegenContext
+): binaryen.ExpressionRef => {
+  const left = args[0]!;
+  const right = args[1]!;
+  switch (kind) {
+    case "i32":
+      switch (op) {
+        case "+":
+          return ctx.mod.i32.add(left, right);
+        case "-":
+          return ctx.mod.i32.sub(left, right);
+        case "*":
+          return ctx.mod.i32.mul(left, right);
+        case "/":
+          return ctx.mod.i32.div_s(left, right);
+      }
+      break;
+    case "i64":
+      switch (op) {
+        case "+":
+          return ctx.mod.i64.add(left, right);
+        case "-":
+          return ctx.mod.i64.sub(left, right);
+        case "*":
+          return ctx.mod.i64.mul(left, right);
+        case "/":
+          return ctx.mod.i64.div_s(left, right);
+      }
+      break;
+    case "f32":
+      switch (op) {
+        case "+":
+          return ctx.mod.f32.add(left, right);
+        case "-":
+          return ctx.mod.f32.sub(left, right);
+        case "*":
+          return ctx.mod.f32.mul(left, right);
+        case "/":
+          return ctx.mod.f32.div(left, right);
+      }
+      break;
+    case "f64":
+      switch (op) {
+        case "+":
+          return ctx.mod.f64.add(left, right);
+        case "-":
+          return ctx.mod.f64.sub(left, right);
+        case "*":
+          return ctx.mod.f64.mul(left, right);
+        case "/":
+          return ctx.mod.f64.div(left, right);
+      }
+      break;
+  }
+  throw new Error(`unsupported ${op} intrinsic for numeric kind ${kind}`);
+};
+
+const emitComparisonIntrinsic = (
+  op: "<" | "<=" | ">" | ">=",
+  kind: NumericKind,
+  args: readonly binaryen.ExpressionRef[],
+  ctx: CodegenContext
+): binaryen.ExpressionRef => {
+  const left = args[0]!;
+  const right = args[1]!;
+  switch (kind) {
+    case "i32":
+      switch (op) {
+        case "<":
+          return ctx.mod.i32.lt_s(left, right);
+        case "<=":
+          return ctx.mod.i32.le_s(left, right);
+        case ">":
+          return ctx.mod.i32.gt_s(left, right);
+        case ">=":
+          return ctx.mod.i32.ge_s(left, right);
+      }
+      break;
+    case "i64":
+      switch (op) {
+        case "<":
+          return ctx.mod.i64.lt_s(left, right);
+        case "<=":
+          return ctx.mod.i64.le_s(left, right);
+        case ">":
+          return ctx.mod.i64.gt_s(left, right);
+        case ">=":
+          return ctx.mod.i64.ge_s(left, right);
+      }
+      break;
+    case "f32":
+      switch (op) {
+        case "<":
+          return ctx.mod.f32.lt(left, right);
+        case "<=":
+          return ctx.mod.f32.le(left, right);
+        case ">":
+          return ctx.mod.f32.gt(left, right);
+        case ">=":
+          return ctx.mod.f32.ge(left, right);
+      }
+      break;
+    case "f64":
+      switch (op) {
+        case "<":
+          return ctx.mod.f64.lt(left, right);
+        case "<=":
+          return ctx.mod.f64.le(left, right);
+        case ">":
+          return ctx.mod.f64.gt(left, right);
+        case ">=":
+          return ctx.mod.f64.ge(left, right);
+      }
+      break;
+  }
+  throw new Error(`unsupported ${op} comparison for numeric kind ${kind}`);
+};
+
+const requireHomogeneousNumericKind = (
+  argExprIds: readonly HirExprId[],
+  ctx: CodegenContext
+): NumericKind => {
+  if (argExprIds.length === 0) {
+    throw new Error("intrinsic requires at least one operand");
+  }
+  const firstKind = getNumericKind(
+    getRequiredExprType(argExprIds[0]!, ctx),
+    ctx
+  );
+  for (let i = 1; i < argExprIds.length; i += 1) {
+    const nextKind = getNumericKind(
+      getRequiredExprType(argExprIds[i]!, ctx),
+      ctx
+    );
+    if (nextKind !== firstKind) {
+      throw new Error("intrinsic operands must share the same numeric type");
+    }
+  }
+  return firstKind;
+};
+
+const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {
+  const descriptor = ctx.typing.arena.get(typeId);
+  if (descriptor.kind === "primitive") {
+    switch (descriptor.name) {
+      case "i32":
+        return "i32";
+      case "i64":
+        return "i64";
+      case "f32":
+        return "f32";
+      case "f64":
+        return "f64";
+    }
+  }
+  throw new Error("intrinsic arguments must be primitive numeric types");
 };
 
 const assertArgCount = (
@@ -698,6 +880,17 @@ const getSymbolTypeId = (symbol: SymbolId, ctx: CodegenContext): TypeId => {
   throw new Error(
     `codegen missing type information for symbol ${getSymbolName(symbol, ctx)}`
   );
+};
+
+const getRequiredExprType = (
+  exprId: HirExprId,
+  ctx: CodegenContext
+): TypeId => {
+  const typeId = ctx.typing.table.getExprType(exprId);
+  if (typeof typeId === "number") {
+    return typeId;
+  }
+  throw new Error(`codegen missing type information for expression ${exprId}`);
 };
 
 const getTupleExpression = (

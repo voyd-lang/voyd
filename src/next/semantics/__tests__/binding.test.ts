@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createSymbolTable } from "../binder/index.js";
+import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline } from "../binding/pipeline.js";
 import { loadAst } from "./load-ast.js";
 
@@ -8,7 +8,7 @@ describe("binding pipeline", () => {
   it("collects functions, parameters, and scopes for the fib sample module", () => {
     const name = "fib.voyd";
     const ast = loadAst(name);
-    const symbolTable = createSymbolTable({ rootOwner: ast.syntaxId });
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
     symbolTable.declare({
       name,
       kind: "module",

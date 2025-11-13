@@ -1,2 +1,2 @@
 export * from "./types.js";
-export { createSymbolTable } from "./symbol-table.js";
+export { SymbolTable } from "./symbol-table.js";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSymbolTable } from "../../binder/index.js";
+import { SymbolTable } from "../../binder/index.js";
 import { createHirBuilder } from "../../hir/index.js";
 import { runTypingPipeline } from "../pipeline.js";
 import type {
@@ -17,7 +17,7 @@ const createModuleContext = () => {
   let nextNodeId: NodeId = 1;
   const nextNode = (): NodeId => nextNodeId++;
   const span = createSpan();
-  const symbolTable = createSymbolTable({ rootOwner: 0 });
+  const symbolTable = new SymbolTable({ rootOwner: 0 });
   const moduleSymbol = symbolTable.declare({
     name: "test",
     kind: "module",
@@ -114,6 +114,7 @@ describe("return tracking", () => {
     const typing = runTypingPipeline({
       symbolTable: ctx.symbolTable,
       hir,
+      overloads: new Map(),
     });
 
     const scheme = typing.table.getSymbolScheme(fnSymbol);
@@ -147,6 +148,7 @@ describe("return tracking", () => {
     const typing = runTypingPipeline({
       symbolTable: ctx.symbolTable,
       hir,
+      overloads: new Map(),
     });
 
     const scheme = typing.table.getSymbolScheme(fnSymbol);
@@ -182,6 +184,7 @@ describe("return tracking", () => {
       runTypingPipeline({
         symbolTable: ctx.symbolTable,
         hir,
+        overloads: new Map(),
       })
     ).toThrow(/return statement/);
   });

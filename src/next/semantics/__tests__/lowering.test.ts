@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSymbolTable } from "../binder/index.js";
+import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline } from "../binding/pipeline.js";
 import { createHirBuilder } from "../hir/builder.js";
 import {
@@ -15,7 +15,7 @@ describe("lowering pipeline", () => {
   it("lowers the fib sample module into HIR", () => {
     const name = "fib.voyd";
     const ast = loadAst(name);
-    const symbolTable = createSymbolTable({ rootOwner: ast.syntaxId });
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
     const moduleSymbol = symbolTable.declare({
       name,
       kind: "module",

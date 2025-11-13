@@ -5,6 +5,7 @@ import type {
   HirItemId,
   HirStmtId,
   NodeId,
+  OverloadSetId,
   SourceSpan,
   SymbolId,
   TypeId,
@@ -322,6 +323,7 @@ export interface HirReturnStatement extends HirNodeBase {
 export type HirExpression =
   | HirLiteralExpr
   | HirIdentifierExpr
+  | HirOverloadSetExpr
   | HirCallExpr
   | HirBlockExpr
   | HirTupleExpr
@@ -347,6 +349,7 @@ export interface HirExpressionBase extends HirNodeBase {
 export type HirExprKind =
   | "literal"
   | "identifier"
+  | "overload-set"
   | "call"
   | "block"
   | "tuple"
@@ -380,6 +383,12 @@ export interface HirLiteralExpr extends HirExpressionBase {
 export interface HirIdentifierExpr extends HirExpressionBase {
   exprKind: "identifier";
   symbol: SymbolId;
+}
+
+export interface HirOverloadSetExpr extends HirExpressionBase {
+  exprKind: "overload-set";
+  name: string;
+  set: OverloadSetId;
 }
 
 export interface HirCallExpr extends HirExpressionBase {
