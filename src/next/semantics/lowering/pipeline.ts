@@ -9,7 +9,7 @@ import {
   isIntAtom,
   isStringAtom,
 } from "../../parser/index.js";
-import type { SymbolTable } from "../binder/index.js";
+import type { SymbolRecord, SymbolTable } from "../binder/index.js";
 import type {
   HirExprId,
   HirStmtId,
@@ -47,6 +47,10 @@ interface LowerContext {
   intrinsicSymbols: Map<string, SymbolId>;
   moduleNodeId: NodeId;
 }
+
+type IdentifierResolution =
+  | { kind: "symbol"; symbol: SymbolId; name: string }
+  | { kind: "overload-set"; name: string; symbols: readonly SymbolId[] };
 
 export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
   const intrinsicSymbols = new Map<string, SymbolId>();
@@ -165,13 +169,24 @@ const lowerExpr = (
   }
 
   if (isIdentifierAtom(expr)) {
-    const symbol = resolveSymbol(expr.value, scopes.current(), ctx);
+    const resolution = resolveIdentifierValue(expr.value, scopes.current(), ctx);
+    if (resolution.kind === "symbol") {
+      return ctx.builder.addExpression({
+        kind: "expr",
+        exprKind: "identifier",
+        ast: expr.syntaxId,
+        span: toSourceSpan(expr),
+        symbol: resolution.symbol,
+      });
+    }
+
     return ctx.builder.addExpression({
       kind: "expr",
-      exprKind: "identifier",
+      exprKind: "overload-set",
       ast: expr.syntaxId,
       span: toSourceSpan(expr),
-      symbol,
+      name: resolution.name,
+      options: resolution.symbols,
     });
   }
 
@@ -484,6 +499,43 @@ const lowerTypeExpr = (
   throw new Error("unsupported type expression");
 };
 
+const resolveIdentifierValue = (
+  name: string,
+  scope: ScopeId,
+  ctx: LowerContext
+): IdentifierResolution => {
+  const hits = ctx.symbolTable.resolveAll(name, scope);
+  if (hits.length === 0) {
+    return {
+      kind: "symbol",
+      name,
+      symbol: resolveIntrinsicSymbol(name, ctx),
+    };
+  }
+
+  const firstRecord = ctx.symbolTable.getSymbol(hits[0]!);
+  const scopeBoundary = firstRecord.scope;
+  const sameScope: { id: SymbolId; record: SymbolRecord }[] = [];
+
+  for (const candidate of hits) {
+    const record = ctx.symbolTable.getSymbol(candidate);
+    if (record.scope !== scopeBoundary) {
+      break;
+    }
+    sameScope.push({ id: candidate, record });
+  }
+
+  const overloads = sameScope
+    .filter(({ record }) => isFunctionRecord(record))
+    .map(({ id }) => id);
+
+  if (overloads.length > 1 && overloads.length === sameScope.length) {
+    return { kind: "overload-set", name, symbols: overloads };
+  }
+
+  return { kind: "symbol", name, symbol: sameScope[0]!.id };
+};
+
 const resolveSymbol = (
   name: string,
   scope: ScopeId,
@@ -494,6 +546,13 @@ const resolveSymbol = (
     return resolved;
   }
 
+  return resolveIntrinsicSymbol(name, ctx);
+};
+
+const resolveIntrinsicSymbol = (
+  name: string,
+  ctx: LowerContext
+): SymbolId => {
   let intrinsic = ctx.intrinsicSymbols.get(name);
   if (typeof intrinsic === "number") {
     return intrinsic;
@@ -507,4 +566,9 @@ const resolveSymbol = (
   });
   ctx.intrinsicSymbols.set(name, intrinsic);
   return intrinsic;
+};
+
+const isFunctionRecord = (record: SymbolRecord): boolean => {
+  const metadata = (record.metadata ?? {}) as { entity?: string };
+  return metadata.entity === "function";
 };

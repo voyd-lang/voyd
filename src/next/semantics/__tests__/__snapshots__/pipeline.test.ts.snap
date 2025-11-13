@@ -541,7 +541,9 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
       "declaredAt": 628,
       "id": 1,
       "kind": "value",
-      "metadata": undefined,
+      "metadata": {
+        "entity": "function",
+      },
       "name": "fib",
       "scope": 0,
     },
@@ -557,7 +559,9 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
       "declaredAt": 633,
       "id": 3,
       "kind": "value",
-      "metadata": undefined,
+      "metadata": {
+        "entity": "function",
+      },
       "name": "main",
       "scope": 0,
     },

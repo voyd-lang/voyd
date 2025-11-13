@@ -199,4 +199,78 @@ describe("semanticsPipeline", () => {
     expect(result.hir).toMatchSnapshot();
     expect(result.symbolTable.snapshot()).toMatchSnapshot();
   });
+
+  it("resolves overloaded functions based on argument types", () => {
+    const ast = loadAst("function_overloads.voyd");
+    const result = semanticsPipeline(ast);
+    const { symbolTable, hir, typing } = result;
+    const rootScope = symbolTable.rootScope;
+
+    const addSymbols = symbolTable.resolveAll("add", rootScope);
+    expect(addSymbols).toHaveLength(2);
+
+    const resolveFunction = (name: string): SymbolId => {
+      const symbol = symbolTable.resolve(name, rootScope);
+      expect(symbol).toBeDefined();
+      return symbol!;
+    };
+
+    const callIntSymbol = resolveFunction("call_int");
+    const callFloatSymbol = resolveFunction("call_float");
+
+    const getFunctionItem = (symbol: SymbolId): HirFunction => {
+      const fn = Array.from(hir.items.values()).find(
+        (item): item is HirFunction =>
+          item.kind === "function" && item.symbol === symbol
+      );
+      if (!fn) {
+        throw new Error(`missing function item for symbol ${symbol}`);
+      }
+      return fn;
+    };
+
+    const getAddSymbolFor = (expectedParamType: string): SymbolId => {
+      for (const symbol of addSymbols) {
+        const scheme = typing.table.getSymbolScheme(symbol);
+        expect(scheme).toBeDefined();
+        const instantiated = typing.arena.instantiate(scheme!, []);
+        const descriptor = typing.arena.get(instantiated);
+        if (descriptor.kind !== "function") {
+          continue;
+        }
+        const firstParam = descriptor.parameters[0];
+        if (!firstParam) {
+          continue;
+        }
+        const paramDesc = typing.arena.get(firstParam.type);
+        if (paramDesc.kind === "primitive" && paramDesc.name === expectedParamType) {
+          return symbol;
+        }
+      }
+      throw new Error(`missing add overload for ${expectedParamType}`);
+    };
+
+    const intAddSymbol = getAddSymbolFor("i32");
+    const floatAddSymbol = getAddSymbolFor("f64");
+
+    const expectCallResolution = (
+      fnSymbol: SymbolId,
+      expectedTarget: SymbolId,
+      expectedType: string
+    ) => {
+      const fn = getFunctionItem(fnSymbol);
+      const block = hir.expressions.get(fn.body);
+      expect(block?.exprKind).toBe("block");
+      const callExprId = (block as HirBlockExpr).value;
+      expect(callExprId).toBeDefined();
+      const callExpr = hir.expressions.get(callExprId!);
+      expect(callExpr?.exprKind).toBe("call");
+      expect(typing.callTargets.get(callExpr!.id)).toBe(expectedTarget);
+      const callType = typing.table.getExprType(callExpr!.id);
+      expectPrimitiveType(typing, callType, expectedType);
+    };
+
+    expectCallResolution(callIntSymbol, intAddSymbol, "i32");
+    expectCallResolution(callFloatSymbol, floatAddSymbol, "f64");
+  });
 });

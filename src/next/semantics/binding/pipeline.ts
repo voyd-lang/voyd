@@ -237,6 +237,7 @@ const bindFunctionDecl = (
     name: decl.signature.name.value,
     kind: "value",
     declaredAt: decl.form.syntaxId,
+    metadata: { entity: "function" },
   });
 
   const fnScope = ctx.symbolTable.createScope({

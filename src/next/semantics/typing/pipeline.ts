@@ -9,6 +9,7 @@ import type {
   HirIfExpr,
   HirLetStatement,
   HirLiteralExpr,
+  HirOverloadSetExpr,
   HirPattern,
   HirTypeExpr,
   HirNamedTypeExpr,
@@ -33,6 +34,7 @@ export interface TypingResult {
   arena: TypeArena;
   table: TypeTable;
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
+  callTargets: ReadonlyMap<HirExprId, SymbolId>;
 }
 
 interface FunctionSignature {
@@ -51,6 +53,7 @@ interface TypingContext {
   table: TypeTable;
   functionSignatures: Map<SymbolId, FunctionSignature>;
   valueTypes: Map<SymbolId, TypeId>;
+  callTargets: Map<HirExprId, SymbolId>;
   primitiveCache: Map<string, TypeId>;
   intrinsicTypes: Map<string, TypeId>;
   boolType: TypeId;
@@ -74,6 +77,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     table,
     functionSignatures: new Map(),
     valueTypes: new Map(),
+    callTargets: new Map(),
     primitiveCache: new Map(),
     intrinsicTypes: new Map(),
     boolType: 0,
@@ -90,7 +94,12 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   runInferencePass(ctx);
   runStrictTypeCheck(ctx);
 
-  return { arena, table, valueTypes: new Map(ctx.valueTypes) };
+  return {
+    arena,
+    table,
+    valueTypes: new Map(ctx.valueTypes),
+    callTargets: new Map(ctx.callTargets),
+  };
 };
 
 const seedPrimitiveTypes = (ctx: TypingContext): void => {
@@ -251,6 +260,9 @@ const typeExpression = (exprId: HirExprId, ctx: TypingContext): TypeId => {
     case "identifier":
       type = typeIdentifierExpr(expr, ctx);
       break;
+    case "overload-set":
+      type = typeOverloadSetExpr(expr, ctx);
+      break;
     case "call":
       type = typeCallExpr(expr, ctx);
       break;
@@ -300,23 +312,54 @@ const typeIdentifierExpr = (
   ctx: TypingContext
 ): TypeId => getValueType(expr.symbol, ctx);
 
+const typeOverloadSetExpr = (
+  expr: HirExpression & {
+    exprKind: "overload-set";
+    name: string;
+    options: readonly SymbolId[];
+  },
+  ctx: TypingContext
+): TypeId => {
+  if (expr.options.length === 0) {
+    throw new Error(`overload set for ${expr.name} has no candidates`);
+  }
+  return ctx.unknownType;
+};
+
 const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
   if (expr.typeArguments && expr.typeArguments.length > 0) {
     throw new Error("polymorphic calls are not supported yet");
   }
 
+  const argTypes = expr.args.map((arg) => typeExpression(arg, ctx));
+  const calleeExpr = ctx.hir.expressions.get(expr.callee);
+  if (!calleeExpr) {
+    throw new Error(`missing callee expression ${expr.callee}`);
+  }
   const calleeType = typeExpression(expr.callee, ctx);
+
+  if (calleeExpr.exprKind === "overload-set") {
+    return typeOverloadedCall(expr, calleeExpr, argTypes, ctx);
+  }
+
+  if (calleeExpr.exprKind === "identifier") {
+    const record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
+    const metadata = (record.metadata ?? {}) as { intrinsic?: boolean };
+    if (metadata.intrinsic) {
+      return typeIntrinsicCall(record.name, argTypes, ctx);
+    }
+  }
+
   const calleeDesc = ctx.arena.get(calleeType);
   if (calleeDesc.kind !== "function") {
     throw new Error("attempted to call a non-function value");
   }
 
-  if (expr.args.length !== calleeDesc.parameters.length) {
+  if (argTypes.length !== calleeDesc.parameters.length) {
     throw new Error("call argument count mismatch");
   }
 
-  expr.args.forEach((argId, index) => {
-    const argType = typeExpression(argId, ctx);
+  argTypes.forEach((argType, index) => {
     const param = calleeDesc.parameters[index];
     ensureTypeMatches(argType, param.type, ctx, `call argument ${index + 1}`);
   });
@@ -449,6 +492,110 @@ const mergeBranchType = (acc: TypeId | undefined, next: TypeId): TypeId => {
   return typeof acc === "number" ? acc : next;
 };
 
+const typeOverloadedCall = (
+  call: HirCallExpr,
+  callee: HirOverloadSetExpr,
+  argTypes: readonly TypeId[],
+  ctx: TypingContext
+): TypeId => {
+  const matches = callee.options
+    .map((symbol) => {
+      const signature = ctx.functionSignatures.get(symbol);
+      if (!signature) {
+        throw new Error(
+          `missing type signature for overloaded function ${getSymbolName(
+            symbol,
+            ctx
+          )}`
+        );
+      }
+      return { symbol, signature };
+    })
+    .filter(({ symbol, signature }) =>
+      matchesOverloadSignature(symbol, signature, argTypes, ctx)
+    );
+
+  if (matches.length === 0) {
+    throw new Error(`no overload of ${callee.name} matches argument types`);
+  }
+
+  if (matches.length > 1) {
+    throw new Error(`ambiguous overload for ${callee.name}`);
+  }
+
+  const selected = matches[0]!;
+  ctx.callTargets.set(call.id, selected.symbol);
+  return selected.signature.returnType;
+};
+
+const matchesOverloadSignature = (
+  symbol: SymbolId,
+  signature: FunctionSignature,
+  argTypes: readonly TypeId[],
+  ctx: TypingContext
+): boolean => {
+  if (signature.parameterTypes.length !== argTypes.length) {
+    return false;
+  }
+
+  signature.parameterTypes.forEach((paramType) => {
+    if (paramType === ctx.unknownType) {
+      throw new Error(
+        `overloaded function ${getSymbolName(
+          symbol,
+          ctx
+        )} must declare parameter types`
+      );
+    }
+  });
+
+  return signature.parameterTypes.every(
+    (paramType, index) => {
+      const argType = argTypes[index];
+      return argType === ctx.unknownType || paramType === argType;
+    }
+  );
+};
+
+const typeIntrinsicCall = (
+  name: string,
+  argTypes: readonly TypeId[],
+  ctx: TypingContext
+): TypeId => {
+  const signatures = intrinsicSignaturesFor(name, ctx);
+  if (signatures.length === 0) {
+    throw new Error(`unsupported intrinsic ${name}`);
+  }
+
+  const matches = signatures.filter((signature) =>
+    intrinsicSignatureMatches(signature, argTypes, ctx)
+  );
+
+  if (matches.length === 0) {
+    throw new Error(`no matching overload for intrinsic ${name}`);
+  }
+
+  if (matches.length > 1) {
+    throw new Error(`ambiguous intrinsic overload for ${name}`);
+  }
+
+  return matches[0]!.returnType;
+};
+
+const intrinsicSignatureMatches = (
+  signature: IntrinsicSignature,
+  argTypes: readonly TypeId[],
+  ctx: TypingContext
+): boolean => {
+  if (signature.parameters.length !== argTypes.length) {
+    return false;
+  }
+  return signature.parameters.every((paramType, index) => {
+    const argType = argTypes[index];
+    return argType === ctx.unknownType || paramType === argType;
+  });
+};
+
 const getValueType = (symbol: SymbolId, ctx: TypingContext): TypeId => {
   const cached = ctx.valueTypes.get(symbol);
   if (typeof cached === "number") {
@@ -479,11 +626,12 @@ const getIntrinsicType = (name: string, ctx: TypingContext): TypeId => {
     return cached;
   }
 
-  const signature = intrinsicSignatureFor(name, ctx);
-  if (!signature) {
+  const signatures = intrinsicSignaturesFor(name, ctx);
+  if (signatures.length === 0) {
     throw new Error(`unsupported intrinsic ${name}`);
   }
 
+  const signature = signatures[0]!;
   const fnType = ctx.arena.internFunction({
     parameters: signature.parameters.map((type) => ({
       type,
@@ -502,24 +650,41 @@ interface IntrinsicSignature {
   returnType: TypeId;
 }
 
-const intrinsicSignatureFor = (
+const intrinsicSignaturesFor = (
   name: string,
   ctx: TypingContext
-): IntrinsicSignature | undefined => {
+): readonly IntrinsicSignature[] => {
   const int32 = getPrimitiveType(ctx, "i32");
+  const int64 = getPrimitiveType(ctx, "i64");
+  const float32 = getPrimitiveType(ctx, "f32");
+  const float64 = getPrimitiveType(ctx, "f64");
+
+  const numericSignatures: IntrinsicSignature[] = [
+    { parameters: [int32, int32], returnType: int32 },
+    { parameters: [int64, int64], returnType: int64 },
+    { parameters: [float32, float32], returnType: float32 },
+    { parameters: [float64, float64], returnType: float64 },
+  ];
+  const comparisonSignatures: IntrinsicSignature[] = [
+    { parameters: [int32, int32], returnType: ctx.boolType },
+    { parameters: [int64, int64], returnType: ctx.boolType },
+    { parameters: [float32, float32], returnType: ctx.boolType },
+    { parameters: [float64, float64], returnType: ctx.boolType },
+  ];
+
   switch (name) {
     case "+":
     case "-":
     case "*":
     case "/":
-      return { parameters: [int32, int32], returnType: int32 };
+      return numericSignatures;
     case "<":
     case "<=":
     case ">":
     case ">=":
-      return { parameters: [int32, int32], returnType: ctx.boolType };
+      return comparisonSignatures;
     default:
-      return undefined;
+      return [];
   }
 };
 
