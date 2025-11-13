@@ -25,7 +25,7 @@ You should generally add unit tests (especially e2e ones like those in
 
 # Style Guide
 
-- Prefer functional style
+- Prefer functional pipelines for general logic; use classes when encapsulating shared state or factory-style behavior
 - Keep functions small
 - Prefer early returns to else ifs
 - Use `const` whenever possible

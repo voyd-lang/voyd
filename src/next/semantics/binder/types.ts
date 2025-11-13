@@ -54,18 +54,3 @@ export interface SymbolTableSnapshot {
   symbols: readonly SymbolRecord[];
   payload?: Record<string, unknown>;
 }
-
-export interface SymbolTable {
-  readonly rootScope: ScopeId;
-  createScope(info: Omit<ScopeInfo, "id">): ScopeId;
-  enterScope(scope: ScopeId): void;
-  exitScope(): void;
-  declare(symbol: Omit<SymbolRecord, "id" | "scope">): SymbolId;
-  resolve(name: string, fromScope: ScopeId): SymbolId | undefined;
-  resolveAll(name: string, fromScope: ScopeId): readonly SymbolId[];
-  getSymbol(id: SymbolId): Readonly<SymbolRecord>;
-  getScope(id: ScopeId): Readonly<ScopeInfo>;
-  symbolsInScope(scope: ScopeId): Iterable<SymbolId>;
-  snapshot(payload?: Record<string, unknown>): SymbolTableSnapshot;
-  restore(snapshot: SymbolTableSnapshot): void;
-}

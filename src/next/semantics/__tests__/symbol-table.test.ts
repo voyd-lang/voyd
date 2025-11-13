@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createSymbolTable } from "../binder/index.js";
+import { SymbolTable } from "../binder/index.js";
 
 describe("SymbolTable", () => {
   it("resolves bindings across lexical scopes", () => {
-    const table = createSymbolTable({ rootOwner: 0 });
+    const table = new SymbolTable({ rootOwner: 0 });
     const rootSymbol = table.declare({
       name: "x",
       kind: "value",
@@ -30,7 +30,7 @@ describe("SymbolTable", () => {
   });
 
   it("restores to a snapshot", () => {
-    const table = createSymbolTable({ rootOwner: 0 });
+    const table = new SymbolTable({ rootOwner: 0 });
     table.declare({ name: "root", kind: "module", declaredAt: 1 });
     const snap = table.snapshot();
 

@@ -1,5 +1,5 @@
 import type { Form } from "../parser/index.js";
-import { createSymbolTable, type SymbolTable } from "./binder/index.js";
+import { SymbolTable } from "./binder/index.js";
 import { runBindingPipeline } from "./binding/pipeline.js";
 import type { HirGraph } from "./hir/index.js";
 import { createHirBuilder } from "./hir/index.js";
@@ -19,7 +19,9 @@ export const semanticsPipeline = (form: Form): SemanticsPipelineResult => {
   }
 
   const modulePath = form.location?.filePath ?? "<module>";
-  const symbolTable = createSymbolTable({ rootOwner: form.syntaxId });
+  const symbolTable: SymbolTable = new SymbolTable({
+    rootOwner: form.syntaxId,
+  });
   const moduleSymbol = symbolTable.declare({
     name: modulePath,
     kind: "module",

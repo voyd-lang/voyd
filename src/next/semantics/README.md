@@ -34,13 +34,13 @@ For background see `docs/compiler-rearchitecture.md` and the language guides in
 ## Binder and `SymbolTable`
 
 * `binder/types.ts` defines `ScopeKind`, `SymbolKind`, `SymbolRecord`, and the
-  `SymbolTable` interface. The table is queried by symbol/Scope IDs rather than
-  syntax references.
+  supporting metadata for the `SymbolTable` class. The table is queried by
+  symbol/Scope IDs rather than syntax references.
 * `binder/symbol-table.ts` implements the API with a persistent snapshot
   mechanism. It exposes `declare`, `resolve`, `symbolsInScope`, and
   `snapshot/restore`, making it straightforward to build incremental tooling
   (macro hygiene, IDE previews, etc.).
-* `createSymbolTable({ rootOwner })` seeds the root scope (usually the module
+* `new SymbolTable({ rootOwner })` seeds the root scope (usually the module
   node). Binder passes should call `enterScope`/`exitScope` during traversal and
   keep diagnostics outside the table to preserve purity.
 
