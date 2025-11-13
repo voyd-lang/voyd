@@ -1,0 +1,8 @@
+fn add(a: i32, b: i32)
+  a + b
+
+fn add(a: i32, b)
+  a + b
+
+pub fn call_add()
+  add(1, 2)

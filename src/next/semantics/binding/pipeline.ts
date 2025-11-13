@@ -81,13 +81,6 @@ interface SignatureParam {
   typeExpr?: Expr;
 }
 
-interface BinderScopeTracker {
-  current(): ScopeId;
-  push(scope: ScopeId): void;
-  pop(): void;
-  depth(): number;
-}
-
 interface OverloadBucket {
   scope: ScopeId;
   name: string;
@@ -98,7 +91,6 @@ interface OverloadBucket {
 
 interface BindingContext extends BindingResult {
   overloadBuckets: Map<string, OverloadBucket>;
-  nextOverloadSetId: OverloadSetId;
   syntaxByNode: Map<NodeId, Syntax>;
 }
 
@@ -114,7 +106,6 @@ export const runBindingPipeline = ({
     overloadBySymbol: new Map(),
     diagnostics: [],
     overloadBuckets: new Map(),
-    nextOverloadSetId: 0,
     syntaxByNode: new Map([[moduleForm.syntaxId, moduleForm]]),
   };
 
@@ -125,7 +116,7 @@ export const runBindingPipeline = ({
 };
 
 const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
-  const tracker = createBinderScopeTracker(ctx.symbolTable);
+  const tracker = new BinderScopeTracker(ctx.symbolTable);
   const entries = moduleForm.rest;
 
   for (const entry of entries) {
@@ -144,27 +135,42 @@ const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   }
 };
 
-const createBinderScopeTracker = (
-  symbolTable: SymbolTable
-): BinderScopeTracker => {
-  const stack: ScopeId[] = [symbolTable.rootScope];
+class BinderScopeTracker {
+  private readonly stack: [ScopeId, ...ScopeId[]];
+  constructor(private readonly symbolTable: SymbolTable) {
+    this.stack = [symbolTable.rootScope];
+  }
 
-  return {
-    current: () => stack.at(-1)!,
-    push: (scope: ScopeId) => {
-      symbolTable.enterScope(scope);
-      stack.push(scope);
-    },
-    pop: () => {
-      if (stack.length <= 1) {
-        throw new Error("attempted to exit the root scope");
-      }
-      stack.pop();
-      symbolTable.exitScope();
-    },
-    depth: () => stack.length,
-  };
-};
+  current() {
+    return this.stack.at(-1)!;
+  }
+
+  depth() {
+    return this.stack.length;
+  }
+
+  enterScope<T>(scope: ScopeId, runInScope: () => T): T {
+    this.push(scope);
+    try {
+      return runInScope();
+    } finally {
+      this.pop();
+    }
+  }
+
+  private push(scope: ScopeId) {
+    this.symbolTable.enterScope(scope);
+    this.stack.push(scope);
+  }
+
+  private pop() {
+    if (this.stack.length <= 1) {
+      throw new Error("attempted to exit the root scope");
+    }
+    this.stack.pop();
+    this.symbolTable.exitScope();
+  }
+}
 
 const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
   let index = 0;
@@ -291,10 +297,9 @@ const bindFunctionDecl = (
   });
   ctx.scopeByNode.set(decl.form.syntaxId, fnScope);
 
-  tracker.push(fnScope);
   const boundParams: BoundParameter[] = [];
 
-  try {
+  tracker.enterScope(fnScope, () => {
     for (const param of decl.signature.params) {
       const paramSymbol = ctx.symbolTable.declare({
         name: param.name,
@@ -311,9 +316,7 @@ const bindFunctionDecl = (
     }
 
     bindExpr(decl.body, ctx, tracker);
-  } finally {
-    tracker.pop();
-  }
+  });
 
   ctx.functions.push({
     name: decl.signature.name.value,
@@ -372,14 +375,11 @@ const bindBlock = (
   });
   ctx.scopeByNode.set(form.syntaxId, scope);
 
-  tracker.push(scope);
-  try {
+  tracker.enterScope(scope, () => {
     for (const child of form.rest) {
       bindExpr(child, ctx, tracker);
     }
-  } finally {
-    tracker.pop();
-  }
+  });
 };
 
 const bindIf = (
@@ -540,6 +540,10 @@ const recordFunctionOverload = (
     });
     bucket.nonFunctionConflictReported = true;
   }
+
+  if (bucket.functions.length > 1) {
+    ensureOverloadParameterAnnotations(bucket, ctx);
+  }
 };
 
 const createOverloadSignature = (
@@ -556,6 +560,41 @@ const createOverloadSignature = (
     key: `${fn.params.length}|${paramAnnotations.join(",")}`,
     label: `${fn.name}(${paramLabels.join(", ")}) -> ${returnAnnotation}`,
   };
+};
+
+const ensureOverloadParameterAnnotations = (
+  bucket: OverloadBucket,
+  ctx: BindingContext
+): void => {
+  const missingAnnotationSymbols = new Set<number>();
+  bucket.functions.forEach((fn) => {
+    fn.params.forEach((param) => {
+      if (param.typeExpr) {
+        return;
+      }
+      if (missingAnnotationSymbols.has(param.symbol)) {
+        return;
+      }
+      const related = bucket.functions.find((candidate) => candidate !== fn);
+      ctx.diagnostics.push({
+        code: "binding.overload.annotation-required",
+        message: `parameter ${param.name} in overloaded function ${fn.name} must declare a type`,
+        severity: "error",
+        span: toSourceSpan(param.ast),
+        related: related
+          ? [
+              {
+                code: "binding.overload.annotation-context",
+                message: "conflicting overload declared here",
+                severity: "note",
+                span: toSourceSpan(related.form),
+              },
+            ]
+          : undefined,
+      });
+      missingAnnotationSymbols.add(param.symbol);
+    });
+  });
 };
 
 const formatTypeAnnotation = (expr?: Expr): string => {
@@ -575,17 +614,21 @@ const formatTypeAnnotation = (expr?: Expr): string => {
     return String(expr.value);
   }
   if (isForm(expr)) {
-    return `(${expr.toArray().map((entry) => formatTypeAnnotation(entry)).join(" ")})`;
+    return `(${expr
+      .toArray()
+      .map((entry) => formatTypeAnnotation(entry))
+      .join(" ")})`;
   }
   return "<expr>";
 };
 
 const finalizeOverloadSets = (ctx: BindingContext): void => {
+  let nextOverloadSetId = 0;
   for (const bucket of ctx.overloadBuckets.values()) {
     if (bucket.functions.length < 2) {
       continue;
     }
-    const id = ctx.nextOverloadSetId++;
+    const id = nextOverloadSetId++;
     const functions = [...bucket.functions];
     functions.forEach((fn) => {
       fn.overloadSetId = id;
@@ -630,7 +673,11 @@ const reportOverloadNameCollision = (
   ctx: BindingContext
 ): void => {
   const bucket = ctx.overloadBuckets.get(makeOverloadBucketKey(scope, name));
-  if (!bucket || bucket.functions.length === 0 || bucket.nonFunctionConflictReported) {
+  if (
+    !bucket ||
+    bucket.functions.length === 0 ||
+    bucket.nonFunctionConflictReported
+  ) {
     return;
   }
   ctx.diagnostics.push({
