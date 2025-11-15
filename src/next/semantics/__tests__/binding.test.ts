@@ -45,4 +45,32 @@ describe("binding pipeline", () => {
       binding.symbolTable.resolve("main", binding.symbolTable.rootScope)
     ).toBe(mainFn!.symbol);
   });
+
+  it("incorporates labeled parameters into overload signatures", () => {
+    const name = "function_overloads_labeled.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+    });
+
+    const routeFns = binding.functions.filter(
+      (fn) => symbolTable.getSymbol(fn.symbol).name === "route"
+    );
+    expect(routeFns).toHaveLength(2);
+    expect(binding.diagnostics).toHaveLength(0);
+    const labels = routeFns.map((fn) => {
+      const label = fn.params[1]?.label;
+      expect(label).toBeDefined();
+      return label!;
+    });
+    expect(labels).toEqual(expect.arrayContaining(["from", "to"]));
+  });
 });

@@ -43,6 +43,10 @@ export class Form extends Syntax {
     return this.#elements.at(0);
   }
 
+  get second() {
+    return this.#elements.at(1);
+  }
+
   get rest() {
     return this.#elements.slice(1);
   }

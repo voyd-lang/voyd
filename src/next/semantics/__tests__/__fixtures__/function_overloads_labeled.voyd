@@ -1,0 +1,11 @@
+fn route(a: i32, { from dest: i32 }) -> i32
+  a + dest
+
+fn route(a: i32, { to dest: i32 }) -> i32
+  a + dest
+
+pub fn call_from() -> i32
+  route(1, from: 2)
+
+pub fn call_to() -> i32
+  route(1, to: 2)
