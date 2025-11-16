@@ -42,8 +42,12 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
     },
     4 => {
       "args": [
-        2,
-        3,
+        {
+          "expr": 2,
+        },
+        {
+          "expr": 3,
+        },
       ],
       "ast": 616,
       "callee": 1,
@@ -144,8 +148,12 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
     },
     12 => {
       "args": [
-        10,
-        11,
+        {
+          "expr": 10,
+        },
+        {
+          "expr": 11,
+        },
       ],
       "ast": 619,
       "callee": 9,
@@ -160,7 +168,9 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
     },
     13 => {
       "args": [
-        12,
+        {
+          "expr": 12,
+        },
       ],
       "ast": 620,
       "callee": 8,
@@ -224,8 +234,12 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
     },
     18 => {
       "args": [
-        16,
-        17,
+        {
+          "expr": 16,
+        },
+        {
+          "expr": 17,
+        },
       ],
       "ast": 621,
       "callee": 15,
@@ -240,7 +254,9 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
     },
     19 => {
       "args": [
-        18,
+        {
+          "expr": 18,
+        },
       ],
       "ast": 622,
       "callee": 14,
@@ -255,8 +271,12 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
     },
     20 => {
       "args": [
-        13,
-        19,
+        {
+          "expr": 13,
+        },
+        {
+          "expr": 19,
+        },
       ],
       "ast": 623,
       "callee": 7,
@@ -340,7 +360,9 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
     },
     27 => {
       "args": [
-        26,
+        {
+          "expr": 26,
+        },
       ],
       "ast": 631,
       "callee": 25,
@@ -375,6 +397,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "kind": "function",
       "parameters": [
         {
+          "label": undefined,
           "mutable": false,
           "pattern": {
             "kind": "identifier",

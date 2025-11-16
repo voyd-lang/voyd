@@ -1,0 +1,5 @@
+fn route(a: i32, { from dest: i32 }) -> i32
+  a + dest
+
+pub fn main() -> i32
+  route(1, to: 2)

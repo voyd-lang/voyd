@@ -57,6 +57,7 @@ export interface BoundOverloadSet {
 
 export interface BoundParameter {
   name: string;
+  label?: string;
   symbol: SymbolId;
   ast: Syntax;
   typeExpr?: Expr;
@@ -77,6 +78,7 @@ interface ParsedFunctionSignature {
 
 interface SignatureParam {
   name: string;
+  label?: string;
   ast: Syntax;
   typeExpr?: Expr;
 }
@@ -222,7 +224,7 @@ const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
     const head = parseFunctionHead(form.at(1));
     return {
       name: head.name,
-      params: head.params.map(parseParameter),
+      params: head.params.flatMap(parseParameter),
       returnType: form.at(2),
     };
   }
@@ -230,7 +232,7 @@ const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
   const head = parseFunctionHead(form);
   return {
     name: head.name,
-    params: head.params.map(parseParameter),
+    params: head.params.flatMap(parseParameter),
   };
 };
 
@@ -256,24 +258,59 @@ const parseFunctionHead = (
   throw new Error("fn name must be an identifier");
 };
 
-const parseParameter = (expr: Expr): SignatureParam => {
+const parseParameter = (expr: Expr): SignatureParam | SignatureParam[] => {
   if (isIdentifierAtom(expr)) {
     return { name: expr.value, ast: expr };
   }
 
   if (isForm(expr) && expr.calls(":")) {
-    const nameExpr = expr.at(1);
-    if (!isIdentifierAtom(nameExpr)) {
-      throw new Error("parameter name must be an identifier");
-    }
-    return {
-      name: nameExpr.value,
-      ast: nameExpr,
-      typeExpr: expr.at(2),
-    };
+    return parseSingleParam(expr);
+  }
+
+  if (isForm(expr) && expr.callsInternal("object_literal")) {
+    return parseLabeledParameters(expr);
   }
 
   throw new Error("unsupported parameter form");
+};
+
+const parseLabeledParameters = (form: Form): SignatureParam[] =>
+  form.rest.map((expr) => {
+    if (isForm(expr) && expr.calls(":")) {
+      const param = parseSingleParam(expr);
+      return {
+        ...param,
+        label: param.name,
+      };
+    }
+
+    // // External labeled param { with val: i32 }
+    if (
+      isForm(expr) &&
+      isIdentifierAtom(expr.first) &&
+      isForm(expr.second) &&
+      expr.second.calls(":")
+    ) {
+      const labelExpr = expr.first;
+      return {
+        label: labelExpr.value,
+        ...parseSingleParam(expr.second),
+      };
+    }
+
+    throw new Error("unsupported parameter form");
+  });
+
+const parseSingleParam = (expr: Form): SignatureParam => {
+  const nameExpr = expr.at(1);
+  if (!isIdentifierAtom(nameExpr)) {
+    throw new Error("parameter name must be an identifier");
+  }
+  return {
+    name: nameExpr.value,
+    ast: nameExpr,
+    typeExpr: expr.at(2),
+  };
 };
 
 const bindFunctionDecl = (
@@ -309,6 +346,7 @@ const bindFunctionDecl = (
       rememberSyntax(param.ast, ctx);
       boundParams.push({
         name: param.name,
+        label: param.label,
         symbol: paramSymbol,
         ast: param.ast,
         typeExpr: param.typeExpr,
@@ -549,17 +587,30 @@ const recordFunctionOverload = (
 const createOverloadSignature = (
   fn: BoundFunction
 ): { key: string; label: string } => {
-  const paramAnnotations = fn.params.map((param) =>
-    formatTypeAnnotation(param.typeExpr)
-  );
-  const paramLabels = fn.params.map(
-    (param, index) => `${param.name}: ${paramAnnotations[index]}`
-  );
+  const params = fn.params.map((param) => {
+    const annotation = formatTypeAnnotation(param.typeExpr);
+    const displayName = formatParameterDisplayName(param);
+    const labelKey = param.label ?? "";
+    return {
+      key: `${labelKey}:${annotation}`,
+      label: `${displayName}: ${annotation}`,
+    };
+  });
   const returnAnnotation = formatTypeAnnotation(fn.returnTypeExpr);
   return {
-    key: `${fn.params.length}|${paramAnnotations.join(",")}`,
-    label: `${fn.name}(${paramLabels.join(", ")}) -> ${returnAnnotation}`,
+    key: `${fn.params.length}|${params.map((param) => param.key).join(",")}`,
+    label: `${fn.name}(${params.map((param) => param.label).join(", ")}) -> ${returnAnnotation}`,
   };
+};
+
+const formatParameterDisplayName = (param: BoundParameter): string => {
+  if (!param.label) {
+    return param.name;
+  }
+  if (param.label === param.name) {
+    return param.label;
+  }
+  return `${param.label} ${param.name}`;
 };
 
 const ensureOverloadParameterAnnotations = (

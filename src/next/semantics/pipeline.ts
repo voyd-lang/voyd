@@ -32,7 +32,7 @@ export const semanticsPipeline = (form: Form): SemanticsPipelineResult => {
     declaredAt: form.syntaxId,
   });
 
-  const binding: BindingResult = runBindingPipeline({
+  const binding = runBindingPipeline({
     moduleForm: form,
     symbolTable,
   });
@@ -75,8 +75,7 @@ const ensureNoBindingErrors = (binding: BindingResult): void => {
       ? errors[0]!.message
       : errors
           .map(
-            (diag) =>
-              `${diag.message} (${diag.span.file}:${diag.span.start})`
+            (diag) => `${diag.message} (${diag.span.file}:${diag.span.start})`
           )
           .join("\n");
   throw new Error(message);

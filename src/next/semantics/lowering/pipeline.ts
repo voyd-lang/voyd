@@ -77,6 +77,7 @@ const lowerFunction = (fn: BoundFunction, ctx: LowerContext): void => {
   const parameters: HirParameter[] = fn.params.map((param) => ({
     symbol: param.symbol,
     pattern: { kind: "identifier", symbol: param.symbol } as const,
+    label: param.label,
     span: toSourceSpan(param.ast),
     mutable: false,
     type: lowerTypeExpr(param.typeExpr, ctx),
@@ -172,7 +173,11 @@ const lowerExpr = (
   }
 
   if (isIdentifierAtom(expr)) {
-    const resolution = resolveIdentifierValue(expr.value, scopes.current(), ctx);
+    const resolution = resolveIdentifierValue(
+      expr.value,
+      scopes.current(),
+      ctx
+    );
     if (resolution.kind === "symbol") {
       return ctx.builder.addExpression({
         kind: "expr",
@@ -333,7 +338,21 @@ const lowerCall = (
   }
 
   const calleeId = lowerExpr(callee, ctx, scopes);
-  const args = form.rest.map((arg) => lowerExpr(arg, ctx, scopes));
+  const args = form.rest.map((arg) => {
+    if (isForm(arg) && arg.calls(":")) {
+      const labelExpr = arg.at(1);
+      const valueExpr = arg.at(2);
+      if (!isIdentifierAtom(labelExpr) || !valueExpr) {
+        throw new Error("Invalid labeled argument");
+      }
+      return {
+        label: labelExpr.value,
+        expr: lowerExpr(valueExpr, ctx, scopes),
+      };
+    }
+    const expr = lowerExpr(arg, ctx, scopes);
+    return { expr };
+  });
 
   return ctx.builder.addExpression({
     kind: "expr",
@@ -537,10 +556,7 @@ const resolveSymbol = (
   return resolveIntrinsicSymbol(name, ctx);
 };
 
-const resolveIntrinsicSymbol = (
-  name: string,
-  ctx: LowerContext
-): SymbolId => {
+const resolveIntrinsicSymbol = (name: string, ctx: LowerContext): SymbolId => {
   let intrinsic = ctx.intrinsicSymbols.get(name);
   if (typeof intrinsic === "number") {
     return intrinsic;
