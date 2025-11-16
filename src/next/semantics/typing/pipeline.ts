@@ -385,6 +385,13 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
 
   args.forEach((arg, index) => {
     const param = calleeDesc.parameters[index];
+    if (param.label !== arg.label) {
+      const expectedLabel = param.label ?? "no label";
+      const actualLabel = arg.label ?? "no label";
+      throw new Error(
+        `call argument ${index + 1} label mismatch: expected ${expectedLabel}, got ${actualLabel}`
+      );
+    }
     ensureTypeMatches(arg.type, param.type, ctx, `call argument ${index + 1}`);
   });
 

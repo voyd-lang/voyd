@@ -297,6 +297,11 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("requires argument labels to match for non-overloaded calls", () => {
+    const ast = loadAst("function_labeled_call_mismatch.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(/label mismatch/);
+  });
+
   it("exposes binder overload metadata", () => {
     const binding = bindFixture("function_overloads.voyd");
     expect(binding.overloads.size).toBe(1);
