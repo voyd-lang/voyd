@@ -157,6 +157,7 @@ export interface HirParameter {
   pattern: HirPattern;
   span: SourceSpan;
   mutable: boolean;
+  label?: string;
   type?: HirTypeExpr;
   defaultValue?: HirExprId;
 }
@@ -394,7 +395,7 @@ export interface HirOverloadSetExpr extends HirExpressionBase {
 export interface HirCallExpr extends HirExpressionBase {
   exprKind: "call";
   callee: HirExprId;
-  args: readonly HirExprId[];
+  args: readonly { label?: string; expr: HirExprId }[];
   typeArguments?: readonly HirTypeExpr[];
 }
 

@@ -46,6 +46,7 @@ export interface StructuralObjectType {
 
 export interface FunctionParameter {
   type: TypeId;
+  label?: string;
   optional?: boolean;
 }
 
@@ -187,9 +188,7 @@ export const createTypeArena = (): TypeArena => {
       typeArgs: [...desc.typeArgs],
     });
 
-  const internNominalObject = (
-    desc: Omit<NominalObjectType, "kind">
-  ): TypeId =>
+  const internNominalObject = (desc: Omit<NominalObjectType, "kind">): TypeId =>
     storeDescriptor({
       kind: "nominal-object",
       owner: desc.owner,
@@ -212,6 +211,7 @@ export const createTypeArena = (): TypeArena => {
       kind: "function",
       parameters: desc.parameters.map((param) => ({
         type: param.type,
+        label: param.label,
         optional: param.optional ?? false,
       })),
       returnType: desc.returnType,
@@ -223,9 +223,7 @@ export const createTypeArena = (): TypeArena => {
     return storeDescriptor({ kind: "union", members: canonical });
   };
 
-  const internIntersection = (
-    desc: Omit<IntersectionType, "kind">
-  ): TypeId =>
+  const internIntersection = (desc: Omit<IntersectionType, "kind">): TypeId =>
     storeDescriptor({
       kind: "intersection",
       nominal: desc.nominal,
@@ -334,9 +332,7 @@ export const createTypeArena = (): TypeArena => {
           changed ||= substituted !== field.type;
           return { name: field.name, type: substituted };
         });
-        return changed
-          ? internStructuralObject({ fields })
-          : type;
+        return changed ? internStructuralObject({ fields }) : type;
       }
       case "function": {
         let changed = false;
@@ -375,9 +371,7 @@ export const createTypeArena = (): TypeArena => {
       }
       case "fixed-array": {
         const element = substitute(desc.element, subst);
-        return element === desc.element
-          ? type
-          : internFixedArray(element);
+        return element === desc.element ? type : internFixedArray(element);
       }
       case "type-param-ref": {
         const replacement = subst.get(desc.param);

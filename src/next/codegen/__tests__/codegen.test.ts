@@ -58,5 +58,13 @@ describe("next codegen", () => {
     const callFloat = instance.exports.call_float;
     expect(typeof callFloat).toBe("function");
     expect((callFloat as () => number)()).toBeCloseTo(3);
+
+    const callFrom = instance.exports.call_from;
+    expect(typeof callFrom).toBe("function");
+    expect((callFrom as () => number)()).toBe(-1);
+
+    const callTo = instance.exports.call_to;
+    expect(typeof callTo).toBe("function");
+    expect((callTo as () => number)()).toBe(3);
   });
 });

@@ -290,7 +290,7 @@ const compileCallExpr = (
     throw new Error(`codegen missing callee expression ${expr.callee}`);
   }
 
-  const args = expr.args.map((arg) => compileExpression(arg, ctx, fnCtx));
+  const args = expr.args.map((arg) => compileExpression(arg.expr, ctx, fnCtx));
 
   if (callee.exprKind === "overload-set") {
     const targetSymbol = ctx.typing.callTargets.get(expr.id);
@@ -625,7 +625,10 @@ const compileIntrinsicCall = (
     case "*":
     case "/": {
       assertArgCount(name, args, 2);
-      const operandKind = requireHomogeneousNumericKind(call.args, ctx);
+      const operandKind = requireHomogeneousNumericKind(
+        call.args.map((a) => a.expr),
+        ctx
+      );
       return emitArithmeticIntrinsic(name, operandKind, args, ctx);
     }
     case "<":
@@ -633,7 +636,10 @@ const compileIntrinsicCall = (
     case ">":
     case ">=": {
       assertArgCount(name, args, 2);
-      const operandKind = requireHomogeneousNumericKind(call.args, ctx);
+      const operandKind = requireHomogeneousNumericKind(
+        call.args.map((a) => a.expr),
+        ctx
+      );
       return emitComparisonIntrinsic(name, operandKind, args, ctx);
     }
     default:
