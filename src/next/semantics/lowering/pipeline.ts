@@ -22,11 +22,17 @@ import type {
   HirBuilder,
   HirCondBranch,
   HirGraph,
+  HirObjectLiteralEntry,
   HirParameter,
   HirPattern,
+  HirRecordTypeField,
   HirTypeExpr,
 } from "../hir/index.js";
-import type { BoundFunction, BindingResult } from "../binding/pipeline.js";
+import type {
+  BoundFunction,
+  BoundTypeAlias,
+  BindingResult,
+} from "../binding/pipeline.js";
 import { isIdentifierWithValue, toSourceSpan } from "../utils.js";
 
 interface LowerInputs {
@@ -54,11 +60,48 @@ type IdentifierResolution =
   | { kind: "symbol"; symbol: SymbolId; name: string }
   | { kind: "overload-set"; name: string; set: OverloadSetId };
 
+type ModuleDeclaration =
+  | { kind: "function"; order: number; fn: BoundFunction }
+  | { kind: "type-alias"; order: number; alias: BoundTypeAlias };
+
+const getModuleDeclarations = (
+  binding: BindingResult
+): ModuleDeclaration[] => {
+  const entries: ModuleDeclaration[] = [
+    ...binding.functions.map((fn) => ({
+      kind: "function" as const,
+      order: fn.moduleIndex,
+      fn,
+    })),
+    ...binding.typeAliases.map((alias) => ({
+      kind: "type-alias" as const,
+      order: alias.moduleIndex,
+      alias,
+    })),
+  ];
+
+  return entries.sort((a, b) => a.order - b.order);
+};
+
 export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
   const intrinsicSymbols = new Map<string, SymbolId>();
 
-  for (const fn of inputs.binding.functions) {
-    lowerFunction(fn, {
+  const declarations = getModuleDeclarations(inputs.binding);
+
+  for (const decl of declarations) {
+    if (decl.kind === "function") {
+      lowerFunction(decl.fn, {
+        builder: inputs.builder,
+        symbolTable: inputs.binding.symbolTable,
+        scopeByNode: inputs.binding.scopeByNode,
+        intrinsicSymbols,
+        moduleNodeId: inputs.moduleNodeId,
+        overloadBySymbol: inputs.binding.overloadBySymbol,
+      });
+      continue;
+    }
+
+    lowerTypeAlias(decl.alias, {
       builder: inputs.builder,
       symbolTable: inputs.binding.symbolTable,
       scopeByNode: inputs.binding.scopeByNode,
@@ -101,6 +144,31 @@ const lowerFunction = (fn: BoundFunction, ctx: LowerContext): void => {
       visibility: "public",
       span: toSourceSpan(fn.form),
       item: fnId,
+    });
+  }
+};
+
+const lowerTypeAlias = (alias: BoundTypeAlias, ctx: LowerContext): void => {
+  const target = lowerTypeExpr(alias.target, ctx);
+  if (!target) {
+    throw new Error("type alias requires a target type expression");
+  }
+
+  const aliasId = ctx.builder.addItem({
+    kind: "type-alias",
+    symbol: alias.symbol,
+    visibility: alias.visibility,
+    ast: alias.form.syntaxId,
+    span: toSourceSpan(alias.form),
+    target,
+  });
+
+  if (alias.visibility === "public") {
+    ctx.builder.recordExport({
+      symbol: alias.symbol,
+      visibility: alias.visibility,
+      span: toSourceSpan(alias.form),
+      item: aliasId,
     });
   }
 };
@@ -199,6 +267,14 @@ const lowerExpr = (
   }
 
   if (isForm(expr)) {
+    if (isObjectLiteralForm(expr)) {
+      return lowerObjectLiteralExpr(expr, ctx, scopes);
+    }
+
+    if (isFieldAccessForm(expr)) {
+      return lowerFieldAccessExpr(expr, ctx, scopes);
+    }
+
     if (expr.calls("block")) {
       return lowerBlock(expr, ctx, scopes);
     }
@@ -443,6 +519,114 @@ const lowerTupleExpr = (
   });
 };
 
+const isObjectLiteralForm = (form: Form): boolean =>
+  form.callsInternal("object_literal");
+
+const lowerObjectLiteralExpr = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
+  const entries = form.rest.map((entry) =>
+    lowerObjectLiteralEntry(entry, ctx, scopes)
+  );
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "object-literal",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    literalKind: "structural",
+    entries,
+  });
+};
+
+const lowerObjectLiteralEntry = (
+  entry: Expr | undefined,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirObjectLiteralEntry => {
+  if (!entry) {
+    throw new Error("object literal entry missing expression");
+  }
+
+  if (isForm(entry) && entry.calls("...")) {
+    const valueExpr = entry.at(1);
+    if (!valueExpr) {
+      throw new Error("spread entry missing value");
+    }
+    return {
+      kind: "spread",
+      value: lowerExpr(valueExpr, ctx, scopes),
+      span: toSourceSpan(entry),
+    };
+  }
+
+  if (isForm(entry) && entry.calls(":")) {
+    const nameExpr = entry.at(1);
+    if (!isIdentifierAtom(nameExpr)) {
+      throw new Error("object literal field name must be an identifier");
+    }
+    const valueExpr = entry.at(2);
+    if (!valueExpr) {
+      throw new Error("object literal field missing value");
+    }
+    return {
+      kind: "field",
+      name: nameExpr.value,
+      value: lowerExpr(valueExpr, ctx, scopes),
+      span: toSourceSpan(entry),
+    };
+  }
+
+  if (isIdentifierAtom(entry)) {
+    return {
+      kind: "field",
+      name: entry.value,
+      value: lowerExpr(entry, ctx, scopes),
+      span: toSourceSpan(entry),
+    };
+  }
+
+  throw new Error("unsupported object literal entry");
+};
+
+const isFieldAccessForm = (form: Form): boolean => {
+  if (form.length !== 2) {
+    return false;
+  }
+  const fieldExpr = form.at(0);
+  const targetExpr = form.at(1);
+  if (!isIdentifierAtom(fieldExpr) || !targetExpr) {
+    return false;
+  }
+  const fieldLocation = fieldExpr.location;
+  const targetLocation = (targetExpr as Syntax)?.location;
+  if (!fieldLocation || !targetLocation) {
+    return false;
+  }
+  return targetLocation.startIndex < fieldLocation.startIndex;
+};
+
+const lowerFieldAccessExpr = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
+  const fieldExpr = form.at(0);
+  const targetExpr = form.at(1);
+  if (!isIdentifierAtom(fieldExpr) || !targetExpr) {
+    throw new Error("invalid field access expression");
+  }
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "field-access",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    field: fieldExpr.value,
+    target: lowerExpr(targetExpr, ctx, scopes),
+  });
+};
+
 const lowerAssignment = (
   form: Form,
   ctx: LowerContext,
@@ -518,7 +702,50 @@ const lowerTypeExpr = (
     };
   }
 
+  if (isForm(expr) && isObjectLiteralForm(expr)) {
+    return lowerObjectTypeExpr(expr, ctx);
+  }
+
   throw new Error("unsupported type expression");
+};
+
+const lowerObjectTypeExpr = (
+  form: Form,
+  ctx: LowerContext
+): HirTypeExpr => {
+  const fields = form.rest.map((entry) => lowerObjectTypeField(entry, ctx));
+  return {
+    typeKind: "object",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    fields,
+  };
+};
+
+const lowerObjectTypeField = (
+  entry: Expr | undefined,
+  ctx: LowerContext
+): HirRecordTypeField => {
+  if (!isForm(entry) || !entry.calls(":")) {
+    throw new Error("object type fields must be labeled");
+  }
+  const nameExpr = entry.at(1);
+  if (!isIdentifierAtom(nameExpr)) {
+    throw new Error("object type field name must be an identifier");
+  }
+  const typeExpr = entry.at(2);
+  if (!typeExpr) {
+    throw new Error("object type field missing type expression");
+  }
+  const type = lowerTypeExpr(typeExpr, ctx);
+  if (!type) {
+    throw new Error("object type field missing resolved type expression");
+  }
+  return {
+    name: nameExpr.value,
+    type,
+    span: toSourceSpan(entry),
+  };
 };
 
 const resolveIdentifierValue = (
