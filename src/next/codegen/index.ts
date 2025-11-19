@@ -24,10 +24,19 @@ import type {
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypingResult } from "../semantics/typing/pipeline.js";
 import {
+  callRef,
   defineStructType,
   initStruct,
+  refCast,
   structGetFieldValue,
+  binaryenTypeToHeapType,
 } from "../../lib/binaryen-gc/index.js";
+import {
+  createRttContext,
+  RTT_METADATA_SLOTS,
+  RTT_METADATA_SLOT_COUNT,
+  LOOKUP_FIELD_ACCESSOR,
+} from "./rtt/index.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -56,6 +65,7 @@ interface CodegenContext {
   functions: Map<SymbolId, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, SymbolId>;
   structTypes: Map<TypeId, StructuralTypeInfo>;
+  rtt: ReturnType<typeof createRttContext>;
 }
 
 interface LocalBinding {
@@ -73,14 +83,22 @@ interface StructuralFieldInfo {
   name: string;
   typeId: TypeId;
   wasmType: binaryen.Type;
-  index: number;
+  runtimeIndex: number;
+  hash: number;
+  getterType?: binaryen.Type;
+  setterType?: binaryen.Type;
 }
 
 interface StructuralTypeInfo {
   typeId: TypeId;
-  typeRef: binaryen.Type;
+  runtimeType: binaryen.Type;
+  interfaceType: binaryen.Type;
   fields: StructuralFieldInfo[];
   fieldMap: Map<string, StructuralFieldInfo>;
+  ancestorsGlobal: string;
+  fieldTableGlobal: string;
+  methodTableGlobal: string;
+  typeLabel: string;
 }
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
@@ -94,6 +112,7 @@ export const codegen = (
 ): CodegenResult => {
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
+  const rtt = createRttContext(mod);
   const ctx: CodegenContext = {
     mod,
     symbolTable: semantics.symbolTable,
@@ -103,6 +122,7 @@ export const codegen = (
     functions: new Map(),
     itemsToSymbols: new Map(),
     structTypes: new Map(),
+    rtt,
   };
 
   registerFunctionMetadata(ctx);
@@ -585,7 +605,7 @@ const compileObjectLiteralExpr = (
       throw new Error("object spread requires a structural object");
     }
 
-    const spreadTemp = allocateTempLocal(spreadInfo.typeRef, fnCtx);
+    const spreadTemp = allocateTempLocal(spreadInfo.interfaceType, fnCtx);
     ops.push(
       ctx.mod.local.set(
         spreadTemp.index,
@@ -598,12 +618,32 @@ const compileObjectLiteralExpr = (
       if (!target) {
         return;
       }
-      const load = structGetFieldValue({
+      const pointer = ctx.mod.local.get(
+        spreadTemp.index,
+        spreadInfo.interfaceType
+      );
+      const lookupTable = structGetFieldValue({
         mod: ctx.mod,
-        fieldIndex: sourceField.index,
-        fieldType: sourceField.wasmType,
-        exprRef: ctx.mod.local.get(spreadTemp.index, spreadInfo.typeRef),
+        fieldType: ctx.rtt.fieldLookupHelpers.lookupTableType,
+        fieldIndex: RTT_METADATA_SLOTS.FIELD_INDEX_TABLE,
+        exprRef: pointer,
       });
+      const accessor = ctx.mod.call(
+        LOOKUP_FIELD_ACCESSOR,
+        [
+          ctx.mod.i32.const(sourceField.hash),
+          lookupTable,
+          ctx.mod.i32.const(0),
+        ],
+        binaryen.funcref
+      );
+      const getter = refCast(ctx.mod, accessor, sourceField.getterType!);
+      const load = callRef(
+        ctx.mod,
+        getter,
+        [pointer],
+        sourceField.wasmType
+      );
       ops.push(ctx.mod.local.set(target.index, load));
       initialized.add(sourceField.name);
     });
@@ -615,14 +655,28 @@ const compileObjectLiteralExpr = (
     }
   });
 
-  const values = structInfo.fields.map((field) => {
-    const binding = fieldTemps.get(field.name);
-    if (!binding) {
-      throw new Error(`missing binding for field ${field.name}`);
-    }
-    return ctx.mod.local.get(binding.index, binding.type);
-  });
-  const literal = initStruct(ctx.mod, structInfo.typeRef, values);
+  const values = [
+    ctx.mod.global.get(
+      structInfo.ancestorsGlobal,
+      ctx.rtt.extensionHelpers.i32Array
+    ),
+    ctx.mod.global.get(
+      structInfo.fieldTableGlobal,
+      ctx.rtt.fieldLookupHelpers.lookupTableType
+    ),
+    ctx.mod.global.get(
+      structInfo.methodTableGlobal,
+      ctx.rtt.methodLookupHelpers.lookupTableType
+    ),
+    ...structInfo.fields.map((field) => {
+      const binding = fieldTemps.get(field.name);
+      if (!binding) {
+        throw new Error(`missing binding for field ${field.name}`);
+      }
+      return ctx.mod.local.get(binding.index, binding.type);
+    }),
+  ];
+  const literal = initStruct(ctx.mod, structInfo.runtimeType, values);
   if (ops.length === 0) {
     return literal;
   }
@@ -646,13 +700,29 @@ const compileFieldAccessExpr = (
     throw new Error(`object does not contain field ${expr.field}`);
   }
 
-  const pointer = compileExpression(expr.target, ctx, fnCtx);
-  return structGetFieldValue({
+  const pointerTemp = allocateTempLocal(structInfo.interfaceType, fnCtx);
+  const storePointer = ctx.mod.local.set(
+    pointerTemp.index,
+    compileExpression(expr.target, ctx, fnCtx)
+  );
+  const pointer = ctx.mod.local.get(
+    pointerTemp.index,
+    structInfo.interfaceType
+  );
+  const lookupTable = structGetFieldValue({
     mod: ctx.mod,
-    fieldIndex: field.index,
-    fieldType: field.wasmType,
+    fieldType: ctx.rtt.fieldLookupHelpers.lookupTableType,
+    fieldIndex: RTT_METADATA_SLOTS.FIELD_INDEX_TABLE,
     exprRef: pointer,
   });
+  const accessor = ctx.mod.call(
+    LOOKUP_FIELD_ACCESSOR,
+    [ctx.mod.i32.const(field.hash), lookupTable, ctx.mod.i32.const(0)],
+    binaryen.funcref
+  );
+  const getter = refCast(ctx.mod, accessor, field.getterType!);
+  const value = callRef(ctx.mod, getter, [pointer], field.wasmType);
+  return ctx.mod.block(null, [storePointer, value], field.wasmType);
 };
 
 interface PatternInitOptions {
@@ -1101,25 +1171,50 @@ const emitStructuralConversion = (
     }
   });
 
-  const temp = allocateTempLocal(actual.typeRef, fnCtx);
+  const temp = allocateTempLocal(actual.interfaceType, fnCtx);
   const ops: binaryen.ExpressionRef[] = [
     ctx.mod.local.set(temp.index, value),
   ];
-  const sourceRef = ctx.mod.local.get(temp.index, actual.typeRef);
+  const sourceRef = ctx.mod.local.get(temp.index, actual.interfaceType);
 
-  const values = target.fields.map((field) => {
+  const fieldValues = target.fields.map((field) => {
     const sourceField = actual.fieldMap.get(field.name)!;
-    return structGetFieldValue({
+    const lookupTable = structGetFieldValue({
       mod: ctx.mod,
-      fieldIndex: sourceField.index,
-      fieldType: sourceField.wasmType,
+      fieldType: ctx.rtt.fieldLookupHelpers.lookupTableType,
+      fieldIndex: RTT_METADATA_SLOTS.FIELD_INDEX_TABLE,
       exprRef: sourceRef,
     });
+    const accessor = ctx.mod.call(
+      LOOKUP_FIELD_ACCESSOR,
+      [
+        ctx.mod.i32.const(sourceField.hash),
+        lookupTable,
+        ctx.mod.i32.const(0),
+      ],
+      binaryen.funcref
+    );
+    const getter = refCast(ctx.mod, accessor, sourceField.getterType!);
+    return callRef(ctx.mod, getter, [sourceRef], sourceField.wasmType);
   });
 
-  const converted = initStruct(ctx.mod, target.typeRef, values);
+  const converted = initStruct(ctx.mod, target.runtimeType, [
+    ctx.mod.global.get(
+      target.ancestorsGlobal,
+      ctx.rtt.extensionHelpers.i32Array
+    ),
+    ctx.mod.global.get(
+      target.fieldTableGlobal,
+      ctx.rtt.fieldLookupHelpers.lookupTableType
+    ),
+    ctx.mod.global.get(
+      target.methodTableGlobal,
+      ctx.rtt.methodLookupHelpers.lookupTableType
+    ),
+    ...fieldValues,
+  ]);
   ops.push(converted);
-  return ctx.mod.block(null, ops, target.typeRef);
+  return ctx.mod.block(null, ops, target.interfaceType);
 };
 
 const getSymbolTypeId = (symbol: SymbolId, ctx: CodegenContext): TypeId => {
@@ -1179,7 +1274,7 @@ const wasmTypeFor = (typeId: TypeId, ctx: CodegenContext): binaryen.Type => {
     if (!structInfo) {
       throw new Error("missing structural type info");
     }
-    return structInfo.typeRef;
+    return structInfo.interfaceType;
   }
 
   if (desc.kind === "intersection" && typeof desc.structural === "number") {
@@ -1234,23 +1329,79 @@ const getStructuralTypeInfo = (
     name: field.name,
     typeId: field.type,
     wasmType: wasmTypeFor(field.type, ctx),
-    index,
+    runtimeIndex: index + RTT_METADATA_SLOT_COUNT,
+    hash: 0,
   }));
-  const typeRef = defineStructType(ctx.mod, {
-    name: `struct_${structuralId}`,
-    fields: fields.map((field) => ({
-      name: field.name,
-      type: field.wasmType,
-      mutable: false,
-    })),
+  const typeLabel = `struct_${structuralId}`;
+  const runtimeType = defineStructType(ctx.mod, {
+    name: typeLabel,
+    fields: [
+      {
+        name: "__ancestors_table",
+        type: ctx.rtt.extensionHelpers.i32Array,
+        mutable: false,
+      },
+      {
+        name: "__field_index_table",
+        type: ctx.rtt.fieldLookupHelpers.lookupTableType,
+        mutable: false,
+      },
+      {
+        name: "__method_lookup_table",
+        type: ctx.rtt.methodLookupHelpers.lookupTableType,
+        mutable: false,
+      },
+      ...fields.map((field) => ({
+        name: field.name,
+        type: field.wasmType,
+        mutable: true,
+      })),
+    ],
+    supertype: binaryenTypeToHeapType(ctx.rtt.baseType),
     final: true,
   });
+  const fieldTableExpr = ctx.rtt.fieldLookupHelpers.registerType({
+    typeLabel,
+    runtimeType,
+    baseType: ctx.rtt.baseType,
+    fields,
+  });
+  const methodTableExpr = ctx.rtt.methodLookupHelpers.createTable([]);
+
+  const ancestorsGlobal = `__ancestors_table_${typeLabel}`;
+  ctx.mod.addGlobal(
+    ancestorsGlobal,
+    ctx.rtt.extensionHelpers.i32Array,
+    false,
+    ctx.rtt.extensionHelpers.initExtensionArray([structuralId])
+  );
+
+  const fieldTableGlobal = `__field_index_table_${typeLabel}`;
+  ctx.mod.addGlobal(
+    fieldTableGlobal,
+    ctx.rtt.fieldLookupHelpers.lookupTableType,
+    false,
+    fieldTableExpr
+  );
+
+  const methodTableGlobal = `__method_table_${typeLabel}`;
+  ctx.mod.addGlobal(
+    methodTableGlobal,
+    ctx.rtt.methodLookupHelpers.lookupTableType,
+    false,
+    methodTableExpr
+  );
 
   const info: StructuralTypeInfo = {
     typeId: structuralId,
-    typeRef,
+    runtimeType,
+    interfaceType: ctx.rtt.baseType,
     fields,
     fieldMap: new Map(fields.map((field) => [field.name, field])),
+    ancestorsGlobal,
+    fieldTableGlobal,
+    methodTableGlobal,
+    typeLabel,
   };
   ctx.structTypes.set(structuralId, info);
   return info;
