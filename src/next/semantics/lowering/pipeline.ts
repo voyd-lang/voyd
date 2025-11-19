@@ -590,6 +590,8 @@ const lowerObjectLiteralEntry = (
   throw new Error("unsupported object literal entry");
 };
 
+// The parser currently emits `(field target)` for `target.field`, so detect it by
+// checking that the identifier comes after the target in the source.
 const isFieldAccessForm = (form: Form): boolean => {
   if (form.length !== 2) {
     return false;

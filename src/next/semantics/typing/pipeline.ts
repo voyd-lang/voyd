@@ -1050,6 +1050,8 @@ const getStructuralFields = (
   return undefined;
 };
 
+// Performs a best-effort structural compatibility check so callers can assign
+// objects that share the same field layout even if their type IDs differ.
 const structuralTypeSatisfies = (
   actual: TypeId,
   expected: TypeId,
