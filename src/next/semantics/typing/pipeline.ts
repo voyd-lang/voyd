@@ -692,10 +692,19 @@ const matchesOverloadSignature = (
 
   return signature.parameters.every((param, index) => {
     const arg = args[index];
-    return (
-      (arg.type === ctx.unknownType || param.type === arg.type) &&
-      arg.label === param.label
-    );
+    if (arg.label !== param.label) {
+      return false;
+    }
+
+    if (arg.type === ctx.unknownType) {
+      return true;
+    }
+
+    if (param.type === arg.type) {
+      return true;
+    }
+
+    return structuralTypeSatisfies(arg.type, param.type, ctx);
   });
 };
 

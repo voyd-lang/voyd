@@ -1,0 +1,180 @@
+import { describe, expect, it } from "vitest";
+import { runTypingPipeline } from "../pipeline.js";
+import type { HirNamedTypeExpr, HirObjectTypeExpr } from "../../hir/nodes.js";
+import type { OverloadSetId } from "../../ids.js";
+import { createModuleContext } from "./helpers.js";
+
+const createNamedType = (
+  name: string,
+  ast: number,
+  span: HirNamedTypeExpr["span"]
+): HirNamedTypeExpr => ({
+  typeKind: "named",
+  path: [name],
+  ast,
+  span,
+});
+
+describe("overload resolution", () => {
+  it("matches structural arguments against overload parameters", () => {
+    const ctx = createModuleContext();
+    const overloadSetId: OverloadSetId = 0;
+
+    const pointAliasSymbol = ctx.symbolTable.declare({
+      name: "Point",
+      kind: "type",
+      declaredAt: ctx.nextNode(),
+    });
+    const fooPointSymbol = ctx.symbolTable.declare({
+      name: "foo",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    const fooBoolSymbol = ctx.symbolTable.declare({
+      name: "foo",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    const pointParamSymbol = ctx.symbolTable.declare({
+      name: "p",
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const boolParamSymbol = ctx.symbolTable.declare({
+      name: "flag",
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const mainSymbol = ctx.symbolTable.declare({
+      name: "main",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+
+    const pointAliasTarget: HirObjectTypeExpr = {
+      typeKind: "object",
+      fields: [
+        {
+          name: "x",
+          type: createNamedType("i32", ctx.nextNode(), ctx.span),
+          span: ctx.span,
+        },
+      ],
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    };
+    ctx.builder.addItem({
+      kind: "type-alias",
+      visibility: "module",
+      symbol: pointAliasSymbol,
+      target: pointAliasTarget,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+
+    const pointType = createNamedType("Point", ctx.nextNode(), ctx.span);
+    const boolType = createNamedType("bool", ctx.nextNode(), ctx.span);
+    const intType = createNamedType("i32", ctx.nextNode(), ctx.span);
+
+    ctx.builder.addFunction({
+      kind: "function",
+      visibility: "module",
+      symbol: fooPointSymbol,
+      parameters: [
+        {
+          symbol: pointParamSymbol,
+          pattern: { kind: "identifier", symbol: pointParamSymbol },
+          mutable: false,
+          span: ctx.span,
+          type: pointType,
+        },
+      ],
+      returnType: intType,
+      body: ctx.createLiteral("i32", "0"),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+
+    ctx.builder.addFunction({
+      kind: "function",
+      visibility: "module",
+      symbol: fooBoolSymbol,
+      parameters: [
+        {
+          symbol: boolParamSymbol,
+          pattern: { kind: "identifier", symbol: boolParamSymbol },
+          mutable: false,
+          span: ctx.span,
+          type: boolType,
+        },
+      ],
+      returnType: boolType,
+      body: ctx.createLiteral("boolean", "false"),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+
+    const structuralArg = ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "object-literal",
+      literalKind: "structural",
+      entries: [
+        {
+          kind: "field",
+          name: "extra",
+          value: ctx.createLiteral("i32", "1"),
+          span: ctx.span,
+        },
+        {
+          kind: "field",
+          name: "x",
+          value: ctx.createLiteral("i32", "2"),
+          span: ctx.span,
+        },
+      ],
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+
+    const callExpr = ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "call",
+      callee: ctx.builder.addExpression({
+        kind: "expr",
+        exprKind: "overload-set",
+        name: "foo",
+        set: overloadSetId,
+        ast: ctx.nextNode(),
+        span: ctx.span,
+      }),
+      args: [{ expr: structuralArg }],
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+
+    ctx.builder.addFunction({
+      kind: "function",
+      visibility: "public",
+      symbol: mainSymbol,
+      parameters: [],
+      returnType: intType,
+      body: callExpr,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+
+    const typing = runTypingPipeline({
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map([[overloadSetId, [fooPointSymbol, fooBoolSymbol]]]),
+    });
+
+    const callType = typing.table.getExprType(callExpr);
+    expect(callType).toBeDefined();
+    const callDesc = typing.arena.get(callType!);
+    expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
+
+    const callTarget = typing.callTargets.get(callExpr);
+    expect(callTarget).toBe(fooPointSymbol);
+  });
+});
