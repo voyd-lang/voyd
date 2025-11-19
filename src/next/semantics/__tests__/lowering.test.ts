@@ -4,8 +4,13 @@ import { runBindingPipeline } from "../binding/pipeline.js";
 import { createHirBuilder } from "../hir/builder.js";
 import {
   type HirBlockExpr,
+  type HirCallExpr,
+  type HirFieldAccessExpr,
   type HirFunction,
   type HirIfExpr,
+  type HirLetStatement,
+  type HirObjectLiteralExpr,
+  type HirTypeAlias,
 } from "../hir/nodes.js";
 import { runLoweringPipeline } from "../lowering/pipeline.js";
 import { toSourceSpan } from "../utils.js";
@@ -69,5 +74,80 @@ describe("lowering pipeline", () => {
     expect(hir.module.exports.map((entry) => entry.symbol)).toEqual([
       mainSymbol,
     ]);
+  });
+
+  it("lowers structural object declarations and expressions", () => {
+    const name = "structural_objects.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+    });
+
+    const alias = Array.from(hir.items.values()).find(
+      (item): item is HirTypeAlias => item.kind === "type-alias"
+    );
+    expect(alias).toBeDefined();
+    expect(alias?.target.typeKind).toBe("object");
+    if (alias?.target.typeKind === "object") {
+      const fieldNames = alias.target.fields.map((field) => field.name);
+      expect(fieldNames).toEqual(["x", "y", "z"]);
+    }
+
+    const addSymbol = symbolTable.resolve("add", symbolTable.rootScope)!;
+    const addFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === addSymbol
+    );
+    expect(addFn).toBeDefined();
+    const addParamType = addFn?.parameters[0]?.type;
+    expect(addParamType?.typeKind).toBe("named");
+    if (addParamType?.typeKind === "named") {
+      expect(addParamType.path).toEqual(["MyVec"]);
+    }
+
+    const addBody = hir.expressions.get(addFn!.body)!;
+    expect(addBody.exprKind).toBe("block");
+    const addValue = (addBody as HirBlockExpr).value;
+    expect(addValue).toBeDefined();
+    const addCall = hir.expressions.get(addValue!) as HirCallExpr;
+    expect(addCall.exprKind).toBe("call");
+    const firstField = hir.expressions.get(addCall.args[0]!.expr)!;
+    expect(firstField.exprKind).toBe("field-access");
+    expect((firstField as HirFieldAccessExpr).field).toBe("x");
+
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope)!;
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+    const mainBlock = hir.expressions.get(mainFn!.body)!;
+    expect(mainBlock.exprKind).toBe("block");
+    const blockExpr = mainBlock as HirBlockExpr;
+    const secondStmt = hir.statements.get(blockExpr.statements[1]!)!;
+    expect(secondStmt.kind).toBe("let");
+    const letStmt = secondStmt as HirLetStatement;
+    const initializer = hir.expressions.get(letStmt.initializer)!;
+    expect(initializer.exprKind).toBe("object-literal");
+    const objectLiteral = initializer as HirObjectLiteralExpr;
+    expect(objectLiteral.entries.some((entry) => entry.kind === "spread")).toBe(
+      true
+    );
   });
 });

@@ -31,6 +31,7 @@ export interface BindingResult {
   symbolTable: SymbolTable;
   scopeByNode: Map<NodeId, ScopeId>;
   functions: BoundFunction[];
+  typeAliases: BoundTypeAlias[];
   overloads: Map<OverloadSetId, BoundOverloadSet>;
   overloadBySymbol: Map<SymbolId, OverloadSetId>;
   diagnostics: Diagnostic[];
@@ -46,6 +47,16 @@ export interface BoundFunction {
   returnTypeExpr?: Expr;
   body: Expr;
   overloadSetId?: OverloadSetId;
+  moduleIndex: number;
+}
+
+export interface BoundTypeAlias {
+  name: string;
+  form: Form;
+  visibility: HirVisibility;
+  symbol: SymbolId;
+  target: Expr;
+  moduleIndex: number;
 }
 
 export interface BoundOverloadSet {
@@ -68,6 +79,13 @@ interface ParsedFunctionDecl {
   visibility: HirVisibility;
   signature: ParsedFunctionSignature;
   body: Expr;
+}
+
+interface ParsedTypeAliasDecl {
+  form: Form;
+  visibility: HirVisibility;
+  name: IdentifierAtom;
+  target: Expr;
 }
 
 interface ParsedFunctionSignature {
@@ -94,6 +112,7 @@ interface OverloadBucket {
 interface BindingContext extends BindingResult {
   overloadBuckets: Map<string, OverloadBucket>;
   syntaxByNode: Map<NodeId, Syntax>;
+  nextModuleIndex: number;
 }
 
 export const runBindingPipeline = ({
@@ -104,11 +123,13 @@ export const runBindingPipeline = ({
     symbolTable,
     scopeByNode: new Map([[moduleForm.syntaxId, symbolTable.rootScope]]),
     functions: [],
+    typeAliases: [],
     overloads: new Map(),
     overloadBySymbol: new Map(),
     diagnostics: [],
     overloadBuckets: new Map(),
     syntaxByNode: new Map([[moduleForm.syntaxId, moduleForm]]),
+    nextModuleIndex: 0,
   };
 
   bindModule(moduleForm, bindingContext);
@@ -124,12 +145,20 @@ const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   for (const entry of entries) {
     if (!isForm(entry)) continue;
     const parsed = parseFunctionDecl(entry);
-    if (!parsed) {
-      throw new Error(
-        "unsupported top-level form; expected a function declaration"
-      );
+    if (parsed) {
+      bindFunctionDecl(parsed, ctx, tracker);
+      continue;
     }
-    bindFunctionDecl(parsed, ctx, tracker);
+
+    const typeDecl = parseTypeAliasDecl(entry);
+    if (typeDecl) {
+      bindTypeAlias(typeDecl, ctx);
+      continue;
+    }
+
+    throw new Error(
+      "unsupported top-level form; expected a function or type declaration"
+    );
   }
 
   if (tracker.depth() !== 1) {
@@ -217,6 +246,39 @@ const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
     signature,
     body: bodyExpr,
   };
+};
+
+const parseTypeAliasDecl = (form: Form): ParsedTypeAliasDecl | null => {
+  let index = 0;
+  let visibility: HirVisibility = "module";
+  const first = form.at(0);
+
+  if (isIdentifierWithValue(first, "pub")) {
+    visibility = "public";
+    index += 1;
+  }
+
+  const keyword = form.at(index);
+  if (!isIdentifierWithValue(keyword, "type")) {
+    return null;
+  }
+
+  const assignment = form.at(index + 1);
+  if (!isForm(assignment) || !assignment.calls("=")) {
+    throw new Error("type declaration expects an assignment");
+  }
+
+  const nameExpr = assignment.at(1);
+  if (!isIdentifierAtom(nameExpr)) {
+    throw new Error("type name must be an identifier");
+  }
+
+  const target = assignment.at(2);
+  if (!target) {
+    throw new Error("type declaration missing target expression");
+  }
+
+  return { form, visibility, name: nameExpr, target };
 };
 
 const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
@@ -365,8 +427,34 @@ const bindFunctionDecl = (
     params: boundParams,
     returnTypeExpr: decl.signature.returnType,
     body: decl.body,
+    moduleIndex: ctx.nextModuleIndex++,
   });
   recordFunctionOverload(ctx.functions.at(-1)!, declarationScope, ctx);
+};
+
+const bindTypeAlias = (
+  decl: ParsedTypeAliasDecl,
+  ctx: BindingContext
+): void => {
+  rememberSyntax(decl.form, ctx);
+  rememberSyntax(decl.name, ctx);
+  rememberSyntax(decl.target as Syntax, ctx);
+
+  const symbol = ctx.symbolTable.declare({
+    name: decl.name.value,
+    kind: "type",
+    declaredAt: decl.form.syntaxId,
+    metadata: { entity: "type-alias" },
+  });
+
+  ctx.typeAliases.push({
+    name: decl.name.value,
+    form: decl.form,
+    visibility: decl.visibility,
+    symbol,
+    target: decl.target,
+    moduleIndex: ctx.nextModuleIndex++,
+  });
 };
 
 const bindExpr = (

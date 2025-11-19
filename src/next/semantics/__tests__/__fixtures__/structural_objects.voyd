@@ -1,0 +1,9 @@
+type MyVec = { x: i32, y: i32, z: i32 }
+
+fn add(vec: MyVec) -> i32
+  vec.x + vec.y
+
+pub fn main() -> i32
+  let my_vec = { x: 1, y: 2, z: 3 }
+  let clone = { ...my_vec, extra: 10 }
+  add(clone)

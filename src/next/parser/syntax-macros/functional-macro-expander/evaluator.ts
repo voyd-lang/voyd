@@ -1,5 +1,11 @@
 import { Form } from "../../ast/form.js";
-import { Expr, IdentifierAtom, isForm, isIdentifierAtom } from "../../ast/index.js";
+import {
+  Expr,
+  IdentifierAtom,
+  formCallsInternal,
+  isForm,
+  isIdentifierAtom,
+} from "../../ast/index.js";
 import { Syntax } from "../../ast/syntax.js";
 import { createBuiltins, fnsToSkipArgEval } from "./builtins.js";
 import {
@@ -28,6 +34,10 @@ export function evalMacroExpr(
   }
 
   if (!isForm(expr)) return expr;
+
+  if (expr.calls(".")) {
+    return evalMacroExpr(transformDotCall(expr), scope, opts);
+  }
 
   if (expr.calls("block")) {
     return evalBlock(expr, scope);
@@ -173,3 +183,28 @@ const builtins = createBuiltins({
   evalMacroExpr,
   callLambda,
 });
+
+function transformDotCall(form: Form): Form {
+  const left = form.at(1);
+  const right = form.at(2);
+  if (!left || !right) {
+    throw new Error("dot expression missing target or member");
+  }
+
+  if (isForm(right) && formCallsInternal(right.at(1), "generics")) {
+    const elements = right.toArray();
+    return recreateForm(form, [
+      elements[0]!,
+      elements[1]!,
+      left,
+      ...elements.slice(2),
+    ]);
+  }
+
+  if (isForm(right)) {
+    const elements = right.toArray();
+    return recreateForm(form, [elements[0]!, left, ...elements.slice(1)]);
+  }
+
+  return recreateForm(form, [right, left]);
+}

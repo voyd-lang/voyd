@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline } from "../binding/pipeline.js";
 import { loadAst } from "./load-ast.js";
+import { isForm, isIdentifierAtom } from "../../parser/index.js";
 
 describe("binding pipeline", () => {
   it("collects functions, parameters, and scopes for the fib sample module", () => {
@@ -72,5 +73,30 @@ describe("binding pipeline", () => {
       return label!;
     });
     expect(labels).toEqual(expect.arrayContaining(["from", "to"]));
+  });
+
+  it("binds structural object type aliases and parameters", () => {
+    const name = "structural_objects.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    expect(binding.typeAliases).toHaveLength(1);
+    const alias = binding.typeAliases[0]!;
+    expect(symbolTable.getSymbol(alias.symbol).kind).toBe("type");
+    expect(isForm(alias.target) && alias.target.callsInternal("object_literal"))
+      .toBe(true);
+
+    const addFn = binding.functions.find(
+      (fn) => symbolTable.getSymbol(fn.symbol).name === "add"
+    );
+    expect(addFn).toBeDefined();
+    const paramType = addFn?.params[0]?.typeExpr;
+    expect(paramType).toBeDefined();
+    expect(isIdentifierAtom(paramType) && paramType.value === "MyVec").toBe(
+      true
+    );
   });
 });
