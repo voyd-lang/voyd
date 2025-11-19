@@ -106,15 +106,21 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
         [
           "block",
           [
-            "concat",
+            ".",
             [
               "\`",
               "parameters",
             ],
             [
-              "slice",
-              "definitions",
-              "1",
+              "concat",
+              [
+                ".",
+                "definitions",
+                [
+                  "slice",
+                  "1",
+                ],
+              ],
             ],
           ],
         ],
@@ -178,38 +184,41 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
     ],
   ],
   [
-    "reduce",
+    ".",
     "array",
-    "0",
-    "1",
-    "2",
     [
-      ":",
-      "hey",
+      "reduce",
+      "0",
+      "1",
+      "2",
       [
-        "=>",
-        [],
+        ":",
+        "hey",
         [
-          "block",
+          "=>",
+          [],
           [
-            "log",
-            "val",
-          ],
-          [
-            "+",
-            "acc",
-            "val",
+            "block",
+            [
+              "log",
+              "val",
+            ],
+            [
+              "+",
+              "acc",
+              "val",
+            ],
           ],
         ],
       ],
-    ],
-    [
-      ":",
-      "with",
       [
-        "=>",
-        [],
-        "0",
+        ":",
+        "with",
+        [
+          "=>",
+          [],
+          "0",
+        ],
       ],
     ],
   ],
@@ -262,21 +271,24 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
       [
         "+",
         [
-          "reduce",
+          ".",
           "array",
-          "0",
           [
-            "=>",
+            "reduce",
+            "0",
             [
-              "acc",
-              "val",
-            ],
-            [
-              "block",
+              "=>",
               [
-                "+",
                 "acc",
                 "val",
+              ],
+              [
+                "block",
+                [
+                  "+",
+                  "acc",
+                  "val",
+                ],
               ],
             ],
           ],
@@ -461,8 +473,9 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
             [
               "+",
               [
-                "value",
+                ".",
                 "x",
+                "value",
               ],
               "1",
             ],
@@ -482,34 +495,76 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
     ],
   ],
   [
-    "match",
+    ".",
+    [
+      ".",
+      [
+        ".",
+        "arr",
+        [
+          "pop",
+        ],
+      ],
+      [
+        "match",
+        "val",
+        [
+          ":",
+          [
+            "Some",
+            [
+              "generics",
+              [
+                "Optional",
+                [
+                  "generics",
+                  "i32",
+                ],
+              ],
+            ],
+          ],
+          [
+            "block",
+            [
+              ".",
+              "val",
+              "value",
+            ],
+          ],
+        ],
+        [
+          ":",
+          "None",
+          [
+            "block",
+            [
+              "None",
+              [
+                "object_literal",
+              ],
+            ],
+          ],
+        ],
+      ],
+    ],
     [
       "match",
-      [
-        "pop",
-        "arr",
-      ],
-      "val",
+      "v",
       [
         ":",
         [
           "Some",
           [
             "generics",
-            [
-              "Optional",
-              [
-                "generics",
-                "i32",
-              ],
-            ],
+            "i32",
           ],
         ],
         [
           "block",
           [
+            ".",
+            "v",
             "value",
-            "val",
           ],
         ],
       ],
@@ -518,71 +573,82 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
         "None",
         [
           "block",
-          [
-            "None",
-            [
-              "object_literal",
-            ],
-          ],
+          "-1",
         ],
-      ],
-    ],
-    "v",
-    [
-      ":",
-      [
-        "Some",
-        [
-          "generics",
-          "i32",
-        ],
-      ],
-      [
-        "block",
-        [
-          "value",
-          "v",
-        ],
-      ],
-    ],
-    [
-      ":",
-      "None",
-      [
-        "block",
-        "-1",
       ],
     ],
   ],
   [
-    "match",
+    ".",
+    [
+      ".",
+      [
+        ".",
+        "arr",
+        [
+          "pop",
+        ],
+      ],
+      [
+        "match",
+        "val",
+        [
+          ":",
+          [
+            "Some",
+            [
+              "generics",
+              [
+                "Optional",
+                [
+                  "generics",
+                  "i32",
+                ],
+              ],
+            ],
+          ],
+          [
+            "block",
+            [
+              ".",
+              "val",
+              "value",
+            ],
+          ],
+        ],
+        [
+          ":",
+          "None",
+          [
+            "block",
+            [
+              "None",
+              [
+                "object_literal",
+              ],
+            ],
+          ],
+        ],
+      ],
+    ],
     [
       "match",
-      [
-        "pop",
-        "arr",
-      ],
-      "val",
+      "v",
       [
         ":",
         [
           "Some",
           [
             "generics",
-            [
-              "Optional",
-              [
-                "generics",
-                "i32",
-              ],
-            ],
+            "i32",
           ],
         ],
         [
           "block",
           [
+            ".",
+            "v",
             "value",
-            "val",
           ],
         ],
       ],
@@ -591,39 +657,8 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
         "None",
         [
           "block",
-          [
-            "None",
-            [
-              "object_literal",
-            ],
-          ],
+          "-1",
         ],
-      ],
-    ],
-    "v",
-    [
-      ":",
-      [
-        "Some",
-        [
-          "generics",
-          "i32",
-        ],
-      ],
-      [
-        "block",
-        [
-          "value",
-          "v",
-        ],
-      ],
-    ],
-    [
-      ":",
-      "None",
-      [
-        "block",
-        "-1",
       ],
     ],
   ],
@@ -663,16 +698,18 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
             [
               "...",
               [
-                "hey",
+                ".",
                 "test",
+                "hey",
               ],
             ],
             [
-              "now",
+              ".",
               [
                 "&",
                 "other",
               ],
+              "now",
             ],
           ],
         ],
@@ -739,8 +776,11 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
               [
                 ">",
                 [
-                  "len",
+                  ".",
                   "args",
+                  [
+                    "len",
+                  ],
                 ],
                 "1",
               ],
@@ -750,45 +790,57 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                 [
                   "block",
                   [
-                    "log",
+                    ".",
                     "console",
                     [
-                      "new_string",
+                      "log",
                       [
-                        "object_literal",
+                        "new_string",
                         [
-                          ":",
-                          "from",
+                          "object_literal",
                           [
-                            "FixedArray",
+                            ":",
+                            "from",
                             [
-                              "generics",
-                              "i32",
+                              "FixedArray",
+                              [
+                                "generics",
+                                "i32",
+                              ],
+                              "72",
+                              "101",
+                              "121",
+                              "32",
+                              "116",
+                              "104",
+                              "101",
+                              "114",
+                              "101",
+                              "33",
                             ],
-                            "72",
-                            "101",
-                            "121",
-                            "32",
-                            "116",
-                            "104",
-                            "101",
-                            "114",
-                            "101",
-                            "33",
                           ],
                         ],
                       ],
                     ],
                   ],
                   [
-                    "unwrap",
+                    ".",
                     [
-                      "parseInt",
+                      ".",
                       [
-                        "at",
+                        ".",
                         "args",
-                        "1",
+                        [
+                          "at",
+                          "1",
+                        ],
                       ],
+                      [
+                        "parseInt",
+                      ],
+                    ],
+                    [
+                      "unwrap",
                     ],
                   ],
                 ],
@@ -829,9 +881,12 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
           "=",
           "a",
           [
-            "boop",
+            ".",
             "hello",
-            "1",
+            [
+              "boop",
+              "1",
+            ],
           ],
         ],
       ],
@@ -1293,22 +1348,10 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
     [
       "block",
       [
-        "call-closure",
+        ".",
         [
-          "=>",
-          [
-            ":",
-            "x",
-            "i32",
-          ],
-          [
-            "*",
-            "x",
-            "5",
-          ],
-        ],
-        [
-          "call-closure",
+          ".",
+          "2",
           [
             "=>",
             [
@@ -1322,7 +1365,19 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
               "3",
             ],
           ],
-          "2",
+        ],
+        [
+          "=>",
+          [
+            ":",
+            "x",
+            "i32",
+          ],
+          [
+            "*",
+            "x",
+            "5",
+          ],
         ],
       ],
     ],
@@ -1379,23 +1434,29 @@ exports[`parser supports generics 1`] = `
         ],
       ],
       [
-        "set",
-        [
-          "generics",
-          "i32",
-        ],
+        ".",
         "arr",
-        "0",
-        "1",
+        [
+          "set",
+          [
+            "generics",
+            "i32",
+          ],
+          "0",
+          "1",
+        ],
       ],
       [
-        "get",
-        [
-          "generics",
-          "i32",
-        ],
+        ".",
         "arr",
-        "0",
+        [
+          "get",
+          [
+            "generics",
+            "i32",
+          ],
+          "0",
+        ],
       ],
     ],
   ],

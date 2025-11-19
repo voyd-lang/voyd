@@ -3,7 +3,6 @@ import {
   Expr,
   formCallsInternal,
   FormCursor,
-  IdentifierAtom,
   isForm,
   isIdentifierAtom,
 } from "../ast/index.js";
@@ -62,7 +61,7 @@ const parsePrecedence = (cursor: FormCursor, minPrecedence = 0): Expr => {
     cursor.consume();
     const right = parsePrecedence(cursor, precedence + 1);
 
-    expr = isDotOp(op) ? parseDot(expr, right) : new Form([op!, expr, right]);
+    expr = new Form([op!, expr, right]);
 
     if (isForm(expr) && isLambdaWithTupleArgs(expr)) {
       expr = removeTupleFromLambdaParameters(expr);
@@ -70,32 +69,6 @@ const parsePrecedence = (cursor: FormCursor, minPrecedence = 0): Expr => {
   }
 
   return expr;
-};
-
-const isDotOp = (op?: Expr): op is IdentifierAtom =>
-  isIdentifierAtom(op) && op.eq(".");
-
-const parseDot = (left: Expr, right: Expr): Form => {
-  if (isForm(right) && right.calls("=>")) {
-    return new Form(["call-closure", right, left]);
-  }
-
-  if (isForm(right) && formCallsInternal(right.at(1), "generics")) {
-    const rightElements = right.toArray();
-    return new Form([
-      rightElements[0]!,
-      rightElements[1]!,
-      left,
-      ...rightElements.slice(2),
-    ]);
-  }
-
-  if (isForm(right)) {
-    const rightElements = right.toArray();
-    return new Form([rightElements[0]!, left, ...rightElements.slice(1)]);
-  }
-
-  return new Form([right, left]);
 };
 
 const infixOpInfo = (op?: Expr): number | undefined => {

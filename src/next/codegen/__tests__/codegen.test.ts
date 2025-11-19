@@ -75,6 +75,6 @@ describe("next codegen", () => {
     const instance = getWasmInstance(module);
     const main = instance.exports.main;
     expect(typeof main).toBe("function");
-    expect((main as () => number)()).toBe(16);
+    expect((main as () => number)()).toBe(21);
   });
 });

@@ -23,7 +23,10 @@ describe("primary syntax macro", () => {
 
   it("parses method calls with arguments", () => {
     const ast = expand("pub fn main() foo.bar(x)");
-    expect(ast).toEqual(["ast", ["pub", "fn", ["main"], ["bar", "foo", "x"]]]);
+    expect(ast).toEqual([
+      "ast",
+      ["pub", "fn", ["main"], [".", "foo", ["bar", "x"]]],
+    ]);
   });
 
   it("parses tuple destructuring", () => {
@@ -38,7 +41,12 @@ describe("primary syntax macro", () => {
     const ast = expand("pub fn main() foo.bar<Option>(x)");
     expect(ast).toEqual([
       "ast",
-      ["pub", "fn", ["main"], ["bar", ["generics", "Option"], "foo", "x"]],
+      [
+        "pub",
+        "fn",
+        ["main"],
+        [".", "foo", ["bar", ["generics", "Option"], "x"]],
+      ],
     ]);
   });
 
@@ -49,12 +57,7 @@ describe("primary syntax macro", () => {
     `);
     expect(ast).toEqual([
       "ast",
-      [
-        "pub",
-        "fn",
-        ["main"],
-        ["block", ["call-closure", ["=>", "x", ["+", "x", "1"]], "foo"]],
-      ],
+      ["pub", "fn", ["main"], ["block", [".", "foo", ["=>", "x", ["+", "x", "1"]]]]],
     ]);
   });
 

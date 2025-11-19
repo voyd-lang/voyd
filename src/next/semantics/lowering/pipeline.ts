@@ -2,6 +2,7 @@ import {
   type Expr,
   type Form,
   type Syntax,
+  formCallsInternal,
   isBoolAtom,
   isFloatAtom,
   isForm,
@@ -275,6 +276,10 @@ const lowerExpr = (
       return lowerFieldAccessExpr(expr, ctx, scopes);
     }
 
+    if (expr.calls(".")) {
+      return lowerDotExpr(expr, ctx, scopes);
+    }
+
     if (expr.calls("block")) {
       return lowerBlock(expr, ctx, scopes);
     }
@@ -403,18 +408,15 @@ const lowerIf = (
   });
 };
 
-const lowerCall = (
-  form: Form,
+const lowerCallFromElements = (
+  calleeExpr: Expr,
+  argsExprs: readonly Expr[],
+  ast: Syntax,
   ctx: LowerContext,
   scopes: LowerScopeStack
 ): HirExprId => {
-  const callee = form.at(0);
-  if (!callee) {
-    throw new Error("call expression missing callee");
-  }
-
-  const calleeId = lowerExpr(callee, ctx, scopes);
-  const args = form.rest.map((arg) => {
+  const calleeId = lowerExpr(calleeExpr, ctx, scopes);
+  const args = argsExprs.map((arg) => {
     if (isForm(arg) && arg.calls(":")) {
       const labelExpr = arg.at(1);
       const valueExpr = arg.at(2);
@@ -433,11 +435,24 @@ const lowerCall = (
   return ctx.builder.addExpression({
     kind: "expr",
     exprKind: "call",
-    ast: form.syntaxId,
-    span: toSourceSpan(form),
+    ast: ast.syntaxId,
+    span: toSourceSpan(ast),
     callee: calleeId,
     args,
   });
+};
+
+const lowerCall = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
+  const callee = form.at(0);
+  if (!callee) {
+    throw new Error("call expression missing callee");
+  }
+
+  return lowerCallFromElements(callee, form.rest, form, ctx, scopes);
 };
 
 const lowerLetStatement = (
@@ -590,23 +605,13 @@ const lowerObjectLiteralEntry = (
   throw new Error("unsupported object literal entry");
 };
 
-// The parser currently emits `(field target)` for `target.field`, so detect it by
-// checking that the identifier comes after the target in the source.
 const isFieldAccessForm = (form: Form): boolean => {
-  if (form.length !== 2) {
+  if (!form.calls(".") || form.length !== 3) {
     return false;
   }
-  const fieldExpr = form.at(0);
   const targetExpr = form.at(1);
-  if (!isIdentifierAtom(fieldExpr) || !targetExpr) {
-    return false;
-  }
-  const fieldLocation = fieldExpr.location;
-  const targetLocation = (targetExpr as Syntax)?.location;
-  if (!fieldLocation || !targetLocation) {
-    return false;
-  }
-  return targetLocation.startIndex < fieldLocation.startIndex;
+  const fieldExpr = form.at(2);
+  return !!targetExpr && isIdentifierAtom(fieldExpr);
 };
 
 const lowerFieldAccessExpr = (
@@ -614,9 +619,9 @@ const lowerFieldAccessExpr = (
   ctx: LowerContext,
   scopes: LowerScopeStack
 ): HirExprId => {
-  const fieldExpr = form.at(0);
   const targetExpr = form.at(1);
-  if (!isIdentifierAtom(fieldExpr) || !targetExpr) {
+  const fieldExpr = form.at(2);
+  if (!targetExpr || !isIdentifierAtom(fieldExpr)) {
     throw new Error("invalid field access expression");
   }
   return ctx.builder.addExpression({
@@ -627,6 +632,53 @@ const lowerFieldAccessExpr = (
     field: fieldExpr.value,
     target: lowerExpr(targetExpr, ctx, scopes),
   });
+};
+
+const lowerDotExpr = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
+  const targetExpr = form.at(1);
+  const memberExpr = form.at(2);
+  if (!targetExpr || !memberExpr) {
+    throw new Error("dot expression missing target or member");
+  }
+
+  if (isForm(memberExpr) && memberExpr.calls("=>")) {
+    return lowerCallFromElements(memberExpr, [targetExpr], form, ctx, scopes);
+  }
+
+  if (isForm(memberExpr)) {
+    return lowerMethodCallExpr(form, memberExpr, targetExpr, ctx, scopes);
+  }
+
+  throw new Error("unsupported dot expression");
+};
+
+const lowerMethodCallExpr = (
+  dotForm: Form,
+  memberForm: Form,
+  targetExpr: Expr,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
+  const elements = memberForm.toArray();
+  if (!elements.length) {
+    throw new Error("method access missing callee");
+  }
+
+  const calleeExpr = elements[0]!;
+  const potentialGenerics = elements[1];
+  const hasGenerics =
+    isForm(potentialGenerics) && formCallsInternal(potentialGenerics, "generics");
+  const argsStartIndex = hasGenerics ? 2 : 1;
+  const args = elements.slice(argsStartIndex);
+  const callArgs: Expr[] = hasGenerics
+    ? [potentialGenerics!, targetExpr, ...args]
+    : [targetExpr, ...args];
+
+  return lowerCallFromElements(calleeExpr, callArgs, dotForm, ctx, scopes);
 };
 
 const lowerAssignment = (

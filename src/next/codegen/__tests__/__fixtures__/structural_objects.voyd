@@ -1,12 +1,12 @@
-type MyVec = { x: i32, y: i32, z: i32 }
+type MyVec = { x: i32, y: i32, z: i32, other: { a: i32 } }
 
 fn add(vec: { x: i32, y: i32, extra: i32 }) -> i32
   vec.x + vec.y + vec.extra
 
-fn pick(vec: { x: i32, y: i32 }) -> i32
+fn pick(vec: MyVec) -> i32
   vec.x + vec.y
 
 pub fn main() -> i32
-  let my_vec = { x: 1, y: 2, z: 3 }
+  let my_vec = { x: 1, y: 2, z: 3, other: { a: 5 } }
   let clone = { ...my_vec, extra: 10 }
-  add(clone) + pick(my_vec)
+  add(clone) + pick(my_vec) + my_vec.other.a
