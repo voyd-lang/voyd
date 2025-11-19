@@ -116,7 +116,10 @@ describe("lowering pipeline", () => {
     );
     expect(addFn).toBeDefined();
     const addParamType = addFn?.parameters[0]?.type;
-    expect(addParamType?.typeKind).toBe("object");
+    expect(addParamType?.typeKind).toBe("named");
+    if (addParamType?.typeKind === "named") {
+      expect(addParamType.path).toEqual(["MyVec"]);
+    }
 
     const addBody = hir.expressions.get(addFn!.body)!;
     expect(addBody.exprKind).toBe("block");

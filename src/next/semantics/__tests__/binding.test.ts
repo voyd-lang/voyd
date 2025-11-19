@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline } from "../binding/pipeline.js";
 import { loadAst } from "./load-ast.js";
-import { isForm } from "../../parser/index.js";
+import { isForm, isIdentifierAtom } from "../../parser/index.js";
 
 describe("binding pipeline", () => {
   it("collects functions, parameters, and scopes for the fib sample module", () => {
@@ -95,7 +95,8 @@ describe("binding pipeline", () => {
     expect(addFn).toBeDefined();
     const paramType = addFn?.params[0]?.typeExpr;
     expect(paramType).toBeDefined();
-    expect(isForm(paramType) && paramType.callsInternal("object_literal"))
-      .toBe(true);
+    expect(isIdentifierAtom(paramType) && paramType.value === "MyVec").toBe(
+      true
+    );
   });
 });

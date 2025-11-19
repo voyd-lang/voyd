@@ -80,6 +80,10 @@ interface TypingContext {
   defaultEffectRow: EffectRowId;
   typeCheckMode: TypeCheckMode;
   currentFunctionReturnType: TypeId | undefined;
+  typeAliasTargets: Map<SymbolId, HirTypeExpr>;
+  typeAliasTypes: Map<SymbolId, TypeId>;
+  typeAliasesByName: Map<string, SymbolId>;
+  resolvingTypeAliases: Set<SymbolId>;
 }
 
 const DEFAULT_EFFECT_ROW: EffectRowId = 0;
@@ -105,9 +109,14 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     defaultEffectRow: DEFAULT_EFFECT_ROW,
     typeCheckMode: "relaxed",
     currentFunctionReturnType: undefined,
+    typeAliasTargets: new Map(),
+    typeAliasTypes: new Map(),
+    typeAliasesByName: new Map(),
+    resolvingTypeAliases: new Set(),
   };
 
   seedPrimitiveTypes(ctx);
+  registerTypeAliases(ctx);
   registerFunctionSignatures(ctx);
 
   runInferencePass(ctx);
@@ -131,6 +140,14 @@ const seedPrimitiveTypes = (ctx: TypingContext): void => {
   registerPrimitive(ctx, "f32");
   registerPrimitive(ctx, "f64");
   registerPrimitive(ctx, "string", "String");
+};
+
+const registerTypeAliases = (ctx: TypingContext): void => {
+  for (const item of ctx.hir.items.values()) {
+    if (item.kind !== "type-alias") continue;
+    ctx.typeAliasTargets.set(item.symbol, item.target);
+    ctx.typeAliasesByName.set(getSymbolName(item.symbol, ctx), item.symbol);
+  }
 };
 
 const registerFunctionSignatures = (ctx: TypingContext): void => {
@@ -845,6 +862,11 @@ const resolveNamedTypeExpr = (
   }
 
   const name = expr.path[0]!;
+  const aliasSymbol = ctx.typeAliasesByName.get(name);
+  if (aliasSymbol !== undefined) {
+    return resolveTypeAlias(aliasSymbol, ctx);
+  }
+
   const resolved = ctx.primitiveCache.get(name);
   if (typeof resolved === "number") {
     return resolved;
@@ -976,6 +998,33 @@ const ensureTypeMatches = (
   }
 
   throw new Error(`type mismatch for ${reason}`);
+};
+
+const resolveTypeAlias = (symbol: SymbolId, ctx: TypingContext): TypeId => {
+  const cached = ctx.typeAliasTypes.get(symbol);
+  if (typeof cached === "number") {
+    return cached;
+  }
+
+  if (ctx.resolvingTypeAliases.has(symbol)) {
+    return ctx.unknownType;
+  }
+
+  const target = ctx.typeAliasTargets.get(symbol);
+  if (!target) {
+    throw new Error(
+      `missing type alias target for ${getSymbolName(symbol, ctx)}`
+    );
+  }
+
+  ctx.resolvingTypeAliases.add(symbol);
+  try {
+    const resolved = resolveTypeExpr(target, ctx, ctx.unknownType);
+    ctx.typeAliasTypes.set(symbol, resolved);
+    return resolved;
+  } finally {
+    ctx.resolvingTypeAliases.delete(symbol);
+  }
 };
 
 const getSymbolName = (symbol: SymbolId, ctx: TypingContext): string =>

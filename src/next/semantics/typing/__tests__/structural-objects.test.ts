@@ -42,8 +42,13 @@ describe("structural objects", () => {
       kind: "value",
       declaredAt: ctx.nextNode(),
     });
+    const aliasSymbol = ctx.symbolTable.declare({
+      name: "MyVec",
+      kind: "type",
+      declaredAt: ctx.nextNode(),
+    });
 
-    const parameterType: HirObjectTypeExpr = {
+    const aliasTarget: HirObjectTypeExpr = {
       typeKind: "object",
       fields: [
         {
@@ -57,6 +62,21 @@ describe("structural objects", () => {
           span: ctx.span,
         },
       ],
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    };
+    ctx.builder.addItem({
+      kind: "type-alias",
+      visibility: "module",
+      symbol: aliasSymbol,
+      target: aliasTarget,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+
+    const parameterType: HirNamedTypeExpr = {
+      typeKind: "named",
+      path: ["MyVec"],
       ast: ctx.nextNode(),
       span: ctx.span,
     };
@@ -200,6 +220,14 @@ describe("structural objects", () => {
       hir: ctx.builder.finalize(),
       overloads: new Map(),
     });
+
+    const vecType = typing.valueTypes.get(vecSymbol);
+    expect(vecType).toBeDefined();
+    const vecDesc = typing.arena.get(vecType!);
+    expect(vecDesc.kind).toBe("structural-object");
+    if (vecDesc.kind !== "structural-object") {
+      throw new Error("expected structural object type for parameter");
+    }
 
     const cloneType = typing.valueTypes.get(cloneSymbol);
     expect(cloneType).toBeDefined();

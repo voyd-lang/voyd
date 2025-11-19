@@ -5,10 +5,12 @@ import type {
   HirBlockExpr,
   HirCallExpr,
   HirExpression,
+  HirFieldAccessExpr,
   HirFunction,
   HirGraph,
   HirIfExpr,
   HirLetStatement,
+  HirObjectLiteralExpr,
   HirPattern,
   HirWhileExpr,
 } from "../semantics/hir/index.js";
@@ -21,7 +23,11 @@ import type {
 } from "../semantics/ids.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypingResult } from "../semantics/typing/pipeline.js";
-import type { TypeDescriptor } from "../semantics/typing/type-arena.js";
+import {
+  defineStructType,
+  initStruct,
+  structGetFieldValue,
+} from "../../lib/binaryen-gc/index.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -37,6 +43,8 @@ interface FunctionMetadata {
   wasmName: string;
   paramTypes: readonly binaryen.Type[];
   resultType: binaryen.Type;
+  paramTypeIds: readonly TypeId[];
+  resultTypeId: TypeId;
 }
 
 interface CodegenContext {
@@ -47,6 +55,7 @@ interface CodegenContext {
   options: Required<CodegenOptions>;
   functions: Map<SymbolId, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, SymbolId>;
+  structTypes: Map<TypeId, StructuralTypeInfo>;
 }
 
 interface LocalBinding {
@@ -58,6 +67,20 @@ interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;
   locals: binaryen.Type[];
   nextLocalIndex: number;
+  returnTypeId: TypeId;
+}
+interface StructuralFieldInfo {
+  name: string;
+  typeId: TypeId;
+  wasmType: binaryen.Type;
+  index: number;
+}
+
+interface StructuralTypeInfo {
+  typeId: TypeId;
+  typeRef: binaryen.Type;
+  fields: StructuralFieldInfo[];
+  fieldMap: Map<string, StructuralFieldInfo>;
 }
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
@@ -70,6 +93,7 @@ export const codegen = (
   options: CodegenOptions = {}
 ): CodegenResult => {
   const mod = new binaryen.Module();
+  mod.setFeatures(binaryen.Features.All);
   const ctx: CodegenContext = {
     mod,
     symbolTable: semantics.symbolTable,
@@ -78,6 +102,7 @@ export const codegen = (
     options: { ...DEFAULT_OPTIONS, ...options },
     functions: new Map(),
     itemsToSymbols: new Map(),
+    structTypes: new Map(),
   };
 
   registerFunctionMetadata(ctx);
@@ -125,6 +150,8 @@ const registerFunctionMetadata = (ctx: CodegenContext): void => {
       wasmName: makeFunctionName(item, ctx),
       paramTypes,
       resultType,
+      paramTypeIds: descriptor.parameters.map((param) => param.type),
+      resultTypeId: descriptor.returnType,
     };
 
     ctx.functions.set(item.symbol, metadata);
@@ -159,6 +186,7 @@ const compileFunctionItem = (fn: HirFunction, ctx: CodegenContext): void => {
     bindings: new Map(),
     locals: [],
     nextLocalIndex: meta.paramTypes.length,
+    returnTypeId: meta.resultTypeId,
   };
 
   fn.parameters.forEach((param, index) => {
@@ -225,6 +253,10 @@ const compileExpression = (
       return compileWhileExpr(expr, ctx, fnCtx);
     case "assign":
       return compileAssignExpr(expr, ctx, fnCtx);
+    case "object-literal":
+      return compileObjectLiteralExpr(expr, ctx, fnCtx);
+    case "field-access":
+      return compileFieldAccessExpr(expr, ctx, fnCtx);
     case "tuple":
       throw new Error("tuple expressions cannot be evaluated directly");
     default:
@@ -290,14 +322,17 @@ const compileCallExpr = (
     throw new Error(`codegen missing callee expression ${expr.callee}`);
   }
 
-  const args = expr.args.map((arg) => compileExpression(arg.expr, ctx, fnCtx));
-
   if (callee.exprKind === "overload-set") {
     const targetSymbol = ctx.typing.callTargets.get(expr.id);
     if (typeof targetSymbol !== "number") {
       throw new Error("codegen missing overload resolution for indirect call");
     }
-    return emitResolvedCall(targetSymbol, args, expr.id, ctx);
+    const targetMeta = ctx.functions.get(targetSymbol);
+    if (!targetMeta) {
+      throw new Error(`codegen cannot call symbol ${targetSymbol}`);
+    }
+    const args = compileCallArguments(expr, targetMeta, ctx, fnCtx);
+    return emitResolvedCall(targetMeta, args, expr.id, ctx);
   }
 
   if (callee.exprKind !== "identifier") {
@@ -305,31 +340,31 @@ const compileCallExpr = (
   }
 
   const symbolRecord = ctx.symbolTable.getSymbol(callee.symbol);
-  const metadata = (symbolRecord.metadata ?? {}) as {
+  const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
     intrinsic?: boolean;
   };
 
-  if (metadata.intrinsic) {
+  if (intrinsicMetadata.intrinsic) {
+    const args = expr.args.map((arg) => compileExpression(arg.expr, ctx, fnCtx));
     return compileIntrinsicCall(symbolRecord.name, expr, args, ctx);
   }
 
-  return emitResolvedCall(callee.symbol, args, expr.id, ctx);
+  const targetMeta = ctx.functions.get(callee.symbol);
+  if (!targetMeta) {
+    throw new Error(`codegen missing metadata for symbol ${callee.symbol}`);
+  }
+  const args = compileCallArguments(expr, targetMeta, ctx, fnCtx);
+  return emitResolvedCall(targetMeta, args, expr.id, ctx);
 };
 
 const emitResolvedCall = (
-  symbol: SymbolId,
+  meta: FunctionMetadata,
   args: readonly binaryen.ExpressionRef[],
   callId: HirExprId,
   ctx: CodegenContext
 ): binaryen.ExpressionRef => {
-  const symbolRecord = ctx.symbolTable.getSymbol(symbol);
-  const targetMeta = ctx.functions.get(symbol);
-  if (!targetMeta) {
-    throw new Error(`codegen cannot call symbol ${symbolRecord.name}`);
-  }
-
   return ctx.mod.call(
-    targetMeta.wasmName,
+    meta.wasmName,
     args as number[],
     getExprBinaryenType(callId, ctx)
   );
@@ -377,7 +412,16 @@ const compileStatement = (
       return asStatement(ctx, compileExpression(stmt.expr, ctx, fnCtx));
     case "return":
       if (typeof stmt.value === "number") {
-        return ctx.mod.return(compileExpression(stmt.value, ctx, fnCtx));
+        const valueExpr = compileExpression(stmt.value, ctx, fnCtx);
+        const actualType = getRequiredExprType(stmt.value, ctx);
+        const coerced = coerceValueToType(
+          valueExpr,
+          actualType,
+          fnCtx.returnTypeId,
+          ctx,
+          fnCtx
+        );
+        return ctx.mod.return(coerced);
       }
       return ctx.mod.return();
     case "let":
@@ -487,10 +531,128 @@ const compileAssignExpr = (
   }
 
   const binding = getRequiredBinding(targetExpr.symbol, ctx, fnCtx);
+  const targetTypeId = getSymbolTypeId(targetExpr.symbol, ctx);
+  const valueTypeId = getRequiredExprType(expr.value, ctx);
+  const valueExpr = compileExpression(expr.value, ctx, fnCtx);
   return ctx.mod.local.set(
     binding.index,
-    compileExpression(expr.value, ctx, fnCtx)
+    coerceValueToType(valueExpr, valueTypeId, targetTypeId, ctx, fnCtx)
   );
+};
+
+const compileObjectLiteralExpr = (
+  expr: HirObjectLiteralExpr,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): binaryen.ExpressionRef => {
+  if (expr.literalKind !== "structural") {
+    throw new Error("nominal object literals are not supported yet");
+  }
+
+  const typeId = getRequiredExprType(expr.id, ctx);
+  const structInfo = getStructuralTypeInfo(typeId, ctx);
+  if (!structInfo) {
+    throw new Error("object literal missing structural type information");
+  }
+
+  const ops: binaryen.ExpressionRef[] = [];
+  const fieldTemps = new Map<string, LocalBinding>();
+  const initialized = new Set<string>();
+
+  structInfo.fields.forEach((field) => {
+    fieldTemps.set(field.name, allocateTempLocal(field.wasmType, fnCtx));
+  });
+
+  expr.entries.forEach((entry) => {
+    if (entry.kind === "field") {
+      const binding = fieldTemps.get(entry.name);
+      if (!binding) {
+        throw new Error(`object literal cannot set unknown field ${entry.name}`);
+      }
+      ops.push(
+        ctx.mod.local.set(
+          binding.index,
+          compileExpression(entry.value, ctx, fnCtx)
+        )
+      );
+      initialized.add(entry.name);
+      return;
+    }
+
+    const spreadType = getRequiredExprType(entry.value, ctx);
+    const spreadInfo = getStructuralTypeInfo(spreadType, ctx);
+    if (!spreadInfo) {
+      throw new Error("object spread requires a structural object");
+    }
+
+    const spreadTemp = allocateTempLocal(spreadInfo.typeRef, fnCtx);
+    ops.push(
+      ctx.mod.local.set(
+        spreadTemp.index,
+        compileExpression(entry.value, ctx, fnCtx)
+      )
+    );
+
+    spreadInfo.fields.forEach((sourceField) => {
+      const target = fieldTemps.get(sourceField.name);
+      if (!target) {
+        return;
+      }
+      const load = structGetFieldValue({
+        mod: ctx.mod,
+        fieldIndex: sourceField.index,
+        fieldType: sourceField.wasmType,
+        exprRef: ctx.mod.local.get(spreadTemp.index, spreadInfo.typeRef),
+      });
+      ops.push(ctx.mod.local.set(target.index, load));
+      initialized.add(sourceField.name);
+    });
+  });
+
+  structInfo.fields.forEach((field) => {
+    if (!initialized.has(field.name)) {
+      throw new Error(`missing initializer for field ${field.name}`);
+    }
+  });
+
+  const values = structInfo.fields.map((field) => {
+    const binding = fieldTemps.get(field.name);
+    if (!binding) {
+      throw new Error(`missing binding for field ${field.name}`);
+    }
+    return ctx.mod.local.get(binding.index, binding.type);
+  });
+  const literal = initStruct(ctx.mod, structInfo.typeRef, values);
+  if (ops.length === 0) {
+    return literal;
+  }
+  ops.push(literal);
+  return ctx.mod.block(null, ops, getExprBinaryenType(expr.id, ctx));
+};
+
+const compileFieldAccessExpr = (
+  expr: HirFieldAccessExpr,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): binaryen.ExpressionRef => {
+  const targetType = getRequiredExprType(expr.target, ctx);
+  const structInfo = getStructuralTypeInfo(targetType, ctx);
+  if (!structInfo) {
+    throw new Error("field access requires a structural object");
+  }
+
+  const field = structInfo.fieldMap.get(expr.field);
+  if (!field) {
+    throw new Error(`object does not contain field ${expr.field}`);
+  }
+
+  const pointer = compileExpression(expr.target, ctx, fnCtx);
+  return structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: field.index,
+    fieldType: field.wasmType,
+    exprRef: pointer,
+  });
 };
 
 interface PatternInitOptions {
@@ -522,9 +684,15 @@ const compilePatternInitialization = (
   const binding = options.declare
     ? declareLocal(pattern.symbol, ctx, fnCtx)
     : getRequiredBinding(pattern.symbol, ctx, fnCtx);
+  const targetTypeId = getSymbolTypeId(pattern.symbol, ctx);
+  const initializerType = getRequiredExprType(initializer, ctx);
+  const value = compileExpression(initializer, ctx, fnCtx);
 
   ops.push(
-    ctx.mod.local.set(binding.index, compileExpression(initializer, ctx, fnCtx))
+    ctx.mod.local.set(
+      binding.index,
+      coerceValueToType(value, initializerType, targetTypeId, ctx, fnCtx)
+    )
   );
 };
 
@@ -532,6 +700,7 @@ interface PendingTupleAssignment {
   pattern: Extract<HirPattern, { kind: "identifier" }>;
   tempIndex: number;
   tempType: binaryen.Type;
+  typeId: TypeId;
 }
 
 const compileTuplePattern = (
@@ -549,12 +718,22 @@ const compileTuplePattern = (
     fnCtx,
     ops
   );
-  pending.forEach(({ pattern: subPattern, tempIndex, tempType }) => {
+  pending.forEach(({ pattern: subPattern, tempIndex, tempType, typeId }) => {
     const binding = options.declare
       ? declareLocal(subPattern.symbol, ctx, fnCtx)
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
+    const targetTypeId = getSymbolTypeId(subPattern.symbol, ctx);
     ops.push(
-      ctx.mod.local.set(binding.index, ctx.mod.local.get(tempIndex, tempType))
+      ctx.mod.local.set(
+        binding.index,
+        coerceValueToType(
+          ctx.mod.local.get(tempIndex, tempType),
+          typeId,
+          targetTypeId,
+          ctx,
+          fnCtx
+        )
+      )
     );
   });
 };
@@ -609,6 +788,7 @@ const collectTupleAssignments = (
       pattern,
       tempIndex: temp.index,
       tempType: temp.type,
+      typeId: elementTypeId,
     },
   ];
 };
@@ -878,6 +1058,70 @@ const allocateTempLocal = (
   return binding;
 };
 
+const coerceValueToType = (
+  value: binaryen.ExpressionRef,
+  actualType: TypeId,
+  targetType: TypeId | undefined,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): binaryen.ExpressionRef => {
+  if (typeof targetType !== "number" || actualType === targetType) {
+    return value;
+  }
+
+  const targetInfo = getStructuralTypeInfo(targetType, ctx);
+  if (!targetInfo) {
+    return value;
+  }
+
+  const actualInfo = getStructuralTypeInfo(actualType, ctx);
+  if (!actualInfo) {
+    throw new Error("cannot coerce non-structural value to structural type");
+  }
+
+  if (actualInfo.typeId === targetInfo.typeId) {
+    return value;
+  }
+
+  return emitStructuralConversion(value, actualInfo, targetInfo, ctx, fnCtx);
+};
+
+const emitStructuralConversion = (
+  value: binaryen.ExpressionRef,
+  actual: StructuralTypeInfo,
+  target: StructuralTypeInfo,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): binaryen.ExpressionRef => {
+  target.fields.forEach((field) => {
+    if (!actual.fieldMap.has(field.name)) {
+      throw new Error(
+        `structural value missing field ${field.name} required for conversion`
+      );
+    }
+  });
+
+  const temp = allocateTempLocal(actual.typeRef, fnCtx);
+  const ops: binaryen.ExpressionRef[] = [
+    ctx.mod.local.set(temp.index, value),
+  ];
+  const sourceRef = ctx.mod.local.get(temp.index, actual.typeRef);
+
+  const values = target.fields.map((field) => {
+    const sourceField = actual.fieldMap.get(field.name)!;
+    return structGetFieldValue({
+      mod: ctx.mod,
+      fieldIndex: sourceField.index,
+      fieldType: sourceField.wasmType,
+      exprRef: sourceRef,
+    });
+  });
+
+  const converted = initStruct(ctx.mod, target.typeRef, values);
+  ops.push(converted);
+  return ctx.mod.block(null, ops, target.typeRef);
+};
+
 const getSymbolTypeId = (symbol: SymbolId, ctx: CodegenContext): TypeId => {
   const typeId = ctx.typing.valueTypes.get(symbol);
   if (typeof typeId === "number") {
@@ -925,13 +1169,21 @@ const getExprBinaryenType = (
 };
 
 const wasmTypeFor = (typeId: TypeId, ctx: CodegenContext): binaryen.Type => {
-  const descriptor = ctx.typing.arena.get(typeId);
-  return mapTypeDescriptorToWasm(descriptor);
-};
-
-const mapTypeDescriptorToWasm = (desc: TypeDescriptor): binaryen.Type => {
+  const desc = ctx.typing.arena.get(typeId);
   if (desc.kind === "primitive") {
     return mapPrimitiveToWasm(desc.name);
+  }
+
+  if (desc.kind === "structural-object") {
+    const structInfo = getStructuralTypeInfo(typeId, ctx);
+    if (!structInfo) {
+      throw new Error("missing structural type info");
+    }
+    return structInfo.typeRef;
+  }
+
+  if (desc.kind === "intersection" && typeof desc.structural === "number") {
+    return wasmTypeFor(desc.structural, ctx);
   }
 
   throw new Error(`codegen cannot map ${desc.kind} types to wasm yet`);
@@ -957,4 +1209,76 @@ const mapPrimitiveToWasm = (name: string): binaryen.Type => {
     default:
       throw new Error(`unsupported primitive type ${name}`);
   }
+};
+
+const getStructuralTypeInfo = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): StructuralTypeInfo | undefined => {
+  const structuralId = resolveStructuralTypeId(typeId, ctx);
+  if (typeof structuralId !== "number") {
+    return undefined;
+  }
+
+  const cached = ctx.structTypes.get(structuralId);
+  if (cached) {
+    return cached;
+  }
+
+  const desc = ctx.typing.arena.get(structuralId);
+  if (desc.kind !== "structural-object") {
+    return undefined;
+  }
+
+  const fields: StructuralFieldInfo[] = desc.fields.map((field, index) => ({
+    name: field.name,
+    typeId: field.type,
+    wasmType: wasmTypeFor(field.type, ctx),
+    index,
+  }));
+  const typeRef = defineStructType(ctx.mod, {
+    name: `struct_${structuralId}`,
+    fields: fields.map((field) => ({
+      name: field.name,
+      type: field.wasmType,
+      mutable: false,
+    })),
+    final: true,
+  });
+
+  const info: StructuralTypeInfo = {
+    typeId: structuralId,
+    typeRef,
+    fields,
+    fieldMap: new Map(fields.map((field) => [field.name, field])),
+  };
+  ctx.structTypes.set(structuralId, info);
+  return info;
+};
+
+const resolveStructuralTypeId = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): TypeId | undefined => {
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind === "structural-object") {
+    return typeId;
+  }
+  if (desc.kind === "intersection" && typeof desc.structural === "number") {
+    return desc.structural;
+  }
+  return undefined;
+};
+const compileCallArguments = (
+  call: HirCallExpr,
+  meta: FunctionMetadata,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): binaryen.ExpressionRef[] => {
+  return call.args.map((arg, index) => {
+    const expectedTypeId = meta.paramTypeIds[index];
+    const actualTypeId = getRequiredExprType(arg.expr, ctx);
+    const value = compileExpression(arg.expr, ctx, fnCtx);
+    return coerceValueToType(value, actualTypeId, expectedTypeId, ctx, fnCtx);
+  });
 };
