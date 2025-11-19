@@ -5,11 +5,15 @@ import type {
   HirBlockExpr,
   HirCallExpr,
   HirExpression,
+  HirFieldAccessExpr,
   HirFunction,
   HirGraph,
   HirIfExpr,
   HirLetStatement,
   HirLiteralExpr,
+  HirObjectLiteralEntry,
+  HirObjectLiteralExpr,
+  HirObjectTypeExpr,
   HirOverloadSetExpr,
   HirPattern,
   HirTypeExpr,
@@ -295,6 +299,12 @@ const typeExpression = (exprId: HirExprId, ctx: TypingContext): TypeId => {
     case "tuple":
       type = typeTupleExpr(expr, ctx);
       break;
+    case "object-literal":
+      type = typeObjectLiteralExpr(expr, ctx);
+      break;
+    case "field-access":
+      type = typeFieldAccessExpr(expr, ctx);
+      break;
     case "while":
       type = typeWhileExpr(expr, ctx);
       break;
@@ -490,6 +500,72 @@ const typeTupleExpr = (
 ): TypeId => {
   expr.elements.forEach((elementId) => typeExpression(elementId, ctx));
   return ctx.unknownType;
+};
+
+const typeObjectLiteralExpr = (
+  expr: HirObjectLiteralExpr,
+  ctx: TypingContext
+): TypeId => {
+  if (expr.literalKind !== "structural") {
+    throw new Error("nominal object literals are not supported yet");
+  }
+
+  const fields = new Map<string, TypeId>();
+  expr.entries.forEach((entry) => mergeObjectLiteralEntry(entry, fields, ctx));
+
+  const orderedFields = Array.from(fields.entries()).map(([name, type]) => ({
+    name,
+    type,
+  }));
+  return ctx.arena.internStructuralObject({ fields: orderedFields });
+};
+
+const mergeObjectLiteralEntry = (
+  entry: HirObjectLiteralEntry,
+  fields: Map<string, TypeId>,
+  ctx: TypingContext
+): void => {
+  if (entry.kind === "field") {
+    const valueType = typeExpression(entry.value, ctx);
+    fields.set(entry.name, valueType);
+    return;
+  }
+
+  const spreadType = typeExpression(entry.value, ctx);
+  if (spreadType === ctx.unknownType) {
+    return;
+  }
+
+  const spreadFields = getStructuralFields(spreadType, ctx);
+  if (!spreadFields) {
+    throw new Error("object spread requires a structural object");
+  }
+  spreadFields.forEach((field) => fields.set(field.name, field.type));
+};
+
+const typeFieldAccessExpr = (
+  expr: HirFieldAccessExpr,
+  ctx: TypingContext
+): TypeId => {
+  const targetType = typeExpression(expr.target, ctx);
+  if (targetType === ctx.unknownType) {
+    return ctx.unknownType;
+  }
+
+  const fields = getStructuralFields(targetType, ctx);
+  if (!fields) {
+    throw new Error("field access requires an object type");
+  }
+
+  const field = fields.find((candidate) => candidate.name === expr.field);
+  if (!field) {
+    if (ctx.typeCheckMode === "relaxed") {
+      return ctx.unknownType;
+    }
+    throw new Error(`object type is missing field ${expr.field}`);
+  }
+
+  return field.type;
 };
 
 const typeWhileExpr = (expr: HirWhileExpr, ctx: TypingContext): TypeId => {
@@ -749,6 +825,8 @@ const resolveTypeExpr = (
   switch (expr.typeKind) {
     case "named":
       return resolveNamedTypeExpr(expr, ctx);
+    case "object":
+      return resolveObjectTypeExpr(expr, ctx);
     default:
       throw new Error(`unsupported type expression kind: ${expr.typeKind}`);
   }
@@ -773,6 +851,17 @@ const resolveNamedTypeExpr = (
   }
 
   return getPrimitiveType(ctx, name);
+};
+
+const resolveObjectTypeExpr = (
+  expr: HirObjectTypeExpr,
+  ctx: TypingContext
+): TypeId => {
+  const fields = expr.fields.map((field) => ({
+    name: field.name,
+    type: resolveTypeExpr(field.type, ctx, ctx.unknownType),
+  }));
+  return ctx.arena.internStructuralObject({ fields });
 };
 
 const registerPrimitive = (
@@ -882,8 +971,79 @@ const ensureTypeMatches = (
     return;
   }
 
+  if (structuralTypeSatisfies(actual, expected, ctx)) {
+    return;
+  }
+
   throw new Error(`type mismatch for ${reason}`);
 };
 
 const getSymbolName = (symbol: SymbolId, ctx: TypingContext): string =>
   ctx.symbolTable.getSymbol(symbol).name;
+
+const getStructuralFields = (
+  type: TypeId,
+  ctx: TypingContext
+): readonly { name: string; type: TypeId }[] | undefined => {
+  if (type === ctx.unknownType) {
+    return undefined;
+  }
+
+  const desc = ctx.arena.get(type);
+  if (desc.kind === "structural-object") {
+    return desc.fields;
+  }
+
+  if (desc.kind === "intersection" && typeof desc.structural === "number") {
+    return getStructuralFields(desc.structural, ctx);
+  }
+
+  return undefined;
+};
+
+const structuralTypeSatisfies = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+  seen: Set<string> = new Set()
+): boolean => {
+  const expectedFields = getStructuralFields(expected, ctx);
+  if (!expectedFields) {
+    return false;
+  }
+
+  const actualFields = getStructuralFields(actual, ctx);
+  if (!actualFields) {
+    return false;
+  }
+
+  if (expectedFields.length === 0) {
+    return actualFields.length >= 0;
+  }
+
+  const cacheKey = `${actual}->${expected}`;
+  if (seen.has(cacheKey)) {
+    return true;
+  }
+  seen.add(cacheKey);
+
+  return expectedFields.every((expectedField) => {
+    const candidate = actualFields.find((field) => field.name === expectedField.name);
+    if (!candidate) {
+      return false;
+    }
+
+    if (candidate.type === expectedField.type) {
+      return true;
+    }
+
+    if (
+      ctx.typeCheckMode === "relaxed" &&
+      (candidate.type === ctx.unknownType || expectedField.type === ctx.unknownType)
+    ) {
+      return true;
+    }
+
+    return structuralTypeSatisfies(candidate.type, expectedField.type, ctx, seen);
+  });
+};
