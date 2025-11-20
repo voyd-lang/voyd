@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { SymbolTable } from "../binder/index.js";
-import { runBindingPipeline } from "../binding/pipeline.js";
+import { runBindingPipeline } from "../binding/binding.js";
 import { loadAst } from "./load-ast.js";
 import { isForm, isIdentifierAtom } from "../../parser/index.js";
 
@@ -87,8 +87,9 @@ describe("binding pipeline", () => {
     expect(binding.typeAliases).toHaveLength(1);
     const alias = binding.typeAliases[0]!;
     expect(symbolTable.getSymbol(alias.symbol).kind).toBe("type");
-    expect(isForm(alias.target) && alias.target.callsInternal("object_literal"))
-      .toBe(true);
+    expect(
+      isForm(alias.target) && alias.target.callsInternal("object_literal")
+    ).toBe(true);
 
     const addFn = binding.functions.find(
       (fn) => symbolTable.getSymbol(fn.symbol).name === "add"

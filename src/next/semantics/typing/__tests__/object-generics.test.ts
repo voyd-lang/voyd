@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { HirObjectDecl } from "../../hir/nodes.js";
 import type { SymbolId, TypeId } from "../../ids.js";
 import { semanticsPipeline } from "../../pipeline.js";
-import type { TypingResult } from "../../typing/pipeline.js";
+import type { TypingResult } from "../typing.js";
 import type { NominalObjectType } from "../type-arena.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 
@@ -29,7 +29,8 @@ const getNominalArgPrimitive = (
     return undefined;
   }
   const nominal =
-    unwrapNominal(typeId, typing) ?? unwrapNominalFromIntersection(typeId, typing);
+    unwrapNominal(typeId, typing) ??
+    unwrapNominalFromIntersection(typeId, typing);
   if (!nominal) {
     return undefined;
   }
@@ -99,9 +100,7 @@ describe("nominal object type parameters", () => {
     if (doubleDesc.kind !== "function") {
       return;
     }
-    expect(
-      getNominalArgPrimitive(doubleDesc.returnType, typing)
-    ).toBe("i32");
+    expect(getNominalArgPrimitive(doubleDesc.returnType, typing)).toBe("i32");
 
     const aSymbol = findValueSymbol("a", typing.valueTypes, symbolTable);
     const bSymbol = findValueSymbol("b", typing.valueTypes, symbolTable);

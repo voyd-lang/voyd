@@ -1,11 +1,11 @@
 import type { Form } from "../parser/index.js";
 import { SymbolTable } from "./binder/index.js";
-import { runBindingPipeline } from "./binding/pipeline.js";
-import type { BindingResult, BoundOverloadSet } from "./binding/pipeline.js";
+import { runBindingPipeline } from "./binding/binding.js";
+import type { BindingResult, BoundOverloadSet } from "./binding/binding.js";
 import type { HirGraph } from "./hir/index.js";
 import { createHirBuilder } from "./hir/index.js";
-import { runLoweringPipeline } from "./lowering/pipeline.js";
-import { runTypingPipeline, type TypingResult } from "./typing/pipeline.js";
+import { runLoweringPipeline } from "./lowering/lowering.js";
+import { runTypingPipeline, type TypingResult } from "./typing/typing.js";
 import { specializeOverloadCallees } from "./typing/specialize-overloads.js";
 import { toSourceSpan } from "./utils.js";
 import type { OverloadSetId, SymbolId } from "./ids.js";

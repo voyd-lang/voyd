@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SymbolTable } from "../binder/index.js";
-import { runBindingPipeline } from "../binding/pipeline.js";
+import { runBindingPipeline } from "../binding/binding.js";
 import { createHirBuilder } from "../hir/builder.js";
 import {
   type HirBlockExpr,
@@ -13,7 +13,7 @@ import {
   type HirObjectLiteralExpr,
   type HirTypeAlias,
 } from "../hir/nodes.js";
-import { runLoweringPipeline } from "../lowering/pipeline.js";
+import { runLoweringPipeline } from "../lowering/lowering.js";
 import { toSourceSpan } from "../utils.js";
 import { loadAst } from "./load-ast.js";
 
@@ -147,9 +147,9 @@ describe("lowering pipeline", () => {
     const initializer = hir.expressions.get(letStmt.initializer)!;
     expect(initializer.exprKind).toBe("object-literal");
     const objectLiteral = initializer as HirObjectLiteralExpr;
-    expect(
-      objectLiteral.entries.some((entry) => entry.kind === "spread")
-    ).toBe(true);
+    expect(objectLiteral.entries.some((entry) => entry.kind === "spread")).toBe(
+      true
+    );
   });
 
   it("lowers UFCS calls into plain function calls", () => {
@@ -200,9 +200,7 @@ describe("lowering pipeline", () => {
       expect(call.args).toHaveLength(1);
       const argExpr = hir.expressions.get(call.args[0]!.expr);
       expect(argExpr?.exprKind).toBe("identifier");
-      return symbolTable.getSymbol(
-        (argExpr as HirIdentifierExpr).symbol
-      ).name;
+      return symbolTable.getSymbol((argExpr as HirIdentifierExpr).symbol).name;
     });
 
     expect(argNames.sort()).toEqual(["v1", "v2"]);

@@ -1,0 +1,309 @@
+import binaryen from "binaryen";
+import {
+  binaryenTypeToHeapType,
+  defineStructType,
+} from "../../lib/binaryen-gc/index.js";
+import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
+import type {
+  CodegenContext,
+  StructuralFieldInfo,
+  StructuralTypeInfo,
+  HirTypeExpr,
+  HirExprId,
+  SymbolId,
+  TypeId,
+} from "./context.js";
+
+export const wasmTypeFor = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): binaryen.Type => {
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind === "primitive") {
+    return mapPrimitiveToWasm(desc.name);
+  }
+
+  if (desc.kind === "structural-object") {
+    const structInfo = getStructuralTypeInfo(typeId, ctx);
+    if (!structInfo) {
+      throw new Error("missing structural type info");
+    }
+    return structInfo.interfaceType;
+  }
+
+  if (desc.kind === "union") {
+    if (desc.members.length === 0) {
+      throw new Error("cannot map empty union to wasm");
+    }
+    const memberTypes = desc.members.map((member) => wasmTypeFor(member, ctx));
+    const first = memberTypes[0]!;
+    if (!memberTypes.every((candidate) => candidate === first)) {
+      throw new Error("union members map to different wasm types");
+    }
+    return first;
+  }
+
+  if (desc.kind === "intersection" && typeof desc.structural === "number") {
+    return wasmTypeFor(desc.structural, ctx);
+  }
+
+  throw new Error(`codegen cannot map ${desc.kind} types to wasm yet`);
+};
+
+export const mapPrimitiveToWasm = (name: string): binaryen.Type => {
+  switch (name) {
+    case "i32":
+    case "bool":
+    case "boolean":
+    case "unknown":
+      return binaryen.i32;
+    case "i64":
+      return binaryen.i64;
+    case "f32":
+      return binaryen.f32;
+    case "f64":
+      return binaryen.f64;
+    case "voyd":
+    case "void":
+    case "Voyd":
+      return binaryen.none;
+    default:
+      throw new Error(`unsupported primitive type ${name}`);
+  }
+};
+
+export const getSymbolTypeId = (
+  symbol: SymbolId,
+  ctx: CodegenContext
+): TypeId => {
+  const typeId = ctx.typing.valueTypes.get(symbol);
+  if (typeof typeId === "number") {
+    return typeId;
+  }
+  throw new Error(
+    `codegen missing type information for symbol ${getSymbolName(symbol, ctx)}`
+  );
+};
+
+export const getRequiredExprType = (
+  exprId: HirExprId,
+  ctx: CodegenContext
+): TypeId => {
+  const typeId = ctx.typing.table.getExprType(exprId);
+  if (typeof typeId === "number") {
+    return typeId;
+  }
+  throw new Error(`codegen missing type information for expression ${exprId}`);
+};
+
+export const getExprBinaryenType = (
+  exprId: HirExprId,
+  ctx: CodegenContext
+): binaryen.Type => {
+  const typeId = ctx.typing.table.getExprType(exprId);
+  if (typeof typeId === "number") {
+    return wasmTypeFor(typeId, ctx);
+  }
+  return binaryen.none;
+};
+
+export const getTypeIdFromTypeExpr = (
+  expr: HirTypeExpr,
+  ctx: CodegenContext
+): TypeId => {
+  if (typeof expr.typeId === "number") {
+    return expr.typeId;
+  }
+  throw new Error("codegen expected type-annotated HIR type expression");
+};
+
+export const resolvePatternTypeForMatch = (
+  type: HirTypeExpr,
+  discriminantTypeId: TypeId,
+  ctx: CodegenContext
+): TypeId => {
+  const resolved = getTypeIdFromTypeExpr(type, ctx);
+  const narrowed = narrowPatternType(resolved, discriminantTypeId, ctx);
+  return typeof narrowed === "number" ? narrowed : resolved;
+};
+
+export const narrowPatternType = (
+  patternTypeId: TypeId,
+  discriminantTypeId: TypeId,
+  ctx: CodegenContext
+): TypeId | undefined => {
+  const patternNominal = getNominalComponentId(patternTypeId, ctx);
+  if (typeof patternNominal !== "number") {
+    return undefined;
+  }
+
+  const discriminantDesc = ctx.typing.arena.get(discriminantTypeId);
+  if (discriminantDesc.kind === "union") {
+    const matches = discriminantDesc.members.filter((member) =>
+      nominalOwnersMatch(patternNominal, member, ctx)
+    );
+    if (matches.length === 1) {
+      return matches[0]!;
+    }
+    return undefined;
+  }
+
+  return nominalOwnersMatch(patternNominal, discriminantTypeId, ctx)
+    ? discriminantTypeId
+    : undefined;
+};
+
+export const getStructuralTypeInfo = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): StructuralTypeInfo | undefined => {
+  const structuralId = resolveStructuralTypeId(typeId, ctx);
+  if (typeof structuralId !== "number") {
+    return undefined;
+  }
+
+  const cached = ctx.structTypes.get(structuralId);
+  if (cached) {
+    return cached;
+  }
+
+  const desc = ctx.typing.arena.get(structuralId);
+  if (desc.kind !== "structural-object") {
+    return undefined;
+  }
+
+  const fields: StructuralFieldInfo[] = desc.fields.map((field, index) => ({
+    name: field.name,
+    typeId: field.type,
+    wasmType: wasmTypeFor(field.type, ctx),
+    runtimeIndex: index + RTT_METADATA_SLOT_COUNT,
+    hash: 0,
+  }));
+  const typeLabel = `struct_${structuralId}`;
+  const runtimeType = defineStructType(ctx.mod, {
+    name: typeLabel,
+    fields: [
+      {
+        name: "__ancestors_table",
+        type: ctx.rtt.extensionHelpers.i32Array,
+        mutable: false,
+      },
+      {
+        name: "__field_index_table",
+        type: ctx.rtt.fieldLookupHelpers.lookupTableType,
+        mutable: false,
+      },
+      {
+        name: "__method_lookup_table",
+        type: ctx.rtt.methodLookupHelpers.lookupTableType,
+        mutable: false,
+      },
+      ...fields.map((field) => ({
+        name: field.name,
+        type: field.wasmType,
+        mutable: true,
+      })),
+    ],
+    supertype: binaryenTypeToHeapType(ctx.rtt.baseType),
+    final: true,
+  });
+  const fieldTableExpr = ctx.rtt.fieldLookupHelpers.registerType({
+    typeLabel,
+    runtimeType,
+    baseType: ctx.rtt.baseType,
+    fields,
+  });
+  const methodTableExpr = ctx.rtt.methodLookupHelpers.createTable([]);
+
+  const ancestorsGlobal = `__ancestors_table_${typeLabel}`;
+  ctx.mod.addGlobal(
+    ancestorsGlobal,
+    ctx.rtt.extensionHelpers.i32Array,
+    false,
+    ctx.rtt.extensionHelpers.initExtensionArray([structuralId])
+  );
+
+  const fieldTableGlobal = `__field_index_table_${typeLabel}`;
+  ctx.mod.addGlobal(
+    fieldTableGlobal,
+    ctx.rtt.fieldLookupHelpers.lookupTableType,
+    false,
+    fieldTableExpr
+  );
+
+  const methodTableGlobal = `__method_table_${typeLabel}`;
+  ctx.mod.addGlobal(
+    methodTableGlobal,
+    ctx.rtt.methodLookupHelpers.lookupTableType,
+    false,
+    methodTableExpr
+  );
+
+  const info: StructuralTypeInfo = {
+    typeId: structuralId,
+    runtimeType,
+    interfaceType: ctx.rtt.baseType,
+    fields,
+    fieldMap: new Map(fields.map((field) => [field.name, field])),
+    ancestorsGlobal,
+    fieldTableGlobal,
+    methodTableGlobal,
+    typeLabel,
+  };
+  ctx.structTypes.set(structuralId, info);
+  return info;
+};
+
+export const resolveStructuralTypeId = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): TypeId | undefined => {
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind === "structural-object") {
+    return typeId;
+  }
+  if (desc.kind === "intersection" && typeof desc.structural === "number") {
+    return desc.structural;
+  }
+  return undefined;
+};
+
+const nominalOwnersMatch = (
+  patternNominal: TypeId,
+  candidateType: TypeId,
+  ctx: CodegenContext
+): boolean => {
+  const candidateNominal = getNominalComponentId(candidateType, ctx);
+  if (typeof candidateNominal !== "number") {
+    return false;
+  }
+  return (
+    getNominalOwner(candidateNominal, ctx) ===
+    getNominalOwner(patternNominal, ctx)
+  );
+};
+
+const getNominalComponentId = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): TypeId | undefined => {
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind === "nominal-object") {
+    return typeId;
+  }
+  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+    return desc.nominal;
+  }
+  return undefined;
+};
+
+const getNominalOwner = (nominalId: TypeId, ctx: CodegenContext): SymbolId => {
+  const desc = ctx.typing.arena.get(nominalId);
+  if (desc.kind !== "nominal-object") {
+    throw new Error("expected nominal type");
+  }
+  return desc.owner;
+};
+
+const getSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
+  ctx.symbolTable.getSymbol(symbol).name;

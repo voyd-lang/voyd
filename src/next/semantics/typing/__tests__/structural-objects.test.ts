@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runTypingPipeline } from "../pipeline.js";
+import { runTypingPipeline } from "../typing.js";
 import type { HirObjectTypeExpr, HirNamedTypeExpr } from "../../hir/nodes.js";
 import { createModuleContext } from "./helpers.js";
 import type { ScopeId } from "../../ids.js";

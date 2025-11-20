@@ -11,268 +11,32 @@ import {
   isIntAtom,
   isStringAtom,
 } from "../../parser/index.js";
-import type { SymbolTable } from "../binder/index.js";
+import {
+  expectLabeledExpr,
+  parseIfBranches,
+  toSourceSpan,
+} from "../utils.js";
 import type {
-  HirExprId,
-  HirStmtId,
-  NodeId,
-  OverloadSetId,
-  ScopeId,
-  SymbolId,
-} from "../ids.js";
-import type {
-  HirBuilder,
   HirCondBranch,
-  HirGraph,
+  HirExprId,
   HirMatchArm,
   HirObjectLiteralEntry,
-  HirParameter,
   HirPattern,
-  HirRecordTypeField,
-  HirTypeExpr,
-  HirTypeParameter,
+  HirStmtId,
 } from "../hir/index.js";
+import {
+  resolveIdentifierValue,
+  resolveSymbol,
+  resolveTypeSymbol,
+} from "./resolution.js";
+import { lowerTypeExpr } from "./type-expressions.js";
 import type {
-  BoundFunction,
-  BoundTypeAlias,
-  BindingResult,
-  BoundObject,
-} from "../binding/pipeline.js";
-import { expectLabeledExpr, parseIfBranches, toSourceSpan } from "../utils.js";
+  LowerContext,
+  LowerObjectLiteralOptions,
+  LowerScopeStack,
+} from "./types.js";
 
-interface LowerInputs {
-  builder: HirBuilder;
-  binding: BindingResult;
-  moduleNodeId: NodeId;
-}
-
-interface LowerScopeStack {
-  current(): ScopeId;
-  push(scope: ScopeId): void;
-  pop(): void;
-}
-
-interface LowerContext {
-  builder: HirBuilder;
-  symbolTable: SymbolTable;
-  scopeByNode: Map<NodeId, ScopeId>;
-  intrinsicSymbols: Map<string, SymbolId>;
-  moduleNodeId: NodeId;
-  overloadBySymbol: ReadonlyMap<SymbolId, OverloadSetId>;
-}
-
-type IdentifierResolution =
-  | { kind: "symbol"; symbol: SymbolId; name: string }
-  | { kind: "overload-set"; name: string; set: OverloadSetId };
-
-type ModuleDeclaration =
-  | { kind: "function"; order: number; fn: BoundFunction }
-  | { kind: "type-alias"; order: number; alias: BoundTypeAlias }
-  | { kind: "object"; order: number; object: BoundObject };
-
-const getModuleDeclarations = (binding: BindingResult): ModuleDeclaration[] => {
-  const entries: ModuleDeclaration[] = [
-    ...binding.functions.map((fn) => ({
-      kind: "function" as const,
-      order: fn.moduleIndex,
-      fn,
-    })),
-    ...binding.typeAliases.map((alias) => ({
-      kind: "type-alias" as const,
-      order: alias.moduleIndex,
-      alias,
-    })),
-    ...binding.objects.map((object) => ({
-      kind: "object" as const,
-      order: object.moduleIndex,
-      object,
-    })),
-  ];
-
-  return entries.sort((a, b) => a.order - b.order);
-};
-
-export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
-  const intrinsicSymbols = new Map<string, SymbolId>();
-
-  const declarations = getModuleDeclarations(inputs.binding);
-
-  for (const decl of declarations) {
-    if (decl.kind === "function") {
-      lowerFunction(decl.fn, {
-        builder: inputs.builder,
-        symbolTable: inputs.binding.symbolTable,
-        scopeByNode: inputs.binding.scopeByNode,
-        intrinsicSymbols,
-        moduleNodeId: inputs.moduleNodeId,
-        overloadBySymbol: inputs.binding.overloadBySymbol,
-      });
-      continue;
-    }
-
-    if (decl.kind === "object") {
-      lowerObjectDecl(decl.object, {
-        builder: inputs.builder,
-        symbolTable: inputs.binding.symbolTable,
-        scopeByNode: inputs.binding.scopeByNode,
-        intrinsicSymbols,
-        moduleNodeId: inputs.moduleNodeId,
-        overloadBySymbol: inputs.binding.overloadBySymbol,
-      });
-      continue;
-    }
-
-    lowerTypeAlias(decl.alias, {
-      builder: inputs.builder,
-      symbolTable: inputs.binding.symbolTable,
-      scopeByNode: inputs.binding.scopeByNode,
-      intrinsicSymbols,
-      moduleNodeId: inputs.moduleNodeId,
-      overloadBySymbol: inputs.binding.overloadBySymbol,
-    });
-  }
-
-  return inputs.builder.finalize();
-};
-
-const lowerFunction = (fn: BoundFunction, ctx: LowerContext): void => {
-  const scopes = createLowerScopeStack(fn.scope);
-  const fallbackSyntax = fn.form ?? fn.body;
-
-  const parameters: HirParameter[] = fn.params.map((param) => ({
-    decl: param.id,
-    symbol: param.symbol,
-    pattern: { kind: "identifier", symbol: param.symbol } as const,
-    label: param.label,
-    span: toSourceSpan(param.ast ?? fallbackSyntax),
-    mutable: false,
-    type: lowerTypeExpr(param.typeExpr, ctx, scopes.current()),
-  }));
-
-  const bodyId = lowerExpr(fn.body, ctx, scopes);
-  const fnId = ctx.builder.addFunction({
-    kind: "function",
-    decl: fn.id,
-    visibility: fn.visibility,
-    symbol: fn.symbol,
-    ast: (fn.form ?? fn.body).syntaxId,
-    span: toSourceSpan(fallbackSyntax),
-    parameters,
-    returnType: lowerTypeExpr(fn.returnTypeExpr, ctx, scopes.current()),
-    body: bodyId,
-  });
-
-  if (fn.visibility === "public") {
-    ctx.builder.recordExport({
-      symbol: fn.symbol,
-      visibility: "public",
-      span: toSourceSpan(fn.form),
-      item: fnId,
-    });
-  }
-};
-
-const lowerTypeAlias = (alias: BoundTypeAlias, ctx: LowerContext): void => {
-  const target = lowerTypeExpr(alias.target, ctx);
-  if (!target) {
-    throw new Error("type alias requires a target type expression");
-  }
-
-  const aliasSyntax = alias.form ?? alias.target;
-
-  const aliasId = ctx.builder.addItem({
-    kind: "type-alias",
-    decl: alias.id,
-    symbol: alias.symbol,
-    visibility: alias.visibility,
-    ast: aliasSyntax.syntaxId,
-    span: toSourceSpan(aliasSyntax),
-    target,
-  });
-
-  if (alias.visibility === "public") {
-    ctx.builder.recordExport({
-      symbol: alias.symbol,
-      visibility: alias.visibility,
-      span: toSourceSpan(alias.form),
-      item: aliasId,
-    });
-  }
-};
-
-const lowerObjectDecl = (object: BoundObject, ctx: LowerContext): void => {
-  const objectScope =
-    (object.form && ctx.scopeByNode.get(object.form.syntaxId)) ??
-    ctx.symbolTable.rootScope;
-
-  const fields = object.fields.map((field) => ({
-    name: field.name,
-    symbol: field.symbol,
-    type: lowerTypeExpr(field.typeExpr, ctx, objectScope),
-    span: toSourceSpan(field.ast ?? object.form),
-  }));
-
-  const base = lowerTypeExpr(object.baseTypeExpr, ctx, objectScope);
-  const baseSymbol =
-    base && base.typeKind === "named" ? base.symbol : undefined;
-
-  const objectSyntax =
-    object.form ?? object.baseTypeExpr ?? object.fields[0]?.ast;
-  if (!objectSyntax) {
-    throw new Error("object declaration missing source syntax");
-  }
-
-  const objectId = ctx.builder.addItem({
-    kind: "object",
-    symbol: object.symbol,
-    visibility: object.visibility,
-    typeParameters: lowerTypeParameters(object.typeParameters),
-    ast: objectSyntax.syntaxId,
-    span: toSourceSpan(objectSyntax),
-    base,
-    baseSymbol,
-    fields,
-    isFinal: false,
-  });
-
-  if (object.visibility === "public") {
-    ctx.builder.recordExport({
-      symbol: object.symbol,
-      visibility: object.visibility,
-      span: toSourceSpan(object.form),
-      item: objectId,
-    });
-  }
-};
-
-const lowerTypeParameters = (
-  params: readonly { symbol: SymbolId; ast?: Syntax }[] | undefined
-): HirTypeParameter[] | undefined => {
-  if (!params || params.length === 0) {
-    return undefined;
-  }
-
-  return params.map((param) => ({
-    symbol: param.symbol,
-    span: toSourceSpan(param.ast),
-  }));
-};
-
-const createLowerScopeStack = (initial: ScopeId): LowerScopeStack => {
-  const stack: ScopeId[] = [initial];
-
-  return {
-    current: () => stack[stack.length - 1]!,
-    push: (scope: ScopeId) => stack.push(scope),
-    pop: () => {
-      if (stack.length > 1) {
-        stack.pop();
-      }
-    },
-  };
-};
-
-const lowerExpr = (
+export const lowerExpr = (
   expr: Expr | undefined,
   ctx: LowerContext,
   scopes: LowerScopeStack
@@ -380,7 +144,6 @@ const lowerExpr = (
       return lowerWhile(expr, ctx, scopes);
     }
 
-    // TODO: tuple should probably be consistently *not* internal
     if (expr.calls("tuple") || expr.callsInternal("tuple")) {
       return lowerTupleExpr(expr, ctx, scopes);
     }
@@ -493,13 +256,7 @@ const lowerMatch = (
 
   const potentialBinder = operandOverride ? form.at(1) : form.at(2);
   const hasBinder = isIdentifierAtom(potentialBinder);
-  const caseStart = hasBinder
-    ? operandOverride
-      ? 2
-      : 3
-    : operandOverride
-    ? 1
-    : 2;
+  const caseStart = hasBinder ? (operandOverride ? 2 : 3) : operandOverride ? 1 : 2;
 
   const operandId = lowerExpr(operandExpr, ctx, scopes);
   const binderSymbol =
@@ -690,7 +447,7 @@ const lowerNominalObjectLiteral = (
   const typeArguments = hasGenerics
     ? ((genericsForm as Form).rest
         .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
-        .filter(Boolean) as HirTypeExpr[])
+        .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
     : undefined;
 
   const symbol = resolveTypeSymbol(callee.value, scopes.current(), ctx);
@@ -704,8 +461,8 @@ const lowerNominalObjectLiteral = (
     return undefined;
   }
 
-  const target: HirTypeExpr = {
-    typeKind: "named",
+  const target = {
+    typeKind: "named" as const,
     path: [callee.value],
     symbol,
     ast: ast.syntaxId,
@@ -832,18 +589,14 @@ const lowerTupleExpr = (
   });
 };
 
-const isObjectLiteralForm = (form: Form): boolean =>
+export const isObjectLiteralForm = (form: Form): boolean =>
   form.callsInternal("object_literal");
 
 const lowerObjectLiteralExpr = (
   form: Form,
   ctx: LowerContext,
   scopes: LowerScopeStack,
-  options: {
-    literalKind?: "structural" | "nominal";
-    target?: HirTypeExpr;
-    targetSymbol?: SymbolId;
-  } = {}
+  options: LowerObjectLiteralOptions = {}
 ): HirExprId => {
   const entries = form.rest.map((entry) =>
     lowerObjectLiteralEntry(entry, ctx, scopes)
@@ -1050,232 +803,4 @@ const lowerWhile = (
     condition,
     body,
   });
-};
-
-const lowerTypeExpr = (
-  expr: Expr | undefined,
-  ctx: LowerContext,
-  scope?: ScopeId
-): HirTypeExpr | undefined => {
-  if (!expr) return undefined;
-
-  if (isIdentifierAtom(expr)) {
-    return lowerNamedType(expr, ctx, scope ?? ctx.symbolTable.rootScope);
-  }
-
-  if (isForm(expr) && isObjectLiteralForm(expr)) {
-    return lowerObjectTypeExpr(expr, ctx, scope);
-  }
-
-  if (isForm(expr) && (expr.calls("tuple") || expr.callsInternal("tuple"))) {
-    return lowerTupleTypeExpr(expr, ctx, scope);
-  }
-
-  if (isForm(expr) && expr.calls("|")) {
-    return lowerUnionTypeExpr(expr, ctx, scope);
-  }
-
-  if (isForm(expr)) {
-    const named = lowerNamedTypeForm(
-      expr,
-      ctx,
-      scope ?? ctx.symbolTable.rootScope
-    );
-    if (named) {
-      return named;
-    }
-  }
-
-  throw new Error("unsupported type expression");
-};
-
-const lowerNamedType = (
-  atom: IdentifierAtom,
-  ctx: LowerContext,
-  scope: ScopeId
-): HirTypeExpr => ({
-  typeKind: "named",
-  ast: atom.syntaxId,
-  span: toSourceSpan(atom),
-  path: [atom.value],
-  symbol: resolveTypeSymbol(atom.value, scope, ctx),
-});
-
-const lowerNamedTypeForm = (
-  form: Form,
-  ctx: LowerContext,
-  scope: ScopeId
-): HirTypeExpr | undefined => {
-  if (
-    !isIdentifierAtom(form.first) ||
-    !isForm(form.second) ||
-    !formCallsInternal(form.second, "generics")
-  ) {
-    return undefined;
-  }
-
-  const name = form.first;
-  const genericsForm = form.second;
-  const typeArguments = genericsForm.rest
-    .map((entry) => lowerTypeExpr(entry, ctx, scope))
-    .filter(Boolean) as HirTypeExpr[];
-
-  return {
-    typeKind: "named",
-    ast: form.syntaxId,
-    span: toSourceSpan(form),
-    path: [name.value],
-    symbol: resolveTypeSymbol(name.value, scope, ctx),
-    typeArguments,
-  };
-};
-
-const lowerObjectTypeExpr = (
-  form: Form,
-  ctx: LowerContext,
-  scope?: ScopeId
-): HirTypeExpr => {
-  const fields = form.rest.map((entry) =>
-    lowerObjectTypeField(entry, ctx, scope)
-  );
-  return {
-    typeKind: "object",
-    ast: form.syntaxId,
-    span: toSourceSpan(form),
-    fields,
-  };
-};
-
-const lowerObjectTypeField = (
-  entry: Expr | undefined,
-  ctx: LowerContext,
-  scope?: ScopeId
-): HirRecordTypeField => {
-  if (!isForm(entry) || !entry.calls(":")) {
-    throw new Error("object type fields must be labeled");
-  }
-  const nameExpr = entry.at(1);
-  if (!isIdentifierAtom(nameExpr)) {
-    throw new Error("object type field name must be an identifier");
-  }
-  const typeExpr = entry.at(2);
-  if (!typeExpr) {
-    throw new Error("object type field missing type expression");
-  }
-  const type = lowerTypeExpr(typeExpr, ctx, scope);
-  if (!type) {
-    throw new Error("object type field missing resolved type expression");
-  }
-  return {
-    name: nameExpr.value,
-    type,
-    span: toSourceSpan(entry),
-  };
-};
-
-const lowerTupleTypeExpr = (
-  form: Form,
-  ctx: LowerContext,
-  scope?: ScopeId
-): HirTypeExpr => {
-  const elements = form.rest.map((entry) => {
-    const lowered = lowerTypeExpr(entry, ctx, scope);
-    if (!lowered) {
-      throw new Error("tuple type element missing resolved type expression");
-    }
-    return lowered;
-  });
-  return {
-    typeKind: "tuple",
-    ast: form.syntaxId,
-    span: toSourceSpan(form),
-    elements,
-  };
-};
-
-const lowerUnionTypeExpr = (
-  form: Form,
-  ctx: LowerContext,
-  scope?: ScopeId
-): HirTypeExpr => {
-  const members = form.rest.map((entry) => {
-    const lowered = lowerTypeExpr(entry, ctx, scope);
-    if (!lowered) {
-      throw new Error("union type member missing resolved type expression");
-    }
-    return lowered;
-  });
-  return {
-    typeKind: "union",
-    ast: form.syntaxId,
-    span: toSourceSpan(form),
-    members,
-  };
-};
-
-const resolveIdentifierValue = (
-  name: string,
-  scope: ScopeId,
-  ctx: LowerContext
-): IdentifierResolution => {
-  const resolved = ctx.symbolTable.resolve(name, scope);
-  if (typeof resolved !== "number") {
-    return {
-      kind: "symbol",
-      name,
-      symbol: resolveIntrinsicSymbol(name, ctx),
-    };
-  }
-
-  const overloadSetId = ctx.overloadBySymbol.get(resolved);
-  if (typeof overloadSetId === "number") {
-    return { kind: "overload-set", name, set: overloadSetId };
-  }
-
-  return { kind: "symbol", name, symbol: resolved };
-};
-
-const resolveSymbol = (
-  name: string,
-  scope: ScopeId,
-  ctx: LowerContext
-): SymbolId => {
-  const resolved = ctx.symbolTable.resolve(name, scope);
-  if (typeof resolved === "number") {
-    return resolved;
-  }
-
-  return resolveIntrinsicSymbol(name, ctx);
-};
-
-const resolveTypeSymbol = (
-  name: string,
-  scope: ScopeId,
-  ctx: LowerContext
-): SymbolId | undefined => {
-  const resolved = ctx.symbolTable.resolve(name, scope);
-  if (typeof resolved !== "number") {
-    return undefined;
-  }
-  const record = ctx.symbolTable.getSymbol(resolved);
-  if (record.kind === "type" || record.kind === "type-parameter") {
-    return resolved;
-  }
-  return undefined;
-};
-
-const resolveIntrinsicSymbol = (name: string, ctx: LowerContext): SymbolId => {
-  let intrinsic = ctx.intrinsicSymbols.get(name);
-  if (typeof intrinsic === "number") {
-    return intrinsic;
-  }
-
-  intrinsic = ctx.symbolTable.declare({
-    name,
-    kind: "value",
-    declaredAt: ctx.moduleNodeId,
-    metadata: { intrinsic: true },
-  });
-  ctx.intrinsicSymbols.set(name, intrinsic);
-  return intrinsic;
 };
