@@ -21,6 +21,14 @@ import type {
 } from "../ids.js";
 import type { HirVisibility } from "../hir/index.js";
 import { isIdentifierWithValue, toSourceSpan } from "../utils.js";
+import {
+  DeclTable,
+  type FunctionDeclInput,
+  type ParameterDeclInput,
+  type FunctionDecl,
+  type ParameterDecl,
+  type TypeAliasDecl,
+} from "../decls.js";
 
 export interface BindingInputs {
   moduleForm: Form;
@@ -30,48 +38,23 @@ export interface BindingInputs {
 export interface BindingResult {
   symbolTable: SymbolTable;
   scopeByNode: Map<NodeId, ScopeId>;
-  functions: BoundFunction[];
-  typeAliases: BoundTypeAlias[];
+  decls: DeclTable;
+  functions: readonly BoundFunction[];
+  typeAliases: readonly BoundTypeAlias[];
   overloads: Map<OverloadSetId, BoundOverloadSet>;
   overloadBySymbol: Map<SymbolId, OverloadSetId>;
   diagnostics: Diagnostic[];
 }
 
-export interface BoundFunction {
-  name: string;
-  form: Form;
-  visibility: HirVisibility;
-  symbol: SymbolId;
-  scope: ScopeId;
-  params: BoundParameter[];
-  returnTypeExpr?: Expr;
-  body: Expr;
-  overloadSetId?: OverloadSetId;
-  moduleIndex: number;
-}
-
-export interface BoundTypeAlias {
-  name: string;
-  form: Form;
-  visibility: HirVisibility;
-  symbol: SymbolId;
-  target: Expr;
-  moduleIndex: number;
-}
+export type BoundFunction = FunctionDecl;
+export type BoundTypeAlias = TypeAliasDecl;
+export type BoundParameter = ParameterDecl;
 
 export interface BoundOverloadSet {
   id: OverloadSetId;
   name: string;
   scope: ScopeId;
   functions: readonly BoundFunction[];
-}
-
-export interface BoundParameter {
-  name: string;
-  label?: string;
-  symbol: SymbolId;
-  ast: Syntax;
-  typeExpr?: Expr;
 }
 
 interface ParsedFunctionDecl {
@@ -109,7 +92,13 @@ interface OverloadBucket {
   nonFunctionConflictReported: boolean;
 }
 
-interface BindingContext extends BindingResult {
+interface BindingContext {
+  symbolTable: SymbolTable;
+  scopeByNode: Map<NodeId, ScopeId>;
+  decls: DeclTable;
+  overloads: Map<OverloadSetId, BoundOverloadSet>;
+  overloadBySymbol: Map<SymbolId, OverloadSetId>;
+  diagnostics: Diagnostic[];
   overloadBuckets: Map<string, OverloadBucket>;
   syntaxByNode: Map<NodeId, Syntax>;
   nextModuleIndex: number;
@@ -119,11 +108,11 @@ export const runBindingPipeline = ({
   moduleForm,
   symbolTable,
 }: BindingInputs): BindingResult => {
+  const decls = new DeclTable();
   const bindingContext: BindingContext = {
     symbolTable,
     scopeByNode: new Map([[moduleForm.syntaxId, symbolTable.rootScope]]),
-    functions: [],
-    typeAliases: [],
+    decls,
     overloads: new Map(),
     overloadBySymbol: new Map(),
     diagnostics: [],
@@ -135,7 +124,16 @@ export const runBindingPipeline = ({
   bindModule(moduleForm, bindingContext);
   finalizeOverloadSets(bindingContext);
 
-  return bindingContext;
+  return {
+    symbolTable: bindingContext.symbolTable,
+    scopeByNode: bindingContext.scopeByNode,
+    decls: bindingContext.decls,
+    functions: bindingContext.decls.functions,
+    typeAliases: bindingContext.decls.typeAliases,
+    overloads: bindingContext.overloads,
+    overloadBySymbol: bindingContext.overloadBySymbol,
+    diagnostics: bindingContext.diagnostics,
+  };
 };
 
 const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
@@ -396,7 +394,7 @@ const bindFunctionDecl = (
   });
   ctx.scopeByNode.set(decl.form.syntaxId, fnScope);
 
-  const boundParams: BoundParameter[] = [];
+  const boundParams: ParameterDeclInput[] = [];
 
   tracker.enterScope(fnScope, () => {
     for (const param of decl.signature.params) {
@@ -418,7 +416,7 @@ const bindFunctionDecl = (
     bindExpr(decl.body, ctx, tracker);
   });
 
-  ctx.functions.push({
+  const fnDecl: FunctionDeclInput = {
     name: decl.signature.name.value,
     form: decl.form,
     visibility: decl.visibility,
@@ -428,8 +426,10 @@ const bindFunctionDecl = (
     returnTypeExpr: decl.signature.returnType,
     body: decl.body,
     moduleIndex: ctx.nextModuleIndex++,
-  });
-  recordFunctionOverload(ctx.functions.at(-1)!, declarationScope, ctx);
+  };
+
+  const registered = ctx.decls.registerFunction(fnDecl);
+  recordFunctionOverload(registered, declarationScope, ctx);
 };
 
 const bindTypeAlias = (
@@ -447,7 +447,7 @@ const bindTypeAlias = (
     metadata: { entity: "type-alias" },
   });
 
-  ctx.typeAliases.push({
+  ctx.decls.registerTypeAlias({
     name: decl.name.value,
     form: decl.form,
     visibility: decl.visibility,
@@ -687,7 +687,9 @@ const createOverloadSignature = (
   const returnAnnotation = formatTypeAnnotation(fn.returnTypeExpr);
   return {
     key: `${fn.params.length}|${params.map((param) => param.key).join(",")}`,
-    label: `${fn.name}(${params.map((param) => param.label).join(", ")}) -> ${returnAnnotation}`,
+    label: `${fn.name}(${params
+      .map((param) => param.label)
+      .join(", ")}) -> ${returnAnnotation}`,
   };
 };
 

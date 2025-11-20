@@ -117,12 +117,14 @@ export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
 
 const lowerFunction = (fn: BoundFunction, ctx: LowerContext): void => {
   const scopes = createLowerScopeStack(fn.scope);
+  const fallbackSyntax = fn.form ?? fn.body;
 
   const parameters: HirParameter[] = fn.params.map((param) => ({
+    decl: param.id,
     symbol: param.symbol,
     pattern: { kind: "identifier", symbol: param.symbol } as const,
     label: param.label,
-    span: toSourceSpan(param.ast),
+    span: toSourceSpan(param.ast ?? fallbackSyntax),
     mutable: false,
     type: lowerTypeExpr(param.typeExpr, ctx),
   }));
@@ -130,10 +132,11 @@ const lowerFunction = (fn: BoundFunction, ctx: LowerContext): void => {
   const bodyId = lowerExpr(fn.body, ctx, scopes);
   const fnId = ctx.builder.addFunction({
     kind: "function",
+    decl: fn.id,
     visibility: fn.visibility,
     symbol: fn.symbol,
-    ast: fn.form.syntaxId,
-    span: toSourceSpan(fn.form),
+    ast: (fn.form ?? fn.body).syntaxId,
+    span: toSourceSpan(fallbackSyntax),
     parameters,
     returnType: lowerTypeExpr(fn.returnTypeExpr, ctx),
     body: bodyId,
@@ -155,12 +158,15 @@ const lowerTypeAlias = (alias: BoundTypeAlias, ctx: LowerContext): void => {
     throw new Error("type alias requires a target type expression");
   }
 
+  const aliasSyntax = alias.form ?? alias.target;
+
   const aliasId = ctx.builder.addItem({
     kind: "type-alias",
+    decl: alias.id,
     symbol: alias.symbol,
     visibility: alias.visibility,
-    ast: alias.form.syntaxId,
-    span: toSourceSpan(alias.form),
+    ast: aliasSyntax.syntaxId,
+    span: toSourceSpan(aliasSyntax),
     target,
   });
 
@@ -178,7 +184,7 @@ const createLowerScopeStack = (initial: ScopeId): LowerScopeStack => {
   const stack: ScopeId[] = [initial];
 
   return {
-    current: () => stack.at(-1)!,
+    current: () => stack[stack.length - 1]!,
     push: (scope: ScopeId) => stack.push(scope),
     pop: () => {
       if (stack.length > 1) {

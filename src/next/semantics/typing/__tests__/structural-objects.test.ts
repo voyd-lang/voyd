@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { runTypingPipeline } from "../pipeline.js";
 import type { HirObjectTypeExpr, HirNamedTypeExpr } from "../../hir/nodes.js";
 import { createModuleContext } from "./helpers.js";
+import type { ScopeId } from "../../ids.js";
+import { Expr } from "src/next/parser/index.js";
 
 const createNamedType = (
   name: string,
@@ -17,6 +19,9 @@ const createNamedType = (
 describe("structural objects", () => {
   it("types object literals, spreads, and field accesses", () => {
     const ctx = createModuleContext();
+    const fakeExpr = (): Expr =>
+      ({ syntaxId: ctx.nextNode(), location: ctx.span } as unknown as Expr);
+    const functionScope = ctx.symbolTable.rootScope as ScopeId;
     const addSymbol = ctx.symbolTable.declare({
       name: "add",
       kind: "value",
@@ -65,9 +70,19 @@ describe("structural objects", () => {
       ast: ctx.nextNode(),
       span: ctx.span,
     };
+    const aliasDecl = ctx.decls.registerTypeAlias({
+      name: "MyVec",
+      visibility: "module",
+      symbol: aliasSymbol,
+      form: undefined,
+      target: aliasTarget as unknown as Expr,
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
     ctx.builder.addItem({
       kind: "type-alias",
       visibility: "module",
+      decl: aliasDecl.id,
       symbol: aliasSymbol,
       target: aliasTarget,
       ast: ctx.nextNode(),
@@ -97,10 +112,21 @@ describe("structural objects", () => {
       span: ctx.span,
     });
 
+    const addDecl = ctx.decls.registerFunction({
+      name: "add",
+      visibility: "module",
+      symbol: addSymbol,
+      scope: functionScope,
+      params: [{ name: "vec", symbol: vecSymbol, ast: undefined }],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
     ctx.builder.addFunction({
       kind: "function",
       visibility: "module",
       symbol: addSymbol,
+      decl: addDecl.id,
       parameters: [
         {
           symbol: vecSymbol,
@@ -204,10 +230,21 @@ describe("structural objects", () => {
       span: ctx.span,
     });
 
+    const mainDecl = ctx.decls.registerFunction({
+      name: "main",
+      visibility: "public",
+      symbol: mainSymbol,
+      scope: functionScope,
+      params: [],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
     ctx.builder.addFunction({
       kind: "function",
       visibility: "public",
       symbol: mainSymbol,
+      decl: mainDecl.id,
       parameters: [],
       returnType: createNamedType("i32", ctx.nextNode(), ctx.span),
       body: mainBody,
@@ -219,6 +256,7 @@ describe("structural objects", () => {
       symbolTable: ctx.symbolTable,
       hir: ctx.builder.finalize(),
       overloads: new Map(),
+      decls: ctx.decls,
     });
 
     const vecType = typing.valueTypes.get(vecSymbol);
@@ -237,7 +275,9 @@ describe("structural objects", () => {
       throw new Error("expected structural object type");
     }
     const fieldNames = cloneDesc.fields.map((field) => field.name);
-    expect(fieldNames).toEqual(expect.arrayContaining(["x", "y", "z", "extra"]));
+    expect(fieldNames).toEqual(
+      expect.arrayContaining(["x", "y", "z", "extra"])
+    );
 
     const fieldAccessType = typing.table.getExprType(vecFieldAccess);
     expect(fieldAccessType).toBeDefined();

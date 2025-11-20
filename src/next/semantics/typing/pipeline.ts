@@ -1,4 +1,3 @@
-import { label } from "src/next/parser/index.js";
 import type { SymbolTable } from "../binder/index.js";
 import type {
   HirAssignExpr,
@@ -28,6 +27,7 @@ import type {
   SymbolId,
   TypeId,
 } from "../ids.js";
+import { DeclTable, type FunctionDecl, type ParameterDecl } from "../decls.js";
 import { createTypeArena, type TypeArena } from "./type-arena.js";
 import { createTypeTable, type TypeTable } from "./type-table.js";
 
@@ -35,6 +35,7 @@ interface TypingInputs {
   symbolTable: SymbolTable;
   hir: HirGraph;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
+  decls?: DeclTable;
 }
 
 export interface TypingResult {
@@ -67,6 +68,7 @@ interface TypingContext {
   symbolTable: SymbolTable;
   hir: HirGraph;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
+  decls: DeclTable;
   arena: TypeArena;
   table: TypeTable;
   functionSignatures: Map<SymbolId, FunctionSignature>;
@@ -89,6 +91,7 @@ interface TypingContext {
 const DEFAULT_EFFECT_ROW: EffectRowId = 0;
 
 export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
+  const decls = inputs.decls ?? new DeclTable();
   const arena = createTypeArena();
   const table = createTypeTable();
 
@@ -96,6 +99,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     symbolTable: inputs.symbolTable,
     hir: inputs.hir,
     overloads: inputs.overloads,
+    decls,
     arena,
     table,
     functionSignatures: new Map(),
@@ -145,6 +149,13 @@ const seedPrimitiveTypes = (ctx: TypingContext): void => {
 const registerTypeAliases = (ctx: TypingContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "type-alias") continue;
+    const decl =
+      (typeof item.decl === "number"
+        ? ctx.decls.getTypeAliasById(item.decl)
+        : ctx.decls.getTypeAlias(item.symbol)) ?? undefined;
+    if (typeof item.decl === "number" && (!decl || decl.symbol !== item.symbol)) {
+      throw new Error(`missing or mismatched decl for type alias symbol ${item.symbol}`);
+    }
     ctx.typeAliasTargets.set(item.symbol, item.target);
     ctx.typeAliasesByName.set(getSymbolName(item.symbol, ctx), item.symbol);
   }
@@ -153,11 +164,41 @@ const registerTypeAliases = (ctx: TypingContext): void => {
 const registerFunctionSignatures = (ctx: TypingContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "function") continue;
+    const fnDecl =
+      (typeof item.decl === "number"
+        ? ctx.decls.getFunctionById(item.decl)
+        : ctx.decls.getFunction(item.symbol)) ?? undefined;
+    if (typeof item.decl === "number" && (!fnDecl || fnDecl.symbol !== item.symbol)) {
+      throw new Error(`missing or mismatched decl for function symbol ${item.symbol}`);
+    }
 
-    const parameters = item.parameters.map((param) => {
+    if (fnDecl && fnDecl.params.length !== item.parameters.length) {
+      throw new Error(
+        `function parameter count mismatch for symbol ${item.symbol}: decl defines ${fnDecl.params.length}, HIR has ${item.parameters.length}`
+      );
+    }
+
+    const parameters = item.parameters.map((param, index) => {
       const resolved = resolveTypeExpr(param.type, ctx, ctx.unknownType);
       ctx.valueTypes.set(param.symbol, resolved);
-      return { type: resolved, label: param.label };
+      const declParam =
+        (typeof param.decl === "number"
+          ? ctx.decls.getParameterById(param.decl)
+          : undefined) ?? ctx.decls.getParameter(param.symbol);
+      if (typeof param.decl === "number" && (!declParam || declParam.symbol !== param.symbol)) {
+        throw new Error(
+          `missing or mismatched parameter decl for symbol ${param.symbol} in function ${getSymbolName(
+            item.symbol,
+            ctx
+          )}`
+        );
+      }
+      if (fnDecl?.params[index] && fnDecl.params[index]!.symbol !== param.symbol) {
+        throw new Error(
+          `parameter order mismatch for function ${getSymbolName(item.symbol, ctx)}`
+        );
+      }
+      return { type: resolved, label: declParam?.label ?? param.label };
     });
 
     const hasExplicitReturn = Boolean(item.returnType);

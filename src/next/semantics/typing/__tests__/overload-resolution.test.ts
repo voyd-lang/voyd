@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { runTypingPipeline } from "../pipeline.js";
 import type { HirNamedTypeExpr, HirObjectTypeExpr } from "../../hir/nodes.js";
-import type { OverloadSetId } from "../../ids.js";
+import type { OverloadSetId, ScopeId } from "../../ids.js";
 import { createModuleContext } from "./helpers.js";
+import { Expr } from "src/next/parser/index.js";
 
 const createNamedType = (
   name: string,
@@ -19,6 +20,9 @@ describe("overload resolution", () => {
   it("matches structural arguments against overload parameters", () => {
     const ctx = createModuleContext();
     const overloadSetId: OverloadSetId = 0;
+    const fakeExpr = (): Expr =>
+      ({ syntaxId: ctx.nextNode(), location: ctx.span } as unknown as Expr);
+    const functionScope = ctx.symbolTable.rootScope as ScopeId;
 
     const pointAliasSymbol = ctx.symbolTable.declare({
       name: "Point",
@@ -63,9 +67,19 @@ describe("overload resolution", () => {
       ast: ctx.nextNode(),
       span: ctx.span,
     };
+    const aliasDecl = ctx.decls.registerTypeAlias({
+      name: "Point",
+      visibility: "module",
+      symbol: pointAliasSymbol,
+      form: undefined,
+      target: pointAliasTarget as unknown as Expr,
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
     ctx.builder.addItem({
       kind: "type-alias",
       visibility: "module",
+      decl: aliasDecl.id,
       symbol: pointAliasSymbol,
       target: pointAliasTarget,
       ast: ctx.nextNode(),
@@ -76,10 +90,27 @@ describe("overload resolution", () => {
     const boolType = createNamedType("bool", ctx.nextNode(), ctx.span);
     const intType = createNamedType("i32", ctx.nextNode(), ctx.span);
 
+    const fooPointDecl = ctx.decls.registerFunction({
+      name: "foo",
+      visibility: "module",
+      symbol: fooPointSymbol,
+      scope: functionScope,
+      params: [
+        {
+          name: "p",
+          symbol: pointParamSymbol,
+          ast: undefined,
+        },
+      ],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
     ctx.builder.addFunction({
       kind: "function",
       visibility: "module",
       symbol: fooPointSymbol,
+      decl: fooPointDecl.id,
       parameters: [
         {
           symbol: pointParamSymbol,
@@ -95,10 +126,27 @@ describe("overload resolution", () => {
       span: ctx.span,
     });
 
+    const fooBoolDecl = ctx.decls.registerFunction({
+      name: "foo",
+      visibility: "module",
+      symbol: fooBoolSymbol,
+      scope: functionScope,
+      params: [
+        {
+          name: "flag",
+          symbol: boolParamSymbol,
+          ast: undefined,
+        },
+      ],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
     ctx.builder.addFunction({
       kind: "function",
       visibility: "module",
       symbol: fooBoolSymbol,
+      decl: fooBoolDecl.id,
       parameters: [
         {
           symbol: boolParamSymbol,
@@ -152,10 +200,21 @@ describe("overload resolution", () => {
       span: ctx.span,
     });
 
+    const mainDecl = ctx.decls.registerFunction({
+      name: "main",
+      visibility: "public",
+      symbol: mainSymbol,
+      scope: functionScope,
+      params: [],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
     ctx.builder.addFunction({
       kind: "function",
       visibility: "public",
       symbol: mainSymbol,
+      decl: mainDecl.id,
       parameters: [],
       returnType: intType,
       body: callExpr,
@@ -167,6 +226,7 @@ describe("overload resolution", () => {
       symbolTable: ctx.symbolTable,
       hir: ctx.builder.finalize(),
       overloads: new Map([[overloadSetId, [fooPointSymbol, fooBoolSymbol]]]),
+      decls: ctx.decls,
     });
 
     const callType = typing.table.getExprType(callExpr);
