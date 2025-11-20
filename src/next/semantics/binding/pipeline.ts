@@ -632,6 +632,11 @@ const bindExpr = (
     return;
   }
 
+  if (expr.calls("match")) {
+    bindMatch(expr, ctx, tracker);
+    return;
+  }
+
   if (expr.calls("while")) {
     bindWhile(expr, ctx, tracker);
     return;
@@ -645,6 +650,62 @@ const bindExpr = (
   for (const child of expr.toArray()) {
     bindExpr(child, ctx, tracker);
   }
+};
+
+const bindMatch = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  const operandExpr = form.at(1);
+  const potentialBinder = form.at(2);
+  const hasBinder = isIdentifierAtom(potentialBinder);
+  const caseStartIndex = hasBinder ? 3 : 2;
+
+  const matchScope = ctx.symbolTable.createScope({
+    parent: tracker.current(),
+    kind: "block",
+    owner: form.syntaxId,
+  });
+  ctx.scopeByNode.set(form.syntaxId, matchScope);
+
+  tracker.enterScope(matchScope, () => {
+    bindExpr(operandExpr, ctx, tracker);
+
+    if (hasBinder) {
+      rememberSyntax(potentialBinder as Syntax, ctx);
+      reportOverloadNameCollision(
+        potentialBinder.value,
+        matchScope,
+        potentialBinder,
+        ctx
+      );
+      ctx.symbolTable.declare({
+        name: potentialBinder.value,
+        kind: "value",
+        declaredAt: potentialBinder.syntaxId,
+      });
+    }
+
+    for (let index = caseStartIndex; index < form.length; index += 1) {
+      const arm = form.at(index);
+      if (!isForm(arm) || !arm.calls(":")) {
+        throw new Error("match cases must be labeled with ':'");
+      }
+
+      const caseScope = ctx.symbolTable.createScope({
+        parent: matchScope,
+        kind: "block",
+        owner: arm.syntaxId,
+      });
+      ctx.scopeByNode.set(arm.syntaxId, caseScope);
+
+      tracker.enterScope(caseScope, () => {
+        const valueExpr = arm.at(2);
+        bindExpr(valueExpr, ctx, tracker);
+      });
+    }
+  });
 };
 
 const bindBlock = (

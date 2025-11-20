@@ -129,4 +129,14 @@ describe("next codegen", () => {
     expect(typeof main).toBe("function");
     expect((main as () => number)()).toBe(19);
   });
+
+  it("emits wasm for union matches and returns the matched payload", () => {
+    const ast = loadAst("unions_match.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module } = codegen(semantics);
+    const instance = getWasmInstance(module);
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(1);
+  });
 });
