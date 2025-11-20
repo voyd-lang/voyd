@@ -35,7 +35,7 @@ import type {
   BindingResult,
   BoundObject,
 } from "../binding/pipeline.js";
-import { isIdentifierWithValue, toSourceSpan } from "../utils.js";
+import { expectLabeledExpr, parseIfBranches, toSourceSpan } from "../utils.js";
 
 interface LowerInputs {
   builder: HirBuilder;
@@ -434,46 +434,25 @@ const lowerIf = (
   ctx: LowerContext,
   scopes: LowerScopeStack
 ): HirExprId => {
-  const conditionExpr = form.at(1);
-  if (!conditionExpr) {
-    throw new Error("if expression missing condition");
-  }
+  const { branches, defaultBranch } = parseIfBranches(form);
+  const loweredBranches: HirCondBranch[] = branches.map(
+    ({ condition, value }) => ({
+      condition: lowerExpr(condition, ctx, scopes),
+      value: lowerExpr(value, ctx, scopes),
+    })
+  );
 
-  const condition = lowerExpr(conditionExpr, ctx, scopes);
-  const branches: HirCondBranch[] = [];
-  let defaultBranch: HirExprId | undefined;
-
-  for (let i = 2; i < form.length; i += 1) {
-    const branch = form.at(i);
-    if (!isForm(branch) || !branch.calls(":")) continue;
-    const label = branch.at(1);
-    const valueExpr = branch.at(2);
-    if (!valueExpr) continue;
-
-    if (isIdentifierWithValue(label, "then")) {
-      branches.push({
-        condition,
-        value: lowerExpr(valueExpr, ctx, scopes),
-      });
-      continue;
-    }
-
-    if (isIdentifierWithValue(label, "else")) {
-      defaultBranch = lowerExpr(valueExpr, ctx, scopes);
-    }
-  }
-
-  if (!branches.length) {
-    throw new Error("if expression missing then branch");
-  }
+  const loweredDefault = defaultBranch
+    ? lowerExpr(defaultBranch, ctx, scopes)
+    : undefined;
 
   return ctx.builder.addExpression({
     kind: "expr",
     exprKind: "if",
     ast: form.syntaxId,
     span: toSourceSpan(form),
-    branches,
-    defaultBranch,
+    branches: loweredBranches,
+    defaultBranch: loweredDefault,
   });
 };
 
@@ -854,10 +833,11 @@ const lowerWhile = (
   scopes: LowerScopeStack
 ): HirExprId => {
   const conditionExpr = form.at(1);
-  const bodyExpr = form.at(2);
-  if (!conditionExpr || !bodyExpr) {
-    throw new Error("while expression requires condition and body");
+  if (!conditionExpr) {
+    throw new Error("while expression missing condition");
   }
+
+  const bodyExpr = expectLabeledExpr(form.at(2), "do", "while expression");
 
   const condition = lowerExpr(conditionExpr, ctx, scopes);
   const body = lowerExpr(bodyExpr, ctx, scopes);
