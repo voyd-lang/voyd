@@ -18,12 +18,11 @@ import {
 } from "../utils.js";
 import type {
   HirCondBranch,
-  HirExprId,
   HirMatchArm,
   HirObjectLiteralEntry,
   HirPattern,
-  HirStmtId,
 } from "../hir/index.js";
+import type { HirExprId, HirStmtId } from "../ids.js";
 import {
   resolveIdentifierValue,
   resolveSymbol,

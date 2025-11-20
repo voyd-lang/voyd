@@ -106,7 +106,7 @@ export const compileStatement = (
     case "let":
       return compileLetStatement(stmt, ctx, fnCtx, compileExpr);
     default:
-      throw new Error(`codegen cannot lower statement kind ${stmt.kind}`);
+      throw new Error("codegen cannot lower statement kind");
   }
 };
 

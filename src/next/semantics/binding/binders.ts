@@ -27,7 +27,11 @@ import {
 import type { BindingContext } from "./types.js";
 import type { ScopeId } from "../ids.js";
 import type { SymbolTable } from "../binder/index.js";
-import type { ParameterDeclInput } from "../decls.js";
+import type {
+  ObjectFieldDecl,
+  ParameterDeclInput,
+  TypeParameterDecl,
+} from "../decls.js";
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   const tracker = new BinderScopeTracker(ctx.symbolTable);
@@ -217,8 +221,8 @@ const bindObjectDecl = (
   });
   ctx.scopeByNode.set(decl.form.syntaxId, objectScope);
 
-  const typeParameters = [];
-  const fields = [];
+  const typeParameters: TypeParameterDecl[] = [];
+  const fields: ObjectFieldDecl[] = [];
   tracker.enterScope(objectScope, () => {
     decl.typeParameters.forEach((param) => {
       rememberSyntax(param, ctx);
