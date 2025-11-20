@@ -1,6 +1,7 @@
 import {
   type Expr,
   type Form,
+  IdentifierAtom,
   type Syntax,
   formCallsInternal,
   isBoolAtom,
@@ -687,9 +688,9 @@ const lowerNominalObjectLiteral = (
   }
 
   const typeArguments = hasGenerics
-    ? (genericsForm as Form).rest.map((entry) =>
-        lowerTypeExpr(entry, ctx, scopes.current())
-      )
+    ? ((genericsForm as Form).rest
+        .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
+        .filter(Boolean) as HirTypeExpr[])
     : undefined;
 
   const symbol = resolveTypeSymbol(callee.value, scopes.current(), ctx);
@@ -1075,7 +1076,11 @@ const lowerTypeExpr = (
   }
 
   if (isForm(expr)) {
-    const named = lowerNamedTypeForm(expr, ctx, scope ?? ctx.symbolTable.rootScope);
+    const named = lowerNamedTypeForm(
+      expr,
+      ctx,
+      scope ?? ctx.symbolTable.rootScope
+    );
     if (named) {
       return named;
     }
@@ -1102,18 +1107,18 @@ const lowerNamedTypeForm = (
   scope: ScopeId
 ): HirTypeExpr | undefined => {
   if (
-    !isIdentifierAtom(form.at(0)) ||
-    !isForm(form.at(1)) ||
-    !formCallsInternal(form.at(1) as Form, "generics")
+    !isIdentifierAtom(form.first) ||
+    !isForm(form.second) ||
+    !formCallsInternal(form.second, "generics")
   ) {
     return undefined;
   }
 
-  const name = form.at(0) as IdentifierAtom;
-  const genericsForm = form.at(1) as Form;
-  const typeArguments = genericsForm.rest.map((entry) =>
-    lowerTypeExpr(entry, ctx, scope)
-  );
+  const name = form.first;
+  const genericsForm = form.second;
+  const typeArguments = genericsForm.rest
+    .map((entry) => lowerTypeExpr(entry, ctx, scope))
+    .filter(Boolean) as HirTypeExpr[];
 
   return {
     typeKind: "named",
@@ -1130,7 +1135,9 @@ const lowerObjectTypeExpr = (
   ctx: LowerContext,
   scope?: ScopeId
 ): HirTypeExpr => {
-  const fields = form.rest.map((entry) => lowerObjectTypeField(entry, ctx, scope));
+  const fields = form.rest.map((entry) =>
+    lowerObjectTypeField(entry, ctx, scope)
+  );
   return {
     typeKind: "object",
     ast: form.syntaxId,

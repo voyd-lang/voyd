@@ -3,6 +3,7 @@ import type { HirObjectDecl } from "../../hir/nodes.js";
 import type { SymbolId, TypeId } from "../../ids.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import type { TypingResult } from "../../typing/pipeline.js";
+import type { NominalObjectType } from "../type-arena.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 
 const findValueSymbol = (
@@ -43,15 +44,19 @@ const getNominalArgPrimitive = (
 const unwrapNominalFromIntersection = (
   typeId: TypeId,
   typing: TypingResult
-) => {
+): Readonly<NominalObjectType> | undefined => {
   const desc = typing.arena.get(typeId);
   if (desc.kind === "intersection" && typeof desc.nominal === "number") {
-    return typing.arena.get(desc.nominal);
+    const nominal = typing.arena.get(desc.nominal);
+    return nominal.kind === "nominal-object" ? nominal : undefined;
   }
   return undefined;
 };
 
-const unwrapNominal = (typeId: TypeId, typing: TypingResult) => {
+const unwrapNominal = (
+  typeId: TypeId,
+  typing: TypingResult
+): Readonly<NominalObjectType> | undefined => {
   const desc = typing.arena.get(typeId);
   return desc.kind === "nominal-object" ? desc : undefined;
 };
