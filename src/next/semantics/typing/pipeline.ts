@@ -1457,17 +1457,17 @@ const typeSatisfies = (
     return true;
   }
 
-  const expectedDesc = ctx.arena.get(expected);
-  if (expectedDesc.kind === "union") {
-    return expectedDesc.members.some((member) =>
-      typeSatisfies(actual, member, ctx)
-    );
-  }
-
   const actualDesc = ctx.arena.get(actual);
   if (actualDesc.kind === "union") {
     return actualDesc.members.every((member) =>
       typeSatisfies(member, expected, ctx)
+    );
+  }
+
+  const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "union") {
+    return expectedDesc.members.some((member) =>
+      typeSatisfies(actual, member, ctx)
     );
   }
 

@@ -1,0 +1,23 @@
+obj Cat {
+  lives: i32
+}
+
+obj Dog {
+  noses: i32
+}
+
+obj Frog {
+  feet: i32
+}
+
+type Narrow = Cat | Dog
+type Wide = Cat | Dog | Frog
+
+fn accept(pet: Wide) -> i32
+  1
+
+pub fn call_with_narrow(pet: Narrow) -> i32
+  accept(pet)
+
+pub fn main() -> i32
+  call_with_narrow(Dog { noses: 1 })
