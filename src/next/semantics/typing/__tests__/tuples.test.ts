@@ -39,14 +39,12 @@ describe("tuple typing", () => {
     const { typing, symbolTable, hir } = semanticsPipeline(ast);
 
     const pairParam = findSymbolByName("pair", "parameter", symbolTable);
-    const pairBinding = findSymbolByName("pair", "value", symbolTable);
     const aBinding = findSymbolByName("a", "value", symbolTable);
     const bBinding = findSymbolByName("b", "value", symbolTable);
-    const xBinding = findSymbolByName("x", "value", symbolTable);
-    const yBinding = findSymbolByName("y", "value", symbolTable);
+    const leftBinding = findSymbolByName("left", "value", symbolTable);
+    const rightBinding = findSymbolByName("right", "value", symbolTable);
 
     expectStructuralTuple(pairParam && typing.valueTypes.get(pairParam), typing, 2);
-    expectStructuralTuple(pairBinding && typing.valueTypes.get(pairBinding), typing, 2);
 
     const tupleExpr = Array.from(hir.expressions.values()).find(
       (expr) => expr.exprKind === "tuple" && expr.elements.length === 2
@@ -55,7 +53,7 @@ describe("tuple typing", () => {
     const tupleType = tupleExpr && typing.table.getExprType(tupleExpr.id);
     expectStructuralTuple(tupleType, typing, 2);
 
-    [aBinding, bBinding, xBinding, yBinding].forEach((binding) => {
+    [aBinding, bBinding, leftBinding, rightBinding].forEach((binding) => {
       const type = binding && typing.valueTypes.get(binding);
       expect(type).toBeDefined();
       if (typeof type === "number") {

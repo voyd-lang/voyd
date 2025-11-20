@@ -198,6 +198,43 @@ describe("semanticsPipeline", () => {
     expectFunctionReturnPrimitive(typing, mainSymbol!, "i32");
   });
 
+  it("infers tuple destructuring from forward-declared functions", () => {
+    const ast = loadAst("tuples.voyd");
+    const result = semanticsPipeline(ast);
+    const { symbolTable, typing } = result;
+    const rootScope = symbolTable.rootScope;
+
+    const buildPair = symbolTable.resolve("build_pair", rootScope);
+    const consumeForward = symbolTable.resolve("consume_forward", rootScope);
+    const combine = symbolTable.resolve("combine", rootScope);
+    const main = symbolTable.resolve("main", rootScope);
+    expect(buildPair).toBeDefined();
+    expect(consumeForward).toBeDefined();
+    expect(combine).toBeDefined();
+    expect(main).toBeDefined();
+
+    const buildPairScheme = typing.table.getSymbolScheme(buildPair!);
+    expect(buildPairScheme).toBeDefined();
+    const buildPairType = typing.arena.instantiate(buildPairScheme!, []);
+    const buildPairDesc = typing.arena.get(buildPairType);
+    expect(buildPairDesc.kind).toBe("function");
+    if (buildPairDesc.kind !== "function") {
+      throw new Error("expected build_pair to have a function type");
+    }
+    const tupleDesc = typing.arena.get(buildPairDesc.returnType);
+    expect(tupleDesc.kind).toBe("structural-object");
+    if (tupleDesc.kind !== "structural-object") {
+      throw new Error("expected build_pair to return a structural tuple");
+    }
+    expect(tupleDesc.fields).toHaveLength(2);
+    expectPrimitiveType(typing, tupleDesc.fields[0]?.type, "i32");
+    expectPrimitiveType(typing, tupleDesc.fields[1]?.type, "i32");
+
+    expectFunctionReturnPrimitive(typing, consumeForward!, "i32");
+    expectFunctionReturnPrimitive(typing, combine!, "i32");
+    expectFunctionReturnPrimitive(typing, main!, "i32");
+  });
+
   it("binds and lowers the fib sample module", () => {
     const ast = loadAst("fib.voyd");
     const result = semanticsPipeline(ast);

@@ -1323,6 +1323,16 @@ const bindTuplePatternFromType = (
 ): void => {
   const fields = getStructuralFields(type, ctx);
   if (!fields) {
+    if (ctx.typeCheckMode === "relaxed" && type === ctx.unknownType) {
+      pattern.elements.forEach((subPattern) => {
+        if (subPattern.kind === "tuple") {
+          bindTuplePatternFromType(subPattern, ctx.unknownType, ctx, mode);
+          return;
+        }
+        recordPatternType(subPattern, ctx.unknownType, ctx, mode);
+      });
+      return;
+    }
     throw new Error("tuple pattern requires a tuple initializer");
   }
 
