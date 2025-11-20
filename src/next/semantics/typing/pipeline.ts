@@ -1292,18 +1292,25 @@ const resolveTypeExpr = (
     return fallback;
   }
 
+  let resolved: TypeId;
   switch (expr.typeKind) {
     case "named":
-      return resolveNamedTypeExpr(expr, ctx, typeParams);
+      resolved = resolveNamedTypeExpr(expr, ctx, typeParams);
+      break;
     case "object":
-      return resolveObjectTypeExpr(expr, ctx, typeParams);
+      resolved = resolveObjectTypeExpr(expr, ctx, typeParams);
+      break;
     case "tuple":
-      return resolveTupleTypeExpr(expr, ctx, typeParams);
+      resolved = resolveTupleTypeExpr(expr, ctx, typeParams);
+      break;
     case "union":
-      return resolveUnionTypeExpr(expr, ctx, typeParams);
+      resolved = resolveUnionTypeExpr(expr, ctx, typeParams);
+      break;
     default:
       throw new Error(`unsupported type expression kind: ${expr.typeKind}`);
   }
+  expr.typeId = resolved;
+  return resolved;
 };
 
 const resolveNamedTypeExpr = (

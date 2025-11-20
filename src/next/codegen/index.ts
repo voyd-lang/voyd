@@ -12,9 +12,7 @@ import type {
   HirMatchExpr,
   HirLetStatement,
   HirObjectLiteralExpr,
-  HirObjectDecl,
   HirPattern,
-  HirTypeAlias,
   HirTypeExpr,
   HirWhileExpr,
 } from "../semantics/hir/index.js";
@@ -69,12 +67,6 @@ interface CodegenContext {
   functions: Map<SymbolId, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, SymbolId>;
   structTypes: Map<TypeId, StructuralTypeInfo>;
-  typeAliases: Map<SymbolId, HirTypeAlias>;
-  objectDecls: Map<SymbolId, HirObjectDecl>;
-  objectTypeCache: Map<string, TypeId>;
-  resolvingObjectTypes: Set<string>;
-  baseObjectType?: TypeId;
-  unknownType?: TypeId;
   rtt: ReturnType<typeof createRttContext>;
 }
 
@@ -126,18 +118,6 @@ const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   validate: true,
 };
 
-const initializeTypeResolution = (ctx: CodegenContext): void => {
-  ctx.hir.items.forEach((item) => {
-    if (item.kind === "type-alias") {
-      ctx.typeAliases.set(item.symbol, item);
-      return;
-    }
-    if (item.kind === "object") {
-      ctx.objectDecls.set(item.symbol, item);
-    }
-  });
-};
-
 export const codegen = (
   semantics: SemanticsPipelineResult,
   options: CodegenOptions = {}
@@ -154,14 +134,9 @@ export const codegen = (
     functions: new Map(),
     itemsToSymbols: new Map(),
     structTypes: new Map(),
-    typeAliases: new Map(),
-    objectDecls: new Map(),
-    objectTypeCache: new Map(),
-    resolvingObjectTypes: new Set(),
     rtt,
   };
 
-  initializeTypeResolution(ctx);
   registerFunctionMetadata(ctx);
   compileFunctions(ctx);
   emitExports(ctx);
@@ -1689,276 +1664,14 @@ const getExprBinaryenType = (
   return binaryen.none;
 };
 
-const resolveTypeIdFromTypeExpr = (
+const getTypeIdFromTypeExpr = (
   expr: HirTypeExpr,
-  ctx: CodegenContext,
-  typeParams?: ReadonlyMap<SymbolId, TypeId>
+  ctx: CodegenContext
 ): TypeId => {
-  switch (expr.typeKind) {
-    case "named":
-      return resolveNamedTypeExpr(expr, ctx, typeParams);
-    case "object":
-      return ctx.typing.arena.internStructuralObject({
-        fields: expr.fields.map((field) => ({
-          name: field.name,
-          type: resolveTypeIdFromTypeExpr(field.type, ctx, typeParams),
-        })),
-      });
-    case "tuple":
-      return ctx.typing.arena.internStructuralObject({
-        fields: expr.elements.map((element, index) => ({
-          name: `${index}`,
-          type: resolveTypeIdFromTypeExpr(element, ctx, typeParams),
-        })),
-      });
-    case "union":
-      return ctx.typing.arena.internUnion(
-        expr.members.map((member) =>
-          resolveTypeIdFromTypeExpr(member, ctx, typeParams)
-        )
-      );
-    default:
-      throw new Error(`unsupported type expression ${expr.typeKind}`);
+  if (typeof expr.typeId === "number") {
+    return expr.typeId;
   }
-};
-
-const resolveNamedTypeExpr = (
-  expr: HirTypeExpr & { typeKind: "named" },
-  ctx: CodegenContext,
-  typeParams?: ReadonlyMap<SymbolId, TypeId>
-): TypeId => {
-  if (expr.path.length !== 1) {
-    throw new Error("qualified type paths are not supported yet");
-  }
-
-  const name = expr.path[0]!;
-  const typeParam =
-    (typeof expr.symbol === "number"
-      ? typeParams?.get(expr.symbol)
-      : findTypeParamByName(name, typeParams, ctx)) ?? undefined;
-  if (typeof typeParam === "number") {
-    if (expr.typeArguments?.length) {
-      throw new Error("type parameters do not accept type arguments");
-    }
-    return typeParam;
-  }
-
-  if (name === "Object") {
-    return getBaseObjectType(ctx);
-  }
-
-  const alias = resolveTypeAlias(expr, ctx);
-  if (alias) {
-    if (alias.typeParameters && alias.typeParameters.length > 0) {
-      throw new Error("generic type aliases are not supported in codegen yet");
-    }
-    if (expr.typeArguments && expr.typeArguments.length > 0) {
-      throw new Error("type aliases do not support type arguments yet");
-    }
-    return resolveTypeIdFromTypeExpr(alias.target, ctx, typeParams);
-  }
-
-  const objectSymbol = resolveObjectSymbol(expr, ctx);
-  if (typeof objectSymbol === "number") {
-    const resolvedArgs =
-      expr.typeArguments?.map((arg) =>
-        resolveTypeIdFromTypeExpr(arg, ctx, typeParams)
-      ) ?? [];
-    return ensureObjectType(objectSymbol, resolvedArgs, ctx, typeParams);
-  }
-
-  if (isPrimitiveName(name)) {
-    return ctx.typing.arena.internPrimitive(name);
-  }
-  throw new Error(`codegen missing type for ${name}`);
-};
-
-const resolveTypeAlias = (
-  expr: HirTypeExpr & { typeKind: "named" },
-  ctx: CodegenContext
-): HirTypeAlias | undefined => {
-  if (typeof expr.symbol === "number") {
-    const alias = ctx.typeAliases.get(expr.symbol);
-    if (alias) {
-      return alias;
-    }
-  }
-  const symbol = ctx.symbolTable.resolve(expr.path[0]!, ctx.hir.module.scope);
-  return typeof symbol === "number" ? ctx.typeAliases.get(symbol) : undefined;
-};
-
-const resolveObjectSymbol = (
-  expr: HirTypeExpr & { typeKind: "named" },
-  ctx: CodegenContext
-): SymbolId | undefined => {
-  if (typeof expr.symbol === "number" && ctx.objectDecls.has(expr.symbol)) {
-    return expr.symbol;
-  }
-  const resolved = ctx.symbolTable.resolve(expr.path[0]!, ctx.hir.module.scope);
-  if (typeof resolved === "number" && ctx.objectDecls.has(resolved)) {
-    return resolved;
-  }
-  return undefined;
-};
-
-const ensureObjectType = (
-  symbol: SymbolId,
-  typeArguments: readonly TypeId[],
-  ctx: CodegenContext,
-  parentTypeParams?: ReadonlyMap<SymbolId, TypeId>
-): TypeId => {
-  const key = `${symbol}<${typeArguments.join(",")}>`;
-  const cached = ctx.objectTypeCache.get(key);
-  if (typeof cached === "number") {
-    return cached;
-  }
-  if (ctx.resolvingObjectTypes.has(key)) {
-    return getUnknownType(ctx);
-  }
-
-  const decl = ctx.objectDecls.get(symbol);
-  if (!decl) {
-    throw new Error(`missing object declaration for symbol ${symbol}`);
-  }
-
-  const { bindings, appliedArgs } = resolveObjectTypeArgs(
-    decl,
-    typeArguments,
-    ctx,
-    parentTypeParams
-  );
-
-  ctx.resolvingObjectTypes.add(key);
-  try {
-    const baseType = decl.base
-      ? resolveTypeIdFromTypeExpr(decl.base, ctx, bindings)
-      : getBaseObjectType(ctx);
-    const baseFields = getStructuralFieldsFromType(baseType, ctx);
-    const ownFields = decl.fields.map((field) => ({
-      name: field.name,
-      type: resolveTypeIdFromTypeExpr(field.type!, ctx, bindings),
-    }));
-    const fields = mergeDeclaredFields(baseFields, ownFields);
-    const structural = ctx.typing.arena.internStructuralObject({ fields });
-    const nominal = ctx.typing.arena.internNominalObject({
-      owner: symbol,
-      name: getSymbolName(symbol, ctx),
-      typeArgs: appliedArgs,
-    });
-    const type = ctx.typing.arena.internIntersection({
-      nominal,
-      structural,
-    });
-    ctx.objectTypeCache.set(key, type);
-    return type;
-  } finally {
-    ctx.resolvingObjectTypes.delete(key);
-  }
-};
-
-const resolveObjectTypeArgs = (
-  decl: HirObjectDecl,
-  typeArguments: readonly TypeId[],
-  ctx: CodegenContext,
-  parentTypeParams?: ReadonlyMap<SymbolId, TypeId>
-): {
-  bindings: Map<SymbolId, TypeId>;
-  appliedArgs: TypeId[];
-} => {
-  const params = decl.typeParameters ?? [];
-  if (typeArguments.length > params.length) {
-    throw new Error("object type argument count mismatch");
-  }
-
-  const bindings = new Map<SymbolId, TypeId>();
-  parentTypeParams?.forEach((value, key) => bindings.set(key, value));
-  const appliedArgs = params.map((param, index) => {
-    const explicit = typeArguments[index];
-    if (typeof explicit === "number") {
-      bindings.set(param.symbol, explicit);
-      return explicit;
-    }
-    const defaultType =
-      param.defaultType &&
-      resolveTypeIdFromTypeExpr(param.defaultType, ctx, bindings);
-    const resolved =
-      typeof defaultType === "number" ? defaultType : getUnknownType(ctx);
-    bindings.set(param.symbol, resolved);
-    return resolved;
-  });
-
-  return { bindings, appliedArgs };
-};
-
-const mergeDeclaredFields = (
-  inherited: readonly { name: string; type: TypeId }[],
-  own: readonly { name: string; type: TypeId }[]
-): { name: string; type: TypeId }[] => {
-  const fields = new Map<string, TypeId>();
-  inherited.forEach((field) => fields.set(field.name, field.type));
-  own.forEach((field) => fields.set(field.name, field.type));
-  return Array.from(fields.entries()).map(([name, type]) => ({ name, type }));
-};
-
-const findTypeParamByName = (
-  name: string,
-  typeParams: ReadonlyMap<SymbolId, TypeId> | undefined,
-  ctx: CodegenContext
-): TypeId | undefined => {
-  if (!typeParams) {
-    return undefined;
-  }
-  for (const [symbol, type] of typeParams.entries()) {
-    if (getSymbolName(symbol, ctx) === name) {
-      return type;
-    }
-  }
-  return undefined;
-};
-
-const getStructuralFieldsFromType = (
-  typeId: TypeId,
-  ctx: CodegenContext
-): readonly { name: string; type: TypeId }[] => {
-  const structuralId = resolveStructuralTypeId(typeId, ctx);
-  if (typeof structuralId !== "number") {
-    return [];
-  }
-  const desc = ctx.typing.arena.get(structuralId);
-  return desc.kind === "structural-object" ? desc.fields : [];
-};
-
-const getUnknownType = (ctx: CodegenContext): TypeId => {
-  if (typeof ctx.unknownType === "number") {
-    return ctx.unknownType;
-  }
-  const unknown = ctx.typing.arena.internPrimitive("unknown");
-  ctx.unknownType = unknown;
-  return unknown;
-};
-
-const getBaseObjectType = (ctx: CodegenContext): TypeId => {
-  if (typeof ctx.baseObjectType === "number") {
-    return ctx.baseObjectType;
-  }
-  for (const [symbol, typeId] of ctx.typing.valueTypes.entries()) {
-    const record = ctx.symbolTable.getSymbol(symbol);
-    const metadata = (record.metadata ?? {}) as {
-      intrinsic?: boolean;
-      entity?: string;
-    };
-    if (
-      record.name === "Object" &&
-      record.kind === "type" &&
-      metadata.entity === "object"
-    ) {
-      ctx.baseObjectType = typeId;
-      return typeId;
-    }
-  }
-  const fallback = ctx.typing.arena.internPrimitive("unknown");
-  ctx.baseObjectType = fallback;
-  return fallback;
+  throw new Error("codegen expected type-annotated HIR type expression");
 };
 
 const resolvePatternTypeForMatch = (
@@ -1966,7 +1679,7 @@ const resolvePatternTypeForMatch = (
   discriminantTypeId: TypeId,
   ctx: CodegenContext
 ): TypeId => {
-  const resolved = resolveTypeIdFromTypeExpr(type, ctx);
+  const resolved = getTypeIdFromTypeExpr(type, ctx);
   const narrowed = narrowPatternType(resolved, discriminantTypeId, ctx);
   return typeof narrowed === "number" ? narrowed : resolved;
 };
@@ -2088,20 +1801,6 @@ const mapPrimitiveToWasm = (name: string): binaryen.Type => {
       throw new Error(`unsupported primitive type ${name}`);
   }
 };
-
-const isPrimitiveName = (name: string): boolean =>
-  [
-    "i32",
-    "i64",
-    "f32",
-    "f64",
-    "bool",
-    "boolean",
-    "unknown",
-    "voyd",
-    "void",
-    "Voyd",
-  ].includes(name);
 
 const getStructuralTypeInfo = (
   typeId: TypeId,
