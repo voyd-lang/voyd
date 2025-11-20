@@ -79,6 +79,16 @@ interface FunctionContext {
   nextLocalIndex: number;
   returnTypeId: TypeId;
 }
+
+interface CompiledExpression {
+  expr: binaryen.ExpressionRef;
+  usedReturnCall: boolean;
+}
+
+interface CompileCallOptions {
+  tailPosition?: boolean;
+  expectedResultTypeId?: TypeId;
+}
 interface StructuralFieldInfo {
   name: string;
   typeId: TypeId;
@@ -219,14 +229,20 @@ const compileFunctionItem = (fn: HirFunction, ctx: CodegenContext): void => {
     fnCtx.bindings.set(param.symbol, { index, type });
   });
 
-  const body = compileExpression(fn.body, ctx, fnCtx);
+  const body = compileExpression(
+    fn.body,
+    ctx,
+    fnCtx,
+    true,
+    fnCtx.returnTypeId
+  );
 
   ctx.mod.addFunction(
     meta.wasmName,
     binaryen.createType(meta.paramTypes as number[]),
     meta.resultType,
     fnCtx.locals,
-    body
+    body.expr
   );
 };
 
@@ -249,8 +265,10 @@ const emitExports = (ctx: CodegenContext): void => {
 const compileExpression = (
   exprId: HirExprId,
   ctx: CodegenContext,
-  fnCtx: FunctionContext
-): binaryen.ExpressionRef => {
+  fnCtx: FunctionContext,
+  tailPosition = false,
+  expectedResultTypeId?: TypeId
+): CompiledExpression => {
   const expr = ctx.hir.expressions.get(exprId);
   if (!expr) {
     throw new Error(`codegen missing HirExpression ${exprId}`);
@@ -264,11 +282,20 @@ const compileExpression = (
     case "overload-set":
       throw new Error("overload sets cannot be evaluated directly");
     case "call":
-      return compileCallExpr(expr, ctx, fnCtx);
+      return compileCallExpr(expr, ctx, fnCtx, {
+        tailPosition,
+        expectedResultTypeId,
+      });
     case "block":
-      return compileBlockExpr(expr, ctx, fnCtx);
+      return compileBlockExpr(
+        expr,
+        ctx,
+        fnCtx,
+        tailPosition,
+        expectedResultTypeId
+      );
     case "if":
-      return compileIfExpr(expr, ctx, fnCtx);
+      return compileIfExpr(expr, ctx, fnCtx, tailPosition, expectedResultTypeId);
     case "while":
       return compileWhileExpr(expr, ctx, fnCtx);
     case "assign":
@@ -293,24 +320,39 @@ const compileLiteralExpr = (
     value: string;
   },
   ctx: CodegenContext
-): binaryen.ExpressionRef => {
+): CompiledExpression => {
   switch (expr.literalKind) {
     case "i32":
-      return ctx.mod.i32.const(Number.parseInt(expr.value, 10));
+      return {
+        expr: ctx.mod.i32.const(Number.parseInt(expr.value, 10)),
+        usedReturnCall: false,
+      };
     case "i64": {
       const value = BigInt(expr.value);
       const low = Number(value & BigInt(0xffffffff));
       const high = Number((value >> BigInt(32)) & BigInt(0xffffffff));
-      return ctx.mod.i64.const(low, high);
+      return {
+        expr: ctx.mod.i64.const(low, high),
+        usedReturnCall: false,
+      };
     }
     case "f32":
-      return ctx.mod.f32.const(Number.parseFloat(expr.value));
+      return {
+        expr: ctx.mod.f32.const(Number.parseFloat(expr.value)),
+        usedReturnCall: false,
+      };
     case "f64":
-      return ctx.mod.f64.const(Number.parseFloat(expr.value));
+      return {
+        expr: ctx.mod.f64.const(Number.parseFloat(expr.value)),
+        usedReturnCall: false,
+      };
     case "boolean":
-      return ctx.mod.i32.const(expr.value === "true" ? 1 : 0);
+      return {
+        expr: ctx.mod.i32.const(expr.value === "true" ? 1 : 0),
+        usedReturnCall: false,
+      };
     case "void":
-      return ctx.mod.nop();
+      return { expr: ctx.mod.nop(), usedReturnCall: false };
     default:
       throw new Error(
         `codegen does not support literal kind ${expr.literalKind}`
@@ -322,21 +364,26 @@ const compileIdentifierExpr = (
   expr: HirExpression & { exprKind: "identifier"; symbol: SymbolId },
   ctx: CodegenContext,
   fnCtx: FunctionContext
-): binaryen.ExpressionRef => {
+): CompiledExpression => {
   const binding = fnCtx.bindings.get(expr.symbol);
   if (!binding) {
     throw new Error(
       `codegen cannot reference symbol ${expr.symbol} in this context`
     );
   }
-  return ctx.mod.local.get(binding.index, binding.type);
+  return {
+    expr: ctx.mod.local.get(binding.index, binding.type),
+    usedReturnCall: false,
+  };
 };
 
 const compileCallExpr = (
   expr: HirCallExpr,
   ctx: CodegenContext,
-  fnCtx: FunctionContext
-): binaryen.ExpressionRef => {
+  fnCtx: FunctionContext,
+  options: CompileCallOptions = {}
+): CompiledExpression => {
+  const { tailPosition = false, expectedResultTypeId } = options;
   const callee = ctx.hir.expressions.get(expr.callee);
   if (!callee) {
     throw new Error(`codegen missing callee expression ${expr.callee}`);
@@ -352,7 +399,10 @@ const compileCallExpr = (
       throw new Error(`codegen cannot call symbol ${targetSymbol}`);
     }
     const args = compileCallArguments(expr, targetMeta, ctx, fnCtx);
-    return emitResolvedCall(targetMeta, args, expr.id, ctx);
+    return emitResolvedCall(targetMeta, args, expr.id, ctx, {
+      tailPosition,
+      expectedResultTypeId,
+    });
   }
 
   if (callee.exprKind !== "identifier") {
@@ -365,8 +415,13 @@ const compileCallExpr = (
   };
 
   if (intrinsicMetadata.intrinsic) {
-    const args = expr.args.map((arg) => compileExpression(arg.expr, ctx, fnCtx));
-    return compileIntrinsicCall(symbolRecord.name, expr, args, ctx);
+    const args = expr.args.map(
+      (arg) => compileExpression(arg.expr, ctx, fnCtx).expr
+    );
+    return {
+      expr: compileIntrinsicCall(symbolRecord.name, expr, args, ctx),
+      usedReturnCall: false,
+    };
   }
 
   const targetMeta = ctx.functions.get(callee.symbol);
@@ -374,47 +429,90 @@ const compileCallExpr = (
     throw new Error(`codegen missing metadata for symbol ${callee.symbol}`);
   }
   const args = compileCallArguments(expr, targetMeta, ctx, fnCtx);
-  return emitResolvedCall(targetMeta, args, expr.id, ctx);
+  return emitResolvedCall(targetMeta, args, expr.id, ctx, {
+    tailPosition,
+    expectedResultTypeId,
+  });
 };
 
 const emitResolvedCall = (
   meta: FunctionMetadata,
   args: readonly binaryen.ExpressionRef[],
   callId: HirExprId,
-  ctx: CodegenContext
-): binaryen.ExpressionRef => {
-  return ctx.mod.call(
-    meta.wasmName,
-    args as number[],
-    getExprBinaryenType(callId, ctx)
-  );
+  ctx: CodegenContext,
+  options: CompileCallOptions = {}
+): CompiledExpression => {
+  const { tailPosition = false, expectedResultTypeId } = options;
+  const returnTypeId = getRequiredExprType(callId, ctx);
+  const expectedTypeId = expectedResultTypeId ?? returnTypeId;
+
+  if (
+    tailPosition &&
+    !requiresStructuralConversion(returnTypeId, expectedTypeId, ctx)
+  ) {
+    return {
+      expr: ctx.mod.return_call(
+        meta.wasmName,
+        args as number[],
+        getExprBinaryenType(callId, ctx)
+      ),
+      usedReturnCall: true,
+    };
+  }
+
+  return {
+    expr: ctx.mod.call(
+      meta.wasmName,
+      args as number[],
+      getExprBinaryenType(callId, ctx)
+    ),
+    usedReturnCall: false,
+  };
 };
 
 const compileBlockExpr = (
   expr: HirBlockExpr,
   ctx: CodegenContext,
-  fnCtx: FunctionContext
-): binaryen.ExpressionRef => {
+  fnCtx: FunctionContext,
+  tailPosition: boolean,
+  expectedResultTypeId?: TypeId
+): CompiledExpression => {
   const statements: binaryen.ExpressionRef[] = [];
   expr.statements.forEach((stmtId) => {
     statements.push(compileStatement(stmtId, ctx, fnCtx));
   });
 
   if (typeof expr.value === "number") {
-    const valueExpr = compileExpression(expr.value, ctx, fnCtx);
+    const { expr: valueExpr, usedReturnCall } = compileExpression(
+      expr.value,
+      ctx,
+      fnCtx,
+      tailPosition,
+      expectedResultTypeId
+    );
     if (statements.length === 0) {
-      return valueExpr;
+      return { expr: valueExpr, usedReturnCall };
     }
 
     statements.push(valueExpr);
-    return ctx.mod.block(null, statements, getExprBinaryenType(expr.id, ctx));
+    return {
+      expr: ctx.mod.block(
+        null,
+        statements,
+        getExprBinaryenType(expr.id, ctx)
+      ),
+      usedReturnCall,
+    };
   }
 
   if (statements.length === 0) {
-    return ctx.mod.nop();
+    return { expr: ctx.mod.nop(), usedReturnCall: false };
   }
 
-  return ctx.mod.block(null, statements, binaryen.none);
+  return {
+    expr: ctx.mod.block(null, statements, binaryen.none),
+    usedReturnCall: false,
+  };
 };
 
 const compileStatement = (
@@ -429,13 +527,22 @@ const compileStatement = (
 
   switch (stmt.kind) {
     case "expr-stmt":
-      return asStatement(ctx, compileExpression(stmt.expr, ctx, fnCtx));
+      return asStatement(ctx, compileExpression(stmt.expr, ctx, fnCtx).expr);
     case "return":
       if (typeof stmt.value === "number") {
-        const valueExpr = compileExpression(stmt.value, ctx, fnCtx);
+        const valueExpr = compileExpression(
+          stmt.value,
+          ctx,
+          fnCtx,
+          true,
+          fnCtx.returnTypeId
+        );
+        if (valueExpr.usedReturnCall) {
+          return valueExpr.expr;
+        }
         const actualType = getRequiredExprType(stmt.value, ctx);
         const coerced = coerceValueToType(
-          valueExpr,
+          valueExpr.expr,
           actualType,
           fnCtx.returnTypeId,
           ctx,
@@ -475,12 +582,20 @@ const compileLetStatement = (
 const compileIfExpr = (
   expr: HirIfExpr,
   ctx: CodegenContext,
-  fnCtx: FunctionContext
-): binaryen.ExpressionRef => {
+  fnCtx: FunctionContext,
+  tailPosition: boolean,
+  expectedResultTypeId?: TypeId
+): CompiledExpression => {
   const resultType = getExprBinaryenType(expr.id, ctx);
   let fallback =
     typeof expr.defaultBranch === "number"
-      ? compileExpression(expr.defaultBranch, ctx, fnCtx)
+      ? compileExpression(
+          expr.defaultBranch,
+          ctx,
+          fnCtx,
+          tailPosition,
+          expectedResultTypeId
+        )
       : undefined;
 
   if (!fallback && resultType !== binaryen.none) {
@@ -488,14 +603,23 @@ const compileIfExpr = (
   }
 
   if (!fallback) {
-    fallback = ctx.mod.nop();
+    fallback = { expr: ctx.mod.nop(), usedReturnCall: false };
   }
 
   for (let index = expr.branches.length - 1; index >= 0; index -= 1) {
     const branch = expr.branches[index]!;
-    const condition = compileExpression(branch.condition, ctx, fnCtx);
-    const value = compileExpression(branch.value, ctx, fnCtx);
-    fallback = ctx.mod.if(condition, value, fallback);
+    const condition = compileExpression(branch.condition, ctx, fnCtx).expr;
+    const value = compileExpression(
+      branch.value,
+      ctx,
+      fnCtx,
+      tailPosition,
+      expectedResultTypeId
+    );
+    fallback = {
+      expr: ctx.mod.if(condition, value.expr, fallback.expr),
+      usedReturnCall: value.usedReturnCall && fallback.usedReturnCall,
+    };
   }
 
   return fallback;
@@ -505,40 +629,45 @@ const compileWhileExpr = (
   expr: HirWhileExpr,
   ctx: CodegenContext,
   fnCtx: FunctionContext
-): binaryen.ExpressionRef => {
+): CompiledExpression => {
   const loopLabel = `while_loop_${expr.id}`;
   const breakLabel = `${loopLabel}_break`;
 
   const conditionCheck = ctx.mod.if(
-    ctx.mod.i32.eqz(compileExpression(expr.condition, ctx, fnCtx)),
+    ctx.mod.i32.eqz(compileExpression(expr.condition, ctx, fnCtx).expr),
     ctx.mod.br(breakLabel)
   );
 
-  const body = asStatement(ctx, compileExpression(expr.body, ctx, fnCtx));
+  const body = asStatement(ctx, compileExpression(expr.body, ctx, fnCtx).expr);
   const loopBody = ctx.mod.block(null, [
     conditionCheck,
     body,
     ctx.mod.br(loopLabel),
   ]);
 
-  return ctx.mod.block(
-    breakLabel,
-    [ctx.mod.loop(loopLabel, loopBody)],
-    binaryen.none
-  );
+  return {
+    expr: ctx.mod.block(
+      breakLabel,
+      [ctx.mod.loop(loopLabel, loopBody)],
+      binaryen.none
+    ),
+    usedReturnCall: false,
+  };
 };
 
 const compileAssignExpr = (
   expr: HirAssignExpr,
   ctx: CodegenContext,
   fnCtx: FunctionContext
-): binaryen.ExpressionRef => {
+): CompiledExpression => {
   if (expr.pattern) {
     const ops: binaryen.ExpressionRef[] = [];
     compilePatternInitialization(expr.pattern, expr.value, ctx, fnCtx, ops, {
       declare: false,
     });
-    return ops.length === 1 ? ops[0]! : ctx.mod.block(null, ops, binaryen.none);
+    const opExpr =
+      ops.length === 1 ? ops[0]! : ctx.mod.block(null, ops, binaryen.none);
+    return { expr: opExpr, usedReturnCall: false };
   }
 
   if (typeof expr.target !== "number") {
@@ -554,17 +683,26 @@ const compileAssignExpr = (
   const targetTypeId = getSymbolTypeId(targetExpr.symbol, ctx);
   const valueTypeId = getRequiredExprType(expr.value, ctx);
   const valueExpr = compileExpression(expr.value, ctx, fnCtx);
-  return ctx.mod.local.set(
-    binding.index,
-    coerceValueToType(valueExpr, valueTypeId, targetTypeId, ctx, fnCtx)
-  );
+  return {
+    expr: ctx.mod.local.set(
+      binding.index,
+      coerceValueToType(
+        valueExpr.expr,
+        valueTypeId,
+        targetTypeId,
+        ctx,
+        fnCtx
+      )
+    ),
+    usedReturnCall: false,
+  };
 };
 
 const compileObjectLiteralExpr = (
   expr: HirObjectLiteralExpr,
   ctx: CodegenContext,
   fnCtx: FunctionContext
-): binaryen.ExpressionRef => {
+): CompiledExpression => {
   const typeId = getRequiredExprType(expr.id, ctx);
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo) {
@@ -588,7 +726,7 @@ const compileObjectLiteralExpr = (
       ops.push(
         ctx.mod.local.set(
           binding.index,
-          compileExpression(entry.value, ctx, fnCtx)
+          compileExpression(entry.value, ctx, fnCtx).expr
         )
       );
       initialized.add(entry.name);
@@ -605,7 +743,7 @@ const compileObjectLiteralExpr = (
     ops.push(
       ctx.mod.local.set(
         spreadTemp.index,
-        compileExpression(entry.value, ctx, fnCtx)
+        compileExpression(entry.value, ctx, fnCtx).expr
       )
     );
 
@@ -674,17 +812,20 @@ const compileObjectLiteralExpr = (
   ];
   const literal = initStruct(ctx.mod, structInfo.runtimeType, values);
   if (ops.length === 0) {
-    return literal;
+    return { expr: literal, usedReturnCall: false };
   }
   ops.push(literal);
-  return ctx.mod.block(null, ops, getExprBinaryenType(expr.id, ctx));
+  return {
+    expr: ctx.mod.block(null, ops, getExprBinaryenType(expr.id, ctx)),
+    usedReturnCall: false,
+  };
 };
 
 const compileFieldAccessExpr = (
   expr: HirFieldAccessExpr,
   ctx: CodegenContext,
   fnCtx: FunctionContext
-): binaryen.ExpressionRef => {
+): CompiledExpression => {
   const targetType = getRequiredExprType(expr.target, ctx);
   const structInfo = getStructuralTypeInfo(targetType, ctx);
   if (!structInfo) {
@@ -699,7 +840,7 @@ const compileFieldAccessExpr = (
   const pointerTemp = allocateTempLocal(structInfo.interfaceType, fnCtx);
   const storePointer = ctx.mod.local.set(
     pointerTemp.index,
-    compileExpression(expr.target, ctx, fnCtx)
+    compileExpression(expr.target, ctx, fnCtx).expr
   );
   const pointer = ctx.mod.local.get(
     pointerTemp.index,
@@ -718,7 +859,10 @@ const compileFieldAccessExpr = (
   );
   const getter = refCast(ctx.mod, accessor, field.getterType!);
   const value = callRef(ctx.mod, getter, [pointer], field.wasmType);
-  return ctx.mod.block(null, [storePointer, value], field.wasmType);
+  return {
+    expr: ctx.mod.block(null, [storePointer, value], field.wasmType),
+    usedReturnCall: false,
+  };
 };
 
 interface PatternInitOptions {
@@ -739,7 +883,9 @@ const compilePatternInitialization = (
   }
 
   if (pattern.kind === "wildcard") {
-    ops.push(asStatement(ctx, compileExpression(initializer, ctx, fnCtx)));
+    ops.push(
+      asStatement(ctx, compileExpression(initializer, ctx, fnCtx).expr)
+    );
     return;
   }
 
@@ -757,7 +903,13 @@ const compilePatternInitialization = (
   ops.push(
     ctx.mod.local.set(
       binding.index,
-      coerceValueToType(value, initializerType, targetTypeId, ctx, fnCtx)
+      coerceValueToType(
+        value.expr,
+        initializerType,
+        targetTypeId,
+        ctx,
+        fnCtx
+      )
     )
   );
 };
@@ -832,7 +984,7 @@ const collectTupleAssignments = (
   }
 
   if (pattern.kind === "wildcard") {
-    ops.push(asStatement(ctx, compileExpression(exprId, ctx, fnCtx)));
+    ops.push(asStatement(ctx, compileExpression(exprId, ctx, fnCtx).expr));
     return [];
   }
 
@@ -847,7 +999,7 @@ const collectTupleAssignments = (
 
   const temp = allocateTempLocal(wasmTypeFor(elementTypeId, ctx), fnCtx);
   ops.push(
-    ctx.mod.local.set(temp.index, compileExpression(exprId, ctx, fnCtx))
+    ctx.mod.local.set(temp.index, compileExpression(exprId, ctx, fnCtx).expr)
   );
   return [
     {
@@ -887,6 +1039,15 @@ const compileIntrinsicCall = (
         ctx
       );
       return emitComparisonIntrinsic(name, operandKind, args, ctx);
+    }
+    case "==":
+    case "!=": {
+      assertArgCount(name, args, 2);
+      const operandKind = requireHomogeneousNumericKind(
+        call.args.map((a) => a.expr),
+        ctx
+      );
+      return emitEqualityIntrinsic(name, operandKind, args, ctx);
     }
     default:
       throw new Error(`unsupported intrinsic ${name}`);
@@ -1017,6 +1178,27 @@ const emitComparisonIntrinsic = (
   throw new Error(`unsupported ${op} comparison for numeric kind ${kind}`);
 };
 
+const emitEqualityIntrinsic = (
+  op: "==" | "!=",
+  kind: NumericKind,
+  args: readonly binaryen.ExpressionRef[],
+  ctx: CodegenContext
+): binaryen.ExpressionRef => {
+  const left = args[0]!;
+  const right = args[1]!;
+  switch (kind) {
+    case "i32":
+      return op === "==" ? ctx.mod.i32.eq(left, right) : ctx.mod.i32.ne(left, right);
+    case "i64":
+      return op === "==" ? ctx.mod.i64.eq(left, right) : ctx.mod.i64.ne(left, right);
+    case "f32":
+      return op === "==" ? ctx.mod.f32.eq(left, right) : ctx.mod.f32.ne(left, right);
+    case "f64":
+      return op === "==" ? ctx.mod.f64.eq(left, right) : ctx.mod.f64.ne(left, right);
+  }
+  throw new Error(`unsupported ${op} equality for numeric kind ${kind}`);
+};
+
 const requireHomogeneousNumericKind = (
   argExprIds: readonly HirExprId[],
   ctx: CodegenContext
@@ -1122,6 +1304,28 @@ const allocateTempLocal = (
   fnCtx.nextLocalIndex += 1;
   fnCtx.locals.push(type);
   return binding;
+};
+
+const requiresStructuralConversion = (
+  actualType: TypeId,
+  targetType: TypeId | undefined,
+  ctx: CodegenContext
+): boolean => {
+  if (typeof targetType !== "number" || actualType === targetType) {
+    return false;
+  }
+
+  const targetInfo = getStructuralTypeInfo(targetType, ctx);
+  if (!targetInfo) {
+    return false;
+  }
+
+  const actualInfo = getStructuralTypeInfo(actualType, ctx);
+  if (!actualInfo) {
+    return false;
+  }
+
+  return actualInfo.typeId !== targetInfo.typeId;
 };
 
 const coerceValueToType = (
@@ -1426,6 +1630,12 @@ const compileCallArguments = (
     const expectedTypeId = meta.paramTypeIds[index];
     const actualTypeId = getRequiredExprType(arg.expr, ctx);
     const value = compileExpression(arg.expr, ctx, fnCtx);
-    return coerceValueToType(value, actualTypeId, expectedTypeId, ctx, fnCtx);
+    return coerceValueToType(
+      value.expr,
+      actualTypeId,
+      expectedTypeId,
+      ctx,
+      fnCtx
+    );
   });
 };
