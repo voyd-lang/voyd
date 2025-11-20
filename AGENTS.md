@@ -31,3 +31,4 @@ You should generally add unit tests (especially e2e ones like those in
 - Use `const` whenever possible
 - Use ternary conditionals for conditional variable init
 - Files should be ordered by importance. The main export of a file at the top.
+- Use a single parameter object for functions containing more than three params to name the parameters on call.

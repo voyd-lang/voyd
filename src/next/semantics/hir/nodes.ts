@@ -25,6 +25,7 @@ export interface HirNodeBase {
 export interface HirTypeExprBase {
   ast: NodeId;
   span: SourceSpan;
+  typeId?: TypeId;
 }
 
 export type HirTypeExpr =

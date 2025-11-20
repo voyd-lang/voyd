@@ -422,6 +422,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
               "start": 11,
             },
             "symbol": undefined,
+            "typeId": 3,
             "typeKind": "named",
           },
         },
@@ -437,6 +438,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "start": 19,
         },
         "symbol": undefined,
+        "typeId": 3,
         "typeKind": "named",
       },
       "span": {
@@ -465,6 +467,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "start": 100,
         },
         "symbol": undefined,
+        "typeId": 3,
         "typeKind": "named",
       },
       "span": {
