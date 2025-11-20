@@ -92,6 +92,10 @@ interface TypingContext {
   typeAliasTypes: Map<SymbolId, TypeId>;
   typeAliasesByName: Map<string, SymbolId>;
   resolvingTypeAliases: Set<SymbolId>;
+  baseObjectSymbol: SymbolId;
+  baseObjectNominal: TypeId;
+  baseObjectStructural: TypeId;
+  baseObjectType: TypeId;
 }
 
 interface ObjectTypeInfo {
@@ -103,6 +107,7 @@ interface ObjectTypeInfo {
 }
 
 const DEFAULT_EFFECT_ROW: EffectRowId = 0;
+const BASE_OBJECT_NAME = "Object";
 
 export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   const decls = inputs.decls ?? new DeclTable();
@@ -136,9 +141,14 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     typeAliasTypes: new Map(),
     typeAliasesByName: new Map(),
     resolvingTypeAliases: new Set(),
+    baseObjectSymbol: -1,
+    baseObjectNominal: -1,
+    baseObjectStructural: -1,
+    baseObjectType: -1,
   };
 
   seedPrimitiveTypes(ctx);
+  seedBaseObjectType(ctx);
   registerTypeAliases(ctx);
   registerObjectDecls(ctx);
   registerFunctionSignatures(ctx);
@@ -166,6 +176,42 @@ const seedPrimitiveTypes = (ctx: TypingContext): void => {
   registerPrimitive(ctx, "string", "String");
 };
 
+const seedBaseObjectType = (ctx: TypingContext): void => {
+  const symbol = ctx.symbolTable.declare({
+    name: BASE_OBJECT_NAME,
+    kind: "type",
+    declaredAt: ctx.hir.module.ast,
+    metadata: { intrinsic: true, entity: "object" },
+  });
+
+  const structural = ctx.arena.internStructuralObject({ fields: [] });
+  const nominal = ctx.arena.internNominalObject({
+    owner: symbol,
+    name: BASE_OBJECT_NAME,
+    typeArgs: [],
+  });
+  const type = ctx.arena.internIntersection({ nominal, structural });
+  const info: ObjectTypeInfo = {
+    nominal,
+    structural,
+    type,
+    fields: [],
+    baseNominal: undefined,
+  };
+
+  ctx.baseObjectSymbol = symbol;
+  ctx.baseObjectNominal = nominal;
+  ctx.baseObjectStructural = structural;
+  ctx.baseObjectType = type;
+
+  ctx.objects.set(symbol, info);
+  ctx.objectsByNominal.set(nominal, info);
+  if (!ctx.objectsByName.has(BASE_OBJECT_NAME)) {
+    ctx.objectsByName.set(BASE_OBJECT_NAME, symbol);
+  }
+  ctx.valueTypes.set(symbol, type);
+};
+
 const registerTypeAliases = (ctx: TypingContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "type-alias") continue;
@@ -185,7 +231,10 @@ const registerObjectDecls = (ctx: TypingContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "object") continue;
     ctx.objectDecls.set(item.symbol, item);
-    ctx.objectsByName.set(getSymbolName(item.symbol, ctx), item.symbol);
+    const name = getSymbolName(item.symbol, ctx);
+    if (!ctx.objectsByName.has(name)) {
+      ctx.objectsByName.set(name, item.symbol);
+    }
   }
 };
 
@@ -1021,6 +1070,9 @@ const resolveNamedTypeExpr = (
   }
 
   const name = expr.path[0]!;
+  if (name === BASE_OBJECT_NAME) {
+    return ctx.baseObjectType;
+  }
   const aliasSymbol = ctx.typeAliasesByName.get(name);
   if (aliasSymbol !== undefined) {
     return resolveTypeAlias(aliasSymbol, ctx);
@@ -1164,6 +1216,12 @@ const ensureTypeMatches = (
     if (actualNominal && nominalExtends(actualNominal, expectedNominal, ctx)) {
       return;
     }
+    if (
+      expectedNominal === ctx.baseObjectNominal &&
+      structuralTypeSatisfies(actual, expected, ctx)
+    ) {
+      return;
+    }
     throw new Error(`type mismatch for ${reason}`);
   }
 
@@ -1224,7 +1282,7 @@ const ensureObjectType = (
 
   ctx.resolvingObjects.add(symbol);
   try {
-    const baseType = resolveTypeExpr(decl.base, ctx, ctx.unknownType);
+    const baseType = resolveTypeExpr(decl.base, ctx, ctx.baseObjectType);
     const baseFields = getStructuralFields(baseType, ctx) ?? [];
     const baseNominal = getNominalComponent(baseType, ctx);
 

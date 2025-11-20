@@ -508,7 +508,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
 exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
 {
   "nextScope": 7,
-  "nextSymbol": 7,
+  "nextSymbol": 8,
   "payload": undefined,
   "scopes": [
     {
@@ -619,6 +619,17 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
         "intrinsic": true,
       },
       "name": "-",
+      "scope": 0,
+    },
+    {
+      "declaredAt": 634,
+      "id": 7,
+      "kind": "type",
+      "metadata": {
+        "entity": "object",
+        "intrinsic": true,
+      },
+      "name": "Object",
       "scope": 0,
     },
   ],

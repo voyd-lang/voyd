@@ -1,0 +1,10 @@
+obj Foo {
+  x: i32
+}
+
+fn accepts_object(o: Object) -> i32
+  1
+
+pub fn main() -> i32
+  let foo = Foo { x: 1 }
+  accepts_object(foo) + accepts_object({ y: 2 })
