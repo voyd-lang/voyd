@@ -1,14 +1,15 @@
 type Pair = (i32, i32)
 
-fn make_pair(a: i32, b: i32) -> Pair
-  (a, b)
+fn consume_forward() -> i32
+  let (left, right) = build_pair()
+  combine((right, left))
 
-fn swap(pair: Pair) -> Pair
-  let (x, y) = pair
-  (y, x)
+fn combine(pair: Pair) -> i32
+  let (a, b) = pair
+  a * 10 + b
+
+fn build_pair()
+  (2, 3)
 
 pub fn main() -> i32
-  let pair = make_pair(2, 3)
-  let swapped = swap(pair)
-  let (a, b) = swapped
-  a * 10 + b
+  consume_forward()
