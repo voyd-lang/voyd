@@ -25,6 +25,18 @@ describe("next codegen", () => {
     expect((main as () => number)()).toBe(55);
   });
 
+  it("uses return_call for tail-recursive functions", () => {
+    const ast = loadAst("tail_fib.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module } = codegen(semantics);
+    const text = module.emitText();
+    expect(text).toContain("return_call");
+    const instance = getWasmInstance(module);
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(55);
+  });
+
   it("emits wasm for the var inference sample and runs main()", () => {
     const ast = loadAst("var_inference.voyd");
     const semantics = semanticsPipeline(ast);

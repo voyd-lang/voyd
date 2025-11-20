@@ -1,0 +1,8 @@
+pub fn fib(n: i32, a: i32, b: i32) -> i32
+  if n == 0 then:
+    a
+  else:
+    fib(n - 1, b, a + b)
+
+pub fn main() -> i32
+  fib(10, 0, 1)

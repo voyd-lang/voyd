@@ -981,6 +981,8 @@ const intrinsicSignaturesFor = (
     case "<=":
     case ">":
     case ">=":
+    case "==":
+    case "!=":
       return comparisonSignatures;
     default:
       return [];
