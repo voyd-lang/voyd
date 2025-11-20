@@ -4,7 +4,7 @@ import type {
   HirIdentifierExpr,
 } from "../hir/index.js";
 import type { HirExprId } from "../ids.js";
-import type { TypingResult } from "./pipeline.js";
+import type { TypingResult } from "./typing.js";
 
 export const specializeOverloadCallees = (
   hir: HirGraph,

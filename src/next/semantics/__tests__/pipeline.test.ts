@@ -9,10 +9,10 @@ import {
 } from "../hir/nodes.js";
 import { semanticsPipeline } from "../pipeline.js";
 import type { SymbolId, TypeId } from "../ids.js";
-import type { TypingResult } from "../typing/pipeline.js";
+import type { TypingResult } from "../typing/typing.js";
 import { loadAst } from "./load-ast.js";
 import { SymbolTable } from "../binder/index.js";
-import { runBindingPipeline, type BindingResult } from "../binding/pipeline.js";
+import { runBindingPipeline, type BindingResult } from "../binding/binding.js";
 
 const expectPrimitiveType = (
   typing: TypingResult,

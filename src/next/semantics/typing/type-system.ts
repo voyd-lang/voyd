@@ -1,0 +1,686 @@
+import type {
+  HirObjectTypeExpr,
+  HirTypeExpr,
+  HirNamedTypeExpr,
+  HirTupleTypeExpr,
+  HirUnionTypeExpr,
+} from "../hir/index.js";
+import type { SymbolId, TypeId, TypeParamId } from "../ids.js";
+import { BASE_OBJECT_NAME, type TypingContext, type ObjectTemplate, type ObjectTypeInfo } from "./types.js";
+
+export const registerPrimitive = (
+  ctx: TypingContext,
+  canonical: string,
+  ...aliases: string[]
+): TypeId => {
+  let id = ctx.primitiveCache.get(canonical);
+  if (typeof id !== "number") {
+    id = ctx.arena.internPrimitive(canonical);
+  }
+  ctx.primitiveCache.set(canonical, id);
+  aliases.forEach((alias) => ctx.primitiveCache.set(alias, id));
+  return id;
+};
+
+export const getPrimitiveType = (ctx: TypingContext, name: string): TypeId => {
+  const cached = ctx.primitiveCache.get(name);
+  if (typeof cached === "number") {
+    return cached;
+  }
+  return registerPrimitive(ctx, name);
+};
+
+export const resolveTypeExpr = (
+  expr: HirTypeExpr | undefined,
+  ctx: TypingContext,
+  fallback: TypeId,
+  typeParams?: ReadonlyMap<SymbolId, TypeId>
+): TypeId => {
+  if (!expr) {
+    return fallback;
+  }
+
+  let resolved: TypeId;
+  switch (expr.typeKind) {
+    case "named":
+      resolved = resolveNamedTypeExpr(expr, ctx, typeParams);
+      break;
+    case "object":
+      resolved = resolveObjectTypeExpr(expr, ctx, typeParams);
+      break;
+    case "tuple":
+      resolved = resolveTupleTypeExpr(expr, ctx, typeParams);
+      break;
+    case "union":
+      resolved = resolveUnionTypeExpr(expr, ctx, typeParams);
+      break;
+    default:
+      throw new Error(`unsupported type expression kind: ${expr.typeKind}`);
+  }
+  expr.typeId = resolved;
+  return resolved;
+};
+
+export const resolveTypeAlias = (symbol: SymbolId, ctx: TypingContext): TypeId => {
+  const cached = ctx.typeAliasTypes.get(symbol);
+  if (typeof cached === "number") {
+    return cached;
+  }
+
+  if (ctx.resolvingTypeAliases.has(symbol)) {
+    return ctx.unknownType;
+  }
+
+  const target = ctx.typeAliasTargets.get(symbol);
+  if (!target) {
+    throw new Error(
+      `missing type alias target for ${getSymbolName(symbol, ctx)}`
+    );
+  }
+
+  ctx.resolvingTypeAliases.add(symbol);
+  try {
+    const resolved = resolveTypeExpr(target, ctx, ctx.unknownType);
+    ctx.typeAliasTypes.set(symbol, resolved);
+    return resolved;
+  } finally {
+    ctx.resolvingTypeAliases.delete(symbol);
+  }
+};
+
+const resolveNamedTypeExpr = (
+  expr: HirNamedTypeExpr,
+  ctx: TypingContext,
+  typeParams?: ReadonlyMap<SymbolId, TypeId>
+): TypeId => {
+  if (expr.path.length !== 1) {
+    throw new Error("qualified type paths are not supported yet");
+  }
+
+  const name = expr.path[0]!;
+  const resolvedTypeArgs =
+    expr.typeArguments?.map((arg) =>
+      resolveTypeExpr(arg, ctx, ctx.unknownType, typeParams)
+    ) ?? [];
+
+  const typeParam =
+    (typeof expr.symbol === "number"
+      ? typeParams?.get(expr.symbol)
+      : findTypeParamByName(name, typeParams, ctx)) ?? undefined;
+  if (typeof typeParam === "number") {
+    if (resolvedTypeArgs.length > 0) {
+      throw new Error("type parameters do not accept type arguments");
+    }
+    return typeParam;
+  }
+
+  if (name === BASE_OBJECT_NAME) {
+    return ctx.baseObjectType;
+  }
+  const aliasSymbol = ctx.typeAliasesByName.get(name);
+  if (aliasSymbol !== undefined) {
+    if (resolvedTypeArgs.length > 0) {
+      throw new Error("type aliases do not support type arguments yet");
+    }
+    return resolveTypeAlias(aliasSymbol, ctx);
+  }
+
+  const objectSymbol =
+    (typeof expr.symbol === "number" && ctx.objectDecls.has(expr.symbol)
+      ? expr.symbol
+      : undefined) ?? ctx.objectsByName.get(name);
+  if (objectSymbol !== undefined) {
+    const info = ensureObjectType(objectSymbol, ctx, resolvedTypeArgs);
+    return info?.type ?? ctx.unknownType;
+  }
+
+  const resolved = ctx.primitiveCache.get(name);
+  if (typeof resolved === "number") {
+    return resolved;
+  }
+
+  return getPrimitiveType(ctx, name);
+};
+
+const findTypeParamByName = (
+  name: string,
+  typeParams: ReadonlyMap<SymbolId, TypeId> | undefined,
+  ctx: TypingContext
+): TypeId | undefined => {
+  if (!typeParams) {
+    return undefined;
+  }
+
+  for (const [symbol, type] of typeParams.entries()) {
+    if (getSymbolName(symbol, ctx) === name) {
+      return type;
+    }
+  }
+
+  return undefined;
+};
+
+const resolveObjectTypeExpr = (
+  expr: HirObjectTypeExpr,
+  ctx: TypingContext,
+  typeParams?: ReadonlyMap<SymbolId, TypeId>
+): TypeId => {
+  const fields = expr.fields.map((field) => ({
+    name: field.name,
+    type: resolveTypeExpr(field.type, ctx, ctx.unknownType, typeParams),
+  }));
+  return ctx.arena.internStructuralObject({ fields });
+};
+
+const resolveTupleTypeExpr = (
+  expr: HirTupleTypeExpr,
+  ctx: TypingContext,
+  typeParams?: ReadonlyMap<SymbolId, TypeId>
+): TypeId => {
+  const fields = expr.elements.map((element, index) => ({
+    name: `${index}`,
+    type: resolveTypeExpr(element, ctx, ctx.unknownType, typeParams),
+  }));
+  return ctx.arena.internStructuralObject({ fields });
+};
+
+const resolveUnionTypeExpr = (
+  expr: HirUnionTypeExpr,
+  ctx: TypingContext,
+  typeParams?: ReadonlyMap<SymbolId, TypeId>
+): TypeId => {
+  const members = expr.members.map((member) =>
+    resolveTypeExpr(member, ctx, ctx.unknownType, typeParams)
+  );
+  return ctx.arena.internUnion(members);
+};
+
+export const getSymbolName = (symbol: SymbolId, ctx: TypingContext): string =>
+  ctx.symbolTable.getSymbol(symbol).name;
+
+const makeObjectInstanceKey = (
+  symbol: SymbolId,
+  typeArgs: readonly TypeId[]
+): string => `${symbol}<${typeArgs.join(",")}>`;
+
+export const getObjectTemplate = (
+  symbol: SymbolId,
+  ctx: TypingContext
+): ObjectTemplate | undefined => {
+  const cached = ctx.objectTemplates.get(symbol);
+  if (cached) {
+    return cached;
+  }
+
+  if (ctx.resolvingTemplates.has(symbol)) {
+    return undefined;
+  }
+
+  const decl = ctx.objectDecls.get(symbol);
+  if (!decl) {
+    return undefined;
+  }
+
+  ctx.resolvingTemplates.add(symbol);
+  try {
+    const params =
+      decl.typeParameters?.map((param) => ({
+        symbol: param.symbol,
+        typeParam: ctx.arena.freshTypeParam(),
+      })) ?? [];
+    const paramMap = new Map<SymbolId, TypeId>();
+    params.forEach(({ symbol, typeParam }) =>
+      paramMap.set(symbol, ctx.arena.internTypeParamRef(typeParam))
+    );
+
+    const baseType = resolveTypeExpr(
+      decl.base,
+      ctx,
+      ctx.baseObjectType,
+      paramMap
+    );
+    const baseFields = getStructuralFields(baseType, ctx) ?? [];
+    const baseNominal = getNominalComponent(baseType, ctx);
+
+    const ownFields = decl.fields.map((field) => ({
+      name: field.name,
+      type: resolveTypeExpr(field.type, ctx, ctx.unknownType, paramMap),
+    }));
+
+    const fields = mergeDeclaredFields(baseFields, ownFields);
+    const structural = ctx.arena.internStructuralObject({ fields });
+    const nominal = ctx.arena.internNominalObject({
+      owner: symbol,
+      name: getSymbolName(symbol, ctx),
+      typeArgs: params.map((param) => paramMap.get(param.symbol)!),
+    });
+    const type = ctx.arena.internIntersection({
+      nominal,
+      structural,
+    });
+
+    const template: ObjectTemplate = {
+      symbol,
+      params,
+      nominal,
+      structural,
+      type,
+      fields,
+      baseNominal,
+    };
+    ctx.objectTemplates.set(symbol, template);
+    return template;
+  } finally {
+    ctx.resolvingTemplates.delete(symbol);
+  }
+};
+
+export const ensureObjectType = (
+  symbol: SymbolId,
+  ctx: TypingContext,
+  typeArgs: readonly TypeId[] = []
+): ObjectTypeInfo | undefined => {
+  if (ctx.resolvingTemplates.has(symbol)) {
+    return undefined;
+  }
+
+  const template = getObjectTemplate(symbol, ctx);
+  if (!template) {
+    return undefined;
+  }
+
+  if (typeArgs.length > template.params.length) {
+    throw new Error("object type argument count mismatch");
+  }
+
+  const appliedArgs = template.params.map(
+    (_param, index) => typeArgs[index] ?? ctx.unknownType
+  );
+  const key = makeObjectInstanceKey(symbol, appliedArgs);
+  const cached = ctx.objectInstances.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const subst = new Map<TypeParamId, TypeId>();
+  template.params.forEach((param, index) =>
+    subst.set(param.typeParam, appliedArgs[index]!)
+  );
+
+  const nominal = ctx.arena.substitute(template.nominal, subst);
+  const structural = ctx.arena.substitute(template.structural, subst);
+  const type = ctx.arena.substitute(template.type, subst);
+  const fields = template.fields.map((field) => ({
+    name: field.name,
+    type: ctx.arena.substitute(field.type, subst),
+  }));
+  const baseNominal = template.baseNominal
+    ? ctx.arena.substitute(template.baseNominal, subst)
+    : undefined;
+
+  const info: ObjectTypeInfo = {
+    nominal,
+    structural,
+    type,
+    fields,
+    baseNominal,
+  };
+
+  ctx.objectInstances.set(key, info);
+  ctx.objectsByNominal.set(nominal, info);
+  ctx.valueTypes.set(symbol, type);
+  return info;
+};
+
+const mergeDeclaredFields = (
+  inherited: readonly { name: string; type: TypeId }[],
+  own: readonly { name: string; type: TypeId }[]
+): { name: string; type: TypeId }[] => {
+  const fields = new Map<string, TypeId>();
+  inherited.forEach((field) => fields.set(field.name, field.type));
+  own.forEach((field) => fields.set(field.name, field.type));
+  return Array.from(fields.entries()).map(([name, type]) => ({ name, type }));
+};
+
+export const getObjectInfoForNominal = (
+  nominal: TypeId,
+  ctx: TypingContext
+): ObjectTypeInfo | undefined => {
+  const cached = ctx.objectsByNominal.get(nominal);
+  if (cached) {
+    return cached;
+  }
+  const desc = ctx.arena.get(nominal);
+  if (desc.kind !== "nominal-object") {
+    return undefined;
+  }
+  return ensureObjectType(desc.owner, ctx, desc.typeArgs);
+};
+
+export const getNominalComponent = (
+  type: TypeId,
+  ctx: TypingContext
+): TypeId | undefined => {
+  if (type === ctx.unknownType) {
+    return undefined;
+  }
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "nominal-object":
+      return type;
+    case "intersection":
+      if (typeof desc.nominal === "number") {
+        return desc.nominal;
+      }
+      if (typeof desc.structural === "number") {
+        return getNominalComponent(desc.structural, ctx);
+      }
+      return undefined;
+    default:
+      return undefined;
+  }
+};
+
+export const nominalSatisfies = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+  seen: Set<TypeId> = new Set()
+): boolean => {
+  if (actual === expected) {
+    return true;
+  }
+
+  const actualDesc = ctx.arena.get(actual);
+  const expectedDesc = ctx.arena.get(expected);
+  if (
+    actualDesc.kind === "nominal-object" &&
+    expectedDesc.kind === "nominal-object" &&
+    actualDesc.owner === expectedDesc.owner
+  ) {
+    if (expectedDesc.typeArgs.length === 0) {
+      return true;
+    }
+    if (actualDesc.typeArgs.length !== expectedDesc.typeArgs.length) {
+      return false;
+    }
+    return expectedDesc.typeArgs.every((expectedArg, index) => {
+      if (expectedArg === ctx.unknownType) {
+        return true;
+      }
+      return typeSatisfies(actualDesc.typeArgs[index]!, expectedArg, ctx);
+    });
+  }
+
+  if (seen.has(actual)) {
+    return false;
+  }
+  seen.add(actual);
+
+  const info = getObjectInfoForNominal(actual, ctx);
+  if (info?.baseNominal) {
+    return nominalSatisfies(info.baseNominal, expected, ctx, seen);
+  }
+  return false;
+};
+
+export const getStructuralFields = (
+  type: TypeId,
+  ctx: TypingContext
+): readonly { name: string; type: TypeId }[] | undefined => {
+  if (type === ctx.unknownType) {
+    return undefined;
+  }
+
+  const desc = ctx.arena.get(type);
+  if (desc.kind === "structural-object") {
+    return desc.fields;
+  }
+
+  if (desc.kind === "nominal-object") {
+    const info = ensureObjectType(desc.owner, ctx, desc.typeArgs);
+    if (info) {
+      return getStructuralFields(info.structural, ctx);
+    }
+    return undefined;
+  }
+
+  if (desc.kind === "intersection") {
+    const info =
+      typeof desc.nominal === "number"
+        ? getObjectInfoForNominal(desc.nominal, ctx)
+        : undefined;
+    if (info) {
+      return getStructuralFields(info.structural, ctx);
+    }
+    if (typeof desc.structural === "number") {
+      return getStructuralFields(desc.structural, ctx);
+    }
+  }
+
+  return undefined;
+};
+
+export const structuralTypeSatisfies = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+  seen: Set<string> = new Set()
+): boolean => {
+  if (actual === expected) {
+    return true;
+  }
+
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind === "union") {
+    return actualDesc.members.every((member) =>
+      structuralTypeSatisfies(member, expected, ctx, seen)
+    );
+  }
+
+  const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "union") {
+    return expectedDesc.members.some((member) =>
+      structuralTypeSatisfies(actual, member, ctx, seen)
+    );
+  }
+
+  const expectedFields = getStructuralFields(expected, ctx);
+  if (!expectedFields) {
+    return false;
+  }
+
+  const actualFields = getStructuralFields(actual, ctx);
+  if (!actualFields) {
+    return false;
+  }
+
+  if (expectedFields.length === 0) {
+    return actualFields.length >= 0;
+  }
+
+  const cacheKey = `${actual}->${expected}`;
+  if (seen.has(cacheKey)) {
+    return true;
+  }
+  seen.add(cacheKey);
+
+  return expectedFields.every((expectedField) => {
+    const candidate = actualFields.find(
+      (field) => field.name === expectedField.name
+    );
+    if (!candidate) {
+      return false;
+    }
+
+    if (candidate.type === expectedField.type) {
+      return true;
+    }
+
+    if (
+      ctx.typeCheckMode === "relaxed" &&
+      (candidate.type === ctx.unknownType ||
+        expectedField.type === ctx.unknownType)
+    ) {
+      return true;
+    }
+
+    return structuralTypeSatisfies(
+      candidate.type,
+      expectedField.type,
+      ctx,
+      seen
+    );
+  });
+};
+
+export const typeSatisfies = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext
+): boolean => {
+  if (actual === expected) {
+    return true;
+  }
+
+  if (
+    ctx.typeCheckMode === "relaxed" &&
+    (actual === ctx.unknownType || expected === ctx.unknownType)
+  ) {
+    return true;
+  }
+
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind === "union") {
+    return actualDesc.members.every((member) =>
+      typeSatisfies(member, expected, ctx)
+    );
+  }
+
+  const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "union") {
+    return expectedDesc.members.some((member) =>
+      typeSatisfies(actual, member, ctx)
+    );
+  }
+
+  const expectedNominal = getNominalComponent(expected, ctx);
+  if (expectedNominal) {
+    const actualNominal = getNominalComponent(actual, ctx);
+    if (
+      actualNominal &&
+      nominalSatisfies(actualNominal, expectedNominal, ctx)
+    ) {
+      return true;
+    }
+    if (
+      expectedNominal === ctx.baseObjectNominal &&
+      structuralTypeSatisfies(actual, expected, ctx)
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  return structuralTypeSatisfies(actual, expected, ctx);
+};
+
+export const ensureTypeMatches = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+  reason: string
+): void => {
+  if (typeSatisfies(actual, expected, ctx)) {
+    return;
+  }
+
+  throw new Error(`type mismatch for ${reason}`);
+};
+
+export const matchedUnionMembers = (
+  patternType: TypeId,
+  remaining: Set<TypeId>,
+  ctx: TypingContext
+): TypeId[] => {
+  if (patternType === ctx.unknownType) {
+    return [];
+  }
+  return Array.from(remaining).filter((member) =>
+    typeSatisfies(member, patternType, ctx)
+  );
+};
+
+export const narrowTypeForPattern = (
+  discriminantType: TypeId,
+  patternType: TypeId,
+  ctx: TypingContext
+): TypeId | undefined => {
+  if (discriminantType === ctx.unknownType) {
+    return patternType;
+  }
+  const desc = ctx.arena.get(discriminantType);
+  if (desc.kind === "union") {
+    const matches = desc.members.filter((member) =>
+      typeSatisfies(member, patternType, ctx)
+    );
+    if (matches.length === 0) {
+      return undefined;
+    }
+    return matches.length === 1 ? matches[0] : ctx.arena.internUnion(matches);
+  }
+  return typeSatisfies(discriminantType, patternType, ctx)
+    ? discriminantType
+    : undefined;
+};
+
+export const bindTypeParamsFromType = (
+  expected: TypeId,
+  actual: TypeId,
+  bindings: Map<TypeParamId, TypeId>,
+  ctx: TypingContext
+): void => {
+  if (expected === ctx.unknownType || actual === ctx.unknownType) {
+    return;
+  }
+
+  const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "type-param-ref") {
+    const existing = bindings.get(expectedDesc.param);
+    if (!existing) {
+      bindings.set(expectedDesc.param, actual);
+      return;
+    }
+    if (typeSatisfies(actual, existing, ctx)) {
+      return;
+    }
+    if (typeSatisfies(existing, actual, ctx)) {
+      bindings.set(expectedDesc.param, actual);
+    }
+    return;
+  }
+
+  if (expectedDesc.kind === "structural-object") {
+    const actualFields = getStructuralFields(actual, ctx);
+    if (!actualFields) {
+      return;
+    }
+    expectedDesc.fields.forEach((field) => {
+      const candidate = actualFields.find((entry) => entry.name === field.name);
+      if (candidate) {
+        bindTypeParamsFromType(field.type, candidate.type, bindings, ctx);
+      }
+    });
+    return;
+  }
+
+  if (expectedDesc.kind === "intersection") {
+    if (typeof expectedDesc.nominal === "number") {
+      bindTypeParamsFromType(expectedDesc.nominal, actual, bindings, ctx);
+    }
+    if (typeof expectedDesc.structural === "number") {
+      bindTypeParamsFromType(expectedDesc.structural, actual, bindings, ctx);
+    }
+  }
+};
