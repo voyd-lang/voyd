@@ -203,7 +203,7 @@ export const createTypeArena = (): TypeArena => {
       kind: "structural-object",
       fields: desc.fields
         .map((field) => ({ ...field }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
     });
 
   const internFunction = (desc: Omit<FunctionType, "kind">): TypeId =>

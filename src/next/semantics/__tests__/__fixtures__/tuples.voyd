@@ -1,0 +1,14 @@
+type Pair = (i32, i32)
+
+fn make_pair(a: i32, b: i32) -> Pair
+  (a, b)
+
+fn sum_pair(pair: Pair) -> i32
+  let (x, y) = pair
+  x + y
+
+pub fn main() -> i32
+  let pair = make_pair(2, 3)
+  let (a, b) = pair
+  let swapped = (b, a)
+  sum_pair(swapped)
