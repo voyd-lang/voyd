@@ -557,6 +557,7 @@ const typeLetStatement = (stmt: HirLetStatement, ctx: TypingContext): void => {
 };
 
 const typeIfExpr = (expr: HirIfExpr, ctx: TypingContext): TypeId => {
+  const hasDefault = typeof expr.defaultBranch === "number";
   let branchType: TypeId | undefined;
 
   expr.branches.forEach((branch, index) => {
@@ -572,12 +573,13 @@ const typeIfExpr = (expr: HirIfExpr, ctx: TypingContext): TypeId => {
     branchType = mergeBranchType(branchType, valueType);
   });
 
-  if (typeof expr.defaultBranch === "number") {
-    const defaultType = typeExpression(expr.defaultBranch, ctx);
+  if (hasDefault) {
+    const defaultType = typeExpression(expr.defaultBranch!, ctx);
     branchType = mergeBranchType(branchType, defaultType);
+    return branchType ?? ctx.voidType;
   }
 
-  return branchType ?? ctx.voidType;
+  return ctx.voidType;
 };
 
 const typeTupleExpr = (

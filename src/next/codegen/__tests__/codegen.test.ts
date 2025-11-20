@@ -68,6 +68,16 @@ describe("next codegen", () => {
     expect((callTo as () => number)()).toBe(3);
   });
 
+  it("emits wasm for the elif sample and runs main()", () => {
+    const ast = loadAst("elif.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module } = codegen(semantics);
+    const instance = getWasmInstance(module);
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(0);
+  });
+
   it("emits wasm for structural object literals and spreads", () => {
     const ast = loadAst("structural_objects.voyd");
     const semantics = semanticsPipeline(ast);

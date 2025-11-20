@@ -20,7 +20,12 @@ import type {
   OverloadSetId,
 } from "../ids.js";
 import type { HirVisibility } from "../hir/index.js";
-import { isIdentifierWithValue, toSourceSpan } from "../utils.js";
+import {
+  expectLabeledExpr,
+  isIdentifierWithValue,
+  parseIfBranches,
+  toSourceSpan,
+} from "../utils.js";
 import {
   DeclTable,
   type FunctionDeclInput,
@@ -666,14 +671,14 @@ const bindIf = (
   ctx: BindingContext,
   tracker: BinderScopeTracker
 ): void => {
-  bindExpr(form.at(1), ctx, tracker);
-  for (let i = 2; i < form.length; i += 1) {
-    const branch = form.at(i);
-    if (!isForm(branch) || !branch.calls(":")) {
-      bindExpr(branch, ctx, tracker);
-      continue;
-    }
-    bindExpr(branch.at(2), ctx, tracker);
+  const { branches, defaultBranch } = parseIfBranches(form);
+  branches.forEach(({ condition, value }) => {
+    bindExpr(condition, ctx, tracker);
+    bindExpr(value, ctx, tracker);
+  });
+
+  if (defaultBranch) {
+    bindExpr(defaultBranch, ctx, tracker);
   }
 };
 
@@ -682,8 +687,15 @@ const bindWhile = (
   ctx: BindingContext,
   tracker: BinderScopeTracker
 ): void => {
-  bindExpr(form.at(1), ctx, tracker);
-  bindExpr(form.at(2), ctx, tracker);
+  const condition = form.at(1);
+  if (!condition) {
+    throw new Error("while expression missing condition");
+  }
+
+  const body = expectLabeledExpr(form.at(2), "do", "while expression");
+
+  bindExpr(condition, ctx, tracker);
+  bindExpr(body, ctx, tracker);
 };
 
 const bindVar = (
