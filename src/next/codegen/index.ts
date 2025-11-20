@@ -9,9 +9,11 @@ import type {
   HirFunction,
   HirGraph,
   HirIfExpr,
+  HirMatchExpr,
   HirLetStatement,
   HirObjectLiteralExpr,
   HirPattern,
+  HirTypeExpr,
   HirWhileExpr,
 } from "../semantics/hir/index.js";
 import type {
@@ -296,6 +298,14 @@ const compileExpression = (
       );
     case "if":
       return compileIfExpr(expr, ctx, fnCtx, tailPosition, expectedResultTypeId);
+    case "match":
+      return compileMatchExpr(
+        expr,
+        ctx,
+        fnCtx,
+        tailPosition,
+        expectedResultTypeId
+      );
     case "while":
       return compileWhileExpr(expr, ctx, fnCtx);
     case "assign":
@@ -623,6 +633,106 @@ const compileIfExpr = (
   }
 
   return fallback;
+};
+
+const compileMatchExpr = (
+  expr: HirMatchExpr,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  tailPosition: boolean,
+  expectedResultTypeId?: TypeId
+): CompiledExpression => {
+  const discriminantTypeId = getRequiredExprType(expr.discriminant, ctx);
+  const discriminantType = wasmTypeFor(discriminantTypeId, ctx);
+  const discriminantTemp = allocateTempLocal(discriminantType, fnCtx);
+  const discriminantValue = compileExpression(
+    expr.discriminant,
+    ctx,
+    fnCtx
+  ).expr;
+
+  const initDiscriminant = ctx.mod.local.set(
+    discriminantTemp.index,
+    discriminantValue
+  );
+
+  let chain: CompiledExpression | undefined;
+  for (let index = expr.arms.length - 1; index >= 0; index -= 1) {
+    const arm = expr.arms[index]!;
+    const armValue = compileExpression(
+      arm.value,
+      ctx,
+      fnCtx,
+      tailPosition,
+      expectedResultTypeId
+    );
+
+    if (arm.pattern.kind === "wildcard") {
+      chain = armValue;
+      continue;
+    }
+
+    if (arm.pattern.kind !== "type") {
+      throw new Error(`unsupported match pattern ${arm.pattern.kind}`);
+    }
+
+    const condition = compileMatchCondition(
+      arm.pattern,
+      discriminantTemp,
+      ctx
+    );
+    const fallback =
+      chain ??
+      ({
+        expr: ctx.mod.unreachable(),
+        usedReturnCall: false,
+      } as CompiledExpression);
+
+    chain = {
+      expr: ctx.mod.if(condition, armValue.expr, fallback.expr),
+      usedReturnCall: armValue.usedReturnCall && fallback.usedReturnCall,
+    };
+  }
+
+  const finalExpr = chain ?? {
+    expr: ctx.mod.unreachable(),
+    usedReturnCall: false,
+  };
+
+  return {
+    expr: ctx.mod.block(
+      null,
+      [initDiscriminant, finalExpr.expr],
+      getExprBinaryenType(expr.id, ctx)
+    ),
+    usedReturnCall: finalExpr.usedReturnCall,
+  };
+};
+
+const compileMatchCondition = (
+  pattern: HirPattern & { kind: "type" },
+  discriminant: LocalBinding,
+  ctx: CodegenContext
+): binaryen.ExpressionRef => {
+  const patternTypeId = resolveTypeIdFromTypeExpr(pattern.type, ctx);
+  const structInfo = getStructuralTypeInfo(patternTypeId, ctx);
+  if (!structInfo) {
+    throw new Error("match pattern requires a structural type");
+  }
+
+  const pointer = ctx.mod.local.get(discriminant.index, discriminant.type);
+  const ancestors = structGetFieldValue({
+    mod: ctx.mod,
+    fieldType: ctx.rtt.extensionHelpers.i32Array,
+    fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
+    exprRef: pointer,
+  });
+
+  return ctx.mod.call(
+    "__extends",
+    [ctx.mod.i32.const(structInfo.typeId), ancestors],
+    binaryen.i32
+  );
 };
 
 const compileWhileExpr = (
@@ -1564,6 +1674,51 @@ const getExprBinaryenType = (
   return binaryen.none;
 };
 
+const resolveTypeIdFromTypeExpr = (
+  expr: HirTypeExpr,
+  ctx: CodegenContext
+): TypeId => {
+  switch (expr.typeKind) {
+    case "named": {
+      if (expr.path.length !== 1) {
+        throw new Error("qualified type paths are not supported yet");
+      }
+      const name = expr.path[0]!;
+      const symbol = ctx.symbolTable.resolve(name, ctx.hir.module.scope);
+      if (typeof symbol === "number") {
+        const typeId = ctx.typing.valueTypes.get(symbol);
+        if (typeof typeId === "number") {
+          return typeId;
+        }
+      }
+      if (isPrimitiveName(name)) {
+        return ctx.typing.arena.internPrimitive(name);
+      }
+      throw new Error(`codegen missing type for ${name}`);
+    }
+    case "object":
+      return ctx.typing.arena.internStructuralObject({
+        fields: expr.fields.map((field) => ({
+          name: field.name,
+          type: resolveTypeIdFromTypeExpr(field.type, ctx),
+        })),
+      });
+    case "tuple":
+      return ctx.typing.arena.internStructuralObject({
+        fields: expr.elements.map((element, index) => ({
+          name: `${index}`,
+          type: resolveTypeIdFromTypeExpr(element, ctx),
+        })),
+      });
+    case "union":
+      return ctx.typing.arena.internUnion(
+        expr.members.map((member) => resolveTypeIdFromTypeExpr(member, ctx))
+      );
+    default:
+      throw new Error(`unsupported type expression ${expr.typeKind}`);
+  }
+};
+
 const wasmTypeFor = (typeId: TypeId, ctx: CodegenContext): binaryen.Type => {
   const desc = ctx.typing.arena.get(typeId);
   if (desc.kind === "primitive") {
@@ -1576,6 +1731,18 @@ const wasmTypeFor = (typeId: TypeId, ctx: CodegenContext): binaryen.Type => {
       throw new Error("missing structural type info");
     }
     return structInfo.interfaceType;
+  }
+
+  if (desc.kind === "union") {
+    if (desc.members.length === 0) {
+      throw new Error("cannot map empty union to wasm");
+    }
+    const memberTypes = desc.members.map((member) => wasmTypeFor(member, ctx));
+    const first = memberTypes[0]!;
+    if (!memberTypes.every((candidate) => candidate === first)) {
+      throw new Error("union members map to different wasm types");
+    }
+    return first;
   }
 
   if (desc.kind === "intersection" && typeof desc.structural === "number") {
@@ -1606,6 +1773,20 @@ const mapPrimitiveToWasm = (name: string): binaryen.Type => {
       throw new Error(`unsupported primitive type ${name}`);
   }
 };
+
+const isPrimitiveName = (name: string): boolean =>
+  [
+    "i32",
+    "i64",
+    "f32",
+    "f64",
+    "bool",
+    "boolean",
+    "unknown",
+    "voyd",
+    "void",
+    "Voyd",
+  ].includes(name);
 
 const getStructuralTypeInfo = (
   typeId: TypeId,

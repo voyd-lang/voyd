@@ -10,6 +10,7 @@ import type {
   HirIfExpr,
   HirLetStatement,
   HirLiteralExpr,
+  HirMatchExpr,
   HirObjectLiteralEntry,
   HirObjectLiteralExpr,
   HirObjectDecl,
@@ -19,6 +20,7 @@ import type {
   HirTypeExpr,
   HirNamedTypeExpr,
   HirTupleTypeExpr,
+  HirUnionTypeExpr,
   HirWhileExpr,
 } from "../hir/index.js";
 import type {
@@ -432,6 +434,9 @@ const typeExpression = (exprId: HirExprId, ctx: TypingContext): TypeId => {
     case "if":
       type = typeIfExpr(expr, ctx);
       break;
+    case "match":
+      type = typeMatchExpr(expr, ctx);
+      break;
     case "tuple":
       type = typeTupleExpr(expr, ctx);
       break;
@@ -630,6 +635,66 @@ const typeIfExpr = (expr: HirIfExpr, ctx: TypingContext): TypeId => {
   }
 
   return ctx.voidType;
+};
+
+const typeMatchExpr = (expr: HirMatchExpr, ctx: TypingContext): TypeId => {
+  const discriminantType = typeExpression(expr.discriminant, ctx);
+  const discriminantExpr = ctx.hir.expressions.get(expr.discriminant);
+  const discriminantSymbol =
+    discriminantExpr?.exprKind === "identifier"
+      ? discriminantExpr.symbol
+      : undefined;
+
+  const discriminantDesc = ctx.arena.get(discriminantType);
+  const unionMembers =
+    discriminantDesc.kind === "union"
+      ? [...discriminantDesc.members]
+      : undefined;
+  const remainingMembers = unionMembers ? new Set(unionMembers) : undefined;
+
+  let branchType: TypeId | undefined;
+
+  expr.arms.forEach((arm, index) => {
+    const narrowed = narrowMatchPattern(
+      discriminantType,
+      arm.pattern,
+      ctx,
+      `match arm ${index + 1}`
+    );
+    const valueType = withNarrowedDiscriminant(
+      discriminantSymbol,
+      narrowed,
+      ctx,
+      () => typeExpression(arm.value, ctx)
+    );
+    branchType = mergeBranchType(branchType, valueType);
+
+    if (!remainingMembers) {
+      return;
+    }
+
+    if (arm.pattern.kind === "wildcard") {
+      remainingMembers.clear();
+      return;
+    }
+
+    if (arm.pattern.kind === "type") {
+      const patternType = resolveTypeExpr(
+        arm.pattern.type,
+        ctx,
+        ctx.unknownType
+      );
+      matchedUnionMembers(patternType, remainingMembers, ctx).forEach(
+        (member) => remainingMembers.delete(member)
+      );
+    }
+  });
+
+  if (remainingMembers && remainingMembers.size > 0) {
+    throw new Error("non-exhaustive match");
+  }
+
+  return branchType ?? ctx.voidType;
 };
 
 const typeTupleExpr = (
@@ -901,11 +966,7 @@ const matchesOverloadSignature = (
       return true;
     }
 
-    if (param.type === arg.type) {
-      return true;
-    }
-
-    return structuralTypeSatisfies(arg.type, param.type, ctx);
+    return typeSatisfies(arg.type, param.type, ctx);
   });
 };
 
@@ -1058,6 +1119,8 @@ const resolveTypeExpr = (
       return resolveObjectTypeExpr(expr, ctx);
     case "tuple":
       return resolveTupleTypeExpr(expr, ctx);
+    case "union":
+      return resolveUnionTypeExpr(expr, ctx);
     default:
       throw new Error(`unsupported type expression kind: ${expr.typeKind}`);
   }
@@ -1118,6 +1181,16 @@ const resolveTupleTypeExpr = (
     type: resolveTypeExpr(element, ctx, ctx.unknownType),
   }));
   return ctx.arena.internStructuralObject({ fields });
+};
+
+const resolveUnionTypeExpr = (
+  expr: HirUnionTypeExpr,
+  ctx: TypingContext
+): TypeId => {
+  const members = expr.members.map((member) =>
+    resolveTypeExpr(member, ctx, ctx.unknownType)
+  );
+  return ctx.arena.internUnion(members);
 };
 
 const registerPrimitive = (
@@ -1251,43 +1324,156 @@ const bindTuplePatternFromType = (
   });
 };
 
+const narrowMatchPattern = (
+  discriminantType: TypeId,
+  pattern: HirPattern,
+  ctx: TypingContext,
+  reason: string
+): TypeId => {
+  switch (pattern.kind) {
+    case "wildcard":
+      return discriminantType;
+    case "type": {
+      const patternType = resolveTypeExpr(
+        pattern.type,
+        ctx,
+        ctx.unknownType
+      );
+      const narrowed = narrowTypeForPattern(
+        discriminantType,
+        patternType,
+        ctx
+      );
+      if (typeof narrowed !== "number") {
+        throw new Error(`pattern does not match discriminant for ${reason}`);
+      }
+      return narrowed;
+    }
+    default:
+      throw new Error(`unsupported match pattern ${pattern.kind}`);
+  }
+};
+
+const withNarrowedDiscriminant = (
+  symbol: SymbolId | undefined,
+  narrowedType: TypeId,
+  ctx: TypingContext,
+  run: () => TypeId
+): TypeId => {
+  if (typeof symbol !== "number" || narrowedType === ctx.unknownType) {
+    return run();
+  }
+
+  const previous = ctx.valueTypes.get(symbol);
+  ctx.valueTypes.set(symbol, narrowedType);
+  try {
+    return run();
+  } finally {
+    if (typeof previous === "number") {
+      ctx.valueTypes.set(symbol, previous);
+    } else {
+      ctx.valueTypes.delete(symbol);
+    }
+  }
+};
+
+const matchedUnionMembers = (
+  patternType: TypeId,
+  remaining: Set<TypeId>,
+  ctx: TypingContext
+): TypeId[] => {
+  if (patternType === ctx.unknownType) {
+    return [];
+  }
+  return Array.from(remaining).filter((member) =>
+    typeSatisfies(member, patternType, ctx)
+  );
+};
+
+const narrowTypeForPattern = (
+  discriminantType: TypeId,
+  patternType: TypeId,
+  ctx: TypingContext
+): TypeId | undefined => {
+  if (discriminantType === ctx.unknownType) {
+    return patternType;
+  }
+  const desc = ctx.arena.get(discriminantType);
+  if (desc.kind === "union") {
+    const matches = desc.members.filter((member) =>
+      typeSatisfies(member, patternType, ctx)
+    );
+    if (matches.length === 0) {
+      return undefined;
+    }
+    return matches.length === 1
+      ? matches[0]
+      : ctx.arena.internUnion(matches);
+  }
+  return typeSatisfies(discriminantType, patternType, ctx)
+    ? discriminantType
+    : undefined;
+};
+
 const ensureTypeMatches = (
   actual: TypeId,
   expected: TypeId,
   ctx: TypingContext,
   reason: string
 ): void => {
-  if (actual === expected) {
+  if (typeSatisfies(actual, expected, ctx)) {
     return;
+  }
+
+  throw new Error(`type mismatch for ${reason}`);
+};
+
+const typeSatisfies = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext
+): boolean => {
+  if (actual === expected) {
+    return true;
   }
 
   if (
     ctx.typeCheckMode === "relaxed" &&
     (actual === ctx.unknownType || expected === ctx.unknownType)
   ) {
-    return;
+    return true;
+  }
+
+  const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "union") {
+    return expectedDesc.members.some((member) =>
+      typeSatisfies(actual, member, ctx)
+    );
+  }
+
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind === "union") {
+    return actualDesc.members.every((member) =>
+      typeSatisfies(member, expected, ctx)
+    );
   }
 
   const expectedNominal = getNominalComponent(expected, ctx);
   if (expectedNominal) {
     const actualNominal = getNominalComponent(actual, ctx);
     if (actualNominal && nominalExtends(actualNominal, expectedNominal, ctx)) {
-      return;
+      return true;
     }
     if (
       expectedNominal === ctx.baseObjectNominal &&
       structuralTypeSatisfies(actual, expected, ctx)
     ) {
-      return;
+      return true;
     }
-    throw new Error(`type mismatch for ${reason}`);
+    return false;
   }
 
-  if (structuralTypeSatisfies(actual, expected, ctx)) {
-    return;
-  }
-
-  throw new Error(`type mismatch for ${reason}`);
+  return structuralTypeSatisfies(actual, expected, ctx);
 };
 
 const resolveTypeAlias = (symbol: SymbolId, ctx: TypingContext): TypeId => {
@@ -1487,6 +1673,24 @@ const structuralTypeSatisfies = (
   ctx: TypingContext,
   seen: Set<string> = new Set()
 ): boolean => {
+  if (actual === expected) {
+    return true;
+  }
+
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind === "union") {
+    return actualDesc.members.every((member) =>
+      structuralTypeSatisfies(member, expected, ctx, seen)
+    );
+  }
+
+  const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "union") {
+    return expectedDesc.members.some((member) =>
+      structuralTypeSatisfies(actual, member, ctx, seen)
+    );
+  }
+
   const expectedFields = getStructuralFields(expected, ctx);
   if (!expectedFields) {
     return false;

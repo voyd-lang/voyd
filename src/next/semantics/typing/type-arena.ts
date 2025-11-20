@@ -219,7 +219,17 @@ export const createTypeArena = (): TypeArena => {
     });
 
   const internUnion = (members: readonly TypeId[]): TypeId => {
-    const canonical = [...new Set(members)].sort((a, b) => a - b);
+    const flattened: TypeId[] = [];
+    members.forEach((member) => {
+      const desc = getDescriptor(member);
+      if (desc.kind === "union") {
+        flattened.push(...desc.members);
+        return;
+      }
+      flattened.push(member);
+    });
+
+    const canonical = [...new Set(flattened)].sort((a, b) => a - b);
     return storeDescriptor({ kind: "union", members: canonical });
   };
 

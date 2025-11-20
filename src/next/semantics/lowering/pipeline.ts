@@ -23,6 +23,7 @@ import type {
   HirBuilder,
   HirCondBranch,
   HirGraph,
+  HirMatchArm,
   HirObjectLiteralEntry,
   HirParameter,
   HirPattern,
@@ -341,6 +342,10 @@ const lowerExpr = (
       return lowerObjectLiteralExpr(expr, ctx, scopes);
     }
 
+    if (expr.calls("match")) {
+      return lowerMatch(expr, ctx, scopes);
+    }
+
     if (isFieldAccessForm(expr)) {
       return lowerFieldAccessExpr(expr, ctx, scopes);
     }
@@ -454,6 +459,159 @@ const lowerIf = (
     branches: loweredBranches,
     defaultBranch: loweredDefault,
   });
+};
+
+const lowerMatch = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack,
+  operandOverride?: Expr
+): HirExprId => {
+  const scopeId = ctx.scopeByNode.get(form.syntaxId);
+  if (scopeId !== undefined) {
+    scopes.push(scopeId);
+  }
+
+  const operandExpr = operandOverride ?? form.at(1);
+  if (!operandExpr) {
+    throw new Error("match expression missing discriminant");
+  }
+
+  const potentialBinder = operandOverride ? form.at(1) : form.at(2);
+  const hasBinder = isIdentifierAtom(potentialBinder);
+  const caseStart = hasBinder
+    ? operandOverride
+      ? 2
+      : 3
+    : operandOverride
+    ? 1
+    : 2;
+
+  const operandId = lowerExpr(operandExpr, ctx, scopes);
+  const binderSymbol =
+    hasBinder && potentialBinder
+      ? resolveSymbol(potentialBinder.value, scopes.current(), ctx)
+      : undefined;
+
+  const arms: HirMatchArm[] = form
+    .toArray()
+    .slice(caseStart)
+    .map((entry) => lowerMatchArm(entry, ctx, scopes));
+
+  const discriminant =
+    typeof binderSymbol === "number"
+      ? ctx.builder.addExpression({
+          kind: "expr",
+          exprKind: "identifier",
+          ast: (potentialBinder as Syntax | undefined)?.syntaxId ?? form.syntaxId,
+          span: toSourceSpan((potentialBinder as Syntax | undefined) ?? form),
+          symbol: binderSymbol,
+        })
+      : operandId;
+
+  const matchExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "match",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    discriminant,
+    arms,
+  });
+
+  if (scopeId !== undefined) {
+    scopes.pop();
+  }
+
+  if (typeof binderSymbol === "number") {
+    const binderPattern: HirPattern = { kind: "identifier", symbol: binderSymbol };
+    return ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "block",
+      ast: form.syntaxId,
+      span: toSourceSpan(form),
+      statements: [
+        ctx.builder.addStatement({
+          kind: "let",
+          ast: (potentialBinder as Syntax | undefined)?.syntaxId ?? form.syntaxId,
+          span: toSourceSpan((potentialBinder as Syntax | undefined) ?? form),
+          mutable: false,
+          pattern: binderPattern,
+          initializer: operandId,
+        }),
+      ],
+      value: matchExpr,
+    });
+  }
+
+  return matchExpr;
+};
+
+const lowerMatchArm = (
+  entry: Expr | undefined,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirMatchArm => {
+  if (!isForm(entry) || !entry.calls(":")) {
+    throw new Error("match cases must be labeled with ':'");
+  }
+
+  const scopeId = ctx.scopeByNode.get(entry.syntaxId);
+  if (scopeId !== undefined) {
+    scopes.push(scopeId);
+  }
+
+  const patternExpr = entry.at(1);
+  const valueExpr = entry.at(2);
+  if (!valueExpr) {
+    throw new Error("match case missing value expression");
+  }
+
+  const pattern = lowerMatchPattern(patternExpr, ctx, scopes);
+  const value = lowerExpr(valueExpr, ctx, scopes);
+
+  if (scopeId !== undefined) {
+    scopes.pop();
+  }
+
+  return { pattern, value };
+};
+
+const lowerMatchPattern = (
+  pattern: Expr | undefined,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirPattern => {
+  if (!pattern) {
+    throw new Error("match case missing pattern");
+  }
+
+  if (isIdentifierAtom(pattern)) {
+    if (pattern.value === "_" || pattern.value === "else") {
+      return { kind: "wildcard" };
+    }
+    const type = lowerTypeExpr(pattern, ctx);
+    if (!type) {
+      throw new Error("match pattern missing type");
+    }
+    return { kind: "type", type };
+  }
+
+  const type = lowerTypeExpr(pattern, ctx);
+  if (type) {
+    return { kind: "type", type };
+  }
+
+  if (
+    isForm(pattern) &&
+    (pattern.calls("tuple") || pattern.callsInternal("tuple"))
+  ) {
+    const elements = pattern.rest.map((entry) =>
+      lowerMatchPattern(entry, ctx, scopes)
+    );
+    return { kind: "tuple", elements };
+  }
+
+  throw new Error("unsupported match pattern");
 };
 
 const lowerCallFromElements = (
@@ -755,6 +913,10 @@ const lowerDotExpr = (
     throw new Error("dot expression missing target or member");
   }
 
+  if (isForm(memberExpr) && memberExpr.calls("match")) {
+    return lowerMatch(memberExpr, ctx, scopes, targetExpr);
+  }
+
   if (isForm(memberExpr) && memberExpr.calls("=>")) {
     return lowerCallFromElements(memberExpr, [targetExpr], form, ctx, scopes);
   }
@@ -875,6 +1037,10 @@ const lowerTypeExpr = (
     return lowerTupleTypeExpr(expr, ctx);
   }
 
+  if (isForm(expr) && expr.calls("|")) {
+    return lowerUnionTypeExpr(expr, ctx);
+  }
+
   throw new Error("unsupported type expression");
 };
 
@@ -933,6 +1099,25 @@ const lowerTupleTypeExpr = (
     ast: form.syntaxId,
     span: toSourceSpan(form),
     elements,
+  };
+};
+
+const lowerUnionTypeExpr = (
+  form: Form,
+  ctx: LowerContext
+): HirTypeExpr => {
+  const members = form.rest.map((entry) => {
+    const lowered = lowerTypeExpr(entry, ctx);
+    if (!lowered) {
+      throw new Error("union type member missing resolved type expression");
+    }
+    return lowered;
+  });
+  return {
+    typeKind: "union",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    members,
   };
 };
 
