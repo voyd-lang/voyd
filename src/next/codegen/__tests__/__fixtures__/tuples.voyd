@@ -1,0 +1,14 @@
+type Pair = (i32, i32)
+
+fn make_pair(a: i32, b: i32) -> Pair
+  (a, b)
+
+fn swap(pair: Pair) -> Pair
+  let (x, y) = pair
+  (y, x)
+
+pub fn main() -> i32
+  let pair = make_pair(2, 3)
+  let swapped = swap(pair)
+  let (a, b) = swapped
+  a * 10 + b

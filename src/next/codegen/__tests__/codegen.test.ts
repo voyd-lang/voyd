@@ -110,6 +110,16 @@ describe("next codegen", () => {
     expect((main as () => number)()).toBe(21);
   });
 
+  it("emits wasm for tuples treated as structural objects", () => {
+    const ast = loadAst("tuples.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module } = codegen(semantics);
+    const instance = getWasmInstance(module);
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(32);
+  });
+
   it("emits wasm for UFCS calls to free functions", () => {
     const ast = loadAst("ufcs.voyd");
     const semantics = semanticsPipeline(ast);

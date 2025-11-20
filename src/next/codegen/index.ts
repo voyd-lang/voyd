@@ -305,7 +305,7 @@ const compileExpression = (
     case "field-access":
       return compileFieldAccessExpr(expr, ctx, fnCtx);
     case "tuple":
-      throw new Error("tuple expressions cannot be evaluated directly");
+      return compileTupleExpr(expr, ctx, fnCtx);
     default:
       throw new Error(
         `codegen does not support ${expr.exprKind} expressions yet`
@@ -821,6 +821,91 @@ const compileObjectLiteralExpr = (
   };
 };
 
+const compileTupleExpr = (
+  expr: HirExpression & { exprKind: "tuple"; elements: readonly HirExprId[] },
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): CompiledExpression => {
+  const typeId = getRequiredExprType(expr.id, ctx);
+  const structInfo = getStructuralTypeInfo(typeId, ctx);
+  if (!structInfo) {
+    throw new Error("tuple missing structural type information");
+  }
+
+  if (structInfo.fields.length !== expr.elements.length) {
+    throw new Error("tuple arity does not match inferred structural type");
+  }
+
+  const ops: binaryen.ExpressionRef[] = [];
+  const fieldTemps = new Map<string, LocalBinding>();
+
+  expr.elements.forEach((elementId, index) => {
+    const fieldName = `${index}`;
+    const field = structInfo.fieldMap.get(fieldName);
+    if (!field) {
+      throw new Error(`tuple element ${index} missing corresponding field`);
+    }
+    const temp = allocateTempLocal(field.wasmType, fnCtx);
+    fieldTemps.set(field.name, temp);
+    ops.push(
+      ctx.mod.local.set(temp.index, compileExpression(elementId, ctx, fnCtx).expr)
+    );
+  });
+
+  const values = [
+    ctx.mod.global.get(
+      structInfo.ancestorsGlobal,
+      ctx.rtt.extensionHelpers.i32Array
+    ),
+    ctx.mod.global.get(
+      structInfo.fieldTableGlobal,
+      ctx.rtt.fieldLookupHelpers.lookupTableType
+    ),
+    ctx.mod.global.get(
+      structInfo.methodTableGlobal,
+      ctx.rtt.methodLookupHelpers.lookupTableType
+    ),
+    ...structInfo.fields.map((field) => {
+      const temp = fieldTemps.get(field.name);
+      if (!temp) {
+        throw new Error(`missing binding for tuple field ${field.name}`);
+      }
+      return ctx.mod.local.get(temp.index, temp.type);
+    }),
+  ];
+
+  const tupleValue = initStruct(ctx.mod, structInfo.runtimeType, values);
+  if (ops.length === 0) {
+    return { expr: tupleValue, usedReturnCall: false };
+  }
+  ops.push(tupleValue);
+  return {
+    expr: ctx.mod.block(null, ops, getExprBinaryenType(expr.id, ctx)),
+    usedReturnCall: false,
+  };
+};
+
+const loadStructuralField = (
+  structInfo: StructuralTypeInfo,
+  field: StructuralFieldInfo,
+  pointer: binaryen.ExpressionRef,
+  ctx: CodegenContext
+): binaryen.ExpressionRef => {
+  const lookupTable = structGetFieldValue({
+    mod: ctx.mod,
+    fieldType: ctx.rtt.fieldLookupHelpers.lookupTableType,
+    fieldIndex: RTT_METADATA_SLOTS.FIELD_INDEX_TABLE,
+    exprRef: pointer,
+  });
+  const accessor = ctx.mod.call(
+    LOOKUP_FIELD_ACCESSOR,
+    [ctx.mod.i32.const(field.hash), lookupTable, ctx.mod.i32.const(0)],
+    binaryen.funcref
+  );
+  const getter = refCast(ctx.mod, accessor, field.getterType!);
+  return callRef(ctx.mod, getter, [pointer], field.wasmType);
+};
+
 const compileFieldAccessExpr = (
   expr: HirFieldAccessExpr,
   ctx: CodegenContext,
@@ -929,9 +1014,22 @@ const compileTuplePattern = (
   ops: binaryen.ExpressionRef[],
   options: PatternInitOptions
 ): void => {
-  const pending = collectTupleAssignments(
+  const initializerType = getRequiredExprType(initializer, ctx);
+  const initializerTemp = allocateTempLocal(
+    wasmTypeFor(initializerType, ctx),
+    fnCtx
+  );
+  ops.push(
+    ctx.mod.local.set(
+      initializerTemp.index,
+      compileExpression(initializer, ctx, fnCtx).expr
+    )
+  );
+
+  const pending = collectTupleAssignmentsFromValue(
     pattern,
-    initializer,
+    initializerTemp,
+    initializerType,
     ctx,
     fnCtx,
     ops
@@ -956,24 +1054,37 @@ const compileTuplePattern = (
   });
 };
 
-const collectTupleAssignments = (
+const collectTupleAssignmentsFromValue = (
   pattern: HirPattern,
-  exprId: HirExprId,
+  temp: LocalBinding,
+  typeId: TypeId,
   ctx: CodegenContext,
   fnCtx: FunctionContext,
   ops: binaryen.ExpressionRef[]
 ): PendingTupleAssignment[] => {
   if (pattern.kind === "tuple") {
-    const tupleExpr = getTupleExpression(exprId, ctx);
-    if (tupleExpr.elements.length !== pattern.elements.length) {
+    const structInfo = getStructuralTypeInfo(typeId, ctx);
+    if (!structInfo) {
+      throw new Error("tuple pattern requires a structural tuple value");
+    }
+    if (pattern.elements.length !== structInfo.fields.length) {
       throw new Error("tuple pattern arity mismatch");
     }
+    const pointer = ctx.mod.local.get(temp.index, temp.type);
     const collected: PendingTupleAssignment[] = [];
-    tupleExpr.elements.forEach((elementExprId, index) => {
+    pattern.elements.forEach((subPattern, index) => {
+      const field = structInfo.fieldMap.get(`${index}`);
+      if (!field) {
+        throw new Error(`tuple is missing element ${index}`);
+      }
+      const elementTemp = allocateTempLocal(field.wasmType, fnCtx);
+      const load = loadStructuralField(structInfo, field, pointer, ctx);
+      ops.push(ctx.mod.local.set(elementTemp.index, load));
       collected.push(
-        ...collectTupleAssignments(
-          pattern.elements[index]!,
-          elementExprId,
+        ...collectTupleAssignmentsFromValue(
+          subPattern,
+          elementTemp,
+          field.typeId,
           ctx,
           fnCtx,
           ops
@@ -984,7 +1095,6 @@ const collectTupleAssignments = (
   }
 
   if (pattern.kind === "wildcard") {
-    ops.push(asStatement(ctx, compileExpression(exprId, ctx, fnCtx).expr));
     return [];
   }
 
@@ -992,21 +1102,12 @@ const collectTupleAssignments = (
     throw new Error(`unsupported tuple sub-pattern ${pattern.kind}`);
   }
 
-  const elementTypeId = ctx.typing.table.getExprType(exprId);
-  if (typeof elementTypeId !== "number") {
-    throw new Error("missing type for tuple element");
-  }
-
-  const temp = allocateTempLocal(wasmTypeFor(elementTypeId, ctx), fnCtx);
-  ops.push(
-    ctx.mod.local.set(temp.index, compileExpression(exprId, ctx, fnCtx).expr)
-  );
   return [
     {
       pattern,
       tempIndex: temp.index,
       tempType: temp.type,
-      typeId: elementTypeId,
+      typeId,
     },
   ];
 };

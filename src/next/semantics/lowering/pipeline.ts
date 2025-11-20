@@ -871,6 +871,10 @@ const lowerTypeExpr = (
     return lowerObjectTypeExpr(expr, ctx);
   }
 
+  if (isForm(expr) && (expr.calls("tuple") || expr.callsInternal("tuple"))) {
+    return lowerTupleTypeExpr(expr, ctx);
+  }
+
   throw new Error("unsupported type expression");
 };
 
@@ -910,6 +914,25 @@ const lowerObjectTypeField = (
     name: nameExpr.value,
     type,
     span: toSourceSpan(entry),
+  };
+};
+
+const lowerTupleTypeExpr = (
+  form: Form,
+  ctx: LowerContext
+): HirTypeExpr => {
+  const elements = form.rest.map((entry) => {
+    const lowered = lowerTypeExpr(entry, ctx);
+    if (!lowered) {
+      throw new Error("tuple type element missing resolved type expression");
+    }
+    return lowered;
+  });
+  return {
+    typeKind: "tuple",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    elements,
   };
 };
 

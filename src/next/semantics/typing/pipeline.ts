@@ -18,6 +18,7 @@ import type {
   HirPattern,
   HirTypeExpr,
   HirNamedTypeExpr,
+  HirTupleTypeExpr,
   HirWhileExpr,
 } from "../hir/index.js";
 import type {
@@ -635,8 +636,11 @@ const typeTupleExpr = (
   expr: HirExpression & { exprKind: "tuple"; elements: readonly HirExprId[] },
   ctx: TypingContext
 ): TypeId => {
-  expr.elements.forEach((elementId) => typeExpression(elementId, ctx));
-  return ctx.unknownType;
+  const fields = expr.elements.map((elementId, index) => ({
+    name: `${index}`,
+    type: typeExpression(elementId, ctx),
+  }));
+  return ctx.arena.internStructuralObject({ fields });
 };
 
 const typeObjectLiteralExpr = (
@@ -1052,6 +1056,8 @@ const resolveTypeExpr = (
       return resolveNamedTypeExpr(expr, ctx);
     case "object":
       return resolveObjectTypeExpr(expr, ctx);
+    case "tuple":
+      return resolveTupleTypeExpr(expr, ctx);
     default:
       throw new Error(`unsupported type expression kind: ${expr.typeKind}`);
   }
@@ -1103,6 +1109,17 @@ const resolveObjectTypeExpr = (
   return ctx.arena.internStructuralObject({ fields });
 };
 
+const resolveTupleTypeExpr = (
+  expr: HirTupleTypeExpr,
+  ctx: TypingContext
+): TypeId => {
+  const fields = expr.elements.map((element, index) => ({
+    name: `${index}`,
+    type: resolveTypeExpr(element, ctx, ctx.unknownType),
+  }));
+  return ctx.arena.internStructuralObject({ fields });
+};
+
 const registerPrimitive = (
   ctx: TypingContext,
   canonical: string,
@@ -1133,20 +1150,29 @@ const bindTuplePatternFromExpr = (
   ctx: TypingContext,
   mode: PatternBindingMode
 ): void => {
-  const tupleExpr = getTupleExpression(exprId, ctx);
-  if (tupleExpr.elements.length !== pattern.elements.length) {
-    throw new Error("tuple pattern length mismatch");
+  const initializerType = typeExpression(exprId, ctx);
+  const initializerExpr = ctx.hir.expressions.get(exprId);
+
+  if (initializerExpr?.exprKind === "tuple") {
+    if (initializerExpr.elements.length !== pattern.elements.length) {
+      throw new Error("tuple pattern length mismatch");
+    }
+
+    pattern.elements.forEach((subPattern, index) => {
+      const elementExprId = initializerExpr.elements[index]!;
+      if (subPattern.kind === "tuple") {
+        bindTuplePatternFromExpr(subPattern, elementExprId, ctx, mode);
+        return;
+      }
+      const cached = ctx.table.getExprType(elementExprId);
+      const elementType =
+        typeof cached === "number" ? cached : typeExpression(elementExprId, ctx);
+      recordPatternType(subPattern, elementType, ctx, mode);
+    });
+    return;
   }
 
-  pattern.elements.forEach((subPattern, index) => {
-    const elementExprId = tupleExpr.elements[index]!;
-    if (subPattern.kind === "tuple") {
-      bindTuplePatternFromExpr(subPattern, elementExprId, ctx, mode);
-      return;
-    }
-    const elementType = typeExpression(elementExprId, ctx);
-    recordPatternType(subPattern, elementType, ctx, mode);
-  });
+  bindTuplePatternFromType(pattern, initializerType, ctx, mode);
 };
 
 const recordPatternType = (
@@ -1191,6 +1217,38 @@ const getTupleExpression = (
     throw new Error("tuple pattern requires a tuple initializer");
   }
   return expr;
+};
+
+const bindTuplePatternFromType = (
+  pattern: HirPattern & { kind: "tuple" },
+  type: TypeId,
+  ctx: TypingContext,
+  mode: PatternBindingMode
+): void => {
+  const fields = getStructuralFields(type, ctx);
+  if (!fields) {
+    throw new Error("tuple pattern requires a tuple initializer");
+  }
+
+  const fieldByIndex = new Map<string, TypeId>(
+    fields.map((field) => [field.name, field.type])
+  );
+
+  if (fieldByIndex.size !== pattern.elements.length) {
+    throw new Error("tuple pattern length mismatch");
+  }
+
+  pattern.elements.forEach((subPattern, index) => {
+    const fieldType = fieldByIndex.get(`${index}`);
+    if (typeof fieldType !== "number") {
+      throw new Error(`tuple is missing element ${index}`);
+    }
+    if (subPattern.kind === "tuple") {
+      bindTuplePatternFromType(subPattern, fieldType, ctx, mode);
+      return;
+    }
+    recordPatternType(subPattern, fieldType, ctx, mode);
+  });
 };
 
 const ensureTypeMatches = (
