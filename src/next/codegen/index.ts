@@ -12,7 +12,9 @@ import type {
   HirMatchExpr,
   HirLetStatement,
   HirObjectLiteralExpr,
+  HirObjectDecl,
   HirPattern,
+  HirTypeAlias,
   HirTypeExpr,
   HirWhileExpr,
 } from "../semantics/hir/index.js";
@@ -67,6 +69,12 @@ interface CodegenContext {
   functions: Map<SymbolId, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, SymbolId>;
   structTypes: Map<TypeId, StructuralTypeInfo>;
+  typeAliases: Map<SymbolId, HirTypeAlias>;
+  objectDecls: Map<SymbolId, HirObjectDecl>;
+  objectTypeCache: Map<string, TypeId>;
+  resolvingObjectTypes: Set<string>;
+  baseObjectType?: TypeId;
+  unknownType?: TypeId;
   rtt: ReturnType<typeof createRttContext>;
 }
 
@@ -118,6 +126,18 @@ const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   validate: true,
 };
 
+const initializeTypeResolution = (ctx: CodegenContext): void => {
+  ctx.hir.items.forEach((item) => {
+    if (item.kind === "type-alias") {
+      ctx.typeAliases.set(item.symbol, item);
+      return;
+    }
+    if (item.kind === "object") {
+      ctx.objectDecls.set(item.symbol, item);
+    }
+  });
+};
+
 export const codegen = (
   semantics: SemanticsPipelineResult,
   options: CodegenOptions = {}
@@ -134,9 +154,14 @@ export const codegen = (
     functions: new Map(),
     itemsToSymbols: new Map(),
     structTypes: new Map(),
+    typeAliases: new Map(),
+    objectDecls: new Map(),
+    objectTypeCache: new Map(),
+    resolvingObjectTypes: new Set(),
     rtt,
   };
 
+  initializeTypeResolution(ctx);
   registerFunctionMetadata(ctx);
   compileFunctions(ctx);
   emitExports(ctx);
@@ -231,13 +256,7 @@ const compileFunctionItem = (fn: HirFunction, ctx: CodegenContext): void => {
     fnCtx.bindings.set(param.symbol, { index, type });
   });
 
-  const body = compileExpression(
-    fn.body,
-    ctx,
-    fnCtx,
-    true,
-    fnCtx.returnTypeId
-  );
+  const body = compileExpression(fn.body, ctx, fnCtx, true, fnCtx.returnTypeId);
 
   ctx.mod.addFunction(
     meta.wasmName,
@@ -297,7 +316,13 @@ const compileExpression = (
         expectedResultTypeId
       );
     case "if":
-      return compileIfExpr(expr, ctx, fnCtx, tailPosition, expectedResultTypeId);
+      return compileIfExpr(
+        expr,
+        ctx,
+        fnCtx,
+        tailPosition,
+        expectedResultTypeId
+      );
     case "match":
       return compileMatchExpr(
         expr,
@@ -506,11 +531,7 @@ const compileBlockExpr = (
 
     statements.push(valueExpr);
     return {
-      expr: ctx.mod.block(
-        null,
-        statements,
-        getExprBinaryenType(expr.id, ctx)
-      ),
+      expr: ctx.mod.block(null, statements, getExprBinaryenType(expr.id, ctx)),
       usedReturnCall,
     };
   }
@@ -679,6 +700,7 @@ const compileMatchExpr = (
     const condition = compileMatchCondition(
       arm.pattern,
       discriminantTemp,
+      discriminantTypeId,
       ctx
     );
     const fallback =
@@ -712,9 +734,14 @@ const compileMatchExpr = (
 const compileMatchCondition = (
   pattern: HirPattern & { kind: "type" },
   discriminant: LocalBinding,
+  discriminantTypeId: TypeId,
   ctx: CodegenContext
 ): binaryen.ExpressionRef => {
-  const patternTypeId = resolveTypeIdFromTypeExpr(pattern.type, ctx);
+  const patternTypeId = resolvePatternTypeForMatch(
+    pattern.type,
+    discriminantTypeId,
+    ctx
+  );
   const structInfo = getStructuralTypeInfo(patternTypeId, ctx);
   if (!structInfo) {
     throw new Error("match pattern requires a structural type");
@@ -796,13 +823,7 @@ const compileAssignExpr = (
   return {
     expr: ctx.mod.local.set(
       binding.index,
-      coerceValueToType(
-        valueExpr.expr,
-        valueTypeId,
-        targetTypeId,
-        ctx,
-        fnCtx
-      )
+      coerceValueToType(valueExpr.expr, valueTypeId, targetTypeId, ctx, fnCtx)
     ),
     usedReturnCall: false,
   };
@@ -831,7 +852,9 @@ const compileObjectLiteralExpr = (
     if (entry.kind === "field") {
       const binding = fieldTemps.get(entry.name);
       if (!binding) {
-        throw new Error(`object literal cannot set unknown field ${entry.name}`);
+        throw new Error(
+          `object literal cannot set unknown field ${entry.name}`
+        );
       }
       ops.push(
         ctx.mod.local.set(
@@ -882,12 +905,7 @@ const compileObjectLiteralExpr = (
         binaryen.funcref
       );
       const getter = refCast(ctx.mod, accessor, sourceField.getterType!);
-      const load = callRef(
-        ctx.mod,
-        getter,
-        [pointer],
-        sourceField.wasmType
-      );
+      const load = callRef(ctx.mod, getter, [pointer], sourceField.wasmType);
       ops.push(ctx.mod.local.set(target.index, load));
       initialized.add(sourceField.name);
     });
@@ -958,7 +976,10 @@ const compileTupleExpr = (
     const temp = allocateTempLocal(field.wasmType, fnCtx);
     fieldTemps.set(field.name, temp);
     ops.push(
-      ctx.mod.local.set(temp.index, compileExpression(elementId, ctx, fnCtx).expr)
+      ctx.mod.local.set(
+        temp.index,
+        compileExpression(elementId, ctx, fnCtx).expr
+      )
     );
   });
 
@@ -1078,9 +1099,7 @@ const compilePatternInitialization = (
   }
 
   if (pattern.kind === "wildcard") {
-    ops.push(
-      asStatement(ctx, compileExpression(initializer, ctx, fnCtx).expr)
-    );
+    ops.push(asStatement(ctx, compileExpression(initializer, ctx, fnCtx).expr));
     return;
   }
 
@@ -1098,13 +1117,7 @@ const compilePatternInitialization = (
   ops.push(
     ctx.mod.local.set(
       binding.index,
-      coerceValueToType(
-        value.expr,
-        initializerType,
-        targetTypeId,
-        ctx,
-        fnCtx
-      )
+      coerceValueToType(value.expr, initializerType, targetTypeId, ctx, fnCtx)
     )
   );
 };
@@ -1399,13 +1412,21 @@ const emitEqualityIntrinsic = (
   const right = args[1]!;
   switch (kind) {
     case "i32":
-      return op === "==" ? ctx.mod.i32.eq(left, right) : ctx.mod.i32.ne(left, right);
+      return op === "=="
+        ? ctx.mod.i32.eq(left, right)
+        : ctx.mod.i32.ne(left, right);
     case "i64":
-      return op === "==" ? ctx.mod.i64.eq(left, right) : ctx.mod.i64.ne(left, right);
+      return op === "=="
+        ? ctx.mod.i64.eq(left, right)
+        : ctx.mod.i64.ne(left, right);
     case "f32":
-      return op === "==" ? ctx.mod.f32.eq(left, right) : ctx.mod.f32.ne(left, right);
+      return op === "=="
+        ? ctx.mod.f32.eq(left, right)
+        : ctx.mod.f32.ne(left, right);
     case "f64":
-      return op === "==" ? ctx.mod.f64.eq(left, right) : ctx.mod.f64.ne(left, right);
+      return op === "=="
+        ? ctx.mod.f64.eq(left, right)
+        : ctx.mod.f64.ne(left, right);
   }
   throw new Error(`unsupported ${op} equality for numeric kind ${kind}`);
 };
@@ -1583,9 +1604,7 @@ const emitStructuralConversion = (
   });
 
   const temp = allocateTempLocal(actual.interfaceType, fnCtx);
-  const ops: binaryen.ExpressionRef[] = [
-    ctx.mod.local.set(temp.index, value),
-  ];
+  const ops: binaryen.ExpressionRef[] = [ctx.mod.local.set(temp.index, value)];
   const sourceRef = ctx.mod.local.get(temp.index, actual.interfaceType);
 
   const fieldValues = target.fields.map((field) => {
@@ -1598,11 +1617,7 @@ const emitStructuralConversion = (
     });
     const accessor = ctx.mod.call(
       LOOKUP_FIELD_ACCESSOR,
-      [
-        ctx.mod.i32.const(sourceField.hash),
-        lookupTable,
-        ctx.mod.i32.const(0),
-      ],
+      [ctx.mod.i32.const(sourceField.hash), lookupTable, ctx.mod.i32.const(0)],
       binaryen.funcref
     );
     const getter = refCast(ctx.mod, accessor, sourceField.getterType!);
@@ -1676,47 +1691,347 @@ const getExprBinaryenType = (
 
 const resolveTypeIdFromTypeExpr = (
   expr: HirTypeExpr,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  typeParams?: ReadonlyMap<SymbolId, TypeId>
 ): TypeId => {
   switch (expr.typeKind) {
-    case "named": {
-      if (expr.path.length !== 1) {
-        throw new Error("qualified type paths are not supported yet");
-      }
-      const name = expr.path[0]!;
-      const symbol = ctx.symbolTable.resolve(name, ctx.hir.module.scope);
-      if (typeof symbol === "number") {
-        const typeId = ctx.typing.valueTypes.get(symbol);
-        if (typeof typeId === "number") {
-          return typeId;
-        }
-      }
-      if (isPrimitiveName(name)) {
-        return ctx.typing.arena.internPrimitive(name);
-      }
-      throw new Error(`codegen missing type for ${name}`);
-    }
+    case "named":
+      return resolveNamedTypeExpr(expr, ctx, typeParams);
     case "object":
       return ctx.typing.arena.internStructuralObject({
         fields: expr.fields.map((field) => ({
           name: field.name,
-          type: resolveTypeIdFromTypeExpr(field.type, ctx),
+          type: resolveTypeIdFromTypeExpr(field.type, ctx, typeParams),
         })),
       });
     case "tuple":
       return ctx.typing.arena.internStructuralObject({
         fields: expr.elements.map((element, index) => ({
           name: `${index}`,
-          type: resolveTypeIdFromTypeExpr(element, ctx),
+          type: resolveTypeIdFromTypeExpr(element, ctx, typeParams),
         })),
       });
     case "union":
       return ctx.typing.arena.internUnion(
-        expr.members.map((member) => resolveTypeIdFromTypeExpr(member, ctx))
+        expr.members.map((member) =>
+          resolveTypeIdFromTypeExpr(member, ctx, typeParams)
+        )
       );
     default:
       throw new Error(`unsupported type expression ${expr.typeKind}`);
   }
+};
+
+const resolveNamedTypeExpr = (
+  expr: HirTypeExpr & { typeKind: "named" },
+  ctx: CodegenContext,
+  typeParams?: ReadonlyMap<SymbolId, TypeId>
+): TypeId => {
+  if (expr.path.length !== 1) {
+    throw new Error("qualified type paths are not supported yet");
+  }
+
+  const name = expr.path[0]!;
+  const typeParam =
+    (typeof expr.symbol === "number"
+      ? typeParams?.get(expr.symbol)
+      : findTypeParamByName(name, typeParams, ctx)) ?? undefined;
+  if (typeof typeParam === "number") {
+    if (expr.typeArguments?.length) {
+      throw new Error("type parameters do not accept type arguments");
+    }
+    return typeParam;
+  }
+
+  if (name === "Object") {
+    return getBaseObjectType(ctx);
+  }
+
+  const alias = resolveTypeAlias(expr, ctx);
+  if (alias) {
+    if (alias.typeParameters && alias.typeParameters.length > 0) {
+      throw new Error("generic type aliases are not supported in codegen yet");
+    }
+    if (expr.typeArguments && expr.typeArguments.length > 0) {
+      throw new Error("type aliases do not support type arguments yet");
+    }
+    return resolveTypeIdFromTypeExpr(alias.target, ctx, typeParams);
+  }
+
+  const objectSymbol = resolveObjectSymbol(expr, ctx);
+  if (typeof objectSymbol === "number") {
+    const resolvedArgs =
+      expr.typeArguments?.map((arg) =>
+        resolveTypeIdFromTypeExpr(arg, ctx, typeParams)
+      ) ?? [];
+    return ensureObjectType(objectSymbol, resolvedArgs, ctx, typeParams);
+  }
+
+  if (isPrimitiveName(name)) {
+    return ctx.typing.arena.internPrimitive(name);
+  }
+  throw new Error(`codegen missing type for ${name}`);
+};
+
+const resolveTypeAlias = (
+  expr: HirTypeExpr & { typeKind: "named" },
+  ctx: CodegenContext
+): HirTypeAlias | undefined => {
+  if (typeof expr.symbol === "number") {
+    const alias = ctx.typeAliases.get(expr.symbol);
+    if (alias) {
+      return alias;
+    }
+  }
+  const symbol = ctx.symbolTable.resolve(expr.path[0]!, ctx.hir.module.scope);
+  return typeof symbol === "number" ? ctx.typeAliases.get(symbol) : undefined;
+};
+
+const resolveObjectSymbol = (
+  expr: HirTypeExpr & { typeKind: "named" },
+  ctx: CodegenContext
+): SymbolId | undefined => {
+  if (typeof expr.symbol === "number" && ctx.objectDecls.has(expr.symbol)) {
+    return expr.symbol;
+  }
+  const resolved = ctx.symbolTable.resolve(expr.path[0]!, ctx.hir.module.scope);
+  if (typeof resolved === "number" && ctx.objectDecls.has(resolved)) {
+    return resolved;
+  }
+  return undefined;
+};
+
+const ensureObjectType = (
+  symbol: SymbolId,
+  typeArguments: readonly TypeId[],
+  ctx: CodegenContext,
+  parentTypeParams?: ReadonlyMap<SymbolId, TypeId>
+): TypeId => {
+  const key = `${symbol}<${typeArguments.join(",")}>`;
+  const cached = ctx.objectTypeCache.get(key);
+  if (typeof cached === "number") {
+    return cached;
+  }
+  if (ctx.resolvingObjectTypes.has(key)) {
+    return getUnknownType(ctx);
+  }
+
+  const decl = ctx.objectDecls.get(symbol);
+  if (!decl) {
+    throw new Error(`missing object declaration for symbol ${symbol}`);
+  }
+
+  const { bindings, appliedArgs } = resolveObjectTypeArgs(
+    decl,
+    typeArguments,
+    ctx,
+    parentTypeParams
+  );
+
+  ctx.resolvingObjectTypes.add(key);
+  try {
+    const baseType = decl.base
+      ? resolveTypeIdFromTypeExpr(decl.base, ctx, bindings)
+      : getBaseObjectType(ctx);
+    const baseFields = getStructuralFieldsFromType(baseType, ctx);
+    const ownFields = decl.fields.map((field) => ({
+      name: field.name,
+      type: resolveTypeIdFromTypeExpr(field.type!, ctx, bindings),
+    }));
+    const fields = mergeDeclaredFields(baseFields, ownFields);
+    const structural = ctx.typing.arena.internStructuralObject({ fields });
+    const nominal = ctx.typing.arena.internNominalObject({
+      owner: symbol,
+      name: getSymbolName(symbol, ctx),
+      typeArgs: appliedArgs,
+    });
+    const type = ctx.typing.arena.internIntersection({
+      nominal,
+      structural,
+    });
+    ctx.objectTypeCache.set(key, type);
+    return type;
+  } finally {
+    ctx.resolvingObjectTypes.delete(key);
+  }
+};
+
+const resolveObjectTypeArgs = (
+  decl: HirObjectDecl,
+  typeArguments: readonly TypeId[],
+  ctx: CodegenContext,
+  parentTypeParams?: ReadonlyMap<SymbolId, TypeId>
+): {
+  bindings: Map<SymbolId, TypeId>;
+  appliedArgs: TypeId[];
+} => {
+  const params = decl.typeParameters ?? [];
+  if (typeArguments.length > params.length) {
+    throw new Error("object type argument count mismatch");
+  }
+
+  const bindings = new Map<SymbolId, TypeId>();
+  parentTypeParams?.forEach((value, key) => bindings.set(key, value));
+  const appliedArgs = params.map((param, index) => {
+    const explicit = typeArguments[index];
+    if (typeof explicit === "number") {
+      bindings.set(param.symbol, explicit);
+      return explicit;
+    }
+    const defaultType =
+      param.defaultType &&
+      resolveTypeIdFromTypeExpr(param.defaultType, ctx, bindings);
+    const resolved =
+      typeof defaultType === "number" ? defaultType : getUnknownType(ctx);
+    bindings.set(param.symbol, resolved);
+    return resolved;
+  });
+
+  return { bindings, appliedArgs };
+};
+
+const mergeDeclaredFields = (
+  inherited: readonly { name: string; type: TypeId }[],
+  own: readonly { name: string; type: TypeId }[]
+): { name: string; type: TypeId }[] => {
+  const fields = new Map<string, TypeId>();
+  inherited.forEach((field) => fields.set(field.name, field.type));
+  own.forEach((field) => fields.set(field.name, field.type));
+  return Array.from(fields.entries()).map(([name, type]) => ({ name, type }));
+};
+
+const findTypeParamByName = (
+  name: string,
+  typeParams: ReadonlyMap<SymbolId, TypeId> | undefined,
+  ctx: CodegenContext
+): TypeId | undefined => {
+  if (!typeParams) {
+    return undefined;
+  }
+  for (const [symbol, type] of typeParams.entries()) {
+    if (getSymbolName(symbol, ctx) === name) {
+      return type;
+    }
+  }
+  return undefined;
+};
+
+const getStructuralFieldsFromType = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): readonly { name: string; type: TypeId }[] => {
+  const structuralId = resolveStructuralTypeId(typeId, ctx);
+  if (typeof structuralId !== "number") {
+    return [];
+  }
+  const desc = ctx.typing.arena.get(structuralId);
+  return desc.kind === "structural-object" ? desc.fields : [];
+};
+
+const getUnknownType = (ctx: CodegenContext): TypeId => {
+  if (typeof ctx.unknownType === "number") {
+    return ctx.unknownType;
+  }
+  const unknown = ctx.typing.arena.internPrimitive("unknown");
+  ctx.unknownType = unknown;
+  return unknown;
+};
+
+const getBaseObjectType = (ctx: CodegenContext): TypeId => {
+  if (typeof ctx.baseObjectType === "number") {
+    return ctx.baseObjectType;
+  }
+  for (const [symbol, typeId] of ctx.typing.valueTypes.entries()) {
+    const record = ctx.symbolTable.getSymbol(symbol);
+    const metadata = (record.metadata ?? {}) as {
+      intrinsic?: boolean;
+      entity?: string;
+    };
+    if (
+      record.name === "Object" &&
+      record.kind === "type" &&
+      metadata.entity === "object"
+    ) {
+      ctx.baseObjectType = typeId;
+      return typeId;
+    }
+  }
+  const fallback = ctx.typing.arena.internPrimitive("unknown");
+  ctx.baseObjectType = fallback;
+  return fallback;
+};
+
+const resolvePatternTypeForMatch = (
+  type: HirTypeExpr,
+  discriminantTypeId: TypeId,
+  ctx: CodegenContext
+): TypeId => {
+  const resolved = resolveTypeIdFromTypeExpr(type, ctx);
+  const narrowed = narrowPatternType(resolved, discriminantTypeId, ctx);
+  return typeof narrowed === "number" ? narrowed : resolved;
+};
+
+const narrowPatternType = (
+  patternTypeId: TypeId,
+  discriminantTypeId: TypeId,
+  ctx: CodegenContext
+): TypeId | undefined => {
+  const patternNominal = getNominalComponentId(patternTypeId, ctx);
+  if (typeof patternNominal !== "number") {
+    return undefined;
+  }
+
+  const discriminantDesc = ctx.typing.arena.get(discriminantTypeId);
+  if (discriminantDesc.kind === "union") {
+    const matches = discriminantDesc.members.filter((member) =>
+      nominalOwnersMatch(patternNominal, member, ctx)
+    );
+    if (matches.length === 1) {
+      return matches[0]!;
+    }
+    return undefined;
+  }
+
+  return nominalOwnersMatch(patternNominal, discriminantTypeId, ctx)
+    ? discriminantTypeId
+    : undefined;
+};
+
+const nominalOwnersMatch = (
+  patternNominal: TypeId,
+  candidateType: TypeId,
+  ctx: CodegenContext
+): boolean => {
+  const candidateNominal = getNominalComponentId(candidateType, ctx);
+  if (typeof candidateNominal !== "number") {
+    return false;
+  }
+  return (
+    getNominalOwner(candidateNominal, ctx) ===
+    getNominalOwner(patternNominal, ctx)
+  );
+};
+
+const getNominalComponentId = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): TypeId | undefined => {
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind === "nominal-object") {
+    return typeId;
+  }
+  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+    return desc.nominal;
+  }
+  return undefined;
+};
+
+const getNominalOwner = (nominalId: TypeId, ctx: CodegenContext): SymbolId => {
+  const desc = ctx.typing.arena.get(nominalId);
+  if (desc.kind !== "nominal-object") {
+    throw new Error("expected nominal type");
+  }
+  return desc.owner;
 };
 
 const wasmTypeFor = (typeId: TypeId, ctx: CodegenContext): binaryen.Type => {

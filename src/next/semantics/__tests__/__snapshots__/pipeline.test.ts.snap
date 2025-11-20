@@ -421,6 +421,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
               "file": "fib.voyd",
               "start": 11,
             },
+            "symbol": undefined,
             "typeKind": "named",
           },
         },
@@ -435,6 +436,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "file": "fib.voyd",
           "start": 19,
         },
+        "symbol": undefined,
         "typeKind": "named",
       },
       "span": {
@@ -462,6 +464,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "file": "fib.voyd",
           "start": 100,
         },
+        "symbol": undefined,
         "typeKind": "named",
       },
       "span": {

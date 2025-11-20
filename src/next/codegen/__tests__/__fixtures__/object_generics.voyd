@@ -1,0 +1,21 @@
+obj Box<T> { a: T }
+obj Box2<T> { b: T }
+
+type BoxI32 = Box<i32>
+
+fn double(box: BoxI32)
+  Box { a: box.a * 2 }
+
+type ABox = Box<i32> | Box<f64> | Box2<i32>
+
+fn get_int(box: ABox)
+  box.match
+    Box<i32>: box.a
+    Box<f64>: 2
+    Box2: box.b
+
+pub fn main()
+  let a = Box { a: 1 }
+  let b = Box<f64> { a: 1.0 }
+  let c = Box2 { b: 3 }
+  a.double().get_int() + b.get_int() + c.get_int()
