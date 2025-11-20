@@ -24,6 +24,7 @@ describe("return tracking", () => {
       symbolTable: ctx.symbolTable,
       hir,
       overloads: new Map(),
+      decls: ctx.decls,
     });
 
     const scheme = typing.table.getSymbolScheme(fnSymbol);
@@ -58,6 +59,7 @@ describe("return tracking", () => {
       symbolTable: ctx.symbolTable,
       hir,
       overloads: new Map(),
+      decls: ctx.decls,
     });
 
     const scheme = typing.table.getSymbolScheme(fnSymbol);
@@ -94,6 +96,7 @@ describe("return tracking", () => {
         symbolTable: ctx.symbolTable,
         hir,
         overloads: new Map(),
+        decls: ctx.decls,
       })
     ).toThrow(/return statement/);
   });

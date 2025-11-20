@@ -38,7 +38,8 @@ describe("binding pipeline", () => {
     expect(mainFn?.visibility).toBe("public");
     expect(mainFn?.params).toHaveLength(0);
 
-    expect(binding.scopeByNode.get(fibFn!.form.syntaxId)).toBe(fibFn!.scope);
+    expect(fibFn?.form).toBeDefined();
+    expect(binding.scopeByNode.get(fibFn!.form!.syntaxId)).toBe(fibFn!.scope);
     expect(
       binding.symbolTable.resolve("fib", binding.symbolTable.rootScope)
     ).toBe(fibFn!.symbol);
@@ -98,5 +99,9 @@ describe("binding pipeline", () => {
     expect(isIdentifierAtom(paramType) && paramType.value === "MyVec").toBe(
       true
     );
+
+    const paramSymbol = addFn?.params[0]?.symbol;
+    expect(paramSymbol).toBeDefined();
+    expect(binding.decls.getParameter(paramSymbol!)).toBe(addFn?.params[0]);
   });
 });

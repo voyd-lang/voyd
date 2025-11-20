@@ -393,10 +393,12 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
     24 => {
       "ast": 628,
       "body": 23,
+      "decl": 0,
       "id": 24,
       "kind": "function",
       "parameters": [
         {
+          "decl": 0,
           "label": undefined,
           "mutable": false,
           "pattern": {
@@ -446,6 +448,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
     29 => {
       "ast": 633,
       "body": 28,
+      "decl": 1,
       "id": 29,
       "kind": "function",
       "parameters": [],

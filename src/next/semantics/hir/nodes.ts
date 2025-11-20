@@ -1,5 +1,6 @@
 import type {
   EffectRowId,
+  FunctionDeclId,
   HirExprId,
   HirId,
   HirItemId,
@@ -9,6 +10,8 @@ import type {
   SourceSpan,
   SymbolId,
   TypeId,
+  ParameterDeclId,
+  TypeAliasDeclId,
 } from "../ids.js";
 
 export type HirVisibility = "public" | "module";
@@ -143,6 +146,7 @@ export interface HirModuleDecl extends HirItemBase {
 
 export interface HirFunction extends HirItemBase {
   kind: "function";
+  decl?: FunctionDeclId;
   symbol: SymbolId;
   typeParameters?: readonly HirTypeParameter[];
   parameters: readonly HirParameter[];
@@ -157,6 +161,7 @@ export interface HirParameter {
   pattern: HirPattern;
   span: SourceSpan;
   mutable: boolean;
+  decl?: ParameterDeclId;
   label?: string;
   type?: HirTypeExpr;
   defaultValue?: HirExprId;
@@ -203,6 +208,7 @@ export interface HirTypePattern extends HirPatternBase {
 
 export interface HirTypeAlias extends HirItemBase {
   kind: "type-alias";
+  decl?: TypeAliasDeclId;
   symbol: SymbolId;
   typeParameters?: readonly HirTypeParameter[];
   target: HirTypeExpr;

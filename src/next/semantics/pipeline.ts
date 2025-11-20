@@ -55,6 +55,7 @@ export const semanticsPipeline = (form: Form): SemanticsPipelineResult => {
     symbolTable,
     hir,
     overloads: collectOverloadOptions(binding.overloads),
+    decls: binding.decls,
   });
 
   specializeOverloadCallees(hir, typing);
