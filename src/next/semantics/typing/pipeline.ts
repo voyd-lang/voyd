@@ -222,8 +222,13 @@ const registerTypeAliases = (ctx: TypingContext): void => {
       (typeof item.decl === "number"
         ? ctx.decls.getTypeAliasById(item.decl)
         : ctx.decls.getTypeAlias(item.symbol)) ?? undefined;
-    if (typeof item.decl === "number" && (!decl || decl.symbol !== item.symbol)) {
-      throw new Error(`missing or mismatched decl for type alias symbol ${item.symbol}`);
+    if (
+      typeof item.decl === "number" &&
+      (!decl || decl.symbol !== item.symbol)
+    ) {
+      throw new Error(
+        `missing or mismatched decl for type alias symbol ${item.symbol}`
+      );
     }
     ctx.typeAliasTargets.set(item.symbol, item.target);
     ctx.typeAliasesByName.set(getSymbolName(item.symbol, ctx), item.symbol);
@@ -248,8 +253,13 @@ const registerFunctionSignatures = (ctx: TypingContext): void => {
       (typeof item.decl === "number"
         ? ctx.decls.getFunctionById(item.decl)
         : ctx.decls.getFunction(item.symbol)) ?? undefined;
-    if (typeof item.decl === "number" && (!fnDecl || fnDecl.symbol !== item.symbol)) {
-      throw new Error(`missing or mismatched decl for function symbol ${item.symbol}`);
+    if (
+      typeof item.decl === "number" &&
+      (!fnDecl || fnDecl.symbol !== item.symbol)
+    ) {
+      throw new Error(
+        `missing or mismatched decl for function symbol ${item.symbol}`
+      );
     }
 
     if (fnDecl && fnDecl.params.length !== item.parameters.length) {
@@ -265,17 +275,25 @@ const registerFunctionSignatures = (ctx: TypingContext): void => {
         (typeof param.decl === "number"
           ? ctx.decls.getParameterById(param.decl)
           : undefined) ?? ctx.decls.getParameter(param.symbol);
-      if (typeof param.decl === "number" && (!declParam || declParam.symbol !== param.symbol)) {
+      if (
+        typeof param.decl === "number" &&
+        (!declParam || declParam.symbol !== param.symbol)
+      ) {
         throw new Error(
-          `missing or mismatched parameter decl for symbol ${param.symbol} in function ${getSymbolName(
+          `missing or mismatched parameter decl for symbol ${
+            param.symbol
+          } in function ${getSymbolName(item.symbol, ctx)}`
+        );
+      }
+      if (
+        fnDecl?.params[index] &&
+        fnDecl.params[index]!.symbol !== param.symbol
+      ) {
+        throw new Error(
+          `parameter order mismatch for function ${getSymbolName(
             item.symbol,
             ctx
           )}`
-        );
-      }
-      if (fnDecl?.params[index] && fnDecl.params[index]!.symbol !== param.symbol) {
-        throw new Error(
-          `parameter order mismatch for function ${getSymbolName(item.symbol, ctx)}`
         );
       }
       return { type: resolved, label: declParam?.label ?? param.label };
@@ -540,7 +558,9 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
       const expectedLabel = param.label ?? "no label";
       const actualLabel = arg.label ?? "no label";
       throw new Error(
-        `call argument ${index + 1} label mismatch: expected ${expectedLabel}, got ${actualLabel}`
+        `call argument ${
+          index + 1
+        } label mismatch: expected ${expectedLabel}, got ${actualLabel}`
       );
     }
     ensureTypeMatches(arg.type, param.type, ctx, `call argument ${index + 1}`);
@@ -794,9 +814,7 @@ const mergeNominalObjectEntry = (
   if (entry.kind === "field") {
     const expectedType = declared.get(entry.name);
     if (!expectedType) {
-      throw new Error(
-        `nominal object does not declare field ${entry.name}`
-      );
+      throw new Error(`nominal object does not declare field ${entry.name}`);
     }
     const valueType = typeExpression(entry.value, ctx);
     ensureTypeMatches(valueType, expectedType, ctx, `field ${entry.name}`);
@@ -817,11 +835,14 @@ const mergeNominalObjectEntry = (
   spreadFields.forEach((field) => {
     const expectedType = declared.get(field.name);
     if (!expectedType) {
-      throw new Error(
-        `nominal object does not declare field ${field.name}`
-      );
+      throw new Error(`nominal object does not declare field ${field.name}`);
     }
-    ensureTypeMatches(field.type, expectedType, ctx, `spread field ${field.name}`);
+    ensureTypeMatches(
+      field.type,
+      expectedType,
+      ctx,
+      `spread field ${field.name}`
+    );
     provided.set(field.name, expectedType);
   });
 };
@@ -1239,7 +1260,9 @@ const bindTuplePatternFromExpr = (
       }
       const cached = ctx.table.getExprType(elementExprId);
       const elementType =
-        typeof cached === "number" ? cached : typeExpression(elementExprId, ctx);
+        typeof cached === "number"
+          ? cached
+          : typeExpression(elementExprId, ctx);
       recordPatternType(subPattern, elementType, ctx, mode);
     });
     return;
@@ -1334,16 +1357,8 @@ const narrowMatchPattern = (
     case "wildcard":
       return discriminantType;
     case "type": {
-      const patternType = resolveTypeExpr(
-        pattern.type,
-        ctx,
-        ctx.unknownType
-      );
-      const narrowed = narrowTypeForPattern(
-        discriminantType,
-        patternType,
-        ctx
-      );
+      const patternType = resolveTypeExpr(pattern.type, ctx, ctx.unknownType);
+      const narrowed = narrowTypeForPattern(discriminantType, patternType, ctx);
       if (typeof narrowed !== "number") {
         throw new Error(`pattern does not match discriminant for ${reason}`);
       }
@@ -1406,9 +1421,7 @@ const narrowTypeForPattern = (
     if (matches.length === 0) {
       return undefined;
     }
-    return matches.length === 1
-      ? matches[0]
-      : ctx.arena.internUnion(matches);
+    return matches.length === 1 ? matches[0] : ctx.arena.internUnion(matches);
   }
   return typeSatisfies(discriminantType, patternType, ctx)
     ? discriminantType
@@ -1712,7 +1725,9 @@ const structuralTypeSatisfies = (
   seen.add(cacheKey);
 
   return expectedFields.every((expectedField) => {
-    const candidate = actualFields.find((field) => field.name === expectedField.name);
+    const candidate = actualFields.find(
+      (field) => field.name === expectedField.name
+    );
     if (!candidate) {
       return false;
     }
@@ -1723,11 +1738,17 @@ const structuralTypeSatisfies = (
 
     if (
       ctx.typeCheckMode === "relaxed" &&
-      (candidate.type === ctx.unknownType || expectedField.type === ctx.unknownType)
+      (candidate.type === ctx.unknownType ||
+        expectedField.type === ctx.unknownType)
     ) {
       return true;
     }
 
-    return structuralTypeSatisfies(candidate.type, expectedField.type, ctx, seen);
+    return structuralTypeSatisfies(
+      candidate.type,
+      expectedField.type,
+      ctx,
+      seen
+    );
   });
 };

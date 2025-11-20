@@ -68,9 +68,7 @@ type ModuleDeclaration =
   | { kind: "type-alias"; order: number; alias: BoundTypeAlias }
   | { kind: "object"; order: number; object: BoundObject };
 
-const getModuleDeclarations = (
-  binding: BindingResult
-): ModuleDeclaration[] => {
+const getModuleDeclarations = (binding: BindingResult): ModuleDeclaration[] => {
   const entries: ModuleDeclaration[] = [
     ...binding.functions.map((fn) => ({
       kind: "function" as const,
@@ -200,10 +198,7 @@ const lowerTypeAlias = (alias: BoundTypeAlias, ctx: LowerContext): void => {
   }
 };
 
-const lowerObjectDecl = (
-  object: BoundObject,
-  ctx: LowerContext
-): void => {
+const lowerObjectDecl = (object: BoundObject, ctx: LowerContext): void => {
   const fields = object.fields.map((field) => ({
     name: field.name,
     symbol: field.symbol,
@@ -212,11 +207,16 @@ const lowerObjectDecl = (
   }));
 
   const base = lowerTypeExpr(object.baseTypeExpr, ctx);
-  let baseSymbol: SymbolId | undefined = object.baseTypeExpr && isIdentifierAtom(object.baseTypeExpr)
-    ? ctx.symbolTable.resolve(object.baseTypeExpr.value, ctx.symbolTable.rootScope)
-    : undefined;
+  let baseSymbol: SymbolId | undefined =
+    object.baseTypeExpr && isIdentifierAtom(object.baseTypeExpr)
+      ? ctx.symbolTable.resolve(
+          object.baseTypeExpr.value,
+          ctx.symbolTable.rootScope
+        )
+      : undefined;
 
-  const objectSyntax = object.form ?? object.baseTypeExpr ?? object.fields[0]?.ast;
+  const objectSyntax =
+    object.form ?? object.baseTypeExpr ?? object.fields[0]?.ast;
   if (!objectSyntax) {
     throw new Error("object declaration missing source syntax");
   }
@@ -503,7 +503,8 @@ const lowerMatch = (
       ? ctx.builder.addExpression({
           kind: "expr",
           exprKind: "identifier",
-          ast: (potentialBinder as Syntax | undefined)?.syntaxId ?? form.syntaxId,
+          ast:
+            (potentialBinder as Syntax | undefined)?.syntaxId ?? form.syntaxId,
           span: toSourceSpan((potentialBinder as Syntax | undefined) ?? form),
           symbol: binderSymbol,
         })
@@ -523,7 +524,10 @@ const lowerMatch = (
   }
 
   if (typeof binderSymbol === "number") {
-    const binderPattern: HirPattern = { kind: "identifier", symbol: binderSymbol };
+    const binderPattern: HirPattern = {
+      kind: "identifier",
+      symbol: binderSymbol,
+    };
     return ctx.builder.addExpression({
       kind: "expr",
       exprKind: "block",
@@ -532,7 +536,8 @@ const lowerMatch = (
       statements: [
         ctx.builder.addStatement({
           kind: "let",
-          ast: (potentialBinder as Syntax | undefined)?.syntaxId ?? form.syntaxId,
+          ast:
+            (potentialBinder as Syntax | undefined)?.syntaxId ?? form.syntaxId,
           span: toSourceSpan((potentialBinder as Syntax | undefined) ?? form),
           mutable: false,
           pattern: binderPattern,
@@ -668,8 +673,9 @@ const lowerNominalObjectLiteral = (
   if (typeof symbol !== "number") {
     return undefined;
   }
-  const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ??
-    {}) as { entity?: string };
+  const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ?? {}) as {
+    entity?: string;
+  };
   if (metadata.entity !== "object") {
     return undefined;
   }
@@ -699,7 +705,13 @@ const lowerCall = (
     throw new Error("call expression missing callee");
   }
 
-  const nominalLiteral = lowerNominalObjectLiteral(callee, form.rest, form, ctx, scopes);
+  const nominalLiteral = lowerNominalObjectLiteral(
+    callee,
+    form.rest,
+    form,
+    ctx,
+    scopes
+  );
   if (typeof nominalLiteral === "number") {
     return nominalLiteral;
   }
@@ -943,7 +955,8 @@ const lowerMethodCallExpr = (
   const calleeExpr = elements[0]!;
   const potentialGenerics = elements[1];
   const hasGenerics =
-    isForm(potentialGenerics) && formCallsInternal(potentialGenerics, "generics");
+    isForm(potentialGenerics) &&
+    formCallsInternal(potentialGenerics, "generics");
   const argsStartIndex = hasGenerics ? 2 : 1;
   const args = elements.slice(argsStartIndex);
   const callArgs: Expr[] = hasGenerics
@@ -1044,10 +1057,7 @@ const lowerTypeExpr = (
   throw new Error("unsupported type expression");
 };
 
-const lowerObjectTypeExpr = (
-  form: Form,
-  ctx: LowerContext
-): HirTypeExpr => {
+const lowerObjectTypeExpr = (form: Form, ctx: LowerContext): HirTypeExpr => {
   const fields = form.rest.map((entry) => lowerObjectTypeField(entry, ctx));
   return {
     typeKind: "object",
@@ -1083,10 +1093,7 @@ const lowerObjectTypeField = (
   };
 };
 
-const lowerTupleTypeExpr = (
-  form: Form,
-  ctx: LowerContext
-): HirTypeExpr => {
+const lowerTupleTypeExpr = (form: Form, ctx: LowerContext): HirTypeExpr => {
   const elements = form.rest.map((entry) => {
     const lowered = lowerTypeExpr(entry, ctx);
     if (!lowered) {
@@ -1102,10 +1109,7 @@ const lowerTupleTypeExpr = (
   };
 };
 
-const lowerUnionTypeExpr = (
-  form: Form,
-  ctx: LowerContext
-): HirTypeExpr => {
+const lowerUnionTypeExpr = (form: Form, ctx: LowerContext): HirTypeExpr => {
   const members = form.rest.map((entry) => {
     const lowered = lowerTypeExpr(entry, ctx);
     if (!lowered) {
