@@ -61,30 +61,69 @@ export const resolveTypeExpr = (
   return resolved;
 };
 
-export const resolveTypeAlias = (symbol: SymbolId, ctx: TypingContext): TypeId => {
-  const cached = ctx.typeAliasTypes.get(symbol);
-  if (typeof cached === "number") {
-    return cached;
-  }
+const makeTypeAliasInstanceKey = (
+  symbol: SymbolId,
+  typeArgs: readonly TypeId[]
+): string => `${symbol}<${typeArgs.join(",")}>`;
 
-  if (ctx.resolvingTypeAliases.has(symbol)) {
-    return ctx.unknownType;
-  }
+export const resolveTypeAlias = (
+  symbol: SymbolId,
+  ctx: TypingContext,
+  typeArgs: readonly TypeId[] = []
+): TypeId => {
+  const template =
+    ctx.typeAliasTemplates.get(symbol) ??
+    (ctx.typeAliasTargets.get(symbol)
+      ? {
+          symbol,
+          params: [],
+          target: ctx.typeAliasTargets.get(symbol)!,
+        }
+      : undefined);
 
-  const target = ctx.typeAliasTargets.get(symbol);
-  if (!target) {
+  if (!template) {
     throw new Error(
       `missing type alias target for ${getSymbolName(symbol, ctx)}`
     );
   }
 
-  ctx.resolvingTypeAliases.add(symbol);
+  if (typeArgs.length > template.params.length) {
+    throw new Error("type alias argument count mismatch");
+  }
+
+  const appliedArgs =
+    template.params.length === 0
+      ? []
+      : template.params.map(
+          (_param, index) => typeArgs[index] ?? ctx.unknownType
+        );
+  const key = makeTypeAliasInstanceKey(symbol, appliedArgs);
+  const cached = ctx.typeAliasInstances.get(key);
+  if (typeof cached === "number") {
+    return cached;
+  }
+
+  if (ctx.resolvingTypeAliases.has(key)) {
+    return ctx.unknownType;
+  }
+
+  const paramMap = new Map<SymbolId, TypeId>();
+  template.params.forEach((param, index) =>
+    paramMap.set(param.symbol, appliedArgs[index] ?? ctx.unknownType)
+  );
+
+  ctx.resolvingTypeAliases.add(key);
   try {
-    const resolved = resolveTypeExpr(target, ctx, ctx.unknownType);
-    ctx.typeAliasTypes.set(symbol, resolved);
+    const resolved = resolveTypeExpr(
+      template.target,
+      ctx,
+      ctx.unknownType,
+      paramMap
+    );
+    ctx.typeAliasInstances.set(key, resolved);
     return resolved;
   } finally {
-    ctx.resolvingTypeAliases.delete(symbol);
+    ctx.resolvingTypeAliases.delete(key);
   }
 };
 
@@ -117,12 +156,13 @@ const resolveNamedTypeExpr = (
   if (name === BASE_OBJECT_NAME) {
     return ctx.baseObjectType;
   }
-  const aliasSymbol = ctx.typeAliasesByName.get(name);
+  const aliasSymbol =
+    (typeof expr.symbol === "number" &&
+    ctx.typeAliasTemplates.has(expr.symbol)
+      ? expr.symbol
+      : undefined) ?? ctx.typeAliasesByName.get(name);
   if (aliasSymbol !== undefined) {
-    if (resolvedTypeArgs.length > 0) {
-      throw new Error("type aliases do not support type arguments yet");
-    }
-    return resolveTypeAlias(aliasSymbol, ctx);
+    return resolveTypeAlias(aliasSymbol, ctx, resolvedTypeArgs);
   }
 
   const objectSymbol =

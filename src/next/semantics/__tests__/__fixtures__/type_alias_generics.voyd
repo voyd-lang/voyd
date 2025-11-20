@@ -1,0 +1,17 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn get_int(o: Optional<i32>)
+  o.match
+    Some: o.value
+    None: 2
+
+pub fn main()
+  let a: Optional<i32> = Some { value: 10 }
+  let b: Optional<i32> = None {}
+  get_int(a) + get_int(b)

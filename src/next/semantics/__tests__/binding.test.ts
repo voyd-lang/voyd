@@ -105,4 +105,29 @@ describe("binding pipeline", () => {
     expect(paramSymbol).toBeDefined();
     expect(binding.decls.getParameter(paramSymbol!)).toBe(addFn?.params[0]);
   });
+
+  it("binds type parameters for type aliases", () => {
+    const name = "type_alias_generics.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    const optional = binding.typeAliases.find(
+      (alias) => symbolTable.getSymbol(alias.symbol).name === "Optional"
+    );
+    expect(optional).toBeDefined();
+    expect(optional?.typeParameters?.map((param) => param.name)).toEqual([
+      "T",
+    ]);
+
+    const scope =
+      optional?.form && binding.scopeByNode.get(optional.form.syntaxId);
+    expect(scope).toBeDefined();
+    if (scope && optional?.typeParameters?.[0]) {
+      const resolved = symbolTable.resolve("T", scope);
+      expect(resolved).toBe(optional.typeParameters[0].symbol);
+    }
+  });
 });
