@@ -29,6 +29,7 @@ import type {
   HirPattern,
   HirRecordTypeField,
   HirTypeExpr,
+  HirTypeParameter,
 } from "../hir/index.js";
 import type {
   BoundFunction,
@@ -144,7 +145,7 @@ const lowerFunction = (fn: BoundFunction, ctx: LowerContext): void => {
     label: param.label,
     span: toSourceSpan(param.ast ?? fallbackSyntax),
     mutable: false,
-    type: lowerTypeExpr(param.typeExpr, ctx),
+    type: lowerTypeExpr(param.typeExpr, ctx, scopes.current()),
   }));
 
   const bodyId = lowerExpr(fn.body, ctx, scopes);
@@ -156,7 +157,7 @@ const lowerFunction = (fn: BoundFunction, ctx: LowerContext): void => {
     ast: (fn.form ?? fn.body).syntaxId,
     span: toSourceSpan(fallbackSyntax),
     parameters,
-    returnType: lowerTypeExpr(fn.returnTypeExpr, ctx),
+    returnType: lowerTypeExpr(fn.returnTypeExpr, ctx, scopes.current()),
     body: bodyId,
   });
 
@@ -199,21 +200,20 @@ const lowerTypeAlias = (alias: BoundTypeAlias, ctx: LowerContext): void => {
 };
 
 const lowerObjectDecl = (object: BoundObject, ctx: LowerContext): void => {
+  const objectScope =
+    (object.form && ctx.scopeByNode.get(object.form.syntaxId)) ??
+    ctx.symbolTable.rootScope;
+
   const fields = object.fields.map((field) => ({
     name: field.name,
     symbol: field.symbol,
-    type: lowerTypeExpr(field.typeExpr, ctx),
+    type: lowerTypeExpr(field.typeExpr, ctx, objectScope),
     span: toSourceSpan(field.ast ?? object.form),
   }));
 
-  const base = lowerTypeExpr(object.baseTypeExpr, ctx);
-  let baseSymbol: SymbolId | undefined =
-    object.baseTypeExpr && isIdentifierAtom(object.baseTypeExpr)
-      ? ctx.symbolTable.resolve(
-          object.baseTypeExpr.value,
-          ctx.symbolTable.rootScope
-        )
-      : undefined;
+  const base = lowerTypeExpr(object.baseTypeExpr, ctx, objectScope);
+  const baseSymbol =
+    base && base.typeKind === "named" ? base.symbol : undefined;
 
   const objectSyntax =
     object.form ?? object.baseTypeExpr ?? object.fields[0]?.ast;
@@ -225,7 +225,7 @@ const lowerObjectDecl = (object: BoundObject, ctx: LowerContext): void => {
     kind: "object",
     symbol: object.symbol,
     visibility: object.visibility,
-    typeParameters: undefined,
+    typeParameters: lowerTypeParameters(object.typeParameters),
     ast: objectSyntax.syntaxId,
     span: toSourceSpan(objectSyntax),
     base,
@@ -242,6 +242,19 @@ const lowerObjectDecl = (object: BoundObject, ctx: LowerContext): void => {
       item: objectId,
     });
   }
+};
+
+const lowerTypeParameters = (
+  params: readonly { symbol: SymbolId; ast?: Syntax }[] | undefined
+): HirTypeParameter[] | undefined => {
+  if (!params || params.length === 0) {
+    return undefined;
+  }
+
+  return params.map((param) => ({
+    symbol: param.symbol,
+    span: toSourceSpan(param.ast),
+  }));
 };
 
 const createLowerScopeStack = (initial: ScopeId): LowerScopeStack => {
@@ -594,14 +607,14 @@ const lowerMatchPattern = (
     if (pattern.value === "_" || pattern.value === "else") {
       return { kind: "wildcard" };
     }
-    const type = lowerTypeExpr(pattern, ctx);
+    const type = lowerTypeExpr(pattern, ctx, scopes.current());
     if (!type) {
       throw new Error("match pattern missing type");
     }
     return { kind: "type", type };
   }
 
-  const type = lowerTypeExpr(pattern, ctx);
+  const type = lowerTypeExpr(pattern, ctx, scopes.current());
   if (type) {
     return { kind: "type", type };
   }
@@ -660,16 +673,26 @@ const lowerNominalObjectLiteral = (
   ctx: LowerContext,
   scopes: LowerScopeStack
 ): HirExprId | undefined => {
-  if (!isIdentifierAtom(callee) || args.length !== 1) {
+  if (!isIdentifierAtom(callee) || args.length === 0) {
     return undefined;
   }
 
-  const literalArg = args[0];
-  if (!isForm(literalArg) || !isObjectLiteralForm(literalArg)) {
+  const genericsForm = args[0];
+  const hasGenerics =
+    isForm(genericsForm) && formCallsInternal(genericsForm, "generics");
+  const literalArgIndex = hasGenerics ? 1 : 0;
+  const literalArg = args[literalArgIndex];
+  if (!literalArg || !isForm(literalArg) || !isObjectLiteralForm(literalArg)) {
     return undefined;
   }
 
-  const symbol = ctx.symbolTable.resolve(callee.value, scopes.current());
+  const typeArguments = hasGenerics
+    ? (genericsForm as Form).rest.map((entry) =>
+        lowerTypeExpr(entry, ctx, scopes.current())
+      )
+    : undefined;
+
+  const symbol = resolveTypeSymbol(callee.value, scopes.current(), ctx);
   if (typeof symbol !== "number") {
     return undefined;
   }
@@ -684,8 +707,9 @@ const lowerNominalObjectLiteral = (
     typeKind: "named",
     path: [callee.value],
     symbol,
-    ast: callee.syntaxId,
-    span: toSourceSpan(callee),
+    ast: ast.syntaxId,
+    span: toSourceSpan(ast),
+    typeArguments,
   };
 
   return lowerObjectLiteralExpr(literalArg, ctx, scopes, {
@@ -1029,36 +1053,84 @@ const lowerWhile = (
 
 const lowerTypeExpr = (
   expr: Expr | undefined,
-  ctx: LowerContext
+  ctx: LowerContext,
+  scope?: ScopeId
 ): HirTypeExpr | undefined => {
   if (!expr) return undefined;
 
   if (isIdentifierAtom(expr)) {
-    return {
-      typeKind: "named",
-      ast: expr.syntaxId,
-      span: toSourceSpan(expr),
-      path: [expr.value],
-    };
+    return lowerNamedType(expr, ctx, scope ?? ctx.symbolTable.rootScope);
   }
 
   if (isForm(expr) && isObjectLiteralForm(expr)) {
-    return lowerObjectTypeExpr(expr, ctx);
+    return lowerObjectTypeExpr(expr, ctx, scope);
   }
 
   if (isForm(expr) && (expr.calls("tuple") || expr.callsInternal("tuple"))) {
-    return lowerTupleTypeExpr(expr, ctx);
+    return lowerTupleTypeExpr(expr, ctx, scope);
   }
 
   if (isForm(expr) && expr.calls("|")) {
-    return lowerUnionTypeExpr(expr, ctx);
+    return lowerUnionTypeExpr(expr, ctx, scope);
+  }
+
+  if (isForm(expr)) {
+    const named = lowerNamedTypeForm(expr, ctx, scope ?? ctx.symbolTable.rootScope);
+    if (named) {
+      return named;
+    }
   }
 
   throw new Error("unsupported type expression");
 };
 
-const lowerObjectTypeExpr = (form: Form, ctx: LowerContext): HirTypeExpr => {
-  const fields = form.rest.map((entry) => lowerObjectTypeField(entry, ctx));
+const lowerNamedType = (
+  atom: IdentifierAtom,
+  ctx: LowerContext,
+  scope: ScopeId
+): HirTypeExpr => ({
+  typeKind: "named",
+  ast: atom.syntaxId,
+  span: toSourceSpan(atom),
+  path: [atom.value],
+  symbol: resolveTypeSymbol(atom.value, scope, ctx),
+});
+
+const lowerNamedTypeForm = (
+  form: Form,
+  ctx: LowerContext,
+  scope: ScopeId
+): HirTypeExpr | undefined => {
+  if (
+    !isIdentifierAtom(form.at(0)) ||
+    !isForm(form.at(1)) ||
+    !formCallsInternal(form.at(1) as Form, "generics")
+  ) {
+    return undefined;
+  }
+
+  const name = form.at(0) as IdentifierAtom;
+  const genericsForm = form.at(1) as Form;
+  const typeArguments = genericsForm.rest.map((entry) =>
+    lowerTypeExpr(entry, ctx, scope)
+  );
+
+  return {
+    typeKind: "named",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    path: [name.value],
+    symbol: resolveTypeSymbol(name.value, scope, ctx),
+    typeArguments,
+  };
+};
+
+const lowerObjectTypeExpr = (
+  form: Form,
+  ctx: LowerContext,
+  scope?: ScopeId
+): HirTypeExpr => {
+  const fields = form.rest.map((entry) => lowerObjectTypeField(entry, ctx, scope));
   return {
     typeKind: "object",
     ast: form.syntaxId,
@@ -1069,7 +1141,8 @@ const lowerObjectTypeExpr = (form: Form, ctx: LowerContext): HirTypeExpr => {
 
 const lowerObjectTypeField = (
   entry: Expr | undefined,
-  ctx: LowerContext
+  ctx: LowerContext,
+  scope?: ScopeId
 ): HirRecordTypeField => {
   if (!isForm(entry) || !entry.calls(":")) {
     throw new Error("object type fields must be labeled");
@@ -1082,7 +1155,7 @@ const lowerObjectTypeField = (
   if (!typeExpr) {
     throw new Error("object type field missing type expression");
   }
-  const type = lowerTypeExpr(typeExpr, ctx);
+  const type = lowerTypeExpr(typeExpr, ctx, scope);
   if (!type) {
     throw new Error("object type field missing resolved type expression");
   }
@@ -1093,9 +1166,13 @@ const lowerObjectTypeField = (
   };
 };
 
-const lowerTupleTypeExpr = (form: Form, ctx: LowerContext): HirTypeExpr => {
+const lowerTupleTypeExpr = (
+  form: Form,
+  ctx: LowerContext,
+  scope?: ScopeId
+): HirTypeExpr => {
   const elements = form.rest.map((entry) => {
-    const lowered = lowerTypeExpr(entry, ctx);
+    const lowered = lowerTypeExpr(entry, ctx, scope);
     if (!lowered) {
       throw new Error("tuple type element missing resolved type expression");
     }
@@ -1109,9 +1186,13 @@ const lowerTupleTypeExpr = (form: Form, ctx: LowerContext): HirTypeExpr => {
   };
 };
 
-const lowerUnionTypeExpr = (form: Form, ctx: LowerContext): HirTypeExpr => {
+const lowerUnionTypeExpr = (
+  form: Form,
+  ctx: LowerContext,
+  scope?: ScopeId
+): HirTypeExpr => {
   const members = form.rest.map((entry) => {
-    const lowered = lowerTypeExpr(entry, ctx);
+    const lowered = lowerTypeExpr(entry, ctx, scope);
     if (!lowered) {
       throw new Error("union type member missing resolved type expression");
     }
@@ -1158,6 +1239,22 @@ const resolveSymbol = (
   }
 
   return resolveIntrinsicSymbol(name, ctx);
+};
+
+const resolveTypeSymbol = (
+  name: string,
+  scope: ScopeId,
+  ctx: LowerContext
+): SymbolId | undefined => {
+  const resolved = ctx.symbolTable.resolve(name, scope);
+  if (typeof resolved !== "number") {
+    return undefined;
+  }
+  const record = ctx.symbolTable.getSymbol(resolved);
+  if (record.kind === "type" || record.kind === "type-parameter") {
+    return resolved;
+  }
+  return undefined;
 };
 
 const resolveIntrinsicSymbol = (name: string, ctx: LowerContext): SymbolId => {

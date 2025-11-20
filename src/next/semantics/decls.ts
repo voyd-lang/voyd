@@ -23,6 +23,14 @@ export type ParameterDeclInput = Omit<ParameterDecl, "id"> & {
   id?: ParameterDeclId;
 };
 
+export interface TypeParameterDecl {
+  name: string;
+  symbol: SymbolId;
+  ast?: Syntax;
+}
+
+export type TypeParameterDeclInput = TypeParameterDecl;
+
 export interface FunctionDecl {
   id: FunctionDeclId;
   name: string;
@@ -71,6 +79,7 @@ export interface ObjectDecl {
   symbol: SymbolId;
   baseTypeExpr?: Expr;
   fields: ObjectFieldDecl[];
+  typeParameters?: TypeParameterDecl[];
   moduleIndex: number;
 }
 

@@ -9,6 +9,7 @@ import {
   isIdentifierAtom,
   isIntAtom,
   isStringAtom,
+  formCallsInternal,
 } from "../../parser/index.js";
 import type { SymbolRecord, SymbolTable } from "../binder/index.js";
 import type {
@@ -35,6 +36,7 @@ import {
   type TypeAliasDecl,
   type ObjectDecl,
   type ObjectFieldDecl,
+  type TypeParameterDecl,
 } from "../decls.js";
 
 export interface BindingInputs {
@@ -84,9 +86,10 @@ interface ParsedObjectDecl {
   form: Form;
   visibility: HirVisibility;
   name: IdentifierAtom;
-  base?: IdentifierAtom;
+  base?: Expr;
   body: Form;
   fields: readonly ParsedObjectField[];
+  typeParameters: readonly IdentifierAtom[];
 }
 
 interface ParsedObjectField {
@@ -331,37 +334,67 @@ const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {
     throw new Error("obj declaration requires a field list");
   }
 
-  const { name, base } = parseObjectHead(head);
+  const { name, base, typeParameters } = parseObjectHead(head);
   const fields = parseObjectFields(body);
 
-  return { form, visibility, name, base, body, fields };
+  return { form, visibility, name, base, body, fields, typeParameters };
 };
 
 const parseObjectHead = (
   expr: Expr | undefined
-): { name: IdentifierAtom; base?: IdentifierAtom } => {
+): {
+  name: IdentifierAtom;
+  base?: Expr;
+  typeParameters: readonly IdentifierAtom[];
+} => {
   if (!expr) {
     throw new Error("obj declaration missing name");
   }
 
   if (isIdentifierAtom(expr)) {
-    return { name: expr };
+    return { name: expr, typeParameters: [] };
   }
 
   if (isForm(expr) && expr.calls(":")) {
     const nameExpr = expr.at(1);
     const baseExpr = expr.at(2);
-    if (!isIdentifierAtom(nameExpr)) {
-      throw new Error("obj name must be an identifier");
-    }
-    if (!isIdentifierAtom(baseExpr)) {
-      throw new Error("obj base must be an identifier");
-    }
-    return { name: nameExpr, base: baseExpr };
+    const { name, typeParameters } = parseNamedTypeHead(nameExpr);
+    return { name, base: baseExpr, typeParameters };
+  }
+
+  if (isForm(expr)) {
+    return parseNamedTypeHead(expr);
   }
 
   throw new Error("invalid obj declaration head");
 };
+
+const parseNamedTypeHead = (
+  expr: Expr | undefined
+): { name: IdentifierAtom; typeParameters: readonly IdentifierAtom[] } => {
+  if (isIdentifierAtom(expr)) {
+    return { name: expr, typeParameters: [] };
+  }
+  if (
+    isForm(expr) &&
+    isIdentifierAtom(expr.at(0)) &&
+    isForm(expr.at(1)) &&
+    formCallsInternal(expr.at(1)!, "generics")
+  ) {
+    const name = expr.at(0) as IdentifierAtom;
+    const generics = expr.at(1) as Form;
+    return { name, typeParameters: parseTypeParameters(generics) };
+  }
+  throw new Error("invalid named type head");
+};
+
+const parseTypeParameters = (form: Form): IdentifierAtom[] =>
+  form.rest.map((entry) => {
+    if (!isIdentifierAtom(entry)) {
+      throw new Error("type parameters must be identifiers");
+    }
+    return entry;
+  });
 
 const parseObjectFields = (body: Form): ParsedObjectField[] =>
   body.rest.map((entry) => {
@@ -581,8 +614,23 @@ const bindObjectDecl = (
   });
   ctx.scopeByNode.set(decl.form.syntaxId, objectScope);
 
+  const typeParameters: TypeParameterDecl[] = [];
   const fields: ObjectFieldDecl[] = [];
   tracker.enterScope(objectScope, () => {
+    decl.typeParameters.forEach((param) => {
+      rememberSyntax(param, ctx);
+      const paramSymbol = ctx.symbolTable.declare({
+        name: param.value,
+        kind: "type-parameter",
+        declaredAt: param.syntaxId,
+      });
+      typeParameters.push({
+        name: param.value,
+        symbol: paramSymbol,
+        ast: param,
+      });
+    });
+
     decl.fields.forEach((field) => {
       rememberSyntax(field.ast, ctx);
       rememberSyntax(field.name, ctx);
@@ -611,6 +659,7 @@ const bindObjectDecl = (
     symbol,
     baseTypeExpr: decl.base,
     fields,
+    typeParameters,
     moduleIndex: ctx.nextModuleIndex++,
   });
 };
