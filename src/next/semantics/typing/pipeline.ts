@@ -12,6 +12,7 @@ import type {
   HirLiteralExpr,
   HirObjectLiteralEntry,
   HirObjectLiteralExpr,
+  HirObjectDecl,
   HirObjectTypeExpr,
   HirOverloadSetExpr,
   HirPattern,
@@ -76,6 +77,11 @@ interface TypingContext {
   callTargets: Map<HirExprId, SymbolId>;
   primitiveCache: Map<string, TypeId>;
   intrinsicTypes: Map<string, TypeId>;
+  objects: Map<SymbolId, ObjectTypeInfo>;
+  objectsByName: Map<string, SymbolId>;
+  objectsByNominal: Map<TypeId, ObjectTypeInfo>;
+  objectDecls: Map<SymbolId, HirObjectDecl>;
+  resolvingObjects: Set<SymbolId>;
   boolType: TypeId;
   voidType: TypeId;
   unknownType: TypeId;
@@ -86,6 +92,14 @@ interface TypingContext {
   typeAliasTypes: Map<SymbolId, TypeId>;
   typeAliasesByName: Map<string, SymbolId>;
   resolvingTypeAliases: Set<SymbolId>;
+}
+
+interface ObjectTypeInfo {
+  nominal: TypeId;
+  structural: TypeId;
+  type: TypeId;
+  fields: readonly { name: string; type: TypeId }[];
+  baseNominal?: TypeId;
 }
 
 const DEFAULT_EFFECT_ROW: EffectRowId = 0;
@@ -107,6 +121,11 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     callTargets: new Map(),
     primitiveCache: new Map(),
     intrinsicTypes: new Map(),
+    objects: new Map(),
+    objectsByName: new Map(),
+    objectsByNominal: new Map(),
+    objectDecls: new Map(),
+    resolvingObjects: new Set(),
     boolType: 0,
     voidType: 0,
     unknownType: 0,
@@ -121,6 +140,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
 
   seedPrimitiveTypes(ctx);
   registerTypeAliases(ctx);
+  registerObjectDecls(ctx);
   registerFunctionSignatures(ctx);
 
   runInferencePass(ctx);
@@ -158,6 +178,14 @@ const registerTypeAliases = (ctx: TypingContext): void => {
     }
     ctx.typeAliasTargets.set(item.symbol, item.target);
     ctx.typeAliasesByName.set(getSymbolName(item.symbol, ctx), item.symbol);
+  }
+};
+
+const registerObjectDecls = (ctx: TypingContext): void => {
+  for (const item of ctx.hir.items.values()) {
+    if (item.kind !== "object") continue;
+    ctx.objectDecls.set(item.symbol, item);
+    ctx.objectsByName.set(getSymbolName(item.symbol, ctx), item.symbol);
   }
 };
 
@@ -564,8 +592,8 @@ const typeObjectLiteralExpr = (
   expr: HirObjectLiteralExpr,
   ctx: TypingContext
 ): TypeId => {
-  if (expr.literalKind !== "structural") {
-    throw new Error("nominal object literals are not supported yet");
+  if (expr.literalKind === "nominal") {
+    return typeNominalObjectLiteral(expr, ctx);
   }
 
   const fields = new Map<string, TypeId>();
@@ -599,6 +627,83 @@ const mergeObjectLiteralEntry = (
     throw new Error("object spread requires a structural object");
   }
   spreadFields.forEach((field) => fields.set(field.name, field.type));
+};
+
+const typeNominalObjectLiteral = (
+  expr: HirObjectLiteralExpr,
+  ctx: TypingContext
+): TypeId => {
+  const targetSymbol =
+    expr.targetSymbol ??
+    (expr.target?.typeKind === "named"
+      ? ctx.objectsByName.get(expr.target.path[0]!)
+      : undefined);
+  if (typeof targetSymbol !== "number") {
+    throw new Error("nominal object literal missing target type");
+  }
+
+  const objectInfo = ensureObjectType(targetSymbol, ctx);
+  if (!objectInfo) {
+    throw new Error("missing object type information for nominal literal");
+  }
+
+  const declaredFields = new Map<string, TypeId>(
+    objectInfo.fields.map((field) => [field.name, field.type])
+  );
+  const provided = new Map<string, TypeId>();
+
+  expr.entries.forEach((entry) =>
+    mergeNominalObjectEntry(entry, declaredFields, provided, ctx)
+  );
+
+  declaredFields.forEach((_, name) => {
+    if (!provided.has(name)) {
+      throw new Error(`missing initializer for field ${name}`);
+    }
+  });
+
+  return objectInfo.type;
+};
+
+const mergeNominalObjectEntry = (
+  entry: HirObjectLiteralEntry,
+  declared: Map<string, TypeId>,
+  provided: Map<string, TypeId>,
+  ctx: TypingContext
+): void => {
+  if (entry.kind === "field") {
+    const expectedType = declared.get(entry.name);
+    if (!expectedType) {
+      throw new Error(
+        `nominal object does not declare field ${entry.name}`
+      );
+    }
+    const valueType = typeExpression(entry.value, ctx);
+    ensureTypeMatches(valueType, expectedType, ctx, `field ${entry.name}`);
+    provided.set(entry.name, expectedType);
+    return;
+  }
+
+  const spreadType = typeExpression(entry.value, ctx);
+  if (spreadType === ctx.unknownType) {
+    return;
+  }
+
+  const spreadFields = getStructuralFields(spreadType, ctx);
+  if (!spreadFields) {
+    throw new Error("object spread requires a structural object");
+  }
+
+  spreadFields.forEach((field) => {
+    const expectedType = declared.get(field.name);
+    if (!expectedType) {
+      throw new Error(
+        `nominal object does not declare field ${field.name}`
+      );
+    }
+    ensureTypeMatches(field.type, expectedType, ctx, `spread field ${field.name}`);
+    provided.set(field.name, expectedType);
+  });
 };
 
 const typeFieldAccessExpr = (
@@ -917,6 +1022,12 @@ const resolveNamedTypeExpr = (
     return resolveTypeAlias(aliasSymbol, ctx);
   }
 
+  const objectSymbol = ctx.objectsByName.get(name);
+  if (objectSymbol !== undefined) {
+    const info = ensureObjectType(objectSymbol, ctx);
+    return info?.type ?? ctx.unknownType;
+  }
+
   const resolved = ctx.primitiveCache.get(name);
   if (typeof resolved === "number") {
     return resolved;
@@ -1043,6 +1154,15 @@ const ensureTypeMatches = (
     return;
   }
 
+  const expectedNominal = getNominalComponent(expected, ctx);
+  if (expectedNominal) {
+    const actualNominal = getNominalComponent(actual, ctx);
+    if (actualNominal && nominalExtends(actualNominal, expectedNominal, ctx)) {
+      return;
+    }
+    throw new Error(`type mismatch for ${reason}`);
+  }
+
   if (structuralTypeSatisfies(actual, expected, ctx)) {
     return;
   }
@@ -1080,6 +1200,128 @@ const resolveTypeAlias = (symbol: SymbolId, ctx: TypingContext): TypeId => {
 const getSymbolName = (symbol: SymbolId, ctx: TypingContext): string =>
   ctx.symbolTable.getSymbol(symbol).name;
 
+const ensureObjectType = (
+  symbol: SymbolId,
+  ctx: TypingContext
+): ObjectTypeInfo | undefined => {
+  const cached = ctx.objects.get(symbol);
+  if (cached) {
+    return cached;
+  }
+
+  if (ctx.resolvingObjects.has(symbol)) {
+    return undefined;
+  }
+
+  const decl = ctx.objectDecls.get(symbol);
+  if (!decl) {
+    return undefined;
+  }
+
+  ctx.resolvingObjects.add(symbol);
+  try {
+    const baseType = resolveTypeExpr(decl.base, ctx, ctx.unknownType);
+    const baseFields = getStructuralFields(baseType, ctx) ?? [];
+    const baseNominal = getNominalComponent(baseType, ctx);
+
+    const ownFields = decl.fields.map((field) => ({
+      name: field.name,
+      type: resolveTypeExpr(field.type, ctx, ctx.unknownType),
+    }));
+
+    const fields = mergeDeclaredFields(baseFields, ownFields);
+    const structural = ctx.arena.internStructuralObject({ fields });
+    const nominal = ctx.arena.internNominalObject({
+      owner: symbol,
+      name: getSymbolName(symbol, ctx),
+      typeArgs: [],
+    });
+    const type = ctx.arena.internIntersection({
+      nominal,
+      structural,
+    });
+    const info: ObjectTypeInfo = {
+      nominal,
+      structural,
+      type,
+      fields,
+      baseNominal,
+    };
+
+    ctx.objects.set(symbol, info);
+    ctx.objectsByNominal.set(nominal, info);
+    ctx.valueTypes.set(symbol, type);
+    return info;
+  } finally {
+    ctx.resolvingObjects.delete(symbol);
+  }
+};
+
+const mergeDeclaredFields = (
+  inherited: readonly { name: string; type: TypeId }[],
+  own: readonly { name: string; type: TypeId }[]
+): { name: string; type: TypeId }[] => {
+  const fields = new Map<string, TypeId>();
+  inherited.forEach((field) => fields.set(field.name, field.type));
+  own.forEach((field) => fields.set(field.name, field.type));
+  return Array.from(fields.entries()).map(([name, type]) => ({ name, type }));
+};
+
+const getObjectInfoForNominal = (
+  nominal: TypeId,
+  ctx: TypingContext
+): ObjectTypeInfo | undefined => {
+  const cached = ctx.objectsByNominal.get(nominal);
+  if (cached) {
+    return cached;
+  }
+  const desc = ctx.arena.get(nominal);
+  if (desc.kind !== "nominal-object") {
+    return undefined;
+  }
+  return ensureObjectType(desc.owner, ctx);
+};
+
+const getNominalComponent = (
+  type: TypeId,
+  ctx: TypingContext
+): TypeId | undefined => {
+  if (type === ctx.unknownType) {
+    return undefined;
+  }
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "nominal-object":
+      return type;
+    case "intersection":
+      if (typeof desc.nominal === "number") {
+        return desc.nominal;
+      }
+      if (typeof desc.structural === "number") {
+        return getNominalComponent(desc.structural, ctx);
+      }
+      return undefined;
+    default:
+      return undefined;
+  }
+};
+
+const nominalExtends = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext
+): boolean => {
+  if (actual === expected) {
+    return true;
+  }
+  const info = getObjectInfoForNominal(actual, ctx);
+  if (info?.baseNominal) {
+    return nominalExtends(info.baseNominal, expected, ctx);
+  }
+  return false;
+};
+
 const getStructuralFields = (
   type: TypeId,
   ctx: TypingContext
@@ -1093,8 +1335,25 @@ const getStructuralFields = (
     return desc.fields;
   }
 
-  if (desc.kind === "intersection" && typeof desc.structural === "number") {
-    return getStructuralFields(desc.structural, ctx);
+  if (desc.kind === "nominal-object") {
+    const info = ensureObjectType(desc.owner, ctx);
+    if (info) {
+      return getStructuralFields(info.structural, ctx);
+    }
+    return undefined;
+  }
+
+  if (desc.kind === "intersection") {
+    const info =
+      typeof desc.nominal === "number"
+        ? getObjectInfoForNominal(desc.nominal, ctx)
+        : undefined;
+    if (info) {
+      return getStructuralFields(info.structural, ctx);
+    }
+    if (typeof desc.structural === "number") {
+      return getStructuralFields(desc.structural, ctx);
+    }
   }
 
   return undefined;

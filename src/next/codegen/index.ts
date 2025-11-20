@@ -234,11 +234,11 @@ const emitExports = (ctx: CodegenContext): void => {
   ctx.hir.module.exports.forEach((entry) => {
     const symbol = ctx.itemsToSymbols.get(entry.item);
     if (typeof symbol !== "number") {
-      throw new Error("codegen cannot export non-function items yet");
+      return;
     }
     const meta = ctx.functions.get(symbol);
     if (!meta) {
-      throw new Error(`codegen missing metadata for export symbol ${symbol}`);
+      return;
     }
     const exportName =
       entry.alias ?? ctx.symbolTable.getSymbol(entry.symbol).name;
@@ -565,10 +565,6 @@ const compileObjectLiteralExpr = (
   ctx: CodegenContext,
   fnCtx: FunctionContext
 ): binaryen.ExpressionRef => {
-  if (expr.literalKind !== "structural") {
-    throw new Error("nominal object literals are not supported yet");
-  }
-
   const typeId = getRequiredExprType(expr.id, ctx);
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo) {

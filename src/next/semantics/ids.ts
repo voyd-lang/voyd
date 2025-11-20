@@ -10,6 +10,7 @@ export type OverloadSetId = number;
 export type FunctionDeclId = number;
 export type ParameterDeclId = number;
 export type TypeAliasDeclId = number;
+export type ObjectDeclId = number;
 
 export type HirId = number;
 export type HirItemId = HirId;

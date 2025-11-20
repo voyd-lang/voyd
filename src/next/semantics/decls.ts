@@ -7,6 +7,7 @@ import type {
   ScopeId,
   SymbolId,
   TypeAliasDeclId,
+  ObjectDeclId,
 } from "./ids.js";
 
 export interface ParameterDecl {
@@ -55,13 +56,35 @@ export type TypeAliasDeclInput = Omit<TypeAliasDecl, "id"> & {
   id?: TypeAliasDeclId;
 };
 
+export interface ObjectFieldDecl {
+  name: string;
+  symbol: SymbolId;
+  ast?: Syntax;
+  typeExpr: Expr;
+}
+
+export interface ObjectDecl {
+  id: ObjectDeclId;
+  name: string;
+  form?: Form;
+  visibility: HirVisibility;
+  symbol: SymbolId;
+  baseTypeExpr?: Expr;
+  fields: ObjectFieldDecl[];
+  moduleIndex: number;
+}
+
+export type ObjectDeclInput = Omit<ObjectDecl, "id"> & { id?: ObjectDeclId };
+
 export class DeclTable {
   functions: FunctionDecl[] = [];
   typeAliases: TypeAliasDecl[] = [];
+  objects: ObjectDecl[] = [];
 
   private nextFunctionId: FunctionDeclId = 0;
   private nextParamId: ParameterDeclId = 0;
   private nextAliasId: TypeAliasDeclId = 0;
+  private nextObjectId: ObjectDeclId = 0;
 
   private functionsBySymbol = new Map<SymbolId, FunctionDecl>();
   private functionsById = new Map<FunctionDeclId, FunctionDecl>();
@@ -69,6 +92,8 @@ export class DeclTable {
   private parametersById = new Map<ParameterDeclId, ParameterDecl>();
   private typeAliasesBySymbol = new Map<SymbolId, TypeAliasDecl>();
   private typeAliasesById = new Map<TypeAliasDeclId, TypeAliasDecl>();
+  private objectsBySymbol = new Map<SymbolId, ObjectDecl>();
+  private objectsById = new Map<ObjectDeclId, ObjectDecl>();
 
   private bumpId(next: number, used: number): number {
     return Math.max(next, used + 1);
@@ -111,6 +136,18 @@ export class DeclTable {
     return withId;
   }
 
+  registerObject(object: ObjectDeclInput): ObjectDecl {
+    const withId: ObjectDecl = {
+      ...object,
+      id: object.id ?? this.nextObjectId++,
+    };
+    this.nextObjectId = this.bumpId(this.nextObjectId, withId.id);
+    this.objects.push(withId);
+    this.objectsBySymbol.set(withId.symbol, withId);
+    this.objectsById.set(withId.id, withId);
+    return withId;
+  }
+
   getFunction(symbol: SymbolId): FunctionDecl | undefined {
     return this.functionsBySymbol.get(symbol);
   }
@@ -133,5 +170,13 @@ export class DeclTable {
 
   getTypeAliasById(id: TypeAliasDeclId): TypeAliasDecl | undefined {
     return this.typeAliasesById.get(id);
+  }
+
+  getObject(symbol: SymbolId): ObjectDecl | undefined {
+    return this.objectsBySymbol.get(symbol);
+  }
+
+  getObjectById(id: ObjectDeclId): ObjectDecl | undefined {
+    return this.objectsById.get(id);
   }
 }
