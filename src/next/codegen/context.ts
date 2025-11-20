@@ -100,12 +100,16 @@ export interface CompileCallOptions {
   expectedResultTypeId?: TypeId;
 }
 
+export interface ExpressionCompilerParams {
+  exprId: HirExprId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  tailPosition?: boolean;
+  expectedResultTypeId?: TypeId;
+}
+
 export type ExpressionCompiler = (
-  exprId: HirExprId,
-  ctx: CodegenContext,
-  fnCtx: FunctionContext,
-  tailPosition?: boolean,
-  expectedResultTypeId?: TypeId
+  params: ExpressionCompilerParams
 ) => CompiledExpression;
 
 export type {

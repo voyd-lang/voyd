@@ -51,7 +51,7 @@ export const compileObjectLiteralExpr = (
       ops.push(
         ctx.mod.local.set(
           binding.index,
-          compileExpr(entry.value, ctx, fnCtx).expr
+          compileExpr({ exprId: entry.value, ctx, fnCtx }).expr
         )
       );
       initialized.add(entry.name);
@@ -68,7 +68,7 @@ export const compileObjectLiteralExpr = (
     ops.push(
       ctx.mod.local.set(
         spreadTemp.index,
-        compileExpr(entry.value, ctx, fnCtx).expr
+        compileExpr({ exprId: entry.value, ctx, fnCtx }).expr
       )
     );
 
@@ -169,7 +169,10 @@ export const compileTupleExpr = (
     const temp = allocateTempLocal(field.wasmType, fnCtx);
     fieldTemps.set(field.name, temp);
     ops.push(
-      ctx.mod.local.set(temp.index, compileExpr(elementId, ctx, fnCtx).expr)
+      ctx.mod.local.set(
+        temp.index,
+        compileExpr({ exprId: elementId, ctx, fnCtx }).expr
+      )
     );
   });
 
@@ -226,13 +229,18 @@ export const compileFieldAccessExpr = (
   const pointerTemp = allocateTempLocal(structInfo.interfaceType, fnCtx);
   const storePointer = ctx.mod.local.set(
     pointerTemp.index,
-    compileExpr(expr.target, ctx, fnCtx).expr
+    compileExpr({ exprId: expr.target, ctx, fnCtx }).expr
   );
   const pointer = ctx.mod.local.get(
     pointerTemp.index,
     structInfo.interfaceType
   );
-  const value = loadStructuralField(structInfo, field, pointer, ctx);
+  const value = loadStructuralField({
+    structInfo,
+    field,
+    pointer,
+    ctx,
+  });
   return {
     expr: ctx.mod.block(null, [storePointer, value], field.wasmType),
     usedReturnCall: false,

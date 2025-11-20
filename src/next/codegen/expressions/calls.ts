@@ -55,9 +55,16 @@ export const compileCallExpr = (
   };
 
   if (intrinsicMetadata.intrinsic) {
-    const args = expr.args.map((arg) => compileExpr(arg.expr, ctx, fnCtx).expr);
+    const args = expr.args.map(
+      (arg) => compileExpr({ exprId: arg.expr, ctx, fnCtx }).expr
+    );
     return {
-      expr: compileIntrinsicCall(symbolRecord.name, expr, args, ctx),
+      expr: compileIntrinsicCall({
+        name: symbolRecord.name,
+        call: expr,
+        args,
+        ctx,
+      }),
       usedReturnCall: false,
     };
   }
@@ -118,13 +125,13 @@ const compileCallArguments = (
   return call.args.map((arg, index) => {
     const expectedTypeId = meta.paramTypeIds[index];
     const actualTypeId = getRequiredExprType(arg.expr, ctx);
-    const value = compileExpr(arg.expr, ctx, fnCtx);
-    return coerceValueToType(
-      value.expr,
-      actualTypeId,
-      expectedTypeId,
+    const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
+    return coerceValueToType({
+      value: value.expr,
+      actualType: actualTypeId,
+      targetType: expectedTypeId,
       ctx,
-      fnCtx
-    );
+      fnCtx,
+    });
   });
 };

@@ -32,7 +32,13 @@ export const compileIfExpr = (
   const resultType = getExprBinaryenType(expr.id, ctx);
   let fallback =
     typeof expr.defaultBranch === "number"
-      ? compileExpr(expr.defaultBranch, ctx, fnCtx, tailPosition, expectedResultTypeId)
+      ? compileExpr({
+          exprId: expr.defaultBranch,
+          ctx,
+          fnCtx,
+          tailPosition,
+          expectedResultTypeId,
+        })
       : undefined;
 
   if (!fallback && resultType !== binaryen.none) {
@@ -45,14 +51,18 @@ export const compileIfExpr = (
 
   for (let index = expr.branches.length - 1; index >= 0; index -= 1) {
     const branch = expr.branches[index]!;
-    const condition = compileExpr(branch.condition, ctx, fnCtx).expr;
-    const value = compileExpr(
-      branch.value,
+    const condition = compileExpr({
+      exprId: branch.condition,
+      ctx,
+      fnCtx,
+    }).expr;
+    const value = compileExpr({
+      exprId: branch.value,
       ctx,
       fnCtx,
       tailPosition,
-      expectedResultTypeId
-    );
+      expectedResultTypeId,
+    });
     fallback = {
       expr: ctx.mod.if(condition, value.expr, fallback.expr),
       usedReturnCall: value.usedReturnCall && fallback.usedReturnCall,
@@ -73,7 +83,11 @@ export const compileMatchExpr = (
   const discriminantTypeId = getRequiredExprType(expr.discriminant, ctx);
   const discriminantType = getExprBinaryenType(expr.discriminant, ctx);
   const discriminantTemp = allocateTempLocal(discriminantType, fnCtx);
-  const discriminantValue = compileExpr(expr.discriminant, ctx, fnCtx).expr;
+  const discriminantValue = compileExpr({
+    exprId: expr.discriminant,
+    ctx,
+    fnCtx,
+  }).expr;
 
   const initDiscriminant = ctx.mod.local.set(
     discriminantTemp.index,
@@ -83,13 +97,13 @@ export const compileMatchExpr = (
   let chain: CompiledExpression | undefined;
   for (let index = expr.arms.length - 1; index >= 0; index -= 1) {
     const arm = expr.arms[index]!;
-    const armValue = compileExpr(
-      arm.value,
+    const armValue = compileExpr({
+      exprId: arm.value,
       ctx,
       fnCtx,
       tailPosition,
-      expectedResultTypeId
-    );
+      expectedResultTypeId,
+    });
 
     if (arm.pattern.kind === "wildcard") {
       chain = armValue;
@@ -175,11 +189,13 @@ export const compileWhileExpr = (
   const breakLabel = `${loopLabel}_break`;
 
   const conditionCheck = ctx.mod.if(
-    ctx.mod.i32.eqz(compileExpr(expr.condition, ctx, fnCtx).expr),
+    ctx.mod.i32.eqz(
+      compileExpr({ exprId: expr.condition, ctx, fnCtx }).expr
+    ),
     ctx.mod.br(breakLabel)
   );
 
-  const body = compileExpr(expr.body, ctx, fnCtx).expr;
+  const body = compileExpr({ exprId: expr.body, ctx, fnCtx }).expr;
   const loopBody = ctx.mod.block(null, [
     conditionCheck,
     body,

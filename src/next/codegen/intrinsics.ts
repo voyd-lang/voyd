@@ -9,12 +9,25 @@ import { getRequiredExprType } from "./types.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 
-export const compileIntrinsicCall = (
-  name: string,
-  call: HirCallExpr,
-  args: readonly binaryen.ExpressionRef[],
-  ctx: CodegenContext
-): binaryen.ExpressionRef => {
+interface CompileIntrinsicCallParams {
+  name: string;
+  call: HirCallExpr;
+  args: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+}
+
+interface EmitNumericIntrinsicParams {
+  kind: NumericKind;
+  args: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+}
+
+export const compileIntrinsicCall = ({
+  name,
+  call,
+  args,
+  ctx,
+}: CompileIntrinsicCallParams): binaryen.ExpressionRef => {
   switch (name) {
     case "+":
     case "-":
@@ -25,7 +38,7 @@ export const compileIntrinsicCall = (
         call.args.map((a) => a.expr),
         ctx
       );
-      return emitArithmeticIntrinsic(name, operandKind, args, ctx);
+      return emitArithmeticIntrinsic({ op: name, kind: operandKind, args, ctx });
     }
     case "<":
     case "<=":
@@ -36,7 +49,7 @@ export const compileIntrinsicCall = (
         call.args.map((a) => a.expr),
         ctx
       );
-      return emitComparisonIntrinsic(name, operandKind, args, ctx);
+      return emitComparisonIntrinsic({ op: name, kind: operandKind, args, ctx });
     }
     case "==":
     case "!=": {
@@ -45,19 +58,19 @@ export const compileIntrinsicCall = (
         call.args.map((a) => a.expr),
         ctx
       );
-      return emitEqualityIntrinsic(name, operandKind, args, ctx);
+      return emitEqualityIntrinsic({ op: name, kind: operandKind, args, ctx });
     }
     default:
       throw new Error(`unsupported intrinsic ${name}`);
   }
 };
 
-const emitArithmeticIntrinsic = (
-  op: "+" | "-" | "*" | "/",
-  kind: NumericKind,
-  args: readonly binaryen.ExpressionRef[],
-  ctx: CodegenContext
-): binaryen.ExpressionRef => {
+const emitArithmeticIntrinsic = ({
+  op,
+  kind,
+  args,
+  ctx,
+}: { op: "+" | "-" | "*" | "/"; } & EmitNumericIntrinsicParams): binaryen.ExpressionRef => {
   const left = args[0]!;
   const right = args[1]!;
   switch (kind) {
@@ -113,12 +126,12 @@ const emitArithmeticIntrinsic = (
   throw new Error(`unsupported ${op} intrinsic for numeric kind ${kind}`);
 };
 
-const emitComparisonIntrinsic = (
-  op: "<" | "<=" | ">" | ">=",
-  kind: NumericKind,
-  args: readonly binaryen.ExpressionRef[],
-  ctx: CodegenContext
-): binaryen.ExpressionRef => {
+const emitComparisonIntrinsic = ({
+  op,
+  kind,
+  args,
+  ctx,
+}: { op: "<" | "<=" | ">" | ">="; } & EmitNumericIntrinsicParams): binaryen.ExpressionRef => {
   const left = args[0]!;
   const right = args[1]!;
   switch (kind) {
@@ -174,12 +187,12 @@ const emitComparisonIntrinsic = (
   throw new Error(`unsupported ${op} comparison for numeric kind ${kind}`);
 };
 
-const emitEqualityIntrinsic = (
-  op: "==" | "!=",
-  kind: NumericKind,
-  args: readonly binaryen.ExpressionRef[],
-  ctx: CodegenContext
-): binaryen.ExpressionRef => {
+const emitEqualityIntrinsic = ({
+  op,
+  kind,
+  args,
+  ctx,
+}: { op: "==" | "!="; } & EmitNumericIntrinsicParams): binaryen.ExpressionRef => {
   const left = args[0]!;
   const right = args[1]!;
   switch (kind) {

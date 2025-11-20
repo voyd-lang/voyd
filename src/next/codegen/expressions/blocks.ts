@@ -31,13 +31,13 @@ export const compileBlockExpr = (
   });
 
   if (typeof expr.value === "number") {
-    const { expr: valueExpr, usedReturnCall } = compileExpr(
-      expr.value,
+    const { expr: valueExpr, usedReturnCall } = compileExpr({
+      exprId: expr.value,
       ctx,
       fnCtx,
       tailPosition,
-      expectedResultTypeId
-    );
+      expectedResultTypeId,
+    });
     if (statements.length === 0) {
       return { expr: valueExpr, usedReturnCall };
     }
@@ -76,21 +76,30 @@ export const compileStatement = (
 
   switch (stmt.kind) {
     case "expr-stmt":
-      return asStatement(ctx, compileExpr(stmt.expr, ctx, fnCtx).expr);
+      return asStatement(
+        ctx,
+        compileExpr({ exprId: stmt.expr, ctx, fnCtx }).expr
+      );
     case "return":
       if (typeof stmt.value === "number") {
-        const valueExpr = compileExpr(stmt.value, ctx, fnCtx, true, fnCtx.returnTypeId);
+        const valueExpr = compileExpr({
+          exprId: stmt.value,
+          ctx,
+          fnCtx,
+          tailPosition: true,
+          expectedResultTypeId: fnCtx.returnTypeId,
+        });
         if (valueExpr.usedReturnCall) {
           return valueExpr.expr;
         }
         const actualType = getRequiredExprType(stmt.value, ctx);
-        const coerced = coerceValueToType(
-          valueExpr.expr,
+        const coerced = coerceValueToType({
+          value: valueExpr.expr,
           actualType,
-          fnCtx.returnTypeId,
+          targetType: fnCtx.returnTypeId,
           ctx,
-          fnCtx
-        );
+          fnCtx,
+        });
         return ctx.mod.return(coerced);
       }
       return ctx.mod.return();

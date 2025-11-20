@@ -89,10 +89,16 @@ const compileFunctionItem = (fn: HirFunction, ctx: CodegenContext): void => {
         `codegen missing parameter type for symbol ${param.symbol}`
       );
     }
-    fnCtx.bindings.set(param.symbol, { index, type });
+  fnCtx.bindings.set(param.symbol, { index, type });
   });
 
-  const body = compileExpression(fn.body, ctx, fnCtx, true, fnCtx.returnTypeId);
+  const body = compileExpression({
+    exprId: fn.body,
+    ctx,
+    fnCtx,
+    tailPosition: true,
+    expectedResultTypeId: fnCtx.returnTypeId,
+  });
 
   ctx.mod.addFunction(
     meta.wasmName,

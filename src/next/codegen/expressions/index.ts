@@ -1,10 +1,7 @@
 import type {
-  CodegenContext,
   CompiledExpression,
   ExpressionCompiler,
-  FunctionContext,
-  HirExpression,
-  TypeId,
+  ExpressionCompilerParams,
 } from "../context.js";
 import { compileCallExpr } from "./calls.js";
 import { compileBlockExpr } from "./blocks.js";
@@ -24,13 +21,13 @@ import {
   compileLiteralExpr,
 } from "./primitives.js";
 
-export const compileExpression: ExpressionCompiler = (
+export const compileExpression: ExpressionCompiler = ({
   exprId,
   ctx,
   fnCtx,
   tailPosition = false,
-  expectedResultTypeId?: TypeId
-): CompiledExpression => {
+  expectedResultTypeId,
+}: ExpressionCompilerParams): CompiledExpression => {
   const expr = ctx.hir.expressions.get(exprId);
   if (!expr) {
     throw new Error(`codegen missing HirExpression ${exprId}`);

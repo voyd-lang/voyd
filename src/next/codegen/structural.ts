@@ -9,7 +9,6 @@ import { LOOKUP_FIELD_ACCESSOR, RTT_METADATA_SLOTS } from "./rtt/index.js";
 import type {
   CodegenContext,
   FunctionContext,
-  LocalBinding,
   StructuralTypeInfo,
   TypeId,
 } from "./context.js";
@@ -40,13 +39,19 @@ export const requiresStructuralConversion = (
   return actualInfo.typeId !== targetInfo.typeId;
 };
 
-export const coerceValueToType = (
-  value: binaryen.ExpressionRef,
-  actualType: TypeId,
-  targetType: TypeId | undefined,
-  ctx: CodegenContext,
-  fnCtx: FunctionContext
-): binaryen.ExpressionRef => {
+export const coerceValueToType = ({
+  value,
+  actualType,
+  targetType,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  actualType: TypeId;
+  targetType: TypeId | undefined;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
   if (typeof targetType !== "number" || actualType === targetType) {
     return value;
   }
@@ -65,16 +70,28 @@ export const coerceValueToType = (
     return value;
   }
 
-  return emitStructuralConversion(value, actualInfo, targetInfo, ctx, fnCtx);
+  return emitStructuralConversion({
+    value,
+    actual: actualInfo,
+    target: targetInfo,
+    ctx,
+    fnCtx,
+  });
 };
 
-export const emitStructuralConversion = (
-  value: binaryen.ExpressionRef,
-  actual: StructuralTypeInfo,
-  target: StructuralTypeInfo,
-  ctx: CodegenContext,
-  fnCtx: FunctionContext
-): binaryen.ExpressionRef => {
+export const emitStructuralConversion = ({
+  value,
+  actual,
+  target,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  actual: StructuralTypeInfo;
+  target: StructuralTypeInfo;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
   target.fields.forEach((field) => {
     if (!actual.fieldMap.has(field.name)) {
       throw new Error(
@@ -123,12 +140,17 @@ export const emitStructuralConversion = (
   return ctx.mod.block(null, ops, target.interfaceType);
 };
 
-export const loadStructuralField = (
-  structInfo: StructuralTypeInfo,
-  field: StructuralTypeInfo["fields"][number],
-  pointer: binaryen.ExpressionRef,
-  ctx: CodegenContext
-): binaryen.ExpressionRef => {
+export const loadStructuralField = ({
+  structInfo,
+  field,
+  pointer,
+  ctx,
+}: {
+  structInfo: StructuralTypeInfo;
+  field: StructuralTypeInfo["fields"][number];
+  pointer: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
   const lookupTable = structGetFieldValue({
     mod: ctx.mod,
     fieldType: ctx.rtt.fieldLookupHelpers.lookupTableType,

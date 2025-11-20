@@ -409,7 +409,6 @@ const typeNominalObjectLiteral = (
     template.fields.map((field) => [field.name, field.type])
   );
   const typeParamBindings = new Map<TypeParamId, TypeId>();
-  const fieldValueTypes = new Map<string, TypeId>();
   const seenFields = new Set<string>();
 
   expr.entries.forEach((entry) =>
@@ -417,7 +416,6 @@ const typeNominalObjectLiteral = (
       entry,
       templateFields,
       typeParamBindings,
-      fieldValueTypes,
       seenFields,
       ctx
     )
@@ -450,7 +448,6 @@ const typeNominalObjectLiteral = (
     mergeNominalObjectEntry(
       entry,
       declaredFields,
-      fieldValueTypes,
       provided,
       ctx
     )
@@ -469,7 +466,6 @@ const bindNominalObjectEntry = (
   entry: HirObjectLiteralEntry,
   declared: Map<string, TypeId>,
   bindings: Map<TypeParamId, TypeId>,
-  valueTypes: Map<string, TypeId>,
   provided: Set<string>,
   ctx: TypingContext
 ): void => {
@@ -478,9 +474,12 @@ const bindNominalObjectEntry = (
     if (!expectedType) {
       throw new Error(`nominal object does not declare field ${entry.name}`);
     }
-    const valueType = typeExpression(entry.value, ctx);
-    valueTypes.set(entry.name, valueType);
-    bindTypeParamsFromType(expectedType, valueType, bindings, ctx);
+    bindTypeParamsFromType(
+      expectedType,
+      typeExpression(entry.value, ctx),
+      bindings,
+      ctx
+    );
     provided.add(entry.name);
     return;
   }
@@ -508,7 +507,6 @@ const bindNominalObjectEntry = (
 const mergeNominalObjectEntry = (
   entry: HirObjectLiteralEntry,
   declared: Map<string, TypeId>,
-  valueTypes: Map<string, TypeId>,
   provided: Set<string>,
   ctx: TypingContext
 ): void => {
@@ -517,8 +515,7 @@ const mergeNominalObjectEntry = (
     if (!expectedType) {
       throw new Error(`nominal object does not declare field ${entry.name}`);
     }
-    const valueType =
-      valueTypes.get(entry.name) ?? typeExpression(entry.value, ctx);
+    const valueType = typeExpression(entry.value, ctx);
     if (expectedType !== ctx.unknownType) {
       ensureTypeMatches(valueType, expectedType, ctx, `field ${entry.name}`);
     }

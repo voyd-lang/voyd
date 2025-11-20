@@ -45,11 +45,17 @@ export const compileAssignExpr = (
   const binding = getRequiredBinding(targetExpr.symbol, ctx, fnCtx);
   const targetTypeId = getSymbolTypeId(targetExpr.symbol, ctx);
   const valueTypeId = getRequiredExprType(expr.value, ctx);
-  const valueExpr = compileExpr(expr.value, ctx, fnCtx);
+  const valueExpr = compileExpr({ exprId: expr.value, ctx, fnCtx });
   return {
     expr: ctx.mod.local.set(
       binding.index,
-      coerceValueToType(valueExpr.expr, valueTypeId, targetTypeId, ctx, fnCtx)
+      coerceValueToType({
+        value: valueExpr.expr,
+        actualType: valueTypeId,
+        targetType: targetTypeId,
+        ctx,
+        fnCtx,
+      })
     ),
     usedReturnCall: false,
   };

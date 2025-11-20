@@ -64,7 +64,12 @@ export const compilePatternInitialization = ({
   }
 
   if (pattern.kind === "wildcard") {
-    ops.push(asStatement(ctx, compileExpr(initializer, ctx, fnCtx).expr));
+    ops.push(
+      asStatement(
+        ctx,
+        compileExpr({ exprId: initializer, ctx, fnCtx }).expr
+      )
+    );
     return;
   }
 
@@ -77,12 +82,18 @@ export const compilePatternInitialization = ({
     : getRequiredBinding(pattern.symbol, ctx, fnCtx);
   const targetTypeId = getSymbolTypeId(pattern.symbol, ctx);
   const initializerType = getRequiredExprType(initializer, ctx);
-  const value = compileExpr(initializer, ctx, fnCtx);
+  const value = compileExpr({ exprId: initializer, ctx, fnCtx });
 
   ops.push(
     ctx.mod.local.set(
       binding.index,
-      coerceValueToType(value.expr, initializerType, targetTypeId, ctx, fnCtx)
+      coerceValueToType({
+        value: value.expr,
+        actualType: initializerType,
+        targetType: targetTypeId,
+        ctx,
+        fnCtx,
+      })
     )
   );
 };
@@ -104,19 +115,19 @@ const compileTuplePattern = ({
   ops.push(
     ctx.mod.local.set(
       initializerTemp.index,
-      compileExpr(initializer, ctx, fnCtx).expr
+      compileExpr({ exprId: initializer, ctx, fnCtx }).expr
     )
   );
 
-  const pending = collectTupleAssignmentsFromValue(
+  const pending = collectTupleAssignmentsFromValue({
     pattern,
-    initializerTemp,
-    initializerType,
+    temp: initializerTemp,
+    typeId: initializerType,
     ctx,
     fnCtx,
     ops,
-    compileExpr
-  );
+    compileExpr,
+  });
   pending.forEach(({ pattern: subPattern, tempIndex, tempType, typeId }) => {
     const binding = options.declare
       ? declareLocal(subPattern.symbol, ctx, fnCtx)
@@ -125,27 +136,35 @@ const compileTuplePattern = ({
     ops.push(
       ctx.mod.local.set(
         binding.index,
-        coerceValueToType(
-          ctx.mod.local.get(tempIndex, tempType),
-          typeId,
-          targetTypeId,
+        coerceValueToType({
+          value: ctx.mod.local.get(tempIndex, tempType),
+          actualType: typeId,
+          targetType: targetTypeId,
           ctx,
-          fnCtx
-        )
+          fnCtx,
+        })
       )
     );
   });
 };
 
-const collectTupleAssignmentsFromValue = (
-  pattern: HirPattern,
-  temp: { index: number; type: binaryen.Type },
-  typeId: TypeId,
-  ctx: CodegenContext,
-  fnCtx: FunctionContext,
-  ops: binaryen.ExpressionRef[],
-  compileExpr: ExpressionCompiler
-): PendingTupleAssignment[] => {
+const collectTupleAssignmentsFromValue = ({
+  pattern,
+  temp,
+  typeId,
+  ctx,
+  fnCtx,
+  ops,
+  compileExpr,
+}: {
+  pattern: HirPattern;
+  temp: { index: number; type: binaryen.Type };
+  typeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  ops: binaryen.ExpressionRef[];
+  compileExpr: ExpressionCompiler;
+}): PendingTupleAssignment[] => {
   if (pattern.kind === "tuple") {
     const structInfo = getStructuralTypeInfo(typeId, ctx);
     if (!structInfo) {
@@ -162,18 +181,23 @@ const collectTupleAssignmentsFromValue = (
         throw new Error(`tuple is missing element ${index}`);
       }
       const elementTemp = allocateTempLocal(field.wasmType, fnCtx);
-      const load = loadStructuralField(structInfo, field, pointer, ctx);
+      const load = loadStructuralField({
+        structInfo,
+        field,
+        pointer,
+        ctx,
+      });
       ops.push(ctx.mod.local.set(elementTemp.index, load));
       collected.push(
-        ...collectTupleAssignmentsFromValue(
-          subPattern,
-          elementTemp,
-          field.typeId,
+        ...collectTupleAssignmentsFromValue({
+          pattern: subPattern,
+          temp: elementTemp,
+          typeId: field.typeId,
           ctx,
           fnCtx,
           ops,
-          compileExpr
-        )
+          compileExpr,
+        })
       );
     });
     return collected;
