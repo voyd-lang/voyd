@@ -28,6 +28,8 @@ import {
   type FunctionDecl,
   type ParameterDecl,
   type TypeAliasDecl,
+  type ObjectDecl,
+  type ObjectFieldDecl,
 } from "../decls.js";
 
 export interface BindingInputs {
@@ -41,6 +43,7 @@ export interface BindingResult {
   decls: DeclTable;
   functions: readonly BoundFunction[];
   typeAliases: readonly BoundTypeAlias[];
+  objects: readonly BoundObject[];
   overloads: Map<OverloadSetId, BoundOverloadSet>;
   overloadBySymbol: Map<SymbolId, OverloadSetId>;
   diagnostics: Diagnostic[];
@@ -49,6 +52,7 @@ export interface BindingResult {
 export type BoundFunction = FunctionDecl;
 export type BoundTypeAlias = TypeAliasDecl;
 export type BoundParameter = ParameterDecl;
+export type BoundObject = ObjectDecl;
 
 export interface BoundOverloadSet {
   id: OverloadSetId;
@@ -69,6 +73,21 @@ interface ParsedTypeAliasDecl {
   visibility: HirVisibility;
   name: IdentifierAtom;
   target: Expr;
+}
+
+interface ParsedObjectDecl {
+  form: Form;
+  visibility: HirVisibility;
+  name: IdentifierAtom;
+  base?: IdentifierAtom;
+  body: Form;
+  fields: readonly ParsedObjectField[];
+}
+
+interface ParsedObjectField {
+  name: IdentifierAtom;
+  typeExpr: Expr;
+  ast: Syntax;
 }
 
 interface ParsedFunctionSignature {
@@ -130,6 +149,7 @@ export const runBindingPipeline = ({
     decls: bindingContext.decls,
     functions: bindingContext.decls.functions,
     typeAliases: bindingContext.decls.typeAliases,
+    objects: bindingContext.decls.objects,
     overloads: bindingContext.overloads,
     overloadBySymbol: bindingContext.overloadBySymbol,
     diagnostics: bindingContext.diagnostics,
@@ -145,6 +165,12 @@ const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     const parsed = parseFunctionDecl(entry);
     if (parsed) {
       bindFunctionDecl(parsed, ctx, tracker);
+      continue;
+    }
+
+    const objectDecl = parseObjectDecl(entry);
+    if (objectDecl) {
+      bindObjectDecl(objectDecl, ctx, tracker);
       continue;
     }
 
@@ -278,6 +304,75 @@ const parseTypeAliasDecl = (form: Form): ParsedTypeAliasDecl | null => {
 
   return { form, visibility, name: nameExpr, target };
 };
+
+const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {
+  let index = 0;
+  let visibility: HirVisibility = "module";
+  const first = form.at(0);
+
+  if (isIdentifierWithValue(first, "pub")) {
+    visibility = "public";
+    index += 1;
+  }
+
+  const keyword = form.at(index);
+  if (!isIdentifierWithValue(keyword, "obj")) {
+    return null;
+  }
+
+  const head = form.at(index + 1);
+  const body = form.at(index + 2);
+  if (!body || !isForm(body) || !body.callsInternal("object_literal")) {
+    throw new Error("obj declaration requires a field list");
+  }
+
+  const { name, base } = parseObjectHead(head);
+  const fields = parseObjectFields(body);
+
+  return { form, visibility, name, base, body, fields };
+};
+
+const parseObjectHead = (
+  expr: Expr | undefined
+): { name: IdentifierAtom; base?: IdentifierAtom } => {
+  if (!expr) {
+    throw new Error("obj declaration missing name");
+  }
+
+  if (isIdentifierAtom(expr)) {
+    return { name: expr };
+  }
+
+  if (isForm(expr) && expr.calls(":")) {
+    const nameExpr = expr.at(1);
+    const baseExpr = expr.at(2);
+    if (!isIdentifierAtom(nameExpr)) {
+      throw new Error("obj name must be an identifier");
+    }
+    if (!isIdentifierAtom(baseExpr)) {
+      throw new Error("obj base must be an identifier");
+    }
+    return { name: nameExpr, base: baseExpr };
+  }
+
+  throw new Error("invalid obj declaration head");
+};
+
+const parseObjectFields = (body: Form): ParsedObjectField[] =>
+  body.rest.map((entry) => {
+    if (!isForm(entry) || !entry.calls(":")) {
+      throw new Error("object fields must be labeled");
+    }
+    const nameExpr = entry.at(1);
+    const typeExpr = entry.at(2);
+    if (!isIdentifierAtom(nameExpr)) {
+      throw new Error("object field name must be an identifier");
+    }
+    if (!typeExpr) {
+      throw new Error("object field missing type");
+    }
+    return { name: nameExpr, typeExpr, ast: entry };
+  });
 
 const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
   if (form.calls("->")) {
@@ -457,6 +552,64 @@ const bindTypeAlias = (
   });
 };
 
+const bindObjectDecl = (
+  decl: ParsedObjectDecl,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  rememberSyntax(decl.form, ctx);
+  rememberSyntax(decl.name, ctx);
+  rememberSyntax(decl.base, ctx);
+  rememberSyntax(decl.body, ctx);
+
+  const symbol = ctx.symbolTable.declare({
+    name: decl.name.value,
+    kind: "type",
+    declaredAt: decl.form.syntaxId,
+    metadata: { entity: "object" },
+  });
+
+  const objectScope = ctx.symbolTable.createScope({
+    parent: tracker.current(),
+    kind: "module",
+    owner: decl.form.syntaxId,
+  });
+  ctx.scopeByNode.set(decl.form.syntaxId, objectScope);
+
+  const fields: ObjectFieldDecl[] = [];
+  tracker.enterScope(objectScope, () => {
+    decl.fields.forEach((field) => {
+      rememberSyntax(field.ast, ctx);
+      rememberSyntax(field.name, ctx);
+      rememberSyntax(field.typeExpr as Syntax, ctx);
+
+      const fieldSymbol = ctx.symbolTable.declare({
+        name: field.name.value,
+        kind: "value",
+        declaredAt: field.ast.syntaxId,
+        metadata: { entity: "field", owner: symbol },
+      });
+
+      fields.push({
+        name: field.name.value,
+        symbol: fieldSymbol,
+        ast: field.ast,
+        typeExpr: field.typeExpr,
+      });
+    });
+  });
+
+  ctx.decls.registerObject({
+    name: decl.name.value,
+    form: decl.form,
+    visibility: decl.visibility,
+    symbol,
+    baseTypeExpr: decl.base,
+    fields,
+    moduleIndex: ctx.nextModuleIndex++,
+  });
+};
+
 const bindExpr = (
   expr: Expr | undefined,
   ctx: BindingContext,
@@ -580,6 +733,23 @@ const declarePatternBindings = (
     (pattern.calls("tuple") || pattern.callsInternal("tuple"))
   ) {
     pattern.rest.forEach((entry) => declarePatternBindings(entry, ctx, scope));
+    return;
+  }
+
+  if (isForm(pattern) && pattern.calls(":")) {
+    const nameExpr = pattern.at(1);
+    const typeExpr = pattern.at(2);
+    if (!isIdentifierAtom(nameExpr)) {
+      throw new Error("typed pattern name must be an identifier");
+    }
+    rememberSyntax(nameExpr, ctx);
+    rememberSyntax(typeExpr as Syntax, ctx);
+    reportOverloadNameCollision(nameExpr.value, scope, pattern, ctx);
+    ctx.symbolTable.declare({
+      name: nameExpr.value,
+      kind: "value",
+      declaredAt: pattern.syntaxId,
+    });
     return;
   }
 
@@ -799,7 +969,7 @@ const findNonFunctionDeclaration = (
       continue;
     }
     const metadata = (record.metadata ?? {}) as { entity?: string };
-    if (metadata.entity === "function") {
+    if (metadata.entity === "function" || metadata.entity === "object") {
       continue;
     }
     return record;

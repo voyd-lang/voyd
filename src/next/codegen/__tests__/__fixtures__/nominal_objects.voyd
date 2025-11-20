@@ -1,0 +1,22 @@
+obj Vec {
+  x: i32,
+  y: i32,
+  z: i32
+}
+
+fn sum(vec: Vec)
+  vec.x + vec.y + vec.z
+
+type StructuralVec = {
+  x: i32,
+  y: i32,
+  z: i32
+}
+
+fn sum2(a: StructuralVec, b: StructuralVec)
+  a.x + b.x + a.y + b.y + a.z + b.z
+
+pub fn main()
+  let a = Vec { x: 1, y: 2, z: 3 }
+  let b: StructuralVec = { x: 3, y: 2, z: 4 }
+  sum(a) + sum2(a, b)

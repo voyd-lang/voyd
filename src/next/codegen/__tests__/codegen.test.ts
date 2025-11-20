@@ -77,4 +77,14 @@ describe("next codegen", () => {
     expect(typeof main).toBe("function");
     expect((main as () => number)()).toBe(21);
   });
+
+  it("emits wasm for nominal objects and structural interop", () => {
+    const ast = loadAst("nominal_objects.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module } = codegen(semantics);
+    const instance = getWasmInstance(module);
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(21);
+  });
 });

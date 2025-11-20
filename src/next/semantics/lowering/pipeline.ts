@@ -33,6 +33,7 @@ import type {
   BoundFunction,
   BoundTypeAlias,
   BindingResult,
+  BoundObject,
 } from "../binding/pipeline.js";
 import { isIdentifierWithValue, toSourceSpan } from "../utils.js";
 
@@ -63,7 +64,8 @@ type IdentifierResolution =
 
 type ModuleDeclaration =
   | { kind: "function"; order: number; fn: BoundFunction }
-  | { kind: "type-alias"; order: number; alias: BoundTypeAlias };
+  | { kind: "type-alias"; order: number; alias: BoundTypeAlias }
+  | { kind: "object"; order: number; object: BoundObject };
 
 const getModuleDeclarations = (
   binding: BindingResult
@@ -79,6 +81,11 @@ const getModuleDeclarations = (
       order: alias.moduleIndex,
       alias,
     })),
+    ...binding.objects.map((object) => ({
+      kind: "object" as const,
+      order: object.moduleIndex,
+      object,
+    })),
   ];
 
   return entries.sort((a, b) => a.order - b.order);
@@ -92,6 +99,18 @@ export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
   for (const decl of declarations) {
     if (decl.kind === "function") {
       lowerFunction(decl.fn, {
+        builder: inputs.builder,
+        symbolTable: inputs.binding.symbolTable,
+        scopeByNode: inputs.binding.scopeByNode,
+        intrinsicSymbols,
+        moduleNodeId: inputs.moduleNodeId,
+        overloadBySymbol: inputs.binding.overloadBySymbol,
+      });
+      continue;
+    }
+
+    if (decl.kind === "object") {
+      lowerObjectDecl(decl.object, {
         builder: inputs.builder,
         symbolTable: inputs.binding.symbolTable,
         scopeByNode: inputs.binding.scopeByNode,
@@ -176,6 +195,50 @@ const lowerTypeAlias = (alias: BoundTypeAlias, ctx: LowerContext): void => {
       visibility: alias.visibility,
       span: toSourceSpan(alias.form),
       item: aliasId,
+    });
+  }
+};
+
+const lowerObjectDecl = (
+  object: BoundObject,
+  ctx: LowerContext
+): void => {
+  const fields = object.fields.map((field) => ({
+    name: field.name,
+    symbol: field.symbol,
+    type: lowerTypeExpr(field.typeExpr, ctx),
+    span: toSourceSpan(field.ast ?? object.form),
+  }));
+
+  const base = lowerTypeExpr(object.baseTypeExpr, ctx);
+  let baseSymbol: SymbolId | undefined = object.baseTypeExpr && isIdentifierAtom(object.baseTypeExpr)
+    ? ctx.symbolTable.resolve(object.baseTypeExpr.value, ctx.symbolTable.rootScope)
+    : undefined;
+
+  const objectSyntax = object.form ?? object.baseTypeExpr ?? object.fields[0]?.ast;
+  if (!objectSyntax) {
+    throw new Error("object declaration missing source syntax");
+  }
+
+  const objectId = ctx.builder.addItem({
+    kind: "object",
+    symbol: object.symbol,
+    visibility: object.visibility,
+    typeParameters: undefined,
+    ast: objectSyntax.syntaxId,
+    span: toSourceSpan(objectSyntax),
+    base,
+    baseSymbol,
+    fields,
+    isFinal: false,
+  });
+
+  if (object.visibility === "public") {
+    ctx.builder.recordExport({
+      symbol: object.symbol,
+      visibility: object.visibility,
+      span: toSourceSpan(object.form),
+      item: objectId,
     });
   }
 };
@@ -448,6 +511,47 @@ const lowerCallFromElements = (
   });
 };
 
+const lowerNominalObjectLiteral = (
+  callee: Expr,
+  args: readonly Expr[],
+  ast: Syntax,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId | undefined => {
+  if (!isIdentifierAtom(callee) || args.length !== 1) {
+    return undefined;
+  }
+
+  const literalArg = args[0];
+  if (!isForm(literalArg) || !isObjectLiteralForm(literalArg)) {
+    return undefined;
+  }
+
+  const symbol = ctx.symbolTable.resolve(callee.value, scopes.current());
+  if (typeof symbol !== "number") {
+    return undefined;
+  }
+  const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ??
+    {}) as { entity?: string };
+  if (metadata.entity !== "object") {
+    return undefined;
+  }
+
+  const target: HirTypeExpr = {
+    typeKind: "named",
+    path: [callee.value],
+    symbol,
+    ast: callee.syntaxId,
+    span: toSourceSpan(callee),
+  };
+
+  return lowerObjectLiteralExpr(literalArg, ctx, scopes, {
+    literalKind: "nominal",
+    target,
+    targetSymbol: symbol,
+  });
+};
+
 const lowerCall = (
   form: Form,
   ctx: LowerContext,
@@ -456,6 +560,11 @@ const lowerCall = (
   const callee = form.at(0);
   if (!callee) {
     throw new Error("call expression missing callee");
+  }
+
+  const nominalLiteral = lowerNominalObjectLiteral(callee, form.rest, form, ctx, scopes);
+  if (typeof nominalLiteral === "number") {
+    return nominalLiteral;
   }
 
   return lowerCallFromElements(callee, form.rest, form, ctx, scopes);
@@ -522,6 +631,15 @@ const lowerPattern = (
     return { kind: "tuple", elements };
   }
 
+  if (isForm(pattern) && pattern.calls(":")) {
+    const nameExpr = pattern.at(1);
+    if (!isIdentifierAtom(nameExpr)) {
+      throw new Error("typed pattern name must be an identifier");
+    }
+    const symbol = resolveSymbol(nameExpr.value, scopes.current(), ctx);
+    return { kind: "identifier", symbol };
+  }
+
   throw new Error("unsupported pattern form");
 };
 
@@ -546,7 +664,12 @@ const isObjectLiteralForm = (form: Form): boolean =>
 const lowerObjectLiteralExpr = (
   form: Form,
   ctx: LowerContext,
-  scopes: LowerScopeStack
+  scopes: LowerScopeStack,
+  options: {
+    literalKind?: "structural" | "nominal";
+    target?: HirTypeExpr;
+    targetSymbol?: SymbolId;
+  } = {}
 ): HirExprId => {
   const entries = form.rest.map((entry) =>
     lowerObjectLiteralEntry(entry, ctx, scopes)
@@ -556,7 +679,9 @@ const lowerObjectLiteralExpr = (
     exprKind: "object-literal",
     ast: form.syntaxId,
     span: toSourceSpan(form),
-    literalKind: "structural",
+    literalKind: options.literalKind ?? "structural",
+    target: options.target,
+    targetSymbol: options.targetSymbol,
     entries,
   });
 };
