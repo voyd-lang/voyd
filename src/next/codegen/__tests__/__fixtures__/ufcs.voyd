@@ -1,0 +1,10 @@
+obj Vec { x: i32, y: i32 }
+type StructVec = { x: i32, y: i32 }
+
+fn sum(v: StructVec)
+  v.x + v.y
+
+pub fn main()
+  let v1 = Vec { x: 1, y: 2 }
+  let v2 = { x: 4, y: 12 }
+  v1.sum() + v2.sum()
