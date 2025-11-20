@@ -7,6 +7,7 @@ import {
   type HirCallExpr,
   type HirFieldAccessExpr,
   type HirFunction,
+  type HirIdentifierExpr,
   type HirIfExpr,
   type HirLetStatement,
   type HirObjectLiteralExpr,
@@ -146,8 +147,64 @@ describe("lowering pipeline", () => {
     const initializer = hir.expressions.get(letStmt.initializer)!;
     expect(initializer.exprKind).toBe("object-literal");
     const objectLiteral = initializer as HirObjectLiteralExpr;
-    expect(objectLiteral.entries.some((entry) => entry.kind === "spread")).toBe(
-      true
+    expect(
+      objectLiteral.entries.some((entry) => entry.kind === "spread")
+    ).toBe(true);
+  });
+
+  it("lowers UFCS calls into plain function calls", () => {
+    const name = "ufcs.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+    });
+
+    const sumSymbol = symbolTable.resolve("sum", symbolTable.rootScope)!;
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope)!;
+
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol
     );
+    expect(mainFn).toBeDefined();
+
+    const sumCalls = Array.from(hir.expressions.values()).filter(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") return false;
+        const callee = hir.expressions.get(expr.callee);
+        return (
+          callee?.exprKind === "identifier" &&
+          (callee as HirIdentifierExpr).symbol === sumSymbol
+        );
+      }
+    );
+
+    expect(sumCalls).toHaveLength(2);
+    const argNames = sumCalls.map((call) => {
+      expect(call.args).toHaveLength(1);
+      const argExpr = hir.expressions.get(call.args[0]!.expr);
+      expect(argExpr?.exprKind).toBe("identifier");
+      return symbolTable.getSymbol(
+        (argExpr as HirIdentifierExpr).symbol
+      ).name;
+    });
+
+    expect(argNames.sort()).toEqual(["v1", "v2"]);
   });
 });
