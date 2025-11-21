@@ -656,6 +656,7 @@ const typeOverloadedCall = (
 
   const selected = matches[0]!;
   ctx.callTargets.set(call.id, selected.symbol);
+  ctx.table.setExprType(callee.id, selected.signature.typeId);
   return selected.signature.returnType;
 };
 
