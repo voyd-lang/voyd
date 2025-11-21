@@ -1,0 +1,19 @@
+obj First {
+  value: i32
+}
+
+obj Second {
+  value: i32
+}
+
+type Duo = First | Second
+
+fn tag(input: Duo)
+  match(input)
+    First: input.value + 100
+    Second: input.value + 200
+
+pub fn main()
+  let a = First { value: 1 }
+  let b = Second { value: 2 }
+  tag(a) + tag(b)

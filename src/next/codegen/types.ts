@@ -162,7 +162,7 @@ export const getStructuralTypeInfo = (
     return undefined;
   }
 
-  const cached = ctx.structTypes.get(structuralId);
+  const cached = ctx.structTypes.get(typeId);
   if (cached) {
     return cached;
   }
@@ -179,7 +179,17 @@ export const getStructuralTypeInfo = (
     runtimeIndex: index + RTT_METADATA_SLOT_COUNT,
     hash: 0,
   }));
-  const typeLabel = `struct_${structuralId}`;
+  const nominalId = getNominalComponentId(typeId, ctx);
+  const typeLabel = makeRuntimeTypeLabel({
+    typeId,
+    structuralId,
+    nominalId,
+  });
+  const ancestors = buildRuntimeAncestors({
+    typeId,
+    structuralId,
+    nominalId,
+  });
   const runtimeType = defineStructType(ctx.mod, {
     name: typeLabel,
     fields: [
@@ -220,7 +230,7 @@ export const getStructuralTypeInfo = (
     ancestorsGlobal,
     ctx.rtt.extensionHelpers.i32Array,
     false,
-    ctx.rtt.extensionHelpers.initExtensionArray([structuralId])
+    ctx.rtt.extensionHelpers.initExtensionArray(ancestors)
   );
 
   const fieldTableGlobal = `__field_index_table_${typeLabel}`;
@@ -240,7 +250,9 @@ export const getStructuralTypeInfo = (
   );
 
   const info: StructuralTypeInfo = {
-    typeId: structuralId,
+    typeId,
+    structuralId,
+    nominalId,
     runtimeType,
     interfaceType: ctx.rtt.baseType,
     fields,
@@ -250,7 +262,7 @@ export const getStructuralTypeInfo = (
     methodTableGlobal,
     typeLabel,
   };
-  ctx.structTypes.set(structuralId, info);
+  ctx.structTypes.set(typeId, info);
   return info;
 };
 
@@ -266,6 +278,46 @@ export const resolveStructuralTypeId = (
     return desc.structural;
   }
   return undefined;
+};
+
+const makeRuntimeTypeLabel = ({
+  typeId,
+  structuralId,
+  nominalId,
+}: {
+  typeId: TypeId;
+  structuralId: TypeId;
+  nominalId?: TypeId;
+}): string => {
+  const nominalPrefix =
+    typeof nominalId === "number" ? `nominal_${nominalId}_` : "";
+  return `struct_${nominalPrefix}type_${typeId}_shape_${structuralId}`;
+};
+
+const buildRuntimeAncestors = ({
+  typeId,
+  structuralId,
+  nominalId,
+}: {
+  typeId: TypeId;
+  structuralId: TypeId;
+  nominalId?: TypeId;
+}): number[] => {
+  const seen = new Set<number>();
+  const ancestors: number[] = [];
+  const add = (id?: TypeId) => {
+    if (typeof id !== "number" || seen.has(id)) {
+      return;
+    }
+    seen.add(id);
+    ancestors.push(id);
+  };
+
+  add(typeId);
+  add(nominalId);
+  add(structuralId);
+
+  return ancestors;
 };
 
 const nominalOwnersMatch = (
