@@ -12,7 +12,7 @@ fn get_int(box: ABox)
   box.match
     Box<i32>: box.a
     Box<f64>: 2
-    Box2: box.b
+    Box2<i32>: box.b
 
 pub fn main()
   let a = Box { a: 1 }

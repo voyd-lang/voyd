@@ -8,7 +8,7 @@ type Optional<T> = Some<T> | None
 
 fn get_int(o: Optional<i32>)
   o.match
-    Some: o.value
+    Some<i32>: o.value
     None: 2
 
 pub fn main()

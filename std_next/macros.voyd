@@ -33,7 +33,7 @@ pub macro my_if()
       let result = `
         let ~temp = ~r
         ~temp.match
-          Some:
+          Some<unknown>:
             let ~l = ~temp.value
             ~main_then
           else: ~default
@@ -65,7 +65,7 @@ pub macro for(cond, do)
     while true do:
       let ~iterator_val_id = ~iterator_id.next()
       ~iterator_val_id.match
-        Some:
+        Some<unknown>:
           let ~binding = ~iterator_val_id.value
           ~(do.get(2))
           void

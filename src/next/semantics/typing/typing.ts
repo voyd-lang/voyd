@@ -7,6 +7,7 @@ import {
   seedBaseObjectType,
   seedPrimitiveTypes,
 } from "./registry.js";
+import { validateTypedProgram } from "./validation.js";
 import type { TypingInputs, TypingResult } from "./types.js";
 
 export * from "./types.js";
@@ -22,6 +23,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
 
   runInferencePass(ctx);
   runStrictTypeCheck(ctx);
+  validateTypedProgram(ctx);
 
   return {
     arena: ctx.arena,

@@ -42,6 +42,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     typeAliasInstances: new Map(),
     typeAliasesByName: new Map(),
     resolvingTypeAliases: new Set(),
+    failedTypeAliasInstantiations: new Set(),
     baseObjectSymbol: -1,
     baseObjectNominal: -1,
     baseObjectStructural: -1,

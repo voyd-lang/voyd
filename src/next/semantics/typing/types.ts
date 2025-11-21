@@ -80,6 +80,7 @@ export interface TypingContext {
   typeAliasInstances: Map<string, TypeId>;
   typeAliasesByName: Map<string, SymbolId>;
   resolvingTypeAliases: Set<string>;
+  failedTypeAliasInstantiations: Set<string>;
   baseObjectSymbol: SymbolId;
   baseObjectNominal: TypeId;
   baseObjectStructural: TypeId;
@@ -90,23 +91,35 @@ export interface ObjectTypeInfo {
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
-  fields: readonly { name: string; type: TypeId }[];
+  fields: readonly {
+    name: string;
+    type: TypeId;
+    declaringParams?: readonly TypeParamId[];
+  }[];
   baseNominal?: TypeId;
 }
 
 export interface ObjectTemplate {
   symbol: SymbolId;
-  params: readonly { symbol: SymbolId; typeParam: TypeParamId }[];
+  params: readonly {
+    symbol: SymbolId;
+    typeParam: TypeParamId;
+    constraint?: TypeId;
+  }[];
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
-  fields: readonly { name: string; type: TypeId }[];
+  fields: readonly {
+    name: string;
+    type: TypeId;
+    declaringParams?: readonly TypeParamId[];
+  }[];
   baseNominal?: TypeId;
 }
 
 export interface TypeAliasTemplate {
   symbol: SymbolId;
-  params: readonly { symbol: SymbolId }[];
+  params: readonly { symbol: SymbolId; constraint?: HirTypeExpr }[];
   target: HirTypeExpr;
 }
 
