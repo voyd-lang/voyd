@@ -7,6 +7,10 @@ import type {
 } from "../hir/index.js";
 import type { SymbolId, TypeId, TypeParamId } from "../ids.js";
 import { BASE_OBJECT_NAME, type TypingContext, type ObjectTemplate, type ObjectTypeInfo } from "./types.js";
+import {
+  normalizeTypeArgs,
+  shouldCacheInstantiation,
+} from "../../types/instantiation.js";
 
 export const registerPrimitive = (
   ctx: TypingContext,
@@ -87,20 +91,26 @@ export const resolveTypeAlias = (
     );
   }
 
-  if (typeArgs.length > template.params.length) {
-    throw new Error("type alias argument count mismatch");
+  const normalized = normalizeTypeArgs({
+    typeArgs,
+    paramCount: template.params.length,
+    unknownType: ctx.unknownType,
+    context: `type alias ${getSymbolName(symbol, ctx)}`,
+  });
+
+  if (normalized.missingCount > 0 && ctx.typeCheckMode === "strict") {
+    throw new Error(
+      `type alias ${getSymbolName(symbol, ctx)} is missing ${normalized.missingCount} type argument(s)`
+    );
   }
 
-  const appliedArgs =
-    template.params.length === 0
-      ? []
-      : template.params.map(
-          (_param, index) => typeArgs[index] ?? ctx.unknownType
-        );
-  const key = makeTypeAliasInstanceKey(symbol, appliedArgs);
-  const cached = ctx.typeAliasInstances.get(key);
-  if (typeof cached === "number") {
-    return cached;
+  const key = makeTypeAliasInstanceKey(symbol, normalized.applied);
+  const cacheable = shouldCacheInstantiation(normalized);
+  if (cacheable) {
+    const cached = ctx.typeAliasInstances.get(key);
+    if (typeof cached === "number") {
+      return cached;
+    }
   }
 
   if (ctx.resolvingTypeAliases.has(key)) {
@@ -109,7 +119,7 @@ export const resolveTypeAlias = (
 
   const paramMap = new Map<SymbolId, TypeId>();
   template.params.forEach((param, index) =>
-    paramMap.set(param.symbol, appliedArgs[index] ?? ctx.unknownType)
+    paramMap.set(param.symbol, normalized.applied[index] ?? ctx.unknownType)
   );
 
   ctx.resolvingTypeAliases.add(key);
@@ -120,7 +130,9 @@ export const resolveTypeAlias = (
       ctx.unknownType,
       paramMap
     );
-    ctx.typeAliasInstances.set(key, resolved);
+    if (cacheable) {
+      ctx.typeAliasInstances.set(key, resolved);
+    }
     return resolved;
   } finally {
     ctx.resolvingTypeAliases.delete(key);
@@ -329,22 +341,31 @@ export const ensureObjectType = (
     return undefined;
   }
 
-  if (typeArgs.length > template.params.length) {
-    throw new Error("object type argument count mismatch");
+  const normalized = normalizeTypeArgs({
+    typeArgs,
+    paramCount: template.params.length,
+    unknownType: ctx.unknownType,
+    context: `object ${getSymbolName(symbol, ctx)}`,
+  });
+
+  if (normalized.missingCount > 0 && ctx.typeCheckMode === "strict") {
+    throw new Error(
+      `object ${getSymbolName(symbol, ctx)} is missing ${normalized.missingCount} type argument(s)`
+    );
   }
 
-  const appliedArgs = template.params.map(
-    (_param, index) => typeArgs[index] ?? ctx.unknownType
-  );
-  const key = makeObjectInstanceKey(symbol, appliedArgs);
-  const cached = ctx.objectInstances.get(key);
-  if (cached) {
-    return cached;
+  const key = makeObjectInstanceKey(symbol, normalized.applied);
+  const cacheable = shouldCacheInstantiation(normalized);
+  if (cacheable) {
+    const cached = ctx.objectInstances.get(key);
+    if (cached) {
+      return cached;
+    }
   }
 
   const subst = new Map<TypeParamId, TypeId>();
   template.params.forEach((param, index) =>
-    subst.set(param.typeParam, appliedArgs[index]!)
+    subst.set(param.typeParam, normalized.applied[index]!)
   );
 
   const nominal = ctx.arena.substitute(template.nominal, subst);
@@ -366,9 +387,11 @@ export const ensureObjectType = (
     baseNominal,
   };
 
-  ctx.objectInstances.set(key, info);
-  ctx.objectsByNominal.set(nominal, info);
-  ctx.valueTypes.set(symbol, type);
+  if (cacheable) {
+    ctx.objectInstances.set(key, info);
+    ctx.objectsByNominal.set(nominal, info);
+    ctx.valueTypes.set(symbol, type);
+  }
   return info;
 };
 
