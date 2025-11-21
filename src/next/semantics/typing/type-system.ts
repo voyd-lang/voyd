@@ -111,6 +111,55 @@ const paramIdSetFrom = (
   return ids.length > 0 ? new Set(ids) : undefined;
 };
 
+const containsUnknownType = (
+  type: TypeId,
+  ctx: TypingContext,
+  seen: Set<TypeId> = new Set()
+): boolean => {
+  if (type === ctx.unknownType) {
+    return true;
+  }
+  if (seen.has(type)) {
+    return false;
+  }
+  seen.add(type);
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "primitive":
+    case "type-param-ref":
+      return false;
+    case "trait":
+    case "nominal-object":
+      return desc.typeArgs.some((arg) => containsUnknownType(arg, ctx, seen));
+    case "structural-object":
+      return desc.fields.some((field) =>
+        containsUnknownType(field.type, ctx, seen)
+      );
+    case "function":
+      return (
+        desc.parameters.some((param) =>
+          containsUnknownType(param.type, ctx, seen)
+        ) || containsUnknownType(desc.returnType, ctx, seen)
+      );
+    case "union":
+      return desc.members.some((member) =>
+        containsUnknownType(member, ctx, seen)
+      );
+    case "intersection":
+      return (
+        (typeof desc.nominal === "number" &&
+          containsUnknownType(desc.nominal, ctx, seen)) ||
+        (typeof desc.structural === "number" &&
+          containsUnknownType(desc.structural, ctx, seen))
+      );
+    case "fixed-array":
+      return containsUnknownType(desc.element, ctx, seen);
+    default:
+      return false;
+  }
+};
+
 const ensureFieldsSubstituted = (
   fields: readonly StructuralField[],
   ctx: TypingContext,
@@ -196,6 +245,7 @@ export const resolveTypeAlias = (
   ctx: TypingContext,
   typeArgs: readonly TypeId[] = []
 ): TypeId => {
+  const aliasName = getSymbolName(symbol, ctx);
   const template =
     ctx.typeAliasTemplates.get(symbol) ??
     (ctx.typeAliasTargets.get(symbol)
@@ -208,7 +258,7 @@ export const resolveTypeAlias = (
 
   if (!template) {
     throw new Error(
-      `missing type alias target for ${getSymbolName(symbol, ctx)}`
+      `missing type alias target for ${aliasName}`
     );
   }
 
@@ -216,17 +266,22 @@ export const resolveTypeAlias = (
     typeArgs,
     paramCount: template.params.length,
     unknownType: ctx.unknownType,
-    context: `type alias ${getSymbolName(symbol, ctx)}`,
+    context: `type alias ${aliasName}`,
   });
 
-  if (normalized.missingCount > 0 && ctx.typeCheckMode === "strict") {
+  if (normalized.missingCount > 0) {
     throw new Error(
-      `type alias ${getSymbolName(symbol, ctx)} is missing ${normalized.missingCount} type argument(s)`
+      `type alias ${aliasName} is missing ${normalized.missingCount} type argument(s)`
     );
   }
 
   const key = makeTypeAliasInstanceKey(symbol, normalized.applied);
   const cacheable = shouldCacheInstantiation(normalized);
+
+  if (ctx.failedTypeAliasInstantiations.has(key)) {
+    throw new Error(`type alias ${aliasName} instantiation previously failed`);
+  }
+
   if (cacheable) {
     const cached = ctx.typeAliasInstances.get(key);
     if (typeof cached === "number") {
@@ -235,7 +290,10 @@ export const resolveTypeAlias = (
   }
 
   if (ctx.resolvingTypeAliases.has(key)) {
-    return ctx.unknownType;
+    ctx.failedTypeAliasInstantiations.add(key);
+    throw new Error(
+      `cyclic type alias instantiation for ${aliasName}`
+    );
   }
 
   const paramMap = new Map<SymbolId, TypeId>();
@@ -278,10 +336,18 @@ export const resolveTypeAlias = (
       ctx.unknownType,
       paramMap
     );
+    if (containsUnknownType(resolved, ctx)) {
+      throw new Error(
+        `type alias ${aliasName} could not be fully resolved`
+      );
+    }
     if (cacheable) {
       ctx.typeAliasInstances.set(key, resolved);
     }
     return resolved;
+  } catch (error) {
+    ctx.failedTypeAliasInstantiations.add(key);
+    throw error;
   } finally {
     ctx.resolvingTypeAliases.delete(key);
   }
@@ -620,7 +686,8 @@ export const ensureObjectType = (
     baseNominal,
   };
 
-  if (cacheable) {
+  const cacheableInstance = cacheable && !containsUnknownType(type, ctx);
+  if (cacheableInstance) {
     ctx.objectInstances.set(key, info);
     ctx.objectsByNominal.set(nominal, info);
     ctx.valueTypes.set(symbol, type);

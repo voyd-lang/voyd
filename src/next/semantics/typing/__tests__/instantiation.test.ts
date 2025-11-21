@@ -236,23 +236,101 @@ describe("instantiation argument handling", () => {
     );
   });
 
-  it("rejects missing alias arguments and skips caching unknown instances", () => {
+  it("fails when alias arguments are missing", () => {
     const { ctx, symbolTable } = createContext();
     const { aliasSymbol } = primeAliasTemplate(ctx, symbolTable);
 
-    ctx.typeCheckMode = "relaxed";
-    const relaxed = resolveTypeAlias(aliasSymbol, ctx, []);
-    expect(relaxed).toBe(ctx.unknownType);
-    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow(
+      /missing 1 type argument/
+    );
 
     ctx.typeCheckMode = "strict";
     expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow(
       /missing 1 type argument/
     );
+    expect(ctx.typeAliasInstances.size).toBe(0);
+  });
 
-    const applied = resolveTypeAlias(aliasSymbol, ctx, [ctx.boolType]);
-    expect(applied).toBe(ctx.boolType);
-    expect(ctx.typeAliasInstances.size).toBe(1);
+  it("throws on direct type alias cycles", () => {
+    const { ctx, symbolTable } = createContext();
+    const aliasSymbol = symbolTable.declare({
+      name: "Loop",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const target: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Loop"],
+      symbol: aliasSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    ctx.typeAliasTemplates.set(aliasSymbol, {
+      symbol: aliasSymbol,
+      params: [],
+      target,
+    });
+    ctx.typeAliasTargets.set(aliasSymbol, target);
+
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow(
+      /cyclic|cycle|recursive/i
+    );
+    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(
+      ctx.failedTypeAliasInstantiations.has(`${aliasSymbol}<>`)
+    ).toBe(true);
+  });
+
+  it("fails mutually recursive aliases instead of returning unknown", () => {
+    const { ctx, symbolTable } = createContext();
+    const leftSymbol = symbolTable.declare({
+      name: "Left",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const rightSymbol = symbolTable.declare({
+      name: "Right",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const leftTarget: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Right"],
+      symbol: rightSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const rightTarget: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Left"],
+      symbol: leftSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(leftSymbol, {
+      symbol: leftSymbol,
+      params: [],
+      target: leftTarget,
+    });
+    ctx.typeAliasTargets.set(leftSymbol, leftTarget);
+    ctx.typeAliasTemplates.set(rightSymbol, {
+      symbol: rightSymbol,
+      params: [],
+      target: rightTarget,
+    });
+    ctx.typeAliasTargets.set(rightSymbol, rightTarget);
+
+    expect(() => resolveTypeAlias(leftSymbol, ctx, [])).toThrow(
+      /cyclic|cycle|recursive/i
+    );
+    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(
+      ctx.failedTypeAliasInstantiations.has(`${leftSymbol}<>`)
+    ).toBe(true);
+    expect(
+      ctx.failedTypeAliasInstantiations.has(`${rightSymbol}<>`)
+    ).toBe(true);
   });
 
   it("enforces object generic constraints before caching instantiations", () => {

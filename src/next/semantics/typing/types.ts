@@ -80,6 +80,7 @@ export interface TypingContext {
   typeAliasInstances: Map<string, TypeId>;
   typeAliasesByName: Map<string, SymbolId>;
   resolvingTypeAliases: Set<string>;
+  failedTypeAliasInstantiations: Set<string>;
   baseObjectSymbol: SymbolId;
   baseObjectNominal: TypeId;
   baseObjectStructural: TypeId;

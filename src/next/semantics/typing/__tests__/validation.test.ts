@@ -94,7 +94,7 @@ describe("typing validation invariants", () => {
     ).toThrow(/unknown type/i);
   });
 
-  it("flags missing type alias arguments after strict typing", () => {
+  it("fails fast when type alias arguments are missing", () => {
     const nextNode = createNodeGenerator();
     const symbolTable = new SymbolTable({ rootOwner: 0 });
     const moduleSymbol = symbolTable.declare({
@@ -204,6 +204,6 @@ describe("typing validation invariants", () => {
         overloads: new Map(),
         decls: new DeclTable(),
       })
-    ).toThrow(/unknown type/i);
+    ).toThrow(/missing 1 type argument/);
   });
 });
