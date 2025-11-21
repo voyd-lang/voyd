@@ -2,10 +2,16 @@ import { describe, expect, it } from "vitest";
 import { SymbolTable } from "../../binder/index.js";
 import { createTypingContext } from "../context.js";
 import { seedBaseObjectType, seedPrimitiveTypes } from "../registry.js";
-import { ensureObjectType, resolveTypeAlias } from "../type-system.js";
+import {
+  ensureObjectType,
+  getObjectTemplate,
+  getStructuralFields,
+  resolveTypeAlias,
+  typeSatisfies,
+} from "../type-system.js";
 import { DeclTable } from "../../decls.js";
 import type { HirGraph, HirTypeExpr } from "../../hir/index.js";
-import type { SourceSpan, TypeId } from "../../ids.js";
+import type { SourceSpan, SymbolId, TypeId } from "../../ids.js";
 
 const DUMMY_SPAN: SourceSpan = { file: "<test>", start: 0, end: 0 };
 
@@ -54,7 +60,9 @@ const primeBoxTemplate = (
   });
   const typeParam = ctx.arena.freshTypeParam();
   const typeParamRef = ctx.arena.internTypeParamRef(typeParam);
-  const fields = [{ name: "value", type: typeParamRef }];
+  const fields = [
+    { name: "value", type: typeParamRef, declaringParams: [typeParam] },
+  ];
   const structural = ctx.arena.internStructuralObject({ fields });
   const nominal = ctx.arena.internNominalObject({
     owner: boxSymbol,
@@ -73,6 +81,101 @@ const primeBoxTemplate = (
   });
   ctx.objectsByName.set("Box", boxSymbol);
   return { boxSymbol };
+};
+
+const primeSomeTemplate = (
+  ctx: ReturnType<typeof createContext>["ctx"],
+  symbolTable: SymbolTable
+) => {
+  const typeParamSymbol = symbolTable.declare({
+    name: "U",
+    kind: "type",
+    declaredAt: 0,
+  });
+  const someSymbol = symbolTable.declare({
+    name: "Some",
+    kind: "type",
+    declaredAt: 0,
+  });
+  const typeParam = ctx.arena.freshTypeParam();
+  const typeParamRef = ctx.arena.internTypeParamRef(typeParam);
+  const fields = [
+    { name: "value", type: typeParamRef, declaringParams: [typeParam] },
+  ];
+  const structural = ctx.arena.internStructuralObject({ fields });
+  const nominal = ctx.arena.internNominalObject({
+    owner: someSymbol,
+    name: "Some",
+    typeArgs: [typeParamRef],
+  });
+  const type = ctx.arena.internIntersection({ nominal, structural });
+  ctx.objectTemplates.set(someSymbol, {
+    symbol: someSymbol,
+    params: [{ symbol: typeParamSymbol, typeParam }],
+    nominal,
+    structural,
+    type,
+    fields,
+    baseNominal: undefined,
+  });
+  ctx.objectsByName.set("Some", someSymbol);
+  return { someSymbol, valueParam: typeParam };
+};
+
+const primeBucketMapTemplate = (
+  ctx: ReturnType<typeof createContext>["ctx"],
+  symbolTable: SymbolTable,
+  someSymbol: SymbolId
+) => {
+  const keyParamSymbol = symbolTable.declare({
+    name: "K",
+    kind: "type",
+    declaredAt: 0,
+  });
+  const valueParamSymbol = symbolTable.declare({
+    name: "V",
+    kind: "type",
+    declaredAt: 0,
+  });
+  const mapSymbol = symbolTable.declare({
+    name: "BucketMap",
+    kind: "type",
+    declaredAt: 0,
+  });
+  const keyParam = ctx.arena.freshTypeParam();
+  const valueParam = ctx.arena.freshTypeParam();
+  const keyRef = ctx.arena.internTypeParamRef(keyParam);
+  const valueRef = ctx.arena.internTypeParamRef(valueParam);
+  const payload = ctx.arena.internNominalObject({
+    owner: someSymbol,
+    name: "Some",
+    typeArgs: [valueRef],
+  });
+  const fields = [
+    { name: "bucketKey", type: keyRef, declaringParams: [keyParam] },
+    { name: "payload", type: payload, declaringParams: [valueParam] },
+  ];
+  const structural = ctx.arena.internStructuralObject({ fields });
+  const nominal = ctx.arena.internNominalObject({
+    owner: mapSymbol,
+    name: "BucketMap",
+    typeArgs: [keyRef, valueRef],
+  });
+  const type = ctx.arena.internIntersection({ nominal, structural });
+  ctx.objectTemplates.set(mapSymbol, {
+    symbol: mapSymbol,
+    params: [
+      { symbol: keyParamSymbol, typeParam: keyParam },
+      { symbol: valueParamSymbol, typeParam: valueParam },
+    ],
+    nominal,
+    structural,
+    type,
+    fields,
+    baseNominal: undefined,
+  });
+  ctx.objectsByName.set("BucketMap", mapSymbol);
+  return { mapSymbol, valueParam };
 };
 
 const primeAliasTemplate = (
@@ -204,6 +307,73 @@ describe("instantiation argument handling", () => {
     });
     const resolved = resolveTypeAlias(aliasSymbol, ctx, [valid]);
     expect(resolved).toBe(valid);
+  });
+
+  it("tracks declaring params on generic fields and blocks unsubstituted access", () => {
+    const { ctx, symbolTable } = createContext();
+    const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
+
+    const template = getObjectTemplate(boxSymbol, ctx);
+    expect(template?.fields[0]?.declaringParams).toEqual(
+      template ? [template.params[0]!.typeParam] : []
+    );
+
+    expect(() => getStructuralFields(template?.structural ?? -1, ctx)).toThrow(
+      /substitutions|type argument/i
+    );
+
+    const instantiated = ensureObjectType(boxSymbol, ctx, [ctx.boolType]);
+    expect(instantiated?.fields[0]?.type).toBe(ctx.boolType);
+    const structuralFields = getStructuralFields(
+      instantiated?.structural ?? -1,
+      ctx
+    );
+    expect(
+      structuralFields?.find((field) => field.name === "value")?.type
+    ).toBe(ctx.boolType);
+  });
+
+  it("prevents payload drift for fields annotated with declaring type params", () => {
+    const { ctx, symbolTable } = createContext();
+    const { someSymbol } = primeSomeTemplate(ctx, symbolTable);
+    const { mapSymbol, valueParam: mapValueParam } = primeBucketMapTemplate(
+      ctx,
+      symbolTable,
+      someSymbol
+    );
+
+    const mapInfo = ensureObjectType(mapSymbol, ctx, [
+      ctx.boolType,
+      ctx.unknownType,
+    ]);
+    const payloadField = mapInfo?.fields.find(
+      (field) => field.name === "payload"
+    );
+    expect(payloadField?.declaringParams).toEqual([mapValueParam]);
+
+    const concrete = ensureObjectType(mapSymbol, ctx, [
+      ctx.boolType,
+      ctx.boolType,
+    ]);
+    const concretePayload = concrete?.fields.find(
+      (field) => field.name === "payload"
+    );
+    expect(concretePayload?.type).toBeDefined();
+    if (!concretePayload) {
+      return;
+    }
+
+    const stringType =
+      ctx.primitiveCache.get("string") ?? ctx.arena.internPrimitive("string");
+    const mismatchedPayload = ctx.arena.internNominalObject({
+      owner: someSymbol,
+      name: "Some",
+      typeArgs: [stringType],
+    });
+
+    expect(typeSatisfies(mismatchedPayload, concretePayload.type, ctx)).toBe(
+      false
+    );
   });
 
   it("unifies composite types with variance-aware substitutions", () => {

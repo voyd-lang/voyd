@@ -90,7 +90,11 @@ export interface ObjectTypeInfo {
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
-  fields: readonly { name: string; type: TypeId }[];
+  fields: readonly {
+    name: string;
+    type: TypeId;
+    declaringParams?: readonly TypeParamId[];
+  }[];
   baseNominal?: TypeId;
 }
 
@@ -104,7 +108,11 @@ export interface ObjectTemplate {
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
-  fields: readonly { name: string; type: TypeId }[];
+  fields: readonly {
+    name: string;
+    type: TypeId;
+    declaringParams?: readonly TypeParamId[];
+  }[];
   baseNominal?: TypeId;
 }
 

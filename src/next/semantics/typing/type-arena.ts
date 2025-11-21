@@ -39,9 +39,15 @@ export interface NominalObjectType {
   typeArgs: readonly TypeId[];
 }
 
+export interface StructuralField {
+  name: string;
+  type: TypeId;
+  declaringParams?: readonly TypeParamId[];
+}
+
 export interface StructuralObjectType {
   kind: "structural-object";
-  fields: readonly { name: string; type: TypeId }[];
+  fields: readonly StructuralField[];
 }
 
 export interface FunctionParameter {
@@ -206,7 +212,14 @@ export const createTypeArena = (): TypeArena => {
     storeDescriptor({
       kind: "structural-object",
       fields: desc.fields
-        .map((field) => ({ ...field }))
+        .map((field) => ({
+          name: field.name,
+          type: field.type,
+          declaringParams:
+            field.declaringParams && field.declaringParams.length > 0
+              ? Array.from(new Set(field.declaringParams)).sort((a, b) => a - b)
+              : undefined,
+        }))
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
     });
 
@@ -270,7 +283,7 @@ export const createTypeArena = (): TypeArena => {
 
   const structuralFieldsOf = (
     type: TypeId
-  ): readonly { name: string; type: TypeId }[] | undefined => {
+  ): readonly StructuralField[] | undefined => {
     const desc = getDescriptor(type);
     if (desc.kind === "structural-object") {
       return desc.fields;
@@ -931,7 +944,11 @@ export const createTypeArena = (): TypeArena => {
         const fields = desc.fields.map((field) => {
           const substituted = substitute(field.type, subst);
           changed ||= substituted !== field.type;
-          return { name: field.name, type: substituted };
+          return {
+            name: field.name,
+            type: substituted,
+            declaringParams: field.declaringParams,
+          };
         });
         return changed ? internStructuralObject({ fields }) : type;
       }

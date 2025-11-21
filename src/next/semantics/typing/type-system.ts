@@ -6,11 +6,132 @@ import type {
   HirUnionTypeExpr,
 } from "../hir/index.js";
 import type { SymbolId, TypeId, TypeParamId } from "../ids.js";
+import type { StructuralField } from "./type-arena.js";
 import { BASE_OBJECT_NAME, type TypingContext, type ObjectTemplate, type ObjectTypeInfo } from "./types.js";
 import {
   normalizeTypeArgs,
   shouldCacheInstantiation,
 } from "../../types/instantiation.js";
+
+const paramsReferencedInType = (
+  type: TypeId,
+  allowed: ReadonlySet<TypeParamId>,
+  ctx: TypingContext,
+  seen: Set<TypeId> = new Set()
+): Set<TypeParamId> => {
+  if (seen.has(type)) {
+    return new Set();
+  }
+  seen.add(type);
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "type-param-ref":
+      return allowed.has(desc.param) ? new Set([desc.param]) : new Set();
+    case "trait":
+    case "nominal-object": {
+      return desc.typeArgs.reduce((acc, arg) => {
+        paramsReferencedInType(arg, allowed, ctx, seen).forEach((entry) =>
+          acc.add(entry)
+        );
+        return acc;
+      }, new Set<TypeParamId>());
+    }
+    case "structural-object":
+      return desc.fields.reduce((acc, field) => {
+        paramsReferencedInType(field.type, allowed, ctx, seen).forEach(
+          (entry) => acc.add(entry)
+        );
+        return acc;
+      }, new Set<TypeParamId>());
+    case "function": {
+      const acc = new Set<TypeParamId>();
+      desc.parameters.forEach((param) =>
+        paramsReferencedInType(param.type, allowed, ctx, seen).forEach((entry) =>
+          acc.add(entry)
+        )
+      );
+      paramsReferencedInType(desc.returnType, allowed, ctx, seen).forEach(
+        (entry) => acc.add(entry)
+      );
+      return acc;
+    }
+    case "union":
+      return desc.members.reduce((acc, member) => {
+        paramsReferencedInType(member, allowed, ctx, seen).forEach((entry) =>
+          acc.add(entry)
+        );
+        return acc;
+      }, new Set<TypeParamId>());
+    case "intersection": {
+      const acc = new Set<TypeParamId>();
+      if (typeof desc.nominal === "number") {
+        paramsReferencedInType(desc.nominal, allowed, ctx, seen).forEach(
+          (entry) => acc.add(entry)
+        );
+      }
+      if (typeof desc.structural === "number") {
+        paramsReferencedInType(desc.structural, allowed, ctx, seen).forEach(
+          (entry) => acc.add(entry)
+        );
+      }
+      return acc;
+    }
+    case "fixed-array":
+      return paramsReferencedInType(desc.element, allowed, ctx, seen);
+    default:
+      return new Set();
+  }
+};
+
+const declaringParamsForField = (
+  type: TypeId,
+  allowed: ReadonlySet<TypeParamId>,
+  ctx: TypingContext
+): readonly TypeParamId[] | undefined => {
+  const referenced = paramsReferencedInType(type, allowed, ctx);
+  return referenced.size > 0
+    ? Array.from(referenced).sort((a, b) => a - b)
+    : undefined;
+};
+
+const paramIdSetFrom = (
+  params: ReadonlyMap<SymbolId, TypeId> | undefined,
+  ctx: TypingContext
+): ReadonlySet<TypeParamId> | undefined => {
+  if (!params) {
+    return undefined;
+  }
+  const ids = Array.from(params.values())
+    .map((type) => {
+      const desc = ctx.arena.get(type);
+      return desc.kind === "type-param-ref" ? desc.param : undefined;
+    })
+    .filter((entry): entry is TypeParamId => typeof entry === "number");
+  return ids.length > 0 ? new Set(ids) : undefined;
+};
+
+const ensureFieldsSubstituted = (
+  fields: readonly StructuralField[],
+  ctx: TypingContext,
+  context: string
+): void => {
+  fields.forEach((field) => {
+    if (!field.declaringParams?.length) {
+      return;
+    }
+    const remaining = paramsReferencedInType(
+      field.type,
+      new Set(field.declaringParams),
+      ctx
+    );
+    if (remaining.size > 0) {
+      throw new Error(
+        `${context} is missing substitutions for field ${field.name}`
+      );
+    }
+  });
+};
 
 export const registerPrimitive = (
   ctx: TypingContext,
@@ -244,10 +365,17 @@ const resolveObjectTypeExpr = (
   ctx: TypingContext,
   typeParams?: ReadonlyMap<SymbolId, TypeId>
 ): TypeId => {
-  const fields = expr.fields.map((field) => ({
-    name: field.name,
-    type: resolveTypeExpr(field.type, ctx, ctx.unknownType, typeParams),
-  }));
+  const allowedParams = paramIdSetFrom(typeParams, ctx);
+  const fields = expr.fields.map((field) => {
+    const type = resolveTypeExpr(field.type, ctx, ctx.unknownType, typeParams);
+    return {
+      name: field.name,
+      type,
+      declaringParams: allowedParams
+        ? declaringParamsForField(type, allowedParams, ctx)
+        : undefined,
+    };
+  });
   return ctx.arena.internStructuralObject({ fields });
 };
 
@@ -256,10 +384,17 @@ const resolveTupleTypeExpr = (
   ctx: TypingContext,
   typeParams?: ReadonlyMap<SymbolId, TypeId>
 ): TypeId => {
-  const fields = expr.elements.map((element, index) => ({
-    name: `${index}`,
-    type: resolveTypeExpr(element, ctx, ctx.unknownType, typeParams),
-  }));
+  const allowedParams = paramIdSetFrom(typeParams, ctx);
+  const fields = expr.elements.map((element, index) => {
+    const type = resolveTypeExpr(element, ctx, ctx.unknownType, typeParams);
+    return {
+      name: `${index}`,
+      type,
+      declaringParams: allowedParams
+        ? declaringParamsForField(type, allowedParams, ctx)
+        : undefined,
+    };
+  });
   return ctx.arena.internStructuralObject({ fields });
 };
 
@@ -323,19 +458,38 @@ export const getObjectTemplate = (
       }
     });
 
+    const templateParams = new Set(params.map((param) => param.typeParam));
+
     const baseType = resolveTypeExpr(
       decl.base,
       ctx,
       ctx.baseObjectType,
       paramMap
     );
-    const baseFields = getStructuralFields(baseType, ctx) ?? [];
+    const baseFields = (getStructuralFields(baseType, ctx) ?? []).map(
+      (field) => ({
+        ...field,
+        declaringParams: declaringParamsForField(
+          field.type,
+          templateParams,
+          ctx
+        ),
+      })
+    );
     const baseNominal = getNominalComponent(baseType, ctx);
 
-    const ownFields = decl.fields.map((field) => ({
-      name: field.name,
-      type: resolveTypeExpr(field.type, ctx, ctx.unknownType, paramMap),
-    }));
+    const ownFields = decl.fields.map((field) => {
+      const type = resolveTypeExpr(field.type, ctx, ctx.unknownType, paramMap);
+      return {
+        name: field.name,
+        type,
+        declaringParams: declaringParamsForField(
+          type,
+          templateParams,
+          ctx
+        ),
+      };
+    });
 
     const fields = mergeDeclaredFields(baseFields, ownFields);
     const structural = ctx.arena.internStructuralObject({ fields });
@@ -378,6 +532,9 @@ export const ensureObjectType = (
   if (!template) {
     return undefined;
   }
+  const templateParamSet = new Set(
+    template.params.map((param) => param.typeParam)
+  );
 
   const normalized = normalizeTypeArgs({
     typeArgs,
@@ -427,11 +584,30 @@ export const ensureObjectType = (
 
   const nominal = ctx.arena.substitute(template.nominal, subst);
   const structural = ctx.arena.substitute(template.structural, subst);
+  const unresolvedStructuralParams = paramsReferencedInType(
+    structural,
+    templateParamSet,
+    ctx
+  );
+  if (unresolvedStructuralParams.size > 0) {
+    throw new Error(
+      `object ${getSymbolName(
+        symbol,
+        ctx
+      )} is missing substitutions for its structural fields`
+    );
+  }
   const type = ctx.arena.substitute(template.type, subst);
   const fields = template.fields.map((field) => ({
     name: field.name,
     type: ctx.arena.substitute(field.type, subst),
+    declaringParams: field.declaringParams,
   }));
+  ensureFieldsSubstituted(
+    fields,
+    ctx,
+    `object ${getSymbolName(symbol, ctx)} instantiation`
+  );
   const baseNominal = template.baseNominal
     ? ctx.arena.substitute(template.baseNominal, subst)
     : undefined;
@@ -453,13 +629,13 @@ export const ensureObjectType = (
 };
 
 const mergeDeclaredFields = (
-  inherited: readonly { name: string; type: TypeId }[],
-  own: readonly { name: string; type: TypeId }[]
-): { name: string; type: TypeId }[] => {
-  const fields = new Map<string, TypeId>();
-  inherited.forEach((field) => fields.set(field.name, field.type));
-  own.forEach((field) => fields.set(field.name, field.type));
-  return Array.from(fields.entries()).map(([name, type]) => ({ name, type }));
+  inherited: readonly StructuralField[],
+  own: readonly StructuralField[]
+): StructuralField[] => {
+  const fields = new Map<string, StructuralField>();
+  inherited.forEach((field) => fields.set(field.name, field));
+  own.forEach((field) => fields.set(field.name, field));
+  return Array.from(fields.values());
 };
 
 export const getObjectInfoForNominal = (
@@ -566,13 +742,18 @@ export const nominalSatisfies = (
 export const getStructuralFields = (
   type: TypeId,
   ctx: TypingContext
-): readonly { name: string; type: TypeId }[] | undefined => {
+): readonly StructuralField[] | undefined => {
   if (type === ctx.unknownType) {
     return undefined;
   }
 
   const desc = ctx.arena.get(type);
   if (desc.kind === "structural-object") {
+    ensureFieldsSubstituted(
+      desc.fields,
+      ctx,
+      "structural object access"
+    );
     return desc.fields;
   }
 
