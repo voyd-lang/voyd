@@ -83,6 +83,15 @@ export const registerTypeAliases = (ctx: TypingContext): void => {
       );
     }
     ctx.typeAliasTargets.set(item.symbol, item.target);
+    const params =
+      item.typeParameters ??
+      decl?.typeParameters?.map((param) => ({ symbol: param.symbol })) ??
+      [];
+    ctx.typeAliasTemplates.set(item.symbol, {
+      symbol: item.symbol,
+      params,
+      target: item.target,
+    });
     ctx.typeAliasesByName.set(getSymbolName(item.symbol, ctx), item.symbol);
   }
 };

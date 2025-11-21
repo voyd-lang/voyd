@@ -57,6 +57,7 @@ export interface TypeAliasDecl {
   visibility: HirVisibility;
   symbol: SymbolId;
   target: Expr;
+   typeParameters?: TypeParameterDecl[];
   moduleIndex: number;
 }
 

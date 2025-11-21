@@ -22,6 +22,7 @@ export interface ParsedTypeAliasDecl {
   visibility: HirVisibility;
   name: IdentifierAtom;
   target: Expr;
+  typeParameters: readonly IdentifierAtom[];
 }
 
 export interface ParsedObjectDecl {
@@ -118,17 +119,15 @@ export const parseTypeAliasDecl = (form: Form): ParsedTypeAliasDecl | null => {
     throw new Error("type declaration expects an assignment");
   }
 
-  const nameExpr = assignment.at(1);
-  if (!isIdentifierAtom(nameExpr)) {
-    throw new Error("type name must be an identifier");
-  }
+  const head = assignment.at(1);
+  const { name, typeParameters } = parseNamedTypeHead(head);
 
   const target = assignment.at(2);
   if (!target) {
     throw new Error("type declaration missing target expression");
   }
 
-  return { form, visibility, name: nameExpr, target };
+  return { form, visibility, name, target, typeParameters };
 };
 
 export const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {

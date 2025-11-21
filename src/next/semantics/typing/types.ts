@@ -76,9 +76,10 @@ export interface TypingContext {
   typeCheckMode: TypeCheckMode;
   currentFunctionReturnType: TypeId | undefined;
   typeAliasTargets: Map<SymbolId, HirTypeExpr>;
-  typeAliasTypes: Map<SymbolId, TypeId>;
+  typeAliasTemplates: Map<SymbolId, TypeAliasTemplate>;
+  typeAliasInstances: Map<string, TypeId>;
   typeAliasesByName: Map<string, SymbolId>;
-  resolvingTypeAliases: Set<SymbolId>;
+  resolvingTypeAliases: Set<string>;
   baseObjectSymbol: SymbolId;
   baseObjectNominal: TypeId;
   baseObjectStructural: TypeId;
@@ -101,6 +102,12 @@ export interface ObjectTemplate {
   type: TypeId;
   fields: readonly { name: string; type: TypeId }[];
   baseNominal?: TypeId;
+}
+
+export interface TypeAliasTemplate {
+  symbol: SymbolId;
+  params: readonly { symbol: SymbolId }[];
+  target: HirTypeExpr;
 }
 
 export const DEFAULT_EFFECT_ROW: EffectRowId = 0;

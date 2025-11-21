@@ -53,7 +53,7 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
 
     const typeDecl = parseTypeAliasDecl(entry);
     if (typeDecl) {
-      bindTypeAlias(typeDecl, ctx);
+      bindTypeAlias(typeDecl, ctx, tracker);
       continue;
     }
 
@@ -174,7 +174,8 @@ const bindFunctionParameters = (
 
 const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
-  ctx: BindingContext
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
 ): void => {
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
@@ -187,12 +188,37 @@ const bindTypeAlias = (
     metadata: { entity: "type-alias" },
   });
 
+  const aliasScope = ctx.symbolTable.createScope({
+    parent: tracker.current(),
+    kind: "module",
+    owner: decl.form.syntaxId,
+  });
+  ctx.scopeByNode.set(decl.form.syntaxId, aliasScope);
+
+  const typeParameters: TypeParameterDecl[] = [];
+  tracker.enterScope(aliasScope, () => {
+    decl.typeParameters.forEach((param) => {
+      rememberSyntax(param, ctx);
+      const paramSymbol = ctx.symbolTable.declare({
+        name: param.value,
+        kind: "type-parameter",
+        declaredAt: param.syntaxId,
+      });
+      typeParameters.push({
+        name: param.value,
+        symbol: paramSymbol,
+        ast: param,
+      });
+    });
+  });
+
   ctx.decls.registerTypeAlias({
     name: decl.name.value,
     form: decl.form,
     visibility: decl.visibility,
     symbol,
     target: decl.target,
+    typeParameters,
     moduleIndex: ctx.nextModuleIndex++,
   });
 };

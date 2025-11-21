@@ -73,7 +73,10 @@ export const lowerTypeAliasDecl = (
   alias: BoundTypeAlias,
   ctx: LowerContext
 ): void => {
-  const target = lowerTypeExpr(alias.target, ctx);
+  const aliasScope =
+    (alias.form && ctx.scopeByNode.get(alias.form.syntaxId)) ??
+    ctx.symbolTable.rootScope;
+  const target = lowerTypeExpr(alias.target, ctx, aliasScope);
   if (!target) {
     throw new Error("type alias requires a target type expression");
   }
@@ -87,6 +90,7 @@ export const lowerTypeAliasDecl = (
     visibility: alias.visibility,
     ast: aliasSyntax.syntaxId,
     span: toSourceSpan(aliasSyntax),
+    typeParameters: lowerTypeParameters(alias.typeParameters),
     target,
   });
 

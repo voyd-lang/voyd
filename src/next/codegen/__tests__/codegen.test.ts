@@ -149,4 +149,14 @@ describe("next codegen", () => {
     expect(typeof main).toBe("function");
     expect((main as () => number)()).toBe(1);
   });
+
+  it("emits wasm for type aliases with type parameters", () => {
+    const ast = loadAst("type_alias_generics.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module } = codegen(semantics);
+    const instance = getWasmInstance(module);
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(12);
+  });
 });
