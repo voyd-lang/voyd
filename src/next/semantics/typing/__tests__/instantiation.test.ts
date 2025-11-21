@@ -5,7 +5,7 @@ import { seedBaseObjectType, seedPrimitiveTypes } from "../registry.js";
 import { ensureObjectType, resolveTypeAlias } from "../type-system.js";
 import { DeclTable } from "../../decls.js";
 import type { HirGraph, HirTypeExpr } from "../../hir/index.js";
-import type { SourceSpan } from "../../ids.js";
+import type { SourceSpan, TypeId } from "../../ids.js";
 
 const DUMMY_SPAN: SourceSpan = { file: "<test>", start: 0, end: 0 };
 
@@ -39,7 +39,8 @@ const createContext = () => {
 
 const primeBoxTemplate = (
   ctx: ReturnType<typeof createContext>["ctx"],
-  symbolTable: SymbolTable
+  symbolTable: SymbolTable,
+  constraint?: TypeId
 ) => {
   const typeParamSymbol = symbolTable.declare({
     name: "T",
@@ -63,7 +64,7 @@ const primeBoxTemplate = (
   const type = ctx.arena.internIntersection({ nominal, structural });
   ctx.objectTemplates.set(boxSymbol, {
     symbol: boxSymbol,
-    params: [{ symbol: typeParamSymbol, typeParam }],
+    params: [{ symbol: typeParamSymbol, typeParam, constraint }],
     nominal,
     structural,
     type,
@@ -76,7 +77,8 @@ const primeBoxTemplate = (
 
 const primeAliasTemplate = (
   ctx: ReturnType<typeof createContext>["ctx"],
-  symbolTable: SymbolTable
+  symbolTable: SymbolTable,
+  options: { constraint?: HirTypeExpr } = {}
 ) => {
   const paramSymbol = symbolTable.declare({
     name: "U",
@@ -97,7 +99,7 @@ const primeAliasTemplate = (
   };
   ctx.typeAliasTemplates.set(aliasSymbol, {
     symbol: aliasSymbol,
-    params: [{ symbol: paramSymbol }],
+    params: [{ symbol: paramSymbol, constraint: options.constraint }],
     target,
   });
   ctx.typeAliasTargets.set(aliasSymbol, target);
@@ -148,5 +150,83 @@ describe("instantiation argument handling", () => {
     const applied = resolveTypeAlias(aliasSymbol, ctx, [ctx.boolType]);
     expect(applied).toBe(ctx.boolType);
     expect(ctx.typeAliasInstances.size).toBe(1);
+  });
+
+  it("enforces object generic constraints before caching instantiations", () => {
+    const { ctx, symbolTable } = createContext();
+    const valueConstraint = ctx.arena.internStructuralObject({
+      fields: [{ name: "value", type: ctx.boolType }],
+    });
+    const { boxSymbol } = primeBoxTemplate(ctx, symbolTable, valueConstraint);
+
+    expect(() => ensureObjectType(boxSymbol, ctx, [ctx.boolType])).toThrow(
+      /constraint/
+    );
+
+    const payload = ctx.arena.internStructuralObject({
+      fields: [{ name: "value", type: ctx.boolType }],
+    });
+    const info = ensureObjectType(boxSymbol, ctx, [payload]);
+    expect(info?.type).toBeDefined();
+  });
+
+  it("rejects alias instantiation when constraints fail", () => {
+    const { ctx, symbolTable } = createContext();
+    const constraint: HirTypeExpr = {
+      typeKind: "object",
+      fields: [
+        {
+          name: "value",
+          type: {
+            typeKind: "named",
+            path: ["i32"],
+            ast: 0,
+            span: DUMMY_SPAN,
+          },
+          span: DUMMY_SPAN,
+        },
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const { aliasSymbol } = primeAliasTemplate(ctx, symbolTable, {
+      constraint,
+    });
+
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, [ctx.boolType])).toThrow(
+      /constraint/
+    );
+
+    const i32 =
+      ctx.primitiveCache.get("i32") ?? ctx.arena.internPrimitive("i32");
+    const valid = ctx.arena.internStructuralObject({
+      fields: [{ name: "value", type: i32 }],
+    });
+    const resolved = resolveTypeAlias(aliasSymbol, ctx, [valid]);
+    expect(resolved).toBe(valid);
+  });
+
+  it("unifies composite types with variance-aware substitutions", () => {
+    const { ctx } = createContext();
+    const param = ctx.arena.freshTypeParam();
+    const paramRef = ctx.arena.internTypeParamRef(param);
+    const genericFn = ctx.arena.internFunction({
+      parameters: [{ type: paramRef, optional: false }],
+      returnType: ctx.arena.internUnion([paramRef, ctx.voidType]),
+      effects: ctx.defaultEffectRow,
+    });
+    const concreteFn = ctx.arena.internFunction({
+      parameters: [{ type: ctx.boolType, optional: false }],
+      returnType: ctx.arena.internUnion([ctx.boolType, ctx.voidType]),
+      effects: ctx.defaultEffectRow,
+    });
+
+    const result = ctx.arena.unify(concreteFn, genericFn, {
+      location: 0,
+      reason: "function variance",
+      variance: "covariant",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.substitution.get(param)).toBe(ctx.boolType);
   });
 });

@@ -96,7 +96,11 @@ export interface ObjectTypeInfo {
 
 export interface ObjectTemplate {
   symbol: SymbolId;
-  params: readonly { symbol: SymbolId; typeParam: TypeParamId }[];
+  params: readonly {
+    symbol: SymbolId;
+    typeParam: TypeParamId;
+    constraint?: TypeId;
+  }[];
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
@@ -106,7 +110,7 @@ export interface ObjectTemplate {
 
 export interface TypeAliasTemplate {
   symbol: SymbolId;
-  params: readonly { symbol: SymbolId }[];
+  params: readonly { symbol: SymbolId; constraint?: HirTypeExpr }[];
   target: HirTypeExpr;
 }
 

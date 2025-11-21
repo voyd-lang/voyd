@@ -124,6 +124,33 @@ export const resolveTypeAlias = (
 
   ctx.resolvingTypeAliases.add(key);
   try {
+    template.params.forEach((param, index) => {
+      if (!param.constraint) {
+        return;
+      }
+      const applied = normalized.applied[index] ?? ctx.unknownType;
+      if (applied === ctx.unknownType) {
+        return;
+      }
+      const resolvedConstraint = resolveTypeExpr(
+        param.constraint,
+        ctx,
+        ctx.unknownType,
+        paramMap
+      );
+      if (!typeSatisfies(applied, resolvedConstraint, ctx)) {
+        throw new Error(
+          `type argument for ${getSymbolName(
+            param.symbol,
+            ctx
+          )} does not satisfy constraint for type alias ${getSymbolName(
+            symbol,
+            ctx
+          )}`
+        );
+      }
+    });
+
     const resolved = resolveTypeExpr(
       template.target,
       ctx,
@@ -279,11 +306,22 @@ export const getObjectTemplate = (
       decl.typeParameters?.map((param) => ({
         symbol: param.symbol,
         typeParam: ctx.arena.freshTypeParam(),
+        constraint: undefined as TypeId | undefined,
       })) ?? [];
     const paramMap = new Map<SymbolId, TypeId>();
-    params.forEach(({ symbol, typeParam }) =>
-      paramMap.set(symbol, ctx.arena.internTypeParamRef(typeParam))
-    );
+    params.forEach(({ symbol, typeParam }, index) => {
+      const ref = ctx.arena.internTypeParamRef(typeParam);
+      paramMap.set(symbol, ref);
+      const constraintExpr = decl.typeParameters?.[index]?.constraint;
+      if (constraintExpr) {
+        params[index]!.constraint = resolveTypeExpr(
+          constraintExpr,
+          ctx,
+          ctx.unknownType,
+          paramMap
+        );
+      }
+    });
 
     const baseType = resolveTypeExpr(
       decl.base,
@@ -367,6 +405,25 @@ export const ensureObjectType = (
   template.params.forEach((param, index) =>
     subst.set(param.typeParam, normalized.applied[index]!)
   );
+
+  template.params.forEach((param, index) => {
+    if (!param.constraint) {
+      return;
+    }
+    const applied = normalized.applied[index] ?? ctx.unknownType;
+    if (applied === ctx.unknownType) {
+      return;
+    }
+    const constraintType = ctx.arena.substitute(param.constraint, subst);
+    if (!typeSatisfies(applied, constraintType, ctx)) {
+      throw new Error(
+        `type argument for ${getSymbolName(
+          param.symbol,
+          ctx
+        )} does not satisfy constraint for object ${getSymbolName(symbol, ctx)}`
+      );
+    }
+  });
 
   const nominal = ctx.arena.substitute(template.nominal, subst);
   const structural = ctx.arena.substitute(template.structural, subst);
@@ -470,6 +527,24 @@ export const nominalSatisfies = (
     }
     return expectedDesc.typeArgs.every((expectedArg, index) => {
       if (expectedArg === ctx.unknownType) {
+        return true;
+      }
+      const result = ctx.arena.unify(
+        actualDesc.typeArgs[index]!,
+        expectedArg,
+        {
+          location: ctx.hir.module.ast,
+          reason: "type argument compatibility",
+          variance: "covariant",
+        }
+      );
+      if (result.ok) {
+        return true;
+      }
+      if (
+        ctx.typeCheckMode === "relaxed" &&
+        actualDesc.typeArgs[index] === ctx.unknownType
+      ) {
         return true;
       }
       return typeSatisfies(actualDesc.typeArgs[index]!, expectedArg, ctx);
@@ -589,6 +664,15 @@ export const structuralTypeSatisfies = (
       return true;
     }
 
+    const comparison = ctx.arena.unify(candidate.type, expectedField.type, {
+      location: ctx.hir.module.ast,
+      reason: `field ${expectedField.name} compatibility check`,
+      variance: "covariant",
+    });
+    if (comparison.ok) {
+      return true;
+    }
+
     return structuralTypeSatisfies(
       candidate.type,
       expectedField.type,
@@ -612,6 +696,13 @@ export const typeSatisfies = (
     (actual === ctx.unknownType || expected === ctx.unknownType)
   ) {
     return true;
+  }
+
+  if (
+    ctx.typeCheckMode === "strict" &&
+    (actual === ctx.unknownType || expected === ctx.unknownType)
+  ) {
+    return false;
   }
 
   const actualDesc = ctx.arena.get(actual);
@@ -646,7 +737,16 @@ export const typeSatisfies = (
     return false;
   }
 
-  return structuralTypeSatisfies(actual, expected, ctx);
+  if (structuralTypeSatisfies(actual, expected, ctx)) {
+    return true;
+  }
+
+  const compatibility = ctx.arena.unify(actual, expected, {
+    location: ctx.hir.module.ast,
+    reason: "type satisfaction",
+    variance: "covariant",
+  });
+  return compatibility.ok;
 };
 
 export const ensureTypeMatches = (
