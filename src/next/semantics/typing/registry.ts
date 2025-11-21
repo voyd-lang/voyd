@@ -86,7 +86,7 @@ export const registerTypeAliases = (ctx: TypingContext): void => {
     const typeParams = item.typeParameters ?? decl?.typeParameters ?? [];
     const params = typeParams.map((param) => ({
       symbol: param.symbol,
-      constraint: param.constraint,
+      constraint: "constraint" in param ? param.constraint : undefined,
     }));
     ctx.typeAliasTemplates.set(item.symbol, {
       symbol: item.symbol,
