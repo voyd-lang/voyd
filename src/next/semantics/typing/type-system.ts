@@ -290,58 +290,68 @@ export const resolveTypeAlias = (
     }
   }
 
-  if (ctx.resolvingTypeAliases.has(key)) {
-    ctx.failedTypeAliasInstantiations.add(key);
-    throw new Error(
-      `cyclic type alias instantiation for ${aliasName}`
-    );
+  const active = ctx.resolvingTypeAliases.get(key);
+  if (typeof active === "number") {
+    return active;
   }
 
-  const paramMap = new Map<SymbolId, TypeId>();
-  template.params.forEach((param, index) =>
-    paramMap.set(param.symbol, normalized.applied[index] ?? ctx.unknownType)
-  );
-
-  ctx.resolvingTypeAliases.add(key);
+  let resolved: TypeId;
   try {
-    template.params.forEach((param, index) => {
-      if (!param.constraint) {
-        return;
-      }
-      const applied = normalized.applied[index] ?? ctx.unknownType;
-      if (applied === ctx.unknownType) {
-        return;
-      }
-      const resolvedConstraint = resolveTypeExpr(
-        param.constraint,
+    resolved = ctx.arena.createRecursiveType((self) => {
+      ctx.resolvingTypeAliases.set(key, self);
+
+      const paramMap = new Map<SymbolId, TypeId>();
+      paramMap.set(symbol, self);
+      template.params.forEach((param, index) =>
+        paramMap.set(param.symbol, normalized.applied[index] ?? ctx.unknownType)
+      );
+
+      template.params.forEach((param, index) => {
+        if (!param.constraint) {
+          return;
+        }
+        const applied = normalized.applied[index] ?? ctx.unknownType;
+        if (applied === ctx.unknownType) {
+          return;
+        }
+        const resolvedConstraint = resolveTypeExpr(
+          param.constraint,
+          ctx,
+          ctx.unknownType,
+          paramMap
+        );
+        if (!typeSatisfies(applied, resolvedConstraint, ctx)) {
+          throw new Error(
+            `type argument for ${getSymbolName(
+              param.symbol,
+              ctx
+            )} does not satisfy constraint for type alias ${getSymbolName(
+              symbol,
+              ctx
+            )}`
+          );
+        }
+      });
+
+      const targetType = resolveTypeExpr(
+        template.target,
         ctx,
         ctx.unknownType,
         paramMap
       );
-      if (!typeSatisfies(applied, resolvedConstraint, ctx)) {
+      if (targetType === self) {
         throw new Error(
-          `type argument for ${getSymbolName(
-            param.symbol,
-            ctx
-          )} does not satisfy constraint for type alias ${getSymbolName(
-            symbol,
-            ctx
-          )}`
+          `type alias ${aliasName} cannot resolve to itself`
         );
       }
+      if (containsUnknownType(targetType, ctx)) {
+        throw new Error(
+          `type alias ${aliasName} could not be fully resolved`
+        );
+      }
+      return ctx.arena.get(targetType);
     });
 
-    const resolved = resolveTypeExpr(
-      template.target,
-      ctx,
-      ctx.unknownType,
-      paramMap
-    );
-    if (containsUnknownType(resolved, ctx)) {
-      throw new Error(
-        `type alias ${aliasName} could not be fully resolved`
-      );
-    }
     if (cacheable) {
       ctx.typeAliasInstances.set(key, resolved);
     }
@@ -798,30 +808,33 @@ export const nominalSatisfies = (
       return false;
     }
     return expectedDesc.typeArgs.every((expectedArg, index) => {
-      if (expectedArg === ctx.unknownType) {
-        return true;
-      }
-      const result = ctx.arena.unify(
-        actualDesc.typeArgs[index]!,
+    if (expectedArg === ctx.unknownType) {
+      return true;
+    }
+    const result = ctx.arena.unify(
+      actualDesc.typeArgs[index]!,
         expectedArg,
         {
           location: ctx.hir.module.ast,
           reason: "type argument compatibility",
           variance: "covariant",
         }
-      );
-      if (result.ok) {
-        return true;
-      }
-      if (
-        ctx.typeCheckMode === "relaxed" &&
-        actualDesc.typeArgs[index] === ctx.unknownType
-      ) {
-        return true;
-      }
+    );
+    if (result.ok) {
+      return true;
+    }
+    if (
+      ctx.typeCheckMode === "relaxed" &&
+      actualDesc.typeArgs[index] === ctx.unknownType
+    ) {
+      return true;
+    }
+    if (ctx.typeCheckMode === "relaxed") {
       return typeSatisfies(actualDesc.typeArgs[index]!, expectedArg, ctx);
-    });
-  }
+    }
+    return false;
+  });
+}
 
   if (seen.has(actual)) {
     return false;

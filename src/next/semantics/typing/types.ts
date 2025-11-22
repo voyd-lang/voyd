@@ -108,7 +108,7 @@ export interface TypingContext {
   typeAliasTemplates: Map<SymbolId, TypeAliasTemplate>;
   typeAliasInstances: Map<string, TypeId>;
   typeAliasesByName: Map<string, SymbolId>;
-  resolvingTypeAliases: Set<string>;
+  resolvingTypeAliases: Map<string, TypeId>;
   failedTypeAliasInstantiations: Set<string>;
   baseObjectSymbol: SymbolId;
   baseObjectNominal: TypeId;

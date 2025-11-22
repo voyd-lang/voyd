@@ -251,7 +251,7 @@ describe("instantiation argument handling", () => {
     expect(ctx.typeAliasInstances.size).toBe(0);
   });
 
-  it("throws on direct type alias cycles", () => {
+  it("rejects aliases that resolve directly to themselves", () => {
     const { ctx, symbolTable } = createContext();
     const aliasSymbol = symbolTable.declare({
       name: "Loop",
@@ -273,7 +273,7 @@ describe("instantiation argument handling", () => {
     ctx.typeAliasTargets.set(aliasSymbol, target);
 
     expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow(
-      /cyclic|cycle|recursive/i
+      /cannot resolve to itself/
     );
     expect(ctx.typeAliasInstances.size).toBe(0);
     expect(
@@ -281,8 +281,75 @@ describe("instantiation argument handling", () => {
     ).toBe(true);
   });
 
-  it("fails mutually recursive aliases instead of returning unknown", () => {
+  it("resolves recursive aliases through constructors", () => {
     const { ctx, symbolTable } = createContext();
+    const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
+    const aliasSymbol = symbolTable.declare({
+      name: "Rec",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const aliasRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Rec"],
+      symbol: aliasSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const boxedAlias: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Box"],
+      symbol: boxSymbol,
+      typeArguments: [aliasRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const target: HirTypeExpr = {
+      typeKind: "union",
+      members: [
+        boxedAlias,
+        {
+          typeKind: "named",
+          path: ["i32"],
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(aliasSymbol, {
+      symbol: aliasSymbol,
+      params: [],
+      target,
+    });
+    ctx.typeAliasTargets.set(aliasSymbol, target);
+
+    const resolved = resolveTypeAlias(aliasSymbol, ctx, []);
+    const desc = ctx.arena.get(resolved);
+    expect(desc.kind).toBe("union");
+    if (desc.kind !== "union") {
+      return;
+    }
+    const boxedMember = desc.members.find((member) => {
+      const memberDesc = ctx.arena.get(member);
+      if (memberDesc.kind === "intersection" && typeof memberDesc.nominal === "number") {
+        const nominalDesc = ctx.arena.get(memberDesc.nominal);
+        return nominalDesc.kind === "nominal-object" && nominalDesc.owner === boxSymbol;
+      }
+      if (memberDesc.kind === "nominal-object") {
+        return memberDesc.owner === boxSymbol;
+      }
+      return false;
+    });
+    expect(boxedMember).toBeDefined();
+    expect(resolveTypeAlias(aliasSymbol, ctx, [])).toBe(resolved);
+  });
+
+  it("resolves mutually recursive aliases", () => {
+    const { ctx, symbolTable } = createContext();
+    const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
     const leftSymbol = symbolTable.declare({
       name: "Left",
       kind: "type",
@@ -293,17 +360,54 @@ describe("instantiation argument handling", () => {
       kind: "type",
       declaredAt: 0,
     });
-    const leftTarget: HirTypeExpr = {
+    const leftBase: HirTypeExpr = {
       typeKind: "named",
-      path: ["Right"],
-      symbol: rightSymbol,
+      path: ["i32"],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const leftTarget: HirTypeExpr = {
+      typeKind: "union",
+      members: [
+        {
+          typeKind: "named",
+          path: ["Right"],
+          symbol: rightSymbol,
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+        leftBase,
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const boxedLeft: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Box"],
+      symbol: boxSymbol,
+      typeArguments: [
+        {
+          typeKind: "named",
+          path: ["Left"],
+          symbol: leftSymbol,
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
       ast: 0,
       span: DUMMY_SPAN,
     };
     const rightTarget: HirTypeExpr = {
-      typeKind: "named",
-      path: ["Left"],
-      symbol: leftSymbol,
+      typeKind: "union",
+      members: [
+        boxedLeft,
+        {
+          typeKind: "named",
+          path: ["bool"],
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
       ast: 0,
       span: DUMMY_SPAN,
     };
@@ -321,16 +425,30 @@ describe("instantiation argument handling", () => {
     });
     ctx.typeAliasTargets.set(rightSymbol, rightTarget);
 
-    expect(() => resolveTypeAlias(leftSymbol, ctx, [])).toThrow(
-      /cyclic|cycle|recursive/i
-    );
-    expect(ctx.typeAliasInstances.size).toBe(0);
-    expect(
-      ctx.failedTypeAliasInstantiations.has(`${leftSymbol}<>`)
-    ).toBe(true);
-    expect(
-      ctx.failedTypeAliasInstantiations.has(`${rightSymbol}<>`)
-    ).toBe(true);
+    const leftAlias = resolveTypeAlias(leftSymbol, ctx, []);
+    const rightAlias = resolveTypeAlias(rightSymbol, ctx, []);
+
+    expect(ctx.typeAliasInstances.get(`${leftSymbol}<>`)).toBe(leftAlias);
+    expect(ctx.typeAliasInstances.get(`${rightSymbol}<>`)).toBe(rightAlias);
+
+    const leftDesc = ctx.arena.get(leftAlias);
+    const rightDesc = ctx.arena.get(rightAlias);
+    expect(leftDesc.kind).toBe("union");
+    expect(rightDesc.kind).toBe("union");
+    if (rightDesc.kind === "union") {
+      const hasBoxedLeft = rightDesc.members.some((member) => {
+        const memberDesc = ctx.arena.get(member);
+        if (memberDesc.kind === "intersection" && typeof memberDesc.nominal === "number") {
+          const nominalDesc = ctx.arena.get(memberDesc.nominal);
+          return nominalDesc.kind === "nominal-object" && nominalDesc.owner === boxSymbol;
+        }
+        if (memberDesc.kind === "nominal-object") {
+          return memberDesc.owner === boxSymbol;
+        }
+        return false;
+      });
+      expect(hasBoxedLeft).toBe(true);
+    }
   });
 
   it("enforces object generic constraints before caching instantiations", () => {
