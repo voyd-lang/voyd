@@ -30,11 +30,20 @@ export const compileCallExpr = (
   }
 
   if (callee.exprKind === "overload-set") {
-    const targetSymbol = ctx.typing.callTargets.get(expr.id);
+    const targets = ctx.typing.callTargets.get(expr.id);
+    const targetSymbol =
+      (fnCtx.instanceKey && targets?.get(fnCtx.instanceKey)) ??
+      (targets && targets.size === 1
+        ? targets.values().next().value
+        : undefined);
     if (typeof targetSymbol !== "number") {
       throw new Error("codegen missing overload resolution for indirect call");
     }
-    const targetMeta = ctx.functions.get(targetSymbol);
+    const targetMeta = getFunctionMetadataForCall({
+      symbol: targetSymbol,
+      callId: expr.id,
+      ctx,
+    });
     if (!targetMeta) {
       throw new Error(`codegen cannot call symbol ${targetSymbol}`);
     }
@@ -64,17 +73,22 @@ export const compileCallExpr = (
         call: expr,
         args,
         ctx,
+        instanceKey: fnCtx.instanceKey,
       }),
       usedReturnCall: false,
     };
   }
 
-  const targetMeta = ctx.functions.get(callee.symbol);
-  if (!targetMeta) {
+  const meta = getFunctionMetadataForCall({
+    symbol: callee.symbol,
+    callId: expr.id,
+    ctx,
+  });
+  if (!meta) {
     throw new Error(`codegen missing metadata for symbol ${callee.symbol}`);
   }
-  const args = compileCallArguments(expr, targetMeta, ctx, fnCtx, compileExpr);
-  return emitResolvedCall(targetMeta, args, expr.id, ctx, {
+  const args = compileCallArguments(expr, meta, ctx, fnCtx, compileExpr);
+  return emitResolvedCall(meta, args, expr.id, ctx, {
     tailPosition,
     expectedResultTypeId,
   });
@@ -88,7 +102,7 @@ const emitResolvedCall = (
   options: CompileCallOptions = {}
 ): CompiledExpression => {
   const { tailPosition = false, expectedResultTypeId } = options;
-  const returnTypeId = getRequiredExprType(callId, ctx);
+  const returnTypeId = getRequiredExprType(callId, ctx, meta.instanceKey);
   const expectedTypeId = expectedResultTypeId ?? returnTypeId;
 
   if (
@@ -99,7 +113,7 @@ const emitResolvedCall = (
       expr: ctx.mod.return_call(
         meta.wasmName,
         args as number[],
-        getExprBinaryenType(callId, ctx)
+        getExprBinaryenType(callId, ctx, meta.instanceKey)
       ),
       usedReturnCall: true,
     };
@@ -109,7 +123,7 @@ const emitResolvedCall = (
     expr: ctx.mod.call(
       meta.wasmName,
       args as number[],
-      getExprBinaryenType(callId, ctx)
+      getExprBinaryenType(callId, ctx, meta.instanceKey)
     ),
     usedReturnCall: false,
   };
@@ -124,7 +138,11 @@ const compileCallArguments = (
 ): binaryen.ExpressionRef[] => {
   return call.args.map((arg, index) => {
     const expectedTypeId = meta.paramTypeIds[index];
-    const actualTypeId = getRequiredExprType(arg.expr, ctx);
+    const actualTypeId = getRequiredExprType(
+      arg.expr,
+      ctx,
+      fnCtx.instanceKey
+    );
     const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
     return coerceValueToType({
       value: value.expr,
@@ -134,4 +152,31 @@ const compileCallArguments = (
       fnCtx,
     });
   });
+};
+
+const getFunctionMetadataForCall = ({
+  symbol,
+  callId,
+  ctx,
+}: {
+  symbol: number;
+  callId: HirExprId;
+  ctx: CodegenContext;
+}): FunctionMetadata | undefined => {
+  const key = ctx.typing.callInstanceKeys.get(callId);
+  const instance = key ? ctx.functionInstances.get(key) : undefined;
+  if (instance) {
+    return instance;
+  }
+  const metas = ctx.functions.get(symbol);
+  if (!metas || metas.length === 0) {
+    return undefined;
+  }
+  if (!key) {
+    const genericMeta = metas.find((meta) => meta.typeArgs.length === 0);
+    if (genericMeta) {
+      return genericMeta;
+    }
+  }
+  return metas[0];
 };

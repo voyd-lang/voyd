@@ -1,0 +1,8 @@
+fn add<T>(a: T, b: T) -> T
+  a + b
+
+pub fn main1()
+  add(1.0, 2.0)
+
+pub fn main2()
+  add(1, 2)

@@ -130,4 +130,26 @@ describe("binding pipeline", () => {
       expect(resolved).toBe(optional.typeParameters[0].symbol);
     }
   });
+
+  it("binds type parameters for functions", () => {
+    const name = "function_generics.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    const addFn = binding.functions.find(
+      (fn) => symbolTable.getSymbol(fn.symbol).name === "add"
+    );
+    expect(addFn?.typeParameters?.length).toBe(1);
+
+    const fnScope =
+      addFn?.form && binding.scopeByNode.get(addFn.form.syntaxId);
+    const typeParamSymbol = addFn?.typeParameters?.[0]?.symbol;
+
+    if (typeof fnScope === "number" && typeof typeParamSymbol === "number") {
+      expect(symbolTable.resolve("T", fnScope)).toBe(typeParamSymbol);
+    }
+  });
 });

@@ -303,6 +303,7 @@ describe("semanticsPipeline", () => {
       expectedTarget: SymbolId,
       expectedType: string
     ) => {
+      const instanceKey = `${fnSymbol}<>`;
       const fn = getFunctionItem(fnSymbol);
       const block = hir.expressions.get(fn.body);
       expect(block?.exprKind).toBe("block");
@@ -310,7 +311,9 @@ describe("semanticsPipeline", () => {
       expect(callExprId).toBeDefined();
       const callExpr = hir.expressions.get(callExprId!);
       expect(callExpr?.exprKind).toBe("call");
-      expect(typing.callTargets.get(callExpr!.id)).toBe(expectedTarget);
+      expect(typing.callTargets.get(callExpr!.id)?.get(instanceKey)).toBe(
+        expectedTarget
+      );
       const callee = hir.expressions.get((callExpr as HirCallExpr)!.callee);
       expect(callee?.exprKind).toBe("identifier");
       expect((callee as HirIdentifierExpr).symbol).toBe(expectedTarget);
@@ -320,6 +323,63 @@ describe("semanticsPipeline", () => {
 
     expectCallResolution(callIntSymbol, intAddSymbol, "i32");
     expectCallResolution(callFloatSymbol, floatAddSymbol, "f64");
+  });
+
+  it("tracks overload resolution separately for generic instantiations", () => {
+    const ast = loadAst("generic_overload_resolution.voyd");
+    const { symbolTable, hir, typing } = semanticsPipeline(ast);
+    const rootScope = symbolTable.rootScope;
+
+    const chooseSymbol = symbolTable.resolve("choose", rootScope);
+    const callIntSymbol = symbolTable.resolve("call_int", rootScope);
+    const callFloatSymbol = symbolTable.resolve("call_float", rootScope);
+    expect(chooseSymbol).toBeDefined();
+    expect(callIntSymbol).toBeDefined();
+    expect(callFloatSymbol).toBeDefined();
+
+    const overloadFns = Array.from(hir.items.values()).filter(
+      (item): item is HirFunction =>
+        item.kind === "function" &&
+        symbolTable.getSymbol(item.symbol).name === "overloaded"
+    );
+    const resolveOverload = (primitiveName: string): SymbolId => {
+      const match = overloadFns.find((fn) => {
+        const param = fn.parameters[0];
+        if (!param?.type || param.type.typeKind !== "named") {
+          return false;
+        }
+        return param.type.path[0] === primitiveName;
+      });
+      if (!match) {
+        throw new Error(`missing overloaded function for ${primitiveName}`);
+      }
+      return match.symbol;
+    };
+
+    const intOverload = resolveOverload("i32");
+    const floatOverload = resolveOverload("f64");
+
+    const chooseFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === chooseSymbol
+    );
+    expect(chooseFn).toBeDefined();
+    const body = hir.expressions.get(chooseFn!.body);
+    expect(body?.exprKind).toBe("block");
+    const callExprId = (body as HirBlockExpr).value;
+    expect(callExprId).toBeDefined();
+    const callExpr = callExprId ? hir.expressions.get(callExprId) : undefined;
+    expect(callExpr?.exprKind).toBe("call");
+    const callee = callExpr
+      ? hir.expressions.get((callExpr as HirCallExpr).callee)
+      : undefined;
+    expect(callee?.exprKind).toBe("overload-set");
+
+    const targets = typing.callTargets.get(callExprId!);
+    const intKey = `${chooseSymbol}<${typing.arena.internPrimitive("i32")}>`;
+    const floatKey = `${chooseSymbol}<${typing.arena.internPrimitive("f64")}>`;
+    expect(targets?.get(intKey)).toBe(intOverload);
+    expect(targets?.get(floatKey)).toBe(floatOverload);
   });
 
   it("rejects ambiguous overloaded calls", () => {

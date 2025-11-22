@@ -43,6 +43,8 @@ export interface FunctionMetadata {
   resultType: binaryen.Type;
   paramTypeIds: readonly TypeId[];
   resultTypeId: TypeId;
+  typeArgs: readonly TypeId[];
+  instanceKey: string;
 }
 
 export interface StructuralFieldInfo {
@@ -59,6 +61,7 @@ export interface StructuralTypeInfo {
   typeId: TypeId;
   structuralId: TypeId;
   nominalId?: TypeId;
+  nominalAncestors: readonly TypeId[];
   runtimeType: binaryen.Type;
   interfaceType: binaryen.Type;
   fields: StructuralFieldInfo[];
@@ -75,7 +78,8 @@ export interface CodegenContext {
   hir: HirGraph;
   typing: TypingResult;
   options: Required<CodegenOptions>;
-  functions: Map<SymbolId, FunctionMetadata>;
+  functions: Map<SymbolId, FunctionMetadata[]>;
+  functionInstances: Map<string, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, SymbolId>;
   structTypes: Map<TypeId, StructuralTypeInfo>;
   rtt: ReturnType<typeof createRttContext>;
@@ -91,6 +95,7 @@ export interface FunctionContext {
   locals: binaryen.Type[];
   nextLocalIndex: number;
   returnTypeId: TypeId;
+  instanceKey?: string;
 }
 
 export interface CompiledExpression {

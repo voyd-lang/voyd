@@ -52,6 +52,7 @@ export const lowerFunctionDecl = (
     decl: fn.id,
     visibility: fn.visibility,
     symbol: fn.symbol,
+    typeParameters: lowerTypeParameters(fn.typeParameters),
     ast: (fn.form ?? fn.body).syntaxId,
     span: toSourceSpan(fallbackSyntax),
     parameters,

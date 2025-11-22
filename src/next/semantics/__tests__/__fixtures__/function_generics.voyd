@@ -1,0 +1,5 @@
+fn add<T>(a: T, b: T) -> T
+  a + b
+
+pub fn main()
+  add<i32>(1, 2)

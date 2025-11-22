@@ -4,11 +4,17 @@ import type {
   FunctionContext,
   FunctionMetadata,
   HirFunction,
+  TypeId,
 } from "./context.js";
 import { compileExpression } from "./expressions/index.js";
 import { wasmTypeFor } from "./types.js";
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
+  const unknown = ctx.typing.arena.internPrimitive("unknown");
+  const exportedItems = new Set(
+    ctx.hir.module.exports.map((entry) => entry.item)
+  );
+
   for (const [itemId, item] of ctx.hir.items) {
     if (item.kind !== "function") continue;
     ctx.itemsToSymbols.set(itemId, item.symbol);
@@ -20,36 +26,81 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
       );
     }
 
-    const typeId = ctx.typing.arena.instantiate(scheme, []);
-    const descriptor = ctx.typing.arena.get(typeId);
-    if (descriptor.kind !== "function") {
+    const schemeInfo = ctx.typing.arena.getScheme(scheme);
+    const instantiationInfo = ctx.typing.functionInstantiationInfo.get(item.symbol);
+    const recordedInstantiations =
+      instantiationInfo && instantiationInfo.size > 0
+        ? Array.from(instantiationInfo.entries())
+        : [];
+    if (recordedInstantiations.length === 0 && schemeInfo.params.length > 0) {
+      const name = ctx.symbolTable.getSymbol(item.symbol).name;
+      const exported = exportedItems.has(itemId) ? "exported " : "";
       throw new Error(
-        `codegen expected function type for symbol ${item.symbol}`
+        `codegen requires a concrete instantiation for ${exported}generic function ${name}`
       );
     }
+    const instantiations: [string, readonly TypeId[]][] =
+      recordedInstantiations.length > 0
+        ? recordedInstantiations
+        : getDefaultInstantiationArgs({
+            symbol: item.symbol,
+            params: schemeInfo.params.length,
+          });
 
-    const paramTypes = descriptor.parameters.map((param) =>
-      wasmTypeFor(param.type, ctx)
-    );
-    const resultType = wasmTypeFor(descriptor.returnType, ctx);
+    instantiations.forEach(([instanceKey, typeArgs]) => {
+      if (typeArgs.some((arg) => arg === unknown)) {
+        const name = ctx.symbolTable.getSymbol(item.symbol).name;
+        throw new Error(
+          `codegen cannot emit ${name} without resolved type arguments (instance ${instanceKey})`
+        );
+      }
+      if (ctx.functionInstances.has(instanceKey)) {
+        return;
+      }
 
-    const metadata: FunctionMetadata = {
-      symbol: item.symbol,
-      wasmName: makeFunctionName(item, ctx),
-      paramTypes,
-      resultType,
-      paramTypeIds: descriptor.parameters.map((param) => param.type),
-      resultTypeId: descriptor.returnType,
-    };
+      const typeId = ctx.typing.arena.instantiate(scheme, typeArgs);
+      const descriptor = ctx.typing.arena.get(typeId);
+      if (descriptor.kind !== "function") {
+        throw new Error(
+          `codegen expected function type for symbol ${item.symbol}`
+        );
+      }
 
-    ctx.functions.set(item.symbol, metadata);
+      const paramTypes = descriptor.parameters.map((param) =>
+        wasmTypeFor(param.type, ctx)
+      );
+      const resultType = wasmTypeFor(descriptor.returnType, ctx);
+
+      const metadata: FunctionMetadata = {
+        symbol: item.symbol,
+        wasmName: makeFunctionName(item, ctx, typeArgs),
+        paramTypes,
+        resultType,
+        paramTypeIds: descriptor.parameters.map((param) => param.type),
+        resultTypeId: descriptor.returnType,
+        typeArgs,
+        instanceKey,
+      };
+
+      const metas = ctx.functions.get(item.symbol);
+      if (metas) {
+        metas.push(metadata);
+      } else {
+        ctx.functions.set(item.symbol, [metadata]);
+      }
+      ctx.functionInstances.set(instanceKey, metadata);
+    });
   }
 };
 
 export const compileFunctions = (ctx: CodegenContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "function") continue;
-    compileFunctionItem(item, ctx);
+    const metas = ctx.functions.get(item.symbol);
+    if (!metas || metas.length === 0) {
+      throw new Error(`codegen missing metadata for function ${item.symbol}`);
+    }
+    metas.forEach((meta) => compileFunctionItem(item, meta, ctx));
   }
 };
 
@@ -59,7 +110,9 @@ export const emitExports = (ctx: CodegenContext): void => {
     if (typeof symbol !== "number") {
       return;
     }
-    const meta = ctx.functions.get(symbol);
+    const metas = ctx.functions.get(symbol);
+    const meta =
+      metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
     if (!meta) {
       return;
     }
@@ -69,17 +122,17 @@ export const emitExports = (ctx: CodegenContext): void => {
   });
 };
 
-const compileFunctionItem = (fn: HirFunction, ctx: CodegenContext): void => {
-  const meta = ctx.functions.get(fn.symbol);
-  if (!meta) {
-    throw new Error(`codegen missing metadata for function ${fn.symbol}`);
-  }
-
+const compileFunctionItem = (
+  fn: HirFunction,
+  meta: FunctionMetadata,
+  ctx: CodegenContext
+): void => {
   const fnCtx: FunctionContext = {
     bindings: new Map(),
     locals: [],
     nextLocalIndex: meta.paramTypes.length,
     returnTypeId: meta.resultTypeId,
+    instanceKey: meta.instanceKey,
   };
 
   fn.parameters.forEach((param, index) => {
@@ -109,13 +162,38 @@ const compileFunctionItem = (fn: HirFunction, ctx: CodegenContext): void => {
   );
 };
 
-const makeFunctionName = (fn: HirFunction, ctx: CodegenContext): string => {
+const makeFunctionName = (
+  fn: HirFunction,
+  ctx: CodegenContext,
+  typeArgs: readonly TypeId[]
+): string => {
   const moduleLabel = sanitizeIdentifier(ctx.hir.module.path);
   const symbolName = sanitizeIdentifier(
     ctx.symbolTable.getSymbol(fn.symbol).name
   );
-  return `${moduleLabel}__${symbolName}_${fn.symbol}`;
+  const suffix =
+    typeArgs.length === 0 ? "" : `__inst_${sanitizeIdentifier(typeArgs.join("_"))}`;
+  return `${moduleLabel}__${symbolName}_${fn.symbol}${suffix}`;
 };
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
+const getDefaultInstantiationArgs = ({
+  symbol,
+  params,
+}: {
+  symbol: number;
+  params: number;
+}): [string, readonly TypeId[]][] => {
+  if (params === 0) {
+    return [[formatInstanceKey(symbol, []), []]];
+  }
+  throw new Error(
+    "getDefaultInstantiationArgs should only be used for non-generic functions"
+  );
+};
+
+const formatInstanceKey = (
+  symbol: number,
+  typeArgs: readonly TypeId[]
+): string => `${symbol}<${typeArgs.join(",")}>`;

@@ -11,6 +11,7 @@ import type {
   HirObjectLiteralEntry,
   HirObjectLiteralExpr,
   HirPattern,
+  HirTypeExpr,
   HirWhileExpr,
   HirOverloadSetExpr,
 } from "../hir/index.js";
@@ -36,12 +37,28 @@ import {
   typeSatisfies,
   getSymbolName,
 } from "./type-system.js";
-import type { Arg, FunctionSignature, TypingContext } from "./types.js";
+import type {
+  Arg,
+  FunctionSignature,
+  FunctionTypeParam,
+  ParamSignature,
+  TypingContext,
+} from "./types.js";
+
+const applyCurrentSubstitution = (
+  type: TypeId,
+  ctx: TypingContext
+): TypeId =>
+  ctx.currentTypeSubst
+    ? ctx.arena.substitute(type, ctx.currentTypeSubst)
+    : type;
 
 export const typeExpression = (exprId: HirExprId, ctx: TypingContext): TypeId => {
   const cached = ctx.table.getExprType(exprId);
   if (typeof cached === "number") {
-    return cached;
+    const applied = applyCurrentSubstitution(cached, ctx);
+    ctx.resolvedExprTypes.set(exprId, applied);
+    return applied;
   }
 
   const expr = ctx.hir.expressions.get(exprId);
@@ -91,8 +108,10 @@ export const typeExpression = (exprId: HirExprId, ctx: TypingContext): TypeId =>
       throw new Error(`unsupported expression kind: ${expr.exprKind}`);
   }
 
+  const appliedType = applyCurrentSubstitution(type, ctx);
   ctx.table.setExprType(exprId, type);
-  return type;
+  ctx.resolvedExprTypes.set(exprId, appliedType);
+  return appliedType;
 };
 
 const typeLiteralExpr = (expr: HirLiteralExpr, ctx: TypingContext): TypeId => {
@@ -132,10 +151,6 @@ const typeOverloadSetExpr = (
 };
 
 const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
-  if (expr.typeArguments && expr.typeArguments.length > 0) {
-    throw new Error("polymorphic calls are not supported yet");
-  }
-
   const args = expr.args.map((arg) => ({
     label: arg.label,
     type: typeExpression(arg.expr, ctx),
@@ -146,11 +161,14 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
   }
 
   if (calleeExpr.exprKind === "overload-set") {
+    if (expr.typeArguments && expr.typeArguments.length > 0) {
+      throw new Error(
+        "type arguments are not supported with overload sets yet"
+      );
+    }
     ctx.table.setExprType(calleeExpr.id, ctx.unknownType);
     return typeOverloadedCall(expr, calleeExpr, args, ctx);
   }
-
-  const calleeType = typeExpression(expr.callee, ctx);
 
   if (calleeExpr.exprKind === "identifier") {
     const record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
@@ -158,6 +176,25 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
     if (metadata.intrinsic) {
       return typeIntrinsicCall(record.name, args, ctx);
     }
+
+    const signature = ctx.functionSignatures.get(calleeExpr.symbol);
+    if (signature) {
+      const typeArguments = resolveTypeArguments(expr.typeArguments, ctx);
+      return typeFunctionCall({
+        args,
+        signature,
+        calleeSymbol: calleeExpr.symbol,
+        typeArguments,
+        callId: expr.id,
+        ctx,
+      });
+    }
+  }
+
+  const calleeType = typeExpression(expr.callee, ctx);
+
+  if (expr.typeArguments && expr.typeArguments.length > 0) {
+    throw new Error("call does not accept type arguments");
   }
 
   const calleeDesc = ctx.arena.get(calleeType);
@@ -165,12 +202,37 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
     throw new Error("attempted to call a non-function value");
   }
 
-  if (args.length !== calleeDesc.parameters.length) {
+  validateCallArgs(args, calleeDesc.parameters, ctx);
+
+  return calleeDesc.returnType;
+};
+
+const resolveTypeArguments = (
+  typeArguments: readonly HirTypeExpr[] | undefined,
+  ctx: TypingContext
+): TypeId[] | undefined =>
+  typeArguments && typeArguments.length > 0
+    ? typeArguments.map((entry) =>
+        resolveTypeExpr(
+          entry,
+          ctx,
+          ctx.unknownType,
+          ctx.currentTypeParams
+        )
+      )
+    : undefined;
+
+const validateCallArgs = (
+  args: readonly Arg[],
+  params: readonly ParamSignature[],
+  ctx: TypingContext
+): void => {
+  if (args.length !== params.length) {
     throw new Error("call argument count mismatch");
   }
 
   args.forEach((arg, index) => {
-    const param = calleeDesc.parameters[index];
+    const param = params[index]!;
     if (param.label !== arg.label) {
       const expectedLabel = param.label ?? "no label";
       const actualLabel = arg.label ?? "no label";
@@ -182,9 +244,348 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
     }
     ensureTypeMatches(arg.type, param.type, ctx, `call argument ${index + 1}`);
   });
-
-  return calleeDesc.returnType;
 };
+
+const typeFunctionCall = ({
+  args,
+  signature,
+  calleeSymbol,
+  typeArguments,
+  callId,
+  ctx,
+}: {
+  args: readonly Arg[];
+  signature: FunctionSignature;
+  calleeSymbol: SymbolId;
+  typeArguments?: readonly TypeId[];
+  callId: HirExprId;
+  ctx: TypingContext;
+}): TypeId => {
+  const hasTypeParams = signature.typeParams && signature.typeParams.length > 0;
+  const instantiation = hasTypeParams
+    ? instantiateFunctionCall({
+        signature,
+        args,
+        typeArguments,
+        calleeSymbol,
+        ctx,
+      })
+    : {
+        substitution: new Map<TypeParamId, TypeId>(),
+        parameters: signature.parameters,
+        returnType: signature.returnType,
+      };
+
+  if (!hasTypeParams && typeArguments && typeArguments.length > 0) {
+    throw new Error("call does not accept type arguments");
+  }
+
+  validateCallArgs(args, instantiation.parameters, ctx);
+
+  if (hasTypeParams) {
+    const mergedSubstitution = mergeSubstitutions(
+      instantiation.substitution,
+      ctx.currentTypeSubst,
+      ctx
+    );
+    const appliedTypeArgs = getAppliedTypeArguments({
+      signature,
+      substitution: mergedSubstitution,
+      symbol: calleeSymbol,
+      ctx,
+    });
+    const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
+    ctx.callTypeArguments.set(callId, appliedTypeArgs);
+    ctx.callInstanceKeys.set(callId, callKey);
+    typeGenericFunctionBody({
+      symbol: calleeSymbol,
+      signature,
+      substitution: instantiation.substitution,
+      ctx,
+    });
+  } else {
+    ctx.callTypeArguments.delete(callId);
+  }
+
+  return instantiation.returnType;
+};
+
+const instantiateFunctionCall = ({
+  signature,
+  args,
+  typeArguments,
+  calleeSymbol,
+  ctx,
+}: {
+  signature: FunctionSignature;
+  args: readonly Arg[];
+  typeArguments?: readonly TypeId[];
+  calleeSymbol: SymbolId;
+  ctx: TypingContext;
+}): {
+  substitution: ReadonlyMap<TypeParamId, TypeId>;
+  parameters: readonly ParamSignature[];
+  returnType: TypeId;
+} => {
+  const typeParams = signature.typeParams ?? [];
+
+  if (typeArguments && typeArguments.length > typeParams.length) {
+    throw new Error(
+      `function ${getSymbolName(
+        calleeSymbol,
+        ctx
+      )} received too many type arguments`
+    );
+  }
+
+  const substitution = new Map<TypeParamId, TypeId>();
+  typeParams.forEach((param, index) => {
+    const explicit = typeArguments?.[index];
+    if (typeof explicit === "number") {
+      substitution.set(param.typeParam, explicit);
+    }
+  });
+
+  args.forEach((arg, index) => {
+    const expected = signature.parameters[index];
+    if (!expected) {
+      return;
+    }
+    const expectedType = ctx.arena.substitute(expected.type, substitution);
+    bindTypeParamsFromType(expectedType, arg.type, substitution, ctx);
+  });
+
+  const missing = typeParams.filter(
+    (param) => !substitution.has(param.typeParam)
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `function ${getSymbolName(
+        calleeSymbol,
+        ctx
+      )} is missing ${missing.length} type argument(s)`
+    );
+  }
+
+  typeParams.forEach((param) =>
+    enforceTypeParamConstraint(param, substitution, ctx)
+  );
+
+  const parameters = signature.parameters.map((param) => ({
+    ...param,
+    type: ctx.arena.substitute(param.type, substitution),
+  }));
+  const returnType = ctx.arena.substitute(signature.returnType, substitution);
+
+  return { substitution, parameters, returnType };
+};
+
+const enforceTypeParamConstraint = (
+  param: FunctionTypeParam,
+  substitution: ReadonlyMap<TypeParamId, TypeId>,
+  ctx: TypingContext
+): void => {
+  if (!param.constraint) {
+    return;
+  }
+  const applied = substitution.get(param.typeParam);
+  if (typeof applied !== "number") {
+    return;
+  }
+  const constraint = ctx.arena.substitute(param.constraint, substitution);
+  if (!typeSatisfies(applied, constraint, ctx)) {
+    throw new Error(
+      `type argument for ${getSymbolName(
+        param.symbol,
+        ctx
+      )} does not satisfy its constraint`
+    );
+  }
+};
+
+const typeGenericFunctionBody = ({
+  symbol,
+  signature,
+  substitution,
+  ctx,
+}: {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  substitution: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+}): void => {
+  const typeParams = signature.typeParams ?? [];
+  if (typeParams.length === 0) {
+    return;
+  }
+
+  const previousExprTypes = Array.from(ctx.table.entries());
+  const previousResolved = new Map(ctx.resolvedExprTypes);
+
+  ctx.table.clearExprTypes();
+  ctx.resolvedExprTypes.clear();
+
+  const previousReturn = ctx.currentFunctionReturnType;
+  const previousInstanceKey = ctx.currentFunctionInstanceKey;
+  const previousTypeParams = ctx.currentTypeParams;
+  const previousSubst = ctx.currentTypeSubst;
+
+  const mergedSubstitution = mergeSubstitutions(
+    substitution,
+    previousSubst,
+    ctx
+  );
+  const appliedTypeArgs = getAppliedTypeArguments({
+    signature,
+    substitution: mergedSubstitution,
+    symbol,
+    ctx,
+  });
+  const key = formatFunctionInstanceKey(symbol, appliedTypeArgs);
+  if (
+    ctx.functionInstances.has(key) ||
+    ctx.activeFunctionInstantiations.has(key)
+  ) {
+    return;
+  }
+
+  const fn = ctx.functionsBySymbol.get(symbol);
+  if (!fn) {
+    throw new Error(`missing function body for symbol ${symbol}`);
+  }
+
+  ctx.activeFunctionInstantiations.add(key);
+  const nextTypeParams =
+    signature.typeParamMap && previousTypeParams
+      ? new Map([
+          ...previousTypeParams.entries(),
+          ...signature.typeParamMap.entries(),
+        ])
+      : signature.typeParamMap ?? previousTypeParams;
+  const expectedReturn = ctx.arena.substitute(
+    signature.returnType,
+    mergedSubstitution
+  );
+
+  ctx.currentFunctionReturnType = expectedReturn;
+  ctx.currentTypeParams = nextTypeParams;
+  ctx.currentTypeSubst = mergedSubstitution;
+  ctx.currentFunctionInstanceKey = key;
+
+  let bodyType: TypeId | undefined;
+
+  try {
+    bodyType = typeExpression(fn.body, ctx);
+    ensureTypeMatches(
+      bodyType,
+      expectedReturn,
+      ctx,
+      `function ${getSymbolName(symbol, ctx)} return type`
+    );
+    ctx.functionInstances.set(key, expectedReturn);
+    recordFunctionInstantiation({
+      symbol,
+      key,
+      typeArgs: appliedTypeArgs,
+      ctx,
+    });
+    ctx.functionInstanceExprTypes.set(
+      key,
+      new Map(ctx.resolvedExprTypes)
+    );
+  } finally {
+    ctx.table.clearExprTypes();
+    ctx.resolvedExprTypes.clear();
+    previousExprTypes.forEach(([id, type]) => ctx.table.setExprType(id, type));
+    previousResolved.forEach((type, id) =>
+      ctx.resolvedExprTypes.set(id, type)
+    );
+    ctx.currentFunctionReturnType = previousReturn;
+    ctx.currentFunctionInstanceKey = previousInstanceKey;
+    ctx.currentTypeParams = previousTypeParams;
+    ctx.currentTypeSubst = previousSubst;
+    ctx.activeFunctionInstantiations.delete(key);
+  }
+};
+
+const mergeSubstitutions = (
+  current: ReadonlyMap<TypeParamId, TypeId>,
+  previous: ReadonlyMap<TypeParamId, TypeId> | undefined,
+  ctx: TypingContext
+): ReadonlyMap<TypeParamId, TypeId> => {
+  if (!previous || previous.size === 0) {
+    return current;
+  }
+
+  const merged = new Map(previous);
+  current.forEach((value, key) => {
+    merged.set(key, ctx.arena.substitute(value, merged));
+  });
+  return merged;
+};
+
+const recordFunctionInstantiation = ({
+  symbol,
+  key,
+  typeArgs,
+  ctx,
+}: {
+  symbol: SymbolId;
+  key: string;
+  typeArgs: readonly TypeId[];
+  ctx: TypingContext;
+}): void => {
+  let bySymbol = ctx.functionInstantiationInfo.get(symbol);
+  if (!bySymbol) {
+    bySymbol = new Map();
+    ctx.functionInstantiationInfo.set(symbol, bySymbol);
+  }
+  if (!bySymbol.has(key)) {
+    bySymbol.set(key, typeArgs);
+  }
+};
+
+const getAppliedTypeArguments = ({
+  signature,
+  substitution,
+  symbol,
+  ctx,
+}: {
+  signature: FunctionSignature;
+  substitution: ReadonlyMap<TypeParamId, TypeId>;
+  symbol: SymbolId;
+  ctx: TypingContext;
+}): readonly TypeId[] => {
+  const typeParams = signature.typeParams ?? [];
+  return typeParams.map((param) => {
+    const applied = substitution.get(param.typeParam);
+    if (typeof applied !== "number") {
+      throw new Error(
+        `function ${getSymbolName(
+          symbol,
+          ctx
+        )} is missing a type argument for ${getSymbolName(param.symbol, ctx)}`
+      );
+    }
+    if (applied === ctx.unknownType) {
+      throw new Error(
+        `function ${getSymbolName(
+          symbol,
+          ctx
+        )} has unresolved type argument for ${getSymbolName(
+          param.symbol,
+          ctx
+        )}`
+      );
+    }
+    return applied;
+  });
+};
+
+export const formatFunctionInstanceKey = (
+  symbol: SymbolId,
+  typeArgs: readonly TypeId[]
+): string => `${symbol}<${typeArgs.join(",")}>`;
 
 const typeBlockExpr = (expr: HirBlockExpr, ctx: TypingContext): TypeId => {
   expr.statements.forEach((stmtId) => typeStatement(stmtId, ctx));
@@ -655,7 +1056,15 @@ const typeOverloadedCall = (
   }
 
   const selected = matches[0]!;
-  ctx.callTargets.set(call.id, selected.symbol);
+  const instanceKey = ctx.currentFunctionInstanceKey;
+  if (!instanceKey) {
+    throw new Error(
+      `missing function instance key for overload resolution at call ${call.id}`
+    );
+  }
+  const targets = ctx.callTargets.get(call.id) ?? new Map<string, SymbolId>();
+  targets.set(instanceKey, selected.symbol);
+  ctx.callTargets.set(call.id, targets);
   ctx.table.setExprType(callee.id, selected.signature.typeId);
   return selected.signature.returnType;
 };

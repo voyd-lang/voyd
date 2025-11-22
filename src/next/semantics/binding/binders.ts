@@ -125,7 +125,12 @@ const bindFunctionDecl = (
   });
   ctx.scopeByNode.set(decl.form.syntaxId, fnScope);
 
-  const boundParams = bindFunctionParameters(decl, ctx, tracker);
+  let typeParameters: TypeParameterDecl[] = [];
+  let boundParams: ParameterDeclInput[] = [];
+  tracker.enterScope(fnScope, () => {
+    typeParameters = bindFunctionTypeParameters(decl, ctx);
+    boundParams = bindFunctionParameters(decl, ctx, tracker);
+  });
 
   const fnDecl = ctx.decls.registerFunction({
     name: decl.signature.name.value,
@@ -134,6 +139,7 @@ const bindFunctionDecl = (
     symbol: fnSymbol,
     scope: fnScope,
     params: boundParams,
+    typeParameters,
     returnTypeExpr: decl.signature.returnType,
     body: decl.body,
     moduleIndex: ctx.nextModuleIndex++,
@@ -142,32 +148,50 @@ const bindFunctionDecl = (
   recordFunctionOverload(fnDecl, declarationScope, ctx);
 };
 
+const bindFunctionTypeParameters = (
+  decl: ParsedFunctionDecl,
+  ctx: BindingContext
+): TypeParameterDecl[] => {
+  const typeParameters: TypeParameterDecl[] = [];
+  decl.signature.typeParameters.forEach((param) => {
+    rememberSyntax(param, ctx);
+    const paramSymbol = ctx.symbolTable.declare({
+      name: param.value,
+      kind: "type-parameter",
+      declaredAt: param.syntaxId,
+    });
+    typeParameters.push({
+      name: param.value,
+      symbol: paramSymbol,
+      ast: param,
+    });
+  });
+  return typeParameters;
+};
+
 const bindFunctionParameters = (
   decl: ParsedFunctionDecl,
   ctx: BindingContext,
   tracker: BinderScopeTracker
 ) => {
   const boundParams: ParameterDeclInput[] = [];
-  const fnScope = ctx.scopeByNode.get(decl.form.syntaxId) ?? tracker.current();
-  tracker.enterScope(fnScope, () => {
-    decl.signature.params.forEach((param) => {
-      const paramSymbol = ctx.symbolTable.declare({
-        name: param.name,
-        kind: "parameter",
-        declaredAt: param.ast.syntaxId,
-      });
-      rememberSyntax(param.ast, ctx);
-      boundParams.push({
-        name: param.name,
-        label: param.label,
-        symbol: paramSymbol,
-        ast: param.ast,
-        typeExpr: param.typeExpr,
-      });
+  decl.signature.params.forEach((param) => {
+    const paramSymbol = ctx.symbolTable.declare({
+      name: param.name,
+      kind: "parameter",
+      declaredAt: param.ast.syntaxId,
     });
-
-    bindExpr(decl.body, ctx, tracker);
+    rememberSyntax(param.ast, ctx);
+    boundParams.push({
+      name: param.name,
+      label: param.label,
+      symbol: paramSymbol,
+      ast: param.ast,
+      typeExpr: param.typeExpr,
+    });
   });
+
+  bindExpr(decl.body, ctx, tracker);
 
   return boundParams;
 };

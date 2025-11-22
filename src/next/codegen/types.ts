@@ -87,8 +87,21 @@ export const getSymbolTypeId = (
 
 export const getRequiredExprType = (
   exprId: HirExprId,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  instanceKey?: string
 ): TypeId => {
+  if (instanceKey) {
+    const instanceType = ctx.typing.functionInstanceExprTypes
+      ?.get(instanceKey)
+      ?.get(exprId);
+    if (typeof instanceType === "number") {
+      return instanceType;
+    }
+  }
+  const resolved = ctx.typing.resolvedExprTypes.get(exprId);
+  if (typeof resolved === "number") {
+    return resolved;
+  }
   const typeId = ctx.typing.table.getExprType(exprId);
   if (typeof typeId === "number") {
     return typeId;
@@ -98,9 +111,22 @@ export const getRequiredExprType = (
 
 export const getExprBinaryenType = (
   exprId: HirExprId,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  instanceKey?: string
 ): binaryen.Type => {
-  const typeId = ctx.typing.table.getExprType(exprId);
+  if (instanceKey) {
+    const instanceType = ctx.typing.functionInstanceExprTypes
+      ?.get(instanceKey)
+      ?.get(exprId);
+    if (typeof instanceType === "number") {
+      return wasmTypeFor(instanceType, ctx);
+    }
+  }
+  const resolved = ctx.typing.resolvedExprTypes.get(exprId);
+  const typeId =
+    typeof resolved === "number"
+      ? resolved
+      : ctx.typing.table.getExprType(exprId);
   if (typeof typeId === "number") {
     return wasmTypeFor(typeId, ctx);
   }
@@ -180,6 +206,8 @@ export const getStructuralTypeInfo = (
     hash: 0,
   }));
   const nominalId = getNominalComponentId(typeId, ctx);
+  const nominalAncestry = getNominalAncestry(nominalId, ctx);
+  const nominalAncestors = nominalAncestry.map((entry) => entry.nominalId);
   const typeLabel = makeRuntimeTypeLabel({
     typeId,
     structuralId,
@@ -188,7 +216,7 @@ export const getStructuralTypeInfo = (
   const ancestors = buildRuntimeAncestors({
     typeId,
     structuralId,
-    nominalId,
+    nominalAncestry,
   });
   const runtimeType = defineStructType(ctx.mod, {
     name: typeLabel,
@@ -253,6 +281,7 @@ export const getStructuralTypeInfo = (
     typeId,
     structuralId,
     nominalId,
+    nominalAncestors,
     runtimeType,
     interfaceType: ctx.rtt.baseType,
     fields,
@@ -294,14 +323,19 @@ const makeRuntimeTypeLabel = ({
   return `struct_${nominalPrefix}type_${typeId}_shape_${structuralId}`;
 };
 
+type NominalAncestryEntry = {
+  nominalId: TypeId;
+  typeId: TypeId;
+};
+
 const buildRuntimeAncestors = ({
   typeId,
   structuralId,
-  nominalId,
+  nominalAncestry,
 }: {
   typeId: TypeId;
   structuralId: TypeId;
-  nominalId?: TypeId;
+  nominalAncestry: readonly NominalAncestryEntry[];
 }): number[] => {
   const seen = new Set<number>();
   const ancestors: number[] = [];
@@ -314,10 +348,44 @@ const buildRuntimeAncestors = ({
   };
 
   add(typeId);
-  add(nominalId);
+  nominalAncestry.forEach((entry) => {
+    add(entry.typeId);
+    add(entry.nominalId);
+  });
   add(structuralId);
 
   return ancestors;
+};
+
+const getNominalAncestry = (
+  nominalId: TypeId | undefined,
+  ctx: CodegenContext
+): NominalAncestryEntry[] => {
+  const ancestry: NominalAncestryEntry[] = [];
+  const seen = new Set<TypeId>();
+  let current = nominalId;
+
+  while (typeof current === "number" && !seen.has(current)) {
+    const info = ctx.typing.objectsByNominal.get(current);
+    if (!info) {
+      const owner = getNominalOwner(current, ctx);
+      const name = getSymbolName(owner, ctx);
+      throw new Error(
+        `codegen missing nominal ancestry for ${name}<${current}> (nominal ${current})`
+      );
+    }
+    ancestry.push({
+      nominalId: current,
+      typeId: info.type,
+    });
+    seen.add(current);
+    if (!info.baseNominal) {
+      break;
+    }
+    current = info.baseNominal;
+  }
+
+  return ancestry;
 };
 
 const nominalOwnersMatch = (
