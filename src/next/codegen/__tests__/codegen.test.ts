@@ -142,6 +142,19 @@ describe("next codegen", () => {
     expect(main()).toBe(12);
   });
 
+  it("uses explicit generic instantiations during codegen", () => {
+    const main = loadMain("explicit_generic_instantiation.voyd");
+    expect(main()).toBe(7);
+  });
+
+  it("fails codegen for exported generic functions without instantiations", () => {
+    const ast = loadAst("uninstantiated_export_generic.voyd");
+    const semantics = semanticsPipeline(ast);
+    expect(() => codegen(semantics)).toThrow(
+      /concrete instantiation for exported generic function identity/
+    );
+  });
+
   it("emits wasm for generic functions", () => {
     const instance = loadWasmInstance("function_generics.voyd");
     const main1 = instance.exports.main1;

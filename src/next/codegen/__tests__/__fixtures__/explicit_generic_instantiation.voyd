@@ -1,0 +1,5 @@
+pub fn identity<T>(value: T) -> T
+  value
+
+pub fn main()
+  identity<i32>(7)

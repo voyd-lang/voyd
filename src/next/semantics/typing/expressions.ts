@@ -283,30 +283,26 @@ const typeFunctionCall = ({
   validateCallArgs(args, instantiation.parameters, ctx);
 
   if (hasTypeParams) {
-    const appliedTypeArgs =
-      signature.typeParams?.map(
-        (param) =>
-          instantiation.substitution.get(param.typeParam) ?? ctx.unknownType
-      ) ?? [];
-    ctx.callTypeArguments.set(callId, appliedTypeArgs);
     const mergedSubstitution = mergeSubstitutions(
       instantiation.substitution,
       ctx.currentTypeSubst,
       ctx
     );
-    const callKey = makeFunctionInstanceKey(
+    const appliedTypeArgs = getAppliedTypeArguments({
       signature,
-      mergedSubstitution,
-      calleeSymbol,
-      ctx
-    );
+      substitution: mergedSubstitution,
+      symbol: calleeSymbol,
+      ctx,
+    });
+    const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
+    ctx.callTypeArguments.set(callId, appliedTypeArgs);
     ctx.callInstanceKeys.set(callId, callKey);
-    typeGenericFunctionBody(
-      calleeSymbol,
+    typeGenericFunctionBody({
+      symbol: calleeSymbol,
       signature,
-      instantiation.substitution,
-      ctx
-    );
+      substitution: instantiation.substitution,
+      ctx,
+    });
   } else {
     ctx.callTypeArguments.delete(callId);
   }
@@ -407,12 +403,17 @@ const enforceTypeParamConstraint = (
   }
 };
 
-const typeGenericFunctionBody = (
-  symbol: SymbolId,
-  signature: FunctionSignature,
-  substitution: ReadonlyMap<TypeParamId, TypeId>,
-  ctx: TypingContext
-): void => {
+const typeGenericFunctionBody = ({
+  symbol,
+  signature,
+  substitution,
+  ctx,
+}: {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  substitution: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+}): void => {
   const typeParams = signature.typeParams ?? [];
   if (typeParams.length === 0) {
     return;
@@ -433,22 +434,19 @@ const typeGenericFunctionBody = (
     previousSubst,
     ctx
   );
-  const key = makeFunctionInstanceKey(
+  const appliedTypeArgs = getAppliedTypeArguments({
     signature,
-    mergedSubstitution,
+    substitution: mergedSubstitution,
     symbol,
-    ctx
-  );
+    ctx,
+  });
+  const key = formatFunctionInstanceKey(symbol, appliedTypeArgs);
   if (
     ctx.functionInstances.has(key) ||
     ctx.activeFunctionInstantiations.has(key)
   ) {
     return;
   }
-  const appliedTypeArgs =
-    signature.typeParams?.map(
-      (param) => mergedSubstitution.get(param.typeParam) ?? ctx.unknownType
-    ) ?? [];
 
   const fn = ctx.functionsBySymbol.get(symbol);
   if (!fn) {
@@ -544,18 +542,47 @@ const recordFunctionInstantiation = ({
   }
 };
 
-const makeFunctionInstanceKey = (
-  signature: FunctionSignature,
-  substitution: ReadonlyMap<TypeParamId, TypeId>,
-  symbol: SymbolId,
-  ctx: TypingContext
-): string => {
-  const applied =
-    signature.typeParams?.map(
-      (param) => substitution.get(param.typeParam) ?? ctx.unknownType
-    ) ?? [];
-  return `${symbol}<${applied.join(",")}>`;
+const getAppliedTypeArguments = ({
+  signature,
+  substitution,
+  symbol,
+  ctx,
+}: {
+  signature: FunctionSignature;
+  substitution: ReadonlyMap<TypeParamId, TypeId>;
+  symbol: SymbolId;
+  ctx: TypingContext;
+}): readonly TypeId[] => {
+  const typeParams = signature.typeParams ?? [];
+  return typeParams.map((param) => {
+    const applied = substitution.get(param.typeParam);
+    if (typeof applied !== "number") {
+      throw new Error(
+        `function ${getSymbolName(
+          symbol,
+          ctx
+        )} is missing a type argument for ${getSymbolName(param.symbol, ctx)}`
+      );
+    }
+    if (applied === ctx.unknownType) {
+      throw new Error(
+        `function ${getSymbolName(
+          symbol,
+          ctx
+        )} has unresolved type argument for ${getSymbolName(
+          param.symbol,
+          ctx
+        )}`
+      );
+    }
+    return applied;
+  });
 };
+
+const formatFunctionInstanceKey = (
+  symbol: SymbolId,
+  typeArgs: readonly TypeId[]
+): string => `${symbol}<${typeArgs.join(",")}>`;
 
 const typeBlockExpr = (expr: HirBlockExpr, ctx: TypingContext): TypeId => {
   expr.statements.forEach((stmtId) => typeStatement(stmtId, ctx));

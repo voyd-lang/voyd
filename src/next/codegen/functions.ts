@@ -11,6 +11,9 @@ import { wasmTypeFor } from "./types.js";
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const unknown = ctx.typing.arena.internPrimitive("unknown");
+  const exportedItems = new Set(
+    ctx.hir.module.exports.map((entry) => entry.item)
+  );
 
   for (const [itemId, item] of ctx.hir.items) {
     if (item.kind !== "function") continue;
@@ -24,19 +27,33 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
     }
 
     const schemeInfo = ctx.typing.arena.getScheme(scheme);
-    const instantiationInfo = ctx.typing.functionInstantiationInfo.get(
-      item.symbol
-    );
-    const instantiations =
+    const instantiationInfo = ctx.typing.functionInstantiationInfo.get(item.symbol);
+    const recordedInstantiations =
       instantiationInfo && instantiationInfo.size > 0
         ? Array.from(instantiationInfo.entries())
+        : [];
+    if (recordedInstantiations.length === 0 && schemeInfo.params.length > 0) {
+      const name = ctx.symbolTable.getSymbol(item.symbol).name;
+      const exported = exportedItems.has(itemId) ? "exported " : "";
+      throw new Error(
+        `codegen requires a concrete instantiation for ${exported}generic function ${name}`
+      );
+    }
+    const instantiations: [string, readonly TypeId[]][] =
+      recordedInstantiations.length > 0
+        ? recordedInstantiations
         : getDefaultInstantiationArgs({
             symbol: item.symbol,
             params: schemeInfo.params.length,
-            unknown,
           });
 
     instantiations.forEach(([instanceKey, typeArgs]) => {
+      if (typeArgs.some((arg) => arg === unknown)) {
+        const name = ctx.symbolTable.getSymbol(item.symbol).name;
+        throw new Error(
+          `codegen cannot emit ${name} without resolved type arguments (instance ${instanceKey})`
+        );
+      }
       if (ctx.functionInstances.has(instanceKey)) {
         return;
       }
@@ -164,20 +181,16 @@ const sanitizeIdentifier = (value: string): string =>
 const getDefaultInstantiationArgs = ({
   symbol,
   params,
-  unknown,
 }: {
   symbol: number;
   params: number;
-  unknown: TypeId;
 }): [string, readonly TypeId[]][] => {
   if (params === 0) {
     return [[formatInstanceKey(symbol, []), []]];
   }
-  if (params < 0) {
-    throw new Error("function has invalid type parameter count");
-  }
-  const args = Array.from({ length: params }, () => unknown);
-  return [[formatInstanceKey(symbol, args), args]];
+  throw new Error(
+    "getDefaultInstantiationArgs should only be used for non-generic functions"
+  );
 };
 
 const formatInstanceKey = (
