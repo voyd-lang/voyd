@@ -3,6 +3,7 @@ import {
   resolveTypeExpr,
   getSymbolName,
 } from "./type-system.js";
+import type { SymbolId, TypeId } from "../ids.js";
 import {
   BASE_OBJECT_NAME,
   type FunctionSignature,
