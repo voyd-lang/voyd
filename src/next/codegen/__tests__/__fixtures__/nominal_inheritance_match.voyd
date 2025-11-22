@@ -1,16 +1,16 @@
-obj Base {
+obj BaseObj {
   value: i32
 }
 
-obj Derived: Base {
+obj DerivedObj: BaseObj {
   value: i32,
   extra: i32
 }
 
-fn project(val: Derived)
+fn project(val: DerivedObj)
   match(val)
-    Base: val.value + val.extra
+    BaseObj: val.value + val.extra
 
 pub fn main()
-  let derived = Derived { value: 5, extra: 2 }
+  let derived = DerivedObj { value: 5, extra: 2 }
   project(derived)

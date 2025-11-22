@@ -122,6 +122,11 @@ describe("next codegen", () => {
     expect(main()).toBe(7);
   });
 
+  it("tracks multi-level generic nominal ancestry", () => {
+    const main = loadMain("nominal_generic_inheritance.voyd");
+    expect(main()).toBe(6);
+  });
+
   it("preserves nominal identity for structurally identical types in match guards", () => {
     const ast = loadAst("nominal_identity_match.voyd");
     const semantics = semanticsPipeline(ast);

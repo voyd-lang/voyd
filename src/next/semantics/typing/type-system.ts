@@ -559,6 +559,33 @@ export const getObjectTemplate = (
       };
     });
 
+    if (baseFields.length > 0) {
+      const declaredFields = new Map(ownFields.map((field) => [field.name, field]));
+      baseFields.forEach((baseField) => {
+        const declared = declaredFields.get(baseField.name);
+        if (!declared) {
+          throw new Error(
+            `object ${getSymbolName(
+              symbol,
+              ctx
+            )} must redeclare inherited field ${baseField.name}`
+          );
+        }
+        const compatibility = ctx.arena.unify(declared.type, baseField.type, {
+          location: ctx.hir.module.ast,
+          reason: `field ${baseField.name} compatibility with base object`,
+        });
+        if (!compatibility.ok) {
+          throw new Error(
+            `field ${baseField.name} in object ${getSymbolName(
+              symbol,
+              ctx
+            )} must match base object type`
+          );
+        }
+      });
+    }
+
     const fields = mergeDeclaredFields(baseFields, ownFields);
     const structural = ctx.arena.internStructuralObject({ fields });
     const nominal = ctx.arena.internNominalObject({

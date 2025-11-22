@@ -1,0 +1,27 @@
+obj BaseObj<T> {
+  base_val: T
+}
+
+obj MidObj<T>: BaseObj<T> {
+  base_val: T,
+  mid_val: T
+}
+
+obj DerivedObj<T>: MidObj<T> {
+  base_val: T,
+  mid_val: T,
+  derived_val: T
+}
+
+fn use_base(val: BaseObj<i32>)
+  val.base_val
+
+fn use_mid(val: MidObj<i32>)
+  val.mid_val
+
+fn use_derived(val: DerivedObj<i32>)
+  val.derived_val
+
+pub fn main()
+  let value = DerivedObj<i32> { base_val: 1, mid_val: 2, derived_val: 3 }
+  use_base(value) + use_mid(value) + use_derived(value)

@@ -1,0 +1,11 @@
+obj BaseObj {
+  value: i32
+}
+
+obj DerivedObj: BaseObj {
+  extra: i32
+}
+
+pub fn main()
+  let derived = DerivedObj { value: 1, extra: 2 }
+  derived.extra

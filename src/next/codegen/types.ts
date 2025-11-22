@@ -325,7 +325,7 @@ const makeRuntimeTypeLabel = ({
 
 type NominalAncestryEntry = {
   nominalId: TypeId;
-  typeId?: TypeId;
+  typeId: TypeId;
 };
 
 const buildRuntimeAncestors = ({
@@ -367,12 +367,19 @@ const getNominalAncestry = (
 
   while (typeof current === "number" && !seen.has(current)) {
     const info = ctx.typing.objectsByNominal.get(current);
+    if (!info) {
+      const owner = getNominalOwner(current, ctx);
+      const name = getSymbolName(owner, ctx);
+      throw new Error(
+        `codegen missing nominal ancestry for ${name}<${current}> (nominal ${current})`
+      );
+    }
     ancestry.push({
       nominalId: current,
-      typeId: info?.type,
+      typeId: info.type,
     });
     seen.add(current);
-    if (!info?.baseNominal) {
+    if (!info.baseNominal) {
       break;
     }
     current = info.baseNominal;
