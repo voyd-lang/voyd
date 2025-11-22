@@ -301,7 +301,6 @@ export const resolveTypeAlias = (
       ctx.resolvingTypeAliases.set(key, self);
 
       const paramMap = new Map<SymbolId, TypeId>();
-      paramMap.set(symbol, self);
       template.params.forEach((param, index) =>
         paramMap.set(param.symbol, normalized.applied[index] ?? ctx.unknownType)
       );
@@ -380,11 +379,52 @@ const resolveNamedTypeExpr = (
     ) ?? [];
 
   const typeParamMap = typeParams ?? ctx.currentTypeParams;
+  const aliasSymbol =
+    (typeof expr.symbol === "number" &&
+    ctx.typeAliasTemplates.has(expr.symbol)
+      ? expr.symbol
+      : undefined) ?? ctx.typeAliasesByName.get(name);
+  const normalizeAliasArgs =
+    aliasSymbol !== undefined &&
+    (typeof expr.symbol !== "number" || expr.symbol === aliasSymbol);
+  const aliasTemplate =
+    normalizeAliasArgs && aliasSymbol !== undefined
+      ? ctx.typeAliasTemplates.get(aliasSymbol) ??
+        (ctx.typeAliasTargets.get(aliasSymbol)
+          ? {
+              symbol: aliasSymbol,
+              params: [],
+              target: ctx.typeAliasTargets.get(aliasSymbol)!,
+            }
+          : undefined)
+      : undefined;
+  const normalizedAliasArgs =
+    normalizeAliasArgs && aliasTemplate
+      ? normalizeTypeArgs({
+          typeArgs: resolvedTypeArgs,
+          paramCount: aliasTemplate.params.length,
+          unknownType: ctx.unknownType,
+          context: `type alias ${getSymbolName(aliasSymbol, ctx)}`,
+        })
+      : undefined;
+  const aliasInstanceKey =
+    normalizeAliasArgs &&
+    normalizedAliasArgs &&
+    normalizedAliasArgs.missingCount === 0 &&
+    aliasSymbol !== undefined
+      ? makeTypeAliasInstanceKey(aliasSymbol, normalizedAliasArgs.applied)
+      : undefined;
+  const activeAlias =
+    typeof aliasInstanceKey === "string"
+      ? ctx.resolvingTypeAliases.get(aliasInstanceKey)
+      : undefined;
   const typeParam =
     (typeof expr.symbol === "number"
       ? typeParamMap?.get(expr.symbol)
       : findTypeParamByName(name, typeParamMap, ctx)) ?? undefined;
-  if (typeof typeParam === "number") {
+  const isAliasSelfReference =
+    typeof activeAlias === "number" && typeParam === activeAlias;
+  if (typeof typeParam === "number" && !isAliasSelfReference) {
     if (resolvedTypeArgs.length > 0) {
       throw new Error("type parameters do not accept type arguments");
     }
@@ -394,13 +434,12 @@ const resolveNamedTypeExpr = (
   if (name === BASE_OBJECT_NAME) {
     return ctx.baseObjectType;
   }
-  const aliasSymbol =
-    (typeof expr.symbol === "number" &&
-    ctx.typeAliasTemplates.has(expr.symbol)
-      ? expr.symbol
-      : undefined) ?? ctx.typeAliasesByName.get(name);
   if (aliasSymbol !== undefined) {
-    return resolveTypeAlias(aliasSymbol, ctx, resolvedTypeArgs);
+    const aliasArgs =
+      isAliasSelfReference && normalizedAliasArgs
+        ? normalizedAliasArgs.applied
+        : resolvedTypeArgs;
+    return resolveTypeAlias(aliasSymbol, ctx, aliasArgs);
   }
 
   const objectSymbol =
