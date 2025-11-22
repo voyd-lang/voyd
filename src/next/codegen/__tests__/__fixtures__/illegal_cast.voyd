@@ -13,10 +13,10 @@ fn to_int(r: RecType) -> i32
     None: -1
 
 pub fn main() -> i32
-  let a: RecType = Box { v: Some { v: 3 } }
-  let b: RecType = Some { v: 42 }
-  let c: RecType = Some { v: 3.14 }
-  let d: RecType = None {}
-  let e: RecType = Box { v: Some { v: Box { v: Some { v: 7 } } } }
+  let a = Box { v: Some { v: 3 } }
+  let b = Some { v: 42 }
+  let c = Some { v: 3.14 }
+  let d = None {}
+  let e = Box { v: Some { v: Box { v: Some { v: 7 } } } }
 
   a.to_int() + b.to_int() + c.to_int() + d.to_int() + e.to_int()
