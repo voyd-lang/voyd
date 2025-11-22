@@ -31,6 +31,7 @@ export interface TypingResult {
   table: TypeTable;
   resolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
+  objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
   callTargets: ReadonlyMap<HirExprId, SymbolId>;
   functionInstances: ReadonlyMap<string, TypeId>;
   callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;

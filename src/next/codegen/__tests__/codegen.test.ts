@@ -117,6 +117,11 @@ describe("next codegen", () => {
     expect(main()).toBe(303);
   });
 
+  it("includes base nominal ancestors for derived casts", () => {
+    const main = loadMain("nominal_inheritance_match.voyd");
+    expect(main()).toBe(7);
+  });
+
   it("preserves nominal identity for structurally identical types in match guards", () => {
     const ast = loadAst("nominal_identity_match.voyd");
     const semantics = semanticsPipeline(ast);

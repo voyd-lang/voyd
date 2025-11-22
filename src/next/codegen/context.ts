@@ -61,6 +61,7 @@ export interface StructuralTypeInfo {
   typeId: TypeId;
   structuralId: TypeId;
   nominalId?: TypeId;
+  nominalAncestors: readonly TypeId[];
   runtimeType: binaryen.Type;
   interfaceType: binaryen.Type;
   fields: StructuralFieldInfo[];
