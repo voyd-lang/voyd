@@ -3,8 +3,12 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { getWasmInstance } from "../../../lib/wasm.js";
 import { codegen } from "../index.js";
+import { narrowPatternType } from "../types.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
+import type { CodegenContext } from "../context.js";
+import { createTypeArena } from "../../semantics/typing/type-arena.js";
+import type { SymbolId } from "../../semantics/ids.js";
 
 const loadAst = (fixtureName: string) => {
   const source = readFileSync(
@@ -152,6 +156,11 @@ describe("next codegen", () => {
     expect(main()).toBe(2);
   });
 
+  it("dispatches matches by concrete generic instantiation", () => {
+    const main = loadMain("generic_union_match.voyd");
+    expect(main()).toBe(35);
+  });
+
   it("uses explicit generic instantiations during codegen", () => {
     const main = loadMain("explicit_generic_instantiation.voyd");
     expect(main()).toBe(7);
@@ -175,8 +184,24 @@ describe("next codegen", () => {
     expect((main2 as () => number)()).toBe(3);
   });
 
+  it("narrows match patterns to the unique generic instantiation when possible", () => {
+    const arena = createTypeArena();
+    const owner: SymbolId = 1;
+    const i32 = arena.internPrimitive("i32");
+    const f64 = arena.internPrimitive("f64");
+    const someI32 = arena.internNominalObject({ owner, typeArgs: [i32] });
+    const someF64 = arena.internNominalObject({ owner, typeArgs: [f64] });
+    const union = arena.internUnion([someI32, someF64]);
+    const ctx = {
+      typing: { arena },
+      hir: { module: { ast: 0 } },
+    } as unknown as CodegenContext;
+
+    expect(narrowPatternType(someI32, union, ctx)).toBe(someI32);
+  });
+
   it("it doesn't produce an illegal cast at runtime", () => {
     const main = loadMain("illegal_cast.voyd");
-    expect(main()).toBe(3);
+    expect(main()).toBe(17);
   });
 });

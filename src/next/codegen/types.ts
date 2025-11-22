@@ -171,6 +171,7 @@ export const narrowPatternType = (
   discriminantTypeId: TypeId,
   ctx: CodegenContext
 ): TypeId | undefined => {
+  const location = ctx.hir.module.ast;
   const patternNominal = getNominalComponentId(patternTypeId, ctx);
   if (typeof patternNominal !== "number") {
     return undefined;
@@ -178,9 +179,29 @@ export const narrowPatternType = (
 
   const discriminantDesc = ctx.typing.arena.get(discriminantTypeId);
   if (discriminantDesc.kind === "union") {
-    const matches = discriminantDesc.members.filter((member) =>
-      nominalOwnersMatch(patternNominal, member, ctx)
-    );
+    if (discriminantDesc.members.includes(patternTypeId)) {
+      return patternTypeId;
+    }
+
+    const matches = discriminantDesc.members.filter((member) => {
+      const candidateNominal = getNominalComponentId(member, ctx);
+      if (typeof candidateNominal !== "number") {
+        return false;
+      }
+      if (
+        getNominalOwner(candidateNominal, ctx) !==
+        getNominalOwner(patternNominal, ctx)
+      ) {
+        return false;
+      }
+
+      const comparison = ctx.typing.arena.unify(member, patternTypeId, {
+        location,
+        reason: "match pattern narrowing",
+        variance: "covariant",
+      });
+      return comparison.ok;
+    });
     if (matches.length === 1) {
       return matches[0]!;
     }
@@ -230,13 +251,13 @@ export const getStructuralTypeInfo = (
       typeId,
       structuralId,
       nominalId,
-  });
-  const ancestors = buildRuntimeAncestors({
-    typeId,
-    structuralId,
-    nominalAncestry,
-    ctx,
-  });
+    });
+    const ancestors = buildRuntimeAncestors({
+      typeId,
+      structuralId,
+      nominalAncestry,
+      ctx,
+    });
     const runtimeType = defineStructType(ctx.mod, {
       name: typeLabel,
       fields: [

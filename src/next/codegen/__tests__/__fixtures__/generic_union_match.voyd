@@ -1,0 +1,14 @@
+obj Some<T> { v: T }
+
+type NumBox = Some<i32> | Some<f64>
+
+fn describe(x: NumBox) -> i32
+  x.match()
+    Some<f64>: 30
+    Some<i32>: x.v + 1
+
+pub fn main() -> i32
+  let a: NumBox = Some { v: 4 }
+  let b: NumBox = Some { v: 2.5 }
+
+  describe(a) + describe(b)
