@@ -32,7 +32,7 @@ export interface TypingResult {
   resolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
   objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
-  callTargets: ReadonlyMap<HirExprId, SymbolId>;
+  callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolId>>;
   functionInstances: ReadonlyMap<string, TypeId>;
   callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
   callInstanceKeys: ReadonlyMap<HirExprId, string>;
@@ -82,7 +82,7 @@ export interface TypingContext {
   resolvedExprTypes: Map<HirExprId, TypeId>;
   functionSignatures: Map<SymbolId, FunctionSignature>;
   valueTypes: Map<SymbolId, TypeId>;
-  callTargets: Map<HirExprId, SymbolId>;
+  callTargets: Map<HirExprId, Map<string, SymbolId>>;
   callTypeArguments: Map<HirExprId, readonly TypeId[]>;
   callInstanceKeys: Map<HirExprId, string>;
   functionInstantiationInfo: Map<SymbolId, Map<string, readonly TypeId[]>>;
@@ -101,6 +101,7 @@ export interface TypingContext {
   defaultEffectRow: EffectRowId;
   typeCheckMode: TypeCheckMode;
   currentFunctionReturnType: TypeId | undefined;
+  currentFunctionInstanceKey?: string;
   currentTypeParams?: ReadonlyMap<SymbolId, TypeId>;
   currentTypeSubst?: ReadonlyMap<TypeParamId, TypeId>;
   typeAliasTargets: Map<SymbolId, HirTypeExpr>;

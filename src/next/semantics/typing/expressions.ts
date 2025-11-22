@@ -426,6 +426,7 @@ const typeGenericFunctionBody = ({
   ctx.resolvedExprTypes.clear();
 
   const previousReturn = ctx.currentFunctionReturnType;
+  const previousInstanceKey = ctx.currentFunctionInstanceKey;
   const previousTypeParams = ctx.currentTypeParams;
   const previousSubst = ctx.currentTypeSubst;
 
@@ -469,6 +470,7 @@ const typeGenericFunctionBody = ({
   ctx.currentFunctionReturnType = expectedReturn;
   ctx.currentTypeParams = nextTypeParams;
   ctx.currentTypeSubst = mergedSubstitution;
+  ctx.currentFunctionInstanceKey = key;
 
   let bodyType: TypeId | undefined;
 
@@ -499,6 +501,7 @@ const typeGenericFunctionBody = ({
       ctx.resolvedExprTypes.set(id, type)
     );
     ctx.currentFunctionReturnType = previousReturn;
+    ctx.currentFunctionInstanceKey = previousInstanceKey;
     ctx.currentTypeParams = previousTypeParams;
     ctx.currentTypeSubst = previousSubst;
     ctx.activeFunctionInstantiations.delete(key);
@@ -579,7 +582,7 @@ const getAppliedTypeArguments = ({
   });
 };
 
-const formatFunctionInstanceKey = (
+export const formatFunctionInstanceKey = (
   symbol: SymbolId,
   typeArgs: readonly TypeId[]
 ): string => `${symbol}<${typeArgs.join(",")}>`;
@@ -1053,7 +1056,15 @@ const typeOverloadedCall = (
   }
 
   const selected = matches[0]!;
-  ctx.callTargets.set(call.id, selected.symbol);
+  const instanceKey = ctx.currentFunctionInstanceKey;
+  if (!instanceKey) {
+    throw new Error(
+      `missing function instance key for overload resolution at call ${call.id}`
+    );
+  }
+  const targets = ctx.callTargets.get(call.id) ?? new Map<string, SymbolId>();
+  targets.set(instanceKey, selected.symbol);
+  ctx.callTargets.set(call.id, targets);
   ctx.table.setExprType(callee.id, selected.signature.typeId);
   return selected.signature.returnType;
 };

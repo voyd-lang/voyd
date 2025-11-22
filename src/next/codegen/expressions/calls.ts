@@ -30,7 +30,12 @@ export const compileCallExpr = (
   }
 
   if (callee.exprKind === "overload-set") {
-    const targetSymbol = ctx.typing.callTargets.get(expr.id);
+    const targets = ctx.typing.callTargets.get(expr.id);
+    const targetSymbol =
+      (fnCtx.instanceKey && targets?.get(fnCtx.instanceKey)) ??
+      (targets && targets.size === 1
+        ? targets.values().next().value
+        : undefined);
     if (typeof targetSymbol !== "number") {
       throw new Error("codegen missing overload resolution for indirect call");
     }

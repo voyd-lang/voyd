@@ -234,7 +234,8 @@ describe("overload resolution", () => {
     const callDesc = typing.arena.get(callType!);
     expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
 
+    const instanceKey = `${mainSymbol}<>`;
     const callTarget = typing.callTargets.get(callExpr);
-    expect(callTarget).toBe(fooPointSymbol);
+    expect(callTarget?.get(instanceKey)).toBe(fooPointSymbol);
   });
 });

@@ -1,7 +1,7 @@
 import type { HirFunction } from "../hir/index.js";
 import { ensureTypeMatches } from "./type-system.js";
 import type { FunctionSignature, TypingContext } from "./types.js";
-import { typeExpression } from "./expressions.js";
+import { formatFunctionInstanceKey, typeExpression } from "./expressions.js";
 
 export const runInferencePass = (ctx: TypingContext): void => {
   ctx.typeCheckMode = "relaxed";
@@ -61,12 +61,15 @@ const typeFunction = (fn: HirFunction, ctx: TypingContext): boolean => {
   }
 
   const previousReturnType = ctx.currentFunctionReturnType;
+  const previousInstanceKey = ctx.currentFunctionInstanceKey;
   ctx.currentFunctionReturnType = signature.returnType;
+  ctx.currentFunctionInstanceKey = formatFunctionInstanceKey(fn.symbol, []);
   let bodyType;
   try {
     bodyType = typeExpression(fn.body, ctx);
   } finally {
     ctx.currentFunctionReturnType = previousReturnType;
+    ctx.currentFunctionInstanceKey = previousInstanceKey;
   }
   if (signature.hasExplicitReturn) {
     ensureTypeMatches(

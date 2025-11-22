@@ -11,6 +11,7 @@ export const specializeOverloadCallees = (
   typing: TypingResult
 ): void => {
   const expressions = hir.expressions as Map<HirExprId, HirExpression>;
+  const unspecialized = new Set<HirExprId>();
 
   for (const expr of expressions.values()) {
     if (expr.exprKind !== "call") continue;
@@ -19,7 +20,20 @@ export const specializeOverloadCallees = (
       continue;
     }
 
-    const target = typing.callTargets.get(expr.id);
+    const targets = typing.callTargets.get(expr.id);
+    if (!targets || targets.size === 0) {
+      throw new Error(
+        `missing overload resolution for call expression ${expr.id}`
+      );
+    }
+
+    const uniqueTargets = new Set(targets.values());
+    if (uniqueTargets.size > 1) {
+      unspecialized.add(callee.id);
+      continue;
+    }
+
+    const [target] = uniqueTargets;
     if (typeof target !== "number") {
       throw new Error(
         `missing overload resolution for call expression ${expr.id}`
@@ -40,7 +54,7 @@ export const specializeOverloadCallees = (
   }
 
   const remaining = Array.from(expressions.values()).find(
-    (expr) => expr.exprKind === "overload-set"
+    (expr) => expr.exprKind === "overload-set" && !unspecialized.has(expr.id)
   );
   if (remaining) {
     throw new Error(

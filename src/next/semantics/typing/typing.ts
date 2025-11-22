@@ -31,7 +31,12 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     resolvedExprTypes: new Map(ctx.resolvedExprTypes),
     valueTypes: new Map(ctx.valueTypes),
     objectsByNominal: new Map(ctx.objectsByNominal),
-    callTargets: new Map(ctx.callTargets),
+    callTargets: new Map(
+      Array.from(ctx.callTargets.entries()).map(([callId, targets]) => [
+        callId,
+        new Map(targets),
+      ])
+    ),
     functionInstances: new Map(ctx.functionInstances),
     callTypeArguments: new Map(ctx.callTypeArguments),
     callInstanceKeys: new Map(ctx.callInstanceKeys),
