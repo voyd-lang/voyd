@@ -14,6 +14,7 @@ interface CompileIntrinsicCallParams {
   call: HirCallExpr;
   args: readonly binaryen.ExpressionRef[];
   ctx: CodegenContext;
+  instanceKey?: string;
 }
 
 interface EmitNumericIntrinsicParams {
@@ -27,6 +28,7 @@ export const compileIntrinsicCall = ({
   call,
   args,
   ctx,
+  instanceKey,
 }: CompileIntrinsicCallParams): binaryen.ExpressionRef => {
   switch (name) {
     case "+":
@@ -36,7 +38,8 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 2);
       const operandKind = requireHomogeneousNumericKind(
         call.args.map((a) => a.expr),
-        ctx
+        ctx,
+        instanceKey
       );
       return emitArithmeticIntrinsic({ op: name, kind: operandKind, args, ctx });
     }
@@ -47,7 +50,8 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 2);
       const operandKind = requireHomogeneousNumericKind(
         call.args.map((a) => a.expr),
-        ctx
+        ctx,
+        instanceKey
       );
       return emitComparisonIntrinsic({ op: name, kind: operandKind, args, ctx });
     }
@@ -56,7 +60,8 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 2);
       const operandKind = requireHomogeneousNumericKind(
         call.args.map((a) => a.expr),
-        ctx
+        ctx,
+        instanceKey
       );
       return emitEqualityIntrinsic({ op: name, kind: operandKind, args, ctx });
     }
@@ -218,18 +223,19 @@ const emitEqualityIntrinsic = ({
 
 const requireHomogeneousNumericKind = (
   argExprIds: readonly HirExprId[],
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  instanceKey?: string
 ): NumericKind => {
   if (argExprIds.length === 0) {
     throw new Error("intrinsic requires at least one operand");
   }
   const firstKind = getNumericKind(
-    getRequiredExprType(argExprIds[0]!, ctx),
+    getRequiredExprType(argExprIds[0]!, ctx, instanceKey),
     ctx
   );
   for (let i = 1; i < argExprIds.length; i += 1) {
     const nextKind = getNumericKind(
-      getRequiredExprType(argExprIds[i]!, ctx),
+      getRequiredExprType(argExprIds[i]!, ctx, instanceKey),
       ctx
     );
     if (nextKind !== firstKind) {

@@ -39,6 +39,7 @@ export interface FunctionDecl {
   symbol: SymbolId;
   scope: ScopeId;
   params: ParameterDecl[];
+  typeParameters?: TypeParameterDecl[];
   returnTypeExpr?: Expr;
   body: Expr;
   overloadSetId?: OverloadSetId;
@@ -110,6 +111,7 @@ export class DeclTable {
   }
 
   registerFunction(fn: FunctionDeclInput): FunctionDecl {
+    const typeParameters = fn.typeParameters?.map((param) => ({ ...param }));
     const params: ParameterDecl[] = fn.params.map((param) => {
       const withId: ParameterDecl = {
         ...param,
@@ -124,6 +126,7 @@ export class DeclTable {
     const withIds: FunctionDecl = {
       ...fn,
       id: fn.id ?? this.nextFunctionId++,
+      typeParameters,
       params,
     };
     this.nextFunctionId = this.bumpId(this.nextFunctionId, withIds.id);

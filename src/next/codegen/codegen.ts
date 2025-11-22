@@ -31,6 +31,7 @@ export const codegen = (
     typing: semantics.typing,
     options: { ...DEFAULT_OPTIONS, ...options },
     functions: new Map(),
+    functionInstances: new Map(),
     itemsToSymbols: new Map(),
     structTypes: new Map(),
     rtt,

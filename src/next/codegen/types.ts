@@ -87,8 +87,21 @@ export const getSymbolTypeId = (
 
 export const getRequiredExprType = (
   exprId: HirExprId,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  instanceKey?: string
 ): TypeId => {
+  if (instanceKey) {
+    const instanceType = ctx.typing.functionInstanceExprTypes
+      ?.get(instanceKey)
+      ?.get(exprId);
+    if (typeof instanceType === "number") {
+      return instanceType;
+    }
+  }
+  const resolved = ctx.typing.resolvedExprTypes.get(exprId);
+  if (typeof resolved === "number") {
+    return resolved;
+  }
   const typeId = ctx.typing.table.getExprType(exprId);
   if (typeof typeId === "number") {
     return typeId;
@@ -98,9 +111,22 @@ export const getRequiredExprType = (
 
 export const getExprBinaryenType = (
   exprId: HirExprId,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  instanceKey?: string
 ): binaryen.Type => {
-  const typeId = ctx.typing.table.getExprType(exprId);
+  if (instanceKey) {
+    const instanceType = ctx.typing.functionInstanceExprTypes
+      ?.get(instanceKey)
+      ?.get(exprId);
+    if (typeof instanceType === "number") {
+      return wasmTypeFor(instanceType, ctx);
+    }
+  }
+  const resolved = ctx.typing.resolvedExprTypes.get(exprId);
+  const typeId =
+    typeof resolved === "number"
+      ? resolved
+      : ctx.typing.table.getExprType(exprId);
   if (typeof typeId === "number") {
     return wasmTypeFor(typeId, ctx);
   }

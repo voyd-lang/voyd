@@ -210,6 +210,7 @@ export const resolveTypeExpr = (
   fallback: TypeId,
   typeParams?: ReadonlyMap<SymbolId, TypeId>
 ): TypeId => {
+  const activeTypeParams = typeParams ?? ctx.currentTypeParams;
   if (!expr) {
     return fallback;
   }
@@ -217,16 +218,16 @@ export const resolveTypeExpr = (
   let resolved: TypeId;
   switch (expr.typeKind) {
     case "named":
-      resolved = resolveNamedTypeExpr(expr, ctx, typeParams);
+      resolved = resolveNamedTypeExpr(expr, ctx, activeTypeParams);
       break;
     case "object":
-      resolved = resolveObjectTypeExpr(expr, ctx, typeParams);
+      resolved = resolveObjectTypeExpr(expr, ctx, activeTypeParams);
       break;
     case "tuple":
-      resolved = resolveTupleTypeExpr(expr, ctx, typeParams);
+      resolved = resolveTupleTypeExpr(expr, ctx, activeTypeParams);
       break;
     case "union":
-      resolved = resolveUnionTypeExpr(expr, ctx, typeParams);
+      resolved = resolveUnionTypeExpr(expr, ctx, activeTypeParams);
       break;
     default:
       throw new Error(`unsupported type expression kind: ${expr.typeKind}`);
@@ -368,10 +369,11 @@ const resolveNamedTypeExpr = (
       resolveTypeExpr(arg, ctx, ctx.unknownType, typeParams)
     ) ?? [];
 
+  const typeParamMap = typeParams ?? ctx.currentTypeParams;
   const typeParam =
     (typeof expr.symbol === "number"
-      ? typeParams?.get(expr.symbol)
-      : findTypeParamByName(name, typeParams, ctx)) ?? undefined;
+      ? typeParamMap?.get(expr.symbol)
+      : findTypeParamByName(name, typeParamMap, ctx)) ?? undefined;
   if (typeof typeParam === "number") {
     if (resolvedTypeArgs.length > 0) {
       throw new Error("type parameters do not accept type arguments");

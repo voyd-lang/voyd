@@ -122,6 +122,7 @@ export interface UnificationConflict {
 
 export interface TypeArena {
   get(id: TypeId): Readonly<TypeDescriptor>;
+  getScheme(id: TypeSchemeId): Readonly<TypeScheme>;
   internPrimitive(name: string): TypeId;
   internTrait(desc: Omit<TraitType, "kind">): TypeId;
   internNominalObject(desc: Omit<NominalObjectType, "kind">): TypeId;
@@ -190,6 +191,14 @@ export const createTypeArena = (): TypeArena => {
   const internPrimitive = (name: string): TypeId =>
     storeDescriptor({ kind: "primitive", name });
 
+  const getScheme = (id: TypeSchemeId): TypeScheme => {
+    const scheme = schemes.get(id);
+    if (!scheme) {
+      throw new Error(`unknown TypeScheme ${id}`);
+    }
+    return scheme;
+  };
+
   const internTrait = (desc: Omit<TraitType, "kind">): TypeId =>
     storeDescriptor({
       kind: "trait",
@@ -220,7 +229,9 @@ export const createTypeArena = (): TypeArena => {
               ? Array.from(new Set(field.declaringParams)).sort((a, b) => a - b)
               : undefined,
         }))
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
+        .sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { numeric: true })
+        ),
     });
 
   const internFunction = (desc: Omit<FunctionType, "kind">): TypeId =>
@@ -386,7 +397,9 @@ export const createTypeArena = (): TypeArena => {
 
       let working = subst;
       for (const predicate of predicates) {
-        const candidate = fields.find((field) => field.name === predicate.field);
+        const candidate = fields.find(
+          (field) => field.name === predicate.field
+        );
         if (!candidate) {
           return conflict(
             type,
@@ -598,11 +611,7 @@ export const createTypeArena = (): TypeArena => {
 
       if (leftDesc.kind === "union" && rightDesc.kind === "union") {
         if (leftDesc.members.length !== rightDesc.members.length) {
-          return conflict(
-            left,
-            right,
-            `union arity mismatch (${ctx.reason})`
-          );
+          return conflict(left, right, `union arity mismatch (${ctx.reason})`);
         }
         let working = subst;
         const remaining = new Set(rightDesc.members);
@@ -705,11 +714,19 @@ export const createTypeArena = (): TypeArena => {
         const successAttempt = attempts.find((candidate) => candidate.ok);
         return (
           successAttempt ??
-          conflict(left, right, `intersection comparison failed (${ctx.reason})`)
+          conflict(
+            left,
+            right,
+            `intersection comparison failed (${ctx.reason})`
+          )
         );
       }
 
-      return conflict(left, right, `intersection comparison failed (${ctx.reason})`);
+      return conflict(
+        left,
+        right,
+        `intersection comparison failed (${ctx.reason})`
+      );
     };
 
     const unifyInternal = (
@@ -742,7 +759,10 @@ export const createTypeArena = (): TypeArena => {
         );
       }
 
-      if (isUnknownPrimitive(resolvedLeft) || isUnknownPrimitive(resolvedRight)) {
+      if (
+        isUnknownPrimitive(resolvedLeft) ||
+        isUnknownPrimitive(resolvedRight)
+      ) {
         return success(subst);
       }
 
@@ -810,7 +830,10 @@ export const createTypeArena = (): TypeArena => {
             "owner" in leftDesc &&
             "owner" in rightDesc &&
             leftDesc.owner === rightDesc.owner;
-          if (!sameOwner || leftDesc.typeArgs.length !== rightDesc.typeArgs.length) {
+          if (
+            !sameOwner ||
+            leftDesc.typeArgs.length !== rightDesc.typeArgs.length
+          ) {
             return conflict(resolvedLeft, resolvedRight);
           }
           let working = subst;
@@ -1006,6 +1029,7 @@ export const createTypeArena = (): TypeArena => {
 
   return {
     get,
+    getScheme,
     internPrimitive,
     internTrait,
     internNominalObject,

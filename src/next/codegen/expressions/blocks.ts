@@ -47,7 +47,7 @@ export const compileBlockExpr = (
       expr: ctx.mod.block(
         null,
         statements,
-        getExprBinaryenType(expr.id, ctx)
+        getExprBinaryenType(expr.id, ctx, fnCtx.instanceKey)
       ),
       usedReturnCall,
     };
@@ -92,7 +92,11 @@ export const compileStatement = (
         if (valueExpr.usedReturnCall) {
           return valueExpr.expr;
         }
-        const actualType = getRequiredExprType(stmt.value, ctx);
+        const actualType = getRequiredExprType(
+          stmt.value,
+          ctx,
+          fnCtx.instanceKey
+        );
         const coerced = coerceValueToType({
           value: valueExpr.expr,
           actualType,

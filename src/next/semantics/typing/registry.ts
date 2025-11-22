@@ -111,6 +111,7 @@ export const registerObjectDecls = (ctx: TypingContext): void => {
 export const registerFunctionSignatures = (ctx: TypingContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "function") continue;
+    ctx.functionsBySymbol.set(item.symbol, item);
     const fnDecl =
       (typeof item.decl === "number"
         ? ctx.decls.getFunctionById(item.decl)
@@ -130,8 +131,44 @@ export const registerFunctionSignatures = (ctx: TypingContext): void => {
       );
     }
 
+    const typeParameterDecls =
+      item.typeParameters ?? fnDecl?.typeParameters ?? [];
+    const paramMap = new Map<SymbolId, TypeId>();
+    const typeParams =
+      typeParameterDecls.length === 0
+        ? undefined
+        : typeParameterDecls.map((param) => {
+            const typeParam = ctx.arena.freshTypeParam();
+            const typeRef = ctx.arena.internTypeParamRef(typeParam);
+            paramMap.set(param.symbol, typeRef);
+            const constraint =
+              "constraint" in param && param.constraint
+                ? resolveTypeExpr(
+                    param.constraint,
+                    ctx,
+                    ctx.unknownType,
+                    paramMap
+                  )
+                : undefined;
+            return { symbol: param.symbol, typeParam, constraint, typeRef };
+          });
+
+    if (typeParams && typeParams.length > 0 && !item.returnType) {
+      throw new Error(
+        `generic function ${getSymbolName(
+          item.symbol,
+          ctx
+        )} must declare a return type`
+      );
+    }
+
     const parameters = item.parameters.map((param, index) => {
-      const resolved = resolveTypeExpr(param.type, ctx, ctx.unknownType);
+      const resolved = resolveTypeExpr(
+        param.type,
+        ctx,
+        ctx.unknownType,
+        paramMap
+      );
       ctx.valueTypes.set(param.symbol, resolved);
       const declParam =
         (typeof param.decl === "number"
@@ -163,7 +200,12 @@ export const registerFunctionSignatures = (ctx: TypingContext): void => {
 
     const hasExplicitReturn = Boolean(item.returnType);
     const declaredReturn =
-      resolveTypeExpr(item.returnType, ctx, ctx.unknownType) ?? ctx.unknownType;
+      resolveTypeExpr(
+        item.returnType,
+        ctx,
+        ctx.unknownType,
+        paramMap
+      ) ?? ctx.unknownType;
 
     const functionType = ctx.arena.internFunction({
       parameters: parameters.map(({ type, label }) => ({
@@ -175,15 +217,27 @@ export const registerFunctionSignatures = (ctx: TypingContext): void => {
       effects: ctx.defaultEffectRow,
     });
 
+    const scheme = ctx.arena.newScheme(
+      typeParams?.map((param) => param.typeParam) ?? [],
+      functionType
+    );
+
     ctx.functionSignatures.set(item.symbol, {
       typeId: functionType,
       parameters,
       returnType: declaredReturn,
       hasExplicitReturn,
+      typeParams,
+      scheme,
+      typeParamMap:
+        typeParams && typeParams.length > 0
+          ? new Map(
+              typeParams.map((param) => [param.symbol, param.typeRef] as const)
+            )
+          : undefined,
     });
     ctx.valueTypes.set(item.symbol, functionType);
 
-    const scheme = ctx.arena.newScheme([], functionType);
     ctx.table.setSymbolScheme(item.symbol, scheme);
   }
 };

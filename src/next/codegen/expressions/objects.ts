@@ -26,7 +26,7 @@ export const compileObjectLiteralExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const typeId = getRequiredExprType(expr.id, ctx);
+  const typeId = getRequiredExprType(expr.id, ctx, fnCtx.instanceKey);
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo) {
     throw new Error("object literal missing structural type information");
@@ -58,7 +58,11 @@ export const compileObjectLiteralExpr = (
       return;
     }
 
-    const spreadType = getRequiredExprType(entry.value, ctx);
+    const spreadType = getRequiredExprType(
+      entry.value,
+      ctx,
+      fnCtx.instanceKey
+    );
     const spreadInfo = getStructuralTypeInfo(spreadType, ctx);
     if (!spreadInfo) {
       throw new Error("object spread requires a structural object");
@@ -136,7 +140,11 @@ export const compileObjectLiteralExpr = (
   }
   ops.push(literal);
   return {
-    expr: ctx.mod.block(null, ops, getExprBinaryenType(expr.id, ctx)),
+    expr: ctx.mod.block(
+      null,
+      ops,
+      getExprBinaryenType(expr.id, ctx, fnCtx.instanceKey)
+    ),
     usedReturnCall: false,
   };
 };
@@ -147,7 +155,7 @@ export const compileTupleExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const typeId = getRequiredExprType(expr.id, ctx);
+  const typeId = getRequiredExprType(expr.id, ctx, fnCtx.instanceKey);
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo) {
     throw new Error("tuple missing structural type information");
@@ -204,7 +212,11 @@ export const compileTupleExpr = (
   }
   ops.push(tupleValue);
   return {
-    expr: ctx.mod.block(null, ops, getExprBinaryenType(expr.id, ctx)),
+    expr: ctx.mod.block(
+      null,
+      ops,
+      getExprBinaryenType(expr.id, ctx, fnCtx.instanceKey)
+    ),
     usedReturnCall: false,
   };
 };
@@ -215,7 +227,11 @@ export const compileFieldAccessExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const targetType = getRequiredExprType(expr.target, ctx);
+  const targetType = getRequiredExprType(
+    expr.target,
+    ctx,
+    fnCtx.instanceKey
+  );
   const structInfo = getStructuralTypeInfo(targetType, ctx);
   if (!structInfo) {
     throw new Error("field access requires a structural object");

@@ -81,7 +81,11 @@ export const compilePatternInitialization = ({
     ? declareLocal(pattern.symbol, ctx, fnCtx)
     : getRequiredBinding(pattern.symbol, ctx, fnCtx);
   const targetTypeId = getSymbolTypeId(pattern.symbol, ctx);
-  const initializerType = getRequiredExprType(initializer, ctx);
+  const initializerType = getRequiredExprType(
+    initializer,
+    ctx,
+    fnCtx.instanceKey
+  );
   const value = compileExpr({ exprId: initializer, ctx, fnCtx });
 
   ops.push(
@@ -107,7 +111,11 @@ const compileTuplePattern = ({
   compileExpr,
   options,
 }: PatternInitParams & { pattern: HirPattern & { kind: "tuple" } }): void => {
-  const initializerType = getRequiredExprType(initializer, ctx);
+  const initializerType = getRequiredExprType(
+    initializer,
+    ctx,
+    fnCtx.instanceKey
+  );
   const initializerTemp = allocateTempLocal(
     wasmTypeFor(initializerType, ctx),
     fnCtx

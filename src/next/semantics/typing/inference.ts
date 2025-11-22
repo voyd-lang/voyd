@@ -7,7 +7,9 @@ export const runInferencePass = (ctx: TypingContext): void => {
   ctx.typeCheckMode = "relaxed";
   let changed: boolean;
   do {
+    clearFunctionInstances(ctx);
     ctx.table.clearExprTypes();
+    ctx.resolvedExprTypes.clear();
     changed = typeAllFunctions(ctx, { collectChanges: true });
   } while (changed);
 
@@ -24,7 +26,9 @@ export const runInferencePass = (ctx: TypingContext): void => {
 
 export const runStrictTypeCheck = (ctx: TypingContext): void => {
   ctx.typeCheckMode = "strict";
+  clearFunctionInstances(ctx);
   ctx.table.clearExprTypes();
+  ctx.resolvedExprTypes.clear();
   typeAllFunctions(ctx, { collectChanges: false });
 };
 
@@ -35,6 +39,9 @@ export const typeAllFunctions = (
   let changed = false;
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "function") continue;
+    if (item.typeParameters && item.typeParameters.length > 0) {
+      continue;
+    }
     const updated = typeFunction(item, ctx);
     if (options.collectChanges) {
       changed = updated || changed;
@@ -47,6 +54,10 @@ const typeFunction = (fn: HirFunction, ctx: TypingContext): boolean => {
   const signature = ctx.functionSignatures.get(fn.symbol);
   if (!signature) {
     throw new Error(`missing type signature for function symbol ${fn.symbol}`);
+  }
+
+  if (signature.typeParams && signature.typeParams.length > 0) {
+    return false;
   }
 
   const previousReturnType = ctx.currentFunctionReturnType;
@@ -73,6 +84,15 @@ const typeFunction = (fn: HirFunction, ctx: TypingContext): boolean => {
 
   finalizeFunctionReturnType(fn, signature, bodyType, ctx);
   return true;
+};
+
+const clearFunctionInstances = (ctx: TypingContext): void => {
+  ctx.functionInstances.clear();
+  ctx.activeFunctionInstantiations.clear();
+  ctx.callTypeArguments.clear();
+  ctx.callInstanceKeys.clear();
+  ctx.functionInstantiationInfo.clear();
+  ctx.functionInstanceExprTypes.clear();
 };
 
 const finalizeFunctionReturnType = (

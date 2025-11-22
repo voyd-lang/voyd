@@ -396,8 +396,18 @@ const lowerCallFromElements = (
   ctx: LowerContext,
   scopes: LowerScopeStack
 ): HirExprId => {
+  const potentialGenerics = argsExprs[0];
+  const hasTypeArguments =
+    isForm(potentialGenerics) &&
+    formCallsInternal(potentialGenerics, "generics");
+  const typeArguments = hasTypeArguments
+    ? ((potentialGenerics as Form).rest
+        .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
+        .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
+    : undefined;
+
   const calleeId = lowerExpr(calleeExpr, ctx, scopes);
-  const args = argsExprs.map((arg) => {
+  const args = argsExprs.slice(hasTypeArguments ? 1 : 0).map((arg) => {
     if (isForm(arg) && arg.calls(":")) {
       const labelExpr = arg.at(1);
       const valueExpr = arg.at(2);
@@ -420,6 +430,7 @@ const lowerCallFromElements = (
     span: toSourceSpan(ast),
     callee: calleeId,
     args,
+    typeArguments,
   });
 };
 

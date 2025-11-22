@@ -13,6 +13,7 @@ import type {
   SymbolId,
   TypeId,
   TypeParamId,
+  TypeSchemeId,
 } from "../ids.js";
 import { DeclTable } from "../decls.js";
 import type { TypeArena } from "./type-arena.js";
@@ -28,8 +29,17 @@ export interface TypingInputs {
 export interface TypingResult {
   arena: TypeArena;
   table: TypeTable;
+  resolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
   callTargets: ReadonlyMap<HirExprId, SymbolId>;
+  functionInstances: ReadonlyMap<string, TypeId>;
+  callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
+  callInstanceKeys: ReadonlyMap<HirExprId, string>;
+  functionInstantiationInfo: ReadonlyMap<
+    SymbolId,
+    ReadonlyMap<string, readonly TypeId[]>
+  >;
+  functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
 }
 
 export interface FunctionSignature {
@@ -37,11 +47,21 @@ export interface FunctionSignature {
   parameters: readonly ParamSignature[];
   returnType: TypeId;
   hasExplicitReturn: boolean;
+  typeParams?: readonly FunctionTypeParam[];
+  scheme: TypeSchemeId;
+  typeParamMap?: ReadonlyMap<SymbolId, TypeId>;
 }
 
 export interface ParamSignature {
   type: TypeId;
   label?: string;
+}
+
+export interface FunctionTypeParam {
+  symbol: SymbolId;
+  typeParam: TypeParamId;
+  constraint?: TypeId;
+  typeRef: TypeId;
 }
 
 export interface Arg {
@@ -58,9 +78,14 @@ export interface TypingContext {
   decls: DeclTable;
   arena: TypeArena;
   table: TypeTable;
+  resolvedExprTypes: Map<HirExprId, TypeId>;
   functionSignatures: Map<SymbolId, FunctionSignature>;
   valueTypes: Map<SymbolId, TypeId>;
   callTargets: Map<HirExprId, SymbolId>;
+  callTypeArguments: Map<HirExprId, readonly TypeId[]>;
+  callInstanceKeys: Map<HirExprId, string>;
+  functionInstantiationInfo: Map<SymbolId, Map<string, readonly TypeId[]>>;
+  functionInstanceExprTypes: Map<string, Map<HirExprId, TypeId>>;
   primitiveCache: Map<string, TypeId>;
   intrinsicTypes: Map<string, TypeId>;
   objectTemplates: Map<SymbolId, ObjectTemplate>;
@@ -75,6 +100,8 @@ export interface TypingContext {
   defaultEffectRow: EffectRowId;
   typeCheckMode: TypeCheckMode;
   currentFunctionReturnType: TypeId | undefined;
+  currentTypeParams?: ReadonlyMap<SymbolId, TypeId>;
+  currentTypeSubst?: ReadonlyMap<TypeParamId, TypeId>;
   typeAliasTargets: Map<SymbolId, HirTypeExpr>;
   typeAliasTemplates: Map<SymbolId, TypeAliasTemplate>;
   typeAliasInstances: Map<string, TypeId>;
@@ -85,6 +112,9 @@ export interface TypingContext {
   baseObjectNominal: TypeId;
   baseObjectStructural: TypeId;
   baseObjectType: TypeId;
+  functionsBySymbol: Map<SymbolId, HirFunction>;
+  functionInstances: Map<string, TypeId>;
+  activeFunctionInstantiations: Set<string>;
 }
 
 export interface ObjectTypeInfo {

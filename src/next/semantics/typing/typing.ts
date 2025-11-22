@@ -28,7 +28,21 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   return {
     arena: ctx.arena,
     table: ctx.table,
+    resolvedExprTypes: new Map(ctx.resolvedExprTypes),
     valueTypes: new Map(ctx.valueTypes),
     callTargets: new Map(ctx.callTargets),
+    functionInstances: new Map(ctx.functionInstances),
+    callTypeArguments: new Map(ctx.callTypeArguments),
+    callInstanceKeys: new Map(ctx.callInstanceKeys),
+    functionInstantiationInfo: new Map(
+      Array.from(ctx.functionInstantiationInfo.entries()).map(
+        ([symbol, instantiations]) => [symbol, new Map(instantiations)]
+      )
+    ),
+    functionInstanceExprTypes: new Map(
+      Array.from(ctx.functionInstanceExprTypes.entries()).map(
+        ([key, exprs]) => [key, new Map(exprs)]
+      )
+    ),
   };
 };

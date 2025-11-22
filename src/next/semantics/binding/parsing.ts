@@ -45,6 +45,7 @@ interface ParsedFunctionSignature {
   name: IdentifierAtom;
   params: SignatureParam[];
   returnType?: Expr;
+  typeParameters: readonly IdentifierAtom[];
 }
 
 interface SignatureParam {
@@ -162,6 +163,7 @@ const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
     const head = parseFunctionHead(form.at(1));
     return {
       name: head.name,
+      typeParameters: head.typeParameters,
       params: head.params.flatMap(parseParameter),
       returnType: form.at(2),
     };
@@ -170,19 +172,24 @@ const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
   const head = parseFunctionHead(form);
   return {
     name: head.name,
+    typeParameters: head.typeParameters,
     params: head.params.flatMap(parseParameter),
   };
 };
 
 const parseFunctionHead = (
   expr: Expr | undefined
-): { name: IdentifierAtom; params: readonly Expr[] } => {
+): {
+  name: IdentifierAtom;
+  typeParameters: readonly IdentifierAtom[];
+  params: readonly Expr[];
+} => {
   if (!expr) {
     throw new Error("fn missing name");
   }
 
   if (isIdentifierAtom(expr)) {
-    return { name: expr, params: [] };
+    return { name: expr, typeParameters: [], params: [] };
   }
 
   if (isForm(expr)) {
@@ -190,7 +197,18 @@ const parseFunctionHead = (
     if (!isIdentifierAtom(nameExpr)) {
       throw new Error("fn name must be an identifier");
     }
-    return { name: nameExpr, params: expr.rest };
+    const potentialGenerics = expr.at(1);
+    const hasGenerics =
+      isForm(potentialGenerics) &&
+      formCallsInternal(potentialGenerics, "generics");
+    const params = hasGenerics ? expr.rest.slice(1) : expr.rest;
+    return {
+      name: nameExpr,
+      typeParameters: hasGenerics
+        ? parseTypeParameters(potentialGenerics as Form)
+        : [],
+      params,
+    };
   }
 
   throw new Error("fn name must be an identifier");

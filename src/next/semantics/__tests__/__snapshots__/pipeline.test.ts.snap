@@ -59,6 +59,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         "file": "fib.voyd",
         "start": 30,
       },
+      "typeArguments": undefined,
     },
     5 => {
       "ast": 790,
@@ -165,6 +166,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         "file": "fib.voyd",
         "start": 64,
       },
+      "typeArguments": undefined,
     },
     13 => {
       "args": [
@@ -182,6 +184,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         "file": "fib.voyd",
         "start": 58,
       },
+      "typeArguments": undefined,
     },
     14 => {
       "ast": 812,
@@ -251,6 +254,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         "file": "fib.voyd",
         "start": 77,
       },
+      "typeArguments": undefined,
     },
     19 => {
       "args": [
@@ -268,6 +272,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         "file": "fib.voyd",
         "start": 71,
       },
+      "typeArguments": undefined,
     },
     20 => {
       "args": [
@@ -288,6 +293,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         "file": "fib.voyd",
         "start": 69,
       },
+      "typeArguments": undefined,
     },
     21 => {
       "ast": 945,
@@ -374,6 +380,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         "file": "fib.voyd",
         "start": 106,
       },
+      "typeArguments": undefined,
     },
     28 => {
       "ast": 953,
@@ -447,6 +454,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         "start": 1,
       },
       "symbol": 1,
+      "typeParameters": undefined,
       "visibility": "module",
     },
     29 => {
@@ -476,6 +484,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         "start": 83,
       },
       "symbol": 3,
+      "typeParameters": undefined,
       "visibility": "public",
     },
   },

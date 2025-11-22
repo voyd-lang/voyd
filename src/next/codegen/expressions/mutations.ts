@@ -44,7 +44,11 @@ export const compileAssignExpr = (
 
   const binding = getRequiredBinding(targetExpr.symbol, ctx, fnCtx);
   const targetTypeId = getSymbolTypeId(targetExpr.symbol, ctx);
-  const valueTypeId = getRequiredExprType(expr.value, ctx);
+  const valueTypeId = getRequiredExprType(
+    expr.value,
+    ctx,
+    fnCtx.instanceKey
+  );
   const valueExpr = compileExpr({ exprId: expr.value, ctx, fnCtx });
   return {
     expr: ctx.mod.local.set(
