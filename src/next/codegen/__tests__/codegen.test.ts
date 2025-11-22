@@ -142,6 +142,11 @@ describe("next codegen", () => {
     expect(main()).toBe(12);
   });
 
+  it("emits wasm for recursive type aliases", () => {
+    const main = loadMain("recursive_type_alias.voyd");
+    expect(main()).toBe(8);
+  });
+
   it("uses explicit generic instantiations during codegen", () => {
     const main = loadMain("explicit_generic_instantiation.voyd");
     expect(main()).toBe(7);
@@ -163,5 +168,10 @@ describe("next codegen", () => {
     expect(typeof main2).toBe("function");
     expect((main1 as () => number)()).toBeCloseTo(3);
     expect((main2 as () => number)()).toBe(3);
+  });
+
+  it("it doesn't produce an illegal cast at runtime", () => {
+    const main = loadMain("illegal_cast.voyd");
+    expect(main()).toBe(3);
   });
 });

@@ -49,7 +49,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     typeAliasTemplates: new Map(),
     typeAliasInstances: new Map(),
     typeAliasesByName: new Map(),
-    resolvingTypeAliases: new Set(),
+    resolvingTypeAliases: new Map(),
     failedTypeAliasInstantiations: new Set(),
     baseObjectSymbol: -1,
     baseObjectNominal: -1,
