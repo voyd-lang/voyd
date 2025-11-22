@@ -4,7 +4,7 @@
 
 Variable mutability determines if a variable can be **reassigned** or not.
 
-```
+```voyd
 // Immutable variable
 let x = 5
 x = 6 // Error: Cannot reassign to immutable variable

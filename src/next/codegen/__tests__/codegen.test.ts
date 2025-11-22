@@ -147,6 +147,11 @@ describe("next codegen", () => {
     expect(main()).toBe(8);
   });
 
+  it("emits wasm for recursive generic type aliases", () => {
+    const main = loadMain("recursive_generic_alias.voyd");
+    expect(main()).toBe(2);
+  });
+
   it("uses explicit generic instantiations during codegen", () => {
     const main = loadMain("explicit_generic_instantiation.voyd");
     expect(main()).toBe(7);

@@ -6,7 +6,7 @@ single type.
 An intersection type is defined by listing the types it is composed of separated
 by `&`.
 
-```
+```voyd
 type Vec2D = {
   a: i32,
   b: i32
@@ -19,7 +19,7 @@ type Vec3D = Vec2D & {
 
 the type expression of `Vec3D` resolves to:
 
-```
+```voyd
 type Vec3D = Object & {
   a: i32,
   b: i32,
@@ -29,7 +29,7 @@ type Vec3D = Object & {
 
 Note that the fields of an intersection cannot conflict:
 
-```
+```voyd
 type Vec2D = {
   a: i32,
   b: i32
@@ -47,7 +47,7 @@ type Vec3D = Vec2D & {
 When an intersection includes a nominal object, the object must be a subtype of
 that object.
 
-```
+```voyd
 obj Animal {
   name: String
 }
@@ -75,7 +75,7 @@ let bad_cat: Cat = { name: "Ghost", lives: 9 } // Error - { name: "Ghost", lives
 All object types of an intersection must be a subtype of the previous
 intersected object type, or a parent type of the previous intersected object type.
 
-```
+```voyd
 obj Animal {
   name: String
 }
@@ -109,8 +109,7 @@ type Abomination = Cat & Dog
 An intersection type can combine multiple traits to define a type that must
 satisfy all of the traits.
 
-```
-
+```voyd
 trait Image
   fn draw(self) -> Array[Rgb]
 
@@ -147,7 +146,7 @@ type.
 ```
 
 Chained intersections always resolve down to those two parts
-```
+```voyd
 obj Animal {
   name: string
 }
@@ -163,7 +162,7 @@ type Cat = Animal & {
 ```
 
 All object literals are an intersection between `Object` and their structure
-```
+```voyd
 let Vec2D = {
   a: i32,
   b: i32

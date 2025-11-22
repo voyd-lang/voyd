@@ -475,3 +475,11 @@ effect State
 // Tail resumptive effects with one function can be defined more concisely as
 effect fn get() -> Int
 ```
+
+```
+Ok. Lets forbid overlapping members. We have done quite a bit of work on unions throughout src/next. Including (I think) attempting reification or some kind of type param RTTs within the type system and in codegen.
+
+Do a thorough audit of the current implementation in `src/next`. What do we need to update to make this happen. Is there code that we can remove? What tests need to be removed / updated / added?
+
+Be *VERY* thorough.
+```
