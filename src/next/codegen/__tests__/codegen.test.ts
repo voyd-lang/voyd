@@ -230,6 +230,7 @@ describe("next codegen", () => {
           );
           const arg = typing.arena.get(patternDesc.typeArgs[0]!);
           expect(arg.kind).toBe("primitive");
+          if (arg.kind !== "primitive") throw new Error("Expected primitive");
           expect(arg.name).toBe("i32");
         })
     );
