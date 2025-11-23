@@ -8,6 +8,10 @@ import { parseFile, parseModuleFromSrc } from "../parser/index.js";
 import { compileSrc } from "../compiler.js";
 import { parse as newParse } from "../next/parser/parser.js";
 import { readFileSync } from "fs";
+import path from "node:path";
+import { semanticsPipeline } from "src/next/semantics/pipeline.js";
+import { codegen } from "src/next/codegen/index.js";
+import { getWasmInstance } from "@lib/wasm.js";
 
 export const exec = () => main().catch(errorHandler);
 
@@ -40,6 +44,13 @@ async function main() {
 
   if (config.emitWasm) {
     return emitWasm(config.index, config.runBinaryenOptimizationPass);
+  }
+
+  if (config.canonical && config.run) {
+    const main = nextLoadMain(config.index);
+    const result = main();
+    console.log(result);
+    return;
   }
 
   if (config.run) {
@@ -117,3 +128,21 @@ function errorHandler(error: Error) {
   console.error(error);
   process.exit(1);
 }
+
+const nextLoadAst = (name: string) => {
+  const source = readFileSync(name, "utf8");
+  return newParse(source, name);
+};
+
+const nextLoadWasmInstance = (fixtureName: string) => {
+  const ast = nextLoadAst(fixtureName);
+  const semantics = semanticsPipeline(ast);
+  const { module } = codegen(semantics);
+  return getWasmInstance(module);
+};
+
+const nextLoadMain = (fixtureName: string) => {
+  const instance = nextLoadWasmInstance(fixtureName);
+  const main = instance.exports.main;
+  return main as (...params: unknown[]) => unknown;
+};

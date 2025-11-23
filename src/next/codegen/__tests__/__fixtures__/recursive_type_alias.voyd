@@ -22,10 +22,7 @@ fn to_int(r: RecType) -> i32
     None: -1
     else: -2
 
-fn to_int(b: Box<i32>) -> i32
-  b.v
-
 pub fn main() -> i32
   let r = Box { v: BoxA { v: 3 } }
-  let b = Box{ v: 5 }
+  let b = BoxB { v: 5 }
   r.to_int() + b.to_int()

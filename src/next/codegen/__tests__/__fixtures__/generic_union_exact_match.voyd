@@ -1,0 +1,27 @@
+obj Some<T> { v: T }
+
+type Num = Some<i32> | Some<f64>
+
+fn only_i32(x: Num) -> i32
+  x.match()
+    Some<i32>: 1
+    else: -1
+
+fn add_if_i32(x: Num) -> i32
+  x.match()
+    Some<i32>: x.v + 1
+    else: -2
+
+pub fn match_i32() -> i32
+  let a: Num = Some { v: 4 }
+  only_i32(a)
+
+pub fn match_f64() -> i32
+  let b: Num = Some { v: 2.5 }
+  only_i32(b)
+
+pub fn main() -> i32
+  let a: Num = Some { v: 4 }
+  let b: Num = Some { v: 2.5 }
+
+  only_i32(a) + only_i32(b) + add_if_i32(a) + add_if_i32(b)

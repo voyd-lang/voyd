@@ -161,6 +161,20 @@ describe("next codegen", () => {
     expect(main()).toBe(35);
   });
 
+  it("avoids widening generic match arms across instantiations", () => {
+    const instance = loadWasmInstance("generic_union_exact_match.voyd");
+
+    const matchI32 = instance.exports.match_i32;
+    const matchF64 = instance.exports.match_f64;
+    const main = instance.exports.main;
+
+    expect(typeof matchI32).toBe("function");
+    expect(typeof matchF64).toBe("function");
+    expect((matchI32 as () => number)()).toBe(1);
+    expect((matchF64 as () => number)()).toBe(-1);
+    expect((main as () => number)()).toBe(3);
+  });
+
   it("uses explicit generic instantiations during codegen", () => {
     const main = loadMain("explicit_generic_instantiation.voyd");
     expect(main()).toBe(7);
@@ -192,12 +206,59 @@ describe("next codegen", () => {
     const someI32 = arena.internNominalObject({ owner, typeArgs: [i32] });
     const someF64 = arena.internNominalObject({ owner, typeArgs: [f64] });
     const union = arena.internUnion([someI32, someF64]);
+    const objectsByNominal = new Map([
+      [
+        someI32,
+        { nominal: someI32, structural: someI32, type: someI32, fields: [] },
+      ],
+      [
+        someF64,
+        { nominal: someF64, structural: someF64, type: someF64, fields: [] },
+      ],
+    ]);
     const ctx = {
-      typing: { arena },
+      typing: { arena, objectsByNominal },
       hir: { module: { ast: 0 } },
     } as unknown as CodegenContext;
 
     expect(narrowPatternType(someI32, union, ctx)).toBe(someI32);
+  });
+
+  it("does not narrow match patterns across incompatible instantiations", () => {
+    const arena = createTypeArena();
+    const owner: SymbolId = 2;
+    const i32 = arena.internPrimitive("i32");
+    const f64 = arena.internPrimitive("f64");
+    const unknown = arena.internPrimitive("unknown");
+    const someUnknown = arena.internNominalObject({ owner, typeArgs: [unknown] });
+    const someI32 = arena.internNominalObject({ owner, typeArgs: [i32] });
+    const someF64 = arena.internNominalObject({ owner, typeArgs: [f64] });
+    const objectsByNominal = new Map([
+      [
+        someUnknown,
+        {
+          nominal: someUnknown,
+          structural: someUnknown,
+          type: someUnknown,
+          fields: [],
+        },
+      ],
+      [
+        someI32,
+        { nominal: someI32, structural: someI32, type: someI32, fields: [] },
+      ],
+      [
+        someF64,
+        { nominal: someF64, structural: someF64, type: someF64, fields: [] },
+      ],
+    ]);
+    const union = arena.internUnion([someI32, someF64]);
+    const ctx = {
+      typing: { arena, objectsByNominal },
+      hir: { module: { ast: 0 } },
+    } as unknown as CodegenContext;
+
+    expect(narrowPatternType(someUnknown, union, ctx)).toBeUndefined();
   });
 
   it("it doesn't produce an illegal cast at runtime", () => {

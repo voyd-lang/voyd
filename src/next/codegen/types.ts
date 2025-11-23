@@ -171,11 +171,55 @@ export const narrowPatternType = (
   discriminantTypeId: TypeId,
   ctx: CodegenContext
 ): TypeId | undefined => {
-  const location = ctx.hir.module.ast;
   const patternNominal = getNominalComponentId(patternTypeId, ctx);
   if (typeof patternNominal !== "number") {
     return undefined;
   }
+
+  const matchesInstantiation = (candidateNominal: TypeId): boolean => {
+    if (candidateNominal === patternNominal) {
+      return true;
+    }
+
+    const candidateDesc = ctx.typing.arena.get(candidateNominal);
+    const patternDesc = ctx.typing.arena.get(patternNominal);
+    if (
+      candidateDesc.kind === "nominal-object" &&
+      patternDesc.kind === "nominal-object" &&
+      candidateDesc.owner === patternDesc.owner &&
+      candidateDesc.typeArgs.length === patternDesc.typeArgs.length &&
+      !candidateDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx)) &&
+      !patternDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
+    ) {
+      const compatibleArgs = candidateDesc.typeArgs.every((arg, index) => {
+        const comparison = ctx.typing.arena.unify(
+          arg,
+          patternDesc.typeArgs[index]!,
+          {
+            location: ctx.hir.module.ast,
+            reason: "nominal instantiation narrowing",
+            variance: "covariant",
+          }
+        );
+        return comparison.ok;
+      });
+      if (compatibleArgs) {
+        return true;
+      }
+    }
+
+    return getNominalAncestry(candidateNominal, ctx).some(
+      (entry) => entry.nominalId === patternNominal
+    );
+  };
+
+  const matchesNominal = (candidate: TypeId): boolean => {
+    const candidateNominal = getNominalComponentId(candidate, ctx);
+    if (typeof candidateNominal !== "number") {
+      return false;
+    }
+    return matchesInstantiation(candidateNominal);
+  };
 
   const discriminantDesc = ctx.typing.arena.get(discriminantTypeId);
   if (discriminantDesc.kind === "union") {
@@ -183,34 +227,14 @@ export const narrowPatternType = (
       return patternTypeId;
     }
 
-    const matches = discriminantDesc.members.filter((member) => {
-      const candidateNominal = getNominalComponentId(member, ctx);
-      if (typeof candidateNominal !== "number") {
-        return false;
-      }
-      if (
-        getNominalOwner(candidateNominal, ctx) !==
-        getNominalOwner(patternNominal, ctx)
-      ) {
-        return false;
-      }
-
-      const comparison = ctx.typing.arena.unify(member, patternTypeId, {
-        location,
-        reason: "match pattern narrowing",
-        variance: "covariant",
-      });
-      return comparison.ok;
-    });
+    const matches = discriminantDesc.members.filter(matchesNominal);
     if (matches.length === 1) {
       return matches[0]!;
     }
     return undefined;
   }
 
-  return nominalOwnersMatch(patternNominal, discriminantTypeId, ctx)
-    ? discriminantTypeId
-    : undefined;
+  return matchesNominal(discriminantTypeId) ? discriminantTypeId : undefined;
 };
 
 export const getStructuralTypeInfo = (
@@ -372,56 +396,12 @@ type NominalAncestryEntry = {
   typeId: TypeId;
 };
 
-const widenNominalAncestors = (
-  nominalId: TypeId | undefined,
+const isUnknownPrimitive = (
+  typeId: TypeId,
   ctx: CodegenContext
-): number[] => {
-  if (typeof nominalId !== "number") {
-    return [];
-  }
-
-  const nominalDesc = ctx.typing.arena.get(nominalId);
-  if (nominalDesc.kind !== "nominal-object") {
-    return [];
-  }
-
-  const compatible: number[] = [];
-  for (const info of ctx.typing.objectsByNominal.values()) {
-    if (info.nominal === nominalId) {
-      continue;
-    }
-    const candidateDesc = ctx.typing.arena.get(info.nominal);
-    if (
-      candidateDesc.kind !== "nominal-object" ||
-      candidateDesc.owner !== nominalDesc.owner ||
-      candidateDesc.typeArgs.length !== nominalDesc.typeArgs.length
-    ) {
-      continue;
-    }
-
-    let ok = true;
-    for (let index = 0; index < nominalDesc.typeArgs.length; index += 1) {
-      const unified = ctx.typing.arena.unify(
-        nominalDesc.typeArgs[index]!,
-        candidateDesc.typeArgs[index]!,
-        {
-          location: ctx.hir.module.ast,
-          reason: "nominal ancestor widening",
-          variance: "covariant",
-        }
-      );
-      if (!unified.ok) {
-        ok = false;
-        break;
-      }
-    }
-
-    if (ok) {
-      compatible.push(info.type);
-    }
-  }
-
-  return compatible;
+): boolean => {
+  const desc = ctx.typing.arena.get(typeId);
+  return desc.kind === "primitive" && desc.name === "unknown";
 };
 
 const buildRuntimeAncestors = ({
@@ -451,9 +431,55 @@ const buildRuntimeAncestors = ({
     add(entry.nominalId);
   });
   add(structuralId);
-  widenNominalAncestors(nominalAncestry[0]?.nominalId, ctx).forEach((id) =>
-    add(id)
-  );
+  const addEquivalentInstantiations = (nominalId?: TypeId) => {
+    if (typeof nominalId !== "number") {
+      return;
+    }
+    const targetDesc = ctx.typing.arena.get(nominalId);
+    if (
+      targetDesc.kind !== "nominal-object" ||
+      targetDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
+    ) {
+      return;
+    }
+
+    ctx.typing.objectsByNominal.forEach((info) => {
+      if (info.nominal === nominalId) {
+        return;
+      }
+      const candidateDesc = ctx.typing.arena.get(info.nominal);
+      if (
+        candidateDesc.kind !== "nominal-object" ||
+        candidateDesc.owner !== targetDesc.owner ||
+        candidateDesc.typeArgs.length !== targetDesc.typeArgs.length ||
+        candidateDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
+      ) {
+        return;
+      }
+      const compatible = candidateDesc.typeArgs.every((arg, index) => {
+        const targetArg = targetDesc.typeArgs[index]!;
+        const forward = ctx.typing.arena.unify(arg, targetArg, {
+          location: ctx.hir.module.ast,
+          reason: "nominal instantiation equivalence",
+          variance: "covariant",
+        });
+        if (forward.ok) {
+          return true;
+        }
+        const backward = ctx.typing.arena.unify(targetArg, arg, {
+          location: ctx.hir.module.ast,
+          reason: "nominal instantiation equivalence",
+          variance: "covariant",
+        });
+        return backward.ok;
+      });
+      if (compatible) {
+        add(info.type);
+        add(info.nominal);
+      }
+    });
+  };
+  addEquivalentInstantiations(nominalAncestry[0]?.nominalId);
 
   return ancestors;
 };
@@ -487,21 +513,6 @@ const getNominalAncestry = (
   }
 
   return ancestry;
-};
-
-const nominalOwnersMatch = (
-  patternNominal: TypeId,
-  candidateType: TypeId,
-  ctx: CodegenContext
-): boolean => {
-  const candidateNominal = getNominalComponentId(candidateType, ctx);
-  if (typeof candidateNominal !== "number") {
-    return false;
-  }
-  return (
-    getNominalOwner(candidateNominal, ctx) ===
-    getNominalOwner(patternNominal, ctx)
-  );
 };
 
 const getNominalComponentId = (

@@ -1091,6 +1091,68 @@ export const ensureTypeMatches = (
   throw new Error(`type mismatch for ${reason}`);
 };
 
+const nominalInstantiationMatches = (
+  candidate: TypeId,
+  expected: TypeId,
+  ctx: TypingContext
+): boolean => {
+  const seen = new Set<TypeId>();
+  let current: TypeId | undefined = candidate;
+  while (typeof current === "number" && !seen.has(current)) {
+    if (current === expected) {
+      return true;
+    }
+
+    const currentDesc = ctx.arena.get(current);
+    const expectedDesc = ctx.arena.get(expected);
+    if (
+      currentDesc.kind === "nominal-object" &&
+      expectedDesc.kind === "nominal-object" &&
+      currentDesc.owner === expectedDesc.owner &&
+      currentDesc.typeArgs.length === expectedDesc.typeArgs.length &&
+      !currentDesc.typeArgs.some((arg) => containsUnknownType(arg, ctx)) &&
+      !expectedDesc.typeArgs.some((arg) => containsUnknownType(arg, ctx))
+    ) {
+      const compatibleArgs = currentDesc.typeArgs.every((arg, index) => {
+        const comparison = ctx.arena.unify(
+          arg,
+          expectedDesc.typeArgs[index]!,
+          {
+            location: ctx.hir.module.ast,
+            reason: "nominal instantiation comparison",
+            variance: "covariant",
+          }
+        );
+        return comparison.ok;
+      });
+      if (compatibleArgs) {
+        return true;
+      }
+    }
+
+    seen.add(current);
+    const info = getObjectInfoForNominal(current, ctx);
+    current = info?.baseNominal;
+  }
+  return false;
+};
+
+const unionMemberMatchesPattern = (
+  member: TypeId,
+  patternType: TypeId,
+  ctx: TypingContext
+): boolean => {
+  const patternNominal = getNominalComponent(patternType, ctx);
+  const memberNominal = getNominalComponent(member, ctx);
+  if (
+    typeof patternNominal === "number" &&
+    typeof memberNominal === "number"
+  ) {
+    return nominalInstantiationMatches(memberNominal, patternNominal, ctx);
+  }
+  return typeSatisfies(member, patternType, ctx);
+};
+
 export const matchedUnionMembers = (
   patternType: TypeId,
   remaining: Set<TypeId>,
@@ -1100,7 +1162,7 @@ export const matchedUnionMembers = (
     return [];
   }
   return Array.from(remaining).filter((member) =>
-    typeSatisfies(member, patternType, ctx)
+    unionMemberMatchesPattern(member, patternType, ctx)
   );
 };
 
@@ -1115,14 +1177,14 @@ export const narrowTypeForPattern = (
   const desc = ctx.arena.get(discriminantType);
   if (desc.kind === "union") {
     const matches = desc.members.filter((member) =>
-      typeSatisfies(member, patternType, ctx)
+      unionMemberMatchesPattern(member, patternType, ctx)
     );
     if (matches.length === 0) {
       return undefined;
     }
     return matches.length === 1 ? matches[0] : ctx.arena.internUnion(matches);
   }
-  return typeSatisfies(discriminantType, patternType, ctx)
+  return unionMemberMatchesPattern(discriminantType, patternType, ctx)
     ? discriminantType
     : undefined;
 };
