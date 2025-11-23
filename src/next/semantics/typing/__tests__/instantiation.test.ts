@@ -281,6 +281,126 @@ describe("instantiation argument handling", () => {
     ).toBe(true);
   });
 
+  it("rejects pure alias cycles", () => {
+    const { ctx, symbolTable } = createContext();
+    const aSymbol = symbolTable.declare({
+      name: "A",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const bSymbol = symbolTable.declare({
+      name: "B",
+      kind: "type",
+      declaredAt: 0,
+    });
+
+    const aTarget: HirTypeExpr = {
+      typeKind: "named",
+      path: ["B"],
+      symbol: bSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const bTarget: HirTypeExpr = {
+      typeKind: "named",
+      path: ["A"],
+      symbol: aSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(aSymbol, { symbol: aSymbol, params: [], target: aTarget });
+    ctx.typeAliasTargets.set(aSymbol, aTarget);
+    ctx.typeAliasTemplates.set(bSymbol, { symbol: bSymbol, params: [], target: bTarget });
+    ctx.typeAliasTargets.set(bSymbol, bTarget);
+
+    expect(() => resolveTypeAlias(aSymbol, ctx, [])).toThrow(
+      /cyclic type alias instantiation/
+    );
+    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(ctx.failedTypeAliasInstantiations.has(`${aSymbol}<>`)).toBe(true);
+  });
+
+  it("rejects generic alias cycles", () => {
+    const { ctx, symbolTable } = createContext();
+    const aParamSymbol = symbolTable.declare({
+      name: "T",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const bParamSymbol = symbolTable.declare({
+      name: "U",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const aSymbol = symbolTable.declare({
+      name: "A",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const bSymbol = symbolTable.declare({
+      name: "B",
+      kind: "type",
+      declaredAt: 0,
+    });
+
+    const aTarget: HirTypeExpr = {
+      typeKind: "named",
+      path: ["B"],
+      symbol: bSymbol,
+      typeArguments: [
+        {
+          typeKind: "named",
+          path: ["T"],
+          symbol: aParamSymbol,
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const bTarget: HirTypeExpr = {
+      typeKind: "named",
+      path: ["A"],
+      symbol: aSymbol,
+      typeArguments: [
+        {
+          typeKind: "named",
+          path: ["U"],
+          symbol: bParamSymbol,
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(aSymbol, {
+      symbol: aSymbol,
+      params: [{ symbol: aParamSymbol }],
+      target: aTarget,
+    });
+    ctx.typeAliasTargets.set(aSymbol, aTarget);
+    ctx.typeAliasTemplates.set(bSymbol, {
+      symbol: bSymbol,
+      params: [{ symbol: bParamSymbol }],
+      target: bTarget,
+    });
+    ctx.typeAliasTargets.set(bSymbol, bTarget);
+
+    const boolType = ctx.primitiveCache.get("bool") ?? ctx.arena.internPrimitive("bool");
+
+    expect(() => resolveTypeAlias(aSymbol, ctx, [boolType])).toThrow(
+      /cyclic type alias instantiation/
+    );
+    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(ctx.failedTypeAliasInstantiations.has(`${aSymbol}<${boolType}>`)).toBe(
+      true
+    );
+  });
+
   it("resolves recursive aliases through constructors", () => {
     const { ctx, symbolTable } = createContext();
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
