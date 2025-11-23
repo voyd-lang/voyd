@@ -160,6 +160,54 @@ const containsUnknownType = (
   }
 };
 
+const containsTypeParam = (
+  type: TypeId,
+  param: TypeParamId,
+  ctx: TypingContext,
+  seen: Set<TypeId> = new Set()
+): boolean => {
+  if (seen.has(type)) {
+    return false;
+  }
+  seen.add(type);
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "type-param-ref":
+      return desc.param === param;
+    case "trait":
+    case "nominal-object":
+      return desc.typeArgs.some((arg) =>
+        containsTypeParam(arg, param, ctx, seen)
+      );
+    case "structural-object":
+      return desc.fields.some((field) =>
+        containsTypeParam(field.type, param, ctx, seen)
+      );
+    case "function":
+      return (
+        desc.parameters.some((paramDesc) =>
+          containsTypeParam(paramDesc.type, param, ctx, seen)
+        ) || containsTypeParam(desc.returnType, param, ctx, seen)
+      );
+    case "union":
+      return desc.members.some((member) =>
+        containsTypeParam(member, param, ctx, seen)
+      );
+    case "intersection":
+      return (
+        (typeof desc.nominal === "number" &&
+          containsTypeParam(desc.nominal, param, ctx, seen)) ||
+        (typeof desc.structural === "number" &&
+          containsTypeParam(desc.structural, param, ctx, seen))
+      );
+    case "fixed-array":
+      return containsTypeParam(desc.element, param, ctx, seen);
+    default:
+      return false;
+  }
+};
+
 const ensureFieldsSubstituted = (
   fields: readonly StructuralField[],
   ctx: TypingContext,
@@ -296,9 +344,12 @@ export const resolveTypeAlias = (
   }
 
   let resolved: TypeId;
+  let placeholderParam: TypeParamId | undefined;
   try {
-    resolved = ctx.arena.createRecursiveType((self) => {
+    resolved = ctx.arena.createRecursiveType((self, placeholder) => {
+      placeholderParam = placeholder;
       ctx.resolvingTypeAliases.set(key, self);
+      ctx.resolvingTypeAliasKeysById.set(self, key);
 
       const paramMap = new Map<SymbolId, TypeId>();
       template.params.forEach((param, index) =>
@@ -351,7 +402,15 @@ export const resolveTypeAlias = (
       return ctx.arena.get(targetType);
     });
 
-    if (cacheable) {
+    if (
+      typeof placeholderParam === "number" &&
+      containsTypeParam(resolved, placeholderParam, ctx)
+    ) {
+      throw new Error("cyclic type alias instantiation");
+    }
+
+    const canCacheNow = cacheable && ctx.resolvingTypeAliases.size === 1;
+    if (canCacheNow) {
       ctx.typeAliasInstances.set(key, resolved);
     }
     return resolved;
@@ -359,7 +418,11 @@ export const resolveTypeAlias = (
     ctx.failedTypeAliasInstantiations.add(key);
     throw error;
   } finally {
+    const activeAlias = ctx.resolvingTypeAliases.get(key);
     ctx.resolvingTypeAliases.delete(key);
+    if (typeof activeAlias === "number") {
+      ctx.resolvingTypeAliasKeysById.delete(activeAlias);
+    }
   }
 };
 
@@ -418,6 +481,10 @@ const resolveNamedTypeExpr = (
     typeof aliasInstanceKey === "string"
       ? ctx.resolvingTypeAliases.get(aliasInstanceKey)
       : undefined;
+  const activeAliasKey =
+    typeof activeAlias === "number"
+      ? ctx.resolvingTypeAliasKeysById.get(activeAlias)
+      : undefined;
   const typeParam =
     (typeof expr.symbol === "number"
       ? typeParamMap?.get(expr.symbol)
@@ -429,6 +496,18 @@ const resolveNamedTypeExpr = (
       throw new Error("type parameters do not accept type arguments");
     }
     return typeParam;
+  }
+
+  if (
+    typeof activeAlias === "number" &&
+    typeof aliasInstanceKey === "string" &&
+    activeAliasKey !== undefined &&
+    activeAliasKey !== aliasInstanceKey
+  ) {
+    const activeDesc = ctx.arena.get(activeAlias);
+    if (activeDesc.kind === "type-param-ref") {
+      throw new Error("cyclic type alias instantiation");
+    }
   }
 
   if (name === BASE_OBJECT_NAME) {
