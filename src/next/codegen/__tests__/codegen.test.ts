@@ -3,12 +3,11 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { getWasmInstance } from "../../../lib/wasm.js";
 import { codegen } from "../index.js";
-import { narrowPatternType } from "../types.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
-import type { CodegenContext } from "../context.js";
-import { createTypeArena } from "../../semantics/typing/type-arena.js";
-import type { SymbolId } from "../../semantics/ids.js";
+import type { HirMatchExpr } from "../../semantics/hir/index.js";
+import type { TypingResult } from "../../semantics/typing/types.js";
+import type { TypeId } from "../../semantics/ids.js";
 
 const loadAst = (fixtureName: string) => {
   const source = readFileSync(
@@ -30,6 +29,20 @@ const loadMain = (fixtureName: string) => {
   const main = instance.exports.main;
   expect(typeof main).toBe("function");
   return main as (...params: unknown[]) => unknown;
+};
+
+const getNominalPatternDesc = (typeId: TypeId, typing: TypingResult) => {
+  const desc = typing.arena.get(typeId);
+  if (desc.kind === "nominal-object") {
+    return desc;
+  }
+  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+    const nominalDesc = typing.arena.get(desc.nominal);
+    if (nominalDesc.kind === "nominal-object") {
+      return nominalDesc;
+    }
+  }
+  throw new Error("expected match pattern to include a nominal component");
 };
 
 describe("next codegen", () => {
@@ -198,67 +211,55 @@ describe("next codegen", () => {
     expect((main2 as () => number)()).toBe(3);
   });
 
-  it("narrows match patterns to the unique generic instantiation when possible", () => {
-    const arena = createTypeArena();
-    const owner: SymbolId = 1;
-    const i32 = arena.internPrimitive("i32");
-    const f64 = arena.internPrimitive("f64");
-    const someI32 = arena.internNominalObject({ owner, typeArgs: [i32] });
-    const someF64 = arena.internNominalObject({ owner, typeArgs: [f64] });
-    const union = arena.internUnion([someI32, someF64]);
-    const objectsByNominal = new Map([
-      [
-        someI32,
-        { nominal: someI32, structural: someI32, type: someI32, fields: [] },
-      ],
-      [
-        someF64,
-        { nominal: someF64, structural: someF64, type: someF64, fields: [] },
-      ],
-    ]);
-    const ctx = {
-      typing: { arena, objectsByNominal },
-      hir: { module: { ast: 0 } },
-    } as unknown as CodegenContext;
+  it("records narrowed match pattern instantiations for generic union arms", () => {
+    const ast = loadAst("generic_union_exact_match.voyd");
+    const { hir, typing } = semanticsPipeline(ast);
+    const matches = Array.from(hir.expressions.values()).filter(
+      (expr): expr is HirMatchExpr => expr.exprKind === "match"
+    );
 
-    expect(narrowPatternType(someI32, union, ctx)).toBe(someI32);
+    expect(matches.length).toBeGreaterThan(0);
+    matches.forEach((match) =>
+      match.arms
+        .filter((arm) => arm.pattern.kind === "type")
+        .forEach((arm) => {
+          expect(typeof arm.pattern.typeId).toBe("number");
+          const patternDesc = getNominalPatternDesc(
+            arm.pattern.typeId!,
+            typing
+          );
+          const arg = typing.arena.get(patternDesc.typeArgs[0]!);
+          expect(arg.kind).toBe("primitive");
+          expect(arg.name).toBe("i32");
+        })
+    );
   });
 
-  it("does not narrow match patterns across incompatible instantiations", () => {
-    const arena = createTypeArena();
-    const owner: SymbolId = 2;
-    const i32 = arena.internPrimitive("i32");
-    const f64 = arena.internPrimitive("f64");
-    const unknown = arena.internPrimitive("unknown");
-    const someUnknown = arena.internNominalObject({ owner, typeArgs: [unknown] });
-    const someI32 = arena.internNominalObject({ owner, typeArgs: [i32] });
-    const someF64 = arena.internNominalObject({ owner, typeArgs: [f64] });
-    const objectsByNominal = new Map([
-      [
-        someUnknown,
-        {
-          nominal: someUnknown,
-          structural: someUnknown,
-          type: someUnknown,
-          fields: [],
-        },
-      ],
-      [
-        someI32,
-        { nominal: someI32, structural: someI32, type: someI32, fields: [] },
-      ],
-      [
-        someF64,
-        { nominal: someF64, structural: someF64, type: someF64, fields: [] },
-      ],
-    ]);
-    const union = arena.internUnion([someI32, someF64]);
-    const ctx = {
-      typing: { arena, objectsByNominal },
-      hir: { module: { ast: 0 } },
-    } as unknown as CodegenContext;
+  it("keeps distinct match pattern instantiations across generic union arms", () => {
+    const ast = loadAst("generic_union_match.voyd");
+    const { hir, typing } = semanticsPipeline(ast);
+    const match = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirMatchExpr => expr.exprKind === "match"
+    );
 
-    expect(narrowPatternType(someUnknown, union, ctx)).toBeUndefined();
+    expect(match).toBeDefined();
+    const argNames =
+      match?.arms
+        .filter((arm) => arm.pattern.kind === "type")
+        .map((arm) => {
+          expect(typeof arm.pattern.typeId).toBe("number");
+          const patternDesc = getNominalPatternDesc(
+            arm.pattern.typeId!,
+            typing
+          );
+          const arg = typing.arena.get(patternDesc.typeArgs[0]!);
+          if (arg.kind !== "primitive") {
+            throw new Error("expected primitive type argument");
+          }
+          return arg.name;
+        }) ?? [];
+
+    expect(argNames).toEqual(["f64", "i32"]);
   });
 
   it("it doesn't produce an illegal cast at runtime", () => {

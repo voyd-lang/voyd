@@ -10,6 +10,7 @@ import type {
   StructuralTypeInfo,
   HirTypeExpr,
   HirExprId,
+  HirPattern,
   SymbolId,
   TypeId,
 } from "./context.js";
@@ -156,85 +157,14 @@ export const getTypeIdFromTypeExpr = (
   throw new Error("codegen expected type-annotated HIR type expression");
 };
 
-export const resolvePatternTypeForMatch = (
-  type: HirTypeExpr,
-  discriminantTypeId: TypeId,
+export const getMatchPatternTypeId = (
+  pattern: HirPattern & { kind: "type" },
   ctx: CodegenContext
 ): TypeId => {
-  const resolved = getTypeIdFromTypeExpr(type, ctx);
-  const narrowed = narrowPatternType(resolved, discriminantTypeId, ctx);
-  return typeof narrowed === "number" ? narrowed : resolved;
-};
-
-export const narrowPatternType = (
-  patternTypeId: TypeId,
-  discriminantTypeId: TypeId,
-  ctx: CodegenContext
-): TypeId | undefined => {
-  const patternNominal = getNominalComponentId(patternTypeId, ctx);
-  if (typeof patternNominal !== "number") {
-    return undefined;
+  if (typeof pattern.typeId === "number") {
+    return pattern.typeId;
   }
-
-  const matchesInstantiation = (candidateNominal: TypeId): boolean => {
-    if (candidateNominal === patternNominal) {
-      return true;
-    }
-
-    const candidateDesc = ctx.typing.arena.get(candidateNominal);
-    const patternDesc = ctx.typing.arena.get(patternNominal);
-    if (
-      candidateDesc.kind === "nominal-object" &&
-      patternDesc.kind === "nominal-object" &&
-      candidateDesc.owner === patternDesc.owner &&
-      candidateDesc.typeArgs.length === patternDesc.typeArgs.length &&
-      !candidateDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx)) &&
-      !patternDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
-    ) {
-      const compatibleArgs = candidateDesc.typeArgs.every((arg, index) => {
-        const comparison = ctx.typing.arena.unify(
-          arg,
-          patternDesc.typeArgs[index]!,
-          {
-            location: ctx.hir.module.ast,
-            reason: "nominal instantiation narrowing",
-            variance: "covariant",
-          }
-        );
-        return comparison.ok;
-      });
-      if (compatibleArgs) {
-        return true;
-      }
-    }
-
-    return getNominalAncestry(candidateNominal, ctx).some(
-      (entry) => entry.nominalId === patternNominal
-    );
-  };
-
-  const matchesNominal = (candidate: TypeId): boolean => {
-    const candidateNominal = getNominalComponentId(candidate, ctx);
-    if (typeof candidateNominal !== "number") {
-      return false;
-    }
-    return matchesInstantiation(candidateNominal);
-  };
-
-  const discriminantDesc = ctx.typing.arena.get(discriminantTypeId);
-  if (discriminantDesc.kind === "union") {
-    if (discriminantDesc.members.includes(patternTypeId)) {
-      return patternTypeId;
-    }
-
-    const matches = discriminantDesc.members.filter(matchesNominal);
-    if (matches.length === 1) {
-      return matches[0]!;
-    }
-    return undefined;
-  }
-
-  return matchesNominal(discriminantTypeId) ? discriminantTypeId : undefined;
+  return getTypeIdFromTypeExpr(pattern.type, ctx);
 };
 
 export const getStructuralTypeInfo = (

@@ -18,7 +18,7 @@ import {
   getExprBinaryenType,
   getRequiredExprType,
   getStructuralTypeInfo,
-  resolvePatternTypeForMatch,
+  getMatchPatternTypeId,
 } from "../types.js";
 
 export const compileIfExpr = (
@@ -125,7 +125,6 @@ export const compileMatchExpr = (
     const condition = compileMatchCondition(
       arm.pattern,
       discriminantTemp,
-      discriminantTypeId,
       ctx
     );
     const fallback =
@@ -159,31 +158,57 @@ export const compileMatchExpr = (
 const compileMatchCondition = (
   pattern: HirPattern & { kind: "type" },
   discriminant: LocalBinding,
-  discriminantTypeId: TypeId,
   ctx: CodegenContext
 ): binaryen.ExpressionRef => {
-  const patternTypeId = resolvePatternTypeForMatch(
-    pattern.type,
-    discriminantTypeId,
-    ctx
-  );
-  const structInfo = getStructuralTypeInfo(patternTypeId, ctx);
-  if (!structInfo) {
+  const patternTypeId = getMatchPatternTypeId(pattern, ctx);
+  const makeAncestors = () =>
+    structGetFieldValue({
+      mod: ctx.mod,
+      fieldType: ctx.rtt.extensionHelpers.i32Array,
+      fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
+      exprRef: ctx.mod.local.get(discriminant.index, discriminant.type),
+    });
+
+  const compileTypeTest = (typeId: TypeId): binaryen.ExpressionRef => {
+    const structInfo = getStructuralTypeInfo(typeId, ctx);
+    if (!structInfo) {
+      throw new Error("match pattern requires a structural type");
+    }
+
+    return ctx.mod.call(
+      "__extends",
+      [ctx.mod.i32.const(structInfo.typeId), makeAncestors()],
+      binaryen.i32
+    );
+  };
+
+  const collectTargets = (
+    typeId: TypeId,
+    seen: Set<TypeId>,
+    targets: TypeId[]
+  ): void => {
+    if (seen.has(typeId)) {
+      return;
+    }
+    seen.add(typeId);
+    const desc = ctx.typing.arena.get(typeId);
+    if (desc.kind === "union") {
+      desc.members.forEach((member) => collectTargets(member, seen, targets));
+      return;
+    }
+    targets.push(typeId);
+  };
+
+  const targets: TypeId[] = [];
+  collectTargets(patternTypeId, new Set<TypeId>(), targets);
+  if (targets.length === 0) {
     throw new Error("match pattern requires a structural type");
   }
 
-  const pointer = ctx.mod.local.get(discriminant.index, discriminant.type);
-  const ancestors = structGetFieldValue({
-    mod: ctx.mod,
-    fieldType: ctx.rtt.extensionHelpers.i32Array,
-    fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
-    exprRef: pointer,
-  });
-
-  return ctx.mod.call(
-    "__extends",
-    [ctx.mod.i32.const(structInfo.typeId), ancestors],
-    binaryen.i32
+  return targets.slice(1).reduce(
+    (condition, typeId) =>
+      ctx.mod.i32.or(condition, compileTypeTest(typeId)),
+    compileTypeTest(targets[0]!)
   );
 };
 
