@@ -361,14 +361,15 @@ const buildRuntimeAncestors = ({
     add(entry.nominalId);
   });
   add(structuralId);
-  const addEquivalentInstantiations = (nominalId?: TypeId) => {
+
+  const addCompatibleSuperInstantiations = (nominalId?: TypeId) => {
     if (typeof nominalId !== "number") {
       return;
     }
-    const targetDesc = ctx.typing.arena.get(nominalId);
+    const sourceDesc = ctx.typing.arena.get(nominalId);
     if (
-      targetDesc.kind !== "nominal-object" ||
-      targetDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
+      sourceDesc.kind !== "nominal-object" ||
+      sourceDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
     ) {
       return;
     }
@@ -377,39 +378,34 @@ const buildRuntimeAncestors = ({
       if (info.nominal === nominalId) {
         return;
       }
-      const candidateDesc = ctx.typing.arena.get(info.nominal);
+      const targetDesc = ctx.typing.arena.get(info.nominal);
       if (
-        candidateDesc.kind !== "nominal-object" ||
-        candidateDesc.owner !== targetDesc.owner ||
-        candidateDesc.typeArgs.length !== targetDesc.typeArgs.length ||
-        candidateDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
+        targetDesc.kind !== "nominal-object" ||
+        targetDesc.owner !== sourceDesc.owner ||
+        targetDesc.typeArgs.length !== sourceDesc.typeArgs.length ||
+        targetDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
       ) {
         return;
       }
-      const compatible = candidateDesc.typeArgs.every((arg, index) => {
+
+      const compatible = sourceDesc.typeArgs.every((arg, index) => {
         const targetArg = targetDesc.typeArgs[index]!;
         const forward = ctx.typing.arena.unify(arg, targetArg, {
           location: ctx.hir.module.ast,
-          reason: "nominal instantiation equivalence",
+          reason: "nominal instantiation compatibility",
           variance: "covariant",
         });
-        if (forward.ok) {
-          return true;
-        }
-        const backward = ctx.typing.arena.unify(targetArg, arg, {
-          location: ctx.hir.module.ast,
-          reason: "nominal instantiation equivalence",
-          variance: "covariant",
-        });
-        return backward.ok;
+        return forward.ok;
       });
+
       if (compatible) {
         add(info.type);
         add(info.nominal);
       }
     });
   };
-  addEquivalentInstantiations(nominalAncestry[0]?.nominalId);
+
+  addCompatibleSuperInstantiations(nominalAncestry[0]?.nominalId);
 
   return ancestors;
 };
