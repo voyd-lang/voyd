@@ -20,7 +20,25 @@ import {
   getStructuralTypeInfo,
   getMatchPatternTypeId,
 } from "../types.js";
-import { getNominalComponent } from "../../semantics/typing/type-system.js";
+
+const getNominalComponentFromTypingResult = (
+  type: TypeId,
+  ctx: CodegenContext["typing"]
+): TypeId | undefined => {
+  const desc = ctx.arena.get(type);
+  if (desc.kind === "nominal-object") {
+    return type;
+  }
+  if (desc.kind === "intersection") {
+    if (typeof desc.nominal === "number") {
+      return desc.nominal;
+    }
+    if (typeof desc.structural === "number") {
+      return getNominalComponentFromTypingResult(desc.structural, ctx);
+    }
+  }
+  return undefined;
+};
 
 export const compileIfExpr = (
   expr: HirIfExpr,
@@ -281,7 +299,7 @@ const collectNominalComponents = (
   ctx: CodegenContext,
   acc: Set<TypeId>
 ): void => {
-  const nominal = getNominalComponent(typeId, ctx.typing);
+  const nominal = getNominalComponentFromTypingResult(typeId, ctx.typing);
   if (typeof nominal === "number") {
     acc.add(nominal);
     return;
