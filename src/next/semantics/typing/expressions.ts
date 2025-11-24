@@ -448,12 +448,6 @@ const typeGenericFunctionBody = ({
     return;
   }
 
-  const previousExprTypes = Array.from(ctx.table.entries());
-  const previousResolved = new Map(ctx.resolvedExprTypes);
-
-  ctx.table.clearExprTypes();
-  ctx.resolvedExprTypes.clear();
-
   const previousFunction = state.currentFunction;
 
   const mergedSubstitution = mergeSubstitutions(
@@ -478,6 +472,9 @@ const typeGenericFunctionBody = ({
   }
 
   ctx.functions.beginInstantiation(key);
+  ctx.table.pushExprTypeScope();
+  const previousResolved = ctx.resolvedExprTypes;
+  ctx.resolvedExprTypes = new Map();
   const nextTypeParams =
     signature.typeParamMap && previousFunction?.typeParams
       ? new Map([
@@ -511,13 +508,9 @@ const typeGenericFunctionBody = ({
     ctx.functions.cacheInstance(key, expectedReturn, ctx.resolvedExprTypes);
     ctx.functions.recordInstantiation(symbol, key, appliedTypeArgs);
   } finally {
-    ctx.table.clearExprTypes();
-    ctx.resolvedExprTypes.clear();
-    previousExprTypes.forEach(([id, type]) => ctx.table.setExprType(id, type));
-    previousResolved.forEach((type, id) =>
-      ctx.resolvedExprTypes.set(id, type)
-    );
     state.currentFunction = previousFunction;
+    ctx.resolvedExprTypes = previousResolved;
+    ctx.table.popExprTypeScope();
     ctx.functions.endInstantiation(key);
   }
 };
