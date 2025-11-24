@@ -1262,6 +1262,8 @@ export const structuralTypeSatisfies = (
   return comparison.ok;
 };
 
+// Satisfaction layers nominal gates over structural comparison and unification:
+// unknown short-circuits according to mode, unions distribute first, and only the base object nominal accepts structural matches.
 export const typeSatisfies = (
   actual: TypeId,
   expected: TypeId,
