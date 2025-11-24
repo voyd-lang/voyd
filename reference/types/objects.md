@@ -191,15 +191,12 @@ impl Animal
   fn run(self) -> String
     "${self.name} is running!"
 
-  fn change_name(mut self, name: String) -> void
-    self.name = name
 
 let me = Animal { name: "John" }
 log me.run // "John is running!"
-
-// The & prefix must be used to call methods that mutate the object
-&me.change_name("Bob")
 ```
+
+// TODO: Document mutability
 
 ### Inheritance
 

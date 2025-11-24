@@ -107,8 +107,11 @@ export interface TypingContext {
   typeAliasTargets: Map<SymbolId, HirTypeExpr>;
   typeAliasTemplates: Map<SymbolId, TypeAliasTemplate>;
   typeAliasInstances: Map<string, TypeId>;
+  typeAliasInstanceSymbols: Map<TypeId, Set<SymbolId>>;
+  validatedTypeAliasInstances: Set<string>;
   typeAliasesByName: Map<string, SymbolId>;
-  resolvingTypeAliases: Set<string>;
+  resolvingTypeAliases: Map<string, TypeId>;
+  resolvingTypeAliasKeysById: Map<TypeId, string>;
   failedTypeAliasInstantiations: Set<string>;
   baseObjectSymbol: SymbolId;
   baseObjectNominal: TypeId;

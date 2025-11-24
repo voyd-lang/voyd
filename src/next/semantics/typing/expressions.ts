@@ -1355,6 +1355,7 @@ const narrowMatchPattern = (
 ): TypeId => {
   switch (pattern.kind) {
     case "wildcard":
+      pattern.typeId = discriminantType;
       return discriminantType;
     case "type": {
       const patternType = resolveTypeExpr(pattern.type, ctx, ctx.unknownType);
@@ -1362,6 +1363,7 @@ const narrowMatchPattern = (
       if (typeof narrowed !== "number") {
         throw new Error(`pattern does not match discriminant for ${reason}`);
       }
+      pattern.typeId = narrowed;
       return narrowed;
     }
     default:

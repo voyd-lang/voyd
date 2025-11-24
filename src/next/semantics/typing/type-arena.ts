@@ -124,6 +124,9 @@ export interface TypeArena {
   get(id: TypeId): Readonly<TypeDescriptor>;
   getScheme(id: TypeSchemeId): Readonly<TypeScheme>;
   internPrimitive(name: string): TypeId;
+  createRecursiveType(
+    build: (self: TypeId, placeholderParam: TypeParamId) => TypeDescriptor
+  ): TypeId;
   internTrait(desc: Omit<TraitType, "kind">): TypeId;
   internNominalObject(desc: Omit<NominalObjectType, "kind">): TypeId;
   internStructuralObject(desc: Omit<StructuralObjectType, "kind">): TypeId;
@@ -190,6 +193,26 @@ export const createTypeArena = (): TypeArena => {
 
   const internPrimitive = (name: string): TypeId =>
     storeDescriptor({ kind: "primitive", name });
+
+  const createRecursiveType = (
+    build: (self: TypeId, placeholderParam: TypeParamId) => TypeDescriptor
+  ): TypeId => {
+    const self = nextTypeId++;
+    const placeholderParam = nextTypeParamId++;
+    descriptors[self] = { kind: "type-param-ref", param: placeholderParam };
+
+    const desc = build(self, placeholderParam);
+    const key = keyFor(desc);
+    const cached = descriptorCache.get(key);
+    if (typeof cached === "number") {
+      descriptors[self] = desc;
+      return cached;
+    }
+
+    descriptors[self] = desc;
+    descriptorCache.set(key, self);
+    return self;
+  };
 
   const getScheme = (id: TypeSchemeId): TypeScheme => {
     const scheme = schemes.get(id);
@@ -1031,6 +1054,7 @@ export const createTypeArena = (): TypeArena => {
     get,
     getScheme,
     internPrimitive,
+    createRecursiveType,
     internTrait,
     internNominalObject,
     internStructuralObject,

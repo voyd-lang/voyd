@@ -1,0 +1,26 @@
+obj Marker<T> {}
+
+obj I32Box { v: i32 }
+obj F64Box { v: f64 }
+
+type Num = I32Box | F64Box
+
+type Choice = Marker<I32Box> | Marker<Num>
+
+fn select(choice: Choice) -> i32
+  choice.match()
+    Marker<I32Box>: 3
+    Marker<Num>: 7
+
+pub fn match_narrow() -> i32
+  let narrow: Marker<I32Box> = Marker<I32Box> {}
+  let choice: Choice = narrow
+  select(choice)
+
+pub fn match_wide() -> i32
+  let wide: Marker<Num> = Marker<Num> {}
+  let choice: Choice = wide
+  select(choice)
+
+pub fn main() -> i32
+  match_narrow() * 10 + match_wide()

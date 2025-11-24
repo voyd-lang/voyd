@@ -122,6 +122,42 @@ const primeSomeTemplate = (
   return { someSymbol, valueParam: typeParam };
 };
 
+const primeNoneTemplate = (
+  ctx: ReturnType<typeof createContext>["ctx"],
+  symbolTable: SymbolTable
+) => {
+  const typeParamSymbol = symbolTable.declare({
+    name: "T",
+    kind: "type",
+    declaredAt: 0,
+  });
+  const noneSymbol = symbolTable.declare({
+    name: "None",
+    kind: "type",
+    declaredAt: 0,
+  });
+  const typeParam = ctx.arena.freshTypeParam();
+  const typeParamRef = ctx.arena.internTypeParamRef(typeParam);
+  const structural = ctx.arena.internStructuralObject({ fields: [] });
+  const nominal = ctx.arena.internNominalObject({
+    owner: noneSymbol,
+    name: "None",
+    typeArgs: [typeParamRef],
+  });
+  const type = ctx.arena.internIntersection({ nominal, structural });
+  ctx.objectTemplates.set(noneSymbol, {
+    symbol: noneSymbol,
+    params: [{ symbol: typeParamSymbol, typeParam }],
+    nominal,
+    structural,
+    type,
+    fields: [],
+    baseNominal: undefined,
+  });
+  ctx.objectsByName.set("None", noneSymbol);
+  return { noneSymbol };
+};
+
 const primeBucketMapTemplate = (
   ctx: ReturnType<typeof createContext>["ctx"],
   symbolTable: SymbolTable,
@@ -251,7 +287,7 @@ describe("instantiation argument handling", () => {
     expect(ctx.typeAliasInstances.size).toBe(0);
   });
 
-  it("throws on direct type alias cycles", () => {
+  it("rejects aliases that resolve directly to themselves", () => {
     const { ctx, symbolTable } = createContext();
     const aliasSymbol = symbolTable.declare({
       name: "Loop",
@@ -273,7 +309,7 @@ describe("instantiation argument handling", () => {
     ctx.typeAliasTargets.set(aliasSymbol, target);
 
     expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow(
-      /cyclic|cycle|recursive/i
+      /cannot resolve to itself/
     );
     expect(ctx.typeAliasInstances.size).toBe(0);
     expect(
@@ -281,8 +317,234 @@ describe("instantiation argument handling", () => {
     ).toBe(true);
   });
 
-  it("fails mutually recursive aliases instead of returning unknown", () => {
+  it("rejects pure alias cycles", () => {
     const { ctx, symbolTable } = createContext();
+    const aSymbol = symbolTable.declare({
+      name: "A",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const bSymbol = symbolTable.declare({
+      name: "B",
+      kind: "type",
+      declaredAt: 0,
+    });
+
+    const aTarget: HirTypeExpr = {
+      typeKind: "named",
+      path: ["B"],
+      symbol: bSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const bTarget: HirTypeExpr = {
+      typeKind: "named",
+      path: ["A"],
+      symbol: aSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(aSymbol, { symbol: aSymbol, params: [], target: aTarget });
+    ctx.typeAliasTargets.set(aSymbol, aTarget);
+    ctx.typeAliasTemplates.set(bSymbol, { symbol: bSymbol, params: [], target: bTarget });
+    ctx.typeAliasTargets.set(bSymbol, bTarget);
+
+    expect(() => resolveTypeAlias(aSymbol, ctx, [])).toThrow(
+      /cyclic type alias instantiation/
+    );
+    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(ctx.failedTypeAliasInstantiations.has(`${aSymbol}<>`)).toBe(true);
+  });
+
+  it("rejects generic alias cycles", () => {
+    const { ctx, symbolTable } = createContext();
+    const aParamSymbol = symbolTable.declare({
+      name: "T",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const bParamSymbol = symbolTable.declare({
+      name: "U",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const aSymbol = symbolTable.declare({
+      name: "A",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const bSymbol = symbolTable.declare({
+      name: "B",
+      kind: "type",
+      declaredAt: 0,
+    });
+
+    const aTarget: HirTypeExpr = {
+      typeKind: "named",
+      path: ["B"],
+      symbol: bSymbol,
+      typeArguments: [
+        {
+          typeKind: "named",
+          path: ["T"],
+          symbol: aParamSymbol,
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const bTarget: HirTypeExpr = {
+      typeKind: "named",
+      path: ["A"],
+      symbol: aSymbol,
+      typeArguments: [
+        {
+          typeKind: "named",
+          path: ["U"],
+          symbol: bParamSymbol,
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(aSymbol, {
+      symbol: aSymbol,
+      params: [{ symbol: aParamSymbol }],
+      target: aTarget,
+    });
+    ctx.typeAliasTargets.set(aSymbol, aTarget);
+    ctx.typeAliasTemplates.set(bSymbol, {
+      symbol: bSymbol,
+      params: [{ symbol: bParamSymbol }],
+      target: bTarget,
+    });
+    ctx.typeAliasTargets.set(bSymbol, bTarget);
+
+    const boolType = ctx.primitiveCache.get("bool") ?? ctx.arena.internPrimitive("bool");
+
+    expect(() => resolveTypeAlias(aSymbol, ctx, [boolType])).toThrow(
+      /cyclic type alias instantiation/
+    );
+    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(ctx.failedTypeAliasInstantiations.has(`${aSymbol}<${boolType}>`)).toBe(
+      true
+    );
+  });
+
+  it("rejects non-contractive self recursion in aliases", () => {
+    const { ctx, symbolTable } = createContext();
+    const aliasSymbol = symbolTable.declare({
+      name: "Loop",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const aliasRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Loop"],
+      symbol: aliasSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const target: HirTypeExpr = {
+      typeKind: "union",
+      members: [
+        aliasRef,
+        {
+          typeKind: "named",
+          path: ["i32"],
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(aliasSymbol, {
+      symbol: aliasSymbol,
+      params: [],
+      target,
+    });
+    ctx.typeAliasTargets.set(aliasSymbol, target);
+
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow();
+    expect(ctx.typeAliasInstances.size).toBe(0);
+  });
+
+  it("rejects non-contractive generic alias recursion", () => {
+    const { ctx, symbolTable } = createContext();
+    const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
+    const paramSymbol = symbolTable.declare({
+      name: "T",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const aliasSymbol = symbolTable.declare({
+      name: "GenLoop",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const paramRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["T"],
+      symbol: paramSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const aliasRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["GenLoop"],
+      symbol: aliasSymbol,
+      typeArguments: [paramRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const boxedParam: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Box"],
+      symbol: boxSymbol,
+      typeArguments: [paramRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const target: HirTypeExpr = {
+      typeKind: "union",
+      members: [aliasRef, boxedParam],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(aliasSymbol, {
+      symbol: aliasSymbol,
+      params: [{ symbol: paramSymbol }],
+      target,
+    });
+    ctx.typeAliasTargets.set(aliasSymbol, target);
+
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, [ctx.boolType])).toThrow(
+      /contractive/i
+    );
+    expect(ctx.typeAliasInstances.size).toBe(0);
+  });
+
+  it("rejects mutual generic recursion without guards", () => {
+    const { ctx, symbolTable } = createContext();
+    const leftParamSymbol = symbolTable.declare({
+      name: "L",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const rightParamSymbol = symbolTable.declare({
+      name: "R",
+      kind: "type",
+      declaredAt: 0,
+    });
     const leftSymbol = symbolTable.declare({
       name: "Left",
       kind: "type",
@@ -293,17 +555,186 @@ describe("instantiation argument handling", () => {
       kind: "type",
       declaredAt: 0,
     });
+
+    const leftParamRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["L"],
+      symbol: leftParamSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const rightParamRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["R"],
+      symbol: rightParamSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
     const leftTarget: HirTypeExpr = {
       typeKind: "named",
       path: ["Right"],
       symbol: rightSymbol,
+      typeArguments: [leftParamRef],
       ast: 0,
       span: DUMMY_SPAN,
     };
+
     const rightTarget: HirTypeExpr = {
       typeKind: "named",
       path: ["Left"],
       symbol: leftSymbol,
+      typeArguments: [rightParamRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(leftSymbol, {
+      symbol: leftSymbol,
+      params: [{ symbol: leftParamSymbol }],
+      target: leftTarget,
+    });
+    ctx.typeAliasTargets.set(leftSymbol, leftTarget);
+    ctx.typeAliasTemplates.set(rightSymbol, {
+      symbol: rightSymbol,
+      params: [{ symbol: rightParamSymbol }],
+      target: rightTarget,
+    });
+    ctx.typeAliasTargets.set(rightSymbol, rightTarget);
+
+    expect(() => resolveTypeAlias(leftSymbol, ctx, [ctx.boolType])).toThrow(
+      /contractive|cyclic/i
+    );
+    expect(ctx.typeAliasInstances.size).toBe(0);
+  });
+
+  it("resolves recursive aliases through constructors", () => {
+    const { ctx, symbolTable } = createContext();
+    const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
+    const aliasSymbol = symbolTable.declare({
+      name: "Rec",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const aliasRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Rec"],
+      symbol: aliasSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const boxedAlias: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Box"],
+      symbol: boxSymbol,
+      typeArguments: [aliasRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const target: HirTypeExpr = {
+      typeKind: "union",
+      members: [
+        boxedAlias,
+        {
+          typeKind: "named",
+          path: ["i32"],
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(aliasSymbol, {
+      symbol: aliasSymbol,
+      params: [],
+      target,
+    });
+    ctx.typeAliasTargets.set(aliasSymbol, target);
+
+    const resolved = resolveTypeAlias(aliasSymbol, ctx, []);
+    const desc = ctx.arena.get(resolved);
+    expect(desc.kind).toBe("union");
+    if (desc.kind !== "union") {
+      return;
+    }
+    const boxedMember = desc.members.find((member) => {
+      const memberDesc = ctx.arena.get(member);
+      if (memberDesc.kind === "intersection" && typeof memberDesc.nominal === "number") {
+        const nominalDesc = ctx.arena.get(memberDesc.nominal);
+        return nominalDesc.kind === "nominal-object" && nominalDesc.owner === boxSymbol;
+      }
+      if (memberDesc.kind === "nominal-object") {
+        return memberDesc.owner === boxSymbol;
+      }
+      return false;
+    });
+    expect(boxedMember).toBeDefined();
+    expect(resolveTypeAlias(aliasSymbol, ctx, [])).toBe(resolved);
+  });
+
+  it("resolves mutually recursive aliases", () => {
+    const { ctx, symbolTable } = createContext();
+    const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
+    const leftSymbol = symbolTable.declare({
+      name: "Left",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const rightSymbol = symbolTable.declare({
+      name: "Right",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const leftBase: HirTypeExpr = {
+      typeKind: "named",
+      path: ["i32"],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const leftTarget: HirTypeExpr = {
+      typeKind: "union",
+      members: [
+        {
+          typeKind: "named",
+          path: ["Right"],
+          symbol: rightSymbol,
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+        leftBase,
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const boxedLeft: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Box"],
+      symbol: boxSymbol,
+      typeArguments: [
+        {
+          typeKind: "named",
+          path: ["Left"],
+          symbol: leftSymbol,
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const rightTarget: HirTypeExpr = {
+      typeKind: "union",
+      members: [
+        boxedLeft,
+        {
+          typeKind: "named",
+          path: ["bool"],
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
       ast: 0,
       span: DUMMY_SPAN,
     };
@@ -321,16 +752,213 @@ describe("instantiation argument handling", () => {
     });
     ctx.typeAliasTargets.set(rightSymbol, rightTarget);
 
-    expect(() => resolveTypeAlias(leftSymbol, ctx, [])).toThrow(
-      /cyclic|cycle|recursive/i
+    const leftAlias = resolveTypeAlias(leftSymbol, ctx, []);
+    const rightAlias = resolveTypeAlias(rightSymbol, ctx, []);
+
+    expect(ctx.typeAliasInstances.get(`${leftSymbol}<>`)).toBe(leftAlias);
+    expect(ctx.typeAliasInstances.get(`${rightSymbol}<>`)).toBe(rightAlias);
+
+    const leftDesc = ctx.arena.get(leftAlias);
+    const rightDesc = ctx.arena.get(rightAlias);
+    expect(leftDesc.kind).toBe("union");
+    expect(rightDesc.kind).toBe("union");
+    if (rightDesc.kind === "union") {
+      const hasBoxedLeft = rightDesc.members.some((member) => {
+        const memberDesc = ctx.arena.get(member);
+        if (memberDesc.kind === "intersection" && typeof memberDesc.nominal === "number") {
+          const nominalDesc = ctx.arena.get(memberDesc.nominal);
+          return nominalDesc.kind === "nominal-object" && nominalDesc.owner === boxSymbol;
+        }
+        if (memberDesc.kind === "nominal-object") {
+          return memberDesc.owner === boxSymbol;
+        }
+        return false;
+      });
+      expect(hasBoxedLeft).toBe(true);
+    }
+  });
+
+  it("supports generic recursive aliases with explicit self arguments", () => {
+    const { ctx, symbolTable } = createContext();
+    const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
+    const typeParamSymbol = symbolTable.declare({
+      name: "T",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const listSymbol = symbolTable.declare({
+      name: "List",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const paramRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["T"],
+      symbol: typeParamSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const listSelf: HirTypeExpr = {
+      typeKind: "named",
+      path: ["List"],
+      symbol: listSymbol,
+      typeArguments: [paramRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const boxedList: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Box"],
+      symbol: boxSymbol,
+      typeArguments: [listSelf],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const target: HirTypeExpr = {
+      typeKind: "union",
+      members: [boxedList, paramRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(listSymbol, {
+      symbol: listSymbol,
+      params: [{ symbol: typeParamSymbol }],
+      target,
+    });
+    ctx.typeAliasTargets.set(listSymbol, target);
+
+    const resolved = resolveTypeAlias(listSymbol, ctx, [ctx.boolType]);
+    const key = `${listSymbol}<${ctx.boolType}>`;
+    expect(ctx.typeAliasInstances.get(key)).toBe(resolved);
+    const desc = ctx.arena.get(resolved);
+    expect(desc.kind).toBe("union");
+  });
+
+  it("resolves mutually recursive generic aliases", () => {
+    const { ctx, symbolTable } = createContext();
+    const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
+    const leftParamSymbol = symbolTable.declare({
+      name: "L",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const rightParamSymbol = symbolTable.declare({
+      name: "R",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const leftSymbol = symbolTable.declare({
+      name: "Left",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const rightSymbol = symbolTable.declare({
+      name: "Right",
+      kind: "type",
+      declaredAt: 0,
+    });
+
+    const leftParamRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["L"],
+      symbol: leftParamSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const rightParamRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["R"],
+      symbol: rightParamSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const rightOfLeft: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Right"],
+      symbol: rightSymbol,
+      typeArguments: [leftParamRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const leftTarget: HirTypeExpr = {
+      typeKind: "union",
+      members: [rightOfLeft, leftParamRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    const leftOfRight: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Left"],
+      symbol: leftSymbol,
+      typeArguments: [rightParamRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const boxedLeft: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Box"],
+      symbol: boxSymbol,
+      typeArguments: [leftOfRight],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const rightTarget: HirTypeExpr = {
+      typeKind: "union",
+      members: [
+        boxedLeft,
+        {
+          typeKind: "named",
+          path: ["bool"],
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(leftSymbol, {
+      symbol: leftSymbol,
+      params: [{ symbol: leftParamSymbol }],
+      target: leftTarget,
+    });
+    ctx.typeAliasTargets.set(leftSymbol, leftTarget);
+    ctx.typeAliasTemplates.set(rightSymbol, {
+      symbol: rightSymbol,
+      params: [{ symbol: rightParamSymbol }],
+      target: rightTarget,
+    });
+    ctx.typeAliasTargets.set(rightSymbol, rightTarget);
+
+    const intType =
+      ctx.primitiveCache.get("i32") ?? ctx.arena.internPrimitive("i32");
+    const leftAlias = resolveTypeAlias(leftSymbol, ctx, [intType]);
+    const rightAlias = resolveTypeAlias(rightSymbol, ctx, [intType]);
+    expect(ctx.typeAliasInstances.get(`${leftSymbol}<${intType}>`)).toBe(
+      leftAlias
     );
-    expect(ctx.typeAliasInstances.size).toBe(0);
-    expect(
-      ctx.failedTypeAliasInstantiations.has(`${leftSymbol}<>`)
-    ).toBe(true);
-    expect(
-      ctx.failedTypeAliasInstantiations.has(`${rightSymbol}<>`)
-    ).toBe(true);
+    expect(ctx.typeAliasInstances.get(`${rightSymbol}<${intType}>`)).toBe(
+      rightAlias
+    );
+
+    const rightDesc = ctx.arena.get(rightAlias);
+    expect(rightDesc.kind).toBe("union");
+    if (rightDesc.kind === "union") {
+      const hasBoxedLeft = rightDesc.members.some((member) => {
+        const memberDesc = ctx.arena.get(member);
+        if (memberDesc.kind === "intersection" && typeof memberDesc.nominal === "number") {
+          const nominalDesc = ctx.arena.get(memberDesc.nominal);
+          return nominalDesc.kind === "nominal-object" && nominalDesc.owner === boxSymbol;
+        }
+        if (memberDesc.kind === "nominal-object") {
+          return memberDesc.owner === boxSymbol;
+        }
+        return false;
+      });
+      expect(hasBoxedLeft).toBe(true);
+    }
   });
 
   it("enforces object generic constraints before caching instantiations", () => {
@@ -452,6 +1080,150 @@ describe("instantiation argument handling", () => {
     expect(typeSatisfies(mismatchedPayload, concretePayload.type, ctx)).toBe(
       false
     );
+  });
+
+  it("allows guarded recursive aliases", () => {
+    const { ctx, symbolTable } = createContext();
+    const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
+    const aliasSymbol = symbolTable.declare({
+      name: "Guarded",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const aliasRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Guarded"],
+      symbol: aliasSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const boxedRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Box"],
+      symbol: boxSymbol,
+      typeArguments: [aliasRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const target: HirTypeExpr = {
+      typeKind: "union",
+      members: [
+        boxedRef,
+        {
+          typeKind: "named",
+          path: ["bool"],
+          ast: 0,
+          span: DUMMY_SPAN,
+        },
+      ],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(aliasSymbol, {
+      symbol: aliasSymbol,
+      params: [],
+      target,
+    });
+    ctx.typeAliasTargets.set(aliasSymbol, target);
+
+    const resolved = resolveTypeAlias(aliasSymbol, ctx, []);
+    expect(resolved).toBeDefined();
+    expect(ctx.typeAliasInstances.get(`${aliasSymbol}<>`)).toBe(resolved);
+  });
+
+  it("allows guarded generic recursion across constructors", () => {
+    const { ctx, symbolTable } = createContext();
+    const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
+    const { noneSymbol } = primeNoneTemplate(ctx, symbolTable);
+    const typeParamSymbol = symbolTable.declare({
+      name: "T",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const listSymbol = symbolTable.declare({
+      name: "List",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const paramRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["T"],
+      symbol: typeParamSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const listRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["List"],
+      symbol: listSymbol,
+      typeArguments: [paramRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const boxedList: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Box"],
+      symbol: boxSymbol,
+      typeArguments: [listRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const noneRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["None"],
+      symbol: noneSymbol,
+      typeArguments: [paramRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    const target: HirTypeExpr = {
+      typeKind: "union",
+      members: [boxedList, noneRef],
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+
+    ctx.typeAliasTemplates.set(listSymbol, {
+      symbol: listSymbol,
+      params: [{ symbol: typeParamSymbol }],
+      target,
+    });
+    ctx.typeAliasTargets.set(listSymbol, target);
+
+    const resolved = resolveTypeAlias(listSymbol, ctx, [ctx.boolType]);
+    expect(resolved).toBeDefined();
+    expect(ctx.typeAliasInstances.get(`${listSymbol}<${ctx.boolType}>`)).toBe(
+      resolved
+    );
+  });
+
+  it("keeps contractiveness checks active across repeated instantiations", () => {
+    const { ctx, symbolTable } = createContext();
+    const aliasSymbol = symbolTable.declare({
+      name: "Repeat",
+      kind: "type",
+      declaredAt: 0,
+    });
+    const aliasRef: HirTypeExpr = {
+      typeKind: "named",
+      path: ["Repeat"],
+      symbol: aliasSymbol,
+      ast: 0,
+      span: DUMMY_SPAN,
+    };
+    ctx.typeAliasTemplates.set(aliasSymbol, {
+      symbol: aliasSymbol,
+      params: [],
+      target: aliasRef,
+    });
+    ctx.typeAliasTargets.set(aliasSymbol, aliasRef);
+
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow();
+    const cacheKey = `${aliasSymbol}<>`;
+    expect(ctx.typeAliasInstances.has(cacheKey)).toBe(false);
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow();
+    expect(ctx.typeAliasInstances.has(cacheKey)).toBe(false);
   });
 
   it("unifies composite types with variance-aware substitutions", () => {

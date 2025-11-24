@@ -18,8 +18,27 @@ import {
   getExprBinaryenType,
   getRequiredExprType,
   getStructuralTypeInfo,
-  resolvePatternTypeForMatch,
+  getMatchPatternTypeId,
 } from "../types.js";
+
+const getNominalComponentFromTypingResult = (
+  type: TypeId,
+  ctx: CodegenContext["typing"]
+): TypeId | undefined => {
+  const desc = ctx.arena.get(type);
+  if (desc.kind === "nominal-object") {
+    return type;
+  }
+  if (desc.kind === "intersection") {
+    if (typeof desc.nominal === "number") {
+      return desc.nominal;
+    }
+    if (typeof desc.structural === "number") {
+      return getNominalComponentFromTypingResult(desc.structural, ctx);
+    }
+  }
+  return undefined;
+};
 
 export const compileIfExpr = (
   expr: HirIfExpr,
@@ -97,6 +116,30 @@ export const compileMatchExpr = (
     fnCtx,
   }).expr;
 
+  const duplicateNominals = (() => {
+    const seen = new Set<TypeId>();
+    const dupes = new Set<TypeId>();
+    expr.arms.forEach((arm) => {
+      if (arm.pattern.kind !== "type") {
+        return;
+      }
+      const typeId = getMatchPatternTypeId(arm.pattern, ctx);
+      if (typeof typeId !== "number") {
+        return;
+      }
+      const nominals = new Set<TypeId>();
+      collectNominalComponents(typeId, ctx, nominals);
+      nominals.forEach((nominal) => {
+        if (seen.has(nominal)) {
+          dupes.add(nominal);
+        } else {
+          seen.add(nominal);
+        }
+      });
+    });
+    return dupes;
+  })();
+
   const initDiscriminant = ctx.mod.local.set(
     discriminantTemp.index,
     discriminantValue
@@ -125,8 +168,8 @@ export const compileMatchExpr = (
     const condition = compileMatchCondition(
       arm.pattern,
       discriminantTemp,
-      discriminantTypeId,
-      ctx
+      ctx,
+      duplicateNominals
     );
     const fallback =
       chain ??
@@ -159,31 +202,63 @@ export const compileMatchExpr = (
 const compileMatchCondition = (
   pattern: HirPattern & { kind: "type" },
   discriminant: LocalBinding,
-  discriminantTypeId: TypeId,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  duplicateNominals: ReadonlySet<TypeId>
 ): binaryen.ExpressionRef => {
-  const patternTypeId = resolvePatternTypeForMatch(
-    pattern.type,
-    discriminantTypeId,
-    ctx
+  const patternTypeId = getMatchPatternTypeId(pattern, ctx);
+  const patternNominals = new Set<TypeId>();
+  collectNominalComponents(patternTypeId, ctx, patternNominals);
+  const useStrict = Array.from(patternNominals).some((nominal) =>
+    duplicateNominals.has(nominal)
   );
-  const structInfo = getStructuralTypeInfo(patternTypeId, ctx);
-  if (!structInfo) {
+  const makeAncestors = () =>
+    structGetFieldValue({
+      mod: ctx.mod,
+      fieldType: ctx.rtt.extensionHelpers.i32Array,
+      fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
+      exprRef: ctx.mod.local.get(discriminant.index, discriminant.type),
+    });
+
+  const compileTypeTest = (typeId: TypeId): binaryen.ExpressionRef => {
+    const structInfo = getStructuralTypeInfo(typeId, ctx);
+    if (!structInfo) {
+      throw new Error("match pattern requires a structural type");
+    }
+
+    return ctx.mod.call(
+      useStrict ? "__has_type" : "__extends",
+      [ctx.mod.i32.const(structInfo.typeId), makeAncestors()],
+      binaryen.i32
+    );
+  };
+
+  const collectTargets = (
+    typeId: TypeId,
+    seen: Set<TypeId>,
+    targets: TypeId[]
+  ): void => {
+    if (seen.has(typeId)) {
+      return;
+    }
+    seen.add(typeId);
+    const desc = ctx.typing.arena.get(typeId);
+    if (desc.kind === "union") {
+      desc.members.forEach((member) => collectTargets(member, seen, targets));
+      return;
+    }
+    targets.push(typeId);
+  };
+
+  const targets: TypeId[] = [];
+  collectTargets(patternTypeId, new Set<TypeId>(), targets);
+  if (targets.length === 0) {
     throw new Error("match pattern requires a structural type");
   }
 
-  const pointer = ctx.mod.local.get(discriminant.index, discriminant.type);
-  const ancestors = structGetFieldValue({
-    mod: ctx.mod,
-    fieldType: ctx.rtt.extensionHelpers.i32Array,
-    fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
-    exprRef: pointer,
-  });
-
-  return ctx.mod.call(
-    "__extends",
-    [ctx.mod.i32.const(structInfo.typeId), ancestors],
-    binaryen.i32
+  return targets.slice(1).reduce(
+    (condition, typeId) =>
+      ctx.mod.i32.or(condition, compileTypeTest(typeId)),
+    compileTypeTest(targets[0]!)
   );
 };
 
@@ -218,4 +293,21 @@ export const compileWhileExpr = (
     ),
     usedReturnCall: false,
   };
+};
+const collectNominalComponents = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+  acc: Set<TypeId>
+): void => {
+  const nominal = getNominalComponentFromTypingResult(typeId, ctx.typing);
+  if (typeof nominal === "number") {
+    acc.add(nominal);
+    return;
+  }
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind === "union") {
+    desc.members.forEach((member) =>
+      collectNominalComponents(member, ctx, acc)
+    );
+  }
 };

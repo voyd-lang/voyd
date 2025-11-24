@@ -48,7 +48,7 @@ export const lowerTypeExpr = (
     }
   }
 
-  throw new Error("unsupported type expression");
+  throw new Error(`unsupported type expression: ${JSON.stringify(expr)}`);
 };
 
 const lowerNamedType = (

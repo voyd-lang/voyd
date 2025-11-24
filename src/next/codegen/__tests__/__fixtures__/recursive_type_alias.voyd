@@ -1,0 +1,28 @@
+obj None {}
+
+obj Box<T> {
+  v: T
+}
+
+obj BoxA<T> {
+  v: T
+}
+
+obj BoxB<T> {
+  v: T
+}
+
+type RecType = Box<RecType> | BoxA<i32> | BoxB<i32> | None
+
+fn to_int(r: RecType) -> i32
+  r.match()
+    Box<RecType>: to_int(r.v)
+    BoxA<i32>: r.v
+    BoxB<i32>: r.v
+    None: -1
+    else: -2
+
+pub fn main() -> i32
+  let r = Box { v: BoxA { v: 3 } }
+  let b = BoxB { v: 5 }
+  r.to_int() + b.to_int()

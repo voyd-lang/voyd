@@ -11,11 +11,7 @@ import {
   isIntAtom,
   isStringAtom,
 } from "../../parser/index.js";
-import {
-  expectLabeledExpr,
-  parseIfBranches,
-  toSourceSpan,
-} from "../utils.js";
+import { expectLabeledExpr, parseIfBranches, toSourceSpan } from "../utils.js";
 import type {
   HirCondBranch,
   HirMatchArm,
@@ -154,7 +150,7 @@ export const lowerExpr = (
     return lowerCall(expr, ctx, scopes);
   }
 
-  throw new Error(`unsupported expression node: ${expr}`);
+  throw new Error(`unsupported expression node: ${expr.location}`);
 };
 
 const lowerBlock = (
@@ -255,7 +251,13 @@ const lowerMatch = (
 
   const potentialBinder = operandOverride ? form.at(1) : form.at(2);
   const hasBinder = isIdentifierAtom(potentialBinder);
-  const caseStart = hasBinder ? (operandOverride ? 2 : 3) : operandOverride ? 1 : 2;
+  const caseStart = hasBinder
+    ? operandOverride
+      ? 2
+      : 3
+    : operandOverride
+    ? 1
+    : 2;
 
   const operandId = lowerExpr(operandExpr, ctx, scopes);
   const binderSymbol =

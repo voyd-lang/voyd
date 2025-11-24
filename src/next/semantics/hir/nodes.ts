@@ -172,6 +172,7 @@ export type HirBindingKind = "value" | "mutable-ref" | "immutable-ref";
 
 export interface HirPatternBase {
   bindingKind?: HirBindingKind;
+  typeId?: TypeId;
 }
 
 export type HirPattern =

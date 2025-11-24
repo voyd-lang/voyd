@@ -1,9 +1,13 @@
 # Unions
 
 Union types represent a value that can be one of a predefined set of types.
+Union members are **nominal objects only**. Structural aliases and intersections
+cannot appear directly in a union.
 
 A union type is defined by listing each of the types it may be, separated by the
 pipe operator, `|`.
+
+## Simple Unions
 
 ```voyd
 type Animal = Cat | Dog
@@ -19,56 +23,75 @@ obj Dog {
 }
 ```
 
-In some cases, where the nominal object is only ever used as part of a union,
-union sugar can be used
+## Generic Nominal Unions (Same Head Allowed)
+
+Union members can be generic nominal objects. Variants sharing the **same**
+object head are allowed as long as each instantiation is disjoint (their
+payloads cannot overlap).
 
 ```voyd
-union Drink
-  Coffee { size: Size, sugar: Grams, cream: Grams }
-  Tea { size: Size, sugar: Grams, cream: Grams }
-  Soda { size: Size }
-  Water
+obj Result
 
-let drink: Drink = Drink::Soda { size: Medium() }
+obj Success<T>: Result {
+  value: T
+}
 
-// Resolves to:
-type Drink =
-  (obj Coffee { size: Size, sugar: Grams, cream: Grams }) |
-  (obj Tea { size: Size, sugar: Grams, cream: Grams }) |
-  (obj Soda { size: Size }) |
-  (obj Water) |
+obj Failure<E>: Result {
+  error: E
+}
+
+obj User {
+  name: String
+}
+
+type FetchResult<T> = Success<T> | Failure<String>
+
+fn fetch_user(id: String) -> FetchResult<User>
+  if id == "root" then:
+    Success { value: User { name: "Root" } }
+  else:
+    Failure { error: "User not found" }
+
+fn render_user(id: String) -> String
+  id.fetch_user()
+    .match(result)
+      Success<User>: "Loaded ${result.value.name}"
+      Failure<String>: "Error: ${result.error}"
 ```
 
-## Calling Methods Of A Union Type
+When matching against a generic union, include the type parameters when multiple
+variants share the same name head, or omit them when the variant is unique (see
+`match` in [Control Flow](../control-flow.md)).
 
-If all objects of a union have a method with the same signature
-(other than self (mutability excluded)). That method can be called
-directly from the union
+Disjoint same-head examples:
 
 ```voyd
-type Animal = Cat | Dog
+obj Some<T> {
+  value: T
+}
 
-obj Cat {}
-obj Dog {}
+type PayloadA = { x: i32 }
+type PayloadB = { y: i32 }
 
-impl Cat
-  pub fn speak(self)
-    self.meow()
-
-  pub fn meow(self)
-    log "Meow"
-
-impl Dog
-  pub fn speak(self)
-    self.meow()
-
-  pub fn woof(self)
-    log "Woof"
-
-fn main()
-  let animal = Animal(Dog {})
-  animal.speak() // Woof!
-  animal.woof() // Error
+// Allowed: same head, disjoint payloads
+type MaybePair = Some<PayloadA> | Some<PayloadB>
 ```
 
-Internally, the method call is expanded to a match statement.
+Overlapping payloads are rejected to keep narrowing sound:
+
+```voyd
+type Bad = Some<{ x: i32 }> | Some<{ x: String }> // Error: payloads overlap
+```
+
+## Soundness Rules
+
+- Union members must be nominal objects. Structural aliases, intersections, and
+  tuples cannot appear directly in a union type.
+- Variants that share a nominal head are allowed only when their instantiated
+  payloads are disjoint. Generic parameters of unionable heads are treated as
+  invariant to prevent collapsing distinct instantiations.
+- Runtime tags carry both the nominal head and an identifier for the concrete
+  type arguments (including structural payloads). This keeps `Some<{ x: i32 }>`
+  distinct from `Some<{ y: i32 }>` at runtime.
+- `match` remains exhaustive: when multiple instantiations of the same head are
+  present, each must be explicitly listed (or covered by a wildcard `else`).

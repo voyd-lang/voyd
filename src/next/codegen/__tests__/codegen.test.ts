@@ -5,6 +5,9 @@ import { getWasmInstance } from "../../../lib/wasm.js";
 import { codegen } from "../index.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
+import type { HirMatchExpr } from "../../semantics/hir/index.js";
+import type { TypingResult } from "../../semantics/typing/types.js";
+import type { TypeId } from "../../semantics/ids.js";
 
 const loadAst = (fixtureName: string) => {
   const source = readFileSync(
@@ -26,6 +29,20 @@ const loadMain = (fixtureName: string) => {
   const main = instance.exports.main;
   expect(typeof main).toBe("function");
   return main as (...params: unknown[]) => unknown;
+};
+
+const getNominalPatternDesc = (typeId: TypeId, typing: TypingResult) => {
+  const desc = typing.arena.get(typeId);
+  if (desc.kind === "nominal-object") {
+    return desc;
+  }
+  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+    const nominalDesc = typing.arena.get(desc.nominal);
+    if (nominalDesc.kind === "nominal-object") {
+      return nominalDesc;
+    }
+  }
+  throw new Error("expected match pattern to include a nominal component");
 };
 
 describe("next codegen", () => {
@@ -142,6 +159,50 @@ describe("next codegen", () => {
     expect(main()).toBe(12);
   });
 
+  it("emits wasm for recursive type aliases", () => {
+    const main = loadMain("recursive_type_alias.voyd");
+    expect(main()).toBe(8);
+  });
+
+  it("emits wasm for recursive generic type aliases", () => {
+    const main = loadMain("recursive_generic_alias.voyd");
+    expect(main()).toBe(2);
+  });
+
+  it("dispatches matches by concrete generic instantiation", () => {
+    const main = loadMain("generic_union_match.voyd");
+    expect(main()).toBe(35);
+  });
+
+  it("avoids widening generic match arms across instantiations", () => {
+    const instance = loadWasmInstance("generic_union_exact_match.voyd");
+
+    const matchI32 = instance.exports.match_i32;
+    const matchF64 = instance.exports.match_f64;
+    const main = instance.exports.main;
+
+    expect(typeof matchI32).toBe("function");
+    expect(typeof matchF64).toBe("function");
+    expect((matchI32 as () => number)()).toBe(1);
+    expect((matchF64 as () => number)()).toBe(-1);
+    expect((main as () => number)()).toBe(3);
+  });
+
+  it("dispatches matches without widening runtime instantiations", () => {
+    const instance = loadWasmInstance("alias_runtime_match.voyd");
+
+    const matchNarrow = instance.exports.match_narrow;
+    const matchWide = instance.exports.match_wide;
+    const main = instance.exports.main;
+
+    expect(typeof matchNarrow).toBe("function");
+    expect(typeof matchWide).toBe("function");
+    expect(typeof main).toBe("function");
+    expect((matchNarrow as () => number)()).toBe(3);
+    expect((matchWide as () => number)()).toBe(7);
+    expect((main as () => number)()).toBe(37);
+  });
+
   it("uses explicit generic instantiations during codegen", () => {
     const main = loadMain("explicit_generic_instantiation.voyd");
     expect(main()).toBe(7);
@@ -163,5 +224,62 @@ describe("next codegen", () => {
     expect(typeof main2).toBe("function");
     expect((main1 as () => number)()).toBeCloseTo(3);
     expect((main2 as () => number)()).toBe(3);
+  });
+
+  it("records narrowed match pattern instantiations for generic union arms", () => {
+    const ast = loadAst("generic_union_exact_match.voyd");
+    const { hir, typing } = semanticsPipeline(ast);
+    const matches = Array.from(hir.expressions.values()).filter(
+      (expr): expr is HirMatchExpr => expr.exprKind === "match"
+    );
+
+    expect(matches.length).toBeGreaterThan(0);
+    matches.forEach((match) =>
+      match.arms
+        .filter((arm) => arm.pattern.kind === "type")
+        .forEach((arm) => {
+          expect(typeof arm.pattern.typeId).toBe("number");
+          const patternDesc = getNominalPatternDesc(
+            arm.pattern.typeId!,
+            typing
+          );
+          const arg = typing.arena.get(patternDesc.typeArgs[0]!);
+          expect(arg.kind).toBe("primitive");
+          if (arg.kind !== "primitive") throw new Error("Expected primitive");
+          expect(arg.name).toBe("i32");
+        })
+    );
+  });
+
+  it("keeps distinct match pattern instantiations across generic union arms", () => {
+    const ast = loadAst("generic_union_match.voyd");
+    const { hir, typing } = semanticsPipeline(ast);
+    const match = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirMatchExpr => expr.exprKind === "match"
+    );
+
+    expect(match).toBeDefined();
+    const argNames =
+      match?.arms
+        .filter((arm) => arm.pattern.kind === "type")
+        .map((arm) => {
+          expect(typeof arm.pattern.typeId).toBe("number");
+          const patternDesc = getNominalPatternDesc(
+            arm.pattern.typeId!,
+            typing
+          );
+          const arg = typing.arena.get(patternDesc.typeArgs[0]!);
+          if (arg.kind !== "primitive") {
+            throw new Error("expected primitive type argument");
+          }
+          return arg.name;
+        }) ?? [];
+
+    expect(argNames).toEqual(["f64", "i32"]);
+  });
+
+  it("it doesn't produce an illegal cast at runtime", () => {
+    const main = loadMain("illegal_cast.voyd");
+    expect(main()).toBe(17);
   });
 });

@@ -61,6 +61,27 @@ export const initExtensionHelpers = (mod: binaryen.Module) => {
     ])
   );
 
+  mod.addFunction(
+    "__has_type",
+    bin.createType([bin.i32, i32Array]),
+    bin.i32,
+    [],
+    mod.block(null, [
+      mod.return(
+        mod.i32.eq(
+          mod.local.get(0, bin.i32),
+          arrayGet(
+            mod,
+            mod.local.get(1, i32Array),
+            mod.i32.const(0),
+            bin.i32,
+            false
+          )
+        )
+      ),
+    ])
+  );
+
   const initExtensionArray = (ancestorIds: number[]) => {
     return arrayNewFixed(
       mod,

@@ -1,0 +1,17 @@
+obj Box<T> {
+  v: T
+}
+
+obj None<T> {}
+
+type List<T> = Box<List<T>> | None<T>
+
+fn depth(l: List<i32>) -> i32
+  l.match()
+    Box<List<i32>>: 1 + depth(l.v)
+    None<i32>: 0
+    else: -1
+
+pub fn main() -> i32
+  let list = Box<List<i32>> { v: Box<List<i32>> { v: None<i32> {} } }
+  list.depth()

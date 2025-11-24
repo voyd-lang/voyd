@@ -10,44 +10,58 @@ import type {
   StructuralTypeInfo,
   HirTypeExpr,
   HirExprId,
+  HirPattern,
   SymbolId,
   TypeId,
 } from "./context.js";
 
 export const wasmTypeFor = (
   typeId: TypeId,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  seen: Set<TypeId> = new Set()
 ): binaryen.Type => {
-  const desc = ctx.typing.arena.get(typeId);
-  if (desc.kind === "primitive") {
-    return mapPrimitiveToWasm(desc.name);
+  const already = seen.has(typeId);
+  if (already) {
+    return ctx.rtt.baseType;
   }
+  seen.add(typeId);
 
-  if (desc.kind === "structural-object") {
-    const structInfo = getStructuralTypeInfo(typeId, ctx);
-    if (!structInfo) {
-      throw new Error("missing structural type info");
+  try {
+    const desc = ctx.typing.arena.get(typeId);
+    if (desc.kind === "primitive") {
+      return mapPrimitiveToWasm(desc.name);
     }
-    return structInfo.interfaceType;
-  }
 
-  if (desc.kind === "union") {
-    if (desc.members.length === 0) {
-      throw new Error("cannot map empty union to wasm");
+    if (desc.kind === "structural-object") {
+      const structInfo = getStructuralTypeInfo(typeId, ctx, seen);
+      if (!structInfo) {
+        throw new Error("missing structural type info");
+      }
+      return structInfo.interfaceType;
     }
-    const memberTypes = desc.members.map((member) => wasmTypeFor(member, ctx));
-    const first = memberTypes[0]!;
-    if (!memberTypes.every((candidate) => candidate === first)) {
-      throw new Error("union members map to different wasm types");
+
+    if (desc.kind === "union") {
+      if (desc.members.length === 0) {
+        throw new Error("cannot map empty union to wasm");
+      }
+      const memberTypes = desc.members.map((member) =>
+        wasmTypeFor(member, ctx, seen)
+      );
+      const first = memberTypes[0]!;
+      if (!memberTypes.every((candidate) => candidate === first)) {
+        throw new Error("union members map to different wasm types");
+      }
+      return first;
     }
-    return first;
-  }
 
-  if (desc.kind === "intersection" && typeof desc.structural === "number") {
-    return wasmTypeFor(desc.structural, ctx);
-  }
+    if (desc.kind === "intersection" && typeof desc.structural === "number") {
+      return wasmTypeFor(desc.structural, ctx, seen);
+    }
 
-  throw new Error(`codegen cannot map ${desc.kind} types to wasm yet`);
+    throw new Error(`codegen cannot map ${desc.kind} types to wasm yet`);
+  } finally {
+    seen.delete(typeId);
+  }
 };
 
 export const mapPrimitiveToWasm = (name: string): binaryen.Type => {
@@ -143,45 +157,20 @@ export const getTypeIdFromTypeExpr = (
   throw new Error("codegen expected type-annotated HIR type expression");
 };
 
-export const resolvePatternTypeForMatch = (
-  type: HirTypeExpr,
-  discriminantTypeId: TypeId,
+export const getMatchPatternTypeId = (
+  pattern: HirPattern & { kind: "type" },
   ctx: CodegenContext
 ): TypeId => {
-  const resolved = getTypeIdFromTypeExpr(type, ctx);
-  const narrowed = narrowPatternType(resolved, discriminantTypeId, ctx);
-  return typeof narrowed === "number" ? narrowed : resolved;
-};
-
-export const narrowPatternType = (
-  patternTypeId: TypeId,
-  discriminantTypeId: TypeId,
-  ctx: CodegenContext
-): TypeId | undefined => {
-  const patternNominal = getNominalComponentId(patternTypeId, ctx);
-  if (typeof patternNominal !== "number") {
-    return undefined;
+  if (typeof pattern.typeId === "number") {
+    return pattern.typeId;
   }
-
-  const discriminantDesc = ctx.typing.arena.get(discriminantTypeId);
-  if (discriminantDesc.kind === "union") {
-    const matches = discriminantDesc.members.filter((member) =>
-      nominalOwnersMatch(patternNominal, member, ctx)
-    );
-    if (matches.length === 1) {
-      return matches[0]!;
-    }
-    return undefined;
-  }
-
-  return nominalOwnersMatch(patternNominal, discriminantTypeId, ctx)
-    ? discriminantTypeId
-    : undefined;
+  return getTypeIdFromTypeExpr(pattern.type, ctx);
 };
 
 export const getStructuralTypeInfo = (
   typeId: TypeId,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  seen: Set<TypeId> = new Set()
 ): StructuralTypeInfo | undefined => {
   const structuralId = resolveStructuralTypeId(typeId, ctx);
   if (typeof structuralId !== "number") {
@@ -193,106 +182,115 @@ export const getStructuralTypeInfo = (
     return cached;
   }
 
-  const desc = ctx.typing.arena.get(structuralId);
-  if (desc.kind !== "structural-object") {
-    return undefined;
+  seen.add(structuralId);
+  seen.add(typeId);
+
+  try {
+    const desc = ctx.typing.arena.get(structuralId);
+    if (desc.kind !== "structural-object") {
+      return undefined;
+    }
+
+    const fields: StructuralFieldInfo[] = desc.fields.map((field, index) => ({
+      name: field.name,
+      typeId: field.type,
+      wasmType: wasmTypeFor(field.type, ctx, seen),
+      runtimeIndex: index + RTT_METADATA_SLOT_COUNT,
+      hash: 0,
+    }));
+    const nominalId = getNominalComponentId(typeId, ctx);
+    const nominalAncestry = getNominalAncestry(nominalId, ctx);
+    const nominalAncestors = nominalAncestry.map((entry) => entry.nominalId);
+    const typeLabel = makeRuntimeTypeLabel({
+      typeId,
+      structuralId,
+      nominalId,
+    });
+    const ancestors = buildRuntimeAncestors({
+      typeId,
+      structuralId,
+      nominalAncestry,
+      ctx,
+    });
+    const runtimeType = defineStructType(ctx.mod, {
+      name: typeLabel,
+      fields: [
+        {
+          name: "__ancestors_table",
+          type: ctx.rtt.extensionHelpers.i32Array,
+          mutable: false,
+        },
+        {
+          name: "__field_index_table",
+          type: ctx.rtt.fieldLookupHelpers.lookupTableType,
+          mutable: false,
+        },
+        {
+          name: "__method_lookup_table",
+          type: ctx.rtt.methodLookupHelpers.lookupTableType,
+          mutable: false,
+        },
+        ...fields.map((field) => ({
+          name: field.name,
+          type: field.wasmType,
+          mutable: true,
+        })),
+      ],
+      supertype: binaryenTypeToHeapType(ctx.rtt.baseType),
+      final: true,
+    });
+    const fieldTableExpr = ctx.rtt.fieldLookupHelpers.registerType({
+      typeLabel,
+      runtimeType,
+      baseType: ctx.rtt.baseType,
+      fields,
+    });
+    const methodTableExpr = ctx.rtt.methodLookupHelpers.createTable([]);
+
+    const ancestorsGlobal = `__ancestors_table_${typeLabel}`;
+    ctx.mod.addGlobal(
+      ancestorsGlobal,
+      ctx.rtt.extensionHelpers.i32Array,
+      false,
+      ctx.rtt.extensionHelpers.initExtensionArray(ancestors)
+    );
+
+    const fieldTableGlobal = `__field_index_table_${typeLabel}`;
+    ctx.mod.addGlobal(
+      fieldTableGlobal,
+      ctx.rtt.fieldLookupHelpers.lookupTableType,
+      false,
+      fieldTableExpr
+    );
+
+    const methodTableGlobal = `__method_table_${typeLabel}`;
+    ctx.mod.addGlobal(
+      methodTableGlobal,
+      ctx.rtt.methodLookupHelpers.lookupTableType,
+      false,
+      methodTableExpr
+    );
+
+    const info: StructuralTypeInfo = {
+      typeId,
+      structuralId,
+      nominalId,
+      nominalAncestors,
+      runtimeType,
+      interfaceType: ctx.rtt.baseType,
+      fields,
+      fieldMap: new Map(fields.map((field) => [field.name, field])),
+      ancestorsGlobal,
+      fieldTableGlobal,
+      methodTableGlobal,
+      typeLabel,
+    };
+    ctx.structTypes.set(typeId, info);
+    return info;
+  } finally {
+    seen.delete(structuralId);
+    seen.delete(typeId);
   }
-
-  const fields: StructuralFieldInfo[] = desc.fields.map((field, index) => ({
-    name: field.name,
-    typeId: field.type,
-    wasmType: wasmTypeFor(field.type, ctx),
-    runtimeIndex: index + RTT_METADATA_SLOT_COUNT,
-    hash: 0,
-  }));
-  const nominalId = getNominalComponentId(typeId, ctx);
-  const nominalAncestry = getNominalAncestry(nominalId, ctx);
-  const nominalAncestors = nominalAncestry.map((entry) => entry.nominalId);
-  const typeLabel = makeRuntimeTypeLabel({
-    typeId,
-    structuralId,
-    nominalId,
-  });
-  const ancestors = buildRuntimeAncestors({
-    typeId,
-    structuralId,
-    nominalAncestry,
-  });
-  const runtimeType = defineStructType(ctx.mod, {
-    name: typeLabel,
-    fields: [
-      {
-        name: "__ancestors_table",
-        type: ctx.rtt.extensionHelpers.i32Array,
-        mutable: false,
-      },
-      {
-        name: "__field_index_table",
-        type: ctx.rtt.fieldLookupHelpers.lookupTableType,
-        mutable: false,
-      },
-      {
-        name: "__method_lookup_table",
-        type: ctx.rtt.methodLookupHelpers.lookupTableType,
-        mutable: false,
-      },
-      ...fields.map((field) => ({
-        name: field.name,
-        type: field.wasmType,
-        mutable: true,
-      })),
-    ],
-    supertype: binaryenTypeToHeapType(ctx.rtt.baseType),
-    final: true,
-  });
-  const fieldTableExpr = ctx.rtt.fieldLookupHelpers.registerType({
-    typeLabel,
-    runtimeType,
-    baseType: ctx.rtt.baseType,
-    fields,
-  });
-  const methodTableExpr = ctx.rtt.methodLookupHelpers.createTable([]);
-
-  const ancestorsGlobal = `__ancestors_table_${typeLabel}`;
-  ctx.mod.addGlobal(
-    ancestorsGlobal,
-    ctx.rtt.extensionHelpers.i32Array,
-    false,
-    ctx.rtt.extensionHelpers.initExtensionArray(ancestors)
-  );
-
-  const fieldTableGlobal = `__field_index_table_${typeLabel}`;
-  ctx.mod.addGlobal(
-    fieldTableGlobal,
-    ctx.rtt.fieldLookupHelpers.lookupTableType,
-    false,
-    fieldTableExpr
-  );
-
-  const methodTableGlobal = `__method_table_${typeLabel}`;
-  ctx.mod.addGlobal(
-    methodTableGlobal,
-    ctx.rtt.methodLookupHelpers.lookupTableType,
-    false,
-    methodTableExpr
-  );
-
-  const info: StructuralTypeInfo = {
-    typeId,
-    structuralId,
-    nominalId,
-    nominalAncestors,
-    runtimeType,
-    interfaceType: ctx.rtt.baseType,
-    fields,
-    fieldMap: new Map(fields.map((field) => [field.name, field])),
-    ancestorsGlobal,
-    fieldTableGlobal,
-    methodTableGlobal,
-    typeLabel,
-  };
-  ctx.structTypes.set(typeId, info);
-  return info;
 };
 
 export const resolveStructuralTypeId = (
@@ -328,14 +326,24 @@ type NominalAncestryEntry = {
   typeId: TypeId;
 };
 
+const isUnknownPrimitive = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): boolean => {
+  const desc = ctx.typing.arena.get(typeId);
+  return desc.kind === "primitive" && desc.name === "unknown";
+};
+
 const buildRuntimeAncestors = ({
   typeId,
   structuralId,
   nominalAncestry,
+  ctx,
 }: {
   typeId: TypeId;
   structuralId: TypeId;
   nominalAncestry: readonly NominalAncestryEntry[];
+  ctx: CodegenContext;
 }): number[] => {
   const seen = new Set<number>();
   const ancestors: number[] = [];
@@ -353,6 +361,51 @@ const buildRuntimeAncestors = ({
     add(entry.nominalId);
   });
   add(structuralId);
+
+  const addCompatibleSuperInstantiations = (nominalId?: TypeId) => {
+    if (typeof nominalId !== "number") {
+      return;
+    }
+    const sourceDesc = ctx.typing.arena.get(nominalId);
+    if (
+      sourceDesc.kind !== "nominal-object" ||
+      sourceDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
+    ) {
+      return;
+    }
+
+    ctx.typing.objectsByNominal.forEach((info) => {
+      if (info.nominal === nominalId) {
+        return;
+      }
+      const targetDesc = ctx.typing.arena.get(info.nominal);
+      if (
+        targetDesc.kind !== "nominal-object" ||
+        targetDesc.owner !== sourceDesc.owner ||
+        targetDesc.typeArgs.length !== sourceDesc.typeArgs.length ||
+        targetDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
+      ) {
+        return;
+      }
+
+      const compatible = sourceDesc.typeArgs.every((arg, index) => {
+        const targetArg = targetDesc.typeArgs[index]!;
+        const forward = ctx.typing.arena.unify(arg, targetArg, {
+          location: ctx.hir.module.ast,
+          reason: "nominal instantiation compatibility",
+          variance: "covariant",
+        });
+        return forward.ok;
+      });
+
+      if (compatible) {
+        add(info.type);
+        add(info.nominal);
+      }
+    });
+  };
+
+  addCompatibleSuperInstantiations(nominalAncestry[0]?.nominalId);
 
   return ancestors;
 };
@@ -386,21 +439,6 @@ const getNominalAncestry = (
   }
 
   return ancestry;
-};
-
-const nominalOwnersMatch = (
-  patternNominal: TypeId,
-  candidateType: TypeId,
-  ctx: CodegenContext
-): boolean => {
-  const candidateNominal = getNominalComponentId(candidateType, ctx);
-  if (typeof candidateNominal !== "number") {
-    return false;
-  }
-  return (
-    getNominalOwner(candidateNominal, ctx) ===
-    getNominalOwner(patternNominal, ctx)
-  );
 };
 
 const getNominalComponentId = (

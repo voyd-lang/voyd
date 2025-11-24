@@ -1,0 +1,22 @@
+obj None {}
+obj Some<T> { v: T }
+obj Box<T> { v: T }
+
+type RecType = Box<RecType> | Some<i32> | Some<f64> | None | Some<RecType>
+
+fn to_int(r: RecType) -> i32
+  r.match()
+    Box<RecType>: to_int(r.v)
+    Some<RecType>: 10
+    Some<i32>: 3
+    Some<f64>: 2
+    None: -1
+
+pub fn main() -> i32
+  let a = Box { v: Some { v: 3 } }
+  let b = Some { v: 42 }
+  let c = Some { v: 3.14 }
+  let d = None {}
+  let e = Box { v: Some { v: Box { v: Some { v: 7 } } } }
+
+  a.to_int() + b.to_int() + c.to_int() + d.to_int() + e.to_int()
