@@ -108,7 +108,7 @@ export interface UnificationContext {
   reason: string;
   variance?: Variance;
   constraints?: ReadonlyMap<TypeParamId, ConstraintSet>;
-  // When true, the "unknown" primitive is treated as compatible with any type.
+  // When true, the "unknown" primitive is treated as compatible with any type during unification.
   allowUnknown?: boolean;
   // Optional projector to normalize types (e.g. to structural components) before comparison.
   structuralResolver?: (type: TypeId) => TypeId | undefined;
@@ -366,8 +366,10 @@ export const createTypeArena = (): TypeArena => {
     ctx: UnificationContext
   ): UnificationResult => {
     const variance: Variance = ctx.variance ?? "invariant";
+    // unknown can be treated as a wildcard when explicitly allowed.
     const allowUnknown = ctx.allowUnknown ?? true;
     const constraintMap = ctx.constraints;
+    // Used to project types (often nominal expectations) into a structural shape before inspection.
     const structuralResolver = ctx.structuralResolver;
     const seen = new Set<string>();
 
@@ -763,6 +765,7 @@ export const createTypeArena = (): TypeArena => {
         return type;
       }
       const resolved = structuralResolver(type);
+      // Returning undefined means no projection; the original type is preserved.
       return typeof resolved === "number" ? resolved : type;
     };
 
