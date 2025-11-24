@@ -1193,7 +1193,7 @@ export const getStructuralFields = (
   return undefined;
 };
 
-const structuralComparableType = (
+const structuralExpectationOf = (
   type: TypeId,
   ctx: TypingContext,
   state: TypingState
@@ -1216,43 +1216,19 @@ const structuralComparableType = (
     }
     case "intersection":
       if (typeof desc.structural === "number") {
-        return structuralComparableType(desc.structural, ctx, state);
+        return structuralExpectationOf(desc.structural, ctx, state);
       }
       if (typeof desc.nominal === "number") {
-        return structuralComparableType(desc.nominal, ctx, state);
+        return structuralExpectationOf(desc.nominal, ctx, state);
       }
       return undefined;
-    case "union": {
-      const members: TypeId[] = [];
-      for (const member of desc.members) {
-        const structural = structuralComparableType(member, ctx, state);
-        if (typeof structural !== "number") {
-          return undefined;
-        }
-        members.push(structural);
-      }
-      return ctx.arena.internUnion(members);
-    }
     default:
       return undefined;
   }
 };
 
-const normalizeStructuralComparison = (
-  actual: TypeId,
-  expectedStructural: TypeId,
-  ctx: TypingContext,
-  state: TypingState
-): { actual: TypeId; expected: TypeId } | undefined => {
-  const comparableActual = structuralComparableType(actual, ctx, state);
-  if (typeof comparableActual !== "number") {
-    return undefined;
-  }
-  return { actual: comparableActual, expected: expectedStructural };
-};
-
 // Satisfaction layers nominal gates over structural comparison and unification:
-// unknown short-circuits according to mode, unions distribute first, structural expectations normalize before unification, and nominal expectations gate non-structural comparisons.
+// unknown short-circuits according to mode, structural expectations normalize through the arena, and nominal expectations gate structural fallbacks.
 export const typeSatisfies = (
   actual: TypeId,
   expected: TypeId,
@@ -1277,20 +1253,6 @@ export const typeSatisfies = (
     return false;
   }
 
-  const actualDesc = ctx.arena.get(actual);
-  if (actualDesc.kind === "union") {
-    return actualDesc.members.every((member) =>
-      typeSatisfies(member, expected, ctx, state)
-    );
-  }
-
-  const expectedDesc = ctx.arena.get(expected);
-  if (expectedDesc.kind === "union") {
-    return expectedDesc.members.some((member) =>
-      typeSatisfies(actual, member, ctx, state)
-    );
-  }
-
   const expectedNominal = getNominalComponent(expected, ctx);
   let nominalMatches = false;
   if (expectedNominal) {
@@ -1303,25 +1265,21 @@ export const typeSatisfies = (
     }
   }
 
-  const expectedStructural = structuralComparableType(expected, ctx, state);
   const structuralComparisonEligible =
-    (!expectedNominal ||
-      nominalMatches ||
-      expectedNominal === ctx.objects.base.nominal) &&
-    typeof expectedStructural === "number";
+    !expectedNominal ||
+    nominalMatches ||
+    expectedNominal === ctx.objects.base.nominal;
+  const structuralResolver = structuralComparisonEligible
+    ? (type: TypeId): TypeId | undefined =>
+        structuralExpectationOf(type, ctx, state)
+    : undefined;
 
-  const comparisonTypes = structuralComparisonEligible && typeof expectedStructural === "number"
-    ? normalizeStructuralComparison(actual, expectedStructural, ctx, state)
-    : { actual, expected };
-
-  if (!comparisonTypes) {
-    return false;
-  }
-
-  const compatibility = ctx.arena.unify(comparisonTypes.actual, comparisonTypes.expected, {
+  const compatibility = ctx.arena.unify(actual, expected, {
     location: ctx.hir.module.ast,
     reason: "type satisfaction",
     variance: "covariant",
+    structuralResolver,
+    allowUnknown: state.mode === "relaxed",
   });
   return compatibility.ok;
 };

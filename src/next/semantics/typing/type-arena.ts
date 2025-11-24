@@ -108,6 +108,8 @@ export interface UnificationContext {
   reason: string;
   variance?: Variance;
   constraints?: ReadonlyMap<TypeParamId, ConstraintSet>;
+  allowUnknown?: boolean;
+  structuralResolver?: (type: TypeId) => TypeId | undefined;
 }
 
 export type UnificationResult =
@@ -362,7 +364,9 @@ export const createTypeArena = (): TypeArena => {
     ctx: UnificationContext
   ): UnificationResult => {
     const variance: Variance = ctx.variance ?? "invariant";
+    const allowUnknown = ctx.allowUnknown ?? true;
     const constraintMap = ctx.constraints;
+    const structuralResolver = ctx.structuralResolver;
     const seen = new Set<string>();
 
     const success = (substitution: Substitution): UnificationResult => ({
@@ -752,6 +756,14 @@ export const createTypeArena = (): TypeArena => {
       );
     };
 
+    const normalizeStructural = (type: TypeId): TypeId => {
+      if (!structuralResolver) {
+        return type;
+      }
+      const resolved = structuralResolver(type);
+      return typeof resolved === "number" ? resolved : type;
+    };
+
     const unifyInternal = (
       left: TypeId,
       right: TypeId,
@@ -759,8 +771,10 @@ export const createTypeArena = (): TypeArena => {
       subst: Substitution,
       localSeen: Set<string>
     ): UnificationResult => {
-      const resolvedLeft = substitute(left, subst);
-      const resolvedRight = substitute(right, subst);
+      const substitutedLeft = substitute(left, subst);
+      const substitutedRight = substitute(right, subst);
+      const resolvedLeft = normalizeStructural(substitutedLeft);
+      const resolvedRight = normalizeStructural(substitutedRight);
 
       if (resolvedLeft === resolvedRight) {
         return success(subst);
@@ -782,11 +796,17 @@ export const createTypeArena = (): TypeArena => {
         );
       }
 
-      if (
-        isUnknownPrimitive(resolvedLeft) ||
-        isUnknownPrimitive(resolvedRight)
-      ) {
-        return success(subst);
+      const leftUnknown = isUnknownPrimitive(resolvedLeft);
+      const rightUnknown = isUnknownPrimitive(resolvedRight);
+      if (leftUnknown || rightUnknown) {
+        if (allowUnknown) {
+          return success(subst);
+        }
+        return conflict(
+          resolvedLeft,
+          resolvedRight,
+          `unknown types are not allowed (${ctx.reason})`
+        );
       }
 
       const leftDesc = getDescriptor(resolvedLeft);
