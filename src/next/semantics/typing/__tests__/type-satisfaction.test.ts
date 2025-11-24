@@ -142,4 +142,43 @@ describe("type satisfaction semantics", () => {
       typeSatisfies(strictBool, expectedUnion, strict.ctx, strict.state)
     ).toBe(true);
   });
+
+  it("distributes structural expectations through unions and nominal bases", () => {
+    const { ctx, state, symbolTable } = createContext();
+    const valueType = getPrimitiveType(ctx, "bool");
+
+    const structural = ctx.arena.internStructuralObject({
+      fields: [{ name: "value", type: valueType }],
+    });
+    const structuralUnion = ctx.arena.internUnion([structural, valueType]);
+    expect(typeSatisfies(structuralUnion, ctx.objects.base.type, ctx, state)).toBe(
+      false
+    );
+
+    const expectedUnion = ctx.arena.internUnion([
+      ctx.objects.base.type,
+      valueType,
+    ]);
+    expect(typeSatisfies(structural, expectedUnion, ctx, state)).toBe(true);
+
+    const parent = registerNominal({
+      ctx,
+      symbolTable,
+      name: "Parent",
+      fields: [{ name: "value", type: valueType }],
+      baseNominal: ctx.objects.base.nominal,
+    });
+    const child = registerNominal({
+      ctx,
+      symbolTable,
+      name: "Child",
+      fields: [
+        { name: "value", type: valueType },
+        { name: "extra", type: valueType },
+      ],
+      baseNominal: parent.nominal,
+    });
+    const nominalUnion = ctx.arena.internUnion([parent.type, valueType]);
+    expect(typeSatisfies(child.type, nominalUnion, ctx, state)).toBe(true);
+  });
 });

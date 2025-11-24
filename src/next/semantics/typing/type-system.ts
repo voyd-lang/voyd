@@ -1238,32 +1238,21 @@ const structuralComparableType = (
   }
 };
 
-export const structuralTypeSatisfies = (
+const normalizeStructuralComparison = (
   actual: TypeId,
-  expected: TypeId,
+  expectedStructural: TypeId,
   ctx: TypingContext,
   state: TypingState
-): boolean => {
+): { actual: TypeId; expected: TypeId } | undefined => {
   const comparableActual = structuralComparableType(actual, ctx, state);
   if (typeof comparableActual !== "number") {
-    return false;
+    return undefined;
   }
-
-  const comparableExpected = structuralComparableType(expected, ctx, state);
-  if (typeof comparableExpected !== "number") {
-    return false;
-  }
-
-  const comparison = ctx.arena.unify(comparableActual, comparableExpected, {
-    location: ctx.hir.module.ast,
-    reason: "structural type satisfaction",
-    variance: "covariant",
-  });
-  return comparison.ok;
+  return { actual: comparableActual, expected: expectedStructural };
 };
 
 // Satisfaction layers nominal gates over structural comparison and unification:
-// unknown short-circuits according to mode, unions distribute first, and only the base object nominal accepts structural matches.
+// unknown short-circuits according to mode, unions distribute first, structural expectations normalize before unification, and nominal expectations gate non-structural comparisons.
 export const typeSatisfies = (
   actual: TypeId,
   expected: TypeId,
@@ -1303,28 +1292,33 @@ export const typeSatisfies = (
   }
 
   const expectedNominal = getNominalComponent(expected, ctx);
+  let nominalMatches = false;
   if (expectedNominal) {
     const actualNominal = getNominalComponent(actual, ctx);
-    if (
-      actualNominal &&
-      nominalSatisfies(actualNominal, expectedNominal, ctx, state)
-    ) {
-      return true;
+    nominalMatches =
+      typeof actualNominal === "number" &&
+      nominalSatisfies(actualNominal, expectedNominal, ctx, state);
+    if (!nominalMatches && expectedNominal !== ctx.objects.base.nominal) {
+      return false;
     }
-    if (
-      expectedNominal === ctx.objects.base.nominal &&
-      structuralTypeSatisfies(actual, expected, ctx, state)
-    ) {
-      return true;
-    }
+  }
+
+  const expectedStructural = structuralComparableType(expected, ctx, state);
+  const structuralComparisonEligible =
+    (!expectedNominal ||
+      nominalMatches ||
+      expectedNominal === ctx.objects.base.nominal) &&
+    typeof expectedStructural === "number";
+
+  const comparisonTypes = structuralComparisonEligible && typeof expectedStructural === "number"
+    ? normalizeStructuralComparison(actual, expectedStructural, ctx, state)
+    : { actual, expected };
+
+  if (!comparisonTypes) {
     return false;
   }
 
-  if (structuralTypeSatisfies(actual, expected, ctx, state)) {
-    return true;
-  }
-
-  const compatibility = ctx.arena.unify(actual, expected, {
+  const compatibility = ctx.arena.unify(comparisonTypes.actual, comparisonTypes.expected, {
     location: ctx.hir.module.ast,
     reason: "type satisfaction",
     variance: "covariant",
