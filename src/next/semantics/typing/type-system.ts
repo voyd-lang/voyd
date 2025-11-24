@@ -1193,88 +1193,73 @@ export const getStructuralFields = (
   return undefined;
 };
 
+const structuralComparableType = (
+  type: TypeId,
+  ctx: TypingContext,
+  state: TypingState
+): TypeId | undefined => {
+  if (type === ctx.primitives.unknown) {
+    return undefined;
+  }
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "structural-object":
+      ensureFieldsSubstituted(desc.fields, ctx, "structural comparison");
+      return type;
+    case "nominal-object": {
+      const info = ensureObjectType(desc.owner, ctx, state, desc.typeArgs);
+      if (info) {
+        ensureFieldsSubstituted(info.fields, ctx, "structural comparison");
+      }
+      return info?.structural;
+    }
+    case "intersection":
+      if (typeof desc.structural === "number") {
+        return structuralComparableType(desc.structural, ctx, state);
+      }
+      if (typeof desc.nominal === "number") {
+        return structuralComparableType(desc.nominal, ctx, state);
+      }
+      return undefined;
+    case "union": {
+      const members: TypeId[] = [];
+      for (const member of desc.members) {
+        const structural = structuralComparableType(member, ctx, state);
+        if (typeof structural !== "number") {
+          return undefined;
+        }
+        members.push(structural);
+      }
+      return ctx.arena.internUnion(members);
+    }
+    default:
+      return undefined;
+  }
+};
+
 export const structuralTypeSatisfies = (
   actual: TypeId,
   expected: TypeId,
   ctx: TypingContext,
-  state: TypingState,
-  seen: Set<string> = new Set()
+  state: TypingState
 ): boolean => {
-  if (actual === expected) {
-    return true;
-  }
-
-  const actualDesc = ctx.arena.get(actual);
-  if (actualDesc.kind === "union") {
-    return actualDesc.members.every((member) =>
-      structuralTypeSatisfies(member, expected, ctx, state, seen)
-    );
-  }
-
-  const expectedDesc = ctx.arena.get(expected);
-  if (expectedDesc.kind === "union") {
-    return expectedDesc.members.some((member) =>
-      structuralTypeSatisfies(actual, member, ctx, state, seen)
-    );
-  }
-
-  const expectedFields = getStructuralFields(expected, ctx, state);
-  if (!expectedFields) {
+  const comparableActual = structuralComparableType(actual, ctx, state);
+  if (typeof comparableActual !== "number") {
     return false;
   }
 
-  const actualFields = getStructuralFields(actual, ctx, state);
-  if (!actualFields) {
+  const comparableExpected = structuralComparableType(expected, ctx, state);
+  if (typeof comparableExpected !== "number") {
     return false;
   }
 
-  if (expectedFields.length === 0) {
-    return actualFields.length >= 0;
-  }
-
-  const cacheKey = `${actual}->${expected}`;
-  if (seen.has(cacheKey)) {
-    return true;
-  }
-  seen.add(cacheKey);
-
-  return expectedFields.every((expectedField) => {
-    const candidate = actualFields.find(
-      (field) => field.name === expectedField.name
-    );
-    if (!candidate) {
-      return false;
-    }
-
-    if (candidate.type === expectedField.type) {
-      return true;
-    }
-
-    if (
-      state.mode === "relaxed" &&
-      (candidate.type === ctx.primitives.unknown ||
-        expectedField.type === ctx.primitives.unknown)
-    ) {
-      return true;
-    }
-
-    const comparison = ctx.arena.unify(candidate.type, expectedField.type, {
-      location: ctx.hir.module.ast,
-      reason: `field ${expectedField.name} compatibility check`,
-      variance: "covariant",
-    });
-    if (comparison.ok) {
-      return true;
-    }
-
-    return structuralTypeSatisfies(
-      candidate.type,
-      expectedField.type,
-      ctx,
-      state,
-      seen
-    );
+  const comparison = ctx.arena.unify(comparableActual, comparableExpected, {
+    location: ctx.hir.module.ast,
+    reason: "structural type satisfaction",
+    variance: "covariant",
   });
+  return comparison.ok;
 };
 
 export const typeSatisfies = (
