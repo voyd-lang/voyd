@@ -42,21 +42,27 @@ import type {
   FunctionSignature,
   FunctionTypeParam,
   ParamSignature,
+  TypingState,
   TypingContext,
 } from "./types.js";
 
 const applyCurrentSubstitution = (
   type: TypeId,
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): TypeId =>
-  ctx.currentTypeSubst
-    ? ctx.arena.substitute(type, ctx.currentTypeSubst)
+  state.currentFunction?.substitution
+    ? ctx.arena.substitute(type, state.currentFunction.substitution)
     : type;
 
-export const typeExpression = (exprId: HirExprId, ctx: TypingContext): TypeId => {
+export const typeExpression = (
+  exprId: HirExprId,
+  ctx: TypingContext,
+  state: TypingState
+): TypeId => {
   const cached = ctx.table.getExprType(exprId);
   if (typeof cached === "number") {
-    const applied = applyCurrentSubstitution(cached, ctx);
+    const applied = applyCurrentSubstitution(cached, ctx, state);
     ctx.resolvedExprTypes.set(exprId, applied);
     return applied;
   }
@@ -78,37 +84,37 @@ export const typeExpression = (exprId: HirExprId, ctx: TypingContext): TypeId =>
       type = typeOverloadSetExpr(expr, ctx);
       break;
     case "call":
-      type = typeCallExpr(expr, ctx);
+      type = typeCallExpr(expr, ctx, state);
       break;
     case "block":
-      type = typeBlockExpr(expr, ctx);
+      type = typeBlockExpr(expr, ctx, state);
       break;
     case "if":
-      type = typeIfExpr(expr, ctx);
+      type = typeIfExpr(expr, ctx, state);
       break;
     case "match":
-      type = typeMatchExpr(expr, ctx);
+      type = typeMatchExpr(expr, ctx, state);
       break;
     case "tuple":
-      type = typeTupleExpr(expr, ctx);
+      type = typeTupleExpr(expr, ctx, state);
       break;
     case "object-literal":
-      type = typeObjectLiteralExpr(expr, ctx);
+      type = typeObjectLiteralExpr(expr, ctx, state);
       break;
     case "field-access":
-      type = typeFieldAccessExpr(expr, ctx);
+      type = typeFieldAccessExpr(expr, ctx, state);
       break;
     case "while":
-      type = typeWhileExpr(expr, ctx);
+      type = typeWhileExpr(expr, ctx, state);
       break;
     case "assign":
-      type = typeAssignExpr(expr, ctx);
+      type = typeAssignExpr(expr, ctx, state);
       break;
     default:
       throw new Error(`unsupported expression kind: ${expr.exprKind}`);
   }
 
-  const appliedType = applyCurrentSubstitution(type, ctx);
+  const appliedType = applyCurrentSubstitution(type, ctx, state);
   ctx.table.setExprType(exprId, type);
   ctx.resolvedExprTypes.set(exprId, appliedType);
   return appliedType;
@@ -124,9 +130,9 @@ const typeLiteralExpr = (expr: HirLiteralExpr, ctx: TypingContext): TypeId => {
     case "string":
       return getPrimitiveType(ctx, "string");
     case "boolean":
-      return ctx.boolType;
+      return ctx.primitives.bool;
     case "void":
-      return ctx.voidType;
+      return ctx.primitives.void;
     default:
       throw new Error(`unsupported literal kind: ${expr.literalKind}`);
   }
@@ -150,10 +156,14 @@ const typeOverloadSetExpr = (
   );
 };
 
-const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
+const typeCallExpr = (
+  expr: HirCallExpr,
+  ctx: TypingContext,
+  state: TypingState
+): TypeId => {
   const args = expr.args.map((arg) => ({
     label: arg.label,
-    type: typeExpression(arg.expr, ctx),
+    type: typeExpression(arg.expr, ctx, state),
   }));
   const calleeExpr = ctx.hir.expressions.get(expr.callee);
   if (!calleeExpr) {
@@ -166,8 +176,8 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
         "type arguments are not supported with overload sets yet"
       );
     }
-    ctx.table.setExprType(calleeExpr.id, ctx.unknownType);
-    return typeOverloadedCall(expr, calleeExpr, args, ctx);
+    ctx.table.setExprType(calleeExpr.id, ctx.primitives.unknown);
+    return typeOverloadedCall(expr, calleeExpr, args, ctx, state);
   }
 
   if (calleeExpr.exprKind === "identifier") {
@@ -177,9 +187,9 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
       return typeIntrinsicCall(record.name, args, ctx);
     }
 
-    const signature = ctx.functionSignatures.get(calleeExpr.symbol);
+    const signature = ctx.functions.signatures.get(calleeExpr.symbol);
     if (signature) {
-      const typeArguments = resolveTypeArguments(expr.typeArguments, ctx);
+      const typeArguments = resolveTypeArguments(expr.typeArguments, ctx, state);
       return typeFunctionCall({
         args,
         signature,
@@ -187,11 +197,12 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
         typeArguments,
         callId: expr.id,
         ctx,
+        state,
       });
     }
   }
 
-  const calleeType = typeExpression(expr.callee, ctx);
+  const calleeType = typeExpression(expr.callee, ctx, state);
 
   if (expr.typeArguments && expr.typeArguments.length > 0) {
     throw new Error("call does not accept type arguments");
@@ -202,22 +213,24 @@ const typeCallExpr = (expr: HirCallExpr, ctx: TypingContext): TypeId => {
     throw new Error("attempted to call a non-function value");
   }
 
-  validateCallArgs(args, calleeDesc.parameters, ctx);
+  validateCallArgs(args, calleeDesc.parameters, ctx, state);
 
   return calleeDesc.returnType;
 };
 
 const resolveTypeArguments = (
   typeArguments: readonly HirTypeExpr[] | undefined,
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): TypeId[] | undefined =>
   typeArguments && typeArguments.length > 0
     ? typeArguments.map((entry) =>
         resolveTypeExpr(
           entry,
           ctx,
-          ctx.unknownType,
-          ctx.currentTypeParams
+          state,
+          ctx.primitives.unknown,
+          state.currentFunction?.typeParams
         )
       )
     : undefined;
@@ -225,7 +238,8 @@ const resolveTypeArguments = (
 const validateCallArgs = (
   args: readonly Arg[],
   params: readonly ParamSignature[],
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): void => {
   if (args.length !== params.length) {
     throw new Error("call argument count mismatch");
@@ -238,11 +252,17 @@ const validateCallArgs = (
       const actualLabel = arg.label ?? "no label";
       throw new Error(
         `call argument ${
-          index + 1
-        } label mismatch: expected ${expectedLabel}, got ${actualLabel}`
+        index + 1
+      } label mismatch: expected ${expectedLabel}, got ${actualLabel}`
       );
     }
-    ensureTypeMatches(arg.type, param.type, ctx, `call argument ${index + 1}`);
+    ensureTypeMatches(
+      arg.type,
+      param.type,
+      ctx,
+      state,
+      `call argument ${index + 1}`
+    );
   });
 };
 
@@ -253,6 +273,7 @@ const typeFunctionCall = ({
   typeArguments,
   callId,
   ctx,
+  state,
 }: {
   args: readonly Arg[];
   signature: FunctionSignature;
@@ -260,6 +281,7 @@ const typeFunctionCall = ({
   typeArguments?: readonly TypeId[];
   callId: HirExprId;
   ctx: TypingContext;
+  state: TypingState;
 }): TypeId => {
   const hasTypeParams = signature.typeParams && signature.typeParams.length > 0;
   const instantiation = hasTypeParams
@@ -269,6 +291,7 @@ const typeFunctionCall = ({
         typeArguments,
         calleeSymbol,
         ctx,
+        state,
       })
     : {
         substitution: new Map<TypeParamId, TypeId>(),
@@ -280,31 +303,32 @@ const typeFunctionCall = ({
     throw new Error("call does not accept type arguments");
   }
 
-  validateCallArgs(args, instantiation.parameters, ctx);
+  validateCallArgs(args, instantiation.parameters, ctx, state);
 
   if (hasTypeParams) {
     const mergedSubstitution = mergeSubstitutions(
       instantiation.substitution,
-      ctx.currentTypeSubst,
+      state.currentFunction?.substitution,
       ctx
     );
-    const appliedTypeArgs = getAppliedTypeArguments({
-      signature,
-      substitution: mergedSubstitution,
-      symbol: calleeSymbol,
-      ctx,
-    });
+  const appliedTypeArgs = getAppliedTypeArguments({
+    signature,
+    substitution: mergedSubstitution,
+    symbol: calleeSymbol,
+    ctx,
+  });
     const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
-    ctx.callTypeArguments.set(callId, appliedTypeArgs);
-    ctx.callInstanceKeys.set(callId, callKey);
+    ctx.callResolution.typeArguments.set(callId, appliedTypeArgs);
+    ctx.callResolution.instanceKeys.set(callId, callKey);
     typeGenericFunctionBody({
       symbol: calleeSymbol,
       signature,
       substitution: instantiation.substitution,
       ctx,
+      state,
     });
   } else {
-    ctx.callTypeArguments.delete(callId);
+    ctx.callResolution.typeArguments.delete(callId);
   }
 
   return instantiation.returnType;
@@ -316,12 +340,14 @@ const instantiateFunctionCall = ({
   typeArguments,
   calleeSymbol,
   ctx,
+  state,
 }: {
   signature: FunctionSignature;
   args: readonly Arg[];
   typeArguments?: readonly TypeId[];
   calleeSymbol: SymbolId;
   ctx: TypingContext;
+  state: TypingState;
 }): {
   substitution: ReadonlyMap<TypeParamId, TypeId>;
   parameters: readonly ParamSignature[];
@@ -352,7 +378,7 @@ const instantiateFunctionCall = ({
       return;
     }
     const expectedType = ctx.arena.substitute(expected.type, substitution);
-    bindTypeParamsFromType(expectedType, arg.type, substitution, ctx);
+    bindTypeParamsFromType(expectedType, arg.type, substitution, ctx, state);
   });
 
   const missing = typeParams.filter(
@@ -368,7 +394,7 @@ const instantiateFunctionCall = ({
   }
 
   typeParams.forEach((param) =>
-    enforceTypeParamConstraint(param, substitution, ctx)
+    enforceTypeParamConstraint(param, substitution, ctx, state)
   );
 
   const parameters = signature.parameters.map((param) => ({
@@ -383,7 +409,8 @@ const instantiateFunctionCall = ({
 const enforceTypeParamConstraint = (
   param: FunctionTypeParam,
   substitution: ReadonlyMap<TypeParamId, TypeId>,
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): void => {
   if (!param.constraint) {
     return;
@@ -393,7 +420,7 @@ const enforceTypeParamConstraint = (
     return;
   }
   const constraint = ctx.arena.substitute(param.constraint, substitution);
-  if (!typeSatisfies(applied, constraint, ctx)) {
+  if (!typeSatisfies(applied, constraint, ctx, state)) {
     throw new Error(
       `type argument for ${getSymbolName(
         param.symbol,
@@ -408,11 +435,13 @@ const typeGenericFunctionBody = ({
   signature,
   substitution,
   ctx,
+  state,
 }: {
   symbol: SymbolId;
   signature: FunctionSignature;
   substitution: ReadonlyMap<TypeParamId, TypeId>;
   ctx: TypingContext;
+  state: TypingState;
 }): void => {
   const typeParams = signature.typeParams ?? [];
   if (typeParams.length === 0) {
@@ -425,14 +454,11 @@ const typeGenericFunctionBody = ({
   ctx.table.clearExprTypes();
   ctx.resolvedExprTypes.clear();
 
-  const previousReturn = ctx.currentFunctionReturnType;
-  const previousInstanceKey = ctx.currentFunctionInstanceKey;
-  const previousTypeParams = ctx.currentTypeParams;
-  const previousSubst = ctx.currentTypeSubst;
+  const previousFunction = state.currentFunction;
 
   const mergedSubstitution = mergeSubstitutions(
     substitution,
-    previousSubst,
+    previousFunction?.substitution,
     ctx
   );
   const appliedTypeArgs = getAppliedTypeArguments({
@@ -443,53 +469,56 @@ const typeGenericFunctionBody = ({
   });
   const key = formatFunctionInstanceKey(symbol, appliedTypeArgs);
   if (
-    ctx.functionInstances.has(key) ||
-    ctx.activeFunctionInstantiations.has(key)
+    ctx.functions.instances.has(key) ||
+    ctx.functions.activeInstantiations.has(key)
   ) {
     return;
   }
 
-  const fn = ctx.functionsBySymbol.get(symbol);
+  const fn = ctx.functions.bySymbol.get(symbol);
   if (!fn) {
     throw new Error(`missing function body for symbol ${symbol}`);
   }
 
-  ctx.activeFunctionInstantiations.add(key);
+  ctx.functions.activeInstantiations.add(key);
   const nextTypeParams =
-    signature.typeParamMap && previousTypeParams
+    signature.typeParamMap && previousFunction?.typeParams
       ? new Map([
-          ...previousTypeParams.entries(),
+          ...previousFunction.typeParams.entries(),
           ...signature.typeParamMap.entries(),
         ])
-      : signature.typeParamMap ?? previousTypeParams;
+      : signature.typeParamMap ?? previousFunction?.typeParams;
   const expectedReturn = ctx.arena.substitute(
     signature.returnType,
     mergedSubstitution
   );
 
-  ctx.currentFunctionReturnType = expectedReturn;
-  ctx.currentTypeParams = nextTypeParams;
-  ctx.currentTypeSubst = mergedSubstitution;
-  ctx.currentFunctionInstanceKey = key;
+  state.currentFunction = {
+    returnType: expectedReturn,
+    instanceKey: key,
+    typeParams: nextTypeParams,
+    substitution: mergedSubstitution,
+  };
 
   let bodyType: TypeId | undefined;
 
   try {
-    bodyType = typeExpression(fn.body, ctx);
+    bodyType = typeExpression(fn.body, ctx, state);
     ensureTypeMatches(
       bodyType,
       expectedReturn,
       ctx,
+      state,
       `function ${getSymbolName(symbol, ctx)} return type`
     );
-    ctx.functionInstances.set(key, expectedReturn);
+    ctx.functions.instances.set(key, expectedReturn);
     recordFunctionInstantiation({
       symbol,
       key,
       typeArgs: appliedTypeArgs,
       ctx,
     });
-    ctx.functionInstanceExprTypes.set(
+    ctx.functions.instanceExprTypes.set(
       key,
       new Map(ctx.resolvedExprTypes)
     );
@@ -500,11 +529,8 @@ const typeGenericFunctionBody = ({
     previousResolved.forEach((type, id) =>
       ctx.resolvedExprTypes.set(id, type)
     );
-    ctx.currentFunctionReturnType = previousReturn;
-    ctx.currentFunctionInstanceKey = previousInstanceKey;
-    ctx.currentTypeParams = previousTypeParams;
-    ctx.currentTypeSubst = previousSubst;
-    ctx.activeFunctionInstantiations.delete(key);
+    state.currentFunction = previousFunction;
+    ctx.functions.activeInstantiations.delete(key);
   }
 };
 
@@ -535,10 +561,10 @@ const recordFunctionInstantiation = ({
   typeArgs: readonly TypeId[];
   ctx: TypingContext;
 }): void => {
-  let bySymbol = ctx.functionInstantiationInfo.get(symbol);
+  let bySymbol = ctx.functions.instantiationInfo.get(symbol);
   if (!bySymbol) {
     bySymbol = new Map();
-    ctx.functionInstantiationInfo.set(symbol, bySymbol);
+    ctx.functions.instantiationInfo.set(symbol, bySymbol);
   }
   if (!bySymbol.has(key)) {
     bySymbol.set(key, typeArgs);
@@ -561,13 +587,13 @@ const getAppliedTypeArguments = ({
     const applied = substitution.get(param.typeParam);
     if (typeof applied !== "number") {
       throw new Error(
-        `function ${getSymbolName(
-          symbol,
-          ctx
-        )} is missing a type argument for ${getSymbolName(param.symbol, ctx)}`
-      );
-    }
-    if (applied === ctx.unknownType) {
+      `function ${getSymbolName(
+        symbol,
+        ctx
+      )} is missing a type argument for ${getSymbolName(param.symbol, ctx)}`
+    );
+  }
+    if (applied === ctx.primitives.unknown) {
       throw new Error(
         `function ${getSymbolName(
           symbol,
@@ -587,15 +613,23 @@ export const formatFunctionInstanceKey = (
   typeArgs: readonly TypeId[]
 ): string => `${symbol}<${typeArgs.join(",")}>`;
 
-const typeBlockExpr = (expr: HirBlockExpr, ctx: TypingContext): TypeId => {
-  expr.statements.forEach((stmtId) => typeStatement(stmtId, ctx));
+const typeBlockExpr = (
+  expr: HirBlockExpr,
+  ctx: TypingContext,
+  state: TypingState
+): TypeId => {
+  expr.statements.forEach((stmtId) => typeStatement(stmtId, ctx, state));
   if (typeof expr.value === "number") {
-    return typeExpression(expr.value, ctx);
+    return typeExpression(expr.value, ctx, state);
   }
-  return ctx.voidType;
+  return ctx.primitives.void;
 };
 
-const typeStatement = (stmtId: HirStmtId, ctx: TypingContext): void => {
+const typeStatement = (
+  stmtId: HirStmtId,
+  ctx: TypingContext,
+  state: TypingState
+): void => {
   const stmt = ctx.hir.statements.get(stmtId);
   if (!stmt) {
     throw new Error(`missing HirStatement ${stmtId}`);
@@ -603,34 +637,36 @@ const typeStatement = (stmtId: HirStmtId, ctx: TypingContext): void => {
 
   switch (stmt.kind) {
     case "expr-stmt":
-      typeExpression(stmt.expr, ctx);
+      typeExpression(stmt.expr, ctx, state);
       return;
     case "return":
-      if (typeof ctx.currentFunctionReturnType !== "number") {
+      if (typeof state.currentFunction?.returnType !== "number") {
         throw new Error("return statement outside of function");
       }
 
-      const expectedReturnType = ctx.currentFunctionReturnType;
+      const expectedReturnType = state.currentFunction.returnType;
       if (typeof stmt.value === "number") {
-        const valueType = typeExpression(stmt.value, ctx);
+        const valueType = typeExpression(stmt.value, ctx, state);
         ensureTypeMatches(
           valueType,
           expectedReturnType,
           ctx,
+          state,
           "return statement"
         );
         return;
       }
 
       ensureTypeMatches(
-        ctx.voidType,
+        ctx.primitives.void,
         expectedReturnType,
         ctx,
+        state,
         "return statement"
       );
       return;
     case "let":
-      typeLetStatement(stmt, ctx);
+      typeLetStatement(stmt, ctx, state);
       return;
     default: {
       const unreachable: never = stmt;
@@ -639,44 +675,57 @@ const typeStatement = (stmtId: HirStmtId, ctx: TypingContext): void => {
   }
 };
 
-const typeLetStatement = (stmt: HirLetStatement, ctx: TypingContext): void => {
+const typeLetStatement = (
+  stmt: HirLetStatement,
+  ctx: TypingContext,
+  state: TypingState
+): void => {
   if (stmt.pattern.kind === "tuple") {
-    bindTuplePatternFromExpr(stmt.pattern, stmt.initializer, ctx, "declare");
+    bindTuplePatternFromExpr(stmt.pattern, stmt.initializer, ctx, state, "declare");
     return;
   }
 
-  const initializerType = typeExpression(stmt.initializer, ctx);
-  recordPatternType(stmt.pattern, initializerType, ctx, "declare");
+  const initializerType = typeExpression(stmt.initializer, ctx, state);
+  recordPatternType(stmt.pattern, initializerType, ctx, state, "declare");
 };
 
-const typeIfExpr = (expr: HirIfExpr, ctx: TypingContext): TypeId => {
+const typeIfExpr = (
+  expr: HirIfExpr,
+  ctx: TypingContext,
+  state: TypingState
+): TypeId => {
   const hasDefault = typeof expr.defaultBranch === "number";
   let branchType: TypeId | undefined;
 
   expr.branches.forEach((branch, index) => {
-    const conditionType = typeExpression(branch.condition, ctx);
+    const conditionType = typeExpression(branch.condition, ctx, state);
     ensureTypeMatches(
       conditionType,
-      ctx.boolType,
+      ctx.primitives.bool,
       ctx,
+      state,
       `if condition ${index + 1}`
     );
 
-    const valueType = typeExpression(branch.value, ctx);
+    const valueType = typeExpression(branch.value, ctx, state);
     branchType = mergeBranchType(branchType, valueType);
   });
 
   if (hasDefault) {
-    const defaultType = typeExpression(expr.defaultBranch!, ctx);
+    const defaultType = typeExpression(expr.defaultBranch!, ctx, state);
     branchType = mergeBranchType(branchType, defaultType);
-    return branchType ?? ctx.voidType;
+    return branchType ?? ctx.primitives.void;
   }
 
-  return ctx.voidType;
+  return ctx.primitives.void;
 };
 
-const typeMatchExpr = (expr: HirMatchExpr, ctx: TypingContext): TypeId => {
-  const discriminantType = typeExpression(expr.discriminant, ctx);
+const typeMatchExpr = (
+  expr: HirMatchExpr,
+  ctx: TypingContext,
+  state: TypingState
+): TypeId => {
+  const discriminantType = typeExpression(expr.discriminant, ctx, state);
   const discriminantExpr = ctx.hir.expressions.get(expr.discriminant);
   const discriminantSymbol =
     discriminantExpr?.exprKind === "identifier"
@@ -697,13 +746,14 @@ const typeMatchExpr = (expr: HirMatchExpr, ctx: TypingContext): TypeId => {
       discriminantType,
       arm.pattern,
       ctx,
+      state,
       `match arm ${index + 1}`
     );
     const valueType = withNarrowedDiscriminant(
       discriminantSymbol,
       narrowed,
       ctx,
-      () => typeExpression(arm.value, ctx)
+      () => typeExpression(arm.value, ctx, state)
     );
     branchType = mergeBranchType(branchType, valueType);
 
@@ -720,9 +770,10 @@ const typeMatchExpr = (expr: HirMatchExpr, ctx: TypingContext): TypeId => {
       const patternType = resolveTypeExpr(
         arm.pattern.type,
         ctx,
-        ctx.unknownType
+        state,
+        ctx.primitives.unknown
       );
-      matchedUnionMembers(patternType, remainingMembers, ctx).forEach(
+      matchedUnionMembers(patternType, remainingMembers, ctx, state).forEach(
         (member) => remainingMembers.delete(member)
       );
     }
@@ -732,30 +783,34 @@ const typeMatchExpr = (expr: HirMatchExpr, ctx: TypingContext): TypeId => {
     throw new Error("non-exhaustive match");
   }
 
-  return branchType ?? ctx.voidType;
+  return branchType ?? ctx.primitives.void;
 };
 
 const typeTupleExpr = (
   expr: HirExpression & { exprKind: "tuple"; elements: readonly HirExprId[] },
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): TypeId => {
   const fields = expr.elements.map((elementId, index) => ({
     name: `${index}`,
-    type: typeExpression(elementId, ctx),
+    type: typeExpression(elementId, ctx, state),
   }));
   return ctx.arena.internStructuralObject({ fields });
 };
 
 const typeObjectLiteralExpr = (
   expr: HirObjectLiteralExpr,
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): TypeId => {
   if (expr.literalKind === "nominal") {
-    return typeNominalObjectLiteral(expr, ctx);
+    return typeNominalObjectLiteral(expr, ctx, state);
   }
 
   const fields = new Map<string, TypeId>();
-  expr.entries.forEach((entry) => mergeObjectLiteralEntry(entry, fields, ctx));
+  expr.entries.forEach((entry) =>
+    mergeObjectLiteralEntry(entry, fields, ctx, state)
+  );
 
   const orderedFields = Array.from(fields.entries()).map(([name, type]) => ({
     name,
@@ -767,20 +822,21 @@ const typeObjectLiteralExpr = (
 const mergeObjectLiteralEntry = (
   entry: HirObjectLiteralEntry,
   fields: Map<string, TypeId>,
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): void => {
   if (entry.kind === "field") {
-    const valueType = typeExpression(entry.value, ctx);
+    const valueType = typeExpression(entry.value, ctx, state);
     fields.set(entry.name, valueType);
     return;
   }
 
-  const spreadType = typeExpression(entry.value, ctx);
-  if (spreadType === ctx.unknownType) {
+  const spreadType = typeExpression(entry.value, ctx, state);
+  if (spreadType === ctx.primitives.unknown) {
     return;
   }
 
-  const spreadFields = getStructuralFields(spreadType, ctx);
+  const spreadFields = getStructuralFields(spreadType, ctx, state);
   if (!spreadFields) {
     throw new Error("object spread requires a structural object");
   }
@@ -789,19 +845,20 @@ const mergeObjectLiteralEntry = (
 
 const typeNominalObjectLiteral = (
   expr: HirObjectLiteralExpr,
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): TypeId => {
   const namedTarget =
     expr.target?.typeKind === "named" ? expr.target : undefined;
   const targetSymbol =
     expr.targetSymbol ??
     namedTarget?.symbol ??
-    (namedTarget ? ctx.objectsByName.get(namedTarget.path[0]!) : undefined);
+    (namedTarget ? ctx.objects.byName.get(namedTarget.path[0]!) : undefined);
   if (typeof targetSymbol !== "number") {
     throw new Error("nominal object literal missing target type");
   }
 
-  const template = getObjectTemplate(targetSymbol, ctx);
+  const template = getObjectTemplate(targetSymbol, ctx, state);
   if (!template) {
     throw new Error("missing object template for nominal literal");
   }
@@ -818,13 +875,14 @@ const typeNominalObjectLiteral = (
       templateFields,
       typeParamBindings,
       seenFields,
-      ctx
+      ctx,
+      state
     )
   );
 
   const explicitTypeArgs =
     namedTarget?.typeArguments?.map((arg) =>
-      resolveTypeExpr(arg, ctx, ctx.unknownType)
+      resolveTypeExpr(arg, ctx, state, ctx.primitives.unknown)
     ) ?? [];
   const typeArgs = template.params.map((param, index) => {
     const explicit = explicitTypeArgs[index];
@@ -832,10 +890,10 @@ const typeNominalObjectLiteral = (
       return explicit;
     }
     const inferred = typeParamBindings.get(param.typeParam);
-    return inferred ?? ctx.unknownType;
+    return inferred ?? ctx.primitives.unknown;
   });
 
-  const objectInfo = ensureObjectType(targetSymbol, ctx, typeArgs);
+  const objectInfo = ensureObjectType(targetSymbol, ctx, state, typeArgs);
   if (!objectInfo) {
     throw new Error("missing object type information for nominal literal");
   }
@@ -850,7 +908,8 @@ const typeNominalObjectLiteral = (
       entry,
       declaredFields,
       provided,
-      ctx
+      ctx,
+      state
     )
   );
 
@@ -868,7 +927,8 @@ const bindNominalObjectEntry = (
   declared: Map<string, TypeId>,
   bindings: Map<TypeParamId, TypeId>,
   provided: Set<string>,
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): void => {
   if (entry.kind === "field") {
     const expectedType = declared.get(entry.name);
@@ -877,20 +937,21 @@ const bindNominalObjectEntry = (
     }
     bindTypeParamsFromType(
       expectedType,
-      typeExpression(entry.value, ctx),
+      typeExpression(entry.value, ctx, state),
       bindings,
-      ctx
+      ctx,
+      state
     );
     provided.add(entry.name);
     return;
   }
 
-  const spreadType = typeExpression(entry.value, ctx);
-  if (spreadType === ctx.unknownType) {
+  const spreadType = typeExpression(entry.value, ctx, state);
+  if (spreadType === ctx.primitives.unknown) {
     return;
   }
 
-  const spreadFields = getStructuralFields(spreadType, ctx);
+  const spreadFields = getStructuralFields(spreadType, ctx, state);
   if (!spreadFields) {
     throw new Error("object spread requires a structural object");
   }
@@ -900,7 +961,7 @@ const bindNominalObjectEntry = (
     if (!expectedType) {
       throw new Error(`nominal object does not declare field ${field.name}`);
     }
-    bindTypeParamsFromType(expectedType, field.type, bindings, ctx);
+    bindTypeParamsFromType(expectedType, field.type, bindings, ctx, state);
     provided.add(field.name);
   });
 };
@@ -909,27 +970,28 @@ const mergeNominalObjectEntry = (
   entry: HirObjectLiteralEntry,
   declared: Map<string, TypeId>,
   provided: Set<string>,
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): void => {
   if (entry.kind === "field") {
     const expectedType = declared.get(entry.name);
     if (!expectedType) {
       throw new Error(`nominal object does not declare field ${entry.name}`);
     }
-    const valueType = typeExpression(entry.value, ctx);
-    if (expectedType !== ctx.unknownType) {
-      ensureTypeMatches(valueType, expectedType, ctx, `field ${entry.name}`);
+    const valueType = typeExpression(entry.value, ctx, state);
+    if (expectedType !== ctx.primitives.unknown) {
+      ensureTypeMatches(valueType, expectedType, ctx, state, `field ${entry.name}`);
     }
     provided.add(entry.name);
     return;
   }
 
-  const spreadType = typeExpression(entry.value, ctx);
-  if (spreadType === ctx.unknownType) {
+  const spreadType = typeExpression(entry.value, ctx, state);
+  if (spreadType === ctx.primitives.unknown) {
     return;
   }
 
-  const spreadFields = getStructuralFields(spreadType, ctx);
+  const spreadFields = getStructuralFields(spreadType, ctx, state);
   if (!spreadFields) {
     throw new Error("object spread requires a structural object");
   }
@@ -939,11 +1001,12 @@ const mergeNominalObjectEntry = (
     if (!expectedType) {
       throw new Error(`nominal object does not declare field ${field.name}`);
     }
-    if (expectedType !== ctx.unknownType) {
+    if (expectedType !== ctx.primitives.unknown) {
       ensureTypeMatches(
         field.type,
         expectedType,
         ctx,
+        state,
         `spread field ${field.name}`
       );
     }
@@ -953,22 +1016,23 @@ const mergeNominalObjectEntry = (
 
 const typeFieldAccessExpr = (
   expr: HirFieldAccessExpr,
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): TypeId => {
-  const targetType = typeExpression(expr.target, ctx);
-  if (targetType === ctx.unknownType) {
-    return ctx.unknownType;
+  const targetType = typeExpression(expr.target, ctx, state);
+  if (targetType === ctx.primitives.unknown) {
+    return ctx.primitives.unknown;
   }
 
-  const fields = getStructuralFields(targetType, ctx);
+  const fields = getStructuralFields(targetType, ctx, state);
   if (!fields) {
     throw new Error("field access requires an object type");
   }
 
   const field = fields.find((candidate) => candidate.name === expr.field);
   if (!field) {
-    if (ctx.typeCheckMode === "relaxed") {
-      return ctx.unknownType;
+    if (state.mode === "relaxed") {
+      return ctx.primitives.unknown;
     }
     throw new Error(`object type is missing field ${expr.field}`);
   }
@@ -976,38 +1040,47 @@ const typeFieldAccessExpr = (
   return field.type;
 };
 
-const typeWhileExpr = (expr: HirWhileExpr, ctx: TypingContext): TypeId => {
-  const conditionType = typeExpression(expr.condition, ctx);
-  ensureTypeMatches(conditionType, ctx.boolType, ctx, "while condition");
-  typeExpression(expr.body, ctx);
-  return ctx.voidType;
+const typeWhileExpr = (
+  expr: HirWhileExpr,
+  ctx: TypingContext,
+  state: TypingState
+): TypeId => {
+  const conditionType = typeExpression(expr.condition, ctx, state);
+  ensureTypeMatches(conditionType, ctx.primitives.bool, ctx, state, "while condition");
+  typeExpression(expr.body, ctx, state);
+  return ctx.primitives.void;
 };
 
-const typeAssignExpr = (expr: HirAssignExpr, ctx: TypingContext): TypeId => {
+const typeAssignExpr = (
+  expr: HirAssignExpr,
+  ctx: TypingContext,
+  state: TypingState
+): TypeId => {
   if (expr.pattern) {
-    typeTupleAssignment(expr.pattern, expr.value, ctx);
-    return ctx.voidType;
+    typeTupleAssignment(expr.pattern, expr.value, ctx, state);
+    return ctx.primitives.void;
   }
 
   if (typeof expr.target !== "number") {
     throw new Error("assignment missing target expression");
   }
 
-  const targetType = typeExpression(expr.target, ctx);
-  const valueType = typeExpression(expr.value, ctx);
-  ensureTypeMatches(valueType, targetType, ctx, "assignment target");
-  return ctx.voidType;
+  const targetType = typeExpression(expr.target, ctx, state);
+  const valueType = typeExpression(expr.value, ctx, state);
+  ensureTypeMatches(valueType, targetType, ctx, state, "assignment target");
+  return ctx.primitives.void;
 };
 
 const typeTupleAssignment = (
   pattern: HirPattern,
   valueExpr: HirExprId,
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): void => {
   if (pattern.kind !== "tuple") {
     throw new Error("tuple assignment requires a tuple pattern");
   }
-  bindTuplePatternFromExpr(pattern, valueExpr, ctx, "assign");
+  bindTuplePatternFromExpr(pattern, valueExpr, ctx, state, "assign");
 };
 
 const mergeBranchType = (acc: TypeId | undefined, next: TypeId): TypeId => {
@@ -1021,7 +1094,8 @@ const typeOverloadedCall = (
   call: HirCallExpr,
   callee: HirOverloadSetExpr,
   argTypes: readonly Arg[],
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): TypeId => {
   const options = ctx.overloads.get(callee.set);
   if (!options) {
@@ -1032,7 +1106,7 @@ const typeOverloadedCall = (
 
   const matches = options
     .map((symbol) => {
-      const signature = ctx.functionSignatures.get(symbol);
+      const signature = ctx.functions.signatures.get(symbol);
       if (!signature) {
         throw new Error(
           `missing type signature for overloaded function ${getSymbolName(
@@ -1044,7 +1118,7 @@ const typeOverloadedCall = (
       return { symbol, signature };
     })
     .filter(({ symbol, signature }) =>
-      matchesOverloadSignature(symbol, signature, argTypes, ctx)
+      matchesOverloadSignature(symbol, signature, argTypes, ctx, state)
     );
 
   if (matches.length === 0) {
@@ -1056,15 +1130,16 @@ const typeOverloadedCall = (
   }
 
   const selected = matches[0]!;
-  const instanceKey = ctx.currentFunctionInstanceKey;
+  const instanceKey = state.currentFunction?.instanceKey;
   if (!instanceKey) {
     throw new Error(
       `missing function instance key for overload resolution at call ${call.id}`
     );
   }
-  const targets = ctx.callTargets.get(call.id) ?? new Map<string, SymbolId>();
+  const targets =
+    ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolId>();
   targets.set(instanceKey, selected.symbol);
-  ctx.callTargets.set(call.id, targets);
+  ctx.callResolution.targets.set(call.id, targets);
   ctx.table.setExprType(callee.id, selected.signature.typeId);
   return selected.signature.returnType;
 };
@@ -1073,14 +1148,15 @@ const matchesOverloadSignature = (
   symbol: SymbolId,
   signature: FunctionSignature,
   args: readonly Arg[],
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState
 ): boolean => {
   if (signature.parameters.length !== args.length) {
     return false;
   }
 
   signature.parameters.forEach(({ type }) => {
-    if (type === ctx.unknownType) {
+    if (type === ctx.primitives.unknown) {
       throw new Error(
         `overloaded function ${getSymbolName(
           symbol,
@@ -1096,11 +1172,11 @@ const matchesOverloadSignature = (
       return false;
     }
 
-    if (arg.type === ctx.unknownType) {
+    if (arg.type === ctx.primitives.unknown) {
       return true;
     }
 
-    return typeSatisfies(arg.type, param.type, ctx);
+    return typeSatisfies(arg.type, param.type, ctx, state);
   });
 };
 
@@ -1139,7 +1215,7 @@ const intrinsicSignatureMatches = (
   }
   return signature.parameters.every((param, index) => {
     const arg = args[index];
-    return arg.type === ctx.unknownType || param === arg.type;
+    return arg.type === ctx.primitives.unknown || param === arg.type;
   });
 };
 
@@ -1185,7 +1261,7 @@ const getIntrinsicType = (name: string, ctx: TypingContext): TypeId => {
       optional: false,
     })),
     returnType: signature.returnType,
-    effects: ctx.defaultEffectRow,
+    effects: ctx.primitives.defaultEffectRow,
   });
 
   ctx.intrinsicTypes.set(name, fnType);
@@ -1213,10 +1289,10 @@ const intrinsicSignaturesFor = (
     { parameters: [float64, float64], returnType: float64 },
   ];
   const comparisonSignatures: IntrinsicSignature[] = [
-    { parameters: [int32, int32], returnType: ctx.boolType },
-    { parameters: [int64, int64], returnType: ctx.boolType },
-    { parameters: [float32, float32], returnType: ctx.boolType },
-    { parameters: [float64, float64], returnType: ctx.boolType },
+    { parameters: [int32, int32], returnType: ctx.primitives.bool },
+    { parameters: [int64, int64], returnType: ctx.primitives.bool },
+    { parameters: [float32, float32], returnType: ctx.primitives.bool },
+    { parameters: [float64, float64], returnType: ctx.primitives.bool },
   ];
 
   switch (name) {
@@ -1241,9 +1317,10 @@ const bindTuplePatternFromExpr = (
   pattern: HirPattern & { kind: "tuple" },
   exprId: HirExprId,
   ctx: TypingContext,
+  state: TypingState,
   mode: PatternBindingMode
 ): void => {
-  const initializerType = typeExpression(exprId, ctx);
+  const initializerType = typeExpression(exprId, ctx, state);
   const initializerExpr = ctx.hir.expressions.get(exprId);
 
   if (initializerExpr?.exprKind === "tuple") {
@@ -1254,20 +1331,20 @@ const bindTuplePatternFromExpr = (
     pattern.elements.forEach((subPattern, index) => {
       const elementExprId = initializerExpr.elements[index]!;
       if (subPattern.kind === "tuple") {
-        bindTuplePatternFromExpr(subPattern, elementExprId, ctx, mode);
+        bindTuplePatternFromExpr(subPattern, elementExprId, ctx, state, mode);
         return;
       }
       const cached = ctx.table.getExprType(elementExprId);
       const elementType =
         typeof cached === "number"
           ? cached
-          : typeExpression(elementExprId, ctx);
-      recordPatternType(subPattern, elementType, ctx, mode);
+          : typeExpression(elementExprId, ctx, state);
+      recordPatternType(subPattern, elementType, ctx, state, mode);
     });
     return;
   }
 
-  bindTuplePatternFromType(pattern, initializerType, ctx, mode);
+  bindTuplePatternFromType(pattern, initializerType, ctx, state, mode);
 };
 
 type PatternBindingMode = "declare" | "assign";
@@ -1276,6 +1353,7 @@ const recordPatternType = (
   pattern: HirPattern,
   type: TypeId,
   ctx: TypingContext,
+  state: TypingState,
   mode: PatternBindingMode
 ): void => {
   switch (pattern.kind) {
@@ -1290,12 +1368,7 @@ const recordPatternType = (
           `missing type for identifier ${getSymbolName(pattern.symbol, ctx)}`
         );
       }
-      ensureTypeMatches(
-        type,
-        existing,
-        ctx,
-        `assignment to ${getSymbolName(pattern.symbol, ctx)}`
-      );
+      ensureTypeMatches(type, existing, ctx, state, `assignment to ${getSymbolName(pattern.symbol, ctx)}`);
       return;
     }
     case "wildcard":
@@ -1309,17 +1382,18 @@ const bindTuplePatternFromType = (
   pattern: HirPattern & { kind: "tuple" },
   type: TypeId,
   ctx: TypingContext,
+  state: TypingState,
   mode: PatternBindingMode
 ): void => {
-  const fields = getStructuralFields(type, ctx);
+  const fields = getStructuralFields(type, ctx, state);
   if (!fields) {
-    if (ctx.typeCheckMode === "relaxed" && type === ctx.unknownType) {
+    if (state.mode === "relaxed" && type === ctx.primitives.unknown) {
       pattern.elements.forEach((subPattern) => {
         if (subPattern.kind === "tuple") {
-          bindTuplePatternFromType(subPattern, ctx.unknownType, ctx, mode);
+          bindTuplePatternFromType(subPattern, ctx.primitives.unknown, ctx, state, mode);
           return;
         }
-        recordPatternType(subPattern, ctx.unknownType, ctx, mode);
+        recordPatternType(subPattern, ctx.primitives.unknown, ctx, state, mode);
       });
       return;
     }
@@ -1340,10 +1414,10 @@ const bindTuplePatternFromType = (
       throw new Error(`tuple is missing element ${index}`);
     }
     if (subPattern.kind === "tuple") {
-      bindTuplePatternFromType(subPattern, fieldType, ctx, mode);
+      bindTuplePatternFromType(subPattern, fieldType, ctx, state, mode);
       return;
     }
-    recordPatternType(subPattern, fieldType, ctx, mode);
+    recordPatternType(subPattern, fieldType, ctx, state, mode);
   });
 };
 
@@ -1351,6 +1425,7 @@ const narrowMatchPattern = (
   discriminantType: TypeId,
   pattern: HirPattern,
   ctx: TypingContext,
+  state: TypingState,
   reason: string
 ): TypeId => {
   switch (pattern.kind) {
@@ -1358,8 +1433,18 @@ const narrowMatchPattern = (
       pattern.typeId = discriminantType;
       return discriminantType;
     case "type": {
-      const patternType = resolveTypeExpr(pattern.type, ctx, ctx.unknownType);
-      const narrowed = narrowTypeForPattern(discriminantType, patternType, ctx);
+      const patternType = resolveTypeExpr(
+        pattern.type,
+        ctx,
+        state,
+        ctx.primitives.unknown
+      );
+      const narrowed = narrowTypeForPattern(
+        discriminantType,
+        patternType,
+        ctx,
+        state
+      );
       if (typeof narrowed !== "number") {
         throw new Error(`pattern does not match discriminant for ${reason}`);
       }
@@ -1377,7 +1462,7 @@ const withNarrowedDiscriminant = (
   ctx: TypingContext,
   run: () => TypeId
 ): TypeId => {
-  if (typeof symbol !== "number" || narrowedType === ctx.unknownType) {
+  if (typeof symbol !== "number" || narrowedType === ctx.primitives.unknown) {
     return run();
   }
 

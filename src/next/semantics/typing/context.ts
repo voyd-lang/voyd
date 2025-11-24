@@ -4,6 +4,7 @@ import { DeclTable } from "../decls.js";
 import {
   BASE_OBJECT_NAME,
   DEFAULT_EFFECT_ROW,
+  type TypingState,
   type TypingContext,
   type TypingInputs,
 } from "./types.js";
@@ -21,48 +22,61 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     arena,
     table,
     resolvedExprTypes: new Map(),
-    functionSignatures: new Map(),
     valueTypes: new Map(),
-    callTargets: new Map(),
-    callTypeArguments: new Map(),
-    callInstanceKeys: new Map(),
-    functionInstantiationInfo: new Map(),
-    functionInstanceExprTypes: new Map(),
-    primitiveCache: new Map(),
+    callResolution: {
+      targets: new Map(),
+      typeArguments: new Map(),
+      instanceKeys: new Map(),
+    },
+    functions: {
+      signatures: new Map(),
+      bySymbol: new Map(),
+      instances: new Map(),
+      instantiationInfo: new Map(),
+      instanceExprTypes: new Map(),
+      activeInstantiations: new Set(),
+    },
+    objects: {
+      templates: new Map(),
+      instances: new Map(),
+      byName: new Map(),
+      byNominal: new Map(),
+      decls: new Map(),
+      resolving: new Set(),
+      base: {
+        symbol: -1,
+        nominal: -1,
+        structural: -1,
+        type: -1,
+      },
+    },
+    typeAliases: {
+      templates: new Map(),
+      instances: new Map(),
+      instanceSymbols: new Map(),
+      validatedInstances: new Set(),
+      byName: new Map(),
+      resolving: new Map(),
+      resolvingKeysById: new Map(),
+      failedInstantiations: new Set(),
+    },
+    primitives: {
+      cache: new Map(),
+      bool: 0,
+      void: 0,
+      unknown: 0,
+      defaultEffectRow: DEFAULT_EFFECT_ROW,
+    },
     intrinsicTypes: new Map(),
-    functionsBySymbol: new Map(),
-    functionInstances: new Map(),
-    activeFunctionInstantiations: new Set(),
-    objectTemplates: new Map(),
-    objectInstances: new Map(),
-    objectsByName: new Map(),
-    objectsByNominal: new Map(),
-    objectDecls: new Map(),
-    resolvingTemplates: new Set(),
-    boolType: 0,
-    voidType: 0,
-    unknownType: 0,
-    defaultEffectRow: DEFAULT_EFFECT_ROW,
-    typeCheckMode: "relaxed",
-    currentFunctionReturnType: undefined,
-    typeAliasTargets: new Map(),
-    typeAliasTemplates: new Map(),
-    typeAliasInstances: new Map(),
-    typeAliasInstanceSymbols: new Map(),
-    validatedTypeAliasInstances: new Set(),
-    typeAliasesByName: new Map(),
-    resolvingTypeAliases: new Map(),
-    resolvingTypeAliasKeysById: new Map(),
-    failedTypeAliasInstantiations: new Set(),
-    baseObjectSymbol: -1,
-    baseObjectNominal: -1,
-    baseObjectStructural: -1,
-    baseObjectType: -1,
   };
 };
 
 export const seedBaseObjectName = (ctx: TypingContext): void => {
-  if (!ctx.objectsByName.has(BASE_OBJECT_NAME)) {
-    ctx.objectsByName.set(BASE_OBJECT_NAME, ctx.baseObjectSymbol);
+  if (!ctx.objects.byName.has(BASE_OBJECT_NAME)) {
+    ctx.objects.byName.set(BASE_OBJECT_NAME, ctx.objects.base.symbol);
   }
 };
+
+export const createTypingState = (mode: TypingState["mode"] = "relaxed"): TypingState => ({
+  mode,
+});

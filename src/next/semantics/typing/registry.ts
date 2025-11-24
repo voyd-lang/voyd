@@ -6,14 +6,14 @@ import {
 import type { SymbolId, TypeId } from "../ids.js";
 import {
   BASE_OBJECT_NAME,
-  type FunctionSignature,
   type TypingContext,
+  type TypingState,
 } from "./types.js";
 
 export const seedPrimitiveTypes = (ctx: TypingContext): void => {
-  ctx.voidType = registerPrimitive(ctx, "voyd", "void", "Voyd");
-  ctx.boolType = registerPrimitive(ctx, "bool", "boolean", "Bool");
-  ctx.unknownType = registerPrimitive(ctx, "unknown");
+  ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
+  ctx.primitives.bool = registerPrimitive(ctx, "bool", "boolean", "Bool");
+  ctx.primitives.unknown = registerPrimitive(ctx, "unknown");
 
   registerPrimitive(ctx, "i32");
   registerPrimitive(ctx, "i64");
@@ -54,21 +54,26 @@ export const seedBaseObjectType = (ctx: TypingContext): void => {
     baseNominal: undefined,
   };
 
-  ctx.baseObjectSymbol = symbol;
-  ctx.baseObjectNominal = nominal;
-  ctx.baseObjectStructural = structural;
-  ctx.baseObjectType = type;
+  ctx.objects.base = {
+    symbol,
+    nominal,
+    structural,
+    type,
+  };
 
-  ctx.objectTemplates.set(symbol, template);
-  ctx.objectInstances.set(`${symbol}<>`, info);
-  ctx.objectsByNominal.set(nominal, info);
-  if (!ctx.objectsByName.has(BASE_OBJECT_NAME)) {
-    ctx.objectsByName.set(BASE_OBJECT_NAME, symbol);
+  ctx.objects.templates.set(symbol, template);
+  ctx.objects.instances.set(`${symbol}<>`, info);
+  ctx.objects.byNominal.set(nominal, info);
+  if (!ctx.objects.byName.has(BASE_OBJECT_NAME)) {
+    ctx.objects.byName.set(BASE_OBJECT_NAME, symbol);
   }
   ctx.valueTypes.set(symbol, type);
 };
 
-export const registerTypeAliases = (ctx: TypingContext): void => {
+export const registerTypeAliases = (
+  ctx: TypingContext,
+  state: TypingState
+): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "type-alias") continue;
     const decl =
@@ -83,36 +88,38 @@ export const registerTypeAliases = (ctx: TypingContext): void => {
         `missing or mismatched decl for type alias symbol ${item.symbol}`
       );
     }
-    ctx.typeAliasTargets.set(item.symbol, item.target);
     const typeParams = item.typeParameters ?? decl?.typeParameters ?? [];
     const params = typeParams.map((param) => ({
       symbol: param.symbol,
       constraint: "constraint" in param ? param.constraint : undefined,
     }));
-    ctx.typeAliasTemplates.set(item.symbol, {
+    ctx.typeAliases.templates.set(item.symbol, {
       symbol: item.symbol,
       params,
       target: item.target,
     });
-    ctx.typeAliasesByName.set(getSymbolName(item.symbol, ctx), item.symbol);
+    ctx.typeAliases.byName.set(getSymbolName(item.symbol, ctx), item.symbol);
   }
 };
 
 export const registerObjectDecls = (ctx: TypingContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "object") continue;
-    ctx.objectDecls.set(item.symbol, item);
+    ctx.objects.decls.set(item.symbol, item);
     const name = getSymbolName(item.symbol, ctx);
-    if (!ctx.objectsByName.has(name)) {
-      ctx.objectsByName.set(name, item.symbol);
+    if (!ctx.objects.byName.has(name)) {
+      ctx.objects.byName.set(name, item.symbol);
     }
   }
 };
 
-export const registerFunctionSignatures = (ctx: TypingContext): void => {
+export const registerFunctionSignatures = (
+  ctx: TypingContext,
+  state: TypingState
+): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "function") continue;
-    ctx.functionsBySymbol.set(item.symbol, item);
+    ctx.functions.bySymbol.set(item.symbol, item);
     const fnDecl =
       (typeof item.decl === "number"
         ? ctx.decls.getFunctionById(item.decl)
@@ -147,7 +154,8 @@ export const registerFunctionSignatures = (ctx: TypingContext): void => {
                 ? resolveTypeExpr(
                     param.constraint,
                     ctx,
-                    ctx.unknownType,
+                    state,
+                    ctx.primitives.unknown,
                     paramMap
                   )
                 : undefined;
@@ -167,7 +175,8 @@ export const registerFunctionSignatures = (ctx: TypingContext): void => {
       const resolved = resolveTypeExpr(
         param.type,
         ctx,
-        ctx.unknownType,
+        state,
+        ctx.primitives.unknown,
         paramMap
       );
       ctx.valueTypes.set(param.symbol, resolved);
@@ -204,9 +213,10 @@ export const registerFunctionSignatures = (ctx: TypingContext): void => {
       resolveTypeExpr(
         item.returnType,
         ctx,
-        ctx.unknownType,
+        state,
+        ctx.primitives.unknown,
         paramMap
-      ) ?? ctx.unknownType;
+      ) ?? ctx.primitives.unknown;
 
     const functionType = ctx.arena.internFunction({
       parameters: parameters.map(({ type, label }) => ({
@@ -215,7 +225,7 @@ export const registerFunctionSignatures = (ctx: TypingContext): void => {
         optional: false,
       })),
       returnType: declaredReturn,
-      effects: ctx.defaultEffectRow,
+      effects: ctx.primitives.defaultEffectRow,
     });
 
     const scheme = ctx.arena.newScheme(
@@ -223,7 +233,7 @@ export const registerFunctionSignatures = (ctx: TypingContext): void => {
       functionType
     );
 
-    ctx.functionSignatures.set(item.symbol, {
+    ctx.functions.signatures.set(item.symbol, {
       typeId: functionType,
       parameters,
       returnType: declaredReturn,

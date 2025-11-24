@@ -19,6 +19,8 @@ import { DeclTable } from "../decls.js";
 import type { TypeArena } from "./type-arena.js";
 import type { TypeTable } from "./type-table.js";
 
+export type TypeCheckMode = "relaxed" | "strict";
+
 export interface TypingInputs {
   symbolTable: SymbolTable;
   hir: HirGraph;
@@ -41,6 +43,14 @@ export interface TypingResult {
     ReadonlyMap<string, readonly TypeId[]>
   >;
   functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+}
+
+export interface PrimitiveTypes {
+  cache: Map<string, TypeId>;
+  bool: TypeId;
+  void: TypeId;
+  unknown: TypeId;
+  defaultEffectRow: EffectRowId;
 }
 
 export interface FunctionSignature {
@@ -70,7 +80,58 @@ export interface Arg {
   label?: string;
 }
 
-export type TypeCheckMode = "relaxed" | "strict";
+export interface CallResolution {
+  targets: Map<HirExprId, Map<string, SymbolId>>;
+  typeArguments: Map<HirExprId, readonly TypeId[]>;
+  instanceKeys: Map<HirExprId, string>;
+}
+
+export interface FunctionStore {
+  signatures: Map<SymbolId, FunctionSignature>;
+  bySymbol: Map<SymbolId, HirFunction>;
+  instances: Map<string, TypeId>;
+  instantiationInfo: Map<SymbolId, Map<string, readonly TypeId[]>>;
+  instanceExprTypes: Map<string, Map<HirExprId, TypeId>>;
+  activeInstantiations: Set<string>;
+}
+
+export interface ObjectStore {
+  templates: Map<SymbolId, ObjectTemplate>;
+  instances: Map<string, ObjectTypeInfo>;
+  byName: Map<string, SymbolId>;
+  byNominal: Map<TypeId, ObjectTypeInfo>;
+  decls: Map<SymbolId, HirObjectDecl>;
+  resolving: Set<SymbolId>;
+  base: {
+    symbol: SymbolId;
+    nominal: TypeId;
+    structural: TypeId;
+    type: TypeId;
+  };
+}
+
+export interface TypeAliasStore {
+  templates: Map<SymbolId, TypeAliasTemplate>;
+  instances: Map<string, TypeId>;
+  instanceSymbols: Map<TypeId, Set<SymbolId>>;
+  validatedInstances: Set<string>;
+  byName: Map<string, SymbolId>;
+  resolving: Map<string, TypeId>;
+  resolvingKeysById: Map<TypeId, string>;
+  failedInstantiations: Set<string>;
+}
+
+export interface FunctionScope {
+  returnType: TypeId;
+  instanceKey?: string;
+  typeParams?: ReadonlyMap<SymbolId, TypeId>;
+  substitution?: ReadonlyMap<TypeParamId, TypeId>;
+}
+
+export interface TypingState {
+  mode: TypeCheckMode;
+  currentFunction?: FunctionScope;
+}
 
 export interface TypingContext {
   symbolTable: SymbolTable;
@@ -80,46 +141,13 @@ export interface TypingContext {
   arena: TypeArena;
   table: TypeTable;
   resolvedExprTypes: Map<HirExprId, TypeId>;
-  functionSignatures: Map<SymbolId, FunctionSignature>;
   valueTypes: Map<SymbolId, TypeId>;
-  callTargets: Map<HirExprId, Map<string, SymbolId>>;
-  callTypeArguments: Map<HirExprId, readonly TypeId[]>;
-  callInstanceKeys: Map<HirExprId, string>;
-  functionInstantiationInfo: Map<SymbolId, Map<string, readonly TypeId[]>>;
-  functionInstanceExprTypes: Map<string, Map<HirExprId, TypeId>>;
-  primitiveCache: Map<string, TypeId>;
+  callResolution: CallResolution;
+  functions: FunctionStore;
+  objects: ObjectStore;
+  typeAliases: TypeAliasStore;
+  primitives: PrimitiveTypes;
   intrinsicTypes: Map<string, TypeId>;
-  objectTemplates: Map<SymbolId, ObjectTemplate>;
-  objectInstances: Map<string, ObjectTypeInfo>;
-  objectsByName: Map<string, SymbolId>;
-  objectsByNominal: Map<TypeId, ObjectTypeInfo>;
-  objectDecls: Map<SymbolId, HirObjectDecl>;
-  resolvingTemplates: Set<SymbolId>;
-  boolType: TypeId;
-  voidType: TypeId;
-  unknownType: TypeId;
-  defaultEffectRow: EffectRowId;
-  typeCheckMode: TypeCheckMode;
-  currentFunctionReturnType: TypeId | undefined;
-  currentFunctionInstanceKey?: string;
-  currentTypeParams?: ReadonlyMap<SymbolId, TypeId>;
-  currentTypeSubst?: ReadonlyMap<TypeParamId, TypeId>;
-  typeAliasTargets: Map<SymbolId, HirTypeExpr>;
-  typeAliasTemplates: Map<SymbolId, TypeAliasTemplate>;
-  typeAliasInstances: Map<string, TypeId>;
-  typeAliasInstanceSymbols: Map<TypeId, Set<SymbolId>>;
-  validatedTypeAliasInstances: Set<string>;
-  typeAliasesByName: Map<string, SymbolId>;
-  resolvingTypeAliases: Map<string, TypeId>;
-  resolvingTypeAliasKeysById: Map<TypeId, string>;
-  failedTypeAliasInstantiations: Set<string>;
-  baseObjectSymbol: SymbolId;
-  baseObjectNominal: TypeId;
-  baseObjectStructural: TypeId;
-  baseObjectType: TypeId;
-  functionsBySymbol: Map<SymbolId, HirFunction>;
-  functionInstances: Map<string, TypeId>;
-  activeFunctionInstantiations: Set<string>;
 }
 
 export interface ObjectTypeInfo {

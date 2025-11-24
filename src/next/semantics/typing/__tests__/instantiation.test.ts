@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SymbolTable } from "../../binder/index.js";
-import { createTypingContext } from "../context.js";
+import { createTypingContext, createTypingState } from "../context.js";
 import { seedBaseObjectType, seedPrimitiveTypes } from "../registry.js";
 import {
   ensureObjectType,
@@ -40,7 +40,8 @@ const createContext = () => {
   });
   seedPrimitiveTypes(ctx);
   seedBaseObjectType(ctx);
-  return { ctx, symbolTable };
+  const state = createTypingState();
+  return { ctx, state, symbolTable };
 };
 
 const primeBoxTemplate = (
@@ -70,7 +71,7 @@ const primeBoxTemplate = (
     typeArgs: [typeParamRef],
   });
   const type = ctx.arena.internIntersection({ nominal, structural });
-  ctx.objectTemplates.set(boxSymbol, {
+  ctx.objects.templates.set(boxSymbol, {
     symbol: boxSymbol,
     params: [{ symbol: typeParamSymbol, typeParam, constraint }],
     nominal,
@@ -79,7 +80,7 @@ const primeBoxTemplate = (
     fields,
     baseNominal: undefined,
   });
-  ctx.objectsByName.set("Box", boxSymbol);
+  ctx.objects.byName.set("Box", boxSymbol);
   return { boxSymbol };
 };
 
@@ -109,7 +110,7 @@ const primeSomeTemplate = (
     typeArgs: [typeParamRef],
   });
   const type = ctx.arena.internIntersection({ nominal, structural });
-  ctx.objectTemplates.set(someSymbol, {
+  ctx.objects.templates.set(someSymbol, {
     symbol: someSymbol,
     params: [{ symbol: typeParamSymbol, typeParam }],
     nominal,
@@ -118,7 +119,7 @@ const primeSomeTemplate = (
     fields,
     baseNominal: undefined,
   });
-  ctx.objectsByName.set("Some", someSymbol);
+  ctx.objects.byName.set("Some", someSymbol);
   return { someSymbol, valueParam: typeParam };
 };
 
@@ -145,7 +146,7 @@ const primeNoneTemplate = (
     typeArgs: [typeParamRef],
   });
   const type = ctx.arena.internIntersection({ nominal, structural });
-  ctx.objectTemplates.set(noneSymbol, {
+  ctx.objects.templates.set(noneSymbol, {
     symbol: noneSymbol,
     params: [{ symbol: typeParamSymbol, typeParam }],
     nominal,
@@ -154,7 +155,7 @@ const primeNoneTemplate = (
     fields: [],
     baseNominal: undefined,
   });
-  ctx.objectsByName.set("None", noneSymbol);
+  ctx.objects.byName.set("None", noneSymbol);
   return { noneSymbol };
 };
 
@@ -198,7 +199,7 @@ const primeBucketMapTemplate = (
     typeArgs: [keyRef, valueRef],
   });
   const type = ctx.arena.internIntersection({ nominal, structural });
-  ctx.objectTemplates.set(mapSymbol, {
+  ctx.objects.templates.set(mapSymbol, {
     symbol: mapSymbol,
     params: [
       { symbol: keyParamSymbol, typeParam: keyParam },
@@ -210,7 +211,7 @@ const primeBucketMapTemplate = (
     fields,
     baseNominal: undefined,
   });
-  ctx.objectsByName.set("BucketMap", mapSymbol);
+  ctx.objects.byName.set("BucketMap", mapSymbol);
   return { mapSymbol, valueParam };
 };
 
@@ -236,59 +237,62 @@ const primeAliasTemplate = (
     ast: 0,
     span: DUMMY_SPAN,
   };
-  ctx.typeAliasTemplates.set(aliasSymbol, {
+  ctx.typeAliases.templates.set(aliasSymbol, {
     symbol: aliasSymbol,
     params: [{ symbol: paramSymbol, constraint: options.constraint }],
     target,
   });
-  ctx.typeAliasTargets.set(aliasSymbol, target);
   return { aliasSymbol };
 };
 
 describe("instantiation argument handling", () => {
   it("does not cache unknown object instantiations", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
-    const unknownKey = `${boxSymbol}<${ctx.unknownType}>`;
+    const unknownKey = `${boxSymbol}<${ctx.primitives.unknown}>`;
 
-    const info = ensureObjectType(boxSymbol, ctx, [ctx.unknownType]);
+    const info = ensureObjectType(boxSymbol, ctx, state, [
+      ctx.primitives.unknown,
+    ]);
     expect(info).toBeDefined();
-    expect(ctx.objectInstances.has(unknownKey)).toBe(false);
-    expect(ctx.objectsByNominal.has(info?.nominal ?? -1)).toBe(false);
+    expect(ctx.objects.instances.has(unknownKey)).toBe(false);
+    expect(ctx.objects.byNominal.has(info?.nominal ?? -1)).toBe(false);
     expect(ctx.valueTypes.has(boxSymbol)).toBe(false);
 
-    const boolKey = `${boxSymbol}<${ctx.boolType}>`;
-    const concrete = ensureObjectType(boxSymbol, ctx, [ctx.boolType]);
-    expect(ctx.objectInstances.get(boolKey)).toEqual(concrete);
+    const boolKey = `${boxSymbol}<${ctx.primitives.bool}>`;
+    const concrete = ensureObjectType(boxSymbol, ctx, state, [
+      ctx.primitives.bool,
+    ]);
+    expect(ctx.objects.instances.get(boolKey)).toEqual(concrete);
     expect(ctx.valueTypes.get(boxSymbol)).toBe(concrete?.type);
   });
 
   it("throws for missing object type arguments in strict mode", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
-    ctx.typeCheckMode = "strict";
-    expect(() => ensureObjectType(boxSymbol, ctx, [])).toThrow(
+    state.mode = "strict";
+    expect(() => ensureObjectType(boxSymbol, ctx, state, [])).toThrow(
       /missing 1 type argument/
     );
   });
 
   it("fails when alias arguments are missing", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { aliasSymbol } = primeAliasTemplate(ctx, symbolTable);
 
-    expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow(
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [])).toThrow(
       /missing 1 type argument/
     );
 
-    ctx.typeCheckMode = "strict";
-    expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow(
+    state.mode = "strict";
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [])).toThrow(
       /missing 1 type argument/
     );
-    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(ctx.typeAliases.instances.size).toBe(0);
   });
 
   it("rejects aliases that resolve directly to themselves", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const aliasSymbol = symbolTable.declare({
       name: "Loop",
       kind: "type",
@@ -301,24 +305,23 @@ describe("instantiation argument handling", () => {
       ast: 0,
       span: DUMMY_SPAN,
     };
-    ctx.typeAliasTemplates.set(aliasSymbol, {
+    ctx.typeAliases.templates.set(aliasSymbol, {
       symbol: aliasSymbol,
       params: [],
       target,
     });
-    ctx.typeAliasTargets.set(aliasSymbol, target);
 
-    expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow(
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [])).toThrow(
       /cannot resolve to itself/
     );
-    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(ctx.typeAliases.instances.size).toBe(0);
     expect(
-      ctx.failedTypeAliasInstantiations.has(`${aliasSymbol}<>`)
+      ctx.typeAliases.failedInstantiations.has(`${aliasSymbol}<>`)
     ).toBe(true);
   });
 
   it("rejects pure alias cycles", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const aSymbol = symbolTable.declare({
       name: "A",
       kind: "type",
@@ -345,20 +348,18 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliasTemplates.set(aSymbol, { symbol: aSymbol, params: [], target: aTarget });
-    ctx.typeAliasTargets.set(aSymbol, aTarget);
-    ctx.typeAliasTemplates.set(bSymbol, { symbol: bSymbol, params: [], target: bTarget });
-    ctx.typeAliasTargets.set(bSymbol, bTarget);
+    ctx.typeAliases.templates.set(aSymbol, { symbol: aSymbol, params: [], target: aTarget });
+    ctx.typeAliases.templates.set(bSymbol, { symbol: bSymbol, params: [], target: bTarget });
 
-    expect(() => resolveTypeAlias(aSymbol, ctx, [])).toThrow(
+    expect(() => resolveTypeAlias(aSymbol, ctx, state, [])).toThrow(
       /cyclic type alias instantiation/
     );
-    expect(ctx.typeAliasInstances.size).toBe(0);
-    expect(ctx.failedTypeAliasInstantiations.has(`${aSymbol}<>`)).toBe(true);
+    expect(ctx.typeAliases.instances.size).toBe(0);
+    expect(ctx.typeAliases.failedInstantiations.has(`${aSymbol}<>`)).toBe(true);
   });
 
   it("rejects generic alias cycles", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const aParamSymbol = symbolTable.declare({
       name: "T",
       kind: "type",
@@ -413,32 +414,30 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliasTemplates.set(aSymbol, {
+    ctx.typeAliases.templates.set(aSymbol, {
       symbol: aSymbol,
       params: [{ symbol: aParamSymbol }],
       target: aTarget,
     });
-    ctx.typeAliasTargets.set(aSymbol, aTarget);
-    ctx.typeAliasTemplates.set(bSymbol, {
+    ctx.typeAliases.templates.set(bSymbol, {
       symbol: bSymbol,
       params: [{ symbol: bParamSymbol }],
       target: bTarget,
     });
-    ctx.typeAliasTargets.set(bSymbol, bTarget);
 
-    const boolType = ctx.primitiveCache.get("bool") ?? ctx.arena.internPrimitive("bool");
+    const boolType = ctx.primitives.cache.get("bool") ?? ctx.arena.internPrimitive("bool");
 
-    expect(() => resolveTypeAlias(aSymbol, ctx, [boolType])).toThrow(
+    expect(() => resolveTypeAlias(aSymbol, ctx, state, [boolType])).toThrow(
       /cyclic type alias instantiation/
     );
-    expect(ctx.typeAliasInstances.size).toBe(0);
-    expect(ctx.failedTypeAliasInstantiations.has(`${aSymbol}<${boolType}>`)).toBe(
+    expect(ctx.typeAliases.instances.size).toBe(0);
+    expect(ctx.typeAliases.failedInstantiations.has(`${aSymbol}<${boolType}>`)).toBe(
       true
     );
   });
 
   it("rejects non-contractive self recursion in aliases", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const aliasSymbol = symbolTable.declare({
       name: "Loop",
       kind: "type",
@@ -466,19 +465,18 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliasTemplates.set(aliasSymbol, {
+    ctx.typeAliases.templates.set(aliasSymbol, {
       symbol: aliasSymbol,
       params: [],
       target,
     });
-    ctx.typeAliasTargets.set(aliasSymbol, target);
 
-    expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow();
-    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [])).toThrow();
+    expect(ctx.typeAliases.instances.size).toBe(0);
   });
 
   it("rejects non-contractive generic alias recursion", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
     const paramSymbol = symbolTable.declare({
       name: "T",
@@ -520,21 +518,20 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliasTemplates.set(aliasSymbol, {
+    ctx.typeAliases.templates.set(aliasSymbol, {
       symbol: aliasSymbol,
       params: [{ symbol: paramSymbol }],
       target,
     });
-    ctx.typeAliasTargets.set(aliasSymbol, target);
 
-    expect(() => resolveTypeAlias(aliasSymbol, ctx, [ctx.boolType])).toThrow(
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [ctx.primitives.bool])).toThrow(
       /contractive/i
     );
-    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(ctx.typeAliases.instances.size).toBe(0);
   });
 
   it("rejects mutual generic recursion without guards", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const leftParamSymbol = symbolTable.declare({
       name: "L",
       kind: "type",
@@ -589,27 +586,25 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliasTemplates.set(leftSymbol, {
+    ctx.typeAliases.templates.set(leftSymbol, {
       symbol: leftSymbol,
       params: [{ symbol: leftParamSymbol }],
       target: leftTarget,
     });
-    ctx.typeAliasTargets.set(leftSymbol, leftTarget);
-    ctx.typeAliasTemplates.set(rightSymbol, {
+    ctx.typeAliases.templates.set(rightSymbol, {
       symbol: rightSymbol,
       params: [{ symbol: rightParamSymbol }],
       target: rightTarget,
     });
-    ctx.typeAliasTargets.set(rightSymbol, rightTarget);
 
-    expect(() => resolveTypeAlias(leftSymbol, ctx, [ctx.boolType])).toThrow(
+    expect(() => resolveTypeAlias(leftSymbol, ctx, state, [ctx.primitives.bool])).toThrow(
       /contractive|cyclic/i
     );
-    expect(ctx.typeAliasInstances.size).toBe(0);
+    expect(ctx.typeAliases.instances.size).toBe(0);
   });
 
   it("resolves recursive aliases through constructors", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
     const aliasSymbol = symbolTable.declare({
       name: "Rec",
@@ -646,14 +641,13 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliasTemplates.set(aliasSymbol, {
+    ctx.typeAliases.templates.set(aliasSymbol, {
       symbol: aliasSymbol,
       params: [],
       target,
     });
-    ctx.typeAliasTargets.set(aliasSymbol, target);
 
-    const resolved = resolveTypeAlias(aliasSymbol, ctx, []);
+    const resolved = resolveTypeAlias(aliasSymbol, ctx, state, []);
     const desc = ctx.arena.get(resolved);
     expect(desc.kind).toBe("union");
     if (desc.kind !== "union") {
@@ -671,11 +665,11 @@ describe("instantiation argument handling", () => {
       return false;
     });
     expect(boxedMember).toBeDefined();
-    expect(resolveTypeAlias(aliasSymbol, ctx, [])).toBe(resolved);
+    expect(resolveTypeAlias(aliasSymbol, ctx, state, [])).toBe(resolved);
   });
 
   it("resolves mutually recursive aliases", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
     const leftSymbol = symbolTable.declare({
       name: "Left",
@@ -739,24 +733,22 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliasTemplates.set(leftSymbol, {
+    ctx.typeAliases.templates.set(leftSymbol, {
       symbol: leftSymbol,
       params: [],
       target: leftTarget,
     });
-    ctx.typeAliasTargets.set(leftSymbol, leftTarget);
-    ctx.typeAliasTemplates.set(rightSymbol, {
+    ctx.typeAliases.templates.set(rightSymbol, {
       symbol: rightSymbol,
       params: [],
       target: rightTarget,
     });
-    ctx.typeAliasTargets.set(rightSymbol, rightTarget);
 
-    const leftAlias = resolveTypeAlias(leftSymbol, ctx, []);
-    const rightAlias = resolveTypeAlias(rightSymbol, ctx, []);
+    const leftAlias = resolveTypeAlias(leftSymbol, ctx, state, []);
+    const rightAlias = resolveTypeAlias(rightSymbol, ctx, state, []);
 
-    expect(ctx.typeAliasInstances.get(`${leftSymbol}<>`)).toBe(leftAlias);
-    expect(ctx.typeAliasInstances.get(`${rightSymbol}<>`)).toBe(rightAlias);
+    expect(ctx.typeAliases.instances.get(`${leftSymbol}<>`)).toBe(leftAlias);
+    expect(ctx.typeAliases.instances.get(`${rightSymbol}<>`)).toBe(rightAlias);
 
     const leftDesc = ctx.arena.get(leftAlias);
     const rightDesc = ctx.arena.get(rightAlias);
@@ -779,7 +771,7 @@ describe("instantiation argument handling", () => {
   });
 
   it("supports generic recursive aliases with explicit self arguments", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
     const typeParamSymbol = symbolTable.declare({
       name: "T",
@@ -821,22 +813,21 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliasTemplates.set(listSymbol, {
+    ctx.typeAliases.templates.set(listSymbol, {
       symbol: listSymbol,
       params: [{ symbol: typeParamSymbol }],
       target,
     });
-    ctx.typeAliasTargets.set(listSymbol, target);
 
-    const resolved = resolveTypeAlias(listSymbol, ctx, [ctx.boolType]);
-    const key = `${listSymbol}<${ctx.boolType}>`;
-    expect(ctx.typeAliasInstances.get(key)).toBe(resolved);
+    const resolved = resolveTypeAlias(listSymbol, ctx, state, [ctx.primitives.bool]);
+    const key = `${listSymbol}<${ctx.primitives.bool}>`;
+    expect(ctx.typeAliases.instances.get(key)).toBe(resolved);
     const desc = ctx.arena.get(resolved);
     expect(desc.kind).toBe("union");
   });
 
   it("resolves mutually recursive generic aliases", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
     const leftParamSymbol = symbolTable.declare({
       name: "L",
@@ -919,27 +910,25 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliasTemplates.set(leftSymbol, {
+    ctx.typeAliases.templates.set(leftSymbol, {
       symbol: leftSymbol,
       params: [{ symbol: leftParamSymbol }],
       target: leftTarget,
     });
-    ctx.typeAliasTargets.set(leftSymbol, leftTarget);
-    ctx.typeAliasTemplates.set(rightSymbol, {
+    ctx.typeAliases.templates.set(rightSymbol, {
       symbol: rightSymbol,
       params: [{ symbol: rightParamSymbol }],
       target: rightTarget,
     });
-    ctx.typeAliasTargets.set(rightSymbol, rightTarget);
 
     const intType =
-      ctx.primitiveCache.get("i32") ?? ctx.arena.internPrimitive("i32");
-    const leftAlias = resolveTypeAlias(leftSymbol, ctx, [intType]);
-    const rightAlias = resolveTypeAlias(rightSymbol, ctx, [intType]);
-    expect(ctx.typeAliasInstances.get(`${leftSymbol}<${intType}>`)).toBe(
+      ctx.primitives.cache.get("i32") ?? ctx.arena.internPrimitive("i32");
+    const leftAlias = resolveTypeAlias(leftSymbol, ctx, state, [intType]);
+    const rightAlias = resolveTypeAlias(rightSymbol, ctx, state, [intType]);
+    expect(ctx.typeAliases.instances.get(`${leftSymbol}<${intType}>`)).toBe(
       leftAlias
     );
-    expect(ctx.typeAliasInstances.get(`${rightSymbol}<${intType}>`)).toBe(
+    expect(ctx.typeAliases.instances.get(`${rightSymbol}<${intType}>`)).toBe(
       rightAlias
     );
 
@@ -962,25 +951,25 @@ describe("instantiation argument handling", () => {
   });
 
   it("enforces object generic constraints before caching instantiations", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const valueConstraint = ctx.arena.internStructuralObject({
-      fields: [{ name: "value", type: ctx.boolType }],
+      fields: [{ name: "value", type: ctx.primitives.bool }],
     });
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable, valueConstraint);
 
-    expect(() => ensureObjectType(boxSymbol, ctx, [ctx.boolType])).toThrow(
+    expect(() => ensureObjectType(boxSymbol, ctx, state, [ctx.primitives.bool])).toThrow(
       /constraint/
     );
 
     const payload = ctx.arena.internStructuralObject({
-      fields: [{ name: "value", type: ctx.boolType }],
+      fields: [{ name: "value", type: ctx.primitives.bool }],
     });
-    const info = ensureObjectType(boxSymbol, ctx, [payload]);
+    const info = ensureObjectType(boxSymbol, ctx, state, [payload]);
     expect(info?.type).toBeDefined();
   });
 
   it("rejects alias instantiation when constraints fail", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const constraint: HirTypeExpr = {
       typeKind: "object",
       fields: [
@@ -1002,45 +991,46 @@ describe("instantiation argument handling", () => {
       constraint,
     });
 
-    expect(() => resolveTypeAlias(aliasSymbol, ctx, [ctx.boolType])).toThrow(
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [ctx.primitives.bool])).toThrow(
       /constraint/
     );
 
     const i32 =
-      ctx.primitiveCache.get("i32") ?? ctx.arena.internPrimitive("i32");
+      ctx.primitives.cache.get("i32") ?? ctx.arena.internPrimitive("i32");
     const valid = ctx.arena.internStructuralObject({
       fields: [{ name: "value", type: i32 }],
     });
-    const resolved = resolveTypeAlias(aliasSymbol, ctx, [valid]);
+    const resolved = resolveTypeAlias(aliasSymbol, ctx, state, [valid]);
     expect(resolved).toBe(valid);
   });
 
   it("tracks declaring params on generic fields and blocks unsubstituted access", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
 
-    const template = getObjectTemplate(boxSymbol, ctx);
+    const template = getObjectTemplate(boxSymbol, ctx, state);
     expect(template?.fields[0]?.declaringParams).toEqual(
       template ? [template.params[0]!.typeParam] : []
     );
 
-    expect(() => getStructuralFields(template?.structural ?? -1, ctx)).toThrow(
+    expect(() => getStructuralFields(template?.structural ?? -1, ctx, state)).toThrow(
       /substitutions|type argument/i
     );
 
-    const instantiated = ensureObjectType(boxSymbol, ctx, [ctx.boolType]);
-    expect(instantiated?.fields[0]?.type).toBe(ctx.boolType);
+    const instantiated = ensureObjectType(boxSymbol, ctx, state, [ctx.primitives.bool]);
+    expect(instantiated?.fields[0]?.type).toBe(ctx.primitives.bool);
     const structuralFields = getStructuralFields(
       instantiated?.structural ?? -1,
-      ctx
+      ctx,
+      state
     );
     expect(
       structuralFields?.find((field) => field.name === "value")?.type
-    ).toBe(ctx.boolType);
+    ).toBe(ctx.primitives.bool);
   });
 
   it("prevents payload drift for fields annotated with declaring type params", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { someSymbol } = primeSomeTemplate(ctx, symbolTable);
     const { mapSymbol, valueParam: mapValueParam } = primeBucketMapTemplate(
       ctx,
@@ -1048,18 +1038,18 @@ describe("instantiation argument handling", () => {
       someSymbol
     );
 
-    const mapInfo = ensureObjectType(mapSymbol, ctx, [
-      ctx.boolType,
-      ctx.unknownType,
+    const mapInfo = ensureObjectType(mapSymbol, ctx, state, [
+      ctx.primitives.bool,
+      ctx.primitives.unknown,
     ]);
     const payloadField = mapInfo?.fields.find(
       (field) => field.name === "payload"
     );
     expect(payloadField?.declaringParams).toEqual([mapValueParam]);
 
-    const concrete = ensureObjectType(mapSymbol, ctx, [
-      ctx.boolType,
-      ctx.boolType,
+    const concrete = ensureObjectType(mapSymbol, ctx, state, [
+      ctx.primitives.bool,
+      ctx.primitives.bool,
     ]);
     const concretePayload = concrete?.fields.find(
       (field) => field.name === "payload"
@@ -1070,20 +1060,20 @@ describe("instantiation argument handling", () => {
     }
 
     const stringType =
-      ctx.primitiveCache.get("string") ?? ctx.arena.internPrimitive("string");
+      ctx.primitives.cache.get("string") ?? ctx.arena.internPrimitive("string");
     const mismatchedPayload = ctx.arena.internNominalObject({
       owner: someSymbol,
       name: "Some",
       typeArgs: [stringType],
     });
 
-    expect(typeSatisfies(mismatchedPayload, concretePayload.type, ctx)).toBe(
+    expect(typeSatisfies(mismatchedPayload, concretePayload.type, ctx, state)).toBe(
       false
     );
   });
 
   it("allows guarded recursive aliases", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
     const aliasSymbol = symbolTable.declare({
       name: "Guarded",
@@ -1120,20 +1110,19 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliasTemplates.set(aliasSymbol, {
+    ctx.typeAliases.templates.set(aliasSymbol, {
       symbol: aliasSymbol,
       params: [],
       target,
     });
-    ctx.typeAliasTargets.set(aliasSymbol, target);
 
-    const resolved = resolveTypeAlias(aliasSymbol, ctx, []);
+    const resolved = resolveTypeAlias(aliasSymbol, ctx, state, []);
     expect(resolved).toBeDefined();
-    expect(ctx.typeAliasInstances.get(`${aliasSymbol}<>`)).toBe(resolved);
+    expect(ctx.typeAliases.instances.get(`${aliasSymbol}<>`)).toBe(resolved);
   });
 
   it("allows guarded generic recursion across constructors", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const { boxSymbol } = primeBoxTemplate(ctx, symbolTable);
     const { noneSymbol } = primeNoneTemplate(ctx, symbolTable);
     const typeParamSymbol = symbolTable.declare({
@@ -1184,22 +1173,21 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliasTemplates.set(listSymbol, {
+    ctx.typeAliases.templates.set(listSymbol, {
       symbol: listSymbol,
       params: [{ symbol: typeParamSymbol }],
       target,
     });
-    ctx.typeAliasTargets.set(listSymbol, target);
 
-    const resolved = resolveTypeAlias(listSymbol, ctx, [ctx.boolType]);
+    const resolved = resolveTypeAlias(listSymbol, ctx, state, [ctx.primitives.bool]);
     expect(resolved).toBeDefined();
-    expect(ctx.typeAliasInstances.get(`${listSymbol}<${ctx.boolType}>`)).toBe(
+    expect(ctx.typeAliases.instances.get(`${listSymbol}<${ctx.primitives.bool}>`)).toBe(
       resolved
     );
   });
 
   it("keeps contractiveness checks active across repeated instantiations", () => {
-    const { ctx, symbolTable } = createContext();
+    const { ctx, state, symbolTable } = createContext();
     const aliasSymbol = symbolTable.declare({
       name: "Repeat",
       kind: "type",
@@ -1212,33 +1200,32 @@ describe("instantiation argument handling", () => {
       ast: 0,
       span: DUMMY_SPAN,
     };
-    ctx.typeAliasTemplates.set(aliasSymbol, {
+    ctx.typeAliases.templates.set(aliasSymbol, {
       symbol: aliasSymbol,
       params: [],
       target: aliasRef,
     });
-    ctx.typeAliasTargets.set(aliasSymbol, aliasRef);
 
-    expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow();
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [])).toThrow();
     const cacheKey = `${aliasSymbol}<>`;
-    expect(ctx.typeAliasInstances.has(cacheKey)).toBe(false);
-    expect(() => resolveTypeAlias(aliasSymbol, ctx, [])).toThrow();
-    expect(ctx.typeAliasInstances.has(cacheKey)).toBe(false);
+    expect(ctx.typeAliases.instances.has(cacheKey)).toBe(false);
+    expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [])).toThrow();
+    expect(ctx.typeAliases.instances.has(cacheKey)).toBe(false);
   });
 
   it("unifies composite types with variance-aware substitutions", () => {
-    const { ctx } = createContext();
+    const { ctx, state } = createContext();
     const param = ctx.arena.freshTypeParam();
     const paramRef = ctx.arena.internTypeParamRef(param);
     const genericFn = ctx.arena.internFunction({
       parameters: [{ type: paramRef, optional: false }],
-      returnType: ctx.arena.internUnion([paramRef, ctx.voidType]),
-      effects: ctx.defaultEffectRow,
+      returnType: ctx.arena.internUnion([paramRef, ctx.primitives.void]),
+      effects: ctx.primitives.defaultEffectRow,
     });
     const concreteFn = ctx.arena.internFunction({
-      parameters: [{ type: ctx.boolType, optional: false }],
-      returnType: ctx.arena.internUnion([ctx.boolType, ctx.voidType]),
-      effects: ctx.defaultEffectRow,
+      parameters: [{ type: ctx.primitives.bool, optional: false }],
+      returnType: ctx.arena.internUnion([ctx.primitives.bool, ctx.primitives.void]),
+      effects: ctx.primitives.defaultEffectRow,
     });
 
     const result = ctx.arena.unify(concreteFn, genericFn, {
@@ -1247,6 +1234,6 @@ describe("instantiation argument handling", () => {
       variance: "covariant",
     });
     expect(result.ok).toBe(true);
-    expect(result.ok && result.substitution.get(param)).toBe(ctx.boolType);
+    expect(result.ok && result.substitution.get(param)).toBe(ctx.primitives.bool);
   });
 });
