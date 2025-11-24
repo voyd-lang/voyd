@@ -7,7 +7,12 @@ import type {
 } from "../hir/index.js";
 import type { SymbolId, TypeId, TypeParamId } from "../ids.js";
 import type { StructuralField } from "./type-arena.js";
-import { BASE_OBJECT_NAME, type TypingContext, type ObjectTemplate, type ObjectTypeInfo } from "./types.js";
+import {
+  BASE_OBJECT_NAME,
+  type TypingContext,
+  type ObjectTemplate,
+  type ObjectTypeInfo,
+} from "./types.js";
 import {
   normalizeTypeArgs,
   shouldCacheInstantiation,
@@ -47,8 +52,8 @@ const paramsReferencedInType = (
     case "function": {
       const acc = new Set<TypeParamId>();
       desc.parameters.forEach((param) =>
-        paramsReferencedInType(param.type, allowed, ctx, seen).forEach((entry) =>
-          acc.add(entry)
+        paramsReferencedInType(param.type, allowed, ctx, seen).forEach(
+          (entry) => acc.add(entry)
         )
       );
       paramsReferencedInType(desc.returnType, allowed, ctx, seen).forEach(
@@ -208,6 +213,173 @@ const containsTypeParam = (
   }
 };
 
+const containsAliasSelfUnguarded = (
+  type: TypeId,
+  aliasSymbol: SymbolId,
+  aliasRoot: TypeId,
+  ctx: TypingContext,
+  guarded: boolean,
+  seen: Set<string> = new Set(),
+  isRoot = false
+): boolean => {
+  const isAliasInstance = (): boolean => {
+    if (type === aliasRoot) {
+      return true;
+    }
+    const activeKey = ctx.resolvingTypeAliasKeysById.get(type);
+    if (typeof activeKey === "string") {
+      const separator = activeKey.indexOf("<");
+      const activeSymbol =
+        separator === -1 ? Number.NaN : Number(activeKey.slice(0, separator));
+      if (activeSymbol === aliasSymbol) {
+        return true;
+      }
+    }
+    const symbols = ctx.typeAliasInstanceSymbols.get(type);
+    return symbols?.has(aliasSymbol) ?? false;
+  };
+
+  const seenKey = `${type}:${guarded ? "g" : "u"}`;
+  if (seen.has(seenKey)) {
+    return false;
+  }
+  seen.add(seenKey);
+
+  if (isAliasInstance() && !isRoot) {
+    return !guarded;
+  }
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "primitive":
+    case "type-param-ref":
+      return false;
+    case "trait":
+      return desc.typeArgs.some((arg) =>
+        containsAliasSelfUnguarded(arg, aliasSymbol, aliasRoot, ctx, true, seen)
+      );
+    case "nominal-object":
+      return desc.typeArgs.some((arg) =>
+        containsAliasSelfUnguarded(arg, aliasSymbol, aliasRoot, ctx, true, seen)
+      );
+    case "structural-object":
+      return desc.fields.some((field) =>
+        containsAliasSelfUnguarded(
+          field.type,
+          aliasSymbol,
+          aliasRoot,
+          ctx,
+          true,
+          seen
+        )
+      );
+    case "function":
+      return (
+        desc.parameters.some((paramDesc) =>
+          containsAliasSelfUnguarded(
+            paramDesc.type,
+            aliasSymbol,
+            aliasRoot,
+            ctx,
+            guarded,
+            seen
+          )
+        ) ||
+        containsAliasSelfUnguarded(
+          desc.returnType,
+          aliasSymbol,
+          aliasRoot,
+          ctx,
+          guarded,
+          seen
+        )
+      );
+    case "union":
+      return desc.members.some((member) =>
+        containsAliasSelfUnguarded(
+          member,
+          aliasSymbol,
+          aliasRoot,
+          ctx,
+          guarded,
+          seen
+        )
+      );
+    case "intersection":
+      return (
+        (typeof desc.nominal === "number" &&
+          containsAliasSelfUnguarded(
+            desc.nominal,
+            aliasSymbol,
+            aliasRoot,
+            ctx,
+            guarded,
+            seen
+          )) ||
+        (typeof desc.structural === "number" &&
+          containsAliasSelfUnguarded(
+            desc.structural,
+            aliasSymbol,
+            aliasRoot,
+            ctx,
+            guarded,
+            seen
+          ))
+      );
+    case "fixed-array":
+      return containsAliasSelfUnguarded(
+        desc.element,
+        aliasSymbol,
+        aliasRoot,
+        ctx,
+        true,
+        seen
+      );
+    default:
+      return false;
+  }
+};
+
+const recordAliasInstanceSymbol = (
+  type: TypeId,
+  symbol: SymbolId,
+  ctx: TypingContext
+): void => {
+  const existing = ctx.typeAliasInstanceSymbols.get(type);
+  if (existing) {
+    existing.add(symbol);
+    return;
+  }
+  ctx.typeAliasInstanceSymbols.set(type, new Set([symbol]));
+};
+
+const assertAliasContractive = ({
+  type,
+  aliasSymbol,
+  aliasName,
+  ctx,
+}: {
+  type: TypeId;
+  aliasSymbol: SymbolId;
+  aliasName: string;
+  ctx: TypingContext;
+}): void => {
+  recordAliasInstanceSymbol(type, aliasSymbol, ctx);
+  if (
+    containsAliasSelfUnguarded(
+      type,
+      aliasSymbol,
+      type,
+      ctx,
+      false,
+      undefined,
+      true
+    )
+  ) {
+    throw new Error(`type alias ${aliasName} is not contractive`);
+  }
+};
+
 const ensureFieldsSubstituted = (
   fields: readonly StructuralField[],
   ctx: TypingContext,
@@ -306,9 +478,7 @@ export const resolveTypeAlias = (
       : undefined);
 
   if (!template) {
-    throw new Error(
-      `missing type alias target for ${aliasName}`
-    );
+    throw new Error(`missing type alias target for ${aliasName}`);
   }
 
   const normalized = normalizeTypeArgs({
@@ -331,11 +501,20 @@ export const resolveTypeAlias = (
     throw new Error(`type alias ${aliasName} instantiation previously failed`);
   }
 
-  if (cacheable) {
-    const cached = ctx.typeAliasInstances.get(key);
-    if (typeof cached === "number") {
-      return cached;
+  const cached = cacheable ? ctx.typeAliasInstances.get(key) : undefined;
+  if (typeof cached === "number") {
+    if (!ctx.validatedTypeAliasInstances.has(key)) {
+      assertAliasContractive({
+        type: cached,
+        aliasSymbol: symbol,
+        aliasName,
+        ctx,
+      });
+      ctx.validatedTypeAliasInstances.add(key);
+    } else {
+      recordAliasInstanceSymbol(cached, symbol, ctx);
     }
+    return cached;
   }
 
   const active = ctx.resolvingTypeAliases.get(key);
@@ -390,14 +569,10 @@ export const resolveTypeAlias = (
         paramMap
       );
       if (targetType === self) {
-        throw new Error(
-          `type alias ${aliasName} cannot resolve to itself`
-        );
+        throw new Error(`type alias ${aliasName} cannot resolve to itself`);
       }
       if (containsUnknownType(targetType, ctx)) {
-        throw new Error(
-          `type alias ${aliasName} could not be fully resolved`
-        );
+        throw new Error(`type alias ${aliasName} could not be fully resolved`);
       }
       return ctx.arena.get(targetType);
     });
@@ -409,9 +584,17 @@ export const resolveTypeAlias = (
       throw new Error("cyclic type alias instantiation");
     }
 
+    assertAliasContractive({
+      type: resolved,
+      aliasSymbol: symbol,
+      aliasName,
+      ctx,
+    });
+
     const canCacheNow = cacheable && ctx.resolvingTypeAliases.size === 1;
     if (canCacheNow) {
       ctx.typeAliasInstances.set(key, resolved);
+      ctx.validatedTypeAliasInstances.add(key);
     }
     return resolved;
   } catch (error) {
@@ -443,8 +626,7 @@ const resolveNamedTypeExpr = (
 
   const typeParamMap = typeParams ?? ctx.currentTypeParams;
   const aliasSymbol =
-    (typeof expr.symbol === "number" &&
-    ctx.typeAliasTemplates.has(expr.symbol)
+    (typeof expr.symbol === "number" && ctx.typeAliasTemplates.has(expr.symbol)
       ? expr.symbol
       : undefined) ?? ctx.typeAliasesByName.get(name);
   const normalizeAliasArgs =
@@ -679,16 +861,14 @@ export const getObjectTemplate = (
       return {
         name: field.name,
         type,
-        declaringParams: declaringParamsForField(
-          type,
-          templateParams,
-          ctx
-        ),
+        declaringParams: declaringParamsForField(type, templateParams, ctx),
       };
     });
 
     if (baseFields.length > 0) {
-      const declaredFields = new Map(ownFields.map((field) => [field.name, field]));
+      const declaredFields = new Map(
+        ownFields.map((field) => [field.name, field])
+      );
       baseFields.forEach((baseField) => {
         const declared = declaredFields.get(baseField.name);
         if (!declared) {
@@ -768,7 +948,9 @@ export const ensureObjectType = (
 
   if (normalized.missingCount > 0 && ctx.typeCheckMode === "strict") {
     throw new Error(
-      `object ${getSymbolName(symbol, ctx)} is missing ${normalized.missingCount} type argument(s)`
+      `object ${getSymbolName(symbol, ctx)} is missing ${
+        normalized.missingCount
+      } type argument(s)`
     );
   }
 
@@ -926,33 +1108,29 @@ export const nominalSatisfies = (
       return false;
     }
     return expectedDesc.typeArgs.every((expectedArg, index) => {
-    if (expectedArg === ctx.unknownType) {
-      return true;
-    }
-    const result = ctx.arena.unify(
-      actualDesc.typeArgs[index]!,
-        expectedArg,
-        {
-          location: ctx.hir.module.ast,
-          reason: "type argument compatibility",
-          variance: "covariant",
-        }
-    );
-    if (result.ok) {
-      return true;
-    }
-    if (
-      ctx.typeCheckMode === "relaxed" &&
-      actualDesc.typeArgs[index] === ctx.unknownType
-    ) {
-      return true;
-    }
-    if (ctx.typeCheckMode === "relaxed") {
-      return typeSatisfies(actualDesc.typeArgs[index]!, expectedArg, ctx);
-    }
-    return false;
-  });
-}
+      if (expectedArg === ctx.unknownType) {
+        return true;
+      }
+      const result = ctx.arena.unify(actualDesc.typeArgs[index]!, expectedArg, {
+        location: ctx.hir.module.ast,
+        reason: "type argument compatibility",
+        variance: "covariant",
+      });
+      if (result.ok) {
+        return true;
+      }
+      if (
+        ctx.typeCheckMode === "relaxed" &&
+        actualDesc.typeArgs[index] === ctx.unknownType
+      ) {
+        return true;
+      }
+      if (ctx.typeCheckMode === "relaxed") {
+        return typeSatisfies(actualDesc.typeArgs[index]!, expectedArg, ctx);
+      }
+      return false;
+    });
+  }
 
   if (seen.has(actual)) {
     return false;
@@ -976,11 +1154,7 @@ export const getStructuralFields = (
 
   const desc = ctx.arena.get(type);
   if (desc.kind === "structural-object") {
-    ensureFieldsSubstituted(
-      desc.fields,
-      ctx,
-      "structural object access"
-    );
+    ensureFieldsSubstituted(desc.fields, ctx, "structural object access");
     return desc.fields;
   }
 
@@ -1193,15 +1367,11 @@ const nominalInstantiationMatches = (
       !expectedDesc.typeArgs.some((arg) => containsUnknownType(arg, ctx))
     ) {
       const compatibleArgs = currentDesc.typeArgs.every((arg, index) => {
-        const comparison = ctx.arena.unify(
-          arg,
-          expectedDesc.typeArgs[index]!,
-          {
-            location: ctx.hir.module.ast,
-            reason: "nominal instantiation comparison",
-            variance: "covariant",
-          }
-        );
+        const comparison = ctx.arena.unify(arg, expectedDesc.typeArgs[index]!, {
+          location: ctx.hir.module.ast,
+          reason: "nominal instantiation comparison",
+          variance: "invariant",
+        });
         return comparison.ok;
       });
       if (compatibleArgs) {
@@ -1223,10 +1393,7 @@ const unionMemberMatchesPattern = (
 ): boolean => {
   const patternNominal = getNominalComponent(patternType, ctx);
   const memberNominal = getNominalComponent(member, ctx);
-  if (
-    typeof patternNominal === "number" &&
-    typeof memberNominal === "number"
-  ) {
+  if (typeof patternNominal === "number" && typeof memberNominal === "number") {
     return nominalInstantiationMatches(memberNominal, patternNominal, ctx);
   }
   return typeSatisfies(member, patternType, ctx);

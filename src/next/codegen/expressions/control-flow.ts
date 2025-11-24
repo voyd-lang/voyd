@@ -20,6 +20,7 @@ import {
   getStructuralTypeInfo,
   getMatchPatternTypeId,
 } from "../types.js";
+import { getNominalComponent } from "../../semantics/typing/type-system.js";
 
 export const compileIfExpr = (
   expr: HirIfExpr,
@@ -97,6 +98,30 @@ export const compileMatchExpr = (
     fnCtx,
   }).expr;
 
+  const duplicateNominals = (() => {
+    const seen = new Set<TypeId>();
+    const dupes = new Set<TypeId>();
+    expr.arms.forEach((arm) => {
+      if (arm.pattern.kind !== "type") {
+        return;
+      }
+      const typeId = getMatchPatternTypeId(arm.pattern, ctx);
+      if (typeof typeId !== "number") {
+        return;
+      }
+      const nominals = new Set<TypeId>();
+      collectNominalComponents(typeId, ctx, nominals);
+      nominals.forEach((nominal) => {
+        if (seen.has(nominal)) {
+          dupes.add(nominal);
+        } else {
+          seen.add(nominal);
+        }
+      });
+    });
+    return dupes;
+  })();
+
   const initDiscriminant = ctx.mod.local.set(
     discriminantTemp.index,
     discriminantValue
@@ -125,7 +150,8 @@ export const compileMatchExpr = (
     const condition = compileMatchCondition(
       arm.pattern,
       discriminantTemp,
-      ctx
+      ctx,
+      duplicateNominals
     );
     const fallback =
       chain ??
@@ -158,9 +184,15 @@ export const compileMatchExpr = (
 const compileMatchCondition = (
   pattern: HirPattern & { kind: "type" },
   discriminant: LocalBinding,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  duplicateNominals: ReadonlySet<TypeId>
 ): binaryen.ExpressionRef => {
   const patternTypeId = getMatchPatternTypeId(pattern, ctx);
+  const patternNominals = new Set<TypeId>();
+  collectNominalComponents(patternTypeId, ctx, patternNominals);
+  const useStrict = Array.from(patternNominals).some((nominal) =>
+    duplicateNominals.has(nominal)
+  );
   const makeAncestors = () =>
     structGetFieldValue({
       mod: ctx.mod,
@@ -176,7 +208,7 @@ const compileMatchCondition = (
     }
 
     return ctx.mod.call(
-      "__extends",
+      useStrict ? "__has_type" : "__extends",
       [ctx.mod.i32.const(structInfo.typeId), makeAncestors()],
       binaryen.i32
     );
@@ -243,4 +275,21 @@ export const compileWhileExpr = (
     ),
     usedReturnCall: false,
   };
+};
+const collectNominalComponents = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+  acc: Set<TypeId>
+): void => {
+  const nominal = getNominalComponent(typeId, ctx.typing);
+  if (typeof nominal === "number") {
+    acc.add(nominal);
+    return;
+  }
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind === "union") {
+    desc.members.forEach((member) =>
+      collectNominalComponents(member, ctx, acc)
+    );
+  }
 };

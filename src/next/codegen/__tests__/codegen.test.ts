@@ -188,6 +188,21 @@ describe("next codegen", () => {
     expect((main as () => number)()).toBe(3);
   });
 
+  it("dispatches matches without widening runtime instantiations", () => {
+    const instance = loadWasmInstance("alias_runtime_match.voyd");
+
+    const matchNarrow = instance.exports.match_narrow;
+    const matchWide = instance.exports.match_wide;
+    const main = instance.exports.main;
+
+    expect(typeof matchNarrow).toBe("function");
+    expect(typeof matchWide).toBe("function");
+    expect(typeof main).toBe("function");
+    expect((matchNarrow as () => number)()).toBe(3);
+    expect((matchWide as () => number)()).toBe(7);
+    expect((main as () => number)()).toBe(37);
+  });
+
   it("uses explicit generic instantiations during codegen", () => {
     const main = loadMain("explicit_generic_instantiation.voyd");
     expect(main()).toBe(7);
