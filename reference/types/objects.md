@@ -150,6 +150,37 @@ pet_structural({ name: "Whiskers" })
 pet_structural(Cat { name: "Whiskers", lives_remaining: 9 })
 ```
 
+## Assignment and Compatibility
+
+voyd blends nominal and structural typing. Assignments and parameter checks
+follow these rules:
+
+- When the expected type is structural (an inline object type or the base `Object`), any object with the required fields is accepted. Nominal objects carry a structural component, so they satisfy structural expectations.
+- When the expected type is nominal, the actual value must come from the same nominal object (including compatible type arguments). Having the same fields is not enough.
+- The base `Object` is the only nominal type that also accepts purely structural objects.
+- `unknown` is permissive during relaxed inference (it satisfies any expectation) but rejected during the strict pass if it remains on either side of a comparison.
+
+```voyd
+obj Person {
+  id: i32
+}
+
+fn take_person(person: Person) -> i32
+  person.id
+
+fn take_shape(shape: { id: i32 }) -> i32
+  shape.id
+
+let named = Person { id: 3 }
+
+take_person(named) // Ok - nominal identity matches
+take_shape(named) // Ok - nominal supplies its structural fields
+
+take_person({ id: 3 }) // Error - structural object cannot satisfy Person
+
+let base: Object = { any: 1 } // Ok - structural types satisfy Object
+```
+
 
 ## Nominal Object Initializers
 
