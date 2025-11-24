@@ -1,19 +1,22 @@
 import type { HirFunction } from "../hir/index.js";
 import { ensureTypeMatches } from "./type-system.js";
-import type { FunctionSignature, TypingContext } from "./types.js";
+import type { FunctionSignature, TypingContext, TypingState } from "./types.js";
 import { formatFunctionInstanceKey, typeExpression } from "./expressions.js";
 
-export const runInferencePass = (ctx: TypingContext): void => {
-  ctx.typeCheckMode = "relaxed";
+export const runInferencePass = (
+  ctx: TypingContext,
+  state: TypingState
+): void => {
+  state.mode = "relaxed";
   let changed: boolean;
   do {
     clearFunctionInstances(ctx);
     ctx.table.clearExprTypes();
     ctx.resolvedExprTypes.clear();
-    changed = typeAllFunctions(ctx, { collectChanges: true });
+    changed = typeAllFunctions(ctx, state, { collectChanges: true });
   } while (changed);
 
-  const unresolved = Array.from(ctx.functionSignatures.entries()).filter(
+  const unresolved = Array.from(ctx.functions.signatures).filter(
     ([, signature]) => !signature.hasExplicitReturn
   );
   if (unresolved.length > 0) {
@@ -24,16 +27,20 @@ export const runInferencePass = (ctx: TypingContext): void => {
   }
 };
 
-export const runStrictTypeCheck = (ctx: TypingContext): void => {
-  ctx.typeCheckMode = "strict";
+export const runStrictTypeCheck = (
+  ctx: TypingContext,
+  state: TypingState
+): void => {
+  state.mode = "strict";
   clearFunctionInstances(ctx);
   ctx.table.clearExprTypes();
   ctx.resolvedExprTypes.clear();
-  typeAllFunctions(ctx, { collectChanges: false });
+  typeAllFunctions(ctx, state, { collectChanges: false });
 };
 
 export const typeAllFunctions = (
   ctx: TypingContext,
+  state: TypingState,
   options: { collectChanges: boolean }
 ): boolean => {
   let changed = false;
@@ -42,7 +49,7 @@ export const typeAllFunctions = (
     if (item.typeParameters && item.typeParameters.length > 0) {
       continue;
     }
-    const updated = typeFunction(item, ctx);
+    const updated = typeFunction(item, ctx, state);
     if (options.collectChanges) {
       changed = updated || changed;
     }
@@ -50,8 +57,12 @@ export const typeAllFunctions = (
   return options.collectChanges ? changed : false;
 };
 
-const typeFunction = (fn: HirFunction, ctx: TypingContext): boolean => {
-  const signature = ctx.functionSignatures.get(fn.symbol);
+const typeFunction = (
+  fn: HirFunction,
+  ctx: TypingContext,
+  state: TypingState
+): boolean => {
+  const signature = ctx.functions.getSignature(fn.symbol);
   if (!signature) {
     throw new Error(`missing type signature for function symbol ${fn.symbol}`);
   }
@@ -60,28 +71,31 @@ const typeFunction = (fn: HirFunction, ctx: TypingContext): boolean => {
     return false;
   }
 
-  const previousReturnType = ctx.currentFunctionReturnType;
-  const previousInstanceKey = ctx.currentFunctionInstanceKey;
-  ctx.currentFunctionReturnType = signature.returnType;
-  ctx.currentFunctionInstanceKey = formatFunctionInstanceKey(fn.symbol, []);
+  const previousFunction = state.currentFunction;
+  state.currentFunction = {
+    returnType: signature.returnType,
+    instanceKey: formatFunctionInstanceKey(fn.symbol, []),
+    typeParams: undefined,
+    substitution: undefined,
+  };
   let bodyType;
   try {
-    bodyType = typeExpression(fn.body, ctx);
+    bodyType = typeExpression(fn.body, ctx, state);
   } finally {
-    ctx.currentFunctionReturnType = previousReturnType;
-    ctx.currentFunctionInstanceKey = previousInstanceKey;
+    state.currentFunction = previousFunction;
   }
   if (signature.hasExplicitReturn) {
     ensureTypeMatches(
       bodyType,
       signature.returnType,
       ctx,
+      state,
       `function ${ctx.symbolTable.getSymbol(fn.symbol).name} return type`
     );
     return false;
   }
 
-  if (bodyType === ctx.unknownType) {
+  if (bodyType === ctx.primitives.unknown) {
     return false;
   }
 
@@ -90,12 +104,9 @@ const typeFunction = (fn: HirFunction, ctx: TypingContext): boolean => {
 };
 
 const clearFunctionInstances = (ctx: TypingContext): void => {
-  ctx.functionInstances.clear();
-  ctx.activeFunctionInstantiations.clear();
-  ctx.callTypeArguments.clear();
-  ctx.callInstanceKeys.clear();
-  ctx.functionInstantiationInfo.clear();
-  ctx.functionInstanceExprTypes.clear();
+  ctx.functions.resetInstances();
+  ctx.callResolution.typeArguments.clear();
+  ctx.callResolution.instanceKeys.clear();
 };
 
 const finalizeFunctionReturnType = (
@@ -112,7 +123,7 @@ const finalizeFunctionReturnType = (
       optional: false,
     })),
     returnType: inferred,
-    effects: ctx.defaultEffectRow,
+    effects: ctx.primitives.defaultEffectRow,
   });
   signature.typeId = functionType;
   ctx.valueTypes.set(fn.symbol, functionType);

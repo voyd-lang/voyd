@@ -25,10 +25,10 @@ You should generally add unit tests (especially e2e ones like those in
 
 # Style Guide
 
-- Prefer functional pipelines for general logic; use classes when encapsulating shared state or factory-style behavior
 - Keep functions small
 - Prefer early returns to else ifs
 - Use `const` whenever possible
 - Use ternary conditionals for conditional variable init
+- Prefer functional control flow (`map`, `filter`, etc) to imperative loop constructs.
 - Files should be ordered by importance. The main export of a file at the top.
 - Use a single parameter object for functions containing more than three params to name the parameters on call.

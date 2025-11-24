@@ -108,6 +108,10 @@ export interface UnificationContext {
   reason: string;
   variance?: Variance;
   constraints?: ReadonlyMap<TypeParamId, ConstraintSet>;
+  // When true, the "unknown" primitive is treated as compatible with any type during unification.
+  allowUnknown?: boolean;
+  // Optional projector to normalize types (e.g. to structural components) before comparison.
+  structuralResolver?: (type: TypeId) => TypeId | undefined;
 }
 
 export type UnificationResult =
@@ -362,7 +366,11 @@ export const createTypeArena = (): TypeArena => {
     ctx: UnificationContext
   ): UnificationResult => {
     const variance: Variance = ctx.variance ?? "invariant";
+    // unknown can be treated as a wildcard when explicitly allowed.
+    const allowUnknown = ctx.allowUnknown ?? true;
     const constraintMap = ctx.constraints;
+    // Used to project types (often nominal expectations) into a structural shape before inspection.
+    const structuralResolver = ctx.structuralResolver;
     const seen = new Set<string>();
 
     const success = (substitution: Substitution): UnificationResult => ({
@@ -752,6 +760,15 @@ export const createTypeArena = (): TypeArena => {
       );
     };
 
+    const normalizeStructural = (type: TypeId): TypeId => {
+      if (!structuralResolver) {
+        return type;
+      }
+      const resolved = structuralResolver(type);
+      // Returning undefined means no projection; the original type is preserved.
+      return typeof resolved === "number" ? resolved : type;
+    };
+
     const unifyInternal = (
       left: TypeId,
       right: TypeId,
@@ -759,8 +776,10 @@ export const createTypeArena = (): TypeArena => {
       subst: Substitution,
       localSeen: Set<string>
     ): UnificationResult => {
-      const resolvedLeft = substitute(left, subst);
-      const resolvedRight = substitute(right, subst);
+      const substitutedLeft = substitute(left, subst);
+      const substitutedRight = substitute(right, subst);
+      const resolvedLeft = normalizeStructural(substitutedLeft);
+      const resolvedRight = normalizeStructural(substitutedRight);
 
       if (resolvedLeft === resolvedRight) {
         return success(subst);
@@ -782,11 +801,17 @@ export const createTypeArena = (): TypeArena => {
         );
       }
 
-      if (
-        isUnknownPrimitive(resolvedLeft) ||
-        isUnknownPrimitive(resolvedRight)
-      ) {
-        return success(subst);
+      const leftUnknown = isUnknownPrimitive(resolvedLeft);
+      const rightUnknown = isUnknownPrimitive(resolvedRight);
+      if (leftUnknown || rightUnknown) {
+        if (allowUnknown) {
+          return success(subst);
+        }
+        return conflict(
+          resolvedLeft,
+          resolvedRight,
+          `unknown types are not allowed (${ctx.reason})`
+        );
       }
 
       const leftDesc = getDescriptor(resolvedLeft);

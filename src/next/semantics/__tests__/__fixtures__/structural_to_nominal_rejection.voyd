@@ -1,0 +1,9 @@
+obj Person {
+  id: i32
+}
+
+fn takes_person(person: Person) -> i32
+  person.id
+
+pub fn main() -> i32
+  takes_person({ id: 1 })

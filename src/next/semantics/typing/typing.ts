@@ -1,4 +1,4 @@
-import { createTypingContext } from "./context.js";
+import { createTypingContext, createTypingState } from "./context.js";
 import { runInferencePass, runStrictTypeCheck } from "./inference.js";
 import {
   registerFunctionSignatures,
@@ -14,15 +14,16 @@ export * from "./types.js";
 
 export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   const ctx = createTypingContext(inputs);
+  const state = createTypingState();
 
   seedPrimitiveTypes(ctx);
   seedBaseObjectType(ctx);
-  registerTypeAliases(ctx);
+  registerTypeAliases(ctx, state);
   registerObjectDecls(ctx);
-  registerFunctionSignatures(ctx);
+  registerFunctionSignatures(ctx, state);
 
-  runInferencePass(ctx);
-  runStrictTypeCheck(ctx);
+  runInferencePass(ctx, state);
+  runStrictTypeCheck(ctx, state);
   validateTypedProgram(ctx);
 
   return {
@@ -30,25 +31,17 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     table: ctx.table,
     resolvedExprTypes: new Map(ctx.resolvedExprTypes),
     valueTypes: new Map(ctx.valueTypes),
-    objectsByNominal: new Map(ctx.objectsByNominal),
+    objectsByNominal: ctx.objects.snapshotByNominal(),
     callTargets: new Map(
-      Array.from(ctx.callTargets.entries()).map(([callId, targets]) => [
+      Array.from(ctx.callResolution.targets.entries()).map(([callId, targets]) => [
         callId,
         new Map(targets),
       ])
     ),
-    functionInstances: new Map(ctx.functionInstances),
-    callTypeArguments: new Map(ctx.callTypeArguments),
-    callInstanceKeys: new Map(ctx.callInstanceKeys),
-    functionInstantiationInfo: new Map(
-      Array.from(ctx.functionInstantiationInfo.entries()).map(
-        ([symbol, instantiations]) => [symbol, new Map(instantiations)]
-      )
-    ),
-    functionInstanceExprTypes: new Map(
-      Array.from(ctx.functionInstanceExprTypes.entries()).map(
-        ([key, exprs]) => [key, new Map(exprs)]
-      )
-    ),
+    functionInstances: ctx.functions.snapshotInstances(),
+    callTypeArguments: new Map(ctx.callResolution.typeArguments),
+    callInstanceKeys: new Map(ctx.callResolution.instanceKeys),
+    functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
+    functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
   };
 };

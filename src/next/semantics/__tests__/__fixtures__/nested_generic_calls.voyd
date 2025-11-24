@@ -1,0 +1,16 @@
+pub fn id<T>(value: T) -> T
+  value
+
+pub fn wrap<U>(value: U) -> U
+  id(value)
+
+pub fn combine<V>(left: V, right: V) -> V
+  let pick = true
+  if pick then:
+    wrap(left)
+  else:
+    wrap(right)
+
+pub fn main() -> i32
+  wrap(1)
+  combine(2, 3)

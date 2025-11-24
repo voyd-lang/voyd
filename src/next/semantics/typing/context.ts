@@ -4,6 +4,10 @@ import { DeclTable } from "../decls.js";
 import {
   BASE_OBJECT_NAME,
   DEFAULT_EFFECT_ROW,
+  FunctionStore,
+  ObjectStore,
+  TypeAliasStore,
+  type TypingState,
   type TypingContext,
   type TypingInputs,
 } from "./types.js";
@@ -12,6 +16,9 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const decls = inputs.decls ?? new DeclTable();
   const arena = createTypeArena();
   const table = createTypeTable();
+  const functions = new FunctionStore();
+  const objects = new ObjectStore();
+  const typeAliases = new TypeAliasStore();
 
   return {
     symbolTable: inputs.symbolTable,
@@ -21,48 +28,32 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     arena,
     table,
     resolvedExprTypes: new Map(),
-    functionSignatures: new Map(),
     valueTypes: new Map(),
-    callTargets: new Map(),
-    callTypeArguments: new Map(),
-    callInstanceKeys: new Map(),
-    functionInstantiationInfo: new Map(),
-    functionInstanceExprTypes: new Map(),
-    primitiveCache: new Map(),
+    callResolution: {
+      targets: new Map(),
+      typeArguments: new Map(),
+      instanceKeys: new Map(),
+    },
+    functions,
+    objects,
+    typeAliases,
+    primitives: {
+      cache: new Map(),
+      bool: 0,
+      void: 0,
+      unknown: 0,
+      defaultEffectRow: DEFAULT_EFFECT_ROW,
+    },
     intrinsicTypes: new Map(),
-    functionsBySymbol: new Map(),
-    functionInstances: new Map(),
-    activeFunctionInstantiations: new Set(),
-    objectTemplates: new Map(),
-    objectInstances: new Map(),
-    objectsByName: new Map(),
-    objectsByNominal: new Map(),
-    objectDecls: new Map(),
-    resolvingTemplates: new Set(),
-    boolType: 0,
-    voidType: 0,
-    unknownType: 0,
-    defaultEffectRow: DEFAULT_EFFECT_ROW,
-    typeCheckMode: "relaxed",
-    currentFunctionReturnType: undefined,
-    typeAliasTargets: new Map(),
-    typeAliasTemplates: new Map(),
-    typeAliasInstances: new Map(),
-    typeAliasInstanceSymbols: new Map(),
-    validatedTypeAliasInstances: new Set(),
-    typeAliasesByName: new Map(),
-    resolvingTypeAliases: new Map(),
-    resolvingTypeAliasKeysById: new Map(),
-    failedTypeAliasInstantiations: new Set(),
-    baseObjectSymbol: -1,
-    baseObjectNominal: -1,
-    baseObjectStructural: -1,
-    baseObjectType: -1,
   };
 };
 
 export const seedBaseObjectName = (ctx: TypingContext): void => {
-  if (!ctx.objectsByName.has(BASE_OBJECT_NAME)) {
-    ctx.objectsByName.set(BASE_OBJECT_NAME, ctx.baseObjectSymbol);
+  if (!ctx.objects.hasName(BASE_OBJECT_NAME)) {
+    ctx.objects.setName(BASE_OBJECT_NAME, ctx.objects.base.symbol);
   }
 };
+
+export const createTypingState = (mode: TypingState["mode"] = "relaxed"): TypingState => ({
+  mode,
+});

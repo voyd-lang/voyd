@@ -19,6 +19,8 @@ import { DeclTable } from "../decls.js";
 import type { TypeArena } from "./type-arena.js";
 import type { TypeTable } from "./type-table.js";
 
+export type TypeCheckMode = "relaxed" | "strict";
+
 export interface TypingInputs {
   symbolTable: SymbolTable;
   hir: HirGraph;
@@ -41,6 +43,14 @@ export interface TypingResult {
     ReadonlyMap<string, readonly TypeId[]>
   >;
   functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+}
+
+export interface PrimitiveTypes {
+  cache: Map<string, TypeId>;
+  bool: TypeId;
+  void: TypeId;
+  unknown: TypeId;
+  defaultEffectRow: EffectRowId;
 }
 
 export interface FunctionSignature {
@@ -70,7 +80,337 @@ export interface Arg {
   label?: string;
 }
 
-export type TypeCheckMode = "relaxed" | "strict";
+export interface CallResolution {
+  targets: Map<HirExprId, Map<string, SymbolId>>;
+  typeArguments: Map<HirExprId, readonly TypeId[]>;
+  instanceKeys: Map<HirExprId, string>;
+}
+
+export class FunctionStore {
+  #signatures = new Map<SymbolId, FunctionSignature>();
+  #bySymbol = new Map<SymbolId, HirFunction>();
+  #instances = new Map<string, TypeId>();
+  #instantiationInfo = new Map<SymbolId, Map<string, readonly TypeId[]>>();
+  #instanceExprTypes = new Map<string, Map<HirExprId, TypeId>>();
+  #activeInstantiations = new Set<string>();
+
+  register(fn: HirFunction): void {
+    this.#bySymbol.set(fn.symbol, fn);
+  }
+
+  setSignature(symbol: SymbolId, signature: FunctionSignature): void {
+    this.#signatures.set(symbol, signature);
+  }
+
+  getSignature(symbol: SymbolId): FunctionSignature | undefined {
+    return this.#signatures.get(symbol);
+  }
+
+  get signatures(): IterableIterator<[SymbolId, FunctionSignature]> {
+    return this.#signatures.entries();
+  }
+
+  getFunction(symbol: SymbolId): HirFunction | undefined {
+    return this.#bySymbol.get(symbol);
+  }
+
+  isCachedOrActive(key: string): boolean {
+    return this.#instances.has(key) || this.#activeInstantiations.has(key);
+  }
+
+  beginInstantiation(key: string): void {
+    this.#activeInstantiations.add(key);
+  }
+
+  endInstantiation(key: string): void {
+    this.#activeInstantiations.delete(key);
+  }
+
+  cacheInstance(
+    key: string,
+    returnType: TypeId,
+    exprTypes: ReadonlyMap<HirExprId, TypeId>
+  ): void {
+    this.#instances.set(key, returnType);
+    this.#instanceExprTypes.set(key, new Map(exprTypes));
+  }
+
+  getInstance(key: string): TypeId | undefined {
+    return this.#instances.get(key);
+  }
+
+  getInstanceExprTypes(key: string): ReadonlyMap<HirExprId, TypeId> | undefined {
+    return this.#instanceExprTypes.get(key);
+  }
+
+  recordInstantiation(
+    symbol: SymbolId,
+    key: string,
+    typeArgs: readonly TypeId[]
+  ): void {
+    let bySymbol = this.#instantiationInfo.get(symbol);
+    if (!bySymbol) {
+      bySymbol = new Map();
+      this.#instantiationInfo.set(symbol, bySymbol);
+    }
+    if (!bySymbol.has(key)) {
+      bySymbol.set(key, typeArgs);
+    }
+  }
+
+  resetInstances(): void {
+    this.#instances.clear();
+    this.#instantiationInfo.clear();
+    this.#instanceExprTypes.clear();
+    this.#activeInstantiations.clear();
+  }
+
+  snapshotInstances(): Map<string, TypeId> {
+    return new Map(this.#instances);
+  }
+
+  snapshotInstantiationInfo(): Map<SymbolId, Map<string, readonly TypeId[]>> {
+    return new Map(
+      Array.from(this.#instantiationInfo.entries()).map(([symbol, info]) => [
+        symbol,
+        new Map(info),
+      ])
+    );
+  }
+
+  snapshotInstanceExprTypes(): Map<string, Map<HirExprId, TypeId>> {
+    return new Map(
+      Array.from(this.#instanceExprTypes.entries()).map(([key, exprs]) => [
+        key,
+        new Map(exprs),
+      ])
+    );
+  }
+}
+
+export interface BaseObjectInfo {
+  symbol: SymbolId;
+  nominal: TypeId;
+  structural: TypeId;
+  type: TypeId;
+}
+
+export class ObjectStore {
+  #templates = new Map<SymbolId, ObjectTemplate>();
+  #instances = new Map<string, ObjectTypeInfo>();
+  #byName = new Map<string, SymbolId>();
+  #byNominal = new Map<TypeId, ObjectTypeInfo>();
+  #decls = new Map<SymbolId, HirObjectDecl>();
+  #resolving = new Set<SymbolId>();
+  #base: BaseObjectInfo = { symbol: -1, nominal: -1, structural: -1, type: -1 };
+
+  setBase(info: BaseObjectInfo): void {
+    this.#base = info;
+  }
+
+  get base(): BaseObjectInfo {
+    return this.#base;
+  }
+
+  registerTemplate(template: ObjectTemplate): void {
+    this.#templates.set(template.symbol, template);
+  }
+
+  getTemplate(symbol: SymbolId): ObjectTemplate | undefined {
+    return this.#templates.get(symbol);
+  }
+
+  templates(): IterableIterator<ObjectTemplate> {
+    return this.#templates.values();
+  }
+
+  addInstance(key: string, info: ObjectTypeInfo): void {
+    this.#instances.set(key, info);
+    this.#byNominal.set(info.nominal, info);
+  }
+
+  hasInstance(key: string): boolean {
+    return this.#instances.has(key);
+  }
+
+  getInstance(key: string): ObjectTypeInfo | undefined {
+    return this.#instances.get(key);
+  }
+
+  getInstanceByNominal(nominal: TypeId): ObjectTypeInfo | undefined {
+    return this.#byNominal.get(nominal);
+  }
+
+  hasNominal(nominal: TypeId): boolean {
+    return this.#byNominal.has(nominal);
+  }
+
+  instanceEntries(): IterableIterator<[string, ObjectTypeInfo]> {
+    return this.#instances.entries();
+  }
+
+  snapshotByNominal(): Map<TypeId, ObjectTypeInfo> {
+    return new Map(this.#byNominal);
+  }
+
+  registerDecl(decl: HirObjectDecl): void {
+    this.#decls.set(decl.symbol, decl);
+  }
+
+  getDecl(symbol: SymbolId): HirObjectDecl | undefined {
+    return this.#decls.get(symbol);
+  }
+
+  hasDecl(symbol: SymbolId): boolean {
+    return this.#decls.has(symbol);
+  }
+
+  setName(name: string, symbol: SymbolId): void {
+    this.#byName.set(name, symbol);
+  }
+
+  hasName(name: string): boolean {
+    return this.#byName.has(name);
+  }
+
+  resolveName(name: string): SymbolId | undefined {
+    return this.#byName.get(name);
+  }
+
+  beginResolving(symbol: SymbolId): void {
+    this.#resolving.add(symbol);
+  }
+
+  endResolving(symbol: SymbolId): void {
+    this.#resolving.delete(symbol);
+  }
+
+  isResolving(symbol: SymbolId): boolean {
+    return this.#resolving.has(symbol);
+  }
+}
+
+export class TypeAliasStore {
+  #templates = new Map<SymbolId, TypeAliasTemplate>();
+  #instances = new Map<string, TypeId>();
+  #instanceSymbols = new Map<TypeId, Set<SymbolId>>();
+  #validatedInstances = new Set<string>();
+  #byName = new Map<string, SymbolId>();
+  #resolving = new Map<string, TypeId>();
+  #resolvingKeysById = new Map<TypeId, string>();
+  #failedInstantiations = new Set<string>();
+
+  registerTemplate(template: TypeAliasTemplate): void {
+    this.#templates.set(template.symbol, template);
+  }
+
+  getTemplate(symbol: SymbolId): TypeAliasTemplate | undefined {
+    return this.#templates.get(symbol);
+  }
+
+  hasTemplate(symbol: SymbolId): boolean {
+    return this.#templates.has(symbol);
+  }
+
+  templates(): IterableIterator<TypeAliasTemplate> {
+    return this.#templates.values();
+  }
+
+  setName(name: string, symbol: SymbolId): void {
+    this.#byName.set(name, symbol);
+  }
+
+  resolveName(name: string): SymbolId | undefined {
+    return this.#byName.get(name);
+  }
+
+  hasFailed(key: string): boolean {
+    return this.#failedInstantiations.has(key);
+  }
+
+  markFailed(key: string): void {
+    this.#failedInstantiations.add(key);
+  }
+
+  getCachedInstance(key: string): TypeId | undefined {
+    return this.#instances.get(key);
+  }
+
+  cacheInstance(key: string, type: TypeId): void {
+    this.#instances.set(key, type);
+  }
+
+  hasInstance(key: string): boolean {
+    return this.#instances.has(key);
+  }
+
+  instanceCount(): number {
+    return this.#instances.size;
+  }
+
+  markValidated(key: string): void {
+    this.#validatedInstances.add(key);
+  }
+
+  isValidated(key: string): boolean {
+    return this.#validatedInstances.has(key);
+  }
+
+  beginResolution(key: string, placeholder: TypeId): void {
+    this.#resolving.set(key, placeholder);
+    this.#resolvingKeysById.set(placeholder, key);
+  }
+
+  getActiveResolution(key: string): TypeId | undefined {
+    return this.#resolving.get(key);
+  }
+
+  getResolutionKey(type: TypeId): string | undefined {
+    return this.#resolvingKeysById.get(type);
+  }
+
+  endResolution(key: string): TypeId | undefined {
+    const placeholder = this.#resolving.get(key);
+    this.#resolving.delete(key);
+    if (typeof placeholder === "number") {
+      this.#resolvingKeysById.delete(placeholder);
+    }
+    return placeholder;
+  }
+
+  resolutionDepth(): number {
+    return this.#resolving.size;
+  }
+
+  recordInstanceSymbol(type: TypeId, symbol: SymbolId): void {
+    const existing = this.#instanceSymbols.get(type);
+    if (existing) {
+      existing.add(symbol);
+      return;
+    }
+    this.#instanceSymbols.set(type, new Set([symbol]));
+  }
+
+  getInstanceSymbols(type: TypeId): ReadonlySet<SymbolId> | undefined {
+    return this.#instanceSymbols.get(type);
+  }
+
+  instanceEntries(): IterableIterator<[string, TypeId]> {
+    return this.#instances.entries();
+  }
+}
+
+export interface FunctionScope {
+  returnType: TypeId;
+  instanceKey?: string;
+  typeParams?: ReadonlyMap<SymbolId, TypeId>;
+  substitution?: ReadonlyMap<TypeParamId, TypeId>;
+}
+
+export interface TypingState {
+  mode: TypeCheckMode;
+  currentFunction?: FunctionScope;
+}
 
 export interface TypingContext {
   symbolTable: SymbolTable;
@@ -80,46 +420,13 @@ export interface TypingContext {
   arena: TypeArena;
   table: TypeTable;
   resolvedExprTypes: Map<HirExprId, TypeId>;
-  functionSignatures: Map<SymbolId, FunctionSignature>;
   valueTypes: Map<SymbolId, TypeId>;
-  callTargets: Map<HirExprId, Map<string, SymbolId>>;
-  callTypeArguments: Map<HirExprId, readonly TypeId[]>;
-  callInstanceKeys: Map<HirExprId, string>;
-  functionInstantiationInfo: Map<SymbolId, Map<string, readonly TypeId[]>>;
-  functionInstanceExprTypes: Map<string, Map<HirExprId, TypeId>>;
-  primitiveCache: Map<string, TypeId>;
+  callResolution: CallResolution;
+  functions: FunctionStore;
+  objects: ObjectStore;
+  typeAliases: TypeAliasStore;
+  primitives: PrimitiveTypes;
   intrinsicTypes: Map<string, TypeId>;
-  objectTemplates: Map<SymbolId, ObjectTemplate>;
-  objectInstances: Map<string, ObjectTypeInfo>;
-  objectsByName: Map<string, SymbolId>;
-  objectsByNominal: Map<TypeId, ObjectTypeInfo>;
-  objectDecls: Map<SymbolId, HirObjectDecl>;
-  resolvingTemplates: Set<SymbolId>;
-  boolType: TypeId;
-  voidType: TypeId;
-  unknownType: TypeId;
-  defaultEffectRow: EffectRowId;
-  typeCheckMode: TypeCheckMode;
-  currentFunctionReturnType: TypeId | undefined;
-  currentFunctionInstanceKey?: string;
-  currentTypeParams?: ReadonlyMap<SymbolId, TypeId>;
-  currentTypeSubst?: ReadonlyMap<TypeParamId, TypeId>;
-  typeAliasTargets: Map<SymbolId, HirTypeExpr>;
-  typeAliasTemplates: Map<SymbolId, TypeAliasTemplate>;
-  typeAliasInstances: Map<string, TypeId>;
-  typeAliasInstanceSymbols: Map<TypeId, Set<SymbolId>>;
-  validatedTypeAliasInstances: Set<string>;
-  typeAliasesByName: Map<string, SymbolId>;
-  resolvingTypeAliases: Map<string, TypeId>;
-  resolvingTypeAliasKeysById: Map<TypeId, string>;
-  failedTypeAliasInstantiations: Set<string>;
-  baseObjectSymbol: SymbolId;
-  baseObjectNominal: TypeId;
-  baseObjectStructural: TypeId;
-  baseObjectType: TypeId;
-  functionsBySymbol: Map<SymbolId, HirFunction>;
-  functionInstances: Map<string, TypeId>;
-  activeFunctionInstantiations: Set<string>;
 }
 
 export interface ObjectTypeInfo {
