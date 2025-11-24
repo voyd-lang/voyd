@@ -108,7 +108,9 @@ export interface UnificationContext {
   reason: string;
   variance?: Variance;
   constraints?: ReadonlyMap<TypeParamId, ConstraintSet>;
+  // When true, the "unknown" primitive is treated as compatible with any type.
   allowUnknown?: boolean;
+  // Optional projector to normalize types (e.g. to structural components) before comparison.
   structuralResolver?: (type: TypeId) => TypeId | undefined;
 }
 

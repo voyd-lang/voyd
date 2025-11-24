@@ -242,4 +242,67 @@ describe("type satisfaction semantics", () => {
       typeSatisfies(augmentedIntersection, ctx.objects.base.type, ctx, state)
     ).toBe(true);
   });
+
+  it("satisfies nominal expectations that include structural intersections", () => {
+    const { ctx, state, symbolTable } = createContext();
+    const valueType = getPrimitiveType(ctx, "bool");
+    const fields = [{ name: "value", type: valueType }];
+    const widget = registerNominal({
+      ctx,
+      symbolTable,
+      name: "Widget",
+      fields,
+    });
+
+    const expected = ctx.arena.internIntersection({
+      nominal: widget.nominal,
+      structural: ctx.arena.internStructuralObject({ fields }),
+    });
+
+    expect(typeSatisfies(widget.nominal, expected, ctx, state)).toBe(true);
+  });
+
+  it("compares unions structurally when a member is a nominal intersection", () => {
+    const { ctx, state, symbolTable } = createContext();
+    const valueType = getPrimitiveType(ctx, "i32");
+    const fields = [{ name: "value", type: valueType }];
+    const widget = registerNominal({
+      ctx,
+      symbolTable,
+      name: "Widget",
+      fields,
+    });
+    const structuralOnly = ctx.arena.internStructuralObject({ fields });
+    const expected = ctx.arena.internUnion([widget.type, valueType]);
+
+    expect(typeSatisfies(structuralOnly, expected, ctx, state)).toBe(true);
+  });
+
+  it("threads allowUnknown through unification during structural comparison", () => {
+    const relaxed = createContext();
+    const relaxedBool = getPrimitiveType(relaxed.ctx, "bool");
+    const relaxedActual = relaxed.ctx.arena.internStructuralObject({
+      fields: [{ name: "value", type: relaxedBool }],
+    });
+    const relaxedExpected = relaxed.ctx.arena.internStructuralObject({
+      fields: [{ name: "value", type: relaxed.ctx.primitives.unknown }],
+    });
+
+    expect(
+      typeSatisfies(relaxedActual, relaxedExpected, relaxed.ctx, relaxed.state)
+    ).toBe(true);
+
+    const strict = createContext("strict");
+    const strictBool = getPrimitiveType(strict.ctx, "bool");
+    const strictActual = strict.ctx.arena.internStructuralObject({
+      fields: [{ name: "value", type: strictBool }],
+    });
+    const strictExpected = strict.ctx.arena.internStructuralObject({
+      fields: [{ name: "value", type: strict.ctx.primitives.unknown }],
+    });
+
+    expect(
+      typeSatisfies(strictActual, strictExpected, strict.ctx, strict.state)
+    ).toBe(false);
+  });
 });

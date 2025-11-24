@@ -1269,6 +1269,7 @@ export const typeSatisfies = (
     !expectedNominal ||
     nominalMatches ||
     expectedNominal === ctx.objects.base.nominal;
+  const allowUnknown = state.mode === "relaxed";
   const structuralResolver = structuralComparisonEligible
     ? (type: TypeId): TypeId | undefined =>
         structuralExpectationOf(type, ctx, state)
@@ -1279,7 +1280,7 @@ export const typeSatisfies = (
     reason: "type satisfaction",
     variance: "covariant",
     structuralResolver,
-    allowUnknown: state.mode === "relaxed",
+    allowUnknown,
   });
   return compatibility.ok;
 };
