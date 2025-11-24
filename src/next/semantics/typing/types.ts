@@ -86,39 +86,318 @@ export interface CallResolution {
   instanceKeys: Map<HirExprId, string>;
 }
 
-export interface FunctionStore {
-  signatures: Map<SymbolId, FunctionSignature>;
-  bySymbol: Map<SymbolId, HirFunction>;
-  instances: Map<string, TypeId>;
-  instantiationInfo: Map<SymbolId, Map<string, readonly TypeId[]>>;
-  instanceExprTypes: Map<string, Map<HirExprId, TypeId>>;
-  activeInstantiations: Set<string>;
+export class FunctionStore {
+  #signatures = new Map<SymbolId, FunctionSignature>();
+  #bySymbol = new Map<SymbolId, HirFunction>();
+  #instances = new Map<string, TypeId>();
+  #instantiationInfo = new Map<SymbolId, Map<string, readonly TypeId[]>>();
+  #instanceExprTypes = new Map<string, Map<HirExprId, TypeId>>();
+  #activeInstantiations = new Set<string>();
+
+  register(fn: HirFunction): void {
+    this.#bySymbol.set(fn.symbol, fn);
+  }
+
+  setSignature(symbol: SymbolId, signature: FunctionSignature): void {
+    this.#signatures.set(symbol, signature);
+  }
+
+  getSignature(symbol: SymbolId): FunctionSignature | undefined {
+    return this.#signatures.get(symbol);
+  }
+
+  get signatures(): IterableIterator<[SymbolId, FunctionSignature]> {
+    return this.#signatures.entries();
+  }
+
+  getFunction(symbol: SymbolId): HirFunction | undefined {
+    return this.#bySymbol.get(symbol);
+  }
+
+  isCachedOrActive(key: string): boolean {
+    return this.#instances.has(key) || this.#activeInstantiations.has(key);
+  }
+
+  beginInstantiation(key: string): void {
+    this.#activeInstantiations.add(key);
+  }
+
+  endInstantiation(key: string): void {
+    this.#activeInstantiations.delete(key);
+  }
+
+  cacheInstance(
+    key: string,
+    returnType: TypeId,
+    exprTypes: ReadonlyMap<HirExprId, TypeId>
+  ): void {
+    this.#instances.set(key, returnType);
+    this.#instanceExprTypes.set(key, new Map(exprTypes));
+  }
+
+  getInstance(key: string): TypeId | undefined {
+    return this.#instances.get(key);
+  }
+
+  getInstanceExprTypes(key: string): ReadonlyMap<HirExprId, TypeId> | undefined {
+    return this.#instanceExprTypes.get(key);
+  }
+
+  recordInstantiation(
+    symbol: SymbolId,
+    key: string,
+    typeArgs: readonly TypeId[]
+  ): void {
+    let bySymbol = this.#instantiationInfo.get(symbol);
+    if (!bySymbol) {
+      bySymbol = new Map();
+      this.#instantiationInfo.set(symbol, bySymbol);
+    }
+    if (!bySymbol.has(key)) {
+      bySymbol.set(key, typeArgs);
+    }
+  }
+
+  resetInstances(): void {
+    this.#instances.clear();
+    this.#instantiationInfo.clear();
+    this.#instanceExprTypes.clear();
+    this.#activeInstantiations.clear();
+  }
+
+  snapshotInstances(): Map<string, TypeId> {
+    return new Map(this.#instances);
+  }
+
+  snapshotInstantiationInfo(): Map<SymbolId, Map<string, readonly TypeId[]>> {
+    return new Map(
+      Array.from(this.#instantiationInfo.entries()).map(([symbol, info]) => [
+        symbol,
+        new Map(info),
+      ])
+    );
+  }
+
+  snapshotInstanceExprTypes(): Map<string, Map<HirExprId, TypeId>> {
+    return new Map(
+      Array.from(this.#instanceExprTypes.entries()).map(([key, exprs]) => [
+        key,
+        new Map(exprs),
+      ])
+    );
+  }
 }
 
-export interface ObjectStore {
-  templates: Map<SymbolId, ObjectTemplate>;
-  instances: Map<string, ObjectTypeInfo>;
-  byName: Map<string, SymbolId>;
-  byNominal: Map<TypeId, ObjectTypeInfo>;
-  decls: Map<SymbolId, HirObjectDecl>;
-  resolving: Set<SymbolId>;
-  base: {
-    symbol: SymbolId;
-    nominal: TypeId;
-    structural: TypeId;
-    type: TypeId;
-  };
+export interface BaseObjectInfo {
+  symbol: SymbolId;
+  nominal: TypeId;
+  structural: TypeId;
+  type: TypeId;
 }
 
-export interface TypeAliasStore {
-  templates: Map<SymbolId, TypeAliasTemplate>;
-  instances: Map<string, TypeId>;
-  instanceSymbols: Map<TypeId, Set<SymbolId>>;
-  validatedInstances: Set<string>;
-  byName: Map<string, SymbolId>;
-  resolving: Map<string, TypeId>;
-  resolvingKeysById: Map<TypeId, string>;
-  failedInstantiations: Set<string>;
+export class ObjectStore {
+  #templates = new Map<SymbolId, ObjectTemplate>();
+  #instances = new Map<string, ObjectTypeInfo>();
+  #byName = new Map<string, SymbolId>();
+  #byNominal = new Map<TypeId, ObjectTypeInfo>();
+  #decls = new Map<SymbolId, HirObjectDecl>();
+  #resolving = new Set<SymbolId>();
+  #base: BaseObjectInfo = { symbol: -1, nominal: -1, structural: -1, type: -1 };
+
+  setBase(info: BaseObjectInfo): void {
+    this.#base = info;
+  }
+
+  get base(): BaseObjectInfo {
+    return this.#base;
+  }
+
+  registerTemplate(template: ObjectTemplate): void {
+    this.#templates.set(template.symbol, template);
+  }
+
+  getTemplate(symbol: SymbolId): ObjectTemplate | undefined {
+    return this.#templates.get(symbol);
+  }
+
+  templates(): IterableIterator<ObjectTemplate> {
+    return this.#templates.values();
+  }
+
+  addInstance(key: string, info: ObjectTypeInfo): void {
+    this.#instances.set(key, info);
+    this.#byNominal.set(info.nominal, info);
+  }
+
+  hasInstance(key: string): boolean {
+    return this.#instances.has(key);
+  }
+
+  getInstance(key: string): ObjectTypeInfo | undefined {
+    return this.#instances.get(key);
+  }
+
+  getInstanceByNominal(nominal: TypeId): ObjectTypeInfo | undefined {
+    return this.#byNominal.get(nominal);
+  }
+
+  hasNominal(nominal: TypeId): boolean {
+    return this.#byNominal.has(nominal);
+  }
+
+  instanceEntries(): IterableIterator<[string, ObjectTypeInfo]> {
+    return this.#instances.entries();
+  }
+
+  snapshotByNominal(): Map<TypeId, ObjectTypeInfo> {
+    return new Map(this.#byNominal);
+  }
+
+  registerDecl(decl: HirObjectDecl): void {
+    this.#decls.set(decl.symbol, decl);
+  }
+
+  getDecl(symbol: SymbolId): HirObjectDecl | undefined {
+    return this.#decls.get(symbol);
+  }
+
+  hasDecl(symbol: SymbolId): boolean {
+    return this.#decls.has(symbol);
+  }
+
+  setName(name: string, symbol: SymbolId): void {
+    this.#byName.set(name, symbol);
+  }
+
+  hasName(name: string): boolean {
+    return this.#byName.has(name);
+  }
+
+  resolveName(name: string): SymbolId | undefined {
+    return this.#byName.get(name);
+  }
+
+  beginResolving(symbol: SymbolId): void {
+    this.#resolving.add(symbol);
+  }
+
+  endResolving(symbol: SymbolId): void {
+    this.#resolving.delete(symbol);
+  }
+
+  isResolving(symbol: SymbolId): boolean {
+    return this.#resolving.has(symbol);
+  }
+}
+
+export class TypeAliasStore {
+  #templates = new Map<SymbolId, TypeAliasTemplate>();
+  #instances = new Map<string, TypeId>();
+  #instanceSymbols = new Map<TypeId, Set<SymbolId>>();
+  #validatedInstances = new Set<string>();
+  #byName = new Map<string, SymbolId>();
+  #resolving = new Map<string, TypeId>();
+  #resolvingKeysById = new Map<TypeId, string>();
+  #failedInstantiations = new Set<string>();
+
+  registerTemplate(template: TypeAliasTemplate): void {
+    this.#templates.set(template.symbol, template);
+  }
+
+  getTemplate(symbol: SymbolId): TypeAliasTemplate | undefined {
+    return this.#templates.get(symbol);
+  }
+
+  hasTemplate(symbol: SymbolId): boolean {
+    return this.#templates.has(symbol);
+  }
+
+  templates(): IterableIterator<TypeAliasTemplate> {
+    return this.#templates.values();
+  }
+
+  setName(name: string, symbol: SymbolId): void {
+    this.#byName.set(name, symbol);
+  }
+
+  resolveName(name: string): SymbolId | undefined {
+    return this.#byName.get(name);
+  }
+
+  hasFailed(key: string): boolean {
+    return this.#failedInstantiations.has(key);
+  }
+
+  markFailed(key: string): void {
+    this.#failedInstantiations.add(key);
+  }
+
+  getCachedInstance(key: string): TypeId | undefined {
+    return this.#instances.get(key);
+  }
+
+  cacheInstance(key: string, type: TypeId): void {
+    this.#instances.set(key, type);
+  }
+
+  hasInstance(key: string): boolean {
+    return this.#instances.has(key);
+  }
+
+  instanceCount(): number {
+    return this.#instances.size;
+  }
+
+  markValidated(key: string): void {
+    this.#validatedInstances.add(key);
+  }
+
+  isValidated(key: string): boolean {
+    return this.#validatedInstances.has(key);
+  }
+
+  beginResolution(key: string, placeholder: TypeId): void {
+    this.#resolving.set(key, placeholder);
+    this.#resolvingKeysById.set(placeholder, key);
+  }
+
+  getActiveResolution(key: string): TypeId | undefined {
+    return this.#resolving.get(key);
+  }
+
+  getResolutionKey(type: TypeId): string | undefined {
+    return this.#resolvingKeysById.get(type);
+  }
+
+  endResolution(key: string): TypeId | undefined {
+    const placeholder = this.#resolving.get(key);
+    this.#resolving.delete(key);
+    if (typeof placeholder === "number") {
+      this.#resolvingKeysById.delete(placeholder);
+    }
+    return placeholder;
+  }
+
+  resolutionDepth(): number {
+    return this.#resolving.size;
+  }
+
+  recordInstanceSymbol(type: TypeId, symbol: SymbolId): void {
+    const existing = this.#instanceSymbols.get(type);
+    if (existing) {
+      existing.add(symbol);
+      return;
+    }
+    this.#instanceSymbols.set(type, new Set([symbol]));
+  }
+
+  getInstanceSymbols(type: TypeId): ReadonlySet<SymbolId> | undefined {
+    return this.#instanceSymbols.get(type);
+  }
+
+  instanceEntries(): IterableIterator<[string, TypeId]> {
+    return this.#instances.entries();
+  }
 }
 
 export interface FunctionScope {

@@ -16,7 +16,7 @@ export const runInferencePass = (
     changed = typeAllFunctions(ctx, state, { collectChanges: true });
   } while (changed);
 
-  const unresolved = Array.from(ctx.functions.signatures.entries()).filter(
+  const unresolved = Array.from(ctx.functions.signatures).filter(
     ([, signature]) => !signature.hasExplicitReturn
   );
   if (unresolved.length > 0) {
@@ -62,7 +62,7 @@ const typeFunction = (
   ctx: TypingContext,
   state: TypingState
 ): boolean => {
-  const signature = ctx.functions.signatures.get(fn.symbol);
+  const signature = ctx.functions.getSignature(fn.symbol);
   if (!signature) {
     throw new Error(`missing type signature for function symbol ${fn.symbol}`);
   }
@@ -104,12 +104,9 @@ const typeFunction = (
 };
 
 const clearFunctionInstances = (ctx: TypingContext): void => {
-  ctx.functions.instances.clear();
-  ctx.functions.activeInstantiations.clear();
+  ctx.functions.resetInstances();
   ctx.callResolution.typeArguments.clear();
   ctx.callResolution.instanceKeys.clear();
-  ctx.functions.instantiationInfo.clear();
-  ctx.functions.instanceExprTypes.clear();
 };
 
 const finalizeFunctionReturnType = (

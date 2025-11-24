@@ -54,18 +54,17 @@ export const seedBaseObjectType = (ctx: TypingContext): void => {
     baseNominal: undefined,
   };
 
-  ctx.objects.base = {
+  ctx.objects.setBase({
     symbol,
     nominal,
     structural,
     type,
-  };
+  });
 
-  ctx.objects.templates.set(symbol, template);
-  ctx.objects.instances.set(`${symbol}<>`, info);
-  ctx.objects.byNominal.set(nominal, info);
-  if (!ctx.objects.byName.has(BASE_OBJECT_NAME)) {
-    ctx.objects.byName.set(BASE_OBJECT_NAME, symbol);
+  ctx.objects.registerTemplate(template);
+  ctx.objects.addInstance(`${symbol}<>`, info);
+  if (!ctx.objects.hasName(BASE_OBJECT_NAME)) {
+    ctx.objects.setName(BASE_OBJECT_NAME, symbol);
   }
   ctx.valueTypes.set(symbol, type);
 };
@@ -93,22 +92,22 @@ export const registerTypeAliases = (
       symbol: param.symbol,
       constraint: "constraint" in param ? param.constraint : undefined,
     }));
-    ctx.typeAliases.templates.set(item.symbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: item.symbol,
       params,
       target: item.target,
     });
-    ctx.typeAliases.byName.set(getSymbolName(item.symbol, ctx), item.symbol);
+    ctx.typeAliases.setName(getSymbolName(item.symbol, ctx), item.symbol);
   }
 };
 
 export const registerObjectDecls = (ctx: TypingContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "object") continue;
-    ctx.objects.decls.set(item.symbol, item);
+    ctx.objects.registerDecl(item);
     const name = getSymbolName(item.symbol, ctx);
-    if (!ctx.objects.byName.has(name)) {
-      ctx.objects.byName.set(name, item.symbol);
+    if (!ctx.objects.hasName(name)) {
+      ctx.objects.setName(name, item.symbol);
     }
   }
 };
@@ -119,7 +118,7 @@ export const registerFunctionSignatures = (
 ): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "function") continue;
-    ctx.functions.bySymbol.set(item.symbol, item);
+    ctx.functions.register(item);
     const fnDecl =
       (typeof item.decl === "number"
         ? ctx.decls.getFunctionById(item.decl)
@@ -233,7 +232,7 @@ export const registerFunctionSignatures = (
       functionType
     );
 
-    ctx.functions.signatures.set(item.symbol, {
+    ctx.functions.setSignature(item.symbol, {
       typeId: functionType,
       parameters,
       returnType: declaredReturn,

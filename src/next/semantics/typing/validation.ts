@@ -213,7 +213,7 @@ const validateObjectTemplates = (
   ctx: TypingContext,
   validateType: TypeValidator
 ): void => {
-  for (const template of ctx.objects.templates.values()) {
+  for (const template of ctx.objects.templates()) {
     const declaredParams = new Set(
       template.params.map((param) => param.typeParam)
     );
@@ -251,11 +251,12 @@ const validateObjectInstances = (
   ctx: TypingContext,
   validateType: TypeValidator
 ): void => {
-  for (const [key, info] of ctx.objects.instances.entries()) {
+  for (const [key, info] of ctx.objects.instanceEntries()) {
     const parsed = parseInstanceKey(key);
-    const template = typeof parsed.symbol === "number"
-      ? ctx.objects.templates.get(parsed.symbol)
-      : undefined;
+    const template =
+      typeof parsed.symbol === "number"
+        ? ctx.objects.getTemplate(parsed.symbol)
+        : undefined;
     const templateParams = template
       ? new Set(template.params.map((param) => param.typeParam))
       : undefined;
@@ -284,7 +285,7 @@ const validateTypeAliasInstances = (
   validateType: TypeValidator
 ): void => {
   const substitutionSeen = new Set<TypeId>();
-  for (const [key, instance] of ctx.typeAliases.instances.entries()) {
+  for (const [key, instance] of ctx.typeAliases.instanceEntries()) {
     const { typeArgs } = parseInstanceKey(key);
     const hasGenericArgs = typeArgs.some((arg) => {
       const desc = ctx.arena.get(arg);

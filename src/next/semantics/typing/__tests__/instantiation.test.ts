@@ -71,7 +71,7 @@ const primeBoxTemplate = (
     typeArgs: [typeParamRef],
   });
   const type = ctx.arena.internIntersection({ nominal, structural });
-  ctx.objects.templates.set(boxSymbol, {
+  ctx.objects.registerTemplate({
     symbol: boxSymbol,
     params: [{ symbol: typeParamSymbol, typeParam, constraint }],
     nominal,
@@ -80,7 +80,7 @@ const primeBoxTemplate = (
     fields,
     baseNominal: undefined,
   });
-  ctx.objects.byName.set("Box", boxSymbol);
+  ctx.objects.setName("Box", boxSymbol);
   return { boxSymbol };
 };
 
@@ -110,7 +110,7 @@ const primeSomeTemplate = (
     typeArgs: [typeParamRef],
   });
   const type = ctx.arena.internIntersection({ nominal, structural });
-  ctx.objects.templates.set(someSymbol, {
+  ctx.objects.registerTemplate({
     symbol: someSymbol,
     params: [{ symbol: typeParamSymbol, typeParam }],
     nominal,
@@ -119,7 +119,7 @@ const primeSomeTemplate = (
     fields,
     baseNominal: undefined,
   });
-  ctx.objects.byName.set("Some", someSymbol);
+  ctx.objects.setName("Some", someSymbol);
   return { someSymbol, valueParam: typeParam };
 };
 
@@ -146,7 +146,7 @@ const primeNoneTemplate = (
     typeArgs: [typeParamRef],
   });
   const type = ctx.arena.internIntersection({ nominal, structural });
-  ctx.objects.templates.set(noneSymbol, {
+  ctx.objects.registerTemplate({
     symbol: noneSymbol,
     params: [{ symbol: typeParamSymbol, typeParam }],
     nominal,
@@ -155,7 +155,7 @@ const primeNoneTemplate = (
     fields: [],
     baseNominal: undefined,
   });
-  ctx.objects.byName.set("None", noneSymbol);
+  ctx.objects.setName("None", noneSymbol);
   return { noneSymbol };
 };
 
@@ -199,7 +199,7 @@ const primeBucketMapTemplate = (
     typeArgs: [keyRef, valueRef],
   });
   const type = ctx.arena.internIntersection({ nominal, structural });
-  ctx.objects.templates.set(mapSymbol, {
+  ctx.objects.registerTemplate({
     symbol: mapSymbol,
     params: [
       { symbol: keyParamSymbol, typeParam: keyParam },
@@ -211,7 +211,7 @@ const primeBucketMapTemplate = (
     fields,
     baseNominal: undefined,
   });
-  ctx.objects.byName.set("BucketMap", mapSymbol);
+  ctx.objects.setName("BucketMap", mapSymbol);
   return { mapSymbol, valueParam };
 };
 
@@ -237,7 +237,7 @@ const primeAliasTemplate = (
     ast: 0,
     span: DUMMY_SPAN,
   };
-  ctx.typeAliases.templates.set(aliasSymbol, {
+  ctx.typeAliases.registerTemplate({
     symbol: aliasSymbol,
     params: [{ symbol: paramSymbol, constraint: options.constraint }],
     target,
@@ -255,15 +255,15 @@ describe("instantiation argument handling", () => {
       ctx.primitives.unknown,
     ]);
     expect(info).toBeDefined();
-    expect(ctx.objects.instances.has(unknownKey)).toBe(false);
-    expect(ctx.objects.byNominal.has(info?.nominal ?? -1)).toBe(false);
+    expect(ctx.objects.hasInstance(unknownKey)).toBe(false);
+    expect(ctx.objects.hasNominal(info?.nominal ?? -1)).toBe(false);
     expect(ctx.valueTypes.has(boxSymbol)).toBe(false);
 
     const boolKey = `${boxSymbol}<${ctx.primitives.bool}>`;
     const concrete = ensureObjectType(boxSymbol, ctx, state, [
       ctx.primitives.bool,
     ]);
-    expect(ctx.objects.instances.get(boolKey)).toEqual(concrete);
+    expect(ctx.objects.getInstance(boolKey)).toEqual(concrete);
     expect(ctx.valueTypes.get(boxSymbol)).toBe(concrete?.type);
   });
 
@@ -288,7 +288,7 @@ describe("instantiation argument handling", () => {
     expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [])).toThrow(
       /missing 1 type argument/
     );
-    expect(ctx.typeAliases.instances.size).toBe(0);
+    expect(ctx.typeAliases.instanceCount()).toBe(0);
   });
 
   it("rejects aliases that resolve directly to themselves", () => {
@@ -305,7 +305,7 @@ describe("instantiation argument handling", () => {
       ast: 0,
       span: DUMMY_SPAN,
     };
-    ctx.typeAliases.templates.set(aliasSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: aliasSymbol,
       params: [],
       target,
@@ -314,10 +314,8 @@ describe("instantiation argument handling", () => {
     expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [])).toThrow(
       /cannot resolve to itself/
     );
-    expect(ctx.typeAliases.instances.size).toBe(0);
-    expect(
-      ctx.typeAliases.failedInstantiations.has(`${aliasSymbol}<>`)
-    ).toBe(true);
+    expect(ctx.typeAliases.instanceCount()).toBe(0);
+    expect(ctx.typeAliases.hasFailed(`${aliasSymbol}<>`)).toBe(true);
   });
 
   it("rejects pure alias cycles", () => {
@@ -348,14 +346,22 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliases.templates.set(aSymbol, { symbol: aSymbol, params: [], target: aTarget });
-    ctx.typeAliases.templates.set(bSymbol, { symbol: bSymbol, params: [], target: bTarget });
+    ctx.typeAliases.registerTemplate({
+      symbol: aSymbol,
+      params: [],
+      target: aTarget,
+    });
+    ctx.typeAliases.registerTemplate({
+      symbol: bSymbol,
+      params: [],
+      target: bTarget,
+    });
 
     expect(() => resolveTypeAlias(aSymbol, ctx, state, [])).toThrow(
       /cyclic type alias instantiation/
     );
-    expect(ctx.typeAliases.instances.size).toBe(0);
-    expect(ctx.typeAliases.failedInstantiations.has(`${aSymbol}<>`)).toBe(true);
+    expect(ctx.typeAliases.instanceCount()).toBe(0);
+    expect(ctx.typeAliases.hasFailed(`${aSymbol}<>`)).toBe(true);
   });
 
   it("rejects generic alias cycles", () => {
@@ -414,12 +420,12 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliases.templates.set(aSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: aSymbol,
       params: [{ symbol: aParamSymbol }],
       target: aTarget,
     });
-    ctx.typeAliases.templates.set(bSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: bSymbol,
       params: [{ symbol: bParamSymbol }],
       target: bTarget,
@@ -430,8 +436,8 @@ describe("instantiation argument handling", () => {
     expect(() => resolveTypeAlias(aSymbol, ctx, state, [boolType])).toThrow(
       /cyclic type alias instantiation/
     );
-    expect(ctx.typeAliases.instances.size).toBe(0);
-    expect(ctx.typeAliases.failedInstantiations.has(`${aSymbol}<${boolType}>`)).toBe(
+    expect(ctx.typeAliases.instanceCount()).toBe(0);
+    expect(ctx.typeAliases.hasFailed(`${aSymbol}<${boolType}>`)).toBe(
       true
     );
   });
@@ -465,14 +471,14 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliases.templates.set(aliasSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: aliasSymbol,
       params: [],
       target,
     });
 
     expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [])).toThrow();
-    expect(ctx.typeAliases.instances.size).toBe(0);
+    expect(ctx.typeAliases.instanceCount()).toBe(0);
   });
 
   it("rejects non-contractive generic alias recursion", () => {
@@ -518,7 +524,7 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliases.templates.set(aliasSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: aliasSymbol,
       params: [{ symbol: paramSymbol }],
       target,
@@ -527,7 +533,7 @@ describe("instantiation argument handling", () => {
     expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [ctx.primitives.bool])).toThrow(
       /contractive/i
     );
-    expect(ctx.typeAliases.instances.size).toBe(0);
+    expect(ctx.typeAliases.instanceCount()).toBe(0);
   });
 
   it("rejects mutual generic recursion without guards", () => {
@@ -586,12 +592,12 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliases.templates.set(leftSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: leftSymbol,
       params: [{ symbol: leftParamSymbol }],
       target: leftTarget,
     });
-    ctx.typeAliases.templates.set(rightSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: rightSymbol,
       params: [{ symbol: rightParamSymbol }],
       target: rightTarget,
@@ -600,7 +606,7 @@ describe("instantiation argument handling", () => {
     expect(() => resolveTypeAlias(leftSymbol, ctx, state, [ctx.primitives.bool])).toThrow(
       /contractive|cyclic/i
     );
-    expect(ctx.typeAliases.instances.size).toBe(0);
+    expect(ctx.typeAliases.instanceCount()).toBe(0);
   });
 
   it("resolves recursive aliases through constructors", () => {
@@ -641,7 +647,7 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliases.templates.set(aliasSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: aliasSymbol,
       params: [],
       target,
@@ -733,12 +739,12 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliases.templates.set(leftSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: leftSymbol,
       params: [],
       target: leftTarget,
     });
-    ctx.typeAliases.templates.set(rightSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: rightSymbol,
       params: [],
       target: rightTarget,
@@ -747,8 +753,8 @@ describe("instantiation argument handling", () => {
     const leftAlias = resolveTypeAlias(leftSymbol, ctx, state, []);
     const rightAlias = resolveTypeAlias(rightSymbol, ctx, state, []);
 
-    expect(ctx.typeAliases.instances.get(`${leftSymbol}<>`)).toBe(leftAlias);
-    expect(ctx.typeAliases.instances.get(`${rightSymbol}<>`)).toBe(rightAlias);
+    expect(ctx.typeAliases.getCachedInstance(`${leftSymbol}<>`)).toBe(leftAlias);
+    expect(ctx.typeAliases.getCachedInstance(`${rightSymbol}<>`)).toBe(rightAlias);
 
     const leftDesc = ctx.arena.get(leftAlias);
     const rightDesc = ctx.arena.get(rightAlias);
@@ -813,7 +819,7 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliases.templates.set(listSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: listSymbol,
       params: [{ symbol: typeParamSymbol }],
       target,
@@ -821,7 +827,7 @@ describe("instantiation argument handling", () => {
 
     const resolved = resolveTypeAlias(listSymbol, ctx, state, [ctx.primitives.bool]);
     const key = `${listSymbol}<${ctx.primitives.bool}>`;
-    expect(ctx.typeAliases.instances.get(key)).toBe(resolved);
+    expect(ctx.typeAliases.getCachedInstance(key)).toBe(resolved);
     const desc = ctx.arena.get(resolved);
     expect(desc.kind).toBe("union");
   });
@@ -910,12 +916,12 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliases.templates.set(leftSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: leftSymbol,
       params: [{ symbol: leftParamSymbol }],
       target: leftTarget,
     });
-    ctx.typeAliases.templates.set(rightSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: rightSymbol,
       params: [{ symbol: rightParamSymbol }],
       target: rightTarget,
@@ -925,10 +931,10 @@ describe("instantiation argument handling", () => {
       ctx.primitives.cache.get("i32") ?? ctx.arena.internPrimitive("i32");
     const leftAlias = resolveTypeAlias(leftSymbol, ctx, state, [intType]);
     const rightAlias = resolveTypeAlias(rightSymbol, ctx, state, [intType]);
-    expect(ctx.typeAliases.instances.get(`${leftSymbol}<${intType}>`)).toBe(
+    expect(ctx.typeAliases.getCachedInstance(`${leftSymbol}<${intType}>`)).toBe(
       leftAlias
     );
-    expect(ctx.typeAliases.instances.get(`${rightSymbol}<${intType}>`)).toBe(
+    expect(ctx.typeAliases.getCachedInstance(`${rightSymbol}<${intType}>`)).toBe(
       rightAlias
     );
 
@@ -1110,7 +1116,7 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliases.templates.set(aliasSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: aliasSymbol,
       params: [],
       target,
@@ -1118,7 +1124,7 @@ describe("instantiation argument handling", () => {
 
     const resolved = resolveTypeAlias(aliasSymbol, ctx, state, []);
     expect(resolved).toBeDefined();
-    expect(ctx.typeAliases.instances.get(`${aliasSymbol}<>`)).toBe(resolved);
+    expect(ctx.typeAliases.getCachedInstance(`${aliasSymbol}<>`)).toBe(resolved);
   });
 
   it("allows guarded generic recursion across constructors", () => {
@@ -1173,7 +1179,7 @@ describe("instantiation argument handling", () => {
       span: DUMMY_SPAN,
     };
 
-    ctx.typeAliases.templates.set(listSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: listSymbol,
       params: [{ symbol: typeParamSymbol }],
       target,
@@ -1181,7 +1187,7 @@ describe("instantiation argument handling", () => {
 
     const resolved = resolveTypeAlias(listSymbol, ctx, state, [ctx.primitives.bool]);
     expect(resolved).toBeDefined();
-    expect(ctx.typeAliases.instances.get(`${listSymbol}<${ctx.primitives.bool}>`)).toBe(
+    expect(ctx.typeAliases.getCachedInstance(`${listSymbol}<${ctx.primitives.bool}>`)).toBe(
       resolved
     );
   });
@@ -1200,7 +1206,7 @@ describe("instantiation argument handling", () => {
       ast: 0,
       span: DUMMY_SPAN,
     };
-    ctx.typeAliases.templates.set(aliasSymbol, {
+    ctx.typeAliases.registerTemplate({
       symbol: aliasSymbol,
       params: [],
       target: aliasRef,
@@ -1208,9 +1214,9 @@ describe("instantiation argument handling", () => {
 
     expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [])).toThrow();
     const cacheKey = `${aliasSymbol}<>`;
-    expect(ctx.typeAliases.instances.has(cacheKey)).toBe(false);
+    expect(ctx.typeAliases.hasInstance(cacheKey)).toBe(false);
     expect(() => resolveTypeAlias(aliasSymbol, ctx, state, [])).toThrow();
-    expect(ctx.typeAliases.instances.has(cacheKey)).toBe(false);
+    expect(ctx.typeAliases.hasInstance(cacheKey)).toBe(false);
   });
 
   it("unifies composite types with variance-aware substitutions", () => {

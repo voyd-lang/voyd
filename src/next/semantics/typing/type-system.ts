@@ -227,7 +227,7 @@ const containsAliasSelfUnguarded = (
     if (type === aliasRoot) {
       return true;
     }
-    const activeKey = ctx.typeAliases.resolvingKeysById.get(type);
+    const activeKey = ctx.typeAliases.getResolutionKey(type);
     if (typeof activeKey === "string") {
       const separator = activeKey.indexOf("<");
       const activeSymbol =
@@ -236,7 +236,7 @@ const containsAliasSelfUnguarded = (
         return true;
       }
     }
-    const symbols = ctx.typeAliases.instanceSymbols.get(type);
+    const symbols = ctx.typeAliases.getInstanceSymbols(type);
     return symbols?.has(aliasSymbol) ?? false;
   };
 
@@ -346,12 +346,7 @@ const recordAliasInstanceSymbol = (
   symbol: SymbolId,
   ctx: TypingContext
 ): void => {
-  const existing = ctx.typeAliases.instanceSymbols.get(type);
-  if (existing) {
-    existing.add(symbol);
-    return;
-  }
-  ctx.typeAliases.instanceSymbols.set(type, new Set([symbol]));
+  ctx.typeAliases.recordInstanceSymbol(type, symbol);
 };
 
 const assertAliasContractive = ({
@@ -470,7 +465,7 @@ export const resolveTypeAlias = (
   typeArgs: readonly TypeId[] = []
 ): TypeId => {
   const aliasName = getSymbolName(symbol, ctx);
-  const template = ctx.typeAliases.templates.get(symbol);
+  const template = ctx.typeAliases.getTemplate(symbol);
 
   if (!template) {
     throw new Error(`missing type alias target for ${aliasName}`);
@@ -492,27 +487,27 @@ export const resolveTypeAlias = (
   const key = makeTypeAliasInstanceKey(symbol, normalized.applied);
   const cacheable = shouldCacheInstantiation(normalized);
 
-  if (ctx.typeAliases.failedInstantiations.has(key)) {
+  if (ctx.typeAliases.hasFailed(key)) {
     throw new Error(`type alias ${aliasName} instantiation previously failed`);
   }
 
-  const cached = cacheable ? ctx.typeAliases.instances.get(key) : undefined;
+  const cached = cacheable ? ctx.typeAliases.getCachedInstance(key) : undefined;
   if (typeof cached === "number") {
-    if (!ctx.typeAliases.validatedInstances.has(key)) {
+    if (!ctx.typeAliases.isValidated(key)) {
       assertAliasContractive({
         type: cached,
         aliasSymbol: symbol,
         aliasName,
         ctx,
       });
-      ctx.typeAliases.validatedInstances.add(key);
+      ctx.typeAliases.markValidated(key);
     } else {
       recordAliasInstanceSymbol(cached, symbol, ctx);
     }
     return cached;
   }
 
-  const active = ctx.typeAliases.resolving.get(key);
+  const active = ctx.typeAliases.getActiveResolution(key);
   if (typeof active === "number") {
     return active;
   }
@@ -522,8 +517,7 @@ export const resolveTypeAlias = (
   try {
     resolved = ctx.arena.createRecursiveType((self, placeholder) => {
       placeholderParam = placeholder;
-      ctx.typeAliases.resolving.set(key, self);
-      ctx.typeAliases.resolvingKeysById.set(self, key);
+      ctx.typeAliases.beginResolution(key, self);
 
       const paramMap = new Map<SymbolId, TypeId>();
       template.params.forEach((param, index) =>
@@ -591,21 +585,17 @@ export const resolveTypeAlias = (
       ctx,
     });
 
-    const canCacheNow = cacheable && ctx.typeAliases.resolving.size === 1;
+    const canCacheNow = cacheable && ctx.typeAliases.resolutionDepth() === 1;
     if (canCacheNow) {
-      ctx.typeAliases.instances.set(key, resolved);
-      ctx.typeAliases.validatedInstances.add(key);
+      ctx.typeAliases.cacheInstance(key, resolved);
+      ctx.typeAliases.markValidated(key);
     }
     return resolved;
   } catch (error) {
-    ctx.typeAliases.failedInstantiations.add(key);
+    ctx.typeAliases.markFailed(key);
     throw error;
   } finally {
-    const activeAlias = ctx.typeAliases.resolving.get(key);
-    ctx.typeAliases.resolving.delete(key);
-    if (typeof activeAlias === "number") {
-      ctx.typeAliases.resolvingKeysById.delete(activeAlias);
-    }
+    ctx.typeAliases.endResolution(key);
   }
 };
 
@@ -627,15 +617,15 @@ const resolveNamedTypeExpr = (
 
   const typeParamMap = typeParams ?? state.currentFunction?.typeParams;
   const aliasSymbol =
-    (typeof expr.symbol === "number" && ctx.typeAliases.templates.has(expr.symbol)
+    (typeof expr.symbol === "number" && ctx.typeAliases.hasTemplate(expr.symbol)
       ? expr.symbol
-      : undefined) ?? ctx.typeAliases.byName.get(name);
+      : undefined) ?? ctx.typeAliases.resolveName(name);
   const normalizeAliasArgs =
     aliasSymbol !== undefined &&
     (typeof expr.symbol !== "number" || expr.symbol === aliasSymbol);
   const aliasTemplate =
     normalizeAliasArgs && aliasSymbol !== undefined
-      ? ctx.typeAliases.templates.get(aliasSymbol)
+      ? ctx.typeAliases.getTemplate(aliasSymbol)
       : undefined;
   const normalizedAliasArgs =
     normalizeAliasArgs && aliasTemplate
@@ -655,11 +645,11 @@ const resolveNamedTypeExpr = (
       : undefined;
   const activeAlias =
     typeof aliasInstanceKey === "string"
-      ? ctx.typeAliases.resolving.get(aliasInstanceKey)
+      ? ctx.typeAliases.getActiveResolution(aliasInstanceKey)
       : undefined;
   const activeAliasKey =
     typeof activeAlias === "number"
-      ? ctx.typeAliases.resolvingKeysById.get(activeAlias)
+      ? ctx.typeAliases.getResolutionKey(activeAlias)
       : undefined;
   const typeParam =
     (typeof expr.symbol === "number"
@@ -698,9 +688,9 @@ const resolveNamedTypeExpr = (
   }
 
   const objectSymbol =
-    (typeof expr.symbol === "number" && ctx.objects.decls.has(expr.symbol)
+    (typeof expr.symbol === "number" && ctx.objects.hasDecl(expr.symbol)
       ? expr.symbol
-      : undefined) ?? ctx.objects.byName.get(name);
+      : undefined) ?? ctx.objects.resolveName(name);
   if (objectSymbol !== undefined) {
     const info = ensureObjectType(objectSymbol, ctx, state, resolvedTypeArgs);
     return info?.type ?? ctx.primitives.unknown;
@@ -809,21 +799,21 @@ export const getObjectTemplate = (
   ctx: TypingContext,
   state: TypingState
 ): ObjectTemplate | undefined => {
-  const cached = ctx.objects.templates.get(symbol);
+  const cached = ctx.objects.getTemplate(symbol);
   if (cached) {
     return cached;
   }
 
-  if (ctx.objects.resolving.has(symbol)) {
+  if (ctx.objects.isResolving(symbol)) {
     return undefined;
   }
 
-  const decl = ctx.objects.decls.get(symbol);
+  const decl = ctx.objects.getDecl(symbol);
   if (!decl) {
     return undefined;
   }
 
-  ctx.objects.resolving.add(symbol);
+  ctx.objects.beginResolving(symbol);
   try {
     const params =
       decl.typeParameters?.map((param) => ({
@@ -933,10 +923,10 @@ export const getObjectTemplate = (
       fields,
       baseNominal,
     };
-    ctx.objects.templates.set(symbol, template);
+    ctx.objects.registerTemplate(template);
     return template;
   } finally {
-    ctx.objects.resolving.delete(symbol);
+    ctx.objects.endResolving(symbol);
   }
 };
 
@@ -946,7 +936,7 @@ export const ensureObjectType = (
   state: TypingState,
   typeArgs: readonly TypeId[] = []
 ): ObjectTypeInfo | undefined => {
-  if (ctx.objects.resolving.has(symbol)) {
+  if (ctx.objects.isResolving(symbol)) {
     return undefined;
   }
 
@@ -976,7 +966,7 @@ export const ensureObjectType = (
   const key = makeObjectInstanceKey(symbol, normalized.applied);
   const cacheable = shouldCacheInstantiation(normalized);
   if (cacheable) {
-    const cached = ctx.objects.instances.get(key);
+    const cached = ctx.objects.getInstance(key);
     if (cached) {
       return cached;
     }
@@ -1046,8 +1036,7 @@ export const ensureObjectType = (
 
   const cacheableInstance = cacheable && !containsUnknownType(type, ctx);
   if (cacheableInstance) {
-    ctx.objects.instances.set(key, info);
-    ctx.objects.byNominal.set(nominal, info);
+    ctx.objects.addInstance(key, info);
     ctx.valueTypes.set(symbol, type);
   }
   return info;
@@ -1068,7 +1057,7 @@ export const getObjectInfoForNominal = (
   ctx: TypingContext,
   state: TypingState
 ): ObjectTypeInfo | undefined => {
-  const cached = ctx.objects.byNominal.get(nominal);
+  const cached = ctx.objects.getInstanceByNominal(nominal);
   if (cached) {
     return cached;
   }

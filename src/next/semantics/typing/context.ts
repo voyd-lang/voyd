@@ -4,6 +4,9 @@ import { DeclTable } from "../decls.js";
 import {
   BASE_OBJECT_NAME,
   DEFAULT_EFFECT_ROW,
+  FunctionStore,
+  ObjectStore,
+  TypeAliasStore,
   type TypingState,
   type TypingContext,
   type TypingInputs,
@@ -13,6 +16,9 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const decls = inputs.decls ?? new DeclTable();
   const arena = createTypeArena();
   const table = createTypeTable();
+  const functions = new FunctionStore();
+  const objects = new ObjectStore();
+  const typeAliases = new TypeAliasStore();
 
   return {
     symbolTable: inputs.symbolTable,
@@ -28,38 +34,9 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
       typeArguments: new Map(),
       instanceKeys: new Map(),
     },
-    functions: {
-      signatures: new Map(),
-      bySymbol: new Map(),
-      instances: new Map(),
-      instantiationInfo: new Map(),
-      instanceExprTypes: new Map(),
-      activeInstantiations: new Set(),
-    },
-    objects: {
-      templates: new Map(),
-      instances: new Map(),
-      byName: new Map(),
-      byNominal: new Map(),
-      decls: new Map(),
-      resolving: new Set(),
-      base: {
-        symbol: -1,
-        nominal: -1,
-        structural: -1,
-        type: -1,
-      },
-    },
-    typeAliases: {
-      templates: new Map(),
-      instances: new Map(),
-      instanceSymbols: new Map(),
-      validatedInstances: new Set(),
-      byName: new Map(),
-      resolving: new Map(),
-      resolvingKeysById: new Map(),
-      failedInstantiations: new Set(),
-    },
+    functions,
+    objects,
+    typeAliases,
     primitives: {
       cache: new Map(),
       bool: 0,
@@ -72,8 +49,8 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
 };
 
 export const seedBaseObjectName = (ctx: TypingContext): void => {
-  if (!ctx.objects.byName.has(BASE_OBJECT_NAME)) {
-    ctx.objects.byName.set(BASE_OBJECT_NAME, ctx.objects.base.symbol);
+  if (!ctx.objects.hasName(BASE_OBJECT_NAME)) {
+    ctx.objects.setName(BASE_OBJECT_NAME, ctx.objects.base.symbol);
   }
 };
 

@@ -187,7 +187,7 @@ const typeCallExpr = (
       return typeIntrinsicCall(record.name, args, ctx);
     }
 
-    const signature = ctx.functions.signatures.get(calleeExpr.symbol);
+    const signature = ctx.functions.getSignature(calleeExpr.symbol);
     if (signature) {
       const typeArguments = resolveTypeArguments(expr.typeArguments, ctx, state);
       return typeFunctionCall({
@@ -468,19 +468,16 @@ const typeGenericFunctionBody = ({
     ctx,
   });
   const key = formatFunctionInstanceKey(symbol, appliedTypeArgs);
-  if (
-    ctx.functions.instances.has(key) ||
-    ctx.functions.activeInstantiations.has(key)
-  ) {
+  if (ctx.functions.isCachedOrActive(key)) {
     return;
   }
 
-  const fn = ctx.functions.bySymbol.get(symbol);
+  const fn = ctx.functions.getFunction(symbol);
   if (!fn) {
     throw new Error(`missing function body for symbol ${symbol}`);
   }
 
-  ctx.functions.activeInstantiations.add(key);
+  ctx.functions.beginInstantiation(key);
   const nextTypeParams =
     signature.typeParamMap && previousFunction?.typeParams
       ? new Map([
@@ -511,17 +508,8 @@ const typeGenericFunctionBody = ({
       state,
       `function ${getSymbolName(symbol, ctx)} return type`
     );
-    ctx.functions.instances.set(key, expectedReturn);
-    recordFunctionInstantiation({
-      symbol,
-      key,
-      typeArgs: appliedTypeArgs,
-      ctx,
-    });
-    ctx.functions.instanceExprTypes.set(
-      key,
-      new Map(ctx.resolvedExprTypes)
-    );
+    ctx.functions.cacheInstance(key, expectedReturn, ctx.resolvedExprTypes);
+    ctx.functions.recordInstantiation(symbol, key, appliedTypeArgs);
   } finally {
     ctx.table.clearExprTypes();
     ctx.resolvedExprTypes.clear();
@@ -530,7 +518,7 @@ const typeGenericFunctionBody = ({
       ctx.resolvedExprTypes.set(id, type)
     );
     state.currentFunction = previousFunction;
-    ctx.functions.activeInstantiations.delete(key);
+    ctx.functions.endInstantiation(key);
   }
 };
 
@@ -561,14 +549,7 @@ const recordFunctionInstantiation = ({
   typeArgs: readonly TypeId[];
   ctx: TypingContext;
 }): void => {
-  let bySymbol = ctx.functions.instantiationInfo.get(symbol);
-  if (!bySymbol) {
-    bySymbol = new Map();
-    ctx.functions.instantiationInfo.set(symbol, bySymbol);
-  }
-  if (!bySymbol.has(key)) {
-    bySymbol.set(key, typeArgs);
-  }
+  ctx.functions.recordInstantiation(symbol, key, typeArgs);
 };
 
 const getAppliedTypeArguments = ({
@@ -853,7 +834,7 @@ const typeNominalObjectLiteral = (
   const targetSymbol =
     expr.targetSymbol ??
     namedTarget?.symbol ??
-    (namedTarget ? ctx.objects.byName.get(namedTarget.path[0]!) : undefined);
+    (namedTarget ? ctx.objects.resolveName(namedTarget.path[0]!) : undefined);
   if (typeof targetSymbol !== "number") {
     throw new Error("nominal object literal missing target type");
   }
@@ -1106,7 +1087,7 @@ const typeOverloadedCall = (
 
   const matches = options
     .map((symbol) => {
-      const signature = ctx.functions.signatures.get(symbol);
+      const signature = ctx.functions.getSignature(symbol);
       if (!signature) {
         throw new Error(
           `missing type signature for overloaded function ${getSymbolName(
