@@ -1,0 +1,9 @@
+pub obj Num { num: i32 }
+
+impl Num
+  fn double(self)
+    Num { num: self.num * 2 }
+
+pub fn main() -> i32
+  let n = Num { num: 2 }
+  n.double().num

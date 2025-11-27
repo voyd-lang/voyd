@@ -152,4 +152,32 @@ describe("binding pipeline", () => {
       expect(symbolTable.resolve("T", fnScope)).toBe(typeParamSymbol);
     }
   });
+
+  it("binds impl blocks and exposes methods as module-level functions", () => {
+    const name = "impl_methods.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    expect(binding.impls).toHaveLength(1);
+    const impl = binding.impls[0]!;
+    expect(impl.methods).toHaveLength(1);
+    const method = impl.methods[0]!;
+
+    expect(method.implId).toBe(impl.id);
+    expect(method.params[0]?.name).toBe("self");
+    expect(isIdentifierAtom(method.params[0]?.typeExpr) && method.params[0]?.typeExpr.value).toBe("Num");
+
+    const rootScope = symbolTable.rootScope;
+    const doubleSymbol = symbolTable.resolve("double", rootScope);
+    expect(doubleSymbol).toBe(method.symbol);
+
+    const implScope = binding.scopeByNode.get(impl.form!.syntaxId);
+    expect(implScope).toBeDefined();
+    if (implScope) {
+      expect(symbolTable.getScope(implScope).kind).toBe("impl");
+    }
+  });
 });

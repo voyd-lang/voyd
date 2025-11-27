@@ -15,9 +15,11 @@ import {
   parseFunctionDecl,
   parseObjectDecl,
   parseTypeAliasDecl,
+  parseImplDecl,
   type ParsedFunctionDecl,
   type ParsedObjectDecl,
   type ParsedTypeAliasDecl,
+  type ParsedImplDecl,
 } from "./parsing.js";
 import { rememberSyntax } from "./context.js";
 import {
@@ -54,6 +56,12 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     const typeDecl = parseTypeAliasDecl(entry);
     if (typeDecl) {
       bindTypeAlias(typeDecl, ctx, tracker);
+      continue;
+    }
+
+    const implDecl = parseImplDecl(entry);
+    if (implDecl) {
+      bindImplDecl(implDecl, ctx, tracker);
       continue;
     }
 
@@ -104,22 +112,34 @@ class BinderScopeTracker {
   }
 }
 
+type BindFunctionOptions = {
+  declarationScope?: ScopeId;
+  scopeParent?: ScopeId;
+  metadata?: Record<string, unknown>;
+  moduleIndex?: number;
+  selfTypeExpr?: Expr;
+};
+
 const bindFunctionDecl = (
   decl: ParsedFunctionDecl,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
+  options: BindFunctionOptions = {}
 ) => {
-  const declarationScope = tracker.current();
+  const declarationScope = options.declarationScope ?? tracker.current();
   rememberSyntax(decl.form, ctx);
-  const fnSymbol = ctx.symbolTable.declare({
-    name: decl.signature.name.value,
-    kind: "value",
-    declaredAt: decl.form.syntaxId,
-    metadata: { entity: "function" },
-  });
+  const fnSymbol = ctx.symbolTable.declare(
+    {
+      name: decl.signature.name.value,
+      kind: "value",
+      declaredAt: decl.form.syntaxId,
+      metadata: { entity: "function", ...options.metadata },
+    },
+    declarationScope
+  );
 
   const fnScope = ctx.symbolTable.createScope({
-    parent: tracker.current(),
+    parent: options.scopeParent ?? tracker.current(),
     kind: "function",
     owner: decl.form.syntaxId,
   });
@@ -129,7 +149,7 @@ const bindFunctionDecl = (
   let boundParams: ParameterDeclInput[] = [];
   tracker.enterScope(fnScope, () => {
     typeParameters = bindFunctionTypeParameters(decl, ctx);
-    boundParams = bindFunctionParameters(decl, ctx, tracker);
+    boundParams = bindFunctionParameters(decl, ctx, tracker, options);
   });
 
   const fnDecl = ctx.decls.registerFunction({
@@ -142,10 +162,12 @@ const bindFunctionDecl = (
     typeParameters,
     returnTypeExpr: decl.signature.returnType,
     body: decl.body,
-    moduleIndex: ctx.nextModuleIndex++,
+    moduleIndex: options.moduleIndex ?? ctx.nextModuleIndex++,
+    implId: undefined,
   });
 
   recordFunctionOverload(fnDecl, declarationScope, ctx);
+  return fnDecl;
 };
 
 const bindFunctionTypeParameters = (
@@ -172,10 +194,11 @@ const bindFunctionTypeParameters = (
 const bindFunctionParameters = (
   decl: ParsedFunctionDecl,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
+  options: BindFunctionOptions = {}
 ) => {
   const boundParams: ParameterDeclInput[] = [];
-  decl.signature.params.forEach((param) => {
+  decl.signature.params.forEach((param, index) => {
     const paramSymbol = ctx.symbolTable.declare({
       name: param.name,
       kind: "parameter",
@@ -187,7 +210,11 @@ const bindFunctionParameters = (
       label: param.label,
       symbol: paramSymbol,
       ast: param.ast,
-      typeExpr: param.typeExpr,
+      typeExpr:
+        param.typeExpr ??
+        (options.selfTypeExpr && index === 0 && param.name === "self"
+          ? options.selfTypeExpr
+          : undefined),
     });
   });
 
@@ -318,6 +345,89 @@ const bindObjectDecl = (
     fields,
     typeParameters,
     moduleIndex: ctx.nextModuleIndex++,
+  });
+};
+
+const bindImplDecl = (
+  decl: ParsedImplDecl,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  rememberSyntax(decl.form, ctx);
+  rememberSyntax(decl.target as Syntax, ctx);
+  rememberSyntax(decl.body, ctx);
+
+  const implName = isIdentifierAtom(decl.target)
+    ? `${decl.target.value}::impl`
+    : `impl#${decl.form.syntaxId}`;
+
+  const implSymbol = ctx.symbolTable.declare(
+    {
+      name: implName,
+      kind: "impl",
+      declaredAt: decl.form.syntaxId,
+      metadata: { entity: "impl" },
+    },
+    tracker.current()
+  );
+
+  const implScope = ctx.symbolTable.createScope({
+    parent: tracker.current(),
+    kind: "impl",
+    owner: decl.form.syntaxId,
+  });
+  ctx.scopeByNode.set(decl.form.syntaxId, implScope);
+  ctx.scopeByNode.set(decl.body.syntaxId, implScope);
+
+  const typeParameters: TypeParameterDecl[] = [];
+  const methods: ReturnType<typeof bindFunctionDecl>[] = [];
+  tracker.enterScope(implScope, () => {
+    decl.typeParameters.forEach((param) => {
+      rememberSyntax(param, ctx);
+      const paramSymbol = ctx.symbolTable.declare({
+        name: param.value,
+        kind: "type-parameter",
+        declaredAt: param.syntaxId,
+      });
+      typeParameters.push({
+        name: param.value,
+        symbol: paramSymbol,
+        ast: param,
+      });
+    });
+
+    decl.body.rest.forEach((entry) => {
+      if (!isForm(entry)) {
+        return;
+      }
+      const parsedFn = parseFunctionDecl(entry);
+      if (!parsedFn) {
+        throw new Error("impl body supports only function declarations");
+      }
+      const method = bindFunctionDecl(parsedFn, ctx, tracker, {
+        declarationScope: ctx.symbolTable.rootScope,
+        scopeParent: implScope,
+        metadata: { entity: "function", impl: implSymbol },
+        selfTypeExpr: decl.target,
+      });
+      methods.push(method);
+    });
+  });
+
+  const implDecl = ctx.decls.registerImpl({
+    form: decl.form,
+    visibility: decl.visibility,
+    symbol: implSymbol,
+    target: decl.target,
+    trait: decl.trait,
+    typeParameters,
+    methods,
+    scope: implScope,
+    moduleIndex: ctx.nextModuleIndex++,
+  });
+
+  methods.forEach((method) => {
+    method.implId = implDecl.id;
   });
 };
 

@@ -5,6 +5,7 @@ import {
   lowerFunctionDecl,
   lowerObjectDecl,
   lowerTypeAliasDecl,
+  lowerImplDecl,
 } from "./declarations.js";
 import type { LowerInputs } from "./types.js";
 
@@ -22,6 +23,11 @@ export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
 
     if (decl.kind === "object") {
       lowerObjectDecl(decl.object, ctx);
+      continue;
+    }
+
+    if (decl.kind === "impl") {
+      lowerImplDecl(decl.impl, ctx);
       continue;
     }
 

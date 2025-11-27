@@ -9,7 +9,13 @@ import type {
   HirPattern,
   HirTypeParameter,
 } from "../hir/index.js";
-import type { BindingResult, BoundObject, BoundFunction, BoundTypeAlias } from "../binding/binding.js";
+import type {
+  BindingResult,
+  BoundObject,
+  BoundFunction,
+  BoundTypeAlias,
+  BoundImpl,
+} from "../binding/binding.js";
 import type { NodeId, OverloadSetId, ScopeId, SymbolId } from "../ids.js";
 import type { SymbolTable } from "../binder/index.js";
 
@@ -41,7 +47,8 @@ export type IdentifierResolution =
 export type ModuleDeclaration =
   | { kind: "function"; order: number; fn: BoundFunction }
   | { kind: "type-alias"; order: number; alias: BoundTypeAlias }
-  | { kind: "object"; order: number; object: BoundObject };
+  | { kind: "object"; order: number; object: BoundObject }
+  | { kind: "impl"; order: number; impl: BoundImpl };
 
 export interface LoweredTypeInfo {
   baseSymbol?: SymbolId;

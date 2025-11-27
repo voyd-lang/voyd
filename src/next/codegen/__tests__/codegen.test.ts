@@ -282,4 +282,9 @@ describe("next codegen", () => {
     const main = loadMain("illegal_cast.voyd");
     expect(main()).toBe(17);
   });
+
+  it("emits wasm for impl methods on nominal objects", () => {
+    const main = loadMain("impl_methods.voyd");
+    expect(main()).toBe(4);
+  });
 });

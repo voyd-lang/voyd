@@ -41,6 +41,15 @@ export interface ParsedObjectField {
   ast: Syntax;
 }
 
+export interface ParsedImplDecl {
+  form: Form;
+  visibility: HirVisibility;
+  target: Expr;
+  trait?: Expr;
+  typeParameters: readonly IdentifierAtom[];
+  body: Form;
+}
+
 interface ParsedFunctionSignature {
   name: IdentifierAtom;
   params: SignatureParam[];
@@ -156,6 +165,36 @@ export const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {
   const fields = parseObjectFields(body);
 
   return { form, visibility, name, base, body, fields, typeParameters };
+};
+
+export const parseImplDecl = (form: Form): ParsedImplDecl | null => {
+  let index = 0;
+  let visibility: HirVisibility = "module";
+  const first = form.at(0);
+
+  if (isIdentifierWithValue(first, "pub")) {
+    visibility = "public";
+    index += 1;
+  }
+
+  const keyword = form.at(index);
+  if (!isIdentifierWithValue(keyword, "impl")) {
+    return null;
+  }
+
+  const head = form.at(index + 1);
+  if (!head) {
+    throw new Error("impl declaration missing target type");
+  }
+
+  const body = form.at(index + 2);
+  if (!isForm(body) || !body.calls("block")) {
+    throw new Error("impl body must be a block");
+  }
+
+  const { target, trait, typeParameters } = parseImplHead(head);
+
+  return { form, visibility, target, trait, typeParameters, body };
 };
 
 const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
@@ -323,6 +362,33 @@ const parseTypeParameters = (form: Form): IdentifierAtom[] =>
     }
     return entry;
   });
+
+const parseImplHead = (
+  expr: Expr
+): { target: Expr; trait?: Expr; typeParameters: IdentifierAtom[] } => {
+  if (isForm(expr) && formCallsInternal(expr, "generics")) {
+    const targetExpr = expr.at(1);
+    if (!targetExpr) {
+      throw new Error("impl generics must be followed by a target type");
+    }
+    return {
+      target: targetExpr,
+      typeParameters: parseTypeParameters(expr),
+    };
+  }
+
+  if (isForm(expr) && isIdentifierAtom(expr.first) && isForm(expr.second)) {
+    const generics = expr.second;
+    if (formCallsInternal(generics, "generics")) {
+      return {
+        target: expr,
+        typeParameters: parseTypeParameters(generics),
+      };
+    }
+  }
+
+  return { target: expr, typeParameters: [] };
+};
 
 const parseObjectFields = (body: Form): ParsedObjectField[] =>
   body.rest.map((entry) => {
