@@ -27,6 +27,7 @@ export const toBindingResult = (ctx: BindingContext): BindingResult => ({
   functions: ctx.decls.functions,
   typeAliases: ctx.decls.typeAliases,
   objects: ctx.decls.objects,
+  traits: ctx.decls.traits,
   impls: ctx.decls.impls,
   overloads: ctx.overloads,
   overloadBySymbol: ctx.overloadBySymbol,

@@ -16,10 +16,13 @@ import {
   parseObjectDecl,
   parseTypeAliasDecl,
   parseImplDecl,
+  parseTraitDecl,
   type ParsedFunctionDecl,
   type ParsedObjectDecl,
   type ParsedTypeAliasDecl,
   type ParsedImplDecl,
+  type ParsedTraitDecl,
+  type ParsedTraitMethod,
 } from "./parsing.js";
 import { rememberSyntax } from "./context.js";
 import {
@@ -27,12 +30,13 @@ import {
   reportOverloadNameCollision,
 } from "./overloads.js";
 import type { BindingContext } from "./types.js";
-import type { ScopeId } from "../ids.js";
+import type { ScopeId, SymbolId } from "../ids.js";
 import type { SymbolTable } from "../binder/index.js";
 import type {
   ObjectFieldDecl,
   ParameterDeclInput,
   TypeParameterDecl,
+  TraitMethodDeclInput,
 } from "../decls.js";
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
@@ -56,6 +60,12 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     const typeDecl = parseTypeAliasDecl(entry);
     if (typeDecl) {
       bindTypeAlias(typeDecl, ctx, tracker);
+      continue;
+    }
+
+    const traitDecl = parseTraitDecl(entry);
+    if (traitDecl) {
+      bindTraitDecl(traitDecl, ctx, tracker);
       continue;
     }
 
@@ -173,23 +183,8 @@ const bindFunctionDecl = (
 const bindFunctionTypeParameters = (
   decl: ParsedFunctionDecl,
   ctx: BindingContext
-): TypeParameterDecl[] => {
-  const typeParameters: TypeParameterDecl[] = [];
-  decl.signature.typeParameters.forEach((param) => {
-    rememberSyntax(param, ctx);
-    const paramSymbol = ctx.symbolTable.declare({
-      name: param.value,
-      kind: "type-parameter",
-      declaredAt: param.syntaxId,
-    });
-    typeParameters.push({
-      name: param.value,
-      symbol: paramSymbol,
-      ast: param,
-    });
-  });
-  return typeParameters;
-};
+): TypeParameterDecl[] =>
+  bindTypeParameters(decl.signature.typeParameters, ctx);
 
 const bindFunctionParameters = (
   decl: ParsedFunctionDecl,
@@ -348,6 +343,135 @@ const bindObjectDecl = (
   });
 };
 
+const bindTraitDecl = (
+  decl: ParsedTraitDecl,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  rememberSyntax(decl.form, ctx);
+  rememberSyntax(decl.name, ctx);
+  rememberSyntax(decl.body, ctx);
+
+  const symbol = ctx.symbolTable.declare({
+    name: decl.name.value,
+    kind: "trait",
+    declaredAt: decl.form.syntaxId,
+    metadata: { entity: "trait" },
+  });
+
+  const traitScope = ctx.symbolTable.createScope({
+    parent: tracker.current(),
+    kind: "trait",
+    owner: decl.form.syntaxId,
+  });
+  ctx.scopeByNode.set(decl.form.syntaxId, traitScope);
+  ctx.scopeByNode.set(decl.body.syntaxId, traitScope);
+
+  let typeParameters: TypeParameterDecl[] = [];
+  const methods: TraitMethodDeclInput[] = [];
+
+  tracker.enterScope(traitScope, () => {
+    typeParameters = bindTypeParameters(decl.typeParameters, ctx);
+
+    decl.methods.forEach((method) => {
+      methods.push(
+        bindTraitMethod({
+          decl: method,
+          ctx,
+          tracker,
+          traitScope,
+          traitSymbol: symbol,
+        })
+      );
+    });
+  });
+
+  ctx.decls.registerTrait({
+    name: decl.name.value,
+    form: decl.form,
+    visibility: decl.visibility,
+    symbol,
+    typeParameters,
+    methods,
+    scope: traitScope,
+    moduleIndex: ctx.nextModuleIndex++,
+  });
+};
+
+const bindTraitMethod = ({
+  decl,
+  ctx,
+  tracker,
+  traitScope,
+  traitSymbol,
+}: {
+  decl: ParsedTraitMethod;
+  ctx: BindingContext;
+  tracker: BinderScopeTracker;
+  traitScope: ScopeId;
+  traitSymbol: SymbolId;
+}): TraitMethodDeclInput => {
+  rememberSyntax(decl.form, ctx);
+  rememberSyntax(decl.body, ctx);
+
+  const methodSymbol = ctx.symbolTable.declare(
+    {
+      name: decl.signature.name.value,
+      kind: "value",
+      declaredAt: decl.form.syntaxId,
+      metadata: { entity: "trait-method", trait: traitSymbol },
+    },
+    traitScope
+  );
+
+  const methodScope = ctx.symbolTable.createScope({
+    parent: traitScope,
+    kind: "function",
+    owner: decl.form.syntaxId,
+  });
+  ctx.scopeByNode.set(decl.form.syntaxId, methodScope);
+
+  let typeParameters: TypeParameterDecl[] = [];
+  let params: ParameterDeclInput[] = [];
+  tracker.enterScope(methodScope, () => {
+    typeParameters = bindTypeParameters(decl.signature.typeParameters, ctx);
+    params = bindTraitMethodParameters(decl, ctx);
+    bindExpr(decl.body, ctx, tracker);
+  });
+
+  return {
+    name: decl.signature.name.value,
+    form: decl.form,
+    symbol: methodSymbol,
+    scope: methodScope,
+    params,
+    typeParameters,
+    returnTypeExpr: decl.signature.returnType,
+    defaultBody: decl.body,
+  };
+};
+
+const bindTraitMethodParameters = (
+  decl: ParsedTraitMethod,
+  ctx: BindingContext
+): ParameterDeclInput[] =>
+  decl.signature.params.map((param) => {
+    const paramSymbol = ctx.symbolTable.declare({
+      name: param.name,
+      kind: "parameter",
+      declaredAt: param.ast.syntaxId,
+    });
+    rememberSyntax(param.ast, ctx);
+    rememberSyntax(param.typeExpr as Syntax, ctx);
+    return {
+      name: param.name,
+      label: param.label,
+      symbol: paramSymbol,
+      ast: param.ast,
+      typeExpr: param.typeExpr,
+    };
+  });
+
 const bindImplDecl = (
   decl: ParsedImplDecl,
   ctx: BindingContext,
@@ -355,6 +479,7 @@ const bindImplDecl = (
 ): void => {
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.target as Syntax, ctx);
+  rememberSyntax(decl.trait as Syntax, ctx);
   rememberSyntax(decl.body, ctx);
 
   const implName = isIdentifierAtom(decl.target)
@@ -644,6 +769,24 @@ const declarePatternBindings = (
 
   throw new Error("unsupported pattern form in declaration");
 };
+
+const bindTypeParameters = (
+  params: readonly IdentifierAtom[],
+  ctx: BindingContext
+): TypeParameterDecl[] =>
+  params.map((param) => {
+    rememberSyntax(param, ctx);
+    const paramSymbol = ctx.symbolTable.declare({
+      name: param.value,
+      kind: "type-parameter",
+      declaredAt: param.syntaxId,
+    });
+    return {
+      name: param.value,
+      symbol: paramSymbol,
+      ast: param,
+    };
+  });
 
 const ensureForm = (expr: Expr | undefined, message: string): Form => {
   if (!isForm(expr)) {

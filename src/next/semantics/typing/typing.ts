@@ -3,6 +3,7 @@ import { runInferencePass, runStrictTypeCheck } from "./inference.js";
 import {
   registerFunctionSignatures,
   registerObjectDecls,
+  registerTraits,
   registerTypeAliases,
   seedBaseObjectType,
   seedPrimitiveTypes,
@@ -21,6 +22,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   seedBaseObjectType(ctx);
   registerTypeAliases(ctx, state);
   registerObjectDecls(ctx);
+  registerTraits(ctx);
   registerFunctionSignatures(ctx, state);
   registerImpls(ctx, state);
 

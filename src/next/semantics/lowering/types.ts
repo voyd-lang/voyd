@@ -14,6 +14,7 @@ import type {
   BoundObject,
   BoundFunction,
   BoundTypeAlias,
+  BoundTrait,
   BoundImpl,
 } from "../binding/binding.js";
 import type { NodeId, OverloadSetId, ScopeId, SymbolId } from "../ids.js";
@@ -48,6 +49,7 @@ export type ModuleDeclaration =
   | { kind: "function"; order: number; fn: BoundFunction }
   | { kind: "type-alias"; order: number; alias: BoundTypeAlias }
   | { kind: "object"; order: number; object: BoundObject }
+  | { kind: "trait"; order: number; trait: BoundTrait }
   | { kind: "impl"; order: number; impl: BoundImpl };
 
 export interface LoweredTypeInfo {

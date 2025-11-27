@@ -114,6 +114,17 @@ export const registerObjectDecls = (ctx: TypingContext): void => {
   }
 };
 
+export const registerTraits = (ctx: TypingContext): void => {
+  for (const item of ctx.hir.items.values()) {
+    if (item.kind !== "trait") continue;
+    ctx.traits.registerDecl(item);
+    const name = getSymbolName(item.symbol, ctx);
+    if (!ctx.traits.hasName(name)) {
+      ctx.traits.setName(name, item.symbol);
+    }
+  }
+};
+
 export const registerFunctionSignatures = (
   ctx: TypingContext,
   state: TypingState
@@ -310,6 +321,11 @@ export const registerImpls = (
       ctx.primitives.unknown,
       typeParamMap
     );
+    validateImplTraitMethods({
+      impl: item,
+      implDecl: decl,
+      ctx,
+    });
 
     item.with?.forEach((entry) => {
       if (entry.kind === "member-import") {
@@ -338,4 +354,48 @@ export const registerImpls = (
       );
     });
   }
+};
+
+const validateImplTraitMethods = ({
+  impl,
+  implDecl,
+  ctx,
+}: {
+  impl: HirImplDecl;
+  implDecl?: ReturnType<TypingContext["decls"]["getImpl"]>;
+  ctx: TypingContext;
+}): void => {
+  const traitSymbol =
+    impl.trait?.typeKind === "named" ? impl.trait.symbol : undefined;
+  if (typeof traitSymbol !== "number" || !implDecl) {
+    return;
+  }
+
+  const traitDecl = ctx.decls.getTrait(traitSymbol);
+  if (!traitDecl) {
+    return;
+  }
+
+  const implMethodNames = new Set(
+    implDecl.methods.map((method) => getSymbolName(method.symbol, ctx))
+  );
+  const missing = traitDecl.methods
+    .filter((method) => !method.defaultBody)
+    .map((method) => getSymbolName(method.symbol, ctx))
+    .filter((name) => !implMethodNames.has(name));
+
+  if (missing.length === 0) {
+    return;
+  }
+
+  const targetName =
+    impl.target.typeKind === "named" && typeof impl.target.symbol === "number"
+      ? getSymbolName(impl.target.symbol, ctx)
+      : "impl target";
+  const traitName = getSymbolName(traitSymbol, ctx);
+  const plural = missing.length > 1 ? "s" : "";
+  const missingList = missing.join(", ");
+  throw new Error(
+    `impl ${traitName} for ${targetName} is missing trait method${plural}: ${missingList}`
+  );
 };

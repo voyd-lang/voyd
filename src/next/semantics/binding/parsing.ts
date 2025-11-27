@@ -41,6 +41,21 @@ export interface ParsedObjectField {
   ast: Syntax;
 }
 
+export interface ParsedTraitMethod {
+  form: Form;
+  signature: ParsedFunctionSignature;
+  body?: Expr;
+}
+
+export interface ParsedTraitDecl {
+  form: Form;
+  visibility: HirVisibility;
+  name: IdentifierAtom;
+  body: Form;
+  typeParameters: readonly IdentifierAtom[];
+  methods: readonly ParsedTraitMethod[];
+}
+
 export interface ParsedImplDecl {
   form: Form;
   visibility: HirVisibility;
@@ -109,6 +124,33 @@ export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
   };
 };
 
+const parseTraitMethod = (form: Form): ParsedTraitMethod => {
+  const keyword = form.at(0);
+  if (!isIdentifierWithValue(keyword, "fn")) {
+    throw new Error("trait methods must start with 'fn'");
+  }
+
+  let signatureExpr: Expr | undefined = form.at(1);
+  let bodyExpr: Expr | undefined = form.at(2);
+
+  if (!bodyExpr && isForm(signatureExpr) && signatureExpr.calls("=")) {
+    bodyExpr = signatureExpr.at(2);
+    signatureExpr = signatureExpr.at(1);
+  }
+
+  if (!signatureExpr) {
+    throw new Error("trait method missing signature");
+  }
+
+  const signatureForm = ensureForm(
+    signatureExpr,
+    "fn signature must be a form"
+  );
+  const signature = parseFunctionSignature(signatureForm);
+
+  return { form, signature, body: bodyExpr };
+};
+
 export const parseTypeAliasDecl = (form: Form): ParsedTypeAliasDecl | null => {
   let index = 0;
   let visibility: HirVisibility = "module";
@@ -167,6 +209,45 @@ export const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {
   return { form, visibility, name, base, body, fields, typeParameters };
 };
 
+export const parseTraitDecl = (form: Form): ParsedTraitDecl | null => {
+  let index = 0;
+  let visibility: HirVisibility = "module";
+  const first = form.at(0);
+
+  if (isIdentifierWithValue(first, "pub")) {
+    visibility = "public";
+    index += 1;
+  }
+
+  const keyword = form.at(index);
+  if (!isIdentifierWithValue(keyword, "trait")) {
+    return null;
+  }
+
+  const head = form.at(index + 1);
+  if (!head) {
+    throw new Error("trait declaration missing name");
+  }
+  const { name, typeParameters } = parseNamedTypeHead(head);
+
+  const body = ensureForm(
+    form.at(index + 2),
+    "trait declaration requires a body block"
+  );
+  if (!body.calls("block")) {
+    throw new Error("trait body must be a block");
+  }
+
+  const methods = body.rest.map((entry) => {
+    if (!isForm(entry)) {
+      throw new Error("trait body supports only function declarations");
+    }
+    return parseTraitMethod(entry);
+  });
+
+  return { form, visibility, name, body, typeParameters, methods };
+};
+
 export const parseImplDecl = (form: Form): ParsedImplDecl | null => {
   let index = 0;
   let visibility: HirVisibility = "module";
@@ -182,17 +263,29 @@ export const parseImplDecl = (form: Form): ParsedImplDecl | null => {
     return null;
   }
 
-  const head = form.at(index + 1);
-  if (!head) {
+  const headEntries: Expr[] = [];
+  let body: Expr | undefined;
+  for (let entryIndex = index + 1; entryIndex < form.length; entryIndex += 1) {
+    const entry = form.at(entryIndex);
+    if (isForm(entry) && entry.calls("block")) {
+      body = entry;
+      break;
+    }
+    if (!entry) {
+      continue;
+    }
+    headEntries.push(entry);
+  }
+
+  if (headEntries.length === 0) {
     throw new Error("impl declaration missing target type");
   }
 
-  const body = form.at(index + 2);
   if (!isForm(body) || !body.calls("block")) {
     throw new Error("impl body must be a block");
   }
 
-  const { target, trait, typeParameters } = parseImplHead(head);
+  const { target, trait, typeParameters } = parseImplHead(headEntries);
 
   return { form, visibility, target, trait, typeParameters, body };
 };
@@ -364,8 +457,63 @@ const parseTypeParameters = (form: Form): IdentifierAtom[] =>
   });
 
 const parseImplHead = (
-  expr: Expr
+  entries: readonly Expr[]
 ): { target: Expr; trait?: Expr; typeParameters: IdentifierAtom[] } => {
+  if (entries.length === 0) {
+    throw new Error("impl declaration missing target type");
+  }
+
+  const forIndex = entries.findIndex((entry) =>
+    isIdentifierWithValue(entry, "for")
+  );
+  if (forIndex !== -1) {
+    if (forIndex === 0 || forIndex === entries.length - 1) {
+      throw new Error("impl 'for' clause missing trait or target");
+    }
+    const traitExpr = entries[forIndex - 1];
+    const targetExpr = entries[forIndex + 1];
+    if (!traitExpr || !targetExpr) {
+      throw new Error("impl 'for' clause missing target type");
+    }
+
+    const leading = entries.slice(0, Math.max(0, forIndex - 1));
+    const trailing = entries.slice(forIndex + 2);
+    let typeParameters: IdentifierAtom[] = [];
+    leading.forEach((entry) => {
+      if (isForm(entry) && formCallsInternal(entry, "generics")) {
+        typeParameters = [...typeParameters, ...parseTypeParameters(entry)];
+        return;
+      }
+      throw new Error("impl head contains unexpected entries");
+    });
+    if (trailing.length > 0) {
+      throw new Error("impl head contains unexpected entries");
+    }
+
+    const trait = parseImplHeadTarget(traitExpr);
+    const target = parseImplHeadTarget(targetExpr);
+
+    return {
+      trait: trait.target,
+      target: target.target,
+      typeParameters: [
+        ...typeParameters,
+        ...trait.typeParameters,
+        ...target.typeParameters,
+      ],
+    };
+  }
+
+  if (entries.length !== 1) {
+    throw new Error("impl declaration missing target type");
+  }
+
+  return parseImplHeadTarget(entries[0]!);
+};
+
+const parseImplHeadTarget = (
+  expr: Expr
+): { target: Expr; typeParameters: IdentifierAtom[] } => {
   if (isForm(expr) && formCallsInternal(expr, "generics")) {
     const targetExpr = expr.at(1);
     if (!targetExpr) {

@@ -180,4 +180,41 @@ describe("binding pipeline", () => {
       expect(symbolTable.getScope(implScope).kind).toBe("impl");
     }
   });
+
+  it("binds trait declarations and trait targets on impl blocks", () => {
+    const name = "trait_area.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    expect(binding.traits).toHaveLength(1);
+    const trait = binding.traits[0]!;
+    expect(symbolTable.getSymbol(trait.symbol).kind).toBe("trait");
+    const traitScope =
+      trait.form && binding.scopeByNode.get(trait.form.syntaxId);
+    expect(traitScope).toBeDefined();
+    if (traitScope) {
+      expect(symbolTable.getScope(traitScope).kind).toBe("trait");
+    }
+
+    const methodNames = trait.methods.map(
+      (method) => symbolTable.getSymbol(method.symbol).name
+    );
+    expect(methodNames).toEqual(["area", "double_area"]);
+    const areaMethod = trait.methods.find(
+      (method) => symbolTable.getSymbol(method.symbol).name === "area"
+    );
+    const doubleMethod = trait.methods.find(
+      (method) => symbolTable.getSymbol(method.symbol).name === "double_area"
+    );
+    expect(areaMethod?.defaultBody).toBeUndefined();
+    expect(doubleMethod?.defaultBody).toBeDefined();
+    expect(doubleMethod?.params[0]?.name).toBe("self");
+
+    const impl = binding.impls[0];
+    expect(impl?.trait).toBeDefined();
+    expect(isIdentifierAtom(impl?.trait) && impl?.trait.value).toBe("Area");
+  });
 });
