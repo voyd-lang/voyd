@@ -17,11 +17,10 @@ Helpful commands:
 
 # Testing
 
-- `npm test` (runs vitest suite)
+- `npm test` (runs vitest suite). Always confirm this passes before finishing.
 - `npx vitest <path-to-test>`
 
-You should generally add unit tests (especially e2e ones like those in
-`src/__tests__) when adding new features or fixing bugs.
+You should generally add unit tests (especially e2e ones)
 
 # Style Guide
 

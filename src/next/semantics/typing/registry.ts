@@ -144,9 +144,11 @@ export const registerFunctionSignatures = (
       typeof fnDecl?.implId === "number"
         ? ctx.decls.getImplById(fnDecl.implId)
         : undefined;
+    const fnTypeParameters = item.typeParameters ?? fnDecl?.typeParameters ?? [];
+    const implTypeParameters = implDecl?.typeParameters ?? [];
     const typeParameterDecls = [
-      ...(implDecl?.typeParameters ?? []),
-      ...(item.typeParameters ?? fnDecl?.typeParameters ?? []),
+      ...fnTypeParameters,
+      ...implTypeParameters,
     ];
     const paramMap = new Map<SymbolId, TypeId>();
     const typeParams =
