@@ -291,10 +291,14 @@ export const registerImpls = (
       ctx.primitives.unknown,
       typeParamMap
     );
-    const nominalTarget = getNominalComponent(
-      item.target.typeId as TypeId,
-      ctx
-    );
+    const targetType = item.target.typeId as TypeId | undefined;
+    if (typeof targetType !== "number") {
+      throw new Error("impl target missing type");
+    }
+    const nominalTarget = getNominalComponent(targetType, ctx);
+    if (typeof nominalTarget !== "number") {
+      throw new Error("impl target must be a nominal object type");
+    }
     if (typeof nominalTarget === "number") {
       item.target.typeId = nominalTarget;
     }

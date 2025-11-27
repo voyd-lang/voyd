@@ -463,6 +463,13 @@ describe("semanticsPipeline", () => {
     ).toBe(true);
   });
 
+  it("rejects impls that target structural types", () => {
+    const ast = loadAst("impl_structural_target.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /nominal object type/
+    );
+  });
+
   it("requires parameter annotations for overloaded functions", () => {
     const binding = bindFixture("function_overloads_missing_annotation.voyd");
     expect(

@@ -182,9 +182,14 @@ export const lowerImplDecl = (
     ? lowerTypeExpr(impl.trait, ctx, implScope ?? ctx.symbolTable.rootScope)
     : undefined;
 
-  const members = impl.methods
-    .map((method) => findFunctionItemId(method.symbol, ctx))
-    .filter((id): id is number => typeof id === "number");
+  const members = impl.methods.map((method) => {
+    const memberId = findFunctionItemId(method.symbol, ctx);
+    if (typeof memberId !== "number") {
+      const { name } = ctx.symbolTable.getSymbol(method.symbol);
+      throw new Error(`missing function item for impl method ${name}`);
+    }
+    return memberId;
+  });
 
   const syntax = impl.form ?? impl.target;
   const implId = ctx.builder.addItem({

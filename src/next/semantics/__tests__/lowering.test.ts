@@ -14,6 +14,8 @@ import {
   type HirObjectLiteralExpr,
   type HirTypeAlias,
 } from "../hir/nodes.js";
+import { createLowerContext } from "../lowering/context.js";
+import { lowerImplDecl } from "../lowering/declarations.js";
 import { runLoweringPipeline } from "../lowering/lowering.js";
 import { toSourceSpan } from "../utils.js";
 import { loadAst } from "./load-ast.js";
@@ -259,5 +261,32 @@ describe("lowering pipeline", () => {
     );
 
     expect(callExpressions.length).toBeGreaterThan(0);
+  });
+
+  it("throws when an impl references a method missing from the lowered module", () => {
+    const name = "impl_methods.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+    const ctx = createLowerContext({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+    });
+
+    expect(() => lowerImplDecl(binding.impls[0]!, ctx)).toThrow(
+      /missing function item/
+    );
   });
 });
