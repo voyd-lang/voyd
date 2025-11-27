@@ -6,6 +6,7 @@ import {
   registerTypeAliases,
   seedBaseObjectType,
   seedPrimitiveTypes,
+  registerImpls,
 } from "./registry.js";
 import { validateTypedProgram } from "./validation.js";
 import type { TypingInputs, TypingResult } from "./types.js";
@@ -21,6 +22,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   registerTypeAliases(ctx, state);
   registerObjectDecls(ctx);
   registerFunctionSignatures(ctx, state);
+  registerImpls(ctx, state);
 
   runInferencePass(ctx, state);
   runStrictTypeCheck(ctx, state);
@@ -29,6 +31,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   return {
     arena: ctx.arena,
     table: ctx.table,
+    functions: ctx.functions,
     resolvedExprTypes: new Map(ctx.resolvedExprTypes),
     valueTypes: new Map(ctx.valueTypes),
     objectsByNominal: ctx.objects.snapshotByNominal(),

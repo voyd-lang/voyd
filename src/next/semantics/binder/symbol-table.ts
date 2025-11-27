@@ -90,8 +90,10 @@ export class SymbolTable {
     this.scopeStack.pop();
   }
 
-  declare(symbol: Omit<SymbolRecord, "id" | "scope">): SymbolId {
-    const scope = this.currentScope();
+  declare(
+    symbol: Omit<SymbolRecord, "id" | "scope">,
+    scope: ScopeId = this.currentScope()
+  ): SymbolId {
     const id = this.nextSymbol++;
     const record: SymbolRecord = { ...symbol, id, scope };
     this.symbolRecords[id] = record;

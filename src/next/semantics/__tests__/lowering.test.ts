@@ -9,10 +9,13 @@ import {
   type HirFunction,
   type HirIdentifierExpr,
   type HirIfExpr,
+  type HirImplDecl,
   type HirLetStatement,
   type HirObjectLiteralExpr,
   type HirTypeAlias,
 } from "../hir/nodes.js";
+import { createLowerContext } from "../lowering/context.js";
+import { lowerImplDecl } from "../lowering/declarations.js";
 import { runLoweringPipeline } from "../lowering/lowering.js";
 import { toSourceSpan } from "../utils.js";
 import { loadAst } from "./load-ast.js";
@@ -204,5 +207,86 @@ describe("lowering pipeline", () => {
     });
 
     expect(argNames.sort()).toEqual(["v1", "v2"]);
+  });
+
+  it("lowers impl methods into functions and impl items", () => {
+    const name = "impl_methods.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+    });
+
+    const doubleSymbol = symbolTable.resolve("double", symbolTable.rootScope)!;
+    const doubleFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === doubleSymbol
+    );
+    expect(doubleFn).toBeDefined();
+
+    const impl = Array.from(hir.items.values()).find(
+      (item): item is HirImplDecl => item.kind === "impl"
+    );
+    expect(impl).toBeDefined();
+    expect(impl?.members).toContain(doubleFn?.id);
+    expect(impl?.target.typeKind).toBe("named");
+    if (impl?.target.typeKind === "named") {
+      expect(impl.target.path).toEqual(["Num"]);
+    }
+
+    const callExpressions = Array.from(hir.expressions.values()).filter(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") return false;
+        const callee = hir.expressions.get(expr.callee);
+        return (
+          callee?.exprKind === "identifier" &&
+          (callee as HirIdentifierExpr).symbol === doubleSymbol
+        );
+      }
+    );
+
+    expect(callExpressions.length).toBeGreaterThan(0);
+  });
+
+  it("throws when an impl references a method missing from the lowered module", () => {
+    const name = "impl_methods.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+    const ctx = createLowerContext({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+    });
+
+    expect(() => lowerImplDecl(binding.impls[0]!, ctx)).toThrow(
+      /missing function item/
+    );
   });
 });

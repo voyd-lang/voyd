@@ -14,6 +14,7 @@ import {
   type ObjectDecl,
   type ParameterDecl,
   type TypeAliasDecl,
+  type ImplDecl,
 } from "../decls.js";
 
 export interface BindingInputs {
@@ -28,6 +29,7 @@ export interface BindingResult {
   functions: readonly BoundFunction[];
   typeAliases: readonly BoundTypeAlias[];
   objects: readonly BoundObject[];
+  impls: readonly BoundImpl[];
   overloads: Map<OverloadSetId, BoundOverloadSet>;
   overloadBySymbol: Map<SymbolId, OverloadSetId>;
   diagnostics: Diagnostic[];
@@ -37,6 +39,7 @@ export type BoundFunction = FunctionDecl;
 export type BoundTypeAlias = TypeAliasDecl;
 export type BoundParameter = ParameterDecl;
 export type BoundObject = ObjectDecl;
+export type BoundImpl = ImplDecl;
 
 export interface BoundOverloadSet {
   id: OverloadSetId;

@@ -31,6 +31,7 @@ export interface TypingInputs {
 export interface TypingResult {
   arena: TypeArena;
   table: TypeTable;
+  functions: FunctionStore;
   resolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
   objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;

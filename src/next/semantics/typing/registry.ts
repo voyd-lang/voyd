@@ -2,6 +2,7 @@ import {
   registerPrimitive,
   resolveTypeExpr,
   getSymbolName,
+  getNominalComponent,
 } from "./type-system.js";
 import type { SymbolId, TypeId } from "../ids.js";
 import {
@@ -9,6 +10,7 @@ import {
   type TypingContext,
   type TypingState,
 } from "./types.js";
+import type { HirImplDecl, HirTypeExpr } from "../hir/index.js";
 
 export const seedPrimitiveTypes = (ctx: TypingContext): void => {
   ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
@@ -138,8 +140,16 @@ export const registerFunctionSignatures = (
       );
     }
 
-    const typeParameterDecls =
-      item.typeParameters ?? fnDecl?.typeParameters ?? [];
+    const implDecl =
+      typeof fnDecl?.implId === "number"
+        ? ctx.decls.getImplById(fnDecl.implId)
+        : undefined;
+    const fnTypeParameters = item.typeParameters ?? fnDecl?.typeParameters ?? [];
+    const implTypeParameters = implDecl?.typeParameters ?? [];
+    const typeParameterDecls = [
+      ...fnTypeParameters,
+      ...implTypeParameters,
+    ];
     const paramMap = new Map<SymbolId, TypeId>();
     const typeParams =
       typeParameterDecls.length === 0
@@ -249,5 +259,83 @@ export const registerFunctionSignatures = (
     ctx.valueTypes.set(item.symbol, functionType);
 
     ctx.table.setSymbolScheme(item.symbol, scheme);
+  }
+};
+
+export const registerImpls = (
+  ctx: TypingContext,
+  state: TypingState
+): void => {
+  for (const item of ctx.hir.items.values()) {
+    if (item.kind !== "impl") continue;
+    const decl =
+      ctx.decls.getImpl(item.symbol) ??
+      (typeof (item as any).decl === "number"
+        ? ctx.decls.getImplById((item as any).decl)
+        : undefined);
+    const typeParameterDecls = item.typeParameters ?? decl?.typeParameters ?? [];
+    const typeParamMap =
+      typeParameterDecls.length === 0
+        ? undefined
+        : typeParameterDecls.reduce((acc, param) => {
+            const typeParam = ctx.arena.freshTypeParam();
+            const typeRef = ctx.arena.internTypeParamRef(typeParam);
+            acc.set(param.symbol, typeRef);
+            return acc;
+          }, new Map<SymbolId, TypeId>());
+
+    resolveTypeExpr(
+      item.target,
+      ctx,
+      state,
+      ctx.primitives.unknown,
+      typeParamMap
+    );
+    const targetType = item.target.typeId as TypeId | undefined;
+    if (typeof targetType !== "number") {
+      throw new Error("impl target missing type");
+    }
+    const nominalTarget = getNominalComponent(targetType, ctx);
+    if (typeof nominalTarget !== "number") {
+      throw new Error("impl target must be a nominal object type");
+    }
+    if (typeof nominalTarget === "number") {
+      item.target.typeId = nominalTarget;
+    }
+
+    resolveTypeExpr(
+      item.trait as HirTypeExpr | undefined,
+      ctx,
+      state,
+      ctx.primitives.unknown,
+      typeParamMap
+    );
+
+    item.with?.forEach((entry) => {
+      if (entry.kind === "member-import") {
+        resolveTypeExpr(
+          entry.source,
+          ctx,
+          state,
+          ctx.primitives.unknown,
+          typeParamMap
+        );
+        return;
+      }
+      resolveTypeExpr(
+        entry.source,
+        ctx,
+        state,
+        ctx.primitives.unknown,
+        typeParamMap
+      );
+      resolveTypeExpr(
+        entry.trait,
+        ctx,
+        state,
+        ctx.primitives.unknown,
+        typeParamMap
+      );
+    });
   }
 };

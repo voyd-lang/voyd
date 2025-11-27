@@ -1,0 +1,9 @@
+obj Box<T> { value: T }
+
+impl Box<T>
+  fn pick<U>(self, value: U) -> U
+    value
+
+pub fn main() -> bool
+  let boxed = Box { value: 1 }
+  boxed.pick<bool>(true)

@@ -3,7 +3,14 @@ import { createLowerScopeStack } from "./context.js";
 import { lowerExpr } from "./expressions.js";
 import { lowerTypeExpr, lowerTypeParameters } from "./type-expressions.js";
 import type { LowerContext, ModuleDeclaration } from "./types.js";
-import type { BindingResult, BoundFunction, BoundObject, BoundTypeAlias } from "../binding/binding.js";
+import type {
+  BindingResult,
+  BoundFunction,
+  BoundObject,
+  BoundTypeAlias,
+  BoundImpl,
+} from "../binding/binding.js";
+import type { Syntax } from "../../parser/index.js";
 
 export const getModuleDeclarations = (
   binding: BindingResult
@@ -23,6 +30,11 @@ export const getModuleDeclarations = (
       kind: "object" as const,
       order: object.moduleIndex,
       object,
+    })),
+    ...binding.impls.map((impl) => ({
+      kind: "impl" as const,
+      order: impl.moduleIndex,
+      impl,
     })),
   ];
 
@@ -150,4 +162,68 @@ export const lowerObjectDecl = (
       item: objectId,
     });
   }
+};
+
+export const lowerImplDecl = (
+  impl: BoundImpl,
+  ctx: LowerContext
+): void => {
+  const implScope = ctx.scopeByNode.get(impl.form?.syntaxId ?? impl.scope);
+  const target = lowerTypeExpr(
+    impl.target,
+    ctx,
+    implScope ?? impl.scope ?? ctx.symbolTable.rootScope
+  );
+  if (!target) {
+    throw new Error("impl requires a target type expression");
+  }
+
+  const trait = impl.trait
+    ? lowerTypeExpr(impl.trait, ctx, implScope ?? ctx.symbolTable.rootScope)
+    : undefined;
+
+  const members = impl.methods.map((method) => {
+    const memberId = findFunctionItemId(method.symbol, ctx);
+    if (typeof memberId !== "number") {
+      const { name } = ctx.symbolTable.getSymbol(method.symbol);
+      throw new Error(`missing function item for impl method ${name}`);
+    }
+    return memberId;
+  });
+
+  const syntax = impl.form ?? impl.target;
+  const implId = ctx.builder.addItem({
+    kind: "impl",
+    symbol: impl.symbol,
+    visibility: impl.visibility,
+    ast: (syntax as Syntax | undefined)?.syntaxId ?? ctx.moduleNodeId,
+    span: toSourceSpan(syntax),
+    typeParameters: lowerTypeParameters(impl.typeParameters),
+    target,
+    trait,
+    with: undefined,
+    members,
+  });
+
+  if (impl.visibility === "public") {
+    ctx.builder.recordExport({
+      symbol: impl.symbol,
+      visibility: impl.visibility,
+      span: toSourceSpan(impl.form),
+      item: implId,
+    });
+  }
+};
+
+const findFunctionItemId = (
+  symbol: number,
+  ctx: LowerContext
+): number | undefined => {
+  for (const itemId of ctx.builder.module.items) {
+    const node = ctx.builder.getNode(itemId);
+    if (node && node.kind === "function" && (node as any).symbol === symbol) {
+      return itemId;
+    }
+  }
+  return undefined;
 };

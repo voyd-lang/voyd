@@ -198,6 +198,40 @@ describe("semanticsPipeline", () => {
     expectFunctionReturnPrimitive(typing, mainSymbol!, "i32");
   });
 
+  it("types impl methods and their calls", () => {
+    const name = "impl_methods.voyd";
+    const ast = loadAst(name);
+    const result = semanticsPipeline(ast);
+
+    const { symbolTable, hir, typing } = result;
+    const rootScope = symbolTable.rootScope;
+    const mainSymbol = symbolTable.resolve("main", rootScope)!;
+    const doubleSymbol = symbolTable.resolve("double", rootScope)!;
+
+    expectFunctionReturnPrimitive(typing, mainSymbol, "i32");
+    const doubleSignature = typing.functions.getSignature(doubleSymbol);
+    expect(doubleSignature).toBeDefined();
+    expect(doubleSignature?.parameters[0]?.type).toBeDefined();
+
+    const implItem = Array.from(hir.items.values()).find(
+      (item) => item.kind === "impl"
+    );
+    expect(implItem).toBeDefined();
+    if (implItem?.kind === "impl") {
+      expect(implItem.target.typeId).toBeDefined();
+      const targetType = implItem.target.typeId!;
+      const targetDesc = typing.arena.get(targetType);
+      const nominalDesc =
+        targetDesc.kind === "nominal-object"
+          ? targetDesc
+          : targetDesc.kind === "intersection" &&
+            typeof targetDesc.nominal === "number"
+          ? typing.arena.get(targetDesc.nominal)
+          : undefined;
+      expect(nominalDesc?.kind).toBe("nominal-object");
+    }
+  });
+
   it("infers tuple destructuring from forward-declared functions", () => {
     const ast = loadAst("tuples.voyd");
     const result = semanticsPipeline(ast);
@@ -427,6 +461,13 @@ describe("semanticsPipeline", () => {
         diag.message.includes("already defines overload convert(a: i32)")
       )
     ).toBe(true);
+  });
+
+  it("rejects impls that target structural types", () => {
+    const ast = loadAst("impl_structural_target.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /nominal object type/
+    );
   });
 
   it("requires parameter annotations for overloaded functions", () => {

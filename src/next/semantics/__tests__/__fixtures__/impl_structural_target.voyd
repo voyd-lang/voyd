@@ -1,0 +1,7 @@
+impl { x: i32 }
+  fn bad(self) -> i32
+    self.x
+
+pub fn main() -> i32
+  let value = { x: 1 }
+  value.x

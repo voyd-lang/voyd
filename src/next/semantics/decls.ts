@@ -8,6 +8,7 @@ import type {
   SymbolId,
   TypeAliasDeclId,
   ObjectDeclId,
+  ImplDeclId,
 } from "./ids.js";
 
 export interface ParameterDecl {
@@ -44,6 +45,7 @@ export interface FunctionDecl {
   body: Expr;
   overloadSetId?: OverloadSetId;
   moduleIndex: number;
+  implId?: ImplDeclId;
 }
 
 export type FunctionDeclInput = Omit<FunctionDecl, "id" | "params"> & {
@@ -87,15 +89,35 @@ export interface ObjectDecl {
 
 export type ObjectDeclInput = Omit<ObjectDecl, "id"> & { id?: ObjectDeclId };
 
+export interface ImplDecl {
+  id: ImplDeclId;
+  form?: Form;
+  visibility: HirVisibility;
+  symbol: SymbolId;
+  target: Expr;
+  trait?: Expr;
+  typeParameters?: TypeParameterDecl[];
+  methods: FunctionDecl[];
+  scope: ScopeId;
+  moduleIndex: number;
+}
+
+export type ImplDeclInput = Omit<ImplDecl, "id" | "methods"> & {
+  id?: ImplDeclId;
+  methods?: FunctionDecl[];
+};
+
 export class DeclTable {
   functions: FunctionDecl[] = [];
   typeAliases: TypeAliasDecl[] = [];
   objects: ObjectDecl[] = [];
+  impls: ImplDecl[] = [];
 
   private nextFunctionId: FunctionDeclId = 0;
   private nextParamId: ParameterDeclId = 0;
   private nextAliasId: TypeAliasDeclId = 0;
   private nextObjectId: ObjectDeclId = 0;
+  private nextImplId: ImplDeclId = 0;
 
   private functionsBySymbol = new Map<SymbolId, FunctionDecl>();
   private functionsById = new Map<FunctionDeclId, FunctionDecl>();
@@ -105,6 +127,8 @@ export class DeclTable {
   private typeAliasesById = new Map<TypeAliasDeclId, TypeAliasDecl>();
   private objectsBySymbol = new Map<SymbolId, ObjectDecl>();
   private objectsById = new Map<ObjectDeclId, ObjectDecl>();
+  private implsBySymbol = new Map<SymbolId, ImplDecl>();
+  private implsById = new Map<ImplDeclId, ImplDecl>();
 
   private bumpId(next: number, used: number): number {
     return Math.max(next, used + 1);
@@ -161,6 +185,20 @@ export class DeclTable {
     return withId;
   }
 
+  registerImpl(impl: ImplDeclInput): ImplDecl {
+    const methods = impl.methods ? [...impl.methods] : [];
+    const withId: ImplDecl = {
+      ...impl,
+      methods,
+      id: impl.id ?? this.nextImplId++,
+    };
+    this.nextImplId = this.bumpId(this.nextImplId, withId.id);
+    this.impls.push(withId);
+    this.implsBySymbol.set(withId.symbol, withId);
+    this.implsById.set(withId.id, withId);
+    return withId;
+  }
+
   getFunction(symbol: SymbolId): FunctionDecl | undefined {
     return this.functionsBySymbol.get(symbol);
   }
@@ -191,5 +229,13 @@ export class DeclTable {
 
   getObjectById(id: ObjectDeclId): ObjectDecl | undefined {
     return this.objectsById.get(id);
+  }
+
+  getImpl(symbol: SymbolId): ImplDecl | undefined {
+    return this.implsBySymbol.get(symbol);
+  }
+
+  getImplById(id: ImplDeclId): ImplDecl | undefined {
+    return this.implsById.get(id);
   }
 }
