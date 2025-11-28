@@ -134,4 +134,28 @@ describe("buildModuleGraph", () => {
       expect(inlineModule.origin.parentId).toBe("src::internal");
     }
   });
+
+  it("discovers dependencies for grouped mod declarations", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}grouped.voyd`]: "mod util::{self, helpers::math}",
+      [`${root}${sep}util.voyd`]: "",
+      [`${root}${sep}util${sep}helpers${sep}math.voyd`]: "",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}grouped.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining([
+        "src::grouped",
+        "src::util",
+        "src::util::helpers::math",
+      ])
+    );
+  });
 });
