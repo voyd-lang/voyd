@@ -175,14 +175,14 @@ export const lowerTraitDecl = (
   ctx: LowerContext
 ): void => {
   const traitScope =
-    ctx.scopeByNode.get(trait.form?.syntaxId ?? trait.scope) ??
     trait.scope ??
+    ctx.scopeByNode.get(trait.form?.syntaxId ?? trait.scope) ??
     ctx.symbolTable.rootScope;
 
   const methods = trait.methods.map((method) => {
     const methodScope =
-      ctx.scopeByNode.get(method.form?.syntaxId ?? method.scope) ??
       method.scope ??
+      ctx.scopeByNode.get(method.form?.syntaxId ?? method.scope) ??
       traitScope;
     const parameters = method.params.map((param) => ({
       symbol: param.symbol,

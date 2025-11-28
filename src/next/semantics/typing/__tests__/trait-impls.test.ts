@@ -22,4 +22,11 @@ describe("trait implementations", () => {
       /missing trait method.*area/i
     );
   });
+
+  it("errors when an impl method signature does not match the trait", () => {
+    const ast = loadAst("trait_area_wrong_return.voyd");
+    expect(() => semanticsPipeline(ast)).toThrowError(
+      /return type mismatch/i
+    );
+  });
 });

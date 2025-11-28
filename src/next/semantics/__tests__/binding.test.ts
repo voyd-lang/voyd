@@ -218,6 +218,39 @@ describe("binding pipeline", () => {
     expect(isIdentifierAtom(impl?.trait) && impl?.trait.value).toBe("Area");
   });
 
+  it("keeps trait method scopes intact when default methods are injected into impls", () => {
+    const name = "trait_default_scope.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    const trait = binding.traits.find(
+      (entry) => symbolTable.getSymbol(entry.symbol).name === "Area"
+    );
+    expect(trait).toBeDefined();
+    if (!trait) return;
+
+    const doubleMethod = trait.methods.find(
+      (method) => symbolTable.getSymbol(method.symbol).name === "double_area"
+    );
+    expect(doubleMethod).toBeDefined();
+    if (!doubleMethod) return;
+
+    const recordedScope = binding.scopeByNode.get(doubleMethod.form!.syntaxId);
+    expect(recordedScope).toBe(doubleMethod.scope);
+
+    const implInjected = binding.functions.find(
+      (fn) =>
+        symbolTable.getSymbol(fn.symbol).name === "double_area" &&
+        typeof fn.implId === "number"
+    );
+    expect(implInjected).toBeDefined();
+    if (!implInjected) return;
+    expect(implInjected.scope).not.toBe(doubleMethod.scope);
+  });
+
   it("applies default trait methods for impls with trait type arguments", () => {
     const name = "trait_generic_defaults.voyd";
     const ast = loadAst(name);

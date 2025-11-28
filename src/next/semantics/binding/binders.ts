@@ -520,14 +520,15 @@ const makeParsedFunctionFromTraitMethod = (
   method: TraitMethodDecl,
   options?: { typeParamSubstitutions?: Map<string, Expr> }
 ): ParsedFunctionDecl => {
-  const nameAst = method.nameAst;
+  const nameAst = method.nameAst?.clone();
   if (!nameAst) {
     throw new Error("trait method missing name identifier");
   }
 
+  const clonedDefaultBody = method.defaultBody?.clone();
   const form =
-    method.form ??
-    (isForm(method.defaultBody) ? method.defaultBody : undefined);
+    method.form?.clone() ??
+    (isForm(clonedDefaultBody) ? clonedDefaultBody : undefined);
   if (!form) {
     throw new Error("trait method default implementation missing form");
   }
@@ -536,20 +537,21 @@ const makeParsedFunctionFromTraitMethod = (
     if (!param.ast) {
       throw new Error("trait method parameter missing syntax");
     }
+    const clonedAst = param.ast.clone();
     const typeExpr = substituteTypeParamExpr(
-      param.typeExpr,
+      param.typeExpr?.clone(),
       options?.typeParamSubstitutions
     );
     return {
       name: param.name,
       label: param.label,
-      ast: param.ast,
+      ast: clonedAst,
       typeExpr,
     };
   });
 
   const returnType = substituteTypeParamExpr(
-    method.returnTypeExpr,
+    method.returnTypeExpr?.clone(),
     options?.typeParamSubstitutions
   );
 
@@ -565,7 +567,7 @@ const makeParsedFunctionFromTraitMethod = (
       params: signatureParams,
       returnType,
     },
-    body: method.defaultBody ?? form,
+    body: clonedDefaultBody ?? form,
   };
 };
 

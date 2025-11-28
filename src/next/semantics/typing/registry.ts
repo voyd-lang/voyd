@@ -11,6 +11,7 @@ import {
   type TypingState,
 } from "./types.js";
 import type { HirImplDecl, HirTypeExpr } from "../hir/index.js";
+import { isForm, isIdentifierAtom, type Expr } from "../../parser/index.js";
 
 export const seedPrimitiveTypes = (ctx: TypingContext): void => {
   ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
@@ -376,15 +377,35 @@ const validateImplTraitMethods = ({
     return;
   }
 
-  const implMethodNames = new Set(
-    implDecl.methods.map((method) => getSymbolName(method.symbol, ctx))
+  const implMethodsByName = new Map(
+    implDecl.methods.map((method) => [
+      getSymbolName(method.symbol, ctx),
+      method,
+    ])
   );
   const missing = traitDecl.methods
     .filter((method) => !method.defaultBody)
     .map((method) => getSymbolName(method.symbol, ctx))
-    .filter((name) => !implMethodNames.has(name));
+    .filter((name) => !implMethodsByName.has(name));
 
   if (missing.length === 0) {
+    traitDecl.methods.forEach((traitMethod) => {
+      const implMethod = implMethodsByName.get(
+        getSymbolName(traitMethod.symbol, ctx)
+      );
+      if (!implMethod) return;
+
+      const signatureError = compareMethodSignatures({
+        traitMethod,
+        implMethod,
+        traitSymbol,
+        impl,
+        ctx,
+      });
+      if (signatureError) {
+        throw signatureError;
+      }
+    });
     return;
   }
 
@@ -398,4 +419,151 @@ const validateImplTraitMethods = ({
   throw new Error(
     `impl ${traitName} for ${targetName} is missing trait method${plural}: ${missingList}`
   );
+};
+
+const compareMethodSignatures = ({
+  traitMethod,
+  implMethod,
+  traitSymbol,
+  impl,
+  ctx,
+}: {
+  traitMethod: NonNullable<
+    ReturnType<TypingContext["decls"]["getTrait"]>
+  >["methods"][number];
+  implMethod: NonNullable<
+    ReturnType<TypingContext["decls"]["getImpl"]>
+  >["methods"][number];
+  traitSymbol: SymbolId;
+  impl: HirImplDecl;
+  ctx: TypingContext;
+}): Error | undefined => {
+  const substitutions = buildTraitTypeSubstitutions(traitSymbol, impl, ctx);
+  const traitName = getSymbolName(traitSymbol, ctx);
+  const methodName = getSymbolName(traitMethod.symbol, ctx);
+  const targetName =
+    impl.target.typeKind === "named" && typeof impl.target.symbol === "number"
+      ? getSymbolName(impl.target.symbol, ctx)
+      : "impl target";
+
+  if (traitMethod.params.length !== implMethod.params.length) {
+    return new Error(
+      `impl ${traitName} for ${targetName} method ${methodName} has ${implMethod.params.length} parameter(s) but trait declares ${traitMethod.params.length}`
+    );
+  }
+
+  const traitParamCount = traitMethod.typeParameters?.length ?? 0;
+  const implParamCount = implMethod.typeParameters?.length ?? 0;
+  if (traitParamCount !== implParamCount) {
+    return new Error(
+      `impl ${traitName} for ${targetName} method ${methodName} must declare ${traitParamCount} type parameter(s)`
+    );
+  }
+
+  for (let index = 0; index < traitMethod.params.length; index += 1) {
+    const traitParam = traitMethod.params[index]!;
+    const implParam = implMethod.params[index]!;
+    if (traitParam.label !== implParam.label) {
+      return new Error(
+        `impl ${traitName} for ${targetName} method ${methodName} parameter ${index + 1} label mismatch`
+      );
+    }
+    const traitTypeKey = typeExprKey(traitParam.typeExpr, substitutions);
+    const implTypeKey = typeExprKey(implParam.typeExpr);
+    if (traitTypeKey && !implTypeKey) {
+      return new Error(
+        `impl ${traitName} for ${targetName} method ${methodName} parameter ${index + 1} is missing type annotation`
+      );
+    }
+    if (traitTypeKey && implTypeKey && traitTypeKey !== implTypeKey) {
+      return new Error(
+        `impl ${traitName} for ${targetName} method ${methodName} parameter ${index + 1} type mismatch: expected ${traitTypeKey}, got ${implTypeKey}`
+      );
+    }
+  }
+
+  const traitReturnKey = typeExprKey(traitMethod.returnTypeExpr, substitutions);
+  const implReturnKey = typeExprKey(implMethod.returnTypeExpr);
+  if (traitReturnKey && !implReturnKey) {
+    return new Error(
+      `impl ${traitName} for ${targetName} method ${methodName} is missing return type annotation`
+    );
+  }
+  if (traitReturnKey && implReturnKey && traitReturnKey !== implReturnKey) {
+    return new Error(
+      `impl ${traitName} for ${targetName} method ${methodName} return type mismatch: expected ${traitReturnKey}, got ${implReturnKey}`
+    );
+  }
+
+  return undefined;
+};
+
+const buildTraitTypeSubstitutions = (
+  traitSymbol: SymbolId,
+  impl: HirImplDecl,
+  ctx: TypingContext
+): Map<string, string> | undefined => {
+  if (
+    impl.trait?.typeKind !== "named" ||
+    !impl.trait.typeArguments ||
+    impl.trait.typeArguments.length === 0
+  ) {
+    return undefined;
+  }
+  const traitDecl = ctx.decls.getTrait(traitSymbol);
+  const params = traitDecl?.typeParameters ?? [];
+  if (params.length === 0) {
+    return undefined;
+  }
+  const substitutions = new Map<string, string>();
+  params.forEach((param, index) => {
+    const arg = impl.trait?.typeArguments?.[index];
+    const key = arg ? hirTypeExprKey(arg) : undefined;
+    if (key) {
+      substitutions.set(param.name, key);
+    }
+  });
+  return substitutions.size > 0 ? substitutions : undefined;
+};
+
+const typeExprKey = (
+  expr: Expr | undefined,
+  substitutions?: Map<string, string>
+): string | undefined => {
+  if (!expr) return undefined;
+  if (isIdentifierAtom(expr)) {
+    return substitutions?.get(expr.value) ?? expr.value;
+  }
+  if (isForm(expr)) {
+    if (expr.callsInternal("generics")) {
+      const target = expr.at(1);
+      const args = expr.rest.slice(1).map((arg) => typeExprKey(arg) ?? "_");
+      return `${typeExprKey(target)}<${args.join(",")}>`;
+    }
+    const head = typeExprKey(expr.first, substitutions);
+    const rest = expr.rest.map((entry) => typeExprKey(entry, substitutions) ?? "_");
+    return `${head ?? "?"}(${rest.join(",")})`;
+  }
+  return undefined;
+};
+
+const hirTypeExprKey = (expr: HirTypeExpr | undefined): string | undefined => {
+  if (!expr) return undefined;
+  if (expr.typeKind === "named") {
+    const name = expr.path.join("::");
+    const args = expr.typeArguments
+      ?.map((arg) => hirTypeExprKey(arg) ?? "_")
+      .join(",");
+    return args && args.length > 0 ? `${name}<${args}>` : name;
+  }
+  if (expr.typeKind === "object") {
+    return "object";
+  }
+  if (expr.typeKind === "tuple") {
+    return `(${expr.types.map((entry) => hirTypeExprKey(entry) ?? "_").join(",")})`;
+  }
+  if (expr.typeKind === "union") {
+    return expr.types.map((entry) => hirTypeExprKey(entry) ?? "_").join("|");
+  }
+  return undefined;
 };
