@@ -17,7 +17,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
 
   for (const [itemId, item] of ctx.hir.items) {
     if (item.kind !== "function") continue;
-    ctx.itemsToSymbols.set(itemId, item.symbol);
+    ctx.itemsToSymbols.set(itemId, { moduleId: ctx.moduleId, symbol: item.symbol });
 
     const scheme = ctx.typing.table.getSymbolScheme(item.symbol);
     if (typeof scheme !== "number") {
@@ -72,6 +72,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
       const resultType = wasmTypeFor(descriptor.returnType, ctx);
 
       const metadata: FunctionMetadata = {
+        moduleId: ctx.moduleId,
         symbol: item.symbol,
         wasmName: makeFunctionName(item, ctx, typeArgs),
         paramTypes,
@@ -82,13 +83,14 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         instanceKey,
       };
 
-      const metas = ctx.functions.get(item.symbol);
+      const key = functionKey(ctx.moduleId, item.symbol);
+      const metas = ctx.functions.get(key);
       if (metas) {
         metas.push(metadata);
       } else {
-        ctx.functions.set(item.symbol, [metadata]);
+        ctx.functions.set(key, [metadata]);
       }
-      ctx.functionInstances.set(instanceKey, metadata);
+      ctx.functionInstances.set(scopedInstanceKey(ctx.moduleId, instanceKey), metadata);
     });
   }
 };
@@ -96,7 +98,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
 export const compileFunctions = (ctx: CodegenContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "function") continue;
-    const metas = ctx.functions.get(item.symbol);
+    const metas = ctx.functions.get(functionKey(ctx.moduleId, item.symbol));
     if (!metas || metas.length === 0) {
       throw new Error(`codegen missing metadata for function ${item.symbol}`);
     }
@@ -104,20 +106,80 @@ export const compileFunctions = (ctx: CodegenContext): void => {
   }
 };
 
-export const emitExports = (ctx: CodegenContext): void => {
-  ctx.hir.module.exports.forEach((entry) => {
-    const symbol = ctx.itemsToSymbols.get(entry.item);
-    if (typeof symbol !== "number") {
+export const registerImportMetadata = (ctx: CodegenContext): void => {
+  ctx.binding.imports.forEach((imp) => {
+    if (!imp.target) return;
+    if (imp.target.moduleId === ctx.moduleId) return;
+
+    const signature = ctx.typing.functions.getSignature(imp.local);
+    if (!signature) return;
+
+    const targetKey = functionKey(imp.target.moduleId, imp.target.symbol);
+    const targetMetas = ctx.functions.get(targetKey);
+    if (!targetMetas || targetMetas.length === 0) {
       return;
     }
-    const metas = ctx.functions.get(symbol);
+
+    const schemeId = ctx.typing.table.getSymbolScheme(imp.local);
+    const scheme =
+      typeof schemeId === "number" ? ctx.typing.arena.getScheme(schemeId) : undefined;
+    const typeParamCount = signature.typeParams?.length ?? scheme?.params.length ?? 0;
+    const instantiationInfo = ctx.typing.functionInstantiationInfo.get(imp.local);
+    const recordedInstantiations =
+      instantiationInfo && instantiationInfo.size > 0
+        ? Array.from(instantiationInfo.entries())
+        : [];
+    if (recordedInstantiations.length === 0 && typeParamCount > 0) {
+      const name = ctx.symbolTable.getSymbol(imp.local).name;
+      throw new Error(
+        `codegen requires a concrete instantiation for imported generic function ${name}`
+      );
+    }
+    const instantiations: [string, readonly TypeId[]][] =
+      recordedInstantiations.length > 0
+        ? recordedInstantiations
+        : [[formatInstanceKey(imp.local, []), []]];
+
+    instantiations.forEach(([instanceKey, typeArgs]) => {
+      const targetMeta = pickTargetMeta(targetMetas, typeArgs.length);
+      const paramTypes = signature.parameters.map((param) =>
+        wasmTypeFor(param.type, ctx)
+      );
+      const resultType = wasmTypeFor(signature.returnType, ctx);
+      const metadata: FunctionMetadata = {
+        moduleId: ctx.moduleId,
+        symbol: imp.local,
+        wasmName: (targetMeta ?? targetMetas[0]!).wasmName,
+        paramTypes,
+        resultType,
+        paramTypeIds: signature.parameters.map((param) => param.type),
+        resultTypeId: signature.returnType,
+        typeArgs,
+        instanceKey,
+      };
+      const key = functionKey(ctx.moduleId, imp.local);
+      const metas = ctx.functions.get(key);
+      if (metas) {
+        metas.push(metadata);
+      } else {
+        ctx.functions.set(key, [metadata]);
+      }
+      ctx.functionInstances.set(scopedInstanceKey(ctx.moduleId, instanceKey), metadata);
+    });
+  });
+};
+
+export const emitModuleExports = (ctx: CodegenContext): void => {
+  ctx.hir.items.forEach((item) => {
+    if (item.kind !== "function") return;
+    if (item.visibility !== "public") return;
+    const metas = ctx.functions.get(functionKey(ctx.moduleId, item.symbol));
     const meta =
       metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
     if (!meta) {
       return;
     }
-    const exportName =
-      entry.alias ?? ctx.symbolTable.getSymbol(entry.symbol).name;
+    const exportName = ctx.symbolTable.getSymbol(item.symbol).name;
     ctx.mod.addFunctionExport(meta.wasmName, exportName);
   });
 };
@@ -167,13 +229,12 @@ const makeFunctionName = (
   ctx: CodegenContext,
   typeArgs: readonly TypeId[]
 ): string => {
-  const moduleLabel = sanitizeIdentifier(ctx.hir.module.path);
   const symbolName = sanitizeIdentifier(
     ctx.symbolTable.getSymbol(fn.symbol).name
   );
   const suffix =
     typeArgs.length === 0 ? "" : `__inst_${sanitizeIdentifier(typeArgs.join("_"))}`;
-  return `${moduleLabel}__${symbolName}_${fn.symbol}${suffix}`;
+  return `${ctx.moduleLabel}__${symbolName}_${fn.symbol}${suffix}`;
 };
 
 const sanitizeIdentifier = (value: string): string =>
@@ -197,3 +258,17 @@ const formatInstanceKey = (
   symbol: number,
   typeArgs: readonly TypeId[]
 ): string => `${symbol}<${typeArgs.join(",")}>`;
+
+const functionKey = (moduleId: string, symbol: number): string =>
+  `${moduleId}::${symbol}`;
+
+const scopedInstanceKey = (
+  moduleId: string,
+  instanceKey: string
+): string => `${moduleId}::${instanceKey}`;
+
+const pickTargetMeta = (
+  metas: readonly FunctionMetadata[],
+  typeArgCount: number
+): FunctionMetadata | undefined =>
+  metas.find((meta) => meta.typeArgs.length === typeArgCount) ?? metas[0];

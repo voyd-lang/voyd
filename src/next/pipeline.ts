@@ -126,17 +126,21 @@ export const emitProgram = async ({
   wasm: Uint8Array;
   module: binaryen.Module;
 }> => {
-  const fallbackId = semantics.keys().next().value;
-  const targetModuleId = entryModuleId ?? graph.entry ?? fallbackId;
-  const semantic = semantics.get(targetModuleId);
-  if (!semantic) {
-    throw new Error(
-      `No semantics available for entry module ${targetModuleId}`
-    );
+  const { orderedModules, entry } = lowerProgram({ graph, semantics });
+  const targetModuleId = entryModuleId ?? entry;
+  const modules = orderedModules
+    .map((id) => semantics.get(id))
+    .filter((value): value is SemanticsPipelineResult => Boolean(value));
+  if (modules.length === 0) {
+    throw new Error("No semantics available for codegen");
   }
 
-  const { codegen } = await lazyCodegen();
-  const result = codegen(semantic, codegenOptions);
+  const codegen = await lazyCodegen();
+  const result = codegen.codegenProgram({
+    modules,
+    entryModuleId: targetModuleId,
+    options: codegenOptions,
+  });
   const binary = result.module.emitBinary();
   const wasm =
     binary instanceof Uint8Array
@@ -199,10 +203,5 @@ const sortModules = (graph: ModuleGraph): string[] => {
   return order;
 };
 
-const lazyCodegen = async () => {
-  // Lazy import to keep tree shaking workable for analysis-only usage.
-  const { codegen } = (await import(
-    "./codegen/codegen.js"
-  )) as typeof import("./codegen/codegen.js");
-  return { codegen };
-};
+const lazyCodegen = async () =>
+  (await import("./codegen/codegen.js")) as typeof import("./codegen/codegen.js");
