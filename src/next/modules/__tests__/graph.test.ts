@@ -139,8 +139,8 @@ describe("buildModuleGraph", () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
       [`${root}${sep}grouped.voyd`]: "mod util::{self, helpers::math}",
-      [`${root}${sep}util.voyd`]: "",
-      [`${root}${sep}util${sep}helpers${sep}math.voyd`]: "",
+      [`${root}${sep}grouped${sep}util.voyd`]: "",
+      [`${root}${sep}grouped${sep}util${sep}helpers${sep}math.voyd`]: "",
     });
 
     const graph = await buildModuleGraph({
@@ -153,8 +153,8 @@ describe("buildModuleGraph", () => {
     expect(Array.from(graph.modules.keys())).toEqual(
       expect.arrayContaining([
         "src::grouped",
-        "src::util",
-        "src::util::helpers::math",
+        "src::grouped::util",
+        "src::grouped::util::helpers::math",
       ])
     );
   });

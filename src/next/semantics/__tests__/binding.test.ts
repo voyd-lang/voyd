@@ -404,10 +404,13 @@ describe("binding pipeline", () => {
     const span = toSourceSpan(modForm);
 
     const modulePath = { namespace: "src" as const, segments: ["grouped"] as const };
-    const utilPath = { namespace: "src" as const, segments: ["util"] as const };
+    const utilPath = {
+      namespace: "src" as const,
+      segments: ["grouped", "util"] as const,
+    };
     const mathPath = {
       namespace: "src" as const,
-      segments: ["util", "helpers", "math"] as const,
+      segments: ["grouped", "util", "helpers", "math"] as const,
     };
     const moduleId = modulePathToString(modulePath);
     const utilId = modulePathToString(utilPath);
@@ -474,8 +477,8 @@ describe("binding pipeline", () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
       [`${root}${sep}grouped.voyd`]: "mod util::{self, helpers::math as math}",
-      [`${root}${sep}util.voyd`]: "",
-      [`${root}${sep}util${sep}helpers${sep}math.voyd`]: "pub fn math()\n  1",
+      [`${root}${sep}grouped${sep}util.voyd`]: "",
+      [`${root}${sep}grouped${sep}util${sep}helpers${sep}math.voyd`]: "pub fn math()\n  1",
     });
 
     const graph = await buildModuleGraph({
@@ -496,7 +499,7 @@ describe("binding pipeline", () => {
       declaredAt: moduleNode.ast.syntaxId,
     });
 
-    const mathId = "src::util::helpers::math";
+    const mathId = "src::grouped::util::helpers::math";
     const moduleExports: Map<string, ModuleExportTable> = new Map([
       [
         mathId,
@@ -525,7 +528,7 @@ describe("binding pipeline", () => {
 
     const [use] = binding.uses;
     expect(use.entries.map((entry) => entry.importKind)).toEqual(["self", "name"]);
-    expect(use.entries[0]?.moduleId).toBe("src::util");
+    expect(use.entries[0]?.moduleId).toBe("src::grouped::util");
     expect(use.entries[1]?.moduleId).toBe(mathId);
     expect(use.entries[1]?.alias).toBe("math");
   });
