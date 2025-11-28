@@ -3,6 +3,7 @@ import {
   type Form,
   type IdentifierAtom,
   type Syntax,
+  formCallsInternal,
   isBoolAtom,
   isFloatAtom,
   isForm,
@@ -38,6 +39,7 @@ import type {
   TypeParameterDecl,
   TraitMethodDeclInput,
   TraitMethodDecl,
+  TraitDecl,
 } from "../decls.js";
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
@@ -479,18 +481,44 @@ const resolveTraitDecl = (
   ctx: BindingContext,
   scope: ScopeId
 ) => {
-  if (!isIdentifierAtom(traitExpr)) {
+  const traitIdentifier = (() => {
+    if (isIdentifierAtom(traitExpr)) {
+      return traitExpr;
+    }
+    if (!isForm(traitExpr)) {
+      return undefined;
+    }
+    if (isIdentifierAtom(traitExpr.first)) {
+      return traitExpr.first;
+    }
+    if (traitExpr.callsInternal("generics")) {
+      const target = traitExpr.at(1);
+      if (isIdentifierAtom(target)) {
+        return target;
+      }
+      if (isForm(target) && isIdentifierAtom(target.first)) {
+        return target.first;
+      }
+    }
+    return undefined;
+  })();
+  if (!traitIdentifier) {
     return undefined;
   }
-  const traitSymbol = ctx.symbolTable.resolve(traitExpr.value, scope);
+  const traitSymbol = ctx.symbolTable.resolve(traitIdentifier.value, scope);
   if (typeof traitSymbol !== "number") {
     return undefined;
   }
-  return ctx.decls.getTrait(traitSymbol);
+  const record = ctx.symbolTable.getSymbol(traitSymbol);
+  if (record.kind !== "trait") {
+    return undefined;
+  }
+  return ctx.decls.getTrait(record.id);
 };
 
 const makeParsedFunctionFromTraitMethod = (
-  method: TraitMethodDecl
+  method: TraitMethodDecl,
+  options?: { typeParamSubstitutions?: Map<string, Expr> }
 ): ParsedFunctionDecl => {
   const nameAst = method.nameAst;
   if (!nameAst) {
@@ -508,13 +536,22 @@ const makeParsedFunctionFromTraitMethod = (
     if (!param.ast) {
       throw new Error("trait method parameter missing syntax");
     }
+    const typeExpr = substituteTypeParamExpr(
+      param.typeExpr,
+      options?.typeParamSubstitutions
+    );
     return {
       name: param.name,
       label: param.label,
       ast: param.ast,
-      typeExpr: param.typeExpr,
+      typeExpr,
     };
   });
+
+  const returnType = substituteTypeParamExpr(
+    method.returnTypeExpr,
+    options?.typeParamSubstitutions
+  );
 
   return {
     form,
@@ -526,10 +563,109 @@ const makeParsedFunctionFromTraitMethod = (
           ?.map((param) => param.ast)
           .filter((entry): entry is IdentifierAtom => Boolean(entry)) ?? [],
       params: signatureParams,
-      returnType: method.returnTypeExpr,
+      returnType,
     },
     body: method.defaultBody ?? form,
   };
+};
+
+const substituteTypeParamExpr = (
+  expr: Expr | undefined,
+  substitutions?: Map<string, Expr>
+): Expr | undefined => {
+  if (!expr || !substitutions || substitutions.size === 0) {
+    return expr;
+  }
+
+  if (isIdentifierAtom(expr)) {
+    return substitutions.get(expr.value) ?? expr;
+  }
+  return expr;
+};
+
+const resolveObjectDecl = (
+  targetExpr: Expr,
+  ctx: BindingContext,
+  scope: ScopeId
+) => {
+  const identifier = (() => {
+    if (isIdentifierAtom(targetExpr)) {
+      return targetExpr;
+    }
+    if (!isForm(targetExpr)) {
+      return undefined;
+    }
+    if (isIdentifierAtom(targetExpr.first)) {
+      return targetExpr.first;
+    }
+    if (targetExpr.callsInternal("generics")) {
+      const target = targetExpr.at(1);
+      if (isIdentifierAtom(target)) {
+        return target;
+      }
+      if (isForm(target) && isIdentifierAtom(target.first)) {
+        return target.first;
+      }
+    }
+    return undefined;
+  })();
+  if (!identifier) {
+    return undefined;
+  }
+  const targetSymbol = ctx.symbolTable.resolve(identifier.value, scope);
+  if (typeof targetSymbol !== "number") {
+    return undefined;
+  }
+  const record = ctx.symbolTable.getSymbol(targetSymbol);
+  if (
+    record.kind !== "type" ||
+    (record.metadata as { entity?: string } | undefined)?.entity !== "object"
+  ) {
+    return undefined;
+  }
+  return ctx.decls.getObject(record.id);
+};
+
+const inferImplTypeParameters = ({
+  target,
+  trait,
+  ctx,
+  scope,
+}: {
+  target: Expr;
+  trait?: Expr;
+  ctx: BindingContext;
+  scope: ScopeId;
+}): string[] => {
+  const inferred = new Set<string>();
+
+  const targetDecl = resolveObjectDecl(target, ctx, scope);
+  if (targetDecl?.typeParameters?.length) {
+    const args = extractTraitTypeArguments(target);
+    if (args.length === targetDecl.typeParameters.length) {
+      targetDecl.typeParameters.forEach((param, index) => {
+        const arg = args[index];
+        if (isIdentifierAtom(arg) && arg.value === param.name) {
+          inferred.add(param.name);
+        }
+      });
+    }
+  }
+
+  const traitDecl = trait ? resolveTraitDecl(trait, ctx, scope) : undefined;
+  if (traitDecl?.typeParameters?.length) {
+    const args = trait ? extractTraitTypeArguments(trait) : [];
+    if (args.length === traitDecl.typeParameters.length) {
+      traitDecl.typeParameters.forEach((param, index) => {
+        const arg = args[index];
+        if (isIdentifierAtom(arg) && arg.value === param.name) {
+          inferred.add(param.name);
+        }
+      });
+    }
+  }
+
+  return Array.from(inferred);
 };
 
 const bindImplDecl = (
@@ -566,6 +702,12 @@ const bindImplDecl = (
 
   const typeParameters: TypeParameterDecl[] = [];
   const methods: ReturnType<typeof bindFunctionDecl>[] = [];
+  const inferredTypeParams = inferImplTypeParameters({
+    target: decl.target,
+    trait: decl.trait,
+    ctx,
+    scope: implScope,
+  });
   tracker.enterScope(implScope, () => {
     decl.typeParameters.forEach((param) => {
       rememberSyntax(param, ctx);
@@ -579,6 +721,18 @@ const bindImplDecl = (
         symbol: paramSymbol,
         ast: param,
       });
+    });
+
+    inferredTypeParams.forEach((name) => {
+      if (typeParameters.some((param) => param.name === name)) {
+        return;
+      }
+      const paramSymbol = ctx.symbolTable.declare({
+        name,
+        kind: "type-parameter",
+        declaredAt: decl.form?.syntaxId ?? decl.target.syntaxId,
+      });
+      typeParameters.push({ name, symbol: paramSymbol });
     });
 
     decl.body.rest.forEach((entry) => {
@@ -601,6 +755,7 @@ const bindImplDecl = (
     if (decl.trait) {
       const traitDecl = resolveTraitDecl(decl.trait, ctx, tracker.current());
       if (traitDecl) {
+        const traitTypeParamMap = buildTraitTypeParamMap(traitDecl, decl.trait);
         const methodNames = new Set(
           methods.map((method) => ctx.symbolTable.getSymbol(method.symbol).name)
         );
@@ -612,7 +767,9 @@ const bindImplDecl = (
           if (methodNames.has(name)) {
             return;
           }
-          const parsed = makeParsedFunctionFromTraitMethod(traitMethod);
+          const parsed = makeParsedFunctionFromTraitMethod(traitMethod, {
+            typeParamSubstitutions: traitTypeParamMap,
+          });
           const method = bindFunctionDecl(parsed, ctx, tracker, {
             declarationScope: ctx.symbolTable.rootScope,
             scopeParent: implScope,
@@ -640,6 +797,47 @@ const bindImplDecl = (
   methods.forEach((method) => {
     method.implId = implDecl.id;
   });
+};
+
+const buildTraitTypeParamMap = (
+  traitDecl: TraitDecl,
+  traitExpr: Expr
+): Map<string, Expr> | undefined => {
+  const params = traitDecl.typeParameters ?? [];
+  if (params.length === 0) {
+    return undefined;
+  }
+  const args = extractTraitTypeArguments(traitExpr);
+  if (args.length === 0) {
+    return undefined;
+  }
+
+  const substitutions = new Map<string, Expr>();
+  params.forEach((param, index) => {
+    const arg = args[index];
+    if (arg) {
+      substitutions.set(param.name, arg);
+    }
+  });
+  return substitutions.size > 0 ? substitutions : undefined;
+};
+
+const extractTraitTypeArguments = (traitExpr: Expr): readonly Expr[] => {
+  if (isForm(traitExpr) && isIdentifierAtom(traitExpr.first)) {
+    if (
+      isForm(traitExpr.second) &&
+      formCallsInternal(traitExpr.second, "generics")
+    ) {
+      return traitExpr.second.rest;
+    }
+    return [];
+  }
+
+  if (isForm(traitExpr) && formCallsInternal(traitExpr, "generics")) {
+    return traitExpr.rest;
+  }
+
+  return [];
 };
 
 const bindExpr = (

@@ -530,7 +530,7 @@ const parseImplHeadTarget = (
     if (formCallsInternal(generics, "generics")) {
       return {
         target: expr,
-        typeParameters: parseTypeParameters(generics),
+        typeParameters: [],
       };
     }
   }

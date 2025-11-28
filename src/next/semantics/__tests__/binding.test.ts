@@ -217,4 +217,21 @@ describe("binding pipeline", () => {
     expect(impl?.trait).toBeDefined();
     expect(isIdentifierAtom(impl?.trait) && impl?.trait.value).toBe("Area");
   });
+
+  it("applies default trait methods for impls with trait type arguments", () => {
+    const name = "trait_generic_defaults.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    const impl = binding.impls[0];
+    expect(impl).toBeDefined();
+    const methodNames = impl?.methods.map(
+      (method) => symbolTable.getSymbol(method.symbol).name
+    );
+    expect(methodNames).toContain("get");
+    expect(methodNames).toContain("copy");
+  });
 });

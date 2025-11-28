@@ -1,0 +1,17 @@
+trait Boxy<T>
+  fn get(self) -> T
+
+  fn copy(self) -> T
+    self.get()
+
+obj IntBox {
+  value: i32,
+}
+
+impl Boxy<i32> for IntBox
+  fn get(self) -> i32
+    self.value
+
+pub fn main() -> i32
+  let box = IntBox { value: 7 }
+  box.copy()
