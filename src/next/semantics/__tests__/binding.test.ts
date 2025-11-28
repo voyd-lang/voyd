@@ -371,7 +371,7 @@ describe("binding pipeline", () => {
               name: "helper",
               symbol: exportedSymbol,
               moduleId: utilId,
-              kind: "function",
+              kind: "value",
               visibility: "public",
             },
           ],
@@ -392,7 +392,10 @@ describe("binding pipeline", () => {
     const helperSymbol = symbolTable.resolve("helper", symbolTable.rootScope);
     expect(helperSymbol).toBeDefined();
     if (!helperSymbol) return;
-    expect(symbolTable.getSymbol(helperSymbol).metadata?.import?.moduleId).toBe(utilId);
+    const helperImport = symbolTable.getSymbol(helperSymbol)
+      .metadata as { import?: { moduleId: string } } | undefined;
+
+    expect(helperImport?.import?.moduleId).toBe(utilId);
   });
 
   it("preserves grouped mod selections when importing submodules", () => {
@@ -445,7 +448,7 @@ describe("binding pipeline", () => {
               name: "math",
               symbol: exportedSymbol,
               moduleId: mathId,
-              kind: "function",
+              kind: "value",
               visibility: "public",
             },
           ],
@@ -470,7 +473,10 @@ describe("binding pipeline", () => {
     const mathImportSymbol = symbolTable.resolve("math", symbolTable.rootScope);
     expect(mathImportSymbol).toBeDefined();
     if (!mathImportSymbol) return;
-    expect(symbolTable.getSymbol(mathImportSymbol).metadata?.import?.moduleId).toBe(mathId);
+    const mathImport = symbolTable.getSymbol(mathImportSymbol)
+      .metadata as { import?: { moduleId: string } } | undefined;
+
+    expect(mathImport?.import?.moduleId).toBe(mathId);
   });
 
   it("populates module graph dependencies for grouped mod selections", async () => {
@@ -510,7 +516,7 @@ describe("binding pipeline", () => {
               name: "math",
               symbol: 1,
               moduleId: mathId,
-              kind: "function",
+              kind: "value",
               visibility: "public",
             },
           ],
