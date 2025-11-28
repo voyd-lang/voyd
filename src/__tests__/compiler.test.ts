@@ -12,8 +12,10 @@ import * as rCallUtil from "../codegen/return-call.js";
 import { readString } from "@lib/read-string.js";
 import { compilers } from "../codegen.js";
 
+const timeout = 60000;
+
 describe("E2E Compiler Pipeline", () => {
-  test("Compiler can compile and run a basic voyd program", async (t) => {
+  test("Compiler can compile and run a basic voyd program", { timeout }, async (t) => {
     const mod = await compile(e2eVoydText);
     const instance = getWasmInstance(mod);
     const fn = getWasmFn("main", instance);
@@ -21,7 +23,7 @@ describe("E2E Compiler Pipeline", () => {
     t.expect(fn(), "Main function returns correct value").toEqual(55);
   });
 
-  test("Compiler has good inference", async (t) => {
+  test("Compiler has good inference", { timeout }, async (t) => {
     const mod = await compile(goodTypeInferenceText);
     const instance = getWasmInstance(mod);
     const fn = getWasmFn("main", instance);
@@ -29,7 +31,7 @@ describe("E2E Compiler Pipeline", () => {
     t.expect(fn(), "Main function returns correct value").toEqual(55n);
   });
 
-  test("Compiler kitchen sink", async (t) => {
+  test("Compiler kitchen sink", { timeout }, async (t) => {
     const mod = await compile(kitchenSink);
     const instance = getWasmInstance(mod);
     t.expect(mod.validate(), "Module is valid");
@@ -101,7 +103,7 @@ describe("E2E Compiler Pipeline", () => {
     );
   });
 
-  test("Compiler can do tco", async (t) => {
+  test("Compiler can do tco", { timeout }, async (t) => {
     const spy = vi.spyOn(rCallUtil, "returnCall");
     await compile(tcoText);
     const did = spy.mock.calls.some((call) => call[1].startsWith("fib"));

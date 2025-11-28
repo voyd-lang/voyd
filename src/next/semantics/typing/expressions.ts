@@ -37,6 +37,7 @@ import {
   typeSatisfies,
   getSymbolName,
 } from "./type-system.js";
+import { resolveImportedValue } from "./imports.js";
 import type {
   Arg,
   FunctionSignature,
@@ -1212,6 +1213,24 @@ const getValueType = (symbol: SymbolId, ctx: TypingContext): TypeId => {
     }
 
     return intrinsicType;
+  }
+
+  const importMetadata = (record.metadata ?? {}) as {
+    intrinsic?: boolean;
+    import?: unknown;
+  };
+  if (importMetadata.import) {
+    const imported = resolveImportedValue({ symbol, ctx });
+    if (imported) {
+      return imported.type;
+    }
+    const unknownType = ctx.primitives.unknown;
+    ctx.valueTypes.set(symbol, unknownType);
+    if (!ctx.table.getSymbolScheme(symbol)) {
+      const scheme = ctx.arena.newScheme([], unknownType);
+      ctx.table.setSymbolScheme(symbol, scheme);
+    }
+    return unknownType;
   }
 
   throw new Error(`missing value type for symbol ${record.name}`);

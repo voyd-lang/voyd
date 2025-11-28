@@ -1,12 +1,61 @@
-import type { BindingInputs, BindingContext, BindingResult } from "./types.js";
+import type {
+  BindingInputs,
+  BindingContext,
+  BindingResult,
+} from "./types.js";
 import { DeclTable } from "../decls.js";
 import type { Syntax } from "../../parser/index.js";
+import { toSourceSpan } from "../utils.js";
+import type {
+  ModuleDependency,
+  ModuleGraph,
+  ModuleNode,
+} from "../../modules/types.js";
+import type { ModuleExportTable } from "../modules.js";
 
 export const createBindingContext = ({
   moduleForm,
   symbolTable,
+  module,
+  graph,
+  moduleExports,
 }: BindingInputs): BindingContext => {
+  const moduleNode =
+    module ??
+    ({
+      id: moduleForm.location?.filePath ?? "<module>",
+      path: { namespace: "src", segments: [] },
+      origin: {
+        kind: "file",
+        filePath: moduleForm.location?.filePath ?? "<module>",
+      },
+      ast: moduleForm,
+      source: "",
+      dependencies: [],
+    } as ModuleNode);
+  const moduleGraph =
+    graph ??
+    ({
+      entry: moduleNode.id,
+      modules: new Map([[moduleNode.id, moduleNode]]),
+      diagnostics: [],
+    } as ModuleGraph);
+  const exportTables = moduleExports ?? new Map<string, ModuleExportTable>();
+
   const decls = new DeclTable();
+  const dependenciesBySpan = new Map<string, ModuleDependency[]>();
+  moduleNode.dependencies
+    .filter((dep) => dep.kind === "use")
+    .forEach((dep) => {
+      const key = spanKey(dep.span ?? toSourceSpan(moduleForm));
+      const bucket = dependenciesBySpan.get(key);
+      if (bucket) {
+        bucket.push(dep);
+      } else {
+        dependenciesBySpan.set(key, [dep]);
+      }
+    });
+
   return {
     symbolTable,
     scopeByNode: new Map([[moduleForm.syntaxId, symbolTable.rootScope]]),
@@ -17,6 +66,13 @@ export const createBindingContext = ({
     overloadBuckets: new Map(),
     syntaxByNode: new Map([[moduleForm.syntaxId, moduleForm]]),
     nextModuleIndex: 0,
+    module: moduleNode,
+    graph: moduleGraph,
+    modulePath: moduleNode.path,
+    moduleExports: exportTables,
+    dependenciesBySpan,
+    uses: [],
+    imports: [],
   };
 };
 
@@ -32,6 +88,8 @@ export const toBindingResult = (ctx: BindingContext): BindingResult => ({
   overloads: ctx.overloads,
   overloadBySymbol: ctx.overloadBySymbol,
   diagnostics: ctx.diagnostics,
+  uses: ctx.uses,
+  imports: ctx.imports,
 });
 
 export const rememberSyntax = (
@@ -43,3 +101,6 @@ export const rememberSyntax = (
   }
   ctx.syntaxByNode.set(syntax.syntaxId, syntax);
 };
+
+const spanKey = (span: ReturnType<typeof toSourceSpan>): string =>
+  `${span.file}:${span.start}:${span.end}`;

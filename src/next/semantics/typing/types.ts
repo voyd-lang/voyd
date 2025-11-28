@@ -7,6 +7,7 @@ import type {
   HirTraitDecl,
   HirTypeExpr,
 } from "../hir/index.js";
+import type { ModuleExportTable } from "../modules.js";
 import type {
   EffectRowId,
   HirExprId,
@@ -27,12 +28,24 @@ export interface TypingInputs {
   hir: HirGraph;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
   decls?: DeclTable;
+  imports?: readonly {
+    local: SymbolId;
+    target?: { moduleId: string; symbol: SymbolId };
+  }[];
+  moduleId?: string;
+  moduleExports?: Map<string, ModuleExportTable>;
+  availableSemantics?: Map<string, DependencySemantics>;
 }
 
 export interface TypingResult {
   arena: TypeArena;
   table: TypeTable;
   functions: FunctionStore;
+  typeAliases: TypeAliasStore;
+  objects: ObjectStore;
+  traits: TraitStore;
+  primitives: PrimitiveTypes;
+  intrinsicTypes: Map<string, TypeId>;
   resolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
   objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
@@ -444,6 +457,11 @@ export interface TypingContext {
   hir: HirGraph;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
   decls: DeclTable;
+  moduleId?: string;
+  moduleExports: Map<string, ModuleExportTable>;
+  dependencies: Map<string, DependencySemantics>;
+  importsByLocal: Map<SymbolId, { moduleId: string; symbol: SymbolId }>;
+  importAliasesByModule: Map<string, Map<SymbolId, SymbolId>>;
   arena: TypeArena;
   table: TypeTable;
   resolvedExprTypes: Map<HirExprId, TypeId>;
@@ -491,6 +509,16 @@ export interface TypeAliasTemplate {
   symbol: SymbolId;
   params: readonly { symbol: SymbolId; constraint?: HirTypeExpr }[];
   target: HirTypeExpr;
+}
+
+export interface DependencySemantics {
+  moduleId: string;
+  symbolTable: SymbolTable;
+  hir: HirGraph;
+  typing: TypingResult;
+  decls: DeclTable;
+  overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
+  exports: ModuleExportTable;
 }
 
 export const DEFAULT_EFFECT_ROW: EffectRowId = 0;

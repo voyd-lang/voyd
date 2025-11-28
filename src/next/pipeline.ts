@@ -12,6 +12,7 @@ import {
   semanticsPipeline,
   type SemanticsPipelineResult,
 } from "./semantics/pipeline.js";
+import type { ModuleExportTable } from "./semantics/modules.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -65,10 +66,26 @@ export const loadModuleGraph = async (
 export const analyzeModules = ({
   graph,
 }: AnalyzeModulesOptions): Map<string, SemanticsPipelineResult> => {
-  return [...graph.modules].reduce(
-    (acc, [id, module]) => acc.set(id, semanticsPipeline(module.ast)),
-    new Map<string, SemanticsPipelineResult>()
-  );
+  const order = sortModules(graph);
+  const semantics = new Map<string, SemanticsPipelineResult>();
+  const exports = new Map<string, ModuleExportTable>();
+
+  order.forEach((id) => {
+    const module = graph.modules.get(id);
+    if (!module) {
+      return;
+    }
+    const result = semanticsPipeline({
+      module,
+      graph,
+      exports,
+      dependencies: semantics,
+    });
+    semantics.set(id, result);
+    exports.set(id, result.exports);
+  });
+
+  return semantics;
 };
 
 export const lowerProgram = ({
@@ -156,6 +173,31 @@ export const compileProgram = async (
 };
 
 const moduleIdForPath = (path: ModulePath): string => modulePathToString(path);
+
+const sortModules = (graph: ModuleGraph): string[] => {
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const order: string[] = [];
+
+  const visit = (id: string) => {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) return;
+    visiting.add(id);
+    const node = graph.modules.get(id);
+    node?.dependencies.forEach((dep) => {
+      const depId = moduleIdForPath(dep.path);
+      if (graph.modules.has(depId)) {
+        visit(depId);
+      }
+    });
+    visiting.delete(id);
+    visited.add(id);
+    order.push(id);
+  };
+
+  graph.modules.forEach((_, id) => visit(id));
+  return order;
+};
 
 const lazyCodegen = async () => {
   // Lazy import to keep tree shaking workable for analysis-only usage.

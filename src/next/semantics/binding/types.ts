@@ -17,10 +17,21 @@ import {
   type TraitDecl,
   type ImplDecl,
 } from "../decls.js";
+import type {
+  ModuleDependency,
+  ModuleGraph,
+  ModuleNode,
+  ModulePath,
+} from "../../modules/types.js";
+import type { ModuleExportTable } from "../modules.js";
+import type { SourceSpan } from "../ids.js";
 
 export interface BindingInputs {
   moduleForm: Form;
   symbolTable: SymbolTable;
+  module?: ModuleNode;
+  graph?: ModuleGraph;
+  moduleExports?: Map<string, ModuleExportTable>;
 }
 
 export interface BindingResult {
@@ -35,6 +46,8 @@ export interface BindingResult {
   overloads: Map<OverloadSetId, BoundOverloadSet>;
   overloadBySymbol: Map<SymbolId, OverloadSetId>;
   diagnostics: Diagnostic[];
+  uses: readonly BoundUse[];
+  imports: readonly BoundImport[];
 }
 
 export type BoundFunction = FunctionDecl;
@@ -69,4 +82,41 @@ export interface BindingContext {
   overloadBuckets: Map<string, OverloadBucket>;
   syntaxByNode: Map<NodeId, Syntax>;
   nextModuleIndex: number;
+  module: ModuleNode;
+  graph: ModuleGraph;
+  modulePath: ModulePath;
+  moduleExports: Map<string, ModuleExportTable>;
+  dependenciesBySpan: Map<string, ModuleDependency[]>;
+  uses: BoundUse[];
+  imports: BoundImport[];
+}
+
+export interface BoundUse {
+  form: Form;
+  visibility: HirVisibility;
+  entries: readonly BoundUseEntry[];
+  order: number;
+}
+
+export interface BoundUseEntry {
+  path: readonly string[];
+  moduleId?: string;
+  span: SourceSpan;
+  importKind: "all" | "self" | "name";
+  targetName?: string;
+  alias?: string;
+  imports: readonly BoundImport[];
+}
+
+export interface BoundImport {
+  name: string;
+  local: SymbolId;
+  target?: ImportedTarget;
+  visibility: HirVisibility;
+  span?: SourceSpan;
+}
+
+export interface ImportedTarget {
+  moduleId: string;
+  symbol: SymbolId;
 }

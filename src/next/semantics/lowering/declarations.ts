@@ -10,6 +10,7 @@ import type {
   BoundTypeAlias,
   BoundTrait,
   BoundImpl,
+  BoundUse,
 } from "../binding/binding.js";
 import type { Syntax } from "../../parser/index.js";
 
@@ -17,6 +18,11 @@ export const getModuleDeclarations = (
   binding: BindingResult
 ): ModuleDeclaration[] => {
   const entries: ModuleDeclaration[] = [
+    ...binding.uses.map((use) => ({
+      kind: "use" as const,
+      order: use.order,
+      use,
+    })),
     ...binding.functions.map((fn) => ({
       kind: "function" as const,
       order: fn.moduleIndex,
@@ -45,6 +51,40 @@ export const getModuleDeclarations = (
   ];
 
   return entries.sort((a, b) => a.order - b.order);
+};
+
+export const lowerUseDecl = (use: BoundUse, ctx: LowerContext): void => {
+  const entries = use.entries.map((entry) => ({
+    path: entry.path,
+    alias: entry.alias,
+    importKind: entry.importKind,
+    span: entry.span,
+  }));
+
+  const useId = ctx.builder.addItem({
+    kind: "use",
+    visibility: use.visibility,
+    entries,
+    ast: use.form.syntaxId,
+    span: toSourceSpan(use.form),
+  });
+
+  if (use.visibility === "public") {
+    use.entries.forEach((entry) =>
+      entry.imports.forEach((imported) => {
+        if (!imported.target) {
+          return;
+        }
+        ctx.builder.recordExport({
+          symbol: imported.local,
+          visibility: "public",
+          span: entry.span,
+          item: useId,
+          alias: entry.alias,
+        });
+      })
+    );
+  }
 };
 
 export const lowerFunctionDecl = (

@@ -11,6 +11,7 @@ import {
 } from "./registry.js";
 import { validateTypedProgram } from "./validation.js";
 import type { TypingInputs, TypingResult } from "./types.js";
+import { resolveImportedValue } from "./imports.js";
 
 export * from "./types.js";
 
@@ -20,6 +21,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
 
   seedPrimitiveTypes(ctx);
   seedBaseObjectType(ctx);
+  primeImportedValues(ctx);
   registerTypeAliases(ctx, state);
   registerObjectDecls(ctx);
   registerTraits(ctx);
@@ -34,6 +36,11 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     arena: ctx.arena,
     table: ctx.table,
     functions: ctx.functions,
+    typeAliases: ctx.typeAliases,
+    objects: ctx.objects,
+    traits: ctx.traits,
+    primitives: ctx.primitives,
+    intrinsicTypes: ctx.intrinsicTypes,
     resolvedExprTypes: new Map(ctx.resolvedExprTypes),
     valueTypes: new Map(ctx.valueTypes),
     objectsByNominal: ctx.objects.snapshotByNominal(),
@@ -49,4 +56,14 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
     functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
   };
+};
+
+const primeImportedValues = (ctx: TypingContext): void => {
+  ctx.importsByLocal.forEach((_, symbol) => {
+    const record = ctx.symbolTable.getSymbol(symbol);
+    if (record.kind !== "value") {
+      return;
+    }
+    resolveImportedValue({ symbol, ctx });
+  });
 };

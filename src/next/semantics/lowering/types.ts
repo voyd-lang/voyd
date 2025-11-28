@@ -16,6 +16,7 @@ import type {
   BoundTypeAlias,
   BoundTrait,
   BoundImpl,
+  BoundUse,
 } from "../binding/binding.js";
 import type { NodeId, OverloadSetId, ScopeId, SymbolId } from "../ids.js";
 import type { SymbolTable } from "../binder/index.js";
@@ -24,6 +25,7 @@ export interface LowerInputs {
   builder: HirBuilder;
   binding: BindingResult;
   moduleNodeId: NodeId;
+  moduleId?: string;
 }
 
 export interface LowerScopeStack {
@@ -50,7 +52,8 @@ export type ModuleDeclaration =
   | { kind: "type-alias"; order: number; alias: BoundTypeAlias }
   | { kind: "object"; order: number; object: BoundObject }
   | { kind: "trait"; order: number; trait: BoundTrait }
-  | { kind: "impl"; order: number; impl: BoundImpl };
+  | { kind: "impl"; order: number; impl: BoundImpl }
+  | { kind: "use"; order: number; use: BoundUse };
 
 export interface LoweredTypeInfo {
   baseSymbol?: SymbolId;
