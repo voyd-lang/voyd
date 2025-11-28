@@ -24,7 +24,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && npm run typecheck",
     "test:w": "vitest",
     "bench": "vitest bench --run",
     "bench:w": "vitest bench",

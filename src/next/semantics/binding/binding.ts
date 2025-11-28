@@ -1,5 +1,5 @@
 import type { BindingInputs, BindingResult } from "./types.js";
-import { bindModule } from "./binders.js";
+import { bindModule } from "./binders/index.js";
 import { createBindingContext, toBindingResult } from "./context.js";
 import { finalizeOverloadSets } from "./overloads.js";
 
