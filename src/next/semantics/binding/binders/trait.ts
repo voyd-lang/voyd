@@ -13,7 +13,7 @@ import type {
   TraitMethodDecl,
   TraitDecl,
   ParameterDeclInput,
-} from "../decls.js";
+} from "../../decls.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
 import type { BindingContext } from "../types.js";
 import type {

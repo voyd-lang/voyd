@@ -28,7 +28,7 @@ import type {
 import { modulePathToString } from "../../../modules/path.js";
 import type { ModulePath } from "../../../modules/types.js";
 import type { HirVisibility } from "../../hir/index.js";
-import type { ModuleExportEntry } from "../modules.js";
+import type { ModuleExportEntry } from "../../modules.js";
 import type { SourceSpan } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
 

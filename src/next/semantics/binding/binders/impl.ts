@@ -1,6 +1,6 @@
 import { type Expr, isIdentifierAtom, isForm } from "../../../parser/index.js";
 import { rememberSyntax } from "../context.js";
-import type { TypeParameterDecl, TraitDecl } from "../decls.js";
+import type { TypeParameterDecl, TraitDecl } from "../../decls.js";
 import type { BindingContext } from "../types.js";
 import type { ParsedImplDecl } from "../parsing.js";
 import { parseFunctionDecl } from "../parsing.js";
@@ -201,7 +201,7 @@ const buildTraitTypeParamMap = (
   }
 
   const substitutions = new Map<string, Expr>();
-  params.forEach((param, index) => {
+    params.forEach((param: TypeParameterDecl, index: number) => {
     const arg = args[index];
     if (arg) {
       substitutions.set(param.name, arg);

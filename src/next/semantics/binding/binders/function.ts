@@ -1,7 +1,7 @@
 import type { Expr } from "../../../parser/index.js";
 import { rememberSyntax } from "../context.js";
 import { recordFunctionOverload } from "../overloads.js";
-import type { TypeParameterDecl, ParameterDeclInput } from "../decls.js";
+import type { TypeParameterDecl, ParameterDeclInput } from "../../decls.js";
 import type { BindingContext } from "../types.js";
 import type { ParsedFunctionDecl } from "../parsing.js";
 import type { HirVisibility } from "../../hir/index.js";

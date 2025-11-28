@@ -1,6 +1,6 @@
 import type { ParsedTypeAliasDecl } from "../parsing.js";
 import type { BindingContext } from "../types.js";
-import type { TypeParameterDecl } from "../decls.js";
+import type { TypeParameterDecl } from "../../decls.js";
 import { rememberSyntax } from "../context.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";

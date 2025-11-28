@@ -1,5 +1,5 @@
-import type { ScopeId } from "../ids.js";
-import type { SymbolTable } from "../binder/index.js";
+import type { ScopeId } from "../../ids.js";
+import type { SymbolTable } from "../../binder/index.js";
 
 export class BinderScopeTracker {
   private readonly stack: [ScopeId, ...ScopeId[]];

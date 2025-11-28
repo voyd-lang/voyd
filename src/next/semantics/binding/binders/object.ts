@@ -1,7 +1,7 @@
 import type { Expr } from "../../../parser/index.js";
 import { isForm, isIdentifierAtom } from "../../../parser/index.js";
 import { rememberSyntax } from "../context.js";
-import type { ObjectFieldDecl, TypeParameterDecl } from "../decls.js";
+import type { ObjectFieldDecl, TypeParameterDecl } from "../../decls.js";
 import type { ScopeId } from "../../ids.js";
 import type { BindingContext } from "../types.js";
 import type { ParsedObjectDecl } from "../parsing.js";

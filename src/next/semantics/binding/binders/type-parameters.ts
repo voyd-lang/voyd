@@ -1,6 +1,6 @@
 import type { IdentifierAtom } from "../../../parser/index.js";
 import { rememberSyntax } from "../context.js";
-import type { TypeParameterDecl } from "../decls.js";
+import type { TypeParameterDecl } from "../../decls.js";
 import type { BindingContext } from "../types.js";
 
 export const bindTypeParameters = (
