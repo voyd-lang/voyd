@@ -14,7 +14,11 @@ import { isContinuationOp, isGreedyOp, isOp } from "../grammar.js";
 export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
   if (form.callsInternal("ast")) {
     const result = interpretWhitespace(form.slice(1), indentLevel);
-    return call("ast", ...(isForm(result.at(0)) ? result.toArray() : [result]));
+    const normalized = call(
+      "ast",
+      ...(isForm(result.at(0)) ? result.toArray() : [result])
+    );
+    return hoistFnBlock(normalized);
   }
 
   const functional = applyFunctionalNotation(form);
@@ -43,7 +47,7 @@ const interpretWhitespaceExpr = (form: Form, indentLevel?: number): Expr => {
     preserved.setLocation(form.location.clone());
   }
 
-  return preserved.unwrap();
+  return hoistFnBlock(preserved).unwrap();
 };
 
 const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
@@ -200,6 +204,52 @@ const handleLeadingContinuationOp = (
 const unwrapSyntheticCall = (expr: Expr): Expr => {
   if (p.isForm(expr)) return expr.unwrap();
   return expr;
+};
+
+const hoistFnBlock = (expr: Expr): Expr => {
+  if (!p.isForm(expr)) return expr;
+
+  const elements = expr.toArray().map(hoistFnBlock);
+  const cloned = new Form({
+    location: expr.location?.clone(),
+    elements,
+  });
+  if (!cloned.calls("fn")) {
+    return expr instanceof CallForm ? cloned.toCall() : cloned;
+  }
+
+  const last = cloned.at(-1);
+  const maybeFnBlock = extractTrailingBlock(last);
+  if (!maybeFnBlock) {
+    return expr instanceof CallForm ? cloned.toCall() : cloned;
+  }
+
+  const { remaining, block } = maybeFnBlock;
+  const baseElements = cloned.toArray();
+  baseElements.pop();
+  if (remaining) baseElements.push(remaining);
+  baseElements.push(block);
+
+  const hoisted = new Form({
+    location: cloned.location?.clone(),
+    elements: baseElements,
+  });
+  return expr instanceof CallForm ? hoisted.toCall() : hoisted;
+};
+
+const extractTrailingBlock = (
+  expr?: Expr
+): { remaining?: Expr; block: Form } | undefined => {
+  if (!p.isForm(expr)) return undefined;
+
+  const last = expr.at(-1);
+  if (!p.isForm(last) || !(last.calls("block") || last.callsInternal("block"))) {
+    return undefined;
+  }
+
+  const rest = expr.toArray().slice(0, -1);
+  const remaining = rest.length ? new Form(rest).unwrap() : undefined;
+  return { remaining, block: last };
 };
 
 const addSibling = (child: Expr, siblings: Expr[]) => {
