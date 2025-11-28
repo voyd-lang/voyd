@@ -206,7 +206,9 @@ const unwrapSyntheticCall = (expr: Expr): Expr => {
   return expr;
 };
 
-const hoistFnBlock = (expr: Expr): Expr => {
+function hoistFnBlock(expr: Form): Form;
+function hoistFnBlock(expr: Expr): Expr;
+function hoistFnBlock(expr: Expr): Expr {
   if (!p.isForm(expr)) return expr;
 
   const elements = expr.toArray().map(hoistFnBlock);
@@ -243,7 +245,7 @@ const extractTrailingBlock = (
   if (!p.isForm(expr)) return undefined;
 
   const last = expr.at(-1);
-  if (!p.isForm(last) || !(last.calls("block") || last.callsInternal("block"))) {
+  if (!p.isForm(last) || !last.calls("block")) {
     return undefined;
   }
 
