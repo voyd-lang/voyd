@@ -16,6 +16,11 @@ describe("trait implementations", () => {
     expect(desc.kind).toBe("trait");
   });
 
+  it("substitutes trait type parameters when comparing nested type arguments", () => {
+    const ast = loadAst("trait_generic_nested_args.voyd");
+    expect(() => semanticsPipeline(ast)).not.toThrow();
+  });
+
   it("errors when an impl does not provide required trait methods", () => {
     const ast = loadAst("trait_area_invalid.voyd");
     expect(() => semanticsPipeline(ast)).toThrowError(

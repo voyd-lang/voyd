@@ -1,0 +1,14 @@
+trait Boxer<T>
+  fn make(self, value: T) -> Box<T>
+
+obj Box<T> { value: T, }
+obj IntBoxer { marker: i32, }
+
+impl Boxer<i32> for IntBoxer
+  fn make(self, value: i32) -> Box<i32>
+    Box { value }
+
+pub fn main() -> i32
+  let boxer = IntBoxer { marker: 0 }
+  let boxed = boxer.make(7)
+  boxed.value
