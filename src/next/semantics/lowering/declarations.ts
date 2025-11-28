@@ -8,6 +8,7 @@ import type {
   BoundFunction,
   BoundObject,
   BoundTypeAlias,
+  BoundTrait,
   BoundImpl,
 } from "../binding/binding.js";
 import type { Syntax } from "../../parser/index.js";
@@ -30,6 +31,11 @@ export const getModuleDeclarations = (
       kind: "object" as const,
       order: object.moduleIndex,
       object,
+    })),
+    ...binding.traits.map((trait) => ({
+      kind: "trait" as const,
+      order: trait.moduleIndex,
+      trait,
     })),
     ...binding.impls.map((impl) => ({
       kind: "impl" as const,
@@ -160,6 +166,69 @@ export const lowerObjectDecl = (
       visibility: object.visibility,
       span: toSourceSpan(object.form),
       item: objectId,
+    });
+  }
+};
+
+export const lowerTraitDecl = (
+  trait: BoundTrait,
+  ctx: LowerContext
+): void => {
+  const traitScope =
+    trait.scope ??
+    ctx.scopeByNode.get(trait.form?.syntaxId ?? trait.scope) ??
+    ctx.symbolTable.rootScope;
+
+  const methods = trait.methods.map((method) => {
+    const methodScope =
+      method.scope ??
+      ctx.scopeByNode.get(method.form?.syntaxId ?? method.scope) ??
+      traitScope;
+    const parameters = method.params.map((param) => ({
+      symbol: param.symbol,
+      span: toSourceSpan(param.ast ?? method.form ?? trait.form),
+      type: lowerTypeExpr(param.typeExpr, ctx, methodScope),
+      mutable: false,
+      bindingKind: undefined,
+    }));
+
+    const scopes = createLowerScopeStack(methodScope);
+    const defaultBody = method.defaultBody
+      ? lowerExpr(method.defaultBody, ctx, scopes)
+      : undefined;
+
+    return {
+      symbol: method.symbol,
+      span: toSourceSpan(method.form ?? trait.form),
+      typeParameters: lowerTypeParameters(method.typeParameters),
+      parameters,
+      returnType: lowerTypeExpr(
+        method.returnTypeExpr,
+        ctx,
+        methodScope
+      ),
+      defaultBody,
+    };
+  });
+
+  const traitSyntax = trait.form ?? trait.methods[0]?.form;
+  const traitId = ctx.builder.addItem({
+    kind: "trait",
+    symbol: trait.symbol,
+    visibility: trait.visibility,
+    ast: (traitSyntax as Syntax | undefined)?.syntaxId ?? ctx.moduleNodeId,
+    span: toSourceSpan(traitSyntax),
+    typeParameters: lowerTypeParameters(trait.typeParameters),
+    requirements: undefined,
+    methods,
+  });
+
+  if (trait.visibility === "public") {
+    ctx.builder.recordExport({
+      symbol: trait.symbol,
+      visibility: trait.visibility,
+      span: toSourceSpan(trait.form),
+      item: traitId,
     });
   }
 };

@@ -4,6 +4,7 @@ import type {
   HirFunction,
   HirGraph,
   HirObjectDecl,
+  HirTraitDecl,
   HirTypeExpr,
 } from "../hir/index.js";
 import type {
@@ -291,6 +292,31 @@ export class ObjectStore {
   }
 }
 
+export class TraitStore {
+  #decls = new Map<SymbolId, HirTraitDecl>();
+  #byName = new Map<string, SymbolId>();
+
+  registerDecl(decl: HirTraitDecl): void {
+    this.#decls.set(decl.symbol, decl);
+  }
+
+  getDecl(symbol: SymbolId): HirTraitDecl | undefined {
+    return this.#decls.get(symbol);
+  }
+
+  setName(name: string, symbol: SymbolId): void {
+    this.#byName.set(name, symbol);
+  }
+
+  hasName(name: string): boolean {
+    return this.#byName.has(name);
+  }
+
+  resolveName(name: string): SymbolId | undefined {
+    return this.#byName.get(name);
+  }
+}
+
 export class TypeAliasStore {
   #templates = new Map<SymbolId, TypeAliasTemplate>();
   #instances = new Map<string, TypeId>();
@@ -425,6 +451,7 @@ export interface TypingContext {
   callResolution: CallResolution;
   functions: FunctionStore;
   objects: ObjectStore;
+  traits: TraitStore;
   typeAliases: TypeAliasStore;
   primitives: PrimitiveTypes;
   intrinsicTypes: Map<string, TypeId>;

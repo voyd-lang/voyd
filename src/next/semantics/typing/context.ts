@@ -7,6 +7,7 @@ import {
   FunctionStore,
   ObjectStore,
   TypeAliasStore,
+  TraitStore,
   type TypingState,
   type TypingContext,
   type TypingInputs,
@@ -18,6 +19,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const table = createTypeTable();
   const functions = new FunctionStore();
   const objects = new ObjectStore();
+  const traits = new TraitStore();
   const typeAliases = new TypeAliasStore();
 
   return {
@@ -36,6 +38,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     },
     functions,
     objects,
+    traits,
     typeAliases,
     primitives: {
       cache: new Map(),

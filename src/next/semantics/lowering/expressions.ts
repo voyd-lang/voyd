@@ -8,6 +8,7 @@ import {
   isFloatAtom,
   isForm,
   isIdentifierAtom,
+  isInternalIdentifierAtom,
   isIntAtom,
   isStringAtom,
 } from "../../parser/index.js";
@@ -84,7 +85,7 @@ export const lowerExpr = (
     });
   }
 
-  if (isIdentifierAtom(expr)) {
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
     const resolution = resolveIdentifierValue(
       expr.value,
       scopes.current(),

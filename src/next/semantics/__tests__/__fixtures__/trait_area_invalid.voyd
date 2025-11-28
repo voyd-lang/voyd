@@ -1,0 +1,20 @@
+trait Area
+  fn area(self) -> f64
+
+  fn double_area(self) -> f64
+    self.area() * 2.0
+
+obj Rect {
+  width: f64,
+  height: f64,
+}
+
+impl Area for Rect
+  fn area(self) -> f64
+    self.width * self.height
+
+pub obj Circle { radius: f64 }
+
+impl Area for Circle
+  fn a(self) -> f64
+    5.0

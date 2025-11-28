@@ -46,7 +46,11 @@ export const resolveTypeSymbol = (
     return undefined;
   }
   const record = ctx.symbolTable.getSymbol(resolved);
-  if (record.kind === "type" || record.kind === "type-parameter") {
+  if (
+    record.kind === "type" ||
+    record.kind === "type-parameter" ||
+    record.kind === "trait"
+  ) {
     return resolved;
   }
   return undefined;

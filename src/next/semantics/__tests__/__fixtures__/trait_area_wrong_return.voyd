@@ -1,0 +1,8 @@
+trait Area
+  fn area(self) -> f64
+
+obj Rect { width: f64, height: f64 }
+
+impl Area for Rect
+  fn area(self) -> string
+    "oops"

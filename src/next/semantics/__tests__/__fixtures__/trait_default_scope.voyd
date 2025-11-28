@@ -1,0 +1,16 @@
+trait Area
+  fn area(self) -> f64
+
+  fn double_area(self) -> f64
+    self.area() * 2.0
+
+obj Rect { width: f64, height: f64 }
+obj Square { side: f64 }
+
+impl Area for Rect
+  fn area(self) -> f64
+    self.width * self.height
+
+impl Area for Square
+  fn area(self) -> f64
+    self.side * self.side

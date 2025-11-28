@@ -696,6 +696,17 @@ const resolveNamedTypeExpr = (
     return info?.type ?? ctx.primitives.unknown;
   }
 
+  const traitSymbol =
+    (typeof expr.symbol === "number" && ctx.traits.getDecl(expr.symbol)
+      ? expr.symbol
+      : undefined) ?? ctx.traits.resolveName(name);
+  if (traitSymbol !== undefined) {
+    const traitType = ensureTraitType(traitSymbol, ctx, state, resolvedTypeArgs);
+    if (typeof traitType === "number") {
+      return traitType;
+    }
+  }
+
   const resolved = ctx.primitives.cache.get(name);
   if (typeof resolved === "number") {
     return resolved;
@@ -1040,6 +1051,42 @@ export const ensureObjectType = (
     ctx.valueTypes.set(symbol, type);
   }
   return info;
+};
+
+export const ensureTraitType = (
+  symbol: SymbolId,
+  ctx: TypingContext,
+  state: TypingState,
+  typeArgs: readonly TypeId[] = []
+): TypeId | undefined => {
+  const decl = ctx.traits.getDecl(symbol) ?? ctx.decls.getTrait(symbol);
+  if (!decl) {
+    return undefined;
+  }
+
+  const paramCount = decl.typeParameters?.length ?? 0;
+  const normalized = normalizeTypeArgs({
+    typeArgs,
+    paramCount,
+    unknownType: ctx.primitives.unknown,
+    context: `trait ${getSymbolName(symbol, ctx)}`,
+  });
+
+  if (normalized.missingCount > 0 && state.mode === "strict") {
+    throw new Error(
+      `trait ${getSymbolName(symbol, ctx)} is missing ${
+        normalized.missingCount
+      } type argument(s)`
+    );
+  }
+
+  const type = ctx.arena.internTrait({
+    owner: symbol,
+    name: getSymbolName(symbol, ctx),
+    typeArgs: normalized.applied,
+  });
+  ctx.valueTypes.set(symbol, type);
+  return type;
 };
 
 const mergeDeclaredFields = (

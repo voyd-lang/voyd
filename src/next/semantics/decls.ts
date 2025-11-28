@@ -8,8 +8,10 @@ import type {
   SymbolId,
   TypeAliasDeclId,
   ObjectDeclId,
+  TraitDeclId,
   ImplDeclId,
 } from "./ids.js";
+import type { IdentifierAtom } from "../parser/ast/atom.js";
 
 export interface ParameterDecl {
   id: ParameterDeclId;
@@ -89,6 +91,39 @@ export interface ObjectDecl {
 
 export type ObjectDeclInput = Omit<ObjectDecl, "id"> & { id?: ObjectDeclId };
 
+export interface TraitMethodDecl {
+  name: string;
+  form?: Form;
+  symbol: SymbolId;
+  scope: ScopeId;
+  nameAst?: IdentifierAtom;
+  params: ParameterDecl[];
+  typeParameters?: TypeParameterDecl[];
+  returnTypeExpr?: Expr;
+  defaultBody?: Expr;
+}
+
+export type TraitMethodDeclInput = Omit<TraitMethodDecl, "params"> & {
+  params: ParameterDeclInput[];
+};
+
+export interface TraitDecl {
+  id: TraitDeclId;
+  name: string;
+  form?: Form;
+  visibility: HirVisibility;
+  symbol: SymbolId;
+  typeParameters?: TypeParameterDecl[];
+  methods: TraitMethodDecl[];
+  scope: ScopeId;
+  moduleIndex: number;
+}
+
+export type TraitDeclInput = Omit<TraitDecl, "id" | "methods"> & {
+  id?: TraitDeclId;
+  methods?: TraitMethodDeclInput[];
+};
+
 export interface ImplDecl {
   id: ImplDeclId;
   form?: Form;
@@ -111,12 +146,14 @@ export class DeclTable {
   functions: FunctionDecl[] = [];
   typeAliases: TypeAliasDecl[] = [];
   objects: ObjectDecl[] = [];
+  traits: TraitDecl[] = [];
   impls: ImplDecl[] = [];
 
   private nextFunctionId: FunctionDeclId = 0;
   private nextParamId: ParameterDeclId = 0;
   private nextAliasId: TypeAliasDeclId = 0;
   private nextObjectId: ObjectDeclId = 0;
+  private nextTraitId: TraitDeclId = 0;
   private nextImplId: ImplDeclId = 0;
 
   private functionsBySymbol = new Map<SymbolId, FunctionDecl>();
@@ -127,6 +164,8 @@ export class DeclTable {
   private typeAliasesById = new Map<TypeAliasDeclId, TypeAliasDecl>();
   private objectsBySymbol = new Map<SymbolId, ObjectDecl>();
   private objectsById = new Map<ObjectDeclId, ObjectDecl>();
+  private traitsBySymbol = new Map<SymbolId, TraitDecl>();
+  private traitsById = new Map<TraitDeclId, TraitDecl>();
   private implsBySymbol = new Map<SymbolId, ImplDecl>();
   private implsById = new Map<ImplDeclId, ImplDecl>();
 
@@ -185,6 +224,40 @@ export class DeclTable {
     return withId;
   }
 
+  registerTrait(trait: TraitDeclInput): TraitDecl {
+    const typeParameters = trait.typeParameters?.map((param) => ({ ...param }));
+    const methods =
+      trait.methods?.map((method) => {
+        const methodTypeParameters = method.typeParameters?.map((param) => ({
+          ...param,
+        }));
+        const params: ParameterDecl[] = method.params.map((param) => {
+          const withId: ParameterDecl = {
+            ...param,
+            id: param.id ?? this.nextParamId++,
+          };
+          this.nextParamId = this.bumpId(this.nextParamId, withId.id);
+          this.parametersBySymbol.set(withId.symbol, withId);
+          this.parametersById.set(withId.id, withId);
+          return withId;
+        });
+
+        return { ...method, params, typeParameters: methodTypeParameters };
+      }) ?? [];
+
+    const withId: TraitDecl = {
+      ...trait,
+      typeParameters,
+      methods,
+      id: trait.id ?? this.nextTraitId++,
+    };
+    this.nextTraitId = this.bumpId(this.nextTraitId, withId.id);
+    this.traits.push(withId);
+    this.traitsBySymbol.set(withId.symbol, withId);
+    this.traitsById.set(withId.id, withId);
+    return withId;
+  }
+
   registerImpl(impl: ImplDeclInput): ImplDecl {
     const methods = impl.methods ? [...impl.methods] : [];
     const withId: ImplDecl = {
@@ -229,6 +302,14 @@ export class DeclTable {
 
   getObjectById(id: ObjectDeclId): ObjectDecl | undefined {
     return this.objectsById.get(id);
+  }
+
+  getTrait(symbol: SymbolId): TraitDecl | undefined {
+    return this.traitsBySymbol.get(symbol);
+  }
+
+  getTraitById(id: TraitDeclId): TraitDecl | undefined {
+    return this.traitsById.get(id);
   }
 
   getImpl(symbol: SymbolId): ImplDecl | undefined {

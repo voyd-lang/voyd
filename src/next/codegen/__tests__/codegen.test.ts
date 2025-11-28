@@ -287,4 +287,19 @@ describe("next codegen", () => {
     const main = loadMain("impl_methods.voyd");
     expect(main()).toBe(4);
   });
+
+  it("emits wasm for impl methods with explicit method generics", () => {
+    const main = loadMain("impl_method_generics.voyd");
+    expect(main()).toBe(1);
+  });
+
+  it("emits wasm for trait defaults applied to impls", () => {
+    const main = loadMain("trait_area.voyd");
+    expect(main()).toBeCloseTo(24);
+  });
+
+  it("emits wasm for trait defaults on generic trait impls", () => {
+    const main = loadMain("trait_generic_defaults.voyd");
+    expect(main()).toBe(7);
+  });
 });

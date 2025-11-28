@@ -13,6 +13,8 @@ import {
   type HirLetStatement,
   type HirObjectLiteralExpr,
   type HirTypeAlias,
+  type HirTraitDecl,
+  type HirNamedTypeExpr,
 } from "../hir/nodes.js";
 import { createLowerContext } from "../lowering/context.js";
 import { lowerImplDecl } from "../lowering/declarations.js";
@@ -261,6 +263,57 @@ describe("lowering pipeline", () => {
     );
 
     expect(callExpressions.length).toBeGreaterThan(0);
+  });
+
+  it("lowers traits and their default methods", () => {
+    const name = "trait_area.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+    });
+
+    const traitSymbol = symbolTable.resolve("Area", symbolTable.rootScope)!;
+    const trait = Array.from(hir.items.values()).find(
+      (item): item is HirTraitDecl =>
+        item.kind === "trait" && item.symbol === traitSymbol
+    );
+    expect(trait).toBeDefined();
+    const methodNames = trait?.methods.map((method) =>
+      symbolTable.getSymbol(method.symbol).name
+    );
+    expect(methodNames).toEqual(["area", "double_area"]);
+    const areaMethod = trait?.methods.find(
+      (method) => symbolTable.getSymbol(method.symbol).name === "area"
+    );
+    const doubleArea = trait?.methods.find(
+      (method) => symbolTable.getSymbol(method.symbol).name === "double_area"
+    );
+    expect(areaMethod?.defaultBody).toBeUndefined();
+    expect(doubleArea?.defaultBody).toBeDefined();
+
+    const impl = Array.from(hir.items.values()).find(
+      (item): item is HirImplDecl => item.kind === "impl"
+    );
+    expect(impl?.trait?.typeKind).toBe("named");
+    if ((impl?.trait as HirNamedTypeExpr | undefined)?.typeKind === "named") {
+      expect((impl?.trait as HirNamedTypeExpr).path).toEqual(["Area"]);
+    }
   });
 
   it("throws when an impl references a method missing from the lowered module", () => {
