@@ -10,7 +10,12 @@ import {
   type TypingContext,
   type TypingState,
 } from "./types.js";
-import type { HirFunction, HirImplDecl, HirTraitMethod, HirTypeExpr } from "../hir/index.js";
+import type {
+  HirFunction,
+  HirImplDecl,
+  HirTraitMethod,
+  HirTypeExpr,
+} from "../hir/index.js";
 
 export const seedPrimitiveTypes = (ctx: TypingContext): void => {
   ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
@@ -155,12 +160,10 @@ export const registerFunctionSignatures = (
       typeof fnDecl?.implId === "number"
         ? ctx.decls.getImplById(fnDecl.implId)
         : undefined;
-    const fnTypeParameters = item.typeParameters ?? fnDecl?.typeParameters ?? [];
+    const fnTypeParameters =
+      item.typeParameters ?? fnDecl?.typeParameters ?? [];
     const implTypeParameters = implDecl?.typeParameters ?? [];
-    const typeParameterDecls = [
-      ...fnTypeParameters,
-      ...implTypeParameters,
-    ];
+    const typeParameterDecls = [...fnTypeParameters, ...implTypeParameters];
     const paramMap = new Map<SymbolId, TypeId>();
     const typeParams =
       typeParameterDecls.length === 0
@@ -273,10 +276,7 @@ export const registerFunctionSignatures = (
   }
 };
 
-export const registerImpls = (
-  ctx: TypingContext,
-  state: TypingState
-): void => {
+export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "impl") continue;
     const decl =
@@ -284,7 +284,8 @@ export const registerImpls = (
       (typeof (item as any).decl === "number"
         ? ctx.decls.getImplById((item as any).decl)
         : undefined);
-    const typeParameterDecls = item.typeParameters ?? decl?.typeParameters ?? [];
+    const typeParameterDecls =
+      item.typeParameters ?? decl?.typeParameters ?? [];
     const typeParamMap =
       typeParameterDecls.length === 0
         ? undefined
@@ -393,7 +394,8 @@ const validateImplTraitMethods = ({
     ])
   );
   const traitTypeSubstitutions = buildTraitTypeSubstitutions({
-    traitTypeParameters: traitHirDecl?.typeParameters ?? traitDecl.typeParameters,
+    traitTypeParameters:
+      traitHirDecl?.typeParameters ?? traitDecl.typeParameters,
     traitExpr: impl.trait,
   });
   const missing = traitDecl.methods
@@ -486,33 +488,51 @@ const compareMethodSignatures = ({
     const implParam = implMethod.params[index]!;
     if (traitParam.label !== implParam.label) {
       return new Error(
-        `impl ${traitName} for ${targetName} method ${methodName} parameter ${index + 1} label mismatch`
+        `impl ${traitName} for ${targetName} method ${methodName} parameter ${
+          index + 1
+        } label mismatch`
       );
     }
     const traitTypeKey = typeExprKey(
       traitMethodHir?.parameters[index]?.type,
-      traitTypeSubstitutions
+      traitTypeSubstitutions,
+      undefined,
+      impl.target
     );
     const implTypeKey = typeExprKey(
-      implFunction?.parameters[index]?.type
+      implFunction?.parameters[index]?.type,
+      traitTypeSubstitutions,
+      undefined,
+      impl.target
     );
     if (traitTypeKey && !implTypeKey) {
       return new Error(
-        `impl ${traitName} for ${targetName} method ${methodName} parameter ${index + 1} is missing type annotation`
+        `impl ${traitName} for ${targetName} method ${methodName} parameter ${
+          index + 1
+        } is missing type annotation`
       );
     }
     if (traitTypeKey && implTypeKey && traitTypeKey !== implTypeKey) {
       return new Error(
-        `impl ${traitName} for ${targetName} method ${methodName} parameter ${index + 1} type mismatch: expected ${traitTypeKey}, got ${implTypeKey}`
+        `impl ${traitName} for ${targetName} method ${methodName} parameter ${
+          index + 1
+        } type mismatch: expected ${traitTypeKey}, got ${implTypeKey}`
       );
     }
   }
 
   const traitReturnKey = typeExprKey(
     traitMethodHir?.returnType,
-    traitTypeSubstitutions
+    traitTypeSubstitutions,
+    undefined,
+    impl.target
   );
-  const implReturnKey = typeExprKey(implFunction?.returnType);
+  const implReturnKey = typeExprKey(
+    implFunction?.returnType,
+    traitTypeSubstitutions,
+    undefined,
+    impl.target
+  );
   if (traitReturnKey && !implReturnKey) {
     return new Error(
       `impl ${traitName} for ${targetName} method ${methodName} is missing return type annotation`
@@ -527,15 +547,13 @@ const compareMethodSignatures = ({
   return undefined;
 };
 
-const buildTraitTypeSubstitutions = (
-  {
-    traitTypeParameters,
-    traitExpr,
-  }: {
-    traitTypeParameters?: readonly { symbol: SymbolId }[];
-    traitExpr?: HirTypeExpr;
-  }
-): Map<SymbolId, HirTypeExpr> | undefined => {
+const buildTraitTypeSubstitutions = ({
+  traitTypeParameters,
+  traitExpr,
+}: {
+  traitTypeParameters?: readonly { symbol: SymbolId }[];
+  traitExpr?: HirTypeExpr;
+}): Map<SymbolId, HirTypeExpr> | undefined => {
   if (
     traitExpr?.typeKind !== "named" ||
     !traitExpr.typeArguments ||
@@ -563,7 +581,8 @@ const buildTraitTypeSubstitutions = (
 const typeExprKey = (
   expr: HirTypeExpr | undefined,
   substitutions?: Map<SymbolId, HirTypeExpr>,
-  visiting?: Set<SymbolId>
+  visiting?: Set<SymbolId>,
+  selfType?: HirTypeExpr
 ): string | undefined => {
   if (!expr) return undefined;
 
@@ -580,10 +599,10 @@ const typeExprKey = (
         if (typeof symbol === "number") {
           nextVisiting.add(symbol);
         }
-        return typeExprKey(substitution, substitutions, nextVisiting);
+        return typeExprKey(substitution, substitutions, nextVisiting, selfType);
       }
       const args = expr.typeArguments?.map((arg) =>
-        typeExprKey(arg, substitutions, visiting)
+        typeExprKey(arg, substitutions, visiting, selfType)
       );
       const renderedArgs =
         args && args.length > 0
@@ -595,28 +614,42 @@ const typeExprKey = (
       return "object";
     case "tuple":
       return `(${expr.elements
-        .map((entry) => typeExprKey(entry, substitutions, visiting) ?? "_")
+        .map(
+          (entry) =>
+            typeExprKey(entry, substitutions, visiting, selfType) ?? "_"
+        )
         .join(",")})`;
     case "union":
       return expr.members
-        .map((entry) => typeExprKey(entry, substitutions, visiting) ?? "_")
+        .map(
+          (entry) =>
+            typeExprKey(entry, substitutions, visiting, selfType) ?? "_"
+        )
         .join("|");
     case "intersection":
       return expr.members
-        .map((entry) => typeExprKey(entry, substitutions, visiting) ?? "_")
+        .map(
+          (entry) =>
+            typeExprKey(entry, substitutions, visiting, selfType) ?? "_"
+        )
         .join("&");
     case "function": {
       const typeParamCount = expr.typeParameters?.length ?? 0;
       const params = expr.parameters
-        .map((param) => typeExprKey(param, substitutions, visiting) ?? "_")
+        .map(
+          (param) =>
+            typeExprKey(param, substitutions, visiting, selfType) ?? "_"
+        )
         .join(",");
       const returnKey =
-        typeExprKey(expr.returnType, substitutions, visiting) ?? "void";
+        typeExprKey(expr.returnType, substitutions, visiting, selfType) ??
+        "void";
       const typeParamPart = typeParamCount > 0 ? `<${typeParamCount}>` : "";
       return `fn${typeParamPart}(${params})->${returnKey}`;
     }
     case "self":
-      return "Self";
+      if (!selfType || selfType.typeKind === "self") return "Self";
+      return typeExprKey(selfType, substitutions, visiting, selfType);
     default:
       return undefined;
   }
