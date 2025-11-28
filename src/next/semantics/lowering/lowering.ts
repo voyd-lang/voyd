@@ -7,6 +7,7 @@ import {
   lowerTypeAliasDecl,
   lowerTraitDecl,
   lowerImplDecl,
+  lowerUseDecl,
 } from "./declarations.js";
 import type { LowerInputs } from "./types.js";
 
@@ -17,6 +18,11 @@ export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
   const declarations = getModuleDeclarations(inputs.binding);
 
   for (const decl of declarations) {
+    if (decl.kind === "use") {
+      lowerUseDecl(decl.use, ctx);
+      continue;
+    }
+
     if (decl.kind === "function") {
       lowerFunctionDecl(decl.fn, ctx);
       continue;

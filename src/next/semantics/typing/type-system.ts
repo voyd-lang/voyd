@@ -5,6 +5,7 @@ import type {
   HirTupleTypeExpr,
   HirUnionTypeExpr,
 } from "../hir/index.js";
+import { resolveImportedTypeExpr } from "./imports.js";
 import type { SymbolId, TypeId, TypeParamId } from "../ids.js";
 import type { StructuralField } from "./type-arena.js";
 import {
@@ -605,15 +606,20 @@ const resolveNamedTypeExpr = (
   state: TypingState,
   typeParams?: ReadonlyMap<SymbolId, TypeId>
 ): TypeId => {
-  if (expr.path.length !== 1) {
-    throw new Error("qualified type paths are not supported yet");
-  }
-
-  const name = expr.path[0]!;
+  const name = expr.path.at(-1)!;
   const resolvedTypeArgs =
     expr.typeArguments?.map((arg) =>
       resolveTypeExpr(arg, ctx, state, ctx.primitives.unknown, typeParams)
     ) ?? [];
+  const importedType = resolveImportedTypeExpr({
+    expr,
+    typeArgs: resolvedTypeArgs,
+    ctx,
+    state,
+  });
+  if (typeof importedType === "number") {
+    return importedType;
+  }
 
   const typeParamMap = typeParams ?? state.currentFunction?.typeParams;
   const aliasSymbol =

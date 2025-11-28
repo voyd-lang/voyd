@@ -177,7 +177,8 @@ export const getStructuralTypeInfo = (
     return undefined;
   }
 
-  const cached = ctx.structTypes.get(typeId);
+  const cacheKey = structuralTypeKey(ctx.moduleId, typeId);
+  const cached = ctx.structTypes.get(cacheKey);
   if (cached) {
     return cached;
   }
@@ -202,6 +203,7 @@ export const getStructuralTypeInfo = (
     const nominalAncestry = getNominalAncestry(nominalId, ctx);
     const nominalAncestors = nominalAncestry.map((entry) => entry.nominalId);
     const typeLabel = makeRuntimeTypeLabel({
+      moduleLabel: ctx.moduleLabel,
       typeId,
       structuralId,
       nominalId,
@@ -285,7 +287,7 @@ export const getStructuralTypeInfo = (
       methodTableGlobal,
       typeLabel,
     };
-    ctx.structTypes.set(typeId, info);
+    ctx.structTypes.set(cacheKey, info);
     return info;
   } finally {
     seen.delete(structuralId);
@@ -308,17 +310,19 @@ export const resolveStructuralTypeId = (
 };
 
 const makeRuntimeTypeLabel = ({
+  moduleLabel,
   typeId,
   structuralId,
   nominalId,
 }: {
+  moduleLabel: string;
   typeId: TypeId;
   structuralId: TypeId;
   nominalId?: TypeId;
 }): string => {
   const nominalPrefix =
     typeof nominalId === "number" ? `nominal_${nominalId}_` : "";
-  return `struct_${nominalPrefix}type_${typeId}_shape_${structuralId}`;
+  return `${moduleLabel}__struct_${nominalPrefix}type_${typeId}_shape_${structuralId}`;
 };
 
 type NominalAncestryEntry = {
@@ -409,6 +413,9 @@ const buildRuntimeAncestors = ({
 
   return ancestors;
 };
+
+const structuralTypeKey = (moduleId: string, typeId: TypeId): string =>
+  `${moduleId}::${typeId}`;
 
 const getNominalAncestry = (
   nominalId: TypeId | undefined,

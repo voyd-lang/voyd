@@ -26,6 +26,7 @@ import type {
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypingResult } from "../semantics/typing/typing.js";
 import type { createRttContext } from "./rtt/index.js";
+import type { BindingResult } from "../semantics/binding/binding.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -37,6 +38,7 @@ export interface CodegenResult {
 }
 
 export interface FunctionMetadata {
+  moduleId: string;
   symbol: SymbolId;
   wasmName: string;
   paramTypes: readonly binaryen.Type[];
@@ -74,14 +76,17 @@ export interface StructuralTypeInfo {
 
 export interface CodegenContext {
   mod: binaryen.Module;
+  moduleId: string;
+  moduleLabel: string;
+  binding: BindingResult;
   symbolTable: SymbolTable;
   hir: HirGraph;
   typing: TypingResult;
   options: Required<CodegenOptions>;
-  functions: Map<SymbolId, FunctionMetadata[]>;
+  functions: Map<string, FunctionMetadata[]>;
   functionInstances: Map<string, FunctionMetadata>;
-  itemsToSymbols: Map<HirItemId, SymbolId>;
-  structTypes: Map<TypeId, StructuralTypeInfo>;
+  itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
+  structTypes: Map<string, StructuralTypeInfo>;
   rtt: ReturnType<typeof createRttContext>;
 }
 

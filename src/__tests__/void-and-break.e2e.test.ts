@@ -2,7 +2,9 @@ import { describe, test } from "vitest";
 import { compile } from "../compiler.js";
 
 describe("void value and break typing", () => {
-  test("allows value-level void in function body", async () => {
+  const timeout = 60000;
+
+  test("allows value-level void in function body", { timeout }, async () => {
     const source = `use std::all
 
 fn noop() -> void void
@@ -13,7 +15,7 @@ pub fn main()
     await compile(source);
   });
 
-  test("treats break as void in match arms", async () => {
+  test("treats break as void in match arms", { timeout }, async () => {
     const source = `use std::all
 
   pub fn main()

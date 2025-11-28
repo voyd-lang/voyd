@@ -8,8 +8,17 @@ export * from "./types.js";
 export const runBindingPipeline = ({
   moduleForm,
   symbolTable,
+  module,
+  graph,
+  moduleExports,
 }: BindingInputs): BindingResult => {
-  const bindingContext = createBindingContext({ moduleForm, symbolTable });
+  const bindingContext = createBindingContext({
+    moduleForm,
+    symbolTable,
+    module,
+    graph,
+    moduleExports,
+  });
 
   bindModule(moduleForm, bindingContext);
   finalizeOverloadSets(bindingContext);

@@ -3,12 +3,14 @@ import type {
   CodegenContext,
   CodegenOptions,
   CodegenResult,
+  FunctionMetadata,
   SemanticsPipelineResult,
 } from "./context.js";
 import { createRttContext } from "./rtt/index.js";
 import {
   compileFunctions,
-  emitExports,
+  emitModuleExports,
+  registerImportMetadata,
   registerFunctionMetadata,
 } from "./functions.js";
 
@@ -17,35 +19,62 @@ const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   validate: true,
 };
 
+export type CodegenProgramParams = {
+  modules: readonly SemanticsPipelineResult[];
+  entryModuleId: string;
+  options?: CodegenOptions;
+};
+
 export const codegen = (
   semantics: SemanticsPipelineResult,
   options: CodegenOptions = {}
-): CodegenResult => {
+): CodegenResult =>
+  codegenProgram({
+    modules: [semantics],
+    entryModuleId: semantics.moduleId,
+    options,
+  });
+
+export const codegenProgram = ({
+  modules,
+  entryModuleId,
+  options = {},
+}: CodegenProgramParams): CodegenResult => {
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
-  const ctx: CodegenContext = {
+  const mergedOptions = { ...DEFAULT_OPTIONS, ...options };
+  const functions = new Map<string, FunctionMetadata[]>();
+  const functionInstances = new Map<string, FunctionMetadata>();
+  const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
-    symbolTable: semantics.symbolTable,
-    hir: semantics.hir,
-    typing: semantics.typing,
-    options: { ...DEFAULT_OPTIONS, ...options },
-    functions: new Map(),
-    functionInstances: new Map(),
+    moduleId: sem.moduleId,
+    moduleLabel: sanitizeIdentifier(sem.hir.module.path),
+    binding: sem.binding,
+    symbolTable: sem.symbolTable,
+    hir: sem.hir,
+    typing: sem.typing,
+    options: mergedOptions,
+    functions,
+    functionInstances,
     itemsToSymbols: new Map(),
     structTypes: new Map(),
     rtt,
-  };
+  }));
 
-  registerFunctionMetadata(ctx);
-  compileFunctions(ctx);
-  emitExports(ctx);
+  contexts.forEach(registerFunctionMetadata);
+  contexts.forEach(registerImportMetadata);
+  contexts.forEach(compileFunctions);
 
-  if (ctx.options.optimize) {
+  const entryCtx =
+    contexts.find((ctx) => ctx.moduleId === entryModuleId) ?? contexts[0];
+  emitModuleExports(entryCtx);
+
+  if (mergedOptions.optimize) {
     mod.optimize();
   }
 
-  if (ctx.options.validate) {
+  if (mergedOptions.validate) {
     mod.validate();
   }
 
@@ -53,3 +82,6 @@ export const codegen = (
 };
 
 export type { CodegenOptions, CodegenResult } from "./context.js";
+
+const sanitizeIdentifier = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9_]/g, "_");

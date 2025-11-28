@@ -163,16 +163,18 @@ const getFunctionMetadataForCall = ({
   callId: HirExprId;
   ctx: CodegenContext;
 }): FunctionMetadata | undefined => {
-  const key = ctx.typing.callInstanceKeys.get(callId);
-  const instance = key ? ctx.functionInstances.get(key) : undefined;
+  const rawKey = ctx.typing.callInstanceKeys.get(callId);
+  const instance = rawKey
+    ? ctx.functionInstances.get(scopedInstanceKey(ctx.moduleId, rawKey))
+    : undefined;
   if (instance) {
     return instance;
   }
-  const metas = ctx.functions.get(symbol);
+  const metas = ctx.functions.get(functionKey(ctx.moduleId, symbol));
   if (!metas || metas.length === 0) {
     return undefined;
   }
-  if (!key) {
+  if (!rawKey) {
     const genericMeta = metas.find((meta) => meta.typeArgs.length === 0);
     if (genericMeta) {
       return genericMeta;
@@ -180,3 +182,11 @@ const getFunctionMetadataForCall = ({
   }
   return metas[0];
 };
+
+const functionKey = (moduleId: string, symbol: number): string =>
+  `${moduleId}::${symbol}`;
+
+const scopedInstanceKey = (
+  moduleId: string,
+  instanceKey: string
+): string => `${moduleId}::${instanceKey}`;

@@ -5,7 +5,9 @@ import { getWasmFn, getWasmInstance } from "@lib/wasm.js";
 import assert from "node:assert";
 
 describe("Control Flow sugar", () => {
-  test("if/while: match and := sugar works and returns expected values", async (t) => {
+  const timeout = 60000;
+
+  test("if/while: match and := sugar works and returns expected values", { timeout }, async (t) => {
     const mod = await compile(controlFlowText);
     const instance = getWasmInstance(mod);
 

@@ -21,12 +21,33 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const objects = new ObjectStore();
   const traits = new TraitStore();
   const typeAliases = new TypeAliasStore();
+  const moduleExports = inputs.moduleExports ?? new Map();
+  const dependencies = inputs.availableSemantics ?? new Map();
+  const importsByLocal = new Map<
+    number,
+    { moduleId: string; symbol: number }
+  >();
+  const importAliasesByModule = new Map<string, Map<number, number>>();
+  (inputs.imports ?? []).forEach((entry) => {
+    if (!entry.target) {
+      return;
+    }
+    importsByLocal.set(entry.local, entry.target);
+    const bucket = importAliasesByModule.get(entry.target.moduleId) ?? new Map();
+    bucket.set(entry.target.symbol, entry.local);
+    importAliasesByModule.set(entry.target.moduleId, bucket);
+  });
 
   return {
     symbolTable: inputs.symbolTable,
     hir: inputs.hir,
     overloads: inputs.overloads,
     decls,
+    moduleId: inputs.moduleId,
+    moduleExports,
+    dependencies,
+    importsByLocal,
+    importAliasesByModule,
     arena,
     table,
     resolvedExprTypes: new Map(),
