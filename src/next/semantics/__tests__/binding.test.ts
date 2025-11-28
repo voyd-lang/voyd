@@ -6,8 +6,67 @@ import { loadAst } from "./load-ast.js";
 import { isForm, isIdentifierAtom, parse } from "../../parser/index.js";
 import { toSourceSpan } from "../utils.js";
 import { modulePathToString } from "../../modules/path.js";
-import type { ModuleDependency, ModuleGraph, ModuleNode } from "../../modules/types.js";
+import { buildModuleGraph } from "../../modules/graph.js";
+import type {
+  ModuleDependency,
+  ModuleGraph,
+  ModuleHost,
+  ModuleNode,
+} from "../../modules/types.js";
 import type { ModuleExportTable } from "../modules.js";
+import { dirname, resolve, sep } from "node:path";
+
+const createMemoryHost = (files: Record<string, string>): ModuleHost => {
+  const normalized = new Map<string, string>();
+  const directories = new Map<string, Set<string>>();
+
+  const ensureDir = (dir: string) => {
+    if (!directories.has(dir)) {
+      directories.set(dir, new Set());
+    }
+  };
+
+  const registerPath = (path: string) => {
+    const directParent = dirname(path);
+    ensureDir(directParent);
+    directories.get(directParent)!.add(path);
+
+    let current = directParent;
+    while (true) {
+      const parent = dirname(current);
+      if (parent === current) break;
+      ensureDir(parent);
+      directories.get(parent)!.add(current);
+      current = parent;
+    }
+  };
+
+  Object.entries(files).forEach(([path, contents]) => {
+    const full = resolve(path);
+    normalized.set(full, contents);
+    registerPath(full);
+  });
+
+  const isDirectoryPath = (path: string) =>
+    directories.has(path) && !normalized.has(path);
+
+  return {
+    readFile: async (path: string) => {
+      const resolved = resolve(path);
+      const file = normalized.get(resolved);
+      if (file === undefined) {
+        throw new Error(`File not found: ${resolved}`);
+      }
+      return file;
+    },
+    readDir: async (path: string) => {
+      const resolved = resolve(path);
+      return Array.from(directories.get(resolved) ?? []);
+    },
+    fileExists: async (path: string) => normalized.has(resolve(path)),
+    isDirectory: async (path: string) => isDirectoryPath(resolve(path)),
+  };
+};
 
 describe("binding pipeline", () => {
   it("collects functions, parameters, and scopes for the fib sample module", () => {
@@ -312,7 +371,7 @@ describe("binding pipeline", () => {
               name: "helper",
               symbol: exportedSymbol,
               moduleId: utilId,
-              kind: "function",
+              kind: "value",
               visibility: "public",
             },
           ],
@@ -333,7 +392,10 @@ describe("binding pipeline", () => {
     const helperSymbol = symbolTable.resolve("helper", symbolTable.rootScope);
     expect(helperSymbol).toBeDefined();
     if (!helperSymbol) return;
-    expect(symbolTable.getSymbol(helperSymbol).metadata?.import?.moduleId).toBe(utilId);
+    const helperImport = symbolTable.getSymbol(helperSymbol)
+      .metadata as { import?: { moduleId: string } } | undefined;
+
+    expect(helperImport?.import?.moduleId).toBe(utilId);
   });
 
   it("preserves grouped mod selections when importing submodules", () => {
@@ -345,10 +407,13 @@ describe("binding pipeline", () => {
     const span = toSourceSpan(modForm);
 
     const modulePath = { namespace: "src" as const, segments: ["grouped"] as const };
-    const utilPath = { namespace: "src" as const, segments: ["util"] as const };
+    const utilPath = {
+      namespace: "src" as const,
+      segments: ["grouped", "util"] as const,
+    };
     const mathPath = {
       namespace: "src" as const,
-      segments: ["util", "helpers", "math"] as const,
+      segments: ["grouped", "util", "helpers", "math"] as const,
     };
     const moduleId = modulePathToString(modulePath);
     const utilId = modulePathToString(utilPath);
@@ -383,7 +448,7 @@ describe("binding pipeline", () => {
               name: "math",
               symbol: exportedSymbol,
               moduleId: mathId,
-              kind: "function",
+              kind: "value",
               visibility: "public",
             },
           ],
@@ -408,6 +473,69 @@ describe("binding pipeline", () => {
     const mathImportSymbol = symbolTable.resolve("math", symbolTable.rootScope);
     expect(mathImportSymbol).toBeDefined();
     if (!mathImportSymbol) return;
-    expect(symbolTable.getSymbol(mathImportSymbol).metadata?.import?.moduleId).toBe(mathId);
+    const mathImport = symbolTable.getSymbol(mathImportSymbol)
+      .metadata as { import?: { moduleId: string } } | undefined;
+
+    expect(mathImport?.import?.moduleId).toBe(mathId);
+  });
+
+  it("populates module graph dependencies for grouped mod selections", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}grouped.voyd`]: "mod util::{self, helpers::math as math}",
+      [`${root}${sep}grouped${sep}util.voyd`]: "",
+      [`${root}${sep}grouped${sep}util${sep}helpers${sep}math.voyd`]: "pub fn math()\n  1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}grouped.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const moduleNode = graph.modules.get(graph.entry);
+    expect(moduleNode).toBeDefined();
+    if (!moduleNode) return;
+
+    const symbolTable = new SymbolTable({ rootOwner: moduleNode.ast.syntaxId });
+    symbolTable.declare({
+      name: "grouped.voyd",
+      kind: "module",
+      declaredAt: moduleNode.ast.syntaxId,
+    });
+
+    const mathId = "src::grouped::util::helpers::math";
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        mathId,
+        new Map([
+          [
+            "math",
+            {
+              name: "math",
+              symbol: 1,
+              moduleId: mathId,
+              kind: "value",
+              visibility: "public",
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: moduleNode.ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    const [use] = binding.uses;
+    expect(use.entries.map((entry) => entry.importKind)).toEqual(["self", "name"]);
+    expect(use.entries[0]?.moduleId).toBe("src::grouped::util");
+    expect(use.entries[1]?.moduleId).toBe(mathId);
+    expect(use.entries[1]?.alias).toBe("math");
   });
 });
