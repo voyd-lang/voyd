@@ -1,0 +1,18 @@
+trait Area
+  fn area(self) -> f64
+
+  fn double_area(self) -> f64
+    self.area() * 2.0
+
+obj Rect {
+  width: f64,
+  height: f64,
+}
+
+impl Area for Rect
+  fn area(self) -> f64
+    self.width * self.height
+
+pub fn main() -> f64
+  let rect = Rect { width: 3.0, height: 4.0 }
+  rect.double_area()

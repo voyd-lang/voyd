@@ -287,4 +287,9 @@ describe("next codegen", () => {
     const main = loadMain("impl_methods.voyd");
     expect(main()).toBe(4);
   });
+
+  it("emits wasm for trait defaults applied to impls", () => {
+    const main = loadMain("trait_area.voyd");
+    expect(main()).toBeCloseTo(24);
+  });
 });

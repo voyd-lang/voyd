@@ -11,6 +11,7 @@ import type {
   TraitDeclId,
   ImplDeclId,
 } from "./ids.js";
+import type { IdentifierAtom } from "../parser/ast/atom.js";
 
 export interface ParameterDecl {
   id: ParameterDeclId;
@@ -95,6 +96,7 @@ export interface TraitMethodDecl {
   form?: Form;
   symbol: SymbolId;
   scope: ScopeId;
+  nameAst?: IdentifierAtom;
   params: ParameterDecl[];
   typeParameters?: TypeParameterDecl[];
   returnTypeExpr?: Expr;

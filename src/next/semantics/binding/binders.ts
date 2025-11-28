@@ -37,6 +37,7 @@ import type {
   ParameterDeclInput,
   TypeParameterDecl,
   TraitMethodDeclInput,
+  TraitMethodDecl,
 } from "../decls.js";
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
@@ -444,6 +445,7 @@ const bindTraitMethod = ({
     form: decl.form,
     symbol: methodSymbol,
     scope: methodScope,
+    nameAst: decl.signature.name,
     params,
     typeParameters,
     returnTypeExpr: decl.signature.returnType,
@@ -471,6 +473,64 @@ const bindTraitMethodParameters = (
       typeExpr: param.typeExpr,
     };
   });
+
+const resolveTraitDecl = (
+  traitExpr: Expr,
+  ctx: BindingContext,
+  scope: ScopeId
+) => {
+  if (!isIdentifierAtom(traitExpr)) {
+    return undefined;
+  }
+  const traitSymbol = ctx.symbolTable.resolve(traitExpr.value, scope);
+  if (typeof traitSymbol !== "number") {
+    return undefined;
+  }
+  return ctx.decls.getTrait(traitSymbol);
+};
+
+const makeParsedFunctionFromTraitMethod = (
+  method: TraitMethodDecl
+): ParsedFunctionDecl => {
+  const nameAst = method.nameAst;
+  if (!nameAst) {
+    throw new Error("trait method missing name identifier");
+  }
+
+  const form =
+    method.form ??
+    (isForm(method.defaultBody) ? method.defaultBody : undefined);
+  if (!form) {
+    throw new Error("trait method default implementation missing form");
+  }
+
+  const signatureParams = method.params.map((param) => {
+    if (!param.ast) {
+      throw new Error("trait method parameter missing syntax");
+    }
+    return {
+      name: param.name,
+      label: param.label,
+      ast: param.ast,
+      typeExpr: param.typeExpr,
+    };
+  });
+
+  return {
+    form,
+    visibility: "module",
+    signature: {
+      name: nameAst,
+      typeParameters:
+        method.typeParameters
+          ?.map((param) => param.ast)
+          .filter((entry): entry is IdentifierAtom => Boolean(entry)) ?? [],
+      params: signatureParams,
+      returnType: method.returnTypeExpr,
+    },
+    body: method.defaultBody ?? form,
+  };
+};
 
 const bindImplDecl = (
   decl: ParsedImplDecl,
@@ -537,6 +597,32 @@ const bindImplDecl = (
       });
       methods.push(method);
     });
+
+    if (decl.trait) {
+      const traitDecl = resolveTraitDecl(decl.trait, ctx, tracker.current());
+      if (traitDecl) {
+        const methodNames = new Set(
+          methods.map((method) => ctx.symbolTable.getSymbol(method.symbol).name)
+        );
+        traitDecl.methods.forEach((traitMethod) => {
+          if (!traitMethod.defaultBody) {
+            return;
+          }
+          const name = ctx.symbolTable.getSymbol(traitMethod.symbol).name;
+          if (methodNames.has(name)) {
+            return;
+          }
+          const parsed = makeParsedFunctionFromTraitMethod(traitMethod);
+          const method = bindFunctionDecl(parsed, ctx, tracker, {
+            declarationScope: ctx.symbolTable.rootScope,
+            scopeParent: implScope,
+            metadata: { entity: "function", impl: implSymbol },
+            selfTypeExpr: decl.target,
+          });
+          methods.push(method);
+        });
+      }
+    }
   });
 
   const implDecl = ctx.decls.registerImpl({
