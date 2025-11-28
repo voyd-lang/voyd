@@ -30,7 +30,11 @@ import {
   recordFunctionOverload,
   reportOverloadNameCollision,
 } from "./overloads.js";
-import type { BindingContext } from "./types.js";
+import type {
+  BindingContext,
+  BoundUseEntry,
+  BoundImport,
+} from "./types.js";
 import type { ScopeId, SymbolId } from "../ids.js";
 import type { SymbolTable } from "../binder/index.js";
 import type {
@@ -187,10 +191,13 @@ const parseUseDecl = (form: Form): ParsedUseDecl | null => {
 };
 
 const parseUsePaths = (
-  expr: Expr,
+  expr: Expr | undefined,
   span: SourceSpan,
   base: readonly string[] = []
 ): ParsedUseEntry[] => {
+  if (!expr) {
+    return [];
+  }
   if (isIdentifierAtom(expr)) {
     return [normalizeUseEntry({ segments: [...base, expr.value], span })];
   }

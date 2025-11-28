@@ -464,7 +464,11 @@ const makeDependencyContext = (
   resolvedExprTypes: new Map(dependency.typing.resolvedExprTypes),
   valueTypes: new Map(dependency.typing.valueTypes),
   callResolution: {
-    targets: new Map(dependency.typing.callTargets),
+    targets: new Map(
+      Array.from(dependency.typing.callTargets.entries()).map(
+        ([exprId, targets]) => [exprId, new Map(targets)]
+      )
+    ),
     typeArguments: new Map(dependency.typing.callTypeArguments),
     instanceKeys: new Map(dependency.typing.callInstanceKeys),
   },

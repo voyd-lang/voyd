@@ -10,7 +10,11 @@ import {
   registerImpls,
 } from "./registry.js";
 import { validateTypedProgram } from "./validation.js";
-import type { TypingInputs, TypingResult } from "./types.js";
+import type {
+  TypingContext,
+  TypingInputs,
+  TypingResult,
+} from "./types.js";
 import { resolveImportedValue } from "./imports.js";
 
 export * from "./types.js";
@@ -59,9 +63,12 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
 };
 
 const primeImportedValues = (ctx: TypingContext): void => {
-  ctx.importsByLocal.forEach((_, symbol) => {
+  ctx.importsByLocal.forEach((target, symbol) => {
     const record = ctx.symbolTable.getSymbol(symbol);
     if (record.kind !== "value") {
+      return;
+    }
+    if (!target) {
       return;
     }
     resolveImportedValue({ symbol, ctx });

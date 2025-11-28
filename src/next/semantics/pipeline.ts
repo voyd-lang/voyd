@@ -58,7 +58,6 @@ export const semanticsPipeline = (
     module,
     graph,
     moduleExports: exports ?? new Map(),
-    availableSemantics: dependencies ?? new Map(),
   });
   ensureNoBindingErrors(binding);
 
