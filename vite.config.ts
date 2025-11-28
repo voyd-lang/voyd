@@ -3,17 +3,21 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = fileURLToPath(new URL(".", import.meta.url));
+const packagesRoot = resolve(projectRoot, "packages");
 
 // Build a browser-friendly ESM bundle that avoids Node-only paths.
 export default defineConfig({
   resolve: {
     alias: {
-      "@lib": resolve(projectRoot, "src/lib"),
+      "@voyd/lib": resolve(packagesRoot, "lib/src/lib"),
+      "@voyd/compiler": resolve(packagesRoot, "compiler/src"),
+      "@voyd/compiler-next": resolve(packagesRoot, "compiler-next/src"),
+      "@voyd/browser-compiler": resolve(packagesRoot, "browser-compiler/src"),
     },
   },
   build: {
     lib: {
-      entry: "src/browser.ts",
+      entry: resolve(projectRoot, "packages/browser-compiler/src/browser.ts"),
       formats: ["es"],
       fileName: () => "browser/index.js",
     },
@@ -31,7 +35,7 @@ export default defineConfig({
     },
     target: "esnext",
     sourcemap: true,
-    outDir: "dist",
+    outDir: "packages/browser-compiler/dist",
     emptyOutDir: false,
   },
 });

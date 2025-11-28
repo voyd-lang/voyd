@@ -1,0 +1,22 @@
+{
+  "name": "@voyd/cli",
+  "version": "0.9.0",
+  "description": "Voyd CLI",
+  "type": "module",
+  "bin": {
+    "voyd": "./dist/cli.js",
+    "vt": "./src/cli-dev.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo 'no CLI-specific tests'",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@voyd/compiler": "0.9.0",
+    "@voyd/compiler-next": "0.9.0",
+    "@voyd/lib": "0.9.0",
+    "binaryen": "^123.0.0"
+  }
+}
