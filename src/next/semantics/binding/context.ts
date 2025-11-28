@@ -44,17 +44,15 @@ export const createBindingContext = ({
 
   const decls = new DeclTable();
   const dependenciesBySpan = new Map<string, ModuleDependency[]>();
-  moduleNode.dependencies
-    .filter((dep) => dep.kind === "use")
-    .forEach((dep) => {
-      const key = spanKey(dep.span ?? toSourceSpan(moduleForm));
-      const bucket = dependenciesBySpan.get(key);
-      if (bucket) {
-        bucket.push(dep);
-      } else {
-        dependenciesBySpan.set(key, [dep]);
-      }
-    });
+  moduleNode.dependencies.forEach((dep) => {
+    const key = spanKey(dep.span ?? toSourceSpan(moduleForm));
+    const bucket = dependenciesBySpan.get(key);
+    if (bucket) {
+      bucket.push(dep);
+    } else {
+      dependenciesBySpan.set(key, [dep]);
+    }
+  });
 
   return {
     symbolTable,

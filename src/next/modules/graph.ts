@@ -374,7 +374,7 @@ const parsePathExprList = (expr: Expr | undefined): ModuleRequest[] => {
     return parsePathExprList(expr.at(1));
   }
 
-  if (expr.calls("object_literal")) {
+  if (expr.calls("object_literal") || expr.callsInternal("object_literal")) {
     return expr.rest.flatMap((entry) => parsePathExprList(entry));
   }
 
