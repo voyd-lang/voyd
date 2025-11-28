@@ -66,6 +66,12 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     if (isInlineModuleDecl(entry)) {
       continue;
     }
+
+    const modDecl = parseModDecl(entry);
+    if (modDecl) {
+      bindUseDecl(modDecl, ctx);
+      continue;
+    }
     const parsed = parseFunctionDecl(entry);
     if (parsed) {
       bindFunctionDecl(parsed, ctx, tracker);
@@ -187,6 +193,54 @@ const parseUseDecl = (form: Form): ParsedUseDecl | null => {
   }
 
   const entries = parseUsePaths(pathExpr, toSourceSpan(form));
+  return { form, visibility, entries };
+};
+
+const containsObjectLiteral = (expr?: Expr): boolean => {
+  if (!isForm(expr)) return false;
+  if (expr.callsInternal("object_literal") || expr.calls("object_literal")) {
+    return true;
+  }
+  return expr.rest.some((child) => containsObjectLiteral(child));
+};
+
+const parseModDecl = (form: Form): ParsedUseDecl | null => {
+  let index = 0;
+  let visibility: HirVisibility = "module";
+  const first = form.at(0);
+
+  if (isIdentifierAtom(first) && first.value === "pub") {
+    visibility = "public";
+    index += 1;
+  }
+
+  const keyword = form.at(index);
+  if (!isIdentifierAtom(keyword) || keyword.value !== "mod") {
+    return null;
+  }
+
+  const pathExpr = form.at(index + 1);
+  const maybeBody = form.at(index + 2);
+  if (isForm(maybeBody) && maybeBody.calls("block")) {
+    return null;
+  }
+
+  if (!pathExpr) {
+    throw new Error("mod declaration missing a path");
+  }
+
+  const span = toSourceSpan(form);
+  const isGrouped = containsObjectLiteral(pathExpr);
+  const entries = parseUsePaths(pathExpr, span).map((entry) =>
+    isGrouped
+      ? entry
+      : {
+          ...entry,
+          importKind: "all" as const,
+          targetName: undefined,
+        }
+  );
+
   return { form, visibility, entries };
 };
 

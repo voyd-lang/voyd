@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline } from "../binding/binding.js";
 import { loadAst } from "./load-ast.js";
-import { isForm, isIdentifierAtom } from "../../parser/index.js";
+import { isForm, isIdentifierAtom, parse } from "../../parser/index.js";
+import { toSourceSpan } from "../utils.js";
+import { modulePathToString } from "../../modules/path.js";
+import type { ModuleDependency, ModuleGraph, ModuleNode } from "../../modules/types.js";
+import type { ModuleExportTable } from "../modules.js";
 
 describe("binding pipeline", () => {
   it("collects functions, parameters, and scopes for the fib sample module", () => {
@@ -266,5 +270,144 @@ describe("binding pipeline", () => {
     );
     expect(methodNames).toContain("get");
     expect(methodNames).toContain("copy");
+  });
+
+  it("resolves non-inline mod declarations using module export dependencies", () => {
+    const source = "mod util";
+    const ast = parse(source, "main.voyd");
+    const modForm = ast.rest.find((entry) => isForm(entry) && entry.calls("mod"));
+    expect(modForm).toBeDefined();
+    if (!isForm(modForm)) return;
+
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const utilPath = { namespace: "src" as const, segments: ["util"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const utilId = modulePathToString(utilPath);
+    const dependencies: ModuleDependency[] = [
+      { kind: "export", path: utilPath, span: toSourceSpan(modForm) },
+    ];
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "main.voyd" },
+      ast,
+      source,
+      dependencies,
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+    const exportedSymbol = 42;
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        utilId,
+        new Map([
+          [
+            "helper",
+            {
+              name: "helper",
+              symbol: exportedSymbol,
+              moduleId: utilId,
+              kind: "function",
+              visibility: "public",
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    const [use] = binding.uses;
+    expect(use.entries[0]?.moduleId).toBe(utilId);
+    const helperSymbol = symbolTable.resolve("helper", symbolTable.rootScope);
+    expect(helperSymbol).toBeDefined();
+    if (!helperSymbol) return;
+    expect(symbolTable.getSymbol(helperSymbol).metadata?.import?.moduleId).toBe(utilId);
+  });
+
+  it("preserves grouped mod selections when importing submodules", () => {
+    const source = "mod util::{self, helpers::math as math}";
+    const ast = parse(source, "grouped.voyd");
+    const modForm = ast.rest.find((entry) => isForm(entry) && entry.calls("mod"));
+    expect(modForm).toBeDefined();
+    if (!isForm(modForm)) return;
+    const span = toSourceSpan(modForm);
+
+    const modulePath = { namespace: "src" as const, segments: ["grouped"] as const };
+    const utilPath = { namespace: "src" as const, segments: ["util"] as const };
+    const mathPath = {
+      namespace: "src" as const,
+      segments: ["util", "helpers", "math"] as const,
+    };
+    const moduleId = modulePathToString(modulePath);
+    const utilId = modulePathToString(utilPath);
+    const mathId = modulePathToString(mathPath);
+    const dependencies: ModuleDependency[] = [
+      { kind: "export", path: utilPath, span },
+      { kind: "export", path: mathPath, span },
+    ];
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "grouped.voyd" },
+      ast,
+      source,
+      dependencies,
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "grouped.voyd", kind: "module", declaredAt: ast.syntaxId });
+    const exportedSymbol = 43;
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        mathId,
+        new Map([
+          [
+            "math",
+            {
+              name: "math",
+              symbol: exportedSymbol,
+              moduleId: mathId,
+              kind: "function",
+              visibility: "public",
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    const [use] = binding.uses;
+    expect(use.entries.map((entry) => entry.importKind)).toEqual(["self", "name"]);
+    expect(use.entries[0]?.moduleId).toBe(utilId);
+    expect(use.entries[1]?.moduleId).toBe(mathId);
+    expect(use.entries[1]?.alias).toBe("math");
+
+    const mathImportSymbol = symbolTable.resolve("math", symbolTable.rootScope);
+    expect(mathImportSymbol).toBeDefined();
+    if (!mathImportSymbol) return;
+    expect(symbolTable.getSymbol(mathImportSymbol).metadata?.import?.moduleId).toBe(mathId);
   });
 });
