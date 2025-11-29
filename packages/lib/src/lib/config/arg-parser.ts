@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { VoydConfig } from "./types.js";
 
 const require = createRequire(import.meta.url);
-const { version } = require("../../../package.json") as { version: string };
+const { version } = require("../../package.json") as { version: string };
 
 export const getConfigFromCli = (): VoydConfig => {
   const program = new Command();
