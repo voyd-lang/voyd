@@ -1,0 +1,2 @@
+fn length() -> i32
+  __array_len()

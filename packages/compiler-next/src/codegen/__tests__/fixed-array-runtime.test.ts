@@ -9,9 +9,6 @@ obj Some<T> { value: T }
 obj None {}
 pub type Optional<T> = Some<T> | None
 
-trait Iterator<T>
-  fn next(self) -> Optional<T>
-
 fn normalize_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
 
@@ -24,11 +21,10 @@ pub fn get<T>(arr: FixedArray<T>, index: i32) -> Optional<T>
 
   if idx < 0 then:
     None {}
+  elif: idx >= len then:
+    None {}
   else:
-    if idx >= len then:
-      None {}
-    else:
-      Some<T> { value: __array_get(arr, idx) }
+    Some { value: __array_get(arr, idx) }
 
 pub fn set<T>(arr: FixedArray<T>, index: i32, value: T) -> FixedArray<T>
   let len = __array_len(arr)
@@ -36,12 +32,11 @@ pub fn set<T>(arr: FixedArray<T>, index: i32, value: T) -> FixedArray<T>
 
   if idx < 0 then:
     arr
+  elif: idx >= len then:
+    arr
   else:
-    if idx >= len then:
-      arr
-    else:
-      __array_set(arr, idx, value)
-      arr
+    __array_set(arr, idx, value)
+    arr
 
 pub fn copy<T>(dest_array: FixedArray<T>, opts: {
   from: FixedArray<T>,
@@ -56,51 +51,33 @@ pub fn copy<T>(dest_array: FixedArray<T>, opts: {
 
   if to_index < 0 then:
     dest_array
+  elif: from_index < 0 then:
+    dest_array
+  elif: to_index >= dest_length then:
+    dest_array
+  elif: from_index >= from_length then:
+    dest_array
+  elif: opts.count <= 0 then:
+    dest_array
   else:
-    if from_index < 0 then:
+    let remaining_dest = dest_length - to_index
+    let remaining_from = from_length - from_index
+    let max_copy = if remaining_dest < remaining_from then: remaining_dest else: remaining_from
+    let count = if opts.count < max_copy then: opts.count else: max_copy
+
+    if count <= 0 then:
       dest_array
     else:
-      if to_index >= dest_length then:
-        dest_array
-      else:
-        if from_index >= from_length then:
-          dest_array
-        else:
-          if opts.count <= 0 then:
-            dest_array
-          else:
-            let remaining_dest = dest_length - to_index
-            let remaining_from = from_length - from_index
-            let max_copy = if remaining_dest < remaining_from then: remaining_dest else: remaining_from
-            let count = if opts.count < max_copy then: opts.count else: max_copy
-
-            if count <= 0 then:
-              dest_array
-            else:
-              __array_copy(dest_array, {
-                from: opts.from,
-                to_index: to_index,
-                from_index: from_index,
-                count: count
-              })
-              dest_array
+      __array_copy(dest_array, {
+        from: opts.from,
+        to_index: to_index,
+        from_index: from_index,
+        count: count
+      })
+      dest_array
 
 pub fn length<T>(arr: FixedArray<T>) -> i32
   __array_len(arr)
-
-obj FixedArrayIterator<T> {
-  index: i32,
-  array: FixedArray<T>
-}
-
-impl<T> Iterator<T> for FixedArrayIterator<T>
-  fn next(self) -> Optional<T>
-    if self.index >= self.array.length<T>() then:
-      None {}
-    else:
-      let value = __array_get(self.array, self.index)
-      self.index = self.index + 1
-      Some<T> { value: value }
 
 pub fn empty_negative_get() -> i32
   let arr = new_fixed_array<i32>(0)
@@ -180,17 +157,17 @@ pub fn iterate_sum() -> i32
   arr = arr.set<i32>(0, 3)
   arr = arr.set<i32>(1, 4)
   arr = arr.set<i32>(2, 5)
-  var iterator = FixedArrayIterator<i32> { index: 0, array: arr }
   var acc = 0
-  var done = false
-  while done == false do:
-    let step = iterator.next<i32>()
-    done = match(step)
+  let len = arr.length<i32>()
+  var index = 0
+  while index < len do:
+    let step = arr.get<i32>(index)
+    match(step)
       Some<i32>:
         acc = acc + step.value
-        false
       None:
-        true
+        acc = acc
+    index = index + 1
   acc
 `;
 
@@ -202,8 +179,7 @@ const loadExports = (): Record<string, CallableFunction> => {
   return instance.exports as Record<string, CallableFunction>;
 };
 
-// TODO: Re-enable once compiler-next fixed-array intrinsics fully supported.
-describe.skip("std_next FixedArray runtime behavior", () => {
+describe("std_next FixedArray runtime behavior", () => {
   it("supports negative indexing and out-of-bounds guards", () => {
     const exports = loadExports();
     expect(exports.empty_negative_get()).toBe(0);

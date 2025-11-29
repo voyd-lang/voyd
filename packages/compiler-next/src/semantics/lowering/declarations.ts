@@ -120,6 +120,7 @@ export const lowerFunctionDecl = (
     parameters,
     returnType: lowerTypeExpr(fn.returnTypeExpr, ctx, scopes.current()),
     body: bodyId,
+    ...(fn.intrinsic ? { intrinsic: fn.intrinsic } : {}),
   });
 
   if (fn.visibility === "public") {

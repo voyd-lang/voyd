@@ -6,6 +6,7 @@ import {
   binaryenTypeFromHeapType,
   modBinaryenTypeToHeapType,
 } from "@voyd/lib/binaryen-gc/index.js";
+import { getFixedArrayWasmTypes } from "../types.js";
 import type {
   CodegenContext,
   HirCallExpr,
@@ -72,6 +73,17 @@ const createContext = () => {
   return { ctx, descriptors, exprTypes, expressions, fnCtx };
 };
 
+const cacheArrayType = (
+  ctx: CodegenContext,
+  element: TypeId,
+  type: binaryen.Type
+): void => {
+  ctx.fixedArrayTypes.set(element, {
+    type,
+    heapType: modBinaryenTypeToHeapType(ctx.mod, type),
+  });
+};
+
 const registerExpr = (
   params: {
     expressions: Map<HirExprId, HirExpression>;
@@ -115,30 +127,20 @@ describe("compileIntrinsicCall array intrinsics", () => {
       modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
       true
     );
-    ctx.fixedArrayTypes.set(i32Type, cachedArrayType);
+    cacheArrayType(ctx, i32Type, cachedArrayType);
 
-    registerExpr(
-      { expressions, exprTypes, typeId: arrayType },
-      1 as HirExprId,
-      { id: 1 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "void", value: "void" } as any
-    );
     registerExpr(
       { expressions, exprTypes, typeId: i32Type },
       2 as HirExprId,
       { id: 2 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "i32", value: "4" } as any
-    );
-    registerExpr(
-      { expressions, exprTypes, typeId: i32Type },
-      3 as HirExprId,
-      { id: 3 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "i32", value: "0" } as any
     );
     exprTypes.set(0 as HirExprId, arrayType);
     fnCtx.returnTypeId = arrayType;
 
     const expr = compileIntrinsicCall({
       name: "__array_new",
-      call: makeCall([1 as HirExprId, 2 as HirExprId, 3 as HirExprId]),
-      args: [ctx.mod.nop(), ctx.mod.i32.const(4), ctx.mod.i32.const(0)],
+      call: makeCall([2 as HirExprId]),
+      args: [ctx.mod.i32.const(4)],
       ctx,
       fnCtx,
     });
@@ -155,7 +157,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
       modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
       true
     );
-    ctx.fixedArrayTypes.set(i32Type, cachedArrayType);
+    cacheArrayType(ctx, i32Type, cachedArrayType);
 
     registerExpr(
       { expressions, exprTypes, typeId: arrayType },
@@ -185,7 +187,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
       modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
       true
     );
-    ctx.fixedArrayTypes.set(i32Type, cachedArrayType);
+    cacheArrayType(ctx, i32Type, cachedArrayType);
 
     registerExpr(
       { expressions, exprTypes, typeId: arrayType },
@@ -301,7 +303,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
       modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
       true
     );
-    ctx.fixedArrayTypes.set(i32Type, cachedArrayType);
+    cacheArrayType(ctx, i32Type, cachedArrayType);
 
     registerExpr(
       { expressions, exprTypes, typeId: arrayType },
@@ -317,11 +319,22 @@ describe("compileIntrinsicCall array intrinsics", () => {
       fnCtx,
     });
 
-    const expected = modBinaryenTypeToHeapType(
-      ctx.mod,
-      ctx.fixedArrayTypes.get(i32Type)!
-    );
+    const expected = ctx.fixedArrayTypes.get(i32Type)!.heapType;
     expect(expr).toBe(expected);
+  });
+
+  it("caches fixed-array heap types per element type", () => {
+    const secondArrayType = 3 as TypeId;
+    const { ctx, descriptors } = createContext();
+    descriptors.set(i32Type, { kind: "primitive", name: "i32" });
+    descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
+    descriptors.set(secondArrayType, { kind: "fixed-array", element: i32Type });
+
+    const first = getFixedArrayWasmTypes(arrayType, ctx);
+    const second = getFixedArrayWasmTypes(secondArrayType, ctx);
+
+    expect(ctx.fixedArrayTypes.size).toBe(1);
+    expect(second).toBe(first);
   });
 
   it("validates arity", () => {
@@ -334,7 +347,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
         ctx,
         fnCtx,
       })
-    ).toThrow(/expected 3 args, received 0/);
+    ).toThrow(/expected 1 args, received 0/);
 
     expect(() =>
       compileIntrinsicCall({
@@ -345,6 +358,36 @@ describe("compileIntrinsicCall array intrinsics", () => {
         fnCtx,
       })
     ).toThrow(/expected at least 1 args, received 0/);
+
+    expect(() =>
+      compileIntrinsicCall({
+        name: "__array_set",
+        call: makeCall([]),
+        args: [],
+        ctx,
+        fnCtx,
+      })
+    ).toThrow(/expected 3 args, received 0/);
+
+    expect(() =>
+      compileIntrinsicCall({
+        name: "__array_get",
+        call: makeCall([]),
+        args: [ctx.mod.nop()],
+        ctx,
+        fnCtx,
+      })
+    ).toThrow(/expected 4 args, received 1/);
+
+    expect(() =>
+      compileIntrinsicCall({
+        name: "__array_copy",
+        call: makeCall([]),
+        args: [ctx.mod.nop()],
+        ctx,
+        fnCtx,
+      })
+    ).toThrow(/expected 5 args, received 1/);
   });
 
   it("requires boolean literal for signed flag", () => {

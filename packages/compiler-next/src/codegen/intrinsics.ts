@@ -10,6 +10,7 @@ import {
   getExprBinaryenType,
   getRequiredExprType,
   getStructuralTypeInfo,
+  getFixedArrayWasmTypes,
   wasmTypeFor,
 } from "./types.js";
 import { allocateTempLocal } from "./locals.js";
@@ -26,6 +27,7 @@ import {
 import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
+type EqualityKind = NumericKind | "bool";
 
 interface CompileIntrinsicCallParams {
   name: string;
@@ -42,6 +44,13 @@ interface EmitNumericIntrinsicParams {
   ctx: CodegenContext;
 }
 
+interface EmitEqualityIntrinsicParams {
+  op: "==" | "!=";
+  kind: EqualityKind;
+  args: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+}
+
 export const compileIntrinsicCall = ({
   name,
   call,
@@ -52,23 +61,12 @@ export const compileIntrinsicCall = ({
 }: CompileIntrinsicCallParams): binaryen.ExpressionRef => {
   switch (name) {
     case "__array_new": {
-      if (args.length === 1 || args.length === 2) {
-        const arrayType = getRequiredExprType(call.id, ctx, instanceKey);
-        const heapType = getFixedArrayHeapType(arrayType, ctx);
-        const descriptor = getFixedArrayDescriptor(arrayType, ctx);
-        const init =
-          args[1] ?? defaultValueForType(descriptor.element, ctx);
-        return arrayNew(ctx.mod, heapType, args[0]!, init);
-      }
-      assertArgCount(name, args, 3);
-      const heapType = getHeapTypeArg({
-        call,
-        ctx,
-        index: 0,
-        instanceKey,
-        name,
-      });
-      return arrayNew(ctx.mod, heapType, args[1]!, args[2]!);
+      assertArgCount(name, args, 1);
+      const arrayType = getRequiredExprType(call.id, ctx, instanceKey);
+      const heapType = getFixedArrayHeapType(arrayType, ctx);
+      const descriptor = getFixedArrayDescriptor(arrayType, ctx);
+      const init = defaultValueForType(descriptor.element, ctx);
+      return arrayNew(ctx.mod, heapType, args[0]!, init);
     }
     case "__array_new_fixed": {
       assertMinArgCount(name, args, 1);
@@ -191,11 +189,11 @@ export const compileIntrinsicCall = ({
     case "==":
     case "!=": {
       assertArgCount(name, args, 2);
-      const operandKind = requireHomogeneousNumericKind(
-        call.args.map((a) => a.expr),
+      const operandKind = requireHomogeneousEqualityKind({
+        argExprIds: call.args.map((a) => a.expr),
         ctx,
-        instanceKey
-      );
+        instanceKey,
+      });
       return emitEqualityIntrinsic({ op: name, kind: operandKind, args, ctx });
     }
     default:
@@ -330,10 +328,14 @@ const emitEqualityIntrinsic = ({
   kind,
   args,
   ctx,
-}: { op: "==" | "!="; } & EmitNumericIntrinsicParams): binaryen.ExpressionRef => {
+}: EmitEqualityIntrinsicParams): binaryen.ExpressionRef => {
   const left = args[0]!;
   const right = args[1]!;
   switch (kind) {
+    case "bool":
+      return op === "=="
+        ? ctx.mod.i32.eq(left, right)
+        : ctx.mod.i32.ne(left, right);
     case "i32":
       return op === "=="
         ? ctx.mod.i32.eq(left, right)
@@ -351,7 +353,7 @@ const emitEqualityIntrinsic = ({
         ? ctx.mod.f64.eq(left, right)
         : ctx.mod.f64.ne(left, right);
   }
-  throw new Error(`unsupported ${op} equality for numeric kind ${kind}`);
+  throw new Error(`unsupported ${op} equality for kind ${kind}`);
 };
 
 const requireHomogeneousNumericKind = (
@@ -378,6 +380,36 @@ const requireHomogeneousNumericKind = (
   return firstKind;
 };
 
+const requireHomogeneousEqualityKind = ({
+  argExprIds,
+  ctx,
+  instanceKey,
+}: {
+  argExprIds: readonly HirExprId[];
+  ctx: CodegenContext;
+  instanceKey?: string;
+}): EqualityKind => {
+  if (argExprIds.length === 0) {
+    throw new Error("intrinsic requires at least one operand");
+  }
+  const firstKind = getEqualityKind(
+    getRequiredExprType(argExprIds[0]!, ctx, instanceKey),
+    ctx
+  );
+  for (let i = 1; i < argExprIds.length; i += 1) {
+    const nextKind = getEqualityKind(
+      getRequiredExprType(argExprIds[i]!, ctx, instanceKey),
+      ctx
+    );
+    if (nextKind !== firstKind) {
+      throw new Error(
+        "intrinsic operands must share the same primitive type"
+      );
+    }
+  }
+  return firstKind;
+};
+
 const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {
   const descriptor = ctx.typing.arena.get(typeId);
   if (descriptor.kind === "primitive") {
@@ -393,6 +425,31 @@ const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {
     }
   }
   throw new Error("intrinsic arguments must be primitive numeric types");
+};
+
+const getEqualityKind = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): EqualityKind => {
+  const descriptor = ctx.typing.arena.get(typeId);
+  if (descriptor.kind === "primitive") {
+    switch (descriptor.name) {
+      case "bool":
+      case "boolean":
+        return "bool";
+      case "i32":
+        return "i32";
+      case "i64":
+        return "i64";
+      case "f32":
+        return "f32";
+      case "f64":
+        return "f64";
+    }
+  }
+  throw new Error(
+    "intrinsic arguments must be primitive numeric or boolean types"
+  );
 };
 
 const assertArgCount = (
@@ -472,8 +529,8 @@ const getFixedArrayHeapType = (
   typeId: TypeId,
   ctx: CodegenContext
 ): HeapTypeRef => {
-  const wasmType = wasmTypeFor(typeId, ctx);
-  return modBinaryenTypeToHeapType(ctx.mod, wasmType);
+  const { heapType } = getFixedArrayWasmTypes(typeId, ctx);
+  return heapType;
 };
 
 const emitArrayCopyFromOptions = ({
@@ -563,7 +620,10 @@ const defaultValueForType = (
           return ctx.mod.f64.const(0);
       }
       break;
-    case "fixed-array":
+    case "fixed-array": {
+      const { heapType } = getFixedArrayWasmTypes(typeId, ctx);
+      return ctx.mod.ref.null(heapType);
+    }
     case "structural-object":
     case "nominal-object":
     case "trait":

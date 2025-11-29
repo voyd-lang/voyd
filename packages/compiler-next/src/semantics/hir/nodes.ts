@@ -13,6 +13,7 @@ import type {
   ParameterDeclId,
   TypeAliasDeclId,
 } from "../ids.js";
+import type { IntrinsicAttribute } from "../../parser/attributes.js";
 
 export type HirVisibility = "public" | "module";
 
@@ -155,6 +156,7 @@ export interface HirFunction extends HirItemBase {
   effectType?: HirTypeExpr;
   body: HirExprId;
   effectRow?: EffectRowId;
+  intrinsic?: IntrinsicAttribute;
 }
 
 export interface HirParameter {

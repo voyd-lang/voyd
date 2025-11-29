@@ -6,6 +6,7 @@ import {
   isIdentifierAtom,
   formCallsInternal,
 } from "../../../parser/index.js";
+import type { IntrinsicAttribute } from "../../../parser/attributes.js";
 import { rememberSyntax } from "../context.js";
 import type {
   TraitMethodDeclInput,
@@ -16,10 +17,11 @@ import type {
 } from "../../decls.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
 import type { BindingContext } from "../types.js";
-import type {
-  ParsedTraitDecl,
-  ParsedTraitMethod,
-  ParsedFunctionDecl,
+import {
+  normalizeIntrinsicAttribute,
+  type ParsedTraitDecl,
+  type ParsedTraitMethod,
+  type ParsedFunctionDecl,
 } from "../parsing.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { bindExpr } from "./expressions.js";
@@ -96,12 +98,25 @@ const bindTraitMethod = ({
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.body, ctx);
 
+  const intrinsicMetadata = decl.intrinsic;
+  const methodMetadata: Record<string, unknown> = {
+    entity: "trait-method",
+    trait: traitSymbol,
+  };
+
+  if (intrinsicMetadata) {
+    methodMetadata.intrinsic = true;
+    methodMetadata.intrinsicName = intrinsicMetadata.name;
+    methodMetadata.intrinsicUsesSignature =
+      intrinsicMetadata.usesSignature ?? false;
+  }
+
   const methodSymbol = ctx.symbolTable.declare(
     {
       name: decl.signature.name.value,
       kind: "value",
       declaredAt: decl.form.syntaxId,
-      metadata: { entity: "trait-method", trait: traitSymbol },
+      metadata: methodMetadata,
     },
     traitScope
   );
@@ -131,6 +146,7 @@ const bindTraitMethod = ({
     typeParameters,
     returnTypeExpr: decl.signature.returnType,
     defaultBody: decl.body,
+    intrinsic: decl.intrinsic,
   };
 };
 
@@ -247,6 +263,11 @@ export const makeParsedFunctionFromTraitMethod = (
       returnType,
     },
     body: clonedDefaultBody ?? form,
+    intrinsic: normalizeIntrinsicAttribute(
+      (form.attributes?.intrinsic as IntrinsicAttribute | undefined) ??
+        method.intrinsic,
+      nameAst.value
+    ),
   };
 };
 

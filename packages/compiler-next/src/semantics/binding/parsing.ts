@@ -9,12 +9,14 @@ import {
 } from "../../parser/index.js";
 import type { HirVisibility } from "../hir/index.js";
 import { isIdentifierWithValue } from "../utils.js";
+import type { IntrinsicAttribute } from "../../parser/attributes.js";
 
 export interface ParsedFunctionDecl {
   form: Form;
   visibility: HirVisibility;
   signature: ParsedFunctionSignature;
   body: Expr;
+  intrinsic?: IntrinsicAttribute;
 }
 
 export interface ParsedTypeAliasDecl {
@@ -45,6 +47,7 @@ export interface ParsedTraitMethod {
   form: Form;
   signature: ParsedFunctionSignature;
   body?: Expr;
+  intrinsic?: IntrinsicAttribute;
 }
 
 export interface ParsedTraitDecl {
@@ -121,6 +124,10 @@ export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
     visibility,
     signature,
     body: bodyExpr,
+    intrinsic: normalizeIntrinsicAttribute(
+      form.attributes?.intrinsic as IntrinsicAttribute | undefined,
+      signature.name.value
+    ),
   };
 };
 
@@ -148,7 +155,15 @@ const parseTraitMethod = (form: Form): ParsedTraitMethod => {
   );
   const signature = parseFunctionSignature(signatureForm);
 
-  return { form, signature, body: bodyExpr };
+  return {
+    form,
+    signature,
+    body: bodyExpr,
+    intrinsic: normalizeIntrinsicAttribute(
+      form.attributes?.intrinsic as IntrinsicAttribute | undefined,
+      signature.name.value
+    ),
+  };
 };
 
 export const parseTypeAliasDecl = (form: Form): ParsedTypeAliasDecl | null => {
@@ -306,6 +321,20 @@ const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
     name: head.name,
     typeParameters: head.typeParameters,
     params: head.params.flatMap(parseParameter),
+  };
+};
+
+export const normalizeIntrinsicAttribute = (
+  attr: IntrinsicAttribute | undefined,
+  fnName: string
+): IntrinsicAttribute | undefined => {
+  if (!attr) {
+    return undefined;
+  }
+
+  return {
+    name: attr.name ?? fnName,
+    usesSignature: attr.usesSignature ?? false,
   };
 };
 

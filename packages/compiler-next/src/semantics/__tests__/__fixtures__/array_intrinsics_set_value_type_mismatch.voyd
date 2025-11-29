@@ -1,0 +1,2 @@
+fn store(arr: FixedArray<i32>) -> FixedArray<i32>
+  __array_set(arr, 0, true)

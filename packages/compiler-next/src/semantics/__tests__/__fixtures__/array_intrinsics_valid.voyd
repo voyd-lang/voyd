@@ -1,0 +1,13 @@
+fn demo(arr: FixedArray<i32>) -> i32
+  let created: FixedArray<i32> = __array_new<i32>(4)
+  let first: i32 = __array_get(created, 0)
+  let updated: FixedArray<i32> = __array_set(created, 0, first)
+  let copied: FixedArray<i32> = __array_copy(updated, 1, created, 2, 1)
+  let opts_copy: FixedArray<i32> = __array_copy(updated, {
+    from: created,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+  let len: i32 = __array_len(opts_copy)
+  len

@@ -14,7 +14,29 @@ import type {
   HirPattern,
   SymbolId,
   TypeId,
+  FixedArrayWasmType,
 } from "./context.js";
+
+export const getFixedArrayWasmTypes = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+  seen: Set<TypeId> = new Set()
+): FixedArrayWasmType => {
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind !== "fixed-array") {
+    throw new Error("intrinsic requires a fixed-array type");
+  }
+  const cached = ctx.fixedArrayTypes.get(desc.element);
+  if (cached) {
+    return cached;
+  }
+  const elementType = wasmTypeFor(desc.element, ctx, seen);
+  const type = defineArrayType(ctx.mod, elementType, true);
+  const heapType = binaryenTypeToHeapType(type);
+  const fixedArrayType: FixedArrayWasmType = { type, heapType };
+  ctx.fixedArrayTypes.set(desc.element, fixedArrayType);
+  return fixedArrayType;
+};
 
 export const wasmTypeFor = (
   typeId: TypeId,
@@ -34,14 +56,7 @@ export const wasmTypeFor = (
     }
 
     if (desc.kind === "fixed-array") {
-      const cached = ctx.fixedArrayTypes.get(desc.element);
-      if (cached) {
-        return cached;
-      }
-      const elementType = wasmTypeFor(desc.element, ctx, seen);
-      const arrayType = defineArrayType(ctx.mod, elementType, true);
-      ctx.fixedArrayTypes.set(desc.element, arrayType);
-      return arrayType;
+      return getFixedArrayWasmTypes(typeId, ctx, seen).type;
     }
 
     if (desc.kind === "structural-object") {

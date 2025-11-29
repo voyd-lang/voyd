@@ -51,6 +51,7 @@ export const compileCallExpr = (
     return emitResolvedCall(targetMeta, args, expr.id, ctx, {
       tailPosition,
       expectedResultTypeId,
+      instanceKey: fnCtx.instanceKey,
     });
   }
 
@@ -62,9 +63,14 @@ export const compileCallExpr = (
   const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
     intrinsic?: boolean;
     intrinsicName?: string;
+    intrinsicUsesSignature?: boolean;
   };
 
-  if (intrinsicMetadata.intrinsic) {
+  const shouldCompileIntrinsic =
+    intrinsicMetadata.intrinsic === true &&
+    intrinsicMetadata.intrinsicUsesSignature !== true;
+
+  if (shouldCompileIntrinsic) {
     const args = expr.args.map(
       (arg) => compileExpr({ exprId: arg.expr, ctx, fnCtx }).expr
     );
@@ -93,6 +99,7 @@ export const compileCallExpr = (
   return emitResolvedCall(meta, args, expr.id, ctx, {
     tailPosition,
     expectedResultTypeId,
+    instanceKey: fnCtx.instanceKey,
   });
 };
 
@@ -103,8 +110,9 @@ const emitResolvedCall = (
   ctx: CodegenContext,
   options: CompileCallOptions = {}
 ): CompiledExpression => {
-  const { tailPosition = false, expectedResultTypeId } = options;
-  const returnTypeId = getRequiredExprType(callId, ctx, meta.instanceKey);
+  const { tailPosition = false, expectedResultTypeId, instanceKey } = options;
+  const typeInstanceKey = instanceKey ?? meta.instanceKey;
+  const returnTypeId = getRequiredExprType(callId, ctx, typeInstanceKey);
   const expectedTypeId = expectedResultTypeId ?? returnTypeId;
 
   if (
@@ -115,7 +123,7 @@ const emitResolvedCall = (
       expr: ctx.mod.return_call(
         meta.wasmName,
         args as number[],
-        getExprBinaryenType(callId, ctx, meta.instanceKey)
+        getExprBinaryenType(callId, ctx, typeInstanceKey)
       ),
       usedReturnCall: true,
     };
@@ -125,7 +133,7 @@ const emitResolvedCall = (
     expr: ctx.mod.call(
       meta.wasmName,
       args as number[],
-      getExprBinaryenType(callId, ctx, meta.instanceKey)
+      getExprBinaryenType(callId, ctx, typeInstanceKey)
     ),
     usedReturnCall: false,
   };

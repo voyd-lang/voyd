@@ -1,6 +1,11 @@
 import { Token } from "../token.js";
 import { Internal } from "./internals.js";
-import { SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
+import {
+  cloneAttributes,
+  SourceLocation,
+  Syntax,
+  VerboseJSON,
+} from "./syntax.js";
 
 export type AtomOpts = {
   location?: SourceLocation;
@@ -37,10 +42,12 @@ export class Atom extends Syntax {
   }
 
   clone(): this {
-    return new this.ctor({
+    const cloned = new this.ctor({
       location: this.location?.clone(),
       value: this.value,
     });
+    cloned.attributes = this.attributes ? { ...this.attributes } : undefined;
+    return cloned;
   }
 
   toJSON() {
@@ -53,6 +60,9 @@ export class Atom extends Syntax {
       id: this.syntaxId,
       location: this.location?.toJSON(),
       value: this.value,
+      ...(this.attributes
+        ? { attributes: cloneAttributes(this.attributes) }
+        : {}),
     };
   }
 }

@@ -1,0 +1,10 @@
+@intrinsic(name: "__array_len")
+fn len(arr: FixedArray<i32>) -> i32 __array_len(arr)
+
+@intrinsic(name: "__array_get", uses_signature: true)
+pub fn get_wrapper(arr: FixedArray<i32>, index: i32) -> i32 __array_get(arr, index)
+
+pub fn main() -> i32
+  let arr: FixedArray<i32> = __array_new<i32>(3)
+  let first: i32 = get_wrapper(arr, 0)
+  len(arr) + first

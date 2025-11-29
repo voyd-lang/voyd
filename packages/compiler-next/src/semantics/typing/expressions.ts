@@ -196,6 +196,10 @@ const typeCallExpr = (
       intrinsicUsesSignature?: boolean;
     };
     const intrinsicName = metadata.intrinsicName ?? record.name;
+    const allowIntrinsicTypeArgs =
+      metadata.intrinsic === true &&
+      typeof metadata.intrinsicName === "string" &&
+      metadata.intrinsicName !== record.name;
 
     const signature = ctx.functions.getSignature(calleeExpr.symbol);
     if (signature) {
@@ -211,7 +215,14 @@ const typeCallExpr = (
         });
       }
       if (metadata.intrinsic) {
-        return typeIntrinsicCall(intrinsicName, args, ctx, state, typeArguments);
+        return typeIntrinsicCall(
+          intrinsicName,
+          args,
+          ctx,
+          state,
+          typeArguments,
+          allowIntrinsicTypeArgs
+        );
       }
       return typeFunctionCall({
         args,
@@ -225,7 +236,14 @@ const typeCallExpr = (
     }
 
     if (metadata.intrinsic) {
-      return typeIntrinsicCall(intrinsicName, args, ctx, state, typeArguments);
+      return typeIntrinsicCall(
+        intrinsicName,
+        args,
+        ctx,
+        state,
+        typeArguments,
+        allowIntrinsicTypeArgs
+      );
     }
   }
 
@@ -311,7 +329,10 @@ const typeFunctionCall = ({
   state: TypingState;
 }): TypeId => {
   const record = ctx.symbolTable.getSymbol(calleeSymbol);
-  const intrinsicMetadata = (record.metadata ?? {}) as { intrinsic?: boolean };
+  const intrinsicMetadata = (record.metadata ?? {}) as {
+    intrinsic?: boolean;
+    intrinsicUsesSignature?: boolean;
+  };
   const hasTypeParams = signature.typeParams && signature.typeParams.length > 0;
   const instantiation = hasTypeParams
     ? instantiateFunctionCall({
@@ -349,7 +370,10 @@ const typeFunctionCall = ({
     const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
     ctx.callResolution.typeArguments.set(callId, appliedTypeArgs);
     ctx.callResolution.instanceKeys.set(callId, callKey);
-    if (!intrinsicMetadata.intrinsic) {
+    const skipGenericBody =
+      intrinsicMetadata.intrinsic === true &&
+      intrinsicMetadata.intrinsicUsesSignature !== true;
+    if (!skipGenericBody) {
       typeGenericFunctionBody({
         symbol: calleeSymbol,
         signature,
@@ -720,12 +744,22 @@ const typeIfExpr = (
     );
 
     const valueType = typeExpression(branch.value, ctx, state);
-    branchType = mergeBranchType(branchType, valueType);
+    branchType = mergeBranchType({
+      acc: branchType,
+      next: valueType,
+      ctx,
+      state,
+    });
   });
 
   if (hasDefault) {
     const defaultType = typeExpression(expr.defaultBranch!, ctx, state);
-    branchType = mergeBranchType(branchType, defaultType);
+    branchType = mergeBranchType({
+      acc: branchType,
+      next: defaultType,
+      ctx,
+      state,
+    });
     return branchType ?? ctx.primitives.void;
   }
 
@@ -773,7 +807,12 @@ const typeMatchExpr = (
       ctx,
       () => typeExpression(arm.value, ctx, state)
     );
-    branchType = mergeBranchType(branchType, valueType);
+    branchType = mergeBranchType({
+      acc: branchType,
+      next: valueType,
+      ctx,
+      state,
+    });
 
     if (!remainingMembers) {
       return;
@@ -1155,11 +1194,111 @@ const typeTupleAssignment = (
   bindTuplePatternFromExpr(pattern, valueExpr, ctx, state, "assign", assignmentSpan);
 };
 
-const mergeBranchType = (acc: TypeId | undefined, next: TypeId): TypeId => {
-  if (typeof acc === "number" && acc !== next) {
+const mergeBranchType = ({
+  acc,
+  next,
+  ctx,
+  state,
+}: {
+  acc: TypeId | undefined;
+  next: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): TypeId => {
+  if (typeof acc !== "number") {
+    return next;
+  }
+  if (acc === next) {
+    return acc;
+  }
+  if (typeSatisfies(next, acc, ctx, state)) {
+    return acc;
+  }
+  if (typeSatisfies(acc, next, ctx, state)) {
+    return next;
+  }
+  const accRepr = branchWasmRepresentation(acc, ctx);
+  const nextRepr = branchWasmRepresentation(next, ctx);
+  if (accRepr === "unknown" || nextRepr === "unknown") {
+    return ctx.arena.internUnion([acc, next]);
+  }
+  if (accRepr === "mixed" || nextRepr === "mixed" || accRepr !== nextRepr) {
     throw new Error("branch type mismatch");
   }
-  return typeof acc === "number" ? acc : next;
+  return ctx.arena.internUnion([acc, next]);
+};
+
+type BranchWasmRepresentation =
+  | "i32"
+  | "i64"
+  | "f32"
+  | "f64"
+  | "void"
+  | "ref"
+  | "unknown"
+  | "mixed";
+
+const branchWasmRepresentation = (
+  type: TypeId,
+  ctx: TypingContext,
+  seen: Set<TypeId> = new Set()
+): BranchWasmRepresentation => {
+  if (seen.has(type)) {
+    return "ref";
+  }
+  seen.add(type);
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "primitive":
+      switch (desc.name) {
+        case "i32":
+        case "bool":
+        case "boolean":
+        case "unknown":
+          return "i32";
+        case "i64":
+          return "i64";
+        case "f32":
+          return "f32";
+        case "f64":
+          return "f64";
+        case "voyd":
+        case "void":
+        case "Voyd":
+          return "void";
+        default:
+          return "ref";
+      }
+    case "trait":
+    case "nominal-object":
+    case "structural-object":
+    case "function":
+    case "fixed-array":
+      return "ref";
+    case "union": {
+      const memberReprs = new Set(
+        desc.members.map((member) => branchWasmRepresentation(member, ctx, seen))
+      );
+      return memberReprs.size === 1
+        ? memberReprs.values().next().value ?? "mixed"
+        : "mixed";
+    }
+    case "intersection": {
+      const reps = new Set<BranchWasmRepresentation>();
+      if (typeof desc.nominal === "number") {
+        reps.add(branchWasmRepresentation(desc.nominal, ctx, seen));
+      }
+      if (typeof desc.structural === "number") {
+        reps.add(branchWasmRepresentation(desc.structural, ctx, seen));
+      }
+      return reps.size === 1 ? reps.values().next().value ?? "mixed" : "mixed";
+    }
+    case "type-param-ref":
+      return "unknown";
+    default:
+      return "mixed";
+  }
 };
 
 const typeOverloadedCall = (
@@ -1257,134 +1396,44 @@ const typeIntrinsicCall = (
   args: readonly Arg[],
   ctx: TypingContext,
   state: TypingState,
-  typeArguments?: readonly TypeId[]
+  typeArguments?: readonly TypeId[],
+  allowTypeArguments = false
 ): TypeId => {
   switch (name) {
-    case "__array_new": {
-      if (args.length === 0) {
-        throw new Error("intrinsic __array_new requires a size argument");
-      }
-      const sizeType = getPrimitiveType(ctx, "i32");
-      ensureTypeMatches(
-        args[0]!.type,
-        sizeType,
+    case "__array_new":
+      return typeArrayNewIntrinsic({ args, ctx, state, typeArguments });
+    case "__array_get":
+      return typeArrayGetIntrinsic({
+        args,
         ctx,
         state,
-        "__array_new size"
-      );
-      const elementType =
-        typeArguments && typeArguments.length > 0
-          ? typeArguments[0]!
-          : ctx.primitives.unknown;
-      if (elementType === ctx.primitives.unknown && state.mode === "strict") {
-        throw new Error("__array_new requires an element type argument");
-      }
-      return ctx.arena.internFixedArray(elementType);
-    }
-    case "__array_get": {
-      if (args.length < 2) {
-        throw new Error("intrinsic __array_get requires array and index");
-      }
-      const { element } = requireFixedArrayArg({
-        arg: args[0]!.type,
-        ctx,
-        state,
-        source: "__array_get target",
+        typeArguments,
+        allowTypeArguments,
       });
-      const int32 = getPrimitiveType(ctx, "i32");
-      ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_get index");
-      return element;
-    }
-    case "__array_set": {
-      if (args.length < 3) {
-        throw new Error(
-          "intrinsic __array_set requires array, index, and value"
-        );
-      }
-      const { array, element } = requireFixedArrayArg({
-        arg: args[0]!.type,
+    case "__array_set":
+      return typeArraySetIntrinsic({
+        args,
         ctx,
         state,
-        source: "__array_set target",
+        typeArguments,
+        allowTypeArguments,
       });
-      const int32 = getPrimitiveType(ctx, "i32");
-      ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_set index");
-      ensureTypeMatches(
-        args[2]!.type,
-        element,
+    case "__array_len":
+      return typeArrayLenIntrinsic({
+        args,
         ctx,
         state,
-        "__array_set value"
-      );
-      return array;
-    }
-    case "__array_len": {
-      if (args.length < 1) {
-        throw new Error("intrinsic __array_len requires an array argument");
-      }
-      requireFixedArrayArg({
-        arg: args[0]!.type,
-        ctx,
-        state,
-        source: "__array_len target",
+        typeArguments,
+        allowTypeArguments,
       });
-      return getPrimitiveType(ctx, "i32");
-    }
-    case "__array_copy": {
-      if (args.length === 0) {
-        throw new Error("intrinsic __array_copy requires a target array");
-      }
-      const { array, element } = requireFixedArrayArg({
-        arg: args[0]!.type,
+    case "__array_copy":
+      return typeArrayCopyIntrinsic({
+        args,
         ctx,
         state,
-        source: "__array_copy target",
+        typeArguments,
+        allowTypeArguments,
       });
-      if (args.length === 2) {
-        return array;
-      }
-      if (args.length < 5) {
-        throw new Error(
-          "intrinsic __array_copy expects target, to_index, from, from_index, count"
-        );
-      }
-      const int32 = getPrimitiveType(ctx, "i32");
-      ensureTypeMatches(
-        args[1]!.type,
-        int32,
-        ctx,
-        state,
-        "__array_copy to_index"
-      );
-      const fromArray = requireFixedArrayArg({
-        arg: args[2]!.type,
-        ctx,
-        state,
-        source: "__array_copy source",
-      });
-      ensureTypeMatches(
-        args[3]!.type,
-        int32,
-        ctx,
-        state,
-        "__array_copy from_index"
-      );
-      ensureTypeMatches(
-        args[4]!.type,
-        int32,
-        ctx,
-        state,
-        "__array_copy count"
-      );
-      ensureTypeMatches(
-        fromArray.element,
-        element,
-        ctx,
-        state,
-        "__array_copy element type"
-      );
-      return array;
-    }
     default: {
       const signatures = intrinsicSignaturesFor(name, ctx);
       if (signatures.length === 0) {
@@ -1406,6 +1455,350 @@ const typeIntrinsicCall = (
       return matches[0]!.returnType;
     }
   }
+};
+
+const typeArrayNewIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__array_new",
+    args,
+    expected: 1,
+    detail: "size",
+  });
+  const elementType = requireSingleTypeArgument({
+    name: "__array_new",
+    typeArguments,
+    detail: "element type",
+  });
+  const sizeType = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(args[0]!.type, sizeType, ctx, state, "__array_new size");
+  return ctx.arena.internFixedArray(elementType);
+};
+
+const typeArrayGetIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+  allowTypeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+  allowTypeArguments?: boolean;
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__array_get",
+    args,
+    expected: 2,
+    detail: "array and index",
+  });
+  const { element } = requireFixedArrayArg({
+    arg: args[0]!.type,
+    ctx,
+    state,
+    source: "__array_get target",
+  });
+  validateIntrinsicTypeArguments({
+    name: "__array_get",
+    typeArguments,
+    expectedType: element,
+    allow: allowTypeArguments === true,
+    ctx,
+    state,
+  });
+  const int32 = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_get index");
+  return element;
+};
+
+const typeArraySetIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+  allowTypeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+  allowTypeArguments?: boolean;
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__array_set",
+    args,
+    expected: 3,
+    detail: "array, index, and value",
+  });
+  const { array, element } = requireFixedArrayArg({
+    arg: args[0]!.type,
+    ctx,
+    state,
+    source: "__array_set target",
+  });
+  validateIntrinsicTypeArguments({
+    name: "__array_set",
+    typeArguments,
+    expectedType: element,
+    allow: allowTypeArguments === true,
+    ctx,
+    state,
+  });
+  const int32 = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_set index");
+  ensureTypeMatches(args[2]!.type, element, ctx, state, "__array_set value");
+  return array;
+};
+
+const typeArrayLenIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+  allowTypeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+  allowTypeArguments?: boolean;
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__array_len",
+    args,
+    expected: 1,
+    detail: "array",
+  });
+  const { element } = requireFixedArrayArg({
+    arg: args[0]!.type,
+    ctx,
+    state,
+    source: "__array_len target",
+  });
+  validateIntrinsicTypeArguments({
+    name: "__array_len",
+    typeArguments,
+    expectedType: element,
+    allow: allowTypeArguments === true,
+    ctx,
+    state,
+  });
+  return getPrimitiveType(ctx, "i32");
+};
+
+const typeArrayCopyIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+  allowTypeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+  allowTypeArguments?: boolean;
+}): TypeId => {
+  assertIntrinsicArgCountOneOf({
+    name: "__array_copy",
+    args,
+    expected: [2, 5],
+  });
+  const { array, element } = requireFixedArrayArg({
+    arg: args[0]!.type,
+    ctx,
+    state,
+    source: "__array_copy target",
+  });
+  validateIntrinsicTypeArguments({
+    name: "__array_copy",
+    typeArguments,
+    expectedType: element,
+    allow: allowTypeArguments === true,
+    ctx,
+    state,
+  });
+  const int32 = getPrimitiveType(ctx, "i32");
+  if (args.length === 2) {
+    const optionsFields = getStructuralFields(args[1]!.type, ctx, state);
+    if (!optionsFields) {
+      throw new Error("__array_copy options must be a structural object");
+    }
+    const toIndex = requireArrayCopyOptionsField({
+      fields: optionsFields,
+      name: "to_index",
+    });
+    const fromType = requireArrayCopyOptionsField({
+      fields: optionsFields,
+      name: "from",
+    });
+    const fromArray = requireFixedArrayArg({
+      arg: fromType,
+      ctx,
+      state,
+      source: "__array_copy options.from",
+    });
+    const fromIndex = requireArrayCopyOptionsField({
+      fields: optionsFields,
+      name: "from_index",
+    });
+    const count = requireArrayCopyOptionsField({
+      fields: optionsFields,
+      name: "count",
+    });
+
+    ensureTypeMatches(toIndex, int32, ctx, state, "__array_copy to_index");
+    ensureTypeMatches(fromIndex, int32, ctx, state, "__array_copy from_index");
+    ensureTypeMatches(count, int32, ctx, state, "__array_copy count");
+    ensureTypeMatches(
+      fromArray.element,
+      element,
+      ctx,
+      state,
+      "__array_copy element type"
+    );
+    return array;
+  }
+
+  ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_copy to_index");
+  const fromArray = requireFixedArrayArg({
+    arg: args[2]!.type,
+    ctx,
+    state,
+    source: "__array_copy source",
+  });
+  ensureTypeMatches(args[3]!.type, int32, ctx, state, "__array_copy from_index");
+  ensureTypeMatches(args[4]!.type, int32, ctx, state, "__array_copy count");
+  ensureTypeMatches(
+    fromArray.element,
+    element,
+    ctx,
+    state,
+    "__array_copy element type"
+  );
+  return array;
+};
+
+const assertIntrinsicArgCount = ({
+  name,
+  args,
+  expected,
+  detail,
+}: {
+  name: string;
+  args: readonly Arg[];
+  expected: number;
+  detail?: string;
+}): void => {
+  if (args.length === expected) {
+    return;
+  }
+  const descriptor = detail ? ` (${detail})` : "";
+  throw new Error(
+    `intrinsic ${name} expects ${expected} argument(s)${descriptor}, received ${args.length}`
+  );
+};
+
+const assertIntrinsicArgCountOneOf = ({
+  name,
+  args,
+  expected,
+}: {
+  name: string;
+  args: readonly Arg[];
+  expected: readonly number[];
+}): void => {
+  if (expected.includes(args.length)) {
+    return;
+  }
+  const descriptor = expected.join(" or ");
+  throw new Error(
+    `intrinsic ${name} expects ${descriptor} argument(s), received ${args.length}`
+  );
+};
+
+const requireSingleTypeArgument = ({
+  name,
+  typeArguments,
+  detail,
+}: {
+  name: string;
+  typeArguments?: readonly TypeId[];
+  detail?: string;
+}): TypeId => {
+  const count = typeArguments?.length ?? 0;
+  if (count === 1) {
+    return typeArguments![0]!;
+  }
+  const descriptor = detail ? ` for ${detail}` : "";
+  throw new Error(
+    `intrinsic ${name} requires exactly 1 type argument${descriptor}, received ${count}`
+  );
+};
+
+const assertNoIntrinsicTypeArgs = (
+  name: string,
+  typeArguments: readonly TypeId[] | undefined
+): void => {
+  if (!typeArguments || typeArguments.length === 0) {
+    return;
+  }
+  throw new Error(`intrinsic ${name} does not accept type arguments`);
+};
+
+const validateIntrinsicTypeArguments = ({
+  name,
+  typeArguments,
+  expectedType,
+  allow,
+  ctx,
+  state,
+}: {
+  name: string;
+  typeArguments?: readonly TypeId[];
+  expectedType: TypeId;
+  allow: boolean;
+  ctx: TypingContext;
+  state: TypingState;
+}): void => {
+  if (!allow) {
+    assertNoIntrinsicTypeArgs(name, typeArguments);
+    return;
+  }
+  if (!typeArguments || typeArguments.length === 0) {
+    return;
+  }
+  const provided = requireSingleTypeArgument({
+    name,
+    typeArguments,
+    detail: "element type",
+  });
+  ensureTypeMatches(provided, expectedType, ctx, state, `${name} type argument`);
+};
+
+const requireArrayCopyOptionsField = ({
+  fields,
+  name,
+}: {
+  fields: readonly { name: string; type: TypeId }[];
+  name: string;
+}): TypeId => {
+  const field = fields.find((entry) => entry.name === name);
+  if (field) {
+    return field.type;
+  }
+  throw new Error(`intrinsic __array_copy options missing field ${name}`);
 };
 
 const requireFixedArrayArg = ({
@@ -1456,6 +1849,35 @@ const getValueType = (symbol: SymbolId, ctx: TypingContext): TypeId => {
     intrinsicName?: string;
     intrinsicUsesSignature?: boolean;
   };
+
+  if (metadata.intrinsic && metadata.intrinsicUsesSignature === true) {
+    const signature = ctx.functions.getSignature(symbol);
+    if (!signature) {
+      throw new Error(`missing signature for intrinsic ${record.name}`);
+    }
+    const functionType =
+      signature.typeId ??
+      ctx.arena.internFunction({
+        parameters: signature.parameters.map(({ type, label }) => ({
+          type,
+          label,
+          optional: false,
+        })),
+        returnType: signature.returnType,
+        effects: ctx.primitives.defaultEffectRow,
+      });
+    ctx.valueTypes.set(symbol, functionType);
+    if (!ctx.table.getSymbolScheme(symbol)) {
+      const typeParams =
+        signature.typeParams?.map((param) => param.typeParam) ?? [];
+      const scheme = ctx.arena.newScheme(
+        typeParams,
+        functionType
+      );
+      ctx.table.setSymbolScheme(symbol, scheme);
+    }
+    return functionType;
+  }
 
   if (metadata.intrinsic && metadata.intrinsicUsesSignature !== true) {
     const intrinsicType = getIntrinsicType(
@@ -1544,6 +1966,10 @@ const intrinsicSignaturesFor = (
     { parameters: [float32, float32], returnType: ctx.primitives.bool },
     { parameters: [float64, float64], returnType: ctx.primitives.bool },
   ];
+  const equalitySignatures: IntrinsicSignature[] = [
+    ...comparisonSignatures,
+    { parameters: [ctx.primitives.bool, ctx.primitives.bool], returnType: ctx.primitives.bool },
+  ];
 
   switch (name) {
     case "+":
@@ -1555,9 +1981,10 @@ const intrinsicSignaturesFor = (
     case "<=":
     case ">":
     case ">=":
+      return comparisonSignatures;
     case "==":
     case "!=":
-      return comparisonSignatures;
+      return equalitySignatures;
     default:
       return [];
   }

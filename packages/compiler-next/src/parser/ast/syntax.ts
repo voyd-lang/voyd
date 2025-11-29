@@ -2,9 +2,11 @@ export abstract class Syntax {
   abstract readonly syntaxType: string;
   readonly syntaxId = getSyntaxId();
   location?: SourceLocation;
+  attributes?: Attributes;
 
-  constructor(opts: { location?: SourceLocation } = {}) {
+  constructor(opts: { location?: SourceLocation; attributes?: Attributes } = {}) {
     this.location = opts.location;
+    this.attributes = cloneAttributes(opts.attributes);
   }
 
   abstract clone(): Syntax;
@@ -23,6 +25,15 @@ export abstract class Syntax {
 }
 
 export type Attributes = { [key: string]: unknown };
+
+export const cloneAttributes = (
+  attributes?: Attributes
+): Attributes | undefined => {
+  if (!attributes) {
+    return undefined;
+  }
+  return { ...attributes };
+};
 
 export type VerboseJSON = {
   type: string;
