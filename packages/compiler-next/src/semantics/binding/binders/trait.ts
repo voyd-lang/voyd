@@ -98,12 +98,25 @@ const bindTraitMethod = ({
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.body, ctx);
 
+  const intrinsicMetadata = decl.intrinsic;
+  const methodMetadata: Record<string, unknown> = {
+    entity: "trait-method",
+    trait: traitSymbol,
+  };
+
+  if (intrinsicMetadata) {
+    methodMetadata.intrinsic = true;
+    methodMetadata.intrinsicName = intrinsicMetadata.name;
+    methodMetadata.intrinsicUsesSignature =
+      intrinsicMetadata.usesSignature ?? false;
+  }
+
   const methodSymbol = ctx.symbolTable.declare(
     {
       name: decl.signature.name.value,
       kind: "value",
       declaredAt: decl.form.syntaxId,
-      metadata: { entity: "trait-method", trait: traitSymbol },
+      metadata: methodMetadata,
     },
     traitScope
   );

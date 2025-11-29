@@ -13,7 +13,6 @@ import { toSourceSpan } from "./utils.js";
 import type { OverloadSetId, SymbolId } from "./ids.js";
 import type { ModuleExportTable } from "./modules.js";
 import type { DependencySemantics } from "./typing/types.js";
-import { tagIntrinsicSymbols } from "./intrinsics.js";
 import type { Diagnostic } from "../diagnostics/index.js";
 import { DiagnosticError } from "../diagnostics/index.js";
 
@@ -64,7 +63,6 @@ export const semanticsPipeline = (
     moduleExports: exports ?? new Map(),
   });
   ensureNoBindingErrors(binding);
-  tagIntrinsicSymbols({ binding, moduleId: module.id });
 
   const builder = createHirBuilder({
     path: module.id,

@@ -312,4 +312,9 @@ describe("next codegen", () => {
     const main = loadMain("blanket_summable_box.voyd");
     expect(main()).toBe(7);
   });
+
+  it("handles attribute-tagged intrinsics through codegen", () => {
+    const main = loadMain("intrinsic_attributes_codegen.voyd");
+    expect(main()).toBe(3);
+  });
 });

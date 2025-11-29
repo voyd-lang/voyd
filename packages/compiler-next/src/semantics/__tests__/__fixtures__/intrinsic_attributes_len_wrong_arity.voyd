@@ -1,0 +1,5 @@
+@intrinsic(name: "__array_len")
+fn len(arr: FixedArray<i32>) -> i32 0
+
+fn demo(arr: FixedArray<i32>) -> i32
+  len()

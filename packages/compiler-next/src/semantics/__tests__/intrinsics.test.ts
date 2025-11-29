@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../pipeline.js";
 import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
+import type { HirFunction } from "../hir/nodes.js";
+import { loadAst } from "./load-ast.js";
 
-const SOURCE = `
+const UNANNOTATED_SOURCE = `
 fn new_fixed_array<T>(size: i32) -> i32 0
 fn get<T>(arr: i32, index: i32) -> i32 0
 fn set<T>(arr: i32, index: i32, value: i32) -> i32 0
@@ -13,33 +15,6 @@ fn helper() -> i32 0
 `;
 
 const FIXED_ARRAY_FILE = "packages/std_next/fixed_array.voyd";
-
-const getMetadata = ({
-  name,
-  modulePath,
-  moduleId,
-}: {
-  name: string;
-  modulePath: string;
-  moduleId?: string;
-}): Record<string, unknown> | undefined => {
-  const ast = parse(SOURCE, modulePath);
-  const result = moduleId
-    ? semanticsPipeline(
-        buildPipelineInput({
-          ast,
-          moduleId,
-          filePath: modulePath,
-        })
-      )
-    : semanticsPipeline(ast);
-  const { symbolTable } = result;
-  return symbolTable
-    .snapshot()
-    .symbols.find(
-      (entry) => entry?.name === name && entry.kind === "value"
-    )?.metadata as Record<string, unknown> | undefined;
-};
 
 const buildPipelineInput = ({
   ast,
@@ -66,59 +41,101 @@ const buildPipelineInput = ({
   return { module, graph };
 };
 
-describe("intrinsic tagging", () => {
-  it("tags std_next fixed_array wrappers with intrinsic metadata", () => {
-    const expectedMetadata: Record<string, Record<string, unknown>> = {
-      new_fixed_array: {
-        intrinsic: true,
-        intrinsicName: "__array_new",
-        intrinsicUsesSignature: false,
-      },
-      get: {
-        intrinsic: true,
-        intrinsicName: "__array_get",
-        intrinsicUsesSignature: true,
-      },
-      set: {
-        intrinsic: true,
-        intrinsicName: "__array_set",
-        intrinsicUsesSignature: true,
-      },
-      copy: {
-        intrinsic: true,
-        intrinsicName: "__array_copy",
-        intrinsicUsesSignature: true,
-      },
-      length: {
-        intrinsic: true,
-        intrinsicName: "__array_len",
-        intrinsicUsesSignature: false,
-      },
-    };
+describe("intrinsic metadata", () => {
+  it("propagates @intrinsic attributes through binding and lowering", () => {
+    const ast = loadAst("intrinsic_attributes.voyd");
+    const { binding, symbolTable, hir } = semanticsPipeline(ast);
+    const rootScope = symbolTable.rootScope;
 
-    const moduleIds = [FIXED_ARRAY_FILE, "std::fixed_array"];
+    const renamed = symbolTable.resolve("renamed", rootScope);
+    const defaultIntrinsic = symbolTable.resolve("default_intrinsic", rootScope);
+    const helper = symbolTable.resolve("helper", rootScope);
 
-    moduleIds.forEach((moduleId) => {
-      Object.entries(expectedMetadata).forEach(([name, metadata]) => {
-        const metadataForId =
-          moduleId === FIXED_ARRAY_FILE
-            ? getMetadata({ name, modulePath: moduleId })
-            : getMetadata({
-                name,
-                modulePath: FIXED_ARRAY_FILE,
-                moduleId,
-              });
-        expect(metadataForId).toMatchObject(metadata);
-      });
+    expect(renamed).toBeDefined();
+    expect(defaultIntrinsic).toBeDefined();
+    expect(helper).toBeDefined();
+
+    const renamedMetadata = symbolTable.getSymbol(renamed!)
+      .metadata as Record<string, unknown>;
+    const defaultMetadata = symbolTable.getSymbol(defaultIntrinsic!)
+      .metadata as Record<string, unknown>;
+    const helperMetadata = symbolTable.getSymbol(helper!)
+      .metadata as Record<string, unknown> | undefined;
+
+    expect(renamedMetadata).toMatchObject({
+      entity: "function",
+      intrinsic: true,
+      intrinsicName: "__renamed_intrinsic",
+      intrinsicUsesSignature: true,
     });
+    expect(defaultMetadata).toMatchObject({
+      entity: "function",
+      intrinsic: true,
+      intrinsicName: "default_intrinsic",
+      intrinsicUsesSignature: false,
+    });
+    expect(helperMetadata?.intrinsic).toBeUndefined();
+
+    const renamedDecl = binding.functions.find(
+      (fn) => fn.symbol === renamed
+    );
+    const defaultDecl = binding.functions.find(
+      (fn) => fn.symbol === defaultIntrinsic
+    );
+    const helperDecl = binding.functions.find((fn) => fn.symbol === helper);
+
+    expect(renamedDecl?.intrinsic).toEqual({
+      name: "__renamed_intrinsic",
+      usesSignature: true,
+    });
+    expect(defaultDecl?.intrinsic).toEqual({
+      name: "default_intrinsic",
+      usesSignature: false,
+    });
+    expect(helperDecl?.intrinsic).toBeUndefined();
+
+    const renamedHir = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === renamed
+    );
+    const defaultHir = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === defaultIntrinsic
+    );
+    const helperHir = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === helper
+    );
+
+    expect(renamedHir?.intrinsic).toEqual({
+      name: "__renamed_intrinsic",
+      usesSignature: true,
+    });
+    expect(defaultHir?.intrinsic).toEqual({
+      name: "default_intrinsic",
+      usesSignature: false,
+    });
+    expect(helperHir?.intrinsic).toBeUndefined();
   });
 
-  it("leaves other modules untouched", () => {
-    expect(
-      getMetadata({ name: "new_fixed_array", modulePath: "packages/std/fixed_array.voyd" })
-    ).not.toMatchObject({ intrinsic: true });
-    expect(
-      getMetadata({ name: "helper", modulePath: "packages/std_next/fixed_array.voyd" })
-    ).not.toMatchObject({ intrinsic: true });
+  it("leaves unannotated modules untouched", () => {
+    const ast = parse(UNANNOTATED_SOURCE, FIXED_ARRAY_FILE);
+    const { symbolTable } = semanticsPipeline(
+      buildPipelineInput({
+        ast,
+        moduleId: FIXED_ARRAY_FILE,
+        filePath: FIXED_ARRAY_FILE,
+      })
+    );
+    const rootScope = symbolTable.rootScope;
+    const names = ["new_fixed_array", "get", "set", "copy", "length", "helper"];
+
+    names.forEach((name) => {
+      const symbol = symbolTable.resolve(name, rootScope);
+      expect(symbol).toBeDefined();
+      const metadata = symbolTable.getSymbol(symbol!)
+        .metadata as Record<string, unknown> | undefined;
+      expect(metadata?.intrinsic).toBeUndefined();
+    });
   });
 });
