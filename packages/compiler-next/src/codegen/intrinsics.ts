@@ -61,23 +61,12 @@ export const compileIntrinsicCall = ({
 }: CompileIntrinsicCallParams): binaryen.ExpressionRef => {
   switch (name) {
     case "__array_new": {
-      if (args.length === 1 || args.length === 2) {
-        const arrayType = getRequiredExprType(call.id, ctx, instanceKey);
-        const heapType = getFixedArrayHeapType(arrayType, ctx);
-        const descriptor = getFixedArrayDescriptor(arrayType, ctx);
-        const init =
-          args[1] ?? defaultValueForType(descriptor.element, ctx);
-        return arrayNew(ctx.mod, heapType, args[0]!, init);
-      }
-      assertArgCount(name, args, 3);
-      const heapType = getHeapTypeArg({
-        call,
-        ctx,
-        index: 0,
-        instanceKey,
-        name,
-      });
-      return arrayNew(ctx.mod, heapType, args[1]!, args[2]!);
+      assertArgCount(name, args, 1);
+      const arrayType = getRequiredExprType(call.id, ctx, instanceKey);
+      const heapType = getFixedArrayHeapType(arrayType, ctx);
+      const descriptor = getFixedArrayDescriptor(arrayType, ctx);
+      const init = defaultValueForType(descriptor.element, ctx);
+      return arrayNew(ctx.mod, heapType, args[0]!, init);
     }
     case "__array_new_fixed": {
       assertMinArgCount(name, args, 1);
