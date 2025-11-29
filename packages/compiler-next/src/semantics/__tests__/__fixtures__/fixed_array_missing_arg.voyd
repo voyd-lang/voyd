@@ -1,0 +1,2 @@
+fn missing(arr: FixedArray) -> i32
+  0

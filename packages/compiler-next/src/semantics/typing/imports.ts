@@ -45,6 +45,29 @@ export const importTargetFor = (
   return metadata.import;
 };
 
+const copyIntrinsicMetadata = ({
+  localSymbol,
+  dependencySymbol,
+  dependency,
+  ctx,
+}: {
+  localSymbol: SymbolId;
+  dependencySymbol: SymbolId;
+  dependency: DependencySemantics;
+  ctx: TypingContext;
+}): void => {
+  const sourceRecord = dependency.symbolTable.getSymbol(dependencySymbol);
+  const metadata = (sourceRecord.metadata ?? {}) as {
+    intrinsic?: boolean;
+    intrinsicName?: string;
+    intrinsicUsesSignature?: boolean;
+  };
+  if (!metadata.intrinsic) {
+    return;
+  }
+  ctx.symbolTable.setSymbolMetadata(localSymbol, metadata);
+};
+
 export const resolveImportedValue = ({
   symbol,
   ctx,
@@ -63,6 +86,12 @@ export const resolveImportedValue = ({
       `missing semantics for imported module ${target.moduleId}`
     );
   }
+  copyIntrinsicMetadata({
+    localSymbol: symbol,
+    dependencySymbol: target.symbol,
+    dependency,
+    ctx,
+  });
 
   const exportEntry = findExport(target.symbol, dependency);
   if (!exportEntry) {

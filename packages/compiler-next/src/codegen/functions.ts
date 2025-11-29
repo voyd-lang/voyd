@@ -19,6 +19,14 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
     if (item.kind !== "function") continue;
     ctx.itemsToSymbols.set(itemId, { moduleId: ctx.moduleId, symbol: item.symbol });
 
+    const symbolRecord = ctx.symbolTable.getSymbol(item.symbol);
+    const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
+      intrinsic?: boolean;
+    };
+    if (intrinsicMetadata.intrinsic) {
+      continue;
+    }
+
     const scheme = ctx.typing.table.getSymbolScheme(item.symbol);
     if (typeof scheme !== "number") {
       throw new Error(
@@ -98,6 +106,13 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
 export const compileFunctions = (ctx: CodegenContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "function") continue;
+    const symbolRecord = ctx.symbolTable.getSymbol(item.symbol);
+    const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
+      intrinsic?: boolean;
+    };
+    if (intrinsicMetadata.intrinsic) {
+      continue;
+    }
     const metas = ctx.functions.get(functionKey(ctx.moduleId, item.symbol));
     if (!metas || metas.length === 0) {
       throw new Error(`codegen missing metadata for function ${item.symbol}`);
@@ -110,6 +125,13 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
   ctx.binding.imports.forEach((imp) => {
     if (!imp.target) return;
     if (imp.target.moduleId === ctx.moduleId) return;
+    const symbolRecord = ctx.symbolTable.getSymbol(imp.local);
+    const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
+      intrinsic?: boolean;
+    };
+    if (intrinsicMetadata.intrinsic) {
+      return;
+    }
 
     const signature = ctx.typing.functions.getSignature(imp.local);
     if (!signature) return;
@@ -173,6 +195,13 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
   ctx.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
     if (item.visibility !== "public") return;
+    const symbolRecord = ctx.symbolTable.getSymbol(item.symbol);
+    const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
+      intrinsic?: boolean;
+    };
+    if (intrinsicMetadata.intrinsic) {
+      return;
+    }
     const metas = ctx.functions.get(functionKey(ctx.moduleId, item.symbol));
     const meta =
       metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];

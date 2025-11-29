@@ -20,6 +20,48 @@ import {
   shouldCacheInstantiation,
 } from "../../types/instantiation.js";
 
+const isFixedArrayReference = (
+  name: string,
+  symbol: SymbolId | undefined,
+  ctx: TypingContext
+): boolean => {
+  if (name === "FixedArray") {
+    return true;
+  }
+  if (typeof symbol !== "number") {
+    return false;
+  }
+  const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ?? {}) as {
+    intrinsicType?: string;
+  };
+  return metadata.intrinsicType === "fixed-array";
+};
+
+const resolveFixedArrayType = ({
+  typeArgs,
+  ctx,
+  state,
+}: {
+  typeArgs: readonly TypeId[];
+  ctx: TypingContext;
+  state: TypingState;
+}): TypeId => {
+  const normalized = normalizeTypeArgs({
+    typeArgs,
+    paramCount: 1,
+    unknownType: ctx.primitives.unknown,
+    context: "FixedArray",
+  });
+
+  if (normalized.missingCount > 0 && state.mode === "strict") {
+    throw new Error(
+      `FixedArray is missing ${normalized.missingCount} type argument(s)`
+    );
+  }
+
+  return ctx.arena.internFixedArray(normalized.applied[0]!);
+};
+
 const paramsReferencedInType = (
   type: TypeId,
   allowed: ReadonlySet<TypeParamId>,
@@ -668,6 +710,14 @@ const resolveNamedTypeExpr = (
       throw new Error("type parameters do not accept type arguments");
     }
     return typeParam;
+  }
+
+  if (isFixedArrayReference(name, expr.symbol, ctx)) {
+    return resolveFixedArrayType({
+      typeArgs: resolvedTypeArgs,
+      ctx,
+      state,
+    });
   }
 
   if (
