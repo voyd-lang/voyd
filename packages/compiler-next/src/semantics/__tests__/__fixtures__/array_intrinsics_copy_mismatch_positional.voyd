@@ -1,0 +1,2 @@
+fn copy_from(dest: FixedArray<i32>, src: FixedArray<boolean>) -> FixedArray<i32>
+  __array_copy(dest, 0, src, 0, 1)

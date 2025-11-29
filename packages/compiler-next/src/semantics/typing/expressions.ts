@@ -1260,131 +1260,16 @@ const typeIntrinsicCall = (
   typeArguments?: readonly TypeId[]
 ): TypeId => {
   switch (name) {
-    case "__array_new": {
-      if (args.length === 0) {
-        throw new Error("intrinsic __array_new requires a size argument");
-      }
-      const sizeType = getPrimitiveType(ctx, "i32");
-      ensureTypeMatches(
-        args[0]!.type,
-        sizeType,
-        ctx,
-        state,
-        "__array_new size"
-      );
-      const elementType =
-        typeArguments && typeArguments.length > 0
-          ? typeArguments[0]!
-          : ctx.primitives.unknown;
-      if (elementType === ctx.primitives.unknown && state.mode === "strict") {
-        throw new Error("__array_new requires an element type argument");
-      }
-      return ctx.arena.internFixedArray(elementType);
-    }
-    case "__array_get": {
-      if (args.length < 2) {
-        throw new Error("intrinsic __array_get requires array and index");
-      }
-      const { element } = requireFixedArrayArg({
-        arg: args[0]!.type,
-        ctx,
-        state,
-        source: "__array_get target",
-      });
-      const int32 = getPrimitiveType(ctx, "i32");
-      ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_get index");
-      return element;
-    }
-    case "__array_set": {
-      if (args.length < 3) {
-        throw new Error(
-          "intrinsic __array_set requires array, index, and value"
-        );
-      }
-      const { array, element } = requireFixedArrayArg({
-        arg: args[0]!.type,
-        ctx,
-        state,
-        source: "__array_set target",
-      });
-      const int32 = getPrimitiveType(ctx, "i32");
-      ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_set index");
-      ensureTypeMatches(
-        args[2]!.type,
-        element,
-        ctx,
-        state,
-        "__array_set value"
-      );
-      return array;
-    }
-    case "__array_len": {
-      if (args.length < 1) {
-        throw new Error("intrinsic __array_len requires an array argument");
-      }
-      requireFixedArrayArg({
-        arg: args[0]!.type,
-        ctx,
-        state,
-        source: "__array_len target",
-      });
-      return getPrimitiveType(ctx, "i32");
-    }
-    case "__array_copy": {
-      if (args.length === 0) {
-        throw new Error("intrinsic __array_copy requires a target array");
-      }
-      const { array, element } = requireFixedArrayArg({
-        arg: args[0]!.type,
-        ctx,
-        state,
-        source: "__array_copy target",
-      });
-      if (args.length === 2) {
-        return array;
-      }
-      if (args.length < 5) {
-        throw new Error(
-          "intrinsic __array_copy expects target, to_index, from, from_index, count"
-        );
-      }
-      const int32 = getPrimitiveType(ctx, "i32");
-      ensureTypeMatches(
-        args[1]!.type,
-        int32,
-        ctx,
-        state,
-        "__array_copy to_index"
-      );
-      const fromArray = requireFixedArrayArg({
-        arg: args[2]!.type,
-        ctx,
-        state,
-        source: "__array_copy source",
-      });
-      ensureTypeMatches(
-        args[3]!.type,
-        int32,
-        ctx,
-        state,
-        "__array_copy from_index"
-      );
-      ensureTypeMatches(
-        args[4]!.type,
-        int32,
-        ctx,
-        state,
-        "__array_copy count"
-      );
-      ensureTypeMatches(
-        fromArray.element,
-        element,
-        ctx,
-        state,
-        "__array_copy element type"
-      );
-      return array;
-    }
+    case "__array_new":
+      return typeArrayNewIntrinsic({ args, ctx, state, typeArguments });
+    case "__array_get":
+      return typeArrayGetIntrinsic({ args, ctx, state, typeArguments });
+    case "__array_set":
+      return typeArraySetIntrinsic({ args, ctx, state, typeArguments });
+    case "__array_len":
+      return typeArrayLenIntrinsic({ args, ctx, state, typeArguments });
+    case "__array_copy":
+      return typeArrayCopyIntrinsic({ args, ctx, state, typeArguments });
     default: {
       const signatures = intrinsicSignaturesFor(name, ctx);
       if (signatures.length === 0) {
@@ -1406,6 +1291,284 @@ const typeIntrinsicCall = (
       return matches[0]!.returnType;
     }
   }
+};
+
+const typeArrayNewIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__array_new",
+    args,
+    expected: 1,
+    detail: "size",
+  });
+  const elementType = requireSingleTypeArgument({
+    name: "__array_new",
+    typeArguments,
+    detail: "element type",
+  });
+  const sizeType = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(args[0]!.type, sizeType, ctx, state, "__array_new size");
+  return ctx.arena.internFixedArray(elementType);
+};
+
+const typeArrayGetIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__array_get",
+    args,
+    expected: 2,
+    detail: "array and index",
+  });
+  assertNoIntrinsicTypeArgs("__array_get", typeArguments);
+  const { element } = requireFixedArrayArg({
+    arg: args[0]!.type,
+    ctx,
+    state,
+    source: "__array_get target",
+  });
+  const int32 = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_get index");
+  return element;
+};
+
+const typeArraySetIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__array_set",
+    args,
+    expected: 3,
+    detail: "array, index, and value",
+  });
+  assertNoIntrinsicTypeArgs("__array_set", typeArguments);
+  const { array, element } = requireFixedArrayArg({
+    arg: args[0]!.type,
+    ctx,
+    state,
+    source: "__array_set target",
+  });
+  const int32 = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_set index");
+  ensureTypeMatches(args[2]!.type, element, ctx, state, "__array_set value");
+  return array;
+};
+
+const typeArrayLenIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__array_len",
+    args,
+    expected: 1,
+    detail: "array",
+  });
+  assertNoIntrinsicTypeArgs("__array_len", typeArguments);
+  requireFixedArrayArg({
+    arg: args[0]!.type,
+    ctx,
+    state,
+    source: "__array_len target",
+  });
+  return getPrimitiveType(ctx, "i32");
+};
+
+const typeArrayCopyIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertNoIntrinsicTypeArgs("__array_copy", typeArguments);
+  assertIntrinsicArgCountOneOf({
+    name: "__array_copy",
+    args,
+    expected: [2, 5],
+  });
+  const { array, element } = requireFixedArrayArg({
+    arg: args[0]!.type,
+    ctx,
+    state,
+    source: "__array_copy target",
+  });
+  const int32 = getPrimitiveType(ctx, "i32");
+  if (args.length === 2) {
+    const optionsFields = getStructuralFields(args[1]!.type, ctx, state);
+    if (!optionsFields) {
+      throw new Error("__array_copy options must be a structural object");
+    }
+    const toIndex = requireArrayCopyOptionsField({
+      fields: optionsFields,
+      name: "to_index",
+    });
+    const fromType = requireArrayCopyOptionsField({
+      fields: optionsFields,
+      name: "from",
+    });
+    const fromArray = requireFixedArrayArg({
+      arg: fromType,
+      ctx,
+      state,
+      source: "__array_copy options.from",
+    });
+    const fromIndex = requireArrayCopyOptionsField({
+      fields: optionsFields,
+      name: "from_index",
+    });
+    const count = requireArrayCopyOptionsField({
+      fields: optionsFields,
+      name: "count",
+    });
+
+    ensureTypeMatches(toIndex, int32, ctx, state, "__array_copy to_index");
+    ensureTypeMatches(fromIndex, int32, ctx, state, "__array_copy from_index");
+    ensureTypeMatches(count, int32, ctx, state, "__array_copy count");
+    ensureTypeMatches(
+      fromArray.element,
+      element,
+      ctx,
+      state,
+      "__array_copy element type"
+    );
+    return array;
+  }
+
+  ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_copy to_index");
+  const fromArray = requireFixedArrayArg({
+    arg: args[2]!.type,
+    ctx,
+    state,
+    source: "__array_copy source",
+  });
+  ensureTypeMatches(args[3]!.type, int32, ctx, state, "__array_copy from_index");
+  ensureTypeMatches(args[4]!.type, int32, ctx, state, "__array_copy count");
+  ensureTypeMatches(
+    fromArray.element,
+    element,
+    ctx,
+    state,
+    "__array_copy element type"
+  );
+  return array;
+};
+
+const assertIntrinsicArgCount = ({
+  name,
+  args,
+  expected,
+  detail,
+}: {
+  name: string;
+  args: readonly Arg[];
+  expected: number;
+  detail?: string;
+}): void => {
+  if (args.length === expected) {
+    return;
+  }
+  const descriptor = detail ? ` (${detail})` : "";
+  throw new Error(
+    `intrinsic ${name} expects ${expected} argument(s)${descriptor}, received ${args.length}`
+  );
+};
+
+const assertIntrinsicArgCountOneOf = ({
+  name,
+  args,
+  expected,
+}: {
+  name: string;
+  args: readonly Arg[];
+  expected: readonly number[];
+}): void => {
+  if (expected.includes(args.length)) {
+    return;
+  }
+  const descriptor = expected.join(" or ");
+  throw new Error(
+    `intrinsic ${name} expects ${descriptor} argument(s), received ${args.length}`
+  );
+};
+
+const requireSingleTypeArgument = ({
+  name,
+  typeArguments,
+  detail,
+}: {
+  name: string;
+  typeArguments?: readonly TypeId[];
+  detail?: string;
+}): TypeId => {
+  const count = typeArguments?.length ?? 0;
+  if (count === 1) {
+    return typeArguments![0]!;
+  }
+  const descriptor = detail ? ` for ${detail}` : "";
+  throw new Error(
+    `intrinsic ${name} requires exactly 1 type argument${descriptor}, received ${count}`
+  );
+};
+
+const assertNoIntrinsicTypeArgs = (
+  name: string,
+  typeArguments: readonly TypeId[] | undefined
+): void => {
+  if (!typeArguments || typeArguments.length === 0) {
+    return;
+  }
+  throw new Error(`intrinsic ${name} does not accept type arguments`);
+};
+
+const requireArrayCopyOptionsField = ({
+  fields,
+  name,
+}: {
+  fields: readonly { name: string; type: TypeId }[];
+  name: string;
+}): TypeId => {
+  const field = fields.find((entry) => entry.name === name);
+  if (field) {
+    return field.type;
+  }
+  throw new Error(`intrinsic __array_copy options missing field ${name}`);
 };
 
 const requireFixedArrayArg = ({
