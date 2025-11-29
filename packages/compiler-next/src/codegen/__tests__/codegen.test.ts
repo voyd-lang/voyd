@@ -314,7 +314,10 @@ describe("next codegen", () => {
   });
 
   it("handles attribute-tagged intrinsics through codegen", () => {
-    const main = loadMain("intrinsic_attributes_codegen.voyd");
-    expect(main()).toBe(3);
+    const instance = loadWasmInstance("intrinsic_attributes_codegen.voyd");
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(3);
+    expect(typeof instance.exports.get_wrapper).toBe("function");
   });
 });

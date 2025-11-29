@@ -201,8 +201,12 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
     const symbolRecord = ctx.symbolTable.getSymbol(item.symbol);
     const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
       intrinsic?: boolean;
+      intrinsicUsesSignature?: boolean;
     };
-    if (intrinsicMetadata.intrinsic) {
+    if (
+      intrinsicMetadata.intrinsic &&
+      intrinsicMetadata.intrinsicUsesSignature !== true
+    ) {
       return;
     }
     const metas = ctx.functions.get(functionKey(ctx.moduleId, item.symbol));
