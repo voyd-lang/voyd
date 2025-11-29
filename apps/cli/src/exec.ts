@@ -11,6 +11,9 @@ import { readFileSync } from "fs";
 import { semanticsPipeline } from "@voyd/compiler-next/semantics/pipeline.js";
 import { codegen } from "@voyd/compiler-next/codegen/index.js";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
+import type { Diagnostic } from "@voyd/compiler-next/diagnostics/index.js";
+import { DiagnosticError } from "@voyd/compiler-next/diagnostics/index.js";
+import { formatCliDiagnostic } from "./diagnostics.js";
 
 export const exec = () => main().catch(errorHandler);
 
@@ -123,10 +126,53 @@ function emit(json: any) {
   console.log(JSON.stringify(json, undefined, 2));
 }
 
-function errorHandler(error: Error) {
+function errorHandler(error: unknown) {
+  const diagnostic = extractDiagnostic(error);
+  if (diagnostic) {
+    console.error(formatCliDiagnostic(diagnostic));
+    process.exit(1);
+  }
+
   console.error(error);
   process.exit(1);
 }
+
+const extractDiagnostic = (error: unknown): Diagnostic | undefined => {
+  if (error instanceof DiagnosticError) {
+    return error.diagnostic;
+  }
+
+  if (!error || typeof error !== "object" || !("diagnostic" in error)) {
+    return undefined;
+  }
+
+  const candidate = (error as { diagnostic?: unknown }).diagnostic;
+  return isDiagnostic(candidate) ? candidate : undefined;
+};
+
+const isDiagnostic = (value: unknown): value is Diagnostic => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const diagnostic = value as Partial<Diagnostic>;
+  const span = diagnostic.span as
+    | { file?: unknown; start?: unknown; end?: unknown }
+    | undefined;
+
+  if (!span) {
+    return false;
+  }
+
+  const hasRequiredFields =
+    typeof diagnostic.code === "string" &&
+    typeof diagnostic.message === "string" &&
+    typeof span.file === "string" &&
+    typeof span.start === "number" &&
+    typeof span.end === "number";
+
+  return hasRequiredFields;
+};
 
 const nextLoadAst = (name: string) => {
   const source = readFileSync(name, "utf8");
