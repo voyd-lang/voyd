@@ -300,6 +300,9 @@ const lowerMatch = (
     const binderPattern: HirPattern = {
       kind: "identifier",
       symbol: binderSymbol,
+      span: toSourceSpan(
+        (potentialBinder as Syntax | undefined) ?? form
+      ),
     };
     return ctx.builder.addExpression({
       kind: "expr",
@@ -365,18 +368,18 @@ const lowerMatchPattern = (
 
   if (isIdentifierAtom(pattern)) {
     if (pattern.value === "_" || pattern.value === "else") {
-      return { kind: "wildcard" };
+      return { kind: "wildcard", span: toSourceSpan(pattern) };
     }
     const type = lowerTypeExpr(pattern, ctx, scopes.current());
     if (!type) {
       throw new Error("match pattern missing type");
     }
-    return { kind: "type", type };
+    return { kind: "type", type, span: toSourceSpan(pattern) };
   }
 
   const type = lowerTypeExpr(pattern, ctx, scopes.current());
   if (type) {
-    return { kind: "type", type };
+    return { kind: "type", type, span: toSourceSpan(pattern) };
   }
 
   if (
@@ -386,7 +389,7 @@ const lowerMatchPattern = (
     const elements = pattern.rest.map((entry) =>
       lowerMatchPattern(entry, ctx, scopes)
     );
-    return { kind: "tuple", elements };
+    return { kind: "tuple", elements, span: toSourceSpan(pattern) };
   }
 
   throw new Error("unsupported match pattern");
@@ -556,12 +559,13 @@ const lowerPattern = (
 
   if (isIdentifierAtom(pattern)) {
     if (pattern.value === "_") {
-      return { kind: "wildcard" };
+      return { kind: "wildcard", span: toSourceSpan(pattern) };
     }
     const symbol = resolveSymbol(pattern.value, scopes.current(), ctx);
     return {
       kind: "identifier",
       symbol,
+      span: toSourceSpan(pattern),
     };
   }
 
@@ -572,7 +576,7 @@ const lowerPattern = (
     const elements = pattern.rest.map((entry) =>
       lowerPattern(entry, ctx, scopes)
     );
-    return { kind: "tuple", elements };
+    return { kind: "tuple", elements, span: toSourceSpan(pattern) };
   }
 
   if (isForm(pattern) && pattern.calls(":")) {
@@ -581,7 +585,7 @@ const lowerPattern = (
       throw new Error("typed pattern name must be an identifier");
     }
     const symbol = resolveSymbol(nameExpr.value, scopes.current(), ctx);
-    return { kind: "identifier", symbol };
+    return { kind: "identifier", symbol, span: toSourceSpan(pattern) };
   }
 
   throw new Error("unsupported pattern form");

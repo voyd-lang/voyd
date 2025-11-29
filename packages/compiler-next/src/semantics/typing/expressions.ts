@@ -22,6 +22,7 @@ import type {
   SymbolId,
   TypeId,
   TypeParamId,
+  SourceSpan,
 } from "../ids.js";
 import {
   bindTypeParamsFromType,
@@ -37,6 +38,7 @@ import {
   typeSatisfies,
   getSymbolName,
 } from "./type-system.js";
+import { createDiagnostic } from "../diagnostics.js";
 import { resolveImportedValue } from "./imports.js";
 import type {
   Arg,
@@ -684,7 +686,14 @@ const typeLetStatement = (
   state: TypingState
 ): void => {
   if (stmt.pattern.kind === "tuple") {
-    bindTuplePatternFromExpr(stmt.pattern, stmt.initializer, ctx, state, "declare");
+    bindTuplePatternFromExpr(
+      stmt.pattern,
+      stmt.initializer,
+      ctx,
+      state,
+      "declare",
+      stmt.span
+    );
     return;
   }
 
@@ -1054,18 +1063,67 @@ const typeWhileExpr = (
   return ctx.primitives.void;
 };
 
+type BindingMetadata = {
+  mutable?: boolean;
+  declarationSpan?: SourceSpan;
+};
+
+const assertMutableBinding = ({
+  symbol,
+  span,
+  ctx,
+}: {
+  symbol: SymbolId;
+  span: SourceSpan;
+  ctx: TypingContext;
+}): void => {
+  const record = ctx.symbolTable.getSymbol(symbol);
+  const metadata = (record.metadata ?? {}) as BindingMetadata;
+  if (metadata.mutable) {
+    return;
+  }
+
+  const related = metadata.declarationSpan
+    ? [
+        createDiagnostic({
+          code: "TY0001",
+          message: `binding '${record.name}' declared here`,
+          span: metadata.declarationSpan,
+          severity: "note",
+        }),
+      ]
+    : undefined;
+
+  ctx.diagnostics.error({
+    code: "TY0001",
+    message: `cannot assign to immutable binding '${record.name}'`,
+    span,
+    related,
+  });
+};
+
 const typeAssignExpr = (
   expr: HirAssignExpr,
   ctx: TypingContext,
   state: TypingState
 ): TypeId => {
   if (expr.pattern) {
-    typeTupleAssignment(expr.pattern, expr.value, ctx, state);
+    typeTupleAssignment(expr.pattern, expr.value, ctx, state, expr.span);
     return ctx.primitives.void;
   }
 
   if (typeof expr.target !== "number") {
     throw new Error("assignment missing target expression");
+  }
+
+  const targetExpr = ctx.hir.expressions.get(expr.target);
+  const targetSpan = targetExpr?.span ?? expr.span;
+  if (targetExpr?.exprKind === "identifier") {
+    assertMutableBinding({
+      symbol: targetExpr.symbol,
+      span: targetSpan,
+      ctx,
+    });
   }
 
   const targetType = typeExpression(expr.target, ctx, state);
@@ -1078,12 +1136,13 @@ const typeTupleAssignment = (
   pattern: HirPattern,
   valueExpr: HirExprId,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  assignmentSpan: SourceSpan
 ): void => {
   if (pattern.kind !== "tuple") {
     throw new Error("tuple assignment requires a tuple pattern");
   }
-  bindTuplePatternFromExpr(pattern, valueExpr, ctx, state, "assign");
+  bindTuplePatternFromExpr(pattern, valueExpr, ctx, state, "assign", assignmentSpan);
 };
 
 const mergeBranchType = (acc: TypeId | undefined, next: TypeId): TypeId => {
@@ -1499,7 +1558,8 @@ const bindTuplePatternFromExpr = (
   exprId: HirExprId,
   ctx: TypingContext,
   state: TypingState,
-  mode: PatternBindingMode
+  mode: PatternBindingMode,
+  originSpan?: SourceSpan
 ): void => {
   const initializerType = typeExpression(exprId, ctx, state);
   const initializerExpr = ctx.hir.expressions.get(exprId);
@@ -1512,7 +1572,14 @@ const bindTuplePatternFromExpr = (
     pattern.elements.forEach((subPattern, index) => {
       const elementExprId = initializerExpr.elements[index]!;
       if (subPattern.kind === "tuple") {
-        bindTuplePatternFromExpr(subPattern, elementExprId, ctx, state, mode);
+        bindTuplePatternFromExpr(
+          subPattern,
+          elementExprId,
+          ctx,
+          state,
+          mode,
+          originSpan ?? subPattern.span
+        );
         return;
       }
       const cached = ctx.table.getExprType(elementExprId);
@@ -1520,12 +1587,26 @@ const bindTuplePatternFromExpr = (
         typeof cached === "number"
           ? cached
           : typeExpression(elementExprId, ctx, state);
-      recordPatternType(subPattern, elementType, ctx, state, mode);
+      recordPatternType(
+        subPattern,
+        elementType,
+        ctx,
+        state,
+        mode,
+        subPattern.span ?? originSpan
+      );
     });
     return;
   }
 
-  bindTuplePatternFromType(pattern, initializerType, ctx, state, mode);
+  bindTuplePatternFromType(
+    pattern,
+    initializerType,
+    ctx,
+    state,
+    mode,
+    originSpan ?? pattern.span
+  );
 };
 
 type PatternBindingMode = "declare" | "assign";
@@ -1535,10 +1616,15 @@ const recordPatternType = (
   type: TypeId,
   ctx: TypingContext,
   state: TypingState,
-  mode: PatternBindingMode
+  mode: PatternBindingMode,
+  spanHint?: SourceSpan
 ): void => {
   switch (pattern.kind) {
     case "identifier": {
+      const span = pattern.span ?? spanHint;
+      if (mode === "assign" && span) {
+        assertMutableBinding({ symbol: pattern.symbol, span, ctx });
+      }
       if (mode === "declare" || !ctx.valueTypes.has(pattern.symbol)) {
         ctx.valueTypes.set(pattern.symbol, type);
         return;
@@ -1564,17 +1650,32 @@ const bindTuplePatternFromType = (
   type: TypeId,
   ctx: TypingContext,
   state: TypingState,
-  mode: PatternBindingMode
+  mode: PatternBindingMode,
+  originSpan?: SourceSpan
 ): void => {
   const fields = getStructuralFields(type, ctx, state);
   if (!fields) {
     if (state.mode === "relaxed" && type === ctx.primitives.unknown) {
       pattern.elements.forEach((subPattern) => {
         if (subPattern.kind === "tuple") {
-          bindTuplePatternFromType(subPattern, ctx.primitives.unknown, ctx, state, mode);
+          bindTuplePatternFromType(
+            subPattern,
+            ctx.primitives.unknown,
+            ctx,
+            state,
+            mode,
+            originSpan ?? subPattern.span
+          );
           return;
         }
-        recordPatternType(subPattern, ctx.primitives.unknown, ctx, state, mode);
+        recordPatternType(
+          subPattern,
+          ctx.primitives.unknown,
+          ctx,
+          state,
+          mode,
+          subPattern.span ?? originSpan
+        );
       });
       return;
     }
@@ -1595,10 +1696,24 @@ const bindTuplePatternFromType = (
       throw new Error(`tuple is missing element ${index}`);
     }
     if (subPattern.kind === "tuple") {
-      bindTuplePatternFromType(subPattern, fieldType, ctx, state, mode);
+      bindTuplePatternFromType(
+        subPattern,
+        fieldType,
+        ctx,
+        state,
+        mode,
+        originSpan ?? subPattern.span
+      );
       return;
     }
-    recordPatternType(subPattern, fieldType, ctx, state, mode);
+    recordPatternType(
+      subPattern,
+      fieldType,
+      ctx,
+      state,
+      mode,
+      subPattern.span ?? originSpan
+    );
   });
 };
 

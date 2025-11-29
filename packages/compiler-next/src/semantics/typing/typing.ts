@@ -59,6 +59,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     callInstanceKeys: new Map(ctx.callResolution.instanceKeys),
     functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
     functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
+    diagnostics: ctx.diagnostics.diagnostics,
   };
 };
 

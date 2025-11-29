@@ -5,7 +5,7 @@ import {
   isForm,
   isIdentifierAtom,
 } from "../../../parser/index.js";
-import { expectLabeledExpr, parseIfBranches } from "../../utils.js";
+import { expectLabeledExpr, parseIfBranches, toSourceSpan } from "../../utils.js";
 import { rememberSyntax } from "../context.js";
 import { reportOverloadNameCollision } from "../overloads.js";
 import type { BindingContext } from "../types.js";
@@ -170,16 +170,22 @@ const bindVar = (
     throw new Error("var statement must be an assignment form");
   }
 
+  const isVar = form.calls("var");
+  const isLet = form.calls("let");
   const patternExpr = assignment.at(1);
   const initializer = assignment.at(2);
-  declarePatternBindings(patternExpr, ctx, tracker.current());
+  declarePatternBindings(patternExpr, ctx, tracker.current(), {
+    mutable: isVar && !isLet,
+    declarationSpan: toSourceSpan(patternExpr as Syntax),
+  });
   bindExpr(initializer, ctx, tracker);
 };
 
 const declarePatternBindings = (
   pattern: Expr | undefined,
   ctx: BindingContext,
-  scope: ScopeId
+  scope: ScopeId,
+  options: { mutable?: boolean; declarationSpan?: ReturnType<typeof toSourceSpan> } = {}
 ): void => {
   if (!pattern) {
     throw new Error("missing pattern");
@@ -189,12 +195,18 @@ const declarePatternBindings = (
     if (pattern.value === "_") {
       return;
     }
+    const declarationSpan =
+      options.declarationSpan ?? toSourceSpan(pattern);
     rememberSyntax(pattern, ctx);
     reportOverloadNameCollision(pattern.value, scope, pattern, ctx);
     ctx.symbolTable.declare({
       name: pattern.value,
       kind: "value",
       declaredAt: pattern.syntaxId,
+      metadata: {
+        mutable: options.mutable ?? false,
+        declarationSpan,
+      },
     });
     return;
   }
@@ -203,7 +215,12 @@ const declarePatternBindings = (
     isForm(pattern) &&
     (pattern.calls("tuple") || pattern.callsInternal("tuple"))
   ) {
-    pattern.rest.forEach((entry) => declarePatternBindings(entry, ctx, scope));
+    pattern.rest.forEach((entry) =>
+      declarePatternBindings(entry, ctx, scope, {
+        mutable: options.mutable,
+        declarationSpan: toSourceSpan(entry as Syntax),
+      })
+    );
     return;
   }
 
@@ -220,6 +237,10 @@ const declarePatternBindings = (
       name: nameExpr.value,
       kind: "value",
       declaredAt: pattern.syntaxId,
+      metadata: {
+        mutable: options.mutable ?? false,
+        declarationSpan: options.declarationSpan ?? toSourceSpan(pattern),
+      },
     });
     return;
   }

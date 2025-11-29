@@ -20,6 +20,8 @@ import type {
 import { DeclTable } from "../decls.js";
 import type { TypeArena } from "./type-arena.js";
 import type { TypeTable } from "./type-table.js";
+import { DiagnosticEmitter } from "../diagnostics.js";
+import type { Diagnostic } from "../ids.js";
 
 export type TypeCheckMode = "relaxed" | "strict";
 
@@ -58,6 +60,7 @@ export interface TypingResult {
     ReadonlyMap<string, readonly TypeId[]>
   >;
   functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+  diagnostics: readonly Diagnostic[];
 }
 
 export interface PrimitiveTypes {
@@ -473,6 +476,7 @@ export interface TypingContext {
   typeAliases: TypeAliasStore;
   primitives: PrimitiveTypes;
   intrinsicTypes: Map<string, TypeId>;
+  diagnostics: DiagnosticEmitter;
 }
 
 export interface ObjectTypeInfo {
