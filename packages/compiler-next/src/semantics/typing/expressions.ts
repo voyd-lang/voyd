@@ -38,7 +38,7 @@ import {
   typeSatisfies,
   getSymbolName,
 } from "./type-system.js";
-import { createDiagnostic } from "../diagnostics.js";
+import { createDiagnostic, normalizeSpan } from "../diagnostics.js";
 import { resolveImportedValue } from "./imports.js";
 import type {
   Arg,
@@ -754,12 +754,18 @@ const typeMatchExpr = (
   let branchType: TypeId | undefined;
 
   expr.arms.forEach((arm, index) => {
+    const patternSpan = normalizeSpan(arm.pattern.span, expr.span);
+    const discriminantSpan = discriminantExpr?.span;
     const narrowed = narrowMatchPattern(
       discriminantType,
       arm.pattern,
       ctx,
       state,
-      `match arm ${index + 1}`
+      `match arm ${index + 1}`,
+      {
+        patternSpan,
+        discriminantSpan,
+      }
     );
     const valueType = withNarrowedDiscriminant(
       discriminantSymbol,
@@ -792,7 +798,11 @@ const typeMatchExpr = (
   });
 
   if (remainingMembers && remainingMembers.size > 0) {
-    throw new Error("non-exhaustive match");
+    ctx.diagnostics.error({
+      code: "TY0003",
+      message: "non-exhaustive match",
+      span: expr.span,
+    });
   }
 
   return branchType ?? ctx.primitives.void;
@@ -1722,7 +1732,8 @@ const narrowMatchPattern = (
   pattern: HirPattern,
   ctx: TypingContext,
   state: TypingState,
-  reason: string
+  reason: string,
+  spans: { patternSpan: SourceSpan; discriminantSpan?: SourceSpan }
 ): TypeId => {
   switch (pattern.kind) {
     case "wildcard":
@@ -1742,7 +1753,26 @@ const narrowMatchPattern = (
         state
       );
       if (typeof narrowed !== "number") {
-        throw new Error(`pattern does not match discriminant for ${reason}`);
+        const related = spans.discriminantSpan
+          ? [
+              createDiagnostic({
+                code: "TY0002",
+                message: "discriminant expression",
+                severity: "note",
+                span: spans.discriminantSpan,
+              }),
+            ]
+          : undefined;
+        const patternLabel =
+          pattern.type.typeKind === "named"
+            ? pattern.type.path.join("::")
+            : pattern.kind;
+        ctx.diagnostics.error({
+          code: "TY0002",
+          message: `pattern '${patternLabel}' does not match discriminant in ${reason}`,
+          span: spans.patternSpan,
+          related,
+        });
       }
       pattern.typeId = narrowed;
       return narrowed;

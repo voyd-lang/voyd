@@ -1,0 +1,10 @@
+obj Some {}
+obj None {}
+type Option = Some | None
+
+pub fn main()
+  let a = Some {}
+  match(a)
+    Some: 1
+    Hi: 2
+    None: 0

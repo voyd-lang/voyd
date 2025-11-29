@@ -49,3 +49,12 @@ export class DiagnosticEmitter {
     return this.#diagnostics;
   }
 }
+
+export const normalizeSpan = (
+  ...candidates: (SourceSpan | undefined)[]
+): SourceSpan => {
+  for (const span of candidates) {
+    if (span) return span;
+  }
+  return { file: "<unknown>", start: 0, end: 0 };
+};
