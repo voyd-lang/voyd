@@ -4,8 +4,8 @@
   "description": "Voyd CLI",
   "type": "module",
   "bin": {
-    "voyd": "./dist/cli.js",
-    "vt": "./src/cli-dev.ts"
+    "voyd": "./dist/apps/cli/src/cli.js",
+    "vt": "./dist/apps/cli/src/cli-dev.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
