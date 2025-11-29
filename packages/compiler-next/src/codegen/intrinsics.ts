@@ -1,6 +1,7 @@
 import binaryen from "binaryen";
 import type {
   CodegenContext,
+  FunctionContext,
   HirCallExpr,
   HirExprId,
   TypeId,
@@ -8,7 +9,11 @@ import type {
 import {
   getExprBinaryenType,
   getRequiredExprType,
+  getStructuralTypeInfo,
+  wasmTypeFor,
 } from "./types.js";
+import { allocateTempLocal } from "./locals.js";
+import { loadStructuralField } from "./structural.js";
 import {
   arrayCopy,
   arrayGet,
@@ -27,6 +32,7 @@ interface CompileIntrinsicCallParams {
   call: HirCallExpr;
   args: readonly binaryen.ExpressionRef[];
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
   instanceKey?: string;
 }
 
@@ -41,10 +47,19 @@ export const compileIntrinsicCall = ({
   call,
   args,
   ctx,
+  fnCtx,
   instanceKey,
 }: CompileIntrinsicCallParams): binaryen.ExpressionRef => {
   switch (name) {
     case "__array_new": {
+      if (args.length === 1 || args.length === 2) {
+        const arrayType = getRequiredExprType(call.id, ctx, instanceKey);
+        const heapType = getFixedArrayHeapType(arrayType, ctx);
+        const descriptor = getFixedArrayDescriptor(arrayType, ctx);
+        const init =
+          args[1] ?? defaultValueForType(descriptor.element, ctx);
+        return arrayNew(ctx.mod, heapType, args[0]!, init);
+      }
       assertArgCount(name, args, 3);
       const heapType = getHeapTypeArg({
         call,
@@ -68,6 +83,14 @@ export const compileIntrinsicCall = ({
       return arrayNewFixed(ctx.mod, heapType, values);
     }
     case "__array_get": {
+      if (args.length === 2) {
+        const arrayType = getFixedArrayDescriptor(
+          getRequiredExprType(call.args[0]!.expr, ctx, instanceKey),
+          ctx
+        );
+        const elementType = wasmTypeFor(arrayType.element, ctx);
+        return arrayGet(ctx.mod, args[0]!, args[1]!, elementType, false);
+      }
       assertArgCount(name, args, 4);
       const elementType = getBinaryenTypeArg({
         call,
@@ -81,21 +104,60 @@ export const compileIntrinsicCall = ({
     }
     case "__array_set": {
       assertArgCount(name, args, 3);
-      return arraySet(ctx.mod, args[0]!, args[1]!, args[2]!);
+      const arrayType = getExprBinaryenType(
+        call.args[0]!.expr,
+        ctx,
+        instanceKey
+      );
+      const temp = allocateTempLocal(arrayType, fnCtx);
+      const target = ctx.mod.local.get(temp.index, arrayType);
+      return ctx.mod.block(
+        null,
+        [
+          ctx.mod.local.set(temp.index, args[0]!),
+          arraySet(ctx.mod, target, args[1]!, args[2]!),
+          ctx.mod.local.get(temp.index, arrayType),
+        ],
+        getExprBinaryenType(call.id, ctx, instanceKey)
+      );
     }
     case "__array_len": {
       assertArgCount(name, args, 1);
       return arrayLen(ctx.mod, args[0]!);
     }
     case "__array_copy": {
+      if (args.length === 2) {
+        return emitArrayCopyFromOptions({
+          call,
+          args,
+          ctx,
+          fnCtx,
+          instanceKey,
+        });
+      }
       assertArgCount(name, args, 5);
-      return arrayCopy(
-        ctx.mod,
-        args[0]!,
-        args[1]!,
-        args[2]!,
-        args[3]!,
-        args[4]!
+      const arrayType = getExprBinaryenType(
+        call.args[0]!.expr,
+        ctx,
+        instanceKey
+      );
+      const temp = allocateTempLocal(arrayType, fnCtx);
+      const target = ctx.mod.local.get(temp.index, arrayType);
+      return ctx.mod.block(
+        null,
+        [
+          ctx.mod.local.set(temp.index, args[0]!),
+          arrayCopy(
+            ctx.mod,
+            target,
+            args[1]!,
+            args[2]!,
+            args[3]!,
+            args[4]!
+          ),
+          ctx.mod.local.get(temp.index, arrayType),
+        ],
+        getExprBinaryenType(call.id, ctx, instanceKey)
       );
     }
     case "__type_to_heap_type": {
@@ -393,6 +455,125 @@ const getHeapTypeArg = ({
 }): HeapTypeRef => {
   const type = getBinaryenTypeArg({ call, ctx, index, instanceKey, name });
   return modBinaryenTypeToHeapType(ctx.mod, type);
+};
+
+const getFixedArrayDescriptor = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): { kind: "fixed-array"; element: TypeId } => {
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind !== "fixed-array") {
+    throw new Error("intrinsic requires a fixed-array type");
+  }
+  return desc as { kind: "fixed-array"; element: TypeId };
+};
+
+const getFixedArrayHeapType = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): HeapTypeRef => {
+  const wasmType = wasmTypeFor(typeId, ctx);
+  return modBinaryenTypeToHeapType(ctx.mod, wasmType);
+};
+
+const emitArrayCopyFromOptions = ({
+  call,
+  args,
+  ctx,
+  fnCtx,
+  instanceKey,
+}: {
+  call: HirCallExpr;
+  args: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  instanceKey?: string;
+}): binaryen.ExpressionRef => {
+  const opts = call.args[1];
+  if (!opts) {
+    throw new Error("array.copy intrinsic missing options argument");
+  }
+  const arrayType = getExprBinaryenType(call.args[0]!.expr, ctx, instanceKey);
+  const optsType = getRequiredExprType(opts.expr, ctx, instanceKey);
+  const structInfo = getStructuralTypeInfo(optsType, ctx);
+  if (!structInfo) {
+    throw new Error("array.copy options must be a structural object");
+  }
+
+  const fieldOrder = [
+    "to_index",
+    "from",
+    "from_index",
+    "count",
+  ] as const;
+  const fields = fieldOrder.map((field) => {
+    const resolved = structInfo.fieldMap.get(field);
+    if (!resolved) {
+      throw new Error(`array.copy options missing field ${field}`);
+    }
+    return resolved;
+  });
+
+  const destTemp = allocateTempLocal(arrayType, fnCtx);
+  const temp = allocateTempLocal(structInfo.interfaceType, fnCtx);
+  const target = ctx.mod.local.get(destTemp.index, arrayType);
+  const pointer = ctx.mod.local.get(temp.index, structInfo.interfaceType);
+  const loadField = (field: (typeof fields)[number]): binaryen.ExpressionRef =>
+    loadStructuralField({ structInfo, field, pointer, ctx });
+
+  const copyExpr = arrayCopy(
+    ctx.mod,
+    target,
+    loadField(fields[0]!),
+    loadField(fields[1]!),
+    loadField(fields[2]!),
+    loadField(fields[3]!)
+  );
+
+  return ctx.mod.block(
+    null,
+    [
+      ctx.mod.local.set(destTemp.index, args[0]!),
+      ctx.mod.local.set(temp.index, args[1]!),
+      copyExpr,
+      ctx.mod.local.get(destTemp.index, arrayType),
+    ],
+    getExprBinaryenType(call.id, ctx, instanceKey)
+  );
+};
+
+const defaultValueForType = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): binaryen.ExpressionRef => {
+  const desc = ctx.typing.arena.get(typeId);
+  switch (desc.kind) {
+    case "primitive":
+      switch (desc.name) {
+        case "i32":
+        case "bool":
+        case "boolean":
+        case "unknown":
+          return ctx.mod.i32.const(0);
+        case "i64":
+          return ctx.mod.i64.const(0, 0);
+        case "f32":
+          return ctx.mod.f32.const(0);
+        case "f64":
+          return ctx.mod.f64.const(0);
+      }
+      break;
+    case "fixed-array":
+    case "structural-object":
+    case "nominal-object":
+    case "trait":
+    case "intersection":
+    case "union": {
+      const wasmType = wasmTypeFor(typeId, ctx);
+      return ctx.mod.ref.null(modBinaryenTypeToHeapType(ctx.mod, wasmType));
+    }
+  }
+  throw new Error(`unsupported intrinsic default value for ${desc.kind}`);
 };
 
 const getBooleanLiteralArg = ({

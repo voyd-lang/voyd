@@ -183,14 +183,30 @@ const typeCallExpr = (
 
   if (calleeExpr.exprKind === "identifier") {
     const record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
-    const metadata = (record.metadata ?? {}) as { intrinsic?: boolean };
-    if (metadata.intrinsic) {
-      return typeIntrinsicCall(record.name, args, ctx);
-    }
+    const metadata = (record.metadata ?? {}) as {
+      intrinsic?: boolean;
+      intrinsicName?: string;
+      intrinsicUsesSignature?: boolean;
+    };
+    const intrinsicName = metadata.intrinsicName ?? record.name;
 
     const signature = ctx.functions.getSignature(calleeExpr.symbol);
     if (signature) {
       const typeArguments = resolveTypeArguments(expr.typeArguments, ctx, state);
+      if (metadata.intrinsic && metadata.intrinsicUsesSignature !== false) {
+        return typeFunctionCall({
+          args,
+          signature,
+          calleeSymbol: calleeExpr.symbol,
+          typeArguments,
+          callId: expr.id,
+          ctx,
+          state,
+        });
+      }
+      if (metadata.intrinsic) {
+        return typeIntrinsicCall(intrinsicName, args, ctx);
+      }
       return typeFunctionCall({
         args,
         signature,
@@ -200,6 +216,10 @@ const typeCallExpr = (
         ctx,
         state,
       });
+    }
+
+    if (metadata.intrinsic) {
+      return typeIntrinsicCall(intrinsicName, args, ctx);
     }
   }
 
@@ -284,6 +304,8 @@ const typeFunctionCall = ({
   ctx: TypingContext;
   state: TypingState;
 }): TypeId => {
+  const record = ctx.symbolTable.getSymbol(calleeSymbol);
+  const intrinsicMetadata = (record.metadata ?? {}) as { intrinsic?: boolean };
   const hasTypeParams = signature.typeParams && signature.typeParams.length > 0;
   const instantiation = hasTypeParams
     ? instantiateFunctionCall({
@@ -321,13 +343,15 @@ const typeFunctionCall = ({
     const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
     ctx.callResolution.typeArguments.set(callId, appliedTypeArgs);
     ctx.callResolution.instanceKeys.set(callId, callKey);
-    typeGenericFunctionBody({
-      symbol: calleeSymbol,
-      signature,
-      substitution: instantiation.substitution,
-      ctx,
-      state,
-    });
+    if (!intrinsicMetadata.intrinsic) {
+      typeGenericFunctionBody({
+        symbol: calleeSymbol,
+        signature,
+        substitution: instantiation.substitution,
+        ctx,
+        state,
+      });
+    }
   } else {
     ctx.callResolution.typeArguments.delete(callId);
   }
@@ -1201,10 +1225,17 @@ const getValueType = (symbol: SymbolId, ctx: TypingContext): TypeId => {
   }
 
   const record = ctx.symbolTable.getSymbol(symbol);
-  const metadata = (record.metadata ?? {}) as { intrinsic?: boolean };
+  const metadata = (record.metadata ?? {}) as {
+    intrinsic?: boolean;
+    intrinsicName?: string;
+    intrinsicUsesSignature?: boolean;
+  };
 
-  if (metadata.intrinsic) {
-    const intrinsicType = getIntrinsicType(record.name, ctx);
+  if (metadata.intrinsic && metadata.intrinsicUsesSignature !== true) {
+    const intrinsicType = getIntrinsicType(
+      metadata.intrinsicName ?? record.name,
+      ctx
+    );
     ctx.valueTypes.set(symbol, intrinsicType);
 
     if (!ctx.table.getSymbolScheme(symbol)) {

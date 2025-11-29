@@ -13,6 +13,10 @@ import type {
   HirExprId,
   TypeId,
 } from "../context.js";
+import { parse } from "../../parser/index.js";
+import { semanticsPipeline } from "../../semantics/pipeline.js";
+import { codegen } from "../index.js";
+import { getWasmInstance } from "@voyd/lib/wasm.js";
 
 type TypeDescriptor =
   | { kind: "primitive"; name: string }
@@ -27,6 +31,12 @@ const createContext = () => {
   const descriptors = new Map<TypeId, TypeDescriptor>();
   const exprTypes = new Map<HirExprId, TypeId>();
   const expressions = new Map<HirExprId, HirExpression>();
+  const fnCtx = {
+    bindings: new Map(),
+    locals: [],
+    nextLocalIndex: 0,
+    returnTypeId: 0 as TypeId,
+  };
 
   const ctx: CodegenContext = {
     mod,
@@ -63,7 +73,7 @@ const createContext = () => {
     rtt: { baseType: binaryen.none, extensionHelpers: { i32Array: binaryen.i32 } } as any,
   };
 
-  return { ctx, descriptors, exprTypes, expressions };
+  return { ctx, descriptors, exprTypes, expressions, fnCtx };
 };
 
 const registerExpr = (
@@ -101,7 +111,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
   const arrayType = 2 as TypeId;
 
   it("emits array.new", () => {
-    const { ctx, descriptors, exprTypes, expressions } = createContext();
+    const { ctx, descriptors, exprTypes, expressions, fnCtx } = createContext();
     descriptors.set(i32Type, { kind: "primitive", name: "i32" });
     descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
     const cachedArrayType = defineArrayType(
@@ -126,19 +136,22 @@ describe("compileIntrinsicCall array intrinsics", () => {
       3 as HirExprId,
       { id: 3 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "i32", value: "0" } as any
     );
+    exprTypes.set(0 as HirExprId, arrayType);
+    fnCtx.returnTypeId = arrayType;
 
     const expr = compileIntrinsicCall({
       name: "__array_new",
       call: makeCall([1 as HirExprId, 2 as HirExprId, 3 as HirExprId]),
       args: [ctx.mod.nop(), ctx.mod.i32.const(4), ctx.mod.i32.const(0)],
       ctx,
+      fnCtx,
     });
 
     expectExpressionId(expr, binaryen.ExpressionIds.ArrayNew);
   });
 
   it("emits array.new_fixed", () => {
-    const { ctx, descriptors, exprTypes, expressions } = createContext();
+    const { ctx, descriptors, exprTypes, expressions, fnCtx } = createContext();
     descriptors.set(i32Type, { kind: "primitive", name: "i32" });
     descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
     const cachedArrayType = defineArrayType(
@@ -154,18 +167,21 @@ describe("compileIntrinsicCall array intrinsics", () => {
       { id: 1 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "void", value: "void" } as any
     );
 
+    fnCtx.returnTypeId = arrayType;
+
     const expr = compileIntrinsicCall({
       name: "__array_new_fixed",
       call: makeCall([1 as HirExprId, 2 as HirExprId, 3 as HirExprId]),
       args: [ctx.mod.nop(), ctx.mod.i32.const(1), ctx.mod.i32.const(2)],
       ctx,
+      fnCtx,
     });
 
     expectExpressionId(expr, binaryen.ExpressionIds.ArrayNewFixed);
   });
 
   it("emits array.get and honors boolean signed flag", () => {
-    const { ctx, descriptors, exprTypes, expressions } = createContext();
+    const { ctx, descriptors, exprTypes, expressions, fnCtx } = createContext();
     descriptors.set(i32Type, { kind: "primitive", name: "i32" });
     descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
     const cachedArrayType = defineArrayType(
@@ -201,6 +217,8 @@ describe("compileIntrinsicCall array intrinsics", () => {
     } as any);
     exprTypes.set(4 as HirExprId, i32Type);
 
+    fnCtx.returnTypeId = i32Type;
+
     const expr = compileIntrinsicCall({
       name: "__array_get",
       call: makeCall([
@@ -221,37 +239,40 @@ describe("compileIntrinsicCall array intrinsics", () => {
         ctx.mod.i32.const(0),
       ],
       ctx,
+      fnCtx,
     });
 
     expectExpressionId(expr, binaryen.ExpressionIds.ArrayGet);
   });
 
   it("emits array.set", () => {
-    const { ctx } = createContext();
+    const { ctx, fnCtx } = createContext();
     const expr = compileIntrinsicCall({
       name: "__array_set",
       call: makeCall([1 as HirExprId, 2 as HirExprId, 3 as HirExprId]),
       args: [ctx.mod.nop(), ctx.mod.i32.const(0), ctx.mod.i32.const(1)],
       ctx,
+      fnCtx,
     });
 
-    expectExpressionId(expr, binaryen.ExpressionIds.ArraySet);
+    expectExpressionId(expr, binaryen.ExpressionIds.Block);
   });
 
   it("emits array.len", () => {
-    const { ctx } = createContext();
+    const { ctx, fnCtx } = createContext();
     const expr = compileIntrinsicCall({
       name: "__array_len",
       call: makeCall([1 as HirExprId]),
       args: [ctx.mod.nop()],
       ctx,
+      fnCtx,
     });
 
     expectExpressionId(expr, binaryen.ExpressionIds.ArrayLen);
   });
 
   it("emits array.copy", () => {
-    const { ctx } = createContext();
+    const { ctx, fnCtx } = createContext();
     const expr = compileIntrinsicCall({
       name: "__array_copy",
       call: makeCall([
@@ -269,13 +290,14 @@ describe("compileIntrinsicCall array intrinsics", () => {
         ctx.mod.i32.const(2),
       ],
       ctx,
+      fnCtx,
     });
 
-    expectExpressionId(expr, binaryen.ExpressionIds.ArrayCopy);
+    expectExpressionId(expr, binaryen.ExpressionIds.Block);
   });
 
   it("maps types to heap types", () => {
-    const { ctx, descriptors, exprTypes, expressions } = createContext();
+    const { ctx, descriptors, exprTypes, expressions, fnCtx } = createContext();
     descriptors.set(i32Type, { kind: "primitive", name: "i32" });
     descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
     const cachedArrayType = defineArrayType(
@@ -296,6 +318,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
       call: makeCall([1 as HirExprId]),
       args: [ctx.mod.nop()],
       ctx,
+      fnCtx,
     });
 
     const expected = modBinaryenTypeToHeapType(
@@ -306,13 +329,14 @@ describe("compileIntrinsicCall array intrinsics", () => {
   });
 
   it("validates arity", () => {
-    const { ctx } = createContext();
+    const { ctx, fnCtx } = createContext();
     expect(() =>
       compileIntrinsicCall({
         name: "__array_new",
         call: makeCall([]),
         args: [],
         ctx,
+        fnCtx,
       })
     ).toThrow(/expected 3 args, received 0/);
 
@@ -322,12 +346,13 @@ describe("compileIntrinsicCall array intrinsics", () => {
         call: makeCall([]),
         args: [],
         ctx,
+        fnCtx,
       })
     ).toThrow(/expected at least 1 args, received 0/);
   });
 
   it("requires boolean literal for signed flag", () => {
-    const { ctx, descriptors, exprTypes, expressions } = createContext();
+    const { ctx, descriptors, exprTypes, expressions, fnCtx } = createContext();
     descriptors.set(i32Type, { kind: "primitive", name: "i32" });
     descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
 
@@ -357,11 +382,11 @@ describe("compileIntrinsicCall array intrinsics", () => {
     } as any);
     exprTypes.set(4 as HirExprId, i32Type);
 
-    expect(() =>
-      compileIntrinsicCall({
-        name: "__array_get",
-        call: makeCall([
-          1 as HirExprId,
+  expect(() =>
+    compileIntrinsicCall({
+      name: "__array_get",
+      call: makeCall([
+        1 as HirExprId,
           2 as HirExprId,
           3 as HirExprId,
           4 as HirExprId,
@@ -373,7 +398,65 @@ describe("compileIntrinsicCall array intrinsics", () => {
           ctx.mod.i32.const(0),
         ],
         ctx,
+        fnCtx,
       })
     ).toThrow(/argument 4 must be a boolean literal/);
+  });
+
+  it("lowers std fixed array wrappers via intrinsics", () => {
+    const source = `
+pub fn new_fixed_array<T>(size: i32) -> FixedArray<T>
+  __array_new(size)
+
+pub fn get<T>(arr: FixedArray<T>, index: i32) -> T
+  __array_get(arr, index)
+
+pub fn set<T>(arr: FixedArray<T>, index: i32, value: T) -> FixedArray<T>
+  __array_set(arr, index, value)
+  arr
+
+pub fn copy<T>(dest_array: FixedArray<T>, opts: {
+  from: FixedArray<T>,
+  to_index: i32,
+  from_index: i32,
+  count: i32
+}) -> FixedArray<T>
+  __array_copy(dest_array, opts)
+  dest_array
+
+pub fn length<T>(arr: FixedArray<T>) -> i32
+  __array_len(arr)
+
+pub fn main() -> i32
+  let arr = new_fixed_array<i32>(2)
+  let with_first = arr.set<i32>(0, 3)
+  let with_both = with_first.set<i32>(1, 4)
+  with_both.copy<i32>({
+    from: with_both,
+    to_index: 0,
+    from_index: 0,
+    count: 2
+  })
+  with_both.get<i32>(0) + with_both.length<i32>()
+`;
+
+    const ast = parse(source, "packages/std_next/fixed_array.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module } = codegen(semantics);
+    const text = module.emitText();
+
+    expect(text).toContain("array.new");
+    expect(text).toContain("array.set");
+    expect(text).toContain("array.get");
+    expect(text).toContain("array.copy");
+    expect(text).toContain("array.len");
+    expect(text).not.toMatch(/func \\$[^\\s]*new_fixed_array/);
+    expect(text).not.toMatch(/func \\$[^\\s]*get_[0-9]+/);
+    expect(text).not.toMatch(/func \\$[^\\s]*set_[0-9]+/);
+
+    const instance = getWasmInstance(module);
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(5);
   });
 });

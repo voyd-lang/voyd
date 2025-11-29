@@ -39,11 +39,7 @@ export const wasmTypeFor = (
         return cached;
       }
       const elementType = wasmTypeFor(desc.element, ctx, seen);
-      const arrayType = defineArrayType(
-        ctx.mod,
-        binaryenTypeToHeapType(elementType),
-        true
-      );
+      const arrayType = defineArrayType(ctx.mod, elementType, true);
       ctx.fixedArrayTypes.set(desc.element, arrayType);
       return arrayType;
     }

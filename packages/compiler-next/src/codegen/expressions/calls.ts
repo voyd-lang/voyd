@@ -61,6 +61,7 @@ export const compileCallExpr = (
   const symbolRecord = ctx.symbolTable.getSymbol(callee.symbol);
   const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
     intrinsic?: boolean;
+    intrinsicName?: string;
   };
 
   if (intrinsicMetadata.intrinsic) {
@@ -69,10 +70,11 @@ export const compileCallExpr = (
     );
     return {
       expr: compileIntrinsicCall({
-        name: symbolRecord.name,
+        name: intrinsicMetadata.intrinsicName ?? symbolRecord.name,
         call: expr,
         args,
         ctx,
+        fnCtx,
         instanceKey: fnCtx.instanceKey,
       }),
       usedReturnCall: false,

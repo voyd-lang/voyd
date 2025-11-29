@@ -158,6 +158,17 @@ export class SymbolTable {
     return resolved;
   }
 
+  setSymbolMetadata(
+    id: SymbolId,
+    metadata: Record<string, unknown>
+  ): void {
+    const record = this.symbolRecords[id];
+    if (!record) {
+      throw new Error(`symbol ${id} does not exist`);
+    }
+    record.metadata = { ...(record.metadata ?? {}), ...metadata };
+  }
+
   *symbolsInScope(scope: ScopeId): IterableIterator<SymbolId> {
     const bucket = ensureScopeExists(this.scopeBuckets[scope], scope);
     yield* bucket.locals;

@@ -1,23 +1,11 @@
-use std::macros::all
 use optional::all
 use iter::all
 
 pub fn new_fixed_array<T>(size: i32) -> FixedArray<T>
-  binaryen_gc_call(
-    arrayNew,
-    `(bin_type_to_heap_type(FixedArray<T>), size),
-    FixedArray<T>
-  )
-
-pub fn get<T>(arr: FixedArray<T>, index: i32) -> T
-  binaryen_gc_call(
-    arrayGet,
-    `(arr, index, BnrType<T>, BnrConst(false)),
-    T
-  )
+  __array_new(size)
 
 pub fn set<T>(arr: FixedArray<T>, index: i32, value: T) -> FixedArray<T>
-  binaryen_gc_call(arraySet, `(arr, index, value), FixedArray<T>)
+  __array_set(arr, index, value)
   arr
 
 pub fn copy<T>(dest_array: FixedArray<T>, opts: {
@@ -26,17 +14,11 @@ pub fn copy<T>(dest_array: FixedArray<T>, opts: {
   from_index: i32,
   count: i32
 }) -> FixedArray<T>
-  binaryen_gc_call(arrayCopy, `(
-    dest_array,
-    opts.to_index,
-    opts.from,
-    opts.from_index,
-    opts.count
-  ), FixedArray<T>)
+  __array_copy(dest_array, opts)
   dest_array
 
 pub fn length<T>(arr: FixedArray<T>) -> i32
-  binaryen_gc_call(arrayLen, `(arr), i32)
+  __array_len(arr)
 
 obj FixedArrayIterator<T> {
   index: i32,
