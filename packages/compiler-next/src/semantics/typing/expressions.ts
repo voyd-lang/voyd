@@ -389,6 +389,11 @@ const typeLambdaExpr = (
       : undefined;
   const expectedFn =
     expectedDesc && expectedDesc.kind === "function" ? expectedDesc : undefined;
+  const expectedReturn =
+    typeof expectedFn?.returnType === "number" &&
+    expectedFn.returnType !== ctx.primitives.unknown
+      ? expectedFn.returnType
+      : undefined;
 
   const typeParamMap = new Map<SymbolId, TypeId>();
   const typeParams =
@@ -447,10 +452,10 @@ const typeLambdaExpr = (
       )
     : undefined;
 
-  if (typeof expectedFn?.returnType === "number" && typeof annotatedReturn === "number") {
+  if (typeof expectedReturn === "number" && typeof annotatedReturn === "number") {
     bindTypeParamsFromType(
       annotatedReturn,
-      expectedFn.returnType,
+      expectedReturn,
       typeParamBindings,
       ctx,
       state
@@ -511,8 +516,6 @@ const typeLambdaExpr = (
     }
   });
 
-  const expectedReturn =
-    typeof expectedFn?.returnType === "number" ? expectedFn.returnType : undefined;
   const returnHint =
     (typeof annotatedReturn === "number" ? annotatedReturn : expectedReturn) ??
     ctx.primitives.unknown;
