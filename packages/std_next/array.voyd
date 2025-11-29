@@ -41,19 +41,18 @@ impl<T> Array<T>
 
   pub fn get(self, index: i32) -> Optional<T>
     let computed_index = compute_index(index, self.count)
-    if computed_index >= self.count then:
+    if computed_index < 0 then:
+      None {}
+    else if computed_index >= self.count then:
       None {}
     else:
-      Some<T> { value: self.storage.get<T>(index) }
+      self.storage.get<T>(computed_index)
 
   // This is unsafe at the moment
   pub fn set(self, index: i32, value: T) -> Array<T>
     let computed_index = compute_index(index, self.count)
-    if computed_index >= self.storage.length<T>() then:
-      self
-    else:
-      self.storage.set<T>(index, value)
-      self
+    self.storage.set<T>(computed_index, value)
+    self
 
   pub fn length(self) -> i32
     self.count
@@ -249,4 +248,8 @@ impl<T> Iterator<T> for ArrayIterator<T>
     else:
       let v = self.array.storage.get<T>(self.index)
       self.index = self.index + 1
-      Some<T> { value: v }
+      match(v)
+        Some<T>:
+          Some<T> { value: v.value }
+        None:
+          None {}

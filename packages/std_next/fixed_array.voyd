@@ -1,12 +1,30 @@
 use optional::all
 use iter::all
 
+fn normalize_index(index: i32, length: i32) -> i32
+  if index < 0 then: length + index else: index
+
 pub fn new_fixed_array<T>(size: i32) -> FixedArray<T>
-  __array_new(size)
+  __array_new<T>(size)
+
+pub fn get<T>(arr: FixedArray<T>, index: i32) -> Optional<T>
+  let len = __array_len(arr)
+  let idx = normalize_index(index, len)
+
+  if (idx < 0) or (idx >= len) then:
+    None {}
+  else:
+    Some<T> { value: __array_get(arr, idx) }
 
 pub fn set<T>(arr: FixedArray<T>, index: i32, value: T) -> FixedArray<T>
-  __array_set(arr, index, value)
-  arr
+  let len = __array_len(arr)
+  let idx = normalize_index(index, len)
+
+  if (idx < 0) or (idx >= len) then:
+    arr
+  else:
+    __array_set(arr, idx, value)
+    arr
 
 pub fn copy<T>(dest_array: FixedArray<T>, opts: {
   from: FixedArray<T>,
@@ -14,8 +32,36 @@ pub fn copy<T>(dest_array: FixedArray<T>, opts: {
   from_index: i32,
   count: i32
 }) -> FixedArray<T>
-  __array_copy(dest_array, opts)
-  dest_array
+  // Clamp to the overlapping slice between source and destination; otherwise no-op.
+  let dest_length = __array_len(dest_array)
+  let from_length = __array_len(opts.from)
+  let to_index = normalize_index(opts.to_index, dest_length)
+  let from_index = normalize_index(opts.from_index, from_length)
+
+  if
+    (to_index < 0) or
+    (from_index < 0) or
+    (to_index >= dest_length) or
+    (from_index >= from_length) or
+    (opts.count <= 0)
+  then:
+    dest_array
+  else:
+    let remaining_dest = dest_length - to_index
+    let remaining_from = from_length - from_index
+    let max_copy = if remaining_dest < remaining_from then: remaining_dest else: remaining_from
+    let count = if opts.count < max_copy then: opts.count else: max_copy
+
+    if count <= 0 then:
+      dest_array
+    else:
+      __array_copy(dest_array, {
+        from: opts.from,
+        to_index: to_index,
+        from_index: from_index,
+        count: count
+      })
+      dest_array
 
 pub fn length<T>(arr: FixedArray<T>) -> i32
   __array_len(arr)
@@ -30,7 +76,7 @@ impl<T> Iterator<T> for FixedArrayIterator<T>
     if self.index >= self.array.length<T>() then:
       None {}
     else:
-      let value = self.array.get<T>(self.index)
+      let value = __array_get(self.array, self.index)
       self.index = self.index + 1
       Some<T> { value: value }
 

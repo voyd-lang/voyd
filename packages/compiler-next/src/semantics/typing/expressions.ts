@@ -171,8 +171,13 @@ const typeCallExpr = (
     throw new Error(`missing callee expression ${expr.callee}`);
   }
 
+  const typeArguments =
+    expr.typeArguments && expr.typeArguments.length > 0
+      ? resolveTypeArguments(expr.typeArguments, ctx, state)
+      : undefined;
+
   if (calleeExpr.exprKind === "overload-set") {
-    if (expr.typeArguments && expr.typeArguments.length > 0) {
+    if (typeArguments && typeArguments.length > 0) {
       throw new Error(
         "type arguments are not supported with overload sets yet"
       );
@@ -192,7 +197,6 @@ const typeCallExpr = (
 
     const signature = ctx.functions.getSignature(calleeExpr.symbol);
     if (signature) {
-      const typeArguments = resolveTypeArguments(expr.typeArguments, ctx, state);
       if (metadata.intrinsic && metadata.intrinsicUsesSignature !== false) {
         return typeFunctionCall({
           args,
@@ -205,7 +209,7 @@ const typeCallExpr = (
         });
       }
       if (metadata.intrinsic) {
-        return typeIntrinsicCall(intrinsicName, args, ctx);
+        return typeIntrinsicCall(intrinsicName, args, ctx, state, typeArguments);
       }
       return typeFunctionCall({
         args,
@@ -219,7 +223,7 @@ const typeCallExpr = (
     }
 
     if (metadata.intrinsic) {
-      return typeIntrinsicCall(intrinsicName, args, ctx);
+      return typeIntrinsicCall(intrinsicName, args, ctx, state, typeArguments);
     }
   }
 
@@ -334,12 +338,12 @@ const typeFunctionCall = ({
       state.currentFunction?.substitution,
       ctx
     );
-  const appliedTypeArgs = getAppliedTypeArguments({
-    signature,
-    substitution: mergedSubstitution,
-    symbol: calleeSymbol,
-    ctx,
-  });
+    const appliedTypeArgs = getAppliedTypeArguments({
+      signature,
+      substitution: mergedSubstitution,
+      symbol: calleeSymbol,
+      ctx,
+    });
     const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
     ctx.callResolution.typeArguments.set(callId, appliedTypeArgs);
     ctx.callResolution.instanceKeys.set(callId, callKey);
@@ -1182,26 +1186,179 @@ const matchesOverloadSignature = (
 const typeIntrinsicCall = (
   name: string,
   args: readonly Arg[],
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState,
+  typeArguments?: readonly TypeId[]
 ): TypeId => {
-  const signatures = intrinsicSignaturesFor(name, ctx);
-  if (signatures.length === 0) {
-    throw new Error(`unsupported intrinsic ${name}`);
+  switch (name) {
+    case "__array_new": {
+      if (args.length === 0) {
+        throw new Error("intrinsic __array_new requires a size argument");
+      }
+      const sizeType = getPrimitiveType(ctx, "i32");
+      ensureTypeMatches(
+        args[0]!.type,
+        sizeType,
+        ctx,
+        state,
+        "__array_new size"
+      );
+      const elementType =
+        typeArguments && typeArguments.length > 0
+          ? typeArguments[0]!
+          : ctx.primitives.unknown;
+      if (elementType === ctx.primitives.unknown && state.mode === "strict") {
+        throw new Error("__array_new requires an element type argument");
+      }
+      return ctx.arena.internFixedArray(elementType);
+    }
+    case "__array_get": {
+      if (args.length < 2) {
+        throw new Error("intrinsic __array_get requires array and index");
+      }
+      const { element } = requireFixedArrayArg({
+        arg: args[0]!.type,
+        ctx,
+        state,
+        source: "__array_get target",
+      });
+      const int32 = getPrimitiveType(ctx, "i32");
+      ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_get index");
+      return element;
+    }
+    case "__array_set": {
+      if (args.length < 3) {
+        throw new Error(
+          "intrinsic __array_set requires array, index, and value"
+        );
+      }
+      const { array, element } = requireFixedArrayArg({
+        arg: args[0]!.type,
+        ctx,
+        state,
+        source: "__array_set target",
+      });
+      const int32 = getPrimitiveType(ctx, "i32");
+      ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_set index");
+      ensureTypeMatches(
+        args[2]!.type,
+        element,
+        ctx,
+        state,
+        "__array_set value"
+      );
+      return array;
+    }
+    case "__array_len": {
+      if (args.length < 1) {
+        throw new Error("intrinsic __array_len requires an array argument");
+      }
+      requireFixedArrayArg({
+        arg: args[0]!.type,
+        ctx,
+        state,
+        source: "__array_len target",
+      });
+      return getPrimitiveType(ctx, "i32");
+    }
+    case "__array_copy": {
+      if (args.length === 0) {
+        throw new Error("intrinsic __array_copy requires a target array");
+      }
+      const { array, element } = requireFixedArrayArg({
+        arg: args[0]!.type,
+        ctx,
+        state,
+        source: "__array_copy target",
+      });
+      if (args.length === 2) {
+        return array;
+      }
+      if (args.length < 5) {
+        throw new Error(
+          "intrinsic __array_copy expects target, to_index, from, from_index, count"
+        );
+      }
+      const int32 = getPrimitiveType(ctx, "i32");
+      ensureTypeMatches(
+        args[1]!.type,
+        int32,
+        ctx,
+        state,
+        "__array_copy to_index"
+      );
+      const fromArray = requireFixedArrayArg({
+        arg: args[2]!.type,
+        ctx,
+        state,
+        source: "__array_copy source",
+      });
+      ensureTypeMatches(
+        args[3]!.type,
+        int32,
+        ctx,
+        state,
+        "__array_copy from_index"
+      );
+      ensureTypeMatches(
+        args[4]!.type,
+        int32,
+        ctx,
+        state,
+        "__array_copy count"
+      );
+      ensureTypeMatches(
+        fromArray.element,
+        element,
+        ctx,
+        state,
+        "__array_copy element type"
+      );
+      return array;
+    }
+    default: {
+      const signatures = intrinsicSignaturesFor(name, ctx);
+      if (signatures.length === 0) {
+        throw new Error(`unsupported intrinsic ${name}`);
+      }
+
+      const matches = signatures.filter((signature) =>
+        intrinsicSignatureMatches(signature, args, ctx)
+      );
+
+      if (matches.length === 0) {
+        throw new Error(`no matching overload for intrinsic ${name}`);
+      }
+
+      if (matches.length > 1) {
+        throw new Error(`ambiguous intrinsic overload for ${name}`);
+      }
+
+      return matches[0]!.returnType;
+    }
   }
+};
 
-  const matches = signatures.filter((signature) =>
-    intrinsicSignatureMatches(signature, args, ctx)
-  );
-
-  if (matches.length === 0) {
-    throw new Error(`no matching overload for intrinsic ${name}`);
+const requireFixedArrayArg = ({
+  arg,
+  ctx,
+  state,
+  source,
+}: {
+  arg: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+  source: string;
+}): { array: TypeId; element: TypeId } => {
+  const desc = ctx.arena.get(arg);
+  if (desc.kind === "fixed-array") {
+    return { array: arg, element: desc.element };
   }
-
-  if (matches.length > 1) {
-    throw new Error(`ambiguous intrinsic overload for ${name}`);
+  if (state.mode === "relaxed") {
+    const fallback = ctx.arena.internFixedArray(ctx.primitives.unknown);
+    return { array: fallback, element: ctx.primitives.unknown };
   }
-
-  return matches[0]!.returnType;
+  throw new Error(`${source} must be a FixedArray`);
 };
 
 const intrinsicSignatureMatches = (

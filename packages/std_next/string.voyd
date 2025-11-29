@@ -40,7 +40,12 @@ impl String
     if computed_index >= self.count then:
       -1
     else:
-      self.storage.get<i32>(computed_index)
+      let code = self.storage.get<i32>(computed_index)
+      match(code)
+        Some<i32>:
+          code.value
+        None:
+          -1
 
   pub fn push(&self, char: i32) -> String
     if self.count >= self.storage.length<i32>() then:

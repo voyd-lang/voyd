@@ -8,11 +8,11 @@ type IntrinsicMetadata = {
 };
 
 const FIXED_ARRAY_INTRINSICS = new Map<string, IntrinsicMetadata>([
-  ["new_fixed_array", { intrinsicName: "__array_new", intrinsicUsesSignature: true }],
-  ["get", { intrinsicName: "__array_get", intrinsicUsesSignature: true }],
-  ["set", { intrinsicName: "__array_set", intrinsicUsesSignature: true }],
-  ["copy", { intrinsicName: "__array_copy", intrinsicUsesSignature: true }],
-  ["length", { intrinsicName: "__array_len", intrinsicUsesSignature: true }],
+  ["new_fixed_array", { intrinsicName: "__array_new", intrinsicUsesSignature: false }],
+  ["get", { intrinsicName: "__array_get", intrinsicUsesSignature: false }],
+  ["set", { intrinsicName: "__array_set", intrinsicUsesSignature: false }],
+  ["copy", { intrinsicName: "__array_copy", intrinsicUsesSignature: false }],
+  ["length", { intrinsicName: "__array_len", intrinsicUsesSignature: false }],
 ]);
 
 const isFixedArrayModule = (moduleId: string): boolean =>

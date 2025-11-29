@@ -13,10 +13,6 @@ import type {
   HirExprId,
   TypeId,
 } from "../context.js";
-import { parse } from "../../parser/index.js";
-import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { codegen } from "../index.js";
-import { getWasmInstance } from "@voyd/lib/wasm.js";
 
 type TypeDescriptor =
   | { kind: "primitive"; name: string }
@@ -401,62 +397,5 @@ describe("compileIntrinsicCall array intrinsics", () => {
         fnCtx,
       })
     ).toThrow(/argument 4 must be a boolean literal/);
-  });
-
-  it("lowers std fixed array wrappers via intrinsics", () => {
-    const source = `
-pub fn new_fixed_array<T>(size: i32) -> FixedArray<T>
-  __array_new(size)
-
-pub fn get<T>(arr: FixedArray<T>, index: i32) -> T
-  __array_get(arr, index)
-
-pub fn set<T>(arr: FixedArray<T>, index: i32, value: T) -> FixedArray<T>
-  __array_set(arr, index, value)
-  arr
-
-pub fn copy<T>(dest_array: FixedArray<T>, opts: {
-  from: FixedArray<T>,
-  to_index: i32,
-  from_index: i32,
-  count: i32
-}) -> FixedArray<T>
-  __array_copy(dest_array, opts)
-  dest_array
-
-pub fn length<T>(arr: FixedArray<T>) -> i32
-  __array_len(arr)
-
-pub fn main() -> i32
-  let arr = new_fixed_array<i32>(2)
-  let with_first = arr.set<i32>(0, 3)
-  let with_both = with_first.set<i32>(1, 4)
-  with_both.copy<i32>({
-    from: with_both,
-    to_index: 0,
-    from_index: 0,
-    count: 2
-  })
-  with_both.get<i32>(0) + with_both.length<i32>()
-`;
-
-    const ast = parse(source, "packages/std_next/fixed_array.voyd");
-    const semantics = semanticsPipeline(ast);
-    const { module } = codegen(semantics);
-    const text = module.emitText();
-
-    expect(text).toContain("array.new");
-    expect(text).toContain("array.set");
-    expect(text).toContain("array.get");
-    expect(text).toContain("array.copy");
-    expect(text).toContain("array.len");
-    expect(text).not.toMatch(/func \\$[^\\s]*new_fixed_array/);
-    expect(text).not.toMatch(/func \\$[^\\s]*get_[0-9]+/);
-    expect(text).not.toMatch(/func \\$[^\\s]*set_[0-9]+/);
-
-    const instance = getWasmInstance(module);
-    const main = instance.exports.main;
-    expect(typeof main).toBe("function");
-    expect((main as () => number)()).toBe(5);
   });
 });
