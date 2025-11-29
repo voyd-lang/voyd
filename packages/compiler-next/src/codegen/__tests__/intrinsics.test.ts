@@ -1,0 +1,379 @@
+import { describe, expect, it } from "vitest";
+import binaryen from "binaryen";
+import { compileIntrinsicCall } from "../intrinsics.js";
+import {
+  defineArrayType,
+  binaryenTypeFromHeapType,
+  modBinaryenTypeToHeapType,
+} from "@voyd/lib/binaryen-gc/index.js";
+import type {
+  CodegenContext,
+  HirCallExpr,
+  HirExpression,
+  HirExprId,
+  TypeId,
+} from "../context.js";
+
+type TypeDescriptor =
+  | { kind: "primitive"; name: string }
+  | { kind: "fixed-array"; element: TypeId };
+
+const span = { start: 0, end: 0 } as const;
+
+const createContext = () => {
+  const mod = new binaryen.Module();
+  mod.setFeatures(binaryen.Features.All);
+
+  const descriptors = new Map<TypeId, TypeDescriptor>();
+  const exprTypes = new Map<HirExprId, TypeId>();
+  const expressions = new Map<HirExprId, HirExpression>();
+
+  const ctx: CodegenContext = {
+    mod,
+    moduleId: "test",
+    moduleLabel: "test",
+    binding: {} as any,
+    symbolTable: {} as any,
+    hir: { expressions } as any,
+    typing: {
+      arena: {
+        get: (id: number) => {
+          const desc = descriptors.get(id);
+          if (!desc) {
+            throw new Error(`missing descriptor for type ${id}`);
+          }
+          return desc as any;
+        },
+      },
+      resolvedExprTypes: exprTypes,
+      callTargets: new Map(),
+      callInstanceKeys: new Map(),
+      valueTypes: new Map(),
+      intrinsicTypes: new Map(),
+      intrinsicSymbols: new Map(),
+      table: { getExprType: (id: number) => exprTypes.get(id) } as any,
+      primitives: { unknown: -1 } as any,
+    } as any,
+    options: { optimize: false, validate: false },
+    functions: new Map(),
+    functionInstances: new Map(),
+    itemsToSymbols: new Map(),
+    structTypes: new Map(),
+    fixedArrayTypes: new Map(),
+    rtt: { baseType: binaryen.none, extensionHelpers: { i32Array: binaryen.i32 } } as any,
+  };
+
+  return { ctx, descriptors, exprTypes, expressions };
+};
+
+const registerExpr = (
+  params: {
+    expressions: Map<HirExprId, HirExpression>;
+    exprTypes: Map<HirExprId, TypeId>;
+    typeId: TypeId;
+  },
+  exprId: HirExprId,
+  expr: HirExpression
+): void => {
+  params.expressions.set(exprId, expr);
+  params.exprTypes.set(exprId, params.typeId);
+};
+
+const makeCall = (args: readonly HirExprId[]): HirCallExpr => ({
+  id: 0 as HirExprId,
+  ast: 0 as any,
+  span: span as any,
+  kind: "expr",
+  exprKind: "call",
+  callee: 0 as HirExprId,
+  args: args.map((expr) => ({ expr })),
+});
+
+const expectExpressionId = (
+  expr: binaryen.ExpressionRef,
+  expected: number
+): void => {
+  expect(binaryen.getExpressionId(expr)).toBe(expected);
+};
+
+describe("compileIntrinsicCall array intrinsics", () => {
+  const i32Type = 1 as TypeId;
+  const arrayType = 2 as TypeId;
+
+  it("emits array.new", () => {
+    const { ctx, descriptors, exprTypes, expressions } = createContext();
+    descriptors.set(i32Type, { kind: "primitive", name: "i32" });
+    descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
+    const cachedArrayType = defineArrayType(
+      ctx.mod,
+      modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
+      true
+    );
+    ctx.fixedArrayTypes.set(i32Type, cachedArrayType);
+
+    registerExpr(
+      { expressions, exprTypes, typeId: arrayType },
+      1 as HirExprId,
+      { id: 1 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "void", value: "void" } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: i32Type },
+      2 as HirExprId,
+      { id: 2 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "i32", value: "4" } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: i32Type },
+      3 as HirExprId,
+      { id: 3 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "i32", value: "0" } as any
+    );
+
+    const expr = compileIntrinsicCall({
+      name: "__array_new",
+      call: makeCall([1 as HirExprId, 2 as HirExprId, 3 as HirExprId]),
+      args: [ctx.mod.nop(), ctx.mod.i32.const(4), ctx.mod.i32.const(0)],
+      ctx,
+    });
+
+    expectExpressionId(expr, binaryen.ExpressionIds.ArrayNew);
+  });
+
+  it("emits array.new_fixed", () => {
+    const { ctx, descriptors, exprTypes, expressions } = createContext();
+    descriptors.set(i32Type, { kind: "primitive", name: "i32" });
+    descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
+    const cachedArrayType = defineArrayType(
+      ctx.mod,
+      modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
+      true
+    );
+    ctx.fixedArrayTypes.set(i32Type, cachedArrayType);
+
+    registerExpr(
+      { expressions, exprTypes, typeId: arrayType },
+      1 as HirExprId,
+      { id: 1 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "void", value: "void" } as any
+    );
+
+    const expr = compileIntrinsicCall({
+      name: "__array_new_fixed",
+      call: makeCall([1 as HirExprId, 2 as HirExprId, 3 as HirExprId]),
+      args: [ctx.mod.nop(), ctx.mod.i32.const(1), ctx.mod.i32.const(2)],
+      ctx,
+    });
+
+    expectExpressionId(expr, binaryen.ExpressionIds.ArrayNewFixed);
+  });
+
+  it("emits array.get and honors boolean signed flag", () => {
+    const { ctx, descriptors, exprTypes, expressions } = createContext();
+    descriptors.set(i32Type, { kind: "primitive", name: "i32" });
+    descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
+    const cachedArrayType = defineArrayType(
+      ctx.mod,
+      modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
+      true
+    );
+    ctx.fixedArrayTypes.set(i32Type, cachedArrayType);
+
+    registerExpr(
+      { expressions, exprTypes, typeId: arrayType },
+      1 as HirExprId,
+      { id: 1 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "void", value: "void" } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: i32Type },
+      2 as HirExprId,
+      { id: 2 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "i32", value: "0" } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: i32Type },
+      3 as HirExprId,
+      { id: 3 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "i32", value: "0" } as any
+    );
+    expressions.set(4 as HirExprId, {
+      id: 4 as HirExprId,
+      ast: 0 as any,
+      span: span as any,
+      kind: "expr",
+      exprKind: "literal",
+      literalKind: "boolean",
+      value: "false",
+    } as any);
+    exprTypes.set(4 as HirExprId, i32Type);
+
+    const expr = compileIntrinsicCall({
+      name: "__array_get",
+      call: makeCall([
+        1 as HirExprId,
+        2 as HirExprId,
+        3 as HirExprId,
+        4 as HirExprId,
+      ]),
+      args: [
+        ctx.mod.ref.null(
+          binaryenTypeFromHeapType(
+            modBinaryenTypeToHeapType(ctx.mod, cachedArrayType),
+            true
+          )
+        ),
+        ctx.mod.i32.const(0),
+        ctx.mod.i32.const(0),
+        ctx.mod.i32.const(0),
+      ],
+      ctx,
+    });
+
+    expectExpressionId(expr, binaryen.ExpressionIds.ArrayGet);
+  });
+
+  it("emits array.set", () => {
+    const { ctx } = createContext();
+    const expr = compileIntrinsicCall({
+      name: "__array_set",
+      call: makeCall([1 as HirExprId, 2 as HirExprId, 3 as HirExprId]),
+      args: [ctx.mod.nop(), ctx.mod.i32.const(0), ctx.mod.i32.const(1)],
+      ctx,
+    });
+
+    expectExpressionId(expr, binaryen.ExpressionIds.ArraySet);
+  });
+
+  it("emits array.len", () => {
+    const { ctx } = createContext();
+    const expr = compileIntrinsicCall({
+      name: "__array_len",
+      call: makeCall([1 as HirExprId]),
+      args: [ctx.mod.nop()],
+      ctx,
+    });
+
+    expectExpressionId(expr, binaryen.ExpressionIds.ArrayLen);
+  });
+
+  it("emits array.copy", () => {
+    const { ctx } = createContext();
+    const expr = compileIntrinsicCall({
+      name: "__array_copy",
+      call: makeCall([
+        1 as HirExprId,
+        2 as HirExprId,
+        3 as HirExprId,
+        4 as HirExprId,
+        5 as HirExprId,
+      ]),
+      args: [
+        ctx.mod.nop(),
+        ctx.mod.i32.const(0),
+        ctx.mod.nop(),
+        ctx.mod.i32.const(1),
+        ctx.mod.i32.const(2),
+      ],
+      ctx,
+    });
+
+    expectExpressionId(expr, binaryen.ExpressionIds.ArrayCopy);
+  });
+
+  it("maps types to heap types", () => {
+    const { ctx, descriptors, exprTypes, expressions } = createContext();
+    descriptors.set(i32Type, { kind: "primitive", name: "i32" });
+    descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
+    const cachedArrayType = defineArrayType(
+      ctx.mod,
+      modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
+      true
+    );
+    ctx.fixedArrayTypes.set(i32Type, cachedArrayType);
+
+    registerExpr(
+      { expressions, exprTypes, typeId: arrayType },
+      1 as HirExprId,
+      { id: 1 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "void", value: "void" } as any
+    );
+
+    const expr = compileIntrinsicCall({
+      name: "__type_to_heap_type",
+      call: makeCall([1 as HirExprId]),
+      args: [ctx.mod.nop()],
+      ctx,
+    });
+
+    const expected = modBinaryenTypeToHeapType(
+      ctx.mod,
+      ctx.fixedArrayTypes.get(i32Type)!
+    );
+    expect(expr).toBe(expected);
+  });
+
+  it("validates arity", () => {
+    const { ctx } = createContext();
+    expect(() =>
+      compileIntrinsicCall({
+        name: "__array_new",
+        call: makeCall([]),
+        args: [],
+        ctx,
+      })
+    ).toThrow(/expected 3 args, received 0/);
+
+    expect(() =>
+      compileIntrinsicCall({
+        name: "__array_new_fixed",
+        call: makeCall([]),
+        args: [],
+        ctx,
+      })
+    ).toThrow(/expected at least 1 args, received 0/);
+  });
+
+  it("requires boolean literal for signed flag", () => {
+    const { ctx, descriptors, exprTypes, expressions } = createContext();
+    descriptors.set(i32Type, { kind: "primitive", name: "i32" });
+    descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
+
+    registerExpr(
+      { expressions, exprTypes, typeId: arrayType },
+      1 as HirExprId,
+      { id: 1 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "void", value: "void" } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: i32Type },
+      2 as HirExprId,
+      { id: 2 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "i32", value: "0" } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: i32Type },
+      3 as HirExprId,
+      { id: 3 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "i32", value: "0" } as any
+    );
+    expressions.set(4 as HirExprId, {
+      id: 4 as HirExprId,
+      ast: 0 as any,
+      span: span as any,
+      kind: "expr",
+      exprKind: "literal",
+      literalKind: "i32",
+      value: "1",
+    } as any);
+    exprTypes.set(4 as HirExprId, i32Type);
+
+    expect(() =>
+      compileIntrinsicCall({
+        name: "__array_get",
+        call: makeCall([
+          1 as HirExprId,
+          2 as HirExprId,
+          3 as HirExprId,
+          4 as HirExprId,
+        ]),
+        args: [
+          ctx.mod.nop(),
+          ctx.mod.i32.const(0),
+          ctx.mod.i32.const(0),
+          ctx.mod.i32.const(0),
+        ],
+        ctx,
+      })
+    ).toThrow(/argument 4 must be a boolean literal/);
+  });
+});

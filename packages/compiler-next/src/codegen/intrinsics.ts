@@ -5,7 +5,20 @@ import type {
   HirExprId,
   TypeId,
 } from "./context.js";
-import { getRequiredExprType } from "./types.js";
+import {
+  getExprBinaryenType,
+  getRequiredExprType,
+} from "./types.js";
+import {
+  arrayCopy,
+  arrayGet,
+  arrayLen,
+  arrayNew,
+  arrayNewFixed,
+  arraySet,
+  modBinaryenTypeToHeapType,
+} from "@voyd/lib/binaryen-gc/index.js";
+import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 
@@ -31,6 +44,64 @@ export const compileIntrinsicCall = ({
   instanceKey,
 }: CompileIntrinsicCallParams): binaryen.ExpressionRef => {
   switch (name) {
+    case "__array_new": {
+      assertArgCount(name, args, 3);
+      const heapType = getHeapTypeArg({
+        call,
+        ctx,
+        index: 0,
+        instanceKey,
+        name,
+      });
+      return arrayNew(ctx.mod, heapType, args[1]!, args[2]!);
+    }
+    case "__array_new_fixed": {
+      assertMinArgCount(name, args, 1);
+      const heapType = getHeapTypeArg({
+        call,
+        ctx,
+        index: 0,
+        instanceKey,
+        name,
+      });
+      const values = args.slice(1);
+      return arrayNewFixed(ctx.mod, heapType, values);
+    }
+    case "__array_get": {
+      assertArgCount(name, args, 4);
+      const elementType = getBinaryenTypeArg({
+        call,
+        ctx,
+        index: 2,
+        instanceKey,
+        name,
+      });
+      const signed = getBooleanLiteralArg({ name, call, ctx, index: 3 });
+      return arrayGet(ctx.mod, args[0]!, args[1]!, elementType, signed);
+    }
+    case "__array_set": {
+      assertArgCount(name, args, 3);
+      return arraySet(ctx.mod, args[0]!, args[1]!, args[2]!);
+    }
+    case "__array_len": {
+      assertArgCount(name, args, 1);
+      return arrayLen(ctx.mod, args[0]!);
+    }
+    case "__array_copy": {
+      assertArgCount(name, args, 5);
+      return arrayCopy(
+        ctx.mod,
+        args[0]!,
+        args[1]!,
+        args[2]!,
+        args[3]!,
+        args[4]!
+      );
+    }
+    case "__type_to_heap_type": {
+      assertArgCount(name, args, 1);
+      return getHeapTypeArg({ call, ctx, index: 0, instanceKey, name });
+    }
     case "+":
     case "-":
     case "*":
@@ -272,4 +343,82 @@ const assertArgCount = (
       `intrinsic ${name} expected ${expected} args, received ${args.length}`
     );
   }
+};
+
+const assertMinArgCount = (
+  name: string,
+  args: readonly unknown[],
+  min: number
+): void => {
+  if (args.length < min) {
+    throw new Error(
+      `intrinsic ${name} expected at least ${min} args, received ${args.length}`
+    );
+  }
+};
+
+const getBinaryenTypeArg = ({
+  call,
+  ctx,
+  index,
+  instanceKey,
+  name,
+}: {
+  call: HirCallExpr;
+  ctx: CodegenContext;
+  index: number;
+  instanceKey?: string;
+  name?: string;
+}): binaryen.Type => {
+  const arg = call.args[index];
+  if (!arg) {
+    const source = name ? `intrinsic ${name}` : "intrinsic";
+    throw new Error(`${source} argument ${index + 1} missing`);
+  }
+  return getExprBinaryenType(arg.expr, ctx, instanceKey);
+};
+
+const getHeapTypeArg = ({
+  call,
+  ctx,
+  index,
+  instanceKey,
+  name,
+}: {
+  call: HirCallExpr;
+  ctx: CodegenContext;
+  index: number;
+  instanceKey?: string;
+  name?: string;
+}): HeapTypeRef => {
+  const type = getBinaryenTypeArg({ call, ctx, index, instanceKey, name });
+  return modBinaryenTypeToHeapType(ctx.mod, type);
+};
+
+const getBooleanLiteralArg = ({
+  name,
+  call,
+  ctx,
+  index,
+}: {
+  name: string;
+  call: HirCallExpr;
+  ctx: CodegenContext;
+  index: number;
+}): boolean => {
+  const exprId = call.args[index]?.expr;
+  if (typeof exprId !== "number") {
+    throw new Error(`intrinsic ${name} missing argument ${index + 1}`);
+  }
+  const expr = ctx.hir.expressions.get(exprId);
+  if (
+    !expr ||
+    expr.exprKind !== "literal" ||
+    expr.literalKind !== "boolean"
+  ) {
+    throw new Error(
+      `intrinsic ${name} argument ${index + 1} must be a boolean literal`
+    );
+  }
+  return expr.value === "true";
 };
