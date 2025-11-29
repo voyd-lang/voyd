@@ -27,6 +27,7 @@ import {
 import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
+type EqualityKind = NumericKind | "bool";
 
 interface CompileIntrinsicCallParams {
   name: string;
@@ -39,6 +40,13 @@ interface CompileIntrinsicCallParams {
 
 interface EmitNumericIntrinsicParams {
   kind: NumericKind;
+  args: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+}
+
+interface EmitEqualityIntrinsicParams {
+  op: "==" | "!=";
+  kind: EqualityKind;
   args: readonly binaryen.ExpressionRef[];
   ctx: CodegenContext;
 }
@@ -192,11 +200,11 @@ export const compileIntrinsicCall = ({
     case "==":
     case "!=": {
       assertArgCount(name, args, 2);
-      const operandKind = requireHomogeneousNumericKind(
-        call.args.map((a) => a.expr),
+      const operandKind = requireHomogeneousEqualityKind({
+        argExprIds: call.args.map((a) => a.expr),
         ctx,
-        instanceKey
-      );
+        instanceKey,
+      });
       return emitEqualityIntrinsic({ op: name, kind: operandKind, args, ctx });
     }
     default:
@@ -331,10 +339,14 @@ const emitEqualityIntrinsic = ({
   kind,
   args,
   ctx,
-}: { op: "==" | "!="; } & EmitNumericIntrinsicParams): binaryen.ExpressionRef => {
+}: EmitEqualityIntrinsicParams): binaryen.ExpressionRef => {
   const left = args[0]!;
   const right = args[1]!;
   switch (kind) {
+    case "bool":
+      return op === "=="
+        ? ctx.mod.i32.eq(left, right)
+        : ctx.mod.i32.ne(left, right);
     case "i32":
       return op === "=="
         ? ctx.mod.i32.eq(left, right)
@@ -352,7 +364,7 @@ const emitEqualityIntrinsic = ({
         ? ctx.mod.f64.eq(left, right)
         : ctx.mod.f64.ne(left, right);
   }
-  throw new Error(`unsupported ${op} equality for numeric kind ${kind}`);
+  throw new Error(`unsupported ${op} equality for kind ${kind}`);
 };
 
 const requireHomogeneousNumericKind = (
@@ -379,6 +391,36 @@ const requireHomogeneousNumericKind = (
   return firstKind;
 };
 
+const requireHomogeneousEqualityKind = ({
+  argExprIds,
+  ctx,
+  instanceKey,
+}: {
+  argExprIds: readonly HirExprId[];
+  ctx: CodegenContext;
+  instanceKey?: string;
+}): EqualityKind => {
+  if (argExprIds.length === 0) {
+    throw new Error("intrinsic requires at least one operand");
+  }
+  const firstKind = getEqualityKind(
+    getRequiredExprType(argExprIds[0]!, ctx, instanceKey),
+    ctx
+  );
+  for (let i = 1; i < argExprIds.length; i += 1) {
+    const nextKind = getEqualityKind(
+      getRequiredExprType(argExprIds[i]!, ctx, instanceKey),
+      ctx
+    );
+    if (nextKind !== firstKind) {
+      throw new Error(
+        "intrinsic operands must share the same primitive type"
+      );
+    }
+  }
+  return firstKind;
+};
+
 const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {
   const descriptor = ctx.typing.arena.get(typeId);
   if (descriptor.kind === "primitive") {
@@ -394,6 +436,31 @@ const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {
     }
   }
   throw new Error("intrinsic arguments must be primitive numeric types");
+};
+
+const getEqualityKind = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): EqualityKind => {
+  const descriptor = ctx.typing.arena.get(typeId);
+  if (descriptor.kind === "primitive") {
+    switch (descriptor.name) {
+      case "bool":
+      case "boolean":
+        return "bool";
+      case "i32":
+        return "i32";
+      case "i64":
+        return "i64";
+      case "f32":
+        return "f32";
+      case "f64":
+        return "f64";
+    }
+  }
+  throw new Error(
+    "intrinsic arguments must be primitive numeric or boolean types"
+  );
 };
 
 const assertArgCount = (

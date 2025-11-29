@@ -7,16 +7,9 @@ type IntrinsicMetadata = {
   intrinsicUsesSignature?: boolean;
 };
 
-const FIXED_ARRAY_INTRINSICS = new Map<string, IntrinsicMetadata>([
-  ["new_fixed_array", { intrinsicName: "__array_new", intrinsicUsesSignature: false }],
-  ["get", { intrinsicName: "__array_get", intrinsicUsesSignature: false }],
-  ["set", { intrinsicName: "__array_set", intrinsicUsesSignature: false }],
-  ["copy", { intrinsicName: "__array_copy", intrinsicUsesSignature: false }],
-  ["length", { intrinsicName: "__array_len", intrinsicUsesSignature: false }],
-]);
-
-const isFixedArrayModule = (moduleId: string): boolean =>
-  moduleId.includes("std_next/fixed_array.voyd");
+const MODULE_INTRINSICS = new Map<string, Map<string, IntrinsicMetadata>>();
+const normalizeModuleId = (moduleId: string): string =>
+  moduleId.replace(/\\/g, "/");
 
 export const tagIntrinsicSymbols = ({
   binding,
@@ -25,12 +18,13 @@ export const tagIntrinsicSymbols = ({
   binding: BindingResult;
   moduleId: string;
 }): void => {
-  if (!isFixedArrayModule(moduleId)) {
+  const moduleIntrinsics = MODULE_INTRINSICS.get(normalizeModuleId(moduleId));
+  if (!moduleIntrinsics) {
     return;
   }
 
   binding.functions.forEach((fn) => {
-    const metadata = FIXED_ARRAY_INTRINSICS.get(fn.name);
+    const metadata = moduleIntrinsics.get(fn.name);
     if (!metadata) {
       return;
     }

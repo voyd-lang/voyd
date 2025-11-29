@@ -118,6 +118,7 @@ export interface CompiledExpression {
 export interface CompileCallOptions {
   tailPosition?: boolean;
   expectedResultTypeId?: TypeId;
+  instanceKey?: string;
 }
 
 export interface ExpressionCompilerParams {

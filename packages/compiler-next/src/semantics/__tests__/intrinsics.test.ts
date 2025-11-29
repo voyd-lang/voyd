@@ -27,22 +27,11 @@ const getMetadata = ({
 };
 
 describe("intrinsic tagging", () => {
-  it("tags std_next fixed_array wrappers as intrinsic calls", () => {
-    expect(getMetadata({ name: "new_fixed_array", modulePath: "packages/std_next/fixed_array.voyd" })).toMatchObject(
-      { intrinsic: true, intrinsicName: "__array_new", intrinsicUsesSignature: false }
-    );
-    expect(getMetadata({ name: "get", modulePath: "packages/std_next/fixed_array.voyd" })).toMatchObject(
-      { intrinsic: true, intrinsicName: "__array_get", intrinsicUsesSignature: false }
-    );
-    expect(getMetadata({ name: "set", modulePath: "packages/std_next/fixed_array.voyd" })).toMatchObject(
-      { intrinsic: true, intrinsicName: "__array_set", intrinsicUsesSignature: false }
-    );
-    expect(getMetadata({ name: "copy", modulePath: "packages/std_next/fixed_array.voyd" })).toMatchObject(
-      { intrinsic: true, intrinsicName: "__array_copy", intrinsicUsesSignature: false }
-    );
-    expect(getMetadata({ name: "length", modulePath: "packages/std_next/fixed_array.voyd" })).toMatchObject(
-      { intrinsic: true, intrinsicName: "__array_len", intrinsicUsesSignature: false }
-    );
+  it("leaves std_next fixed_array wrappers as normal functions", () => {
+    const modulePath = "packages/std_next/fixed_array.voyd";
+    ["new_fixed_array", "get", "set", "copy", "length"].forEach((name) => {
+      expect(getMetadata({ name, modulePath })).not.toMatchObject({ intrinsic: true });
+    });
   });
 
   it("leaves other modules untouched", () => {

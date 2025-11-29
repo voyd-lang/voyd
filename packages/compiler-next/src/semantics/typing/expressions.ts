@@ -720,12 +720,12 @@ const typeIfExpr = (
     );
 
     const valueType = typeExpression(branch.value, ctx, state);
-    branchType = mergeBranchType(branchType, valueType);
+    branchType = mergeBranchType({ acc: branchType, next: valueType, ctx });
   });
 
   if (hasDefault) {
     const defaultType = typeExpression(expr.defaultBranch!, ctx, state);
-    branchType = mergeBranchType(branchType, defaultType);
+    branchType = mergeBranchType({ acc: branchType, next: defaultType, ctx });
     return branchType ?? ctx.primitives.void;
   }
 
@@ -773,7 +773,7 @@ const typeMatchExpr = (
       ctx,
       () => typeExpression(arm.value, ctx, state)
     );
-    branchType = mergeBranchType(branchType, valueType);
+    branchType = mergeBranchType({ acc: branchType, next: valueType, ctx });
 
     if (!remainingMembers) {
       return;
@@ -1155,11 +1155,22 @@ const typeTupleAssignment = (
   bindTuplePatternFromExpr(pattern, valueExpr, ctx, state, "assign", assignmentSpan);
 };
 
-const mergeBranchType = (acc: TypeId | undefined, next: TypeId): TypeId => {
-  if (typeof acc === "number" && acc !== next) {
-    throw new Error("branch type mismatch");
+const mergeBranchType = ({
+  acc,
+  next,
+  ctx,
+}: {
+  acc: TypeId | undefined;
+  next: TypeId;
+  ctx: TypingContext;
+}): TypeId => {
+  if (typeof acc !== "number") {
+    return next;
   }
-  return typeof acc === "number" ? acc : next;
+  if (acc === next) {
+    return acc;
+  }
+  return ctx.arena.internUnion([acc, next]);
 };
 
 const typeOverloadedCall = (
@@ -1707,6 +1718,10 @@ const intrinsicSignaturesFor = (
     { parameters: [float32, float32], returnType: ctx.primitives.bool },
     { parameters: [float64, float64], returnType: ctx.primitives.bool },
   ];
+  const equalitySignatures: IntrinsicSignature[] = [
+    ...comparisonSignatures,
+    { parameters: [ctx.primitives.bool, ctx.primitives.bool], returnType: ctx.primitives.bool },
+  ];
 
   switch (name) {
     case "+":
@@ -1718,9 +1733,10 @@ const intrinsicSignaturesFor = (
     case "<=":
     case ">":
     case ">=":
+      return comparisonSignatures;
     case "==":
     case "!=":
-      return comparisonSignatures;
+      return equalitySignatures;
     default:
       return [];
   }
