@@ -71,7 +71,7 @@ describe("module typing across imports", () => {
       host,
     });
 
-    const semantics = analyzeModules({ graph });
+    const { semantics, diagnostics } = analyzeModules({ graph });
     const mainSemantics = semantics.get("src::main");
     const addImport = mainSemantics?.binding.imports.find(
       (entry) => entry.name === "add"
@@ -88,6 +88,7 @@ describe("module typing across imports", () => {
         : undefined;
     expect(paramDesc).toBeDefined();
     expect(paramDesc).toMatchObject({ kind: "primitive", name: "i32" });
+    expect(diagnostics).toHaveLength(0);
   });
 
   it("raises a typing error when imported functions are called with incompatible types", async () => {
@@ -96,7 +97,7 @@ describe("module typing across imports", () => {
       [`${root}${sep}util${sep}math.voyd`]:
         "pub fn add(a: i32, b: i32) -> i32\n  a",
       [`${root}${sep}main.voyd`]:
-        'use util::math::add\n\npub fn bad() i32\n  add("oops", 2)',
+        'use util::math::all\n\npub fn bad() i32\n  add("oops", 2)',
     });
 
     const graph = await loadModuleGraph({
@@ -105,7 +106,9 @@ describe("module typing across imports", () => {
       host,
     });
 
-    expect(() => analyzeModules({ graph })).toThrow();
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(diagnostics.some((diag) => diag.code.startsWith("TY"))).toBe(true);
   });
 
   it("resolves pub use chains for imported types", async () => {
@@ -125,11 +128,12 @@ describe("module typing across imports", () => {
       host,
     });
 
-    const semantics = analyzeModules({ graph });
+    const { semantics, diagnostics } = analyzeModules({ graph });
     const consumer = semantics.get("src::consumer");
     expect(
       consumer?.binding.imports.some((entry) => entry.name === "Point")
     ).toBe(true);
+    expect(diagnostics).toHaveLength(0);
   });
 
   it("type-checks inline modules", async () => {
@@ -145,10 +149,11 @@ describe("module typing across imports", () => {
       host,
     });
 
-    const semantics = analyzeModules({ graph });
+    const { semantics, diagnostics } = analyzeModules({ graph });
     const inline = semantics.get("src::inline");
     const inlineHelpers = semantics.get("src::inline::helpers");
     expect(inline).toBeDefined();
     expect(inlineHelpers).toBeDefined();
+    expect(diagnostics).toHaveLength(0);
   });
 });

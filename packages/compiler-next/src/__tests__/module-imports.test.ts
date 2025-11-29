@@ -69,7 +69,7 @@ describe("module imports", () => {
       host,
     });
 
-    const semantics = analyzeModules({ graph });
+    const { semantics, diagnostics } = analyzeModules({ graph });
     const mainSemantics = semantics.get("src::main");
     const mathSemantics = semantics.get("src::util::math");
 
@@ -77,6 +77,6 @@ describe("module imports", () => {
       "add"
     );
     expect(mathSemantics?.exports.has("add")).toBe(true);
-    expect(graph.diagnostics).toHaveLength(0);
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
 });

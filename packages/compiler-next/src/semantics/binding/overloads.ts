@@ -10,6 +10,7 @@ import {
 } from "../../parser/index.js";
 import type { SymbolRecord } from "../binder/index.js";
 import type { NodeId, ScopeId, SymbolId } from "../ids.js";
+import { createDiagnostic } from "../../diagnostics/index.js";
 import { toSourceSpan } from "../utils.js";
 import type {
   BindingContext,
@@ -43,20 +44,22 @@ export const recordFunctionOverload = (
   const signature = createOverloadSignature(fn);
   const duplicate = bucket.signatureIndex.get(signature.key);
   if (duplicate) {
-    ctx.diagnostics.push({
-      code: "binding.overload.duplicate",
-      message: `function ${fn.name} already defines overload ${signature.label}`,
-      severity: "error",
-      span: toSourceSpan(fn.form),
-      related: [
-        {
-          code: "binding.overload.previous",
-          message: "previous overload declared here",
-          severity: "note",
-          span: toSourceSpan(duplicate.form),
-        },
-      ],
-    });
+    ctx.diagnostics.push(
+      createDiagnostic({
+        code: "BD0002",
+        message: `function ${fn.name} already defines overload ${signature.label}`,
+        severity: "error",
+        span: toSourceSpan(fn.form),
+        related: [
+          createDiagnostic({
+            code: "BD0002",
+            message: "previous overload declared here",
+            severity: "note",
+            span: toSourceSpan(duplicate.form),
+          }),
+        ],
+      })
+    );
   } else {
     bucket.signatureIndex.set(signature.key, fn);
   }
@@ -70,20 +73,22 @@ export const recordFunctionOverload = (
     ctx
   );
   if (conflict && !bucket.nonFunctionConflictReported) {
-    ctx.diagnostics.push({
-      code: "binding.overload.name-conflict",
-      message: `cannot overload ${fn.name}; ${conflict.kind} with the same name already exists`,
-      severity: "error",
-      span: toSourceSpan(fn.form),
-      related: [
-        {
-          code: "binding.overload.conflict",
-          message: "conflicting declaration here",
-          severity: "note",
-          span: spanForNode(conflict.declaredAt, ctx),
-        },
-      ],
-    });
+    ctx.diagnostics.push(
+      createDiagnostic({
+        code: "BD0003",
+        message: `cannot overload ${fn.name}; ${conflict.kind} with the same name already exists`,
+        severity: "error",
+        span: toSourceSpan(fn.form),
+        related: [
+          createDiagnostic({
+            code: "BD0003",
+            message: "conflicting declaration here",
+            severity: "note",
+            span: spanForNode(conflict.declaredAt, ctx),
+          }),
+        ],
+      })
+    );
     bucket.nonFunctionConflictReported = true;
   }
 
@@ -137,22 +142,24 @@ const ensureOverloadParameterAnnotations = (
         return;
       }
       const related = bucket.functions.find((candidate) => candidate !== fn);
-      ctx.diagnostics.push({
-        code: "binding.overload.annotation-required",
-        message: `parameter ${param.name} in overloaded function ${fn.name} must declare a type`,
-        severity: "error",
-        span: toSourceSpan(param.ast),
-        related: related
-          ? [
-              {
-                code: "binding.overload.annotation-context",
-                message: "conflicting overload declared here",
-                severity: "note",
-                span: toSourceSpan(related.form),
-              },
-            ]
-          : undefined,
-      });
+      ctx.diagnostics.push(
+        createDiagnostic({
+          code: "BD0004",
+          message: `parameter ${param.name} in overloaded function ${fn.name} must declare a type`,
+          severity: "error",
+          span: toSourceSpan(param.ast),
+          related: related
+            ? [
+                createDiagnostic({
+                  code: "BD0004",
+                  message: "conflicting overload declared here",
+                  severity: "note",
+                  span: toSourceSpan(related.form),
+                }),
+              ]
+            : undefined,
+        })
+      );
       missingAnnotationSymbols.add(param.symbol);
     });
   });
@@ -218,20 +225,22 @@ export const reportOverloadNameCollision = (
   ) {
     return;
   }
-  ctx.diagnostics.push({
-    code: "binding.overload.name-conflict",
-    message: `cannot declare ${name}; overloads with this name already exist in the current scope`,
-    severity: "error",
-    span: toSourceSpan(syntax),
-    related: [
-      {
-        code: "binding.overload.conflict",
-        message: "conflicting overload declared here",
-        severity: "note",
-        span: toSourceSpan(bucket.functions[0]!.form),
-      },
-    ],
-  });
+  ctx.diagnostics.push(
+    createDiagnostic({
+      code: "BD0003",
+      message: `cannot declare ${name}; overloads with this name already exist in the current scope`,
+      severity: "error",
+      span: toSourceSpan(syntax),
+      related: [
+        createDiagnostic({
+          code: "BD0003",
+          message: "conflicting overload declared here",
+          severity: "note",
+          span: toSourceSpan(bucket.functions[0]!.form),
+        }),
+      ],
+    })
+  );
   bucket.nonFunctionConflictReported = true;
 };
 

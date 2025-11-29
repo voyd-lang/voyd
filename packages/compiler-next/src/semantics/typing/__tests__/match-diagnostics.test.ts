@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
-import { DiagnosticError } from "../../diagnostics.js";
+import { DiagnosticError } from "../../../diagnostics/index.js";
 
 describe("match diagnostics", () => {
   it("reports helpful errors for non-matching patterns", () => {
@@ -16,12 +16,13 @@ describe("match diagnostics", () => {
       caught = error;
     }
 
-    expect(caught).toBeInstanceOf(DiagnosticError);
+    expect(caught instanceof DiagnosticError).toBe(true);
     if (!(caught instanceof DiagnosticError)) {
       return;
     }
 
     const diagnostic = caught.diagnostic;
+    expect(diagnostic.phase).toBe("typing");
     expect(diagnostic.code).toBe("TY0002");
     expect(diagnostic.message).toMatch(/pattern 'Hi'/i);
 

@@ -14,6 +14,7 @@ import {
   modulePathToString,
   resolveModuleFile,
 } from "./path.js";
+import { moduleDiagnosticToDiagnostic } from "./diagnostics.js";
 import type {
   ModuleDependency,
   ModuleDiagnostic,
@@ -43,7 +44,7 @@ export const buildModuleGraph = async ({
 }: BuildGraphOptions): Promise<ModuleGraph> => {
   const modules = new Map<string, ModuleNode>();
   const modulesByPath = new Map<string, ModuleNode>();
-  const diagnostics: ModuleDiagnostic[] = [];
+  const moduleDiagnostics: ModuleDiagnostic[] = [];
 
   const entryFile = resolve(entryPath);
   const entryModulePath = modulePathFromFile(entryFile, roots);
@@ -72,7 +73,7 @@ export const buildModuleGraph = async ({
     );
 
     if (!resolvedPath) {
-      diagnostics.push({
+      moduleDiagnostics.push({
         kind: "missing-module",
         message: `Unable to resolve module ${pathKey}`,
         requested: dependency.path,
@@ -92,11 +93,9 @@ export const buildModuleGraph = async ({
     enqueueDependencies(nextModule, pending);
   }
 
-  return {
-    entry: entryModule.node.id,
-    modules,
-    diagnostics,
-  };
+  const diagnostics = moduleDiagnostics.map(moduleDiagnosticToDiagnostic);
+
+  return { entry: entryModule.node.id, modules, diagnostics };
 };
 
 const addModuleTree = (

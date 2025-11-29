@@ -93,7 +93,7 @@ describe("next pipeline API", () => {
       roots: { src: root, std },
       host,
     });
-    const semantics = analyzeModules({ graph });
+    const { semantics } = analyzeModules({ graph });
     const { orderedModules, entry } = lowerProgram({ graph, semantics });
 
     expect(entry).toBe("src::main");

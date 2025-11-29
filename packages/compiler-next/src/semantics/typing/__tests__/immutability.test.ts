@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
-import { DiagnosticError } from "../../diagnostics.js";
+import { DiagnosticError } from "../../../diagnostics/index.js";
 
 describe("immutable bindings", () => {
   it("rejects reassigning a let binding and reports a precise diagnostic", () => {
@@ -16,12 +16,13 @@ describe("immutable bindings", () => {
       caught = error;
     }
 
-    expect(caught).toBeInstanceOf(DiagnosticError);
+    expect(caught instanceof DiagnosticError).toBe(true);
     if (!(caught instanceof DiagnosticError)) {
       return;
     }
 
     const diagnostic = caught.diagnostic;
+    expect(diagnostic.phase).toBe("typing");
     expect(diagnostic.code).toBe("TY0001");
     expect(diagnostic.message).toMatch(/immutable binding 'a'/i);
     expect(diagnostic.span.file).toContain("immutable_let_assignment.voyd");

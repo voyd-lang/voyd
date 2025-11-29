@@ -38,7 +38,7 @@ import {
   typeSatisfies,
   getSymbolName,
 } from "./type-system.js";
-import { createDiagnostic, normalizeSpan } from "../diagnostics.js";
+import { createDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
 import { resolveImportedValue } from "./imports.js";
 import type {
   Arg,

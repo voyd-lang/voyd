@@ -15,6 +15,10 @@ export default defineConfig({
       "@voyd/browser-compiler": resolve(packagesRoot, "browser-compiler/src"),
     },
   },
+  test: {
+    reporters: ["dot"],
+    silent: "passed-only",
+  },
   build: {
     lib: {
       entry: resolve(projectRoot, "packages/browser-compiler/src/browser.ts"),

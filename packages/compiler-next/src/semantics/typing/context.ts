@@ -12,7 +12,7 @@ import {
   type TypingContext,
   type TypingInputs,
 } from "./types.js";
-import { DiagnosticEmitter } from "../diagnostics.js";
+import { DiagnosticEmitter } from "../../diagnostics/index.js";
 
 export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const decls = inputs.decls ?? new DeclTable();

@@ -20,7 +20,7 @@ import type {
 import { DeclTable } from "../decls.js";
 import type { TypeArena } from "./type-arena.js";
 import type { TypeTable } from "./type-table.js";
-import { DiagnosticEmitter } from "../diagnostics.js";
+import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import type { Diagnostic } from "../ids.js";
 
 export type TypeCheckMode = "relaxed" | "strict";

@@ -10,7 +10,7 @@ import type {
   TypingContext,
   TypingState,
 } from "./types.js";
-import { DiagnosticEmitter } from "../diagnostics.js";
+import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import type { HirNamedTypeExpr } from "../hir/index.js";
 import type {
   SymbolId,
