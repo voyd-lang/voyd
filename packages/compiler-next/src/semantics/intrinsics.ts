@@ -27,7 +27,7 @@ const MODULE_INTRINSICS = new Map<string, Map<string, IntrinsicMetadata>>([
         {
           intrinsic: true,
           intrinsicName: "__array_get",
-          intrinsicUsesSignature: false,
+          intrinsicUsesSignature: true,
         },
       ],
       [
@@ -35,7 +35,7 @@ const MODULE_INTRINSICS = new Map<string, Map<string, IntrinsicMetadata>>([
         {
           intrinsic: true,
           intrinsicName: "__array_set",
-          intrinsicUsesSignature: false,
+          intrinsicUsesSignature: true,
         },
       ],
       [
@@ -43,7 +43,7 @@ const MODULE_INTRINSICS = new Map<string, Map<string, IntrinsicMetadata>>([
         {
           intrinsic: true,
           intrinsicName: "__array_copy",
-          intrinsicUsesSignature: false,
+          intrinsicUsesSignature: true,
         },
       ],
       [

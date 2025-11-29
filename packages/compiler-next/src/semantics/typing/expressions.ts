@@ -196,6 +196,10 @@ const typeCallExpr = (
       intrinsicUsesSignature?: boolean;
     };
     const intrinsicName = metadata.intrinsicName ?? record.name;
+    const allowIntrinsicTypeArgs =
+      metadata.intrinsic === true &&
+      typeof metadata.intrinsicName === "string" &&
+      metadata.intrinsicName !== record.name;
 
     const signature = ctx.functions.getSignature(calleeExpr.symbol);
     if (signature) {
@@ -211,7 +215,14 @@ const typeCallExpr = (
         });
       }
       if (metadata.intrinsic) {
-        return typeIntrinsicCall(intrinsicName, args, ctx, state, typeArguments);
+        return typeIntrinsicCall(
+          intrinsicName,
+          args,
+          ctx,
+          state,
+          typeArguments,
+          allowIntrinsicTypeArgs
+        );
       }
       return typeFunctionCall({
         args,
@@ -225,7 +236,14 @@ const typeCallExpr = (
     }
 
     if (metadata.intrinsic) {
-      return typeIntrinsicCall(intrinsicName, args, ctx, state, typeArguments);
+      return typeIntrinsicCall(
+        intrinsicName,
+        args,
+        ctx,
+        state,
+        typeArguments,
+        allowIntrinsicTypeArgs
+      );
     }
   }
 
@@ -311,7 +329,10 @@ const typeFunctionCall = ({
   state: TypingState;
 }): TypeId => {
   const record = ctx.symbolTable.getSymbol(calleeSymbol);
-  const intrinsicMetadata = (record.metadata ?? {}) as { intrinsic?: boolean };
+  const intrinsicMetadata = (record.metadata ?? {}) as {
+    intrinsic?: boolean;
+    intrinsicUsesSignature?: boolean;
+  };
   const hasTypeParams = signature.typeParams && signature.typeParams.length > 0;
   const instantiation = hasTypeParams
     ? instantiateFunctionCall({
@@ -349,7 +370,10 @@ const typeFunctionCall = ({
     const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
     ctx.callResolution.typeArguments.set(callId, appliedTypeArgs);
     ctx.callResolution.instanceKeys.set(callId, callKey);
-    if (!intrinsicMetadata.intrinsic) {
+    const skipGenericBody =
+      intrinsicMetadata.intrinsic === true &&
+      intrinsicMetadata.intrinsicUsesSignature !== true;
+    if (!skipGenericBody) {
       typeGenericFunctionBody({
         symbol: calleeSymbol,
         signature,
@@ -1268,19 +1292,44 @@ const typeIntrinsicCall = (
   args: readonly Arg[],
   ctx: TypingContext,
   state: TypingState,
-  typeArguments?: readonly TypeId[]
+  typeArguments?: readonly TypeId[],
+  allowTypeArguments = false
 ): TypeId => {
   switch (name) {
     case "__array_new":
       return typeArrayNewIntrinsic({ args, ctx, state, typeArguments });
     case "__array_get":
-      return typeArrayGetIntrinsic({ args, ctx, state, typeArguments });
+      return typeArrayGetIntrinsic({
+        args,
+        ctx,
+        state,
+        typeArguments,
+        allowTypeArguments,
+      });
     case "__array_set":
-      return typeArraySetIntrinsic({ args, ctx, state, typeArguments });
+      return typeArraySetIntrinsic({
+        args,
+        ctx,
+        state,
+        typeArguments,
+        allowTypeArguments,
+      });
     case "__array_len":
-      return typeArrayLenIntrinsic({ args, ctx, state, typeArguments });
+      return typeArrayLenIntrinsic({
+        args,
+        ctx,
+        state,
+        typeArguments,
+        allowTypeArguments,
+      });
     case "__array_copy":
-      return typeArrayCopyIntrinsic({ args, ctx, state, typeArguments });
+      return typeArrayCopyIntrinsic({
+        args,
+        ctx,
+        state,
+        typeArguments,
+        allowTypeArguments,
+      });
     default: {
       const signatures = intrinsicSignaturesFor(name, ctx);
       if (signatures.length === 0) {
@@ -1336,11 +1385,13 @@ const typeArrayGetIntrinsic = ({
   ctx,
   state,
   typeArguments,
+  allowTypeArguments,
 }: {
   args: readonly Arg[];
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
+  allowTypeArguments?: boolean;
 }): TypeId => {
   assertIntrinsicArgCount({
     name: "__array_get",
@@ -1348,12 +1399,19 @@ const typeArrayGetIntrinsic = ({
     expected: 2,
     detail: "array and index",
   });
-  assertNoIntrinsicTypeArgs("__array_get", typeArguments);
   const { element } = requireFixedArrayArg({
     arg: args[0]!.type,
     ctx,
     state,
     source: "__array_get target",
+  });
+  validateIntrinsicTypeArguments({
+    name: "__array_get",
+    typeArguments,
+    expectedType: element,
+    allow: allowTypeArguments === true,
+    ctx,
+    state,
   });
   const int32 = getPrimitiveType(ctx, "i32");
   ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_get index");
@@ -1365,11 +1423,13 @@ const typeArraySetIntrinsic = ({
   ctx,
   state,
   typeArguments,
+  allowTypeArguments,
 }: {
   args: readonly Arg[];
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
+  allowTypeArguments?: boolean;
 }): TypeId => {
   assertIntrinsicArgCount({
     name: "__array_set",
@@ -1377,12 +1437,19 @@ const typeArraySetIntrinsic = ({
     expected: 3,
     detail: "array, index, and value",
   });
-  assertNoIntrinsicTypeArgs("__array_set", typeArguments);
   const { array, element } = requireFixedArrayArg({
     arg: args[0]!.type,
     ctx,
     state,
     source: "__array_set target",
+  });
+  validateIntrinsicTypeArguments({
+    name: "__array_set",
+    typeArguments,
+    expectedType: element,
+    allow: allowTypeArguments === true,
+    ctx,
+    state,
   });
   const int32 = getPrimitiveType(ctx, "i32");
   ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_set index");
@@ -1395,11 +1462,13 @@ const typeArrayLenIntrinsic = ({
   ctx,
   state,
   typeArguments,
+  allowTypeArguments,
 }: {
   args: readonly Arg[];
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
+  allowTypeArguments?: boolean;
 }): TypeId => {
   assertIntrinsicArgCount({
     name: "__array_len",
@@ -1407,12 +1476,19 @@ const typeArrayLenIntrinsic = ({
     expected: 1,
     detail: "array",
   });
-  assertNoIntrinsicTypeArgs("__array_len", typeArguments);
-  requireFixedArrayArg({
+  const { element } = requireFixedArrayArg({
     arg: args[0]!.type,
     ctx,
     state,
     source: "__array_len target",
+  });
+  validateIntrinsicTypeArguments({
+    name: "__array_len",
+    typeArguments,
+    expectedType: element,
+    allow: allowTypeArguments === true,
+    ctx,
+    state,
   });
   return getPrimitiveType(ctx, "i32");
 };
@@ -1422,13 +1498,14 @@ const typeArrayCopyIntrinsic = ({
   ctx,
   state,
   typeArguments,
+  allowTypeArguments,
 }: {
   args: readonly Arg[];
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
+  allowTypeArguments?: boolean;
 }): TypeId => {
-  assertNoIntrinsicTypeArgs("__array_copy", typeArguments);
   assertIntrinsicArgCountOneOf({
     name: "__array_copy",
     args,
@@ -1439,6 +1516,14 @@ const typeArrayCopyIntrinsic = ({
     ctx,
     state,
     source: "__array_copy target",
+  });
+  validateIntrinsicTypeArguments({
+    name: "__array_copy",
+    typeArguments,
+    expectedType: element,
+    allow: allowTypeArguments === true,
+    ctx,
+    state,
   });
   const int32 = getPrimitiveType(ctx, "i32");
   if (args.length === 2) {
@@ -1568,6 +1653,36 @@ const assertNoIntrinsicTypeArgs = (
   throw new Error(`intrinsic ${name} does not accept type arguments`);
 };
 
+const validateIntrinsicTypeArguments = ({
+  name,
+  typeArguments,
+  expectedType,
+  allow,
+  ctx,
+  state,
+}: {
+  name: string;
+  typeArguments?: readonly TypeId[];
+  expectedType: TypeId;
+  allow: boolean;
+  ctx: TypingContext;
+  state: TypingState;
+}): void => {
+  if (!allow) {
+    assertNoIntrinsicTypeArgs(name, typeArguments);
+    return;
+  }
+  if (!typeArguments || typeArguments.length === 0) {
+    return;
+  }
+  const provided = requireSingleTypeArgument({
+    name,
+    typeArguments,
+    detail: "element type",
+  });
+  ensureTypeMatches(provided, expectedType, ctx, state, `${name} type argument`);
+};
+
 const requireArrayCopyOptionsField = ({
   fields,
   name,
@@ -1630,6 +1745,35 @@ const getValueType = (symbol: SymbolId, ctx: TypingContext): TypeId => {
     intrinsicName?: string;
     intrinsicUsesSignature?: boolean;
   };
+
+  if (metadata.intrinsic && metadata.intrinsicUsesSignature === true) {
+    const signature = ctx.functions.getSignature(symbol);
+    if (!signature) {
+      throw new Error(`missing signature for intrinsic ${record.name}`);
+    }
+    const functionType =
+      signature.typeId ??
+      ctx.arena.internFunction({
+        parameters: signature.parameters.map(({ type, label }) => ({
+          type,
+          label,
+          optional: false,
+        })),
+        returnType: signature.returnType,
+        effects: ctx.primitives.defaultEffectRow,
+      });
+    ctx.valueTypes.set(symbol, functionType);
+    if (!ctx.table.getSymbolScheme(symbol)) {
+      const typeParams =
+        signature.typeParams?.map((param) => param.typeParam) ?? [];
+      const scheme = ctx.arena.newScheme(
+        typeParams,
+        functionType
+      );
+      ctx.table.setSymbolScheme(symbol, scheme);
+    }
+    return functionType;
+  }
 
   if (metadata.intrinsic && metadata.intrinsicUsesSignature !== true) {
     const intrinsicType = getIntrinsicType(

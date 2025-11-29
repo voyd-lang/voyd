@@ -38,17 +38,17 @@ describe("intrinsic tagging", () => {
       get: {
         intrinsic: true,
         intrinsicName: "__array_get",
-        intrinsicUsesSignature: false,
+        intrinsicUsesSignature: true,
       },
       set: {
         intrinsic: true,
         intrinsicName: "__array_set",
-        intrinsicUsesSignature: false,
+        intrinsicUsesSignature: true,
       },
       copy: {
         intrinsic: true,
         intrinsicName: "__array_copy",
-        intrinsicUsesSignature: false,
+        intrinsicUsesSignature: true,
       },
       length: {
         intrinsic: true,
