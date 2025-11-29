@@ -215,13 +215,13 @@ const parseStringValue = (expr?: Expr): string | null => {
     return null;
   }
 
-  const fromField = rawValue.rest.find(
-    (entry) =>
-      isForm(entry) &&
-      entry.calls(":") &&
-      isIdentifierAtom(entry.at(1)) &&
-      entry.at(1)!.value === "from"
-  );
+  const fromField = rawValue.rest.find((entry) => {
+    if (!isForm(entry) || !entry.calls(":")) {
+      return false;
+    }
+    const key = entry.at(1);
+    return isIdentifierAtom(key) && key.value === "from";
+  });
 
   if (!fromField || !isForm(fromField)) {
     return null;
