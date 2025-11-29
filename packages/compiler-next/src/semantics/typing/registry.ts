@@ -307,8 +307,10 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
     if (typeof targetType !== "number") {
       throw new Error("impl target missing type");
     }
+    const targetDesc = ctx.arena.get(targetType);
     const nominalTarget = getNominalComponent(targetType, ctx);
-    if (typeof nominalTarget !== "number") {
+    const isTypeParamTarget = targetDesc.kind === "type-param-ref";
+    if (!isTypeParamTarget && typeof nominalTarget !== "number") {
       throw new Error("impl target must be a nominal object type");
     }
     if (typeof nominalTarget === "number") {
