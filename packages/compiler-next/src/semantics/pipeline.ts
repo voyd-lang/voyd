@@ -14,6 +14,8 @@ import type { OverloadSetId, SymbolId } from "./ids.js";
 import type { ModuleExportTable } from "./modules.js";
 import type { DependencySemantics } from "./typing/types.js";
 import { tagIntrinsicSymbols } from "./intrinsics.js";
+import type { Diagnostic } from "../diagnostics/index.js";
+import { DiagnosticError } from "../diagnostics/index.js";
 
 export interface SemanticsPipelineResult {
   binding: BindingResult;
@@ -22,6 +24,7 @@ export interface SemanticsPipelineResult {
   typing: TypingResult;
   moduleId: string;
   exports: ModuleExportTable;
+  diagnostics: readonly Diagnostic[];
 }
 
 export interface SemanticsPipelineOptions {
@@ -90,6 +93,11 @@ export const semanticsPipeline = (
 
   specializeOverloadCallees(hir, typing);
 
+  const diagnostics: Diagnostic[] = [
+    ...binding.diagnostics,
+    ...typing.diagnostics,
+  ];
+
   return {
     binding,
     symbolTable,
@@ -97,6 +105,7 @@ export const semanticsPipeline = (
     typing,
     moduleId: module.id,
     exports: collectModuleExports({ hir, symbolTable, moduleId: module.id }),
+    diagnostics,
   };
 };
 
@@ -107,16 +116,7 @@ const ensureNoBindingErrors = (binding: BindingResult): void => {
   if (errors.length === 0) {
     return;
   }
-
-  const message =
-    errors.length === 1
-      ? errors[0]!.message
-      : errors
-          .map(
-            (diag) => `${diag.message} (${diag.span.file}:${diag.span.start})`
-          )
-          .join("\n");
-  throw new Error(message);
+  throw new DiagnosticError(errors[0]!);
 };
 
 const collectOverloadOptions = (

@@ -97,7 +97,11 @@ export const lowerFunctionDecl = (
   const parameters = fn.params.map((param) => ({
     decl: param.id,
     symbol: param.symbol,
-    pattern: { kind: "identifier", symbol: param.symbol } as const,
+    pattern: {
+      kind: "identifier",
+      symbol: param.symbol,
+      span: toSourceSpan(param.ast ?? fallbackSyntax),
+    } as const,
     label: param.label,
     span: toSourceSpan(param.ast ?? fallbackSyntax),
     mutable: false,

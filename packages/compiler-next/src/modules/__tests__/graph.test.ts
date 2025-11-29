@@ -158,4 +158,25 @@ describe("buildModuleGraph", () => {
       ])
     );
   });
+
+  it("emits structured diagnostics for missing modules", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: "use util::missing",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(1);
+    const diagnostic = graph.diagnostics[0]!;
+    expect(diagnostic.code).toBe("MD0001");
+    expect(diagnostic.phase).toBe("module-graph");
+    expect(diagnostic.severity).toBe("error");
+    expect(diagnostic.span.file).toContain("main.voyd");
+    expect(diagnostic.message).toMatch(/util::missing/);
+  });
 });

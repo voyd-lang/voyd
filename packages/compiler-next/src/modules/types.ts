@@ -1,5 +1,5 @@
-import type { SourceSpan } from "../semantics/ids.js";
 import type { Form } from "../parser/index.js";
+import type { Diagnostic, SourceSpan } from "../diagnostics/index.js";
 
 export type ModuleNamespace = "src" | "std" | "pkg";
 
@@ -58,7 +58,7 @@ export interface ModuleDiagnostic {
 export interface ModuleGraph {
   entry: string;
   modules: Map<string, ModuleNode>;
-  diagnostics: readonly ModuleDiagnostic[];
+  diagnostics: readonly Diagnostic[];
 }
 
 export interface ModuleHost {

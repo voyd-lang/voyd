@@ -25,22 +25,9 @@ export type TypeParamId = number;
 
 export type EffectRowId = number;
 
-/**
- * Every semantic artifact carries a `SourceSpan` for diagnostics. The parser
- * owns absolute offsets; later phases merely thread them through.
- */
-export interface SourceSpan {
-  file: string;
-  start: number;
-  end: number;
-}
-
-export type DiagnosticSeverity = "error" | "warning" | "note";
-
-export interface Diagnostic {
-  code: string;
-  message: string;
-  severity: DiagnosticSeverity;
-  span: SourceSpan;
-  related?: readonly Diagnostic[];
-}
+export type {
+  SourceSpan,
+  DiagnosticSeverity,
+  Diagnostic,
+  DiagnosticPhase,
+} from "../diagnostics/index.js";

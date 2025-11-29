@@ -25,6 +25,7 @@ import type {
   BoundUseEntry,
   BoundImport,
 } from "../types.js";
+import { createDiagnostic } from "../../../diagnostics/index.js";
 import { modulePathToString } from "../../../modules/path.js";
 import type { ModulePath } from "../../../modules/types.js";
 import type { HirVisibility } from "../../hir/index.js";
@@ -513,12 +514,14 @@ const recordImportDiagnostic = (
   span: SourceSpan,
   ctx: BindingContext
 ): void => {
-  ctx.diagnostics.push({
-    code: "unresolved-import",
-    message,
-    severity: "error",
-    span,
-  });
+  ctx.diagnostics.push(
+    createDiagnostic({
+      code: "BD0001",
+      message,
+      severity: "error",
+      span,
+    })
+  );
 };
 
 const spanKey = (span: SourceSpan): string =>

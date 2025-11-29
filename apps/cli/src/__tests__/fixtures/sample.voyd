@@ -1,0 +1,6 @@
+fn main() {
+  match "Hello" {
+    "Hi" => "h"
+    _ => "fallback"
+  }
+}

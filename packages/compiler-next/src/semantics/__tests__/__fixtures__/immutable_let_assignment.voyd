@@ -1,0 +1,4 @@
+pub fn main()
+  let a = 5
+  a = 7
+  a

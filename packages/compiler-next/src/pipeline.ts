@@ -13,6 +13,9 @@ import {
   type SemanticsPipelineResult,
 } from "./semantics/pipeline.js";
 import type { ModuleExportTable } from "./semantics/modules.js";
+import type { Diagnostic } from "./diagnostics/index.js";
+import { createDiagnostic, DiagnosticError } from "./diagnostics/index.js";
+import { codegenErrorToDiagnostic } from "./codegen/diagnostics.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -22,6 +25,11 @@ export type LoadModulesOptions = {
 
 export type AnalyzeModulesOptions = {
   graph: ModuleGraph;
+};
+
+export type AnalyzeModulesResult = {
+  semantics: Map<string, SemanticsPipelineResult>;
+  diagnostics: Diagnostic[];
 };
 
 export type LowerProgramOptions = {
@@ -49,7 +57,7 @@ export type CompileProgramResult = {
   graph: ModuleGraph;
   semantics?: Map<string, SemanticsPipelineResult>;
   wasm?: Uint8Array;
-  diagnostics: ModuleGraph["diagnostics"];
+  diagnostics: Diagnostic[];
 };
 
 export const loadModuleGraph = async (
@@ -65,27 +73,47 @@ export const loadModuleGraph = async (
 
 export const analyzeModules = ({
   graph,
-}: AnalyzeModulesOptions): Map<string, SemanticsPipelineResult> => {
+}: AnalyzeModulesOptions): AnalyzeModulesResult => {
   const order = sortModules(graph);
   const semantics = new Map<string, SemanticsPipelineResult>();
   const exports = new Map<string, ModuleExportTable>();
+  const diagnostics: Diagnostic[] = [];
+  let halted = false;
 
   order.forEach((id) => {
+    if (halted) return;
     const module = graph.modules.get(id);
     if (!module) {
       return;
     }
-    const result = semanticsPipeline({
-      module,
-      graph,
-      exports,
-      dependencies: semantics,
-    });
-    semantics.set(id, result);
-    exports.set(id, result.exports);
+    try {
+      const result = semanticsPipeline({
+        module,
+        graph,
+        exports,
+        dependencies: semantics,
+      });
+      semantics.set(id, result);
+      exports.set(id, result.exports);
+      diagnostics.push(...result.diagnostics);
+    } catch (error) {
+      if (error instanceof DiagnosticError) {
+        diagnostics.push(error.diagnostic);
+        halted = true;
+        return;
+      }
+      const fallback = createDiagnostic({
+        code: "TY9999",
+        message: error instanceof Error ? error.message : String(error),
+        span: { file: module.id, start: 0, end: 0 },
+      });
+      diagnostics.push(fallback);
+      halted = true;
+      return;
+    }
   });
 
-  return semantics;
+  return { semantics, diagnostics };
 };
 
 export const lowerProgram = ({
@@ -157,23 +185,36 @@ export const compileProgram = async (
   const graph = await loadModuleGraph(options);
 
   if (options.skipSemantics) {
-    return { graph, diagnostics: graph.diagnostics };
+    return { graph, diagnostics: [...graph.diagnostics] };
   }
 
-  const semantics = analyzeModules({ graph });
-  const wasmResult = await emitProgram({
-    graph,
-    semantics,
-    codegenOptions: options.codegenOptions,
-    entryModuleId: options.entryModuleId,
-  });
+  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({ graph });
+  const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
 
-  return {
-    graph,
-    semantics,
-    wasm: wasmResult.wasm,
-    diagnostics: graph.diagnostics,
-  };
+  if (diagnostics.some((diag) => diag.severity === "error")) {
+    return { graph, semantics, diagnostics };
+  }
+
+  try {
+    const wasmResult = await emitProgram({
+      graph,
+      semantics,
+      codegenOptions: options.codegenOptions,
+      entryModuleId: options.entryModuleId,
+    });
+
+    return {
+      graph,
+      semantics,
+      wasm: wasmResult.wasm,
+      diagnostics,
+    };
+  } catch (error) {
+    diagnostics.push(
+      codegenErrorToDiagnostic(error, { moduleId: options.entryModuleId ?? graph.entry })
+    );
+    return { graph, semantics, diagnostics };
+  }
 };
 
 const moduleIdForPath = (path: ModulePath): string => modulePathToString(path);

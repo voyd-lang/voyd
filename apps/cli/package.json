@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo 'no CLI-specific tests'",
+    "test": "vitest run --config ../../vitest.config.ts src/__tests__",
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {

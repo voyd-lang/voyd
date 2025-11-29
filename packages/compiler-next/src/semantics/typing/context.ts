@@ -12,6 +12,7 @@ import {
   type TypingContext,
   type TypingInputs,
 } from "./types.js";
+import { DiagnosticEmitter } from "../../diagnostics/index.js";
 
 export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const decls = inputs.decls ?? new DeclTable();
@@ -69,6 +70,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
       defaultEffectRow: DEFAULT_EFFECT_ROW,
     },
     intrinsicTypes: new Map(),
+    diagnostics: new DiagnosticEmitter(),
   };
 };
 

@@ -10,6 +10,7 @@ import type {
   TypingContext,
   TypingState,
 } from "./types.js";
+import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import type { HirNamedTypeExpr } from "../hir/index.js";
 import type {
   SymbolId,
@@ -507,6 +508,7 @@ const makeDependencyContext = (
   typeAliases: dependency.typing.typeAliases,
   primitives: dependency.typing.primitives,
   intrinsicTypes: dependency.typing.intrinsicTypes,
+  diagnostics: new DiagnosticEmitter(),
 });
 
 const cloneTypeParamSymbol = (
