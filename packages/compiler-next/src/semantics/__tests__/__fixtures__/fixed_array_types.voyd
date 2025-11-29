@@ -1,0 +1,2 @@
+fn identity(arr: FixedArray<i32>) -> FixedArray<i32>
+  arr

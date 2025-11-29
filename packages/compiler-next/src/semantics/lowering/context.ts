@@ -10,6 +10,7 @@ export const createLowerContext = ({
   symbolTable: binding.symbolTable,
   scopeByNode: binding.scopeByNode,
   intrinsicSymbols: new Map(),
+  intrinsicTypeSymbols: new Map(),
   moduleNodeId,
   overloadBySymbol: binding.overloadBySymbol,
 });

@@ -39,6 +39,7 @@ export interface LowerContext {
   symbolTable: SymbolTable;
   scopeByNode: Map<NodeId, ScopeId>;
   intrinsicSymbols: Map<string, SymbolId>;
+  intrinsicTypeSymbols: Map<string, SymbolId>;
   moduleNodeId: NodeId;
   overloadBySymbol: ReadonlyMap<SymbolId, OverloadSetId>;
 }

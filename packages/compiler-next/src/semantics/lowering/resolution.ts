@@ -1,6 +1,16 @@
 import type { LowerContext, IdentifierResolution } from "./types.js";
 import type { ScopeId, SymbolId } from "../ids.js";
 
+const INTRINSIC_TYPES = new Map<
+  string,
+  { metadata: Record<string, unknown> }
+>([
+  [
+    "FixedArray",
+    { metadata: { intrinsic: true, intrinsicType: "fixed-array", arity: 1 } },
+  ],
+]);
+
 export const resolveIdentifierValue = (
   name: string,
   scope: ScopeId,
@@ -42,18 +52,17 @@ export const resolveTypeSymbol = (
   ctx: LowerContext
 ): SymbolId | undefined => {
   const resolved = ctx.symbolTable.resolve(name, scope);
-  if (typeof resolved !== "number") {
-    return undefined;
+  if (typeof resolved === "number") {
+    const record = ctx.symbolTable.getSymbol(resolved);
+    if (
+      record.kind === "type" ||
+      record.kind === "type-parameter" ||
+      record.kind === "trait"
+    ) {
+      return resolved;
+    }
   }
-  const record = ctx.symbolTable.getSymbol(resolved);
-  if (
-    record.kind === "type" ||
-    record.kind === "type-parameter" ||
-    record.kind === "trait"
-  ) {
-    return resolved;
-  }
-  return undefined;
+  return resolveIntrinsicTypeSymbol(name, ctx);
 };
 
 const resolveIntrinsicSymbol = (name: string, ctx: LowerContext): SymbolId => {
@@ -70,4 +79,27 @@ const resolveIntrinsicSymbol = (name: string, ctx: LowerContext): SymbolId => {
   });
   ctx.intrinsicSymbols.set(name, intrinsic);
   return intrinsic;
+};
+
+const resolveIntrinsicTypeSymbol = (
+  name: string,
+  ctx: LowerContext
+): SymbolId | undefined => {
+  const intrinsic = INTRINSIC_TYPES.get(name);
+  if (!intrinsic) {
+    return undefined;
+  }
+  const existing = ctx.intrinsicTypeSymbols.get(name);
+  if (typeof existing === "number") {
+    return existing;
+  }
+
+  const symbol = ctx.symbolTable.declare({
+    name,
+    kind: "type",
+    declaredAt: ctx.moduleNodeId,
+    metadata: intrinsic.metadata,
+  });
+  ctx.intrinsicTypeSymbols.set(name, symbol);
+  return symbol;
 };
