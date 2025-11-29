@@ -7,9 +7,56 @@ type IntrinsicMetadata = {
   intrinsicUsesSignature?: boolean;
 };
 
-const MODULE_INTRINSICS = new Map<string, Map<string, IntrinsicMetadata>>();
 const normalizeModuleId = (moduleId: string): string =>
   moduleId.replace(/\\/g, "/");
+
+const MODULE_INTRINSICS = new Map<string, Map<string, IntrinsicMetadata>>([
+  [
+    normalizeModuleId("packages/std_next/fixed_array.voyd"),
+    new Map<string, IntrinsicMetadata>([
+      [
+        "new_fixed_array",
+        {
+          intrinsic: true,
+          intrinsicName: "__array_new",
+          intrinsicUsesSignature: false,
+        },
+      ],
+      [
+        "get",
+        {
+          intrinsic: true,
+          intrinsicName: "__array_get",
+          intrinsicUsesSignature: false,
+        },
+      ],
+      [
+        "set",
+        {
+          intrinsic: true,
+          intrinsicName: "__array_set",
+          intrinsicUsesSignature: false,
+        },
+      ],
+      [
+        "copy",
+        {
+          intrinsic: true,
+          intrinsicName: "__array_copy",
+          intrinsicUsesSignature: false,
+        },
+      ],
+      [
+        "length",
+        {
+          intrinsic: true,
+          intrinsicName: "__array_len",
+          intrinsicUsesSignature: false,
+        },
+      ],
+    ]),
+  ],
+]);
 
 export const tagIntrinsicSymbols = ({
   binding,

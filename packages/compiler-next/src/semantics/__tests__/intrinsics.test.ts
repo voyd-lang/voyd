@@ -27,10 +27,38 @@ const getMetadata = ({
 };
 
 describe("intrinsic tagging", () => {
-  it("leaves std_next fixed_array wrappers as normal functions", () => {
+  it("tags std_next fixed_array wrappers with intrinsic metadata", () => {
     const modulePath = "packages/std_next/fixed_array.voyd";
-    ["new_fixed_array", "get", "set", "copy", "length"].forEach((name) => {
-      expect(getMetadata({ name, modulePath })).not.toMatchObject({ intrinsic: true });
+    const expectedMetadata: Record<string, Record<string, unknown>> = {
+      new_fixed_array: {
+        intrinsic: true,
+        intrinsicName: "__array_new",
+        intrinsicUsesSignature: false,
+      },
+      get: {
+        intrinsic: true,
+        intrinsicName: "__array_get",
+        intrinsicUsesSignature: false,
+      },
+      set: {
+        intrinsic: true,
+        intrinsicName: "__array_set",
+        intrinsicUsesSignature: false,
+      },
+      copy: {
+        intrinsic: true,
+        intrinsicName: "__array_copy",
+        intrinsicUsesSignature: false,
+      },
+      length: {
+        intrinsic: true,
+        intrinsicName: "__array_len",
+        intrinsicUsesSignature: false,
+      },
+    };
+
+    Object.entries(expectedMetadata).forEach(([name, metadata]) => {
+      expect(getMetadata({ name, modulePath })).toMatchObject(metadata);
     });
   });
 
