@@ -3,12 +3,15 @@
   "version": "0.9.0",
   "private": true,
   "description": "Voyd monorepo",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "type": "module",
   "packageManager": "npm@11.4.2",
   "scripts": {
     "build": "turbo run build",
-    "test": "turbo run test",
+    "test": "turbo run test --output-logs=errors-only",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint --parallel",
     "dev": "turbo run dev --parallel",

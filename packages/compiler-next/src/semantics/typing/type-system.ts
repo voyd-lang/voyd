@@ -4,6 +4,7 @@ import type {
   HirNamedTypeExpr,
   HirTupleTypeExpr,
   HirUnionTypeExpr,
+  HirFunctionTypeExpr,
 } from "../hir/index.js";
 import { resolveImportedTypeExpr } from "./imports.js";
 import type { SymbolId, TypeId, TypeParamId } from "../ids.js";
@@ -486,6 +487,9 @@ export const resolveTypeExpr = (
     case "tuple":
       resolved = resolveTupleTypeExpr(expr, ctx, state, activeTypeParams);
       break;
+    case "function":
+      resolved = resolveFunctionTypeExpr(expr, ctx, state, activeTypeParams);
+      break;
     case "union":
       resolved = resolveUnionTypeExpr(expr, ctx, state, activeTypeParams);
       break;
@@ -813,6 +817,32 @@ const resolveObjectTypeExpr = (
     };
   });
   return ctx.arena.internStructuralObject({ fields });
+};
+
+const resolveFunctionTypeExpr = (
+  expr: HirFunctionTypeExpr,
+  ctx: TypingContext,
+  state: TypingState,
+  typeParams?: ReadonlyMap<SymbolId, TypeId>
+): TypeId => {
+  if (expr.typeParameters && expr.typeParameters.length > 0) {
+    throw new Error("function type parameters are not supported yet");
+  }
+  const parameters = expr.parameters.map((param) =>
+    resolveTypeExpr(param, ctx, state, ctx.primitives.unknown, typeParams)
+  );
+  const returnType = resolveTypeExpr(
+    expr.returnType,
+    ctx,
+    state,
+    ctx.primitives.unknown,
+    typeParams
+  );
+  return ctx.arena.internFunction({
+    parameters: parameters.map((type) => ({ type, optional: false })),
+    returnType,
+    effects: ctx.primitives.defaultEffectRow,
+  });
 };
 
 const resolveTupleTypeExpr = (

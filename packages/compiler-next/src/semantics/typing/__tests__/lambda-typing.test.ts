@@ -1,0 +1,61 @@
+import { describe, expect, it } from "vitest";
+
+import type { HirLambdaExpr } from "../../hir/index.js";
+import { semanticsPipeline } from "../../pipeline.js";
+import { loadAst } from "../../__tests__/load-ast.js";
+
+const lambdaByParam = (
+  hir: ReturnType<typeof semanticsPipeline>["hir"],
+  symbolTable: ReturnType<typeof semanticsPipeline>["symbolTable"],
+  name: string
+): HirLambdaExpr | undefined =>
+  Array.from(hir.expressions.values()).find(
+    (expr): expr is HirLambdaExpr =>
+      expr.exprKind === "lambda" &&
+      expr.parameters.some(
+        (param) => symbolTable.getSymbol(param.symbol).name === name
+      )
+  );
+
+describe("lambda typing", () => {
+  it("infers parameter and return types from context", () => {
+    const { hir, symbolTable, typing } = semanticsPipeline(
+      loadAst("lambda_typing.voyd")
+    );
+    const i32 = typing.arena.internPrimitive("i32");
+
+    const doubled = lambdaByParam(hir, symbolTable, "x");
+    expect(doubled).toBeDefined();
+    if (!doubled) return;
+    const doubledTypeId = typing.table.getExprType(doubled.id);
+    const doubledType = typing.arena.get(doubledTypeId);
+    expect(doubledType.kind).toBe("function");
+    if (doubledType.kind !== "function") return;
+    expect(doubledType.parameters.map((param) => param.type)).toEqual([i32]);
+    expect(doubledType.returnType).toBe(i32);
+
+    const incrementer = lambdaByParam(hir, symbolTable, "value");
+    expect(incrementer).toBeDefined();
+    if (!incrementer) return;
+    const incrementerType = typing.arena.get(
+      typing.table.getExprType(incrementer.id)
+    );
+    expect(incrementerType.kind).toBe("function");
+    if (incrementerType.kind !== "function") return;
+    expect(incrementerType.parameters.map((param) => param.type)).toEqual([
+      i32,
+    ]);
+    expect(incrementerType.returnType).toBe(i32);
+
+    const trimmed = lambdaByParam(hir, symbolTable, "n");
+    expect(trimmed).toBeDefined();
+    if (!trimmed) return;
+    const trimmedType = typing.arena.get(
+      typing.table.getExprType(trimmed.id)
+    );
+    expect(trimmedType.kind).toBe("function");
+    if (trimmedType.kind !== "function") return;
+    expect(trimmedType.parameters.map((param) => param.type)).toEqual([i32]);
+    expect(trimmedType.returnType).toBe(i32);
+  });
+});
