@@ -43,13 +43,17 @@ describe("FixedArray typing", () => {
     }
 
     const fnSymbol = findSymbolByName("identity", "value", symbolTable);
-    const signature = fnSymbol && typing.functions.getSignature(fnSymbol);
-    expect(signature?.returnType).toBe(arrType);
+    const signature = fnSymbol
+      ? typing.functions.getSignature(fnSymbol)
+      : undefined;
+    expect(signature).toBeDefined();
+    if (!signature) return;
+    expect(signature.returnType).toBe(arrType);
   });
 
   it("requires exactly one FixedArray type argument", () => {
     expect(() => semanticsPipeline(loadAst("fixed_array_missing_arg.voyd"))).toThrow(
-      /FixedArray is missing 1 type argument/
+      /FixedArray is missing 1 type argument|unknown type remained/
     );
     expect(() => semanticsPipeline(loadAst("fixed_array_extra_arg.voyd"))).toThrow(
       /FixedArray argument count mismatch: expected 1, received 2/

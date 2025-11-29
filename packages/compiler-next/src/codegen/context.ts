@@ -87,6 +87,7 @@ export interface CodegenContext {
   functionInstances: Map<string, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
+  fixedArrayTypes: Map<TypeId, binaryen.Type>;
   rtt: ReturnType<typeof createRttContext>;
 }
 

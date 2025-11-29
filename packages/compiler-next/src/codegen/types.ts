@@ -1,6 +1,7 @@
 import binaryen from "binaryen";
 import {
   binaryenTypeToHeapType,
+  defineArrayType,
   defineStructType,
 } from "@voyd/lib/binaryen-gc/index.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
@@ -30,6 +31,21 @@ export const wasmTypeFor = (
     const desc = ctx.typing.arena.get(typeId);
     if (desc.kind === "primitive") {
       return mapPrimitiveToWasm(desc.name);
+    }
+
+    if (desc.kind === "fixed-array") {
+      const cached = ctx.fixedArrayTypes.get(desc.element);
+      if (cached) {
+        return cached;
+      }
+      const elementType = wasmTypeFor(desc.element, ctx, seen);
+      const arrayType = defineArrayType(
+        ctx.mod,
+        binaryenTypeToHeapType(elementType),
+        true
+      );
+      ctx.fixedArrayTypes.set(desc.element, arrayType);
+      return arrayType;
     }
 
     if (desc.kind === "structural-object") {

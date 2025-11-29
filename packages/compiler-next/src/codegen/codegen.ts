@@ -59,6 +59,7 @@ export const codegenProgram = ({
     functionInstances,
     itemsToSymbols: new Map(),
     structTypes: new Map(),
+    fixedArrayTypes: new Map(),
     rtt,
   }));
 
