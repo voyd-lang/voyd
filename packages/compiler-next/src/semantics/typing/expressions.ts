@@ -108,7 +108,7 @@ export const typeExpression = (
       type = typeCallExpr(expr, ctx, state);
       break;
     case "block":
-      type = typeBlockExpr(expr, ctx, state);
+      type = typeBlockExpr(expr, ctx, state, expectedType);
       break;
     case "if":
       type = typeIfExpr(expr, ctx, state);
@@ -1008,11 +1008,12 @@ export const formatFunctionInstanceKey = (
 const typeBlockExpr = (
   expr: HirBlockExpr,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  expectedType?: TypeId
 ): TypeId => {
   expr.statements.forEach((stmtId) => typeStatement(stmtId, ctx, state));
   if (typeof expr.value === "number") {
-    return typeExpression(expr.value, ctx, state);
+    return typeExpression(expr.value, ctx, state, expectedType);
   }
   return ctx.primitives.void;
 };

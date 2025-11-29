@@ -5,8 +5,7 @@ fn makeIncrementer(delta: i32) -> ((i32) -> i32)
   (value) => value + delta
 
 pub fn main() -> i32
-  let doubled = (x) => x * 2
-  let result = applyTwice(doubled, 3)
+  let result = applyTwice((x) => x * 2, 3)
   let inc = makeIncrementer(1)
   let trimmed = result.((n) => n - 1)
   trimmed + inc(4)
