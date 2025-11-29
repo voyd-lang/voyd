@@ -10,52 +10,52 @@ type IntrinsicMetadata = {
 const normalizeModuleId = (moduleId: string): string =>
   moduleId.replace(/\\/g, "/");
 
-const MODULE_INTRINSICS = new Map<string, Map<string, IntrinsicMetadata>>([
+const FIXED_ARRAY_INTRINSICS = new Map<string, IntrinsicMetadata>([
   [
-    normalizeModuleId("packages/std_next/fixed_array.voyd"),
-    new Map<string, IntrinsicMetadata>([
-      [
-        "new_fixed_array",
-        {
-          intrinsic: true,
-          intrinsicName: "__array_new",
-          intrinsicUsesSignature: false,
-        },
-      ],
-      [
-        "get",
-        {
-          intrinsic: true,
-          intrinsicName: "__array_get",
-          intrinsicUsesSignature: true,
-        },
-      ],
-      [
-        "set",
-        {
-          intrinsic: true,
-          intrinsicName: "__array_set",
-          intrinsicUsesSignature: true,
-        },
-      ],
-      [
-        "copy",
-        {
-          intrinsic: true,
-          intrinsicName: "__array_copy",
-          intrinsicUsesSignature: true,
-        },
-      ],
-      [
-        "length",
-        {
-          intrinsic: true,
-          intrinsicName: "__array_len",
-          intrinsicUsesSignature: false,
-        },
-      ],
-    ]),
+    "new_fixed_array",
+    {
+      intrinsic: true,
+      intrinsicName: "__array_new",
+      intrinsicUsesSignature: false,
+    },
   ],
+  [
+    "get",
+    {
+      intrinsic: true,
+      intrinsicName: "__array_get",
+      intrinsicUsesSignature: true,
+    },
+  ],
+  [
+    "set",
+    {
+      intrinsic: true,
+      intrinsicName: "__array_set",
+      intrinsicUsesSignature: true,
+    },
+  ],
+  [
+    "copy",
+    {
+      intrinsic: true,
+      intrinsicName: "__array_copy",
+      intrinsicUsesSignature: true,
+    },
+  ],
+  [
+    "length",
+    {
+      intrinsic: true,
+      intrinsicName: "__array_len",
+      intrinsicUsesSignature: false,
+    },
+  ],
+]);
+
+const MODULE_INTRINSICS = new Map<string, Map<string, IntrinsicMetadata>>([
+  [normalizeModuleId("packages/std_next/fixed_array.voyd"), FIXED_ARRAY_INTRINSICS],
+  ["std::fixed_array", FIXED_ARRAY_INTRINSICS],
 ]);
 
 export const tagIntrinsicSymbols = ({

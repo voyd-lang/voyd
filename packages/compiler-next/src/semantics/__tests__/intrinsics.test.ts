@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../pipeline.js";
+import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
 
 const SOURCE = `
 fn new_fixed_array<T>(size: i32) -> i32 0
@@ -11,14 +12,28 @@ fn length<T>(arr: i32) -> i32 0
 fn helper() -> i32 0
 `;
 
+const FIXED_ARRAY_FILE = "packages/std_next/fixed_array.voyd";
+
 const getMetadata = ({
   name,
   modulePath,
+  moduleId,
 }: {
   name: string;
   modulePath: string;
+  moduleId?: string;
 }): Record<string, unknown> | undefined => {
-  const { symbolTable } = semanticsPipeline(parse(SOURCE, modulePath));
+  const ast = parse(SOURCE, modulePath);
+  const result = moduleId
+    ? semanticsPipeline(
+        buildPipelineInput({
+          ast,
+          moduleId,
+          filePath: modulePath,
+        })
+      )
+    : semanticsPipeline(ast);
+  const { symbolTable } = result;
   return symbolTable
     .snapshot()
     .symbols.find(
@@ -26,9 +41,33 @@ const getMetadata = ({
     )?.metadata as Record<string, unknown> | undefined;
 };
 
+const buildPipelineInput = ({
+  ast,
+  moduleId,
+  filePath,
+}: {
+  ast: ReturnType<typeof parse>;
+  moduleId: string;
+  filePath: string;
+}): { module: ModuleNode; graph: ModuleGraph } => {
+  const module: ModuleNode = {
+    id: moduleId,
+    path: { namespace: "std", segments: ["fixed_array"] },
+    origin: { kind: "file", filePath },
+    ast,
+    source: "",
+    dependencies: [],
+  };
+  const graph: ModuleGraph = {
+    entry: module.id,
+    modules: new Map([[module.id, module]]),
+    diagnostics: [],
+  };
+  return { module, graph };
+};
+
 describe("intrinsic tagging", () => {
   it("tags std_next fixed_array wrappers with intrinsic metadata", () => {
-    const modulePath = "packages/std_next/fixed_array.voyd";
     const expectedMetadata: Record<string, Record<string, unknown>> = {
       new_fixed_array: {
         intrinsic: true,
@@ -57,8 +96,20 @@ describe("intrinsic tagging", () => {
       },
     };
 
-    Object.entries(expectedMetadata).forEach(([name, metadata]) => {
-      expect(getMetadata({ name, modulePath })).toMatchObject(metadata);
+    const moduleIds = [FIXED_ARRAY_FILE, "std::fixed_array"];
+
+    moduleIds.forEach((moduleId) => {
+      Object.entries(expectedMetadata).forEach(([name, metadata]) => {
+        const metadataForId =
+          moduleId === FIXED_ARRAY_FILE
+            ? getMetadata({ name, modulePath: moduleId })
+            : getMetadata({
+                name,
+                modulePath: FIXED_ARRAY_FILE,
+                moduleId,
+              });
+        expect(metadataForId).toMatchObject(metadata);
+      });
     });
   });
 
