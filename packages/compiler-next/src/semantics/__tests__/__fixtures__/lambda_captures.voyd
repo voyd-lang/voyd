@@ -1,0 +1,9 @@
+fn makeAdder(base: i32)
+  (delta: i32) -> i32 => base + delta
+
+fn nested(base: i32)
+  let outer = base + 1
+  (value: i32) =>
+    let shadow = value
+    var total = base + outer
+    (extra: i32) => shadow + base + outer + total + extra

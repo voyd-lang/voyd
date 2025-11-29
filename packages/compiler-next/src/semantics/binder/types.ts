@@ -8,6 +8,7 @@ import type {
 export type ScopeKind =
   | "module"
   | "function"
+  | "lambda"
   | "block"
   | "impl"
   | "trait"
