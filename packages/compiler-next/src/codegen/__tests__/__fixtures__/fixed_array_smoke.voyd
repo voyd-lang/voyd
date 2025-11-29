@@ -1,0 +1,53 @@
+trait Iterator<T>
+  fn next(self, index: i32) -> T
+
+obj FixedArrayIterator<T> {
+  array: FixedArray<T>
+}
+
+impl<T> Iterator<T> for FixedArrayIterator<T>
+  fn next(self, index: i32) -> T
+    __array_get(self.array, index)
+
+fn build_values() -> FixedArray<i32>
+  var arr = __array_new<i32>(3)
+  arr = __array_set(arr, 0, 1)
+  arr = __array_set(arr, 1, 2)
+  arr = __array_set(arr, 2, 3)
+  arr
+
+fn init_dest() -> FixedArray<i32>
+  var arr = __array_new<i32>(3)
+  arr = __array_set(arr, 0, 9)
+  arr = __array_set(arr, 1, 8)
+  arr = __array_set(arr, 2, 7)
+  arr
+
+pub fn len_and_head() -> i32
+  let arr = build_values()
+  let len = __array_len(arr)
+  let first = __array_get(arr, 0)
+  len + first
+
+pub fn copy_tail() -> i32
+  let src = build_values()
+  let dest = init_dest()
+  let copied = __array_copy(dest, {
+    from: src,
+    to_index: 1,
+    from_index: 0,
+    count: 2
+  })
+  __array_get(copied, 2)
+
+pub fn iterate_sum() -> i32
+  let arr = build_values()
+  var iterator = FixedArrayIterator<i32> { array: arr }
+  let len = __array_len(arr)
+  var index = 0
+  var acc = 0
+  while index < len do:
+    let step = iterator.next<i32>(index)
+    acc = acc + step
+    index = index + 1
+  acc

@@ -27,6 +27,7 @@ import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypingResult } from "../semantics/typing/typing.js";
 import type { createRttContext } from "./rtt/index.js";
 import type { BindingResult } from "../semantics/binding/binding.js";
+import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -74,6 +75,11 @@ export interface StructuralTypeInfo {
   typeLabel: string;
 }
 
+export interface FixedArrayWasmType {
+  type: binaryen.Type;
+  heapType: HeapTypeRef;
+}
+
 export interface CodegenContext {
   mod: binaryen.Module;
   moduleId: string;
@@ -87,7 +93,7 @@ export interface CodegenContext {
   functionInstances: Map<string, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
-  fixedArrayTypes: Map<TypeId, binaryen.Type>;
+  fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
   rtt: ReturnType<typeof createRttContext>;
 }
 

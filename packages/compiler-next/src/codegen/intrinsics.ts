@@ -10,6 +10,7 @@ import {
   getExprBinaryenType,
   getRequiredExprType,
   getStructuralTypeInfo,
+  getFixedArrayWasmTypes,
   wasmTypeFor,
 } from "./types.js";
 import { allocateTempLocal } from "./locals.js";
@@ -472,8 +473,8 @@ const getFixedArrayHeapType = (
   typeId: TypeId,
   ctx: CodegenContext
 ): HeapTypeRef => {
-  const wasmType = wasmTypeFor(typeId, ctx);
-  return modBinaryenTypeToHeapType(ctx.mod, wasmType);
+  const { heapType } = getFixedArrayWasmTypes(typeId, ctx);
+  return heapType;
 };
 
 const emitArrayCopyFromOptions = ({
@@ -563,7 +564,10 @@ const defaultValueForType = (
           return ctx.mod.f64.const(0);
       }
       break;
-    case "fixed-array":
+    case "fixed-array": {
+      const { heapType } = getFixedArrayWasmTypes(typeId, ctx);
+      return ctx.mod.ref.null(heapType);
+    }
     case "structural-object":
     case "nominal-object":
     case "trait":
