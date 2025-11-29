@@ -8,5 +8,5 @@ pub fn main() -> i32
   let doubled = (x) => x * 2
   let result = applyTwice(doubled, 3)
   let inc = makeIncrementer(1)
-  let trimmed = ((n) => n - 1)(result)
+  let trimmed = result.((n) => n - 1)
   trimmed + inc(4)
