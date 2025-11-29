@@ -1,0 +1,16 @@
+trait Scalable
+  fn scale(self, factor: f64) -> i32
+
+obj Point {
+  x: i32,
+  y: i32
+}
+
+impl<T> Scalable for T
+  fn scale(self, factor: f64) -> i32
+    4
+
+pub fn main() -> i32
+  let p = Point { x: 3, y: 7 }
+  let v = p.scale(1.5)
+  v

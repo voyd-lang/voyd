@@ -302,4 +302,14 @@ describe("next codegen", () => {
     const main = loadMain("trait_generic_defaults.voyd");
     expect(main()).toBe(7);
   });
+
+  it("emits wasm for blanket impls over any type parameter target", () => {
+    const main = loadMain("blanket_scalable.voyd");
+    expect(main()).toBe(4);
+  });
+
+  it("emits wasm for blanket impls on generic objects", () => {
+    const main = loadMain("blanket_summable_box.voyd");
+    expect(main()).toBe(7);
+  });
 });

@@ -1,0 +1,19 @@
+trait Summable<T>
+  fn sum(self) -> T
+
+obj Box<T> {
+  value: T
+}
+
+impl<T> Summable<T> for Box<T>
+  fn sum(self) -> T
+    self.value
+
+pub fn main() -> i32
+  let a = Box<i32> { value: 7 }
+  let b = Box<f64> { value: 2.5 }
+
+  let s1 = a.sum()
+  let s2 = b.sum()
+
+  s1

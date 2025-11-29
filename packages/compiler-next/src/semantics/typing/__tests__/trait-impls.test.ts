@@ -34,4 +34,24 @@ describe("trait implementations", () => {
       /return type mismatch/i
     );
   });
+
+  it("type-checks blanket impls over type parameters", () => {
+    const ast = loadAst("blanket_scalable.voyd");
+    const { symbolTable, typing } = semanticsPipeline(ast);
+    const scaleSymbol = symbolTable.resolve("scale", symbolTable.rootScope);
+    expect(scaleSymbol).toBeDefined();
+    if (!scaleSymbol) return;
+    const instantiations = typing.functionInstantiationInfo.get(scaleSymbol);
+    expect(instantiations?.size).toBeGreaterThan(0);
+  });
+
+  it("records instantiations for blanket impls on generic objects", () => {
+    const ast = loadAst("blanket_summable_box.voyd");
+    const { symbolTable, typing } = semanticsPipeline(ast);
+    const sumSymbol = symbolTable.resolve("sum", symbolTable.rootScope);
+    expect(sumSymbol).toBeDefined();
+    if (!sumSymbol) return;
+    const instantiations = typing.functionInstantiationInfo.get(sumSymbol);
+    expect(instantiations?.size).toBeGreaterThanOrEqual(2);
+  });
 });
