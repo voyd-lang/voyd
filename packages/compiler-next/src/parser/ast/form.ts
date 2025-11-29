@@ -1,6 +1,11 @@
 import { FastShiftArray } from "@voyd/lib/fast-shift-array.js";
 import { Expr } from "./expr.js";
-import { SourceLocation, Syntax, VerboseJSON } from "./syntax.js";
+import {
+  cloneAttributes,
+  SourceLocation,
+  Syntax,
+  VerboseJSON,
+} from "./syntax.js";
 import { IdentifierAtom, InternalIdentifierAtom } from "./atom.js";
 import { FormCursor } from "./form-cursor.js";
 import {
@@ -85,10 +90,12 @@ export class Form extends Syntax {
   }
 
   clone(): this {
-    return new this.ctor({
+    const cloned = new this.ctor({
       location: this.location?.clone(),
       elements: this.#elements.toArray().map((e) => e.clone()),
     });
+    cloned.attributes = this.attributes ? { ...this.attributes } : undefined;
+    return cloned;
   }
 
   slice(start?: number, end?: number): Form {
@@ -161,6 +168,9 @@ export class Form extends Syntax {
       id: this.syntaxId,
       location: this.location?.toJSON(),
       elements: this.#elements.toArray().map((e) => e.toVerboseJSON()),
+      ...(this.attributes
+        ? { attributes: cloneAttributes(this.attributes) }
+        : {}),
     };
   }
 

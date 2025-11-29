@@ -12,6 +12,7 @@ import type {
   ImplDeclId,
 } from "./ids.js";
 import type { IdentifierAtom } from "../parser/ast/atom.js";
+import type { IntrinsicAttribute } from "../parser/attributes.js";
 
 export interface ParameterDecl {
   id: ParameterDeclId;
@@ -48,6 +49,7 @@ export interface FunctionDecl {
   overloadSetId?: OverloadSetId;
   moduleIndex: number;
   implId?: ImplDeclId;
+  intrinsic?: IntrinsicAttribute;
 }
 
 export type FunctionDeclInput = Omit<FunctionDecl, "id" | "params"> & {
@@ -101,6 +103,7 @@ export interface TraitMethodDecl {
   typeParameters?: TypeParameterDecl[];
   returnTypeExpr?: Expr;
   defaultBody?: Expr;
+  intrinsic?: IntrinsicAttribute;
 }
 
 export type TraitMethodDeclInput = Omit<TraitMethodDecl, "params"> & {

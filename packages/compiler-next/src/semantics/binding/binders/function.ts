@@ -26,12 +26,24 @@ export const bindFunctionDecl = (
 ) => {
   const declarationScope = options.declarationScope ?? tracker.current();
   rememberSyntax(decl.form, ctx);
+  const intrinsicMetadata = decl.intrinsic;
+  const symbolMetadata: Record<string, unknown> = {
+    entity: "function",
+    ...options.metadata,
+  };
+
+  if (intrinsicMetadata) {
+    symbolMetadata.intrinsic = true;
+    symbolMetadata.intrinsicName = intrinsicMetadata.name;
+    symbolMetadata.intrinsicUsesSignature = intrinsicMetadata.usesSignature ?? false;
+  }
+
   const fnSymbol = ctx.symbolTable.declare(
     {
       name: decl.signature.name.value,
       kind: "value",
       declaredAt: decl.form.syntaxId,
-      metadata: { entity: "function", ...options.metadata },
+      metadata: symbolMetadata,
     },
     declarationScope
   );
@@ -62,6 +74,7 @@ export const bindFunctionDecl = (
     body: decl.body,
     moduleIndex: options.moduleIndex ?? ctx.nextModuleIndex++,
     implId: undefined,
+    intrinsic: intrinsicMetadata,
   });
 
   recordFunctionOverload(fnDecl, declarationScope, ctx);

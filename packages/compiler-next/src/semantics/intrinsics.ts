@@ -71,6 +71,10 @@ export const tagIntrinsicSymbols = ({
   }
 
   binding.functions.forEach((fn) => {
+    const record = binding.symbolTable.getSymbol(fn.symbol);
+    if ((record.metadata as IntrinsicMetadata | undefined)?.intrinsic) {
+      return;
+    }
     const metadata = moduleIntrinsics.get(fn.name);
     if (!metadata) {
       return;

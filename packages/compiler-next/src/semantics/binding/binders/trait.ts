@@ -6,6 +6,7 @@ import {
   isIdentifierAtom,
   formCallsInternal,
 } from "../../../parser/index.js";
+import type { IntrinsicAttribute } from "../../../parser/attributes.js";
 import { rememberSyntax } from "../context.js";
 import type {
   TraitMethodDeclInput,
@@ -16,10 +17,11 @@ import type {
 } from "../../decls.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
 import type { BindingContext } from "../types.js";
-import type {
-  ParsedTraitDecl,
-  ParsedTraitMethod,
-  ParsedFunctionDecl,
+import {
+  normalizeIntrinsicAttribute,
+  type ParsedTraitDecl,
+  type ParsedTraitMethod,
+  type ParsedFunctionDecl,
 } from "../parsing.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { bindExpr } from "./expressions.js";
@@ -131,6 +133,7 @@ const bindTraitMethod = ({
     typeParameters,
     returnTypeExpr: decl.signature.returnType,
     defaultBody: decl.body,
+    intrinsic: decl.intrinsic,
   };
 };
 
@@ -247,6 +250,11 @@ export const makeParsedFunctionFromTraitMethod = (
       returnType,
     },
     body: clonedDefaultBody ?? form,
+    intrinsic: normalizeIntrinsicAttribute(
+      (form.attributes?.intrinsic as IntrinsicAttribute | undefined) ??
+        method.intrinsic,
+      nameAst.value
+    ),
   };
 };
 
