@@ -3,14 +3,14 @@
   "version": "0.9.0",
   "description": "Voyd next-gen compiler experiments",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/compiler-next/src/pipeline.js",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
+      "types": "./src/pipeline.ts",
+      "import": "./dist/compiler-next/src/pipeline.js",
+      "default": "./dist/compiler-next/src/pipeline.js"
     },
-    "./*": "./dist/*"
+    "./*": "./dist/compiler-next/src/*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
