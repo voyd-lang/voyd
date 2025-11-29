@@ -1,0 +1,12 @@
+{
+  "name": "@voyd/std",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Voyd standard library sources",
+  "scripts": {
+    "build": "echo 'standard library source bundle'",
+    "typecheck": "echo 'no types for voyd std'",
+    "test": "echo 'no tests for std'",
+    "lint": "echo 'no lint configured'"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@voyd/browser-compiler",
+  "version": "0.9.0",
+  "description": "Browser-compatible entrypoints for the Voyd compiler",
+  "type": "module",
+  "main": "./dist/browser/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/browser.ts",
+      "import": "./dist/browser/index.js",
+      "default": "./dist/browser/index.js"
+    },
+    "./*": "./dist/*"
+  },
+  "scripts": {
+    "build": "vite build -c ../../vite.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo 'no tests for browser compiler yet'",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@voyd/compiler": "0.9.0",
+    "@voyd/lib": "0.9.0",
+    "binaryen": "^123.0.0"
+  }
+}

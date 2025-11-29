@@ -1,0 +1,25 @@
+{
+  "name": "@voyd/lib",
+  "version": "0.9.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/lib/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./*": "./dist/*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config ../../vitest.config.ts src/lib/__tests__",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^3.1.2",
+    "binaryen": "^123.0.0",
+    "commander": "^14.0.0"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@voyd/reference",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Voyd language reference documentation",
+  "scripts": {
+    "build": "echo 'documentation only'",
+    "typecheck": "echo 'documentation only'",
+    "test": "echo 'no tests for reference docs'",
+    "lint": "echo 'no lint configured'"
+  }
+}
