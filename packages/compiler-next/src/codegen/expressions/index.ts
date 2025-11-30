@@ -16,6 +16,7 @@ import {
   compileObjectLiteralExpr,
   compileTupleExpr,
 } from "./objects.js";
+import { compileLambdaExpr } from "./lambdas.js";
 import {
   compileIdentifierExpr,
   compileLiteralExpr,
@@ -82,6 +83,8 @@ export const compileExpression: ExpressionCompiler = ({
       return compileFieldAccessExpr(expr, ctx, fnCtx, compileExpression);
     case "tuple":
       return compileTupleExpr(expr, ctx, fnCtx, compileExpression);
+    case "lambda":
+      return compileLambdaExpr(expr, ctx, fnCtx, compileExpression);
     default:
       throw new Error(
         `codegen does not support ${expr.exprKind} expressions yet`

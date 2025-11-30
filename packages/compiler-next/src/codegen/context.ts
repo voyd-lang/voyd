@@ -80,6 +80,15 @@ export interface FixedArrayWasmType {
   heapType: HeapTypeRef;
 }
 
+export interface ClosureTypeInfo {
+  key: string;
+  typeId: TypeId;
+  interfaceType: binaryen.Type;
+  fnRefType: binaryen.Type;
+  paramTypes: readonly binaryen.Type[];
+  resultType: binaryen.Type;
+}
+
 export interface CodegenContext {
   mod: binaryen.Module;
   moduleId: string;
@@ -94,13 +103,43 @@ export interface CodegenContext {
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
   fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
+  closureTypes: Map<string, ClosureTypeInfo>;
+  closureFunctionTypes: Map<string, binaryen.Type>;
+  lambdaEnvs: Map<
+    string,
+    {
+      envType: binaryen.Type;
+      captures: readonly {
+        symbol: SymbolId;
+        typeId: TypeId;
+        wasmType: binaryen.Type;
+        mutable: boolean;
+        fieldIndex: number;
+      }[];
+      base: ClosureTypeInfo;
+      typeId: TypeId;
+    }
+  >;
+  lambdaFunctions: Map<string, string>;
   rtt: ReturnType<typeof createRttContext>;
 }
 
-export interface LocalBinding {
-  index: number;
-  type: binaryen.Type;
-}
+export type LocalBinding =
+  | {
+      kind: "local";
+      index: number;
+      type: binaryen.Type;
+      typeId?: TypeId;
+    }
+  | {
+      kind: "capture";
+      envIndex: number;
+      envType: binaryen.Type;
+      fieldIndex: number;
+      type: binaryen.Type;
+      typeId: TypeId;
+      mutable: boolean;
+    };
 
 export interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;

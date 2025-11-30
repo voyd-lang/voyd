@@ -60,6 +60,10 @@ export const codegenProgram = ({
     itemsToSymbols: new Map(),
     structTypes: new Map(),
     fixedArrayTypes: new Map(),
+    closureTypes: new Map(),
+    closureFunctionTypes: new Map(),
+    lambdaEnvs: new Map(),
+    lambdaFunctions: new Map(),
     rtt,
   }));
 

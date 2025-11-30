@@ -5,7 +5,7 @@ import type {
   HirExpression,
   SymbolId,
 } from "../context.js";
-import { getRequiredBinding } from "../locals.js";
+import { getRequiredBinding, loadBindingValue } from "../locals.js";
 
 export const compileLiteralExpr = (
   expr: HirExpression & {
@@ -60,8 +60,5 @@ export const compileIdentifierExpr = (
   fnCtx: FunctionContext
 ): CompiledExpression => {
   const binding = getRequiredBinding(expr.symbol, ctx, fnCtx);
-  return {
-    expr: ctx.mod.local.get(binding.index, binding.type),
-    usedReturnCall: false,
-  };
+  return { expr: loadBindingValue(binding, ctx), usedReturnCall: false };
 };

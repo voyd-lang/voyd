@@ -8,13 +8,17 @@ import type {
   FunctionMetadata,
   HirCallExpr,
   HirExprId,
+  TypeId,
 } from "../context.js";
 import { compileIntrinsicCall } from "../intrinsics.js";
 import { requiresStructuralConversion, coerceValueToType } from "../structural.js";
 import {
+  getClosureTypeInfo,
   getExprBinaryenType,
   getRequiredExprType,
 } from "../types.js";
+import { allocateTempLocal } from "../locals.js";
+import { callRef, refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 
 export const compileCallExpr = (
   expr: HirCallExpr,
@@ -55,52 +59,69 @@ export const compileCallExpr = (
     });
   }
 
-  if (callee.exprKind !== "identifier") {
-    throw new Error("codegen only supports direct identifier calls today");
-  }
-
-  const symbolRecord = ctx.symbolTable.getSymbol(callee.symbol);
-  const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
-    intrinsic?: boolean;
-    intrinsicName?: string;
-    intrinsicUsesSignature?: boolean;
-  };
-
-  const shouldCompileIntrinsic =
-    intrinsicMetadata.intrinsic === true &&
-    intrinsicMetadata.intrinsicUsesSignature !== true;
-
-  if (shouldCompileIntrinsic) {
-    const args = expr.args.map(
-      (arg) => compileExpr({ exprId: arg.expr, ctx, fnCtx }).expr
-    );
-    return {
-      expr: compileIntrinsicCall({
-        name: intrinsicMetadata.intrinsicName ?? symbolRecord.name,
-        call: expr,
-        args,
-        ctx,
-        fnCtx,
-        instanceKey: fnCtx.instanceKey,
-      }),
-      usedReturnCall: false,
-    };
-  }
-
-  const meta = getFunctionMetadataForCall({
-    symbol: callee.symbol,
-    callId: expr.id,
+  const calleeTypeId = getRequiredExprType(
+    expr.callee,
     ctx,
-  });
-  if (!meta) {
-    throw new Error(`codegen missing metadata for symbol ${callee.symbol}`);
+    fnCtx.instanceKey
+  );
+  const calleeDesc = ctx.typing.arena.get(calleeTypeId);
+
+  if (callee.exprKind === "identifier") {
+    const symbolRecord = ctx.symbolTable.getSymbol(callee.symbol);
+    const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
+      intrinsic?: boolean;
+      intrinsicName?: string;
+      intrinsicUsesSignature?: boolean;
+    };
+
+    const shouldCompileIntrinsic =
+      intrinsicMetadata.intrinsic === true &&
+      intrinsicMetadata.intrinsicUsesSignature !== true;
+
+    if (shouldCompileIntrinsic) {
+      const args = expr.args.map(
+        (arg) => compileExpr({ exprId: arg.expr, ctx, fnCtx }).expr
+      );
+      return {
+        expr: compileIntrinsicCall({
+          name: intrinsicMetadata.intrinsicName ?? symbolRecord.name,
+          call: expr,
+          args,
+          ctx,
+          fnCtx,
+          instanceKey: fnCtx.instanceKey,
+        }),
+        usedReturnCall: false,
+      };
+    }
+
+    const meta = getFunctionMetadataForCall({
+      symbol: callee.symbol,
+      callId: expr.id,
+      ctx,
+    });
+    if (meta) {
+      const args = compileCallArguments(expr, meta, ctx, fnCtx, compileExpr);
+      return emitResolvedCall(meta, args, expr.id, ctx, {
+        tailPosition,
+        expectedResultTypeId,
+        instanceKey: fnCtx.instanceKey,
+      });
+    }
   }
-  const args = compileCallArguments(expr, meta, ctx, fnCtx, compileExpr);
-  return emitResolvedCall(meta, args, expr.id, ctx, {
-    tailPosition,
-    expectedResultTypeId,
-    instanceKey: fnCtx.instanceKey,
-  });
+
+  if (calleeDesc.kind === "function") {
+    return compileClosureCall({
+      expr,
+      calleeTypeId,
+      calleeDesc,
+      ctx,
+      fnCtx,
+      compileExpr,
+    });
+  }
+
+  throw new Error("codegen only supports function and closure calls today");
 };
 
 const emitResolvedCall = (
@@ -162,6 +183,93 @@ const compileCallArguments = (
       fnCtx,
     });
   });
+};
+
+const compileClosureArguments = (
+  call: HirCallExpr,
+  desc: {
+    parameters: readonly { type: TypeId; label?: string; optional?: boolean }[];
+  },
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  compileExpr: ExpressionCompiler
+): binaryen.ExpressionRef[] => {
+  return call.args.map((arg, index) => {
+    const expectedTypeId = desc.parameters[index]?.type;
+    const actualTypeId = getRequiredExprType(
+      arg.expr,
+      ctx,
+      fnCtx.instanceKey
+    );
+    const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
+    return coerceValueToType({
+      value: value.expr,
+      actualType: actualTypeId,
+      targetType: expectedTypeId,
+      ctx,
+      fnCtx,
+    });
+  });
+};
+
+const compileClosureCall = ({
+  expr,
+  calleeTypeId,
+  calleeDesc,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  expr: HirCallExpr;
+  calleeTypeId: TypeId;
+  calleeDesc: {
+    kind: "function";
+    parameters: readonly { type: TypeId; label?: string; optional?: boolean }[];
+    returnType: TypeId;
+  };
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): CompiledExpression => {
+  const base = getClosureTypeInfo(calleeTypeId, ctx);
+  const closureValue = compileExpr({ exprId: expr.callee, ctx, fnCtx });
+  const closureTemp = allocateTempLocal(base.interfaceType, fnCtx);
+  const ops: binaryen.ExpressionRef[] = [
+    ctx.mod.local.set(closureTemp.index, closureValue.expr),
+  ];
+  const fnField = structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: 0,
+    fieldType: binaryen.funcref,
+    exprRef: ctx.mod.local.get(closureTemp.index, base.interfaceType),
+  });
+  const targetFn =
+    base.fnRefType === binaryen.funcref
+      ? fnField
+      : refCast(ctx.mod, fnField, base.fnRefType);
+  const args = compileClosureArguments(expr, calleeDesc, ctx, fnCtx, compileExpr);
+  const call = callRef(
+    ctx.mod,
+    targetFn,
+    [
+      ctx.mod.local.get(closureTemp.index, base.interfaceType),
+      ...args,
+    ] as number[],
+    base.resultType
+  );
+
+  ops.push(call);
+  return {
+    expr:
+      ops.length === 1
+        ? ops[0]!
+        : ctx.mod.block(
+            null,
+            ops,
+            getExprBinaryenType(expr.id, ctx, fnCtx.instanceKey)
+          ),
+    usedReturnCall: false,
+  };
 };
 
 const getFunctionMetadataForCall = ({

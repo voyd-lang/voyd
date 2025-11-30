@@ -1,0 +1,49 @@
+fn make_counter(start: i32)
+  var current = start
+  () -> i32 =>
+    current = current + 1
+    current
+
+fn nested_sum()
+  let inc = make_counter(0)
+  let other = make_counter(10)
+  let a = inc()
+  let b = inc()
+  let c = other()
+  a + b + c
+
+fn apply_twice(value: i32, op: (i32) -> i32)
+  op(op(value))
+
+fn generic_pipe<T>(value: T, op: (T) -> T)
+  op(value)
+
+fn returner(x: i32)
+  (y: i32) -> i32 => x + y
+
+fn nested_return(base: i32)
+  (offset: i32) =>
+    (extra: i32) => base + offset + extra
+
+fn make_pair(x: i32, y: i32)
+  () => { first: x, second: y }
+
+fn pair_sum()
+  let pair_maker = make_pair(3, 4)
+  let pair = pair_maker()
+  pair.first + pair.second
+
+pub fn main() -> i32
+  let adder = returner(3)
+  let total = adder(4)
+  let counter = make_counter(5)
+  counter()
+  counter()
+  let count = counter()
+  let nested = nested_sum()
+  let doubled = apply_twice(5, (n) => n * 2)
+  let piped = generic_pipe(7, (n: i32) => n + 3)
+  let nested_lambda = nested_return(2)
+  let nested_total = nested_lambda(3)(4)
+  let pair_total = pair_sum()
+  total + count + nested + doubled + piped + nested_total + pair_total

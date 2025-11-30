@@ -240,7 +240,12 @@ const compileFunctionItem = (
         `codegen missing parameter type for symbol ${param.symbol}`
       );
     }
-  fnCtx.bindings.set(param.symbol, { index, type });
+    fnCtx.bindings.set(param.symbol, {
+      kind: "local",
+      index,
+      type,
+      typeId: meta.paramTypeIds[index],
+    });
   });
 
   const body = compileExpression({

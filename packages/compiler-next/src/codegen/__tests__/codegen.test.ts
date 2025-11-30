@@ -313,6 +313,11 @@ describe("next codegen", () => {
     expect(main()).toBe(7);
   });
 
+  it("emits wasm for lambdas with captures, mutation, and nesting", () => {
+    const main = loadMain("lambdas.voyd");
+    expect(main()).toBe(75);
+  });
+
   it("handles attribute-tagged intrinsics through codegen", () => {
     const instance = loadWasmInstance("intrinsic_attributes_codegen.voyd");
     const main = instance.exports.main;
