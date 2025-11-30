@@ -28,6 +28,8 @@ describe("lambda typing", () => {
     expect(doubled).toBeDefined();
     if (!doubled) return;
     const doubledTypeId = typing.table.getExprType(doubled.id);
+    expect(doubledTypeId).toBeDefined();
+    if (doubledTypeId === undefined) return;
     const doubledType = typing.arena.get(doubledTypeId);
     expect(doubledType.kind).toBe("function");
     if (doubledType.kind !== "function") return;
@@ -37,9 +39,10 @@ describe("lambda typing", () => {
     const incrementer = lambdaByParam(hir, symbolTable, "value");
     expect(incrementer).toBeDefined();
     if (!incrementer) return;
-    const incrementerType = typing.arena.get(
-      typing.table.getExprType(incrementer.id)
-    );
+    const incrementerTypeId = typing.table.getExprType(incrementer.id);
+    expect(incrementerTypeId).toBeDefined();
+    if (incrementerTypeId === undefined) return;
+    const incrementerType = typing.arena.get(incrementerTypeId);
     expect(incrementerType.kind).toBe("function");
     if (incrementerType.kind !== "function") return;
     expect(incrementerType.parameters.map((param) => param.type)).toEqual([
@@ -50,9 +53,10 @@ describe("lambda typing", () => {
     const trimmed = lambdaByParam(hir, symbolTable, "n");
     expect(trimmed).toBeDefined();
     if (!trimmed) return;
-    const trimmedType = typing.arena.get(
-      typing.table.getExprType(trimmed.id)
-    );
+    const trimmedTypeId = typing.table.getExprType(trimmed.id);
+    expect(trimmedTypeId).toBeDefined();
+    if (trimmedTypeId === undefined) return;
+    const trimmedType = typing.arena.get(trimmedTypeId);
     expect(trimmedType.kind).toBe("function");
     if (trimmedType.kind !== "function") return;
     expect(trimmedType.parameters.map((param) => param.type)).toEqual([i32]);

@@ -137,17 +137,17 @@ export const lowerExpr = (
       return lowerIf(expr, ctx, scopes);
     }
 
-  if (expr.calls("while")) {
-    return lowerWhile(expr, ctx, scopes);
-  }
+    if (expr.calls("while")) {
+      return lowerWhile(expr, ctx, scopes);
+    }
 
-  if (expr.calls("=>")) {
-    return lowerLambda(expr, ctx, scopes);
-  }
+    if (expr.calls("=>")) {
+      return lowerLambda(expr, ctx, scopes);
+    }
 
-  if (expr.calls("tuple") || expr.callsInternal("tuple")) {
-    return lowerTupleExpr(expr, ctx, scopes);
-  }
+    if (expr.calls("tuple") || expr.callsInternal("tuple")) {
+      return lowerTupleExpr(expr, ctx, scopes);
+    }
 
     if (expr.calls("=")) {
       return lowerAssignment(expr, ctx, scopes);
@@ -305,9 +305,7 @@ const lowerMatch = (
     const binderPattern: HirPattern = {
       kind: "identifier",
       symbol: binderSymbol,
-      span: toSourceSpan(
-        (potentialBinder as Syntax | undefined) ?? form
-      ),
+      span: toSourceSpan((potentialBinder as Syntax | undefined) ?? form),
     };
     return ctx.builder.addExpression({
       kind: "expr",
@@ -858,11 +856,7 @@ const lowerLambda = (
     })
   );
 
-  const returnType = lowerTypeExpr(
-    signature.returnType,
-    ctx,
-    scopes.current()
-  );
+  const returnType = lowerTypeExpr(signature.returnType, ctx, scopes.current());
   const effectType = lowerTypeExpr(signature.effectType, ctx, scopes.current());
   const body = lowerExpr(bodyExpr, ctx, scopes);
 
@@ -923,9 +917,9 @@ const lowerLambdaParameter = (
   }
 
   if (isForm(param)) {
-    const nestedParams = param.toArray().map((entry) =>
-      lowerLambdaParameter(entry, ctx, scopes)
-    );
+    const nestedParams = param
+      .toArray()
+      .map((entry) => lowerLambdaParameter(entry, ctx, scopes));
     if (nestedParams.length !== 1) {
       throw new Error("unexpected nested lambda parameter structure");
     }

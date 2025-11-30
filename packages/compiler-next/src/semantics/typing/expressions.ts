@@ -791,6 +791,7 @@ const typeFunctionCall = ({
   callId,
   ctx,
   state,
+  calleeExprId,
 }: {
   args: readonly Arg[];
   signature: FunctionSignature;

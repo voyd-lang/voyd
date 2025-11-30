@@ -3,6 +3,7 @@ import type {
   CodegenContext,
   FunctionContext,
   LocalBinding,
+  LocalBindingLocal,
   SymbolId,
 } from "./context.js";
 import { refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
@@ -43,8 +44,8 @@ export const allocateTempLocal = (
   type: binaryen.Type,
   fnCtx: FunctionContext,
   typeId?: number
-): LocalBinding => {
-  const binding: LocalBinding = {
+): LocalBindingLocal => {
+  const binding: LocalBindingLocal = {
     kind: "local",
     index: fnCtx.nextLocalIndex,
     type,

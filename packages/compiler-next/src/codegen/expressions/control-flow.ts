@@ -9,7 +9,7 @@ import type {
   HirMatchExpr,
   HirPattern,
   HirWhileExpr,
-  LocalBinding,
+  LocalBindingLocal,
   TypeId,
 } from "../context.js";
 import { allocateTempLocal } from "../locals.js";
@@ -203,7 +203,7 @@ export const compileMatchExpr = (
 
 const compileMatchCondition = (
   pattern: HirPattern & { kind: "type" },
-  discriminant: LocalBinding,
+  discriminant: LocalBindingLocal,
   ctx: CodegenContext,
   duplicateNominals: ReadonlySet<TypeId>
 ): binaryen.ExpressionRef => {

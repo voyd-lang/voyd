@@ -15,6 +15,7 @@ import type {
   HirFieldAccessExpr,
   HirCallExpr,
   HirTypeExpr,
+  HirLambdaExpr,
 } from "../semantics/hir/index.js";
 import type {
   HirExprId,
@@ -124,23 +125,27 @@ export interface CodegenContext {
   rtt: ReturnType<typeof createRttContext>;
 }
 
-export type LocalBinding =
-  | {
-      kind: "local";
-      index: number;
-      type: binaryen.Type;
-      typeId?: TypeId;
-    }
-  | {
-      kind: "capture";
-      envIndex: number;
-      envType: binaryen.Type;
-      envSuperType: binaryen.Type;
-      fieldIndex: number;
-      type: binaryen.Type;
-      typeId: TypeId;
-      mutable: boolean;
-    };
+export interface LocalBindingBase {
+  type: binaryen.Type;
+  typeId?: TypeId;
+}
+
+export interface LocalBindingLocal extends LocalBindingBase {
+  kind: "local";
+  index: number;
+}
+
+export interface LocalBindingCapture extends LocalBindingBase {
+  kind: "capture";
+  envIndex: number;
+  envType: binaryen.Type;
+  envSuperType: binaryen.Type;
+  fieldIndex: number;
+  typeId: TypeId;
+  mutable: boolean;
+}
+
+export type LocalBinding = LocalBindingLocal | LocalBindingCapture;
 
 export interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;
@@ -197,4 +202,5 @@ export type {
   HirStmtId,
   SymbolId,
   TypeId,
+  HirLambdaExpr,
 };
