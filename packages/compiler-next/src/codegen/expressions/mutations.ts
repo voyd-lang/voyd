@@ -10,7 +10,7 @@ import { compilePatternInitialization } from "../patterns.js";
 import { coerceValueToType } from "../structural.js";
 import { getRequiredBinding } from "../locals.js";
 import { getRequiredExprType, getSymbolTypeId } from "../types.js";
-import { structSetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
+import { refCast, structSetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 
 export const compileAssignExpr = (
   expr: HirAssignExpr,
@@ -63,11 +63,16 @@ export const compileAssignExpr = (
     if (!binding.mutable) {
       throw new Error("cannot assign to immutable capture");
     }
+    const envRef = ctx.mod.local.get(binding.envIndex, binding.envSuperType);
+    const typedEnv =
+      binding.envType === binding.envSuperType
+        ? envRef
+        : refCast(ctx.mod, envRef, binding.envType);
     return {
       expr: structSetFieldValue({
         mod: ctx.mod,
         fieldIndex: binding.fieldIndex,
-        ref: ctx.mod.local.get(binding.envIndex, binding.envType),
+        ref: typedEnv,
         value: coerced,
       }),
       usedReturnCall: false,

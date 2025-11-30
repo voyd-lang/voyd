@@ -135,6 +135,7 @@ export type LocalBinding =
       kind: "capture";
       envIndex: number;
       envType: binaryen.Type;
+      envSuperType: binaryen.Type;
       fieldIndex: number;
       type: binaryen.Type;
       typeId: TypeId;

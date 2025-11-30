@@ -19,7 +19,7 @@ import {
   wasmTypeFor,
 } from "./types.js";
 import { asStatement } from "./expressions/utils.js";
-import { structSetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
+import { refCast, structSetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 
 export interface PatternInitOptions {
   declare: boolean;
@@ -68,10 +68,15 @@ const storeIntoBinding = ({
     if (!binding.mutable) {
       throw new Error("cannot assign to immutable capture");
     }
+    const envRef = ctx.mod.local.get(binding.envIndex, binding.envSuperType);
+    const typedEnv =
+      binding.envType === binding.envSuperType
+        ? envRef
+        : refCast(ctx.mod, envRef, binding.envType);
     return structSetFieldValue({
       mod: ctx.mod,
       fieldIndex: binding.fieldIndex,
-      ref: ctx.mod.local.get(binding.envIndex, binding.envType),
+      ref: typedEnv,
       value: coerced,
     });
   }

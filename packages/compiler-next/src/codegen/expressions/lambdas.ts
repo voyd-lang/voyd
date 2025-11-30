@@ -127,7 +127,8 @@ const emitLambdaFunction = ({
     lambdaCtx.bindings.set(capture.symbol, {
       kind: "capture",
       envIndex: 0,
-      envType: env.base.interfaceType,
+      envType: env.envType,
+      envSuperType: env.base.interfaceType,
       fieldIndex: capture.fieldIndex,
       type: capture.wasmType,
       typeId: capture.typeId,

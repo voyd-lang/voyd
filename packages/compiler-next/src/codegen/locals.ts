@@ -5,7 +5,7 @@ import type {
   LocalBinding,
   SymbolId,
 } from "./context.js";
-import { structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
+import { refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 import { getSymbolTypeId, wasmTypeFor } from "./types.js";
 
 export const declareLocal = (
@@ -62,10 +62,15 @@ export const loadBindingValue = (
   if (binding.kind === "local") {
     return ctx.mod.local.get(binding.index, binding.type);
   }
+  const envRef = ctx.mod.local.get(binding.envIndex, binding.envSuperType);
+  const typedEnv =
+    binding.envType === binding.envSuperType
+      ? envRef
+      : refCast(ctx.mod, envRef, binding.envType);
   return structGetFieldValue({
     mod: ctx.mod,
     fieldIndex: binding.fieldIndex,
     fieldType: binding.type,
-    exprRef: ctx.mod.local.get(binding.envIndex, binding.envType),
+    exprRef: typedEnv,
   });
 };
