@@ -61,11 +61,13 @@ describe("trait objects", () => {
     const doDoubleExpr = doDoubleBody
       ? hir.expressions.get(doDoubleBody)
       : undefined;
+    const blockValue =
+      doDoubleExpr?.exprKind === "block" ? doDoubleExpr.value : undefined;
     const doDoubleCall =
       doDoubleExpr?.exprKind === "call"
         ? doDoubleExpr
-        : doDoubleExpr?.exprKind === "block"
-          ? hir.expressions.get((doDoubleExpr as HirBlockExpr).value)
+        : typeof blockValue === "number"
+          ? hir.expressions.get(blockValue)
           : undefined;
     expect(doDoubleCall?.exprKind).toBe("call");
     if (doDoubleCall) {

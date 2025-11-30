@@ -512,6 +512,9 @@ const makeDependencyContext = (
   typeAliases: dependency.typing.typeAliases,
   primitives: dependency.typing.primitives,
   intrinsicTypes: dependency.typing.intrinsicTypes,
+  traitImplsByNominal: new Map(dependency.typing.traitImplsByNominal),
+  traitImplsByTrait: new Map(dependency.typing.traitImplsByTrait),
+  traitMethodImpls: new Map(dependency.typing.traitMethodImpls),
   diagnostics: new DiagnosticEmitter(),
 });
 

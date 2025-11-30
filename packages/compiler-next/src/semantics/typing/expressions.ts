@@ -893,7 +893,7 @@ const resolveCurriedCallReturnType = ({
   while (true) {
     const desc = ctx.arena.get(currentType);
     if (desc.kind !== "function") {
-      reportNonFunctionCallee({ callSpan, calleeSpan, ctx });
+      return reportNonFunctionCallee({ callSpan, calleeSpan, ctx });
     }
 
     const { parameters, returnType } = desc;
