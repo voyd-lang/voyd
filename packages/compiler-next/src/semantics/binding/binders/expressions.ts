@@ -10,6 +10,7 @@ import { rememberSyntax } from "../context.js";
 import { reportOverloadNameCollision } from "../overloads.js";
 import type { BindingContext } from "../types.js";
 import type { ScopeId } from "../../ids.js";
+import { parseLambdaSignature } from "../../lambda.js";
 import { ensureForm } from "./utils.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 
@@ -32,6 +33,11 @@ export const bindExpr = (
 
   if (expr.calls("match")) {
     bindMatch(expr, ctx, tracker);
+    return;
+  }
+
+  if (expr.calls("=>")) {
+    bindLambda(expr, ctx, tracker);
     return;
   }
 
@@ -179,6 +185,94 @@ const bindVar = (
     declarationSpan: toSourceSpan(patternExpr as Syntax),
   });
   bindExpr(initializer, ctx, tracker);
+};
+
+const bindLambda = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  const signatureExpr = form.at(1);
+  const bodyExpr = form.at(2);
+  if (!signatureExpr || !bodyExpr) {
+    throw new Error("lambda expression missing signature or body");
+  }
+
+  rememberSyntax(form, ctx);
+  rememberSyntax(signatureExpr as Syntax, ctx);
+  rememberSyntax(bodyExpr as Syntax, ctx);
+
+  const signature = parseLambdaSignature(signatureExpr);
+  const scope = ctx.symbolTable.createScope({
+    parent: tracker.current(),
+    kind: "lambda",
+    owner: form.syntaxId,
+  });
+  ctx.scopeByNode.set(form.syntaxId, scope);
+
+  tracker.enterScope(scope, () => {
+    signature.typeParameters?.forEach((param) => {
+      rememberSyntax(param, ctx);
+      ctx.symbolTable.declare({
+        name: param.value,
+        kind: "type-parameter",
+        declaredAt: param.syntaxId,
+      });
+    });
+
+    signature.parameters.forEach((param) =>
+      declareLambdaParam(param, scope, ctx)
+    );
+    bindExpr(bodyExpr, ctx, tracker);
+  });
+};
+
+const declareLambdaParam = (
+  param: Expr,
+  scope: ScopeId,
+  ctx: BindingContext
+): void => {
+  if (isIdentifierAtom(param)) {
+    rememberSyntax(param, ctx);
+    reportOverloadNameCollision(param.value, scope, param, ctx);
+    ctx.symbolTable.declare(
+      {
+        name: param.value,
+        kind: "parameter",
+        declaredAt: param.syntaxId,
+      },
+      scope
+    );
+    return;
+  }
+
+  if (isForm(param) && param.calls(":")) {
+    const nameExpr = param.at(1);
+    if (!isIdentifierAtom(nameExpr)) {
+      throw new Error("lambda parameter name must be an identifier");
+    }
+    rememberSyntax(nameExpr, ctx);
+    rememberSyntax(param.at(2) as Syntax, ctx);
+    reportOverloadNameCollision(nameExpr.value, scope, param, ctx);
+    ctx.symbolTable.declare(
+      {
+        name: nameExpr.value,
+        kind: "parameter",
+        declaredAt: param.syntaxId,
+      },
+      scope
+    );
+    return;
+  }
+
+  if (isForm(param)) {
+    param.toArray().forEach((entry) =>
+      declareLambdaParam(entry, scope, ctx)
+    );
+    return;
+  }
+
+  throw new Error("unsupported lambda parameter form");
 };
 
 const declarePatternBindings = (

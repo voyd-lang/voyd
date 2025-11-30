@@ -1,13 +1,22 @@
+import binaryen from "binaryen";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
 import { codegen } from "../index.js";
+import { createRttContext } from "../rtt/index.js";
+import {
+  compileFunctions,
+  emitModuleExports,
+  registerFunctionMetadata,
+  registerImportMetadata,
+} from "../functions.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
 import type { TypingResult } from "../../semantics/typing/types.js";
 import type { TypeId } from "../../semantics/ids.js";
+import type { CodegenContext, FunctionMetadata } from "../context.js";
 
 const loadAst = (fixtureName: string) => {
   const source = readFileSync(
@@ -43,6 +52,48 @@ const getNominalPatternDesc = (typeId: TypeId, typing: TypingResult) => {
     }
   }
   throw new Error("expected match pattern to include a nominal component");
+};
+
+const DEFAULT_OPTIONS = { optimize: false, validate: true } as const;
+
+const sanitizeIdentifier = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const buildCodegenProgram = (
+  modules: readonly ReturnType<typeof semanticsPipeline>[]
+): { mod: binaryen.Module; contexts: CodegenContext[] } => {
+  const mod = new binaryen.Module();
+  mod.setFeatures(binaryen.Features.All);
+  const rtt = createRttContext(mod);
+  const functions = new Map<string, FunctionMetadata[]>();
+  const functionInstances = new Map<string, FunctionMetadata>();
+  const contexts: CodegenContext[] = modules.map((sem) => ({
+    mod,
+    moduleId: sem.moduleId,
+    moduleLabel: sanitizeIdentifier(sem.hir.module.path),
+    binding: sem.binding,
+    symbolTable: sem.symbolTable,
+    hir: sem.hir,
+    typing: sem.typing,
+    options: DEFAULT_OPTIONS,
+    functions,
+    functionInstances,
+    itemsToSymbols: new Map(),
+    structTypes: new Map(),
+    fixedArrayTypes: new Map(),
+    closureTypes: new Map(),
+    closureFunctionTypes: new Map(),
+    lambdaEnvs: new Map(),
+    lambdaFunctions: new Map(),
+    rtt,
+  }));
+
+  contexts.forEach(registerFunctionMetadata);
+  contexts.forEach(registerImportMetadata);
+  contexts.forEach(compileFunctions);
+  emitModuleExports(contexts[0]!);
+
+  return { mod, contexts };
 };
 
 describe("next codegen", () => {
@@ -313,11 +364,101 @@ describe("next codegen", () => {
     expect(main()).toBe(7);
   });
 
+  it("emits wasm for lambdas with captures, mutation, and nesting", () => {
+    const main = loadMain("lambdas.voyd");
+    expect(main()).toBe(75);
+  });
+
+  it("marks lambda captures mutable and reuses the canonical closure call_ref heap type", () => {
+    const ast = loadAst("lambdas.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module } = codegen(semantics);
+    const text = module.emitText();
+    const typeLines = text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("(type"));
+    expect(
+      typeLines.some((line) =>
+        line.includes("__closure_base_lambdas_voyd")
+      )
+    ).toBe(true);
+    expect(
+      typeLines.some(
+        (line) =>
+          line.includes("__lambda_env_12_1") && line.includes("(mut i32")
+      )
+    ).toBe(true);
+    const callRefs = text
+      .split("\n")
+      .filter((line) => line.trim().startsWith("(call_ref"));
+    expect(callRefs.length).toBeGreaterThan(0);
+    expect(callRefs.every((line) => /\$[A-Za-z0-9_]+/.test(line))).toBe(true);
+    expect(callRefs.every((line) => !line.includes("funcref"))).toBe(true);
+  });
+
+  it("resolves overloads in nested lambda instances and preserves captures", () => {
+    const main = loadMain("lambda_overload_instances.voyd");
+    expect(main()).toBe(54);
+  });
+
   it("handles attribute-tagged intrinsics through codegen", () => {
     const instance = loadWasmInstance("intrinsic_attributes_codegen.voyd");
     const main = instance.exports.main;
     expect(typeof main).toBe("function");
     expect((main as () => number)()).toBe(3);
     expect(typeof instance.exports.get_wrapper).toBe("function");
+  });
+
+  it("keeps closure heap caches scoped per module and deterministic", () => {
+    const moduleA = semanticsPipeline(loadAst("lambda_multi_module_a.voyd"));
+    const moduleB = semanticsPipeline(loadAst("lambda_multi_module_b.voyd"));
+    const {
+      mod: combined,
+      contexts: [ctxA, ctxB],
+    } = buildCodegenProgram([moduleA, moduleB]);
+
+    const lambdaCount = (sem: typeof moduleA) =>
+      Array.from(sem.hir.expressions.values()).filter(
+        (expr) => expr.exprKind === "lambda"
+      ).length;
+
+    const envKeysA = Array.from(ctxA.lambdaEnvs.keys());
+    const envKeysB = Array.from(ctxB.lambdaEnvs.keys());
+    expect(envKeysA.every((key) => key.startsWith(`${moduleA.moduleId}::`))).toBe(
+      true
+    );
+    expect(envKeysB.every((key) => key.startsWith(`${moduleB.moduleId}::`))).toBe(
+      true
+    );
+    expect(new Set([...envKeysA, ...envKeysB]).size).toBe(
+      envKeysA.length + envKeysB.length
+    );
+    expect(ctxA.lambdaEnvs.size).toBe(lambdaCount(moduleA));
+    expect(ctxB.lambdaEnvs.size).toBe(lambdaCount(moduleB));
+
+    const closureKeysA = Array.from(ctxA.closureTypes.keys());
+    const closureKeysB = Array.from(ctxB.closureTypes.keys());
+    expect(
+      closureKeysA.every((key) => key.startsWith(`${moduleA.moduleId}::`))
+    ).toBe(true);
+    expect(
+      closureKeysB.every((key) => key.startsWith(`${moduleB.moduleId}::`))
+    ).toBe(true);
+    expect(new Set([...closureKeysA, ...closureKeysB]).size).toBe(
+      closureKeysA.length + closureKeysB.length
+    );
+
+    const {
+      contexts: [ctxASecond, ctxBSecond],
+      mod: combinedSecond,
+    } = buildCodegenProgram([moduleA, moduleB]);
+    expect(Array.from(ctxASecond.lambdaEnvs.keys())).toEqual(envKeysA);
+    expect(Array.from(ctxBSecond.lambdaEnvs.keys())).toEqual(envKeysB);
+    expect(Array.from(ctxASecond.closureTypes.keys())).toEqual(closureKeysA);
+    expect(Array.from(ctxBSecond.closureTypes.keys())).toEqual(closureKeysB);
+
+    combined.dispose();
+    combinedSecond.dispose();
   });
 });

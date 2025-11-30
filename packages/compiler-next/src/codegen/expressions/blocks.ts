@@ -25,6 +25,7 @@ export const compileBlockExpr = (
   tailPosition: boolean,
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const statements: binaryen.ExpressionRef[] = [];
   expr.statements.forEach((stmtId) => {
     statements.push(compileStatement(stmtId, ctx, fnCtx, compileExpr));
@@ -47,7 +48,7 @@ export const compileBlockExpr = (
       expr: ctx.mod.block(
         null,
         statements,
-        getExprBinaryenType(expr.id, ctx, fnCtx.instanceKey)
+        getExprBinaryenType(expr.id, ctx, typeInstanceKey)
       ),
       usedReturnCall,
     };
@@ -69,6 +70,7 @@ export const compileStatement = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const stmt = ctx.hir.statements.get(stmtId);
   if (!stmt) {
     throw new Error(`codegen missing HirStatement ${stmtId}`);
@@ -95,7 +97,7 @@ export const compileStatement = (
         const actualType = getRequiredExprType(
           stmt.value,
           ctx,
-          fnCtx.instanceKey
+          typeInstanceKey
         );
         const coerced = coerceValueToType({
           value: valueExpr.expr,

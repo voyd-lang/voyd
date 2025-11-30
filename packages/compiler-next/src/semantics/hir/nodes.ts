@@ -467,6 +467,8 @@ export interface HirLambdaExpr extends HirExpressionBase {
   returnType?: HirTypeExpr;
   effectType?: HirTypeExpr;
   body: HirExprId;
+  captures: readonly HirCapture[];
+  owner?: HirCallableOwner;
 }
 
 export interface HirEffectHandlerClause {
@@ -532,5 +534,15 @@ export interface HirContinueExpr extends HirExpressionBase {
   exprKind: "continue";
   label?: string;
 }
+
+export interface HirCapture {
+  symbol: SymbolId;
+  span: SourceSpan;
+  mutable: boolean;
+}
+
+export type HirCallableOwner =
+  | { kind: "function"; item: HirItemId; symbol: SymbolId }
+  | { kind: "lambda"; expr: HirExprId };
 
 export type HirNode = HirModule | HirItem | HirStatement | HirExpression;

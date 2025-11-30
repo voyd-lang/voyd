@@ -15,6 +15,7 @@ import type {
   HirFieldAccessExpr,
   HirCallExpr,
   HirTypeExpr,
+  HirLambdaExpr,
 } from "../semantics/hir/index.js";
 import type {
   HirExprId,
@@ -80,6 +81,15 @@ export interface FixedArrayWasmType {
   heapType: HeapTypeRef;
 }
 
+export interface ClosureTypeInfo {
+  key: string;
+  typeId: TypeId;
+  interfaceType: binaryen.Type;
+  fnRefType: binaryen.Type;
+  paramTypes: readonly binaryen.Type[];
+  resultType: binaryen.Type;
+}
+
 export interface CodegenContext {
   mod: binaryen.Module;
   moduleId: string;
@@ -94,13 +104,48 @@ export interface CodegenContext {
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
   fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
+  closureTypes: Map<string, ClosureTypeInfo>;
+  closureFunctionTypes: Map<string, binaryen.Type>;
+  lambdaEnvs: Map<
+    string,
+    {
+      envType: binaryen.Type;
+      captures: readonly {
+        symbol: SymbolId;
+        typeId: TypeId;
+        wasmType: binaryen.Type;
+        mutable: boolean;
+        fieldIndex: number;
+      }[];
+      base: ClosureTypeInfo;
+      typeId: TypeId;
+    }
+  >;
+  lambdaFunctions: Map<string, string>;
   rtt: ReturnType<typeof createRttContext>;
 }
 
-export interface LocalBinding {
-  index: number;
+export interface LocalBindingBase {
   type: binaryen.Type;
+  typeId?: TypeId;
 }
+
+export interface LocalBindingLocal extends LocalBindingBase {
+  kind: "local";
+  index: number;
+}
+
+export interface LocalBindingCapture extends LocalBindingBase {
+  kind: "capture";
+  envIndex: number;
+  envType: binaryen.Type;
+  envSuperType: binaryen.Type;
+  fieldIndex: number;
+  typeId: TypeId;
+  mutable: boolean;
+}
+
+export type LocalBinding = LocalBindingLocal | LocalBindingCapture;
 
 export interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;
@@ -108,6 +153,7 @@ export interface FunctionContext {
   nextLocalIndex: number;
   returnTypeId: TypeId;
   instanceKey?: string;
+  typeInstanceKey?: string;
 }
 
 export interface CompiledExpression {
@@ -118,7 +164,7 @@ export interface CompiledExpression {
 export interface CompileCallOptions {
   tailPosition?: boolean;
   expectedResultTypeId?: TypeId;
-  instanceKey?: string;
+  typeInstanceKey?: string;
 }
 
 export interface ExpressionCompilerParams {
@@ -156,4 +202,5 @@ export type {
   HirStmtId,
   SymbolId,
   TypeId,
+  HirLambdaExpr,
 };

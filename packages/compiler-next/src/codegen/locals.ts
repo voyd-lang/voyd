@@ -3,8 +3,10 @@ import type {
   CodegenContext,
   FunctionContext,
   LocalBinding,
+  LocalBindingLocal,
   SymbolId,
 } from "./context.js";
+import { refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 import { getSymbolTypeId, wasmTypeFor } from "./types.js";
 
 export const declareLocal = (
@@ -19,8 +21,8 @@ export const declareLocal = (
 
   const typeId = getSymbolTypeId(symbol, ctx);
   const wasmType = wasmTypeFor(typeId, ctx);
-  const binding = allocateTempLocal(wasmType, fnCtx);
-  fnCtx.bindings.set(symbol, binding);
+  const binding = allocateTempLocal(wasmType, fnCtx, typeId);
+  fnCtx.bindings.set(symbol, { ...binding, kind: "local", typeId });
   return binding;
 };
 
@@ -40,13 +42,36 @@ export const getRequiredBinding = (
 
 export const allocateTempLocal = (
   type: binaryen.Type,
-  fnCtx: FunctionContext
-): LocalBinding => {
-  const binding: LocalBinding = {
+  fnCtx: FunctionContext,
+  typeId?: number
+): LocalBindingLocal => {
+  const binding: LocalBindingLocal = {
+    kind: "local",
     index: fnCtx.nextLocalIndex,
     type,
+    typeId,
   };
   fnCtx.nextLocalIndex += 1;
   fnCtx.locals.push(type);
   return binding;
+};
+
+export const loadBindingValue = (
+  binding: LocalBinding,
+  ctx: CodegenContext
+): binaryen.ExpressionRef => {
+  if (binding.kind === "local") {
+    return ctx.mod.local.get(binding.index, binding.type);
+  }
+  const envRef = ctx.mod.local.get(binding.envIndex, binding.envSuperType);
+  const typedEnv =
+    binding.envType === binding.envSuperType
+      ? envRef
+      : refCast(ctx.mod, envRef, binding.envType);
+  return structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: binding.fieldIndex,
+    fieldType: binding.type,
+    exprRef: typedEnv,
+  });
 };

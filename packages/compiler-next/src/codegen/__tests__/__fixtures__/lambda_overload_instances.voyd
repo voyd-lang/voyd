@@ -1,0 +1,30 @@
+type I32Closure = () -> i32
+
+fn overloaded(value: i32)
+  value + 10
+
+fn overloaded(value: bool)
+  if value then:
+    20
+  else:
+    30
+
+fn make_caller<T>(value: T) -> I32Closure
+  () => overloaded(value)
+
+fn make_nested_counter(start: i32)
+  var base = start
+  (offset: i32) =>
+    base = base + offset
+    () =>
+      base = base + offset + 1
+      base
+
+pub fn main() -> i32
+  let call_int = make_caller(1)
+  let call_bool = make_caller(true)
+  let with_offset = make_nested_counter(5)
+  let inner_counter = with_offset(2)
+  let first = inner_counter()
+  let second = inner_counter()
+  call_int() + call_bool() + first + second

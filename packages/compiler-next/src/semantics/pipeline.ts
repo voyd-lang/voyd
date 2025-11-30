@@ -7,6 +7,7 @@ import type { BindingResult, BoundOverloadSet } from "./binding/binding.js";
 import type { HirGraph } from "./hir/index.js";
 import { createHirBuilder, type HirVisibility } from "./hir/index.js";
 import { runLoweringPipeline } from "./lowering/lowering.js";
+import { analyzeLambdaCaptures } from "./lowering/captures.js";
 import { runTypingPipeline, type TypingResult } from "./typing/typing.js";
 import { specializeOverloadCallees } from "./typing/specialize-overloads.js";
 import { toSourceSpan } from "./utils.js";
@@ -76,6 +77,11 @@ export const semanticsPipeline = (
     binding,
     moduleNodeId: form.syntaxId,
     moduleId: module.id,
+  });
+  analyzeLambdaCaptures({
+    hir,
+    symbolTable,
+    scopeByNode: binding.scopeByNode,
   });
 
   const typing = runTypingPipeline({

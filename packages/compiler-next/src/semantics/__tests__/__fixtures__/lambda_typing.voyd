@@ -1,0 +1,11 @@
+fn applyTwice(f: (i32) -> i32, value: i32) -> i32
+  f(f(value))
+
+fn makeIncrementer(delta: i32) -> ((i32) -> i32)
+  (value) => value + delta
+
+pub fn main() -> i32
+  let result = applyTwice((x) => x * 2, 3)
+  let inc = makeIncrementer(1)
+  let trimmed = result.((n) => n - 1)
+  trimmed + inc(4)

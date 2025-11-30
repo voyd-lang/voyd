@@ -96,6 +96,7 @@ export interface FunctionTypeParam {
 export interface Arg {
   type: TypeId;
   label?: string;
+  exprId?: HirExprId;
 }
 
 export interface CallResolution {

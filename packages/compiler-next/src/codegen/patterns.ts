@@ -19,6 +19,7 @@ import {
   wasmTypeFor,
 } from "./types.js";
 import { asStatement } from "./expressions/utils.js";
+import { refCast, structSetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 
 export interface PatternInitOptions {
   declare: boolean;
@@ -41,6 +42,47 @@ interface PendingTupleAssignment {
   typeId: TypeId;
 }
 
+const storeIntoBinding = ({
+  binding,
+  value,
+  targetTypeId,
+  actualTypeId,
+  ctx,
+  fnCtx,
+}: {
+  binding: ReturnType<typeof getRequiredBinding> | ReturnType<typeof declareLocal>;
+  value: binaryen.ExpressionRef;
+  targetTypeId: TypeId;
+  actualTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const coerced = coerceValueToType({
+    value,
+    actualType: actualTypeId,
+    targetType: targetTypeId,
+    ctx,
+    fnCtx,
+  });
+  if (binding.kind === "capture") {
+    if (!binding.mutable) {
+      throw new Error("cannot assign to immutable capture");
+    }
+    const envRef = ctx.mod.local.get(binding.envIndex, binding.envSuperType);
+    const typedEnv =
+      binding.envType === binding.envSuperType
+        ? envRef
+        : refCast(ctx.mod, envRef, binding.envType);
+    return structSetFieldValue({
+      mod: ctx.mod,
+      fieldIndex: binding.fieldIndex,
+      ref: typedEnv,
+      value: coerced,
+    });
+  }
+  return ctx.mod.local.set(binding.index, coerced);
+};
+
 export const compilePatternInitialization = ({
   pattern,
   initializer,
@@ -50,6 +92,7 @@ export const compilePatternInitialization = ({
   compileExpr,
   options,
 }: PatternInitParams): void => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   if (pattern.kind === "tuple") {
     compileTuplePattern({
       pattern,
@@ -84,21 +127,19 @@ export const compilePatternInitialization = ({
   const initializerType = getRequiredExprType(
     initializer,
     ctx,
-    fnCtx.instanceKey
+    typeInstanceKey
   );
   const value = compileExpr({ exprId: initializer, ctx, fnCtx });
 
   ops.push(
-    ctx.mod.local.set(
-      binding.index,
-      coerceValueToType({
-        value: value.expr,
-        actualType: initializerType,
-        targetType: targetTypeId,
-        ctx,
-        fnCtx,
-      })
-    )
+    storeIntoBinding({
+      binding,
+      value: value.expr,
+      targetTypeId,
+      actualTypeId: initializerType,
+      ctx,
+      fnCtx,
+    })
   );
 };
 
@@ -111,10 +152,11 @@ const compileTuplePattern = ({
   compileExpr,
   options,
 }: PatternInitParams & { pattern: HirPattern & { kind: "tuple" } }): void => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const initializerType = getRequiredExprType(
     initializer,
     ctx,
-    fnCtx.instanceKey
+    typeInstanceKey
   );
   const initializerTemp = allocateTempLocal(
     wasmTypeFor(initializerType, ctx),
@@ -142,16 +184,14 @@ const compileTuplePattern = ({
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     const targetTypeId = getSymbolTypeId(subPattern.symbol, ctx);
     ops.push(
-      ctx.mod.local.set(
-        binding.index,
-        coerceValueToType({
-          value: ctx.mod.local.get(tempIndex, tempType),
-          actualType: typeId,
-          targetType: targetTypeId,
-          ctx,
-          fnCtx,
-        })
-      )
+      storeIntoBinding({
+        binding,
+        value: ctx.mod.local.get(tempIndex, tempType),
+        targetTypeId,
+        actualTypeId: typeId,
+        ctx,
+        fnCtx,
+      })
     );
   });
 };

@@ -1,0 +1,10 @@
+fn outer_a(start: i32)
+  var count = start
+  () =>
+    count = count + 1
+    () => count
+
+pub fn main() -> i32
+  let builder = outer_a(1)
+  let inner = builder()
+  inner()

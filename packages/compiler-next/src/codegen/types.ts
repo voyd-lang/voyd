@@ -4,9 +4,11 @@ import {
   defineArrayType,
   defineStructType,
 } from "@voyd/lib/binaryen-gc/index.js";
+import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
 import type {
   CodegenContext,
+  ClosureTypeInfo,
   StructuralFieldInfo,
   StructuralTypeInfo,
   HirTypeExpr,
@@ -16,6 +18,135 @@ import type {
   TypeId,
   FixedArrayWasmType,
 } from "./context.js";
+
+const bin = binaryen as unknown as AugmentedBinaryen;
+
+const sanitizeIdentifier = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const closureSignatureKey = ({
+  moduleId,
+  parameters,
+  returnType,
+  effects,
+}: {
+  moduleId: string;
+  parameters: ReadonlyArray<{ type: TypeId; label?: string; optional?: boolean }>;
+  returnType: TypeId;
+  effects: unknown;
+}): string => {
+  const params = parameters
+    .map((param) => {
+      const label = param.label ?? "_";
+      const optional = param.optional ? "?" : "";
+      return `${label}:${param.type}${optional}`;
+    })
+    .join("|");
+  return `${moduleId}::(${params})->${returnType}|${effects}`;
+};
+
+const closureStructName = ({
+  moduleLabel,
+  key,
+}: {
+  moduleLabel: string;
+  key: string;
+}): string => `${moduleLabel}__closure_base_${sanitizeIdentifier(key)}`;
+
+const getClosureFunctionRefType = ({
+  params,
+  result,
+  ctx,
+}: {
+  params: readonly binaryen.Type[];
+  result: binaryen.Type;
+  ctx: CodegenContext;
+}): binaryen.Type => {
+  const key = `${params.join(",")}->${result}`;
+  const cached = ctx.closureFunctionTypes.get(key);
+  if (cached) {
+    return cached;
+  }
+  const tempName = `__closure_sig_${ctx.closureFunctionTypes.size}`;
+  const fnRef = ctx.mod.addFunction(
+    tempName,
+    binaryen.createType(params as number[]),
+    result,
+    [],
+    ctx.mod.nop()
+  );
+  const fnType = bin._BinaryenTypeFromHeapType(
+    bin._BinaryenFunctionGetType(fnRef),
+    false
+  );
+  ctx.closureFunctionTypes.set(key, fnType);
+  ctx.mod.removeFunction(tempName);
+  return fnType;
+};
+
+const ensureClosureTypeInfo = ({
+  typeId,
+  desc,
+  ctx,
+  seen,
+}: {
+  typeId: TypeId;
+  desc: { parameters: ReadonlyArray<{ type: TypeId; label?: string; optional?: boolean }>; returnType: TypeId; effects: unknown };
+  ctx: CodegenContext;
+  seen: Set<TypeId>;
+}): ClosureTypeInfo => {
+  const key = closureSignatureKey({
+    moduleId: ctx.moduleId,
+    parameters: desc.parameters,
+    returnType: desc.returnType,
+    effects: desc.effects,
+  });
+  const cached = ctx.closureTypes.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const paramTypes = desc.parameters.map((param) =>
+    wasmTypeFor(param.type, ctx, seen)
+  );
+  const resultType = wasmTypeFor(desc.returnType, ctx, seen);
+  const interfaceType = defineStructType(ctx.mod, {
+    name: closureStructName({ moduleLabel: ctx.moduleLabel, key }),
+    fields: [{ name: "__fn", type: binaryen.funcref, mutable: false }],
+    final: false,
+  });
+  const fnRefType = getClosureFunctionRefType({
+    params: [interfaceType, ...paramTypes],
+    result: resultType,
+    ctx,
+  });
+  const info: ClosureTypeInfo = {
+    key,
+    typeId,
+    interfaceType,
+    fnRefType,
+    paramTypes,
+    resultType,
+  };
+  ctx.closureTypes.set(key, info);
+  return info;
+};
+
+export const getClosureTypeInfo = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): ClosureTypeInfo => {
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind !== "function") {
+    throw new Error("expected function type for closure info");
+  }
+  return ensureClosureTypeInfo({
+    typeId,
+    desc,
+    ctx,
+    seen: new Set<TypeId>(),
+  });
+};
 
 export const getFixedArrayWasmTypes = (
   typeId: TypeId,
@@ -45,6 +176,10 @@ export const wasmTypeFor = (
 ): binaryen.Type => {
   const already = seen.has(typeId);
   if (already) {
+    const desc = ctx.typing.arena.get(typeId);
+    if (desc.kind === "function") {
+      return binaryen.funcref;
+    }
     return ctx.rtt.baseType;
   }
   seen.add(typeId);
@@ -57,6 +192,11 @@ export const wasmTypeFor = (
 
     if (desc.kind === "fixed-array") {
       return getFixedArrayWasmTypes(typeId, ctx, seen).type;
+    }
+
+    if (desc.kind === "function") {
+      const info = ensureClosureTypeInfo({ typeId, desc, ctx, seen });
+      return info.interfaceType;
     }
 
     if (desc.kind === "structural-object") {
@@ -85,7 +225,9 @@ export const wasmTypeFor = (
       return wasmTypeFor(desc.structural, ctx, seen);
     }
 
-    throw new Error(`codegen cannot map ${desc.kind} types to wasm yet`);
+    throw new Error(
+      `codegen cannot map ${desc.kind} types to wasm yet (type ${typeId})`
+    );
   } finally {
     seen.delete(typeId);
   }
@@ -126,18 +268,28 @@ export const getSymbolTypeId = (
   );
 };
 
+const getInstanceExprType = (
+  exprId: HirExprId,
+  ctx: CodegenContext,
+  instanceKey?: string
+): TypeId | undefined => {
+  if (!instanceKey) {
+    return undefined;
+  }
+  const instanceType = ctx.typing.functionInstanceExprTypes
+    ?.get(instanceKey)
+    ?.get(exprId);
+  return typeof instanceType === "number" ? instanceType : undefined;
+};
+
 export const getRequiredExprType = (
   exprId: HirExprId,
   ctx: CodegenContext,
   instanceKey?: string
 ): TypeId => {
-  if (instanceKey) {
-    const instanceType = ctx.typing.functionInstanceExprTypes
-      ?.get(instanceKey)
-      ?.get(exprId);
-    if (typeof instanceType === "number") {
-      return instanceType;
-    }
+  const instanceType = getInstanceExprType(exprId, ctx, instanceKey);
+  if (typeof instanceType === "number") {
+    return instanceType;
   }
   const resolved = ctx.typing.resolvedExprTypes.get(exprId);
   if (typeof resolved === "number") {
@@ -155,13 +307,9 @@ export const getExprBinaryenType = (
   ctx: CodegenContext,
   instanceKey?: string
 ): binaryen.Type => {
-  if (instanceKey) {
-    const instanceType = ctx.typing.functionInstanceExprTypes
-      ?.get(instanceKey)
-      ?.get(exprId);
-    if (typeof instanceType === "number") {
-      return wasmTypeFor(instanceType, ctx);
-    }
+  const instanceType = getInstanceExprType(exprId, ctx, instanceKey);
+  if (typeof instanceType === "number") {
+    return wasmTypeFor(instanceType, ctx);
   }
   const resolved = ctx.typing.resolvedExprTypes.get(exprId);
   const typeId =

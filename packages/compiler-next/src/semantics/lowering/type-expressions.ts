@@ -10,11 +10,13 @@ import { toSourceSpan } from "../utils.js";
 import type {
   HirRecordTypeField,
   HirTypeExpr,
+  HirFunctionTypeExpr,
   HirTypeParameter,
 } from "../hir/index.js";
 import { resolveTypeSymbol } from "./resolution.js";
 import type { LowerContext } from "./types.js";
 import type { ScopeId, SymbolId } from "../ids.js";
+import { parseLambdaSignature } from "../lambda.js";
 
 export const lowerTypeExpr = (
   expr: Expr | undefined,
@@ -39,6 +41,10 @@ export const lowerTypeExpr = (
 
   if (isForm(expr) && expr.calls("|")) {
     return lowerUnionTypeExpr(expr, ctx, currentScope);
+  }
+
+  if (isForm(expr) && expr.calls("->")) {
+    return lowerFunctionTypeExpr(expr, ctx, currentScope);
   }
 
   if (isForm(expr)) {
@@ -175,6 +181,53 @@ const lowerUnionTypeExpr = (
     ast: form.syntaxId,
     span: toSourceSpan(form),
     members,
+  };
+};
+
+const lowerFunctionTypeExpr = (
+  form: Form,
+  ctx: LowerContext,
+  scope: ScopeId
+): HirFunctionTypeExpr => {
+  const signature = parseLambdaSignature(form);
+  if (!signature.returnType) {
+    throw new Error("function type missing return type");
+  }
+
+  const typeParameters = lowerTypeParameters(
+    signature.typeParameters?.map((param) => {
+      const symbol = resolveTypeSymbol(param.value, scope, ctx);
+      if (!symbol) {
+        throw new Error(`unknown type parameter ${param.value} in function type`);
+      }
+      return { symbol, ast: param };
+    })
+  );
+
+  const parameters = signature.parameters.map((param) => {
+    const paramTypeExpr = isForm(param) && param.calls(":") ? param.at(2) : param;
+    const lowered = lowerTypeExpr(paramTypeExpr, ctx, scope);
+    if (!lowered) {
+      throw new Error("function type parameter missing type");
+    }
+    return lowered;
+  });
+
+  const returnType = lowerTypeExpr(signature.returnType, ctx, scope);
+  if (!returnType) {
+    throw new Error("function type missing resolved return type");
+  }
+
+  const effectType = lowerTypeExpr(signature.effectType, ctx, scope);
+
+  return {
+    typeKind: "function",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    typeParameters,
+    parameters,
+    returnType,
+    effectType,
   };
 };
 

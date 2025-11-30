@@ -231,6 +231,7 @@ const compileFunctionItem = (
     nextLocalIndex: meta.paramTypes.length,
     returnTypeId: meta.resultTypeId,
     instanceKey: meta.instanceKey,
+    typeInstanceKey: meta.instanceKey,
   };
 
   fn.parameters.forEach((param, index) => {
@@ -240,7 +241,12 @@ const compileFunctionItem = (
         `codegen missing parameter type for symbol ${param.symbol}`
       );
     }
-  fnCtx.bindings.set(param.symbol, { index, type });
+    fnCtx.bindings.set(param.symbol, {
+      kind: "local",
+      index,
+      type,
+      typeId: meta.paramTypeIds[index],
+    });
   });
 
   const body = compileExpression({

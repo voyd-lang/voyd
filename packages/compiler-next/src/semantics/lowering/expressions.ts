@@ -13,6 +13,7 @@ import {
   isStringAtom,
 } from "../../parser/index.js";
 import { expectLabeledExpr, parseIfBranches, toSourceSpan } from "../utils.js";
+import { parseLambdaSignature } from "../lambda.js";
 import type {
   HirCondBranch,
   HirMatchArm,
@@ -25,7 +26,7 @@ import {
   resolveSymbol,
   resolveTypeSymbol,
 } from "./resolution.js";
-import { lowerTypeExpr } from "./type-expressions.js";
+import { lowerTypeExpr, lowerTypeParameters } from "./type-expressions.js";
 import type {
   LowerContext,
   LowerObjectLiteralOptions,
@@ -138,6 +139,10 @@ export const lowerExpr = (
 
     if (expr.calls("while")) {
       return lowerWhile(expr, ctx, scopes);
+    }
+
+    if (expr.calls("=>")) {
+      return lowerLambda(expr, ctx, scopes);
     }
 
     if (expr.calls("tuple") || expr.callsInternal("tuple")) {
@@ -300,9 +305,7 @@ const lowerMatch = (
     const binderPattern: HirPattern = {
       kind: "identifier",
       symbol: binderSymbol,
-      span: toSourceSpan(
-        (potentialBinder as Syntax | undefined) ?? form
-      ),
+      span: toSourceSpan((potentialBinder as Syntax | undefined) ?? form),
     };
     return ctx.builder.addExpression({
       kind: "expr",
@@ -820,4 +823,108 @@ const lowerWhile = (
     condition,
     body,
   });
+};
+
+const lowerLambda = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
+  const signatureExpr = form.at(1);
+  const bodyExpr = form.at(2);
+  if (!signatureExpr || !bodyExpr) {
+    throw new Error("lambda expression missing signature or body");
+  }
+
+  const lambdaScope = ctx.scopeByNode.get(form.syntaxId);
+  if (lambdaScope !== undefined) {
+    scopes.push(lambdaScope);
+  }
+
+  const signature = parseLambdaSignature(signatureExpr);
+  const parameters = signature.parameters.map((param) =>
+    lowerLambdaParameter(param, ctx, scopes)
+  );
+
+  const typeParameters = lowerTypeParameters(
+    signature.typeParameters?.map((param) => {
+      const symbol = resolveTypeSymbol(param.value, scopes.current(), ctx);
+      if (!symbol) {
+        throw new Error(`unknown type parameter ${param.value} in lambda`);
+      }
+      return { symbol, ast: param };
+    })
+  );
+
+  const returnType = lowerTypeExpr(signature.returnType, ctx, scopes.current());
+  const effectType = lowerTypeExpr(signature.effectType, ctx, scopes.current());
+  const body = lowerExpr(bodyExpr, ctx, scopes);
+
+  if (lambdaScope !== undefined) {
+    scopes.pop();
+  }
+
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "lambda",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    typeParameters,
+    parameters,
+    returnType,
+    effectType,
+    body,
+    captures: [],
+  });
+};
+
+const lowerLambdaParameter = (
+  param: Expr,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+) => {
+  if (isIdentifierAtom(param) || isInternalIdentifierAtom(param)) {
+    const symbol = resolveSymbol(param.value, scopes.current(), ctx);
+    return {
+      symbol,
+      pattern: {
+        kind: "identifier",
+        symbol,
+        span: toSourceSpan(param),
+      },
+      mutable: false,
+      span: toSourceSpan(param),
+    };
+  }
+
+  if (isForm(param) && param.calls(":")) {
+    const nameExpr = param.at(1);
+    if (!isIdentifierAtom(nameExpr) && !isInternalIdentifierAtom(nameExpr)) {
+      throw new Error("lambda parameter name must be an identifier");
+    }
+    const symbol = resolveSymbol(nameExpr.value, scopes.current(), ctx);
+    return {
+      symbol,
+      pattern: {
+        kind: "identifier",
+        symbol,
+        span: toSourceSpan(param),
+      },
+      mutable: false,
+      span: toSourceSpan(param),
+      type: lowerTypeExpr(param.at(2), ctx, scopes.current()),
+    };
+  }
+
+  if (isForm(param)) {
+    const nestedParams = param
+      .toArray()
+      .map((entry) => lowerLambdaParameter(entry, ctx, scopes));
+    if (nestedParams.length !== 1) {
+      throw new Error("unexpected nested lambda parameter structure");
+    }
+    return nestedParams[0]!;
+  }
+
+  throw new Error("unsupported lambda parameter form");
 };

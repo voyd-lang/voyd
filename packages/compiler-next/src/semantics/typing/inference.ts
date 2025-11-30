@@ -80,7 +80,7 @@ const typeFunction = (
   };
   let bodyType;
   try {
-    bodyType = typeExpression(fn.body, ctx, state);
+    bodyType = typeExpression(fn.body, ctx, state, signature.returnType);
   } finally {
     state.currentFunction = previousFunction;
   }

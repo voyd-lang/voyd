@@ -9,7 +9,7 @@ import type {
   HirMatchExpr,
   HirPattern,
   HirWhileExpr,
-  LocalBinding,
+  LocalBindingLocal,
   TypeId,
 } from "../context.js";
 import { allocateTempLocal } from "../locals.js";
@@ -48,7 +48,8 @@ export const compileIfExpr = (
   tailPosition: boolean,
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
-  const resultType = getExprBinaryenType(expr.id, ctx, fnCtx.instanceKey);
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceKey);
   let fallback =
     typeof expr.defaultBranch === "number"
       ? compileExpr({
@@ -99,15 +100,16 @@ export const compileMatchExpr = (
   tailPosition: boolean,
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const discriminantTypeId = getRequiredExprType(
     expr.discriminant,
     ctx,
-    fnCtx.instanceKey
+    typeInstanceKey
   );
   const discriminantType = getExprBinaryenType(
     expr.discriminant,
     ctx,
-    fnCtx.instanceKey
+    typeInstanceKey
   );
   const discriminantTemp = allocateTempLocal(discriminantType, fnCtx);
   const discriminantValue = compileExpr({
@@ -193,7 +195,7 @@ export const compileMatchExpr = (
     expr: ctx.mod.block(
       null,
       [initDiscriminant, finalExpr.expr],
-      getExprBinaryenType(expr.id, ctx, fnCtx.instanceKey)
+      getExprBinaryenType(expr.id, ctx, typeInstanceKey)
     ),
     usedReturnCall: finalExpr.usedReturnCall,
   };
@@ -201,7 +203,7 @@ export const compileMatchExpr = (
 
 const compileMatchCondition = (
   pattern: HirPattern & { kind: "type" },
-  discriminant: LocalBinding,
+  discriminant: LocalBindingLocal,
   ctx: CodegenContext,
   duplicateNominals: ReadonlySet<TypeId>
 ): binaryen.ExpressionRef => {
