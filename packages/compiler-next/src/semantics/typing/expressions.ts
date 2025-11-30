@@ -237,6 +237,20 @@ const typeCallExpr = (
         ? intrinsicSignaturesFor(intrinsicName, ctx)
         : undefined;
 
+    const missingFunction =
+      metadata.intrinsic === true &&
+      !signature &&
+      (intrinsicSignatures?.length ?? 0) === 0 &&
+      metadata.intrinsicUsesSignature !== false;
+
+    if (missingFunction) {
+      return reportUnknownFunction({
+        name: intrinsicName,
+        span: calleeExpr.span,
+        ctx,
+      });
+    }
+
     if (metadata.intrinsic && metadata.intrinsicUsesSignature === false) {
       const returnType = typeIntrinsicCall(
         intrinsicName,
@@ -870,6 +884,21 @@ const reportNonFunctionCallee = ({
     code: "TY0005",
     message: "cannot call a non-function value",
     span: normalizeSpan(calleeSpan, callSpan),
+  });
+
+const reportUnknownFunction = ({
+  name,
+  span,
+  ctx,
+}: {
+  name: string;
+  span?: SourceSpan;
+  ctx: TypingContext;
+}): never =>
+  ctx.diagnostics.error({
+    code: "TY0006",
+    message: `function '${name}' is not defined`,
+    span: normalizeSpan(span),
   });
 
 const resolveCurriedCallReturnType = ({
