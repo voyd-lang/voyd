@@ -38,4 +38,35 @@ describe("call diagnostics", () => {
     const { start, end } = caught.diagnostic.span;
     expect(source.slice(start, end)).toBe("x");
   });
+
+  it("reports diagnostics for calling a missing function", () => {
+    const ast = loadAst("missing_function_call.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0006");
+    expect(caught.diagnostic.message).toMatch(/function 'hi' is not defined/i);
+
+    const fixturePath = resolve(
+      import.meta.dirname,
+      "..",
+      "..",
+      "__tests__",
+      "__fixtures__",
+      "missing_function_call.voyd"
+    );
+    const source = readFileSync(fixturePath, "utf8");
+    const { start, end } = caught.diagnostic.span;
+    expect(source.slice(start, end)).toBe("hi");
+  });
 });

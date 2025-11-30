@@ -51,6 +51,16 @@ import type {
   TypingContext,
 } from "./types.js";
 
+const SIGNATURELESS_INTRINSICS = new Set<string>([
+  "~",
+  "__array_new",
+  "__array_new_fixed",
+  "__array_get",
+  "__array_set",
+  "__array_len",
+  "__array_copy",
+]);
+
 const applyCurrentSubstitution = (
   type: TypeId,
   ctx: TypingContext,
@@ -236,6 +246,24 @@ const typeCallExpr = (
       metadata.intrinsic === true
         ? intrinsicSignaturesFor(intrinsicName, ctx)
         : undefined;
+    const intrinsicSignatureCount = intrinsicSignatures?.length ?? 0;
+    const hasIntrinsicHandler =
+      metadata.intrinsicUsesSignature === false ||
+      intrinsicSignatureCount > 0 ||
+      SIGNATURELESS_INTRINSICS.has(intrinsicName);
+
+    const missingFunction =
+      metadata.intrinsic === true &&
+      !signature &&
+      !hasIntrinsicHandler;
+
+    if (missingFunction) {
+      return reportUnknownFunction({
+        name: intrinsicName,
+        span: calleeExpr.span,
+        ctx,
+      });
+    }
 
     if (metadata.intrinsic && metadata.intrinsicUsesSignature === false) {
       const returnType = typeIntrinsicCall(
@@ -270,7 +298,7 @@ const typeCallExpr = (
       metadata.intrinsic === true &&
       !signature &&
       metadata.intrinsicUsesSignature !== true &&
-      (intrinsicSignatures?.length ?? 0) === 0;
+      intrinsicSignatureCount === 0;
 
     const calleeType = isRawIntrinsic
       ? (() => {
@@ -870,6 +898,21 @@ const reportNonFunctionCallee = ({
     code: "TY0005",
     message: "cannot call a non-function value",
     span: normalizeSpan(calleeSpan, callSpan),
+  });
+
+const reportUnknownFunction = ({
+  name,
+  span,
+  ctx,
+}: {
+  name: string;
+  span?: SourceSpan;
+  ctx: TypingContext;
+}): never =>
+  ctx.diagnostics.error({
+    code: "TY0006",
+    message: `function '${name}' is not defined`,
+    span: normalizeSpan(span),
   });
 
 const resolveCurriedCallReturnType = ({
