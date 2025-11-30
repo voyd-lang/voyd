@@ -288,6 +288,9 @@ const translateFunctionSignature = ({
   const parameters = signature.parameters.map((param) => ({
     type: translation(param.type),
     label: param.label,
+    bindingKind: param.bindingKind,
+    span: param.span,
+    name: param.name,
   }));
 
   const returnType = translation(signature.returnType);

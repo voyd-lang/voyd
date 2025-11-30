@@ -41,16 +41,13 @@ export const compileAssignExpr = (
 
   const targetExpr = ctx.hir.expressions.get(expr.target);
   if (!targetExpr || targetExpr.exprKind !== "identifier") {
+    console.log("HEY");
     throw new Error("only identifier assignments are supported today");
   }
 
   const binding = getRequiredBinding(targetExpr.symbol, ctx, fnCtx);
   const targetTypeId = getSymbolTypeId(targetExpr.symbol, ctx);
-  const valueTypeId = getRequiredExprType(
-    expr.value,
-    ctx,
-    typeInstanceKey
-  );
+  const valueTypeId = getRequiredExprType(expr.value, ctx, typeInstanceKey);
   const valueExpr = compileExpr({ exprId: expr.value, ctx, fnCtx });
   const coerced = coerceValueToType({
     value: valueExpr.expr,
@@ -81,10 +78,7 @@ export const compileAssignExpr = (
   }
 
   return {
-    expr: ctx.mod.local.set(
-      binding.index,
-      coerced
-    ),
+    expr: ctx.mod.local.set(binding.index, coerced),
     usedReturnCall: false,
   };
 };

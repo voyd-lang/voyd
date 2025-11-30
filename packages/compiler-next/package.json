@@ -7,15 +7,22 @@
   "exports": {
     ".": {
       "types": "./src/pipeline.ts",
+      "development": "./src/pipeline.ts",
       "import": "./dist/compiler-next/src/pipeline.js",
       "default": "./dist/compiler-next/src/pipeline.js"
     },
-    "./*": "./dist/compiler-next/src/*"
+    "./*": {
+      "types": "./src/*",
+      "development": "./src/*",
+      "import": "./dist/compiler-next/src/*",
+      "default": "./dist/compiler-next/src/*"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config ../../vitest.config.ts src",
+    "test:w": "vitest --config ../../vitest.config.ts src",
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {

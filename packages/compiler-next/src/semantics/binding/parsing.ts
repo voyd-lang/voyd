@@ -10,6 +10,7 @@ import {
 import type { HirVisibility } from "../hir/index.js";
 import { isIdentifierWithValue } from "../utils.js";
 import type { IntrinsicAttribute } from "../../parser/attributes.js";
+import type { HirBindingKind } from "../hir/index.js";
 
 export interface ParsedFunctionDecl {
   form: Form;
@@ -80,6 +81,7 @@ interface SignatureParam {
   label?: string;
   ast: Syntax;
   typeExpr?: Expr;
+   bindingKind?: HirBindingKind;
 }
 
 export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
@@ -380,6 +382,11 @@ const parseParameter = (expr: Expr): SignatureParam | SignatureParam[] => {
     return { name: expr.value, ast: expr };
   }
 
+  if (isForm(expr) && expr.calls("&")) {
+    const { name, ast, bindingKind } = parseParamName(expr);
+    return { name, ast, bindingKind };
+  }
+
   if (isForm(expr) && expr.calls(":")) {
     return parseSingleParam(expr);
   }
@@ -419,14 +426,35 @@ const parseLabeledParameters = (form: Form): SignatureParam[] =>
 
 const parseSingleParam = (expr: Form): SignatureParam => {
   const nameExpr = expr.at(1);
-  if (!isIdentifierAtom(nameExpr)) {
-    throw new Error("parameter name must be an identifier");
-  }
+  const { name, ast, bindingKind } = parseParamName(nameExpr);
   return {
-    name: nameExpr.value,
-    ast: nameExpr,
+    name,
+    ast,
+    bindingKind,
     typeExpr: expr.at(2),
   };
+};
+
+const parseParamName = (
+  expr: Expr | undefined
+): { name: string; ast: Syntax; bindingKind?: HirBindingKind } => {
+  if (isIdentifierAtom(expr)) {
+    return { name: expr.value, ast: expr };
+  }
+
+  if (isForm(expr) && expr.calls("&")) {
+    const target = expr.at(1);
+    if (!isIdentifierAtom(target)) {
+      throw new Error("parameter name must be an identifier");
+    }
+    return {
+      name: target.value,
+      ast: target,
+      bindingKind: "mutable-ref",
+    };
+  }
+
+  throw new Error("parameter name must be an identifier");
 };
 
 const parseObjectHead = (

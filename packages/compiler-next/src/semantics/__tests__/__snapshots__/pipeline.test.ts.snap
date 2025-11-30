@@ -409,6 +409,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "label": undefined,
           "mutable": false,
           "pattern": {
+            "bindingKind": undefined,
             "kind": "identifier",
             "symbol": 2,
           },
@@ -592,7 +593,14 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
       "declaredAt": 1331,
       "id": 2,
       "kind": "parameter",
-      "metadata": undefined,
+      "metadata": {
+        "bindingKind": undefined,
+        "declarationSpan": {
+          "end": 9,
+          "file": "fib.voyd",
+          "start": 8,
+        },
+      },
       "name": "n",
       "scope": 1,
     },

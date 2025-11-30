@@ -6,6 +6,7 @@ import type {
   HirObjectDecl,
   HirTraitDecl,
   HirTypeExpr,
+  HirBindingKind,
 } from "../hir/index.js";
 import type { ModuleExportTable } from "../modules.js";
 import type {
@@ -16,6 +17,7 @@ import type {
   TypeId,
   TypeParamId,
   TypeSchemeId,
+  SourceSpan,
 } from "../ids.js";
 import { DeclTable } from "../decls.js";
 import type { TypeArena } from "./type-arena.js";
@@ -84,6 +86,10 @@ export interface FunctionSignature {
 export interface ParamSignature {
   type: TypeId;
   label?: string;
+  bindingKind?: HirBindingKind;
+  span?: SourceSpan;
+  name?: string;
+  symbol?: SymbolId;
 }
 
 export interface FunctionTypeParam {

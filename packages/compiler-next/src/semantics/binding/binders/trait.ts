@@ -26,6 +26,7 @@ import {
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { bindExpr } from "./expressions.js";
 import { bindTypeParameters } from "./type-parameters.js";
+import { toSourceSpan } from "../../utils.js";
 
 export const bindTraitDecl = (
   decl: ParsedTraitDecl,
@@ -159,6 +160,10 @@ const bindTraitMethodParameters = (
       name: param.name,
       kind: "parameter",
       declaredAt: param.ast.syntaxId,
+      metadata: {
+        bindingKind: param.bindingKind,
+        declarationSpan: toSourceSpan(param.ast),
+      },
     });
     rememberSyntax(param.ast, ctx);
     rememberSyntax(param.typeExpr as Syntax, ctx);
@@ -168,6 +173,7 @@ const bindTraitMethodParameters = (
       symbol: paramSymbol,
       ast: param.ast,
       typeExpr: param.typeExpr,
+      bindingKind: param.bindingKind,
     };
   });
 

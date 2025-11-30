@@ -1,5 +1,5 @@
 import type { Expr, Form, Syntax } from "../parser/index.js";
-import type { HirVisibility } from "./hir/index.js";
+import type { HirBindingKind, HirVisibility } from "./hir/index.js";
 import type {
   FunctionDeclId,
   OverloadSetId,
@@ -21,6 +21,7 @@ export interface ParameterDecl {
   symbol: SymbolId;
   ast?: Syntax;
   typeExpr?: Expr;
+  bindingKind?: HirBindingKind;
 }
 
 export type ParameterDeclInput = Omit<ParameterDecl, "id"> & {
