@@ -4,8 +4,6 @@ This repository contains the implementation of the voyd programming language.
 voyd is a level between rust and typescript in terms of abstraction. It
 compiles to webassembly.
 
-Any form of git network commands are forbidden. Including `git push` & `git pull`
-
 # Debugging
 
 A cli is available after `npm link`

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HirCallExpr } from "../../hir/nodes.js";
+import type { HirBlockExpr, HirCallExpr, HirFunction } from "../../hir/nodes.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 
@@ -51,5 +51,25 @@ describe("trait objects", () => {
         ? typing.traitImplsByTrait.get(traitSymbol)
         : undefined;
     expect(impls?.length).toBeGreaterThanOrEqual(1);
+
+    const doDoubleFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === doDouble
+    );
+    expect(doDoubleFn).toBeDefined();
+    const doDoubleBody = doDoubleFn?.body;
+    const doDoubleExpr = doDoubleBody
+      ? hir.expressions.get(doDoubleBody)
+      : undefined;
+    const doDoubleCall =
+      doDoubleExpr?.exprKind === "call"
+        ? doDoubleExpr
+        : doDoubleExpr?.exprKind === "block"
+          ? hir.expressions.get((doDoubleExpr as HirBlockExpr).value)
+          : undefined;
+    expect(doDoubleCall?.exprKind).toBe("call");
+    if (doDoubleCall) {
+      expect(typing.callTraitDispatches.has(doDoubleCall.id)).toBe(true);
+    }
   });
 });

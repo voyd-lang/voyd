@@ -57,6 +57,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
       targets: new Map(),
       typeArguments: new Map(),
       instanceKeys: new Map(),
+      traitDispatches: new Set(),
     },
     functions,
     objects,

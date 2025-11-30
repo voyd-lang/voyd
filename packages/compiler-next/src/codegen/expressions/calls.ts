@@ -9,6 +9,7 @@ import type {
   FunctionMetadata,
   HirCallExpr,
   HirExprId,
+  SymbolId,
   TypeId,
 } from "../context.js";
 import { compileIntrinsicCall } from "../intrinsics.js";
@@ -37,6 +38,7 @@ export const compileCallExpr = (
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const callInstanceKey = fnCtx.instanceKey ?? typeInstanceKey;
   const callee = ctx.hir.expressions.get(expr.callee);
+  const expectTraitDispatch = ctx.typing.callTraitDispatches.has(expr.id);
   if (!callee) {
     throw new Error(`codegen missing callee expression ${expr.callee}`);
   }
@@ -51,6 +53,20 @@ export const compileCallExpr = (
         : undefined);
     if (typeof targetSymbol !== "number") {
       throw new Error("codegen missing overload resolution for indirect call");
+    }
+    const traitDispatch = compileTraitDispatchCall({
+      expr,
+      calleeSymbol: targetSymbol,
+      ctx,
+      fnCtx,
+      compileExpr,
+      expectedResultTypeId,
+    });
+    if (traitDispatch) {
+      return traitDispatch;
+    }
+    if (expectTraitDispatch) {
+      throw new Error("codegen missing trait dispatch target for indirect call");
     }
     const targetMeta = getFunctionMetadataForCall({
       symbol: targetSymbol,
@@ -84,7 +100,7 @@ export const compileCallExpr = (
     };
     const traitDispatch = compileTraitDispatchCall({
       expr,
-      callee,
+      calleeSymbol: callee.symbol,
       ctx,
       fnCtx,
       compileExpr,
@@ -92,6 +108,9 @@ export const compileCallExpr = (
     });
     if (traitDispatch) {
       return traitDispatch;
+    }
+    if (expectTraitDispatch) {
+      throw new Error("codegen missing trait dispatch target for call");
     }
 
     const shouldCompileIntrinsic =
@@ -155,14 +174,14 @@ export const compileCallExpr = (
 
 const compileTraitDispatchCall = ({
   expr,
-  callee,
+  calleeSymbol,
   ctx,
   fnCtx,
   compileExpr,
   expectedResultTypeId,
 }: {
   expr: HirCallExpr;
-  callee: HirExpression & { exprKind: "identifier" };
+  calleeSymbol: SymbolId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -171,7 +190,7 @@ const compileTraitDispatchCall = ({
   if (expr.args.length === 0) {
     return undefined;
   }
-  const mapping = ctx.typing.traitMethodImpls.get(callee.symbol);
+  const mapping = ctx.typing.traitMethodImpls.get(calleeSymbol);
   if (!mapping) {
     return undefined;
   }
@@ -190,7 +209,7 @@ const compileTraitDispatchCall = ({
   }
 
   const meta = getFunctionMetadataForCall({
-    symbol: callee.symbol,
+    symbol: calleeSymbol,
     callId: expr.id,
     ctx,
   });

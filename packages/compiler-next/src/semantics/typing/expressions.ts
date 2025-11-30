@@ -336,6 +336,8 @@ const typeCallExpr = (
         calleeType,
         ctx,
         state,
+        callSpan: expr.span,
+        calleeSpan: calleeExpr.span,
       })
     );
   }
@@ -353,7 +355,11 @@ const typeCallExpr = (
 
   const calleeDesc = ctx.arena.get(calleeType);
   if (calleeDesc.kind !== "function") {
-    throw new Error("attempted to call a non-function value");
+    reportNonFunctionCallee({
+      callSpan: expr.span,
+      calleeSpan: calleeExpr.span,
+      ctx,
+    });
   }
 
   return resolveCurriedCallReturnType({
@@ -361,6 +367,8 @@ const typeCallExpr = (
     calleeType,
     ctx,
     state,
+    callSpan: expr.span,
+    calleeSpan: calleeExpr.span,
   });
 };
 
@@ -849,16 +857,35 @@ const adjustTraitDispatchParameters = ({
   return updated;
 };
 
+const reportNonFunctionCallee = ({
+  callSpan,
+  calleeSpan,
+  ctx,
+}: {
+  callSpan: SourceSpan;
+  calleeSpan?: SourceSpan;
+  ctx: TypingContext;
+}): never =>
+  ctx.diagnostics.error({
+    code: "TY0005",
+    message: "cannot call a non-function value",
+    span: normalizeSpan(calleeSpan, callSpan),
+  });
+
 const resolveCurriedCallReturnType = ({
   args,
   calleeType,
   ctx,
   state,
+  callSpan,
+  calleeSpan,
 }: {
   args: readonly Arg[];
   calleeType: TypeId;
   ctx: TypingContext;
   state: TypingState;
+  callSpan: SourceSpan;
+  calleeSpan?: SourceSpan;
 }): TypeId => {
   let remainingArgs = args;
   let currentType = calleeType;
@@ -866,7 +893,7 @@ const resolveCurriedCallReturnType = ({
   while (true) {
     const desc = ctx.arena.get(currentType);
     if (desc.kind !== "function") {
-      throw new Error("attempted to call a non-function value");
+      reportNonFunctionCallee({ callSpan, calleeSpan, ctx });
     }
 
     const { parameters, returnType } = desc;
@@ -2046,6 +2073,11 @@ const typeOverloadedCall = (
     throw new Error(
       `missing function instance key for overload resolution at call ${call.id}`
     );
+  }
+  if (traitDispatch) {
+    ctx.callResolution.traitDispatches.add(call.id);
+  } else {
+    ctx.callResolution.traitDispatches.delete(call.id);
   }
   const targets =
     ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolId>();

@@ -504,6 +504,7 @@ const makeDependencyContext = (
     ),
     typeArguments: new Map(dependency.typing.callTypeArguments),
     instanceKeys: new Map(dependency.typing.callInstanceKeys),
+    traitDispatches: new Set(dependency.typing.callTraitDispatches),
   },
   functions: dependency.typing.functions,
   objects: dependency.typing.objects,

@@ -57,6 +57,7 @@ export interface TypingResult {
   functionInstances: ReadonlyMap<string, TypeId>;
   callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
   callInstanceKeys: ReadonlyMap<HirExprId, string>;
+  callTraitDispatches: ReadonlySet<HirExprId>;
   functionInstantiationInfo: ReadonlyMap<
     SymbolId,
     ReadonlyMap<string, readonly TypeId[]>
@@ -112,6 +113,7 @@ export interface CallResolution {
   targets: Map<HirExprId, Map<string, SymbolId>>;
   typeArguments: Map<HirExprId, readonly TypeId[]>;
   instanceKeys: Map<HirExprId, string>;
+  traitDispatches: Set<HirExprId>;
 }
 
 export class FunctionStore {
