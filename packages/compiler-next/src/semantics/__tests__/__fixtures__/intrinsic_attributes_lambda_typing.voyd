@@ -1,0 +1,13 @@
+@intrinsic(name: "__array_len")
+fn len(arr: FixedArray<i32>) -> i32 0
+
+@intrinsic(name: "__array_get", uses_signature: true)
+fn get_wrapper(arr: FixedArray<i32>, index: i32) -> i32 __array_get(arr, index)
+
+fn demo(arr: FixedArray<i32>) -> i32
+  let read = () =>
+    let size: i32 = len(arr)
+    let first: i32 = get_wrapper(arr, 0)
+    size + first
+
+  read()

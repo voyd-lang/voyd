@@ -1,0 +1,6 @@
+@intrinsic(name: "__array_len")
+fn len(arr: FixedArray<i32>) -> i32 0
+
+fn demo(arr: FixedArray<i32>) -> i32
+  let missing_arg = () => len()
+  missing_arg()
