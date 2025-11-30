@@ -111,6 +111,15 @@ export const compileCallExpr = (
   }
 
   if (calleeDesc.kind === "function") {
+    if (expr.args.length > calleeDesc.parameters.length) {
+      return compileCurriedClosureCall({
+        expr,
+        calleeTypeId,
+        ctx,
+        fnCtx,
+        compileExpr,
+      });
+    }
     return compileClosureCall({
       expr,
       calleeTypeId,
@@ -231,6 +240,10 @@ const compileClosureCall = ({
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): CompiledExpression => {
+  if (expr.args.length !== calleeDesc.parameters.length) {
+    throw new Error("call argument count mismatch");
+  }
+
   const base = getClosureTypeInfo(calleeTypeId, ctx);
   const closureValue = compileExpr({ exprId: expr.callee, ctx, fnCtx });
   const closureTemp = allocateTempLocal(base.interfaceType, fnCtx);
@@ -270,6 +283,93 @@ const compileClosureCall = ({
           ),
     usedReturnCall: false,
   };
+};
+
+const compileCurriedClosureCall = ({
+  expr,
+  calleeTypeId,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  expr: HirCallExpr;
+  calleeTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): CompiledExpression => {
+  let currentValue = compileExpr({ exprId: expr.callee, ctx, fnCtx });
+  let currentTypeId = calleeTypeId;
+  let argIndex = 0;
+
+  while (argIndex < expr.args.length) {
+    const currentDesc = ctx.typing.arena.get(currentTypeId);
+    if (currentDesc.kind !== "function") {
+      throw new Error("attempted to call a non-function value");
+    }
+
+    const paramCount = currentDesc.parameters.length;
+    const slice = expr.args.slice(argIndex, argIndex + paramCount);
+    if (slice.length !== paramCount) {
+      throw new Error("call argument count mismatch");
+    }
+
+    const base = getClosureTypeInfo(currentTypeId, ctx);
+    const closureTemp = allocateTempLocal(base.interfaceType, fnCtx);
+    const ops: binaryen.ExpressionRef[] = [
+      ctx.mod.local.set(closureTemp.index, currentValue.expr),
+    ];
+
+    const fnField = structGetFieldValue({
+      mod: ctx.mod,
+      fieldIndex: 0,
+      fieldType: binaryen.funcref,
+      exprRef: ctx.mod.local.get(closureTemp.index, base.interfaceType),
+    });
+    const targetFn =
+      base.fnRefType === binaryen.funcref
+        ? fnField
+        : refCast(ctx.mod, fnField, base.fnRefType);
+    const args = slice.map((arg, index) => {
+      const expectedTypeId = currentDesc.parameters[index]?.type;
+      const actualTypeId = getRequiredExprType(
+        arg.expr,
+        ctx,
+        fnCtx.instanceKey
+      );
+      const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
+      return coerceValueToType({
+        value: value.expr,
+        actualType: actualTypeId,
+        targetType: expectedTypeId,
+        ctx,
+        fnCtx,
+      });
+    });
+
+    const call = callRef(
+      ctx.mod,
+      targetFn,
+      [
+        ctx.mod.local.get(closureTemp.index, base.interfaceType),
+        ...args,
+      ] as number[],
+      base.resultType
+    );
+
+    ops.push(call);
+    currentValue = {
+      expr:
+        ops.length === 1
+          ? ops[0]!
+          : ctx.mod.block(null, ops, base.resultType),
+      usedReturnCall: false,
+    };
+    currentTypeId = currentDesc.returnType;
+    argIndex += paramCount;
+  }
+
+  return currentValue;
 };
 
 const getFunctionMetadataForCall = ({

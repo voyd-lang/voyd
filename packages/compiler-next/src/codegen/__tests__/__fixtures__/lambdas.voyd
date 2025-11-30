@@ -15,7 +15,7 @@ fn nested_sum()
 fn apply_twice(value: i32, op: (i32) -> i32)
   op(op(value))
 
-fn generic_pipe<T>(value: T, op: (T) -> T)
+fn generic_pipe<T>(value: T, op: (T) -> T) -> T
   op(value)
 
 fn returner(x: i32)

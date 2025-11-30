@@ -23,6 +23,7 @@ export const analyzeLambdaCaptures = ({
 }): void => {
   const lambdaScopeById = new Map<number, ScopeId>();
   const scopeOwners = new Map<ScopeId, HirCallableOwner>();
+  const lambdaById = new Map<number, HirLambdaExpr>();
 
   const scopeCache = new Map<ScopeId, ReturnType<typeof symbolTable.getScope>>();
   const getScope = (id: ScopeId) => {
@@ -42,6 +43,7 @@ export const analyzeLambdaCaptures = ({
   const lambdaByAst = new Map<NodeId, HirLambdaExpr>();
   hir.expressions.forEach((expr) => {
     if (expr.exprKind !== "lambda") return;
+    lambdaById.set(expr.id, expr);
     lambdaByAst.set(expr.ast, expr);
   });
 
@@ -111,16 +113,44 @@ export const analyzeLambdaCaptures = ({
     return captures;
   };
 
+  const baseCaptures = new Map<number, HirCapture[]>();
+
   hir.expressions.forEach((expr) => {
     if (expr.exprKind !== "lambda") return;
     const lambdaScope = lambdaScopeById.get(expr.id);
     if (lambdaScope === undefined) {
-      expr.captures = [];
       expr.owner = findOwner(scopeByNode.get(expr.ast) ?? symbolTable.rootScope);
+      baseCaptures.set(expr.id, []);
       return;
     }
     expr.owner = findOwner(lambdaScope);
-    expr.captures = collectCaptures(expr.body, lambdaScope);
+    baseCaptures.set(expr.id, collectCaptures(expr.body, lambdaScope));
+  });
+
+  hir.expressions.forEach((expr) => {
+    if (expr.exprKind !== "lambda") return;
+    const lambdaScope = lambdaScopeById.get(expr.id);
+    const captures = [...(baseCaptures.get(expr.id) ?? [])];
+    if (lambdaScope === undefined) {
+      expr.captures = captures;
+      return;
+    }
+
+    const nested = new Set<number>();
+    gatherNestedLambdas(expr.body, hir, nested);
+    nested.forEach((nestedId) => {
+      const nestedLambda = lambdaById.get(nestedId);
+      if (!nestedLambda?.captures) return;
+      nestedLambda.captures.forEach((capture) => {
+        const symbolScope = symbolTable.getSymbol(capture.symbol).scope;
+        if (isWithinScope(symbolScope, lambdaScope)) return;
+        if (captures.some((existing) => existing.symbol === capture.symbol)) {
+          return;
+        }
+        captures.push(capture);
+      });
+    });
+    expr.captures = captures;
   });
 };
 
@@ -209,6 +239,129 @@ const walkExpression = (
       walkExpression(expr.value, hir, onIdentifier);
       return;
     case "lambda":
+      return;
+  }
+};
+
+const gatherNestedLambdas = (
+  exprId: number,
+  hir: HirGraph,
+  nested: Set<number>
+): void => {
+  const expr = hir.expressions.get(exprId);
+  if (!expr) {
+    throw new Error(`missing HirExpression ${exprId}`);
+  }
+
+  switch (expr.exprKind) {
+    case "lambda":
+      nested.add(expr.id);
+      gatherNestedLambdas(expr.body, hir, nested);
+      return;
+    case "identifier":
+    case "literal":
+    case "overload-set":
+    case "continue":
+      return;
+    case "break":
+      if (typeof expr.value === "number") {
+        gatherNestedLambdas(expr.value, hir, nested);
+      }
+      return;
+    case "call":
+      gatherNestedLambdas(expr.callee, hir, nested);
+      expr.args.forEach((arg) => gatherNestedLambdas(arg.expr, hir, nested));
+      return;
+    case "block":
+      expr.statements.forEach((stmt) =>
+        gatherNestedLambdasFromStatement(stmt, hir, nested)
+      );
+      if (typeof expr.value === "number") {
+        gatherNestedLambdas(expr.value, hir, nested);
+      }
+      return;
+    case "tuple":
+      expr.elements.forEach((entry) =>
+        gatherNestedLambdas(entry, hir, nested)
+      );
+      return;
+    case "loop":
+      gatherNestedLambdas(expr.body, hir, nested);
+      return;
+    case "while":
+      gatherNestedLambdas(expr.condition, hir, nested);
+      gatherNestedLambdas(expr.body, hir, nested);
+      return;
+    case "cond":
+    case "if":
+      expr.branches.forEach((branch) => {
+        gatherNestedLambdas(branch.condition, hir, nested);
+        gatherNestedLambdas(branch.value, hir, nested);
+      });
+      if (typeof expr.defaultBranch === "number") {
+        gatherNestedLambdas(expr.defaultBranch, hir, nested);
+      }
+      return;
+    case "match":
+      gatherNestedLambdas(expr.discriminant, hir, nested);
+      expr.arms.forEach((arm) => {
+        if (typeof arm.guard === "number") {
+          gatherNestedLambdas(arm.guard, hir, nested);
+        }
+        gatherNestedLambdas(arm.value, hir, nested);
+      });
+      return;
+    case "effect-handler":
+      gatherNestedLambdas(expr.body, hir, nested);
+      expr.handlers.forEach((handler) =>
+        gatherNestedLambdas(handler.body, hir, nested)
+      );
+      if (typeof expr.finallyBranch === "number") {
+        gatherNestedLambdas(expr.finallyBranch, hir, nested);
+      }
+      return;
+    case "object-literal":
+      expr.entries.forEach((entry) => {
+        if (entry.kind === "spread") {
+          gatherNestedLambdas(entry.value, hir, nested);
+          return;
+        }
+        gatherNestedLambdas(entry.value, hir, nested);
+      });
+      return;
+    case "field-access":
+      gatherNestedLambdas(expr.target, hir, nested);
+      return;
+    case "assign":
+      if (typeof expr.target === "number") {
+        gatherNestedLambdas(expr.target, hir, nested);
+      }
+      gatherNestedLambdas(expr.value, hir, nested);
+      return;
+  }
+};
+
+const gatherNestedLambdasFromStatement = (
+  stmtId: number,
+  hir: HirGraph,
+  nested: Set<number>
+): void => {
+  const stmt = hir.statements.get(stmtId);
+  if (!stmt) {
+    throw new Error(`missing HirStatement ${stmtId}`);
+  }
+
+  switch (stmt.kind) {
+    case "let":
+      gatherNestedLambdas(stmt.initializer, hir, nested);
+      return;
+    case "expr-stmt":
+      gatherNestedLambdas(stmt.expr, hir, nested);
+      return;
+    case "return":
+      if (typeof stmt.value === "number") {
+        gatherNestedLambdas(stmt.value, hir, nested);
+      }
       return;
   }
 };

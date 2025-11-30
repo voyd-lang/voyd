@@ -225,7 +225,9 @@ export const wasmTypeFor = (
       return wasmTypeFor(desc.structural, ctx, seen);
     }
 
-    throw new Error(`codegen cannot map ${desc.kind} types to wasm yet`);
+    throw new Error(
+      `codegen cannot map ${desc.kind} types to wasm yet (type ${typeId})`
+    );
   } finally {
     seen.delete(typeId);
   }
@@ -266,18 +268,38 @@ export const getSymbolTypeId = (
   );
 };
 
+const getInstanceExprType = (
+  exprId: HirExprId,
+  ctx: CodegenContext,
+  instanceKey?: string
+): TypeId | undefined => {
+  if (!instanceKey) {
+    return undefined;
+  }
+
+  let currentKey: string | undefined = instanceKey;
+  while (currentKey) {
+    const instanceType = ctx.typing.functionInstanceExprTypes
+      ?.get(currentKey)
+      ?.get(exprId);
+    if (typeof instanceType === "number") {
+      return instanceType;
+    }
+    const lambdaIndex = currentKey.lastIndexOf("::lambda");
+    currentKey = lambdaIndex === -1 ? undefined : currentKey.slice(0, lambdaIndex);
+  }
+
+  return undefined;
+};
+
 export const getRequiredExprType = (
   exprId: HirExprId,
   ctx: CodegenContext,
   instanceKey?: string
 ): TypeId => {
-  if (instanceKey) {
-    const instanceType = ctx.typing.functionInstanceExprTypes
-      ?.get(instanceKey)
-      ?.get(exprId);
-    if (typeof instanceType === "number") {
-      return instanceType;
-    }
+  const instanceType = getInstanceExprType(exprId, ctx, instanceKey);
+  if (typeof instanceType === "number") {
+    return instanceType;
   }
   const resolved = ctx.typing.resolvedExprTypes.get(exprId);
   if (typeof resolved === "number") {
@@ -295,13 +317,9 @@ export const getExprBinaryenType = (
   ctx: CodegenContext,
   instanceKey?: string
 ): binaryen.Type => {
-  if (instanceKey) {
-    const instanceType = ctx.typing.functionInstanceExprTypes
-      ?.get(instanceKey)
-      ?.get(exprId);
-    if (typeof instanceType === "number") {
-      return wasmTypeFor(instanceType, ctx);
-    }
+  const instanceType = getInstanceExprType(exprId, ctx, instanceKey);
+  if (typeof instanceType === "number") {
+    return wasmTypeFor(instanceType, ctx);
   }
   const resolved = ctx.typing.resolvedExprTypes.get(exprId);
   const typeId =

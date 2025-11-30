@@ -205,6 +205,7 @@ const typeCallExpr = (
   const args = expr.args.map((arg, index) => ({
     label: arg.label,
     type: typeExpression(arg.expr, ctx, state, expectedParams?.[index]),
+    exprId: arg.expr,
   }));
 
   if (calleeExpr.exprKind === "overload-set") {
@@ -229,21 +230,65 @@ const typeCallExpr = (
       metadata.intrinsic === true &&
       typeof metadata.intrinsicName === "string" &&
       metadata.intrinsicName !== record.name;
-
     const signature = ctx.functions.getSignature(calleeExpr.symbol);
+    const intrinsicSignatures =
+      metadata.intrinsic === true
+        ? intrinsicSignaturesFor(intrinsicName, ctx)
+        : undefined;
+
+    let intrinsicReturn: TypeId | undefined;
+    const isRawIntrinsic =
+      metadata.intrinsic === true &&
+      !signature &&
+      metadata.intrinsicUsesSignature !== true &&
+      (intrinsicSignatures?.length ?? 0) === 0;
+
+    const calleeType = isRawIntrinsic
+      ? (() => {
+          intrinsicReturn = typeIntrinsicCall(
+            intrinsicName,
+            args,
+            ctx,
+            state,
+            typeArguments,
+            allowIntrinsicTypeArgs
+          );
+          return ctx.arena.internFunction({
+            parameters: args.map(({ type, label }) => ({
+              type,
+              label,
+              optional: false,
+            })),
+            returnType: intrinsicReturn,
+            effects: ctx.primitives.defaultEffectRow,
+          });
+        })()
+      : metadata.intrinsic && metadata.intrinsicUsesSignature === false
+        ? expectedCalleeType(args, ctx)
+        : signature ||
+            !metadata.intrinsic ||
+            (intrinsicSignatures && intrinsicSignatures.length > 0)
+          ? getValueType(calleeExpr.symbol, ctx)
+          : expectedCalleeType(args, ctx);
+    ctx.table.setExprType(calleeExpr.id, calleeType);
+    ctx.resolvedExprTypes.set(
+      calleeExpr.id,
+      applyCurrentSubstitution(calleeType, ctx, state)
+    );
+
     if (signature) {
-      if (metadata.intrinsic && metadata.intrinsicUsesSignature !== false) {
-        return typeFunctionCall({
-          args,
-          signature,
-          calleeSymbol: calleeExpr.symbol,
-          typeArguments,
-          callId: expr.id,
-          ctx,
-          state,
-        });
-      }
-      if (metadata.intrinsic) {
+      const returnType = typeFunctionCall({
+        args,
+        signature,
+        calleeSymbol: calleeExpr.symbol,
+        typeArguments,
+        callId: expr.id,
+        calleeExprId: calleeExpr.id,
+        ctx,
+        state,
+      });
+
+      if (metadata.intrinsic && metadata.intrinsicUsesSignature === false) {
         return typeIntrinsicCall(
           intrinsicName,
           args,
@@ -253,15 +298,8 @@ const typeCallExpr = (
           allowIntrinsicTypeArgs
         );
       }
-      return typeFunctionCall({
-        args,
-        signature,
-        calleeSymbol: calleeExpr.symbol,
-        typeArguments,
-        callId: expr.id,
-        ctx,
-        state,
-      });
+
+      return returnType;
     }
 
     if (metadata.intrinsic) {
@@ -274,6 +312,16 @@ const typeCallExpr = (
         allowIntrinsicTypeArgs
       );
     }
+
+    return (
+      intrinsicReturn ??
+      resolveCurriedCallReturnType({
+        args,
+        calleeType,
+        ctx,
+        state,
+      })
+    );
   }
 
   const calleeType = typeExpression(
@@ -292,9 +340,12 @@ const typeCallExpr = (
     throw new Error("attempted to call a non-function value");
   }
 
-  validateCallArgs(args, calleeDesc.parameters, ctx, state);
-
-  return calleeDesc.returnType;
+  return resolveCurriedCallReturnType({
+    args,
+    calleeType,
+    ctx,
+    state,
+  });
 };
 
 const getExpectedCallParameters = ({
@@ -677,6 +728,46 @@ const validateCallArgs = (
   });
 };
 
+const resolveCurriedCallReturnType = ({
+  args,
+  calleeType,
+  ctx,
+  state,
+}: {
+  args: readonly Arg[];
+  calleeType: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): TypeId => {
+  let remainingArgs = args;
+  let currentType = calleeType;
+
+  while (true) {
+    const desc = ctx.arena.get(currentType);
+    if (desc.kind !== "function") {
+      throw new Error("attempted to call a non-function value");
+    }
+
+    const { parameters, returnType } = desc;
+    if (parameters.length === 0) {
+      if (remainingArgs.length > 0) {
+        throw new Error("call argument count mismatch");
+      }
+      return returnType;
+    }
+
+    const segment = remainingArgs.slice(0, parameters.length);
+    validateCallArgs(segment, parameters, ctx, state);
+
+    remainingArgs = remainingArgs.slice(parameters.length);
+    if (remainingArgs.length === 0) {
+      return returnType;
+    }
+
+    currentType = returnType;
+  }
+};
+
 const typeFunctionCall = ({
   args,
   signature,
@@ -693,6 +784,7 @@ const typeFunctionCall = ({
   callId: HirExprId;
   ctx: TypingContext;
   state: TypingState;
+  calleeExprId?: HirExprId;
 }): TypeId => {
   const record = ctx.symbolTable.getSymbol(calleeSymbol);
   const intrinsicMetadata = (record.metadata ?? {}) as {
@@ -721,12 +813,34 @@ const typeFunctionCall = ({
 
   validateCallArgs(args, instantiation.parameters, ctx, state);
 
+  if (typeof calleeExprId === "number") {
+    const calleeType = ctx.arena.internFunction({
+      parameters: instantiation.parameters.map((param) => ({
+        ...param,
+        optional: false,
+      })),
+      returnType: instantiation.returnType,
+      effects: ctx.primitives.defaultEffectRow,
+    });
+    ctx.table.setExprType(calleeExprId, calleeType);
+    ctx.resolvedExprTypes.set(
+      calleeExprId,
+      applyCurrentSubstitution(calleeType, ctx, state)
+    );
+  }
+
   if (hasTypeParams) {
     const mergedSubstitution = mergeSubstitutions(
       instantiation.substitution,
       state.currentFunction?.substitution,
       ctx
     );
+    args.forEach((arg) => {
+      if (typeof arg.exprId === "number") {
+        const applied = ctx.arena.substitute(arg.type, mergedSubstitution);
+        ctx.resolvedExprTypes.set(arg.exprId, applied);
+      }
+    });
     const appliedTypeArgs = getAppliedTypeArguments({
       signature,
       substitution: mergedSubstitution,
