@@ -1194,7 +1194,7 @@ const instantiateTraitImplsFor = ({
   state: TypingState;
 }): readonly TraitImplInstance[] => {
   const cached = ctx.traitImplsByNominal.get(nominal);
-  if (cached) {
+  if (cached && cached.length > 0) {
     return cached;
   }
 
@@ -1515,8 +1515,16 @@ const traitSatisfies = (
   }
 
   const info = getObjectInfoForNominal(actualNominal, ctx, state);
-  const impls =
-    ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls ?? [];
+  let impls =
+    ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls;
+  if (!impls || impls.length === 0) {
+    impls = instantiateTraitImplsFor({
+      nominal: actualNominal,
+      ctx,
+      state,
+    });
+  }
+  impls ??= [];
   return impls.some((impl) => {
     if (impl.traitSymbol !== traitSymbol) {
       return false;

@@ -60,6 +60,10 @@ export const compileIntrinsicCall = ({
   instanceKey,
 }: CompileIntrinsicCallParams): binaryen.ExpressionRef => {
   switch (name) {
+    case "~": {
+      assertArgCount(name, args, 1);
+      return args[0]!;
+    }
     case "__array_new": {
       assertArgCount(name, args, 1);
       const arrayType = getRequiredExprType(call.id, ctx, instanceKey);

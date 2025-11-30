@@ -785,6 +785,16 @@ const ensureMutableArgument = ({
     typeof arg.exprId === "number"
       ? ctx.hir.expressions.get(arg.exprId)
       : undefined;
+  if (argExpr?.exprKind === "call") {
+    const calleeExpr = ctx.hir.expressions.get(argExpr.callee);
+    if (calleeExpr?.exprKind === "identifier") {
+      const record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
+      const metadata = (record.metadata ?? {}) as { intrinsic?: boolean };
+      if (metadata.intrinsic === true && record.name === "~") {
+        return;
+      }
+    }
+  }
   const span = argExpr?.span ?? param.span ?? ctx.hir.module.span;
   const symbol =
     typeof arg.exprId === "number"
@@ -1992,32 +2002,45 @@ const typeOverloadedCall = (
     );
   }
 
-  const matches = options
-    .map((symbol) => {
-      const signature = ctx.functions.getSignature(symbol);
-      if (!signature) {
-        throw new Error(
-          `missing type signature for overloaded function ${getSymbolName(
-            symbol,
-            ctx
-          )}`
-        );
-      }
-      return { symbol, signature };
-    })
-    .filter(({ symbol, signature }) =>
-      matchesOverloadSignature(symbol, signature, argTypes, ctx, state)
-    );
+  const candidates = options.map((symbol) => {
+    const signature = ctx.functions.getSignature(symbol);
+    if (!signature) {
+      throw new Error(
+        `missing type signature for overloaded function ${getSymbolName(
+          symbol,
+          ctx
+        )}`
+      );
+    }
+    return { symbol, signature };
+  });
 
-  if (matches.length === 0) {
-    throw new Error(`no overload of ${callee.name} matches argument types`);
+  const matches = candidates.filter(({ symbol, signature }) =>
+    matchesOverloadSignature(symbol, signature, argTypes, ctx, state)
+  );
+
+  const traitDispatch =
+    matches.length === 0
+      ? resolveTraitDispatchOverload({
+          candidates,
+          args: argTypes,
+          ctx,
+          state,
+        })
+      : undefined;
+
+  let selected = traitDispatch;
+  if (!selected) {
+    if (matches.length === 0) {
+      throw new Error(`no overload of ${callee.name} matches argument types`);
+    }
+
+    if (matches.length > 1) {
+      throw new Error(`ambiguous overload for ${callee.name}`);
+    }
+
+    selected = matches[0];
   }
-
-  if (matches.length > 1) {
-    throw new Error(`ambiguous overload for ${callee.name}`);
-  }
-
-  const selected = matches[0]!;
   const instanceKey = state.currentFunction?.instanceKey;
   if (!instanceKey) {
     throw new Error(
@@ -2030,6 +2053,127 @@ const typeOverloadedCall = (
   ctx.callResolution.targets.set(call.id, targets);
   ctx.table.setExprType(callee.id, selected.signature.typeId);
   return selected.signature.returnType;
+};
+
+const resolveTraitDispatchOverload = ({
+  candidates,
+  args,
+  ctx,
+  state,
+}: {
+  candidates: readonly { symbol: SymbolId; signature: FunctionSignature }[];
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+}): { symbol: SymbolId; signature: FunctionSignature } | undefined => {
+  if (args.length === 0) {
+    return undefined;
+  }
+  const receiver = args[0];
+  const receiverDesc = ctx.arena.get(receiver.type);
+  if (receiverDesc.kind !== "trait") {
+    return undefined;
+  }
+
+  const impls = ctx.traitImplsByTrait.get(receiverDesc.owner);
+  const templates = ctx.traits.getImplTemplatesForTrait(receiverDesc.owner);
+  if (
+    (!impls || impls.length === 0) &&
+    (!templates || templates.length === 0)
+  ) {
+    return undefined;
+  }
+
+  const allowUnknown = state.mode === "relaxed";
+  const candidate = candidates.find(({ symbol, signature }) => {
+    if (signature.parameters.length === 0) {
+      return false;
+    }
+    const methodMetadata = ctx.traitMethodImpls.get(symbol);
+    if (!methodMetadata || methodMetadata.traitSymbol !== receiverDesc.owner) {
+      return false;
+    }
+    const hasMatchingImpl =
+      impls?.some(
+        (entry) =>
+          entry.methods.get(methodMetadata.traitMethodSymbol) === symbol &&
+          typeSatisfies(receiver.type, entry.trait, ctx, state)
+      ) === true;
+    const hasCompatibleTemplate =
+      templates?.some((template) => {
+        const implMethod = template.methods.get(
+          methodMetadata.traitMethodSymbol
+        );
+        if (implMethod !== symbol) {
+          return false;
+        }
+        const comparison = ctx.arena.unify(receiver.type, template.trait, {
+          location: ctx.hir.module.ast,
+          reason: "trait object dispatch",
+          variance: "covariant",
+          allowUnknown,
+        });
+        return comparison.ok;
+      }) === true;
+    if (!hasMatchingImpl && !hasCompatibleTemplate) {
+      return false;
+    }
+    const adjustedParams =
+      adjustTraitDispatchParameters({
+        args,
+        params: signature.parameters,
+        calleeSymbol: symbol,
+        ctx,
+      }) ?? signature.parameters;
+    if (adjustedParams.length !== args.length) {
+      return false;
+    }
+    return adjustedParams.every((param, index) => {
+      const arg = args[index];
+      if (!arg || param.label !== arg.label) {
+        return false;
+      }
+      if (arg.type === ctx.primitives.unknown) {
+        return true;
+      }
+      return typeSatisfies(arg.type, param.type, ctx, state);
+    });
+  });
+
+  if (!candidate) {
+    return undefined;
+  }
+
+  const params =
+    adjustTraitDispatchParameters({
+      args,
+      params: candidate.signature.parameters,
+      calleeSymbol: candidate.symbol,
+      ctx,
+    }) ?? candidate.signature.parameters;
+
+  const signatureDesc = ctx.arena.get(candidate.signature.typeId);
+  const effects =
+    signatureDesc.kind === "function"
+      ? signatureDesc.effects
+      : ctx.primitives.defaultEffectRow;
+  const adjustedType = ctx.arena.internFunction({
+    parameters: params.map((param) => ({
+      type: param.type,
+      label: param.label,
+      optional: false,
+    })),
+    returnType: candidate.signature.returnType,
+    effects,
+  });
+
+  return {
+    symbol: candidate.symbol,
+    signature:
+      params === candidate.signature.parameters
+        ? candidate.signature
+        : { ...candidate.signature, parameters: params, typeId: adjustedType },
+  };
 };
 
 const matchesOverloadSignature = (
@@ -2077,6 +2221,8 @@ const typeIntrinsicCall = (
   allowTypeArguments = false
 ): TypeId => {
   switch (name) {
+    case "~":
+      return typeMutableIntrinsic({ args, ctx, state, typeArguments });
     case "__array_new":
       return typeArrayNewIntrinsic({ args, ctx, state, typeArguments });
     case "__array_get":
@@ -2132,6 +2278,38 @@ const typeIntrinsicCall = (
       return matches[0]!.returnType;
     }
   }
+};
+
+const typeMutableIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  if (typeArguments && typeArguments.length > 0) {
+    throw new Error("~ does not accept type arguments");
+  }
+  if (args.length === 0) {
+    throw new Error("~ requires at least one argument");
+  }
+  const [target, ...rest] = args;
+  const value = rest.length > 0 ? rest[rest.length - 1]! : target;
+  if (rest.length > 0) {
+    ensureTypeMatches(
+      value.type,
+      target.type,
+      ctx,
+      state,
+      "mutable expression target"
+    );
+    return target.type;
+  }
+  return value.type;
 };
 
 const typeArrayNewIntrinsic = ({
