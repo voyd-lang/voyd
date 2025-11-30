@@ -1557,6 +1557,27 @@ export const bindTypeParamsFromType = (
     return;
   }
 
+  if (expectedDesc.kind === "nominal-object") {
+    const actualNominal = getNominalComponent(actual, ctx);
+    if (typeof actualNominal !== "number") {
+      return;
+    }
+    const actualDesc = ctx.arena.get(actualNominal);
+    if (
+      actualDesc.kind !== "nominal-object" ||
+      actualDesc.owner !== expectedDesc.owner
+    ) {
+      return;
+    }
+    expectedDesc.typeArgs.forEach((typeArg, index) => {
+      const actualArg = actualDesc.typeArgs[index];
+      if (typeof actualArg === "number") {
+        bindTypeParamsFromType(typeArg, actualArg, bindings, ctx, state);
+      }
+    });
+    return;
+  }
+
   if (expectedDesc.kind === "structural-object") {
     const actualFields = getStructuralFields(actual, ctx, state);
     if (!actualFields) {

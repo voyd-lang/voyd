@@ -561,6 +561,12 @@ const parseImplHead = (
     };
   }
 
+  if (entries.length === 2 && isForm(entries[0]) && formCallsInternal(entries[0]!, "generics")) {
+    const typeParameters = parseTypeParameters(entries[0] as Form);
+    const { target, typeParameters: targetParams } = parseImplHeadTarget(entries[1]!);
+    return { target, typeParameters: [...typeParameters, ...targetParams] };
+  }
+
   if (entries.length !== 1) {
     throw new Error("impl declaration missing target type");
   }
