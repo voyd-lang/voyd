@@ -51,16 +51,6 @@ import type {
   TypingContext,
 } from "./types.js";
 
-const SIGNATURELESS_INTRINSICS = new Set<string>([
-  "~",
-  "__array_new",
-  "__array_new_fixed",
-  "__array_get",
-  "__array_set",
-  "__array_len",
-  "__array_copy",
-]);
-
 const applyCurrentSubstitution = (
   type: TypeId,
   ctx: TypingContext,
@@ -235,7 +225,15 @@ const typeCallExpr = (
       intrinsic?: boolean;
       intrinsicName?: string;
       intrinsicUsesSignature?: boolean;
+      unresolved?: boolean;
     };
+    if (metadata.unresolved) {
+      return reportUnknownFunction({
+        name: record.name,
+        span: calleeExpr.span,
+        ctx,
+      });
+    }
     const intrinsicName = metadata.intrinsicName ?? record.name;
     const allowIntrinsicTypeArgs =
       metadata.intrinsic === true &&
@@ -249,8 +247,7 @@ const typeCallExpr = (
     const intrinsicSignatureCount = intrinsicSignatures?.length ?? 0;
     const hasIntrinsicHandler =
       metadata.intrinsicUsesSignature === false ||
-      intrinsicSignatureCount > 0 ||
-      SIGNATURELESS_INTRINSICS.has(intrinsicName);
+      intrinsicSignatureCount > 0;
 
     const missingFunction =
       metadata.intrinsic === true &&
