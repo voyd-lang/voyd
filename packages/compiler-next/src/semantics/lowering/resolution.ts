@@ -11,6 +11,22 @@ const INTRINSIC_TYPES = new Map<
   ],
 ]);
 
+const INTRINSIC_VALUES = new Map<
+  string,
+  { metadata: Record<string, unknown> }
+>([
+  [
+    "fixed_array_literal",
+    {
+      metadata: {
+        intrinsic: true,
+        intrinsicName: "__array_new_fixed",
+        intrinsicUsesSignature: false,
+      },
+    },
+  ],
+]);
+
 export const resolveIdentifierValue = (
   name: string,
   scope: ScopeId,
@@ -71,11 +87,14 @@ const resolveIntrinsicSymbol = (name: string, ctx: LowerContext): SymbolId => {
     return intrinsic;
   }
 
+  const { metadata: intrinsicMetadata = {} } =
+    INTRINSIC_VALUES.get(name) ?? {};
+
   intrinsic = ctx.symbolTable.declare({
     name,
     kind: "value",
     declaredAt: ctx.moduleNodeId,
-    metadata: { intrinsic: true },
+    metadata: { intrinsic: true, ...intrinsicMetadata },
   });
   ctx.intrinsicSymbols.set(name, intrinsic);
   return intrinsic;

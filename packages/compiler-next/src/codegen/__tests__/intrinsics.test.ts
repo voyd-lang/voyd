@@ -165,17 +165,23 @@ describe("compileIntrinsicCall array intrinsics", () => {
     cacheArrayType(ctx, i32Type, cachedArrayType);
 
     registerExpr(
-      { expressions, exprTypes, typeId: arrayType },
-      1 as HirExprId,
-      { id: 1 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "void", value: "void" } as any
+      { expressions, exprTypes, typeId: i32Type },
+      2 as HirExprId,
+      { id: 2 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "i32", value: "1" } as any
     );
+    registerExpr(
+      { expressions, exprTypes, typeId: i32Type },
+      3 as HirExprId,
+      { id: 3 as HirExprId, ast: 0 as any, span: span as any, kind: "expr", exprKind: "literal", literalKind: "i32", value: "2" } as any
+    );
+    exprTypes.set(0 as HirExprId, arrayType);
 
     fnCtx.returnTypeId = arrayType;
 
     const expr = compileIntrinsicCall({
       name: "__array_new_fixed",
-      call: makeCall([1 as HirExprId, 2 as HirExprId, 3 as HirExprId]),
-      args: [ctx.mod.nop(), ctx.mod.i32.const(1), ctx.mod.i32.const(2)],
+      call: makeCall([2 as HirExprId, 3 as HirExprId]),
+      args: [ctx.mod.i32.const(1), ctx.mod.i32.const(2)],
       ctx,
       fnCtx,
     });
@@ -362,7 +368,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
         ctx,
         fnCtx,
       })
-    ).toThrow(/expected at least 1 args, received 0/);
+    ).toThrow(/codegen missing type information/);
 
     expect(() =>
       compileIntrinsicCall({

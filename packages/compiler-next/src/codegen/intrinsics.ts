@@ -73,16 +73,9 @@ export const compileIntrinsicCall = ({
       return arrayNew(ctx.mod, heapType, args[0]!, init);
     }
     case "__array_new_fixed": {
-      assertMinArgCount(name, args, 1);
-      const heapType = getHeapTypeArg({
-        call,
-        ctx,
-        index: 0,
-        instanceKey,
-        name,
-      });
-      const values = args.slice(1);
-      return arrayNewFixed(ctx.mod, heapType, values);
+      const arrayType = getRequiredExprType(call.id, ctx, instanceKey);
+      const heapType = getFixedArrayHeapType(arrayType, ctx);
+      return arrayNewFixed(ctx.mod, heapType, args);
     }
     case "__array_get": {
       if (args.length === 2) {

@@ -2257,6 +2257,13 @@ const typeIntrinsicCall = (
       return typeMutableIntrinsic({ args, ctx, state, typeArguments });
     case "__array_new":
       return typeArrayNewIntrinsic({ args, ctx, state, typeArguments });
+    case "__array_new_fixed":
+      return typeArrayNewFixedIntrinsic({
+        args,
+        ctx,
+        state,
+        typeArguments,
+      });
     case "__array_get":
       return typeArrayGetIntrinsic({
         args,
@@ -2368,6 +2375,47 @@ const typeArrayNewIntrinsic = ({
   });
   const sizeType = getPrimitiveType(ctx, "i32");
   ensureTypeMatches(args[0]!.type, sizeType, ctx, state, "__array_new size");
+  return ctx.arena.internFixedArray(elementType);
+};
+
+const typeArrayNewFixedIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  const specifiedElement =
+    typeArguments && typeArguments.length > 0
+      ? requireSingleTypeArgument({
+          name: "__array_new_fixed",
+          typeArguments,
+          detail: "element type",
+        })
+      : undefined;
+  const elementType =
+    specifiedElement ??
+    (args.length > 0 ? args[0]!.type : ctx.primitives.unknown);
+
+  if (
+    typeof elementType === "number" &&
+    !(elementType === ctx.primitives.unknown && args.length === 0)
+  ) {
+    args.forEach((arg) =>
+      ensureTypeMatches(
+        arg.type,
+        elementType,
+        ctx,
+        state,
+        "__array_new_fixed element"
+      )
+    );
+  }
+
   return ctx.arena.internFixedArray(elementType);
 };
 
