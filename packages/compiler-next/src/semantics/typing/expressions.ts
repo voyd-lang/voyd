@@ -235,7 +235,15 @@ const typeCallExpr = (
       intrinsic?: boolean;
       intrinsicName?: string;
       intrinsicUsesSignature?: boolean;
+      unresolved?: boolean;
     };
+    if (metadata.unresolved) {
+      return reportUnknownFunction({
+        name: record.name,
+        span: calleeExpr.span,
+        ctx,
+      });
+    }
     const intrinsicName = metadata.intrinsicName ?? record.name;
     const allowIntrinsicTypeArgs =
       metadata.intrinsic === true &&
@@ -248,14 +256,10 @@ const typeCallExpr = (
         : undefined;
     const intrinsicSignatureCount = intrinsicSignatures?.length ?? 0;
     const hasIntrinsicHandler =
-      metadata.intrinsicUsesSignature === false ||
-      intrinsicSignatureCount > 0 ||
-      SIGNATURELESS_INTRINSICS.has(intrinsicName);
+      metadata.intrinsicUsesSignature === false || intrinsicSignatureCount > 0;
 
     const missingFunction =
-      metadata.intrinsic === true &&
-      !signature &&
-      !hasIntrinsicHandler;
+      metadata.intrinsic === true && !signature && !hasIntrinsicHandler;
 
     if (missingFunction) {
       return reportUnknownFunction({
