@@ -87,6 +87,7 @@ const emitLambdaFunction = ({
   env,
   fnName,
   instanceKey,
+  typeInstanceKey,
   compileExpr,
 }: {
   expr: HirLambdaExpr;
@@ -94,6 +95,7 @@ const emitLambdaFunction = ({
   env: LambdaEnvInfo;
   fnName: string;
   instanceKey: string;
+  typeInstanceKey?: string;
   compileExpr: ExpressionCompiler;
 }): void => {
   const desc = ctx.typing.arena.get(env.typeId);
@@ -111,6 +113,7 @@ const emitLambdaFunction = ({
     nextLocalIndex: params.length,
     returnTypeId: desc.returnType,
     instanceKey,
+    typeInstanceKey,
   };
 
   expr.parameters.forEach((param, index) => {
@@ -159,7 +162,8 @@ export const compileLambdaExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const lambdaTypeId = getRequiredExprType(expr.id, ctx, fnCtx.instanceKey);
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const lambdaTypeId = getRequiredExprType(expr.id, ctx, typeInstanceKey);
   const base = getClosureTypeInfo(lambdaTypeId, ctx);
   const lambdaInstanceKey = formatLambdaInstanceKey(expr.id, fnCtx.instanceKey);
   const key = makeLambdaKey(expr.id, ctx, fnCtx.instanceKey);
@@ -202,6 +206,7 @@ export const compileLambdaExpr = (
       env,
       fnName,
       instanceKey: lambdaInstanceKey,
+      typeInstanceKey,
       compileExpr,
     });
     ctx.lambdaFunctions.set(key, fnName);

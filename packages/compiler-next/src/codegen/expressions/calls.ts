@@ -28,6 +28,7 @@ export const compileCallExpr = (
   options: CompileCallOptions = {}
 ): CompiledExpression => {
   const { tailPosition = false, expectedResultTypeId } = options;
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const callee = ctx.hir.expressions.get(expr.callee);
   if (!callee) {
     throw new Error(`codegen missing callee expression ${expr.callee}`);
@@ -36,7 +37,7 @@ export const compileCallExpr = (
   if (callee.exprKind === "overload-set") {
     const targets = ctx.typing.callTargets.get(expr.id);
     const targetSymbol =
-      (fnCtx.instanceKey && targets?.get(fnCtx.instanceKey)) ??
+      (typeInstanceKey && targets?.get(typeInstanceKey)) ??
       (targets && targets.size === 1
         ? targets.values().next().value
         : undefined);
@@ -55,14 +56,14 @@ export const compileCallExpr = (
     return emitResolvedCall(targetMeta, args, expr.id, ctx, {
       tailPosition,
       expectedResultTypeId,
-      instanceKey: fnCtx.instanceKey,
+      typeInstanceKey,
     });
   }
 
   const calleeTypeId = getRequiredExprType(
     expr.callee,
     ctx,
-    fnCtx.instanceKey
+    typeInstanceKey
   );
   const calleeDesc = ctx.typing.arena.get(calleeTypeId);
 
@@ -89,7 +90,7 @@ export const compileCallExpr = (
           args,
           ctx,
           fnCtx,
-          instanceKey: fnCtx.instanceKey,
+          instanceKey: typeInstanceKey,
         }),
         usedReturnCall: false,
       };
@@ -105,7 +106,7 @@ export const compileCallExpr = (
       return emitResolvedCall(meta, args, expr.id, ctx, {
         tailPosition,
         expectedResultTypeId,
-        instanceKey: fnCtx.instanceKey,
+        typeInstanceKey,
       });
     }
   }
@@ -140,9 +141,10 @@ const emitResolvedCall = (
   ctx: CodegenContext,
   options: CompileCallOptions = {}
 ): CompiledExpression => {
-  const { tailPosition = false, expectedResultTypeId, instanceKey } = options;
-  const typeInstanceKey = instanceKey ?? meta.instanceKey;
-  const returnTypeId = getRequiredExprType(callId, ctx, typeInstanceKey);
+  const { tailPosition = false, expectedResultTypeId, typeInstanceKey } =
+    options;
+  const lookupKey = typeInstanceKey ?? meta.instanceKey;
+  const returnTypeId = getRequiredExprType(callId, ctx, lookupKey);
   const expectedTypeId = expectedResultTypeId ?? returnTypeId;
 
   if (
@@ -153,7 +155,7 @@ const emitResolvedCall = (
       expr: ctx.mod.return_call(
         meta.wasmName,
         args as number[],
-        getExprBinaryenType(callId, ctx, typeInstanceKey)
+        getExprBinaryenType(callId, ctx, lookupKey)
       ),
       usedReturnCall: true,
     };
@@ -163,7 +165,7 @@ const emitResolvedCall = (
     expr: ctx.mod.call(
       meta.wasmName,
       args as number[],
-      getExprBinaryenType(callId, ctx, typeInstanceKey)
+      getExprBinaryenType(callId, ctx, lookupKey)
     ),
     usedReturnCall: false,
   };
@@ -176,12 +178,13 @@ const compileCallArguments = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef[] => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   return call.args.map((arg, index) => {
     const expectedTypeId = meta.paramTypeIds[index];
     const actualTypeId = getRequiredExprType(
       arg.expr,
       ctx,
-      fnCtx.instanceKey
+      typeInstanceKey
     );
     const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
     return coerceValueToType({
@@ -203,12 +206,13 @@ const compileClosureArguments = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef[] => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   return call.args.map((arg, index) => {
     const expectedTypeId = desc.parameters[index]?.type;
     const actualTypeId = getRequiredExprType(
       arg.expr,
       ctx,
-      fnCtx.instanceKey
+      typeInstanceKey
     );
     const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
     return coerceValueToType({
@@ -245,6 +249,7 @@ const compileClosureCall = ({
   }
 
   const base = getClosureTypeInfo(calleeTypeId, ctx);
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const closureValue = compileExpr({ exprId: expr.callee, ctx, fnCtx });
   const closureTemp = allocateTempLocal(base.interfaceType, fnCtx);
   const ops: binaryen.ExpressionRef[] = [
@@ -279,7 +284,7 @@ const compileClosureCall = ({
         : ctx.mod.block(
             null,
             ops,
-            getExprBinaryenType(expr.id, ctx, fnCtx.instanceKey)
+            getExprBinaryenType(expr.id, ctx, typeInstanceKey)
           ),
     usedReturnCall: false,
   };
@@ -298,6 +303,7 @@ const compileCurriedClosureCall = ({
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): CompiledExpression => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   let currentValue = compileExpr({ exprId: expr.callee, ctx, fnCtx });
   let currentTypeId = calleeTypeId;
   let argIndex = 0;
@@ -335,7 +341,7 @@ const compileCurriedClosureCall = ({
       const actualTypeId = getRequiredExprType(
         arg.expr,
         ctx,
-        fnCtx.instanceKey
+        typeInstanceKey
       );
       const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
       return coerceValueToType({

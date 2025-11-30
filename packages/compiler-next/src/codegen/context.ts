@@ -148,6 +148,7 @@ export interface FunctionContext {
   nextLocalIndex: number;
   returnTypeId: TypeId;
   instanceKey?: string;
+  typeInstanceKey?: string;
 }
 
 export interface CompiledExpression {
@@ -158,7 +159,7 @@ export interface CompiledExpression {
 export interface CompileCallOptions {
   tailPosition?: boolean;
   expectedResultTypeId?: TypeId;
-  instanceKey?: string;
+  typeInstanceKey?: string;
 }
 
 export interface ExpressionCompilerParams {

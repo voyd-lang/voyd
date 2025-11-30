@@ -236,6 +236,34 @@ const typeCallExpr = (
         ? intrinsicSignaturesFor(intrinsicName, ctx)
         : undefined;
 
+    if (metadata.intrinsic && metadata.intrinsicUsesSignature === false) {
+      const returnType = typeIntrinsicCall(
+        intrinsicName,
+        args,
+        ctx,
+        state,
+        typeArguments,
+        allowIntrinsicTypeArgs
+      );
+      const calleeType =
+        signature?.typeId ??
+        ctx.arena.internFunction({
+          parameters: args.map(({ type, label }) => ({
+            type,
+            label,
+            optional: false,
+          })),
+          returnType,
+          effects: ctx.primitives.defaultEffectRow,
+        });
+      ctx.table.setExprType(calleeExpr.id, calleeType);
+      ctx.resolvedExprTypes.set(
+        calleeExpr.id,
+        applyCurrentSubstitution(calleeType, ctx, state)
+      );
+      return returnType;
+    }
+
     let intrinsicReturn: TypeId | undefined;
     const isRawIntrinsic =
       metadata.intrinsic === true &&
@@ -263,13 +291,11 @@ const typeCallExpr = (
             effects: ctx.primitives.defaultEffectRow,
           });
         })()
-      : metadata.intrinsic && metadata.intrinsicUsesSignature === false
-        ? expectedCalleeType(args, ctx)
-        : signature ||
-            !metadata.intrinsic ||
-            (intrinsicSignatures && intrinsicSignatures.length > 0)
-          ? getValueType(calleeExpr.symbol, ctx)
-          : expectedCalleeType(args, ctx);
+      : signature ||
+          !metadata.intrinsic ||
+          (intrinsicSignatures && intrinsicSignatures.length > 0)
+        ? getValueType(calleeExpr.symbol, ctx)
+        : expectedCalleeType(args, ctx);
     ctx.table.setExprType(calleeExpr.id, calleeType);
     ctx.resolvedExprTypes.set(
       calleeExpr.id,
@@ -287,17 +313,6 @@ const typeCallExpr = (
         ctx,
         state,
       });
-
-      if (metadata.intrinsic && metadata.intrinsicUsesSignature === false) {
-        return typeIntrinsicCall(
-          intrinsicName,
-          args,
-          ctx,
-          state,
-          typeArguments,
-          allowIntrinsicTypeArgs
-        );
-      }
 
       return returnType;
     }

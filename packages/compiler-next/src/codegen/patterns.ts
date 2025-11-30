@@ -92,6 +92,7 @@ export const compilePatternInitialization = ({
   compileExpr,
   options,
 }: PatternInitParams): void => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   if (pattern.kind === "tuple") {
     compileTuplePattern({
       pattern,
@@ -126,7 +127,7 @@ export const compilePatternInitialization = ({
   const initializerType = getRequiredExprType(
     initializer,
     ctx,
-    fnCtx.instanceKey
+    typeInstanceKey
   );
   const value = compileExpr({ exprId: initializer, ctx, fnCtx });
 
@@ -151,10 +152,11 @@ const compileTuplePattern = ({
   compileExpr,
   options,
 }: PatternInitParams & { pattern: HirPattern & { kind: "tuple" } }): void => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const initializerType = getRequiredExprType(
     initializer,
     ctx,
-    fnCtx.instanceKey
+    typeInstanceKey
   );
   const initializerTemp = allocateTempLocal(
     wasmTypeFor(initializerType, ctx),

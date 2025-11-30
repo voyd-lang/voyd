@@ -276,20 +276,10 @@ const getInstanceExprType = (
   if (!instanceKey) {
     return undefined;
   }
-
-  let currentKey: string | undefined = instanceKey;
-  while (currentKey) {
-    const instanceType = ctx.typing.functionInstanceExprTypes
-      ?.get(currentKey)
-      ?.get(exprId);
-    if (typeof instanceType === "number") {
-      return instanceType;
-    }
-    const lambdaIndex = currentKey.lastIndexOf("::lambda");
-    currentKey = lambdaIndex === -1 ? undefined : currentKey.slice(0, lambdaIndex);
-  }
-
-  return undefined;
+  const instanceType = ctx.typing.functionInstanceExprTypes
+    ?.get(instanceKey)
+    ?.get(exprId);
+  return typeof instanceType === "number" ? instanceType : undefined;
 };
 
 export const getRequiredExprType = (

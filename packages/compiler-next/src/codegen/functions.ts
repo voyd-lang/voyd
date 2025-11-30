@@ -231,6 +231,7 @@ const compileFunctionItem = (
     nextLocalIndex: meta.paramTypes.length,
     returnTypeId: meta.resultTypeId,
     instanceKey: meta.instanceKey,
+    typeInstanceKey: meta.instanceKey,
   };
 
   fn.parameters.forEach((param, index) => {

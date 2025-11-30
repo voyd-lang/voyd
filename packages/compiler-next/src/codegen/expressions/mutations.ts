@@ -18,6 +18,7 @@ export const compileAssignExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   if (expr.pattern) {
     const ops: binaryen.ExpressionRef[] = [];
     compilePatternInitialization({
@@ -48,7 +49,7 @@ export const compileAssignExpr = (
   const valueTypeId = getRequiredExprType(
     expr.value,
     ctx,
-    fnCtx.instanceKey
+    typeInstanceKey
   );
   const valueExpr = compileExpr({ exprId: expr.value, ctx, fnCtx });
   const coerced = coerceValueToType({

@@ -26,7 +26,8 @@ export const compileObjectLiteralExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const typeId = getRequiredExprType(expr.id, ctx, fnCtx.instanceKey);
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeId = getRequiredExprType(expr.id, ctx, typeInstanceKey);
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo) {
     throw new Error("object literal missing structural type information");
@@ -61,7 +62,7 @@ export const compileObjectLiteralExpr = (
     const spreadType = getRequiredExprType(
       entry.value,
       ctx,
-      fnCtx.instanceKey
+      typeInstanceKey
     );
     const spreadInfo = getStructuralTypeInfo(spreadType, ctx);
     if (!spreadInfo) {
@@ -143,7 +144,7 @@ export const compileObjectLiteralExpr = (
     expr: ctx.mod.block(
       null,
       ops,
-      getExprBinaryenType(expr.id, ctx, fnCtx.instanceKey)
+      getExprBinaryenType(expr.id, ctx, typeInstanceKey)
     ),
     usedReturnCall: false,
   };
@@ -155,7 +156,8 @@ export const compileTupleExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const typeId = getRequiredExprType(expr.id, ctx, fnCtx.instanceKey);
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeId = getRequiredExprType(expr.id, ctx, typeInstanceKey);
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo) {
     throw new Error("tuple missing structural type information");
@@ -215,7 +217,7 @@ export const compileTupleExpr = (
     expr: ctx.mod.block(
       null,
       ops,
-      getExprBinaryenType(expr.id, ctx, fnCtx.instanceKey)
+      getExprBinaryenType(expr.id, ctx, typeInstanceKey)
     ),
     usedReturnCall: false,
   };
@@ -227,10 +229,11 @@ export const compileFieldAccessExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const targetType = getRequiredExprType(
     expr.target,
     ctx,
-    fnCtx.instanceKey
+    typeInstanceKey
   );
   const structInfo = getStructuralTypeInfo(targetType, ctx);
   if (!structInfo) {
