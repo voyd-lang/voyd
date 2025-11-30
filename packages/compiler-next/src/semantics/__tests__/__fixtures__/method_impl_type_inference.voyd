@@ -1,0 +1,14 @@
+obj Wrapper<T> { marker: i32 }
+
+obj Holder<T> {
+  wrap: Wrapper<T>
+}
+
+impl<T> Holder<T>
+  fn unwrap(self) -> Wrapper<T>
+    self.wrap
+
+pub fn main() -> i32
+  let holder = Holder<i32> { wrap: Wrapper<i32> { marker: 41 } }
+  let wrapper = holder.unwrap()
+  wrapper.marker

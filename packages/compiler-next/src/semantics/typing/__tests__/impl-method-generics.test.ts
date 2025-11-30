@@ -42,4 +42,31 @@ describe("impl method generics", () => {
     const intType = typing.arena.internPrimitive("i32");
     expect(typeArgs).toEqual([boolType, intType]);
   });
+
+  it("infers impl type parameters from receiver nominal arguments", () => {
+    const ast = loadAst("method_impl_type_inference.voyd");
+    const { symbolTable, hir, typing } = semanticsPipeline(ast);
+    const root = symbolTable.rootScope;
+
+    const unwrapSymbol = symbolTable.resolve("unwrap", root);
+    expect(unwrapSymbol).toBeDefined();
+
+    const unwrapCall = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") return false;
+        const callee = hir.expressions.get(expr.callee);
+        return (
+          callee?.exprKind === "identifier" &&
+          typeof unwrapSymbol === "number" &&
+          callee.symbol === unwrapSymbol
+        );
+      }
+    );
+    expect(unwrapCall).toBeDefined();
+
+    const typeArgs = typing.callTypeArguments.get(unwrapCall!.id);
+    expect(typeArgs).toBeDefined();
+    const intType = typing.arena.internPrimitive("i32");
+    expect(typeArgs).toEqual([intType]);
+  });
 });
