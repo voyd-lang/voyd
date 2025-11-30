@@ -59,6 +59,43 @@ describe("array literals", () => {
     }
   });
 
+  it("infers generic new_array type arguments from literal elements", () => {
+    const { typing, hir, symbolTable } = semanticsPipeline(
+      loadAst("array_literal_generic_new_array.voyd")
+    );
+    const callId = Array.from(typing.callTypeArguments.keys()).find((id) => {
+      const expr = hir.expressions.get(id);
+      if (!expr || expr.exprKind !== "call") return false;
+      const callee = hir.expressions.get(expr.callee);
+      if (!callee || callee.exprKind !== "identifier") return false;
+      return symbolTable.getSymbol(callee.symbol).name === "new_array";
+    });
+    expect(callId).toBeDefined();
+    if (!callId) return;
+    const typeArgs = typing.callTypeArguments.get(callId);
+    expect(typeArgs).toBeDefined();
+    if (!typeArgs) return;
+    expect(typeArgs).toHaveLength(1);
+    const typeArgDesc = typing.arena.get(typeArgs[0]!);
+    expect(typeArgDesc).toMatchObject({ kind: "primitive", name: "f64" });
+    const callTypeId = typing.table.getExprType(callId);
+    expect(callTypeId).toBeDefined();
+    const callDesc = typing.arena.get(callTypeId!);
+    const nominalTypeId =
+      callDesc.kind === "nominal-object"
+        ? callTypeId
+        : callDesc.kind === "intersection"
+        ? callDesc.nominal
+        : undefined;
+    expect(typeof nominalTypeId).toBe("number");
+    if (typeof nominalTypeId !== "number") return;
+    const nominalDesc = typing.arena.get(nominalTypeId);
+    expect(nominalDesc.kind).toBe("nominal-object");
+    if (nominalDesc.kind === "nominal-object") {
+      expect(nominalDesc.typeArgs[0]).toBe(typeArgs[0]);
+    }
+  });
+
   it("errors on mixed primitive elements", () => {
     expect(() =>
       semanticsPipeline(loadAst("array_literal_mixed_primitives.voyd"))
