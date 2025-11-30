@@ -1,5 +1,5 @@
-obj Array {
-  storage: FixedArray<i32>
+obj Array<T> {
+  storage: FixedArray<T>
 }
 obj Some<T> {
   value: T
@@ -7,11 +7,11 @@ obj Some<T> {
 obj None {}
 type Option<T> = Some<T> | None
 
-pub fn new_array({ from source: FixedArray<i32> }) -> Array
-  Array { storage: source }
+pub fn new_array<T>({ from source: FixedArray<T> }) -> Array<T>
+  Array<T> { storage: source }
 
-impl Array
-  pub fn get(self, index: i32) -> Option<i32>
+impl<T> Array<T>
+  pub fn get(self, index: i32) -> Option<T>
     if index < 0 or index >= __array_len(self.storage) then:
       None {}
     else:

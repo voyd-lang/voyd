@@ -1713,6 +1713,21 @@ export const bindTypeParamsFromType = (
     return;
   }
 
+  if (expectedDesc.kind === "fixed-array") {
+    const actualDesc = ctx.arena.get(actual);
+    if (actualDesc.kind !== "fixed-array") {
+      return;
+    }
+    bindTypeParamsFromType(
+      expectedDesc.element,
+      actualDesc.element,
+      bindings,
+      ctx,
+      state
+    );
+    return;
+  }
+
   if (expectedDesc.kind === "intersection") {
     if (typeof expectedDesc.nominal === "number") {
       bindTypeParamsFromType(expectedDesc.nominal, actual, bindings, ctx, state);
