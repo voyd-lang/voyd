@@ -51,6 +51,16 @@ import type {
   TypingContext,
 } from "./types.js";
 
+const SIGNATURELESS_INTRINSICS = new Set<string>([
+  "~",
+  "__array_new",
+  "__array_new_fixed",
+  "__array_get",
+  "__array_set",
+  "__array_len",
+  "__array_copy",
+]);
+
 const applyCurrentSubstitution = (
   type: TypeId,
   ctx: TypingContext,
@@ -236,12 +246,16 @@ const typeCallExpr = (
       metadata.intrinsic === true
         ? intrinsicSignaturesFor(intrinsicName, ctx)
         : undefined;
+    const intrinsicSignatureCount = intrinsicSignatures?.length ?? 0;
+    const hasIntrinsicHandler =
+      metadata.intrinsicUsesSignature === false ||
+      intrinsicSignatureCount > 0 ||
+      SIGNATURELESS_INTRINSICS.has(intrinsicName);
 
     const missingFunction =
       metadata.intrinsic === true &&
       !signature &&
-      (intrinsicSignatures?.length ?? 0) === 0 &&
-      metadata.intrinsicUsesSignature !== false;
+      !hasIntrinsicHandler;
 
     if (missingFunction) {
       return reportUnknownFunction({
@@ -284,7 +298,7 @@ const typeCallExpr = (
       metadata.intrinsic === true &&
       !signature &&
       metadata.intrinsicUsesSignature !== true &&
-      (intrinsicSignatures?.length ?? 0) === 0;
+      intrinsicSignatureCount === 0;
 
     const calleeType = isRawIntrinsic
       ? (() => {
