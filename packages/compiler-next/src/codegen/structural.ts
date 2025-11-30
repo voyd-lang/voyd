@@ -8,6 +8,7 @@ import {
 import { LOOKUP_FIELD_ACCESSOR, RTT_METADATA_SLOTS } from "./rtt/index.js";
 import type {
   CodegenContext,
+  StructuralFieldInfo,
   FunctionContext,
   StructuralTypeInfo,
   TypeId,
@@ -164,4 +165,35 @@ export const loadStructuralField = ({
   );
   const getter = refCast(ctx.mod, accessor, field.getterType!);
   return callRef(ctx.mod, getter, [pointer], field.wasmType);
+};
+
+export const storeStructuralField = ({
+  structInfo,
+  field,
+  pointer,
+  value,
+  ctx,
+}: {
+  structInfo: StructuralTypeInfo;
+  field: StructuralFieldInfo;
+  pointer: binaryen.ExpressionRef;
+  value: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  if (!field.setterType) {
+    throw new Error(`missing setter for structural field ${field.name}`);
+  }
+  const lookupTable = structGetFieldValue({
+    mod: ctx.mod,
+    fieldType: ctx.rtt.fieldLookupHelpers.lookupTableType,
+    fieldIndex: RTT_METADATA_SLOTS.FIELD_INDEX_TABLE,
+    exprRef: pointer,
+  });
+  const accessor = ctx.mod.call(
+    LOOKUP_FIELD_ACCESSOR,
+    [ctx.mod.i32.const(field.hash), lookupTable, ctx.mod.i32.const(1)],
+    binaryen.funcref
+  );
+  const setter = refCast(ctx.mod, accessor, field.setterType);
+  return callRef(ctx.mod, setter, [pointer, value], binaryen.none);
 };

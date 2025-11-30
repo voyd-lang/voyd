@@ -27,9 +27,9 @@ with: () => 0
 10
 + 3
 
-mul(&self, other: Vec<T>)
+mul(~self, other: Vec<T>, ~test: i32)
 mul(
-  &self,
+  ~self,
   other: Vec<T>
 )
 
@@ -121,12 +121,13 @@ fn main()
 
   let x2 = 10
   let z = nothing()
+  let ~z2 = nothing()
   let a = hello.boop(1)
   let test_spacing = fib n
   let result = fib(n)
-  let x = &hey
+  let x = ~hey
   $hey
-  $@(hey)
+  $$(hey)
   $(hey)
   $(extract equals_expr 2)
   (block $body)

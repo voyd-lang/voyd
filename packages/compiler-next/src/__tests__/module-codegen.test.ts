@@ -97,4 +97,46 @@ pub fn sub(a: i32, b: i32) -> i32
     expect((exports.main as () => number)()).toBe(13);
     expect((exports.delta as () => number)()).toBe(5);
   });
+
+  it("supports reassigning structural object fields", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `pub fn main() -> i32
+  let &o = { a: 1 }
+  o.a = 3
+  o.a`,
+    });
+
+    const result = await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(3);
+  });
+
+  it("supports reassigning nested structural object fields", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `pub fn main() -> i32
+  let &o = { a: { b: 1 } }
+  o.a.b = 3
+  o.a.b`,
+    });
+
+    const result = await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(3);
+  });
 });
