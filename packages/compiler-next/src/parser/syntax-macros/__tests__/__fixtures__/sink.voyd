@@ -27,9 +27,9 @@ with: () => 0
 10
 + 3
 
-mul(&self, other: Vec<T>)
+mul(~self, other: Vec<T>)
 mul(
-  &self,
+  ~self,
   other: Vec<T>
 )
 

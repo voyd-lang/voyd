@@ -228,7 +228,14 @@ export const registerFunctionSignatures = (
           )}`
         );
       }
-      return { type: resolved, label: declParam?.label ?? param.label };
+      return {
+        type: resolved,
+        label: declParam?.label ?? param.label,
+        bindingKind: param.pattern.bindingKind,
+        span: param.span,
+        name: getSymbolName(param.symbol, ctx),
+        symbol: param.symbol,
+      };
     });
 
     const hasExplicitReturn = Boolean(item.returnType);

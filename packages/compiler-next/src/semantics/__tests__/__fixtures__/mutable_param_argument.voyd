@@ -1,0 +1,12 @@
+obj VecTest {
+  x: i32
+}
+
+fn bump(~v: VecTest) -> void
+  v.x = v.x + 1
+
+pub fn main()
+  let ~a = VecTest { x: 1 }
+  let b = VecTest { x: 1 }
+  bump(a)
+  bump(b)

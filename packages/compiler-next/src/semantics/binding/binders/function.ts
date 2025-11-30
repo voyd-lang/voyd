@@ -9,6 +9,7 @@ import type { ScopeId, SymbolId } from "../../ids.js";
 import { bindExpr } from "./expressions.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { bindTypeParameters } from "./type-parameters.js";
+import { toSourceSpan } from "../../utils.js";
 
 export type BindFunctionOptions = {
   declarationScope?: ScopeId;
@@ -99,6 +100,10 @@ const bindFunctionParameters = (
       name: param.name,
       kind: "parameter",
       declaredAt: param.ast.syntaxId,
+      metadata: {
+        bindingKind: param.bindingKind,
+        declarationSpan: toSourceSpan(param.ast),
+      },
     });
     rememberSyntax(param.ast, ctx);
     boundParams.push({
@@ -111,6 +116,7 @@ const bindFunctionParameters = (
         (options.selfTypeExpr && index === 0 && param.name === "self"
           ? options.selfTypeExpr
           : undefined),
+      bindingKind: param.bindingKind,
     });
   });
 

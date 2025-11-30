@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Diagnostic } from "@voyd/compiler-next/diagnostics/index.js";
+import type { Diagnostic } from "@voyd/compiler-next/diagnostics/index";
 import { describe, expect, it } from "vitest";
 import { formatCliDiagnostic } from "../diagnostics.js";
 

@@ -100,6 +100,7 @@ export const lowerFunctionDecl = (
     pattern: {
       kind: "identifier",
       symbol: param.symbol,
+      bindingKind: param.bindingKind,
       span: toSourceSpan(param.ast ?? fallbackSyntax),
     } as const,
     label: param.label,
@@ -234,7 +235,7 @@ export const lowerTraitDecl = (
       span: toSourceSpan(param.ast ?? method.form ?? trait.form),
       type: lowerTypeExpr(param.typeExpr, ctx, methodScope),
       mutable: false,
-      bindingKind: undefined,
+      bindingKind: param.bindingKind,
     }));
 
     const scopes = createLowerScopeStack(methodScope);

@@ -19,6 +19,7 @@ import type {
   HirMatchArm,
   HirObjectLiteralEntry,
   HirPattern,
+  HirBindingKind,
 } from "../hir/index.js";
 import type { HirExprId, HirStmtId } from "../ids.js";
 import {
@@ -560,38 +561,69 @@ const lowerPattern = (
     throw new Error("missing pattern");
   }
 
-  if (isIdentifierAtom(pattern)) {
-    if (pattern.value === "_") {
+  const { target, bindingKind } = unwrapMutablePattern(pattern);
+
+  if (isIdentifierAtom(target)) {
+    if (target.value === "_") {
       return { kind: "wildcard", span: toSourceSpan(pattern) };
     }
-    const symbol = resolveSymbol(pattern.value, scopes.current(), ctx);
+    const symbol = resolveSymbol(target.value, scopes.current(), ctx);
     return {
       kind: "identifier",
       symbol,
       span: toSourceSpan(pattern),
+      bindingKind,
     };
   }
 
   if (
-    isForm(pattern) &&
-    (pattern.calls("tuple") || pattern.callsInternal("tuple"))
+    isForm(target) &&
+    (target.calls("tuple") || target.callsInternal("tuple"))
   ) {
-    const elements = pattern.rest.map((entry) =>
+    if (bindingKind && bindingKind !== "value") {
+      throw new Error("mutable reference patterns must bind identifiers");
+    }
+    const elements = target.rest.map((entry) =>
       lowerPattern(entry, ctx, scopes)
     );
     return { kind: "tuple", elements, span: toSourceSpan(pattern) };
   }
 
-  if (isForm(pattern) && pattern.calls(":")) {
-    const nameExpr = pattern.at(1);
-    if (!isIdentifierAtom(nameExpr)) {
+  if (isForm(target) && target.calls(":")) {
+    const nameExpr = target.at(1);
+    const { target: nameTarget, bindingKind: nameBinding } =
+      unwrapMutablePattern(nameExpr);
+    if (!isIdentifierAtom(nameTarget)) {
       throw new Error("typed pattern name must be an identifier");
     }
-    const symbol = resolveSymbol(nameExpr.value, scopes.current(), ctx);
-    return { kind: "identifier", symbol, span: toSourceSpan(pattern) };
+    const symbol = resolveSymbol(nameTarget.value, scopes.current(), ctx);
+    return {
+      kind: "identifier",
+      symbol,
+      span: toSourceSpan(pattern),
+      bindingKind: nameBinding ?? bindingKind,
+    };
   }
 
   throw new Error("unsupported pattern form");
+};
+
+const unwrapMutablePattern = (
+  pattern?: Expr
+): { target: Expr; bindingKind?: HirBindingKind } => {
+  if (!pattern) {
+    throw new Error("missing pattern");
+  }
+
+  if (isForm(pattern) && pattern.calls("~")) {
+    const target = pattern.at(1);
+    if (!target) {
+      throw new Error("mutable pattern missing target");
+    }
+    return { target, bindingKind: "mutable-ref" };
+  }
+
+  return { target: pattern };
 };
 
 const lowerTupleExpr = (
@@ -883,41 +915,50 @@ const lowerLambdaParameter = (
   ctx: LowerContext,
   scopes: LowerScopeStack
 ) => {
-  if (isIdentifierAtom(param) || isInternalIdentifierAtom(param)) {
-    const symbol = resolveSymbol(param.value, scopes.current(), ctx);
+  const { target, bindingKind } = unwrapMutablePattern(param);
+
+  if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
+    const symbol = resolveSymbol(target.value, scopes.current(), ctx);
     return {
       symbol,
       pattern: {
         kind: "identifier",
         symbol,
         span: toSourceSpan(param),
+        bindingKind,
       },
       mutable: false,
       span: toSourceSpan(param),
     };
   }
 
-  if (isForm(param) && param.calls(":")) {
-    const nameExpr = param.at(1);
-    if (!isIdentifierAtom(nameExpr) && !isInternalIdentifierAtom(nameExpr)) {
+  if (isForm(target) && target.calls(":")) {
+    const nameExpr = target.at(1);
+    const { target: nameTarget, bindingKind: nameBinding } =
+      unwrapMutablePattern(nameExpr);
+    if (
+      !isIdentifierAtom(nameTarget) &&
+      !isInternalIdentifierAtom(nameTarget)
+    ) {
       throw new Error("lambda parameter name must be an identifier");
     }
-    const symbol = resolveSymbol(nameExpr.value, scopes.current(), ctx);
+    const symbol = resolveSymbol(nameTarget.value, scopes.current(), ctx);
     return {
       symbol,
       pattern: {
         kind: "identifier",
         symbol,
         span: toSourceSpan(param),
+        bindingKind: nameBinding ?? bindingKind,
       },
       mutable: false,
       span: toSourceSpan(param),
-      type: lowerTypeExpr(param.at(2), ctx, scopes.current()),
+      type: lowerTypeExpr(target.at(2), ctx, scopes.current()),
     };
   }
 
-  if (isForm(param)) {
-    const nestedParams = param
+  if (isForm(target)) {
+    const nestedParams = target
       .toArray()
       .map((entry) => lowerLambdaParameter(entry, ctx, scopes));
     if (nestedParams.length !== 1) {

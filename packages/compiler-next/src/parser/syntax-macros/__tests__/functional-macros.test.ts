@@ -1,9 +1,15 @@
 import { describe, expect, test } from "vitest";
 import { parse } from "../../parser.js";
 import { Form } from "../../ast/index.js";
-import { functionalMacrosVoydFile } from "@voyd/compiler/semantics/__tests__/fixtures/functional-macros-voyd-file.js";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 
 type Plain = (string | Plain)[];
+
+const functionalMacrosVoydFile = readFileSync(
+  resolve(import.meta.dirname, "__fixtures__", "functional_macros.voyd"),
+  "utf-8"
+);
 
 const toPlain = (form: Form): Plain =>
   JSON.parse(JSON.stringify(form.toJSON()));
@@ -41,7 +47,7 @@ describe("functional macro expansion", () => {
   test("expands nested macro invocations", () => {
     const code = `\
 macro binaryen_gc_call(func, args)
-  syntax_template binaryen func: ~func namespace: gc args: ~args
+  syntax_template binaryen func: $func namespace: gc args: $args
 macro bin_type_to_heap_type(type)
     binaryen_gc_call(modBinaryenTypeToHeapType, BnrType<type>)
 bin_type_to_heap_type(FixedArray<Int>)
@@ -62,9 +68,9 @@ bin_type_to_heap_type(FixedArray<Int>)
   test("double tilde preserves labeled args", () => {
     const code = `\
 macro binaryen_gc_call_1(func, args)
-  syntax_template binaryen func: ~func namespace: gc args: ~args
+  syntax_template binaryen func: $func namespace: gc args: $args
 macro wrap()
-  syntax_template ~~(binaryen_gc_call_1(modBinaryenTypeToHeapType, syntax_template arg))
+  syntax_template $$(binaryen_gc_call_1(modBinaryenTypeToHeapType, syntax_template arg))
 wrap()
 `;
     const ast = parse(code);

@@ -6,13 +6,13 @@ import binaryen from "binaryen";
 import { testGc } from "@voyd/lib/binaryen-gc/test.js";
 import { parseFile, parseModuleFromSrc } from "@voyd/compiler/parser/index.js";
 import { compileSrc } from "@voyd/compiler/compiler.js";
-import { parse as newParse } from "@voyd/compiler-next/parser/parser.js";
+import { parse as newParse } from "@voyd/compiler-next/parser/parser";
 import { readFileSync } from "fs";
-import { semanticsPipeline } from "@voyd/compiler-next/semantics/pipeline.js";
-import { codegen } from "@voyd/compiler-next/codegen/index.js";
+import { semanticsPipeline } from "@voyd/compiler-next/semantics/pipeline";
+import { codegen } from "@voyd/compiler-next/codegen/index";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
-import type { Diagnostic } from "@voyd/compiler-next/diagnostics/index.js";
-import { DiagnosticError } from "@voyd/compiler-next/diagnostics/index.js";
+import type { Diagnostic } from "@voyd/compiler-next/diagnostics/index";
+import { DiagnosticError } from "@voyd/compiler-next/diagnostics/index";
 import { formatCliDiagnostic } from "./diagnostics.js";
 
 export const exec = () => main().catch(errorHandler);

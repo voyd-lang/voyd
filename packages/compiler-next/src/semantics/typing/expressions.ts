@@ -15,6 +15,7 @@ import type {
   HirTypeExpr,
   HirWhileExpr,
   HirOverloadSetExpr,
+  HirBindingKind,
 } from "../hir/index.js";
 import type {
   HirExprId,
@@ -740,6 +741,47 @@ const validateCallArgs = (
       state,
       `call argument ${index + 1}`
     );
+    ensureMutableArgument({ arg, param, index, ctx });
+  });
+};
+
+const ensureMutableArgument = ({
+  arg,
+  param,
+  index,
+  ctx,
+}: {
+  arg: Arg;
+  param: ParamSignature;
+  index: number;
+  ctx: TypingContext;
+}): void => {
+  if (param.bindingKind !== "mutable-ref") {
+    return;
+  }
+
+  const argExpr = typeof arg.exprId === "number"
+    ? ctx.hir.expressions.get(arg.exprId)
+    : undefined;
+  const span = argExpr?.span ?? param.span ?? ctx.hir.module.span;
+  const symbol =
+    typeof arg.exprId === "number" ? findBindingSymbol(arg.exprId, ctx) : undefined;
+  const paramName = param.name ?? param.label ?? `parameter ${index + 1}`;
+
+  if (typeof symbol !== "number") {
+    ctx.diagnostics.error({
+      code: "TY0004",
+      message: `${paramName} requires a mutable object reference`,
+      span,
+    });
+    return;
+  }
+
+  assertMutableObjectBinding({
+    symbol,
+    span,
+    ctx,
+    reason: `${paramName} requires a mutable object reference`,
   });
 };
 
@@ -1623,6 +1665,7 @@ const typeWhileExpr = (
 type BindingMetadata = {
   mutable?: boolean;
   declarationSpan?: SourceSpan;
+  bindingKind?: HirBindingKind;
 };
 
 const assertMutableBinding = ({
@@ -1659,6 +1702,59 @@ const assertMutableBinding = ({
   });
 };
 
+const assertMutableObjectBinding = ({
+  symbol,
+  span,
+  ctx,
+  reason,
+}: {
+  symbol: SymbolId;
+  span: SourceSpan;
+  ctx: TypingContext;
+  reason: string;
+}): void => {
+  const record = ctx.symbolTable.getSymbol(symbol);
+  const metadata = (record.metadata ?? {}) as BindingMetadata;
+  if (metadata.bindingKind === "mutable-ref") {
+    return;
+  }
+
+  const related = metadata.declarationSpan
+    ? [
+        createDiagnostic({
+          code: "TY0004",
+          message: `binding '${record.name}' declared here`,
+          span: metadata.declarationSpan,
+          severity: "note",
+        }),
+      ]
+    : undefined;
+
+  ctx.diagnostics.error({
+    code: "TY0004",
+    message: `${reason}: object '${record.name}' is immutable`,
+    span,
+    related,
+  });
+};
+
+const findBindingSymbol = (
+  exprId: HirExprId,
+  ctx: TypingContext
+): SymbolId | undefined => {
+  const expr = ctx.hir.expressions.get(exprId);
+  if (!expr) {
+    return undefined;
+  }
+  if (expr.exprKind === "identifier") {
+    return expr.symbol;
+  }
+  if (expr.exprKind === "field-access") {
+    return findBindingSymbol(expr.target, ctx);
+  }
+  return undefined;
+};
+
 const typeAssignExpr = (
   expr: HirAssignExpr,
   ctx: TypingContext,
@@ -1681,6 +1777,17 @@ const typeAssignExpr = (
       span: targetSpan,
       ctx,
     });
+  }
+  if (targetExpr?.exprKind === "field-access") {
+    const symbol = findBindingSymbol(targetExpr.target, ctx);
+    if (typeof symbol === "number") {
+      assertMutableObjectBinding({
+        symbol,
+        span: targetSpan,
+        ctx,
+        reason: "cannot assign to field of immutable object",
+      });
+    }
   }
 
   const targetType = typeExpression(expr.target, ctx, state);

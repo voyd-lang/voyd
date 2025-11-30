@@ -5,7 +5,7 @@
   "type": "module",
   "bin": {
     "voyd": "./dist/apps/cli/src/cli.js",
-    "vt": "./dist/apps/cli/src/cli-dev.js"
+    "vt": "./src/cli-dev.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

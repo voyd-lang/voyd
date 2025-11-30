@@ -251,7 +251,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
   [
     "mul",
     [
-      "&",
+      "~",
       "self",
     ],
     [
@@ -269,7 +269,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
   [
     "mul",
     [
-      "&",
+      "~",
       "self",
     ],
     [
@@ -887,12 +887,10 @@ exports[`it correctly handles the kitchen sink 1`] = `
           "hey",
         ],
       ],
+      "$hey",
       [
         "$",
-        "hey",
-      ],
-      [
-        "$@",
+        "@",
         "hey",
       ],
       [
@@ -909,8 +907,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
       ],
       [
         "block",
-        "$",
-        "body",
+        "$body",
       ],
       [
         "x",

@@ -5,7 +5,11 @@ import {
   isForm,
   isIdentifierAtom,
 } from "../../../parser/index.js";
-import { expectLabeledExpr, parseIfBranches, toSourceSpan } from "../../utils.js";
+import {
+  expectLabeledExpr,
+  parseIfBranches,
+  toSourceSpan,
+} from "../../utils.js";
 import { rememberSyntax } from "../context.js";
 import { reportOverloadNameCollision } from "../overloads.js";
 import type { BindingContext } from "../types.js";
@@ -13,6 +17,7 @@ import type { ScopeId } from "../../ids.js";
 import { parseLambdaSignature } from "../../lambda.js";
 import { ensureForm } from "./utils.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
+import type { HirBindingKind } from "../../hir/index.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -232,6 +237,8 @@ const declareLambdaParam = (
   scope: ScopeId,
   ctx: BindingContext
 ): void => {
+  const declarationSpan = toSourceSpan(param as Syntax);
+
   if (isIdentifierAtom(param)) {
     rememberSyntax(param, ctx);
     reportOverloadNameCollision(param.value, scope, param, ctx);
@@ -240,6 +247,26 @@ const declareLambdaParam = (
         name: param.value,
         kind: "parameter",
         declaredAt: param.syntaxId,
+        metadata: { declarationSpan },
+      },
+      scope
+    );
+    return;
+  }
+
+  if (isForm(param) && param.calls("~")) {
+    const target = param.at(1);
+    if (!isIdentifierAtom(target)) {
+      throw new Error("lambda parameter name must be an identifier");
+    }
+    rememberSyntax(target, ctx);
+    reportOverloadNameCollision(target.value, scope, target, ctx);
+    ctx.symbolTable.declare(
+      {
+        name: target.value,
+        kind: "parameter",
+        declaredAt: param.syntaxId,
+        metadata: { bindingKind: "mutable-ref", declarationSpan },
       },
       scope
     );
@@ -248,17 +275,19 @@ const declareLambdaParam = (
 
   if (isForm(param) && param.calls(":")) {
     const nameExpr = param.at(1);
-    if (!isIdentifierAtom(nameExpr)) {
+    const { target, bindingKind } = unwrapMutablePattern(nameExpr);
+    if (!isIdentifierAtom(target)) {
       throw new Error("lambda parameter name must be an identifier");
     }
-    rememberSyntax(nameExpr, ctx);
+    rememberSyntax(target, ctx);
     rememberSyntax(param.at(2) as Syntax, ctx);
-    reportOverloadNameCollision(nameExpr.value, scope, param, ctx);
+    reportOverloadNameCollision(target.value, scope, param, ctx);
     ctx.symbolTable.declare(
       {
-        name: nameExpr.value,
+        name: target.value,
         kind: "parameter",
         declaredAt: param.syntaxId,
+        metadata: { bindingKind, declarationSpan },
       },
       scope
     );
@@ -266,9 +295,7 @@ const declareLambdaParam = (
   }
 
   if (isForm(param)) {
-    param.toArray().forEach((entry) =>
-      declareLambdaParam(entry, scope, ctx)
-    );
+    param.toArray().forEach((entry) => declareLambdaParam(entry, scope, ctx));
     return;
   }
 
@@ -279,37 +306,46 @@ const declarePatternBindings = (
   pattern: Expr | undefined,
   ctx: BindingContext,
   scope: ScopeId,
-  options: { mutable?: boolean; declarationSpan?: ReturnType<typeof toSourceSpan> } = {}
+  options: {
+    mutable?: boolean;
+    declarationSpan?: ReturnType<typeof toSourceSpan>;
+  } = {}
 ): void => {
   if (!pattern) {
     throw new Error("missing pattern");
   }
 
-  if (isIdentifierAtom(pattern)) {
-    if (pattern.value === "_") {
+  const { target: basePattern, bindingKind } = unwrapMutablePattern(pattern);
+
+  if (isIdentifierAtom(basePattern)) {
+    if (basePattern.value === "_") {
       return;
     }
     const declarationSpan =
-      options.declarationSpan ?? toSourceSpan(pattern);
-    rememberSyntax(pattern, ctx);
-    reportOverloadNameCollision(pattern.value, scope, pattern, ctx);
+      options.declarationSpan ?? toSourceSpan(basePattern);
+    rememberSyntax(basePattern, ctx);
+    reportOverloadNameCollision(basePattern.value, scope, basePattern, ctx);
     ctx.symbolTable.declare({
-      name: pattern.value,
+      name: basePattern.value,
       kind: "value",
-      declaredAt: pattern.syntaxId,
+      declaredAt: basePattern.syntaxId,
       metadata: {
         mutable: options.mutable ?? false,
         declarationSpan,
+        bindingKind,
       },
     });
     return;
   }
 
   if (
-    isForm(pattern) &&
-    (pattern.calls("tuple") || pattern.callsInternal("tuple"))
+    isForm(basePattern) &&
+    (basePattern.calls("tuple") || basePattern.callsInternal("tuple"))
   ) {
-    pattern.rest.forEach((entry) =>
+    if (bindingKind && bindingKind !== "value") {
+      throw new Error("mutable reference patterns must bind identifiers");
+    }
+    basePattern.rest.forEach((entry) =>
       declarePatternBindings(entry, ctx, scope, {
         mutable: options.mutable,
         declarationSpan: toSourceSpan(entry as Syntax),
@@ -318,26 +354,46 @@ const declarePatternBindings = (
     return;
   }
 
-  if (isForm(pattern) && pattern.calls(":")) {
-    const nameExpr = pattern.at(1);
-    const typeExpr = pattern.at(2);
-    if (!isIdentifierAtom(nameExpr)) {
+  if (isForm(basePattern) && basePattern.calls(":")) {
+    const nameExpr = basePattern.at(1);
+    const typeExpr = basePattern.at(2);
+    const { target, bindingKind: nameBinding } = unwrapMutablePattern(nameExpr);
+    if (!isIdentifierAtom(target)) {
       throw new Error("typed pattern name must be an identifier");
     }
-    rememberSyntax(nameExpr, ctx);
+    rememberSyntax(target as Syntax, ctx);
     rememberSyntax(typeExpr as Syntax, ctx);
-    reportOverloadNameCollision(nameExpr.value, scope, pattern, ctx);
+    reportOverloadNameCollision(target.value, scope, basePattern, ctx);
     ctx.symbolTable.declare({
-      name: nameExpr.value,
+      name: target.value,
       kind: "value",
-      declaredAt: pattern.syntaxId,
+      declaredAt: basePattern.syntaxId,
       metadata: {
         mutable: options.mutable ?? false,
-        declarationSpan: options.declarationSpan ?? toSourceSpan(pattern),
+        declarationSpan: options.declarationSpan ?? toSourceSpan(basePattern),
+        bindingKind: nameBinding ?? bindingKind,
       },
     });
     return;
   }
 
   throw new Error("unsupported pattern form in declaration");
+};
+
+const unwrapMutablePattern = (
+  pattern: Expr | undefined
+): { target: Expr; bindingKind?: HirBindingKind } => {
+  if (!pattern) {
+    throw new Error("missing pattern");
+  }
+
+  if (isForm(pattern) && pattern.calls("~")) {
+    const target = pattern.at(1);
+    if (!target) {
+      throw new Error("mutable pattern is missing a target");
+    }
+    return { target, bindingKind: "mutable-ref" };
+  }
+
+  return { target: pattern, bindingKind: undefined };
 };

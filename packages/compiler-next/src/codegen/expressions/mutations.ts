@@ -7,9 +7,16 @@ import type {
   HirAssignExpr,
 } from "../context.js";
 import { compilePatternInitialization } from "../patterns.js";
-import { coerceValueToType } from "../structural.js";
-import { getRequiredBinding } from "../locals.js";
-import { getRequiredExprType, getSymbolTypeId } from "../types.js";
+import {
+  coerceValueToType,
+  storeStructuralField,
+} from "../structural.js";
+import { allocateTempLocal, getRequiredBinding } from "../locals.js";
+import {
+  getRequiredExprType,
+  getStructuralTypeInfo,
+  getSymbolTypeId,
+} from "../types.js";
 import { refCast, structSetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 
 export const compileAssignExpr = (
@@ -40,18 +47,67 @@ export const compileAssignExpr = (
   }
 
   const targetExpr = ctx.hir.expressions.get(expr.target);
-  if (!targetExpr || targetExpr.exprKind !== "identifier") {
+  if (!targetExpr) {
+    throw new Error("assignment missing target expression");
+  }
+
+  const valueTypeId = getRequiredExprType(expr.value, ctx, typeInstanceKey);
+  const valueExpr = compileExpr({ exprId: expr.value, ctx, fnCtx });
+
+  if (targetExpr.exprKind === "field-access") {
+    const structTypeId = getRequiredExprType(
+      targetExpr.target,
+      ctx,
+      typeInstanceKey
+    );
+    const structInfo = getStructuralTypeInfo(structTypeId, ctx);
+    if (!structInfo) {
+      throw new Error("field assignment requires a structural object");
+    }
+    const field = structInfo.fieldMap.get(targetExpr.field);
+    if (!field) {
+      throw new Error(`object does not contain field ${targetExpr.field}`);
+    }
+    const targetTypeId = getRequiredExprType(
+      expr.target,
+      ctx,
+      typeInstanceKey
+    );
+    const coerced = coerceValueToType({
+      value: valueExpr.expr,
+      actualType: valueTypeId,
+      targetType: targetTypeId,
+      ctx,
+      fnCtx,
+    });
+    const pointerTemp = allocateTempLocal(structInfo.interfaceType, fnCtx);
+    const pointerStore = ctx.mod.local.set(
+      pointerTemp.index,
+      compileExpr({ exprId: targetExpr.target, ctx, fnCtx }).expr
+    );
+    const pointer = ctx.mod.local.get(
+      pointerTemp.index,
+      structInfo.interfaceType
+    );
+    const store = storeStructuralField({
+      structInfo,
+      field,
+      pointer,
+      value: coerced,
+      ctx,
+    });
+    return {
+      expr: ctx.mod.block(null, [pointerStore, store], binaryen.none),
+      usedReturnCall: false,
+    };
+  }
+
+  if (targetExpr.exprKind !== "identifier") {
     throw new Error("only identifier assignments are supported today");
   }
 
   const binding = getRequiredBinding(targetExpr.symbol, ctx, fnCtx);
   const targetTypeId = getSymbolTypeId(targetExpr.symbol, ctx);
-  const valueTypeId = getRequiredExprType(
-    expr.value,
-    ctx,
-    typeInstanceKey
-  );
-  const valueExpr = compileExpr({ exprId: expr.value, ctx, fnCtx });
   const coerced = coerceValueToType({
     value: valueExpr.expr,
     actualType: valueTypeId,
@@ -81,10 +137,7 @@ export const compileAssignExpr = (
   }
 
   return {
-    expr: ctx.mod.local.set(
-      binding.index,
-      coerced
-    ),
+    expr: ctx.mod.local.set(binding.index, coerced),
     usedReturnCall: false,
   };
 };

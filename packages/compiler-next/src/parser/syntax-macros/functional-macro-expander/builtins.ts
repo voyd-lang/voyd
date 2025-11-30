@@ -172,7 +172,7 @@ export const createBuiltins = (
     const expand = (exprs: Expr[]): Expr[] =>
       exprs.flatMap((expr) => {
         if (isForm(expr) && isIdentifierAtom(expr.at(0))) {
-          if (expr.calls("~~")) {
+          if (expr.calls("$$")) {
             const value = expr.at(1) ?? new IdentifierAtom("nop");
             const evaluated = evalMacroExpr(value, scope, {
               skipBuiltins: new Set([":"]),
@@ -183,14 +183,14 @@ export const createBuiltins = (
               : [cloneExpr(normalized)];
           }
 
-          if (expr.calls("~")) {
+          if (expr.calls("$")) {
             const value = expr.at(1) ?? new IdentifierAtom("nop");
             return [expectExpr(evalMacroExpr(value, scope))];
           }
         }
 
         if (isIdentifierAtom(expr)) {
-          if (expr.value.startsWith("~~")) {
+          if (expr.value.startsWith("$$")) {
             const identifier = new IdentifierAtom(expr.value.slice(2));
             const evaluated = evalMacroExpr(identifier, scope);
             const normalized = expectExpr(evaluated);
@@ -199,7 +199,7 @@ export const createBuiltins = (
               : [cloneExpr(normalized)];
           }
 
-          if (expr.value.startsWith("~")) {
+          if (expr.value.startsWith("$")) {
             const identifier = new IdentifierAtom(expr.value.slice(1));
             const evaluated = evalMacroExpr(identifier, scope);
             return [expectExpr(evaluated)];
