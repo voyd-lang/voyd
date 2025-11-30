@@ -26,11 +26,25 @@ test("does not insert empty block after nested array", (t) => {
         [
           "work",
           [
-            "array_literal",
-            ["JsonNumber", ["object_literal", [":", "val", "23"]]],
+            "new_array",
             [
-              "array_literal",
-              ["JsonNumber", ["object_literal", [":", "val", "43"]]],
+              ":",
+              "from",
+              [
+                "fixed_array_literal",
+                ["JsonNumber", ["object_literal", [":", "val", "23"]]],
+                [
+                  "new_array",
+                  [
+                    ":",
+                    "from",
+                    [
+                      "fixed_array_literal",
+                      ["JsonNumber", ["object_literal", [":", "val", "43"]]],
+                    ],
+                  ],
+                ],
+              ],
             ],
           ],
         ],

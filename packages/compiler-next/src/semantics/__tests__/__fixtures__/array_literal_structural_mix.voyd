@@ -1,0 +1,5 @@
+pub fn new_array({ from source: FixedArray<Object> }) -> FixedArray<Object>
+  source
+
+fn make() -> FixedArray<Object>
+  [{ foo: 1 }, { bar: 2 }]

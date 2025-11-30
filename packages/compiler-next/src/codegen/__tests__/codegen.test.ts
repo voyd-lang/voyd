@@ -420,6 +420,11 @@ describe("next codegen", () => {
     expect(typeof instance.exports.get_wrapper).toBe("function");
   });
 
+  it("emits wasm for array literals via fixed_array_literal", () => {
+    const main = loadMain("array_literal_codegen.voyd");
+    expect(main()).toBe(2);
+  });
+
   it("keeps closure heap caches scoped per module and deterministic", () => {
     const moduleA = semanticsPipeline(loadAst("lambda_multi_module_a.voyd"));
     const moduleB = semanticsPipeline(loadAst("lambda_multi_module_b.voyd"));

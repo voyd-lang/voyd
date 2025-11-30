@@ -1,0 +1,2 @@
+fn make() -> FixedArray<i32>
+  __array_new_fixed<i32>()

@@ -118,6 +118,10 @@ export const lowerExpr = (
       return lowerObjectLiteralExpr(expr, ctx, scopes);
     }
 
+    if (isArrayLiteralForm(expr)) {
+      return lowerArrayLiteralExpr(expr, ctx, scopes);
+    }
+
     if (expr.calls("match")) {
       return lowerMatch(expr, ctx, scopes);
     }
@@ -671,6 +675,37 @@ const lowerTupleExpr = (
 
 export const isObjectLiteralForm = (form: Form): boolean =>
   form.callsInternal("object_literal");
+
+const isArrayLiteralForm = (form: Form): boolean =>
+  form.callsInternal("array_literal");
+
+const lowerArrayLiteralExpr = (
+  form: Form,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): HirExprId => {
+  const callee = resolveSymbol("fixed_array_literal", scopes.current(), ctx);
+  const calleeExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "identifier",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    symbol: callee,
+  });
+
+  const args = form.rest.map((entry) => ({
+    expr: lowerExpr(entry, ctx, scopes),
+  }));
+
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    callee: calleeExpr,
+    args,
+  });
+};
 
 const lowerObjectLiteralExpr = (
   form: Form,
