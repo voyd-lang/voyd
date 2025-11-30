@@ -1,4 +1,4 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env -S tsx --conditions=development
 import { exec } from "./exec.js";
 
 /**

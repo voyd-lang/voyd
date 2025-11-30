@@ -41,7 +41,6 @@ export const compileAssignExpr = (
 
   const targetExpr = ctx.hir.expressions.get(expr.target);
   if (!targetExpr || targetExpr.exprKind !== "identifier") {
-    console.log("HEY");
     throw new Error("only identifier assignments are supported today");
   }
 

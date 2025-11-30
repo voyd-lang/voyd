@@ -12,10 +12,10 @@
       "default": "./dist/compiler-next/src/pipeline.js"
     },
     "./*": {
-      "types": "./src/*",
-      "development": "./src/*",
-      "import": "./dist/compiler-next/src/*",
-      "default": "./dist/compiler-next/src/*"
+      "types": "./src/*.ts",
+      "development": "./src/*.ts",
+      "import": "./dist/compiler-next/src/*.js",
+      "default": "./dist/compiler-next/src/*.js"
     }
   },
   "scripts": {
