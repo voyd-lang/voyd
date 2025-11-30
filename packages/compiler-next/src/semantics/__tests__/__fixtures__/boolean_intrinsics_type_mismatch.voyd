@@ -1,0 +1,2 @@
+fn invalid_and(a: boolean, b: i32) -> boolean
+  a and b

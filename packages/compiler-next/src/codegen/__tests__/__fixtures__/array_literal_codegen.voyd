@@ -1,0 +1,25 @@
+obj Array {
+  storage: FixedArray<i32>
+}
+obj Some<T> {
+  value: T
+}
+obj None {}
+type Option<T> = Some<T> | None
+
+pub fn new_array({ from source: FixedArray<i32> }) -> Array
+  Array { storage: source }
+
+impl Array
+  pub fn get(self, index: i32) -> Option<i32>
+    if index < 0 or index >= __array_len(self.storage) then:
+      None {}
+    else:
+      Some { value: __array_get(self.storage, index) }
+
+pub fn main() -> i32
+  let a = [1, 2, 3]
+  let r = a.get(1)
+  r.match()
+    Some<i32>: r.value
+    None: -1

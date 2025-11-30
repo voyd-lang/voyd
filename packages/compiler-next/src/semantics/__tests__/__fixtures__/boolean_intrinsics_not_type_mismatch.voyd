@@ -1,0 +1,2 @@
+fn invalid_not(value: i32) -> boolean
+  not value

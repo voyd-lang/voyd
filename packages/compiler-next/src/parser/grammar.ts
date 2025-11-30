@@ -63,6 +63,7 @@ export const prefixOps: OpMap = new Map([
   ["%", 7],
   ["@", 7],
   ["~", 7],
+  ["not", 7],
   ["...", 5],
 ]);
 

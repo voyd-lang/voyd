@@ -28,6 +28,7 @@ import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
+type BooleanKind = "bool";
 
 interface CompileIntrinsicCallParams {
   name: string;
@@ -75,7 +76,7 @@ export const compileIntrinsicCall = ({
     case "__array_new_fixed": {
       const arrayType = getRequiredExprType(call.id, ctx, instanceKey);
       const heapType = getFixedArrayHeapType(arrayType, ctx);
-      return arrayNewFixed(ctx.mod, heapType, args);
+      return arrayNewFixed(ctx.mod, heapType, args as number[]);
     }
     case "__array_get": {
       if (args.length === 2) {
@@ -142,14 +143,7 @@ export const compileIntrinsicCall = ({
         null,
         [
           ctx.mod.local.set(temp.index, args[0]!),
-          arrayCopy(
-            ctx.mod,
-            target,
-            args[1]!,
-            args[2]!,
-            args[3]!,
-            args[4]!
-          ),
+          arrayCopy(ctx.mod, target, args[1]!, args[2]!, args[3]!, args[4]!),
           ctx.mod.local.get(temp.index, arrayType),
         ],
         getExprBinaryenType(call.id, ctx, instanceKey)
@@ -169,7 +163,12 @@ export const compileIntrinsicCall = ({
         ctx,
         instanceKey
       );
-      return emitArithmeticIntrinsic({ op: name, kind: operandKind, args, ctx });
+      return emitArithmeticIntrinsic({
+        op: name,
+        kind: operandKind,
+        args,
+        ctx,
+      });
     }
     case "<":
     case "<=":
@@ -181,7 +180,12 @@ export const compileIntrinsicCall = ({
         ctx,
         instanceKey
       );
-      return emitComparisonIntrinsic({ op: name, kind: operandKind, args, ctx });
+      return emitComparisonIntrinsic({
+        op: name,
+        kind: operandKind,
+        args,
+        ctx,
+      });
     }
     case "==":
     case "!=": {
@@ -193,6 +197,30 @@ export const compileIntrinsicCall = ({
       });
       return emitEqualityIntrinsic({ op: name, kind: operandKind, args, ctx });
     }
+    case "and":
+    case "or":
+    case "xor": {
+      assertArgCount(name, args, 2);
+      requireBooleanKind({
+        argExprIds: call.args.map((a) => a.expr),
+        ctx,
+        instanceKey,
+      });
+      return emitBooleanBinaryIntrinsic({
+        op: name,
+        args,
+        ctx,
+      });
+    }
+    case "not": {
+      assertArgCount(name, args, 1);
+      requireBooleanKind({
+        argExprIds: call.args.map((a) => a.expr),
+        ctx,
+        instanceKey,
+      });
+      return emitBooleanNotIntrinsic({ arg: args[0]!, ctx });
+    }
     default:
       throw new Error(`unsupported intrinsic ${name}`);
   }
@@ -203,7 +231,9 @@ const emitArithmeticIntrinsic = ({
   kind,
   args,
   ctx,
-}: { op: "+" | "-" | "*" | "/"; } & EmitNumericIntrinsicParams): binaryen.ExpressionRef => {
+}: {
+  op: "+" | "-" | "*" | "/";
+} & EmitNumericIntrinsicParams): binaryen.ExpressionRef => {
   const left = args[0]!;
   const right = args[1]!;
   switch (kind) {
@@ -264,7 +294,9 @@ const emitComparisonIntrinsic = ({
   kind,
   args,
   ctx,
-}: { op: "<" | "<=" | ">" | ">="; } & EmitNumericIntrinsicParams): binaryen.ExpressionRef => {
+}: {
+  op: "<" | "<=" | ">" | ">=";
+} & EmitNumericIntrinsicParams): binaryen.ExpressionRef => {
   const left = args[0]!;
   const right = args[1]!;
   switch (kind) {
@@ -353,6 +385,35 @@ const emitEqualityIntrinsic = ({
   throw new Error(`unsupported ${op} equality for kind ${kind}`);
 };
 
+const emitBooleanBinaryIntrinsic = ({
+  op,
+  args,
+  ctx,
+}: {
+  op: "and" | "or" | "xor";
+  args: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  const left = args[0]!;
+  const right = args[1]!;
+  switch (op) {
+    case "and":
+      return ctx.mod.i32.and(left, right);
+    case "or":
+      return ctx.mod.i32.or(left, right);
+    case "xor":
+      return ctx.mod.i32.xor(left, right);
+  }
+};
+
+const emitBooleanNotIntrinsic = ({
+  arg,
+  ctx,
+}: {
+  arg: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => ctx.mod.i32.eqz(arg);
+
 const requireHomogeneousNumericKind = (
   argExprIds: readonly HirExprId[],
   ctx: CodegenContext,
@@ -399,9 +460,35 @@ const requireHomogeneousEqualityKind = ({
       ctx
     );
     if (nextKind !== firstKind) {
-      throw new Error(
-        "intrinsic operands must share the same primitive type"
-      );
+      throw new Error("intrinsic operands must share the same primitive type");
+    }
+  }
+  return firstKind;
+};
+
+const requireBooleanKind = ({
+  argExprIds,
+  ctx,
+  instanceKey,
+}: {
+  argExprIds: readonly HirExprId[];
+  ctx: CodegenContext;
+  instanceKey?: string;
+}): BooleanKind => {
+  if (argExprIds.length === 0) {
+    throw new Error("intrinsic requires at least one operand");
+  }
+  const firstKind = getBooleanKind(
+    getRequiredExprType(argExprIds[0]!, ctx, instanceKey),
+    ctx
+  );
+  for (let i = 1; i < argExprIds.length; i += 1) {
+    const nextKind = getBooleanKind(
+      getRequiredExprType(argExprIds[i]!, ctx, instanceKey),
+      ctx
+    );
+    if (nextKind !== firstKind) {
+      throw new Error("intrinsic operands must be boolean types");
     }
   }
   return firstKind;
@@ -424,10 +511,7 @@ const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {
   throw new Error("intrinsic arguments must be primitive numeric types");
 };
 
-const getEqualityKind = (
-  typeId: TypeId,
-  ctx: CodegenContext
-): EqualityKind => {
+const getEqualityKind = (typeId: TypeId, ctx: CodegenContext): EqualityKind => {
   const descriptor = ctx.typing.arena.get(typeId);
   if (descriptor.kind === "primitive") {
     switch (descriptor.name) {
@@ -447,6 +531,20 @@ const getEqualityKind = (
   throw new Error(
     "intrinsic arguments must be primitive numeric or boolean types"
   );
+};
+
+const getBooleanKind = (
+  typeId: TypeId,
+  ctx: CodegenContext
+): BooleanKind => {
+  const descriptor = ctx.typing.arena.get(typeId);
+  if (
+    descriptor.kind === "primitive" &&
+    (descriptor.name === "bool" || descriptor.name === "boolean")
+  ) {
+    return "bool";
+  }
+  throw new Error("intrinsic arguments must be boolean types");
 };
 
 const assertArgCount = (
@@ -554,12 +652,7 @@ const emitArrayCopyFromOptions = ({
     throw new Error("array.copy options must be a structural object");
   }
 
-  const fieldOrder = [
-    "to_index",
-    "from",
-    "from_index",
-    "count",
-  ] as const;
+  const fieldOrder = ["to_index", "from", "from_index", "count"] as const;
   const fields = fieldOrder.map((field) => {
     const resolved = structInfo.fieldMap.get(field);
     if (!resolved) {
@@ -649,11 +742,7 @@ const getBooleanLiteralArg = ({
     throw new Error(`intrinsic ${name} missing argument ${index + 1}`);
   }
   const expr = ctx.hir.expressions.get(exprId);
-  if (
-    !expr ||
-    expr.exprKind !== "literal" ||
-    expr.literalKind !== "boolean"
-  ) {
+  if (!expr || expr.exprKind !== "literal" || expr.literalKind !== "boolean") {
     throw new Error(
       `intrinsic ${name} argument ${index + 1} must be a boolean literal`
     );

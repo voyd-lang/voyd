@@ -1,2 +1,5 @@
+pub fn new_array({ from source: FixedArray<i32> }) -> FixedArray<i32>
+  source
+
 fn make() -> FixedArray<i32>
   [1, 2]

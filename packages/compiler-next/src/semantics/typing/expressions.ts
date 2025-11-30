@@ -3025,6 +3025,15 @@ const intrinsicSignaturesFor = (
       returnType: ctx.primitives.bool,
     },
   ];
+  const booleanBinarySignatures: IntrinsicSignature[] = [
+    {
+      parameters: [ctx.primitives.bool, ctx.primitives.bool],
+      returnType: ctx.primitives.bool,
+    },
+  ];
+  const booleanUnarySignatures: IntrinsicSignature[] = [
+    { parameters: [ctx.primitives.bool], returnType: ctx.primitives.bool },
+  ];
 
   switch (name) {
     case "+":
@@ -3040,6 +3049,12 @@ const intrinsicSignaturesFor = (
     case "==":
     case "!=":
       return equalitySignatures;
+    case "and":
+    case "or":
+    case "xor":
+      return booleanBinarySignatures;
+    case "not":
+      return booleanUnarySignatures;
     default:
       return [];
   }

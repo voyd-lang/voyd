@@ -1,0 +1,6 @@
+fn logic(a: boolean, b: boolean) -> boolean
+  let both: boolean = a and b
+  let either: boolean = a or b
+  let parity: boolean = a xor b
+  let inverted: boolean = not parity
+  inverted

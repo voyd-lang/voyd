@@ -452,4 +452,96 @@ describe("compileIntrinsicCall array intrinsics", () => {
       })
     ).toThrow(/argument 4 must be a boolean literal/);
   });
+
+  it("emits boolean logic intrinsics", () => {
+    const boolType = 4 as TypeId;
+    const { ctx, descriptors, exprTypes, expressions, fnCtx } = createContext();
+    descriptors.set(boolType, { kind: "primitive", name: "bool" });
+
+    registerExpr(
+      { expressions, exprTypes, typeId: boolType },
+      1 as HirExprId,
+      {
+        id: 1 as HirExprId,
+        ast: 0 as any,
+        span: span as any,
+        kind: "expr",
+        exprKind: "literal",
+        literalKind: "boolean",
+        value: "true",
+      } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: boolType },
+      2 as HirExprId,
+      {
+        id: 2 as HirExprId,
+        ast: 0 as any,
+        span: span as any,
+        kind: "expr",
+        exprKind: "literal",
+        literalKind: "boolean",
+        value: "false",
+      } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: boolType },
+      3 as HirExprId,
+      {
+        id: 3 as HirExprId,
+        ast: 0 as any,
+        span: span as any,
+        kind: "expr",
+        exprKind: "literal",
+        literalKind: "boolean",
+        value: "true",
+      } as any
+    );
+
+    fnCtx.returnTypeId = boolType;
+
+    const andExpr = compileIntrinsicCall({
+      name: "and",
+      call: makeCall([1 as HirExprId, 2 as HirExprId]),
+      args: [ctx.mod.i32.const(1), ctx.mod.i32.const(0)],
+      ctx,
+      fnCtx,
+    });
+    const andInfo = binaryen.getExpressionInfo(andExpr) as binaryen.BinaryInfo;
+    expect(andInfo.id).toBe(binaryen.ExpressionIds.Binary);
+    expect(andInfo.op).toBe(binaryen.Operations.AndInt32);
+
+    const orExpr = compileIntrinsicCall({
+      name: "or",
+      call: makeCall([1 as HirExprId, 2 as HirExprId]),
+      args: [ctx.mod.i32.const(1), ctx.mod.i32.const(0)],
+      ctx,
+      fnCtx,
+    });
+    const orInfo = binaryen.getExpressionInfo(orExpr) as binaryen.BinaryInfo;
+    expect(orInfo.id).toBe(binaryen.ExpressionIds.Binary);
+    expect(orInfo.op).toBe(binaryen.Operations.OrInt32);
+
+    const xorExpr = compileIntrinsicCall({
+      name: "xor",
+      call: makeCall([1 as HirExprId, 2 as HirExprId]),
+      args: [ctx.mod.i32.const(1), ctx.mod.i32.const(0)],
+      ctx,
+      fnCtx,
+    });
+    const xorInfo = binaryen.getExpressionInfo(xorExpr) as binaryen.BinaryInfo;
+    expect(xorInfo.id).toBe(binaryen.ExpressionIds.Binary);
+    expect(xorInfo.op).toBe(binaryen.Operations.XorInt32);
+
+    const notExpr = compileIntrinsicCall({
+      name: "not",
+      call: makeCall([3 as HirExprId]),
+      args: [ctx.mod.i32.const(1)],
+      ctx,
+      fnCtx,
+    });
+    const notInfo = binaryen.getExpressionInfo(notExpr) as binaryen.UnaryInfo;
+    expect(notInfo.id).toBe(binaryen.ExpressionIds.Unary);
+    expect(notInfo.op).toBe(binaryen.Operations.EqZInt32);
+  });
 });
