@@ -1,4 +1,5 @@
 import binaryen from "binaryen";
+import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import type {
   CodegenContext,
   CompiledExpression,
@@ -19,6 +20,11 @@ import {
 } from "../types.js";
 import { allocateTempLocal } from "../locals.js";
 import { callRef, refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
+import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
+import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
+
+const bin = binaryen as unknown as AugmentedBinaryen;
+let traitDispatchSigCounter = 0;
 
 export const compileCallExpr = (
   expr: HirCallExpr,
@@ -76,6 +82,17 @@ export const compileCallExpr = (
       intrinsicName?: string;
       intrinsicUsesSignature?: boolean;
     };
+    const traitDispatch = compileTraitDispatchCall({
+      expr,
+      callee,
+      ctx,
+      fnCtx,
+      compileExpr,
+      expectedResultTypeId,
+    });
+    if (traitDispatch) {
+      return traitDispatch;
+    }
 
     const shouldCompileIntrinsic =
       intrinsicMetadata.intrinsic === true &&
@@ -134,6 +151,121 @@ export const compileCallExpr = (
   }
 
   throw new Error("codegen only supports function and closure calls today");
+};
+
+const compileTraitDispatchCall = ({
+  expr,
+  callee,
+  ctx,
+  fnCtx,
+  compileExpr,
+  expectedResultTypeId,
+}: {
+  expr: HirCallExpr;
+  callee: HirExpression & { exprKind: "identifier" };
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+  expectedResultTypeId?: TypeId;
+}): CompiledExpression | undefined => {
+  if (expr.args.length === 0) {
+    return undefined;
+  }
+  const mapping = ctx.typing.traitMethodImpls.get(callee.symbol);
+  if (!mapping) {
+    return undefined;
+  }
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const receiverTypeId = getRequiredExprType(
+    expr.args[0].expr,
+    ctx,
+    typeInstanceKey
+  );
+  const receiverDesc = ctx.typing.arena.get(receiverTypeId);
+  if (
+    receiverDesc.kind !== "trait" ||
+    receiverDesc.owner !== mapping.traitSymbol
+  ) {
+    return undefined;
+  }
+
+  const meta = getFunctionMetadataForCall({
+    symbol: callee.symbol,
+    callId: expr.id,
+    ctx,
+  });
+  if (!meta) {
+    return undefined;
+  }
+
+  const wrapperParamTypes = [ctx.rtt.baseType, ...meta.paramTypes.slice(1)];
+  const fnRefType = functionRefType({
+    params: wrapperParamTypes,
+    result: meta.resultType,
+    ctx,
+  });
+
+  const receiverValue = compileExpr({
+    exprId: expr.args[0].expr,
+    ctx,
+    fnCtx,
+  });
+  const receiverTemp = allocateTempLocal(ctx.rtt.baseType, fnCtx);
+  const ops: binaryen.ExpressionRef[] = [
+    ctx.mod.local.set(receiverTemp.index, receiverValue.expr),
+  ];
+  const loadReceiver = () =>
+    ctx.mod.local.get(receiverTemp.index, receiverTemp.type);
+  const methodTable = structGetFieldValue({
+    mod: ctx.mod,
+    fieldType: ctx.rtt.methodLookupHelpers.lookupTableType,
+    fieldIndex: RTT_METADATA_SLOTS.METHOD_TABLE,
+    exprRef: loadReceiver(),
+  });
+  const accessor = ctx.mod.call(
+    LOOKUP_METHOD_ACCESSOR,
+    [
+      ctx.mod.i32.const(
+        traitMethodHash(mapping.traitSymbol, mapping.traitMethodSymbol)
+      ),
+      methodTable,
+    ],
+    binaryen.funcref
+  );
+  const target = refCast(ctx.mod, accessor, fnRefType);
+
+  const args = expr.args.map((arg, index) => {
+    if (index === 0) {
+      return loadReceiver();
+    }
+    const expectedTypeId = meta.paramTypeIds[index];
+    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
+    const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
+    return coerceValueToType({
+      value: value.expr,
+      actualType: actualTypeId,
+      targetType: expectedTypeId,
+      ctx,
+      fnCtx,
+    });
+  });
+
+  const callExpr = callRef(
+    ctx.mod,
+    target,
+    args as number[],
+    meta.resultType
+  );
+  ops.push(callExpr);
+  const binaryenResult = getExprBinaryenType(expr.id, ctx, typeInstanceKey);
+
+  return {
+    expr:
+      ops.length === 1
+        ? ops[0]!
+        : ctx.mod.block(null, ops, binaryenResult),
+    usedReturnCall: false,
+  };
 };
 
 const emitResolvedCall = (
@@ -378,6 +510,34 @@ const compileCurriedClosureCall = ({
   }
 
   return currentValue;
+};
+
+const traitMethodHash = (traitSymbol: number, methodSymbol: number): number =>
+  murmurHash3(`${traitSymbol}:${methodSymbol}`);
+
+const functionRefType = ({
+  params,
+  result,
+  ctx,
+}: {
+  params: readonly binaryen.Type[];
+  result: binaryen.Type;
+  ctx: CodegenContext;
+}): binaryen.Type => {
+  const tempName = `__trait_method_sig_${traitDispatchSigCounter++}_${params.length}`;
+  const temp = ctx.mod.addFunction(
+    tempName,
+    binaryen.createType(params as number[]),
+    result,
+    [],
+    ctx.mod.nop()
+  );
+  const fnType = bin._BinaryenTypeFromHeapType(
+    bin._BinaryenFunctionGetType(temp),
+    false
+  );
+  ctx.mod.removeFunction(tempName);
+  return fnType;
 };
 
 const getFunctionMetadataForCall = ({

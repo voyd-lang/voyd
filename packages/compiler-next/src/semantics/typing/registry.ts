@@ -291,24 +291,34 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
       (typeof (item as any).decl === "number"
         ? ctx.decls.getImplById((item as any).decl)
         : undefined);
-    const typeParameterDecls =
-      item.typeParameters ?? decl?.typeParameters ?? [];
-    const typeParamMap =
+    const typeParameterDecls = item.typeParameters ?? decl?.typeParameters ?? [];
+    const typeParamMap = new Map<SymbolId, TypeId>();
+    const typeParams =
       typeParameterDecls.length === 0
-        ? undefined
-        : typeParameterDecls.reduce((acc, param) => {
+        ? []
+        : typeParameterDecls.map((param) => {
             const typeParam = ctx.arena.freshTypeParam();
             const typeRef = ctx.arena.internTypeParamRef(typeParam);
-            acc.set(param.symbol, typeRef);
-            return acc;
-          }, new Map<SymbolId, TypeId>());
+            typeParamMap.set(param.symbol, typeRef);
+            const constraint = param.constraint
+              ? resolveTypeExpr(
+                  param.constraint,
+                  ctx,
+                  state,
+                  ctx.primitives.unknown,
+                  typeParamMap
+                )
+              : undefined;
+            return { symbol: param.symbol, typeParam, typeRef, constraint };
+          });
+    const typeParamMapRef = typeParams.length > 0 ? typeParamMap : undefined;
 
     resolveTypeExpr(
       item.target,
       ctx,
       state,
       ctx.primitives.unknown,
-      typeParamMap
+      typeParamMapRef
     );
     const targetType = item.target.typeId as TypeId | undefined;
     if (typeof targetType !== "number") {
@@ -329,13 +339,49 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
       ctx,
       state,
       ctx.primitives.unknown,
-      typeParamMap
+      typeParamMapRef
     );
     validateImplTraitMethods({
       impl: item,
       implDecl: decl,
       ctx,
     });
+
+    const traitSymbol =
+      item.trait?.typeKind === "named" ? item.trait.symbol : undefined;
+    const methodMap =
+      typeof traitSymbol === "number"
+        ? buildTraitMethodMap({
+            implDecl: decl,
+            traitSymbol,
+            ctx,
+          })
+        : undefined;
+    const implTarget =
+      (item.target.typeId as TypeId | undefined) ?? targetType;
+    const traitType = item.trait?.typeId as TypeId | undefined;
+    if (
+      methodMap &&
+      methodMap.size > 0 &&
+      typeof traitSymbol === "number" &&
+      typeof implTarget === "number" &&
+      typeof traitType === "number"
+    ) {
+      ctx.traits.registerImplTemplate({
+        trait: traitType,
+        traitSymbol,
+        target: implTarget,
+        typeParams,
+        methods: methodMap,
+        implSymbol: item.symbol,
+      });
+      methodMap.forEach((implMethodSymbol, traitMethodSymbol) => {
+        ctx.traitMethodImpls.set(implMethodSymbol, {
+          traitSymbol,
+          traitMethodSymbol,
+        });
+      });
+    }
 
     item.with?.forEach((entry) => {
       if (entry.kind === "member-import") {
@@ -344,7 +390,7 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
           ctx,
           state,
           ctx.primitives.unknown,
-          typeParamMap
+          typeParamMapRef
         );
         return;
       }
@@ -353,14 +399,14 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
         ctx,
         state,
         ctx.primitives.unknown,
-        typeParamMap
+        typeParamMapRef
       );
       resolveTypeExpr(
         entry.trait,
         ctx,
         state,
         ctx.primitives.unknown,
-        typeParamMap
+        typeParamMapRef
       );
     });
   }
@@ -446,6 +492,40 @@ const validateImplTraitMethods = ({
   throw new Error(
     `impl ${traitName} for ${targetName} is missing trait method${plural}: ${missingList}`
   );
+};
+
+const buildTraitMethodMap = ({
+  implDecl,
+  traitSymbol,
+  ctx,
+}: {
+  implDecl?: ReturnType<TypingContext["decls"]["getImpl"]>;
+  traitSymbol: SymbolId;
+  ctx: TypingContext;
+}): ReadonlyMap<SymbolId, SymbolId> | undefined => {
+  if (!implDecl) {
+    return undefined;
+  }
+  const traitDecl = ctx.decls.getTrait(traitSymbol);
+  if (!traitDecl) {
+    return undefined;
+  }
+  const implMethodsByName = new Map(
+    implDecl.methods.map((method) => [
+      getSymbolName(method.symbol, ctx),
+      method.symbol,
+    ])
+  );
+  const methodMap = new Map<SymbolId, SymbolId>();
+  traitDecl.methods.forEach((traitMethod) => {
+    const implMethod = implMethodsByName.get(
+      getSymbolName(traitMethod.symbol, ctx)
+    );
+    if (typeof implMethod === "number") {
+      methodMap.set(traitMethod.symbol, implMethod);
+    }
+  });
+  return methodMap.size > 0 ? methodMap : undefined;
 };
 
 const compareMethodSignatures = ({

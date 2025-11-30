@@ -59,6 +59,19 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     callInstanceKeys: new Map(ctx.callResolution.instanceKeys),
     functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
     functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
+    traitImplsByNominal: new Map(
+      Array.from(ctx.traitImplsByNominal.entries()).map(([nominal, impls]) => [
+        nominal,
+        impls,
+      ])
+    ),
+    traitImplsByTrait: new Map(
+      Array.from(ctx.traitImplsByTrait.entries()).map(([symbol, impls]) => [
+        symbol,
+        impls,
+      ])
+    ),
+    traitMethodImpls: new Map(ctx.traitMethodImpls),
     diagnostics: ctx.diagnostics.diagnostics,
   };
 };

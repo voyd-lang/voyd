@@ -180,6 +180,11 @@ describe("next codegen", () => {
     expect(main()).toBe(1);
   });
 
+  it("emits wasm for trait object dispatch", () => {
+    const main = loadMain("trait_object_dispatch.voyd");
+    expect(main()).toBe(53);
+  });
+
   it("preserves nominal identity for structurally identical types in match guards", () => {
     const main = loadMain("nominal_identity_match.voyd");
     expect(main()).toBe(303);

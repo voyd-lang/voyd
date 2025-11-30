@@ -809,6 +809,36 @@ const ensureMutableArgument = ({
   });
 };
 
+const adjustTraitDispatchParameters = ({
+  args,
+  params,
+  calleeSymbol,
+  ctx,
+}: {
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  calleeSymbol: SymbolId;
+  ctx: TypingContext;
+}): readonly ParamSignature[] | undefined => {
+  if (args.length === 0 || params.length === 0) {
+    return undefined;
+  }
+  const methodMetadata = ctx.traitMethodImpls.get(calleeSymbol);
+  if (!methodMetadata) {
+    return undefined;
+  }
+  const receiverType = args[0].type;
+  const receiverDesc = ctx.arena.get(receiverType);
+  if (
+    receiverDesc.kind !== "trait" ||
+    receiverDesc.owner !== methodMetadata.traitSymbol
+  ) {
+    return undefined;
+  }
+  const updated = [{ ...params[0]!, type: receiverType }, ...params.slice(1)];
+  return updated;
+};
+
 const resolveCurriedCallReturnType = ({
   args,
   calleeType,
@@ -893,11 +923,19 @@ const typeFunctionCall = ({
     throw new Error("call does not accept type arguments");
   }
 
-  validateCallArgs(args, instantiation.parameters, ctx, state);
+  const adjustedParameters =
+    adjustTraitDispatchParameters({
+      args,
+      params: instantiation.parameters,
+      calleeSymbol,
+      ctx,
+    }) ?? instantiation.parameters;
+
+  validateCallArgs(args, adjustedParameters, ctx, state);
 
   if (typeof calleeExprId === "number") {
     const calleeType = ctx.arena.internFunction({
-      parameters: instantiation.parameters.map((param) => ({
+      parameters: adjustedParameters.map((param) => ({
         ...param,
         optional: false,
       })),

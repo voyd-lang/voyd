@@ -71,6 +71,9 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     },
     intrinsicTypes: new Map(),
     diagnostics: new DiagnosticEmitter(),
+    traitImplsByNominal: new Map(),
+    traitImplsByTrait: new Map(),
+    traitMethodImpls: new Map(),
   };
 };
 
