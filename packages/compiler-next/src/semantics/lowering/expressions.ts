@@ -615,7 +615,7 @@ const unwrapMutablePattern = (
     throw new Error("missing pattern");
   }
 
-  if (isForm(pattern) && pattern.calls("&")) {
+  if (isForm(pattern) && pattern.calls("~")) {
     const target = pattern.at(1);
     if (!target) {
       throw new Error("mutable pattern missing target");

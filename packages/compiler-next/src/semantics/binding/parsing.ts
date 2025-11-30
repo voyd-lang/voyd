@@ -81,7 +81,7 @@ interface SignatureParam {
   label?: string;
   ast: Syntax;
   typeExpr?: Expr;
-   bindingKind?: HirBindingKind;
+  bindingKind?: HirBindingKind;
 }
 
 export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
@@ -382,7 +382,7 @@ const parseParameter = (expr: Expr): SignatureParam | SignatureParam[] => {
     return { name: expr.value, ast: expr };
   }
 
-  if (isForm(expr) && expr.calls("&")) {
+  if (isForm(expr) && expr.calls("~")) {
     const { name, ast, bindingKind } = parseParamName(expr);
     return { name, ast, bindingKind };
   }
@@ -442,7 +442,7 @@ const parseParamName = (
     return { name: expr.value, ast: expr };
   }
 
-  if (isForm(expr) && expr.calls("&")) {
+  if (isForm(expr) && expr.calls("~")) {
     const target = expr.at(1);
     if (!isIdentifierAtom(target)) {
       throw new Error("parameter name must be an identifier");

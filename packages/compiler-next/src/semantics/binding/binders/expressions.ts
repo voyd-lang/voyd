@@ -5,7 +5,11 @@ import {
   isForm,
   isIdentifierAtom,
 } from "../../../parser/index.js";
-import { expectLabeledExpr, parseIfBranches, toSourceSpan } from "../../utils.js";
+import {
+  expectLabeledExpr,
+  parseIfBranches,
+  toSourceSpan,
+} from "../../utils.js";
 import { rememberSyntax } from "../context.js";
 import { reportOverloadNameCollision } from "../overloads.js";
 import type { BindingContext } from "../types.js";
@@ -250,7 +254,7 @@ const declareLambdaParam = (
     return;
   }
 
-  if (isForm(param) && param.calls("&")) {
+  if (isForm(param) && param.calls("~")) {
     const target = param.at(1);
     if (!isIdentifierAtom(target)) {
       throw new Error("lambda parameter name must be an identifier");
@@ -291,9 +295,7 @@ const declareLambdaParam = (
   }
 
   if (isForm(param)) {
-    param.toArray().forEach((entry) =>
-      declareLambdaParam(entry, scope, ctx)
-    );
+    param.toArray().forEach((entry) => declareLambdaParam(entry, scope, ctx));
     return;
   }
 
@@ -304,7 +306,10 @@ const declarePatternBindings = (
   pattern: Expr | undefined,
   ctx: BindingContext,
   scope: ScopeId,
-  options: { mutable?: boolean; declarationSpan?: ReturnType<typeof toSourceSpan> } = {}
+  options: {
+    mutable?: boolean;
+    declarationSpan?: ReturnType<typeof toSourceSpan>;
+  } = {}
 ): void => {
   if (!pattern) {
     throw new Error("missing pattern");
@@ -382,7 +387,7 @@ const unwrapMutablePattern = (
     throw new Error("missing pattern");
   }
 
-  if (isForm(pattern) && pattern.calls("&")) {
+  if (isForm(pattern) && pattern.calls("~")) {
     const target = pattern.at(1);
     if (!target) {
       throw new Error("mutable pattern is missing a target");

@@ -3,6 +3,6 @@ obj Point {
 }
 
 pub fn main()
-  let &point = Point { x: 1 }
+  let ~point = Point { x: 1 }
   point.x = 2
   point.x
