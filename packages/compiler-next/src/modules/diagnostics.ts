@@ -1,5 +1,5 @@
 import {
-  createDiagnostic,
+  diagnosticFromCode,
   normalizeSpan,
   type Diagnostic,
 } from "../diagnostics/index.js";
@@ -16,36 +16,44 @@ export const moduleDiagnosticToDiagnostic = (
   const span = normalizeSpan(diagnostic.span, importerSpan);
 
   if (diagnostic.kind === "missing-module") {
-    return createDiagnostic({
-      code: "MD0001",
-      message: `Unable to resolve module ${requested}`,
-      span,
-      related: importerSpan
-        ? [
-            createDiagnostic({
-              code: "MD0001",
-              message: `Referenced from ${diagnostic.importer}`,
-              span: importerSpan,
-              severity: "note",
-            }),
-          ]
-        : undefined,
-    });
-  }
-
-  return createDiagnostic({
-    code: "MD0002",
-    message: diagnostic.message || `Unable to load module ${requested}`,
-    span,
-    related: importerSpan
+    const related = importerSpan
       ? [
-          createDiagnostic({
-            code: "MD0002",
-            message: `Requested by ${diagnostic.importer}`,
+          diagnosticFromCode({
+            code: "MD0001",
+            params: { kind: "referenced-from", importer: diagnostic.importer },
             span: importerSpan,
             severity: "note",
           }),
         ]
-      : undefined,
+      : undefined;
+
+    return diagnosticFromCode({
+      code: "MD0001",
+      params: { kind: "missing", requested },
+      span,
+      related,
+    });
+  }
+
+  const related = importerSpan
+    ? [
+        diagnosticFromCode({
+          code: "MD0002",
+          params: { kind: "requested-from", importer: diagnostic.importer },
+          span: importerSpan,
+          severity: "note",
+        }),
+      ]
+    : undefined;
+
+  return diagnosticFromCode({
+    code: "MD0002",
+    params: {
+      kind: "load-failed",
+      requested,
+      errorMessage: diagnostic.message || undefined,
+    },
+    span,
+    related,
   });
 };

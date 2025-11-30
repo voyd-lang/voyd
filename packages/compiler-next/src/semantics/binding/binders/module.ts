@@ -25,7 +25,10 @@ import type {
   BoundUseEntry,
   BoundImport,
 } from "../types.js";
-import { createDiagnostic } from "../../../diagnostics/index.js";
+import {
+  diagnosticFromCode,
+  type DiagnosticParams,
+} from "../../../diagnostics/index.js";
 import { modulePathToString } from "../../../modules/path.js";
 import type { ModulePath } from "../../../modules/types.js";
 import type { HirVisibility } from "../../hir/index.js";
@@ -320,11 +323,11 @@ const resolveUseEntry = ({
     ? modulePathToString(dependencyPath)
     : undefined;
   if (!moduleId) {
-    recordImportDiagnostic(
-      `Unable to resolve module for use path ${entry.path.join("::")}`,
-      entry.span,
-      ctx
-    );
+    recordImportDiagnostic({
+      params: { kind: "unresolved-use-path", path: entry.path },
+      span: entry.span,
+      ctx,
+    });
   }
 
   const imports =
@@ -385,11 +388,11 @@ const bindImportsFromModule = ({
 }): BoundImport[] => {
   const exports = ctx.moduleExports.get(moduleId);
   if (!exports) {
-    recordImportDiagnostic(
-      `Module ${moduleId} is not available for import`,
-      entry.span,
-      ctx
-    );
+    recordImportDiagnostic({
+      params: { kind: "module-unavailable", moduleId },
+      span: entry.span,
+      ctx,
+    });
     return [];
   }
 
@@ -412,17 +415,21 @@ const bindImportsFromModule = ({
 
   const targetName = entry.targetName ?? entry.alias;
   if (!targetName) {
-    recordImportDiagnostic("use entry missing target name", entry.span, ctx);
+    recordImportDiagnostic({
+      params: { kind: "missing-target" },
+      span: entry.span,
+      ctx,
+    });
     return [];
   }
 
   const exported = exports.get(targetName);
   if (!exported || (exported.visibility !== "public" && moduleId !== ctx.module.id)) {
-    recordImportDiagnostic(
-      `Module ${moduleId} does not export ${targetName}`,
-      entry.span,
-      ctx
-    );
+    recordImportDiagnostic({
+      params: { kind: "missing-export", moduleId, target: targetName },
+      span: entry.span,
+      ctx,
+    });
     return [];
   }
 
@@ -488,7 +495,11 @@ const declareModuleImport = ({
   visibility: HirVisibility;
 }): BoundImport[] => {
   if (!moduleId) {
-    recordImportDiagnostic("missing module identifier for import", span, ctx);
+    recordImportDiagnostic({
+      params: { kind: "missing-module-identifier" },
+      span,
+      ctx,
+    });
     return [];
   }
   const name = alias ?? moduleId.split("::").at(-1) ?? "self";
@@ -510,15 +521,20 @@ const declareModuleImport = ({
 };
 
 const recordImportDiagnostic = (
-  message: string,
-  span: SourceSpan,
-  ctx: BindingContext
+  {
+    params,
+    span,
+    ctx,
+  }: {
+    params: DiagnosticParams<"BD0001">;
+    span: SourceSpan;
+    ctx: BindingContext;
+  }
 ): void => {
   ctx.diagnostics.push(
-    createDiagnostic({
+    diagnosticFromCode({
       code: "BD0001",
-      message,
-      severity: "error",
+      params,
       span,
     })
   );

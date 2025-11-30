@@ -10,7 +10,7 @@ import {
 } from "../../parser/index.js";
 import type { SymbolRecord } from "../binder/index.js";
 import type { NodeId, ScopeId, SymbolId } from "../ids.js";
-import { createDiagnostic } from "../../diagnostics/index.js";
+import { diagnosticFromCode } from "../../diagnostics/index.js";
 import { toSourceSpan } from "../utils.js";
 import type {
   BindingContext,
@@ -45,17 +45,20 @@ export const recordFunctionOverload = (
   const duplicate = bucket.signatureIndex.get(signature.key);
   if (duplicate) {
     ctx.diagnostics.push(
-      createDiagnostic({
+      diagnosticFromCode({
         code: "BD0002",
-        message: `function ${fn.name} already defines overload ${signature.label}`,
-        severity: "error",
         span: toSourceSpan(fn.form),
+        params: {
+          kind: "duplicate-overload",
+          functionName: fn.name,
+          signature: signature.label,
+        },
         related: [
-          createDiagnostic({
+          diagnosticFromCode({
             code: "BD0002",
-            message: "previous overload declared here",
-            severity: "note",
+            params: { kind: "previous-overload" },
             span: toSourceSpan(duplicate.form),
+            severity: "note",
           }),
         ],
       })
@@ -74,15 +77,18 @@ export const recordFunctionOverload = (
   );
   if (conflict && !bucket.nonFunctionConflictReported) {
     ctx.diagnostics.push(
-      createDiagnostic({
+      diagnosticFromCode({
         code: "BD0003",
-        message: `cannot overload ${fn.name}; ${conflict.kind} with the same name already exists`,
-        severity: "error",
+        params: {
+          kind: "non-function-conflict",
+          name: fn.name,
+          conflictKind: conflict.kind,
+        },
         span: toSourceSpan(fn.form),
         related: [
-          createDiagnostic({
+          diagnosticFromCode({
             code: "BD0003",
-            message: "conflicting declaration here",
+            params: { kind: "conflicting-declaration" },
             severity: "note",
             span: spanForNode(conflict.declaredAt, ctx),
           }),
@@ -143,16 +149,19 @@ const ensureOverloadParameterAnnotations = (
       }
       const related = bucket.functions.find((candidate) => candidate !== fn);
       ctx.diagnostics.push(
-        createDiagnostic({
+        diagnosticFromCode({
           code: "BD0004",
-          message: `parameter ${param.name} in overloaded function ${fn.name} must declare a type`,
-          severity: "error",
+          params: {
+            kind: "missing-annotation",
+            functionName: fn.name,
+            parameter: param.name,
+          },
           span: toSourceSpan(param.ast),
           related: related
             ? [
-                createDiagnostic({
+                diagnosticFromCode({
                   code: "BD0004",
-                  message: "conflicting overload declared here",
+                  params: { kind: "conflicting-overload" },
                   severity: "note",
                   span: toSourceSpan(related.form),
                 }),
@@ -226,15 +235,14 @@ export const reportOverloadNameCollision = (
     return;
   }
   ctx.diagnostics.push(
-    createDiagnostic({
+    diagnosticFromCode({
       code: "BD0003",
-      message: `cannot declare ${name}; overloads with this name already exist in the current scope`,
-      severity: "error",
+      params: { kind: "overload-name-collision", name },
       span: toSourceSpan(syntax),
       related: [
-        createDiagnostic({
+        diagnosticFromCode({
           code: "BD0003",
-          message: "conflicting overload declared here",
+          params: { kind: "conflicting-declaration" },
           severity: "note",
           span: toSourceSpan(bucket.functions[0]!.form),
         }),

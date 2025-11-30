@@ -40,7 +40,7 @@ import {
   typeSatisfies,
   getSymbolName,
 } from "./type-system.js";
-import { createDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
+import { diagnosticFromCode, normalizeSpan } from "../../diagnostics/index.js";
 import { resolveImportedValue } from "./imports.js";
 import type {
   Arg,
@@ -843,11 +843,13 @@ const ensureMutableArgument = ({
   const paramName = param.name ?? param.label ?? `parameter ${index + 1}`;
 
   if (typeof symbol !== "number") {
-    ctx.diagnostics.error({
-      code: "TY0004",
-      message: `${paramName} requires a mutable object reference. Hint: Use the '~' prefix to create a mutable binding (~my_var).`,
-      span,
-    });
+    ctx.diagnostics.error(
+      diagnosticFromCode({
+        code: "TY0004",
+        params: { kind: "argument-must-be-mutable", paramName },
+        span,
+      })
+    );
     return;
   }
 
@@ -898,11 +900,13 @@ const reportNonFunctionCallee = ({
   calleeSpan?: SourceSpan;
   ctx: TypingContext;
 }): never =>
-  ctx.diagnostics.error({
-    code: "TY0005",
-    message: "cannot call a non-function value",
-    span: normalizeSpan(calleeSpan, callSpan),
-  });
+  ctx.diagnostics.error(
+    diagnosticFromCode({
+      code: "TY0005",
+      params: { kind: "not-callable" },
+      span: normalizeSpan(calleeSpan, callSpan),
+    })
+  );
 
 const reportUnknownFunction = ({
   name,
@@ -913,11 +917,13 @@ const reportUnknownFunction = ({
   span?: SourceSpan;
   ctx: TypingContext;
 }): never =>
-  ctx.diagnostics.error({
-    code: "TY0006",
-    message: `function '${name}' is not defined`,
-    span: normalizeSpan(span),
-  });
+  ctx.diagnostics.error(
+    diagnosticFromCode({
+      code: "TY0006",
+      params: { kind: "unknown-function", name },
+      span: normalizeSpan(span),
+    })
+  );
 
 const resolveCurriedCallReturnType = ({
   args,
@@ -1523,11 +1529,13 @@ const typeMatchExpr = (
   });
 
   if (remainingMembers && remainingMembers.size > 0) {
-    ctx.diagnostics.error({
-      code: "TY0003",
-      message: "non-exhaustive match",
-      span: expr.span,
-    });
+    ctx.diagnostics.error(
+      diagnosticFromCode({
+        code: "TY0003",
+        params: { kind: "non-exhaustive-match" },
+        span: expr.span,
+      })
+    );
   }
 
   return branchType ?? ctx.primitives.void;
@@ -1822,21 +1830,23 @@ const assertMutableBinding = ({
 
   const related = metadata.declarationSpan
     ? [
-        createDiagnostic({
+        diagnosticFromCode({
           code: "TY0001",
-          message: `binding '${record.name}' declared here`,
+          params: { kind: "binding-declaration", name: record.name },
           span: metadata.declarationSpan,
           severity: "note",
         }),
       ]
     : undefined;
 
-  ctx.diagnostics.error({
-    code: "TY0001",
-    message: `cannot assign to immutable binding '${record.name}'`,
-    span,
-    related,
-  });
+  ctx.diagnostics.error(
+    diagnosticFromCode({
+      code: "TY0001",
+      params: { kind: "immutable-assignment", name: record.name },
+      span,
+      related,
+    })
+  );
 };
 
 const assertMutableObjectBinding = ({
@@ -1858,21 +1868,27 @@ const assertMutableObjectBinding = ({
 
   const related = metadata.declarationSpan
     ? [
-        createDiagnostic({
+        diagnosticFromCode({
           code: "TY0004",
-          message: `binding '${record.name}' declared here. Hint: Use the '~' prefix to create a mutable binding (~my_var).`,
+          params: { kind: "binding-declaration", binding: record.name },
           span: metadata.declarationSpan,
           severity: "note",
         }),
       ]
     : undefined;
 
-  ctx.diagnostics.error({
-    code: "TY0004",
-    message: `${reason}: object '${record.name}' is immutable. Hint: Use the '~' prefix to create a mutable binding (~my_var).`,
-    span,
-    related,
-  });
+  ctx.diagnostics.error(
+    diagnosticFromCode({
+      code: "TY0004",
+      params: {
+        kind: "immutable-object",
+        binding: record.name,
+        reason,
+      },
+      span,
+      related,
+    })
+  );
 };
 
 const findBindingSymbol = (
@@ -3305,9 +3321,9 @@ const narrowMatchPattern = (
       if (typeof narrowed !== "number") {
         const related = spans.discriminantSpan
           ? [
-              createDiagnostic({
+              diagnosticFromCode({
                 code: "TY0002",
-                message: "discriminant expression",
+                params: { kind: "discriminant-note" },
                 severity: "note",
                 span: spans.discriminantSpan,
               }),
@@ -3317,12 +3333,18 @@ const narrowMatchPattern = (
           pattern.type.typeKind === "named"
             ? pattern.type.path.join("::")
             : pattern.kind;
-        ctx.diagnostics.error({
-          code: "TY0002",
-          message: `pattern '${patternLabel}' does not match discriminant in ${reason}`,
-          span: spans.patternSpan,
-          related,
-        });
+        ctx.diagnostics.error(
+          diagnosticFromCode({
+            code: "TY0002",
+            params: {
+              kind: "pattern-mismatch",
+              patternLabel,
+              reason,
+            },
+            span: spans.patternSpan,
+            related,
+          })
+        );
       }
       pattern.typeId = narrowed;
       return narrowed;

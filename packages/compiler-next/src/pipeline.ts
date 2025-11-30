@@ -14,7 +14,7 @@ import {
 } from "./semantics/pipeline.js";
 import type { ModuleExportTable } from "./semantics/modules.js";
 import type { Diagnostic } from "./diagnostics/index.js";
-import { createDiagnostic, DiagnosticError } from "./diagnostics/index.js";
+import { diagnosticFromCode, DiagnosticError } from "./diagnostics/index.js";
 import { codegenErrorToDiagnostic } from "./codegen/diagnostics.js";
 
 export type LoadModulesOptions = {
@@ -102,9 +102,12 @@ export const analyzeModules = ({
         halted = true;
         return;
       }
-      const fallback = createDiagnostic({
+      const fallback = diagnosticFromCode({
         code: "TY9999",
-        message: error instanceof Error ? error.message : String(error),
+        params: {
+          kind: "unexpected-error",
+          message: error instanceof Error ? error.message : String(error),
+        },
         span: { file: module.id, start: 0, end: 0 },
       });
       diagnostics.push(fallback);
