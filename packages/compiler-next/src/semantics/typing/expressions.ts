@@ -293,10 +293,10 @@ const typeCallExpr = (
           });
         })()
       : signature ||
-          !metadata.intrinsic ||
-          (intrinsicSignatures && intrinsicSignatures.length > 0)
-        ? getValueType(calleeExpr.symbol, ctx)
-        : expectedCalleeType(args, ctx);
+        !metadata.intrinsic ||
+        (intrinsicSignatures && intrinsicSignatures.length > 0)
+      ? getValueType(calleeExpr.symbol, ctx)
+      : expectedCalleeType(args, ctx);
     ctx.table.setExprType(calleeExpr.id, calleeType);
     ctx.resolvedExprTypes.set(
       calleeExpr.id,
@@ -486,17 +486,29 @@ const typeLambdaExpr = (
             typeParamMap
           )
         : undefined;
-      return { symbol: param.symbol, typeParam, typeRef, constraint, defaultType };
+      return {
+        symbol: param.symbol,
+        typeParam,
+        typeRef,
+        constraint,
+        defaultType,
+      };
     }) ?? [];
 
   const typeParamBindings = new Map<TypeParamId, TypeId>();
   const resolvedParams = expr.parameters.map((param, index) => {
     const expectedParamType = expectedFn?.parameters[index]?.type;
     const resolvedType = param.type
-      ? resolveTypeExpr(param.type, ctx, state, ctx.primitives.unknown, typeParamMap)
+      ? resolveTypeExpr(
+          param.type,
+          ctx,
+          state,
+          ctx.primitives.unknown,
+          typeParamMap
+        )
       : typeof expectedParamType === "number"
-        ? expectedParamType
-        : ctx.primitives.unknown;
+      ? expectedParamType
+      : ctx.primitives.unknown;
     if (typeof expectedParamType === "number") {
       bindTypeParamsFromType(
         resolvedType,
@@ -519,7 +531,10 @@ const typeLambdaExpr = (
       )
     : undefined;
 
-  if (typeof expectedReturn === "number" && typeof annotatedReturn === "number") {
+  if (
+    typeof expectedReturn === "number" &&
+    typeof annotatedReturn === "number"
+  ) {
     bindTypeParamsFromType(
       annotatedReturn,
       expectedReturn,
@@ -565,7 +580,13 @@ const typeLambdaExpr = (
   }));
 
   appliedParams.forEach((param) => {
-    bindParameterPattern(param.pattern, param.appliedType, param.span, ctx, state);
+    bindParameterPattern(
+      param.pattern,
+      param.appliedType,
+      param.span,
+      ctx,
+      state
+    );
     if (typeof param.defaultValue === "number") {
       const defaultType = typeExpression(
         param.defaultValue,
@@ -730,8 +751,8 @@ const validateCallArgs = (
       const actualLabel = arg.label ?? "no label";
       throw new Error(
         `call argument ${
-        index + 1
-      } label mismatch: expected ${expectedLabel}, got ${actualLabel}`
+          index + 1
+        } label mismatch: expected ${expectedLabel}, got ${actualLabel}`
       );
     }
     ensureTypeMatches(
@@ -760,18 +781,21 @@ const ensureMutableArgument = ({
     return;
   }
 
-  const argExpr = typeof arg.exprId === "number"
-    ? ctx.hir.expressions.get(arg.exprId)
-    : undefined;
+  const argExpr =
+    typeof arg.exprId === "number"
+      ? ctx.hir.expressions.get(arg.exprId)
+      : undefined;
   const span = argExpr?.span ?? param.span ?? ctx.hir.module.span;
   const symbol =
-    typeof arg.exprId === "number" ? findBindingSymbol(arg.exprId, ctx) : undefined;
+    typeof arg.exprId === "number"
+      ? findBindingSymbol(arg.exprId, ctx)
+      : undefined;
   const paramName = param.name ?? param.label ?? `parameter ${index + 1}`;
 
   if (typeof symbol !== "number") {
     ctx.diagnostics.error({
       code: "TY0004",
-      message: `${paramName} requires a mutable object reference`,
+      message: `${paramName} requires a mutable object reference. Hint: Use the '~' prefix to create a mutable binding (~my_var).`,
       span,
     });
     return;
@@ -979,10 +1003,9 @@ const instantiateFunctionCall = ({
   );
   if (missing.length > 0) {
     throw new Error(
-      `function ${getSymbolName(
-        calleeSymbol,
-        ctx
-      )} is missing ${missing.length} type argument(s)`
+      `function ${getSymbolName(calleeSymbol, ctx)} is missing ${
+        missing.length
+      } type argument(s)`
     );
   }
 
@@ -1154,21 +1177,18 @@ const getAppliedTypeArguments = ({
     const applied = substitution.get(param.typeParam);
     if (typeof applied !== "number") {
       throw new Error(
-      `function ${getSymbolName(
-        symbol,
-        ctx
-      )} is missing a type argument for ${getSymbolName(param.symbol, ctx)}`
-    );
-  }
+        `function ${getSymbolName(
+          symbol,
+          ctx
+        )} is missing a type argument for ${getSymbolName(param.symbol, ctx)}`
+      );
+    }
     if (applied === ctx.primitives.unknown) {
       throw new Error(
         `function ${getSymbolName(
           symbol,
           ctx
-        )} has unresolved type argument for ${getSymbolName(
-          param.symbol,
-          ctx
-        )}`
+        )} has unresolved type argument for ${getSymbolName(param.symbol, ctx)}`
       );
     }
     return applied;
@@ -1509,13 +1529,7 @@ const typeNominalObjectLiteral = (
   const provided = new Set<string>();
 
   expr.entries.forEach((entry) =>
-    mergeNominalObjectEntry(
-      entry,
-      declaredFields,
-      provided,
-      ctx,
-      state
-    )
+    mergeNominalObjectEntry(entry, declaredFields, provided, ctx, state)
   );
 
   declaredFields.forEach((_, name) => {
@@ -1541,13 +1555,7 @@ const bindNominalObjectEntry = (
       throw new Error(`nominal object does not declare field ${entry.name}`);
     }
     const valueType = typeExpression(entry.value, ctx, state, expectedType);
-    bindTypeParamsFromType(
-      expectedType,
-      valueType,
-      bindings,
-      ctx,
-      state
-    );
+    bindTypeParamsFromType(expectedType, valueType, bindings, ctx, state);
     provided.add(entry.name);
     return;
   }
@@ -1584,14 +1592,15 @@ const mergeNominalObjectEntry = (
     if (!expectedType) {
       throw new Error(`nominal object does not declare field ${entry.name}`);
     }
-    const valueType = typeExpression(
-      entry.value,
-      ctx,
-      state,
-      expectedType
-    );
+    const valueType = typeExpression(entry.value, ctx, state, expectedType);
     if (expectedType !== ctx.primitives.unknown) {
-      ensureTypeMatches(valueType, expectedType, ctx, state, `field ${entry.name}`);
+      ensureTypeMatches(
+        valueType,
+        expectedType,
+        ctx,
+        state,
+        `field ${entry.name}`
+      );
     }
     provided.add(entry.name);
     return;
@@ -1657,7 +1666,13 @@ const typeWhileExpr = (
   state: TypingState
 ): TypeId => {
   const conditionType = typeExpression(expr.condition, ctx, state);
-  ensureTypeMatches(conditionType, ctx.primitives.bool, ctx, state, "while condition");
+  ensureTypeMatches(
+    conditionType,
+    ctx.primitives.bool,
+    ctx,
+    state,
+    "while condition"
+  );
   typeExpression(expr.body, ctx, state);
   return ctx.primitives.void;
 };
@@ -1723,7 +1738,7 @@ const assertMutableObjectBinding = ({
     ? [
         createDiagnostic({
           code: "TY0004",
-          message: `binding '${record.name}' declared here`,
+          message: `binding '${record.name}' declared here. Hint: Use the '~' prefix to create a mutable binding (~my_var).`,
           span: metadata.declarationSpan,
           severity: "note",
         }),
@@ -1732,7 +1747,7 @@ const assertMutableObjectBinding = ({
 
   ctx.diagnostics.error({
     code: "TY0004",
-    message: `${reason}: object '${record.name}' is immutable`,
+    message: `${reason}: object '${record.name}' is immutable. Hint: Use the '~' prefix to create a mutable binding (~my_var).`,
     span,
     related,
   });
@@ -1806,7 +1821,14 @@ const typeTupleAssignment = (
   if (pattern.kind !== "tuple") {
     throw new Error("tuple assignment requires a tuple pattern");
   }
-  bindTuplePatternFromExpr(pattern, valueExpr, ctx, state, "assign", assignmentSpan);
+  bindTuplePatternFromExpr(
+    pattern,
+    valueExpr,
+    ctx,
+    state,
+    "assign",
+    assignmentSpan
+  );
 };
 
 const mergeBranchType = ({
@@ -1893,7 +1915,9 @@ const branchWasmRepresentation = (
       return "ref";
     case "union": {
       const memberReprs = new Set(
-        desc.members.map((member) => branchWasmRepresentation(member, ctx, seen))
+        desc.members.map((member) =>
+          branchWasmRepresentation(member, ctx, seen)
+        )
       );
       return memberReprs.size === 1
         ? memberReprs.values().next().value ?? "mixed"
@@ -2293,7 +2317,13 @@ const typeArrayCopyIntrinsic = ({
     state,
     source: "__array_copy source",
   });
-  ensureTypeMatches(args[3]!.type, int32, ctx, state, "__array_copy from_index");
+  ensureTypeMatches(
+    args[3]!.type,
+    int32,
+    ctx,
+    state,
+    "__array_copy from_index"
+  );
   ensureTypeMatches(args[4]!.type, int32, ctx, state, "__array_copy count");
   ensureTypeMatches(
     fromArray.element,
@@ -2399,7 +2429,13 @@ const validateIntrinsicTypeArguments = ({
     typeArguments,
     detail: "element type",
   });
-  ensureTypeMatches(provided, expectedType, ctx, state, `${name} type argument`);
+  ensureTypeMatches(
+    provided,
+    expectedType,
+    ctx,
+    state,
+    `${name} type argument`
+  );
 };
 
 const requireArrayCopyOptionsField = ({
@@ -2485,10 +2521,7 @@ const getValueType = (symbol: SymbolId, ctx: TypingContext): TypeId => {
     if (!ctx.table.getSymbolScheme(symbol)) {
       const typeParams =
         signature.typeParams?.map((param) => param.typeParam) ?? [];
-      const scheme = ctx.arena.newScheme(
-        typeParams,
-        functionType
-      );
+      const scheme = ctx.arena.newScheme(typeParams, functionType);
       ctx.table.setSymbolScheme(symbol, scheme);
     }
     return functionType;
@@ -2583,7 +2616,10 @@ const intrinsicSignaturesFor = (
   ];
   const equalitySignatures: IntrinsicSignature[] = [
     ...comparisonSignatures,
-    { parameters: [ctx.primitives.bool, ctx.primitives.bool], returnType: ctx.primitives.bool },
+    {
+      parameters: [ctx.primitives.bool, ctx.primitives.bool],
+      returnType: ctx.primitives.bool,
+    },
   ];
 
   switch (name) {
@@ -2687,7 +2723,13 @@ const recordPatternType = (
           `missing type for identifier ${getSymbolName(pattern.symbol, ctx)}`
         );
       }
-      ensureTypeMatches(type, existing, ctx, state, `assignment to ${getSymbolName(pattern.symbol, ctx)}`);
+      ensureTypeMatches(
+        type,
+        existing,
+        ctx,
+        state,
+        `assignment to ${getSymbolName(pattern.symbol, ctx)}`
+      );
       return;
     }
     case "wildcard":
