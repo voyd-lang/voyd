@@ -1,0 +1,5 @@
+obj A { value: i32 }
+obj B {}
+
+fn make() -> FixedArray<A | B>
+  [A { value: 1 }, B {}]

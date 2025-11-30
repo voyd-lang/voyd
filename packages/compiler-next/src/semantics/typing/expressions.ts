@@ -2389,22 +2389,13 @@ const typeArrayNewFixedIntrinsic = ({
   state: TypingState;
   typeArguments?: readonly TypeId[];
 }): TypeId => {
-  const specifiedElement =
-    typeArguments && typeArguments.length > 0
-      ? requireSingleTypeArgument({
-          name: "__array_new_fixed",
-          typeArguments,
-          detail: "element type",
-        })
-      : undefined;
-  const elementType =
-    specifiedElement ??
-    (args.length > 0 ? args[0]!.type : ctx.primitives.unknown);
-
-  if (
-    typeof elementType === "number" &&
-    !(elementType === ctx.primitives.unknown && args.length === 0)
-  ) {
+  let elementType: TypeId;
+  if (typeArguments && typeArguments.length > 0) {
+    elementType = requireSingleTypeArgument({
+      name: "__array_new_fixed",
+      typeArguments,
+      detail: "element type",
+    });
     args.forEach((arg) =>
       ensureTypeMatches(
         arg.type,
@@ -2414,9 +2405,126 @@ const typeArrayNewFixedIntrinsic = ({
         "__array_new_fixed element"
       )
     );
+  } else {
+    elementType = inferArrayLiteralElementType({ args, ctx, state });
+    args.forEach((arg) => {
+      if (arg.type === ctx.primitives.unknown) return;
+      ensureTypeMatches(
+        arg.type,
+        elementType,
+        ctx,
+        state,
+        "__array_new_fixed element"
+      );
+    });
   }
 
   return ctx.arena.internFixedArray(elementType);
+};
+
+const inferArrayLiteralElementType = ({
+  args,
+  ctx,
+  state,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+}): TypeId => {
+  if (args.length === 0) {
+    throw new Error(
+      "__array_new_fixed requires at least one element to infer the element type"
+    );
+  }
+
+  const nonUnknown = args
+    .map((arg) => arg.type)
+    .filter((type) => type !== ctx.primitives.unknown);
+
+  if (nonUnknown.length === 0) {
+    return ctx.primitives.unknown;
+  }
+
+  const first = nonUnknown[0]!;
+  if (nonUnknown.every((type) => type === first)) {
+    return first;
+  }
+
+  const primitives = new Set<TypeId>();
+  const nominalTypes: TypeId[] = [];
+  const structuralTypes: TypeId[] = [];
+  const others: TypeId[] = [];
+
+  const addUnique = (bucket: TypeId[], type: TypeId) => {
+    if (!bucket.includes(type)) bucket.push(type);
+  };
+
+  nonUnknown.forEach((type) => {
+    const desc = ctx.arena.get(type);
+    switch (desc.kind) {
+      case "primitive":
+        primitives.add(type);
+        return;
+      default: {
+        const nominalComponent = getNominalComponent(type, ctx);
+        const structuralFields = getStructuralFields(type, ctx, state);
+        const isBaseNominal =
+          typeof nominalComponent === "number" &&
+          nominalComponent === ctx.objects.base.nominal;
+
+        if (nominalComponent && !isBaseNominal) {
+          addUnique(nominalTypes, type);
+          return;
+        }
+
+        if (structuralFields) {
+          addUnique(structuralTypes, type);
+          return;
+        }
+
+        if (nominalComponent) {
+          addUnique(structuralTypes, type);
+          return;
+        }
+
+        others.push(type);
+      }
+    }
+  });
+
+  if (
+    primitives.size > 1 ||
+    (primitives.size > 0 &&
+      (nominalTypes.length > 0 ||
+        structuralTypes.length > 0 ||
+        others.length > 0))
+  ) {
+    throw new Error("array literal elements must not mix primitive types");
+  }
+
+  if (others.length > 0) {
+    throw new Error("array literal elements must share a compatible type");
+  }
+
+  if (
+    nominalTypes.length > 0 &&
+    structuralTypes.length === 0 &&
+    primitives.size === 0
+  ) {
+    return nominalTypes.length === 1
+      ? nominalTypes[0]!
+      : ctx.arena.internUnion(nominalTypes);
+  }
+
+  if (
+    structuralTypes.length > 0 &&
+    nominalTypes.length === 0 &&
+    primitives.size === 0
+  ) {
+    return ctx.objects.base.type;
+  }
+
+  throw new Error("array literal elements must share a compatible type");
 };
 
 const typeArrayGetIntrinsic = ({

@@ -1,0 +1,2 @@
+fn make() -> FixedArray<Object>
+  [{ foo: 1 }, { bar: 2 }]

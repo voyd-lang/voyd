@@ -1,0 +1,2 @@
+fn make() -> FixedArray<i32>
+  []
