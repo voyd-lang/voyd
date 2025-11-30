@@ -57,11 +57,15 @@ export interface TypingResult {
   functionInstances: ReadonlyMap<string, TypeId>;
   callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
   callInstanceKeys: ReadonlyMap<HirExprId, string>;
+  callTraitDispatches: ReadonlySet<HirExprId>;
   functionInstantiationInfo: ReadonlyMap<
     SymbolId,
     ReadonlyMap<string, readonly TypeId[]>
   >;
   functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+  traitImplsByNominal: ReadonlyMap<TypeId, readonly TraitImplInstance[]>;
+  traitImplsByTrait: ReadonlyMap<SymbolId, readonly TraitImplInstance[]>;
+  traitMethodImpls: ReadonlyMap<SymbolId, TraitMethodImpl>;
   diagnostics: readonly Diagnostic[];
 }
 
@@ -109,6 +113,7 @@ export interface CallResolution {
   targets: Map<HirExprId, Map<string, SymbolId>>;
   typeArguments: Map<HirExprId, readonly TypeId[]>;
   instanceKeys: Map<HirExprId, string>;
+  traitDispatches: Set<HirExprId>;
 }
 
 export class FunctionStore {
@@ -318,6 +323,7 @@ export class ObjectStore {
 export class TraitStore {
   #decls = new Map<SymbolId, HirTraitDecl>();
   #byName = new Map<string, SymbolId>();
+  #implTemplates: TraitImplTemplate[] = [];
 
   registerDecl(decl: HirTraitDecl): void {
     this.#decls.set(decl.symbol, decl);
@@ -337,6 +343,18 @@ export class TraitStore {
 
   resolveName(name: string): SymbolId | undefined {
     return this.#byName.get(name);
+  }
+
+  registerImplTemplate(template: TraitImplTemplate): void {
+    this.#implTemplates.push(template);
+  }
+
+  getImplTemplates(): readonly TraitImplTemplate[] {
+    return this.#implTemplates;
+  }
+
+  getImplTemplatesForTrait(symbol: SymbolId): readonly TraitImplTemplate[] {
+    return this.#implTemplates.filter((template) => template.traitSymbol === symbol);
   }
 }
 
@@ -484,6 +502,9 @@ export interface TypingContext {
   primitives: PrimitiveTypes;
   intrinsicTypes: Map<string, TypeId>;
   diagnostics: DiagnosticEmitter;
+  traitImplsByNominal: Map<TypeId, readonly TraitImplInstance[]>;
+  traitImplsByTrait: Map<SymbolId, readonly TraitImplInstance[]>;
+  traitMethodImpls: Map<SymbolId, TraitMethodImpl>;
 }
 
 export interface ObjectTypeInfo {
@@ -496,6 +517,7 @@ export interface ObjectTypeInfo {
     declaringParams?: readonly TypeParamId[];
   }[];
   baseNominal?: TypeId;
+  traitImpls?: readonly TraitImplInstance[];
 }
 
 export interface ObjectTemplate {
@@ -530,6 +552,28 @@ export interface DependencySemantics {
   decls: DeclTable;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
   exports: ModuleExportTable;
+}
+
+export interface TraitMethodImpl {
+  traitSymbol: SymbolId;
+  traitMethodSymbol: SymbolId;
+}
+
+export interface TraitImplTemplate {
+  trait: TypeId;
+  traitSymbol: SymbolId;
+  target: TypeId;
+  typeParams: readonly FunctionTypeParam[];
+  methods: ReadonlyMap<SymbolId, SymbolId>;
+  implSymbol: SymbolId;
+}
+
+export interface TraitImplInstance {
+  trait: TypeId;
+  traitSymbol: SymbolId;
+  target: TypeId;
+  methods: ReadonlyMap<SymbolId, SymbolId>;
+  implSymbol: SymbolId;
 }
 
 export const DEFAULT_EFFECT_ROW: EffectRowId = 0;

@@ -55,6 +55,7 @@ const createContext = () => {
       resolvedExprTypes: exprTypes,
       callTargets: new Map(),
       callInstanceKeys: new Map(),
+      callTraitDispatches: new Set(),
       valueTypes: new Map(),
       intrinsicTypes: new Map(),
       intrinsicSymbols: new Map(),

@@ -15,6 +15,7 @@ import {
   type ObjectTemplate,
   type ObjectTypeInfo,
   type TypingState,
+  type TraitImplInstance,
 } from "./types.js";
 import {
   normalizeTypeArgs,
@@ -1130,6 +1131,14 @@ export const ensureObjectType = (
     fields,
     baseNominal,
   };
+  const traitImpls = instantiateTraitImplsFor({
+    nominal,
+    ctx,
+    state,
+  });
+  if (traitImpls.length > 0) {
+    info.traitImpls = traitImpls;
+  }
 
   const cacheableInstance = cacheable && !containsUnknownType(type, ctx);
   if (cacheableInstance) {
@@ -1173,6 +1182,63 @@ export const ensureTraitType = (
   });
   ctx.valueTypes.set(symbol, type);
   return type;
+};
+
+const instantiateTraitImplsFor = ({
+  nominal,
+  ctx,
+  state,
+}: {
+  nominal: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): readonly TraitImplInstance[] => {
+  const cached = ctx.traitImplsByNominal.get(nominal);
+  if (cached && cached.length > 0) {
+    return cached;
+  }
+
+  const implementations: TraitImplInstance[] = [];
+  const allowUnknown = state.mode === "relaxed";
+  ctx.traits.getImplTemplates().forEach((template) => {
+    const match = ctx.arena.unify(nominal, template.target, {
+      location: ctx.hir.module.ast,
+      reason: "trait impl instantiation",
+      variance: "invariant",
+      allowUnknown,
+    });
+    if (!match.ok) {
+      return;
+    }
+    const appliedTrait = ctx.arena.substitute(
+      template.trait,
+      match.substitution
+    );
+    const traitDesc = ctx.arena.get(appliedTrait);
+    if (traitDesc.kind !== "trait") {
+      return;
+    }
+    const appliedTarget = ctx.arena.substitute(
+      template.target,
+      match.substitution
+    );
+    implementations.push({
+      trait: appliedTrait,
+      traitSymbol: template.traitSymbol,
+      target: appliedTarget,
+      methods: template.methods,
+      implSymbol: template.implSymbol,
+    });
+  });
+
+  ctx.traitImplsByNominal.set(nominal, implementations);
+  implementations.forEach((impl) => {
+    const existing = ctx.traitImplsByTrait.get(impl.traitSymbol);
+    const next = existing ? [...existing, impl] : [impl];
+    ctx.traitImplsByTrait.set(impl.traitSymbol, next);
+  });
+
+  return implementations;
 };
 
 const mergeDeclaredFields = (
@@ -1386,6 +1452,11 @@ export const typeSatisfies = (
     return false;
   }
 
+  const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "trait") {
+    return traitSatisfies(actual, expected, expectedDesc.owner, ctx, state);
+  }
+
   const expectedNominal = getNominalComponent(expected, ctx);
   let nominalMatches = false;
   if (expectedNominal) {
@@ -1416,6 +1487,56 @@ export const typeSatisfies = (
     allowUnknown,
   });
   return compatibility.ok;
+};
+
+const traitSatisfies = (
+  actual: TypeId,
+  expected: TypeId,
+  traitSymbol: SymbolId,
+  ctx: TypingContext,
+  state: TypingState
+): boolean => {
+  const allowUnknown = state.mode === "relaxed";
+  const expectedDesc = ctx.arena.get(expected);
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind === "trait" && expectedDesc.kind === "trait") {
+    const match = ctx.arena.unify(actual, expected, {
+      location: ctx.hir.module.ast,
+      reason: "trait compatibility",
+      variance: "covariant",
+      allowUnknown,
+    });
+    return match.ok;
+  }
+
+  const actualNominal = getNominalComponent(actual, ctx);
+  if (typeof actualNominal !== "number") {
+    return false;
+  }
+
+  const info = getObjectInfoForNominal(actualNominal, ctx, state);
+  let impls =
+    ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls;
+  if (!impls || impls.length === 0) {
+    impls = instantiateTraitImplsFor({
+      nominal: actualNominal,
+      ctx,
+      state,
+    });
+  }
+  impls ??= [];
+  return impls.some((impl) => {
+    if (impl.traitSymbol !== traitSymbol) {
+      return false;
+    }
+    const comparison = ctx.arena.unify(impl.trait, expected, {
+      location: ctx.hir.module.ast,
+      reason: "trait compatibility",
+      variance: "covariant",
+      allowUnknown,
+    });
+    return comparison.ok;
+  });
 };
 
 export const ensureTypeMatches = (

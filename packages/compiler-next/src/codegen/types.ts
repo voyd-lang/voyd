@@ -3,14 +3,18 @@ import {
   binaryenTypeToHeapType,
   defineArrayType,
   defineStructType,
+  refFunc,
+  refCast,
 } from "@voyd/lib/binaryen-gc/index.js";
 import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
+import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
 import type {
   CodegenContext,
   ClosureTypeInfo,
   StructuralFieldInfo,
   StructuralTypeInfo,
+  FunctionMetadata,
   HirTypeExpr,
   HirExprId,
   HirPattern,
@@ -18,11 +22,24 @@ import type {
   TypeId,
   FixedArrayWasmType,
 } from "./context.js";
+import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
+import type { TraitImplInstance } from "../semantics/typing/types.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const functionKey = (moduleId: string, symbol: number): string =>
+  `${moduleId}::${symbol}`;
+
+const traitMethodHash = ({
+  traitSymbol,
+  methodSymbol,
+}: {
+  traitSymbol: number;
+  methodSymbol: number;
+}): number => murmurHash3(`${traitSymbol}:${methodSymbol}`);
 
 const closureSignatureKey = ({
   moduleId,
@@ -197,6 +214,10 @@ export const wasmTypeFor = (
     if (desc.kind === "function") {
       const info = ensureClosureTypeInfo({ typeId, desc, ctx, seen });
       return info.interfaceType;
+    }
+
+    if (desc.kind === "trait") {
+      return ctx.rtt.baseType;
     }
 
     if (desc.kind === "structural-object") {
@@ -422,7 +443,17 @@ export const getStructuralTypeInfo = (
       baseType: ctx.rtt.baseType,
       fields,
     });
-    const methodTableExpr = ctx.rtt.methodLookupHelpers.createTable([]);
+    const methodEntries = createMethodLookupEntries({
+      impls:
+        typeof nominalId === "number"
+          ? ctx.typing.traitImplsByNominal.get(nominalId) ?? []
+          : [],
+      ctx,
+      typeLabel,
+      runtimeType,
+    });
+    const methodTableExpr =
+      ctx.rtt.methodLookupHelpers.createTable(methodEntries);
 
     const ancestorsGlobal = `__ancestors_table_${typeLabel}`;
     ctx.mod.addGlobal(
@@ -587,6 +618,84 @@ const buildRuntimeAncestors = ({
   addCompatibleSuperInstantiations(nominalAncestry[0]?.nominalId);
 
   return ancestors;
+};
+
+const pickMethodMetadata = (
+  metas: readonly FunctionMetadata[] | undefined
+): FunctionMetadata | undefined => {
+  if (!metas || metas.length === 0) {
+    return undefined;
+  }
+  const concrete = metas.find((meta) => meta.typeArgs.length === 0);
+  return concrete ?? metas[0];
+};
+
+const createMethodLookupEntries = ({
+  impls,
+  ctx,
+  typeLabel,
+  runtimeType,
+}: {
+  impls: readonly TraitImplInstance[];
+  ctx: CodegenContext;
+  typeLabel: string;
+  runtimeType: binaryen.Type;
+}): MethodAccessorEntry[] => {
+  if (impls.length === 0) {
+    return [];
+  }
+  const entries: MethodAccessorEntry[] = [];
+
+  impls.forEach((impl) => {
+    impl.methods.forEach((implMethodSymbol, traitMethodSymbol) => {
+      const metas = ctx.functions.get(
+        functionKey(ctx.moduleId, implMethodSymbol)
+      );
+      const meta = pickMethodMetadata(metas);
+      if (!meta) {
+        throw new Error(
+          `codegen missing metadata for trait method impl ${implMethodSymbol}`
+        );
+      }
+      const params = [
+        ctx.rtt.baseType,
+        ...meta.paramTypes.slice(1),
+      ];
+      const receiverType = meta.paramTypes[0] ?? runtimeType;
+      const wrapperName = `${typeLabel}__method_${impl.traitSymbol}_${traitMethodSymbol}`;
+      const wrapper = ctx.mod.addFunction(
+        wrapperName,
+        binaryen.createType(params as number[]),
+        meta.resultType,
+        [],
+        ctx.mod.call(
+          meta.wasmName,
+          [
+            refCast(
+              ctx.mod,
+              ctx.mod.local.get(0, ctx.rtt.baseType),
+              receiverType
+            ),
+            ...meta.paramTypes.slice(1).map((type, index) =>
+              ctx.mod.local.get(index + 1, type)
+            ),
+          ],
+          meta.resultType
+        )
+      );
+      const heapType = bin._BinaryenFunctionGetType(wrapper);
+      const fnType = bin._BinaryenTypeFromHeapType(heapType, false);
+      entries.push({
+        hash: traitMethodHash({
+          traitSymbol: impl.traitSymbol,
+          methodSymbol: traitMethodSymbol,
+        }),
+        ref: refFunc(ctx.mod, wrapperName, fnType),
+      });
+    });
+  });
+
+  return entries;
 };
 
 const structuralTypeKey = (moduleId: string, typeId: TypeId): string =>

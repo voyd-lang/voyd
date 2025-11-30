@@ -1,0 +1,21 @@
+trait Doubleable<T>
+  fn double(~self) -> T
+
+obj Box { value: i32 }
+obj Alt { value: i32 }
+
+impl Doubleable<i32> for Box
+  fn double(~self) -> i32
+    self.value * 2
+
+impl Doubleable<i32> for Alt
+  fn double(~self) -> i32
+    self.value * 3
+
+fn do_double(~b: Doubleable<i32>) -> i32
+  double(b)
+
+pub fn main() -> i32
+  let ~b = Box { value: 7 }
+  let ~a = Alt { value: 5 }
+  do_double(b) + do_double(a)

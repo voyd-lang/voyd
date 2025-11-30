@@ -336,6 +336,8 @@ const typeCallExpr = (
         calleeType,
         ctx,
         state,
+        callSpan: expr.span,
+        calleeSpan: calleeExpr.span,
       })
     );
   }
@@ -353,7 +355,11 @@ const typeCallExpr = (
 
   const calleeDesc = ctx.arena.get(calleeType);
   if (calleeDesc.kind !== "function") {
-    throw new Error("attempted to call a non-function value");
+    reportNonFunctionCallee({
+      callSpan: expr.span,
+      calleeSpan: calleeExpr.span,
+      ctx,
+    });
   }
 
   return resolveCurriedCallReturnType({
@@ -361,6 +367,8 @@ const typeCallExpr = (
     calleeType,
     ctx,
     state,
+    callSpan: expr.span,
+    calleeSpan: calleeExpr.span,
   });
 };
 
@@ -785,6 +793,16 @@ const ensureMutableArgument = ({
     typeof arg.exprId === "number"
       ? ctx.hir.expressions.get(arg.exprId)
       : undefined;
+  if (argExpr?.exprKind === "call") {
+    const calleeExpr = ctx.hir.expressions.get(argExpr.callee);
+    if (calleeExpr?.exprKind === "identifier") {
+      const record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
+      const metadata = (record.metadata ?? {}) as { intrinsic?: boolean };
+      if (metadata.intrinsic === true && record.name === "~") {
+        return;
+      }
+    }
+  }
   const span = argExpr?.span ?? param.span ?? ctx.hir.module.span;
   const symbol =
     typeof arg.exprId === "number"
@@ -809,16 +827,65 @@ const ensureMutableArgument = ({
   });
 };
 
+const adjustTraitDispatchParameters = ({
+  args,
+  params,
+  calleeSymbol,
+  ctx,
+}: {
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  calleeSymbol: SymbolId;
+  ctx: TypingContext;
+}): readonly ParamSignature[] | undefined => {
+  if (args.length === 0 || params.length === 0) {
+    return undefined;
+  }
+  const methodMetadata = ctx.traitMethodImpls.get(calleeSymbol);
+  if (!methodMetadata) {
+    return undefined;
+  }
+  const receiverType = args[0].type;
+  const receiverDesc = ctx.arena.get(receiverType);
+  if (
+    receiverDesc.kind !== "trait" ||
+    receiverDesc.owner !== methodMetadata.traitSymbol
+  ) {
+    return undefined;
+  }
+  const updated = [{ ...params[0]!, type: receiverType }, ...params.slice(1)];
+  return updated;
+};
+
+const reportNonFunctionCallee = ({
+  callSpan,
+  calleeSpan,
+  ctx,
+}: {
+  callSpan: SourceSpan;
+  calleeSpan?: SourceSpan;
+  ctx: TypingContext;
+}): never =>
+  ctx.diagnostics.error({
+    code: "TY0005",
+    message: "cannot call a non-function value",
+    span: normalizeSpan(calleeSpan, callSpan),
+  });
+
 const resolveCurriedCallReturnType = ({
   args,
   calleeType,
   ctx,
   state,
+  callSpan,
+  calleeSpan,
 }: {
   args: readonly Arg[];
   calleeType: TypeId;
   ctx: TypingContext;
   state: TypingState;
+  callSpan: SourceSpan;
+  calleeSpan?: SourceSpan;
 }): TypeId => {
   let remainingArgs = args;
   let currentType = calleeType;
@@ -826,7 +893,7 @@ const resolveCurriedCallReturnType = ({
   while (true) {
     const desc = ctx.arena.get(currentType);
     if (desc.kind !== "function") {
-      throw new Error("attempted to call a non-function value");
+      return reportNonFunctionCallee({ callSpan, calleeSpan, ctx });
     }
 
     const { parameters, returnType } = desc;
@@ -893,11 +960,19 @@ const typeFunctionCall = ({
     throw new Error("call does not accept type arguments");
   }
 
-  validateCallArgs(args, instantiation.parameters, ctx, state);
+  const adjustedParameters =
+    adjustTraitDispatchParameters({
+      args,
+      params: instantiation.parameters,
+      calleeSymbol,
+      ctx,
+    }) ?? instantiation.parameters;
+
+  validateCallArgs(args, adjustedParameters, ctx, state);
 
   if (typeof calleeExprId === "number") {
     const calleeType = ctx.arena.internFunction({
-      parameters: instantiation.parameters.map((param) => ({
+      parameters: adjustedParameters.map((param) => ({
         ...param,
         optional: false,
       })),
@@ -1954,37 +2029,55 @@ const typeOverloadedCall = (
     );
   }
 
-  const matches = options
-    .map((symbol) => {
-      const signature = ctx.functions.getSignature(symbol);
-      if (!signature) {
-        throw new Error(
-          `missing type signature for overloaded function ${getSymbolName(
-            symbol,
-            ctx
-          )}`
-        );
-      }
-      return { symbol, signature };
-    })
-    .filter(({ symbol, signature }) =>
-      matchesOverloadSignature(symbol, signature, argTypes, ctx, state)
-    );
+  const candidates = options.map((symbol) => {
+    const signature = ctx.functions.getSignature(symbol);
+    if (!signature) {
+      throw new Error(
+        `missing type signature for overloaded function ${getSymbolName(
+          symbol,
+          ctx
+        )}`
+      );
+    }
+    return { symbol, signature };
+  });
 
-  if (matches.length === 0) {
-    throw new Error(`no overload of ${callee.name} matches argument types`);
+  const matches = candidates.filter(({ symbol, signature }) =>
+    matchesOverloadSignature(symbol, signature, argTypes, ctx, state)
+  );
+
+  const traitDispatch =
+    matches.length === 0
+      ? resolveTraitDispatchOverload({
+          candidates,
+          args: argTypes,
+          ctx,
+          state,
+        })
+      : undefined;
+
+  let selected = traitDispatch;
+  if (!selected) {
+    if (matches.length === 0) {
+      throw new Error(`no overload of ${callee.name} matches argument types`);
+    }
+
+    if (matches.length > 1) {
+      throw new Error(`ambiguous overload for ${callee.name}`);
+    }
+
+    selected = matches[0];
   }
-
-  if (matches.length > 1) {
-    throw new Error(`ambiguous overload for ${callee.name}`);
-  }
-
-  const selected = matches[0]!;
   const instanceKey = state.currentFunction?.instanceKey;
   if (!instanceKey) {
     throw new Error(
       `missing function instance key for overload resolution at call ${call.id}`
     );
+  }
+  if (traitDispatch) {
+    ctx.callResolution.traitDispatches.add(call.id);
+  } else {
+    ctx.callResolution.traitDispatches.delete(call.id);
   }
   const targets =
     ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolId>();
@@ -1992,6 +2085,127 @@ const typeOverloadedCall = (
   ctx.callResolution.targets.set(call.id, targets);
   ctx.table.setExprType(callee.id, selected.signature.typeId);
   return selected.signature.returnType;
+};
+
+const resolveTraitDispatchOverload = ({
+  candidates,
+  args,
+  ctx,
+  state,
+}: {
+  candidates: readonly { symbol: SymbolId; signature: FunctionSignature }[];
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+}): { symbol: SymbolId; signature: FunctionSignature } | undefined => {
+  if (args.length === 0) {
+    return undefined;
+  }
+  const receiver = args[0];
+  const receiverDesc = ctx.arena.get(receiver.type);
+  if (receiverDesc.kind !== "trait") {
+    return undefined;
+  }
+
+  const impls = ctx.traitImplsByTrait.get(receiverDesc.owner);
+  const templates = ctx.traits.getImplTemplatesForTrait(receiverDesc.owner);
+  if (
+    (!impls || impls.length === 0) &&
+    (!templates || templates.length === 0)
+  ) {
+    return undefined;
+  }
+
+  const allowUnknown = state.mode === "relaxed";
+  const candidate = candidates.find(({ symbol, signature }) => {
+    if (signature.parameters.length === 0) {
+      return false;
+    }
+    const methodMetadata = ctx.traitMethodImpls.get(symbol);
+    if (!methodMetadata || methodMetadata.traitSymbol !== receiverDesc.owner) {
+      return false;
+    }
+    const hasMatchingImpl =
+      impls?.some(
+        (entry) =>
+          entry.methods.get(methodMetadata.traitMethodSymbol) === symbol &&
+          typeSatisfies(receiver.type, entry.trait, ctx, state)
+      ) === true;
+    const hasCompatibleTemplate =
+      templates?.some((template) => {
+        const implMethod = template.methods.get(
+          methodMetadata.traitMethodSymbol
+        );
+        if (implMethod !== symbol) {
+          return false;
+        }
+        const comparison = ctx.arena.unify(receiver.type, template.trait, {
+          location: ctx.hir.module.ast,
+          reason: "trait object dispatch",
+          variance: "covariant",
+          allowUnknown,
+        });
+        return comparison.ok;
+      }) === true;
+    if (!hasMatchingImpl && !hasCompatibleTemplate) {
+      return false;
+    }
+    const adjustedParams =
+      adjustTraitDispatchParameters({
+        args,
+        params: signature.parameters,
+        calleeSymbol: symbol,
+        ctx,
+      }) ?? signature.parameters;
+    if (adjustedParams.length !== args.length) {
+      return false;
+    }
+    return adjustedParams.every((param, index) => {
+      const arg = args[index];
+      if (!arg || param.label !== arg.label) {
+        return false;
+      }
+      if (arg.type === ctx.primitives.unknown) {
+        return true;
+      }
+      return typeSatisfies(arg.type, param.type, ctx, state);
+    });
+  });
+
+  if (!candidate) {
+    return undefined;
+  }
+
+  const params =
+    adjustTraitDispatchParameters({
+      args,
+      params: candidate.signature.parameters,
+      calleeSymbol: candidate.symbol,
+      ctx,
+    }) ?? candidate.signature.parameters;
+
+  const signatureDesc = ctx.arena.get(candidate.signature.typeId);
+  const effects =
+    signatureDesc.kind === "function"
+      ? signatureDesc.effects
+      : ctx.primitives.defaultEffectRow;
+  const adjustedType = ctx.arena.internFunction({
+    parameters: params.map((param) => ({
+      type: param.type,
+      label: param.label,
+      optional: false,
+    })),
+    returnType: candidate.signature.returnType,
+    effects,
+  });
+
+  return {
+    symbol: candidate.symbol,
+    signature:
+      params === candidate.signature.parameters
+        ? candidate.signature
+        : { ...candidate.signature, parameters: params, typeId: adjustedType },
+  };
 };
 
 const matchesOverloadSignature = (
@@ -2039,6 +2253,8 @@ const typeIntrinsicCall = (
   allowTypeArguments = false
 ): TypeId => {
   switch (name) {
+    case "~":
+      return typeMutableIntrinsic({ args, ctx, state, typeArguments });
     case "__array_new":
       return typeArrayNewIntrinsic({ args, ctx, state, typeArguments });
     case "__array_get":
@@ -2094,6 +2310,38 @@ const typeIntrinsicCall = (
       return matches[0]!.returnType;
     }
   }
+};
+
+const typeMutableIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  if (typeArguments && typeArguments.length > 0) {
+    throw new Error("~ does not accept type arguments");
+  }
+  if (args.length === 0) {
+    throw new Error("~ requires at least one argument");
+  }
+  const [target, ...rest] = args;
+  const value = rest.length > 0 ? rest[rest.length - 1]! : target;
+  if (rest.length > 0) {
+    ensureTypeMatches(
+      value.type,
+      target.type,
+      ctx,
+      state,
+      "mutable expression target"
+    );
+    return target.type;
+  }
+  return value.type;
 };
 
 const typeArrayNewIntrinsic = ({

@@ -507,6 +507,34 @@ const lowerCall = (
     throw new Error("call expression missing callee");
   }
 
+  if (isIdentifierAtom(callee) && callee.value === "~") {
+    const targetCallee = form.at(1);
+    if (!targetCallee) {
+      throw new Error("~ expression missing target");
+    }
+    const innerArgs = form.rest.slice(1);
+    const nominal = lowerNominalObjectLiteral(
+      targetCallee,
+      innerArgs,
+      form,
+      ctx,
+      scopes
+    );
+    const valueExpr =
+      typeof nominal === "number"
+        ? nominal
+        : lowerCallFromElements(targetCallee, innerArgs, form, ctx, scopes);
+    const loweredCallee = lowerExpr(callee, ctx, scopes);
+    return ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "call",
+      ast: form.syntaxId,
+      span: toSourceSpan(form),
+      callee: loweredCallee,
+      args: [{ expr: valueExpr }],
+    });
+  }
+
   const nominalLiteral = lowerNominalObjectLiteral(
     callee,
     form.rest,

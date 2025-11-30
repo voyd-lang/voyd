@@ -504,6 +504,7 @@ const makeDependencyContext = (
     ),
     typeArguments: new Map(dependency.typing.callTypeArguments),
     instanceKeys: new Map(dependency.typing.callInstanceKeys),
+    traitDispatches: new Set(dependency.typing.callTraitDispatches),
   },
   functions: dependency.typing.functions,
   objects: dependency.typing.objects,
@@ -511,6 +512,9 @@ const makeDependencyContext = (
   typeAliases: dependency.typing.typeAliases,
   primitives: dependency.typing.primitives,
   intrinsicTypes: dependency.typing.intrinsicTypes,
+  traitImplsByNominal: new Map(dependency.typing.traitImplsByNominal),
+  traitImplsByTrait: new Map(dependency.typing.traitImplsByTrait),
+  traitMethodImpls: new Map(dependency.typing.traitMethodImpls),
   diagnostics: new DiagnosticEmitter(),
 });
 
