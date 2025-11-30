@@ -172,7 +172,11 @@ export const compileLambdaExpr = (
   if (!envInfo) {
     const captures: LambdaCaptureInfo[] =
       expr.captures?.map((capture, index) => {
-        const typeId = getSymbolTypeId(capture.symbol, ctx);
+        const bindingTypeId = fnCtx.bindings.get(capture.symbol)?.typeId;
+        const typeId =
+          typeof bindingTypeId === "number"
+            ? bindingTypeId
+            : getSymbolTypeId(capture.symbol, ctx);
         return {
           symbol: capture.symbol,
           typeId,

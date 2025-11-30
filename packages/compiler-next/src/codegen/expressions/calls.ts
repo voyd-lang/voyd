@@ -29,6 +29,7 @@ export const compileCallExpr = (
 ): CompiledExpression => {
   const { tailPosition = false, expectedResultTypeId } = options;
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const callInstanceKey = fnCtx.instanceKey ?? typeInstanceKey;
   const callee = ctx.hir.expressions.get(expr.callee);
   if (!callee) {
     throw new Error(`codegen missing callee expression ${expr.callee}`);
@@ -37,6 +38,7 @@ export const compileCallExpr = (
   if (callee.exprKind === "overload-set") {
     const targets = ctx.typing.callTargets.get(expr.id);
     const targetSymbol =
+      (callInstanceKey && targets?.get(callInstanceKey)) ??
       (typeInstanceKey && targets?.get(typeInstanceKey)) ??
       (targets && targets.size === 1
         ? targets.values().next().value
