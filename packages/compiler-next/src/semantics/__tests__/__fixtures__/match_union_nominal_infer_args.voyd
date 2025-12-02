@@ -1,0 +1,12 @@
+obj None {}
+
+obj Some<T> {
+  v: T
+}
+
+type Option<T> = Some<T> | None
+
+pub fn unwrap(o: Option<i32>) -> i32
+  match(o)
+    Some: 1
+    None: 0

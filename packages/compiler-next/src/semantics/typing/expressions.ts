@@ -1476,6 +1476,10 @@ const typeMatchExpr = (
     discriminantDesc.kind === "union"
       ? [...discriminantDesc.members]
       : undefined;
+  const patternNominalHints =
+    discriminantDesc.kind === "union"
+      ? collectNominalPatternHints(discriminantType, ctx)
+      : undefined;
   const remainingMembers = unionMembers ? new Set(unionMembers) : undefined;
 
   let branchType: TypeId | undefined;
@@ -1492,7 +1496,8 @@ const typeMatchExpr = (
       {
         patternSpan,
         discriminantSpan,
-      }
+      },
+      patternNominalHints
     );
     const valueType = withNarrowedDiscriminant(
       discriminantSymbol,
@@ -1517,12 +1522,15 @@ const typeMatchExpr = (
     }
 
     if (arm.pattern.kind === "type") {
-      const patternType = resolveTypeExpr(
-        arm.pattern.type,
-        ctx,
-        state,
-        ctx.primitives.unknown
-      );
+      const patternType =
+        typeof arm.pattern.typeId === "number"
+          ? arm.pattern.typeId
+          : resolveMatchPatternType({
+              pattern: arm.pattern,
+              ctx,
+              state,
+              hints: patternNominalHints,
+            });
       matchedUnionMembers(patternType, remainingMembers, ctx, state).forEach(
         (member) => remainingMembers.delete(member)
       );
@@ -3307,19 +3315,20 @@ const narrowMatchPattern = (
   ctx: TypingContext,
   state: TypingState,
   reason: string,
-  spans: { patternSpan: SourceSpan; discriminantSpan?: SourceSpan }
+  spans: { patternSpan: SourceSpan; discriminantSpan?: SourceSpan },
+  patternHints?: Map<SymbolId, NominalPatternHint>
 ): TypeId => {
   switch (pattern.kind) {
     case "wildcard":
       pattern.typeId = discriminantType;
       return discriminantType;
     case "type": {
-      const patternType = resolveTypeExpr(
-        pattern.type,
+      const patternType = resolveMatchPatternType({
+        pattern,
         ctx,
         state,
-        ctx.primitives.unknown
-      );
+        hints: patternHints,
+      });
       const narrowed = narrowTypeForPattern(
         discriminantType,
         patternType,
@@ -3361,6 +3370,94 @@ const narrowMatchPattern = (
     default:
       throw new Error(`unsupported match pattern ${pattern.kind}`);
   }
+};
+
+type NominalPatternHint = {
+  nominal: TypeId;
+  memberType: TypeId;
+};
+
+const collectNominalPatternHints = (
+  discriminantType: TypeId,
+  ctx: TypingContext
+): Map<SymbolId, NominalPatternHint> | undefined => {
+  const desc = ctx.arena.get(discriminantType);
+  if (desc.kind !== "union") {
+    return undefined;
+  }
+
+  const counts = new Map<SymbolId, number>();
+  const hints = new Map<SymbolId, NominalPatternHint>();
+
+  desc.members.forEach((member) => {
+    const nominal = getNominalComponent(member, ctx);
+    if (typeof nominal !== "number") {
+      return;
+    }
+    const nominalDesc = ctx.arena.get(nominal);
+    if (nominalDesc.kind !== "nominal-object") {
+      return;
+    }
+    const owner = nominalDesc.owner;
+    const count = (counts.get(owner) ?? 0) + 1;
+    counts.set(owner, count);
+    if (count === 1) {
+      hints.set(owner, { nominal, memberType: member });
+    } else {
+      hints.delete(owner);
+    }
+  });
+
+  return hints.size > 0 ? hints : undefined;
+};
+
+const resolveNominalPatternSymbol = (
+  typeExpr: HirTypeExpr | undefined,
+  ctx: TypingContext
+): SymbolId | undefined => {
+  if (!typeExpr || typeExpr.typeKind !== "named") {
+    return undefined;
+  }
+
+  if (typeof typeExpr.symbol === "number") {
+    const symbol = typeExpr.symbol;
+    if (ctx.objects.getTemplate(symbol)) {
+      return symbol;
+    }
+  }
+
+  const name = typeExpr.path.at(-1);
+  if (!name) {
+    return undefined;
+  }
+  return ctx.objects.resolveName(name);
+};
+
+const resolveMatchPatternType = ({
+  pattern,
+  ctx,
+  state,
+  hints,
+}: {
+  pattern: HirPattern & { kind: "type" };
+  ctx: TypingContext;
+  state: TypingState;
+  hints?: Map<SymbolId, NominalPatternHint>;
+}): TypeId => {
+  const namedType =
+    pattern.type.typeKind === "named" ? pattern.type : undefined;
+  const nominalSymbol =
+    hints && namedType ? resolveNominalPatternSymbol(namedType, ctx) : undefined;
+  const inferred =
+    nominalSymbol && hints ? hints.get(nominalSymbol) : undefined;
+  if (
+    inferred &&
+    (!namedType?.typeArguments || namedType.typeArguments.length === 0)
+  ) {
+    return inferred.memberType;
+  }
+
+  return resolveTypeExpr(pattern.type, ctx, state, ctx.primitives.unknown);
 };
 
 const withNarrowedDiscriminant = (
