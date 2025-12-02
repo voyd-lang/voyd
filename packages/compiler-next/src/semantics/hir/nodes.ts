@@ -188,6 +188,7 @@ export type HirPattern =
 export interface HirIdentifierPattern extends HirPatternBase {
   kind: "identifier";
   symbol: SymbolId;
+  typeAnnotation?: HirTypeExpr;
 }
 
 export interface HirDestructurePattern extends HirPatternBase {

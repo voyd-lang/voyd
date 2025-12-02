@@ -107,6 +107,72 @@ describe("match expressions", () => {
     }
   });
 
+  it("infers nominal type arguments for locally declared discriminants when the nominal is unique", () => {
+    const ast = loadAst("match_union_nominal_infer_args_local_binding.voyd");
+    const { typing, hir, symbolTable } = semanticsPipeline(ast);
+
+    const matchExpr = Array.from(hir.expressions.values()).find(
+      (candidate) => candidate.exprKind === "match"
+    );
+    expect(matchExpr).toBeDefined();
+    if (!matchExpr || matchExpr.exprKind !== "match") {
+      return;
+    }
+
+    const somePattern = matchExpr.arms[0]?.pattern;
+    expect(somePattern?.kind).toBe("type");
+    if (somePattern?.kind !== "type") {
+      return;
+    }
+
+    const patternType = somePattern.typeId;
+    expect(typeof patternType).toBe("number");
+    if (typeof patternType !== "number") {
+      return;
+    }
+
+    const desc = typing.arena.get(patternType);
+    expect(desc.kind).toBe("intersection");
+    if (desc.kind !== "intersection") {
+      return;
+    }
+
+    expect(typeof desc.nominal).toBe("number");
+    if (typeof desc.nominal !== "number") {
+      return;
+    }
+
+    const nominalDesc = typing.arena.get(desc.nominal);
+    expect(nominalDesc.kind).toBe("nominal-object");
+    if (nominalDesc.kind !== "nominal-object") {
+      return;
+    }
+
+    const [typeArg] = nominalDesc.typeArgs;
+    expect(typeof typeArg).toBe("number");
+    if (typeof typeArg !== "number") {
+      return;
+    }
+    const argDesc = typing.arena.get(typeArg);
+    expect(argDesc.kind).toBe("primitive");
+    if (argDesc.kind === "primitive") {
+      expect(argDesc.name).toBe("i32");
+    }
+
+    const binding = findSymbolByName("o", "value", symbolTable);
+    expect(binding).toBeDefined();
+    if (typeof binding !== "number") {
+      return;
+    }
+    const boundType = typing.valueTypes.get(binding);
+    expect(typeof boundType).toBe("number");
+    if (typeof boundType !== "number") {
+      return;
+    }
+    const boundDesc = typing.arena.get(boundType);
+    expect(boundDesc.kind).toBe("union");
+  });
+
   it("errors when omitting type parameters for repeated nominal union members", () => {
     expect(() =>
       semanticsPipeline(

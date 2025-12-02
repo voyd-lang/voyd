@@ -1414,8 +1414,39 @@ const typeLetStatement = (
     return;
   }
 
-  const initializerType = typeExpression(stmt.initializer, ctx, state);
-  recordPatternType(stmt.pattern, initializerType, ctx, state, "declare");
+  const expectedType =
+    stmt.pattern.kind === "identifier" && stmt.pattern.typeAnnotation
+      ? resolveTypeExpr(
+          stmt.pattern.typeAnnotation,
+          ctx,
+          state,
+          ctx.primitives.unknown
+        )
+      : undefined;
+  const initializerType = typeExpression(
+    stmt.initializer,
+    ctx,
+    state,
+    expectedType
+  );
+
+  if (
+    typeof expectedType === "number" &&
+    expectedType !== ctx.primitives.unknown &&
+    initializerType !== ctx.primitives.unknown
+  ) {
+    ensureTypeMatches(
+      initializerType,
+      expectedType,
+      ctx,
+      state,
+      "let initializer"
+    );
+  }
+
+  const declaredType = expectedType ?? initializerType;
+  recordPatternType(stmt.pattern, declaredType, ctx, state, "declare");
+  stmt.pattern.typeId = declaredType;
 };
 
 const typeIfExpr = (
