@@ -173,6 +173,59 @@ describe("match expressions", () => {
     expect(boundDesc.kind).toBe("union");
   });
 
+  it("respects tuple-bound annotations when inferring nominal pattern arguments", () => {
+    const ast = loadAst("match_union_nominal_infer_args_tuple_binding.voyd");
+    const { typing, hir } = semanticsPipeline(ast);
+
+    const matchExpr = Array.from(hir.expressions.values()).find(
+      (candidate) => candidate.exprKind === "match"
+    );
+    expect(matchExpr).toBeDefined();
+    if (!matchExpr || matchExpr.exprKind !== "match") {
+      return;
+    }
+
+    const somePattern = matchExpr.arms[0]?.pattern;
+    expect(somePattern?.kind).toBe("type");
+    if (somePattern?.kind !== "type") {
+      return;
+    }
+
+    const patternType = somePattern.typeId;
+    expect(typeof patternType).toBe("number");
+    if (typeof patternType !== "number") {
+      return;
+    }
+
+    const desc = typing.arena.get(patternType);
+    expect(desc.kind).toBe("intersection");
+    if (desc.kind !== "intersection") {
+      return;
+    }
+
+    expect(typeof desc.nominal).toBe("number");
+    if (typeof desc.nominal !== "number") {
+      return;
+    }
+
+    const nominalDesc = typing.arena.get(desc.nominal);
+    expect(nominalDesc.kind).toBe("nominal-object");
+    if (nominalDesc.kind !== "nominal-object") {
+      return;
+    }
+
+    const [typeArg] = nominalDesc.typeArgs;
+    expect(typeof typeArg).toBe("number");
+    if (typeof typeArg !== "number") {
+      return;
+    }
+    const argDesc = typing.arena.get(typeArg);
+    expect(argDesc.kind).toBe("primitive");
+    if (argDesc.kind === "primitive") {
+      expect(argDesc.name).toBe("i32");
+    }
+  });
+
   it("errors when omitting type parameters for repeated nominal union members", () => {
     expect(() =>
       semanticsPipeline(

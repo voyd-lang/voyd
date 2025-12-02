@@ -1403,6 +1403,43 @@ const typeLetStatement = (
   state: TypingState
 ): void => {
   if (stmt.pattern.kind === "tuple") {
+    const annotated =
+      stmt.pattern.typeAnnotation &&
+      resolveTypeExpr(
+        stmt.pattern.typeAnnotation,
+        ctx,
+        state,
+        ctx.primitives.unknown
+      );
+    if (
+      typeof annotated === "number" &&
+      annotated !== ctx.primitives.unknown
+    ) {
+      const initializerType = typeExpression(
+        stmt.initializer,
+        ctx,
+        state,
+        annotated
+      );
+      if (initializerType !== ctx.primitives.unknown) {
+        ensureTypeMatches(
+          initializerType,
+          annotated,
+          ctx,
+          state,
+          "let initializer"
+        );
+      }
+      bindTuplePatternFromType(
+        stmt.pattern,
+        annotated,
+        ctx,
+        state,
+        "declare",
+        stmt.span
+      );
+      return;
+    }
     bindTuplePatternFromExpr(
       stmt.pattern,
       stmt.initializer,
@@ -1995,6 +2032,35 @@ const typeTupleAssignment = (
 ): void => {
   if (pattern.kind !== "tuple") {
     throw new Error("tuple assignment requires a tuple pattern");
+  }
+  const annotated =
+    pattern.typeAnnotation &&
+    resolveTypeExpr(
+      pattern.typeAnnotation,
+      ctx,
+      state,
+      ctx.primitives.unknown
+    );
+  if (typeof annotated === "number" && annotated !== ctx.primitives.unknown) {
+    const valueType = typeExpression(valueExpr, ctx, state, annotated);
+    if (valueType !== ctx.primitives.unknown) {
+      ensureTypeMatches(
+        valueType,
+        annotated,
+        ctx,
+        state,
+        "tuple assignment"
+      );
+    }
+    bindTuplePatternFromType(
+      pattern,
+      annotated,
+      ctx,
+      state,
+      "assign",
+      assignmentSpan
+    );
+    return;
   }
   bindTuplePatternFromExpr(
     pattern,
@@ -3176,9 +3242,50 @@ const bindTuplePatternFromExpr = (
   ctx: TypingContext,
   state: TypingState,
   mode: PatternBindingMode,
-  originSpan?: SourceSpan
+  originSpan?: SourceSpan,
+  expectedType?: TypeId
 ): void => {
-  const initializerType = typeExpression(exprId, ctx, state);
+  const annotation = resolvePatternAnnotation(pattern, ctx, state);
+  const expectedAnnotation =
+    typeof annotation === "number" && annotation !== ctx.primitives.unknown
+      ? annotation
+      : undefined;
+  const expectedFromCaller =
+    typeof expectedType === "number" && expectedType !== ctx.primitives.unknown
+      ? expectedType
+      : undefined;
+  const expected = expectedAnnotation ?? expectedFromCaller;
+  if (
+    expectedAnnotation &&
+    expectedFromCaller &&
+    expectedAnnotation !== expectedFromCaller
+  ) {
+    ensureTypeMatches(
+      expectedFromCaller,
+      expectedAnnotation,
+      ctx,
+      state,
+      mode === "declare" ? "let pattern" : "assignment pattern"
+    );
+  }
+  const initializerType = expected
+    ? typeExpression(exprId, ctx, state, expected)
+    : typeExpression(exprId, ctx, state);
+  if (
+    expected &&
+    initializerType !== ctx.primitives.unknown &&
+    expected !== ctx.primitives.unknown
+  ) {
+    ensureTypeMatches(
+      initializerType,
+      expected,
+      ctx,
+      state,
+      mode === "declare" ? "let initializer" : "assignment"
+    );
+  }
+  const patternType = expected ?? initializerType;
+  pattern.typeId = patternType;
   const initializerExpr = ctx.hir.expressions.get(exprId);
 
   if (initializerExpr?.exprKind === "tuple") {
@@ -3189,13 +3296,15 @@ const bindTuplePatternFromExpr = (
     pattern.elements.forEach((subPattern, index) => {
       const elementExprId = initializerExpr.elements[index]!;
       if (subPattern.kind === "tuple") {
+        const subExpected = resolvePatternAnnotation(subPattern, ctx, state);
         bindTuplePatternFromExpr(
           subPattern,
           elementExprId,
           ctx,
           state,
           mode,
-          originSpan ?? subPattern.span
+          originSpan ?? subPattern.span,
+          subExpected
         );
         return;
       }
@@ -3218,7 +3327,7 @@ const bindTuplePatternFromExpr = (
 
   bindTuplePatternFromType(
     pattern,
-    initializerType,
+    patternType,
     ctx,
     state,
     mode,
@@ -3227,6 +3336,20 @@ const bindTuplePatternFromExpr = (
 };
 
 type PatternBindingMode = "declare" | "assign";
+
+const resolvePatternAnnotation = (
+  pattern: HirPattern,
+  ctx: TypingContext,
+  state: TypingState
+): TypeId | undefined =>
+  pattern.typeAnnotation
+    ? resolveTypeExpr(
+        pattern.typeAnnotation,
+        ctx,
+        state,
+        ctx.primitives.unknown
+      )
+    : undefined;
 
 const recordPatternType = (
   pattern: HirPattern,
@@ -3239,11 +3362,34 @@ const recordPatternType = (
   switch (pattern.kind) {
     case "identifier": {
       const span = pattern.span ?? spanHint;
+      const annotation =
+        pattern.typeAnnotation &&
+        resolveTypeExpr(
+          pattern.typeAnnotation,
+          ctx,
+          state,
+          ctx.primitives.unknown
+        );
+      const targetType = typeof annotation === "number" ? annotation : type;
+      if (
+        typeof annotation === "number" &&
+        annotation !== ctx.primitives.unknown &&
+        type !== ctx.primitives.unknown
+      ) {
+        ensureTypeMatches(
+          type,
+          annotation,
+          ctx,
+          state,
+          `pattern ${getSymbolName(pattern.symbol, ctx)}`
+        );
+      }
       if (mode === "assign" && span) {
         assertMutableBinding({ symbol: pattern.symbol, span, ctx });
       }
       if (mode === "declare" || !ctx.valueTypes.has(pattern.symbol)) {
-        ctx.valueTypes.set(pattern.symbol, type);
+        ctx.valueTypes.set(pattern.symbol, targetType);
+        pattern.typeId = targetType;
         return;
       }
       const existing = ctx.valueTypes.get(pattern.symbol);
@@ -3253,12 +3399,13 @@ const recordPatternType = (
         );
       }
       ensureTypeMatches(
-        type,
+        targetType,
         existing,
         ctx,
         state,
         `assignment to ${getSymbolName(pattern.symbol, ctx)}`
       );
+      pattern.typeId = targetType;
       return;
     }
     case "wildcard":
@@ -3276,7 +3423,26 @@ const bindTuplePatternFromType = (
   mode: PatternBindingMode,
   originSpan?: SourceSpan
 ): void => {
-  const fields = getStructuralFields(type, ctx, state);
+  const annotation = resolvePatternAnnotation(pattern, ctx, state);
+  const expected =
+    typeof annotation === "number" && annotation !== ctx.primitives.unknown
+      ? annotation
+      : type;
+  if (
+    typeof annotation === "number" &&
+    annotation !== ctx.primitives.unknown &&
+    type !== ctx.primitives.unknown
+  ) {
+    ensureTypeMatches(
+      type,
+      annotation,
+      ctx,
+      state,
+      mode === "declare" ? "tuple pattern" : "tuple assignment"
+    );
+  }
+  pattern.typeId = expected;
+  const fields = getStructuralFields(expected, ctx, state);
   if (!fields) {
     if (state.mode === "relaxed" && type === ctx.primitives.unknown) {
       pattern.elements.forEach((subPattern) => {
