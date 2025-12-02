@@ -1,0 +1,13 @@
+obj None {}
+
+obj Some<T> {
+  v: T
+}
+
+type Option<T> = Some<T> | None
+
+pub fn main() -> i32
+  let o: Option<i32> = Some { v: 42 }
+  match(o)
+    Some: 1
+    None: 0

@@ -358,21 +358,25 @@ const declarePatternBindings = (
     const nameExpr = basePattern.at(1);
     const typeExpr = basePattern.at(2);
     const { target, bindingKind: nameBinding } = unwrapMutablePattern(nameExpr);
-    if (!isIdentifierAtom(target)) {
-      throw new Error("typed pattern name must be an identifier");
-    }
-    rememberSyntax(target as Syntax, ctx);
     rememberSyntax(typeExpr as Syntax, ctx);
-    reportOverloadNameCollision(target.value, scope, basePattern, ctx);
-    ctx.symbolTable.declare({
-      name: target.value,
-      kind: "value",
-      declaredAt: basePattern.syntaxId,
-      metadata: {
-        mutable: options.mutable ?? false,
-        declarationSpan: options.declarationSpan ?? toSourceSpan(basePattern),
-        bindingKind: nameBinding ?? bindingKind,
-      },
+    if (isIdentifierAtom(target)) {
+      rememberSyntax(target as Syntax, ctx);
+      reportOverloadNameCollision(target.value, scope, basePattern, ctx);
+      ctx.symbolTable.declare({
+        name: target.value,
+        kind: "value",
+        declaredAt: basePattern.syntaxId,
+        metadata: {
+          mutable: options.mutable ?? false,
+          declarationSpan: options.declarationSpan ?? toSourceSpan(basePattern),
+          bindingKind: nameBinding ?? bindingKind,
+        },
+      });
+      return;
+    }
+    declarePatternBindings(target, ctx, scope, {
+      mutable: options.mutable,
+      declarationSpan: options.declarationSpan ?? toSourceSpan(basePattern),
     });
     return;
   }

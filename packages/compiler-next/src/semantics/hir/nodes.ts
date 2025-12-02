@@ -176,6 +176,7 @@ export interface HirPatternBase {
   bindingKind?: HirBindingKind;
   typeId?: TypeId;
   span?: SourceSpan;
+  typeAnnotation?: HirTypeExpr;
 }
 
 export type HirPattern =

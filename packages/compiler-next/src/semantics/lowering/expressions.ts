@@ -623,17 +623,19 @@ const lowerPattern = (
 
   if (isForm(target) && target.calls(":")) {
     const nameExpr = target.at(1);
+    const typeExpr = target.at(2);
+    if (!typeExpr) {
+      throw new Error("typed pattern is missing a type annotation");
+    }
     const { target: nameTarget, bindingKind: nameBinding } =
       unwrapMutablePattern(nameExpr);
-    if (!isIdentifierAtom(nameTarget)) {
-      throw new Error("typed pattern name must be an identifier");
-    }
-    const symbol = resolveSymbol(nameTarget.value, scopes.current(), ctx);
+    const lowered = lowerPattern(nameTarget, ctx, scopes);
+    const typeAnnotation = lowerTypeExpr(typeExpr, ctx, scopes.current());
     return {
-      kind: "identifier",
-      symbol,
-      span: toSourceSpan(pattern),
-      bindingKind: nameBinding ?? bindingKind,
+      ...lowered,
+      typeAnnotation,
+      bindingKind: nameBinding ?? lowered.bindingKind ?? bindingKind,
+      span: lowered.span ?? toSourceSpan(pattern),
     };
   }
 
