@@ -1,35 +1,20 @@
-export type DiagnosticSeverity = "error" | "warning" | "note";
+export * from "./types.js";
+export * from "./registry.js";
 
-export type DiagnosticPhase =
-  | "module-graph"
-  | "binder"
-  | "typing"
-  | "lowering"
-  | "codegen";
-
-export interface SourceSpan {
-  file: string;
-  start: number;
-  end: number;
-}
-
-export interface Diagnostic {
-  code: string;
-  message: string;
-  severity: DiagnosticSeverity;
-  span: SourceSpan;
-  related?: readonly Diagnostic[];
-  phase?: DiagnosticPhase;
-}
-
-export type DiagnosticInput = {
-  code: string;
-  message: string;
-  span: SourceSpan;
-  severity?: DiagnosticSeverity;
-  related?: readonly Diagnostic[];
-  phase?: DiagnosticPhase;
-};
+import {
+  type Diagnostic,
+  type DiagnosticHint,
+  type DiagnosticInput,
+  type DiagnosticPhase,
+  type DiagnosticSeverity,
+  type SourceSpan,
+} from "./types.js";
+import {
+  formatDiagnosticMessage,
+  getDiagnosticDefinition,
+  type DiagnosticCode,
+  type DiagnosticParams,
+} from "./registry.js";
 
 const codePhasePrefixes: Record<string, DiagnosticPhase> = {
   MD: "module-graph",
@@ -53,6 +38,46 @@ export const createDiagnostic = ({
   severity: severity ?? "error",
   phase: phase ?? inferPhase(input.code),
 });
+
+type RegistryDiagnosticOptions<K extends DiagnosticCode> = {
+  code: K;
+  params: DiagnosticParams<K>;
+  span: SourceSpan;
+  related?: readonly Diagnostic[];
+  severity?: DiagnosticSeverity;
+  phase?: DiagnosticPhase;
+  hints?: readonly DiagnosticHint[];
+};
+
+export const diagnosticFromCode = <K extends DiagnosticCode>(
+  options: RegistryDiagnosticOptions<K>
+): Diagnostic => {
+  const definition = getDiagnosticDefinition(options.code);
+  return createDiagnostic({
+    code: options.code,
+    message: formatDiagnosticMessage(options.code, options.params),
+    span: options.span,
+    related: options.related,
+    severity: options.severity ?? definition.severity,
+    phase: options.phase ?? definition.phase,
+    hints: options.hints ?? definition.hints,
+  });
+};
+
+type DiagnosticsCarrier = DiagnosticEmitter | { diagnostics: DiagnosticEmitter };
+
+export type EmitDiagnosticOptions<K extends DiagnosticCode> =
+  RegistryDiagnosticOptions<K> & { ctx: DiagnosticsCarrier };
+
+const getEmitter = (carrier: DiagnosticsCarrier): DiagnosticEmitter =>
+  "report" in carrier ? carrier : carrier.diagnostics;
+
+export const emitDiagnostic = <K extends DiagnosticCode>(
+  options: EmitDiagnosticOptions<K>
+): never => {
+  const { ctx, ...rest } = options;
+  return getEmitter(ctx).error(diagnosticFromCode(rest));
+};
 
 export const formatDiagnostic = (diagnostic: Diagnostic): string => {
   const location = `${diagnostic.span.file}:${diagnostic.span.start}-${diagnostic.span.end}`;

@@ -1,5 +1,5 @@
 import {
-  createDiagnostic,
+  diagnosticFromCode,
   normalizeSpan,
   type Diagnostic,
 } from "../diagnostics/index.js";
@@ -10,42 +10,53 @@ export const moduleDiagnosticToDiagnostic = (
   diagnostic: ModuleDiagnostic
 ): Diagnostic => {
   const requested = modulePathToString(diagnostic.requested);
-  const importerSpan = diagnostic.importer
-    ? { file: diagnostic.importer, start: 0, end: 0 }
+  const importer = diagnostic.importer;
+  const importerSpan = importer
+    ? { file: importer, start: 0, end: 0 }
     : undefined;
   const span = normalizeSpan(diagnostic.span, importerSpan);
 
   if (diagnostic.kind === "missing-module") {
-    return createDiagnostic({
-      code: "MD0001",
-      message: `Unable to resolve module ${requested}`,
-      span,
-      related: importerSpan
+    const related =
+      importer && importerSpan
         ? [
-            createDiagnostic({
+            diagnosticFromCode({
               code: "MD0001",
-              message: `Referenced from ${diagnostic.importer}`,
+              params: { kind: "referenced-from", importer },
               span: importerSpan,
               severity: "note",
             }),
           ]
-        : undefined,
+        : undefined;
+
+    return diagnosticFromCode({
+      code: "MD0001",
+      params: { kind: "missing", requested },
+      span,
+      related,
     });
   }
 
-  return createDiagnostic({
-    code: "MD0002",
-    message: diagnostic.message || `Unable to load module ${requested}`,
-    span,
-    related: importerSpan
+  const related =
+    importer && importerSpan
       ? [
-          createDiagnostic({
+          diagnosticFromCode({
             code: "MD0002",
-            message: `Requested by ${diagnostic.importer}`,
+            params: { kind: "requested-from", importer },
             span: importerSpan,
             severity: "note",
           }),
         ]
-      : undefined,
+      : undefined;
+
+  return diagnosticFromCode({
+    code: "MD0002",
+    params: {
+      kind: "load-failed",
+      requested,
+      errorMessage: diagnostic.message || undefined,
+    },
+    span,
+    related,
   });
 };
