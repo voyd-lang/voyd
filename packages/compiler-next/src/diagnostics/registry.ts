@@ -14,13 +14,65 @@ export type DiagnosticDefinition<P> = {
   hints?: readonly DiagnosticHint[];
 };
 
-type DefinitionParams<T> = T extends DiagnosticDefinition<infer P> ? P : never;
-
 const mutableBindingHint: DiagnosticHint = {
   message: "Use the '~' prefix to create a mutable binding (~my_var).",
 };
 
-export const diagnosticsRegistry = {
+type DiagnosticParamsMap = {
+  BD0001:
+    | { kind: "unresolved-use-path"; path: readonly string[] }
+    | { kind: "module-unavailable"; moduleId: string }
+    | { kind: "missing-target" }
+    | { kind: "missing-export"; moduleId: string; target: string }
+    | { kind: "missing-module-identifier" };
+  BD0002:
+    | {
+        kind: "duplicate-overload";
+        functionName: string;
+        signature: string;
+      }
+    | { kind: "previous-overload" };
+  BD0003:
+    | { kind: "non-function-conflict"; name: string; conflictKind: string }
+    | { kind: "overload-name-collision"; name: string }
+    | { kind: "conflicting-declaration" };
+  BD0004:
+    | { kind: "missing-annotation"; functionName: string; parameter: string }
+    | { kind: "conflicting-overload" };
+  CG0001: { kind: "codegen-error"; message: string };
+  MD0001:
+    | { kind: "missing"; requested: string }
+    | { kind: "referenced-from"; importer: string };
+  MD0002:
+    | {
+        kind: "load-failed";
+        requested: string;
+        errorMessage?: string;
+      }
+    | { kind: "requested-from"; importer: string };
+  TY0001:
+    | { kind: "immutable-assignment"; name: string }
+    | { kind: "binding-declaration"; name: string };
+  TY0002:
+    | { kind: "pattern-mismatch"; patternLabel: string; reason: string }
+    | { kind: "discriminant-note" };
+  TY0003: { kind: "non-exhaustive-match" };
+  TY0004:
+    | { kind: "argument-must-be-mutable"; paramName: string }
+    | { kind: "immutable-object"; binding: string; reason: string }
+    | { kind: "binding-declaration"; binding: string };
+  TY0005: { kind: "not-callable" };
+  TY0006: { kind: "unknown-function"; name: string };
+  TY9999: { kind: "unexpected-error"; message: string };
+};
+
+export type DiagnosticCode = keyof DiagnosticParamsMap;
+
+export type DiagnosticParams<K extends DiagnosticCode> = DiagnosticParamsMap[K];
+
+export const diagnosticsRegistry: {
+  [K in DiagnosticCode]: DiagnosticDefinition<DiagnosticParamsMap[K]>;
+} = {
   BD0001: {
     code: "BD0001",
     message: (params) => {
@@ -38,13 +90,7 @@ export const diagnosticsRegistry = {
       }
       return exhaustive(params);
     },
-  } satisfies DiagnosticDefinition<
-    | { kind: "unresolved-use-path"; path: readonly string[] }
-    | { kind: "module-unavailable"; moduleId: string }
-    | { kind: "missing-target" }
-    | { kind: "missing-export"; moduleId: string; target: string }
-    | { kind: "missing-module-identifier" }
-  >,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0001"]>,
   BD0002: {
     code: "BD0002",
     message: (params) =>
@@ -52,14 +98,7 @@ export const diagnosticsRegistry = {
         ? `function ${params.functionName} already defines overload ${params.signature}`
         : "previous overload declared here",
     severity: "error",
-  } satisfies DiagnosticDefinition<
-    | {
-        kind: "duplicate-overload";
-        functionName: string;
-        signature: string;
-      }
-    | { kind: "previous-overload" }
-  >,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0002"]>,
   BD0003: {
     code: "BD0003",
     message: (params) => {
@@ -74,15 +113,7 @@ export const diagnosticsRegistry = {
       return exhaustive(params);
     },
     severity: "error",
-  } satisfies DiagnosticDefinition<
-    | {
-        kind: "non-function-conflict";
-        name: string;
-        conflictKind: string;
-      }
-    | { kind: "overload-name-collision"; name: string }
-    | { kind: "conflicting-declaration" }
-  >,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0003"]>,
   BD0004: {
     code: "BD0004",
     message: (params) =>
@@ -90,20 +121,13 @@ export const diagnosticsRegistry = {
         ? `parameter ${params.parameter} in overloaded function ${params.functionName} must declare a type`
         : "conflicting overload declared here",
     severity: "error",
-  } satisfies DiagnosticDefinition<
-    | {
-        kind: "missing-annotation";
-        functionName: string;
-        parameter: string;
-      }
-    | { kind: "conflicting-overload" }
-  >,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0004"]>,
   CG0001: {
     code: "CG0001",
     message: (params) => params.message,
     severity: "error",
     phase: "codegen",
-  } satisfies DiagnosticDefinition<{ kind: "codegen-error"; message: string }>,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["CG0001"]>,
   MD0001: {
     code: "MD0001",
     message: (params) =>
@@ -112,10 +136,7 @@ export const diagnosticsRegistry = {
         : `Referenced from ${params.importer}`,
     severity: "error",
     phase: "module-graph",
-  } satisfies DiagnosticDefinition<
-    | { kind: "missing"; requested: string }
-    | { kind: "referenced-from"; importer: string }
-  >,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["MD0001"]>,
   MD0002: {
     code: "MD0002",
     message: (params) =>
@@ -124,14 +145,7 @@ export const diagnosticsRegistry = {
         : `Requested by ${params.importer}`,
     severity: "error",
     phase: "module-graph",
-  } satisfies DiagnosticDefinition<
-    | {
-        kind: "load-failed";
-        requested: string;
-        errorMessage?: string;
-      }
-    | { kind: "requested-from"; importer: string }
-  >,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["MD0002"]>,
   TY0001: {
     code: "TY0001",
     message: (params) =>
@@ -140,10 +154,7 @@ export const diagnosticsRegistry = {
         : `binding '${params.name}' declared here`,
     severity: "error",
     phase: "typing",
-  } satisfies DiagnosticDefinition<
-    | { kind: "immutable-assignment"; name: string }
-    | { kind: "binding-declaration"; name: string }
-  >,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0001"]>,
   TY0002: {
     code: "TY0002",
     message: (params) =>
@@ -152,16 +163,13 @@ export const diagnosticsRegistry = {
         : "discriminant expression",
     severity: "error",
     phase: "typing",
-  } satisfies DiagnosticDefinition<
-    | { kind: "pattern-mismatch"; patternLabel: string; reason: string }
-    | { kind: "discriminant-note" }
-  >,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0002"]>,
   TY0003: {
     code: "TY0003",
     message: (_params) => "non-exhaustive match",
     severity: "error",
     phase: "typing",
-  } satisfies DiagnosticDefinition<{ kind: "non-exhaustive-match" }>,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0003"]>,
   TY0004: {
     code: "TY0004",
     message: (params) => {
@@ -178,36 +186,26 @@ export const diagnosticsRegistry = {
     severity: "error",
     phase: "typing",
     hints: [mutableBindingHint],
-  } satisfies DiagnosticDefinition<
-    | { kind: "argument-must-be-mutable"; paramName: string }
-    | { kind: "immutable-object"; binding: string; reason: string }
-    | { kind: "binding-declaration"; binding: string }
-  >,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0004"]>,
   TY0005: {
     code: "TY0005",
     message: (_params) => "cannot call a non-function value",
     severity: "error",
     phase: "typing",
-  } satisfies DiagnosticDefinition<{ kind: "not-callable" }>,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0005"]>,
   TY0006: {
     code: "TY0006",
     message: (params) => `function '${params.name}' is not defined`,
     severity: "error",
     phase: "typing",
-  } satisfies DiagnosticDefinition<{ kind: "unknown-function"; name: string }>,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0006"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
     severity: "error",
     phase: "typing",
-  } satisfies DiagnosticDefinition<{ kind: "unexpected-error"; message: string }>,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY9999"]>,
 } as const;
-
-export type DiagnosticCode = keyof typeof diagnosticsRegistry;
-
-export type DiagnosticParams<K extends DiagnosticCode> = DefinitionParams<
-  (typeof diagnosticsRegistry)[K]
->;
 
 export const formatDiagnosticMessage = <K extends DiagnosticCode>(
   code: K,

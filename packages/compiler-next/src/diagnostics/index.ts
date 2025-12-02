@@ -64,6 +64,21 @@ export const diagnosticFromCode = <K extends DiagnosticCode>(
   });
 };
 
+type DiagnosticsCarrier = DiagnosticEmitter | { diagnostics: DiagnosticEmitter };
+
+export type EmitDiagnosticOptions<K extends DiagnosticCode> =
+  RegistryDiagnosticOptions<K> & { ctx: DiagnosticsCarrier };
+
+const getEmitter = (carrier: DiagnosticsCarrier): DiagnosticEmitter =>
+  "report" in carrier ? carrier : carrier.diagnostics;
+
+export const emitDiagnostic = <K extends DiagnosticCode>(
+  options: EmitDiagnosticOptions<K>
+): never => {
+  const { ctx, ...rest } = options;
+  return getEmitter(ctx).error(diagnosticFromCode(rest));
+};
+
 export const formatDiagnostic = (diagnostic: Diagnostic): string => {
   const location = `${diagnostic.span.file}:${diagnostic.span.start}-${diagnostic.span.end}`;
   const severity = diagnostic.severity.toUpperCase();

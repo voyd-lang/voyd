@@ -40,7 +40,11 @@ import {
   typeSatisfies,
   getSymbolName,
 } from "./type-system.js";
-import { diagnosticFromCode, normalizeSpan } from "../../diagnostics/index.js";
+import {
+  diagnosticFromCode,
+  emitDiagnostic,
+  normalizeSpan,
+} from "../../diagnostics/index.js";
 import { resolveImportedValue } from "./imports.js";
 import type {
   Arg,
@@ -843,13 +847,12 @@ const ensureMutableArgument = ({
   const paramName = param.name ?? param.label ?? `parameter ${index + 1}`;
 
   if (typeof symbol !== "number") {
-    ctx.diagnostics.error(
-      diagnosticFromCode({
-        code: "TY0004",
-        params: { kind: "argument-must-be-mutable", paramName },
-        span,
-      })
-    );
+    emitDiagnostic({
+      ctx,
+      code: "TY0004",
+      params: { kind: "argument-must-be-mutable", paramName },
+      span,
+    });
     return;
   }
 
@@ -900,13 +903,12 @@ const reportNonFunctionCallee = ({
   calleeSpan?: SourceSpan;
   ctx: TypingContext;
 }): never =>
-  ctx.diagnostics.error(
-    diagnosticFromCode({
-      code: "TY0005",
-      params: { kind: "not-callable" },
-      span: normalizeSpan(calleeSpan, callSpan),
-    })
-  );
+  emitDiagnostic({
+    ctx,
+    code: "TY0005",
+    params: { kind: "not-callable" },
+    span: normalizeSpan(calleeSpan, callSpan),
+  });
 
 const reportUnknownFunction = ({
   name,
@@ -917,13 +919,12 @@ const reportUnknownFunction = ({
   span?: SourceSpan;
   ctx: TypingContext;
 }): never =>
-  ctx.diagnostics.error(
-    diagnosticFromCode({
-      code: "TY0006",
-      params: { kind: "unknown-function", name },
-      span: normalizeSpan(span),
-    })
-  );
+  emitDiagnostic({
+    ctx,
+    code: "TY0006",
+    params: { kind: "unknown-function", name },
+    span: normalizeSpan(span),
+  });
 
 const resolveCurriedCallReturnType = ({
   args,
@@ -1529,13 +1530,12 @@ const typeMatchExpr = (
   });
 
   if (remainingMembers && remainingMembers.size > 0) {
-    ctx.diagnostics.error(
-      diagnosticFromCode({
-        code: "TY0003",
-        params: { kind: "non-exhaustive-match" },
-        span: expr.span,
-      })
-    );
+    emitDiagnostic({
+      ctx,
+      code: "TY0003",
+      params: { kind: "non-exhaustive-match" },
+      span: expr.span,
+    });
   }
 
   return branchType ?? ctx.primitives.void;
@@ -1839,14 +1839,13 @@ const assertMutableBinding = ({
       ]
     : undefined;
 
-  ctx.diagnostics.error(
-    diagnosticFromCode({
-      code: "TY0001",
-      params: { kind: "immutable-assignment", name: record.name },
-      span,
-      related,
-    })
-  );
+  emitDiagnostic({
+    ctx,
+    code: "TY0001",
+    params: { kind: "immutable-assignment", name: record.name },
+    span,
+    related,
+  });
 };
 
 const assertMutableObjectBinding = ({
@@ -1877,18 +1876,17 @@ const assertMutableObjectBinding = ({
       ]
     : undefined;
 
-  ctx.diagnostics.error(
-    diagnosticFromCode({
-      code: "TY0004",
-      params: {
-        kind: "immutable-object",
-        binding: record.name,
-        reason,
-      },
-      span,
-      related,
-    })
-  );
+  emitDiagnostic({
+    ctx,
+    code: "TY0004",
+    params: {
+      kind: "immutable-object",
+      binding: record.name,
+      reason,
+    },
+    span,
+    related,
+  });
 };
 
 const findBindingSymbol = (
@@ -3333,21 +3331,22 @@ const narrowMatchPattern = (
           pattern.type.typeKind === "named"
             ? pattern.type.path.join("::")
             : pattern.kind;
-        ctx.diagnostics.error(
-          diagnosticFromCode({
-            code: "TY0002",
-            params: {
-              kind: "pattern-mismatch",
-              patternLabel,
-              reason,
-            },
-            span: spans.patternSpan,
-            related,
-          })
-        );
+        emitDiagnostic({
+          ctx,
+          code: "TY0002",
+          params: {
+            kind: "pattern-mismatch",
+            patternLabel,
+            reason,
+          },
+          span: spans.patternSpan,
+          related,
+        });
       }
-      pattern.typeId = narrowed;
-      return narrowed;
+      const result =
+        typeof narrowed === "number" ? narrowed : ctx.primitives.unknown;
+      pattern.typeId = result;
+      return result;
     }
     default:
       throw new Error(`unsupported match pattern ${pattern.kind}`);
