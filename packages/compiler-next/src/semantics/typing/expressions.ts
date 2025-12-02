@@ -2120,11 +2120,21 @@ const typeOverloadedCall = (
   let selected = traitDispatch;
   if (!selected) {
     if (matches.length === 0) {
-      throw new Error(`no overload of ${callee.name} matches argument types`);
+      emitDiagnostic({
+        ctx,
+        code: "TY0008",
+        params: { kind: "no-overload", name: callee.name },
+        span: call.span,
+      });
     }
 
     if (matches.length > 1) {
-      throw new Error(`ambiguous overload for ${callee.name}`);
+      emitDiagnostic({
+        ctx,
+        code: "TY0007",
+        params: { kind: "ambiguous-overload", name: callee.name },
+        span: call.span,
+      });
     }
 
     selected = matches[0];

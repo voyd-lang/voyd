@@ -63,6 +63,8 @@ type DiagnosticParamsMap = {
     | { kind: "binding-declaration"; binding: string };
   TY0005: { kind: "not-callable" };
   TY0006: { kind: "unknown-function"; name: string };
+  TY0007: { kind: "ambiguous-overload"; name: string };
+  TY0008: { kind: "no-overload"; name: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -199,6 +201,18 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0006"]>,
+  TY0007: {
+    code: "TY0007",
+    message: (params) => `ambiguous overload for ${params.name}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0007"]>,
+  TY0008: {
+    code: "TY0008",
+    message: (params) => `no overload of ${params.name} matches argument types`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0008"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
