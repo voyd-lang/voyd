@@ -6,7 +6,16 @@ The goals are:
 
 * **Safe by default**: nothing leaks across modules or packages unless explicitly allowed.
 * **Ergonomic inside a package**: if you can see a type, you can usually use its non-private members.
-* **Explicit public APIs**: only things listed in the package root (`index.voyd`) are visible to other packages.
+* **Explicit public APIs**: only things listed in the package root (`pkg.voyd`) are visible to other packages.
+
+---
+
+## At a Glance
+
+* Top-level default: module-only (level 1).
+* `pub` top-level: package-visible (level 2), **not** exported to other packages.
+* Public API (level 3): only what `pkg.voyd` exports with `pub use` (or items declared there).
+* Members inherit their type’s visibility; `pri` narrows to the object; `api` makes a member exportable but not wider internally.
 
 ---
 
@@ -16,7 +25,7 @@ Voyd has three structural scopes:
 
 * **Type / object** – the body of an `obj` and its `impl`s.
 * **Module** – a `.voyd` file.
-* **Package** – a directory tree (`src/` + `index.voyd`), imported by other packages.
+* **Package** – a directory tree (`src/` + `pkg.voyd`), imported by other packages.
 
 On top of this, there are five effective *visibility levels* (conceptual, not all named explicitly):
 
@@ -78,14 +87,16 @@ fn f()
   let w: Vec = v       // OK
 ```
 
-### 2.3 Public API (`pub use` in `index.voyd`)
+### 2.3 Public API (`pub use` in `pkg.voyd`)
 
-Level 3 (public API) is controlled **exclusively** by the package root file, typically `index.voyd`.
+Level 3 (public API) is controlled **exclusively** by the package root file, `pkg.voyd`.
+
+> Only `pkg.voyd` can make things visible to other packages.
 
 Example:
 
 ```voyd
-// pkg1/index.voyd
+// pkg1/pkg.voyd
 use src::module_a::all
 
 pub use src::module_a::Vec
@@ -96,11 +107,11 @@ pub fn work() ...
 
 Rules:
 
-* Only items referenced in `pub use` (or `pub fn`, `pub obj` declared in `index.voyd` itself) are visible to other packages.
+* Only items referenced in `pub use` (or `pub fn`, `pub obj` declared in `pkg.voyd` itself) are visible to other packages.
 * Other packages can import using:
 
   ```voyd
-  // pkg2/index.voyd
+  // pkg2/pkg.voyd
   use pkg::pkg1::all
 
   fn main()
@@ -146,18 +157,18 @@ fn g(v: Vec)
   v.y   // OK
 ```
 
-### 3.2 Narrowing visibility: `#`
+### 3.2 Narrowing visibility: `pri`
 
 Members can be made more restrictive than their type.
 
 #### Object private (level 0)
 
-Use `#` to restrict a member to the defining type only:
+Use `pri` to restrict a member to the defining type only:
 
 ```voyd
 pub obj Vec
   x: i32,
-  #z: i32,    // private to Vec
+  pri z: i32,    // private to Vec
 
 impl Vec
   fn inc(self)
@@ -165,7 +176,7 @@ impl Vec
     self.z += 1      // OK
 ```
 
-* `#` members are only accessible from:
+* `pri` members are only accessible from:
 
   * methods in the same `obj`’s `impl`s.
 * They are **not** accessible:
@@ -182,7 +193,7 @@ Members can participate in the public API if explicitly marked `api`:
 pub obj Vec {
   api x: i32,        // candidate for external API
   y: i32,            // internal-only
-  #z: i32,           // object-private
+  pri z: i32,           // object-private
 }
 
 impl Vec
@@ -209,9 +220,10 @@ Semantics of `api`:
 
 To make a *member* (field or method) visible to other packages:
 
-1. Its **type** must be package-visible and exported.
-2. The member itself must be marked `api`.
-3. You must export it in the package root, or use a sugar that does so.
+Checklist:
+
+1) Type is package-visible (`pub`) and exported from `pkg.voyd`.
+2) Member is marked `api`.
 
 ### 4.1 Explicit member exports
 
@@ -220,7 +232,7 @@ To make a *member* (field or method) visible to other packages:
 pub obj Vec {
   api x: i32,
   y: i32,
-  #z: i32,
+  pri z: i32,
 }
 
 impl Vec
@@ -235,22 +247,19 @@ fn make_hi()
 ```
 
 ```voyd
-// pkg1/index.voyd
+// pkg1/pkg.voyd
 use src::module_a::all
 
-// Export type and constructor
+// Export type and make_vec fn
 pub use src::module_a::Vec
 pub use src::module_a::make_vec
 
-// Export specific api member(s)
-pub use src::module_a::Vec.double
-pub use src::module_a::Vec.x
 
 pub fn work()
   let vec = make_vec()   // OK
   vec.x                  // OK (same package)
   vec.y                  // OK
-  vec.z                  // ERROR (#z, private)
+  vec.z                  // ERROR (pri z, private)
   make_hi()              // ERROR, module-private in module_a
 
 fn hi()
@@ -260,7 +269,7 @@ fn hi()
 From another package:
 
 ```voyd
-// pkg2/index.voyd
+// pkg2/pkg.voyd
 use pkg::pkg1::all
 
 fn main()
@@ -280,28 +289,10 @@ fn main()
 
 ## 5. `use` Behavior and Levels
 
-`use` has different behavior depending on source and destination:
-
-### 5.1 Within a package
-
-```voyd
-use src::module_a::all
-```
-
-* Imports all **package-visible** (`pub`) items from `module_a` into the current module’s scope.
-* Does **not** import:
-
-  * module-private items (no `pub`),
-  * items that are only `private`/`#` inside types.
-
-### 5.2 From another package
-
-```voyd
-use pkg::pkg1::all
-```
-
-* Imports all **public API** (level 3) items declared via `pub` and `pub use` in `pkg1/index.voyd`.
-* Types imported this way may expose `api` members that have been exported (directly or via `use api` sugar).
+| Import form            | What comes in                                          | What stays out                           |
+| ---------------------- | ------------------------------------------------------ | ---------------------------------------- |
+| `use src::module::all` | Package-visible (`pub`) items from that module         | Module-private items; `pri`/non-`api` bits |
+| `use pkg::pkg1::all`   | Public API (level 3) items exported by `pkg1/pkg.voyd` | Anything not exported; non-`api` members |
 
 ---
 
@@ -318,8 +309,8 @@ Given:
 * Declaration:
 
   * type `T` is module-private or `pub`
-  * member annotated with `#` / `private` / `api` / nothing
-  * exported or not in `index.voyd`
+  * member annotated with `pri` / `private` / `api` / nothing
+  * exported or not in `pkg.voyd`
 
 Access is allowed if:
 
@@ -329,11 +320,11 @@ Access is allowed if:
 
      * same module, or
      * same package and `pub obj T`, or
-     * other package and `T` is exported from `index.voyd`.
+     * other package and `T` is exported from `pkg.voyd`.
 
 2. **Member internal visibility**
 
-   * If member is `#` / `private`:
+   * If member is `pri` / `private`:
 
      * Caller must be within the same type.
    * Otherwise:
@@ -346,14 +337,7 @@ Access is allowed if:
 3. **Member external visibility (level 3)**
 
    * Caller is in a different package.
-   * Type is exported in `index.voyd`.
+   * Type is exported in `pkg.voyd`.
    * Member is marked `api`.
-   * Member is exported (directly or via `use api` sugar):
-
-     ```voyd
-     pub use src::module_a::T.member
-     // or
-     pub use api src::module_a::T
-     ```
 
 If any of these conditions fail, access is rejected at compile time.
