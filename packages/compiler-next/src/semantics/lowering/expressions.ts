@@ -829,42 +829,121 @@ const lowerStaticAccessExpr = (
     scopes.current(),
     ctx
   );
-  if (typeof targetSymbol !== "number") {
-    return lowerCall(form, ctx, scopes);
+  if (typeof targetSymbol === "number") {
+    const methodTable = ctx.staticMethods.get(targetSymbol);
+    if (!methodTable) {
+      const targetName = ctx.symbolTable.getSymbol(targetSymbol).name;
+      throw new Error(`type ${targetName} does not declare static methods`);
+    }
+
+    if (isForm(memberExpr)) {
+      return lowerStaticMethodCall({
+        accessForm: form,
+        memberForm: memberExpr,
+        methodTable,
+        targetSymbol,
+        ctx,
+        scopes,
+      });
+    }
+
+    if (isIdentifierAtom(memberExpr) || isInternalIdentifierAtom(memberExpr)) {
+      const resolution = resolveStaticMethodResolution({
+        name: memberExpr.value,
+        targetSymbol,
+        methodTable,
+        ctx,
+      });
+      return lowerResolvedCallee({
+        resolution,
+        syntax: memberExpr,
+        ctx,
+      });
+    }
+    throw new Error("unsupported static access expression");
   }
 
-  const methodTable = ctx.staticMethods.get(targetSymbol);
-  if (!methodTable) {
-    const targetName = ctx.symbolTable.getSymbol(targetSymbol).name;
-    throw new Error(`type ${targetName} does not declare static methods`);
+  const moduleAccess = lowerModuleAccess({
+    accessForm: form,
+    targetExpr,
+    memberExpr,
+    ctx,
+    scopes,
+  });
+  if (typeof moduleAccess === "number") {
+    return moduleAccess;
+  }
+
+  return lowerCall(form, ctx, scopes);
+};
+
+const lowerModuleAccess = ({
+  accessForm,
+  targetExpr,
+  memberExpr,
+  ctx,
+  scopes,
+}: {
+  accessForm: Form;
+  targetExpr: Expr;
+  memberExpr: Expr;
+  ctx: LowerContext;
+  scopes: LowerScopeStack;
+}): HirExprId | undefined => {
+  const moduleSymbol = resolveModuleSymbol(targetExpr, scopes.current(), ctx);
+  if (typeof moduleSymbol !== "number") {
+    return undefined;
+  }
+  const memberName = extractModuleMemberName(memberExpr);
+  if (!memberName) {
+    return undefined;
+  }
+  const memberTable = ctx.moduleMembers.get(moduleSymbol);
+  if (!memberTable) {
+    const targetName = ctx.symbolTable.getSymbol(moduleSymbol).name;
+    throw new Error(`module ${targetName} does not expose members`);
   }
 
   if (isForm(memberExpr)) {
-    return lowerStaticMethodCall({
-      accessForm: form,
+    return lowerModuleQualifiedCall({
+      accessForm,
       memberForm: memberExpr,
-      methodTable,
-      targetSymbol,
+      memberTable,
+      moduleSymbol,
       ctx,
       scopes,
     });
   }
 
-  if (isIdentifierAtom(memberExpr) || isInternalIdentifierAtom(memberExpr)) {
-    const resolution = resolveStaticMethodResolution({
-      name: memberExpr.value,
-      targetSymbol,
-      methodTable,
-      ctx,
-    });
-    return lowerResolvedCallee({
-      resolution,
-      syntax: memberExpr,
-      ctx,
-    });
+  const resolution = resolveModuleMemberResolution({
+    name: memberName,
+    moduleSymbol,
+    memberTable,
+    ctx,
+  });
+  if (!resolution) {
+    return undefined;
   }
+  return lowerResolvedCallee({
+    resolution,
+    syntax: memberExpr as Syntax,
+    ctx,
+  });
+};
 
-  throw new Error("unsupported static access expression");
+const extractModuleMemberName = (expr: Expr | undefined): string | undefined => {
+  if (!expr) return undefined;
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    return expr.value;
+  }
+  if (!isForm(expr)) {
+    return undefined;
+  }
+  const head = expr.at(0);
+  if (isIdentifierAtom(head) || isInternalIdentifierAtom(head)) {
+    return head.value;
+  }
+  return undefined;
 };
 
 const lowerStaticMethodCall = ({
@@ -927,6 +1006,89 @@ const lowerStaticMethodCall = ({
     methodTable,
     ctx,
   });
+  const callee = lowerResolvedCallee({
+    resolution,
+    syntax: calleeExpr,
+    ctx,
+  });
+
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    ast: accessForm.syntaxId,
+    span: toSourceSpan(accessForm),
+    callee,
+    args,
+    typeArguments,
+  });
+};
+
+const lowerModuleQualifiedCall = ({
+  accessForm,
+  memberForm,
+  memberTable,
+  moduleSymbol,
+  ctx,
+  scopes,
+}: {
+  accessForm: Form;
+  memberForm: Form;
+  memberTable: ReadonlyMap<string, Set<SymbolId>>;
+  moduleSymbol: SymbolId;
+  ctx: LowerContext;
+  scopes: LowerScopeStack;
+}): HirExprId => {
+  const elements = memberForm.toArray();
+  if (elements.length === 0) {
+    throw new Error("module-qualified call missing callee");
+  }
+
+  const calleeExpr = elements[0]!;
+  if (
+    !isIdentifierAtom(calleeExpr) &&
+    !isInternalIdentifierAtom(calleeExpr)
+  ) {
+    throw new Error("module-qualified callee must be an identifier");
+  }
+
+  const potentialGenerics = elements[1];
+  const hasTypeArguments =
+    isForm(potentialGenerics) &&
+    formCallsInternal(potentialGenerics, "generics");
+  const typeArguments = hasTypeArguments
+    ? ((potentialGenerics as Form).rest
+        .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
+        .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
+    : undefined;
+
+  const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
+    if (isForm(arg) && arg.calls(":")) {
+      const labelExpr = arg.at(1);
+      const valueExpr = arg.at(2);
+      if (!isIdentifierAtom(labelExpr) || !valueExpr) {
+        throw new Error("Invalid labeled argument");
+      }
+      return {
+        label: labelExpr.value,
+        expr: lowerExpr(valueExpr, ctx, scopes),
+      };
+    }
+    const expr = lowerExpr(arg, ctx, scopes);
+    return { expr };
+  });
+
+  const resolution = resolveModuleMemberResolution({
+    name: calleeExpr.value,
+    moduleSymbol,
+    memberTable,
+    ctx,
+  });
+  if (!resolution) {
+    const moduleName = ctx.symbolTable.getSymbol(moduleSymbol).name;
+    throw new Error(
+      `module ${moduleName} does not export ${calleeExpr.value}`
+    );
+  }
   const callee = lowerResolvedCallee({
     resolution,
     syntax: calleeExpr,
@@ -1021,6 +1183,70 @@ const resolveStaticMethodResolution = ({
 
   const targetName = ctx.symbolTable.getSymbol(targetSymbol).name;
   throw new Error(`ambiguous static method ${name} for type ${targetName}`);
+};
+
+const resolveModuleMemberResolution = ({
+  name,
+  moduleSymbol,
+  memberTable,
+  ctx,
+}: {
+  name: string;
+  moduleSymbol: SymbolId;
+  memberTable: ReadonlyMap<string, Set<SymbolId>>;
+  ctx: LowerContext;
+}): IdentifierResolution | undefined => {
+  const symbols = memberTable.get(name);
+  if (!symbols || symbols.size === 0) {
+    return undefined;
+  }
+
+  if (symbols.size === 1) {
+    const symbol = symbols.values().next().value as SymbolId;
+    const overload = ctx.overloadBySymbol.get(symbol);
+    return typeof overload === "number"
+      ? { kind: "overload-set", name, set: overload }
+      : { kind: "symbol", name, symbol };
+  }
+
+  const overloads = new Set<number>();
+  let missing = false;
+  symbols.forEach((symbol) => {
+    const id = ctx.overloadBySymbol.get(symbol);
+    if (typeof id === "number") {
+      overloads.add(id);
+    } else {
+      missing = true;
+    }
+  });
+
+  if (!missing && overloads.size === 1) {
+    return {
+      kind: "overload-set",
+      name,
+      set: overloads.values().next().value as number,
+    };
+  }
+
+  const moduleName = ctx.symbolTable.getSymbol(moduleSymbol).name;
+  throw new Error(`ambiguous module member ${name} on ${moduleName}`);
+};
+
+const resolveModuleSymbol = (
+  expr: Expr,
+  scope: ScopeId,
+  ctx: LowerContext
+): SymbolId | undefined => {
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    const symbol = resolveSymbol(expr.value, scope, ctx);
+    if (typeof symbol === "number") {
+      const record = ctx.symbolTable.getSymbol(symbol);
+      if (record.kind === "module") {
+        return symbol;
+      }
+    }
+  }
+  return undefined;
 };
 
 const resolveStaticTargetSymbol = (

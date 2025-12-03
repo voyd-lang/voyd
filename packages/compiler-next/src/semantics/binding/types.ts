@@ -31,6 +31,11 @@ export type StaticMethodTable = Map<
   Map<string, Set<SymbolId>>
 >;
 
+export type ModuleMemberTable = Map<
+  SymbolId,
+  Map<string, Set<SymbolId>>
+>;
+
 export interface BindingInputs {
   moduleForm: Form;
   symbolTable: SymbolTable;
@@ -54,6 +59,7 @@ export interface BindingResult {
   uses: readonly BoundUse[];
   imports: readonly BoundImport[];
   staticMethods: StaticMethodTable;
+  moduleMembers: ModuleMemberTable;
 }
 
 export type BoundFunction = FunctionDecl;
@@ -96,6 +102,7 @@ export interface BindingContext {
   uses: BoundUse[];
   imports: BoundImport[];
   staticMethods: StaticMethodTable;
+  moduleMembers: ModuleMemberTable;
 }
 
 export interface BoundUse {

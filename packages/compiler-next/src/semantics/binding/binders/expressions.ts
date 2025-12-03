@@ -4,12 +4,14 @@ import {
   type Syntax,
   isForm,
   isIdentifierAtom,
+  isInternalIdentifierAtom,
 } from "../../../parser/index.js";
 import {
   expectLabeledExpr,
   parseIfBranches,
   toSourceSpan,
 } from "../../utils.js";
+import { diagnosticFromCode } from "../../../diagnostics/index.js";
 import { rememberSyntax } from "../context.js";
 import { reportOverloadNameCollision } from "../overloads.js";
 import type { BindingContext } from "../types.js";
@@ -18,6 +20,8 @@ import { parseLambdaSignature } from "../../lambda.js";
 import { ensureForm } from "./utils.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import type { HirBindingKind } from "../../hir/index.js";
+import type { ModuleExportEntry } from "../../modules.js";
+import type { ModuleMemberTable } from "../types.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -25,6 +29,11 @@ export const bindExpr = (
   tracker: BinderScopeTracker
 ): void => {
   if (!expr || !isForm(expr)) return;
+
+  if (expr.calls("::")) {
+    bindNamespaceAccess(expr, ctx, tracker);
+    return;
+  }
 
   if (expr.calls("block")) {
     bindBlock(expr, ctx, tracker);
@@ -300,6 +309,162 @@ const declareLambdaParam = (
   }
 
   throw new Error("unsupported lambda parameter form");
+};
+
+const bindNamespaceAccess = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  const target = form.at(1);
+  const member = form.at(2);
+
+  bindExpr(target, ctx, tracker);
+  bindExpr(member, ctx, tracker);
+
+  const targetName =
+    isIdentifierAtom(target) || isInternalIdentifierAtom(target)
+      ? target.value
+      : undefined;
+  if (!targetName) {
+    return;
+  }
+  const targetSymbol = ctx.symbolTable.resolve(targetName, tracker.current());
+  if (typeof targetSymbol !== "number") {
+    return;
+  }
+  const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
+  if (
+    targetRecord.kind !== "module" ||
+    !targetRecord.metadata ||
+    !("import" in targetRecord.metadata)
+  ) {
+    return;
+  }
+
+  const importMeta = targetRecord.metadata as {
+    import?: { moduleId?: string };
+  };
+  const moduleId = importMeta.import?.moduleId;
+  if (!moduleId) {
+    return;
+  }
+
+  const memberName = extractMemberName(member);
+  if (!memberName) {
+    return;
+  }
+
+  ensureModuleMemberImport({
+    moduleId,
+    moduleSymbol: targetSymbol,
+    memberName,
+    syntax: member as Syntax,
+    scope: tracker.current(),
+    ctx,
+  });
+};
+
+const extractMemberName = (expr: Expr | undefined): string | undefined => {
+  if (!expr) return undefined;
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    return expr.value;
+  }
+  if (!isForm(expr)) {
+    return undefined;
+  }
+  const head = expr.at(0);
+  if (isIdentifierAtom(head) || isInternalIdentifierAtom(head)) {
+    return head.value;
+  }
+  return undefined;
+};
+
+const ensureModuleMemberImport = ({
+  moduleId,
+  moduleSymbol,
+  memberName,
+  syntax,
+  scope,
+  ctx,
+}: {
+  moduleId: string;
+  moduleSymbol: number;
+  memberName: string;
+  syntax: Syntax;
+  scope: ScopeId;
+  ctx: BindingContext;
+}): void => {
+  const cached = ctx.moduleMembers
+    .get(moduleSymbol)
+    ?.get(memberName)
+    ?.size;
+  if (cached) {
+    return;
+  }
+  const exportTable = ctx.moduleExports.get(moduleId);
+  const exported = exportTable?.get(memberName);
+  if (!exported) {
+    ctx.diagnostics.push(
+      diagnosticFromCode({
+        code: "BD0001",
+        params: { kind: "missing-export", moduleId, target: memberName },
+        span: toSourceSpan(syntax),
+      })
+    );
+    return;
+  }
+  const symbol = declareModuleMemberImport({
+    exported,
+    syntax,
+    scope,
+    ctx,
+  });
+
+  const memberMap =
+    ctx.moduleMembers.get(moduleSymbol) ??
+    createMemberBucket(ctx.moduleMembers, moduleSymbol);
+  const members = memberMap.get(memberName) ?? new Set<number>();
+  members.add(symbol);
+  memberMap.set(memberName, members);
+};
+
+const createMemberBucket = (
+  table: ModuleMemberTable,
+  key: number
+): Map<string, Set<number>> => {
+  const bucket = new Map<string, Set<number>>();
+  table.set(key, bucket);
+  return bucket;
+};
+
+const declareModuleMemberImport = ({
+  exported,
+  syntax,
+  scope,
+  ctx,
+}: {
+  exported: ModuleExportEntry;
+  syntax: Syntax;
+  scope: ScopeId;
+  ctx: BindingContext;
+}): number => {
+  const local = ctx.symbolTable.declare({
+    name: exported.name,
+    kind: exported.kind,
+    declaredAt: syntax.syntaxId,
+    metadata: {
+      import: { moduleId: exported.moduleId, symbol: exported.symbol },
+    },
+  }, scope);
+  ctx.imports.push({
+    name: exported.name,
+    local,
+    target: { moduleId: exported.moduleId, symbol: exported.symbol },
+    visibility: "module",
+    span: toSourceSpan(syntax),
+  });
+  return local;
 };
 
 const declarePatternBindings = (

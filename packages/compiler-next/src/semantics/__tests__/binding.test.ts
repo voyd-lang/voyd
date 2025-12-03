@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline } from "../binding/binding.js";
 import { loadAst } from "./load-ast.js";
-import { isForm, isIdentifierAtom, parse } from "../../parser/index.js";
+import { isForm, isIdentifierAtom, parse, type Form } from "../../parser/index.js";
 import { toSourceSpan } from "../utils.js";
 import { modulePathToString } from "../../modules/path.js";
 import { buildModuleGraph } from "../../modules/graph.js";
@@ -287,6 +287,78 @@ describe("binding pipeline", () => {
     const staticMethods = binding.staticMethods.get(counterSymbol);
     expect(staticMethods?.get("new")?.has(staticMethod.symbol)).toBe(true);
     expect(staticMethods?.get("double")).toBeUndefined();
+  });
+
+  it("binds module-qualified calls via module imports", () => {
+    const name = "module_qualified.voyd";
+    const ast = loadAst(name);
+    const useForm = ast.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    ) as Form | undefined;
+    const span = toSourceSpan(useForm ?? ast);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const utilPath = { namespace: "src" as const, segments: ["util"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const utilId = modulePathToString(utilPath);
+    const dependency = { kind: "use" as const, path: utilPath, span };
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: name },
+      ast,
+      source: "",
+      dependencies: [dependency],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+
+    const exportedSymbol = 77;
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        utilId,
+        new Map([
+          [
+            "helper",
+            {
+              name: "helper",
+              symbol: exportedSymbol,
+              moduleId: utilId,
+              kind: "value",
+              visibility: "public",
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    const utilSymbol = symbolTable.resolve("util", symbolTable.rootScope);
+    expect(typeof utilSymbol).toBe("number");
+    if (typeof utilSymbol !== "number") return;
+
+    const helpers = binding.moduleMembers.get(utilSymbol)?.get("helper");
+    expect(helpers?.size).toBe(1);
+    const helperSymbol = helpers ? Array.from(helpers)[0] : undefined;
+    expect(typeof helperSymbol).toBe("number");
+
+    const importEntry = binding.imports.find(
+      (entry) => entry.local === helperSymbol
+    );
+    expect(importEntry?.target?.moduleId).toBe(utilId);
+    expect(importEntry?.target?.symbol).toBe(exportedSymbol);
   });
 
   it("binds trait declarations and trait targets on impl blocks", () => {

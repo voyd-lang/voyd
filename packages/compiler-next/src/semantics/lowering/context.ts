@@ -14,6 +14,7 @@ export const createLowerContext = ({
   moduleNodeId,
   overloadBySymbol: binding.overloadBySymbol,
   staticMethods: binding.staticMethods,
+  moduleMembers: binding.moduleMembers,
 });
 
 export const createLowerScopeStack = (initial: ScopeId): LowerScopeStack => {

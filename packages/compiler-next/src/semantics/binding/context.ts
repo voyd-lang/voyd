@@ -72,6 +72,7 @@ export const createBindingContext = ({
     uses: [],
     imports: [],
     staticMethods: new Map(),
+    moduleMembers: new Map(),
   };
 };
 
@@ -90,6 +91,7 @@ export const toBindingResult = (ctx: BindingContext): BindingResult => ({
   uses: ctx.uses,
   imports: ctx.imports,
   staticMethods: ctx.staticMethods,
+  moduleMembers: ctx.moduleMembers,
 });
 
 export const rememberSyntax = (
