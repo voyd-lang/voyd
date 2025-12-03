@@ -1,7 +1,8 @@
 import {
   type Expr,
   type Form,
-  IdentifierAtom,
+  type IdentifierAtom,
+  type InternalIdentifierAtom,
   type Syntax,
   formCallsInternal,
   isBoolAtom,
@@ -30,6 +31,7 @@ import {
 } from "./resolution.js";
 import { lowerTypeExpr, lowerTypeParameters } from "./type-expressions.js";
 import type {
+  IdentifierResolution,
   LowerContext,
   LowerObjectLiteralOptions,
   LowerScopeStack,
@@ -1282,7 +1284,7 @@ const resolveStaticTargetSymbol = (
 
 const extractStaticTargetIdentifier = (
   expr: Expr | undefined
-): IdentifierAtom | undefined => {
+): IdentifierAtom | InternalIdentifierAtom | undefined => {
   if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
     return expr;
   }
@@ -1290,19 +1292,19 @@ const extractStaticTargetIdentifier = (
     return undefined;
   }
   if (isIdentifierAtom(expr.first) || isInternalIdentifierAtom(expr.first)) {
-    return expr.first as IdentifierAtom;
+    return expr.first as IdentifierAtom | InternalIdentifierAtom;
   }
   if (formCallsInternal(expr, "generics")) {
     const target = expr.at(1);
     if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
-      return target as IdentifierAtom;
+      return target as IdentifierAtom | InternalIdentifierAtom;
     }
     if (
       isForm(target) &&
       (isIdentifierAtom(target.first) ||
         isInternalIdentifierAtom(target.first))
     ) {
-      return target.first as IdentifierAtom;
+      return target.first as IdentifierAtom | InternalIdentifierAtom;
     }
   }
   return undefined;

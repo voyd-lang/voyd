@@ -21,7 +21,7 @@ import { lowerImplDecl } from "../lowering/declarations.js";
 import { runLoweringPipeline } from "../lowering/lowering.js";
 import { toSourceSpan } from "../utils.js";
 import { loadAst } from "./load-ast.js";
-import type { ModuleGraph, ModuleNode } from "../modules/types.js";
+import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
 import type { ModuleExportTable } from "../modules.js";
 import { modulePathToString } from "../../modules/path.js";
 import { isForm } from "../../parser/index.js";
