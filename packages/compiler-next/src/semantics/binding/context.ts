@@ -71,6 +71,7 @@ export const createBindingContext = ({
     dependenciesBySpan,
     uses: [],
     imports: [],
+    staticMethods: new Map(),
   };
 };
 
@@ -88,6 +89,7 @@ export const toBindingResult = (ctx: BindingContext): BindingResult => ({
   diagnostics: ctx.diagnostics,
   uses: ctx.uses,
   imports: ctx.imports,
+  staticMethods: ctx.staticMethods,
 });
 
 export const rememberSyntax = (

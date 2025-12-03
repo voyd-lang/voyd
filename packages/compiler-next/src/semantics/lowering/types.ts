@@ -17,6 +17,7 @@ import type {
   BoundTrait,
   BoundImpl,
   BoundUse,
+  StaticMethodTable,
 } from "../binding/binding.js";
 import type { NodeId, OverloadSetId, ScopeId, SymbolId } from "../ids.js";
 import type { SymbolTable } from "../binder/index.js";
@@ -42,6 +43,7 @@ export interface LowerContext {
   intrinsicTypeSymbols: Map<string, SymbolId>;
   moduleNodeId: NodeId;
   overloadBySymbol: ReadonlyMap<SymbolId, OverloadSetId>;
+  staticMethods: StaticMethodTable;
 }
 
 export type IdentifierResolution =

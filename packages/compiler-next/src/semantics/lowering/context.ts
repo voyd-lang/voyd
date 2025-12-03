@@ -13,6 +13,7 @@ export const createLowerContext = ({
   intrinsicTypeSymbols: new Map(),
   moduleNodeId,
   overloadBySymbol: binding.overloadBySymbol,
+  staticMethods: binding.staticMethods,
 });
 
 export const createLowerScopeStack = (initial: ScopeId): LowerScopeStack => {

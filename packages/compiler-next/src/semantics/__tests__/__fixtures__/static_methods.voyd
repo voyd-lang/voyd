@@ -1,0 +1,12 @@
+pub obj Counter { value: i32 }
+
+impl Counter
+  fn new(value: i32) -> Counter
+    Counter { value }
+
+  fn double(self) -> i32
+    self.value * 2
+
+pub fn main() -> i32
+  let counter = Counter::new(4)
+  counter.double()

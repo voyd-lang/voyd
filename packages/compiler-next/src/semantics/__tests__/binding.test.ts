@@ -244,6 +244,51 @@ describe("binding pipeline", () => {
     }
   });
 
+  it("binds static methods to impl scopes and records them", () => {
+    const name = "static_methods.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    const impl = binding.impls[0];
+    expect(impl).toBeDefined();
+    if (!impl) return;
+
+    const implScope = impl.form
+      ? binding.scopeByNode.get(impl.form.syntaxId)
+      : undefined;
+    expect(implScope).toBeDefined();
+
+    const staticMethod = impl.methods.find(
+      (method) => symbolTable.getSymbol(method.symbol).name === "new"
+    );
+    expect(staticMethod).toBeDefined();
+    if (!staticMethod || !implScope) return;
+
+    const staticMethodRecord = symbolTable.getSymbol(staticMethod.symbol);
+    expect(staticMethodRecord.scope).toBe(implScope);
+
+    const instanceMethod = impl.methods.find(
+      (method) => symbolTable.getSymbol(method.symbol).name === "double"
+    );
+    const rootScope = symbolTable.rootScope;
+    if (instanceMethod) {
+      expect(symbolTable.getSymbol(instanceMethod.symbol).scope).toBe(
+        rootScope
+      );
+    }
+
+    const counterSymbol = symbolTable.resolve("Counter", implScope);
+    expect(typeof counterSymbol).toBe("number");
+    if (typeof counterSymbol !== "number") return;
+
+    const staticMethods = binding.staticMethods.get(counterSymbol);
+    expect(staticMethods?.get("new")?.has(staticMethod.symbol)).toBe(true);
+    expect(staticMethods?.get("double")).toBeUndefined();
+  });
+
   it("binds trait declarations and trait targets on impl blocks", () => {
     const name = "trait_area.voyd";
     const ast = loadAst(name);

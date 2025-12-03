@@ -26,6 +26,11 @@ import type {
 import type { ModuleExportTable } from "../modules.js";
 import type { SourceSpan } from "../ids.js";
 
+export type StaticMethodTable = Map<
+  SymbolId,
+  Map<string, Set<SymbolId>>
+>;
+
 export interface BindingInputs {
   moduleForm: Form;
   symbolTable: SymbolTable;
@@ -48,6 +53,7 @@ export interface BindingResult {
   diagnostics: Diagnostic[];
   uses: readonly BoundUse[];
   imports: readonly BoundImport[];
+  staticMethods: StaticMethodTable;
 }
 
 export type BoundFunction = FunctionDecl;
@@ -89,6 +95,7 @@ export interface BindingContext {
   dependenciesBySpan: Map<string, ModuleDependency[]>;
   uses: BoundUse[];
   imports: BoundImport[];
+  staticMethods: StaticMethodTable;
 }
 
 export interface BoundUse {

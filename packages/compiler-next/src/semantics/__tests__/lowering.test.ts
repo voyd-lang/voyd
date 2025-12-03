@@ -265,6 +265,64 @@ describe("lowering pipeline", () => {
     expect(callExpressions.length).toBeGreaterThan(0);
   });
 
+  it("lowers static method calls without injecting self", () => {
+    const name = "static_methods.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+    });
+
+    const counterSymbol = symbolTable.resolve("Counter", symbolTable.rootScope);
+    expect(typeof counterSymbol).toBe("number");
+    const staticNewSymbols =
+      typeof counterSymbol === "number"
+        ? binding.staticMethods.get(counterSymbol)?.get("new")
+        : undefined;
+    expect(staticNewSymbols).toBeDefined();
+    const staticNewSymbol = staticNewSymbols
+      ? Array.from(staticNewSymbols)[0]
+      : undefined;
+
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope)!;
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) return;
+
+    const mainBlock = hir.expressions.get(mainFn.body)! as HirBlockExpr;
+    const firstStmt = hir.statements.get(mainBlock.statements[0]!)!;
+    expect(firstStmt.kind).toBe("let");
+    const initializer = hir.expressions.get(
+      (firstStmt as HirLetStatement).initializer
+    )!;
+    expect(initializer.exprKind).toBe("call");
+    const staticCall = initializer as HirCallExpr;
+    expect(staticCall.args).toHaveLength(1);
+    const calleeExpr = hir.expressions.get(staticCall.callee)!;
+    expect(calleeExpr.exprKind).toBe("identifier");
+    if (staticNewSymbol && calleeExpr.exprKind === "identifier") {
+      expect((calleeExpr as HirIdentifierExpr).symbol).toBe(staticNewSymbol);
+    }
+  });
+
   it("lowers traits and their default methods", () => {
     const name = "trait_area.voyd";
     const ast = loadAst(name);

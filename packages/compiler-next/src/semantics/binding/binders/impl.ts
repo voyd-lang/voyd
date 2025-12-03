@@ -2,9 +2,9 @@ import { type Expr, isIdentifierAtom, isForm } from "../../../parser/index.js";
 import { rememberSyntax } from "../context.js";
 import type { TypeParameterDecl, TraitDecl } from "../../decls.js";
 import type { BindingContext } from "../types.js";
-import type { ParsedImplDecl } from "../parsing.js";
+import type { ParsedFunctionDecl, ParsedImplDecl } from "../parsing.js";
 import { parseFunctionDecl } from "../parsing.js";
-import type { ScopeId } from "../../ids.js";
+import type { ScopeId, SymbolId } from "../../ids.js";
 import { bindFunctionDecl } from "./function.js";
 import {
   makeParsedFunctionFromTraitMethod,
@@ -13,6 +13,27 @@ import {
 } from "./trait.js";
 import { resolveObjectDecl } from "./object.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
+
+const isStaticMethod = (fn: ParsedFunctionDecl): boolean =>
+  fn.signature.params.length === 0 ||
+  fn.signature.params[0]?.name !== "self";
+
+const recordStaticMethod = ({
+  target,
+  methodSymbol,
+  ctx,
+}: {
+  target: SymbolId;
+  methodSymbol: SymbolId;
+  ctx: BindingContext;
+}): void => {
+  const name = ctx.symbolTable.getSymbol(methodSymbol).name;
+  const bucket = ctx.staticMethods.get(target) ?? new Map();
+  const methods = bucket.get(name) ?? new Set<SymbolId>();
+  methods.add(methodSymbol);
+  bucket.set(name, methods);
+  ctx.staticMethods.set(target, bucket);
+};
 
 export const bindImplDecl = (
   decl: ParsedImplDecl,
@@ -54,6 +75,8 @@ export const bindImplDecl = (
     ctx,
     scope: implScope,
   });
+  const implTargetSymbol = resolveObjectDecl(decl.target, ctx, implScope)
+    ?.symbol;
   tracker.enterScope(implScope, () => {
     decl.typeParameters.forEach((param) => {
       rememberSyntax(param, ctx);
@@ -81,6 +104,39 @@ export const bindImplDecl = (
       typeParameters.push({ name, symbol: paramSymbol });
     });
 
+    const bindMethod = (parsedFn: ParsedFunctionDecl) => {
+      const staticMethod = isStaticMethod(parsedFn);
+      const metadata: Record<string, unknown> = {
+        entity: "function",
+        impl: implSymbol,
+      };
+      if (staticMethod) {
+        metadata.static = true;
+        if (typeof implTargetSymbol === "number") {
+          metadata.implTarget = implTargetSymbol;
+        }
+      }
+
+      const method = bindFunctionDecl(parsedFn, ctx, tracker, {
+        declarationScope: staticMethod
+          ? implScope
+          : ctx.symbolTable.rootScope,
+        scopeParent: implScope,
+        metadata,
+        selfTypeExpr: staticMethod ? undefined : decl.target,
+      });
+
+      if (staticMethod && typeof implTargetSymbol === "number") {
+        recordStaticMethod({
+          target: implTargetSymbol,
+          methodSymbol: method.symbol,
+          ctx,
+        });
+      }
+
+      return method;
+    };
+
     decl.body.rest.forEach((entry) => {
       if (!isForm(entry)) {
         return;
@@ -89,13 +145,7 @@ export const bindImplDecl = (
       if (!parsedFn) {
         throw new Error("impl body supports only function declarations");
       }
-      const method = bindFunctionDecl(parsedFn, ctx, tracker, {
-        declarationScope: ctx.symbolTable.rootScope,
-        scopeParent: implScope,
-        metadata: { entity: "function", impl: implSymbol },
-        selfTypeExpr: decl.target,
-      });
-      methods.push(method);
+      methods.push(bindMethod(parsedFn));
     });
 
     if (decl.trait) {
@@ -116,13 +166,7 @@ export const bindImplDecl = (
           const parsed = makeParsedFunctionFromTraitMethod(traitMethod, {
             typeParamSubstitutions: traitTypeParamMap,
           });
-          const method = bindFunctionDecl(parsed, ctx, tracker, {
-            declarationScope: ctx.symbolTable.rootScope,
-            scopeParent: implScope,
-            metadata: { entity: "function", impl: implSymbol },
-            selfTypeExpr: decl.target,
-          });
-          methods.push(method);
+          methods.push(bindMethod(parsed));
         });
       }
     }
