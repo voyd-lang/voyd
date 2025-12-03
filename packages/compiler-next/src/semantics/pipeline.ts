@@ -62,6 +62,14 @@ export const semanticsPipeline = (
     module,
     graph,
     moduleExports: exports ?? new Map(),
+    dependencies: dependencies
+      ? new Map(
+          Array.from(dependencies.entries()).map(([id, entry]) => [
+            id,
+            entry.binding,
+          ])
+        )
+      : undefined,
   });
   ensureNoBindingErrors(binding);
 

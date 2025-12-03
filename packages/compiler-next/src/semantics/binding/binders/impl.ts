@@ -126,12 +126,20 @@ export const bindImplDecl = (
         selfTypeExpr: staticMethod ? undefined : decl.target,
       });
 
-      if (staticMethod && typeof implTargetSymbol === "number") {
-        recordStaticMethod({
-          target: implTargetSymbol,
-          methodSymbol: method.symbol,
-          ctx,
-        });
+      if (staticMethod) {
+        if (typeof implTargetSymbol === "number") {
+          recordStaticMethod({
+            target: implTargetSymbol,
+            methodSymbol: method.symbol,
+            ctx,
+          });
+        } else {
+          ctx.pendingStaticMethods.push({
+            targetExpr: decl.target,
+            scope: implScope,
+            methodSymbol: method.symbol,
+          });
+        }
       }
 
       return method;
@@ -252,4 +260,25 @@ const buildTraitTypeParamMap = (
     }
   });
   return substitutions.size > 0 ? substitutions : undefined;
+};
+
+export const flushPendingStaticMethods = (ctx: BindingContext): void => {
+  if (ctx.pendingStaticMethods.length === 0) {
+    return;
+  }
+
+  ctx.pendingStaticMethods.forEach(({ targetExpr, scope, methodSymbol }) => {
+    const targetDecl = resolveObjectDecl(targetExpr, ctx, scope);
+    const targetSymbol = targetDecl?.symbol;
+    if (typeof targetSymbol !== "number") {
+      return;
+    }
+    recordStaticMethod({
+      target: targetSymbol,
+      methodSymbol,
+      ctx,
+    });
+  });
+
+  ctx.pendingStaticMethods = [];
 };

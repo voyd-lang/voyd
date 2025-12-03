@@ -101,4 +101,26 @@ describe("static access e2e", () => {
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(41);
   });
+
+  it("invokes static methods on imported types", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const utilPath = `${root}${sep}util.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("static_method_import_main.voyd"),
+      [utilPath]: loadFixture("static_method_import_util.voyd"),
+    });
+
+    const result = await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(41);
+  });
 });

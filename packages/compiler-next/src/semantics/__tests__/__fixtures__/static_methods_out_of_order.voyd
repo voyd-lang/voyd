@@ -1,0 +1,8 @@
+impl Counter
+  fn create() -> Counter
+    Counter { value: 1 }
+
+pub obj Counter { value: i32 }
+
+pub fn main() -> Counter
+  Counter::create()

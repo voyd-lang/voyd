@@ -883,7 +883,7 @@ const lowerStaticAccessExpr = (
     return moduleAccess;
   }
 
-  return lowerCall(form, ctx, scopes);
+  throw new Error("static access target must be a type or module");
 };
 
 const lowerModuleAccess = ({

@@ -327,6 +327,32 @@ describe("lowering pipeline", () => {
     }
   });
 
+  it("fails when lowering static access with an unknown target", () => {
+    const name = "bad_static_access.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    expect(() =>
+      runLoweringPipeline({
+        builder,
+        binding,
+        moduleNodeId: ast.syntaxId,
+      })
+    ).toThrow(/static access target/);
+  });
+
   it("lowers module-qualified calls", () => {
     const name = "module_qualified.voyd";
     const ast = loadAst(name);

@@ -289,6 +289,22 @@ describe("binding pipeline", () => {
     expect(staticMethods?.get("double")).toBeUndefined();
   });
 
+  it("records static methods even when the impl appears before the object", () => {
+    const name = "static_methods_out_of_order.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const counterSymbol = symbolTable.resolve("Counter", symbolTable.rootScope);
+    expect(typeof counterSymbol).toBe("number");
+    if (typeof counterSymbol !== "number") return;
+
+    const staticMethods = binding.staticMethods.get(counterSymbol);
+    const create = staticMethods?.get("create");
+    expect(create?.size).toBe(1);
+  });
+
   it("binds module-qualified calls via module imports", () => {
     const name = "module_qualified.voyd";
     const ast = loadAst(name);

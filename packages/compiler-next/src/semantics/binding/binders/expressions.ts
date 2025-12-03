@@ -15,7 +15,7 @@ import { diagnosticFromCode } from "../../../diagnostics/index.js";
 import { rememberSyntax } from "../context.js";
 import { reportOverloadNameCollision } from "../overloads.js";
 import type { BindingContext } from "../types.js";
-import type { ScopeId } from "../../ids.js";
+import type { ScopeId, SymbolId } from "../../ids.js";
 import { parseLambdaSignature } from "../../lambda.js";
 import { ensureForm } from "./utils.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
@@ -322,6 +322,11 @@ const bindNamespaceAccess = (
   bindExpr(target, ctx, tracker);
   bindExpr(member, ctx, tracker);
 
+  const memberName = extractMemberName(member);
+  if (!memberName) {
+    return;
+  }
+
   const targetName =
     isIdentifierAtom(target) || isInternalIdentifierAtom(target)
       ? target.value
@@ -335,34 +340,110 @@ const bindNamespaceAccess = (
   }
   const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
   if (
-    targetRecord.kind !== "module" ||
-    !targetRecord.metadata ||
-    !("import" in targetRecord.metadata)
+    targetRecord.kind === "module" &&
+    targetRecord.metadata &&
+    "import" in targetRecord.metadata
   ) {
+    const importMeta = targetRecord.metadata as {
+      import?: { moduleId?: string };
+    };
+    const moduleId = importMeta.import?.moduleId;
+    if (!moduleId) {
+      return;
+    }
+
+    ensureModuleMemberImport({
+      moduleId,
+      moduleSymbol: targetSymbol,
+      memberName,
+      syntax: member as Syntax,
+      scope: tracker.current(),
+      ctx,
+    });
     return;
   }
 
-  const importMeta = targetRecord.metadata as {
-    import?: { moduleId?: string };
-  };
-  const moduleId = importMeta.import?.moduleId;
-  if (!moduleId) {
+  if (targetRecord.kind === "type") {
+    ensureStaticMethodImport({
+      targetSymbol,
+      memberName,
+      syntax: member as Syntax,
+      scope: tracker.current(),
+      ctx,
+    });
+  }
+};
+
+const ensureStaticMethodImport = ({
+  targetSymbol,
+  memberName,
+  syntax,
+  scope,
+  ctx,
+}: {
+  targetSymbol: number;
+  memberName: string;
+  syntax: Syntax;
+  scope: ScopeId;
+  ctx: BindingContext;
+}): void => {
+  const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
+  const importMeta = targetRecord.metadata as
+    | { import?: { moduleId?: string; symbol?: number } }
+    | undefined;
+  const moduleId = importMeta?.import?.moduleId;
+  const exportedSymbol = importMeta?.import?.symbol;
+  if (!moduleId || typeof exportedSymbol !== "number") {
     return;
   }
 
-  const memberName = extractMemberName(member);
-  if (!memberName) {
+  const dependency = ctx.dependencies.get(moduleId);
+  const staticTable = dependency?.staticMethods.get(exportedSymbol);
+  const methodSymbols = staticTable?.get(memberName);
+  if (!dependency || !methodSymbols || methodSymbols.size === 0) {
     return;
   }
 
-  ensureModuleMemberImport({
-    moduleId,
-    moduleSymbol: targetSymbol,
-    memberName,
-    syntax: member as Syntax,
-    scope: tracker.current(),
-    ctx,
+  const existing = ctx.staticMethods.get(targetSymbol)?.get(memberName);
+  if (existing?.size) {
+    return;
+  }
+
+  const imported: SymbolId[] = [];
+  methodSymbols.forEach((methodSymbol) => {
+    const fn = dependency.functions.find(
+      (entry) => entry.symbol === methodSymbol
+    );
+    if (!fn || fn.visibility !== "public") {
+      return;
+    }
+    const record = dependency.symbolTable.getSymbol(methodSymbol);
+    const local = ctx.symbolTable.declare(
+      {
+        name: memberName,
+        kind: record.kind,
+        declaredAt: syntax.syntaxId,
+        metadata: { import: { moduleId, symbol: methodSymbol } },
+      },
+      scope
+    );
+    ctx.imports.push({
+      name: memberName,
+      local,
+      target: { moduleId, symbol: methodSymbol },
+      visibility: "module",
+      span: toSourceSpan(syntax),
+    });
+    imported.push(local);
   });
+
+  if (imported.length === 0) {
+    return;
+  }
+
+  const bucket = ctx.staticMethods.get(targetSymbol) ?? new Map();
+  bucket.set(memberName, new Set(imported));
+  ctx.staticMethods.set(targetSymbol, bucket);
 };
 
 const extractMemberName = (expr: Expr | undefined): string | undefined => {

@@ -42,6 +42,7 @@ export interface BindingInputs {
   module?: ModuleNode;
   graph?: ModuleGraph;
   moduleExports?: Map<string, ModuleExportTable>;
+  dependencies?: Map<string, BindingResult>;
 }
 
 export interface BindingResult {
@@ -60,6 +61,7 @@ export interface BindingResult {
   imports: readonly BoundImport[];
   staticMethods: StaticMethodTable;
   moduleMembers: ModuleMemberTable;
+  dependencies: Map<string, BindingResult>;
 }
 
 export type BoundFunction = FunctionDecl;
@@ -99,10 +101,12 @@ export interface BindingContext {
   modulePath: ModulePath;
   moduleExports: Map<string, ModuleExportTable>;
   dependenciesBySpan: Map<string, ModuleDependency[]>;
+  dependencies: Map<string, BindingResult>;
   uses: BoundUse[];
   imports: BoundImport[];
   staticMethods: StaticMethodTable;
   moduleMembers: ModuleMemberTable;
+  pendingStaticMethods: PendingStaticMethod[];
 }
 
 export interface BoundUse {
@@ -133,4 +137,10 @@ export interface BoundImport {
 export interface ImportedTarget {
   moduleId: string;
   symbol: SymbolId;
+}
+
+export interface PendingStaticMethod {
+  targetExpr: Expr;
+  scope: ScopeId;
+  methodSymbol: SymbolId;
 }

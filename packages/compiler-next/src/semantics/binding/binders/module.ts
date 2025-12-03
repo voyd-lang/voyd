@@ -19,7 +19,7 @@ import { bindTypeAlias } from "./type-alias.js";
 import {
   bindTraitDecl,
 } from "./trait.js";
-import { bindImplDecl } from "./impl.js";
+import { bindImplDecl, flushPendingStaticMethods } from "./impl.js";
 import type {
   BindingContext,
   BoundUseEntry,
@@ -91,6 +91,8 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
       "unsupported top-level form; expected a function or type declaration"
     );
   }
+
+  flushPendingStaticMethods(ctx);
 
   if (tracker.depth() !== 1) {
     throw new Error("binder scope stack imbalance after traversal");

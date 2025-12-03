@@ -1,0 +1,4 @@
+use util::Counter
+
+pub fn main() -> i32
+  Counter::make(40)
