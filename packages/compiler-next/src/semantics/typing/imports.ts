@@ -476,7 +476,8 @@ const findExport = (
   dependency: DependencySemantics
 ): ModuleExportEntry | undefined =>
   Array.from(dependency.exports.values()).find(
-    (entry) => entry.symbol === symbol
+    (entry) =>
+      entry.symbol === symbol || entry.symbols?.some((sym) => sym === symbol)
   );
 
 const makeDependencyContext = (

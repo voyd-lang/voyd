@@ -21,6 +21,10 @@ import { lowerImplDecl } from "../lowering/declarations.js";
 import { runLoweringPipeline } from "../lowering/lowering.js";
 import { toSourceSpan } from "../utils.js";
 import { loadAst } from "./load-ast.js";
+import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
+import type { ModuleExportTable } from "../modules.js";
+import { modulePathToString } from "../../modules/path.js";
+import { isForm } from "../../parser/index.js";
 
 describe("lowering pipeline", () => {
   it("lowers the fib sample module into HIR", () => {
@@ -263,6 +267,188 @@ describe("lowering pipeline", () => {
     );
 
     expect(callExpressions.length).toBeGreaterThan(0);
+  });
+
+  it("lowers static method calls without injecting self", () => {
+    const name = "static_methods.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+    });
+
+    const counterSymbol = symbolTable.resolve("Counter", symbolTable.rootScope);
+    expect(typeof counterSymbol).toBe("number");
+    const staticNewSymbols =
+      typeof counterSymbol === "number"
+        ? binding.staticMethods.get(counterSymbol)?.get("new")
+        : undefined;
+    expect(staticNewSymbols).toBeDefined();
+    const staticNewSymbol = staticNewSymbols
+      ? Array.from(staticNewSymbols)[0]
+      : undefined;
+
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope)!;
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) return;
+
+    const mainBlock = hir.expressions.get(mainFn.body)! as HirBlockExpr;
+    const firstStmt = hir.statements.get(mainBlock.statements[0]!)!;
+    expect(firstStmt.kind).toBe("let");
+    const initializer = hir.expressions.get(
+      (firstStmt as HirLetStatement).initializer
+    )!;
+    expect(initializer.exprKind).toBe("call");
+    const staticCall = initializer as HirCallExpr;
+    expect(staticCall.args).toHaveLength(1);
+    const calleeExpr = hir.expressions.get(staticCall.callee)!;
+    expect(calleeExpr.exprKind).toBe("identifier");
+    if (staticNewSymbol && calleeExpr.exprKind === "identifier") {
+      expect((calleeExpr as HirIdentifierExpr).symbol).toBe(staticNewSymbol);
+    }
+  });
+
+  it("fails when lowering static access with an unknown target", () => {
+    const name = "bad_static_access.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    expect(() =>
+      runLoweringPipeline({
+        builder,
+        binding,
+        moduleNodeId: ast.syntaxId,
+      })
+    ).toThrow(/static access target/);
+  });
+
+  it("lowers module-qualified calls", () => {
+    const name = "module_qualified.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const utilPath = { namespace: "src" as const, segments: ["util"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const utilId = modulePathToString(utilPath);
+    const useForm = ast.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    );
+    const dependency = {
+      kind: "use" as const,
+      path: utilPath,
+      span: toSourceSpan((useForm as any) ?? ast),
+    };
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: name },
+      ast,
+      source: "",
+      dependencies: [dependency],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+
+    const exportedSymbol = 88;
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        utilId,
+        new Map([
+          [
+            "helper",
+            {
+              name: "helper",
+              symbol: exportedSymbol,
+              moduleId: utilId,
+              kind: "value",
+              visibility: "public",
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    const utilSymbol = symbolTable.resolve("util", symbolTable.rootScope);
+    const helperSymbol =
+      typeof utilSymbol === "number"
+        ? binding.moduleMembers.get(utilSymbol)?.get("helper")
+        : undefined;
+    const helper = helperSymbol ? Array.from(helperSymbol)[0] : undefined;
+    expect(typeof helper).toBe("number");
+
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+    });
+
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope)!;
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn || typeof helper !== "number") return;
+
+    const block = hir.expressions.get(mainFn.body) as HirBlockExpr;
+    const call = hir.expressions.get(block.value!) as HirCallExpr;
+    const callee = hir.expressions.get(call.callee) as HirIdentifierExpr;
+    expect(callee.symbol).toBe(helper);
   });
 
   it("lowers traits and their default methods", () => {

@@ -19,6 +19,7 @@ export const createBindingContext = ({
   module,
   graph,
   moduleExports,
+  dependencies,
 }: BindingInputs): BindingContext => {
   const moduleNode =
     module ??
@@ -41,6 +42,7 @@ export const createBindingContext = ({
       diagnostics: [],
     } as ModuleGraph);
   const exportTables = moduleExports ?? new Map<string, ModuleExportTable>();
+  const dependencyBindings = dependencies ?? new Map<string, BindingResult>();
 
   const decls = new DeclTable();
   const dependenciesBySpan = new Map<string, ModuleDependency[]>();
@@ -66,12 +68,17 @@ export const createBindingContext = ({
     nextModuleIndex: 0,
     module: moduleNode,
     graph: moduleGraph,
-    modulePath: moduleNode.path,
-    moduleExports: exportTables,
-    dependenciesBySpan,
-    uses: [],
-    imports: [],
-  };
+  modulePath: moduleNode.path,
+  moduleExports: exportTables,
+  dependenciesBySpan,
+  dependencies: dependencyBindings,
+  uses: [],
+  imports: [],
+  staticMethods: new Map(),
+  moduleMembers: new Map(),
+  pendingStaticMethods: [],
+  importedOverloadOptions: new Map(),
+};
 };
 
 export const toBindingResult = (ctx: BindingContext): BindingResult => ({
@@ -88,6 +95,10 @@ export const toBindingResult = (ctx: BindingContext): BindingResult => ({
   diagnostics: ctx.diagnostics,
   uses: ctx.uses,
   imports: ctx.imports,
+  staticMethods: ctx.staticMethods,
+  moduleMembers: ctx.moduleMembers,
+  dependencies: ctx.dependencies,
+  importedOverloadOptions: ctx.importedOverloadOptions,
 });
 
 export const rememberSyntax = (

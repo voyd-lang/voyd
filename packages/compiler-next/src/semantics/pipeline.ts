@@ -62,6 +62,14 @@ export const semanticsPipeline = (
     module,
     graph,
     moduleExports: exports ?? new Map(),
+    dependencies: dependencies
+      ? new Map(
+          Array.from(dependencies.entries()).map(([id, entry]) => [
+            id,
+            entry.binding,
+          ])
+        )
+      : undefined,
   });
   ensureNoBindingErrors(binding);
 
@@ -87,7 +95,10 @@ export const semanticsPipeline = (
   const typing = runTypingPipeline({
     symbolTable,
     hir,
-    overloads: collectOverloadOptions(binding.overloads),
+    overloads: collectOverloadOptions(
+      binding.overloads,
+      binding.importedOverloadOptions
+    ),
     decls: binding.decls,
     imports: binding.imports,
     moduleId: module.id,
@@ -108,7 +119,12 @@ export const semanticsPipeline = (
     hir,
     typing,
     moduleId: module.id,
-    exports: collectModuleExports({ hir, symbolTable, moduleId: module.id }),
+    exports: collectModuleExports({
+      hir,
+      symbolTable,
+      moduleId: module.id,
+      binding,
+    }),
     diagnostics,
   };
 };
@@ -124,31 +140,50 @@ const ensureNoBindingErrors = (binding: BindingResult): void => {
 };
 
 const collectOverloadOptions = (
-  overloads: ReadonlyMap<OverloadSetId, BoundOverloadSet>
-): Map<OverloadSetId, readonly SymbolId[]> =>
-  new Map(
+  overloads: ReadonlyMap<OverloadSetId, BoundOverloadSet>,
+  imported?: ReadonlyMap<OverloadSetId, readonly SymbolId[]>
+): Map<OverloadSetId, readonly SymbolId[]> => {
+  const entries = new Map<OverloadSetId, readonly SymbolId[]>(
     Array.from(overloads.entries()).map(([id, set]) => [
       id,
       set.functions.map((fn) => fn.symbol),
     ])
   );
+  if (imported) {
+    imported.forEach((symbols, id) => {
+      entries.set(id, symbols);
+    });
+  }
+  return entries;
+};
 
 const collectModuleExports = ({
   hir,
   symbolTable,
   moduleId,
+  binding,
 }: {
   hir: HirGraph;
   symbolTable: SymbolTable;
   moduleId: string;
+  binding: BindingResult;
 }): ModuleExportTable => {
   const table: ModuleExportTable = new Map();
   hir.module.exports.forEach((entry) => {
     const record = symbolTable.getSymbol(entry.symbol);
     const name = entry.alias ?? record.name;
+    const existing = table.get(name);
+    const symbols = existing
+      ? new Set(existing.symbols ?? [existing.symbol])
+      : new Set<SymbolId>();
+    symbols.add(entry.symbol);
+    const overloadSet =
+      binding.overloadBySymbol.get(entry.symbol) ?? existing?.overloadSet;
     table.set(name, {
       name,
-      symbol: entry.symbol,
+      symbol: existing?.symbol ?? entry.symbol,
+      symbols: Array.from(symbols),
+      overloadSet,
       moduleId,
       kind: record.kind,
       visibility: entry.visibility,

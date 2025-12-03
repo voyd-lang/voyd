@@ -1,4 +1,4 @@
-import type { Form, Syntax } from "../../parser/index.js";
+import type { Expr, Form, Syntax } from "../../parser/index.js";
 import type { SymbolRecord, SymbolTable } from "../binder/index.js";
 import type {
   Diagnostic,
@@ -26,12 +26,23 @@ import type {
 import type { ModuleExportTable } from "../modules.js";
 import type { SourceSpan } from "../ids.js";
 
+export type StaticMethodTable = Map<
+  SymbolId,
+  Map<string, Set<SymbolId>>
+>;
+
+export type ModuleMemberTable = Map<
+  SymbolId,
+  Map<string, Set<SymbolId>>
+>;
+
 export interface BindingInputs {
   moduleForm: Form;
   symbolTable: SymbolTable;
   module?: ModuleNode;
   graph?: ModuleGraph;
   moduleExports?: Map<string, ModuleExportTable>;
+  dependencies?: Map<string, BindingResult>;
 }
 
 export interface BindingResult {
@@ -48,6 +59,10 @@ export interface BindingResult {
   diagnostics: Diagnostic[];
   uses: readonly BoundUse[];
   imports: readonly BoundImport[];
+  staticMethods: StaticMethodTable;
+  moduleMembers: ModuleMemberTable;
+  dependencies: Map<string, BindingResult>;
+  importedOverloadOptions: Map<OverloadSetId, readonly SymbolId[]>;
 }
 
 export type BoundFunction = FunctionDecl;
@@ -87,8 +102,13 @@ export interface BindingContext {
   modulePath: ModulePath;
   moduleExports: Map<string, ModuleExportTable>;
   dependenciesBySpan: Map<string, ModuleDependency[]>;
+  dependencies: Map<string, BindingResult>;
   uses: BoundUse[];
   imports: BoundImport[];
+  staticMethods: StaticMethodTable;
+  moduleMembers: ModuleMemberTable;
+  pendingStaticMethods: PendingStaticMethod[];
+  importedOverloadOptions: Map<OverloadSetId, readonly SymbolId[]>;
 }
 
 export interface BoundUse {
@@ -119,4 +139,10 @@ export interface BoundImport {
 export interface ImportedTarget {
   moduleId: string;
   symbol: SymbolId;
+}
+
+export interface PendingStaticMethod {
+  targetExpr: Expr;
+  scope: ScopeId;
+  methodSymbol: SymbolId;
 }

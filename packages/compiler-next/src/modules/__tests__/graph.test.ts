@@ -177,6 +177,6 @@ describe("buildModuleGraph", () => {
     expect(diagnostic.phase).toBe("module-graph");
     expect(diagnostic.severity).toBe("error");
     expect(diagnostic.span.file).toContain("main.voyd");
-    expect(diagnostic.message).toMatch(/util::missing/);
+    expect(diagnostic.message).toMatch(/src::util/);
   });
 });

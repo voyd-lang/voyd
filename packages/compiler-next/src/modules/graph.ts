@@ -14,6 +14,7 @@ import {
   modulePathToString,
   resolveModuleFile,
 } from "./path.js";
+import { parseUsePaths } from "./use-path.js";
 import { moduleDiagnosticToDiagnostic } from "./diagnostics.js";
 import type {
   ModuleDependency,
@@ -191,8 +192,13 @@ const collectModuleInfo = ({
 
     const usePath = parseUse(entry);
     if (usePath) {
-      usePath.paths
-        .map((path) => resolveModuleRequest(path, modulePath))
+      usePath.entries
+        .map((entryPath) =>
+          resolveModuleRequest(
+            { segments: entryPath.moduleSegments, span: entryPath.span },
+            modulePath
+          )
+        )
         .forEach((path) => {
           if (!path.segments.length && !path.packageName) return;
           dependencies.push({
@@ -206,8 +212,14 @@ const collectModuleInfo = ({
 
     const exported = parseExportMod(entry);
     if (exported) {
-      exported.paths
-        .map((path) => resolveModuleRequest(path, modulePath, { anchorToSelf: true }))
+      exported.entries
+        .map((entryPath) =>
+          resolveModuleRequest(
+            { segments: entryPath.path, span: entryPath.span },
+            modulePath,
+            { anchorToSelf: true }
+          )
+        )
         .forEach((path) => {
           if (!path.segments.length && !path.packageName) return;
           dependencies.push({
@@ -236,10 +248,11 @@ type ModuleRequest = {
 };
 
 const parseUse = (form: Form):
-  | { paths: ModuleRequest[]; span?: SourceSpan }
+  | { entries: ReturnType<typeof parseUsePaths>; span?: SourceSpan }
   | undefined => {
   if (form.calls("use")) {
-    return { paths: parsePathExprList(form.at(1)), span: toSourceSpan(form) };
+    const span = toSourceSpan(form);
+    return { entries: parseUsePaths(form.at(1), span), span };
   }
 
   const keyword = form.at(1);
@@ -248,14 +261,15 @@ const parseUse = (form: Form):
     isIdentifierAtom(keyword) &&
     keyword.value === "use"
   ) {
-    return { paths: parsePathExprList(form.at(2)), span: toSourceSpan(form) };
+    const span = toSourceSpan(form);
+    return { entries: parseUsePaths(form.at(2), span), span };
   }
 
   return undefined;
 };
 
 const parseExportMod = (form: Form):
-  | { paths: ModuleRequest[]; span?: SourceSpan }
+  | { entries: ReturnType<typeof parseUsePaths>; span?: SourceSpan }
   | undefined => {
   const isPub = form.calls("pub");
   const keywordIndex = isPub ? 1 : 0;
@@ -274,9 +288,10 @@ const parseExportMod = (form: Form):
   }
 
   const pathExpr = form.calls("mod") ? form.at(1) : form.at(keywordIndex + 1);
-  const paths = pathExpr ? parsePathExprList(pathExpr) : [];
+  const span = toSourceSpan(form);
+  const entries = pathExpr ? parseUsePaths(pathExpr, span) : [];
 
-  return { paths, span: toSourceSpan(form) };
+  return { entries, span };
 };
 
 type InlineModuleTree = {
@@ -350,52 +365,6 @@ const toModuleAst = (block: Form): Form => {
 
 const sliceSource = (source: string, span: SourceSpan): string =>
   source.slice(span.start, span.end);
-
-const parsePathExpr = (expr: Expr | undefined): ModuleRequest => {
-  const [first] = parsePathExprList(expr);
-  return first ?? { segments: [] };
-};
-
-const parsePathExprList = (expr: Expr | undefined): ModuleRequest[] => {
-  if (!expr) return [];
-  if (isIdentifierAtom(expr)) {
-    return [{ segments: [expr.value] }];
-  }
-  if (!isForm(expr)) return [];
-
-  if (expr.calls("::")) {
-    const left = parsePathExprList(expr.at(1));
-    const right = parsePathExprList(expr.at(2));
-    return combineRequests(left, right);
-  }
-
-  if (expr.calls("as")) {
-    return parsePathExprList(expr.at(1));
-  }
-
-  if (expr.calls("object_literal") || expr.callsInternal("object_literal")) {
-    return expr.rest.flatMap((entry) => parsePathExprList(entry));
-  }
-
-  return [];
-};
-
-const combineRequests = (
-  left: ModuleRequest[],
-  right: ModuleRequest[]
-): ModuleRequest[] => {
-  if (!left.length) return right;
-  if (!right.length) return left;
-
-  return left.flatMap((lhs) =>
-    right.map((rhs) => ({
-      segments: [...lhs.segments, ...rhs.segments],
-      namespace: lhs.namespace ?? rhs.namespace,
-      packageName: lhs.packageName ?? rhs.packageName,
-      span: lhs.span ?? rhs.span,
-    }))
-  );
-};
 
 const resolveModuleRequest = (
   request: ModuleRequest,

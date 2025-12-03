@@ -196,17 +196,28 @@ obj Animal {
 let me = Animal { name: "John", id: 1 }
 ```
 
-You can add a custom initializer by defining a function with the same name as
-the object that accepts different arguments.
+You can add a custom initializers by defining static init methods
 
 ```voyd
 obj Animal {
-  id: i32
+  id: String
   name: String
 }
 
-fn Animal({ name: String }) -> Animal
-  Animal { id: genId(), name }
+impl Animal
+  pub fn init({ name: String })
+    Animal { id: uuid(), name }
+
+  pub fn init({ nombre: String })
+    Animal { name: nombre }
+
+  pub fn init(name: String)
+    Animal { name }
+
+// All these are now valid ways of initializing Animal
+Animal { name: "frog" }
+Animal { nombre: "frog" }
+Animal("frog")
 ```
 
 ## Methods

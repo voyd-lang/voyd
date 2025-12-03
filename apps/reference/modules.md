@@ -29,7 +29,9 @@ src/math/
 ```
 
 If a directory exists with the module name, every file inside that directory becomes a submodule.
-There is **no `mod.voyd` or `index.voyd`** special file.
+
+Package root: `pkg.voyd` is the package entry that defines what is exported to other packages (via `pub use` / top-level `pub` declarations). Other modules are normal.
+If `pkg.voyd` defines `pub fn main`, that function is the executable entry point; otherwise the package is a library.
 
 ---
 
@@ -171,32 +173,63 @@ use utils::goodbye::jupiter
 
 # **Visibility**
 
-Voyd has three visibility levels:
+Voyd is safe-by-default.
 
-| Keyword    | Meaning                                                           |
-| ---------- | ----------------------------------------------------------------- |
-| **(none)** | Private to the defining module                                    |
-| **api**    | Public inside the containing package, but not exported outside it |
-| **pub**    | Fully public and exportable everywhere                            |
+| Marker     | Meaning                                          |
+| ---------- | ------------------------------------------------ |
+| **(none)** | Private to the defining module                   |
+| **pub**    | Package-visible (any module in the same package) |
 
-### **Examples**
+Public API (visible to other packages) comes only from `pkg.voyd` exports.
+
+Members (the methods and fields of a type) have their own markers for added
+safety
+
+| Marker     | Meaning                                                    |
+| ---------- | ---------------------------------------------------------- |
+| **pri**    | Private to the type, only accessible from internal methods |
+| **(none)** | Package visible when parent type is `pub`                  |
+| **api**    | Public API visible                                         |
+
+Note that even if a type is exported from `pkg.voyd` only members marked with
+`api` will be visible to other packages.
+
+### **Examples (top-level)**
 
 ```voyd
-pub fn public_func()     // Available to any module or package
-api fn package_func()    // Only inside this package
+pub fn package_func()    // Available to any module in the same package
 fn private_func()        // Only inside this file/module
 ```
 
-For objects:
+### **Examples (objects)**
 
 ```voyd
 pub obj Vec {
-  api x: i32   // visible within the package
-  y: i32       // private
-  #z: i32      // explicitly private
+  api x: i32   // exportable field (still package-visible internally)
+  y: i32       // package-visible internally
+  pri z: i32   // explicitly private to the object
 }
+
+impl Vec
+  api fn init(fill: i32)
+    Vec { x: fill, y: fill, z: fill }
 ```
 
+To expose `Vec` to other export them from `pkg.voyd`:
+
+```voyd
+// my_lib/src/pkg.voyd
+pub use src::vec::Vec
+```
+
+```voyd
+// my_app/src/pkg.voyd
+use pkg::my_lib::Vec
+
+pub fn main()
+  let v = Vec(1)
+  v.x // Ok, x is part of the api
+  v.y // Error, y is not part of the API
 ---
 
 # **Exporting From a Module**

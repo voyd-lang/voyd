@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline } from "../binding/binding.js";
 import { loadAst } from "./load-ast.js";
-import { isForm, isIdentifierAtom, parse } from "../../parser/index.js";
+import { isForm, isIdentifierAtom, parse, type Form } from "../../parser/index.js";
 import { toSourceSpan } from "../utils.js";
 import { modulePathToString } from "../../modules/path.js";
 import { buildModuleGraph } from "../../modules/graph.js";
@@ -242,6 +242,139 @@ describe("binding pipeline", () => {
     if (implScope) {
       expect(symbolTable.getScope(implScope).kind).toBe("impl");
     }
+  });
+
+  it("binds static methods to impl scopes and records them", () => {
+    const name = "static_methods.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    const impl = binding.impls[0];
+    expect(impl).toBeDefined();
+    if (!impl) return;
+
+    const implScope = impl.form
+      ? binding.scopeByNode.get(impl.form.syntaxId)
+      : undefined;
+    expect(implScope).toBeDefined();
+
+    const staticMethod = impl.methods.find(
+      (method) => symbolTable.getSymbol(method.symbol).name === "new"
+    );
+    expect(staticMethod).toBeDefined();
+    if (!staticMethod || !implScope) return;
+
+    const staticMethodRecord = symbolTable.getSymbol(staticMethod.symbol);
+    expect(staticMethodRecord.scope).toBe(implScope);
+
+    const instanceMethod = impl.methods.find(
+      (method) => symbolTable.getSymbol(method.symbol).name === "double"
+    );
+    const rootScope = symbolTable.rootScope;
+    if (instanceMethod) {
+      expect(symbolTable.getSymbol(instanceMethod.symbol).scope).toBe(
+        rootScope
+      );
+    }
+
+    const counterSymbol = symbolTable.resolve("Counter", implScope);
+    expect(typeof counterSymbol).toBe("number");
+    if (typeof counterSymbol !== "number") return;
+
+    const staticMethods = binding.staticMethods.get(counterSymbol);
+    expect(staticMethods?.get("new")?.has(staticMethod.symbol)).toBe(true);
+    expect(staticMethods?.get("double")).toBeUndefined();
+  });
+
+  it("records static methods even when the impl appears before the object", () => {
+    const name = "static_methods_out_of_order.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const counterSymbol = symbolTable.resolve("Counter", symbolTable.rootScope);
+    expect(typeof counterSymbol).toBe("number");
+    if (typeof counterSymbol !== "number") return;
+
+    const staticMethods = binding.staticMethods.get(counterSymbol);
+    const create = staticMethods?.get("create");
+    expect(create?.size).toBe(1);
+  });
+
+  it("binds module-qualified calls via module imports", () => {
+    const name = "module_qualified.voyd";
+    const ast = loadAst(name);
+    const useForm = ast.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    ) as Form | undefined;
+    const span = toSourceSpan(useForm ?? ast);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const utilPath = { namespace: "src" as const, segments: ["util"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const utilId = modulePathToString(utilPath);
+    const dependency = { kind: "use" as const, path: utilPath, span };
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: name },
+      ast,
+      source: "",
+      dependencies: [dependency],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+
+    const exportedSymbol = 77;
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        utilId,
+        new Map([
+          [
+            "helper",
+            {
+              name: "helper",
+              symbol: exportedSymbol,
+              moduleId: utilId,
+              kind: "value",
+              visibility: "public",
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    const utilSymbol = symbolTable.resolve("util", symbolTable.rootScope);
+    expect(typeof utilSymbol).toBe("number");
+    if (typeof utilSymbol !== "number") return;
+
+    const helpers = binding.moduleMembers.get(utilSymbol)?.get("helper");
+    expect(helpers?.size).toBe(1);
+    const helperSymbol = helpers ? Array.from(helpers)[0] : undefined;
+    expect(typeof helperSymbol).toBe("number");
+
+    const importEntry = binding.imports.find(
+      (entry) => entry.local === helperSymbol
+    );
+    expect(importEntry?.target?.moduleId).toBe(utilId);
+    expect(importEntry?.target?.symbol).toBe(exportedSymbol);
   });
 
   it("binds trait declarations and trait targets on impl blocks", () => {

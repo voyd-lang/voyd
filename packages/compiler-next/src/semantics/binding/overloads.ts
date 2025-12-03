@@ -109,10 +109,12 @@ const createOverloadSignature = (
   const params = fn.params.map((param) => {
     const annotation = formatTypeAnnotation(param.typeExpr);
     const displayName = formatParameterDisplayName(param);
-    const labelKey = param.label ?? "";
+    const label = parameterLabel(param);
+    const labelKey = label ?? "";
     return {
       key: `${labelKey}:${annotation}`,
       label: `${displayName}: ${annotation}`,
+      displayLabel: label,
     };
   });
   const returnAnnotation = formatTypeAnnotation(fn.returnTypeExpr);
@@ -123,6 +125,9 @@ const createOverloadSignature = (
       .join(", ")}) -> ${returnAnnotation}`,
   };
 };
+
+const parameterLabel = (param: BoundParameter): string | undefined =>
+  param.label ?? param.name;
 
 const formatParameterDisplayName = (param: BoundParameter): string => {
   if (!param.label) {
@@ -200,7 +205,12 @@ const formatTypeAnnotation = (expr?: Expr): string => {
 };
 
 export const finalizeOverloadSets = (ctx: BindingContext): void => {
-  let nextOverloadSetId = 0;
+  const existingIds = [
+    ...ctx.overloads.keys(),
+    ...ctx.importedOverloadOptions.keys(),
+  ];
+  let nextOverloadSetId =
+    existingIds.length > 0 ? Math.max(...existingIds) + 1 : 0;
   for (const bucket of ctx.overloadBuckets.values()) {
     if (bucket.functions.length < 2) {
       continue;
