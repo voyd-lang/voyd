@@ -1,4 +1,4 @@
-import type { Form, Syntax } from "../../parser/index.js";
+import type { Expr, Form, Syntax } from "../../parser/index.js";
 import type { SymbolRecord, SymbolTable } from "../binder/index.js";
 import type {
   Diagnostic,
