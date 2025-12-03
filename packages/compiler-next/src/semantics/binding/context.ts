@@ -68,16 +68,17 @@ export const createBindingContext = ({
     nextModuleIndex: 0,
     module: moduleNode,
     graph: moduleGraph,
-    modulePath: moduleNode.path,
-    moduleExports: exportTables,
-    dependenciesBySpan,
-    dependencies: dependencyBindings,
-    uses: [],
-    imports: [],
-    staticMethods: new Map(),
-    moduleMembers: new Map(),
-    pendingStaticMethods: [],
-  };
+  modulePath: moduleNode.path,
+  moduleExports: exportTables,
+  dependenciesBySpan,
+  dependencies: dependencyBindings,
+  uses: [],
+  imports: [],
+  staticMethods: new Map(),
+  moduleMembers: new Map(),
+  pendingStaticMethods: [],
+  importedOverloadOptions: new Map(),
+};
 };
 
 export const toBindingResult = (ctx: BindingContext): BindingResult => ({
@@ -97,6 +98,7 @@ export const toBindingResult = (ctx: BindingContext): BindingResult => ({
   staticMethods: ctx.staticMethods,
   moduleMembers: ctx.moduleMembers,
   dependencies: ctx.dependencies,
+  importedOverloadOptions: ctx.importedOverloadOptions,
 });
 
 export const rememberSyntax = (

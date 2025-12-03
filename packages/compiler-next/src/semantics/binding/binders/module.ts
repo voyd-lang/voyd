@@ -403,7 +403,7 @@ const bindImportsFromModule = ({
       (item) =>
         item.visibility === "public" || moduleId === ctx.module.id
     );
-    return allowed.map((item) =>
+    return allowed.flatMap((item) =>
       declareImportedSymbol({
         exported: item,
         alias: item.name,
@@ -435,16 +435,14 @@ const bindImportsFromModule = ({
     return [];
   }
 
-  return [
-    declareImportedSymbol({
-      exported,
-      alias: entry.alias ?? targetName,
-      ctx,
-      declaredAt,
-      span: entry.span,
-      visibility,
-    }),
-  ];
+  return declareImportedSymbol({
+    exported,
+    alias: entry.alias ?? targetName,
+    ctx,
+    declaredAt,
+    span: entry.span,
+    visibility,
+  });
 };
 
 const declareImportedSymbol = ({
@@ -461,24 +459,43 @@ const declareImportedSymbol = ({
   declaredAt: Form;
   span: SourceSpan;
   visibility: HirVisibility;
-}): BoundImport => {
-  const local = ctx.symbolTable.declare({
-    name: alias,
-    kind: exported.kind,
-    declaredAt: declaredAt.syntaxId,
-    metadata: {
-      import: { moduleId: exported.moduleId, symbol: exported.symbol },
-    },
+}): BoundImport[] => {
+  const symbols = exported.symbols && exported.symbols.length > 0
+    ? exported.symbols
+    : [exported.symbol];
+  const locals: BoundImport[] = [];
+
+  symbols.forEach((symbol) => {
+    const local = ctx.symbolTable.declare({
+      name: alias,
+      kind: exported.kind,
+      declaredAt: declaredAt.syntaxId,
+      metadata: {
+        import: { moduleId: exported.moduleId, symbol },
+      },
+    });
+    const bound: BoundImport = {
+      name: alias,
+      local,
+      target: { moduleId: exported.moduleId, symbol },
+      visibility,
+      span,
+    };
+    ctx.imports.push(bound);
+    locals.push(bound);
   });
-  const bound: BoundImport = {
-    name: alias,
-    local,
-    target: { moduleId: exported.moduleId, symbol: exported.symbol },
-    visibility,
-    span,
-  };
-  ctx.imports.push(bound);
-  return bound;
+
+  if (symbols.length > 1 && exported.overloadSet !== undefined) {
+    const nextId =
+      Math.max(-1, ...ctx.importedOverloadOptions.keys()) + 1;
+    const localSymbols = locals.map((entry) => entry.local);
+    ctx.importedOverloadOptions.set(nextId, localSymbols);
+    localSymbols.forEach((local) => ctx.overloadBySymbol.set(local, nextId));
+  } else if (symbols.length === 1 && exported.overloadSet !== undefined) {
+    ctx.overloadBySymbol.set(locals[0]!.local, exported.overloadSet);
+  }
+
+  return locals;
 };
 
 const declareModuleImport = ({

@@ -778,6 +778,23 @@ const resolveTypeArguments = (
       )
     : undefined;
 
+const expectedParamLabel = (param: ParamSignature): string | undefined =>
+  param.label ?? param.name;
+
+const labelsCompatible = (
+  param: ParamSignature,
+  argLabel: string | undefined
+): boolean => {
+  const expected = expectedParamLabel(param);
+  if (!expected) {
+    return argLabel === undefined;
+  }
+  if (param.label) {
+    return argLabel === expected;
+  }
+  return argLabel === undefined || argLabel === expected;
+};
+
 const validateCallArgs = (
   args: readonly Arg[],
   params: readonly ParamSignature[],
@@ -790,8 +807,8 @@ const validateCallArgs = (
 
   args.forEach((arg, index) => {
     const param = params[index]!;
-    if (param.label !== arg.label) {
-      const expectedLabel = param.label ?? "no label";
+    if (!labelsCompatible(param, arg.label)) {
+      const expectedLabel = expectedParamLabel(param) ?? "no label";
       const actualLabel = arg.label ?? "no label";
       throw new Error(
         `call argument ${
@@ -2338,7 +2355,7 @@ const resolveTraitDispatchOverload = ({
     }
     return adjustedParams.every((param, index) => {
       const arg = args[index];
-      if (!arg || param.label !== arg.label) {
+      if (!arg || !labelsCompatible(param, arg.label)) {
         return false;
       }
       if (arg.type === ctx.primitives.unknown) {
@@ -2408,7 +2425,7 @@ const matchesOverloadSignature = (
 
   return signature.parameters.every((param, index) => {
     const arg = args[index];
-    if (arg.label !== param.label) {
+    if (!labelsCompatible(param, arg.label)) {
       return false;
     }
 

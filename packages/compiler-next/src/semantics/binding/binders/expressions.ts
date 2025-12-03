@@ -495,7 +495,7 @@ const ensureModuleMemberImport = ({
     );
     return;
   }
-  const symbol = declareModuleMemberImport({
+  const locals = declareModuleMemberImport({
     exported,
     syntax,
     scope,
@@ -506,7 +506,7 @@ const ensureModuleMemberImport = ({
     ctx.moduleMembers.get(moduleSymbol) ??
     createMemberBucket(ctx.moduleMembers, moduleSymbol);
   const members = memberMap.get(memberName) ?? new Set<number>();
-  members.add(symbol);
+  locals.forEach((symbol) => members.add(symbol));
   memberMap.set(memberName, members);
 };
 
@@ -529,23 +529,43 @@ const declareModuleMemberImport = ({
   syntax: Syntax;
   scope: ScopeId;
   ctx: BindingContext;
-}): number => {
-  const local = ctx.symbolTable.declare({
-    name: exported.name,
-    kind: exported.kind,
-    declaredAt: syntax.syntaxId,
-    metadata: {
-      import: { moduleId: exported.moduleId, symbol: exported.symbol },
-    },
-  }, scope);
-  ctx.imports.push({
-    name: exported.name,
-    local,
-    target: { moduleId: exported.moduleId, symbol: exported.symbol },
-    visibility: "module",
-    span: toSourceSpan(syntax),
+}): number[] => {
+  const symbols = exported.symbols && exported.symbols.length > 0
+    ? exported.symbols
+    : [exported.symbol];
+  const locals: number[] = [];
+  symbols.forEach((symbol) => {
+    const local = ctx.symbolTable.declare(
+      {
+        name: exported.name,
+        kind: exported.kind,
+        declaredAt: syntax.syntaxId,
+        metadata: {
+          import: { moduleId: exported.moduleId, symbol },
+        },
+      },
+      scope
+    );
+    ctx.imports.push({
+      name: exported.name,
+      local,
+      target: { moduleId: exported.moduleId, symbol },
+      visibility: "module",
+      span: toSourceSpan(syntax),
+    });
+    locals.push(local);
   });
-  return local;
+
+  if (locals.length > 1 && exported.overloadSet !== undefined) {
+    const nextId =
+      Math.max(-1, ...ctx.importedOverloadOptions.keys()) + 1;
+    ctx.importedOverloadOptions.set(nextId, locals);
+    locals.forEach((local) => ctx.overloadBySymbol.set(local, nextId));
+  } else if (exported.overloadSet !== undefined && locals.length === 1) {
+    ctx.overloadBySymbol.set(locals[0]!, exported.overloadSet);
+  }
+
+  return locals;
 };
 
 const declarePatternBindings = (

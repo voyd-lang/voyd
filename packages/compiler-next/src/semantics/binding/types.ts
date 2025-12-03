@@ -62,6 +62,7 @@ export interface BindingResult {
   staticMethods: StaticMethodTable;
   moduleMembers: ModuleMemberTable;
   dependencies: Map<string, BindingResult>;
+  importedOverloadOptions: Map<OverloadSetId, readonly SymbolId[]>;
 }
 
 export type BoundFunction = FunctionDecl;
@@ -107,6 +108,7 @@ export interface BindingContext {
   staticMethods: StaticMethodTable;
   moduleMembers: ModuleMemberTable;
   pendingStaticMethods: PendingStaticMethod[];
+  importedOverloadOptions: Map<OverloadSetId, readonly SymbolId[]>;
 }
 
 export interface BoundUse {

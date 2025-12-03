@@ -123,4 +123,44 @@ describe("static access e2e", () => {
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(41);
   });
+
+  it("resolves overloaded imports pulled directly into scope", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const modPath = `${root}${sep}overload_mod.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("overload_use_direct.voyd"),
+      [modPath]: loadFixture("overload_mod.voyd"),
+    });
+
+    const result = await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(5);
+  });
+
+  it("resolves overloaded module-qualified calls", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const modPath = `${root}${sep}overload_mod.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("overload_use_module.voyd"),
+      [modPath]: loadFixture("overload_mod.voyd"),
+    });
+
+    const result = await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(5);
+  });
 });

@@ -192,7 +192,11 @@ const collectModuleInfo = ({
     const usePath = parseUse(entry);
     if (usePath) {
       usePath.paths
-        .map((path) => resolveModuleRequest(path, modulePath))
+        .map((request) => ({
+          request,
+          resolved: resolveModuleRequest(request, modulePath),
+        }))
+        .map(({ request, resolved }) => modulePathForUse(resolved, request))
         .forEach((path) => {
           if (!path.segments.length && !path.packageName) return;
           dependencies.push({
@@ -449,6 +453,22 @@ const resolveModuleRequest = (
     namespace,
     segments,
   };
+};
+
+const modulePathForUse = (
+  path: ModulePath,
+  request: ModuleRequest
+): ModulePath => {
+  const last = request.segments.at(-1);
+  const shouldTrim =
+    last !== "all" &&
+    last !== "self" &&
+    request.segments.length > 1 &&
+    path.segments.length > 0;
+  if (!shouldTrim) {
+    return path;
+  }
+  return { ...path, segments: path.segments.slice(0, -1) };
 };
 
 const normalizeRequest = (request: ModuleRequest): ModuleRequest => {

@@ -11,6 +11,7 @@ export const runBindingPipeline = ({
   module,
   graph,
   moduleExports,
+  dependencies,
 }: BindingInputs): BindingResult => {
   const bindingContext = createBindingContext({
     moduleForm,
@@ -18,6 +19,7 @@ export const runBindingPipeline = ({
     module,
     graph,
     moduleExports,
+    dependencies,
   });
 
   bindModule(moduleForm, bindingContext);
