@@ -20,6 +20,7 @@ import type {
   HirObjectLiteralEntry,
   HirPattern,
   HirBindingKind,
+  HirTypeExpr,
 } from "../hir/index.js";
 import type { HirExprId, HirStmtId, ScopeId, SymbolId } from "../ids.js";
 import {
@@ -830,6 +831,11 @@ const lowerStaticAccessExpr = (
     ctx
   );
   if (typeof targetSymbol === "number") {
+    const targetTypeArguments = extractStaticTargetTypeArguments({
+      targetExpr,
+      ctx,
+      scopes,
+    });
     const methodTable = ctx.staticMethods.get(targetSymbol);
     if (!methodTable) {
       const targetName = ctx.symbolTable.getSymbol(targetSymbol).name;
@@ -842,6 +848,7 @@ const lowerStaticAccessExpr = (
         memberForm: memberExpr,
         methodTable,
         targetSymbol,
+        targetTypeArguments,
         ctx,
         scopes,
       });
@@ -951,6 +958,7 @@ const lowerStaticMethodCall = ({
   memberForm,
   methodTable,
   targetSymbol,
+  targetTypeArguments,
   ctx,
   scopes,
 }: {
@@ -958,6 +966,7 @@ const lowerStaticMethodCall = ({
   memberForm: Form;
   methodTable: ReadonlyMap<string, Set<SymbolId>>;
   targetSymbol: SymbolId;
+  targetTypeArguments?: HirTypeExpr[];
   ctx: LowerContext;
   scopes: LowerScopeStack;
 }): HirExprId => {
@@ -983,6 +992,13 @@ const lowerStaticMethodCall = ({
         .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
         .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
     : undefined;
+  const combinedTypeArguments =
+    targetTypeArguments && targetTypeArguments.length > 0
+      ? [
+          ...(typeArguments ?? []),
+          ...(targetTypeArguments.filter(Boolean) as HirTypeExpr[]),
+        ]
+      : typeArguments;
 
   const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
     if (isForm(arg) && arg.calls(":")) {
@@ -1019,7 +1035,10 @@ const lowerStaticMethodCall = ({
     span: toSourceSpan(accessForm),
     callee,
     args,
-    typeArguments,
+    typeArguments:
+      combinedTypeArguments && combinedTypeArguments.length > 0
+        ? combinedTypeArguments
+        : undefined,
   });
 };
 
@@ -1286,6 +1305,45 @@ const extractStaticTargetIdentifier = (
       return target.first as IdentifierAtom;
     }
   }
+  return undefined;
+};
+
+const extractStaticTargetTypeArguments = ({
+  targetExpr,
+  ctx,
+  scopes,
+}: {
+  targetExpr: Expr;
+  ctx: LowerContext;
+  scopes: LowerScopeStack;
+}): HirTypeExpr[] | undefined => {
+  const genericArgs = extractTypeArgumentForms(targetExpr);
+  if (!genericArgs || genericArgs.length === 0) {
+    return undefined;
+  }
+  const typeArguments = genericArgs
+    .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
+    .filter(Boolean) as HirTypeExpr[];
+  return typeArguments.length > 0 ? typeArguments : undefined;
+};
+
+const extractTypeArgumentForms = (
+  expr: Expr
+): readonly Expr[] | undefined => {
+  if (isForm(expr) && isIdentifierAtom(expr.first)) {
+    if (
+      isForm(expr.second) &&
+      formCallsInternal(expr.second, "generics")
+    ) {
+      return expr.second.rest;
+    }
+    return undefined;
+  }
+
+  if (isForm(expr) && formCallsInternal(expr, "generics")) {
+    return expr.rest;
+  }
+
   return undefined;
 };
 

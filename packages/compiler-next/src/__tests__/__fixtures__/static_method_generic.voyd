@@ -1,0 +1,8 @@
+pub obj Container<T> { }
+
+impl<T> Container<T>
+  pub fn new() -> i32
+    11
+
+pub fn main() -> i32
+  Container<i32>::new()
