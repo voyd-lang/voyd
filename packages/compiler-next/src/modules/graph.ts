@@ -14,6 +14,7 @@ import {
   modulePathToString,
   resolveModuleFile,
 } from "./path.js";
+import { parseUsePaths } from "./use-path.js";
 import { moduleDiagnosticToDiagnostic } from "./diagnostics.js";
 import type {
   ModuleDependency,
@@ -191,12 +192,13 @@ const collectModuleInfo = ({
 
     const usePath = parseUse(entry);
     if (usePath) {
-      usePath.paths
-        .map((request) => ({
-          request,
-          resolved: resolveModuleRequest(request, modulePath),
-        }))
-        .map(({ request, resolved }) => modulePathForUse(resolved, request))
+      usePath.entries
+        .map((entryPath) =>
+          resolveModuleRequest(
+            { segments: entryPath.moduleSegments, span: entryPath.span },
+            modulePath
+          )
+        )
         .forEach((path) => {
           if (!path.segments.length && !path.packageName) return;
           dependencies.push({
@@ -240,10 +242,11 @@ type ModuleRequest = {
 };
 
 const parseUse = (form: Form):
-  | { paths: ModuleRequest[]; span?: SourceSpan }
+  | { entries: ReturnType<typeof parseUsePaths>; span?: SourceSpan }
   | undefined => {
   if (form.calls("use")) {
-    return { paths: parsePathExprList(form.at(1)), span: toSourceSpan(form) };
+    const span = toSourceSpan(form);
+    return { entries: parseUsePaths(form.at(1), span), span };
   }
 
   const keyword = form.at(1);
@@ -252,7 +255,8 @@ const parseUse = (form: Form):
     isIdentifierAtom(keyword) &&
     keyword.value === "use"
   ) {
-    return { paths: parsePathExprList(form.at(2)), span: toSourceSpan(form) };
+    const span = toSourceSpan(form);
+    return { entries: parseUsePaths(form.at(2), span), span };
   }
 
   return undefined;
@@ -453,22 +457,6 @@ const resolveModuleRequest = (
     namespace,
     segments,
   };
-};
-
-const modulePathForUse = (
-  path: ModulePath,
-  request: ModuleRequest
-): ModulePath => {
-  const last = request.segments.at(-1);
-  const shouldTrim =
-    last !== "all" &&
-    last !== "self" &&
-    request.segments.length > 1 &&
-    path.segments.length > 0;
-  if (!shouldTrim) {
-    return path;
-  }
-  return { ...path, segments: path.segments.slice(0, -1) };
 };
 
 const normalizeRequest = (request: ModuleRequest): ModuleRequest => {

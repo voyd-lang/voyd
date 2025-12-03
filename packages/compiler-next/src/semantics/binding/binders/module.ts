@@ -31,6 +31,10 @@ import {
 } from "../../../diagnostics/index.js";
 import { modulePathToString } from "../../../modules/path.js";
 import type { ModulePath } from "../../../modules/types.js";
+import {
+  parseUsePaths,
+  type NormalizedUseEntry,
+} from "../../../modules/use-path.js";
 import type { HirVisibility } from "../../hir/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
 import type { SourceSpan } from "../../ids.js";
@@ -99,14 +103,7 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   }
 };
 
-type ParsedUseEntry = {
-  moduleSegments: readonly string[];
-  path: readonly string[];
-  targetName?: string;
-  alias?: string;
-  importKind: "all" | "self" | "name";
-  span: SourceSpan;
-};
+type ParsedUseEntry = NormalizedUseEntry;
 
 type ParsedUseDecl = {
   form: Form;
@@ -184,102 +181,6 @@ const parseModDecl = (form: Form): ParsedUseDecl | null => {
   );
 
   return { form, visibility, entries };
-};
-
-const parseUsePaths = (
-  expr: Expr | undefined,
-  span: SourceSpan,
-  base: readonly string[] = []
-): ParsedUseEntry[] => {
-  if (!expr) {
-    return [];
-  }
-  if (isIdentifierAtom(expr)) {
-    return [normalizeUseEntry({ segments: [...base, expr.value], span })];
-  }
-
-  if (!isForm(expr)) {
-    return [];
-  }
-
-  if (expr.calls("::")) {
-    const left = parseUsePaths(expr.at(1), span, base);
-    return left.flatMap((entry) =>
-      parseUsePaths(expr.at(2), span, entry.path)
-    );
-  }
-
-  if (expr.calls("as")) {
-    const aliasExpr = expr.at(2);
-    const alias = isIdentifierAtom(aliasExpr) ? aliasExpr.value : undefined;
-    return parseUsePaths(expr.at(1), span, base).map((entry) => ({
-      ...entry,
-      alias: alias ?? entry.alias,
-    }));
-  }
-
-  if (expr.callsInternal("object_literal")) {
-    return expr.rest.flatMap((entry) => parseUsePaths(entry, span, base));
-  }
-
-  return [];
-};
-
-const normalizeUseEntry = ({
-  segments,
-  span,
-  alias,
-}: {
-  segments: readonly string[];
-  span: SourceSpan;
-  alias?: string;
-}): ParsedUseEntry => {
-  const last = segments.at(-1);
-  if (last === "all") {
-    const moduleSegments = segments.slice(0, -1);
-    return {
-      moduleSegments,
-      path: moduleSegments,
-      importKind: "all",
-      alias,
-      span,
-    };
-  }
-
-  if (last === "self") {
-    const moduleSegments = segments.slice(0, -1);
-    const name = moduleSegments.at(-1) ?? "self";
-    return {
-      moduleSegments,
-      path: moduleSegments,
-      importKind: "self",
-      alias: alias ?? name,
-      span,
-    };
-  }
-
-  if (segments.length === 1 && last) {
-    return {
-      moduleSegments: segments,
-      path: segments,
-      targetName: last,
-      alias: alias ?? last,
-      importKind: "self",
-      span,
-    };
-  }
-
-  const targetName = last;
-  const moduleSegments = segments.slice(0, -1);
-  const name = targetName ?? segments.at(-1) ?? "self";
-  return {
-    moduleSegments,
-    path: targetName ? [...moduleSegments, targetName] : moduleSegments,
-    targetName,
-    alias: alias ?? name,
-    importKind: "name",
-    span,
-  };
 };
 
 const isInlineModuleDecl = (form: Form): boolean => {
