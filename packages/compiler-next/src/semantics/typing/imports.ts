@@ -494,6 +494,15 @@ export const registerImportedObjectTemplate = ({
   const translateTypeParam = (id: TypeParamId | undefined) =>
     typeof id === "number" ? typeParamMap.get(id) ?? id : undefined;
 
+  const translateDeclaringParams = (
+    params?: readonly TypeParamId[]
+  ): readonly TypeParamId[] | undefined => {
+    const translated = params
+      ?.map(translateTypeParam)
+      .filter((entry): entry is TypeParamId => typeof entry === "number");
+    return translated && translated.length > 0 ? translated : undefined;
+  };
+
   const params = template.params.map((param) => ({
     symbol: mapParamSymbol(param.symbol),
     typeParam: mapTypeParam(param.typeParam, typeParamMap, ctx),
@@ -505,7 +514,7 @@ export const registerImportedObjectTemplate = ({
   const fields = template.fields.map((field) => ({
     name: field.name,
     type: translation(field.type),
-    declaringParams: field.declaringParams?.map(translateTypeParam),
+    declaringParams: translateDeclaringParams(field.declaringParams),
   }));
 
   ctx.objects.registerTemplate({
