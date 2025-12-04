@@ -37,6 +37,10 @@ import type {
   LowerObjectLiteralOptions,
   LowerScopeStack,
 } from "./types.js";
+import {
+  extractConstructorTargetIdentifier,
+  literalProvidesAllFields,
+} from "../constructors.js";
 
 export const lowerExpr = (
   expr: Expr | undefined,
@@ -805,42 +809,6 @@ const lowerObjectLiteralEntry = (
   throw new Error("unsupported object literal entry");
 };
 
-const literalProvidesAllFields = (
-  literal: Form,
-  fields: readonly { name: string }[]
-): boolean => {
-  const info = gatherLiteralFieldInfo(literal);
-  if (info.hasSpread) {
-    return false;
-  }
-  const expected = fields.map((field) => field.name);
-  return expected.every((name) => info.fields.has(name));
-};
-
-const gatherLiteralFieldInfo = (
-  literal: Form
-): { fields: Set<string>; hasSpread: boolean } => {
-  const fields = new Set<string>();
-  let hasSpread = false;
-  literal.rest.forEach((entry) => {
-    if (isForm(entry) && entry.calls("...")) {
-      hasSpread = true;
-      return;
-    }
-    if (isForm(entry) && entry.calls(":")) {
-      const nameExpr = entry.at(1);
-      if (isIdentifierAtom(nameExpr)) {
-        fields.add(nameExpr.value);
-      }
-      return;
-    }
-    if (isIdentifierAtom(entry)) {
-      fields.add(entry.value);
-    }
-  });
-  return { fields, hasSpread };
-};
-
 const lowerConstructorLiteralCall = ({
   callee,
   literal,
@@ -1240,7 +1208,18 @@ const lowerModuleQualifiedCall = ({
     return { expr };
   });
 
-  const resolution = resolveModuleMemberResolution({
+  const nominal = lowerNominalObjectLiteral(
+    calleeExpr,
+    memberForm.rest,
+    accessForm,
+    ctx,
+    scopes
+  );
+  if (typeof nominal === "number") {
+    return nominal;
+  }
+
+  const resolution = resolveModuleMemberCallResolution({
     name: calleeExpr.value,
     moduleSymbol,
     memberTable,
@@ -1253,33 +1232,8 @@ const lowerModuleQualifiedCall = ({
     );
   }
 
-  let callResolution: IdentifierResolution = resolution;
-  if (resolution.kind === "symbol") {
-    const record = ctx.symbolTable.getSymbol(resolution.symbol);
-    if (record.kind === "type") {
-      const nominal = lowerNominalObjectLiteral(
-        calleeExpr,
-        memberForm.rest,
-        accessForm,
-        ctx,
-        scopes
-      );
-      if (typeof nominal === "number") {
-        return nominal;
-      }
-      const constructorResolution = resolveConstructorResolution({
-        targetSymbol: resolution.symbol,
-        name: calleeExpr.value,
-        ctx,
-      });
-      if (constructorResolution) {
-        callResolution = constructorResolution;
-      }
-    }
-  }
-
   const callee = lowerResolvedCallee({
-    resolution: callResolution,
+    resolution,
     syntax: calleeExpr,
     ctx,
   });
@@ -1421,6 +1375,41 @@ const resolveModuleMemberResolution = ({
   throw new Error(`ambiguous module member ${name} on ${moduleName}`);
 };
 
+const resolveModuleMemberCallResolution = ({
+  name,
+  moduleSymbol,
+  memberTable,
+  ctx,
+}: {
+  name: string;
+  moduleSymbol: SymbolId;
+  memberTable: ReadonlyMap<string, Set<SymbolId>>;
+  ctx: LowerContext;
+}): IdentifierResolution | undefined => {
+  const base = resolveModuleMemberResolution({
+    name,
+    moduleSymbol,
+    memberTable,
+    ctx,
+  });
+  if (!base) {
+    return undefined;
+  }
+  if (base.kind !== "symbol") {
+    return base;
+  }
+  const record = ctx.symbolTable.getSymbol(base.symbol);
+  if (record.kind !== "type") {
+    return base;
+  }
+  const constructor = resolveConstructorResolution({
+    targetSymbol: base.symbol,
+    name,
+    ctx,
+  });
+  return constructor ?? base;
+};
+
 const resolveModuleSymbol = (
   expr: Expr,
   scope: ScopeId,
@@ -1443,39 +1432,11 @@ const resolveStaticTargetSymbol = (
   scope: ScopeId,
   ctx: LowerContext
 ): SymbolId | undefined => {
-  const identifier = extractStaticTargetIdentifier(expr);
+  const identifier = extractConstructorTargetIdentifier(expr);
   if (!identifier) {
     return undefined;
   }
   return resolveTypeSymbol(identifier.value, scope, ctx);
-};
-
-const extractStaticTargetIdentifier = (
-  expr: Expr | undefined
-): IdentifierAtom | InternalIdentifierAtom | undefined => {
-  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
-    return expr;
-  }
-  if (!isForm(expr)) {
-    return undefined;
-  }
-  if (isIdentifierAtom(expr.first) || isInternalIdentifierAtom(expr.first)) {
-    return expr.first as IdentifierAtom | InternalIdentifierAtom;
-  }
-  if (formCallsInternal(expr, "generics")) {
-    const target = expr.at(1);
-    if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
-      return target as IdentifierAtom | InternalIdentifierAtom;
-    }
-    if (
-      isForm(target) &&
-      (isIdentifierAtom(target.first) ||
-        isInternalIdentifierAtom(target.first))
-    ) {
-      return target.first as IdentifierAtom | InternalIdentifierAtom;
-    }
-  }
-  return undefined;
 };
 
 const extractStaticTargetTypeArguments = ({

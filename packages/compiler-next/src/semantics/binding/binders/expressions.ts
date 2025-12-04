@@ -23,6 +23,7 @@ import type { BinderScopeTracker } from "./scope-tracker.js";
 import type { HirBindingKind } from "../../hir/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
 import type { ModuleMemberTable } from "../types.js";
+import { extractConstructorTargetIdentifier } from "../../constructors.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -326,25 +327,10 @@ const maybeBindConstructorCall = (
   }
   const callee = form.at(0);
   const identifier = extractConstructorTargetIdentifier(callee);
-  if (!identifier) {
-    return;
-  }
-  const targetSymbol = ctx.symbolTable.resolve(
-    identifier.value,
-    tracker.current()
-  );
-  if (typeof targetSymbol !== "number") {
-    return;
-  }
-  const record = ctx.symbolTable.getSymbol(targetSymbol);
-  if (record.kind !== "type") {
-    return;
-  }
-  ensureConstructorImport({
-    targetSymbol,
-    syntax: identifier,
-    scope: tracker.current(),
+  ensureConstructorImportForTarget({
+    identifier,
     ctx,
+    scope: tracker.current(),
   });
 };
 
@@ -397,26 +383,11 @@ const bindNamespaceAccess = (
       scope: tracker.current(),
       ctx,
     });
-
-    const constructorTarget = extractConstructorTargetIdentifier(member);
-    if (constructorTarget) {
-      const constructorSymbol = ctx.symbolTable.resolve(
-        constructorTarget.value,
-        tracker.current()
-      );
-      const constructorRecord =
-        typeof constructorSymbol === "number"
-          ? ctx.symbolTable.getSymbol(constructorSymbol)
-          : undefined;
-      if (constructorRecord?.kind === "type") {
-        ensureConstructorImport({
-          targetSymbol: constructorSymbol,
-          syntax: constructorTarget,
-          scope: tracker.current(),
-          ctx,
-        });
-      }
-    }
+    ensureConstructorImportForTarget({
+      identifier: extractConstructorTargetIdentifier(member),
+      ctx,
+      scope: tracker.current(),
+    });
     return;
   }
 
@@ -551,28 +522,32 @@ const ensureConstructorImport = ({
   });
 };
 
-const extractConstructorTargetIdentifier = (
-  expr: Expr | undefined
-): IdentifierAtom | InternalIdentifierAtom | undefined => {
-  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
-    return expr;
+const ensureConstructorImportForTarget = ({
+  identifier,
+  ctx,
+  scope,
+}: {
+  identifier?: IdentifierAtom | InternalIdentifierAtom;
+  ctx: BindingContext;
+  scope: ScopeId;
+}): void => {
+  if (!identifier) {
+    return;
   }
-  if (!isForm(expr)) {
-    return undefined;
+  const targetSymbol = ctx.symbolTable.resolve(identifier.value, scope);
+  if (typeof targetSymbol !== "number") {
+    return;
   }
-  if (isIdentifierAtom(expr.first) || isInternalIdentifierAtom(expr.first)) {
-    return expr.first as IdentifierAtom | InternalIdentifierAtom;
+  const record = ctx.symbolTable.getSymbol(targetSymbol);
+  if (record.kind !== "type") {
+    return;
   }
-  if (expr.callsInternal("generics")) {
-    const target = expr.at(1);
-    if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
-      return target as IdentifierAtom | InternalIdentifierAtom;
-    }
-    if (isForm(target) && (isIdentifierAtom(target.first) || isInternalIdentifierAtom(target.first))) {
-      return target.first as IdentifierAtom | InternalIdentifierAtom;
-    }
-  }
-  return undefined;
+  ensureConstructorImport({
+    targetSymbol,
+    syntax: identifier,
+    scope,
+    ctx,
+  });
 };
 
 const extractMemberName = (expr: Expr | undefined): string | undefined => {
