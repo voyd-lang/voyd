@@ -472,9 +472,6 @@ const ensureStaticMethodImport = ({
       span: toSourceSpan(syntax),
     });
     const overloadId = dependency.overloadBySymbol.get(methodSymbol);
-    if (typeof overloadId === "number") {
-      ctx.overloadBySymbol.set(local, overloadId);
-    }
     imported.push({ local, overloadId });
   });
 
@@ -492,17 +489,15 @@ const ensureStaticMethodImport = ({
       .map((entry) => entry.overloadId)
       .filter((entry): entry is number => typeof entry === "number")
   );
-  const needsImportedSet = locals.length > 1;
-  const setId =
-    importedOverloadIds.size === 1
-      ? importedOverloadIds.values().next().value
-      : Math.max(
-          -1,
-          ...ctx.importedOverloadOptions.keys(),
-          ...ctx.overloads.keys()
-        ) + 1;
-
-  if (needsImportedSet || (locals.length === 1 && importedOverloadIds.size === 1)) {
+  const needsImportedSet = locals.length > 1 || importedOverloadIds.size === 1;
+  if (needsImportedSet) {
+    const nextId =
+      Math.max(
+        -1,
+        ...ctx.importedOverloadOptions.keys(),
+        ...ctx.overloads.keys()
+      ) + 1;
+    const setId = importedOverloadIds.size === 1 ? nextId : nextId;
     const existing = ctx.importedOverloadOptions.get(setId);
     const merged = existing
       ? Array.from(new Set([...existing, ...locals]))

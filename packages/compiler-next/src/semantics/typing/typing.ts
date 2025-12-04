@@ -15,7 +15,10 @@ import type {
   TypingInputs,
   TypingResult,
 } from "./types.js";
-import { resolveImportedValue } from "./imports.js";
+import {
+  registerImportedObjectTemplate,
+  resolveImportedValue,
+} from "./imports.js";
 
 export * from "./types.js";
 
@@ -26,6 +29,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   seedPrimitiveTypes(ctx);
   seedBaseObjectType(ctx);
   primeImportedValues(ctx);
+  primeImportedTypes(ctx);
   registerTypeAliases(ctx, state);
   registerObjectDecls(ctx);
   registerTraits(ctx);
@@ -87,5 +91,27 @@ const primeImportedValues = (ctx: TypingContext): void => {
       return;
     }
     resolveImportedValue({ symbol, ctx });
+  });
+};
+
+const primeImportedTypes = (ctx: TypingContext): void => {
+  ctx.importsByLocal.forEach((target, symbol) => {
+    const record = ctx.symbolTable.getSymbol(symbol);
+    if (record.kind !== "type") {
+      return;
+    }
+    if (!target) {
+      return;
+    }
+    const dependency = ctx.dependencies.get(target.moduleId);
+    if (!dependency) {
+      return;
+    }
+    registerImportedObjectTemplate({
+      dependency,
+      dependencySymbol: target.symbol,
+      localSymbol: symbol,
+      ctx,
+    });
   });
 };

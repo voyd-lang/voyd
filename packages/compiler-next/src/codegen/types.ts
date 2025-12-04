@@ -713,6 +713,22 @@ const getNominalAncestry = (
     const info = ctx.typing.objectsByNominal.get(current);
     if (!info) {
       const owner = getNominalOwner(current, ctx);
+      const template = ctx.typing.objects.getTemplate(owner);
+      if (template) {
+        const typeId =
+          template.type ??
+          ctx.typing.arena.internIntersection({
+            nominal: current,
+            structural: template.structural,
+          });
+        ancestry.push({
+          nominalId: current,
+          typeId,
+        });
+        seen.add(current);
+        current = template.baseNominal;
+        continue;
+      }
       const name = getSymbolName(owner, ctx);
       throw new Error(
         `codegen missing nominal ancestry for ${name}<${current}> (nominal ${current})`
