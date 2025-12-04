@@ -1,0 +1,14 @@
+pub obj Animal {
+  id: i32,
+  name: i32
+}
+
+impl Animal
+  pub fn init({ name: i32 }) -> Animal
+    Animal { id: 0, name }
+
+  pub fn init({ nombre: i32 }) -> Animal
+    Animal { id: 1, name: nombre }
+
+  pub fn init(value: i32) -> Animal
+    Animal { id: 2, name: value }

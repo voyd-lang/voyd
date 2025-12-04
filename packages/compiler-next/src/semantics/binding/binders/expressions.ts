@@ -397,6 +397,26 @@ const bindNamespaceAccess = (
       scope: tracker.current(),
       ctx,
     });
+
+    const constructorTarget = extractConstructorTargetIdentifier(member);
+    if (constructorTarget) {
+      const constructorSymbol = ctx.symbolTable.resolve(
+        constructorTarget.value,
+        tracker.current()
+      );
+      const constructorRecord =
+        typeof constructorSymbol === "number"
+          ? ctx.symbolTable.getSymbol(constructorSymbol)
+          : undefined;
+      if (constructorRecord?.kind === "type") {
+        ensureConstructorImport({
+          targetSymbol: constructorSymbol,
+          syntax: constructorTarget,
+          scope: tracker.current(),
+          ctx,
+        });
+      }
+    }
     return;
   }
 

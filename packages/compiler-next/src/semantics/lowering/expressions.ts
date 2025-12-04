@@ -26,6 +26,7 @@ import type {
 import type { HirExprId, HirStmtId, ScopeId, SymbolId } from "../ids.js";
 import {
   resolveIdentifierValue,
+  resolveConstructorResolution,
   resolveSymbol,
   resolveTypeSymbol,
 } from "./resolution.js";
@@ -1251,8 +1252,34 @@ const lowerModuleQualifiedCall = ({
       `module ${moduleName} does not export ${calleeExpr.value}`
     );
   }
+
+  let callResolution: IdentifierResolution = resolution;
+  if (resolution.kind === "symbol") {
+    const record = ctx.symbolTable.getSymbol(resolution.symbol);
+    if (record.kind === "type") {
+      const nominal = lowerNominalObjectLiteral(
+        calleeExpr,
+        memberForm.rest,
+        accessForm,
+        ctx,
+        scopes
+      );
+      if (typeof nominal === "number") {
+        return nominal;
+      }
+      const constructorResolution = resolveConstructorResolution({
+        targetSymbol: resolution.symbol,
+        name: calleeExpr.value,
+        ctx,
+      });
+      if (constructorResolution) {
+        callResolution = constructorResolution;
+      }
+    }
+  }
+
   const callee = lowerResolvedCallee({
-    resolution,
+    resolution: callResolution,
     syntax: calleeExpr,
     ctx,
   });

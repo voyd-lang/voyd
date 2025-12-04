@@ -139,7 +139,7 @@ const declareUnresolvedSymbol = (
     metadata: { unresolved: true },
   });
 
-const resolveConstructorResolution = ({
+export const resolveConstructorResolution = ({
   targetSymbol,
   name,
   ctx,
