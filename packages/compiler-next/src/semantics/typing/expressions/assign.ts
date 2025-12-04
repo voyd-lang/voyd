@@ -1,5 +1,5 @@
 import type { HirAssignExpr, HirPattern } from "../../hir/index.js";
-import type { HirExprId, SourceSpan, TypeId } from "../ids.js";
+import type { HirExprId, SourceSpan, TypeId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
 import {
   bindTuplePatternFromExpr,

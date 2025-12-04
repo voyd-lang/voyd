@@ -9,8 +9,8 @@ import {
 } from "../../../parser/index.js";
 import { extractConstructorTargetIdentifier } from "../../constructors.js";
 import { toSourceSpan } from "../../utils.js";
-import type { HirExprId, ScopeId, SymbolId } from "../ids.js";
-import type { HirTypeExpr } from "../hir/index.js";
+import type { HirExprId, ScopeId, SymbolId } from "../../ids.js";
+import type { HirTypeExpr } from "../../hir/index.js";
 import {
   lowerResolvedCallee,
   resolveModuleMemberCallResolution,
@@ -44,6 +44,7 @@ export const lowerStaticAccessExpr = ({
       targetExpr,
       ctx,
       scopes,
+      lowerExpr,
     });
     const methodTable = ctx.staticMethods.get(targetSymbol);
     if (!methodTable) {

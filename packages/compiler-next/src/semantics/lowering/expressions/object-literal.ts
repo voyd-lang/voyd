@@ -5,8 +5,8 @@ import {
   isIdentifierAtom,
 } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
-import type { HirExprId } from "../ids.js";
-import type { HirObjectLiteralEntry } from "../hir/index.js";
+import type { HirExprId } from "../../ids.js";
+import type { HirObjectLiteralEntry } from "../../hir/index.js";
 import type { LowerObjectLiteralOptions } from "../types.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
 

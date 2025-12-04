@@ -1,4 +1,4 @@
-import type { TypeId } from "../ids.js";
+import type { TypeId } from "../../ids.js";
 import type { TypingContext, TypingState } from "../types.js";
 import { typeSatisfies } from "../type-system.js";
 

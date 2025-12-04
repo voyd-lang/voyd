@@ -2,7 +2,7 @@ import type {
   HirObjectLiteralEntry,
   HirObjectLiteralExpr,
 } from "../../hir/index.js";
-import type { TypeId, TypeParamId } from "../ids.js";
+import type { TypeId, TypeParamId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
 import {
   bindTypeParamsFromType,

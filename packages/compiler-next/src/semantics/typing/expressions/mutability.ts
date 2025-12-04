@@ -2,7 +2,7 @@ import type {
   HirBindingKind,
   HirExpression,
 } from "../../hir/index.js";
-import type { HirExprId, SourceSpan, SymbolId } from "../ids.js";
+import type { HirExprId, SourceSpan, SymbolId } from "../../ids.js";
 import {
   diagnosticFromCode,
   emitDiagnostic,

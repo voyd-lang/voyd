@@ -1,9 +1,5 @@
-import type {
-  HirBlockExpr,
-  HirLetStatement,
-  HirStmtId,
-} from "../../hir/index.js";
-import type { TypeId } from "../ids.js";
+import type { HirBlockExpr, HirLetStatement } from "../../hir/index.js";
+import type { HirStmtId, TypeId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
 import {
   bindTuplePatternFromExpr,

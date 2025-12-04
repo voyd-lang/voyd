@@ -1,5 +1,5 @@
 import type { HirWhileExpr } from "../../hir/index.js";
-import type { TypeId } from "../ids.js";
+import type { TypeId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
 import { ensureTypeMatches } from "../type-system.js";
 import type { TypingContext, TypingState } from "../types.js";

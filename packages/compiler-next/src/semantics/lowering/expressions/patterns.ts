@@ -6,7 +6,7 @@ import {
   isInternalIdentifierAtom,
 } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
-import type { HirBindingKind, HirPattern } from "../hir/index.js";
+import type { HirBindingKind, HirPattern } from "../../hir/index.js";
 import type { LowerContext, LowerScopeStack } from "../types.js";
 import { resolveSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";

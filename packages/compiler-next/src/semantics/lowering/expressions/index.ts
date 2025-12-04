@@ -11,7 +11,7 @@ import {
 } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
 import { resolveIdentifierValue } from "../resolution.js";
-import type { HirExprId } from "../ids.js";
+import type { HirExprId } from "../../ids.js";
 import type { LowerContext, LowerScopeStack } from "../types.js";
 import { lowerAssignment } from "./assignment.js";
 import { lowerArrayLiteralExpr, isArrayLiteralForm } from "./array-literal.js";

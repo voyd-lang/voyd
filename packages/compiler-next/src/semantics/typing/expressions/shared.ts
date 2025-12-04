@@ -1,4 +1,4 @@
-import type { TypeId } from "../ids.js";
+import type { TypeId } from "../../ids.js";
 import type { TypingContext, TypingState } from "../types.js";
 
 export const applyCurrentSubstitution = (

@@ -1,5 +1,5 @@
 import type { Expr, Form } from "../../../parser/index.js";
-import type { HirExprId } from "../ids.js";
+import type { HirExprId } from "../../ids.js";
 import type { LowerContext, LowerScopeStack } from "../types.js";
 
 export type LowerExprFn = (

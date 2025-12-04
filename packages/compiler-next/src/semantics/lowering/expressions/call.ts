@@ -8,8 +8,8 @@ import {
   isInternalIdentifierAtom,
 } from "../../../parser/index.js";
 import { literalProvidesAllFields } from "../../constructors.js";
-import type { HirExprId } from "../ids.js";
-import type { HirTypeExpr } from "../hir/index.js";
+import type { HirExprId } from "../../ids.js";
+import type { HirTypeExpr } from "../../hir/index.js";
 import { resolveTypeSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import { toSourceSpan } from "../../utils.js";
@@ -32,7 +32,7 @@ type LowerCallFromElementsParams = LoweringParams & {
 type LowerNominalObjectLiteralParams = LoweringParams & {
   callee: Expr;
   args: readonly Expr[];
-  ast: Syntax;
+  ast: Expr;
 };
 
 export const lowerCallFromElements = ({
@@ -101,6 +101,7 @@ export const lowerNominalObjectLiteral = ({
   if (!literalArg || !isForm(literalArg) || !isObjectLiteralForm(literalArg)) {
     return undefined;
   }
+  const literalForm: Form = literalArg;
 
   const typeArguments = hasGenerics
     ? ((genericsForm as Form).rest
@@ -122,11 +123,11 @@ export const lowerNominalObjectLiteral = ({
   if (constructors && constructors.size > 0) {
     const decl = ctx.decls.getObject(symbol);
     const providesAllFields =
-      decl && literalProvidesAllFields(literalArg, decl.fields);
+      decl && literalProvidesAllFields(literalForm, decl.fields);
     if (!providesAllFields) {
       return lowerConstructorLiteralCall({
         callee,
-        literal: literalArg,
+        literal: literalForm,
         typeArguments,
         targetSymbol: symbol,
         ctx,
@@ -147,7 +148,7 @@ export const lowerNominalObjectLiteral = ({
   };
 
   return lowerObjectLiteralExpr({
-    form: literalArg,
+    form: literalForm,
     ctx,
     scopes,
     lowerExpr,

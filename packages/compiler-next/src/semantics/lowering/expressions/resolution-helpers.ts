@@ -2,7 +2,7 @@ import type { Syntax } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
 import { resolveConstructorResolution } from "../resolution.js";
 import type { IdentifierResolution, LowerContext } from "../types.js";
-import type { HirExprId, SymbolId } from "../ids.js";
+import type { HirExprId, SymbolId } from "../../ids.js";
 
 export const lowerResolvedCallee = ({
   resolution,

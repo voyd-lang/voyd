@@ -9,7 +9,7 @@ import { parseLambdaSignature } from "../../lambda.js";
 import { toSourceSpan } from "../../utils.js";
 import { resolveSymbol, resolveTypeSymbol } from "../resolution.js";
 import { lowerTypeExpr, lowerTypeParameters } from "../type-expressions.js";
-import type { HirExprId } from "../ids.js";
+import type { HirExprId } from "../../ids.js";
 import { unwrapMutablePattern } from "./patterns.js";
 import type { LoweringFormParams } from "./types.js";
 

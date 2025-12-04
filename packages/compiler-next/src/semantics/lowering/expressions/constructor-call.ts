@@ -7,8 +7,8 @@ import {
   isInternalIdentifierAtom,
 } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
-import type { HirExprId, SymbolId } from "../ids.js";
-import type { HirTypeExpr } from "../hir/index.js";
+import type { HirExprId, SymbolId } from "../../ids.js";
+import type { HirTypeExpr } from "../../hir/index.js";
 import {
   lowerResolvedCallee,
   resolveStaticMethodResolution,

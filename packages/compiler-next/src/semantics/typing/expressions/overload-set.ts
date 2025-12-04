@@ -1,5 +1,5 @@
 import type { HirExpression, HirOverloadSetExpr } from "../../hir/index.js";
-import type { TypeId } from "../ids.js";
+import type { TypeId } from "../../ids.js";
 import type { TypingContext } from "../types.js";
 
 export const typeOverloadSetExpr = (

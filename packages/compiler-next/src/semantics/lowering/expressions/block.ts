@@ -1,6 +1,6 @@
 import { type Form, type Syntax, isForm } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
-import type { HirExprId, HirStmtId } from "../ids.js";
+import type { HirExprId, HirStmtId } from "../../ids.js";
 import { lowerPattern } from "./patterns.js";
 import type { LoweringFormParams } from "./types.js";
 

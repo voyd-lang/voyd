@@ -6,8 +6,8 @@ import {
   isIdentifierAtom,
 } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
-import type { HirExprId } from "../ids.js";
-import type { HirMatchArm, HirPattern } from "../hir/index.js";
+import type { HirExprId } from "../../ids.js";
+import type { HirMatchArm, HirPattern } from "../../hir/index.js";
 import { resolveSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import type { LoweringFormParams } from "./types.js";

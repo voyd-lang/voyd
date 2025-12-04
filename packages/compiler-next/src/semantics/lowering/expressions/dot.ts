@@ -4,7 +4,7 @@ import {
   formCallsInternal,
   isForm,
 } from "../../../parser/index.js";
-import type { HirExprId } from "../ids.js";
+import type { HirExprId } from "../../ids.js";
 import { lowerCallFromElements } from "./call.js";
 import { lowerMatch } from "./match.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";

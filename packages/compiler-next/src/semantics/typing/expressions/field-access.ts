@@ -1,5 +1,5 @@
 import type { HirFieldAccessExpr } from "../../hir/index.js";
-import type { TypeId } from "../ids.js";
+import type { TypeId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
 import { getStructuralFields } from "../type-system.js";
 import type { TypingContext, TypingState } from "../types.js";

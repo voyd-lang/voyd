@@ -1,5 +1,5 @@
 import type { HirMatchExpr, HirPattern, HirTypeExpr } from "../../hir/index.js";
-import type { SourceSpan, SymbolId, TypeId } from "../ids.js";
+import type { SourceSpan, SymbolId, TypeId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
 import {
   getNominalComponent,

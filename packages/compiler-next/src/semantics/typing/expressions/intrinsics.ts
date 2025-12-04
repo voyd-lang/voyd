@@ -1,4 +1,4 @@
-import type { TypeId } from "../ids.js";
+import type { TypeId } from "../../ids.js";
 import { getPrimitiveType } from "../type-system.js";
 import type { TypingContext } from "../types.js";
 

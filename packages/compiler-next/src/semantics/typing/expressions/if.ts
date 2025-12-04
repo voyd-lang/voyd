@@ -3,7 +3,7 @@ import { typeExpression } from "../expressions.js";
 import type { TypingContext, TypingState } from "../types.js";
 import { ensureTypeMatches } from "../type-system.js";
 import { mergeBranchType } from "./branching.js";
-import type { TypeId } from "../ids.js";
+import type { TypeId } from "../../ids.js";
 
 export const typeIfExpr = (
   expr: HirIfExpr,

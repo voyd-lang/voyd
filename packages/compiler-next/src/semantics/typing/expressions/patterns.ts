@@ -1,5 +1,5 @@
-import type { HirExprId, HirPattern } from "../../hir/index.js";
-import type { SourceSpan, TypeId } from "../ids.js";
+import type { HirPattern } from "../../hir/index.js";
+import type { HirExprId, SourceSpan, TypeId } from "../../ids.js";
 import { ensureTypeMatches, resolveTypeExpr } from "../type-system.js";
 import { getSymbolName } from "../type-system.js";
 import { getStructuralFields } from "../type-system.js";

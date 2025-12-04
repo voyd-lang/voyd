@@ -1,6 +1,6 @@
 import type { Form } from "../../../parser/index.js";
 import { expectLabeledExpr, toSourceSpan } from "../../utils.js";
-import type { HirExprId } from "../ids.js";
+import type { HirExprId } from "../../ids.js";
 import type { LoweringFormParams } from "./types.js";
 
 export const lowerWhile = ({

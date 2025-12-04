@@ -7,7 +7,7 @@ import type {
   SymbolId,
   TypeId,
   TypeParamId,
-} from "../ids.js";
+} from "../../ids.js";
 import {
   bindTypeParamsFromType,
   ensureTypeMatches,

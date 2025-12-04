@@ -1,6 +1,7 @@
 import type { Form } from "../../../parser/index.js";
 import { parseIfBranches } from "../../utils.js";
-import type { HirCondBranch, HirExprId } from "../hir/index.js";
+import type { HirCondBranch } from "../../hir/index.js";
+import type { HirExprId } from "../../ids.js";
 import { toSourceSpan } from "../../utils.js";
 import type { LoweringFormParams } from "./types.js";
 
