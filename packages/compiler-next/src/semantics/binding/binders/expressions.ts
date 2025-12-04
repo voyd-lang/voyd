@@ -2,6 +2,7 @@ import {
   type Expr,
   type Form,
   type Syntax,
+  type InternalIdentifierAtom,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
@@ -63,6 +64,10 @@ export const bindExpr = (
   if (expr.calls("var") || expr.calls("let")) {
     bindVar(expr, ctx, tracker);
     return;
+  }
+
+  if (isForm(expr)) {
+    maybeBindConstructorCall(expr, ctx, tracker);
   }
 
   for (const child of expr.toArray()) {
@@ -311,6 +316,38 @@ const declareLambdaParam = (
   throw new Error("unsupported lambda parameter form");
 };
 
+const maybeBindConstructorCall = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  if (form.length < 2) {
+    return;
+  }
+  const callee = form.at(0);
+  const identifier = extractConstructorTargetIdentifier(callee);
+  if (!identifier) {
+    return;
+  }
+  const targetSymbol = ctx.symbolTable.resolve(
+    identifier.value,
+    tracker.current()
+  );
+  if (typeof targetSymbol !== "number") {
+    return;
+  }
+  const record = ctx.symbolTable.getSymbol(targetSymbol);
+  if (record.kind !== "type") {
+    return;
+  }
+  ensureConstructorImport({
+    targetSymbol,
+    syntax: identifier,
+    scope: tracker.current(),
+    ctx,
+  });
+};
+
 const bindNamespaceAccess = (
   form: Form,
   ctx: BindingContext,
@@ -409,7 +446,7 @@ const ensureStaticMethodImport = ({
     return;
   }
 
-  const imported: SymbolId[] = [];
+  const imported: { local: SymbolId; overloadId?: number }[] = [];
   methodSymbols.forEach((methodSymbol) => {
     const fn = dependency.functions.find(
       (entry) => entry.symbol === methodSymbol
@@ -434,16 +471,93 @@ const ensureStaticMethodImport = ({
       visibility: "module",
       span: toSourceSpan(syntax),
     });
-    imported.push(local);
+    const overloadId = dependency.overloadBySymbol.get(methodSymbol);
+    if (typeof overloadId === "number") {
+      ctx.overloadBySymbol.set(local, overloadId);
+    }
+    imported.push({ local, overloadId });
   });
 
   if (imported.length === 0) {
     return;
   }
 
+  const locals = imported.map((entry) => entry.local);
   const bucket = ctx.staticMethods.get(targetSymbol) ?? new Map();
-  bucket.set(memberName, new Set(imported));
+  bucket.set(memberName, new Set(locals));
   ctx.staticMethods.set(targetSymbol, bucket);
+
+  const importedOverloadIds = new Set(
+    imported
+      .map((entry) => entry.overloadId)
+      .filter((entry): entry is number => typeof entry === "number")
+  );
+  const needsImportedSet = locals.length > 1;
+  const setId =
+    importedOverloadIds.size === 1
+      ? importedOverloadIds.values().next().value
+      : Math.max(
+          -1,
+          ...ctx.importedOverloadOptions.keys(),
+          ...ctx.overloads.keys()
+        ) + 1;
+
+  if (needsImportedSet || (locals.length === 1 && importedOverloadIds.size === 1)) {
+    const existing = ctx.importedOverloadOptions.get(setId);
+    const merged = existing
+      ? Array.from(new Set([...existing, ...locals]))
+      : locals;
+    ctx.importedOverloadOptions.set(setId, merged);
+    merged.forEach((local) => ctx.overloadBySymbol.set(local, setId));
+  }
+};
+
+const ensureConstructorImport = ({
+  targetSymbol,
+  syntax,
+  scope,
+  ctx,
+}: {
+  targetSymbol: number;
+  syntax: Syntax;
+  scope: ScopeId;
+  ctx: BindingContext;
+}): void => {
+  const constructors = ctx.staticMethods.get(targetSymbol)?.get("init");
+  if (constructors?.size) {
+    return;
+  }
+  ensureStaticMethodImport({
+    targetSymbol,
+    memberName: "init",
+    syntax,
+    scope,
+    ctx,
+  });
+};
+
+const extractConstructorTargetIdentifier = (
+  expr: Expr | undefined
+): IdentifierAtom | InternalIdentifierAtom | undefined => {
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    return expr;
+  }
+  if (!isForm(expr)) {
+    return undefined;
+  }
+  if (isIdentifierAtom(expr.first) || isInternalIdentifierAtom(expr.first)) {
+    return expr.first as IdentifierAtom | InternalIdentifierAtom;
+  }
+  if (expr.callsInternal("generics")) {
+    const target = expr.at(1);
+    if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
+      return target as IdentifierAtom | InternalIdentifierAtom;
+    }
+    if (isForm(target) && (isIdentifierAtom(target.first) || isInternalIdentifierAtom(target.first))) {
+      return target.first as IdentifierAtom | InternalIdentifierAtom;
+    }
+  }
+  return undefined;
 };
 
 const extractMemberName = (expr: Expr | undefined): string | undefined => {
@@ -534,7 +648,12 @@ const declareModuleMemberImport = ({
     ? exported.symbols
     : [exported.symbol];
   const locals: number[] = [];
+  const dependency = ctx.dependencies.get(exported.moduleId);
   symbols.forEach((symbol) => {
+    const dependencyRecord = dependency?.symbolTable.getSymbol(symbol);
+    const dependencyMetadata = (dependencyRecord?.metadata ?? {}) as {
+      entity?: string;
+    };
     const local = ctx.symbolTable.declare(
       {
         name: exported.name,
@@ -542,6 +661,9 @@ const declareModuleMemberImport = ({
         declaredAt: syntax.syntaxId,
         metadata: {
           import: { moduleId: exported.moduleId, symbol },
+          ...(dependencyMetadata.entity
+            ? { entity: dependencyMetadata.entity }
+            : {}),
         },
       },
       scope

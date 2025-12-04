@@ -11,6 +11,19 @@ export const resolveIdentifierValue = (
   ctx: LowerContext
 ): IdentifierResolution => {
   const resolved = ctx.symbolTable.resolve(name, scope);
+  if (typeof resolved === "number") {
+    const record = ctx.symbolTable.getSymbol(resolved);
+    if (record.kind === "type") {
+      const constructorResolution = resolveConstructorResolution({
+        targetSymbol: resolved,
+        name,
+        ctx,
+      });
+      if (constructorResolution) {
+        return constructorResolution;
+      }
+    }
+  }
   if (typeof resolved !== "number") {
     const intrinsic = resolveIntrinsicSymbol(name, ctx);
     if (typeof intrinsic === "number") {
@@ -125,3 +138,47 @@ const declareUnresolvedSymbol = (
     declaredAt: ctx.moduleNodeId,
     metadata: { unresolved: true },
   });
+
+const resolveConstructorResolution = ({
+  targetSymbol,
+  name,
+  ctx,
+}: {
+  targetSymbol: SymbolId;
+  name: string;
+  ctx: LowerContext;
+}): IdentifierResolution | undefined => {
+  const constructors = ctx.staticMethods.get(targetSymbol)?.get("init");
+  if (!constructors || constructors.size === 0) {
+    return undefined;
+  }
+
+  const symbols = Array.from(constructors);
+  const overloadIds = new Set(
+    symbols
+      .map((symbol) => ctx.overloadBySymbol.get(symbol))
+      .filter((entry): entry is number => typeof entry === "number")
+  );
+
+  if (symbols.length === 1) {
+    const [symbol] = symbols;
+    if (overloadIds.size === 1) {
+      return {
+        kind: "overload-set",
+        name,
+        set: overloadIds.values().next().value as number,
+      };
+    }
+    return { kind: "symbol", name, symbol };
+  }
+
+  if (overloadIds.size === 1) {
+    return {
+      kind: "overload-set",
+      name,
+      set: overloadIds.values().next().value as number,
+    };
+  }
+
+  throw new Error(`ambiguous constructor overloads for type ${name}`);
+};

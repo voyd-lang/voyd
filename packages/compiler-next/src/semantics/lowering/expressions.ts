@@ -488,8 +488,25 @@ const lowerNominalObjectLiteral = (
   const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ?? {}) as {
     entity?: string;
   };
-  if (metadata.entity !== "object") {
+  const constructors = ctx.staticMethods.get(symbol)?.get("init");
+  if (metadata.entity !== "object" && !(constructors && constructors.size > 0)) {
     return undefined;
+  }
+  if (constructors && constructors.size > 0) {
+    const decl = ctx.decls.getObject(symbol);
+    const providesAllFields =
+      decl && literalProvidesAllFields(literalArg, decl.fields);
+    if (!providesAllFields) {
+      return lowerConstructorLiteralCall({
+        callee,
+        literal: literalArg,
+        typeArguments,
+        targetSymbol: symbol,
+        ctx,
+        scopes,
+        ast,
+      });
+    }
   }
 
   const target = {
@@ -785,6 +802,130 @@ const lowerObjectLiteralEntry = (
   }
 
   throw new Error("unsupported object literal entry");
+};
+
+const literalProvidesAllFields = (
+  literal: Form,
+  fields: readonly { name: string }[]
+): boolean => {
+  const info = gatherLiteralFieldInfo(literal);
+  if (info.hasSpread) {
+    return false;
+  }
+  const expected = fields.map((field) => field.name);
+  return expected.every((name) => info.fields.has(name));
+};
+
+const gatherLiteralFieldInfo = (
+  literal: Form
+): { fields: Set<string>; hasSpread: boolean } => {
+  const fields = new Set<string>();
+  let hasSpread = false;
+  literal.rest.forEach((entry) => {
+    if (isForm(entry) && entry.calls("...")) {
+      hasSpread = true;
+      return;
+    }
+    if (isForm(entry) && entry.calls(":")) {
+      const nameExpr = entry.at(1);
+      if (isIdentifierAtom(nameExpr)) {
+        fields.add(nameExpr.value);
+      }
+      return;
+    }
+    if (isIdentifierAtom(entry)) {
+      fields.add(entry.value);
+    }
+  });
+  return { fields, hasSpread };
+};
+
+const lowerConstructorLiteralCall = ({
+  callee,
+  literal,
+  typeArguments,
+  targetSymbol,
+  ctx,
+  scopes,
+  ast,
+}: {
+  callee: IdentifierAtom;
+  literal: Form;
+  typeArguments?: HirTypeExpr[];
+  targetSymbol: SymbolId;
+  ctx: LowerContext;
+  scopes: LowerScopeStack;
+  ast: Syntax;
+}): HirExprId => {
+  const methodTable = ctx.staticMethods.get(targetSymbol);
+  if (!methodTable) {
+    const targetName = ctx.symbolTable.getSymbol(targetSymbol).name;
+    throw new Error(`type ${targetName} does not declare constructors`);
+  }
+  const resolution = resolveStaticMethodResolution({
+    name: "init",
+    targetSymbol,
+    methodTable,
+    ctx,
+  });
+  const calleeExpr = lowerResolvedCallee({
+    resolution,
+    syntax: callee,
+    ctx,
+  });
+  const args = literal.rest.map((entry) =>
+    lowerConstructorArgFromEntry(entry, ctx, scopes)
+  );
+
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    ast: ast.syntaxId,
+    span: toSourceSpan(ast),
+    callee: calleeExpr,
+    args,
+    typeArguments:
+      typeArguments && typeArguments.length > 0 ? typeArguments : undefined,
+  });
+};
+
+const lowerConstructorArgFromEntry = (
+  entry: Expr | undefined,
+  ctx: LowerContext,
+  scopes: LowerScopeStack
+): { label?: string; expr: HirExprId } => {
+  if (!entry) {
+    throw new Error("constructor argument missing expression");
+  }
+
+  if (isForm(entry) && entry.calls("...")) {
+    const valueExpr = entry.at(1);
+    if (!valueExpr) {
+      throw new Error("spread constructor argument missing value");
+    }
+    return { expr: lowerExpr(valueExpr, ctx, scopes) };
+  }
+
+  if (isForm(entry) && entry.calls(":")) {
+    const nameExpr = entry.at(1);
+    const valueExpr = entry.at(2);
+    if (!isIdentifierAtom(nameExpr) || !valueExpr) {
+      throw new Error("constructor literal argument must name a field");
+    }
+    return {
+      label: nameExpr.value,
+      expr: lowerExpr(valueExpr, ctx, scopes),
+    };
+  }
+
+  if (isIdentifierAtom(entry) || isInternalIdentifierAtom(entry)) {
+    return {
+      label: entry.value,
+      expr: lowerExpr(entry, ctx, scopes),
+    };
+  }
+
+  throw new Error("unsupported constructor literal entry");
 };
 
 const isFieldAccessForm = (form: Form): boolean => {

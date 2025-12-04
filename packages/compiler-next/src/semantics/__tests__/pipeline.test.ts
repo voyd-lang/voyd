@@ -6,6 +6,7 @@ import {
   type HirIdentifierExpr,
   type HirIfExpr,
   type HirNamedTypeExpr,
+  type HirLetStatement,
   type HirPattern,
 } from "../hir/nodes.js";
 import { semanticsPipeline } from "../pipeline.js";
@@ -14,6 +15,10 @@ import type { TypingResult } from "../typing/typing.js";
 import { loadAst } from "./load-ast.js";
 import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline, type BindingResult } from "../binding/binding.js";
+import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
+import { modulePathToString } from "../../modules/path.js";
+import { toSourceSpan } from "../utils.js";
+import { isForm } from "../../parser/index.js";
 
 const expectPrimitiveType = (
   typing: TypingResult,
@@ -460,6 +465,125 @@ describe("semanticsPipeline", () => {
     const floatKey = `${chooseSymbol}<${typing.arena.internPrimitive("f64")}>`;
     expect(targets?.get(intKey)).toBe(intOverload);
     expect(targets?.get(floatKey)).toBe(floatOverload);
+  });
+
+  it("lowers nominal constructor overloads across modules", () => {
+    const animalFixture = "nominal_constructors_cross_module/animal.voyd";
+    const mainFixture = "nominal_constructors_cross_module/main.voyd";
+    const animalAst = loadAst(animalFixture);
+    const mainAst = loadAst(mainFixture);
+
+    const animalPath = {
+      namespace: "src" as const,
+      segments: ["animal"] as const,
+    };
+    const mainPath = {
+      namespace: "src" as const,
+      segments: ["main"] as const,
+    };
+    const animalId = modulePathToString(animalPath);
+    const mainId = modulePathToString(mainPath);
+
+    const animalModule: ModuleNode = {
+      id: animalId,
+      path: animalPath,
+      origin: { kind: "file", filePath: animalFixture },
+      ast: animalAst,
+      source: "",
+      dependencies: [],
+    };
+    const animalGraph: ModuleGraph = {
+      entry: animalId,
+      modules: new Map([[animalId, animalModule]]),
+      diagnostics: [],
+    };
+    const animalSemantics = semanticsPipeline({
+      module: animalModule,
+      graph: animalGraph,
+    });
+
+    const useForm = mainAst.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    );
+    const dependency = {
+      kind: "use" as const,
+      path: animalPath,
+      span: toSourceSpan(useForm ?? mainAst),
+    };
+    const mainModule: ModuleNode = {
+      id: mainId,
+      path: mainPath,
+      origin: { kind: "file", filePath: mainFixture },
+      ast: mainAst,
+      source: "",
+      dependencies: [dependency],
+    };
+    const mainGraph: ModuleGraph = {
+      entry: mainId,
+      modules: new Map([[mainId, mainModule]]),
+      diagnostics: [],
+    };
+
+    const mainSemantics = semanticsPipeline({
+      module: mainModule,
+      graph: mainGraph,
+      exports: new Map([[animalId, animalSemantics.exports]]),
+      dependencies: new Map([[animalId, animalSemantics]]),
+    });
+
+    const animalSymbol = mainSemantics.symbolTable.resolve(
+      "Animal",
+      mainSemantics.symbolTable.rootScope
+    );
+    expect(typeof animalSymbol).toBe("number");
+    if (typeof animalSymbol !== "number") return;
+
+    const constructors =
+      mainSemantics.binding.staticMethods.get(animalSymbol)?.get("init");
+    expect(constructors?.size).toBe(3);
+    const constructorOverloadIds = new Set(
+      Array.from(constructors ?? []).map((symbol) =>
+        mainSemantics.binding.overloadBySymbol.get(symbol)
+      )
+    );
+    expect(constructorOverloadIds.size).toBe(1);
+
+    const mainFn = Array.from(mainSemantics.hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" &&
+        mainSemantics.symbolTable.getSymbol(item.symbol).name === "main"
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) return;
+
+    const mainBlock = mainSemantics.hir.expressions.get(
+      mainFn.body
+    ) as HirBlockExpr | undefined;
+    expect(mainBlock?.exprKind).toBe("block");
+    if (!mainBlock) return;
+
+    const letStatements = mainBlock.statements
+      .map((stmtId) => mainSemantics.hir.statements.get(stmtId))
+      .filter(
+        (stmt): stmt is HirLetStatement =>
+          stmt !== undefined && stmt.kind === "let"
+      );
+    expect(letStatements).toHaveLength(3);
+
+    letStatements.forEach((stmt) => {
+      const initializer = mainSemantics.hir.expressions.get(stmt.initializer);
+      expect(initializer?.exprKind).toBe("call");
+      const call = initializer as HirCallExpr;
+      const callee = mainSemantics.hir.expressions.get(call.callee);
+      if (callee?.exprKind === "overload-set") {
+        expect(constructorOverloadIds.has(callee.set)).toBe(true);
+        return;
+      }
+      expect(callee?.exprKind).toBe("identifier");
+      if (callee?.exprKind === "identifier") {
+        expect(constructors?.has(callee.symbol)).toBe(true);
+      }
+    });
   });
 
   it("rejects ambiguous overloaded calls", () => {

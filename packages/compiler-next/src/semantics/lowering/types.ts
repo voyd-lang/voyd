@@ -22,6 +22,7 @@ import type {
 } from "../binding/binding.js";
 import type { NodeId, OverloadSetId, ScopeId, SymbolId } from "../ids.js";
 import type { SymbolTable } from "../binder/index.js";
+import { DeclTable } from "../decls.js";
 
 export interface LowerInputs {
   builder: HirBuilder;
@@ -46,6 +47,7 @@ export interface LowerContext {
   overloadBySymbol: ReadonlyMap<SymbolId, OverloadSetId>;
   staticMethods: StaticMethodTable;
   moduleMembers: ModuleMemberTable;
+  decls: DeclTable;
 }
 
 export type IdentifierResolution =
