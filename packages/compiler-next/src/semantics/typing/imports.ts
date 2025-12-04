@@ -93,6 +93,12 @@ export const resolveImportedValue = ({
     dependency,
     ctx,
   });
+  registerImportedObjectTemplate({
+    dependency,
+    dependencySymbol: target.symbol,
+    localSymbol: symbol,
+    ctx,
+  });
 
   const exportEntry = findExport(target.symbol, dependency);
   if (!exportEntry) {
@@ -189,6 +195,12 @@ export const resolveImportedTypeExpr = ({
       `missing semantics for imported module ${target.moduleId}`
     );
   }
+  registerImportedObjectTemplate({
+    dependency,
+    dependencySymbol: target.symbol,
+    localSymbol: symbol,
+    ctx,
+  });
 
   const exportEntry = findExport(target.symbol, dependency);
   if (!exportEntry) {
@@ -416,6 +428,114 @@ const mapTypeParam = (
   return fresh;
 };
 
+export const registerImportedObjectTemplate = ({
+  dependency,
+  dependencySymbol,
+  localSymbol,
+  ctx,
+}: {
+  dependency: DependencySemantics;
+  dependencySymbol: SymbolId;
+  localSymbol: SymbolId;
+  ctx: TypingContext;
+}): void => {
+  if (ctx.objects.getTemplate(localSymbol)) {
+    return;
+  }
+  const template = dependency.typing.objects.getTemplate(dependencySymbol);
+  if (!template) {
+    return;
+  }
+
+  const typeParamMap = new Map<TypeParamId, TypeParamId>();
+  const cache = new Map<TypeId, TypeId>();
+  const mapOwner = (symbol: SymbolId): SymbolId => {
+    if (symbol === dependencySymbol) {
+      return localSymbol;
+    }
+    if (symbol === dependency.typing.objects.base.symbol) {
+      return ctx.objects.base.symbol;
+    }
+    try {
+      return mapDependencySymbolToLocal({ owner: symbol, dependency, ctx });
+    } catch {
+      const depRecord = dependency.symbolTable.getSymbol(symbol);
+      return ctx.symbolTable.declare({
+        name: depRecord.name,
+        kind: depRecord.kind,
+        declaredAt: ctx.hir.module.ast,
+      });
+    }
+  };
+  const translation = createTranslation({
+    sourceArena: dependency.typing.arena,
+    targetArena: ctx.arena,
+    paramMap: typeParamMap,
+    cache,
+    mapSymbol: mapOwner,
+  });
+
+  const paramSymbolMap = new Map<SymbolId, SymbolId>();
+  const mapParamSymbol = (symbol: SymbolId): SymbolId => {
+    const existing = paramSymbolMap.get(symbol);
+    if (typeof existing === "number") {
+      return existing;
+    }
+    const depRecord = dependency.symbolTable.getSymbol(symbol);
+    const local = ctx.symbolTable.declare({
+      name: depRecord.name,
+      kind: "type-parameter",
+      declaredAt: ctx.hir.module.ast,
+    });
+    paramSymbolMap.set(symbol, local);
+    return local;
+  };
+
+  const translateTypeParam = (id: TypeParamId | undefined) =>
+    typeof id === "number" ? typeParamMap.get(id) ?? id : undefined;
+
+  const translateDeclaringParams = (
+    params?: readonly TypeParamId[]
+  ): readonly TypeParamId[] | undefined => {
+    const translated = params
+      ?.map(translateTypeParam)
+      .filter((entry): entry is TypeParamId => typeof entry === "number");
+    return translated && translated.length > 0 ? translated : undefined;
+  };
+
+  const params = template.params.map((param) => ({
+    symbol: mapParamSymbol(param.symbol),
+    typeParam: mapTypeParam(param.typeParam, typeParamMap, ctx),
+    constraint: param.constraint
+      ? translation(param.constraint)
+      : undefined,
+  }));
+
+  const fields = template.fields.map((field) => ({
+    name: field.name,
+    type: translation(field.type),
+    declaringParams: translateDeclaringParams(field.declaringParams),
+  }));
+
+  ctx.objects.registerTemplate({
+    symbol: localSymbol,
+    params,
+    nominal: translation(template.nominal),
+    structural: translation(template.structural),
+    type: translation(template.type),
+    fields,
+    baseNominal: template.baseNominal
+      ? translation(template.baseNominal)
+      : undefined,
+  });
+  const name = ctx.symbolTable.getSymbol(localSymbol).name;
+  ctx.objects.setName(name, localSymbol);
+  if (params.length === 0) {
+    const state = createTypingState();
+    ensureObjectType(localSymbol, ctx, state, []);
+  }
+};
+
 const mapDependencySymbolToLocal = ({
   owner,
   dependency,
@@ -446,6 +566,17 @@ const mapDependencySymbolToLocal = ({
   const bucket = ctx.importAliasesByModule.get(dependency.moduleId) ?? new Map();
   bucket.set(owner, declared);
   ctx.importAliasesByModule.set(dependency.moduleId, bucket);
+  if (
+    exportEntry.kind === "type" ||
+    dependency.typing.objects.getTemplate(owner)
+  ) {
+    registerImportedObjectTemplate({
+      dependency,
+      dependencySymbol: owner,
+      localSymbol: declared,
+      ctx,
+    });
+  }
   return declared;
 };
 

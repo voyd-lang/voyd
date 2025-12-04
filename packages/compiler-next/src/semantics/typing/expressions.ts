@@ -2224,7 +2224,6 @@ const typeOverloadedCall = (
     }
     return { symbol, signature };
   });
-
   const matches = candidates.filter(({ symbol, signature }) =>
     matchesOverloadSignature(symbol, signature, argTypes, ctx, state)
   );

@@ -6,6 +6,7 @@ import {
   type HirIdentifierExpr,
   type HirIfExpr,
   type HirNamedTypeExpr,
+  type HirLetStatement,
   type HirPattern,
 } from "../hir/nodes.js";
 import { semanticsPipeline } from "../pipeline.js";
@@ -14,6 +15,12 @@ import type { TypingResult } from "../typing/typing.js";
 import { loadAst } from "./load-ast.js";
 import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline, type BindingResult } from "../binding/binding.js";
+import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
+import { modulePathToString } from "../../modules/path.js";
+import { toSourceSpan } from "../utils.js";
+import { isForm } from "../../parser/index.js";
+
+type SemanticsResult = ReturnType<typeof semanticsPipeline>;
 
 const expectPrimitiveType = (
   typing: TypingResult,
@@ -85,6 +92,109 @@ const stripPatternSpansFromHir = (hir: ReturnType<typeof semanticsPipeline>["hir
     }
   });
   return hir;
+};
+
+const buildModule = ({
+  fixture,
+  segments,
+  ast,
+  dependencies = [],
+}: {
+  fixture: string;
+  segments: readonly string[];
+  ast?: ReturnType<typeof loadAst>;
+  dependencies?: ModuleNode["dependencies"];
+}): { module: ModuleNode; graph: ModuleGraph } => {
+  const parsedAst = ast ?? loadAst(fixture);
+  const path = { namespace: "src" as const, segments };
+  const id = modulePathToString(path);
+  const module: ModuleNode = {
+    id,
+    path,
+    origin: { kind: "file", filePath: fixture },
+    ast: parsedAst,
+    source: "",
+    dependencies,
+  };
+  const graph: ModuleGraph = {
+    entry: id,
+    modules: new Map([[id, module]]),
+    diagnostics: [],
+  };
+  return { module, graph };
+};
+
+const expectAnimalConstructorBindings = (
+  semantics: SemanticsResult
+): void => {
+  let animalSymbol = semantics.symbolTable.resolve(
+    "Animal",
+    semantics.symbolTable.rootScope
+  );
+  if (typeof animalSymbol !== "number") {
+    const moduleSymbol = semantics.symbolTable.resolve(
+      "animal",
+      semantics.symbolTable.rootScope
+    );
+    const moduleMember = semantics.binding.moduleMembers
+      .get(typeof moduleSymbol === "number" ? moduleSymbol : -1)
+      ?.get("Animal");
+    const resolvedMember =
+      moduleMember && moduleMember.size > 0
+        ? moduleMember.values().next().value
+        : undefined;
+    animalSymbol =
+      typeof resolvedMember === "number" ? resolvedMember : animalSymbol;
+  }
+  expect(typeof animalSymbol).toBe("number");
+  if (typeof animalSymbol !== "number") return;
+
+  const constructors =
+    semantics.binding.staticMethods.get(animalSymbol)?.get("init");
+  expect(constructors?.size).toBe(3);
+  const constructorOverloadIds = new Set(
+    Array.from(constructors ?? []).map((symbol) =>
+      semantics.binding.overloadBySymbol.get(symbol)
+    )
+  );
+  expect(constructorOverloadIds.size).toBe(1);
+
+  const mainFn = Array.from(semantics.hir.items.values()).find(
+    (item): item is HirFunction =>
+      item.kind === "function" &&
+      semantics.symbolTable.getSymbol(item.symbol).name === "main"
+  );
+  expect(mainFn).toBeDefined();
+  if (!mainFn) return;
+
+  const mainBlock = semantics.hir.expressions.get(
+    mainFn.body
+  ) as HirBlockExpr | undefined;
+  expect(mainBlock?.exprKind).toBe("block");
+  if (!mainBlock) return;
+
+  const letStatements = mainBlock.statements
+    .map((stmtId) => semantics.hir.statements.get(stmtId))
+    .filter(
+      (stmt): stmt is HirLetStatement =>
+        stmt !== undefined && stmt.kind === "let"
+    );
+  expect(letStatements).toHaveLength(3);
+
+  letStatements.forEach((stmt) => {
+    const initializer = semantics.hir.expressions.get(stmt.initializer);
+    expect(initializer?.exprKind).toBe("call");
+    const call = initializer as HirCallExpr;
+    const callee = semantics.hir.expressions.get(call.callee);
+    if (callee?.exprKind === "overload-set") {
+      expect(constructorOverloadIds.has(callee.set)).toBe(true);
+      return;
+    }
+    expect(callee?.exprKind).toBe("identifier");
+    if (callee?.exprKind === "identifier") {
+      expect(constructors?.has(callee.symbol)).toBe(true);
+    }
+  });
 };
 
 describe("semanticsPipeline", () => {
@@ -460,6 +570,83 @@ describe("semanticsPipeline", () => {
     const floatKey = `${chooseSymbol}<${typing.arena.internPrimitive("f64")}>`;
     expect(targets?.get(intKey)).toBe(intOverload);
     expect(targets?.get(floatKey)).toBe(floatOverload);
+  });
+
+  it("lowers nominal constructor overloads across modules", () => {
+    const animalFixture = "nominal_constructors_cross_module/animal.voyd";
+    const mainFixture = "nominal_constructors_cross_module/main.voyd";
+    const animal = buildModule({
+      fixture: animalFixture,
+      segments: ["animal"],
+    });
+    const animalSemantics = semanticsPipeline({
+      module: animal.module,
+      graph: animal.graph,
+    });
+
+    const mainAst = loadAst(mainFixture);
+    const useForm = mainAst.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    );
+    const dependency = {
+      kind: "use" as const,
+      path: animal.module.path,
+      span: toSourceSpan(useForm ?? mainAst),
+    };
+    const main = buildModule({
+      fixture: mainFixture,
+      ast: mainAst,
+      segments: ["main"],
+      dependencies: [dependency],
+    });
+
+    const mainSemantics = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([[animal.module.id, animalSemantics.exports]]),
+      dependencies: new Map([[animal.module.id, animalSemantics]]),
+    });
+
+    expectAnimalConstructorBindings(mainSemantics);
+  });
+
+  it("binds constructor overloads through module namespaces", () => {
+    const animalFixture = "nominal_constructors_namespace/animal.voyd";
+    const mainFixture = "nominal_constructors_namespace/main.voyd";
+    const animal = buildModule({
+      fixture: animalFixture,
+      segments: ["animal"],
+    });
+    const animalSemantics = semanticsPipeline({
+      module: animal.module,
+      graph: animal.graph,
+    });
+
+    const mainAst = loadAst(mainFixture);
+    const useForm = mainAst.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    );
+    const dependency = {
+      kind: "use" as const,
+      path: animal.module.path,
+      span: toSourceSpan(useForm ?? mainAst),
+    };
+    const main = buildModule({
+      fixture: mainFixture,
+      ast: mainAst,
+      segments: ["main"],
+      dependencies: [dependency],
+    });
+
+    const mainSemantics = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([[animal.module.id, animalSemantics.exports]]),
+      dependencies: new Map([[animal.module.id, animalSemantics]]),
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
+    expectAnimalConstructorBindings(mainSemantics);
   });
 
   it("rejects ambiguous overloaded calls", () => {

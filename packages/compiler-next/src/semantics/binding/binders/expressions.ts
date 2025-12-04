@@ -1,7 +1,9 @@
 import {
   type Expr,
   type Form,
+  type IdentifierAtom,
   type Syntax,
+  type InternalIdentifierAtom,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
@@ -22,6 +24,7 @@ import type { BinderScopeTracker } from "./scope-tracker.js";
 import type { HirBindingKind } from "../../hir/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
 import type { ModuleMemberTable } from "../types.js";
+import { extractConstructorTargetIdentifier } from "../../constructors.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -63,6 +66,10 @@ export const bindExpr = (
   if (expr.calls("var") || expr.calls("let")) {
     bindVar(expr, ctx, tracker);
     return;
+  }
+
+  if (isForm(expr)) {
+    maybeBindConstructorCall(expr, ctx, tracker);
   }
 
   for (const child of expr.toArray()) {
@@ -311,6 +318,23 @@ const declareLambdaParam = (
   throw new Error("unsupported lambda parameter form");
 };
 
+const maybeBindConstructorCall = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  if (form.length < 2) {
+    return;
+  }
+  const callee = form.at(0);
+  const identifier = extractConstructorTargetIdentifier(callee);
+  ensureConstructorImportForTarget({
+    identifier,
+    ctx,
+    scope: tracker.current(),
+  });
+};
+
 const bindNamespaceAccess = (
   form: Form,
   ctx: BindingContext,
@@ -359,6 +383,11 @@ const bindNamespaceAccess = (
       syntax: member as Syntax,
       scope: tracker.current(),
       ctx,
+    });
+    ensureConstructorImportForTarget({
+      identifier: extractConstructorTargetIdentifier(member),
+      ctx,
+      scope: tracker.current(),
     });
     return;
   }
@@ -409,7 +438,7 @@ const ensureStaticMethodImport = ({
     return;
   }
 
-  const imported: SymbolId[] = [];
+  const imported: { local: SymbolId; overloadId?: number }[] = [];
   methodSymbols.forEach((methodSymbol) => {
     const fn = dependency.functions.find(
       (entry) => entry.symbol === methodSymbol
@@ -434,16 +463,92 @@ const ensureStaticMethodImport = ({
       visibility: "module",
       span: toSourceSpan(syntax),
     });
-    imported.push(local);
+    const overloadId = dependency.overloadBySymbol.get(methodSymbol);
+    imported.push({ local, overloadId });
   });
 
   if (imported.length === 0) {
     return;
   }
 
+  const locals = imported.map((entry) => entry.local);
   const bucket = ctx.staticMethods.get(targetSymbol) ?? new Map();
-  bucket.set(memberName, new Set(imported));
+  bucket.set(memberName, new Set(locals));
   ctx.staticMethods.set(targetSymbol, bucket);
+
+  const importedOverloadIds = new Set(
+    imported
+      .map((entry) => entry.overloadId)
+      .filter((entry): entry is number => typeof entry === "number")
+  );
+  const needsImportedSet = locals.length > 1 || importedOverloadIds.size === 1;
+  if (needsImportedSet) {
+    const nextId =
+      Math.max(
+        -1,
+        ...ctx.importedOverloadOptions.keys(),
+        ...ctx.overloads.keys()
+      ) + 1;
+    const setId = importedOverloadIds.size === 1 ? nextId : nextId;
+    const existing = ctx.importedOverloadOptions.get(setId);
+    const merged = existing
+      ? Array.from(new Set([...existing, ...locals]))
+      : locals;
+    ctx.importedOverloadOptions.set(setId, merged);
+    merged.forEach((local) => ctx.overloadBySymbol.set(local, setId));
+  }
+};
+
+const ensureConstructorImport = ({
+  targetSymbol,
+  syntax,
+  scope,
+  ctx,
+}: {
+  targetSymbol: number;
+  syntax: Syntax;
+  scope: ScopeId;
+  ctx: BindingContext;
+}): void => {
+  const constructors = ctx.staticMethods.get(targetSymbol)?.get("init");
+  if (constructors?.size) {
+    return;
+  }
+  ensureStaticMethodImport({
+    targetSymbol,
+    memberName: "init",
+    syntax,
+    scope,
+    ctx,
+  });
+};
+
+const ensureConstructorImportForTarget = ({
+  identifier,
+  ctx,
+  scope,
+}: {
+  identifier?: IdentifierAtom | InternalIdentifierAtom;
+  ctx: BindingContext;
+  scope: ScopeId;
+}): void => {
+  if (!identifier) {
+    return;
+  }
+  const targetSymbol = ctx.symbolTable.resolve(identifier.value, scope);
+  if (typeof targetSymbol !== "number") {
+    return;
+  }
+  const record = ctx.symbolTable.getSymbol(targetSymbol);
+  if (record.kind !== "type") {
+    return;
+  }
+  ensureConstructorImport({
+    targetSymbol,
+    syntax: identifier,
+    scope,
+    ctx,
+  });
 };
 
 const extractMemberName = (expr: Expr | undefined): string | undefined => {
@@ -534,7 +639,12 @@ const declareModuleMemberImport = ({
     ? exported.symbols
     : [exported.symbol];
   const locals: number[] = [];
+  const dependency = ctx.dependencies.get(exported.moduleId);
   symbols.forEach((symbol) => {
+    const dependencyRecord = dependency?.symbolTable.getSymbol(symbol);
+    const dependencyMetadata = (dependencyRecord?.metadata ?? {}) as {
+      entity?: string;
+    };
     const local = ctx.symbolTable.declare(
       {
         name: exported.name,
@@ -542,6 +652,9 @@ const declareModuleMemberImport = ({
         declaredAt: syntax.syntaxId,
         metadata: {
           import: { moduleId: exported.moduleId, symbol },
+          ...(dependencyMetadata.entity
+            ? { entity: dependencyMetadata.entity }
+            : {}),
         },
       },
       scope
