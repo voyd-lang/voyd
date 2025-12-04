@@ -1,6 +1,6 @@
 import { toSourceSpan } from "../utils.js";
 import { createLowerScopeStack } from "./context.js";
-import { lowerExpr } from "./expressions.js";
+import { lowerExpr } from "./expressions/index.js";
 import { lowerTypeExpr, lowerTypeParameters } from "./type-expressions.js";
 import type { LowerContext, ModuleDeclaration } from "./types.js";
 import type {
