@@ -15,9 +15,18 @@ export const typeBlockExpr = (
   state: TypingState,
   expectedType?: TypeId
 ): TypeId => {
-  expr.statements.forEach((stmtId) => typeStatement(stmtId, ctx, state));
+  let lastStatementReturnType: TypeId | undefined;
+  expr.statements.forEach((stmtId, index) => {
+    const stmtReturnType = typeStatement(stmtId, ctx, state);
+    if (index === expr.statements.length - 1) {
+      lastStatementReturnType = stmtReturnType;
+    }
+  });
   if (typeof expr.value === "number") {
     return typeExpression(expr.value, ctx, state, expectedType);
+  }
+  if (lastStatementReturnType !== undefined) {
+    return lastStatementReturnType;
   }
   return ctx.primitives.void;
 };
@@ -26,7 +35,7 @@ const typeStatement = (
   stmtId: HirStmtId,
   ctx: TypingContext,
   state: TypingState
-): void => {
+): TypeId | undefined => {
   const stmt = ctx.hir.statements.get(stmtId);
   if (!stmt) {
     throw new Error(`missing HirStatement ${stmtId}`);
@@ -35,7 +44,7 @@ const typeStatement = (
   switch (stmt.kind) {
     case "expr-stmt":
       typeExpression(stmt.expr, ctx, state);
-      return;
+      return undefined;
     case "return":
       if (typeof state.currentFunction?.returnType !== "number") {
         throw new Error("return statement outside of function");
@@ -56,7 +65,7 @@ const typeStatement = (
           state,
           "return statement"
         );
-        return;
+        return expectedReturnType;
       }
 
       ensureTypeMatches(
@@ -66,10 +75,10 @@ const typeStatement = (
         state,
         "return statement"
       );
-      return;
+      return expectedReturnType;
     case "let":
       typeLetStatement(stmt, ctx, state);
-      return;
+      return undefined;
     default: {
       const unreachable: never = stmt;
       throw new Error("unsupported statement kind");

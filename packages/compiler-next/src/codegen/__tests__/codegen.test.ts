@@ -114,6 +114,21 @@ describe("next codegen", () => {
     expect((main as () => number)()).toBe(55);
   });
 
+  it("handles return statements and preserves tail-call optimization", () => {
+    const ast = loadAst("return_statements.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module } = codegen(semantics);
+    const text = module.emitText();
+    expect(text).toContain("return_call");
+    const instance = getWasmInstance(module);
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(15);
+    const guarded = instance.exports.guarded_sum;
+    expect(typeof guarded).toBe("function");
+    expect((guarded as (n: number) => number)(-1)).toBe(-1);
+  });
+
   it("emits wasm for the var inference sample and runs main()", () => {
     const main = loadMain("var_inference.voyd");
     expect(main()).toBe(55);

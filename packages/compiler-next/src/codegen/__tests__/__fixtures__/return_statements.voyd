@@ -1,0 +1,12 @@
+pub fn tail_sum(n: i32, acc: i32) -> i32
+  if n == 0 then:
+    return acc
+  tail_sum(n - 1, acc + n)
+
+pub fn guarded_sum(n: i32) -> i32
+  if n < 0 then:
+    return -1
+  tail_sum(n, 0)
+
+pub fn main() -> i32
+  return guarded_sum(5)
