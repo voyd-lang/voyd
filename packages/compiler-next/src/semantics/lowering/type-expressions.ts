@@ -43,7 +43,10 @@ export const lowerTypeExpr = (
     return lowerUnionTypeExpr(expr, ctx, currentScope);
   }
 
-  if (isForm(expr) && expr.calls("->")) {
+  if (
+    isForm(expr) &&
+    (expr.calls("->") || expr.calls(":") || expr.calls("fn"))
+  ) {
     return lowerFunctionTypeExpr(expr, ctx, currentScope);
   }
 
