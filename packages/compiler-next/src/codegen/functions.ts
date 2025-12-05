@@ -8,6 +8,7 @@ import type {
 } from "./context.js";
 import { compileExpression } from "./expressions/index.js";
 import { wasmTypeFor } from "./types.js";
+import { isPackageVisible } from "../semantics/hir/index.js";
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const unknown = ctx.typing.arena.internPrimitive("unknown");
@@ -197,7 +198,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
 export const emitModuleExports = (ctx: CodegenContext): void => {
   ctx.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
-    if (item.visibility !== "public") return;
+    if (!isPackageVisible(item.visibility)) return;
     const symbolRecord = ctx.symbolTable.getSymbol(item.symbol);
     const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
       intrinsic?: boolean;
