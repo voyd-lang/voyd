@@ -6,6 +6,7 @@ import {
   bindTuplePatternFromType,
   recordPatternType,
 } from "./patterns.js";
+import { mergeBranchType } from "./branching.js";
 import { ensureTypeMatches, resolveTypeExpr } from "../type-system.js";
 import type { TypingContext, TypingState } from "../types.js";
 
@@ -15,20 +16,31 @@ export const typeBlockExpr = (
   state: TypingState,
   expectedType?: TypeId
 ): TypeId => {
-  let lastStatementReturnType: TypeId | undefined;
-  expr.statements.forEach((stmtId, index) => {
+  let returnType: TypeId | undefined;
+
+  expr.statements.forEach((stmtId) => {
     const stmtReturnType = typeStatement(stmtId, ctx, state);
-    if (index === expr.statements.length - 1) {
-      lastStatementReturnType = stmtReturnType;
+    if (typeof stmtReturnType === "number") {
+      returnType = mergeBranchType({
+        acc: returnType,
+        next: stmtReturnType,
+        ctx,
+        state,
+      });
     }
   });
+
   if (typeof expr.value === "number") {
-    return typeExpression(expr.value, ctx, state, expectedType);
+    const valueType = typeExpression(expr.value, ctx, state, expectedType);
+    return mergeBranchType({
+      acc: returnType,
+      next: valueType,
+      ctx,
+      state,
+    });
   }
-  if (lastStatementReturnType !== undefined) {
-    return lastStatementReturnType;
-  }
-  return ctx.primitives.void;
+
+  return returnType ?? ctx.primitives.void;
 };
 
 const typeStatement = (
@@ -51,6 +63,11 @@ const typeStatement = (
       }
 
       const expectedReturnType = state.currentFunction.returnType;
+      const signature =
+        typeof state.currentFunction.functionSymbol === "number"
+          ? ctx.functions.getSignature(state.currentFunction.functionSymbol)
+          : undefined;
+      const enforceReturnType = signature?.annotatedReturn === true;
       if (typeof stmt.value === "number") {
         const valueType = typeExpression(
           stmt.value,
@@ -58,24 +75,45 @@ const typeStatement = (
           state,
           expectedReturnType
         );
+        if (enforceReturnType) {
+          ensureTypeMatches(
+            valueType,
+            expectedReturnType,
+            ctx,
+            state,
+            "return statement"
+          );
+        }
+        if (state.currentFunction) {
+          state.currentFunction.observedReturnType = mergeBranchType({
+            acc: state.currentFunction.observedReturnType,
+            next: valueType,
+            ctx,
+            state,
+          });
+        }
+        return valueType;
+      }
+
+      const voidType = ctx.primitives.void;
+      if (enforceReturnType) {
         ensureTypeMatches(
-          valueType,
+          voidType,
           expectedReturnType,
           ctx,
           state,
-          "return statement"
-        );
-        return expectedReturnType;
-      }
-
-      ensureTypeMatches(
-        ctx.primitives.void,
-        expectedReturnType,
-        ctx,
-        state,
-        "return statement"
-      );
-      return expectedReturnType;
+            "return statement"
+          );
+        }
+        if (state.currentFunction) {
+          state.currentFunction.observedReturnType = mergeBranchType({
+            acc: state.currentFunction.observedReturnType,
+            next: voidType,
+            ctx,
+            state,
+          });
+        }
+      return voidType;
     case "let":
       typeLetStatement(stmt, ctx, state);
       return undefined;

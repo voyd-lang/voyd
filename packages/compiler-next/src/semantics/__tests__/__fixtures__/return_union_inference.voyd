@@ -1,0 +1,17 @@
+obj Some {
+  v: i32
+}
+
+obj Other {
+  v: i32
+}
+
+fn choose()
+  if 1 == 1 then:
+    return(Some { v: 1 })
+
+  return(Other { v: 2 })
+
+pub fn main()
+  choose()
+  0

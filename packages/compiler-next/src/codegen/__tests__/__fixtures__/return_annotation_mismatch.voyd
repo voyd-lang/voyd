@@ -1,0 +1,13 @@
+obj None {}
+obj Some<T> { v: T }
+obj Other<T> { v: T }
+
+type Option<T> = None | Some<T>
+
+pub fn main() -> Option<i32>
+  let x = 2
+
+  if x == 2 then:
+    return(Other { v: 30 })
+
+  return(None {})

@@ -139,6 +139,23 @@ describe("next codegen", () => {
     expect(main()).toBe(120);
   });
 
+  it("infers union return types across nominal branches", () => {
+    const main = loadMain("union_return_nominals.voyd");
+    expect(main()).toBe(42);
+  });
+
+  it("rejects return values that do not match annotated unions", () => {
+    const ast = loadAst("return_annotation_mismatch.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(/return (type|statement)/i);
+  });
+
+  it("rejects incompatible primitive return branches", () => {
+    const ast = loadAst("return_mixed_primitives.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /(branch type mismatch|type mismatch)/
+    );
+  });
+
   it("emits wasm for the function overloads sample and runs both call sites", () => {
     const instance = loadWasmInstance("function_overloads.voyd");
 

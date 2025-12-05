@@ -1,0 +1,5 @@
+pub fn main()
+  let x = 10
+  if x > 5 then:
+    return 1.0
+  return 1

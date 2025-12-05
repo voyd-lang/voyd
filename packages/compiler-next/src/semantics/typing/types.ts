@@ -85,6 +85,7 @@ export interface FunctionSignature {
   parameters: readonly ParamSignature[];
   returnType: TypeId;
   hasExplicitReturn: boolean;
+  annotatedReturn: boolean;
   typeParams?: readonly FunctionTypeParam[];
   scheme: TypeSchemeId;
   typeParamMap?: ReadonlyMap<SymbolId, TypeId>;
@@ -478,6 +479,7 @@ export interface FunctionScope {
   substitution?: ReadonlyMap<TypeParamId, TypeId>;
   memberOf?: SymbolId;
   functionSymbol?: SymbolId;
+  observedReturnType?: TypeId;
 }
 
 export interface TypingState {

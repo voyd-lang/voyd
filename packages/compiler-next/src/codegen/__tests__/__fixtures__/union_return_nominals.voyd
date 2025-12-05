@@ -1,0 +1,23 @@
+obj None {}
+obj Some {
+  v: i32
+}
+obj Other {
+  v: i32
+}
+
+fn choose(x: i32) -> (None | Some | Other)
+  if x > 2 then:
+    return(Some { v: 10 })
+
+  if x < 2 then:
+    return(Some { v: 20 })
+
+  if x == 2 then:
+    return(Other { v: 30 })
+
+  return(None {})
+
+pub fn main()
+  choose(2)
+  42
