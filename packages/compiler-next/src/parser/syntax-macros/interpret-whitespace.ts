@@ -220,38 +220,50 @@ function hoistFnBlock(expr: Expr): Expr {
     return expr instanceof CallForm ? cloned.toCall() : cloned;
   }
 
-  const last = cloned.at(-1);
-  const maybeFnBlock = extractTrailingBlock(last);
-  if (!maybeFnBlock) {
+  const { expr: withoutBlock, block } = splitTrailingBlock(cloned);
+  if (!block || !p.isForm(withoutBlock)) {
     return expr instanceof CallForm ? cloned.toCall() : cloned;
   }
 
-  const { remaining, block } = maybeFnBlock;
-  const baseElements = cloned.toArray();
-  baseElements.pop();
-  if (remaining) baseElements.push(remaining);
-  baseElements.push(block);
-
   const hoisted = new Form({
     location: cloned.location?.clone(),
-    elements: baseElements,
+    elements: [...withoutBlock.toArray(), block],
   });
   return expr instanceof CallForm ? hoisted.toCall() : hoisted;
 };
 
-const extractTrailingBlock = (
-  expr?: Expr
-): { remaining?: Expr; block: Form } | undefined => {
-  if (!p.isForm(expr)) return undefined;
+type TrailingBlockExtraction = { expr?: Expr; block?: Form };
+
+const splitTrailingBlock = (expr: Expr): TrailingBlockExtraction => {
+  if (!p.isForm(expr)) return { expr };
 
   const last = expr.at(-1);
-  if (!p.isForm(last) || !last.calls("block")) {
-    return undefined;
+  if (!last) return { expr };
+
+  if (p.isForm(last) && last.calls("block")) {
+    const elements = expr.toArray().slice(0, -1);
+    const rebuilt = new Form({
+      location: expr.location?.clone(),
+      elements,
+    });
+    const remaining =
+      expr instanceof CallForm ? rebuilt.toCall() : rebuilt.unwrap();
+    return { expr: remaining, block: last };
   }
 
-  const rest = expr.toArray().slice(0, -1);
-  const remaining = rest.length ? new Form(rest).unwrap() : undefined;
-  return { remaining, block: last };
+  const { expr: trimmedLast, block } = splitTrailingBlock(last);
+  if (!block) return { expr };
+
+  const elements = expr.toArray().slice(0, -1);
+  if (trimmedLast) elements.push(trimmedLast);
+
+  const rebuilt = new Form({
+    location: expr.location?.clone(),
+    elements,
+  });
+  const remaining =
+    expr instanceof CallForm ? rebuilt.toCall() : rebuilt.unwrap();
+  return { expr: remaining, block };
 };
 
 const addSibling = (child: Expr, siblings: Expr[]) => {

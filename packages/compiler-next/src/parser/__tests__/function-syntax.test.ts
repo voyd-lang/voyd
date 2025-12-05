@@ -65,3 +65,22 @@ fn describe(x: NumBox) -> Some<i32> | Some<f64>
     ],
   ]);
 });
+
+test("parses union return types with multiple pipes without stealing the block", (t) => {
+  const code = `
+fn choose(x: i32) -> None | Some | Other
+  foo(x)`;
+
+  t.expect(toPlain(code)).toEqual([
+    "ast",
+    [
+      "fn",
+      [
+        "->",
+        ["choose", [":", "x", "i32"]],
+        ["|", "None", ["|", "Some", "Other"]],
+      ],
+      ["block", ["foo", "x"]],
+    ],
+  ]);
+});

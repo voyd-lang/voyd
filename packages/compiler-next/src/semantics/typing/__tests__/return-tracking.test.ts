@@ -98,6 +98,6 @@ describe("return tracking", () => {
         overloads: new Map(),
         decls: ctx.decls,
       })
-    ).toThrow(/return statement/);
+    ).toThrow(/return value does not match declared return type/);
   });
 });
