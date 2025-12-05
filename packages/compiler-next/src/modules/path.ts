@@ -45,10 +45,18 @@ export const resolveModuleFile = async (
   const root = await resolveRoot(path, normalizedRoots);
   if (!root) return undefined;
 
-  const segmentsWithPkg =
-    path.namespace === "pkg" && path.packageName
-      ? [path.packageName, ...path.segments]
+  const packageSegments =
+    path.namespace === "pkg" && path.segments.length === 0
+      ? ["pkg"]
       : path.segments;
+  const rootIncludesPackage =
+    path.namespace === "pkg" &&
+    path.packageName !== undefined &&
+    root.split(sep).at(-1) === path.packageName;
+  const segmentsWithPkg =
+    path.namespace === "pkg" && path.packageName && !rootIncludesPackage
+      ? [path.packageName, ...packageSegments]
+      : packageSegments;
 
   const candidate = join(root, ...segmentsWithPkg) + VOYD_EXTENSION;
   const exists = await host.fileExists(candidate);

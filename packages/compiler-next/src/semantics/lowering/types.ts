@@ -23,12 +23,16 @@ import type {
 import type { NodeId, OverloadSetId, ScopeId, SymbolId } from "../ids.js";
 import type { SymbolTable } from "../binder/index.js";
 import { DeclTable } from "../decls.js";
+import type { ModulePath } from "../../modules/types.js";
 
 export interface LowerInputs {
   builder: HirBuilder;
   binding: BindingResult;
   moduleNodeId: NodeId;
   moduleId?: string;
+  modulePath: ModulePath;
+  packageId: string;
+  isPackageRoot: boolean;
 }
 
 export interface LowerScopeStack {
@@ -48,6 +52,9 @@ export interface LowerContext {
   staticMethods: StaticMethodTable;
   moduleMembers: ModuleMemberTable;
   decls: DeclTable;
+  modulePath: ModulePath;
+  packageId: string;
+  isPackageRoot: boolean;
 }
 
 export type IdentifierResolution =

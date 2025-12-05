@@ -15,7 +15,68 @@ import type {
 } from "../ids.js";
 import type { IntrinsicAttribute } from "../../parser/attributes.js";
 
-export type HirVisibility = "public" | "module";
+export type HirVisibilityLevel = "object" | "module" | "package" | "public";
+
+export interface HirVisibility {
+  level: HirVisibilityLevel;
+  api?: boolean;
+}
+
+export type HirMemberModifier = "api" | "pri";
+
+export const moduleVisibility = (): HirVisibility => ({ level: "module" });
+export const packageVisibility = (): HirVisibility => ({ level: "package" });
+export const publicVisibility = (): HirVisibility => ({ level: "public" });
+export const objectVisibility = (): HirVisibility => ({ level: "object" });
+export const withApi = (visibility: HirVisibility): HirVisibility => ({
+  ...visibility,
+  api: true,
+});
+
+export const visibilityRank = (visibility: HirVisibilityLevel): number => {
+  switch (visibility) {
+    case "object":
+      return 0;
+    case "module":
+      return 1;
+    case "package":
+      return 2;
+    case "public":
+      return 3;
+  }
+};
+
+export const maxVisibility = (
+  a: HirVisibility,
+  b: HirVisibility
+): HirVisibility =>
+  visibilityRank(a.level) >= visibilityRank(b.level)
+    ? { ...a, api: a.api || b.api }
+    : { ...b, api: a.api || b.api };
+
+export const inheritMemberVisibility = ({
+  ownerVisibility,
+  modifier,
+}: {
+  ownerVisibility: HirVisibility;
+  modifier?: HirMemberModifier;
+}): HirVisibility => {
+  const baseLevel =
+    ownerVisibility.level === "public" ? "package" : ownerVisibility.level;
+  if (modifier === "pri") {
+    return objectVisibility();
+  }
+  if (modifier === "api") {
+    return withApi({ level: baseLevel });
+  }
+  return { level: baseLevel };
+};
+
+export const isPublicVisibility = (visibility: HirVisibility): boolean =>
+  visibility.level === "public";
+
+export const isPackageVisible = (visibility: HirVisibility): boolean =>
+  visibility.level === "package" || visibility.level === "public";
 
 export interface HirNodeBase {
   id: HirId;
@@ -150,6 +211,7 @@ export interface HirFunction extends HirItemBase {
   kind: "function";
   decl?: FunctionDeclId;
   symbol: SymbolId;
+  memberVisibility?: HirVisibility;
   typeParameters?: readonly HirTypeParameter[];
   parameters: readonly HirParameter[];
   returnType?: HirTypeExpr;
@@ -223,6 +285,7 @@ export interface HirTypeAlias extends HirItemBase {
 export interface HirObjectField {
   name: string;
   symbol: SymbolId;
+  visibility: HirVisibility;
   type?: HirTypeExpr;
   span: SourceSpan;
 }

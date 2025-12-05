@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SymbolTable } from "../../binder/index.js";
-import { createHirBuilder } from "../../hir/index.js";
+import { createHirBuilder, moduleVisibility } from "../../hir/index.js";
 import type { HirPattern, HirTypeExpr } from "../../hir/index.js";
 import type { NodeId, SourceSpan } from "../../ids.js";
 import { DeclTable } from "../../decls.js";
@@ -67,7 +67,7 @@ describe("typing validation invariants", () => {
 
     builder.addFunction({
       kind: "function",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol: fnSymbol,
       parameters: [
         {
@@ -128,7 +128,7 @@ describe("typing validation invariants", () => {
     };
     builder.addItem({
       kind: "type-alias",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol: aliasSymbol,
       typeParameters: [{ symbol: typeParamSymbol, span }],
       target: aliasTarget,
@@ -174,7 +174,7 @@ describe("typing validation invariants", () => {
 
     builder.addFunction({
       kind: "function",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol: fnSymbol,
       parameters: [
         {

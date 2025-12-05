@@ -15,6 +15,12 @@ import type {
 } from "../../modules/types.js";
 import type { ModuleExportTable } from "../modules.js";
 import { dirname, resolve, sep } from "node:path";
+import {
+  moduleVisibility,
+  packageVisibility,
+  publicVisibility,
+} from "../hir/index.js";
+import { packageIdFromPath } from "../packages.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost => {
   const normalized = new Map<string, string>();
@@ -98,7 +104,7 @@ describe("binding pipeline", () => {
     expect(fibFn?.params).toHaveLength(1);
     expect(fibFn?.params[0]?.typeExpr).toBeDefined();
     expect(fibFn?.returnTypeExpr).toBeDefined();
-    expect(mainFn?.visibility).toBe("public");
+    expect(mainFn?.visibility.level).toBe("package");
     expect(mainFn?.params).toHaveLength(0);
 
     expect(fibFn?.form).toBeDefined();
@@ -244,6 +250,38 @@ describe("binding pipeline", () => {
     }
   });
 
+  it("records member visibility for api and pri fields and methods", () => {
+    const name = "visibility_members.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const vec = binding.objects.find(
+      (object) => symbolTable.getSymbol(object.symbol).name === "Vec"
+    );
+    expect(vec?.visibility.level).toBe("package");
+
+    const fieldVisibility = new Map(
+      vec?.fields.map((field) => [field.name, field.visibility]) ?? []
+    );
+    expect(fieldVisibility.get("x")?.api).toBe(true);
+    expect(fieldVisibility.get("x")?.level).toBe("package");
+    expect(fieldVisibility.get("y")?.level).toBe("package");
+    expect(fieldVisibility.get("z")?.level).toBe("object");
+
+    const methodByName = new Map(
+      binding.functions.map((fn) => [
+        symbolTable.getSymbol(fn.symbol).name,
+        fn,
+      ])
+    );
+    expect(methodByName.get("double")?.memberVisibility?.api).toBe(true);
+    expect(methodByName.get("double")?.visibility.level).toBe("package");
+    expect(methodByName.get("sum")?.visibility.level).toBe("package");
+    expect(methodByName.get("hide")?.visibility.level).toBe("object");
+  });
+
   it("binds static methods to impl scopes and records them", () => {
     const name = "static_methods.voyd";
     const ast = loadAst(name);
@@ -345,8 +383,10 @@ describe("binding pipeline", () => {
               name: "helper",
               symbol: exportedSymbol,
               moduleId: utilId,
+              modulePath: utilPath,
+              packageId: packageIdFromPath(utilPath),
               kind: "value",
-              visibility: "public",
+              visibility: packageVisibility(),
             },
           ],
         ]),
@@ -375,6 +415,75 @@ describe("binding pipeline", () => {
     );
     expect(importEntry?.target?.moduleId).toBe(utilId);
     expect(importEntry?.target?.symbol).toBe(exportedSymbol);
+    expect(importEntry?.visibility.level).toBe("module");
+    expect(binding.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects cross-package imports of package-visible exports", () => {
+    const source = "use pkg::dep::Thing";
+    const ast = parse(source, "main.voyd");
+    const useForm = ast.rest.find((entry) => isForm(entry) && entry.calls("use")) as Form | undefined;
+    const span = toSourceSpan(useForm ?? ast);
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const depPath = {
+      namespace: "pkg" as const,
+      packageName: "dep",
+      segments: ["pkg"] as const,
+    };
+    const depId = modulePathToString(depPath);
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "main.voyd" },
+      ast,
+      source,
+      dependencies: [{ kind: "use", path: depPath, span }],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        depId,
+        new Map([
+          [
+            "Thing",
+            {
+              name: "Thing",
+              symbol: 99,
+              moduleId: depId,
+              modulePath: depPath,
+              packageId: packageIdFromPath(depPath),
+              kind: "value",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    expect(binding.imports).toHaveLength(0);
+    expect(binding.diagnostics.some((diag) => diag.code === "BD0001")).toBe(
+      true
+    );
   });
 
   it("binds trait declarations and trait targets on impl blocks", () => {
@@ -504,8 +613,10 @@ describe("binding pipeline", () => {
               name: "helper",
               symbol: exportedSymbol,
               moduleId: utilId,
+              modulePath: utilPath,
+              packageId: packageIdFromPath(utilPath),
               kind: "value",
-              visibility: "public",
+              visibility: packageVisibility(),
             },
           ],
         ]),
@@ -581,8 +692,10 @@ describe("binding pipeline", () => {
               name: "math",
               symbol: exportedSymbol,
               moduleId: mathId,
+              modulePath: mathPath,
+              packageId: packageIdFromPath(mathPath),
               kind: "value",
-              visibility: "public",
+              visibility: packageVisibility(),
             },
           ],
         ]),
@@ -649,8 +762,16 @@ describe("binding pipeline", () => {
               name: "math",
               symbol: 1,
               moduleId: mathId,
+              modulePath: {
+                namespace: "src" as const,
+                segments: ["grouped", "util", "helpers", "math"] as const,
+              },
+              packageId: packageIdFromPath({
+                namespace: "src" as const,
+                segments: ["grouped", "util", "helpers", "math"] as const,
+              }),
               kind: "value",
-              visibility: "public",
+              visibility: packageVisibility(),
             },
           ],
         ]),

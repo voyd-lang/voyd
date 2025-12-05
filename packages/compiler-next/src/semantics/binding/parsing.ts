@@ -7,7 +7,12 @@ import {
   isForm,
   isIdentifierAtom,
 } from "../../parser/index.js";
-import type { HirVisibility } from "../hir/index.js";
+import {
+  type HirMemberModifier,
+  type HirVisibility,
+  moduleVisibility,
+  packageVisibility,
+} from "../hir/index.js";
 import { isIdentifierWithValue } from "../utils.js";
 import type { IntrinsicAttribute } from "../../parser/attributes.js";
 import type { HirBindingKind } from "../hir/index.js";
@@ -15,6 +20,7 @@ import type { HirBindingKind } from "../hir/index.js";
 export interface ParsedFunctionDecl {
   form: Form;
   visibility: HirVisibility;
+  memberModifier?: HirMemberModifier;
   signature: ParsedFunctionSignature;
   body: Expr;
   intrinsic?: IntrinsicAttribute;
@@ -42,6 +48,7 @@ export interface ParsedObjectField {
   name: IdentifierAtom;
   typeExpr: Expr;
   ast: Syntax;
+  memberModifier?: HirMemberModifier;
 }
 
 export interface ParsedTraitMethod {
@@ -86,11 +93,18 @@ interface SignatureParam {
 
 export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
   let index = 0;
-  let visibility: HirVisibility = "module";
+  let visibility: HirVisibility = moduleVisibility();
+  let memberModifier: HirMemberModifier | undefined;
   const first = form.at(0);
 
   if (isIdentifierWithValue(first, "pub")) {
-    visibility = "public";
+    visibility = packageVisibility();
+    index += 1;
+  } else if (isIdentifierWithValue(first, "api")) {
+    memberModifier = "api";
+    index += 1;
+  } else if (isIdentifierWithValue(first, "pri") || isIdentifierWithValue(first, "#")) {
+    memberModifier = "pri";
     index += 1;
   }
 
@@ -124,6 +138,7 @@ export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
   return {
     form,
     visibility,
+    memberModifier,
     signature,
     body: bodyExpr,
     intrinsic: normalizeIntrinsicAttribute(
@@ -170,11 +185,11 @@ const parseTraitMethod = (form: Form): ParsedTraitMethod => {
 
 export const parseTypeAliasDecl = (form: Form): ParsedTypeAliasDecl | null => {
   let index = 0;
-  let visibility: HirVisibility = "module";
+  let visibility: HirVisibility = moduleVisibility();
   const first = form.at(0);
 
   if (isIdentifierWithValue(first, "pub")) {
-    visibility = "public";
+    visibility = packageVisibility();
     index += 1;
   }
 
@@ -201,11 +216,11 @@ export const parseTypeAliasDecl = (form: Form): ParsedTypeAliasDecl | null => {
 
 export const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {
   let index = 0;
-  let visibility: HirVisibility = "module";
+  let visibility: HirVisibility = moduleVisibility();
   const first = form.at(0);
 
   if (isIdentifierWithValue(first, "pub")) {
-    visibility = "public";
+    visibility = packageVisibility();
     index += 1;
   }
 
@@ -228,11 +243,11 @@ export const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {
 
 export const parseTraitDecl = (form: Form): ParsedTraitDecl | null => {
   let index = 0;
-  let visibility: HirVisibility = "module";
+  let visibility: HirVisibility = moduleVisibility();
   const first = form.at(0);
 
   if (isIdentifierWithValue(first, "pub")) {
-    visibility = "public";
+    visibility = packageVisibility();
     index += 1;
   }
 
@@ -267,11 +282,11 @@ export const parseTraitDecl = (form: Form): ParsedTraitDecl | null => {
 
 export const parseImplDecl = (form: Form): ParsedImplDecl | null => {
   let index = 0;
-  let visibility: HirVisibility = "module";
+  let visibility: HirVisibility = moduleVisibility();
   const first = form.at(0);
 
   if (isIdentifierWithValue(first, "pub")) {
-    visibility = "public";
+    visibility = packageVisibility();
     index += 1;
   }
 
@@ -603,19 +618,50 @@ const parseImplHeadTarget = (
 
 const parseObjectFields = (body: Form): ParsedObjectField[] =>
   body.rest.map((entry) => {
-    if (!isForm(entry) || !entry.calls(":")) {
+    if (!isForm(entry)) {
       throw new Error("object fields must be labeled");
     }
-    const nameExpr = entry.at(1);
-    const typeExpr = entry.at(2);
+
+    const { field, modifier } = unwrapFieldEntry(entry);
+    if (!field.calls(":")) {
+      throw new Error("object fields must be labeled");
+    }
+    const nameExpr = field.at(1);
+    const typeExpr = field.at(2);
     if (!isIdentifierAtom(nameExpr)) {
       throw new Error("object field name must be an identifier");
     }
     if (!typeExpr) {
       throw new Error("object field missing type");
     }
-    return { name: nameExpr, typeExpr, ast: entry };
+    return { name: nameExpr, typeExpr, ast: entry, memberModifier: modifier };
   });
+
+const unwrapFieldEntry = (
+  entry: Form
+): { field: Form; modifier?: HirMemberModifier } => {
+  const modifier = (() => {
+    if (isIdentifierWithValue(entry.at(0), "api")) return "api";
+    if (
+      isIdentifierWithValue(entry.at(0), "pri") ||
+      isIdentifierWithValue(entry.at(0), "#")
+    ) {
+      return "pri";
+    }
+    return undefined;
+  })();
+
+  if (!modifier) {
+    return { field: entry };
+  }
+
+  const field = entry.at(1);
+  if (!isForm(field)) {
+    throw new Error("api/pri field entries must wrap a labeled field");
+  }
+
+  return { field, modifier };
+};
 
 const ensureForm = (expr: Expr | undefined, message: string): Form => {
   if (!isForm(expr)) {

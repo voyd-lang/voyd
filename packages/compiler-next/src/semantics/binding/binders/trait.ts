@@ -27,6 +27,7 @@ import type { BinderScopeTracker } from "./scope-tracker.js";
 import { bindExpr } from "./expressions.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import { toSourceSpan } from "../../utils.js";
+import { moduleVisibility } from "../../hir/index.js";
 
 export const bindTraitDecl = (
   decl: ParsedTraitDecl,
@@ -258,7 +259,7 @@ export const makeParsedFunctionFromTraitMethod = (
 
   return {
     form,
-    visibility: "module",
+    visibility: moduleVisibility(),
     signature: {
       name: nameAst,
       typeParameters:

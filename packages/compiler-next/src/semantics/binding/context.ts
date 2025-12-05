@@ -5,13 +5,9 @@ import type {
 } from "./types.js";
 import { DeclTable } from "../decls.js";
 import type { Syntax } from "../../parser/index.js";
-import { toSourceSpan } from "../utils.js";
-import type {
-  ModuleDependency,
-  ModuleGraph,
-  ModuleNode,
-} from "../../modules/types.js";
+import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
 import type { ModuleExportTable } from "../modules.js";
+import { isPackageRootModule, packageIdFromPath } from "../packages.js";
 
 export const createBindingContext = ({
   moduleForm,
@@ -45,16 +41,7 @@ export const createBindingContext = ({
   const dependencyBindings = dependencies ?? new Map<string, BindingResult>();
 
   const decls = new DeclTable();
-  const dependenciesBySpan = new Map<string, ModuleDependency[]>();
-  moduleNode.dependencies.forEach((dep) => {
-    const key = spanKey(dep.span ?? toSourceSpan(moduleForm));
-    const bucket = dependenciesBySpan.get(key);
-    if (bucket) {
-      bucket.push(dep);
-    } else {
-      dependenciesBySpan.set(key, [dep]);
-    }
-  });
+  const packageId = packageIdFromPath(moduleNode.path);
 
   return {
     symbolTable,
@@ -68,17 +55,18 @@ export const createBindingContext = ({
     nextModuleIndex: 0,
     module: moduleNode,
     graph: moduleGraph,
-  modulePath: moduleNode.path,
-  moduleExports: exportTables,
-  dependenciesBySpan,
-  dependencies: dependencyBindings,
-  uses: [],
-  imports: [],
-  staticMethods: new Map(),
-  moduleMembers: new Map(),
-  pendingStaticMethods: [],
-  importedOverloadOptions: new Map(),
-};
+    modulePath: moduleNode.path,
+    packageId,
+    isPackageRoot: isPackageRootModule(moduleNode.path),
+    moduleExports: exportTables,
+    dependencies: dependencyBindings,
+    uses: [],
+    imports: [],
+    staticMethods: new Map(),
+    moduleMembers: new Map(),
+    pendingStaticMethods: [],
+    importedOverloadOptions: new Map(),
+  };
 };
 
 export const toBindingResult = (ctx: BindingContext): BindingResult => ({
@@ -99,6 +87,9 @@ export const toBindingResult = (ctx: BindingContext): BindingResult => ({
   moduleMembers: ctx.moduleMembers,
   dependencies: ctx.dependencies,
   importedOverloadOptions: ctx.importedOverloadOptions,
+  modulePath: ctx.modulePath,
+  packageId: ctx.packageId,
+  isPackageRoot: ctx.isPackageRoot,
 });
 
 export const rememberSyntax = (
@@ -110,6 +101,3 @@ export const rememberSyntax = (
   }
   ctx.syntaxByNode.set(syntax.syntaxId, syntax);
 };
-
-const spanKey = (span: ReturnType<typeof toSourceSpan>): string =>
-  `${span.file}:${span.start}:${span.end}`;

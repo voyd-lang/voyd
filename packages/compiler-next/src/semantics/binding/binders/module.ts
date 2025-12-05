@@ -35,10 +35,18 @@ import {
   parseUsePaths,
   type NormalizedUseEntry,
 } from "../../../modules/use-path.js";
-import type { HirVisibility } from "../../hir/index.js";
+import {
+  type HirVisibility,
+  isPackageVisible,
+  isPublicVisibility,
+  moduleVisibility,
+  packageVisibility,
+} from "../../hir/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
 import type { SourceSpan } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
+import { isSamePackage } from "../../packages.js";
+import { importableMetadataFrom } from "../../imports/metadata.js";
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   const tracker = new BinderScopeTracker(ctx.symbolTable);
@@ -86,10 +94,10 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     }
 
     const implDecl = parseImplDecl(entry);
-    if (implDecl) {
-      bindImplDecl(implDecl, ctx, tracker);
-      continue;
-    }
+  if (implDecl) {
+    bindImplDecl(implDecl, ctx, tracker);
+    continue;
+  }
 
     throw new Error(
       "unsupported top-level form; expected a function or type declaration"
@@ -113,11 +121,11 @@ type ParsedUseDecl = {
 
 const parseUseDecl = (form: Form): ParsedUseDecl | null => {
   let index = 0;
-  let visibility: HirVisibility = "module";
+  let visibility: HirVisibility = moduleVisibility();
   const first = form.at(0);
 
   if (isIdentifierAtom(first) && first.value === "pub") {
-    visibility = "public";
+    visibility = packageVisibility();
     index += 1;
   }
 
@@ -145,11 +153,11 @@ const containsObjectLiteral = (expr?: Expr): boolean => {
 
 const parseModDecl = (form: Form): ParsedUseDecl | null => {
   let index = 0;
-  let visibility: HirVisibility = "module";
+  let visibility: HirVisibility = moduleVisibility();
   const first = form.at(0);
 
   if (isIdentifierAtom(first) && first.value === "pub") {
-    visibility = "public";
+    visibility = packageVisibility();
     index += 1;
   }
 
@@ -221,7 +229,7 @@ const resolveUseEntry = ({
   decl: ParsedUseDecl;
   ctx: BindingContext;
 }): BoundUseEntry => {
-  const dependencyPath = takeDependencyPath(entry.span, ctx);
+  const dependencyPath = resolveDependencyPath({ entry, ctx });
   const moduleId = dependencyPath
     ? modulePathToString(dependencyPath)
     : undefined;
@@ -264,16 +272,22 @@ const resolveUseEntry = ({
   };
 };
 
-const takeDependencyPath = (
-  span: SourceSpan,
-  ctx: BindingContext
-): ModulePath | undefined => {
-  const bucket = ctx.dependenciesBySpan.get(spanKey(span));
-  if (!bucket || bucket.length === 0) {
-    return undefined;
-  }
-  const dep = bucket.shift();
-  return dep?.path;
+const resolveDependencyPath = ({
+  entry,
+  ctx,
+}: {
+  entry: ParsedUseEntry;
+  ctx: BindingContext;
+}): ModulePath | undefined => {
+  const matches = ctx.module.dependencies.filter((dep) =>
+    matchesDependencyPath({
+      dependencyPath: dep.path,
+      entry,
+      currentModulePath: ctx.module.path,
+    })
+  );
+  const preferred = matches.find((dep) => dep.kind === "use") ?? matches[0];
+  return preferred?.path;
 };
 
 const bindImportsFromModule = ({
@@ -299,11 +313,55 @@ const bindImportsFromModule = ({
     return [];
   }
 
+  const ownerNameFor = (exported: ModuleExportEntry): string | undefined => {
+    if (typeof exported.memberOwner !== "number") {
+      return undefined;
+    }
+    const dependency = ctx.dependencies.get(moduleId);
+    if (!dependency) {
+      return undefined;
+    }
+    try {
+      return dependency.symbolTable.getSymbol(exported.memberOwner).name;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const isInstanceMemberExport = (exported: ModuleExportEntry): boolean =>
+    typeof exported.memberOwner === "number" && exported.isStatic !== true;
+
+  const allowMemberExport = (exported: ModuleExportEntry): boolean => {
+    if (!isInstanceMemberExport(exported)) {
+      return true;
+    }
+    if (isPackageVisible(visibility)) {
+      return exported.apiProjection === true;
+    }
+    return true;
+  };
+
   if (entry.importKind === "all") {
-    const allowed = Array.from(exports.values()).filter(
-      (item) =>
-        item.visibility === "public" || moduleId === ctx.module.id
-    );
+    const allowed = Array.from(exports.values()).filter((item) => {
+      const accessible = canAccessExport({ exported: item, moduleId, ctx });
+      if (!accessible) {
+        return false;
+      }
+      if (!allowMemberExport(item)) {
+        recordImportDiagnostic({
+          params: {
+            kind: "instance-member-import",
+            moduleId,
+            target: item.name,
+            owner: ownerNameFor(item),
+          },
+          span: entry.span,
+          ctx,
+        });
+        return false;
+      }
+      return true;
+    });
     return allowed.flatMap((item) =>
       declareImportedSymbol({
         exported: item,
@@ -327,9 +385,37 @@ const bindImportsFromModule = ({
   }
 
   const exported = exports.get(targetName);
-  if (!exported || (exported.visibility !== "public" && moduleId !== ctx.module.id)) {
+  if (!exported) {
     recordImportDiagnostic({
       params: { kind: "missing-export", moduleId, target: targetName },
+      span: entry.span,
+      ctx,
+    });
+    return [];
+  }
+
+  if (isInstanceMemberExport(exported)) {
+    recordImportDiagnostic({
+      params: {
+        kind: "instance-member-import",
+        moduleId,
+        target: targetName,
+        owner: ownerNameFor(exported),
+      },
+      span: entry.span,
+      ctx,
+    });
+    return [];
+  }
+
+  if (!canAccessExport({ exported, moduleId, ctx })) {
+    recordImportDiagnostic({
+      params: {
+        kind: "out-of-scope-export",
+        moduleId,
+        target: targetName,
+        visibility: exported.visibility.level,
+      },
       span: entry.span,
       ctx,
     });
@@ -367,12 +453,20 @@ const declareImportedSymbol = ({
   const locals: BoundImport[] = [];
 
   symbols.forEach((symbol) => {
+    const dependency = ctx.dependencies.get(exported.moduleId);
+    const sourceMetadata = dependency
+      ? dependency.symbolTable.getSymbol(symbol).metadata
+      : undefined;
+    const importableMetadata = importableMetadataFrom(
+      sourceMetadata as Record<string, unknown> | undefined
+    );
     const local = ctx.symbolTable.declare({
       name: alias,
       kind: exported.kind,
       declaredAt: declaredAt.syntaxId,
       metadata: {
         import: { moduleId: exported.moduleId, symbol },
+        ...(importableMetadata ?? {}),
       },
     });
     const bound: BoundImport = {
@@ -440,6 +534,30 @@ const declareModuleImport = ({
   return [bound];
 };
 
+const canAccessExport = ({
+  exported,
+  moduleId,
+  ctx,
+}: {
+  exported: ModuleExportEntry;
+  moduleId: string;
+  ctx: BindingContext;
+}): boolean => {
+  if (moduleId === ctx.module.id) {
+    return true;
+  }
+
+  const samePackage =
+    exported.packageId === ctx.packageId ||
+    isSamePackage(exported.modulePath, ctx.modulePath);
+
+  if (samePackage) {
+    return isPackageVisible(exported.visibility);
+  }
+
+  return isPublicVisibility(exported.visibility);
+};
+
 const recordImportDiagnostic = (
   {
     params,
@@ -460,5 +578,65 @@ const recordImportDiagnostic = (
   );
 };
 
-const spanKey = (span: SourceSpan): string =>
-  `${span.file}:${span.start}:${span.end}`;
+const matchesDependencyPath = ({
+  dependencyPath,
+  entry,
+  currentModulePath,
+}: {
+  dependencyPath: ModulePath;
+  entry: ParsedUseEntry;
+  currentModulePath: ModulePath;
+}): boolean => {
+  const entryKeys = [
+    entry.moduleSegments.length > 0 ? entry.moduleSegments.join("::") : undefined,
+    entry.path.length > 0 ? entry.path.join("::") : undefined,
+  ].filter((value): value is string => Boolean(value));
+
+  const depSegments = dependencyPath.segments.join("::");
+  const namespacedDepKey = [dependencyPath.namespace, ...dependencyPath.segments].join(
+    "::"
+  );
+  if (entryKeys.some((key) => key === depSegments || key === namespacedDepKey)) {
+    return true;
+  }
+
+  if (dependencyPath.namespace === "pkg" && dependencyPath.packageName) {
+    const packageKey = `${dependencyPath.namespace}::${dependencyPath.packageName}`;
+    const pkgKey = [dependencyPath.packageName, ...dependencyPath.segments].join("::");
+    const namespacedPkgKey = [
+      dependencyPath.namespace,
+      dependencyPath.packageName,
+      ...dependencyPath.segments,
+    ].join("::");
+    if (
+      entryKeys.some(
+        (key) =>
+          key === packageKey ||
+          key === dependencyPath.packageName ||
+          key === pkgKey ||
+          key === namespacedPkgKey
+      )
+    ) {
+      return true;
+    }
+  }
+  const sameNamespace = dependencyPath.namespace === currentModulePath.namespace;
+  const samePackage = dependencyPath.packageName === currentModulePath.packageName;
+  if (sameNamespace && samePackage) {
+    const hasModulePrefix =
+      dependencyPath.segments.length > currentModulePath.segments.length &&
+      dependencyPath.segments
+        .slice(0, currentModulePath.segments.length)
+        .every((segment, index) => segment === currentModulePath.segments[index]);
+    if (hasModulePrefix) {
+      const relativeSegments = dependencyPath.segments.slice(
+        currentModulePath.segments.length
+      );
+      const relativeKey = relativeSegments.join("::");
+      if (entryKeys.some((key) => key === relativeKey)) {
+        return true;
+      }
+    }
+  }
+  return false;
+};

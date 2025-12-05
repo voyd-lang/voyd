@@ -7,6 +7,7 @@ import type {
   HirTraitDecl,
   HirTypeExpr,
   HirBindingKind,
+  HirVisibility,
 } from "../hir/index.js";
 import type { ModuleExportTable } from "../modules.js";
 import type {
@@ -20,7 +21,7 @@ import type {
   SourceSpan,
 } from "../ids.js";
 import { DeclTable } from "../decls.js";
-import type { TypeArena } from "./type-arena.js";
+import type { StructuralField, TypeArena } from "./type-arena.js";
 import type { TypeTable } from "./type-table.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import type { Diagnostic } from "../ids.js";
@@ -37,6 +38,7 @@ export interface TypingInputs {
     target?: { moduleId: string; symbol: SymbolId };
   }[];
   moduleId?: string;
+  packageId?: string;
   moduleExports?: Map<string, ModuleExportTable>;
   availableSemantics?: Map<string, DependencySemantics>;
 }
@@ -48,6 +50,7 @@ export interface TypingResult {
   typeAliases: TypeAliasStore;
   objects: ObjectStore;
   traits: TraitStore;
+  memberMetadata: ReadonlyMap<SymbolId, MemberMetadata>;
   primitives: PrimitiveTypes;
   intrinsicTypes: Map<string, TypeId>;
   resolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
@@ -473,11 +476,19 @@ export interface FunctionScope {
   instanceKey?: string;
   typeParams?: ReadonlyMap<SymbolId, TypeId>;
   substitution?: ReadonlyMap<TypeParamId, TypeId>;
+  memberOf?: SymbolId;
+  functionSymbol?: SymbolId;
 }
 
 export interface TypingState {
   mode: TypeCheckMode;
   currentFunction?: FunctionScope;
+}
+
+export interface MemberMetadata {
+  owner?: SymbolId;
+  visibility?: HirVisibility;
+  packageId?: string;
 }
 
 export interface TypingContext {
@@ -486,6 +497,7 @@ export interface TypingContext {
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
   decls: DeclTable;
   moduleId?: string;
+  packageId: string;
   moduleExports: Map<string, ModuleExportTable>;
   dependencies: Map<string, DependencySemantics>;
   importsByLocal: Map<SymbolId, { moduleId: string; symbol: SymbolId }>;
@@ -502,6 +514,7 @@ export interface TypingContext {
   primitives: PrimitiveTypes;
   intrinsicTypes: Map<string, TypeId>;
   diagnostics: DiagnosticEmitter;
+  memberMetadata: Map<SymbolId, MemberMetadata>;
   traitImplsByNominal: Map<TypeId, readonly TraitImplInstance[]>;
   traitImplsByTrait: Map<SymbolId, readonly TraitImplInstance[]>;
   traitMethodImpls: Map<SymbolId, TraitMethodImpl>;
@@ -511,11 +524,8 @@ export interface ObjectTypeInfo {
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
-  fields: readonly {
-    name: string;
-    type: TypeId;
-    declaringParams?: readonly TypeParamId[];
-  }[];
+  fields: readonly StructuralField[];
+  visibility?: HirVisibility;
   baseNominal?: TypeId;
   traitImpls?: readonly TraitImplInstance[];
 }
@@ -530,11 +540,8 @@ export interface ObjectTemplate {
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
-  fields: readonly {
-    name: string;
-    type: TypeId;
-    declaringParams?: readonly TypeParamId[];
-  }[];
+  fields: readonly StructuralField[];
+  visibility?: HirVisibility;
   baseNominal?: TypeId;
 }
 
@@ -546,6 +553,7 @@ export interface TypeAliasTemplate {
 
 export interface DependencySemantics {
   moduleId: string;
+  packageId: string;
   symbolTable: SymbolTable;
   hir: HirGraph;
   typing: TypingResult;

@@ -41,6 +41,7 @@ import type {
   TypingContext,
   TypingState,
 } from "../types.js";
+import { assertMemberAccess } from "../visibility.js";
 
 export const typeCallExpr = (
   expr: HirCallExpr,
@@ -95,6 +96,13 @@ export const typeCallExpr = (
         ctx,
       });
     }
+    assertMemberAccess({
+      symbol: calleeExpr.symbol,
+      ctx,
+      state,
+      span: calleeExpr.span ?? expr.span,
+      context: "calling member",
+    });
     const intrinsicName = metadata.intrinsicName ?? record.name;
     const allowIntrinsicTypeArgs =
       metadata.intrinsic === true &&
@@ -824,6 +832,8 @@ const typeGenericFunctionBody = ({
     instanceKey: key,
     typeParams: nextTypeParams,
     substitution: mergedSubstitution,
+    memberOf: ctx.memberMetadata.get(symbol)?.owner,
+    functionSymbol: symbol,
   };
 
   let bodyType: TypeId | undefined;
@@ -975,6 +985,13 @@ const typeOverloadedCall = (
   } else {
     ctx.callResolution.traitDispatches.delete(call.id);
   }
+  assertMemberAccess({
+    symbol: selected.symbol,
+    ctx,
+    state,
+    span: call.span,
+    context: "calling member",
+  });
   const targets =
     ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolId>();
   targets.set(instanceKey, selected.symbol);

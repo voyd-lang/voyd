@@ -24,7 +24,19 @@ type DiagnosticParamsMap = {
     | { kind: "module-unavailable"; moduleId: string }
     | { kind: "missing-target" }
     | { kind: "missing-export"; moduleId: string; target: string }
-    | { kind: "missing-module-identifier" };
+    | { kind: "missing-module-identifier" }
+    | {
+        kind: "out-of-scope-export";
+        moduleId: string;
+        target: string;
+        visibility: string;
+      }
+    | {
+        kind: "instance-member-import";
+        moduleId: string;
+        target: string;
+        owner?: string;
+      };
   BD0002:
     | {
         kind: "duplicate-overload";
@@ -65,6 +77,19 @@ type DiagnosticParamsMap = {
   TY0006: { kind: "unknown-function"; name: string };
   TY0007: { kind: "ambiguous-overload"; name: string };
   TY0008: { kind: "no-overload"; name: string };
+  TY0009: {
+    kind: "member-access";
+    memberKind: "field" | "method";
+    name: string;
+    visibility: string;
+    context?: string;
+  };
+  TY0010: {
+    kind: "inaccessible-construction";
+    typeName: string;
+    member: string;
+    visibility: string;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -89,6 +114,12 @@ export const diagnosticsRegistry: {
           return `Module ${params.moduleId} does not export ${params.target}`;
         case "missing-module-identifier":
           return "missing module identifier for import";
+        case "out-of-scope-export":
+          return `Module ${params.moduleId} export ${params.target} is not visible here (visibility: ${params.visibility})`;
+        case "instance-member-import": {
+          const ownerPrefix = params.owner ? `${params.owner}::` : "";
+          return `Cannot import ${params.target} from ${params.moduleId}; ${ownerPrefix}${params.target} is an instance member and must be accessed through its type`;
+        }
       }
       return exhaustive(params);
     },
@@ -213,6 +244,22 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0008"]>,
+  TY0009: {
+    code: "TY0009",
+    message: (params) => {
+      const context = params.context ? ` when ${params.context}` : "";
+      return `${params.memberKind} '${params.name}' is not accessible${context} (visibility: ${params.visibility})`;
+    },
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0009"]>,
+  TY0010: {
+    code: "TY0010",
+    message: (params) =>
+      `cannot construct ${params.typeName}; field '${params.member}' is not accessible (visibility: ${params.visibility})`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0010"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

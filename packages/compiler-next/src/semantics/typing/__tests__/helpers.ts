@@ -1,5 +1,5 @@
 import { SymbolTable } from "../../binder/index.js";
-import { createHirBuilder } from "../../hir/index.js";
+import { createHirBuilder, moduleVisibility } from "../../hir/index.js";
 import type {
   HirExprId,
   HirStmtId,
@@ -105,7 +105,7 @@ export const createModuleContext = (): TestModuleContext => {
       id: moduleIndex,
       name,
       form: undefined,
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol,
       scope: functionScope,
       params: [],
@@ -115,7 +115,7 @@ export const createModuleContext = (): TestModuleContext => {
 
     builder.addFunction({
       kind: "function",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol,
       decl: registered.id,
       parameters: [],

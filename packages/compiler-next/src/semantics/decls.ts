@@ -47,6 +47,7 @@ export interface FunctionDecl {
   typeParameters?: TypeParameterDecl[];
   returnTypeExpr?: Expr;
   body: Expr;
+  memberVisibility?: HirVisibility;
   overloadSetId?: OverloadSetId;
   moduleIndex: number;
   implId?: ImplDeclId;
@@ -77,6 +78,7 @@ export interface ObjectFieldDecl {
   name: string;
   symbol: SymbolId;
   ast?: Syntax;
+  visibility: HirVisibility;
   typeExpr: Expr;
 }
 

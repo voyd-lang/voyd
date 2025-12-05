@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { resolve, dirname, sep } from "node:path";
-import type { ModuleHost } from "../modules/types.js";
 import {
   analyzeModules,
   compileProgram,
   loadModuleGraph,
   lowerProgram,
 } from "../pipeline.js";
+import type { ModuleHost } from "../modules/types.js";
+import { getWasmInstance } from "@voyd/lib/wasm.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost => {
   const normalized = new Map<string, string>();
@@ -98,5 +99,263 @@ describe("next pipeline API", () => {
 
     expect(entry).toBe("src::main");
     expect(orderedModules).toEqual(["src::main"]);
+  });
+
+  it("exports only pkg.voyd public API entries to wasm", async () => {
+    const root = resolve("/proj/src");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const apiPath = `${root}${sep}api.voyd`;
+    const host = createMemoryHost({
+      [pkgPath]: `
+use src::api::all
+
+pub use src::api::public_fn
+`,
+      [apiPath]: `
+pub fn public_fn() -> i32
+  7
+
+pub fn internal_fn() -> i32
+  3
+`,
+    });
+
+    const result = await compileProgram({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+
+    const instance = getWasmInstance(result.wasm!);
+    const exports = instance.exports as Record<string, unknown>;
+
+    expect(typeof exports.public_fn).toBe("function");
+    expect((exports.public_fn as () => number)()).toBe(7);
+    expect(exports.internal_fn).toBeUndefined();
+  });
+
+  it("rejects accessing pri fields outside their object", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+pub obj SecretBox {
+  pri value: i32,
+}
+
+impl SecretBox
+  pub fn reveal(self) -> i32
+    self.value
+
+pub fn leak(box: SecretBox) -> i32
+  box.value
+`,
+    });
+
+    const result = await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.wasm).toBeUndefined();
+    expect(result.diagnostics.some((diag) => diag.code === "TY0009")).toBe(
+      true
+    );
+  });
+
+  it("exposes only api members to other packages", async () => {
+    const appRoot = resolve("/proj/app");
+    const packagesRoot = resolve("/proj/pkg");
+    const depRoot = `${packagesRoot}${sep}dep`;
+    const mainPath = `${appRoot}${sep}main.voyd`;
+    const depPkgPath = `${depRoot}${sep}pkg.voyd`;
+    const depExternalPath = `${depRoot}${sep}src${sep}external.voyd`;
+
+    const host = createMemoryHost({
+      [mainPath]: `
+use pkg::dep::all
+
+pub fn main() -> i32
+  let ext = make_external()
+  ext.visible + ext.expose()
+`,
+      [depPkgPath]: `
+use src::external::all
+
+pub use src::external::External
+pub use src::external::make_external
+`,
+      [depExternalPath]: `
+pub obj External {
+  api visible: i32,
+  hidden: i32,
+  pri secret: i32,
+}
+
+impl External
+  api fn expose(self) -> i32
+    self.visible + self.hidden
+
+  fn hidden_value(self) -> i32
+    self.hidden
+
+  pri fn secret_value(self) -> i32
+    self.secret
+
+pub fn make_external() -> External
+  External { visible: 2, hidden: 3, secret: 5 }
+`,
+    });
+
+    const result = await compileProgram({
+      entryPath: mainPath,
+      roots: { src: appRoot, pkg: packagesRoot },
+      host,
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(7);
+  });
+
+  it("blocks external access to non-api members", async () => {
+    const appRoot = resolve("/proj/app");
+    const packagesRoot = resolve("/proj/pkg");
+    const depRoot = `${packagesRoot}${sep}dep`;
+    const mainPath = `${appRoot}${sep}leak.voyd`;
+    const depPkgPath = `${depRoot}${sep}pkg.voyd`;
+    const depExternalPath = `${depRoot}${sep}src${sep}external.voyd`;
+
+    const host = createMemoryHost({
+      [mainPath]: `
+use pkg::dep::all
+
+pub fn leak_hidden() -> i32
+  make_external().hidden
+`,
+      [depPkgPath]: `
+use src::external::all
+
+pub use src::external::External
+pub use src::external::make_external
+`,
+      [depExternalPath]: `
+pub obj External {
+  api visible: i32,
+  hidden: i32,
+  pri secret: i32,
+}
+
+impl External
+  api fn expose(self) -> i32
+    self.visible + self.hidden
+
+  fn hidden_value(self) -> i32
+    self.hidden
+
+  pri fn secret_value(self) -> i32
+    self.secret
+
+pub fn make_external() -> External
+  External { visible: 2, hidden: 3, secret: 5 }
+`,
+    });
+
+    const result = await compileProgram({
+      entryPath: mainPath,
+      roots: { src: appRoot, pkg: packagesRoot },
+      host,
+    });
+
+    expect(result.wasm).toBeUndefined();
+    expect(result.diagnostics.some((diag) => diag.code === "TY0009")).toBe(
+      true
+    );
+  });
+
+  it("rejects pub re-export of instance methods", async () => {
+    const root = resolve("/proj/reexport");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const externalPath = `${root}${sep}external.voyd`;
+
+    const host = createMemoryHost({
+      [pkgPath]: `
+pub use src::external::External
+pub use src::external::expose
+
+pub fn main() -> i32
+  0
+`,
+      [externalPath]: `
+pub obj External { api value: i32 }
+
+impl External
+  api fn expose(self) -> i32
+    self.value
+
+pub fn make_external() -> External
+  External { value: 1 }
+`,
+    });
+
+    const result = await compileProgram({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.wasm).toBeUndefined();
+    expect(
+      result.diagnostics.some(
+        (diag) =>
+          diag.code === "BD0001" &&
+          diag.message.includes("instance member")
+      )
+    ).toBe(true);
+  });
+
+  it("allows importing static methods", async () => {
+    const root = resolve("/proj/static");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const counterPath = `${root}${sep}counter.voyd`;
+
+    const host = createMemoryHost({
+      [pkgPath]: `
+use src::counter::all
+
+pub use src::counter::new
+
+pub fn main() -> i32
+  let counter = new(4)
+  counter.double()
+`,
+      [counterPath]: `
+pub obj Counter { api value: i32 }
+
+impl Counter
+  fn new(value: i32) -> Counter
+    Counter { value }
+
+  api fn double(self) -> i32
+    self.value * 2
+`,
+    });
+
+    const result = await compileProgram({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(8);
   });
 });

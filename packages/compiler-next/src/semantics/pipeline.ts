@@ -5,7 +5,7 @@ import { SymbolTable } from "./binder/index.js";
 import { runBindingPipeline } from "./binding/binding.js";
 import type { BindingResult, BoundOverloadSet } from "./binding/binding.js";
 import type { HirGraph } from "./hir/index.js";
-import { createHirBuilder, type HirVisibility } from "./hir/index.js";
+import { createHirBuilder, type HirVisibility, maxVisibility } from "./hir/index.js";
 import { runLoweringPipeline } from "./lowering/lowering.js";
 import { analyzeLambdaCaptures } from "./lowering/captures.js";
 import { runTypingPipeline, type TypingResult } from "./typing/typing.js";
@@ -85,6 +85,9 @@ export const semanticsPipeline = (
     binding,
     moduleNodeId: form.syntaxId,
     moduleId: module.id,
+    modulePath: module.path,
+    packageId: binding.packageId,
+    isPackageRoot: binding.isPackageRoot,
   });
   analyzeLambdaCaptures({
     hir,
@@ -102,6 +105,7 @@ export const semanticsPipeline = (
     decls: binding.decls,
     imports: binding.imports,
     moduleId: module.id,
+    packageId: binding.packageId,
     moduleExports: exports ?? new Map(),
     availableSemantics: projectDependencySemantics(dependencies),
   });
@@ -122,9 +126,12 @@ export const semanticsPipeline = (
     exports: collectModuleExports({
       hir,
       symbolTable,
-      moduleId: module.id,
-      binding,
-    }),
+    moduleId: module.id,
+    modulePath: module.path,
+    packageId: binding.packageId,
+    binding,
+    typing,
+  }),
     diagnostics,
   };
 };
@@ -161,34 +168,123 @@ const collectModuleExports = ({
   hir,
   symbolTable,
   moduleId,
+  modulePath,
+  packageId,
   binding,
+  typing,
 }: {
   hir: HirGraph;
   symbolTable: SymbolTable;
   moduleId: string;
+  modulePath: ModulePath;
+  packageId: string;
   binding: BindingResult;
+  typing: TypingResult;
 }): ModuleExportTable => {
   const table: ModuleExportTable = new Map();
-  hir.module.exports.forEach((entry) => {
-    const record = symbolTable.getSymbol(entry.symbol);
-    const name = entry.alias ?? record.name;
+
+  const upsertExport = ({
+    name,
+    symbol,
+    visibility,
+    memberOwner,
+    isStatic,
+    apiProjection,
+  }: {
+    name: string;
+    symbol: SymbolId;
+    visibility: HirVisibility;
+    memberOwner?: SymbolId;
+    isStatic?: boolean;
+    apiProjection?: boolean;
+  }): void => {
     const existing = table.get(name);
     const symbols = existing
       ? new Set(existing.symbols ?? [existing.symbol])
       : new Set<SymbolId>();
-    symbols.add(entry.symbol);
+    symbols.add(symbol);
     const overloadSet =
-      binding.overloadBySymbol.get(entry.symbol) ?? existing?.overloadSet;
+      binding.overloadBySymbol.get(symbol) ?? existing?.overloadSet;
+    const record = symbolTable.getSymbol(symbol);
+    const mergedVisibility = existing
+      ? maxVisibility(existing.visibility, visibility)
+      : visibility;
+    const owner = existing?.memberOwner ?? memberOwner;
+    const mergedStatic =
+      existing?.isStatic === true ? true : isStatic ?? existing?.isStatic;
+    const projected = existing?.apiProjection || apiProjection === true;
     table.set(name, {
       name,
-      symbol: existing?.symbol ?? entry.symbol,
+      symbol: existing?.symbol ?? symbol,
       symbols: Array.from(symbols),
       overloadSet,
       moduleId,
+      modulePath,
+      packageId,
       kind: record.kind,
+      visibility: mergedVisibility,
+      memberOwner: owner,
+      isStatic: mergedStatic,
+      apiProjection: projected,
+    });
+  };
+
+  const memberInfoFor = (
+    symbol: SymbolId
+  ): { owner?: SymbolId; isStatic?: boolean } => {
+    const memberMetadata = typing.memberMetadata.get(symbol);
+    const owner =
+      typeof memberMetadata?.owner === "number" ? memberMetadata.owner : undefined;
+    const recordMetadata = symbolTable.getSymbol(symbol).metadata as
+      | { static?: boolean }
+      | undefined;
+    const isStatic = recordMetadata?.static === true;
+    return { owner, isStatic };
+  };
+
+  hir.module.exports.forEach((entry) => {
+    const record = symbolTable.getSymbol(entry.symbol);
+    const name = entry.alias ?? record.name;
+    const { owner: memberOwner, isStatic } = memberInfoFor(entry.symbol);
+    upsertExport({
+      name,
+      symbol: entry.symbol,
       visibility: entry.visibility,
+      memberOwner,
+      isStatic,
     });
   });
+
+  if (binding.isPackageRoot) {
+    const exportedObjects = new Set(
+      Array.from(table.values())
+        .filter(
+          (entry) =>
+            entry.kind === "type" && entry.visibility.level === "public"
+        )
+        .map((entry) => entry.symbol)
+    );
+
+    typing.memberMetadata.forEach((metadata, symbol) => {
+      if (!metadata.visibility?.api) return;
+      if (typeof metadata.owner !== "number") return;
+      if (!exportedObjects.has(metadata.owner)) return;
+      const record = symbolTable.getSymbol(symbol);
+      const publicVisibility =
+        metadata.visibility.level === "public"
+          ? metadata.visibility
+          : { ...metadata.visibility, level: "public" as const };
+      upsertExport({
+        name: record.name,
+        symbol,
+        visibility: publicVisibility,
+        memberOwner: metadata.owner,
+        isStatic: memberInfoFor(symbol).isStatic,
+        apiProjection: true,
+      });
+    });
+  }
+
   return table;
 };
 
@@ -204,6 +300,7 @@ const projectDependencySemantics = (
       id,
       {
         moduleId: entry.moduleId,
+        packageId: entry.binding.packageId,
         symbolTable: entry.symbolTable,
         hir: entry.hir,
         typing: entry.typing,

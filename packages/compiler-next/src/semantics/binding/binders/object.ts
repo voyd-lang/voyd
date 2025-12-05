@@ -6,6 +6,7 @@ import type { ScopeId } from "../../ids.js";
 import type { BindingContext } from "../types.js";
 import type { ParsedObjectDecl } from "../parsing.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
+import { inheritMemberVisibility } from "../../hir/index.js";
 
 export const bindObjectDecl = (
   decl: ParsedObjectDecl,
@@ -65,6 +66,10 @@ export const bindObjectDecl = (
         symbol: fieldSymbol,
         ast: field.ast,
         typeExpr: field.typeExpr,
+        visibility: inheritMemberVisibility({
+          ownerVisibility: decl.visibility,
+          modifier: field.memberModifier,
+        }),
       });
     });
   });

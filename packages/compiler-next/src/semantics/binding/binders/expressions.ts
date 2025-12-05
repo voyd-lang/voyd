@@ -21,10 +21,16 @@ import type { ScopeId, SymbolId } from "../../ids.js";
 import { parseLambdaSignature } from "../../lambda.js";
 import { ensureForm } from "./utils.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
-import type { HirBindingKind } from "../../hir/index.js";
+import {
+  type HirBindingKind,
+  isPublicVisibility,
+  isPackageVisible,
+  moduleVisibility,
+} from "../../hir/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
 import type { ModuleMemberTable } from "../types.js";
 import { extractConstructorTargetIdentifier } from "../../constructors.js";
+import { importableMetadataFrom } from "../../imports/metadata.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -443,7 +449,14 @@ const ensureStaticMethodImport = ({
     const fn = dependency.functions.find(
       (entry) => entry.symbol === methodSymbol
     );
-    if (!fn || fn.visibility !== "public") {
+    if (!fn) {
+      return;
+    }
+    const samePackage = dependency.packageId === ctx.packageId;
+    const visibilityAllowed =
+      isPublicVisibility(fn.visibility) ||
+      (samePackage && isPackageVisible(fn.visibility));
+    if (!visibilityAllowed) {
       return;
     }
     const record = dependency.symbolTable.getSymbol(methodSymbol);
@@ -460,7 +473,7 @@ const ensureStaticMethodImport = ({
       name: memberName,
       local,
       target: { moduleId, symbol: methodSymbol },
-      visibility: "module",
+      visibility: moduleVisibility(),
       span: toSourceSpan(syntax),
     });
     const overloadId = dependency.overloadBySymbol.get(methodSymbol);
@@ -642,9 +655,9 @@ const declareModuleMemberImport = ({
   const dependency = ctx.dependencies.get(exported.moduleId);
   symbols.forEach((symbol) => {
     const dependencyRecord = dependency?.symbolTable.getSymbol(symbol);
-    const dependencyMetadata = (dependencyRecord?.metadata ?? {}) as {
-      entity?: string;
-    };
+    const importableMetadata = importableMetadataFrom(
+      dependencyRecord?.metadata as Record<string, unknown> | undefined
+    );
     const local = ctx.symbolTable.declare(
       {
         name: exported.name,
@@ -652,9 +665,7 @@ const declareModuleMemberImport = ({
         declaredAt: syntax.syntaxId,
         metadata: {
           import: { moduleId: exported.moduleId, symbol },
-          ...(dependencyMetadata.entity
-            ? { entity: dependencyMetadata.entity }
-            : {}),
+          ...(importableMetadata ?? {}),
         },
       },
       scope
@@ -663,7 +674,7 @@ const declareModuleMemberImport = ({
       name: exported.name,
       local,
       target: { moduleId: exported.moduleId, symbol },
-      visibility: "module",
+      visibility: moduleVisibility(),
       span: toSourceSpan(syntax),
     });
     locals.push(local);

@@ -4,6 +4,10 @@ import {
   ensureTraitType,
   resolveTypeAlias,
 } from "./type-system.js";
+import {
+  applyImportableMetadata,
+  importableMetadataFrom,
+} from "../imports/metadata.js";
 import type {
   DependencySemantics,
   FunctionSignature,
@@ -46,29 +50,6 @@ export const importTargetFor = (
   return metadata.import;
 };
 
-const copyIntrinsicMetadata = ({
-  localSymbol,
-  dependencySymbol,
-  dependency,
-  ctx,
-}: {
-  localSymbol: SymbolId;
-  dependencySymbol: SymbolId;
-  dependency: DependencySemantics;
-  ctx: TypingContext;
-}): void => {
-  const sourceRecord = dependency.symbolTable.getSymbol(dependencySymbol);
-  const metadata = (sourceRecord.metadata ?? {}) as {
-    intrinsic?: boolean;
-    intrinsicName?: string;
-    intrinsicUsesSignature?: boolean;
-  };
-  if (!metadata.intrinsic) {
-    return;
-  }
-  ctx.symbolTable.setSymbolMetadata(localSymbol, metadata);
-};
-
 export const resolveImportedValue = ({
   symbol,
   ctx,
@@ -87,12 +68,29 @@ export const resolveImportedValue = ({
       `missing semantics for imported module ${target.moduleId}`
     );
   }
-  copyIntrinsicMetadata({
-    localSymbol: symbol,
-    dependencySymbol: target.symbol,
-    dependency,
-    ctx,
+  const dependencyRecord = dependency.symbolTable.getSymbol(target.symbol);
+  applyImportableMetadata({
+    symbolTable: ctx.symbolTable,
+    symbol,
+    source: dependencyRecord.metadata as Record<string, unknown> | undefined,
   });
+  const dependencyMemberMetadata =
+    dependency.typing.memberMetadata.get(target.symbol);
+  if (dependencyMemberMetadata) {
+    const owner =
+      typeof dependencyMemberMetadata.owner === "number"
+        ? mapDependencySymbolToLocal({
+            owner: dependencyMemberMetadata.owner,
+            dependency,
+            ctx,
+          })
+        : undefined;
+    ctx.memberMetadata.set(symbol, {
+      owner,
+      visibility: dependencyMemberMetadata.visibility,
+      packageId: dependencyMemberMetadata.packageId ?? dependency.packageId,
+    });
+  }
   registerImportedObjectTemplate({
     dependency,
     dependencySymbol: target.symbol,
@@ -368,12 +366,25 @@ const createTranslation = ({
         break;
       }
       case "structural-object": {
+        const mapOwnerSymbol = (
+          owner: number | undefined
+        ): number | undefined => {
+          if (typeof owner !== "number") return owner;
+          try {
+            return mapSymbol(owner);
+          } catch {
+            return undefined;
+          }
+        };
         const fields = desc.fields.map((field) => ({
           name: field.name,
           type: translate(field.type),
           declaringParams: field.declaringParams?.map((param) =>
             mapTypeParam(param, paramMap, { arena: targetArena } as TypingContext)
           ),
+          visibility: field.visibility,
+          owner: mapOwnerSymbol(field.owner),
+          packageId: field.packageId,
         }));
         result = targetArena.internStructuralObject({ fields });
         break;
@@ -515,6 +526,10 @@ export const registerImportedObjectTemplate = ({
     name: field.name,
     type: translation(field.type),
     declaringParams: translateDeclaringParams(field.declaringParams),
+    visibility: field.visibility,
+    owner:
+      typeof field.owner === "number" ? mapOwner(field.owner) : field.owner,
+    packageId: field.packageId ?? dependency.packageId ?? ctx.packageId,
   }));
 
   ctx.objects.registerTemplate({
@@ -524,6 +539,7 @@ export const registerImportedObjectTemplate = ({
     structural: translation(template.structural),
     type: translation(template.type),
     fields,
+    visibility: template.visibility,
     baseNominal: template.baseNominal
       ? translation(template.baseNominal)
       : undefined,
@@ -556,11 +572,18 @@ const mapDependencySymbolToLocal = ({
     throw new Error(`module ${dependency.moduleId} does not export symbol ${owner}`);
   }
 
+  const dependencyRecord = dependency.symbolTable.getSymbol(owner);
+  const importableMetadata = importableMetadataFrom(
+    dependencyRecord.metadata as Record<string, unknown> | undefined
+  );
   const declared = ctx.symbolTable.declare({
     name: exportEntry.name,
     kind: exportEntry.kind,
     declaredAt: ctx.hir.module.ast,
-    metadata: { import: { moduleId: dependency.moduleId, symbol: owner } },
+    metadata: {
+      import: { moduleId: dependency.moduleId, symbol: owner },
+      ...(importableMetadata ?? {}),
+    },
   });
   ctx.importsByLocal.set(declared, { moduleId: dependency.moduleId, symbol: owner });
   const bucket = ctx.importAliasesByModule.get(dependency.moduleId) ?? new Map();
@@ -620,6 +643,7 @@ const makeDependencyContext = (
   overloads: dependency.overloads,
   decls: dependency.decls,
   moduleId: dependency.moduleId,
+  packageId: dependency.packageId,
   moduleExports: ctx.moduleExports,
   dependencies: ctx.dependencies,
   importsByLocal: new Map(),
@@ -647,6 +671,7 @@ const makeDependencyContext = (
   traitImplsByNominal: new Map(dependency.typing.traitImplsByNominal),
   traitImplsByTrait: new Map(dependency.typing.traitImplsByTrait),
   traitMethodImpls: new Map(dependency.typing.traitMethodImpls),
+  memberMetadata: new Map(dependency.typing.memberMetadata),
   diagnostics: new DiagnosticEmitter(),
 });
 

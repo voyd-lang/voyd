@@ -5,6 +5,9 @@ export const createLowerContext = ({
   builder,
   binding,
   moduleNodeId,
+  modulePath,
+  packageId,
+  isPackageRoot,
 }: LowerInputs): LowerContext => ({
   builder,
   symbolTable: binding.symbolTable,
@@ -16,6 +19,9 @@ export const createLowerContext = ({
   staticMethods: binding.staticMethods,
   moduleMembers: binding.moduleMembers,
   decls: binding.decls,
+  modulePath,
+  packageId,
+  isPackageRoot,
 });
 
 export const createLowerScopeStack = (initial: ScopeId): LowerScopeStack => {

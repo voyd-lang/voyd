@@ -52,6 +52,9 @@ const buildSemantics = (fixture: string) => {
     binding,
     moduleNodeId: ast.syntaxId,
     moduleId: module.id,
+    modulePath: module.path,
+    packageId: binding.packageId,
+    isPackageRoot: binding.isPackageRoot,
   });
 
   analyzeLambdaCaptures({

@@ -6,6 +6,7 @@ import type {
   TypeParamId,
   TypeSchemeId,
 } from "../ids.js";
+import type { HirVisibility } from "../hir/index.js";
 
 export type Substitution = ReadonlyMap<TypeParamId, TypeId>;
 
@@ -43,6 +44,9 @@ export interface StructuralField {
   name: string;
   type: TypeId;
   declaringParams?: readonly TypeParamId[];
+  visibility?: HirVisibility;
+  owner?: SymbolId;
+  packageId?: string;
 }
 
 export interface StructuralObjectType {
@@ -1019,6 +1023,9 @@ export const createTypeArena = (): TypeArena => {
             name: field.name,
             type: substituted,
             declaringParams: field.declaringParams,
+            visibility: field.visibility,
+            owner: field.owner,
+            packageId: field.packageId,
           };
         });
         return changed ? internStructuralObject({ fields }) : type;

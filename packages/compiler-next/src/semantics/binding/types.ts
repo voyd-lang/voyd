@@ -63,6 +63,9 @@ export interface BindingResult {
   moduleMembers: ModuleMemberTable;
   dependencies: Map<string, BindingResult>;
   importedOverloadOptions: Map<OverloadSetId, readonly SymbolId[]>;
+  modulePath: ModulePath;
+  packageId: string;
+  isPackageRoot: boolean;
 }
 
 export type BoundFunction = FunctionDecl;
@@ -100,8 +103,9 @@ export interface BindingContext {
   module: ModuleNode;
   graph: ModuleGraph;
   modulePath: ModulePath;
+  packageId: string;
+  isPackageRoot: boolean;
   moduleExports: Map<string, ModuleExportTable>;
-  dependenciesBySpan: Map<string, ModuleDependency[]>;
   dependencies: Map<string, BindingResult>;
   uses: BoundUse[];
   imports: BoundImport[];
