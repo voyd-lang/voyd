@@ -29,6 +29,8 @@ export const typeIfExpr = (
       next: valueType,
       ctx,
       state,
+      span: ctx.hir.expressions.get(branch.value)?.span,
+      context: "if branch",
     });
   });
 
@@ -39,6 +41,8 @@ export const typeIfExpr = (
       next: defaultType,
       ctx,
       state,
+      span: ctx.hir.expressions.get(expr.defaultBranch!)?.span,
+      context: "if default branch",
     });
     return branchType ?? ctx.primitives.void;
   }

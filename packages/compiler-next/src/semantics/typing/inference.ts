@@ -98,6 +98,8 @@ const typeFunction = (
           next: bodyType,
           ctx,
           state,
+          span: fn.span,
+          context: `function ${ctx.symbolTable.getSymbol(fn.symbol).name}`,
         })
       : bodyType;
 
@@ -147,4 +149,5 @@ const finalizeFunctionReturnType = (
   const scheme = ctx.arena.newScheme([], functionType);
   ctx.table.setSymbolScheme(fn.symbol, scheme);
   signature.hasExplicitReturn = true;
+  signature.annotatedReturn ||= false;
 };

@@ -7,7 +7,13 @@ import {
   recordPatternType,
 } from "./patterns.js";
 import { mergeBranchType } from "./branching.js";
-import { ensureTypeMatches, resolveTypeExpr } from "../type-system.js";
+import {
+  ensureTypeMatches,
+  resolveTypeExpr,
+  typeSatisfies,
+  getSymbolName,
+} from "../type-system.js";
+import { emitDiagnostic } from "../../../diagnostics/index.js";
 import type { TypingContext, TypingState } from "../types.js";
 
 export const typeBlockExpr = (
@@ -19,6 +25,7 @@ export const typeBlockExpr = (
   let returnType: TypeId | undefined;
 
   expr.statements.forEach((stmtId) => {
+    const stmtSpan = ctx.hir.statements.get(stmtId)?.span;
     const stmtReturnType = typeStatement(stmtId, ctx, state);
     if (typeof stmtReturnType === "number") {
       returnType = mergeBranchType({
@@ -26,6 +33,8 @@ export const typeBlockExpr = (
         next: stmtReturnType,
         ctx,
         state,
+        span: stmtSpan,
+        context: "block",
       });
     }
   });
@@ -37,6 +46,8 @@ export const typeBlockExpr = (
       next: valueType,
       ctx,
       state,
+      span: ctx.hir.expressions.get(expr.value)?.span,
+      context: "block",
     });
   }
 
@@ -68,6 +79,10 @@ const typeStatement = (
           ? ctx.functions.getSignature(state.currentFunction.functionSymbol)
           : undefined;
       const enforceReturnType = signature?.annotatedReturn === true;
+      const functionName =
+        typeof state.currentFunction.functionSymbol === "number"
+          ? getSymbolName(state.currentFunction.functionSymbol, ctx)
+          : undefined;
       if (typeof stmt.value === "number") {
         const valueType = typeExpression(
           stmt.value,
@@ -75,14 +90,19 @@ const typeStatement = (
           state,
           expectedReturnType
         );
-        if (enforceReturnType) {
-          ensureTypeMatches(
-            valueType,
-            expectedReturnType,
+        if (
+          enforceReturnType &&
+          !typeSatisfies(valueType, expectedReturnType, ctx, state)
+        ) {
+          emitDiagnostic({
             ctx,
-            state,
-            "return statement"
-          );
+            code: "TY0011",
+            params: {
+              kind: "return-type-mismatch",
+              functionName,
+            },
+            span: stmt.span,
+          });
         }
         if (state.currentFunction) {
           state.currentFunction.observedReturnType = mergeBranchType({
@@ -90,27 +110,36 @@ const typeStatement = (
             next: valueType,
             ctx,
             state,
+            span: stmt.span,
+            context: "return",
           });
         }
         return valueType;
       }
 
       const voidType = ctx.primitives.void;
-      if (enforceReturnType) {
-        ensureTypeMatches(
-          voidType,
-          expectedReturnType,
+      if (
+        enforceReturnType &&
+        !typeSatisfies(voidType, expectedReturnType, ctx, state)
+      ) {
+        emitDiagnostic({
           ctx,
-          state,
-            "return statement"
-          );
-        }
+          code: "TY0011",
+          params: {
+            kind: "return-type-mismatch",
+            functionName,
+          },
+          span: stmt.span,
+        });
+      }
         if (state.currentFunction) {
           state.currentFunction.observedReturnType = mergeBranchType({
             acc: state.currentFunction.observedReturnType,
             next: voidType,
             ctx,
             state,
+            span: stmt.span,
+            context: "return",
           });
         }
       return voidType;

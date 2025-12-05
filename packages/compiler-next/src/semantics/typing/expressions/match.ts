@@ -66,6 +66,8 @@ export const typeMatchExpr = (
       next: valueType,
       ctx,
       state,
+      span: ctx.hir.expressions.get(arm.value)?.span,
+      context: "match arm",
     });
 
     if (!remainingMembers) {
