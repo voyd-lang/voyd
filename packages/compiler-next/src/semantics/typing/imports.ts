@@ -643,6 +643,7 @@ const makeDependencyContext = (
   overloads: dependency.overloads,
   decls: dependency.decls,
   moduleId: dependency.moduleId,
+  packageId: dependency.packageId,
   moduleExports: ctx.moduleExports,
   dependencies: ctx.dependencies,
   importsByLocal: new Map(),
@@ -670,6 +671,7 @@ const makeDependencyContext = (
   traitImplsByNominal: new Map(dependency.typing.traitImplsByNominal),
   traitImplsByTrait: new Map(dependency.typing.traitImplsByTrait),
   traitMethodImpls: new Map(dependency.typing.traitMethodImpls),
+  memberMetadata: new Map(dependency.typing.memberMetadata),
   diagnostics: new DiagnosticEmitter(),
 });
 

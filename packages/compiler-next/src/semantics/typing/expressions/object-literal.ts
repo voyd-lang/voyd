@@ -174,11 +174,13 @@ const bindNominalObjectEntry = (
     if (!expectedField) {
       throw new Error(`nominal object does not declare field ${entry.name}`);
     }
+    const valueSpan =
+      ctx.hir.expressions.get(entry.value)?.span ?? entry.span;
     assertFieldAccess({
       field: expectedField,
       ctx,
       state,
-      span: entry.value.span,
+      span: valueSpan,
       context: `constructing ${typeName}`,
       allowOwnerPrivate: true,
     });
@@ -224,11 +226,13 @@ const mergeNominalObjectEntry = (
     if (!expectedField) {
       throw new Error(`nominal object does not declare field ${entry.name}`);
     }
+    const valueSpan =
+      ctx.hir.expressions.get(entry.value)?.span ?? entry.span;
     assertFieldAccess({
       field: expectedField,
       ctx,
       state,
-      span: entry.value.span,
+      span: valueSpan,
       context: `constructing ${typeName}`,
       allowOwnerPrivate: true,
     });

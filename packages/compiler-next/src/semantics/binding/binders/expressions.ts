@@ -449,11 +449,14 @@ const ensureStaticMethodImport = ({
     const fn = dependency.functions.find(
       (entry) => entry.symbol === methodSymbol
     );
+    if (!fn) {
+      return;
+    }
     const samePackage = dependency.packageId === ctx.packageId;
     const visibilityAllowed =
       isPublicVisibility(fn.visibility) ||
       (samePackage && isPackageVisible(fn.visibility));
-    if (!fn || !visibilityAllowed) {
+    if (!visibilityAllowed) {
       return;
     }
     const record = dependency.symbolTable.getSymbol(methodSymbol);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Form, isForm, parse } from "../../../parser/index.js";
+import { type Expr, type Form, isForm, parse } from "../../../parser/index.js";
 import type {
   ModuleDependency,
   ModuleGraph,
