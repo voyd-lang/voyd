@@ -30,6 +30,7 @@ import {
 import type { ModuleExportEntry } from "../../modules.js";
 import type { ModuleMemberTable } from "../types.js";
 import { extractConstructorTargetIdentifier } from "../../constructors.js";
+import { importableMetadataFrom } from "../../imports/metadata.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -651,9 +652,9 @@ const declareModuleMemberImport = ({
   const dependency = ctx.dependencies.get(exported.moduleId);
   symbols.forEach((symbol) => {
     const dependencyRecord = dependency?.symbolTable.getSymbol(symbol);
-    const dependencyMetadata = (dependencyRecord?.metadata ?? {}) as {
-      entity?: string;
-    };
+    const importableMetadata = importableMetadataFrom(
+      dependencyRecord?.metadata as Record<string, unknown> | undefined
+    );
     const local = ctx.symbolTable.declare(
       {
         name: exported.name,
@@ -661,9 +662,7 @@ const declareModuleMemberImport = ({
         declaredAt: syntax.syntaxId,
         metadata: {
           import: { moduleId: exported.moduleId, symbol },
-          ...(dependencyMetadata.entity
-            ? { entity: dependencyMetadata.entity }
-            : {}),
+          ...(importableMetadata ?? {}),
         },
       },
       scope

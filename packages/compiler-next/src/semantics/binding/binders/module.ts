@@ -46,6 +46,7 @@ import type { ModuleExportEntry } from "../../modules.js";
 import type { SourceSpan } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
 import { isSamePackage } from "../../packages.js";
+import { importableMetadataFrom } from "../../imports/metadata.js";
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   const tracker = new BinderScopeTracker(ctx.symbolTable);
@@ -391,13 +392,16 @@ const declareImportedSymbol = ({
     const sourceMetadata = dependency
       ? dependency.symbolTable.getSymbol(symbol).metadata
       : undefined;
+    const importableMetadata = importableMetadataFrom(
+      sourceMetadata as Record<string, unknown> | undefined
+    );
     const local = ctx.symbolTable.declare({
       name: alias,
       kind: exported.kind,
       declaredAt: declaredAt.syntaxId,
       metadata: {
         import: { moduleId: exported.moduleId, symbol },
-        entity: (sourceMetadata as { entity?: string } | undefined)?.entity,
+        ...(importableMetadata ?? {}),
       },
     });
     const bound: BoundImport = {

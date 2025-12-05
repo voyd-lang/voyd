@@ -4,6 +4,10 @@ import {
   ensureTraitType,
   resolveTypeAlias,
 } from "./type-system.js";
+import {
+  applyImportableMetadata,
+  importableMetadataFrom,
+} from "../imports/metadata.js";
 import type {
   DependencySemantics,
   FunctionSignature,
@@ -46,29 +50,6 @@ export const importTargetFor = (
   return metadata.import;
 };
 
-const copyIntrinsicMetadata = ({
-  localSymbol,
-  dependencySymbol,
-  dependency,
-  ctx,
-}: {
-  localSymbol: SymbolId;
-  dependencySymbol: SymbolId;
-  dependency: DependencySemantics;
-  ctx: TypingContext;
-}): void => {
-  const sourceRecord = dependency.symbolTable.getSymbol(dependencySymbol);
-  const metadata = (sourceRecord.metadata ?? {}) as {
-    intrinsic?: boolean;
-    intrinsicName?: string;
-    intrinsicUsesSignature?: boolean;
-  };
-  if (!metadata.intrinsic) {
-    return;
-  }
-  ctx.symbolTable.setSymbolMetadata(localSymbol, metadata);
-};
-
 export const resolveImportedValue = ({
   symbol,
   ctx,
@@ -87,11 +68,11 @@ export const resolveImportedValue = ({
       `missing semantics for imported module ${target.moduleId}`
     );
   }
-  copyIntrinsicMetadata({
-    localSymbol: symbol,
-    dependencySymbol: target.symbol,
-    dependency,
-    ctx,
+  const dependencyRecord = dependency.symbolTable.getSymbol(target.symbol);
+  applyImportableMetadata({
+    symbolTable: ctx.symbolTable,
+    symbol,
+    source: dependencyRecord.metadata as Record<string, unknown> | undefined,
   });
   const dependencyMemberMetadata =
     dependency.typing.memberMetadata.get(target.symbol);
@@ -591,11 +572,18 @@ const mapDependencySymbolToLocal = ({
     throw new Error(`module ${dependency.moduleId} does not export symbol ${owner}`);
   }
 
+  const dependencyRecord = dependency.symbolTable.getSymbol(owner);
+  const importableMetadata = importableMetadataFrom(
+    dependencyRecord.metadata as Record<string, unknown> | undefined
+  );
   const declared = ctx.symbolTable.declare({
     name: exportEntry.name,
     kind: exportEntry.kind,
     declaredAt: ctx.hir.module.ast,
-    metadata: { import: { moduleId: dependency.moduleId, symbol: owner } },
+    metadata: {
+      import: { moduleId: dependency.moduleId, symbol: owner },
+      ...(importableMetadata ?? {}),
+    },
   });
   ctx.importsByLocal.set(declared, { moduleId: dependency.moduleId, symbol: owner });
   const bucket = ctx.importAliasesByModule.get(dependency.moduleId) ?? new Map();
