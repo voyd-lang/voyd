@@ -8,7 +8,10 @@ import type {
 } from "./context.js";
 import { compileExpression } from "./expressions/index.js";
 import { wasmTypeFor } from "./types.js";
-import { isPackageVisible } from "../semantics/hir/index.js";
+import {
+  isPackageVisible,
+  isPublicVisibility,
+} from "../semantics/hir/index.js";
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const unknown = ctx.typing.arena.internPrimitive("unknown");
@@ -196,10 +199,18 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
 };
 
 export const emitModuleExports = (ctx: CodegenContext): void => {
-  ctx.hir.items.forEach((item) => {
-    if (item.kind !== "function") return;
-    if (!isPackageVisible(item.visibility)) return;
-    const symbolRecord = ctx.symbolTable.getSymbol(item.symbol);
+  const publicExports = ctx.hir.module.exports.filter((entry) =>
+    isPublicVisibility(entry.visibility)
+  );
+  const exportEntries =
+    ctx.binding.isPackageRoot || publicExports.length > 0
+      ? publicExports
+      : ctx.hir.module.exports.filter((entry) =>
+          isPackageVisible(entry.visibility)
+        );
+
+  exportEntries.forEach((entry) => {
+    const symbolRecord = ctx.symbolTable.getSymbol(entry.symbol);
     const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
       intrinsic?: boolean;
       intrinsicUsesSignature?: boolean;
@@ -210,13 +221,15 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
     ) {
       return;
     }
-    const metas = ctx.functions.get(functionKey(ctx.moduleId, item.symbol));
+    const metas = ctx.functions.get(
+      functionKey(ctx.moduleId, entry.symbol)
+    );
     const meta =
       metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
     if (!meta) {
       return;
     }
-    const exportName = ctx.symbolTable.getSymbol(item.symbol).name;
+    const exportName = entry.alias ?? symbolRecord.name;
     ctx.mod.addFunctionExport(meta.wasmName, exportName);
   });
 };

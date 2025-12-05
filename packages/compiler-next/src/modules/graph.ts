@@ -372,11 +372,27 @@ const resolveModuleRequest = (
   options: { anchorToSelf?: boolean } = {}
 ): ModulePath => {
   const normalized = normalizeRequest(request);
-  const namespace = normalized.namespace ?? importer.namespace;
+  const prefixSrcWithinPackage =
+    importer.namespace === "pkg" && normalized.namespace === "src";
+  const namespace = prefixSrcWithinPackage
+    ? "pkg"
+    : normalized.namespace ?? importer.namespace;
+  const packageName =
+    namespace === "pkg"
+      ? normalized.packageName ?? importer.packageName
+      : normalized.packageName;
+  const requestedSegments =
+    prefixSrcWithinPackage && normalized.segments[0] !== "src"
+      ? ["src", ...normalized.segments]
+      : normalized.segments;
+  const normalizedSegments =
+    namespace === "pkg" && requestedSegments.length === 0
+      ? ["pkg"]
+      : requestedSegments;
 
   const anchorToSelf = options.anchorToSelf ?? false;
   const importerRoot = importer.segments.at(0);
-  const firstRequestSegment = normalized.segments.at(0);
+  const firstRequestSegment = normalizedSegments.at(0);
   const parentSegments = importer.segments.slice(0, -1);
   const useParentSegments =
     !anchorToSelf &&
@@ -391,26 +407,19 @@ const resolveModuleRequest = (
     : [];
   const suffix = anchorToSelf
     ? firstRequestSegment === importer.segments.at(0)
-      ? normalized.segments.slice(1)
-      : normalized.segments
+      ? normalizedSegments.slice(1)
+      : normalizedSegments
     : useParentSegments && firstRequestSegment === parentSegments.at(-1)
-    ? normalized.segments.slice(1)
-    : normalized.segments;
+    ? normalizedSegments.slice(1)
+    : normalizedSegments;
 
   const segments = [...baseSegments, ...suffix];
 
   if (namespace === "pkg") {
-    const [packageName, ...rest] =
-      normalized.packageName && normalized.segments.length === 0
-        ? [normalized.packageName]
-        : normalized.packageName
-        ? [normalized.packageName, ...segments]
-        : segments;
-
     return {
       namespace,
       packageName,
-      segments: rest,
+      segments: segments.length === 0 ? ["pkg"] : segments,
     };
   }
 
