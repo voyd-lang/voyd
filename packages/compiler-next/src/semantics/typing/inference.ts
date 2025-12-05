@@ -77,6 +77,8 @@ const typeFunction = (
     instanceKey: formatFunctionInstanceKey(fn.symbol, []),
     typeParams: undefined,
     substitution: undefined,
+    memberOf: ctx.memberMetadata.get(fn.symbol)?.owner,
+    functionSymbol: fn.symbol,
   };
   let bodyType;
   try {

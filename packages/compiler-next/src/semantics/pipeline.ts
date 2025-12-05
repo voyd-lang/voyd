@@ -105,6 +105,7 @@ export const semanticsPipeline = (
     decls: binding.decls,
     imports: binding.imports,
     moduleId: module.id,
+    packageId: binding.packageId,
     moduleExports: exports ?? new Map(),
     availableSemantics: projectDependencySemantics(dependencies),
   });
@@ -218,6 +219,7 @@ const projectDependencySemantics = (
       id,
       {
         moduleId: entry.moduleId,
+        packageId: entry.binding.packageId,
         symbolTable: entry.symbolTable,
         hir: entry.hir,
         typing: entry.typing,

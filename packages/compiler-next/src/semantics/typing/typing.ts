@@ -9,6 +9,7 @@ import {
   seedPrimitiveTypes,
   registerImpls,
 } from "./registry.js";
+import { indexMemberMetadata } from "./members.js";
 import { validateTypedProgram } from "./validation.js";
 import type {
   TypingContext,
@@ -35,6 +36,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   registerTraits(ctx);
   registerFunctionSignatures(ctx, state);
   registerImpls(ctx, state);
+  indexMemberMetadata(ctx);
 
   runInferencePass(ctx, state);
   runStrictTypeCheck(ctx, state);
@@ -77,6 +79,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
       ])
     ),
     traitMethodImpls: new Map(ctx.traitMethodImpls),
+    memberMetadata: new Map(ctx.memberMetadata),
     diagnostics: ctx.diagnostics.diagnostics,
   };
 };

@@ -10,9 +10,17 @@ import {
   ensureTypeMatches,
   getObjectTemplate,
   getStructuralFields,
+  getSymbolName,
   resolveTypeExpr,
 } from "../type-system.js";
+import type { StructuralField } from "../type-arena.js";
 import type { TypingContext, TypingState } from "../types.js";
+import {
+  assertFieldAccess,
+  canAccessField,
+  filterAccessibleFields,
+  reportInaccessibleFieldRequirement,
+} from "../visibility.js";
 
 export const typeObjectLiteralExpr = (
   expr: HirObjectLiteralExpr,
@@ -52,11 +60,16 @@ const mergeObjectLiteralEntry = (
     return;
   }
 
-  const spreadFields = getStructuralFields(spreadType, ctx, state);
+  const spreadFields = getStructuralFields(spreadType, ctx, state, {
+    includeInaccessible: true,
+    allowOwnerPrivate: true,
+  });
   if (!spreadFields) {
     throw new Error("object spread requires a structural object");
   }
-  spreadFields.forEach((field) => fields.set(field.name, field.type));
+  filterAccessibleFields(spreadFields, ctx, state).forEach((field) =>
+    fields.set(field.name, field.type)
+  );
 };
 
 const typeNominalObjectLiteral = (
@@ -79,8 +92,9 @@ const typeNominalObjectLiteral = (
     throw new Error("missing object template for nominal literal");
   }
 
-  const templateFields = new Map<string, TypeId>(
-    template.fields.map((field) => [field.name, field.type])
+  const typeName = getSymbolName(targetSymbol, ctx);
+  const templateFields = new Map<string, StructuralField>(
+    template.fields.map((field) => [field.name, field])
   );
   const typeParamBindings = new Map<TypeParamId, TypeId>();
   const seenFields = new Set<string>();
@@ -92,7 +106,8 @@ const typeNominalObjectLiteral = (
       typeParamBindings,
       seenFields,
       ctx,
-      state
+      state,
+      typeName
     )
   );
 
@@ -114,17 +129,30 @@ const typeNominalObjectLiteral = (
     throw new Error("missing object type information for nominal literal");
   }
 
-  const declaredFields = new Map<string, TypeId>(
-    objectInfo.fields.map((field) => [field.name, field.type])
+  const declaredFields = new Map<string, StructuralField>(
+    objectInfo.fields.map((field) => [field.name, field])
   );
   const provided = new Set<string>();
 
   expr.entries.forEach((entry) =>
-    mergeNominalObjectEntry(entry, declaredFields, provided, ctx, state)
+    mergeNominalObjectEntry(entry, declaredFields, provided, ctx, state, typeName)
   );
 
-  declaredFields.forEach((_, name) => {
+  declaredFields.forEach((field, name) => {
     if (!provided.has(name)) {
+      const accessible = canAccessField(field, ctx, state, {
+        allowOwnerPrivate: true,
+      });
+      if (!accessible) {
+        reportInaccessibleFieldRequirement({
+          field,
+          typeName,
+          ctx,
+          state,
+          span: expr.span,
+        });
+        return;
+      }
       throw new Error(`missing initializer for field ${name}`);
     }
   });
@@ -134,19 +162,28 @@ const typeNominalObjectLiteral = (
 
 const bindNominalObjectEntry = (
   entry: HirObjectLiteralEntry,
-  declared: Map<string, TypeId>,
+  declared: Map<string, StructuralField>,
   bindings: Map<TypeParamId, TypeId>,
   provided: Set<string>,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  typeName: string
 ): void => {
   if (entry.kind === "field") {
-    const expectedType = declared.get(entry.name);
-    if (!expectedType) {
+    const expectedField = declared.get(entry.name);
+    if (!expectedField) {
       throw new Error(`nominal object does not declare field ${entry.name}`);
     }
-    const valueType = typeExpression(entry.value, ctx, state, expectedType);
-    bindTypeParamsFromType(expectedType, valueType, bindings, ctx, state);
+    assertFieldAccess({
+      field: expectedField,
+      ctx,
+      state,
+      span: entry.value.span,
+      context: `constructing ${typeName}`,
+      allowOwnerPrivate: true,
+    });
+    const valueType = typeExpression(entry.value, ctx, state, expectedField.type);
+    bindTypeParamsFromType(expectedField.type, valueType, bindings, ctx, state);
     provided.add(entry.name);
     return;
   }
@@ -156,38 +193,50 @@ const bindNominalObjectEntry = (
     return;
   }
 
-  const spreadFields = getStructuralFields(spreadType, ctx, state);
+  const spreadFields = getStructuralFields(spreadType, ctx, state, {
+    includeInaccessible: true,
+    allowOwnerPrivate: true,
+  });
   if (!spreadFields) {
     throw new Error("object spread requires a structural object");
   }
 
-  spreadFields.forEach((field) => {
-    const expectedType = declared.get(field.name);
-    if (!expectedType) {
+  filterAccessibleFields(spreadFields, ctx, state, { allowOwnerPrivate: true }).forEach((field) => {
+    const expectedField = declared.get(field.name);
+    if (!expectedField) {
       throw new Error(`nominal object does not declare field ${field.name}`);
     }
-    bindTypeParamsFromType(expectedType, field.type, bindings, ctx, state);
+    bindTypeParamsFromType(expectedField.type, field.type, bindings, ctx, state);
     provided.add(field.name);
   });
 };
 
 const mergeNominalObjectEntry = (
   entry: HirObjectLiteralEntry,
-  declared: Map<string, TypeId>,
+  declared: Map<string, StructuralField>,
   provided: Set<string>,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  typeName: string
 ): void => {
   if (entry.kind === "field") {
-    const expectedType = declared.get(entry.name);
-    if (!expectedType) {
+    const expectedField = declared.get(entry.name);
+    if (!expectedField) {
       throw new Error(`nominal object does not declare field ${entry.name}`);
     }
-    const valueType = typeExpression(entry.value, ctx, state, expectedType);
-    if (expectedType !== ctx.primitives.unknown) {
+    assertFieldAccess({
+      field: expectedField,
+      ctx,
+      state,
+      span: entry.value.span,
+      context: `constructing ${typeName}`,
+      allowOwnerPrivate: true,
+    });
+    const valueType = typeExpression(entry.value, ctx, state, expectedField.type);
+    if (expectedField.type !== ctx.primitives.unknown) {
       ensureTypeMatches(
         valueType,
-        expectedType,
+        expectedField.type,
         ctx,
         state,
         `field ${entry.name}`
@@ -202,20 +251,23 @@ const mergeNominalObjectEntry = (
     return;
   }
 
-  const spreadFields = getStructuralFields(spreadType, ctx, state);
+  const spreadFields = getStructuralFields(spreadType, ctx, state, {
+    includeInaccessible: true,
+    allowOwnerPrivate: true,
+  });
   if (!spreadFields) {
     throw new Error("object spread requires a structural object");
   }
 
-  spreadFields.forEach((field) => {
-    const expectedType = declared.get(field.name);
-    if (!expectedType) {
+  filterAccessibleFields(spreadFields, ctx, state, { allowOwnerPrivate: true }).forEach((field) => {
+    const expectedField = declared.get(field.name);
+    if (!expectedField) {
       throw new Error(`nominal object does not declare field ${field.name}`);
     }
-    if (expectedType !== ctx.primitives.unknown) {
+    if (expectedField.type !== ctx.primitives.unknown) {
       ensureTypeMatches(
         field.type,
-        expectedType,
+        expectedField.type,
         ctx,
         state,
         `spread field ${field.name}`

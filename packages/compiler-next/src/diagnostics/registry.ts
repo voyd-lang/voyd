@@ -71,6 +71,19 @@ type DiagnosticParamsMap = {
   TY0006: { kind: "unknown-function"; name: string };
   TY0007: { kind: "ambiguous-overload"; name: string };
   TY0008: { kind: "no-overload"; name: string };
+  TY0009: {
+    kind: "member-access";
+    memberKind: "field" | "method";
+    name: string;
+    visibility: string;
+    context?: string;
+  };
+  TY0010: {
+    kind: "inaccessible-construction";
+    typeName: string;
+    member: string;
+    visibility: string;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -221,6 +234,22 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0008"]>,
+  TY0009: {
+    code: "TY0009",
+    message: (params) => {
+      const context = params.context ? ` when ${params.context}` : "";
+      return `${params.memberKind} '${params.name}' is not accessible${context} (visibility: ${params.visibility})`;
+    },
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0009"]>,
+  TY0010: {
+    code: "TY0010",
+    message: (params) =>
+      `cannot construct ${params.typeName}; field '${params.member}' is not accessible (visibility: ${params.visibility})`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0010"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

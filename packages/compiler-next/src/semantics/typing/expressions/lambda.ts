@@ -208,6 +208,8 @@ export const typeLambdaExpr = (
     instanceKey: lambdaInstanceKey,
     typeParams: mergedTypeParams,
     substitution: mergedSubstitution,
+    memberOf: previousFunction?.memberOf,
+    functionSymbol: previousFunction?.functionSymbol,
   };
 
   let bodyType: TypeId;

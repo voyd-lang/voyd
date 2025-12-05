@@ -387,12 +387,17 @@ const declareImportedSymbol = ({
   const locals: BoundImport[] = [];
 
   symbols.forEach((symbol) => {
+    const dependency = ctx.dependencies.get(exported.moduleId);
+    const sourceMetadata = dependency
+      ? dependency.symbolTable.getSymbol(symbol).metadata
+      : undefined;
     const local = ctx.symbolTable.declare({
       name: alias,
       kind: exported.kind,
       declaredAt: declaredAt.syntaxId,
       metadata: {
         import: { moduleId: exported.moduleId, symbol },
+        entity: (sourceMetadata as { entity?: string } | undefined)?.entity,
       },
     });
     const bound: BoundImport = {

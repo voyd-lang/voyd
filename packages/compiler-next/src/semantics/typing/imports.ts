@@ -93,6 +93,23 @@ export const resolveImportedValue = ({
     dependency,
     ctx,
   });
+  const dependencyMemberMetadata =
+    dependency.typing.memberMetadata.get(target.symbol);
+  if (dependencyMemberMetadata) {
+    const owner =
+      typeof dependencyMemberMetadata.owner === "number"
+        ? mapDependencySymbolToLocal({
+            owner: dependencyMemberMetadata.owner,
+            dependency,
+            ctx,
+          })
+        : undefined;
+    ctx.memberMetadata.set(symbol, {
+      owner,
+      visibility: dependencyMemberMetadata.visibility,
+      packageId: dependencyMemberMetadata.packageId ?? dependency.packageId,
+    });
+  }
   registerImportedObjectTemplate({
     dependency,
     dependencySymbol: target.symbol,
@@ -368,12 +385,25 @@ const createTranslation = ({
         break;
       }
       case "structural-object": {
+        const mapOwnerSymbol = (
+          owner: number | undefined
+        ): number | undefined => {
+          if (typeof owner !== "number") return owner;
+          try {
+            return mapSymbol(owner);
+          } catch {
+            return undefined;
+          }
+        };
         const fields = desc.fields.map((field) => ({
           name: field.name,
           type: translate(field.type),
           declaringParams: field.declaringParams?.map((param) =>
             mapTypeParam(param, paramMap, { arena: targetArena } as TypingContext)
           ),
+          visibility: field.visibility,
+          owner: mapOwnerSymbol(field.owner),
+          packageId: field.packageId,
         }));
         result = targetArena.internStructuralObject({ fields });
         break;
@@ -515,6 +545,10 @@ export const registerImportedObjectTemplate = ({
     name: field.name,
     type: translation(field.type),
     declaringParams: translateDeclaringParams(field.declaringParams),
+    visibility: field.visibility,
+    owner:
+      typeof field.owner === "number" ? mapOwner(field.owner) : field.owner,
+    packageId: field.packageId ?? dependency.packageId ?? ctx.packageId,
   }));
 
   ctx.objects.registerTemplate({
@@ -524,6 +558,7 @@ export const registerImportedObjectTemplate = ({
     structural: translation(template.structural),
     type: translation(template.type),
     fields,
+    visibility: template.visibility,
     baseNominal: template.baseNominal
       ? translation(template.baseNominal)
       : undefined,

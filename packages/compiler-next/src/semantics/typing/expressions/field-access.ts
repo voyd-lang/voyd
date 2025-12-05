@@ -3,6 +3,7 @@ import type { TypeId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
 import { getStructuralFields } from "../type-system.js";
 import type { TypingContext, TypingState } from "../types.js";
+import { assertFieldAccess } from "../visibility.js";
 
 export const typeFieldAccessExpr = (
   expr: HirFieldAccessExpr,
@@ -14,7 +15,9 @@ export const typeFieldAccessExpr = (
     return ctx.primitives.unknown;
   }
 
-  const fields = getStructuralFields(targetType, ctx, state);
+  const fields = getStructuralFields(targetType, ctx, state, {
+    includeInaccessible: true,
+  });
   if (!fields) {
     throw new Error("field access requires an object type");
   }
@@ -27,5 +30,12 @@ export const typeFieldAccessExpr = (
     throw new Error(`object type is missing field ${expr.field}`);
   }
 
+  assertFieldAccess({
+    field,
+    ctx,
+    state,
+    span: expr.span,
+    context: "accessing member",
+  });
   return field.type;
 };

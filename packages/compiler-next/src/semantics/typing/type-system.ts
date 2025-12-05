@@ -21,6 +21,7 @@ import {
   normalizeTypeArgs,
   shouldCacheInstantiation,
 } from "../../types/instantiation.js";
+import { filterAccessibleFields } from "./visibility.js";
 
 const isFixedArrayReference = (
   name: string,
@@ -944,7 +945,12 @@ export const getObjectTemplate = (
       ctx.objects.base.type,
       paramMap
     );
-    const baseFields = (getStructuralFields(baseType, ctx, state) ?? []).map(
+    const baseFields = (
+      getStructuralFields(baseType, ctx, state, {
+        includeInaccessible: true,
+        allowOwnerPrivate: true,
+      }) ?? []
+    ).map(
       (field) => ({
         ...field,
         declaringParams: declaringParamsForField(
@@ -952,6 +958,7 @@ export const getObjectTemplate = (
           templateParams,
           ctx
         ),
+        packageId: field.packageId ?? ctx.packageId,
       })
     );
     const baseNominal = getNominalComponent(baseType, ctx);
@@ -968,6 +975,9 @@ export const getObjectTemplate = (
         name: field.name,
         type,
         declaringParams: declaringParamsForField(type, templateParams, ctx),
+        visibility: field.visibility,
+        owner: decl.symbol,
+        packageId: ctx.packageId,
       };
     });
 
@@ -1019,6 +1029,7 @@ export const getObjectTemplate = (
       structural,
       type,
       fields,
+      visibility: decl.visibility,
       baseNominal,
     };
     ctx.objects.registerTemplate(template);
@@ -1114,6 +1125,9 @@ export const ensureObjectType = (
     name: field.name,
     type: ctx.arena.substitute(field.type, subst),
     declaringParams: field.declaringParams,
+    visibility: field.visibility,
+    owner: field.owner,
+    packageId: field.packageId ?? ctx.packageId,
   }));
   ensureFieldsSubstituted(
     fields,
@@ -1129,6 +1143,7 @@ export const ensureObjectType = (
     structural,
     type,
     fields,
+    visibility: template.visibility,
     baseNominal,
   };
   const traitImpls = instantiateTraitImplsFor({
@@ -1356,7 +1371,8 @@ export const nominalSatisfies = (
 export const getStructuralFields = (
   type: TypeId,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  options: { includeInaccessible?: boolean; allowOwnerPrivate?: boolean } = {}
 ): readonly StructuralField[] | undefined => {
   if (type === ctx.primitives.unknown) {
     return undefined;
@@ -1365,13 +1381,22 @@ export const getStructuralFields = (
   const desc = ctx.arena.get(type);
   if (desc.kind === "structural-object") {
     ensureFieldsSubstituted(desc.fields, ctx, "structural object access");
-    return desc.fields;
+    return options.includeInaccessible
+      ? desc.fields
+      : filterAccessibleFields(desc.fields, ctx, state, {
+          allowOwnerPrivate: options.allowOwnerPrivate,
+        });
   }
 
   if (desc.kind === "nominal-object") {
     const info = ensureObjectType(desc.owner, ctx, state, desc.typeArgs);
     if (info) {
-      return getStructuralFields(info.structural, ctx, state);
+      const fields = info.fields;
+      return options.includeInaccessible
+        ? fields
+        : filterAccessibleFields(fields, ctx, state, {
+            allowOwnerPrivate: options.allowOwnerPrivate,
+          });
     }
     return undefined;
   }
@@ -1382,10 +1407,15 @@ export const getStructuralFields = (
         ? getObjectInfoForNominal(desc.nominal, ctx, state)
         : undefined;
     if (info) {
-      return getStructuralFields(info.structural, ctx, state);
+      const fields = info.fields;
+      return options.includeInaccessible
+        ? fields
+        : filterAccessibleFields(fields, ctx, state, {
+            allowOwnerPrivate: options.allowOwnerPrivate,
+          });
     }
     if (typeof desc.structural === "number") {
-      return getStructuralFields(desc.structural, ctx, state);
+      return getStructuralFields(desc.structural, ctx, state, options);
     }
   }
 
