@@ -92,7 +92,7 @@ move(x: x, y: y, z: z)
 Labeled arguments also support concise closure sugar on call sites:
 
 ```voyd
-fn try({ do: ((): throws -> void), catch: (e: Error) -> void })
+fn try({ do: fn(): throws -> void, catch: fn(e: Error) -> void })
 
 try do():
   this_may_throw()
@@ -208,25 +208,11 @@ add_three_numbers 1 2
 This can be used to achieve trailing closures, much like swift:
 
 ```rust
-fn call_with_5(f: (i32) -> void) -> void
+fn call_with_5(f: fn(i32) -> void) -> void
   f(5)
 
 call_with_5 (x) =>
   print(x)
-```
-
-By name parameters make this feature even more powerful:
-
-```rust
-fn eval_twice(@f: () -> void) -> void
-  f()
-  f()
-
-fn main()
-  var x = 0
-  eval_twice
-    x = x + 1
-  print(x) // 2
 ```
 
 Parenthetical elision also works with labeled arguments:
@@ -244,22 +230,6 @@ the two:
 ```rust
 add 1
 to: 2
-```
-
-Labeled arguments can also be call by name parameters, which allows for the
-implementation of a custom DSL for native like control flow:
-
-```rust
-fn my_if(@condition: () -> bool, {@then: () -> void, @else: () -> void}) -> void
-  if condition then:
-    then()
-  else:
-    else()
-
-my_if true then:
-  print("It's true!")
-else:
-  print("It's false!")
 ```
 
 See the chapter on [Syntax](./syntax.md) for more information and detailed rules.
