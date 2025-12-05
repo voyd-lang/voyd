@@ -229,7 +229,7 @@ const resolveUseEntry = ({
   decl: ParsedUseDecl;
   ctx: BindingContext;
 }): BoundUseEntry => {
-  const dependencyPath = takeDependencyPath(entry.span, ctx);
+  const dependencyPath = resolveDependencyPath({ entry, ctx });
   const moduleId = dependencyPath
     ? modulePathToString(dependencyPath)
     : undefined;
@@ -272,16 +272,22 @@ const resolveUseEntry = ({
   };
 };
 
-const takeDependencyPath = (
-  span: SourceSpan,
-  ctx: BindingContext
-): ModulePath | undefined => {
-  const bucket = ctx.dependenciesBySpan.get(spanKey(span));
-  if (!bucket || bucket.length === 0) {
-    return undefined;
-  }
-  const dep = bucket.shift();
-  return dep?.path;
+const resolveDependencyPath = ({
+  entry,
+  ctx,
+}: {
+  entry: ParsedUseEntry;
+  ctx: BindingContext;
+}): ModulePath | undefined => {
+  const matches = ctx.module.dependencies.filter((dep) =>
+    matchesDependencyPath({
+      dependencyPath: dep.path,
+      entry,
+      currentModulePath: ctx.module.path,
+    })
+  );
+  const preferred = matches.find((dep) => dep.kind === "use") ?? matches[0];
+  return preferred?.path;
 };
 
 const bindImportsFromModule = ({
@@ -513,5 +519,65 @@ const recordImportDiagnostic = (
   );
 };
 
-const spanKey = (span: SourceSpan): string =>
-  `${span.file}:${span.start}:${span.end}`;
+const matchesDependencyPath = ({
+  dependencyPath,
+  entry,
+  currentModulePath,
+}: {
+  dependencyPath: ModulePath;
+  entry: ParsedUseEntry;
+  currentModulePath: ModulePath;
+}): boolean => {
+  const entryKeys = [
+    entry.moduleSegments.length > 0 ? entry.moduleSegments.join("::") : undefined,
+    entry.path.length > 0 ? entry.path.join("::") : undefined,
+  ].filter((value): value is string => Boolean(value));
+
+  const depSegments = dependencyPath.segments.join("::");
+  const namespacedDepKey = [dependencyPath.namespace, ...dependencyPath.segments].join(
+    "::"
+  );
+  if (entryKeys.some((key) => key === depSegments || key === namespacedDepKey)) {
+    return true;
+  }
+
+  if (dependencyPath.namespace === "pkg" && dependencyPath.packageName) {
+    const packageKey = `${dependencyPath.namespace}::${dependencyPath.packageName}`;
+    const pkgKey = [dependencyPath.packageName, ...dependencyPath.segments].join("::");
+    const namespacedPkgKey = [
+      dependencyPath.namespace,
+      dependencyPath.packageName,
+      ...dependencyPath.segments,
+    ].join("::");
+    if (
+      entryKeys.some(
+        (key) =>
+          key === packageKey ||
+          key === dependencyPath.packageName ||
+          key === pkgKey ||
+          key === namespacedPkgKey
+      )
+    ) {
+      return true;
+    }
+  }
+  const sameNamespace = dependencyPath.namespace === currentModulePath.namespace;
+  const samePackage = dependencyPath.packageName === currentModulePath.packageName;
+  if (sameNamespace && samePackage) {
+    const hasModulePrefix =
+      dependencyPath.segments.length > currentModulePath.segments.length &&
+      dependencyPath.segments
+        .slice(0, currentModulePath.segments.length)
+        .every((segment, index) => segment === currentModulePath.segments[index]);
+    if (hasModulePrefix) {
+      const relativeSegments = dependencyPath.segments.slice(
+        currentModulePath.segments.length
+      );
+      const relativeKey = relativeSegments.join("::");
+      if (entryKeys.some((key) => key === relativeKey)) {
+        return true;
+      }
+    }
+  }
+  return false;
+};

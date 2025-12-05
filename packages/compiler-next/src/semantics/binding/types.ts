@@ -106,7 +106,6 @@ export interface BindingContext {
   packageId: string;
   isPackageRoot: boolean;
   moduleExports: Map<string, ModuleExportTable>;
-  dependenciesBySpan: Map<string, ModuleDependency[]>;
   dependencies: Map<string, BindingResult>;
   uses: BoundUse[];
   imports: BoundImport[];

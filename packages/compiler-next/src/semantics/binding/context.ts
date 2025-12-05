@@ -5,12 +5,7 @@ import type {
 } from "./types.js";
 import { DeclTable } from "../decls.js";
 import type { Syntax } from "../../parser/index.js";
-import { toSourceSpan } from "../utils.js";
-import type {
-  ModuleDependency,
-  ModuleGraph,
-  ModuleNode,
-} from "../../modules/types.js";
+import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
 import type { ModuleExportTable } from "../modules.js";
 import { isPackageRootModule, packageIdFromPath } from "../packages.js";
 
@@ -46,17 +41,7 @@ export const createBindingContext = ({
   const dependencyBindings = dependencies ?? new Map<string, BindingResult>();
 
   const decls = new DeclTable();
-  const dependenciesBySpan = new Map<string, ModuleDependency[]>();
   const packageId = packageIdFromPath(moduleNode.path);
-  moduleNode.dependencies.forEach((dep) => {
-    const key = spanKey(dep.span ?? toSourceSpan(moduleForm));
-    const bucket = dependenciesBySpan.get(key);
-    if (bucket) {
-      bucket.push(dep);
-    } else {
-      dependenciesBySpan.set(key, [dep]);
-    }
-  });
 
   return {
     symbolTable,
@@ -74,7 +59,6 @@ export const createBindingContext = ({
     packageId,
     isPackageRoot: isPackageRootModule(moduleNode.path),
     moduleExports: exportTables,
-    dependenciesBySpan,
     dependencies: dependencyBindings,
     uses: [],
     imports: [],
@@ -117,6 +101,3 @@ export const rememberSyntax = (
   }
   ctx.syntaxByNode.set(syntax.syntaxId, syntax);
 };
-
-const spanKey = (span: ReturnType<typeof toSourceSpan>): string =>
-  `${span.file}:${span.start}:${span.end}`;

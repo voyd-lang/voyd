@@ -52,18 +52,19 @@ const buildImportGraph = () => {
   const depSemantics = semanticsPipeline({ module: dep.module, graph: dep.graph });
 
   const mainAst = loadAst(MAIN_FIXTURE);
-  const dependencyUses = mainAst.rest
-    .filter((entry): entry is Form => isForm(entry) && entry.calls("use"))
-    .map((form) => ({
-      kind: "use" as const,
-      path: dep.module.path,
-      span: toSourceSpan(form),
-    }));
+  const firstUse = mainAst.rest.find(
+    (entry): entry is Form => isForm(entry) && entry.calls("use")
+  );
+  const dependency = {
+    kind: "use" as const,
+    path: dep.module.path,
+    span: toSourceSpan(firstUse ?? mainAst),
+  };
   const main = buildModule({
     fixture: MAIN_FIXTURE,
     segments: ["main"],
     ast: mainAst,
-    dependencies: dependencyUses,
+    dependencies: [dependency],
   });
 
   return { dep, depSemantics, main };
