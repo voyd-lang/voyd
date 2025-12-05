@@ -1,0 +1,6 @@
+use dep::dep_intrinsic
+use dep::make_external
+
+pub fn main() -> i32
+  let item = make_external(2)
+  dep_intrinsic(item.value)
