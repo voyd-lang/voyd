@@ -94,10 +94,10 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     }
 
     const implDecl = parseImplDecl(entry);
-    if (implDecl) {
-      bindImplDecl(implDecl, ctx, tracker);
-      continue;
-    }
+  if (implDecl) {
+    bindImplDecl(implDecl, ctx, tracker);
+    continue;
+  }
 
     throw new Error(
       "unsupported top-level form; expected a function or type declaration"
@@ -313,10 +313,55 @@ const bindImportsFromModule = ({
     return [];
   }
 
+  const ownerNameFor = (exported: ModuleExportEntry): string | undefined => {
+    if (typeof exported.memberOwner !== "number") {
+      return undefined;
+    }
+    const dependency = ctx.dependencies.get(moduleId);
+    if (!dependency) {
+      return undefined;
+    }
+    try {
+      return dependency.symbolTable.getSymbol(exported.memberOwner).name;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const isInstanceMemberExport = (exported: ModuleExportEntry): boolean =>
+    typeof exported.memberOwner === "number" && exported.isStatic !== true;
+
+  const allowMemberExport = (exported: ModuleExportEntry): boolean => {
+    if (!isInstanceMemberExport(exported)) {
+      return true;
+    }
+    if (isPackageVisible(visibility)) {
+      return exported.apiProjection === true;
+    }
+    return true;
+  };
+
   if (entry.importKind === "all") {
-    const allowed = Array.from(exports.values()).filter((item) =>
-      canAccessExport({ exported: item, moduleId, ctx })
-    );
+    const allowed = Array.from(exports.values()).filter((item) => {
+      const accessible = canAccessExport({ exported: item, moduleId, ctx });
+      if (!accessible) {
+        return false;
+      }
+      if (!allowMemberExport(item)) {
+        recordImportDiagnostic({
+          params: {
+            kind: "instance-member-import",
+            moduleId,
+            target: item.name,
+            owner: ownerNameFor(item),
+          },
+          span: entry.span,
+          ctx,
+        });
+        return false;
+      }
+      return true;
+    });
     return allowed.flatMap((item) =>
       declareImportedSymbol({
         exported: item,
@@ -343,6 +388,20 @@ const bindImportsFromModule = ({
   if (!exported) {
     recordImportDiagnostic({
       params: { kind: "missing-export", moduleId, target: targetName },
+      span: entry.span,
+      ctx,
+    });
+    return [];
+  }
+
+  if (isInstanceMemberExport(exported)) {
+    recordImportDiagnostic({
+      params: {
+        kind: "instance-member-import",
+        moduleId,
+        target: targetName,
+        owner: ownerNameFor(exported),
+      },
       span: entry.span,
       ctx,
     });

@@ -13,6 +13,9 @@ export interface ModuleExportEntry {
   packageId: string;
   kind: SymbolKind;
   visibility: HirVisibility;
+  memberOwner?: SymbolId;
+  isStatic?: boolean;
+  apiProjection?: boolean;
 }
 
 export type ModuleExportTable = Map<string, ModuleExportEntry>;

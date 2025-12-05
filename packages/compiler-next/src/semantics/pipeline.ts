@@ -187,10 +187,16 @@ const collectModuleExports = ({
     name,
     symbol,
     visibility,
+    memberOwner,
+    isStatic,
+    apiProjection,
   }: {
     name: string;
     symbol: SymbolId;
     visibility: HirVisibility;
+    memberOwner?: SymbolId;
+    isStatic?: boolean;
+    apiProjection?: boolean;
   }): void => {
     const existing = table.get(name);
     const symbols = existing
@@ -203,6 +209,10 @@ const collectModuleExports = ({
     const mergedVisibility = existing
       ? maxVisibility(existing.visibility, visibility)
       : visibility;
+    const owner = existing?.memberOwner ?? memberOwner;
+    const mergedStatic =
+      existing?.isStatic === true ? true : isStatic ?? existing?.isStatic;
+    const projected = existing?.apiProjection || apiProjection === true;
     table.set(name, {
       name,
       symbol: existing?.symbol ?? symbol,
@@ -213,13 +223,36 @@ const collectModuleExports = ({
       packageId,
       kind: record.kind,
       visibility: mergedVisibility,
+      memberOwner: owner,
+      isStatic: mergedStatic,
+      apiProjection: projected,
     });
+  };
+
+  const memberInfoFor = (
+    symbol: SymbolId
+  ): { owner?: SymbolId; isStatic?: boolean } => {
+    const memberMetadata = typing.memberMetadata.get(symbol);
+    const owner =
+      typeof memberMetadata?.owner === "number" ? memberMetadata.owner : undefined;
+    const recordMetadata = symbolTable.getSymbol(symbol).metadata as
+      | { static?: boolean }
+      | undefined;
+    const isStatic = recordMetadata?.static === true;
+    return { owner, isStatic };
   };
 
   hir.module.exports.forEach((entry) => {
     const record = symbolTable.getSymbol(entry.symbol);
     const name = entry.alias ?? record.name;
-    upsertExport({ name, symbol: entry.symbol, visibility: entry.visibility });
+    const { owner: memberOwner, isStatic } = memberInfoFor(entry.symbol);
+    upsertExport({
+      name,
+      symbol: entry.symbol,
+      visibility: entry.visibility,
+      memberOwner,
+      isStatic,
+    });
   });
 
   if (binding.isPackageRoot) {
@@ -245,6 +278,9 @@ const collectModuleExports = ({
         name: record.name,
         symbol,
         visibility: publicVisibility,
+        memberOwner: metadata.owner,
+        isStatic: memberInfoFor(symbol).isStatic,
+        apiProjection: true,
       });
     });
   }

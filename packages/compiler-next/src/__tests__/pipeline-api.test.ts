@@ -278,4 +278,84 @@ pub fn make_external() -> External
       true
     );
   });
+
+  it("rejects pub re-export of instance methods", async () => {
+    const root = resolve("/proj/reexport");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const externalPath = `${root}${sep}external.voyd`;
+
+    const host = createMemoryHost({
+      [pkgPath]: `
+pub use src::external::External
+pub use src::external::expose
+
+pub fn main() -> i32
+  0
+`,
+      [externalPath]: `
+pub obj External { api value: i32 }
+
+impl External
+  api fn expose(self) -> i32
+    self.value
+
+pub fn make_external() -> External
+  External { value: 1 }
+`,
+    });
+
+    const result = await compileProgram({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.wasm).toBeUndefined();
+    expect(
+      result.diagnostics.some(
+        (diag) =>
+          diag.code === "BD0001" &&
+          diag.message.includes("instance member")
+      )
+    ).toBe(true);
+  });
+
+  it("allows importing static methods", async () => {
+    const root = resolve("/proj/static");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const counterPath = `${root}${sep}counter.voyd`;
+
+    const host = createMemoryHost({
+      [pkgPath]: `
+use src::counter::all
+
+pub use src::counter::new
+
+pub fn main() -> i32
+  let counter = new(4)
+  counter.double()
+`,
+      [counterPath]: `
+pub obj Counter { api value: i32 }
+
+impl Counter
+  fn new(value: i32) -> Counter
+    Counter { value }
+
+  api fn double(self) -> i32
+    self.value * 2
+`,
+    });
+
+    const result = await compileProgram({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(8);
+  });
 });

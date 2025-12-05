@@ -30,6 +30,12 @@ type DiagnosticParamsMap = {
         moduleId: string;
         target: string;
         visibility: string;
+      }
+    | {
+        kind: "instance-member-import";
+        moduleId: string;
+        target: string;
+        owner?: string;
       };
   BD0002:
     | {
@@ -110,6 +116,10 @@ export const diagnosticsRegistry: {
           return "missing module identifier for import";
         case "out-of-scope-export":
           return `Module ${params.moduleId} export ${params.target} is not visible here (visibility: ${params.visibility})`;
+        case "instance-member-import": {
+          const ownerPrefix = params.owner ? `${params.owner}::` : "";
+          return `Cannot import ${params.target} from ${params.moduleId}; ${ownerPrefix}${params.target} is an instance member and must be accessed through its type`;
+        }
       }
       return exhaustive(params);
     },
