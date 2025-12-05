@@ -188,7 +188,6 @@ use src::external::all
 
 pub use src::external::External
 pub use src::external::make_external
-pub use src::external::expose
 `,
       [depExternalPath]: `
 pub obj External {
@@ -241,9 +240,10 @@ pub fn leak_hidden() -> i32
   make_external().hidden
 `,
       [depPkgPath]: `
+use src::external::all
+
 pub use src::external::External
 pub use src::external::make_external
-pub use src::external::expose
 `,
       [depExternalPath]: `
 pub obj External {

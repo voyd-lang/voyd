@@ -130,6 +130,7 @@ export const semanticsPipeline = (
     modulePath: module.path,
     packageId: binding.packageId,
     binding,
+    typing,
   }),
     diagnostics,
   };
@@ -170,6 +171,7 @@ const collectModuleExports = ({
   modulePath,
   packageId,
   binding,
+  typing,
 }: {
   hir: HirGraph;
   symbolTable: SymbolTable;
@@ -177,33 +179,76 @@ const collectModuleExports = ({
   modulePath: ModulePath;
   packageId: string;
   binding: BindingResult;
+  typing: TypingResult;
 }): ModuleExportTable => {
   const table: ModuleExportTable = new Map();
-  hir.module.exports.forEach((entry) => {
-    const record = symbolTable.getSymbol(entry.symbol);
-    const name = entry.alias ?? record.name;
+
+  const upsertExport = ({
+    name,
+    symbol,
+    visibility,
+  }: {
+    name: string;
+    symbol: SymbolId;
+    visibility: HirVisibility;
+  }): void => {
     const existing = table.get(name);
     const symbols = existing
       ? new Set(existing.symbols ?? [existing.symbol])
       : new Set<SymbolId>();
-    symbols.add(entry.symbol);
+    symbols.add(symbol);
     const overloadSet =
-      binding.overloadBySymbol.get(entry.symbol) ?? existing?.overloadSet;
-    const visibility = existing
-      ? maxVisibility(existing.visibility, entry.visibility)
-      : entry.visibility;
+      binding.overloadBySymbol.get(symbol) ?? existing?.overloadSet;
+    const record = symbolTable.getSymbol(symbol);
+    const mergedVisibility = existing
+      ? maxVisibility(existing.visibility, visibility)
+      : visibility;
     table.set(name, {
       name,
-      symbol: existing?.symbol ?? entry.symbol,
+      symbol: existing?.symbol ?? symbol,
       symbols: Array.from(symbols),
       overloadSet,
       moduleId,
       modulePath,
       packageId,
       kind: record.kind,
-      visibility,
+      visibility: mergedVisibility,
     });
+  };
+
+  hir.module.exports.forEach((entry) => {
+    const record = symbolTable.getSymbol(entry.symbol);
+    const name = entry.alias ?? record.name;
+    upsertExport({ name, symbol: entry.symbol, visibility: entry.visibility });
   });
+
+  if (binding.isPackageRoot) {
+    const exportedObjects = new Set(
+      Array.from(table.values())
+        .filter(
+          (entry) =>
+            entry.kind === "type" && entry.visibility.level === "public"
+        )
+        .map((entry) => entry.symbol)
+    );
+
+    typing.memberMetadata.forEach((metadata, symbol) => {
+      if (!metadata.visibility?.api) return;
+      if (typeof metadata.owner !== "number") return;
+      if (!exportedObjects.has(metadata.owner)) return;
+      const record = symbolTable.getSymbol(symbol);
+      const publicVisibility =
+        metadata.visibility.level === "public"
+          ? metadata.visibility
+          : { ...metadata.visibility, level: "public" as const };
+      upsertExport({
+        name: record.name,
+        symbol,
+        visibility: publicVisibility,
+      });
+    });
+  }
+
   return table;
 };
 
