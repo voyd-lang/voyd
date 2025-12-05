@@ -4,6 +4,7 @@ import type { HirNamedTypeExpr, HirObjectTypeExpr } from "../../hir/nodes.js";
 import type { OverloadSetId, ScopeId } from "../../ids.js";
 import { createModuleContext } from "./helpers.js";
 import { Expr } from "../../../parser/index.js";
+import { moduleVisibility, packageVisibility } from "../../hir/index.js";
 
 const createNamedType = (
   name: string,
@@ -69,7 +70,7 @@ describe("overload resolution", () => {
     };
     const aliasDecl = ctx.decls.registerTypeAlias({
       name: "Point",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol: pointAliasSymbol,
       form: undefined,
       target: pointAliasTarget as unknown as Expr,
@@ -78,7 +79,7 @@ describe("overload resolution", () => {
 
     ctx.builder.addItem({
       kind: "type-alias",
-      visibility: "module",
+      visibility: moduleVisibility(),
       decl: aliasDecl.id,
       symbol: pointAliasSymbol,
       target: pointAliasTarget,
@@ -92,7 +93,7 @@ describe("overload resolution", () => {
 
     const fooPointDecl = ctx.decls.registerFunction({
       name: "foo",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol: fooPointSymbol,
       scope: functionScope,
       params: [
@@ -108,7 +109,7 @@ describe("overload resolution", () => {
 
     ctx.builder.addFunction({
       kind: "function",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol: fooPointSymbol,
       decl: fooPointDecl.id,
       parameters: [
@@ -128,7 +129,7 @@ describe("overload resolution", () => {
 
     const fooBoolDecl = ctx.decls.registerFunction({
       name: "foo",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol: fooBoolSymbol,
       scope: functionScope,
       params: [
@@ -144,7 +145,7 @@ describe("overload resolution", () => {
 
     ctx.builder.addFunction({
       kind: "function",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol: fooBoolSymbol,
       decl: fooBoolDecl.id,
       parameters: [
@@ -202,7 +203,7 @@ describe("overload resolution", () => {
 
     const mainDecl = ctx.decls.registerFunction({
       name: "main",
-      visibility: "public",
+      visibility: packageVisibility(),
       symbol: mainSymbol,
       scope: functionScope,
       params: [],
@@ -212,7 +213,7 @@ describe("overload resolution", () => {
 
     ctx.builder.addFunction({
       kind: "function",
-      visibility: "public",
+      visibility: packageVisibility(),
       symbol: mainSymbol,
       decl: mainDecl.id,
       parameters: [],

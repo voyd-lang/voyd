@@ -1,0 +1,18 @@
+pub obj Vec {
+  api x: i32,
+  y: i32,
+  pri z: i32,
+}
+
+impl Vec
+  api fn double(self)
+    self.x * 2
+
+  fn sum(self)
+    self.x + self.y
+
+  pri fn hide(self)
+    self.z
+
+fn make() -> Vec
+  Vec { x: 1, y: 2, z: 3 }

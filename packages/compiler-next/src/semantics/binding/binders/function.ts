@@ -17,6 +17,8 @@ export type BindFunctionOptions = {
   metadata?: Record<string, unknown>;
   moduleIndex?: number;
   selfTypeExpr?: Expr;
+  visibilityOverride?: HirVisibility;
+  memberVisibility?: HirVisibility;
 };
 
 export const bindFunctionDecl = (
@@ -63,12 +65,14 @@ export const bindFunctionDecl = (
     boundParams = bindFunctionParameters(decl, ctx, tracker, options);
   });
 
+  const visibility = options.visibilityOverride ?? decl.visibility;
   const fnDecl = ctx.decls.registerFunction({
     name: decl.signature.name.value,
     form: decl.form,
-    visibility: decl.visibility,
+    visibility,
     symbol: fnSymbol,
     scope: fnScope,
+    memberVisibility: options.memberVisibility,
     params: boundParams,
     typeParameters,
     returnTypeExpr: decl.signature.returnType,

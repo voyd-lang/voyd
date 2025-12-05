@@ -35,10 +35,17 @@ import {
   parseUsePaths,
   type NormalizedUseEntry,
 } from "../../../modules/use-path.js";
-import type { HirVisibility } from "../../hir/index.js";
+import {
+  type HirVisibility,
+  isPackageVisible,
+  isPublicVisibility,
+  moduleVisibility,
+  packageVisibility,
+} from "../../hir/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
 import type { SourceSpan } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
+import { isSamePackage } from "../../packages.js";
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   const tracker = new BinderScopeTracker(ctx.symbolTable);
@@ -113,11 +120,11 @@ type ParsedUseDecl = {
 
 const parseUseDecl = (form: Form): ParsedUseDecl | null => {
   let index = 0;
-  let visibility: HirVisibility = "module";
+  let visibility: HirVisibility = moduleVisibility();
   const first = form.at(0);
 
   if (isIdentifierAtom(first) && first.value === "pub") {
-    visibility = "public";
+    visibility = packageVisibility();
     index += 1;
   }
 
@@ -145,11 +152,11 @@ const containsObjectLiteral = (expr?: Expr): boolean => {
 
 const parseModDecl = (form: Form): ParsedUseDecl | null => {
   let index = 0;
-  let visibility: HirVisibility = "module";
+  let visibility: HirVisibility = moduleVisibility();
   const first = form.at(0);
 
   if (isIdentifierAtom(first) && first.value === "pub") {
-    visibility = "public";
+    visibility = packageVisibility();
     index += 1;
   }
 
@@ -300,9 +307,8 @@ const bindImportsFromModule = ({
   }
 
   if (entry.importKind === "all") {
-    const allowed = Array.from(exports.values()).filter(
-      (item) =>
-        item.visibility === "public" || moduleId === ctx.module.id
+    const allowed = Array.from(exports.values()).filter((item) =>
+      canAccessExport({ exported: item, moduleId, ctx })
     );
     return allowed.flatMap((item) =>
       declareImportedSymbol({
@@ -327,9 +333,23 @@ const bindImportsFromModule = ({
   }
 
   const exported = exports.get(targetName);
-  if (!exported || (exported.visibility !== "public" && moduleId !== ctx.module.id)) {
+  if (!exported) {
     recordImportDiagnostic({
       params: { kind: "missing-export", moduleId, target: targetName },
+      span: entry.span,
+      ctx,
+    });
+    return [];
+  }
+
+  if (!canAccessExport({ exported, moduleId, ctx })) {
+    recordImportDiagnostic({
+      params: {
+        kind: "out-of-scope-export",
+        moduleId,
+        target: targetName,
+        visibility: exported.visibility.level,
+      },
       span: entry.span,
       ctx,
     });
@@ -438,6 +458,30 @@ const declareModuleImport = ({
   };
   ctx.imports.push(bound);
   return [bound];
+};
+
+const canAccessExport = ({
+  exported,
+  moduleId,
+  ctx,
+}: {
+  exported: ModuleExportEntry;
+  moduleId: string;
+  ctx: BindingContext;
+}): boolean => {
+  if (moduleId === ctx.module.id) {
+    return true;
+  }
+
+  const samePackage =
+    exported.packageId === ctx.packageId ||
+    isSamePackage(exported.modulePath, ctx.modulePath);
+
+  if (samePackage) {
+    return isPackageVisible(exported.visibility);
+  }
+
+  return isPublicVisibility(exported.visibility);
 };
 
 const recordImportDiagnostic = (

@@ -4,6 +4,11 @@ import type { HirObjectTypeExpr, HirNamedTypeExpr } from "../../hir/nodes.js";
 import { createModuleContext } from "./helpers.js";
 import type { ScopeId } from "../../ids.js";
 import { Expr } from "../../../parser/index.js";
+import {
+  moduleVisibility,
+  packageVisibility,
+  publicVisibility,
+} from "../../hir/index.js";
 
 const createNamedType = (
   name: string,
@@ -72,7 +77,7 @@ describe("structural objects", () => {
     };
     const aliasDecl = ctx.decls.registerTypeAlias({
       name: "MyVec",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol: aliasSymbol,
       form: undefined,
       target: aliasTarget as unknown as Expr,
@@ -81,7 +86,7 @@ describe("structural objects", () => {
 
     ctx.builder.addItem({
       kind: "type-alias",
-      visibility: "module",
+      visibility: moduleVisibility(),
       decl: aliasDecl.id,
       symbol: aliasSymbol,
       target: aliasTarget,
@@ -114,7 +119,7 @@ describe("structural objects", () => {
 
     const addDecl = ctx.decls.registerFunction({
       name: "add",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol: addSymbol,
       scope: functionScope,
       params: [{ name: "vec", symbol: vecSymbol, ast: undefined }],
@@ -124,7 +129,7 @@ describe("structural objects", () => {
 
     ctx.builder.addFunction({
       kind: "function",
-      visibility: "module",
+      visibility: moduleVisibility(),
       symbol: addSymbol,
       decl: addDecl.id,
       parameters: [
@@ -232,7 +237,7 @@ describe("structural objects", () => {
 
     const mainDecl = ctx.decls.registerFunction({
       name: "main",
-      visibility: "public",
+      visibility: packageVisibility(),
       symbol: mainSymbol,
       scope: functionScope,
       params: [],
@@ -242,7 +247,7 @@ describe("structural objects", () => {
 
     ctx.builder.addFunction({
       kind: "function",
-      visibility: "public",
+      visibility: packageVisibility(),
       symbol: mainSymbol,
       decl: mainDecl.id,
       parameters: [],

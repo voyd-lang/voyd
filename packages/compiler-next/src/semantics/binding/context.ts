@@ -12,6 +12,7 @@ import type {
   ModuleNode,
 } from "../../modules/types.js";
 import type { ModuleExportTable } from "../modules.js";
+import { isPackageRootModule, packageIdFromPath } from "../packages.js";
 
 export const createBindingContext = ({
   moduleForm,
@@ -46,6 +47,7 @@ export const createBindingContext = ({
 
   const decls = new DeclTable();
   const dependenciesBySpan = new Map<string, ModuleDependency[]>();
+  const packageId = packageIdFromPath(moduleNode.path);
   moduleNode.dependencies.forEach((dep) => {
     const key = spanKey(dep.span ?? toSourceSpan(moduleForm));
     const bucket = dependenciesBySpan.get(key);
@@ -68,17 +70,19 @@ export const createBindingContext = ({
     nextModuleIndex: 0,
     module: moduleNode,
     graph: moduleGraph,
-  modulePath: moduleNode.path,
-  moduleExports: exportTables,
-  dependenciesBySpan,
-  dependencies: dependencyBindings,
-  uses: [],
-  imports: [],
-  staticMethods: new Map(),
-  moduleMembers: new Map(),
-  pendingStaticMethods: [],
-  importedOverloadOptions: new Map(),
-};
+    modulePath: moduleNode.path,
+    packageId,
+    isPackageRoot: isPackageRootModule(moduleNode.path),
+    moduleExports: exportTables,
+    dependenciesBySpan,
+    dependencies: dependencyBindings,
+    uses: [],
+    imports: [],
+    staticMethods: new Map(),
+    moduleMembers: new Map(),
+    pendingStaticMethods: [],
+    importedOverloadOptions: new Map(),
+  };
 };
 
 export const toBindingResult = (ctx: BindingContext): BindingResult => ({
@@ -99,6 +103,9 @@ export const toBindingResult = (ctx: BindingContext): BindingResult => ({
   moduleMembers: ctx.moduleMembers,
   dependencies: ctx.dependencies,
   importedOverloadOptions: ctx.importedOverloadOptions,
+  modulePath: ctx.modulePath,
+  packageId: ctx.packageId,
+  isPackageRoot: ctx.isPackageRoot,
 });
 
 export const rememberSyntax = (

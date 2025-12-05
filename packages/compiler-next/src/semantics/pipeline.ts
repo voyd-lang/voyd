@@ -5,7 +5,7 @@ import { SymbolTable } from "./binder/index.js";
 import { runBindingPipeline } from "./binding/binding.js";
 import type { BindingResult, BoundOverloadSet } from "./binding/binding.js";
 import type { HirGraph } from "./hir/index.js";
-import { createHirBuilder, type HirVisibility } from "./hir/index.js";
+import { createHirBuilder, type HirVisibility, maxVisibility } from "./hir/index.js";
 import { runLoweringPipeline } from "./lowering/lowering.js";
 import { analyzeLambdaCaptures } from "./lowering/captures.js";
 import { runTypingPipeline, type TypingResult } from "./typing/typing.js";
@@ -85,6 +85,9 @@ export const semanticsPipeline = (
     binding,
     moduleNodeId: form.syntaxId,
     moduleId: module.id,
+    modulePath: module.path,
+    packageId: binding.packageId,
+    isPackageRoot: binding.isPackageRoot,
   });
   analyzeLambdaCaptures({
     hir,
@@ -122,9 +125,11 @@ export const semanticsPipeline = (
     exports: collectModuleExports({
       hir,
       symbolTable,
-      moduleId: module.id,
-      binding,
-    }),
+    moduleId: module.id,
+    modulePath: module.path,
+    packageId: binding.packageId,
+    binding,
+  }),
     diagnostics,
   };
 };
@@ -161,11 +166,15 @@ const collectModuleExports = ({
   hir,
   symbolTable,
   moduleId,
+  modulePath,
+  packageId,
   binding,
 }: {
   hir: HirGraph;
   symbolTable: SymbolTable;
   moduleId: string;
+  modulePath: ModulePath;
+  packageId: string;
   binding: BindingResult;
 }): ModuleExportTable => {
   const table: ModuleExportTable = new Map();
@@ -179,14 +188,19 @@ const collectModuleExports = ({
     symbols.add(entry.symbol);
     const overloadSet =
       binding.overloadBySymbol.get(entry.symbol) ?? existing?.overloadSet;
+    const visibility = existing
+      ? maxVisibility(existing.visibility, entry.visibility)
+      : entry.visibility;
     table.set(name, {
       name,
       symbol: existing?.symbol ?? entry.symbol,
       symbols: Array.from(symbols),
       overloadSet,
       moduleId,
+      modulePath,
+      packageId,
       kind: record.kind,
-      visibility: entry.visibility,
+      visibility,
     });
   });
   return table;

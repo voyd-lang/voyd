@@ -24,7 +24,9 @@ import { loadAst } from "./load-ast.js";
 import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
 import type { ModuleExportTable } from "../modules.js";
 import { modulePathToString } from "../../modules/path.js";
-import { isForm } from "../../parser/index.js";
+import { isForm, parse } from "../../parser/index.js";
+import { packageIdFromPath } from "../packages.js";
+import { packageVisibility } from "../hir/index.js";
 
 describe("lowering pipeline", () => {
   it("lowers the fib sample module into HIR", () => {
@@ -51,6 +53,9 @@ describe("lowering pipeline", () => {
       builder,
       binding,
       moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
     });
 
     expect(hir.module.items).toHaveLength(2);
@@ -80,9 +85,12 @@ describe("lowering pipeline", () => {
     expect(fibIf.branches).toHaveLength(1);
     expect(fibIf.defaultBranch).toBeDefined();
 
-    expect(mainFn?.visibility).toBe("public");
+    expect(mainFn?.visibility.level).toBe("package");
     expect(hir.module.exports.map((entry) => entry.symbol)).toEqual([
       mainSymbol,
+    ]);
+    expect(hir.module.exports.map((entry) => entry.visibility.level)).toEqual([
+      "package",
     ]);
   });
 
@@ -107,6 +115,9 @@ describe("lowering pipeline", () => {
       builder,
       binding,
       moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
     });
 
     const alias = Array.from(hir.items.values()).find(
@@ -182,6 +193,9 @@ describe("lowering pipeline", () => {
       builder,
       binding,
       moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
     });
 
     const sumSymbol = symbolTable.resolve("sum", symbolTable.rootScope)!;
@@ -236,6 +250,9 @@ describe("lowering pipeline", () => {
       builder,
       binding,
       moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
     });
 
     const doubleSymbol = symbolTable.resolve("double", symbolTable.rootScope)!;
@@ -290,6 +307,9 @@ describe("lowering pipeline", () => {
       builder,
       binding,
       moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
     });
 
     const counterSymbol = symbolTable.resolve("Counter", symbolTable.rootScope);
@@ -349,6 +369,9 @@ describe("lowering pipeline", () => {
         builder,
         binding,
         moduleNodeId: ast.syntaxId,
+        modulePath: binding.modulePath,
+        packageId: binding.packageId,
+        isPackageRoot: binding.isPackageRoot,
       })
     ).toThrow(/static access target/);
   });
@@ -400,8 +423,10 @@ describe("lowering pipeline", () => {
               name: "helper",
               symbol: exportedSymbol,
               moduleId: utilId,
+              modulePath: utilPath,
+              packageId: packageIdFromPath(utilPath),
               kind: "value",
-              visibility: "public",
+              visibility: packageVisibility(),
             },
           ],
         ]),
@@ -435,6 +460,9 @@ describe("lowering pipeline", () => {
       builder,
       binding,
       moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
     });
 
     const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope)!;
@@ -472,6 +500,9 @@ describe("lowering pipeline", () => {
       builder,
       binding,
       moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
     });
 
     const traitSymbol = symbolTable.resolve("Area", symbolTable.rootScope)!;
@@ -502,6 +533,101 @@ describe("lowering pipeline", () => {
     }
   });
 
+  it("only elevates exports to public API from pkg.voyd", () => {
+    const source = "pub fn main()\n  1";
+
+    const rootAst = parse(source, "pkg.voyd");
+    const rootPath = { namespace: "src" as const, segments: ["pkg"] as const };
+    const rootId = modulePathToString(rootPath);
+    const rootSymbolTable = new SymbolTable({ rootOwner: rootAst.syntaxId });
+    const rootModuleSymbol = rootSymbolTable.declare({
+      name: rootId,
+      kind: "module",
+      declaredAt: rootAst.syntaxId,
+    });
+    const rootNode: ModuleNode = {
+      id: rootId,
+      path: rootPath,
+      origin: { kind: "file", filePath: "pkg.voyd" },
+      ast: rootAst,
+      source,
+      dependencies: [],
+    };
+    const rootGraph: ModuleGraph = {
+      entry: rootId,
+      modules: new Map([[rootId, rootNode]]),
+      diagnostics: [],
+    };
+    const rootBinding = runBindingPipeline({
+      moduleForm: rootAst,
+      symbolTable: rootSymbolTable,
+      module: rootNode,
+      graph: rootGraph,
+    });
+    const rootBuilder = createHirBuilder({
+      path: rootId,
+      scope: rootModuleSymbol,
+      ast: rootAst.syntaxId,
+      span: toSourceSpan(rootAst),
+    });
+    const rootHir = runLoweringPipeline({
+      builder: rootBuilder,
+      binding: rootBinding,
+      moduleNodeId: rootAst.syntaxId,
+      modulePath: rootPath,
+      packageId: rootBinding.packageId,
+      isPackageRoot: rootBinding.isPackageRoot,
+    });
+    expect(rootHir.module.exports[0]?.visibility.level).toBe("public");
+
+    const moduleAst = parse(source, "main.voyd");
+    const modulePath = {
+      namespace: "src" as const,
+      segments: ["main"] as const,
+    };
+    const moduleId = modulePathToString(modulePath);
+    const moduleSymbolTable = new SymbolTable({ rootOwner: moduleAst.syntaxId });
+    const moduleSymbol = moduleSymbolTable.declare({
+      name: moduleId,
+      kind: "module",
+      declaredAt: moduleAst.syntaxId,
+    });
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "main.voyd" },
+      ast: moduleAst,
+      source,
+      dependencies: [],
+    };
+    const moduleGraph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const moduleBinding = runBindingPipeline({
+      moduleForm: moduleAst,
+      symbolTable: moduleSymbolTable,
+      module: moduleNode,
+      graph: moduleGraph,
+    });
+    const moduleBuilder = createHirBuilder({
+      path: moduleId,
+      scope: moduleSymbol,
+      ast: moduleAst.syntaxId,
+      span: toSourceSpan(moduleAst),
+    });
+    const moduleHir = runLoweringPipeline({
+      builder: moduleBuilder,
+      binding: moduleBinding,
+      moduleNodeId: moduleAst.syntaxId,
+      modulePath: modulePath,
+      packageId: moduleBinding.packageId,
+      isPackageRoot: moduleBinding.isPackageRoot,
+    });
+    expect(moduleHir.module.exports[0]?.visibility.level).toBe("package");
+  });
+
   it("throws when an impl references a method missing from the lowered module", () => {
     const name = "impl_methods.voyd";
     const ast = loadAst(name);
@@ -522,6 +648,9 @@ describe("lowering pipeline", () => {
       builder,
       binding,
       moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
     });
 
     expect(() => lowerImplDecl(binding.impls[0]!, ctx)).toThrow(

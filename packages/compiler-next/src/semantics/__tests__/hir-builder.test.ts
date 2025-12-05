@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createHirBuilder } from "../hir/builder.js";
+import { publicVisibility } from "../hir/index.js";
 
 const span = { file: "test.voyd", start: 0, end: 1 };
 
@@ -23,7 +24,7 @@ describe("HirBuilder", () => {
 
     const fnId = builder.addFunction({
       kind: "function",
-      visibility: "public",
+      visibility: publicVisibility(),
       symbol: 10,
       ast: 3,
       span,
@@ -41,7 +42,7 @@ describe("HirBuilder", () => {
     builder.recordExport({
       symbol: 10,
       alias: "testFn",
-      visibility: "public",
+      visibility: publicVisibility(),
       span,
       item: fnId,
     });
@@ -54,7 +55,7 @@ describe("HirBuilder", () => {
       {
         symbol: 10,
         alias: "testFn",
-        visibility: "public",
+        visibility: publicVisibility(),
         span,
         item: fnId,
       },

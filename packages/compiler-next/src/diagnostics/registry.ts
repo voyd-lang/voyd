@@ -24,7 +24,13 @@ type DiagnosticParamsMap = {
     | { kind: "module-unavailable"; moduleId: string }
     | { kind: "missing-target" }
     | { kind: "missing-export"; moduleId: string; target: string }
-    | { kind: "missing-module-identifier" };
+    | { kind: "missing-module-identifier" }
+    | {
+        kind: "out-of-scope-export";
+        moduleId: string;
+        target: string;
+        visibility: string;
+      };
   BD0002:
     | {
         kind: "duplicate-overload";
@@ -89,6 +95,8 @@ export const diagnosticsRegistry: {
           return `Module ${params.moduleId} does not export ${params.target}`;
         case "missing-module-identifier":
           return "missing module identifier for import";
+        case "out-of-scope-export":
+          return `Module ${params.moduleId} export ${params.target} is not visible here (visibility: ${params.visibility})`;
       }
       return exhaustive(params);
     },

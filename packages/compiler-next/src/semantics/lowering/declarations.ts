@@ -13,6 +13,10 @@ import type {
   BoundUse,
 } from "../binding/binding.js";
 import type { Syntax } from "../../parser/index.js";
+import {
+  isPackageVisible,
+  type HirVisibility,
+} from "../hir/index.js";
 
 export const getModuleDeclarations = (
   binding: BindingResult
@@ -53,6 +57,19 @@ export const getModuleDeclarations = (
   return entries.sort((a, b) => a.order - b.order);
 };
 
+const toExportVisibility = (
+  visibility: HirVisibility,
+  ctx: LowerContext
+): HirVisibility => {
+  if (!isPackageVisible(visibility)) {
+    return visibility;
+  }
+  if (ctx.isPackageRoot && visibility.level !== "public") {
+    return { ...visibility, level: "public" };
+  }
+  return visibility;
+};
+
 export const lowerUseDecl = (use: BoundUse, ctx: LowerContext): void => {
   const entries = use.entries.map((entry) => ({
     path: entry.path,
@@ -69,7 +86,8 @@ export const lowerUseDecl = (use: BoundUse, ctx: LowerContext): void => {
     span: toSourceSpan(use.form),
   });
 
-  if (use.visibility === "public") {
+  if (isPackageVisible(use.visibility)) {
+    const exportVisibility = toExportVisibility(use.visibility, ctx);
     use.entries.forEach((entry) =>
       entry.imports.forEach((imported) => {
         if (!imported.target) {
@@ -77,7 +95,7 @@ export const lowerUseDecl = (use: BoundUse, ctx: LowerContext): void => {
         }
         ctx.builder.recordExport({
           symbol: imported.local,
-          visibility: "public",
+          visibility: exportVisibility,
           span: entry.span,
           item: useId,
           alias: entry.alias,
@@ -114,6 +132,7 @@ export const lowerFunctionDecl = (
     kind: "function",
     decl: fn.id,
     visibility: fn.visibility,
+    memberVisibility: fn.memberVisibility,
     symbol: fn.symbol,
     typeParameters: lowerTypeParameters(fn.typeParameters),
     ast: (fn.form ?? fn.body).syntaxId,
@@ -124,10 +143,10 @@ export const lowerFunctionDecl = (
     ...(fn.intrinsic ? { intrinsic: fn.intrinsic } : {}),
   });
 
-  if (fn.visibility === "public") {
+  if (isPackageVisible(fn.visibility)) {
     ctx.builder.recordExport({
       symbol: fn.symbol,
-      visibility: "public",
+      visibility: toExportVisibility(fn.visibility, ctx),
       span: toSourceSpan(fn.form),
       item: fnId,
     });
@@ -159,10 +178,10 @@ export const lowerTypeAliasDecl = (
     target,
   });
 
-  if (alias.visibility === "public") {
+  if (isPackageVisible(alias.visibility)) {
     ctx.builder.recordExport({
       symbol: alias.symbol,
-      visibility: alias.visibility,
+      visibility: toExportVisibility(alias.visibility, ctx),
       span: toSourceSpan(alias.form),
       item: aliasId,
     });
@@ -180,6 +199,7 @@ export const lowerObjectDecl = (
   const fields = object.fields.map((field) => ({
     name: field.name,
     symbol: field.symbol,
+    visibility: field.visibility,
     type: lowerTypeExpr(field.typeExpr, ctx, objectScope),
     span: toSourceSpan(field.ast ?? object.form),
   }));
@@ -206,10 +226,10 @@ export const lowerObjectDecl = (
     isFinal: false,
   });
 
-  if (object.visibility === "public") {
+  if (isPackageVisible(object.visibility)) {
     ctx.builder.recordExport({
       symbol: object.symbol,
-      visibility: object.visibility,
+      visibility: toExportVisibility(object.visibility, ctx),
       span: toSourceSpan(object.form),
       item: objectId,
     });
@@ -269,10 +289,10 @@ export const lowerTraitDecl = (
     methods,
   });
 
-  if (trait.visibility === "public") {
+  if (isPackageVisible(trait.visibility)) {
     ctx.builder.recordExport({
       symbol: trait.symbol,
-      visibility: trait.visibility,
+      visibility: toExportVisibility(trait.visibility, ctx),
       span: toSourceSpan(trait.form),
       item: traitId,
     });
@@ -320,10 +340,10 @@ export const lowerImplDecl = (
     members,
   });
 
-  if (impl.visibility === "public") {
+  if (isPackageVisible(impl.visibility)) {
     ctx.builder.recordExport({
       symbol: impl.symbol,
-      visibility: impl.visibility,
+      visibility: toExportVisibility(impl.visibility, ctx),
       span: toSourceSpan(impl.form),
       item: implId,
     });

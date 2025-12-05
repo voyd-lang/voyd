@@ -261,7 +261,7 @@ describe("semanticsPipeline", () => {
         item.kind === "function" && item.symbol === mainId
     );
     expect(mainFn).toBeDefined();
-    expect(mainFn?.visibility).toBe("public");
+    expect(mainFn?.visibility.level).toBe("package");
     expect(hir.module.exports.map((entry) => entry.symbol)).toContain(mainId);
 
     const mainBlock = hir.expressions.get(mainFn!.body)!;

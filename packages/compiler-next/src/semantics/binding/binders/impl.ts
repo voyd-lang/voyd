@@ -13,6 +13,7 @@ import {
 } from "./trait.js";
 import { resolveObjectDecl } from "./object.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
+import { inheritMemberVisibility, moduleVisibility } from "../../hir/index.js";
 
 const isStaticMethod = (fn: ParsedFunctionDecl): boolean =>
   fn.signature.params.length === 0 ||
@@ -75,8 +76,9 @@ export const bindImplDecl = (
     ctx,
     scope: implScope,
   });
-  const implTargetSymbol = resolveObjectDecl(decl.target, ctx, implScope)
-    ?.symbol;
+  const implTargetDecl = resolveObjectDecl(decl.target, ctx, implScope);
+  const implTargetSymbol = implTargetDecl?.symbol;
+  const ownerVisibility = implTargetDecl?.visibility ?? moduleVisibility();
   tracker.enterScope(implScope, () => {
     decl.typeParameters.forEach((param) => {
       rememberSyntax(param, ctx);
@@ -117,6 +119,11 @@ export const bindImplDecl = (
         }
       }
 
+      const memberVisibility = inheritMemberVisibility({
+        ownerVisibility,
+        modifier: parsedFn.memberModifier,
+      });
+
       const method = bindFunctionDecl(parsedFn, ctx, tracker, {
         declarationScope: staticMethod
           ? implScope
@@ -124,6 +131,8 @@ export const bindImplDecl = (
         scopeParent: implScope,
         metadata,
         selfTypeExpr: staticMethod ? undefined : decl.target,
+        visibilityOverride: memberVisibility,
+        memberVisibility,
       });
 
       if (staticMethod) {
