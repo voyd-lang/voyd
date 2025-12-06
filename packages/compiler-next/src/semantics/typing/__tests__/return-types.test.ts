@@ -10,13 +10,15 @@ const nominalNameOf = (
   }: Pick<ReturnType<typeof semanticsPipeline>["typing"], "arena">
 ): string => {
   const desc = arena.get(typeId);
-  if (desc.kind === "nominal-object") {
+  if (desc.kind === "nominal-object" && typeof desc.name === "string") {
     return desc.name;
   }
   if (desc.kind === "intersection" && typeof desc.nominal === "number") {
     const nominal = arena.get(desc.nominal);
     if (nominal.kind === "nominal-object") {
-      return nominal.name;
+      return typeof nominal.name === "string"
+        ? nominal.name
+        : nominal.kind;
     }
   }
   return desc.kind;
