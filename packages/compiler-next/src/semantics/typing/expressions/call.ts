@@ -29,6 +29,7 @@ import {
   composeEffectRows,
   freshOpenEffectRow,
   getExprEffectRow,
+  ensureEffectCompatibility,
 } from "../effects.js";
 import {
   intrinsicSignaturesFor,
@@ -908,6 +909,45 @@ const typeGenericFunctionBody = ({
       state,
       `function ${getSymbolName(symbol, ctx)} return type`
     );
+    const inferredEffectRow = getExprEffectRow(fn.body, ctx);
+    if (signature.annotatedEffects) {
+      ensureEffectCompatibility({
+        inferred: inferredEffectRow,
+        annotated: signature.effectRow ?? ctx.primitives.defaultEffectRow,
+        ctx,
+        span: fn.span,
+        location: fn.ast,
+        reason: `function ${getSymbolName(symbol, ctx)} effects`,
+      });
+    } else if (signature.effectRow !== inferredEffectRow) {
+      signature.effectRow = inferredEffectRow;
+      const functionType = ctx.arena.internFunction({
+        parameters: signature.parameters.map(({ type, label }) => ({
+          type,
+          label,
+          optional: false,
+        })),
+        returnType: signature.returnType,
+        effectRow: inferredEffectRow,
+      });
+      const scheme = ctx.arena.newScheme(
+        signature.typeParams?.map((param) => param.typeParam) ?? [],
+        functionType
+      );
+      signature.typeId = functionType;
+      signature.scheme = scheme;
+      ctx.valueTypes.set(symbol, functionType);
+      ctx.table.setSymbolScheme(symbol, scheme);
+    }
+    if (state.mode === "strict" && signature.scheme) {
+      if (ctx.effects.getFunctionEffect(symbol) === undefined) {
+        ctx.effects.setFunctionEffect(
+          symbol,
+          signature.scheme,
+          signature.effectRow ?? ctx.primitives.defaultEffectRow
+        );
+      }
+    }
     ctx.functions.cacheInstance(key, expectedReturn, ctx.resolvedExprTypes);
     ctx.functions.recordInstantiation(symbol, key, appliedTypeArgs);
   } finally {

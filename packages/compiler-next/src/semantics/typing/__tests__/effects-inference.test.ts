@@ -314,4 +314,41 @@ fn missing()
 
     expect(caught && (caught as any).diagnostic?.code).toBe("TY0013");
   });
+
+  it("infers effects for generic functions", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> i32
+
+fn lift<T>(value: T) -> i32
+  Async::await()
+
+fn caller() -> i32
+  lift(1)
+`,
+      "effects.voyd"
+    );
+
+    const { typing, symbolTable } = semanticsPipeline(ast);
+    const liftSymbol = symbolTable.resolve("lift", symbolTable.rootScope);
+    const callerSymbol = symbolTable.resolve("caller", symbolTable.rootScope);
+    expect(typeof liftSymbol).toBe("number");
+    expect(typeof callerSymbol).toBe("number");
+    if (typeof liftSymbol !== "number" || typeof callerSymbol !== "number") {
+      return;
+    }
+
+    const liftSig = typing.functions.getSignature(liftSymbol);
+    const callerSig = typing.functions.getSignature(callerSymbol);
+    expect(liftSig && callerSig).toBeTruthy();
+    if (!liftSig || !callerSig) return;
+
+    expect(effectOps(liftSig.effectRow, typing.effects)).toEqual([
+      "Async.await",
+    ]);
+    expect(effectOps(callerSig.effectRow, typing.effects)).toEqual([
+      "Async.await",
+    ]);
+  });
 });
