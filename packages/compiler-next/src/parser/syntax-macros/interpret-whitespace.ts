@@ -19,11 +19,15 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
       "ast",
       ...(isForm(result.at(0)) ? result.toArray() : [result])
     );
-    return hoistTrailingBlock(normalized);
+    return attachLabeledClosureSugarHandlers(
+      hoistTrailingBlock(normalized)
+    ) as Form;
   }
 
   const functional = applyFunctionalNotation(form);
-  const result = interpretWhitespaceExpr(functional, indentLevel);
+  const result = attachLabeledClosureSugarHandlers(
+    interpretWhitespaceExpr(functional, indentLevel)
+  );
   return p.isForm(result) ? result : new Form([result]);
 };
 
@@ -48,7 +52,9 @@ const interpretWhitespaceExpr = (form: Form, indentLevel?: number): Expr => {
     preserved.setLocation(form.location.clone());
   }
 
-  return hoistTrailingBlock(preserved).unwrap();
+  return hoistTrailingBlock(
+    attachLabeledClosureSugarHandlers(preserved)
+  ).unwrap();
 };
 
 const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
@@ -73,6 +79,23 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
     if (p.isForm(firstChild) && isNamedArg(firstChild)) {
       transformed.push(...children.slice(1));
       return;
+    }
+
+    const handlerEntries = children
+      .slice(1)
+      .filter((entry) => p.isForm(entry) && isHandlerClause(entry));
+    if (handlerEntries.length > 0) {
+      const bodyEntries = children.filter(
+        (entry) => !p.isForm(entry) || !isHandlerClause(entry)
+      );
+      const targetIndex = bodyEntries.length - 1;
+      const target = bodyEntries.at(targetIndex);
+      if (targetIndex >= 1 && p.isForm(target)) {
+        const rewritten = new Form([...target.toArray(), ...handlerEntries]);
+        bodyEntries[targetIndex] = rewritten;
+        transformed.push(new CallForm(bodyEntries));
+        return;
+      }
     }
 
     transformed.push(new CallForm(children));
@@ -171,6 +194,28 @@ const isNamedArg = (v: Form) => {
   return true;
 };
 
+const hasTrailingHandlerBlock = (v: Form): boolean => {
+  if (v.length < 3) return false;
+  const last = v.at(v.length - 1);
+  const colon = v.at(v.length - 2);
+  const target = v.at(v.length - 3);
+  return (
+    p.atomEq(colon, ":") &&
+    p.isForm(last) &&
+    (last as Form).calls("block") &&
+    p.isForm(target) &&
+    isCallLikeForm(target)
+  );
+};
+
+const isHandlerClause = (v: Expr | undefined): v is Form =>
+  p.isForm(v) &&
+  ((v.calls(":") &&
+    p.isForm(v.at(1)) &&
+    p.isForm(v.at(2)) &&
+    (v.at(2) as Form).calls("block")) ||
+    hasTrailingHandlerBlock(v));
+
 const handleLeadingContinuationOp = (
   child: Expr,
   children: Expr[],
@@ -219,6 +264,52 @@ const isCallLikeForm = (form: Form) => {
 const normalizeFormKind = (original: Expr, rebuilt: Form): Expr =>
   original instanceof CallForm ? rebuilt.toCall() : rebuilt;
 
+/** Handles labeled parameter closure sugar syntax my_fn\n  labeled_param_that_takes_closure(param): expression */
+const attachLabeledClosureSugarHandlers = (expr: Expr): Expr => {
+  if (!p.isForm(expr)) return expr;
+  const rewritten = expr.toArray().map(attachLabeledClosureSugarHandlers);
+  if (expr.calls("block")) {
+    const normalized: Expr[] = [];
+    rewritten.forEach((entry) => {
+      if (
+        isHandlerClause(entry) &&
+        normalized.length > 0 &&
+        p.isForm(normalized.at(-1)) &&
+        (normalized.at(-1) as Form).calls("try")
+      ) {
+        const previous = normalized.pop() as Form;
+        normalized.push(new Form([...previous.toArray(), entry]));
+        return;
+      }
+      if (
+        isHandlerClause(entry) &&
+        normalized.length > 0 &&
+        p.isForm(normalized.at(-1)) &&
+        isCallLikeForm(normalized.at(-1) as Form)
+      ) {
+        const previous = normalized.pop() as Form;
+        normalized.push(new Form([...previous.toArray(), entry]));
+        return;
+      }
+      normalized.push(entry);
+    });
+    return normalizeFormKind(
+      expr,
+      new Form({
+        location: expr.location?.clone(),
+        elements: normalized,
+      })
+    );
+  }
+  return normalizeFormKind(
+    expr,
+    new Form({
+      location: expr.location?.clone(),
+      elements: rewritten,
+    })
+  );
+};
+
 function hoistTrailingBlock(expr: Form): Form;
 function hoistTrailingBlock(expr: Expr): Expr;
 function hoistTrailingBlock(expr: Expr): Expr {
@@ -263,9 +354,7 @@ const shouldDescendForTrailingBlock = (
     isOp(child.first) &&
     !isBlockBindingOp(child.first);
   const prevIsOp =
-    isIdentifierAtom(previous) &&
-    isOp(previous) &&
-    !isBlockBindingOp(previous);
+    isIdentifierAtom(previous) && isOp(previous) && !isBlockBindingOp(previous);
   return headIsOp || prevIsOp;
 };
 
@@ -317,6 +406,16 @@ const addSibling = (child: Expr, siblings: Expr[]) => {
 
   if (!p.isForm(normalizedChild)) {
     siblings.push(normalizedChild);
+    return;
+  }
+
+  if (
+    isHandlerClause(normalizedChild) &&
+    p.isForm(olderSibling) &&
+    olderSibling.calls("try")
+  ) {
+    siblings.pop();
+    siblings.push(new Form([...olderSibling.toArray(), normalizedChild]));
     return;
   }
 

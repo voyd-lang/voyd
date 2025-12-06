@@ -1,8 +1,52 @@
-import type { Form, Expr } from "../../../parser/index.js";
-import { isForm, isIdentifierAtom, isInternalIdentifierAtom } from "../../../parser/index.js";
+import { Form, type Expr, isForm, isIdentifierAtom, isInternalIdentifierAtom } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
 import { resolveSymbol } from "../resolution.js";
 import type { LoweringFormParams } from "./types.js";
+
+const collectNamespaceSegments = (
+  expr: Expr | undefined
+): readonly string[] | undefined => {
+  if (!expr) return undefined;
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    return [expr.value];
+  }
+  if (!isForm(expr) || !expr.calls("::")) {
+    return undefined;
+  }
+  const left = collectNamespaceSegments(expr.at(1));
+  const right = collectNamespaceSegments(expr.at(2));
+  if (!left || !right || right.length === 0) {
+    return undefined;
+  }
+  return [...left, ...right];
+};
+
+const resolveQualifiedSymbol = ({
+  segments,
+  scope,
+  ctx,
+}: {
+  segments: readonly string[] | undefined;
+  scope: number;
+  ctx: LoweringFormParams["ctx"];
+}): number | undefined => {
+  if (!segments || segments.length === 0) {
+    return undefined;
+  }
+  let current = resolveSymbol(segments[0]!, scope, ctx);
+  for (let index = 1; index < segments.length; index += 1) {
+    const members = ctx.moduleMembers.get(current);
+    if (!members) {
+      return undefined;
+    }
+    const bucket = members.get(segments[index]!);
+    if (!bucket || bucket.size === 0) {
+      return undefined;
+    }
+    current = bucket.values().next().value as number;
+  }
+  return current;
+};
 
 export const lowerTry = ({
   form,
@@ -14,9 +58,11 @@ export const lowerTry = ({
   if (!bodyExpr) {
     throw new Error("try expression missing body");
   }
-  const body = lowerExpr(bodyExpr, ctx, scopes);
+  const { expr: strippedBody, handlers: embeddedHandlers } =
+    stripEmbeddedHandlerClauses(bodyExpr);
+  const body = lowerExpr(strippedBody, ctx, scopes);
 
-  const handlerForms = collectHandlerForms(form);
+  const handlerForms = [...collectHandlerForms(form), ...embeddedHandlers];
   const handlers = handlerForms.flatMap((entry) => {
     const clauseScope = ctx.scopeByNode.get(entry.syntaxId);
     if (clauseScope !== undefined) {
@@ -72,12 +118,55 @@ const collectHandlerForms = (form: Form): Form[] => {
       }
     });
   }
-  form.rest.slice(2).forEach((entry) => {
+  form.rest.slice(1).forEach((entry) => {
     if (isForm(entry) && entry.calls(":")) {
       handlers.push(entry);
     }
   });
   return handlers;
+};
+
+const isHandlerClause = (entry: Expr | undefined): entry is Form =>
+  isForm(entry) &&
+  entry.calls(":") &&
+  isForm(entry.at(2)) &&
+  (entry.at(2) as Form).calls("block");
+
+const stripEmbeddedHandlerClauses = (
+  expr: Expr
+): { expr: Expr; handlers: Form[] } => {
+  if (!isForm(expr)) {
+    return { expr, handlers: [] };
+  }
+  let changed = false;
+  const handlers: Form[] = [];
+  const rewritten: Expr[] = [];
+
+  expr.toArray().forEach((child) => {
+    if (isHandlerClause(child)) {
+      handlers.push(child);
+      changed = true;
+      return;
+    }
+    const { expr: nextExpr, handlers: nested } = stripEmbeddedHandlerClauses(child);
+    if (nested.length > 0) {
+      handlers.push(...nested);
+      if (nextExpr !== child) {
+        changed = true;
+      }
+    }
+    rewritten.push(nextExpr);
+  });
+
+  if (!changed) {
+    return { expr, handlers };
+  }
+
+  const rebuilt = new Form({
+    location: expr.location?.clone(),
+    elements: rewritten,
+  });
+  return { expr: rebuilt.unwrap(), handlers };
 };
 
 const lowerHandlerHead = (
@@ -100,7 +189,11 @@ const lowerHandlerHead = (
     const effectSymbol =
       effectExpr && isIdentifierAtom(effectExpr)
         ? resolveSymbol(effectExpr.value, scope, ctx)
-        : undefined;
+        : resolveQualifiedSymbol({
+            segments: collectNamespaceSegments(effectExpr),
+            scope,
+            ctx,
+          });
     const { operation, parameters, resumable } = lowerHandlerCall(
       opExpr,
       ctx,
@@ -130,6 +223,46 @@ const lowerHandlerCall = (
 } => {
   if (!head) {
     throw new Error("handler head missing operation");
+  }
+
+  const namespaced = collectNamespaceSegments(head);
+  if (namespaced && namespaced.length > 1) {
+    const opName = namespaced.at(-1)!;
+    const effectPath = namespaced.slice(0, -1);
+    const effectSymbolFromPath =
+      effectSymbol ??
+      resolveQualifiedSymbol({
+        segments: effectPath,
+        scope,
+        ctx,
+      });
+    const resolvedOperation =
+      effectSymbolFromPath !== undefined
+        ? ctx.moduleMembers
+            .get(effectSymbolFromPath)
+            ?.get(opName)
+            ?.values()
+            .next().value
+        : undefined;
+    const operation =
+      resolvedOperation ??
+      resolveSymbol(opName, scope, ctx);
+    const callArgs = isForm(head) ? head.rest : [];
+    const params = callArgs
+      .filter((param) => isIdentifierAtom(param) || isInternalIdentifierAtom(param))
+      .map((param) => {
+        const symbol = resolveSymbol((param as any).value, scope, ctx);
+        return {
+          symbol,
+          span: toSourceSpan(param),
+        };
+      });
+    const firstName = callArgs[0];
+    const resumable =
+      isIdentifierAtom(firstName) && firstName.value === "tail"
+        ? "fn"
+        : "ctl";
+    return { operation, parameters: params, resumable };
   }
 
   if (isIdentifierAtom(head) || isInternalIdentifierAtom(head)) {

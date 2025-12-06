@@ -94,6 +94,7 @@ type DiagnosticParamsMap = {
   TY0012: { kind: "branch-type-mismatch"; context?: string };
   TY0013: { kind: "unhandled-effects"; operations: string };
   TY0014: { kind: "effect-annotation-mismatch"; message: string };
+  TY0015: { kind: "tail-resume-count"; operation: string; count: number };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -296,6 +297,13 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0014"]>,
+  TY0015: {
+    code: "TY0015",
+    message: (params) =>
+      `tail-resumptive operation ${params.operation} must call tail exactly once (found ${params.count})`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0015"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

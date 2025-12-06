@@ -93,12 +93,25 @@ const bindTry = (
   ctx: BindingContext,
   tracker: BinderScopeTracker
 ): void => {
+  const handlerEntries: Form[] = [];
   const body = form.at(1);
+  if (isForm(body) && body.calls("block")) {
+    body.rest.forEach((entry) => {
+      if (isForm(entry) && entry.calls(":")) {
+        handlerEntries.push(entry);
+      }
+    });
+  }
+  if (body) {
+    handlerEntries.push(...findHandlerClauses(body));
+  }
   if (body) {
     bindExpr(body, ctx, tracker);
   }
 
-  const handlerEntries = form.rest.slice(2);
+  handlerEntries.push(
+    ...form.rest.slice(1).filter((entry): entry is Form => isForm(entry))
+  );
   handlerEntries.forEach((entry) => {
     if (!isForm(entry) || !entry.calls(":")) {
       bindExpr(entry, ctx, tracker);
@@ -158,6 +171,24 @@ const extractHandlerParams = (head: Expr): readonly (IdentifierAtom | InternalId
   return [];
 };
 
+const findHandlerClauses = (expr: Expr): Form[] => {
+  if (!isForm(expr)) {
+    return [];
+  }
+  const handlers: Form[] = [];
+  expr.toArray().forEach((child) => {
+    if (isForm(child) && child.calls(":")) {
+      const body = child.at(2);
+      if (isForm(body) && body.calls("block")) {
+        handlers.push(child);
+        return;
+      }
+    }
+    handlers.push(...findHandlerClauses(child));
+  });
+  return handlers;
+};
+
 const bindBlock = (
   form: Form,
   ctx: BindingContext,
@@ -172,6 +203,9 @@ const bindBlock = (
 
   tracker.enterScope(scope, () => {
     for (const child of form.rest) {
+      if (isForm(child) && child.calls(":")) {
+        continue;
+      }
       bindExpr(child, ctx, tracker);
     }
   });

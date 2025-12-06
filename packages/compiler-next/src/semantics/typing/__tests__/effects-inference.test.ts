@@ -105,8 +105,8 @@ eff Async
 fn handled()
   try
     Async::await()
-    Async::await(tail):
-      1
+  Async::await(tail):
+    tail(1)
 `,
       "effects.voyd"
     );
@@ -130,17 +130,93 @@ fn handled()
     expect(effectOps(signature.effectRow, typing.effects)).toHaveLength(0);
   });
 
-  it("keeps effects when handlers re-raise", () => {
+  it("diagnoses missing tail resumes", () => {
     const ast = parse(
       `
 eff Async
   fn await(tail) -> i32
 
+fn missing_tail()
+  try
+    Async::await()
+  Async::await(tail):
+    1
+`,
+      "effects.voyd"
+    );
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught && (caught as any).diagnostic?.code).toBe("TY0015");
+  });
+
+  it("rejects multiple tail resumes", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> i32
+
+fn doubled()
+  try
+    Async::await()
+  Async::await(tail):
+    tail(1)
+    tail(2)
+`,
+      "effects.voyd"
+    );
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught && (caught as any).diagnostic?.code).toBe("TY0015");
+  });
+
+  it("allows resumable handlers to call resume()", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(resume, value: i32) -> i32
+
+fn handled()
+  try
+    Async::await(1)
+  Async::await(resume, value):
+    resume(value)
+`,
+      "effects.voyd"
+    );
+
+    const { typing, symbolTable } = semanticsPipeline(ast);
+    const handledSymbol = symbolTable.resolve("handled", symbolTable.rootScope);
+    expect(typeof handledSymbol).toBe("number");
+    if (typeof handledSymbol !== "number") return;
+    const signature = typing.functions.getSignature(handledSymbol);
+    expect(signature).toBeDefined();
+    if (!signature) return;
+    expect(effectOps(signature.effectRow, typing.effects)).toHaveLength(0);
+  });
+
+  it("keeps effects when handlers re-raise", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(resume) -> i32
+
 fn reraises()
   try
     Async::await()
-    Async::await(resume):
-      Async::await()
+  Async::await(resume):
+    Async::await()
 `,
       "effects.voyd"
     );

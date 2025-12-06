@@ -77,8 +77,8 @@ eff Async
 fn main(): Async -> i32
   try
     Async::await()
-    Async::await(tail):
-      tail(1)
+  Async::await(tail):
+    tail(1)
 `);
     const handler = Array.from(hir.expressions.values()).find(
       (expr) => expr.kind === "expr" && expr.exprKind === "effect-handler"
@@ -89,5 +89,48 @@ fn main(): Async -> i32
     const clause = handler.handlers[0]!;
     expect(clause.resumable).toBe("fn");
     expect(typeof clause.operation).toBe("number");
+  });
+
+  it("lowers try handlers with resume continuations", () => {
+    const hir = lower(`
+eff Async
+  fn await(resume, value: i32) -> i32
+
+fn main(): Async -> i32
+  try
+    Async::await(1)
+  Async::await(resume, value):
+    resume(value)
+`);
+    const handler = Array.from(hir.expressions.values()).find(
+      (expr) => expr.kind === "expr" && expr.exprKind === "effect-handler"
+    );
+    expect(handler).toBeDefined();
+    if (!handler || handler.exprKind !== "effect-handler") return;
+    expect(handler.handlers).toHaveLength(1);
+    const clause = handler.handlers[0]!;
+    expect(clause.resumable).toBe("ctl");
+    expect(clause.parameters).toHaveLength(2);
+  });
+
+  it("hoists indented qualified handlers out of the try block", () => {
+    const hir = lower(`
+eff Async
+  fn await(tail) -> i32
+
+fn main(): Async -> i32
+  try
+    Async::await()
+    Async::await(tail):
+      tail(1)
+`);
+    const handler = Array.from(hir.expressions.values()).find(
+      (expr) => expr.kind === "expr" && expr.exprKind === "effect-handler"
+    );
+    expect(handler).toBeDefined();
+    if (!handler || handler.exprKind !== "effect-handler") return;
+    expect(handler.handlers).toHaveLength(1);
+    expect(handler.handlers[0]?.parameters).toHaveLength(1);
+    expect(handler.handlers[0]?.resumable).toBe("fn");
   });
 });
