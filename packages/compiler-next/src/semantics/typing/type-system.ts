@@ -9,6 +9,7 @@ import type {
 import { resolveImportedTypeExpr } from "./imports.js";
 import type { SymbolId, TypeId, TypeParamId } from "../ids.js";
 import type { StructuralField } from "./type-arena.js";
+import { freshOpenEffectRow, resolveEffectAnnotation } from "./effects.js";
 import {
   BASE_OBJECT_NAME,
   type TypingContext,
@@ -840,10 +841,13 @@ const resolveFunctionTypeExpr = (
     ctx.primitives.unknown,
     typeParams
   );
+  const effectRow =
+    resolveEffectAnnotation(expr.effectType, ctx, state) ??
+    freshOpenEffectRow(ctx.effects);
   return ctx.arena.internFunction({
     parameters: parameters.map((type) => ({ type, optional: false })),
     returnType,
-    effectRow: ctx.primitives.defaultEffectRow,
+    effectRow,
   });
 };
 

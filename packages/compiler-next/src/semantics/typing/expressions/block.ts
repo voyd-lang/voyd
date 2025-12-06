@@ -1,6 +1,7 @@
 import type { HirBlockExpr, HirLetStatement } from "../../hir/index.js";
 import type { HirStmtId, TypeId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
+import { getExprEffectRow } from "../effects.js";
 import {
   bindTuplePatternFromExpr,
   bindTuplePatternFromType,
@@ -23,10 +24,16 @@ export const typeBlockExpr = (
   expectedType?: TypeId
 ): TypeId => {
   let returnType: TypeId | undefined;
+  let effectRow = ctx.effects.emptyRow;
 
   expr.statements.forEach((stmtId) => {
     const stmtSpan = ctx.hir.statements.get(stmtId)?.span;
-    const stmtReturnType = typeStatement(stmtId, ctx, state);
+    const { type: stmtReturnType, effect: stmtEffect } = typeStatement(
+      stmtId,
+      ctx,
+      state
+    );
+    effectRow = ctx.effects.compose(effectRow, stmtEffect);
     if (typeof stmtReturnType === "number") {
       returnType = mergeBranchType({
         acc: returnType,
@@ -41,6 +48,11 @@ export const typeBlockExpr = (
 
   if (typeof expr.value === "number") {
     const valueType = typeExpression(expr.value, ctx, state, expectedType);
+    effectRow = ctx.effects.compose(
+      effectRow,
+      getExprEffectRow(expr.value, ctx)
+    );
+    ctx.effects.setExprEffect(expr.id, effectRow);
     return mergeBranchType({
       acc: returnType,
       next: valueType,
@@ -51,6 +63,7 @@ export const typeBlockExpr = (
     });
   }
 
+  ctx.effects.setExprEffect(expr.id, effectRow);
   return returnType ?? ctx.primitives.void;
 };
 
@@ -58,7 +71,7 @@ const typeStatement = (
   stmtId: HirStmtId,
   ctx: TypingContext,
   state: TypingState
-): TypeId | undefined => {
+): { type?: TypeId; effect: number } => {
   const stmt = ctx.hir.statements.get(stmtId);
   if (!stmt) {
     throw new Error(`missing HirStatement ${stmtId}`);
@@ -67,7 +80,7 @@ const typeStatement = (
   switch (stmt.kind) {
     case "expr-stmt":
       typeExpression(stmt.expr, ctx, state);
-      return undefined;
+      return { effect: getExprEffectRow(stmt.expr, ctx) };
     case "return":
       if (typeof state.currentFunction?.returnType !== "number") {
         throw new Error("return statement outside of function");
@@ -114,7 +127,7 @@ const typeStatement = (
             context: "return",
           });
         }
-        return valueType;
+        return { type: valueType, effect: getExprEffectRow(stmt.value, ctx) };
       }
 
       const voidType = ctx.primitives.void;
@@ -132,20 +145,19 @@ const typeStatement = (
           span: stmt.span,
         });
       }
-        if (state.currentFunction) {
-          state.currentFunction.observedReturnType = mergeBranchType({
-            acc: state.currentFunction.observedReturnType,
-            next: voidType,
-            ctx,
-            state,
-            span: stmt.span,
-            context: "return",
-          });
-        }
-      return voidType;
+      if (state.currentFunction) {
+        state.currentFunction.observedReturnType = mergeBranchType({
+          acc: state.currentFunction.observedReturnType,
+          next: voidType,
+          ctx,
+          state,
+          span: stmt.span,
+          context: "return",
+        });
+      }
+      return { type: voidType, effect: ctx.effects.emptyRow };
     case "let":
-      typeLetStatement(stmt, ctx, state);
-      return undefined;
+      return { effect: typeLetStatement(stmt, ctx, state) };
     default: {
       const unreachable: never = stmt;
       throw new Error("unsupported statement kind");
@@ -157,7 +169,7 @@ const typeLetStatement = (
   stmt: HirLetStatement,
   ctx: TypingContext,
   state: TypingState
-): void => {
+): number => {
   if (stmt.pattern.kind === "tuple") {
     const annotated =
       stmt.pattern.typeAnnotation &&
@@ -194,7 +206,7 @@ const typeLetStatement = (
         "declare",
         stmt.span
       );
-      return;
+      return getExprEffectRow(stmt.initializer, ctx);
     }
     bindTuplePatternFromExpr(
       stmt.pattern,
@@ -204,7 +216,7 @@ const typeLetStatement = (
       "declare",
       stmt.span
     );
-    return;
+    return getExprEffectRow(stmt.initializer, ctx);
   }
 
   const expectedType =
@@ -240,4 +252,5 @@ const typeLetStatement = (
   const declaredType = expectedType ?? initializerType;
   recordPatternType(stmt.pattern, declaredType, ctx, state, "declare");
   stmt.pattern.typeId = declaredType;
+  return getExprEffectRow(stmt.initializer, ctx);
 };

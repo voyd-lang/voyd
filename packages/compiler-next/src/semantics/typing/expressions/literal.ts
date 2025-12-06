@@ -7,6 +7,7 @@ export const typeLiteralExpr = (
   expr: HirLiteralExpr,
   ctx: TypingContext
 ): TypeId => {
+  ctx.effects.setExprEffect(expr.id, ctx.effects.emptyRow);
   switch (expr.literalKind) {
     case "i32":
     case "i64":

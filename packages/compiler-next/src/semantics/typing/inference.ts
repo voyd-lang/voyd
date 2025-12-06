@@ -3,6 +3,7 @@ import { ensureTypeMatches } from "./type-system.js";
 import type { FunctionSignature, TypingContext, TypingState } from "./types.js";
 import { formatFunctionInstanceKey, typeExpression } from "./expressions.js";
 import { mergeBranchType } from "./expressions/branching.js";
+import { ensureEffectCompatibility, getExprEffectRow } from "./effects.js";
 
 export const runInferencePass = (
   ctx: TypingContext,
@@ -84,11 +85,27 @@ const typeFunction = (
   };
   let bodyType;
   let observedReturnType: number | undefined;
+  let updated = false;
   try {
     bodyType = typeExpression(fn.body, ctx, state, signature.returnType);
     observedReturnType = state.currentFunction?.observedReturnType;
   } finally {
     state.currentFunction = previousFunction;
+  }
+
+  const inferredEffectRow = getExprEffectRow(fn.body, ctx);
+  if (signature.annotatedEffects) {
+    ensureEffectCompatibility({
+      inferred: inferredEffectRow,
+      annotated: signature.effectRow ?? ctx.primitives.defaultEffectRow,
+      ctx,
+      span: fn.span,
+      location: fn.ast,
+      reason: `function ${ctx.symbolTable.getSymbol(fn.symbol).name} effects`,
+    });
+  } else if (signature.effectRow !== inferredEffectRow) {
+    signature.effectRow = inferredEffectRow;
+    updated = true;
   }
 
   const effectiveReturnType =
@@ -111,14 +128,44 @@ const typeFunction = (
       state,
       `function ${ctx.symbolTable.getSymbol(fn.symbol).name} return type`
     );
-    return false;
+    if (updated) {
+      refreshFunctionSignatureType({ fn, signature, ctx });
+    }
+    if (
+      state.mode === "strict" &&
+      typeof signature.effectRow === "number" &&
+      signature.scheme
+    ) {
+      if (ctx.effects.getFunctionEffect(fn.symbol) === undefined) {
+        ctx.effects.setFunctionEffect(fn.symbol, signature.scheme, signature.effectRow);
+      }
+    }
+    return updated;
   }
 
   if (effectiveReturnType === ctx.primitives.unknown) {
-    return false;
+    if (
+      state.mode === "strict" &&
+      typeof signature.effectRow === "number" &&
+      signature.scheme
+    ) {
+      if (ctx.effects.getFunctionEffect(fn.symbol) === undefined) {
+        ctx.effects.setFunctionEffect(fn.symbol, signature.scheme, signature.effectRow);
+      }
+    }
+    return updated;
   }
 
   finalizeFunctionReturnType(fn, signature, effectiveReturnType, ctx);
+  if (
+    state.mode === "strict" &&
+    typeof signature.effectRow === "number" &&
+    signature.scheme
+  ) {
+    if (ctx.effects.getFunctionEffect(fn.symbol) === undefined) {
+      ctx.effects.setFunctionEffect(fn.symbol, signature.scheme, signature.effectRow);
+    }
+  }
   return true;
 };
 
@@ -135,19 +182,35 @@ const finalizeFunctionReturnType = (
   ctx: TypingContext
 ): void => {
   signature.returnType = inferred;
+  refreshFunctionSignatureType({ fn, signature, ctx });
+  signature.hasExplicitReturn = true;
+  signature.annotatedReturn ||= false;
+};
+
+const refreshFunctionSignatureType = ({
+  fn,
+  signature,
+  ctx,
+}: {
+  fn: HirFunction;
+  signature: FunctionSignature;
+  ctx: TypingContext;
+}): void => {
   const functionType = ctx.arena.internFunction({
     parameters: signature.parameters.map(({ type, label }) => ({
       type,
       label,
       optional: false,
     })),
-    returnType: inferred,
+    returnType: signature.returnType,
     effectRow: signature.effectRow ?? ctx.primitives.defaultEffectRow,
   });
   signature.typeId = functionType;
   ctx.valueTypes.set(fn.symbol, functionType);
-  const scheme = ctx.arena.newScheme([], functionType);
+  const scheme = ctx.arena.newScheme(
+    signature.typeParams?.map((param) => param.typeParam) ?? [],
+    functionType
+  );
+  signature.scheme = scheme;
   ctx.table.setSymbolScheme(fn.symbol, scheme);
-  signature.hasExplicitReturn = true;
-  signature.annotatedReturn ||= false;
 };

@@ -249,10 +249,11 @@ export const createEffectTable = (): EffectTable => {
 
   const setExprEffect = (expr: HirExprId, row: EffectRowId): void => {
     const existing = exprEffects.get(expr);
-    if (typeof existing === "number" && existing !== row) {
-      throw new Error(
-        `conflicting effect rows for expr ${expr}: existing=${existing}, next=${row}`
-      );
+    if (typeof existing === "number") {
+      if (existing === row) {
+        return;
+      }
+      row = compose(existing, row);
     }
     exprEffects.set(expr, row);
   };

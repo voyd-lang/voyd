@@ -8,7 +8,10 @@ import { getIntrinsicType } from "./intrinsics.js";
 export const typeIdentifierExpr = (
   expr: HirExpression & { exprKind: "identifier"; symbol: SymbolId },
   ctx: TypingContext
-): TypeId => getValueType(expr.symbol, ctx);
+): TypeId => {
+  ctx.effects.setExprEffect(expr.id, ctx.effects.emptyRow);
+  return getValueType(expr.symbol, ctx);
+};
 
 export const getValueType = (symbol: SymbolId, ctx: TypingContext): TypeId => {
   const cached = ctx.valueTypes.get(symbol);

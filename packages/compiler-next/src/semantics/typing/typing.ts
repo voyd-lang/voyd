@@ -8,6 +8,7 @@ import {
   seedBaseObjectType,
   seedPrimitiveTypes,
   registerImpls,
+  registerEffectOperations,
 } from "./registry.js";
 import { indexMemberMetadata } from "./members.js";
 import { validateTypedProgram } from "./validation.js";
@@ -35,6 +36,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   registerObjectDecls(ctx);
   registerTraits(ctx);
   registerFunctionSignatures(ctx, state);
+  registerEffectOperations(ctx, state);
   registerImpls(ctx, state);
   indexMemberMetadata(ctx);
 

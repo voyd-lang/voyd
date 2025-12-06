@@ -16,6 +16,10 @@ import type {
   HirTraitMethod,
   HirTypeExpr,
 } from "../hir/index.js";
+import {
+  freshOpenEffectRow,
+  resolveEffectAnnotation,
+} from "./effects.js";
 
 export const seedPrimitiveTypes = (ctx: TypingContext): void => {
   ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
@@ -238,6 +242,15 @@ export const registerFunctionSignatures = (
       };
     });
 
+    const effectAnnotation = resolveEffectAnnotation(
+      item.effectType,
+      ctx,
+      state
+    );
+    const initialEffectRow =
+      effectAnnotation ?? freshOpenEffectRow(ctx.effects);
+    const annotatedEffects = effectAnnotation !== undefined;
+
     const hasExplicitReturn = Boolean(item.returnType);
     const declaredReturn =
       resolveTypeExpr(
@@ -255,7 +268,7 @@ export const registerFunctionSignatures = (
         optional: false,
       })),
       returnType: declaredReturn,
-      effectRow: ctx.primitives.defaultEffectRow,
+      effectRow: initialEffectRow,
     });
 
     const scheme = ctx.arena.newScheme(
@@ -269,8 +282,8 @@ export const registerFunctionSignatures = (
       returnType: declaredReturn,
       hasExplicitReturn,
       annotatedReturn: hasExplicitReturn,
-      effectRow: ctx.primitives.defaultEffectRow,
-      annotatedEffects: false,
+      effectRow: initialEffectRow,
+      annotatedEffects,
       typeParams,
       scheme,
       typeParamMap:
@@ -283,6 +296,76 @@ export const registerFunctionSignatures = (
     ctx.valueTypes.set(item.symbol, functionType);
 
     ctx.table.setSymbolScheme(item.symbol, scheme);
+  }
+};
+
+export const registerEffectOperations = (
+  ctx: TypingContext,
+  state: TypingState
+): void => {
+  for (const item of ctx.hir.items.values()) {
+    if (item.kind !== "effect") continue;
+
+    item.operations.forEach((op) => {
+      const parameters = op.parameters.map((param) => ({
+        type:
+          resolveTypeExpr(
+            param.type,
+            ctx,
+            state,
+            ctx.primitives.unknown
+          ) ?? ctx.primitives.unknown,
+        label: undefined,
+        bindingKind: param.bindingKind,
+        span: param.span,
+        name: getSymbolName(param.symbol, ctx),
+        symbol: param.symbol,
+      }));
+
+      const hasExplicitReturn = Boolean(op.returnType);
+      const returnType =
+        resolveTypeExpr(
+          op.returnType,
+          ctx,
+          state,
+          ctx.primitives.unknown
+        ) ?? ctx.primitives.void;
+
+      const effectRow = ctx.effects.internRow({
+        operations: [
+          {
+            name: `${getSymbolName(item.symbol, ctx)}.${getSymbolName(
+              op.symbol,
+              ctx
+            )}`,
+          },
+        ],
+      });
+
+      const functionType = ctx.arena.internFunction({
+        parameters: parameters.map((param) => ({
+          type: param.type,
+          label: param.label,
+          optional: false,
+        })),
+        returnType,
+        effectRow,
+      });
+
+      const scheme = ctx.arena.newScheme([], functionType);
+      ctx.functions.setSignature(op.symbol, {
+        typeId: functionType,
+        parameters,
+        returnType,
+        hasExplicitReturn,
+        annotatedReturn: hasExplicitReturn,
+        effectRow,
+        annotatedEffects: true,
+        scheme,
+      });
+      ctx.valueTypes.set(op.symbol, functionType);
+      ctx.table.setSymbolScheme(op.symbol, scheme);
+    });
   }
 };
 

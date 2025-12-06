@@ -86,8 +86,16 @@ describe("EffectTable", () => {
     const row = effects.internRow({ operations: [{ name: "Async.await" }] });
     effects.setExprEffect(1, row);
     effects.setExprEffect(1, row);
-    expect(effects.getExprEffect(1)).toBe(row);
-    expect(() => effects.setExprEffect(1, effects.emptyRow)).toThrow();
+    const added = effects.internRow({ operations: [{ name: "Log.write" }] });
+    effects.setExprEffect(1, effects.emptyRow);
+    effects.setExprEffect(1, added);
+    const combined = effects.getExprEffect(1);
+    expect(combined).toBeTypeOf("number");
+    const desc = effects.getRow(combined!);
+    expect(desc.operations).toEqual([
+      { name: "Async.await" },
+      { name: "Log.write" },
+    ]);
 
     const scheme: TypeSchemeId = 7;
     effects.setFunctionEffect(2, scheme, row);
