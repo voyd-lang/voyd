@@ -23,6 +23,35 @@ test("it normalizes function calls", async ({ expect }) => {
   ).toMatchSnapshot();
 });
 
+test("it hoists trailing blocks for non-fn calls", () => {
+  const sink = new CharStream(
+    "foo(x: i32) -> None | Some\n  body()",
+    "test"
+  );
+  const readerOutput = read(sink);
+  expect(expandSyntaxMacros(readerOutput, [interpretWhitespace]).toJSON()).toEqual([
+    "ast",
+    [
+      "foo",
+      [
+        "x",
+        ":",
+        "i32",
+      ],
+    ],
+    "->",
+    "None",
+    "|",
+    "Some",
+    [
+      "block",
+      [
+        "body",
+      ],
+    ],
+  ]);
+});
+
 test("it correctly inserts blocks in a basic fib fn", async () => {
   const form = await runFixture("fib.voyd");
   expect(form).toMatchSnapshot();
