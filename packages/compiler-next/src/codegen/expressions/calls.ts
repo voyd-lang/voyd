@@ -18,14 +18,87 @@ import {
   getClosureTypeInfo,
   getExprBinaryenType,
   getRequiredExprType,
+  wasmTypeFor,
 } from "../types.js";
 import { allocateTempLocal } from "../locals.js";
 import { callRef, refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
+import { OUTCOME_TAGS } from "../effects/runtime-abi.js";
+import { unboxOutcomeValue } from "../effects/outcome-values.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 let traitDispatchSigCounter = 0;
+
+const lowerEffectfulCallResult = ({
+  callExpr,
+  callId,
+  returnTypeId,
+  expectedResultTypeId,
+  typeInstanceKey,
+  ctx,
+  fnCtx,
+}: {
+  callExpr: binaryen.ExpressionRef;
+  callId: HirExprId;
+  returnTypeId: TypeId;
+  expectedResultTypeId?: TypeId;
+  typeInstanceKey?: string;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): CompiledExpression => {
+  const lookupKey =
+    typeInstanceKey ?? fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const valueType = wasmTypeFor(returnTypeId, ctx);
+  const outcomeTemp = allocateTempLocal(ctx.effectsRuntime.outcomeType, fnCtx);
+  const ops: binaryen.ExpressionRef[] = [
+    ctx.mod.local.set(outcomeTemp.index, callExpr),
+  ];
+  const loadOutcome = () =>
+    ctx.mod.local.get(outcomeTemp.index, ctx.effectsRuntime.outcomeType);
+  const tagIsValue = ctx.mod.i32.eq(
+    ctx.effectsRuntime.outcomeTag(loadOutcome()),
+    ctx.mod.i32.const(OUTCOME_TAGS.value)
+  );
+  const payload = ctx.effectsRuntime.outcomePayload(loadOutcome());
+  const unboxed = unboxOutcomeValue({
+    payload,
+    valueType,
+    ctx,
+  });
+  const valueResult = unboxed;
+
+  if (valueType === binaryen.none) {
+    ops.push(ctx.mod.if(tagIsValue, valueResult, ctx.mod.unreachable()));
+    return {
+      expr: ctx.mod.block(
+        null,
+        ops,
+        getExprBinaryenType(callId, ctx, lookupKey)
+      ),
+      usedReturnCall: false,
+    };
+  }
+
+  const resultTemp = allocateTempLocal(valueType, fnCtx);
+  ops.push(
+    ctx.mod.if(
+      tagIsValue,
+      ctx.mod.local.set(resultTemp.index, valueResult),
+      ctx.mod.unreachable()
+    ),
+    ctx.mod.local.get(resultTemp.index, valueType)
+  );
+
+  return {
+    expr: ctx.mod.block(
+      null,
+      ops,
+      getExprBinaryenType(callId, ctx, lookupKey)
+    ),
+    usedReturnCall: false,
+  };
+};
 
 export const compileCallExpr = (
   expr: HirCallExpr,
@@ -77,7 +150,7 @@ export const compileCallExpr = (
       throw new Error(`codegen cannot call symbol ${targetSymbol}`);
     }
     const args = compileCallArguments(expr, targetMeta, ctx, fnCtx, compileExpr);
-    return emitResolvedCall(targetMeta, args, expr.id, ctx, {
+    return emitResolvedCall(targetMeta, args, expr.id, ctx, fnCtx, {
       tailPosition,
       expectedResultTypeId,
       typeInstanceKey,
@@ -141,7 +214,7 @@ export const compileCallExpr = (
     });
     if (meta) {
       const args = compileCallArguments(expr, meta, ctx, fnCtx, compileExpr);
-      return emitResolvedCall(meta, args, expr.id, ctx, {
+      return emitResolvedCall(meta, args, expr.id, ctx, fnCtx, {
         tailPosition,
         expectedResultTypeId,
         typeInstanceKey,
@@ -157,6 +230,7 @@ export const compileCallExpr = (
         ctx,
         fnCtx,
         compileExpr,
+        expectedResultTypeId,
       });
     }
     return compileClosureCall({
@@ -166,6 +240,7 @@ export const compileCallExpr = (
       ctx,
       fnCtx,
       compileExpr,
+      expectedResultTypeId,
     });
   }
 
@@ -190,11 +265,11 @@ const compileTraitDispatchCall = ({
   if (expr.args.length === 0) {
     return undefined;
   }
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const mapping = ctx.typing.traitMethodImpls.get(calleeSymbol);
   if (!mapping) {
     return undefined;
   }
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const receiverTypeId = getRequiredExprType(
     expr.args[0].expr,
     ctx,
@@ -275,7 +350,18 @@ const compileTraitDispatchCall = ({
     args as number[],
     meta.resultType
   );
-  ops.push(callExpr);
+  const lowered = meta.effectful
+    ? lowerEffectfulCallResult({
+        callExpr,
+        callId: expr.id,
+        returnTypeId: getRequiredExprType(expr.id, ctx, typeInstanceKey),
+        expectedResultTypeId,
+        typeInstanceKey,
+        ctx,
+        fnCtx,
+      })
+    : { expr: callExpr, usedReturnCall: false };
+  ops.push(lowered.expr);
   const binaryenResult = getExprBinaryenType(expr.id, ctx, typeInstanceKey);
 
   return {
@@ -283,7 +369,7 @@ const compileTraitDispatchCall = ({
       ops.length === 1
         ? ops[0]!
         : ctx.mod.block(null, ops, binaryenResult),
-    usedReturnCall: false,
+    usedReturnCall: lowered.usedReturnCall,
   };
 };
 
@@ -292,6 +378,7 @@ const emitResolvedCall = (
   args: readonly binaryen.ExpressionRef[],
   callId: HirExprId,
   ctx: CodegenContext,
+  fnCtx: FunctionContext,
   options: CompileCallOptions = {}
 ): CompiledExpression => {
   const { tailPosition = false, expectedResultTypeId, typeInstanceKey } =
@@ -300,10 +387,29 @@ const emitResolvedCall = (
   const returnTypeId = getRequiredExprType(callId, ctx, lookupKey);
   const expectedTypeId = expectedResultTypeId ?? returnTypeId;
 
-  if (
+  if (meta.effectful) {
+    const callExpr = ctx.mod.call(
+      meta.wasmName,
+      args as number[],
+      meta.resultType
+    );
+    return lowerEffectfulCallResult({
+      callExpr,
+      callId,
+      returnTypeId,
+      expectedResultTypeId,
+      typeInstanceKey,
+      ctx,
+      fnCtx,
+    });
+  }
+
+  const allowReturnCall =
     tailPosition &&
-    !requiresStructuralConversion(returnTypeId, expectedTypeId, ctx)
-  ) {
+    !fnCtx.effectful &&
+    !requiresStructuralConversion(returnTypeId, expectedTypeId, ctx);
+
+  if (allowReturnCall) {
     return {
       expr: ctx.mod.return_call(
         meta.wasmName,
@@ -385,6 +491,7 @@ const compileClosureCall = ({
   ctx,
   fnCtx,
   compileExpr,
+  expectedResultTypeId,
 }: {
   expr: HirCallExpr;
   calleeTypeId: TypeId;
@@ -392,16 +499,27 @@ const compileClosureCall = ({
     kind: "function";
     parameters: readonly { type: TypeId; label?: string; optional?: boolean }[];
     returnType: TypeId;
+    effectRow: unknown;
   };
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
+  expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
   if (expr.args.length !== calleeDesc.parameters.length) {
     throw new Error("call argument count mismatch");
   }
 
   const base = getClosureTypeInfo(calleeTypeId, ctx);
+  const effectful =
+    typeof calleeDesc.effectRow === "number" &&
+    ctx.typing.effects.getRow(calleeDesc.effectRow).operations.length > 0;
+  if (effectful && process.env.DEBUG_EFFECTS === "1") {
+    console.log("[effects] closure call", {
+      returnType: calleeDesc.returnType,
+      row: ctx.typing.effects.getRow(calleeDesc.effectRow),
+    });
+  }
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const closureValue = compileExpr({ exprId: expr.callee, ctx, fnCtx });
   const closureTemp = allocateTempLocal(base.interfaceType, fnCtx);
@@ -429,7 +547,19 @@ const compileClosureCall = ({
     base.resultType
   );
 
-  ops.push(call);
+  const lowered = effectful
+    ? lowerEffectfulCallResult({
+        callExpr: call,
+        callId: expr.id,
+        returnTypeId: calleeDesc.returnType,
+        expectedResultTypeId,
+        typeInstanceKey,
+        ctx,
+        fnCtx,
+      })
+    : { expr: call, usedReturnCall: false };
+
+  ops.push(lowered.expr);
   return {
     expr:
       ops.length === 1
@@ -439,7 +569,7 @@ const compileClosureCall = ({
             ops,
             getExprBinaryenType(expr.id, ctx, typeInstanceKey)
           ),
-    usedReturnCall: false,
+    usedReturnCall: lowered.usedReturnCall,
   };
 };
 
@@ -449,12 +579,14 @@ const compileCurriedClosureCall = ({
   ctx,
   fnCtx,
   compileExpr,
+  expectedResultTypeId,
 }: {
   expr: HirCallExpr;
   calleeTypeId: TypeId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
+  expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   let currentValue = compileExpr({ exprId: expr.callee, ctx, fnCtx });
@@ -489,6 +621,19 @@ const compileCurriedClosureCall = ({
       base.fnRefType === binaryen.funcref
         ? fnField
         : refCast(ctx.mod, fnField, base.fnRefType);
+    const effectful =
+      currentDesc.kind === "function" &&
+      typeof currentDesc.effectRow === "number" &&
+      ctx.typing.effects.getRow(currentDesc.effectRow).operations.length > 0;
+    if (effectful && process.env.DEBUG_EFFECTS === "1") {
+      console.log("[effects] curried closure call", {
+        returnType: currentDesc.returnType,
+        row: ctx.typing.effects.getRow(currentDesc.effectRow),
+      });
+    }
+    const returnTypeId =
+      currentDesc.kind === "function" ? currentDesc.returnType : calleeTypeId;
+    const returnWasmType = wasmTypeFor(returnTypeId, ctx);
     const args = slice.map((arg, index) => {
       const expectedTypeId = currentDesc.parameters[index]?.type;
       const actualTypeId = getRequiredExprType(
@@ -516,15 +661,30 @@ const compileCurriedClosureCall = ({
       base.resultType
     );
 
-    ops.push(call);
+    const isFinalSlice = argIndex + paramCount >= expr.args.length;
+    const lowered = effectful
+      ? lowerEffectfulCallResult({
+          callExpr: call,
+          callId: expr.id,
+          returnTypeId,
+          expectedResultTypeId: isFinalSlice
+            ? expectedResultTypeId
+            : undefined,
+          typeInstanceKey,
+          ctx,
+          fnCtx,
+        })
+      : { expr: call, usedReturnCall: false };
+
+    ops.push(lowered.expr);
     currentValue = {
       expr:
         ops.length === 1
           ? ops[0]!
-          : ctx.mod.block(null, ops, base.resultType),
-      usedReturnCall: false,
+          : ctx.mod.block(null, ops, returnWasmType),
+      usedReturnCall: lowered.usedReturnCall,
     };
-    currentTypeId = currentDesc.returnType;
+    currentTypeId = returnTypeId;
     argIndex += paramCount;
   }
 

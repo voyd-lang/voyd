@@ -130,7 +130,12 @@ const ensureClosureTypeInfo = ({
   const paramTypes = desc.parameters.map((param) =>
     wasmTypeFor(param.type, ctx, seen)
   );
-  const resultType = wasmTypeFor(desc.returnType, ctx, seen);
+  const effectful =
+    typeof desc.effectRow === "number" &&
+    ctx.typing.effects.getRow(desc.effectRow).operations.length > 0;
+  const resultType = effectful
+    ? ctx.effectsRuntime.outcomeType
+    : wasmTypeFor(desc.returnType, ctx, seen);
   const interfaceType = defineStructType(ctx.mod, {
     name: closureStructName({ moduleLabel: ctx.moduleLabel, key }),
     fields: [{ name: "__fn", type: binaryen.funcref, mutable: false }],

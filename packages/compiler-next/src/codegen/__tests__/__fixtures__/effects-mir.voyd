@@ -1,0 +1,26 @@
+eff Async
+  await(tail) -> i32
+
+fn pure_add(x: i32, y: i32): () -> i32
+  x + y
+
+fn effectful(): Async -> i32
+  Async::await()
+
+fn handle_static(): () -> i32
+  try
+    effectful()
+  Async::await(tail):
+    tail(7)
+
+fn handle_runtime(): () -> i32
+  try
+    effectful()
+  Async::await(tail):
+    let thunk = () => tail(1)
+    thunk()
+
+fn call_mix(cb: fn() -> i32): Async -> i32
+  pure_add(1, 2)
+  cb()
+  effectful()

@@ -23,12 +23,16 @@ import type {
   HirStmtId,
   SymbolId,
   TypeId,
+  EffectRowId,
 } from "../semantics/ids.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypingResult } from "../semantics/typing/typing.js";
 import type { createRttContext } from "./rtt/index.js";
 import type { BindingResult } from "../semantics/binding/binding.js";
 import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
+import type { EffectRuntime } from "./effects/runtime-abi.js";
+import type { EffectMir } from "./effects/backend.js";
+import type { OutcomeValueBox } from "./effects/outcome-values.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -49,6 +53,8 @@ export interface FunctionMetadata {
   resultTypeId: TypeId;
   typeArgs: readonly TypeId[];
   instanceKey: string;
+  effectful: boolean;
+  effectRow?: EffectRowId;
 }
 
 export interface StructuralFieldInfo {
@@ -123,6 +129,9 @@ export interface CodegenContext {
   >;
   lambdaFunctions: Map<string, string>;
   rtt: ReturnType<typeof createRttContext>;
+  effectsRuntime: EffectRuntime;
+  effectMir: EffectMir;
+  outcomeValueTypes: Map<string, OutcomeValueBox>;
 }
 
 export interface LocalBindingBase {
@@ -154,6 +163,7 @@ export interface FunctionContext {
   returnTypeId: TypeId;
   instanceKey?: string;
   typeInstanceKey?: string;
+  effectful: boolean;
 }
 
 export interface CompiledExpression {
@@ -203,4 +213,6 @@ export type {
   SymbolId,
   TypeId,
   HirLambdaExpr,
+  EffectRowId,
+  OutcomeValueBox,
 };

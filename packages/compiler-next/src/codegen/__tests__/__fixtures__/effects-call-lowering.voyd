@@ -1,0 +1,5 @@
+fn effectful_value(): () -> i32
+  5
+
+fn forward(): () -> i32
+  effectful_value()

@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
 import { codegen } from "../index.js";
 import { createRttContext } from "../rtt/index.js";
+import { createEffectRuntime } from "../effects/runtime-abi.js";
+import { buildEffectMir } from "../effects/effect-mir.js";
 import {
   compileFunctions,
   emitModuleExports,
@@ -16,7 +18,11 @@ import { semanticsPipeline } from "../../semantics/pipeline.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
 import type { TypingResult } from "../../semantics/typing/types.js";
 import type { TypeId } from "../../semantics/ids.js";
-import type { CodegenContext, FunctionMetadata } from "../context.js";
+import type {
+  CodegenContext,
+  FunctionMetadata,
+  OutcomeValueBox,
+} from "../context.js";
 
 const loadAst = (fixtureName: string) => {
   const source = readFileSync(
@@ -65,8 +71,10 @@ const buildCodegenProgram = (
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
+  const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, FunctionMetadata[]>();
   const functionInstances = new Map<string, FunctionMetadata>();
+  const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
@@ -86,6 +94,9 @@ const buildCodegenProgram = (
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,
+    effectsRuntime,
+    effectMir: buildEffectMir({ semantics: sem }),
+    outcomeValueTypes,
   }));
 
   contexts.forEach(registerFunctionMetadata);

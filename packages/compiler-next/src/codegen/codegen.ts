@@ -7,12 +7,15 @@ import type {
   SemanticsPipelineResult,
 } from "./context.js";
 import { createRttContext } from "./rtt/index.js";
+import { createEffectRuntime } from "./effects/runtime-abi.js";
 import {
   compileFunctions,
   emitModuleExports,
   registerImportMetadata,
   registerFunctionMetadata,
 } from "./functions.js";
+import { buildEffectMir } from "./effects/effect-mir.js";
+import type { OutcomeValueBox } from "./effects/outcome-values.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
@@ -43,9 +46,11 @@ export const codegenProgram = ({
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
+  const effectsRuntime = createEffectRuntime(mod);
   const mergedOptions = { ...DEFAULT_OPTIONS, ...options };
   const functions = new Map<string, FunctionMetadata[]>();
   const functionInstances = new Map<string, FunctionMetadata>();
+  const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
@@ -65,6 +70,9 @@ export const codegenProgram = ({
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,
+    effectsRuntime,
+    effectMir: buildEffectMir({ semantics: sem }),
+    outcomeValueTypes,
   }));
 
   contexts.forEach(registerFunctionMetadata);

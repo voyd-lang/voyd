@@ -7,6 +7,7 @@ import {
   modBinaryenTypeToHeapType,
 } from "@voyd/lib/binaryen-gc/index.js";
 import { getFixedArrayWasmTypes } from "../types.js";
+import { createEffectRuntime } from "../effects/runtime-abi.js";
 import type {
   CodegenContext,
   HirCallExpr,
@@ -24,6 +25,7 @@ const span = { start: 0, end: 0 } as const;
 const createContext = () => {
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
+  const effectsRuntime = createEffectRuntime(mod);
 
   const descriptors = new Map<TypeId, TypeDescriptor>();
   const exprTypes = new Map<HirExprId, TypeId>();
@@ -33,6 +35,7 @@ const createContext = () => {
     locals: [],
     nextLocalIndex: 0,
     returnTypeId: 0 as TypeId,
+    effectful: false,
   };
 
   const ctx: CodegenContext = {
@@ -73,6 +76,17 @@ const createContext = () => {
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt: { baseType: binaryen.none, extensionHelpers: { i32Array: binaryen.i32 } } as any,
+    effectsRuntime,
+    effectMir: {
+      functions: new Map(),
+      operations: new Map(),
+      handlers: new Map(),
+      calls: new Map(),
+      handlerTails: new Map(),
+      semantics: {} as any,
+      stackSwitching: false,
+    },
+    outcomeValueTypes: new Map(),
   };
 
   return { ctx, descriptors, exprTypes, expressions, fnCtx };

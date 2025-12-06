@@ -14,8 +14,10 @@ import { coerceValueToType } from "../structural.js";
 import {
   getExprBinaryenType,
   getRequiredExprType,
+  wasmTypeFor,
 } from "../types.js";
 import { asStatement } from "./utils.js";
+import { wrapValueInOutcome } from "../effects/outcome-values.js";
 
 export const compileBlockExpr = (
   expr: HirBlockExpr,
@@ -106,7 +108,25 @@ export const compileStatement = (
           ctx,
           fnCtx,
         });
+        if (fnCtx.effectful) {
+          return ctx.mod.return(
+            wrapValueInOutcome({
+              valueExpr: coerced,
+              valueType: wasmTypeFor(fnCtx.returnTypeId, ctx),
+              ctx,
+            })
+          );
+        }
         return ctx.mod.return(coerced);
+      }
+      if (fnCtx.effectful) {
+        return ctx.mod.return(
+          wrapValueInOutcome({
+            valueExpr: ctx.mod.nop(),
+            valueType: wasmTypeFor(fnCtx.returnTypeId, ctx),
+            ctx,
+          })
+        );
       }
       return ctx.mod.return();
     case "let":

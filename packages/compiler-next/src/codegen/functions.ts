@@ -12,6 +12,7 @@ import {
   isPackageVisible,
   isPublicVisibility,
 } from "../semantics/hir/index.js";
+import { wrapValueInOutcome } from "./effects/outcome-values.js";
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const unknown = ctx.typing.arena.internPrimitive("unknown");
@@ -79,10 +80,32 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         );
       }
 
+      const effectInfo = ctx.effectMir.functions.get(item.symbol);
+      if (!effectInfo) {
+        throw new Error(
+          `codegen missing effect information for function ${item.symbol}`
+        );
+      }
+      const effectful = effectInfo.pure === false;
+      if (effectful && process.env.DEBUG_EFFECTS === "1") {
+        console.log(
+          `[effects] effectful ${ctx.moduleLabel}::${ctx.symbolTable.getSymbol(item.symbol).name}`,
+          {
+            effectRow: effectInfo.effectRow,
+            row: ctx.typing.effects.getRow(effectInfo.effectRow),
+            hasOps:
+              ctx.typing.effects.getRow(effectInfo.effectRow).operations.length >
+              0,
+          }
+        );
+      }
+
       const paramTypes = descriptor.parameters.map((param) =>
         wasmTypeFor(param.type, ctx)
       );
-      const resultType = wasmTypeFor(descriptor.returnType, ctx);
+      const resultType = effectful
+        ? ctx.effectsRuntime.outcomeType
+        : wasmTypeFor(descriptor.returnType, ctx);
 
       const metadata: FunctionMetadata = {
         moduleId: ctx.moduleId,
@@ -94,6 +117,8 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         resultTypeId: descriptor.returnType,
         typeArgs,
         instanceKey,
+        effectful,
+        effectRow: effectInfo.effectRow,
       };
 
       const key = functionKey(ctx.moduleId, item.symbol);
@@ -171,10 +196,15 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
 
     instantiations.forEach(([instanceKey, typeArgs]) => {
       const targetMeta = pickTargetMeta(targetMetas, typeArgs.length);
+      const effectInfo = ctx.effectMir.functions.get(imp.local);
+      const effectful =
+        targetMeta?.effectful ?? (effectInfo ? effectInfo.pure === false : false);
       const paramTypes = signature.parameters.map((param) =>
         wasmTypeFor(param.type, ctx)
       );
-      const resultType = wasmTypeFor(signature.returnType, ctx);
+      const resultType = effectful
+        ? ctx.effectsRuntime.outcomeType
+        : wasmTypeFor(signature.returnType, ctx);
       const metadata: FunctionMetadata = {
         moduleId: ctx.moduleId,
         symbol: imp.local,
@@ -185,6 +215,8 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         resultTypeId: signature.returnType,
         typeArgs,
         instanceKey,
+        effectful,
+        effectRow: targetMeta?.effectRow ?? effectInfo?.effectRow,
       };
       const key = functionKey(ctx.moduleId, imp.local);
       const metas = ctx.functions.get(key);
@@ -246,6 +278,7 @@ const compileFunctionItem = (
     returnTypeId: meta.resultTypeId,
     instanceKey: meta.instanceKey,
     typeInstanceKey: meta.instanceKey,
+    effectful: meta.effectful,
   };
 
   fn.parameters.forEach((param, index) => {
@@ -270,13 +303,24 @@ const compileFunctionItem = (
     tailPosition: true,
     expectedResultTypeId: fnCtx.returnTypeId,
   });
+  const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
+  const shouldWrapOutcome =
+    meta.effectful &&
+    binaryen.getExpressionType(body.expr) === returnValueType;
+  const functionBody = shouldWrapOutcome
+    ? wrapValueInOutcome({
+        valueExpr: body.expr,
+        valueType: returnValueType,
+        ctx,
+      })
+    : body.expr;
 
   ctx.mod.addFunction(
     meta.wasmName,
     binaryen.createType(meta.paramTypes as number[]),
     meta.resultType,
     fnCtx.locals,
-    body.expr
+    functionBody
   );
 };
 
