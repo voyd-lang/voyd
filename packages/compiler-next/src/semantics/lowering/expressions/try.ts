@@ -24,7 +24,11 @@ export const lowerTry = ({
     }
     const head = entry.at(1);
     const clauseBody = entry.at(2);
-    const { operation, effect, parameters, resumable } = lowerHandlerHead(head, ctx, clauseScope ?? scopes.current());
+    const { operation, effect, parameters, resumable } = lowerHandlerHead(
+      head,
+      ctx,
+      clauseScope ?? scopes.current()
+    );
     if (!clauseBody) {
       throw new Error("effect handler clause missing body");
     }
@@ -37,7 +41,10 @@ export const lowerTry = ({
         operation,
         effect,
         resumable,
-        parameters,
+        parameters: parameters.map((param) => ({
+          ...param,
+          mutable: false,
+        })),
         body: bodyId,
       },
     ];
