@@ -59,6 +59,28 @@ const parseSignatureParts = (
 const parseParameters = (
   expr: Expr
 ): { params: readonly Expr[]; typeParameters?: readonly IdentifierAtom[] } => {
+  if (isForm(expr) && expr.calls("fn")) {
+    let params = expr.rest;
+    let typeParameters: IdentifierAtom[] | undefined;
+
+    const maybeGenerics = params[0];
+    if (isForm(maybeGenerics) && formCallsInternal(maybeGenerics, "generics")) {
+      typeParameters = parseTypeParameters(maybeGenerics as Form);
+      params = params.slice(1);
+    }
+
+    if (
+      params.length === 1 &&
+      isForm(params[0]) &&
+      ((params[0] as Form).calls("tuple") ||
+        (params[0] as Form).callsInternal("tuple"))
+    ) {
+      return { params: (params[0] as Form).rest, typeParameters };
+    }
+
+    return { params, typeParameters };
+  }
+
   if (!isForm(expr)) {
     return { params: [expr] };
   }

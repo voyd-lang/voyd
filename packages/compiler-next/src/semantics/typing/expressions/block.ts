@@ -6,7 +6,14 @@ import {
   bindTuplePatternFromType,
   recordPatternType,
 } from "./patterns.js";
-import { ensureTypeMatches, resolveTypeExpr } from "../type-system.js";
+import { mergeBranchType } from "./branching.js";
+import {
+  ensureTypeMatches,
+  resolveTypeExpr,
+  typeSatisfies,
+  getSymbolName,
+} from "../type-system.js";
+import { emitDiagnostic } from "../../../diagnostics/index.js";
 import type { TypingContext, TypingState } from "../types.js";
 
 export const typeBlockExpr = (
@@ -15,18 +22,43 @@ export const typeBlockExpr = (
   state: TypingState,
   expectedType?: TypeId
 ): TypeId => {
-  expr.statements.forEach((stmtId) => typeStatement(stmtId, ctx, state));
+  let returnType: TypeId | undefined;
+
+  expr.statements.forEach((stmtId) => {
+    const stmtSpan = ctx.hir.statements.get(stmtId)?.span;
+    const stmtReturnType = typeStatement(stmtId, ctx, state);
+    if (typeof stmtReturnType === "number") {
+      returnType = mergeBranchType({
+        acc: returnType,
+        next: stmtReturnType,
+        ctx,
+        state,
+        span: stmtSpan,
+        context: "block",
+      });
+    }
+  });
+
   if (typeof expr.value === "number") {
-    return typeExpression(expr.value, ctx, state, expectedType);
+    const valueType = typeExpression(expr.value, ctx, state, expectedType);
+    return mergeBranchType({
+      acc: returnType,
+      next: valueType,
+      ctx,
+      state,
+      span: ctx.hir.expressions.get(expr.value)?.span,
+      context: "block",
+    });
   }
-  return ctx.primitives.void;
+
+  return returnType ?? ctx.primitives.void;
 };
 
 const typeStatement = (
   stmtId: HirStmtId,
   ctx: TypingContext,
   state: TypingState
-): void => {
+): TypeId | undefined => {
   const stmt = ctx.hir.statements.get(stmtId);
   if (!stmt) {
     throw new Error(`missing HirStatement ${stmtId}`);
@@ -35,13 +67,22 @@ const typeStatement = (
   switch (stmt.kind) {
     case "expr-stmt":
       typeExpression(stmt.expr, ctx, state);
-      return;
+      return undefined;
     case "return":
       if (typeof state.currentFunction?.returnType !== "number") {
         throw new Error("return statement outside of function");
       }
 
       const expectedReturnType = state.currentFunction.returnType;
+      const signature =
+        typeof state.currentFunction.functionSymbol === "number"
+          ? ctx.functions.getSignature(state.currentFunction.functionSymbol)
+          : undefined;
+      const enforceReturnType = signature?.annotatedReturn === true;
+      const functionName =
+        typeof state.currentFunction.functionSymbol === "number"
+          ? getSymbolName(state.currentFunction.functionSymbol, ctx)
+          : undefined;
       if (typeof stmt.value === "number") {
         const valueType = typeExpression(
           stmt.value,
@@ -49,27 +90,62 @@ const typeStatement = (
           state,
           expectedReturnType
         );
-        ensureTypeMatches(
-          valueType,
-          expectedReturnType,
-          ctx,
-          state,
-          "return statement"
-        );
-        return;
+        if (
+          enforceReturnType &&
+          !typeSatisfies(valueType, expectedReturnType, ctx, state)
+        ) {
+          emitDiagnostic({
+            ctx,
+            code: "TY0011",
+            params: {
+              kind: "return-type-mismatch",
+              functionName,
+            },
+            span: stmt.span,
+          });
+        }
+        if (state.currentFunction) {
+          state.currentFunction.observedReturnType = mergeBranchType({
+            acc: state.currentFunction.observedReturnType,
+            next: valueType,
+            ctx,
+            state,
+            span: stmt.span,
+            context: "return",
+          });
+        }
+        return valueType;
       }
 
-      ensureTypeMatches(
-        ctx.primitives.void,
-        expectedReturnType,
-        ctx,
-        state,
-        "return statement"
-      );
-      return;
+      const voidType = ctx.primitives.void;
+      if (
+        enforceReturnType &&
+        !typeSatisfies(voidType, expectedReturnType, ctx, state)
+      ) {
+        emitDiagnostic({
+          ctx,
+          code: "TY0011",
+          params: {
+            kind: "return-type-mismatch",
+            functionName,
+          },
+          span: stmt.span,
+        });
+      }
+        if (state.currentFunction) {
+          state.currentFunction.observedReturnType = mergeBranchType({
+            acc: state.currentFunction.observedReturnType,
+            next: voidType,
+            ctx,
+            state,
+            span: stmt.span,
+            context: "return",
+          });
+        }
+      return voidType;
     case "let":
       typeLetStatement(stmt, ctx, state);
-      return;
+      return undefined;
     default: {
       const unreachable: never = stmt;
       throw new Error("unsupported statement kind");

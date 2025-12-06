@@ -268,6 +268,7 @@ export const registerFunctionSignatures = (
       parameters,
       returnType: declaredReturn,
       hasExplicitReturn,
+      annotatedReturn: hasExplicitReturn,
       typeParams,
       scheme,
       typeParamMap:

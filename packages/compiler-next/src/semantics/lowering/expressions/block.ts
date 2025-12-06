@@ -20,11 +20,21 @@ export const lowerBlock = ({
   const entries = form.rest;
 
   entries.forEach((entry, index) => {
-    const isStatementForm =
-      isForm(entry) && (entry.calls("var") || entry.calls("let"));
-    if (isStatementForm) {
+    if (isForm(entry) && (entry.calls("var") || entry.calls("let"))) {
       statements.push(
         lowerLetStatement({
+          form: entry as Form,
+          ctx,
+          scopes,
+          lowerExpr,
+        })
+      );
+      return;
+    }
+
+    if (isForm(entry) && entry.calls("return")) {
+      statements.push(
+        lowerReturnStatement({
           form: entry as Form,
           ctx,
           scopes,
@@ -94,5 +104,27 @@ const lowerLetStatement = ({
     mutable: isVar && !isLet,
     pattern,
     initializer,
+  });
+};
+
+const lowerReturnStatement = ({
+  form,
+  ctx,
+  scopes,
+  lowerExpr,
+}: LoweringFormParams): HirStmtId => {
+  if (form.length > 2) {
+    throw new Error("return statement expects zero or one value");
+  }
+
+  const valueExpr = form.at(1);
+  const value =
+    valueExpr !== undefined ? lowerExpr(valueExpr, ctx, scopes) : undefined;
+
+  return ctx.builder.addStatement({
+    kind: "return",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    value,
   });
 };

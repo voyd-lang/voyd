@@ -12,10 +12,10 @@ fn nested_sum()
   let c = other()
   a + b + c
 
-fn apply_twice(value: i32, op: (i32) -> i32)
+fn apply_twice(value: i32, op: fn(i32) -> i32)
   op(op(value))
 
-fn generic_pipe<T>(value: T, op: (T) -> T) -> T
+fn generic_pipe<T>(value: T, op: fn(T) -> T) -> T
   op(value)
 
 fn returner(x: i32)

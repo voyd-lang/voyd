@@ -2,6 +2,7 @@ import type { HirFunction } from "../hir/index.js";
 import { ensureTypeMatches } from "./type-system.js";
 import type { FunctionSignature, TypingContext, TypingState } from "./types.js";
 import { formatFunctionInstanceKey, typeExpression } from "./expressions.js";
+import { mergeBranchType } from "./expressions/branching.js";
 
 export const runInferencePass = (
   ctx: TypingContext,
@@ -79,16 +80,32 @@ const typeFunction = (
     substitution: undefined,
     memberOf: ctx.memberMetadata.get(fn.symbol)?.owner,
     functionSymbol: fn.symbol,
+    observedReturnType: undefined,
   };
   let bodyType;
+  let observedReturnType: number | undefined;
   try {
     bodyType = typeExpression(fn.body, ctx, state, signature.returnType);
+    observedReturnType = state.currentFunction?.observedReturnType;
   } finally {
     state.currentFunction = previousFunction;
   }
+
+  const effectiveReturnType =
+    typeof observedReturnType === "number"
+      ? mergeBranchType({
+          acc: observedReturnType,
+          next: bodyType,
+          ctx,
+          state,
+          span: fn.span,
+          context: `function ${ctx.symbolTable.getSymbol(fn.symbol).name}`,
+        })
+      : bodyType;
+
   if (signature.hasExplicitReturn) {
     ensureTypeMatches(
-      bodyType,
+      effectiveReturnType,
       signature.returnType,
       ctx,
       state,
@@ -97,11 +114,11 @@ const typeFunction = (
     return false;
   }
 
-  if (bodyType === ctx.primitives.unknown) {
+  if (effectiveReturnType === ctx.primitives.unknown) {
     return false;
   }
 
-  finalizeFunctionReturnType(fn, signature, bodyType, ctx);
+  finalizeFunctionReturnType(fn, signature, effectiveReturnType, ctx);
   return true;
 };
 
@@ -132,4 +149,5 @@ const finalizeFunctionReturnType = (
   const scheme = ctx.arena.newScheme([], functionType);
   ctx.table.setSymbolScheme(fn.symbol, scheme);
   signature.hasExplicitReturn = true;
+  signature.annotatedReturn ||= false;
 };

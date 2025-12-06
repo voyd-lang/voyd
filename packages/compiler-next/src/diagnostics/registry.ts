@@ -90,6 +90,8 @@ type DiagnosticParamsMap = {
     member: string;
     visibility: string;
   };
+  TY0011: { kind: "return-type-mismatch"; functionName?: string };
+  TY0012: { kind: "branch-type-mismatch"; context?: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -260,6 +262,24 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0010"]>,
+  TY0011: {
+    code: "TY0011",
+    message: (params) =>
+      params.functionName
+        ? `return value does not match declared return type of ${params.functionName}`
+        : "return value does not match declared return type",
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0011"]>,
+  TY0012: {
+    code: "TY0012",
+    message: (params) =>
+      params.context
+        ? `branch type mismatch in ${params.context}`
+        : "branch type mismatch",
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0012"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

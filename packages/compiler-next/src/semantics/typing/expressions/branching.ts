@@ -1,17 +1,22 @@
-import type { TypeId } from "../../ids.js";
+import type { SourceSpan, TypeId } from "../../ids.js";
 import type { TypingContext, TypingState } from "../types.js";
 import { typeSatisfies } from "../type-system.js";
+import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 
 export const mergeBranchType = ({
   acc,
   next,
   ctx,
   state,
+  span,
+  context,
 }: {
   acc: TypeId | undefined;
   next: TypeId;
   ctx: TypingContext;
   state: TypingState;
+  span?: SourceSpan;
+  context?: string;
 }): TypeId => {
   if (typeof acc !== "number") {
     return next;
@@ -31,7 +36,12 @@ export const mergeBranchType = ({
     return ctx.arena.internUnion([acc, next]);
   }
   if (accRepr === "mixed" || nextRepr === "mixed" || accRepr !== nextRepr) {
-    throw new Error("branch type mismatch");
+    emitDiagnostic({
+      ctx,
+      code: "TY0012",
+      params: { kind: "branch-type-mismatch", context },
+      span: normalizeSpan(span, ctx.hir.module.span),
+    });
   }
   return ctx.arena.internUnion([acc, next]);
 };

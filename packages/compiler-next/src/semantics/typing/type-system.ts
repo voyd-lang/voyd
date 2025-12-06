@@ -1487,6 +1487,11 @@ export const typeSatisfies = (
     return traitSatisfies(actual, expected, expectedDesc.owner, ctx, state);
   }
 
+  const forceNominalUnion =
+    expectedDesc.kind === "union" &&
+    expectedDesc.members.every(
+      (member) => typeof getNominalComponent(member, ctx) === "number"
+    );
   const expectedNominal = getNominalComponent(expected, ctx);
   let nominalMatches = false;
   if (expectedNominal) {
@@ -1500,9 +1505,10 @@ export const typeSatisfies = (
   }
 
   const structuralComparisonEligible =
-    !expectedNominal ||
-    nominalMatches ||
-    expectedNominal === ctx.objects.base.nominal;
+    !forceNominalUnion &&
+    (!expectedNominal ||
+      nominalMatches ||
+      expectedNominal === ctx.objects.base.nominal);
   const allowUnknown = state.mode === "relaxed";
   const structuralResolver = structuralComparisonEligible
     ? (type: TypeId): TypeId | undefined =>

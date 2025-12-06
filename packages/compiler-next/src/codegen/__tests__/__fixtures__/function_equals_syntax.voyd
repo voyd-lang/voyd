@@ -1,0 +1,11 @@
+fn t1() = 1
+fn t2() -> i32 = 2
+
+pub fn t1_call() -> i32
+  t1()
+
+pub fn t2_call() -> i32
+  t2()
+
+pub fn main() -> i32
+  t1_call() + t2_call()

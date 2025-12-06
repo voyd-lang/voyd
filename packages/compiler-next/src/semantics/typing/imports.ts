@@ -316,6 +316,7 @@ const translateFunctionSignature = ({
       parameters,
       returnType,
       hasExplicitReturn: signature.hasExplicitReturn,
+      annotatedReturn: signature.annotatedReturn ?? false,
       typeParams: params,
       scheme,
       typeParamMap: signature.typeParamMap,

@@ -5,6 +5,7 @@ import {
   FormCursor,
   IdentifierAtom,
   isCallForm,
+  isIdentifierAtom,
   isForm,
   isWhitespaceAtom,
 } from "../ast/index.js";
@@ -18,7 +19,7 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
       "ast",
       ...(isForm(result.at(0)) ? result.toArray() : [result])
     );
-    return hoistFnBlock(normalized);
+    return hoistTrailingBlock(normalized);
   }
 
   const functional = applyFunctionalNotation(form);
@@ -47,7 +48,7 @@ const interpretWhitespaceExpr = (form: Form, indentLevel?: number): Expr => {
     preserved.setLocation(form.location.clone());
   }
 
-  return hoistFnBlock(preserved).unwrap();
+  return hoistTrailingBlock(preserved).unwrap();
 };
 
 const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
@@ -206,52 +207,108 @@ const unwrapSyntheticCall = (expr: Expr): Expr => {
   return expr;
 };
 
-function hoistFnBlock(expr: Form): Form;
-function hoistFnBlock(expr: Expr): Expr;
-function hoistFnBlock(expr: Expr): Expr {
+const isCallLikeForm = (form: Form) => {
+  const head = form.first;
+  if (isIdentifierAtom(head) && isOp(head)) {
+    return false;
+  }
+
+  return true;
+};
+
+const normalizeFormKind = (original: Expr, rebuilt: Form): Expr =>
+  original instanceof CallForm ? rebuilt.toCall() : rebuilt;
+
+function hoistTrailingBlock(expr: Form): Form;
+function hoistTrailingBlock(expr: Expr): Expr;
+function hoistTrailingBlock(expr: Expr): Expr {
   if (!p.isForm(expr)) return expr;
 
-  const elements = expr.toArray().map(hoistFnBlock);
+  const elements = expr.toArray().map(hoistTrailingBlock);
   const cloned = new Form({
     location: expr.location?.clone(),
     elements,
   });
-  if (!cloned.calls("fn")) {
-    return expr instanceof CallForm ? cloned.toCall() : cloned;
+
+  if (!isCallLikeForm(cloned)) {
+    return normalizeFormKind(expr, cloned);
   }
 
-  const last = cloned.at(-1);
-  const maybeFnBlock = extractTrailingBlock(last);
-  if (!maybeFnBlock) {
-    return expr instanceof CallForm ? cloned.toCall() : cloned;
+  const { expr: withoutBlock, block } = splitTrailingBlock(cloned);
+  if (!block || !p.isForm(withoutBlock)) {
+    return normalizeFormKind(expr, cloned);
   }
-
-  const { remaining, block } = maybeFnBlock;
-  const baseElements = cloned.toArray();
-  baseElements.pop();
-  if (remaining) baseElements.push(remaining);
-  baseElements.push(block);
 
   const hoisted = new Form({
     location: cloned.location?.clone(),
-    elements: baseElements,
+    elements: [...withoutBlock.toArray(), block],
   });
-  return expr instanceof CallForm ? hoisted.toCall() : hoisted;
+
+  return normalizeFormKind(expr, hoisted);
+}
+
+type TrailingBlockExtraction = { expr?: Expr; block?: Form };
+
+const blockBindingOps = new Set(["=>", ":", "="]);
+
+const isBlockBindingOp = (expr?: Expr) =>
+  isIdentifierAtom(expr) && blockBindingOps.has(expr.value);
+
+const shouldDescendForTrailingBlock = (
+  child: Form,
+  previous?: Expr
+): boolean => {
+  const headIsOp =
+    isIdentifierAtom(child.first) &&
+    isOp(child.first) &&
+    !isBlockBindingOp(child.first);
+  const prevIsOp =
+    isIdentifierAtom(previous) &&
+    isOp(previous) &&
+    !isBlockBindingOp(previous);
+  return headIsOp || prevIsOp;
 };
 
-const extractTrailingBlock = (
-  expr?: Expr
-): { remaining?: Expr; block: Form } | undefined => {
-  if (!p.isForm(expr)) return undefined;
+const splitTrailingBlock = (expr: Expr): TrailingBlockExtraction => {
+  if (!p.isForm(expr)) return { expr };
 
-  const last = expr.at(-1);
-  if (!p.isForm(last) || !last.calls("block")) {
-    return undefined;
+  const lastIndex = expr.length - 1;
+  if (lastIndex < 0) return { expr };
+
+  const last = expr.at(lastIndex);
+  if (!last) return { expr };
+
+  if (p.isForm(last) && last.calls("block")) {
+    const elements = expr.toArray().slice(0, -1);
+    const rebuilt = new Form({
+      location: expr.location?.clone(),
+      elements,
+    });
+    const remaining =
+      expr instanceof CallForm ? rebuilt.toCall() : rebuilt.unwrap();
+    return { expr: remaining, block: last };
   }
 
-  const rest = expr.toArray().slice(0, -1);
-  const remaining = rest.length ? new Form(rest).unwrap() : undefined;
-  return { remaining, block: last };
+  const previous = expr.at(lastIndex - 1);
+  if (p.isForm(last) && shouldDescendForTrailingBlock(last, previous)) {
+    const { expr: trimmedLast, block } = splitTrailingBlock(last);
+    if (!block) return { expr };
+
+    const elements = expr.toArray().slice(0, -1);
+    if (trimmedLast && !(p.isForm(trimmedLast) && trimmedLast.length === 0)) {
+      elements.push(trimmedLast);
+    }
+
+    const rebuilt = new Form({
+      location: expr.location?.clone(),
+      elements,
+    });
+    const remaining =
+      expr instanceof CallForm ? rebuilt.toCall() : rebuilt.unwrap();
+    return { expr: remaining, block };
+  }
+
+  return { expr };
 };
 
 const addSibling = (child: Expr, siblings: Expr[]) => {
