@@ -152,7 +152,9 @@ fn missing_tail()
       caught = error;
     }
 
-    expect(caught && (caught as any).diagnostic?.code).toBe("TY0015");
+    const diagnostic = (caught as any)?.diagnostic;
+    expect(diagnostic?.code).toBe("TY0015");
+    expect(diagnostic?.message).toMatch(/observed 0/);
   });
 
   it("rejects multiple tail resumes", () => {
@@ -178,7 +180,63 @@ fn doubled()
       caught = error;
     }
 
-    expect(caught && (caught as any).diagnostic?.code).toBe("TY0015");
+    const diagnostic = (caught as any)?.diagnostic;
+    expect(diagnostic?.code).toBe("TY0015");
+    expect(diagnostic?.message).toMatch(/observed 2/);
+  });
+
+  it("allows multiple resumes for resumable operations", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(resume) -> i32
+
+fn handled()
+  try
+    Async::await()
+  Async::await(resume):
+    resume(1)
+    resume(2)
+`,
+      "effects.voyd"
+    );
+
+    const { typing, symbolTable } = semanticsPipeline(ast);
+    const handledSymbol = symbolTable.resolve("handled", symbolTable.rootScope);
+    expect(typeof handledSymbol).toBe("number");
+    if (typeof handledSymbol !== "number") return;
+    const signature = typing.functions.getSignature(handledSymbol);
+    expect(signature).toBeDefined();
+    if (!signature) return;
+    expect(typing.effects.getRow(signature.effectRow).operations).toHaveLength(0);
+  });
+
+  it("defers tail enforcement to runtime when continuation escapes", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> i32
+
+fn forward(cb: fn(i32) -> i32) -> i32
+  cb(2)
+
+fn main()
+  try
+    Async::await()
+  Async::await(tail):
+    forward(tail)
+`,
+      "effects.voyd"
+    );
+
+    const { hir } = semanticsPipeline(ast);
+    const handler = findEffectHandler(hir);
+    expect(handler).toBeDefined();
+    if (!handler || handler.exprKind !== "effect-handler") return;
+    const clause = handler.handlers[0];
+    expect(clause?.tailResumption?.enforcement).toBe("runtime");
+    expect(clause?.tailResumption?.calls).toBe(0);
+    expect(clause?.tailResumption?.escapes).toBe(true);
   });
 
   it("allows resumable handlers to call resume()", () => {

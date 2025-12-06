@@ -98,18 +98,25 @@ const findEffectOperationDecl = (
   return undefined;
 };
 
-const countContinuationCalls = ({
+type ContinuationUsage = { count: number; escapes: boolean };
+
+const mergeUsage = (left: ContinuationUsage, right: ContinuationUsage): ContinuationUsage => ({
+  count: left.count + right.count,
+  escapes: left.escapes || right.escapes,
+});
+
+const analyzeContinuationUsage = ({
   exprId,
   targetSymbol,
   ctx,
+  nested,
 }: {
   exprId: HirExprId;
   targetSymbol: SymbolId;
   ctx: TypingContext;
-}): number => {
-  let count = 0;
-
-  const visitExpression = (id: HirExprId): void => {
+  nested?: boolean;
+}): ContinuationUsage => {
+  const visitExpression = (id: HirExprId, inNestedLambda: boolean): ContinuationUsage => {
     const expr = ctx.hir.expressions.get(id);
     if (!expr) {
       throw new Error(`missing HirExpression ${id}`);
@@ -117,107 +124,132 @@ const countContinuationCalls = ({
 
     switch (expr.exprKind) {
       case "identifier":
+        return expr.symbol === targetSymbol
+          ? { count: 0, escapes: true }
+          : { count: 0, escapes: false };
       case "literal":
       case "overload-set":
       case "continue":
-        return;
+        return { count: 0, escapes: false };
       case "break":
-        if (typeof expr.value === "number") {
-          visitExpression(expr.value);
-        }
-        return;
+        return typeof expr.value === "number"
+          ? visitExpression(expr.value, inNestedLambda)
+          : { count: 0, escapes: false };
       case "call": {
         const callee = ctx.hir.expressions.get(expr.callee);
-        if (callee?.exprKind === "identifier" && callee.symbol === targetSymbol) {
-          count += 1;
-        } else {
-          visitExpression(expr.callee);
-        }
-        expr.args.forEach((arg) => visitExpression(arg.expr));
-        return;
-      }
-      case "block":
-        expr.statements.forEach(visitStatement);
-        if (typeof expr.value === "number") {
-          visitExpression(expr.value);
-        }
-        return;
-      case "tuple":
-        expr.elements.forEach((entry) => visitExpression(entry));
-        return;
-      case "loop":
-        visitExpression(expr.body);
-        return;
-      case "while":
-        visitExpression(expr.condition);
-        visitExpression(expr.body);
-        return;
-      case "cond":
-      case "if":
-        expr.branches.forEach((branch) => {
-          visitExpression(branch.condition);
-          visitExpression(branch.value);
+        let usage =
+          callee?.exprKind === "identifier" && callee.symbol === targetSymbol
+            ? { count: 1, escapes: Boolean(inNestedLambda) }
+            : visitExpression(expr.callee, inNestedLambda);
+        expr.args.forEach((arg) => {
+          usage = mergeUsage(usage, visitExpression(arg.expr, inNestedLambda));
         });
-        if (typeof expr.defaultBranch === "number") {
-          visitExpression(expr.defaultBranch);
+        return usage;
+      }
+      case "block": {
+        let usage = expr.statements.reduce(
+          (acc, stmtId) => mergeUsage(acc, visitStatement(stmtId, inNestedLambda)),
+          { count: 0, escapes: false }
+        );
+        if (typeof expr.value === "number") {
+          usage = mergeUsage(usage, visitExpression(expr.value, inNestedLambda));
         }
-        return;
-      case "match":
-        visitExpression(expr.discriminant);
+        return usage;
+      }
+      case "tuple":
+        return expr.elements.reduce(
+          (acc, entry) => mergeUsage(acc, visitExpression(entry, inNestedLambda)),
+          { count: 0, escapes: false }
+        );
+      case "loop":
+        return visitExpression(expr.body, inNestedLambda);
+      case "while":
+        return mergeUsage(
+          visitExpression(expr.condition, inNestedLambda),
+          visitExpression(expr.body, inNestedLambda)
+        );
+      case "cond":
+      case "if": {
+        let usage =
+          typeof expr.defaultBranch === "number"
+            ? visitExpression(expr.defaultBranch, inNestedLambda)
+            : { count: 0, escapes: false };
+        expr.branches.forEach((branch) => {
+          usage = mergeUsage(
+            usage,
+            mergeUsage(
+              visitExpression(branch.condition, inNestedLambda),
+              visitExpression(branch.value, inNestedLambda)
+            )
+          );
+        });
+        return usage;
+      }
+      case "match": {
+        let usage = visitExpression(expr.discriminant, inNestedLambda);
         expr.arms.forEach((arm) => {
           if (typeof arm.guard === "number") {
-            visitExpression(arm.guard);
+            usage = mergeUsage(usage, visitExpression(arm.guard, inNestedLambda));
           }
-          visitExpression(arm.value);
+          usage = mergeUsage(usage, visitExpression(arm.value, inNestedLambda));
         });
-        return;
-      case "effect-handler":
-        visitExpression(expr.body);
-        expr.handlers.forEach((handler) => visitExpression(handler.body));
+        return usage;
+      }
+      case "effect-handler": {
+        let usage = visitExpression(expr.body, inNestedLambda);
+        expr.handlers.forEach((handler) => {
+          usage = mergeUsage(usage, visitExpression(handler.body, inNestedLambda));
+        });
         if (typeof expr.finallyBranch === "number") {
-          visitExpression(expr.finallyBranch);
+          usage = mergeUsage(usage, visitExpression(expr.finallyBranch, inNestedLambda));
         }
-        return;
+        return usage;
+      }
       case "object-literal":
-        expr.entries.forEach((entry) => visitExpression(entry.value));
-        return;
+        return expr.entries.reduce(
+          (acc, entry) => mergeUsage(acc, visitExpression(entry.value, inNestedLambda)),
+          { count: 0, escapes: false }
+        );
       case "field-access":
-        visitExpression(expr.target);
-        return;
-      case "assign":
-        if (typeof expr.target === "number") {
-          visitExpression(expr.target);
-        }
-        visitExpression(expr.value);
-        return;
-      case "lambda":
-        visitExpression(expr.body);
-        return;
+        return visitExpression(expr.target, inNestedLambda);
+      case "assign": {
+        const targetUsage =
+          typeof expr.target === "number"
+            ? visitExpression(expr.target, inNestedLambda)
+            : { count: 0, escapes: false };
+        return mergeUsage(targetUsage, visitExpression(expr.value, inNestedLambda));
+      }
+      case "lambda": {
+        const inner = visitExpression(expr.body, true);
+        return inner.count > 0 || inner.escapes
+          ? { count: inner.count, escapes: true }
+          : inner;
+      }
     }
+
+    return { count: 0, escapes: false };
   };
 
-  const visitStatement = (id: number): void => {
+  const visitStatement = (id: number, inNestedLambda: boolean): ContinuationUsage => {
     const stmt = ctx.hir.statements.get(id);
     if (!stmt) {
       throw new Error(`missing HirStatement ${id}`);
     }
     switch (stmt.kind) {
       case "let":
-        visitExpression(stmt.initializer);
-        return;
+        return visitExpression(stmt.initializer, inNestedLambda);
       case "expr-stmt":
-        visitExpression(stmt.expr);
-        return;
+        return visitExpression(stmt.expr, inNestedLambda);
       case "return":
-        if (typeof stmt.value === "number") {
-          visitExpression(stmt.value);
-        }
-        return;
+        return typeof stmt.value === "number"
+          ? visitExpression(stmt.value, inNestedLambda)
+          : { count: 0, escapes: false };
     }
+
+    return { count: 0, escapes: false };
   };
 
-  visitExpression(exprId);
-  return count;
+  return visitExpression(exprId, Boolean(nested));
 };
 
 const enforceTailResumption = ({
@@ -236,22 +268,31 @@ const enforceTailResumption = ({
     return;
   }
   const continuationSymbol = clause.parameters[0]?.symbol;
-  const resumeCount =
+  const usage =
     typeof continuationSymbol === "number"
-      ? countContinuationCalls({
+      ? analyzeContinuationUsage({
           exprId: clause.body,
           targetSymbol: continuationSymbol,
           ctx,
         })
-      : 0;
-  if (resumeCount !== 1) {
+      : { count: 0, escapes: false };
+
+  clause.tailResumption = {
+    enforcement: usage.escapes ? "runtime" : "static",
+    calls: usage.count,
+    escapes: usage.escapes,
+  };
+
+  const hasStaticViolation =
+    usage.count > 1 || (!usage.escapes && usage.count !== 1);
+  if (hasStaticViolation) {
     emitDiagnostic({
       ctx,
       code: "TY0015",
       params: {
         kind: "tail-resume-count",
         operation: opName,
-        count: resumeCount,
+        count: usage.count,
       },
       span,
     });

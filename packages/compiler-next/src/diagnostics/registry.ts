@@ -300,7 +300,7 @@ export const diagnosticsRegistry: {
   TY0015: {
     code: "TY0015",
     message: (params) =>
-      `tail-resumptive operation ${params.operation} must call tail exactly once (found ${params.count})`,
+      `tail-resumptive operation ${params.operation} must call tail exactly once (observed ${params.count})`,
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0015"]>,
