@@ -1,10 +1,12 @@
 import type { HirMatchExpr, HirPattern, HirTypeExpr } from "../../hir/index.js";
 import type { SourceSpan, SymbolId, TypeId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
+import { composeEffectRows, getExprEffectRow } from "../effects.js";
 import {
   getNominalComponent,
   matchedUnionMembers,
   narrowTypeForPattern,
+  ensureTypeMatches,
   resolveTypeExpr,
 } from "../type-system.js";
 import {
@@ -39,6 +41,7 @@ export const typeMatchExpr = (
   const remainingMembers = unionMembers ? new Set(unionMembers) : undefined;
 
   let branchType: TypeId | undefined;
+  let effectRow = getExprEffectRow(expr.discriminant, ctx);
 
   expr.arms.forEach((arm, index) => {
     const patternSpan = normalizeSpan(arm.pattern.span, expr.span);
@@ -55,12 +58,32 @@ export const typeMatchExpr = (
       },
       patternNominalHints
     );
+    let armEffectRow = ctx.effects.emptyRow;
+    if (typeof arm.guard === "number") {
+      const guardType = typeExpression(arm.guard, ctx, state);
+      ensureTypeMatches(
+        guardType,
+        ctx.primitives.bool,
+        ctx,
+        state,
+        `match guard ${index + 1}`
+      );
+      armEffectRow = ctx.effects.compose(
+        armEffectRow,
+        getExprEffectRow(arm.guard, ctx)
+      );
+    }
     const valueType = withNarrowedDiscriminant(
       discriminantSymbol,
       narrowed,
       ctx,
       () => typeExpression(arm.value, ctx, state)
     );
+    armEffectRow = ctx.effects.compose(
+      armEffectRow,
+      getExprEffectRow(arm.value, ctx)
+    );
+    effectRow = ctx.effects.compose(effectRow, armEffectRow);
     branchType = mergeBranchType({
       acc: branchType,
       next: valueType,
@@ -104,6 +127,7 @@ export const typeMatchExpr = (
     });
   }
 
+  ctx.effects.setExprEffect(expr.id, effectRow);
   return branchType ?? ctx.primitives.void;
 };
 

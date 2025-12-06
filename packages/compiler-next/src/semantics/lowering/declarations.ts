@@ -10,6 +10,7 @@ import type {
   BoundTypeAlias,
   BoundTrait,
   BoundImpl,
+  BoundEffect,
   BoundUse,
 } from "../binding/binding.js";
 import type { Syntax } from "../../parser/index.js";
@@ -46,6 +47,11 @@ export const getModuleDeclarations = (
       kind: "trait" as const,
       order: trait.moduleIndex,
       trait,
+    })),
+    ...binding.effects.map((effect) => ({
+      kind: "effect" as const,
+      order: effect.moduleIndex,
+      effect,
     })),
     ...binding.impls.map((impl) => ({
       kind: "impl" as const,
@@ -128,6 +134,7 @@ export const lowerFunctionDecl = (
   }));
 
   const bodyId = lowerExpr(fn.body, ctx, scopes);
+  const effectType = lowerTypeExpr(fn.effectTypeExpr, ctx, scopes.current());
   const fnId = ctx.builder.addFunction({
     kind: "function",
     decl: fn.id,
@@ -139,6 +146,7 @@ export const lowerFunctionDecl = (
     span: toSourceSpan(fallbackSyntax),
     parameters,
     returnType: lowerTypeExpr(fn.returnTypeExpr, ctx, scopes.current()),
+    ...(effectType ? { effectType } : {}),
     body: bodyId,
     ...(fn.intrinsic ? { intrinsic: fn.intrinsic } : {}),
   });
@@ -263,6 +271,7 @@ export const lowerTraitDecl = (
       ? lowerExpr(method.defaultBody, ctx, scopes)
       : undefined;
 
+    const effectType = lowerTypeExpr(method.effectTypeExpr, ctx, methodScope);
     return {
       symbol: method.symbol,
       span: toSourceSpan(method.form ?? trait.form),
@@ -273,6 +282,7 @@ export const lowerTraitDecl = (
         ctx,
         methodScope
       ),
+      ...(effectType ? { effectType } : {}),
       defaultBody,
     };
   });
@@ -346,6 +356,64 @@ export const lowerImplDecl = (
       visibility: toExportVisibility(impl.visibility, ctx),
       span: toSourceSpan(impl.form),
       item: implId,
+    });
+  }
+};
+
+export const lowerEffectDecl = (
+  effect: BoundEffect,
+  ctx: LowerContext
+): void => {
+  const effectScope =
+    effect.scope ??
+    ctx.scopeByNode.get(effect.form?.syntaxId ?? effect.scope) ??
+    ctx.symbolTable.rootScope;
+
+  const operations = effect.operations.map((op) => {
+    const opScope =
+      ctx.scopeByNode.get(op.ast?.syntaxId ?? effectScope) ?? effectScope;
+    const parameters = op.parameters.map((param) => ({
+      symbol: param.symbol,
+      span: toSourceSpan(param.ast ?? op.ast ?? effect.form),
+      type: lowerTypeExpr(param.typeExpr, ctx, opScope),
+      mutable: false,
+      bindingKind: param.bindingKind,
+    }));
+    return {
+      symbol: op.symbol,
+      span: toSourceSpan(op.ast ?? effect.form),
+      resumable: op.resumable === "tail" ? "fn" : "ctl",
+      parameters,
+      returnType: lowerTypeExpr(op.returnTypeExpr, ctx, opScope),
+    };
+  });
+
+  const effectId = ctx.builder.addItem({
+    kind: "effect",
+    symbol: effect.symbol,
+    visibility: effect.visibility,
+    ast: (effect.form ?? effect.operations[0]?.ast)?.syntaxId ?? ctx.moduleNodeId,
+    span: toSourceSpan(effect.form),
+    operations,
+  });
+
+  if (isPackageVisible(effect.visibility)) {
+    ctx.builder.recordExport({
+      symbol: effect.symbol,
+      visibility: toExportVisibility(effect.visibility, ctx),
+      span: toSourceSpan(effect.form),
+      item: effectId,
+    });
+    operations.forEach((op) => {
+      ctx.builder.recordExport({
+        name: ctx.symbolTable.getSymbol(op.symbol).name,
+        symbol: op.symbol,
+        visibility: toExportVisibility(effect.visibility, ctx),
+        span: toSourceSpan(effect.form),
+        item: effectId,
+        memberOwner: effect.symbol,
+        isStatic: true,
+      });
     });
   }
 };

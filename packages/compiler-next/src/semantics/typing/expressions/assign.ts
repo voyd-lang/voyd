@@ -1,6 +1,7 @@
 import type { HirAssignExpr, HirPattern } from "../../hir/index.js";
 import type { HirExprId, SourceSpan, TypeId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
+import { composeEffectRows, getExprEffectRow } from "../effects.js";
 import {
   bindTuplePatternFromExpr,
   bindTuplePatternFromType,
@@ -19,7 +20,14 @@ export const typeAssignExpr = (
   state: TypingState
 ): TypeId => {
   if (expr.pattern) {
-    typeTupleAssignment(expr.pattern, expr.value, ctx, state, expr.span);
+    const effectRow = typeTupleAssignment(
+      expr.pattern,
+      expr.value,
+      ctx,
+      state,
+      expr.span
+    );
+    ctx.effects.setExprEffect(expr.id, effectRow);
     return ctx.primitives.void;
   }
 
@@ -51,6 +59,11 @@ export const typeAssignExpr = (
   const targetType = typeExpression(expr.target, ctx, state);
   const valueType = typeExpression(expr.value, ctx, state, targetType);
   ensureTypeMatches(valueType, targetType, ctx, state, "assignment target");
+  const effectRow = composeEffectRows(ctx.effects, [
+    getExprEffectRow(expr.target, ctx),
+    getExprEffectRow(expr.value, ctx),
+  ]);
+  ctx.effects.setExprEffect(expr.id, effectRow);
   return ctx.primitives.void;
 };
 
@@ -60,7 +73,7 @@ const typeTupleAssignment = (
   ctx: TypingContext,
   state: TypingState,
   assignmentSpan: SourceSpan
-): void => {
+): number => {
   if (pattern.kind !== "tuple") {
     throw new Error("tuple assignment requires a tuple pattern");
   }
@@ -91,7 +104,7 @@ const typeTupleAssignment = (
       "assign",
       assignmentSpan
     );
-    return;
+    return getExprEffectRow(valueExpr, ctx);
   }
   bindTuplePatternFromExpr(
     pattern,
@@ -101,4 +114,5 @@ const typeTupleAssignment = (
     "assign",
     assignmentSpan
   );
+  return getExprEffectRow(valueExpr, ctx);
 };

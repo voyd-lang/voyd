@@ -22,6 +22,7 @@ import { lowerFieldAccessExpr, isFieldAccessForm } from "./field-access.js";
 import { lowerIf } from "./if.js";
 import { lowerLambda } from "./lambda.js";
 import { lowerMatch } from "./match.js";
+import { lowerTry } from "./try.js";
 import {
   isObjectLiteralForm,
   lowerObjectLiteralExpr,
@@ -121,13 +122,17 @@ export const lowerExpr: LowerExprFn = (
       return lowerArrayLiteralExpr({ form: expr, ctx, scopes, lowerExpr });
     }
 
-    if (expr.calls("match")) {
-      return lowerMatch({ form: expr, ctx, scopes, lowerExpr });
-    }
+  if (expr.calls("match")) {
+    return lowerMatch({ form: expr, ctx, scopes, lowerExpr });
+  }
 
-    if (isFieldAccessForm(expr)) {
-      return lowerFieldAccessExpr({ form: expr, ctx, scopes, lowerExpr });
-    }
+  if (expr.calls("try")) {
+    return lowerTry({ form: expr, ctx, scopes, lowerExpr });
+  }
+
+  if (isFieldAccessForm(expr)) {
+    return lowerFieldAccessExpr({ form: expr, ctx, scopes, lowerExpr });
+  }
 
     if (expr.calls("::")) {
       return lowerStaticAccessExpr({ form: expr, ctx, scopes, lowerExpr });

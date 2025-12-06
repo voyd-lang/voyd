@@ -92,6 +92,8 @@ type DiagnosticParamsMap = {
   };
   TY0011: { kind: "return-type-mismatch"; functionName?: string };
   TY0012: { kind: "branch-type-mismatch"; context?: string };
+  TY0013: { kind: "unhandled-effects"; operations: string };
+  TY0014: { kind: "effect-annotation-mismatch"; message: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -280,6 +282,20 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0012"]>,
+  TY0013: {
+    code: "TY0013",
+    message: (params) =>
+      `unhandled effect operations: ${params.operations}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0013"]>,
+  TY0014: {
+    code: "TY0014",
+    message: (params) =>
+      `effect annotation mismatch: ${params.message}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0014"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

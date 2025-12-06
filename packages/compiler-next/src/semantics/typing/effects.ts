@@ -1,0 +1,170 @@
+import type {
+  EffectRowId,
+  HirTypeExpr,
+  HirNamedTypeExpr,
+  SymbolId,
+  NodeId,
+  SourceSpan,
+  HirExprId,
+} from "../ids.js";
+import type { TypingContext, TypingState } from "./types.js";
+import type { EffectTable } from "../effects/effect-table.js";
+import { emitDiagnostic } from "../../diagnostics/index.js";
+
+const pureEffectRow = (effects: EffectTable): EffectRowId => effects.emptyRow;
+
+export const freshOpenEffectRow = (
+  effects: EffectTable,
+  options?: { rigid?: boolean }
+): EffectRowId =>
+  effects.internRow({
+    operations: [],
+    tailVar: effects.freshTailVar({ rigid: options?.rigid }),
+  });
+
+export const composeEffectRows = (
+  effects: EffectTable,
+  rows: readonly EffectRowId[]
+): EffectRowId =>
+  rows.reduce((acc, row) => effects.compose(acc, row), pureEffectRow(effects));
+
+export const getExprEffectRow = (
+  expr: HirExprId,
+  ctx: TypingContext
+): EffectRowId => ctx.effects.getExprEffect(expr) ?? pureEffectRow(ctx.effects);
+
+export const effectOpName = (
+  symbol: SymbolId,
+  ctx: TypingContext
+): string => {
+  const record = ctx.symbolTable.getSymbol(symbol);
+  const ownerEffect = (record.metadata as { ownerEffect?: SymbolId } | undefined)
+    ?.ownerEffect;
+  const effectName =
+    typeof ownerEffect === "number"
+      ? ctx.symbolTable.getSymbol(ownerEffect).name
+      : undefined;
+    return effectName ? `${effectName}.${record.name}` : record.name;
+};
+
+const resolveNamedEffectRow = (
+  expr: HirNamedTypeExpr,
+  ctx: TypingContext
+): EffectRowId => {
+  if (typeof expr.symbol !== "number") {
+    return pureEffectRow(ctx.effects);
+  }
+
+  const record = ctx.symbolTable.getSymbol(expr.symbol);
+  if (record.kind === "effect") {
+    const decl = ctx.decls.getEffect(expr.symbol);
+    const ops =
+      decl?.operations.map((op) => ({
+        name: `${record.name}.${op.name}`,
+      })) ?? [];
+    return ctx.effects.internRow({ operations: ops });
+  }
+
+  if (record.kind === "effect-op") {
+    return ctx.effects.internRow({
+      operations: [{ name: effectOpName(expr.symbol, ctx) }],
+    });
+  }
+
+  return freshOpenEffectRow(ctx.effects);
+};
+
+const resolveEffectRowFromExpr = (
+  effectType: HirTypeExpr,
+  ctx: TypingContext,
+  state: TypingState
+): EffectRowId => {
+  switch (effectType.typeKind) {
+    case "named":
+      return resolveNamedEffectRow(effectType, ctx);
+    case "tuple":
+      return composeEffectRows(
+        ctx.effects,
+        effectType.elements.map((element) =>
+          resolveEffectRowFromExpr(element, ctx, state)
+        )
+      );
+    case "union":
+      return composeEffectRows(
+        ctx.effects,
+        effectType.members.map((member) =>
+          resolveEffectRowFromExpr(member, ctx, state)
+        )
+      );
+    case "intersection":
+      return composeEffectRows(
+        ctx.effects,
+        effectType.members.map((member) =>
+          resolveEffectRowFromExpr(member, ctx, state)
+        )
+      );
+    case "function":
+      return typeof effectType.effectType !== "undefined"
+        ? resolveEffectRowFromExpr(effectType.effectType, ctx, state)
+        : freshOpenEffectRow(ctx.effects);
+    default:
+      return freshOpenEffectRow(ctx.effects);
+  }
+};
+
+export const resolveEffectAnnotation = (
+  effectType: HirTypeExpr | undefined,
+  ctx: TypingContext,
+  state: TypingState
+): EffectRowId | undefined =>
+  effectType ? resolveEffectRowFromExpr(effectType, ctx, state) : undefined;
+
+export const ensureEffectCompatibility = ({
+  inferred,
+  annotated,
+  ctx,
+  span,
+  location,
+  reason,
+}: {
+  inferred: EffectRowId;
+  annotated: EffectRowId;
+  ctx: TypingContext;
+  span: SourceSpan;
+  location: NodeId;
+  reason: string;
+}): boolean => {
+  const forward = ctx.effects.constrain(inferred, annotated, {
+    location,
+    reason,
+  });
+  if (!forward.ok) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0014",
+      params: {
+        kind: "effect-annotation-mismatch",
+        message: forward.conflict.message,
+      },
+      span,
+    });
+    return false;
+  }
+  const backward = ctx.effects.constrain(annotated, inferred, {
+    location,
+    reason,
+  });
+  if (!backward.ok) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0014",
+      params: {
+        kind: "effect-annotation-mismatch",
+        message: backward.conflict.message,
+      },
+      span,
+    });
+    return false;
+  }
+  return true;
+};
