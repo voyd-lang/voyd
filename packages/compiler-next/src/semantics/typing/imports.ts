@@ -17,21 +17,56 @@ import type {
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import type { HirNamedTypeExpr } from "../hir/index.js";
 import type {
+  EffectRowId,
   SymbolId,
   TypeId,
   TypeParamId,
   TypeSchemeId,
 } from "../ids.js";
 import type { ModuleExportEntry } from "../modules.js";
+import type { EffectTable } from "../effects/effect-table.js";
 
 type ImportTarget = { moduleId: string; symbol: SymbolId };
 
 type TranslationContext = {
   sourceArena: TypingContext["arena"];
   targetArena: TypingContext["arena"];
+  sourceEffects: EffectTable;
+  targetEffects: EffectTable;
   paramMap: Map<TypeParamId, TypeParamId>;
   cache: Map<TypeId, TypeId>;
   mapSymbol: (symbol: SymbolId) => SymbolId;
+};
+
+const translateEffectRow = ({
+  effectRow,
+  sourceEffects,
+  targetEffects,
+}: {
+  effectRow: EffectRowId;
+  sourceEffects: EffectTable;
+  targetEffects: EffectTable;
+}): EffectRowId => {
+  if (sourceEffects === targetEffects) {
+    return effectRow;
+  }
+  if (effectRow === sourceEffects.emptyRow) {
+    return targetEffects.emptyRow;
+  }
+  if (effectRow === sourceEffects.unknownRow) {
+    return targetEffects.unknownRow;
+  }
+  const desc = sourceEffects.getRow(effectRow);
+  const tailVar = desc.tailVar
+    ? targetEffects.freshTailVar({ rigid: desc.tailVar.rigid })
+    : undefined;
+  return targetEffects.internRow({
+    operations: desc.operations.map((op) => ({
+      name: op.name,
+      ...(typeof op.region === "number" ? { region: op.region } : {}),
+    })),
+    tailVar,
+  });
 };
 
 export const importTargetFor = (
@@ -110,6 +145,8 @@ export const resolveImportedValue = ({
   const translation = createTranslation({
     sourceArena: dependency.typing.arena,
     targetArena: ctx.arena,
+    sourceEffects: dependency.typing.effects,
+    targetEffects: ctx.effects,
     paramMap,
     cache,
     mapSymbol: (owner) =>
@@ -213,6 +250,8 @@ export const resolveImportedTypeExpr = ({
   const forward = createTranslation({
     sourceArena: ctx.arena,
     targetArena: depCtx.arena,
+    sourceEffects: ctx.effects,
+    targetEffects: depCtx.effects,
     paramMap: new Map(),
     cache: new Map(),
     mapSymbol: (owner) =>
@@ -221,6 +260,8 @@ export const resolveImportedTypeExpr = ({
   const back = createTranslation({
     sourceArena: depCtx.arena,
     targetArena: ctx.arena,
+    sourceEffects: depCtx.effects,
+    targetEffects: ctx.effects,
     paramMap: new Map(),
     cache: new Map(),
     mapSymbol: (owner) =>
@@ -317,7 +358,11 @@ const translateFunctionSignature = ({
       returnType,
       hasExplicitReturn: signature.hasExplicitReturn,
       annotatedReturn: signature.annotatedReturn ?? false,
-      effectRow: signature.effectRow,
+      effectRow: translateEffectRow({
+        effectRow: signature.effectRow,
+        sourceEffects: dependency.typing.effects,
+        targetEffects: ctx.effects,
+      }),
       annotatedEffects: signature.annotatedEffects ?? false,
       typeParams: params,
       scheme,
@@ -329,6 +374,8 @@ const translateFunctionSignature = ({
 const createTranslation = ({
   sourceArena,
   targetArena,
+  sourceEffects,
+  targetEffects,
   paramMap,
   cache,
   mapSymbol,
@@ -401,7 +448,11 @@ const createTranslation = ({
         result = targetArena.internFunction({
           parameters,
           returnType: translate(desc.returnType),
-          effectRow: desc.effectRow,
+          effectRow: translateEffectRow({
+            effectRow: desc.effectRow,
+            sourceEffects,
+            targetEffects,
+          }),
         });
         break;
       }
@@ -484,6 +535,8 @@ export const registerImportedObjectTemplate = ({
   const translation = createTranslation({
     sourceArena: dependency.typing.arena,
     targetArena: ctx.arena,
+    sourceEffects: dependency.typing.effects,
+    targetEffects: ctx.effects,
     paramMap: typeParamMap,
     cache,
     mapSymbol: mapOwner,
@@ -653,8 +706,10 @@ const makeDependencyContext = (
   importAliasesByModule: new Map(),
   arena: dependency.typing.arena,
   table: dependency.typing.table,
+  effects: dependency.typing.effects,
   resolvedExprTypes: new Map(dependency.typing.resolvedExprTypes),
   valueTypes: new Map(dependency.typing.valueTypes),
+  tailResumptions: new Map(dependency.typing.tailResumptions),
   callResolution: {
     targets: new Map(
       Array.from(dependency.typing.callTargets.entries()).map(

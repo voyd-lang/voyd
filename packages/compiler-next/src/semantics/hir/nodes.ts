@@ -544,6 +544,7 @@ export interface HirEffectHandlerClause {
   tailResumption?: {
     enforcement: "static" | "runtime";
     calls: number;
+    minCalls?: number;
     escapes: boolean;
   };
 }

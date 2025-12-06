@@ -56,6 +56,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     intrinsicTypes: ctx.intrinsicTypes,
     resolvedExprTypes: new Map(ctx.resolvedExprTypes),
     valueTypes: new Map(ctx.valueTypes),
+    tailResumptions: new Map(ctx.tailResumptions),
     objectsByNominal: ctx.objects.snapshotByNominal(),
     callTargets: new Map(
       Array.from(ctx.callResolution.targets.entries()).map(([callId, targets]) => [

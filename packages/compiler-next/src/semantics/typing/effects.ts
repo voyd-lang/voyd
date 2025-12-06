@@ -51,13 +51,17 @@ const resolveNamedEffectRow = (
   expr: HirNamedTypeExpr,
   ctx: TypingContext
 ): EffectRowId => {
-  if (typeof expr.symbol !== "number") {
+  const symbol =
+    typeof expr.symbol === "number"
+      ? expr.symbol
+      : ctx.symbolTable.resolve(expr.path[0] ?? "", ctx.symbolTable.rootScope);
+  if (typeof symbol !== "number") {
     return pureEffectRow(ctx.effects);
   }
 
-  const record = ctx.symbolTable.getSymbol(expr.symbol);
+  const record = ctx.symbolTable.getSymbol(symbol);
   if (record.kind === "effect") {
-    const decl = ctx.decls.getEffect(expr.symbol);
+    const decl = ctx.decls.getEffect(symbol);
     const ops =
       decl?.operations.map((op) => ({
         name: `${record.name}.${op.name}`,
@@ -67,7 +71,7 @@ const resolveNamedEffectRow = (
 
   if (record.kind === "effect-op") {
     return ctx.effects.internRow({
-      operations: [{ name: effectOpName(expr.symbol, ctx) }],
+      operations: [{ name: effectOpName(symbol, ctx) }],
     });
   }
 

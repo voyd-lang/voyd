@@ -58,6 +58,7 @@ export interface TypingResult {
   effects: EffectTable;
   resolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
+  tailResumptions: ReadonlyMap<HirExprId, HirEffectHandlerClause["tailResumption"]>;
   objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
   callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolId>>;
   functionInstances: ReadonlyMap<string, TypeId>;
@@ -514,6 +515,7 @@ export interface TypingContext {
   effects: EffectTable;
   resolvedExprTypes: Map<HirExprId, TypeId>;
   valueTypes: Map<SymbolId, TypeId>;
+  tailResumptions: Map<HirExprId, HirEffectHandlerClause["tailResumption"]>;
   callResolution: CallResolution;
   functions: FunctionStore;
   objects: ObjectStore;

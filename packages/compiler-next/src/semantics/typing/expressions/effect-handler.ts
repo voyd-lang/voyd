@@ -98,12 +98,27 @@ const findEffectOperationDecl = (
   return undefined;
 };
 
-type ContinuationUsage = { count: number; escapes: boolean };
+type ContinuationUsage = { min: number; max: number; escapes: boolean };
 
 const mergeUsage = (left: ContinuationUsage, right: ContinuationUsage): ContinuationUsage => ({
-  count: left.count + right.count,
+  min: left.min + right.min,
+  max: left.max + right.max,
   escapes: left.escapes || right.escapes,
 });
+
+const mergeBranches = (branches: ContinuationUsage[]): ContinuationUsage => {
+  if (branches.length === 0) {
+    return { min: 0, max: 0, escapes: false };
+  }
+  return branches.reduce(
+    (acc, branch) => ({
+      min: Math.min(acc.min, branch.min),
+      max: Math.max(acc.max, branch.max),
+      escapes: acc.escapes || branch.escapes,
+    }),
+    { min: Number.POSITIVE_INFINITY, max: 0, escapes: false }
+  );
+};
 
 const analyzeContinuationUsage = ({
   exprId,
@@ -125,21 +140,21 @@ const analyzeContinuationUsage = ({
     switch (expr.exprKind) {
       case "identifier":
         return expr.symbol === targetSymbol
-          ? { count: 0, escapes: true }
-          : { count: 0, escapes: false };
+          ? { min: 0, max: 0, escapes: true }
+          : { min: 0, max: 0, escapes: false };
       case "literal":
       case "overload-set":
       case "continue":
-        return { count: 0, escapes: false };
+        return { min: 0, max: 0, escapes: false };
       case "break":
         return typeof expr.value === "number"
           ? visitExpression(expr.value, inNestedLambda)
-          : { count: 0, escapes: false };
+          : { min: 0, max: 0, escapes: false };
       case "call": {
         const callee = ctx.hir.expressions.get(expr.callee);
         let usage =
           callee?.exprKind === "identifier" && callee.symbol === targetSymbol
-            ? { count: 1, escapes: Boolean(inNestedLambda) }
+            ? { min: 1, max: 1, escapes: Boolean(inNestedLambda) }
             : visitExpression(expr.callee, inNestedLambda);
         expr.args.forEach((arg) => {
           usage = mergeUsage(usage, visitExpression(arg.expr, inNestedLambda));
@@ -149,7 +164,7 @@ const analyzeContinuationUsage = ({
       case "block": {
         let usage = expr.statements.reduce(
           (acc, stmtId) => mergeUsage(acc, visitStatement(stmtId, inNestedLambda)),
-          { count: 0, escapes: false }
+          { min: 0, max: 0, escapes: false }
         );
         if (typeof expr.value === "number") {
           usage = mergeUsage(usage, visitExpression(expr.value, inNestedLambda));
@@ -159,41 +174,57 @@ const analyzeContinuationUsage = ({
       case "tuple":
         return expr.elements.reduce(
           (acc, entry) => mergeUsage(acc, visitExpression(entry, inNestedLambda)),
-          { count: 0, escapes: false }
+          { min: 0, max: 0, escapes: false }
         );
       case "loop":
-        return visitExpression(expr.body, inNestedLambda);
+        const loopUsage = analyzeContinuationUsage({
+          exprId: expr.body,
+          targetSymbol,
+          ctx,
+          nested: inNestedLambda,
+        });
+        return {
+          min: 0,
+          max: loopUsage.max > 0 ? Number.POSITIVE_INFINITY : 0,
+          escapes: loopUsage.escapes,
+        };
       case "while":
-        return mergeUsage(
-          visitExpression(expr.condition, inNestedLambda),
-          visitExpression(expr.body, inNestedLambda)
-        );
+        const whileBody = analyzeContinuationUsage({
+          exprId: expr.body,
+          targetSymbol,
+          ctx,
+          nested: inNestedLambda,
+        });
+        return mergeUsage(visitExpression(expr.condition, inNestedLambda), {
+          min: 0,
+          max: whileBody.max > 0 ? Number.POSITIVE_INFINITY : 0,
+          escapes: whileBody.escapes,
+        });
       case "cond":
       case "if": {
-        let usage =
+        const branchUsages = expr.branches.map((branch) =>
+          mergeUsage(
+            visitExpression(branch.condition, inNestedLambda),
+            visitExpression(branch.value, inNestedLambda)
+          )
+        );
+        const defaultUsage =
           typeof expr.defaultBranch === "number"
             ? visitExpression(expr.defaultBranch, inNestedLambda)
-            : { count: 0, escapes: false };
-        expr.branches.forEach((branch) => {
-          usage = mergeUsage(
-            usage,
-            mergeUsage(
-              visitExpression(branch.condition, inNestedLambda),
-              visitExpression(branch.value, inNestedLambda)
-            )
-          );
-        });
-        return usage;
+            : { min: 0, max: 0, escapes: false };
+        return mergeBranches([...branchUsages, defaultUsage]);
       }
       case "match": {
         let usage = visitExpression(expr.discriminant, inNestedLambda);
-        expr.arms.forEach((arm) => {
-          if (typeof arm.guard === "number") {
-            usage = mergeUsage(usage, visitExpression(arm.guard, inNestedLambda));
-          }
-          usage = mergeUsage(usage, visitExpression(arm.value, inNestedLambda));
+        const armUsages = expr.arms.map((arm) => {
+          let armUsage =
+            typeof arm.guard === "number"
+              ? visitExpression(arm.guard, inNestedLambda)
+              : { min: 0, max: 0, escapes: false };
+          armUsage = mergeUsage(armUsage, visitExpression(arm.value, inNestedLambda));
+          return armUsage;
         });
-        return usage;
+        return mergeUsage(usage, mergeBranches(armUsages));
       }
       case "effect-handler": {
         let usage = visitExpression(expr.body, inNestedLambda);
@@ -208,7 +239,7 @@ const analyzeContinuationUsage = ({
       case "object-literal":
         return expr.entries.reduce(
           (acc, entry) => mergeUsage(acc, visitExpression(entry.value, inNestedLambda)),
-          { count: 0, escapes: false }
+          { min: 0, max: 0, escapes: false }
         );
       case "field-access":
         return visitExpression(expr.target, inNestedLambda);
@@ -216,18 +247,18 @@ const analyzeContinuationUsage = ({
         const targetUsage =
           typeof expr.target === "number"
             ? visitExpression(expr.target, inNestedLambda)
-            : { count: 0, escapes: false };
+            : { min: 0, max: 0, escapes: false };
         return mergeUsage(targetUsage, visitExpression(expr.value, inNestedLambda));
       }
       case "lambda": {
         const inner = visitExpression(expr.body, true);
-        return inner.count > 0 || inner.escapes
-          ? { count: inner.count, escapes: true }
+        return inner.min > 0 || inner.max > 0 || inner.escapes
+          ? { min: inner.min, max: inner.max, escapes: true }
           : inner;
       }
     }
 
-    return { count: 0, escapes: false };
+    return { min: 0, max: 0, escapes: false };
   };
 
   const visitStatement = (id: number, inNestedLambda: boolean): ContinuationUsage => {
@@ -243,10 +274,10 @@ const analyzeContinuationUsage = ({
       case "return":
         return typeof stmt.value === "number"
           ? visitExpression(stmt.value, inNestedLambda)
-          : { count: 0, escapes: false };
+          : { min: 0, max: 0, escapes: false };
     }
 
-    return { count: 0, escapes: false };
+    return { min: 0, max: 0, escapes: false };
   };
 
   return visitExpression(exprId, Boolean(nested));
@@ -275,24 +306,32 @@ const enforceTailResumption = ({
           targetSymbol: continuationSymbol,
           ctx,
         })
-      : { count: 0, escapes: false };
+      : { min: 0, max: 0, escapes: false };
+
+  const staticallyExactOnce =
+    !usage.escapes && usage.min === 1 && usage.max === 1;
+  const definitelyMissing = !usage.escapes && usage.min === 0 && usage.max === 0;
+  const definitelyMultiple = !usage.escapes && usage.min > 1 && usage.max > 1;
+  const enforcement: "static" | "runtime" =
+    usage.escapes || !staticallyExactOnce ? "runtime" : "static";
 
   clause.tailResumption = {
-    enforcement: usage.escapes ? "runtime" : "static",
-    calls: usage.count,
+    enforcement,
+    calls: usage.max,
+    minCalls: usage.min,
     escapes: usage.escapes,
   };
 
-  const hasStaticViolation =
-    usage.count > 1 || (!usage.escapes && usage.count !== 1);
-  if (hasStaticViolation) {
+  ctx.tailResumptions.set(clause.body, clause.tailResumption);
+
+  if (definitelyMissing || definitelyMultiple) {
     emitDiagnostic({
       ctx,
       code: "TY0015",
       params: {
         kind: "tail-resume-count",
         operation: opName,
-        count: usage.count,
+        count: usage.max,
       },
       span,
     });

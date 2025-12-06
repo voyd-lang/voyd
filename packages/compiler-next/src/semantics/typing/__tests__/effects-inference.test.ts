@@ -239,6 +239,39 @@ fn main()
     expect(clause?.tailResumption?.escapes).toBe(true);
   });
 
+  it("falls back to runtime enforcement for uncertain control flow", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> i32
+
+fn maybe(x: bool)
+  try
+    Async::await()
+  Async::await(tail):
+    if x then:
+      tail(1)
+    else:
+      1
+`,
+      "effects.voyd"
+    );
+
+    const { hir, typing } = semanticsPipeline(ast);
+    const handler = findEffectHandler(hir);
+    expect(handler).toBeDefined();
+    if (!handler || handler.exprKind !== "effect-handler") return;
+    const clause = handler.handlers[0];
+    const metadata = clause?.tailResumption;
+    expect(metadata?.enforcement).toBe("runtime");
+    expect(metadata?.escapes).toBe(false);
+    expect(metadata?.calls).toBe(1);
+
+    const recorded = typing.tailResumptions.get(clause.body);
+    expect(recorded?.enforcement).toBe("runtime");
+    expect(recorded?.minCalls).toBe(0);
+  });
+
   it("allows resumable handlers to call resume()", () => {
     const ast = parse(
       `

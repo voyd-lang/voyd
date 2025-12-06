@@ -95,6 +95,8 @@ type DiagnosticParamsMap = {
   TY0013: { kind: "unhandled-effects"; operations: string };
   TY0014: { kind: "effect-annotation-mismatch"; message: string };
   TY0015: { kind: "tail-resume-count"; operation: string; count: number };
+  TY0016: { kind: "pkg-effect-annotation"; functionName: string };
+  TY0017: { kind: "effectful-main"; effects: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -304,6 +306,20 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0015"]>,
+  TY0016: {
+    code: "TY0016",
+    message: (params) =>
+      `exported function ${params.functionName} must declare an effect row in pkg.voyd (use () when pure)`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0016"]>,
+  TY0017: {
+    code: "TY0017",
+    message: (params) =>
+      `pub fn main must be pure ('()'); found effects: ${params.effects}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0017"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
