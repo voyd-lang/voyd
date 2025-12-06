@@ -102,6 +102,22 @@ describe("next codegen", () => {
     expect(main()).toBe(55);
   });
 
+  it("handles functions declared with `=` syntax and calls them", () => {
+    const instance = loadWasmInstance("function_equals_syntax.voyd");
+
+    const t1Call = instance.exports.t1_call;
+    expect(typeof t1Call).toBe("function");
+    expect((t1Call as () => number)()).toBe(1);
+
+    const t2Call = instance.exports.t2_call;
+    expect(typeof t2Call).toBe("function");
+    expect((t2Call as () => number)()).toBe(2);
+
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(3);
+  });
+
   it("uses return_call for tail-recursive functions", () => {
     const ast = loadAst("tail_fib.voyd");
     const semantics = semanticsPipeline(ast);
