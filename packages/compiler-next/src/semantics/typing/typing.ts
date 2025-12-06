@@ -50,6 +50,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     objects: ctx.objects,
     traits: ctx.traits,
     primitives: ctx.primitives,
+    effects: ctx.effects,
     intrinsicTypes: ctx.intrinsicTypes,
     resolvedExprTypes: new Map(ctx.resolvedExprTypes),
     valueTypes: new Map(ctx.valueTypes),

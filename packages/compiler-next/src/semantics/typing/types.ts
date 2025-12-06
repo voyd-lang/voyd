@@ -20,6 +20,7 @@ import type {
   TypeSchemeId,
   SourceSpan,
 } from "../ids.js";
+import type { EffectTable } from "../effects/effect-table.js";
 import { DeclTable } from "../decls.js";
 import type { StructuralField, TypeArena } from "./type-arena.js";
 import type { TypeTable } from "./type-table.js";
@@ -33,6 +34,7 @@ export interface TypingInputs {
   hir: HirGraph;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
   decls?: DeclTable;
+  effects?: EffectTable;
   imports?: readonly {
     local: SymbolId;
     target?: { moduleId: string; symbol: SymbolId };
@@ -53,6 +55,7 @@ export interface TypingResult {
   memberMetadata: ReadonlyMap<SymbolId, MemberMetadata>;
   primitives: PrimitiveTypes;
   intrinsicTypes: Map<string, TypeId>;
+  effects: EffectTable;
   resolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
   objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
@@ -506,6 +509,7 @@ export interface TypingContext {
   importAliasesByModule: Map<string, Map<SymbolId, SymbolId>>;
   arena: TypeArena;
   table: TypeTable;
+  effects: EffectTable;
   resolvedExprTypes: Map<HirExprId, TypeId>;
   valueTypes: Map<SymbolId, TypeId>;
   callResolution: CallResolution;
