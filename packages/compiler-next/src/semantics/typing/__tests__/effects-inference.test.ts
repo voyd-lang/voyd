@@ -233,6 +233,35 @@ fn reraises()
     ]);
   });
 
+  it("reports unhandled effects even when another clause re-raises", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(resume) -> i32
+
+eff Log
+  fn write(resume, msg: i32) -> void
+
+fn mixed()
+  try
+    Async::await()
+    Log::write(1)
+  Async::await(resume):
+    Async::await()
+`,
+      "effects.voyd"
+    );
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught && (caught as any).diagnostic?.code).toBe("TY0013");
+  });
+
   it("propagates callback effects", () => {
     const ast = parse(
       `

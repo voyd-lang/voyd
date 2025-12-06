@@ -268,7 +268,7 @@ export const typeEffectHandlerExpr = (
 
   const handlerEffects: number[] = [];
   let remainingRow = bodyEffectRow;
-  let reRaised = false;
+  const reRaisedOps = new Set<string>();
 
   expr.handlers.forEach((clause) => {
     const opName = effectOpName(clause.operation, ctx);
@@ -276,8 +276,9 @@ export const typeEffectHandlerExpr = (
     handlerEffects.push(clauseEffectRow);
     const clauseDesc = ctx.effects.getRow(clauseEffectRow);
     const reRaises = clauseDesc.operations.some((op) => op.name === opName);
-    reRaised = reRaised || reRaises;
-    if (!reRaises) {
+    if (reRaises) {
+      reRaisedOps.add(opName);
+    } else {
       remainingRow = dropHandledOperation({ row: remainingRow, opName, ctx });
     }
     const clauseSpan =
@@ -300,8 +301,11 @@ export const typeEffectHandlerExpr = (
   }
 
   const remainingDesc = ctx.effects.getRow(remainingRow);
-  if (!reRaised && remainingDesc.operations.length > 0 && !remainingDesc.tailVar) {
-    const opList = remainingDesc.operations.map((op) => op.name).join(", ");
+  const unhandled = remainingDesc.operations.filter(
+    (op) => !reRaisedOps.has(op.name)
+  );
+  if (unhandled.length > 0 && !remainingDesc.tailVar) {
+    const opList = unhandled.map((op) => op.name).join(", ");
     emitDiagnostic({
       ctx,
       code: "TY0013",
