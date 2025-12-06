@@ -12,6 +12,7 @@ import {
   parseTypeAliasDecl,
   parseImplDecl,
   parseTraitDecl,
+  parseEffectDecl,
 } from "../parsing.js";
 import { bindFunctionDecl } from "./function.js";
 import { bindObjectDecl } from "./object.js";
@@ -20,6 +21,7 @@ import {
   bindTraitDecl,
 } from "./trait.js";
 import { bindImplDecl, flushPendingStaticMethods } from "./impl.js";
+import { bindEffectDecl } from "./effect.js";
 import type {
   BindingContext,
   BoundUseEntry,
@@ -98,6 +100,12 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     bindImplDecl(implDecl, ctx, tracker);
     continue;
   }
+
+    const effectDecl = parseEffectDecl(entry);
+    if (effectDecl) {
+      bindEffectDecl(effectDecl, ctx, tracker);
+      continue;
+    }
 
     throw new Error(
       "unsupported top-level form; expected a function or type declaration"

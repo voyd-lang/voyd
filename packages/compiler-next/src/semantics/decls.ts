@@ -10,6 +10,7 @@ import type {
   ObjectDeclId,
   TraitDeclId,
   ImplDeclId,
+  EffectDeclId,
 } from "./ids.js";
 import type { IdentifierAtom } from "../parser/ast/atom.js";
 import type { IntrinsicAttribute } from "../parser/attributes.js";
@@ -46,6 +47,7 @@ export interface FunctionDecl {
   params: ParameterDecl[];
   typeParameters?: TypeParameterDecl[];
   returnTypeExpr?: Expr;
+  effectTypeExpr?: Expr;
   body: Expr;
   memberVisibility?: HirVisibility;
   overloadSetId?: OverloadSetId;
@@ -105,6 +107,7 @@ export interface TraitMethodDecl {
   params: ParameterDecl[];
   typeParameters?: TypeParameterDecl[];
   returnTypeExpr?: Expr;
+  effectTypeExpr?: Expr;
   defaultBody?: Expr;
   intrinsic?: IntrinsicAttribute;
 }
@@ -148,12 +151,35 @@ export type ImplDeclInput = Omit<ImplDecl, "id" | "methods"> & {
   methods?: FunctionDecl[];
 };
 
+export interface EffectOperationDecl {
+  name: string;
+  symbol: SymbolId;
+  ast?: Syntax;
+  parameters: readonly ParameterDecl[];
+  resumable: "resume" | "tail";
+  returnTypeExpr?: Expr;
+}
+
+export interface EffectDecl {
+  id: EffectDeclId;
+  name: string;
+  form?: Form;
+  visibility: HirVisibility;
+  symbol: SymbolId;
+  scope: ScopeId;
+  operations: readonly EffectOperationDecl[];
+  moduleIndex: number;
+}
+
+export type EffectDeclInput = Omit<EffectDecl, "id"> & { id?: EffectDeclId };
+
 export class DeclTable {
   functions: FunctionDecl[] = [];
   typeAliases: TypeAliasDecl[] = [];
   objects: ObjectDecl[] = [];
   traits: TraitDecl[] = [];
   impls: ImplDecl[] = [];
+  effects: EffectDecl[] = [];
 
   private nextFunctionId: FunctionDeclId = 0;
   private nextParamId: ParameterDeclId = 0;
@@ -161,6 +187,7 @@ export class DeclTable {
   private nextObjectId: ObjectDeclId = 0;
   private nextTraitId: TraitDeclId = 0;
   private nextImplId: ImplDeclId = 0;
+  private nextEffectId: EffectDeclId = 0;
 
   private functionsBySymbol = new Map<SymbolId, FunctionDecl>();
   private functionsById = new Map<FunctionDeclId, FunctionDecl>();
@@ -174,6 +201,8 @@ export class DeclTable {
   private traitsById = new Map<TraitDeclId, TraitDecl>();
   private implsBySymbol = new Map<SymbolId, ImplDecl>();
   private implsById = new Map<ImplDeclId, ImplDecl>();
+  private effectsBySymbol = new Map<SymbolId, EffectDecl>();
+  private effectsById = new Map<EffectDeclId, EffectDecl>();
 
   private bumpId(next: number, used: number): number {
     return Math.max(next, used + 1);
@@ -278,6 +307,33 @@ export class DeclTable {
     return withId;
   }
 
+  registerEffect(effect: EffectDeclInput): EffectDecl {
+    const operations = effect.operations.map((op) => ({
+      ...op,
+      parameters: op.parameters.map((param) => {
+        const withId: ParameterDecl = {
+          ...param,
+          id: param.id ?? this.nextParamId++,
+        };
+        this.nextParamId = this.bumpId(this.nextParamId, withId.id);
+        this.parametersBySymbol.set(withId.symbol, withId);
+        this.parametersById.set(withId.id, withId);
+        return withId;
+      }),
+    }));
+
+    const withId: EffectDecl = {
+      ...effect,
+      operations,
+      id: effect.id ?? this.nextEffectId++,
+    };
+    this.nextEffectId = this.bumpId(this.nextEffectId, withId.id);
+    this.effects.push(withId);
+    this.effectsBySymbol.set(withId.symbol, withId);
+    this.effectsById.set(withId.id, withId);
+    return withId;
+  }
+
   getFunction(symbol: SymbolId): FunctionDecl | undefined {
     return this.functionsBySymbol.get(symbol);
   }
@@ -324,5 +380,13 @@ export class DeclTable {
 
   getImplById(id: ImplDeclId): ImplDecl | undefined {
     return this.implsById.get(id);
+  }
+
+  getEffect(symbol: SymbolId): EffectDecl | undefined {
+    return this.effectsBySymbol.get(symbol);
+  }
+
+  getEffectById(id: EffectDeclId): EffectDecl | undefined {
+    return this.effectsById.get(id);
   }
 }

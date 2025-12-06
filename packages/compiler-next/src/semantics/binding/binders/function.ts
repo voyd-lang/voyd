@@ -76,6 +76,7 @@ export const bindFunctionDecl = (
     params: boundParams,
     typeParameters,
     returnTypeExpr: decl.signature.returnType,
+    effectTypeExpr: decl.signature.effectType,
     body: decl.body,
     moduleIndex: options.moduleIndex ?? ctx.nextModuleIndex++,
     implId: undefined,

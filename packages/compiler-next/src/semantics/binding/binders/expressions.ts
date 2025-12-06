@@ -49,6 +49,11 @@ export const bindExpr = (
     return;
   }
 
+  if (expr.calls("try")) {
+    bindTry(expr, ctx, tracker);
+    return;
+  }
+
   if (expr.calls("if")) {
     bindIf(expr, ctx, tracker);
     return;
@@ -81,6 +86,76 @@ export const bindExpr = (
   for (const child of expr.toArray()) {
     bindExpr(child, ctx, tracker);
   }
+};
+
+const bindTry = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  const body = form.at(1);
+  if (body) {
+    bindExpr(body, ctx, tracker);
+  }
+
+  const handlerEntries = form.rest.slice(2);
+  handlerEntries.forEach((entry) => {
+    if (!isForm(entry) || !entry.calls(":")) {
+      bindExpr(entry, ctx, tracker);
+      return;
+    }
+    const clauseScope = ctx.symbolTable.createScope({
+      parent: tracker.current(),
+      kind: "block",
+      owner: entry.syntaxId,
+    });
+    ctx.scopeByNode.set(entry.syntaxId, clauseScope);
+
+    const head = entry.at(1);
+    const handlerBody = entry.at(2);
+
+    tracker.enterScope(clauseScope, () => {
+      declareHandlerParams(head, ctx, clauseScope);
+      bindExpr(handlerBody, ctx, tracker);
+    });
+  });
+};
+
+const declareHandlerParams = (
+  head: Expr | undefined,
+  ctx: BindingContext,
+  scope: number
+): void => {
+  if (!head || (!isForm(head) && !isIdentifierAtom(head))) {
+    return;
+  }
+  const params = extractHandlerParams(head);
+  params.forEach((param) => {
+    if (!param || (!isIdentifierAtom(param) && !isInternalIdentifierAtom(param))) {
+      return;
+    }
+    const symbol = ctx.symbolTable.declare(
+      {
+        name: param.value,
+        kind: "parameter",
+        declaredAt: param.syntaxId,
+      },
+      scope
+    );
+    ctx.scopeByNode.set(param.syntaxId, scope);
+    rememberSyntax(param, ctx);
+  });
+};
+
+const extractHandlerParams = (head: Expr): readonly (IdentifierAtom | InternalIdentifierAtom | Expr)[] => {
+  if (isForm(head) && head.calls("::")) {
+    const opCall = head.at(2);
+    return isForm(opCall) ? opCall.rest : [];
+  }
+  if (isForm(head)) {
+    return head.rest;
+  }
+  return [];
 };
 
 const bindBlock = (

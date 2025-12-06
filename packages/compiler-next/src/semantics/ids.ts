@@ -13,6 +13,7 @@ export type TypeAliasDeclId = number;
 export type ObjectDeclId = number;
 export type TraitDeclId = number;
 export type ImplDeclId = number;
+export type EffectDeclId = number;
 
 export type HirId = number;
 export type HirItemId = HirId;
