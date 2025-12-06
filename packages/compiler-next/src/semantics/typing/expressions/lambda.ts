@@ -284,7 +284,7 @@ export const typeLambdaExpr = (
       optional: false,
     })),
     returnType: finalReturn,
-    effects: ctx.primitives.defaultEffectRow,
+    effectRow: ctx.primitives.defaultEffectRow,
   });
 };
 

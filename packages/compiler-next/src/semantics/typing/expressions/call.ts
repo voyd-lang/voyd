@@ -146,7 +146,7 @@ export const typeCallExpr = (
             optional: false,
           })),
           returnType,
-          effects: ctx.primitives.defaultEffectRow,
+          effectRow: ctx.primitives.defaultEffectRow,
         });
       ctx.table.setExprType(calleeExpr.id, calleeType);
       ctx.resolvedExprTypes.set(
@@ -180,7 +180,7 @@ export const typeCallExpr = (
               optional: false,
             })),
             returnType: intrinsicReturn,
-            effects: ctx.primitives.defaultEffectRow,
+            effectRow: ctx.primitives.defaultEffectRow,
           });
         })()
       : signature ||
@@ -336,7 +336,7 @@ const expectedCalleeType = (args: readonly Arg[], ctx: TypingContext): TypeId =>
       optional: false,
     })),
     returnType: ctx.primitives.unknown,
-    effects: ctx.primitives.defaultEffectRow,
+    effectRow: ctx.primitives.defaultEffectRow,
   });
 
 const resolveTypeArguments = (
@@ -626,7 +626,7 @@ const typeFunctionCall = ({
         optional: false,
       })),
       returnType: instantiation.returnType,
-      effects: ctx.primitives.defaultEffectRow,
+      effectRow: ctx.primitives.defaultEffectRow,
     });
     ctx.table.setExprType(calleeExprId, calleeType);
     ctx.resolvedExprTypes.set(
@@ -1098,9 +1098,9 @@ const resolveTraitDispatchOverload = ({
     }) ?? candidate.signature.parameters;
 
   const signatureDesc = ctx.arena.get(candidate.signature.typeId);
-  const effects =
+  const effectRow =
     signatureDesc.kind === "function"
-      ? signatureDesc.effects
+      ? signatureDesc.effectRow
       : ctx.primitives.defaultEffectRow;
   const adjustedType = ctx.arena.internFunction({
     parameters: params.map((param) => ({
@@ -1109,7 +1109,7 @@ const resolveTraitDispatchOverload = ({
       optional: false,
     })),
     returnType: candidate.signature.returnType,
-    effects,
+    effectRow,
   });
 
   return {
@@ -1117,7 +1117,12 @@ const resolveTraitDispatchOverload = ({
     signature:
       params === candidate.signature.parameters
         ? candidate.signature
-        : { ...candidate.signature, parameters: params, typeId: adjustedType },
+        : {
+            ...candidate.signature,
+            parameters: params,
+            typeId: adjustedType,
+            effectRow,
+          },
   };
 };
 

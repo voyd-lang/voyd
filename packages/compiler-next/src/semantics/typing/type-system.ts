@@ -843,7 +843,7 @@ const resolveFunctionTypeExpr = (
   return ctx.arena.internFunction({
     parameters: parameters.map((type) => ({ type, optional: false })),
     returnType,
-    effects: ctx.primitives.defaultEffectRow,
+    effectRow: ctx.primitives.defaultEffectRow,
   });
 };
 

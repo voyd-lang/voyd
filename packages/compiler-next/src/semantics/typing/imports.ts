@@ -317,6 +317,8 @@ const translateFunctionSignature = ({
       returnType,
       hasExplicitReturn: signature.hasExplicitReturn,
       annotatedReturn: signature.annotatedReturn ?? false,
+      effectRow: signature.effectRow,
+      annotatedEffects: signature.annotatedEffects ?? false,
       typeParams: params,
       scheme,
       typeParamMap: signature.typeParamMap,
@@ -399,7 +401,7 @@ const createTranslation = ({
         result = targetArena.internFunction({
           parameters,
           returnType: translate(desc.returnType),
-          effects: desc.effects,
+          effectRow: desc.effectRow,
         });
         break;
       }

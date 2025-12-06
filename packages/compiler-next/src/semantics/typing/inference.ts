@@ -142,7 +142,7 @@ const finalizeFunctionReturnType = (
       optional: false,
     })),
     returnType: inferred,
-    effects: ctx.primitives.defaultEffectRow,
+    effectRow: signature.effectRow ?? ctx.primitives.defaultEffectRow,
   });
   signature.typeId = functionType;
   ctx.valueTypes.set(fn.symbol, functionType);

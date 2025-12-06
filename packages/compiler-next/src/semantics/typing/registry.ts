@@ -255,7 +255,7 @@ export const registerFunctionSignatures = (
         optional: false,
       })),
       returnType: declaredReturn,
-      effects: ctx.primitives.defaultEffectRow,
+      effectRow: ctx.primitives.defaultEffectRow,
     });
 
     const scheme = ctx.arena.newScheme(
@@ -269,6 +269,8 @@ export const registerFunctionSignatures = (
       returnType: declaredReturn,
       hasExplicitReturn,
       annotatedReturn: hasExplicitReturn,
+      effectRow: ctx.primitives.defaultEffectRow,
+      annotatedEffects: false,
       typeParams,
       scheme,
       typeParamMap:

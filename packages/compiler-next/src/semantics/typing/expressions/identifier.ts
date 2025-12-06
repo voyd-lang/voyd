@@ -37,7 +37,7 @@ export const getValueType = (symbol: SymbolId, ctx: TypingContext): TypeId => {
           optional: false,
         })),
         returnType: signature.returnType,
-        effects: ctx.primitives.defaultEffectRow,
+        effectRow: signature.effectRow ?? ctx.primitives.defaultEffectRow,
       });
     ctx.valueTypes.set(symbol, functionType);
     if (!ctx.table.getSymbolScheme(symbol)) {

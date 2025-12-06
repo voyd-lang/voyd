@@ -89,6 +89,8 @@ export interface FunctionSignature {
   returnType: TypeId;
   hasExplicitReturn: boolean;
   annotatedReturn: boolean;
+  effectRow: EffectRowId;
+  annotatedEffects: boolean;
   typeParams?: readonly FunctionTypeParam[];
   scheme: TypeSchemeId;
   typeParamMap?: ReadonlyMap<SymbolId, TypeId>;

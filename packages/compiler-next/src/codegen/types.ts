@@ -45,12 +45,12 @@ const closureSignatureKey = ({
   moduleId,
   parameters,
   returnType,
-  effects,
+  effectRow,
 }: {
   moduleId: string;
   parameters: ReadonlyArray<{ type: TypeId; label?: string; optional?: boolean }>;
   returnType: TypeId;
-  effects: unknown;
+  effectRow: unknown;
 }): string => {
   const params = parameters
     .map((param) => {
@@ -59,7 +59,7 @@ const closureSignatureKey = ({
       return `${label}:${param.type}${optional}`;
     })
     .join("|");
-  return `${moduleId}::(${params})->${returnType}|${effects}`;
+  return `${moduleId}::(${params})->${returnType}|${effectRow}`;
 };
 
 const closureStructName = ({
@@ -108,7 +108,11 @@ const ensureClosureTypeInfo = ({
   seen,
 }: {
   typeId: TypeId;
-  desc: { parameters: ReadonlyArray<{ type: TypeId; label?: string; optional?: boolean }>; returnType: TypeId; effects: unknown };
+  desc: {
+    parameters: ReadonlyArray<{ type: TypeId; label?: string; optional?: boolean }>;
+    returnType: TypeId;
+    effectRow: unknown;
+  };
   ctx: CodegenContext;
   seen: Set<TypeId>;
 }): ClosureTypeInfo => {
@@ -116,7 +120,7 @@ const ensureClosureTypeInfo = ({
     moduleId: ctx.moduleId,
     parameters: desc.parameters,
     returnType: desc.returnType,
-    effects: desc.effects,
+    effectRow: desc.effectRow,
   });
   const cached = ctx.closureTypes.get(key);
   if (cached) {
