@@ -24,7 +24,7 @@ import { allocateTempLocal } from "../locals.js";
 import { callRef, refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
-import { OUTCOME_TAGS } from "../effects/runtime-abi.js";
+import { OUTCOME_TAGS, RESUME_KIND } from "../effects/runtime-abi.js";
 import { unboxOutcomeValue } from "../effects/outcome-values.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
@@ -166,6 +166,15 @@ export const compileCallExpr = (
 
   if (callee.exprKind === "identifier") {
     const symbolRecord = ctx.symbolTable.getSymbol(callee.symbol);
+    if (symbolRecord.kind === "effect-op") {
+      return compileEffectOpCall({
+        expr,
+        calleeSymbol: callee.symbol,
+        ctx,
+        fnCtx,
+        compileExpr,
+      });
+    }
     const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
       intrinsic?: boolean;
       intrinsicName?: string;
@@ -245,6 +254,66 @@ export const compileCallExpr = (
   }
 
   throw new Error("codegen only supports function and closure calls today");
+};
+
+const effectOpIds = (symbol: SymbolId, ctx: CodegenContext): {
+  effectId: number;
+  opId: number;
+  resumeKind: ResumeKind;
+} => {
+  for (let effectId = 0; effectId < ctx.binding.effects.length; effectId++) {
+    const effect = ctx.binding.effects[effectId];
+    const opIndex = effect.operations.findIndex((op) => op.symbol === symbol);
+    if (opIndex >= 0) {
+      const op = effect.operations[opIndex]!;
+      const resumeKind =
+        op.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
+      return { effectId, opId: opIndex, resumeKind };
+    }
+  }
+  throw new Error(`codegen missing effect metadata for op ${symbol}`);
+};
+
+const compileEffectOpCall = ({
+  expr,
+  calleeSymbol,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  expr: HirCallExpr;
+  calleeSymbol: SymbolId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): CompiledExpression => {
+  const { effectId, opId, resumeKind } = effectOpIds(calleeSymbol, ctx);
+  const sideEffects = expr.args.map((arg) =>
+    compileExpr({ exprId: arg.expr, ctx, fnCtx })
+  );
+  const ops: binaryen.ExpressionRef[] = [];
+  sideEffects.forEach((value) => {
+    ops.push(ctx.mod.drop(value.expr));
+  });
+  const request = ctx.effectsRuntime.makeEffectRequest({
+    effectId: ctx.mod.i32.const(effectId),
+    opId: ctx.mod.i32.const(opId),
+    resumeKind,
+    args: ctx.mod.ref.null(binaryen.eqref),
+    continuation: ctx.mod.ref.null(ctx.effectsRuntime.continuationType),
+    tailGuard: ctx.mod.ref.null(ctx.effectsRuntime.tailGuardType),
+  });
+  ops.push(ctx.effectsRuntime.makeOutcomeEffect(request));
+
+  const exprRef =
+    ops.length === 1
+      ? ops[0]!
+      : ctx.mod.block(null, ops, ctx.effectsRuntime.outcomeType);
+
+  return {
+    expr: exprRef,
+    usedReturnCall: false,
+  };
 };
 
 const compileTraitDispatchCall = ({

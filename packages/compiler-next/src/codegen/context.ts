@@ -33,14 +33,17 @@ import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
 import type { EffectRuntime } from "./effects/runtime-abi.js";
 import type { EffectMir } from "./effects/backend.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
+import type { EffectTableSidecar } from "./effects/effect-table-types.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
   validate?: boolean;
+  emitEffectHelpers?: boolean;
 }
 
 export interface CodegenResult {
   module: binaryen.Module;
+  effectTable?: EffectTableSidecar;
 }
 
 export interface FunctionMetadata {

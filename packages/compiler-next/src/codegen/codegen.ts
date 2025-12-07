@@ -15,11 +15,17 @@ import {
   registerFunctionMetadata,
 } from "./functions.js";
 import { buildEffectMir } from "./effects/effect-mir.js";
+import {
+  EFFECT_TABLE_EXPORT,
+  emitEffectTableSection,
+} from "./effects/effect-table.js";
+import { addEffectRuntimeHelpers } from "./effects/runtime-helpers.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
   validate: true,
+  emitEffectHelpers: false,
 };
 
 export type CodegenProgramParams = {
@@ -82,6 +88,15 @@ export const codegenProgram = ({
   const entryCtx =
     contexts.find((ctx) => ctx.moduleId === entryModuleId) ?? contexts[0];
   emitModuleExports(entryCtx);
+  const effectTable = emitEffectTableSection({
+    contexts,
+    entryModuleId,
+    mod,
+    exportName: EFFECT_TABLE_EXPORT,
+  });
+  if (mergedOptions.emitEffectHelpers) {
+    addEffectRuntimeHelpers(entryCtx);
+  }
 
   if (mergedOptions.optimize) {
     mod.optimize();
@@ -91,7 +106,7 @@ export const codegenProgram = ({
     mod.validate();
   }
 
-  return { module: mod };
+  return { module: mod, effectTable };
 };
 
 export type { CodegenOptions, CodegenResult } from "./context.js";

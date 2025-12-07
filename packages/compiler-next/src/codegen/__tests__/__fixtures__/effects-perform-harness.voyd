@@ -1,0 +1,9 @@
+eff Log
+  info(resume, msg: i32) -> void
+
+fn worker(): Log -> i32
+  Log::info(7)
+  0
+
+pub fn main(): Log -> i32
+  worker()
