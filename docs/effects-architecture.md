@@ -27,7 +27,7 @@ This document explains how to implement the effects runtime semantics from `apps
    - call into generated handler dispatcher for `Outcome.effect`,
    - include runtime structs/helpers.
 
-## ABI (stable, shared with Prompt 1)
+## ABI (stable)
 - `$Outcome { tag: i32, payload: eqref }` with `tag=0` => boxed value tuple; `tag=1` => `$EffectRequest`.
 - `$EffectRequest { effectId: i32, opId: i32, resumeKind: i32 /*0 resume, 1 tail*/, args: eqref, cont: ref null $Continuation, tailGuard: ref null $TailGuard }`.
 - `$Continuation { fn: funcref /*(env, value) -> ref null $Outcome*/, env: anyref }`.
@@ -105,4 +105,4 @@ This document explains how to implement the effects runtime semantics from `apps
 - Include runtime structs/helpers (already in `runtime-abi.ts`) in modules that need them.
 - Optional: export gating diagnostic for effectful exports (can be stubbed if host-call not needed).
 
-This architecture keeps the CPS/delimited continuation logic in a dedicated translation layer and limits codegen changes to a few well-defined hooks, while remaining future-proof for stack-switching.***
+This architecture keeps the CPS/delimited continuation logic in a dedicated translation layer and limits codegen changes to a few well-defined hooks, while remaining future-proof for stack-switching.
