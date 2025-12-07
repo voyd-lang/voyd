@@ -35,6 +35,7 @@ import type { EffectMir } from "./effects/backend.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
 import type { EffectTableSidecar } from "./effects/effect-table-types.js";
 import type { EffectLoweringResult } from "./effects/effect-lowering.js";
+import type { ResumeKind } from "./effects/runtime-abi.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -161,6 +162,18 @@ export interface LocalBindingCapture extends LocalBindingBase {
 
 export type LocalBinding = LocalBindingLocal | LocalBindingCapture;
 
+export interface HandlerScope {
+  prevHandler: LocalBindingLocal;
+  label?: number;
+}
+
+export interface ContinuationBinding {
+  continuationLocal: LocalBindingLocal;
+  tailGuardLocal: LocalBindingLocal;
+  resumeKind: ResumeKind;
+  returnTypeId: TypeId;
+}
+
 export interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;
   locals: binaryen.Type[];
@@ -174,6 +187,8 @@ export interface FunctionContext {
     exprId: HirExprId;
     resumeLocal?: LocalBindingLocal;
   };
+  handlerStack?: HandlerScope[];
+  continuations?: Map<SymbolId, ContinuationBinding>;
 }
 
 export interface CompiledExpression {

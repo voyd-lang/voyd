@@ -56,7 +56,7 @@ const buildLoweringSnapshot = () => {
     rtt,
     effectsRuntime,
     effectMir: buildEffectMir({ semantics }),
-    effectLowering: { sitesByExpr: new Map(), sites: [] },
+    effectLowering: { sitesByExpr: new Map(), sites: [], argsTypes: new Map() },
     outcomeValueTypes: new Map(),
   };
   ctx.effectLowering = buildEffectLowering({ ctx, siteCounter: { current: 0 } });

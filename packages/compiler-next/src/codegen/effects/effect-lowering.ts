@@ -53,6 +53,7 @@ export interface EffectPerformSite {
 export interface EffectLoweringResult {
   sitesByExpr: Map<HirExprId, EffectPerformSite>;
   sites: readonly EffectPerformSite[];
+  argsTypes: Map<SymbolId, binaryen.Type>;
 }
 
 type SiteCounter = { current: number };
@@ -625,6 +626,7 @@ export const buildEffectLowering = ({
   const sites: EffectPerformSite[] = [];
   const sitesByExpr = new Map<HirExprId, EffectPerformSite>();
   const argsTypeCache = new Map<SymbolId, binaryen.Type>();
+  const argsTypes = new Map<SymbolId, binaryen.Type>();
 
   ctx.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
@@ -696,6 +698,9 @@ export const buildEffectLowering = ({
           ctx,
           cache: argsTypeCache,
         });
+      if (argsType) {
+        argsTypes.set(site.effectSymbol, argsType);
+      }
       const lowered: EffectPerformSite = {
         exprId: site.exprId,
         siteId: siteCounter.current,
@@ -722,5 +727,5 @@ export const buildEffectLowering = ({
     });
   });
 
-  return { sitesByExpr, sites };
+  return { sitesByExpr, sites, argsTypes };
 };

@@ -79,7 +79,7 @@ export const codegenProgram = ({
     rtt,
     effectsRuntime,
     effectMir: buildEffectMir({ semantics: sem }),
-    effectLowering: { sitesByExpr: new Map(), sites: [] },
+    effectLowering: { sitesByExpr: new Map(), sites: [], argsTypes: new Map() },
     outcomeValueTypes,
   }));
 

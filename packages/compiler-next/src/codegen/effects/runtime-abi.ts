@@ -3,6 +3,7 @@ import {
   defineStructType,
   initStruct,
   structGetFieldValue,
+  structSetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
 
 export const OUTCOME_TAGS = {
@@ -52,6 +53,16 @@ export interface EffectRuntime {
   makeOutcomeEffect: (
     request: binaryen.ExpressionRef
   ) => binaryen.ExpressionRef;
+  makeHandlerFrame: (params: {
+    prev: binaryen.ExpressionRef;
+    effectId: binaryen.ExpressionRef;
+    opId: binaryen.ExpressionRef;
+    resumeKind: binaryen.ExpressionRef;
+    clauseFn: binaryen.ExpressionRef;
+    clauseEnv: binaryen.ExpressionRef;
+    tailExpected: binaryen.ExpressionRef;
+    label: binaryen.ExpressionRef;
+  }) => binaryen.ExpressionRef;
   outcomeTag: (outcome: binaryen.ExpressionRef) => binaryen.ExpressionRef;
   outcomePayload: (outcome: binaryen.ExpressionRef) => binaryen.ExpressionRef;
   makeEffectRequest: (params: {
@@ -89,10 +100,35 @@ export interface EffectRuntime {
     observed?: number;
   }) => binaryen.ExpressionRef;
   tailGuardObserved: (guard: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  tailGuardExpected: (guard: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  bumpTailGuardObserved: (
+    guard: binaryen.ExpressionRef
+  ) => binaryen.ExpressionRef;
+  handlerPrev: (frame: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  handlerEffectId: (frame: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  handlerOpId: (frame: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  handlerResumeKind: (frame: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  handlerClauseFn: (frame: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  handlerClauseEnv: (frame: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  handlerTailExpected: (frame: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  handlerLabel: (frame: binaryen.ExpressionRef) => binaryen.ExpressionRef;
 }
 
 export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
-  const handlerFrameType = binaryen.eqref;
+  const handlerFrameType = defineStructType(mod, {
+    name: "voydHandlerFrame",
+    fields: [
+      { name: "prev", type: binaryen.eqref, mutable: false },
+      { name: "effectId", type: binaryen.i32, mutable: false },
+      { name: "opId", type: binaryen.i32, mutable: false },
+      { name: "resumeKind", type: binaryen.i32, mutable: false },
+      { name: "clauseFn", type: binaryen.funcref, mutable: false },
+      { name: "clauseEnv", type: binaryen.anyref, mutable: false },
+      { name: "tailExpected", type: binaryen.i32, mutable: false },
+      { name: "label", type: binaryen.i32, mutable: false },
+    ],
+    final: true,
+  });
   const continuationType = defineStructType(mod, {
     name: "voydContinuation",
     fields: [
@@ -204,6 +240,16 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
       });
   };
 
+  const getHandlerField = (index: number, type: binaryen.Type) => {
+    return (frame: binaryen.ExpressionRef): binaryen.ExpressionRef =>
+      structGetFieldValue({
+        mod,
+        fieldIndex: index,
+        fieldType: type,
+        exprRef: frame,
+      });
+  };
+
   const getContinuationField = (index: number, type: binaryen.Type) => {
     return (continuation: binaryen.ExpressionRef): binaryen.ExpressionRef =>
       structGetFieldValue({
@@ -232,6 +278,26 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
     tailGuardType,
     makeOutcomeValue: (payload) => makeOutcome(OUTCOME_TAGS.value, payload),
     makeOutcomeEffect: (request) => makeOutcome(OUTCOME_TAGS.effect, request),
+    makeHandlerFrame: ({
+      prev,
+      effectId,
+      opId,
+      resumeKind,
+      clauseFn,
+      clauseEnv,
+      tailExpected,
+      label,
+    }) =>
+      initStruct(mod, handlerFrameType, [
+        prev,
+        effectId,
+        opId,
+        resumeKind,
+        clauseFn,
+        clauseEnv,
+        tailExpected,
+        label,
+      ]),
     outcomeTag: getOutcomeField(OUTCOME_FIELDS.tag, binaryen.i32),
     outcomePayload: getOutcomeField(
       OUTCOME_FIELDS.payload,
@@ -270,5 +336,27 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
       TAIL_GUARD_FIELDS.observed,
       binaryen.i32
     ),
+    tailGuardExpected: getTailGuardField(
+      TAIL_GUARD_FIELDS.expected,
+      binaryen.i32
+    ),
+    bumpTailGuardObserved: (guard) =>
+      structSetFieldValue({
+        mod,
+        fieldIndex: TAIL_GUARD_FIELDS.observed,
+        ref: guard,
+        value: mod.i32.add(
+          getTailGuardField(TAIL_GUARD_FIELDS.observed, binaryen.i32)(guard),
+          mod.i32.const(1)
+        ),
+      }),
+    handlerPrev: getHandlerField(0, binaryen.eqref),
+    handlerEffectId: getHandlerField(1, binaryen.i32),
+    handlerOpId: getHandlerField(2, binaryen.i32),
+    handlerResumeKind: getHandlerField(3, binaryen.i32),
+    handlerClauseFn: getHandlerField(4, binaryen.funcref),
+    handlerClauseEnv: getHandlerField(5, binaryen.anyref),
+    handlerTailExpected: getHandlerField(6, binaryen.i32),
+    handlerLabel: getHandlerField(7, binaryen.i32),
   };
 };

@@ -21,6 +21,7 @@ import {
   compileIdentifierExpr,
   compileLiteralExpr,
 } from "./primitives.js";
+import { compileEffectHandlerExpr } from "./effect-handler.js";
 
 export const compileExpression: ExpressionCompiler = ({
   exprId,
@@ -98,6 +99,15 @@ export const compileExpression: ExpressionCompiler = ({
       return compileTupleExpr(expr, ctx, fnCtx, compileExpression);
     case "lambda":
       return compileLambdaExpr(expr, ctx, fnCtx, compileExpression);
+    case "effect-handler":
+      return compileEffectHandlerExpr(
+        expr,
+        ctx,
+        fnCtx,
+        compileExpression,
+        tailPosition,
+        expectedResultTypeId
+      );
     default:
       throw new Error(
         `codegen does not support ${expr.exprKind} expressions yet`
