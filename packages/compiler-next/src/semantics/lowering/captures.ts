@@ -93,6 +93,9 @@ export const analyzeLambdaCaptures = ({
       const record = symbolTable.getSymbol(expr.symbol);
       const metadata = (record.metadata ?? {}) as { intrinsic?: boolean; mutable?: boolean };
       if (metadata.intrinsic) return;
+      if (record.scope === symbolTable.rootScope) {
+        return;
+      }
 
       if (isWithinScope(record.scope, lambdaScope)) {
         return;

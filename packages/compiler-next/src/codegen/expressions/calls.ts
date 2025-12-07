@@ -30,6 +30,25 @@ import { unboxOutcomeValue } from "../effects/outcome-values.js";
 const bin = binaryen as unknown as AugmentedBinaryen;
 let traitDispatchSigCounter = 0;
 
+const handlerType = (ctx: CodegenContext): binaryen.Type =>
+  ctx.effectsRuntime.handlerFrameType;
+
+const currentHandlerValue = (
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): binaryen.ExpressionRef => {
+  if (fnCtx.effectful) {
+    if (!fnCtx.currentHandler) {
+      throw new Error("effectful function missing currentHandler binding");
+    }
+    return ctx.mod.local.get(
+      fnCtx.currentHandler.index,
+      fnCtx.currentHandler.type
+    );
+  }
+  return ctx.mod.ref.null(handlerType(ctx));
+};
+
 const lowerEffectfulCallResult = ({
   callExpr,
   callId,
@@ -361,7 +380,12 @@ const compileTraitDispatchCall = ({
     return undefined;
   }
 
-  const wrapperParamTypes = [ctx.rtt.baseType, ...meta.paramTypes.slice(1)];
+  const userParamTypes = meta.effectful
+    ? meta.paramTypes.slice(2)
+    : meta.paramTypes.slice(1);
+  const wrapperParamTypes = meta.effectful
+    ? [handlerType(ctx), ctx.rtt.baseType, ...userParamTypes]
+    : [ctx.rtt.baseType, ...userParamTypes];
   const fnRefType = functionRefType({
     params: wrapperParamTypes,
     result: meta.resultType,
@@ -413,12 +437,10 @@ const compileTraitDispatchCall = ({
     });
   });
 
-  const callExpr = callRef(
-    ctx.mod,
-    target,
-    args as number[],
-    meta.resultType
-  );
+  const callArgs = meta.effectful
+    ? [currentHandlerValue(ctx, fnCtx), ...args]
+    : args;
+  const callExpr = callRef(ctx.mod, target, callArgs as number[], meta.resultType);
   const lowered = meta.effectful
     ? lowerEffectfulCallResult({
         callExpr,
@@ -455,11 +477,14 @@ const emitResolvedCall = (
   const lookupKey = typeInstanceKey ?? meta.instanceKey;
   const returnTypeId = getRequiredExprType(callId, ctx, lookupKey);
   const expectedTypeId = expectedResultTypeId ?? returnTypeId;
+  const callArgs = meta.effectful
+    ? [currentHandlerValue(ctx, fnCtx), ...args]
+    : args;
 
   if (meta.effectful) {
     const callExpr = ctx.mod.call(
       meta.wasmName,
-      args as number[],
+      callArgs as number[],
       meta.resultType
     );
     return lowerEffectfulCallResult({
@@ -482,7 +507,7 @@ const emitResolvedCall = (
     return {
       expr: ctx.mod.return_call(
         meta.wasmName,
-        args as number[],
+        callArgs as number[],
         getExprBinaryenType(callId, ctx, lookupKey)
       ),
       usedReturnCall: true,
@@ -492,7 +517,7 @@ const emitResolvedCall = (
   return {
     expr: ctx.mod.call(
       meta.wasmName,
-      args as number[],
+      callArgs as number[],
       getExprBinaryenType(callId, ctx, lookupKey)
     ),
     usedReturnCall: false,
@@ -606,15 +631,14 @@ const compileClosureCall = ({
       ? fnField
       : refCast(ctx.mod, fnField, base.fnRefType);
   const args = compileClosureArguments(expr, calleeDesc, ctx, fnCtx, compileExpr);
-  const call = callRef(
-    ctx.mod,
-    targetFn,
-    [
-      ctx.mod.local.get(closureTemp.index, base.interfaceType),
-      ...args,
-    ] as number[],
-    base.resultType
-  );
+  const callArgs = effectful
+    ? [
+        ctx.mod.local.get(closureTemp.index, base.interfaceType),
+        currentHandlerValue(ctx, fnCtx),
+        ...args,
+      ]
+    : [ctx.mod.local.get(closureTemp.index, base.interfaceType), ...args];
+  const call = callRef(ctx.mod, targetFn, callArgs as number[], base.resultType);
 
   const lowered = effectful
     ? lowerEffectfulCallResult({
@@ -720,13 +744,17 @@ const compileCurriedClosureCall = ({
       });
     });
 
+    const callArgs = effectful
+      ? [
+          ctx.mod.local.get(closureTemp.index, base.interfaceType),
+          currentHandlerValue(ctx, fnCtx),
+          ...args,
+        ]
+      : [ctx.mod.local.get(closureTemp.index, base.interfaceType), ...args];
     const call = callRef(
       ctx.mod,
       targetFn,
-      [
-        ctx.mod.local.get(closureTemp.index, base.interfaceType),
-        ...args,
-      ] as number[],
+      callArgs as number[],
       base.resultType
     );
 

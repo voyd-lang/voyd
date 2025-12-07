@@ -127,12 +127,16 @@ const ensureClosureTypeInfo = ({
     return cached;
   }
 
-  const paramTypes = desc.parameters.map((param) =>
-    wasmTypeFor(param.type, ctx, seen)
-  );
   const effectful =
     typeof desc.effectRow === "number" &&
     ctx.typing.effects.getRow(desc.effectRow).operations.length > 0;
+  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
+  const userParamTypes = desc.parameters.map((param) =>
+    wasmTypeFor(param.type, ctx, seen)
+  );
+  const paramTypes = effectful
+    ? [handlerParamType, ...userParamTypes]
+    : userParamTypes;
   const resultType = effectful
     ? ctx.effectsRuntime.outcomeType
     : wasmTypeFor(desc.returnType, ctx, seen);
@@ -666,11 +670,15 @@ const createMethodLookupEntries = ({
           `codegen missing metadata for trait method impl ${implMethodSymbol}`
         );
       }
-      const params = [
-        ctx.rtt.baseType,
-        ...meta.paramTypes.slice(1),
-      ];
-      const receiverType = meta.paramTypes[0] ?? runtimeType;
+      const handlerParamType = ctx.effectsRuntime.handlerFrameType;
+      const receiverTypeIndex = meta.effectful ? 1 : 0;
+      const receiverType = meta.paramTypes[receiverTypeIndex] ?? runtimeType;
+      const userParamTypes = meta.effectful
+        ? meta.paramTypes.slice(2)
+        : meta.paramTypes.slice(1);
+      const params = meta.effectful
+        ? [handlerParamType, ctx.rtt.baseType, ...userParamTypes]
+        : [ctx.rtt.baseType, ...userParamTypes];
       const wrapperName = `${typeLabel}__method_${impl.traitSymbol}_${traitMethodSymbol}`;
       const wrapper = ctx.mod.addFunction(
         wrapperName,
@@ -680,14 +688,28 @@ const createMethodLookupEntries = ({
         ctx.mod.call(
           meta.wasmName,
           [
-            refCast(
-              ctx.mod,
-              ctx.mod.local.get(0, ctx.rtt.baseType),
-              receiverType
-            ),
-            ...meta.paramTypes.slice(1).map((type, index) =>
-              ctx.mod.local.get(index + 1, type)
-            ),
+            ...(meta.effectful
+              ? [
+                  ctx.mod.local.get(0, handlerParamType),
+                  refCast(
+                    ctx.mod,
+                    ctx.mod.local.get(1, ctx.rtt.baseType),
+                    receiverType
+                  ),
+                  ...userParamTypes.map((type, index) =>
+                    ctx.mod.local.get(index + 2, type)
+                  ),
+                ]
+              : [
+                  refCast(
+                    ctx.mod,
+                    ctx.mod.local.get(0, ctx.rtt.baseType),
+                    receiverType
+                  ),
+                  ...userParamTypes.map((type, index) =>
+                    ctx.mod.local.get(index + 1, type)
+                  ),
+                ]),
           ],
           meta.resultType
         )

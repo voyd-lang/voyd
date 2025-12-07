@@ -43,6 +43,7 @@ export type OutcomeTag = (typeof OUTCOME_TAGS)[keyof typeof OUTCOME_TAGS];
 export type ResumeKind = (typeof RESUME_KIND)[keyof typeof RESUME_KIND];
 
 export interface EffectRuntime {
+  handlerFrameType: binaryen.Type;
   outcomeType: binaryen.Type;
   effectRequestType: binaryen.Type;
   continuationType: binaryen.Type;
@@ -91,6 +92,7 @@ export interface EffectRuntime {
 }
 
 export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
+  const handlerFrameType = binaryen.eqref;
   const continuationType = defineStructType(mod, {
     name: "voydContinuation",
     fields: [
@@ -223,6 +225,7 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
   };
 
   return {
+    handlerFrameType,
     outcomeType,
     effectRequestType,
     continuationType,

@@ -85,6 +85,8 @@ Notes:
   row. Handled operations are removed from the row.
 - A handler may re-raise an effect (keeping it in the row) or fully discharge
   it.
+- `resume` is one-shot: handlers may resume zero or one time; a second resume
+  traps at runtime. `tail` resumes are enforced to happen exactly once.
 - Handlers are written as clauses after `try`: each clause matches an operation
   by name and destructures its parameters (including `resume`/`tail`).
 
@@ -101,7 +103,9 @@ Notes:
 
 - If the effect annotation is omitted, the compiler infers effects from the
   body. Inference is fine inside a package, but exported APIs should be
-  explicit to keep semver-stable surface areas.
+  explicit to keep semver-stable surface areas. Any function exported by the
+  API that does not explicitly define it's effects will be assumed pure,
+  and will result in a compiler error if not all effects are handled.
 - Handlers shrink effect rows. For example, `try ... with Async` yields a pure
   result if the handler covers all Async operations and does not re-raise.
 
@@ -202,3 +206,23 @@ To keep package APIs explicit and auditable:
 
 This keeps cross-package dependencies predictable and prevents accidental API
 changes when internal implementations start using new effects.
+
+---
+
+## Host Boundary (Exports, Continuations, Buffer Protocol)
+
+- Only pure exports are host-callable by default. If an export is effectful, you must either wrap it in a pure function or expose an explicit effectful entrypoint pair (snake case) that returns a struct (no multi-return):
+  - Define `type EffectResult = { status: i32, cont: externref }`.
+  - `pub fn main_effectful(buf_ptr: i32, buf_len: i32): EffectResult`
+  - `pub fn resume_effectful(cont_ref: externref, buf_ptr: i32, buf_len: i32): EffectResult`
+  - Accessors for hosts via primitives: `pub fn effect_status(res: EffectResult) -> i32`, `pub fn effect_cont(res: EffectResult) -> externref`.
+- Status codes: `0` => value written to `(buf_ptr, buf_len)`, `1` => effect request written, negative => trap/diagnostic.
+- Buffer contract (linear memory; MsgPack recommended):
+  - `status=0`: `{ kind: "value", value }`
+  - `status=1`: `{ kind: "effect", effectId, opId, resumeKind, args }` (args encoded as tuple/array)
+- Continuations stay as Wasm GC refs (`externref`); JS holds the opaque ref and passes it back to `resume_effectful`, preventing premature collection.
+- JS-side helpers use camelCase; Voyd exports stay snake_case.
+- Effect/op ids map to names via the emitted effect/op table so hosts can dispatch on ids safely.
+- Effect/op table export (data): header entries `{effectId, nameOffset, opsOffset, opCount}`, op entries `{opId, resumeKind, nameOffset}`, and a UTF-8 name blob; ids are stable in declaration order.
+- Runtime-owned helpers (not user-defined): `handle_outcome`, `read_value`, and `resume_continuation` are emitted/linked by the compiler to implement the entry/resume protocol.
+- Buffer overflow: writing past `buf_len` traps; hosts/harness should allocate sufficient space or retry with a larger buffer.

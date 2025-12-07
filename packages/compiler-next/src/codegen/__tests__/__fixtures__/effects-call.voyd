@@ -1,0 +1,26 @@
+trait Runner
+  fn run(self) -> i32
+
+obj Worker {
+  value: i32,
+}
+
+impl Runner for Worker
+  fn run(self) -> i32
+    effectful_value()
+
+fn effectful_value(): () -> i32
+  5
+
+fn call_direct(): () -> i32
+  effectful_value()
+
+fn call_closure(): () -> i32
+  let f = () => effectful_value()
+  f()
+
+fn call_trait(r: Runner): () -> i32
+  r.run()
+
+fn effectful_forward(): () -> i32
+  effectful_value()

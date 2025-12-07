@@ -233,7 +233,10 @@ export const runEffectfulExport = async <T = unknown>({
   if (typeof tagFn !== "function") {
     throw new Error(`Missing outcome helper export ${OUTCOME_TAG_HELPER}`);
   }
-  const outcome = (target as CallableFunction)();
+  const outcome =
+    target.length > 0
+      ? (target as CallableFunction)(null)
+      : (target as CallableFunction)();
   const tag = (tagFn as CallableFunction)(outcome);
   if (tag === OUTCOME_TAGS.value) {
     if (valueType === "i32") {

@@ -19,6 +19,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const exportedItems = new Set(
     ctx.hir.module.exports.map((entry) => entry.item)
   );
+  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
 
   for (const [itemId, item] of ctx.hir.items) {
     if (item.kind !== "function") continue;
@@ -100,9 +101,12 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         );
       }
 
-      const paramTypes = descriptor.parameters.map((param) =>
+      const userParamTypes = descriptor.parameters.map((param) =>
         wasmTypeFor(param.type, ctx)
       );
+      const paramTypes = effectful
+        ? [handlerParamType, ...userParamTypes]
+        : userParamTypes;
       const resultType = effectful
         ? ctx.effectsRuntime.outcomeType
         : wasmTypeFor(descriptor.returnType, ctx);
@@ -153,6 +157,7 @@ export const compileFunctions = (ctx: CodegenContext): void => {
 };
 
 export const registerImportMetadata = (ctx: CodegenContext): void => {
+  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   ctx.binding.imports.forEach((imp) => {
     if (!imp.target) return;
     if (imp.target.moduleId === ctx.moduleId) return;
@@ -194,17 +199,20 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         ? recordedInstantiations
         : [[formatInstanceKey(imp.local, []), []]];
 
-    instantiations.forEach(([instanceKey, typeArgs]) => {
-      const targetMeta = pickTargetMeta(targetMetas, typeArgs.length);
-      const effectInfo = ctx.effectMir.functions.get(imp.local);
-      const effectful =
-        targetMeta?.effectful ?? (effectInfo ? effectInfo.pure === false : false);
-      const paramTypes = signature.parameters.map((param) =>
-        wasmTypeFor(param.type, ctx)
-      );
-      const resultType = effectful
-        ? ctx.effectsRuntime.outcomeType
-        : wasmTypeFor(signature.returnType, ctx);
+      instantiations.forEach(([instanceKey, typeArgs]) => {
+        const targetMeta = pickTargetMeta(targetMetas, typeArgs.length);
+        const effectInfo = ctx.effectMir.functions.get(imp.local);
+        const effectful =
+          targetMeta?.effectful ?? (effectInfo ? effectInfo.pure === false : false);
+        const userParamTypes = signature.parameters.map((param) =>
+          wasmTypeFor(param.type, ctx)
+        );
+        const paramTypes = effectful
+          ? [handlerParamType, ...userParamTypes]
+          : userParamTypes;
+        const resultType = effectful
+          ? ctx.effectsRuntime.outcomeType
+          : wasmTypeFor(signature.returnType, ctx);
       const metadata: FunctionMetadata = {
         moduleId: ctx.moduleId,
         symbol: imp.local,
@@ -271,6 +279,7 @@ const compileFunctionItem = (
   meta: FunctionMetadata,
   ctx: CodegenContext
 ): void => {
+  const handlerOffset = meta.effectful ? 1 : 0;
   const fnCtx: FunctionContext = {
     bindings: new Map(),
     locals: [],
@@ -280,9 +289,16 @@ const compileFunctionItem = (
     typeInstanceKey: meta.instanceKey,
     effectful: meta.effectful,
   };
+  if (meta.effectful) {
+    fnCtx.currentHandler = {
+      index: 0,
+      type: ctx.effectsRuntime.handlerFrameType,
+    };
+  }
 
   fn.parameters.forEach((param, index) => {
-    const type = meta.paramTypes[index];
+    const wasmIndex = index + handlerOffset;
+    const type = meta.paramTypes[wasmIndex];
     if (typeof type !== "number") {
       throw new Error(
         `codegen missing parameter type for symbol ${param.symbol}`
@@ -290,7 +306,7 @@ const compileFunctionItem = (
     }
     fnCtx.bindings.set(param.symbol, {
       kind: "local",
-      index,
+      index: wasmIndex,
       type,
       typeId: meta.paramTypeIds[index],
     });

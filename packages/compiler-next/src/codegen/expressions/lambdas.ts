@@ -111,6 +111,7 @@ const emitLambdaFunction = ({
   const effectful =
     typeof desc.effectRow === "number" &&
     !ctx.typing.effects.isEmpty(desc.effectRow);
+  const handlerOffset = effectful ? 1 : 0;
   const lambdaCtx: FunctionContext = {
     bindings: new Map(),
     locals: [],
@@ -120,12 +121,18 @@ const emitLambdaFunction = ({
     typeInstanceKey,
     effectful,
   };
+  if (effectful) {
+    lambdaCtx.currentHandler = {
+      index: 1,
+      type: ctx.effectsRuntime.handlerFrameType,
+    };
+  }
 
   expr.parameters.forEach((param, index) => {
     const binding = {
       kind: "local" as const,
-      index: index + 1,
-      type: env.base.paramTypes[index]!,
+      index: index + 1 + handlerOffset,
+      type: env.base.paramTypes[index + handlerOffset]!,
       typeId: desc.parameters[index]!.type,
     };
     lambdaCtx.bindings.set(param.symbol, binding);

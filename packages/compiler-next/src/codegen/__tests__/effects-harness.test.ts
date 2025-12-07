@@ -125,9 +125,13 @@ const buildFixtureEffectModule = () => {
     });
 
   const outcomeEffect = () => effectsRuntime.makeOutcomeEffect(effectRequest());
+  const handlerParams = binaryen.createType([
+    effectsRuntime.handlerFrameType,
+  ]);
+
   mod.addFunction(
     "worker",
-    binaryen.none,
+    handlerParams,
     effectsRuntime.outcomeType,
     [],
     outcomeEffect()
@@ -136,10 +140,14 @@ const buildFixtureEffectModule = () => {
   // main calls worker and forwards the outcome
   mod.addFunction(
     "emit_effect",
-    binaryen.none,
+    handlerParams,
     effectsRuntime.outcomeType,
     [],
-    mod.call("worker", [], effectsRuntime.outcomeType)
+    mod.call(
+      "worker",
+      [mod.local.get(0, effectsRuntime.handlerFrameType)],
+      effectsRuntime.outcomeType
+    )
   );
   mod.addFunctionExport("emit_effect", "emit_effect");
   mod.validate();

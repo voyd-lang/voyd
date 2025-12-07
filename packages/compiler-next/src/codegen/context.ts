@@ -164,6 +164,7 @@ export interface FunctionContext {
   locals: binaryen.Type[];
   nextLocalIndex: number;
   returnTypeId: TypeId;
+  currentHandler?: { index: number; type: binaryen.Type };
   instanceKey?: string;
   typeInstanceKey?: string;
   effectful: boolean;
