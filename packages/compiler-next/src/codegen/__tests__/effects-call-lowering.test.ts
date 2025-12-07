@@ -81,10 +81,10 @@ describe("effectful call lowering", () => {
   it("widens effectful functions with handler params and $Outcome results", () => {
     const text = loadModuleText();
     expect(text).toMatch(
-      /\(func \$[^\s)]*effectful_value[\s\S]*\(param(?: \$\d+)? eqref\)[\s\S]*\(result \(ref null \$voydOutcome\)\)/
+      /\(func \$[^\s)]*effectful_value[\s\S]*\(param(?: \$\d+)? \(ref null \$voydHandlerFrame\)\)[\s\S]*\(result \(ref null \$voydOutcome\)\)/
     );
     expect(text).toMatch(
-      /\(func \$[^\s)]*run[\s\S]*\(param(?: \$\d+)? eqref[\s\S]*\(result \(ref null \$voydOutcome\)\)/
+      /\(func \$[^\s)]*run[\s\S]*\(param(?: \$\d+)? \(ref null \$voydHandlerFrame\)[\s\S]*\(result \(ref null \$voydOutcome\)\)/
     );
   });
 
@@ -101,7 +101,7 @@ describe("effectful call lowering", () => {
   it("threads handler locals through effectful and trait-dispatched calls", () => {
     const text = loadModuleText();
     expect(text).toMatch(
-      /\(func \$[^\s)]*effectful_forward[\s\S]*\(param(?: \$\d+)? eqref\)[\s\S]*call \$[^\s)]*effectful_value[^\)]*\(local\.get \$0\)/
+      /\(func \$[^\s)]*effectful_forward[\s\S]*\(param(?: \$\d+)? \(ref null \$voydHandlerFrame\)\)[\s\S]*call \$[^\s)]*effectful_value[^\)]*\(local\.get \$0\)/
     );
     expect(text).toMatch(
       /\(func \$[^\s)]*call_trait[\s\S]*call_ref[^\)]*ref\.null none/
