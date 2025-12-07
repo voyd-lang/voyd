@@ -7,7 +7,7 @@ so that functions must either expose them in their signature or handle them.
 
 - Effects bundle named operations that may suspend and resume execution.
 - Operation behavior is signaled by the first parameter:
-  - `resume` means resumable; the handler may resume zero or many times.
+  - `resume` means resumable; the handler may resume zero or one time.
   - `tail` means tail-resumptive; the handler must resume exactly once.
 - Function types carry an effect row: `fn load(): (Async, Log) -> Bytes`.
 - Effects are inferred locally, but exported APIs should **spell them out** or
@@ -30,7 +30,7 @@ An effect is a set of named operations:
 
 ```voyd
 eff Exception
-  // Resumable operation; the handler may resume zero or many times.
+  // Resumable operation; the handler may resume zero or one time.
   fn throw(resume, msg: String) -> void
 
 // Single-operation shorthand
@@ -46,7 +46,7 @@ eff get(tail) -> Int
 ```
 
 Operations that start with a `resume` parameter expose the current continuation
-to the handler and may be resumed multiple times. Operations that start with a
+to the handler and may be resumed zero or one time. Operations that start with a
 `tail` parameter are tail-resumptive (like `await` or `yield from`) and are
 guaranteed to resume exactly once by the handler.
 
@@ -183,8 +183,14 @@ fn with_default<T>(cb: fn(): Exception -> T, fallback: T): () -> T
 
 To keep package APIs explicit and auditable:
 
-- Any function exported from `src/pkg.voyd` **must** spell out its effect row.
-  Use `()` for a guaranteed pure function.
+- Inside a package (anything not exported from `src/pkg.voyd`), you can rely on
+  effect inference; explicit annotations are optional.
+- In `src/pkg.voyd` (the public API per `visibility.md`), every exported
+  function must either:
+  - spell out its effects (including any `effects` parameters), or
+  - be explicitly pure `()`.
+  Omitting an effect annotation in `pkg.voyd` means “assume pure”; if the body
+  is not pure, it is a compile-time error.
 - Exported polymorphic functions must still declare their effect parameters:
 
   ```voyd
@@ -194,5 +200,5 @@ To keep package APIs explicit and auditable:
 - A function that handles all effects internally can advertise purity by
   annotating `()` (even if effects were inferred in helpers it calls).
 
-This makes cross-package dependencies predictable and prevents accidental API
+This keeps cross-package dependencies predictable and prevents accidental API
 changes when internal implementations start using new effects.
