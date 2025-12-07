@@ -34,6 +34,7 @@ import type { EffectRuntime } from "./effects/runtime-abi.js";
 import type { EffectMir } from "./effects/backend.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
 import type { EffectTableSidecar } from "./effects/effect-table-types.js";
+import type { EffectLoweringResult } from "./effects/effect-lowering.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -134,6 +135,7 @@ export interface CodegenContext {
   rtt: ReturnType<typeof createRttContext>;
   effectsRuntime: EffectRuntime;
   effectMir: EffectMir;
+  effectLowering: EffectLoweringResult;
   outcomeValueTypes: Map<string, OutcomeValueBox>;
 }
 
@@ -168,6 +170,10 @@ export interface FunctionContext {
   instanceKey?: string;
   typeInstanceKey?: string;
   effectful: boolean;
+  resumeFromSite?: {
+    exprId: HirExprId;
+    resumeLocal?: LocalBindingLocal;
+  };
 }
 
 export interface CompiledExpression {

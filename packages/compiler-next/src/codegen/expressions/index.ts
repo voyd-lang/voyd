@@ -29,6 +29,19 @@ export const compileExpression: ExpressionCompiler = ({
   tailPosition = false,
   expectedResultTypeId,
 }: ExpressionCompilerParams): CompiledExpression => {
+  if (fnCtx.resumeFromSite && exprId === fnCtx.resumeFromSite.exprId) {
+    const resumeFromSite = fnCtx.resumeFromSite;
+    fnCtx.resumeFromSite = undefined;
+    if (resumeFromSite.resumeLocal) {
+      const binding = resumeFromSite.resumeLocal;
+      return {
+        expr: ctx.mod.local.get(binding.index, binding.type),
+        usedReturnCall: false,
+      };
+    }
+    return { expr: ctx.mod.nop(), usedReturnCall: false };
+  }
+
   const expr = ctx.hir.expressions.get(exprId);
   if (!expr) {
     throw new Error(`codegen missing HirExpression ${exprId}`);

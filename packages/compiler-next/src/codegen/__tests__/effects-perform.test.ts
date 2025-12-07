@@ -1,0 +1,137 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+import binaryen from "binaryen";
+import { parse } from "../../parser/parser.js";
+import { semanticsPipeline } from "../../semantics/pipeline.js";
+import { buildEffectMir } from "../effects/effect-mir.js";
+import { buildEffectLowering } from "../effects/effect-lowering.js";
+import { codegen } from "../index.js";
+import { createRttContext } from "../rtt/index.js";
+import { createEffectRuntime } from "../effects/runtime-abi.js";
+import type { CodegenContext } from "../context.js";
+import { runEffectfulExport } from "./support/effects-harness.js";
+
+const fixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-perform.voyd"
+);
+const guardFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-perform-guard.voyd"
+);
+
+const loadSemantics = () =>
+  semanticsPipeline(parse(readFileSync(fixturePath, "utf8"), "/proj/src/effects-perform.voyd"));
+
+const sanitize = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const buildLoweringSnapshot = () => {
+  const semantics = loadSemantics();
+  const mod = new binaryen.Module();
+  mod.setFeatures(binaryen.Features.All);
+  const rtt = createRttContext(mod);
+  const effectsRuntime = createEffectRuntime(mod);
+  const ctx: CodegenContext = {
+    mod,
+    moduleId: semantics.moduleId,
+    moduleLabel: sanitize(semantics.hir.module.path),
+    binding: semantics.binding,
+    symbolTable: semantics.symbolTable,
+    hir: semantics.hir,
+    typing: semantics.typing,
+    options: { optimize: false, validate: true, emitEffectHelpers: false },
+    functions: new Map(),
+    functionInstances: new Map(),
+    itemsToSymbols: new Map(),
+    structTypes: new Map(),
+    fixedArrayTypes: new Map(),
+    closureTypes: new Map(),
+    closureFunctionTypes: new Map(),
+    lambdaEnvs: new Map(),
+    lambdaFunctions: new Map(),
+    rtt,
+    effectsRuntime,
+    effectMir: buildEffectMir({ semantics }),
+    effectLowering: { sitesByExpr: new Map(), sites: [] },
+    outcomeValueTypes: new Map(),
+  };
+  ctx.effectLowering = buildEffectLowering({ ctx, siteCounter: { current: 0 } });
+  return ctx.effectLowering.sites.map((site) => ({
+    siteOrder: site.siteOrder,
+    function: semantics.symbolTable.getSymbol(site.functionSymbol).name,
+    effect: semantics.symbolTable.getSymbol(site.effectSymbol).name,
+    envFields: site.envFields.map((field) => ({
+      name: field.name,
+      sourceKind: field.sourceKind,
+    })),
+  }));
+};
+
+describe("effect perform lowering", () => {
+  it("records liveness and continuation layouts for perform sites", () => {
+    const sites = buildLoweringSnapshot();
+    expect(sites.length).toBeGreaterThan(0);
+    expect(sites.map((site) => site.effect)).toContain("Async");
+    expect(sites.every((site) => site.envFields[0]?.name === "site")).toBe(true);
+    expect(
+      sites.some((site) =>
+        site.envFields.some((field) => field.sourceKind === "handler")
+      )
+    ).toBe(true);
+  });
+
+  it("emits continuation env captures and effect requests in Wasm", () => {
+    const { module } = codegen(loadSemantics(), { emitEffectHelpers: true });
+    const text = module.emitText();
+    expect(text).toContain("voydEffectRequest");
+    expect(text).toContain("voydContEnv_main");
+    expect(text).toContain("__cont_branch_0");
+  });
+
+  it("allows effects to bubble when unhandled", async () => {
+    const { module } = codegen(loadSemantics(), { emitEffectHelpers: true });
+    await expect(
+      runEffectfulExport({
+        wasm: module,
+        exportName: "main",
+      })
+    ).rejects.toThrow();
+  });
+
+  it("does not re-evaluate guards when resuming after a perform", async () => {
+    const semantics = semanticsPipeline(
+      parse(readFileSync(guardFixturePath, "utf8"), "/proj/src/effects-perform-guard.voyd")
+    );
+    const { module } = codegen(semantics, { emitEffectHelpers: true });
+    if (process.env.DEBUG_EFFECTS_WAT === "1") {
+      writeFileSync(
+        "debug-effects-perform-guard.wat",
+        module.emitText()
+      );
+    }
+    let guardHits = 0;
+    const result = await runEffectfulExport<number | boolean>({
+      wasm: module,
+      exportName: "main",
+      handlers: {
+        "0:0:0": () => {
+          guardHits += 1;
+          return true;
+        },
+        "1:0:0": () => 10,
+      },
+    });
+    expect(guardHits).toBe(1);
+    const text = module.emitText();
+    const cont0Start = text.indexOf("(func $__cont_main_0");
+    const cont0End = cont0Start < 0 ? -1 : text.indexOf("(func ", cont0Start + 1);
+    const cont0 = cont0Start < 0 ? "" : text.slice(cont0Start, cont0End > 0 ? cont0End : undefined);
+    expect(cont0).toContain("(local.get $1)");
+    expect(cont0).toContain("(else\n      (i32.const 3)");
+    expect(result.value).toBe(true);
+  });
+});

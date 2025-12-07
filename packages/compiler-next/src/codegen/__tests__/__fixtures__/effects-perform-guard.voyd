@@ -1,0 +1,15 @@
+eff Log
+  hit(resume) -> bool
+
+eff Async
+  await(resume, value: i32) -> i32
+
+pub fn main(): (Log, Async) -> i32
+  if Log::hit() then:
+    let value = Async::await(5)
+    if value > 0 then:
+      1
+    else:
+      2
+  else:
+    3

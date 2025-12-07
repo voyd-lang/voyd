@@ -103,6 +103,7 @@ const buildFixtureEffectModule = () => {
     rtt: undefined as never,
     effectsRuntime,
     effectMir: undefined as never,
+    effectLowering: undefined as never,
     outcomeValueTypes,
   };
 

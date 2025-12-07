@@ -15,6 +15,7 @@ import {
   registerFunctionMetadata,
 } from "./functions.js";
 import { buildEffectMir } from "./effects/effect-mir.js";
+import { buildEffectLowering } from "./effects/effect-lowering.js";
 import {
   EFFECT_TABLE_EXPORT,
   emitEffectTableSection,
@@ -78,9 +79,17 @@ export const codegenProgram = ({
     rtt,
     effectsRuntime,
     effectMir: buildEffectMir({ semantics: sem }),
+    effectLowering: { sitesByExpr: new Map(), sites: [] },
     outcomeValueTypes,
   }));
 
+  const siteCounter = { current: 0 };
+  contexts.forEach((ctx) => {
+    ctx.effectLowering = buildEffectLowering({
+      ctx,
+      siteCounter,
+    });
+  });
   contexts.forEach(registerFunctionMetadata);
   contexts.forEach(registerImportMetadata);
   contexts.forEach(compileFunctions);

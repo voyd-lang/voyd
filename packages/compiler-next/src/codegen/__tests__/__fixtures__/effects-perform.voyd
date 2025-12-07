@@ -1,0 +1,26 @@
+eff Async
+  await(resume, value: i32) -> i32
+  log(tail, msg: i32) -> void
+
+fn branch(value: i32): Async -> i32
+  let first = Async::await(value)
+  Async::log(first)
+  if first > 0 then:
+    let second = Async::await(first - 1)
+    second
+  else:
+    0
+
+fn loop_values(n: i32): Async -> i32
+  var i = 0
+  var acc = 0
+  while i < n do:
+    acc = acc + Async::await(i)
+    Async::log(acc)
+    i = i + 1
+  acc
+
+pub fn main(): Async -> i32
+  let a = branch(2)
+  Async::log(a)
+  loop_values(a)
