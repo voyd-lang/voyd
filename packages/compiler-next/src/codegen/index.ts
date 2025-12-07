@@ -1,8 +1,4 @@
 export * from "./codegen.js";
-export {
-  createContinuationBackend,
-  GcContinuationBackend,
-} from "./effects/gc-backend.js";
 export type {
   ContinuationBackend,
   ContinuationBackendOptions,
