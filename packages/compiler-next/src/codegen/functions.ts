@@ -15,6 +15,17 @@ import {
 } from "../semantics/hir/index.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
 import { allocateTempLocal } from "./locals.js";
+import {
+  collectEffectOperationSignatures,
+  createEffectfulEntry,
+  createHandleOutcome,
+  createReadValue,
+  createResumeContinuation,
+  createResumeEffectful,
+  ensureEffectResultAccessors,
+  ensureLinearMemory,
+  ensureMsgPackImports,
+} from "./effects/host-boundary.js";
 
 const containsEffectHandlerFromPattern = (
   pattern: HirPattern,
@@ -369,6 +380,9 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
           isPackageVisible(entry.visibility)
         );
 
+  const effectfulExports: { meta: FunctionMetadata; exportName: string }[] = [];
+  let effectfulValueType: binaryen.Type | undefined;
+
   exportEntries.forEach((entry) => {
     const symbolRecord = ctx.symbolTable.getSymbol(entry.symbol);
     const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
@@ -390,7 +404,58 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
       return;
     }
     const exportName = entry.alias ?? symbolRecord.name;
+    if (meta.effectful) {
+      const valueType = wasmTypeFor(meta.resultTypeId, ctx);
+      if (!effectfulValueType) {
+        effectfulValueType = valueType;
+      } else if (effectfulValueType !== valueType) {
+        throw new Error(
+          "effectful exports with differing return types are not supported"
+        );
+      }
+      effectfulExports.push({ meta, exportName });
+      return;
+    }
     ctx.mod.addFunctionExport(meta.wasmName, exportName);
+  });
+
+  if (effectfulExports.length === 0) {
+    return;
+  }
+
+  ensureLinearMemory(ctx);
+  const imports = ensureMsgPackImports(ctx);
+  const signatures = collectEffectOperationSignatures(ctx);
+  const handleOutcome = createHandleOutcome({
+    ctx,
+    runtime: ctx.effectsRuntime,
+    valueType: effectfulValueType ?? binaryen.none,
+    signatures,
+    imports,
+  });
+  const resumeContinuation = createResumeContinuation({
+    ctx,
+    runtime: ctx.effectsRuntime,
+    signatures,
+  });
+  createResumeEffectful({
+    ctx,
+    runtime: ctx.effectsRuntime,
+    imports,
+    handleOutcome,
+    resumeContinuation,
+  });
+  createReadValue({ ctx, imports });
+  ensureEffectResultAccessors({ ctx, runtime: ctx.effectsRuntime });
+
+  effectfulExports.forEach(({ meta, exportName }) => {
+    createEffectfulEntry({
+      ctx,
+      runtime: ctx.effectsRuntime,
+      meta,
+      handleOutcome,
+      exportName: `${exportName}_effectful`,
+    });
   });
 };
 

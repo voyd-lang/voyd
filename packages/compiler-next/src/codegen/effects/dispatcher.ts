@@ -65,7 +65,7 @@ export const ensureDispatcher = (ctx: CodegenContext): string => {
     ctx.mod.block(null, [
       ctx.mod.if(
         ctx.mod.ref.is_null(loadFrame()),
-        ctx.mod.unreachable(),
+        ctx.mod.return(loadOutcome()),
         ctx.mod.nop()
       ),
       ctx.mod.if(

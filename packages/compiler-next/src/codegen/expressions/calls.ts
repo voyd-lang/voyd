@@ -653,6 +653,7 @@ const compileEffectOpCall = ({
   const continuation = ctx.effectsRuntime.makeContinuation({
     fnRef: contRef,
     env,
+    site: ctx.mod.i32.const(site.siteOrder),
   });
   const argsBoxed = site.argsType
     ? initStruct(ctx.mod, site.argsType, args as number[])

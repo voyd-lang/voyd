@@ -1,18 +1,18 @@
 import { Buffer } from "node:buffer";
+import { encode, decode } from "@msgpack/msgpack";
 import type binaryen from "binaryen";
 import { EFFECT_TABLE_EXPORT } from "../../effects/effect-table.js";
 import type {
   EffectTableEffect,
   EffectTableOp,
 } from "../../effects/effect-table-types.js";
+import { RESUME_KIND } from "../../effects/runtime-abi.js";
 import {
-  EFFECT_ID_HELPER,
-  EFFECT_OP_ID_HELPER,
-  EFFECT_RESUME_KIND_HELPER,
-  OUTCOME_TAG_HELPER,
-  OUTCOME_UNWRAP_I32_HELPER,
-} from "../../effects/runtime-helpers.js";
-import { OUTCOME_TAGS, RESUME_KIND } from "../../effects/runtime-abi.js";
+  MIN_EFFECT_BUFFER_SIZE,
+  MSGPACK_READ_VALUE,
+  MSGPACK_WRITE_EFFECT,
+  MSGPACK_WRITE_VALUE,
+} from "../../effects/host-boundary.js";
 
 const TABLE_HEADER_SIZE = 12;
 const EFFECT_HEADER_SIZE = 16;
@@ -201,102 +201,247 @@ const lookupHandler = ({
   );
 };
 
+const toEffectHandlerRequest = ({
+  table,
+  effectId,
+  opId,
+  resumeKind,
+}: {
+  table: ParsedEffectTable;
+  effectId: number;
+  opId: number;
+  resumeKind: number;
+}): EffectHandlerRequest & { opLabel: string } => {
+  const effect = table.effects.find((entry) => entry.id === effectId);
+  const effectLabel = effect?.label ?? `effect#${effectId}`;
+  const opLabel =
+    effect?.ops.find((op) => op.id === opId)?.label ??
+    `${effectLabel}.op#${opId}`;
+  return {
+    effectId,
+    opId,
+    resumeKind,
+    label: opLabel,
+    effectLabel,
+    opLabel,
+  };
+};
+
+type MsgPackHost = {
+  imports: WebAssembly.Imports;
+  setMemory: (memory: WebAssembly.Memory) => void;
+  lastEncodedLength: () => number;
+  recordLength: (len: number) => void;
+};
+
+export const createMsgPackHost = (): MsgPackHost => {
+  let memory: WebAssembly.Memory | undefined;
+  let latestLength = 0;
+  const memoryView = (): ArrayBuffer => {
+    if (!memory) {
+      throw new Error("memory is not set on msgpack host");
+    }
+    return memory.buffer;
+  };
+  const write = ({
+    ptr,
+    len,
+    payload,
+  }: {
+    ptr: number;
+    len: number;
+    payload: unknown;
+  }): number => {
+    const encoded = encode(payload) as Uint8Array;
+    latestLength = encoded.length;
+    if (encoded.length > len) {
+      // eslint-disable-next-line no-console
+      console.error("msgpack overflow", { len, needed: encoded.length });
+      return -1;
+    }
+    new Uint8Array(memoryView(), ptr, encoded.length).set(encoded);
+    return 0;
+  };
+
+  return {
+    imports: {
+      env: {
+        [MSGPACK_WRITE_VALUE]: (
+          tag: number,
+          value: number,
+          ptr: number,
+          len: number
+        ) =>
+          write({
+            ptr,
+            len,
+            payload: {
+              kind: "value",
+              value: tag === 0 ? null : value,
+            },
+          }),
+        [MSGPACK_WRITE_EFFECT]: (
+          effectId: number,
+          opId: number,
+          resumeKind: number,
+          argsPtr: number,
+          argCount: number,
+          ptr: number,
+          len: number
+        ) => {
+          const view = new DataView(memoryView());
+          const args: number[] = [];
+          for (let index = 0; index < argCount; index += 1) {
+            args.push(view.getInt32(argsPtr + index * 4, true));
+          }
+          return write({
+            ptr,
+            len,
+            payload: {
+              kind: "effect",
+              effectId,
+              opId,
+              resumeKind,
+              args,
+            },
+          });
+        },
+        [MSGPACK_READ_VALUE]: (ptr: number, len: number) => {
+          const size = latestLength > 0 ? latestLength : len;
+          const slice = new Uint8Array(memoryView(), ptr, size);
+          const decoded = decode(slice) as unknown;
+          if (typeof decoded === "number") return decoded | 0;
+          if (typeof decoded === "boolean") return decoded ? 1 : 0;
+          return 0;
+        },
+      },
+    },
+    setMemory: (mem) => {
+      memory = mem;
+    },
+    lastEncodedLength: () => latestLength,
+    recordLength: (len: number) => {
+      latestLength = len;
+    },
+  };
+};
+
 export const runEffectfulExport = async <T = unknown>({
   wasm,
-  exportName,
-  valueType = "i32",
+  entryName,
   handlers,
   imports,
+  bufferSize = MIN_EFFECT_BUFFER_SIZE,
   tableExport = EFFECT_TABLE_EXPORT,
 }: {
   wasm: WasmSource;
-  exportName: string;
-  valueType?: "i32" | "none";
+  entryName: string;
   handlers?: Record<string, EffectHandler>;
   imports?: WebAssembly.Imports;
+  bufferSize?: number;
   tableExport?: string;
 }): Promise<{
   value: T;
   table: ParsedEffectTable;
   instance: WebAssembly.Instance;
 }> => {
-  const { instance, table } = instantiateEffectModule({
+  const host = createMsgPackHost();
+  const mergedImports = {
+    ...(imports ?? {}),
+    ...host.imports,
+    env: { ...(imports?.env ?? {}), ...(host.imports.env ?? {}) },
+  };
+  const { module, instance, table } = instantiateEffectModule({
     wasm,
-    imports,
+    imports: mergedImports,
     tableExport,
   });
-  const target = instance.exports[exportName];
-  if (typeof target !== "function") {
-    throw new Error(`Missing export ${exportName}`);
+  const memory = instance.exports.memory;
+  if (!(memory instanceof WebAssembly.Memory)) {
+    throw new Error("expected module to export memory");
   }
-  const tagFn = instance.exports[OUTCOME_TAG_HELPER];
-  if (typeof tagFn !== "function") {
-    throw new Error(`Missing outcome helper export ${OUTCOME_TAG_HELPER}`);
+  host.setMemory(memory);
+
+  const effectStatus = instance.exports.effect_status as CallableFunction;
+  const effectCont = instance.exports.effect_cont as CallableFunction;
+  const resumeEffectful = instance.exports.resume_effectful as CallableFunction;
+  const entry = instance.exports[entryName];
+  if (typeof entry !== "function") {
+    throw new Error(`Missing export ${entryName}`);
   }
-  const outcome =
-    target.length > 0
-      ? (target as CallableFunction)(null)
-      : (target as CallableFunction)();
-  const tag = (tagFn as CallableFunction)(outcome);
-  if (tag === OUTCOME_TAGS.value) {
-    if (valueType === "i32") {
-      const unwrap = instance.exports[OUTCOME_UNWRAP_I32_HELPER];
-      if (typeof unwrap !== "function") {
-        throw new Error(
-          `Missing outcome helper export ${OUTCOME_UNWRAP_I32_HELPER}`
-        );
-      }
+  if (
+    typeof effectStatus !== "function" ||
+    typeof effectCont !== "function" ||
+    typeof resumeEffectful !== "function"
+  ) {
+    throw new Error("missing effect result helper exports");
+  }
+
+  const bufferPtr = 0;
+  const decodeLast = (): any => {
+    const length = host.lastEncodedLength();
+    if (length <= 0) {
+      throw new Error("no msgpack payload written to buffer");
+    }
+    const bytes = new Uint8Array(memory.buffer, bufferPtr, length);
+    return decode(bytes);
+  };
+
+  let result = (entry as CallableFunction)(bufferPtr, bufferSize);
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const status = effectStatus(result) as number;
+    if (status === 0) {
+      const decoded = decodeLast();
       return {
-        value: (unwrap as CallableFunction)(outcome) as T,
+        value: (decoded as { value: T }).value,
         table,
         instance,
       };
     }
-    return { value: undefined as T, table, instance };
-  }
 
-  if (tag === OUTCOME_TAGS.effect) {
-    const effectIdFn = instance.exports[EFFECT_ID_HELPER];
-    const opIdFn = instance.exports[EFFECT_OP_ID_HELPER];
-    const resumeKindFn = instance.exports[EFFECT_RESUME_KIND_HELPER];
-    if (
-      !effectIdFn ||
-      !opIdFn ||
-      !resumeKindFn ||
-      typeof effectIdFn !== "function" ||
-      typeof opIdFn !== "function" ||
-      typeof resumeKindFn !== "function"
-    ) {
-      throw new Error("Missing effect request helper exports");
+    if (status === 1) {
+      const decoded = decodeLast() as {
+        effectId: number;
+        opId: number;
+        resumeKind: number;
+        args: unknown[];
+      };
+      const request = toEffectHandlerRequest({
+        table,
+        effectId: decoded.effectId,
+        opId: decoded.opId,
+        resumeKind: decoded.resumeKind,
+      });
+      const handler = lookupHandler({ handlers, request });
+      if (!handler) {
+        throw new Error(
+          `Unhandled effect ${request.label} (${resumeKindName(request.resumeKind)})`
+        );
+      }
+      const resumeValue = await handler(request, ...(decoded.args ?? []));
+      const encoded = encode(resumeValue) as Uint8Array;
+      if (encoded.length > bufferSize) {
+        throw new Error("resume payload exceeds buffer size");
+      }
+      new Uint8Array(memory.buffer, bufferPtr, encoded.length).set(encoded);
+      host.recordLength(encoded.length);
+      try {
+        result = resumeEffectful(
+          effectCont(result),
+          bufferPtr,
+          bufferSize
+        );
+      } catch (error) {
+        // Helpful for debugging traps inside the wasm runtime
+        // eslint-disable-next-line no-console
+        console.error("resume_effectful failed", { request });
+        throw error;
+      }
+      continue;
     }
-    const effectId = (effectIdFn as CallableFunction)(outcome) as number;
-    const opId = (opIdFn as CallableFunction)(outcome) as number;
-    const resumeKind = (resumeKindFn as CallableFunction)(outcome) as number;
-    const effect = table.effects.find((entry) => entry.id === effectId);
-    const effectLabel = effect?.label ?? `effect#${effectId}`;
-    const opLabel =
-      effect?.ops.find((op) => op.id === opId)?.label ??
-      `${effectLabel}.op#${opId}`;
-    const handlerRequest = {
-      effectId,
-      opId,
-      resumeKind,
-      label: opLabel,
-      effectLabel,
-      opLabel,
-    };
-    const handler = lookupHandler({
-      handlers,
-      request: handlerRequest,
-    });
-    if (!handler) {
-      throw new Error(
-        `Unhandled effect ${opLabel} (${resumeKindName(resumeKind)})`
-      );
-    }
-    const value = await handler(handlerRequest);
-    return { value: value as T, table, instance };
-  }
 
-  throw new Error(`Unknown outcome tag ${tag}`);
+    throw new Error(`unexpected effect status ${status}`);
+  }
 };

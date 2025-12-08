@@ -1,0 +1,8 @@
+eff Async
+  await(tail) -> i32
+  log(resume, msg: i32) -> void
+
+pub fn main(): Async -> i32
+  let value = Async::await()
+  Async::log(value)
+  value + 1

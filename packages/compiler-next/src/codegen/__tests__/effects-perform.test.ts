@@ -93,11 +93,11 @@ describe("effect perform lowering", () => {
   });
 
   it("allows effects to bubble when unhandled", async () => {
-    const { module } = codegen(loadSemantics(), { emitEffectHelpers: true });
+    const { module } = codegen(loadSemantics());
     await expect(
       runEffectfulExport({
         wasm: module,
-        exportName: "main",
+        entryName: "main_effectful",
       })
     ).rejects.toThrow();
   });
@@ -106,7 +106,7 @@ describe("effect perform lowering", () => {
     const semantics = semanticsPipeline(
       parse(readFileSync(guardFixturePath, "utf8"), "/proj/src/effects-perform-guard.voyd")
     );
-    const { module } = codegen(semantics, { emitEffectHelpers: true });
+    const { module } = codegen(semantics);
     if (process.env.DEBUG_EFFECTS_WAT === "1") {
       writeFileSync(
         "debug-effects-perform-guard.wat",
@@ -114,9 +114,9 @@ describe("effect perform lowering", () => {
       );
     }
     let guardHits = 0;
-    const result = await runEffectfulExport<number | boolean>({
+    const result = await runEffectfulExport<number>({
       wasm: module,
-      exportName: "main",
+      entryName: "main_effectful",
       handlers: {
         "0:0:0": () => {
           guardHits += 1;
@@ -132,6 +132,6 @@ describe("effect perform lowering", () => {
     const cont0 = cont0Start < 0 ? "" : text.slice(cont0Start, cont0End > 0 ? cont0End : undefined);
     expect(cont0).toContain("(local.get $1)");
     expect(cont0).toContain("(else\n      (i32.const 3)");
-    expect(result.value).toBe(true);
+    expect(result.value).toBe(1);
   });
 });

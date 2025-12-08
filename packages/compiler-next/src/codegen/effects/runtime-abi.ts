@@ -35,6 +35,11 @@ const CONTINUATION_FIELDS = {
   env: 1,
 } as const;
 
+const EFFECT_RESULT_FIELDS = {
+  status: 0,
+  cont: 1,
+} as const;
+
 const TAIL_GUARD_FIELDS = {
   expected: 0,
   observed: 1,
@@ -49,6 +54,7 @@ export interface EffectRuntime {
   effectRequestType: binaryen.Type;
   continuationType: binaryen.Type;
   tailGuardType: binaryen.Type;
+  effectResultType: binaryen.Type;
   makeOutcomeValue: (payload: binaryen.ExpressionRef) => binaryen.ExpressionRef;
   makeOutcomeEffect: (
     request: binaryen.ExpressionRef
@@ -89,10 +95,17 @@ export interface EffectRuntime {
     fnRef: binaryen.ExpressionRef;
     env?: binaryen.ExpressionRef;
   }) => binaryen.ExpressionRef;
+  makeEffectResult: (params: {
+    status: binaryen.ExpressionRef;
+    cont?: binaryen.ExpressionRef;
+  }) => binaryen.ExpressionRef;
   continuationFn: (
     continuation: binaryen.ExpressionRef
   ) => binaryen.ExpressionRef;
   continuationEnv: (
+    continuation: binaryen.ExpressionRef
+  ) => binaryen.ExpressionRef;
+  continuationSite: (
     continuation: binaryen.ExpressionRef
   ) => binaryen.ExpressionRef;
   makeTailGuard: (params?: {
@@ -112,6 +125,10 @@ export interface EffectRuntime {
   handlerClauseEnv: (frame: binaryen.ExpressionRef) => binaryen.ExpressionRef;
   handlerTailExpected: (frame: binaryen.ExpressionRef) => binaryen.ExpressionRef;
   handlerLabel: (frame: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  effectResultStatus: (
+    result: binaryen.ExpressionRef
+  ) => binaryen.ExpressionRef;
+  effectResultCont: (result: binaryen.ExpressionRef) => binaryen.ExpressionRef;
 }
 
 export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
@@ -134,6 +151,7 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
     fields: [
       { name: "fn", type: binaryen.funcref, mutable: false },
       { name: "env", type: binaryen.anyref, mutable: false },
+      { name: "site", type: binaryen.i32, mutable: false },
     ],
     final: true,
   });
@@ -160,6 +178,15 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
     final: true,
   });
 
+  const effectResultType = defineStructType(mod, {
+    name: "voydEffectResult",
+    fields: [
+      { name: "status", type: binaryen.i32, mutable: false },
+      { name: "cont", type: binaryen.anyref, mutable: false },
+    ],
+    final: true,
+  });
+
   const outcomeType = defineStructType(mod, {
     name: "voydOutcome",
     fields: [
@@ -175,13 +202,28 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
   const makeContinuation = ({
     fnRef,
     env = mod.ref.null(binaryen.anyref),
+    site = mod.i32.const(-1),
   }: {
     fnRef: binaryen.ExpressionRef;
     env?: binaryen.ExpressionRef;
+    site?: binaryen.ExpressionRef;
   }) =>
     initStruct(mod, continuationType, [
       fnRef,
       env,
+      site,
+    ]);
+
+  const makeEffectResult = ({
+    status,
+    cont = mod.ref.null(binaryen.anyref),
+  }: {
+    status: binaryen.ExpressionRef;
+    cont?: binaryen.ExpressionRef;
+  }) =>
+    initStruct(mod, effectResultType, [
+      status,
+      cont,
     ]);
 
   const makeTailGuard = ({
@@ -270,12 +312,23 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
       });
   };
 
+  const getEffectResultField = (index: number, type: binaryen.Type) => {
+    return (result: binaryen.ExpressionRef): binaryen.ExpressionRef =>
+      structGetFieldValue({
+        mod,
+        fieldIndex: index,
+        fieldType: type,
+        exprRef: result,
+      });
+  };
+
   return {
     handlerFrameType,
     outcomeType,
     effectRequestType,
     continuationType,
     tailGuardType,
+    effectResultType,
     makeOutcomeValue: (payload) => makeOutcome(OUTCOME_TAGS.value, payload),
     makeOutcomeEffect: (request) => makeOutcome(OUTCOME_TAGS.effect, request),
     makeHandlerFrame: ({
@@ -323,6 +376,7 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
       tailGuardType
     ),
     makeContinuation,
+    makeEffectResult,
     continuationFn: getContinuationField(
       CONTINUATION_FIELDS.fnRef,
       binaryen.funcref
@@ -330,6 +384,10 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
     continuationEnv: getContinuationField(
       CONTINUATION_FIELDS.env,
       binaryen.anyref
+    ),
+    continuationSite: getContinuationField(
+      CONTINUATION_FIELDS.site,
+      binaryen.i32
     ),
     makeTailGuard,
     tailGuardObserved: getTailGuardField(
@@ -358,5 +416,13 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
     handlerClauseEnv: getHandlerField(5, binaryen.anyref),
     handlerTailExpected: getHandlerField(6, binaryen.i32),
     handlerLabel: getHandlerField(7, binaryen.i32),
+    effectResultStatus: getEffectResultField(
+      EFFECT_RESULT_FIELDS.status,
+      binaryen.i32
+    ),
+    effectResultCont: getEffectResultField(
+      EFFECT_RESULT_FIELDS.cont,
+      binaryen.anyref
+    ),
   };
 };
