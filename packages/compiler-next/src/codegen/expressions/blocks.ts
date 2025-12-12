@@ -18,7 +18,6 @@ import {
 } from "../types.js";
 import { asStatement } from "./utils.js";
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
-import { exprContainsTarget, stmtContainsTarget } from "./contains.js";
 import { handlerCleanupOps } from "../effects/handler-stack.js";
 
 export const compileBlockExpr = (
@@ -31,33 +30,11 @@ export const compileBlockExpr = (
 ): CompiledExpression => {
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const statements: binaryen.ExpressionRef[] = [];
-  const resumeTarget = fnCtx.resumeFromSite?.exprId;
-  let foundResume = false;
   expr.statements.forEach((stmtId) => {
-    if (foundResume) {
-      statements.push(compileStatement(stmtId, ctx, fnCtx, compileExpr));
-      return;
-    }
-    if (
-      resumeTarget !== undefined &&
-      !stmtContainsTarget(stmtId, resumeTarget, ctx)
-    ) {
-      return;
-    }
-    if (resumeTarget !== undefined) {
-      foundResume = true;
-    }
     statements.push(compileStatement(stmtId, ctx, fnCtx, compileExpr));
   });
 
   if (typeof expr.value === "number") {
-    if (
-      resumeTarget !== undefined &&
-      !foundResume &&
-      !exprContainsTarget(expr.value, resumeTarget, ctx)
-    ) {
-      return { expr: ctx.mod.nop(), usedReturnCall: false };
-    }
     const { expr: valueExpr, usedReturnCall } = compileExpr({
       exprId: expr.value,
       ctx,

@@ -46,6 +46,7 @@ import { unboxOutcomeValue } from "../effects/outcome-values.js";
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { handlerCleanupOps } from "../effects/handler-stack.js";
 import { ensureDispatcher } from "../effects/dispatcher.js";
+import { createContinuationExpressionCompiler } from "../effects/continuation-compiler.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 let traitDispatchSigCounter = 0;
@@ -194,11 +195,9 @@ const collectLocalSymbols = (
 const ensureContinuationFunction = ({
   site,
   ctx,
-  compileExpr,
 }: {
   site: EffectPerformSite;
   ctx: CodegenContext;
-  compileExpr: ExpressionCompiler;
 }): binaryen.Type => {
   const built = ctx.effectsState.contBuilt;
   const building = ctx.effectsState.contBuilding;
@@ -279,9 +278,12 @@ const ensureContinuationFunction = ({
           type: site.resumeValueType,
           typeId: site.resumeValueTypeId,
         } as const);
-  fnCtx.resumeFromSite = { exprId: site.exprId, resumeLocal };
+  const continuationCompiler = createContinuationExpressionCompiler({
+    targetExprId: site.exprId,
+    resumeLocal,
+  });
 
-  const bodyExpr = compileExpr({
+  const bodyExpr = continuationCompiler({
     exprId: fn.body,
     ctx,
     fnCtx,
@@ -642,7 +644,7 @@ export const compileEffectOpCall = ({
     }
   });
 
-  const contRefType = ensureContinuationFunction({ site, ctx, compileExpr });
+  const contRefType = ensureContinuationFunction({ site, ctx });
   const env = initStruct(ctx.mod, site.envType, envValues as number[]);
   const contRef = refFunc(ctx.mod, site.contFnName, contRefType);
   const continuation = ctx.effectsRuntime.makeContinuation({

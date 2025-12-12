@@ -20,7 +20,6 @@ import {
   getStructuralTypeInfo,
   getMatchPatternTypeId,
 } from "../types.js";
-import { exprContainsTarget } from "./contains.js";
 
 const getNominalComponentFromTypingResult = (
   type: TypeId,
@@ -49,80 +48,6 @@ export const compileIfExpr = (
   tailPosition: boolean,
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
-  const resumeTarget = fnCtx.resumeFromSite?.exprId;
-  if (typeof resumeTarget === "number") {
-    const branchWithTarget = expr.branches.find(
-      (branch) =>
-        exprContainsTarget(branch.value, resumeTarget, ctx) &&
-        !exprContainsTarget(branch.condition, resumeTarget, ctx)
-    );
-    if (branchWithTarget) {
-      return compileExpr({
-        exprId: branchWithTarget.value,
-        ctx,
-        fnCtx,
-        tailPosition,
-        expectedResultTypeId,
-      });
-    }
-    if (
-      typeof expr.defaultBranch === "number" &&
-      exprContainsTarget(expr.defaultBranch, resumeTarget, ctx)
-    ) {
-      return compileExpr({
-        exprId: expr.defaultBranch,
-        ctx,
-        fnCtx,
-        tailPosition,
-        expectedResultTypeId,
-      });
-    }
-    const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-    const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceKey);
-    const compiledBranches = expr.branches.map((branch) => ({
-      condition: compileExpr({
-        exprId: branch.condition,
-        ctx,
-        fnCtx,
-      }).expr,
-      value: compileExpr({
-        exprId: branch.value,
-        ctx,
-        fnCtx,
-        tailPosition,
-        expectedResultTypeId,
-      }),
-    }));
-    const defaultBranch =
-      typeof expr.defaultBranch === "number"
-        ? compileExpr({
-            exprId: expr.defaultBranch,
-            ctx,
-            fnCtx,
-            tailPosition,
-            expectedResultTypeId,
-          })
-        : { expr: ctx.mod.nop(), usedReturnCall: false };
-    if (
-      typeof expr.defaultBranch !== "number" &&
-      resultType !== binaryen.none
-    ) {
-      throw new Error("non-void if expressions require an else branch");
-    }
-
-    let chain = defaultBranch;
-    for (let index = compiledBranches.length - 1; index >= 0; index -= 1) {
-      const branch = compiledBranches[index]!;
-      chain = {
-        expr: ctx.mod.if(branch.condition, branch.value.expr, chain.expr),
-        usedReturnCall:
-          branch.value.usedReturnCall && chain.usedReturnCall,
-      };
-    }
-
-    return chain;
-  }
-
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceKey);
   let fallback =
@@ -175,23 +100,6 @@ export const compileMatchExpr = (
   tailPosition: boolean,
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
-  const resumeTarget = fnCtx.resumeFromSite?.exprId;
-  if (typeof resumeTarget === "number") {
-    const armWithTarget = expr.arms.find((arm) =>
-      exprContainsTarget(arm.value, resumeTarget, ctx)
-    );
-    if (armWithTarget) {
-      const armValue = compileExpr({
-        exprId: armWithTarget.value,
-        ctx,
-        fnCtx,
-        tailPosition,
-        expectedResultTypeId,
-      });
-      return armValue;
-    }
-  }
-
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const discriminantTypeId = getRequiredExprType(
     expr.discriminant,
@@ -362,19 +270,8 @@ export const compileWhileExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const resumeTarget = fnCtx.resumeFromSite?.exprId;
-  const bodyContainsTarget =
-    typeof resumeTarget === "number" &&
-    exprContainsTarget(expr.body, resumeTarget, ctx);
-  const conditionContainsTarget =
-    typeof resumeTarget === "number" &&
-    exprContainsTarget(expr.condition, resumeTarget, ctx);
   const loopLabel = `while_loop_${expr.id}`;
   const breakLabel = `${loopLabel}_break`;
-  const skipConditionOnce = bodyContainsTarget && !conditionContainsTarget;
-  const skipFlag = skipConditionOnce
-    ? allocateTempLocal(binaryen.i32, fnCtx)
-    : undefined;
 
   const conditionExpr = compileExpr({
     exprId: expr.condition,
@@ -382,36 +279,26 @@ export const compileWhileExpr = (
     fnCtx,
   }).expr;
 
-  const conditionCheck = skipFlag
-    ? ctx.mod.if(
-        ctx.mod.i32.eqz(ctx.mod.local.get(skipFlag.index, binaryen.i32)),
-        ctx.mod.if(ctx.mod.i32.eqz(conditionExpr), ctx.mod.br(breakLabel))
-      )
-    : ctx.mod.if(ctx.mod.i32.eqz(conditionExpr), ctx.mod.br(breakLabel));
+  const conditionCheck = ctx.mod.if(
+    ctx.mod.i32.eqz(conditionExpr),
+    ctx.mod.br(breakLabel)
+  );
 
   const body = compileExpr({ exprId: expr.body, ctx, fnCtx }).expr;
   const loopBody = ctx.mod.block(
     null,
     [
       conditionCheck,
-      skipFlag
-        ? ctx.mod.local.set(skipFlag.index, ctx.mod.i32.const(0))
-        : ctx.mod.nop(),
       body,
       ctx.mod.br(loopLabel),
     ],
     binaryen.none
   );
 
-  const initSkipFlag = skipFlag
-    ? ctx.mod.local.set(skipFlag.index, ctx.mod.i32.const(1))
-    : undefined;
-
   return {
     expr: ctx.mod.block(
       breakLabel,
       [
-        ...(initSkipFlag ? [initSkipFlag] : []),
         ctx.mod.loop(loopLabel, loopBody),
       ],
       binaryen.none

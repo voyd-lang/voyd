@@ -189,10 +189,6 @@ export interface FunctionContext {
   instanceKey?: string;
   typeInstanceKey?: string;
   effectful: boolean;
-  resumeFromSite?: {
-    exprId: HirExprId;
-    resumeLocal?: LocalBindingLocal;
-  };
   handlerStack?: HandlerScope[];
   continuations?: Map<SymbolId, ContinuationBinding>;
 }
