@@ -92,9 +92,9 @@ move(x: x, y: y, z: z)
 Labeled arguments also support concise closure sugar on call sites:
 
 ```voyd
-fn try({ do: fn(): throws -> void, catch: fn(e: Error) -> void })
+fn foo({ do: fn(): throws -> void, catch: fn(e: Error) -> void })
 
-try do():
+foo do():
   this_may_throw()
 catch(e):
   log e

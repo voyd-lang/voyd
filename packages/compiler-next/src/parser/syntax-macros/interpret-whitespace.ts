@@ -38,15 +38,10 @@ const interpretWhitespaceExpr = (form: Form, indentLevel?: number): Expr => {
   }
 
   const newForm = new Form(transformed);
-  const normalizedForm =
+  const normalizedForm: Form =
     newForm.length === 1 && p.isForm(newForm.first) ? newForm.first : newForm;
-
-  const preserved =
-    form instanceof CallForm ? normalizedForm.toCall() : normalizedForm;
-
-  if (form.location) {
-    preserved.setLocation(form.location.clone());
-  }
+  const preserved = normalizeFormKind(form, normalizedForm);
+  if (form.location) preserved.setLocation(form.location.clone());
 
   const normalized = finalizeWhitespace(preserved);
   return p.isForm(normalized) ? normalized.unwrap() : normalized;
@@ -85,15 +80,15 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
   consumeLeadingWhitespace(cursor);
   while (!cursor.done) {
     const next = cursor.peek();
-    const nextIndent = nextExprIndentLevel(cursor);
 
-    if (isNewline(next) && nextIndent > indentLevel) {
-      pushChildBlock();
-      continue;
-    }
+    if (isNewline(next)) {
+      const nextIndent = nextExprIndentLevel(cursor);
+      if (nextIndent > indentLevel) {
+        pushChildBlock();
+        continue;
+      }
 
-    if (isNewline(next) && !isContinuationOp(transformed.at(-1))) {
-      break;
+      if (!isContinuationOp(transformed.at(-1))) break;
     }
 
     if (p.isWhitespaceAtom(next)) {
@@ -101,16 +96,13 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
       continue;
     }
 
-    if (p.isForm(next) && next.callsInternal("paren")) {
-      cursor.consume();
-      const result = elideParens(next.slice(1).cursor(), indentLevel);
-      transformed.push(result);
-      continue;
-    }
-
     if (p.isForm(next)) {
       cursor.consume();
-      transformed.push(interpretWhitespaceExpr(next, indentLevel));
+      transformed.push(
+        next.callsInternal("paren")
+          ? elideParens(next.slice(1).cursor(), indentLevel)
+          : interpretWhitespaceExpr(next, indentLevel)
+      );
       continue;
     }
 
@@ -134,8 +126,8 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
 };
 
 /**
- * Returns the indentation level of the next expression. Returns `0` if a comma
- * is encountered, which is a performance hack for whitespace block parsing.
+ * Returns the indentation level of the next expression by counting consecutive
+ * indent atoms after the next newline.
  */
 const nextExprIndentLevel = (cursor: FormCursor) => {
   let nextIndentLevel = 0;
@@ -166,14 +158,7 @@ const consumeLeadingWhitespace = (cursor: FormCursor) => {
 const isNewline = (v?: Expr) => p.isWhitespaceAtom(v) && v.isNewline;
 const isIndent = (v?: Expr) => p.isWhitespaceAtom(v) && v.isIndent;
 
-const isNamedArg = (v: Form) => {
-  // Second value should be an identifier whose value is a colon
-  if (!p.atomEq(v.at(1), ":")) {
-    return false;
-  }
-
-  return true;
-};
+const isNamedArg = (v: Form) => p.atomEq(v.at(1), ":");
 
 const hasTrailingHandlerBlock = (v: Form): boolean => {
   if (v.length < 3) return false;
@@ -214,17 +199,8 @@ const handleLeadingContinuationOp = (
   const head = elements.at(0);
   if (head) transformed.push(head);
   const tail = elements.slice(1);
-
-  if (tail.length === 1) {
-    transformed.push(tail[0]!);
-    return true;
-  }
-
-  if (tail.length > 1) {
-    transformed.push(tail);
-    return true;
-  }
-
+  if (tail.length === 0) return true;
+  transformed.push(tail.length === 1 ? tail[0]! : tail);
   return true;
 };
 
@@ -248,47 +224,41 @@ const normalizeFormKind = (original: Expr, rebuilt: Form): Expr =>
 /** Handles labeled parameter closure sugar syntax my_fn\n  labeled_param_that_takes_closure(param): expression */
 const attachLabeledClosureSugarHandlers = (expr: Expr): Expr => {
   if (!p.isForm(expr)) return expr;
+
   const rewritten = expr.toArray().map(attachLabeledClosureSugarHandlers);
-  if (expr.calls("block")) {
-    const normalized: Expr[] = [];
-    rewritten.forEach((entry) => {
-      if (
-        isHandlerClause(entry) &&
-        normalized.length > 0 &&
-        p.isForm(normalized.at(-1)) &&
-        (normalized.at(-1) as Form).calls("try")
-      ) {
-        const previous = normalized.pop() as Form;
-        normalized.push(new Form([...previous.toArray(), entry]));
-        return;
-      }
-      if (
-        isHandlerClause(entry) &&
-        normalized.length > 0 &&
-        p.isForm(normalized.at(-1)) &&
-        isCallLikeForm(normalized.at(-1) as Form)
-      ) {
-        const previous = normalized.pop() as Form;
-        normalized.push(new Form([...previous.toArray(), entry]));
-        return;
-      }
-      normalized.push(entry);
-    });
-    return normalizeFormKind(
-      expr,
-      new Form({
-        location: expr.location?.clone(),
-        elements: normalized,
-      })
-    );
-  }
+  const elements = expr.calls("block")
+    ? mergeHandlerClauses(rewritten)
+    : rewritten;
+
   return normalizeFormKind(
     expr,
     new Form({
       location: expr.location?.clone(),
-      elements: rewritten,
+      elements,
     })
   );
+};
+
+const mergeHandlerClauses = (entries: Expr[]): Expr[] => {
+  const result: Expr[] = [];
+
+  entries.forEach((entry) => {
+    const previous = result.at(-1);
+
+    if (
+      isHandlerClause(entry) &&
+      p.isForm(previous) &&
+      isCallLikeForm(previous)
+    ) {
+      result.pop();
+      result.push(new Form([...previous.toArray(), entry]));
+      return;
+    }
+
+    result.push(entry);
+  });
+
+  return result;
 };
 
 function hoistTrailingBlock(expr: Form): Form;
@@ -326,63 +296,60 @@ const blockBindingOps = new Set(["=>", ":", "="]);
 const isBlockBindingOp = (expr?: Expr) =>
   isIdentifierAtom(expr) && blockBindingOps.has(expr.value);
 
+const isNonBindingOp = (expr?: Expr) =>
+  isIdentifierAtom(expr) && isOp(expr) && !isBlockBindingOp(expr);
+
 const shouldDescendForTrailingBlock = (
   child: Form,
   previous?: Expr
 ): boolean => {
-  const headIsOp =
-    isIdentifierAtom(child.first) &&
-    isOp(child.first) &&
-    !isBlockBindingOp(child.first);
-  const prevIsOp =
-    isIdentifierAtom(previous) && isOp(previous) && !isBlockBindingOp(previous);
-  return headIsOp || prevIsOp;
+  return isNonBindingOp(child.first) || isNonBindingOp(previous);
+};
+
+const rebuildSameKind = (original: Form, elements: Expr[]): Expr => {
+  const rebuilt = new Form({
+    location: original.location?.clone(),
+    elements,
+  });
+
+  return original instanceof CallForm ? rebuilt.toCall() : rebuilt.unwrap();
 };
 
 const splitTrailingBlock = (expr: Expr): TrailingBlockExtraction => {
   if (!p.isForm(expr)) return { expr };
 
-  const lastIndex = expr.length - 1;
-  if (lastIndex < 0) return { expr };
-
-  const last = expr.at(lastIndex);
+  const elements = expr.toArray();
+  const last = elements.at(-1);
   if (!last) return { expr };
 
   if (p.isForm(last) && last.calls("block")) {
-    const elements = expr.toArray().slice(0, -1);
-    const rebuilt = new Form({
-      location: expr.location?.clone(),
-      elements,
-    });
-    const remaining =
-      expr instanceof CallForm ? rebuilt.toCall() : rebuilt.unwrap();
-    return { expr: remaining, block: last };
+    return {
+      expr: rebuildSameKind(expr, elements.slice(0, -1)),
+      block: last,
+    };
   }
 
-  const previous = expr.at(lastIndex - 1);
+  const previous = elements.at(-2);
   if (p.isForm(last) && shouldDescendForTrailingBlock(last, previous)) {
     const { expr: trimmedLast, block } = splitTrailingBlock(last);
     if (!block) return { expr };
 
-    const elements = expr.toArray().slice(0, -1);
+    const remaining = elements.slice(0, -1);
     if (trimmedLast && !(p.isForm(trimmedLast) && trimmedLast.length === 0)) {
-      elements.push(trimmedLast);
+      remaining.push(trimmedLast);
     }
 
-    const rebuilt = new Form({
-      location: expr.location?.clone(),
-      elements,
-    });
-    const remaining =
-      expr instanceof CallForm ? rebuilt.toCall() : rebuilt.unwrap();
-    return { expr: remaining, block };
+    return {
+      expr: rebuildSameKind(expr, remaining),
+      block,
+    };
   }
 
   return { expr };
 };
 
 const addSibling = (child: Expr, siblings: Expr[]) => {
-  let normalizedChild = unwrapSyntheticCall(child);
+  const normalizedChild = unwrapSyntheticCall(child);
   const olderSibling = siblings.at(-1);
 
   if (!p.isForm(normalizedChild)) {
