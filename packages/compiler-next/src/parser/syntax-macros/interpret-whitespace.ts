@@ -19,9 +19,7 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
       "ast",
       ...(isForm(result.at(0)) ? result.toArray() : [result])
     );
-    return attachLabeledClosureSugarHandlers(
-      hoistTrailingBlock(normalized)
-    ) as Form;
+    return finalizeWhitespace(normalized) as Form;
   }
 
   const functional = applyFunctionalNotation(form);
@@ -50,14 +48,12 @@ const interpretWhitespaceExpr = (form: Form, indentLevel?: number): Expr => {
     preserved.setLocation(form.location.clone());
   }
 
-  const hoisted = hoistTrailingBlock(
-    attachLabeledClosureSugarHandlers(preserved)
-  );
-  if (p.isForm(hoisted)) {
-    return hoisted.unwrap();
-  }
-  return hoisted;
+  const normalized = finalizeWhitespace(preserved);
+  return p.isForm(normalized) ? normalized.unwrap() : normalized;
 };
+
+const finalizeWhitespace = (expr: Expr): Expr =>
+  hoistTrailingBlock(attachLabeledClosureSugarHandlers(expr));
 
 const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
   const transformed: FormInitElements = [];
