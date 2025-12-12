@@ -6,7 +6,7 @@ import type {
   EffectTableEffect,
   EffectTableOp,
 } from "../../effects/effect-table-types.js";
-import { RESUME_KIND } from "../../effects/runtime-abi.js";
+import { RESUME_KIND, type ResumeKind } from "../../effects/runtime-abi.js";
 import {
   MIN_EFFECT_BUFFER_SIZE,
   MSGPACK_READ_VALUE,
@@ -24,6 +24,17 @@ type WasmSource =
   | ArrayBuffer
   | WebAssembly.Module;
 
+const normalizeBinary = (
+  bytes: Uint8Array<ArrayBufferLike>
+): Uint8Array => new Uint8Array(bytes);
+
+const parseResumeKind = (value: number): ResumeKind => {
+  if (value === RESUME_KIND.resume || value === RESUME_KIND.tail) {
+    return value;
+  }
+  throw new Error(`unsupported resume kind ${value}`);
+};
+
 export interface ParsedEffectTable {
   version: number;
   tableExport: string;
@@ -36,23 +47,24 @@ export interface ParsedEffectTable {
 export interface EffectHandlerRequest {
   effectId: number;
   opId: number;
-  resumeKind: number;
+  resumeKind: ResumeKind;
   label: string;
   effectLabel: string;
 }
 
 export type EffectHandler = (
-  request: EffectHandlerRequest
+  request: EffectHandlerRequest,
+  ...args: unknown[]
 ) => unknown | Promise<unknown>;
 
 const toBytes = (wasm: WasmSource): Uint8Array => {
-  if (wasm instanceof Uint8Array) return wasm;
+  if (wasm instanceof Uint8Array) return normalizeBinary(wasm);
   if (wasm instanceof ArrayBuffer) return new Uint8Array(wasm);
   if (typeof WebAssembly !== "undefined" && wasm instanceof WebAssembly.Module) {
     throw new Error("Cannot derive bytes from a compiled WebAssembly.Module");
   }
   if (typeof (wasm as binaryen.Module).emitBinary === "function") {
-    return (wasm as binaryen.Module).emitBinary();
+    return normalizeBinary((wasm as binaryen.Module).emitBinary());
   }
   throw new Error("Unsupported wasm input");
 };
@@ -77,7 +89,7 @@ export const parseEffectTable = (
   const module =
     wasm instanceof WebAssembly.Module
       ? wasm
-      : new WebAssembly.Module(toBytes(wasm));
+      : new WebAssembly.Module(new Uint8Array(toBytes(wasm)));
   const sections = WebAssembly.Module.customSections(module, tableExport);
   if (sections.length === 0) {
     throw new Error(`Missing effect table export ${tableExport}`);
@@ -136,11 +148,11 @@ export const parseEffectTable = (
       throw new Error("Effect table op range exceeds table bounds");
     }
     const ops = opEntries.slice(start, end).map((op) => ({
-        id: op.opId,
-        name: decodeName(names, op.nameOffset),
-        label: decodeName(names, op.nameOffset),
-        resumeKind: op.resumeKind,
-      }));
+      id: op.opId,
+      name: decodeName(names, op.nameOffset),
+      label: decodeName(names, op.nameOffset),
+      resumeKind: parseResumeKind(op.resumeKind),
+    }));
     opsByEffect.set(header.effectId, ops);
     return {
       id: header.effectId,
@@ -176,13 +188,13 @@ export const instantiateEffectModule = ({
   const module =
     wasm instanceof WebAssembly.Module
       ? wasm
-      : new WebAssembly.Module(toBytes(wasm));
+      : new WebAssembly.Module(new Uint8Array(toBytes(wasm)));
   const table = parseEffectTable(module, tableExport);
   const instance = new WebAssembly.Instance(module, imports);
   return { module, instance, table };
 };
 
-const resumeKindName = (kind: number): string =>
+const resumeKindName = (kind: ResumeKind): string =>
   kind === RESUME_KIND.tail ? "tail" : "resume";
 
 const lookupHandler = ({
@@ -210,7 +222,7 @@ const toEffectHandlerRequest = ({
   table: ParsedEffectTable;
   effectId: number;
   opId: number;
-  resumeKind: number;
+  resumeKind: ResumeKind;
 }): EffectHandlerRequest & { opLabel: string } => {
   const effect = table.effects.find((entry) => entry.id === effectId);
   const effectLabel = effect?.label ?? `effect#${effectId}`;
@@ -408,12 +420,13 @@ export const runEffectfulExport = async <T = unknown>({
         resumeKind: number;
         args: unknown[];
       };
-      const request = toEffectHandlerRequest({
-        table,
-        effectId: decoded.effectId,
-        opId: decoded.opId,
-        resumeKind: decoded.resumeKind,
-      });
+const resumeKind = parseResumeKind(decoded.resumeKind);
+const request = toEffectHandlerRequest({
+  table,
+  effectId: decoded.effectId,
+  opId: decoded.opId,
+  resumeKind,
+});
       const handler = lookupHandler({ handlers, request });
       if (!handler) {
         throw new Error(

@@ -65,7 +65,11 @@ const createContext = () => {
       table: { getExprType: (id: number) => exprTypes.get(id) } as any,
       primitives: { unknown: -1 } as any,
     } as any,
-    options: { optimize: false, validate: false },
+    options: {
+      optimize: false,
+      validate: false,
+      emitEffectHelpers: false,
+    },
     functions: new Map(),
     functionInstances: new Map(),
     itemsToSymbols: new Map(),
@@ -85,6 +89,11 @@ const createContext = () => {
       handlerTails: new Map(),
       semantics: {} as any,
       stackSwitching: false,
+    },
+    effectLowering: {
+      sitesByExpr: new Map(),
+      sites: [],
+      argsTypes: new Map(),
     },
     outcomeValueTypes: new Map(),
   };

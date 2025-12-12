@@ -12,7 +12,6 @@ import type {
   CompiledExpression,
   ExpressionCompiler,
   FunctionContext,
-  HirEffectHandlerExpr,
 } from "../context.js";
 import { effectOpIds } from "../effects/effect-lowering.js";
 import { allocateTempLocal, loadBindingValue } from "../locals.js";
@@ -23,7 +22,8 @@ import {
   popHandlerScope,
 } from "../effects/handler-stack.js";
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
-import { RESUME_KIND } from "../effects/runtime-abi.js";
+import { RESUME_KIND, type ResumeKind } from "../effects/runtime-abi.js";
+import type { HirEffectHandlerExpr } from "../../semantics/hir/index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -116,7 +116,7 @@ const emitClauseFunction = ({
   clauseIndex: number;
   env: ReturnType<typeof buildClauseEnv>;
   ctx: CodegenContext;
-  handlerResumeKind: number;
+  handlerResumeKind: ResumeKind;
   compileExpr: ExpressionCompiler;
 }): { fnName: string; fnRefType: binaryen.Type } => {
   const clause = expr.handlers[clauseIndex]!;

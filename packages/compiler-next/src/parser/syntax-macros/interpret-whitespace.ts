@@ -52,9 +52,13 @@ const interpretWhitespaceExpr = (form: Form, indentLevel?: number): Expr => {
     preserved.setLocation(form.location.clone());
   }
 
-  return hoistTrailingBlock(
+  const hoisted = hoistTrailingBlock(
     attachLabeledClosureSugarHandlers(preserved)
-  ).unwrap();
+  );
+  if (p.isForm(hoisted)) {
+    return hoisted.unwrap();
+  }
+  return hoisted;
 };
 
 const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
@@ -85,7 +89,7 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
       .slice(1)
       .filter((entry) => p.isForm(entry) && isHandlerClause(entry));
     if (handlerEntries.length > 0) {
-      const bodyEntries = children.filter(
+      const bodyEntries: FormInitElements = children.filter(
         (entry) => !p.isForm(entry) || !isHandlerClause(entry)
       );
       const targetIndex = bodyEntries.length - 1;

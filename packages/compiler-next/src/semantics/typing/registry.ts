@@ -25,11 +25,11 @@ export const seedPrimitiveTypes = (ctx: TypingContext): void => {
   ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
   ctx.primitives.bool = registerPrimitive(ctx, "bool", "boolean", "Bool");
   ctx.primitives.unknown = registerPrimitive(ctx, "unknown");
+  ctx.primitives.i32 = registerPrimitive(ctx, "i32");
+  ctx.primitives.i64 = registerPrimitive(ctx, "i64");
+  ctx.primitives.f32 = registerPrimitive(ctx, "f32");
+  ctx.primitives.f64 = registerPrimitive(ctx, "f64");
 
-  registerPrimitive(ctx, "i32");
-  registerPrimitive(ctx, "i64");
-  registerPrimitive(ctx, "f32");
-  registerPrimitive(ctx, "f64");
   registerPrimitive(ctx, "string", "String");
 };
 

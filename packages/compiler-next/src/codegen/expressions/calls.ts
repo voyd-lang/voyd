@@ -14,6 +14,8 @@ import type {
   TypeId,
 } from "../context.js";
 import type { EffectPerformSite } from "../effects/effect-lowering.js";
+import type { HirFunction, HirPattern } from "../../semantics/hir/index.js";
+import type { EffectRowId, HirStmtId } from "../../semantics/ids.js";
 import { compileIntrinsicCall } from "../intrinsics.js";
 import {
   requiresStructuralConversion,
@@ -1041,7 +1043,7 @@ const compileClosureCall = ({
     kind: "function";
     parameters: readonly { type: TypeId; label?: string; optional?: boolean }[];
     returnType: TypeId;
-    effectRow: unknown;
+    effectRow: EffectRowId;
   };
   ctx: CodegenContext;
   fnCtx: FunctionContext;

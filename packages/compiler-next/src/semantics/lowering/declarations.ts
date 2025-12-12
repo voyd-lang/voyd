@@ -379,10 +379,12 @@ export const lowerEffectDecl = (
       mutable: false,
       bindingKind: param.bindingKind,
     }));
+    const resumableMode: "ctl" | "fn" =
+      op.resumable === "tail" ? "fn" : "ctl";
     return {
       symbol: op.symbol,
       span: toSourceSpan(op.ast ?? effect.form),
-      resumable: op.resumable === "tail" ? "fn" : "ctl",
+      resumable: resumableMode,
       parameters,
       returnType: lowerTypeExpr(op.returnTypeExpr, ctx, opScope),
     };
@@ -406,13 +408,11 @@ export const lowerEffectDecl = (
     });
     operations.forEach((op) => {
       ctx.builder.recordExport({
-        name: ctx.symbolTable.getSymbol(op.symbol).name,
+        alias: ctx.symbolTable.getSymbol(op.symbol).name,
         symbol: op.symbol,
         visibility: toExportVisibility(effect.visibility, ctx),
         span: toSourceSpan(effect.form),
         item: effectId,
-        memberOwner: effect.symbol,
-        isStatic: true,
       });
     });
   }

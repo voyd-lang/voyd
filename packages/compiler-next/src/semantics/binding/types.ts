@@ -56,7 +56,6 @@ export interface BindingResult {
   traits: readonly BoundTrait[];
   impls: readonly BoundImpl[];
   effects: readonly BoundEffect[];
-  effects: readonly BoundEffect[];
   overloads: Map<OverloadSetId, BoundOverloadSet>;
   overloadBySymbol: Map<SymbolId, OverloadSetId>;
   diagnostics: Diagnostic[];

@@ -16,7 +16,7 @@ import {
 import { isIdentifierWithValue } from "../utils.js";
 import type { IntrinsicAttribute } from "../../parser/attributes.js";
 import type { HirBindingKind } from "../hir/index.js";
-import { ensureForm } from "./utils.js";
+import { ensureForm } from "./binders/utils.js";
 
 export interface ParsedFunctionDecl {
   form: Form;
@@ -800,11 +800,4 @@ const unwrapFieldEntry = (
   }
 
   return { field, modifier };
-};
-
-const ensureForm = (expr: Expr | undefined, message: string): Form => {
-  if (!isForm(expr)) {
-    throw new Error(message);
-  }
-  return expr;
 };

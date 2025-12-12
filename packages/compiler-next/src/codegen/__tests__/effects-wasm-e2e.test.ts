@@ -22,8 +22,9 @@ const buildModule = () => {
 describe("effects wasm e2e", () => {
   it("runs handlers inside wasm", () => {
     const { module } = buildModule();
+    const wasmBinary = new Uint8Array(module.emitBinary());
     const instance = new WebAssembly.Instance(
-      new WebAssembly.Module(module.emitBinary()),
+      new WebAssembly.Module(wasmBinary),
       {}
     );
     const main = instance.exports.main as CallableFunction;
@@ -32,8 +33,9 @@ describe("effects wasm e2e", () => {
 
   it("traps on double resume", () => {
     const { module } = buildModule();
+    const wasmBinary = new Uint8Array(module.emitBinary());
     const instance = new WebAssembly.Instance(
-      new WebAssembly.Module(module.emitBinary()),
+      new WebAssembly.Module(wasmBinary),
       {}
     );
     const target = instance.exports.double_resume as CallableFunction;
@@ -42,8 +44,9 @@ describe("effects wasm e2e", () => {
 
   it("traps when a tail resume is missing", () => {
     const { module } = buildModule();
+    const wasmBinary = new Uint8Array(module.emitBinary());
     const instance = new WebAssembly.Instance(
-      new WebAssembly.Module(module.emitBinary()),
+      new WebAssembly.Module(wasmBinary),
       {}
     );
     const target = instance.exports.missing_tail as CallableFunction;

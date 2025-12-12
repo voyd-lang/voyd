@@ -7,6 +7,7 @@ import { codegen } from "../index.js";
 import { createRttContext } from "../rtt/index.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";
 import { buildEffectMir } from "../effects/effect-mir.js";
+import { buildEffectLowering } from "../effects/effect-lowering.js";
 import {
   compileFunctions,
   emitModuleExports,
@@ -60,7 +61,11 @@ const getNominalPatternDesc = (typeId: TypeId, typing: TypingResult) => {
   throw new Error("expected match pattern to include a nominal component");
 };
 
-const DEFAULT_OPTIONS = { optimize: false, validate: true } as const;
+const DEFAULT_OPTIONS = {
+  optimize: false,
+  validate: true,
+  emitEffectHelpers: false,
+} as const;
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
@@ -96,8 +101,17 @@ const buildCodegenProgram = (
     rtt,
     effectsRuntime,
     effectMir: buildEffectMir({ semantics: sem }),
+    effectLowering: { sitesByExpr: new Map(), sites: [], argsTypes: new Map() },
     outcomeValueTypes,
   }));
+
+  const siteCounter = { current: 0 };
+  contexts.forEach((ctx) => {
+    ctx.effectLowering = buildEffectLowering({
+      ctx,
+      siteCounter,
+    });
+  });
 
   contexts.forEach(registerFunctionMetadata);
   contexts.forEach(registerImportMetadata);

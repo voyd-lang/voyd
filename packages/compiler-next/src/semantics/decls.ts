@@ -160,6 +160,15 @@ export interface EffectOperationDecl {
   returnTypeExpr?: Expr;
 }
 
+export interface EffectOperationDeclInput {
+  name: string;
+  symbol: SymbolId;
+  ast?: Syntax;
+  parameters: readonly ParameterDeclInput[];
+  resumable: "resume" | "tail";
+  returnTypeExpr?: Expr;
+}
+
 export interface EffectDecl {
   id: EffectDeclId;
   name: string;
@@ -171,7 +180,11 @@ export interface EffectDecl {
   moduleIndex: number;
 }
 
-export type EffectDeclInput = Omit<EffectDecl, "id"> & { id?: EffectDeclId };
+export type EffectDeclInput = Omit<EffectDecl, "id" | "operations"> & {
+  id?: EffectDeclId;
+  operations: readonly EffectOperationDeclInput[];
+};
+
 
 export class DeclTable {
   functions: FunctionDecl[] = [];

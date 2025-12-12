@@ -1,7 +1,5 @@
 import type {
   EffectRowId,
-  HirTypeExpr,
-  HirNamedTypeExpr,
   SymbolId,
   NodeId,
   SourceSpan,
@@ -10,6 +8,10 @@ import type {
 import type { TypingContext, TypingState } from "./types.js";
 import type { EffectTable } from "../effects/effect-table.js";
 import { emitDiagnostic } from "../../diagnostics/index.js";
+import type {
+  HirTypeExpr,
+  HirNamedTypeExpr,
+} from "../hir/index.js";
 
 const pureEffectRow = (effects: EffectTable): EffectRowId => effects.emptyRow;
 

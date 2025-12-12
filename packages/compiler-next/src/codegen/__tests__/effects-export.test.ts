@@ -31,8 +31,9 @@ describe("effectful exports & host boundary", () => {
       entryName: "main_effectful",
       handlers: {
         "0:0:1": () => 2,
-        "0:1:0": (_req, msg: number) => {
-          logs.push(msg);
+        "0:1:0": (_req, msg: unknown) => {
+          const value = typeof msg === "number" ? msg : Number(msg);
+          logs.push(value);
           return 0;
         },
       },

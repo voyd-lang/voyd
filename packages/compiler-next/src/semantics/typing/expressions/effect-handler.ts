@@ -172,7 +172,7 @@ const analyzeContinuationUsage = ({
         return usage;
       }
       case "tuple":
-        return expr.elements.reduce(
+        return expr.elements.reduce<ContinuationUsage>(
           (acc, entry) => mergeUsage(acc, visitExpression(entry, inNestedLambda)),
           { min: 0, max: 0, escapes: false }
         );
@@ -237,7 +237,7 @@ const analyzeContinuationUsage = ({
         return usage;
       }
       case "object-literal":
-        return expr.entries.reduce(
+        return expr.entries.reduce<ContinuationUsage>(
           (acc, entry) => mergeUsage(acc, visitExpression(entry.value, inNestedLambda)),
           { min: 0, max: 0, escapes: false }
         );

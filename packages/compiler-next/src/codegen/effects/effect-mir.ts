@@ -10,11 +10,13 @@ import type {
 import type { SemanticsPipelineResult } from "../context.js";
 import type {
   EffectRowId,
-  HirEffectHandlerClause,
   HirExprId,
   SymbolId,
 } from "../../semantics/ids.js";
-import type { HirExpression } from "../../semantics/hir/index.js";
+import type {
+  HirExpression,
+  HirEffectHandlerClause,
+} from "../../semantics/hir/index.js";
 
 const effectRowFor = (
   symbol: SymbolId,

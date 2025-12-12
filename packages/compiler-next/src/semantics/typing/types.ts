@@ -8,6 +8,7 @@ import type {
   HirTypeExpr,
   HirBindingKind,
   HirVisibility,
+  HirEffectHandlerClause,
 } from "../hir/index.js";
 import type { ModuleExportTable } from "../modules.js";
 import type {
@@ -82,6 +83,10 @@ export interface PrimitiveTypes {
   void: TypeId;
   unknown: TypeId;
   defaultEffectRow: EffectRowId;
+  i32: TypeId;
+  i64: TypeId;
+  f32: TypeId;
+  f64: TypeId;
 }
 
 export interface FunctionSignature {
@@ -104,6 +109,7 @@ export interface ParamSignature {
   span?: SourceSpan;
   name?: string;
   symbol?: SymbolId;
+  optional?: boolean;
 }
 
 export interface FunctionTypeParam {

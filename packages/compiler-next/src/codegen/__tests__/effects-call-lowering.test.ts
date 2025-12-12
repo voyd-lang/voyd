@@ -5,6 +5,7 @@ import { parse } from "../../parser/parser.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
 import type { SemanticsPipelineResult } from "../../semantics/pipeline.js";
+import type { EffectRowId } from "../../semantics/ids.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -20,7 +21,7 @@ const setEffectRowFor = ({
 }: {
   semantics: SemanticsPipelineResult;
   names: readonly string[];
-  effectRow: number;
+  effectRow: EffectRowId;
 }) => {
   semantics.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
@@ -28,7 +29,10 @@ const setEffectRowFor = ({
     if (!names.includes(name)) return;
     const signature = semantics.typing.functions.getSignature(item.symbol);
     if (signature) {
-      signature.effectRow = effectRow;
+      semantics.typing.functions.setSignature(item.symbol, {
+        ...signature,
+        effectRow,
+      });
     }
   });
 };
@@ -64,7 +68,7 @@ const markEffectful = (semantics: SemanticsPipelineResult): void => {
     if (typeof typeId !== "number") return;
     const desc = semantics.typing.arena.get(typeId);
     if (desc.kind === "function") {
-      desc.effectRow = effectRow;
+      (desc as { effectRow: EffectRowId }).effectRow = effectRow;
     }
   });
 };

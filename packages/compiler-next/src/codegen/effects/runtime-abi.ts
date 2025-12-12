@@ -33,6 +33,7 @@ const EFFECT_REQUEST_FIELDS = {
 const CONTINUATION_FIELDS = {
   fnRef: 0,
   env: 1,
+  site: 2,
 } as const;
 
 const EFFECT_RESULT_FIELDS = {
@@ -94,6 +95,7 @@ export interface EffectRuntime {
   makeContinuation: (params: {
     fnRef: binaryen.ExpressionRef;
     env?: binaryen.ExpressionRef;
+    site?: binaryen.ExpressionRef;
   }) => binaryen.ExpressionRef;
   makeEffectResult: (params: {
     status: binaryen.ExpressionRef;

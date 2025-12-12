@@ -40,7 +40,10 @@ const markEffectful = (semantics: SemanticsPipelineResult): void => {
     if (!signature) {
       throw new Error(`missing signature for ${name}`);
     }
-    signature.effectRow = effectRow;
+    semantics.typing.functions.setSignature(symbol, {
+      ...signature,
+      effectRow,
+    });
   });
 
   semantics.hir.expressions.forEach((expr) => {

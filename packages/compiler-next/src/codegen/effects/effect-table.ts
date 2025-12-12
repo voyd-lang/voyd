@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import binaryen from "binaryen";
 import type { CodegenContext } from "../context.js";
-import { RESUME_KIND } from "./runtime-abi.js";
+import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
 import type {
   EffectTableEffect,
   EffectTableOp,
@@ -24,7 +24,7 @@ interface EffectHeader {
 
 interface OpEntry {
   opId: number;
-  resumeKind: number;
+  resumeKind: ResumeKind;
   nameOffset: number;
 }
 
@@ -48,7 +48,7 @@ class NamesBlobBuilder {
   }
 }
 
-const opResumeKind = (resumable: "resume" | "tail"): number =>
+const opResumeKind = (resumable: "resume" | "tail"): ResumeKind =>
   resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
 
 const collectEffects = (
