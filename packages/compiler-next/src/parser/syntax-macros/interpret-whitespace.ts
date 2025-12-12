@@ -125,30 +125,51 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
   return new Form(transformed).unwrap();
 };
 
+type IndentCacheEntry = { position: number; indent: number };
+const indentLookaheadCache = new WeakMap<FormCursor, IndentCacheEntry>();
+
 /**
  * Returns the indentation level of the next expression by counting consecutive
- * indent atoms after the next newline.
+ * indent atoms after the most recent newline. Uses a tiny per-cursor cache since
+ * callers often query the same position twice.
  */
 const nextExprIndentLevel = (cursor: FormCursor) => {
-  let nextIndentLevel = 0;
-  const probe = cursor.fork();
+  const cached = indentLookaheadCache.get(cursor);
+  if (cached && cached.position === cursor.position) {
+    return cached.indent;
+  }
 
-  while (!probe.done) {
-    const expr = probe.consume();
+  let nextIndentLevel = 0;
+  let offset = 0;
+
+  while (true) {
+    const expr = cursor.peek(offset);
+    if (!expr) {
+      nextIndentLevel = 0;
+      break;
+    }
+
     if (isNewline(expr)) {
       nextIndentLevel = 0;
+      offset += 1;
       continue;
     }
 
     if (isIndent(expr)) {
       nextIndentLevel += 1;
+      offset += 1;
       continue;
     }
 
-    return nextIndentLevel;
+    break;
   }
 
-  return 0;
+  indentLookaheadCache.set(cursor, {
+    position: cursor.position,
+    indent: nextIndentLevel,
+  });
+
+  return nextIndentLevel;
 };
 
 const consumeLeadingWhitespace = (cursor: FormCursor) => {
