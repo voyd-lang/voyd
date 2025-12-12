@@ -6,7 +6,7 @@ import type { CodegenContext } from "../context.js";
 const bin = binaryen as unknown as AugmentedBinaryen;
 
 export const ensureDispatcher = (ctx: CodegenContext): string => {
-  const existing = (ctx as unknown as { __voyd_dispatcher?: string }).__voyd_dispatcher;
+  const existing = ctx.effectsState.dispatcherName;
   if (existing) return existing;
   const fnName = "__voyd_dispatch";
   const handlerType = ctx.effectsRuntime.handlerFrameType;
@@ -139,6 +139,6 @@ export const ensureDispatcher = (ctx: CodegenContext): string => {
     ])
   );
 
-  (ctx as unknown as { __voyd_dispatcher?: string }).__voyd_dispatcher = fnName;
+  ctx.effectsState.dispatcherName = fnName;
   return fnName;
 };

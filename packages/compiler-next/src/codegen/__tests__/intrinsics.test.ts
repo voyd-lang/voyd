@@ -8,6 +8,8 @@ import {
 } from "@voyd/lib/binaryen-gc/index.js";
 import { getFixedArrayWasmTypes } from "../types.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";
+import { selectEffectsBackend } from "../effects/codegen-backend.js";
+import { createEffectsState } from "../effects/state.js";
 import type {
   CodegenContext,
   HirCallExpr,
@@ -69,6 +71,7 @@ const createContext = () => {
       optimize: false,
       validate: false,
       emitEffectHelpers: false,
+      continuationBackend: {},
     },
     functions: new Map(),
     functionInstances: new Map(),
@@ -90,6 +93,8 @@ const createContext = () => {
       semantics: {} as any,
       stackSwitching: false,
     },
+    effectsBackend: undefined as any,
+    effectsState: createEffectsState(),
     effectLowering: {
       sitesByExpr: new Map(),
       sites: [],
@@ -97,6 +102,8 @@ const createContext = () => {
     },
     outcomeValueTypes: new Map(),
   };
+
+  ctx.effectsBackend = selectEffectsBackend(ctx);
 
   return { ctx, descriptors, exprTypes, expressions, fnCtx };
 };

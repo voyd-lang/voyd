@@ -15,18 +15,23 @@ import {
   registerFunctionMetadata,
 } from "./functions.js";
 import { buildEffectMir } from "./effects/effect-mir.js";
-import { buildEffectLowering } from "./effects/effect-lowering.js";
 import {
   EFFECT_TABLE_EXPORT,
   emitEffectTableSection,
 } from "./effects/effect-table.js";
 import { addEffectRuntimeHelpers } from "./effects/runtime-helpers.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
+import {
+  selectEffectsBackend,
+  type EffectsBackend,
+} from "./effects/codegen-backend.js";
+import { createEffectsState } from "./effects/state.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
   validate: true,
   emitEffectHelpers: false,
+  continuationBackend: {},
 };
 
 export type CodegenProgramParams = {
@@ -54,7 +59,14 @@ export const codegenProgram = ({
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
-  const mergedOptions = { ...DEFAULT_OPTIONS, ...options };
+  const mergedOptions: Required<CodegenOptions> = {
+    ...DEFAULT_OPTIONS,
+    ...options,
+    continuationBackend: {
+      ...DEFAULT_OPTIONS.continuationBackend,
+      ...(options.continuationBackend ?? {}),
+    },
+  };
   const functions = new Map<string, FunctionMetadata[]>();
   const functionInstances = new Map<string, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
@@ -78,17 +90,22 @@ export const codegenProgram = ({
     lambdaFunctions: new Map(),
     rtt,
     effectsRuntime,
-    effectMir: buildEffectMir({ semantics: sem }),
+    effectMir: buildEffectMir({
+      semantics: sem,
+      options: mergedOptions.continuationBackend,
+    }),
+    effectsBackend: undefined as unknown as EffectsBackend,
+    effectsState: createEffectsState(),
     effectLowering: { sitesByExpr: new Map(), sites: [], argsTypes: new Map() },
     outcomeValueTypes,
   }));
 
   const siteCounter = { current: 0 };
   contexts.forEach((ctx) => {
-    ctx.effectLowering = buildEffectLowering({
-      ctx,
-      siteCounter,
-    });
+    ctx.effectsBackend = selectEffectsBackend(ctx);
+  });
+  contexts.forEach((ctx) => {
+    ctx.effectLowering = ctx.effectsBackend.buildLowering({ ctx, siteCounter });
   });
   contexts.forEach(registerFunctionMetadata);
   contexts.forEach(registerImportMetadata);

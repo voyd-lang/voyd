@@ -5,10 +5,11 @@ import binaryen from "binaryen";
 import { parse } from "../../parser/parser.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { buildEffectMir } from "../effects/effect-mir.js";
-import { buildEffectLowering } from "../effects/effect-lowering.js";
 import { codegen } from "../index.js";
 import { createRttContext } from "../rtt/index.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";
+import { selectEffectsBackend } from "../effects/codegen-backend.js";
+import { createEffectsState } from "../effects/state.js";
 import type { CodegenContext } from "../context.js";
 import { runEffectfulExport } from "./support/effects-harness.js";
 
@@ -43,7 +44,12 @@ const buildLoweringSnapshot = () => {
     symbolTable: semantics.symbolTable,
     hir: semantics.hir,
     typing: semantics.typing,
-    options: { optimize: false, validate: true, emitEffectHelpers: false },
+    options: {
+      optimize: false,
+      validate: true,
+      emitEffectHelpers: false,
+      continuationBackend: {},
+    },
     functions: new Map(),
     functionInstances: new Map(),
     itemsToSymbols: new Map(),
@@ -56,10 +62,16 @@ const buildLoweringSnapshot = () => {
     rtt,
     effectsRuntime,
     effectMir: buildEffectMir({ semantics }),
+    effectsBackend: undefined as any,
+    effectsState: createEffectsState(),
     effectLowering: { sitesByExpr: new Map(), sites: [], argsTypes: new Map() },
     outcomeValueTypes: new Map(),
   };
-  ctx.effectLowering = buildEffectLowering({ ctx, siteCounter: { current: 0 } });
+  ctx.effectsBackend = selectEffectsBackend(ctx);
+  ctx.effectLowering = ctx.effectsBackend.buildLowering({
+    ctx,
+    siteCounter: { current: 0 },
+  });
   return ctx.effectLowering.sites.map((site) => ({
     siteOrder: site.siteOrder,
     function: semantics.symbolTable.getSymbol(site.functionSymbol).name,

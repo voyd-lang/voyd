@@ -7,7 +7,8 @@ import { codegen } from "../index.js";
 import { createRttContext } from "../rtt/index.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";
 import { buildEffectMir } from "../effects/effect-mir.js";
-import { buildEffectLowering } from "../effects/effect-lowering.js";
+import { selectEffectsBackend } from "../effects/codegen-backend.js";
+import { createEffectsState } from "../effects/state.js";
 import {
   compileFunctions,
   emitModuleExports,
@@ -65,6 +66,7 @@ const DEFAULT_OPTIONS = {
   optimize: false,
   validate: true,
   emitEffectHelpers: false,
+  continuationBackend: {},
 } as const;
 
 const sanitizeIdentifier = (value: string): string =>
@@ -101,16 +103,18 @@ const buildCodegenProgram = (
     rtt,
     effectsRuntime,
     effectMir: buildEffectMir({ semantics: sem }),
+    effectsBackend: undefined as any,
+    effectsState: createEffectsState(),
     effectLowering: { sitesByExpr: new Map(), sites: [], argsTypes: new Map() },
     outcomeValueTypes,
   }));
 
   const siteCounter = { current: 0 };
   contexts.forEach((ctx) => {
-    ctx.effectLowering = buildEffectLowering({
-      ctx,
-      siteCounter,
-    });
+    ctx.effectsBackend = selectEffectsBackend(ctx);
+  });
+  contexts.forEach((ctx) => {
+    ctx.effectLowering = ctx.effectsBackend.buildLowering({ ctx, siteCounter });
   });
 
   contexts.forEach(registerFunctionMetadata);

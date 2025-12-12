@@ -200,15 +200,8 @@ const ensureContinuationFunction = ({
   ctx: CodegenContext;
   compileExpr: ExpressionCompiler;
 }): binaryen.Type => {
-  const built =
-    (ctx as unknown as { __contBuilt?: Set<number> }).__contBuilt ??
-    new Set<number>();
-  const building =
-    (ctx as unknown as { __contBuilding?: Set<number> }).__contBuilding ??
-    new Set<number>();
-  (ctx as unknown as { __contBuilt?: Set<number> }).__contBuilt = built;
-  (ctx as unknown as { __contBuilding?: Set<number> }).__contBuilding =
-    building;
+  const built = ctx.effectsState.contBuilt;
+  const building = ctx.effectsState.contBuilding;
   if (built.has(site.siteId)) {
     return site.contRefType ?? binaryen.funcref;
   }
@@ -508,7 +501,7 @@ export const compileCallExpr = (
   if (callee.exprKind === "identifier") {
     const symbolRecord = ctx.symbolTable.getSymbol(callee.symbol);
     if (symbolRecord.kind === "effect-op") {
-      return compileEffectOpCall({
+      return ctx.effectsBackend.compileEffectOpCall({
         expr,
         calleeSymbol: callee.symbol,
         ctx,
@@ -597,7 +590,7 @@ export const compileCallExpr = (
   throw new Error("codegen only supports function and closure calls today");
 };
 
-const compileEffectOpCall = ({
+export const compileEffectOpCall = ({
   expr,
   calleeSymbol,
   ctx,

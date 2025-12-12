@@ -36,11 +36,15 @@ import type { OutcomeValueBox } from "./effects/outcome-values.js";
 import type { EffectTableSidecar } from "./effects/effect-table-types.js";
 import type { EffectLoweringResult } from "./effects/effect-lowering.js";
 import type { ResumeKind } from "./effects/runtime-abi.js";
+import type { ContinuationBackendOptions } from "./effects/backend.js";
+import type { EffectsBackend } from "./effects/codegen-backend.js";
+import type { EffectsState } from "./effects/state.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
   validate?: boolean;
   emitEffectHelpers?: boolean;
+  continuationBackend?: ContinuationBackendOptions;
 }
 
 export interface CodegenResult {
@@ -136,6 +140,8 @@ export interface CodegenContext {
   rtt: ReturnType<typeof createRttContext>;
   effectsRuntime: EffectRuntime;
   effectMir: EffectMir;
+  effectsBackend: EffectsBackend;
+  effectsState: EffectsState;
   effectLowering: EffectLoweringResult;
   outcomeValueTypes: Map<string, OutcomeValueBox>;
 }
