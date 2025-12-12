@@ -85,23 +85,6 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
       return;
     }
 
-    const handlerEntries = children
-      .slice(1)
-      .filter((entry) => p.isForm(entry) && isHandlerClause(entry));
-    if (handlerEntries.length > 0) {
-      const bodyEntries: FormInitElements = children.filter(
-        (entry) => !p.isForm(entry) || !isHandlerClause(entry)
-      );
-      const targetIndex = bodyEntries.length - 1;
-      const target = bodyEntries.at(targetIndex);
-      if (targetIndex >= 1 && p.isForm(target)) {
-        const rewritten = new Form([...target.toArray(), ...handlerEntries]);
-        bodyEntries[targetIndex] = rewritten;
-        transformed.push(new CallForm(bodyEntries));
-        return;
-      }
-    }
-
     transformed.push(new CallForm(children));
   };
 
