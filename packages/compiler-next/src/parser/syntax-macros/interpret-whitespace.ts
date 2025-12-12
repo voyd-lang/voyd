@@ -25,9 +25,7 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
   }
 
   const functional = applyFunctionalNotation(form);
-  const result = attachLabeledClosureSugarHandlers(
-    interpretWhitespaceExpr(functional, indentLevel)
-  );
+  const result = interpretWhitespaceExpr(functional, indentLevel);
   return p.isForm(result) ? result : new Form([result]);
 };
 
@@ -393,16 +391,6 @@ const addSibling = (child: Expr, siblings: Expr[]) => {
 
   if (!p.isForm(normalizedChild)) {
     siblings.push(normalizedChild);
-    return;
-  }
-
-  if (
-    isHandlerClause(normalizedChild) &&
-    p.isForm(olderSibling) &&
-    olderSibling.calls("try")
-  ) {
-    siblings.pop();
-    siblings.push(new Form([...olderSibling.toArray(), normalizedChild]));
     return;
   }
 
