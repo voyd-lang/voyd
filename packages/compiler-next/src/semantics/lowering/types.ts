@@ -17,6 +17,7 @@ import type {
   BoundTrait,
   BoundImpl,
   BoundUse,
+  BoundEffect,
   StaticMethodTable,
   ModuleMemberTable,
 } from "../binding/binding.js";
@@ -67,6 +68,7 @@ export type ModuleDeclaration =
   | { kind: "object"; order: number; object: BoundObject }
   | { kind: "trait"; order: number; trait: BoundTrait }
   | { kind: "impl"; order: number; impl: BoundImpl }
+  | { kind: "effect"; order: number; effect: BoundEffect }
   | { kind: "use"; order: number; use: BoundUse };
 
 export interface LoweredTypeInfo {

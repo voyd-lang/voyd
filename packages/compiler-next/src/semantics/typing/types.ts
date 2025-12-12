@@ -8,6 +8,7 @@ import type {
   HirTypeExpr,
   HirBindingKind,
   HirVisibility,
+  HirEffectHandlerClause,
 } from "../hir/index.js";
 import type { ModuleExportTable } from "../modules.js";
 import type {
@@ -20,6 +21,7 @@ import type {
   TypeSchemeId,
   SourceSpan,
 } from "../ids.js";
+import type { EffectTable } from "../effects/effect-table.js";
 import { DeclTable } from "../decls.js";
 import type { StructuralField, TypeArena } from "./type-arena.js";
 import type { TypeTable } from "./type-table.js";
@@ -33,6 +35,7 @@ export interface TypingInputs {
   hir: HirGraph;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
   decls?: DeclTable;
+  effects?: EffectTable;
   imports?: readonly {
     local: SymbolId;
     target?: { moduleId: string; symbol: SymbolId };
@@ -53,8 +56,10 @@ export interface TypingResult {
   memberMetadata: ReadonlyMap<SymbolId, MemberMetadata>;
   primitives: PrimitiveTypes;
   intrinsicTypes: Map<string, TypeId>;
+  effects: EffectTable;
   resolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
+  tailResumptions: ReadonlyMap<HirExprId, HirEffectHandlerClause["tailResumption"]>;
   objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
   callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolId>>;
   functionInstances: ReadonlyMap<string, TypeId>;
@@ -78,6 +83,10 @@ export interface PrimitiveTypes {
   void: TypeId;
   unknown: TypeId;
   defaultEffectRow: EffectRowId;
+  i32: TypeId;
+  i64: TypeId;
+  f32: TypeId;
+  f64: TypeId;
 }
 
 export interface FunctionSignature {
@@ -86,6 +95,8 @@ export interface FunctionSignature {
   returnType: TypeId;
   hasExplicitReturn: boolean;
   annotatedReturn: boolean;
+  effectRow: EffectRowId;
+  annotatedEffects: boolean;
   typeParams?: readonly FunctionTypeParam[];
   scheme: TypeSchemeId;
   typeParamMap?: ReadonlyMap<SymbolId, TypeId>;
@@ -98,6 +109,7 @@ export interface ParamSignature {
   span?: SourceSpan;
   name?: string;
   symbol?: SymbolId;
+  optional?: boolean;
 }
 
 export interface FunctionTypeParam {
@@ -506,8 +518,10 @@ export interface TypingContext {
   importAliasesByModule: Map<string, Map<SymbolId, SymbolId>>;
   arena: TypeArena;
   table: TypeTable;
+  effects: EffectTable;
   resolvedExprTypes: Map<HirExprId, TypeId>;
   valueTypes: Map<SymbolId, TypeId>;
+  tailResumptions: Map<HirExprId, HirEffectHandlerClause["tailResumption"]>;
   callResolution: CallResolution;
   functions: FunctionStore;
   objects: ObjectStore;

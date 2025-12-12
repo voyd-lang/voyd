@@ -88,7 +88,7 @@ export const getIntrinsicType = (name: string, ctx: TypingContext): TypeId => {
       optional: false,
     })),
     returnType: signature.returnType,
-    effects: ctx.primitives.defaultEffectRow,
+    effectRow: ctx.primitives.defaultEffectRow,
   });
 
   ctx.intrinsicTypes.set(name, fnType);

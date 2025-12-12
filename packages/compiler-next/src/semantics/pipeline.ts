@@ -12,10 +12,10 @@ import { runTypingPipeline, type TypingResult } from "./typing/typing.js";
 import { specializeOverloadCallees } from "./typing/specialize-overloads.js";
 import { toSourceSpan } from "./utils.js";
 import type { OverloadSetId, SymbolId } from "./ids.js";
-import type { ModuleExportTable } from "./modules.js";
+import type { ModuleExportEffect, ModuleExportTable } from "./modules.js";
 import type { DependencySemantics } from "./typing/types.js";
 import type { Diagnostic } from "../diagnostics/index.js";
-import { DiagnosticError } from "../diagnostics/index.js";
+import { DiagnosticError, diagnosticFromCode } from "../diagnostics/index.js";
 
 export interface SemanticsPipelineResult {
   binding: BindingResult;
@@ -112,9 +112,20 @@ export const semanticsPipeline = (
 
   specializeOverloadCallees(hir, typing);
 
+  const exportsTable = collectModuleExports({
+    hir,
+    symbolTable,
+    moduleId: module.id,
+    modulePath: module.path,
+    packageId: binding.packageId,
+    binding,
+    typing,
+  });
+
   const diagnostics: Diagnostic[] = [
     ...binding.diagnostics,
     ...typing.diagnostics,
+    ...enforcePkgRootEffectRules({ binding, hir, typing, symbolTable }),
   ];
 
   return {
@@ -123,15 +134,7 @@ export const semanticsPipeline = (
     hir,
     typing,
     moduleId: module.id,
-    exports: collectModuleExports({
-      hir,
-      symbolTable,
-    moduleId: module.id,
-    modulePath: module.path,
-    packageId: binding.packageId,
-    binding,
-    typing,
-  }),
+    exports: exportsTable,
     diagnostics,
   };
 };
@@ -183,6 +186,40 @@ const collectModuleExports = ({
 }): ModuleExportTable => {
   const table: ModuleExportTable = new Map();
 
+  const mergeEffects = (
+    existing: readonly ModuleExportEffect[] | undefined,
+    next?: ModuleExportEffect
+  ): readonly ModuleExportEffect[] | undefined => {
+    if (!next) {
+      return existing;
+    }
+    const bySymbol = new Map<SymbolId, ModuleExportEffect>();
+    existing?.forEach((entry) => bySymbol.set(entry.symbol, entry));
+    bySymbol.set(next.symbol, next);
+    return Array.from(bySymbol.values());
+  };
+
+  const exportEffectFor = (
+    symbol: SymbolId
+  ): ModuleExportEffect | undefined => {
+    const signature = typing.functions.getSignature(symbol);
+    if (!signature) {
+      return undefined;
+    }
+    const desc = typing.effects.getRow(
+      signature.effectRow ?? typing.primitives.defaultEffectRow
+    );
+    return {
+      symbol,
+      annotated: signature.annotatedEffects,
+      operations: desc.operations.map((op) => ({
+        name: op.name,
+        ...(typeof op.region === "number" ? { region: op.region } : {}),
+      })),
+      ...(desc.tailVar ? { tail: { rigid: desc.tailVar.rigid } } : {}),
+    };
+  };
+
   const upsertExport = ({
     name,
     symbol,
@@ -213,6 +250,10 @@ const collectModuleExports = ({
     const mergedStatic =
       existing?.isStatic === true ? true : isStatic ?? existing?.isStatic;
     const projected = existing?.apiProjection || apiProjection === true;
+    const effects = mergeEffects(
+      existing?.effects,
+      exportEffectFor(symbol)
+    );
     table.set(name, {
       name,
       symbol: existing?.symbol ?? symbol,
@@ -226,6 +267,7 @@ const collectModuleExports = ({
       memberOwner: owner,
       isStatic: mergedStatic,
       apiProjection: projected,
+      effects,
     });
   };
 
@@ -286,6 +328,87 @@ const collectModuleExports = ({
   }
 
   return table;
+};
+
+const formatEffectOp = (op: { name: string; region?: number }): string =>
+  typeof op.region === "number" ? `${op.name}@${op.region}` : op.name;
+
+const formatEffectRow = (
+  row: number,
+  effects: TypingResult["effects"]
+): string => {
+  const desc = effects.getRow(row);
+  const ops = desc.operations.map(formatEffectOp);
+  if (ops.length === 0 && desc.tailVar) {
+    return "open effect row";
+  }
+  if (ops.length === 0) {
+    return "()";
+  }
+  const suffix = desc.tailVar ? ", ..." : "";
+  return `${ops.join(", ")}${suffix}`;
+};
+
+const enforcePkgRootEffectRules = ({
+  binding,
+  hir,
+  typing,
+  symbolTable,
+}: {
+  binding: BindingResult;
+  hir: HirGraph;
+  typing: TypingResult;
+  symbolTable: SymbolTable;
+}): Diagnostic[] => {
+  if (!binding.isPackageRoot) {
+    return [];
+  }
+  const diagnostics: Diagnostic[] = [];
+  const seen = new Set<SymbolId>();
+
+  hir.module.exports.forEach((entry) => {
+    if (entry.visibility.level !== "public") return;
+    if (seen.has(entry.symbol)) return;
+    seen.add(entry.symbol);
+
+    const signature = typing.functions.getSignature(entry.symbol);
+    if (!signature) {
+      return;
+    }
+    const name = symbolTable.getSymbol(entry.symbol).name;
+
+    if (!signature.annotatedEffects) {
+      diagnostics.push(
+        diagnosticFromCode({
+          code: "TY0016",
+          params: { kind: "pkg-effect-annotation", functionName: name },
+          span: entry.span,
+        })
+      );
+    }
+
+    if (name === "main") {
+      let isPure = false;
+      let effectsText = "unknown effects";
+      try {
+        isPure = typing.effects.isEmpty(signature.effectRow);
+        effectsText = formatEffectRow(signature.effectRow, typing.effects);
+      } catch {
+        isPure = false;
+      }
+      if (!isPure) {
+        diagnostics.push(
+          diagnosticFromCode({
+            code: "TY0017",
+            params: { kind: "effectful-main", effects: effectsText },
+            span: entry.span,
+          })
+        );
+      }
+    }
+  });
+
+  return diagnostics;
 };
 
 const projectDependencySemantics = (

@@ -78,6 +78,7 @@ export const toBindingResult = (ctx: BindingContext): BindingResult => ({
   objects: ctx.decls.objects,
   traits: ctx.decls.traits,
   impls: ctx.decls.impls,
+  effects: ctx.decls.effects,
   overloads: ctx.overloads,
   overloadBySymbol: ctx.overloadBySymbol,
   diagnostics: ctx.diagnostics,

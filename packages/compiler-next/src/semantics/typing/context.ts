@@ -1,9 +1,9 @@
 import { createTypeArena } from "./type-arena.js";
 import { createTypeTable } from "./type-table.js";
 import { DeclTable } from "../decls.js";
+import { createEffectTable } from "../effects/effect-table.js";
 import {
   BASE_OBJECT_NAME,
-  DEFAULT_EFFECT_ROW,
   FunctionStore,
   ObjectStore,
   TypeAliasStore,
@@ -18,6 +18,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const decls = inputs.decls ?? new DeclTable();
   const arena = createTypeArena();
   const table = createTypeTable();
+  const effects = inputs.effects ?? createEffectTable();
   const functions = new FunctionStore();
   const objects = new ObjectStore();
   const traits = new TraitStore();
@@ -52,8 +53,10 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     importAliasesByModule,
     arena,
     table,
+    effects,
     resolvedExprTypes: new Map(),
     valueTypes: new Map(),
+    tailResumptions: new Map(),
     callResolution: {
       targets: new Map(),
       typeArguments: new Map(),
@@ -69,7 +72,11 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
       bool: 0,
       void: 0,
       unknown: 0,
-      defaultEffectRow: DEFAULT_EFFECT_ROW,
+      defaultEffectRow: effects.emptyRow,
+      i32: 0,
+      i64: 0,
+      f32: 0,
+      f64: 0,
     },
     intrinsicTypes: new Map(),
     diagnostics: new DiagnosticEmitter(),

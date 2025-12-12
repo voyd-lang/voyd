@@ -147,6 +147,7 @@ const bindTraitMethod = ({
     params,
     typeParameters,
     returnTypeExpr: decl.signature.returnType,
+    effectTypeExpr: decl.signature.effectType,
     defaultBody: decl.body,
     intrinsic: decl.intrinsic,
   };

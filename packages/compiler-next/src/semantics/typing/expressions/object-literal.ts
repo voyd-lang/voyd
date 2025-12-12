@@ -4,6 +4,7 @@ import type {
 } from "../../hir/index.js";
 import type { TypeId, TypeParamId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
+import { composeEffectRows, getExprEffectRow } from "../effects.js";
 import {
   bindTypeParamsFromType,
   ensureObjectType,
@@ -40,6 +41,11 @@ export const typeObjectLiteralExpr = (
     name,
     type,
   }));
+  const effectRow = composeEffectRows(
+    ctx.effects,
+    expr.entries.map((entry) => getExprEffectRow(entry.value, ctx))
+  );
+  ctx.effects.setExprEffect(expr.id, effectRow);
   return ctx.arena.internStructuralObject({ fields: orderedFields });
 };
 
@@ -157,6 +163,11 @@ const typeNominalObjectLiteral = (
     }
   });
 
+  const effectRow = composeEffectRows(
+    ctx.effects,
+    expr.entries.map((entry) => getExprEffectRow(entry.value, ctx))
+  );
+  ctx.effects.setExprEffect(expr.id, effectRow);
   return objectInfo.type;
 };
 

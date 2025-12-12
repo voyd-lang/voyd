@@ -2,6 +2,7 @@ import type { HirFieldAccessExpr } from "../../hir/index.js";
 import type { TypeId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
 import { getStructuralFields } from "../type-system.js";
+import { getExprEffectRow } from "../effects.js";
 import type { TypingContext, TypingState } from "../types.js";
 import { assertFieldAccess } from "../visibility.js";
 
@@ -37,5 +38,6 @@ export const typeFieldAccessExpr = (
     span: expr.span,
     context: "accessing member",
   });
+  ctx.effects.setExprEffect(expr.id, getExprEffectRow(expr.target, ctx));
   return field.type;
 };

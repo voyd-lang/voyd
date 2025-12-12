@@ -8,6 +8,7 @@ import {
   seedBaseObjectType,
   seedPrimitiveTypes,
   registerImpls,
+  registerEffectOperations,
 } from "./registry.js";
 import { indexMemberMetadata } from "./members.js";
 import { validateTypedProgram } from "./validation.js";
@@ -35,6 +36,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   registerObjectDecls(ctx);
   registerTraits(ctx);
   registerFunctionSignatures(ctx, state);
+  registerEffectOperations(ctx, state);
   registerImpls(ctx, state);
   indexMemberMetadata(ctx);
 
@@ -50,9 +52,11 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     objects: ctx.objects,
     traits: ctx.traits,
     primitives: ctx.primitives,
+    effects: ctx.effects,
     intrinsicTypes: ctx.intrinsicTypes,
     resolvedExprTypes: new Map(ctx.resolvedExprTypes),
     valueTypes: new Map(ctx.valueTypes),
+    tailResumptions: new Map(ctx.tailResumptions),
     objectsByNominal: ctx.objects.snapshotByNominal(),
     callTargets: new Map(
       Array.from(ctx.callResolution.targets.entries()).map(([callId, targets]) => [

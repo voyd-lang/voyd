@@ -26,6 +26,12 @@ import {
   normalizeSpan,
 } from "../../../diagnostics/index.js";
 import {
+  composeEffectRows,
+  freshOpenEffectRow,
+  getExprEffectRow,
+  ensureEffectCompatibility,
+} from "../effects.js";
+import {
   intrinsicSignaturesFor,
   type IntrinsicSignature,
 } from "./intrinsics.js";
@@ -71,6 +77,33 @@ export const typeCallExpr = (
     exprId: arg.expr,
   }));
 
+  const argEffectRow = composeEffectRows(
+    ctx.effects,
+    args.map((arg) =>
+      typeof arg.exprId === "number"
+        ? getExprEffectRow(arg.exprId, ctx)
+        : ctx.effects.emptyRow
+    )
+  );
+
+  const finalizeCall = ({
+    returnType,
+    latentEffectRow = ctx.effects.emptyRow,
+    calleeEffectRow = ctx.effects.emptyRow,
+  }: {
+    returnType: TypeId;
+    latentEffectRow?: number;
+    calleeEffectRow?: number;
+  }): TypeId => {
+    const callEffect = composeEffectRows(ctx.effects, [
+      calleeEffectRow,
+      argEffectRow,
+      latentEffectRow,
+    ]);
+    ctx.effects.setExprEffect(expr.id, callEffect);
+    return returnType;
+  };
+
   if (calleeExpr.exprKind === "overload-set") {
     if (typeArguments && typeArguments.length > 0) {
       throw new Error(
@@ -78,7 +111,12 @@ export const typeCallExpr = (
       );
     }
     ctx.table.setExprType(calleeExpr.id, ctx.primitives.unknown);
-    return typeOverloadedCall(expr, calleeExpr, args, ctx, state);
+    ctx.effects.setExprEffect(calleeExpr.id, ctx.effects.emptyRow);
+    const overloaded = typeOverloadedCall(expr, calleeExpr, args, ctx, state);
+    return finalizeCall({
+      returnType: overloaded.returnType,
+      latentEffectRow: overloaded.effectRow,
+    });
   }
 
   if (calleeExpr.exprKind === "identifier") {
@@ -146,14 +184,17 @@ export const typeCallExpr = (
             optional: false,
           })),
           returnType,
-          effects: ctx.primitives.defaultEffectRow,
+          effectRow: ctx.primitives.defaultEffectRow,
         });
       ctx.table.setExprType(calleeExpr.id, calleeType);
       ctx.resolvedExprTypes.set(
         calleeExpr.id,
         applyCurrentSubstitution(calleeType, ctx, state)
       );
-      return returnType;
+      return finalizeCall({
+        returnType,
+        latentEffectRow: signature?.effectRow ?? ctx.primitives.defaultEffectRow,
+      });
     }
 
     let intrinsicReturn: TypeId | undefined;
@@ -180,7 +221,7 @@ export const typeCallExpr = (
               optional: false,
             })),
             returnType: intrinsicReturn,
-            effects: ctx.primitives.defaultEffectRow,
+            effectRow: ctx.primitives.defaultEffectRow,
           });
         })()
       : signature ||
@@ -193,9 +234,10 @@ export const typeCallExpr = (
       calleeExpr.id,
       applyCurrentSubstitution(calleeType, ctx, state)
     );
+    ctx.effects.setExprEffect(calleeExpr.id, ctx.effects.emptyRow);
 
     if (signature) {
-      const returnType = typeFunctionCall({
+      const { returnType, effectRow } = typeFunctionCall({
         args,
         signature,
         calleeSymbol: calleeExpr.symbol,
@@ -206,21 +248,24 @@ export const typeCallExpr = (
         state,
       });
 
-      return returnType;
+      return finalizeCall({ returnType, latentEffectRow: effectRow });
     }
 
     if (metadata.intrinsic) {
-      return typeIntrinsicCall(
-        intrinsicName,
-        args,
-        ctx,
-        state,
-        typeArguments,
-        allowIntrinsicTypeArgs
-      );
+      return finalizeCall({
+        returnType: typeIntrinsicCall(
+          intrinsicName,
+          args,
+          ctx,
+          state,
+          typeArguments,
+          allowIntrinsicTypeArgs
+        ),
+        latentEffectRow: ctx.primitives.defaultEffectRow,
+      });
     }
 
-    return (
+    const returnType =
       intrinsicReturn ??
       resolveCurriedCallReturnType({
         args,
@@ -229,8 +274,16 @@ export const typeCallExpr = (
         state,
         callSpan: expr.span,
         calleeSpan: calleeExpr.span,
-      })
-    );
+      });
+    const calleeDesc = ctx.arena.get(calleeType);
+    const latentEffectRow =
+      calleeDesc.kind === "function"
+        ? calleeDesc.effectRow
+        : ctx.primitives.defaultEffectRow;
+    return finalizeCall({
+      returnType,
+      latentEffectRow,
+    });
   }
 
   const calleeType = typeExpression(
@@ -253,13 +306,22 @@ export const typeCallExpr = (
     });
   }
 
-  return resolveCurriedCallReturnType({
+  const returnType = resolveCurriedCallReturnType({
     args,
     calleeType,
     ctx,
     state,
     callSpan: expr.span,
     calleeSpan: calleeExpr.span,
+  });
+  const latentEffectRow =
+    calleeDesc.kind === "function"
+      ? calleeDesc.effectRow
+      : ctx.primitives.defaultEffectRow;
+  return finalizeCall({
+    returnType,
+    latentEffectRow,
+    calleeEffectRow: getExprEffectRow(expr.callee, ctx),
   });
 };
 
@@ -336,7 +398,7 @@ const expectedCalleeType = (args: readonly Arg[], ctx: TypingContext): TypeId =>
       optional: false,
     })),
     returnType: ctx.primitives.unknown,
-    effects: ctx.primitives.defaultEffectRow,
+    effectRow: freshOpenEffectRow(ctx.effects),
   });
 
 const resolveTypeArguments = (
@@ -583,7 +645,7 @@ const typeFunctionCall = ({
   ctx: TypingContext;
   state: TypingState;
   calleeExprId?: HirExprId;
-}): TypeId => {
+}): { returnType: TypeId; effectRow: number } => {
   const record = ctx.symbolTable.getSymbol(calleeSymbol);
   const intrinsicMetadata = (record.metadata ?? {}) as {
     intrinsic?: boolean;
@@ -626,7 +688,7 @@ const typeFunctionCall = ({
         optional: false,
       })),
       returnType: instantiation.returnType,
-      effects: ctx.primitives.defaultEffectRow,
+      effectRow: ctx.primitives.defaultEffectRow,
     });
     ctx.table.setExprType(calleeExprId, calleeType);
     ctx.resolvedExprTypes.set(
@@ -672,7 +734,7 @@ const typeFunctionCall = ({
     ctx.callResolution.typeArguments.delete(callId);
   }
 
-  return instantiation.returnType;
+  return { returnType: instantiation.returnType, effectRow: signature.effectRow };
 };
 
 const instantiateFunctionCall = ({
@@ -847,6 +909,45 @@ const typeGenericFunctionBody = ({
       state,
       `function ${getSymbolName(symbol, ctx)} return type`
     );
+    const inferredEffectRow = getExprEffectRow(fn.body, ctx);
+    if (signature.annotatedEffects) {
+      ensureEffectCompatibility({
+        inferred: inferredEffectRow,
+        annotated: signature.effectRow ?? ctx.primitives.defaultEffectRow,
+        ctx,
+        span: fn.span,
+        location: fn.ast,
+        reason: `function ${getSymbolName(symbol, ctx)} effects`,
+      });
+    } else if (signature.effectRow !== inferredEffectRow) {
+      signature.effectRow = inferredEffectRow;
+      const functionType = ctx.arena.internFunction({
+        parameters: signature.parameters.map(({ type, label }) => ({
+          type,
+          label,
+          optional: false,
+        })),
+        returnType: signature.returnType,
+        effectRow: inferredEffectRow,
+      });
+      const scheme = ctx.arena.newScheme(
+        signature.typeParams?.map((param) => param.typeParam) ?? [],
+        functionType
+      );
+      signature.typeId = functionType;
+      signature.scheme = scheme;
+      ctx.valueTypes.set(symbol, functionType);
+      ctx.table.setSymbolScheme(symbol, scheme);
+    }
+    if (state.mode === "strict" && signature.scheme) {
+      if (ctx.effects.getFunctionEffect(symbol) === undefined) {
+        ctx.effects.setFunctionEffect(
+          symbol,
+          signature.scheme,
+          signature.effectRow ?? ctx.primitives.defaultEffectRow
+        );
+      }
+    }
     ctx.functions.cacheInstance(key, expectedReturn, ctx.resolvedExprTypes);
     ctx.functions.recordInstantiation(symbol, key, appliedTypeArgs);
   } finally {
@@ -918,7 +1019,7 @@ const typeOverloadedCall = (
   argTypes: readonly Arg[],
   ctx: TypingContext,
   state: TypingState
-): TypeId => {
+): { returnType: TypeId; effectRow: number } => {
   const options = ctx.overloads.get(callee.set);
   if (!options) {
     throw new Error(
@@ -997,7 +1098,10 @@ const typeOverloadedCall = (
   targets.set(instanceKey, selected.symbol);
   ctx.callResolution.targets.set(call.id, targets);
   ctx.table.setExprType(callee.id, selected.signature.typeId);
-  return selected.signature.returnType;
+  return {
+    returnType: selected.signature.returnType,
+    effectRow: selected.signature.effectRow,
+  };
 };
 
 const resolveTraitDispatchOverload = ({
@@ -1098,9 +1202,9 @@ const resolveTraitDispatchOverload = ({
     }) ?? candidate.signature.parameters;
 
   const signatureDesc = ctx.arena.get(candidate.signature.typeId);
-  const effects =
+  const effectRow =
     signatureDesc.kind === "function"
-      ? signatureDesc.effects
+      ? signatureDesc.effectRow
       : ctx.primitives.defaultEffectRow;
   const adjustedType = ctx.arena.internFunction({
     parameters: params.map((param) => ({
@@ -1109,7 +1213,7 @@ const resolveTraitDispatchOverload = ({
       optional: false,
     })),
     returnType: candidate.signature.returnType,
-    effects,
+    effectRow,
   });
 
   return {
@@ -1117,7 +1221,12 @@ const resolveTraitDispatchOverload = ({
     signature:
       params === candidate.signature.parameters
         ? candidate.signature
-        : { ...candidate.signature, parameters: params, typeId: adjustedType },
+        : {
+            ...candidate.signature,
+            parameters: params,
+            typeId: adjustedType,
+            effectRow,
+          },
   };
 };
 

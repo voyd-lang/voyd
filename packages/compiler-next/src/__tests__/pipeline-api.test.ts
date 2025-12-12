@@ -112,10 +112,10 @@ use src::api::all
 pub use src::api::public_fn
 `,
       [apiPath]: `
-pub fn public_fn() -> i32
+pub fn public_fn(): () -> i32
   7
 
-pub fn internal_fn() -> i32
+pub fn internal_fn(): () -> i32
   3
 `,
     });
@@ -206,7 +206,7 @@ impl External
   pri fn secret_value(self) -> i32
     self.secret
 
-pub fn make_external() -> External
+pub fn make_external(): () -> External
   External { visible: 2, hidden: 3, secret: 5 }
 `,
     });
@@ -262,7 +262,7 @@ impl External
   pri fn secret_value(self) -> i32
     self.secret
 
-pub fn make_external() -> External
+pub fn make_external(): () -> External
   External { visible: 2, hidden: 3, secret: 5 }
 `,
     });
@@ -299,7 +299,7 @@ impl External
   api fn expose(self) -> i32
     self.value
 
-pub fn make_external() -> External
+pub fn make_external(): () -> External
   External { value: 1 }
 `,
     });
@@ -331,7 +331,7 @@ use src::counter::all
 
 pub use src::counter::new
 
-pub fn main() -> i32
+pub fn main(): () -> i32
   let counter = new(4)
   counter.double()
 `,
@@ -339,7 +339,7 @@ pub fn main() -> i32
 pub obj Counter { api value: i32 }
 
 impl Counter
-  fn new(value: i32) -> Counter
+  fn new(value: i32): () -> Counter
     Counter { value }
 
   api fn double(self) -> i32

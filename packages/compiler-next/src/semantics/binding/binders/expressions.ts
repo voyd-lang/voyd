@@ -49,6 +49,11 @@ export const bindExpr = (
     return;
   }
 
+  if (expr.calls("try")) {
+    bindTry(expr, ctx, tracker);
+    return;
+  }
+
   if (expr.calls("if")) {
     bindIf(expr, ctx, tracker);
     return;
@@ -83,6 +88,107 @@ export const bindExpr = (
   }
 };
 
+const bindTry = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker
+): void => {
+  const handlerEntries: Form[] = [];
+  const body = form.at(1);
+  if (isForm(body) && body.calls("block")) {
+    body.rest.forEach((entry) => {
+      if (isForm(entry) && entry.calls(":")) {
+        handlerEntries.push(entry);
+      }
+    });
+  }
+  if (body) {
+    handlerEntries.push(...findHandlerClauses(body));
+  }
+  if (body) {
+    bindExpr(body, ctx, tracker);
+  }
+
+  handlerEntries.push(
+    ...form.rest.slice(1).filter((entry): entry is Form => isForm(entry))
+  );
+  handlerEntries.forEach((entry) => {
+    if (!isForm(entry) || !entry.calls(":")) {
+      bindExpr(entry, ctx, tracker);
+      return;
+    }
+    const clauseScope = ctx.symbolTable.createScope({
+      parent: tracker.current(),
+      kind: "block",
+      owner: entry.syntaxId,
+    });
+    ctx.scopeByNode.set(entry.syntaxId, clauseScope);
+
+    const head = entry.at(1);
+    const handlerBody = entry.at(2);
+
+    tracker.enterScope(clauseScope, () => {
+      declareHandlerParams(head, ctx, clauseScope);
+      bindExpr(handlerBody, ctx, tracker);
+    });
+  });
+};
+
+const declareHandlerParams = (
+  head: Expr | undefined,
+  ctx: BindingContext,
+  scope: number
+): void => {
+  if (!head || (!isForm(head) && !isIdentifierAtom(head))) {
+    return;
+  }
+  const params = extractHandlerParams(head);
+  params.forEach((param) => {
+    if (!param || (!isIdentifierAtom(param) && !isInternalIdentifierAtom(param))) {
+      return;
+    }
+    const symbol = ctx.symbolTable.declare(
+      {
+        name: param.value,
+        kind: "parameter",
+        declaredAt: param.syntaxId,
+      },
+      scope
+    );
+    ctx.scopeByNode.set(param.syntaxId, scope);
+    rememberSyntax(param, ctx);
+  });
+};
+
+const extractHandlerParams = (head: Expr): readonly (IdentifierAtom | InternalIdentifierAtom | Expr)[] => {
+  if (isForm(head) && head.calls("::")) {
+    const opCall = head.at(2);
+    return isForm(opCall) ? opCall.rest : [];
+  }
+  if (isForm(head)) {
+    return head.rest;
+  }
+  return [];
+};
+
+const findHandlerClauses = (expr: Expr): Form[] => {
+  if (!isForm(expr)) {
+    return [];
+  }
+  const handlers: Form[] = [];
+  expr.toArray().forEach((child) => {
+    if (isForm(child) && child.calls(":")) {
+      const body = child.at(2);
+      if (isForm(body) && body.calls("block")) {
+        handlers.push(child);
+        return;
+      }
+    }
+    handlers.push(...findHandlerClauses(child));
+  });
+  return handlers;
+};
+
 const bindBlock = (
   form: Form,
   ctx: BindingContext,
@@ -97,6 +203,9 @@ const bindBlock = (
 
   tracker.enterScope(scope, () => {
     for (const child of form.rest) {
+      if (isForm(child) && child.calls(":")) {
+        continue;
+      }
       bindExpr(child, ctx, tracker);
     }
   });

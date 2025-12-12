@@ -19,6 +19,7 @@ import {
   wasmTypeFor,
 } from "../types.js";
 import { getRequiredBinding, loadBindingValue } from "../locals.js";
+import { wrapValueInOutcome } from "../effects/outcome-values.js";
 
 type LambdaCaptureInfo = {
   symbol: number;
@@ -107,6 +108,10 @@ const emitLambdaFunction = ({
   }
 
   const params = [env.base.interfaceType, ...env.base.paramTypes];
+  const effectful =
+    typeof desc.effectRow === "number" &&
+    !ctx.typing.effects.isEmpty(desc.effectRow);
+  const handlerOffset = effectful ? 1 : 0;
   const lambdaCtx: FunctionContext = {
     bindings: new Map(),
     locals: [],
@@ -114,13 +119,20 @@ const emitLambdaFunction = ({
     returnTypeId: desc.returnType,
     instanceKey,
     typeInstanceKey,
+    effectful,
   };
+  if (effectful) {
+    lambdaCtx.currentHandler = {
+      index: 1,
+      type: ctx.effectsRuntime.handlerFrameType,
+    };
+  }
 
   expr.parameters.forEach((param, index) => {
     const binding = {
       kind: "local" as const,
-      index: index + 1,
-      type: env.base.paramTypes[index]!,
+      index: index + 1 + handlerOffset,
+      type: env.base.paramTypes[index + handlerOffset]!,
       typeId: desc.parameters[index]!.type,
     };
     lambdaCtx.bindings.set(param.symbol, binding);
@@ -146,13 +158,24 @@ const emitLambdaFunction = ({
     tailPosition: true,
     expectedResultTypeId: desc.returnType,
   });
+  const returnWasmType = wasmTypeFor(desc.returnType, ctx);
+  const shouldWrapOutcome =
+    effectful &&
+    binaryen.getExpressionType(body.expr) === returnWasmType;
+  const functionBody = shouldWrapOutcome
+    ? wrapValueInOutcome({
+        valueExpr: body.expr,
+        valueType: returnWasmType,
+        ctx,
+      })
+    : body.expr;
 
   ctx.mod.addFunction(
     fnName,
     binaryen.createType(params as number[]),
     env.base.resultType,
     lambdaCtx.locals,
-    body.expr
+    functionBody
   );
 };
 

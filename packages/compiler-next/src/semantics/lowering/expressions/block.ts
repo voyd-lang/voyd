@@ -20,6 +20,9 @@ export const lowerBlock = ({
   const entries = form.rest;
 
   entries.forEach((entry, index) => {
+    if (isForm(entry) && entry.calls(":")) {
+      return;
+    }
     if (isForm(entry) && (entry.calls("var") || entry.calls("let"))) {
       statements.push(
         lowerLetStatement({

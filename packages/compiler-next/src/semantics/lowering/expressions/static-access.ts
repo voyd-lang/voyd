@@ -357,7 +357,7 @@ const resolveModuleSymbol = (
     const symbol = resolveSymbol(expr.value, scope, ctx);
     if (typeof symbol === "number") {
       const record = ctx.symbolTable.getSymbol(symbol);
-      if (record.kind === "module") {
+      if (record.kind === "module" || record.kind === "effect") {
         return symbol;
       }
     }

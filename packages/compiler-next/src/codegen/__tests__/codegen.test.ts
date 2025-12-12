@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
 import { codegen } from "../index.js";
 import { createRttContext } from "../rtt/index.js";
+import { createEffectRuntime } from "../effects/runtime-abi.js";
+import { buildEffectMir } from "../effects/effect-mir.js";
+import { buildEffectLowering } from "../effects/effect-lowering.js";
 import {
   compileFunctions,
   emitModuleExports,
@@ -16,7 +19,11 @@ import { semanticsPipeline } from "../../semantics/pipeline.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
 import type { TypingResult } from "../../semantics/typing/types.js";
 import type { TypeId } from "../../semantics/ids.js";
-import type { CodegenContext, FunctionMetadata } from "../context.js";
+import type {
+  CodegenContext,
+  FunctionMetadata,
+  OutcomeValueBox,
+} from "../context.js";
 
 const loadAst = (fixtureName: string) => {
   const source = readFileSync(
@@ -54,7 +61,11 @@ const getNominalPatternDesc = (typeId: TypeId, typing: TypingResult) => {
   throw new Error("expected match pattern to include a nominal component");
 };
 
-const DEFAULT_OPTIONS = { optimize: false, validate: true } as const;
+const DEFAULT_OPTIONS = {
+  optimize: false,
+  validate: true,
+  emitEffectHelpers: false,
+} as const;
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
@@ -65,8 +76,10 @@ const buildCodegenProgram = (
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
+  const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, FunctionMetadata[]>();
   const functionInstances = new Map<string, FunctionMetadata>();
+  const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
@@ -86,7 +99,19 @@ const buildCodegenProgram = (
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,
+    effectsRuntime,
+    effectMir: buildEffectMir({ semantics: sem }),
+    effectLowering: { sitesByExpr: new Map(), sites: [], argsTypes: new Map() },
+    outcomeValueTypes,
   }));
+
+  const siteCounter = { current: 0 };
+  contexts.forEach((ctx) => {
+    ctx.effectLowering = buildEffectLowering({
+      ctx,
+      siteCounter,
+    });
+  });
 
   contexts.forEach(registerFunctionMetadata);
   contexts.forEach(registerImportMetadata);

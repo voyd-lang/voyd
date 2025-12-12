@@ -23,20 +23,29 @@ import type {
   HirStmtId,
   SymbolId,
   TypeId,
+  EffectRowId,
 } from "../semantics/ids.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypingResult } from "../semantics/typing/typing.js";
 import type { createRttContext } from "./rtt/index.js";
 import type { BindingResult } from "../semantics/binding/binding.js";
 import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
+import type { EffectRuntime } from "./effects/runtime-abi.js";
+import type { EffectMir } from "./effects/backend.js";
+import type { OutcomeValueBox } from "./effects/outcome-values.js";
+import type { EffectTableSidecar } from "./effects/effect-table-types.js";
+import type { EffectLoweringResult } from "./effects/effect-lowering.js";
+import type { ResumeKind } from "./effects/runtime-abi.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
   validate?: boolean;
+  emitEffectHelpers?: boolean;
 }
 
 export interface CodegenResult {
   module: binaryen.Module;
+  effectTable?: EffectTableSidecar;
 }
 
 export interface FunctionMetadata {
@@ -49,6 +58,8 @@ export interface FunctionMetadata {
   resultTypeId: TypeId;
   typeArgs: readonly TypeId[];
   instanceKey: string;
+  effectful: boolean;
+  effectRow?: EffectRowId;
 }
 
 export interface StructuralFieldInfo {
@@ -123,6 +134,10 @@ export interface CodegenContext {
   >;
   lambdaFunctions: Map<string, string>;
   rtt: ReturnType<typeof createRttContext>;
+  effectsRuntime: EffectRuntime;
+  effectMir: EffectMir;
+  effectLowering: EffectLoweringResult;
+  outcomeValueTypes: Map<string, OutcomeValueBox>;
 }
 
 export interface LocalBindingBase {
@@ -147,13 +162,33 @@ export interface LocalBindingCapture extends LocalBindingBase {
 
 export type LocalBinding = LocalBindingLocal | LocalBindingCapture;
 
+export interface HandlerScope {
+  prevHandler: LocalBindingLocal;
+  label?: number;
+}
+
+export interface ContinuationBinding {
+  continuationLocal: LocalBindingLocal;
+  tailGuardLocal: LocalBindingLocal;
+  resumeKind: ResumeKind;
+  returnTypeId: TypeId;
+}
+
 export interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;
   locals: binaryen.Type[];
   nextLocalIndex: number;
   returnTypeId: TypeId;
+  currentHandler?: { index: number; type: binaryen.Type };
   instanceKey?: string;
   typeInstanceKey?: string;
+  effectful: boolean;
+  resumeFromSite?: {
+    exprId: HirExprId;
+    resumeLocal?: LocalBindingLocal;
+  };
+  handlerStack?: HandlerScope[];
+  continuations?: Map<SymbolId, ContinuationBinding>;
 }
 
 export interface CompiledExpression {
@@ -203,4 +238,6 @@ export type {
   SymbolId,
   TypeId,
   HirLambdaExpr,
+  EffectRowId,
+  OutcomeValueBox,
 };
