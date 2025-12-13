@@ -23,7 +23,7 @@ describe("effect runtime ABI helpers", () => {
     const request = runtime.makeEffectRequest({
       effectId: mod.i32.const(1),
       opId: mod.i32.const(2),
-      resumeKind: RESUME_KIND.resume,
+      resumeKind: mod.i32.const(RESUME_KIND.resume),
       args: mod.ref.null(binaryen.eqref),
       continuation,
       tailGuard: guard,
@@ -61,7 +61,7 @@ describe("effect runtime ABI helpers", () => {
     const request = runtime.makeEffectRequest({
       effectId: mod.i32.const(7),
       opId: mod.i32.const(3),
-      resumeKind: RESUME_KIND.tail,
+      resumeKind: mod.i32.const(RESUME_KIND.tail),
       args: mod.ref.null(binaryen.eqref),
       continuation,
       tailGuard: guard,

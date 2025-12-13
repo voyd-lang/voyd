@@ -1,15 +1,16 @@
 import type {
   CodegenContext,
-  EffectPerformSite,
   HirExprId,
   HirFunction,
   HirStmtId,
 } from "../context.js";
+import type { ContinuationSite } from "./effect-lowering.js";
 
 export interface GroupContinuationCfg {
   sitesByExpr: Map<HirExprId, ReadonlySet<number>>;
   sitesByStmt: Map<HirStmtId, ReadonlySet<number>>;
   siteOrderByExpr: Map<HirExprId, number>;
+  siteByExprId: Map<HirExprId, ContinuationSite>;
 }
 
 const emptySites = (): ReadonlySet<number> => new Set<number>();
@@ -309,11 +310,13 @@ export const buildGroupContinuationCfg = ({
   ctx,
 }: {
   fn: HirFunction;
-  groupSites: readonly EffectPerformSite[];
+  groupSites: readonly ContinuationSite[];
   ctx: CodegenContext;
 }): GroupContinuationCfg => {
   const siteOrderByExpr = new Map<HirExprId, number>();
   groupSites.forEach((site) => siteOrderByExpr.set(site.exprId, site.siteOrder));
+  const siteByExprId = new Map<HirExprId, ContinuationSite>();
+  groupSites.forEach((site) => siteByExprId.set(site.exprId, site));
 
   const sitesByExpr = new Map<HirExprId, ReadonlySet<number>>();
   const sitesByStmt = new Map<HirStmtId, ReadonlySet<number>>();
@@ -337,5 +340,5 @@ export const buildGroupContinuationCfg = ({
 
   visitExpr(fn.body);
 
-  return { sitesByExpr, sitesByStmt, siteOrderByExpr };
+  return { sitesByExpr, sitesByStmt, siteOrderByExpr, siteByExprId };
 };

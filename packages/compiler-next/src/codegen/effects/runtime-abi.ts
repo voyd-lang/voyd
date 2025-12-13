@@ -75,7 +75,7 @@ export interface EffectRuntime {
   makeEffectRequest: (params: {
     effectId: binaryen.ExpressionRef;
     opId: binaryen.ExpressionRef;
-    resumeKind: ResumeKind;
+    resumeKind: binaryen.ExpressionRef;
     args: binaryen.ExpressionRef;
     continuation?: binaryen.ExpressionRef;
     tailGuard?: binaryen.ExpressionRef;
@@ -250,7 +250,7 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
   }: {
     effectId: binaryen.ExpressionRef;
     opId: binaryen.ExpressionRef;
-    resumeKind: ResumeKind;
+    resumeKind: binaryen.ExpressionRef;
     args: binaryen.ExpressionRef;
     continuation?: binaryen.ExpressionRef;
     tailGuard?: binaryen.ExpressionRef;
@@ -258,7 +258,7 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
     initStruct(mod, effectRequestType, [
       effectId,
       opId,
-      mod.i32.const(resumeKind),
+      resumeKind,
       args,
       continuation,
       tailGuard,

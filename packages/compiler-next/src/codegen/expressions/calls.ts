@@ -13,7 +13,11 @@ import type {
   SymbolId,
   TypeId,
 } from "../context.js";
-import type { EffectPerformSite } from "../effects/effect-lowering.js";
+import type {
+  ContinuationCallSite,
+  ContinuationPerformSite,
+  ContinuationSite,
+} from "../effects/effect-lowering.js";
 import type { HirFunction, HirPattern } from "../../semantics/hir/index.js";
 import type { EffectRowId, HirStmtId } from "../../semantics/ids.js";
 import { compileIntrinsicCall } from "../intrinsics.js";
@@ -48,6 +52,8 @@ import { handlerCleanupOps } from "../effects/handler-stack.js";
 import { ensureDispatcher } from "../effects/dispatcher.js";
 import { createGroupedContinuationExpressionCompiler } from "../effects/continuation-compiler.js";
 import { buildGroupContinuationCfg } from "../effects/continuation-cfg.js";
+import { wrapRequestContinuationWithFrame } from "../effects/continuation-bind.js";
+import { boxOutcomeValue } from "../effects/outcome-values.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 let traitDispatchSigCounter = 0;
@@ -197,18 +203,15 @@ const ensureContinuationFunction = ({
   site,
   ctx,
 }: {
-  site: EffectPerformSite;
+  site: ContinuationSite;
   ctx: CodegenContext;
 }): binaryen.Type => {
   const built = ctx.effectsState.contBuilt;
   const building = ctx.effectsState.contBuilding;
   const contName = site.contFnName;
-  const resumeWasmType = site.resumeValueType;
+  const resumeBoxType = binaryen.eqref;
   const provisionalRefType = functionRefType({
-    params:
-      resumeWasmType === binaryen.none
-        ? [binaryen.anyref]
-        : [binaryen.anyref, resumeWasmType],
+    params: [binaryen.anyref, resumeBoxType],
     result: ctx.effectsRuntime.outcomeType,
     ctx,
   });
@@ -222,11 +225,8 @@ const ensureContinuationFunction = ({
   building.add(contName);
 
   const { fn, returnTypeId } = findFunctionBySymbol(site.functionSymbol, ctx);
-  const params = [binaryen.anyref];
+  const params = [binaryen.anyref, resumeBoxType];
   const returnWasmType = wasmTypeFor(returnTypeId, ctx);
-  if (resumeWasmType !== binaryen.none) {
-    params.push(resumeWasmType);
-  }
 
   const groupSites = ctx.effectLowering.sites.filter(
     (candidate) =>
@@ -311,14 +311,12 @@ const ensureContinuationFunction = ({
     })();
 
   const resumeLocal =
-    resumeWasmType === binaryen.none
-      ? undefined
-      : ({
-          kind: "local",
-          index: 1,
-          type: resumeWasmType,
-          typeId: site.resumeValueTypeId,
-        } as const);
+    ({
+      kind: "local",
+      index: 1,
+      type: resumeBoxType,
+      typeId: ctx.typing.primitives.unknown,
+    } as const);
 
   const continuationCompiler = createGroupedContinuationExpressionCompiler({
     cfg,
@@ -434,6 +432,7 @@ const lowerEffectfulCallResult = ({
   callId,
   returnTypeId,
   expectedResultTypeId,
+  tailPosition,
   typeInstanceKey,
   ctx,
   fnCtx,
@@ -442,6 +441,7 @@ const lowerEffectfulCallResult = ({
   callId: HirExprId;
   returnTypeId: TypeId;
   expectedResultTypeId?: TypeId;
+  tailPosition: boolean;
   typeInstanceKey?: string;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
@@ -487,9 +487,62 @@ const lowerEffectfulCallResult = ({
   const effectReturn = fnCtx.effectful
     ? (() => {
         const cleanup = handlerCleanupOps({ ctx, fnCtx });
-        const ret = ctx.mod.return(loadOutcome());
-        if (cleanup.length === 0) return ret;
-        return ctx.mod.block(null, [...cleanup, ret], binaryen.none);
+        const site = !tailPosition ? ctx.effectLowering.sitesByExpr.get(callId) : undefined;
+        const shouldWrap = !!site && site.kind === "call" && !tailPosition;
+
+        if (!shouldWrap) {
+          const ret = ctx.mod.return(loadOutcome());
+          if (cleanup.length === 0) return ret;
+          return ctx.mod.block(null, [...cleanup, ret], binaryen.none);
+        }
+
+        const callSite = site as ContinuationCallSite;
+        const frameEnvValues = callSite.envFields.map((field) => {
+          switch (field.sourceKind) {
+            case "site":
+              return ctx.mod.i32.const(callSite.siteOrder);
+            case "handler":
+              return currentHandlerValue(ctx, fnCtx);
+            case "param":
+            case "local": {
+              if (typeof field.symbol !== "number") {
+                throw new Error("missing symbol for env field");
+              }
+              const binding = getRequiredBinding(field.symbol, ctx, fnCtx);
+              return loadBindingValue(binding, ctx);
+            }
+          }
+        });
+
+        const contRefType = ensureContinuationFunction({ site: callSite, ctx });
+        const frameEnv = initStruct(ctx.mod, callSite.envType, frameEnvValues as number[]);
+        const frameCont = ctx.effectsRuntime.makeContinuation({
+          fnRef: refFunc(ctx.mod, callSite.contFnName, contRefType),
+          env: frameEnv,
+          site: ctx.mod.i32.const(callSite.siteOrder),
+        });
+
+        const request = refCast(
+          ctx.mod,
+          ctx.effectsRuntime.outcomePayload(loadOutcome()),
+          ctx.effectsRuntime.effectRequestType
+        );
+        const wrappedRequest = wrapRequestContinuationWithFrame({
+          ctx,
+          request,
+          frame: frameCont,
+        });
+        const wrappedOutcome = ctx.effectsRuntime.makeOutcomeEffect(wrappedRequest);
+
+        const wrappedLocal = allocateTempLocal(ctx.effectsRuntime.outcomeType, fnCtx);
+        const ops = [
+          ctx.mod.local.set(wrappedLocal.index, wrappedOutcome),
+          ...cleanup,
+          ctx.mod.return(
+            ctx.mod.local.get(wrappedLocal.index, wrappedLocal.type)
+          ),
+        ];
+        return ctx.mod.block(null, ops, binaryen.none);
       })()
     : ctx.mod.unreachable();
 
@@ -547,6 +600,7 @@ export const compileCallExpr = (
         fnCtx,
         compileExpr,
         expectedResultTypeId,
+        tailPosition,
       });
     }
   }
@@ -568,6 +622,7 @@ export const compileCallExpr = (
       ctx,
       fnCtx,
       compileExpr,
+      tailPosition,
       expectedResultTypeId,
     });
     if (traitDispatch) {
@@ -625,6 +680,7 @@ export const compileCallExpr = (
       ctx,
       fnCtx,
       compileExpr,
+      tailPosition,
       expectedResultTypeId,
     });
     if (traitDispatch) {
@@ -678,6 +734,7 @@ export const compileCallExpr = (
         ctx,
         fnCtx,
         compileExpr,
+        tailPosition,
         expectedResultTypeId,
       });
     }
@@ -688,6 +745,7 @@ export const compileCallExpr = (
       ctx,
       fnCtx,
       compileExpr,
+      tailPosition,
       expectedResultTypeId,
     });
   }
@@ -709,7 +767,7 @@ export const compileEffectOpCall = ({
   compileExpr: ExpressionCompiler;
 }): CompiledExpression => {
   const site = ctx.effectLowering.sitesByExpr.get(expr.id);
-  if (!site) {
+  if (!site || site.kind !== "perform") {
     throw new Error("codegen missing effect lowering info for perform site");
   }
   const signature = ctx.typing.functions.getSignature(calleeSymbol);
@@ -761,7 +819,7 @@ export const compileEffectOpCall = ({
   const request = ctx.effectsRuntime.makeEffectRequest({
     effectId: ctx.mod.i32.const(site.effectId),
     opId: ctx.mod.i32.const(site.opId),
-    resumeKind: site.resumeKind,
+    resumeKind: ctx.mod.i32.const(site.resumeKind),
     args: argsBoxed,
     continuation,
     tailGuard: ctx.effectsRuntime.makeTailGuard(),
@@ -770,10 +828,18 @@ export const compileEffectOpCall = ({
   const exprRef = ctx.effectsRuntime.makeOutcomeEffect(request);
 
   if (fnCtx.effectful) {
+    const cleanup = handlerCleanupOps({ ctx, fnCtx });
+    const temp = allocateTempLocal(ctx.effectsRuntime.outcomeType, fnCtx);
+    const ops: binaryen.ExpressionRef[] = [
+      ctx.mod.local.set(temp.index, exprRef),
+      ...cleanup,
+      ctx.mod.return(ctx.mod.local.get(temp.index, temp.type)),
+      ctx.mod.unreachable(),
+    ];
     return {
       expr: ctx.mod.block(
         null,
-        [ctx.mod.return(exprRef), ctx.mod.unreachable()],
+        ops,
         getExprBinaryenType(expr.id, ctx, typeInstanceKey)
       ),
       usedReturnCall: false,
@@ -793,6 +859,7 @@ const compileContinuationCall = ({
   fnCtx,
   compileExpr,
   expectedResultTypeId,
+  tailPosition,
 }: {
   expr: HirCallExpr;
   continuation: ContinuationBinding;
@@ -800,12 +867,16 @@ const compileContinuationCall = ({
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
   expectedResultTypeId?: TypeId;
+  tailPosition: boolean;
 }): CompiledExpression => {
   const resumeTypeId = continuation.returnTypeId;
   const resumeWasmType = wasmTypeFor(resumeTypeId, ctx);
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   if (resumeWasmType === binaryen.none && expr.args.length > 0) {
     throw new Error("continuation does not take a value");
+  }
+  if (resumeWasmType !== binaryen.none && expr.args.length === 0) {
+    throw new Error("continuation call requires a value");
   }
   const args =
     resumeWasmType === binaryen.none
@@ -849,18 +920,17 @@ const compileContinuationCall = ({
     ctx.effectsRuntime.bumpTailGuardObserved(guardRef),
   ];
 
-  const callArgs =
+  const resumeBox =
     resumeWasmType === binaryen.none
-      ? [ctx.effectsRuntime.continuationEnv(contRef)]
-      : [
-          ctx.effectsRuntime.continuationEnv(contRef),
-          args[0] ?? ctx.mod.ref.null(resumeWasmType),
-        ];
+      ? ctx.mod.ref.null(binaryen.eqref)
+      : boxOutcomeValue({
+          value: args[0]!,
+          valueType: resumeWasmType,
+          ctx,
+        });
+  const callArgs = [ctx.effectsRuntime.continuationEnv(contRef), resumeBox];
   const fnRefType = functionRefType({
-    params:
-      resumeWasmType === binaryen.none
-        ? [binaryen.anyref]
-        : [binaryen.anyref, resumeWasmType],
+    params: [binaryen.anyref, binaryen.eqref],
     result: ctx.effectsRuntime.outcomeType,
     ctx,
   });
@@ -880,6 +950,7 @@ const compileContinuationCall = ({
     callId: expr.id,
     returnTypeId: continuation.returnTypeId,
     expectedResultTypeId,
+    tailPosition,
     typeInstanceKey,
     ctx,
     fnCtx,
@@ -892,6 +963,7 @@ const compileTraitDispatchCall = ({
   ctx,
   fnCtx,
   compileExpr,
+  tailPosition,
   expectedResultTypeId,
 }: {
   expr: HirCallExpr;
@@ -899,6 +971,7 @@ const compileTraitDispatchCall = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
+  tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression | undefined => {
   if (expr.args.length === 0) {
@@ -1003,6 +1076,7 @@ const compileTraitDispatchCall = ({
         callId: expr.id,
         returnTypeId: getRequiredExprType(expr.id, ctx, typeInstanceKey),
         expectedResultTypeId,
+        tailPosition,
         typeInstanceKey,
         ctx,
         fnCtx,
@@ -1048,6 +1122,7 @@ const emitResolvedCall = (
       callId,
       returnTypeId,
       expectedResultTypeId,
+      tailPosition,
       typeInstanceKey,
       ctx,
       fnCtx,
@@ -1133,6 +1208,7 @@ const compileClosureCall = ({
   ctx,
   fnCtx,
   compileExpr,
+  tailPosition,
   expectedResultTypeId,
 }: {
   expr: HirCallExpr;
@@ -1146,6 +1222,7 @@ const compileClosureCall = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
+  tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
   if (expr.args.length !== calleeDesc.parameters.length) {
@@ -1205,6 +1282,7 @@ const compileClosureCall = ({
         callId: expr.id,
         returnTypeId: calleeDesc.returnType,
         expectedResultTypeId,
+        tailPosition,
         typeInstanceKey,
         ctx,
         fnCtx,
@@ -1231,6 +1309,7 @@ const compileCurriedClosureCall = ({
   ctx,
   fnCtx,
   compileExpr,
+  tailPosition,
   expectedResultTypeId,
 }: {
   expr: HirCallExpr;
@@ -1238,6 +1317,7 @@ const compileCurriedClosureCall = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
+  tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
@@ -1320,6 +1400,7 @@ const compileCurriedClosureCall = ({
           callId: expr.id,
           returnTypeId,
           expectedResultTypeId: isFinalSlice ? expectedResultTypeId : undefined,
+          tailPosition: tailPosition && isFinalSlice,
           typeInstanceKey,
           ctx,
           fnCtx,

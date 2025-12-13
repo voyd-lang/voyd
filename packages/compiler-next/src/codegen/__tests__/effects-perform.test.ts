@@ -72,15 +72,17 @@ const buildLoweringSnapshot = () => {
     ctx,
     siteCounter: { current: 0 },
   });
-  return ctx.effectLowering.sites.map((site) => ({
-    siteOrder: site.siteOrder,
-    function: semantics.symbolTable.getSymbol(site.functionSymbol).name,
-    effect: semantics.symbolTable.getSymbol(site.effectSymbol).name,
-    envFields: site.envFields.map((field) => ({
-      name: field.name,
-      sourceKind: field.sourceKind,
-    })),
-  }));
+  return ctx.effectLowering.sites
+    .filter((site) => site.kind === "perform")
+    .map((site) => ({
+      siteOrder: site.siteOrder,
+      function: semantics.symbolTable.getSymbol(site.functionSymbol).name,
+      effect: semantics.symbolTable.getSymbol(site.effectSymbol).name,
+      envFields: site.envFields.map((field) => ({
+        name: field.name,
+        sourceKind: field.sourceKind,
+      })),
+    }));
 };
 
 describe("effect perform lowering", () => {

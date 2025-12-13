@@ -30,41 +30,49 @@ export interface ContinuationEnvField {
   tempId?: number;
 }
 
-export interface EffectPerformSite {
+export interface ContinuationSiteBase {
   exprId: HirExprId;
   siteId: number;
   siteOrder: number;
   functionSymbol: SymbolId;
-  effectSymbol: SymbolId;
-  effectId: number;
-  opId: number;
-  resumeKind: ResumeKind;
   contFnName: string;
   contRefType?: binaryen.Type;
   baseEnvType: binaryen.Type;
   envType: binaryen.Type;
   envFields: readonly ContinuationEnvField[];
   handlerAtSite: boolean;
-  postBlockLabel: string;
-  evalOrder: readonly HirExprId[];
   resumeValueTypeId: TypeId;
-  resumeValueType: binaryen.Type;
+}
+
+export interface ContinuationPerformSite extends ContinuationSiteBase {
+  kind: "perform";
+  effectSymbol: SymbolId;
+  effectId: number;
+  opId: number;
+  resumeKind: ResumeKind;
   argsType?: binaryen.Type;
 }
 
+export interface ContinuationCallSite extends ContinuationSiteBase {
+  kind: "call";
+}
+
+export type ContinuationSite = ContinuationPerformSite | ContinuationCallSite;
+
 export interface EffectLoweringResult {
-  sitesByExpr: Map<HirExprId, EffectPerformSite>;
-  sites: readonly EffectPerformSite[];
+  sitesByExpr: Map<HirExprId, ContinuationSite>;
+  sites: readonly ContinuationSite[];
   argsTypes: Map<SymbolId, binaryen.Type>;
 }
 
 type SiteCounter = { current: number };
 
 interface SiteDraft {
+  kind: "perform" | "call";
   exprId: HirExprId;
   liveAfter: ReadonlySet<SymbolId>;
   evalOrder: readonly HirExprId[];
-  effectSymbol: SymbolId;
+  effectSymbol?: SymbolId;
 }
 
 type LiveResult = {
@@ -288,16 +296,30 @@ const analyzeExpr = ({
           ? analyzeExpr({ exprId: expr.callee, liveAfter: cursor, ctx })
           : { live: cursor, sites: [] };
       const merged = mergeSiteResults(...argResults, calleeResult);
+      const callInfo = ctx.effectMir.calls.get(expr.id);
       if (
         callee &&
         callee.exprKind === "identifier" &&
         ctx.symbolTable.getSymbol(callee.symbol).kind === "effect-op"
       ) {
         const site: SiteDraft = {
+          kind: "perform",
           exprId: expr.id,
           liveAfter,
           evalOrder: expr.args.map((arg) => arg.expr),
           effectSymbol: callee.symbol,
+        };
+        return {
+          live: merged.live,
+          sites: [...merged.sites, site],
+        };
+      }
+      if (callInfo?.effectful) {
+        const site: SiteDraft = {
+          kind: "call",
+          exprId: expr.id,
+          liveAfter,
+          evalOrder: expr.args.map((arg) => arg.expr),
         };
         return {
           live: merged.live,
@@ -625,8 +647,8 @@ export const buildEffectLowering = ({
   ctx: CodegenContext;
   siteCounter: SiteCounter;
 }): EffectLoweringResult => {
-  const sites: EffectPerformSite[] = [];
-  const sitesByExpr = new Map<HirExprId, EffectPerformSite>();
+  const sites: ContinuationSite[] = [];
+  const sitesByExpr = new Map<HirExprId, ContinuationSite>();
   const argsTypeCache = new Map<SymbolId, binaryen.Type>();
   const argsTypes = new Map<SymbolId, binaryen.Type>();
   const baseEnvTypes = new Map<SymbolId, binaryen.Type>();
@@ -666,15 +688,23 @@ export const buildEffectLowering = ({
     const baseEnvType = ensureBaseEnvType(item.symbol);
     const baseHeapType = modBinaryenTypeToHeapType(ctx.mod, baseEnvType);
     const fnName = sanitize(ctx.symbolTable.getSymbol(item.symbol).name);
+    const contFnName = `__cont_${sanitize(ctx.moduleLabel)}_${fnName}_${item.symbol}`;
 
     analysis.sites.forEach((site) => {
-      const { effectId, opId, resumeKind, effectSymbol } = effectOpIds(
-        site.effectSymbol,
-        ctx
-      );
-      const signature = ctx.typing.functions.getSignature(site.effectSymbol);
       const resumeValueTypeId =
-        signature?.returnType ?? ctx.typing.primitives.unknown;
+        site.kind === "perform"
+          ? (() => {
+              if (typeof site.effectSymbol !== "number") {
+                throw new Error("perform site missing effect op symbol");
+              }
+              const signature = ctx.typing.functions.getSignature(
+                site.effectSymbol
+              );
+              return signature?.returnType ?? ctx.typing.primitives.unknown;
+            })()
+          : (ctx.typing.resolvedExprTypes.get(site.exprId) ??
+              ctx.typing.table.getExprType(site.exprId) ??
+              ctx.typing.primitives.unknown);
       const capturedFields = envFieldsFor({
         liveSymbols: site.liveAfter,
         params,
@@ -706,45 +736,68 @@ export const buildEffectLowering = ({
         supertype: baseHeapType,
         final: true,
       });
-      const resumeValueType = wasmTypeFor(resumeValueTypeId, ctx);
-      const resumeKey =
-        resumeValueType === binaryen.none
-          ? "void"
-          : resumeValueType === binaryen.i32
-            ? "i32"
-            : `t${resumeValueType}`;
-      const contFnName = `__cont_${sanitize(ctx.moduleLabel)}_${fnName}_${item.symbol}_${resumeKey}`;
-      const argsType =
-        signature &&
-        ensureArgsType({
-          opSymbol: site.effectSymbol,
-          paramTypes: signature.parameters.map((param) => param.type),
-          ctx,
-          cache: argsTypeCache,
-        });
-      if (argsType) {
-        argsTypes.set(site.effectSymbol, argsType);
-      }
-      const lowered: EffectPerformSite = {
-        exprId: site.exprId,
-        siteId: siteCounter.current,
-        siteOrder: siteCounter.current,
-        functionSymbol: item.symbol,
-        effectSymbol,
-        effectId,
-        opId,
-        resumeKind,
-        contFnName,
-        baseEnvType,
-        envType,
-        envFields,
-        handlerAtSite: true,
-        postBlockLabel: `post_${siteCounter.current}`,
-        evalOrder: site.evalOrder,
-        resumeValueTypeId,
-        resumeValueType,
-        argsType,
-      };
+
+      const performMeta =
+        site.kind === "perform"
+          ? (() => {
+              if (typeof site.effectSymbol !== "number") {
+                throw new Error("perform site missing effect op symbol");
+              }
+              const { effectId, opId, resumeKind, effectSymbol } = effectOpIds(
+                site.effectSymbol,
+                ctx
+              );
+              const signature = ctx.typing.functions.getSignature(
+                site.effectSymbol
+              );
+              const argsType =
+                signature &&
+                ensureArgsType({
+                  opSymbol: site.effectSymbol,
+                  paramTypes: signature.parameters.map((param) => param.type),
+                  ctx,
+                  cache: argsTypeCache,
+                });
+              if (argsType) {
+                argsTypes.set(site.effectSymbol, argsType);
+              }
+              return { effectId, opId, resumeKind, effectSymbol, argsType };
+            })()
+          : undefined;
+
+      const lowered: ContinuationSite =
+        site.kind === "perform" && performMeta
+          ? {
+              kind: "perform",
+              exprId: site.exprId,
+              siteId: siteCounter.current,
+              siteOrder: siteCounter.current,
+              functionSymbol: item.symbol,
+              effectSymbol: performMeta.effectSymbol,
+              effectId: performMeta.effectId,
+              opId: performMeta.opId,
+              resumeKind: performMeta.resumeKind,
+              contFnName,
+              baseEnvType,
+              envType,
+              envFields,
+              handlerAtSite: true,
+              resumeValueTypeId,
+              argsType: performMeta.argsType,
+            }
+          : {
+              kind: "call",
+              exprId: site.exprId,
+              siteId: siteCounter.current,
+              siteOrder: siteCounter.current,
+              functionSymbol: item.symbol,
+              contFnName,
+              baseEnvType,
+              envType,
+              envFields,
+              handlerAtSite: true,
+              resumeValueTypeId,
+            };
       siteCounter.current += 1;
       sites.push(lowered);
       sitesByExpr.set(site.exprId, lowered);

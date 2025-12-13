@@ -5,7 +5,7 @@ import {
   structGetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
 import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
-import { unboxOutcomeValue } from "./outcome-values.js";
+import { boxOutcomeValue, unboxOutcomeValue } from "./outcome-values.js";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
 import type { EffectRuntime } from "./runtime-abi.js";
 import { wasmTypeFor } from "../types.js";
@@ -592,27 +592,25 @@ export const createResumeContinuation = ({
   ];
 
     const contRef = ctx.mod.local.get(contLocal, runtime.continuationType);
+    const fnRefType = functionRefType({
+      params: [binaryen.anyref, binaryen.eqref],
+      result: runtime.outcomeType,
+      ctx,
+    });
     const branches = signatures.map((sig) => {
       const matches = ctx.mod.i32.and(
         ctx.mod.i32.eq(effectIdExpr, ctx.mod.i32.const(sig.effectId)),
         ctx.mod.i32.eq(opIdExpr, ctx.mod.i32.const(sig.opId))
       );
-      const paramsForRef =
+      const resumeBox =
         sig.returnType === binaryen.none
-          ? [binaryen.anyref]
-          : [binaryen.anyref, sig.returnType];
-      const fnRefType = functionRefType({
-        params: paramsForRef,
-        result: runtime.outcomeType,
-        ctx,
-      });
-      const operands =
-        sig.returnType === binaryen.none
-          ? [runtime.continuationEnv(contRef)]
-          : [
-              runtime.continuationEnv(contRef),
-              ctx.mod.local.get(valueLocal, sig.returnType),
-            ];
+          ? ctx.mod.ref.null(binaryen.eqref)
+          : boxOutcomeValue({
+              value: ctx.mod.local.get(valueLocal, sig.returnType),
+              valueType: sig.returnType,
+              ctx,
+            });
+      const operands = [runtime.continuationEnv(contRef), resumeBox];
       const call = callRef(
         ctx.mod,
         refCast(ctx.mod, runtime.continuationFn(contRef), fnRefType),

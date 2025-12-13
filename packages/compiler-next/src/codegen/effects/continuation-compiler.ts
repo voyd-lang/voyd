@@ -15,7 +15,7 @@ import type {
   TypeId,
 } from "../context.js";
 import { allocateTempLocal } from "../locals.js";
-import { getExprBinaryenType } from "../types.js";
+import { getExprBinaryenType, wasmTypeFor } from "../types.js";
 import { compileCallExpr } from "../expressions/calls.js";
 import { compileBlockExpr, compileStatement } from "../expressions/blocks.js";
 import {
@@ -39,6 +39,7 @@ import {
   stmtContainsTarget,
 } from "../expressions/contains.js";
 import type { GroupContinuationCfg } from "./continuation-cfg.js";
+import { unboxOutcomeValue } from "./outcome-values.js";
 
 const compileContinuationBlockExpr = ({
   expr,
@@ -314,9 +315,11 @@ const compileContinuationWhileExpr = ({
 export const createContinuationExpressionCompiler = ({
   targetExprId,
   resumeLocal,
+  resumeValueTypeId,
 }: {
   targetExprId: HirExprId;
   resumeLocal?: LocalBindingLocal;
+  resumeValueTypeId?: TypeId;
 }): ExpressionCompiler => {
   let resumeActive = true;
 
@@ -330,8 +333,24 @@ export const createContinuationExpressionCompiler = ({
     if (resumeActive && exprId === targetExprId) {
       resumeActive = false;
       if (resumeLocal) {
+        const resolvedTypeId =
+          resumeValueTypeId ?? ctx.typing.resolvedExprTypes.get(exprId);
+        const valueType =
+          typeof resolvedTypeId === "number"
+            ? wasmTypeFor(resolvedTypeId, ctx)
+            : resumeLocal.type;
+        const payload = ctx.mod.local.get(resumeLocal.index, resumeLocal.type);
+        if (valueType !== resumeLocal.type && resumeLocal.type === binaryen.eqref) {
+          return {
+            expr:
+              valueType === binaryen.none
+                ? ctx.mod.block(null, [ctx.mod.drop(payload)], binaryen.none)
+                : unboxOutcomeValue({ payload, valueType, ctx }),
+            usedReturnCall: false,
+          };
+        }
         return {
-          expr: ctx.mod.local.get(resumeLocal.index, resumeLocal.type),
+          expr: payload,
           usedReturnCall: false,
         };
       }
@@ -853,6 +872,11 @@ export const createGroupedContinuationExpressionCompiler = ({
       if (expr.exprKind !== "call") {
         throw new Error("continuation targets must be call expressions");
       }
+      const site = cfg.siteByExprId.get(exprId);
+      if (!site) {
+        throw new Error("missing site metadata for continuation target");
+      }
+      const valueType = wasmTypeFor(site.resumeValueTypeId, ctx);
       const started = () =>
         ctx.mod.local.get(startedLocal.index, startedLocal.type);
       const cond = ctx.mod.i32.and(
@@ -870,13 +894,17 @@ export const createGroupedContinuationExpressionCompiler = ({
         startedLocal.index,
         ctx.mod.i32.const(1)
       );
-      const resumedValue = resumeLocal
+      const resumeBox = resumeLocal
         ? ctx.mod.local.get(resumeLocal.index, resumeLocal.type)
-        : ctx.mod.nop();
+        : ctx.mod.ref.null(binaryen.eqref);
+      const resumedValue =
+        valueType === binaryen.none
+          ? ctx.mod.block(null, [ctx.mod.drop(resumeBox)], binaryen.none)
+          : unboxOutcomeValue({ payload: resumeBox, valueType, ctx });
       const resumedExpr = ctx.mod.block(
         null,
         [resumeSet, resumedValue],
-        resumeLocal?.type ?? binaryen.none
+        valueType
       );
       return {
         expr: ctx.mod.if(cond, resumedExpr, normal.expr),
