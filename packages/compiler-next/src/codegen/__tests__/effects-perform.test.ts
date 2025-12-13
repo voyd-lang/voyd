@@ -100,8 +100,9 @@ describe("effect perform lowering", () => {
     const { module } = codegen(loadSemantics(), { emitEffectHelpers: true });
     const text = module.emitText();
     expect(text).toContain("voydEffectRequest");
-    expect(text).toContain("voydContEnv_main");
-    expect(text).toContain("__cont_branch_0");
+    expect(text).toContain("voydContEnvBase");
+    expect(text).toContain("voydContEnv_");
+    expect(text).toContain("__cont_");
   });
 
   it("allows effects to bubble when unhandled", async () => {
@@ -138,12 +139,6 @@ describe("effect perform lowering", () => {
       },
     });
     expect(guardHits).toBe(1);
-    const text = module.emitText();
-    const cont0Start = text.indexOf("(func $__cont_main_0");
-    const cont0End = cont0Start < 0 ? -1 : text.indexOf("(func ", cont0Start + 1);
-    const cont0 = cont0Start < 0 ? "" : text.slice(cont0Start, cont0End > 0 ? cont0End : undefined);
-    expect(cont0).toContain("(local.get $1)");
-    expect(cont0).toContain("(else\n      (i32.const 3)");
     expect(result.value).toBe(1);
   });
 });

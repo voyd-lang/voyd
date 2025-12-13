@@ -1,6 +1,7 @@
 import binaryen from "binaryen";
 import {
   defineStructType,
+  modBinaryenTypeToHeapType,
 } from "@voyd/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
@@ -40,6 +41,7 @@ export interface EffectPerformSite {
   resumeKind: ResumeKind;
   contFnName: string;
   contRefType?: binaryen.Type;
+  baseEnvType: binaryen.Type;
   envType: binaryen.Type;
   envFields: readonly ContinuationEnvField[];
   handlerAtSite: boolean;
@@ -627,6 +629,27 @@ export const buildEffectLowering = ({
   const sitesByExpr = new Map<HirExprId, EffectPerformSite>();
   const argsTypeCache = new Map<SymbolId, binaryen.Type>();
   const argsTypes = new Map<SymbolId, binaryen.Type>();
+  const baseEnvTypes = new Map<SymbolId, binaryen.Type>();
+
+  const ensureBaseEnvType = (fnSymbol: SymbolId): binaryen.Type => {
+    const cached = baseEnvTypes.get(fnSymbol);
+    if (cached) return cached;
+    const fnName = sanitize(ctx.symbolTable.getSymbol(fnSymbol).name);
+    const baseType = defineStructType(ctx.mod, {
+      name: `voydContEnvBase_${sanitize(ctx.moduleLabel)}_${fnName}_${fnSymbol}`,
+      fields: [
+        { name: "site", type: binaryen.i32, mutable: false },
+        {
+          name: "handler",
+          type: ctx.effectsRuntime.handlerFrameType,
+          mutable: false,
+        },
+      ],
+      final: false,
+    });
+    baseEnvTypes.set(fnSymbol, baseType);
+    return baseType;
+  };
 
   ctx.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
@@ -640,6 +663,9 @@ export const buildEffectLowering = ({
       liveAfter: new Set(),
       ctx,
     });
+    const baseEnvType = ensureBaseEnvType(item.symbol);
+    const baseHeapType = modBinaryenTypeToHeapType(ctx.mod, baseEnvType);
+    const fnName = sanitize(ctx.symbolTable.getSymbol(item.symbol).name);
 
     analysis.sites.forEach((site) => {
       const { effectId, opId, resumeKind, effectSymbol } = effectOpIds(
@@ -649,6 +675,12 @@ export const buildEffectLowering = ({
       const signature = ctx.typing.functions.getSignature(site.effectSymbol);
       const resumeValueTypeId =
         signature?.returnType ?? ctx.typing.primitives.unknown;
+      const capturedFields = envFieldsFor({
+        liveSymbols: site.liveAfter,
+        params,
+        ordering: order,
+        ctx,
+      });
       const envFields: ContinuationEnvField[] = [
         {
           name: "site",
@@ -656,40 +688,32 @@ export const buildEffectLowering = ({
           wasmType: binaryen.i32,
           sourceKind: "site",
         },
-        ...envFieldsFor({
-          liveSymbols: site.liveAfter,
-          params,
-          ordering: order,
-          ctx,
-        }),
         {
           name: "handler",
           wasmType: ctx.effectsRuntime.handlerFrameType,
           typeId: ctx.typing.primitives.unknown,
           sourceKind: "handler",
         } as const,
-        {
-          name: "marker",
-          typeId: ctx.typing.primitives.i32,
-          wasmType: binaryen.i32,
-          sourceKind: "site",
-        },
+        ...capturedFields,
       ];
       const envType = defineStructType(ctx.mod, {
-        name: `voydContEnv_${sanitize(
-          ctx.symbolTable.getSymbol(item.symbol).name
-        )}_${siteCounter.current}`,
+        name: `voydContEnv_${sanitize(ctx.moduleLabel)}_${fnName}_${siteCounter.current}`,
         fields: envFields.map((field) => ({
           name: field.name,
           type: field.wasmType,
           mutable: false,
         })),
+        supertype: baseHeapType,
         final: true,
       });
       const resumeValueType = wasmTypeFor(resumeValueTypeId, ctx);
-      const contFnName = `__cont_${sanitize(
-        ctx.symbolTable.getSymbol(item.symbol).name
-      )}_${siteCounter.current}`;
+      const resumeKey =
+        resumeValueType === binaryen.none
+          ? "void"
+          : resumeValueType === binaryen.i32
+            ? "i32"
+            : `t${resumeValueType}`;
+      const contFnName = `__cont_${sanitize(ctx.moduleLabel)}_${fnName}_${item.symbol}_${resumeKey}`;
       const argsType =
         signature &&
         ensureArgsType({
@@ -711,7 +735,7 @@ export const buildEffectLowering = ({
         opId,
         resumeKind,
         contFnName,
-        contRefType: binaryen.funcref,
+        baseEnvType,
         envType,
         envFields,
         handlerAtSite: true,

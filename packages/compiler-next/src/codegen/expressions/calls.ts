@@ -46,7 +46,8 @@ import { unboxOutcomeValue } from "../effects/outcome-values.js";
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { handlerCleanupOps } from "../effects/handler-stack.js";
 import { ensureDispatcher } from "../effects/dispatcher.js";
-import { createContinuationExpressionCompiler } from "../effects/continuation-compiler.js";
+import { createGroupedContinuationExpressionCompiler } from "../effects/continuation-compiler.js";
+import { buildGroupContinuationCfg } from "../effects/continuation-cfg.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 let traitDispatchSigCounter = 0;
@@ -201,23 +202,42 @@ const ensureContinuationFunction = ({
 }): binaryen.Type => {
   const built = ctx.effectsState.contBuilt;
   const building = ctx.effectsState.contBuilding;
-  if (built.has(site.siteId)) {
-    return site.contRefType ?? binaryen.funcref;
+  const contName = site.contFnName;
+  const resumeWasmType = site.resumeValueType;
+  const provisionalRefType = functionRefType({
+    params:
+      resumeWasmType === binaryen.none
+        ? [binaryen.anyref]
+        : [binaryen.anyref, resumeWasmType],
+    result: ctx.effectsRuntime.outcomeType,
+    ctx,
+  });
+  if (built.has(contName)) {
+    return site.contRefType ?? provisionalRefType;
   }
-  if (building.has(site.siteId)) {
-    return site.contRefType ?? binaryen.funcref;
+  if (building.has(contName)) {
+    site.contRefType ??= provisionalRefType;
+    return site.contRefType;
   }
-  building.add(site.siteId);
+  building.add(contName);
 
   const { fn, returnTypeId } = findFunctionBySymbol(site.functionSymbol, ctx);
   const params = [binaryen.anyref];
-  if (site.resumeValueType !== binaryen.none) {
-    params.push(site.resumeValueType);
+  const returnWasmType = wasmTypeFor(returnTypeId, ctx);
+  if (resumeWasmType !== binaryen.none) {
+    params.push(resumeWasmType);
   }
 
+  const groupSites = ctx.effectLowering.sites.filter(
+    (candidate) =>
+      candidate.functionSymbol === site.functionSymbol &&
+      candidate.contFnName === contName
+  );
+
+  const locals: binaryen.Type[] = [];
   const fnCtx: FunctionContext = {
     bindings: new Map(),
-    locals: [],
+    locals,
     nextLocalIndex: params.length,
     returnTypeId,
     instanceKey: undefined,
@@ -225,39 +245,8 @@ const ensureContinuationFunction = ({
     effectful: true,
   };
 
-  const envParamIndex = 0;
-  const envLocalGetter = () =>
-    refCast(
-      ctx.mod,
-      ctx.mod.local.get(envParamIndex, binaryen.anyref),
-      site.envType
-    );
-  const initOps: binaryen.ExpressionRef[] = [];
-  site.envFields.forEach((field, fieldIndex) => {
-    if (field.sourceKind === "site") return;
-    const value = structGetFieldValue({
-      mod: ctx.mod,
-      fieldIndex,
-      fieldType: field.wasmType,
-      exprRef: envLocalGetter(),
-    });
-    const binding = allocateTempLocal(field.wasmType, fnCtx, field.typeId);
-    if (typeof field.symbol === "number") {
-      fnCtx.bindings.set(field.symbol, {
-        ...binding,
-        kind: "local",
-        typeId: field.typeId,
-      });
-    }
-    if (field.sourceKind === "handler") {
-      fnCtx.currentHandler = { index: binding.index, type: binding.type };
-    }
-    initOps.push(ctx.mod.local.set(binding.index, value));
-  });
-
   const localsToSeed = collectLocalSymbols(fn, ctx);
   localsToSeed.forEach((symbol) => {
-    if (fnCtx.bindings.has(symbol)) return;
     const typeId =
       ctx.typing.valueTypes.get(symbol) ?? ctx.typing.primitives.unknown;
     const wasmType = wasmTypeFor(typeId, ctx);
@@ -269,17 +258,73 @@ const ensureContinuationFunction = ({
     });
   });
 
+  const handlerLocal = allocateTempLocal(
+    ctx.effectsRuntime.handlerFrameType,
+    fnCtx
+  );
+  fnCtx.currentHandler = { index: handlerLocal.index, type: handlerLocal.type };
+
+  const startedLocal = allocateTempLocal(
+    binaryen.i32,
+    fnCtx,
+    ctx.typing.primitives.i32
+  );
+  const activeSiteLocal = allocateTempLocal(
+    binaryen.i32,
+    fnCtx,
+    ctx.typing.primitives.i32
+  );
+
+  const envParamIndex = 0;
+  const baseEnvRef = () =>
+    refCast(
+      ctx.mod,
+      ctx.mod.local.get(envParamIndex, binaryen.anyref),
+      site.baseEnvType
+    );
+  const activeSiteFromEnv = structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: 0,
+    fieldType: binaryen.i32,
+    exprRef: baseEnvRef(),
+  });
+  const initActiveSite = ctx.mod.local.set(
+    activeSiteLocal.index,
+    activeSiteFromEnv
+  );
+  const initStarted = ctx.mod.local.set(
+    startedLocal.index,
+    ctx.mod.i32.const(0)
+  );
+
+  const cfgCache = ctx.effectsState.contCfgByName;
+  const cfg =
+    cfgCache.get(contName) ??
+    (() => {
+      const builtCfg = buildGroupContinuationCfg({
+        fn,
+        groupSites,
+        ctx,
+      });
+      cfgCache.set(contName, builtCfg);
+      return builtCfg;
+    })();
+
   const resumeLocal =
-    site.resumeValueType === binaryen.none
+    resumeWasmType === binaryen.none
       ? undefined
       : ({
           kind: "local",
           index: 1,
-          type: site.resumeValueType,
+          type: resumeWasmType,
           typeId: site.resumeValueTypeId,
         } as const);
-  const continuationCompiler = createContinuationExpressionCompiler({
-    targetExprId: site.exprId,
+
+  const continuationCompiler = createGroupedContinuationExpressionCompiler({
+    cfg,
+    activeSiteOrder: () =>
+      ctx.mod.local.get(activeSiteLocal.index, binaryen.i32),
+    startedLocal,
     resumeLocal,
   });
 
@@ -290,40 +335,98 @@ const ensureContinuationFunction = ({
     tailPosition: true,
     expectedResultTypeId: returnTypeId,
   });
-  const returnWasmType = wasmTypeFor(returnTypeId, ctx);
   const needsWrap =
     binaryen.getExpressionType(bodyExpr.expr) === returnWasmType;
-  const finalBody =
-    initOps.length === 0 && !needsWrap
-      ? bodyExpr.expr
-      : ctx.mod.block(
-          null,
-          [
-            ...initOps,
-            needsWrap
-              ? wrapValueInOutcome({
-                  valueExpr: bodyExpr.expr,
-                  valueType: returnWasmType,
-                  ctx,
-                })
-              : bodyExpr.expr,
-          ],
-          ctx.effectsRuntime.outcomeType
-        );
+  const bodyOutcomeExpr = needsWrap
+    ? wrapValueInOutcome({
+        valueExpr: bodyExpr.expr,
+        valueType: returnWasmType,
+        ctx,
+      })
+    : bodyExpr.expr;
+
+  let restoreChain = ctx.mod.nop();
+
+  [...groupSites].reverse().forEach((groupSite) => {
+    const envLocalGetter = () =>
+      refCast(
+        ctx.mod,
+        ctx.mod.local.get(envParamIndex, binaryen.anyref),
+        groupSite.envType
+      );
+    const initOps: binaryen.ExpressionRef[] = [];
+    groupSite.envFields.forEach((field, fieldIndex) => {
+      if (field.sourceKind === "site") return;
+      const value = structGetFieldValue({
+        mod: ctx.mod,
+        fieldIndex,
+        fieldType: field.wasmType,
+        exprRef: envLocalGetter(),
+      });
+      if (field.sourceKind === "handler") {
+        initOps.push(ctx.mod.local.set(handlerLocal.index, value));
+        return;
+      }
+      if (typeof field.symbol !== "number") {
+        throw new Error("missing symbol for env field");
+      }
+      const binding = fnCtx.bindings.get(field.symbol);
+      if (!binding || binding.kind !== "local") {
+        throw new Error("missing local binding for env restore");
+      }
+      initOps.push(ctx.mod.local.set(binding.index, value));
+    });
+    const restoreBlock =
+      initOps.length === 0
+        ? ctx.mod.nop()
+        : ctx.mod.block(null, initOps, binaryen.none);
+    const matches = ctx.mod.i32.eq(
+      ctx.mod.local.get(activeSiteLocal.index, binaryen.i32),
+      ctx.mod.i32.const(groupSite.siteOrder)
+    );
+    restoreChain = ctx.mod.if(matches, restoreBlock, restoreChain);
+  });
+
+  const activeSiteGet = () =>
+    ctx.mod.local.get(activeSiteLocal.index, binaryen.i32);
+  const matchAny = groupSites
+    .map((groupSite) =>
+      ctx.mod.i32.eq(activeSiteGet(), ctx.mod.i32.const(groupSite.siteOrder))
+    )
+    .reduce(
+      (acc, exprRef) => ctx.mod.i32.or(acc, exprRef),
+      ctx.mod.i32.const(0)
+    );
 
   const fnRef = ctx.mod.addFunction(
-    site.contFnName,
+    contName,
     binaryen.createType(params),
     ctx.effectsRuntime.outcomeType,
-    fnCtx.locals,
-    finalBody
+    locals,
+    ctx.mod.block(
+      null,
+      [
+        initActiveSite,
+        initStarted,
+        restoreChain,
+        ctx.mod.if(
+          matchAny,
+          bodyOutcomeExpr,
+          ctx.mod.ref.null(ctx.effectsRuntime.outcomeType)
+        ),
+      ],
+      ctx.effectsRuntime.outcomeType
+    )
   );
 
   const fnHeapType = bin._BinaryenFunctionGetType(fnRef);
-  site.contRefType = bin._BinaryenTypeFromHeapType(fnHeapType, false);
-  building.delete(site.siteId);
-  built.add(site.siteId);
-  return site.contRefType;
+  const contRefType = bin._BinaryenTypeFromHeapType(fnHeapType, false);
+  groupSites.forEach((groupSite) => {
+    groupSite.contRefType = contRefType;
+  });
+  building.delete(contName);
+  built.add(contName);
+  return contRefType;
 };
 
 const lowerEffectfulCallResult = ({

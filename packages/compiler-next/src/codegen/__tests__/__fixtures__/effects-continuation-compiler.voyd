@@ -1,0 +1,19 @@
+eff Async
+  await(resume, value: i32) -> i32
+
+pub fn block_test(): Async -> i32
+  var x = 0
+  x = x + 1
+  let y = Async::await(5)
+  x = x + y
+  x
+
+pub fn while_test(): Async -> i32
+  var i = 0
+  var sum = 0
+  let n = 1
+  while i < n do:
+    i = i + 1
+    let v = Async::await(i)
+    sum = sum + v
+  sum
