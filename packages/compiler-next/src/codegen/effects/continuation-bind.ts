@@ -3,6 +3,7 @@ import {
   callRef,
   defineStructType,
   initStruct,
+  modBinaryenTypeToHeapType,
   refCast,
   refFunc,
   structGetFieldValue,
@@ -59,12 +60,19 @@ export const ensureContinuationBindFunction = (
   }
 
   const fnName = "__voyd_cont_bind";
+  const baseHeapType = modBinaryenTypeToHeapType(
+    ctx.mod,
+    ctx.effectsRuntime.contEnvBaseType
+  );
   const envType = defineStructType(ctx.mod, {
     name: "__voydContBindEnv",
     fields: [
+      { name: "site", type: binaryen.i32, mutable: false },
+      { name: "handler", type: ctx.effectsRuntime.handlerFrameType, mutable: false },
       { name: "next", type: ctx.effectsRuntime.continuationType, mutable: false },
       { name: "frame", type: ctx.effectsRuntime.continuationType, mutable: false },
     ],
+    supertype: baseHeapType,
     final: true,
   });
   const contCallRefType = ensureContCallRefType(ctx);
@@ -83,14 +91,14 @@ export const ensureContinuationBindFunction = (
   const nextCont = () =>
     structGetFieldValue({
       mod: ctx.mod,
-      fieldIndex: 0,
+      fieldIndex: 2,
       fieldType: ctx.effectsRuntime.continuationType,
       exprRef: envRef(),
     });
   const frameCont = () =>
     structGetFieldValue({
       mod: ctx.mod,
-      fieldIndex: 1,
+      fieldIndex: 3,
       fieldType: ctx.effectsRuntime.continuationType,
       exprRef: envRef(),
     });
@@ -135,6 +143,8 @@ export const ensureContinuationBindFunction = (
   const wrapEffect = (() => {
     const request = refCast(ctx.mod, payload, ctx.effectsRuntime.effectRequestType);
     const wrappedEnv = initStruct(ctx.mod, envType, [
+      ctx.mod.i32.const(-1),
+      ctx.effectsRuntime.requestHandler(request),
       ctx.effectsRuntime.requestContinuation(request),
       frameCont(),
     ] as number[]);
@@ -188,6 +198,8 @@ export const wrapRequestContinuationWithFrame = ({
 }): binaryen.ExpressionRef => {
   const { fnName, fnRefType, envType } = ensureContinuationBindFunction(ctx);
   const env = initStruct(ctx.mod, envType, [
+    ctx.mod.i32.const(-1),
+    ctx.effectsRuntime.requestHandler(request),
     ctx.effectsRuntime.requestContinuation(request),
     frame,
   ] as number[]);

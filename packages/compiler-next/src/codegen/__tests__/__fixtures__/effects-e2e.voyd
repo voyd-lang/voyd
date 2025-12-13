@@ -34,3 +34,13 @@ pub fn missing_tail(): () -> i32
       0
   Async::log(resume, msg):
     resume(msg)
+
+pub fn perform_in_try(): () -> i32
+  try
+    let value = Async::await()
+    Async::log(value)
+    value + 10
+  Async::await(tail):
+    tail(5)
+  Async::log(resume, msg):
+    resume(msg)

@@ -8,6 +8,7 @@ import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { boxOutcomeValue, unboxOutcomeValue } from "./outcome-values.js";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
 import type { EffectRuntime } from "./runtime-abi.js";
+import { ensureDispatcher } from "./dispatcher.js";
 import { wasmTypeFor } from "../types.js";
 
 export const MSGPACK_WRITE_VALUE = "__voyd_msgpack_write_value";
@@ -512,6 +513,17 @@ export const createEffectfulEntry = ({
   }
   const name = `${ctx.moduleLabel}__${exportName}`;
   const params = binaryen.createType([binaryen.i32, binaryen.i32]);
+  const dispatched = ctx.mod.call(
+    ensureDispatcher(ctx),
+    [
+      ctx.mod.call(
+        meta.wasmName,
+        [ctx.mod.ref.null(runtime.handlerFrameType)],
+        runtime.outcomeType
+      ),
+    ],
+    runtime.outcomeType
+  );
   ctx.mod.addFunction(
     name,
     params,
@@ -520,11 +532,7 @@ export const createEffectfulEntry = ({
     ctx.mod.call(
       handleOutcome,
       [
-        ctx.mod.call(
-          meta.wasmName,
-          [ctx.mod.ref.null(runtime.handlerFrameType)],
-          runtime.outcomeType
-        ),
+        dispatched,
         ctx.mod.local.get(0, binaryen.i32),
         ctx.mod.local.get(1, binaryen.i32),
       ],
@@ -679,6 +687,22 @@ export const createResumeEffectful = ({
     const bufPtrParam = 1;
     const bufLenParam = 2;
 
+    const resumedOutcome = ctx.mod.call(
+      resumeContinuation,
+      [
+        ctx.mod.local.get(contParam, runtime.effectRequestType),
+        ctx.mod.call(
+          imports.readValue,
+          [
+            ctx.mod.local.get(bufPtrParam, binaryen.i32),
+            ctx.mod.local.get(bufLenParam, binaryen.i32),
+          ],
+          binaryen.i32
+        ),
+      ],
+      runtime.outcomeType
+    );
+
     ctx.mod.addFunction(
       name,
       params,
@@ -688,18 +712,8 @@ export const createResumeEffectful = ({
         handleOutcome,
         [
           ctx.mod.call(
-            resumeContinuation,
-            [
-              ctx.mod.local.get(contParam, runtime.effectRequestType),
-              ctx.mod.call(
-                imports.readValue,
-                [
-                  ctx.mod.local.get(bufPtrParam, binaryen.i32),
-                  ctx.mod.local.get(bufLenParam, binaryen.i32),
-                ],
-                binaryen.i32
-              ),
-            ],
+            ensureDispatcher(ctx),
+            [resumedOutcome],
             runtime.outcomeType
           ),
           ctx.mod.local.get(bufPtrParam, binaryen.i32),

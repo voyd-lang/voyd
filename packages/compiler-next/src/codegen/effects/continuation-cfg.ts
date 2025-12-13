@@ -261,7 +261,30 @@ const siteOrdersFromExpr = ({
       );
       break;
     case "lambda":
+      break;
     case "effect-handler":
+      unionInto(
+        sites,
+        siteOrdersFromExpr({
+          exprId: expr.body,
+          ctx,
+          memo,
+          siteOrderByExpr,
+          visitStmt,
+        })
+      );
+      if (typeof expr.finallyBranch === "number") {
+        unionInto(
+          sites,
+          siteOrdersFromExpr({
+            exprId: expr.finallyBranch,
+            ctx,
+            memo,
+            siteOrderByExpr,
+            visitStmt,
+          })
+        );
+      }
       break;
   }
 

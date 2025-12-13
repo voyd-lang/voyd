@@ -52,4 +52,15 @@ describe("effects wasm e2e", () => {
     const target = instance.exports.missing_tail as CallableFunction;
     expect(() => target()).toThrow();
   });
+
+  it("supports direct performs inside a try body", () => {
+    const { module } = buildModule();
+    const wasmBinary = new Uint8Array(module.emitBinary());
+    const instance = new WebAssembly.Instance(
+      new WebAssembly.Module(wasmBinary),
+      {}
+    );
+    const target = instance.exports.perform_in_try as CallableFunction;
+    expect(target()).toBe(15);
+  });
 });

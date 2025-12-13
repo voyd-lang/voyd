@@ -104,6 +104,98 @@ export const effectOpIds = (
 const sanitize = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
 
+const functionContainsEffectHandlers = (
+  exprId: HirExprId,
+  ctx: CodegenContext
+): boolean => {
+  const expr = ctx.hir.expressions.get(exprId);
+  if (!expr) return false;
+
+  switch (expr.exprKind) {
+    case "effect-handler":
+      return true;
+    case "identifier":
+    case "literal":
+    case "overload-set":
+    case "continue":
+      return false;
+    case "break":
+      return typeof expr.value === "number"
+        ? functionContainsEffectHandlers(expr.value, ctx)
+        : false;
+    case "call":
+      return (
+        functionContainsEffectHandlers(expr.callee, ctx) ||
+        expr.args.some((arg) => functionContainsEffectHandlers(arg.expr, ctx))
+      );
+    case "block":
+      return (
+        expr.statements.some((stmtId) => {
+          const stmt = ctx.hir.statements.get(stmtId);
+          if (!stmt) return false;
+          if (stmt.kind === "let") {
+            return functionContainsEffectHandlers(stmt.initializer, ctx);
+          }
+          if (stmt.kind === "expr-stmt") {
+            return functionContainsEffectHandlers(stmt.expr, ctx);
+          }
+          if (stmt.kind === "return" && typeof stmt.value === "number") {
+            return functionContainsEffectHandlers(stmt.value, ctx);
+          }
+          return false;
+        }) ||
+        (typeof expr.value === "number" &&
+          functionContainsEffectHandlers(expr.value, ctx))
+      );
+    case "tuple":
+      return expr.elements.some((element) =>
+        functionContainsEffectHandlers(element, ctx)
+      );
+    case "loop":
+      return functionContainsEffectHandlers(expr.body, ctx);
+    case "while":
+      return (
+        functionContainsEffectHandlers(expr.condition, ctx) ||
+        functionContainsEffectHandlers(expr.body, ctx)
+      );
+    case "if":
+    case "cond":
+      return (
+        expr.branches.some(
+          (branch) =>
+            functionContainsEffectHandlers(branch.condition, ctx) ||
+            functionContainsEffectHandlers(branch.value, ctx)
+        ) ||
+        (typeof expr.defaultBranch === "number" &&
+          functionContainsEffectHandlers(expr.defaultBranch, ctx))
+      );
+    case "match":
+      return (
+        functionContainsEffectHandlers(expr.discriminant, ctx) ||
+        expr.arms.some(
+          (arm) =>
+            (typeof arm.guard === "number" &&
+              functionContainsEffectHandlers(arm.guard, ctx)) ||
+            functionContainsEffectHandlers(arm.value, ctx)
+        )
+      );
+    case "object-literal":
+      return expr.entries.some((entry) =>
+        functionContainsEffectHandlers(entry.value, ctx)
+      );
+    case "field-access":
+      return functionContainsEffectHandlers(expr.target, ctx);
+    case "assign":
+      return (
+        (typeof expr.target === "number" &&
+          functionContainsEffectHandlers(expr.target, ctx)) ||
+        functionContainsEffectHandlers(expr.value, ctx)
+      );
+    case "lambda":
+      return false;
+  }
+};
+
 const cloneLive = (set: ReadonlySet<SymbolId>): Set<SymbolId> =>
   new Set(set);
 
@@ -452,8 +544,22 @@ const analyzeExpr = ({
       };
     }
     case "lambda":
-    case "effect-handler":
       return { live: cloneLive(liveAfter), sites: [] };
+    case "effect-handler": {
+      const finallyRes =
+        typeof expr.finallyBranch === "number"
+          ? analyzeExpr({ exprId: expr.finallyBranch, liveAfter, ctx })
+          : { live: cloneLive(liveAfter), sites: [] as SiteDraft[] };
+      const bodyRes = analyzeExpr({
+        exprId: expr.body,
+        liveAfter: mergeLive(liveAfter, finallyRes.live),
+        ctx,
+      });
+      return {
+        live: mergeLive(liveAfter, bodyRes.live, finallyRes.live),
+        sites: [...bodyRes.sites, ...finallyRes.sites],
+      };
+    }
   }
 };
 
@@ -577,6 +683,11 @@ const definitionOrder = (
       case "literal":
       case "lambda":
       case "effect-handler":
+        walkExpr(expr.body);
+        if (typeof expr.finallyBranch === "number") {
+          walkExpr(expr.finallyBranch);
+        }
+        return;
       case "overload-set":
       case "continue":
       case "break":
@@ -651,32 +762,16 @@ export const buildEffectLowering = ({
   const sitesByExpr = new Map<HirExprId, ContinuationSite>();
   const argsTypeCache = new Map<SymbolId, binaryen.Type>();
   const argsTypes = new Map<SymbolId, binaryen.Type>();
-  const baseEnvTypes = new Map<SymbolId, binaryen.Type>();
-
-  const ensureBaseEnvType = (fnSymbol: SymbolId): binaryen.Type => {
-    const cached = baseEnvTypes.get(fnSymbol);
-    if (cached) return cached;
-    const fnName = sanitize(ctx.symbolTable.getSymbol(fnSymbol).name);
-    const baseType = defineStructType(ctx.mod, {
-      name: `voydContEnvBase_${sanitize(ctx.moduleLabel)}_${fnName}_${fnSymbol}`,
-      fields: [
-        { name: "site", type: binaryen.i32, mutable: false },
-        {
-          name: "handler",
-          type: ctx.effectsRuntime.handlerFrameType,
-          mutable: false,
-        },
-      ],
-      final: false,
-    });
-    baseEnvTypes.set(fnSymbol, baseType);
-    return baseType;
-  };
+  const baseEnvType = ctx.effectsRuntime.contEnvBaseType;
+  const baseHeapType = modBinaryenTypeToHeapType(ctx.mod, baseEnvType);
 
   ctx.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
     const effectInfo = ctx.effectMir.functions.get(item.symbol);
-    if (!effectInfo || effectInfo.pure) return;
+    if (!effectInfo) return;
+    if (effectInfo.pure && !functionContainsEffectHandlers(item.body, ctx)) {
+      return;
+    }
 
     const order = definitionOrder(item, ctx);
     const params = paramSymbolSet(item);
@@ -685,8 +780,6 @@ export const buildEffectLowering = ({
       liveAfter: new Set(),
       ctx,
     });
-    const baseEnvType = ensureBaseEnvType(item.symbol);
-    const baseHeapType = modBinaryenTypeToHeapType(ctx.mod, baseEnvType);
     const fnName = sanitize(ctx.symbolTable.getSymbol(item.symbol).name);
     const contFnName = `__cont_${sanitize(ctx.moduleLabel)}_${fnName}_${item.symbol}`;
 

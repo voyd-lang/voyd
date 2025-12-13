@@ -167,10 +167,15 @@ const collectLocalSymbols = (
         visitExpr(expr.value);
         if (expr.pattern) visitPattern(expr.pattern);
         return;
+      case "effect-handler":
+        visitExpr(expr.body);
+        if (typeof expr.finallyBranch === "number") {
+          visitExpr(expr.finallyBranch);
+        }
+        return;
       case "identifier":
       case "literal":
       case "lambda":
-      case "effect-handler":
       case "overload-set":
       case "continue":
       case "break":
@@ -466,7 +471,7 @@ const lowerEffectfulCallResult = ({
         outcomeTemp.index,
         ctx.mod.call(
           ensureDispatcher(ctx),
-          [currentHandlerValue(ctx, fnCtx), loadOutcome()],
+          [loadOutcome()],
           ctx.effectsRuntime.outcomeType
         )
       ),

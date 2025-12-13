@@ -2,6 +2,7 @@ import binaryen from "binaryen";
 import {
   defineStructType,
   initStruct,
+  refCast,
   structGetFieldValue,
   structSetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
@@ -51,6 +52,7 @@ export type ResumeKind = (typeof RESUME_KIND)[keyof typeof RESUME_KIND];
 
 export interface EffectRuntime {
   handlerFrameType: binaryen.Type;
+  contEnvBaseType: binaryen.Type;
   outcomeType: binaryen.Type;
   effectRequestType: binaryen.Type;
   continuationType: binaryen.Type;
@@ -92,6 +94,7 @@ export interface EffectRuntime {
   requestTailGuard: (
     request: binaryen.ExpressionRef
   ) => binaryen.ExpressionRef;
+  requestHandler: (request: binaryen.ExpressionRef) => binaryen.ExpressionRef;
   makeContinuation: (params: {
     fnRef: binaryen.ExpressionRef;
     env?: binaryen.ExpressionRef;
@@ -147,6 +150,15 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
       { name: "label", type: binaryen.i32, mutable: false },
     ],
     final: true,
+  });
+
+  const contEnvBaseType = defineStructType(mod, {
+    name: "voydContEnvBase",
+    fields: [
+      { name: "site", type: binaryen.i32, mutable: false },
+      { name: "handler", type: handlerFrameType, mutable: false },
+    ],
+    final: false,
   });
   const continuationType = defineStructType(mod, {
     name: "voydContinuation",
@@ -304,6 +316,16 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
       });
   };
 
+  const continuationEnvHandler = (
+    env: binaryen.ExpressionRef
+  ): binaryen.ExpressionRef =>
+    structGetFieldValue({
+      mod,
+      fieldIndex: 1,
+      fieldType: handlerFrameType,
+      exprRef: refCast(mod, env, contEnvBaseType),
+    });
+
   const getTailGuardField = (index: number, type: binaryen.Type) => {
     return (guard: binaryen.ExpressionRef): binaryen.ExpressionRef =>
       structGetFieldValue({
@@ -326,6 +348,7 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
 
   return {
     handlerFrameType,
+    contEnvBaseType,
     outcomeType,
     effectRequestType,
     continuationType,
@@ -377,6 +400,25 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
       EFFECT_REQUEST_FIELDS.tailGuard,
       tailGuardType
     ),
+    requestHandler: (request) => {
+      const nullHandler = mod.ref.null(handlerFrameType);
+      const cont = getRequestField(EFFECT_REQUEST_FIELDS.continuation, continuationType)(
+        request
+      );
+      const envFromCont = getContinuationField(CONTINUATION_FIELDS.env, binaryen.anyref);
+      return mod.if(
+        mod.ref.is_null(cont),
+        nullHandler,
+        (() => {
+          const env = envFromCont(cont);
+          return mod.if(
+            mod.ref.is_null(env),
+            nullHandler,
+            continuationEnvHandler(env)
+          );
+        })()
+      );
+    },
     makeContinuation,
     makeEffectResult,
     continuationFn: getContinuationField(

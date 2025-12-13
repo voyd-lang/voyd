@@ -27,6 +27,30 @@ import type { HirEffectHandlerExpr } from "../../semantics/hir/index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
+type HandlerCodegenState = {
+  envLayouts: Map<
+    number,
+    {
+      envType: binaryen.Type;
+      fields: ClauseEnvField[];
+    }
+  >;
+  clauseFnRefTypes: Map<string, binaryen.Type>;
+};
+
+const handlerState = (ctx: CodegenContext): HandlerCodegenState => {
+  const container = ctx.effectsState as unknown as Record<string, unknown>;
+  const key = "__voyd_effect_handler_codegen_state__";
+  const existing = container[key] as HandlerCodegenState | undefined;
+  if (existing) return existing;
+  const created: HandlerCodegenState = {
+    envLayouts: new Map(),
+    clauseFnRefTypes: new Map(),
+  };
+  container[key] = created;
+  return created;
+};
+
 type ClauseEnvField = {
   symbol: number;
   typeId: number;
@@ -60,48 +84,61 @@ const buildClauseEnv = ({
   envValue: binaryen.ExpressionRef;
   fields: ClauseEnvField[];
 } => {
-  const captured = Array.from(fnCtx.bindings.entries()).map(([symbol, binding], index) => {
-    const typeId =
-      binding.typeId ??
-      ctx.typing.valueTypes.get(symbol) ??
-      ctx.typing.primitives.unknown;
-    return {
-      symbol,
-      typeId,
-      wasmType: binding.type,
-      fieldIndex: index,
-      value: loadBindingValue(binding, ctx),
-    };
-  });
+  const state = handlerState(ctx);
+  const cached = state.envLayouts.get(expr.id);
+  const layout =
+    cached ??
+    (() => {
+      const captured = Array.from(fnCtx.bindings.entries())
+        .map(([symbol, binding]) => {
+          const typeId =
+            binding.typeId ??
+            ctx.typing.valueTypes.get(symbol) ??
+            ctx.typing.primitives.unknown;
+          return {
+            symbol,
+            typeId,
+            wasmType: binding.type,
+          };
+        })
+        .sort((a, b) => a.symbol - b.symbol)
+        .map((field, fieldIndex) => ({ ...field, fieldIndex }));
 
-  if (captured.length === 0) {
-    const envType = defineStructType(ctx.mod, {
-      name: `voydHandlerEnv_${sanitize(ctx.moduleLabel)}_${expr.id}`,
-      fields: [],
-      final: true,
-    });
+      const envType = defineStructType(ctx.mod, {
+        name: `voydHandlerEnv_${sanitize(ctx.moduleLabel)}_${expr.id}`,
+        fields: captured.map((field) => ({
+          name: `c${field.fieldIndex}`,
+          type: field.wasmType,
+          mutable: false,
+        })),
+        final: true,
+      });
+
+      const next = { envType, fields: captured };
+      state.envLayouts.set(expr.id, next);
+      return next;
+    })();
+
+  if (layout.fields.length === 0) {
     return {
-      envType,
-      envValue: ctx.mod.ref.null(envType),
+      envType: layout.envType,
+      envValue: ctx.mod.ref.null(layout.envType),
       fields: [],
     };
   }
 
-  const envType = defineStructType(ctx.mod, {
-    name: `voydHandlerEnv_${sanitize(ctx.moduleLabel)}_${expr.id}`,
-    fields: captured.map((field) => ({
-      name: `c${field.fieldIndex}`,
-      type: field.wasmType,
-      mutable: false,
-    })),
-    final: true,
-  });
   const envValue = initStruct(
     ctx.mod,
-    envType,
-    captured.map((field) => field.value) as number[]
+    layout.envType,
+    layout.fields.map((field) => {
+      const binding = fnCtx.bindings.get(field.symbol);
+      if (!binding) {
+        throw new Error("missing handler env binding");
+      }
+      return loadBindingValue(binding, ctx);
+    }) as number[]
   );
-  return { envType, envValue, fields: captured };
+  return { envType: layout.envType, envValue, fields: layout.fields };
 };
 
 const emitClauseFunction = ({
@@ -119,6 +156,13 @@ const emitClauseFunction = ({
   handlerResumeKind: ResumeKind;
   compileExpr: ExpressionCompiler;
 }): { fnName: string; fnRefType: binaryen.Type } => {
+  const fnName = `${ctx.moduleLabel}__handler_${expr.id}_${clauseIndex}`;
+  const state = handlerState(ctx);
+  const cachedRefType = state.clauseFnRefTypes.get(fnName);
+  if (cachedRefType) {
+    return { fnName, fnRefType: cachedRefType };
+  }
+
   const clause = expr.handlers[clauseIndex]!;
   const signature = ctx.typing.functions.getSignature(clause.operation);
   if (!signature) {
@@ -280,7 +324,6 @@ const emitClauseFunction = ({
         })
       : body.expr;
 
-  const fnName = `${ctx.moduleLabel}__handler_${expr.id}_${clauseIndex}`;
   const resultLocal =
     handlerResumeKind === RESUME_KIND.tail
       ? allocateTempLocal(ctx.effectsRuntime.outcomeType, fnCtx)
@@ -321,6 +364,7 @@ const emitClauseFunction = ({
   );
   const heapType = bin._BinaryenFunctionGetType(fnRef);
   const fnRefType = bin._BinaryenTypeFromHeapType(heapType, false);
+  state.clauseFnRefTypes.set(fnName, fnRefType);
   return { fnName, fnRefType };
 };
 
@@ -345,38 +389,78 @@ export const compileEffectHandlerExpr = (
     ctx.effectsRuntime.handlerFrameType,
     fnCtx
   );
+  const headLocal = allocateTempLocal(
+    ctx.effectsRuntime.handlerFrameType,
+    fnCtx
+  );
   const ops: binaryen.ExpressionRef[] = [
-    ctx.mod.local.set(prevHandlerLocal.index, currentHandlerValue(ctx, fnCtx)),
+    ctx.mod.local.set(headLocal.index, currentHandlerValue(ctx, fnCtx)),
   ];
 
-  let current = ctx.mod.local.get(prevHandlerLocal.index, prevHandlerLocal.type);
-  handlerInfo.clauses.forEach((clause, index) => {
-    const { effectId, opId, resumeKind } = effectOpIds(clause.operation, ctx);
-    const { fnName, fnRefType } = emitClauseFunction({
-      expr,
-      clauseIndex: index,
-      env,
-      ctx,
-      handlerResumeKind: resumeKind,
-      compileExpr,
+  const head = () => ctx.mod.local.get(headLocal.index, headLocal.type);
+  const handlerAlreadyInstalled = ctx.mod.if(
+    ctx.mod.ref.is_null(head()),
+    ctx.mod.i32.const(0),
+    ctx.mod.i32.eq(
+      ctx.effectsRuntime.handlerLabel(head()),
+      ctx.mod.i32.const(expr.id)
+    )
+  );
+
+  const walkPrev = (cursor: binaryen.ExpressionRef): binaryen.ExpressionRef =>
+    ctx.effectsRuntime.handlerPrev(
+      refCast(ctx.mod, cursor, ctx.effectsRuntime.handlerFrameType)
+    );
+
+  const prevFromInstalled = (() => {
+    let cursor: binaryen.ExpressionRef = head();
+    for (let index = 0; index < handlerInfo.clauses.length; index += 1) {
+      cursor = walkPrev(cursor);
+    }
+    return refCast(ctx.mod, cursor, ctx.effectsRuntime.handlerFrameType);
+  })();
+
+  const installFromScratch = (() => {
+    let current = head();
+    const installOps: binaryen.ExpressionRef[] = [
+      ctx.mod.local.set(prevHandlerLocal.index, current),
+    ];
+    handlerInfo.clauses.forEach((clause, index) => {
+      const { effectId, opId, resumeKind } = effectOpIds(clause.operation, ctx);
+      const { fnName, fnRefType } = emitClauseFunction({
+        expr,
+        clauseIndex: index,
+        env,
+        ctx,
+        handlerResumeKind: resumeKind,
+        compileExpr,
+      });
+      current = ctx.effectsRuntime.makeHandlerFrame({
+        prev: current,
+        effectId: ctx.mod.i32.const(effectId),
+        opId: ctx.mod.i32.const(opId),
+        resumeKind: ctx.mod.i32.const(resumeKind),
+        clauseFn: refFunc(ctx.mod, fnName, fnRefType),
+        clauseEnv: env.envValue,
+        tailExpected:
+          resumeKind === RESUME_KIND.tail
+            ? ctx.mod.i32.const(1)
+            : ctx.mod.i32.const(0),
+        label: ctx.mod.i32.const(expr.id),
+      });
     });
-    current = ctx.effectsRuntime.makeHandlerFrame({
-      prev: current,
-      effectId: ctx.mod.i32.const(effectId),
-      opId: ctx.mod.i32.const(opId),
-      resumeKind: ctx.mod.i32.const(resumeKind),
-      clauseFn: refFunc(ctx.mod, fnName, fnRefType),
-      clauseEnv: env.envValue,
-      tailExpected:
-        resumeKind === RESUME_KIND.tail
-          ? ctx.mod.i32.const(1)
-          : ctx.mod.i32.const(0),
-      label: ctx.mod.i32.const(expr.id),
-    });
-  });
+    installOps.push(
+      ctx.mod.local.set(fnCtx.currentHandler.index, current)
+    );
+    return ctx.mod.block(null, installOps, binaryen.none);
+  })();
 
   ops.push(
-    ctx.mod.local.set(fnCtx.currentHandler.index, current)
+    ctx.mod.if(
+      handlerAlreadyInstalled,
+      ctx.mod.local.set(prevHandlerLocal.index, prevFromInstalled),
+      installFromScratch
+    )
   );
   pushHandlerScope(fnCtx, { prevHandler: prevHandlerLocal, label: expr.id });
 

@@ -13,15 +13,21 @@ export const ensureDispatcher = (ctx: CodegenContext): string => {
   const outcomeType = ctx.effectsRuntime.outcomeType;
   const requestType = ctx.effectsRuntime.effectRequestType;
 
-  const params = binaryen.createType([handlerType, outcomeType]);
-  const locals = [binaryen.eqref, requestType, outcomeType];
-  const frameLocal = 0;
-  const requestLocal = 1;
-  const outcomeLocal = 2;
+  const params = binaryen.createType([outcomeType]);
+  const locals = [handlerType, binaryen.eqref, requestType, outcomeType];
+  const handlerLocal = 0;
+  const frameLocal = 1;
+  const requestLocal = 2;
+  const outcomeLocal = 3;
   const loopLabel = "voyd_dispatch_loop";
-  const loadFrame = () => ctx.mod.local.get(frameLocal + 2, binaryen.eqref);
-  const loadOutcome = () => ctx.mod.local.get(outcomeLocal + 2, outcomeType);
-  const loadRequest = () => ctx.mod.local.get(requestLocal + 2, requestType);
+  const loadHandler = () =>
+    ctx.mod.local.get(handlerLocal + 1, handlerType);
+  const loadFrame = () =>
+    ctx.mod.local.get(frameLocal + 1, binaryen.eqref);
+  const loadOutcome = () =>
+    ctx.mod.local.get(outcomeLocal + 1, outcomeType);
+  const loadRequest = () =>
+    ctx.mod.local.get(requestLocal + 1, requestType);
   const clauseFnType = (() => {
     const tempName = "__voyd_dispatch_sig";
     const temp = ctx.mod.addFunction(
@@ -72,7 +78,7 @@ export const ensureDispatcher = (ctx: CodegenContext): string => {
         matchFields(),
         ctx.mod.block(null, [
           ctx.mod.local.set(
-            outcomeLocal + 2,
+            outcomeLocal + 1,
             callRef(
               ctx.mod,
               refCast(
@@ -83,7 +89,7 @@ export const ensureDispatcher = (ctx: CodegenContext): string => {
                 clauseFnType
               ),
               [
-                ctx.mod.local.get(0, handlerType),
+                loadHandler(),
                 ctx.effectsRuntime.handlerClauseEnv(
                   refCast(ctx.mod, loadFrame(), handlerType)
                 ),
@@ -97,7 +103,7 @@ export const ensureDispatcher = (ctx: CodegenContext): string => {
         ctx.mod.nop()
       ),
       ctx.mod.local.set(
-        frameLocal + 2,
+        frameLocal + 1,
         ctx.effectsRuntime.handlerPrev(
           refCast(ctx.mod, loadFrame(), handlerType)
         )
@@ -116,14 +122,18 @@ export const ensureDispatcher = (ctx: CodegenContext): string => {
       ctx.mod.nop()
     ),
     ctx.mod.local.set(
-      requestLocal + 2,
+      requestLocal + 1,
       refCast(
         ctx.mod,
         ctx.effectsRuntime.outcomePayload(loadOutcome()),
         requestType
       )
     ),
-    ctx.mod.local.set(frameLocal + 2, ctx.mod.local.get(0, handlerType)),
+    ctx.mod.local.set(
+      handlerLocal + 1,
+      ctx.effectsRuntime.requestHandler(loadRequest())
+    ),
+    ctx.mod.local.set(frameLocal + 1, loadHandler()),
     frameLoop,
   ]);
 
@@ -133,8 +143,7 @@ export const ensureDispatcher = (ctx: CodegenContext): string => {
     outcomeType,
     locals,
     ctx.mod.block(null, [
-      ctx.mod.local.set(frameLocal + 2, ctx.mod.local.get(0, handlerType)),
-      ctx.mod.local.set(outcomeLocal + 2, ctx.mod.local.get(1, outcomeType)),
+      ctx.mod.local.set(outcomeLocal + 1, ctx.mod.local.get(0, outcomeType)),
       ctx.mod.loop(loopLabel, loopBody),
     ])
   );

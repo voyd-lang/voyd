@@ -15,6 +15,9 @@ import {
 } from "../semantics/hir/index.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
 import { allocateTempLocal } from "./locals.js";
+import { unboxOutcomeValue } from "./effects/outcome-values.js";
+import { ensureDispatcher } from "./effects/dispatcher.js";
+import { OUTCOME_TAGS } from "./effects/runtime-abi.js";
 import {
   collectEffectOperationSignatures,
   createEffectfulEntry,
@@ -466,6 +469,124 @@ const compileFunctionItem = (
 ): void => {
   const hasHandlerExpr = containsEffectHandler(fn.body, ctx);
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
+  if (!meta.effectful && hasHandlerExpr) {
+    const implName = `${meta.wasmName}__effectful_impl`;
+    const implCtx: FunctionContext = {
+      bindings: new Map(),
+      locals: [],
+      nextLocalIndex: meta.paramTypes.length + 1,
+      returnTypeId: meta.resultTypeId,
+      instanceKey: meta.instanceKey,
+      typeInstanceKey: meta.instanceKey,
+      effectful: true,
+      currentHandler: { index: 0, type: handlerParamType },
+    };
+
+    fn.parameters.forEach((param, index) => {
+      const type = meta.paramTypes[index];
+      if (typeof type !== "number") {
+        throw new Error(
+          `codegen missing parameter type for symbol ${param.symbol}`
+        );
+      }
+      implCtx.bindings.set(param.symbol, {
+        kind: "local",
+        index: index + 1,
+        type,
+        typeId: meta.paramTypeIds[index],
+      });
+    });
+
+    const implBody = compileExpression({
+      exprId: fn.body,
+      ctx,
+      fnCtx: implCtx,
+      tailPosition: true,
+      expectedResultTypeId: implCtx.returnTypeId,
+    });
+
+    const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
+    const shouldWrapOutcome =
+      binaryen.getExpressionType(implBody.expr) === returnValueType;
+    const functionBody = shouldWrapOutcome
+      ? wrapValueInOutcome({
+          valueExpr: implBody.expr,
+          valueType: returnValueType,
+          ctx,
+        })
+      : implBody.expr;
+
+    ctx.mod.addFunction(
+      implName,
+      binaryen.createType([handlerParamType, ...(meta.paramTypes as number[])]),
+      ctx.effectsRuntime.outcomeType,
+      implCtx.locals,
+      functionBody
+    );
+
+    const wrapperCtx: FunctionContext = {
+      bindings: new Map(),
+      locals: [],
+      nextLocalIndex: meta.paramTypes.length,
+      returnTypeId: meta.resultTypeId,
+      instanceKey: meta.instanceKey,
+      typeInstanceKey: meta.instanceKey,
+      effectful: false,
+    };
+    const outcomeTemp = allocateTempLocal(ctx.effectsRuntime.outcomeType, wrapperCtx);
+    const payload = () =>
+      ctx.effectsRuntime.outcomePayload(
+        ctx.mod.local.get(outcomeTemp.index, outcomeTemp.type)
+      );
+    const dispatchedOutcome = ctx.mod.call(
+      ensureDispatcher(ctx),
+      [
+        ctx.mod.call(
+          implName,
+          [
+            ctx.mod.ref.null(handlerParamType),
+            ...fn.parameters.map((_, index) =>
+              ctx.mod.local.get(index, meta.paramTypes[index] as number)
+            ),
+          ],
+          ctx.effectsRuntime.outcomeType
+        ),
+      ],
+      ctx.effectsRuntime.outcomeType
+    );
+    const tagIsValue = ctx.mod.i32.eq(
+      ctx.effectsRuntime.outcomeTag(
+        ctx.mod.local.get(outcomeTemp.index, outcomeTemp.type)
+      ),
+      ctx.mod.i32.const(OUTCOME_TAGS.value)
+    );
+    const wrapperBody = ctx.mod.block(
+      null,
+      [
+        ctx.mod.local.set(outcomeTemp.index, dispatchedOutcome),
+        ctx.mod.if(
+          tagIsValue,
+          unboxOutcomeValue({
+            payload: payload(),
+            valueType: meta.resultType,
+            ctx,
+          }),
+          ctx.mod.unreachable()
+        ),
+      ],
+      meta.resultType
+    );
+
+    ctx.mod.addFunction(
+      meta.wasmName,
+      binaryen.createType(meta.paramTypes as number[]),
+      meta.resultType,
+      wrapperCtx.locals,
+      wrapperBody
+    );
+    return;
+  }
+
   const handlerOffset = meta.effectful ? 1 : 0;
   const fnCtx: FunctionContext = {
     bindings: new Map(),
