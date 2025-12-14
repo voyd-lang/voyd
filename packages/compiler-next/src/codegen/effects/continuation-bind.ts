@@ -19,12 +19,13 @@ const bindState = (ctx: CodegenContext): {
   bindEnvType?: binaryen.Type;
   contCallRefType?: binaryen.Type;
 } => {
-  const container = ctx.effectsState as unknown as Record<string, unknown>;
+  const memo = ctx.effectsState.memo;
   const key = "__voyd_continuation_bind_state__";
-  if (!container[key]) {
-    container[key] = {};
-  }
-  return container[key] as any;
+  const existing = memo.get(key);
+  if (existing) return existing as any;
+  const created = {};
+  memo.set(key, created);
+  return created as any;
 };
 
 const ensureContCallRefType = (ctx: CodegenContext): binaryen.Type => {

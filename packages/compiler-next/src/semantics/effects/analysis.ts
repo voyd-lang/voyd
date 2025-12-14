@@ -24,6 +24,7 @@ export interface EffectsLoweringFunctionInfo {
   effectRow: EffectRowId;
   pure: boolean;
   hasHandlerInBody: boolean;
+  abiEffectful: boolean;
 }
 
 export interface EffectsLoweringCallInfo {
@@ -53,6 +54,7 @@ export interface EffectsLoweringLambdaInfo {
   exprId: HirExprId;
   effectfulType: boolean;
   hasHandlerInBody: boolean;
+  abiEffectful: boolean;
   shouldLower: boolean;
 }
 
@@ -247,15 +249,18 @@ export const buildEffectsLoweringInfo = ({
     if (item.kind !== "function") return;
     const signature = typing.functions.getSignature(item.symbol);
     const effectRow = signature?.effectRow ?? typing.primitives.defaultEffectRow;
+    const hasHandlerInBody = containsEffectHandler({
+      rootExprId: item.body,
+      hir,
+      visitLambdaBodies: false,
+    });
+    const pure = isPureEffectRow(effectRow, typing);
     functions.set(item.symbol, {
       symbol: item.symbol,
       effectRow,
-      pure: isPureEffectRow(effectRow, typing),
-      hasHandlerInBody: containsEffectHandler({
-        rootExprId: item.body,
-        hir,
-        visitLambdaBodies: false,
-      }),
+      pure,
+      hasHandlerInBody,
+      abiEffectful: !pure || hasHandlerInBody,
     });
   });
 
@@ -302,11 +307,13 @@ export const buildEffectsLoweringInfo = ({
       visitLambdaBodies: false,
     });
     const effectfulType = lambdaEffectfulType(expr, typing);
+    const abiEffectful = effectfulType || hasHandlerInBody;
     lambdas.set(expr.id, {
       exprId: expr.id,
       hasHandlerInBody,
       effectfulType,
-      shouldLower: effectfulType || hasHandlerInBody,
+      abiEffectful,
+      shouldLower: abiEffectful,
     });
   });
 
@@ -319,4 +326,3 @@ export const buildEffectsLoweringInfo = ({
     lambdas,
   };
 };
-

@@ -39,15 +39,15 @@ type HandlerCodegenState = {
 };
 
 const handlerState = (ctx: CodegenContext): HandlerCodegenState => {
-  const container = ctx.effectsState as unknown as Record<string, unknown>;
+  const memo = ctx.effectsState.memo;
   const key = "__voyd_effect_handler_codegen_state__";
-  const existing = container[key] as HandlerCodegenState | undefined;
+  const existing = memo.get(key) as HandlerCodegenState | undefined;
   if (existing) return existing;
   const created: HandlerCodegenState = {
     envLayouts: new Map(),
     clauseFnRefTypes: new Map(),
   };
-  container[key] = created;
+  memo.set(key, created);
   return created;
 };
 
@@ -377,7 +377,7 @@ export const compileEffectHandlerExpr = (
   tailPosition: boolean,
   expectedResultTypeId?: number
 ): CompiledExpression => {
-  const handlerInfo = effectsFacade(ctx).getHandlerInfo(expr.id);
+  const handlerInfo = effectsFacade(ctx).handler(expr.id);
   if (!handlerInfo) {
     throw new Error("missing handler metadata for effect handler expression");
   }
@@ -427,7 +427,7 @@ export const compileEffectHandlerExpr = (
       ctx.mod.local.set(prevHandlerLocal.index, current),
     ];
     handlerInfo.clauses.forEach((clause, index) => {
-      const { effectId, opId, resumeKind } = effectsFacade(ctx).getEffectOpIds(
+      const { effectId, opId, resumeKind } = effectsFacade(ctx).effectOpIds(
         clause.operation
       );
       const { fnName, fnRefType } = emitClauseFunction({

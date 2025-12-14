@@ -13,10 +13,6 @@ import {
   isPublicVisibility,
 } from "../semantics/hir/index.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
-import { allocateTempLocal } from "./locals.js";
-import { unboxOutcomeValue } from "./effects/outcome-values.js";
-import { ensureDispatcher } from "./effects/dispatcher.js";
-import { OUTCOME_TAGS } from "./effects/runtime-abi.js";
 import {
   collectEffectOperationSignatures,
   createEffectfulEntry,
@@ -29,6 +25,7 @@ import {
   ensureMsgPackImports,
 } from "./effects/host-boundary.js";
 import { effectsFacade } from "./effects/facade.js";
+import { emitPureSurfaceWrapper } from "./effects/abi-wrapper.js";
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
@@ -98,13 +95,13 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         );
       }
 
-      const effectInfo = effects.getFunctionInfo(item.symbol);
+      const effectInfo = effects.functionAbi(item.symbol);
       if (!effectInfo) {
         throw new Error(
           `codegen missing effect information for function ${item.symbol}`
         );
       }
-      const effectful = effectInfo.pure === false;
+      const effectful = effectInfo.typeEffectful;
       if (effectful && process.env.DEBUG_EFFECTS === "1") {
         console.log(
           `[effects] effectful ${ctx.moduleLabel}::${ctx.symbolTable.getSymbol(item.symbol).name}`,
@@ -219,9 +216,9 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
 
       instantiations.forEach(([instanceKey, typeArgs]) => {
         const targetMeta = pickTargetMeta(targetMetas, typeArgs.length);
-        const effectInfo = effects.getFunctionInfo(imp.local);
+        const effectInfo = effects.functionAbi(imp.local);
         const effectful =
-          targetMeta?.effectful ?? (effectInfo ? effectInfo.pure === false : false);
+          targetMeta?.effectful ?? (effectInfo ? effectInfo.typeEffectful : false);
         const userParamTypes = signature.parameters.map((param) =>
           wasmTypeFor(param.type, ctx)
         );
@@ -280,48 +277,18 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
   }): void => {
     const userParamTypes = meta.paramTypes.slice(1) as number[];
     const wrapperName = `${meta.wasmName}__wasm_export_${sanitizeIdentifier(exportName)}`;
-    const params = binaryen.createType(userParamTypes);
-    const locals: binaryen.Type[] = [ctx.effectsRuntime.outcomeType];
-    const outcomeIndex = userParamTypes.length;
 
-    const dispatchedOutcome = ctx.mod.call(
-      ensureDispatcher(ctx),
-      [
-        ctx.mod.call(
-          meta.wasmName,
-          [
-            ctx.mod.ref.null(handlerParamType),
-            ...userParamTypes.map((type, index) => ctx.mod.local.get(index, type)),
-          ],
-          ctx.effectsRuntime.outcomeType
-        ),
+    emitPureSurfaceWrapper({
+      ctx,
+      wrapperName,
+      wrapperParamTypes: userParamTypes,
+      wrapperResultType: wasmTypeFor(meta.resultTypeId, ctx),
+      implName: meta.wasmName,
+      buildImplCallArgs: () => [
+        ctx.mod.ref.null(handlerParamType),
+        ...userParamTypes.map((type, index) => ctx.mod.local.get(index, type)),
       ],
-      ctx.effectsRuntime.outcomeType
-    );
-    const outcomeLocal = () =>
-      ctx.mod.local.get(outcomeIndex, ctx.effectsRuntime.outcomeType);
-    const payload = () => ctx.effectsRuntime.outcomePayload(outcomeLocal());
-    const tagIsValue = ctx.mod.i32.eq(
-      ctx.effectsRuntime.outcomeTag(outcomeLocal()),
-      ctx.mod.i32.const(OUTCOME_TAGS.value)
-    );
-    const wrapperBody = ctx.mod.block(
-      null,
-      [
-        ctx.mod.local.set(outcomeIndex, dispatchedOutcome),
-        ctx.mod.if(
-          tagIsValue,
-          unboxOutcomeValue({
-            payload: payload(),
-            valueType: wasmTypeFor(meta.resultTypeId, ctx),
-            ctx,
-          }),
-          ctx.mod.unreachable()
-        ),
-      ],
-      wasmTypeFor(meta.resultTypeId, ctx)
-    );
-    ctx.mod.addFunction(wrapperName, params, wasmTypeFor(meta.resultTypeId, ctx), locals, wrapperBody);
+    });
     ctx.mod.addFunctionExport(wrapperName, exportName);
   };
 
@@ -411,10 +378,13 @@ const compileFunctionItem = (
   meta: FunctionMetadata,
   ctx: CodegenContext
 ): void => {
-  const hasHandlerExpr =
-    effectsFacade(ctx).getFunctionInfo(fn.symbol)?.hasHandlerInBody ?? false;
+  const effectInfo = effectsFacade(ctx).functionAbi(fn.symbol);
+  if (!effectInfo) {
+    throw new Error(`codegen missing effect information for function ${fn.symbol}`);
+  }
+  const needsWrapper = effectInfo.abiEffectful && effectInfo.typeEffectful === false;
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
-  if (!meta.effectful && hasHandlerExpr) {
+  if (needsWrapper) {
     const implName = `${meta.wasmName}__effectful_impl`;
     const implCtx: FunctionContext = {
       bindings: new Map(),
@@ -470,67 +440,19 @@ const compileFunctionItem = (
       functionBody
     );
 
-    const wrapperCtx: FunctionContext = {
-      bindings: new Map(),
-      tempLocals: new Map(),
-      locals: [],
-      nextLocalIndex: meta.paramTypes.length,
-      returnTypeId: meta.resultTypeId,
-      instanceKey: meta.instanceKey,
-      typeInstanceKey: meta.instanceKey,
-      effectful: false,
-    };
-    const outcomeTemp = allocateTempLocal(ctx.effectsRuntime.outcomeType, wrapperCtx);
-    const payload = () =>
-      ctx.effectsRuntime.outcomePayload(
-        ctx.mod.local.get(outcomeTemp.index, outcomeTemp.type)
-      );
-    const dispatchedOutcome = ctx.mod.call(
-      ensureDispatcher(ctx),
-      [
-        ctx.mod.call(
-          implName,
-          [
-            ctx.mod.ref.null(handlerParamType),
-            ...fn.parameters.map((_, index) =>
-              ctx.mod.local.get(index, meta.paramTypes[index] as number)
-            ),
-          ],
-          ctx.effectsRuntime.outcomeType
+    emitPureSurfaceWrapper({
+      ctx,
+      wrapperName: meta.wasmName,
+      wrapperParamTypes: meta.paramTypes as number[],
+      wrapperResultType: meta.resultType,
+      implName,
+      buildImplCallArgs: () => [
+        ctx.mod.ref.null(handlerParamType),
+        ...fn.parameters.map((_, index) =>
+          ctx.mod.local.get(index, meta.paramTypes[index] as number)
         ),
       ],
-      ctx.effectsRuntime.outcomeType
-    );
-    const tagIsValue = ctx.mod.i32.eq(
-      ctx.effectsRuntime.outcomeTag(
-        ctx.mod.local.get(outcomeTemp.index, outcomeTemp.type)
-      ),
-      ctx.mod.i32.const(OUTCOME_TAGS.value)
-    );
-    const wrapperBody = ctx.mod.block(
-      null,
-      [
-        ctx.mod.local.set(outcomeTemp.index, dispatchedOutcome),
-        ctx.mod.if(
-          tagIsValue,
-          unboxOutcomeValue({
-            payload: payload(),
-            valueType: meta.resultType,
-            ctx,
-          }),
-          ctx.mod.unreachable()
-        ),
-      ],
-      meta.resultType
-    );
-
-    ctx.mod.addFunction(
-      meta.wasmName,
-      binaryen.createType(meta.paramTypes as number[]),
-      meta.resultType,
-      wrapperCtx.locals,
-      wrapperBody
-    );
+    });
     return;
   }
 
@@ -549,12 +471,6 @@ const compileFunctionItem = (
     fnCtx.currentHandler = {
       index: 0,
       type: handlerParamType,
-    };
-  } else if (hasHandlerExpr) {
-    const handlerLocal = allocateTempLocal(handlerParamType, fnCtx);
-    fnCtx.currentHandler = {
-      index: handlerLocal.index,
-      type: handlerLocal.type,
     };
   }
 

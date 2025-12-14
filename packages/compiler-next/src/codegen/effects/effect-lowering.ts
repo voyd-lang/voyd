@@ -17,6 +17,7 @@ import { wasmTypeFor } from "../types.js";
 import type { ResumeKind } from "./runtime-abi.js";
 import { getEffectOpIds } from "./op-ids.js";
 import { walkHirExpression, walkHirPattern } from "../hir-walk.js";
+import { effectsFacade } from "./facade.js";
 
 export type ContinuationFieldSource =
   | "param"
@@ -129,7 +130,7 @@ const sanitize = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
 
 const shouldLowerLambda = (expr: HirLambdaExpr, ctx: CodegenContext): boolean => {
-  return ctx.effectsInfo.lambdas.get(expr.id)?.shouldLower ?? false;
+  return effectsFacade(ctx).lambdaAbi(expr.id)?.shouldLower ?? false;
 };
 
 const lambdaParamSymbolSet = (expr: HirLambdaExpr): ReadonlySet<SymbolId> =>
@@ -395,25 +396,26 @@ const analyzeExpr = ({
       }
 
       const merged = mergeSiteResults(...argResults, calleeResult);
-      const callInfo = ctx.effectsInfo.calls.get(expr.id);
-      if (
-        callee &&
-        callee.exprKind === "identifier" &&
-        ctx.effectsInfo.operations.has(callee.symbol)
-      ) {
+      const kind = effectsFacade(ctx).callKind(expr.id);
+      if (kind === "perform") {
+        const calleeSymbol =
+          callee && callee.exprKind === "identifier" ? callee.symbol : undefined;
+        if (typeof calleeSymbol !== "number") {
+          throw new Error("perform site missing callee symbol");
+        }
         const site: SiteDraft = {
           kind: "perform",
           exprId: expr.id,
           liveAfter,
           evalOrder: expr.args.map((arg) => arg.expr),
-          effectSymbol: callee.symbol,
+          effectSymbol: calleeSymbol,
         };
         return {
           live: merged.live,
           sites: [...merged.sites, site],
         };
       }
-      if (callInfo?.effectful) {
+      if (kind === "effectful-call") {
         const site: SiteDraft = {
           kind: "call",
           exprId: expr.id,
@@ -703,9 +705,9 @@ export const buildEffectLowering = ({
 
   ctx.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
-    const effectInfo = ctx.effectsInfo.functions.get(item.symbol);
+    const effectInfo = effectsFacade(ctx).functionAbi(item.symbol);
     if (!effectInfo) return;
-    if (effectInfo.pure && !effectInfo.hasHandlerInBody) {
+    if (!effectInfo.abiEffectful) {
       return;
     }
 

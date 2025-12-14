@@ -1,26 +1,31 @@
 import type { CodegenContext } from "../context.js";
-import type { HirExprId, SymbolId } from "../../semantics/ids.js";
+import type { EffectRowId, HirExprId, SymbolId } from "../../semantics/ids.js";
 import type {
-  EffectOperationRuntimeInfo,
-  EffectsLoweringCallInfo,
-  EffectsLoweringFunctionInfo,
   EffectsLoweringHandlerInfo,
-  EffectsLoweringLambdaInfo,
 } from "../../semantics/effects/analysis.js";
 import { getEffectOpIds } from "./op-ids.js";
 import { buildEffectsIr } from "../../semantics/effects/ir/build.js";
 import type { EffectsIr, EffectsIrCallKind } from "../../semantics/effects/ir/types.js";
 
+export type FunctionAbiInfo = {
+  effectRow: EffectRowId;
+  typeEffectful: boolean;
+  abiEffectful: boolean;
+};
+
+export type LambdaAbiInfo = {
+  effectfulType: boolean;
+  abiEffectful: boolean;
+  shouldLower: boolean;
+};
+
 export interface EffectsFacade {
   getIr: () => EffectsIr;
-  getFunctionInfo: (symbol: SymbolId) => EffectsLoweringFunctionInfo | undefined;
-  getLambdaInfo: (exprId: HirExprId) => EffectsLoweringLambdaInfo | undefined;
-  getHandlerInfo: (exprId: HirExprId) => EffectsLoweringHandlerInfo | undefined;
-  getCallInfo: (exprId: HirExprId) => EffectsLoweringCallInfo | undefined;
-  isEffectOpSymbol: (symbol: SymbolId) => boolean;
-  getOperationInfo: (symbol: SymbolId) => EffectOperationRuntimeInfo | undefined;
+  functionAbi: (symbol: SymbolId) => FunctionAbiInfo | undefined;
+  lambdaAbi: (exprId: HirExprId) => LambdaAbiInfo | undefined;
+  handler: (exprId: HirExprId) => EffectsLoweringHandlerInfo | undefined;
   callKind: (exprId: HirExprId) => EffectsIrCallKind | undefined;
-  getEffectOpIds: (symbol: SymbolId) => ReturnType<typeof getEffectOpIds>;
+  effectOpIds: (symbol: SymbolId) => ReturnType<typeof getEffectOpIds>;
 }
 
 export const effectsFacade = (ctx: CodegenContext): EffectsFacade => {
@@ -40,14 +45,27 @@ export const effectsFacade = (ctx: CodegenContext): EffectsFacade => {
 
   const facade: EffectsFacade = {
     getIr: () => ensureIr(),
-    getFunctionInfo: (symbol) => ctx.effectsInfo.functions.get(symbol),
-    getLambdaInfo: (exprId) => ctx.effectsInfo.lambdas.get(exprId),
-    getHandlerInfo: (exprId) => ctx.effectsInfo.handlers.get(exprId),
-    getCallInfo: (exprId) => ctx.effectsInfo.calls.get(exprId),
-    isEffectOpSymbol: (symbol) => ctx.effectsInfo.operations.has(symbol),
-    getOperationInfo: (symbol) => ctx.effectsInfo.operations.get(symbol),
+    functionAbi: (symbol) => {
+      const info = ctx.effectsInfo.functions.get(symbol);
+      if (!info) return undefined;
+      return {
+        effectRow: info.effectRow,
+        typeEffectful: info.pure === false,
+        abiEffectful: info.abiEffectful,
+      };
+    },
+    lambdaAbi: (exprId) => {
+      const info = ctx.effectsInfo.lambdas.get(exprId);
+      if (!info) return undefined;
+      return {
+        effectfulType: info.effectfulType,
+        abiEffectful: info.abiEffectful,
+        shouldLower: info.shouldLower,
+      };
+    },
+    handler: (exprId) => ctx.effectsInfo.handlers.get(exprId),
     callKind: (exprId) => ensureIr().calls.get(exprId)?.kind,
-    getEffectOpIds: (symbol) => getEffectOpIds(symbol, ctx),
+    effectOpIds: (symbol) => getEffectOpIds(symbol, ctx),
   };
 
   memo.set(key, facade);

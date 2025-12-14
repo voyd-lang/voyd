@@ -35,15 +35,22 @@ describe("EffectsLoweringInfo", () => {
 
     const effectfulSym = resolveSymbol("effectful", semantics);
     const pureSym = resolveSymbol("pure_add", semantics);
+    const handleStaticSym = resolveSymbol("handle_static", semantics);
 
     const effectful = info.functions.get(effectfulSym);
     const pure = info.functions.get(pureSym);
+    const handleStatic = info.functions.get(handleStaticSym);
 
     expect(effectful?.pure).toBe(false);
+    expect(effectful?.abiEffectful).toBe(true);
     expect(semantics.typing.effects.isEmpty(effectful!.effectRow)).toBe(false);
 
     expect(pure?.pure).toBe(true);
+    expect(pure?.abiEffectful).toBe(false);
     expect(semantics.typing.effects.isEmpty(pure!.effectRow)).toBe(true);
+
+    expect(handleStatic?.pure).toBe(true);
+    expect(handleStatic?.abiEffectful).toBe(true);
   });
 
   it("preserves handler clauses and tail metadata", () => {
@@ -120,4 +127,3 @@ describe("EffectsLoweringInfo", () => {
     expect(semantics.typing.effects.isEmpty(effectfulCall!.effectRow)).toBe(false);
   });
 });
-

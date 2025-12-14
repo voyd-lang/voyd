@@ -42,10 +42,10 @@ type EffectOpSignature = {
 };
 
 const stateFor = <T>(ctx: CodegenContext, key: string, init: () => T): T => {
-  const container = ctx as unknown as Record<string, unknown>;
-  if (container[key]) return container[key] as T;
+  const memo = ctx.effectsState.memo;
+  if (memo.has(key)) return memo.get(key) as T;
   const value = init();
-  container[key] = value;
+  memo.set(key, value);
   return value;
 };
 

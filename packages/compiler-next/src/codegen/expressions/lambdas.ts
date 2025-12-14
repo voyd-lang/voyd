@@ -20,6 +20,8 @@ import {
 } from "../types.js";
 import { getRequiredBinding, loadBindingValue } from "../locals.js";
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
+import { effectsFacade } from "../effects/facade.js";
+import { emitPureSurfaceWrapper } from "../effects/abi-wrapper.js";
 
 type LambdaCaptureInfo = {
   symbol: number;
@@ -108,9 +110,96 @@ const emitLambdaFunction = ({
   }
 
   const params = [env.base.interfaceType, ...env.base.paramTypes];
-  const effectful =
+  const typeEffectful =
     typeof desc.effectRow === "number" &&
     !ctx.typing.effects.isEmpty(desc.effectRow);
+  const lambdaInfo = effectsFacade(ctx).lambdaAbi(expr.id);
+  const abiEffectful = lambdaInfo?.abiEffectful ?? typeEffectful;
+  const needsWrapper = abiEffectful && !typeEffectful;
+
+  if (needsWrapper) {
+    const handlerParamType = ctx.effectsRuntime.handlerFrameType;
+    const implName = `${fnName}__effectful_impl`;
+    const implParams = [env.base.interfaceType, handlerParamType, ...env.base.paramTypes];
+
+    const implCtx: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
+      locals: [],
+      nextLocalIndex: implParams.length,
+      returnTypeId: desc.returnType,
+      instanceKey,
+      typeInstanceKey,
+      effectful: true,
+      currentHandler: { index: 1, type: handlerParamType },
+    };
+
+    expr.parameters.forEach((param, index) => {
+      const binding = {
+        kind: "local" as const,
+        index: index + 2,
+        type: env.base.paramTypes[index]!,
+        typeId: desc.parameters[index]!.type,
+      };
+      implCtx.bindings.set(param.symbol, binding);
+    });
+
+    env.captures.forEach((capture) => {
+      implCtx.bindings.set(capture.symbol, {
+        kind: "capture",
+        envIndex: 0,
+        envType: env.envType,
+        envSuperType: env.base.interfaceType,
+        fieldIndex: capture.fieldIndex,
+        type: capture.wasmType,
+        typeId: capture.typeId,
+        mutable: capture.mutable,
+      });
+    });
+
+    const implBody = compileExpr({
+      exprId: expr.body,
+      ctx,
+      fnCtx: implCtx,
+      tailPosition: true,
+      expectedResultTypeId: desc.returnType,
+    });
+    const returnWasmType = wasmTypeFor(desc.returnType, ctx);
+    const implFunctionBody =
+      binaryen.getExpressionType(implBody.expr) === returnWasmType
+        ? wrapValueInOutcome({
+            valueExpr: implBody.expr,
+            valueType: returnWasmType,
+            ctx,
+          })
+        : implBody.expr;
+
+    ctx.mod.addFunction(
+      implName,
+      binaryen.createType(implParams as number[]),
+      ctx.effectsRuntime.outcomeType,
+      implCtx.locals,
+      implFunctionBody
+    );
+
+    emitPureSurfaceWrapper({
+      ctx,
+      wrapperName: fnName,
+      wrapperParamTypes: params,
+      wrapperResultType: env.base.resultType,
+      implName,
+      buildImplCallArgs: () => [
+        ctx.mod.local.get(0, env.base.interfaceType),
+        ctx.mod.ref.null(handlerParamType),
+        ...expr.parameters.map((_, index) =>
+          ctx.mod.local.get(index + 1, env.base.paramTypes[index] as number)
+        ),
+      ],
+    });
+    return;
+  }
+
+  const effectful = abiEffectful;
   const handlerOffset = effectful ? 1 : 0;
   const lambdaCtx: FunctionContext = {
     bindings: new Map(),
