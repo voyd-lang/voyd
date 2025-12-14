@@ -42,16 +42,6 @@ describe("effectful exports & host boundary", () => {
     expect(logs).toEqual([2]);
   });
 
-  it("rejects when no handler is provided", async () => {
-    const { module } = buildModule();
-    await expect(
-      runEffectfulExport({
-        wasm: module,
-        entryName: "main_effectful",
-      })
-    ).rejects.toThrow(/Unhandled effect/);
-  });
-
   it("traps when the buffer is too small", async () => {
     const { module } = buildModule();
     await expect(

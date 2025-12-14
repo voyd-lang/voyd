@@ -10,7 +10,6 @@ import {
 import { RESUME_KIND } from "../effects/runtime-abi.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import type { SemanticsPipelineResult } from "../../semantics/pipeline.js";
-import type { SymbolId } from "../../semantics/ids.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -18,40 +17,6 @@ const fixturePath = resolve(
   "effects-perform-harness.voyd"
 );
 const fixtureVirtualPath = "/proj/src/effects-perform-harness.voyd";
-
-const markEffectful = (semantics: SemanticsPipelineResult): void => {
-  const effectRow = semantics.typing.effects.internRow({
-    operations: [{ name: "Log.info" }],
-  });
-  const resolveSymbol = (name: string): SymbolId => {
-    const symbol = semantics.symbolTable.resolve(
-      name,
-      semantics.symbolTable.rootScope
-    );
-    if (typeof symbol !== "number") {
-      throw new Error(`missing symbol for ${name}`);
-    }
-    return symbol;
-  };
-
-  ["main"].forEach((name) => {
-    const symbol = resolveSymbol(name);
-    const signature = semantics.typing.functions.getSignature(symbol);
-    if (!signature) {
-      throw new Error(`missing signature for ${name}`);
-    }
-    semantics.typing.functions.setSignature(symbol, {
-      ...signature,
-      effectRow,
-    });
-  });
-
-  semantics.hir.expressions.forEach((expr) => {
-    if (expr.exprKind === "call") {
-      semantics.typing.effects.setExprEffect(expr.id, effectRow);
-    }
-  });
-};
 
 const loadSmokeModule = () => {
   const source = readFileSync(
@@ -61,7 +26,6 @@ const loadSmokeModule = () => {
   const semantics = semanticsPipeline(
     parse(source, "/proj/src/effects-smoke.voyd")
   );
-  markEffectful(semantics);
   return codegen(semantics, { emitEffectHelpers: true });
 };
 
@@ -157,7 +121,7 @@ describe("effect table + harness", () => {
         wasm: module,
         entryName: "main_effectful",
       })
-    ).rejects.toThrow(/Unhandled effect/);
+    ).rejects.toThrow(/Unhandled effect .*Log\.info/);
   });
 
   it("snapshots the perform fixture via codegen", () => {

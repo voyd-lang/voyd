@@ -1,7 +1,0 @@
-use animal
-
-pub fn main() -> i32
-  let a = animal::Animal { name: 3 }
-  let b = animal::Animal(4)
-  let label = animal::Animal::label()
-  a.id + a.name + b.id + b.name + label

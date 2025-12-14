@@ -8,5 +8,7 @@ pub fn effectful_identity(x: i32) -> i32
   x
 
 pub fn main() -> i32
+  if 1 == 0 then:
+    Log::info(0)
   let y = pure_value()
   effectful_identity(y + 1)

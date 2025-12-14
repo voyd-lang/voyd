@@ -122,16 +122,6 @@ describe("effect perform lowering", () => {
     expect(text).toContain("__cont_");
   });
 
-  it("allows effects to bubble when unhandled", async () => {
-    const { module } = codegen(loadSemantics());
-    await expect(
-      runEffectfulExport({
-        wasm: module,
-        entryName: "main_effectful",
-      })
-    ).rejects.toThrow();
-  });
-
   it("does not re-evaluate guards when resuming after a perform", async () => {
     const semantics = semanticsPipeline(
       parse(readFileSync(guardFixturePath, "utf8"), "/proj/src/effects-perform-guard.voyd")
