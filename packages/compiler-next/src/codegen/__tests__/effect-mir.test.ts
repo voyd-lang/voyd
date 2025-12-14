@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildEffectMir } from "../effects/effect-mir.js";
 import { parse } from "../../parser/parser.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import type { SemanticsPipelineResult } from "../../semantics/pipeline.js";
 import type { SymbolId } from "../../semantics/ids.js";
+import { buildEffectsLoweringInfo } from "../../middle/effects/analysis.js";
 
 const loadSemantics = (): SemanticsPipelineResult => {
   const source = readFileSync(
@@ -29,7 +29,12 @@ const resolveSymbol = (name: string, semantics: SemanticsPipelineResult): Symbol
 describe("effect MIR", () => {
   it("records function effect rows and purity", () => {
     const semantics = loadSemantics();
-    const mir = buildEffectMir({ semantics });
+    const mir = buildEffectsLoweringInfo({
+      binding: semantics.binding,
+      symbolTable: semantics.symbolTable,
+      hir: semantics.hir,
+      typing: semantics.typing,
+    });
 
     const effectfulSym = resolveSymbol("effectful", semantics);
     const pureSym = resolveSymbol("pure_add", semantics);
@@ -46,7 +51,12 @@ describe("effect MIR", () => {
 
   it("preserves handler clauses and tail metadata", () => {
     const semantics = loadSemantics();
-    const mir = buildEffectMir({ semantics });
+    const mir = buildEffectsLoweringInfo({
+      binding: semantics.binding,
+      symbolTable: semantics.symbolTable,
+      hir: semantics.hir,
+      typing: semantics.typing,
+    });
 
     const awaitOp = Array.from(mir.operations.values()).find(
       (op) => op.name === "Async.await"
@@ -83,12 +93,12 @@ describe("effect MIR", () => {
       (clause) => clause.operation === awaitOp.symbol
     );
 
-    expect(staticAwait?.effect).toBe(awaitOp.effect);
+    expect(staticAwait?.effect).toBe(awaitOp.effectSymbol);
     expect(staticAwait?.resumeKind).toBe("tail");
     expect(staticAwait?.tailResumption?.enforcement).toBe("static");
     expect(staticAwait?.tailResumption?.calls).toBe(1);
 
-    expect(runtimeAwait?.effect).toBe(awaitOp.effect);
+    expect(runtimeAwait?.effect).toBe(awaitOp.effectSymbol);
     expect(runtimeAwait?.resumeKind).toBe("tail");
     expect(runtimeAwait?.tailResumption?.enforcement).toBe("runtime");
     expect(runtimeAwait?.tailResumption?.escapes).toBe(true);
@@ -96,7 +106,12 @@ describe("effect MIR", () => {
 
   it("marks calls as pure or effectful based on the inferred effect row", () => {
     const semantics = loadSemantics();
-    const mir = buildEffectMir({ semantics });
+    const mir = buildEffectsLoweringInfo({
+      binding: semantics.binding,
+      symbolTable: semantics.symbolTable,
+      hir: semantics.hir,
+      typing: semantics.typing,
+    });
 
     const pureSym = resolveSymbol("pure_add", semantics);
     const effectfulSym = resolveSymbol("effectful", semantics);

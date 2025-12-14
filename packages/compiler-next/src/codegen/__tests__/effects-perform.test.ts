@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import binaryen from "binaryen";
 import { parse } from "../../parser/parser.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { buildEffectMir } from "../effects/effect-mir.js";
 import { codegen } from "../index.js";
 import { createRttContext } from "../rtt/index.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";
@@ -12,6 +11,7 @@ import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
 import type { CodegenContext } from "../context.js";
 import { runEffectfulExport } from "./support/effects-harness.js";
+import { buildEffectsLoweringInfo } from "../../middle/effects/analysis.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -45,6 +45,12 @@ const buildLoweringSnapshot = () => {
     symbolTable: semantics.symbolTable,
     hir: semantics.hir,
     typing: semantics.typing,
+    effectsInfo: buildEffectsLoweringInfo({
+      binding: semantics.binding,
+      symbolTable: semantics.symbolTable,
+      hir: semantics.hir,
+      typing: semantics.typing,
+    }),
     options: {
       optimize: false,
       validate: true,
@@ -62,7 +68,6 @@ const buildLoweringSnapshot = () => {
     lambdaFunctions: new Map(),
     rtt,
     effectsRuntime,
-    effectMir: buildEffectMir({ semantics }),
     effectsBackend: undefined as any,
     effectsState: createEffectsState(),
     effectLowering: {

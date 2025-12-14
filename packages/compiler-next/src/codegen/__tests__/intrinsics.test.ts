@@ -86,14 +86,13 @@ const createContext = () => {
 	    lambdaFunctions: new Map(),
     rtt: { baseType: binaryen.none, extensionHelpers: { i32Array: binaryen.i32 } } as any,
     effectsRuntime,
-    effectMir: {
+    effectsInfo: {
       functions: new Map(),
       operations: new Map(),
       handlers: new Map(),
       calls: new Map(),
       handlerTails: new Map(),
-      semantics: {} as any,
-      stackSwitching: false,
+      lambdas: new Map(),
     },
     effectsBackend: undefined as any,
     effectsState: createEffectsState(),
@@ -101,6 +100,8 @@ const createContext = () => {
       sitesByExpr: new Map(),
       sites: [],
       argsTypes: new Map(),
+      callArgTemps: new Map(),
+      tempTypeIds: new Map(),
     },
     outcomeValueTypes: new Map(),
   };

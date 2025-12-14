@@ -1,4 +1,8 @@
 export * from "./codegen.js";
+export {
+  codegenProgramWithContinuationFallback,
+  type ContinuationBackendKind,
+} from "./codegen.js";
 export type {
   ContinuationBackend,
   ContinuationBackendOptions,

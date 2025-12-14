@@ -276,7 +276,7 @@ export const compileCallExpr = (
 
   if (callee.exprKind === "identifier") {
     const symbolRecord = ctx.symbolTable.getSymbol(callee.symbol);
-    if (symbolRecord.kind === "effect-op") {
+    if (ctx.effectsInfo.operations.has(callee.symbol)) {
       return ctx.effectsBackend.compileEffectOpCall({
         expr,
         calleeSymbol: callee.symbol,

@@ -14,7 +14,6 @@ import {
   registerImportMetadata,
   registerFunctionMetadata,
 } from "./functions.js";
-import { buildEffectMir } from "./effects/effect-mir.js";
 import {
   EFFECT_TABLE_EXPORT,
   emitEffectTableSection,
@@ -26,6 +25,7 @@ import {
   type EffectsBackend,
 } from "./effects/codegen-backend.js";
 import { createEffectsState } from "./effects/state.js";
+import { buildEffectsLoweringInfo } from "../middle/effects/analysis.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
@@ -39,6 +39,8 @@ export type CodegenProgramParams = {
   entryModuleId: string;
   options?: CodegenOptions;
 };
+
+export type ContinuationBackendKind = "gc-trampoline" | "stack-switch";
 
 export const codegen = (
   semantics: SemanticsPipelineResult,
@@ -56,9 +58,6 @@ export const codegenProgram = ({
   options = {},
 }: CodegenProgramParams): CodegenResult => {
   const mod = new binaryen.Module();
-  mod.setFeatures(binaryen.Features.All);
-  const rtt = createRttContext(mod);
-  const effectsRuntime = createEffectRuntime(mod);
   const mergedOptions: Required<CodegenOptions> = {
     ...DEFAULT_OPTIONS,
     ...options,
@@ -67,6 +66,11 @@ export const codegenProgram = ({
       ...(options.continuationBackend ?? {}),
     },
   };
+  const wantsStackSwitching = mergedOptions.continuationBackend.stackSwitching === true;
+  const baseFeatures = binaryen.Features.All & ~binaryen.Features.StackSwitching;
+  mod.setFeatures(wantsStackSwitching ? binaryen.Features.All : baseFeatures);
+  const rtt = createRttContext(mod);
+  const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, FunctionMetadata[]>();
   const functionInstances = new Map<string, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
@@ -79,6 +83,12 @@ export const codegenProgram = ({
     symbolTable: sem.symbolTable,
     hir: sem.hir,
     typing: sem.typing,
+    effectsInfo: buildEffectsLoweringInfo({
+      binding: sem.binding,
+      symbolTable: sem.symbolTable,
+      hir: sem.hir,
+      typing: sem.typing,
+    }),
     options: mergedOptions,
     functions,
     functionInstances,
@@ -91,10 +101,6 @@ export const codegenProgram = ({
     lambdaFunctions: new Map(),
     rtt,
     effectsRuntime,
-    effectMir: buildEffectMir({
-      semantics: sem,
-      options: mergedOptions.continuationBackend,
-    }),
     effectsBackend: undefined as unknown as EffectsBackend,
     effectsState: createEffectsState(),
     effectLowering: {
@@ -146,6 +152,46 @@ export const codegenProgram = ({
   }
 
   return { module: mod, effectTable };
+};
+
+export const codegenProgramWithContinuationFallback = ({
+  modules,
+  entryModuleId,
+  options = {},
+}: CodegenProgramParams): {
+  preferredKind: ContinuationBackendKind;
+  preferred: CodegenResult;
+  fallback?: CodegenResult;
+} => {
+  const preferredKind: ContinuationBackendKind =
+    options.continuationBackend?.stackSwitching === true
+      ? "stack-switch"
+      : "gc-trampoline";
+
+  if (preferredKind !== "stack-switch") {
+    return {
+      preferredKind,
+      preferred: codegenProgram({ modules, entryModuleId, options }),
+    };
+  }
+
+  const preferred = codegenProgram({
+    modules,
+    entryModuleId,
+    options: {
+      ...options,
+      continuationBackend: { ...(options.continuationBackend ?? {}), stackSwitching: true },
+    },
+  });
+  const fallback = codegenProgram({
+    modules,
+    entryModuleId,
+    options: {
+      ...options,
+      continuationBackend: { ...(options.continuationBackend ?? {}), stackSwitching: false },
+    },
+  });
+  return { preferredKind, preferred, fallback };
 };
 
 export type { CodegenOptions, CodegenResult } from "./context.js";

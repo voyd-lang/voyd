@@ -14,8 +14,9 @@ import type {
   TypeId,
 } from "../context.js";
 import { wasmTypeFor } from "../types.js";
-import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
-import { exprContainsEffectHandler, walkHirExpression, walkHirPattern } from "../hir-walk.js";
+import type { ResumeKind } from "./runtime-abi.js";
+import { getEffectOpIds } from "./op-ids.js";
+import { walkHirExpression, walkHirPattern } from "../hir-walk.js";
 
 export type ContinuationFieldSource =
   | "param"
@@ -124,50 +125,11 @@ const appendTempCaptures = (
   });
 };
 
-export const effectOpIds = (
-  symbol: SymbolId,
-  ctx: CodegenContext
-): {
-  effectId: number;
-  opId: number;
-  resumeKind: ResumeKind;
-  effectSymbol: SymbolId;
-} => {
-  for (
-    let localEffectId = 0;
-    localEffectId < ctx.binding.effects.length;
-    localEffectId += 1
-  ) {
-    const effect = ctx.binding.effects[localEffectId]!;
-    const opIndex = effect.operations.findIndex((op) => op.symbol === symbol);
-    if (opIndex < 0) continue;
-    const op = effect.operations[opIndex]!;
-    const resumeKind =
-      op.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
-    return {
-      effectId: ctx.effectIdOffset + localEffectId,
-      opId: opIndex,
-      resumeKind,
-      effectSymbol: effect.symbol,
-    };
-  }
-  throw new Error(`codegen missing effect metadata for op ${symbol}`);
-};
-
 const sanitize = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
 
 const shouldLowerLambda = (expr: HirLambdaExpr, ctx: CodegenContext): boolean => {
-  const typeId =
-    ctx.typing.resolvedExprTypes.get(expr.id) ??
-    ctx.typing.table.getExprType(expr.id) ??
-    ctx.typing.primitives.unknown;
-  const desc = ctx.typing.arena.get(typeId);
-  if (desc.kind !== "function") return false;
-  const effectful =
-    typeof desc.effectRow === "number" && !ctx.typing.effects.isEmpty(desc.effectRow);
-  if (effectful) return true;
-  return exprContainsEffectHandler(expr.body, ctx);
+  return ctx.effectsInfo.lambdas.get(expr.id)?.shouldLower ?? false;
 };
 
 const lambdaParamSymbolSet = (expr: HirLambdaExpr): ReadonlySet<SymbolId> =>
@@ -433,11 +395,11 @@ const analyzeExpr = ({
       }
 
       const merged = mergeSiteResults(...argResults, calleeResult);
-      const callInfo = ctx.effectMir.calls.get(expr.id);
+      const callInfo = ctx.effectsInfo.calls.get(expr.id);
       if (
         callee &&
         callee.exprKind === "identifier" &&
-        ctx.symbolTable.getSymbol(callee.symbol).kind === "effect-op"
+        ctx.effectsInfo.operations.has(callee.symbol)
       ) {
         const site: SiteDraft = {
           kind: "perform",
@@ -741,9 +703,9 @@ export const buildEffectLowering = ({
 
   ctx.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
-    const effectInfo = ctx.effectMir.functions.get(item.symbol);
+    const effectInfo = ctx.effectsInfo.functions.get(item.symbol);
     if (!effectInfo) return;
-    if (effectInfo.pure && !exprContainsEffectHandler(item.body, ctx)) {
+    if (effectInfo.pure && !effectInfo.hasHandlerInBody) {
       return;
     }
 
@@ -831,7 +793,7 @@ export const buildEffectLowering = ({
               if (typeof site.effectSymbol !== "number") {
                 throw new Error("perform site missing effect op symbol");
               }
-              const { effectId, opId, resumeKind, effectSymbol } = effectOpIds(
+              const { effectId, opId, resumeKind, effectSymbol } = getEffectOpIds(
                 site.effectSymbol,
                 ctx
               );
@@ -984,7 +946,7 @@ export const buildEffectLowering = ({
               if (typeof site.effectSymbol !== "number") {
                 throw new Error("perform site missing effect op symbol");
               }
-              const { effectId, opId, resumeKind, effectSymbol } = effectOpIds(
+              const { effectId, opId, resumeKind, effectSymbol } = getEffectOpIds(
                 site.effectSymbol,
                 ctx
               );

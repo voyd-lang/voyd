@@ -28,7 +28,6 @@ import {
   ensureLinearMemory,
   ensureMsgPackImports,
 } from "./effects/host-boundary.js";
-import { exprContainsEffectHandler } from "./hir-walk.js";
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const unknown = ctx.typing.arena.internPrimitive("unknown");
@@ -97,7 +96,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         );
       }
 
-      const effectInfo = ctx.effectMir.functions.get(item.symbol);
+      const effectInfo = ctx.effectsInfo.functions.get(item.symbol);
       if (!effectInfo) {
         throw new Error(
           `codegen missing effect information for function ${item.symbol}`
@@ -217,7 +216,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
 
       instantiations.forEach(([instanceKey, typeArgs]) => {
         const targetMeta = pickTargetMeta(targetMetas, typeArgs.length);
-        const effectInfo = ctx.effectMir.functions.get(imp.local);
+        const effectInfo = ctx.effectsInfo.functions.get(imp.local);
         const effectful =
           targetMeta?.effectful ?? (effectInfo ? effectInfo.pure === false : false);
         const userParamTypes = signature.parameters.map((param) =>
@@ -409,7 +408,8 @@ const compileFunctionItem = (
   meta: FunctionMetadata,
   ctx: CodegenContext
 ): void => {
-  const hasHandlerExpr = exprContainsEffectHandler(fn.body, ctx);
+  const hasHandlerExpr =
+    ctx.effectsInfo.functions.get(fn.symbol)?.hasHandlerInBody ?? false;
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   if (!meta.effectful && hasHandlerExpr) {
     const implName = `${meta.wasmName}__effectful_impl`;

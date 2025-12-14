@@ -13,7 +13,7 @@ import type {
   ExpressionCompiler,
   FunctionContext,
 } from "../context.js";
-import { effectOpIds } from "../effects/effect-lowering.js";
+import { getEffectOpIds } from "../effects/op-ids.js";
 import { allocateTempLocal, loadBindingValue } from "../locals.js";
 import { getRequiredExprType, wasmTypeFor } from "../types.js";
 import {
@@ -377,7 +377,7 @@ export const compileEffectHandlerExpr = (
   tailPosition: boolean,
   expectedResultTypeId?: number
 ): CompiledExpression => {
-  const handlerInfo = ctx.effectMir.handlers.get(expr.id);
+  const handlerInfo = ctx.effectsInfo.handlers.get(expr.id);
   if (!handlerInfo) {
     throw new Error("missing handler metadata for effect handler expression");
   }
@@ -427,7 +427,7 @@ export const compileEffectHandlerExpr = (
       ctx.mod.local.set(prevHandlerLocal.index, current),
     ];
     handlerInfo.clauses.forEach((clause, index) => {
-      const { effectId, opId, resumeKind } = effectOpIds(clause.operation, ctx);
+      const { effectId, opId, resumeKind } = getEffectOpIds(clause.operation, ctx);
       const { fnName, fnRefType } = emitClauseFunction({
         expr,
         clauseIndex: index,

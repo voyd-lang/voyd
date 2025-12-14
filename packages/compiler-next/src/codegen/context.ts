@@ -31,7 +31,6 @@ import type { createRttContext } from "./rtt/index.js";
 import type { BindingResult } from "../semantics/binding/binding.js";
 import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
 import type { EffectRuntime } from "./effects/runtime-abi.js";
-import type { EffectMir } from "./effects/backend.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
 import type { EffectTableSidecar } from "./effects/effect-table-types.js";
 import type { EffectLoweringResult } from "./effects/effect-lowering.js";
@@ -40,6 +39,7 @@ import type { ContinuationBackendOptions } from "./effects/backend.js";
 import type { EffectsBackend } from "./effects/codegen-backend.js";
 import type { EffectsState } from "./effects/state.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
+import type { EffectsLoweringInfo } from "../middle/effects/analysis.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -115,6 +115,7 @@ export interface CodegenContext {
   symbolTable: SymbolTable;
   hir: HirGraph;
   typing: TypingResult;
+  effectsInfo: EffectsLoweringInfo;
   options: Required<CodegenOptions>;
   functions: Map<string, FunctionMetadata[]>;
   functionInstances: Map<string, FunctionMetadata>;
@@ -141,7 +142,6 @@ export interface CodegenContext {
   lambdaFunctions: Map<string, string>;
   rtt: ReturnType<typeof createRttContext>;
   effectsRuntime: EffectRuntime;
-  effectMir: EffectMir;
   effectsBackend: EffectsBackend;
   effectsState: EffectsState;
   effectLowering: EffectLoweringResult;

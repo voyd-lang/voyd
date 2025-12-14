@@ -69,7 +69,10 @@ const createStackSwitchBackend = (fallback: EffectsBackend): EffectsBackend => (
 
 export const selectEffectsBackend = (ctx: CodegenContext): EffectsBackend => {
   const fallback = createGcTrampolineBackend();
-  if (ctx.effectMir.stackSwitching) {
+  const stackSwitching =
+    ctx.options.continuationBackend.stackSwitching ??
+    (typeof process !== "undefined" && process.env.VOYD_STACK_SWITCH === "1");
+  if (stackSwitching) {
     // Stack-switching backend is not implemented yet; use gc-trampoline fallback.
     return createStackSwitchBackend(fallback);
   }

@@ -3,7 +3,7 @@ import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import type { CodegenContext } from "../context.js";
 
 const makeCtx = (stackSwitching: boolean): CodegenContext =>
-  ({ effectMir: { stackSwitching } } as any);
+  ({ options: { continuationBackend: { stackSwitching } } } as any);
 
 describe("effects backend selection", () => {
   it("defaults to gc-trampoline when stack switching disabled", () => {
@@ -16,4 +16,3 @@ describe("effects backend selection", () => {
     expect(backend.kind).toBe("stack-switch");
   });
 });
-
