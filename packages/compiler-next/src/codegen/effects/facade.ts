@@ -7,6 +7,9 @@ import { getEffectOpIds } from "./op-ids.js";
 import { buildEffectsIr } from "../../semantics/effects/ir/build.js";
 import type { EffectsIr, EffectsIrCallKind } from "../../semantics/effects/ir/types.js";
 
+const FACADE_KEY = Symbol("voyd.effects.facade");
+const IR_KEY = Symbol("voyd.effects.ir");
+
 export type FunctionAbiInfo = {
   effectRow: EffectRowId;
   typeEffectful: boolean;
@@ -30,16 +33,14 @@ export interface EffectsFacade {
 
 export const effectsFacade = (ctx: CodegenContext): EffectsFacade => {
   const memo = ctx.effectsState.memo;
-  const key = "__voyd_effects_facade__";
-  const existing = memo.get(key) as EffectsFacade | undefined;
+  const existing = memo.get(FACADE_KEY) as EffectsFacade | undefined;
   if (existing) return existing;
 
   const ensureIr = (): EffectsIr => {
-    const irKey = "__voyd_effects_ir__";
-    const cached = memo.get(irKey) as EffectsIr | undefined;
+    const cached = memo.get(IR_KEY) as EffectsIr | undefined;
     if (cached) return cached;
     const built = buildEffectsIr({ hir: ctx.hir, info: ctx.effectsInfo });
-    memo.set(irKey, built);
+    memo.set(IR_KEY, built);
     return built;
   };
 
@@ -68,6 +69,6 @@ export const effectsFacade = (ctx: CodegenContext): EffectsFacade => {
     effectOpIds: (symbol) => getEffectOpIds(symbol, ctx),
   };
 
-  memo.set(key, facade);
+  memo.set(FACADE_KEY, facade);
   return facade;
 };

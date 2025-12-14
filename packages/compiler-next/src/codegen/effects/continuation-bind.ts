@@ -13,6 +13,8 @@ import type { CodegenContext } from "../context.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
+const BIND_STATE_KEY = Symbol("voyd.effects.continuationBind");
+
 const bindState = (ctx: CodegenContext): {
   bindFnName?: string;
   bindFnRefType?: binaryen.Type;
@@ -20,11 +22,10 @@ const bindState = (ctx: CodegenContext): {
   contCallRefType?: binaryen.Type;
 } => {
   const memo = ctx.effectsState.memo;
-  const key = "__voyd_continuation_bind_state__";
-  const existing = memo.get(key);
+  const existing = memo.get(BIND_STATE_KEY);
   if (existing) return existing as any;
   const created = {};
-  memo.set(key, created);
+  memo.set(BIND_STATE_KEY, created);
   return created as any;
 };
 

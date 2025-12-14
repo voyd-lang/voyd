@@ -38,16 +38,17 @@ type HandlerCodegenState = {
   clauseFnRefTypes: Map<string, binaryen.Type>;
 };
 
+const HANDLER_STATE_KEY = Symbol("voyd.effects.effectHandler.codegenState");
+
 const handlerState = (ctx: CodegenContext): HandlerCodegenState => {
   const memo = ctx.effectsState.memo;
-  const key = "__voyd_effect_handler_codegen_state__";
-  const existing = memo.get(key) as HandlerCodegenState | undefined;
+  const existing = memo.get(HANDLER_STATE_KEY) as HandlerCodegenState | undefined;
   if (existing) return existing;
   const created: HandlerCodegenState = {
     envLayouts: new Map(),
     clauseFnRefTypes: new Map(),
   };
-  memo.set(key, created);
+  memo.set(HANDLER_STATE_KEY, created);
   return created;
 };
 
