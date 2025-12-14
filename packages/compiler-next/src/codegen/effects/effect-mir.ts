@@ -30,8 +30,7 @@ const isPureEffectRow = (
 ): boolean => {
   if (typeof row !== "number") return false;
   try {
-    const desc = semantics.typing.effects.getRow(row);
-    return desc.operations.length === 0;
+    return semantics.typing.effects.isEmpty(row);
   } catch {
     return false;
   }

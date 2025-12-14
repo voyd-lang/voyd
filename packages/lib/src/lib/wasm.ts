@@ -7,7 +7,14 @@ export const getWasmInstance = (
     mod instanceof Uint8Array ? mod : mod.emitBinary()
   ) as unknown as BufferSource;
   const compiled = new WebAssembly.Module(bin);
-  return new WebAssembly.Instance(compiled);
+  const noop = () => 0;
+  return new WebAssembly.Instance(compiled, {
+    env: {
+      __voyd_msgpack_write_value: noop,
+      __voyd_msgpack_write_effect: noop,
+      __voyd_msgpack_read_value: noop,
+    },
+  });
 };
 
 export const getWasmFn = (

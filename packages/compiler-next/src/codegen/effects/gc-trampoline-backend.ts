@@ -246,6 +246,7 @@ const collectLambdaLocalSymbols = (
   ctx: CodegenContext
 ): Set<SymbolId> => {
   const symbols = new Set<SymbolId>();
+  expr.captures.forEach((capture) => symbols.add(capture.symbol));
   expr.parameters.forEach((param) => symbols.add(param.symbol));
 
   const visitPattern = (pattern: HirPattern): void => {

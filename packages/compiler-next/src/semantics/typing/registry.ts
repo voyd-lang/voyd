@@ -247,8 +247,7 @@ export const registerFunctionSignatures = (
       ctx,
       state
     );
-    const initialEffectRow =
-      effectAnnotation ?? freshOpenEffectRow(ctx.effects);
+    const initialEffectRow = effectAnnotation ?? ctx.primitives.defaultEffectRow;
     const annotatedEffects = effectAnnotation !== undefined;
 
     const hasExplicitReturn = Boolean(item.returnType);

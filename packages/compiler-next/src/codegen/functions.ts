@@ -385,6 +385,61 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
 
   const effectfulExports: { meta: FunctionMetadata; exportName: string }[] = [];
   let effectfulValueType: binaryen.Type | undefined;
+  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
+
+  const emitEffectfulWasmExportWrapper = ({
+    meta,
+    exportName,
+  }: {
+    meta: FunctionMetadata;
+    exportName: string;
+  }): void => {
+    const userParamTypes = meta.paramTypes.slice(1) as number[];
+    const wrapperName = `${meta.wasmName}__wasm_export_${sanitizeIdentifier(exportName)}`;
+    const params = binaryen.createType(userParamTypes);
+    const locals: binaryen.Type[] = [ctx.effectsRuntime.outcomeType];
+    const outcomeIndex = userParamTypes.length;
+
+    const dispatchedOutcome = ctx.mod.call(
+      ensureDispatcher(ctx),
+      [
+        ctx.mod.call(
+          meta.wasmName,
+          [
+            ctx.mod.ref.null(handlerParamType),
+            ...userParamTypes.map((type, index) => ctx.mod.local.get(index, type)),
+          ],
+          ctx.effectsRuntime.outcomeType
+        ),
+      ],
+      ctx.effectsRuntime.outcomeType
+    );
+    const outcomeLocal = () =>
+      ctx.mod.local.get(outcomeIndex, ctx.effectsRuntime.outcomeType);
+    const payload = () => ctx.effectsRuntime.outcomePayload(outcomeLocal());
+    const tagIsValue = ctx.mod.i32.eq(
+      ctx.effectsRuntime.outcomeTag(outcomeLocal()),
+      ctx.mod.i32.const(OUTCOME_TAGS.value)
+    );
+    const wrapperBody = ctx.mod.block(
+      null,
+      [
+        ctx.mod.local.set(outcomeIndex, dispatchedOutcome),
+        ctx.mod.if(
+          tagIsValue,
+          unboxOutcomeValue({
+            payload: payload(),
+            valueType: wasmTypeFor(meta.resultTypeId, ctx),
+            ctx,
+          }),
+          ctx.mod.unreachable()
+        ),
+      ],
+      wasmTypeFor(meta.resultTypeId, ctx)
+    );
+    ctx.mod.addFunction(wrapperName, params, wasmTypeFor(meta.resultTypeId, ctx), locals, wrapperBody);
+    ctx.mod.addFunctionExport(wrapperName, exportName);
+  };
 
   exportEntries.forEach((entry) => {
     const symbolRecord = ctx.symbolTable.getSymbol(entry.symbol);
@@ -408,6 +463,11 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
     }
     const exportName = entry.alias ?? symbolRecord.name;
     if (meta.effectful) {
+      emitEffectfulWasmExportWrapper({ meta, exportName });
+
+      if (meta.paramTypes.length > 1) {
+        return;
+      }
       const valueType = wasmTypeFor(meta.resultTypeId, ctx);
       if (!effectfulValueType) {
         effectfulValueType = valueType;

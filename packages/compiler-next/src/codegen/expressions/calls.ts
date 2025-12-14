@@ -507,7 +507,7 @@ const compileClosureCall = ({
   const base = getClosureTypeInfo(calleeTypeId, ctx);
   const effectful =
     typeof calleeDesc.effectRow === "number" &&
-    ctx.typing.effects.getRow(calleeDesc.effectRow).operations.length > 0;
+    !ctx.typing.effects.isEmpty(calleeDesc.effectRow);
   if (effectful && process.env.DEBUG_EFFECTS === "1") {
     console.log("[effects] closure call", {
       returnType: calleeDesc.returnType,
@@ -631,7 +631,7 @@ const compileCurriedClosureCall = ({
     const effectful =
       currentDesc.kind === "function" &&
       typeof currentDesc.effectRow === "number" &&
-      ctx.typing.effects.getRow(currentDesc.effectRow).operations.length > 0;
+      !ctx.typing.effects.isEmpty(currentDesc.effectRow);
     if (effectful && process.env.DEBUG_EFFECTS === "1") {
       console.log("[effects] curried closure call", {
         returnType: currentDesc.returnType,

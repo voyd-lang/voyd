@@ -496,6 +496,11 @@ describe("next codegen", () => {
     expect(main()).toBe(54);
   });
 
+  it("coerces pure lambdas to open-effect function types", () => {
+    const main = loadMain("lambda_open_effect_coercion.voyd");
+    expect(main()).toBe(2);
+  });
+
   it("handles attribute-tagged intrinsics through codegen", () => {
     const instance = loadWasmInstance("intrinsic_attributes_codegen.voyd");
     const main = instance.exports.main;

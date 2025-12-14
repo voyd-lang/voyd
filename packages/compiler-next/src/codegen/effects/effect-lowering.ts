@@ -141,6 +141,11 @@ const definitionOrderForLambda = (
   const order = new Map<SymbolId, number>();
   let index = 0;
 
+  expr.captures.forEach((capture) => {
+    order.set(capture.symbol, index);
+    index += 1;
+  });
+
   expr.parameters.forEach((param) => {
     order.set(param.symbol, index);
     index += 1;

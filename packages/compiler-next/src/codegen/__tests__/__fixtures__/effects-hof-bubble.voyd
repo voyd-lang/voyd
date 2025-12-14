@@ -1,0 +1,22 @@
+eff Async
+  await(tail) -> i32
+
+fn apply(f: fn() -> i32) -> i32
+  f()
+
+pub fn handled() -> i32
+  let x = 5
+  try
+    apply(() -> i32 =>
+      let y = Async::await()
+      y + x
+    )
+  Async::await(tail):
+    tail(10)
+
+pub fn bubble() -> i32
+  let x = 7
+  apply(() -> i32 =>
+    let y = Async::await()
+    y + x
+  )

@@ -128,8 +128,7 @@ const ensureClosureTypeInfo = ({
   }
 
   const effectful =
-    typeof desc.effectRow === "number" &&
-    ctx.typing.effects.getRow(desc.effectRow).operations.length > 0;
+    typeof desc.effectRow === "number" && !ctx.typing.effects.isEmpty(desc.effectRow);
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   const userParamTypes = desc.parameters.map((param) =>
     wasmTypeFor(param.type, ctx, seen)
