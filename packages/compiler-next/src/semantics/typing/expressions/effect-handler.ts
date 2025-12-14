@@ -62,15 +62,16 @@ const typeHandlerClause = ({
   }
 
   clause.parameters.slice(continuationParam ? 1 : 0).forEach((param, index) => {
-    const paramType = signature.parameters[index]?.type ?? ctx.primitives.unknown;
+    const paramType =
+      signature.parameters[index]?.type ?? ctx.primitives.unknown;
     ctx.valueTypes.set(param.symbol, paramType);
   });
 
   const clauseReturn = typeExpression(
     clause.body,
-  ctx,
-  state,
-  signature.returnType
+    ctx,
+    state,
+    signature.returnType
   );
   if (signature.returnType !== ctx.primitives.unknown) {
     ensureTypeMatches(
@@ -85,22 +86,12 @@ const typeHandlerClause = ({
   return getExprEffectRow(clause.body, ctx);
 };
 
-const findEffectOperationDecl = (
-  symbol: SymbolId,
-  ctx: TypingContext
-): { effect: (typeof ctx.decls.effects)[number]; operation: (typeof ctx.decls.effects)[number]["operations"][number] } | undefined => {
-  for (const effect of ctx.decls.effects) {
-    const operation = effect.operations.find((candidate) => candidate.symbol === symbol);
-    if (operation) {
-      return { effect, operation };
-    }
-  }
-  return undefined;
-};
-
 type ContinuationUsage = { min: number; max: number; escapes: boolean };
 
-const mergeUsage = (left: ContinuationUsage, right: ContinuationUsage): ContinuationUsage => ({
+const mergeUsage = (
+  left: ContinuationUsage,
+  right: ContinuationUsage
+): ContinuationUsage => ({
   min: left.min + right.min,
   max: left.max + right.max,
   escapes: left.escapes || right.escapes,
@@ -131,7 +122,10 @@ const analyzeContinuationUsage = ({
   ctx: TypingContext;
   nested?: boolean;
 }): ContinuationUsage => {
-  const visitExpression = (id: HirExprId, inNestedLambda: boolean): ContinuationUsage => {
+  const visitExpression = (
+    id: HirExprId,
+    inNestedLambda: boolean
+  ): ContinuationUsage => {
     const expr = ctx.hir.expressions.get(id);
     if (!expr) {
       throw new Error(`missing HirExpression ${id}`);
@@ -221,7 +215,10 @@ const analyzeContinuationUsage = ({
             typeof arm.guard === "number"
               ? visitExpression(arm.guard, inNestedLambda)
               : { min: 0, max: 0, escapes: false };
-          armUsage = mergeUsage(armUsage, visitExpression(arm.value, inNestedLambda));
+          armUsage = mergeUsage(
+            armUsage,
+            visitExpression(arm.value, inNestedLambda)
+          );
           return armUsage;
         });
         return mergeUsage(usage, mergeBranches(armUsages));
@@ -232,13 +229,17 @@ const analyzeContinuationUsage = ({
           usage = mergeUsage(usage, visitExpression(handler.body, inNestedLambda));
         });
         if (typeof expr.finallyBranch === "number") {
-          usage = mergeUsage(usage, visitExpression(expr.finallyBranch, inNestedLambda));
+          usage = mergeUsage(
+            usage,
+            visitExpression(expr.finallyBranch, inNestedLambda)
+          );
         }
         return usage;
       }
       case "object-literal":
         return expr.entries.reduce<ContinuationUsage>(
-          (acc, entry) => mergeUsage(acc, visitExpression(entry.value, inNestedLambda)),
+          (acc, entry) =>
+            mergeUsage(acc, visitExpression(entry.value, inNestedLambda)),
           { min: 0, max: 0, escapes: false }
         );
       case "field-access":
@@ -248,7 +249,10 @@ const analyzeContinuationUsage = ({
           typeof expr.target === "number"
             ? visitExpression(expr.target, inNestedLambda)
             : { min: 0, max: 0, escapes: false };
-        return mergeUsage(targetUsage, visitExpression(expr.value, inNestedLambda));
+        return mergeUsage(
+          targetUsage,
+          visitExpression(expr.value, inNestedLambda)
+        );
       }
       case "lambda": {
         const inner = visitExpression(expr.body, true);
@@ -261,7 +265,10 @@ const analyzeContinuationUsage = ({
     return { min: 0, max: 0, escapes: false };
   };
 
-  const visitStatement = (id: number, inNestedLambda: boolean): ContinuationUsage => {
+  const visitStatement = (
+    id: number,
+    inNestedLambda: boolean
+  ): ContinuationUsage => {
     const stmt = ctx.hir.statements.get(id);
     if (!stmt) {
       throw new Error(`missing HirStatement ${id}`);
@@ -294,7 +301,7 @@ const enforceTailResumption = ({
   opName: string;
   span: SourceSpan;
 }): void => {
-  const operationDecl = findEffectOperationDecl(clause.operation, ctx);
+  const operationDecl = ctx.decls.getEffectOperation(clause.operation);
   if (operationDecl?.operation.resumable !== "tail") {
     return;
   }

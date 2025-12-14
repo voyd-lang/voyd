@@ -216,6 +216,10 @@ export class DeclTable {
   private implsById = new Map<ImplDeclId, ImplDecl>();
   private effectsBySymbol = new Map<SymbolId, EffectDecl>();
   private effectsById = new Map<EffectDeclId, EffectDecl>();
+  private effectOperationsBySymbol = new Map<
+    SymbolId,
+    { effect: EffectDecl; operation: EffectOperationDecl }
+  >();
 
   private bumpId(next: number, used: number): number {
     return Math.max(next, used + 1);
@@ -344,6 +348,12 @@ export class DeclTable {
     this.effects.push(withId);
     this.effectsBySymbol.set(withId.symbol, withId);
     this.effectsById.set(withId.id, withId);
+    withId.operations.forEach((operation) => {
+      this.effectOperationsBySymbol.set(operation.symbol, {
+        effect: withId,
+        operation,
+      });
+    });
     return withId;
   }
 
@@ -401,5 +411,13 @@ export class DeclTable {
 
   getEffectById(id: EffectDeclId): EffectDecl | undefined {
     return this.effectsById.get(id);
+  }
+
+  getEffectOperation(
+    symbol: SymbolId
+  ):
+    | { effect: EffectDecl; operation: EffectOperationDecl }
+    | undefined {
+    return this.effectOperationsBySymbol.get(symbol);
   }
 }

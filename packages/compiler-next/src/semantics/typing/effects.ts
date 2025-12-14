@@ -42,11 +42,10 @@ export const effectOpName = (
   const record = ctx.symbolTable.getSymbol(symbol);
   const ownerEffect = (record.metadata as { ownerEffect?: SymbolId } | undefined)
     ?.ownerEffect;
-  const effectName =
-    typeof ownerEffect === "number"
-      ? ctx.symbolTable.getSymbol(ownerEffect).name
-      : undefined;
-    return effectName ? `${effectName}.${record.name}` : record.name;
+  if (typeof ownerEffect !== "number") {
+    return record.name;
+  }
+  return `${ctx.symbolTable.getSymbol(ownerEffect).name}.${record.name}`;
 };
 
 const resolveNamedEffectRow = (
@@ -85,30 +84,21 @@ const resolveEffectRowFromExpr = (
   ctx: TypingContext,
   state: TypingState
 ): EffectRowId => {
+  const compose = (types: readonly HirTypeExpr[]): EffectRowId =>
+    composeEffectRows(
+      ctx.effects,
+      types.map((type) => resolveEffectRowFromExpr(type, ctx, state))
+    );
+
   switch (effectType.typeKind) {
     case "named":
       return resolveNamedEffectRow(effectType, ctx);
     case "tuple":
-      return composeEffectRows(
-        ctx.effects,
-        effectType.elements.map((element) =>
-          resolveEffectRowFromExpr(element, ctx, state)
-        )
-      );
+      return compose(effectType.elements);
     case "union":
-      return composeEffectRows(
-        ctx.effects,
-        effectType.members.map((member) =>
-          resolveEffectRowFromExpr(member, ctx, state)
-        )
-      );
+      return compose(effectType.members);
     case "intersection":
-      return composeEffectRows(
-        ctx.effects,
-        effectType.members.map((member) =>
-          resolveEffectRowFromExpr(member, ctx, state)
-        )
-      );
+      return compose(effectType.members);
     case "function":
       return typeof effectType.effectType !== "undefined"
         ? resolveEffectRowFromExpr(effectType.effectType, ctx, state)
