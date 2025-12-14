@@ -424,6 +424,7 @@ const ensureContinuationFunction = ({
   const locals: binaryen.Type[] = [];
   const fnCtx: FunctionContext = {
     bindings: new Map(),
+    tempLocals: new Map(),
     locals,
     nextLocalIndex: params.length,
     returnTypeId,
@@ -461,6 +462,20 @@ const ensureContinuationFunction = ({
     ctx.typing.primitives.i32
   );
 
+  const tempIds = new Set<number>();
+  groupSites.forEach((groupSite) => {
+    groupSite.envFields.forEach((field) => {
+      if (typeof field.tempId !== "number") return;
+      tempIds.add(field.tempId);
+    });
+  });
+  tempIds.forEach((tempId) => {
+    const typeId =
+      ctx.effectLowering.tempTypeIds.get(tempId) ?? ctx.typing.primitives.unknown;
+    const wasmType = wasmTypeFor(typeId, ctx);
+    fnCtx.tempLocals.set(tempId, allocateTempLocal(wasmType, fnCtx, typeId));
+  });
+
   const envParamIndex = 0;
   const baseEnvRef = () =>
     refCast(
@@ -495,6 +510,8 @@ const ensureContinuationFunction = ({
       cfgCache.set(contName, builtCfg);
       return builtCfg;
     })();
+
+  fnCtx.continuation = { cfg, startedLocal, activeSiteLocal };
 
   const resumeLocal =
     ({
@@ -549,6 +566,14 @@ const ensureContinuationFunction = ({
       });
       if (field.sourceKind === "handler") {
         initOps.push(ctx.mod.local.set(handlerLocal.index, value));
+        return;
+      }
+      if (typeof field.tempId === "number") {
+        const binding = fnCtx.tempLocals.get(field.tempId);
+        if (!binding) {
+          throw new Error("missing temp local binding for env restore");
+        }
+        initOps.push(ctx.mod.local.set(binding.index, value));
         return;
       }
       if (typeof field.symbol !== "number") {
@@ -693,6 +718,13 @@ const lowerEffectfulCallResult = ({
               return currentHandlerValue(ctx, fnCtx);
             case "param":
             case "local": {
+              if (typeof field.tempId === "number") {
+                const binding = fnCtx.tempLocals.get(field.tempId);
+                if (!binding) {
+                  throw new Error("missing temp local binding for call env capture");
+                }
+                return ctx.mod.local.get(binding.index, binding.type);
+              }
               if (typeof field.symbol !== "number") {
                 throw new Error("missing symbol for env field");
               }
@@ -918,6 +950,13 @@ const compileEffectOpCall = ({
         return currentHandlerValue(ctx, fnCtx);
       case "param":
       case "local": {
+        if (typeof field.tempId === "number") {
+          const binding = fnCtx.tempLocals.get(field.tempId);
+          if (!binding) {
+            throw new Error("missing temp local binding for perform env capture");
+          }
+          return ctx.mod.local.get(binding.index, binding.type);
+        }
         if (typeof field.symbol !== "number") {
           throw new Error("missing symbol for env field");
         }

@@ -33,6 +33,7 @@ import {
 } from "@voyd/lib/binaryen-gc/index.js";
 import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
+import type { GroupContinuationCfg } from "../effects/continuation-cfg.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 let traitDispatchSigCounter = 0;
@@ -51,6 +52,145 @@ const currentHandlerValue = (
     );
   }
   return ctx.mod.ref.null(handlerType(ctx));
+};
+
+const activeSiteInSet = ({
+  sites,
+  activeSiteOrder,
+  ctx,
+}: {
+  sites: ReadonlySet<number>;
+  activeSiteOrder: () => binaryen.ExpressionRef;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  if (sites.size === 0) return ctx.mod.i32.const(0);
+  const comparisons = [...sites].map((siteOrder) =>
+    ctx.mod.i32.eq(activeSiteOrder(), ctx.mod.i32.const(siteOrder))
+  );
+  return comparisons.reduce(
+    (acc, cmp) => ctx.mod.i32.or(acc, cmp),
+    ctx.mod.i32.const(0)
+  );
+};
+
+const getOrCreateTempLocal = ({
+  tempId,
+  ctx,
+  fnCtx,
+}: {
+  tempId: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): { index: number; type: binaryen.Type } => {
+  const existing = fnCtx.tempLocals.get(tempId);
+  if (existing) return existing;
+  const typeId =
+    ctx.effectLowering.tempTypeIds.get(tempId) ?? ctx.typing.primitives.unknown;
+  const wasmType = wasmTypeFor(typeId, ctx);
+  const local = allocateTempLocal(wasmType, fnCtx, typeId);
+  fnCtx.tempLocals.set(tempId, local);
+  return local;
+};
+
+const buildArgSkipSites = ({
+  args,
+  cfg,
+}: {
+  args: readonly { expr: HirExprId }[];
+  cfg: GroupContinuationCfg;
+}): ReadonlyArray<ReadonlySet<number>> => {
+  const sitesByArg = args.map((arg) => cfg.sitesByExpr.get(arg.expr) ?? new Set());
+  const laterSites: Set<number>[] = args.map(() => new Set<number>());
+  let suffix = new Set<number>();
+  for (let index = args.length - 1; index >= 0; index -= 1) {
+    laterSites[index] = suffix;
+    const next = new Set<number>(suffix);
+    sitesByArg[index]?.forEach((site) => next.add(site));
+    suffix = next;
+  }
+  return laterSites;
+};
+
+const compileCallArgExpressionsWithTemps = ({
+  callId,
+  args,
+  expectedTypeIdAt,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  callId: HirExprId;
+  args: readonly { expr: HirExprId }[];
+  expectedTypeIdAt: (index: number) => TypeId | undefined;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): binaryen.ExpressionRef[] => {
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const tempSpecs = ctx.effectLowering.callArgTemps.get(callId) ?? [];
+  const tempsByIndex = new Map(
+    tempSpecs.map((entry) => [entry.argIndex, entry.tempId] as const)
+  );
+  const continuationCfg = fnCtx.continuation?.cfg;
+  const startedLocal = fnCtx.continuation?.startedLocal;
+  const activeSiteLocal = fnCtx.continuation?.activeSiteLocal;
+  const laterSites =
+    continuationCfg && startedLocal && activeSiteLocal
+      ? buildArgSkipSites({ args, cfg: continuationCfg })
+      : undefined;
+
+  return args.map((arg, index) => {
+    const expectedTypeId = expectedTypeIdAt(index);
+    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
+    const tempId = tempsByIndex.get(index);
+    if (typeof tempId !== "number") {
+      const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
+      return coerceValueToType({
+        value: value.expr,
+        actualType: actualTypeId,
+        targetType: expectedTypeId,
+        ctx,
+        fnCtx,
+      });
+    }
+
+    const tempLocal = getOrCreateTempLocal({ tempId, ctx, fnCtx });
+    const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
+    const coerced = coerceValueToType({
+      value: value.expr,
+      actualType: actualTypeId,
+      targetType: expectedTypeId,
+      ctx,
+      fnCtx,
+    });
+    const compute = ctx.mod.block(
+      null,
+      [
+        ctx.mod.local.set(tempLocal.index, coerced),
+        ctx.mod.local.get(tempLocal.index, tempLocal.type),
+      ],
+      tempLocal.type
+    );
+
+    if (!laterSites || !startedLocal || !activeSiteLocal) {
+      return compute;
+    }
+
+    const shouldSkip = ctx.mod.i32.and(
+      ctx.mod.i32.eqz(ctx.mod.local.get(startedLocal.index, binaryen.i32)),
+      activeSiteInSet({
+        sites: laterSites[index] ?? new Set(),
+        activeSiteOrder: () =>
+          ctx.mod.local.get(activeSiteLocal.index, binaryen.i32),
+        ctx,
+      })
+    );
+    return ctx.mod.if(
+      shouldSkip,
+      ctx.mod.local.get(tempLocal.index, tempLocal.type),
+      compute
+    );
+  });
 };
 
 export const compileCallExpr = (
@@ -174,9 +314,14 @@ export const compileCallExpr = (
       intrinsicMetadata.intrinsicUsesSignature !== true;
 
     if (shouldCompileIntrinsic) {
-      const args = expr.args.map(
-        (arg) => compileExpr({ exprId: arg.expr, ctx, fnCtx }).expr
-      );
+      const args = compileCallArgExpressionsWithTemps({
+        callId: expr.id,
+        args: expr.args,
+        expectedTypeIdAt: () => undefined,
+        ctx,
+        fnCtx,
+        compileExpr,
+      });
       return {
         expr: compileIntrinsicCall({
           name: intrinsicMetadata.intrinsicName ?? symbolRecord.name,
@@ -437,18 +582,13 @@ const compileCallArguments = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef[] => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  return call.args.map((arg, index) => {
-    const expectedTypeId = meta.paramTypeIds[index];
-    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
-    const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
-    return coerceValueToType({
-      value: value.expr,
-      actualType: actualTypeId,
-      targetType: expectedTypeId,
-      ctx,
-      fnCtx,
-    });
+  return compileCallArgExpressionsWithTemps({
+    callId: call.id,
+    args: call.args,
+    expectedTypeIdAt: (index) => meta.paramTypeIds[index],
+    ctx,
+    fnCtx,
+    compileExpr,
   });
 };
 
@@ -461,18 +601,13 @@ const compileClosureArguments = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef[] => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  return call.args.map((arg, index) => {
-    const expectedTypeId = desc.parameters[index]?.type;
-    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
-    const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
-    return coerceValueToType({
-      value: value.expr,
-      actualType: actualTypeId,
-      targetType: expectedTypeId,
-      ctx,
-      fnCtx,
-    });
+  return compileCallArgExpressionsWithTemps({
+    callId: call.id,
+    args: call.args,
+    expectedTypeIdAt: (index) => desc.parameters[index]?.type,
+    ctx,
+    fnCtx,
+    compileExpr,
   });
 };
 

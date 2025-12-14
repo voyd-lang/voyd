@@ -106,7 +106,13 @@ const buildCodegenProgram = (
     effectMir: buildEffectMir({ semantics: sem }),
     effectsBackend: undefined as any,
     effectsState: createEffectsState(),
-    effectLowering: { sitesByExpr: new Map(), sites: [], argsTypes: new Map() },
+    effectLowering: {
+      sitesByExpr: new Map(),
+      sites: [],
+      argsTypes: new Map(),
+      callArgTemps: new Map(),
+      tempTypeIds: new Map(),
+    },
     outcomeValueTypes,
   }));
 
@@ -499,6 +505,11 @@ describe("next codegen", () => {
   it("coerces pure lambdas to open-effect function types", () => {
     const main = loadMain("lambda_open_effect_coercion.voyd");
     expect(main()).toBe(2);
+  });
+
+  it("resumes correctly when multiple suspending call arguments exist", () => {
+    const main = loadMain("effects-multi-arg-resume.voyd");
+    expect(main()).toBe(30);
   });
 
   it("handles attribute-tagged intrinsics through codegen", () => {

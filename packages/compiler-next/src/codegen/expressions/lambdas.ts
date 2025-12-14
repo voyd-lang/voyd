@@ -114,6 +114,7 @@ const emitLambdaFunction = ({
   const handlerOffset = effectful ? 1 : 0;
   const lambdaCtx: FunctionContext = {
     bindings: new Map(),
+    tempLocals: new Map(),
     locals: [],
     nextLocalIndex: params.length,
     returnTypeId: desc.returnType,

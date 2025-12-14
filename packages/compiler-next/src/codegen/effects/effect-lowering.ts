@@ -64,6 +64,11 @@ export interface EffectLoweringResult {
   sitesByExpr: Map<HirExprId, ContinuationSite>;
   sites: readonly ContinuationSite[];
   argsTypes: Map<SymbolId, binaryen.Type>;
+  callArgTemps: Map<
+    HirExprId,
+    readonly { argIndex: number; tempId: number; typeId: TypeId }[]
+  >;
+  tempTypeIds: Map<number, TypeId>;
 }
 
 export type ContinuationSiteOwner =
@@ -78,11 +83,44 @@ interface SiteDraft {
   liveAfter: ReadonlySet<SymbolId>;
   evalOrder: readonly HirExprId[];
   effectSymbol?: SymbolId;
+  tempCaptures?: TempCaptureDraft[];
 }
 
 type LiveResult = {
   live: Set<SymbolId>;
   sites: SiteDraft[];
+};
+
+interface TempCaptureDraft {
+  key: string;
+  callExprId: HirExprId;
+  argIndex: number;
+  typeId: TypeId;
+}
+
+const callArgTempKey = ({
+  callExprId,
+  argIndex,
+}: {
+  callExprId: HirExprId;
+  argIndex: number;
+}): string => `callArg:${callExprId}:${argIndex}`;
+
+const appendTempCaptures = (
+  site: SiteDraft,
+  captures: readonly TempCaptureDraft[]
+): void => {
+  if (captures.length === 0) return;
+  if (!site.tempCaptures) {
+    site.tempCaptures = [...captures];
+    return;
+  }
+  const existing = new Set(site.tempCaptures.map((capture) => capture.key));
+  captures.forEach((capture) => {
+    if (existing.has(capture.key)) return;
+    existing.add(capture.key);
+    site.tempCaptures!.push(capture);
+  });
 };
 
 export const effectOpIds = (
@@ -535,21 +573,59 @@ const analyzeExpr = ({
     }
     case "call": {
       const callee = ctx.hir.expressions.get(expr.callee);
-      const argResults: LiveResult[] = [];
+      const argResults: LiveResult[] = new Array(expr.args.length);
       let cursor = cloneLive(liveAfter);
-      [...expr.args].reverse().forEach((arg) => {
+      for (let index = expr.args.length - 1; index >= 0; index -= 1) {
+        const arg = expr.args[index]!;
         const res = analyzeExpr({
           exprId: arg.expr,
           liveAfter: cursor,
           ctx,
         });
         cursor = mergeLive(cursor, res.live);
-        argResults.push(res);
-      });
+        argResults[index] = res;
+      }
       const calleeResult =
         callee && callee.exprKind !== "identifier"
           ? analyzeExpr({ exprId: expr.callee, liveAfter: cursor, ctx })
           : { live: cursor, sites: [] };
+
+      const hasSitesInArg = argResults.map((res) => res.sites.length > 0);
+      const needsTemp = new Array(expr.args.length).fill(false);
+      let suffixHasSites = false;
+      for (let index = expr.args.length - 2; index >= 0; index -= 1) {
+        suffixHasSites ||= hasSitesInArg[index + 1] ?? false;
+        needsTemp[index] = suffixHasSites;
+      }
+
+      const tempCapturesByIndex: Array<TempCaptureDraft | undefined> = new Array(
+        expr.args.length
+      ).fill(undefined);
+      needsTemp.forEach((needed, argIndex) => {
+        if (!needed) return;
+        const argExprId = expr.args[argIndex]!.expr;
+        const typeId =
+          ctx.typing.resolvedExprTypes.get(argExprId) ??
+          ctx.typing.table.getExprType(argExprId) ??
+          ctx.typing.primitives.unknown;
+        tempCapturesByIndex[argIndex] = {
+          key: callArgTempKey({ callExprId: expr.id, argIndex }),
+          callExprId: expr.id,
+          argIndex,
+          typeId,
+        };
+      });
+
+      for (let argIndex = 0; argIndex < argResults.length; argIndex += 1) {
+        const res = argResults[argIndex]!;
+        if (res.sites.length === 0) continue;
+        const captures = tempCapturesByIndex
+          .slice(0, argIndex)
+          .filter((capture): capture is TempCaptureDraft => !!capture);
+        if (captures.length === 0) continue;
+        res.sites.forEach((site) => appendTempCaptures(site, captures));
+      }
+
       const merged = mergeSiteResults(...argResults, calleeResult);
       const callInfo = ctx.effectMir.calls.get(expr.id);
       if (
@@ -925,8 +1001,34 @@ export const buildEffectLowering = ({
   const sitesByExpr = new Map<HirExprId, ContinuationSite>();
   const argsTypeCache = new Map<SymbolId, binaryen.Type>();
   const argsTypes = new Map<SymbolId, binaryen.Type>();
+  const callArgTemps = new Map<
+    HirExprId,
+    { argIndex: number; tempId: number; typeId: TypeId }[]
+  >();
+  const tempTypeIds = new Map<number, TypeId>();
+  const tempIdByKey = new Map<string, number>();
+  let tempCounter = 0;
   const baseEnvType = ctx.effectsRuntime.contEnvBaseType;
   const baseHeapType = modBinaryenTypeToHeapType(ctx.mod, baseEnvType);
+
+  const ensureTempId = (capture: TempCaptureDraft): number => {
+    const existing = tempIdByKey.get(capture.key);
+    if (typeof existing === "number") {
+      return existing;
+    }
+    const next = tempCounter;
+    tempCounter += 1;
+    tempIdByKey.set(capture.key, next);
+    tempTypeIds.set(next, capture.typeId);
+    const list = callArgTemps.get(capture.callExprId) ?? [];
+    list.push({
+      argIndex: capture.argIndex,
+      tempId: next,
+      typeId: capture.typeId,
+    });
+    callArgTemps.set(capture.callExprId, list);
+    return next;
+  };
 
   ctx.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
@@ -961,6 +1063,26 @@ export const buildEffectLowering = ({
           : (ctx.typing.resolvedExprTypes.get(site.exprId) ??
               ctx.typing.table.getExprType(site.exprId) ??
               ctx.typing.primitives.unknown);
+      const tempCaptures = (site.tempCaptures ?? [])
+        .slice()
+        .sort((a, b) => {
+          if (a.callExprId !== b.callExprId) return a.callExprId - b.callExprId;
+          return a.argIndex - b.argIndex;
+        })
+        .filter((capture, index, all) => {
+          const prev = all[index - 1];
+          return !prev || prev.key !== capture.key;
+        });
+      const tempFields: ContinuationEnvField[] = tempCaptures.map((capture) => {
+        const tempId = ensureTempId(capture);
+        return {
+          name: `tmp_${tempId}`,
+          wasmType: wasmTypeFor(capture.typeId, ctx),
+          typeId: capture.typeId,
+          sourceKind: "local",
+          tempId,
+        };
+      });
       const capturedFields = envFieldsFor({
         liveSymbols: site.liveAfter,
         params,
@@ -980,6 +1102,7 @@ export const buildEffectLowering = ({
           typeId: ctx.typing.primitives.unknown,
           sourceKind: "handler",
         } as const,
+        ...tempFields,
         ...capturedFields,
       ];
       const envType = defineStructType(ctx.mod, {
@@ -1090,6 +1213,26 @@ export const buildEffectLowering = ({
           : (ctx.typing.resolvedExprTypes.get(site.exprId) ??
               ctx.typing.table.getExprType(site.exprId) ??
               ctx.typing.primitives.unknown);
+      const tempCaptures = (site.tempCaptures ?? [])
+        .slice()
+        .sort((a, b) => {
+          if (a.callExprId !== b.callExprId) return a.callExprId - b.callExprId;
+          return a.argIndex - b.argIndex;
+        })
+        .filter((capture, index, all) => {
+          const prev = all[index - 1];
+          return !prev || prev.key !== capture.key;
+        });
+      const tempFields: ContinuationEnvField[] = tempCaptures.map((capture) => {
+        const tempId = ensureTempId(capture);
+        return {
+          name: `tmp_${tempId}`,
+          wasmType: wasmTypeFor(capture.typeId, ctx),
+          typeId: capture.typeId,
+          sourceKind: "local",
+          tempId,
+        };
+      });
 
       const capturedFields = envFieldsFor({
         liveSymbols: site.liveAfter,
@@ -1111,6 +1254,7 @@ export const buildEffectLowering = ({
           typeId: ctx.typing.primitives.unknown,
           sourceKind: "handler",
         } as const,
+        ...tempFields,
         ...capturedFields,
       ];
 
@@ -1193,5 +1337,14 @@ export const buildEffectLowering = ({
     });
   });
 
-  return { sitesByExpr, sites, argsTypes };
+  callArgTemps.forEach((value, key) => {
+    const unique = new Map<number, { argIndex: number; tempId: number; typeId: TypeId }>();
+    value.forEach((entry) => {
+      unique.set(entry.argIndex, entry);
+    });
+    const sorted = [...unique.values()].sort((a, b) => a.argIndex - b.argIndex);
+    callArgTemps.set(key, sorted);
+  });
+
+  return { sitesByExpr, sites, argsTypes, callArgTemps, tempTypeIds };
 };

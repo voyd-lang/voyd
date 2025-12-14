@@ -31,14 +31,15 @@ const createContext = () => {
 
   const descriptors = new Map<TypeId, TypeDescriptor>();
   const exprTypes = new Map<HirExprId, TypeId>();
-  const expressions = new Map<HirExprId, HirExpression>();
-  const fnCtx = {
-    bindings: new Map(),
-    locals: [],
-    nextLocalIndex: 0,
-    returnTypeId: 0 as TypeId,
-    effectful: false,
-  };
+	  const expressions = new Map<HirExprId, HirExpression>();
+	  const fnCtx = {
+	    bindings: new Map(),
+	    tempLocals: new Map(),
+	    locals: [],
+	    nextLocalIndex: 0,
+	    returnTypeId: 0 as TypeId,
+	    effectful: false,
+	  };
 
   const ctx: CodegenContext = {
     mod,

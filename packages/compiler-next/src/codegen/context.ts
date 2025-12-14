@@ -39,6 +39,7 @@ import type { ResumeKind } from "./effects/runtime-abi.js";
 import type { ContinuationBackendOptions } from "./effects/backend.js";
 import type { EffectsBackend } from "./effects/codegen-backend.js";
 import type { EffectsState } from "./effects/state.js";
+import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -183,6 +184,7 @@ export interface ContinuationBinding {
 
 export interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;
+  tempLocals: Map<number, LocalBindingLocal>;
   locals: binaryen.Type[];
   nextLocalIndex: number;
   returnTypeId: TypeId;
@@ -192,6 +194,11 @@ export interface FunctionContext {
   effectful: boolean;
   handlerStack?: HandlerScope[];
   continuations?: Map<SymbolId, ContinuationBinding>;
+  continuation?: {
+    cfg: GroupContinuationCfg;
+    startedLocal: LocalBindingLocal;
+    activeSiteLocal: LocalBindingLocal;
+  };
 }
 
 export interface CompiledExpression {

@@ -533,6 +533,7 @@ const compileFunctionItem = (
     const implName = `${meta.wasmName}__effectful_impl`;
     const implCtx: FunctionContext = {
       bindings: new Map(),
+      tempLocals: new Map(),
       locals: [],
       nextLocalIndex: meta.paramTypes.length + 1,
       returnTypeId: meta.resultTypeId,
@@ -586,6 +587,7 @@ const compileFunctionItem = (
 
     const wrapperCtx: FunctionContext = {
       bindings: new Map(),
+      tempLocals: new Map(),
       locals: [],
       nextLocalIndex: meta.paramTypes.length,
       returnTypeId: meta.resultTypeId,
@@ -650,6 +652,7 @@ const compileFunctionItem = (
   const handlerOffset = meta.effectful ? 1 : 0;
   const fnCtx: FunctionContext = {
     bindings: new Map(),
+    tempLocals: new Map(),
     locals: [],
     nextLocalIndex: meta.paramTypes.length,
     returnTypeId: meta.resultTypeId,

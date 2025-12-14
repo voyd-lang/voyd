@@ -175,6 +175,7 @@ const emitClauseFunction = ({
   ];
   const fnCtx: FunctionContext = {
     bindings: new Map(),
+    tempLocals: new Map(),
     locals: [],
     nextLocalIndex: params.length,
     returnTypeId: signature.returnType,

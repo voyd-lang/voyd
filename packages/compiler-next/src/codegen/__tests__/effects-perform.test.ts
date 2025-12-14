@@ -65,7 +65,13 @@ const buildLoweringSnapshot = () => {
     effectMir: buildEffectMir({ semantics }),
     effectsBackend: undefined as any,
     effectsState: createEffectsState(),
-    effectLowering: { sitesByExpr: new Map(), sites: [], argsTypes: new Map() },
+    effectLowering: {
+      sitesByExpr: new Map(),
+      sites: [],
+      argsTypes: new Map(),
+      callArgTemps: new Map(),
+      tempTypeIds: new Map(),
+    },
     outcomeValueTypes: new Map(),
   };
   ctx.effectsBackend = selectEffectsBackend(ctx);

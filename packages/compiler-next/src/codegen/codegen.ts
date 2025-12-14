@@ -97,7 +97,13 @@ export const codegenProgram = ({
     }),
     effectsBackend: undefined as unknown as EffectsBackend,
     effectsState: createEffectsState(),
-    effectLowering: { sitesByExpr: new Map(), sites: [], argsTypes: new Map() },
+    effectLowering: {
+      sitesByExpr: new Map(),
+      sites: [],
+      argsTypes: new Map(),
+      callArgTemps: new Map(),
+      tempTypeIds: new Map(),
+    },
     outcomeValueTypes,
   }));
 
