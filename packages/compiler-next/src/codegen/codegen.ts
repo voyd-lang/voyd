@@ -25,7 +25,7 @@ import {
   type EffectsBackend,
 } from "./effects/codegen-backend.js";
 import { createEffectsState } from "./effects/state.js";
-import { buildEffectsLoweringInfo } from "../middle/effects/analysis.js";
+import { buildEffectsLoweringInfo } from "../semantics/effects/analysis.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,

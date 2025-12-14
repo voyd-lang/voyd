@@ -39,7 +39,7 @@ import type { ContinuationBackendOptions } from "./effects/backend.js";
 import type { EffectsBackend } from "./effects/codegen-backend.js";
 import type { EffectsState } from "./effects/state.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
-import type { EffectsLoweringInfo } from "../middle/effects/analysis.js";
+import type { EffectsLoweringInfo } from "../semantics/effects/analysis.js";
 
 export interface CodegenOptions {
   optimize?: boolean;

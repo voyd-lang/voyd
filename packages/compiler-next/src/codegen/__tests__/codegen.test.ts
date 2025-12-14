@@ -16,7 +16,7 @@ import {
 } from "../functions.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { buildEffectsLoweringInfo } from "../../middle/effects/analysis.js";
+import { buildEffectsLoweringInfo } from "../../semantics/effects/analysis.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
 import type { TypingResult } from "../../semantics/typing/types.js";
 import type { TypeId } from "../../semantics/ids.js";
@@ -82,37 +82,37 @@ const buildCodegenProgram = (
   const functions = new Map<string, FunctionMetadata[]>();
   const functionInstances = new Map<string, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
-	  const contexts: CodegenContext[] = modules.map((sem) => ({
-	    mod,
-	    moduleId: sem.moduleId,
-	    moduleLabel: sanitizeIdentifier(sem.hir.module.path),
-	    effectIdOffset: 0,
-	    binding: sem.binding,
-	    symbolTable: sem.symbolTable,
-	    hir: sem.hir,
-	    typing: sem.typing,
-	    effectsInfo: buildEffectsLoweringInfo({
-	      binding: sem.binding,
-	      symbolTable: sem.symbolTable,
-	      hir: sem.hir,
-	      typing: sem.typing,
-	    }),
-	    options: DEFAULT_OPTIONS,
-	    functions,
-	    functionInstances,
-	    itemsToSymbols: new Map(),
+  const contexts: CodegenContext[] = modules.map((sem) => ({
+    mod,
+    moduleId: sem.moduleId,
+    moduleLabel: sanitizeIdentifier(sem.hir.module.path),
+    effectIdOffset: 0,
+    binding: sem.binding,
+    symbolTable: sem.symbolTable,
+    hir: sem.hir,
+    typing: sem.typing,
+    effectsInfo: buildEffectsLoweringInfo({
+      binding: sem.binding,
+      symbolTable: sem.symbolTable,
+      hir: sem.hir,
+      typing: sem.typing,
+    }),
+    options: DEFAULT_OPTIONS,
+    functions,
+    functionInstances,
+    itemsToSymbols: new Map(),
     structTypes: new Map(),
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
     functionRefTypes: new Map(),
     lambdaEnvs: new Map(),
-	    lambdaFunctions: new Map(),
-	    rtt,
-	    effectsRuntime,
-	    effectsBackend: undefined as any,
-	    effectsState: createEffectsState(),
-	    effectLowering: {
-	      sitesByExpr: new Map(),
+    lambdaFunctions: new Map(),
+    rtt,
+    effectsRuntime,
+    effectsBackend: undefined as any,
+    effectsState: createEffectsState(),
+    effectLowering: {
+      sitesByExpr: new Map(),
       sites: [],
       argsTypes: new Map(),
       callArgTemps: new Map(),

@@ -24,3 +24,4 @@ fn call_mix(cb: fn() -> i32): Async -> i32
   pure_add(1, 2)
   cb()
   effectful()
+

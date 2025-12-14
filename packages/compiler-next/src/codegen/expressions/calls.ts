@@ -34,6 +34,7 @@ import {
 import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
 import type { GroupContinuationCfg } from "../effects/continuation-cfg.js";
+import { effectsFacade } from "../effects/facade.js";
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsRuntime.handlerFrameType;
@@ -276,7 +277,8 @@ export const compileCallExpr = (
 
   if (callee.exprKind === "identifier") {
     const symbolRecord = ctx.symbolTable.getSymbol(callee.symbol);
-    if (ctx.effectsInfo.operations.has(callee.symbol)) {
+    const effects = effectsFacade(ctx);
+    if (effects.callKind(expr.id) === "perform") {
       return ctx.effectsBackend.compileEffectOpCall({
         expr,
         calleeSymbol: callee.symbol,

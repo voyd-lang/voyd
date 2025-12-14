@@ -28,8 +28,10 @@ import {
   ensureLinearMemory,
   ensureMsgPackImports,
 } from "./effects/host-boundary.js";
+import { effectsFacade } from "./effects/facade.js";
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
+  const effects = effectsFacade(ctx);
   const unknown = ctx.typing.arena.internPrimitive("unknown");
   const exportedItems = new Set(
     ctx.hir.module.exports.map((entry) => entry.item)
@@ -96,7 +98,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         );
       }
 
-      const effectInfo = ctx.effectsInfo.functions.get(item.symbol);
+      const effectInfo = effects.getFunctionInfo(item.symbol);
       if (!effectInfo) {
         throw new Error(
           `codegen missing effect information for function ${item.symbol}`
@@ -172,6 +174,7 @@ export const compileFunctions = (ctx: CodegenContext): void => {
 };
 
 export const registerImportMetadata = (ctx: CodegenContext): void => {
+  const effects = effectsFacade(ctx);
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   ctx.binding.imports.forEach((imp) => {
     if (!imp.target) return;
@@ -216,7 +219,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
 
       instantiations.forEach(([instanceKey, typeArgs]) => {
         const targetMeta = pickTargetMeta(targetMetas, typeArgs.length);
-        const effectInfo = ctx.effectsInfo.functions.get(imp.local);
+        const effectInfo = effects.getFunctionInfo(imp.local);
         const effectful =
           targetMeta?.effectful ?? (effectInfo ? effectInfo.pure === false : false);
         const userParamTypes = signature.parameters.map((param) =>
@@ -409,7 +412,7 @@ const compileFunctionItem = (
   ctx: CodegenContext
 ): void => {
   const hasHandlerExpr =
-    ctx.effectsInfo.functions.get(fn.symbol)?.hasHandlerInBody ?? false;
+    effectsFacade(ctx).getFunctionInfo(fn.symbol)?.hasHandlerInBody ?? false;
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   if (!meta.effectful && hasHandlerExpr) {
     const implName = `${meta.wasmName}__effectful_impl`;

@@ -11,7 +11,7 @@ import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
 import type { CodegenContext } from "../context.js";
 import { runEffectfulExport } from "./support/effects-harness.js";
-import { buildEffectsLoweringInfo } from "../../middle/effects/analysis.js";
+import { buildEffectsLoweringInfo } from "../../semantics/effects/analysis.js";
 
 const fixturePath = resolve(
   import.meta.dirname,

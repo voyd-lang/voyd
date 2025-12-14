@@ -1,35 +1,32 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "../../parser/parser.js";
-import { semanticsPipeline } from "../../semantics/pipeline.js";
-import type { SemanticsPipelineResult } from "../../semantics/pipeline.js";
-import type { SymbolId } from "../../semantics/ids.js";
-import { buildEffectsLoweringInfo } from "../../middle/effects/analysis.js";
+import { parse } from "../../../parser/parser.js";
+import { semanticsPipeline } from "../../pipeline.js";
+import type { SemanticsPipelineResult } from "../../pipeline.js";
+import type { SymbolId } from "../../ids.js";
+import { buildEffectsLoweringInfo } from "../analysis.js";
 
 const loadSemantics = (): SemanticsPipelineResult => {
   const source = readFileSync(
-    resolve(import.meta.dirname, "__fixtures__", "effects-mir.voyd"),
+    resolve(import.meta.dirname, "__fixtures__", "effects-lowering-info.voyd"),
     "utf8"
   );
-  return semanticsPipeline(parse(source, "/proj/src/effects-mir.voyd"));
+  return semanticsPipeline(parse(source, "/proj/src/effects-lowering-info.voyd"));
 };
 
 const resolveSymbol = (name: string, semantics: SemanticsPipelineResult): SymbolId => {
-  const symbol = semantics.symbolTable.resolve(
-    name,
-    semantics.symbolTable.rootScope
-  );
+  const symbol = semantics.symbolTable.resolve(name, semantics.symbolTable.rootScope);
   if (typeof symbol !== "number") {
     throw new Error(`missing symbol for ${name}`);
   }
   return symbol;
 };
 
-describe("effect MIR", () => {
+describe("EffectsLoweringInfo", () => {
   it("records function effect rows and purity", () => {
     const semantics = loadSemantics();
-    const mir = buildEffectsLoweringInfo({
+    const info = buildEffectsLoweringInfo({
       binding: semantics.binding,
       symbolTable: semantics.symbolTable,
       hir: semantics.hir,
@@ -39,8 +36,8 @@ describe("effect MIR", () => {
     const effectfulSym = resolveSymbol("effectful", semantics);
     const pureSym = resolveSymbol("pure_add", semantics);
 
-    const effectful = mir.functions.get(effectfulSym);
-    const pure = mir.functions.get(pureSym);
+    const effectful = info.functions.get(effectfulSym);
+    const pure = info.functions.get(pureSym);
 
     expect(effectful?.pure).toBe(false);
     expect(semantics.typing.effects.isEmpty(effectful!.effectRow)).toBe(false);
@@ -51,30 +48,26 @@ describe("effect MIR", () => {
 
   it("preserves handler clauses and tail metadata", () => {
     const semantics = loadSemantics();
-    const mir = buildEffectsLoweringInfo({
+    const info = buildEffectsLoweringInfo({
       binding: semantics.binding,
       symbolTable: semantics.symbolTable,
       hir: semantics.hir,
       typing: semantics.typing,
     });
 
-    const awaitOp = Array.from(mir.operations.values()).find(
+    const awaitOp = Array.from(info.operations.values()).find(
       (op) => op.name === "Async.await"
     );
     expect(awaitOp).toBeDefined();
     if (!awaitOp) return;
 
-    const handlers = Array.from(mir.handlers.values());
+    const handlers = Array.from(info.handlers.values());
     expect(handlers.length).toBeGreaterThanOrEqual(2);
     const staticHandler = handlers.find((handler) =>
-      handler.clauses.some(
-        (clause) => clause.tailResumption?.enforcement === "static"
-      )
+      handler.clauses.some((clause) => clause.tailResumption?.enforcement === "static")
     );
     const runtimeHandler = handlers.find((handler) =>
-      handler.clauses.some(
-        (clause) => clause.tailResumption?.enforcement === "runtime"
-      )
+      handler.clauses.some((clause) => clause.tailResumption?.enforcement === "runtime")
     );
 
     expect(staticHandler).toBeDefined();
@@ -106,7 +99,7 @@ describe("effect MIR", () => {
 
   it("marks calls as pure or effectful based on the inferred effect row", () => {
     const semantics = loadSemantics();
-    const mir = buildEffectsLoweringInfo({
+    const info = buildEffectsLoweringInfo({
       binding: semantics.binding,
       symbolTable: semantics.symbolTable,
       hir: semantics.hir,
@@ -116,7 +109,7 @@ describe("effect MIR", () => {
     const pureSym = resolveSymbol("pure_add", semantics);
     const effectfulSym = resolveSymbol("effectful", semantics);
 
-    const calls = Array.from(mir.calls.values());
+    const calls = Array.from(info.calls.values());
     const pureCall = calls.find((call) => call.callee === pureSym);
     const effectfulCall = calls.find((call) => call.callee === effectfulSym);
 
@@ -127,3 +120,4 @@ describe("effect MIR", () => {
     expect(semantics.typing.effects.isEmpty(effectfulCall!.effectRow)).toBe(false);
   });
 });
+

@@ -180,36 +180,3 @@ export const walkHirExpression = ({
       );
   }
 };
-
-export const hirExprSome = ({
-  exprId,
-  ctx,
-  predicate,
-  visitLambdaBodies = false,
-}: {
-  exprId: HirExprId;
-  ctx: CodegenContext;
-  predicate: (expr: HirExpression) => boolean;
-  visitLambdaBodies?: boolean;
-}): boolean => {
-  let found = false;
-  walkHirExpression({
-    exprId,
-    ctx,
-    visitLambdaBodies,
-    visitor: {
-      onExpr: (_id, expr) => {
-        if (!predicate(expr)) return;
-        found = true;
-        return "stop";
-      },
-    },
-  });
-  return found;
-};
-
-export const exprContainsEffectHandler = (
-  exprId: HirExprId,
-  ctx: CodegenContext
-): boolean => hirExprSome({ exprId, ctx, predicate: (expr) => expr.exprKind === "effect-handler" });
-

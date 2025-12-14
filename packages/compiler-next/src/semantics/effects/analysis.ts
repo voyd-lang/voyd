@@ -1,14 +1,14 @@
-import type { BindingResult } from "../../semantics/binding/binding.js";
-import type { SymbolTable } from "../../semantics/binder/index.js";
+import type { BindingResult } from "../binding/binding.js";
+import type { SymbolTable } from "../binder/index.js";
 import type {
   HirExpression,
   HirEffectHandlerClause,
   HirEffectHandlerExpr,
   HirGraph,
   HirLambdaExpr,
-} from "../../semantics/hir/index.js";
-import type { EffectRowId, HirExprId, SymbolId, TypeId } from "../../semantics/ids.js";
-import type { TypingResult } from "../../semantics/typing/types.js";
+} from "../hir/index.js";
+import type { EffectRowId, HirExprId, SymbolId, TypeId } from "../ids.js";
+import type { TypingResult } from "../typing/types.js";
 
 export interface EffectOperationRuntimeInfo {
   symbol: SymbolId;
@@ -153,7 +153,11 @@ const containsEffectHandler = ({
           if (!stmt) continue;
           if (stmt.kind === "let" && visit(stmt.initializer)) return true;
           if (stmt.kind === "expr-stmt" && visit(stmt.expr)) return true;
-          if (stmt.kind === "return" && typeof stmt.value === "number" && visit(stmt.value)) {
+          if (
+            stmt.kind === "return" &&
+            typeof stmt.value === "number" &&
+            visit(stmt.value)
+          ) {
             return true;
           }
         }
@@ -170,15 +174,20 @@ const containsEffectHandler = ({
       case "cond":
       case "if":
         return (
-          expr.branches.some((branch) => visit(branch.condition) || visit(branch.value)) ||
-          (typeof expr.defaultBranch === "number" ? visit(expr.defaultBranch) : false)
+          expr.branches.some(
+            (branch) => visit(branch.condition) || visit(branch.value)
+          ) ||
+          (typeof expr.defaultBranch === "number"
+            ? visit(expr.defaultBranch)
+            : false)
         );
       case "match":
         return (
           visit(expr.discriminant) ||
           expr.arms.some(
             (arm) =>
-              (typeof arm.guard === "number" && visit(arm.guard)) || visit(arm.value)
+              (typeof arm.guard === "number" && visit(arm.guard)) ||
+              visit(arm.value)
           )
         );
       case "object-literal":
@@ -186,7 +195,10 @@ const containsEffectHandler = ({
       case "field-access":
         return visit(expr.target);
       case "assign":
-        return (typeof expr.target === "number" && visit(expr.target)) || visit(expr.value);
+        return (
+          (typeof expr.target === "number" && visit(expr.target)) ||
+          visit(expr.value)
+        );
       case "effect-handler":
         return false;
     }

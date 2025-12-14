@@ -9,6 +9,7 @@ export interface EffectsState {
     string,
     { envType: number; fnName: string; fnRefType: number }
   >;
+  memo: Map<string, unknown>;
 }
 
 export const createEffectsState = (): EffectsState => ({
@@ -16,4 +17,5 @@ export const createEffectsState = (): EffectsState => ({
   contBuilding: new Set<string>(),
   contCfgByName: new Map<string, GroupContinuationCfg>(),
   closureCoercions: new Map(),
+  memo: new Map<string, unknown>(),
 });

@@ -31,15 +31,15 @@ const createContext = () => {
 
   const descriptors = new Map<TypeId, TypeDescriptor>();
   const exprTypes = new Map<HirExprId, TypeId>();
-	  const expressions = new Map<HirExprId, HirExpression>();
-	  const fnCtx = {
-	    bindings: new Map(),
-	    tempLocals: new Map(),
-	    locals: [],
-	    nextLocalIndex: 0,
-	    returnTypeId: 0 as TypeId,
-	    effectful: false,
-	  };
+  const expressions = new Map<HirExprId, HirExpression>();
+  const fnCtx = {
+    bindings: new Map(),
+    tempLocals: new Map(),
+    locals: [],
+    nextLocalIndex: 0,
+    returnTypeId: 0 as TypeId,
+    effectful: false,
+  };
 
   const ctx: CodegenContext = {
     mod,
@@ -78,12 +78,12 @@ const createContext = () => {
     functions: new Map(),
     functionInstances: new Map(),
     itemsToSymbols: new Map(),
-	    structTypes: new Map(),
-	    fixedArrayTypes: new Map(),
-	    closureTypes: new Map(),
-	    functionRefTypes: new Map(),
-	    lambdaEnvs: new Map(),
-	    lambdaFunctions: new Map(),
+    structTypes: new Map(),
+    fixedArrayTypes: new Map(),
+    closureTypes: new Map(),
+    functionRefTypes: new Map(),
+    lambdaEnvs: new Map(),
+    lambdaFunctions: new Map(),
     rtt: { baseType: binaryen.none, extensionHelpers: { i32Array: binaryen.i32 } } as any,
     effectsRuntime,
     effectsInfo: {

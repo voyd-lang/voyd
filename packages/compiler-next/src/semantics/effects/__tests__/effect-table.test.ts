@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createEffectTable } from "../../semantics/effects/effect-table.js";
-import type { NodeId, TypeSchemeId } from "../../semantics/ids.js";
+import { createEffectTable } from "../effect-table.js";
+import type { NodeId, TypeSchemeId } from "../../ids.js";
 
 describe("EffectTable", () => {
   it("interns rows canonically and caches duplicates", () => {
@@ -111,3 +111,4 @@ describe("EffectTable", () => {
     expect(effects.isOpen(effects.unknownRow)).toBe(true);
   });
 });
+
