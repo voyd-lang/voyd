@@ -30,6 +30,40 @@ const bin = binaryen as unknown as AugmentedBinaryen;
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
 
+export const getFunctionRefType = ({
+  params,
+  result,
+  ctx,
+  label,
+}: {
+  params: readonly binaryen.Type[];
+  result: binaryen.Type;
+  ctx: CodegenContext;
+  label?: string;
+}): binaryen.Type => {
+  const key = `${params.join(",")}->${result}`;
+  const cached = ctx.functionRefTypes.get(key);
+  if (cached) {
+    return cached;
+  }
+  const safeLabel = label ? `_${sanitizeIdentifier(label)}` : "";
+  const tempName = `__fn_sig_${ctx.functionRefTypes.size}${safeLabel}`;
+  const fnRef = ctx.mod.addFunction(
+    tempName,
+    binaryen.createType(params as number[]),
+    result,
+    [],
+    ctx.mod.nop()
+  );
+  const fnType = bin._BinaryenTypeFromHeapType(
+    bin._BinaryenFunctionGetType(fnRef),
+    false
+  );
+  ctx.functionRefTypes.set(key, fnType);
+  ctx.mod.removeFunction(tempName);
+  return fnType;
+};
+
 const functionKey = (moduleId: string, symbol: number): string =>
   `${moduleId}::${symbol}`;
 
@@ -79,26 +113,7 @@ const getClosureFunctionRefType = ({
   result: binaryen.Type;
   ctx: CodegenContext;
 }): binaryen.Type => {
-  const key = `${params.join(",")}->${result}`;
-  const cached = ctx.closureFunctionTypes.get(key);
-  if (cached) {
-    return cached;
-  }
-  const tempName = `__closure_sig_${ctx.closureFunctionTypes.size}`;
-  const fnRef = ctx.mod.addFunction(
-    tempName,
-    binaryen.createType(params as number[]),
-    result,
-    [],
-    ctx.mod.nop()
-  );
-  const fnType = bin._BinaryenTypeFromHeapType(
-    bin._BinaryenFunctionGetType(fnRef),
-    false
-  );
-  ctx.closureFunctionTypes.set(key, fnType);
-  ctx.mod.removeFunction(tempName);
-  return fnType;
+  return getFunctionRefType({ params, result, ctx, label: "closure" });
 };
 
 const ensureClosureTypeInfo = ({

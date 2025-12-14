@@ -15,6 +15,7 @@ import type {
 } from "../context.js";
 import { wasmTypeFor } from "../types.js";
 import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
+import { exprContainsEffectHandler, walkHirExpression, walkHirPattern } from "../hir-walk.js";
 
 export type ContinuationFieldSource =
   | "param"
@@ -166,7 +167,7 @@ const shouldLowerLambda = (expr: HirLambdaExpr, ctx: CodegenContext): boolean =>
   const effectful =
     typeof desc.effectRow === "number" && !ctx.typing.effects.isEmpty(desc.effectRow);
   if (effectful) return true;
-  return functionContainsEffectHandlers(expr.body, ctx);
+  return exprContainsEffectHandler(expr.body, ctx);
 };
 
 const lambdaParamSymbolSet = (expr: HirLambdaExpr): ReadonlySet<SymbolId> =>
@@ -179,222 +180,27 @@ const definitionOrderForLambda = (
   const order = new Map<SymbolId, number>();
   let index = 0;
 
-  expr.captures.forEach((capture) => {
-    order.set(capture.symbol, index);
+  const add = (symbol: SymbolId): void => {
+    if (order.has(symbol)) return;
+    order.set(symbol, index);
     index += 1;
+  };
+
+  expr.captures.forEach((capture) => add(capture.symbol));
+  expr.parameters.forEach((param) => add(param.symbol));
+
+  walkHirExpression({
+    exprId: expr.body,
+    ctx,
+    visitLambdaBodies: false,
+    visitor: {
+      onPattern: (pattern) => {
+        if (pattern.kind !== "identifier") return;
+        add(pattern.symbol);
+      },
+    },
   });
-
-  expr.parameters.forEach((param) => {
-    order.set(param.symbol, index);
-    index += 1;
-  });
-
-  const visitPattern = (pattern: HirPattern): void => {
-    switch (pattern.kind) {
-      case "identifier":
-        order.set(pattern.symbol, index);
-        index += 1;
-        return;
-      case "destructure":
-        pattern.fields.forEach((field) => visitPattern(field.pattern));
-        if (pattern.spread) visitPattern(pattern.spread);
-        return;
-      case "tuple":
-        pattern.elements.forEach((element) => visitPattern(element));
-        return;
-      case "type":
-        if (pattern.binding) visitPattern(pattern.binding);
-        return;
-      case "wildcard":
-        return;
-    }
-  };
-
-  const walkExpr = (exprId: HirExprId): void => {
-    const expr = ctx.hir.expressions.get(exprId);
-    if (!expr) return;
-    switch (expr.exprKind) {
-      case "block":
-        expr.statements.forEach((stmtId) => visitStmt(stmtId));
-        if (typeof expr.value === "number") walkExpr(expr.value);
-        return;
-      case "call":
-        walkExpr(expr.callee);
-        expr.args.forEach((arg) => walkExpr(arg.expr));
-        return;
-      case "tuple":
-        expr.elements.forEach((element) => walkExpr(element));
-        return;
-      case "loop":
-      case "while":
-        walkExpr(expr.body);
-        if (expr.exprKind === "while") {
-          walkExpr(expr.condition);
-        }
-        return;
-      case "cond":
-      case "if":
-        expr.branches.forEach((branch) => {
-          walkExpr(branch.condition);
-          walkExpr(branch.value);
-        });
-        if (typeof expr.defaultBranch === "number") {
-          walkExpr(expr.defaultBranch);
-        }
-        return;
-      case "match":
-        walkExpr(expr.discriminant);
-        expr.arms.forEach((arm) => {
-          if (typeof arm.guard === "number") {
-            walkExpr(arm.guard);
-          }
-          walkExpr(arm.value);
-        });
-        return;
-      case "object-literal":
-        expr.entries.forEach((entry) => walkExpr(entry.value));
-        return;
-      case "field-access":
-        walkExpr(expr.target);
-        return;
-      case "assign":
-        if (typeof expr.target === "number") {
-          walkExpr(expr.target);
-        }
-        walkExpr(expr.value);
-        if (expr.pattern) {
-          visitPattern(expr.pattern);
-        }
-        return;
-      case "identifier":
-      case "literal":
-      case "lambda":
-      case "overload-set":
-      case "continue":
-      case "break":
-        return;
-      case "effect-handler":
-        walkExpr(expr.body);
-        if (typeof expr.finallyBranch === "number") {
-          walkExpr(expr.finallyBranch);
-        }
-        return;
-    }
-  };
-
-  const visitStmt = (stmtId: HirStmtId): void => {
-    const stmt = ctx.hir.statements.get(stmtId);
-    if (!stmt) return;
-    switch (stmt.kind) {
-      case "let":
-        visitPattern(stmt.pattern);
-        walkExpr(stmt.initializer);
-        return;
-      case "expr-stmt":
-        walkExpr(stmt.expr);
-        return;
-      case "return":
-        if (typeof stmt.value === "number") {
-          walkExpr(stmt.value);
-        }
-        return;
-    }
-  };
-
-  walkExpr(expr.body);
   return order;
-};
-
-const functionContainsEffectHandlers = (
-  exprId: HirExprId,
-  ctx: CodegenContext
-): boolean => {
-  const expr = ctx.hir.expressions.get(exprId);
-  if (!expr) return false;
-
-  switch (expr.exprKind) {
-    case "effect-handler":
-      return true;
-    case "identifier":
-    case "literal":
-    case "overload-set":
-    case "continue":
-      return false;
-    case "break":
-      return typeof expr.value === "number"
-        ? functionContainsEffectHandlers(expr.value, ctx)
-        : false;
-    case "call":
-      return (
-        functionContainsEffectHandlers(expr.callee, ctx) ||
-        expr.args.some((arg) => functionContainsEffectHandlers(arg.expr, ctx))
-      );
-    case "block":
-      return (
-        expr.statements.some((stmtId) => {
-          const stmt = ctx.hir.statements.get(stmtId);
-          if (!stmt) return false;
-          if (stmt.kind === "let") {
-            return functionContainsEffectHandlers(stmt.initializer, ctx);
-          }
-          if (stmt.kind === "expr-stmt") {
-            return functionContainsEffectHandlers(stmt.expr, ctx);
-          }
-          if (stmt.kind === "return" && typeof stmt.value === "number") {
-            return functionContainsEffectHandlers(stmt.value, ctx);
-          }
-          return false;
-        }) ||
-        (typeof expr.value === "number" &&
-          functionContainsEffectHandlers(expr.value, ctx))
-      );
-    case "tuple":
-      return expr.elements.some((element) =>
-        functionContainsEffectHandlers(element, ctx)
-      );
-    case "loop":
-      return functionContainsEffectHandlers(expr.body, ctx);
-    case "while":
-      return (
-        functionContainsEffectHandlers(expr.condition, ctx) ||
-        functionContainsEffectHandlers(expr.body, ctx)
-      );
-    case "if":
-    case "cond":
-      return (
-        expr.branches.some(
-          (branch) =>
-            functionContainsEffectHandlers(branch.condition, ctx) ||
-            functionContainsEffectHandlers(branch.value, ctx)
-        ) ||
-        (typeof expr.defaultBranch === "number" &&
-          functionContainsEffectHandlers(expr.defaultBranch, ctx))
-      );
-    case "match":
-      return (
-        functionContainsEffectHandlers(expr.discriminant, ctx) ||
-        expr.arms.some(
-          (arm) =>
-            (typeof arm.guard === "number" &&
-              functionContainsEffectHandlers(arm.guard, ctx)) ||
-            functionContainsEffectHandlers(arm.value, ctx)
-        )
-      );
-    case "object-literal":
-      return expr.entries.some((entry) =>
-        functionContainsEffectHandlers(entry.value, ctx)
-      );
-    case "field-access":
-      return functionContainsEffectHandlers(expr.target, ctx);
-    case "assign":
-      return (
-        (typeof expr.target === "number" &&
-          functionContainsEffectHandlers(expr.target, ctx)) ||
-        functionContainsEffectHandlers(expr.value, ctx)
-      );
-    case "lambda":
-      return false;
-  }
 };
 
 const cloneLive = (set: ReadonlySet<SymbolId>): Set<SymbolId> =>
@@ -815,126 +621,29 @@ const definitionOrder = (
   ctx: CodegenContext
 ): Map<SymbolId, number> => {
   const order = new Map<SymbolId, number>();
+  let index = 0;
   const add = (symbol: SymbolId): void => {
-    if (!order.has(symbol)) {
-      order.set(symbol, order.size);
-    }
-  };
-  const visitPattern = (pattern: HirPattern): void => {
-    switch (pattern.kind) {
-      case "identifier":
-        add(pattern.symbol);
-        return;
-      case "destructure":
-        pattern.fields.forEach((field) => visitPattern(field.pattern));
-        if (pattern.spread) {
-          visitPattern(pattern.spread);
-        }
-        return;
-      case "tuple":
-        pattern.elements.forEach((element) => visitPattern(element));
-        return;
-      case "type":
-        if (pattern.binding) {
-          visitPattern(pattern.binding);
-        }
-        return;
-      case "wildcard":
-        return;
-    }
+    if (order.has(symbol)) return;
+    order.set(symbol, index);
+    index += 1;
   };
 
-  fn.parameters.forEach((param) => visitPattern(param.pattern));
-
-  const walkExpr = (exprId: HirExprId): void => {
-    const expr = ctx.hir.expressions.get(exprId);
-    if (!expr) return;
-    switch (expr.exprKind) {
-      case "block":
-        expr.statements.forEach((stmtId) => {
-          const stmt = ctx.hir.statements.get(stmtId);
-          if (!stmt) return;
-          if (stmt.kind === "let") {
-            visitPattern(stmt.pattern);
-            walkExpr(stmt.initializer);
-            return;
-          }
-          if (stmt.kind === "expr-stmt") {
-            walkExpr(stmt.expr);
-          }
-          if (stmt.kind === "return" && typeof stmt.value === "number") {
-            walkExpr(stmt.value);
-          }
-        });
-        if (typeof expr.value === "number") {
-          walkExpr(expr.value);
-        }
-        return;
-      case "call":
-        walkExpr(expr.callee);
-        expr.args.forEach((arg) => walkExpr(arg.expr));
-        return;
-      case "tuple":
-        expr.elements.forEach((element) => walkExpr(element));
-        return;
-      case "loop":
-      case "while":
-        walkExpr(expr.body);
-        if (expr.exprKind === "while") {
-          walkExpr(expr.condition);
-        }
-        return;
-      case "cond":
-      case "if":
-        expr.branches.forEach((branch) => {
-          walkExpr(branch.condition);
-          walkExpr(branch.value);
-        });
-        if (typeof expr.defaultBranch === "number") {
-          walkExpr(expr.defaultBranch);
-        }
-        return;
-      case "match":
-        walkExpr(expr.discriminant);
-        expr.arms.forEach((arm) => {
-          if (typeof arm.guard === "number") {
-            walkExpr(arm.guard);
-          }
-          walkExpr(arm.value);
-        });
-        return;
-      case "object-literal":
-        expr.entries.forEach((entry) => walkExpr(entry.value));
-        return;
-      case "field-access":
-        walkExpr(expr.target);
-        return;
-      case "assign":
-        if (typeof expr.target === "number") {
-          walkExpr(expr.target);
-        }
-        walkExpr(expr.value);
-        if (expr.pattern) {
-          visitPattern(expr.pattern);
-        }
-        return;
-      case "identifier":
-      case "literal":
-      case "lambda":
-      case "effect-handler":
-        walkExpr(expr.body);
-        if (typeof expr.finallyBranch === "number") {
-          walkExpr(expr.finallyBranch);
-        }
-        return;
-      case "overload-set":
-      case "continue":
-      case "break":
-        return;
-    }
+  const visitor = {
+    onPattern: (pattern: HirPattern) => {
+      if (pattern.kind !== "identifier") return;
+      add(pattern.symbol);
+    },
   };
 
-  walkExpr(fn.body);
+  fn.parameters.forEach((param) => {
+    walkHirPattern({ pattern: param.pattern, visitor });
+  });
+  walkHirExpression({
+    exprId: fn.body,
+    ctx,
+    visitLambdaBodies: false,
+    visitor,
+  });
   return order;
 };
 
@@ -1034,7 +743,7 @@ export const buildEffectLowering = ({
     if (item.kind !== "function") return;
     const effectInfo = ctx.effectMir.functions.get(item.symbol);
     if (!effectInfo) return;
-    if (effectInfo.pure && !functionContainsEffectHandlers(item.body, ctx)) {
+    if (effectInfo.pure && !exprContainsEffectHandler(item.body, ctx)) {
       return;
     }
 

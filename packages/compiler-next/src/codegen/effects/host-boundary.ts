@@ -4,12 +4,11 @@ import {
   refCast,
   structGetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
-import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { boxOutcomeValue, unboxOutcomeValue } from "./outcome-values.js";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
 import type { EffectRuntime } from "./runtime-abi.js";
 import { ensureDispatcher } from "./dispatcher.js";
-import { wasmTypeFor } from "../types.js";
+import { getFunctionRefType, wasmTypeFor } from "../types.js";
 
 export const MSGPACK_WRITE_VALUE = "__voyd_msgpack_write_value";
 export const MSGPACK_WRITE_EFFECT = "__voyd_msgpack_write_effect";
@@ -164,8 +163,6 @@ const trapOnNonZero = (
     ctx.mod.nop()
   );
 
-let hostSigCounter = 0;
-const bin = binaryen as unknown as AugmentedBinaryen;
 const functionRefType = ({
   params,
   result,
@@ -174,22 +171,7 @@ const functionRefType = ({
   params: readonly binaryen.Type[];
   result: binaryen.Type;
   ctx: CodegenContext;
-}): binaryen.Type => {
-  const tempName = `__voyd_host_sig_${hostSigCounter++}`;
-  const temp = ctx.mod.addFunction(
-    tempName,
-    binaryen.createType(params as number[]),
-    result,
-    [],
-    ctx.mod.nop()
-  );
-  const refType = bin._BinaryenTypeFromHeapType(
-    bin._BinaryenFunctionGetType(temp),
-    false
-  );
-  ctx.mod.removeFunction(tempName);
-  return refType;
-};
+}): binaryen.Type => getFunctionRefType({ params, result, ctx, label: "host" });
 
 const encodeEffectArgs = ({
   ctx,

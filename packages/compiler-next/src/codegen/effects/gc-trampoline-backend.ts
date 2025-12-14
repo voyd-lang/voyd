@@ -12,7 +12,6 @@ import type {
   TypeId,
 } from "../context.js";
 import type { HirFunction, HirLambdaExpr, HirPattern } from "../../semantics/hir/index.js";
-import type { HirStmtId } from "../../semantics/ids.js";
 import type {
   ContinuationCallSite,
   ContinuationSite,
@@ -41,13 +40,14 @@ import { coerceValueToType } from "../structural.js";
 import {
   getExprBinaryenType,
   getRequiredExprType,
+  getFunctionRefType,
   wasmTypeFor,
 } from "../types.js";
 import { compileEffectHandlerExpr } from "../expressions/effect-handler.js";
 import type { EffectsBackend } from "./codegen-backend.js";
+import { walkHirExpression, walkHirPattern } from "../hir-walk.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
-let gcTrampolineSigCounter = 0;
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsRuntime.handlerFrameType;
@@ -73,24 +73,8 @@ const functionRefType = ({
   params: readonly binaryen.Type[];
   result: binaryen.Type;
   ctx: CodegenContext;
-}): binaryen.Type => {
-  const tempName = `__voyd_gc_trampoline_sig_${gcTrampolineSigCounter++}_${
-    params.length
-  }`;
-  const temp = ctx.mod.addFunction(
-    tempName,
-    binaryen.createType(params as number[]),
-    result,
-    [],
-    ctx.mod.nop()
-  );
-  const fnType = bin._BinaryenTypeFromHeapType(
-    bin._BinaryenFunctionGetType(temp),
-    false
-  );
-  ctx.mod.removeFunction(tempName);
-  return fnType;
-};
+}): binaryen.Type =>
+  getFunctionRefType({ params, result, ctx, label: "gc_trampoline" });
 
 const findFunctionBySymbol = (
   symbol: SymbolId,
@@ -132,112 +116,16 @@ const collectFunctionLocalSymbols = (
   ctx: CodegenContext
 ): Set<SymbolId> => {
   const symbols = new Set<SymbolId>();
-  const visitPattern = (pattern: HirPattern): void => {
-    switch (pattern.kind) {
-      case "identifier":
-        symbols.add(pattern.symbol);
-        return;
-      case "destructure":
-        pattern.fields.forEach((field) => visitPattern(field.pattern));
-        if (pattern.spread) visitPattern(pattern.spread);
-        return;
-      case "tuple":
-        pattern.elements.forEach((element) => visitPattern(element));
-        return;
-      case "type":
-        if (pattern.binding) visitPattern(pattern.binding);
-        return;
-      case "wildcard":
-        return;
-    }
+
+  const visitor = {
+    onPattern: (pattern: HirPattern) => {
+      if (pattern.kind !== "identifier") return;
+      symbols.add(pattern.symbol);
+    },
   };
 
-  fn.parameters.forEach((param) => visitPattern(param.pattern));
-
-  const visitExpr = (exprId: HirExprId): void => {
-    const expr = ctx.hir.expressions.get(exprId);
-    if (!expr) return;
-    switch (expr.exprKind) {
-      case "block":
-        expr.statements.forEach((stmtId) => visitStmt(stmtId));
-        if (typeof expr.value === "number") visitExpr(expr.value);
-        return;
-      case "call":
-        visitExpr(expr.callee);
-        expr.args.forEach((arg) => visitExpr(arg.expr));
-        return;
-      case "tuple":
-        expr.elements.forEach((element) => visitExpr(element));
-        return;
-      case "loop":
-      case "while":
-        visitExpr(expr.body);
-        if (expr.exprKind === "while") {
-          visitExpr(expr.condition);
-        }
-        return;
-      case "if":
-      case "cond":
-        expr.branches.forEach((branch) => {
-          visitExpr(branch.condition);
-          visitExpr(branch.value);
-        });
-        if (typeof expr.defaultBranch === "number") {
-          visitExpr(expr.defaultBranch);
-        }
-        return;
-      case "match":
-        visitExpr(expr.discriminant);
-        expr.arms.forEach((arm) => {
-          if (typeof arm.guard === "number") visitExpr(arm.guard);
-          visitExpr(arm.value);
-        });
-        return;
-      case "object-literal":
-        expr.entries.forEach((entry) => visitExpr(entry.value));
-        return;
-      case "field-access":
-        visitExpr(expr.target);
-        return;
-      case "assign":
-        if (typeof expr.target === "number") visitExpr(expr.target);
-        visitExpr(expr.value);
-        if (expr.pattern) visitPattern(expr.pattern);
-        return;
-      case "effect-handler":
-        visitExpr(expr.body);
-        if (typeof expr.finallyBranch === "number") {
-          visitExpr(expr.finallyBranch);
-        }
-        return;
-      case "identifier":
-      case "literal":
-      case "lambda":
-      case "overload-set":
-      case "continue":
-      case "break":
-        return;
-    }
-  };
-
-  const visitStmt = (stmtId: HirStmtId): void => {
-    const stmt = ctx.hir.statements.get(stmtId);
-    if (!stmt) return;
-    switch (stmt.kind) {
-      case "let":
-        visitPattern(stmt.pattern);
-        visitExpr(stmt.initializer);
-        return;
-      case "expr-stmt":
-        visitExpr(stmt.expr);
-        return;
-      case "return":
-        if (typeof stmt.value === "number") visitExpr(stmt.value);
-        return;
-    }
-  };
-
-  visitExpr(fn.body);
+  fn.parameters.forEach((param) => walkHirPattern({ pattern: param.pattern, visitor }));
+  walkHirExpression({ exprId: fn.body, ctx, visitor, visitLambdaBodies: false });
   return symbols;
 };
 
@@ -249,110 +137,14 @@ const collectLambdaLocalSymbols = (
   expr.captures.forEach((capture) => symbols.add(capture.symbol));
   expr.parameters.forEach((param) => symbols.add(param.symbol));
 
-  const visitPattern = (pattern: HirPattern): void => {
-    switch (pattern.kind) {
-      case "identifier":
-        symbols.add(pattern.symbol);
-        return;
-      case "destructure":
-        pattern.fields.forEach((field) => visitPattern(field.pattern));
-        if (pattern.spread) visitPattern(pattern.spread);
-        return;
-      case "tuple":
-        pattern.elements.forEach((element) => visitPattern(element));
-        return;
-      case "type":
-        if (pattern.binding) visitPattern(pattern.binding);
-        return;
-      case "wildcard":
-        return;
-    }
+  const visitor = {
+    onPattern: (pattern: HirPattern) => {
+      if (pattern.kind !== "identifier") return;
+      symbols.add(pattern.symbol);
+    },
   };
 
-  const visitExpr = (exprId: HirExprId): void => {
-    const node = ctx.hir.expressions.get(exprId);
-    if (!node) return;
-    switch (node.exprKind) {
-      case "block":
-        node.statements.forEach((stmtId) => visitStmt(stmtId));
-        if (typeof node.value === "number") visitExpr(node.value);
-        return;
-      case "call":
-        visitExpr(node.callee);
-        node.args.forEach((arg) => visitExpr(arg.expr));
-        return;
-      case "tuple":
-        node.elements.forEach((element) => visitExpr(element));
-        return;
-      case "loop":
-      case "while":
-        visitExpr(node.body);
-        if (node.exprKind === "while") {
-          visitExpr(node.condition);
-        }
-        return;
-      case "if":
-      case "cond":
-        node.branches.forEach((branch) => {
-          visitExpr(branch.condition);
-          visitExpr(branch.value);
-        });
-        if (typeof node.defaultBranch === "number") {
-          visitExpr(node.defaultBranch);
-        }
-        return;
-      case "match":
-        visitExpr(node.discriminant);
-        node.arms.forEach((arm) => {
-          if (typeof arm.guard === "number") visitExpr(arm.guard);
-          visitExpr(arm.value);
-        });
-        return;
-      case "object-literal":
-        node.entries.forEach((entry) => visitExpr(entry.value));
-        return;
-      case "field-access":
-        visitExpr(node.target);
-        return;
-      case "assign":
-        if (typeof node.target === "number") visitExpr(node.target);
-        visitExpr(node.value);
-        if (node.pattern) visitPattern(node.pattern);
-        return;
-      case "effect-handler":
-        visitExpr(node.body);
-        if (typeof node.finallyBranch === "number") {
-          visitExpr(node.finallyBranch);
-        }
-        return;
-      case "identifier":
-      case "literal":
-      case "lambda":
-      case "overload-set":
-      case "continue":
-      case "break":
-        return;
-    }
-  };
-
-  const visitStmt = (stmtId: HirStmtId): void => {
-    const stmt = ctx.hir.statements.get(stmtId);
-    if (!stmt) return;
-    switch (stmt.kind) {
-      case "let":
-        visitPattern(stmt.pattern);
-        visitExpr(stmt.initializer);
-        return;
-      case "expr-stmt":
-        visitExpr(stmt.expr);
-        return;
-      case "return":
-        if (typeof stmt.value === "number") visitExpr(stmt.value);
-        return;
-    }
-  };
-
-  visitExpr(expr.body);
+  walkHirExpression({ exprId: expr.body, ctx, visitor, visitLambdaBodies: false });
   return symbols;
 };
 

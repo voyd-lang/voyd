@@ -122,7 +122,7 @@ export interface CodegenContext {
   structTypes: Map<string, StructuralTypeInfo>;
   fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
-  closureFunctionTypes: Map<string, binaryen.Type>;
+  functionRefTypes: Map<string, binaryen.Type>;
   lambdaEnvs: Map<
     string,
     {

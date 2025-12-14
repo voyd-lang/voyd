@@ -98,7 +98,7 @@ const buildCodegenProgram = (
     structTypes: new Map(),
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
-    closureFunctionTypes: new Map(),
+    functionRefTypes: new Map(),
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,

@@ -4,7 +4,6 @@ import type {
   FunctionContext,
   FunctionMetadata,
   HirFunction,
-  HirPattern,
   TypeId,
 } from "./context.js";
 import { compileExpression } from "./expressions/index.js";
@@ -29,124 +28,7 @@ import {
   ensureLinearMemory,
   ensureMsgPackImports,
 } from "./effects/host-boundary.js";
-
-const containsEffectHandlerFromPattern = (
-  pattern: HirPattern,
-  ctx: CodegenContext
-): boolean => {
-  switch (pattern.kind) {
-    case "identifier":
-    case "wildcard":
-      return false;
-    case "destructure":
-      return (
-        pattern.fields.some((field) =>
-          containsEffectHandlerFromPattern(field.pattern, ctx)
-        ) ||
-        (pattern.spread
-          ? containsEffectHandlerFromPattern(pattern.spread, ctx)
-          : false)
-      );
-    case "tuple":
-      return pattern.elements.some((element) =>
-        containsEffectHandlerFromPattern(element, ctx)
-      );
-    case "type":
-      return pattern.binding
-        ? containsEffectHandlerFromPattern(pattern.binding, ctx)
-        : false;
-  }
-};
-
-const containsEffectHandler = (
-  exprId: number,
-  ctx: CodegenContext
-): boolean => {
-  const expr = ctx.hir.expressions.get(exprId);
-  if (!expr) return false;
-  switch (expr.exprKind) {
-    case "effect-handler":
-      return true;
-    case "call":
-      return (
-        containsEffectHandler(expr.callee, ctx) ||
-        expr.args.some((arg) => containsEffectHandler(arg.expr, ctx))
-      );
-    case "block":
-      return (
-        expr.statements.some((stmtId) => {
-          const stmt = ctx.hir.statements.get(stmtId);
-          if (!stmt) return false;
-          if (stmt.kind === "let") {
-            return (
-              containsEffectHandler(stmt.initializer, ctx) ||
-              containsEffectHandlerFromPattern(stmt.pattern, ctx)
-            );
-          }
-          if (stmt.kind === "expr-stmt") {
-            return containsEffectHandler(stmt.expr, ctx);
-          }
-          if (stmt.kind === "return" && typeof stmt.value === "number") {
-            return containsEffectHandler(stmt.value, ctx);
-          }
-          return false;
-        }) ||
-        (typeof expr.value === "number" &&
-          containsEffectHandler(expr.value, ctx))
-      );
-    case "tuple":
-      return expr.elements.some((element) =>
-        containsEffectHandler(element, ctx)
-      );
-    case "loop":
-      return containsEffectHandler(expr.body, ctx);
-    case "while":
-      return (
-        containsEffectHandler(expr.condition, ctx) ||
-        containsEffectHandler(expr.body, ctx)
-      );
-    case "if":
-    case "cond":
-      return (
-        expr.branches.some(
-          (branch) =>
-            containsEffectHandler(branch.condition, ctx) ||
-            containsEffectHandler(branch.value, ctx)
-        ) ||
-        (typeof expr.defaultBranch === "number" &&
-          containsEffectHandler(expr.defaultBranch, ctx))
-      );
-    case "match":
-      return (
-        containsEffectHandler(expr.discriminant, ctx) ||
-        expr.arms.some(
-          (arm) =>
-            (typeof arm.guard === "number" &&
-              containsEffectHandler(arm.guard, ctx)) ||
-            containsEffectHandler(arm.value, ctx)
-        )
-      );
-    case "object-literal":
-      return expr.entries.some((entry) =>
-        containsEffectHandler(entry.value, ctx)
-      );
-    case "field-access":
-      return containsEffectHandler(expr.target, ctx);
-    case "assign":
-      return (
-        (typeof expr.target === "number" &&
-          containsEffectHandler(expr.target, ctx)) ||
-        containsEffectHandler(expr.value, ctx)
-      );
-    case "lambda":
-    case "identifier":
-    case "literal":
-    case "overload-set":
-    case "continue":
-    case "break":
-      return false;
-  }
-};
+import { exprContainsEffectHandler } from "./hir-walk.js";
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const unknown = ctx.typing.arena.internPrimitive("unknown");
@@ -527,7 +409,7 @@ const compileFunctionItem = (
   meta: FunctionMetadata,
   ctx: CodegenContext
 ): void => {
-  const hasHandlerExpr = containsEffectHandler(fn.body, ctx);
+  const hasHandlerExpr = exprContainsEffectHandler(fn.body, ctx);
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   if (!meta.effectful && hasHandlerExpr) {
     const implName = `${meta.wasmName}__effectful_impl`;

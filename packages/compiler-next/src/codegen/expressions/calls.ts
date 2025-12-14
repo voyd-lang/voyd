@@ -1,5 +1,4 @@
 import binaryen from "binaryen";
-import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import type {
   CodegenContext,
   CompiledExpression,
@@ -22,6 +21,7 @@ import {
   getClosureTypeInfo,
   getExprBinaryenType,
   getRequiredExprType,
+  getFunctionRefType,
   wasmTypeFor,
 } from "../types.js";
 import { allocateTempLocal } from "../locals.js";
@@ -34,9 +34,6 @@ import {
 import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
 import type { GroupContinuationCfg } from "../effects/continuation-cfg.js";
-
-const bin = binaryen as unknown as AugmentedBinaryen;
-let traitDispatchSigCounter = 0;
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsRuntime.handlerFrameType;
@@ -842,22 +839,7 @@ const functionRefType = ({
   result: binaryen.Type;
   ctx: CodegenContext;
 }): binaryen.Type => {
-  const tempName = `__trait_method_sig_${traitDispatchSigCounter++}_${
-    params.length
-  }`;
-  const temp = ctx.mod.addFunction(
-    tempName,
-    binaryen.createType(params as number[]),
-    result,
-    [],
-    ctx.mod.nop()
-  );
-  const fnType = bin._BinaryenTypeFromHeapType(
-    bin._BinaryenFunctionGetType(temp),
-    false
-  );
-  ctx.mod.removeFunction(tempName);
-  return fnType;
+  return getFunctionRefType({ params, result, ctx, label: "trait_method" });
 };
 
 const getFunctionMetadataForCall = ({
