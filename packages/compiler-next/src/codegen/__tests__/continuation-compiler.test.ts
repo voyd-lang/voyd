@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/parser.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
-import { runEffectfulExport } from "./support/effects-harness.js";
+import {
+  runEffectfulExport,
+  type EffectHandler,
+} from "./support/effects-harness.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -22,11 +25,12 @@ describe("continuation compiler", () => {
     if (process.env.DEBUG_EFFECTS_WAT === "1") {
       writeFileSync("debug-effects-continuation-compiler.wat", module.emitText());
     }
+    const handler: EffectHandler = (_request, ...args) => args[0] as number;
     const blockResult = await runEffectfulExport<number>({
       wasm: module,
       entryName: "block_test_effectful",
       handlers: {
-        "0:0:0": (_request, value: number) => value,
+        "0:0:0": handler,
       },
     });
     expect(blockResult.value).toBe(6);
@@ -35,7 +39,7 @@ describe("continuation compiler", () => {
       wasm: module,
       entryName: "while_test_effectful",
       handlers: {
-        "0:0:0": (_request, value: number) => value,
+        "0:0:0": handler,
       },
     });
     expect(whileResult.value).toBe(1);

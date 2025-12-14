@@ -201,8 +201,6 @@ const containsEffectHandler = ({
           (typeof expr.target === "number" && visit(expr.target)) ||
           visit(expr.value)
         );
-      case "effect-handler":
-        return false;
     }
   };
 

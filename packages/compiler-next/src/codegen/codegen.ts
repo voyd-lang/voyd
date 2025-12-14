@@ -66,9 +66,7 @@ export const codegenProgram = ({
       ...(options.continuationBackend ?? {}),
     },
   };
-  const wantsStackSwitching = mergedOptions.continuationBackend.stackSwitching === true;
-  const baseFeatures = binaryen.Features.All & ~binaryen.Features.StackSwitching;
-  mod.setFeatures(wantsStackSwitching ? binaryen.Features.All : baseFeatures);
+  mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, FunctionMetadata[]>();

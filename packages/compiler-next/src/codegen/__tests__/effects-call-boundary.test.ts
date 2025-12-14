@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/parser.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
-import { runEffectfulExport } from "./support/effects-harness.js";
+import {
+  runEffectfulExport,
+  type EffectHandler,
+} from "./support/effects-harness.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -20,8 +23,9 @@ describe("effects call boundary", () => {
     );
     const { module } = codegen(semantics);
 
-    const handlers = {
-      "0:0:0": (_request: unknown, value: number) => value,
+    const handler: EffectHandler = (_request, ...args) => args[0] as number;
+    const handlers: Record<string, EffectHandler> = {
+      "0:0:0": handler,
     };
 
     const outer = await runEffectfulExport<number>({
@@ -46,4 +50,3 @@ describe("effects call boundary", () => {
     expect(nested.value).toBe(18);
   });
 });
-

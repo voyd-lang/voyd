@@ -16,6 +16,8 @@ import type {
   HirCallExpr,
   HirTypeExpr,
   HirLambdaExpr,
+  HirCondExpr,
+  HirEffectHandlerExpr,
 } from "../semantics/hir/index.js";
 import type {
   HirExprId,
@@ -236,11 +238,13 @@ export type {
   HirIfExpr,
   HirMatchExpr,
   HirWhileExpr,
+  HirCondExpr,
   HirAssignExpr,
   HirObjectLiteralExpr,
   HirFieldAccessExpr,
   HirCallExpr,
   HirTypeExpr,
+  HirEffectHandlerExpr,
   SymbolTable,
   HirExprId,
   HirItemId,

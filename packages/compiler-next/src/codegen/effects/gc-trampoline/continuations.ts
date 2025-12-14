@@ -8,7 +8,10 @@ import type {
   TypeId,
 } from "../../context.js";
 import type { HirFunction, HirLambdaExpr, HirPattern } from "../../../semantics/hir/index.js";
-import type { ContinuationSite } from "../effect-lowering.js";
+import type {
+  ContinuationSite,
+  ContinuationSiteOwner,
+} from "../effect-lowering.js";
 import {
   refCast,
   structGetFieldValue,
@@ -88,12 +91,22 @@ const collectLambdaLocalSymbols = (expr: HirLambdaExpr, ctx: CodegenContext): Se
   return symbols;
 };
 
+const isFunctionOwner = (
+  owner: ContinuationSiteOwner
+): owner is { kind: "function"; symbol: SymbolId } => owner.kind === "function";
+
 const sameContinuationOwner = (
-  a: ContinuationSite["owner"],
-  b: ContinuationSite["owner"]
+  a: ContinuationSiteOwner,
+  b: ContinuationSiteOwner
 ): boolean => {
   if (a.kind !== b.kind) return false;
-  return a.kind === "function" ? a.symbol === b.symbol : a.exprId === b.exprId;
+  if (isFunctionOwner(a) && isFunctionOwner(b)) {
+    return a.symbol === b.symbol;
+  }
+  if (!isFunctionOwner(a) && !isFunctionOwner(b)) {
+    return a.exprId === b.exprId;
+  }
+  return false;
 };
 
 export const ensureContinuationFunction = ({
@@ -320,4 +333,3 @@ export const ensureContinuationFunction = ({
   built.add(contName);
   return contRefType;
 };
-
