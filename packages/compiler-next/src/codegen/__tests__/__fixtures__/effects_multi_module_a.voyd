@@ -1,0 +1,6 @@
+eff Alpha
+  ping(resume, value: i32) -> i32
+
+pub fn main(): Alpha -> i32
+  Alpha::ping(1) + 1
+

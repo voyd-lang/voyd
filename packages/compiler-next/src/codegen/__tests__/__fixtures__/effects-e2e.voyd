@@ -44,3 +44,14 @@ pub fn perform_in_try(): () -> i32
     tail(5)
   Async::log(resume, msg):
     resume(msg)
+
+pub fn lambda_perform(): () -> i32
+  try
+    let f = () -> i32 =>
+      let value = Async::await()
+      value + 4
+    f() + 1
+  Async::await(tail):
+    tail(20)
+  Async::log(resume, msg):
+    resume(msg)

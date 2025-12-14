@@ -109,6 +109,7 @@ export interface CodegenContext {
   mod: binaryen.Module;
   moduleId: string;
   moduleLabel: string;
+  effectIdOffset: number;
   binding: BindingResult;
   symbolTable: SymbolTable;
   hir: HirGraph;

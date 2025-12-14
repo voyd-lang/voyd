@@ -74,6 +74,7 @@ export const codegenProgram = ({
     mod,
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
+    effectIdOffset: 0,
     binding: sem.binding,
     symbolTable: sem.symbolTable,
     hir: sem.hir,
@@ -99,6 +100,12 @@ export const codegenProgram = ({
     effectLowering: { sitesByExpr: new Map(), sites: [], argsTypes: new Map() },
     outcomeValueTypes,
   }));
+
+  let effectIdOffset = 0;
+  contexts.forEach((ctx) => {
+    ctx.effectIdOffset = effectIdOffset;
+    effectIdOffset += ctx.binding.effects.length;
+  });
 
   const siteCounter = { current: 0 };
   contexts.forEach((ctx) => {

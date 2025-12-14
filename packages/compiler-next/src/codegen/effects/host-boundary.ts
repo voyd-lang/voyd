@@ -125,7 +125,8 @@ export const collectEffectOperationSignatures = (
 ): EffectOpSignature[] =>
   stateFor(ctx, "__voyd_effect_op_sigs__", () => {
     const signatures: EffectOpSignature[] = [];
-    ctx.binding.effects.forEach((effect, effectId) => {
+    ctx.binding.effects.forEach((effect, localEffectId) => {
+      const effectId = ctx.effectIdOffset + localEffectId;
       effect.operations.forEach((op, opId) => {
         const signature = ctx.typing.functions.getSignature(op.symbol);
         if (!signature) {

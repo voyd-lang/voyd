@@ -7,6 +7,7 @@ import type {
   CodegenContext,
   HirExprId,
   HirFunction,
+  HirLambdaExpr,
   HirPattern,
   HirStmtId,
   SymbolId,
@@ -34,7 +35,7 @@ export interface ContinuationSiteBase {
   exprId: HirExprId;
   siteId: number;
   siteOrder: number;
-  functionSymbol: SymbolId;
+  owner: ContinuationSiteOwner;
   contFnName: string;
   contRefType?: binaryen.Type;
   baseEnvType: binaryen.Type;
@@ -65,6 +66,10 @@ export interface EffectLoweringResult {
   argsTypes: Map<SymbolId, binaryen.Type>;
 }
 
+export type ContinuationSiteOwner =
+  | { kind: "function"; symbol: SymbolId }
+  | { kind: "lambda"; exprId: HirExprId };
+
 type SiteCounter = { current: number };
 
 interface SiteDraft {
@@ -89,20 +94,173 @@ export const effectOpIds = (
   resumeKind: ResumeKind;
   effectSymbol: SymbolId;
 } => {
-  for (let effectId = 0; effectId < ctx.binding.effects.length; effectId += 1) {
-    const effect = ctx.binding.effects[effectId]!;
+  for (
+    let localEffectId = 0;
+    localEffectId < ctx.binding.effects.length;
+    localEffectId += 1
+  ) {
+    const effect = ctx.binding.effects[localEffectId]!;
     const opIndex = effect.operations.findIndex((op) => op.symbol === symbol);
     if (opIndex < 0) continue;
     const op = effect.operations[opIndex]!;
     const resumeKind =
       op.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
-    return { effectId, opId: opIndex, resumeKind, effectSymbol: effect.symbol };
+    return {
+      effectId: ctx.effectIdOffset + localEffectId,
+      opId: opIndex,
+      resumeKind,
+      effectSymbol: effect.symbol,
+    };
   }
   throw new Error(`codegen missing effect metadata for op ${symbol}`);
 };
 
 const sanitize = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const shouldLowerLambda = (expr: HirLambdaExpr, ctx: CodegenContext): boolean => {
+  const typeId =
+    ctx.typing.resolvedExprTypes.get(expr.id) ??
+    ctx.typing.table.getExprType(expr.id) ??
+    ctx.typing.primitives.unknown;
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind !== "function") return false;
+  const effectful =
+    typeof desc.effectRow === "number" && !ctx.typing.effects.isEmpty(desc.effectRow);
+  if (effectful) return true;
+  return functionContainsEffectHandlers(expr.body, ctx);
+};
+
+const lambdaParamSymbolSet = (expr: HirLambdaExpr): ReadonlySet<SymbolId> =>
+  new Set(expr.parameters.map((param) => param.symbol));
+
+const definitionOrderForLambda = (
+  expr: HirLambdaExpr,
+  ctx: CodegenContext
+): Map<SymbolId, number> => {
+  const order = new Map<SymbolId, number>();
+  let index = 0;
+
+  expr.parameters.forEach((param) => {
+    order.set(param.symbol, index);
+    index += 1;
+  });
+
+  const visitPattern = (pattern: HirPattern): void => {
+    switch (pattern.kind) {
+      case "identifier":
+        order.set(pattern.symbol, index);
+        index += 1;
+        return;
+      case "destructure":
+        pattern.fields.forEach((field) => visitPattern(field.pattern));
+        if (pattern.spread) visitPattern(pattern.spread);
+        return;
+      case "tuple":
+        pattern.elements.forEach((element) => visitPattern(element));
+        return;
+      case "type":
+        if (pattern.binding) visitPattern(pattern.binding);
+        return;
+      case "wildcard":
+        return;
+    }
+  };
+
+  const walkExpr = (exprId: HirExprId): void => {
+    const expr = ctx.hir.expressions.get(exprId);
+    if (!expr) return;
+    switch (expr.exprKind) {
+      case "block":
+        expr.statements.forEach((stmtId) => visitStmt(stmtId));
+        if (typeof expr.value === "number") walkExpr(expr.value);
+        return;
+      case "call":
+        walkExpr(expr.callee);
+        expr.args.forEach((arg) => walkExpr(arg.expr));
+        return;
+      case "tuple":
+        expr.elements.forEach((element) => walkExpr(element));
+        return;
+      case "loop":
+      case "while":
+        walkExpr(expr.body);
+        if (expr.exprKind === "while") {
+          walkExpr(expr.condition);
+        }
+        return;
+      case "cond":
+      case "if":
+        expr.branches.forEach((branch) => {
+          walkExpr(branch.condition);
+          walkExpr(branch.value);
+        });
+        if (typeof expr.defaultBranch === "number") {
+          walkExpr(expr.defaultBranch);
+        }
+        return;
+      case "match":
+        walkExpr(expr.discriminant);
+        expr.arms.forEach((arm) => {
+          if (typeof arm.guard === "number") {
+            walkExpr(arm.guard);
+          }
+          walkExpr(arm.value);
+        });
+        return;
+      case "object-literal":
+        expr.entries.forEach((entry) => walkExpr(entry.value));
+        return;
+      case "field-access":
+        walkExpr(expr.target);
+        return;
+      case "assign":
+        if (typeof expr.target === "number") {
+          walkExpr(expr.target);
+        }
+        walkExpr(expr.value);
+        if (expr.pattern) {
+          visitPattern(expr.pattern);
+        }
+        return;
+      case "identifier":
+      case "literal":
+      case "lambda":
+      case "overload-set":
+      case "continue":
+      case "break":
+        return;
+      case "effect-handler":
+        walkExpr(expr.body);
+        if (typeof expr.finallyBranch === "number") {
+          walkExpr(expr.finallyBranch);
+        }
+        return;
+    }
+  };
+
+  const visitStmt = (stmtId: HirStmtId): void => {
+    const stmt = ctx.hir.statements.get(stmtId);
+    if (!stmt) return;
+    switch (stmt.kind) {
+      case "let":
+        visitPattern(stmt.pattern);
+        walkExpr(stmt.initializer);
+        return;
+      case "expr-stmt":
+        walkExpr(stmt.expr);
+        return;
+      case "return":
+        if (typeof stmt.value === "number") {
+          walkExpr(stmt.value);
+        }
+        return;
+    }
+  };
+
+  walkExpr(expr.body);
+  return order;
+};
 
 const functionContainsEffectHandlers = (
   exprId: HirExprId,
@@ -858,14 +1016,14 @@ export const buildEffectLowering = ({
             })()
           : undefined;
 
-      const lowered: ContinuationSite =
-        site.kind === "perform" && performMeta
+    const lowered: ContinuationSite =
+      site.kind === "perform" && performMeta
           ? {
               kind: "perform",
               exprId: site.exprId,
               siteId: siteCounter.current,
               siteOrder: siteCounter.current,
-              functionSymbol: item.symbol,
+              owner: { kind: "function", symbol: item.symbol },
               effectSymbol: performMeta.effectSymbol,
               effectId: performMeta.effectId,
               opId: performMeta.opId,
@@ -883,7 +1041,7 @@ export const buildEffectLowering = ({
               exprId: site.exprId,
               siteId: siteCounter.current,
               siteOrder: siteCounter.current,
-              functionSymbol: item.symbol,
+              owner: { kind: "function", symbol: item.symbol },
               contFnName,
               baseEnvType,
               envType,
@@ -891,6 +1049,139 @@ export const buildEffectLowering = ({
               handlerAtSite: true,
               resumeValueTypeId,
             };
+      siteCounter.current += 1;
+      sites.push(lowered);
+      sitesByExpr.set(site.exprId, lowered);
+    });
+  });
+
+  ctx.hir.expressions.forEach((expr) => {
+    if (expr.exprKind !== "lambda") return;
+    if (!shouldLowerLambda(expr, ctx)) return;
+
+    const order = definitionOrderForLambda(expr, ctx);
+    const params = lambdaParamSymbolSet(expr);
+    const fnName = `lambda_${expr.id}`;
+    const contFnName = `__cont_${sanitize(ctx.moduleLabel)}_${fnName}_${expr.id}`;
+
+    const analysis = analyzeExpr({
+      exprId: expr.body,
+      liveAfter: new Set(),
+      ctx,
+    });
+
+    analysis.sites.forEach((site) => {
+      const resumeValueTypeId =
+        site.kind === "perform"
+          ? (() => {
+              if (typeof site.effectSymbol !== "number") {
+                throw new Error("perform site missing effect op symbol");
+              }
+              const signature = ctx.typing.functions.getSignature(
+                site.effectSymbol
+              );
+              return signature?.returnType ?? ctx.typing.primitives.unknown;
+            })()
+          : (ctx.typing.resolvedExprTypes.get(site.exprId) ??
+              ctx.typing.table.getExprType(site.exprId) ??
+              ctx.typing.primitives.unknown);
+
+      const capturedFields = envFieldsFor({
+        liveSymbols: site.liveAfter,
+        params,
+        ordering: order,
+        ctx,
+      });
+
+      const envFields: ContinuationEnvField[] = [
+        {
+          name: "site",
+          typeId: ctx.typing.primitives.i32,
+          wasmType: binaryen.i32,
+          sourceKind: "site",
+        },
+        {
+          name: "handler",
+          wasmType: ctx.effectsRuntime.handlerFrameType,
+          typeId: ctx.typing.primitives.unknown,
+          sourceKind: "handler",
+        } as const,
+        ...capturedFields,
+      ];
+
+      const envType = defineStructType(ctx.mod, {
+        name: `voydContEnv_${sanitize(ctx.moduleLabel)}_${fnName}_${siteCounter.current}`,
+        fields: envFields.map((field) => ({
+          name: field.name,
+          type: field.wasmType,
+          mutable: false,
+        })),
+        supertype: baseHeapType,
+        final: true,
+      });
+
+      const performMeta =
+        site.kind === "perform"
+          ? (() => {
+              if (typeof site.effectSymbol !== "number") {
+                throw new Error("perform site missing effect op symbol");
+              }
+              const { effectId, opId, resumeKind, effectSymbol } = effectOpIds(
+                site.effectSymbol,
+                ctx
+              );
+              const signature = ctx.typing.functions.getSignature(
+                site.effectSymbol
+              );
+              const argsType =
+                signature &&
+                ensureArgsType({
+                  opSymbol: site.effectSymbol,
+                  paramTypes: signature.parameters.map((param) => param.type),
+                  ctx,
+                  cache: argsTypeCache,
+                });
+              if (argsType) {
+                argsTypes.set(site.effectSymbol, argsType);
+              }
+              return { effectId, opId, resumeKind, effectSymbol, argsType };
+            })()
+          : undefined;
+
+      const lowered: ContinuationSite =
+        site.kind === "perform" && performMeta
+          ? {
+              kind: "perform",
+              exprId: site.exprId,
+              siteId: siteCounter.current,
+              siteOrder: siteCounter.current,
+              owner: { kind: "lambda", exprId: expr.id },
+              effectSymbol: performMeta.effectSymbol,
+              effectId: performMeta.effectId,
+              opId: performMeta.opId,
+              resumeKind: performMeta.resumeKind,
+              contFnName,
+              baseEnvType,
+              envType,
+              envFields,
+              handlerAtSite: true,
+              resumeValueTypeId,
+              argsType: performMeta.argsType,
+            }
+          : {
+              kind: "call",
+              exprId: site.exprId,
+              siteId: siteCounter.current,
+              siteOrder: siteCounter.current,
+              owner: { kind: "lambda", exprId: expr.id },
+              contFnName,
+              baseEnvType,
+              envType,
+              envFields,
+              handlerAtSite: true,
+              resumeValueTypeId,
+            };
+
       siteCounter.current += 1;
       sites.push(lowered);
       sitesByExpr.set(site.exprId, lowered);

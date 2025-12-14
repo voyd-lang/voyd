@@ -44,6 +44,7 @@ const createContext = () => {
     mod,
     moduleId: "test",
     moduleLabel: "test",
+    effectIdOffset: 0,
     binding: {} as any,
     symbolTable: {} as any,
     hir: { expressions } as any,

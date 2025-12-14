@@ -1,17 +1,18 @@
+import type binaryen from "binaryen";
 import type {
   CodegenContext,
   CompiledExpression,
+  ContinuationBinding,
   ExpressionCompiler,
   FunctionContext,
   HirCallExpr,
+  HirExprId,
   HirEffectHandlerExpr,
   SymbolId,
   TypeId,
 } from "../context.js";
 import type { EffectLoweringResult } from "./effect-lowering.js";
-import { buildEffectLowering } from "./effect-lowering.js";
-import { compileEffectOpCall } from "../expressions/calls.js";
-import { compileEffectHandlerExpr } from "../expressions/effect-handler.js";
+import { createGcTrampolineBackend } from "./gc-trampoline-backend.js";
 
 export type EffectsBackendKind = "gc-trampoline" | "stack-switch";
 
@@ -21,6 +22,25 @@ export interface EffectsBackend {
     ctx: CodegenContext;
     siteCounter: { current: number };
   }) => EffectLoweringResult;
+  lowerEffectfulCallResult: (params: {
+    callExpr: binaryen.ExpressionRef;
+    callId: HirExprId;
+    returnTypeId: TypeId;
+    expectedResultTypeId?: TypeId;
+    tailPosition: boolean;
+    typeInstanceKey?: string;
+    ctx: CodegenContext;
+    fnCtx: FunctionContext;
+  }) => CompiledExpression;
+  compileContinuationCall: (params: {
+    expr: HirCallExpr;
+    continuation: ContinuationBinding;
+    ctx: CodegenContext;
+    fnCtx: FunctionContext;
+    compileExpr: ExpressionCompiler;
+    expectedResultTypeId?: TypeId;
+    tailPosition: boolean;
+  }) => CompiledExpression;
   compileEffectOpCall: (params: {
     expr: HirCallExpr;
     calleeSymbol: SymbolId;
@@ -38,32 +58,11 @@ export interface EffectsBackend {
   }) => CompiledExpression;
 }
 
-const createGcTrampolineBackend = (): EffectsBackend => ({
-  kind: "gc-trampoline",
-  buildLowering: ({ ctx, siteCounter }) =>
-    buildEffectLowering({ ctx, siteCounter }),
-  compileEffectOpCall: (params) => compileEffectOpCall(params),
-  compileEffectHandlerExpr: ({
-    expr,
-    ctx,
-    fnCtx,
-    compileExpr,
-    tailPosition,
-    expectedResultTypeId,
-  }) =>
-    compileEffectHandlerExpr(
-      expr,
-      ctx,
-      fnCtx,
-      compileExpr,
-      tailPosition,
-      expectedResultTypeId
-    ),
-});
-
 const createStackSwitchBackend = (fallback: EffectsBackend): EffectsBackend => ({
   kind: "stack-switch",
   buildLowering: fallback.buildLowering,
+  lowerEffectfulCallResult: fallback.lowerEffectfulCallResult,
+  compileContinuationCall: fallback.compileContinuationCall,
   compileEffectOpCall: fallback.compileEffectOpCall,
   compileEffectHandlerExpr: fallback.compileEffectHandlerExpr,
 });
@@ -76,4 +75,3 @@ export const selectEffectsBackend = (ctx: CodegenContext): EffectsBackend => {
   }
   return fallback;
 };
-

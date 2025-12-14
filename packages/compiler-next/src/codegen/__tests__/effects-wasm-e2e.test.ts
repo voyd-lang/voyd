@@ -63,4 +63,15 @@ describe("effects wasm e2e", () => {
     const target = instance.exports.perform_in_try as CallableFunction;
     expect(target()).toBe(15);
   });
+
+  it("supports effects inside lambdas", () => {
+    const { module } = buildModule();
+    const wasmBinary = new Uint8Array(module.emitBinary());
+    const instance = new WebAssembly.Instance(
+      new WebAssembly.Module(wasmBinary),
+      {}
+    );
+    const target = instance.exports.lambda_perform as CallableFunction;
+    expect(target()).toBe(25);
+  });
 });
