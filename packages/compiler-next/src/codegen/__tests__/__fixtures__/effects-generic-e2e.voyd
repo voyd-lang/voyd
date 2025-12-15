@@ -1,0 +1,20 @@
+fn add(a: i32, b: i32) -> i32
+  a + b
+
+fn add(a: f64, b: f64) -> f64
+  a + b
+
+eff Async<T>
+  await(tail) -> T
+
+pub fn test1() -> i32
+  try
+    add(Async::await(), Async::await())
+  Async::await(tail):
+    tail(10)
+
+pub fn test2() -> f64
+  try
+    add(Async::await(), Async::await())
+  Async::await(tail):
+    tail(2.0)

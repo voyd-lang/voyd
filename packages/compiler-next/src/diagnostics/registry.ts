@@ -97,6 +97,7 @@ type DiagnosticParamsMap = {
   TY0015: { kind: "tail-resume-count"; operation: string; count: number };
   TY0016: { kind: "pkg-effect-annotation"; functionName: string };
   TY0017: { kind: "effectful-main"; effects: string };
+  TY0018: { kind: "effect-generic-mismatch"; operation: string; message: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -320,6 +321,13 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0017"]>,
+  TY0018: {
+    code: "TY0018",
+    message: (params) =>
+      `effect generic mismatch for ${params.operation}: ${params.message}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0018"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

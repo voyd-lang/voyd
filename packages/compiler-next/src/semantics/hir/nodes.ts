@@ -371,6 +371,7 @@ export interface HirEffectOperation {
 export interface HirEffectDecl extends HirItemBase {
   kind: "effect";
   symbol: SymbolId;
+  typeParameters?: readonly HirTypeParameter[];
   operations: readonly HirEffectOperation[];
 }
 

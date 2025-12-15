@@ -53,18 +53,20 @@ const resumeValueTypeIdForSite = ({
   site: { kind: "perform" | "call"; exprId: HirExprId; effectSymbol?: SymbolId };
   ctx: CodegenContext;
 }): TypeId => {
+  const exprType =
+    ctx.typing.resolvedExprTypes.get(site.exprId) ??
+    ctx.typing.table.getExprType(site.exprId);
   if (site.kind === "perform") {
     if (typeof site.effectSymbol !== "number") {
       throw new Error("perform site missing effect op symbol");
     }
+    if (typeof exprType === "number") {
+      return exprType;
+    }
     const signature = ctx.typing.functions.getSignature(site.effectSymbol);
     return signature?.returnType ?? ctx.typing.primitives.unknown;
   }
-  return (
-    ctx.typing.resolvedExprTypes.get(site.exprId) ??
-    ctx.typing.table.getExprType(site.exprId) ??
-    ctx.typing.primitives.unknown
-  );
+  return exprType ?? ctx.typing.primitives.unknown;
 };
 
 const baseEnvFields = (ctx: CodegenContext): ContinuationEnvField[] => [

@@ -3,6 +3,7 @@ import { toSourceSpan } from "../../utils.js";
 import type { BindingContext } from "../types.js";
 import type { ParsedEffectDecl, ParsedEffectOperation } from "../parsing.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
+import type { TypeParameterDecl } from "../../decls.js";
 
 const declareEffectOperationParams = ({
   op,
@@ -43,6 +44,7 @@ export const bindEffectDecl = (
   tracker: BinderScopeTracker
 ): void => {
   rememberSyntax(decl.form, ctx);
+  rememberSyntax(decl.name, ctx);
   const effectSymbol = ctx.symbolTable.declare(
     {
       name: decl.name.value,
@@ -53,10 +55,30 @@ export const bindEffectDecl = (
     tracker.current()
   );
 
+  const effectScope = ctx.symbolTable.createScope({
+    parent: tracker.current(),
+    kind: "module",
+    owner: decl.form.syntaxId,
+  });
+  ctx.scopeByNode.set(decl.form.syntaxId, effectScope);
+
+  const typeParameters: TypeParameterDecl[] = [];
+  tracker.enterScope(effectScope, () => {
+    decl.typeParameters.forEach((param) => {
+      rememberSyntax(param, ctx);
+      const symbol = ctx.symbolTable.declare({
+        name: param.value,
+        kind: "type-parameter",
+        declaredAt: param.syntaxId,
+      });
+      typeParameters.push({ name: param.value, symbol, ast: param });
+    });
+  });
+
   const operations = decl.operations.map((op) => {
     rememberSyntax(op.form, ctx);
     const scope = ctx.symbolTable.createScope({
-      parent: tracker.current(),
+      parent: effectScope,
       kind: "function",
       owner: op.form.syntaxId,
     });
@@ -66,7 +88,7 @@ export const bindEffectDecl = (
         name: op.name.value,
         kind: "effect-op",
         declaredAt: op.form.syntaxId,
-        metadata: { ownerEffect: effectSymbol },
+        metadata: { ownerEffect: effectSymbol, intrinsic: true },
       },
       tracker.current()
     );
@@ -99,8 +121,9 @@ export const bindEffectDecl = (
     form: decl.form,
     visibility: decl.visibility,
     symbol: effectSymbol,
+    typeParameters,
     operations,
     moduleIndex: ctx.nextModuleIndex++,
-    scope: tracker.current(),
+    scope: effectScope,
   });
 };

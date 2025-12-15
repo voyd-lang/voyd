@@ -511,6 +511,7 @@ const validateItemTypeExprs = (
       });
       return;
     case "effect":
+      visitTypeParameters(item.typeParameters, validateType);
       item.operations.forEach((op) => {
         op.parameters.forEach((param) =>
           visitTypeExpr(

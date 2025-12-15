@@ -266,6 +266,7 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
 
   const effectfulExports: { meta: FunctionMetadata; exportName: string }[] = [];
   let effectfulValueType: binaryen.Type | undefined;
+  let effectfulHostExportsEnabled = true;
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
 
   const emitEffectfulWasmExportWrapper = ({
@@ -316,6 +317,9 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
     if (meta.effectful) {
       emitEffectfulWasmExportWrapper({ meta, exportName });
 
+      if (!effectfulHostExportsEnabled) {
+        return;
+      }
       if (meta.paramTypes.length > 1) {
         return;
       }
@@ -323,9 +327,10 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
       if (!effectfulValueType) {
         effectfulValueType = valueType;
       } else if (effectfulValueType !== valueType) {
-        throw new Error(
-          "effectful exports with differing return types are not supported"
-        );
+        effectfulHostExportsEnabled = false;
+        effectfulValueType = undefined;
+        effectfulExports.length = 0;
+        return;
       }
       effectfulExports.push({ meta, exportName });
       return;
