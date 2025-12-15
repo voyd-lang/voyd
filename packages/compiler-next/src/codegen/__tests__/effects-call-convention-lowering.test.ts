@@ -10,9 +10,9 @@ import type { EffectRowId } from "../../semantics/ids.js";
 const fixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
-  "effects-call.voyd"
+  "effects-call-convention.voyd"
 );
-const fixtureVirtualPath = "/proj/src/effects-call.voyd";
+const fixtureVirtualPath = "/proj/src/effects-call-convention.voyd";
 
 const setEffectRowFor = ({
   semantics,
@@ -81,7 +81,7 @@ const loadModuleText = (): string => {
   return module.emitText();
 };
 
-describe("effectful call lowering", () => {
+describe("effectful call convention lowering", () => {
   it("widens effectful functions with handler params and $Outcome results", () => {
     const text = loadModuleText();
     expect(text).toMatch(

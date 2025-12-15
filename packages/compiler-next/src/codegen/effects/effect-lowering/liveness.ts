@@ -226,13 +226,16 @@ const computeLiveness = ({
     const oldIn = liveInById.get(nodeId) ?? new Set();
     const oldOut = liveOutById.get(nodeId) ?? new Set();
 
-    const out = union(
+    const out = union<SymbolId>(
       ...node.succ
         .filter((succId) => reachable.has(succId))
-        .map((succId) => liveInById.get(succId) ?? new Set())
+        .map((succId) => liveInById.get(succId) ?? new Set<SymbolId>())
     );
 
-    const inSet = union(node.uses, new Set([...out].filter((sym) => !node.defs.has(sym))));
+    const inSet = union<SymbolId>(
+      node.uses,
+      new Set<SymbolId>([...out].filter((sym) => !node.defs.has(sym)))
+    );
 
     const changed = !setsEqual(oldIn, inSet) || !setsEqual(oldOut, out);
     if (!changed) continue;

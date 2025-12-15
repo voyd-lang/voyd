@@ -12,6 +12,7 @@ import type {
   ContinuationSite,
   ContinuationSiteOwner,
 } from "../effect-lowering.js";
+import type { ResumeKind } from "../runtime-abi.js";
 import {
   refCast,
   structGetFieldValue,
@@ -169,7 +170,7 @@ const findHandlerClauseByOwner = ({
   bodyExprId: HirExprId;
   returnTypeId: TypeId;
   resumeSymbol?: SymbolId;
-  resumeKind: number;
+  resumeKind: ResumeKind;
 } => {
   const handler = ctx.hir.expressions.get(handlerExprId);
   if (!handler || handler.exprKind !== "effect-handler") {
@@ -334,7 +335,7 @@ export const ensureContinuationFunction = ({
   fnCtx.continuation = { cfg, startedLocal, activeSiteLocal };
 
   if (site.owner.kind === "handler-clause" && typeof resumeSymbol === "number") {
-    if (typeof resumeKind !== "number") {
+    if (resumeKind === undefined) {
       throw new Error("missing handler clause resume kind for continuation function");
     }
     const continuationLocal = fnCtx.tempLocals.get(

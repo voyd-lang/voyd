@@ -6,9 +6,6 @@ import type {
   ExpressionCompiler,
   FunctionContext,
   HirIfExpr,
-  HirBreakExpr,
-  HirContinueExpr,
-  HirLoopExpr,
   HirMatchExpr,
   HirPattern,
   HirWhileExpr,
@@ -24,6 +21,11 @@ import {
   getStructuralTypeInfo,
   getMatchPatternTypeId,
 } from "../types.js";
+import type {
+  HirBreakExpr,
+  HirContinueExpr,
+  HirLoopExpr,
+} from "../../semantics/hir/index.js";
 
 const getNominalComponentFromTypingResult = (
   type: TypeId,

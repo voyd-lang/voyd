@@ -317,8 +317,9 @@ export const createContinuationExpressionCompiler = ({
 
     const resumeTarget =
       resumeActive && exprContainsTarget(exprId, targetExprId, ctx) ? targetExprId : undefined;
+    const exprKind = expr.exprKind;
 
-    switch (expr.exprKind) {
+    switch (exprKind) {
       case "literal":
         return compileLiteralExpr(expr, ctx);
       case "identifier":
@@ -395,7 +396,7 @@ export const createContinuationExpressionCompiler = ({
           expectedResultTypeId,
         });
       default:
-        throw new Error(`codegen does not support ${expr.exprKind} expressions yet`);
+        throw new Error(`codegen does not support ${exprKind} expressions yet`);
     }
   };
 
