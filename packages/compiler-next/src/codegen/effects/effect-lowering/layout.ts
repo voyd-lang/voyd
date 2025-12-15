@@ -125,6 +125,7 @@ export const envFieldsFor = ({
   ctx: CodegenContext;
 }): ContinuationEnvField[] =>
   Array.from(liveSymbols)
+    .filter((symbol) => params.has(symbol) || ordering.has(symbol))
     .sort((a, b) => (ordering.get(a) ?? 0) - (ordering.get(b) ?? 0))
     .map((symbol) => {
       const typeId = ctx.typing.valueTypes.get(symbol) ?? ctx.typing.primitives.unknown;
@@ -166,4 +167,3 @@ export const ensureArgsType = ({
   cache.set(opSymbol, type);
   return type;
 };
-

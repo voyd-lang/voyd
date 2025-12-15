@@ -29,7 +29,68 @@ export type LiveResult = {
   sites: SiteDraft[];
 };
 
-const cloneLive = (set: ReadonlySet<SymbolId>): Set<SymbolId> => new Set(set);
+type NodeId = number;
+
+type SiteBase = Omit<SiteDraft, "liveAfter">;
+
+interface CfgNode {
+  id: NodeId;
+  uses: ReadonlySet<SymbolId>;
+  defs: ReadonlySet<SymbolId>;
+  succ: NodeId[];
+  site?: SiteBase;
+  tempCaptures?: TempCaptureDraft[];
+}
+
+interface Subgraph {
+  entry: NodeId;
+  exits: NodeId[];
+  siteNodes: NodeId[];
+}
+
+interface FlowTargets {
+  breakTarget?: NodeId;
+  continueTarget?: NodeId;
+  returnTarget: NodeId;
+}
+
+export const analyzeExpr = ({
+  exprId,
+  liveAfter,
+  ctx,
+}: {
+  exprId: HirExprId;
+  liveAfter: ReadonlySet<SymbolId>;
+  ctx: CodegenContext;
+}): LiveResult => {
+  const { nodes, entry, siteNodeIds } = buildCfg({
+    exprId,
+    liveAfter,
+    ctx,
+  });
+  const reachable = computeReachable({ nodes, entry });
+  const { liveInById, liveOutById } = computeLiveness({ nodes, reachable });
+
+  const sites = siteNodeIds
+    .filter((nodeId) => reachable.has(nodeId))
+    .map((nodeId) => {
+      const node = nodes[nodeId]!;
+      const site = node.site;
+      if (!site) {
+        throw new Error("expected site metadata on site node");
+      }
+      return {
+        ...site,
+        liveAfter: new Set(liveOutById.get(nodeId) ?? []),
+        tempCaptures: node.tempCaptures ? [...node.tempCaptures] : undefined,
+      };
+    });
+
+  return {
+    live: new Set(liveInById.get(entry) ?? []),
+    sites,
+  };
+};
 
 const setsEqual = <T>(a: ReadonlySet<T>, b: ReadonlySet<T>): boolean => {
   if (a.size !== b.size) return false;
@@ -39,16 +100,15 @@ const setsEqual = <T>(a: ReadonlySet<T>, b: ReadonlySet<T>): boolean => {
   return true;
 };
 
-const mergeLive = (...sets: ReadonlySet<SymbolId>[]): Set<SymbolId> => {
-  const merged = new Set<SymbolId>();
-  sets.forEach((entry) => entry.forEach((symbol) => merged.add(symbol)));
-  return merged;
+const unionInto = <T>(into: Set<T>, from: ReadonlySet<T>): void => {
+  from.forEach((value) => into.add(value));
 };
 
-const mergeSiteResults = (...results: LiveResult[]): LiveResult => ({
-  live: mergeLive(...results.map((res) => res.live)),
-  sites: results.flatMap((res) => res.sites),
-});
+const union = <T>(...sets: ReadonlySet<T>[]): Set<T> => {
+  const merged = new Set<T>();
+  sets.forEach((set) => unionInto(merged, set));
+  return merged;
+};
 
 const callArgTempKey = ({
   callExprId,
@@ -59,21 +119,21 @@ const callArgTempKey = ({
 }): string => `callArg:${callExprId}:${argIndex}`;
 
 const appendTempCaptures = (
-  site: SiteDraft,
+  node: CfgNode,
   captures: readonly TempCaptureDraft[]
 ): void => {
   if (captures.length === 0) return;
 
-  if (!site.tempCaptures) {
-    site.tempCaptures = [...captures];
+  if (!node.tempCaptures) {
+    node.tempCaptures = [...captures];
     return;
   }
 
-  const existing = new Set(site.tempCaptures.map((capture) => capture.key));
+  const existing = new Set(node.tempCaptures.map((capture) => capture.key));
   captures.forEach((capture) => {
     if (existing.has(capture.key)) return;
     existing.add(capture.key);
-    site.tempCaptures!.push(capture);
+    node.tempCaptures!.push(capture);
   });
 };
 
@@ -101,87 +161,103 @@ const collectPatternSymbols = (pattern: HirPattern, into: Set<SymbolId>): void =
   }
 };
 
-const analyzeStatement = ({
-  stmtId,
-  liveAfter,
-  ctx,
-  visitExpr,
+const computeReachable = ({
+  nodes,
+  entry,
 }: {
-  stmtId: HirStmtId;
-  liveAfter: ReadonlySet<SymbolId>;
-  ctx: CodegenContext;
-  visitExpr: (params: {
-    exprId: HirExprId;
-    liveAfter: ReadonlySet<SymbolId>;
-    ctx: CodegenContext;
-  }) => LiveResult;
-}): LiveResult => {
-  const stmt = ctx.hir.statements.get(stmtId);
-  if (!stmt) {
-    throw new Error(`codegen missing HirStatement ${stmtId}`);
+  nodes: readonly CfgNode[];
+  entry: NodeId;
+}): Set<NodeId> => {
+  const reachable = new Set<NodeId>();
+  const stack = [entry];
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (reachable.has(current)) continue;
+    reachable.add(current);
+    const node = nodes[current];
+    if (!node) continue;
+    node.succ.forEach((next) => {
+      if (reachable.has(next)) return;
+      stack.push(next);
+    });
   }
 
-  switch (stmt.kind) {
-    case "expr-stmt": {
-      const res = visitExpr({ exprId: stmt.expr, liveAfter, ctx });
-      return { live: mergeLive(liveAfter, res.live), sites: res.sites };
-    }
-    case "return": {
-      if (typeof stmt.value !== "number") {
-        return { live: new Set(), sites: [] };
-      }
-      return visitExpr({ exprId: stmt.value, liveAfter: new Set(), ctx });
-    }
-    case "let": {
-      const res = visitExpr({ exprId: stmt.initializer, liveAfter, ctx });
-      const patternSymbols = new Set<SymbolId>();
-      collectPatternSymbols(stmt.pattern, patternSymbols);
-      const live = mergeLive(res.live);
-      patternSymbols.forEach((symbol) => live.delete(symbol));
-      return { live, sites: res.sites };
-    }
-  }
+  return reachable;
 };
 
-const analyzeBlock = ({
-  exprId,
-  liveAfter,
-  ctx,
-  visitExpr,
+const computeLiveness = ({
+  nodes,
+  reachable,
 }: {
-  exprId: HirExprId;
-  liveAfter: ReadonlySet<SymbolId>;
-  ctx: CodegenContext;
-  visitExpr: (params: {
-    exprId: HirExprId;
-    liveAfter: ReadonlySet<SymbolId>;
-    ctx: CodegenContext;
-  }) => LiveResult;
-}): LiveResult => {
-  const expr = ctx.hir.expressions.get(exprId);
-  if (!expr || expr.exprKind !== "block") {
-    throw new Error("analyzeBlock expects a block expression");
-  }
+  nodes: readonly CfgNode[];
+  reachable: ReadonlySet<NodeId>;
+}): {
+  liveInById: Map<NodeId, Set<SymbolId>>;
+  liveOutById: Map<NodeId, Set<SymbolId>>;
+} => {
+  const liveInById = new Map<NodeId, Set<SymbolId>>();
+  const liveOutById = new Map<NodeId, Set<SymbolId>>();
+  const worklist: NodeId[] = [];
+  const predecessors = new Map<NodeId, Set<NodeId>>();
 
-  let live = cloneLive(liveAfter);
-  const sites: SiteDraft[] = [];
-
-  if (typeof expr.value === "number") {
-    const valueRes = visitExpr({ exprId: expr.value, liveAfter, ctx });
-    live = mergeLive(live, valueRes.live);
-    sites.push(...valueRes.sites);
-  }
-
-  [...expr.statements].reverse().forEach((stmtId) => {
-    const res = analyzeStatement({ stmtId, liveAfter: live, ctx, visitExpr });
-    live = res.live;
-    sites.push(...res.sites);
+  reachable.forEach((nodeId) => {
+    worklist.push(nodeId);
+    liveInById.set(nodeId, new Set());
+    liveOutById.set(nodeId, new Set());
+    predecessors.set(nodeId, new Set());
   });
 
-  return { live, sites };
+  reachable.forEach((nodeId) => {
+    const node = nodes[nodeId];
+    if (!node) return;
+    node.succ.forEach((succId) => {
+      if (!reachable.has(succId)) return;
+      const preds = predecessors.get(succId);
+      if (!preds) return;
+      preds.add(nodeId);
+    });
+  });
+
+  while (worklist.length > 0) {
+    const nodeId = worklist.pop()!;
+    const node = nodes[nodeId];
+    if (!node) continue;
+
+    const oldIn = liveInById.get(nodeId) ?? new Set();
+    const oldOut = liveOutById.get(nodeId) ?? new Set();
+
+    const out = union(
+      ...node.succ
+        .filter((succId) => reachable.has(succId))
+        .map((succId) => liveInById.get(succId) ?? new Set())
+    );
+
+    const inSet = union(node.uses, new Set([...out].filter((sym) => !node.defs.has(sym))));
+
+    const changed = !setsEqual(oldIn, inSet) || !setsEqual(oldOut, out);
+    if (!changed) continue;
+
+    liveInById.set(nodeId, inSet);
+    liveOutById.set(nodeId, out);
+
+    const preds = predecessors.get(nodeId);
+    if (!preds) continue;
+    preds.forEach((predId) => worklist.push(predId));
+  }
+
+  return { liveInById, liveOutById };
 };
 
-export const analyzeExpr = ({
+const shouldSkipCalleeIdentifierUse = ({
+  symbol,
+  ctx,
+}: {
+  symbol: SymbolId;
+  ctx: CodegenContext;
+}): boolean => !!ctx.typing.functions.getSignature(symbol);
+
+const buildCfg = ({
   exprId,
   liveAfter,
   ctx,
@@ -189,226 +265,369 @@ export const analyzeExpr = ({
   exprId: HirExprId;
   liveAfter: ReadonlySet<SymbolId>;
   ctx: CodegenContext;
-}): LiveResult => {
-  const expr = ctx.hir.expressions.get(exprId);
-  if (!expr) {
-    throw new Error(`codegen missing HirExpression ${exprId}`);
-  }
+}): {
+  nodes: CfgNode[];
+  entry: NodeId;
+  siteNodeIds: NodeId[];
+} => {
+  const nodes: CfgNode[] = [];
+  const siteNodeIds: NodeId[] = [];
 
-  switch (expr.exprKind) {
-    case "identifier":
-      return { live: mergeLive(liveAfter, new Set([expr.symbol])), sites: [] };
-    case "literal":
-    case "overload-set":
-    case "continue":
-      return { live: cloneLive(liveAfter), sites: [] };
-    case "break": {
-      if (typeof expr.value !== "number") {
-        return { live: cloneLive(liveAfter), sites: [] };
+  const addNode = ({
+    uses = new Set<SymbolId>(),
+    defs = new Set<SymbolId>(),
+    site,
+  }: {
+    uses?: ReadonlySet<SymbolId>;
+    defs?: ReadonlySet<SymbolId>;
+    site?: SiteBase;
+  }): NodeId => {
+    const id = nodes.length;
+    nodes.push({ id, uses, defs, succ: [], site });
+    if (site) {
+      siteNodeIds.push(id);
+    }
+    return id;
+  };
+
+  const addEdge = (from: NodeId, to: NodeId): void => {
+    const node = nodes[from];
+    if (!node) {
+      throw new Error(`invalid cfg edge from ${from}`);
+    }
+    node.succ.push(to);
+  };
+
+  const nop = (): Subgraph => {
+    const id = addNode({});
+    return { entry: id, exits: [id], siteNodes: [] };
+  };
+
+  const sequence = (graphs: readonly Subgraph[]): Subgraph => {
+    if (graphs.length === 0) return nop();
+
+    let entry = graphs[0]!.entry;
+    let exits = graphs[0]!.exits;
+    const siteNodes: NodeId[] = [...graphs[0]!.siteNodes];
+
+    for (let index = 1; index < graphs.length; index += 1) {
+      const next = graphs[index]!;
+      siteNodes.push(...next.siteNodes);
+      if (exits.length === 0) {
+        exits = [];
+        continue;
       }
-      const res = analyzeExpr({ exprId: expr.value, liveAfter, ctx });
-      return { live: mergeLive(liveAfter, res.live), sites: res.sites };
+      exits.forEach((exit) => addEdge(exit, next.entry));
+      exits = next.exits;
     }
-    case "tuple": {
-      const results = expr.elements.map((element) =>
-        analyzeExpr({ exprId: element, liveAfter, ctx })
-      );
-      return mergeSiteResults(...results, { live: cloneLive(liveAfter), sites: [] });
+
+    return { entry, exits, siteNodes };
+  };
+
+  const buildStmt = (stmtId: HirStmtId, flow: FlowTargets): Subgraph => {
+    const stmt = ctx.hir.statements.get(stmtId);
+    if (!stmt) {
+      throw new Error(`codegen missing HirStatement ${stmtId}`);
     }
-    case "block":
-      return analyzeBlock({ exprId, liveAfter, ctx, visitExpr: analyzeExpr });
-    case "loop":
-      return analyzeExpr({ exprId: expr.body, liveAfter, ctx });
-    case "while": {
-      let loopHeadLive = cloneLive(liveAfter);
 
-      let bodyRes: LiveResult = { live: new Set(), sites: [] };
-      let condRes: LiveResult = { live: new Set(), sites: [] };
+    switch (stmt.kind) {
+      case "expr-stmt":
+        return buildExpr(stmt.expr, flow);
+      case "return": {
+        const valueGraph =
+          typeof stmt.value === "number" ? buildExpr(stmt.value, flow) : nop();
+        if (valueGraph.exits.length > 0) {
+          valueGraph.exits.forEach((exit) => addEdge(exit, flow.returnTarget));
+        }
+        return { entry: valueGraph.entry, exits: [], siteNodes: valueGraph.siteNodes };
+      }
+      case "let": {
+        const initGraph = buildExpr(stmt.initializer, flow);
+        const defs = new Set<SymbolId>();
+        collectPatternSymbols(stmt.pattern, defs);
+        const bindNode = addNode({ defs });
+        initGraph.exits.forEach((exit) => addEdge(exit, bindNode));
+        return {
+          entry: initGraph.entry,
+          exits: [bindNode],
+          siteNodes: initGraph.siteNodes,
+        };
+      }
+    }
+  };
 
-      for (let iteration = 0; iteration < 32; iteration += 1) {
-        bodyRes = analyzeExpr({ exprId: expr.body, liveAfter: loopHeadLive, ctx });
-        const liveAfterCondition = mergeLive(liveAfter, bodyRes.live);
-        condRes = analyzeExpr({
-          exprId: expr.condition,
-          liveAfter: liveAfterCondition,
-          ctx,
+  const buildExpr = (id: HirExprId, flow: FlowTargets): Subgraph => {
+    const expr = ctx.hir.expressions.get(id);
+    if (!expr) {
+      throw new Error(`codegen missing HirExpression ${id}`);
+    }
+
+    switch (expr.exprKind) {
+      case "literal":
+      case "overload-set": {
+        return nop();
+      }
+      case "identifier": {
+        const nodeId = addNode({ uses: new Set([expr.symbol]) });
+        return { entry: nodeId, exits: [nodeId], siteNodes: [] };
+      }
+      case "lambda": {
+        return nop();
+      }
+      case "continue": {
+        const nodeId = addNode({});
+        if (typeof flow.continueTarget === "number") {
+          addEdge(nodeId, flow.continueTarget);
+        }
+        return { entry: nodeId, exits: [], siteNodes: [] };
+      }
+      case "break": {
+        const valueGraph =
+          typeof expr.value === "number" ? buildExpr(expr.value, flow) : nop();
+        if (valueGraph.exits.length > 0 && typeof flow.breakTarget === "number") {
+          valueGraph.exits.forEach((exit) => addEdge(exit, flow.breakTarget!));
+        }
+        return { entry: valueGraph.entry, exits: [], siteNodes: valueGraph.siteNodes };
+      }
+      case "tuple": {
+        const graphs = expr.elements.map((element) => buildExpr(element, flow));
+        return sequence(graphs);
+      }
+      case "field-access": {
+        return buildExpr(expr.target, flow);
+      }
+      case "object-literal": {
+        const graphs = expr.entries.map((entry) => buildExpr(entry.value, flow));
+        return sequence(graphs);
+      }
+      case "assign": {
+        const targetGraph =
+          typeof expr.target === "number" ? buildExpr(expr.target, flow) : nop();
+        const valueGraph = buildExpr(expr.value, flow);
+        const patternSymbols = new Set<SymbolId>();
+        if (expr.pattern) {
+          collectPatternSymbols(expr.pattern, patternSymbols);
+        }
+        const assignNode = addNode({ uses: patternSymbols });
+        const graph = sequence([targetGraph, valueGraph]);
+        graph.exits.forEach((exit) => addEdge(exit, assignNode));
+        return {
+          entry: graph.entry,
+          exits: [assignNode],
+          siteNodes: [...graph.siteNodes],
+        };
+      }
+      case "block": {
+        const stmtGraphs = expr.statements.map((stmtId) => buildStmt(stmtId, flow));
+        const valueGraph = typeof expr.value === "number" ? buildExpr(expr.value, flow) : nop();
+        return sequence([...stmtGraphs, valueGraph]);
+      }
+      case "loop": {
+        const loopEntry = addNode({});
+        const breakJoin = addNode({});
+        const bodyGraph = buildExpr(expr.body, {
+          ...flow,
+          breakTarget: breakJoin,
+          continueTarget: loopEntry,
         });
+        addEdge(loopEntry, bodyGraph.entry);
+        bodyGraph.exits.forEach((exit) => addEdge(exit, loopEntry));
+        return {
+          entry: loopEntry,
+          exits: [breakJoin],
+          siteNodes: [...bodyGraph.siteNodes],
+        };
+      }
+      case "while": {
+        const conditionGraph = buildExpr(expr.condition, flow);
+        const breakJoin = addNode({});
+        const bodyGraph = buildExpr(expr.body, {
+          ...flow,
+          breakTarget: breakJoin,
+          continueTarget: conditionGraph.entry,
+        });
+        const conditionBranch = addNode({});
+        conditionGraph.exits.forEach((exit) => addEdge(exit, conditionBranch));
+        addEdge(conditionBranch, bodyGraph.entry);
+        addEdge(conditionBranch, breakJoin);
+        bodyGraph.exits.forEach((exit) => addEdge(exit, conditionGraph.entry));
+        return {
+          entry: conditionGraph.entry,
+          exits: [breakJoin],
+          siteNodes: [...conditionGraph.siteNodes, ...bodyGraph.siteNodes],
+        };
+      }
+      case "cond":
+      case "if": {
+        const join = addNode({});
+        const defaultGraph =
+          typeof expr.defaultBranch === "number" ? buildExpr(expr.defaultBranch, flow) : undefined;
+        const defaultEntry = defaultGraph ? defaultGraph.entry : join;
+        defaultGraph?.exits.forEach((exit) => addEdge(exit, join));
 
-        if (setsEqual(condRes.live, loopHeadLive)) {
-          return { live: condRes.live, sites: [...condRes.sites, ...bodyRes.sites] };
+        const branches = expr.branches.map((branch) => ({
+          condition: buildExpr(branch.condition, flow),
+          value: buildExpr(branch.value, flow),
+        }));
+        branches.forEach((branch) => branch.value.exits.forEach((exit) => addEdge(exit, join)));
+
+        for (let index = branches.length - 1; index >= 0; index -= 1) {
+          const branch = branches[index]!;
+          const nextEntry = index === branches.length - 1 ? defaultEntry : branches[index + 1]!.condition.entry;
+          branch.condition.exits.forEach((exit) => {
+            addEdge(exit, branch.value.entry);
+            addEdge(exit, nextEntry);
+          });
         }
 
-        loopHeadLive = condRes.live;
-      }
+        const entry = branches.length > 0 ? branches[0]!.condition.entry : defaultEntry;
+        const siteNodes = [
+          ...(defaultGraph ? defaultGraph.siteNodes : []),
+          ...branches.flatMap((branch) => [...branch.condition.siteNodes, ...branch.value.siteNodes]),
+        ];
 
-      bodyRes = analyzeExpr({ exprId: expr.body, liveAfter: loopHeadLive, ctx });
-      condRes = analyzeExpr({
-        exprId: expr.condition,
-        liveAfter: mergeLive(liveAfter, bodyRes.live),
-        ctx,
-      });
-      return { live: condRes.live, sites: [...condRes.sites, ...bodyRes.sites] };
-    }
-    case "cond":
-    case "if": {
-      const branchResults = expr.branches.map((branch) => {
-        const valueRes = analyzeExpr({ exprId: branch.value, liveAfter, ctx });
-        const condRes = analyzeExpr({
-          exprId: branch.condition,
-          liveAfter: mergeLive(liveAfter, valueRes.live),
-          ctx,
-        });
-        return mergeSiteResults(condRes, valueRes);
-      });
-      const defaultRes =
-        typeof expr.defaultBranch === "number"
-          ? analyzeExpr({ exprId: expr.defaultBranch, liveAfter, ctx })
-          : { live: cloneLive(liveAfter), sites: [] };
-      return mergeSiteResults(...branchResults, defaultRes);
-    }
-    case "match": {
-      const discriminantRes = analyzeExpr({ exprId: expr.discriminant, liveAfter, ctx });
-      const armResults = expr.arms.map((arm) => {
-        const guardRes =
-          typeof arm.guard === "number"
-            ? analyzeExpr({ exprId: arm.guard, liveAfter, ctx })
-            : { live: cloneLive(liveAfter), sites: [] };
-        const valueRes = analyzeExpr({ exprId: arm.value, liveAfter, ctx });
-        return mergeSiteResults(guardRes, valueRes);
-      });
-      return mergeSiteResults(discriminantRes, ...armResults, {
-        live: cloneLive(liveAfter),
-        sites: [],
-      });
-    }
-    case "object-literal": {
-      const entryResults = expr.entries.map((entry) =>
-        analyzeExpr({ exprId: entry.value, liveAfter, ctx })
-      );
-      return mergeSiteResults(...entryResults, {
-        live: cloneLive(liveAfter),
-        sites: [],
-      });
-    }
-    case "field-access": {
-      const res = analyzeExpr({ exprId: expr.target, liveAfter, ctx });
-      return { live: mergeLive(liveAfter, res.live), sites: res.sites };
-    }
-    case "assign": {
-      const targetRes =
-        typeof expr.target === "number"
-          ? analyzeExpr({ exprId: expr.target, liveAfter, ctx })
-          : { live: cloneLive(liveAfter), sites: [] };
-      const valueRes = analyzeExpr({
-        exprId: expr.value,
-        liveAfter: mergeLive(liveAfter, targetRes.live),
-        ctx,
-      });
-      const patternSymbols = new Set<SymbolId>();
-      if (expr.pattern) {
-        collectPatternSymbols(expr.pattern, patternSymbols);
+        return { entry, exits: [join], siteNodes };
       }
-      const live = mergeLive(liveAfter, targetRes.live, valueRes.live);
-      patternSymbols.forEach((symbol) => live.add(symbol));
-      return { live, sites: [...targetRes.sites, ...valueRes.sites] };
-    }
-    case "lambda":
-      return { live: cloneLive(liveAfter), sites: [] };
-    case "effect-handler": {
-      const finallyRes =
-        typeof expr.finallyBranch === "number"
-          ? analyzeExpr({ exprId: expr.finallyBranch, liveAfter, ctx })
-          : { live: cloneLive(liveAfter), sites: [] as SiteDraft[] };
-      const bodyRes = analyzeExpr({
-        exprId: expr.body,
-        liveAfter: mergeLive(liveAfter, finallyRes.live),
-        ctx,
-      });
-      return {
-        live: mergeLive(liveAfter, bodyRes.live, finallyRes.live),
-        sites: [...bodyRes.sites, ...finallyRes.sites],
-      };
-    }
-    case "call": {
-      const callee = ctx.hir.expressions.get(expr.callee);
-      const argResults: LiveResult[] = new Array(expr.args.length);
-      let cursor = cloneLive(liveAfter);
-      for (let index = expr.args.length - 1; index >= 0; index -= 1) {
-        const arg = expr.args[index]!;
-        const res = analyzeExpr({ exprId: arg.expr, liveAfter: cursor, ctx });
-        cursor = mergeLive(cursor, res.live);
-        argResults[index] = res;
-      }
-      const calleeResult =
-        callee && callee.exprKind !== "identifier"
-          ? analyzeExpr({ exprId: expr.callee, liveAfter: cursor, ctx })
-          : { live: cursor, sites: [] };
+      case "match": {
+        const join = addNode({});
+        const discriminantGraph = buildExpr(expr.discriminant, flow);
+        let nextEntry: NodeId = join;
+        const siteNodes: NodeId[] = [...discriminantGraph.siteNodes];
 
-      const hasSitesInArg = argResults.map((res) => res.sites.length > 0);
-      const needsTemp = new Array(expr.args.length).fill(false);
-      let suffixHasSites = false;
-      for (let index = expr.args.length - 2; index >= 0; index -= 1) {
-        suffixHasSites ||= hasSitesInArg[index + 1] ?? false;
-        needsTemp[index] = suffixHasSites;
-      }
+        for (let index = expr.arms.length - 1; index >= 0; index -= 1) {
+          const arm = expr.arms[index]!;
+          const defs = new Set<SymbolId>();
+          collectPatternSymbols(arm.pattern, defs);
+          const bindNode = addNode({ defs });
+          addEdge(bindNode, nextEntry);
 
-      const tempCapturesByIndex: Array<TempCaptureDraft | undefined> = new Array(
-        expr.args.length
-      ).fill(undefined);
-      needsTemp.forEach((needed, argIndex) => {
-        if (!needed) return;
-        const argExprId = expr.args[argIndex]!.expr;
-        const typeId =
-          ctx.typing.resolvedExprTypes.get(argExprId) ??
-          ctx.typing.table.getExprType(argExprId) ??
-          ctx.typing.primitives.unknown;
-        tempCapturesByIndex[argIndex] = {
-          key: callArgTempKey({ callExprId: expr.id, argIndex }),
-          callExprId: expr.id,
-          argIndex,
-          typeId,
-        };
-      });
+          const valueGraph = buildExpr(arm.value, flow);
+          valueGraph.exits.forEach((exit) => addEdge(exit, join));
+          siteNodes.push(...valueGraph.siteNodes);
 
-      for (let argIndex = 0; argIndex < argResults.length; argIndex += 1) {
-        const res = argResults[argIndex]!;
-        if (res.sites.length === 0) continue;
-        const captures = tempCapturesByIndex
-          .slice(0, argIndex)
-          .filter((capture): capture is TempCaptureDraft => !!capture);
-        if (captures.length === 0) continue;
-        res.sites.forEach((site) => appendTempCaptures(site, captures));
-      }
+          if (typeof arm.guard === "number") {
+            const guardGraph = buildExpr(arm.guard, flow);
+            guardGraph.exits.forEach((exit) => {
+              addEdge(exit, valueGraph.entry);
+              addEdge(exit, nextEntry);
+            });
+            addEdge(bindNode, guardGraph.entry);
+            siteNodes.push(...guardGraph.siteNodes);
+          } else {
+            addEdge(bindNode, valueGraph.entry);
+          }
 
-      const merged = mergeSiteResults(...argResults, calleeResult);
-      const kind = effectsFacade(ctx).callKind(expr.id);
-      if (kind === "perform") {
-        const calleeSymbol =
-          callee && callee.exprKind === "identifier" ? callee.symbol : undefined;
-        if (typeof calleeSymbol !== "number") {
-          throw new Error("perform site missing callee symbol");
+          nextEntry = bindNode;
         }
-        const site: SiteDraft = {
-          kind: "perform",
-          exprId: expr.id,
-          liveAfter,
-          evalOrder: expr.args.map((arg) => arg.expr),
-          effectSymbol: calleeSymbol,
-        };
-        return { live: merged.live, sites: [...merged.sites, site] };
-      }
 
-      if (kind === "effectful-call") {
-        const site: SiteDraft = {
-          kind: "call",
-          exprId: expr.id,
-          liveAfter,
-          evalOrder: expr.args.map((arg) => arg.expr),
-        };
-        return { live: merged.live, sites: [...merged.sites, site] };
-      }
+        discriminantGraph.exits.forEach((exit) => addEdge(exit, nextEntry));
 
-      return merged;
+        return { entry: discriminantGraph.entry, exits: [join], siteNodes };
+      }
+      case "effect-handler": {
+        const bodyGraph = buildExpr(expr.body, flow);
+        const finallyGraph =
+          typeof expr.finallyBranch === "number" ? buildExpr(expr.finallyBranch, flow) : undefined;
+        if (!finallyGraph) {
+          return bodyGraph;
+        }
+        return sequence([bodyGraph, finallyGraph]);
+      }
+      case "call": {
+        const calleeExpr = ctx.hir.expressions.get(expr.callee);
+        const calleeGraph =
+          calleeExpr && calleeExpr.exprKind === "identifier"
+            ? shouldSkipCalleeIdentifierUse({ symbol: calleeExpr.symbol, ctx })
+              ? nop()
+              : buildExpr(expr.callee, flow)
+            : calleeExpr && calleeExpr.exprKind === "overload-set"
+              ? nop()
+              : buildExpr(expr.callee, flow);
+
+        const argGraphs = expr.args.map((arg) => buildExpr(arg.expr, flow));
+        const kind = effectsFacade(ctx).callKind(expr.id);
+        const applyNode = addNode({
+          site:
+            kind === "perform"
+              ? (() => {
+                  const calleeSymbol =
+                    calleeExpr && calleeExpr.exprKind === "identifier"
+                      ? calleeExpr.symbol
+                      : undefined;
+                  if (typeof calleeSymbol !== "number") {
+                    throw new Error("perform site missing callee symbol");
+                  }
+                  return {
+                    kind: "perform",
+                    exprId: expr.id,
+                    evalOrder: expr.args.map((arg) => arg.expr),
+                    effectSymbol: calleeSymbol,
+                  };
+                })()
+              : kind === "effectful-call"
+                ? {
+                    kind: "call",
+                    exprId: expr.id,
+                    evalOrder: expr.args.map((arg) => arg.expr),
+                  }
+                : undefined,
+        });
+
+        const hasSitesInArg = argGraphs.map((graph) => graph.siteNodes.length > 0);
+        const needsTemp = new Array(expr.args.length).fill(false);
+        let suffixHasSites = false;
+        for (let index = expr.args.length - 2; index >= 0; index -= 1) {
+          suffixHasSites ||= hasSitesInArg[index + 1] ?? false;
+          needsTemp[index] = suffixHasSites;
+        }
+
+        const tempCapturesByIndex: Array<TempCaptureDraft | undefined> = new Array(
+          expr.args.length
+        ).fill(undefined);
+        needsTemp.forEach((needed, argIndex) => {
+          if (!needed) return;
+          const argExprId = expr.args[argIndex]!.expr;
+          const typeId =
+            ctx.typing.resolvedExprTypes.get(argExprId) ??
+            ctx.typing.table.getExprType(argExprId) ??
+            ctx.typing.primitives.unknown;
+          tempCapturesByIndex[argIndex] = {
+            key: callArgTempKey({ callExprId: expr.id, argIndex }),
+            callExprId: expr.id,
+            argIndex,
+            typeId,
+          };
+        });
+
+        for (let argIndex = 0; argIndex < argGraphs.length; argIndex += 1) {
+          const graph = argGraphs[argIndex]!;
+          if (graph.siteNodes.length === 0) continue;
+          const captures = tempCapturesByIndex
+            .slice(0, argIndex)
+            .filter((capture): capture is TempCaptureDraft => !!capture);
+          if (captures.length === 0) continue;
+          graph.siteNodes.forEach((siteNodeId) => {
+            const node = nodes[siteNodeId];
+            if (!node?.site) return;
+            appendTempCaptures(node, captures);
+          });
+        }
+
+        const graph = sequence([calleeGraph, ...argGraphs]);
+        graph.exits.forEach((exit) => addEdge(exit, applyNode));
+        return {
+          entry: graph.entry,
+          exits: [applyNode],
+          siteNodes: [...graph.siteNodes, ...(nodes[applyNode]!.site ? [applyNode] : [])],
+        };
+      }
     }
-  }
+  };
+
+  const afterNode = addNode({ uses: liveAfter });
+  const returnSink = addNode({});
+  const graph = buildExpr(exprId, { returnTarget: returnSink });
+  graph.exits.forEach((exit) => addEdge(exit, afterNode));
+
+  return { nodes, entry: graph.entry, siteNodeIds };
 };
