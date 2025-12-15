@@ -34,6 +34,55 @@ import { lowerWhile } from "./while.js";
 
 export { isObjectLiteralForm } from "./object-literal.js";
 
+const isBreakExpr = (expr: Expr): expr is Syntax & { value: string } =>
+  (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) && expr.value === "break";
+
+const isContinueExpr = (expr: Expr): expr is Syntax & { value: string } =>
+  (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) && expr.value === "continue";
+
+const lowerBreak = ({
+  ast,
+  label,
+  value,
+  ctx,
+  scopes,
+  lowerExpr,
+}: {
+  ast: Syntax;
+  label?: string;
+  value?: Expr;
+  ctx: LowerContext;
+  scopes: LowerScopeStack;
+  lowerExpr: LowerExprFn;
+}): HirExprId => {
+  const loweredValue = value ? lowerExpr(value, ctx, scopes) : undefined;
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "break",
+    ast: ast.syntaxId,
+    span: toSourceSpan(ast),
+    label,
+    value: loweredValue,
+  });
+};
+
+const lowerContinue = ({
+  ast,
+  label,
+  ctx,
+}: {
+  ast: Syntax;
+  label?: string;
+  ctx: LowerContext;
+}): HirExprId =>
+  ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "continue",
+    ast: ast.syntaxId,
+    span: toSourceSpan(ast),
+    label,
+  });
+
 export const lowerExpr: LowerExprFn = (
   expr: Expr | undefined,
   ctx: LowerContext,
@@ -88,6 +137,12 @@ export const lowerExpr: LowerExprFn = (
   }
 
   if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    if (isBreakExpr(expr)) {
+      return lowerBreak({ ast: expr, ctx, scopes, lowerExpr });
+    }
+    if (isContinueExpr(expr)) {
+      return lowerContinue({ ast: expr, ctx });
+    }
     const resolution = resolveIdentifierValue(
       expr.value,
       scopes.current(),
@@ -114,6 +169,32 @@ export const lowerExpr: LowerExprFn = (
   }
 
   if (isForm(expr)) {
+    if (
+      isIdentifierAtom(expr.first) &&
+      (expr.first.value === "break" || expr.first.value === "continue")
+    ) {
+      const label =
+        expr.length >= 3 && isIdentifierAtom(expr.at(1))
+          ? (expr.at(1) as { value: string }).value
+          : undefined;
+      if (expr.first.value === "continue") {
+        return lowerContinue({ ast: expr, label, ctx });
+      }
+      const valueExpr =
+        expr.length === 2
+          ? expr.at(1)
+          : expr.length >= 3 && label
+            ? expr.at(2)
+            : undefined;
+      return lowerBreak({
+        ast: expr,
+        label,
+        value: valueExpr,
+        ctx,
+        scopes,
+        lowerExpr,
+      });
+    }
     if (isObjectLiteralForm(expr)) {
       return lowerObjectLiteralExpr({ form: expr, ctx, scopes, lowerExpr });
     }

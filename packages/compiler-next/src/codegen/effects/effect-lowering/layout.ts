@@ -7,6 +7,7 @@ import type {
   HirFunction,
   HirLambdaExpr,
   HirPattern,
+  HirEffectHandlerExpr,
   SymbolId,
   TypeId,
 } from "../../context.js";
@@ -55,6 +56,10 @@ export const functionParamSymbols = (fn: HirFunction): Set<SymbolId> => {
 
 export const lambdaParamSymbols = (expr: HirLambdaExpr): ReadonlySet<SymbolId> =>
   new Set(expr.parameters.map((param) => param.symbol));
+
+export const handlerClauseParamSymbols = (
+  clause: HirEffectHandlerExpr["handlers"][number]
+): ReadonlySet<SymbolId> => new Set(clause.parameters.map((param) => param.symbol));
 
 export const definitionOrderForFunction = (
   fn: HirFunction,
@@ -110,6 +115,47 @@ export const definitionOrderForLambda = (
       },
     },
   });
+  return order;
+};
+
+const shouldCaptureIdentifierSymbol = (symbol: SymbolId, ctx: CodegenContext): boolean =>
+  ctx.symbolTable.getScope(ctx.symbolTable.getSymbol(symbol).scope).kind !== "module";
+
+export const definitionOrderForHandlerClause = ({
+  clause,
+  ctx,
+}: {
+  clause: HirEffectHandlerExpr["handlers"][number];
+  ctx: CodegenContext;
+}): Map<SymbolId, number> => {
+  const order = new Map<SymbolId, number>();
+  let index = 0;
+
+  const add = (symbol: SymbolId): void => {
+    if (order.has(symbol)) return;
+    order.set(symbol, index);
+    index += 1;
+  };
+
+  clause.parameters.forEach((param) => add(param.symbol));
+
+  walkHirExpression({
+    exprId: clause.body,
+    ctx,
+    visitLambdaBodies: false,
+    visitor: {
+      onPattern: (pattern) => {
+        if (pattern.kind !== "identifier") return;
+        add(pattern.symbol);
+      },
+      onExpr: (_exprId, expr) => {
+        if (expr.exprKind !== "identifier") return;
+        if (!shouldCaptureIdentifierSymbol(expr.symbol, ctx)) return;
+        add(expr.symbol);
+      },
+    },
+  });
+
   return order;
 };
 

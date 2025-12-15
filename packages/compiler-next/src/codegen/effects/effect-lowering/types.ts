@@ -64,7 +64,8 @@ export interface EffectLoweringResult {
 
 export type ContinuationSiteOwner =
   | { kind: "function"; symbol: SymbolId }
-  | { kind: "lambda"; exprId: HirExprId };
+  | { kind: "lambda"; exprId: HirExprId }
+  | { kind: "handler-clause"; handlerExprId: HirExprId; clauseIndex: number };
 
 export type SiteCounter = { current: number };
 
@@ -72,4 +73,3 @@ export type BuildEffectLoweringParams = {
   ctx: CodegenContext;
   siteCounter: SiteCounter;
 };
-

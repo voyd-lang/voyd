@@ -18,7 +18,10 @@ import { getExprBinaryenType, wasmTypeFor } from "../../types.js";
 import { compileCallExpr } from "../../expressions/calls.js";
 import { compileBlockExpr, compileStatement } from "../../expressions/blocks.js";
 import {
+  compileBreakExpr,
+  compileContinueExpr,
   compileIfExpr,
+  compileLoopExpr,
   compileMatchExpr,
   compileWhileExpr,
 } from "../../expressions/control-flow.js";
@@ -33,6 +36,7 @@ import {
   compileIdentifierExpr,
   compileLiteralExpr,
 } from "../../expressions/primitives.js";
+import { withLoopScope } from "../../control-flow-stack.js";
 import {
   exprContainsTarget,
   stmtContainsTarget,
@@ -236,7 +240,11 @@ const compileContinuationWhileExpr = ({
       )
     : ctx.mod.if(ctx.mod.i32.eqz(conditionExpr), ctx.mod.br(breakLabel));
 
-  const body = compileExpr({ exprId: expr.body, ctx, fnCtx }).expr;
+  const body = withLoopScope(
+    fnCtx,
+    { breakLabel, continueLabel: loopLabel },
+    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr
+  );
   const loopBody = ctx.mod.block(
     null,
     [
@@ -361,8 +369,14 @@ export const createContinuationExpressionCompiler = ({
           compileExpr,
           resumeTarget,
         });
+      case "loop":
+        return compileLoopExpr(expr, ctx, fnCtx, compileExpr);
       case "assign":
         return compileAssignExpr(expr, ctx, fnCtx, compileExpr);
+      case "break":
+        return compileBreakExpr(expr, ctx, fnCtx, compileExpr);
+      case "continue":
+        return compileContinueExpr(expr, ctx, fnCtx);
       case "object-literal":
         return compileObjectLiteralExpr(expr, ctx, fnCtx, compileExpr);
       case "field-access":

@@ -15,5 +15,8 @@ export { typeMatchExpr } from "./match.js";
 export { typeObjectLiteralExpr } from "./object-literal.js";
 export { typeOverloadSetExpr } from "./overload-set.js";
 export { typeEffectHandlerExpr } from "./effect-handler.js";
+export { typeBreakExpr } from "./break.js";
+export { typeContinueExpr } from "./continue.js";
+export { typeLoopExpr } from "./loop.js";
 export { typeTupleExpr } from "./tuple.js";
 export { typeWhileExpr } from "./while.js";

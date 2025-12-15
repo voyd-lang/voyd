@@ -184,6 +184,12 @@ export interface ContinuationBinding {
   returnTypeId: TypeId;
 }
 
+export interface LoopScope {
+  breakLabel: string;
+  continueLabel: string;
+  label?: string;
+}
+
 export interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;
   tempLocals: Map<number, LocalBindingLocal>;
@@ -195,6 +201,7 @@ export interface FunctionContext {
   typeInstanceKey?: string;
   effectful: boolean;
   handlerStack?: HandlerScope[];
+  loopStack?: LoopScope[];
   continuations?: Map<SymbolId, ContinuationBinding>;
   continuation?: {
     cfg: GroupContinuationCfg;

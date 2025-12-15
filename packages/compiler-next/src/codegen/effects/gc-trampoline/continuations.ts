@@ -23,6 +23,11 @@ import { buildGroupContinuationCfg } from "../continuation-cfg.js";
 import { createGroupedContinuationExpressionCompiler } from "../continuation-compiler.js";
 import { wrapValueInOutcome } from "../outcome-values.js";
 import { functionRefType } from "./shared.js";
+import {
+  handlerClauseContinuationTempId,
+  handlerClauseTailGuardTempId,
+} from "../effect-lowering/handler-clause-temp-ids.js";
+import { effectsFacade } from "../facade.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -91,22 +96,100 @@ const collectLambdaLocalSymbols = (expr: HirLambdaExpr, ctx: CodegenContext): Se
   return symbols;
 };
 
-const isFunctionOwner = (
-  owner: ContinuationSiteOwner
-): owner is { kind: "function"; symbol: SymbolId } => owner.kind === "function";
-
 const sameContinuationOwner = (
   a: ContinuationSiteOwner,
   b: ContinuationSiteOwner
 ): boolean => {
   if (a.kind !== b.kind) return false;
-  if (isFunctionOwner(a) && isFunctionOwner(b)) {
-    return a.symbol === b.symbol;
+  switch (a.kind) {
+    case "function":
+      return a.symbol === (b as typeof a).symbol;
+    case "lambda":
+      return a.exprId === (b as typeof a).exprId;
+    case "handler-clause":
+      return (
+        a.handlerExprId === (b as typeof a).handlerExprId &&
+        a.clauseIndex === (b as typeof a).clauseIndex
+      );
   }
-  if (!isFunctionOwner(a) && !isFunctionOwner(b)) {
-    return a.exprId === b.exprId;
+};
+
+const shouldCaptureIdentifierSymbol = (symbol: SymbolId, ctx: CodegenContext): boolean =>
+  ctx.symbolTable.getScope(ctx.symbolTable.getSymbol(symbol).scope).kind !== "module";
+
+const collectHandlerClauseLocalSymbols = ({
+  handlerExprId,
+  clauseIndex,
+  ctx,
+}: {
+  handlerExprId: HirExprId;
+  clauseIndex: number;
+  ctx: CodegenContext;
+}): Set<SymbolId> => {
+  const symbols = new Set<SymbolId>();
+  const handler = ctx.hir.expressions.get(handlerExprId);
+  if (!handler || handler.exprKind !== "effect-handler") {
+    throw new Error(`could not find effect handler expression ${handlerExprId}`);
   }
-  return false;
+  const clause = handler.handlers[clauseIndex];
+  if (!clause) {
+    throw new Error(`missing handler clause ${handlerExprId}:${clauseIndex}`);
+  }
+
+  clause.parameters.forEach((param) => symbols.add(param.symbol));
+
+  walkHirExpression({
+    exprId: clause.body,
+    ctx,
+    visitor: {
+      onExpr: (_exprId, expr) => {
+        if (expr.exprKind !== "identifier") return;
+        if (!shouldCaptureIdentifierSymbol(expr.symbol, ctx)) return;
+        symbols.add(expr.symbol);
+      },
+      onPattern: (pattern: HirPattern) => {
+        if (pattern.kind !== "identifier") return;
+        symbols.add(pattern.symbol);
+      },
+    },
+    visitLambdaBodies: false,
+  });
+  return symbols;
+};
+
+const findHandlerClauseByOwner = ({
+  handlerExprId,
+  clauseIndex,
+  ctx,
+}: {
+  handlerExprId: HirExprId;
+  clauseIndex: number;
+  ctx: CodegenContext;
+}): {
+  bodyExprId: HirExprId;
+  returnTypeId: TypeId;
+  resumeSymbol?: SymbolId;
+  resumeKind: number;
+} => {
+  const handler = ctx.hir.expressions.get(handlerExprId);
+  if (!handler || handler.exprKind !== "effect-handler") {
+    throw new Error(`could not find effect handler expression ${handlerExprId}`);
+  }
+  const clause = handler.handlers[clauseIndex];
+  if (!clause) {
+    throw new Error(`missing handler clause ${handlerExprId}:${clauseIndex}`);
+  }
+  const signature = ctx.typing.functions.getSignature(clause.operation);
+  if (!signature) {
+    throw new Error("missing signature for effect handler clause operation");
+  }
+  const { resumeKind } = effectsFacade(ctx).effectOpIds(clause.operation);
+  return {
+    bodyExprId: clause.body,
+    returnTypeId: signature.returnType,
+    resumeSymbol: clause.parameters[0]?.symbol,
+    resumeKind,
+  };
 };
 
 export const ensureContinuationFunction = ({
@@ -145,6 +228,27 @@ export const ensureContinuationFunction = ({
         cfgFn: fn,
         localsToSeed: collectFunctionLocalSymbols(fn, ctx),
         returnTypeId,
+        resumeSymbol: undefined,
+        resumeKind: undefined,
+      };
+    }
+    if (site.owner.kind === "handler-clause") {
+      const { bodyExprId, returnTypeId, resumeSymbol, resumeKind } = findHandlerClauseByOwner({
+        handlerExprId: site.owner.handlerExprId,
+        clauseIndex: site.owner.clauseIndex,
+        ctx,
+      });
+      return {
+        bodyExprId,
+        cfgFn: { body: bodyExprId } as HirFunction,
+        localsToSeed: collectHandlerClauseLocalSymbols({
+          handlerExprId: site.owner.handlerExprId,
+          clauseIndex: site.owner.clauseIndex,
+          ctx,
+        }),
+        returnTypeId,
+        resumeSymbol,
+        resumeKind,
       };
     }
     const { expr, returnTypeId } = findLambdaByExprId(site.owner.exprId, ctx);
@@ -153,10 +257,13 @@ export const ensureContinuationFunction = ({
       cfgFn: { body: expr.body } as HirFunction,
       localsToSeed: collectLambdaLocalSymbols(expr, ctx),
       returnTypeId,
+      resumeSymbol: undefined,
+      resumeKind: undefined,
     };
   })();
 
-  const { cfgFn, returnTypeId, localsToSeed, bodyExprId } = continuationBody;
+  const { cfgFn, returnTypeId, localsToSeed, bodyExprId, resumeSymbol, resumeKind } =
+    continuationBody;
   const params = [binaryen.anyref, resumeBoxType];
   const returnWasmType = wasmTypeFor(returnTypeId, ctx);
 
@@ -191,18 +298,16 @@ export const ensureContinuationFunction = ({
   const startedLocal = allocateTempLocal(binaryen.i32, fnCtx, ctx.typing.primitives.i32);
   const activeSiteLocal = allocateTempLocal(binaryen.i32, fnCtx, ctx.typing.primitives.i32);
 
-  const tempIds = new Set<number>();
+  const tempFields = new Map<number, { wasmType: binaryen.Type; typeId: TypeId }>();
   groupSites.forEach((groupSite) => {
     groupSite.envFields.forEach((field) => {
       if (typeof field.tempId !== "number") return;
-      tempIds.add(field.tempId);
+      if (tempFields.has(field.tempId)) return;
+      tempFields.set(field.tempId, { wasmType: field.wasmType, typeId: field.typeId });
     });
   });
-  tempIds.forEach((tempId) => {
-    const typeId =
-      ctx.effectLowering.tempTypeIds.get(tempId) ?? ctx.typing.primitives.unknown;
-    const wasmType = wasmTypeFor(typeId, ctx);
-    fnCtx.tempLocals.set(tempId, allocateTempLocal(wasmType, fnCtx, typeId));
+  tempFields.forEach((spec, tempId) => {
+    fnCtx.tempLocals.set(tempId, allocateTempLocal(spec.wasmType, fnCtx, spec.typeId));
   });
 
   const envParamIndex = 0;
@@ -227,6 +332,41 @@ export const ensureContinuationFunction = ({
     })();
 
   fnCtx.continuation = { cfg, startedLocal, activeSiteLocal };
+
+  if (site.owner.kind === "handler-clause" && typeof resumeSymbol === "number") {
+    if (typeof resumeKind !== "number") {
+      throw new Error("missing handler clause resume kind for continuation function");
+    }
+    const continuationLocal = fnCtx.tempLocals.get(
+      handlerClauseContinuationTempId({
+        handlerExprId: site.owner.handlerExprId,
+        clauseIndex: site.owner.clauseIndex,
+      })
+    );
+    if (!continuationLocal) {
+      throw new Error("missing handler clause continuation local for continuation function");
+    }
+    const tailGuardLocal = fnCtx.tempLocals.get(
+      handlerClauseTailGuardTempId({
+        handlerExprId: site.owner.handlerExprId,
+        clauseIndex: site.owner.clauseIndex,
+      })
+    );
+    if (!tailGuardLocal) {
+      throw new Error("missing handler clause tail guard local for continuation function");
+    }
+    fnCtx.continuations = new Map([
+      [
+        resumeSymbol,
+        {
+          continuationLocal,
+          tailGuardLocal,
+          resumeKind,
+          returnTypeId,
+        },
+      ],
+    ]);
+  }
 
   const resumeLocal = {
     kind: "local",

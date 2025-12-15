@@ -21,14 +21,20 @@ import type {
 import { analyzeExpr } from "./liveness.js";
 import {
   definitionOrderForFunction,
+  definitionOrderForHandlerClause,
   definitionOrderForLambda,
   envFieldsFor,
   functionParamSymbols,
+  handlerClauseParamSymbols,
   lambdaParamSymbols,
   sanitizeIdentifier,
   shouldLowerLambda,
   ensureArgsType,
 } from "./layout.js";
+import {
+  handlerClauseContinuationTempId,
+  handlerClauseTailGuardTempId,
+} from "./handler-clause-temp-ids.js";
 
 type TempCaptureKey = string;
 
@@ -75,6 +81,38 @@ const baseEnvFields = (ctx: CodegenContext): ContinuationEnvField[] => [
     sourceKind: "handler",
   } as const,
 ];
+
+const handlerClauseBaseTemps = ({
+  owner,
+  ctx,
+}: {
+  owner: ContinuationSite["owner"];
+  ctx: CodegenContext;
+}): ContinuationEnvField[] => {
+  if (owner.kind !== "handler-clause") return [];
+  return [
+    {
+      name: "clause_cont",
+      wasmType: ctx.effectsRuntime.continuationType,
+      typeId: ctx.typing.primitives.unknown,
+      sourceKind: "local",
+      tempId: handlerClauseContinuationTempId({
+        handlerExprId: owner.handlerExprId,
+        clauseIndex: owner.clauseIndex,
+      }),
+    },
+    {
+      name: "clause_tail_guard",
+      wasmType: ctx.effectsRuntime.tailGuardType,
+      typeId: ctx.typing.primitives.unknown,
+      sourceKind: "local",
+      tempId: handlerClauseTailGuardTempId({
+        handlerExprId: owner.handlerExprId,
+        clauseIndex: owner.clauseIndex,
+      }),
+    },
+  ];
+};
 
 export const buildEffectLowering = ({
   ctx,
@@ -147,6 +185,7 @@ export const buildEffectLowering = ({
           tempId,
         };
       });
+      const clauseTemps = handlerClauseBaseTemps({ owner, ctx });
       const capturedFields = envFieldsFor({
         liveSymbols: site.liveAfter,
         params,
@@ -156,6 +195,7 @@ export const buildEffectLowering = ({
 
       const envFields: ContinuationEnvField[] = [
         ...baseEnvFields(ctx),
+        ...clauseTemps,
         ...tempFields,
         ...capturedFields,
       ];
@@ -273,6 +313,28 @@ export const buildEffectLowering = ({
     });
   });
 
+  ctx.hir.expressions.forEach((expr) => {
+    if (expr.exprKind !== "effect-handler") return;
+
+    expr.handlers.forEach((clause, clauseIndex) => {
+      const ordering = definitionOrderForHandlerClause({ clause, ctx });
+      const params = handlerClauseParamSymbols(clause);
+      const analysis = analyzeExpr({ exprId: clause.body, liveAfter: new Set(), ctx });
+      const fnName = `handler_${expr.id}_${clauseIndex}`;
+      const contFnName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}`;
+
+      emitSitesFor({
+        analysisSites: analysis.sites,
+        owner: { kind: "handler-clause", handlerExprId: expr.id, clauseIndex },
+        contFnName,
+        ordering,
+        params,
+        handlerAtSite: true,
+        fnNameForEnv: fnName,
+      });
+    });
+  });
+
   callArgTemps.forEach((value, key) => {
     const unique = new Map<number, { argIndex: number; tempId: number; typeId: TypeId }>();
     value.forEach((entry) => unique.set(entry.argIndex, entry));
@@ -282,4 +344,3 @@ export const buildEffectLowering = ({
 
   return { sitesByExpr, sites, argsTypes, callArgTemps, tempTypeIds };
 };
-

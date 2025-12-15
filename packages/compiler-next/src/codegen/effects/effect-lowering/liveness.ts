@@ -19,7 +19,6 @@ export interface SiteDraft {
   kind: "perform" | "call";
   exprId: HirExprId;
   liveAfter: ReadonlySet<SymbolId>;
-  evalOrder: readonly HirExprId[];
   effectSymbol?: SymbolId;
   tempCaptures?: TempCaptureDraft[];
 }
@@ -560,7 +559,6 @@ const buildCfg = ({
                   return {
                     kind: "perform",
                     exprId: expr.id,
-                    evalOrder: expr.args.map((arg) => arg.expr),
                     effectSymbol: calleeSymbol,
                   };
                 })()
@@ -568,7 +566,6 @@ const buildCfg = ({
                 ? {
                     kind: "call",
                     exprId: expr.id,
-                    evalOrder: expr.args.map((arg) => arg.expr),
                   }
                 : undefined,
         });

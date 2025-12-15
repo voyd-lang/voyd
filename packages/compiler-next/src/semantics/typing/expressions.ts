@@ -14,6 +14,9 @@ import {
   typeObjectLiteralExpr,
   typeOverloadSetExpr,
   typeEffectHandlerExpr,
+  typeBreakExpr,
+  typeContinueExpr,
+  typeLoopExpr,
   typeTupleExpr,
   typeWhileExpr,
 } from "./expressions/index.js";
@@ -101,8 +104,14 @@ const resolveExpressionType = (
       return typeFieldAccessExpr(expr, ctx, state);
     case "while":
       return typeWhileExpr(expr, ctx, state);
+    case "loop":
+      return typeLoopExpr(expr, ctx, state);
     case "assign":
       return typeAssignExpr(expr, ctx, state);
+    case "break":
+      return typeBreakExpr(expr, ctx, state);
+    case "continue":
+      return typeContinueExpr(expr, ctx);
     case "lambda":
       return typeLambdaExpr(expr, ctx, state, expectedType);
     default:

@@ -19,7 +19,10 @@ import { getExprBinaryenType, wasmTypeFor } from "../../types.js";
 import { compileCallExpr } from "../../expressions/calls.js";
 import { compileBlockExpr, compileStatement } from "../../expressions/blocks.js";
 import {
+  compileBreakExpr,
+  compileContinueExpr,
   compileIfExpr,
+  compileLoopExpr,
   compileMatchExpr,
   compileWhileExpr,
 } from "../../expressions/control-flow.js";
@@ -34,6 +37,7 @@ import {
   compileIdentifierExpr,
   compileLiteralExpr,
 } from "../../expressions/primitives.js";
+import { withLoopScope } from "../../control-flow-stack.js";
 import type { GroupContinuationCfg } from "../continuation-cfg.js";
 import { unboxOutcomeValue } from "../outcome-values.js";
 
@@ -399,7 +403,11 @@ const compileGroupedContinuationWhileExpr = ({
     ctx.mod.nop()
   );
 
-  const body = compileExpr({ exprId: expr.body, ctx, fnCtx }).expr;
+  const body = withLoopScope(
+    fnCtx,
+    { breakLabel, continueLabel: loopLabel },
+    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr
+  );
   const loopBody = ctx.mod.block(
     null,
     [
@@ -577,8 +585,14 @@ export const createGroupedContinuationExpressionCompiler = ({
         );
       case "while":
         return compileWhileExpr(expr, ctx, fnCtx, compileExpr);
+      case "loop":
+        return compileLoopExpr(expr, ctx, fnCtx, compileExpr);
       case "assign":
         return compileAssignExpr(expr, ctx, fnCtx, compileExpr);
+      case "break":
+        return compileBreakExpr(expr, ctx, fnCtx, compileExpr);
+      case "continue":
+        return compileContinueExpr(expr, ctx, fnCtx);
       case "object-literal":
         return compileObjectLiteralExpr(expr, ctx, fnCtx, compileExpr);
       case "field-access":
@@ -603,4 +617,3 @@ export const createGroupedContinuationExpressionCompiler = ({
 
   return compileExpr;
 };
-

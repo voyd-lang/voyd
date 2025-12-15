@@ -24,6 +24,10 @@ import {
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { RESUME_KIND, type ResumeKind } from "../effects/runtime-abi.js";
 import type { HirEffectHandlerExpr } from "../../semantics/hir/index.js";
+import {
+  handlerClauseContinuationTempId,
+  handlerClauseTailGuardTempId,
+} from "../effects/effect-lowering/handler-clause-temp-ids.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -245,6 +249,15 @@ const emitClauseFunction = ({
         ctx.mod.local.get(requestLocal.index, requestLocal.type)
       )
     )
+  );
+
+  fnCtx.tempLocals.set(
+    handlerClauseContinuationTempId({ handlerExprId: expr.id, clauseIndex }),
+    continuationLocal
+  );
+  fnCtx.tempLocals.set(
+    handlerClauseTailGuardTempId({ handlerExprId: expr.id, clauseIndex }),
+    tailGuardLocal
   );
 
   if (clause.parameters[0]) {
