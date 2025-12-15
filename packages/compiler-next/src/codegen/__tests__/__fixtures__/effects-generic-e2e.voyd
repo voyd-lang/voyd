@@ -17,4 +17,4 @@ pub fn test2() -> f64
   try
     add(Async::await(), Async::await())
   Async::await(tail):
-    tail(2.0)
+    tail(2.2)

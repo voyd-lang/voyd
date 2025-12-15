@@ -30,7 +30,6 @@ describe("generic effects wasm e2e", () => {
     const test1 = instance.exports.test1 as CallableFunction;
     const test2 = instance.exports.test2 as CallableFunction;
     expect(test1()).toBe(20);
-    expect(test2()).toBe(4);
+    expect(test2()).toBe(4.4);
   });
 });
-
