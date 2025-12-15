@@ -43,13 +43,14 @@ describe("effects higher-order functions", () => {
     const { module } = buildModule();
     const wasmBinary = new Uint8Array(module.emitBinary());
     const noop = () => 0;
+    const noopI64 = () => 0n;
     const instance = new WebAssembly.Instance(
       new WebAssembly.Module(wasmBinary),
       {
         env: {
           __voyd_msgpack_write_value: noop,
           __voyd_msgpack_write_effect: noop,
-          __voyd_msgpack_read_value: noop,
+          __voyd_msgpack_read_value: noopI64,
         },
       }
     );

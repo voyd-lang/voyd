@@ -40,6 +40,14 @@ const ensureOutcomeValueBox = ({
   return box;
 };
 
+export const getOutcomeValueBoxType = ({
+  valueType,
+  ctx,
+}: {
+  valueType: binaryen.Type;
+  ctx: CodegenContext;
+}): binaryen.Type => ensureOutcomeValueBox({ valueType, ctx }).boxType;
+
 export const boxOutcomeValue = ({
   value,
   valueType,

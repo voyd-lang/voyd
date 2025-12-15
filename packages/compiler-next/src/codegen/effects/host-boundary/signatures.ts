@@ -16,7 +16,12 @@ export const supportedValueTag = ({
 }): number => {
   if (wasmType === binaryen.none) return VALUE_TAG.none;
   if (wasmType === binaryen.i32) return VALUE_TAG.i32;
-  throw new Error(`unsupported value type ${wasmType} for host boundary (${label})`);
+  if (wasmType === binaryen.i64) return VALUE_TAG.i64;
+  if (wasmType === binaryen.f32) return VALUE_TAG.f32;
+  if (wasmType === binaryen.f64) return VALUE_TAG.f64;
+  throw new Error(
+    `unsupported value type ${wasmType} for host boundary (${label})`
+  );
 };
 
 export const collectEffectOperationSignatures = (
@@ -34,7 +39,13 @@ export const collectEffectOperationSignatures = (
         const params = signature.parameters.map((param) => wasmTypeFor(param.type, ctx));
         const returnType = wasmTypeFor(signature.returnType, ctx);
         const label = `${effect.name}.${op.name}`;
-        params.forEach((paramType) => supportedValueTag({ wasmType: paramType, label }));
+        params.forEach((paramType) => {
+          if (paramType !== binaryen.i32) {
+            throw new Error(
+              `unsupported effect operation parameter type ${paramType} for host boundary (${label})`
+            );
+          }
+        });
         supportedValueTag({ wasmType: returnType, label });
         signatures.push({
           effectId,

@@ -319,7 +319,13 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
         return;
       }
       const valueType = wasmTypeFor(meta.resultTypeId, ctx);
-      if (valueType !== binaryen.none && valueType !== binaryen.i32) {
+      if (
+        valueType !== binaryen.none &&
+        valueType !== binaryen.i32 &&
+        valueType !== binaryen.i64 &&
+        valueType !== binaryen.f32 &&
+        valueType !== binaryen.f64
+      ) {
         return;
       }
       effectfulExports.push({ meta, exportName });
@@ -354,11 +360,11 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
     ctx,
     runtime: ctx.effectsRuntime,
     signatures,
+    imports,
   });
   createResumeEffectful({
     ctx,
     runtime: ctx.effectsRuntime,
-    imports,
     handleOutcome,
     resumeContinuation,
   });

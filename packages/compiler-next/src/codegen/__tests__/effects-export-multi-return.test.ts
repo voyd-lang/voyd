@@ -23,6 +23,9 @@ describe("effectful exports with different return types", () => {
     const handlers = {
       "0:0:1": () => 2,
       "1:0:0": () => 0,
+      "2:0:1": () => 40n,
+      "3:0:1": () => 2.5,
+      "4:0:1": () => 1.25,
     };
 
     const main = await runEffectfulExport<number>({
@@ -38,5 +41,26 @@ describe("effectful exports with different return types", () => {
       handlers,
     });
     expect(done.value).toBeNull();
+
+    const big = await runEffectfulExport<bigint>({
+      wasm: module,
+      entryName: "big_effectful",
+      handlers,
+    });
+    expect(big.value).toBe(40n);
+
+    const floaty = await runEffectfulExport<number>({
+      wasm: module,
+      entryName: "floaty_effectful",
+      handlers,
+    });
+    expect(floaty.value).toBeCloseTo(2.5);
+
+    const tiny = await runEffectfulExport<number>({
+      wasm: module,
+      entryName: "tiny_effectful",
+      handlers,
+    });
+    expect(tiny.value).toBeCloseTo(1.25);
   });
 });

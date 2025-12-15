@@ -1,6 +1,10 @@
 import binaryen from "binaryen";
-import { refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
-import { unboxOutcomeValue } from "../outcome-values.js";
+import {
+  refCast,
+  refTest,
+  structGetFieldValue,
+} from "@voyd/lib/binaryen-gc/index.js";
+import { getOutcomeValueBoxType, unboxOutcomeValue } from "../outcome-values.js";
 import type { CodegenContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { EFFECT_RESULT_STATUS, VALUE_TAG } from "./constants.js";
@@ -20,6 +24,30 @@ const trapOnNonZero = (
     ctx.mod.unreachable(),
     ctx.mod.nop()
   );
+
+const toWriteValueBits = ({
+  value,
+  valueType,
+  ctx,
+}: {
+  value: binaryen.ExpressionRef;
+  valueType: binaryen.Type;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  if (valueType === binaryen.i32) {
+    return ctx.mod.i64.extend_s(value);
+  }
+  if (valueType === binaryen.i64) {
+    return value;
+  }
+  if (valueType === binaryen.f32) {
+    return ctx.mod.i64.extend_u(ctx.mod.i32.reinterpret(value));
+  }
+  if (valueType === binaryen.f64) {
+    return ctx.mod.i64.reinterpret(value);
+  }
+  return ctx.mod.unreachable();
+};
 
 const encodeEffectArgs = ({
   ctx,
@@ -138,9 +166,15 @@ export const createHandleOutcome = ({
         [
           ctx.mod.i32.const(tag),
           tag === VALUE_TAG.none
-            ? ctx.mod.i32.const(0)
-            : unboxOutcomeValue({
-                payload: runtime.outcomePayload(ctx.mod.local.get(outcomeLocal, runtime.outcomeType)),
+            ? ctx.mod.i64.const(0, 0)
+            : toWriteValueBits({
+                value: unboxOutcomeValue({
+                  payload: runtime.outcomePayload(
+                    ctx.mod.local.get(outcomeLocal, runtime.outcomeType)
+                  ),
+                  valueType,
+                  ctx,
+                }),
                 valueType,
                 ctx,
               }),
@@ -262,6 +296,11 @@ export const createHandleOutcomeDynamic = ({
     const outcomeTagLocal = 5;
     const payloadLocal = 6;
 
+    const boxTypeI32 = getOutcomeValueBoxType({ valueType: binaryen.i32, ctx });
+    const boxTypeI64 = getOutcomeValueBoxType({ valueType: binaryen.i64, ctx });
+    const boxTypeF32 = getOutcomeValueBoxType({ valueType: binaryen.f32, ctx });
+    const boxTypeF64 = getOutcomeValueBoxType({ valueType: binaryen.f64, ctx });
+
     const payload = runtime.outcomePayload(
       ctx.mod.local.get(outcomeLocal, runtime.outcomeType)
     );
@@ -276,7 +315,7 @@ export const createHandleOutcomeDynamic = ({
               imports.writeValue,
               [
                 ctx.mod.i32.const(VALUE_TAG.none),
-                ctx.mod.i32.const(0),
+                ctx.mod.i64.const(0, 0),
                 ctx.mod.local.get(bufPtrLocal, binaryen.i32),
                 ctx.mod.local.get(bufLenLocal, binaryen.i32),
               ],
@@ -284,15 +323,32 @@ export const createHandleOutcomeDynamic = ({
             ),
             ctx
           ),
-        ]),
+          ctx.mod.return(
+            runtime.makeEffectResult({
+              status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.value),
+              cont: ctx.mod.ref.null(binaryen.anyref),
+            })
+          ),
+        ])
+      ),
+      ctx.mod.if(
+        refTest(
+          ctx.mod,
+          ctx.mod.local.get(payloadLocal, binaryen.eqref),
+          boxTypeI32
+        ),
         ctx.mod.block(null, [
           trapOnNonZero(
             ctx.mod.call(
               imports.writeValue,
               [
                 ctx.mod.i32.const(VALUE_TAG.i32),
-                unboxOutcomeValue({
-                  payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                toWriteValueBits({
+                  value: unboxOutcomeValue({
+                    payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                    valueType: binaryen.i32,
+                    ctx,
+                  }),
                   valueType: binaryen.i32,
                   ctx,
                 }),
@@ -303,8 +359,123 @@ export const createHandleOutcomeDynamic = ({
             ),
             ctx
           ),
+          ctx.mod.return(
+            runtime.makeEffectResult({
+              status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.value),
+              cont: ctx.mod.ref.null(binaryen.anyref),
+            })
+          ),
         ])
       ),
+      ctx.mod.if(
+        refTest(
+          ctx.mod,
+          ctx.mod.local.get(payloadLocal, binaryen.eqref),
+          boxTypeI64
+        ),
+        ctx.mod.block(null, [
+          trapOnNonZero(
+            ctx.mod.call(
+              imports.writeValue,
+              [
+                ctx.mod.i32.const(VALUE_TAG.i64),
+                toWriteValueBits({
+                  value: unboxOutcomeValue({
+                    payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                    valueType: binaryen.i64,
+                    ctx,
+                  }),
+                  valueType: binaryen.i64,
+                  ctx,
+                }),
+                ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+                ctx.mod.local.get(bufLenLocal, binaryen.i32),
+              ],
+              binaryen.i32
+            ),
+            ctx
+          ),
+          ctx.mod.return(
+            runtime.makeEffectResult({
+              status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.value),
+              cont: ctx.mod.ref.null(binaryen.anyref),
+            })
+          ),
+        ])
+      ),
+      ctx.mod.if(
+        refTest(
+          ctx.mod,
+          ctx.mod.local.get(payloadLocal, binaryen.eqref),
+          boxTypeF32
+        ),
+        ctx.mod.block(null, [
+          trapOnNonZero(
+            ctx.mod.call(
+              imports.writeValue,
+              [
+                ctx.mod.i32.const(VALUE_TAG.f32),
+                toWriteValueBits({
+                  value: unboxOutcomeValue({
+                    payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                    valueType: binaryen.f32,
+                    ctx,
+                  }),
+                  valueType: binaryen.f32,
+                  ctx,
+                }),
+                ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+                ctx.mod.local.get(bufLenLocal, binaryen.i32),
+              ],
+              binaryen.i32
+            ),
+            ctx
+          ),
+          ctx.mod.return(
+            runtime.makeEffectResult({
+              status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.value),
+              cont: ctx.mod.ref.null(binaryen.anyref),
+            })
+          ),
+        ])
+      ),
+      ctx.mod.if(
+        refTest(
+          ctx.mod,
+          ctx.mod.local.get(payloadLocal, binaryen.eqref),
+          boxTypeF64
+        ),
+        ctx.mod.block(null, [
+          trapOnNonZero(
+            ctx.mod.call(
+              imports.writeValue,
+              [
+                ctx.mod.i32.const(VALUE_TAG.f64),
+                toWriteValueBits({
+                  value: unboxOutcomeValue({
+                    payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                    valueType: binaryen.f64,
+                    ctx,
+                  }),
+                  valueType: binaryen.f64,
+                  ctx,
+                }),
+                ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+                ctx.mod.local.get(bufLenLocal, binaryen.i32),
+              ],
+              binaryen.i32
+            ),
+            ctx
+          ),
+          ctx.mod.return(
+            runtime.makeEffectResult({
+              status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.value),
+              cont: ctx.mod.ref.null(binaryen.anyref),
+            })
+          ),
+        ])
+      ),
+      ctx.mod.unreachable(),
       ctx.mod.return(
         runtime.makeEffectResult({
           status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.value),
@@ -396,6 +567,9 @@ export const createHandleOutcomeDynamic = ({
 
     ctx.mod.addFunctionExport(name, exportName);
     supportedValueTag({ wasmType: binaryen.i32, label: exportName });
+    supportedValueTag({ wasmType: binaryen.i64, label: exportName });
+    supportedValueTag({ wasmType: binaryen.f32, label: exportName });
+    supportedValueTag({ wasmType: binaryen.f64, label: exportName });
     supportedValueTag({ wasmType: binaryen.none, label: exportName });
     return name;
   });
