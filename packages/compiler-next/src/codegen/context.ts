@@ -16,6 +16,8 @@ import type {
   HirCallExpr,
   HirTypeExpr,
   HirLambdaExpr,
+  HirCondExpr,
+  HirEffectHandlerExpr,
 } from "../semantics/hir/index.js";
 import type {
   HirExprId,
@@ -23,20 +25,34 @@ import type {
   HirStmtId,
   SymbolId,
   TypeId,
+  EffectRowId,
 } from "../semantics/ids.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypingResult } from "../semantics/typing/typing.js";
 import type { createRttContext } from "./rtt/index.js";
 import type { BindingResult } from "../semantics/binding/binding.js";
 import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
+import type { EffectRuntime } from "./effects/runtime-abi.js";
+import type { OutcomeValueBox } from "./effects/outcome-values.js";
+import type { EffectTableSidecar } from "./effects/effect-table-types.js";
+import type { EffectLoweringResult } from "./effects/effect-lowering.js";
+import type { ResumeKind } from "./effects/runtime-abi.js";
+import type { ContinuationBackendOptions } from "./effects/backend.js";
+import type { EffectsBackend } from "./effects/codegen-backend.js";
+import type { EffectsState } from "./effects/state.js";
+import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
+import type { EffectsLoweringInfo } from "../semantics/effects/analysis.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
   validate?: boolean;
+  emitEffectHelpers?: boolean;
+  continuationBackend?: ContinuationBackendOptions;
 }
 
 export interface CodegenResult {
   module: binaryen.Module;
+  effectTable?: EffectTableSidecar;
 }
 
 export interface FunctionMetadata {
@@ -49,6 +65,8 @@ export interface FunctionMetadata {
   resultTypeId: TypeId;
   typeArgs: readonly TypeId[];
   instanceKey: string;
+  effectful: boolean;
+  effectRow?: EffectRowId;
 }
 
 export interface StructuralFieldInfo {
@@ -94,10 +112,12 @@ export interface CodegenContext {
   mod: binaryen.Module;
   moduleId: string;
   moduleLabel: string;
+  effectIdOffset: number;
   binding: BindingResult;
   symbolTable: SymbolTable;
   hir: HirGraph;
   typing: TypingResult;
+  effectsInfo: EffectsLoweringInfo;
   options: Required<CodegenOptions>;
   functions: Map<string, FunctionMetadata[]>;
   functionInstances: Map<string, FunctionMetadata>;
@@ -105,7 +125,7 @@ export interface CodegenContext {
   structTypes: Map<string, StructuralTypeInfo>;
   fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
-  closureFunctionTypes: Map<string, binaryen.Type>;
+  functionRefTypes: Map<string, binaryen.Type>;
   lambdaEnvs: Map<
     string,
     {
@@ -123,6 +143,11 @@ export interface CodegenContext {
   >;
   lambdaFunctions: Map<string, string>;
   rtt: ReturnType<typeof createRttContext>;
+  effectsRuntime: EffectRuntime;
+  effectsBackend: EffectsBackend;
+  effectsState: EffectsState;
+  effectLowering: EffectLoweringResult;
+  outcomeValueTypes: Map<string, OutcomeValueBox>;
 }
 
 export interface LocalBindingBase {
@@ -147,13 +172,42 @@ export interface LocalBindingCapture extends LocalBindingBase {
 
 export type LocalBinding = LocalBindingLocal | LocalBindingCapture;
 
+export interface HandlerScope {
+  prevHandler: LocalBindingLocal;
+  label?: number;
+}
+
+export interface ContinuationBinding {
+  continuationLocal: LocalBindingLocal;
+  tailGuardLocal: LocalBindingLocal;
+  resumeKind: ResumeKind;
+  returnTypeId: TypeId;
+}
+
+export interface LoopScope {
+  breakLabel: string;
+  continueLabel: string;
+  label?: string;
+}
+
 export interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;
+  tempLocals: Map<number, LocalBindingLocal>;
   locals: binaryen.Type[];
   nextLocalIndex: number;
   returnTypeId: TypeId;
+  currentHandler?: { index: number; type: binaryen.Type };
   instanceKey?: string;
   typeInstanceKey?: string;
+  effectful: boolean;
+  handlerStack?: HandlerScope[];
+  loopStack?: LoopScope[];
+  continuations?: Map<SymbolId, ContinuationBinding>;
+  continuation?: {
+    cfg: GroupContinuationCfg;
+    startedLocal: LocalBindingLocal;
+    activeSiteLocal: LocalBindingLocal;
+  };
 }
 
 export interface CompiledExpression {
@@ -191,11 +245,13 @@ export type {
   HirIfExpr,
   HirMatchExpr,
   HirWhileExpr,
+  HirCondExpr,
   HirAssignExpr,
   HirObjectLiteralExpr,
   HirFieldAccessExpr,
   HirCallExpr,
   HirTypeExpr,
+  HirEffectHandlerExpr,
   SymbolTable,
   HirExprId,
   HirItemId,
@@ -203,4 +259,6 @@ export type {
   SymbolId,
   TypeId,
   HirLambdaExpr,
+  EffectRowId,
+  OutcomeValueBox,
 };

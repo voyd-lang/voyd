@@ -6,7 +6,10 @@ import type {
 import { compileCallExpr } from "./calls.js";
 import { compileBlockExpr } from "./blocks.js";
 import {
+  compileBreakExpr,
+  compileContinueExpr,
   compileIfExpr,
+  compileLoopExpr,
   compileMatchExpr,
   compileWhileExpr,
 } from "./control-flow.js";
@@ -75,6 +78,12 @@ export const compileExpression: ExpressionCompiler = ({
       );
     case "while":
       return compileWhileExpr(expr, ctx, fnCtx, compileExpression);
+    case "loop":
+      return compileLoopExpr(expr, ctx, fnCtx, compileExpression);
+    case "break":
+      return compileBreakExpr(expr, ctx, fnCtx, compileExpression);
+    case "continue":
+      return compileContinueExpr(expr, ctx, fnCtx);
     case "assign":
       return compileAssignExpr(expr, ctx, fnCtx, compileExpression);
     case "object-literal":
@@ -85,6 +94,15 @@ export const compileExpression: ExpressionCompiler = ({
       return compileTupleExpr(expr, ctx, fnCtx, compileExpression);
     case "lambda":
       return compileLambdaExpr(expr, ctx, fnCtx, compileExpression);
+    case "effect-handler":
+      return ctx.effectsBackend.compileEffectHandlerExpr({
+        expr,
+        ctx,
+        fnCtx,
+        compileExpr: compileExpression,
+        tailPosition,
+        expectedResultTypeId,
+      });
     default:
       throw new Error(
         `codegen does not support ${expr.exprKind} expressions yet`

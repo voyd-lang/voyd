@@ -1,8 +1,11 @@
 import binaryen from "binaryen";
 import {
   callRef,
+  defineStructType,
   initStruct,
+  binaryenTypeToHeapType,
   refCast,
+  refFunc,
   structGetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
 import { LOOKUP_FIELD_ACCESSOR, RTT_METADATA_SLOTS } from "./rtt/index.js";
@@ -15,8 +18,11 @@ import type {
 } from "./context.js";
 import { allocateTempLocal } from "./locals.js";
 import {
+  getClosureTypeInfo,
   getStructuralTypeInfo,
+  wasmTypeFor,
 } from "./types.js";
+import { wrapValueInOutcome } from "./effects/outcome-values.js";
 
 export const requiresStructuralConversion = (
   actualType: TypeId,
@@ -57,6 +63,26 @@ export const coerceValueToType = ({
     return value;
   }
 
+  const targetDesc = ctx.typing.arena.get(targetType);
+  const actualDesc = ctx.typing.arena.get(actualType);
+  if (targetDesc.kind === "function" && actualDesc.kind === "function") {
+    const targetEffectful =
+      typeof targetDesc.effectRow === "number" &&
+      !ctx.typing.effects.isEmpty(targetDesc.effectRow);
+    const actualEffectful =
+      typeof actualDesc.effectRow === "number" &&
+      !ctx.typing.effects.isEmpty(actualDesc.effectRow);
+
+    if (targetEffectful && !actualEffectful) {
+      return coercePureClosureToEffectful({
+        value,
+        actualType,
+        targetType,
+        ctx,
+      });
+    }
+  }
+
   const targetInfo = getStructuralTypeInfo(targetType, ctx);
   if (!targetInfo) {
     return value;
@@ -78,6 +104,106 @@ export const coerceValueToType = ({
     ctx,
     fnCtx,
   });
+};
+
+const coercePureClosureToEffectful = ({
+  value,
+  actualType,
+  targetType,
+  ctx,
+}: {
+  value: binaryen.ExpressionRef;
+  actualType: TypeId;
+  targetType: TypeId;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  const key = `${actualType}->${targetType}`;
+  const cache = ctx.effectsState.closureCoercions;
+  const cached = cache.get(key);
+  if (cached) {
+    return initStruct(ctx.mod, cached.envType, [
+      refFunc(ctx.mod, cached.fnName, cached.fnRefType),
+      value,
+    ]);
+  }
+
+  const actualClosure = getClosureTypeInfo(actualType, ctx);
+  const targetClosure = getClosureTypeInfo(targetType, ctx);
+  const wrapperIndex = cache.size;
+  const fnName = `__voyd_effect_closure_wrap_${wrapperIndex}_${actualType}_${targetType}`;
+  const envType = defineStructType(ctx.mod, {
+    name: `__voydEffectClosureWrapEnv_${wrapperIndex}`,
+    fields: [
+      { name: "__fn", type: binaryen.funcref, mutable: false },
+      { name: "inner", type: actualClosure.interfaceType, mutable: false },
+    ],
+    supertype: binaryenTypeToHeapType(targetClosure.interfaceType),
+    final: true,
+  });
+  const fnRefType = targetClosure.fnRefType;
+
+  const params = binaryen.createType([
+    targetClosure.interfaceType,
+    ...targetClosure.paramTypes,
+  ] as number[]);
+
+  const innerEnv = () =>
+    refCast(ctx.mod, ctx.mod.local.get(0, targetClosure.interfaceType), envType);
+  const innerClosure = () =>
+    structGetFieldValue({
+      mod: ctx.mod,
+      fieldIndex: 1,
+      fieldType: actualClosure.interfaceType,
+      exprRef: innerEnv(),
+    });
+  const innerFnField = structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: 0,
+    fieldType: binaryen.funcref,
+    exprRef: innerClosure(),
+  });
+  const innerTarget =
+    actualClosure.fnRefType === binaryen.funcref
+      ? innerFnField
+      : refCast(ctx.mod, innerFnField, actualClosure.fnRefType);
+
+  const userArgsStart = 2; // [self, handler, ...userArgs]
+  const callArgs = [
+    innerClosure(),
+    ...targetClosure.paramTypes
+      .slice(1)
+      .map((type, index) => ctx.mod.local.get(userArgsStart + index, type)),
+  ];
+  const innerResult = callRef(
+    ctx.mod,
+    innerTarget,
+    callArgs as number[],
+    actualClosure.resultType
+  );
+  const innerValueType = wasmTypeFor(actualDescReturnTypeId(actualType, ctx), ctx);
+  const wrapped =
+    binaryen.getExpressionType(innerResult) === innerValueType
+      ? wrapValueInOutcome({ valueExpr: innerResult, valueType: innerValueType, ctx })
+      : innerResult;
+
+  ctx.mod.addFunction(
+    fnName,
+    params,
+    targetClosure.resultType,
+    [],
+    wrapped
+  );
+  cache.set(key, { envType, fnName, fnRefType });
+
+  return initStruct(ctx.mod, envType, [refFunc(ctx.mod, fnName, fnRefType), value]);
+};
+
+const actualDescReturnTypeId = (typeId: TypeId, ctx: CodegenContext): TypeId => {
+  const desc = ctx.typing.arena.get(typeId);
+  if (desc.kind !== "function") {
+    throw new Error("expected function type for closure coercion");
+  }
+  return desc.returnType;
 };
 
 export const emitStructuralConversion = ({

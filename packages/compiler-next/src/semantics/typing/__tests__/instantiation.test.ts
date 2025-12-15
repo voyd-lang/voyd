@@ -1226,12 +1226,12 @@ describe("instantiation argument handling", () => {
     const genericFn = ctx.arena.internFunction({
       parameters: [{ type: paramRef, optional: false }],
       returnType: ctx.arena.internUnion([paramRef, ctx.primitives.void]),
-      effects: ctx.primitives.defaultEffectRow,
+      effectRow: ctx.primitives.defaultEffectRow,
     });
     const concreteFn = ctx.arena.internFunction({
       parameters: [{ type: ctx.primitives.bool, optional: false }],
       returnType: ctx.arena.internUnion([ctx.primitives.bool, ctx.primitives.void]),
-      effects: ctx.primitives.defaultEffectRow,
+      effectRow: ctx.primitives.defaultEffectRow,
     });
 
     const result = ctx.arena.unify(concreteFn, genericFn, {

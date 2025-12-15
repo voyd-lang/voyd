@@ -541,6 +541,12 @@ export interface HirEffectHandlerClause {
   resumable: "ctl" | "fn";
   parameters: readonly HirMethodParameter[];
   body: HirExprId;
+  tailResumption?: {
+    enforcement: "static" | "runtime";
+    calls: number;
+    minCalls?: number;
+    escapes: boolean;
+  };
 }
 
 export interface HirEffectHandlerExpr extends HirExpressionBase {

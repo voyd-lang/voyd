@@ -1,0 +1,6 @@
+eff Beta
+  pong(resume, value: i32) -> i32
+
+pub fn main(): Beta -> i32
+  Beta::pong(2) + 1
+

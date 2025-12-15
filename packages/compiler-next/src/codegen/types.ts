@@ -30,6 +30,40 @@ const bin = binaryen as unknown as AugmentedBinaryen;
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
 
+export const getFunctionRefType = ({
+  params,
+  result,
+  ctx,
+  label,
+}: {
+  params: readonly binaryen.Type[];
+  result: binaryen.Type;
+  ctx: CodegenContext;
+  label?: string;
+}): binaryen.Type => {
+  const key = `${params.join(",")}->${result}`;
+  const cached = ctx.functionRefTypes.get(key);
+  if (cached) {
+    return cached;
+  }
+  const safeLabel = label ? `_${sanitizeIdentifier(label)}` : "";
+  const tempName = `__fn_sig_${ctx.functionRefTypes.size}${safeLabel}`;
+  const fnRef = ctx.mod.addFunction(
+    tempName,
+    binaryen.createType(params as number[]),
+    result,
+    [],
+    ctx.mod.nop()
+  );
+  const fnType = bin._BinaryenTypeFromHeapType(
+    bin._BinaryenFunctionGetType(fnRef),
+    false
+  );
+  ctx.functionRefTypes.set(key, fnType);
+  ctx.mod.removeFunction(tempName);
+  return fnType;
+};
+
 const functionKey = (moduleId: string, symbol: number): string =>
   `${moduleId}::${symbol}`;
 
@@ -45,12 +79,12 @@ const closureSignatureKey = ({
   moduleId,
   parameters,
   returnType,
-  effects,
+  effectRow,
 }: {
   moduleId: string;
   parameters: ReadonlyArray<{ type: TypeId; label?: string; optional?: boolean }>;
   returnType: TypeId;
-  effects: unknown;
+  effectRow: unknown;
 }): string => {
   const params = parameters
     .map((param) => {
@@ -59,7 +93,7 @@ const closureSignatureKey = ({
       return `${label}:${param.type}${optional}`;
     })
     .join("|");
-  return `${moduleId}::(${params})->${returnType}|${effects}`;
+  return `${moduleId}::(${params})->${returnType}|${effectRow}`;
 };
 
 const closureStructName = ({
@@ -79,26 +113,7 @@ const getClosureFunctionRefType = ({
   result: binaryen.Type;
   ctx: CodegenContext;
 }): binaryen.Type => {
-  const key = `${params.join(",")}->${result}`;
-  const cached = ctx.closureFunctionTypes.get(key);
-  if (cached) {
-    return cached;
-  }
-  const tempName = `__closure_sig_${ctx.closureFunctionTypes.size}`;
-  const fnRef = ctx.mod.addFunction(
-    tempName,
-    binaryen.createType(params as number[]),
-    result,
-    [],
-    ctx.mod.nop()
-  );
-  const fnType = bin._BinaryenTypeFromHeapType(
-    bin._BinaryenFunctionGetType(fnRef),
-    false
-  );
-  ctx.closureFunctionTypes.set(key, fnType);
-  ctx.mod.removeFunction(tempName);
-  return fnType;
+  return getFunctionRefType({ params, result, ctx, label: "closure" });
 };
 
 const ensureClosureTypeInfo = ({
@@ -108,7 +123,11 @@ const ensureClosureTypeInfo = ({
   seen,
 }: {
   typeId: TypeId;
-  desc: { parameters: ReadonlyArray<{ type: TypeId; label?: string; optional?: boolean }>; returnType: TypeId; effects: unknown };
+  desc: {
+    parameters: ReadonlyArray<{ type: TypeId; label?: string; optional?: boolean }>;
+    returnType: TypeId;
+    effectRow: unknown;
+  };
   ctx: CodegenContext;
   seen: Set<TypeId>;
 }): ClosureTypeInfo => {
@@ -116,17 +135,25 @@ const ensureClosureTypeInfo = ({
     moduleId: ctx.moduleId,
     parameters: desc.parameters,
     returnType: desc.returnType,
-    effects: desc.effects,
+    effectRow: desc.effectRow,
   });
   const cached = ctx.closureTypes.get(key);
   if (cached) {
     return cached;
   }
 
-  const paramTypes = desc.parameters.map((param) =>
+  const effectful =
+    typeof desc.effectRow === "number" && !ctx.typing.effects.isEmpty(desc.effectRow);
+  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
+  const userParamTypes = desc.parameters.map((param) =>
     wasmTypeFor(param.type, ctx, seen)
   );
-  const resultType = wasmTypeFor(desc.returnType, ctx, seen);
+  const paramTypes = effectful
+    ? [handlerParamType, ...userParamTypes]
+    : userParamTypes;
+  const resultType = effectful
+    ? ctx.effectsRuntime.outcomeType
+    : wasmTypeFor(desc.returnType, ctx, seen);
   const interfaceType = defineStructType(ctx.mod, {
     name: closureStructName({ moduleLabel: ctx.moduleLabel, key }),
     fields: [{ name: "__fn", type: binaryen.funcref, mutable: false }],
@@ -657,11 +684,15 @@ const createMethodLookupEntries = ({
           `codegen missing metadata for trait method impl ${implMethodSymbol}`
         );
       }
-      const params = [
-        ctx.rtt.baseType,
-        ...meta.paramTypes.slice(1),
-      ];
-      const receiverType = meta.paramTypes[0] ?? runtimeType;
+      const handlerParamType = ctx.effectsRuntime.handlerFrameType;
+      const receiverTypeIndex = meta.effectful ? 1 : 0;
+      const receiverType = meta.paramTypes[receiverTypeIndex] ?? runtimeType;
+      const userParamTypes = meta.effectful
+        ? meta.paramTypes.slice(2)
+        : meta.paramTypes.slice(1);
+      const params = meta.effectful
+        ? [handlerParamType, ctx.rtt.baseType, ...userParamTypes]
+        : [ctx.rtt.baseType, ...userParamTypes];
       const wrapperName = `${typeLabel}__method_${impl.traitSymbol}_${traitMethodSymbol}`;
       const wrapper = ctx.mod.addFunction(
         wrapperName,
@@ -671,14 +702,28 @@ const createMethodLookupEntries = ({
         ctx.mod.call(
           meta.wasmName,
           [
-            refCast(
-              ctx.mod,
-              ctx.mod.local.get(0, ctx.rtt.baseType),
-              receiverType
-            ),
-            ...meta.paramTypes.slice(1).map((type, index) =>
-              ctx.mod.local.get(index + 1, type)
-            ),
+            ...(meta.effectful
+              ? [
+                  ctx.mod.local.get(0, handlerParamType),
+                  refCast(
+                    ctx.mod,
+                    ctx.mod.local.get(1, ctx.rtt.baseType),
+                    receiverType
+                  ),
+                  ...userParamTypes.map((type, index) =>
+                    ctx.mod.local.get(index + 2, type)
+                  ),
+                ]
+              : [
+                  refCast(
+                    ctx.mod,
+                    ctx.mod.local.get(0, ctx.rtt.baseType),
+                    receiverType
+                  ),
+                  ...userParamTypes.map((type, index) =>
+                    ctx.mod.local.get(index + 1, type)
+                  ),
+                ]),
           ],
           meta.resultType
         )

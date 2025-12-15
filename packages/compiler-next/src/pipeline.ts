@@ -16,6 +16,8 @@ import type { ModuleExportTable } from "./semantics/modules.js";
 import type { Diagnostic } from "./diagnostics/index.js";
 import { diagnosticFromCode, DiagnosticError } from "./diagnostics/index.js";
 import { codegenErrorToDiagnostic } from "./codegen/diagnostics.js";
+import type { CodegenOptions } from "./codegen/context.js";
+import type { ContinuationBackendKind } from "./codegen/codegen.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -40,7 +42,7 @@ export type LowerProgramOptions = {
 export type EmitProgramOptions = {
   graph: ModuleGraph;
   semantics: Map<string, SemanticsPipelineResult>;
-  codegenOptions?: { optimize?: boolean; validate?: boolean };
+  codegenOptions?: CodegenOptions;
   entryModuleId?: string;
 };
 
@@ -180,6 +182,51 @@ export const emitProgram = async ({
         (binary as { binary?: Uint8Array }).binary ??
         new Uint8Array();
   return { wasm, module: result.module };
+};
+
+export type ContinuationFallbackBundle = {
+  preferredKind: ContinuationBackendKind;
+  preferredWasm: Uint8Array;
+  fallbackWasm?: Uint8Array;
+};
+
+export const emitProgramWithContinuationFallback = async ({
+  graph,
+  semantics,
+  codegenOptions,
+  entryModuleId,
+}: EmitProgramOptions): Promise<ContinuationFallbackBundle> => {
+  const { orderedModules, entry } = lowerProgram({ graph, semantics });
+  const targetModuleId = entryModuleId ?? entry;
+  const modules = orderedModules
+    .map((id) => semantics.get(id))
+    .filter((value): value is SemanticsPipelineResult => Boolean(value));
+  if (modules.length === 0) {
+    throw new Error("No semantics available for codegen");
+  }
+
+  const codegenImpl = await lazyCodegen();
+  const { preferredKind, preferred, fallback } =
+    codegenImpl.codegenProgramWithContinuationFallback({
+      modules,
+      entryModuleId: targetModuleId,
+      options: codegenOptions,
+    });
+
+  const toWasmBytes = (result: { module: binaryen.Module }): Uint8Array => {
+    const binary = result.module.emitBinary();
+    return binary instanceof Uint8Array
+      ? binary
+      : (binary as { binary?: Uint8Array; output?: Uint8Array }).output ??
+          (binary as { binary?: Uint8Array }).binary ??
+          new Uint8Array();
+  };
+
+  return {
+    preferredKind,
+    preferredWasm: toWasmBytes(preferred),
+    fallbackWasm: fallback ? toWasmBytes(fallback) : undefined,
+  };
 };
 
 export const compileProgram = async (

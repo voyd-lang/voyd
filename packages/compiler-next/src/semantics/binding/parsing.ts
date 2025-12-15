@@ -16,6 +16,7 @@ import {
 import { isIdentifierWithValue } from "../utils.js";
 import type { IntrinsicAttribute } from "../../parser/attributes.js";
 import type { HirBindingKind } from "../hir/index.js";
+import { ensureForm } from "./binders/utils.js";
 
 export interface ParsedFunctionDecl {
   form: Form;
@@ -76,11 +77,27 @@ export interface ParsedImplDecl {
   body: Form;
 }
 
+export interface ParsedEffectOperation {
+  form: Form;
+  name: IdentifierAtom;
+  params: SignatureParam[];
+  resumable: "resume" | "tail";
+  returnType?: Expr;
+}
+
+export interface ParsedEffectDecl {
+  form: Form;
+  visibility: HirVisibility;
+  name: IdentifierAtom;
+  operations: readonly ParsedEffectOperation[];
+}
+
 interface ParsedFunctionSignature {
   name: IdentifierAtom;
   params: SignatureParam[];
   returnType?: Expr;
   typeParameters: readonly IdentifierAtom[];
+  effectType?: Expr;
 }
 
 interface SignatureParam {
@@ -323,6 +340,18 @@ export const parseImplDecl = (form: Form): ParsedImplDecl | null => {
 };
 
 const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
+  if (form.calls(":") && form.at(2) && isForm(form.at(2)) && (form.at(2) as Form).calls("->")) {
+    const effectTail = form.at(2) as Form;
+    const head = parseFunctionHead(form.at(1));
+    return {
+      name: head.name,
+      typeParameters: head.typeParameters,
+      params: head.params.flatMap(parseParameter),
+      effectType: effectTail.at(1),
+      returnType: effectTail.at(2),
+    };
+  }
+
   if (form.calls("->")) {
     const head = parseFunctionHead(form.at(1));
     return {
@@ -411,6 +440,116 @@ const parseParameter = (expr: Expr): SignatureParam | SignatureParam[] => {
   }
 
   throw new Error("unsupported parameter form");
+};
+
+export const parseEffectDecl = (form: Form): ParsedEffectDecl | null => {
+  let index = 0;
+  let visibility: HirVisibility = moduleVisibility();
+  const first = form.at(0);
+
+  if (isIdentifierWithValue(first, "pub")) {
+    visibility = packageVisibility();
+    index += 1;
+  }
+
+  const keyword = form.at(index);
+  if (!isIdentifierWithValue(keyword, "eff")) {
+    return null;
+  }
+
+  const next = form.at(index + 1);
+  if (!next) {
+    throw new Error("eff declaration missing name or operation");
+  }
+
+  const operations: ParsedEffectOperation[] = [];
+  if (isIdentifierAtom(next)) {
+    const body = form.at(index + 2);
+    if (!body) {
+      throw new Error("eff declaration missing body");
+    }
+    if (!isForm(body) || !body.calls("block")) {
+      throw new Error("eff declaration body must be a block");
+    }
+    body.rest.forEach((entry) => {
+      if (!isForm(entry)) {
+        throw new Error("effect operations must be forms");
+      }
+      operations.push(parseEffectOperation(entry));
+    });
+    return { form, visibility, name: next, operations };
+  }
+
+  if (isForm(next)) {
+    const op = parseEffectOperation(next);
+    return { form, visibility, name: op.name, operations: [op] };
+  }
+
+  throw new Error("invalid eff declaration");
+};
+
+const parseEffectOperation = (form: Form): ParsedEffectOperation => {
+  const opForm = form.calls("fn") ? ensureForm(form.at(1), "effect operation signature must be a form") : form;
+  const signature = parseEffectOperationSignature(opForm);
+  return {
+    form,
+    name: signature.name,
+    params: signature.params,
+    resumable: signature.resumable,
+    returnType: signature.returnType,
+  };
+};
+
+const parseEffectOperationSignature = (
+  form: Form
+): { name: IdentifierAtom; params: SignatureParam[]; resumable: "resume" | "tail"; returnType?: Expr } => {
+  let headExpr: Expr | undefined = form;
+  let returnType: Expr | undefined;
+
+  if (form.calls("->")) {
+    headExpr = form.at(1);
+    returnType = form.at(2);
+  }
+
+  if (!headExpr) {
+    throw new Error("effect operation missing name");
+  }
+
+  if (isIdentifierAtom(headExpr)) {
+    return {
+      name: headExpr,
+      params: [],
+      resumable: "resume",
+      returnType,
+    };
+  }
+
+  if (!isForm(headExpr)) {
+    throw new Error("effect operation name must be an identifier");
+  }
+
+  const nameExpr = headExpr.at(0);
+  if (!isIdentifierAtom(nameExpr)) {
+    throw new Error("effect operation name must be an identifier");
+  }
+  const rawParams = headExpr.rest;
+  const resumableParam = rawParams[0];
+  const resumable =
+    isIdentifierAtom(resumableParam) && (resumableParam.value === "tail" || resumableParam.value === "resume")
+      ? (resumableParam.value as "resume" | "tail")
+      : "resume";
+
+  const params = rawParams
+    .slice(resumable === "resume" || resumable === "tail" ? 1 : 0)
+    .flatMap(parseParameter)
+    .flat();
+
+  return {
+    name: nameExpr,
+    params,
+    resumable,
+    returnType,
+  };
 };
 
 const parseLabeledParameters = (form: Form): SignatureParam[] =>
@@ -661,11 +800,4 @@ const unwrapFieldEntry = (
   }
 
   return { field, modifier };
-};
-
-const ensureForm = (expr: Expr | undefined, message: string): Form => {
-  if (!isForm(expr)) {
-    throw new Error(message);
-  }
-  return expr;
 };

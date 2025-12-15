@@ -1,0 +1,8 @@
+type I32Closure = () -> i32
+
+fn make_caller(x: i32) -> I32Closure
+  () => x + 1
+
+pub fn main() -> i32
+  let f = make_caller(1)
+  f()

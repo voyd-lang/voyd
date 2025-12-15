@@ -22,7 +22,9 @@ export type SymbolKind =
   | "trait"
   | "impl"
   | "module"
-  | "macro";
+  | "macro"
+  | "effect"
+  | "effect-op";
 
 export interface ScopeInfo {
   id: ScopeId;

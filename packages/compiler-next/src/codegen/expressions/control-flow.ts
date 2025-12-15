@@ -12,6 +12,7 @@ import type {
   LocalBindingLocal,
   TypeId,
 } from "../context.js";
+import { resolveLoopScope, withLoopScope } from "../control-flow-stack.js";
 import { allocateTempLocal } from "../locals.js";
 import { RTT_METADATA_SLOTS } from "../rtt/index.js";
 import {
@@ -20,6 +21,11 @@ import {
   getStructuralTypeInfo,
   getMatchPatternTypeId,
 } from "../types.js";
+import type {
+  HirBreakExpr,
+  HirContinueExpr,
+  HirLoopExpr,
+} from "../../semantics/hir/index.js";
 
 const getNominalComponentFromTypingResult = (
   type: TypeId,
@@ -273,28 +279,96 @@ export const compileWhileExpr = (
   const loopLabel = `while_loop_${expr.id}`;
   const breakLabel = `${loopLabel}_break`;
 
+  const conditionExpr = compileExpr({
+    exprId: expr.condition,
+    ctx,
+    fnCtx,
+  }).expr;
+
   const conditionCheck = ctx.mod.if(
-    ctx.mod.i32.eqz(
-      compileExpr({ exprId: expr.condition, ctx, fnCtx }).expr
-    ),
+    ctx.mod.i32.eqz(conditionExpr),
     ctx.mod.br(breakLabel)
   );
 
-  const body = compileExpr({ exprId: expr.body, ctx, fnCtx }).expr;
-  const loopBody = ctx.mod.block(null, [
-    conditionCheck,
-    body,
-    ctx.mod.br(loopLabel),
-  ]);
+  const body = withLoopScope(
+    fnCtx,
+    { breakLabel, continueLabel: loopLabel },
+    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr
+  );
+  const loopBody = ctx.mod.block(
+    null,
+    [
+      conditionCheck,
+      body,
+      ctx.mod.br(loopLabel),
+    ],
+    binaryen.none
+  );
 
   return {
     expr: ctx.mod.block(
       breakLabel,
-      [ctx.mod.loop(loopLabel, loopBody)],
+      [
+        ctx.mod.loop(loopLabel, loopBody),
+      ],
       binaryen.none
     ),
     usedReturnCall: false,
   };
+};
+
+export const compileLoopExpr = (
+  expr: HirLoopExpr,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  compileExpr: ExpressionCompiler
+): CompiledExpression => {
+  const loopLabel = `loop_${expr.id}`;
+  const breakLabel = `${loopLabel}_break`;
+  const body = withLoopScope(
+    fnCtx,
+    { breakLabel, continueLabel: loopLabel },
+    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr
+  );
+  const loopBody = ctx.mod.block(null, [body, ctx.mod.br(loopLabel)], binaryen.none);
+  return {
+    expr: ctx.mod.block(breakLabel, [ctx.mod.loop(loopLabel, loopBody)], binaryen.none),
+    usedReturnCall: false,
+  };
+};
+
+export const compileBreakExpr = (
+  expr: HirBreakExpr,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  compileExpr: ExpressionCompiler
+): CompiledExpression => {
+  const target = resolveLoopScope({ fnCtx, label: expr.label });
+  const ops: binaryen.ExpressionRef[] = [];
+
+  if (typeof expr.value === "number") {
+    const valueExpr = compileExpr({ exprId: expr.value, ctx, fnCtx }).expr;
+    ops.push(
+      binaryen.getExpressionType(valueExpr) === binaryen.none
+        ? valueExpr
+        : ctx.mod.drop(valueExpr)
+    );
+  }
+  ops.push(ctx.mod.br(target.breakLabel));
+
+  return {
+    expr: ctx.mod.block(null, ops, binaryen.none),
+    usedReturnCall: false,
+  };
+};
+
+export const compileContinueExpr = (
+  expr: HirContinueExpr,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): CompiledExpression => {
+  const target = resolveLoopScope({ fnCtx, label: expr.label });
+  return { expr: ctx.mod.br(target.continueLabel), usedReturnCall: false };
 };
 const collectNominalComponents = (
   typeId: TypeId,

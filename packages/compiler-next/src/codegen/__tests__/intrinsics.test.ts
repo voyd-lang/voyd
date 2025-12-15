@@ -7,6 +7,9 @@ import {
   modBinaryenTypeToHeapType,
 } from "@voyd/lib/binaryen-gc/index.js";
 import { getFixedArrayWasmTypes } from "../types.js";
+import { createEffectRuntime } from "../effects/runtime-abi.js";
+import { selectEffectsBackend } from "../effects/codegen-backend.js";
+import { createEffectsState } from "../effects/state.js";
 import type {
   CodegenContext,
   HirCallExpr,
@@ -24,21 +27,25 @@ const span = { start: 0, end: 0 } as const;
 const createContext = () => {
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
+  const effectsRuntime = createEffectRuntime(mod);
 
   const descriptors = new Map<TypeId, TypeDescriptor>();
   const exprTypes = new Map<HirExprId, TypeId>();
   const expressions = new Map<HirExprId, HirExpression>();
   const fnCtx = {
     bindings: new Map(),
+    tempLocals: new Map(),
     locals: [],
     nextLocalIndex: 0,
     returnTypeId: 0 as TypeId,
+    effectful: false,
   };
 
   const ctx: CodegenContext = {
     mod,
     moduleId: "test",
     moduleLabel: "test",
+    effectIdOffset: 0,
     binding: {} as any,
     symbolTable: {} as any,
     hir: { expressions } as any,
@@ -62,18 +69,44 @@ const createContext = () => {
       table: { getExprType: (id: number) => exprTypes.get(id) } as any,
       primitives: { unknown: -1 } as any,
     } as any,
-    options: { optimize: false, validate: false },
+    options: {
+      optimize: false,
+      validate: false,
+      emitEffectHelpers: false,
+      continuationBackend: {},
+    },
     functions: new Map(),
     functionInstances: new Map(),
     itemsToSymbols: new Map(),
     structTypes: new Map(),
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
-    closureFunctionTypes: new Map(),
+    functionRefTypes: new Map(),
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt: { baseType: binaryen.none, extensionHelpers: { i32Array: binaryen.i32 } } as any,
+    effectsRuntime,
+    effectsInfo: {
+      functions: new Map(),
+      operations: new Map(),
+      handlers: new Map(),
+      calls: new Map(),
+      handlerTails: new Map(),
+      lambdas: new Map(),
+    },
+    effectsBackend: undefined as any,
+    effectsState: createEffectsState(),
+    effectLowering: {
+      sitesByExpr: new Map(),
+      sites: [],
+      argsTypes: new Map(),
+      callArgTemps: new Map(),
+      tempTypeIds: new Map(),
+    },
+    outcomeValueTypes: new Map(),
   };
+
+  ctx.effectsBackend = selectEffectsBackend(ctx);
 
   return { ctx, descriptors, exprTypes, expressions, fnCtx };
 };

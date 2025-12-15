@@ -1,0 +1,14 @@
+eff Two
+  first(tail) -> i32
+  second(tail) -> i32
+
+fn add(a: i32, b: i32) -> i32
+  a + b
+
+pub fn main() -> i32
+  try
+    add(Two::first(), Two::second())
+  Two::first(tail):
+    tail(10)
+  Two::second(tail):
+    tail(20)

@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
 import { codegen } from "../index.js";
 import { createRttContext } from "../rtt/index.js";
+import { createEffectRuntime } from "../effects/runtime-abi.js";
+import { selectEffectsBackend } from "../effects/codegen-backend.js";
+import { createEffectsState } from "../effects/state.js";
 import {
   compileFunctions,
   emitModuleExports,
@@ -13,10 +16,15 @@ import {
 } from "../functions.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
+import { buildEffectsLoweringInfo } from "../../semantics/effects/analysis.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
 import type { TypingResult } from "../../semantics/typing/types.js";
 import type { TypeId } from "../../semantics/ids.js";
-import type { CodegenContext, FunctionMetadata } from "../context.js";
+import type {
+  CodegenContext,
+  FunctionMetadata,
+  OutcomeValueBox,
+} from "../context.js";
 
 const loadAst = (fixtureName: string) => {
   const source = readFileSync(
@@ -54,7 +62,12 @@ const getNominalPatternDesc = (typeId: TypeId, typing: TypingResult) => {
   throw new Error("expected match pattern to include a nominal component");
 };
 
-const DEFAULT_OPTIONS = { optimize: false, validate: true } as const;
+const DEFAULT_OPTIONS = {
+  optimize: false,
+  validate: true,
+  emitEffectHelpers: false,
+  continuationBackend: {},
+} as const;
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
@@ -65,16 +78,25 @@ const buildCodegenProgram = (
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
+  const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, FunctionMetadata[]>();
   const functionInstances = new Map<string, FunctionMetadata>();
+  const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
+    effectIdOffset: 0,
     binding: sem.binding,
     symbolTable: sem.symbolTable,
     hir: sem.hir,
     typing: sem.typing,
+    effectsInfo: buildEffectsLoweringInfo({
+      binding: sem.binding,
+      symbolTable: sem.symbolTable,
+      hir: sem.hir,
+      typing: sem.typing,
+    }),
     options: DEFAULT_OPTIONS,
     functions,
     functionInstances,
@@ -82,11 +104,36 @@ const buildCodegenProgram = (
     structTypes: new Map(),
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
-    closureFunctionTypes: new Map(),
+    functionRefTypes: new Map(),
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,
+    effectsRuntime,
+    effectsBackend: undefined as any,
+    effectsState: createEffectsState(),
+    effectLowering: {
+      sitesByExpr: new Map(),
+      sites: [],
+      argsTypes: new Map(),
+      callArgTemps: new Map(),
+      tempTypeIds: new Map(),
+    },
+    outcomeValueTypes,
   }));
+
+  let effectIdOffset = 0;
+  contexts.forEach((ctx) => {
+    ctx.effectIdOffset = effectIdOffset;
+    effectIdOffset += ctx.binding.effects.length;
+  });
+
+  const siteCounter = { current: 0 };
+  contexts.forEach((ctx) => {
+    ctx.effectsBackend = selectEffectsBackend(ctx);
+  });
+  contexts.forEach((ctx) => {
+    ctx.effectLowering = ctx.effectsBackend.buildLowering({ ctx, siteCounter });
+  });
 
   contexts.forEach(registerFunctionMetadata);
   contexts.forEach(registerImportMetadata);
@@ -458,6 +505,16 @@ describe("next codegen", () => {
   it("resolves overloads in nested lambda instances and preserves captures", () => {
     const main = loadMain("lambda_overload_instances.voyd");
     expect(main()).toBe(54);
+  });
+
+  it("coerces pure lambdas to open-effect function types", () => {
+    const main = loadMain("lambda_open_effect_coercion.voyd");
+    expect(main()).toBe(2);
+  });
+
+  it("resumes correctly when multiple suspending call arguments exist", () => {
+    const main = loadMain("effects-multi-arg-resume.voyd");
+    expect(main()).toBe(30);
   });
 
   it("handles attribute-tagged intrinsics through codegen", () => {

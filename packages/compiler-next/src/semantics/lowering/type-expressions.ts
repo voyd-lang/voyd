@@ -27,6 +27,15 @@ export const lowerTypeExpr = (
 
   const currentScope = scope ?? ctx.symbolTable.rootScope;
 
+  if (isForm(expr) && expr.length === 0) {
+    return {
+      typeKind: "tuple",
+      ast: expr.syntaxId,
+      span: toSourceSpan(expr),
+      elements: [],
+    };
+  }
+
   if (isIdentifierAtom(expr)) {
     return lowerNamedType(expr, ctx, currentScope);
   }

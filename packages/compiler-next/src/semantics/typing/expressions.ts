@@ -13,6 +13,10 @@ import {
   typeMatchExpr,
   typeObjectLiteralExpr,
   typeOverloadSetExpr,
+  typeEffectHandlerExpr,
+  typeBreakExpr,
+  typeContinueExpr,
+  typeLoopExpr,
   typeTupleExpr,
   typeWhileExpr,
 } from "./expressions/index.js";
@@ -30,6 +34,9 @@ export const typeExpression = (
 ): TypeId => {
   const cached = ctx.table.getExprType(exprId);
   if (typeof cached === "number") {
+    if (ctx.effects.getExprEffect(exprId) === undefined) {
+      ctx.effects.setExprEffect(exprId, ctx.effects.emptyRow);
+    }
     const applied = applyCurrentSubstitution(cached, ctx, state);
     const appliedExpected =
       typeof expectedType === "number"
@@ -60,6 +67,9 @@ export const typeExpression = (
   const appliedType = applyCurrentSubstitution(type, ctx, state);
   ctx.table.setExprType(exprId, type);
   ctx.resolvedExprTypes.set(exprId, appliedType);
+  if (ctx.effects.getExprEffect(exprId) === undefined) {
+    ctx.effects.setExprEffect(exprId, ctx.effects.emptyRow);
+  }
   return appliedType;
 };
 
@@ -84,6 +94,8 @@ const resolveExpressionType = (
       return typeIfExpr(expr, ctx, state);
     case "match":
       return typeMatchExpr(expr, ctx, state);
+    case "effect-handler":
+      return typeEffectHandlerExpr(expr, ctx, state);
     case "tuple":
       return typeTupleExpr(expr, ctx, state);
     case "object-literal":
@@ -92,8 +104,14 @@ const resolveExpressionType = (
       return typeFieldAccessExpr(expr, ctx, state);
     case "while":
       return typeWhileExpr(expr, ctx, state);
+    case "loop":
+      return typeLoopExpr(expr, ctx, state);
     case "assign":
       return typeAssignExpr(expr, ctx, state);
+    case "break":
+      return typeBreakExpr(expr, ctx, state);
+    case "continue":
+      return typeContinueExpr(expr, ctx);
     case "lambda":
       return typeLambdaExpr(expr, ctx, state, expectedType);
     default:

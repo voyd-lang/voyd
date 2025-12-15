@@ -1,6 +1,9 @@
 import {
   type Expr,
   type Form,
+  type IdentifierAtom,
+  type InternalIdentifierAtom,
+  type Syntax,
   isBoolAtom,
   isFloatAtom,
   isForm,
@@ -22,6 +25,7 @@ import { lowerFieldAccessExpr, isFieldAccessForm } from "./field-access.js";
 import { lowerIf } from "./if.js";
 import { lowerLambda } from "./lambda.js";
 import { lowerMatch } from "./match.js";
+import { lowerTry } from "./try.js";
 import {
   isObjectLiteralForm,
   lowerObjectLiteralExpr,
@@ -32,6 +36,59 @@ import { lowerTupleExpr } from "./tuple.js";
 import { lowerWhile } from "./while.js";
 
 export { isObjectLiteralForm } from "./object-literal.js";
+
+const isBreakExpr = (
+  expr: Expr
+): expr is IdentifierAtom | InternalIdentifierAtom =>
+  (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) && expr.value === "break";
+
+const isContinueExpr = (
+  expr: Expr
+): expr is IdentifierAtom | InternalIdentifierAtom =>
+  (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) && expr.value === "continue";
+
+const lowerBreak = ({
+  ast,
+  label,
+  value,
+  ctx,
+  scopes,
+  lowerExpr,
+}: {
+  ast: Syntax;
+  label?: string;
+  value?: Expr;
+  ctx: LowerContext;
+  scopes: LowerScopeStack;
+  lowerExpr: LowerExprFn;
+}): HirExprId => {
+  const loweredValue = value ? lowerExpr(value, ctx, scopes) : undefined;
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "break",
+    ast: ast.syntaxId,
+    span: toSourceSpan(ast),
+    label,
+    value: loweredValue,
+  });
+};
+
+const lowerContinue = ({
+  ast,
+  label,
+  ctx,
+}: {
+  ast: Syntax;
+  label?: string;
+  ctx: LowerContext;
+}): HirExprId =>
+  ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "continue",
+    ast: ast.syntaxId,
+    span: toSourceSpan(ast),
+    label,
+  });
 
 export const lowerExpr: LowerExprFn = (
   expr: Expr | undefined,
@@ -86,9 +143,22 @@ export const lowerExpr: LowerExprFn = (
     });
   }
 
-  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+  const identifierAtom =
+    isIdentifierAtom(expr)
+      ? expr
+      : isInternalIdentifierAtom(expr)
+        ? expr
+        : undefined;
+
+  if (identifierAtom) {
+    if (isBreakExpr(expr)) {
+      return lowerBreak({ ast: expr, ctx, scopes, lowerExpr });
+    }
+    if (isContinueExpr(expr)) {
+      return lowerContinue({ ast: expr, ctx });
+    }
     const resolution = resolveIdentifierValue(
-      expr.value,
+      identifierAtom.value,
       scopes.current(),
       ctx
     );
@@ -96,8 +166,8 @@ export const lowerExpr: LowerExprFn = (
       return ctx.builder.addExpression({
         kind: "expr",
         exprKind: "identifier",
-        ast: expr.syntaxId,
-        span: toSourceSpan(expr),
+        ast: identifierAtom.syntaxId,
+        span: toSourceSpan(identifierAtom),
         symbol: resolution.symbol,
       });
     }
@@ -105,14 +175,40 @@ export const lowerExpr: LowerExprFn = (
     return ctx.builder.addExpression({
       kind: "expr",
       exprKind: "overload-set",
-      ast: expr.syntaxId,
-      span: toSourceSpan(expr),
+      ast: identifierAtom.syntaxId,
+      span: toSourceSpan(identifierAtom),
       name: resolution.name,
       set: resolution.set,
     });
   }
 
   if (isForm(expr)) {
+    if (
+      isIdentifierAtom(expr.first) &&
+      (expr.first.value === "break" || expr.first.value === "continue")
+    ) {
+      const label =
+        expr.length >= 3 && isIdentifierAtom(expr.at(1))
+          ? (expr.at(1) as { value: string }).value
+          : undefined;
+      if (expr.first.value === "continue") {
+        return lowerContinue({ ast: expr, label, ctx });
+      }
+      const valueExpr =
+        expr.length === 2
+          ? expr.at(1)
+          : expr.length >= 3 && label
+            ? expr.at(2)
+            : undefined;
+      return lowerBreak({
+        ast: expr,
+        label,
+        value: valueExpr,
+        ctx,
+        scopes,
+        lowerExpr,
+      });
+    }
     if (isObjectLiteralForm(expr)) {
       return lowerObjectLiteralExpr({ form: expr, ctx, scopes, lowerExpr });
     }
@@ -121,13 +217,17 @@ export const lowerExpr: LowerExprFn = (
       return lowerArrayLiteralExpr({ form: expr, ctx, scopes, lowerExpr });
     }
 
-    if (expr.calls("match")) {
-      return lowerMatch({ form: expr, ctx, scopes, lowerExpr });
-    }
+  if (expr.calls("match")) {
+    return lowerMatch({ form: expr, ctx, scopes, lowerExpr });
+  }
 
-    if (isFieldAccessForm(expr)) {
-      return lowerFieldAccessExpr({ form: expr, ctx, scopes, lowerExpr });
-    }
+  if (expr.calls("try")) {
+    return lowerTry({ form: expr, ctx, scopes, lowerExpr });
+  }
+
+  if (isFieldAccessForm(expr)) {
+    return lowerFieldAccessExpr({ form: expr, ctx, scopes, lowerExpr });
+  }
 
     if (expr.calls("::")) {
       return lowerStaticAccessExpr({ form: expr, ctx, scopes, lowerExpr });

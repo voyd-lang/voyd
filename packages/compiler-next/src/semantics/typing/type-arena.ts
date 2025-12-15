@@ -64,7 +64,7 @@ export interface FunctionType {
   kind: "function";
   parameters: readonly FunctionParameter[];
   returnType: TypeId;
-  effects: EffectRowId;
+  effectRow: EffectRowId;
 }
 
 export interface UnionType {
@@ -274,7 +274,7 @@ export const createTypeArena = (): TypeArena => {
         optional: param.optional ?? false,
       })),
       returnType: desc.returnType,
-      effects: desc.effects,
+      effectRow: desc.effectRow,
     });
 
   const internUnion = (members: readonly TypeId[]): TypeId => {
@@ -1043,7 +1043,7 @@ export const createTypeArena = (): TypeArena => {
           ? internFunction({
               parameters,
               returnType,
-              effects: desc.effects,
+              effectRow: desc.effectRow,
             })
           : type;
       }

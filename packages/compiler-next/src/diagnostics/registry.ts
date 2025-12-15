@@ -92,6 +92,11 @@ type DiagnosticParamsMap = {
   };
   TY0011: { kind: "return-type-mismatch"; functionName?: string };
   TY0012: { kind: "branch-type-mismatch"; context?: string };
+  TY0013: { kind: "unhandled-effects"; operations: string };
+  TY0014: { kind: "effect-annotation-mismatch"; message: string };
+  TY0015: { kind: "tail-resume-count"; operation: string; count: number };
+  TY0016: { kind: "pkg-effect-annotation"; functionName: string };
+  TY0017: { kind: "effectful-main"; effects: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -280,6 +285,41 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0012"]>,
+  TY0013: {
+    code: "TY0013",
+    message: (params) =>
+      `unhandled effect operations: ${params.operations}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0013"]>,
+  TY0014: {
+    code: "TY0014",
+    message: (params) =>
+      `effect annotation mismatch: ${params.message}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0014"]>,
+  TY0015: {
+    code: "TY0015",
+    message: (params) =>
+      `tail-resumptive operation ${params.operation} must call tail exactly once (observed ${params.count})`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0015"]>,
+  TY0016: {
+    code: "TY0016",
+    message: (params) =>
+      `exported function ${params.functionName} must declare an effect row in pkg.voyd (use () when pure)`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0016"]>,
+  TY0017: {
+    code: "TY0017",
+    message: (params) =>
+      `pub fn main must be pure ('()'); found effects: ${params.effects}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0017"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

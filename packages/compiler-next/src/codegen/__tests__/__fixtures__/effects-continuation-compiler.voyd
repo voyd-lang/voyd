@@ -1,0 +1,44 @@
+eff Async
+  await(resume, value: i32) -> i32
+  ping(resume, value: i32) -> i32
+
+pub fn block_test(): await -> i32
+  var x = 0
+  x = x + 1
+  let y = Async::await(5)
+  x = x + y
+  x
+
+pub fn while_test(): await -> i32
+  var i = 0
+  var sum = 0
+  let n = 5
+  while i < n do:
+    i = i + 1
+    let v = Async::await(i)
+    sum = sum + v
+  sum
+
+pub fn nested_break_continue_test(): await -> i32
+  var i = 0
+  var sum = 0
+  while i < 3 do:
+    i = i + 1
+    var j = 0
+    while j < 4 do:
+      j = j + 1
+      if j == 2 then: continue
+      if i == 2 and j == 4 then: break
+      let v = Async::await(i * 10 + j)
+      sum = sum + v
+  sum
+
+pub fn handler_clause_perform_test(): ping -> i32
+  try
+    Async::await(1)
+  Async::await(resume, value):
+    var y = 0
+    y = y + 1
+    let z = Async::ping(value)
+    y = y + z
+    resume(y)

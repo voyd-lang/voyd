@@ -25,6 +25,11 @@ import {
   resolvePatternAnnotation,
 } from "./patterns.js";
 import { applyCurrentSubstitution } from "./shared.js";
+import {
+  getExprEffectRow,
+  resolveEffectAnnotation,
+  ensureEffectCompatibility,
+} from "../effects.js";
 import type { TypingContext, TypingState } from "../types.js";
 
 export const typeLambdaExpr = (
@@ -277,6 +282,29 @@ export const typeLambdaExpr = (
     enforceTypeParamConstraint(param, finalSubstitution, ctx, state)
   );
 
+  const annotatedEffectRow = resolveEffectAnnotation(
+    expr.effectType,
+    ctx,
+    state
+  );
+  const inferredEffectRow = getExprEffectRow(expr.body, ctx);
+  const effectRow =
+    typeof annotatedEffectRow === "number"
+      ? (() => {
+          ensureEffectCompatibility({
+            inferred: inferredEffectRow,
+            annotated: annotatedEffectRow,
+            ctx,
+            span: expr.span,
+            location: expr.ast,
+            reason: "lambda effects",
+          });
+          return annotatedEffectRow;
+        })()
+      : inferredEffectRow;
+
+  ctx.effects.setExprEffect(expr.id, ctx.effects.emptyRow);
+
   return ctx.arena.internFunction({
     parameters: finalParams.map(({ type, label }) => ({
       type,
@@ -284,7 +312,7 @@ export const typeLambdaExpr = (
       optional: false,
     })),
     returnType: finalReturn,
-    effects: ctx.primitives.defaultEffectRow,
+    effectRow,
   });
 };
 

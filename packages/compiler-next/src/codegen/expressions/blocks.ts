@@ -14,8 +14,11 @@ import { coerceValueToType } from "../structural.js";
 import {
   getExprBinaryenType,
   getRequiredExprType,
+  wasmTypeFor,
 } from "../types.js";
 import { asStatement } from "./utils.js";
+import { wrapValueInOutcome } from "../effects/outcome-values.js";
+import { handlerCleanupOps } from "../effects/handler-stack.js";
 
 export const compileBlockExpr = (
   expr: HirBlockExpr,
@@ -39,11 +42,22 @@ export const compileBlockExpr = (
       tailPosition,
       expectedResultTypeId,
     });
+    const actualType = getRequiredExprType(expr.value, ctx, typeInstanceKey);
+    const coerced =
+      typeof expectedResultTypeId === "number" && !usedReturnCall
+        ? coerceValueToType({
+            value: valueExpr,
+            actualType,
+            targetType: expectedResultTypeId,
+            ctx,
+            fnCtx,
+          })
+        : valueExpr;
     if (statements.length === 0) {
-      return { expr: valueExpr, usedReturnCall };
+      return { expr: coerced, usedReturnCall };
     }
 
-    statements.push(valueExpr);
+    statements.push(coerced);
     return {
       expr: ctx.mod.block(
         null,
@@ -106,9 +120,51 @@ export const compileStatement = (
           ctx,
           fnCtx,
         });
-        return ctx.mod.return(coerced);
+        const cleanup = handlerCleanupOps({ ctx, fnCtx });
+        if (fnCtx.effectful) {
+          const wrapped = wrapValueInOutcome({
+            valueExpr: coerced,
+            valueType: wasmTypeFor(fnCtx.returnTypeId, ctx),
+            ctx,
+          });
+          if (cleanup.length === 0) {
+            return ctx.mod.return(wrapped);
+          }
+          return ctx.mod.block(
+            null,
+            [...cleanup, ctx.mod.return(wrapped)],
+            binaryen.none
+          );
+        }
+        if (cleanup.length === 0) {
+          return ctx.mod.return(coerced);
+        }
+        return ctx.mod.block(
+          null,
+          [...cleanup, ctx.mod.return(coerced)],
+          binaryen.none
+        );
       }
-      return ctx.mod.return();
+      const cleanup = handlerCleanupOps({ ctx, fnCtx });
+      if (fnCtx.effectful) {
+        const wrapped = wrapValueInOutcome({
+          valueExpr: ctx.mod.nop(),
+          valueType: wasmTypeFor(fnCtx.returnTypeId, ctx),
+          ctx,
+        });
+        if (cleanup.length === 0) {
+          return ctx.mod.return(wrapped);
+        }
+        return ctx.mod.block(
+          null,
+          [...cleanup, ctx.mod.return(wrapped)],
+          binaryen.none
+        );
+      }
+      if (cleanup.length === 0) {
+        return ctx.mod.return();
+      }
+      return ctx.mod.block(null, [...cleanup, ctx.mod.return()], binaryen.none);
     case "let":
       return compileLetStatement(stmt, ctx, fnCtx, compileExpr);
     default:
