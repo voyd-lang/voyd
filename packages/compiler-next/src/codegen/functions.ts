@@ -340,16 +340,7 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
 
   ensureLinearMemory(ctx);
   const imports = ensureMsgPackImports(ctx);
-  const signatures = (() => {
-    try {
-      return collectEffectOperationSignatures(ctx);
-    } catch {
-      return undefined;
-    }
-  })();
-  if (!signatures) {
-    return;
-  }
+  const signatures = collectEffectOperationSignatures(ctx);
   const handleOutcome = createHandleOutcomeDynamic({
     ctx,
     runtime: ctx.effectsRuntime,

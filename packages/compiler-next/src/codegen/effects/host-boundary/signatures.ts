@@ -39,14 +39,6 @@ export const collectEffectOperationSignatures = (
         const params = signature.parameters.map((param) => wasmTypeFor(param.type, ctx));
         const returnType = wasmTypeFor(signature.returnType, ctx);
         const label = `${effect.name}.${op.name}`;
-        params.forEach((paramType) => {
-          if (paramType !== binaryen.i32) {
-            throw new Error(
-              `unsupported effect operation parameter type ${paramType} for host boundary (${label})`
-            );
-          }
-        });
-        supportedValueTag({ wasmType: returnType, label });
         signatures.push({
           effectId,
           opId,

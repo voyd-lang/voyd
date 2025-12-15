@@ -1,0 +1,14 @@
+obj Box { v: i32 }
+
+eff ObjArg
+  take(resume, box: Box) -> i32
+
+fn worker(): ObjArg -> i32
+  ObjArg::take(Box { v: 41 })
+
+pub fn main(): () -> i32
+  try
+    worker() + 1
+  ObjArg::take(resume, box):
+    resume(box.v)
+

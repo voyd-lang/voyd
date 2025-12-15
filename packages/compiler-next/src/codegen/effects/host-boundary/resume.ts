@@ -84,7 +84,16 @@ export const createResumeContinuation = ({
         ctx.mod.i32.eq(effectIdExpr, ctx.mod.i32.const(sig.effectId)),
         ctx.mod.i32.eq(opIdExpr, ctx.mod.i32.const(sig.opId))
       );
-      const tag = supportedValueTag({ wasmType: sig.returnType, label: sig.label });
+      const tag = (() => {
+        try {
+          return supportedValueTag({ wasmType: sig.returnType, label: sig.label });
+        } catch {
+          return undefined;
+        }
+      })();
+      if (typeof tag !== "number") {
+        return ctx.mod.if(matches, ctx.mod.unreachable());
+      }
       const bits =
         sig.returnType === binaryen.none
           ? ctx.mod.i64.const(0, 0)

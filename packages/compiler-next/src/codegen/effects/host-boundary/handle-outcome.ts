@@ -81,6 +81,12 @@ const encodeEffectArgs = ({
       ctx.mod.i32.eq(effectIdExpr, ctx.mod.i32.const(sig.effectId)),
       ctx.mod.i32.eq(opIdExpr, ctx.mod.i32.const(sig.opId))
     );
+    if (sig.params.some((paramType) => paramType !== binaryen.i32)) {
+      ops.push(
+        ctx.mod.if(matches, ctx.mod.local.set(argsCountLocal, ctx.mod.i32.const(-1)))
+      );
+      return;
+    }
     if (!sig.argsType) {
       ops.push(
         ctx.mod.if(
@@ -219,6 +225,14 @@ export const createHandleOutcome = ({
       )
     ),
     ...argOps,
+    ctx.mod.if(
+      ctx.mod.i32.lt_s(
+        ctx.mod.local.get(argsCountLocal, binaryen.i32),
+        ctx.mod.i32.const(0)
+      ),
+      ctx.mod.unreachable(),
+      ctx.mod.nop()
+    ),
     trapOnNonZero(
       ctx.mod.call(
         imports.writeEffect,
@@ -512,6 +526,14 @@ export const createHandleOutcomeDynamic = ({
         )
       ),
       ...argOps,
+      ctx.mod.if(
+        ctx.mod.i32.lt_s(
+          ctx.mod.local.get(argsCountLocal, binaryen.i32),
+          ctx.mod.i32.const(0)
+        ),
+        ctx.mod.unreachable(),
+        ctx.mod.nop()
+      ),
       trapOnNonZero(
         ctx.mod.call(
           imports.writeEffect,

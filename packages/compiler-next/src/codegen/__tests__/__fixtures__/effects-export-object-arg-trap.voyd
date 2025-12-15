@@ -1,0 +1,8 @@
+obj Box { v: i32 }
+
+eff HostOnly
+  poke(resume, box: Box) -> i32
+
+pub fn main(): HostOnly -> i32
+  HostOnly::poke(Box { v: 1 })
+
