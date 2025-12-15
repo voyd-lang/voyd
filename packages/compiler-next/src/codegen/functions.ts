@@ -16,7 +16,7 @@ import { wrapValueInOutcome } from "./effects/outcome-values.js";
 import {
   collectEffectOperationSignatures,
   createEffectfulEntry,
-  createHandleOutcome,
+  createHandleOutcomeDynamic,
   createReadValue,
   createResumeContinuation,
   createResumeEffectful,
@@ -265,8 +265,6 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
         );
 
   const effectfulExports: { meta: FunctionMetadata; exportName: string }[] = [];
-  let effectfulValueType: binaryen.Type | undefined;
-  let effectfulHostExportsEnabled = true;
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
 
   const emitEffectfulWasmExportWrapper = ({
@@ -317,19 +315,11 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
     if (meta.effectful) {
       emitEffectfulWasmExportWrapper({ meta, exportName });
 
-      if (!effectfulHostExportsEnabled) {
-        return;
-      }
       if (meta.paramTypes.length > 1) {
         return;
       }
       const valueType = wasmTypeFor(meta.resultTypeId, ctx);
-      if (!effectfulValueType) {
-        effectfulValueType = valueType;
-      } else if (effectfulValueType !== valueType) {
-        effectfulHostExportsEnabled = false;
-        effectfulValueType = undefined;
-        effectfulExports.length = 0;
+      if (valueType !== binaryen.none && valueType !== binaryen.i32) {
         return;
       }
       effectfulExports.push({ meta, exportName });
@@ -344,11 +334,19 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
 
   ensureLinearMemory(ctx);
   const imports = ensureMsgPackImports(ctx);
-  const signatures = collectEffectOperationSignatures(ctx);
-  const handleOutcome = createHandleOutcome({
+  const signatures = (() => {
+    try {
+      return collectEffectOperationSignatures(ctx);
+    } catch {
+      return undefined;
+    }
+  })();
+  if (!signatures) {
+    return;
+  }
+  const handleOutcome = createHandleOutcomeDynamic({
     ctx,
     runtime: ctx.effectsRuntime,
-    valueType: effectfulValueType ?? binaryen.none,
     signatures,
     imports,
   });

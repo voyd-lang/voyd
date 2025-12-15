@@ -211,11 +211,13 @@ const applyTypeArgumentsToSignature = ({
 const typeHandlerClause = ({
   handlerBody,
   clause,
+  continuationEffectRow,
   ctx,
   state,
 }: {
   handlerBody: HirExprId;
   clause: HirEffectHandlerExpr["handlers"][number];
+  continuationEffectRow: number;
   ctx: TypingContext;
   state: TypingState;
 }): number => {
@@ -251,7 +253,7 @@ const typeHandlerClause = ({
         },
       ],
       returnType: instantiated.returnType,
-      effectRow: freshOpenEffectRow(ctx.effects),
+      effectRow: continuationEffectRow,
     });
     ctx.valueTypes.set(continuationParam.symbol, continuationType);
   }
@@ -552,12 +554,20 @@ export const typeEffectHandlerExpr = (
   const handlerEffects: number[] = [];
   let remainingRow = bodyEffectRow;
   const reRaisedOps = new Set<string>();
+  const handledOpNames = new Set(
+    expr.handlers.map((clause) => effectOpName(clause.operation, ctx))
+  );
+  const continuationEffectRow = Array.from(handledOpNames).reduce(
+    (row, opName) => dropHandledOperation({ row, opName, ctx }),
+    bodyEffectRow
+  );
 
   expr.handlers.forEach((clause) => {
     const opName = effectOpName(clause.operation, ctx);
     const clauseEffectRow = typeHandlerClause({
       handlerBody: expr.body,
       clause,
+      continuationEffectRow,
       ctx,
       state,
     });

@@ -9,6 +9,7 @@ import type { EffectOpSignature, MsgPackImports } from "./types.js";
 import { stateFor } from "./state.js";
 
 const HANDLE_OUTCOME_CACHE_KEY = Symbol("voyd.effects.hostBoundary.handleOutcomeCache");
+const HANDLE_OUTCOME_DYNAMIC_KEY = Symbol("voyd.effects.hostBoundary.handleOutcomeDynamic");
 
 const trapOnNonZero = (
   value: binaryen.ExpressionRef,
@@ -231,3 +232,170 @@ export const createHandleOutcome = ({
   return name;
 };
 
+export const createHandleOutcomeDynamic = ({
+  ctx,
+  runtime,
+  signatures,
+  imports,
+  exportName = "handle_outcome",
+}: {
+  ctx: CodegenContext;
+  runtime: EffectRuntime;
+  signatures: readonly EffectOpSignature[];
+  imports: MsgPackImports;
+  exportName?: string;
+}): string =>
+  stateFor(ctx, HANDLE_OUTCOME_DYNAMIC_KEY, () => {
+    const name = `${ctx.moduleLabel}__handle_outcome_dynamic`;
+    const params = binaryen.createType([runtime.outcomeType, binaryen.i32, binaryen.i32]);
+    const locals: binaryen.Type[] = [
+      runtime.effectRequestType, // requestLocal
+      binaryen.i32, // argsCountLocal
+      binaryen.i32, // outcomeTagLocal
+      binaryen.eqref, // payloadLocal
+    ];
+    const outcomeLocal = 0;
+    const bufPtrLocal = 1;
+    const bufLenLocal = 2;
+    const requestLocal = 3;
+    const argsCountLocal = 4;
+    const outcomeTagLocal = 5;
+    const payloadLocal = 6;
+
+    const payload = runtime.outcomePayload(
+      ctx.mod.local.get(outcomeLocal, runtime.outcomeType)
+    );
+
+    const valueOps: binaryen.ExpressionRef[] = [
+      ctx.mod.local.set(payloadLocal, payload),
+      ctx.mod.if(
+        ctx.mod.ref.is_null(ctx.mod.local.get(payloadLocal, binaryen.eqref)),
+        ctx.mod.block(null, [
+          trapOnNonZero(
+            ctx.mod.call(
+              imports.writeValue,
+              [
+                ctx.mod.i32.const(VALUE_TAG.none),
+                ctx.mod.i32.const(0),
+                ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+                ctx.mod.local.get(bufLenLocal, binaryen.i32),
+              ],
+              binaryen.i32
+            ),
+            ctx
+          ),
+        ]),
+        ctx.mod.block(null, [
+          trapOnNonZero(
+            ctx.mod.call(
+              imports.writeValue,
+              [
+                ctx.mod.i32.const(VALUE_TAG.i32),
+                unboxOutcomeValue({
+                  payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                  valueType: binaryen.i32,
+                  ctx,
+                }),
+                ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+                ctx.mod.local.get(bufLenLocal, binaryen.i32),
+              ],
+              binaryen.i32
+            ),
+            ctx
+          ),
+        ])
+      ),
+      ctx.mod.return(
+        runtime.makeEffectResult({
+          status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.value),
+          cont: ctx.mod.ref.null(binaryen.anyref),
+        })
+      ),
+    ];
+
+    const effectIdExpr = runtime.requestEffectId(
+      ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+    );
+    const opIdExpr = runtime.requestOpId(
+      ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+    );
+    const argOps = encodeEffectArgs({
+      ctx,
+      runtime,
+      requestLocal,
+      signatures,
+      bufPtrLocal,
+      effectIdExpr,
+      opIdExpr,
+      argsCountLocal,
+    });
+    const effectOps: binaryen.ExpressionRef[] = [
+      ctx.mod.local.set(
+        requestLocal,
+        refCast(
+          ctx.mod,
+          runtime.outcomePayload(
+            ctx.mod.local.get(outcomeLocal, runtime.outcomeType)
+          ),
+          runtime.effectRequestType
+        )
+      ),
+      ...argOps,
+      trapOnNonZero(
+        ctx.mod.call(
+          imports.writeEffect,
+          [
+            runtime.requestEffectId(
+              ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+            ),
+            runtime.requestOpId(
+              ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+            ),
+            runtime.requestResumeKind(
+              ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+            ),
+            ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+            ctx.mod.local.get(argsCountLocal, binaryen.i32),
+            ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+            ctx.mod.local.get(bufLenLocal, binaryen.i32),
+          ],
+          binaryen.i32
+        ),
+        ctx
+      ),
+      ctx.mod.return(
+        runtime.makeEffectResult({
+          status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.effect),
+          cont: ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+        })
+      ),
+    ];
+
+    ctx.mod.addFunction(
+      name,
+      params,
+      runtime.effectResultType,
+      locals,
+      ctx.mod.block(null, [
+        ctx.mod.local.set(
+          outcomeTagLocal,
+          runtime.outcomeTag(
+            ctx.mod.local.get(outcomeLocal, runtime.outcomeType)
+          )
+        ),
+        ctx.mod.if(
+          ctx.mod.i32.eq(
+            ctx.mod.local.get(outcomeTagLocal, binaryen.i32),
+            ctx.mod.i32.const(EFFECT_RESULT_STATUS.value)
+          ),
+          ctx.mod.block(null, valueOps),
+          ctx.mod.block(null, effectOps)
+        ),
+      ])
+    );
+
+    ctx.mod.addFunctionExport(name, exportName);
+    supportedValueTag({ wasmType: binaryen.i32, label: exportName });
+    supportedValueTag({ wasmType: binaryen.none, label: exportName });
+    return name;
+  });

@@ -1,0 +1,12 @@
+eff Async
+  await(tail) -> i32
+
+eff Noop
+  noop(resume) -> void
+
+pub fn main(): Async -> i32
+  Async::await() + 1
+
+pub fn done(): (Async, Noop) -> void
+  Async::await()
+  Noop::noop()
