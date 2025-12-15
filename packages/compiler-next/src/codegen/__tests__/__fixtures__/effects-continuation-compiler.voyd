@@ -11,7 +11,7 @@ pub fn block_test(): Async -> i32
 pub fn while_test(): Async -> i32
   var i = 0
   var sum = 0
-  let n = 1
+  let n = 5
   while i < n do:
     i = i + 1
     let v = Async::await(i)

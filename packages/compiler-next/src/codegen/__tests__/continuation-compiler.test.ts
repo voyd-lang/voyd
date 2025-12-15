@@ -23,9 +23,16 @@ describe("continuation compiler", () => {
     );
     const { module } = codegen(semantics);
     if (process.env.DEBUG_EFFECTS_WAT === "1") {
-      writeFileSync("debug-effects-continuation-compiler.wat", module.emitText());
+      writeFileSync(
+        "debug-effects-continuation-compiler.wat",
+        module.emitText()
+      );
     }
-    const handler: EffectHandler = (_request, ...args) => args[0] as number;
+    const observed: number[] = [];
+    const handler: EffectHandler = (_request, value) => {
+      observed.push(value as number);
+      return value as number;
+    };
     const blockResult = await runEffectfulExport<number>({
       wasm: module,
       entryName: "block_test_effectful",
@@ -34,6 +41,8 @@ describe("continuation compiler", () => {
       },
     });
     expect(blockResult.value).toBe(6);
+    expect(observed).toEqual([5]);
+    observed.length = 0;
 
     const whileResult = await runEffectfulExport<number>({
       wasm: module,
@@ -42,6 +51,7 @@ describe("continuation compiler", () => {
         "0:0:0": handler,
       },
     });
-    expect(whileResult.value).toBe(1);
+    expect(observed).toEqual([1, 2, 3, 4, 5]);
+    expect(whileResult.value).toBe(15);
   });
 });

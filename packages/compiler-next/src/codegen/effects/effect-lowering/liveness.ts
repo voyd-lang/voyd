@@ -31,6 +31,14 @@ export type LiveResult = {
 
 const cloneLive = (set: ReadonlySet<SymbolId>): Set<SymbolId> => new Set(set);
 
+const setsEqual = <T>(a: ReadonlySet<T>, b: ReadonlySet<T>): boolean => {
+  if (a.size !== b.size) return false;
+  for (const value of a) {
+    if (!b.has(value)) return false;
+  }
+  return true;
+};
+
 const mergeLive = (...sets: ReadonlySet<SymbolId>[]): Set<SymbolId> => {
   const merged = new Set<SymbolId>();
   sets.forEach((entry) => entry.forEach((symbol) => merged.add(symbol)));
@@ -212,13 +220,34 @@ export const analyzeExpr = ({
     case "loop":
       return analyzeExpr({ exprId: expr.body, liveAfter, ctx });
     case "while": {
-      const bodyRes = analyzeExpr({ exprId: expr.body, liveAfter, ctx });
-      const condRes = analyzeExpr({
+      let loopHeadLive = cloneLive(liveAfter);
+
+      let bodyRes: LiveResult = { live: new Set(), sites: [] };
+      let condRes: LiveResult = { live: new Set(), sites: [] };
+
+      for (let iteration = 0; iteration < 32; iteration += 1) {
+        bodyRes = analyzeExpr({ exprId: expr.body, liveAfter: loopHeadLive, ctx });
+        const liveAfterCondition = mergeLive(liveAfter, bodyRes.live);
+        condRes = analyzeExpr({
+          exprId: expr.condition,
+          liveAfter: liveAfterCondition,
+          ctx,
+        });
+
+        if (setsEqual(condRes.live, loopHeadLive)) {
+          return { live: condRes.live, sites: [...condRes.sites, ...bodyRes.sites] };
+        }
+
+        loopHeadLive = condRes.live;
+      }
+
+      bodyRes = analyzeExpr({ exprId: expr.body, liveAfter: loopHeadLive, ctx });
+      condRes = analyzeExpr({
         exprId: expr.condition,
         liveAfter: mergeLive(liveAfter, bodyRes.live),
         ctx,
       });
-      return mergeSiteResults(condRes, bodyRes);
+      return { live: condRes.live, sites: [...condRes.sites, ...bodyRes.sites] };
     }
     case "cond":
     case "if": {
