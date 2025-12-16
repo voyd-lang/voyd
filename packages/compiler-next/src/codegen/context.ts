@@ -181,7 +181,7 @@ export interface ContinuationBinding {
   continuationLocal: LocalBindingLocal;
   tailGuardLocal: LocalBindingLocal;
   resumeKind: ResumeKind;
-  returnTypeId: TypeId;
+  resumeTypeId: TypeId;
 }
 
 export interface LoopScope {

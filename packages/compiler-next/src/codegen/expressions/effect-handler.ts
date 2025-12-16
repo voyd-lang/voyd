@@ -267,7 +267,7 @@ const emitClauseFunction = ({
     const continuationDesc = ctx.typing.arena.get(continuationTypeId);
     const resumeTypeId =
       continuationDesc.kind === "function"
-        ? continuationDesc.returnType
+        ? continuationDesc.parameters[0]?.type ?? ctx.typing.primitives.void
         : signature.returnType;
     const continuationBinding = allocateTempLocal(
       wasmTypeFor(continuationTypeId, ctx),
@@ -292,7 +292,7 @@ const emitClauseFunction = ({
           continuationLocal,
           tailGuardLocal,
           resumeKind: handlerResumeKind,
-          returnTypeId: resumeTypeId,
+          resumeTypeId,
         },
       ],
     ]);

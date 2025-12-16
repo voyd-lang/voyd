@@ -363,7 +363,7 @@ export const ensureContinuationFunction = ({
           continuationLocal,
           tailGuardLocal,
           resumeKind,
-          returnTypeId,
+          resumeTypeId: returnTypeId,
         },
       ],
     ]);

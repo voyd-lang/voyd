@@ -211,12 +211,14 @@ const applyTypeArgumentsToSignature = ({
 const typeHandlerClause = ({
   handlerBody,
   clause,
+  handlerReturnTypeId,
   continuationEffectRow,
   ctx,
   state,
 }: {
   handlerBody: HirExprId;
   clause: HirEffectHandlerExpr["handlers"][number];
+  handlerReturnTypeId: TypeId;
   continuationEffectRow: number;
   ctx: TypingContext;
   state: TypingState;
@@ -245,14 +247,18 @@ const typeHandlerClause = ({
 
   const continuationParam = clause.parameters[0];
   if (continuationParam) {
+    const continuationParameters =
+      instantiated.returnType === ctx.primitives.void
+        ? []
+        : [
+            {
+              type: instantiated.returnType,
+              optional: false,
+            },
+          ];
     const continuationType = ctx.arena.internFunction({
-      parameters: [
-        {
-          type: instantiated.returnType,
-          optional: false,
-        },
-      ],
-      returnType: instantiated.returnType,
+      parameters: continuationParameters,
+      returnType: handlerReturnTypeId,
       effectRow: continuationEffectRow,
     });
     ctx.valueTypes.set(continuationParam.symbol, continuationType);
@@ -264,16 +270,11 @@ const typeHandlerClause = ({
     ctx.valueTypes.set(param.symbol, paramType);
   });
 
-  const clauseReturn = typeExpression(
-    clause.body,
-    ctx,
-    state,
-    instantiated.returnType
-  );
-  if (instantiated.returnType !== ctx.primitives.unknown) {
+  const clauseReturn = typeExpression(clause.body, ctx, state, handlerReturnTypeId);
+  if (handlerReturnTypeId !== ctx.primitives.unknown) {
     ensureTypeMatches(
       clauseReturn,
-      instantiated.returnType,
+      handlerReturnTypeId,
       ctx,
       state,
       "handler body"
@@ -550,6 +551,7 @@ export const typeEffectHandlerExpr = (
 ): number => {
   const bodyType = typeExpression(expr.body, ctx, state, expectedType);
   const bodyEffectRow = getExprEffectRow(expr.body, ctx);
+  const handlerReturnTypeId = state.currentFunction?.returnType ?? bodyType;
 
   const handlerEffects: number[] = [];
   let remainingRow = bodyEffectRow;
@@ -567,6 +569,7 @@ export const typeEffectHandlerExpr = (
     const clauseEffectRow = typeHandlerClause({
       handlerBody: expr.body,
       clause,
+      handlerReturnTypeId,
       continuationEffectRow,
       ctx,
       state,

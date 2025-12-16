@@ -32,9 +32,10 @@ export const compileContinuationCall = ({
   expectedResultTypeId?: TypeId;
   tailPosition: boolean;
 }): CompiledExpression => {
-  const resumeTypeId = continuation.returnTypeId;
+  const resumeTypeId = continuation.resumeTypeId;
   const resumeWasmType = wasmTypeFor(resumeTypeId, ctx);
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const callReturnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceKey);
   if (resumeWasmType === binaryen.none && expr.args.length > 0) {
     throw new Error("continuation does not take a value");
   }
@@ -107,7 +108,7 @@ export const compileContinuationCall = ({
   return lowerEffectfulCallResult({
     callExpr,
     callId: expr.id,
-    returnTypeId: continuation.returnTypeId,
+    returnTypeId: callReturnTypeId,
     expectedResultTypeId,
     tailPosition,
     typeInstanceKey,
@@ -115,4 +116,3 @@ export const compileContinuationCall = ({
     fnCtx,
   });
 };
-

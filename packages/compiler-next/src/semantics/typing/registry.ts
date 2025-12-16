@@ -18,6 +18,7 @@ import type {
 } from "../hir/index.js";
 import {
   freshOpenEffectRow,
+  effectOpName,
   resolveEffectAnnotation,
 } from "./effects.js";
 
@@ -358,10 +359,7 @@ export const registerEffectOperations = (
       const effectRow = ctx.effects.internRow({
         operations: [
           {
-            name: `${getSymbolName(item.symbol, ctx)}.${getSymbolName(
-              op.symbol,
-              ctx
-            )}`,
+            name: effectOpName(op.symbol, ctx),
           },
         ],
       });

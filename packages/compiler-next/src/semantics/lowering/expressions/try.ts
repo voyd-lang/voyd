@@ -1,7 +1,42 @@
-import { Form, type Expr, isForm, isIdentifierAtom, isInternalIdentifierAtom } from "../../../parser/index.js";
+import {
+  Form,
+  type Expr,
+  isBoolAtom,
+  isFloatAtom,
+  isForm,
+  isIdentifierAtom,
+  isInternalIdentifierAtom,
+  isIntAtom,
+  isStringAtom,
+} from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
 import { resolveSymbol } from "../resolution.js";
 import type { LoweringFormParams } from "./types.js";
+
+const formatTypeAnnotation = (expr: Expr | undefined): string => {
+  if (!expr) {
+    return "<inferred>";
+  }
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    return expr.value;
+  }
+  if (isIntAtom(expr) || isFloatAtom(expr)) {
+    return expr.value;
+  }
+  if (isStringAtom(expr)) {
+    return JSON.stringify(expr.value);
+  }
+  if (isBoolAtom(expr)) {
+    return String(expr.value);
+  }
+  if (isForm(expr)) {
+    return `(${expr
+      .toArray()
+      .map((entry) => formatTypeAnnotation(entry))
+      .join(" ")})`;
+  }
+  return "<expr>";
+};
 
 const collectNamespaceSegments = (
   expr: Expr | undefined
@@ -282,24 +317,84 @@ const lowerHandlerCall = (
   if (!isIdentifierAtom(opName) && !isInternalIdentifierAtom(opName)) {
     throw new Error("handler operation must be an identifier");
   }
-  const operation =
+  const candidates =
     effectSymbol !== undefined
-      ? ctx.moduleMembers.get(effectSymbol)?.get(opName.value)?.values().next()
-          .value ?? resolveSymbol(opName.value, scope, ctx)
-      : resolveSymbol(opName.value, scope, ctx);
-  const params = head.rest
-    .filter((param) => isIdentifierAtom(param) || isInternalIdentifierAtom(param))
-    .map((param) => {
-      const symbol = resolveSymbol((param as any).value, scope, ctx);
-      return {
-        symbol,
-        span: toSourceSpan(param),
-      };
+      ? ctx.moduleMembers.get(effectSymbol)?.get(opName.value)
+      : undefined;
+
+  const parseParam = (
+    expr: Expr
+  ): { name: string; span: ReturnType<typeof toSourceSpan>; typeExpr?: Expr } | undefined => {
+    if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+      return { name: expr.value, span: toSourceSpan(expr) };
+    }
+    if (isForm(expr) && expr.calls(":")) {
+      const nameExpr = expr.at(1);
+      const typeExpr = expr.at(2);
+      if (
+        (isIdentifierAtom(nameExpr) || isInternalIdentifierAtom(nameExpr)) &&
+        typeExpr
+      ) {
+        return {
+          name: nameExpr.value,
+          span: toSourceSpan(nameExpr),
+          typeExpr,
+        };
+      }
+    }
+    return undefined;
+  };
+
+  const parsedParams = head.rest.map((entry) => (entry ? parseParam(entry) : undefined));
+  const params = parsedParams
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .map((param) => ({
+      symbol: resolveSymbol(param.name, scope, ctx),
+      span: param.span,
+    }));
+
+  const argTypeExprs = parsedParams
+    .slice(1)
+    .map((entry) => entry?.typeExpr)
+    .filter(Boolean) as Expr[];
+
+  const resolvedOperation = (() => {
+    if (!candidates || candidates.size === 0) {
+      return undefined;
+    }
+    if (candidates.size === 1) {
+      return candidates.values().next().value as number;
+    }
+    const requiredTypes = parsedParams.slice(1);
+    if (requiredTypes.length === 0 || requiredTypes.some((p) => !p?.typeExpr)) {
+      throw new Error(
+        `ambiguous overloaded effect handler clause ${opName.value}; annotate handler parameter types to disambiguate`
+      );
+    }
+
+    const matches = Array.from(candidates).filter((candidate) => {
+      const decl = ctx.decls.getEffectOperation(candidate);
+      if (!decl) return false;
+      if (decl.operation.parameters.length !== requiredTypes.length) {
+        return false;
+      }
+      return decl.operation.parameters.every((param, index) => {
+        const expected = requiredTypes[index]!.typeExpr;
+        return (
+          formatTypeAnnotation(param.typeExpr) === formatTypeAnnotation(expected)
+        );
+      });
     });
-  const firstName = head.rest[0];
-  const resumable =
-    isIdentifierAtom(firstName) && firstName.value === "tail"
-      ? "fn"
-      : "ctl";
+    if (matches.length !== 1) {
+      throw new Error(
+        `no matching overload for effect handler clause ${opName.value}(${argTypeExprs.map((t) => formatTypeAnnotation(t)).join(", ")})`
+      );
+    }
+    return matches[0]!;
+  })();
+
+  const operation = resolvedOperation ?? resolveSymbol(opName.value, scope, ctx);
+  const opDecl = ctx.decls.getEffectOperation(operation);
+  const resumable = opDecl?.operation.resumable === "tail" ? "fn" : "ctl";
   return { operation, parameters: params, resumable };
 };
