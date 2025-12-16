@@ -130,7 +130,7 @@ export const codegenProgram = ({
 
   const entryCtx =
     contexts.find((ctx) => ctx.moduleId === entryModuleId) ?? contexts[0];
-  emitModuleExports(entryCtx);
+  emitModuleExports(entryCtx, contexts);
   const effectTable = emitEffectTableSection({
     contexts,
     entryModuleId,

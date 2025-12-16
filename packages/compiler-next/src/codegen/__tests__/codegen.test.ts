@@ -138,7 +138,7 @@ const buildCodegenProgram = (
   contexts.forEach(registerFunctionMetadata);
   contexts.forEach(registerImportMetadata);
   contexts.forEach(compileFunctions);
-  emitModuleExports(contexts[0]!);
+  emitModuleExports(contexts[0]!, contexts);
 
   return { mod, contexts };
 };

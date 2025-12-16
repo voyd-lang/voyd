@@ -253,7 +253,10 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
   });
 };
 
-export const emitModuleExports = (ctx: CodegenContext): void => {
+export const emitModuleExports = (
+  ctx: CodegenContext,
+  contexts: readonly CodegenContext[] = [ctx]
+): void => {
   const publicExports = ctx.hir.module.exports.filter((entry) =>
     isPublicVisibility(entry.visibility)
   );
@@ -340,7 +343,7 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
 
   ensureLinearMemory(ctx);
   const imports = ensureMsgPackImports(ctx);
-  const signatures = collectEffectOperationSignatures(ctx);
+  const signatures = collectEffectOperationSignatures(ctx, contexts);
   const handleOutcome = createHandleOutcomeDynamic({
     ctx,
     runtime: ctx.effectsRuntime,
