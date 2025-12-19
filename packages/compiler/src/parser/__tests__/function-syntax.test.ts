@@ -26,3 +26,61 @@ test("parses fn with effect annotation and =", (t) => {
     ],
   ]);
 });
+
+test("ignores inline line comments in function bodies", (t) => {
+  t.expect(toPlain("fn fib() = // comment\n  test()")) .toEqual([
+    "ast",
+    ["fn", ["=", ["fib"], ["test"]]],
+  ]);
+});
+
+test("parses union return types without parentheses", (t) => {
+  const code = `
+fn describe(x: NumBox) -> Some<i32> | Some<f64>
+  x.match()
+    Some<f64>: 30
+    Some<i32>: x.v + 1`;
+
+  t.expect(toPlain(code)).toEqual([
+    "ast",
+    [
+      "fn",
+      [
+        "->",
+        ["describe", [":", "x", "NumBox"]],
+        ["|", ["Some", ["generics", "i32"]], ["Some", ["generics", "f64"]]],
+      ],
+      [
+        "block",
+        [
+          ".",
+          "x",
+          [
+            "match",
+            [":", ["Some", ["generics", "f64"]], "30"],
+            [":", ["Some", ["generics", "i32"]], ["+", [".", "x", "v"], "1"]],
+          ],
+        ],
+      ],
+    ],
+  ]);
+});
+
+test("parses union return types with multiple pipes without stealing the block", (t) => {
+  const code = `
+fn choose(x: i32) -> None | Some | Other
+  foo(x)`;
+
+  t.expect(toPlain(code)).toEqual([
+    "ast",
+    [
+      "fn",
+      [
+        "->",
+        ["choose", [":", "x", "i32"]],
+        ["|", "None", ["|", "Some", "Other"]],
+      ],
+      ["block", ["foo", "x"]],
+    ],
+  ]);
+});

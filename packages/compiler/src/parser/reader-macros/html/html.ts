@@ -1,4 +1,4 @@
-import { List } from "../../../syntax-objects/list.js";
+import { isWhitespaceAtom } from "../../ast/predicates.js";
 import { Lexer } from "../../lexer.js";
 import { expandSyntaxMacros } from "../../syntax-macros/index.js";
 import { ReaderMacro } from "../types.js";
@@ -12,7 +12,7 @@ export const htmlMacro: ReaderMacro = {
   match: (t, prev, nextChar) => {
     return (
       t.value === "<" &&
-      !!prev?.isWhitespace() &&
+      !!isWhitespaceAtom(prev) &&
       !!nextChar &&
       TAG_START.test(nextChar)
     );
@@ -22,7 +22,8 @@ export const htmlMacro: ReaderMacro = {
       onUnescapedCurlyBrace: () => {
         file.consumeChar();
         const list = reader(file, "}");
-        if (list) return expandSyntaxMacros(list);
+        if (list) return expandSyntaxMacros(list); // TODO add test coverage and verify against old parser
+        return list;
       },
     });
     const start = new Lexer().tokenize(file);

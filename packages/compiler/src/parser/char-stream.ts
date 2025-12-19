@@ -1,4 +1,4 @@
-import { SourceLocation } from "../syntax-objects/syntax.js";
+import { SourceLocation } from "./ast/syntax.js";
 
 export class CharStream {
   readonly filePath: string;
@@ -38,11 +38,15 @@ export class CharStream {
   }
 
   currentSourceLocation() {
+    const startLine = this.line;
+    const startColumn = this.column;
     return new SourceLocation({
       startIndex: this.position,
       endIndex: this.position,
-      line: this.line,
-      column: this.column,
+      startLine,
+      endLine: startLine,
+      startColumn,
+      endColumn: startColumn,
       filePath: this.filePath,
     });
   }

@@ -1,12 +1,5 @@
 import { Token } from "./token.js";
 import { CharStream } from "./char-stream.js";
-import {
-  isOpChar,
-  isTerminator,
-  isWhitespace,
-  isDigit,
-  isDigitSign,
-} from "./grammar.js";
 
 const NUMBER_REGEX =
   /^[+-]?\d+(?:\.\d+)?([Ee]?[+-]?\d+|(?:i|f)(?:|3|6|32|64))?$/;
@@ -125,4 +118,49 @@ export class Lexer {
       token.addChar(chars.consumeChar());
     }
   }
+}
+
+export const isTerminator = (char: string) =>
+  isWhitespace(char) ||
+  isBracket(char) ||
+  isQuote(char) ||
+  isOpChar(char) ||
+  char === ",";
+
+export const isQuote = newTest(["'", '"', "`"]);
+
+export const isWhitespace = (char: string) =>
+  char === " " || char === "\n" || char === "\r";
+
+export const isBracket = newTest(["{", "[", "(", ")", "]", "}"]);
+
+export const isOpChar = newTest([
+  "+",
+  "-",
+  "*",
+  "/",
+  "=",
+  ":",
+  "?",
+  ".",
+  ";",
+  "<",
+  ">",
+  "~",
+  "!",
+  "@",
+  "%",
+  "^",
+  "&",
+  "\\",
+  "#",
+  "|",
+]);
+
+export const isDigit = (char: string) => char >= "0" && char <= "9";
+export const isDigitSign = (char: string) => char === "+" || char === "-";
+
+function newTest<T>(list: Set<T> | Array<T>) {
+  const set = new Set(list);
+  return (val: T) => set.has(val);
 }

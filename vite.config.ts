@@ -11,7 +11,6 @@ export default defineConfig({
     alias: {
       "@voyd/lib": resolve(packagesRoot, "lib/src/lib"),
       "@voyd/compiler": resolve(packagesRoot, "compiler/src"),
-      "@voyd/compiler-next": resolve(packagesRoot, "compiler-next/src"),
       "@voyd/browser-compiler": resolve(packagesRoot, "browser-compiler/src"),
     },
   },

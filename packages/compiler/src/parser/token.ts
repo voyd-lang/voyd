@@ -1,4 +1,4 @@
-import { SourceLocation } from "../syntax-objects/syntax.js";
+import { SourceLocation } from "./ast/syntax.js";
 
 const WHITESPACE = /^\s+$/;
 

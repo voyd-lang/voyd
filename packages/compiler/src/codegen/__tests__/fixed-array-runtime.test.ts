@@ -172,14 +172,14 @@ pub fn iterate_sum() -> i32
 `;
 
 const loadExports = (): Record<string, CallableFunction> => {
-  const ast = parse(source, "packages/std_next/fixed_array.voyd");
+  const ast = parse(source, "packages/std/fixed_array.voyd");
   const semantics = semanticsPipeline(ast);
   const { module } = codegen(semantics);
   const instance = getWasmInstance(module);
   return instance.exports as Record<string, CallableFunction>;
 };
 
-describe("std_next FixedArray runtime behavior", () => {
+describe("std FixedArray runtime behavior", () => {
   it("supports negative indexing and out-of-bounds guards", () => {
     const exports = loadExports();
     expect(exports.empty_negative_get()).toBe(0);

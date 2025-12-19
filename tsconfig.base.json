@@ -10,7 +10,6 @@
     "paths": {
       "@voyd/lib/*": ["packages/lib/src/lib/*"],
       "@voyd/compiler/*": ["packages/compiler/src/*"],
-      "@voyd/compiler-next/*": ["packages/compiler-next/src/*"],
       "@voyd/browser-compiler/*": ["packages/browser-compiler/src/*"]
     },
     "esModuleInterop": true,

@@ -14,7 +14,7 @@ fn length<T>(arr: i32) -> i32 0
 fn helper() -> i32 0
 `;
 
-const FIXED_ARRAY_FILE = "packages/std_next/fixed_array.voyd";
+const FIXED_ARRAY_FILE = "packages/std/fixed_array.voyd";
 
 const buildPipelineInput = ({
   ast,
