@@ -114,7 +114,7 @@ export const analyzeLambdaCaptures = ({
       exprId: root,
       hir,
       options: { skipLambdas: true },
-      onExpression: (_exprId, expr) => {
+      onEnterExpression: (_exprId, expr) => {
         if (expr.exprKind === "identifier") {
           visitIdentifier(expr);
         }
@@ -172,7 +172,7 @@ const gatherNestedLambdas = (
   walkExpression({
     exprId,
     hir,
-    onExpression: (_exprId, expr) => {
+    onEnterExpression: (_exprId, expr) => {
       if (expr.exprKind === "lambda") {
         nested.add(expr.id);
       }

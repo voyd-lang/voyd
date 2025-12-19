@@ -143,7 +143,7 @@ const containsEffectHandler = ({
       skipLambdas: !visitLambdaBodies,
       skipEffectHandlers: true,
     },
-    onExpression: (_exprId, expr) => {
+    onEnterExpression: (_exprId, expr) => {
       if (expr.exprKind === "effect-handler") {
         found = true;
       }
