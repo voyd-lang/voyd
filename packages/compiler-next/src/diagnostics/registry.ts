@@ -52,6 +52,11 @@ type DiagnosticParamsMap = {
     | { kind: "missing-annotation"; functionName: string; parameter: string }
     | { kind: "conflicting-overload" };
   CG0001: { kind: "codegen-error"; message: string };
+  CG0002: {
+    kind: "unsupported-effectful-export-return";
+    exportName: string;
+    returnType: string;
+  };
   MD0001:
     | { kind: "missing"; requested: string }
     | { kind: "referenced-from"; importer: string };
@@ -169,6 +174,13 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "codegen",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["CG0001"]>,
+  CG0002: {
+    code: "CG0002",
+    message: (params) =>
+      `effectful export ${params.exportName} has unsupported return type ${params.returnType}`,
+    severity: "error",
+    phase: "codegen",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["CG0002"]>,
   MD0001: {
     code: "MD0001",
     message: (params) =>

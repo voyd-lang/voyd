@@ -12,6 +12,7 @@ import {
   isPackageVisible,
   isPublicVisibility,
 } from "../semantics/hir/index.js";
+import { diagnosticFromCode } from "../diagnostics/index.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
 import {
   collectEffectOperationSignatures,
@@ -329,9 +330,18 @@ export const emitModuleExports = (
         valueType === binaryen.f32 ||
         valueType === binaryen.f64;
       if (!supportedReturn) {
-        throw new Error(
-          `effectful export ${exportName} has unsupported return type ${valueType}`
+        ctx.binding.diagnostics.push(
+          diagnosticFromCode({
+            code: "CG0002",
+            params: {
+              kind: "unsupported-effectful-export-return",
+              exportName,
+              returnType: formatWasmType(valueType),
+            },
+            span: entry.span,
+          })
         );
+        return;
       }
       effectfulExports.push({ meta, exportName });
       return;
@@ -538,6 +548,16 @@ const makeFunctionName = (
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
+const formatWasmType = (valueType: binaryen.Type): string => {
+  if (valueType === binaryen.none) return "none";
+  if (valueType === binaryen.i32) return "i32";
+  if (valueType === binaryen.i64) return "i64";
+  if (valueType === binaryen.f32) return "f32";
+  if (valueType === binaryen.f64) return "f64";
+  if (valueType === binaryen.eqref) return "eqref";
+  if (valueType === binaryen.anyref) return "anyref";
+  return String(valueType);
+};
 const getDefaultInstantiationArgs = ({
   symbol,
   params,
