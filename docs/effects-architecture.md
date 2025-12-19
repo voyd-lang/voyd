@@ -158,7 +158,7 @@ This document explains how to implement the effects runtime semantics from `apps
   - Overflow handling: trap if a write would exceed `buf_len`; harness documents minimum recommended buffer size; hosts may retry with a larger buffer.
 - JS host calls remain camelCase; only Voyd exports use snake_case.
 - Continuations stay in Wasm GC; only the externref travels to JS to prevent premature collection.
-- Shared tools: harness + `vt --run` share one effect table parser (from Wasm export or JSON sidecar) and one host loop; buffer min size documented (e.g., 4 KiB) and overflow tested. CLI defaults to the `compiler-next` path (legacy behind a flag) so developer workflows exercise the Wasm effects implementation by default.
+- Shared tools: harness + `vt --run` share one effect table parser (from Wasm export or JSON sidecar) and one host loop; buffer min size documented (e.g., 4 KiB) and overflow tested. CLI targets the new compiler path so developer workflows exercise the Wasm effects implementation by default.
 
 ### Host Boundary Sketch (Voyd + JS)
 `handle_outcome`, `read_value`, and `resume_continuation` are compiler/runtime helpers (not user-defined); they are emitted or linked by codegen to implement the protocol.

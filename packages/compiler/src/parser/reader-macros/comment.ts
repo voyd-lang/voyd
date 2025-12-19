@@ -1,14 +1,14 @@
-import { nop } from "../../syntax-objects/index.js";
 import { ReaderMacro } from "./types.js";
 
 export const comment: ReaderMacro = {
   match: (t) => t.value === "//",
-  macro: (file) => {
+  macro: (file, { token }) => {
     while (file.hasCharacters) {
       if (file.next === "\n") break;
-      file.consumeChar();
+      token.addChar(file.consumeChar());
     }
 
-    return nop();
+    token.setEndLocationToStartOf(file.currentSourceLocation());
+    return undefined;
   },
 };

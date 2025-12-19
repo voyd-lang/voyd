@@ -1,18 +1,19 @@
 import { parse } from "../parser.js";
 import { test } from "vitest";
 
-const toPlain = (code: string) => JSON.parse(JSON.stringify(parse(code).toJSON()));
+const toPlain = (code: string) =>
+  JSON.parse(JSON.stringify(parse(code).toJSON()));
 
 test("does not insert empty block after nested array", (t) => {
-  const code = [
-    "pub fn main() -> i32",
-    "  work([",
-    "    JsonNumber { val: 23 },",
-    "    [",
-    "      JsonNumber { val: 43 }",
-    "    ]",
-    "  ])",
-  ].join("\n");
+  const code = `
+    pub fn main() -> i32
+      work([
+        JsonNumber { val: 23 },
+        [
+          JsonNumber { val: 43 }
+        ]
+      ])
+  `;
 
   t.expect(toPlain(code)).toEqual([
     "ast",
@@ -25,12 +26,29 @@ test("does not insert empty block after nested array", (t) => {
         [
           "work",
           [
-            "array",
-            ["JsonNumber", ["object", [":", "val", 23]]],
-            ["array", ["JsonNumber", ["object", [":", "val", 43]]]]
-          ]
-        ]
-      ]
-    ]
+            "new_array",
+            [
+              ":",
+              "from",
+              [
+                "fixed_array_literal",
+                ["JsonNumber", ["object_literal", [":", "val", "23"]]],
+                [
+                  "new_array",
+                  [
+                    ":",
+                    "from",
+                    [
+                      "fixed_array_literal",
+                      ["JsonNumber", ["object_literal", [":", "val", "43"]]],
+                    ],
+                  ],
+                ],
+              ],
+            ],
+          ],
+        ],
+      ],
+    ],
   ]);
 });

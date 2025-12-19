@@ -1,119 +1,69 @@
+import { Form } from "../ast/form.js";
+import {
+  Expr,
+  formCallsInternal,
+  FormCursor,
+  isForm,
+  isIdentifierAtom,
+} from "../ast/index.js";
 import { infixOps, isInfixOp, isPrefixOp, prefixOps } from "../grammar.js";
-import { Expr, List } from "../../syntax-objects/index.js";
 
-/**
- * Primary surface language syntax macro. Post whitespace interpretation.
- * In charge of operator parsing and precedence. Operator-precedence parser
- */
-export const primary = (list: List): List => parseList(list);
+export const primary = (form: Form): Form => parseForm(form);
 
-const parseExpression = (expr: Expr): Expr => {
-  if (!expr.isList()) return expr;
-  return parseList(expr);
-};
+const parseExpression = (expr: Expr): Expr =>
+  isForm(expr) ? parseForm(expr) : expr;
 
-const parseList = (list: List): List => {
-  const hadSingleListChild = list.length === 1 && list.at(0)?.isList();
+const parseForm = (form: Form): Form => {
+  const hadSingleFormChild = form.length === 1 && isForm(form.at(0));
+
+  if (!form.length) {
+    return new Form({ location: form.location?.clone() });
+  }
+
   const items: Expr[] = [];
+  const cursor = form.cursor();
 
-  while (list.hasChildren) {
-    items.push(parsePrecedence(list));
+  while (!cursor.done) {
+    items.push(parsePrecedence(cursor, 0));
   }
 
-  let result: List;
-  if (!hadSingleListChild && items[0]?.isList()) {
-    result = items[0] as List;
-    result.push(...items.slice(1));
+  let result: Form;
+  if (!hadSingleFormChild && items.length && isForm(items[0])) {
+    const head = items[0] as Form;
+    const rest = items.slice(1);
+    result = new Form([...head.toArray(), ...rest]);
   } else {
-    result = new List({
-      ...list.metadata,
-      value: items,
-      dynamicLocation: true,
-    });
+    result = new Form(items);
   }
 
-  // Handle expressions to the right of an operator { a: hello there, b: 2 } -> [object [: a [hello there] b [2]]
-  if (
-    result.at(0)?.isIdentifier() &&
-    isInfixOp(result.identifierAt(0)) &&
-    result.length > 3
-  ) {
-    const head = new List({
-      ...result.metadata,
-      dynamicLocation: true,
-      value: [result.exprAt(0), result.exprAt(1)],
-    });
-
-    const tail = new List({
-      ...result.metadata,
-      dynamicLocation: true,
-      value: result.sliceAsArray(2),
-    });
-
-    head.push(parseList(tail));
-    return head;
-  }
-
-  return result;
+  return restructureOperatorTail(result);
 };
 
-const isDotOp = (op?: Expr): boolean => {
-  return !!op?.isIdentifier() && op.is(".");
-};
+const parsePrecedence = (cursor: FormCursor, minPrecedence = 0): Expr => {
+  const first = cursor.peek();
+  if (!first) return new Form();
 
-const parseDot = (right: Expr, left: Expr): List => {
-  if (right.isList() && right.calls("=>")) {
-    return new List({
-      value: ["call-closure", right, left],
-      dynamicLocation: true,
-    });
-  }
-  if (
-    right.isList() &&
-    right.at(1)?.isList() &&
-    right.listAt(1).calls("generics")
-  ) {
-    right.insert(left, 2);
-    return right;
-  }
-
-  if (right.isList()) {
-    right.insert(left, 1);
-    return right;
-  }
-
-  return new List({ value: [right, left], dynamicLocation: true });
-};
-
-const parsePrecedence = (list: List, minPrecedence = 0): Expr => {
-  const first = list.first();
   let expr: Expr;
 
   if (isPrefixOp(first)) {
-    const op = list.consume();
-    const right = parsePrecedence(list, unaryOpInfo(op) ?? -1);
-    expr = new List({ value: [op, right], dynamicLocation: true });
+    const op = cursor.consume()!;
+    const right = parsePrecedence(cursor, unaryOpInfo(op) ?? -1);
+    expr = new Form([op, right]);
   } else {
-    expr = parseExpression(list.consume());
+    expr = parseExpression(cursor.consume()!);
   }
 
-  while (list.hasChildren) {
-    const op = list.first()!;
+  while (!cursor.done) {
+    const op = cursor.peek();
     const precedence = infixOpInfo(op);
     if (precedence === undefined || precedence < minPrecedence) break;
 
-    list.consume();
-    const right = parsePrecedence(list, precedence + 1);
+    cursor.consume();
+    const right = parsePrecedence(cursor, precedence + 1);
 
-    expr = isDotOp(op)
-      ? parseDot(right, expr)
-      : new List({
-          ...op.metadata,
-          value: [op, expr, right],
-          dynamicLocation: true,
-        });
+    expr = new Form([op!, expr, right]);
 
-    if (isLambdaWithTupleArgs(expr)) {
+    if (isForm(expr) && isLambdaWithTupleArgs(expr)) {
       expr = removeTupleFromLambdaParameters(expr);
     }
   }
@@ -122,20 +72,41 @@ const parsePrecedence = (list: List, minPrecedence = 0): Expr => {
 };
 
 const infixOpInfo = (op?: Expr): number | undefined => {
-  if (!op?.isIdentifier() || op.isQuoted) return undefined;
+  if (!isIdentifierAtom(op) || op.isQuoted) return undefined;
   return infixOps.get(op.value);
 };
 
 const unaryOpInfo = (op?: Expr): number | undefined => {
-  if (!op?.isIdentifier()) return undefined;
+  if (!isIdentifierAtom(op)) return undefined;
   return prefixOps.get(op.value);
 };
 
-const isLambdaWithTupleArgs = (list: List) =>
-  list.calls("=>") && list.at(1)?.isList() && list.listAt(1).calls("tuple");
+const isLambdaWithTupleArgs = (form: Form) =>
+  form.calls("=>") && formCallsInternal(form.at(1), "tuple");
 
-const removeTupleFromLambdaParameters = (list: List) => {
-  const parameters = list.listAt(1);
-  parameters.remove(0);
-  return list;
+const removeTupleFromLambdaParameters = (form: Form): Form => {
+  const params = form.at(1);
+  if (!isForm(params)) return form;
+
+  const normalizedParams = params.slice(1);
+  const elements = form.toArray();
+  return new Form([elements[0]!, normalizedParams, ...elements.slice(2)]);
+};
+
+const restructureOperatorTail = (form: Form): Form => {
+  const op = form.at(0);
+  if (
+    !isIdentifierAtom(op) ||
+    !isInfixOp(op) ||
+    op.isQuoted ||
+    form.length <= 3
+  ) {
+    return form;
+  }
+
+  const left = form.at(1);
+  if (!left) return form;
+
+  const parsedTail = parseForm(form.slice(2));
+  return new Form([op, left, parsedTail]);
 };

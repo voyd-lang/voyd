@@ -1,71 +1,12 @@
-export
-  macro pub()
-    // handle syntax like "pub fn me" and "pub fn(me)"
-    if body.length == 1 and body.extract(0).is_list() then:
-      syntax_template export block(~~body)
-    else:
-      syntax_template export block(~body)
-
-pub macro `()
-  syntax_template syntax_template ~~body
-
-pub macro let()
-  define equals_expr body.extract(0)
-  ` define ~(equals_expr.extract(1)) ~(equals_expr.extract(2))
-
-pub macro var()
-  define equals_expr body.extract(0)
-  ` define_mut ~(equals_expr.extract(1)) ~(equals_expr.extract(2))
-
-// Extracts typed parameters from a list where index 0 is fn name, and offset_index+ are labeled_expr
-macro_let extract_parameters = (definitions) =>
-  `(parameters).concat definitions.slice(1)
-
-pub macro fn()
-  let first = body.extract(0)
-  let is_equals = first.extract(0) == '='
-  let definitions =
-    if is_equals then:
-      first.extract(1)
-    else:
-      first
-  let identifier_list =
-    if definitions.extract(0) == ':' then:
-      definitions.extract(1)
-    else:
-      if definitions.extract(0) == '->' then:
-        definitions.extract(1)
-      else:
-        definitions
-  let return_type =
-    if definitions.extract(0) == ':' then:
-      definitions.slice(2, 3)
-    else:
-      if definitions.extract(0) == '->' then:
-        definitions.slice(2, 3)
-      else: `()
-  let identifier = identifier_list.extract(0)
-  let params = extract_parameters(identifier_list)
-  let expressions =
-    if is_equals then:
-      first.slice(2)
-    else:
-      body.slice(1)
-  `(
-    define_function,
-    ~identifier,
-    ~params,
-    (return_type ~~return_type),
-    ~~expressions
-  )
-
 pub macro binaryen_gc_call(func, args, return_type)
   ` binaryen func: ~func namespace: gc args: ~args return_type: ~return_type
 
 pub macro bin_type_to_heap_type(type)
   ` binaryen_gc_call(modBinaryenTypeToHeapType, list(BnrType<~type>))
 
-pub macro if()
+// TODO: Remove and turn into a unit test.
+// CTX: This will be represented natively in HIR
+pub macro my_if()
   let cond = body.get(0)
   // Note: we call it main_then to avoid preventing the then in body.argsWithLabel(then) from being turned into a list. Need a better way to pass a label then passing an identifier that may or may not be bound to a var
   let main_then = body.argWithLabel(then)
@@ -92,7 +33,7 @@ pub macro if()
       let result = `
         let ~temp = ~r
         ~temp.match
-          Some:
+          Some<unknown>:
             let ~l = ~temp.value
             ~main_then
           else: ~default
@@ -124,7 +65,7 @@ pub macro for(cond, do)
     while true do:
       let ~iterator_val_id = ~iterator_id.next()
       ~iterator_val_id.match
-        Some:
+        Some<unknown>:
           let ~binding = ~iterator_val_id.value
           ~(do.get(2))
           void

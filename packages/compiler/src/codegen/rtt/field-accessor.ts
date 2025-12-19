@@ -1,35 +1,50 @@
 import binaryen from "binaryen";
 import { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import {
-  defineArrayType,
-  arrayLen,
   arrayGet,
+  arrayLen,
   arrayNewFixed,
   binaryenTypeToHeapType,
+  defineArrayType,
   defineStructType,
   initStruct,
-  structGetFieldValue,
-  refFunc,
-  callRef,
   refCast,
+  refFunc,
+  structGetFieldValue,
   structSetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
-import {
-  IntersectionType,
-  voydBaseObject,
-} from "../../syntax-objects/types.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
-import {
-  compileExpression,
-  CompileExprOpts,
-  mapBinaryenType,
-} from "../../codegen.js";
-import { Call } from "../../syntax-objects/call.js";
-import { Obj } from "../../syntax-objects/index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
-export const initFieldLookupHelpers = (mod: binaryen.Module) => {
+export const LOOKUP_FIELD_ACCESSOR = "__lookup_field_accessor";
+
+export interface FieldAccessorField {
+  name: string;
+  wasmType: binaryen.Type;
+  runtimeIndex: number;
+  hash?: number;
+  getterType?: binaryen.Type;
+  setterType?: binaryen.Type;
+}
+
+export interface RegisterFieldAccessorsOptions {
+  typeLabel: string;
+  runtimeType: binaryen.Type;
+  baseType: binaryen.Type;
+  fields: readonly FieldAccessorField[];
+}
+
+export interface FieldLookupHelpers {
+  lookupTableType: binaryen.Type;
+  registerType: (
+    opts: RegisterFieldAccessorsOptions
+  ) => binaryen.ExpressionRef;
+}
+
+export const initFieldLookupHelpers = (
+  mod: binaryen.Module
+): FieldLookupHelpers => {
   const fieldAccessorStruct = defineStructType(mod, {
     name: "FieldAccessor",
     fields: [
@@ -39,10 +54,9 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
     ],
   });
   const lookupTableType = defineArrayType(mod, fieldAccessorStruct, true);
-  const LOOKUP_NAME = "__lookup_field_accessor";
 
   mod.addFunction(
-    LOOKUP_NAME,
+    LOOKUP_FIELD_ACCESSOR,
     // Field hash int, Field lookup table, getterOrSetter 0 = getter, 1 = setter
     bin.createType([bin.i32, lookupTableType, bin.i32]),
     bin.funcref, // Field accessor
@@ -122,157 +136,74 @@ export const initFieldLookupHelpers = (mod: binaryen.Module) => {
     ])
   );
 
-  const initFieldIndexTable = (opts: CompileExprOpts<Obj>) => {
-    const { mod, expr: obj } = opts;
+  const registerType = (
+    opts: RegisterFieldAccessorsOptions
+  ): binaryen.ExpressionRef => {
+    const entries = opts.fields.map((field) => {
+      const hash = murmurHash3(field.name);
+      field.hash = hash;
+
+      const getterName = `obj_field_getter_${opts.typeLabel}_${field.name}`;
+      const setterName = `obj_field_setter_${opts.typeLabel}_${field.name}`;
+
+      const getter = mod.addFunction(
+        getterName,
+        bin.createType([opts.baseType]),
+        field.wasmType,
+        [],
+        structGetFieldValue({
+          mod,
+          fieldType: field.wasmType,
+          fieldIndex: field.runtimeIndex,
+          exprRef: refCast(
+            mod,
+            mod.local.get(0, opts.baseType),
+            opts.runtimeType
+          ),
+        })
+      );
+
+      const setter = mod.addFunction(
+        setterName,
+        bin.createType([opts.baseType, field.wasmType]),
+        bin.none,
+        [],
+        structSetFieldValue({
+          mod,
+          fieldIndex: field.runtimeIndex,
+          ref: refCast(
+            mod,
+            mod.local.get(0, opts.baseType),
+            opts.runtimeType
+          ),
+          value: mod.local.get(1, field.wasmType),
+        })
+      );
+
+      const getterHeapType = bin._BinaryenFunctionGetType(getter);
+      const getterType = bin._BinaryenTypeFromHeapType(getterHeapType, false);
+      field.getterType = getterType;
+
+      const setterHeapType = bin._BinaryenFunctionGetType(setter);
+      const setterType = bin._BinaryenTypeFromHeapType(setterHeapType, false);
+      field.setterType = setterType;
+
+      return initStruct(mod, fieldAccessorStruct, [
+        mod.i32.const(hash),
+        refFunc(mod, getterName, getterType),
+        refFunc(mod, setterName, setterType),
+      ]);
+    });
+
     return arrayNewFixed(
       mod,
       binaryenTypeToHeapType(lookupTableType),
-      obj.fields.map((field, index) => {
-        const getterName = `obj_field_getter_${obj.id}_${field.name}`;
-        const setterName = `obj_field_setter_${obj.id}_${field.name}`;
-
-        const getter = mod.addFunction(
-          getterName,
-          bin.createType([mapBinaryenType(opts, voydBaseObject)]),
-          mapBinaryenType(opts, field.type!),
-          [],
-          structGetFieldValue({
-            mod,
-            fieldType: mapBinaryenType(opts, field.type!),
-            fieldIndex: index + 3, // Skip RTT type fields
-            exprRef: refCast(
-              mod,
-              mod.local.get(0, mapBinaryenType(opts, voydBaseObject)),
-              mapBinaryenType(opts, obj)
-            ),
-          })
-        );
-
-        const setter = mod.addFunction(
-          setterName,
-          bin.createType([
-            mapBinaryenType(opts, voydBaseObject),
-            mapBinaryenType(opts, field.type!),
-          ]),
-          bin.none,
-          [],
-          structSetFieldValue({
-            mod,
-            fieldIndex: index + 3, // Skip RTT type fields
-            ref: refCast(
-              mod,
-              mod.local.get(0, mapBinaryenType(opts, voydBaseObject)),
-              mapBinaryenType(opts, obj)
-            ),
-            value: mod.local.get(1, mapBinaryenType(opts, field.type!)),
-          })
-        );
-
-        const getterHeapType = bin._BinaryenFunctionGetType(getter);
-        const getterType = bin._BinaryenTypeFromHeapType(getterHeapType, false);
-
-        const setterHeapType = bin._BinaryenFunctionGetType(setter);
-        const setterType = bin._BinaryenTypeFromHeapType(setterHeapType, false);
-
-        field.binaryenGetterType = getterType;
-        field.binaryenSetterType = setterType;
-
-        return initStruct(mod, fieldAccessorStruct, [
-          mod.i32.const(murmurHash3(field.name)),
-          refFunc(mod, getterName, getterType),
-          refFunc(mod, setterName, setterType),
-        ]);
-      })
-    );
-  };
-
-  const getFieldValueByAccessor = (opts: CompileExprOpts<Call>) => {
-    const { expr, mod } = opts;
-    const obj = expr.exprArgAt(0);
-    const member = expr.identifierArgAt(1);
-    const objType = obj.getType() as Obj | IntersectionType;
-
-    const field = objType.isIntersectionType()
-      ? objType.nominalType?.getField(member) ??
-        objType.structuralType?.getField(member)
-      : objType.getField(member);
-
-    if (!field) {
-      throw new Error(
-        `Field ${member.value} not found on object ${objType.id}`
-      );
-    }
-
-    const lookupTable = structGetFieldValue({
-      mod,
-      fieldType: lookupTableType,
-      fieldIndex: 1,
-      exprRef: compileExpression({ ...opts, expr: obj }),
-    });
-
-    const funcRef = mod.call(
-      LOOKUP_NAME,
-      [mod.i32.const(murmurHash3(member.value)), lookupTable, mod.i32.const(0)],
-      bin.funcref
-    );
-
-    return callRef(
-      mod,
-      refCast(mod, funcRef, field.binaryenGetterType!),
-      [compileExpression({ ...opts, expr: obj })],
-      mapBinaryenType(opts, field.type!)
-    );
-  };
-
-  const setFieldValueByAccessor = (opts: CompileExprOpts<Call>) => {
-    const { expr, mod } = opts;
-    const access = expr.callArgAt(0);
-    const member = access.identifierArgAt(1);
-    const target = access.exprArgAt(0);
-    const value = compileExpression({
-      ...opts,
-      expr: expr.argAt(1)!,
-      isReturnExpr: false,
-    });
-    const objType = target.getType() as Obj | IntersectionType;
-
-    const field = objType.isIntersectionType()
-      ? objType.nominalType?.getField(member) ??
-        objType.structuralType?.getField(member)
-      : objType.getField(member);
-
-    if (!field) {
-      throw new Error(
-        `Field ${member.value} not found on object ${objType.id}`
-      );
-    }
-
-    const lookupTable = structGetFieldValue({
-      mod,
-      fieldType: lookupTableType,
-      fieldIndex: 1,
-      exprRef: compileExpression({ ...opts, expr: target }),
-    });
-
-    const funcRef = mod.call(
-      LOOKUP_NAME,
-      [mod.i32.const(murmurHash3(member.value)), lookupTable, mod.i32.const(1)],
-      bin.funcref
-    );
-
-    return callRef(
-      mod,
-      refCast(mod, funcRef, field.binaryenSetterType!),
-      [compileExpression({ ...opts, expr: target }), value],
-      mapBinaryenType(opts, field.type!)
+      entries
     );
   };
 
   return {
-    initFieldIndexTable,
     lookupTableType,
-    LOOKUP_NAME,
-    getFieldValueByAccessor,
-    setFieldValueByAccessor,
+    registerType,
   };
 };

@@ -3,7 +3,6 @@
   "references": [
     { "path": "packages/lib" },
     { "path": "packages/compiler" },
-    { "path": "packages/compiler-next" },
     { "path": "packages/browser-compiler" },
     { "path": "apps/cli" },
     { "path": "apps/reference" }

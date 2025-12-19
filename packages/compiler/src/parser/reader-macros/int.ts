@@ -1,4 +1,4 @@
-import { Int } from "../../syntax-objects/index.js";
+import { IntAtom } from "../ast/atom.js";
 import { ReaderMacro } from "./types.js";
 
 const INT = /^[+-]?\d+(?:i64|i32)?$/;
@@ -6,16 +6,10 @@ const INT = /^[+-]?\d+(?:i64|i32)?$/;
 export const intMacro: ReaderMacro = {
   match: (t) => INT.test(t.value),
   macro: (_, { token }) => {
+    const intType = token.value.endsWith("i64") ? "i64" : "i32";
     const value =
-      token.value.at(-3) === "i"
-        ? token.value.endsWith("i64")
-          ? ({
-              type: "i64",
-              value: BigInt(token.value.slice(0, -3)),
-            } as const)
-          : Number(token.value.slice(0, -3))
-        : Number(token.value); // Default to i32
+      token.value.at(-3) === "i" ? token.value.slice(0, -3) : token.value;
 
-    return new Int({ value, location: token.location });
+    return new IntAtom({ value, location: token.location }).setType(intType);
   },
 };

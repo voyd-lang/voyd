@@ -13,7 +13,6 @@ export const getConfigFromCli = (): VoydConfig => {
     .description("Voyd programming language CLI")
     .version(version, "-v, --version", "display the current version")
     .argument("[index]", "entry voyd file", "./src")
-    .option("-c, --canonical")
     .option("--emit-parser-ast", "write raw parser AST to stdout")
     .option("--emit-core-ast", "write desurfaced AST to stdout")
     .option("--emit-ir-ast", "emit expanded IR AST after semantic phases")
@@ -43,6 +42,5 @@ export const getConfigFromCli = (): VoydConfig => {
     decodeMsgPackResponse: opts.msgPack,
     run: opts.run,
     internalTest: opts.internalTest,
-    canonical: opts.canonical,
   };
 };

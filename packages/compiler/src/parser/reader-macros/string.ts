@@ -1,6 +1,5 @@
-import { Identifier } from "../../syntax-objects/index.js";
-import { makeString } from "../../syntax-objects/lib/make-string.js";
 import { ReaderMacro } from "./types.js";
+import { identifier, string } from "../ast/init-helpers.js";
 
 export const stringMacro: ReaderMacro = {
   match: (t) => t.value === '"' || t.value === "'",
@@ -22,16 +21,14 @@ export const stringMacro: ReaderMacro = {
 
       token.addChar(next);
     }
-    token.location.endIndex = file.position;
+    token.setEndLocationToStartOf(file.currentSourceLocation());
 
     if (startChar === "'") {
-      return new Identifier({
-        value: token.value,
-        location: token.location,
-        isQuoted: true,
-      });
+      return identifier(token.value)
+        .setLocation(token.location)
+        .setIsQuoted(true);
     }
 
-    return makeString(token.value, { location: token.location });
+    return string(token.value).setLocation(token.location);
   },
 };
