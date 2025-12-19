@@ -142,10 +142,7 @@ async function getIrAST(entryPath: string) {
 }
 
 const emitBinary = (mod: binaryen.Module): Uint8Array => {
-  const result = mod.emitBinary();
-  return result instanceof Uint8Array
-    ? result
-    : result.output ?? result.binary ?? new Uint8Array();
+  return mod.emitBinary();
 };
 
 const compileModule = async (entryPath: string, optimize = false) => {

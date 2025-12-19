@@ -10,6 +10,7 @@ import { toSourceSpan } from "../../utils.js";
 import { resolveSymbol, resolveTypeSymbol } from "../resolution.js";
 import { lowerTypeExpr, lowerTypeParameters } from "../type-expressions.js";
 import type { HirExprId } from "../../ids.js";
+import type { HirParameter } from "../../hir/index.js";
 import { unwrapMutablePattern } from "./patterns.js";
 import type { LoweringFormParams } from "./types.js";
 
@@ -71,7 +72,7 @@ const lowerLambdaParameter = (
   param: Expr,
   ctx: LoweringFormParams["ctx"],
   scopes: LoweringFormParams["scopes"]
-) => {
+): HirParameter => {
   const { target, bindingKind } = unwrapMutablePattern(param);
 
   if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
@@ -115,7 +116,7 @@ const lowerLambdaParameter = (
   }
 
   if (isForm(target)) {
-    const nestedParams = target
+    const nestedParams: HirParameter[] = target
       .toArray()
       .map((entry) => lowerLambdaParameter(entry, ctx, scopes));
     if (nestedParams.length !== 1) {

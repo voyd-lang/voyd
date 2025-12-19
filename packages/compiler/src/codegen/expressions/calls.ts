@@ -97,7 +97,9 @@ const buildArgSkipSites = ({
   args: readonly { expr: HirExprId }[];
   cfg: GroupContinuationCfg;
 }): ReadonlyArray<ReadonlySet<number>> => {
-  const sitesByArg = args.map((arg) => cfg.sitesByExpr.get(arg.expr) ?? new Set());
+  const sitesByArg = args.map(
+    (arg) => cfg.sitesByExpr.get(arg.expr) ?? new Set<number>()
+  );
   const laterSites: Set<number>[] = args.map(() => new Set<number>());
   let suffix = new Set<number>();
   for (let index = args.length - 1; index >= 0; index -= 1) {

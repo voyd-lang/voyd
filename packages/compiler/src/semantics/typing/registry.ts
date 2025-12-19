@@ -418,15 +418,16 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
             const typeParam = ctx.arena.freshTypeParam();
             const typeRef = ctx.arena.internTypeParamRef(typeParam);
             typeParamMap.set(param.symbol, typeRef);
-            const constraint = param.constraint
-              ? resolveTypeExpr(
-                  param.constraint,
-                  ctx,
-                  state,
-                  ctx.primitives.unknown,
-                  typeParamMap
-                )
-              : undefined;
+            const constraint =
+              "constraint" in param && param.constraint
+                ? resolveTypeExpr(
+                    param.constraint,
+                    ctx,
+                    state,
+                    ctx.primitives.unknown,
+                    typeParamMap
+                  )
+                : undefined;
             return { symbol: param.symbol, typeParam, typeRef, constraint };
           });
     const typeParamMapRef = typeParams.length > 0 ? typeParamMap : undefined;
