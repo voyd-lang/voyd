@@ -35,6 +35,7 @@ import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
 } from "./handler-clause-temp-ids.js";
+import { performSiteArgTypes } from "../perform-site.js";
 
 type TempCaptureKey = string;
 
@@ -67,25 +68,6 @@ const resumeValueTypeIdForSite = ({
     return signature?.returnType ?? ctx.typing.primitives.unknown;
   }
   return exprType ?? ctx.typing.primitives.unknown;
-};
-
-const callArgTypesForSite = ({
-  exprId,
-  ctx,
-}: {
-  exprId: HirExprId;
-  ctx: CodegenContext;
-}): readonly TypeId[] => {
-  const expr = ctx.hir.expressions.get(exprId);
-  if (!expr || expr.exprKind !== "call") {
-    return [];
-  }
-  return expr.args.map((arg) => {
-    const resolved =
-      ctx.typing.resolvedExprTypes.get(arg.expr) ??
-      ctx.typing.table.getExprType(arg.expr);
-    return resolved ?? ctx.typing.primitives.unknown;
-  });
 };
 
 const baseEnvFields = (ctx: CodegenContext): ContinuationEnvField[] => [
@@ -235,7 +217,7 @@ export const buildEffectLowering = ({
               }
               const { effectId, opId, resumeKind, effectSymbol } = getEffectOpIds(site.effectSymbol, ctx);
               const signature = ctx.typing.functions.getSignature(site.effectSymbol);
-              const paramTypes = callArgTypesForSite({ exprId: site.exprId, ctx });
+              const paramTypes = performSiteArgTypes({ exprId: site.exprId, ctx });
               const argsType =
                 signature &&
                 ensureArgsType({

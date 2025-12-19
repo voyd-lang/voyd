@@ -5,6 +5,7 @@ import { VALUE_TAG } from "./constants.js";
 import type { EffectOpSignature } from "./types.js";
 import { stateFor } from "./state.js";
 import type { ContinuationSite } from "../effect-lowering/types.js";
+import { performSiteArgTypes } from "../perform-site.js";
 
 const OP_SIGNATURES_KEY = Symbol("voyd.effects.hostBoundary.opSignatures");
 
@@ -39,25 +40,6 @@ type EffectOperationIndexEntry = {
   ctx: CodegenContext;
   label: string;
   opSymbol: number;
-};
-
-const callArgTypesForSite = ({
-  site,
-  ctx,
-}: {
-  site: Extract<ContinuationSite, { kind: "perform" }>;
-  ctx: CodegenContext;
-}): readonly number[] => {
-  const expr = ctx.hir.expressions.get(site.exprId);
-  if (!expr || expr.exprKind !== "call") {
-    throw new Error("perform site missing call expression");
-  }
-  return expr.args.map((arg) => {
-    const resolved =
-      ctx.typing.resolvedExprTypes.get(arg.expr) ??
-      ctx.typing.table.getExprType(arg.expr);
-    return resolved ?? ctx.typing.primitives.unknown;
-  });
 };
 
 const signatureKey = (effectId: number, opId: number): string => `${effectId}:${opId}`;
@@ -116,7 +98,7 @@ export const collectEffectOperationSignatures = (
           throw new Error("missing effect operation signature");
         }
 
-        const paramTypes = callArgTypesForSite({ site, ctx: siteCtx });
+        const paramTypes = performSiteArgTypes({ exprId: site.exprId, ctx: siteCtx });
         const params = paramTypes.map((paramType) => wasmTypeFor(paramType, siteCtx));
         const returnType = wasmTypeFor(site.resumeValueTypeId, siteCtx);
         const label = operation.label;
