@@ -52,7 +52,8 @@ import { assertMemberAccess } from "../visibility.js";
 export const typeCallExpr = (
   expr: HirCallExpr,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  expectedReturnType?: TypeId
 ): TypeId => {
   const calleeExpr = ctx.hir.expressions.get(expr.callee);
   if (!calleeExpr) {
@@ -67,6 +68,7 @@ export const typeCallExpr = (
   const expectedParams = getExpectedCallParameters({
     callee: calleeExpr,
     typeArguments,
+    expectedReturnType,
     ctx,
     state,
   });
@@ -242,6 +244,7 @@ export const typeCallExpr = (
         signature,
         calleeSymbol: calleeExpr.symbol,
         typeArguments,
+        expectedReturnType,
         callId: expr.id,
         calleeExprId: calleeExpr.id,
         ctx,
@@ -328,14 +331,37 @@ export const typeCallExpr = (
 const getExpectedCallParameters = ({
   callee,
   typeArguments,
+  expectedReturnType,
   ctx,
   state,
 }: {
   callee: HirExpression;
   typeArguments: readonly TypeId[] | undefined;
+  expectedReturnType: TypeId | undefined;
   ctx: TypingContext;
   state: TypingState;
 }): readonly TypeId[] | undefined => {
+  if (
+    callee.exprKind === "overload-set" &&
+    typeof expectedReturnType === "number" &&
+    expectedReturnType !== ctx.primitives.unknown
+  ) {
+    const overloads = ctx.overloads.get(callee.set);
+    if (!overloads) {
+      return undefined;
+    }
+    const candidates = overloads
+      .map((symbol) => ctx.functions.getSignature(symbol))
+      .filter((entry): entry is FunctionSignature => Boolean(entry));
+    const matchingReturn = candidates.filter((signature) =>
+      typeSatisfies(signature.returnType, expectedReturnType, ctx, state)
+    );
+    if (matchingReturn.length !== 1) {
+      return undefined;
+    }
+    return matchingReturn[0].parameters.map((param) => param.type);
+  }
+
   if (callee.exprKind !== "identifier") {
     return undefined;
   }
@@ -632,6 +658,7 @@ const typeFunctionCall = ({
   signature,
   calleeSymbol,
   typeArguments,
+  expectedReturnType,
   callId,
   ctx,
   state,
@@ -641,6 +668,7 @@ const typeFunctionCall = ({
   signature: FunctionSignature;
   calleeSymbol: SymbolId;
   typeArguments?: readonly TypeId[];
+  expectedReturnType?: TypeId;
   callId: HirExprId;
   ctx: TypingContext;
   state: TypingState;
@@ -657,6 +685,7 @@ const typeFunctionCall = ({
         signature,
         args,
         typeArguments,
+        expectedReturnType,
         calleeSymbol,
         ctx,
         state,
@@ -741,6 +770,7 @@ const instantiateFunctionCall = ({
   signature,
   args,
   typeArguments,
+  expectedReturnType,
   calleeSymbol,
   ctx,
   state,
@@ -748,6 +778,7 @@ const instantiateFunctionCall = ({
   signature: FunctionSignature;
   args: readonly Arg[];
   typeArguments?: readonly TypeId[];
+  expectedReturnType?: TypeId;
   calleeSymbol: SymbolId;
   ctx: TypingContext;
   state: TypingState;
@@ -784,9 +815,21 @@ const instantiateFunctionCall = ({
     bindTypeParamsFromType(expectedType, arg.type, substitution, ctx, state);
   });
 
-  const missing = typeParams.filter(
-    (param) => !substitution.has(param.typeParam)
-  );
+  if (
+    typeof expectedReturnType === "number" &&
+    expectedReturnType !== ctx.primitives.unknown
+  ) {
+    const expected = ctx.arena.substitute(signature.returnType, substitution);
+    bindTypeParamsFromType(
+      expected,
+      applyCurrentSubstitution(expectedReturnType, ctx, state),
+      substitution,
+      ctx,
+      state
+    );
+  }
+
+  const missing = typeParams.filter((param) => !substitution.has(param.typeParam));
   if (missing.length > 0) {
     throw new Error(
       `function ${getSymbolName(calleeSymbol, ctx)} is missing ${

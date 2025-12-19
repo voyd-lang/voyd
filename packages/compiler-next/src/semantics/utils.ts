@@ -1,5 +1,13 @@
 import type { Expr, Form, IdentifierAtom, Syntax } from "../parser/index.js";
-import { isForm, isIdentifierAtom } from "../parser/index.js";
+import {
+  isBoolAtom,
+  isFloatAtom,
+  isForm,
+  isIdentifierAtom,
+  isInternalIdentifierAtom,
+  isIntAtom,
+  isStringAtom,
+} from "../parser/index.js";
 import type { SourceSpan } from "./ids.js";
 
 export const isIdentifierWithValue = (
@@ -108,4 +116,36 @@ export const toSourceSpan = (syntax?: Syntax): SourceSpan => {
     start: location.startIndex,
     end: location.endIndex,
   };
+};
+
+export const formatTypeAnnotation = (
+  expr?: Expr,
+  options?: { includeInternalIdentifiers?: boolean }
+): string => {
+  if (!expr) {
+    return "<inferred>";
+  }
+  if (
+    isIdentifierAtom(expr) ||
+    (options?.includeInternalIdentifiers === true &&
+      isInternalIdentifierAtom(expr))
+  ) {
+    return expr.value;
+  }
+  if (isIntAtom(expr) || isFloatAtom(expr)) {
+    return expr.value;
+  }
+  if (isStringAtom(expr)) {
+    return JSON.stringify(expr.value);
+  }
+  if (isBoolAtom(expr)) {
+    return String(expr.value);
+  }
+  if (isForm(expr)) {
+    return `(${expr
+      .toArray()
+      .map((entry) => formatTypeAnnotation(entry, options))
+      .join(" ")})`;
+  }
+  return "<expr>";
 };

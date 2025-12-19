@@ -22,7 +22,7 @@ export const ensureMsgPackImports = (ctx: CodegenContext): MsgPackImports =>
   stateFor(ctx, MSGPACK_IMPORTS_KEY, () => {
     const params = binaryen.createType([
       binaryen.i32,
-      binaryen.i32,
+      binaryen.i64,
       binaryen.i32,
       binaryen.i32,
     ]);
@@ -51,13 +51,17 @@ export const ensureMsgPackImports = (ctx: CodegenContext): MsgPackImports =>
       binaryen.i32
     );
 
-    const readParams = binaryen.createType([binaryen.i32, binaryen.i32]);
+    const readParams = binaryen.createType([
+      binaryen.i32,
+      binaryen.i32,
+      binaryen.i32,
+    ]);
     ctx.mod.addFunctionImport(
       MSGPACK_READ_VALUE,
       "env",
       MSGPACK_READ_VALUE,
       readParams,
-      binaryen.i32
+      binaryen.i64
     );
 
     return {
@@ -66,4 +70,3 @@ export const ensureMsgPackImports = (ctx: CodegenContext): MsgPackImports =>
       readValue: MSGPACK_READ_VALUE,
     };
   });
-

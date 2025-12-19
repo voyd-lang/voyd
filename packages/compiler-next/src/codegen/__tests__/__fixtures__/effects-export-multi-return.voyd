@@ -1,0 +1,30 @@
+eff Async
+  await(tail) -> i32
+
+eff Noop
+  noop(resume) -> void
+
+eff AsyncI64
+  await(tail) -> i64
+
+eff AsyncF64
+  await(tail) -> f64
+
+eff AsyncF32
+  await(tail) -> f32
+
+pub fn main(): Async -> i32
+  Async::await() + 1
+
+pub fn done(): (Async, Noop) -> void
+  Async::await()
+  Noop::noop()
+
+pub fn big(): AsyncI64 -> i64
+  AsyncI64::await()
+
+pub fn floaty(): AsyncF64 -> f64
+  AsyncF64::await()
+
+pub fn tiny(): AsyncF32 -> f32
+  AsyncF32::await()

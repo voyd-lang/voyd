@@ -24,6 +24,7 @@ import {
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { RESUME_KIND, type ResumeKind } from "../effects/runtime-abi.js";
 import type { HirEffectHandlerExpr } from "../../semantics/hir/index.js";
+import type { TypeId } from "../../semantics/ids.js";
 import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
@@ -264,6 +265,11 @@ const emitClauseFunction = ({
     const continuationTypeId =
       ctx.typing.valueTypes.get(clause.parameters[0].symbol) ??
       ctx.typing.primitives.unknown;
+    const continuationDesc = ctx.typing.arena.get(continuationTypeId);
+    const resumeTypeId =
+      continuationDesc.kind === "function"
+        ? continuationDesc.parameters[0]?.type ?? ctx.typing.primitives.void
+        : signature.returnType;
     const continuationBinding = allocateTempLocal(
       wasmTypeFor(continuationTypeId, ctx),
       fnCtx,
@@ -287,7 +293,7 @@ const emitClauseFunction = ({
           continuationLocal,
           tailGuardLocal,
           resumeKind: handlerResumeKind,
-          returnTypeId: signature.returnType,
+          resumeTypeId,
         },
       ],
     ]);
@@ -303,7 +309,9 @@ const emitClauseFunction = ({
 
   clause.parameters.slice(clause.parameters[0] ? 1 : 0).forEach((param, index) => {
     const typeId =
-      signature.parameters[index]?.type ?? ctx.typing.primitives.unknown;
+      ctx.typing.valueTypes.get(param.symbol) ??
+      signature.parameters[index]?.type ??
+      ctx.typing.primitives.unknown;
     const wasmType = wasmTypeFor(typeId, ctx);
     const binding = allocateTempLocal(wasmType, fnCtx, typeId);
     initOps.push(
@@ -322,14 +330,25 @@ const emitClauseFunction = ({
     fnCtx.bindings.set(param.symbol, { ...binding, kind: "local", typeId });
   });
 
+  const expectedClauseReturnTypeId =
+    clause.parameters[0] &&
+    typeof ctx.typing.valueTypes.get(clause.parameters[0].symbol) === "number"
+      ? ((): TypeId => {
+          const continuationTypeId = ctx.typing.valueTypes.get(
+            clause.parameters[0].symbol
+          ) as TypeId;
+          const desc = ctx.typing.arena.get(continuationTypeId);
+          return desc.kind === "function" ? desc.returnType : signature.returnType;
+        })()
+      : signature.returnType;
   const body = compileExpr({
     exprId: clause.body,
     ctx,
     fnCtx,
     tailPosition: true,
-    expectedResultTypeId: signature.returnType,
+    expectedResultTypeId: expectedClauseReturnTypeId,
   });
-  const returnWasmType = wasmTypeFor(signature.returnType, ctx);
+  const returnWasmType = wasmTypeFor(expectedClauseReturnTypeId, ctx);
   const wrapped =
     binaryen.getExpressionType(body.expr) === returnWasmType
       ? wrapValueInOutcome({

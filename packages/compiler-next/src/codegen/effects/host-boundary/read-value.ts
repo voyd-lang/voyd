@@ -16,19 +16,22 @@ export const createReadValue = ({
 }): string =>
   stateFor(ctx, READ_VALUE_KEY, () => {
     const name = `${ctx.moduleLabel}__read_value`;
-    const params = binaryen.createType([binaryen.i32, binaryen.i32]);
+    const params = binaryen.createType([binaryen.i32, binaryen.i32, binaryen.i32]);
     ctx.mod.addFunction(
       name,
       params,
-      binaryen.i32,
+      binaryen.i64,
       [],
       ctx.mod.call(
         imports.readValue,
-        [ctx.mod.local.get(0, binaryen.i32), ctx.mod.local.get(1, binaryen.i32)],
-        binaryen.i32
+        [
+          ctx.mod.local.get(0, binaryen.i32),
+          ctx.mod.local.get(1, binaryen.i32),
+          ctx.mod.local.get(2, binaryen.i32),
+        ],
+        binaryen.i64
       )
     );
     ctx.mod.addFunctionExport(name, exportName);
     return name;
   });
-

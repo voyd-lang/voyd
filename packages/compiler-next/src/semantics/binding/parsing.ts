@@ -89,6 +89,7 @@ export interface ParsedEffectDecl {
   form: Form;
   visibility: HirVisibility;
   name: IdentifierAtom;
+  typeParameters: readonly IdentifierAtom[];
   operations: readonly ParsedEffectOperation[];
 }
 
@@ -463,7 +464,22 @@ export const parseEffectDecl = (form: Form): ParsedEffectDecl | null => {
   }
 
   const operations: ParsedEffectOperation[] = [];
-  if (isIdentifierAtom(next)) {
+  const effectHead = (() => {
+    if (isIdentifierAtom(next)) {
+      return { name: next, typeParameters: [] as const };
+    }
+    if (
+      isForm(next) &&
+      isIdentifierAtom(next.at(0)) &&
+      isForm(next.at(1)) &&
+      formCallsInternal(next.at(1)!, "generics")
+    ) {
+      return parseNamedTypeHead(next);
+    }
+    return undefined;
+  })();
+
+  if (effectHead) {
     const body = form.at(index + 2);
     if (!body) {
       throw new Error("eff declaration missing body");
@@ -477,12 +493,24 @@ export const parseEffectDecl = (form: Form): ParsedEffectDecl | null => {
       }
       operations.push(parseEffectOperation(entry));
     });
-    return { form, visibility, name: next, operations };
+    return {
+      form,
+      visibility,
+      name: effectHead.name,
+      typeParameters: effectHead.typeParameters,
+      operations,
+    };
   }
 
   if (isForm(next)) {
     const op = parseEffectOperation(next);
-    return { form, visibility, name: op.name, operations: [op] };
+    return {
+      form,
+      visibility,
+      name: op.name,
+      typeParameters: [],
+      operations: [op],
+    };
   }
 
   throw new Error("invalid eff declaration");

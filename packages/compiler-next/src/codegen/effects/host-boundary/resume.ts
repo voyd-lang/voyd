@@ -5,6 +5,7 @@ import type { CodegenContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
 import { getFunctionRefType } from "../../types.js";
+import { supportedValueTag } from "./signatures.js";
 import type { EffectOpSignature, MsgPackImports } from "./types.js";
 import { stateFor } from "./state.js";
 
@@ -25,21 +26,28 @@ export const createResumeContinuation = ({
   ctx,
   runtime,
   signatures,
+  imports,
   exportName = "resume_continuation",
 }: {
   ctx: CodegenContext;
   runtime: EffectRuntime;
   signatures: readonly EffectOpSignature[];
+  imports: MsgPackImports;
   exportName?: string;
 }): string =>
   stateFor(ctx, RESUME_CONTINUATION_KEY, () => {
     const name = `${ctx.moduleLabel}__resume_continuation`;
-    const params = binaryen.createType([runtime.effectRequestType, binaryen.i32]);
+    const params = binaryen.createType([
+      runtime.effectRequestType,
+      binaryen.i32,
+      binaryen.i32,
+    ]);
     const locals: binaryen.Type[] = [runtime.tailGuardType, runtime.continuationType];
     const requestLocal = 0;
-    const valueLocal = 1;
-    const guardLocal = 2;
-    const contLocal = 3;
+    const bufPtrLocal = 1;
+    const bufLenLocal = 2;
+    const guardLocal = 3;
+    const contLocal = 4;
     const effectIdExpr = runtime.requestEffectId(
       ctx.mod.local.get(requestLocal, runtime.effectRequestType)
     );
@@ -76,11 +84,45 @@ export const createResumeContinuation = ({
         ctx.mod.i32.eq(effectIdExpr, ctx.mod.i32.const(sig.effectId)),
         ctx.mod.i32.eq(opIdExpr, ctx.mod.i32.const(sig.opId))
       );
+      const tag = (() => {
+        try {
+          return supportedValueTag({ wasmType: sig.returnType, label: sig.label });
+        } catch {
+          return undefined;
+        }
+      })();
+      if (typeof tag !== "number") {
+        return ctx.mod.if(matches, ctx.mod.unreachable());
+      }
+      const bits =
+        sig.returnType === binaryen.none
+          ? ctx.mod.i64.const(0, 0)
+          : ctx.mod.call(
+              imports.readValue,
+              [
+                ctx.mod.i32.const(tag),
+                ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+                ctx.mod.local.get(bufLenLocal, binaryen.i32),
+              ],
+              binaryen.i64
+            );
+      const resumedValue =
+        sig.returnType === binaryen.none
+          ? ctx.mod.nop()
+          : sig.returnType === binaryen.i32
+            ? ctx.mod.i32.wrap(bits)
+            : sig.returnType === binaryen.i64
+              ? bits
+              : sig.returnType === binaryen.f32
+                ? ctx.mod.f32.reinterpret(ctx.mod.i32.wrap(bits))
+                : sig.returnType === binaryen.f64
+                  ? ctx.mod.f64.reinterpret(bits)
+                  : ctx.mod.unreachable();
       const resumeBox =
         sig.returnType === binaryen.none
           ? ctx.mod.ref.null(binaryen.eqref)
           : boxOutcomeValue({
-              value: ctx.mod.local.get(valueLocal, sig.returnType),
+              value: resumedValue,
               valueType: sig.returnType,
               ctx,
             });
@@ -123,14 +165,12 @@ export const createResumeContinuation = ({
 export const createResumeEffectful = ({
   ctx,
   runtime,
-  imports,
   handleOutcome,
   resumeContinuation,
   exportName = "resume_effectful",
 }: {
   ctx: CodegenContext;
   runtime: EffectRuntime;
-  imports: MsgPackImports;
   handleOutcome: string;
   resumeContinuation: string;
   exportName?: string;
@@ -146,14 +186,8 @@ export const createResumeEffectful = ({
       resumeContinuation,
       [
         ctx.mod.local.get(contParam, runtime.effectRequestType),
-        ctx.mod.call(
-          imports.readValue,
-          [
-            ctx.mod.local.get(bufPtrParam, binaryen.i32),
-            ctx.mod.local.get(bufLenParam, binaryen.i32),
-          ],
-          binaryen.i32
-        ),
+        ctx.mod.local.get(bufPtrParam, binaryen.i32),
+        ctx.mod.local.get(bufLenParam, binaryen.i32),
       ],
       runtime.outcomeType
     );
@@ -180,4 +214,3 @@ export const createResumeEffectful = ({
     ctx.mod.addFunctionExport(name, exportName);
     return name;
   });
-

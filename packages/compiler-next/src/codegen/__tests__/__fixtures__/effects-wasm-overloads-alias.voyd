@@ -1,0 +1,20 @@
+type Count = i32
+
+obj Sum { v: i32 }
+
+eff Logger
+  info(tail, v: i32) -> void
+  info(tail, v: f64) -> void
+
+pub fn main() -> i32
+  let ~sum = Sum { v: 0 }
+  try
+    Logger::info(10)
+    Logger::info(2.2)
+  Logger::info(tail, v: Count):
+    sum.v = sum.v + v
+    tail()
+  Logger::info(tail, v: f64):
+    sum.v = sum.v + 2
+    tail()
+  sum.v

@@ -12,11 +12,13 @@ import {
   MSGPACK_READ_VALUE,
   MSGPACK_WRITE_EFFECT,
   MSGPACK_WRITE_VALUE,
+  VALUE_TAG,
 } from "../../effects/host-boundary.js";
 
 const TABLE_HEADER_SIZE = 12;
 const EFFECT_HEADER_SIZE = 16;
 const OP_ENTRY_SIZE = 12;
+const MSGPACK_OPTS = { useBigInt64: true } as const;
 
 type WasmSource =
   | binaryen.Module
@@ -249,11 +251,52 @@ type MsgPackHost = {
 export const createMsgPackHost = (): MsgPackHost => {
   let memory: WebAssembly.Memory | undefined;
   let latestLength = 0;
+  const scratch = new DataView(new ArrayBuffer(8));
   const memoryView = (): ArrayBuffer => {
     if (!memory) {
       throw new Error("memory is not set on msgpack host");
     }
     return memory.buffer;
+  };
+  const decodeValueBits = (tag: number, value: unknown): bigint => {
+    if (tag === VALUE_TAG.none) return 0n;
+    if (tag === VALUE_TAG.i32) {
+      if (typeof value === "boolean") return value ? 1n : 0n;
+      const asNumber = typeof value === "number" ? value : Number(value);
+      return BigInt.asIntN(32, BigInt(asNumber | 0));
+    }
+    if (tag === VALUE_TAG.i64) {
+      if (typeof value === "bigint") return BigInt.asIntN(64, value);
+      if (typeof value === "boolean") return value ? 1n : 0n;
+      const asNumber = typeof value === "number" ? value : Number(value);
+      return BigInt.asIntN(64, BigInt(Math.trunc(asNumber)));
+    }
+    if (tag === VALUE_TAG.f32) {
+      const asNumber = typeof value === "number" ? value : Number(value);
+      scratch.setFloat32(0, asNumber, true);
+      const bits = scratch.getUint32(0, true);
+      return BigInt(bits);
+    }
+    if (tag === VALUE_TAG.f64) {
+      const asNumber = typeof value === "number" ? value : Number(value);
+      scratch.setFloat64(0, asNumber, true);
+      return scratch.getBigInt64(0, true);
+    }
+    throw new Error(`unsupported read value tag ${tag}`);
+  };
+  const encodeValueBits = (tag: number, bits: bigint): unknown => {
+    if (tag === VALUE_TAG.none) return null;
+    if (tag === VALUE_TAG.i32) return Number(BigInt.asIntN(32, bits));
+    if (tag === VALUE_TAG.i64) return BigInt.asIntN(64, bits);
+    if (tag === VALUE_TAG.f32) {
+      scratch.setUint32(0, Number(BigInt.asUintN(32, bits)), true);
+      return scratch.getFloat32(0, true);
+    }
+    if (tag === VALUE_TAG.f64) {
+      scratch.setBigUint64(0, BigInt.asUintN(64, bits), true);
+      return scratch.getFloat64(0, true);
+    }
+    throw new Error(`unsupported write value tag ${tag}`);
   };
   const write = ({
     ptr,
@@ -264,7 +307,7 @@ export const createMsgPackHost = (): MsgPackHost => {
     len: number;
     payload: unknown;
   }): number => {
-    const encoded = encode(payload) as Uint8Array;
+    const encoded = encode(payload, MSGPACK_OPTS) as Uint8Array;
     latestLength = encoded.length;
     if (encoded.length > len) {
       // eslint-disable-next-line no-console
@@ -280,7 +323,7 @@ export const createMsgPackHost = (): MsgPackHost => {
       env: {
         [MSGPACK_WRITE_VALUE]: (
           tag: number,
-          value: number,
+          value: bigint,
           ptr: number,
           len: number
         ) =>
@@ -289,7 +332,7 @@ export const createMsgPackHost = (): MsgPackHost => {
             len,
             payload: {
               kind: "value",
-              value: tag === 0 ? null : value,
+              value: encodeValueBits(tag, value),
             },
           }),
         [MSGPACK_WRITE_EFFECT]: (
@@ -318,13 +361,11 @@ export const createMsgPackHost = (): MsgPackHost => {
             },
           });
         },
-        [MSGPACK_READ_VALUE]: (ptr: number, len: number) => {
+        [MSGPACK_READ_VALUE]: (tag: number, ptr: number, len: number) => {
           const size = latestLength > 0 ? latestLength : len;
           const slice = new Uint8Array(memoryView(), ptr, size);
-          const decoded = decode(slice) as unknown;
-          if (typeof decoded === "number") return decoded | 0;
-          if (typeof decoded === "boolean") return decoded ? 1 : 0;
-          return 0;
+          const decoded = decode(slice, MSGPACK_OPTS) as unknown;
+          return decodeValueBits(tag, decoded);
         },
       },
     },
@@ -396,7 +437,7 @@ export const runEffectfulExport = async <T = unknown>({
       throw new Error("no msgpack payload written to buffer");
     }
     const bytes = new Uint8Array(memory.buffer, bufferPtr, length);
-    return decode(bytes);
+    return decode(bytes, MSGPACK_OPTS);
   };
 
   let result = (entry as CallableFunction)(bufferPtr, bufferSize);
@@ -434,7 +475,7 @@ const request = toEffectHandlerRequest({
         );
       }
       const resumeValue = await handler(request, ...(decoded.args ?? []));
-      const encoded = encode(resumeValue) as Uint8Array;
+      const encoded = encode(resumeValue, MSGPACK_OPTS) as Uint8Array;
       if (encoded.length > bufferSize) {
         throw new Error("resume payload exceeds buffer size");
       }

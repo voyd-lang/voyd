@@ -87,7 +87,7 @@ const resolveExpressionType = (
     case "overload-set":
       return typeOverloadSetExpr(expr, ctx);
     case "call":
-      return typeCallExpr(expr, ctx, state);
+      return typeCallExpr(expr, ctx, state, expectedType);
     case "block":
       return typeBlockExpr(expr, ctx, state, expectedType);
     case "if":
@@ -95,7 +95,7 @@ const resolveExpressionType = (
     case "match":
       return typeMatchExpr(expr, ctx, state);
     case "effect-handler":
-      return typeEffectHandlerExpr(expr, ctx, state);
+      return typeEffectHandlerExpr(expr, ctx, state, expectedType);
     case "tuple":
       return typeTupleExpr(expr, ctx, state);
     case "object-literal":

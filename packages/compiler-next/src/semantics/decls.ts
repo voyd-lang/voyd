@@ -176,6 +176,7 @@ export interface EffectDecl {
   visibility: HirVisibility;
   symbol: SymbolId;
   scope: ScopeId;
+  typeParameters?: TypeParameterDecl[];
   operations: readonly EffectOperationDecl[];
   moduleIndex: number;
 }
@@ -339,8 +340,10 @@ export class DeclTable {
       }),
     }));
 
+    const typeParameters = effect.typeParameters?.map((param) => ({ ...param }));
     const withId: EffectDecl = {
       ...effect,
+      typeParameters,
       operations,
       id: effect.id ?? this.nextEffectId++,
     };

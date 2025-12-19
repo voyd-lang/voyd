@@ -396,6 +396,7 @@ export const lowerEffectDecl = (
     visibility: effect.visibility,
     ast: (effect.form ?? effect.operations[0]?.ast)?.syntaxId ?? ctx.moduleNodeId,
     span: toSourceSpan(effect.form),
+    typeParameters: lowerTypeParameters(effect.typeParameters),
     operations,
   });
 

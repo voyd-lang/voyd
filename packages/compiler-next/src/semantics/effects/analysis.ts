@@ -1,5 +1,6 @@
 import type { BindingResult } from "../binding/binding.js";
 import type { SymbolTable } from "../binder/index.js";
+import { walkExpression } from "../hir/index.js";
 import type {
   HirExpression,
   HirEffectHandlerClause,
@@ -134,77 +135,21 @@ const containsEffectHandler = ({
   hir: HirGraph;
   visitLambdaBodies?: boolean;
 }): boolean => {
-  const visit = (exprId: HirExprId): boolean => {
-    const expr = hir.expressions.get(exprId);
-    if (!expr) return false;
-    if (expr.exprKind === "effect-handler") return true;
-
-    switch (expr.exprKind) {
-      case "literal":
-      case "identifier":
-      case "overload-set":
-      case "continue":
-        return false;
-      case "break":
-        return typeof expr.value === "number" ? visit(expr.value) : false;
-      case "lambda":
-        return visitLambdaBodies ? visit(expr.body) : false;
-      case "block": {
-        for (const stmtId of expr.statements) {
-          const stmt = hir.statements.get(stmtId);
-          if (!stmt) continue;
-          if (stmt.kind === "let" && visit(stmt.initializer)) return true;
-          if (stmt.kind === "expr-stmt" && visit(stmt.expr)) return true;
-          if (
-            stmt.kind === "return" &&
-            typeof stmt.value === "number" &&
-            visit(stmt.value)
-          ) {
-            return true;
-          }
-        }
-        return typeof expr.value === "number" ? visit(expr.value) : false;
+  let found = false;
+  walkExpression({
+    exprId: rootExprId,
+    hir,
+    options: {
+      skipLambdas: !visitLambdaBodies,
+      skipEffectHandlers: true,
+    },
+    onExpression: (_exprId, expr) => {
+      if (expr.exprKind === "effect-handler") {
+        found = true;
       }
-      case "call":
-        return visit(expr.callee) || expr.args.some((arg) => visit(arg.expr));
-      case "tuple":
-        return expr.elements.some(visit);
-      case "loop":
-        return visit(expr.body);
-      case "while":
-        return visit(expr.body) || visit(expr.condition);
-      case "cond":
-      case "if":
-        return (
-          expr.branches.some(
-            (branch) => visit(branch.condition) || visit(branch.value)
-          ) ||
-          (typeof expr.defaultBranch === "number"
-            ? visit(expr.defaultBranch)
-            : false)
-        );
-      case "match":
-        return (
-          visit(expr.discriminant) ||
-          expr.arms.some(
-            (arm) =>
-              (typeof arm.guard === "number" && visit(arm.guard)) ||
-              visit(arm.value)
-          )
-        );
-      case "object-literal":
-        return expr.entries.some((entry) => visit(entry.value));
-      case "field-access":
-        return visit(expr.target);
-      case "assign":
-        return (
-          (typeof expr.target === "number" && visit(expr.target)) ||
-          visit(expr.value)
-        );
-    }
-  };
-
-  return visit(rootExprId);
+    },
+  });
+  return found;
 };
 
 const lambdaEffectfulType = (expr: HirLambdaExpr, typing: TypingResult): boolean => {

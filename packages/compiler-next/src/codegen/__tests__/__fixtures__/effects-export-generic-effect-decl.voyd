@@ -1,0 +1,11 @@
+eff Async
+  await(tail) -> i32
+  log(resume, msg: i32) -> void
+
+eff Box<T>
+  unbox(tail) -> T
+
+pub fn main(): Async -> i32
+  let value = Async::await()
+  Async::log(value)
+  value + 1

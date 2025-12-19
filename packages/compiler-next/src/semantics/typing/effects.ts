@@ -12,8 +12,27 @@ import type {
   HirTypeExpr,
   HirNamedTypeExpr,
 } from "../hir/index.js";
+import type { Expr } from "../../parser/index.js";
+import { formatTypeAnnotation } from "../utils.js";
 
 const pureEffectRow = (effects: EffectTable): EffectRowId => effects.emptyRow;
+
+const effectOperationKeyFromDecl = ({
+  effectName,
+  opName,
+  params,
+}: {
+  effectName: string;
+  opName: string;
+  params: readonly { typeExpr?: Expr }[];
+}): string => {
+  if (params.length === 0) {
+    return `${effectName}.${opName}`;
+  }
+  return `${effectName}.${opName}(${params
+    .map((p) => formatTypeAnnotation(p.typeExpr))
+    .join(",")})`;
+};
 
 export const freshOpenEffectRow = (
   effects: EffectTable,
@@ -45,7 +64,16 @@ export const effectOpName = (
   if (typeof ownerEffect !== "number") {
     return record.name;
   }
-  return `${ctx.symbolTable.getSymbol(ownerEffect).name}.${record.name}`;
+  const decl = ctx.decls.getEffectOperation(symbol);
+  const effectName = ctx.symbolTable.getSymbol(ownerEffect).name;
+  if (!decl) {
+    return `${effectName}.${record.name}`;
+  }
+  return effectOperationKeyFromDecl({
+    effectName,
+    opName: decl.operation.name,
+    params: decl.operation.parameters,
+  });
 };
 
 const resolveNamedEffectRow = (
@@ -63,9 +91,14 @@ const resolveNamedEffectRow = (
   const record = ctx.symbolTable.getSymbol(symbol);
   if (record.kind === "effect") {
     const decl = ctx.decls.getEffect(symbol);
+    const effectName = record.name;
     const ops =
       decl?.operations.map((op) => ({
-        name: `${record.name}.${op.name}`,
+        name: effectOperationKeyFromDecl({
+          effectName,
+          opName: op.name,
+          params: op.parameters,
+        }),
       })) ?? [];
     return ctx.effects.internRow({ operations: ops });
   }

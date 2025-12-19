@@ -52,6 +52,11 @@ type DiagnosticParamsMap = {
     | { kind: "missing-annotation"; functionName: string; parameter: string }
     | { kind: "conflicting-overload" };
   CG0001: { kind: "codegen-error"; message: string };
+  CG0002: {
+    kind: "unsupported-effectful-export-return";
+    exportName: string;
+    returnType: string;
+  };
   MD0001:
     | { kind: "missing"; requested: string }
     | { kind: "referenced-from"; importer: string };
@@ -97,6 +102,8 @@ type DiagnosticParamsMap = {
   TY0015: { kind: "tail-resume-count"; operation: string; count: number };
   TY0016: { kind: "pkg-effect-annotation"; functionName: string };
   TY0017: { kind: "effectful-main"; effects: string };
+  TY0018: { kind: "effect-generic-mismatch"; operation: string; message: string };
+  TY0019: { kind: "effect-handler-overload"; operation: string; message: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -168,6 +175,13 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "codegen",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["CG0001"]>,
+  CG0002: {
+    code: "CG0002",
+    message: (params) =>
+      `effectful export ${params.exportName} has unsupported return type ${params.returnType}`,
+    severity: "error",
+    phase: "codegen",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["CG0002"]>,
   MD0001: {
     code: "MD0001",
     message: (params) =>
@@ -320,6 +334,20 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0017"]>,
+  TY0018: {
+    code: "TY0018",
+    message: (params) =>
+      `effect generic mismatch for ${params.operation}: ${params.message}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0018"]>,
+  TY0019: {
+    code: "TY0019",
+    message: (params) =>
+      `effect handler for ${params.operation}: ${params.message}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0019"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

@@ -144,19 +144,32 @@ const declareHandlerParams = (
   }
   const params = extractHandlerParams(head);
   params.forEach((param) => {
-    if (!param || (!isIdentifierAtom(param) && !isInternalIdentifierAtom(param))) {
-      return;
-    }
+    const nameExpr = (() => {
+      if (!param) {
+        return undefined;
+      }
+      if (isIdentifierAtom(param) || isInternalIdentifierAtom(param)) {
+        return param;
+      }
+      if (isForm(param) && param.calls(":")) {
+        const candidate = param.at(1);
+        return isIdentifierAtom(candidate) || isInternalIdentifierAtom(candidate)
+          ? candidate
+          : undefined;
+      }
+      return undefined;
+    })();
+    if (!nameExpr) return;
     const symbol = ctx.symbolTable.declare(
       {
-        name: param.value,
+        name: nameExpr.value,
         kind: "parameter",
-        declaredAt: param.syntaxId,
+        declaredAt: nameExpr.syntaxId,
       },
       scope
     );
-    ctx.scopeByNode.set(param.syntaxId, scope);
-    rememberSyntax(param, ctx);
+    ctx.scopeByNode.set(nameExpr.syntaxId, scope);
+    rememberSyntax(nameExpr, ctx);
   });
 };
 

@@ -18,6 +18,7 @@ import type {
 } from "../hir/index.js";
 import {
   freshOpenEffectRow,
+  effectOpName,
   resolveEffectAnnotation,
 } from "./effects.js";
 
@@ -305,6 +306,29 @@ export const registerEffectOperations = (
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "effect") continue;
 
+    const decl = ctx.decls.getEffect(item.symbol);
+    const typeParameterDecls = item.typeParameters ?? decl?.typeParameters ?? [];
+    const typeParamMap = new Map<SymbolId, TypeId>();
+    const typeParams =
+      typeParameterDecls.length === 0
+        ? undefined
+        : typeParameterDecls.map((param) => {
+            const typeParam = ctx.arena.freshTypeParam();
+            const typeRef = ctx.arena.internTypeParamRef(typeParam);
+            typeParamMap.set(param.symbol, typeRef);
+            const constraint = (param as any).constraint
+              ? resolveTypeExpr(
+                  (param as any).constraint,
+                  ctx,
+                  state,
+                  ctx.primitives.unknown,
+                  typeParamMap
+                )
+              : undefined;
+            return { symbol: param.symbol, typeParam, typeRef, constraint };
+          });
+    const typeParamMapRef = typeParams ? typeParamMap : undefined;
+
     item.operations.forEach((op) => {
       const parameters = op.parameters.map((param) => ({
         type:
@@ -312,7 +336,8 @@ export const registerEffectOperations = (
             param.type,
             ctx,
             state,
-            ctx.primitives.unknown
+            ctx.primitives.unknown,
+            typeParamMapRef
           ) ?? ctx.primitives.unknown,
         label: undefined,
         bindingKind: param.bindingKind,
@@ -327,16 +352,14 @@ export const registerEffectOperations = (
           op.returnType,
           ctx,
           state,
-          ctx.primitives.unknown
+          ctx.primitives.unknown,
+          typeParamMapRef
         ) ?? ctx.primitives.void;
 
       const effectRow = ctx.effects.internRow({
         operations: [
           {
-            name: `${getSymbolName(item.symbol, ctx)}.${getSymbolName(
-              op.symbol,
-              ctx
-            )}`,
+            name: effectOpName(op.symbol, ctx),
           },
         ],
       });
@@ -351,7 +374,10 @@ export const registerEffectOperations = (
         effectRow,
       });
 
-      const scheme = ctx.arena.newScheme([], functionType);
+      const scheme = ctx.arena.newScheme(
+        typeParams?.map((param) => param.typeParam) ?? [],
+        functionType
+      );
       ctx.functions.setSignature(op.symbol, {
         typeId: functionType,
         parameters,
@@ -360,7 +386,14 @@ export const registerEffectOperations = (
         annotatedReturn: hasExplicitReturn,
         effectRow,
         annotatedEffects: true,
+        typeParams,
         scheme,
+        typeParamMap:
+          typeParams && typeParams.length > 0
+            ? new Map(
+                typeParams.map((param) => [param.symbol, param.typeRef] as const)
+              )
+            : undefined,
       });
       ctx.valueTypes.set(op.symbol, functionType);
       ctx.table.setSymbolScheme(op.symbol, scheme);

@@ -12,11 +12,12 @@ import {
   isPackageVisible,
   isPublicVisibility,
 } from "../semantics/hir/index.js";
+import { diagnosticFromCode } from "../diagnostics/index.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
 import {
   collectEffectOperationSignatures,
   createEffectfulEntry,
-  createHandleOutcome,
+  createHandleOutcomeDynamic,
   createReadValue,
   createResumeContinuation,
   createResumeEffectful,
@@ -253,7 +254,10 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
   });
 };
 
-export const emitModuleExports = (ctx: CodegenContext): void => {
+export const emitModuleExports = (
+  ctx: CodegenContext,
+  contexts: readonly CodegenContext[] = [ctx]
+): void => {
   const publicExports = ctx.hir.module.exports.filter((entry) =>
     isPublicVisibility(entry.visibility)
   );
@@ -265,7 +269,6 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
         );
 
   const effectfulExports: { meta: FunctionMetadata; exportName: string }[] = [];
-  let effectfulValueType: binaryen.Type | undefined;
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
 
   const emitEffectfulWasmExportWrapper = ({
@@ -320,12 +323,25 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
         return;
       }
       const valueType = wasmTypeFor(meta.resultTypeId, ctx);
-      if (!effectfulValueType) {
-        effectfulValueType = valueType;
-      } else if (effectfulValueType !== valueType) {
-        throw new Error(
-          "effectful exports with differing return types are not supported"
+      const supportedReturn =
+        valueType === binaryen.none ||
+        valueType === binaryen.i32 ||
+        valueType === binaryen.i64 ||
+        valueType === binaryen.f32 ||
+        valueType === binaryen.f64;
+      if (!supportedReturn) {
+        ctx.binding.diagnostics.push(
+          diagnosticFromCode({
+            code: "CG0002",
+            params: {
+              kind: "unsupported-effectful-export-return",
+              exportName,
+              returnType: formatWasmType(valueType),
+            },
+            span: entry.span,
+          })
         );
+        return;
       }
       effectfulExports.push({ meta, exportName });
       return;
@@ -339,11 +355,10 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
 
   ensureLinearMemory(ctx);
   const imports = ensureMsgPackImports(ctx);
-  const signatures = collectEffectOperationSignatures(ctx);
-  const handleOutcome = createHandleOutcome({
+  const signatures = collectEffectOperationSignatures(ctx, contexts);
+  const handleOutcome = createHandleOutcomeDynamic({
     ctx,
     runtime: ctx.effectsRuntime,
-    valueType: effectfulValueType ?? binaryen.none,
     signatures,
     imports,
   });
@@ -351,11 +366,11 @@ export const emitModuleExports = (ctx: CodegenContext): void => {
     ctx,
     runtime: ctx.effectsRuntime,
     signatures,
+    imports,
   });
   createResumeEffectful({
     ctx,
     runtime: ctx.effectsRuntime,
-    imports,
     handleOutcome,
     resumeContinuation,
   });
@@ -533,6 +548,16 @@ const makeFunctionName = (
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
+const formatWasmType = (valueType: binaryen.Type): string => {
+  if (valueType === binaryen.none) return "none";
+  if (valueType === binaryen.i32) return "i32";
+  if (valueType === binaryen.i64) return "i64";
+  if (valueType === binaryen.f32) return "f32";
+  if (valueType === binaryen.f64) return "f64";
+  if (valueType === binaryen.eqref) return "eqref";
+  if (valueType === binaryen.anyref) return "anyref";
+  return String(valueType);
+};
 const getDefaultInstantiationArgs = ({
   symbol,
   params,

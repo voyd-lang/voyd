@@ -35,6 +35,7 @@ import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
 } from "./handler-clause-temp-ids.js";
+import { performSiteArgTypes } from "../perform-site.js";
 
 type TempCaptureKey = string;
 
@@ -53,18 +54,20 @@ const resumeValueTypeIdForSite = ({
   site: { kind: "perform" | "call"; exprId: HirExprId; effectSymbol?: SymbolId };
   ctx: CodegenContext;
 }): TypeId => {
+  const exprType =
+    ctx.typing.resolvedExprTypes.get(site.exprId) ??
+    ctx.typing.table.getExprType(site.exprId);
   if (site.kind === "perform") {
     if (typeof site.effectSymbol !== "number") {
       throw new Error("perform site missing effect op symbol");
     }
+    if (typeof exprType === "number") {
+      return exprType;
+    }
     const signature = ctx.typing.functions.getSignature(site.effectSymbol);
     return signature?.returnType ?? ctx.typing.primitives.unknown;
   }
-  return (
-    ctx.typing.resolvedExprTypes.get(site.exprId) ??
-    ctx.typing.table.getExprType(site.exprId) ??
-    ctx.typing.primitives.unknown
-  );
+  return exprType ?? ctx.typing.primitives.unknown;
 };
 
 const baseEnvFields = (ctx: CodegenContext): ContinuationEnvField[] => [
@@ -214,11 +217,12 @@ export const buildEffectLowering = ({
               }
               const { effectId, opId, resumeKind, effectSymbol } = getEffectOpIds(site.effectSymbol, ctx);
               const signature = ctx.typing.functions.getSignature(site.effectSymbol);
+              const paramTypes = performSiteArgTypes({ exprId: site.exprId, ctx });
               const argsType =
                 signature &&
                 ensureArgsType({
                   opSymbol: site.effectSymbol,
-                  paramTypes: signature.parameters.map((param) => param.type),
+                  paramTypes,
                   ctx,
                   cache: argsTypeCache,
                 });

@@ -1,4 +1,4 @@
-import type { HirEffectHandlerExpr } from "../../hir/index.js";
+import { walkExpression, type HirEffectHandlerExpr } from "../../hir/index.js";
 import { typeExpression } from "../expressions.js";
 import {
   composeEffectRows,
@@ -6,10 +6,10 @@ import {
   freshOpenEffectRow,
   getExprEffectRow,
 } from "../effects.js";
-import { ensureTypeMatches } from "../type-system.js";
+import { ensureTypeMatches, resolveTypeExpr, typeSatisfies } from "../type-system.js";
 import type { TypingContext, TypingState } from "../types.js";
 import { emitDiagnostic } from "../../../diagnostics/index.js";
-import type { HirExprId, SymbolId, SourceSpan } from "../../ids.js";
+import type { HirExprId, SymbolId, SourceSpan, TypeId, TypeParamId } from "../../ids.js";
 
 const dropHandledOperation = ({
   row,
@@ -27,12 +27,241 @@ const dropHandledOperation = ({
   });
 };
 
-const typeHandlerClause = ({
+const typesMatch = (
+  left: TypeId,
+  right: TypeId,
+  ctx: TypingContext,
+  state: TypingState
+): boolean => typeSatisfies(left, right, ctx, state) && typeSatisfies(right, left, ctx, state);
+
+const overloadOptionsFor = (
+  symbol: SymbolId,
+  ctx: TypingContext
+): readonly SymbolId[] | undefined => {
+  for (const options of ctx.overloads.values()) {
+    if (options.includes(symbol)) {
+      return options;
+    }
+  }
+  return undefined;
+};
+
+const collectEffectOperationTypeArguments = ({
+  rootExprId,
+  operation,
+  ctx,
+}: {
+  rootExprId: HirExprId;
+  operation: SymbolId;
+  ctx: TypingContext;
+}): readonly TypeId[][] => {
+  const collected: TypeId[][] = [];
+  walkExpression({
+    exprId: rootExprId,
+    hir: ctx.hir,
+    options: { skipEffectHandlers: true },
+    onExpression: (_exprId, expr) => {
+      if (expr.exprKind !== "call") {
+        return;
+      }
+      const callee = ctx.hir.expressions.get(expr.callee);
+      if (callee?.exprKind !== "identifier" || callee.symbol !== operation) {
+        return;
+      }
+      const typeArgs = ctx.callResolution.typeArguments.get(expr.id);
+      if (typeArgs && typeArgs.length > 0) {
+        collected.push([...typeArgs]);
+      }
+    },
+  });
+  return collected;
+};
+
+const resolveHandlerTypeArguments = ({
+  handlerBody,
+  clause,
+  signature,
+  ctx,
+}: {
+  handlerBody: HirExprId;
+  clause: HirEffectHandlerExpr["handlers"][number];
+  signature: NonNullable<ReturnType<TypingContext["functions"]["getSignature"]>>;
+  ctx: TypingContext;
+}): readonly TypeId[] | undefined => {
+  const typeParams = signature.typeParams ?? [];
+  if (typeParams.length === 0) {
+    return undefined;
+  }
+
+  const candidates = collectEffectOperationTypeArguments({
+    rootExprId: handlerBody,
+    operation: clause.operation,
+    ctx,
+  });
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  const first = candidates[0]!;
+  const compatible = candidates.every((candidate) => {
+    if (candidate.length !== first.length) return false;
+    return candidate.every((entry, index) => entry === first[index]);
+  });
+  if (!compatible) {
+    const span =
+      ctx.hir.expressions.get(handlerBody)?.span ??
+      ctx.hir.expressions.get(clause.body)?.span;
+    if (!span) {
+      throw new Error("missing span for effect handler clause");
+    }
+    emitDiagnostic({
+      ctx,
+      code: "TY0018",
+      params: {
+        kind: "effect-generic-mismatch",
+        operation: effectOpName(clause.operation, ctx),
+        message:
+          "effect operation performed with multiple instantiations in the same try body",
+      },
+      span,
+    });
+  }
+
+  return first;
+};
+
+const applyTypeArgumentsToSignature = ({
+  signature,
+  typeArguments,
+  ctx,
+}: {
+  signature: NonNullable<ReturnType<TypingContext["functions"]["getSignature"]>>;
+  typeArguments: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+}): {
+  parameters: readonly (typeof signature.parameters)[number][];
+  returnType: TypeId;
+} => {
+  const typeParams = signature.typeParams ?? [];
+  if (!typeArguments || typeArguments.length === 0 || typeParams.length === 0) {
+    return { parameters: signature.parameters, returnType: signature.returnType };
+  }
+
+  const substitution = new Map<TypeParamId, TypeId>();
+  typeParams.forEach((param, index) => {
+    const arg = typeArguments[index];
+    if (typeof arg === "number") {
+      substitution.set(param.typeParam, arg);
+    }
+  });
+
+  if (substitution.size === 0) {
+    return { parameters: signature.parameters, returnType: signature.returnType };
+  }
+
+  return {
+    parameters: signature.parameters.map((param) => ({
+      ...param,
+      type: ctx.arena.substitute(param.type, substitution),
+    })),
+    returnType: ctx.arena.substitute(signature.returnType, substitution),
+  };
+};
+
+const resolveHandlerOperation = ({
+  handlerBody,
   clause,
   ctx,
   state,
 }: {
+  handlerBody: HirExprId;
   clause: HirEffectHandlerExpr["handlers"][number];
+  ctx: TypingContext;
+  state: TypingState;
+}): SymbolId => {
+  const overloads = overloadOptionsFor(clause.operation, ctx);
+  if (!overloads || overloads.length < 2) {
+    return clause.operation;
+  }
+
+  const continuationParam = clause.parameters[0];
+  const argParams = clause.parameters.slice(continuationParam ? 1 : 0);
+  const missingAnnotation = argParams.find((param) => !param.type);
+  if (missingAnnotation) {
+    const span =
+      missingAnnotation.span ??
+      ctx.hir.expressions.get(clause.body)?.span ??
+      ctx.hir.expressions.get(handlerBody)?.span;
+    if (!span) {
+      throw new Error("missing span for effect handler clause");
+    }
+    emitDiagnostic({
+      ctx,
+      code: "TY0019",
+      params: {
+        kind: "effect-handler-overload",
+        operation: effectOpName(clause.operation, ctx),
+        message: "annotate handler parameter types to disambiguate overloads",
+      },
+      span,
+    });
+  }
+
+  const resolvedArgTypes = argParams.map((param) =>
+    resolveTypeExpr(param.type, ctx, state, ctx.primitives.unknown)
+  );
+
+  const matches = overloads.filter((candidate) => {
+    const signature = ctx.functions.getSignature(candidate);
+    if (!signature) {
+      return false;
+    }
+    if (signature.parameters.length !== resolvedArgTypes.length) {
+      return false;
+    }
+    return signature.parameters.every((param, index) =>
+      typesMatch(param.type, resolvedArgTypes[index]!, ctx, state)
+    );
+  });
+
+  if (matches.length !== 1) {
+    const span =
+      ctx.hir.expressions.get(clause.body)?.span ??
+      ctx.hir.expressions.get(handlerBody)?.span;
+    if (!span) {
+      throw new Error("missing span for effect handler clause");
+    }
+    emitDiagnostic({
+      ctx,
+      code: "TY0019",
+      params: {
+        kind: "effect-handler-overload",
+        operation: effectOpName(clause.operation, ctx),
+        message:
+          matches.length === 0
+            ? "handler annotations do not match any overload"
+            : "handler annotations match multiple overloads",
+      },
+      span,
+    });
+    return clause.operation;
+  }
+
+  return matches[0]!;
+};
+
+const typeHandlerClause = ({
+  handlerBody,
+  clause,
+  handlerReturnTypeId,
+  continuationEffectRow,
+  ctx,
+  state,
+}: {
+  handlerBody: HirExprId;
+  clause: HirEffectHandlerExpr["handlers"][number];
+  handlerReturnTypeId: TypeId;
+  continuationEffectRow: number;
   ctx: TypingContext;
   state: TypingState;
 }): number => {
@@ -46,37 +275,48 @@ const typeHandlerClause = ({
     );
   }
 
+  const typeArguments = resolveHandlerTypeArguments({
+    handlerBody,
+    clause,
+    signature,
+    ctx,
+  });
+  const instantiated = applyTypeArgumentsToSignature({
+    signature,
+    typeArguments,
+    ctx,
+  });
+
   const continuationParam = clause.parameters[0];
   if (continuationParam) {
+    const continuationParameters =
+      instantiated.returnType === ctx.primitives.void
+        ? []
+        : [
+            {
+              type: instantiated.returnType,
+              optional: false,
+            },
+          ];
     const continuationType = ctx.arena.internFunction({
-      parameters: [
-        {
-          type: signature.returnType,
-          optional: false,
-        },
-      ],
-      returnType: signature.returnType,
-      effectRow: freshOpenEffectRow(ctx.effects),
+      parameters: continuationParameters,
+      returnType: handlerReturnTypeId,
+      effectRow: continuationEffectRow,
     });
     ctx.valueTypes.set(continuationParam.symbol, continuationType);
   }
 
   clause.parameters.slice(continuationParam ? 1 : 0).forEach((param, index) => {
     const paramType =
-      signature.parameters[index]?.type ?? ctx.primitives.unknown;
+      instantiated.parameters[index]?.type ?? ctx.primitives.unknown;
     ctx.valueTypes.set(param.symbol, paramType);
   });
 
-  const clauseReturn = typeExpression(
-    clause.body,
-    ctx,
-    state,
-    signature.returnType
-  );
-  if (signature.returnType !== ctx.primitives.unknown) {
+  const clauseReturn = typeExpression(clause.body, ctx, state, handlerReturnTypeId);
+  if (handlerReturnTypeId !== ctx.primitives.unknown) {
     ensureTypeMatches(
       clauseReturn,
-      signature.returnType,
+      handlerReturnTypeId,
       ctx,
       state,
       "handler body"
@@ -348,18 +588,47 @@ const enforceTailResumption = ({
 export const typeEffectHandlerExpr = (
   expr: HirEffectHandlerExpr,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  expectedType?: TypeId
 ): number => {
-  const bodyType = typeExpression(expr.body, ctx, state);
+  const bodyType = typeExpression(expr.body, ctx, state, expectedType);
   const bodyEffectRow = getExprEffectRow(expr.body, ctx);
+  const handlerReturnTypeId =
+    expectedType ?? state.currentFunction?.returnType ?? bodyType;
+
+  expr.handlers.forEach((clause) => {
+    const resolved = resolveHandlerOperation({
+      handlerBody: expr.body,
+      clause,
+      ctx,
+      state,
+    });
+    if (resolved !== clause.operation) {
+      clause.operation = resolved;
+    }
+  });
 
   const handlerEffects: number[] = [];
   let remainingRow = bodyEffectRow;
   const reRaisedOps = new Set<string>();
+  const handledOpNames = new Set(
+    expr.handlers.map((clause) => effectOpName(clause.operation, ctx))
+  );
+  const continuationEffectRow = Array.from(handledOpNames).reduce(
+    (row, opName) => dropHandledOperation({ row, opName, ctx }),
+    bodyEffectRow
+  );
 
   expr.handlers.forEach((clause) => {
     const opName = effectOpName(clause.operation, ctx);
-    const clauseEffectRow = typeHandlerClause({ clause, ctx, state });
+    const clauseEffectRow = typeHandlerClause({
+      handlerBody: expr.body,
+      clause,
+      handlerReturnTypeId,
+      continuationEffectRow,
+      ctx,
+      state,
+    });
     handlerEffects.push(clauseEffectRow);
     const clauseDesc = ctx.effects.getRow(clauseEffectRow);
     const reRaises = clauseDesc.operations.some((op) => op.name === opName);

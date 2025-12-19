@@ -1,17 +1,8 @@
-import {
-  type Expr,
-  type Syntax,
-  isBoolAtom,
-  isFloatAtom,
-  isForm,
-  isIdentifierAtom,
-  isIntAtom,
-  isStringAtom,
-} from "../../parser/index.js";
+import type { Syntax } from "../../parser/index.js";
 import type { SymbolRecord } from "../binder/index.js";
 import type { NodeId, ScopeId, SymbolId } from "../ids.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
-import { toSourceSpan } from "../utils.js";
+import { formatTypeAnnotation, toSourceSpan } from "../utils.js";
 import type {
   BindingContext,
   BoundFunction,
@@ -179,31 +170,6 @@ const ensureOverloadParameterAnnotations = (
   });
 };
 
-const formatTypeAnnotation = (expr?: Expr): string => {
-  if (!expr) {
-    return "<inferred>";
-  }
-  if (isIdentifierAtom(expr)) {
-    return expr.value;
-  }
-  if (isIntAtom(expr) || isFloatAtom(expr)) {
-    return expr.value;
-  }
-  if (isStringAtom(expr)) {
-    return JSON.stringify(expr.value);
-  }
-  if (isBoolAtom(expr)) {
-    return String(expr.value);
-  }
-  if (isForm(expr)) {
-    return `(${expr
-      .toArray()
-      .map((entry) => formatTypeAnnotation(entry))
-      .join(" ")})`;
-  }
-  return "<expr>";
-};
-
 export const finalizeOverloadSets = (ctx: BindingContext): void => {
   const existingIds = [
     ...ctx.overloads.keys(),
@@ -228,6 +194,96 @@ export const finalizeOverloadSets = (ctx: BindingContext): void => {
       functions,
     });
   }
+};
+
+const overloadSignatureKeyFromParams = (params: readonly BoundParameter[]): string =>
+  `${params.length}|${params
+    .map((param) => formatTypeAnnotation(param.typeExpr))
+    .join(",")}`;
+
+export const finalizeEffectOperationOverloadSets = (ctx: BindingContext): void => {
+  const existingIds = [
+    ...ctx.overloads.keys(),
+    ...ctx.importedOverloadOptions.keys(),
+  ];
+  let nextOverloadSetId =
+    existingIds.length > 0 ? Math.max(...existingIds) + 1 : 0;
+
+  ctx.decls.effects.forEach((effect) => {
+    const operationsByName = new Map<string, typeof effect.operations>();
+    effect.operations.forEach((op) => {
+      const existing = operationsByName.get(op.name);
+      if (existing) {
+        operationsByName.set(op.name, [...existing, op]);
+      } else {
+        operationsByName.set(op.name, [op]);
+      }
+    });
+
+    operationsByName.forEach((operations, opName) => {
+      if (operations.length < 2) {
+        return;
+      }
+
+      const signatureIndex = new Map<string, (typeof operations)[number]>();
+      const missingAnnotationSymbols = new Set<number>();
+      operations.forEach((op) => {
+        const signatureKey = overloadSignatureKeyFromParams(op.parameters);
+        const duplicate = signatureIndex.get(signatureKey);
+        if (duplicate) {
+          ctx.diagnostics.push(
+            diagnosticFromCode({
+              code: "BD0002",
+              span: toSourceSpan(op.ast),
+              params: {
+                kind: "duplicate-overload",
+                functionName: `${effect.name}.${opName}`,
+                signature: `${effect.name}.${opName}(${op.parameters
+                  .map((param) => `${param.name}: ${formatTypeAnnotation(param.typeExpr)}`)
+                  .join(", ")})`,
+              },
+              related: [
+                diagnosticFromCode({
+                  code: "BD0002",
+                  params: { kind: "previous-overload" },
+                  span: toSourceSpan(duplicate.ast),
+                  severity: "note",
+                }),
+              ],
+            })
+          );
+        } else {
+          signatureIndex.set(signatureKey, op);
+        }
+
+        op.parameters.forEach((param) => {
+          if (param.typeExpr) {
+            return;
+          }
+          if (missingAnnotationSymbols.has(param.symbol)) {
+            return;
+          }
+          ctx.diagnostics.push(
+            diagnosticFromCode({
+              code: "BD0004",
+              params: {
+                kind: "missing-annotation",
+                functionName: `${effect.name}.${opName}`,
+                parameter: param.name,
+              },
+              span: toSourceSpan(param.ast),
+            })
+          );
+          missingAnnotationSymbols.add(param.symbol);
+        });
+      });
+
+      const id = nextOverloadSetId++;
+      const symbols = operations.map((op) => op.symbol);
+      symbols.forEach((symbol) => ctx.overloadBySymbol.set(symbol, id));
+      ctx.importedOverloadOptions.set(id, symbols);
+    });
+  });
 };
 
 export const reportOverloadNameCollision = (

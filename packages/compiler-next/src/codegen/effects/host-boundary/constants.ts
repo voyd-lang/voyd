@@ -5,6 +5,9 @@ export const MSGPACK_READ_VALUE = "__voyd_msgpack_read_value";
 export const VALUE_TAG = {
   none: 0,
   i32: 1,
+  i64: 2,
+  f32: 3,
+  f64: 4,
 } as const;
 
 export const EFFECT_RESULT_STATUS = {
@@ -13,4 +16,3 @@ export const EFFECT_RESULT_STATUS = {
 } as const;
 
 export const MIN_EFFECT_BUFFER_SIZE = 4 * 1024;
-
