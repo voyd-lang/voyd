@@ -1,0 +1,5 @@
+eff Box<T>
+  take(resume, value: T) -> i32
+
+pub fn main(): Box<i32> -> i32
+  Box::take(41)

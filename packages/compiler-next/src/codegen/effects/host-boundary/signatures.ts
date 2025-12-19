@@ -41,6 +41,25 @@ type EffectOperationIndexEntry = {
   opSymbol: number;
 };
 
+const callArgTypesForSite = ({
+  site,
+  ctx,
+}: {
+  site: Extract<ContinuationSite, { kind: "perform" }>;
+  ctx: CodegenContext;
+}): readonly number[] => {
+  const expr = ctx.hir.expressions.get(site.exprId);
+  if (!expr || expr.exprKind !== "call") {
+    throw new Error("perform site missing call expression");
+  }
+  return expr.args.map((arg) => {
+    const resolved =
+      ctx.typing.resolvedExprTypes.get(arg.expr) ??
+      ctx.typing.table.getExprType(arg.expr);
+    return resolved ?? ctx.typing.primitives.unknown;
+  });
+};
+
 const signatureKey = (effectId: number, opId: number): string => `${effectId}:${opId}`;
 
 const buildEffectOperationIndex = (
@@ -97,9 +116,8 @@ export const collectEffectOperationSignatures = (
           throw new Error("missing effect operation signature");
         }
 
-        const params = signature.parameters.map((param) =>
-          wasmTypeFor(param.type, operation.ctx)
-        );
+        const paramTypes = callArgTypesForSite({ site, ctx: siteCtx });
+        const params = paramTypes.map((paramType) => wasmTypeFor(paramType, siteCtx));
         const returnType = wasmTypeFor(site.resumeValueTypeId, siteCtx);
         const label = operation.label;
 

@@ -103,6 +103,7 @@ type DiagnosticParamsMap = {
   TY0016: { kind: "pkg-effect-annotation"; functionName: string };
   TY0017: { kind: "effectful-main"; effects: string };
   TY0018: { kind: "effect-generic-mismatch"; operation: string; message: string };
+  TY0019: { kind: "effect-handler-overload"; operation: string; message: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -340,6 +341,13 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0018"]>,
+  TY0019: {
+    code: "TY0019",
+    message: (params) =>
+      `effect handler for ${params.operation}: ${params.message}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0019"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
