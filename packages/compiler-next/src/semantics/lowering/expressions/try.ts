@@ -1,42 +1,13 @@
 import {
   Form,
   type Expr,
-  isBoolAtom,
-  isFloatAtom,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
-  isIntAtom,
-  isStringAtom,
 } from "../../../parser/index.js";
-import { toSourceSpan } from "../../utils.js";
+import { formatTypeAnnotation, toSourceSpan } from "../../utils.js";
 import { resolveSymbol } from "../resolution.js";
 import type { LoweringFormParams } from "./types.js";
-
-const formatTypeAnnotation = (expr: Expr | undefined): string => {
-  if (!expr) {
-    return "<inferred>";
-  }
-  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
-    return expr.value;
-  }
-  if (isIntAtom(expr) || isFloatAtom(expr)) {
-    return expr.value;
-  }
-  if (isStringAtom(expr)) {
-    return JSON.stringify(expr.value);
-  }
-  if (isBoolAtom(expr)) {
-    return String(expr.value);
-  }
-  if (isForm(expr)) {
-    return `(${expr
-      .toArray()
-      .map((entry) => formatTypeAnnotation(entry))
-      .join(" ")})`;
-  }
-  return "<expr>";
-};
 
 const collectNamespaceSegments = (
   expr: Expr | undefined
@@ -55,6 +26,9 @@ const collectNamespaceSegments = (
   }
   return [...left, ...right];
 };
+
+const formatHandlerType = (expr: Expr | undefined): string =>
+  formatTypeAnnotation(expr, { includeInternalIdentifiers: true });
 
 const resolveQualifiedSymbol = ({
   segments,
@@ -381,13 +355,13 @@ const lowerHandlerCall = (
       return decl.operation.parameters.every((param, index) => {
         const expected = requiredTypes[index]!.typeExpr;
         return (
-          formatTypeAnnotation(param.typeExpr) === formatTypeAnnotation(expected)
+          formatHandlerType(param.typeExpr) === formatHandlerType(expected)
         );
       });
     });
     if (matches.length !== 1) {
       throw new Error(
-        `no matching overload for effect handler clause ${opName.value}(${argTypeExprs.map((t) => formatTypeAnnotation(t)).join(", ")})`
+        `no matching overload for effect handler clause ${opName.value}(${argTypeExprs.map((t) => formatHandlerType(t)).join(", ")})`
       );
     }
     return matches[0]!;

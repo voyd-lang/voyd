@@ -551,7 +551,8 @@ export const typeEffectHandlerExpr = (
 ): number => {
   const bodyType = typeExpression(expr.body, ctx, state, expectedType);
   const bodyEffectRow = getExprEffectRow(expr.body, ctx);
-  const handlerReturnTypeId = state.currentFunction?.returnType ?? bodyType;
+  const handlerReturnTypeId =
+    expectedType ?? state.currentFunction?.returnType ?? bodyType;
 
   const handlerEffects: number[] = [];
   let remainingRow = bodyEffectRow;

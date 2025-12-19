@@ -1,17 +1,8 @@
-import {
-  type Expr,
-  type Syntax,
-  isBoolAtom,
-  isFloatAtom,
-  isForm,
-  isIdentifierAtom,
-  isIntAtom,
-  isStringAtom,
-} from "../../parser/index.js";
+import type { Syntax } from "../../parser/index.js";
 import type { SymbolRecord } from "../binder/index.js";
 import type { NodeId, ScopeId, SymbolId } from "../ids.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
-import { toSourceSpan } from "../utils.js";
+import { formatTypeAnnotation, toSourceSpan } from "../utils.js";
 import type {
   BindingContext,
   BoundFunction,
@@ -177,31 +168,6 @@ const ensureOverloadParameterAnnotations = (
       missingAnnotationSymbols.add(param.symbol);
     });
   });
-};
-
-const formatTypeAnnotation = (expr?: Expr): string => {
-  if (!expr) {
-    return "<inferred>";
-  }
-  if (isIdentifierAtom(expr)) {
-    return expr.value;
-  }
-  if (isIntAtom(expr) || isFloatAtom(expr)) {
-    return expr.value;
-  }
-  if (isStringAtom(expr)) {
-    return JSON.stringify(expr.value);
-  }
-  if (isBoolAtom(expr)) {
-    return String(expr.value);
-  }
-  if (isForm(expr)) {
-    return `(${expr
-      .toArray()
-      .map((entry) => formatTypeAnnotation(entry))
-      .join(" ")})`;
-  }
-  return "<expr>";
 };
 
 export const finalizeOverloadSets = (ctx: BindingContext): void => {

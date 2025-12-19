@@ -13,41 +13,9 @@ import type {
   HirNamedTypeExpr,
 } from "../hir/index.js";
 import type { Expr } from "../../parser/index.js";
-import {
-  isBoolAtom,
-  isFloatAtom,
-  isForm,
-  isIdentifierAtom,
-  isIntAtom,
-  isStringAtom,
-} from "../../parser/index.js";
+import { formatTypeAnnotation } from "../utils.js";
 
 const pureEffectRow = (effects: EffectTable): EffectRowId => effects.emptyRow;
-
-const formatTypeAnnotation = (expr?: Expr): string => {
-  if (!expr) {
-    return "<inferred>";
-  }
-  if (isIdentifierAtom(expr)) {
-    return expr.value;
-  }
-  if (isIntAtom(expr) || isFloatAtom(expr)) {
-    return expr.value;
-  }
-  if (isStringAtom(expr)) {
-    return JSON.stringify(expr.value);
-  }
-  if (isBoolAtom(expr)) {
-    return String(expr.value);
-  }
-  if (isForm(expr)) {
-    return `(${expr
-      .toArray()
-      .map((entry) => formatTypeAnnotation(entry))
-      .join(" ")})`;
-  }
-  return "<expr>";
-};
 
 const effectOperationKeyFromDecl = ({
   effectName,

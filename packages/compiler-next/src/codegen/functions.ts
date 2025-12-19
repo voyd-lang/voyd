@@ -322,14 +322,16 @@ export const emitModuleExports = (
         return;
       }
       const valueType = wasmTypeFor(meta.resultTypeId, ctx);
-      if (
-        valueType !== binaryen.none &&
-        valueType !== binaryen.i32 &&
-        valueType !== binaryen.i64 &&
-        valueType !== binaryen.f32 &&
-        valueType !== binaryen.f64
-      ) {
-        return;
+      const supportedReturn =
+        valueType === binaryen.none ||
+        valueType === binaryen.i32 ||
+        valueType === binaryen.i64 ||
+        valueType === binaryen.f32 ||
+        valueType === binaryen.f64;
+      if (!supportedReturn) {
+        throw new Error(
+          `effectful export ${exportName} has unsupported return type ${valueType}`
+        );
       }
       effectfulExports.push({ meta, exportName });
       return;
