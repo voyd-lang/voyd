@@ -1,3 +1,4 @@
+import { walkExpression } from "../hir/index.js";
 import type {
   HirCallableOwner,
   HirCapture,
@@ -5,9 +6,6 @@ import type {
   HirFunction,
   HirGraph,
   HirLambdaExpr,
-  HirMatchArm,
-  HirObjectLiteralEntry,
-  HirStatement,
 } from "../hir/index.js";
 import type { SymbolTable } from "../binder/index.js";
 import type { NodeId, ScopeId, SymbolId } from "../ids.js";
@@ -112,7 +110,16 @@ export const analyzeLambdaCaptures = ({
       });
     };
 
-    walkExpression(root, hir, visitIdentifier);
+    walkExpression({
+      exprId: root,
+      hir,
+      options: { skipLambdas: true },
+      onExpression: (_exprId, expr) => {
+        if (expr.exprKind === "identifier") {
+          visitIdentifier(expr);
+        }
+      },
+    });
     return captures;
   };
 
@@ -157,262 +164,18 @@ export const analyzeLambdaCaptures = ({
   });
 };
 
-const walkExpression = (
-  exprId: number,
-  hir: HirGraph,
-  onIdentifier: (expr: HirExpression & { exprKind: "identifier" }) => void
-): void => {
-  const expr = hir.expressions.get(exprId);
-  if (!expr) {
-    throw new Error(`missing HirExpression ${exprId}`);
-  }
-
-  switch (expr.exprKind) {
-    case "identifier":
-      onIdentifier(expr);
-      return;
-    case "literal":
-    case "overload-set":
-    case "continue":
-      return;
-    case "break":
-      if (typeof expr.value === "number") {
-        walkExpression(expr.value, hir, onIdentifier);
-      }
-      return;
-    case "call":
-      walkExpression(expr.callee, hir, onIdentifier);
-      expr.args.forEach((arg) => walkExpression(arg.expr, hir, onIdentifier));
-      return;
-    case "block":
-      expr.statements.forEach((stmt) =>
-        walkStatement(stmt, hir, onIdentifier)
-      );
-      if (typeof expr.value === "number") {
-        walkExpression(expr.value, hir, onIdentifier);
-      }
-      return;
-    case "tuple":
-      expr.elements.forEach((entry) =>
-        walkExpression(entry, hir, onIdentifier)
-      );
-      return;
-    case "loop":
-      walkExpression(expr.body, hir, onIdentifier);
-      return;
-    case "while":
-      walkExpression(expr.condition, hir, onIdentifier);
-      walkExpression(expr.body, hir, onIdentifier);
-      return;
-    case "cond":
-    case "if":
-      expr.branches.forEach((branch) => {
-        walkExpression(branch.condition, hir, onIdentifier);
-        walkExpression(branch.value, hir, onIdentifier);
-      });
-      if (typeof expr.defaultBranch === "number") {
-        walkExpression(expr.defaultBranch, hir, onIdentifier);
-      }
-      return;
-    case "match":
-      walkExpression(expr.discriminant, hir, onIdentifier);
-      expr.arms.forEach((arm) => walkMatchArm(arm, hir, onIdentifier));
-      return;
-    case "effect-handler":
-      walkExpression(expr.body, hir, onIdentifier);
-      expr.handlers.forEach((handler) =>
-        walkExpression(handler.body, hir, onIdentifier)
-      );
-      if (typeof expr.finallyBranch === "number") {
-        walkExpression(expr.finallyBranch, hir, onIdentifier);
-      }
-      return;
-    case "object-literal":
-      expr.entries.forEach((entry) =>
-        walkObjectLiteralEntry(entry, hir, onIdentifier)
-      );
-      return;
-    case "field-access":
-      walkExpression(expr.target, hir, onIdentifier);
-      return;
-    case "assign":
-      if (typeof expr.target === "number") {
-        walkExpression(expr.target, hir, onIdentifier);
-      }
-      walkExpression(expr.value, hir, onIdentifier);
-      return;
-    case "lambda":
-      return;
-  }
-};
-
 const gatherNestedLambdas = (
   exprId: number,
   hir: HirGraph,
   nested: Set<number>
 ): void => {
-  const expr = hir.expressions.get(exprId);
-  if (!expr) {
-    throw new Error(`missing HirExpression ${exprId}`);
-  }
-
-  switch (expr.exprKind) {
-    case "lambda":
-      nested.add(expr.id);
-      gatherNestedLambdas(expr.body, hir, nested);
-      return;
-    case "identifier":
-    case "literal":
-    case "overload-set":
-    case "continue":
-      return;
-    case "break":
-      if (typeof expr.value === "number") {
-        gatherNestedLambdas(expr.value, hir, nested);
+  walkExpression({
+    exprId,
+    hir,
+    onExpression: (_exprId, expr) => {
+      if (expr.exprKind === "lambda") {
+        nested.add(expr.id);
       }
-      return;
-    case "call":
-      gatherNestedLambdas(expr.callee, hir, nested);
-      expr.args.forEach((arg) => gatherNestedLambdas(arg.expr, hir, nested));
-      return;
-    case "block":
-      expr.statements.forEach((stmt) =>
-        gatherNestedLambdasFromStatement(stmt, hir, nested)
-      );
-      if (typeof expr.value === "number") {
-        gatherNestedLambdas(expr.value, hir, nested);
-      }
-      return;
-    case "tuple":
-      expr.elements.forEach((entry) =>
-        gatherNestedLambdas(entry, hir, nested)
-      );
-      return;
-    case "loop":
-      gatherNestedLambdas(expr.body, hir, nested);
-      return;
-    case "while":
-      gatherNestedLambdas(expr.condition, hir, nested);
-      gatherNestedLambdas(expr.body, hir, nested);
-      return;
-    case "cond":
-    case "if":
-      expr.branches.forEach((branch) => {
-        gatherNestedLambdas(branch.condition, hir, nested);
-        gatherNestedLambdas(branch.value, hir, nested);
-      });
-      if (typeof expr.defaultBranch === "number") {
-        gatherNestedLambdas(expr.defaultBranch, hir, nested);
-      }
-      return;
-    case "match":
-      gatherNestedLambdas(expr.discriminant, hir, nested);
-      expr.arms.forEach((arm) => {
-        if (typeof arm.guard === "number") {
-          gatherNestedLambdas(arm.guard, hir, nested);
-        }
-        gatherNestedLambdas(arm.value, hir, nested);
-      });
-      return;
-    case "effect-handler":
-      gatherNestedLambdas(expr.body, hir, nested);
-      expr.handlers.forEach((handler) =>
-        gatherNestedLambdas(handler.body, hir, nested)
-      );
-      if (typeof expr.finallyBranch === "number") {
-        gatherNestedLambdas(expr.finallyBranch, hir, nested);
-      }
-      return;
-    case "object-literal":
-      expr.entries.forEach((entry) => {
-        if (entry.kind === "spread") {
-          gatherNestedLambdas(entry.value, hir, nested);
-          return;
-        }
-        gatherNestedLambdas(entry.value, hir, nested);
-      });
-      return;
-    case "field-access":
-      gatherNestedLambdas(expr.target, hir, nested);
-      return;
-    case "assign":
-      if (typeof expr.target === "number") {
-        gatherNestedLambdas(expr.target, hir, nested);
-      }
-      gatherNestedLambdas(expr.value, hir, nested);
-      return;
-  }
-};
-
-const gatherNestedLambdasFromStatement = (
-  stmtId: number,
-  hir: HirGraph,
-  nested: Set<number>
-): void => {
-  const stmt = hir.statements.get(stmtId);
-  if (!stmt) {
-    throw new Error(`missing HirStatement ${stmtId}`);
-  }
-
-  switch (stmt.kind) {
-    case "let":
-      gatherNestedLambdas(stmt.initializer, hir, nested);
-      return;
-    case "expr-stmt":
-      gatherNestedLambdas(stmt.expr, hir, nested);
-      return;
-    case "return":
-      if (typeof stmt.value === "number") {
-        gatherNestedLambdas(stmt.value, hir, nested);
-      }
-      return;
-  }
-};
-
-const walkStatement = (
-  stmtId: number,
-  hir: HirGraph,
-  onIdentifier: (expr: HirExpression & { exprKind: "identifier" }) => void
-): void => {
-  const stmt = hir.statements.get(stmtId);
-  if (!stmt) {
-    throw new Error(`missing HirStatement ${stmtId}`);
-  }
-
-  switch (stmt.kind) {
-    case "let":
-      walkExpression(stmt.initializer, hir, onIdentifier);
-      return;
-    case "expr-stmt":
-      walkExpression(stmt.expr, hir, onIdentifier);
-      return;
-    case "return":
-      if (typeof stmt.value === "number") {
-        walkExpression(stmt.value, hir, onIdentifier);
-      }
-      return;
-  }
-};
-
-const walkMatchArm = (
-  arm: HirMatchArm,
-  hir: HirGraph,
-  onIdentifier: (expr: HirExpression & { exprKind: "identifier" }) => void
-): void => {
-  if (typeof arm.guard === "number") {
-    walkExpression(arm.guard, hir, onIdentifier);
-  }
-  walkExpression(arm.value, hir, onIdentifier);
-};
-
-const walkObjectLiteralEntry = (
-  entry: HirObjectLiteralEntry,
-  hir: HirGraph,
-  onIdentifier: (expr: HirExpression & { exprKind: "identifier" }) => void
-): void => {
-  if (entry.kind === "spread") {
-    walkExpression(entry.value, hir, onIdentifier);
-    return;
-  }
-  walkExpression(entry.value, hir, onIdentifier);
+    },
+  });
 };

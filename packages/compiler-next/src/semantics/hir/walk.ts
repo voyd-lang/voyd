@@ -4,6 +4,7 @@ import type { HirExpression, HirStatement } from "./nodes.js";
 
 type WalkOptions = {
   skipEffectHandlers?: boolean;
+  skipLambdas?: boolean;
 };
 
 export const walkExpression = ({
@@ -38,6 +39,9 @@ export const walkExpression = ({
         }
         return;
       case "lambda":
+        if (options?.skipLambdas) {
+          return;
+        }
         visitExpression(expr.body);
         return;
       case "effect-handler":
