@@ -1,4 +1,4 @@
-import type { HirEffectHandlerExpr } from "../../hir/index.js";
+import { walkExpression, type HirEffectHandlerExpr } from "../../hir/index.js";
 import { typeExpression } from "../expressions.js";
 import {
   composeEffectRows,
@@ -56,89 +56,24 @@ const collectEffectOperationTypeArguments = ({
   ctx: TypingContext;
 }): readonly TypeId[][] => {
   const collected: TypeId[][] = [];
-  const visitExpression = (exprId: HirExprId): void => {
-    const expr = ctx.hir.expressions.get(exprId);
-    if (!expr) return;
-
-    switch (expr.exprKind) {
-      case "literal":
-      case "identifier":
-      case "overload-set":
-      case "continue":
-        return;
-      case "break":
-        if (typeof expr.value === "number") visitExpression(expr.value);
-        return;
-      case "lambda":
-        visitExpression(expr.body);
-        return;
-      case "effect-handler":
-        return;
-      case "block":
-        expr.statements.forEach((stmtId) => {
-          const stmt = ctx.hir.statements.get(stmtId);
-          if (!stmt) return;
-          if (stmt.kind === "let") visitExpression(stmt.initializer);
-          if (stmt.kind === "expr-stmt") visitExpression(stmt.expr);
-          if (stmt.kind === "return" && typeof stmt.value === "number") {
-            visitExpression(stmt.value);
-          }
-        });
-        if (typeof expr.value === "number") visitExpression(expr.value);
-        return;
-      case "call": {
-        const callee = ctx.hir.expressions.get(expr.callee);
-        if (callee?.exprKind === "identifier" && callee.symbol === operation) {
-          const typeArgs = ctx.callResolution.typeArguments.get(expr.id);
-          if (typeArgs && typeArgs.length > 0) {
-            collected.push([...typeArgs]);
-          }
-        }
-        visitExpression(expr.callee);
-        expr.args.forEach((arg) => visitExpression(arg.expr));
+  walkExpression({
+    exprId: rootExprId,
+    hir: ctx.hir,
+    options: { skipEffectHandlers: true },
+    onExpression: (_exprId, expr) => {
+      if (expr.exprKind !== "call") {
         return;
       }
-      case "tuple":
-        expr.elements.forEach(visitExpression);
+      const callee = ctx.hir.expressions.get(expr.callee);
+      if (callee?.exprKind !== "identifier" || callee.symbol !== operation) {
         return;
-      case "loop":
-        visitExpression(expr.body);
-        return;
-      case "while":
-        visitExpression(expr.condition);
-        visitExpression(expr.body);
-        return;
-      case "cond":
-      case "if":
-        expr.branches.forEach((branch) => {
-          visitExpression(branch.condition);
-          visitExpression(branch.value);
-        });
-        if (typeof expr.defaultBranch === "number") {
-          visitExpression(expr.defaultBranch);
-        }
-        return;
-      case "match":
-        visitExpression(expr.discriminant);
-        expr.arms.forEach((arm) => {
-          if (typeof arm.guard === "number") visitExpression(arm.guard);
-          visitExpression(arm.value);
-        });
-        return;
-      case "object-literal":
-        expr.entries.forEach((entry) => visitExpression(entry.value));
-        return;
-      case "field-access":
-        visitExpression(expr.target);
-        return;
-      case "assign":
-        if (typeof expr.target === "number") visitExpression(expr.target);
-        visitExpression(expr.value);
-        return;
-    }
-  };
-
-  visitExpression(rootExprId);
+      }
+      const typeArgs = ctx.callResolution.typeArguments.get(expr.id);
+      if (typeArgs && typeArgs.length > 0) {
+        collected.push([...typeArgs]);
+      }
+    },
+  });
   return collected;
 };
 
@@ -309,6 +244,7 @@ const resolveHandlerOperation = ({
       },
       span,
     });
+    return clause.operation;
   }
 
   return matches[0]!;
