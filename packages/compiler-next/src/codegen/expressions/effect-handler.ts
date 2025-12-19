@@ -24,6 +24,7 @@ import {
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { RESUME_KIND, type ResumeKind } from "../effects/runtime-abi.js";
 import type { HirEffectHandlerExpr } from "../../semantics/hir/index.js";
+import type { TypeId } from "../../semantics/ids.js";
 import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,

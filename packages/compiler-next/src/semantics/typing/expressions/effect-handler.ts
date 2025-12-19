@@ -154,6 +154,12 @@ const resolveHandlerTypeArguments = ({
     return candidate.every((entry, index) => entry === first[index]);
   });
   if (!compatible) {
+    const span =
+      ctx.hir.expressions.get(handlerBody)?.span ??
+      ctx.hir.expressions.get(clause.body)?.span;
+    if (!span) {
+      throw new Error("missing span for effect handler clause");
+    }
     emitDiagnostic({
       ctx,
       code: "TY0018",
@@ -163,7 +169,7 @@ const resolveHandlerTypeArguments = ({
         message:
           "effect operation performed with multiple instantiations in the same try body",
       },
-      span: clause.span,
+      span,
     });
   }
 
