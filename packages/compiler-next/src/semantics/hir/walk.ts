@@ -1,15 +1,95 @@
 import type { HirExprId, HirStmtId } from "../ids.js";
 import type { HirGraph } from "./builder.js";
-import type { HirExpression, HirStatement } from "./nodes.js";
+import type { HirExpression, HirPattern, HirStatement } from "./nodes.js";
 
 export type WalkOptions = {
   skipEffectHandlers?: boolean;
   skipLambdas?: boolean;
+  visitHandlerBodies?: boolean;
+  visitPatterns?: boolean;
 };
 
 export type WalkControl = {
   skipChildren?: boolean;
   stop?: boolean;
+};
+
+const walkPatternInternal = ({
+  pattern,
+  onEnterPattern,
+  onExitPattern,
+}: {
+  pattern: HirPattern;
+  onEnterPattern?: (pattern: HirPattern) => WalkControl | void;
+  onExitPattern?: (pattern: HirPattern) => void;
+}): boolean => {
+  const control = onEnterPattern?.(pattern);
+  if (control?.stop) {
+    return true;
+  }
+
+  if (!control?.skipChildren) {
+    switch (pattern.kind) {
+      case "identifier":
+      case "wildcard":
+        break;
+      case "destructure":
+        for (const field of pattern.fields) {
+          if (
+            walkPatternInternal({
+              pattern: field.pattern,
+              onEnterPattern,
+              onExitPattern,
+            })
+          ) {
+            return true;
+          }
+        }
+        if (
+          pattern.spread &&
+          walkPatternInternal({ pattern: pattern.spread, onEnterPattern, onExitPattern })
+        ) {
+          return true;
+        }
+        break;
+      case "tuple":
+        for (const element of pattern.elements) {
+          if (
+            walkPatternInternal({
+              pattern: element,
+              onEnterPattern,
+              onExitPattern,
+            })
+          ) {
+            return true;
+          }
+        }
+        break;
+      case "type":
+        if (
+          pattern.binding &&
+          walkPatternInternal({ pattern: pattern.binding, onEnterPattern, onExitPattern })
+        ) {
+          return true;
+        }
+        break;
+    }
+  }
+
+  onExitPattern?.(pattern);
+  return false;
+};
+
+export const walkPattern = ({
+  pattern,
+  onEnterPattern,
+  onExitPattern,
+}: {
+  pattern: HirPattern;
+  onEnterPattern?: (pattern: HirPattern) => WalkControl | void;
+  onExitPattern?: (pattern: HirPattern) => void;
+}): void => {
+  walkPatternInternal({ pattern, onEnterPattern, onExitPattern });
 };
 
 export const walkExpression = ({
@@ -19,6 +99,8 @@ export const walkExpression = ({
   onExitExpression,
   onEnterStatement,
   onExitStatement,
+  onEnterPattern,
+  onExitPattern,
   options,
 }: {
   exprId: HirExprId;
@@ -27,8 +109,17 @@ export const walkExpression = ({
   onExitExpression?: (exprId: HirExprId, expr: HirExpression) => void;
   onEnterStatement?: (stmtId: HirStmtId, stmt: HirStatement) => WalkControl | void;
   onExitStatement?: (stmtId: HirStmtId, stmt: HirStatement) => void;
+  onEnterPattern?: (pattern: HirPattern) => WalkControl | void;
+  onExitPattern?: (pattern: HirPattern) => void;
   options?: WalkOptions;
 }): void => {
+  const shouldVisitPatterns =
+    options?.visitPatterns === true || onEnterPattern !== undefined || onExitPattern !== undefined;
+  const visitHandlerBodies = options?.visitHandlerBodies !== false;
+
+  const visitPattern = (pattern: HirPattern): boolean =>
+    walkPatternInternal({ pattern, onEnterPattern, onExitPattern });
+
   const visitExpression = (id: HirExprId): boolean => {
     const expr = hir.expressions.get(id);
     if (!expr) {
@@ -61,8 +152,10 @@ export const walkExpression = ({
           break;
         case "effect-handler":
           if (visitExpression(expr.body)) return true;
-          for (const handler of expr.handlers) {
-            if (visitExpression(handler.body)) return true;
+          if (visitHandlerBodies) {
+            for (const handler of expr.handlers) {
+              if (visitExpression(handler.body)) return true;
+            }
           }
           if (typeof expr.finallyBranch === "number") {
             if (visitExpression(expr.finallyBranch)) return true;
@@ -126,6 +219,9 @@ export const walkExpression = ({
             if (visitExpression(expr.target)) return true;
           }
           if (visitExpression(expr.value)) return true;
+          if (expr.pattern && shouldVisitPatterns) {
+            if (visitPattern(expr.pattern)) return true;
+          }
           break;
       }
     }
@@ -147,6 +243,9 @@ export const walkExpression = ({
     if (!control?.skipChildren) {
       switch (stmt.kind) {
         case "let":
+          if (shouldVisitPatterns) {
+            if (visitPattern(stmt.pattern)) return true;
+          }
           if (visitExpression(stmt.initializer)) return true;
           break;
         case "expr-stmt":
