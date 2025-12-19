@@ -60,7 +60,7 @@ const collectEffectOperationTypeArguments = ({
     exprId: rootExprId,
     hir: ctx.hir,
     options: { skipEffectHandlers: true },
-    onExpression: (_exprId, expr) => {
+    onEnterExpression: (_exprId, expr) => {
       if (expr.exprKind !== "call") {
         return;
       }
@@ -362,172 +362,162 @@ const analyzeContinuationUsage = ({
   ctx: TypingContext;
   nested?: boolean;
 }): ContinuationUsage => {
-  const visitExpression = (
-    id: HirExprId,
-    inNestedLambda: boolean
-  ): ContinuationUsage => {
-    const expr = ctx.hir.expressions.get(id);
-    if (!expr) {
-      throw new Error(`missing HirExpression ${id}`);
-    }
+  const emptyUsage: ContinuationUsage = { min: 0, max: 0, escapes: false };
+  const usageByExpr = new Map<number, ContinuationUsage>();
+  const usageByStmt = new Map<number, ContinuationUsage>();
+  const usageForExpr = (id?: number): ContinuationUsage =>
+    typeof id === "number" ? usageByExpr.get(id) ?? emptyUsage : emptyUsage;
+  const usageForStmt = (id: number): ContinuationUsage =>
+    usageByStmt.get(id) ?? emptyUsage;
+  const toLoopUsage = (usage: ContinuationUsage): ContinuationUsage => ({
+    min: 0,
+    max: usage.max > 0 ? Number.POSITIVE_INFINITY : 0,
+    escapes: usage.escapes,
+  });
 
-    switch (expr.exprKind) {
-      case "identifier":
-        return expr.symbol === targetSymbol
-          ? { min: 0, max: 0, escapes: true }
-          : { min: 0, max: 0, escapes: false };
-      case "literal":
-      case "overload-set":
-      case "continue":
-        return { min: 0, max: 0, escapes: false };
-      case "break":
-        return typeof expr.value === "number"
-          ? visitExpression(expr.value, inNestedLambda)
-          : { min: 0, max: 0, escapes: false };
-      case "call": {
-        const callee = ctx.hir.expressions.get(expr.callee);
-        let usage =
-          callee?.exprKind === "identifier" && callee.symbol === targetSymbol
-            ? { min: 1, max: 1, escapes: Boolean(inNestedLambda) }
-            : visitExpression(expr.callee, inNestedLambda);
-        expr.args.forEach((arg) => {
-          usage = mergeUsage(usage, visitExpression(arg.expr, inNestedLambda));
-        });
-        return usage;
+  let nestedLambdaDepth = nested ? 1 : 0;
+
+  walkExpression({
+    exprId,
+    hir: ctx.hir,
+    onEnterExpression: (_id, expr) => {
+      if (expr.exprKind === "lambda") {
+        nestedLambdaDepth += 1;
       }
-      case "block": {
-        let usage = expr.statements.reduce(
-          (acc, stmtId) => mergeUsage(acc, visitStatement(stmtId, inNestedLambda)),
-          { min: 0, max: 0, escapes: false }
-        );
-        if (typeof expr.value === "number") {
-          usage = mergeUsage(usage, visitExpression(expr.value, inNestedLambda));
+    },
+    onExitStatement: (stmtId, stmt) => {
+      const usage =
+        stmt.kind === "let"
+          ? usageForExpr(stmt.initializer)
+          : stmt.kind === "expr-stmt"
+            ? usageForExpr(stmt.expr)
+            : typeof stmt.value === "number"
+              ? usageForExpr(stmt.value)
+              : emptyUsage;
+      usageByStmt.set(stmtId, usage);
+    },
+    onExitExpression: (id, expr) => {
+      let usage = emptyUsage;
+      switch (expr.exprKind) {
+        case "identifier":
+          usage =
+            expr.symbol === targetSymbol
+              ? { min: 0, max: 0, escapes: true }
+              : emptyUsage;
+          break;
+        case "literal":
+        case "overload-set":
+        case "continue":
+          usage = emptyUsage;
+          break;
+        case "break":
+          usage =
+            typeof expr.value === "number" ? usageForExpr(expr.value) : emptyUsage;
+          break;
+        case "call": {
+          const callee = ctx.hir.expressions.get(expr.callee);
+          usage =
+            callee?.exprKind === "identifier" && callee.symbol === targetSymbol
+              ? { min: 1, max: 1, escapes: nestedLambdaDepth > 0 }
+              : usageForExpr(expr.callee);
+          expr.args.forEach((arg) => {
+            usage = mergeUsage(usage, usageForExpr(arg.expr));
+          });
+          break;
         }
-        return usage;
-      }
-      case "tuple":
-        return expr.elements.reduce<ContinuationUsage>(
-          (acc, entry) => mergeUsage(acc, visitExpression(entry, inNestedLambda)),
-          { min: 0, max: 0, escapes: false }
-        );
-      case "loop":
-        const loopUsage = analyzeContinuationUsage({
-          exprId: expr.body,
-          targetSymbol,
-          ctx,
-          nested: inNestedLambda,
-        });
-        return {
-          min: 0,
-          max: loopUsage.max > 0 ? Number.POSITIVE_INFINITY : 0,
-          escapes: loopUsage.escapes,
-        };
-      case "while":
-        const whileBody = analyzeContinuationUsage({
-          exprId: expr.body,
-          targetSymbol,
-          ctx,
-          nested: inNestedLambda,
-        });
-        return mergeUsage(visitExpression(expr.condition, inNestedLambda), {
-          min: 0,
-          max: whileBody.max > 0 ? Number.POSITIVE_INFINITY : 0,
-          escapes: whileBody.escapes,
-        });
-      case "cond":
-      case "if": {
-        const branchUsages = expr.branches.map((branch) =>
-          mergeUsage(
-            visitExpression(branch.condition, inNestedLambda),
-            visitExpression(branch.value, inNestedLambda)
-          )
-        );
-        const defaultUsage =
-          typeof expr.defaultBranch === "number"
-            ? visitExpression(expr.defaultBranch, inNestedLambda)
-            : { min: 0, max: 0, escapes: false };
-        return mergeBranches([...branchUsages, defaultUsage]);
-      }
-      case "match": {
-        let usage = visitExpression(expr.discriminant, inNestedLambda);
-        const armUsages = expr.arms.map((arm) => {
-          let armUsage =
-            typeof arm.guard === "number"
-              ? visitExpression(arm.guard, inNestedLambda)
-              : { min: 0, max: 0, escapes: false };
-          armUsage = mergeUsage(
-            armUsage,
-            visitExpression(arm.value, inNestedLambda)
+        case "block":
+          usage = expr.statements.reduce(
+            (acc, stmtId) => mergeUsage(acc, usageForStmt(stmtId)),
+            emptyUsage
           );
-          return armUsage;
-        });
-        return mergeUsage(usage, mergeBranches(armUsages));
-      }
-      case "effect-handler": {
-        let usage = visitExpression(expr.body, inNestedLambda);
-        expr.handlers.forEach((handler) => {
-          usage = mergeUsage(usage, visitExpression(handler.body, inNestedLambda));
-        });
-        if (typeof expr.finallyBranch === "number") {
+          if (typeof expr.value === "number") {
+            usage = mergeUsage(usage, usageForExpr(expr.value));
+          }
+          break;
+        case "tuple":
+          usage = expr.elements.reduce(
+            (acc, entry) => mergeUsage(acc, usageForExpr(entry)),
+            emptyUsage
+          );
+          break;
+        case "loop":
+          usage = toLoopUsage(usageForExpr(expr.body));
+          break;
+        case "while":
           usage = mergeUsage(
-            usage,
-            visitExpression(expr.finallyBranch, inNestedLambda)
+            usageForExpr(expr.condition),
+            toLoopUsage(usageForExpr(expr.body))
           );
+          break;
+        case "cond":
+        case "if": {
+          const branchUsages = expr.branches.map((branch) =>
+            mergeUsage(
+              usageForExpr(branch.condition),
+              usageForExpr(branch.value)
+            )
+          );
+          const defaultUsage =
+            typeof expr.defaultBranch === "number"
+              ? usageForExpr(expr.defaultBranch)
+              : emptyUsage;
+          usage = mergeBranches([...branchUsages, defaultUsage]);
+          break;
         }
-        return usage;
+        case "match": {
+          const discriminantUsage = usageForExpr(expr.discriminant);
+          const armUsages = expr.arms.map((arm) => {
+            const guardUsage =
+              typeof arm.guard === "number"
+                ? usageForExpr(arm.guard)
+                : emptyUsage;
+            return mergeUsage(guardUsage, usageForExpr(arm.value));
+          });
+          usage = mergeUsage(discriminantUsage, mergeBranches(armUsages));
+          break;
+        }
+        case "effect-handler": {
+          usage = usageForExpr(expr.body);
+          expr.handlers.forEach((handler) => {
+            usage = mergeUsage(usage, usageForExpr(handler.body));
+          });
+          if (typeof expr.finallyBranch === "number") {
+            usage = mergeUsage(usage, usageForExpr(expr.finallyBranch));
+          }
+          break;
+        }
+        case "object-literal":
+          usage = expr.entries.reduce(
+            (acc, entry) => mergeUsage(acc, usageForExpr(entry.value)),
+            emptyUsage
+          );
+          break;
+        case "field-access":
+          usage = usageForExpr(expr.target);
+          break;
+        case "assign": {
+          const targetUsage =
+            typeof expr.target === "number"
+              ? usageForExpr(expr.target)
+              : emptyUsage;
+          usage = mergeUsage(targetUsage, usageForExpr(expr.value));
+          break;
+        }
+        case "lambda": {
+          const inner = usageForExpr(expr.body);
+          usage =
+            inner.min > 0 || inner.max > 0 || inner.escapes
+              ? { min: inner.min, max: inner.max, escapes: true }
+              : inner;
+          nestedLambdaDepth -= 1;
+          break;
+        }
       }
-      case "object-literal":
-        return expr.entries.reduce<ContinuationUsage>(
-          (acc, entry) =>
-            mergeUsage(acc, visitExpression(entry.value, inNestedLambda)),
-          { min: 0, max: 0, escapes: false }
-        );
-      case "field-access":
-        return visitExpression(expr.target, inNestedLambda);
-      case "assign": {
-        const targetUsage =
-          typeof expr.target === "number"
-            ? visitExpression(expr.target, inNestedLambda)
-            : { min: 0, max: 0, escapes: false };
-        return mergeUsage(
-          targetUsage,
-          visitExpression(expr.value, inNestedLambda)
-        );
-      }
-      case "lambda": {
-        const inner = visitExpression(expr.body, true);
-        return inner.min > 0 || inner.max > 0 || inner.escapes
-          ? { min: inner.min, max: inner.max, escapes: true }
-          : inner;
-      }
-    }
+      usageByExpr.set(id, usage);
+    },
+  });
 
-    return { min: 0, max: 0, escapes: false };
-  };
-
-  const visitStatement = (
-    id: number,
-    inNestedLambda: boolean
-  ): ContinuationUsage => {
-    const stmt = ctx.hir.statements.get(id);
-    if (!stmt) {
-      throw new Error(`missing HirStatement ${id}`);
-    }
-    switch (stmt.kind) {
-      case "let":
-        return visitExpression(stmt.initializer, inNestedLambda);
-      case "expr-stmt":
-        return visitExpression(stmt.expr, inNestedLambda);
-      case "return":
-        return typeof stmt.value === "number"
-          ? visitExpression(stmt.value, inNestedLambda)
-          : { min: 0, max: 0, escapes: false };
-    }
-
-    return { min: 0, max: 0, escapes: false };
-  };
-
-  return visitExpression(exprId, Boolean(nested));
+  return usageByExpr.get(exprId) ?? emptyUsage;
 };
 
 const enforceTailResumption = ({
