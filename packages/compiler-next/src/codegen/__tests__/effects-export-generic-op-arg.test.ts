@@ -23,7 +23,8 @@ describe("effectful exports with generic effect args", () => {
   it("encodes concrete args for generic effect operations", async () => {
     const { module } = buildModule();
     const handlers = {
-      "0:0:0": (_request: unknown, value: number) => value + 1,
+      "0:0:0": (_request: unknown, ...args: unknown[]) =>
+        (args[0] as number) + 1,
     };
 
     const result = await runEffectfulExport<number>({
