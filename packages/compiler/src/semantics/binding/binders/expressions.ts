@@ -30,7 +30,10 @@ import {
 import type { ModuleExportEntry } from "../../modules.js";
 import type { ModuleMemberTable } from "../types.js";
 import { extractConstructorTargetIdentifier } from "../../constructors.js";
-import { importableMetadataFrom } from "../../imports/metadata.js";
+import {
+  importableMetadataFrom,
+  importedModuleIdFrom,
+} from "../../imports/metadata.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -481,23 +484,11 @@ const bindNamespaceAccess = (
     return;
   }
 
-  const targetName =
-    isIdentifierAtom(target) || isInternalIdentifierAtom(target)
-      ? target.value
-      : undefined;
-  if (!targetName) {
-    return;
-  }
-  const targetSymbol = ctx.symbolTable.resolve(targetName, tracker.current());
-  if (typeof targetSymbol !== "number") {
-    return;
-  }
-  const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
-  if (
-    targetRecord.kind === "module" &&
-    targetRecord.metadata &&
-    "import" in targetRecord.metadata
-  ) {
+  const scope = tracker.current();
+
+  const moduleSymbol = resolveNamespaceModuleSymbol(target, scope, ctx);
+  if (typeof moduleSymbol === "number") {
+    const targetRecord = ctx.symbolTable.getSymbol(moduleSymbol);
     const importMeta = targetRecord.metadata as {
       import?: { moduleId?: string };
     };
@@ -508,29 +499,106 @@ const bindNamespaceAccess = (
 
     ensureModuleMemberImport({
       moduleId,
-      moduleSymbol: targetSymbol,
+      moduleSymbol,
       memberName,
       syntax: member as Syntax,
-      scope: tracker.current(),
+      scope,
       ctx,
     });
     ensureConstructorImportForTarget({
       identifier: extractConstructorTargetIdentifier(member),
       ctx,
-      scope: tracker.current(),
+      scope,
     });
     return;
   }
 
-  if (targetRecord.kind === "type") {
-    ensureStaticMethodImport({
-      targetSymbol,
-      memberName,
-      syntax: member as Syntax,
-      scope: tracker.current(),
-      ctx,
-    });
+  const identifier = extractConstructorTargetIdentifier(target);
+  if (!identifier) {
+    return;
   }
+
+  const targetSymbol = ctx.symbolTable.resolve(identifier.value, scope);
+  if (typeof targetSymbol !== "number") {
+    return;
+  }
+
+  const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
+  if (targetRecord.kind !== "type") {
+    return;
+  }
+
+  ensureStaticMethodImport({
+    targetSymbol,
+    memberName,
+    syntax: member as Syntax,
+    scope,
+    ctx,
+  });
+};
+
+const resolveNamespaceModuleSymbol = (
+  target: Expr | undefined,
+  scope: ScopeId,
+  ctx: BindingContext
+): number | undefined => {
+  if (!target) {
+    return undefined;
+  }
+
+  if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
+    const symbol = ctx.symbolTable.resolve(target.value, scope);
+    if (typeof symbol !== "number") {
+      return undefined;
+    }
+    const record = ctx.symbolTable.getSymbol(symbol);
+    if (record.kind !== "module" && record.kind !== "effect") {
+      return undefined;
+    }
+    if (!record.metadata || !("import" in record.metadata)) {
+      return undefined;
+    }
+    return symbol;
+  }
+
+  if (!isForm(target) || !target.calls("::") || target.length !== 3) {
+    return undefined;
+  }
+
+  const left = target.at(1);
+  const right = target.at(2);
+  if (!left || !right) {
+    return undefined;
+  }
+
+  const leftSymbol = resolveNamespaceModuleSymbol(left, scope, ctx);
+  if (typeof leftSymbol !== "number") {
+    return undefined;
+  }
+
+  const memberName = extractMemberName(right);
+  if (!memberName) {
+    return undefined;
+  }
+
+  const memberTable = ctx.moduleMembers.get(leftSymbol);
+  const candidates = memberTable?.get(memberName);
+  if (!candidates) {
+    return undefined;
+  }
+
+  for (const candidate of candidates) {
+    const record = ctx.symbolTable.getSymbol(candidate);
+    if (record.kind !== "module" && record.kind !== "effect") {
+      continue;
+    }
+    if (!record.metadata || !("import" in record.metadata)) {
+      continue;
+    }
+    return candidate;
+  }
+
+  return undefined;
 };
 
 const ensureStaticMethodImport = ({
@@ -782,13 +850,22 @@ const declareModuleMemberImport = ({
     const importableMetadata = importableMetadataFrom(
       dependencyRecord?.metadata as Record<string, unknown> | undefined
     );
+    const importedModuleId =
+      exported.kind === "module"
+        ? importedModuleIdFrom(
+            dependencyRecord?.metadata as Record<string, unknown> | undefined
+          ) ?? exported.moduleId
+        : exported.moduleId;
     const local = ctx.symbolTable.declare(
       {
         name: exported.name,
         kind: exported.kind,
         declaredAt: syntax.syntaxId,
         metadata: {
-          import: { moduleId: exported.moduleId, symbol },
+          import:
+            exported.kind === "module"
+              ? { moduleId: importedModuleId }
+              : { moduleId: exported.moduleId, symbol },
           ...(importableMetadata ?? {}),
         },
       },
@@ -797,7 +874,10 @@ const declareModuleMemberImport = ({
     ctx.imports.push({
       name: exported.name,
       local,
-      target: { moduleId: exported.moduleId, symbol },
+      target:
+        exported.kind === "module"
+          ? undefined
+          : { moduleId: exported.moduleId, symbol },
       visibility: moduleVisibility(),
       span: toSourceSpan(syntax),
     });

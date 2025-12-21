@@ -445,13 +445,13 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
         "generics",
         "T",
       ],
-    ],
-    [
-      "object_literal",
       [
-        ":",
-        "c",
-        "i32",
+        "object_literal",
+        [
+          ":",
+          "c",
+          "i32",
+        ],
       ],
     ],
   ],

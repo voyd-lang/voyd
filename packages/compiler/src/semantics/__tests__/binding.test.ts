@@ -792,4 +792,59 @@ describe("binding pipeline", () => {
     expect(use.entries[1]?.moduleId).toBe(mathId);
     expect(use.entries[1]?.alias).toBe("math");
   });
+
+  it("prefers nested export modules when resolving relative use paths", () => {
+    const source = "pub use inner::self";
+    const ast = parse(source, "outer.voyd");
+
+    const modulePath = { namespace: "src" as const, segments: ["outer"] as const };
+    const moduleId = modulePathToString(modulePath);
+
+    const innerUsePath = { namespace: "src" as const, segments: ["inner"] as const };
+    const innerNestedPath = {
+      namespace: "src" as const,
+      segments: ["outer", "inner"] as const,
+    };
+    const nestedId = modulePathToString(innerNestedPath);
+
+    const dependencies: ModuleDependency[] = [
+      { kind: "use", path: innerUsePath },
+      { kind: "export", path: innerNestedPath },
+    ];
+
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "outer.voyd" },
+      ast,
+      source,
+      dependencies,
+    };
+
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "outer.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports: new Map(),
+    });
+
+    const [use] = binding.uses;
+    expect(use?.entries[0]?.moduleId).toBe(nestedId);
+    const innerSymbol = symbolTable.resolve("inner", symbolTable.rootScope);
+    expect(innerSymbol).toBeDefined();
+    if (typeof innerSymbol !== "number") return;
+    const innerImport = symbolTable.getSymbol(innerSymbol)
+      .metadata as { import?: { moduleId: string } } | undefined;
+    expect(innerImport?.import?.moduleId).toBe(nestedId);
+  });
 });

@@ -18,6 +18,18 @@ export const extractConstructorTargetIdentifier = (
   if (!isForm(expr)) {
     return undefined;
   }
+  if (expr.calls("::")) {
+    const member = expr.at(2);
+    if (isIdentifierAtom(member) || isInternalIdentifierAtom(member)) {
+      return member as IdentifierAtom | InternalIdentifierAtom;
+    }
+    if (
+      isForm(member) &&
+      (isIdentifierAtom(member.first) || isInternalIdentifierAtom(member.first))
+    ) {
+      return member.first as IdentifierAtom | InternalIdentifierAtom;
+    }
+  }
   if (isIdentifierAtom(expr.first) || isInternalIdentifierAtom(expr.first)) {
     return expr.first as IdentifierAtom | InternalIdentifierAtom;
   }

@@ -42,3 +42,13 @@ export const applyImportableMetadata = ({
     symbolTable.setSymbolMetadata(symbol, metadata);
   }
 };
+
+export const importedModuleIdFrom = (
+  source?: Record<string, unknown>
+): string | undefined => {
+  const meta = source as
+    | { import?: { moduleId?: unknown } | undefined }
+    | undefined;
+  const moduleId = meta?.import?.moduleId;
+  return typeof moduleId === "string" ? moduleId : undefined;
+};

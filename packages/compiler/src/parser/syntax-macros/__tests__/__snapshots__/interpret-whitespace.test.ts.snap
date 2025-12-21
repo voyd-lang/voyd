@@ -440,18 +440,20 @@ exports[`it correctly handles the kitchen sink 1`] = `
   [
     "obj",
     [
-      "Test",
       [
-        "generics",
-        "T",
+        "Test",
+        [
+          "generics",
+          "T",
+        ],
       ],
-    ],
-    [
-      "object_literal",
       [
-        "c",
-        ":",
-        "i32",
+        "object_literal",
+        [
+          "c",
+          ":",
+          "i32",
+        ],
       ],
     ],
   ],
@@ -470,31 +472,35 @@ exports[`it correctly handles the kitchen sink 1`] = `
       ],
       ":",
       [
-        "Some",
         [
-          "generics",
-          "i32",
+          "Some",
+          [
+            "generics",
+            "i32",
+          ],
         ],
-      ],
-      [
-        "object_literal",
         [
-          "value",
-          ":",
-          "x",
-          ".",
-          "value",
-          "+",
-          "1",
+          "object_literal",
+          [
+            "value",
+            ":",
+            "x",
+            ".",
+            "value",
+            "+",
+            "1",
+          ],
         ],
       ],
     ],
     [
       "None",
       ":",
-      "None",
       [
-        "object_literal",
+        "None",
+        [
+          "object_literal",
+        ],
       ],
     ],
   ],
@@ -946,18 +952,20 @@ exports[`it correctly handles the kitchen sink 1`] = `
           [
             "y",
             ":",
-            "Point",
             [
-              "object_literal",
+              "Point",
               [
-                "x",
-                ":",
-                "10",
-              ],
-              [
-                "y",
-                ":",
-                "20",
+                "object_literal",
+                [
+                  "x",
+                  ":",
+                  "10",
+                ],
+                [
+                  "y",
+                  ":",
+                  "20",
+                ],
               ],
             ],
           ],

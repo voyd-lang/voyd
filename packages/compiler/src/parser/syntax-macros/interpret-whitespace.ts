@@ -58,7 +58,36 @@ const finalizeWhitespace = (expr: Expr): Expr =>
 
 const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
   const transformed: FormInitElements = [];
+  const parenthesized: boolean[] = [];
   const indentLevel = startIndentLevel ?? nextExprIndentLevel(cursor);
+
+  const pushElement = (expr: FormInitElements[number], isParenthesized = false) => {
+    transformed.push(expr);
+    parenthesized.push(isParenthesized);
+  };
+
+  const popElement = () => {
+    parenthesized.pop();
+    return transformed.pop();
+  };
+
+  const maybeMergeConstructorObjectLiteral = () => {
+    if (transformed.length < 2) return;
+    const objectLiteral = transformed.at(-1);
+    const callee = transformed.at(-2);
+    const calleeIsParenthesized = parenthesized.at(-2) ?? false;
+    if (
+      objectLiteral &&
+      callee &&
+      isObjectLiteral(objectLiteral) &&
+      !calleeIsParenthesized &&
+      isUpperCamelConstructorTarget(callee)
+    ) {
+      popElement();
+      popElement();
+      pushElement(new CallForm([callee, objectLiteral]));
+    }
+  };
 
   const pushChildBlock = () => {
     const children: Expr[] = [new IdentifierAtom("block")];
@@ -66,7 +95,9 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
     while (nextExprIndentLevel(cursor) > indentLevel) {
       const child = elideParens(cursor, indentLevel + 1);
 
-      if (handleLeadingContinuationOp(child, children, transformed)) {
+      const continuationOp = extractLeadingContinuationOp(child, children);
+      if (continuationOp !== undefined) {
+        continuationOp.forEach((entry) => pushElement(entry));
         return;
       }
 
@@ -81,11 +112,11 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
 
     // Handle labeled arguments
     if (suiteIsArgList(children)) {
-      transformed.push(...children.slice(1));
+      children.slice(1).forEach((child) => pushElement(child));
       return;
     }
 
-    transformed.push(new CallForm(children));
+    pushElement(new CallForm(children));
   };
 
   consumeLeadingWhitespace(cursor);
@@ -109,20 +140,21 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
 
     if (p.isForm(next)) {
       cursor.consume();
-      transformed.push(
-        next.callsInternal("paren")
-          ? elideParens(next.slice(1).cursor(), indentLevel)
-          : interpretWhitespaceExpr(next, indentLevel)
-      );
+      const isParen = next.callsInternal("paren");
+      const expr = isParen
+        ? elideParens(next.slice(1).cursor(), indentLevel)
+        : interpretWhitespaceExpr(next, indentLevel);
+      pushElement(expr, isParen);
+      maybeMergeConstructorObjectLiteral();
       continue;
     }
 
     if (isGreedyOp(next)) {
       const op = cursor.consume()!;
-      transformed.push(op);
+      pushElement(op);
 
       if (nextExprIndentLevel(cursor) <= indentLevel) {
-        transformed.push(elideParens(cursor, indentLevel));
+        pushElement(elideParens(cursor, indentLevel));
       }
 
       continue;
@@ -130,7 +162,8 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
 
     const consumed = cursor.consume();
     if (!consumed) break;
-    transformed.push(consumed);
+    pushElement(consumed);
+    maybeMergeConstructorObjectLiteral();
   }
 
   return new Form(transformed).unwrap();
@@ -409,31 +442,61 @@ const isHandlerClause = (v: Expr | undefined): v is Form =>
     (v.at(2) as Form).calls("block")) ||
     hasTrailingHandlerBlock(v));
 
-const handleLeadingContinuationOp = (
+const extractLeadingContinuationOp = (
   child: Expr,
-  children: Expr[],
-  transformed: FormInitElements
-): boolean => {
+  children: Expr[]
+): FormInitElements | undefined => {
   if (
     children.length !== 1 ||
     !p.isForm(child) ||
     !isContinuationOp(child.first)
   ) {
-    return false;
+    return undefined;
   }
 
   const elements = child.toArray();
   const head = elements.at(0);
-  if (head) transformed.push(head);
+  if (!head) return [];
   const tail = elements.slice(1);
-  if (tail.length === 0) return true;
-  transformed.push(tail.length === 1 ? tail[0]! : tail);
-  return true;
+  if (tail.length === 0) return [head];
+  return [head, tail.length === 1 ? tail[0]! : tail];
 };
 
 const unwrapSyntheticCall = (expr: Expr): Expr => {
   if (p.isForm(expr)) return expr.unwrap();
   return expr;
+};
+
+const isObjectLiteral = (expr: Expr): expr is Form =>
+  p.isForm(expr) && (expr as Form).callsInternal("object_literal");
+
+const isUpperCamelCase = (value: string): boolean => {
+  const first = value[0];
+  if (!first) return false;
+  return first.toUpperCase() === first && first.toLowerCase() !== first;
+};
+
+const isUpperCamelConstructorTarget = (expr: Expr | undefined): boolean => {
+  if (!expr) return false;
+
+  if (isIdentifierAtom(expr)) {
+    return !expr.isQuoted && isUpperCamelCase(expr.value);
+  }
+
+  if (
+    !p.isForm(expr) ||
+    expr.callsInternal("paren") ||
+    expr.callsInternal("tuple")
+  ) {
+    return false;
+  }
+
+  const head = expr.at(0);
+  if (!isIdentifierAtom(head) || isOp(head) || head.isQuoted) {
+    return false;
+  }
+
+  return isUpperCamelCase(head.value);
 };
 
 const isCallLikeForm = (form: Form) => {
