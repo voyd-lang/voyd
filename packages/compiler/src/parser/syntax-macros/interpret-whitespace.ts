@@ -80,11 +80,7 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
     }
 
     // Handle labeled arguments
-    const firstChild = children.at(1);
-    if (
-      p.isForm(firstChild) &&
-      (isNamedArg(firstChild) || isInlineLabeledExpr(firstChild))
-    ) {
+    if (suiteIsArgList(children)) {
       transformed.push(...children.slice(1));
       return;
     }
@@ -196,46 +192,43 @@ const isIndent = (v?: Expr) => p.isWhitespaceAtom(v) && v.isIndent;
 
 const isNamedArg = (v: Form) => p.atomEq(v.at(1), ":");
 
-const STATEMENT_LIKE_HEADS = new Set([
-  "block",
-  "let",
-  "var",
-  "fn",
-  "pub",
-  "obj",
-  "type",
-  "trait",
-  "impl",
-  "use",
-  "return",
-  "if",
-  "match",
-  "while",
-  "try",
-]);
+const isAssignmentLikeOp = (expr: Expr | undefined): boolean =>
+  isIdentifierAtom(expr) && !expr.isQuoted && (expr.value === "=" || expr.value === ":=");
 
 const isInlineLabeledExpr = (v: Form): boolean => {
   const elements = v.toArray().filter((expr) => !p.isWhitespaceAtom(expr));
   if (elements.length < 3) return false;
-
-  const first = elements[0];
-  if (!isIdentifierAtom(first) || isOp(first) || first.isQuoted) {
-    return false;
-  }
-
-  // Avoid treating statement-ish forms (e.g. `let x: T = ...`) as labeled args.
-  // Inline labeled args are intended for patterns like `Dog as d: ...` within calls.
-  if (STATEMENT_LIKE_HEADS.has(first.value)) {
-    return false;
-  }
 
   const colonIndex = elements.findIndex(
     (expr, index) => index > 0 && p.atomEq(expr, ":")
   );
   if (colonIndex <= 0 || colonIndex >= elements.length - 1) return false;
 
-  const rhs = elements[colonIndex + 1];
-  return !(p.isForm(rhs) && (rhs as Form).calls("block"));
+  const rhsHead = elements[colonIndex + 1];
+  if (p.isForm(rhsHead) && (rhsHead as Form).calls("block")) {
+    return false;
+  }
+
+  // Reject forms that look like type annotations / assignments such as `let x: T = 1`,
+  // by disallowing assignment-like operators on the RHS at the same list level.
+  for (let i = colonIndex + 1; i < elements.length; i += 1) {
+    if (isAssignmentLikeOp(elements[i])) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const isIgnorableSuiteEntry = (expr: Expr): boolean =>
+  p.isWhitespaceAtom(expr) || p.isCommentAtom(expr);
+
+const isArgLikeSuiteEntry = (expr: Expr): boolean =>
+  p.isForm(expr) && (isNamedArg(expr) || isInlineLabeledExpr(expr));
+
+const suiteIsArgList = (children: Expr[]): boolean => {
+  const entries = children.slice(1).filter((entry) => !isIgnorableSuiteEntry(entry));
+  return entries.length > 0 && entries.every(isArgLikeSuiteEntry);
 };
 
 /**
@@ -269,10 +262,6 @@ const expandClauseStyleLabeledSuite = (
     return undefined;
   }
 
-  if (STATEMENT_LIKE_HEADS.has(first.value)) {
-    return undefined;
-  }
-
   const elements = expr.toArray();
   if (elements.length < 3) return undefined;
 
@@ -298,6 +287,9 @@ const expandClauseStyleLabeledSuite = (
   const previous = siblings.at(-1);
   const suiteLabel = previous ? findTrailingSuiteLabel(previous) : undefined;
   if (!suiteLabel) return undefined;
+  if (containsExplicitSuiteLabel(expr, suiteLabel)) {
+    return undefined;
+  }
 
   const conditionTokens = elements.slice(
     1,
@@ -331,6 +323,29 @@ const expandClauseStyleLabeledSuite = (
 
   const trailing = elements.slice(suiteBlockIndex + 1);
   return [clauseArg, suiteArg, ...trailing];
+};
+
+const containsExplicitSuiteLabel = (
+  expr: Form,
+  suiteLabel: IdentifierAtom
+): boolean => {
+  const elements = expr.toArray();
+  for (let i = 0; i < elements.length - 2; i += 1) {
+    const label = elements[i];
+    const maybeColon = elements[i + 1];
+    const value = elements[i + 2];
+    if (
+      isIdentifierAtom(label) &&
+      !label.isQuoted &&
+      label.value === suiteLabel.value &&
+      p.atomEq(maybeColon, ":") &&
+      p.isForm(value) &&
+      (value as Form).calls("block")
+    ) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const findTrailingSuiteLabel = (expr: Expr): IdentifierAtom | undefined => {
