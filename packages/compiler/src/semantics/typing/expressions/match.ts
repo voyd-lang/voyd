@@ -9,6 +9,7 @@ import {
   ensureTypeMatches,
   resolveTypeExpr,
   getStructuralFields,
+  getSymbolName,
 } from "../type-system.js";
 import {
   diagnosticFromCode,
@@ -116,6 +117,7 @@ export const typeMatchExpr = (
               ctx,
               state,
               hints: patternNominalHints,
+              discriminantSpan,
             })
           : undefined;
     if (typeof patternType === "number") {
@@ -145,7 +147,7 @@ const narrowMatchPattern = (
   state: TypingState,
   reason: string,
   spans: { patternSpan: SourceSpan; discriminantSpan?: SourceSpan },
-  patternHints?: Map<SymbolId, NominalPatternHint>
+  patternHints?: NominalPatternHints
 ): TypeId => {
   switch (pattern.kind) {
     case "wildcard":
@@ -190,6 +192,7 @@ const narrowMatchPattern = (
         ctx,
         state,
         hints: patternHints,
+        discriminantSpan: spans.discriminantSpan,
       });
       const narrowed = narrowTypeForPattern(
         discriminantType,
@@ -328,17 +331,23 @@ type NominalPatternHint = {
   memberType: TypeId;
 };
 
+type NominalPatternHints = {
+  unique: Map<SymbolId, NominalPatternHint>;
+  ambiguous: Set<SymbolId>;
+};
+
 const collectNominalPatternHints = (
   discriminantType: TypeId,
   ctx: TypingContext
-): Map<SymbolId, NominalPatternHint> | undefined => {
+): NominalPatternHints | undefined => {
   const desc = ctx.arena.get(discriminantType);
   if (desc.kind !== "union") {
     return undefined;
   }
 
   const counts = new Map<SymbolId, number>();
-  const hints = new Map<SymbolId, NominalPatternHint>();
+  const unique = new Map<SymbolId, NominalPatternHint>();
+  const ambiguous = new Set<SymbolId>();
 
   desc.members.forEach((member) => {
     const nominal = getNominalComponent(member, ctx);
@@ -353,13 +362,14 @@ const collectNominalPatternHints = (
     const count = (counts.get(owner) ?? 0) + 1;
     counts.set(owner, count);
     if (count === 1) {
-      hints.set(owner, { nominal, memberType: member });
+      unique.set(owner, { nominal, memberType: member });
     } else {
-      hints.delete(owner);
+      unique.delete(owner);
+      ambiguous.add(owner);
     }
   });
 
-  return hints.size > 0 ? hints : undefined;
+  return unique.size > 0 || ambiguous.size > 0 ? { unique, ambiguous } : undefined;
 };
 
 const resolveNominalPatternSymbol = (
@@ -389,23 +399,51 @@ const resolveMatchPatternType = ({
   ctx,
   state,
   hints,
+  discriminantSpan,
 }: {
   pattern: HirPattern & { kind: "type" };
   ctx: TypingContext;
   state: TypingState;
-  hints?: Map<SymbolId, NominalPatternHint>;
+  hints?: NominalPatternHints;
+  discriminantSpan?: SourceSpan;
 }): TypeId => {
   const namedType =
     pattern.type.typeKind === "named" ? pattern.type : undefined;
   const nominalSymbol =
     hints && namedType ? resolveNominalPatternSymbol(namedType, ctx) : undefined;
-  const inferred =
-    nominalSymbol && hints ? hints.get(nominalSymbol) : undefined;
-  if (
-    inferred &&
-    (!namedType?.typeArguments || namedType.typeArguments.length === 0)
-  ) {
-    return inferred.memberType;
+  const hasTypeArguments = (namedType?.typeArguments?.length ?? 0) > 0;
+
+  if (nominalSymbol && hints && !hasTypeArguments) {
+    const inferred = hints.unique.get(nominalSymbol);
+    if (inferred) {
+      return inferred.memberType;
+    }
+
+    const template = ctx.objects.getTemplate(nominalSymbol);
+    const isGeneric = (template?.params.length ?? 0) > 0;
+    if (isGeneric && hints.ambiguous.has(nominalSymbol)) {
+      const related = discriminantSpan
+        ? [
+            diagnosticFromCode({
+              code: "TY0002",
+              params: { kind: "discriminant-note" },
+              severity: "note",
+              span: discriminantSpan,
+            }),
+          ]
+        : undefined;
+
+      emitDiagnostic({
+        ctx,
+        code: "TY0020",
+        params: {
+          kind: "ambiguous-nominal-match-pattern",
+          typeName: getSymbolName(nominalSymbol, ctx),
+        },
+        span: pattern.span,
+        related,
+      });
+    }
   }
 
   return resolveTypeExpr(pattern.type, ctx, state, ctx.primitives.unknown);

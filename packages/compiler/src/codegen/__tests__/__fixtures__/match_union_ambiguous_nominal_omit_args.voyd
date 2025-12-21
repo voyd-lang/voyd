@@ -1,0 +1,9 @@
+obj O1<T> { v: T }
+obj None {}
+
+type MyUnion = O1<i32> | O1<f64> | None
+
+pub fn main(u: MyUnion) -> i32
+  u.match()
+    O1: 1
+    None: 3
