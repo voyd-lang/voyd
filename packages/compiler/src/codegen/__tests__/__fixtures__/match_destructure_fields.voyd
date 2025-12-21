@@ -11,5 +11,5 @@ type Pet = Dog | Cat
 pub fn main() -> i32
   let pet: Pet = Dog { noses: 3 }
   match(pet)
-    (Dog { noses }): noses + 2
-    (Cat { lives: l }): l
+    Dog { noses }: noses + 2
+    Cat { lives: l }: l

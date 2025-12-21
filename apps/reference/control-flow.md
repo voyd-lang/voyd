@@ -6,8 +6,10 @@ If expressions support any number of `elif` branches and an optional `else`.
 
 ```voyd
 if x < 0 then: -1
-elif: x < 10 then: 0
-else: 1
+elif x < 10:
+  0
+else:
+  1
 ```
 
 When the `else` branch is omitted, the result of the expression is `voyd`.
@@ -38,54 +40,51 @@ while cond do:
 
 ## Match
 
-Used to narrow types. Can operate on object to narrow
-child objects or on unions to narrow union members
+`match` is an expression that branches on a value using a list of pattern arms.
 
-Signature(s):
-```
-fn match<T extends Object, U>(val: T, body: MatchBlock) -> U
-fn match<T extends Object, U>(val: T, bind_identifier: Identifier, body: MatchBlock) -> U
-```
-
-Example:
 ```voyd
-obj Optional
-
-obj None: Optional
-
-obj Some: Optional {
-  value: i32
-}
-
-fn divide(a: i32, b: i32) -> Optional
-  if b == 0 then:
-    None {}
-  else:
-    Some { value: a / b }
-
-fn main(a: i32, b: i32) -> String
-  let x = a.divide(b)
-  match(x)
-    Some: "The value is ${x}"
-    None: "Error: divide by zero"
-    else: "Bleh"
+match(value)
+  Pattern1: expr1
+  Pattern2:
+    expr2
+  else: default_expr
 ```
 
-Match arm types must be compatible with the overall match expression type.
-When used as a statement (e.g., inside a loop body), both a value-level
-`void` and `break` satisfy `void` cases.
+Match arm bodies can be written inline (`Pattern: expr`) or as an indented suite
+(`Pattern:` followed by a block).
 
-The second signature of match is useful when the value being matched against
-is not already bound to an identifier (i.e. dot pipelines):
+### Patterns
+
+Supported pattern forms include:
+
+- `else` (wildcard)
+- Type tests: `Dog`
+- Type + bind whole value: `Dog as d`
+- Type + destructure fields:
+
 ```voyd
-fn main(a: i32, b: i32) -> String
-  a.divide(b)
-    .match(x) // Here, match binds the result of the previous expression to x
-      Some<i32>: "The value is ${x}"
-      None: "Error: divide by zero"
+match(pet)
+  Dog { noses }: noses + 2
+  Cat { lives: l }: l
 ```
 
-### Omitting Type Parameters in Match Arms
+- Tuple patterns:
+
+```voyd
+(a, b): a + b
+```
+
+- Nested patterns:
+
+```voyd
+Some { v: (a, b) }: a * 10 + b
+```
+
+Match arm types must be compatible with the overall match expression type. When
+used as a statement (e.g., inside a loop body), both a value-level `void` and
+`break` satisfy `void` cases.
+
+### Omitting Type Parameters in Type Arms
 
 When matching against a union, you can omit generic type parameters in a case
 label if the referenced object appears exactly once among the union variants.
@@ -100,7 +99,7 @@ use std::optional::Optional
 
 fn main() -> i32
   let m = Map<i32>([("hey", 5), ("bye", 1)])
-  m.get("hey").match(v)
+  match(m.get("hey"))
     Some: 1   // OK: `Some` appears once in Optional<T>
     None: -1
 ```
@@ -108,43 +107,18 @@ fn main() -> i32
 If the same head appears multiple times in the union (e.g., `Some<A> | Some<B>`),
 you must specify the type parameters to disambiguate: `Some<A>:`.
 
-## Pattern Matching Sugar
+## `if` as `match` Shorthand
 
-voyd provides some features to make pattern matching more ergonomic in places where using a match would be a bit awkward.
-
-```voyd
-let opt = Some { value: 4 }
-
-// If match, useful when you don't care about exhaustiveness
-if opt.match(Some<i32>) then:
-  opt.value
-
-// Match can also optionally bind to a new variable name
-if opt.match(x, Some<i32>) then:
-  x.value
-```
-
-`Optional<T>` specific sugar
+An `if/elif/else` chain is lowered as a `match` when all conditions are type
+tests (`is`) of the same identifier and an `else` branch exists:
 
 ```voyd
-// Optional chain
-let structure = {
-  a: some {
-    b: some {
-      c: some 5
-    }
-  }
-}
-
-let value: Some<i32> = a?.b?.c // 5
-
-// Optional unwrap
-if x := opt then:
-  x // x is i32 here, not Some<i32>
-
-// Iteration
-let a = [1, 2, 3]
-var sum = 0
-for n in a do:
-  sum = sum + n
+if pet is Dog then:
+  pet.noses
+elif pet is Cat:
+  pet.lives
+else:
+  0
 ```
+
+This is equivalent to a `match(pet)` with type patterns plus a wildcard arm.
