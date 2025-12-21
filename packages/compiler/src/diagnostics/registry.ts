@@ -104,6 +104,7 @@ type DiagnosticParamsMap = {
   TY0017: { kind: "effectful-main"; effects: string };
   TY0018: { kind: "effect-generic-mismatch"; operation: string; message: string };
   TY0019: { kind: "effect-handler-overload"; operation: string; message: string };
+  TY0020: { kind: "ambiguous-nominal-match-pattern"; typeName: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -348,6 +349,19 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0019"]>,
+  TY0020: {
+    code: "TY0020",
+    message: (params) =>
+      `ambiguous match pattern '${params.typeName}': this union contains multiple instantiations of '${params.typeName}', so the pattern must specify type arguments`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Specify type arguments in the pattern (for example: MyType<i32>).",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0020"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

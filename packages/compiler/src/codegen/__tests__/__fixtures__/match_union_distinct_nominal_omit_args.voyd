@@ -1,0 +1,18 @@
+obj O1<T> { v: T }
+obj O2<T> { v: T }
+obj None {}
+
+type MyUnion = O1<i32> | O2<i32> | None
+
+fn describe(x: MyUnion) -> i32
+  x.match()
+    O1: 1
+    O2: 2
+    None: 3
+
+pub fn main() -> i32
+  let a: MyUnion = O1 { v: 3 }
+  let b: MyUnion = O2 { v: 4 }
+  let c: MyUnion = None {}
+
+  describe(a) + describe(b) + describe(c)

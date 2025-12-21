@@ -231,6 +231,6 @@ describe("match expressions", () => {
       semanticsPipeline(
         loadAst("match_union_nominal_infer_args_ambiguous.voyd")
       )
-    ).toThrow(/pattern 'A' does not match discriminant/i);
+    ).toThrow(/ambiguous match pattern 'A'/i);
   });
 });

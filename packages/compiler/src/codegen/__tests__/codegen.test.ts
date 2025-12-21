@@ -295,6 +295,16 @@ describe("next codegen", () => {
     expect(main()).toBe(34);
   });
 
+  it("allows omitting type parameters for distinct nominal union members in match patterns", () => {
+    const main = loadMain("match_union_distinct_nominal_omit_args.voyd");
+    expect(main()).toBe(6);
+  });
+
+  it("diagnoses ambiguous match patterns when type parameters are omitted", () => {
+    const ast = loadAst("match_union_ambiguous_nominal_omit_args.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(/TY0020/);
+  });
+
   it("lowers `if x is Type` chains into match for narrowing", () => {
     const main = loadMain("if_is_match_shorthand.voyd");
     expect(main()).toBe(5);

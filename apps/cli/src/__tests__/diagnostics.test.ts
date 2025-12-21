@@ -41,7 +41,7 @@ describe("formatCliDiagnostic", () => {
     expect(formatted).toContain(
       `${diagnostic.span.file}:${line}:${column}`
     );
-    expect(formatted).toContain(` |     "Hi" => "h"`);
+    expect(formatted).toContain(` |     "Hi": "h"`);
     expect(formatted).toContain("^");
     expect(formatted).toContain(
       "TY0002: pattern 'Hi' does not match discriminant"

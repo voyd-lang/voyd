@@ -1,6 +1,4 @@
-fn main() {
-  match "Hello" {
-    "Hi" => "h"
-    _ => "fallback"
-  }
-}
+fn main()
+  match "Hello"
+    "Hi": "h"
+    else: "fallback"
