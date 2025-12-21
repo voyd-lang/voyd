@@ -21,7 +21,7 @@ pub fn new_string(opts: { from: FixedArray<i32> }) -> String
   }
 
 impl String
-  fn resize(&self) -> String
+  fn resize(~self) -> String
     let new_storage = new_fixed_array<i32>(self.storage.length<i32>() * 2)
     new_storage.copy<i32>({
       from: self.storage,
@@ -47,7 +47,7 @@ impl String
         None:
           -1
 
-  pub fn push(&self, char: i32) -> String
+  pub fn push(~self, char: i32) -> String
     if self.count >= self.storage.length<i32>() then:
       self.resize().push(char)
     else:
@@ -91,7 +91,7 @@ impl String
 pub fn new_string_iterator(str: String) -> StringIterator
   StringIterator { str: str, index: 0 }
 
-pub fn read_next_char(&iterator: StringIterator) -> i32
+pub fn read_next_char(~iterator: StringIterator) -> i32
   if iterator.index >= iterator.str.length then:
     -1
   else:
@@ -100,7 +100,7 @@ pub fn read_next_char(&iterator: StringIterator) -> i32
     char
 
 impl Iterator<i32> for StringIterator
-  fn next(&self) -> Optional<i32>
+  fn next(~self) -> Optional<i32>
     if self.index >= self.str.length then:
       None {}
     else:

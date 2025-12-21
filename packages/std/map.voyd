@@ -16,7 +16,7 @@ obj MapIterator<T> {
 }
 
 pub fn new_map<T>() -> Map<T>
-  let &buckets = new_array<Array<{ key: String, value: T }>>(with_size: 16)
+  let ~buckets = new_array<Array<{ key: String, value: T }>>(with_size: 16)
 
   var i = 0
   while i < 16 do:
@@ -26,7 +26,7 @@ pub fn new_map<T>() -> Map<T>
   Map<T> { buckets: buckets }
 
 impl<T> Iterator<{ key: String, value: T }> for MapIterator<T>
-  fn next(&self) -> Optional<{ key: String, value: T }>
+  fn next(~self) -> Optional<{ key: String, value: T }>
     if self.bucket_index >= self.map.buckets.length then:
       None {}
     else:
@@ -110,7 +110,7 @@ impl<T> Map<T>
         self
 
   fn add_to_bucket(
-    &bucket: Array<{ key: String, value: T }>,
+    ~bucket: Array<{ key: String, value: T }>,
     key: String,
     value: T
   )

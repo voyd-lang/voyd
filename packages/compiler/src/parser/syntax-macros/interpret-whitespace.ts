@@ -34,6 +34,12 @@ const interpretWhitespaceExpr = (form: Form, indentLevel?: number): Expr => {
   while (!cursor.done) {
     const child = elideParens(cursor, indentLevel);
     if (p.isForm(child) && !child.length) continue;
+    const expanded = expandClauseStyleLabeledSuite(child, transformed);
+    if (expanded) {
+      expanded.forEach((entry) => addSibling(entry, transformed));
+      continue;
+    }
+
     addSibling(child, transformed);
   }
 
@@ -180,6 +186,123 @@ const isNewline = (v?: Expr) => p.isWhitespaceAtom(v) && v.isNewline;
 const isIndent = (v?: Expr) => p.isWhitespaceAtom(v) && v.isIndent;
 
 const isNamedArg = (v: Form) => p.atomEq(v.at(1), ":");
+
+/**
+ * Clause-style labeled suite sugar (multiline only):
+ *
+ * Within a call that has already used an indented-suite labeled arg (the "suite label"),
+ * allow subsequent arguments written as:
+ *
+ *   label <expr>:
+ *     <suite>
+ *
+ * to desugar into:
+ *
+ *   label: <expr>
+ *   <suite_label>:
+ *     <suite>
+ *
+ * The suite label is taken from the most recently seen labeled suite argument in the
+ * previous call expression (e.g. `then:` or `do:`). Clause sugar is intentionally
+ * disallowed on one-liners by requiring the RHS to be an indented `block(...)`.
+ */
+const expandClauseStyleLabeledSuite = (
+  expr: Expr,
+  siblings: Expr[]
+): Expr[] | undefined => {
+  if (!p.isForm(expr)) return undefined;
+  if (isNamedArg(expr)) return undefined;
+
+  const first = expr.at(0);
+  if (!isIdentifierAtom(first) || isOp(first) || first.isQuoted) {
+    return undefined;
+  }
+
+  const elements = expr.toArray();
+  if (elements.length < 4) return undefined;
+
+  const block = elements.at(-1);
+  const colon = elements.at(-2);
+  if (
+    !p.isForm(block) ||
+    !(block as Form).calls("block") ||
+    !p.atomEq(colon, ":")
+  ) {
+    return undefined;
+  }
+
+  const previous = siblings.at(-1);
+  const suiteLabel = previous ? findTrailingSuiteLabel(previous) : undefined;
+  if (!suiteLabel) return undefined;
+
+  const conditionTokens = elements.slice(1, -2);
+  if (conditionTokens.length === 0) return undefined;
+
+  const conditionExpr =
+    conditionTokens.length === 1
+      ? conditionTokens[0]!
+      : new Form(conditionTokens);
+
+  const syntheticColon = new IdentifierAtom({
+    location: first.location?.clone(),
+    value: ":",
+  });
+
+  const suiteColon = isIdentifierAtom(colon)
+    ? colon.clone()
+    : new IdentifierAtom({ location: first.location?.clone(), value: ":" });
+
+  const clauseArg = new Form({
+    location: first.location?.clone(),
+    elements: [first.clone(), syntheticColon, conditionExpr],
+  });
+
+  const suiteArg = new Form({
+    location: suiteLabel.location?.clone(),
+    elements: [suiteLabel.clone(), suiteColon, block],
+  });
+
+  return [clauseArg, suiteArg];
+};
+
+const findTrailingSuiteLabel = (expr: Expr): IdentifierAtom | undefined => {
+  if (!p.isForm(expr)) return undefined;
+
+  const elements = expr.toArray();
+
+  let lastSuiteLabel: IdentifierAtom | undefined;
+
+  // Named-arg form: label: block(...)
+  elements.forEach((entry) => {
+    if (!p.isForm(entry) || !isNamedArg(entry)) return;
+    const label = entry.at(0);
+    const value = entry.at(2);
+    if (
+      isIdentifierAtom(label) &&
+      p.isForm(value) &&
+      (value as Form).calls("block")
+    ) {
+      lastSuiteLabel = label;
+    }
+  });
+
+  // Inline form: label : block(...)
+  for (let i = 0; i < elements.length - 2; i += 1) {
+    const label = elements[i];
+    const maybeColon = elements[i + 1];
+    const value = elements[i + 2];
+    if (
+      isIdentifierAtom(label) &&
+      p.atomEq(maybeColon, ":") &&
+      p.isForm(value) &&
+      (value as Form).calls("block")
+    ) {
+      lastSuiteLabel = label;
+    }
+  }
+
+  return lastSuiteLabel;
+};
 
 const hasTrailingHandlerBlock = (v: Form): boolean => {
   if (v.length < 3) return false;
