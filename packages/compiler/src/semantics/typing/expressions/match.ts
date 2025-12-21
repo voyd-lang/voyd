@@ -118,6 +118,7 @@ export const typeMatchExpr = (
               state,
               hints: patternNominalHints,
               discriminantSpan,
+              patternSpan,
             })
           : undefined;
     if (typeof patternType === "number") {
@@ -193,6 +194,7 @@ const narrowMatchPattern = (
         state,
         hints: patternHints,
         discriminantSpan: spans.discriminantSpan,
+        patternSpan: spans.patternSpan,
       });
       const narrowed = narrowTypeForPattern(
         discriminantType,
@@ -400,12 +402,14 @@ const resolveMatchPatternType = ({
   state,
   hints,
   discriminantSpan,
+  patternSpan,
 }: {
   pattern: HirPattern & { kind: "type" };
   ctx: TypingContext;
   state: TypingState;
   hints?: NominalPatternHints;
   discriminantSpan?: SourceSpan;
+  patternSpan: SourceSpan;
 }): TypeId => {
   const namedType =
     pattern.type.typeKind === "named" ? pattern.type : undefined;
@@ -440,7 +444,7 @@ const resolveMatchPatternType = ({
           kind: "ambiguous-nominal-match-pattern",
           typeName: getSymbolName(nominalSymbol, ctx),
         },
-        span: pattern.span,
+        span: patternSpan,
         related,
       });
     }
