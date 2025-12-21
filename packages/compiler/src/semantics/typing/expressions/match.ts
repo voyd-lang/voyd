@@ -8,6 +8,7 @@ import {
   narrowTypeForPattern,
   ensureTypeMatches,
   resolveTypeExpr,
+  getStructuralFields,
 } from "../type-system.js";
 import {
   diagnosticFromCode,
@@ -16,6 +17,7 @@ import {
 } from "../../../diagnostics/index.js";
 import { mergeBranchType } from "./branching.js";
 import type { TypingContext, TypingState } from "../types.js";
+import { bindPatternFromType, recordPatternType } from "./patterns.js";
 
 export const typeMatchExpr = (
   expr: HirMatchExpr,
@@ -58,6 +60,9 @@ export const typeMatchExpr = (
       },
       patternNominalHints
     );
+
+    bindMatchPatternBindings(arm.pattern, narrowed, ctx, state, patternSpan);
+
     let armEffectRow = ctx.effects.emptyRow;
     if (typeof arm.guard === "number") {
       const guardType = typeExpression(arm.guard, ctx, state);
@@ -102,16 +107,18 @@ export const typeMatchExpr = (
       return;
     }
 
-    if (arm.pattern.kind === "type") {
-      const patternType =
-        typeof arm.pattern.typeId === "number"
-          ? arm.pattern.typeId
-          : resolveMatchPatternType({
+    const patternType =
+      typeof arm.pattern.typeId === "number"
+        ? arm.pattern.typeId
+        : arm.pattern.kind === "type"
+          ? resolveMatchPatternType({
               pattern: arm.pattern,
               ctx,
               state,
               hints: patternNominalHints,
-            });
+            })
+          : undefined;
+    if (typeof patternType === "number") {
       matchedUnionMembers(patternType, remainingMembers, ctx, state).forEach(
         (member) => remainingMembers.delete(member)
       );
@@ -144,6 +151,39 @@ const narrowMatchPattern = (
     case "wildcard":
       pattern.typeId = discriminantType;
       return discriminantType;
+    case "tuple": {
+      const arity = pattern.elements.length;
+      const candidates = collectTupleCandidates(discriminantType, arity, ctx, state);
+      if (candidates.length === 0) {
+        const related = spans.discriminantSpan
+          ? [
+              diagnosticFromCode({
+                code: "TY0002",
+                params: { kind: "discriminant-note" },
+                severity: "note",
+                span: spans.discriminantSpan,
+              }),
+            ]
+          : undefined;
+        emitDiagnostic({
+          ctx,
+          code: "TY0002",
+          params: {
+            kind: "pattern-mismatch",
+            patternLabel: `(${arity}-tuple)`,
+            reason,
+          },
+          span: spans.patternSpan,
+          related,
+        });
+        pattern.typeId = ctx.primitives.unknown;
+        return ctx.primitives.unknown;
+      }
+      const narrowed =
+        candidates.length === 1 ? candidates[0]! : ctx.arena.internUnion(candidates);
+      pattern.typeId = narrowed;
+      return narrowed;
+    }
     case "type": {
       const patternType = resolveMatchPatternType({
         pattern,
@@ -192,6 +232,95 @@ const narrowMatchPattern = (
     default:
       throw new Error(`unsupported match pattern ${pattern.kind}`);
   }
+};
+
+const bindMatchPatternBindings = (
+  pattern: HirPattern,
+  narrowedType: TypeId,
+  ctx: TypingContext,
+  state: TypingState,
+  spanHint: SourceSpan
+): void => {
+  const bindUnknown = (binding: HirPattern): void => {
+    switch (binding.kind) {
+      case "wildcard":
+        return;
+      case "identifier":
+        recordPatternType(
+          binding,
+          ctx.primitives.unknown,
+          ctx,
+          state,
+          "declare",
+          binding.span ?? spanHint
+        );
+        return;
+      case "tuple":
+        binding.typeId = ctx.primitives.unknown;
+        binding.elements.forEach((entry) => bindUnknown(entry));
+        return;
+      case "destructure":
+        binding.typeId = ctx.primitives.unknown;
+        binding.fields.forEach((field) => bindUnknown(field.pattern));
+        if (binding.spread) {
+          bindUnknown(binding.spread);
+        }
+        return;
+      case "type":
+        throw new Error("type patterns are not supported in binding positions");
+    }
+  };
+
+  if (pattern.kind === "type" && pattern.binding) {
+    if (narrowedType === ctx.primitives.unknown) {
+      bindUnknown(pattern.binding);
+      return;
+    }
+    bindPatternFromType(
+      pattern.binding,
+      narrowedType,
+      ctx,
+      state,
+      "declare",
+      spanHint
+    );
+  }
+
+  if (pattern.kind === "tuple") {
+    if (narrowedType === ctx.primitives.unknown) {
+      bindUnknown(pattern);
+      return;
+    }
+    bindPatternFromType(pattern, narrowedType, ctx, state, "declare", spanHint);
+  }
+};
+
+const collectTupleCandidates = (
+  discriminantType: TypeId,
+  arity: number,
+  ctx: TypingContext,
+  state: TypingState
+): TypeId[] => {
+  if (discriminantType === ctx.primitives.unknown) {
+    return [];
+  }
+
+  const isTupleType = (typeId: TypeId): boolean => {
+    const fields = getStructuralFields(typeId, ctx, state);
+    if (!fields) return false;
+    if (fields.length !== arity) return false;
+    return fields.every((field) => {
+      const index = Number(field.name);
+      return Number.isInteger(index) && index >= 0 && index < arity;
+    });
+  };
+
+  const desc = ctx.arena.get(discriminantType);
+  if (desc.kind === "union") {
+    return desc.members.filter(isTupleType);
+  }
+
+  return isTupleType(discriminantType) ? [discriminantType] : [];
 };
 
 type NominalPatternHint = {

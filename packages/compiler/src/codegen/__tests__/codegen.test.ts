@@ -275,6 +275,31 @@ describe("next codegen", () => {
     expect(main()).toBe(1);
   });
 
+  it("binds nominal match values via `as` patterns", () => {
+    const main = loadMain("match_bind_value.voyd");
+    expect(main()).toBe(4);
+  });
+
+  it("destructures nominal fields in match patterns", () => {
+    const main = loadMain("match_destructure_fields.voyd");
+    expect(main()).toBe(5);
+  });
+
+  it("matches tuple patterns and binds elements", () => {
+    const main = loadMain("match_tuple_patterns.voyd");
+    expect(main()).toBe(30);
+  });
+
+  it("matches nested patterns (nominal + tuple destructure)", () => {
+    const main = loadMain("match_nested_patterns.voyd");
+    expect(main()).toBe(34);
+  });
+
+  it("lowers `if x is Type` chains into match for narrowing", () => {
+    const main = loadMain("if_is_match_shorthand.voyd");
+    expect(main()).toBe(5);
+  });
+
   it("emits wasm for trait object dispatch", () => {
     const main = loadMain("trait_object_dispatch.voyd");
     expect(main()).toBe(53);

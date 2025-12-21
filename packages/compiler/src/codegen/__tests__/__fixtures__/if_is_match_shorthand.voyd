@@ -1,0 +1,19 @@
+obj Dog {
+  noses: i32
+}
+
+obj Cat {
+  lives: i32
+}
+
+type Pet = Dog | Cat
+
+pub fn main() -> i32
+  let pet: Pet = Dog { noses: 5 }
+
+  if pet is Dog then:
+    pet.noses
+  elif pet is Cat:
+    pet.lives
+  else:
+    0

@@ -87,6 +87,122 @@ export const recordPatternType = (
   }
 };
 
+export const bindDestructurePatternFromType = (
+  pattern: HirPattern & { kind: "destructure" },
+  type: TypeId,
+  ctx: TypingContext,
+  state: TypingState,
+  mode: PatternBindingMode,
+  originSpan?: SourceSpan
+): void => {
+  const annotation = resolvePatternAnnotation(pattern, ctx, state);
+  const expected =
+    typeof annotation === "number" && annotation !== ctx.primitives.unknown
+      ? annotation
+      : type;
+  if (
+    typeof annotation === "number" &&
+    annotation !== ctx.primitives.unknown &&
+    type !== ctx.primitives.unknown
+  ) {
+    ensureTypeMatches(
+      type,
+      annotation,
+      ctx,
+      state,
+      mode === "declare" ? "destructure pattern" : "destructure assignment"
+    );
+  }
+
+  pattern.typeId = expected;
+  const fields = getStructuralFields(expected, ctx, state);
+  if (!fields) {
+    if (state.mode === "relaxed" && type === ctx.primitives.unknown) {
+      pattern.fields.forEach((field) =>
+        bindPatternFromType(
+          field.pattern,
+          ctx.primitives.unknown,
+          ctx,
+          state,
+          mode,
+          originSpan ?? field.pattern.span
+        )
+      );
+      if (pattern.spread) {
+        bindPatternFromType(
+          pattern.spread,
+          ctx.primitives.unknown,
+          ctx,
+          state,
+          mode,
+          originSpan ?? pattern.spread.span
+        );
+      }
+      return;
+    }
+    throw new Error("destructure pattern requires a structural initializer");
+  }
+
+  const fieldByName = new Map<string, TypeId>(
+    fields.map((field) => [field.name, field.type])
+  );
+
+  pattern.fields.forEach((field) => {
+    const fieldType = fieldByName.get(field.name);
+    if (typeof fieldType !== "number") {
+      throw new Error(`object is missing field ${field.name}`);
+    }
+    bindPatternFromType(
+      field.pattern,
+      fieldType,
+      ctx,
+      state,
+      mode,
+      originSpan ?? field.pattern.span
+    );
+  });
+
+  if (pattern.spread) {
+    bindPatternFromType(
+      pattern.spread,
+      ctx.primitives.unknown,
+      ctx,
+      state,
+      mode,
+      originSpan ?? pattern.spread.span
+    );
+  }
+};
+
+export const bindPatternFromType = (
+  pattern: HirPattern,
+  type: TypeId,
+  ctx: TypingContext,
+  state: TypingState,
+  mode: PatternBindingMode,
+  originSpan?: SourceSpan
+): void => {
+  switch (pattern.kind) {
+    case "wildcard":
+      return;
+    case "identifier":
+      return recordPatternType(pattern, type, ctx, state, mode, originSpan);
+    case "tuple":
+      return bindTuplePatternFromType(pattern, type, ctx, state, mode, originSpan);
+    case "destructure":
+      return bindDestructurePatternFromType(
+        pattern,
+        type,
+        ctx,
+        state,
+        mode,
+        originSpan
+      );
+    case "type":
+      throw new Error("type patterns are not supported in binding positions");
+  }
+};
+
 export const bindTuplePatternFromType = (
   pattern: HirPattern & { kind: "tuple" },
   type: TypeId,

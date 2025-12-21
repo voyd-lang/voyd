@@ -70,12 +70,21 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
         return;
       }
 
+      const expanded = expandClauseStyleLabeledSuite(child, children);
+      if (expanded) {
+        expanded.forEach((entry) => addSibling(entry, children));
+        continue;
+      }
+
       addSibling(child, children);
     }
 
     // Handle labeled arguments
     const firstChild = children.at(1);
-    if (p.isForm(firstChild) && isNamedArg(firstChild)) {
+    if (
+      p.isForm(firstChild) &&
+      (isNamedArg(firstChild) || isInlineLabeledExpr(firstChild))
+    ) {
       transformed.push(...children.slice(1));
       return;
     }
@@ -187,6 +196,48 @@ const isIndent = (v?: Expr) => p.isWhitespaceAtom(v) && v.isIndent;
 
 const isNamedArg = (v: Form) => p.atomEq(v.at(1), ":");
 
+const STATEMENT_LIKE_HEADS = new Set([
+  "block",
+  "let",
+  "var",
+  "fn",
+  "pub",
+  "obj",
+  "type",
+  "trait",
+  "impl",
+  "use",
+  "return",
+  "if",
+  "match",
+  "while",
+  "try",
+]);
+
+const isInlineLabeledExpr = (v: Form): boolean => {
+  const elements = v.toArray().filter((expr) => !p.isWhitespaceAtom(expr));
+  if (elements.length < 3) return false;
+
+  const first = elements[0];
+  if (!isIdentifierAtom(first) || isOp(first) || first.isQuoted) {
+    return false;
+  }
+
+  // Avoid treating statement-ish forms (e.g. `let x: T = ...`) as labeled args.
+  // Inline labeled args are intended for patterns like `Dog as d: ...` within calls.
+  if (STATEMENT_LIKE_HEADS.has(first.value)) {
+    return false;
+  }
+
+  const colonIndex = elements.findIndex(
+    (expr, index) => index > 0 && p.atomEq(expr, ":")
+  );
+  if (colonIndex <= 0 || colonIndex >= elements.length - 1) return false;
+
+  const rhs = elements[colonIndex + 1];
+  return !(p.isForm(rhs) && (rhs as Form).calls("block"));
+};
+
 /**
  * Clause-style labeled suite sugar (multiline only):
  *
@@ -218,24 +269,40 @@ const expandClauseStyleLabeledSuite = (
     return undefined;
   }
 
-  const elements = expr.toArray();
-  if (elements.length < 4) return undefined;
-
-  const block = elements.at(-1);
-  const colon = elements.at(-2);
-  if (
-    !p.isForm(block) ||
-    !(block as Form).calls("block") ||
-    !p.atomEq(colon, ":")
-  ) {
+  if (STATEMENT_LIKE_HEADS.has(first.value)) {
     return undefined;
   }
+
+  const elements = expr.toArray();
+  if (elements.length < 3) return undefined;
+
+  const suiteBlockIndex = (() => {
+    for (let i = elements.length - 1; i >= 0; i -= 1) {
+      const entry = elements[i];
+      if (p.isForm(entry) && (entry as Form).calls("block")) {
+        return i;
+      }
+    }
+    return undefined;
+  })();
+
+  if (typeof suiteBlockIndex !== "number" || suiteBlockIndex < 2) {
+    return undefined;
+  }
+
+  const block = elements[suiteBlockIndex] as Form;
+  const colon = elements.at(suiteBlockIndex - 1);
+  const hasExplicitColon =
+    typeof colon !== "undefined" && p.atomEq(colon, ":");
 
   const previous = siblings.at(-1);
   const suiteLabel = previous ? findTrailingSuiteLabel(previous) : undefined;
   if (!suiteLabel) return undefined;
 
-  const conditionTokens = elements.slice(1, -2);
+  const conditionTokens = elements.slice(
+    1,
+    suiteBlockIndex - (hasExplicitColon ? 1 : 0)
+  );
   if (conditionTokens.length === 0) return undefined;
 
   const conditionExpr =
@@ -248,7 +315,7 @@ const expandClauseStyleLabeledSuite = (
     value: ":",
   });
 
-  const suiteColon = isIdentifierAtom(colon)
+  const suiteColon = hasExplicitColon && isIdentifierAtom(colon)
     ? colon.clone()
     : new IdentifierAtom({ location: first.location?.clone(), value: ":" });
 
@@ -262,7 +329,8 @@ const expandClauseStyleLabeledSuite = (
     elements: [suiteLabel.clone(), suiteColon, block],
   });
 
-  return [clauseArg, suiteArg];
+  const trailing = elements.slice(suiteBlockIndex + 1);
+  return [clauseArg, suiteArg, ...trailing];
 };
 
 const findTrailingSuiteLabel = (expr: Expr): IdentifierAtom | undefined => {

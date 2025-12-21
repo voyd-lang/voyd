@@ -289,6 +289,8 @@ const bindMatch = (
       ctx.scopeByNode.set(arm.syntaxId, caseScope);
 
       tracker.enterScope(caseScope, () => {
+        const patternExpr = arm.at(1);
+        declareMatchPatternBindings(patternExpr, ctx, caseScope);
         const valueExpr = arm.at(2);
         bindExpr(valueExpr, ctx, tracker);
       });
@@ -866,6 +868,50 @@ const declarePatternBindings = (
     return;
   }
 
+  if (isForm(basePattern) && basePattern.callsInternal("object_literal")) {
+    if (bindingKind && bindingKind !== "value") {
+      throw new Error("mutable reference patterns must bind identifiers");
+    }
+
+    let seenSpread = false;
+    basePattern.rest.forEach((entry) => {
+      if (isIdentifierAtom(entry)) {
+        declarePatternBindings(entry, ctx, scope, {
+          mutable: options.mutable,
+          declarationSpan: toSourceSpan(entry as Syntax),
+        });
+        return;
+      }
+
+      if (!isForm(entry)) {
+        throw new Error("unsupported destructure entry in declaration");
+      }
+
+      if (entry.calls("...")) {
+        if (seenSpread) {
+          throw new Error("destructure pattern supports at most one spread");
+        }
+        seenSpread = true;
+        declarePatternBindings(entry.at(1), ctx, scope, {
+          mutable: options.mutable,
+          declarationSpan: toSourceSpan(entry as Syntax),
+        });
+        return;
+      }
+
+      if (!entry.calls(":")) {
+        throw new Error("unsupported destructure entry in declaration");
+      }
+
+      const valueExpr = entry.at(2);
+      declarePatternBindings(valueExpr, ctx, scope, {
+        mutable: options.mutable,
+        declarationSpan: toSourceSpan(entry as Syntax),
+      });
+    });
+    return;
+  }
+
   if (isForm(basePattern) && basePattern.calls(":")) {
     const nameExpr = basePattern.at(1);
     const typeExpr = basePattern.at(2);
@@ -894,6 +940,49 @@ const declarePatternBindings = (
   }
 
   throw new Error("unsupported pattern form in declaration");
+};
+
+const declareMatchPatternBindings = (
+  pattern: Expr | undefined,
+  ctx: BindingContext,
+  scope: ScopeId
+): void => {
+  if (!pattern) {
+    throw new Error("match case missing pattern");
+  }
+
+  if (isIdentifierAtom(pattern)) {
+    return;
+  }
+
+  if (!isForm(pattern)) {
+    return;
+  }
+
+  if (pattern.calls("as")) {
+    const bindingPattern = pattern.at(2);
+    declarePatternBindings(bindingPattern, ctx, scope, {
+      mutable: false,
+      declarationSpan: toSourceSpan(pattern as unknown as Syntax),
+    });
+    return;
+  }
+
+  if (pattern.calls("tuple") || pattern.callsInternal("tuple")) {
+    declarePatternBindings(pattern, ctx, scope, {
+      mutable: false,
+      declarationSpan: toSourceSpan(pattern as unknown as Syntax),
+    });
+    return;
+  }
+
+  const last = pattern.at(-1);
+  if (isForm(last) && last.callsInternal("object_literal")) {
+    declarePatternBindings(last, ctx, scope, {
+      mutable: false,
+      declarationSpan: toSourceSpan(last as unknown as Syntax),
+    });
+  }
 };
 
 const unwrapMutablePattern = (
