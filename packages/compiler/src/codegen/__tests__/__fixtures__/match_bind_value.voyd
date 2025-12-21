@@ -1,0 +1,16 @@
+obj Dog {
+  noses: i32
+}
+
+obj Cat {
+  lives: i32
+}
+
+type Pet = Dog | Cat
+
+pub fn main() -> i32
+  let pet: Pet = Dog { noses: 3 }
+  match(pet)
+    Dog as d: d.noses + 1
+    Cat as c: c.lives
+

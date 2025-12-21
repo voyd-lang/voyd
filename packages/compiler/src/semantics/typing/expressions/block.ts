@@ -5,6 +5,7 @@ import { getExprEffectRow } from "../effects.js";
 import {
   bindTuplePatternFromExpr,
   bindTuplePatternFromType,
+  bindDestructurePatternFromType,
   recordPatternType,
 } from "./patterns.js";
 import { mergeBranchType } from "./branching.js";
@@ -211,6 +212,54 @@ const typeLetStatement = (
     bindTuplePatternFromExpr(
       stmt.pattern,
       stmt.initializer,
+      ctx,
+      state,
+      "declare",
+      stmt.span
+    );
+    return getExprEffectRow(stmt.initializer, ctx);
+  }
+
+  if (stmt.pattern.kind === "destructure") {
+    const annotated =
+      stmt.pattern.typeAnnotation &&
+      resolveTypeExpr(
+        stmt.pattern.typeAnnotation,
+        ctx,
+        state,
+        ctx.primitives.unknown
+      );
+
+    const expectedType =
+      typeof annotated === "number" && annotated !== ctx.primitives.unknown
+        ? annotated
+        : undefined;
+
+    const initializerType = typeExpression(
+      stmt.initializer,
+      ctx,
+      state,
+      expectedType
+    );
+
+    if (
+      typeof expectedType === "number" &&
+      expectedType !== ctx.primitives.unknown &&
+      initializerType !== ctx.primitives.unknown
+    ) {
+      ensureTypeMatches(
+        initializerType,
+        expectedType,
+        ctx,
+        state,
+        "let initializer"
+      );
+    }
+
+    const declaredType = expectedType ?? initializerType;
+    bindDestructurePatternFromType(
+      stmt.pattern,
+      declaredType,
       ctx,
       state,
       "declare",

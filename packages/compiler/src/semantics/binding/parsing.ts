@@ -1,6 +1,6 @@
 import {
   type Expr,
-  type Form,
+  Form,
   type IdentifierAtom,
   type Syntax,
   formCallsInternal,
@@ -247,16 +247,66 @@ export const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {
     return null;
   }
 
-  const head = form.at(index + 1);
-  const body = form.at(index + 2);
-  if (!body || !isForm(body) || !body.callsInternal("object_literal")) {
+  const headExpr = form.at(index + 1);
+  const bodyExpr = form.at(index + 2);
+  const body =
+    bodyExpr && isForm(bodyExpr) && bodyExpr.callsInternal("object_literal")
+      ? bodyExpr
+      : undefined;
+
+  const extractedFromHead = headExpr
+    ? extractTrailingObjectLiteral(headExpr)
+    : undefined;
+
+  const extractedFromBase =
+    !body &&
+    !extractedFromHead &&
+    isForm(headExpr) &&
+    headExpr.calls(":") &&
+    headExpr.length === 3
+      ? extractTrailingObjectLiteral(headExpr.at(2))
+      : undefined;
+
+  const head =
+    extractedFromHead
+      ? extractedFromHead.expr
+      : extractedFromBase && isForm(headExpr)
+        ? new Form({
+            location: headExpr.location?.clone(),
+            elements: [headExpr.first!, headExpr.at(1)!, extractedFromBase.expr],
+          })
+        : headExpr;
+
+  const resolvedBody = body ?? extractedFromHead?.literal ?? extractedFromBase?.literal;
+
+  if (!head || !resolvedBody) {
     throw new Error("obj declaration requires a field list");
   }
 
   const { name, base, typeParameters } = parseObjectHead(head);
-  const fields = parseObjectFields(body);
+  const fields = parseObjectFields(resolvedBody);
 
-  return { form, visibility, name, base, body, fields, typeParameters };
+  return {
+    form,
+    visibility,
+    name,
+    base,
+    body: resolvedBody,
+    fields,
+    typeParameters,
+  };
+};
+
+const extractTrailingObjectLiteral = (
+  expr: Expr | undefined
+): { expr: Expr; literal: Form } | undefined => {
+  if (!expr || !isForm(expr)) return undefined;
+  const last = expr.last;
+  if (!isForm(last) || !last.callsInternal("object_literal")) {
+    return undefined;
+  }
+  const trimmed = expr.slice(0, -1).unwrap();
+  return { expr: trimmed, literal: last };
 };
 
 export const parseTraitDecl = (form: Form): ParsedTraitDecl | null => {

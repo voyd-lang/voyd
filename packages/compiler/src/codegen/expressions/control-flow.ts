@@ -13,7 +13,7 @@ import type {
   TypeId,
 } from "../context.js";
 import { resolveLoopScope, withLoopScope } from "../control-flow-stack.js";
-import { allocateTempLocal } from "../locals.js";
+import { allocateTempLocal, declareLocal } from "../locals.js";
 import { RTT_METADATA_SLOTS } from "../rtt/index.js";
 import {
   getExprBinaryenType,
@@ -21,11 +21,48 @@ import {
   getStructuralTypeInfo,
   getMatchPatternTypeId,
 } from "../types.js";
+import { compilePatternInitializationFromValue } from "../patterns.js";
 import type {
   HirBreakExpr,
   HirContinueExpr,
   HirLoopExpr,
 } from "../../semantics/hir/index.js";
+
+const declarePatternLocals = (
+  pattern: HirPattern,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): void => {
+  switch (pattern.kind) {
+    case "wildcard":
+      return;
+    case "identifier":
+      declareLocal(pattern.symbol, ctx, fnCtx);
+      return;
+    case "tuple":
+      pattern.elements.forEach((entry) =>
+        declarePatternLocals(entry, ctx, fnCtx)
+      );
+      return;
+    case "destructure":
+      pattern.fields.forEach((field) =>
+        declarePatternLocals(field.pattern, ctx, fnCtx)
+      );
+      if (pattern.spread) {
+        declarePatternLocals(pattern.spread, ctx, fnCtx);
+      }
+      return;
+    case "type":
+      if (pattern.binding) {
+        declarePatternLocals(pattern.binding, ctx, fnCtx);
+      }
+      return;
+    default: {
+      const unknownPattern = pattern as { kind: string };
+      throw new Error(`unsupported pattern kind ${unknownPattern.kind}`);
+    }
+  }
+};
 
 const getNominalComponentFromTypingResult = (
   type: TypeId,
@@ -124,14 +161,22 @@ export const compileMatchExpr = (
     fnCtx,
   }).expr;
 
+  const patternTypeIdFor = (pattern: HirPattern): TypeId | undefined => {
+    if (pattern.kind === "wildcard") return undefined;
+    if (pattern.kind === "type") {
+      return getMatchPatternTypeId(pattern, ctx);
+    }
+    if (typeof pattern.typeId === "number") {
+      return pattern.typeId;
+    }
+    return undefined;
+  };
+
   const duplicateNominals = (() => {
     const seen = new Set<TypeId>();
     const dupes = new Set<TypeId>();
     expr.arms.forEach((arm) => {
-      if (arm.pattern.kind !== "type") {
-        return;
-      }
-      const typeId = getMatchPatternTypeId(arm.pattern, ctx);
+      const typeId = patternTypeIdFor(arm.pattern);
       if (typeof typeId !== "number") {
         return;
       }
@@ -156,6 +201,12 @@ export const compileMatchExpr = (
   let chain: CompiledExpression | undefined;
   for (let index = expr.arms.length - 1; index >= 0; index -= 1) {
     const arm = expr.arms[index]!;
+    if (arm.pattern.kind === "type" && arm.pattern.binding) {
+      declarePatternLocals(arm.pattern.binding, ctx, fnCtx);
+    } else if (arm.pattern.kind !== "wildcard") {
+      declarePatternLocals(arm.pattern, ctx, fnCtx);
+    }
+
     const armValue = compileExpr({
       exprId: arm.value,
       ctx,
@@ -169,16 +220,53 @@ export const compileMatchExpr = (
       continue;
     }
 
-    if (arm.pattern.kind !== "type") {
-      throw new Error(`unsupported match pattern ${arm.pattern.kind}`);
+    const patternTypeId = patternTypeIdFor(arm.pattern);
+    if (typeof patternTypeId !== "number") {
+      throw new Error(`match pattern missing type annotation (${arm.pattern.kind})`);
     }
 
     const condition = compileMatchCondition(
-      arm.pattern,
+      patternTypeId,
       discriminantTemp,
       ctx,
       duplicateNominals
     );
+
+    const bindingOps: binaryen.ExpressionRef[] = [];
+    if (arm.pattern.kind === "type" && arm.pattern.binding) {
+      compilePatternInitializationFromValue({
+        pattern: arm.pattern.binding,
+        value: ctx.mod.local.get(discriminantTemp.index, discriminantTemp.type),
+        valueTypeId: patternTypeId,
+        ctx,
+        fnCtx,
+        ops: bindingOps,
+        options: { declare: true },
+      });
+    } else if (arm.pattern.kind !== "type") {
+      compilePatternInitializationFromValue({
+        pattern: arm.pattern,
+        value: ctx.mod.local.get(discriminantTemp.index, discriminantTemp.type),
+        valueTypeId: patternTypeId,
+        ctx,
+        fnCtx,
+        ops: bindingOps,
+        options: { declare: true },
+      });
+    }
+
+    const armExpr =
+      bindingOps.length === 0
+        ? armValue
+        : {
+            expr: ctx.mod.block(
+              null,
+              [...bindingOps, armValue.expr],
+              binaryen.getExpressionType(armValue.expr)
+            ),
+            usedReturnCall: armValue.usedReturnCall,
+          };
+
     const fallback =
       chain ??
       ({
@@ -187,8 +275,8 @@ export const compileMatchExpr = (
       } as CompiledExpression);
 
     chain = {
-      expr: ctx.mod.if(condition, armValue.expr, fallback.expr),
-      usedReturnCall: armValue.usedReturnCall && fallback.usedReturnCall,
+      expr: ctx.mod.if(condition, armExpr.expr, fallback.expr),
+      usedReturnCall: armExpr.usedReturnCall && fallback.usedReturnCall,
     };
   }
 
@@ -208,12 +296,11 @@ export const compileMatchExpr = (
 };
 
 const compileMatchCondition = (
-  pattern: HirPattern & { kind: "type" },
+  patternTypeId: TypeId,
   discriminant: LocalBindingLocal,
   ctx: CodegenContext,
   duplicateNominals: ReadonlySet<TypeId>
 ): binaryen.ExpressionRef => {
-  const patternTypeId = getMatchPatternTypeId(pattern, ctx);
   const patternNominals = new Set<TypeId>();
   collectNominalComponents(patternTypeId, ctx, patternNominals);
   const useStrict = Array.from(patternNominals).some((nominal) =>

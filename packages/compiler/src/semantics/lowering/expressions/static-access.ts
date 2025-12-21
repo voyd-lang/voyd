@@ -19,8 +19,9 @@ import {
 } from "./resolution-helpers.js";
 import { lowerNominalObjectLiteral } from "./call.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
-import { resolveSymbol, resolveTypeSymbol } from "../resolution.js";
+import { resolveTypeSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
+import { resolveModulePathSymbol } from "./namespace-resolution.js";
 
 export const lowerStaticAccessExpr = ({
   form,
@@ -108,7 +109,11 @@ const lowerModuleAccess = ({
   targetExpr: Expr;
   memberExpr: Expr;
 } & LoweringParams): HirExprId | undefined => {
-  const moduleSymbol = resolveModuleSymbol(targetExpr, scopes.current(), ctx);
+  const moduleSymbol = resolveModulePathSymbol(
+    targetExpr,
+    scopes.current(),
+    ctx
+  );
   if (typeof moduleSymbol !== "number") {
     return undefined;
   }
@@ -346,23 +351,6 @@ const lowerModuleQualifiedCall = ({
     args,
     typeArguments,
   });
-};
-
-const resolveModuleSymbol = (
-  expr: Expr,
-  scope: ScopeId,
-  ctx: LoweringParams["ctx"]
-): SymbolId | undefined => {
-  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
-    const symbol = resolveSymbol(expr.value, scope, ctx);
-    if (typeof symbol === "number") {
-      const record = ctx.symbolTable.getSymbol(symbol);
-      if (record.kind === "module" || record.kind === "effect") {
-        return symbol;
-      }
-    }
-  }
-  return undefined;
 };
 
 const resolveStaticTargetSymbol = (

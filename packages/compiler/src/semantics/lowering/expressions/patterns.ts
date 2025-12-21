@@ -35,6 +35,64 @@ export const lowerPattern = (
     };
   }
 
+  if (isForm(target) && target.callsInternal("object_literal")) {
+    if (bindingKind && bindingKind !== "value") {
+      throw new Error("mutable reference patterns must bind identifiers");
+    }
+
+    let spread: HirPattern | undefined;
+    const fields = target.rest.flatMap((entry) => {
+      if (isIdentifierAtom(entry)) {
+        return [
+          {
+            name: entry.value,
+            pattern: lowerPattern(entry, ctx, scopes),
+          },
+        ];
+      }
+
+      if (!isForm(entry)) {
+        throw new Error("unsupported destructure entry in pattern");
+      }
+
+      if (entry.calls("...")) {
+        if (spread) {
+          throw new Error("destructure pattern supports at most one spread");
+        }
+        spread = lowerPattern(entry.at(1), ctx, scopes);
+        return [];
+      }
+
+      if (!entry.calls(":")) {
+        throw new Error("unsupported destructure entry in pattern");
+      }
+
+      const nameExpr = entry.at(1);
+      if (!isIdentifierAtom(nameExpr)) {
+        throw new Error("destructure field name must be an identifier");
+      }
+
+      const valueExpr = entry.at(2);
+      if (!valueExpr) {
+        throw new Error("destructure field pattern is missing a value");
+      }
+
+      return [
+        {
+          name: nameExpr.value,
+          pattern: lowerPattern(valueExpr, ctx, scopes),
+        },
+      ];
+    });
+
+    return {
+      kind: "destructure",
+      fields,
+      spread,
+      span: toSourceSpan(pattern),
+    };
+  }
+
   if (
     isForm(target) &&
     (target.calls("tuple") || target.callsInternal("tuple"))

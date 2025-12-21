@@ -12,7 +12,7 @@ impl Decoder
   pub fn init(ptr: i32, len: i32)
     Decoder { ptr, pos: 0, end: ptr + len }
 
-  fn read_u8(&self) -> i32
+  fn read_u8(~self) -> i32
     let next = self.ptr + self.pos
     let memory_end = linear_memory::size() * 65536
     if next >= self.end or next >= memory_end then:
@@ -22,12 +22,12 @@ impl Decoder
       self.pos = self.pos + 1
       value
 
-  fn read_u16(&self) -> i32
+  fn read_u16(~self) -> i32
     let high = self.read_u8()
     let low = self.read_u8()
     bit_or(shift_l(high, 8), low)
 
-  fn read_u32(&self) -> i32
+  fn read_u32(~self) -> i32
     let b1 = self.read_u8()
     let b2 = self.read_u8()
     let b3 = self.read_u8()
@@ -37,23 +37,23 @@ impl Decoder
     value = bit_or(value, shift_l(b3, 8))
     bit_or(value, b4)
 
-  fn read_i8(&self) -> i32
+  fn read_i8(~self) -> i32
     let value = self.read_u8()
     if value >= 128 then: value - 256 else: value
 
-  fn read_i16(&self) -> i32
+  fn read_i16(~self) -> i32
     let value = self.read_u16()
     if value >= 32768 then: value - 65536 else: value
 
-  fn read_i32(&self) -> i32
+  fn read_i32(~self) -> i32
     let value = self.read_u32()
     if value >= 2147483648 then: value - 4294967296 else: value
 
-  fn decode_string(&self, length: i32) -> String
+  fn decode_string(~self, length: i32) -> String
     if length <= 0 then:
       String { storage: new_fixed_array<i32>(1), count: 0 }
     else:
-      let &result = String {
+      let ~result = String {
         storage: new_fixed_array<i32>(length),
         count: 0,
       }
@@ -63,17 +63,17 @@ impl Decoder
         i = i + 1
       result
 
-  fn decode_array(&self, length: i32) -> Array<MsgPack>
+  fn decode_array(~self, length: i32) -> Array<MsgPack>
     let capacity = if length < 1 then: 1 else: length
-    let &result = new_array<MsgPack>({ with_size: capacity })
+    let ~result = new_array<MsgPack>({ with_size: capacity })
     var i = 0
     while i < length do:
       result.push(self.decode_any())
       i = i + 1
     result
 
-  fn decode_map(&self, length: i32) -> Map<MsgPack>
-    let &result = new_map<MsgPack>()
+  fn decode_map(~self, length: i32) -> Map<MsgPack>
+    let ~result = new_map<MsgPack>()
     var i = 0
     while i < length do:
       let key = self.decode_any()
@@ -88,7 +88,7 @@ impl Decoder
       i = i + 1
     result
 
-  fn decode_number(&self, prefix: i32) -> i32
+  fn decode_number(~self, prefix: i32) -> i32
     if prefix < 128 then:
       prefix
     elif: prefix >= 224 then:
@@ -108,7 +108,7 @@ impl Decoder
     else:
       0
 
-  fn decode_with_prefix(&self, prefix: i32) -> MsgPack
+  fn decode_with_prefix(~self, prefix: i32) -> MsgPack
     if prefix >= 160 and prefix < 192 then:
       self.decode_string(prefix - 160)
     elif: prefix >= 144 and prefix < 160 then:
@@ -140,22 +140,22 @@ impl Decoder
       self.decode_number(prefix)
       new_array<MsgPack>({ with_size: 1 })
 
-  fn decode_any(&self) -> MsgPack
+  fn decode_any(~self) -> MsgPack
     let prefix = self.read_u8()
     self.decode_with_prefix(prefix)
 
 
 pub fn decode(ptr: i32, len: i32) -> MsgPack
-  let &decoder = Decoder(ptr, len)
+  let ~decoder = Decoder(ptr, len)
   decoder.decode_any()
 
 pub fn decode_i32(ptr: i32, len: i32) -> i32
-  let &decoder = Decoder(ptr, len)
+  let ~decoder = Decoder(ptr, len)
   let prefix = decoder.read_u8()
   decoder.decode_number(prefix)
 
 pub fn decode_string(ptr: i32, len: i32) -> String
-  let &decoder = Decoder(ptr, len)
+  let ~decoder = Decoder(ptr, len)
   let prefix = decoder.read_u8()
   if prefix >= 160 and prefix < 192 then:
     decoder.decode_string(prefix - 160)
@@ -172,7 +172,7 @@ pub fn decode_string(ptr: i32, len: i32) -> String
     ""
 
 pub fn decode_array(ptr: i32, len: i32) -> Array<MsgPack>
-  let &decoder = Decoder(ptr, len)
+  let ~decoder = Decoder(ptr, len)
   let prefix = decoder.read_u8()
   if prefix >= 144 and prefix < 160 then:
     decoder.decode_array(prefix - 144)
@@ -186,7 +186,7 @@ pub fn decode_array(ptr: i32, len: i32) -> Array<MsgPack>
     new_array<MsgPack>({ with_size: 1 })
 
 pub fn decode_map(ptr: i32, len: i32) -> Map<MsgPack>
-  let &decoder = Decoder(ptr, len)
+  let ~decoder = Decoder(ptr, len)
   let prefix = decoder.read_u8()
   if prefix >= 128 and prefix < 144 then:
     decoder.decode_map(prefix - 128)

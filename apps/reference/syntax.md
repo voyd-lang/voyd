@@ -14,6 +14,9 @@ language syntax supports:
 -   Greedy identifiers
 -   Macro expansion
 -   Tuple, Struct, Array, and Dictionary literals etc
+-   Clause-style labeled suites (multiline only)
+-   Nominal object initialization shorthand (`Type { ... }`)
+-   Pattern matching (`match`) and `if`-as-`match` shorthand
 
 At its core, the surface language is still very lisp like. As in lisp,
 everything built on a list. Any valid s-expression, is a valid Surface Language
@@ -52,7 +55,7 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
   ```
 
 2.  Indented lines are grouped together in a block and passed to their parent
-  function call, provided the fist line is not a named argument.
+  expression.
 
   ```voyd
   add 2
@@ -64,6 +67,20 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     (block
       (let (= x 5))
       (mul 4 x)))
+  ```
+
+  If an indented suite contains only argument-like entries (labeled arguments),
+  the suite is treated as additional arguments rather than a `block(...)`.
+
+  ```voyd
+  match(x)
+    Some: 1
+    None: 0
+
+  // Becomes (conceptually)
+  (match x
+    (: Some 1)
+    (: None 0))
   ```
 
 3.  Isolated labeled arguments, that is labeled arguments that are on their own
@@ -92,6 +109,53 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     (: then 3)
     (: else 5))
   ```
+
+4.  Clause-style labeled suite sugar (multiline only).
+
+  This is a general mechanism used to make “conditional clause” syntax feel
+  more natural while still being a uniform call + labeled-args language.
+
+  If a call has already established a “suite label” that takes an indented
+  suite (e.g. `then:`), then subsequent clauses can be written as:
+
+  ```voyd
+  label <expr>:
+    <suite>
+  ```
+
+  and desugar into:
+
+  ```voyd
+  label: <expr>
+  <suite_label>:
+    <suite>
+  ```
+
+  Example (`if`):
+
+  ```voyd
+  if x < 1 then:
+    10
+  elif x < 2:
+    20
+  else:
+    30
+
+  // Becomes (conceptually)
+  (if (< x 1)
+    (: then (block 10))
+    (: elif (< x 2))
+    (: then (block 20))
+    (: else (block 30)))
+  ```
+
+  Notes:
+
+  - Clause-style sugar is intentionally **disallowed on one-liners** to keep
+    parsing predictable.
+  - To avoid ambiguity with type annotations / assignments (e.g. `let x: T = 1`)
+    the clause condition portion rejects assignment-like operators (`=`, `:=`)
+    at the same list level.
 
 4.  Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special
   handling.
@@ -208,6 +272,40 @@ let x = my_func(
     (+ 3 4))))
 ```
 
+# Nominal Object Initialization Shorthand
+
+Direct object initialization uses an object literal following a type name:
+
+```voyd
+MyObj { field: 1 }
+```
+
+In the surface language, an `UpperCamelCase` identifier (or `module::UpperCamelCase`
+path) followed immediately by an object literal is treated as a *single*
+constructor-init expression. This fixes cases like:
+
+```voyd
+return MyObj { field: 1 }
+```
+
+which should be interpreted as:
+
+```voyd
+return(MyObj({ field: 1 }))
+```
+
+This also works with:
+
+-   Generics: `MyObj<i32> { field: 1 }`
+-   Deep module paths: `outer::inner::MyObj { field: 1 }`
+
+If you need to pass the type and the object literal as separate arguments, wrap
+the type in parentheses to disable the constructor-init merge:
+
+```voyd
+my_two_arg_call (MyObj) { field: 1 }
+```
+
 # Standard Function Call Syntax
 
 To make Voyd language feel more familiar to users familiar with C style
@@ -230,6 +328,62 @@ add (1 2)
 // Becomes
 (add (1 2))
 ```
+
+# Pattern Matching (`match`)
+
+`match` is an expression that branches on a value using pattern arms:
+
+```voyd
+match(pet)
+  Dog as d: d.noses + 1
+  Cat as c: c.lives
+  else: 0
+```
+
+Arms are written as `pattern: expr` (or `pattern:` followed by an indented
+suite, which becomes `pattern: block(...)`).
+
+## Patterns
+
+Current pattern forms include:
+
+-   **Wildcard**: `else` (or `_` in binding positions).
+-   **Type check**: `Dog`
+-   **Type + bind whole value**: `Dog as d`
+-   **Type + destructure fields**:
+
+  ```voyd
+  (Dog { noses }): noses + 1
+  (Cat { lives: l }): l
+  ```
+
+-   **Tuple patterns**:
+
+  ```voyd
+  (a, b): a + b
+  ```
+
+-   **Nested patterns**:
+
+  ```voyd
+  (Some { v: (a, b) }): a * 10 + b
+  ```
+
+# `if` as `match` Shorthand
+
+An `if/elif/else` chain is lowered as a `match` when all conditions are simple
+type tests of the same identifier and an `else` branch exists:
+
+```voyd
+if pet is Dog then:
+  pet.noses
+elif pet is Cat:
+  pet.lives
+else:
+  0
+```
+
+This is equivalent to a `match(pet)` with type patterns plus a wildcard arm.
 
 # Uniform Function Call Syntax (Dot Notation)
 

@@ -28,7 +28,7 @@ pub fn new_array<T>(opts: { from: FixedArray<T> }) -> Array<T>
   Array<T> { storage: opts.from, count: opts.from.length<T>() }
 
 impl<T> Array<T>
-  fn resize(&self) -> Array<T>
+  fn resize(~self) -> Array<T>
     let new_storage = new_fixed_array<T>(self.storage.length<T>() * 2)
     new_storage.copy<T>({
       from: self.storage,
@@ -57,7 +57,7 @@ impl<T> Array<T>
   pub fn length(self) -> i32
     self.count
 
-  pub fn push(&self, value: T) -> Array<T>
+  pub fn push(~self, value: T) -> Array<T>
     if self.count >= self.storage.length<T>() then:
       self.resize().push(value)
     else:
@@ -65,7 +65,7 @@ impl<T> Array<T>
       self.count = self.count + 1
       self
 
-  pub fn pop(&self) -> Optional<T>
+  pub fn pop(~self) -> Optional<T>
     if self.count == 0 then:
       None {}
     else:
@@ -101,7 +101,7 @@ impl<T> Array<T>
 
       Array<T> { storage: new_storage, count: new_length }
 
-  pub fn insert(&self, index: i32, value: T) -> Array<T>
+  pub fn insert(~self, index: i32, value: T) -> Array<T>
     let computed_index = compute_index(index, self.count)
     if computed_index >= self.count then:
       self.push(value)
@@ -192,7 +192,7 @@ impl<T> Array<T>
       f(item)
 
   pub fn filter(self, pred: (v: T) -> bool) -> Array<T>
-    let &acc = new_array<T>({ with_size: 4 })
+    let ~acc = new_array<T>({ with_size: 4 })
 
     for item in self do:
       if pred(item) then: acc.push(item)
@@ -200,7 +200,7 @@ impl<T> Array<T>
     acc
 
   pub fn map<O>(self, f: (v: T) -> O) -> Array<O>
-    let &acc = new_array<O>({ with_size: 4 })
+    let ~acc = new_array<O>({ with_size: 4 })
     for item in self do:
       acc.push(f(item))
     acc
@@ -242,7 +242,7 @@ fn compute_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
 
 impl<T> Iterator<T> for ArrayIterator<T>
-  fn next(&self) -> Optional<T>
+  fn next(~self) -> Optional<T>
     if self.index >= self.array.count then:
       None {}
     else:

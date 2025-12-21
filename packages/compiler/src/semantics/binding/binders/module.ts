@@ -48,7 +48,10 @@ import type { ModuleExportEntry } from "../../modules.js";
 import type { SourceSpan } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
 import { isSamePackage } from "../../packages.js";
-import { importableMetadataFrom } from "../../imports/metadata.js";
+import {
+  importableMetadataFrom,
+  importedModuleIdFrom,
+} from "../../imports/metadata.js";
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   const tracker = new BinderScopeTracker(ctx.symbolTable);
@@ -294,8 +297,31 @@ const resolveDependencyPath = ({
       currentModulePath: ctx.module.path,
     })
   );
-  const preferred = matches.find((dep) => dep.kind === "use") ?? matches[0];
-  return preferred?.path;
+  if (matches.length === 0) {
+    return undefined;
+  }
+
+  const firstSegment = entry.moduleSegments.at(0);
+  const isExplicitlyNamespaced =
+    firstSegment === "src" || firstSegment === "std" || firstSegment === "pkg";
+
+  if (isExplicitlyNamespaced) {
+    const preferred = matches.find((dep) => dep.kind === "use") ?? matches[0];
+    return preferred?.path;
+  }
+
+  const longest = matches.reduce<(typeof matches)[number] | undefined>((best, dep) => {
+    if (!best) return dep;
+    if (dep.path.segments.length !== best.path.segments.length) {
+      return dep.path.segments.length > best.path.segments.length ? dep : best;
+    }
+    if (dep.kind !== best.kind) {
+      return dep.kind === "export" ? dep : best;
+    }
+    return best;
+  }, undefined);
+
+  return longest?.path;
 };
 
 const bindImportsFromModule = ({
@@ -468,19 +494,28 @@ const declareImportedSymbol = ({
     const importableMetadata = importableMetadataFrom(
       sourceMetadata as Record<string, unknown> | undefined
     );
+    const importedModuleId =
+      exported.kind === "module"
+        ? importedModuleIdFrom(sourceMetadata as Record<string, unknown> | undefined) ??
+          exported.moduleId
+        : exported.moduleId;
     const local = ctx.symbolTable.declare({
       name: alias,
       kind: exported.kind,
       declaredAt: declaredAt.syntaxId,
       metadata: {
-        import: { moduleId: exported.moduleId, symbol },
+        import:
+          exported.kind === "module"
+            ? { moduleId: importedModuleId }
+            : { moduleId: exported.moduleId, symbol },
         ...(importableMetadata ?? {}),
       },
     });
     const bound: BoundImport = {
       name: alias,
       local,
-      target: { moduleId: exported.moduleId, symbol },
+      target:
+        exported.kind === "module" ? undefined : { moduleId: exported.moduleId, symbol },
       visibility,
       span,
     };

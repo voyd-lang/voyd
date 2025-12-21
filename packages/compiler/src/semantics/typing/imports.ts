@@ -2,6 +2,7 @@ import { createTypingState } from "./context.js";
 import {
   ensureObjectType,
   ensureTraitType,
+  getObjectTemplate,
   resolveTypeAlias,
 } from "./type-system.js";
 import {
@@ -507,7 +508,12 @@ export const registerImportedObjectTemplate = ({
   if (ctx.objects.getTemplate(localSymbol)) {
     return;
   }
-  const template = dependency.typing.objects.getTemplate(dependencySymbol);
+  let template = dependency.typing.objects.getTemplate(dependencySymbol);
+  if (!template) {
+    const depCtx = makeDependencyContext(dependency, ctx);
+    const state = createTypingState();
+    template = getObjectTemplate(dependencySymbol, depCtx, state);
+  }
   if (!template) {
     return;
   }

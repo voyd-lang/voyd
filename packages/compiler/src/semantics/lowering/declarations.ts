@@ -96,9 +96,6 @@ export const lowerUseDecl = (use: BoundUse, ctx: LowerContext): void => {
     const exportVisibility = toExportVisibility(use.visibility, ctx);
     use.entries.forEach((entry) =>
       entry.imports.forEach((imported) => {
-        if (!imported.target) {
-          return;
-        }
         ctx.builder.recordExport({
           symbol: imported.local,
           visibility: exportVisibility,

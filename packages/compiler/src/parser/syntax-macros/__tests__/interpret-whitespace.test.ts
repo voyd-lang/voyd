@@ -71,3 +71,58 @@ test("it correctly handles the kitchen sink", async () => {
   const form = await runFixture("sink.voyd");
   expect(form).toMatchSnapshot();
 });
+
+test("it supports clause-style labeled suites (multiline only)", () => {
+  const sink = new CharStream(
+    [
+      "if x < 1 then:",
+      "  10",
+      "elif x < 2:",
+      "  20",
+      "else:",
+      "  30",
+    ].join("\n"),
+    "test"
+  );
+  const readerOutput = read(sink);
+  expect(expandSyntaxMacros(readerOutput, [interpretWhitespace]).toJSON()).toEqual([
+    "ast",
+    [
+      "if",
+      "x",
+      "<",
+      "1",
+      "then",
+      ":",
+      [
+        "block",
+        "10",
+      ],
+      [
+        "elif",
+        ":",
+        [
+          "x",
+          "<",
+          "2",
+        ],
+      ],
+      [
+        "then",
+        ":",
+        [
+          "block",
+          "20",
+        ],
+      ],
+      [
+        "else",
+        ":",
+        [
+          "block",
+          "30",
+        ],
+      ],
+    ],
+  ]);
+});

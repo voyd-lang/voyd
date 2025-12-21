@@ -1,6 +1,6 @@
 import {
   type Expr,
-  type Form,
+  Form,
   type Syntax,
   isForm,
   isIdentifierAtom,
@@ -10,6 +10,7 @@ import type { HirExprId } from "../../ids.js";
 import type { HirMatchArm, HirPattern } from "../../hir/index.js";
 import { resolveSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
+import { lowerPattern } from "./patterns.js";
 import type { LoweringFormParams } from "./types.js";
 
 type LowerMatchParams = LoweringFormParams & {
@@ -171,19 +172,52 @@ const lowerMatchPattern = (
     return { kind: "type", type, span: toSourceSpan(pattern) };
   }
 
+  if (isForm(pattern) && pattern.calls("as")) {
+    const base = pattern.at(1);
+    const binding = pattern.at(2);
+    if (!base || !binding) {
+      throw new Error("match pattern 'as' is missing a target or binding");
+    }
+
+    const type = lowerTypeExpr(base, ctx, scopes.current());
+    if (!type) {
+      throw new Error("match pattern 'as' requires a type on the left");
+    }
+
+    return {
+      kind: "type",
+      type,
+      binding: lowerPattern(binding, ctx, scopes),
+      span: toSourceSpan(pattern),
+    };
+  }
+
+  if (isForm(pattern)) {
+    if (pattern.calls("tuple") || pattern.callsInternal("tuple")) {
+      return lowerPattern(pattern, ctx, scopes);
+    }
+
+    const last = pattern.at(-1);
+    if (isForm(last) && last.callsInternal("object_literal")) {
+      const headElements = pattern.toArray().slice(0, -1);
+      const headExpr =
+        headElements.length === 1 ? headElements[0]! : new Form(headElements);
+      const type = lowerTypeExpr(headExpr, ctx, scopes.current());
+      if (!type) {
+        throw new Error("match destructure pattern is missing a type");
+      }
+      return {
+        kind: "type",
+        type,
+        binding: lowerPattern(last, ctx, scopes),
+        span: toSourceSpan(pattern),
+      };
+    }
+  }
+
   const type = lowerTypeExpr(pattern, ctx, scopes.current());
   if (type) {
     return { kind: "type", type, span: toSourceSpan(pattern) };
-  }
-
-  if (
-    isForm(pattern) &&
-    (pattern.calls("tuple") || pattern.callsInternal("tuple"))
-  ) {
-    const elements = pattern.rest.map((entry) =>
-      lowerMatchPattern(entry, ctx, scopes)
-    );
-    return { kind: "tuple", elements, span: toSourceSpan(pattern) };
   }
 
   throw new Error("unsupported match pattern");
