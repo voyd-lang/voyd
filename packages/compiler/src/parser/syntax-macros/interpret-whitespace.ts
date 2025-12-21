@@ -71,10 +71,15 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
     return transformed.pop();
   };
 
+  const asExpr = (element: FormInitElements[number] | undefined): Expr | undefined =>
+    !element || typeof element === "string" || Array.isArray(element)
+      ? undefined
+      : element;
+
   const maybeMergeConstructorObjectLiteral = () => {
     if (transformed.length < 2) return;
-    const objectLiteral = transformed.at(-1);
-    const callee = transformed.at(-2);
+    const objectLiteral = asExpr(transformed.at(-1));
+    const callee = asExpr(transformed.at(-2));
     const calleeIsParenthesized = parenthesized.at(-2) ?? false;
     if (
       objectLiteral &&
