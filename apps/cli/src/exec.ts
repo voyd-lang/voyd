@@ -16,6 +16,7 @@ import type { HirGraph } from "@voyd/compiler/semantics/hir/index.js";
 import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
 import { DiagnosticError } from "@voyd/compiler/diagnostics/index.js";
 import { formatCliDiagnostic } from "./diagnostics.js";
+import { assertRunnableWasm, emitWasmBytes } from "./wasm-validation.js";
 
 export const exec = () => main().catch(errorHandler);
 
@@ -145,9 +146,7 @@ async function getIrAST(entryPath: string) {
   return serializeHir(entrySemantics.hir);
 }
 
-const emitBinary = (mod: binaryen.Module): Uint8Array => {
-  return mod.emitBinary();
-};
+const emitBinary = (mod: binaryen.Module): Uint8Array => emitWasmBytes(mod);
 
 const compileModule = async (entryPath: string, optimize = false) => {
   const roots = getModuleRoots(entryPath);
@@ -180,11 +179,8 @@ async function getWasmText(entryPath: string, optimize = false) {
 async function emitWasm(entryPath: string, optimize = false) {
   const mod = await compileModule(entryPath, optimize);
 
-  if (!mod.validate()) {
-    throw new Error("Module is invalid");
-  }
-
-  stdout.write(emitBinary(mod));
+  const wasm = assertRunnableWasm(mod);
+  stdout.write(wasm);
 }
 
 async function runWasm(
@@ -194,11 +190,8 @@ async function runWasm(
 ) {
   const mod = await compileModule(entryPath, optimize);
 
-  if (!mod.validate()) {
-    throw new Error("Module is invalid");
-  }
-
-  const instance = getWasmInstance(mod);
+  const wasm = assertRunnableWasm(mod);
+  const instance = getWasmInstance(wasm);
   const main = instance.exports.main;
   if (typeof main !== "function") {
     throw new Error("No main function exported from wasm module");
