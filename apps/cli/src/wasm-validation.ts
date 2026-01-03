@@ -11,11 +11,10 @@ export const emitWasmBytes = (mod: binaryen.Module): Uint8Array => {
 
 export const assertRunnableWasm = (mod: binaryen.Module): Uint8Array => {
   const wasm = emitWasmBytes(mod);
-  if (WebAssembly.validate(wasm)) {
+  if (WebAssembly.validate(wasm as BufferSource)) {
     return wasm;
   }
 
   mod.validate();
   throw new Error("Module is invalid");
 };
-

@@ -147,7 +147,7 @@ export const codegenProgram = ({
 
   if (mergedOptions.validate) {
     const wasm = emitWasmBytes(mod);
-    if (!WebAssembly.validate(wasm)) {
+    if (!WebAssembly.validate(wasm as BufferSource)) {
       mod.validate();
     }
   }
@@ -181,7 +181,10 @@ export const codegenProgramWithContinuationFallback = ({
     entryModuleId,
     options: {
       ...options,
-      continuationBackend: { ...(options.continuationBackend ?? {}), stackSwitching: true },
+      continuationBackend: {
+        ...(options.continuationBackend ?? {}),
+        stackSwitching: true,
+      },
     },
   });
   const fallback = codegenProgram({
@@ -189,7 +192,10 @@ export const codegenProgramWithContinuationFallback = ({
     entryModuleId,
     options: {
       ...options,
-      continuationBackend: { ...(options.continuationBackend ?? {}), stackSwitching: false },
+      continuationBackend: {
+        ...(options.continuationBackend ?? {}),
+        stackSwitching: false,
+      },
     },
   });
   return { preferredKind, preferred, fallback };

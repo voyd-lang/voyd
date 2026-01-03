@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
-import { analyzeModules, emitProgram, loadModuleGraph } from "@voyd/compiler/pipeline.js";
+import {
+  analyzeModules,
+  emitProgram,
+  loadModuleGraph,
+} from "@voyd/compiler/pipeline.js";
 import { assertRunnableWasm } from "../wasm-validation.js";
 
 const require = createRequire(import.meta.url);
@@ -28,9 +32,9 @@ describe("wasm validation", () => {
 
     const wasm = assertRunnableWasm(module);
     expect(wasm).toBeInstanceOf(Uint8Array);
-    expect(WebAssembly.validate(wasm)).toBe(true);
+    expect(WebAssembly.validate(wasm as BufferSource)).toBe(true);
 
-    (module as unknown as { validate: () => boolean }).validate = originalValidate;
+    (module as unknown as { validate: () => number }).validate =
+      originalValidate;
   });
 });
-
