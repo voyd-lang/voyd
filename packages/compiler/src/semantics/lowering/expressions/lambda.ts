@@ -8,7 +8,11 @@ import {
 import { parseLambdaSignature } from "../../lambda.js";
 import { toSourceSpan } from "../../utils.js";
 import { resolveSymbol, resolveTypeSymbol } from "../resolution.js";
-import { lowerTypeExpr, lowerTypeParameters } from "../type-expressions.js";
+import {
+  lowerTypeExpr,
+  lowerTypeParameters,
+  wrapInOptionalTypeExpr,
+} from "../type-expressions.js";
 import type { HirExprId } from "../../ids.js";
 import type { HirParameter } from "../../hir/index.js";
 import { unwrapMutablePattern } from "./patterns.js";
@@ -112,6 +116,36 @@ const lowerLambdaParameter = (
       mutable: false,
       span: toSourceSpan(param),
       type: lowerTypeExpr(target.at(2), ctx, scopes.current()),
+    };
+  }
+
+  if (isForm(target) && target.calls("?:")) {
+    const nameExpr = target.at(1);
+    const { target: nameTarget, bindingKind: nameBinding } =
+      unwrapMutablePattern(nameExpr);
+    if (
+      !isIdentifierAtom(nameTarget) &&
+      !isInternalIdentifierAtom(nameTarget)
+    ) {
+      throw new Error("lambda parameter name must be an identifier");
+    }
+    const symbol = resolveSymbol(nameTarget.value, scopes.current(), ctx);
+    const lowered = lowerTypeExpr(target.at(2), ctx, scopes.current());
+    if (!lowered) {
+      throw new Error("optional lambda parameter missing type");
+    }
+    return {
+      symbol,
+      pattern: {
+        kind: "identifier",
+        symbol,
+        span: toSourceSpan(param),
+        bindingKind: nameBinding ?? bindingKind,
+      },
+      mutable: false,
+      span: toSourceSpan(param),
+      optional: true,
+      type: wrapInOptionalTypeExpr({ inner: lowered, ctx, scope: scopes.current() }),
     };
   }
 

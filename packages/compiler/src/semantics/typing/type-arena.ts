@@ -43,6 +43,7 @@ export interface NominalObjectType {
 export interface StructuralField {
   name: string;
   type: TypeId;
+  optional?: boolean;
   declaringParams?: readonly TypeParamId[];
   visibility?: HirVisibility;
   owner?: SymbolId;
@@ -255,6 +256,7 @@ export const createTypeArena = (): TypeArena => {
         .map((field) => ({
           name: field.name,
           type: field.type,
+          optional: field.optional ?? false,
           declaringParams:
             field.declaringParams && field.declaringParams.length > 0
               ? Array.from(new Set(field.declaringParams)).sort((a, b) => a - b)
@@ -1022,6 +1024,7 @@ export const createTypeArena = (): TypeArena => {
           return {
             name: field.name,
             type: substituted,
+            optional: field.optional,
             declaringParams: field.declaringParams,
             visibility: field.visibility,
             owner: field.owner,
@@ -1035,7 +1038,7 @@ export const createTypeArena = (): TypeArena => {
         const parameters = desc.parameters.map((param) => {
           const substituted = substitute(param.type, subst);
           changed ||= substituted !== param.type;
-          return { type: substituted, optional: param.optional };
+          return { type: substituted, label: param.label, optional: param.optional };
         });
         const returnType = substitute(desc.returnType, subst);
         changed ||= returnType !== desc.returnType;

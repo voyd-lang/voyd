@@ -159,6 +159,9 @@ const typeNominalObjectLiteral = (
         });
         return;
       }
+      if (field.optional) {
+        return;
+      }
       throw new Error(`missing initializer for field ${name}`);
     }
   });

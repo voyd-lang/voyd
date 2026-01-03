@@ -228,6 +228,7 @@ export interface HirParameter {
   mutable: boolean;
   decl?: ParameterDeclId;
   label?: string;
+  optional?: boolean;
   type?: HirTypeExpr;
   defaultValue?: HirExprId;
 }
@@ -287,6 +288,7 @@ export interface HirObjectField {
   symbol: SymbolId;
   visibility: HirVisibility;
   type?: HirTypeExpr;
+  optional?: boolean;
   span: SourceSpan;
 }
 

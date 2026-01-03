@@ -240,6 +240,7 @@ export const registerFunctionSignatures = (
         span: param.span,
         name: getSymbolName(param.symbol, ctx),
         symbol: param.symbol,
+        optional: declParam?.optional ?? param.optional,
       };
     });
 
@@ -262,10 +263,10 @@ export const registerFunctionSignatures = (
       ) ?? ctx.primitives.unknown;
 
     const functionType = ctx.arena.internFunction({
-      parameters: parameters.map(({ type, label }) => ({
+      parameters: parameters.map(({ type, label, optional }) => ({
         type,
         label,
-        optional: false,
+        optional: optional ?? false,
       })),
       returnType: declaredReturn,
       effectRow: initialEffectRow,

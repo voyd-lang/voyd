@@ -114,6 +114,7 @@ const bindFunctionParameters = (
     boundParams.push({
       name: param.name,
       label: param.label,
+      optional: param.optional,
       symbol: paramSymbol,
       ast: param.ast,
       typeExpr:

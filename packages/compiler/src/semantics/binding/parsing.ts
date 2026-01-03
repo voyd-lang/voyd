@@ -48,6 +48,7 @@ export interface ParsedObjectDecl {
 export interface ParsedObjectField {
   name: IdentifierAtom;
   typeExpr: Expr;
+  optional?: boolean;
   ast: Syntax;
   memberModifier?: HirMemberModifier;
 }
@@ -106,6 +107,7 @@ interface SignatureParam {
   label?: string;
   ast: Syntax;
   typeExpr?: Expr;
+  optional?: boolean;
   bindingKind?: HirBindingKind;
 }
 
@@ -486,6 +488,10 @@ const parseParameter = (expr: Expr): SignatureParam | SignatureParam[] => {
     return parseSingleParam(expr);
   }
 
+  if (isForm(expr) && expr.calls("?:")) {
+    return parseSingleParam(expr);
+  }
+
   if (isForm(expr) && expr.callsInternal("object_literal")) {
     return parseLabeledParameters(expr);
   }
@@ -632,7 +638,7 @@ const parseEffectOperationSignature = (
 
 const parseLabeledParameters = (form: Form): SignatureParam[] =>
   form.rest.map((expr) => {
-    if (isForm(expr) && expr.calls(":")) {
+    if (isForm(expr) && (expr.calls(":") || expr.calls("?:"))) {
       const param = parseSingleParam(expr);
       return {
         ...param,
@@ -644,7 +650,7 @@ const parseLabeledParameters = (form: Form): SignatureParam[] =>
       isForm(expr) &&
       isIdentifierAtom(expr.first) &&
       isForm(expr.second) &&
-      expr.second.calls(":")
+      (expr.second.calls(":") || expr.second.calls("?:"))
     ) {
       const labelExpr = expr.first;
       return {
@@ -664,6 +670,7 @@ const parseSingleParam = (expr: Form): SignatureParam => {
     ast,
     bindingKind,
     typeExpr: expr.at(2),
+    optional: expr.calls("?:") ? true : undefined,
   };
 };
 
@@ -840,7 +847,8 @@ const parseObjectFields = (body: Form): ParsedObjectField[] =>
     }
 
     const { field, modifier } = unwrapFieldEntry(entry);
-    if (!field.calls(":")) {
+    const optional = field.calls("?:");
+    if (!field.calls(":") && !optional) {
       throw new Error("object fields must be labeled");
     }
     const nameExpr = field.at(1);
@@ -851,7 +859,13 @@ const parseObjectFields = (body: Form): ParsedObjectField[] =>
     if (!typeExpr) {
       throw new Error("object field missing type");
     }
-    return { name: nameExpr, typeExpr, ast: entry, memberModifier: modifier };
+    return {
+      name: nameExpr,
+      typeExpr,
+      optional: optional ? true : undefined,
+      ast: entry,
+      memberModifier: modifier,
+    };
   });
 
 const unwrapFieldEntry = (

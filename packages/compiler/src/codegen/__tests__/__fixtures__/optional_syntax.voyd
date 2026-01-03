@@ -1,0 +1,76 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+obj OptionalBox {
+  v?: i32
+}
+
+fn default_num(v: Optional<i32>, d: i32) -> i32
+  match(v)
+    Some<i32>: v.value
+    None: d
+
+pub fn test1_optional_obj_field() -> i32
+  let v1 = OptionalBox { v: 5 }
+  let v2 = OptionalBox {}
+  default_num(v1.v, 2) + default_num(v2.v, 2)
+
+fn work(id: i32, middle?: i32) -> i32
+  match(middle)
+    Some<i32>:
+      2
+    None:
+      1
+
+pub fn test2_passed_optional_param() -> i32
+  work(1, 2)
+
+pub fn test3_not_passed_optional_param() -> i32
+  work(1)
+
+fn work_with_optional_labeled({ title: i32, subtitle?: i32 }) -> i32
+  match(subtitle)
+    Some<i32>:
+      2
+    None:
+      1
+
+pub fn test4_pass_optional_label_arg() -> i32
+  work_with_optional_labeled(title: 1, subtitle: 2)
+
+pub fn test5_no_pass_optional_label() -> i32
+  work_with_optional_labeled(title: 1)
+
+pub fn test6_pass_optional_object_for_label() -> i32
+  work_with_optional_labeled({ title: 1 })
+
+fn sum(a: i32, b?: i32, { c: i32 }) -> i32
+  a + c
+
+pub fn test7_skip_optional_labeled() -> i32
+  sum(1, c: 2)
+
+pub fn test8_closure_with_arg() -> i32
+  let f = (name: i32, middle?: i32) => work(name, middle)
+  f(3, 4)
+
+pub fn test9_closure_without_arg() -> i32
+  let f = (name: i32, middle?: i32) => work(name, middle)
+  f(5)
+
+pub fn main() -> i32
+  test1_optional_obj_field() +
+  test2_passed_optional_param() +
+  test3_not_passed_optional_param() +
+  test4_pass_optional_label_arg() +
+  test5_no_pass_optional_label() +
+  test6_pass_optional_object_for_label() +
+  test7_skip_optional_labeled() +
+  test8_closure_with_arg() +
+  test9_closure_without_arg()
+

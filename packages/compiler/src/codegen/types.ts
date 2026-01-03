@@ -420,6 +420,7 @@ export const getStructuralTypeInfo = (
       typeId: field.type,
       wasmType: wasmTypeFor(field.type, ctx, seen),
       runtimeIndex: index + RTT_METADATA_SLOT_COUNT,
+      optional: field.optional,
       hash: 0,
     }));
     const nominalId = getNominalComponentId(typeId, ctx);

@@ -133,6 +133,15 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         paramTypes,
         resultType,
         paramTypeIds: descriptor.parameters.map((param) => param.type),
+        parameters: descriptor.parameters.map((param, index) => ({
+          typeId: param.type,
+          label: param.label,
+          optional: param.optional,
+          name:
+            typeof item.parameters[index]?.symbol === "number"
+              ? ctx.symbolTable.getSymbol(item.parameters[index]!.symbol).name
+              : undefined,
+        })),
         resultTypeId: descriptor.returnType,
         typeArgs,
         instanceKey,
@@ -236,6 +245,12 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         paramTypes,
         resultType,
         paramTypeIds: signature.parameters.map((param) => param.type),
+        parameters: signature.parameters.map((param) => ({
+          typeId: param.type,
+          label: param.label,
+          optional: param.optional,
+          name: param.name,
+        })),
         resultTypeId: signature.returnType,
         typeArgs,
         instanceKey,

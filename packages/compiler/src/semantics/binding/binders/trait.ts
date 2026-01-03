@@ -172,6 +172,7 @@ const bindTraitMethodParameters = (
     return {
       name: param.name,
       label: param.label,
+      optional: param.optional,
       symbol: paramSymbol,
       ast: param.ast,
       typeExpr: param.typeExpr,
@@ -248,6 +249,7 @@ export const makeParsedFunctionFromTraitMethod = (
     return {
       name: param.name,
       label: param.label,
+      optional: param.optional,
       ast: clonedAst,
       typeExpr,
     };
