@@ -92,4 +92,20 @@ describe("primary syntax macro", () => {
       ],
     ]);
   });
+
+  it("attaches indented suites to functional calls", () => {
+    const expected = expand(`
+      match pet
+        Dog { noses }: noses + 2
+        Cat { lives: l }: l
+    `);
+
+    const actual = expand(`
+      match(pet)
+        Dog { noses }: noses + 2
+        Cat { lives: l }: l
+    `);
+
+    expect(actual).toEqual(expected);
+  });
 });

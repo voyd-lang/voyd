@@ -1,10 +1,29 @@
 import { Expr, Form } from "../../ast/index.js";
 import * as p from "../../ast/predicates.js";
-import { isCallLikeForm, isNonBindingOp, normalizeFormKind, rebuildSameKind } from "./shared.js";
+import {
+  isCallLikeForm,
+  isNonBindingOp,
+  normalizeFormKind,
+  rebuildSameKind,
+} from "./shared.js";
 
 /**
  * Hoists a trailing `block(...)` out of operator chains so it attaches to the
  * outermost call-like expression.
+ *
+ * This makes indented suites behave like “trailing blocks” (similar to a final
+ * argument), even when the suite is written after an expression that contains
+ * non-binding operators.
+ *
+ * Examples (schematic):
+ *
+ * - `foo(x: i32) -> None | Some\n  body()` should attach the suite to the whole
+ *   `foo(...) -> ... | ...` expression, not just the rightmost branch.
+ * - `a.b + c\n  body()` should attach the suite to `(a.b + c)` rather than only
+ *   to `c`.
+ *
+ * The hoist does not cross “binding” operators (currently `:`, `=`, `=>`), since
+ * those are treated as structural boundaries.
  */
 export function hoistTrailingBlock(expr: Form): Form;
 export function hoistTrailingBlock(expr: Expr): Expr;

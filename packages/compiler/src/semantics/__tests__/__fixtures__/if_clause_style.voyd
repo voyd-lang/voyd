@@ -1,0 +1,7 @@
+pub fn main()
+  let x = 3
+  if
+    x < 4: 1
+    x > 4: 2
+    else: 3
+
