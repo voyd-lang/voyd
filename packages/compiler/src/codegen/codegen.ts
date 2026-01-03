@@ -146,7 +146,10 @@ export const codegenProgram = ({
   }
 
   if (mergedOptions.validate) {
-    mod.validate();
+    const wasm = emitWasmBytes(mod);
+    if (!WebAssembly.validate(wasm as BufferSource)) {
+      mod.validate();
+    }
   }
 
   return { module: mod, effectTable };
@@ -178,7 +181,10 @@ export const codegenProgramWithContinuationFallback = ({
     entryModuleId,
     options: {
       ...options,
-      continuationBackend: { ...(options.continuationBackend ?? {}), stackSwitching: true },
+      continuationBackend: {
+        ...(options.continuationBackend ?? {}),
+        stackSwitching: true,
+      },
     },
   });
   const fallback = codegenProgram({
@@ -186,7 +192,10 @@ export const codegenProgramWithContinuationFallback = ({
     entryModuleId,
     options: {
       ...options,
-      continuationBackend: { ...(options.continuationBackend ?? {}), stackSwitching: false },
+      continuationBackend: {
+        ...(options.continuationBackend ?? {}),
+        stackSwitching: false,
+      },
     },
   });
   return { preferredKind, preferred, fallback };
@@ -196,3 +205,12 @@ export type { CodegenOptions, CodegenResult } from "./context.js";
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const emitWasmBytes = (mod: binaryen.Module): Uint8Array => {
+  const emitted = mod.emitBinary();
+  return emitted instanceof Uint8Array
+    ? emitted
+    : (emitted as { binary?: Uint8Array; output?: Uint8Array }).output ??
+        (emitted as { binary?: Uint8Array }).binary ??
+        new Uint8Array();
+};

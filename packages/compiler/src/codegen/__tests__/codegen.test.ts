@@ -519,9 +519,7 @@ describe("next codegen", () => {
       .map((line) => line.trim())
       .filter((line) => line.startsWith("(type"));
     expect(
-      typeLines.some((line) =>
-        line.includes("__closure_base_lambdas_voyd")
-      )
+      typeLines.some((line) => line.includes("__closure_base_lambdas_voyd"))
     ).toBe(true);
     expect(
       typeLines.some(
@@ -580,12 +578,12 @@ describe("next codegen", () => {
 
     const envKeysA = Array.from(ctxA.lambdaEnvs.keys());
     const envKeysB = Array.from(ctxB.lambdaEnvs.keys());
-    expect(envKeysA.every((key) => key.startsWith(`${moduleA.moduleId}::`))).toBe(
-      true
-    );
-    expect(envKeysB.every((key) => key.startsWith(`${moduleB.moduleId}::`))).toBe(
-      true
-    );
+    expect(
+      envKeysA.every((key) => key.startsWith(`${moduleA.moduleId}::`))
+    ).toBe(true);
+    expect(
+      envKeysB.every((key) => key.startsWith(`${moduleB.moduleId}::`))
+    ).toBe(true);
     expect(new Set([...envKeysA, ...envKeysB]).size).toBe(
       envKeysA.length + envKeysB.length
     );
