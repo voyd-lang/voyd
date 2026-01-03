@@ -11,6 +11,12 @@
       "import": "./dist/src/pipeline.js",
       "default": "./dist/src/pipeline.js"
     },
+    "./*.js": {
+      "types": "./src/*.ts",
+      "development": "./src/*.ts",
+      "import": "./dist/src/*.js",
+      "default": "./dist/src/*.js"
+    },
     "./*": {
       "types": "./src/*.ts",
       "development": "./src/*.ts",
