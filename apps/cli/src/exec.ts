@@ -103,7 +103,9 @@ const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
   diagnostics.some((diagnostic) => diagnostic.severity === "error");
 
 const assertNoDiagnostics = (diagnostics: readonly Diagnostic[]): void => {
-  const error = diagnostics.find((diagnostic) => diagnostic.severity === "error");
+  const error = diagnostics.find(
+    (diagnostic) => diagnostic.severity === "error"
+  );
   if (error) {
     throw new DiagnosticError(error);
   }
@@ -128,7 +130,9 @@ async function getCoreAst(entryPath: string) {
 async function getIrAST(entryPath: string) {
   const roots = getModuleRoots(entryPath);
   const graph = await loadModuleGraph({ entryPath, roots });
-  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({ graph });
+  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
+    graph,
+  });
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
 
   assertNoDiagnostics(diagnostics);
@@ -148,7 +152,9 @@ const emitBinary = (mod: binaryen.Module): Uint8Array => {
 const compileModule = async (entryPath: string, optimize = false) => {
   const roots = getModuleRoots(entryPath);
   const graph = await loadModuleGraph({ entryPath, roots });
-  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({ graph });
+  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
+    graph,
+  });
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
 
   if (hasErrorDiagnostics(diagnostics)) {
