@@ -100,36 +100,6 @@ catch(e):
   log e
 ```
 
-### Clause-style labeled suites
-
-When a call has already provided an indented suite to a labeled argument, later
-labeled arguments may omit the `:` after the label and attach a suite using
-Python-like syntax:
-
-```voyd
-if x < 1 then:
-  10
-elif x < 2:
-  20
-else:
-  30
-```
-
-This desugars into standard labeled arguments by reusing the most recent "suite
-label" (`then:` in the example):
-
-```voyd
-if x < 1 then:
-  10
-elif: x < 2 then:
-  20
-else:
-  30
-```
-
-Clause-style labeled suites are multiline-only. On one line, use explicit
-labeled-argument syntax (`elif: ... then: ...`).
-
 [1] The compiler will typically optimize this away, so there is no performance
 penalty for using labeled arguments.
 

@@ -13,7 +13,7 @@ pub fn main() -> i32
 
   if pet is Dog then:
     pet.noses
-  elif pet is Cat:
+  elif: (pet is Cat) then:
     pet.lives
   else:
     0

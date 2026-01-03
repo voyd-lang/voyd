@@ -9,7 +9,6 @@ import { finalizeWhitespace } from "./finalize.js";
 import { addSibling } from "./siblings.js";
 import { normalizeFormKind } from "./shared.js";
 import {
-  expandClauseStyleLabeledSuite,
   extractLeadingContinuationOp,
   suiteIsArgList,
 } from "./suite-sugar.js";
@@ -25,12 +24,6 @@ export const interpretWhitespaceExpr = (form: Form, indentLevel?: number): Expr 
   while (!cursor.done) {
     const child = elideParens(cursor, indentLevel);
     if (p.isForm(child) && !child.length) continue;
-    const expanded = expandClauseStyleLabeledSuite(child, transformed);
-    if (expanded) {
-      expanded.forEach((entry) => addSibling(entry, transformed));
-      continue;
-    }
-
     addSibling(child, transformed);
   }
 
@@ -97,12 +90,6 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
       if (continuationOp !== undefined) {
         continuationOp.forEach((entry) => pushElement(entry));
         return;
-      }
-
-      const expanded = expandClauseStyleLabeledSuite(child, children);
-      if (expanded) {
-        expanded.forEach((entry) => addSibling(entry, children));
-        continue;
       }
 
       addSibling(child, children);
