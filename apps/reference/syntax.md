@@ -68,8 +68,8 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
       (mul 4 x)))
   ```
 
-  If an indented suite contains only argument-like entries (labeled arguments),
-  the suite is treated as additional arguments rather than a `block(...)`.
+  If an indented suite contains only clause entries (`lhs: rhs`), the suite is
+  treated as additional arguments rather than a `block(...)`.
 
   ```voyd
   match(x)
@@ -82,11 +82,11 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     (: None 0))
   ```
 
-3.  Isolated labeled arguments, that is labeled arguments that are on their own
-  line, are applied to the preceding function call provided:
+3.  Isolated clauses (`lhs: rhs`) that are on their own line are applied to the
+  preceding call-like expression provided:
 
   1. There are no empty lines separating the two
-  2. The labeled argument is on the same indentation level, or 1 child
+  2. The clause is on the same indentation level, or 1 child
      indentation level as the preceding function call.
 
   ```voyd
@@ -107,6 +107,35 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
   (if (x > y)
     (: then 3)
     (: else 5))
+  ```
+
+  This generalizes to multiline `if` without `then:`/`elif:`:
+
+  ```voyd
+  if
+    x < 4:
+      do_thing()
+    x > 4:
+      do_another_thing()
+    else:
+      do_other_thing()
+
+  // Becomes (conceptually)
+  (if
+    (: (< x 4) (block do_thing))
+    (: (> x 4) (block do_another_thing))
+    (: else (block do_other_thing)))
+  ```
+
+  And the same-indent chaining form:
+
+  ```voyd
+  if x < 4:
+    do_thing()
+  x > 4:
+    do_another_thing()
+  else:
+    do_other_thing()
   ```
 
 4.  Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special
@@ -323,16 +352,14 @@ Current pattern forms include:
 
 # `if` as `match` Shorthand
 
-An `if/elif/else` chain is lowered as a `match` when all conditions are simple
-type tests of the same identifier and an `else` branch exists:
+An `if` chain is lowered as a `match` when all conditions are simple type tests
+of the same identifier and an `else` branch exists:
 
 ```voyd
-if pet is Dog then:
-  pet.noses
-elif pet is Cat:
-  pet.lives
-else:
-  0
+if
+  pet is Dog: pet.noses
+  pet is Cat: pet.lives
+  else: 0
 ```
 
 This is equivalent to a `match(pet)` with type patterns plus a wildcard arm.

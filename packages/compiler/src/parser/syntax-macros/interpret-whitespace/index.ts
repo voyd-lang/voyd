@@ -2,7 +2,7 @@ import { call, Form, isForm } from "../../ast/index.js";
 import * as p from "../../ast/predicates.js";
 import { interpretWhitespaceExpr } from "./interpret-expr.js";
 import { applyFunctionalNotation } from "./functional-notation.js";
-import { finalizeWhitespace } from "./finalize.js";
+import { hoistTrailingBlock } from "./trailing-block.js";
 
 /**
  * Rewrites whitespace (newlines/indentation) into explicit `block(...)` forms and
@@ -15,7 +15,7 @@ export const interpretWhitespace = (form: Form, indentLevel?: number): Form => {
       "ast",
       ...(isForm(result.at(0)) ? result.toArray() : [result])
     );
-    return finalizeWhitespace(normalized) as Form;
+    return hoistTrailingBlock(normalized) as Form;
   }
 
   const functional = applyFunctionalNotation(form);

@@ -4,52 +4,55 @@ exports[`it correctly handles implicit labeled arguments to a generic function 1
 [
   "ast",
   [
+    "foo",
     [
-      "foo",
-      [
-        "generics",
-        "Option",
-      ],
+      "generics",
+      "Option",
     ],
     [
-      "then",
-      ":",
+      "block",
       [
-        "work",
-      ],
-    ],
-  ],
-  [
-    [
-      "Foo",
-      [
-        "generics",
+        "then",
+        ":",
         [
-          "T",
-          ":",
-          "Display",
+          "work",
         ],
       ],
     ],
-    [
-      "else",
-      ":",
-      "0",
-    ],
   ],
   [
+    "Foo",
     [
-      "bar",
+      "generics",
       [
-        "generics",
-        "Option",
+        "T",
+        ":",
+        "Display",
       ],
     ],
     [
-      "then",
-      ":",
+      "block",
       [
-        "baz",
+        "else",
+        ":",
+        "0",
+      ],
+    ],
+  ],
+  [
+    "bar",
+    [
+      "generics",
+      "Option",
+    ],
+    [
+      "block",
+      [
+        "then",
+        ":",
+        [
+          "baz",
+        ],
       ],
     ],
   ],
@@ -108,28 +111,28 @@ exports[`it correctly handles the kitchen sink 1`] = `
           "block",
           "n",
         ],
+      ],
+      [
+        "else",
+        ":",
         [
-          "else",
-          ":",
+          "block",
           [
-            "block",
             [
+              "fib",
               [
-                "fib",
-                [
-                  "n",
-                  "-",
-                  "1",
-                ],
+                "n",
+                "-",
+                "1",
               ],
-              "+",
+            ],
+            "+",
+            [
+              "fib",
               [
-                "fib",
-                [
-                  "n",
-                  "-",
-                  "2",
-                ],
+                "n",
+                "-",
+                "2",
               ],
             ],
           ],
@@ -175,13 +178,13 @@ exports[`it correctly handles the kitchen sink 1`] = `
       "block",
       "10",
     ],
+  ],
+  [
+    "else",
+    ":",
     [
-      "else",
-      ":",
-      [
-        "block",
-        "20",
-      ],
+      "block",
+      "20",
     ],
   ],
   [
@@ -192,23 +195,21 @@ exports[`it correctly handles the kitchen sink 1`] = `
     "then",
     ":",
     "-1",
-    [
-      "elif",
-      ":",
-      "x",
-      "<",
-      "2.0",
-    ],
-    [
-      "then",
-      ":",
-      "0",
-    ],
-    [
-      "else",
-      ":",
-      "2",
-    ],
+  ],
+  [
+    "elif",
+    ":",
+    "x",
+    "<",
+    "2.0",
+    "then",
+    ":",
+    "0",
+  ],
+  [
+    "else",
+    ":",
+    "2",
   ],
   [
     "array",
@@ -235,13 +236,13 @@ exports[`it correctly handles the kitchen sink 1`] = `
         "val",
       ],
     ],
-    [
-      "with",
-      ":",
-      [],
-      "=>",
-      "0",
-    ],
+  ],
+  [
+    "with",
+    ":",
+    [],
+    "=>",
+    "0",
   ],
   "10",
   [
@@ -458,19 +459,10 @@ exports[`it correctly handles the kitchen sink 1`] = `
     ],
   ],
   [
+    "match",
+    "x",
     [
-      "match",
-      "x",
-    ],
-    [
-      [
-        "Some",
-        [
-          "generics",
-          "i32",
-        ],
-      ],
-      ":",
+      "block",
       [
         [
           "Some",
@@ -479,27 +471,37 @@ exports[`it correctly handles the kitchen sink 1`] = `
             "i32",
           ],
         ],
+        ":",
         [
-          "object_literal",
           [
-            "value",
-            ":",
-            "x",
-            ".",
-            "value",
-            "+",
-            "1",
+            "Some",
+            [
+              "generics",
+              "i32",
+            ],
+          ],
+          [
+            "object_literal",
+            [
+              "value",
+              ":",
+              "x",
+              ".",
+              "value",
+              "+",
+              "1",
+            ],
           ],
         ],
       ],
-    ],
-    [
-      "None",
-      ":",
       [
         "None",
+        ":",
         [
-          "object_literal",
+          "None",
+          [
+            "object_literal",
+          ],
         ],
       ],
     ],
@@ -512,43 +514,44 @@ exports[`it correctly handles the kitchen sink 1`] = `
     ],
     ".",
     [
+      "match",
+      "val",
       [
-        "match",
-        "val",
-      ],
-      [
+        "block",
         [
-          "Some",
           [
-            "generics",
+            "Some",
             [
-              "Optional",
+              "generics",
               [
-                "generics",
-                "i32",
+                "Optional",
+                [
+                  "generics",
+                  "i32",
+                ],
               ],
             ],
           ],
-        ],
-        ":",
-        [
-          "block",
+          ":",
           [
-            "val",
-            ".",
-            "value",
+            "block",
+            [
+              "val",
+              ".",
+              "value",
+            ],
           ],
         ],
-      ],
-      [
-        "None",
-        ":",
         [
-          "block",
+          "None",
+          ":",
           [
-            "None",
+            "block",
             [
-              "object_literal",
+              "None",
+              [
+                "object_literal",
+              ],
             ],
           ],
         ],
@@ -556,10 +559,11 @@ exports[`it correctly handles the kitchen sink 1`] = `
     ],
     ".",
     [
-      [
-        "match",
-        "v",
-      ],
+      "match",
+      "v",
+    ],
+    [
+      "block",
       [
         [
           "Some",
@@ -596,43 +600,44 @@ exports[`it correctly handles the kitchen sink 1`] = `
     ],
     ".",
     [
+      "match",
+      "val",
       [
-        "match",
-        "val",
-      ],
-      [
+        "block",
         [
-          "Some",
           [
-            "generics",
+            "Some",
             [
-              "Optional",
+              "generics",
               [
-                "generics",
-                "i32",
+                "Optional",
+                [
+                  "generics",
+                  "i32",
+                ],
               ],
             ],
           ],
-        ],
-        ":",
-        [
-          "block",
+          ":",
           [
-            "val",
-            ".",
-            "value",
+            "block",
+            [
+              "val",
+              ".",
+              "value",
+            ],
           ],
         ],
-      ],
-      [
-        "None",
-        ":",
         [
-          "block",
+          "None",
+          ":",
           [
-            "None",
+            "block",
             [
-              "object_literal",
+              "None",
+              [
+                "object_literal",
+              ],
             ],
           ],
         ],
@@ -640,10 +645,11 @@ exports[`it correctly handles the kitchen sink 1`] = `
     ],
     ".",
     [
-      [
-        "match",
-        "v",
-      ],
+      "match",
+      "v",
+    ],
+    [
+      "block",
       [
         [
           "Some",
@@ -739,19 +745,22 @@ exports[`it correctly handles the kitchen sink 1`] = `
           ">",
           "10",
           [
-            "then",
-            ":",
+            "block",
             [
-              "block",
-              "10",
+              "then",
+              ":",
+              [
+                "block",
+                "10",
+              ],
             ],
-          ],
-          [
-            "else",
-            ":",
             [
-              "block",
-              "20",
+              "else",
+              ":",
+              [
+                "block",
+                "20",
+              ],
             ],
           ],
         ],
@@ -828,13 +837,13 @@ exports[`it correctly handles the kitchen sink 1`] = `
                 ],
               ],
             ],
+          ],
+          [
+            "else",
+            ":",
             [
-              "else",
-              ":",
-              [
-                "block",
-                "10",
-              ],
+              "block",
+              "10",
             ],
           ],
         ],
@@ -997,14 +1006,14 @@ exports[`it correctly handles the kitchen sink 1`] = `
         ":",
         "is",
         "up",
+      ],
+      [
         [
-          [
-            "what",
-          ],
-          ":",
-          "is",
-          "up",
+          "what",
         ],
+        ":",
+        "is",
+        "up",
       ],
       [
         "pub",
@@ -1388,28 +1397,28 @@ exports[`it correctly inserts blocks in a basic fib fn 1`] = `
           "block",
           "n",
         ],
+      ],
+      [
+        "else",
+        ":",
         [
-          "else",
-          ":",
+          "block",
           [
-            "block",
             [
+              "fib",
               [
-                "fib",
-                [
-                  "n",
-                  "-",
-                  "1",
-                ],
+                "n",
+                "-",
+                "1",
               ],
-              "+",
+            ],
+            "+",
+            [
+              "fib",
               [
-                "fib",
-                [
-                  "n",
-                  "-",
-                  "2",
-                ],
+                "n",
+                "-",
+                "2",
               ],
             ],
           ],

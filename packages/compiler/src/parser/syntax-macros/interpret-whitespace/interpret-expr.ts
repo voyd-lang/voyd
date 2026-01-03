@@ -1,23 +1,25 @@
-import { CallForm, Expr, Form, FormCursor, FormInitElements } from "../../ast/index.js";
 import {
-  IdentifierAtom,
-  isIdentifierAtom,
+  CallForm,
+  Expr,
+  Form,
+  FormCursor,
+  FormInitElements,
 } from "../../ast/index.js";
+import { IdentifierAtom, isIdentifierAtom } from "../../ast/index.js";
 import * as p from "../../ast/predicates.js";
 import { isContinuationOp, isGreedyOp, isOp } from "../../grammar.js";
-import { finalizeWhitespace } from "./finalize.js";
-import { addSibling } from "./siblings.js";
-import { normalizeFormKind } from "./shared.js";
-import {
-  extractLeadingContinuationOp,
-  suiteIsArgList,
-} from "./suite-sugar.js";
+import { normalizeFormKind, unwrapSyntheticCall } from "./shared.js";
+import { extractLeadingContinuationOp } from "./suite-sugar.js";
+import { hoistTrailingBlock } from "./trailing-block.js";
 
 /**
  * Core whitespace interpreter that turns indentation into explicit `block(...)`
  * forms while recursively rewriting nested list expressions.
  */
-export const interpretWhitespaceExpr = (form: Form, indentLevel?: number): Expr => {
+export const interpretWhitespaceExpr = (
+  form: Form,
+  indentLevel?: number
+): Expr => {
   const cursor = form.cursor();
   const transformed: Expr[] = [];
 
@@ -33,7 +35,7 @@ export const interpretWhitespaceExpr = (form: Form, indentLevel?: number): Expr 
   const preserved = normalizeFormKind(form, normalizedForm);
   if (form.location) preserved.setLocation(form.location.clone());
 
-  const normalized = finalizeWhitespace(preserved);
+  const normalized = hoistTrailingBlock(preserved);
   return p.isForm(normalized) ? normalized.unwrap() : normalized;
 };
 
@@ -93,12 +95,6 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
       }
 
       addSibling(child, children);
-    }
-
-    // Handle labeled arguments
-    if (suiteIsArgList(children)) {
-      children.slice(1).forEach((child) => pushElement(child));
-      return;
     }
 
     pushElement(new CallForm(children));
@@ -238,4 +234,12 @@ const isUpperCamelConstructorTarget = (expr: Expr | undefined): boolean => {
   }
 
   return isUpperCamelCase(head.value);
+};
+
+/**
+ * Accumulates siblings in a call-like expression.
+ */
+export const addSibling = (child: Expr, siblings: Expr[]) => {
+  const normalizedChild = unwrapSyntheticCall(child);
+  siblings.push(normalizedChild);
 };

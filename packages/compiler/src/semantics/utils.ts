@@ -1,5 +1,8 @@
-import type { Expr, Form, IdentifierAtom, Syntax } from "../parser/index.js";
 import {
+  Form,
+  type Expr,
+  type IdentifierAtom,
+  type Syntax,
   isBoolAtom,
   isFloatAtom,
   isForm,
@@ -51,6 +54,47 @@ export const parseIfBranches = (
   form: Form,
   context = "if expression"
 ): { branches: ParsedIfBranch[]; defaultBranch?: Expr } => {
+  const clauseEntries = form
+    .rest
+    .filter((entry): entry is Form => isForm(entry) && entry.calls(":"));
+
+  const hasLegacyLabels = clauseEntries.some((entry) => {
+    const labelExpr = entry.at(1);
+    return (
+      isIdentifierWithValue(labelExpr, "then") ||
+      isIdentifierWithValue(labelExpr, "elif")
+    );
+  });
+
+  if (!hasLegacyLabels && clauseEntries.length > 0) {
+    const branches: ParsedIfBranch[] = [];
+    let defaultBranch: Expr | undefined;
+
+    clauseEntries.forEach((entry) => {
+      const conditionExpr = entry.at(1);
+      const valueExpr = entry.at(2);
+      if (!conditionExpr) {
+        throw new Error(`${context} clause is missing a condition`);
+      }
+      if (!valueExpr) {
+        throw new Error(`${context} clause is missing a value`);
+      }
+
+      if (isIdentifierWithValue(conditionExpr, "else")) {
+        defaultBranch = valueExpr;
+        return;
+      }
+
+      branches.push({ condition: conditionExpr, value: valueExpr });
+    });
+
+    if (!branches.length) {
+      throw new Error(`${context} missing then branch`);
+    }
+
+    return { branches, defaultBranch };
+  }
+
   const conditionExpr = form.at(1);
   if (!conditionExpr) {
     throw new Error(`${context} missing condition`);
@@ -59,6 +103,30 @@ export const parseIfBranches = (
   const branches: ParsedIfBranch[] = [];
   let defaultBranch: Expr | undefined;
   let pendingCondition: Expr | undefined = conditionExpr;
+
+  const extractInlineThenBranch = (
+    condition: Expr
+  ): { condition: Expr; value: Expr } | undefined => {
+    if (!isForm(condition)) return undefined;
+    const last = condition.last;
+    if (!isForm(last)) return undefined;
+
+    const maybeClause = last.last;
+    if (!isForm(maybeClause) || !maybeClause.calls(":")) return undefined;
+    const clauseLabel = maybeClause.at(1);
+    const clauseValue = maybeClause.at(2);
+    if (!isIdentifierWithValue(clauseLabel, "then") || !clauseValue) {
+      return undefined;
+    }
+
+    const trimmedLast = last.slice(0, -1).unwrap();
+    const rebuiltCondition = new Form({
+      location: condition.location?.clone(),
+      elements: [...condition.toArray().slice(0, -1), trimmedLast],
+    }).unwrap();
+
+    return { condition: rebuiltCondition, value: clauseValue };
+  };
 
   for (let i = 2; i < form.length; i += 1) {
     const branch = form.at(i);
@@ -81,7 +149,14 @@ export const parseIfBranches = (
           `${context} requires 'then:' after a condition before 'elif:'`
         );
       }
-      pendingCondition = expectLabeledExpr(branch, "elif", context);
+      const elifCondition = expectLabeledExpr(branch, "elif", context);
+      const inlineThen = extractInlineThenBranch(elifCondition);
+      if (inlineThen) {
+        branches.push(inlineThen);
+        pendingCondition = undefined;
+        continue;
+      }
+      pendingCondition = elifCondition;
       continue;
     }
 
