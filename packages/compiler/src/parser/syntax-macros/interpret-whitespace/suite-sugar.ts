@@ -2,11 +2,10 @@ import {
   Expr,
   Form,
   FormInitElements,
-  IdentifierAtom,
   isIdentifierAtom,
 } from "../../ast/index.js";
 import * as p from "../../ast/predicates.js";
-import { isContinuationOp, isOp } from "../../grammar.js";
+import { isContinuationOp } from "../../grammar.js";
 
 const isNamedArg = (v: Form) => p.atomEq(v.at(1), ":");
 
@@ -53,159 +52,6 @@ const isArgLikeSuiteEntry = (expr: Expr): boolean =>
 export const suiteIsArgList = (children: Expr[]): boolean => {
   const entries = children.slice(1).filter((entry) => !isIgnorableSuiteEntry(entry));
   return entries.length > 0 && entries.every(isArgLikeSuiteEntry);
-};
-
-/**
- * Clause-style labeled suite sugar (multiline only).
- *
- * Within a call that has already used an indented-suite labeled arg (the "suite label"),
- * allow subsequent arguments written as:
- *
- *   label <expr>:
- *     <suite>
- *
- * to desugar into:
- *
- *   label: <expr>
- *   <suite_label>:
- *     <suite>
- */
-export const expandClauseStyleLabeledSuite = (
-  expr: Expr,
-  siblings: Expr[]
-): Expr[] | undefined => {
-  if (!p.isForm(expr)) return undefined;
-  if (isNamedArg(expr)) return undefined;
-
-  const first = expr.at(0);
-  if (!isIdentifierAtom(first) || isOp(first) || first.isQuoted) {
-    return undefined;
-  }
-
-  const elements = expr.toArray();
-  if (elements.length < 3) return undefined;
-
-  const suiteBlockIndex = (() => {
-    for (let i = elements.length - 1; i >= 0; i -= 1) {
-      const entry = elements[i];
-      if (p.isForm(entry) && (entry as Form).calls("block")) {
-        return i;
-      }
-    }
-    return undefined;
-  })();
-
-  if (typeof suiteBlockIndex !== "number" || suiteBlockIndex < 2) {
-    return undefined;
-  }
-
-  const block = elements[suiteBlockIndex] as Form;
-  const colon = elements.at(suiteBlockIndex - 1);
-  const hasExplicitColon =
-    typeof colon !== "undefined" && p.atomEq(colon, ":");
-
-  const previous = siblings.at(-1);
-  const suiteLabel = previous ? findTrailingSuiteLabel(previous) : undefined;
-  if (!suiteLabel) return undefined;
-  if (containsExplicitSuiteLabel(expr, suiteLabel)) {
-    return undefined;
-  }
-
-  const conditionTokens = elements.slice(
-    1,
-    suiteBlockIndex - (hasExplicitColon ? 1 : 0)
-  );
-  if (conditionTokens.length === 0) return undefined;
-
-  const conditionExpr =
-    conditionTokens.length === 1
-      ? conditionTokens[0]!
-      : new Form(conditionTokens);
-
-  const syntheticColon = new IdentifierAtom({
-    location: first.location?.clone(),
-    value: ":",
-  });
-
-  const suiteColon =
-    hasExplicitColon && isIdentifierAtom(colon)
-      ? colon.clone()
-      : new IdentifierAtom({ location: first.location?.clone(), value: ":" });
-
-  const clauseArg = new Form({
-    location: first.location?.clone(),
-    elements: [first.clone(), syntheticColon, conditionExpr],
-  });
-
-  const suiteArg = new Form({
-    location: suiteLabel.location?.clone(),
-    elements: [suiteLabel.clone(), suiteColon, block],
-  });
-
-  const trailing = elements.slice(suiteBlockIndex + 1);
-  return [clauseArg, suiteArg, ...trailing];
-};
-
-const containsExplicitSuiteLabel = (
-  expr: Form,
-  suiteLabel: IdentifierAtom
-): boolean => {
-  const elements = expr.toArray();
-  for (let i = 0; i < elements.length - 2; i += 1) {
-    const label = elements[i];
-    const maybeColon = elements[i + 1];
-    const value = elements[i + 2];
-    if (
-      isIdentifierAtom(label) &&
-      !label.isQuoted &&
-      label.value === suiteLabel.value &&
-      p.atomEq(maybeColon, ":") &&
-      p.isForm(value) &&
-      (value as Form).calls("block")
-    ) {
-      return true;
-    }
-  }
-  return false;
-};
-
-const findTrailingSuiteLabel = (expr: Expr): IdentifierAtom | undefined => {
-  if (!p.isForm(expr)) return undefined;
-
-  const elements = expr.toArray();
-
-  let lastSuiteLabel: IdentifierAtom | undefined;
-
-  // Named-arg form: label: block(...)
-  elements.forEach((entry) => {
-    if (!p.isForm(entry) || !isNamedArg(entry)) return;
-    const label = entry.at(0);
-    const value = entry.at(2);
-    if (
-      isIdentifierAtom(label) &&
-      p.isForm(value) &&
-      (value as Form).calls("block")
-    ) {
-      lastSuiteLabel = label;
-    }
-  });
-
-  // Inline form: label : block(...)
-  for (let i = 0; i < elements.length - 2; i += 1) {
-    const label = elements[i];
-    const maybeColon = elements[i + 1];
-    const value = elements[i + 2];
-    if (
-      isIdentifierAtom(label) &&
-      p.atomEq(maybeColon, ":") &&
-      p.isForm(value) &&
-      (value as Form).calls("block")
-    ) {
-      lastSuiteLabel = label;
-    }
-  }
-
-  return lastSuiteLabel;
 };
 
 /**

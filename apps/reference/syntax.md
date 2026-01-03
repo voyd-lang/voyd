@@ -14,7 +14,6 @@ language syntax supports:
 -   Greedy identifiers
 -   Macro expansion
 -   Tuple, Struct, Array, and Dictionary literals etc
--   Clause-style labeled suites (multiline only)
 -   Nominal object initialization shorthand (`Type { ... }`)
 -   Pattern matching (`match`) and `if`-as-`match` shorthand
 
@@ -109,53 +108,6 @@ This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org
     (: then 3)
     (: else 5))
   ```
-
-4.  Clause-style labeled suite sugar (multiline only).
-
-  This is a general mechanism used to make “conditional clause” syntax feel
-  more natural while still being a uniform call + labeled-args language.
-
-  If a call has already established a “suite label” that takes an indented
-  suite (e.g. `then:`), then subsequent clauses can be written as:
-
-  ```voyd
-  label <expr>:
-    <suite>
-  ```
-
-  and desugar into:
-
-  ```voyd
-  label: <expr>
-  <suite_label>:
-    <suite>
-  ```
-
-  Example (`if`):
-
-  ```voyd
-  if x < 1 then:
-    10
-  elif x < 2:
-    20
-  else:
-    30
-
-  // Becomes (conceptually)
-  (if (< x 1)
-    (: then (block 10))
-    (: elif (< x 2))
-    (: then (block 20))
-    (: else (block 30)))
-  ```
-
-  Notes:
-
-  - Clause-style sugar is intentionally **disallowed on one-liners** to keep
-    parsing predictable.
-  - To avoid ambiguity with type annotations / assignments (e.g. `let x: T = 1`)
-    the clause condition portion rejects assignment-like operators (`=`, `:=`)
-    at the same list level.
 
 4.  Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special
   handling.

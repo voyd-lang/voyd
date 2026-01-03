@@ -72,15 +72,13 @@ test("it correctly handles the kitchen sink", async () => {
   expect(form).toMatchSnapshot();
 });
 
-test("it supports clause-style labeled suites (multiline only)", () => {
+test("it does not merge adjacent suite calls into clause-sugar args", () => {
   const sink = new CharStream(
     [
-      "if x < 1 then:",
-      "  10",
-      "elif x < 2:",
-      "  20",
-      "else:",
-      "  30",
+      "foo bar:",
+      "  hi()",
+      "foo baz:",
+      "  bye()",
     ].join("\n"),
     "test"
   );
@@ -88,39 +86,24 @@ test("it supports clause-style labeled suites (multiline only)", () => {
   expect(expandSyntaxMacros(readerOutput, [interpretWhitespace]).toJSON()).toEqual([
     "ast",
     [
-      "if",
-      "x",
-      "<",
-      "1",
-      "then",
+      "foo",
+      "bar",
       ":",
       [
         "block",
-        "10",
-      ],
-      [
-        "elif",
-        ":",
         [
-          "x",
-          "<",
-          "2",
+          "hi",
         ],
       ],
+    ],
+    [
+      "foo",
+      "baz",
+      ":",
       [
-        "then",
-        ":",
+        "block",
         [
-          "block",
-          "20",
-        ],
-      ],
-      [
-        "else",
-        ":",
-        [
-          "block",
-          "30",
+          "bye",
         ],
       ],
     ],
