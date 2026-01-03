@@ -241,7 +241,10 @@ const lowerFunctionTypeExpr = (
     if (!lowered) {
       throw new Error("function type parameter missing type");
     }
-    return isOptional ? wrapInOptionalTypeExpr({ inner: lowered, ctx, scope }) : lowered;
+    const type = isOptional
+      ? wrapInOptionalTypeExpr({ inner: lowered, ctx, scope })
+      : lowered;
+    return { type, optional: isOptional ? true : undefined };
   });
 
   const returnType = lowerTypeExpr(signature.returnType, ctx, scope);

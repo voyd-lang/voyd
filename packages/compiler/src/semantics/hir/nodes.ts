@@ -137,10 +137,15 @@ export interface HirIntersectionTypeExpr extends HirTypeExprBase {
   members: readonly HirTypeExpr[];
 }
 
+export interface HirFunctionTypeParameter {
+  type: HirTypeExpr;
+  optional?: boolean;
+}
+
 export interface HirFunctionTypeExpr extends HirTypeExprBase {
   typeKind: "function";
   typeParameters?: readonly HirTypeParameter[];
-  parameters: readonly HirTypeExpr[];
+  parameters: readonly HirFunctionTypeParameter[];
   returnType: HirTypeExpr;
   effectType?: HirTypeExpr;
 }

@@ -846,8 +846,11 @@ const typeExprKey = (
       const typeParamCount = expr.typeParameters?.length ?? 0;
       const params = expr.parameters
         .map(
-          (param) =>
-            typeExprKey(param, substitutions, visiting, selfType) ?? "_"
+          (param) => {
+            const resolved =
+              typeExprKey(param.type, substitutions, visiting, selfType) ?? "_";
+            return param.optional ? `${resolved}?` : resolved;
+          }
         )
         .join(",");
       const returnKey =

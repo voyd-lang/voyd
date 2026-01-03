@@ -831,9 +831,16 @@ const resolveFunctionTypeExpr = (
   if (expr.typeParameters && expr.typeParameters.length > 0) {
     throw new Error("function type parameters are not supported yet");
   }
-  const parameters = expr.parameters.map((param) =>
-    resolveTypeExpr(param, ctx, state, ctx.primitives.unknown, typeParams)
-  );
+  const parameters = expr.parameters.map((param) => ({
+    type: resolveTypeExpr(
+      param.type,
+      ctx,
+      state,
+      ctx.primitives.unknown,
+      typeParams
+    ),
+    optional: param.optional ?? false,
+  }));
   const returnType = resolveTypeExpr(
     expr.returnType,
     ctx,
@@ -845,7 +852,7 @@ const resolveFunctionTypeExpr = (
     resolveEffectAnnotation(expr.effectType, ctx, state) ??
     freshOpenEffectRow(ctx.effects);
   return ctx.arena.internFunction({
-    parameters: parameters.map((type) => ({ type, optional: false })),
+    parameters,
     returnType,
     effectRow,
   });

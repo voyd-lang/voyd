@@ -695,7 +695,7 @@ const visitTypeExpr = (
       visitTypeParameters(expr.typeParameters, validateType);
       expr.parameters.forEach((param, index) =>
         visitTypeExpr(
-          param,
+          param.type,
           validateType,
           `${context} parameter ${index + 1}`
         )
