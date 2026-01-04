@@ -114,7 +114,15 @@ export const compileObjectLiteralExpr = (
       );
       const getter = refCast(ctx.mod, accessor, sourceField.getterType!);
       const load = callRef(ctx.mod, getter, [pointer], sourceField.wasmType);
-      ops.push(ctx.mod.local.set(target.index, load));
+      const expectedTypeId = structInfo.fieldMap.get(sourceField.name)?.typeId;
+      const coerced = coerceValueToType({
+        value: load,
+        actualType: sourceField.typeId,
+        targetType: expectedTypeId,
+        ctx,
+        fnCtx,
+      });
+      ops.push(ctx.mod.local.set(target.index, coerced));
       initialized.add(sourceField.name);
     });
   });

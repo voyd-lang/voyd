@@ -63,6 +63,14 @@ pub fn test9_closure_without_arg() -> i32
   let f = (name: i32, middle?: i32) => work(name, middle)
   f(5)
 
+pub fn test10_optional_spread_wraps_some() -> i32
+  let s = { v: 5 }
+  let b = OptionalBox { ...s }
+  let v = b.v
+  match(v)
+    Some<i32>: v.value
+    None: 0
+
 pub fn main() -> i32
   test1_optional_obj_field() +
   test2_passed_optional_param() +
@@ -72,5 +80,5 @@ pub fn main() -> i32
   test6_pass_optional_object_for_label() +
   test7_skip_optional_labeled() +
   test8_closure_with_arg() +
-  test9_closure_without_arg()
-
+  test9_closure_without_arg() +
+  test10_optional_spread_wraps_some()
