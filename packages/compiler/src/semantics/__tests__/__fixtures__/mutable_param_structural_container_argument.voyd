@@ -1,0 +1,12 @@
+obj Foo {
+  x: i32
+}
+
+fn bump_from_container({ ~title: Foo }) -> void
+  title.x = title.x + 1
+
+pub fn main() -> void
+  let ~a = Foo { x: 1 }
+  let b = Foo { x: 1 }
+  bump_from_container({ title: a })
+  bump_from_container({ title: b })

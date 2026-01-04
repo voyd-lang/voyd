@@ -548,6 +548,25 @@ const validateCallArgs = (
               state,
               `call argument ${cursor + 1}`
             );
+            const mutabilityExprId = (() => {
+              if (typeof arg.exprId !== "number") {
+                return undefined;
+              }
+              const argExpr = ctx.hir.expressions.get(arg.exprId);
+              if (argExpr?.exprKind !== "object-literal") {
+                return arg.exprId;
+              }
+              const directField = argExpr.entries.find(
+                (entry) => entry.kind === "field" && entry.name === runParam.label
+              );
+              return directField?.kind === "field" ? directField.value : arg.exprId;
+            })();
+            ensureMutableArgument({
+              arg: { ...arg, type: match.type, exprId: mutabilityExprId ?? arg.exprId },
+              param: runParam,
+              index: cursor,
+              ctx,
+            });
             cursor += 1;
             continue;
           }
