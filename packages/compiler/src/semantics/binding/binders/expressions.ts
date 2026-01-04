@@ -422,7 +422,7 @@ const declareLambdaParam = (
     return;
   }
 
-  if (isForm(param) && param.calls(":")) {
+  if (isForm(param) && (param.calls(":") || param.calls("?:"))) {
     const nameExpr = param.at(1);
     const { target, bindingKind } = unwrapMutablePattern(nameExpr);
     if (!isIdentifierAtom(target)) {

@@ -165,6 +165,35 @@ describe("next codegen", () => {
     expect((main as () => number)()).toBe(3);
   });
 
+	  it("supports optional fields and parameters", () => {
+	    const instance = loadWasmInstance("optional_syntax.voyd");
+	    const {
+	      test1_optional_obj_field,
+	      test2_passed_optional_param,
+	      test3_not_passed_optional_param,
+	      test4_pass_optional_label_arg,
+	      test5_no_pass_optional_label,
+	      test6_pass_optional_object_for_label,
+	      test7_skip_optional_labeled,
+	      test8_closure_with_arg,
+	      test9_closure_without_arg,
+	      test10_optional_spread_wraps_some,
+	      main,
+	    } = instance.exports as Record<string, unknown>;
+
+    expect((test1_optional_obj_field as () => number)()).toBe(7);
+    expect((test2_passed_optional_param as () => number)()).toBe(2);
+    expect((test3_not_passed_optional_param as () => number)()).toBe(1);
+    expect((test4_pass_optional_label_arg as () => number)()).toBe(2);
+    expect((test5_no_pass_optional_label as () => number)()).toBe(1);
+    expect((test6_pass_optional_object_for_label as () => number)()).toBe(1);
+	    expect((test7_skip_optional_labeled as () => number)()).toBe(3);
+	    expect((test8_closure_with_arg as () => number)()).toBe(2);
+	    expect((test9_closure_without_arg as () => number)()).toBe(1);
+	    expect((test10_optional_spread_wraps_some as () => number)()).toBe(5);
+	    expect((main as () => number)()).toBe(25);
+	  });
+
   it("uses return_call for tail-recursive functions", () => {
     const ast = loadAst("tail_fib.voyd");
     const semantics = semanticsPipeline(ast);

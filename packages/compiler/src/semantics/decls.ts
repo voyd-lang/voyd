@@ -19,6 +19,7 @@ export interface ParameterDecl {
   id: ParameterDeclId;
   name: string;
   label?: string;
+  optional?: boolean;
   symbol: SymbolId;
   ast?: Syntax;
   typeExpr?: Expr;
@@ -82,6 +83,7 @@ export interface ObjectFieldDecl {
   ast?: Syntax;
   visibility: HirVisibility;
   typeExpr: Expr;
+  optional?: boolean;
 }
 
 export interface ObjectDecl {

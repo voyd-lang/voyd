@@ -16,12 +16,14 @@ import { compileIntrinsicCall } from "../intrinsics.js";
 import {
   requiresStructuralConversion,
   coerceValueToType,
+  loadStructuralField,
 } from "../structural.js";
 import {
   getClosureTypeInfo,
   getExprBinaryenType,
   getRequiredExprType,
   getFunctionRefType,
+  getStructuralTypeInfo,
   wasmTypeFor,
 } from "../types.js";
 import { allocateTempLocal } from "../locals.js";
@@ -35,6 +37,7 @@ import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
 import type { GroupContinuationCfg } from "../effects/continuation-cfg.js";
 import { effectsFacade } from "../effects/facade.js";
+import { compileOptionalNoneValue } from "../optionals.js";
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsRuntime.handlerFrameType;
@@ -583,13 +586,217 @@ const compileCallArguments = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef[] => {
-  return compileCallArgExpressionsWithTemps({
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  return compileCallArgumentsForParams(call, meta.parameters, ctx, fnCtx, compileExpr, {
+    typeInstanceKey,
+  });
+};
+
+type CallParam = {
+  typeId: TypeId;
+  label?: string;
+  optional?: boolean;
+  name?: string;
+};
+
+const compileCallArgumentsForParams = (
+  call: HirCallExpr,
+  params: readonly CallParam[],
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  compileExpr: ExpressionCompiler,
+  options: { typeInstanceKey: string | undefined }
+): binaryen.ExpressionRef[] => {
+  const { typeInstanceKey } = options;
+  const calleeName = (() => {
+    const callee = ctx.hir.expressions.get(call.callee);
+    if (!callee) return "<unknown>";
+    if (callee.exprKind === "identifier") {
+      return ctx.symbolTable.getSymbol(callee.symbol).name;
+    }
+    if (callee.exprKind === "overload-set") {
+      return callee.name;
+    }
+    return callee.exprKind;
+  })();
+  const fail = (detail: string): never => {
+    throw new Error(`call argument count mismatch for ${calleeName}: ${detail}`);
+  };
+  const expectedParamLabel = (param: CallParam): string | undefined =>
+    param.label ?? param.name;
+  const labelsCompatible = (param: CallParam, argLabel: string | undefined): boolean => {
+    const expected = expectedParamLabel(param);
+    if (!expected) {
+      return argLabel === undefined;
+    }
+    if (param.label) {
+      return argLabel === expected;
+    }
+    return argLabel === undefined || argLabel === expected;
+  };
+
+  type PlanEntry =
+    | { kind: "direct"; argIndex: number }
+    | { kind: "missing"; targetTypeId: TypeId }
+    | {
+        kind: "container-field";
+        containerArgIndex: number;
+        fieldName: string;
+        targetTypeId: TypeId;
+      };
+
+  const plan: PlanEntry[] = [];
+  const expectedTypeByArgIndex = new Map<number, TypeId>();
+  let argIndex = 0;
+  let paramIndex = 0;
+
+  while (paramIndex < params.length) {
+    const param = params[paramIndex]!;
+    const arg = call.args[argIndex];
+
+    if (!arg) {
+      if (param.optional) {
+        plan.push({ kind: "missing", targetTypeId: param.typeId });
+        paramIndex += 1;
+        continue;
+      }
+      fail("missing required argument");
+    }
+
+    if (param.label && arg.label === undefined) {
+      const containerTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
+      const containerInfo = getStructuralTypeInfo(containerTypeId, ctx);
+      if (containerInfo) {
+        let cursor = paramIndex;
+        while (cursor < params.length) {
+          const runParam = params[cursor]!;
+          if (!runParam.label) {
+            break;
+          }
+          const field = containerInfo.fieldMap.get(runParam.label);
+          if (field) {
+            plan.push({
+              kind: "container-field",
+              containerArgIndex: argIndex,
+              fieldName: runParam.label,
+              targetTypeId: runParam.typeId,
+            });
+            cursor += 1;
+            continue;
+          }
+          if (runParam.optional) {
+            plan.push({ kind: "missing", targetTypeId: runParam.typeId });
+            cursor += 1;
+            continue;
+          }
+          fail(`missing required labeled argument ${runParam.label}`);
+        }
+        if (cursor > paramIndex) {
+          paramIndex = cursor;
+          argIndex += 1;
+          continue;
+        }
+      }
+    }
+
+    if (labelsCompatible(param, arg.label)) {
+      plan.push({ kind: "direct", argIndex });
+      expectedTypeByArgIndex.set(argIndex, param.typeId);
+      paramIndex += 1;
+      argIndex += 1;
+      continue;
+    }
+
+    if (param.optional) {
+      plan.push({ kind: "missing", targetTypeId: param.typeId });
+      paramIndex += 1;
+      continue;
+    }
+
+    fail("argument/parameter mismatch");
+  }
+
+  if (argIndex < call.args.length) {
+    fail(`received ${call.args.length - argIndex} extra argument(s)`);
+  }
+
+  const compiledArgs = compileCallArgExpressionsWithTemps({
     callId: call.id,
     args: call.args,
-    expectedTypeIdAt: (index) => meta.paramTypeIds[index],
+    expectedTypeIdAt: (index) => expectedTypeByArgIndex.get(index),
     ctx,
     fnCtx,
     compileExpr,
+  });
+
+  const containerTemps = new Map<number, ReturnType<typeof allocateTempLocal>>();
+  const initializedContainers = new Set<number>();
+
+  return plan.map((entry) => {
+    if (entry.kind === "direct") {
+      return compiledArgs[entry.argIndex]!;
+    }
+    if (entry.kind === "missing") {
+      return compileOptionalNoneValue({
+        targetTypeId: entry.targetTypeId,
+        ctx,
+        fnCtx,
+      });
+    }
+
+    const containerArg = call.args[entry.containerArgIndex]!;
+    const containerTypeId = getRequiredExprType(
+      containerArg.expr,
+      ctx,
+      typeInstanceKey
+    );
+    const containerInfo = getStructuralTypeInfo(containerTypeId, ctx);
+    if (!containerInfo) {
+      throw new Error("labeled-argument container requires a structural value");
+    }
+    const field = containerInfo.fieldMap.get(entry.fieldName);
+    if (!field) {
+      throw new Error(`missing field ${entry.fieldName} in labeled-argument container`);
+    }
+
+    const existingTemp = containerTemps.get(entry.containerArgIndex);
+    const temp =
+      existingTemp ??
+      (() => {
+        const created = allocateTempLocal(containerInfo.interfaceType, fnCtx);
+        containerTemps.set(entry.containerArgIndex, created);
+        return created;
+      })();
+
+    const pointer = () =>
+      ctx.mod.local.get(temp.index, containerInfo.interfaceType);
+    const loaded = loadStructuralField({
+      structInfo: containerInfo,
+      field,
+      pointer: pointer(),
+      ctx,
+    });
+    const coerced = coerceValueToType({
+      value: loaded,
+      actualType: field.typeId,
+      targetType: entry.targetTypeId,
+      ctx,
+      fnCtx,
+    });
+
+    if (initializedContainers.has(entry.containerArgIndex)) {
+      return coerced;
+    }
+
+    initializedContainers.add(entry.containerArgIndex);
+    return ctx.mod.block(
+      null,
+      [
+        ctx.mod.local.set(temp.index, compiledArgs[entry.containerArgIndex]!),
+        coerced,
+      ],
+      wasmTypeFor(entry.targetTypeId, ctx)
+    );
   });
 };
 
@@ -602,13 +809,14 @@ const compileClosureArguments = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef[] => {
-  return compileCallArgExpressionsWithTemps({
-    callId: call.id,
-    args: call.args,
-    expectedTypeIdAt: (index) => desc.parameters[index]?.type,
-    ctx,
-    fnCtx,
-    compileExpr,
+  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const params: CallParam[] = desc.parameters.map((param) => ({
+    typeId: param.type,
+    label: param.label,
+    optional: param.optional,
+  }));
+  return compileCallArgumentsForParams(call, params, ctx, fnCtx, compileExpr, {
+    typeInstanceKey,
   });
 };
 
@@ -636,10 +844,6 @@ const compileClosureCall = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
-  if (expr.args.length !== calleeDesc.parameters.length) {
-    throw new Error("call argument count mismatch");
-  }
-
   const base = getClosureTypeInfo(calleeTypeId, ctx);
   const effectful =
     typeof calleeDesc.effectRow === "number" &&
@@ -744,7 +948,9 @@ const compileCurriedClosureCall = ({
 
     const paramCount = currentDesc.parameters.length;
     const slice = expr.args.slice(argIndex, argIndex + paramCount);
-    if (slice.length !== paramCount) {
+    const isFinalSlice = argIndex + paramCount >= expr.args.length;
+    const missingParams = slice.length < paramCount ? currentDesc.parameters.slice(slice.length) : [];
+    if (slice.length !== paramCount && (!isFinalSlice || missingParams.some((param) => !param.optional))) {
       throw new Error("call argument count mismatch");
     }
 
@@ -777,7 +983,8 @@ const compileCurriedClosureCall = ({
     const returnTypeId =
       currentDesc.kind === "function" ? currentDesc.returnType : calleeTypeId;
     const returnWasmType = wasmTypeFor(returnTypeId, ctx);
-    const args = slice.map((arg, index) => {
+    const args = [
+      ...slice.map((arg, index) => {
       const expectedTypeId = currentDesc.parameters[index]?.type;
       const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
       const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
@@ -788,7 +995,11 @@ const compileCurriedClosureCall = ({
         ctx,
         fnCtx,
       });
-    });
+    }),
+      ...missingParams.map((param) =>
+        compileOptionalNoneValue({ targetTypeId: param.type, ctx, fnCtx })
+      ),
+    ];
 
     const callArgs = effectful
       ? [
@@ -804,12 +1015,11 @@ const compileCurriedClosureCall = ({
       base.resultType
     );
 
-    const isFinalSlice = argIndex + paramCount >= expr.args.length;
     const lowered = effectful
       ? ctx.effectsBackend.lowerEffectfulCallResult({
-          callExpr: call,
-          callId: expr.id,
-          returnTypeId,
+        callExpr: call,
+        callId: expr.id,
+        returnTypeId,
           expectedResultTypeId: isFinalSlice ? expectedResultTypeId : undefined,
           tailPosition: tailPosition && isFinalSlice,
           typeInstanceKey,

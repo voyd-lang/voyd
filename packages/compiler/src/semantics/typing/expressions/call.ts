@@ -461,36 +461,284 @@ const labelsCompatible = (
   return argLabel === undefined || argLabel === expected;
 };
 
+const optionalNoneMember = (type: TypeId, ctx: TypingContext): TypeId | undefined => {
+  const desc = ctx.arena.get(type);
+  if (desc.kind !== "union") {
+    return undefined;
+  }
+  for (const member of desc.members) {
+    const nominal = getNominalComponent(member, ctx);
+    if (typeof nominal !== "number") {
+      continue;
+    }
+    const nominalDesc = ctx.arena.get(nominal);
+    if (nominalDesc.kind !== "nominal-object") {
+      continue;
+    }
+    const name = nominalDesc.name ?? getSymbolName(nominalDesc.owner, ctx);
+    if (name === "None") {
+      return member;
+    }
+  }
+  return undefined;
+};
+
 const validateCallArgs = (
   args: readonly Arg[],
   params: readonly ParamSignature[],
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  callSpan?: SourceSpan
 ): void => {
-  if (args.length !== params.length) {
-    throw new Error("call argument count mismatch");
+  const span = callSpan ?? ctx.hir.module.span;
+
+  let argIndex = 0;
+  let paramIndex = 0;
+
+  while (paramIndex < params.length) {
+    const param = params[paramIndex]!;
+    const arg = args[argIndex];
+
+    if (!arg) {
+      if (param.optional) {
+        const noneType = optionalNoneMember(param.type, ctx);
+        if (typeof noneType !== "number") {
+          throw new Error("optional parameter type must include None");
+        }
+        ensureTypeMatches(
+          noneType,
+          param.type,
+          ctx,
+          state,
+          `call argument ${paramIndex + 1}`
+        );
+        paramIndex += 1;
+        continue;
+      }
+
+      emitDiagnostic({
+        ctx,
+        code: "TY0021",
+        params: {
+          kind: "call-missing-argument",
+          paramName: param.name ?? param.label ?? `parameter ${paramIndex + 1}`,
+        },
+        span,
+      });
+      throw new Error("call argument count mismatch");
+    }
+
+    if (param.label && arg.label === undefined) {
+      const structuralFields = getStructuralFields(arg.type, ctx, state);
+      if (structuralFields) {
+        let cursor = paramIndex;
+        while (cursor < params.length) {
+          const runParam = params[cursor]!;
+          if (!runParam.label) {
+            break;
+          }
+          const match = structuralFields.find(
+            (field) => field.name === runParam.label
+          );
+          if (match) {
+            ensureTypeMatches(
+              match.type,
+              runParam.type,
+              ctx,
+              state,
+              `call argument ${cursor + 1}`
+            );
+            const mutabilityExprId = (() => {
+              if (typeof arg.exprId !== "number") {
+                return undefined;
+              }
+              const argExpr = ctx.hir.expressions.get(arg.exprId);
+              if (argExpr?.exprKind !== "object-literal") {
+                return arg.exprId;
+              }
+              const directField = argExpr.entries.find(
+                (entry) => entry.kind === "field" && entry.name === runParam.label
+              );
+              return directField?.kind === "field" ? directField.value : arg.exprId;
+            })();
+            ensureMutableArgument({
+              arg: { ...arg, type: match.type, exprId: mutabilityExprId ?? arg.exprId },
+              param: runParam,
+              index: cursor,
+              ctx,
+            });
+            cursor += 1;
+            continue;
+          }
+
+          if (runParam.optional) {
+            const noneType = optionalNoneMember(runParam.type, ctx);
+            if (typeof noneType !== "number") {
+              throw new Error("optional parameter type must include None");
+            }
+            ensureTypeMatches(
+              noneType,
+              runParam.type,
+              ctx,
+              state,
+              `call argument ${cursor + 1}`
+            );
+            cursor += 1;
+            continue;
+          }
+
+          emitDiagnostic({
+            ctx,
+            code: "TY0021",
+            params: { kind: "call-missing-labeled-argument", label: runParam.label },
+            span,
+          });
+          throw new Error("call argument count mismatch");
+        }
+
+        if (cursor > paramIndex) {
+          paramIndex = cursor;
+          argIndex += 1;
+          continue;
+        }
+      }
+    }
+
+    if (labelsCompatible(param, arg.label)) {
+      ensureTypeMatches(
+        arg.type,
+        param.type,
+        ctx,
+        state,
+        `call argument ${paramIndex + 1}`
+      );
+      ensureMutableArgument({ arg, param, index: paramIndex, ctx });
+      argIndex += 1;
+      paramIndex += 1;
+      continue;
+    }
+
+    if (param.optional) {
+      const noneType = optionalNoneMember(param.type, ctx);
+      if (typeof noneType !== "number") {
+        throw new Error("optional parameter type must include None");
+      }
+      ensureTypeMatches(
+        noneType,
+        param.type,
+        ctx,
+        state,
+        `call argument ${paramIndex + 1}`
+      );
+      paramIndex += 1;
+      continue;
+    }
+
+    const expectedLabel = expectedParamLabel(param) ?? "no label";
+    const actualLabel = arg.label ?? "no label";
+    throw new Error(
+      `call argument ${
+        paramIndex + 1
+      } label mismatch: expected ${expectedLabel}, got ${actualLabel}`
+    );
   }
 
-  args.forEach((arg, index) => {
-    const param = params[index]!;
-    if (!labelsCompatible(param, arg.label)) {
-      const expectedLabel = expectedParamLabel(param) ?? "no label";
-      const actualLabel = arg.label ?? "no label";
-      throw new Error(
-        `call argument ${
-          index + 1
-        } label mismatch: expected ${expectedLabel}, got ${actualLabel}`
-      );
-    }
-    ensureTypeMatches(
-      arg.type,
-      param.type,
+  if (argIndex < args.length) {
+    emitDiagnostic({
       ctx,
-      state,
-      `call argument ${index + 1}`
-    );
-    ensureMutableArgument({ arg, param, index, ctx });
-  });
+      code: "TY0021",
+      params: {
+        kind: "call-extra-arguments",
+        extra: args.length - argIndex,
+      },
+      span,
+    });
+    throw new Error("call argument count mismatch");
+  }
+};
+
+const callArgumentsSatisfyParams = ({
+  args,
+  params,
+  ctx,
+  state,
+}: {
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  let argIndex = 0;
+  let paramIndex = 0;
+
+  while (paramIndex < params.length) {
+    const param = params[paramIndex]!;
+    const arg = args[argIndex];
+
+    if (!arg) {
+      return params
+        .slice(paramIndex)
+        .every((remaining) => Boolean(remaining.optional));
+    }
+
+    if (param.label && arg.label === undefined) {
+      const structuralFields = getStructuralFields(arg.type, ctx, state);
+      if (structuralFields) {
+        let cursor = paramIndex;
+        while (cursor < params.length) {
+          const runParam = params[cursor]!;
+          if (!runParam.label) {
+            break;
+          }
+          const match = structuralFields.find(
+            (field) => field.name === runParam.label
+          );
+          if (match) {
+            if (
+              match.type !== ctx.primitives.unknown &&
+              !typeSatisfies(match.type, runParam.type, ctx, state)
+            ) {
+              return false;
+            }
+            cursor += 1;
+            continue;
+          }
+          if (runParam.optional) {
+            cursor += 1;
+            continue;
+          }
+          return false;
+        }
+
+        if (cursor > paramIndex) {
+          paramIndex = cursor;
+          argIndex += 1;
+          continue;
+        }
+      }
+    }
+
+    if (labelsCompatible(param, arg.label)) {
+      if (
+        arg.type !== ctx.primitives.unknown &&
+        !typeSatisfies(arg.type, param.type, ctx, state)
+      ) {
+        return false;
+      }
+      paramIndex += 1;
+      argIndex += 1;
+      continue;
+    }
+
+    if (param.optional) {
+      paramIndex += 1;
+      continue;
+    }
+
+    return false;
+  }
+
+  return argIndex === args.length;
 };
 
 const ensureMutableArgument = ({
@@ -507,11 +755,11 @@ const ensureMutableArgument = ({
   if (param.bindingKind !== "mutable-ref") {
     return;
   }
+  if (typeof arg.exprId !== "number") {
+    return;
+  }
 
-  const argExpr =
-    typeof arg.exprId === "number"
-      ? ctx.hir.expressions.get(arg.exprId)
-      : undefined;
+  const argExpr = ctx.hir.expressions.get(arg.exprId);
   if (argExpr?.exprKind === "call") {
     const calleeExpr = ctx.hir.expressions.get(argExpr.callee);
     if (calleeExpr?.exprKind === "identifier") {
@@ -642,7 +890,7 @@ const resolveCurriedCallReturnType = ({
     }
 
     const segment = remainingArgs.slice(0, parameters.length);
-    validateCallArgs(segment, parameters, ctx, state);
+    validateCallArgs(segment, parameters, ctx, state, callSpan);
 
     remainingArgs = remainingArgs.slice(parameters.length);
     if (remainingArgs.length === 0) {
@@ -708,7 +956,8 @@ const typeFunctionCall = ({
       ctx,
     }) ?? instantiation.parameters;
 
-  validateCallArgs(args, adjustedParameters, ctx, state);
+  const callSpan = ctx.hir.expressions.get(callId)?.span;
+  validateCallArgs(args, adjustedParameters, ctx, state, callSpan);
 
   if (typeof calleeExprId === "number") {
     const calleeType = ctx.arena.internFunction({
@@ -1217,19 +1466,7 @@ const resolveTraitDispatchOverload = ({
         calleeSymbol: symbol,
         ctx,
       }) ?? signature.parameters;
-    if (adjustedParams.length !== args.length) {
-      return false;
-    }
-    return adjustedParams.every((param, index) => {
-      const arg = args[index];
-      if (!arg || !labelsCompatible(param, arg.label)) {
-        return false;
-      }
-      if (arg.type === ctx.primitives.unknown) {
-        return true;
-      }
-      return typeSatisfies(arg.type, param.type, ctx, state);
-    });
+    return callArgumentsSatisfyParams({ args, params: adjustedParams, ctx, state });
   });
 
   if (!candidate) {
@@ -1253,7 +1490,7 @@ const resolveTraitDispatchOverload = ({
     parameters: params.map((param) => ({
       type: param.type,
       label: param.label,
-      optional: false,
+      optional: param.optional ?? false,
     })),
     returnType: candidate.signature.returnType,
     effectRow,
@@ -1280,7 +1517,7 @@ const matchesOverloadSignature = (
   ctx: TypingContext,
   state: TypingState
 ): boolean => {
-  if (signature.parameters.length !== args.length) {
+  if (!callArgumentsSatisfyParams({ args, params: signature.parameters, ctx, state })) {
     return false;
   }
 
@@ -1295,18 +1532,7 @@ const matchesOverloadSignature = (
     }
   });
 
-  return signature.parameters.every((param, index) => {
-    const arg = args[index];
-    if (!labelsCompatible(param, arg.label)) {
-      return false;
-    }
-
-    if (arg.type === ctx.primitives.unknown) {
-      return true;
-    }
-
-    return typeSatisfies(arg.type, param.type, ctx, state);
-  });
+  return true;
 };
 
 const typeIntrinsicCall = (

@@ -1,0 +1,18 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn expects(opt: Optional<i32>) -> i32
+  match(opt)
+    Some<i32>:
+      1
+    None:
+      0
+
+pub fn main() -> i32
+  expects()
+

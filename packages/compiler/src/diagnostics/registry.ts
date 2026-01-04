@@ -105,6 +105,10 @@ type DiagnosticParamsMap = {
   TY0018: { kind: "effect-generic-mismatch"; operation: string; message: string };
   TY0019: { kind: "effect-handler-overload"; operation: string; message: string };
   TY0020: { kind: "ambiguous-nominal-match-pattern"; typeName: string };
+  TY0021:
+    | { kind: "call-missing-argument"; paramName: string }
+    | { kind: "call-missing-labeled-argument"; label: string }
+    | { kind: "call-extra-arguments"; extra: number };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -362,6 +366,22 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0020"]>,
+  TY0021: {
+    code: "TY0021",
+    message: (params) => {
+      switch (params.kind) {
+        case "call-missing-argument":
+          return `missing required call argument for ${params.paramName}`;
+        case "call-missing-labeled-argument":
+          return `missing required labeled call argument ${params.label}`;
+        case "call-extra-arguments":
+          return `call has ${params.extra} extra argument(s)`;
+      }
+      return exhaustive(params);
+    },
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0021"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

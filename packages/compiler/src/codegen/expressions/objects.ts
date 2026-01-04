@@ -17,7 +17,8 @@ import type {
 } from "../context.js";
 import { LOOKUP_FIELD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
 import { allocateTempLocal } from "../locals.js";
-import { loadStructuralField } from "../structural.js";
+import { coerceValueToType, loadStructuralField } from "../structural.js";
+import { compileOptionalNoneValue } from "../optionals.js";
 import { getExprBinaryenType, getRequiredExprType, getStructuralTypeInfo } from "../types.js";
 
 export const compileObjectLiteralExpr = (
@@ -49,10 +50,20 @@ export const compileObjectLiteralExpr = (
           `object literal cannot set unknown field ${entry.name}`
         );
       }
+      const expectedTypeId = structInfo.fieldMap.get(entry.name)?.typeId;
+      const actualTypeId = getRequiredExprType(entry.value, ctx, typeInstanceKey);
+      const value = compileExpr({ exprId: entry.value, ctx, fnCtx });
+      const coerced = coerceValueToType({
+        value: value.expr,
+        actualType: actualTypeId,
+        targetType: expectedTypeId,
+        ctx,
+        fnCtx,
+      });
       ops.push(
         ctx.mod.local.set(
           binding.index,
-          compileExpr({ exprId: entry.value, ctx, fnCtx }).expr
+          coerced
         )
       );
       initialized.add(entry.name);
@@ -103,13 +114,39 @@ export const compileObjectLiteralExpr = (
       );
       const getter = refCast(ctx.mod, accessor, sourceField.getterType!);
       const load = callRef(ctx.mod, getter, [pointer], sourceField.wasmType);
-      ops.push(ctx.mod.local.set(target.index, load));
+      const expectedTypeId = structInfo.fieldMap.get(sourceField.name)?.typeId;
+      const coerced = coerceValueToType({
+        value: load,
+        actualType: sourceField.typeId,
+        targetType: expectedTypeId,
+        ctx,
+        fnCtx,
+      });
+      ops.push(ctx.mod.local.set(target.index, coerced));
       initialized.add(sourceField.name);
     });
   });
 
   structInfo.fields.forEach((field) => {
     if (!initialized.has(field.name)) {
+      if (field.optional) {
+        const binding = fieldTemps.get(field.name);
+        if (!binding) {
+          throw new Error(`missing binding for field ${field.name}`);
+        }
+        ops.push(
+          ctx.mod.local.set(
+            binding.index,
+            compileOptionalNoneValue({
+              targetTypeId: field.typeId,
+              ctx,
+              fnCtx,
+            })
+          )
+        );
+        initialized.add(field.name);
+        return;
+      }
       throw new Error(`missing initializer for field ${field.name}`);
     }
   });

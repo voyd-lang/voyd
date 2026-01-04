@@ -1,0 +1,20 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn call(cb: fn(middle?: i32) -> i32) -> i32
+  cb()
+
+fn impl(middle?: i32) -> i32
+  match(middle)
+    Some<i32>:
+      middle.value
+    None:
+      0
+
+pub fn main() -> i32
+  call(impl)

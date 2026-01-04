@@ -66,6 +66,7 @@ export const bindObjectDecl = (
         symbol: fieldSymbol,
         ast: field.ast,
         typeExpr: field.typeExpr,
+        optional: field.optional,
         visibility: inheritMemberVisibility({
           ownerVisibility: decl.visibility,
           modifier: field.memberModifier,

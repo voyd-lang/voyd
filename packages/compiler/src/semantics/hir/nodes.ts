@@ -137,10 +137,15 @@ export interface HirIntersectionTypeExpr extends HirTypeExprBase {
   members: readonly HirTypeExpr[];
 }
 
+export interface HirFunctionTypeParameter {
+  type: HirTypeExpr;
+  optional?: boolean;
+}
+
 export interface HirFunctionTypeExpr extends HirTypeExprBase {
   typeKind: "function";
   typeParameters?: readonly HirTypeParameter[];
-  parameters: readonly HirTypeExpr[];
+  parameters: readonly HirFunctionTypeParameter[];
   returnType: HirTypeExpr;
   effectType?: HirTypeExpr;
 }
@@ -228,6 +233,7 @@ export interface HirParameter {
   mutable: boolean;
   decl?: ParameterDeclId;
   label?: string;
+  optional?: boolean;
   type?: HirTypeExpr;
   defaultValue?: HirExprId;
 }
@@ -287,6 +293,7 @@ export interface HirObjectField {
   symbol: SymbolId;
   visibility: HirVisibility;
   type?: HirTypeExpr;
+  optional?: boolean;
   span: SourceSpan;
 }
 

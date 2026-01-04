@@ -44,6 +44,27 @@ describe("object mutability", () => {
     expect(caught.diagnostic.span.file).toContain("mutable_param_argument.voyd");
   });
 
+  it("rejects passing immutable objects via structural labeled containers", () => {
+    const ast = loadAst("mutable_param_structural_container_argument.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0004");
+    expect(caught.diagnostic.span.file).toContain(
+      "mutable_param_structural_container_argument.voyd"
+    );
+  });
+
   it("allows mutating fields on mutable object bindings", () => {
     expect(() =>
       semanticsPipeline(loadAst("mutable_object_field_assignment.voyd"))

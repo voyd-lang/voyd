@@ -243,6 +243,7 @@ export const typeLambdaExpr = (
   const finalParams = appliedParams.map((param) => ({
     label: param.label,
     type: ctx.arena.substitute(param.resolvedType, finalSubstitution),
+    optional: param.optional ?? false,
   }));
   const substitutedBodyType = ctx.arena.substitute(bodyType, finalSubstitution);
   const annotatedReturnApplied =
@@ -306,10 +307,10 @@ export const typeLambdaExpr = (
   ctx.effects.setExprEffect(expr.id, ctx.effects.emptyRow);
 
   return ctx.arena.internFunction({
-    parameters: finalParams.map(({ type, label }) => ({
+    parameters: finalParams.map(({ type, label, optional }) => ({
       type,
       label,
-      optional: false,
+      optional,
     })),
     returnType: finalReturn,
     effectRow,

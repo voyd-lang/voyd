@@ -62,6 +62,12 @@ export interface FunctionMetadata {
   paramTypes: readonly binaryen.Type[];
   resultType: binaryen.Type;
   paramTypeIds: readonly TypeId[];
+  parameters: readonly {
+    typeId: TypeId;
+    label?: string;
+    optional?: boolean;
+    name?: string;
+  }[];
   resultTypeId: TypeId;
   typeArgs: readonly TypeId[];
   instanceKey: string;
@@ -74,6 +80,7 @@ export interface StructuralFieldInfo {
   typeId: TypeId;
   wasmType: binaryen.Type;
   runtimeIndex: number;
+  optional?: boolean;
   hash: number;
   getterType?: binaryen.Type;
   setterType?: binaryen.Type;

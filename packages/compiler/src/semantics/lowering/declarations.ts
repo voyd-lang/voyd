@@ -1,7 +1,11 @@
 import { toSourceSpan } from "../utils.js";
 import { createLowerScopeStack } from "./context.js";
 import { lowerExpr } from "./expressions/index.js";
-import { lowerTypeExpr, lowerTypeParameters } from "./type-expressions.js";
+import {
+  lowerTypeExpr,
+  lowerTypeParameters,
+  wrapInOptionalTypeExpr,
+} from "./type-expressions.js";
 import type { LowerContext, ModuleDeclaration } from "./types.js";
 import type {
   BindingResult,
@@ -115,6 +119,7 @@ export const lowerFunctionDecl = (
   const scopes = createLowerScopeStack(fn.scope);
   const fallbackSyntax = fn.form ?? fn.body;
 
+  const currentScope = scopes.current();
   const parameters = fn.params.map((param) => ({
     decl: param.id,
     symbol: param.symbol,
@@ -125,13 +130,25 @@ export const lowerFunctionDecl = (
       span: toSourceSpan(param.ast ?? fallbackSyntax),
     } as const,
     label: param.label,
+    ...(param.optional ? { optional: true } : {}),
     span: toSourceSpan(param.ast ?? fallbackSyntax),
     mutable: false,
-    type: lowerTypeExpr(param.typeExpr, ctx, scopes.current()),
+    type: (() => {
+      const lowered = lowerTypeExpr(param.typeExpr, ctx, currentScope);
+      if (!param.optional) {
+        return lowered;
+      }
+      if (!lowered) {
+        throw new Error(
+          `optional parameter ${param.name} must declare a type annotation`
+        );
+      }
+      return wrapInOptionalTypeExpr({ inner: lowered, ctx, scope: currentScope });
+    })(),
   }));
 
   const bodyId = lowerExpr(fn.body, ctx, scopes);
-  const effectType = lowerTypeExpr(fn.effectTypeExpr, ctx, scopes.current());
+  const effectType = lowerTypeExpr(fn.effectTypeExpr, ctx, currentScope);
   const fnId = ctx.builder.addFunction({
     kind: "function",
     decl: fn.id,
@@ -142,7 +159,7 @@ export const lowerFunctionDecl = (
     ast: (fn.form ?? fn.body).syntaxId,
     span: toSourceSpan(fallbackSyntax),
     parameters,
-    returnType: lowerTypeExpr(fn.returnTypeExpr, ctx, scopes.current()),
+    returnType: lowerTypeExpr(fn.returnTypeExpr, ctx, currentScope),
     ...(effectType ? { effectType } : {}),
     body: bodyId,
     ...(fn.intrinsic ? { intrinsic: fn.intrinsic } : {}),
@@ -205,7 +222,17 @@ export const lowerObjectDecl = (
     name: field.name,
     symbol: field.symbol,
     visibility: field.visibility,
-    type: lowerTypeExpr(field.typeExpr, ctx, objectScope),
+    ...(field.optional ? { optional: true } : {}),
+    type: (() => {
+      const lowered = lowerTypeExpr(field.typeExpr, ctx, objectScope);
+      if (!field.optional) {
+        return lowered;
+      }
+      if (!lowered) {
+        throw new Error(`optional field ${field.name} must declare a type`);
+      }
+      return wrapInOptionalTypeExpr({ inner: lowered, ctx, scope: objectScope });
+    })(),
     span: toSourceSpan(field.ast ?? object.form),
   }));
 

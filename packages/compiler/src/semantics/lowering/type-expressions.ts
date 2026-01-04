@@ -18,6 +18,23 @@ import type { LowerContext } from "./types.js";
 import type { ScopeId, SymbolId } from "../ids.js";
 import { parseLambdaSignature } from "../lambda.js";
 
+export const wrapInOptionalTypeExpr = ({
+  inner,
+  ctx,
+  scope,
+}: {
+  inner: HirTypeExpr;
+  ctx: LowerContext;
+  scope: ScopeId;
+}): HirTypeExpr => ({
+  typeKind: "named",
+  ast: inner.ast,
+  span: inner.span,
+  path: ["Optional"],
+  symbol: resolveTypeSymbol("Optional", scope, ctx),
+  typeArguments: [inner],
+});
+
 export const lowerTypeExpr = (
   expr: Expr | undefined,
   ctx: LowerContext,
@@ -217,12 +234,17 @@ const lowerFunctionTypeExpr = (
   );
 
   const parameters = signature.parameters.map((param) => {
-    const paramTypeExpr = isForm(param) && param.calls(":") ? param.at(2) : param;
+    const isOptional = isForm(param) && param.calls("?:");
+    const paramTypeExpr =
+      isForm(param) && (param.calls(":") || isOptional) ? param.at(2) : param;
     const lowered = lowerTypeExpr(paramTypeExpr, ctx, scope);
     if (!lowered) {
       throw new Error("function type parameter missing type");
     }
-    return lowered;
+    const type = isOptional
+      ? wrapInOptionalTypeExpr({ inner: lowered, ctx, scope })
+      : lowered;
+    return { type, optional: isOptional ? true : undefined };
   });
 
   const returnType = lowerTypeExpr(signature.returnType, ctx, scope);

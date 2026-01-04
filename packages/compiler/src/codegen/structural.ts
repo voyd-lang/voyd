@@ -65,6 +65,91 @@ export const coerceValueToType = ({
 
   const targetDesc = ctx.typing.arena.get(targetType);
   const actualDesc = ctx.typing.arena.get(actualType);
+
+  const optionalUnionInfo = (() => {
+    if (targetDesc.kind !== "union") {
+      return undefined;
+    }
+    let someTypeId: TypeId | undefined;
+    let noneTypeId: TypeId | undefined;
+
+    const nominalNameOf = (typeId: TypeId): string | undefined => {
+      const desc = ctx.typing.arena.get(typeId);
+      if (desc.kind === "nominal-object") {
+        return desc.name ?? ctx.symbolTable.getSymbol(desc.owner).name;
+      }
+      if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+        const nominalDesc = ctx.typing.arena.get(desc.nominal);
+        if (nominalDesc.kind === "nominal-object") {
+          return nominalDesc.name ?? ctx.symbolTable.getSymbol(nominalDesc.owner).name;
+        }
+      }
+      return undefined;
+    };
+
+    for (const member of targetDesc.members) {
+      const name = nominalNameOf(member);
+      if (name === "Some") {
+        someTypeId = member;
+      } else if (name === "None") {
+        noneTypeId = member;
+      }
+    }
+
+    if (typeof someTypeId !== "number" || typeof noneTypeId !== "number") {
+      return undefined;
+    }
+
+    const someInfo = getStructuralTypeInfo(someTypeId, ctx);
+    const valueField = someInfo?.fieldMap.get("value");
+    if (!someInfo || !valueField) {
+      return undefined;
+    }
+    if (someInfo.fields.length !== 1 || someInfo.fields[0]!.name !== "value") {
+      throw new Error("Optional Some type must contain only a `value` field");
+    }
+
+    return {
+      someTypeId,
+      noneTypeId,
+      valueField,
+      someInfo,
+    };
+  })();
+
+  if (optionalUnionInfo) {
+    const comparison = ctx.typing.arena.unify(actualType, optionalUnionInfo.valueField.typeId, {
+      location: ctx.hir.module.ast,
+      reason: "optional Some coercion",
+      variance: "covariant",
+      allowUnknown: true,
+    });
+    if (comparison.ok) {
+      const inner = coerceValueToType({
+        value,
+        actualType,
+        targetType: optionalUnionInfo.valueField.typeId,
+        ctx,
+        fnCtx,
+      });
+      return initStruct(ctx.mod, optionalUnionInfo.someInfo.runtimeType, [
+        ctx.mod.global.get(
+          optionalUnionInfo.someInfo.ancestorsGlobal,
+          ctx.rtt.extensionHelpers.i32Array
+        ),
+        ctx.mod.global.get(
+          optionalUnionInfo.someInfo.fieldTableGlobal,
+          ctx.rtt.fieldLookupHelpers.lookupTableType
+        ),
+        ctx.mod.global.get(
+          optionalUnionInfo.someInfo.methodTableGlobal,
+          ctx.rtt.methodLookupHelpers.lookupTableType
+        ),
+        inner,
+      ]);
+    }
+  }
+
   if (targetDesc.kind === "function" && actualDesc.kind === "function") {
     const targetEffectful =
       typeof targetDesc.effectRow === "number" &&

@@ -31,6 +31,7 @@ const declareEffectOperationParams = ({
     return {
       name: param.name,
       label: param.label,
+      optional: param.optional,
       symbol,
       ast: param.ast,
       bindingKind: param.bindingKind,
