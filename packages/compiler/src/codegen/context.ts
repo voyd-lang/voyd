@@ -88,6 +88,7 @@ export interface StructuralFieldInfo {
 
 export interface StructuralTypeInfo {
   typeId: TypeId;
+  runtimeTypeId: number;
   structuralId: TypeId;
   nominalId?: TypeId;
   nominalAncestors: readonly TypeId[];

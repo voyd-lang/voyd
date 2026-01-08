@@ -25,7 +25,7 @@ import {
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
 import {
   getOptionalInfo,
-  optionalResolverContextForTypingResult,
+  optionalResolverContextForTypingResultWithSymbolTable,
 } from "../semantics/typing/optionals.js";
 
 export const requiresStructuralConversion = (
@@ -72,7 +72,10 @@ export const coerceValueToType = ({
 
   const optionalInfo = getOptionalInfo(
     targetType,
-    optionalResolverContextForTypingResult(ctx.typing)
+    optionalResolverContextForTypingResultWithSymbolTable(
+      ctx.typing,
+      ctx.symbolTable
+    )
   );
 
   if (optionalInfo) {

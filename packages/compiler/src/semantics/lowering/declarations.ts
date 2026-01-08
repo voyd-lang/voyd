@@ -105,7 +105,7 @@ export const lowerUseDecl = (use: BoundUse, ctx: LowerContext): void => {
           visibility: exportVisibility,
           span: entry.span,
           item: useId,
-          alias: entry.alias,
+          alias: entry.importKind === "all" ? undefined : entry.alias,
         });
       })
     );

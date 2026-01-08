@@ -15,10 +15,10 @@ const STD_ROOT = "/std";
 const SRC_ROOT = "/src";
 const DEFAULT_ENTRY = "index.voyd";
 
-const STD_SOURCES = import.meta.glob<string>(
-  ["/packages/std/**/*.voyd", "!/packages/std/__fixtures__/**"],
-  { as: "raw", eager: true }
-);
+const STD_SOURCES = import.meta.glob<string>("/packages/std/src/**/*.voyd", {
+  as: "raw",
+  eager: true,
+});
 
 export type BrowserCompileOptions = {
   entryPath?: string;
@@ -140,7 +140,7 @@ const buildStdFiles = (stdRoot: string): Record<string, string> => {
 
 const toStdRelativePath = (path: string): string => {
   const normalized = normalizePath(path);
-  const marker = "/packages/std/";
+  const marker = "/packages/std/src/";
   const index = normalized.indexOf(marker);
   if (index >= 0) {
     return normalized.slice(index + marker.length);

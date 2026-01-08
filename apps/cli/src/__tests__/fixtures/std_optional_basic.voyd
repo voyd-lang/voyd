@@ -1,0 +1,17 @@
+use std::optional::all
+
+obj OptionalBox {
+  v?: i32
+}
+
+fn sum(v?: i32) -> i32
+  unwrap_or(v, 0)
+
+pub fn main() -> i32
+  let b1 = OptionalBox { v: 5 }
+  let b2 = OptionalBox {}
+  let s = { v: 7 }
+  let b3 = OptionalBox { ...s }
+
+  sum(b1.v) + sum(b2.v) + sum() + sum(b3.v)
+

@@ -45,13 +45,26 @@ import {
   packageVisibility,
 } from "../../hir/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
-import type { SourceSpan } from "../../ids.js";
+import type { SourceSpan, SymbolId } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
 import { isSamePackage } from "../../packages.js";
 import {
   importableMetadataFrom,
   importedModuleIdFrom,
 } from "../../imports/metadata.js";
+
+const importedSymbolTargetFrom = (
+  source?: Record<string, unknown>
+): { moduleId: string; symbol: SymbolId } | undefined => {
+  const meta = source as
+    | { import?: { moduleId?: unknown; symbol?: unknown } | undefined }
+    | undefined;
+  const moduleId = meta?.import?.moduleId;
+  const symbol = meta?.import?.symbol;
+  return typeof moduleId === "string" && typeof symbol === "number"
+    ? { moduleId, symbol }
+    : undefined;
+};
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   const tracker = new BinderScopeTracker(ctx.symbolTable);
@@ -494,11 +507,19 @@ const declareImportedSymbol = ({
     const importableMetadata = importableMetadataFrom(
       sourceMetadata as Record<string, unknown> | undefined
     );
+    const importedSymbolTarget =
+      exported.kind !== "module"
+        ? importedSymbolTargetFrom(sourceMetadata as Record<string, unknown> | undefined)
+        : undefined;
     const importedModuleId =
       exported.kind === "module"
         ? importedModuleIdFrom(sourceMetadata as Record<string, unknown> | undefined) ??
           exported.moduleId
-        : exported.moduleId;
+        : importedSymbolTarget?.moduleId ?? exported.moduleId;
+    const importedSymbolId =
+      exported.kind !== "module"
+        ? importedSymbolTarget?.symbol ?? symbol
+        : undefined;
     const local = ctx.symbolTable.declare({
       name: alias,
       kind: exported.kind,
@@ -507,7 +528,7 @@ const declareImportedSymbol = ({
         import:
           exported.kind === "module"
             ? { moduleId: importedModuleId }
-            : { moduleId: exported.moduleId, symbol },
+            : { moduleId: importedModuleId, symbol: importedSymbolId },
         ...(importableMetadata ?? {}),
       },
     });
@@ -515,7 +536,9 @@ const declareImportedSymbol = ({
       name: alias,
       local,
       target:
-        exported.kind === "module" ? undefined : { moduleId: exported.moduleId, symbol },
+        exported.kind === "module"
+          ? undefined
+          : { moduleId: importedModuleId, symbol: importedSymbolId as SymbolId },
       visibility,
       span,
     };
@@ -588,6 +611,10 @@ const canAccessExport = ({
 }): boolean => {
   if (moduleId === ctx.module.id) {
     return true;
+  }
+
+  if (exported.packageId === "std") {
+    return isPackageVisible(exported.visibility);
   }
 
   const samePackage =

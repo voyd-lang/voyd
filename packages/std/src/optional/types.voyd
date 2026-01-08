@@ -1,0 +1,13 @@
+@intrinsic_type(type: "optional-some")
+pub obj Some<T> {
+  value: T
+}
+
+@intrinsic_type(type: "optional-none")
+pub obj None {}
+
+@intrinsic_type(type: "optional")
+pub type Optional<T> = Some<T> | None
+
+pub type Option<T> = Optional<T>
+

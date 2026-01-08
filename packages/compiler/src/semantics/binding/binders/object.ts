@@ -18,11 +18,15 @@ export const bindObjectDecl = (
   rememberSyntax(decl.base, ctx);
   rememberSyntax(decl.body, ctx);
 
+  const intrinsicType = decl.form.attributes?.intrinsicType;
+  const intrinsicTypeMetadata =
+    typeof intrinsicType === "string" ? { intrinsicType } : undefined;
+
   const symbol = ctx.symbolTable.declare({
     name: decl.name.value,
     kind: "type",
     declaredAt: decl.form.syntaxId,
-    metadata: { entity: "object" },
+    metadata: { entity: "object", ...intrinsicTypeMetadata },
   });
 
   const objectScope = ctx.symbolTable.createScope({

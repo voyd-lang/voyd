@@ -322,7 +322,7 @@ const compileMatchCondition = (
 
     return ctx.mod.call(
       useStrict ? "__has_type" : "__extends",
-      [ctx.mod.i32.const(structInfo.typeId), makeAncestors()],
+      [ctx.mod.i32.const(structInfo.runtimeTypeId), makeAncestors()],
       binaryen.i32
     );
   };
