@@ -5,6 +5,7 @@ import { parse } from "../../../parser/parser.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { buildEffectsLoweringInfo } from "../analysis.js";
 import { buildEffectsIr } from "../ir/build.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 const loadFixture = () => {
   const source = readFileSync(
@@ -19,7 +20,7 @@ describe("EffectsIR (overlay)", () => {
     const semantics = loadFixture();
     const info = buildEffectsLoweringInfo({
       binding: semantics.binding,
-      symbolTable: semantics.symbolTable,
+      symbolTable: getSymbolTable(semantics),
       hir: semantics.hir,
       typing: semantics.typing,
     });
@@ -29,7 +30,7 @@ describe("EffectsIR (overlay)", () => {
       kind: call.kind,
       callee:
         typeof call.calleeSymbol === "number"
-          ? semantics.symbolTable.getSymbol(call.calleeSymbol).name
+          ? getSymbolTable(semantics).getSymbol(call.calleeSymbol).name
           : "<unknown>",
       op: call.operation?.name,
     }));
@@ -43,4 +44,3 @@ describe("EffectsIR (overlay)", () => {
     ).toBe(true);
   });
 });
-

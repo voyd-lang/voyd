@@ -6,6 +6,7 @@ import { semanticsPipeline } from "../../pipeline.js";
 import type { SemanticsPipelineResult } from "../../pipeline.js";
 import type { SymbolId } from "../../ids.js";
 import { buildEffectsLoweringInfo } from "../analysis.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 const loadSemantics = (): SemanticsPipelineResult => {
   const source = readFileSync(
@@ -16,7 +17,8 @@ const loadSemantics = (): SemanticsPipelineResult => {
 };
 
 const resolveSymbol = (name: string, semantics: SemanticsPipelineResult): SymbolId => {
-  const symbol = semantics.symbolTable.resolve(name, semantics.symbolTable.rootScope);
+  const symbolTable = getSymbolTable(semantics);
+  const symbol = symbolTable.resolve(name, symbolTable.rootScope);
   if (typeof symbol !== "number") {
     throw new Error(`missing symbol for ${name}`);
   }
@@ -28,7 +30,7 @@ describe("EffectsLoweringInfo", () => {
     const semantics = loadSemantics();
     const info = buildEffectsLoweringInfo({
       binding: semantics.binding,
-      symbolTable: semantics.symbolTable,
+      symbolTable: getSymbolTable(semantics),
       hir: semantics.hir,
       typing: semantics.typing,
     });
@@ -57,7 +59,7 @@ describe("EffectsLoweringInfo", () => {
     const semantics = loadSemantics();
     const info = buildEffectsLoweringInfo({
       binding: semantics.binding,
-      symbolTable: semantics.symbolTable,
+      symbolTable: getSymbolTable(semantics),
       hir: semantics.hir,
       typing: semantics.typing,
     });
@@ -108,7 +110,7 @@ describe("EffectsLoweringInfo", () => {
     const semantics = loadSemantics();
     const info = buildEffectsLoweringInfo({
       binding: semantics.binding,
-      symbolTable: semantics.symbolTable,
+      symbolTable: getSymbolTable(semantics),
       hir: semantics.hir,
       typing: semantics.typing,
     });

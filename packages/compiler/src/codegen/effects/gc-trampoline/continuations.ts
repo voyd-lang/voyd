@@ -38,7 +38,7 @@ const findFunctionBySymbol = (
 ): { fn: HirFunction; returnTypeId: TypeId } => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind === "function" && item.symbol === symbol) {
-      const signature = ctx.typing.functions.getSignature(symbol);
+      const signature = ctx.program.functions.getSignature(ctx.moduleId, symbol);
       if (!signature) {
         throw new Error("missing signature for continuation function");
       }
@@ -57,10 +57,10 @@ const findLambdaByExprId = (
     throw new Error(`could not find lambda expression ${exprId}`);
   }
   const typeId =
-    ctx.typing.resolvedExprTypes.get(exprId) ??
-    ctx.typing.table.getExprType(exprId) ??
-    ctx.typing.primitives.unknown;
-  const desc = ctx.typing.arena.get(typeId);
+  ctx.module.types.getResolvedExprType(exprId) ??
+    ctx.module.types.getExprType(exprId) ??
+    ctx.program.primitives.unknown;
+  const desc = ctx.program.arena.get(typeId);
   if (desc.kind !== "function") {
     throw new Error("lambda missing function type");
   }
@@ -116,7 +116,7 @@ const sameContinuationOwner = (
 };
 
 const shouldCaptureIdentifierSymbol = (symbol: SymbolId, ctx: CodegenContext): boolean =>
-  ctx.symbolTable.getScope(ctx.symbolTable.getSymbol(symbol).scope).kind !== "module";
+  !ctx.program.symbols.isModuleScoped(ctx.moduleId, symbol);
 
 const collectHandlerClauseLocalSymbols = ({
   handlerExprId,
@@ -180,7 +180,7 @@ const findHandlerClauseByOwner = ({
   if (!clause) {
     throw new Error(`missing handler clause ${handlerExprId}:${clauseIndex}`);
   }
-  const signature = ctx.typing.functions.getSignature(clause.operation);
+  const signature = ctx.program.functions.getSignature(ctx.moduleId, clause.operation);
   if (!signature) {
     throw new Error("missing signature for effect handler clause operation");
   }
@@ -287,7 +287,7 @@ export const ensureContinuationFunction = ({
   };
 
   localsToSeed.forEach((symbol) => {
-    const typeId = ctx.typing.valueTypes.get(symbol) ?? ctx.typing.primitives.unknown;
+    const typeId = ctx.module.types.getValueType(symbol) ?? ctx.program.primitives.unknown;
     const wasmType = wasmTypeFor(typeId, ctx);
     const seeded = allocateTempLocal(wasmType, fnCtx, typeId);
     fnCtx.bindings.set(symbol, { ...seeded, kind: "local", typeId });
@@ -296,8 +296,8 @@ export const ensureContinuationFunction = ({
   const handlerLocal = allocateTempLocal(ctx.effectsRuntime.handlerFrameType, fnCtx);
   fnCtx.currentHandler = { index: handlerLocal.index, type: handlerLocal.type };
 
-  const startedLocal = allocateTempLocal(binaryen.i32, fnCtx, ctx.typing.primitives.i32);
-  const activeSiteLocal = allocateTempLocal(binaryen.i32, fnCtx, ctx.typing.primitives.i32);
+  const startedLocal = allocateTempLocal(binaryen.i32, fnCtx, ctx.program.primitives.i32);
+  const activeSiteLocal = allocateTempLocal(binaryen.i32, fnCtx, ctx.program.primitives.i32);
 
   const tempFields = new Map<number, { wasmType: binaryen.Type; typeId: TypeId }>();
   groupSites.forEach((groupSite) => {
@@ -373,7 +373,7 @@ export const ensureContinuationFunction = ({
     kind: "local",
     index: 1,
     type: resumeBoxType,
-    typeId: ctx.typing.primitives.unknown,
+    typeId: ctx.program.primitives.unknown,
   } as const;
 
   const continuationCompiler = createGroupedContinuationExpressionCompiler({

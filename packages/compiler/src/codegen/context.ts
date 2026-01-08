@@ -1,5 +1,4 @@
 import binaryen from "binaryen";
-import type { SymbolTable } from "../semantics/binder/index.js";
 import type {
   HirGraph,
   HirExpression,
@@ -27,8 +26,6 @@ import type {
   TypeId,
   EffectRowId,
 } from "../semantics/ids.js";
-import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
-import type { TypingResult } from "../semantics/typing/typing.js";
 import type { createRttContext } from "./rtt/index.js";
 import type { BindingResult } from "../semantics/binding/binding.js";
 import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
@@ -42,7 +39,8 @@ import type { EffectsBackend } from "./effects/codegen-backend.js";
 import type { EffectsState } from "./effects/state.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
 import type { EffectsLoweringInfo } from "../semantics/effects/analysis.js";
-import type { ProgramSemanticsIndex } from "../semantics/program-index.js";
+import type { ProgramCodegenView } from "../semantics/codegen-view/index.js";
+import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -128,11 +126,10 @@ export interface CodegenContext {
   moduleId: string;
   moduleLabel: string;
   effectIdOffset: number;
-  programIndex: ProgramSemanticsIndex;
+  program: ProgramCodegenView;
+  module: ModuleCodegenView;
   binding: BindingResult;
-  symbolTable: SymbolTable;
   hir: HirGraph;
-  typing: TypingResult;
   effectsInfo: EffectsLoweringInfo;
   options: Required<CodegenOptions>;
   functions: Map<string, FunctionMetadata[]>;

@@ -159,19 +159,13 @@ describe("module typing across imports", () => {
     expect(pointModule).toBeDefined();
     expect(consumerModule).toBeDefined();
 
-    const pointSymbol = pointModule!.symbolTable.resolve(
-      "Point",
-      pointModule!.symbolTable.rootScope
-    );
+    const pointSymbol = pointModule!.symbols.resolveTopLevel("Point");
     expect(pointSymbol).toBeDefined();
 
     const pointType = pointModule!.typing.valueTypes.get(pointSymbol!);
     expect(pointType).toBeDefined();
 
-    const idSymbol = consumerModule!.symbolTable.resolve(
-      "id",
-      consumerModule!.symbolTable.rootScope
-    );
+    const idSymbol = consumerModule!.symbols.resolveTopLevel("id");
     expect(idSymbol).toBeDefined();
 
     const idSig = consumerModule!.typing.functions.getSignature(idSymbol!);

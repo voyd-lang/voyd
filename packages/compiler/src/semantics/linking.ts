@@ -4,24 +4,17 @@ import type { DependencySemantics, TypingContext } from "./typing/types.js";
 import { typeGenericFunctionBody } from "./typing/expressions/call.js";
 import type { ModuleExportTable } from "./modules.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
+import type { MonomorphizedInstanceInfo } from "./codegen-view/index.js";
+import type { SymbolRef } from "./typing/symbol-ref.js";
+import { getSymbolTable } from "./_internal/symbol-table.js";
 
-export const linkProgramSemantics = ({
+export const monomorphizeProgram = ({
   modules,
   semantics,
 }: {
   modules: readonly SemanticsPipelineResult[];
   semantics: Map<string, SemanticsPipelineResult>;
-}): void => {
-  monomorphizeProgramSemantics({ modules, semantics });
-};
-
-export const monomorphizeProgramSemantics = ({
-  modules,
-  semantics,
-}: {
-  modules: readonly SemanticsPipelineResult[];
-  semantics: Map<string, SemanticsPipelineResult>;
-}): void => {
+}): { instances: readonly MonomorphizedInstanceInfo[] } => {
   const { moduleExports, dependencies } = buildDependencyIndex(semantics);
   const typingContexts = new Map<string, TypingContext>();
   const typingContextFor = createTypingContextFactory({
@@ -35,6 +28,8 @@ export const monomorphizeProgramSemantics = ({
     modules.map((entry) => [entry.moduleId, entry] as const)
   );
   const touchedModules = new Set<string>();
+
+  const requestedInstances: MonomorphizedInstanceInfo[] = [];
 
   modules.forEach((caller) => {
     const callerDep = dependencies.get(caller.moduleId);
@@ -50,7 +45,7 @@ export const monomorphizeProgramSemantics = ({
       if (!instantiations) {
         return;
       }
-      const metadata = (caller.symbolTable.getSymbol(localSymbol).metadata ?? {}) as
+      const metadata = (getSymbolTable(caller).getSymbol(localSymbol).metadata ?? {}) as
         | { import?: { moduleId?: unknown; symbol?: unknown } }
         | undefined;
       const importModuleId = metadata?.import?.moduleId;
@@ -75,10 +70,16 @@ export const monomorphizeProgramSemantics = ({
       const sortedInstantiations = Array.from(instantiations.entries()).sort(([a], [b]) =>
         a.localeCompare(b, undefined, { numeric: true })
       );
-      sortedInstantiations.forEach(([, typeArgs]) => {
+      sortedInstantiations.forEach(([instanceKey, typeArgs]) => {
         if (typeArgs.length !== typeParams.length) {
           return;
         }
+
+        requestedInstances.push({
+          callee: { moduleId: importModuleId, symbol: importSymbol } satisfies SymbolRef,
+          typeArgs,
+          instanceKey,
+        });
 
         const substitution = new Map(
           typeParams.map((param, index) => [param.typeParam, typeArgs[index]!] as const)
@@ -106,6 +107,25 @@ export const monomorphizeProgramSemantics = ({
     entry.typing.functionInstanceExprTypes = ctx.functions.snapshotInstanceExprTypes();
     entry.typing.valueTypes = new Map(ctx.valueTypes);
   });
+
+  const deduped = new Map<string, MonomorphizedInstanceInfo>();
+  requestedInstances.forEach((info) => {
+    if (!info.instanceKey) return;
+    const key = `${info.callee.moduleId}::${info.instanceKey}`;
+    if (!deduped.has(key)) {
+      deduped.set(key, { ...info, instanceKey: key });
+    }
+  });
+  const instances = Array.from(deduped.values()).sort((a, b) => {
+    const modOrder = a.callee.moduleId.localeCompare(b.callee.moduleId, undefined, {
+      numeric: true,
+    });
+    if (modOrder !== 0) return modOrder;
+    if (a.callee.symbol !== b.callee.symbol) return a.callee.symbol - b.callee.symbol;
+    return a.instanceKey.localeCompare(b.instanceKey, undefined, { numeric: true });
+  });
+
+  return { instances };
 };
 
 const buildDependencyIndex = (
@@ -123,7 +143,7 @@ const buildDependencyIndex = (
       {
         moduleId: entry.moduleId,
         packageId: entry.binding.packageId,
-        symbolTable: entry.symbolTable,
+        symbolTable: getSymbolTable(entry),
         hir: entry.hir,
         typing: entry.typing,
         decls: entry.binding.decls,
@@ -174,7 +194,7 @@ const createTypingContextFactory = ({
     });
 
     const ctx: TypingContext = {
-      symbolTable: entry.symbolTable,
+      symbolTable: getSymbolTable(entry),
       hir: entry.hir,
       overloads: collectOverloadOptions(
         entry.binding.overloads,

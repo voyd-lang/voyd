@@ -55,8 +55,8 @@ const resumeValueTypeIdForSite = ({
   ctx: CodegenContext;
 }): TypeId => {
   const exprType =
-    ctx.typing.resolvedExprTypes.get(site.exprId) ??
-    ctx.typing.table.getExprType(site.exprId);
+    ctx.module.types.getResolvedExprType(site.exprId) ??
+    ctx.module.types.getExprType(site.exprId);
   if (site.kind === "perform") {
     if (typeof site.effectSymbol !== "number") {
       throw new Error("perform site missing effect op symbol");
@@ -64,23 +64,23 @@ const resumeValueTypeIdForSite = ({
     if (typeof exprType === "number") {
       return exprType;
     }
-    const signature = ctx.typing.functions.getSignature(site.effectSymbol);
-    return signature?.returnType ?? ctx.typing.primitives.unknown;
+    const signature = ctx.program.functions.getSignature(ctx.moduleId, site.effectSymbol);
+    return signature?.returnType ?? ctx.program.primitives.unknown;
   }
-  return exprType ?? ctx.typing.primitives.unknown;
+  return exprType ?? ctx.program.primitives.unknown;
 };
 
 const baseEnvFields = (ctx: CodegenContext): ContinuationEnvField[] => [
   {
     name: "site",
-    typeId: ctx.typing.primitives.i32,
+    typeId: ctx.program.primitives.i32,
     wasmType: binaryen.i32,
     sourceKind: "site",
   },
   {
     name: "handler",
     wasmType: ctx.effectsRuntime.handlerFrameType,
-    typeId: ctx.typing.primitives.unknown,
+    typeId: ctx.program.primitives.unknown,
     sourceKind: "handler",
   } as const,
 ];
@@ -97,7 +97,7 @@ const handlerClauseBaseTemps = ({
     {
       name: "clause_cont",
       wasmType: ctx.effectsRuntime.continuationType,
-      typeId: ctx.typing.primitives.unknown,
+      typeId: ctx.program.primitives.unknown,
       sourceKind: "local",
       tempId: handlerClauseContinuationTempId({
         handlerExprId: owner.handlerExprId,
@@ -107,7 +107,7 @@ const handlerClauseBaseTemps = ({
     {
       name: "clause_tail_guard",
       wasmType: ctx.effectsRuntime.tailGuardType,
-      typeId: ctx.typing.primitives.unknown,
+      typeId: ctx.program.primitives.unknown,
       sourceKind: "local",
       tempId: handlerClauseTailGuardTempId({
         handlerExprId: owner.handlerExprId,
@@ -216,7 +216,7 @@ export const buildEffectLowering = ({
                 throw new Error("perform site missing effect op symbol");
               }
               const { effectId, opId, resumeKind, effectSymbol } = getEffectOpIds(site.effectSymbol, ctx);
-              const signature = ctx.typing.functions.getSignature(site.effectSymbol);
+              const signature = ctx.program.functions.getSignature(ctx.moduleId, site.effectSymbol);
               const paramTypes = performSiteArgTypes({ exprId: site.exprId, ctx });
               const argsType =
                 signature &&
@@ -282,7 +282,9 @@ export const buildEffectLowering = ({
     const ordering = definitionOrderForFunction(item, ctx);
     const params = functionParamSymbols(item);
     const analysis = analyzeExpr({ exprId: item.body, liveAfter: new Set(), ctx });
-    const fnName = sanitizeIdentifier(ctx.symbolTable.getSymbol(item.symbol).name);
+    const fnName = sanitizeIdentifier(
+      ctx.program.symbols.getLocalName(ctx.moduleId, item.symbol) ?? `${item.symbol}`
+    );
     const contFnName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${item.symbol}`;
 
     emitSitesFor({

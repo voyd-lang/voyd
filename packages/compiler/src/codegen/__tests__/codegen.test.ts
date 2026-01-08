@@ -16,10 +16,8 @@ import {
 } from "../functions.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { buildEffectsLoweringInfo } from "../../semantics/effects/analysis.js";
-import { buildProgramSemanticsIndex } from "../../semantics/program-index.js";
+import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
-import type { TypingResult } from "../../semantics/typing/types.js";
 import type { TypeId } from "../../semantics/ids.js";
 import type {
   CodegenContext,
@@ -49,13 +47,13 @@ const loadMain = (fixtureName: string) => {
   return main as (...params: unknown[]) => unknown;
 };
 
-const getNominalPatternDesc = (typeId: TypeId, typing: TypingResult) => {
-  const desc = typing.arena.get(typeId);
+const getNominalPatternDesc = (typeId: TypeId, arena: { get: (typeId: TypeId) => any }) => {
+  const desc = arena.get(typeId);
   if (desc.kind === "nominal-object") {
     return desc;
   }
   if (desc.kind === "intersection" && typeof desc.nominal === "number") {
-    const nominalDesc = typing.arena.get(desc.nominal);
+    const nominalDesc = arena.get(desc.nominal);
     if (nominalDesc.kind === "nominal-object") {
       return nominalDesc;
     }
@@ -76,7 +74,7 @@ const sanitizeIdentifier = (value: string): string =>
 const buildCodegenProgram = (
   modules: readonly ReturnType<typeof semanticsPipeline>[]
 ): { mod: binaryen.Module; contexts: CodegenContext[] } => {
-  const programIndex = buildProgramSemanticsIndex(modules);
+  const program = buildProgramCodegenView(modules);
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
@@ -86,21 +84,15 @@ const buildCodegenProgram = (
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const runtimeTypeRegistry = new Map();
   const contexts: CodegenContext[] = modules.map((sem) => ({
+    program,
+    module: program.modules.get(sem.moduleId)!,
     mod,
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
     effectIdOffset: 0,
-    programIndex,
     binding: sem.binding,
-    symbolTable: sem.symbolTable,
     hir: sem.hir,
-    typing: sem.typing,
-    effectsInfo: buildEffectsLoweringInfo({
-      binding: sem.binding,
-      symbolTable: sem.symbolTable,
-      hir: sem.hir,
-      typing: sem.typing,
-    }),
+    effectsInfo: program.modules.get(sem.moduleId)!.effectsInfo,
     options: DEFAULT_OPTIONS,
     functions,
     functionInstances,
@@ -466,7 +458,7 @@ describe("next codegen", () => {
           expect(typeof arm.pattern.typeId).toBe("number");
           const patternDesc = getNominalPatternDesc(
             arm.pattern.typeId!,
-            typing
+            typing.arena
           );
           const arg = typing.arena.get(patternDesc.typeArgs[0]!);
           expect(arg.kind).toBe("primitive");
@@ -491,7 +483,7 @@ describe("next codegen", () => {
           expect(typeof arm.pattern.typeId).toBe("number");
           const patternDesc = getNominalPatternDesc(
             arm.pattern.typeId!,
-            typing
+            typing.arena
           );
           const arg = typing.arena.get(patternDesc.typeArgs[0]!);
           if (arg.kind !== "primitive") {

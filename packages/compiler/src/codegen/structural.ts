@@ -23,10 +23,6 @@ import {
   wasmTypeFor,
 } from "./types.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
-import {
-  getOptionalInfo,
-  optionalResolverContextForTypingResultWithSymbolTable,
-} from "../semantics/typing/optionals.js";
 
 export const requiresStructuralConversion = (
   actualType: TypeId,
@@ -67,16 +63,10 @@ export const coerceValueToType = ({
     return value;
   }
 
-  const targetDesc = ctx.typing.arena.get(targetType);
-  const actualDesc = ctx.typing.arena.get(actualType);
+  const targetDesc = ctx.program.arena.get(targetType);
+  const actualDesc = ctx.program.arena.get(actualType);
 
-  const optionalInfo = getOptionalInfo(
-    targetType,
-    optionalResolverContextForTypingResultWithSymbolTable(
-      ctx.typing,
-      ctx.symbolTable
-    )
-  );
+  const optionalInfo = ctx.program.optionals.getOptionalInfo(ctx.moduleId, targetType);
 
   if (optionalInfo) {
     const someInfo = getStructuralTypeInfo(optionalInfo.someType, ctx);
@@ -87,7 +77,7 @@ export const coerceValueToType = ({
       throw new Error("Optional Some member must contain exactly one field");
     }
 
-    const comparison = ctx.typing.arena.unify(actualType, optionalInfo.innerType, {
+    const comparison = ctx.program.arena.unify(actualType, optionalInfo.innerType, {
       location: ctx.hir.module.ast,
       reason: "optional Some coercion",
       variance: "covariant",
@@ -122,10 +112,10 @@ export const coerceValueToType = ({
   if (targetDesc.kind === "function" && actualDesc.kind === "function") {
     const targetEffectful =
       typeof targetDesc.effectRow === "number" &&
-      !ctx.typing.effects.isEmpty(targetDesc.effectRow);
+      !ctx.program.effects.isEmpty(targetDesc.effectRow);
     const actualEffectful =
       typeof actualDesc.effectRow === "number" &&
-      !ctx.typing.effects.isEmpty(actualDesc.effectRow);
+      !ctx.program.effects.isEmpty(actualDesc.effectRow);
 
     if (targetEffectful && !actualEffectful) {
       return coercePureClosureToEffectful({
@@ -253,7 +243,7 @@ const coercePureClosureToEffectful = ({
 };
 
 const actualDescReturnTypeId = (typeId: TypeId, ctx: CodegenContext): TypeId => {
-  const desc = ctx.typing.arena.get(typeId);
+  const desc = ctx.program.arena.get(typeId);
   if (desc.kind !== "function") {
     throw new Error("expected function type for closure coercion");
   }

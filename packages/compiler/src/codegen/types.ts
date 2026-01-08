@@ -23,8 +23,7 @@ import type {
   FixedArrayWasmType,
 } from "./context.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
-import type { TraitImplInstance } from "../semantics/typing/types.js";
-import { symbolRefEquals, type SymbolRef } from "../semantics/typing/symbol-ref.js";
+import type { SymbolRef } from "../semantics/typing/symbol-ref.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -44,7 +43,7 @@ const runtimeTypeKeyFor = (
   }
   seen.add(typeId);
 
-  const desc = ctx.typing.arena.get(typeId);
+  const desc = ctx.program.arena.get(typeId);
   switch (desc.kind) {
     case "primitive":
       return `prim:${desc.name}`;
@@ -80,12 +79,14 @@ const runtimeTypeKeyFor = (
       return `union:${members.join("|")}`;
     }
     case "intersection": {
-      const nominal = typeof desc.nominal === "number"
-        ? runtimeTypeKeyFor(desc.nominal, ctx, seen)
-        : "none";
-      const structural = typeof desc.structural === "number"
-        ? runtimeTypeKeyFor(desc.structural, ctx, seen)
-        : "none";
+      const nominal =
+        typeof desc.nominal === "number"
+          ? runtimeTypeKeyFor(desc.nominal, ctx, seen)
+          : "none";
+      const structural =
+        typeof desc.structural === "number"
+          ? runtimeTypeKeyFor(desc.structural, ctx, seen)
+          : "none";
       return `intersection:${nominal}&${structural}`;
     }
     case "fixed-array":
@@ -100,13 +101,17 @@ const runtimeTypeIdFor = (typeId: TypeId, ctx: CodegenContext): number =>
     const key = runtimeTypeKeyFor(typeId, ctx, new Set());
     const existing = ctx.runtimeTypeRegistry.get(typeId);
     if (!existing) {
-      ctx.runtimeTypeRegistry.set(typeId, { key, moduleId: ctx.moduleId, typeId });
+      ctx.runtimeTypeRegistry.set(typeId, {
+        key,
+        moduleId: ctx.moduleId,
+        typeId,
+      });
     }
     return typeId;
   })();
 
 const getLocalSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
-  ctx.symbolTable.getSymbol(symbol).name;
+  ctx.program.symbols.getLocalName(ctx.moduleId, symbol) ?? `${symbol}`;
 
 export const getFunctionRefType = ({
   params,
@@ -160,7 +165,11 @@ const closureSignatureKey = ({
   effectRow,
 }: {
   moduleId: string;
-  parameters: ReadonlyArray<{ type: TypeId; label?: string; optional?: boolean }>;
+  parameters: ReadonlyArray<{
+    type: TypeId;
+    label?: string;
+    optional?: boolean;
+  }>;
   returnType: TypeId;
   effectRow: unknown;
 }): string => {
@@ -202,7 +211,11 @@ const ensureClosureTypeInfo = ({
 }: {
   typeId: TypeId;
   desc: {
-    parameters: ReadonlyArray<{ type: TypeId; label?: string; optional?: boolean }>;
+    parameters: ReadonlyArray<{
+      type: TypeId;
+      label?: string;
+      optional?: boolean;
+    }>;
     returnType: TypeId;
     effectRow: unknown;
   };
@@ -221,7 +234,8 @@ const ensureClosureTypeInfo = ({
   }
 
   const effectful =
-    typeof desc.effectRow === "number" && !ctx.typing.effects.isEmpty(desc.effectRow);
+    typeof desc.effectRow === "number" &&
+    !ctx.program.effects.isEmpty(desc.effectRow);
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   const userParamTypes = desc.parameters.map((param) =>
     wasmTypeFor(param.type, ctx, seen)
@@ -258,7 +272,7 @@ export const getClosureTypeInfo = (
   typeId: TypeId,
   ctx: CodegenContext
 ): ClosureTypeInfo => {
-  const desc = ctx.typing.arena.get(typeId);
+  const desc = ctx.program.arena.get(typeId);
   if (desc.kind !== "function") {
     throw new Error("expected function type for closure info");
   }
@@ -275,7 +289,7 @@ export const getFixedArrayWasmTypes = (
   ctx: CodegenContext,
   seen: Set<TypeId> = new Set()
 ): FixedArrayWasmType => {
-  const desc = ctx.typing.arena.get(typeId);
+  const desc = ctx.program.arena.get(typeId);
   if (desc.kind !== "fixed-array") {
     throw new Error("intrinsic requires a fixed-array type");
   }
@@ -298,7 +312,7 @@ export const wasmTypeFor = (
 ): binaryen.Type => {
   const already = seen.has(typeId);
   if (already) {
-    const desc = ctx.typing.arena.get(typeId);
+    const desc = ctx.program.arena.get(typeId);
     if (desc.kind === "function") {
       return binaryen.funcref;
     }
@@ -307,7 +321,7 @@ export const wasmTypeFor = (
   seen.add(typeId);
 
   try {
-    const desc = ctx.typing.arena.get(typeId);
+    const desc = ctx.program.arena.get(typeId);
     if (desc.kind === "primitive") {
       return mapPrimitiveToWasm(desc.name);
     }
@@ -391,12 +405,15 @@ export const getSymbolTypeId = (
   symbol: SymbolId,
   ctx: CodegenContext
 ): TypeId => {
-  const typeId = ctx.typing.valueTypes.get(symbol);
+  const typeId = ctx.module.types.getValueType(symbol);
   if (typeof typeId === "number") {
     return typeId;
   }
   throw new Error(
-    `codegen missing type information for symbol ${getLocalSymbolName(symbol, ctx)}`
+    `codegen missing type information for symbol ${getLocalSymbolName(
+      symbol,
+      ctx
+    )}`
   );
 };
 
@@ -408,9 +425,11 @@ const getInstanceExprType = (
   if (!instanceKey) {
     return undefined;
   }
-  const instanceType = ctx.typing.functionInstanceExprTypes
-    ?.get(instanceKey)
-    ?.get(exprId);
+  const instanceType = ctx.program.functions.getInstanceExprType(
+    ctx.moduleId,
+    instanceKey,
+    exprId
+  );
   return typeof instanceType === "number" ? instanceType : undefined;
 };
 
@@ -423,11 +442,11 @@ export const getRequiredExprType = (
   if (typeof instanceType === "number") {
     return instanceType;
   }
-  const resolved = ctx.typing.resolvedExprTypes.get(exprId);
+  const resolved = ctx.module.types.getResolvedExprType(exprId);
   if (typeof resolved === "number") {
     return resolved;
   }
-  const typeId = ctx.typing.table.getExprType(exprId);
+  const typeId = ctx.module.types.getExprType(exprId);
   if (typeof typeId === "number") {
     return typeId;
   }
@@ -443,11 +462,11 @@ export const getExprBinaryenType = (
   if (typeof instanceType === "number") {
     return wasmTypeFor(instanceType, ctx);
   }
-  const resolved = ctx.typing.resolvedExprTypes.get(exprId);
+  const resolved = ctx.module.types.getResolvedExprType(exprId);
   const typeId =
     typeof resolved === "number"
       ? resolved
-      : ctx.typing.table.getExprType(exprId);
+      : ctx.module.types.getExprType(exprId);
   if (typeof typeId === "number") {
     return wasmTypeFor(typeId, ctx);
   }
@@ -494,7 +513,7 @@ export const getStructuralTypeInfo = (
   seen.add(typeId);
 
   try {
-    const desc = ctx.typing.arena.get(structuralId);
+    const desc = ctx.program.arena.get(structuralId);
     if (desc.kind !== "structural-object") {
       return undefined;
     }
@@ -559,7 +578,7 @@ export const getStructuralTypeInfo = (
     const methodEntries = createMethodLookupEntries({
       impls:
         typeof nominalId === "number"
-          ? ctx.typing.traitImplsByNominal.get(nominalId) ?? []
+          ? ctx.program.traits.getImplsByNominal(nominalId)
           : [],
       ctx,
       typeLabel,
@@ -619,7 +638,7 @@ export const resolveStructuralTypeId = (
   typeId: TypeId,
   ctx: CodegenContext
 ): TypeId | undefined => {
-  const desc = ctx.typing.arena.get(typeId);
+  const desc = ctx.program.arena.get(typeId);
   if (desc.kind === "structural-object") {
     return typeId;
   }
@@ -645,16 +664,8 @@ const makeRuntimeTypeLabel = ({
   return `${moduleLabel}__struct_${nominalPrefix}type_${typeId}_shape_${structuralId}`;
 };
 
-type NominalAncestryEntry = {
-  nominalId: TypeId;
-  typeId: TypeId;
-};
-
-const isUnknownPrimitive = (
-  typeId: TypeId,
-  ctx: CodegenContext
-): boolean => {
-  const desc = ctx.typing.arena.get(typeId);
+const isUnknownPrimitive = (typeId: TypeId, ctx: CodegenContext): boolean => {
+  const desc = ctx.program.arena.get(typeId);
   return desc.kind === "primitive" && desc.name === "unknown";
 };
 
@@ -666,7 +677,7 @@ const buildRuntimeAncestors = ({
 }: {
   typeId: TypeId;
   structuralId: TypeId;
-  nominalAncestry: readonly NominalAncestryEntry[];
+  nominalAncestry: readonly { nominalId: TypeId; typeId: TypeId }[];
   ctx: CodegenContext;
 }): number[] => {
   const runtimeIdMemo = new Map<TypeId, number>();
@@ -705,7 +716,7 @@ const buildRuntimeAncestors = ({
     if (typeof nominalId !== "number") {
       return;
     }
-    const sourceDesc = ctx.typing.arena.get(nominalId);
+    const sourceDesc = ctx.program.arena.get(nominalId);
     if (
       sourceDesc.kind !== "nominal-object" ||
       sourceDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
@@ -713,14 +724,18 @@ const buildRuntimeAncestors = ({
       return;
     }
 
-    ctx.typing.objectsByNominal.forEach((info) => {
-      if (info.nominal === nominalId) {
+    const candidates = ctx.program.objects.getNominalInstancesByOwner(sourceDesc.owner);
+    candidates.forEach((candidateNominal) => {
+      if (candidateNominal === nominalId) {
         return;
       }
-      const targetDesc = ctx.typing.arena.get(info.nominal);
+      const info = ctx.program.objects.getInfoByNominal(candidateNominal);
+      if (!info || info.nominal !== candidateNominal) {
+        return;
+      }
+      const targetDesc = ctx.program.arena.get(candidateNominal);
       if (
         targetDesc.kind !== "nominal-object" ||
-        !symbolRefEquals(targetDesc.owner, sourceDesc.owner) ||
         targetDesc.typeArgs.length !== sourceDesc.typeArgs.length ||
         targetDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
       ) {
@@ -729,7 +744,7 @@ const buildRuntimeAncestors = ({
 
       const compatible = sourceDesc.typeArgs.every((arg, index) => {
         const targetArg = targetDesc.typeArgs[index]!;
-        const forward = ctx.typing.arena.unify(arg, targetArg, {
+        const forward = ctx.program.arena.unify(arg, targetArg, {
           location: ctx.hir.module.ast,
           reason: "nominal instantiation compatibility",
           variance: "covariant",
@@ -739,7 +754,7 @@ const buildRuntimeAncestors = ({
 
       if (compatible) {
         add(info.type);
-        add(info.nominal);
+        add(candidateNominal);
       }
     });
   };
@@ -866,58 +881,14 @@ const structuralTypeKey = (moduleId: string, typeId: TypeId): string =>
 const getNominalAncestry = (
   nominalId: TypeId | undefined,
   ctx: CodegenContext
-): NominalAncestryEntry[] => {
-  const ancestry: NominalAncestryEntry[] = [];
-  const seen = new Set<TypeId>();
-  let current = nominalId;
-
-  while (typeof current === "number" && !seen.has(current)) {
-    const info = ctx.programIndex.getObjectInfoByNominal(current);
-    if (!info) {
-      const desc = ctx.typing.arena.get(current);
-      if (desc.kind !== "nominal-object") {
-        break;
-      }
-      const template = ctx.programIndex.getObjectTemplate(desc.owner);
-      if (template) {
-        const typeId =
-          template.type ??
-          ctx.typing.arena.internIntersection({
-            nominal: current,
-            structural: template.structural,
-          });
-        ancestry.push({
-          nominalId: current,
-          typeId,
-        });
-        seen.add(current);
-        current = template.baseNominal;
-        continue;
-      }
-      const name = ctx.programIndex.getSymbolName(desc.owner) ?? "unknown";
-      throw new Error(
-        `codegen missing nominal ancestry for ${name}<${current}> (nominal ${current})`
-      );
-    }
-    ancestry.push({
-      nominalId: current,
-      typeId: info.type,
-    });
-    seen.add(current);
-    if (!info.baseNominal) {
-      break;
-    }
-    current = info.baseNominal;
-  }
-
-  return ancestry;
-};
+): readonly { nominalId: TypeId; typeId: TypeId }[] =>
+  typeof nominalId === "number" ? ctx.program.types.getNominalAncestry(nominalId) : [];
 
 const getNominalComponentId = (
   typeId: TypeId,
   ctx: CodegenContext
 ): TypeId | undefined => {
-  const desc = ctx.typing.arena.get(typeId);
+  const desc = ctx.program.arena.get(typeId);
   if (desc.kind === "nominal-object") {
     return typeId;
   }
@@ -927,4 +898,4 @@ const getNominalComponentId = (
   return undefined;
 };
 
-// Symbol/name resolution for nominal owners is handled by `ctx.programIndex`.
+// Symbol/name resolution for nominal owners is handled by `ctx.program.symbols`.

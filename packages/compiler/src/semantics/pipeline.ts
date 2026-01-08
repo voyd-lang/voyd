@@ -16,10 +16,12 @@ import type { ModuleExportEffect, ModuleExportTable } from "./modules.js";
 import type { DependencySemantics } from "./typing/types.js";
 import type { Diagnostic } from "../diagnostics/index.js";
 import { DiagnosticError, diagnosticFromCode } from "../diagnostics/index.js";
+import { buildModuleSymbolIndex, type ModuleSymbolIndex } from "./symbol-index.js";
+import { getSymbolTable } from "./_internal/symbol-table.js";
 
 export interface SemanticsPipelineResult {
   binding: BindingResult;
-  symbolTable: SymbolTable;
+  symbols: ModuleSymbolIndex;
   hir: HirGraph;
   typing: TypingResult;
   moduleId: string;
@@ -131,15 +133,23 @@ export const semanticsPipeline = (
     ...enforcePkgRootEffectRules({ binding, hir, typing, symbolTable }),
   ];
 
+  const symbols = buildModuleSymbolIndex({
+    moduleId: module.id,
+    packageId: binding.packageId,
+    symbolTable,
+  });
+
   return {
     binding,
-    symbolTable,
+    symbols,
     hir,
     typing,
     moduleId: module.id,
     exports: exportsTable,
     diagnostics,
-  };
+    // Intentionally not part of the public result type; semantics-internal only.
+    ...( { symbolTable } as unknown as {} ),
+  } as SemanticsPipelineResult;
 };
 
 const ensureNoBindingErrors = (binding: BindingResult): void => {
@@ -427,7 +437,7 @@ const projectDependencySemantics = (
       {
         moduleId: entry.moduleId,
         packageId: entry.binding.packageId,
-        symbolTable: entry.symbolTable,
+        symbolTable: getSymbolTable(entry),
         hir: entry.hir,
         typing: entry.typing,
         decls: entry.binding.decls,

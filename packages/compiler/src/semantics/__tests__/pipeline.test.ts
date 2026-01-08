@@ -19,6 +19,7 @@ import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
 import { modulePathToString } from "../../modules/path.js";
 import { toSourceSpan } from "../utils.js";
 import { isForm } from "../../parser/index.js";
+import { getSymbolTable } from "../_internal/symbol-table.js";
 
 type SemanticsResult = ReturnType<typeof semanticsPipeline>;
 
@@ -127,15 +128,10 @@ const buildModule = ({
 const expectAnimalConstructorBindings = (
   semantics: SemanticsResult
 ): void => {
-  let animalSymbol = semantics.symbolTable.resolve(
-    "Animal",
-    semantics.symbolTable.rootScope
-  );
+  const symbolTable = getSymbolTable(semantics);
+  let animalSymbol = symbolTable.resolve("Animal", symbolTable.rootScope);
   if (typeof animalSymbol !== "number") {
-    const moduleSymbol = semantics.symbolTable.resolve(
-      "animal",
-      semantics.symbolTable.rootScope
-    );
+    const moduleSymbol = symbolTable.resolve("animal", symbolTable.rootScope);
     const moduleMember = semantics.binding.moduleMembers
       .get(typeof moduleSymbol === "number" ? moduleSymbol : -1)
       ?.get("Animal");
@@ -162,7 +158,7 @@ const expectAnimalConstructorBindings = (
   const mainFn = Array.from(semantics.hir.items.values()).find(
     (item): item is HirFunction =>
       item.kind === "function" &&
-      semantics.symbolTable.getSymbol(item.symbol).name === "main"
+      symbolTable.getSymbol(item.symbol).name === "main"
   );
   expect(mainFn).toBeDefined();
   if (!mainFn) return;
@@ -429,7 +425,7 @@ describe("semanticsPipeline", () => {
     const result = semanticsPipeline(ast);
     const sanitizedHir = stripPatternSpansFromHir(structuredClone(result.hir));
     expect(sanitizedHir).toMatchSnapshot();
-    expect(result.symbolTable.snapshot()).toMatchSnapshot();
+    expect(getSymbolTable(result).snapshot()).toMatchSnapshot();
   });
 
   it("resolves overloaded functions based on argument types", () => {

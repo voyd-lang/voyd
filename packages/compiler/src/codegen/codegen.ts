@@ -4,7 +4,6 @@ import type {
   CodegenOptions,
   CodegenResult,
   FunctionMetadata,
-  SemanticsPipelineResult,
   RuntimeTypeIdRegistryEntry,
 } from "./context.js";
 import { createRttContext } from "./rtt/index.js";
@@ -26,8 +25,11 @@ import {
   type EffectsBackend,
 } from "./effects/codegen-backend.js";
 import { createEffectsState } from "./effects/state.js";
-import { buildEffectsLoweringInfo } from "../semantics/effects/analysis.js";
-import { buildProgramSemanticsIndex } from "../semantics/program-index.js";
+import {
+  buildProgramCodegenView,
+  type ProgramCodegenView,
+} from "../semantics/codegen-view/index.js";
+import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
@@ -37,7 +39,7 @@ const DEFAULT_OPTIONS: Required<CodegenOptions> = {
 };
 
 export type CodegenProgramParams = {
-  modules: readonly SemanticsPipelineResult[];
+  program: ProgramCodegenView;
   entryModuleId: string;
   options?: CodegenOptions;
 };
@@ -49,17 +51,17 @@ export const codegen = (
   options: CodegenOptions = {}
 ): CodegenResult =>
   codegenProgram({
-    modules: [semantics],
+    program: buildProgramCodegenView([semantics]),
     entryModuleId: semantics.moduleId,
     options,
   });
 
 export const codegenProgram = ({
-  modules,
+  program,
   entryModuleId,
   options = {},
 }: CodegenProgramParams): CodegenResult => {
-  const programIndex = buildProgramSemanticsIndex(modules);
+  const modules = Array.from(program.modules.values());
   const mod = new binaryen.Module();
   const mergedOptions: Required<CodegenOptions> = {
     ...DEFAULT_OPTIONS,
@@ -81,17 +83,11 @@ export const codegenProgram = ({
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
     effectIdOffset: 0,
-    programIndex,
+    program,
+    module: sem,
     binding: sem.binding,
-    symbolTable: sem.symbolTable,
     hir: sem.hir,
-    typing: sem.typing,
-    effectsInfo: buildEffectsLoweringInfo({
-      binding: sem.binding,
-      symbolTable: sem.symbolTable,
-      hir: sem.hir,
-      typing: sem.typing,
-    }),
+    effectsInfo: sem.effectsInfo,
     options: mergedOptions,
     functions,
     functionInstances,
@@ -162,7 +158,7 @@ export const codegenProgram = ({
 };
 
 export const codegenProgramWithContinuationFallback = ({
-  modules,
+  program,
   entryModuleId,
   options = {},
 }: CodegenProgramParams): {
@@ -178,12 +174,12 @@ export const codegenProgramWithContinuationFallback = ({
   if (preferredKind !== "stack-switch") {
     return {
       preferredKind,
-      preferred: codegenProgram({ modules, entryModuleId, options }),
+      preferred: codegenProgram({ program, entryModuleId, options }),
     };
   }
 
   const preferred = codegenProgram({
-    modules,
+    program,
     entryModuleId,
     options: {
       ...options,
@@ -194,7 +190,7 @@ export const codegenProgramWithContinuationFallback = ({
     },
   });
   const fallback = codegenProgram({
-    modules,
+    program,
     entryModuleId,
     options: {
       ...options,

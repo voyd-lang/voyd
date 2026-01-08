@@ -129,10 +129,7 @@ pub fn main() -> i32
     if (!utilSemantics) {
       return;
     }
-    const idSymbol = utilSemantics.symbolTable.resolve(
-      "id",
-      utilSemantics.symbolTable.rootScope
-    );
+    const idSymbol = utilSemantics.symbols.resolveTopLevel("id");
     expect(typeof idSymbol).toBe("number");
     if (typeof idSymbol !== "number") {
       return;

@@ -3,10 +3,6 @@ import { initStruct } from "@voyd/lib/binaryen-gc/index.js";
 import type { CodegenContext, FunctionContext, TypeId } from "./context.js";
 import { coerceValueToType } from "./structural.js";
 import { getStructuralTypeInfo } from "./types.js";
-import {
-  getOptionalInfo,
-  optionalResolverContextForTypingResultWithSymbolTable,
-} from "../semantics/typing/optionals.js";
 
 export const compileOptionalNoneValue = ({
   targetTypeId,
@@ -17,13 +13,7 @@ export const compileOptionalNoneValue = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const optionalInfo = getOptionalInfo(
-    targetTypeId,
-    optionalResolverContextForTypingResultWithSymbolTable(
-      ctx.typing,
-      ctx.symbolTable
-    )
-  );
+  const optionalInfo = ctx.program.optionals.getOptionalInfo(ctx.moduleId, targetTypeId);
   if (!optionalInfo) {
     throw new Error("optional default requires an Optional type");
   }

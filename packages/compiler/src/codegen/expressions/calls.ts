@@ -87,7 +87,7 @@ const getOrCreateTempLocal = ({
   const existing = fnCtx.tempLocals.get(tempId);
   if (existing) return existing;
   const typeId =
-    ctx.effectLowering.tempTypeIds.get(tempId) ?? ctx.typing.primitives.unknown;
+    ctx.effectLowering.tempTypeIds.get(tempId) ?? ctx.program.primitives.unknown;
   const wasmType = wasmTypeFor(typeId, ctx);
   const local = allocateTempLocal(wasmType, fnCtx, typeId);
   fnCtx.tempLocals.set(tempId, local);
@@ -208,7 +208,8 @@ export const compileCallExpr = (
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const callInstanceKey = fnCtx.instanceKey ?? typeInstanceKey;
   const callee = ctx.hir.expressions.get(expr.callee);
-  const expectTraitDispatch = ctx.typing.callTraitDispatches.has(expr.id);
+  const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
+  const expectTraitDispatch = callInfo.traitDispatch;
   if (!callee) {
     throw new Error(`codegen missing callee expression ${expr.callee}`);
   }
@@ -229,7 +230,7 @@ export const compileCallExpr = (
   }
 
   if (callee.exprKind === "overload-set") {
-    const targets = ctx.typing.callTargets.get(expr.id);
+    const targets = callInfo.targets;
     const targetSymbol =
       (callInstanceKey && targets?.get(callInstanceKey)) ??
       (typeInstanceKey && targets?.get(typeInstanceKey)) ??
@@ -279,10 +280,9 @@ export const compileCallExpr = (
   }
 
   const calleeTypeId = getRequiredExprType(expr.callee, ctx, typeInstanceKey);
-  const calleeDesc = ctx.typing.arena.get(calleeTypeId);
+  const calleeDesc = ctx.program.arena.get(calleeTypeId);
 
   if (callee.exprKind === "identifier") {
-    const symbolRecord = ctx.symbolTable.getSymbol(callee.symbol);
     const effects = effectsFacade(ctx);
     if (effects.callKind(expr.id) === "perform") {
       return ctx.effectsBackend.compileEffectOpCall({
@@ -293,11 +293,14 @@ export const compileCallExpr = (
         compileExpr,
       });
     }
-    const intrinsicMetadata = (symbolRecord.metadata ?? {}) as {
-      intrinsic?: boolean;
-      intrinsicName?: string;
-      intrinsicUsesSignature?: boolean;
-    };
+    const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
+      ctx.moduleId,
+      callee.symbol
+    );
+    const intrinsicName = ctx.program.symbols.getIntrinsicName(
+      ctx.moduleId,
+      callee.symbol
+    );
     const traitDispatch = compileTraitDispatchCall({
       expr,
       calleeSymbol: callee.symbol,
@@ -329,7 +332,10 @@ export const compileCallExpr = (
       });
       return {
         expr: compileIntrinsicCall({
-          name: intrinsicMetadata.intrinsicName ?? symbolRecord.name,
+          name:
+            intrinsicName ??
+            ctx.program.symbols.getLocalName(ctx.moduleId, callee.symbol) ??
+            `${callee.symbol}`,
           call: expr,
           args,
           ctx,
@@ -403,7 +409,7 @@ const compileTraitDispatchCall = ({
     return undefined;
   }
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  const mapping = ctx.typing.traitMethodImpls.get(calleeSymbol);
+  const mapping = ctx.program.traits.getTraitMethodImpl(calleeSymbol);
   if (!mapping) {
     return undefined;
   }
@@ -412,7 +418,7 @@ const compileTraitDispatchCall = ({
     ctx,
     typeInstanceKey
   );
-  const receiverDesc = ctx.typing.arena.get(receiverTypeId);
+  const receiverDesc = ctx.program.arena.get(receiverTypeId);
   const receiverTraitSymbol =
     receiverDesc.kind === "trait"
       ? localSymbolForSymbolRef(receiverDesc.owner, ctx)
@@ -630,7 +636,7 @@ const compileCallArgumentsForParams = (
     const callee = ctx.hir.expressions.get(call.callee);
     if (!callee) return "<unknown>";
     if (callee.exprKind === "identifier") {
-      return ctx.symbolTable.getSymbol(callee.symbol).name;
+      return ctx.program.symbols.getLocalName(ctx.moduleId, callee.symbol) ?? `${callee.symbol}`;
     }
     if (callee.exprKind === "overload-set") {
       return callee.name;
@@ -865,11 +871,11 @@ const compileClosureCall = ({
   const base = getClosureTypeInfo(calleeTypeId, ctx);
   const effectful =
     typeof calleeDesc.effectRow === "number" &&
-    !ctx.typing.effects.isEmpty(calleeDesc.effectRow);
+    !ctx.program.effects.isEmpty(calleeDesc.effectRow);
   if (effectful && process.env.DEBUG_EFFECTS === "1") {
     console.log("[effects] closure call", {
       returnType: calleeDesc.returnType,
-      row: ctx.typing.effects.getRow(calleeDesc.effectRow),
+      row: ctx.program.effects.getRow(calleeDesc.effectRow),
     });
   }
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
@@ -959,7 +965,7 @@ const compileCurriedClosureCall = ({
   let argIndex = 0;
 
   while (argIndex < expr.args.length) {
-    const currentDesc = ctx.typing.arena.get(currentTypeId);
+    const currentDesc = ctx.program.arena.get(currentTypeId);
     if (currentDesc.kind !== "function") {
       throw new Error("attempted to call a non-function value");
     }
@@ -991,11 +997,11 @@ const compileCurriedClosureCall = ({
     const effectful =
       currentDesc.kind === "function" &&
       typeof currentDesc.effectRow === "number" &&
-      !ctx.typing.effects.isEmpty(currentDesc.effectRow);
+      !ctx.program.effects.isEmpty(currentDesc.effectRow);
     if (effectful && process.env.DEBUG_EFFECTS === "1") {
       console.log("[effects] curried closure call", {
         returnType: currentDesc.returnType,
-        row: ctx.typing.effects.getRow(currentDesc.effectRow),
+        row: ctx.program.effects.getRow(currentDesc.effectRow),
       });
     }
     const returnTypeId =
@@ -1083,7 +1089,7 @@ const getFunctionMetadataForCall = ({
   callId: HirExprId;
   ctx: CodegenContext;
 }): FunctionMetadata | undefined => {
-  const rawKey = ctx.typing.callInstanceKeys.get(callId);
+  const rawKey = ctx.program.calls.getCallInfo(ctx.moduleId, callId).instanceKey;
   const instance = rawKey
     ? ctx.functionInstances.get(scopedInstanceKey(ctx.moduleId, rawKey))
     : undefined;

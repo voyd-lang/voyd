@@ -42,7 +42,7 @@ export const compileEffectOpCall = ({
   if (!site || site.kind !== "perform") {
     throw new Error("codegen missing effect lowering info for perform site");
   }
-  const signature = ctx.typing.functions.getSignature(calleeSymbol);
+  const signature = ctx.program.functions.getSignature(ctx.moduleId, calleeSymbol);
   if (!signature) {
     throw new Error("codegen missing effect operation signature");
   }
@@ -123,4 +123,3 @@ export const compileEffectOpCall = ({
     usedReturnCall: false,
   };
 };
-

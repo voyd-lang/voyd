@@ -257,7 +257,7 @@ const shouldSkipCalleeIdentifierUse = ({
 }: {
   symbol: SymbolId;
   ctx: CodegenContext;
-}): boolean => !!ctx.typing.functions.getSignature(symbol);
+}): boolean => !!ctx.program.functions.getSignature(ctx.moduleId, symbol);
 
 const buildCfg = ({
   exprId,
@@ -588,9 +588,9 @@ const buildCfg = ({
           if (!needed) return;
           const argExprId = expr.args[argIndex]!.expr;
           const typeId =
-            ctx.typing.resolvedExprTypes.get(argExprId) ??
-            ctx.typing.table.getExprType(argExprId) ??
-            ctx.typing.primitives.unknown;
+            ctx.module.types.getResolvedExprType(argExprId) ??
+            ctx.module.types.getExprType(argExprId) ??
+            ctx.program.primitives.unknown;
           tempCapturesByIndex[argIndex] = {
             key: callArgTempKey({ callExprId: expr.id, argIndex }),
             callExprId: expr.id,

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegenProgram } from "../index.js";
+import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import { runEffectfulExport } from "./support/effects-harness.js";
 
 const fixturePath = (name: string) =>
@@ -18,15 +19,16 @@ describe("effects multi-module ids", () => {
   it("keeps effect ids stable across modules and consistent with the effect table", async () => {
     const moduleA = loadSemantics("effects_multi_module_a.voyd");
     const moduleB = loadSemantics("effects_multi_module_b.voyd");
+    const program = buildProgramCodegenView([moduleA, moduleB]);
 
     const buildA = () =>
       codegenProgram({
-        modules: [moduleA, moduleB],
+        program,
         entryModuleId: moduleA.moduleId,
       });
     const buildB = () =>
       codegenProgram({
-        modules: [moduleA, moduleB],
+        program,
         entryModuleId: moduleB.moduleId,
       });
 
@@ -72,4 +74,3 @@ describe("effects multi-module ids", () => {
     expect(second.table.effects).toEqual(resultA.table.effects);
   });
 });
-

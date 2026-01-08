@@ -10,7 +10,6 @@ import { getFixedArrayWasmTypes } from "../types.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";
 import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
-import type { ProgramSemanticsIndex } from "../../semantics/program-index.js";
 import type {
   CodegenContext,
   HirCallExpr,
@@ -42,21 +41,33 @@ const createContext = () => {
     effectful: false,
   };
 
+  const moduleView = {
+    moduleId: "test",
+    binding: {} as any,
+    hir: { expressions } as any,
+    effects: { isEmpty: () => true, getRow: () => ({ operations: [] }) } as any,
+    types: {
+      getExprType: (id: number) => exprTypes.get(id) as any,
+      getResolvedExprType: (id: number) => exprTypes.get(id) as any,
+      getValueType: () => undefined,
+      getTailResumption: () => undefined,
+    },
+    effectsInfo: {
+      functions: new Map(),
+      operations: new Map(),
+      handlers: new Map(),
+      calls: new Map(),
+      handlerTails: new Map(),
+      lambdas: new Map(),
+    },
+  } as const;
+
   const ctx: CodegenContext = {
     mod,
     moduleId: "test",
     moduleLabel: "test",
     effectIdOffset: 0,
-    programIndex: {
-      getModule: () => undefined,
-      getSymbolName: () => undefined,
-      getObjectTemplate: () => undefined,
-      getObjectInfoByNominal: () => undefined,
-    } satisfies ProgramSemanticsIndex,
-    binding: {} as any,
-    symbolTable: {} as any,
-    hir: { expressions } as any,
-    typing: {
+    program: {
       arena: {
         get: (id: number) => {
           const desc = descriptors.get(id);
@@ -66,16 +77,50 @@ const createContext = () => {
           return desc as any;
         },
       },
-      resolvedExprTypes: exprTypes,
-      callTargets: new Map(),
-      callInstanceKeys: new Map(),
-      callTraitDispatches: new Set(),
-      valueTypes: new Map(),
-      intrinsicTypes: new Map(),
-      intrinsicSymbols: new Map(),
-      table: { getExprType: (id: number) => exprTypes.get(id) } as any,
-      primitives: { unknown: -1 } as any,
+      effects: { isEmpty: () => true, getRow: () => ({ operations: [] }) } as any,
+      primitives: { unknown: -1, void: -2, bool: -3, i32: -4, i64: -5, f32: -6, f64: -7, defaultEffectRow: 0 } as any,
+      types: {
+        getTypeDesc: (typeId: number) => moduleView.hir && ({} as any),
+        getNominalOwner: () => undefined,
+        getNominalAncestry: () => [],
+        getStructuralLayout: () => undefined,
+        getRuntimeTypeId: (typeId: number) => typeId,
+      },
+      symbols: {
+        getName: () => undefined,
+        getLocalName: () => undefined,
+        getPackageId: () => undefined,
+        getIntrinsicType: () => undefined,
+        getIntrinsicFunctionFlags: () => ({ intrinsic: false, intrinsicUsesSignature: false }),
+        getIntrinsicName: () => undefined,
+        isModuleScoped: () => false,
+      },
+      functions: {
+        getSignature: () => undefined,
+        getInstantiationInfo: () => undefined,
+        getInstanceExprType: () => undefined,
+      },
+      optionals: { getOptionalInfo: () => undefined },
+      objects: {
+        getTemplate: () => undefined,
+        getInfoByNominal: () => undefined,
+        getNominalOwnerRef: () => undefined,
+        getNominalInstancesByOwner: () => [],
+      },
+      traits: {
+        getImplsByNominal: () => [],
+        getImplsByTrait: () => [],
+        getTraitMethodImpl: () => undefined,
+      },
+      calls: {
+        getCallInfo: () => ({ traitDispatch: false }),
+      },
+      instances: { getAll: () => [], getByKey: () => undefined },
+      modules: new Map([["test", moduleView as any]]),
     } as any,
+    module: moduleView as any,
+    binding: {} as any,
+    hir: { expressions } as any,
     options: {
       optimize: false,
       validate: false,
@@ -94,14 +139,7 @@ const createContext = () => {
     lambdaFunctions: new Map(),
     rtt: { baseType: binaryen.none, extensionHelpers: { i32Array: binaryen.i32 } } as any,
     effectsRuntime,
-    effectsInfo: {
-      functions: new Map(),
-      operations: new Map(),
-      handlers: new Map(),
-      calls: new Map(),
-      handlerTails: new Map(),
-      lambdas: new Map(),
-    },
+    effectsInfo: moduleView.effectsInfo as any,
     effectsBackend: undefined as any,
     effectsState: createEffectsState(),
     effectLowering: {

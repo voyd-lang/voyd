@@ -101,7 +101,7 @@ const emitLambdaFunction = ({
   typeInstanceKey?: string;
   compileExpr: ExpressionCompiler;
 }): void => {
-  const desc = ctx.typing.arena.get(env.typeId);
+  const desc = ctx.program.arena.get(env.typeId);
   if (desc.kind !== "function") {
     throw new Error("lambda missing function type");
   }
@@ -112,7 +112,7 @@ const emitLambdaFunction = ({
   const params = [env.base.interfaceType, ...env.base.paramTypes];
   const typeEffectful =
     typeof desc.effectRow === "number" &&
-    !ctx.typing.effects.isEmpty(desc.effectRow);
+    !ctx.program.effects.isEmpty(desc.effectRow);
   const lambdaInfo = effectsFacade(ctx).lambdaAbi(expr.id);
   const abiEffectful = lambdaInfo?.abiEffectful ?? typeEffectful;
   const needsWrapper = abiEffectful && !typeEffectful;

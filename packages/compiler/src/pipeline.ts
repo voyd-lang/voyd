@@ -12,7 +12,7 @@ import {
   semanticsPipeline,
   type SemanticsPipelineResult,
 } from "./semantics/pipeline.js";
-import { linkProgramSemantics } from "./semantics/linking.js";
+import { monomorphizeProgram } from "./semantics/linking.js";
 import type { Diagnostic } from "./diagnostics/index.js";
 import { diagnosticFromCode, DiagnosticError } from "./diagnostics/index.js";
 import { codegenErrorToDiagnostic } from "./codegen/diagnostics.js";
@@ -21,6 +21,7 @@ import type { ContinuationBackendKind } from "./codegen/codegen.js";
 import { ModuleExportTable } from "./semantics/modules.js";
 import { createTypeArena } from "./semantics/typing/type-arena.js";
 import { createEffectInterner, createEffectTable } from "./semantics/effects/effect-table.js";
+import { buildProgramCodegenView } from "./semantics/codegen-view/index.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -181,13 +182,12 @@ export const emitProgram = async ({
     throw new Error("No semantics available for codegen");
   }
 
-  if (linkSemantics !== false) {
-    linkProgramSemantics({ modules, semantics });
-  }
-
   const codegen = await lazyCodegen();
+  const monomorphized =
+    linkSemantics !== false ? monomorphizeProgram({ modules, semantics }) : { instances: [] };
+  const program = buildProgramCodegenView(modules, { instances: monomorphized.instances });
   const result = codegen.codegenProgram({
-    modules,
+    program,
     entryModuleId: targetModuleId,
     options: codegenOptions,
   });
@@ -223,14 +223,14 @@ export const emitProgramWithContinuationFallback = async ({
     throw new Error("No semantics available for codegen");
   }
 
-  if (linkSemantics !== false) {
-    linkProgramSemantics({ modules, semantics });
-  }
+  const monomorphized =
+    linkSemantics !== false ? monomorphizeProgram({ modules, semantics }) : { instances: [] };
+  const program = buildProgramCodegenView(modules, { instances: monomorphized.instances });
 
   const codegenImpl = await lazyCodegen();
   const { preferredKind, preferred, fallback } =
     codegenImpl.codegenProgramWithContinuationFallback({
-      modules,
+      program,
       entryModuleId: targetModuleId,
       options: codegenOptions,
     });
@@ -275,7 +275,7 @@ export const compileProgram = async (
     const reachableModules = orderedModules
       .map((id) => semantics.get(id))
       .filter((value): value is SemanticsPipelineResult => Boolean(value));
-    linkProgramSemantics({ modules: reachableModules, semantics });
+    monomorphizeProgram({ modules: reachableModules, semantics });
   }
 
   try {

@@ -27,7 +27,7 @@ export const emitPureSurfaceWrapper = (params: {
     tempLocals: new Map(),
     locals: [] as binaryen.Type[],
     nextLocalIndex: wrapperParamTypes.length,
-    returnTypeId: ctx.typing.primitives.unknown,
+    returnTypeId: ctx.program.primitives.unknown,
     instanceKey: undefined,
     typeInstanceKey: undefined,
     effectful: false,

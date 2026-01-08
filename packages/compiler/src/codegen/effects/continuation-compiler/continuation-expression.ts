@@ -294,7 +294,8 @@ export const createContinuationExpressionCompiler = ({
         return { expr: ctx.mod.nop(), usedReturnCall: false };
       }
 
-      const resolvedTypeId = resumeValueTypeId ?? ctx.typing.resolvedExprTypes.get(exprId);
+      const resolvedTypeId =
+        resumeValueTypeId ?? ctx.module.types.getResolvedExprType(exprId);
       const valueType =
         typeof resolvedTypeId === "number" ? wasmTypeFor(resolvedTypeId, ctx) : resumeLocal.type;
       const payload = ctx.mod.local.get(resumeLocal.index, resumeLocal.type);
