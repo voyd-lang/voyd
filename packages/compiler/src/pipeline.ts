@@ -263,11 +263,14 @@ export const compileProgram = async (
     return { graph, semantics, diagnostics };
   }
 
-  const { orderedModules } = lowerProgram({ graph, semantics });
-  const reachableModules = orderedModules
-    .map((id) => semantics.get(id))
-    .filter((value): value is SemanticsPipelineResult => Boolean(value));
-  linkProgramSemantics({ modules: reachableModules, semantics });
+  const shouldLinkSemantics = options.linkSemantics !== false;
+  if (shouldLinkSemantics) {
+    const { orderedModules } = lowerProgram({ graph, semantics });
+    const reachableModules = orderedModules
+      .map((id) => semantics.get(id))
+      .filter((value): value is SemanticsPipelineResult => Boolean(value));
+    linkProgramSemantics({ modules: reachableModules, semantics });
+  }
 
   try {
     const wasmResult = await emitProgram({
