@@ -1,12 +1,21 @@
 import { DiagnosticEmitter } from "../diagnostics/index.js";
 import { createTypingState } from "./typing/context.js";
 import type { DependencySemantics, TypingContext } from "./typing/types.js";
-import { createTypeTranslation, mapDependencySymbolToLocal } from "./typing/imports.js";
 import { typeGenericFunctionBody } from "./typing/expressions/call.js";
 import type { ModuleExportTable } from "./modules.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
 
 export const linkProgramSemantics = ({
+  modules,
+  semantics,
+}: {
+  modules: readonly SemanticsPipelineResult[];
+  semantics: Map<string, SemanticsPipelineResult>;
+}): void => {
+  monomorphizeProgramSemantics({ modules, semantics });
+};
+
+export const monomorphizeProgramSemantics = ({
   modules,
   semantics,
 }: {
@@ -22,16 +31,25 @@ export const linkProgramSemantics = ({
     typingContexts,
   });
 
-  const modulesById = new Map(modules.map((entry) => [entry.moduleId, entry] as const));
+  const modulesById = new Map(
+    modules.map((entry) => [entry.moduleId, entry] as const)
+  );
   const touchedModules = new Set<string>();
 
-  modulesById.forEach((caller) => {
+  modules.forEach((caller) => {
     const callerDep = dependencies.get(caller.moduleId);
     if (!callerDep) {
       return;
     }
 
-    caller.typing.functionInstantiationInfo.forEach((instantiations, localSymbol) => {
+    const sortedLocalSymbols = Array.from(caller.typing.functionInstantiationInfo.keys()).sort(
+      (a, b) => a - b
+    );
+    sortedLocalSymbols.forEach((localSymbol) => {
+      const instantiations = caller.typing.functionInstantiationInfo.get(localSymbol);
+      if (!instantiations) {
+        return;
+      }
       const metadata = (caller.symbolTable.getSymbol(localSymbol).metadata ?? {}) as
         | { import?: { moduleId?: unknown; symbol?: unknown } }
         | undefined;
@@ -54,28 +72,16 @@ export const linkProgramSemantics = ({
         return;
       }
 
-      const translateTypeArg = createTypeTranslation({
-        sourceArena: caller.typing.arena,
-        targetArena: calleeCtx.arena,
-        sourceEffects: caller.typing.effects,
-        targetEffects: calleeCtx.effects,
-        mapSymbol: (symbol) =>
-          mapDependencySymbolToLocal({
-            owner: symbol,
-            dependency: callerDep,
-            ctx: calleeCtx,
-            allowUnexported: true,
-          }),
-      });
-
-      instantiations.forEach((typeArgs) => {
+      const sortedInstantiations = Array.from(instantiations.entries()).sort(([a], [b]) =>
+        a.localeCompare(b, undefined, { numeric: true })
+      );
+      sortedInstantiations.forEach(([, typeArgs]) => {
         if (typeArgs.length !== typeParams.length) {
           return;
         }
 
-        const translated = typeArgs.map((arg) => translateTypeArg(arg));
         const substitution = new Map(
-          typeParams.map((param, index) => [param.typeParam, translated[index]!] as const)
+          typeParams.map((param, index) => [param.typeParam, typeArgs[index]!] as const)
         );
         typeGenericFunctionBody({
           symbol: importSymbol,

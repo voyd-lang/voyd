@@ -18,6 +18,7 @@ import {
 } from "../../../diagnostics/index.js";
 import { mergeBranchType } from "./branching.js";
 import type { TypingContext, TypingState } from "../types.js";
+import { localSymbolForSymbolRef } from "../symbol-ref-utils.js";
 import { bindPatternFromType, recordPatternType } from "./patterns.js";
 
 export const typeMatchExpr = (
@@ -360,7 +361,10 @@ const collectNominalPatternHints = (
     if (nominalDesc.kind !== "nominal-object") {
       return;
     }
-    const owner = nominalDesc.owner;
+    const owner = localSymbolForSymbolRef(nominalDesc.owner, ctx);
+    if (typeof owner !== "number") {
+      return;
+    }
     const count = (counts.get(owner) ?? 0) + 1;
     counts.set(owner, count);
     if (count === 1) {

@@ -136,6 +136,51 @@ describe("module typing across imports", () => {
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("preserves TypeId identity for imported nominal types", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}shapes${sep}point.voyd`]:
+        "pub obj Point { x: i32 }\n\npub fn make(x: i32) -> Point\n  Point { x }",
+      [`${root}${sep}consumer.voyd`]:
+        "use shapes::point::all\n\npub fn id(p: Point) -> Point\n  p",
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}consumer.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+
+    const pointModule = semantics.get("src::shapes::point");
+    const consumerModule = semantics.get("src::consumer");
+    expect(pointModule).toBeDefined();
+    expect(consumerModule).toBeDefined();
+
+    const pointSymbol = pointModule!.symbolTable.resolve(
+      "Point",
+      pointModule!.symbolTable.rootScope
+    );
+    expect(pointSymbol).toBeDefined();
+
+    const pointType = pointModule!.typing.valueTypes.get(pointSymbol!);
+    expect(pointType).toBeDefined();
+
+    const idSymbol = consumerModule!.symbolTable.resolve(
+      "id",
+      consumerModule!.symbolTable.rootScope
+    );
+    expect(idSymbol).toBeDefined();
+
+    const idSig = consumerModule!.typing.functions.getSignature(idSymbol!);
+    const paramType = idSig?.parameters[0]?.type;
+    expect(paramType).toBeDefined();
+
+    expect(paramType).toBe(pointType);
+  });
+
   it("type-checks inline modules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

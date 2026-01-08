@@ -127,6 +127,7 @@ export interface CodegenContext {
   moduleId: string;
   moduleLabel: string;
   effectIdOffset: number;
+  programContexts: Map<string, CodegenContext>;
   binding: BindingResult;
   symbolTable: SymbolTable;
   hir: HirGraph;
@@ -140,7 +141,7 @@ export interface CodegenContext {
   fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
   functionRefTypes: Map<string, binaryen.Type>;
-  runtimeTypeIdsByHash: Map<number, RuntimeTypeIdRegistryEntry>;
+  runtimeTypeRegistry: Map<TypeId, RuntimeTypeIdRegistryEntry>;
   lambdaEnvs: Map<
     string,
     {

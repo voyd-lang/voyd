@@ -85,7 +85,7 @@ describe("type alias type parameters", () => {
         return;
       }
       const nominal = memberNominals.find(
-        (candidate) => candidate.owner === symbol
+        (candidate) => candidate.owner.symbol === symbol
       );
       expect(nominal).toBeDefined();
       if (!nominal || !args) {

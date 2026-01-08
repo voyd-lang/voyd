@@ -62,16 +62,16 @@ export interface EffectTable {
   getFunctionEffect(symbol: SymbolId): EffectRowId | undefined;
 }
 
-export const createEffectTable = (): EffectTable => {
+export type EffectInterner = Omit<
+  EffectTable,
+  "setExprEffect" | "getExprEffect" | "setFunctionEffect" | "getFunctionEffect"
+>;
+
+export const createEffectInterner = (): EffectInterner => {
   let nextRowId: EffectRowId = 0;
   let nextTailVarId = 0;
   const rows: EffectRowDesc[] = [];
   const rowCache = new Map<string, EffectRowId>();
-  const exprEffects = new Map<HirExprId, EffectRowId>();
-  const functionEffects = new Map<
-    SymbolId,
-    { scheme: TypeSchemeId; row: EffectRowId }
-  >();
 
   const opKey = (op: EffectOp): string =>
     `${op.name}#${typeof op.region === "number" ? op.region : ""}`;
@@ -247,40 +247,6 @@ export const createEffectTable = (): EffectTable => {
 
   const isOpen = (row: EffectRowId): boolean => Boolean(getRow(row).tailVar);
 
-  const setExprEffect = (expr: HirExprId, row: EffectRowId): void => {
-    const existing = exprEffects.get(expr);
-    if (typeof existing === "number") {
-      if (existing === row) {
-        return;
-      }
-      row = compose(existing, row);
-    }
-    exprEffects.set(expr, row);
-  };
-
-  const getExprEffect = (expr: HirExprId): EffectRowId | undefined =>
-    exprEffects.get(expr);
-
-  const setFunctionEffect = (
-    symbol: SymbolId,
-    scheme: TypeSchemeId,
-    row: EffectRowId
-  ): void => {
-    const existing = functionEffects.get(symbol);
-    if (
-      existing &&
-      (existing.row !== row || existing.scheme !== scheme)
-    ) {
-      throw new Error(
-        `conflicting effect rows for function ${symbol}: existing=${existing?.row}, next=${row}`
-      );
-    }
-    functionEffects.set(symbol, { scheme, row });
-  };
-
-  const getFunctionEffect = (symbol: SymbolId): EffectRowId | undefined =>
-    functionEffects.get(symbol)?.row;
-
   const emptyRow = internRow({ operations: [] });
   const unknownRow = internRow({
     operations: [],
@@ -297,6 +263,52 @@ export const createEffectTable = (): EffectTable => {
     isEmpty,
     isOpen,
     freshTailVar,
+  };
+};
+
+export const createEffectTable = ({
+  interner,
+}: { interner?: EffectInterner } = {}): EffectTable => {
+  const shared = interner ?? createEffectInterner();
+  const exprEffects = new Map<HirExprId, EffectRowId>();
+  const functionEffects = new Map<
+    SymbolId,
+    { scheme: TypeSchemeId; row: EffectRowId }
+  >();
+
+  const setExprEffect = (expr: HirExprId, row: EffectRowId): void => {
+    const existing = exprEffects.get(expr);
+    if (typeof existing === "number") {
+      if (existing === row) {
+        return;
+      }
+      row = shared.compose(existing, row);
+    }
+    exprEffects.set(expr, row);
+  };
+
+  const getExprEffect = (expr: HirExprId): EffectRowId | undefined =>
+    exprEffects.get(expr);
+
+  const setFunctionEffect = (
+    symbol: SymbolId,
+    scheme: TypeSchemeId,
+    row: EffectRowId
+  ): void => {
+    const existing = functionEffects.get(symbol);
+    if (existing && (existing.row !== row || existing.scheme !== scheme)) {
+      throw new Error(
+        `conflicting effect rows for function ${symbol}: existing=${existing.row}, next=${row}`
+      );
+    }
+    functionEffects.set(symbol, { scheme, row });
+  };
+
+  const getFunctionEffect = (symbol: SymbolId): EffectRowId | undefined =>
+    functionEffects.get(symbol)?.row;
+
+  return {
+    ...shared,
     setExprEffect,
     getExprEffect,
     setFunctionEffect,

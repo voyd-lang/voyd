@@ -64,7 +64,7 @@ const buildLoweringSnapshot = () => {
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
     functionRefTypes: new Map(),
-    runtimeTypeIdsByHash: new Map(),
+    runtimeTypeRegistry: new Map(),
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,

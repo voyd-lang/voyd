@@ -21,7 +21,7 @@ describe("nominal objects", () => {
       const nominalDesc = typing.arena.get(vecDesc.nominal!);
       expect(nominalDesc).toMatchObject({
         kind: "nominal-object",
-        owner: vecSymbol,
+        owner: expect.objectContaining({ symbol: vecSymbol }),
       });
       const structuralDesc = typing.arena.get(vecDesc.structural!);
       expect(structuralDesc.kind).toBe("structural-object");

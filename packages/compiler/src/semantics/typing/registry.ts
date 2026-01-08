@@ -10,6 +10,7 @@ import {
   type TypingContext,
   type TypingState,
 } from "./types.js";
+import { canonicalSymbolRefForTypingContext } from "./symbol-ref-utils.js";
 import type {
   HirFunction,
   HirImplDecl,
@@ -44,7 +45,7 @@ export const seedBaseObjectType = (ctx: TypingContext): void => {
 
   const structural = ctx.arena.internStructuralObject({ fields: [] });
   const nominal = ctx.arena.internNominalObject({
-    owner: symbol,
+    owner: canonicalSymbolRefForTypingContext(symbol, ctx),
     name: BASE_OBJECT_NAME,
     typeArgs: [],
   });

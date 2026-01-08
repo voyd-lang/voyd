@@ -16,7 +16,7 @@ import { DiagnosticEmitter } from "../../diagnostics/index.js";
 
 export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const decls = inputs.decls ?? new DeclTable();
-  const arena = createTypeArena();
+  const arena = inputs.arena ?? createTypeArena();
   const table = createTypeTable();
   const effects = inputs.effects ?? createEffectTable();
   const functions = new FunctionStore();
@@ -45,7 +45,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     hir: inputs.hir,
     overloads: inputs.overloads,
     decls,
-    moduleId: inputs.moduleId,
+    moduleId: inputs.moduleId ?? "local",
     packageId: inputs.packageId ?? "local",
     moduleExports,
     dependencies,

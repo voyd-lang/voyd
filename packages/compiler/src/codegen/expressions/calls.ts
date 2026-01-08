@@ -12,6 +12,7 @@ import type {
   TypeId,
 } from "../context.js";
 import type { EffectRowId } from "../../semantics/ids.js";
+import type { SymbolRef } from "../../semantics/typing/symbol-ref.js";
 import { compileIntrinsicCall } from "../intrinsics.js";
 import {
   requiresStructuralConversion,
@@ -412,9 +413,13 @@ const compileTraitDispatchCall = ({
     typeInstanceKey
   );
   const receiverDesc = ctx.typing.arena.get(receiverTypeId);
+  const receiverTraitSymbol =
+    receiverDesc.kind === "trait"
+      ? localSymbolForSymbolRef(receiverDesc.owner, ctx)
+      : undefined;
   if (
     receiverDesc.kind !== "trait" ||
-    receiverDesc.owner !== mapping.traitSymbol
+    receiverTraitSymbol !== mapping.traitSymbol
   ) {
     return undefined;
   }
@@ -513,6 +518,19 @@ const compileTraitDispatchCall = ({
     expr: ops.length === 1 ? ops[0]! : ctx.mod.block(null, ops, binaryenResult),
     usedReturnCall: lowered.usedReturnCall,
   };
+};
+
+const localSymbolForSymbolRef = (
+  ref: SymbolRef,
+  ctx: CodegenContext
+): SymbolId | undefined => {
+  if (ref.moduleId === ctx.moduleId) {
+    return ref.symbol;
+  }
+  const match = ctx.binding.imports.find(
+    (imp) => imp.target?.moduleId === ref.moduleId && imp.target?.symbol === ref.symbol
+  );
+  return match?.local;
 };
 
 const emitResolvedCall = (

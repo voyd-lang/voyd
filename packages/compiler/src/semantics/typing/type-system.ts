@@ -27,6 +27,11 @@ import {
   getOptionalInfo,
   optionalResolverContextForTypingContext,
 } from "./optionals.js";
+import {
+  canonicalSymbolRefForTypingContext,
+  localSymbolForSymbolRef,
+} from "./symbol-ref-utils.js";
+import { symbolRefEquals } from "./symbol-ref.js";
 
 const isFixedArrayReference = (
   name: string,
@@ -1029,7 +1034,7 @@ export const getObjectTemplate = (
     const fields = mergeDeclaredFields(baseFields, ownFields);
     const structural = ctx.arena.internStructuralObject({ fields });
     const nominal = ctx.arena.internNominalObject({
-      owner: symbol,
+      owner: canonicalSymbolRefForTypingContext(symbol, ctx),
       name: getSymbolName(symbol, ctx),
       typeArgs: params.map((param) => paramMap.get(param.symbol)!),
     });
@@ -1208,7 +1213,7 @@ export const ensureTraitType = (
   }
 
   const type = ctx.arena.internTrait({
-    owner: symbol,
+    owner: canonicalSymbolRefForTypingContext(symbol, ctx),
     name: getSymbolName(symbol, ctx),
     typeArgs: normalized.applied,
   });
@@ -1296,7 +1301,11 @@ export const getObjectInfoForNominal = (
   if (desc.kind !== "nominal-object") {
     return undefined;
   }
-  return ensureObjectType(desc.owner, ctx, state, desc.typeArgs);
+  const owner = localSymbolForSymbolRef(desc.owner, ctx);
+  if (typeof owner !== "number") {
+    return undefined;
+  }
+  return ensureObjectType(owner, ctx, state, desc.typeArgs);
 };
 
 export const getNominalComponent = (
@@ -1340,7 +1349,7 @@ export const nominalSatisfies = (
   if (
     actualDesc.kind === "nominal-object" &&
     expectedDesc.kind === "nominal-object" &&
-    actualDesc.owner === expectedDesc.owner
+    symbolRefEquals(actualDesc.owner, expectedDesc.owner)
   ) {
     if (expectedDesc.typeArgs.length === 0) {
       return true;
@@ -1406,7 +1415,11 @@ export const getStructuralFields = (
   }
 
   if (desc.kind === "nominal-object") {
-    const info = ensureObjectType(desc.owner, ctx, state, desc.typeArgs);
+    const owner = localSymbolForSymbolRef(desc.owner, ctx);
+    const info =
+      typeof owner === "number"
+        ? ensureObjectType(owner, ctx, state, desc.typeArgs)
+        : undefined;
     if (info) {
       const fields = info.fields;
       return options.includeInaccessible
@@ -1454,7 +1467,11 @@ const structuralExpectationOf = (
       ensureFieldsSubstituted(desc.fields, ctx, "structural comparison");
       return type;
     case "nominal-object": {
-      const info = ensureObjectType(desc.owner, ctx, state, desc.typeArgs);
+      const owner = localSymbolForSymbolRef(desc.owner, ctx);
+      const info =
+        typeof owner === "number"
+          ? ensureObjectType(owner, ctx, state, desc.typeArgs)
+          : undefined;
       if (info) {
         ensureFieldsSubstituted(info.fields, ctx, "structural comparison");
       }
@@ -1501,7 +1518,10 @@ export const typeSatisfies = (
 
   const expectedDesc = ctx.arena.get(expected);
   if (expectedDesc.kind === "trait") {
-    return traitSatisfies(actual, expected, expectedDesc.owner, ctx, state);
+    const owner = localSymbolForSymbolRef(expectedDesc.owner, ctx);
+    return typeof owner === "number"
+      ? traitSatisfies(actual, expected, owner, ctx, state)
+      : false;
   }
 
   const optionalInfo = getOptionalInfo(
@@ -1643,7 +1663,7 @@ const nominalInstantiationMatches = (
     if (
       currentDesc.kind === "nominal-object" &&
       expectedDesc.kind === "nominal-object" &&
-      currentDesc.owner === expectedDesc.owner &&
+      symbolRefEquals(currentDesc.owner, expectedDesc.owner) &&
       currentDesc.typeArgs.length === expectedDesc.typeArgs.length &&
       !currentDesc.typeArgs.some((arg) => containsUnknownType(arg, ctx)) &&
       !expectedDesc.typeArgs.some((arg) => containsUnknownType(arg, ctx))
@@ -1758,7 +1778,7 @@ export const bindTypeParamsFromType = (
     const actualDesc = ctx.arena.get(actualNominal);
     if (
       actualDesc.kind !== "nominal-object" ||
-      actualDesc.owner !== expectedDesc.owner
+      !symbolRefEquals(actualDesc.owner, expectedDesc.owner)
     ) {
       return;
     }

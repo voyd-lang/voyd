@@ -12,7 +12,7 @@ describe("unification options", () => {
       fields: [{ name: "value", type: bool }],
     });
     const nominal = arena.internNominalObject({
-      owner: 1 as SymbolId,
+      owner: { moduleId: "test", symbol: 1 as SymbolId },
       name: "Widget",
       typeArgs: [],
     });
@@ -44,7 +44,7 @@ describe("unification options", () => {
       fields: [{ name: "value", type: bool }],
     });
     const nominal = arena.internNominalObject({
-      owner: 2 as SymbolId,
+      owner: { moduleId: "test", symbol: 2 as SymbolId },
       name: "Gadget",
       typeArgs: [],
     });

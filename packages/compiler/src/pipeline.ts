@@ -19,6 +19,8 @@ import { codegenErrorToDiagnostic } from "./codegen/diagnostics.js";
 import type { CodegenOptions } from "./codegen/context.js";
 import type { ContinuationBackendKind } from "./codegen/codegen.js";
 import { ModuleExportTable } from "./semantics/modules.js";
+import { createTypeArena } from "./semantics/typing/type-arena.js";
+import { createEffectInterner, createEffectTable } from "./semantics/effects/effect-table.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -88,6 +90,9 @@ export const analyzeModules = ({
   const diagnostics: Diagnostic[] = [];
   let halted = false;
 
+  const arena = createTypeArena();
+  const effectInterner = createEffectInterner();
+
   order.forEach((id) => {
     if (halted) return;
     const module = graph.modules.get(id);
@@ -100,6 +105,7 @@ export const analyzeModules = ({
         graph,
         exports,
         dependencies: semantics,
+        typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
       });
       semantics.set(id, result);
       exports.set(id, result.exports);

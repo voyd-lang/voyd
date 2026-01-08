@@ -32,6 +32,7 @@ export interface SemanticsPipelineOptions {
   graph: ModuleGraph;
   exports?: Map<string, ModuleExportTable>;
   dependencies?: Map<string, SemanticsPipelineResult>;
+  typing?: Partial<Pick<TypingResult, "arena" | "effects">>;
 }
 
 type SemanticsPipelineInput = SemanticsPipelineOptions | Form;
@@ -39,7 +40,7 @@ type SemanticsPipelineInput = SemanticsPipelineOptions | Form;
 export const semanticsPipeline = (
   input: SemanticsPipelineInput
 ): SemanticsPipelineResult => {
-  const { module, graph, exports, dependencies } =
+  const { module, graph, exports, dependencies, typing: typingState } =
     normalizeSemanticsInput(input);
   const form = module.ast;
   if (!form.callsInternal("ast")) {
@@ -103,6 +104,8 @@ export const semanticsPipeline = (
       binding.importedOverloadOptions
     ),
     decls: binding.decls,
+    arena: typingState?.arena,
+    effects: typingState?.effects,
     imports: binding.imports,
     moduleId: module.id,
     packageId: binding.packageId,

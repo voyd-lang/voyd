@@ -35,6 +35,7 @@ export interface TypingInputs {
   hir: HirGraph;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
   decls?: DeclTable;
+  arena?: TypeArena;
   effects?: EffectTable;
   imports?: readonly {
     local: SymbolId;
@@ -510,7 +511,7 @@ export interface TypingContext {
   hir: HirGraph;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
   decls: DeclTable;
-  moduleId?: string;
+  moduleId: string;
   packageId: string;
   moduleExports: Map<string, ModuleExportTable>;
   dependencies: Map<string, DependencySemantics>;

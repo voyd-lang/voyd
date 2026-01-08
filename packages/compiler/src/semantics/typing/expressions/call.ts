@@ -53,6 +53,7 @@ import type {
   TypingState,
 } from "../types.js";
 import { assertMemberAccess } from "../visibility.js";
+import { localSymbolForSymbolRef } from "../symbol-ref-utils.js";
 
 export const typeCallExpr = (
   expr: HirCallExpr,
@@ -807,9 +808,13 @@ const adjustTraitDispatchParameters = ({
   }
   const receiverType = args[0].type;
   const receiverDesc = ctx.arena.get(receiverType);
+  const receiverTraitSymbol =
+    receiverDesc.kind === "trait"
+      ? localSymbolForSymbolRef(receiverDesc.owner, ctx)
+      : undefined;
   if (
     receiverDesc.kind !== "trait" ||
-    receiverDesc.owner !== methodMetadata.traitSymbol
+    receiverTraitSymbol !== methodMetadata.traitSymbol
   ) {
     return undefined;
   }
@@ -1415,8 +1420,12 @@ const resolveTraitDispatchOverload = ({
     return undefined;
   }
 
-  const impls = ctx.traitImplsByTrait.get(receiverDesc.owner);
-  const templates = ctx.traits.getImplTemplatesForTrait(receiverDesc.owner);
+  const receiverTraitSymbol = localSymbolForSymbolRef(receiverDesc.owner, ctx);
+  if (typeof receiverTraitSymbol !== "number") {
+    return undefined;
+  }
+  const impls = ctx.traitImplsByTrait.get(receiverTraitSymbol);
+  const templates = ctx.traits.getImplTemplatesForTrait(receiverTraitSymbol);
   if (
     (!impls || impls.length === 0) &&
     (!templates || templates.length === 0)
@@ -1430,7 +1439,7 @@ const resolveTraitDispatchOverload = ({
       return false;
     }
     const methodMetadata = ctx.traitMethodImpls.get(symbol);
-    if (!methodMetadata || methodMetadata.traitSymbol !== receiverDesc.owner) {
+    if (!methodMetadata || methodMetadata.traitSymbol !== receiverTraitSymbol) {
       return false;
     }
     const hasMatchingImpl =

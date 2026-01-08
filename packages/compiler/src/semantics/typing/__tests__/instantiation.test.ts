@@ -37,6 +37,7 @@ const createContext = () => {
     hir,
     overloads: new Map(),
     decls: new DeclTable(),
+    moduleId: "test",
   });
   seedPrimitiveTypes(ctx);
   seedBaseObjectType(ctx);
@@ -66,7 +67,7 @@ const primeBoxTemplate = (
   ];
   const structural = ctx.arena.internStructuralObject({ fields });
   const nominal = ctx.arena.internNominalObject({
-    owner: boxSymbol,
+    owner: { moduleId: "test", symbol: boxSymbol },
     name: "Box",
     typeArgs: [typeParamRef],
   });
@@ -105,7 +106,7 @@ const primeSomeTemplate = (
   ];
   const structural = ctx.arena.internStructuralObject({ fields });
   const nominal = ctx.arena.internNominalObject({
-    owner: someSymbol,
+    owner: { moduleId: "test", symbol: someSymbol },
     name: "Some",
     typeArgs: [typeParamRef],
   });
@@ -141,7 +142,7 @@ const primeNoneTemplate = (
   const typeParamRef = ctx.arena.internTypeParamRef(typeParam);
   const structural = ctx.arena.internStructuralObject({ fields: [] });
   const nominal = ctx.arena.internNominalObject({
-    owner: noneSymbol,
+    owner: { moduleId: "test", symbol: noneSymbol },
     name: "None",
     typeArgs: [typeParamRef],
   });
@@ -184,7 +185,7 @@ const primeBucketMapTemplate = (
   const keyRef = ctx.arena.internTypeParamRef(keyParam);
   const valueRef = ctx.arena.internTypeParamRef(valueParam);
   const payload = ctx.arena.internNominalObject({
-    owner: someSymbol,
+    owner: { moduleId: "test", symbol: someSymbol },
     name: "Some",
     typeArgs: [valueRef],
   });
@@ -194,7 +195,7 @@ const primeBucketMapTemplate = (
   ];
   const structural = ctx.arena.internStructuralObject({ fields });
   const nominal = ctx.arena.internNominalObject({
-    owner: mapSymbol,
+    owner: { moduleId: "test", symbol: mapSymbol },
     name: "BucketMap",
     typeArgs: [keyRef, valueRef],
   });
@@ -663,10 +664,13 @@ describe("instantiation argument handling", () => {
       const memberDesc = ctx.arena.get(member);
       if (memberDesc.kind === "intersection" && typeof memberDesc.nominal === "number") {
         const nominalDesc = ctx.arena.get(memberDesc.nominal);
-        return nominalDesc.kind === "nominal-object" && nominalDesc.owner === boxSymbol;
+        return (
+          nominalDesc.kind === "nominal-object" &&
+          nominalDesc.owner.symbol === boxSymbol
+        );
       }
       if (memberDesc.kind === "nominal-object") {
-        return memberDesc.owner === boxSymbol;
+        return memberDesc.owner.symbol === boxSymbol;
       }
       return false;
     });
@@ -765,10 +769,13 @@ describe("instantiation argument handling", () => {
         const memberDesc = ctx.arena.get(member);
         if (memberDesc.kind === "intersection" && typeof memberDesc.nominal === "number") {
           const nominalDesc = ctx.arena.get(memberDesc.nominal);
-          return nominalDesc.kind === "nominal-object" && nominalDesc.owner === boxSymbol;
+          return (
+            nominalDesc.kind === "nominal-object" &&
+            nominalDesc.owner.symbol === boxSymbol
+          );
         }
         if (memberDesc.kind === "nominal-object") {
-          return memberDesc.owner === boxSymbol;
+          return memberDesc.owner.symbol === boxSymbol;
         }
         return false;
       });
@@ -945,10 +952,13 @@ describe("instantiation argument handling", () => {
         const memberDesc = ctx.arena.get(member);
         if (memberDesc.kind === "intersection" && typeof memberDesc.nominal === "number") {
           const nominalDesc = ctx.arena.get(memberDesc.nominal);
-          return nominalDesc.kind === "nominal-object" && nominalDesc.owner === boxSymbol;
+          return (
+            nominalDesc.kind === "nominal-object" &&
+            nominalDesc.owner.symbol === boxSymbol
+          );
         }
         if (memberDesc.kind === "nominal-object") {
-          return memberDesc.owner === boxSymbol;
+          return memberDesc.owner.symbol === boxSymbol;
         }
         return false;
       });
@@ -1068,7 +1078,7 @@ describe("instantiation argument handling", () => {
     const stringType =
       ctx.primitives.cache.get("string") ?? ctx.arena.internPrimitive("string");
     const mismatchedPayload = ctx.arena.internNominalObject({
-      owner: someSymbol,
+      owner: { moduleId: "test", symbol: someSymbol },
       name: "Some",
       typeArgs: [stringType],
     });

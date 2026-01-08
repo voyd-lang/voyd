@@ -73,12 +73,13 @@ export const codegenProgram = ({
   const functions = new Map<string, FunctionMetadata[]>();
   const functionInstances = new Map<string, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
-  const runtimeTypeIdsByHash = new Map<number, RuntimeTypeIdRegistryEntry>();
+  const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
     effectIdOffset: 0,
+    programContexts: new Map(),
     binding: sem.binding,
     symbolTable: sem.symbolTable,
     hir: sem.hir,
@@ -97,7 +98,7 @@ export const codegenProgram = ({
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
     functionRefTypes: new Map(),
-    runtimeTypeIdsByHash,
+    runtimeTypeRegistry,
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,
@@ -113,6 +114,13 @@ export const codegenProgram = ({
     },
     outcomeValueTypes,
   }));
+
+  const programContexts = new Map<string, CodegenContext>(
+    contexts.map((ctx) => [ctx.moduleId, ctx] as const)
+  );
+  contexts.forEach((ctx) => {
+    ctx.programContexts = programContexts;
+  });
 
   let effectIdOffset = 0;
   contexts.forEach((ctx) => {
