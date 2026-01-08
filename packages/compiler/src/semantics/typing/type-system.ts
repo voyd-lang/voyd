@@ -23,6 +23,10 @@ import {
   shouldCacheInstantiation,
 } from "../../types/instantiation.js";
 import { filterAccessibleFields } from "./visibility.js";
+import {
+  getOptionalInfo,
+  optionalResolverContextForTypingContext,
+} from "./optionals.js";
 
 const isFixedArrayReference = (
   name: string,
@@ -1500,42 +1504,11 @@ export const typeSatisfies = (
     return traitSatisfies(actual, expected, expectedDesc.owner, ctx, state);
   }
 
-  const optionalInner = (() => {
-    if (expectedDesc.kind !== "union") {
-      return undefined;
-    }
-    let someType: TypeId | undefined;
-    let noneType: TypeId | undefined;
-    for (const member of expectedDesc.members) {
-      const nominal = getNominalComponent(member, ctx);
-      if (typeof nominal !== "number") {
-        continue;
-      }
-      const nominalDesc = ctx.arena.get(nominal);
-      if (nominalDesc.kind !== "nominal-object") {
-        continue;
-      }
-      const name = nominalDesc.name ?? getSymbolName(nominalDesc.owner, ctx);
-      if (!someType && name === "Some") {
-        someType = member;
-        continue;
-      }
-      if (!noneType && name === "None") {
-        noneType = member;
-      }
-    }
-    if (!someType || !noneType) {
-      return undefined;
-    }
-    const someFields = getStructuralFields(someType, ctx, state, {
-      includeInaccessible: true,
-      allowOwnerPrivate: true,
-    });
-    const valueField = someFields?.find((field) => field.name === "value");
-    return valueField?.type;
-  })();
-
-  if (typeof optionalInner === "number" && typeSatisfies(actual, optionalInner, ctx, state)) {
+  const optionalInfo = getOptionalInfo(
+    expected,
+    optionalResolverContextForTypingContext(ctx)
+  );
+  if (optionalInfo && typeSatisfies(actual, optionalInfo.innerType, ctx, state)) {
     return true;
   }
 

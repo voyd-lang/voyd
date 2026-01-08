@@ -22,6 +22,10 @@ import {
   getSymbolName,
 } from "../type-system.js";
 import {
+  getOptionalInfo,
+  optionalResolverContextForTypingContext,
+} from "../optionals.js";
+import {
   emitDiagnostic,
   normalizeSpan,
 } from "../../../diagnostics/index.js";
@@ -461,28 +465,6 @@ const labelsCompatible = (
   return argLabel === undefined || argLabel === expected;
 };
 
-const optionalNoneMember = (type: TypeId, ctx: TypingContext): TypeId | undefined => {
-  const desc = ctx.arena.get(type);
-  if (desc.kind !== "union") {
-    return undefined;
-  }
-  for (const member of desc.members) {
-    const nominal = getNominalComponent(member, ctx);
-    if (typeof nominal !== "number") {
-      continue;
-    }
-    const nominalDesc = ctx.arena.get(nominal);
-    if (nominalDesc.kind !== "nominal-object") {
-      continue;
-    }
-    const name = nominalDesc.name ?? getSymbolName(nominalDesc.owner, ctx);
-    if (name === "None") {
-      return member;
-    }
-  }
-  return undefined;
-};
-
 const validateCallArgs = (
   args: readonly Arg[],
   params: readonly ParamSignature[],
@@ -501,12 +483,15 @@ const validateCallArgs = (
 
     if (!arg) {
       if (param.optional) {
-        const noneType = optionalNoneMember(param.type, ctx);
-        if (typeof noneType !== "number") {
-          throw new Error("optional parameter type must include None");
+        const optionalInfo = getOptionalInfo(
+          param.type,
+          optionalResolverContextForTypingContext(ctx)
+        );
+        if (!optionalInfo) {
+          throw new Error("optional parameter type must be Optional");
         }
         ensureTypeMatches(
-          noneType,
+          optionalInfo.noneType,
           param.type,
           ctx,
           state,
@@ -572,12 +557,15 @@ const validateCallArgs = (
           }
 
           if (runParam.optional) {
-            const noneType = optionalNoneMember(runParam.type, ctx);
-            if (typeof noneType !== "number") {
-              throw new Error("optional parameter type must include None");
+            const optionalInfo = getOptionalInfo(
+              runParam.type,
+              optionalResolverContextForTypingContext(ctx)
+            );
+            if (!optionalInfo) {
+              throw new Error("optional parameter type must be Optional");
             }
             ensureTypeMatches(
-              noneType,
+              optionalInfo.noneType,
               runParam.type,
               ctx,
               state,
@@ -619,12 +607,15 @@ const validateCallArgs = (
     }
 
     if (param.optional) {
-      const noneType = optionalNoneMember(param.type, ctx);
-      if (typeof noneType !== "number") {
-        throw new Error("optional parameter type must include None");
+      const optionalInfo = getOptionalInfo(
+        param.type,
+        optionalResolverContextForTypingContext(ctx)
+      );
+      if (!optionalInfo) {
+        throw new Error("optional parameter type must be Optional");
       }
       ensureTypeMatches(
-        noneType,
+        optionalInfo.noneType,
         param.type,
         ctx,
         state,
