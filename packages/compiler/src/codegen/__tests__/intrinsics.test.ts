@@ -82,6 +82,7 @@ const createContext = () => {
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
     functionRefTypes: new Map(),
+    runtimeTypeIdsByHash: new Map(),
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt: { baseType: binaryen.none, extensionHelpers: { i32Array: binaryen.i32 } } as any,

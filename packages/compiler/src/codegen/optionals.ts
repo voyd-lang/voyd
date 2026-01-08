@@ -5,7 +5,7 @@ import { coerceValueToType } from "./structural.js";
 import { getStructuralTypeInfo } from "./types.js";
 import {
   getOptionalInfo,
-  optionalResolverContextForTypingResult,
+  optionalResolverContextForTypingResultWithSymbolTable,
 } from "../semantics/typing/optionals.js";
 
 export const compileOptionalNoneValue = ({
@@ -19,7 +19,10 @@ export const compileOptionalNoneValue = ({
 }): binaryen.ExpressionRef => {
   const optionalInfo = getOptionalInfo(
     targetTypeId,
-    optionalResolverContextForTypingResult(ctx.typing)
+    optionalResolverContextForTypingResultWithSymbolTable(
+      ctx.typing,
+      ctx.symbolTable
+    )
   );
   if (!optionalInfo) {
     throw new Error("optional default requires an Optional type");

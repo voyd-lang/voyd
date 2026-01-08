@@ -30,6 +30,101 @@ const bin = binaryen as unknown as AugmentedBinaryen;
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
 
+const canonicalSymbolKey = (symbol: SymbolId, ctx: CodegenContext): string => {
+  const record = ctx.symbolTable.getSymbol(symbol);
+  const metadata = (record.metadata ?? {}) as
+    | { import?: { moduleId?: unknown; symbol?: unknown } }
+    | undefined;
+  const moduleId = metadata?.import?.moduleId;
+  const importedSymbol = metadata?.import?.symbol;
+  if (typeof moduleId === "string" && typeof importedSymbol === "number") {
+    return `${moduleId}#${importedSymbol}`;
+  }
+  return `${ctx.moduleId}#${symbol}`;
+};
+
+const runtimeTypeKeyFor = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+  seen: Set<TypeId>
+): string => {
+  if (seen.has(typeId)) {
+    return `recursive:${typeId}`;
+  }
+  seen.add(typeId);
+
+  const desc = ctx.typing.arena.get(typeId);
+  switch (desc.kind) {
+    case "primitive":
+      return `prim:${desc.name}`;
+    case "type-param-ref":
+      return `typeparam:${desc.param}`;
+    case "nominal-object":
+      return `nominal:${canonicalSymbolKey(desc.owner, ctx)}<${desc.typeArgs
+        .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
+        .join(",")}>`;
+    case "trait":
+      return `trait:${canonicalSymbolKey(desc.owner, ctx)}<${desc.typeArgs
+        .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
+        .join(",")}>`;
+    case "structural-object":
+      return `struct:{${desc.fields
+        .map(
+          (field) =>
+            `${field.name}${field.optional ? "?" : ""}:${runtimeTypeKeyFor(
+              field.type,
+              ctx,
+              seen
+            )}`
+        )
+        .join(",")}}`;
+    case "function":
+      return `fn:(${desc.parameters
+        .map((param) => runtimeTypeKeyFor(param.type, ctx, seen))
+        .join(",")})->${runtimeTypeKeyFor(desc.returnType, ctx, seen)}`;
+    case "union": {
+      const members = desc.members
+        .map((member) => runtimeTypeKeyFor(member, ctx, seen))
+        .sort();
+      return `union:${members.join("|")}`;
+    }
+    case "intersection": {
+      const nominal = typeof desc.nominal === "number"
+        ? runtimeTypeKeyFor(desc.nominal, ctx, seen)
+        : "none";
+      const structural = typeof desc.structural === "number"
+        ? runtimeTypeKeyFor(desc.structural, ctx, seen)
+        : "none";
+      return `intersection:${nominal}&${structural}`;
+    }
+    case "fixed-array":
+      return `fixed-array:${runtimeTypeKeyFor(desc.element, ctx, seen)}`;
+    default:
+      return `${(desc as { kind: string }).kind}:${typeId}`;
+  }
+};
+
+const runtimeTypeIdFor = (typeId: TypeId, ctx: CodegenContext): number =>
+  (() => {
+    const key = runtimeTypeKeyFor(typeId, ctx, new Set());
+    const id = murmurHash3(key);
+    const existing = ctx.runtimeTypeIdsByHash.get(id);
+    if (existing && existing.key !== key) {
+      throw new Error(
+        [
+          "runtime type hash collision detected",
+          `hash: ${id}`,
+          `existing: (module ${existing.moduleId}, type ${existing.typeId}) ${existing.key}`,
+          `new: (module ${ctx.moduleId}, type ${typeId}) ${key}`,
+        ].join("\n")
+      );
+    }
+    if (!existing) {
+      ctx.runtimeTypeIdsByHash.set(id, { key, moduleId: ctx.moduleId, typeId });
+    }
+    return id;
+  })();
+
 export const getFunctionRefType = ({
   params,
   result,
@@ -273,8 +368,14 @@ export const wasmTypeFor = (
       return wasmTypeFor(desc.structural, ctx, seen);
     }
 
+    if (desc.kind === "type-param-ref") {
+      throw new Error(
+        `codegen cannot map unresolved type parameter to wasm (module ${ctx.moduleId}, type ${typeId}, param ${desc.param})`
+      );
+    }
+
     throw new Error(
-      `codegen cannot map ${desc.kind} types to wasm yet (type ${typeId})`
+      `codegen cannot map ${desc.kind} types to wasm yet (module ${ctx.moduleId}, type ${typeId})`
     );
   } finally {
     seen.delete(typeId);
@@ -432,6 +533,7 @@ export const getStructuralTypeInfo = (
       structuralId,
       nominalId,
     });
+    const runtimeTypeId = runtimeTypeIdFor(typeId, ctx);
     const ancestors = buildRuntimeAncestors({
       typeId,
       structuralId,
@@ -509,6 +611,7 @@ export const getStructuralTypeInfo = (
 
     const info: StructuralTypeInfo = {
       typeId,
+      runtimeTypeId,
       structuralId,
       nominalId,
       nominalAncestors,
@@ -583,14 +686,29 @@ const buildRuntimeAncestors = ({
   nominalAncestry: readonly NominalAncestryEntry[];
   ctx: CodegenContext;
 }): number[] => {
+  const runtimeIdMemo = new Map<TypeId, number>();
+  const runtimeIdFor = (id: TypeId): number => {
+    const cached = runtimeIdMemo.get(id);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const computed = runtimeTypeIdFor(id, ctx);
+    runtimeIdMemo.set(id, computed);
+    return computed;
+  };
+
   const seen = new Set<number>();
   const ancestors: number[] = [];
   const add = (id?: TypeId) => {
-    if (typeof id !== "number" || seen.has(id)) {
+    if (typeof id !== "number") {
       return;
     }
-    seen.add(id);
-    ancestors.push(id);
+    const runtimeId = runtimeIdFor(id);
+    if (seen.has(runtimeId)) {
+      return;
+    }
+    seen.add(runtimeId);
+    ancestors.push(runtimeId);
   };
 
   add(typeId);
@@ -673,6 +791,7 @@ const createMethodLookupEntries = ({
     return [];
   }
   const entries: MethodAccessorEntry[] = [];
+  const hashes = new Map<number, string>();
 
   impls.forEach((impl) => {
     impl.methods.forEach((implMethodSymbol, traitMethodSymbol) => {
@@ -731,11 +850,25 @@ const createMethodLookupEntries = ({
       );
       const heapType = bin._BinaryenFunctionGetType(wrapper);
       const fnType = bin._BinaryenTypeFromHeapType(heapType, false);
+      const hash = traitMethodHash({
+        traitSymbol: impl.traitSymbol,
+        methodSymbol: traitMethodSymbol,
+      });
+      const signatureKey = `${impl.traitSymbol}:${traitMethodSymbol}`;
+      const existing = hashes.get(hash);
+      if (existing && existing !== signatureKey) {
+        throw new Error(
+          [
+            `method hash collision detected for ${typeLabel}`,
+            `hash: ${hash}`,
+            `existing: ${existing}`,
+            `new: ${signatureKey}`,
+          ].join("\n")
+        );
+      }
+      hashes.set(hash, signatureKey);
       entries.push({
-        hash: traitMethodHash({
-          traitSymbol: impl.traitSymbol,
-          methodSymbol: traitMethodSymbol,
-        }),
+        hash,
         ref: refFunc(ctx.mod, wrapperName, fnType),
       });
     });

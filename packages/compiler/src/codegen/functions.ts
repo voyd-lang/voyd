@@ -11,8 +11,10 @@ import { wasmTypeFor } from "./types.js";
 import {
   isPackageVisible,
   isPublicVisibility,
+  type HirExportEntry,
 } from "../semantics/hir/index.js";
 import { diagnosticFromCode } from "../diagnostics/index.js";
+import { DiagnosticError } from "../diagnostics/index.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
 import {
   collectEffectOperationSignatures,
@@ -63,11 +65,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         ? Array.from(instantiationInfo.entries())
         : [];
     if (recordedInstantiations.length === 0 && schemeInfo.params.length > 0) {
-      const name = ctx.symbolTable.getSymbol(item.symbol).name;
-      const exported = exportedItems.has(itemId) ? "exported " : "";
-      throw new Error(
-        `codegen requires a concrete instantiation for ${exported}generic function ${name}`
-      );
+      continue;
     }
     const instantiations: [string, readonly TypeId[]][] =
       recordedInstantiations.length > 0
@@ -174,6 +172,14 @@ export const compileFunctions = (ctx: CodegenContext): void => {
     }
     const metas = ctx.functions.get(functionKey(ctx.moduleId, item.symbol));
     if (!metas || metas.length === 0) {
+      const schemeId = ctx.typing.table.getSymbolScheme(item.symbol);
+      const scheme =
+        typeof schemeId === "number" ? ctx.typing.arena.getScheme(schemeId) : undefined;
+      const instantiationInfo = ctx.typing.functionInstantiationInfo.get(item.symbol);
+      const hasInstantiations = Boolean(instantiationInfo && instantiationInfo.size > 0);
+      if (scheme && scheme.params.length > 0 && !hasInstantiations) {
+        continue;
+      }
       throw new Error(`codegen missing metadata for function ${item.symbol}`);
     }
     metas.forEach((meta) => compileFunctionItem(item, meta, ctx));
@@ -214,10 +220,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         ? Array.from(instantiationInfo.entries())
         : [];
     if (recordedInstantiations.length === 0 && typeParamCount > 0) {
-      const name = ctx.symbolTable.getSymbol(imp.local).name;
-      throw new Error(
-        `codegen requires a concrete instantiation for imported generic function ${name}`
-      );
+      return;
     }
     const instantiations: [string, readonly TypeId[]][] =
       recordedInstantiations.length > 0
@@ -229,7 +232,19 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         const effectInfo = effects.functionAbi(imp.local);
         const effectful =
           targetMeta?.effectful ?? (effectInfo ? effectInfo.typeEffectful : false);
-        const userParamTypes = signature.parameters.map((param) =>
+        const instantiationScheme = signature.scheme ?? schemeId;
+        const instantiatedTypeId =
+          typeof instantiationScheme === "number"
+            ? ctx.typing.arena.instantiate(instantiationScheme, typeArgs)
+            : signature.typeId;
+        const instantiatedTypeDesc = ctx.typing.arena.get(instantiatedTypeId);
+        if (instantiatedTypeDesc.kind !== "function") {
+          throw new Error(
+            `codegen expected function type for import ${imp.local} (type ${instantiatedTypeId})`
+          );
+        }
+
+        const userParamTypes = instantiatedTypeDesc.parameters.map((param) =>
           wasmTypeFor(param.type, ctx)
         );
         const paramTypes = effectful
@@ -237,21 +252,21 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
           : userParamTypes;
         const resultType = effectful
           ? ctx.effectsRuntime.outcomeType
-          : wasmTypeFor(signature.returnType, ctx);
+          : wasmTypeFor(instantiatedTypeDesc.returnType, ctx);
       const metadata: FunctionMetadata = {
         moduleId: ctx.moduleId,
         symbol: imp.local,
         wasmName: (targetMeta ?? targetMetas[0]!).wasmName,
         paramTypes,
         resultType,
-        paramTypeIds: signature.parameters.map((param) => param.type),
-        parameters: signature.parameters.map((param) => ({
+        paramTypeIds: instantiatedTypeDesc.parameters.map((param) => param.type),
+        parameters: instantiatedTypeDesc.parameters.map((param, index) => ({
           typeId: param.type,
           label: param.label,
           optional: param.optional,
-          name: param.name,
+          name: signature.parameters[index]?.name,
         })),
-        resultTypeId: signature.returnType,
+        resultTypeId: instantiatedTypeDesc.returnType,
         typeArgs,
         instanceKey,
         effectful,
@@ -328,6 +343,7 @@ export const emitModuleExports = (
     const meta =
       metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
     if (!meta) {
+      throwIfMissingExportedGenericInstantiation({ ctx, entry, symbolRecord });
       return;
     }
     const exportName = entry.alias ?? symbolRecord.name;
@@ -401,6 +417,45 @@ export const emitModuleExports = (
       exportName: `${exportName}_effectful`,
     });
   });
+};
+
+/**
+ * Codegen intentionally skips emitting *uninstantiated* generic functions so that
+ * modules like `std` can define lots of generic helpers without forcing every
+ * function into the output WASM.
+ *
+ * Exports are different: a WASM export requires a concrete signature. If a
+ * generic function is exported but never instantiated, we fail with a diagnostic
+ * rather than silently omitting the export.
+ */
+const throwIfMissingExportedGenericInstantiation = ({
+  ctx,
+  entry,
+  symbolRecord,
+}: {
+  ctx: CodegenContext;
+  entry: HirExportEntry;
+  symbolRecord: ReturnType<CodegenContext["symbolTable"]["getSymbol"]>;
+}): void => {
+  const schemeId = ctx.typing.table.getSymbolScheme(entry.symbol);
+  if (typeof schemeId !== "number") return;
+
+  const scheme = ctx.typing.arena.getScheme(schemeId);
+  if (scheme.params.length === 0) return;
+
+  const body = ctx.typing.arena.get(scheme.body);
+  if (body.kind !== "function") return;
+
+  throw new DiagnosticError(
+    diagnosticFromCode({
+      code: "CG0003",
+      params: {
+        kind: "exported-generic-missing-instantiation",
+        functionName: symbolRecord.name,
+      },
+      span: entry.span,
+    })
+  );
 };
 
 const compileFunctionItem = (

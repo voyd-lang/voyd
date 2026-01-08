@@ -88,6 +88,7 @@ export interface StructuralFieldInfo {
 
 export interface StructuralTypeInfo {
   typeId: TypeId;
+  runtimeTypeId: number;
   structuralId: TypeId;
   nominalId?: TypeId;
   nominalAncestors: readonly TypeId[];
@@ -100,6 +101,12 @@ export interface StructuralTypeInfo {
   methodTableGlobal: string;
   typeLabel: string;
 }
+
+export type RuntimeTypeIdRegistryEntry = {
+  key: string;
+  moduleId: string;
+  typeId: TypeId;
+};
 
 export interface FixedArrayWasmType {
   type: binaryen.Type;
@@ -133,6 +140,7 @@ export interface CodegenContext {
   fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
   functionRefTypes: Map<string, binaryen.Type>;
+  runtimeTypeIdsByHash: Map<number, RuntimeTypeIdRegistryEntry>;
   lambdaEnvs: Map<
     string,
     {

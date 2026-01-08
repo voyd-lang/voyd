@@ -14,11 +14,15 @@ export const bindTypeAlias = (
   rememberSyntax(decl.name, ctx);
   rememberSyntax(decl.target, ctx);
 
+  const intrinsicType = decl.form.attributes?.intrinsicType;
+  const intrinsicTypeMetadata =
+    typeof intrinsicType === "string" ? { intrinsicType } : undefined;
+
   const symbol = ctx.symbolTable.declare({
     name: decl.name.value,
     kind: "type",
     declaredAt: decl.form.syntaxId,
-    metadata: { entity: "type-alias" },
+    metadata: { entity: "type-alias", ...intrinsicTypeMetadata },
   });
 
   const aliasScope = ctx.symbolTable.createScope({

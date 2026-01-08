@@ -5,6 +5,7 @@ import type {
   CodegenResult,
   FunctionMetadata,
   SemanticsPipelineResult,
+  RuntimeTypeIdRegistryEntry,
 } from "./context.js";
 import { createRttContext } from "./rtt/index.js";
 import { createEffectRuntime } from "./effects/runtime-abi.js";
@@ -72,6 +73,7 @@ export const codegenProgram = ({
   const functions = new Map<string, FunctionMetadata[]>();
   const functionInstances = new Map<string, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
+  const runtimeTypeIdsByHash = new Map<number, RuntimeTypeIdRegistryEntry>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
@@ -95,6 +97,7 @@ export const codegenProgram = ({
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
     functionRefTypes: new Map(),
+    runtimeTypeIdsByHash,
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,

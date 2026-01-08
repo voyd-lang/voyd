@@ -139,8 +139,21 @@ export const initFieldLookupHelpers = (
   const registerType = (
     opts: RegisterFieldAccessorsOptions
   ): binaryen.ExpressionRef => {
+    const hashes = new Map<number, string>();
     const entries = opts.fields.map((field) => {
       const hash = murmurHash3(field.name);
+      const existing = hashes.get(hash);
+      if (existing && existing !== field.name) {
+        throw new Error(
+          [
+            `field hash collision detected for ${opts.typeLabel}`,
+            `hash: ${hash}`,
+            `existing: ${existing}`,
+            `new: ${field.name}`,
+          ].join("\n")
+        );
+      }
+      hashes.set(hash, field.name);
       field.hash = hash;
 
       const getterName = `obj_field_getter_${opts.typeLabel}_${field.name}`;

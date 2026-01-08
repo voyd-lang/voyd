@@ -1,9 +1,9 @@
 import { stdout } from "process";
 import { readFileSync, statSync, existsSync } from "fs";
 import { dirname, join, resolve } from "node:path";
-import { createRequire } from "node:module";
 import binaryen from "binaryen";
 import { getConfig } from "@voyd/lib/config/index.js";
+import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { testGc } from "@voyd/lib/binaryen-gc/test.js";
 import { parse } from "@voyd/compiler/parser/parser.js";
 import {
@@ -19,8 +19,6 @@ import { formatCliDiagnostic } from "./diagnostics.js";
 import { assertRunnableWasm, emitWasmBytes } from "./wasm-validation.js";
 
 export const exec = () => main().catch(errorHandler);
-
-const require = createRequire(import.meta.url);
 
 async function main() {
   const config = getConfig();
@@ -64,11 +62,6 @@ async function main() {
     "I don't know what to do with the supplied options. Maybe try something else ¯_(ツ)_/¯"
   );
 }
-
-const resolveStdRoot = (): string => {
-  const pkgPath = require.resolve("@voyd/std/package.json");
-  return dirname(pkgPath);
-};
 
 const resolveEntryPath = (index: string): string => {
   const resolved = resolve(index);

@@ -1,6 +1,7 @@
-import type { TypeId } from "../ids.js";
+import type { SymbolId, TypeId } from "../ids.js";
 import type { TypeArena } from "./type-arena.js";
 import type { TypingContext, TypingResult } from "./types.js";
+import type { SymbolTable } from "../binder/index.js";
 
 export type OptionalInfo = {
   optionalType: TypeId;
@@ -13,6 +14,7 @@ export type OptionalResolverContext = {
   arena: TypeArena;
   unknownType: TypeId;
   getObjectStructuralTypeId?: (nominal: TypeId) => TypeId | undefined;
+  getSymbolIntrinsicType?: (symbol: SymbolId) => string | undefined;
 };
 
 const cacheByArena = new WeakMap<TypeArena, Map<TypeId, OptionalInfo | null>>();
@@ -24,6 +26,14 @@ export const optionalResolverContextForTypingContext = (
   unknownType: ctx.primitives.unknown,
   getObjectStructuralTypeId: (nominal) =>
     ctx.objects.getInstanceByNominal(nominal)?.structural,
+  getSymbolIntrinsicType: (symbol) => {
+    const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ?? {}) as {
+      intrinsicType?: unknown;
+    };
+    return typeof metadata.intrinsicType === "string"
+      ? metadata.intrinsicType
+      : undefined;
+  },
 });
 
 export const optionalResolverContextForTypingResult = (
@@ -33,6 +43,21 @@ export const optionalResolverContextForTypingResult = (
   unknownType: typing.primitives.unknown,
   getObjectStructuralTypeId: (nominal) =>
     typing.objectsByNominal.get(nominal)?.structural,
+});
+
+export const optionalResolverContextForTypingResultWithSymbolTable = (
+  typing: TypingResult,
+  symbolTable: SymbolTable
+): OptionalResolverContext => ({
+  ...optionalResolverContextForTypingResult(typing),
+  getSymbolIntrinsicType: (symbol) => {
+    const metadata = (symbolTable.getSymbol(symbol).metadata ?? {}) as {
+      intrinsicType?: unknown;
+    };
+    return typeof metadata.intrinsicType === "string"
+      ? metadata.intrinsicType
+      : undefined;
+  },
 });
 
 const resolveStructuralTypeId = (
@@ -61,6 +86,25 @@ const resolveStructuralTypeId = (
   }
   if (desc.kind === "nominal-object" && ctx.getObjectStructuralTypeId) {
     return ctx.getObjectStructuralTypeId(type);
+  }
+  return undefined;
+};
+
+const resolveNominalOwnerSymbol = (
+  type: TypeId,
+  ctx: OptionalResolverContext
+): SymbolId | undefined => {
+  if (type === ctx.unknownType) {
+    return undefined;
+  }
+
+  const desc = ctx.arena.get(type);
+  if (desc.kind === "nominal-object") {
+    return desc.owner;
+  }
+  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+    const nominal = ctx.arena.get(desc.nominal);
+    return nominal.kind === "nominal-object" ? nominal.owner : undefined;
   }
   return undefined;
 };
@@ -99,6 +143,47 @@ export const getOptionalInfo = (
   const analyzeMember = (
     member: TypeId
   ): { kind: "none" } | { kind: "some"; innerType: TypeId } | undefined => {
+    const intrinsicType = (() => {
+      if (!ctx.getSymbolIntrinsicType) {
+        return undefined;
+      }
+      const owner = resolveNominalOwnerSymbol(member, ctx);
+      if (typeof owner !== "number") {
+        return undefined;
+      }
+      return ctx.getSymbolIntrinsicType(owner);
+    })();
+
+    if (intrinsicType === "optional-none") {
+      const structural = resolveStructuralTypeId(member, ctx);
+      if (typeof structural !== "number") {
+        return undefined;
+      }
+      const structuralDesc = ctx.arena.get(structural);
+      if (structuralDesc.kind !== "structural-object") {
+        return undefined;
+      }
+      return structuralDesc.fields.length === 0 ? { kind: "none" } : undefined;
+    }
+
+    if (intrinsicType === "optional-some") {
+      const structural = resolveStructuralTypeId(member, ctx);
+      if (typeof structural !== "number") {
+        return undefined;
+      }
+      const structuralDesc = ctx.arena.get(structural);
+      if (structuralDesc.kind !== "structural-object") {
+        return undefined;
+      }
+      if (
+        structuralDesc.fields.length === 1 &&
+        structuralDesc.fields[0]!.name === "value"
+      ) {
+        return { kind: "some", innerType: structuralDesc.fields[0]!.type };
+      }
+      return undefined;
+    }
+
     const structural = resolveStructuralTypeId(member, ctx);
     if (typeof structural !== "number") {
       return undefined;
@@ -155,4 +240,3 @@ export const optionalInnerType = (
   type: TypeId,
   ctx: OptionalResolverContext
 ): TypeId | undefined => getOptionalInfo(type, ctx)?.innerType;
-

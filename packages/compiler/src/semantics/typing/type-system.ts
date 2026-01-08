@@ -1611,7 +1611,18 @@ export const ensureTypeMatches = (
     return;
   }
 
-  throw new Error(`type mismatch for ${reason}`);
+  const format = (type: TypeId): string => {
+    try {
+      return JSON.stringify({ id: type, desc: ctx.arena.get(type) });
+    } catch {
+      return String(type);
+    }
+  };
+  throw new Error(
+    `type mismatch for ${reason}\nactual: ${format(actual)}\nexpected: ${format(
+      expected
+    )}`
+  );
 };
 
 const nominalInstantiationMatches = (

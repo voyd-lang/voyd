@@ -57,6 +57,10 @@ type DiagnosticParamsMap = {
     exportName: string;
     returnType: string;
   };
+  CG0003: {
+    kind: "exported-generic-missing-instantiation";
+    functionName: string;
+  };
   MD0001:
     | { kind: "missing"; requested: string }
     | { kind: "referenced-from"; importer: string };
@@ -187,6 +191,13 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "codegen",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["CG0002"]>,
+  CG0003: {
+    code: "CG0003",
+    message: (params) =>
+      `requires concrete instantiation for exported generic function ${params.functionName}`,
+    severity: "error",
+    phase: "codegen",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["CG0003"]>,
   MD0001: {
     code: "MD0001",
     message: (params) =>

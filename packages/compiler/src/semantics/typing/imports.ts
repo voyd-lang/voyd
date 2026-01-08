@@ -70,6 +70,29 @@ const translateEffectRow = ({
   });
 };
 
+export const createTypeTranslation = ({
+  sourceArena,
+  targetArena,
+  sourceEffects,
+  targetEffects,
+  mapSymbol,
+}: {
+  sourceArena: TypingContext["arena"];
+  targetArena: TypingContext["arena"];
+  sourceEffects: EffectTable;
+  targetEffects: EffectTable;
+  mapSymbol: (symbol: SymbolId) => SymbolId;
+}): ((id: TypeId) => TypeId) =>
+  createTranslation({
+    sourceArena,
+    targetArena,
+    sourceEffects,
+    targetEffects,
+    paramMap: new Map<TypeParamId, TypeParamId>(),
+    cache: new Map<TypeId, TypeId>(),
+    mapSymbol,
+  });
+
 export const importTargetFor = (
   symbol: SymbolId,
   ctx: TypingContext
@@ -248,28 +271,33 @@ export const resolveImportedTypeExpr = ({
   const depCtx = makeDependencyContext(dependency, ctx);
   const depState = createTypingState(state.mode);
 
+  const forwardParamMap = new Map<TypeParamId, TypeParamId>();
   const forward = createTranslation({
     sourceArena: ctx.arena,
     targetArena: depCtx.arena,
     sourceEffects: ctx.effects,
     targetEffects: depCtx.effects,
-    paramMap: new Map(),
+    paramMap: forwardParamMap,
     cache: new Map(),
     mapSymbol: (owner) =>
       mapLocalSymbolToDependency({ owner, dependency, ctx }),
   });
+  const reverseParamMap = new Map<TypeParamId, TypeParamId>();
   const back = createTranslation({
     sourceArena: depCtx.arena,
     targetArena: ctx.arena,
     sourceEffects: depCtx.effects,
     targetEffects: ctx.effects,
-    paramMap: new Map(),
+    paramMap: reverseParamMap,
     cache: new Map(),
     mapSymbol: (owner) =>
       mapDependencySymbolToLocal({ owner, dependency, ctx }),
   });
 
   const depArgs = typeArgs.map((arg) => forward(arg));
+  forwardParamMap.forEach((targetParam, sourceParam) => {
+    reverseParamMap.set(targetParam, sourceParam);
+  });
   const resolved =
     resolveImportedAlias(target.symbol, depArgs, depCtx, depState) ??
     resolveImportedObject(target.symbol, depArgs, depCtx, depState) ??
@@ -614,27 +642,100 @@ export const registerImportedObjectTemplate = ({
   }
 };
 
-const mapDependencySymbolToLocal = ({
+export const mapDependencySymbolToLocal = ({
   owner,
   dependency,
   ctx,
+  allowUnexported,
 }: {
   owner: SymbolId;
   dependency: DependencySemantics;
   ctx: TypingContext;
+  allowUnexported?: boolean;
 }): SymbolId => {
-  const aliases = ctx.importAliasesByModule.get(dependency.moduleId);
-  const aliased = aliases?.get(owner);
-  if (typeof aliased === "number") {
-    return aliased;
-  }
+  const visit = (
+    candidateOwner: SymbolId,
+    candidateDependency: DependencySemantics,
+    seen: Set<string>
+  ): SymbolId => {
+    const key = `${candidateDependency.moduleId}::${candidateOwner}`;
+    if (seen.has(key)) {
+      throw new Error(
+        `cyclic import metadata while resolving symbol ${candidateOwner}`
+      );
+    }
+    seen.add(key);
 
-  const exportEntry = findExport(owner, dependency);
-  if (!exportEntry) {
-    throw new Error(`module ${dependency.moduleId} does not export symbol ${owner}`);
-  }
+    const aliases = ctx.importAliasesByModule.get(candidateDependency.moduleId);
+    const aliased = aliases?.get(candidateOwner);
+    if (typeof aliased === "number") {
+      return aliased;
+    }
 
-  const dependencyRecord = dependency.symbolTable.getSymbol(owner);
+    const exportEntry = findExport(candidateOwner, candidateDependency);
+    if (!exportEntry) {
+      const record = candidateDependency.symbolTable.getSymbol(candidateOwner);
+      const importMetadata = (record.metadata ?? {}) as
+        | { import?: { moduleId?: unknown; symbol?: unknown } }
+        | undefined;
+      const importModuleId = importMetadata?.import?.moduleId;
+      const importSymbol = importMetadata?.import?.symbol;
+
+      if (
+        typeof importModuleId === "string" &&
+        typeof importSymbol === "number"
+      ) {
+        const importedDependency = ctx.dependencies.get(importModuleId);
+        if (importedDependency) {
+          return visit(importSymbol, importedDependency, seen);
+        }
+      }
+
+      if (allowUnexported === true) {
+        const recordName = record.name;
+        const importableMetadata = importableMetadataFrom(
+          record.metadata as Record<string, unknown> | undefined
+        );
+        const declared = ctx.symbolTable.declare({
+          name: recordName,
+          kind: record.kind,
+          declaredAt: ctx.hir.module.ast,
+          metadata: {
+            import: { moduleId: candidateDependency.moduleId, symbol: candidateOwner },
+            ...(importableMetadata ?? {}),
+          },
+        });
+        ctx.importsByLocal.set(declared, {
+          moduleId: candidateDependency.moduleId,
+          symbol: candidateOwner,
+        });
+        const bucket =
+          ctx.importAliasesByModule.get(candidateDependency.moduleId) ??
+          new Map();
+        bucket.set(candidateOwner, declared);
+        ctx.importAliasesByModule.set(candidateDependency.moduleId, bucket);
+        if (
+          record.kind === "type" ||
+          candidateDependency.typing.objects.getTemplate(candidateOwner)
+        ) {
+          registerImportedObjectTemplate({
+            dependency: candidateDependency,
+            dependencySymbol: candidateOwner,
+            localSymbol: declared,
+            ctx,
+          });
+        }
+        return declared;
+      }
+
+      throw new Error(
+        `module ${candidateDependency.moduleId} does not export symbol ${candidateOwner}`
+      );
+    }
+
+    const dependencyRecord = candidateDependency.symbolTable.getSymbol(
+      candidateOwner
+    );
   const importableMetadata = importableMetadataFrom(
     dependencyRecord.metadata as Record<string, unknown> | undefined
   );
@@ -643,26 +744,33 @@ const mapDependencySymbolToLocal = ({
     kind: exportEntry.kind,
     declaredAt: ctx.hir.module.ast,
     metadata: {
-      import: { moduleId: dependency.moduleId, symbol: owner },
+      import: { moduleId: candidateDependency.moduleId, symbol: candidateOwner },
       ...(importableMetadata ?? {}),
     },
   });
-  ctx.importsByLocal.set(declared, { moduleId: dependency.moduleId, symbol: owner });
-  const bucket = ctx.importAliasesByModule.get(dependency.moduleId) ?? new Map();
-  bucket.set(owner, declared);
-  ctx.importAliasesByModule.set(dependency.moduleId, bucket);
+    ctx.importsByLocal.set(declared, {
+      moduleId: candidateDependency.moduleId,
+      symbol: candidateOwner,
+    });
+    const bucket =
+      ctx.importAliasesByModule.get(candidateDependency.moduleId) ?? new Map();
+    bucket.set(candidateOwner, declared);
+    ctx.importAliasesByModule.set(candidateDependency.moduleId, bucket);
   if (
     exportEntry.kind === "type" ||
-    dependency.typing.objects.getTemplate(owner)
+    candidateDependency.typing.objects.getTemplate(candidateOwner)
   ) {
     registerImportedObjectTemplate({
-      dependency,
-      dependencySymbol: owner,
+      dependency: candidateDependency,
+      dependencySymbol: candidateOwner,
       localSymbol: declared,
       ctx,
     });
   }
   return declared;
+  };
+
+  return visit(owner, dependency, new Set());
 };
 
 const mapLocalSymbolToDependency = ({

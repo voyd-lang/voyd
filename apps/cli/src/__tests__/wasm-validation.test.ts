@@ -1,17 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
+import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
+import { getWasmInstance } from "@voyd/lib/wasm.js";
 import {
   analyzeModules,
   emitProgram,
   loadModuleGraph,
 } from "@voyd/compiler/pipeline.js";
 import { assertRunnableWasm } from "../wasm-validation.js";
-
-const require = createRequire(import.meta.url);
-
-const resolveStdRoot = (): string =>
-  dirname(require.resolve("@voyd/std/package.json"));
 
 describe("wasm validation", () => {
   it("accepts wasm-gc modules that Node can validate", async () => {
@@ -36,5 +32,27 @@ describe("wasm validation", () => {
 
     (module as unknown as { validate: () => number }).validate =
       originalValidate;
+  });
+
+  it("compiles std::optional and preserves optional semantics", async () => {
+    const entryPath = resolve(
+      import.meta.dirname,
+      "fixtures",
+      "std_optional_basic.voyd"
+    );
+    const roots = { src: dirname(entryPath), std: resolveStdRoot() };
+    const graph = await loadModuleGraph({ entryPath, roots });
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const error = [...graph.diagnostics, ...diagnostics].find(
+      (diag) => diag.severity === "error"
+    );
+    if (error) {
+      throw new Error(`${error.code}: ${error.message}`);
+    }
+    const { module } = await emitProgram({ graph, semantics });
+    const wasm = assertRunnableWasm(module);
+    const instance = getWasmInstance(wasm);
+    const exports = instance.exports as Record<string, unknown>;
+    expect((exports.main as () => number)()).toBe(12);
   });
 });

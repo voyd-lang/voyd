@@ -43,6 +43,7 @@ import { typeExpression } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
 import { getValueType } from "./identifier.js";
 import { assertMutableObjectBinding, findBindingSymbol } from "./mutability.js";
+import { importTargetFor } from "../imports.js";
 import type {
   Arg,
   FunctionSignature,
@@ -990,7 +991,14 @@ const typeFunctionCall = ({
     const skipGenericBody =
       intrinsicMetadata.intrinsic === true &&
       intrinsicMetadata.intrinsicUsesSignature !== true;
-    if (!skipGenericBody) {
+    const importedTarget = importTargetFor(calleeSymbol, ctx);
+    const isImportedFunction =
+      importedTarget?.moduleId !== undefined &&
+      importedTarget.moduleId !== ctx.moduleId &&
+      typeof importedTarget.symbol === "number";
+    if (!skipGenericBody && isImportedFunction) {
+      ctx.functions.recordInstantiation(calleeSymbol, callKey, appliedTypeArgs);
+    } else if (!skipGenericBody) {
       typeGenericFunctionBody({
         symbol: calleeSymbol,
         signature,
@@ -1115,7 +1123,7 @@ export const enforceTypeParamConstraint = (
   }
 };
 
-const typeGenericFunctionBody = ({
+export const typeGenericFunctionBody = ({
   symbol,
   signature,
   substitution,
