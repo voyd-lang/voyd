@@ -273,7 +273,7 @@ export const buildEffectLowering = ({
     });
   };
 
-  ctx.hir.items.forEach((item) => {
+  ctx.module.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
     const effectInfo = effectsFacade(ctx).functionAbi(item.symbol);
     if (!effectInfo) return;
@@ -298,7 +298,7 @@ export const buildEffectLowering = ({
     });
   });
 
-  ctx.hir.expressions.forEach((expr) => {
+  ctx.module.hir.expressions.forEach((expr) => {
     if (expr.exprKind !== "lambda") return;
     if (!shouldLowerLambda(expr, ctx)) return;
 
@@ -319,7 +319,7 @@ export const buildEffectLowering = ({
     });
   });
 
-  ctx.hir.expressions.forEach((expr) => {
+  ctx.module.hir.expressions.forEach((expr) => {
     if (expr.exprKind !== "effect-handler") return;
 
     expr.handlers.forEach((clause, clauseIndex) => {

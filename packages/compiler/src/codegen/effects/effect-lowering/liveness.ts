@@ -327,7 +327,7 @@ const buildCfg = ({
   };
 
   const buildStmt = (stmtId: HirStmtId, flow: FlowTargets): Subgraph => {
-    const stmt = ctx.hir.statements.get(stmtId);
+    const stmt = ctx.module.hir.statements.get(stmtId);
     if (!stmt) {
       throw new Error(`codegen missing HirStatement ${stmtId}`);
     }
@@ -359,7 +359,7 @@ const buildCfg = ({
   };
 
   const buildExpr = (id: HirExprId, flow: FlowTargets): Subgraph => {
-    const expr = ctx.hir.expressions.get(id);
+    const expr = ctx.module.hir.expressions.get(id);
     if (!expr) {
       throw new Error(`codegen missing HirExpression ${id}`);
     }
@@ -536,7 +536,7 @@ const buildCfg = ({
         return sequence([bodyGraph, finallyGraph]);
       }
       case "call": {
-        const calleeExpr = ctx.hir.expressions.get(expr.callee);
+        const calleeExpr = ctx.module.hir.expressions.get(expr.callee);
         const calleeGraph =
           calleeExpr && calleeExpr.exprKind === "identifier"
             ? shouldSkipCalleeIdentifierUse({ symbol: calleeExpr.symbol, ctx })

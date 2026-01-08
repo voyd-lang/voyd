@@ -35,7 +35,7 @@ const siteOrdersFromExpr = ({
   const cached = memo.get(exprId);
   if (cached) return cached;
 
-  const expr = ctx.hir.expressions.get(exprId);
+  const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr) return emptySites();
 
   const sites = new Set<number>();
@@ -305,7 +305,7 @@ const siteOrdersFromStmt = ({
 }): ReadonlySet<number> => {
   const cached = memoStmt.get(stmtId);
   if (cached) return cached;
-  const stmt = ctx.hir.statements.get(stmtId);
+  const stmt = ctx.module.hir.statements.get(stmtId);
   if (!stmt) return emptySites();
 
   const sites = new Set<number>();

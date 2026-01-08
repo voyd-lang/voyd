@@ -85,9 +85,6 @@ export const codegenProgram = ({
     effectIdOffset: 0,
     program,
     module: sem,
-    binding: sem.binding,
-    hir: sem.hir,
-    effectsInfo: sem.effectsInfo,
     options: mergedOptions,
     functions,
     functionInstances,
@@ -116,7 +113,7 @@ export const codegenProgram = ({
   let effectIdOffset = 0;
   contexts.forEach((ctx) => {
     ctx.effectIdOffset = effectIdOffset;
-    effectIdOffset += ctx.binding.effects.length;
+    effectIdOffset += ctx.module.binding.effects.length;
   });
 
   const siteCounter = { current: 0 };

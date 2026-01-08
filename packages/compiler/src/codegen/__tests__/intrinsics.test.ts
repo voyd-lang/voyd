@@ -119,8 +119,6 @@ const createContext = () => {
       modules: new Map([["test", moduleView as any]]),
     } as any,
     module: moduleView as any,
-    binding: {} as any,
-    hir: { expressions } as any,
     options: {
       optimize: false,
       validate: false,
@@ -139,7 +137,6 @@ const createContext = () => {
     lambdaFunctions: new Map(),
     rtt: { baseType: binaryen.none, extensionHelpers: { i32Array: binaryen.i32 } } as any,
     effectsRuntime,
-    effectsInfo: moduleView.effectsInfo as any,
     effectsBackend: undefined as any,
     effectsState: createEffectsState(),
     effectLowering: {

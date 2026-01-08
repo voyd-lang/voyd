@@ -207,7 +207,7 @@ export const compileCallExpr = (
   const { tailPosition = false, expectedResultTypeId } = options;
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const callInstanceKey = fnCtx.instanceKey ?? typeInstanceKey;
-  const callee = ctx.hir.expressions.get(expr.callee);
+  const callee = ctx.module.hir.expressions.get(expr.callee);
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
   const expectTraitDispatch = callInfo.traitDispatch;
   if (!callee) {
@@ -533,7 +533,7 @@ const localSymbolForSymbolRef = (
   if (ref.moduleId === ctx.moduleId) {
     return ref.symbol;
   }
-  const match = ctx.binding.imports.find(
+  const match = ctx.module.binding.imports.find(
     (imp) => imp.target?.moduleId === ref.moduleId && imp.target?.symbol === ref.symbol
   );
   return match?.local;
@@ -633,7 +633,7 @@ const compileCallArgumentsForParams = (
 ): binaryen.ExpressionRef[] => {
   const { typeInstanceKey } = options;
   const calleeName = (() => {
-    const callee = ctx.hir.expressions.get(call.callee);
+    const callee = ctx.module.hir.expressions.get(call.callee);
     if (!callee) return "<unknown>";
     if (callee.exprKind === "identifier") {
       return ctx.program.symbols.getLocalName(ctx.moduleId, callee.symbol) ?? `${callee.symbol}`;

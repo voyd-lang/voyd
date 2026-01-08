@@ -50,7 +50,7 @@ const buildEffectOperationIndex = (
   const index = new Map<string, EffectOperationIndexEntry>();
 
   contexts.forEach((ctx) => {
-    ctx.binding.effects.forEach((effect, localEffectIndex) => {
+  ctx.module.binding.effects.forEach((effect, localEffectIndex) => {
       const effectId = ctx.effectIdOffset + localEffectIndex;
       effect.operations.forEach((op, opId) => {
         const key = signatureKey(effectId, opId);

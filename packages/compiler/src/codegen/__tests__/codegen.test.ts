@@ -90,9 +90,6 @@ const buildCodegenProgram = (
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
     effectIdOffset: 0,
-    binding: sem.binding,
-    hir: sem.hir,
-    effectsInfo: program.modules.get(sem.moduleId)!.effectsInfo,
     options: DEFAULT_OPTIONS,
     functions,
     functionInstances,
@@ -121,7 +118,7 @@ const buildCodegenProgram = (
   let effectIdOffset = 0;
   contexts.forEach((ctx) => {
     ctx.effectIdOffset = effectIdOffset;
-    effectIdOffset += ctx.binding.effects.length;
+    effectIdOffset += ctx.module.binding.effects.length;
   });
 
   const siteCounter = { current: 0 };

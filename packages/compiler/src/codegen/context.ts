@@ -27,7 +27,6 @@ import type {
   EffectRowId,
 } from "../semantics/ids.js";
 import type { createRttContext } from "./rtt/index.js";
-import type { BindingResult } from "../semantics/binding/binding.js";
 import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
 import type { EffectRuntime } from "./effects/runtime-abi.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
@@ -38,7 +37,6 @@ import type { ContinuationBackendOptions } from "./effects/backend.js";
 import type { EffectsBackend } from "./effects/codegen-backend.js";
 import type { EffectsState } from "./effects/state.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
-import type { EffectsLoweringInfo } from "../semantics/effects/analysis.js";
 import type { ProgramCodegenView } from "../semantics/codegen-view/index.js";
 import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
 
@@ -128,9 +126,6 @@ export interface CodegenContext {
   effectIdOffset: number;
   program: ProgramCodegenView;
   module: ModuleCodegenView;
-  binding: BindingResult;
-  hir: HirGraph;
-  effectsInfo: EffectsLoweringInfo;
   options: Required<CodegenOptions>;
   functions: Map<string, FunctionMetadata[]>;
   functionInstances: Map<string, FunctionMetadata>;
@@ -248,8 +243,6 @@ export type ExpressionCompiler = (
 ) => CompiledExpression;
 
 export type {
-  SemanticsPipelineResult,
-  TypingResult,
   HirGraph,
   HirFunction,
   HirExpression,
@@ -266,7 +259,6 @@ export type {
   HirCallExpr,
   HirTypeExpr,
   HirEffectHandlerExpr,
-  SymbolTable,
   HirExprId,
   HirItemId,
   HirStmtId,

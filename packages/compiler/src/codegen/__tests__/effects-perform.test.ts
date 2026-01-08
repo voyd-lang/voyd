@@ -48,9 +48,6 @@ const buildLoweringSnapshot = () => {
     effectIdOffset: 0,
     program,
     module: moduleView,
-    binding: moduleView.binding,
-    hir: moduleView.hir,
-    effectsInfo: moduleView.effectsInfo,
     options: {
       optimize: false,
       validate: true,

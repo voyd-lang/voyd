@@ -36,7 +36,7 @@ const findFunctionBySymbol = (
   symbol: SymbolId,
   ctx: CodegenContext
 ): { fn: HirFunction; returnTypeId: TypeId } => {
-  for (const item of ctx.hir.items.values()) {
+  for (const item of ctx.module.hir.items.values()) {
     if (item.kind === "function" && item.symbol === symbol) {
       const signature = ctx.program.functions.getSignature(ctx.moduleId, symbol);
       if (!signature) {
@@ -52,7 +52,7 @@ const findLambdaByExprId = (
   exprId: HirExprId,
   ctx: CodegenContext
 ): { expr: HirLambdaExpr; returnTypeId: TypeId } => {
-  const expr = ctx.hir.expressions.get(exprId);
+  const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr || expr.exprKind !== "lambda") {
     throw new Error(`could not find lambda expression ${exprId}`);
   }
@@ -128,7 +128,7 @@ const collectHandlerClauseLocalSymbols = ({
   ctx: CodegenContext;
 }): Set<SymbolId> => {
   const symbols = new Set<SymbolId>();
-  const handler = ctx.hir.expressions.get(handlerExprId);
+  const handler = ctx.module.hir.expressions.get(handlerExprId);
   if (!handler || handler.exprKind !== "effect-handler") {
     throw new Error(`could not find effect handler expression ${handlerExprId}`);
   }
@@ -172,7 +172,7 @@ const findHandlerClauseByOwner = ({
   resumeSymbol?: SymbolId;
   resumeKind: ResumeKind;
 } => {
-  const handler = ctx.hir.expressions.get(handlerExprId);
+  const handler = ctx.module.hir.expressions.get(handlerExprId);
   if (!handler || handler.exprKind !== "effect-handler") {
     throw new Error(`could not find effect handler expression ${handlerExprId}`);
   }

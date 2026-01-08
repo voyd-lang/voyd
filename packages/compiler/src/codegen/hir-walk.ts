@@ -58,7 +58,7 @@ export const walkHirExpression = ({
   const stop = { value: false };
   walkSemanticsExpression({
     exprId,
-    hir: ctx.hir,
+    hir: ctx.module.hir,
     options: {
       skipLambdas: !visitLambdaBodies,
       visitHandlerBodies: false,

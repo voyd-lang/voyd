@@ -34,11 +34,11 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
   const unknown = ctx.program.primitives.unknown;
   const exportedItems = new Set(
-    ctx.hir.module.exports.map((entry) => entry.item)
+    ctx.module.hir.module.exports.map((entry) => entry.item)
   );
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
 
-  for (const [itemId, item] of ctx.hir.items) {
+  for (const [itemId, item] of ctx.module.hir.items) {
     if (item.kind !== "function") continue;
     ctx.itemsToSymbols.set(itemId, { moduleId: ctx.moduleId, symbol: item.symbol });
 
@@ -160,7 +160,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
 };
 
 export const compileFunctions = (ctx: CodegenContext): void => {
-  for (const item of ctx.hir.items.values()) {
+  for (const item of ctx.module.hir.items.values()) {
     if (item.kind !== "function") continue;
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
       ctx.moduleId,
@@ -187,7 +187,7 @@ export const compileFunctions = (ctx: CodegenContext): void => {
 export const registerImportMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
-  ctx.binding.imports.forEach((imp) => {
+  ctx.module.binding.imports.forEach((imp) => {
     if (!imp.target) return;
     if (imp.target.moduleId === ctx.moduleId) return;
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
@@ -282,13 +282,13 @@ export const emitModuleExports = (
   ctx: CodegenContext,
   contexts: readonly CodegenContext[] = [ctx]
 ): void => {
-  const publicExports = ctx.hir.module.exports.filter((entry) =>
+  const publicExports = ctx.module.hir.module.exports.filter((entry) =>
     isPublicVisibility(entry.visibility)
   );
   const exportEntries =
-    ctx.binding.isPackageRoot || publicExports.length > 0
+    ctx.module.binding.isPackageRoot || publicExports.length > 0
       ? publicExports
-      : ctx.hir.module.exports.filter((entry) =>
+      : ctx.module.hir.module.exports.filter((entry) =>
           isPackageVisible(entry.visibility)
         );
 
@@ -355,7 +355,7 @@ export const emitModuleExports = (
         valueType === binaryen.f32 ||
         valueType === binaryen.f64;
       if (!supportedReturn) {
-        ctx.binding.diagnostics.push(
+        ctx.module.binding.diagnostics.push(
           diagnosticFromCode({
             code: "CG0002",
             params: {

@@ -7,7 +7,7 @@ export const performSiteArgTypes = ({
   exprId: HirExprId;
   ctx: CodegenContext;
 }): readonly TypeId[] => {
-  const expr = ctx.hir.expressions.get(exprId);
+  const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr || expr.exprKind !== "call") {
     throw new Error("perform site missing call expression");
   }

@@ -741,7 +741,7 @@ const getBooleanLiteralArg = ({
   if (typeof exprId !== "number") {
     throw new Error(`intrinsic ${name} missing argument ${index + 1}`);
   }
-  const expr = ctx.hir.expressions.get(exprId);
+  const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr || expr.exprKind !== "literal" || expr.literalKind !== "boolean") {
     throw new Error(
       `intrinsic ${name} argument ${index + 1} must be a boolean literal`

@@ -78,7 +78,7 @@ export const coerceValueToType = ({
     }
 
     const comparison = ctx.program.arena.unify(actualType, optionalInfo.innerType, {
-      location: ctx.hir.module.ast,
+      location: ctx.module.hir.module.ast,
       reason: "optional Some coercion",
       variance: "covariant",
       allowUnknown: true,

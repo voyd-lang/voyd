@@ -39,7 +39,7 @@ export const effectsFacade = (ctx: CodegenContext): EffectsFacade => {
   const ensureIr = (): EffectsIr => {
     const cached = memo.get(IR_KEY) as EffectsIr | undefined;
     if (cached) return cached;
-    const built = buildEffectsIr({ hir: ctx.hir, info: ctx.effectsInfo });
+    const built = buildEffectsIr({ hir: ctx.module.hir, info: ctx.module.effectsInfo });
     memo.set(IR_KEY, built);
     return built;
   };
@@ -47,7 +47,7 @@ export const effectsFacade = (ctx: CodegenContext): EffectsFacade => {
   const facade: EffectsFacade = {
     getIr: () => ensureIr(),
     functionAbi: (symbol) => {
-      const info = ctx.effectsInfo.functions.get(symbol);
+      const info = ctx.module.effectsInfo.functions.get(symbol);
       if (!info) return undefined;
       return {
         effectRow: info.effectRow,
@@ -56,7 +56,7 @@ export const effectsFacade = (ctx: CodegenContext): EffectsFacade => {
       };
     },
     lambdaAbi: (exprId) => {
-      const info = ctx.effectsInfo.lambdas.get(exprId);
+      const info = ctx.module.effectsInfo.lambdas.get(exprId);
       if (!info) return undefined;
       return {
         effectfulType: info.effectfulType,
@@ -64,7 +64,7 @@ export const effectsFacade = (ctx: CodegenContext): EffectsFacade => {
         shouldLower: info.shouldLower,
       };
     },
-    handler: (exprId) => ctx.effectsInfo.handlers.get(exprId),
+    handler: (exprId) => ctx.module.effectsInfo.handlers.get(exprId),
     callKind: (exprId) => ensureIr().calls.get(exprId)?.kind,
     effectOpIds: (symbol) => getEffectOpIds(symbol, ctx),
   };

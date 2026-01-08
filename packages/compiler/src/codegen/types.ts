@@ -745,7 +745,7 @@ const buildRuntimeAncestors = ({
       const compatible = sourceDesc.typeArgs.every((arg, index) => {
         const targetArg = targetDesc.typeArgs[index]!;
         const forward = ctx.program.arena.unify(arg, targetArg, {
-          location: ctx.hir.module.ast,
+          location: ctx.module.hir.module.ast,
           reason: "nominal instantiation compatibility",
           variance: "covariant",
         });
