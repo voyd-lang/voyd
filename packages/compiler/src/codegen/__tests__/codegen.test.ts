@@ -17,6 +17,7 @@ import {
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { buildEffectsLoweringInfo } from "../../semantics/effects/analysis.js";
+import { buildProgramSemanticsIndex } from "../../semantics/program-index.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
 import type { TypingResult } from "../../semantics/typing/types.js";
 import type { TypeId } from "../../semantics/ids.js";
@@ -75,6 +76,7 @@ const sanitizeIdentifier = (value: string): string =>
 const buildCodegenProgram = (
   modules: readonly ReturnType<typeof semanticsPipeline>[]
 ): { mod: binaryen.Module; contexts: CodegenContext[] } => {
+  const programIndex = buildProgramSemanticsIndex(modules);
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
@@ -88,6 +90,7 @@ const buildCodegenProgram = (
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
     effectIdOffset: 0,
+    programIndex,
     binding: sem.binding,
     symbolTable: sem.symbolTable,
     hir: sem.hir,

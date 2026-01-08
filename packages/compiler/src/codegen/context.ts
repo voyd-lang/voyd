@@ -42,6 +42,7 @@ import type { EffectsBackend } from "./effects/codegen-backend.js";
 import type { EffectsState } from "./effects/state.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
 import type { EffectsLoweringInfo } from "../semantics/effects/analysis.js";
+import type { ProgramSemanticsIndex } from "../semantics/program-index.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -127,7 +128,7 @@ export interface CodegenContext {
   moduleId: string;
   moduleLabel: string;
   effectIdOffset: number;
-  programContexts: Map<string, CodegenContext>;
+  programIndex: ProgramSemanticsIndex;
   binding: BindingResult;
   symbolTable: SymbolTable;
   hir: HirGraph;

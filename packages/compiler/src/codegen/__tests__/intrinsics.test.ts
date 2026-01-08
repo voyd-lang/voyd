@@ -10,6 +10,7 @@ import { getFixedArrayWasmTypes } from "../types.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";
 import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
+import type { ProgramSemanticsIndex } from "../../semantics/program-index.js";
 import type {
   CodegenContext,
   HirCallExpr,
@@ -46,6 +47,12 @@ const createContext = () => {
     moduleId: "test",
     moduleLabel: "test",
     effectIdOffset: 0,
+    programIndex: {
+      getModule: () => undefined,
+      getSymbolName: () => undefined,
+      getObjectTemplate: () => undefined,
+      getObjectInfoByNominal: () => undefined,
+    } satisfies ProgramSemanticsIndex,
     binding: {} as any,
     symbolTable: {} as any,
     hir: { expressions } as any,

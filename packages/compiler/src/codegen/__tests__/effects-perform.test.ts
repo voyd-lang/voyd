@@ -12,6 +12,7 @@ import { createEffectsState } from "../effects/state.js";
 import type { CodegenContext } from "../context.js";
 import { runEffectfulExport } from "./support/effects-harness.js";
 import { buildEffectsLoweringInfo } from "../../semantics/effects/analysis.js";
+import type { ProgramSemanticsIndex } from "../../semantics/program-index.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -41,6 +42,12 @@ const buildLoweringSnapshot = () => {
     moduleId: semantics.moduleId,
     moduleLabel: sanitize(semantics.hir.module.path),
     effectIdOffset: 0,
+    programIndex: {
+      getModule: () => undefined,
+      getSymbolName: () => undefined,
+      getObjectTemplate: () => undefined,
+      getObjectInfoByNominal: () => undefined,
+    } satisfies ProgramSemanticsIndex,
     binding: semantics.binding,
     symbolTable: semantics.symbolTable,
     hir: semantics.hir,

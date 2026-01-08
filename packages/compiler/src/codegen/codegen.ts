@@ -27,6 +27,7 @@ import {
 } from "./effects/codegen-backend.js";
 import { createEffectsState } from "./effects/state.js";
 import { buildEffectsLoweringInfo } from "../semantics/effects/analysis.js";
+import { buildProgramSemanticsIndex } from "../semantics/program-index.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
@@ -58,6 +59,7 @@ export const codegenProgram = ({
   entryModuleId,
   options = {},
 }: CodegenProgramParams): CodegenResult => {
+  const programIndex = buildProgramSemanticsIndex(modules);
   const mod = new binaryen.Module();
   const mergedOptions: Required<CodegenOptions> = {
     ...DEFAULT_OPTIONS,
@@ -79,7 +81,7 @@ export const codegenProgram = ({
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
     effectIdOffset: 0,
-    programContexts: new Map(),
+    programIndex,
     binding: sem.binding,
     symbolTable: sem.symbolTable,
     hir: sem.hir,
@@ -114,13 +116,6 @@ export const codegenProgram = ({
     },
     outcomeValueTypes,
   }));
-
-  const programContexts = new Map<string, CodegenContext>(
-    contexts.map((ctx) => [ctx.moduleId, ctx] as const)
-  );
-  contexts.forEach((ctx) => {
-    ctx.programContexts = programContexts;
-  });
 
   let effectIdOffset = 0;
   contexts.forEach((ctx) => {

@@ -34,28 +34,6 @@ const sanitizeIdentifier = (value: string): string =>
 const canonicalSymbolKey = (ref: SymbolRef): string =>
   `${ref.moduleId}#${ref.symbol}`;
 
-const resolveOwnerSymbol = (
-  ref: SymbolRef,
-  ctx: CodegenContext
-): { ownerCtx: CodegenContext; ownerSymbol: SymbolId } | undefined => {
-  const ownerCtx = ctx.programContexts.get(ref.moduleId);
-  if (ownerCtx) {
-    return { ownerCtx, ownerSymbol: ref.symbol };
-  }
-
-  const match =
-    ref.moduleId === ctx.moduleId
-      ? undefined
-      : ctx.binding.imports.find(
-          (imp) =>
-            imp.target?.moduleId === ref.moduleId &&
-            imp.target?.symbol === ref.symbol
-        );
-  return typeof match?.local === "number"
-    ? { ownerCtx: ctx, ownerSymbol: match.local }
-    : undefined;
-};
-
 const runtimeTypeKeyFor = (
   typeId: TypeId,
   ctx: CodegenContext,
@@ -73,11 +51,11 @@ const runtimeTypeKeyFor = (
     case "type-param-ref":
       return `typeparam:${desc.param}`;
     case "nominal-object":
-      return `nominal:${canonicalSymbolKey(desc.owner, ctx)}<${desc.typeArgs
+      return `nominal:${canonicalSymbolKey(desc.owner)}<${desc.typeArgs
         .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
         .join(",")}>`;
     case "trait":
-      return `trait:${canonicalSymbolKey(desc.owner, ctx)}<${desc.typeArgs
+      return `trait:${canonicalSymbolKey(desc.owner)}<${desc.typeArgs
         .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
         .join(",")}>`;
     case "structural-object":
@@ -126,6 +104,9 @@ const runtimeTypeIdFor = (typeId: TypeId, ctx: CodegenContext): number =>
     }
     return typeId;
   })();
+
+const getLocalSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
+  ctx.symbolTable.getSymbol(symbol).name;
 
 export const getFunctionRefType = ({
   params,
@@ -415,7 +396,7 @@ export const getSymbolTypeId = (
     return typeId;
   }
   throw new Error(
-    `codegen missing type information for symbol ${getSymbolName(symbol, ctx)}`
+    `codegen missing type information for symbol ${getLocalSymbolName(symbol, ctx)}`
   );
 };
 
@@ -891,10 +872,13 @@ const getNominalAncestry = (
   let current = nominalId;
 
   while (typeof current === "number" && !seen.has(current)) {
-    const info = ctx.typing.objectsByNominal.get(current);
+    const info = ctx.programIndex.getObjectInfoByNominal(current);
     if (!info) {
-      const owner = getNominalOwner(current, ctx);
-      const template = owner.ownerCtx.typing.objects.getTemplate(owner.ownerSymbol);
+      const desc = ctx.typing.arena.get(current);
+      if (desc.kind !== "nominal-object") {
+        break;
+      }
+      const template = ctx.programIndex.getObjectTemplate(desc.owner);
       if (template) {
         const typeId =
           template.type ??
@@ -910,7 +894,7 @@ const getNominalAncestry = (
         current = template.baseNominal;
         continue;
       }
-      const name = getSymbolName(owner.ownerSymbol, owner.ownerCtx);
+      const name = ctx.programIndex.getSymbolName(desc.owner) ?? "unknown";
       throw new Error(
         `codegen missing nominal ancestry for ${name}<${current}> (nominal ${current})`
       );
@@ -943,22 +927,4 @@ const getNominalComponentId = (
   return undefined;
 };
 
-const getNominalOwner = (
-  nominalId: TypeId,
-  ctx: CodegenContext
-): { ownerCtx: CodegenContext; ownerSymbol: SymbolId } => {
-  const desc = ctx.typing.arena.get(nominalId);
-  if (desc.kind !== "nominal-object") {
-    throw new Error("expected nominal type");
-  }
-  const resolved = resolveOwnerSymbol(desc.owner, ctx);
-  if (!resolved) {
-    throw new Error(
-      `missing module semantics for nominal owner ${desc.owner.moduleId}::${desc.owner.symbol}`
-    );
-  }
-  return resolved;
-};
-
-const getSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
-  ctx.symbolTable.getSymbol(symbol).name;
+// Symbol/name resolution for nominal owners is handled by `ctx.programIndex`.
