@@ -105,7 +105,25 @@ const runtimeTypeKeyFor = (
 };
 
 const runtimeTypeIdFor = (typeId: TypeId, ctx: CodegenContext): number =>
-  murmurHash3(runtimeTypeKeyFor(typeId, ctx, new Set()));
+  (() => {
+    const key = runtimeTypeKeyFor(typeId, ctx, new Set());
+    const id = murmurHash3(key);
+    const existing = ctx.runtimeTypeIdsByHash.get(id);
+    if (existing && existing.key !== key) {
+      throw new Error(
+        [
+          "runtime type hash collision detected",
+          `hash: ${id}`,
+          `existing: (module ${existing.moduleId}, type ${existing.typeId}) ${existing.key}`,
+          `new: (module ${ctx.moduleId}, type ${typeId}) ${key}`,
+        ].join("\n")
+      );
+    }
+    if (!existing) {
+      ctx.runtimeTypeIdsByHash.set(id, { key, moduleId: ctx.moduleId, typeId });
+    }
+    return id;
+  })();
 
 export const getFunctionRefType = ({
   params,
@@ -773,6 +791,7 @@ const createMethodLookupEntries = ({
     return [];
   }
   const entries: MethodAccessorEntry[] = [];
+  const hashes = new Map<number, string>();
 
   impls.forEach((impl) => {
     impl.methods.forEach((implMethodSymbol, traitMethodSymbol) => {
@@ -831,11 +850,25 @@ const createMethodLookupEntries = ({
       );
       const heapType = bin._BinaryenFunctionGetType(wrapper);
       const fnType = bin._BinaryenTypeFromHeapType(heapType, false);
+      const hash = traitMethodHash({
+        traitSymbol: impl.traitSymbol,
+        methodSymbol: traitMethodSymbol,
+      });
+      const signatureKey = `${impl.traitSymbol}:${traitMethodSymbol}`;
+      const existing = hashes.get(hash);
+      if (existing && existing !== signatureKey) {
+        throw new Error(
+          [
+            `method hash collision detected for ${typeLabel}`,
+            `hash: ${hash}`,
+            `existing: ${existing}`,
+            `new: ${signatureKey}`,
+          ].join("\n")
+        );
+      }
+      hashes.set(hash, signatureKey);
       entries.push({
-        hash: traitMethodHash({
-          traitSymbol: impl.traitSymbol,
-          methodSymbol: traitMethodSymbol,
-        }),
+        hash,
         ref: refFunc(ctx.mod, wrapperName, fnType),
       });
     });

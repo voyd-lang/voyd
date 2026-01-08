@@ -102,6 +102,12 @@ export interface StructuralTypeInfo {
   typeLabel: string;
 }
 
+export type RuntimeTypeIdRegistryEntry = {
+  key: string;
+  moduleId: string;
+  typeId: TypeId;
+};
+
 export interface FixedArrayWasmType {
   type: binaryen.Type;
   heapType: HeapTypeRef;
@@ -134,6 +140,7 @@ export interface CodegenContext {
   fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
   functionRefTypes: Map<string, binaryen.Type>;
+  runtimeTypeIdsByHash: Map<number, RuntimeTypeIdRegistryEntry>;
   lambdaEnvs: Map<
     string,
     {
