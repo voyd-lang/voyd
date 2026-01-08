@@ -12,16 +12,13 @@ import {
   semanticsPipeline,
   type SemanticsPipelineResult,
 } from "./semantics/pipeline.js";
-import { createTypingState } from "./semantics/typing/context.js";
-import type { DependencySemantics, TypingContext } from "./semantics/typing/types.js";
-import { createTypeTranslation, mapDependencySymbolToLocal } from "./semantics/typing/imports.js";
-import { typeGenericFunctionBody } from "./semantics/typing/expressions/call.js";
-import type { ModuleExportTable } from "./semantics/modules.js";
+import { linkProgramSemantics } from "./semantics/linking.js";
 import type { Diagnostic } from "./diagnostics/index.js";
-import { diagnosticFromCode, DiagnosticEmitter, DiagnosticError } from "./diagnostics/index.js";
+import { diagnosticFromCode, DiagnosticError } from "./diagnostics/index.js";
 import { codegenErrorToDiagnostic } from "./codegen/diagnostics.js";
 import type { CodegenOptions } from "./codegen/context.js";
 import type { ContinuationBackendKind } from "./codegen/codegen.js";
+import { ModuleExportTable } from "./semantics/modules.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -48,6 +45,11 @@ export type EmitProgramOptions = {
   semantics: Map<string, SemanticsPipelineResult>;
   codegenOptions?: CodegenOptions;
   entryModuleId?: string;
+  /**
+   * Whether to run the semantics linking stage prior to codegen.
+   * Defaults to true.
+   */
+  linkSemantics?: boolean;
 };
 
 export type CompileProgramOptions = LoadModulesOptions &
@@ -159,6 +161,7 @@ export const emitProgram = async ({
   semantics,
   codegenOptions,
   entryModuleId,
+  linkSemantics,
 }: EmitProgramOptions): Promise<{
   wasm: Uint8Array;
   module: binaryen.Module;
@@ -172,7 +175,9 @@ export const emitProgram = async ({
     throw new Error("No semantics available for codegen");
   }
 
-  materializeImportedGenericInstantiations({ modules, semantics });
+  if (linkSemantics !== false) {
+    linkProgramSemantics({ modules, semantics });
+  }
 
   const codegen = await lazyCodegen();
   const result = codegen.codegenProgram({
@@ -201,6 +206,7 @@ export const emitProgramWithContinuationFallback = async ({
   semantics,
   codegenOptions,
   entryModuleId,
+  linkSemantics,
 }: EmitProgramOptions): Promise<ContinuationFallbackBundle> => {
   const { orderedModules, entry } = lowerProgram({ graph, semantics });
   const targetModuleId = entryModuleId ?? entry;
@@ -211,7 +217,9 @@ export const emitProgramWithContinuationFallback = async ({
     throw new Error("No semantics available for codegen");
   }
 
-  materializeImportedGenericInstantiations({ modules, semantics });
+  if (linkSemantics !== false) {
+    linkProgramSemantics({ modules, semantics });
+  }
 
   const codegenImpl = await lazyCodegen();
   const { preferredKind, preferred, fallback } =
@@ -246,12 +254,20 @@ export const compileProgram = async (
     return { graph, diagnostics: [...graph.diagnostics] };
   }
 
-  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({ graph });
+  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
+    graph,
+  });
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
 
   if (diagnostics.some((diag) => diag.severity === "error")) {
     return { graph, semantics, diagnostics };
   }
+
+  const { orderedModules } = lowerProgram({ graph, semantics });
+  const reachableModules = orderedModules
+    .map((id) => semantics.get(id))
+    .filter((value): value is SemanticsPipelineResult => Boolean(value));
+  linkProgramSemantics({ modules: reachableModules, semantics });
 
   try {
     const wasmResult = await emitProgram({
@@ -259,6 +275,7 @@ export const compileProgram = async (
       semantics,
       codegenOptions: options.codegenOptions,
       entryModuleId: options.entryModuleId,
+      linkSemantics: false,
     });
 
     return {
@@ -269,7 +286,9 @@ export const compileProgram = async (
     };
   } catch (error) {
     diagnostics.push(
-      codegenErrorToDiagnostic(error, { moduleId: options.entryModuleId ?? graph.entry })
+      codegenErrorToDiagnostic(error, {
+        moduleId: options.entryModuleId ?? graph.entry,
+      })
     );
     return { graph, semantics, diagnostics };
   }
@@ -303,208 +322,6 @@ const sortModules = (graph: ModuleGraph): string[] => {
 };
 
 const lazyCodegen = async () =>
-  (await import("./codegen/codegen.js")) as typeof import("./codegen/codegen.js");
-
-const materializeImportedGenericInstantiations = ({
-  modules,
-  semantics,
-}: {
-  modules: readonly SemanticsPipelineResult[];
-  semantics: Map<string, SemanticsPipelineResult>;
-}): void => {
-  const moduleExports = new Map<string, ModuleExportTable>(
-    Array.from(semantics.entries()).map(([id, entry]) => [id, entry.exports])
-  );
-  const dependencies = new Map<string, DependencySemantics>(
-    Array.from(semantics.entries()).map(([id, entry]) => [
-      id,
-      {
-        moduleId: entry.moduleId,
-        packageId: entry.binding.packageId,
-        symbolTable: entry.symbolTable,
-        hir: entry.hir,
-        typing: entry.typing,
-        decls: entry.binding.decls,
-        overloads: collectOverloadOptions(
-          entry.binding.overloads,
-          entry.binding.importedOverloadOptions
-        ),
-        exports: entry.exports,
-      },
-    ])
-  );
-
-  const typingContexts = new Map<string, TypingContext>();
-
-  const typingContextFor = (moduleId: string): TypingContext | undefined => {
-    const cached = typingContexts.get(moduleId);
-    if (cached) {
-      return cached;
-    }
-
-    const entry = semantics.get(moduleId);
-    if (!entry) {
-      return undefined;
-    }
-
-    const importsByLocal = new Map<number, { moduleId: string; symbol: number }>();
-    const importAliasesByModule = new Map<string, Map<number, number>>();
-    entry.binding.imports.forEach((imp) => {
-      if (!imp.target) {
-        return;
-      }
-      importsByLocal.set(imp.local, imp.target);
-      const bucket = importAliasesByModule.get(imp.target.moduleId) ?? new Map();
-      bucket.set(imp.target.symbol, imp.local);
-      importAliasesByModule.set(imp.target.moduleId, bucket);
-    });
-
-    const ctx: TypingContext = {
-      symbolTable: entry.symbolTable,
-      hir: entry.hir,
-      overloads: collectOverloadOptions(
-        entry.binding.overloads,
-        entry.binding.importedOverloadOptions
-      ),
-      decls: entry.binding.decls,
-      moduleId: entry.moduleId,
-      packageId: entry.binding.packageId,
-      moduleExports,
-      dependencies,
-      importsByLocal,
-      importAliasesByModule,
-      arena: entry.typing.arena,
-      table: entry.typing.table,
-      effects: entry.typing.effects,
-      resolvedExprTypes: new Map(entry.typing.resolvedExprTypes),
-      valueTypes: new Map(entry.typing.valueTypes),
-      tailResumptions: new Map(entry.typing.tailResumptions),
-      callResolution: {
-        targets: new Map(
-          Array.from(entry.typing.callTargets.entries()).map(([exprId, targets]) => [
-            exprId,
-            new Map(targets),
-          ])
-        ),
-        typeArguments: new Map(entry.typing.callTypeArguments),
-        instanceKeys: new Map(entry.typing.callInstanceKeys),
-        traitDispatches: new Set(entry.typing.callTraitDispatches),
-      },
-      functions: entry.typing.functions,
-      objects: entry.typing.objects,
-      traits: entry.typing.traits,
-      typeAliases: entry.typing.typeAliases,
-      primitives: entry.typing.primitives,
-      intrinsicTypes: entry.typing.intrinsicTypes,
-      diagnostics: new DiagnosticEmitter(),
-      memberMetadata: new Map(entry.typing.memberMetadata),
-      traitImplsByNominal: new Map(entry.typing.traitImplsByNominal),
-      traitImplsByTrait: new Map(entry.typing.traitImplsByTrait),
-      traitMethodImpls: new Map(entry.typing.traitMethodImpls),
-    };
-
-    typingContexts.set(moduleId, ctx);
-    return ctx;
-  };
-
-  const dependents = new Map(
-    modules.map((entry) => [entry.moduleId, entry] as const)
-  );
-
-  const touchedCallees = new Set<string>();
-
-  dependents.forEach((caller) => {
-    const callerDep = dependencies.get(caller.moduleId);
-    if (!callerDep) {
-      return;
-    }
-
-    caller.typing.functionInstantiationInfo.forEach((instantiations, localSymbol) => {
-      const metadata = (caller.symbolTable.getSymbol(localSymbol).metadata ?? {}) as
-        | { import?: { moduleId?: unknown; symbol?: unknown } }
-        | undefined;
-      const importModuleId = metadata?.import?.moduleId;
-      const importSymbol = metadata?.import?.symbol;
-
-      if (typeof importModuleId !== "string" || typeof importSymbol !== "number") {
-        return;
-      }
-
-      const callee = semantics.get(importModuleId);
-      const calleeDep = dependencies.get(importModuleId);
-      const calleeCtx = callee ? typingContextFor(callee.moduleId) : undefined;
-      if (!callee || !calleeDep || !calleeCtx) {
-        return;
-      }
-
-      const calleeSignature = callee.typing.functions.getSignature(importSymbol);
-      const typeParams = calleeSignature?.typeParams ?? [];
-      if (!calleeSignature || typeParams.length === 0) {
-        return;
-      }
-
-      const translateTypeArg = createTypeTranslation({
-        sourceArena: caller.typing.arena,
-        targetArena: calleeCtx.arena,
-        sourceEffects: caller.typing.effects,
-        targetEffects: calleeCtx.effects,
-        mapSymbol: (symbol) =>
-          mapDependencySymbolToLocal({
-            owner: symbol,
-            dependency: callerDep,
-            ctx: calleeCtx,
-            allowUnexported: true,
-          }),
-      });
-
-      instantiations.forEach((typeArgs) => {
-        if (typeArgs.length !== typeParams.length) {
-          return;
-        }
-
-        const translated = typeArgs.map((arg) => translateTypeArg(arg));
-        const substitution = new Map(
-          typeParams.map((param, index) => [param.typeParam, translated[index]!] as const)
-        );
-        typeGenericFunctionBody({
-          symbol: importSymbol,
-          signature: calleeSignature,
-          substitution,
-          ctx: calleeCtx,
-          state: createTypingState("relaxed"),
-        });
-        touchedCallees.add(importModuleId);
-      });
-    });
-  });
-
-  touchedCallees.forEach((moduleId) => {
-    const entry = semantics.get(moduleId);
-    const ctx = typingContexts.get(moduleId);
-    if (!entry || !ctx) {
-      return;
-    }
-    entry.typing.functionInstantiationInfo = ctx.functions.snapshotInstantiationInfo();
-    entry.typing.functionInstances = ctx.functions.snapshotInstances();
-    entry.typing.functionInstanceExprTypes = ctx.functions.snapshotInstanceExprTypes();
-    entry.typing.valueTypes = new Map(ctx.valueTypes);
-  });
-};
-
-const collectOverloadOptions = (
-  overloads: ReadonlyMap<number, { functions: readonly { symbol: number }[] }>,
-  imported?: ReadonlyMap<number, readonly number[]>
-): Map<number, readonly number[]> => {
-  const entries = new Map<number, readonly number[]>(
-    Array.from(overloads.entries()).map(([id, set]) => [
-      id,
-      set.functions.map((fn) => fn.symbol),
-    ])
-  );
-  if (imported) {
-    imported.forEach((symbols, id) => {
-      entries.set(id, symbols);
-    });
-  }
-  return entries;
-};
+  (await import(
+    "./codegen/codegen.js"
+  )) as typeof import("./codegen/codegen.js");
