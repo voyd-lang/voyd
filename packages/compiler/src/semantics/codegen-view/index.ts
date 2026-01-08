@@ -156,11 +156,22 @@ export type ProgramCodegenView = {
 
 export const buildProgramCodegenView = (
   modules: readonly SemanticsPipelineResult[],
-  options?: { instances?: readonly MonomorphizedInstanceInfo[] }
+  options?: {
+    instances?: readonly MonomorphizedInstanceInfo[];
+    moduleTyping?: ReadonlyMap<
+      string,
+      {
+        functionInstantiationInfo: ReadonlyMap<SymbolId, ReadonlyMap<string, readonly TypeId[]>>;
+        functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+        valueTypes: ReadonlyMap<SymbolId, TypeId>;
+      }
+    >;
+  }
 ): ProgramCodegenView => {
   const modulesById = new Map<string, SemanticsPipelineResult>(
     modules.map((mod) => [mod.moduleId, mod] as const)
   );
+  const moduleTyping = options?.moduleTyping ?? new Map();
   const first = modules[0];
   if (!first) {
     throw new Error("buildProgramCodegenView requires at least one module");
@@ -419,8 +430,10 @@ export const buildProgramCodegenView = (
       };
     },
     getInstantiationInfo: (moduleId, symbol) =>
+      moduleTyping.get(moduleId)?.functionInstantiationInfo.get(symbol) ??
       modulesById.get(moduleId)?.typing.functionInstantiationInfo.get(symbol),
     getInstanceExprType: (moduleId, key, expr) =>
+      moduleTyping.get(moduleId)?.functionInstanceExprTypes.get(key)?.get(expr) ??
       modulesById.get(moduleId)?.typing.functionInstanceExprTypes.get(key)?.get(expr),
   };
 
@@ -439,7 +452,8 @@ export const buildProgramCodegenView = (
       types: {
         getExprType: (expr) => mod.typing.table.getExprType(expr),
         getResolvedExprType: (expr) => mod.typing.resolvedExprTypes.get(expr),
-        getValueType: (symbol) => mod.typing.valueTypes.get(symbol),
+        getValueType: (symbol) =>
+          moduleTyping.get(mod.moduleId)?.valueTypes.get(symbol) ?? mod.typing.valueTypes.get(symbol),
         getTailResumption: (expr) => mod.typing.tailResumptions.get(expr),
       },
       effectsInfo: buildEffectsLoweringInfo({

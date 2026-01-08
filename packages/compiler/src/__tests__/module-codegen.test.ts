@@ -3,6 +3,7 @@ import { dirname, resolve, sep } from "node:path";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
 import type { ModuleHost } from "../modules/types.js";
 import { compileProgram } from "../pipeline.js";
+import { monomorphizeProgram } from "../semantics/linking.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost => {
   const normalized = new Map<string, string>();
@@ -134,8 +135,13 @@ pub fn main() -> i32
     if (typeof idSymbol !== "number") {
       return;
     }
-    const instantiations =
-      utilSemantics.typing.functionInstantiationInfo.get(idSymbol);
+    const monomorphized = monomorphizeProgram({
+      modules: Array.from(result.semantics?.values() ?? []),
+      semantics: result.semantics ?? new Map(),
+    });
+    const instantiations = monomorphized.moduleTyping
+      .get("std::util")
+      ?.functionInstantiationInfo.get(idSymbol);
     expect(instantiations?.size ?? 0).toBeGreaterThan(0);
   });
 

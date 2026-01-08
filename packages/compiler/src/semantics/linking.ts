@@ -7,6 +7,7 @@ import type { SemanticsPipelineResult } from "./pipeline.js";
 import type { MonomorphizedInstanceInfo } from "./codegen-view/index.js";
 import type { SymbolRef } from "./typing/symbol-ref.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
+import type { HirExprId, SymbolId, TypeId } from "./ids.js";
 
 export const monomorphizeProgram = ({
   modules,
@@ -14,7 +15,17 @@ export const monomorphizeProgram = ({
 }: {
   modules: readonly SemanticsPipelineResult[];
   semantics: Map<string, SemanticsPipelineResult>;
-}): { instances: readonly MonomorphizedInstanceInfo[] } => {
+}): {
+  instances: readonly MonomorphizedInstanceInfo[];
+  moduleTyping: ReadonlyMap<
+    string,
+    {
+      functionInstantiationInfo: ReadonlyMap<SymbolId, ReadonlyMap<string, readonly TypeId[]>>;
+      functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+      valueTypes: ReadonlyMap<SymbolId, TypeId>;
+    }
+  >;
+} => {
   const { moduleExports, dependencies } = buildDependencyIndex(semantics);
   const typingContexts = new Map<string, TypingContext>();
   const typingContextFor = createTypingContextFactory({
@@ -96,18 +107,6 @@ export const monomorphizeProgram = ({
     });
   });
 
-  touchedModules.forEach((moduleId) => {
-    const entry = semantics.get(moduleId);
-    const ctx = typingContexts.get(moduleId);
-    if (!entry || !ctx) {
-      return;
-    }
-    entry.typing.functionInstantiationInfo = ctx.functions.snapshotInstantiationInfo();
-    entry.typing.functionInstances = ctx.functions.snapshotInstances();
-    entry.typing.functionInstanceExprTypes = ctx.functions.snapshotInstanceExprTypes();
-    entry.typing.valueTypes = new Map(ctx.valueTypes);
-  });
-
   const deduped = new Map<string, MonomorphizedInstanceInfo>();
   requestedInstances.forEach((info) => {
     if (!info.instanceKey) return;
@@ -125,7 +124,26 @@ export const monomorphizeProgram = ({
     return a.instanceKey.localeCompare(b.instanceKey, undefined, { numeric: true });
   });
 
-  return { instances };
+  const moduleTyping = new Map<
+    string,
+    {
+      functionInstantiationInfo: ReadonlyMap<SymbolId, ReadonlyMap<string, readonly TypeId[]>>;
+      functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+      valueTypes: ReadonlyMap<SymbolId, TypeId>;
+    }
+  >();
+
+  touchedModules.forEach((moduleId) => {
+    const ctx = typingContexts.get(moduleId);
+    if (!ctx) return;
+    moduleTyping.set(moduleId, {
+      functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
+      functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
+      valueTypes: new Map(ctx.valueTypes),
+    });
+  });
+
+  return { instances, moduleTyping };
 };
 
 const buildDependencyIndex = (

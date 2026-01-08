@@ -184,8 +184,13 @@ export const emitProgram = async ({
 
   const codegen = await lazyCodegen();
   const monomorphized =
-    linkSemantics !== false ? monomorphizeProgram({ modules, semantics }) : { instances: [] };
-  const program = buildProgramCodegenView(modules, { instances: monomorphized.instances });
+    linkSemantics !== false
+      ? monomorphizeProgram({ modules, semantics })
+      : { instances: [], moduleTyping: new Map() };
+  const program = buildProgramCodegenView(modules, {
+    instances: monomorphized.instances,
+    moduleTyping: monomorphized.moduleTyping,
+  });
   const result = codegen.codegenProgram({
     program,
     entryModuleId: targetModuleId,
@@ -224,8 +229,13 @@ export const emitProgramWithContinuationFallback = async ({
   }
 
   const monomorphized =
-    linkSemantics !== false ? monomorphizeProgram({ modules, semantics }) : { instances: [] };
-  const program = buildProgramCodegenView(modules, { instances: monomorphized.instances });
+    linkSemantics !== false
+      ? monomorphizeProgram({ modules, semantics })
+      : { instances: [], moduleTyping: new Map() };
+  const program = buildProgramCodegenView(modules, {
+    instances: monomorphized.instances,
+    moduleTyping: monomorphized.moduleTyping,
+  });
 
   const codegenImpl = await lazyCodegen();
   const { preferredKind, preferred, fallback } =
@@ -270,13 +280,6 @@ export const compileProgram = async (
   }
 
   const shouldLinkSemantics = options.linkSemantics !== false;
-  if (shouldLinkSemantics) {
-    const { orderedModules } = lowerProgram({ graph, semantics });
-    const reachableModules = orderedModules
-      .map((id) => semantics.get(id))
-      .filter((value): value is SemanticsPipelineResult => Boolean(value));
-    monomorphizeProgram({ modules: reachableModules, semantics });
-  }
 
   try {
     const wasmResult = await emitProgram({
@@ -284,7 +287,7 @@ export const compileProgram = async (
       semantics,
       codegenOptions: options.codegenOptions,
       entryModuleId: options.entryModuleId,
-      linkSemantics: false,
+      linkSemantics: shouldLinkSemantics,
     });
 
     return {
