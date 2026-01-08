@@ -23,6 +23,10 @@ import {
   wasmTypeFor,
 } from "./types.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
+import {
+  getOptionalInfo,
+  optionalResolverContextForTypingResult,
+} from "../semantics/typing/optionals.js";
 
 export const requiresStructuralConversion = (
   actualType: TypeId,
@@ -66,59 +70,21 @@ export const coerceValueToType = ({
   const targetDesc = ctx.typing.arena.get(targetType);
   const actualDesc = ctx.typing.arena.get(actualType);
 
-  const optionalUnionInfo = (() => {
-    if (targetDesc.kind !== "union") {
-      return undefined;
+  const optionalInfo = getOptionalInfo(
+    targetType,
+    optionalResolverContextForTypingResult(ctx.typing)
+  );
+
+  if (optionalInfo) {
+    const someInfo = getStructuralTypeInfo(optionalInfo.someType, ctx);
+    if (!someInfo) {
+      throw new Error("Optional wrapping requires structural type info for Some member");
     }
-    let someTypeId: TypeId | undefined;
-    let noneTypeId: TypeId | undefined;
-
-    const nominalNameOf = (typeId: TypeId): string | undefined => {
-      const desc = ctx.typing.arena.get(typeId);
-      if (desc.kind === "nominal-object") {
-        return desc.name ?? ctx.symbolTable.getSymbol(desc.owner).name;
-      }
-      if (desc.kind === "intersection" && typeof desc.nominal === "number") {
-        const nominalDesc = ctx.typing.arena.get(desc.nominal);
-        if (nominalDesc.kind === "nominal-object") {
-          return nominalDesc.name ?? ctx.symbolTable.getSymbol(nominalDesc.owner).name;
-        }
-      }
-      return undefined;
-    };
-
-    for (const member of targetDesc.members) {
-      const name = nominalNameOf(member);
-      if (name === "Some") {
-        someTypeId = member;
-      } else if (name === "None") {
-        noneTypeId = member;
-      }
+    if (someInfo.fields.length !== 1) {
+      throw new Error("Optional Some member must contain exactly one field");
     }
 
-    if (typeof someTypeId !== "number" || typeof noneTypeId !== "number") {
-      return undefined;
-    }
-
-    const someInfo = getStructuralTypeInfo(someTypeId, ctx);
-    const valueField = someInfo?.fieldMap.get("value");
-    if (!someInfo || !valueField) {
-      return undefined;
-    }
-    if (someInfo.fields.length !== 1 || someInfo.fields[0]!.name !== "value") {
-      throw new Error("Optional Some type must contain only a `value` field");
-    }
-
-    return {
-      someTypeId,
-      noneTypeId,
-      valueField,
-      someInfo,
-    };
-  })();
-
-  if (optionalUnionInfo) {
-    const comparison = ctx.typing.arena.unify(actualType, optionalUnionInfo.valueField.typeId, {
+    const comparison = ctx.typing.arena.unify(actualType, optionalInfo.innerType, {
       location: ctx.hir.module.ast,
       reason: "optional Some coercion",
       variance: "covariant",
@@ -128,21 +94,21 @@ export const coerceValueToType = ({
       const inner = coerceValueToType({
         value,
         actualType,
-        targetType: optionalUnionInfo.valueField.typeId,
+        targetType: optionalInfo.innerType,
         ctx,
         fnCtx,
       });
-      return initStruct(ctx.mod, optionalUnionInfo.someInfo.runtimeType, [
+      return initStruct(ctx.mod, someInfo.runtimeType, [
         ctx.mod.global.get(
-          optionalUnionInfo.someInfo.ancestorsGlobal,
+          someInfo.ancestorsGlobal,
           ctx.rtt.extensionHelpers.i32Array
         ),
         ctx.mod.global.get(
-          optionalUnionInfo.someInfo.fieldTableGlobal,
+          someInfo.fieldTableGlobal,
           ctx.rtt.fieldLookupHelpers.lookupTableType
         ),
         ctx.mod.global.get(
-          optionalUnionInfo.someInfo.methodTableGlobal,
+          someInfo.methodTableGlobal,
           ctx.rtt.methodLookupHelpers.lookupTableType
         ),
         inner,
