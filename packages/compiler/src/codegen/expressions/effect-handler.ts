@@ -265,7 +265,7 @@ const emitClauseFunction = ({
     const continuationTypeId =
       ctx.module.types.getValueType(clause.parameters[0].symbol) ??
       ctx.program.primitives.unknown;
-    const continuationDesc = ctx.program.arena.get(continuationTypeId);
+    const continuationDesc = ctx.program.types.getTypeDesc(continuationTypeId);
     const resumeTypeId =
       continuationDesc.kind === "function"
         ? continuationDesc.parameters[0]?.type ?? ctx.program.primitives.void
@@ -337,7 +337,7 @@ const emitClauseFunction = ({
           const continuationTypeId = ctx.module.types.getValueType(
             clause.parameters[0].symbol
           ) as TypeId;
-          const desc = ctx.program.arena.get(continuationTypeId);
+          const desc = ctx.program.types.getTypeDesc(continuationTypeId);
           return desc.kind === "function" ? desc.returnType : signature.returnType;
         })()
       : signature.returnType;

@@ -60,7 +60,7 @@ const findLambdaByExprId = (
   ctx.module.types.getResolvedExprType(exprId) ??
     ctx.module.types.getExprType(exprId) ??
     ctx.program.primitives.unknown;
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind !== "function") {
     throw new Error("lambda missing function type");
   }

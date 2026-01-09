@@ -63,8 +63,8 @@ export const coerceValueToType = ({
     return value;
   }
 
-  const targetDesc = ctx.program.arena.get(targetType);
-  const actualDesc = ctx.program.arena.get(actualType);
+  const targetDesc = ctx.program.types.getTypeDesc(targetType);
+  const actualDesc = ctx.program.types.getTypeDesc(actualType);
 
   const optionalInfo = ctx.program.optionals.getOptionalInfo(ctx.moduleId, targetType);
 
@@ -77,7 +77,7 @@ export const coerceValueToType = ({
       throw new Error("Optional Some member must contain exactly one field");
     }
 
-    const comparison = ctx.program.arena.unify(actualType, optionalInfo.innerType, {
+    const comparison = ctx.program.types.unify(actualType, optionalInfo.innerType, {
       location: ctx.module.hir.module.ast,
       reason: "optional Some coercion",
       variance: "covariant",
@@ -243,7 +243,7 @@ const coercePureClosureToEffectful = ({
 };
 
 const actualDescReturnTypeId = (typeId: TypeId, ctx: CodegenContext): TypeId => {
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind !== "function") {
     throw new Error("expected function type for closure coercion");
   }

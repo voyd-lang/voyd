@@ -1,15 +1,27 @@
-import type { HirGraph } from "../hir/index.js";
-import type { HirEffectHandlerClause } from "../hir/index.js";
+import type { HirGraph, HirEffectHandlerClause, HirVisibility } from "../hir/index.js";
 import type { EffectInterner } from "../effects/effect-table.js";
 import type { EffectTable } from "../effects/effect-table.js";
-import type { HirExprId, SymbolId, TypeId } from "../ids.js";
-import type { TypeArena, TypeDescriptor } from "../typing/type-arena.js";
+import type {
+  HirExprId,
+  NodeId,
+  SymbolId,
+  TypeId,
+  TypeParamId,
+  TypeSchemeId,
+} from "../ids.js";
+import type {
+  ConstraintSet,
+  StructuralField,
+  TypeDescriptor,
+  TypeScheme,
+  UnificationContext,
+  UnificationResult,
+} from "../typing/type-arena.js";
 import type { SemanticsPipelineResult } from "../pipeline.js";
 import { buildEffectsLoweringInfo } from "../effects/analysis.js";
 import type { EffectsLoweringInfo } from "../effects/analysis.js";
 import { getSymbolTable } from "../_internal/symbol-table.js";
-import type { SymbolRef } from "../typing/symbol-ref.js";
-import { symbolRefKey } from "../typing/symbol-ref.js";
+import type { SymbolRef as TypingSymbolRef } from "../typing/symbol-ref.js";
 import type {
   ObjectTemplate,
   ObjectTypeInfo,
@@ -18,11 +30,81 @@ import type {
 } from "../typing/types.js";
 import {
   getOptionalInfo,
-  type OptionalInfo,
   type OptionalResolverContext,
 } from "../typing/optionals.js";
 
-export type CodegenTypeDesc = Readonly<TypeDescriptor>;
+export type SymbolRef = {
+  moduleId: string;
+  symbol: SymbolId;
+};
+
+export type CodegenStructuralField = {
+  name: string;
+  type: TypeId;
+  optional?: boolean;
+  declaringParams?: readonly TypeParamId[];
+  visibility?: HirVisibility;
+  owner?: SymbolId;
+  packageId?: string;
+};
+
+export type CodegenFunctionParameter = {
+  type: TypeId;
+  label?: string;
+  optional?: boolean;
+};
+
+export type CodegenTypeDesc =
+  | { kind: "primitive"; name: string }
+  | { kind: "trait"; owner: SymbolRef; name?: string; typeArgs: readonly TypeId[] }
+  | { kind: "nominal-object"; owner: SymbolRef; name?: string; typeArgs: readonly TypeId[] }
+  | { kind: "structural-object"; fields: readonly CodegenStructuralField[] }
+  | { kind: "function"; parameters: readonly CodegenFunctionParameter[]; returnType: TypeId; effectRow: number }
+  | { kind: "union"; members: readonly TypeId[] }
+  | { kind: "intersection"; nominal?: TypeId; structural?: TypeId }
+  | { kind: "fixed-array"; element: TypeId }
+  | { kind: "type-param-ref"; param: TypeParamId };
+
+export type CodegenStructuralPredicate = {
+  field: string;
+  type: TypeId;
+};
+
+export type CodegenConstraintSet = {
+  traits?: readonly TypeId[];
+  structural?: readonly CodegenStructuralPredicate[];
+};
+
+export type CodegenVariance = "invariant" | "covariant" | "contravariant";
+
+export type CodegenSubstitution = ReadonlyMap<TypeParamId, TypeId>;
+
+export type CodegenTypeScheme = {
+  id: TypeSchemeId;
+  params: readonly TypeParamId[];
+  body: TypeId;
+  constraints?: CodegenConstraintSet;
+};
+
+export type CodegenUnificationContext = {
+  location: NodeId;
+  reason: string;
+  variance?: CodegenVariance;
+  constraints?: ReadonlyMap<TypeParamId, CodegenConstraintSet>;
+  allowUnknown?: boolean;
+  structuralResolver?: (type: TypeId) => TypeId | undefined;
+};
+
+export type CodegenUnificationResult =
+  | { ok: true; substitution: CodegenSubstitution }
+  | { ok: false; conflict: { left: TypeId; right: TypeId; message: string } };
+
+export type CodegenOptionalInfo = {
+  optionalType: TypeId;
+  innerType: TypeId;
+  someType: TypeId;
+  noneType: TypeId;
+};
 
 export type StructuralLayout =
   | { kind: "structural-object"; fields: readonly { name: string; typeId: TypeId; optional: boolean }[] }
@@ -45,7 +127,7 @@ export const makeInstanceKey = (moduleId: string, localKey: string): InstanceKey
 
 export type CodegenFunctionSignature = {
   typeId: TypeId;
-  scheme: number;
+  scheme: TypeSchemeId;
   parameters: readonly {
     typeId: TypeId;
     label?: string;
@@ -55,7 +137,12 @@ export type CodegenFunctionSignature = {
   }[];
   returnType: TypeId;
   effectRow: number;
-  typeParams: readonly { symbol: SymbolId; typeParam: number; typeRef: TypeId; constraint?: TypeId }[];
+  typeParams: readonly {
+    symbol: SymbolId;
+    typeParam: TypeParamId;
+    typeRef: TypeId;
+    constraint?: TypeId;
+  }[];
 };
 
 export type FunctionLoweringIndex = {
@@ -82,6 +169,13 @@ export type MonomorphizedInstanceInfo = {
 
 export type TypeLoweringIndex = {
   getTypeDesc(typeId: TypeId): CodegenTypeDesc;
+  getScheme(schemeId: TypeSchemeId): CodegenTypeScheme;
+  instantiate(
+    schemeId: TypeSchemeId,
+    args: readonly TypeId[],
+    ctx?: CodegenUnificationContext
+  ): TypeId;
+  unify(a: TypeId, b: TypeId, ctx: CodegenUnificationContext): CodegenUnificationResult;
   getNominalOwner(typeId: TypeId): SymbolRef | undefined;
   getNominalAncestry(typeId: TypeId): readonly { nominalId: TypeId; typeId: TypeId }[];
   getStructuralLayout(typeId: TypeId): StructuralLayout | undefined;
@@ -102,16 +196,16 @@ export type SymbolIndex = {
 };
 
 export type ObjectLayoutIndex = {
-  getTemplate(owner: SymbolRef): ObjectTemplate | undefined;
-  getInfoByNominal(nominal: TypeId): ObjectTypeInfo | undefined;
+  getTemplate(owner: SymbolRef): CodegenObjectTemplate | undefined;
+  getInfoByNominal(nominal: TypeId): CodegenObjectTypeInfo | undefined;
   getNominalOwnerRef(nominal: TypeId): SymbolRef | undefined;
   getNominalInstancesByOwner(owner: SymbolRef): readonly TypeId[];
 };
 
 export type TraitDispatchIndex = {
-  getImplsByNominal(nominal: TypeId): readonly TraitImplInstance[];
-  getImplsByTrait(traitSymbol: SymbolId): readonly TraitImplInstance[];
-  getTraitMethodImpl(symbol: SymbolId): TraitMethodImpl | undefined;
+  getImplsByNominal(nominal: TypeId): readonly CodegenTraitImplInstance[];
+  getImplsByTrait(traitSymbol: SymbolId): readonly CodegenTraitImplInstance[];
+  getTraitMethodImpl(symbol: SymbolId): CodegenTraitMethodImpl | undefined;
 };
 
 export type CallLoweringIndex = {
@@ -165,7 +259,6 @@ export type ProgramEffectIndex = {
 };
 
 export type ProgramCodegenView = {
-  arena: TypeArena;
   effects: EffectInterner & ProgramEffectIndex;
   primitives: {
     bool: TypeId;
@@ -181,7 +274,7 @@ export type ProgramCodegenView = {
   symbols: SymbolIndex;
   functions: FunctionLoweringIndex;
   optionals: {
-    getOptionalInfo(moduleId: string, typeId: TypeId): OptionalInfo | undefined;
+    getOptionalInfo(moduleId: string, typeId: TypeId): CodegenOptionalInfo | undefined;
   };
   objects: ObjectLayoutIndex;
   traits: TraitDispatchIndex;
@@ -189,6 +282,40 @@ export type ProgramCodegenView = {
   instances: MonomorphizedInstanceIndex;
   imports: ImportWiringIndex;
   modules: ReadonlyMap<string, ModuleCodegenView>;
+};
+
+export type CodegenObjectTemplate = {
+  symbol: SymbolId;
+  params: readonly { symbol: SymbolId; typeParam: TypeParamId; constraint?: TypeId }[];
+  nominal: TypeId;
+  structural: TypeId;
+  type: TypeId;
+  fields: readonly CodegenStructuralField[];
+  visibility?: HirVisibility;
+  baseNominal?: TypeId;
+};
+
+export type CodegenObjectTypeInfo = {
+  nominal: TypeId;
+  structural: TypeId;
+  type: TypeId;
+  fields: readonly CodegenStructuralField[];
+  visibility?: HirVisibility;
+  baseNominal?: TypeId;
+  traitImpls?: readonly CodegenTraitImplInstance[];
+};
+
+export type CodegenTraitMethodImpl = {
+  traitSymbol: SymbolId;
+  traitMethodSymbol: SymbolId;
+};
+
+export type CodegenTraitImplInstance = {
+  trait: TypeId;
+  traitSymbol: SymbolId;
+  target: TypeId;
+  methods: readonly { traitMethod: SymbolId; implMethod: SymbolId }[];
+  implSymbol: SymbolId;
 };
 
 export const buildProgramCodegenView = (
@@ -217,14 +344,14 @@ export const buildProgramCodegenView = (
   const arena = first.typing.arena;
   const effectsInterner: EffectInterner = first.typing.effects;
 
-  const objectTemplateByOwner = new Map<string, ObjectTemplate>();
-  const objectInfoByNominal = new Map<TypeId, ObjectTypeInfo>();
+  const objectTemplateByOwner = new Map<string, CodegenObjectTemplate>();
+  const objectInfoByNominal = new Map<TypeId, CodegenObjectTypeInfo>();
   const nominalOwnerByNominal = new Map<TypeId, SymbolRef>();
   const nominalsByOwner = new Map<string, TypeId[]>();
 
-  const traitImplsByNominal = new Map<TypeId, TraitImplInstance[]>();
-  const traitImplsByTrait = new Map<SymbolId, TraitImplInstance[]>();
-  const traitMethodImpls = new Map<SymbolId, TraitMethodImpl>();
+  const traitImplsByNominal = new Map<TypeId, CodegenTraitImplInstance[]>();
+  const traitImplsByTrait = new Map<SymbolId, CodegenTraitImplInstance[]>();
+  const traitMethodImpls = new Map<SymbolId, CodegenTraitMethodImpl>();
 
   const callsByModule = new Map<
     string,
@@ -246,6 +373,174 @@ export const buildProgramCodegenView = (
   const moduleMetaById = new Map<string, ModuleCodegenMetadata>();
   const importTargetsByModule = new Map<string, Map<SymbolId, SymbolRef>>();
   const importLocalsByModule = new Map<string, Map<string, SymbolId>>();
+
+  const symbolRefKey = (ref: SymbolRef): string => `${ref.moduleId}::${ref.symbol}`;
+
+  const toSymbolRef = (ref: TypingSymbolRef): SymbolRef => ({
+    moduleId: ref.moduleId,
+    symbol: ref.symbol,
+  });
+
+  const typeDescCache = new Map<TypeId, CodegenTypeDesc>();
+  const schemeCache = new Map<TypeSchemeId, CodegenTypeScheme>();
+  const traitImplCache = new Map<string, CodegenTraitImplInstance>();
+
+  const toCodegenStructuralField = (field: StructuralField): CodegenStructuralField => ({
+    name: field.name,
+    type: field.type,
+    optional: field.optional === true,
+    declaringParams: field.declaringParams,
+    visibility: field.visibility,
+    owner: field.owner,
+    packageId: field.packageId,
+  });
+
+  const toCodegenTypeDesc = (typeId: TypeId, desc: TypeDescriptor): CodegenTypeDesc => {
+    const cached = typeDescCache.get(typeId);
+    if (cached) {
+      return cached;
+    }
+    switch (desc.kind) {
+      case "primitive":
+        return cacheTypeDesc(typeId, { kind: "primitive", name: desc.name });
+      case "type-param-ref":
+        return cacheTypeDesc(typeId, { kind: "type-param-ref", param: desc.param });
+      case "trait":
+        return cacheTypeDesc(typeId, {
+          kind: "trait",
+          owner: toSymbolRef(desc.owner),
+          name: desc.name,
+          typeArgs: [...desc.typeArgs],
+        });
+      case "nominal-object":
+        return cacheTypeDesc(typeId, {
+          kind: "nominal-object",
+          owner: toSymbolRef(desc.owner),
+          name: desc.name,
+          typeArgs: [...desc.typeArgs],
+        });
+      case "structural-object":
+        return cacheTypeDesc(typeId, {
+          kind: "structural-object",
+          fields: desc.fields.map(toCodegenStructuralField),
+        });
+      case "function":
+        return cacheTypeDesc(typeId, {
+          kind: "function",
+          parameters: desc.parameters.map((param) => ({
+            type: param.type,
+            label: param.label,
+            optional: param.optional === true,
+          })),
+          returnType: desc.returnType,
+          effectRow: desc.effectRow,
+        });
+      case "union":
+        return cacheTypeDesc(typeId, { kind: "union", members: [...desc.members] });
+      case "intersection":
+        return cacheTypeDesc(typeId, {
+          kind: "intersection",
+          nominal: desc.nominal,
+          structural: desc.structural,
+        });
+      case "fixed-array":
+        return cacheTypeDesc(typeId, { kind: "fixed-array", element: desc.element });
+      default: {
+        const _exhaustive: never = desc;
+        return _exhaustive;
+      }
+    }
+  };
+
+  const cacheTypeDesc = (typeId: TypeId, value: CodegenTypeDesc): CodegenTypeDesc => {
+    typeDescCache.set(typeId, value);
+    return value;
+  };
+
+  const toCodegenConstraintSet = (constraints: ConstraintSet): CodegenConstraintSet => ({
+    traits: constraints.traits ? [...constraints.traits] : undefined,
+    structural: constraints.structural
+      ? constraints.structural.map((pred) => ({ field: pred.field, type: pred.type }))
+      : undefined,
+  });
+
+  const toCodegenScheme = (scheme: TypeScheme): CodegenTypeScheme => {
+    const cached = schemeCache.get(scheme.id);
+    if (cached) {
+      return cached;
+    }
+    const value: CodegenTypeScheme = {
+      id: scheme.id,
+      params: [...scheme.params],
+      body: scheme.body,
+      constraints: scheme.constraints ? toCodegenConstraintSet(scheme.constraints) : undefined,
+    };
+    schemeCache.set(scheme.id, value);
+    return value;
+  };
+
+  const toCodegenUnificationResult = (
+    result: UnificationResult
+  ): CodegenUnificationResult =>
+    result.ok
+      ? { ok: true, substitution: new Map(result.substitution) }
+      : {
+          ok: false,
+          conflict: {
+            left: result.conflict.left,
+            right: result.conflict.right,
+            message: result.conflict.message,
+          },
+        };
+
+  const toCodegenTraitMethodImpl = (info: TraitMethodImpl): CodegenTraitMethodImpl => ({
+    traitSymbol: info.traitSymbol,
+    traitMethodSymbol: info.traitMethodSymbol,
+  });
+
+  const toCodegenTraitImplInstance = (impl: TraitImplInstance): CodegenTraitImplInstance => {
+    const cacheKey = `${impl.implSymbol}:${impl.trait}:${impl.target}`;
+    const cached = traitImplCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const value: CodegenTraitImplInstance = {
+      trait: impl.trait,
+      traitSymbol: impl.traitSymbol,
+      target: impl.target,
+      methods: Array.from(impl.methods.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([traitMethod, implMethod]) => ({ traitMethod, implMethod })),
+      implSymbol: impl.implSymbol,
+    };
+    traitImplCache.set(cacheKey, value);
+    return value;
+  };
+
+  const toCodegenObjectTemplate = (template: ObjectTemplate): CodegenObjectTemplate => ({
+    symbol: template.symbol,
+    params: template.params.map((param) => ({
+      symbol: param.symbol,
+      typeParam: param.typeParam,
+      constraint: param.constraint,
+    })),
+    nominal: template.nominal,
+    structural: template.structural,
+    type: template.type,
+    fields: template.fields.map(toCodegenStructuralField),
+    visibility: template.visibility,
+    baseNominal: template.baseNominal,
+  });
+
+  const toCodegenObjectTypeInfo = (info: ObjectTypeInfo): CodegenObjectTypeInfo => ({
+    nominal: info.nominal,
+    structural: info.structural,
+    type: info.type,
+    fields: info.fields.map(toCodegenStructuralField),
+    visibility: info.visibility,
+    baseNominal: info.baseNominal,
+    traitImpls: info.traitImpls?.map(toCodegenTraitImplInstance),
+  });
 
   stableModules.forEach((mod) => {
     const importsByLocal = new Map<SymbolId, SymbolRef>();
@@ -285,17 +580,17 @@ export const buildProgramCodegenView = (
 
     for (const template of mod.typing.objects.templates()) {
       const owner: SymbolRef = { moduleId: mod.moduleId, symbol: template.symbol };
-      objectTemplateByOwner.set(symbolRefKey(owner), template);
+      objectTemplateByOwner.set(symbolRefKey(owner), toCodegenObjectTemplate(template));
     }
 
     mod.typing.objectsByNominal.forEach((info, nominal) => {
-      objectInfoByNominal.set(nominal, info);
+      objectInfoByNominal.set(nominal, toCodegenObjectTypeInfo(info));
       const desc = arena.get(nominal);
       if (desc.kind !== "nominal-object") {
         return;
       }
-      nominalOwnerByNominal.set(nominal, desc.owner);
-      const ownerKey = symbolRefKey(desc.owner);
+      nominalOwnerByNominal.set(nominal, toSymbolRef(desc.owner));
+      const ownerKey = symbolRefKey(toSymbolRef(desc.owner));
       const bucket = nominalsByOwner.get(ownerKey) ?? [];
       bucket.push(nominal);
       nominalsByOwner.set(ownerKey, bucket);
@@ -303,20 +598,22 @@ export const buildProgramCodegenView = (
 
     const implsByNominal = mod.typing.traitImplsByNominal;
     implsByNominal.forEach((impls, nominal) => {
+      const mapped = impls.map(toCodegenTraitImplInstance);
       const bucket = traitImplsByNominal.get(nominal) ?? [];
-      bucket.push(...impls);
+      bucket.push(...mapped);
       traitImplsByNominal.set(nominal, bucket);
     });
 
     const implsByTrait = mod.typing.traitImplsByTrait;
     implsByTrait.forEach((impls, traitSymbol) => {
+      const mapped = impls.map(toCodegenTraitImplInstance);
       const bucket = traitImplsByTrait.get(traitSymbol) ?? [];
-      bucket.push(...impls);
+      bucket.push(...mapped);
       traitImplsByTrait.set(traitSymbol, bucket);
     });
 
     mod.typing.traitMethodImpls.forEach((info, symbol) => {
-      traitMethodImpls.set(symbol, info);
+      traitMethodImpls.set(symbol, toCodegenTraitMethodImpl(info));
     });
 
     callsByModule.set(mod.moduleId, {
@@ -364,10 +661,15 @@ export const buildProgramCodegenView = (
   });
 
   const types: TypeLoweringIndex = {
-    getTypeDesc: (typeId) => arena.get(typeId),
+    getTypeDesc: (typeId) => toCodegenTypeDesc(typeId, arena.get(typeId)),
+    getScheme: (schemeId) => toCodegenScheme(arena.getScheme(schemeId)),
+    instantiate: (schemeId, args, ctx) =>
+      arena.instantiate(schemeId, args, ctx as UnificationContext | undefined),
+    unify: (a, b, ctx) =>
+      toCodegenUnificationResult(arena.unify(a, b, ctx as UnificationContext)),
     getNominalOwner: (typeId) => {
       const desc = arena.get(typeId);
-      return desc.kind === "nominal-object" ? desc.owner : undefined;
+      return desc.kind === "nominal-object" ? toSymbolRef(desc.owner) : undefined;
     },
     getNominalAncestry: (typeId) => {
       const seen = new Set<TypeId>();
@@ -436,14 +738,22 @@ export const buildProgramCodegenView = (
   };
 
   const optionals = {
-    getOptionalInfo: (moduleId: string, typeId: TypeId): OptionalInfo | undefined => {
+    getOptionalInfo: (moduleId: string, typeId: TypeId): CodegenOptionalInfo | undefined => {
       const ctx: OptionalResolverContext = {
         arena,
         unknownType: first.typing.primitives.unknown,
         getObjectStructuralTypeId: (nominal) => objectInfoByNominal.get(nominal)?.structural,
         getSymbolIntrinsicType: (symbol) => symbols.getIntrinsicType(moduleId, symbol),
       };
-      return getOptionalInfo(typeId, ctx) ?? undefined;
+      const info = getOptionalInfo(typeId, ctx);
+      return info
+        ? {
+            optionalType: info.optionalType,
+            innerType: info.innerType,
+            someType: info.someType,
+            noneType: info.noneType,
+          }
+        : undefined;
     },
   };
 
@@ -571,7 +881,6 @@ export const buildProgramCodegenView = (
   });
 
   return {
-    arena,
     effects,
     primitives: {
       bool: first.typing.primitives.bool,

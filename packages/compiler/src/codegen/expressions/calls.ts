@@ -12,7 +12,7 @@ import type {
   TypeId,
 } from "../context.js";
 import type { EffectRowId } from "../../semantics/ids.js";
-import type { SymbolRef } from "../../semantics/typing/symbol-ref.js";
+import type { SymbolRef } from "../../semantics/codegen-view/index.js";
 import { compileIntrinsicCall } from "../intrinsics.js";
 import {
   requiresStructuralConversion,
@@ -281,7 +281,7 @@ export const compileCallExpr = (
   }
 
   const calleeTypeId = getRequiredExprType(expr.callee, ctx, typeInstanceKey);
-  const calleeDesc = ctx.program.arena.get(calleeTypeId);
+  const calleeDesc = ctx.program.types.getTypeDesc(calleeTypeId);
 
   if (callee.exprKind === "identifier") {
     const effects = effectsFacade(ctx);
@@ -419,7 +419,7 @@ const compileTraitDispatchCall = ({
     ctx,
     typeInstanceKey
   );
-  const receiverDesc = ctx.program.arena.get(receiverTypeId);
+  const receiverDesc = ctx.program.types.getTypeDesc(receiverTypeId);
   const receiverTraitSymbol =
     receiverDesc.kind === "trait"
       ? localSymbolForSymbolRef(receiverDesc.owner, ctx)
@@ -963,7 +963,7 @@ const compileCurriedClosureCall = ({
   let argIndex = 0;
 
   while (argIndex < expr.args.length) {
-    const currentDesc = ctx.program.arena.get(currentTypeId);
+    const currentDesc = ctx.program.types.getTypeDesc(currentTypeId);
     if (currentDesc.kind !== "function") {
       throw new Error("attempted to call a non-function value");
     }

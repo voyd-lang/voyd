@@ -39,6 +39,48 @@ type CodegenTraitImplInstance = {
 };
 ```
 
+### Module Codegen Metadata and Program Indexes
+
+The boundary should also expose DTOs for module-level wiring and effect identity,
+so codegen never reaches into binding internals:
+
+```ts
+type ModuleCodegenMetadata = {
+  moduleId: string;
+  packageId: string;
+  isPackageRoot: boolean;
+  imports: readonly {
+    local: SymbolId;
+    target?: { moduleId: string; symbol: SymbolId };
+  }[];
+  effects: readonly {
+    name: string;
+    operations: readonly {
+      name: string;
+      resumable: "resume" | "tail";
+      symbol: SymbolId;
+    }[];
+  }[];
+};
+
+type ImportWiringIndex = {
+  getLocal(moduleId: string, target: SymbolRef): SymbolId | undefined;
+  getTarget(moduleId: string, local: SymbolId): SymbolRef | undefined;
+};
+
+type ProgramEffectIndex = {
+  getOrderedModules(): readonly string[];
+  getGlobalId(moduleId: string, localEffectIndex: number): number | undefined;
+  getByGlobalId(
+    effectId: number
+  ): { moduleId: string; localEffectIndex: number } | undefined;
+  getEffectCount(): number;
+};
+```
+
+These DTOs must be constructed in `buildProgramCodegenView` and used by codegen
+for imports, package visibility, and deterministic global effect ids.
+
 ### Translate at View Construction Time
 
 `buildProgramCodegenView` becomes the only place that knows how to translate typing stores into boundary DTOs.

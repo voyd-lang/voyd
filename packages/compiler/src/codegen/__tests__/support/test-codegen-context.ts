@@ -56,15 +56,6 @@ export const createTestCodegenContext = (): {
     moduleId: "test",
     moduleLabel: "test",
     program: {
-      arena: {
-        get: (id: number) => {
-          const desc = descriptors.get(id);
-          if (!desc) {
-            throw new Error(`missing descriptor for type ${id}`);
-          }
-          return desc as any;
-        },
-      },
       effects: {
         isEmpty: () => true,
         getRow: () => ({ operations: [] }),
@@ -84,7 +75,16 @@ export const createTestCodegenContext = (): {
         defaultEffectRow: 0,
       } as any,
       types: {
-        getTypeDesc: () => ({} as any),
+        getTypeDesc: (id: number) => {
+          const desc = descriptors.get(id);
+          if (!desc) {
+            throw new Error(`missing descriptor for type ${id}`);
+          }
+          return desc as any;
+        },
+        getScheme: () => ({ id: 0, params: [], body: 0 }),
+        instantiate: () => 0,
+        unify: () => ({ ok: false, conflict: { left: 0, right: 0, message: "unsupported" } }),
         getNominalOwner: () => undefined,
         getNominalAncestry: () => [],
         getStructuralLayout: () => undefined,

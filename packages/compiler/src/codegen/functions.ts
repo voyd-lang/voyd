@@ -79,7 +79,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
       throw new Error(`codegen missing type information for function ${item.symbol}`);
     }
 
-    const schemeInfo = ctx.program.arena.getScheme(signature.scheme);
+    const schemeInfo = ctx.program.types.getScheme(signature.scheme);
     const instantiationInfo = ctx.program.functions.getInstantiationInfo(ctx.moduleId, item.symbol);
     const recordedInstantiations =
       instantiationInfo && instantiationInfo.size > 0
@@ -108,8 +108,8 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         return;
       }
 
-      const typeId = ctx.program.arena.instantiate(signature.scheme, typeArgs);
-      const descriptor = ctx.program.arena.get(typeId);
+      const typeId = ctx.program.types.instantiate(signature.scheme, typeArgs);
+      const descriptor = ctx.program.types.getTypeDesc(typeId);
       if (descriptor.kind !== "function") {
         throw new Error(
           `codegen expected function type for symbol ${item.symbol}`
@@ -191,7 +191,7 @@ export const compileFunctions = (ctx: CodegenContext): void => {
     const metas = getFunctionMetas(ctx, ctx.moduleId, item.symbol);
     if (!metas || metas.length === 0) {
       const signature = ctx.program.functions.getSignature(ctx.moduleId, item.symbol);
-      const scheme = signature ? ctx.program.arena.getScheme(signature.scheme) : undefined;
+      const scheme = signature ? ctx.program.types.getScheme(signature.scheme) : undefined;
       const instantiationInfo = ctx.program.functions.getInstantiationInfo(ctx.moduleId, item.symbol);
       const hasInstantiations = Boolean(instantiationInfo && instantiationInfo.size > 0);
       if (scheme && scheme.params.length > 0 && !hasInstantiations) {
@@ -226,7 +226,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
       return;
     }
 
-    const scheme = ctx.program.arena.getScheme(signature.scheme);
+    const scheme = ctx.program.types.getScheme(signature.scheme);
     const typeParamCount =
       signature.typeParams.length > 0
         ? signature.typeParams.length
@@ -251,9 +251,9 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
           targetMeta?.effectful ?? (effectInfo ? effectInfo.typeEffectful : false);
         const instantiatedTypeId =
           typeof signature.scheme === "number"
-            ? ctx.program.arena.instantiate(signature.scheme, typeArgs)
+            ? ctx.program.types.instantiate(signature.scheme, typeArgs)
             : signature.typeId;
-        const instantiatedTypeDesc = ctx.program.arena.get(instantiatedTypeId);
+        const instantiatedTypeDesc = ctx.program.types.getTypeDesc(instantiatedTypeId);
         if (instantiatedTypeDesc.kind !== "function") {
           throw new Error(
             `codegen expected function type for import ${imp.local} (type ${instantiatedTypeId})`
@@ -445,10 +445,10 @@ const reportMissingExportedGenericInstantiation = ({
   const signature = ctx.program.functions.getSignature(ctx.moduleId, entry.symbol);
   if (!signature) return;
 
-  const scheme = ctx.program.arena.getScheme(signature.scheme);
+  const scheme = ctx.program.types.getScheme(signature.scheme);
   if (scheme.params.length === 0) return;
 
-  const body = ctx.program.arena.get(scheme.body);
+  const body = ctx.program.types.getTypeDesc(scheme.body);
   if (body.kind !== "function") return;
   const functionName =
     ctx.program.symbols.getLocalName(ctx.moduleId, entry.symbol) ?? `${entry.symbol}`;

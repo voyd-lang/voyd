@@ -495,7 +495,7 @@ const requireBooleanKind = ({
 };
 
 const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {
-  const descriptor = ctx.program.arena.get(typeId);
+  const descriptor = ctx.program.types.getTypeDesc(typeId);
   if (descriptor.kind === "primitive") {
     switch (descriptor.name) {
       case "i32":
@@ -512,7 +512,7 @@ const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {
 };
 
 const getEqualityKind = (typeId: TypeId, ctx: CodegenContext): EqualityKind => {
-  const descriptor = ctx.program.arena.get(typeId);
+  const descriptor = ctx.program.types.getTypeDesc(typeId);
   if (descriptor.kind === "primitive") {
     switch (descriptor.name) {
       case "bool":
@@ -537,7 +537,7 @@ const getBooleanKind = (
   typeId: TypeId,
   ctx: CodegenContext
 ): BooleanKind => {
-  const descriptor = ctx.program.arena.get(typeId);
+  const descriptor = ctx.program.types.getTypeDesc(typeId);
   if (
     descriptor.kind === "primitive" &&
     (descriptor.name === "bool" || descriptor.name === "boolean")
@@ -613,7 +613,7 @@ const getFixedArrayDescriptor = (
   typeId: TypeId,
   ctx: CodegenContext
 ): { kind: "fixed-array"; element: TypeId } => {
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind !== "fixed-array") {
     throw new Error("intrinsic requires a fixed-array type");
   }
@@ -693,7 +693,7 @@ const defaultValueForType = (
   typeId: TypeId,
   ctx: CodegenContext
 ): binaryen.ExpressionRef => {
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   switch (desc.kind) {
     case "primitive":
       switch (desc.name) {

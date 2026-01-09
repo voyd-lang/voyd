@@ -65,7 +65,7 @@ const declarePatternLocals = (
 };
 
 const getNominalComponent = (type: TypeId, ctx: CodegenContext): TypeId | undefined => {
-  const desc = ctx.program.arena.get(type);
+  const desc = ctx.program.types.getTypeDesc(type);
   if (desc.kind === "nominal-object") {
     return type;
   }
@@ -333,7 +333,7 @@ const compileMatchCondition = (
       return;
     }
     seen.add(typeId);
-    const desc = ctx.program.arena.get(typeId);
+    const desc = ctx.program.types.getTypeDesc(typeId);
     if (desc.kind === "union") {
       desc.members.forEach((member) => collectTargets(member, seen, targets));
       return;
@@ -464,7 +464,7 @@ const collectNominalComponents = (
     acc.add(nominal);
     return;
   }
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind === "union") {
     desc.members.forEach((member) =>
       collectNominalComponents(member, ctx, acc)

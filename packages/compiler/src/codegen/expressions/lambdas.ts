@@ -101,7 +101,7 @@ const emitLambdaFunction = ({
   typeInstanceKey?: string;
   compileExpr: ExpressionCompiler;
 }): void => {
-  const desc = ctx.program.arena.get(env.typeId);
+  const desc = ctx.program.types.getTypeDesc(env.typeId);
   if (desc.kind !== "function") {
     throw new Error("lambda missing function type");
   }
