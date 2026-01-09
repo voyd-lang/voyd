@@ -68,6 +68,12 @@ export const compileParsedModule = async (
       codegenOptions: options.codegenOptions,
       entryModuleId: options.entryModuleId,
     });
+    const codegenError = result.diagnostics.find(
+      (diagnostic) => diagnostic.severity === "error"
+    );
+    if (codegenError) {
+      throw new Error(formatDiagnostic(codegenError));
+    }
     return result.module;
   } catch (errorThrown) {
     const diagnostic = codegenErrorToDiagnostic(errorThrown, {

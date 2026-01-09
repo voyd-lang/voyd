@@ -8,6 +8,7 @@ import { createRttContext } from "../rtt/index.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";
 import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
+import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import {
   compileFunctions,
   emitModuleExports,
@@ -89,6 +90,7 @@ const buildCodegenProgram = (
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const runtimeTypeIdsByKey = new Map<string, number>();
   const runtimeTypeIdCounter = { value: 1 };
+  const diagnostics = new DiagnosticEmitter();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     program,
     module: program.modules.get(sem.moduleId)!,
@@ -96,6 +98,7 @@ const buildCodegenProgram = (
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
     effectIdOffset: 0,
+    diagnostics,
     options: DEFAULT_OPTIONS,
     functions,
     functionInstances,
@@ -432,9 +435,10 @@ describe("next codegen", () => {
   it("fails codegen for exported generic functions without instantiations", () => {
     const ast = loadAst("uninstantiated_export_generic.voyd");
     const semantics = semanticsPipeline(ast);
-    expect(() => codegen(semantics)).toThrow(
-      /concrete instantiation for exported generic function identity/
-    );
+    const result = codegen(semantics);
+    expect(
+      result.diagnostics.some((diag) => diag.code === "CG0003")
+    ).toBe(true);
   });
 
   it("emits wasm for generic functions", () => {

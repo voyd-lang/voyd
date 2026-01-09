@@ -14,7 +14,6 @@ import {
   type HirExportEntry,
 } from "../semantics/hir/index.js";
 import { diagnosticFromCode } from "../diagnostics/index.js";
-import { DiagnosticError } from "../diagnostics/index.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
 import {
   collectEffectOperationSignatures,
@@ -349,7 +348,7 @@ export const emitModuleExports = (
     const metas = getFunctionMetas(ctx, ctx.moduleId, entry.symbol);
     const meta = metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
     if (!meta) {
-      throwIfMissingExportedGenericInstantiation({ ctx, entry });
+      reportMissingExportedGenericInstantiation({ ctx, entry });
       return;
     }
     const exportName =
@@ -368,7 +367,7 @@ export const emitModuleExports = (
         valueType === binaryen.f32 ||
         valueType === binaryen.f64;
       if (!supportedReturn) {
-        ctx.module.binding.diagnostics.push(
+        ctx.diagnostics.report(
           diagnosticFromCode({
             code: "CG0002",
             params: {
@@ -435,7 +434,7 @@ export const emitModuleExports = (
  * generic function is exported but never instantiated, we fail with a diagnostic
  * rather than silently omitting the export.
  */
-const throwIfMissingExportedGenericInstantiation = ({
+const reportMissingExportedGenericInstantiation = ({
   ctx,
   entry,
 }: {
@@ -453,7 +452,7 @@ const throwIfMissingExportedGenericInstantiation = ({
   const functionName =
     ctx.program.symbols.getLocalName(ctx.moduleId, entry.symbol) ?? `${entry.symbol}`;
 
-  throw new DiagnosticError(
+  ctx.diagnostics.report(
     diagnosticFromCode({
       code: "CG0003",
       params: {

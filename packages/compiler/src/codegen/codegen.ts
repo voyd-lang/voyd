@@ -32,6 +32,7 @@ import {
 } from "../semantics/codegen-view/index.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypeId } from "../semantics/ids.js";
+import { DiagnosticEmitter } from "../diagnostics/index.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
@@ -82,6 +83,7 @@ export const codegenProgram = ({
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const runtimeTypeIdsByKey = new Map<string, number>();
   const runtimeTypeIdCounter = { value: 1 };
+  const diagnostics = new DiagnosticEmitter();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
@@ -89,6 +91,7 @@ export const codegenProgram = ({
     effectIdOffset: 0,
     program,
     module: sem,
+    diagnostics,
     options: mergedOptions,
     functions,
     functionInstances,
@@ -159,7 +162,7 @@ export const codegenProgram = ({
     }
   }
 
-  return { module: mod, effectTable };
+  return { module: mod, effectTable, diagnostics: [...diagnostics.diagnostics] };
 };
 
 export const codegenProgramWithContinuationFallback = ({

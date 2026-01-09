@@ -12,6 +12,7 @@ import { createEffectsState } from "../effects/state.js";
 import type { CodegenContext } from "../context.js";
 import { runEffectfulExport } from "./support/effects-harness.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
+import { DiagnosticEmitter } from "../../diagnostics/index.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -41,6 +42,7 @@ const buildLoweringSnapshot = () => {
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
+  const diagnostics = new DiagnosticEmitter();
   const ctx: CodegenContext = {
     mod,
     moduleId: semantics.moduleId,
@@ -48,6 +50,7 @@ const buildLoweringSnapshot = () => {
     effectIdOffset: 0,
     program,
     module: moduleView,
+    diagnostics,
     options: {
       optimize: false,
       validate: true,

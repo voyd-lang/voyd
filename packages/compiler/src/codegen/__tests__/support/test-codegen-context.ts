@@ -3,6 +3,7 @@ import type { CodegenContext, HirExpression, HirExprId, TypeId } from "../../con
 import { createEffectRuntime } from "../../effects/runtime-abi.js";
 import { createEffectsState } from "../../effects/state.js";
 import { selectEffectsBackend } from "../../effects/codegen-backend.js";
+import { DiagnosticEmitter } from "../../../diagnostics/index.js";
 
 type TypeDescriptor =
   | { kind: "primitive"; name: string }
@@ -17,6 +18,7 @@ export const createTestCodegenContext = (): {
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   const effectsRuntime = createEffectRuntime(mod);
+  const diagnostics = new DiagnosticEmitter();
 
   const descriptors = new Map<TypeId, TypeDescriptor>();
   const exprTypes = new Map<HirExprId, TypeId>();
@@ -112,6 +114,7 @@ export const createTestCodegenContext = (): {
       modules: new Map([["test", moduleView as any]]),
     } as any,
     module: moduleView as any,
+    diagnostics,
     options: {
       optimize: false,
       validate: false,

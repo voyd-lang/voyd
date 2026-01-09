@@ -40,6 +40,7 @@ import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
 import type { ProgramCodegenView } from "../semantics/codegen-view/index.js";
 import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
 import type { InstanceKey } from "../semantics/codegen-view/index.js";
+import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -51,6 +52,7 @@ export interface CodegenOptions {
 export interface CodegenResult {
   module: binaryen.Module;
   effectTable?: EffectTableSidecar;
+  diagnostics: Diagnostic[];
 }
 
 export interface FunctionMetadata {
@@ -132,6 +134,7 @@ export interface CodegenContext {
   effectIdOffset: number;
   program: ProgramCodegenView;
   module: ModuleCodegenView;
+  diagnostics: DiagnosticEmitter;
   options: Required<CodegenOptions>;
   functions: Map<string, Map<number, FunctionMetadata[]>>;
   functionInstances: Map<InstanceKey, FunctionMetadata>;
