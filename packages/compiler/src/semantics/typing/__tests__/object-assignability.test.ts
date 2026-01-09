@@ -3,6 +3,7 @@ import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import type { TypingResult } from "../typing.js";
 import type { SymbolTable } from "../../binder/index.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 const findValueSymbol = (
   name: string,
@@ -22,7 +23,9 @@ describe("object assignability", () => {
 
   it("allows nominal objects where structural types are expected", () => {
     const ast = loadAst("nominal_to_structural_acceptance.voyd");
-    const { typing, symbolTable, hir } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing, hir } = semantics;
+    const symbolTable = getSymbolTable(semantics);
 
     const resultSymbol = findValueSymbol("result", typing, symbolTable);
     expect(resultSymbol).toBeDefined();

@@ -24,6 +24,7 @@ import type {
 } from "./context.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
 import type { SymbolRef } from "../semantics/typing/symbol-ref.js";
+import type { TraitImplInstance } from "../semantics/typing/types.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -792,7 +793,7 @@ const createMethodLookupEntries = ({
   const hashes = new Map<number, string>();
 
   impls.forEach((impl) => {
-    impl.methods.forEach((implMethodSymbol, traitMethodSymbol) => {
+    impl.methods.forEach((implMethodSymbol: number, traitMethodSymbol: number) => {
       const metas = ctx.functions.get(ctx.moduleId)?.get(implMethodSymbol);
       const meta = pickMethodMetadata(metas);
       if (!meta) {

@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { HirLambdaExpr } from "../../hir/index.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
+import type { SymbolTable } from "../../binder/index.js";
 
 const lambdaByParam = (
   hir: ReturnType<typeof semanticsPipeline>["hir"],
-  symbolTable: ReturnType<typeof semanticsPipeline>["symbolTable"],
+  symbolTable: SymbolTable,
   name: string
 ): HirLambdaExpr | undefined =>
   Array.from(hir.expressions.values()).find(
@@ -19,9 +21,9 @@ const lambdaByParam = (
 
 describe("lambda typing", () => {
   it("infers parameter and return types from context", () => {
-    const { hir, symbolTable, typing } = semanticsPipeline(
-      loadAst("lambda_typing.voyd")
-    );
+    const semantics = semanticsPipeline(loadAst("lambda_typing.voyd"));
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const i32 = typing.arena.internPrimitive("i32");
 
     const doubled = lambdaByParam(hir, symbolTable, "x");

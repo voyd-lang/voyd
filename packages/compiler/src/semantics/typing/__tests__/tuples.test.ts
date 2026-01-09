@@ -1,16 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { semanticsPipeline } from "../../pipeline.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
+import type { SymbolTable } from "../../binder/index.js";
 
 const findSymbolByName = (
   name: string,
   kind: "value" | "parameter",
-  symbolTable: ReturnType<typeof semanticsPipeline>["symbolTable"]
+  symbolTable: SymbolTable
 ) =>
   symbolTable
     .snapshot()
-    .symbols.filter(Boolean)
-    .find((record) => record?.name === name && record?.kind === kind)?.id;
+    .symbols.find((record) => record.name === name && record.kind === kind)?.id;
 
 const expectStructuralTuple = (
   typeId: number | undefined,
@@ -36,7 +37,9 @@ const expectStructuralTuple = (
 describe("tuple typing", () => {
   it("treats tuples as structural objects with numeric field names", () => {
     const ast = loadAst("tuples.voyd");
-    const { typing, symbolTable, hir } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing, hir } = semantics;
+    const symbolTable = getSymbolTable(semantics);
 
     const pairParam = findSymbolByName("pair", "parameter", symbolTable);
     const aBinding = findSymbolByName("a", "value", symbolTable);

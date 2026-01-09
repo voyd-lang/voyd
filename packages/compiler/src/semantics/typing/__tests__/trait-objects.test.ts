@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { HirBlockExpr, HirCallExpr, HirFunction } from "../../hir/nodes.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 describe("trait objects", () => {
   it("accepts trait-typed parameters and dispatches trait method calls", () => {
     const ast = loadAst("trait_object_dispatch.voyd");
-    const { symbolTable, hir, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const root = symbolTable.rootScope;
 
     const doDouble = symbolTable.resolve("do_double", root);

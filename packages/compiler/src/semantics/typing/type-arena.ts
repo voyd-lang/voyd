@@ -1,6 +1,7 @@
 import type {
   EffectRowId,
   NodeId,
+  SymbolId,
   TypeId,
   TypeParamId,
   TypeSchemeId,

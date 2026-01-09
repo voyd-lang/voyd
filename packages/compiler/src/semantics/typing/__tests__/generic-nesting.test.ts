@@ -8,11 +8,14 @@ import type {
 } from "../../hir/index.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 describe("nested generic instantiation", () => {
   it("isolates expression typing when a generic calls another generic", () => {
     const ast = loadAst("nested_generic_calls.voyd");
-    const { hir, symbolTable, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const root = symbolTable.rootScope;
 
     const combineSymbol = symbolTable.resolve("combine", root);

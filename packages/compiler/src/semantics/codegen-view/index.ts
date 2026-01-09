@@ -212,10 +212,10 @@ export const buildProgramCodegenView = (
   );
 
   stableModules.forEach((mod) => {
-    mod.typing.objects.templates().forEach((template) => {
+    for (const template of mod.typing.objects.templates()) {
       const owner: SymbolRef = { moduleId: mod.moduleId, symbol: template.symbol };
       objectTemplateByOwner.set(symbolRefKey(owner), template);
-    });
+    }
 
     mod.typing.objectsByNominal.forEach((info, nominal) => {
       objectInfoByNominal.set(nominal, info);
@@ -451,7 +451,8 @@ export const buildProgramCodegenView = (
       hir: mod.hir,
       effects: mod.typing.effects,
       types: {
-        getExprType: (expr) => mod.typing.table.getExprType(expr),
+        getExprType: (expr) =>
+          mod.typing.table.getExprType(expr) ?? first.typing.primitives.unknown,
         getResolvedExprType: (expr) => mod.typing.resolvedExprTypes.get(expr),
         getValueType: (symbol) =>
           moduleTyping.get(mod.moduleId)?.valueTypes.get(symbol) ?? mod.typing.valueTypes.get(symbol),

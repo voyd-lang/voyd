@@ -31,6 +31,7 @@ import {
   type InstanceKey,
 } from "../semantics/codegen-view/index.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
+import type { TypeId } from "../semantics/ids.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,

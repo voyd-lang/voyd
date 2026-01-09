@@ -48,7 +48,7 @@ export const compileEffectOpCall = ({
   }
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const args = expr.args.map((arg, index) => {
-    const expectedTypeId = signature.parameters[index]?.type;
+    const expectedTypeId = signature.parameters[index]?.typeId;
     const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
     const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
     return coerceValueToType({

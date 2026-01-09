@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import type { HirCallExpr, HirFunction } from "../../hir/nodes.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 describe("unions", () => {
   it("allows assigning narrower unions to wider unions", () => {
     const ast = loadAst("unions_widening.voyd");
-    const { symbolTable, hir, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
 
     const rootScope = symbolTable.rootScope;
     const acceptSymbol = symbolTable.resolve("accept", rootScope);

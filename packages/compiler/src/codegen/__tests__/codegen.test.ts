@@ -16,13 +16,17 @@ import {
 } from "../functions.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
+import {
+  buildProgramCodegenView,
+  type InstanceKey,
+} from "../../semantics/codegen-view/index.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
 import type { TypeId } from "../../semantics/ids.js";
 import type {
   CodegenContext,
   FunctionMetadata,
   OutcomeValueBox,
+  RuntimeTypeIdRegistryEntry,
 } from "../context.js";
 
 const loadAst = (fixtureName: string) => {
@@ -79,10 +83,10 @@ const buildCodegenProgram = (
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
-  const functions = new Map<string, FunctionMetadata[]>();
-  const functionInstances = new Map<string, FunctionMetadata>();
+  const functions = new Map<string, Map<number, FunctionMetadata[]>>();
+  const functionInstances = new Map<InstanceKey, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
-  const runtimeTypeRegistry = new Map();
+  const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     program,
     module: program.modules.get(sem.moduleId)!,

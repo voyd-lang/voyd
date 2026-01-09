@@ -310,7 +310,7 @@ const emitClauseFunction = ({
   clause.parameters.slice(clause.parameters[0] ? 1 : 0).forEach((param, index) => {
     const typeId =
       ctx.module.types.getValueType(param.symbol) ??
-      signature.parameters[index]?.type ??
+      signature.parameters[index]?.typeId ??
       ctx.program.primitives.unknown;
     const wasmType = wasmTypeFor(typeId, ctx);
     const binding = allocateTempLocal(wasmType, fnCtx, typeId);

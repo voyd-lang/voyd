@@ -96,7 +96,7 @@ export const monomorphizeProgram = ({
             symbol: importSymbol,
           } satisfies SymbolRef,
           typeArgs,
-          instanceKey,
+          instanceKey: makeInstanceKey(importModuleId, instanceKey),
         });
 
         const substitution = new Map(

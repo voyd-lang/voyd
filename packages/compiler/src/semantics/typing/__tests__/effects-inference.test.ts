@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../../parser/parser.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import type { HirCallExpr, HirExpression } from "../../hir/index.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
+import type { SymbolTable } from "../../binder/index.js";
 
 const effectOps = (
   row: number,
@@ -12,7 +14,7 @@ const effectOps = (
 const findCallByCallee = (
   hir: ReturnType<typeof semanticsPipeline>["hir"],
   symbolName: string,
-  symbolTable: ReturnType<typeof semanticsPipeline>["symbolTable"]
+  symbolTable: SymbolTable
 ): HirCallExpr | undefined => {
   for (const expr of hir.expressions.values()) {
     if (expr.exprKind !== "call") continue;
@@ -46,7 +48,9 @@ fn main()
       "effects.voyd"
     );
 
-    const { typing, hir, symbolTable } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing, hir } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const callExpr = findCallByCallee(hir, "await", symbolTable);
     expect(callExpr).toBeDefined();
     if (!callExpr) return;
@@ -111,7 +115,9 @@ fn handled()
       "effects.voyd"
     );
 
-    const { typing, hir, symbolTable } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing, hir } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const handler = findEffectHandler(hir);
     expect(handler).toBeDefined();
     if (!handler) return;
@@ -201,7 +207,9 @@ fn handled()
       "effects.voyd"
     );
 
-    const { typing, symbolTable } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const handledSymbol = symbolTable.resolve("handled", symbolTable.rootScope);
     expect(typeof handledSymbol).toBe("number");
     if (typeof handledSymbol !== "number") return;
@@ -287,7 +295,9 @@ fn handled()
       "effects.voyd"
     );
 
-    const { typing, symbolTable } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const handledSymbol = symbolTable.resolve("handled", symbolTable.rootScope);
     expect(typeof handledSymbol).toBe("number");
     if (typeof handledSymbol !== "number") return;
@@ -312,7 +322,9 @@ fn reraises()
       "effects.voyd"
     );
 
-    const { typing, symbolTable } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const reraisesSymbol = symbolTable.resolve("reraises", symbolTable.rootScope);
     expect(typeof reraisesSymbol).toBe("number");
     if (typeof reraisesSymbol !== "number") return;
@@ -368,7 +380,9 @@ fn main()
       "effects.voyd"
     );
 
-    const { typing, symbolTable } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const runSymbol = symbolTable.resolve("run", symbolTable.rootScope);
     const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
     expect(typeof runSymbol).toBe("number");
@@ -421,7 +435,9 @@ fn caller() -> i32
       "effects.voyd"
     );
 
-    const { typing, symbolTable } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const liftSymbol = symbolTable.resolve("lift", symbolTable.rootScope);
     const callerSymbol = symbolTable.resolve("caller", symbolTable.rootScope);
     expect(typeof liftSymbol).toBe("number");

@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 describe("nominal objects", () => {
   it("preserves nominal identity while allowing structural use", () => {
     const ast = loadAst("nominal_objects.voyd");
-    const { symbolTable, typing, binding } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing, binding } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const root = symbolTable.rootScope;
 
     const vecSymbol = symbolTable.resolve("Vec", root);

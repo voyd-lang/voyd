@@ -5,11 +5,13 @@ import { semanticsPipeline } from "../../pipeline.js";
 import type { TypingResult } from "../typing.js";
 import type { NominalObjectType } from "../type-arena.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
+import type { SymbolTable } from "../../binder/index.js";
 
 const findValueSymbol = (
   name: string,
   valueTypes: ReadonlyMap<SymbolId, TypeId>,
-  symbolTable: ReturnType<typeof semanticsPipeline>["symbolTable"]
+  symbolTable: SymbolTable
 ): SymbolId | undefined => {
   for (const symbol of valueTypes.keys()) {
     const record = symbolTable.getSymbol(symbol);
@@ -65,7 +67,9 @@ const unwrapNominal = (
 describe("nominal object type parameters", () => {
   it("propagates type arguments through aliases and literals", () => {
     const ast = loadAst("object_generics.voyd");
-    const { symbolTable, hir, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const root = symbolTable.rootScope;
 
     const boxSymbol = symbolTable.resolve("Box", root);

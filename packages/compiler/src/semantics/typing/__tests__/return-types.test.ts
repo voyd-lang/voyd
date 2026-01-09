@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 const nominalNameOf = (
   typeId: number,
@@ -26,9 +27,9 @@ const nominalNameOf = (
 
 describe("return type inference", () => {
   it("infers a union when multiple nominal objects are returned", () => {
-    const { typing, symbolTable } = semanticsPipeline(
-      loadAst("return_union_inference.voyd")
-    );
+    const semantics = semanticsPipeline(loadAst("return_union_inference.voyd"));
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const chooseSymbol = symbolTable.resolve("choose", symbolTable.rootScope);
     expect(typeof chooseSymbol).toBe("number");
     if (typeof chooseSymbol !== "number") return;
