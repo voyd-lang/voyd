@@ -793,9 +793,7 @@ const createMethodLookupEntries = ({
 
   impls.forEach((impl) => {
     impl.methods.forEach((implMethodSymbol, traitMethodSymbol) => {
-      const metas = ctx.functions.get(
-        functionKey(ctx.moduleId, implMethodSymbol)
-      );
+      const metas = ctx.functions.get(ctx.moduleId)?.get(implMethodSymbol);
       const meta = pickMethodMetadata(metas);
       if (!meta) {
         throw new Error(

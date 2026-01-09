@@ -38,6 +38,7 @@ import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
 import type { GroupContinuationCfg } from "../effects/continuation-cfg.js";
 import { effectsFacade } from "../effects/facade.js";
+import { makeInstanceKey } from "../../semantics/codegen-view/index.js";
 import { compileOptionalNoneValue } from "../optionals.js";
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
@@ -1091,12 +1092,12 @@ const getFunctionMetadataForCall = ({
 }): FunctionMetadata | undefined => {
   const rawKey = ctx.program.calls.getCallInfo(ctx.moduleId, callId).instanceKey;
   const instance = rawKey
-    ? ctx.functionInstances.get(scopedInstanceKey(ctx.moduleId, rawKey))
+    ? ctx.functionInstances.get(makeInstanceKey(ctx.moduleId, rawKey))
     : undefined;
   if (instance) {
     return instance;
   }
-  const metas = ctx.functions.get(functionKey(ctx.moduleId, symbol));
+  const metas = ctx.functions.get(ctx.moduleId)?.get(symbol);
   if (!metas || metas.length === 0) {
     return undefined;
   }
@@ -1109,8 +1110,6 @@ const getFunctionMetadataForCall = ({
   return metas[0];
 };
 
-const functionKey = (moduleId: string, symbol: number): string =>
-  `${moduleId}::${symbol}`;
+// Function metadata is stored per-module in `ctx.functions`.
 
-const scopedInstanceKey = (moduleId: string, instanceKey: string): string =>
-  `${moduleId}::${instanceKey}`;
+// Instance keys are scoped via `makeInstanceKey`.

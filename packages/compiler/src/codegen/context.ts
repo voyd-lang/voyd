@@ -39,6 +39,7 @@ import type { EffectsState } from "./effects/state.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
 import type { ProgramCodegenView } from "../semantics/codegen-view/index.js";
 import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
+import type { InstanceKey } from "../semantics/codegen-view/index.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -127,8 +128,8 @@ export interface CodegenContext {
   program: ProgramCodegenView;
   module: ModuleCodegenView;
   options: Required<CodegenOptions>;
-  functions: Map<string, FunctionMetadata[]>;
-  functionInstances: Map<string, FunctionMetadata>;
+  functions: Map<string, Map<number, FunctionMetadata[]>>;
+  functionInstances: Map<InstanceKey, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
   fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;

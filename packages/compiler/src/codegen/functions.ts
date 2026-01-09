@@ -29,6 +29,31 @@ import {
 } from "./effects/host-boundary.js";
 import { effectsFacade } from "./effects/facade.js";
 import { emitPureSurfaceWrapper } from "./effects/abi-wrapper.js";
+import { makeInstanceKey } from "../semantics/codegen-view/index.js";
+
+const getFunctionMetas = (
+  ctx: CodegenContext,
+  moduleId: string,
+  symbol: number
+): FunctionMetadata[] | undefined => ctx.functions.get(moduleId)?.get(symbol);
+
+const pushFunctionMeta = (
+  ctx: CodegenContext,
+  moduleId: string,
+  symbol: number,
+  meta: FunctionMetadata
+): void => {
+  const bySymbol = ctx.functions.get(moduleId) ?? new Map<number, FunctionMetadata[]>();
+  const existing = bySymbol.get(symbol);
+  if (existing) {
+    existing.push(meta);
+  } else {
+    bySymbol.set(symbol, [meta]);
+  }
+  if (!ctx.functions.has(moduleId)) {
+    ctx.functions.set(moduleId, bySymbol);
+  }
+};
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
@@ -79,7 +104,8 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           `codegen cannot emit ${name} without resolved type arguments (instance ${instanceKey})`
         );
       }
-      if (ctx.functionInstances.has(instanceKey)) {
+      const scopedKey = makeInstanceKey(ctx.moduleId, instanceKey);
+      if (ctx.functionInstances.has(scopedKey)) {
         return;
       }
 
@@ -147,14 +173,8 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         effectRow: effectInfo.effectRow,
       };
 
-      const key = functionKey(ctx.moduleId, item.symbol);
-      const metas = ctx.functions.get(key);
-      if (metas) {
-        metas.push(metadata);
-      } else {
-        ctx.functions.set(key, [metadata]);
-      }
-      ctx.functionInstances.set(scopedInstanceKey(ctx.moduleId, instanceKey), metadata);
+      pushFunctionMeta(ctx, ctx.moduleId, item.symbol, metadata);
+      ctx.functionInstances.set(scopedKey, metadata);
     });
   }
 };
@@ -169,7 +189,7 @@ export const compileFunctions = (ctx: CodegenContext): void => {
     if (intrinsicMetadata.intrinsic && intrinsicMetadata.intrinsicUsesSignature !== true) {
       continue;
     }
-    const metas = ctx.functions.get(functionKey(ctx.moduleId, item.symbol));
+    const metas = getFunctionMetas(ctx, ctx.moduleId, item.symbol);
     if (!metas || metas.length === 0) {
       const signature = ctx.program.functions.getSignature(ctx.moduleId, item.symbol);
       const scheme = signature ? ctx.program.arena.getScheme(signature.scheme) : undefined;
@@ -201,8 +221,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
     const signature = ctx.program.functions.getSignature(ctx.moduleId, imp.local);
     if (!signature) return;
 
-    const targetKey = functionKey(imp.target.moduleId, imp.target.symbol);
-    const targetMetas = ctx.functions.get(targetKey);
+    const targetMetas = getFunctionMetas(ctx, imp.target.moduleId, imp.target.symbol);
     if (!targetMetas || targetMetas.length === 0) {
       return;
     }
@@ -266,14 +285,8 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         effectful,
         effectRow: targetMeta?.effectRow ?? effectInfo?.effectRow,
       };
-      const key = functionKey(ctx.moduleId, imp.local);
-      const metas = ctx.functions.get(key);
-      if (metas) {
-        metas.push(metadata);
-      } else {
-        ctx.functions.set(key, [metadata]);
-      }
-      ctx.functionInstances.set(scopedInstanceKey(ctx.moduleId, instanceKey), metadata);
+      pushFunctionMeta(ctx, ctx.moduleId, imp.local, metadata);
+      ctx.functionInstances.set(makeInstanceKey(ctx.moduleId, instanceKey), metadata);
     });
   });
 };
@@ -330,11 +343,8 @@ export const emitModuleExports = (
     ) {
       return;
     }
-    const metas = ctx.functions.get(
-      functionKey(ctx.moduleId, entry.symbol)
-    );
-    const meta =
-      metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
+    const metas = getFunctionMetas(ctx, ctx.moduleId, entry.symbol);
+    const meta = metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
     if (!meta) {
       throwIfMissingExportedGenericInstantiation({ ctx, entry });
       return;
@@ -641,14 +651,6 @@ const formatInstanceKey = (
   symbol: number,
   typeArgs: readonly TypeId[]
 ): string => `${symbol}<${typeArgs.join(",")}>`;
-
-const functionKey = (moduleId: string, symbol: number): string =>
-  `${moduleId}::${symbol}`;
-
-const scopedInstanceKey = (
-  moduleId: string,
-  instanceKey: string
-): string => `${moduleId}::${instanceKey}`;
 
 const pickTargetMeta = (
   metas: readonly FunctionMetadata[],

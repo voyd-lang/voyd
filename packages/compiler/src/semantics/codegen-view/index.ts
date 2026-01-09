@@ -39,6 +39,11 @@ export type CallLoweringInfo = {
   traitDispatch: boolean;
 };
 
+export type InstanceKey = string & { readonly __brand: "InstanceKey" };
+
+export const makeInstanceKey = (moduleId: string, localKey: string): InstanceKey =>
+  `${moduleId}::${localKey}` as InstanceKey;
+
 export type CodegenFunctionSignature = {
   typeId: TypeId;
   scheme: number;
@@ -73,7 +78,7 @@ export type ModuleTypeIndex = {
 export type MonomorphizedInstanceInfo = {
   callee: SymbolRef;
   typeArgs: readonly TypeId[];
-  instanceKey: string;
+  instanceKey: InstanceKey;
 };
 
 export type TypeLoweringIndex = {
@@ -116,7 +121,7 @@ export type CallLoweringIndex = {
 
 export type MonomorphizedInstanceIndex = {
   getAll(): readonly MonomorphizedInstanceInfo[];
-  getByKey(instanceKey: string): MonomorphizedInstanceInfo | undefined;
+  getByKey(instanceKey: InstanceKey): MonomorphizedInstanceInfo | undefined;
 };
 
 export type ModuleCodegenView = {
@@ -179,10 +184,6 @@ export const buildProgramCodegenView = (
 
   const arena = first.typing.arena;
   const effectsInterner: EffectInterner = first.typing.effects;
-
-  const packageIdByModule = new Map<string, string>(
-    modules.map((mod) => [mod.moduleId, mod.binding.packageId] as const)
-  );
 
   const objectTemplateByOwner = new Map<string, ObjectTemplate>();
   const objectInfoByNominal = new Map<TypeId, ObjectTypeInfo>();
@@ -349,7 +350,7 @@ export const buildProgramCodegenView = (
       return mod?.symbols.getName(ref.symbol);
     },
     getLocalName: (moduleId, symbol) => modulesById.get(moduleId)?.symbols.getName(symbol),
-    getPackageId: (moduleId) => packageIdByModule.get(moduleId),
+    getPackageId: (moduleId) => modulesById.get(moduleId)?.binding.packageId,
     getIntrinsicType: (moduleId, symbol) =>
       modulesById.get(moduleId)?.symbols.getIntrinsicType(symbol),
     getIntrinsicFunctionFlags: (moduleId, symbol) =>

@@ -1,22 +1,19 @@
 # Program-Wide Shared Type Arena
 
-Status: Draft  
+Status: Implemented  
 Owner: Compiler Architecture Working Group  
-Scope: `packages/compiler/src/semantics/typing/*`, `packages/compiler/src/semantics/linking.ts`, `packages/compiler/src/pipeline.ts`
+Scope: `packages/compiler/src/pipeline.ts`, `packages/compiler/src/semantics/typing/*`, `packages/compiler/src/semantics/linking.ts`, `packages/compiler/src/semantics/codegen-view/*`
 
-## Overview
+## Overview (Implemented)
 
-Today, each module gets its own `TypeArena` (and `EffectTable`). That makes `TypeId`
-and `EffectRowId` *module-local*, which forces the compiler to:
+All modules in a compilation share a single `TypeArena` and a program-wide `EffectInterner`,
+so `TypeId`/`EffectRowId` identity is valid across the compilation unit.
 
-- Translate types across arenas during imports (`createTypeTranslation`).
-- Link imported generic instantiations as a whole-program pass (`linkProgramSemantics`).
-- Avoid using `TypeId` as a runtime identity (because the same conceptual type has different `TypeId`s in different modules).
+The compiler also builds a semantics-owned whole-program artifact (`ProgramCodegenView`)
+that becomes the stable interface consumed by codegen (see `docs/architecture/codegen-semantics-boundary.md`).
 
-This proposal moves to a program-wide shared arena so that all modules in a
-single compilation share a single `TypeArena` (and, optionally, a single
-`EffectTable`). This yields global `TypeId`s within that compilation unit and
-eliminates most cross-module translation.
+This eliminates most cross-module translation and prevents codegen from directly
+querying typing internals to reconstruct semantic structure.
 
 ## Goals
 
@@ -104,7 +101,7 @@ reduced to:
 
 ### 4) Generic Monomorphization as a First-Class Whole-Program Pass
 
-`linkProgramSemantics` exists because the caller can
+`monomorphizeProgram` exists because the caller can
 discover instantiations that require typing work in the callee module.
 
 With a shared arena, we still need whole-program monomorphization, but it
@@ -153,7 +150,7 @@ or keep hashing only if there’s a specific backend constraint requiring it.
 ### Phase 3: Cleanups and Simplification
 
 1. Remove or significantly reduce `createTypeTranslation` for imports.
-2. Replace `linkProgramSemantics` with an explicit, tested whole-program monomorphization pass.
+2. Replace `linkProgramSemantics` with an explicit, tested whole-program monomorphization pass. (Done: `monomorphizeProgram`.)
 3. Switch runtime type identity to use program-wide `TypeId` (or keep hashing with collision checks as a transitional measure).
 
 ## Risks and Tradeoffs
@@ -169,5 +166,5 @@ or keep hashing only if there’s a specific backend constraint requiring it.
 
 - Cross-module RTT/type tests can use `TypeId` directly without hashing.
 - Import-heavy code eliminates most type translation work.
-- `linkProgramSemantics` is removed or replaced by a
+- `linkProgramSemantics` is removed (replaced by `monomorphizeProgram`).
   deterministic whole-program monomorphization pass.

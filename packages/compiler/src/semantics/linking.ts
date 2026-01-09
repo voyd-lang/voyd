@@ -4,7 +4,7 @@ import type { DependencySemantics, TypingContext } from "./typing/types.js";
 import { typeGenericFunctionBody } from "./typing/expressions/call.js";
 import type { ModuleExportTable } from "./modules.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
-import type { MonomorphizedInstanceInfo } from "./codegen-view/index.js";
+import { makeInstanceKey, type MonomorphizedInstanceInfo } from "./codegen-view/index.js";
 import type { SymbolRef } from "./typing/symbol-ref.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import type { HirExprId, SymbolId, TypeId } from "./ids.js";
@@ -46,11 +46,6 @@ export const monomorphizeProgram = ({
   const requestedInstances: MonomorphizedInstanceInfo[] = [];
 
   modules.forEach((caller) => {
-    const callerDep = dependencies.get(caller.moduleId);
-    if (!callerDep) {
-      return;
-    }
-
     const sortedLocalSymbols = Array.from(
       caller.typing.functionInstantiationInfo.keys()
     ).sort((a, b) => a - b);
@@ -126,7 +121,7 @@ export const monomorphizeProgram = ({
     if (!info.instanceKey) return;
     const key = `${info.callee.moduleId}::${info.instanceKey}`;
     if (!deduped.has(key)) {
-      deduped.set(key, { ...info, instanceKey: key });
+      deduped.set(key, { ...info, instanceKey: makeInstanceKey(info.callee.moduleId, info.instanceKey) });
     }
   });
   const instances = Array.from(deduped.values()).sort((a, b) => {
@@ -179,27 +174,25 @@ const buildDependencyIndex = (
   moduleExports: Map<string, ModuleExportTable>;
   dependencies: Map<string, DependencySemantics>;
 } => {
-  const moduleExports = new Map<string, ModuleExportTable>(
-    Array.from(semantics.entries()).map(([id, entry]) => [id, entry.exports])
-  );
-  const dependencies = new Map<string, DependencySemantics>(
-    Array.from(semantics.entries()).map(([id, entry]) => [
-      id,
-      {
-        moduleId: entry.moduleId,
-        packageId: entry.binding.packageId,
-        symbolTable: getSymbolTable(entry),
-        hir: entry.hir,
-        typing: entry.typing,
-        decls: entry.binding.decls,
-        overloads: collectOverloadOptions(
-          entry.binding.overloads,
-          entry.binding.importedOverloadOptions
-        ),
-        exports: entry.exports,
-      },
-    ])
-  );
+  const moduleExports = new Map<string, ModuleExportTable>();
+  const dependencies = new Map<string, DependencySemantics>();
+
+  semantics.forEach((entry, id) => {
+    moduleExports.set(id, entry.exports);
+    dependencies.set(id, {
+      moduleId: entry.moduleId,
+      packageId: entry.binding.packageId,
+      symbolTable: getSymbolTable(entry),
+      hir: entry.hir,
+      typing: entry.typing,
+      decls: entry.binding.decls,
+      overloads: collectOverloadOptions(
+        entry.binding.overloads,
+        entry.binding.importedOverloadOptions
+      ),
+      exports: entry.exports,
+    });
+  });
 
   return { moduleExports, dependencies };
 };

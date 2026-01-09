@@ -55,7 +55,7 @@ const buildLoweringSnapshot = () => {
       continuationBackend: {},
     },
     functions: new Map(),
-    functionInstances: new Map(),
+    functionInstances: new Map() as any,
     itemsToSymbols: new Map(),
     structTypes: new Map(),
     fixedArrayTypes: new Map(),

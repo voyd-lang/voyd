@@ -28,6 +28,7 @@ import { createEffectsState } from "./effects/state.js";
 import {
   buildProgramCodegenView,
   type ProgramCodegenView,
+  type InstanceKey,
 } from "../semantics/codegen-view/index.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 
@@ -74,8 +75,8 @@ export const codegenProgram = ({
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
-  const functions = new Map<string, FunctionMetadata[]>();
-  const functionInstances = new Map<string, FunctionMetadata>();
+  const functions = new Map<string, Map<number, FunctionMetadata[]>>();
+  const functionInstances = new Map<InstanceKey, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
