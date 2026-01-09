@@ -2,6 +2,8 @@ import type { SymbolId, TypeId } from "../ids.js";
 import type { TypeArena } from "./type-arena.js";
 import type { TypingContext, TypingResult } from "./types.js";
 import type { SymbolTable } from "../binder/index.js";
+import type { SymbolRef } from "./symbol-ref.js";
+import { localSymbolForSymbolRef } from "./symbol-ref-utils.js";
 
 export type OptionalInfo = {
   optionalType: TypeId;
@@ -15,6 +17,7 @@ export type OptionalResolverContext = {
   unknownType: TypeId;
   getObjectStructuralTypeId?: (nominal: TypeId) => TypeId | undefined;
   getSymbolIntrinsicType?: (symbol: SymbolId) => string | undefined;
+  localSymbolForSymbolRef?: (ref: SymbolRef) => SymbolId | undefined;
 };
 
 const cacheByArena = new WeakMap<TypeArena, Map<TypeId, OptionalInfo | null>>();
@@ -26,6 +29,7 @@ export const optionalResolverContextForTypingContext = (
   unknownType: ctx.primitives.unknown,
   getObjectStructuralTypeId: (nominal) =>
     ctx.objects.getInstanceByNominal(nominal)?.structural,
+  localSymbolForSymbolRef: (ref) => localSymbolForSymbolRef(ref, ctx),
   getSymbolIntrinsicType: (symbol) => {
     const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ?? {}) as {
       intrinsicType?: unknown;
@@ -100,11 +104,16 @@ const resolveNominalOwnerSymbol = (
 
   const desc = ctx.arena.get(type);
   if (desc.kind === "nominal-object") {
-    return desc.owner;
+    return ctx.localSymbolForSymbolRef
+      ? ctx.localSymbolForSymbolRef(desc.owner)
+      : undefined;
   }
   if (desc.kind === "intersection" && typeof desc.nominal === "number") {
     const nominal = ctx.arena.get(desc.nominal);
-    return nominal.kind === "nominal-object" ? nominal.owner : undefined;
+    if (nominal.kind !== "nominal-object" || !ctx.localSymbolForSymbolRef) {
+      return undefined;
+    }
+    return ctx.localSymbolForSymbolRef(nominal.owner);
   }
   return undefined;
 };

@@ -5,6 +5,7 @@ import { semanticsPipeline } from "../../pipeline.js";
 import type { TypingResult } from "../typing.js";
 import type { NominalObjectType } from "../type-arena.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 const nominalFor = (
   typeId: TypeId,
@@ -29,7 +30,9 @@ const primitiveName = (typeId: TypeId, typing: TypingResult): string | null => {
 describe("type alias type parameters", () => {
   it("propagates type arguments through type aliases", () => {
     const ast = loadAst("type_alias_generics.voyd");
-    const { symbolTable, hir, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const root = symbolTable.rootScope;
 
     const optional = Array.from(hir.items.values()).find(
@@ -85,7 +88,7 @@ describe("type alias type parameters", () => {
         return;
       }
       const nominal = memberNominals.find(
-        (candidate) => candidate.owner === symbol
+        (candidate) => candidate.owner.symbol === symbol
       );
       expect(nominal).toBeDefined();
       if (!nominal || !args) {

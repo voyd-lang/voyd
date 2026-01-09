@@ -5,6 +5,7 @@ import { modulePathToString } from "../../modules/path.js";
 import { loadAst } from "./load-ast.js";
 import { toSourceSpan } from "../utils.js";
 import { isForm } from "../../parser/index.js";
+import { getSymbolTable } from "../_internal/symbol-table.js";
 
 const buildModule = ({
   fixture,
@@ -78,20 +79,15 @@ describe("e2e: nominal constructor overloads", () => {
 
     expect(mainSemantics.diagnostics).toHaveLength(0);
 
-    const animalSymbol = mainSemantics.symbolTable.resolve(
-      "Animal",
-      mainSemantics.symbolTable.rootScope
-    );
+    const symbolTable = getSymbolTable(mainSemantics);
+    const animalSymbol = symbolTable.resolve("Animal", symbolTable.rootScope);
     expect(typeof animalSymbol).toBe("number");
     if (typeof animalSymbol !== "number") return;
     const constructors =
       mainSemantics.binding.staticMethods.get(animalSymbol)?.get("init");
     expect(constructors?.size).toBe(3);
 
-    const mainSymbol = mainSemantics.symbolTable.resolve(
-      "main",
-      mainSemantics.symbolTable.rootScope
-    );
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
     expect(typeof mainSymbol).toBe("number");
     if (typeof mainSymbol !== "number") return;
     const scheme = mainSemantics.typing.table.getSymbolScheme(mainSymbol);

@@ -42,13 +42,13 @@ export const compileEffectOpCall = ({
   if (!site || site.kind !== "perform") {
     throw new Error("codegen missing effect lowering info for perform site");
   }
-  const signature = ctx.typing.functions.getSignature(calleeSymbol);
+  const signature = ctx.program.functions.getSignature(ctx.moduleId, calleeSymbol);
   if (!signature) {
     throw new Error("codegen missing effect operation signature");
   }
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
   const args = expr.args.map((arg, index) => {
-    const expectedTypeId = signature.parameters[index]?.type;
+    const expectedTypeId = signature.parameters[index]?.typeId;
     const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
     const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
     return coerceValueToType({
@@ -123,4 +123,3 @@ export const compileEffectOpCall = ({
     usedReturnCall: false,
   };
 };
-

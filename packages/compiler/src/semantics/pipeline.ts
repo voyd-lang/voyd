@@ -16,10 +16,12 @@ import type { ModuleExportEffect, ModuleExportTable } from "./modules.js";
 import type { DependencySemantics } from "./typing/types.js";
 import type { Diagnostic } from "../diagnostics/index.js";
 import { DiagnosticError, diagnosticFromCode } from "../diagnostics/index.js";
+import { buildModuleSymbolIndex, type ModuleSymbolIndex } from "./symbol-index.js";
+import { getSymbolTable } from "./_internal/symbol-table.js";
 
 export interface SemanticsPipelineResult {
   binding: BindingResult;
-  symbolTable: SymbolTable;
+  symbols: ModuleSymbolIndex;
   hir: HirGraph;
   typing: TypingResult;
   moduleId: string;
@@ -32,6 +34,7 @@ export interface SemanticsPipelineOptions {
   graph: ModuleGraph;
   exports?: Map<string, ModuleExportTable>;
   dependencies?: Map<string, SemanticsPipelineResult>;
+  typing?: Partial<Pick<TypingResult, "arena" | "effects">>;
 }
 
 type SemanticsPipelineInput = SemanticsPipelineOptions | Form;
@@ -39,7 +42,7 @@ type SemanticsPipelineInput = SemanticsPipelineOptions | Form;
 export const semanticsPipeline = (
   input: SemanticsPipelineInput
 ): SemanticsPipelineResult => {
-  const { module, graph, exports, dependencies } =
+  const { module, graph, exports, dependencies, typing: typingState } =
     normalizeSemanticsInput(input);
   const form = module.ast;
   if (!form.callsInternal("ast")) {
@@ -103,6 +106,8 @@ export const semanticsPipeline = (
       binding.importedOverloadOptions
     ),
     decls: binding.decls,
+    arena: typingState?.arena,
+    effects: typingState?.effects,
     imports: binding.imports,
     moduleId: module.id,
     packageId: binding.packageId,
@@ -128,15 +133,23 @@ export const semanticsPipeline = (
     ...enforcePkgRootEffectRules({ binding, hir, typing, symbolTable }),
   ];
 
+  const symbols = buildModuleSymbolIndex({
+    moduleId: module.id,
+    packageId: binding.packageId,
+    symbolTable,
+  });
+
   return {
     binding,
-    symbolTable,
+    symbols,
     hir,
     typing,
     moduleId: module.id,
     exports: exportsTable,
     diagnostics,
-  };
+    // Intentionally not part of the public result type; semantics-internal only.
+    ...( { symbolTable } as unknown as {} ),
+  } as SemanticsPipelineResult;
 };
 
 const ensureNoBindingErrors = (binding: BindingResult): void => {
@@ -424,7 +437,7 @@ const projectDependencySemantics = (
       {
         moduleId: entry.moduleId,
         packageId: entry.binding.packageId,
-        symbolTable: entry.symbolTable,
+        symbolTable: getSymbolTable(entry),
         hir: entry.hir,
         typing: entry.typing,
         decls: entry.binding.decls,

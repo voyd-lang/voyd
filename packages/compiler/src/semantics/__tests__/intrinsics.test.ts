@@ -3,6 +3,7 @@ import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../pipeline.js";
 import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
 import type { HirFunction } from "../hir/nodes.js";
+import { getSymbolTable } from "../_internal/symbol-table.js";
 import { loadAst } from "./load-ast.js";
 
 const UNANNOTATED_SOURCE = `
@@ -44,7 +45,9 @@ const buildPipelineInput = ({
 describe("intrinsic metadata", () => {
   it("propagates @intrinsic attributes through binding and lowering", () => {
     const ast = loadAst("intrinsic_attributes.voyd");
-    const { binding, symbolTable, hir } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { binding, hir } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const rootScope = symbolTable.rootScope;
 
     const renamed = symbolTable.resolve("renamed", rootScope);
@@ -120,13 +123,14 @@ describe("intrinsic metadata", () => {
 
   it("leaves unannotated modules untouched", () => {
     const ast = parse(UNANNOTATED_SOURCE, FIXED_ARRAY_FILE);
-    const { symbolTable } = semanticsPipeline(
+    const semantics = semanticsPipeline(
       buildPipelineInput({
         ast,
         moduleId: FIXED_ARRAY_FILE,
         filePath: FIXED_ARRAY_FILE,
       })
     );
+    const symbolTable = getSymbolTable(semantics);
     const rootScope = symbolTable.rootScope;
     const names = ["new_fixed_array", "get", "set", "copy", "length", "helper"];
 

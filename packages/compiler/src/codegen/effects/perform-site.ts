@@ -7,14 +7,14 @@ export const performSiteArgTypes = ({
   exprId: HirExprId;
   ctx: CodegenContext;
 }): readonly TypeId[] => {
-  const expr = ctx.hir.expressions.get(exprId);
+  const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr || expr.exprKind !== "call") {
     throw new Error("perform site missing call expression");
   }
   return expr.args.map((arg) => {
     const resolved =
-      ctx.typing.resolvedExprTypes.get(arg.expr) ??
-      ctx.typing.table.getExprType(arg.expr);
-    return resolved ?? ctx.typing.primitives.unknown;
+      ctx.module.types.getResolvedExprType(arg.expr) ??
+      ctx.module.types.getExprType(arg.expr);
+    return resolved ?? ctx.program.primitives.unknown;
   });
 };

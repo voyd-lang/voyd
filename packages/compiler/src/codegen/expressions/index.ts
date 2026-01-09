@@ -32,7 +32,7 @@ export const compileExpression: ExpressionCompiler = ({
   tailPosition = false,
   expectedResultTypeId,
 }: ExpressionCompilerParams): CompiledExpression => {
-  const expr = ctx.hir.expressions.get(exprId);
+  const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr) {
     throw new Error(`codegen missing HirExpression ${exprId}`);
   }

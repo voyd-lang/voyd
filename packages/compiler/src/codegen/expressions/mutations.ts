@@ -46,7 +46,7 @@ export const compileAssignExpr = (
     throw new Error("assignment missing target expression");
   }
 
-  const targetExpr = ctx.hir.expressions.get(expr.target);
+  const targetExpr = ctx.module.hir.expressions.get(expr.target);
   if (!targetExpr) {
     throw new Error("assignment missing target expression");
   }

@@ -56,7 +56,7 @@ const collectEffects = (
 ): EffectTableEffect[] => {
   const effects: EffectTableEffect[] = [];
   contexts.forEach((ctx) => {
-    ctx.binding.effects.forEach((effect) => {
+    ctx.module.binding.effects.forEach((effect) => {
       const effectId = effects.length;
       const label = `${ctx.moduleLabel}::${effect.name}`;
       const ops: EffectTableOp[] = effect.operations.map((op, index) => ({

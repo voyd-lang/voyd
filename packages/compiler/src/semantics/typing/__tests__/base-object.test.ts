@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
+import type { SymbolTable } from "../../binder/index.js";
 
 const findTypeByName = (
   name: string,
   typing: ReturnType<typeof semanticsPipeline>["typing"],
-  symbolTable: ReturnType<typeof semanticsPipeline>["symbolTable"]
+  symbolTable: SymbolTable
 ) => {
   for (const [symbol, typeId] of typing.valueTypes.entries()) {
     const record = symbolTable.getSymbol(symbol);
@@ -19,7 +21,9 @@ const findTypeByName = (
 describe("base Object support", () => {
   it("treats nominal and structural objects as Object", () => {
     const ast = loadAst("base_object_compat.voyd");
-    const { typing, symbolTable, hir } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing, hir } = semantics;
+    const symbolTable = getSymbolTable(semantics);
 
     const baseEntry = findTypeByName("Object", typing, symbolTable);
     expect(baseEntry?.typeId).toBeDefined();

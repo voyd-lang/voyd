@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 const getFirstCall = (hir: ReturnType<typeof semanticsPipeline>["hir"]) =>
   Array.from(hir.expressions.values()).find((expr) => expr.exprKind === "call");
@@ -60,9 +61,9 @@ describe("array literals", () => {
   });
 
   it("infers generic new_array type arguments from literal elements", () => {
-    const { typing, hir, symbolTable } = semanticsPipeline(
-      loadAst("array_literal_generic_new_array.voyd")
-    );
+    const semantics = semanticsPipeline(loadAst("array_literal_generic_new_array.voyd"));
+    const { typing, hir } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const callId = Array.from(typing.callTypeArguments.keys()).find((id) => {
       const expr = hir.expressions.get(id);
       if (!expr || expr.exprKind !== "call") return false;

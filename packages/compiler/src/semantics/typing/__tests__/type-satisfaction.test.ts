@@ -32,6 +32,7 @@ const createContext = (mode: TypingState["mode"] = "relaxed") => {
     hir,
     overloads: new Map(),
     decls: new DeclTable(),
+    moduleId: "test",
   });
   seedPrimitiveTypes(ctx);
   seedBaseObjectType(ctx);
@@ -59,7 +60,7 @@ const registerNominal = ({
   });
   const structural = ctx.arena.internStructuralObject({ fields });
   const nominal = ctx.arena.internNominalObject({
-    owner: symbol,
+    owner: { moduleId: "test", symbol },
     name,
     typeArgs: [],
   });

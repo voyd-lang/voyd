@@ -26,6 +26,7 @@ import type {
 } from "../ids.js";
 import type { ModuleExportEntry } from "../modules.js";
 import type { EffectTable } from "../effects/effect-table.js";
+import { symbolRefKey, type SymbolRef } from "./symbol-ref.js";
 
 type ImportTarget = { moduleId: string; symbol: SymbolId };
 
@@ -83,15 +84,17 @@ export const createTypeTranslation = ({
   targetEffects: EffectTable;
   mapSymbol: (symbol: SymbolId) => SymbolId;
 }): ((id: TypeId) => TypeId) =>
-  createTranslation({
-    sourceArena,
-    targetArena,
-    sourceEffects,
-    targetEffects,
-    paramMap: new Map<TypeParamId, TypeParamId>(),
-    cache: new Map<TypeId, TypeId>(),
-    mapSymbol,
-  });
+  sourceArena === targetArena && sourceEffects === targetEffects
+    ? (id) => id
+    : createTranslation({
+        sourceArena,
+        targetArena,
+        sourceEffects,
+        targetEffects,
+        paramMap: new Map<TypeParamId, TypeParamId>(),
+        cache: new Map<TypeId, TypeId>(),
+        mapSymbol,
+      });
 
 export const importTargetFor = (
   symbol: SymbolId,
@@ -164,6 +167,40 @@ export const resolveImportedValue = ({
     );
   }
 
+  const sharedInterners =
+    dependency.typing.arena === ctx.arena && dependency.typing.effects === ctx.effects;
+
+  if (sharedInterners) {
+    const scheme = dependency.typing.table.getSymbolScheme(target.symbol);
+    if (typeof scheme === "number") {
+      ctx.table.setSymbolScheme(symbol, scheme);
+      const sourceScheme = ctx.arena.getScheme(scheme);
+      ctx.valueTypes.set(symbol, sourceScheme.body);
+      ensureImportedOwnerTemplatesAvailable({
+        types: [sourceScheme.body],
+        ctx,
+      });
+    }
+
+    const signature = dependency.typing.functions.getSignature(target.symbol);
+    if (signature) {
+      ctx.functions.setSignature(symbol, signature);
+      ctx.table.setSymbolScheme(symbol, signature.scheme);
+      ctx.valueTypes.set(symbol, signature.typeId);
+      ensureImportedOwnerTemplatesAvailable({
+        types: [
+          signature.typeId,
+          signature.returnType,
+          ...signature.parameters.map((param) => param.type),
+        ],
+        ctx,
+      });
+    }
+
+    const resolvedType = ctx.valueTypes.get(symbol);
+    return typeof resolvedType === "number" ? { type: resolvedType, scheme: ctx.table.getSymbolScheme(symbol) } : undefined;
+  }
+
   const paramMap = new Map<TypeParamId, TypeParamId>();
   const cache = new Map<TypeId, TypeId>();
   const translation = createTranslation({
@@ -218,6 +255,14 @@ export const resolveImportedValue = ({
       ctx.table.setSymbolScheme(symbol, scheme);
     }
     ctx.valueTypes.set(symbol, translated.signature.typeId);
+    ensureImportedOwnerTemplatesAvailable({
+      types: [
+        translated.signature.typeId,
+        translated.signature.returnType,
+        ...translated.signature.parameters.map((param) => param.type),
+      ],
+      ctx,
+    });
     return { type: translated.signature.typeId, scheme };
   }
 
@@ -226,6 +271,94 @@ export const resolveImportedValue = ({
   }
 
   return undefined;
+};
+
+const ensureImportedOwnerTemplatesAvailable = ({
+  types,
+  ctx,
+}: {
+  types: readonly TypeId[];
+  ctx: TypingContext;
+}): void => {
+  const owners: SymbolRef[] = [];
+  const seenTypes = new Set<TypeId>();
+  const seenOwners = new Set<string>();
+
+  types.forEach((type) => collectOwnerRefs(type, ctx.arena, owners, seenTypes, seenOwners));
+
+  owners.forEach((owner) => {
+    if (owner.moduleId === ctx.moduleId) {
+      return;
+    }
+    const dependency = ctx.dependencies.get(owner.moduleId);
+    if (!dependency) {
+      return;
+    }
+    const localSymbol = mapDependencySymbolToLocal({
+      owner: owner.symbol,
+      dependency,
+      ctx,
+      allowUnexported: true,
+    });
+    registerImportedObjectTemplate({
+      dependency,
+      dependencySymbol: owner.symbol,
+      localSymbol,
+      ctx,
+    });
+  });
+};
+
+const collectOwnerRefs = (
+  root: TypeId,
+  arena: TypingContext["arena"],
+  owners: SymbolRef[],
+  seenTypes: Set<TypeId>,
+  seenOwners: Set<string>
+): void => {
+  const stack: TypeId[] = [root];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (typeof current !== "number") {
+      continue;
+    }
+    if (seenTypes.has(current)) {
+      continue;
+    }
+    seenTypes.add(current);
+    const desc = arena.get(current);
+    switch (desc.kind) {
+      case "nominal-object":
+      case "trait": {
+        const ownerKey = symbolRefKey(desc.owner);
+        if (!seenOwners.has(ownerKey)) {
+          seenOwners.add(ownerKey);
+          owners.push(desc.owner);
+        }
+        desc.typeArgs.forEach((arg) => stack.push(arg));
+        break;
+      }
+      case "structural-object":
+        desc.fields.forEach((field) => stack.push(field.type));
+        break;
+      case "function":
+        desc.parameters.forEach((param) => stack.push(param.type));
+        stack.push(desc.returnType);
+        break;
+      case "union":
+        desc.members.forEach((member) => stack.push(member));
+        break;
+      case "intersection":
+        if (typeof desc.nominal === "number") stack.push(desc.nominal);
+        if (typeof desc.structural === "number") stack.push(desc.structural);
+        break;
+      case "fixed-array":
+        stack.push(desc.element);
+        break;
+      default:
+        break;
+    }
+  }
 };
 
 export const resolveImportedTypeExpr = ({
@@ -422,14 +555,14 @@ const createTranslation = ({
         result = targetArena.internPrimitive(desc.name);
         break;
       case "type-param-ref": {
-        const mapped = mapTypeParam(desc.param, paramMap, { arena: targetArena } as TypingContext);
+        const mapped = mapTypeParam(desc.param, paramMap, { arena: targetArena });
         result = targetArena.internTypeParamRef(mapped);
         break;
       }
       case "nominal-object": {
         const typeArgs = desc.typeArgs.map(translate);
         result = targetArena.internNominalObject({
-          owner: mapSymbol(desc.owner),
+          owner: desc.owner,
           name: desc.name,
           typeArgs,
         });
@@ -438,7 +571,7 @@ const createTranslation = ({
       case "trait": {
         const typeArgs = desc.typeArgs.map(translate);
         result = targetArena.internTrait({
-          owner: mapSymbol(desc.owner),
+          owner: desc.owner,
           name: desc.name,
           typeArgs,
         });
@@ -459,7 +592,7 @@ const createTranslation = ({
           name: field.name,
           type: translate(field.type),
           declaringParams: field.declaringParams?.map((param) =>
-            mapTypeParam(param, paramMap, { arena: targetArena } as TypingContext)
+            mapTypeParam(param, paramMap, { arena: targetArena })
           ),
           visibility: field.visibility,
           owner: mapOwnerSymbol(field.owner),

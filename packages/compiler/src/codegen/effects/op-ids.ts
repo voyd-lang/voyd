@@ -11,7 +11,7 @@ export const getEffectOpIds = (
   resumeKind: ResumeKind;
   effectSymbol: SymbolId;
 } => {
-  const info = ctx.effectsInfo.operations.get(symbol);
+  const info = ctx.module.effectsInfo.operations.get(symbol);
   if (!info) {
     throw new Error(`codegen missing effect metadata for op ${symbol}`);
   }
@@ -25,4 +25,3 @@ export const getEffectOpIds = (
     effectSymbol: info.effectSymbol,
   };
 };
-

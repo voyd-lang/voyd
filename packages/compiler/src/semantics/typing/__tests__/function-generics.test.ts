@@ -3,11 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { HirCallExpr, HirIdentifierExpr } from "../../hir/index.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 describe("generic functions", () => {
   it("instantiates generic functions with explicit type arguments", () => {
     const ast = loadAst("function_generics.voyd");
-    const { symbolTable, hir, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const root = symbolTable.rootScope;
 
     const addSymbol = symbolTable.resolve("add", root);

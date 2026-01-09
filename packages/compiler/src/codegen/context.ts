@@ -1,5 +1,4 @@
 import binaryen from "binaryen";
-import type { SymbolTable } from "../semantics/binder/index.js";
 import type {
   HirGraph,
   HirExpression,
@@ -27,10 +26,7 @@ import type {
   TypeId,
   EffectRowId,
 } from "../semantics/ids.js";
-import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
-import type { TypingResult } from "../semantics/typing/typing.js";
 import type { createRttContext } from "./rtt/index.js";
-import type { BindingResult } from "../semantics/binding/binding.js";
 import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
 import type { EffectRuntime } from "./effects/runtime-abi.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
@@ -41,7 +37,9 @@ import type { ContinuationBackendOptions } from "./effects/backend.js";
 import type { EffectsBackend } from "./effects/codegen-backend.js";
 import type { EffectsState } from "./effects/state.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
-import type { EffectsLoweringInfo } from "../semantics/effects/analysis.js";
+import type { ProgramCodegenView } from "../semantics/codegen-view/index.js";
+import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
+import type { InstanceKey } from "../semantics/codegen-view/index.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -108,6 +106,11 @@ export type RuntimeTypeIdRegistryEntry = {
   typeId: TypeId;
 };
 
+export type RuntimeTypeIdState = {
+  byKey: Map<string, number>;
+  nextId: { value: number };
+};
+
 export interface FixedArrayWasmType {
   type: binaryen.Type;
   heapType: HeapTypeRef;
@@ -127,20 +130,18 @@ export interface CodegenContext {
   moduleId: string;
   moduleLabel: string;
   effectIdOffset: number;
-  binding: BindingResult;
-  symbolTable: SymbolTable;
-  hir: HirGraph;
-  typing: TypingResult;
-  effectsInfo: EffectsLoweringInfo;
+  program: ProgramCodegenView;
+  module: ModuleCodegenView;
   options: Required<CodegenOptions>;
-  functions: Map<string, FunctionMetadata[]>;
-  functionInstances: Map<string, FunctionMetadata>;
+  functions: Map<string, Map<number, FunctionMetadata[]>>;
+  functionInstances: Map<InstanceKey, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
   fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
   functionRefTypes: Map<string, binaryen.Type>;
-  runtimeTypeIdsByHash: Map<number, RuntimeTypeIdRegistryEntry>;
+  runtimeTypeRegistry: Map<TypeId, RuntimeTypeIdRegistryEntry>;
+  runtimeTypeIds: RuntimeTypeIdState;
   lambdaEnvs: Map<
     string,
     {
@@ -249,8 +250,6 @@ export type ExpressionCompiler = (
 ) => CompiledExpression;
 
 export type {
-  SemanticsPipelineResult,
-  TypingResult,
   HirGraph,
   HirFunction,
   HirExpression,
@@ -267,7 +266,6 @@ export type {
   HirCallExpr,
   HirTypeExpr,
   HirEffectHandlerExpr,
-  SymbolTable,
   HirExprId,
   HirItemId,
   HirStmtId,

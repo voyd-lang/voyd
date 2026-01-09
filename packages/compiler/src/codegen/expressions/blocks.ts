@@ -85,7 +85,7 @@ export const compileStatement = (
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef => {
   const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  const stmt = ctx.hir.statements.get(stmtId);
+  const stmt = ctx.module.hir.statements.get(stmtId);
   if (!stmt) {
     throw new Error(`codegen missing HirStatement ${stmtId}`);
   }

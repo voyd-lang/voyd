@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 describe("trait implementations", () => {
   it("registers trait types and allows impls that satisfy required methods", () => {
     const ast = loadAst("trait_area.voyd");
-    const { symbolTable, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const areaSymbol = symbolTable.resolve("Area", symbolTable.rootScope);
     expect(areaSymbol).toBeDefined();
 
@@ -37,7 +40,9 @@ describe("trait implementations", () => {
 
   it("type-checks blanket impls over type parameters", () => {
     const ast = loadAst("blanket_scalable.voyd");
-    const { symbolTable, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const scaleSymbol = symbolTable.resolve("scale", symbolTable.rootScope);
     expect(scaleSymbol).toBeDefined();
     if (!scaleSymbol) return;
@@ -47,7 +52,9 @@ describe("trait implementations", () => {
 
   it("records instantiations for blanket impls on generic objects", () => {
     const ast = loadAst("blanket_summable_box.voyd");
-    const { symbolTable, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const sumSymbol = symbolTable.resolve("sum", symbolTable.rootScope);
     expect(sumSymbol).toBeDefined();
     if (!sumSymbol) return;

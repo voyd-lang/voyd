@@ -8,6 +8,7 @@ import { toSourceSpan } from "../../utils.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { isForm } from "../../../parser/index.js";
 import type { Form } from "../../../parser/index.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 const DEP_FIXTURE = "import_metadata/dep.voyd";
 const MAIN_FIXTURE = "import_metadata/main.voyd";
@@ -116,7 +117,8 @@ describe("import metadata propagation", () => {
     expect(typeof externalSymbol).toBe("number");
     if (typeof externalSymbol !== "number") return;
 
-    const metadata = mainSemantics.symbolTable.getSymbol(externalSymbol)
+    const symbolTable = getSymbolTable(mainSemantics);
+    const metadata = symbolTable.getSymbol(externalSymbol)
       .metadata as Record<string, unknown> | undefined;
     expect(metadata).toMatchObject({ entity: "object" });
     const importMetadata = (metadata?.import ?? {}) as {

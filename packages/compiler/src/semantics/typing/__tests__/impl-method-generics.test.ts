@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { HirCallExpr } from "../../hir/nodes.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 describe("impl method generics", () => {
   it("binds explicit type arguments to method generics before impl generics", () => {
     const ast = loadAst("impl_method_generics.voyd");
-    const { symbolTable, hir, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const root = symbolTable.rootScope;
 
     const pickSymbol = symbolTable.resolve("pick", root);
@@ -45,7 +48,9 @@ describe("impl method generics", () => {
 
   it("infers impl type parameters from receiver nominal arguments", () => {
     const ast = loadAst("method_impl_type_inference.voyd");
-    const { symbolTable, hir, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const root = symbolTable.rootScope;
 
     const unwrapSymbol = symbolTable.resolve("unwrap", root);

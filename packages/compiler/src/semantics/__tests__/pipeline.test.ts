@@ -19,6 +19,7 @@ import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
 import { modulePathToString } from "../../modules/path.js";
 import { toSourceSpan } from "../utils.js";
 import { isForm } from "../../parser/index.js";
+import { getSymbolTable } from "../_internal/symbol-table.js";
 
 type SemanticsResult = ReturnType<typeof semanticsPipeline>;
 
@@ -127,15 +128,10 @@ const buildModule = ({
 const expectAnimalConstructorBindings = (
   semantics: SemanticsResult
 ): void => {
-  let animalSymbol = semantics.symbolTable.resolve(
-    "Animal",
-    semantics.symbolTable.rootScope
-  );
+  const symbolTable = getSymbolTable(semantics);
+  let animalSymbol = symbolTable.resolve("Animal", symbolTable.rootScope);
   if (typeof animalSymbol !== "number") {
-    const moduleSymbol = semantics.symbolTable.resolve(
-      "animal",
-      semantics.symbolTable.rootScope
-    );
+    const moduleSymbol = symbolTable.resolve("animal", symbolTable.rootScope);
     const moduleMember = semantics.binding.moduleMembers
       .get(typeof moduleSymbol === "number" ? moduleSymbol : -1)
       ?.get("Animal");
@@ -162,7 +158,7 @@ const expectAnimalConstructorBindings = (
   const mainFn = Array.from(semantics.hir.items.values()).find(
     (item): item is HirFunction =>
       item.kind === "function" &&
-      semantics.symbolTable.getSymbol(item.symbol).name === "main"
+      symbolTable.getSymbol(item.symbol).name === "main"
   );
   expect(mainFn).toBeDefined();
   if (!mainFn) return;
@@ -198,12 +194,13 @@ const expectAnimalConstructorBindings = (
 };
 
 describe("semanticsPipeline", () => {
-  it("binds and lowers the fib sample module", () => {
+ it("binds and lowers the fib sample module", () => {
     const name = "fib.voyd";
     const ast = loadAst(name);
     const result = semanticsPipeline(ast);
 
-    const { symbolTable, hir, typing } = result;
+    const { hir, typing } = result;
+    const symbolTable = getSymbolTable(result);
     expect(hir.module.path).toBe(name);
     expect(hir.module.items).toHaveLength(2);
 
@@ -300,7 +297,8 @@ describe("semanticsPipeline", () => {
   it("infers return types for forward references", () => {
     const ast = loadAst("forward_inference.voyd");
     const result = semanticsPipeline(ast);
-    const { symbolTable, hir, typing } = result;
+    const { hir, typing } = result;
+    const symbolTable = getSymbolTable(result);
     const rootScope = symbolTable.rootScope;
     const mainSymbol = symbolTable.resolve("main", rootScope);
     const helperSymbol = symbolTable.resolve("helper", rootScope);
@@ -327,7 +325,8 @@ describe("semanticsPipeline", () => {
   it("infers return types for recursive functions", () => {
     const ast = loadAst("recursive_inference.voyd");
     const result = semanticsPipeline(ast);
-    const { symbolTable, hir, typing } = result;
+    const { hir, typing } = result;
+    const symbolTable = getSymbolTable(result);
     const rootScope = symbolTable.rootScope;
     const factSymbol = symbolTable.resolve("fact", rootScope);
     const mainSymbol = symbolTable.resolve("main", rootScope);
@@ -358,7 +357,8 @@ describe("semanticsPipeline", () => {
     const ast = loadAst(name);
     const result = semanticsPipeline(ast);
 
-    const { symbolTable, hir, typing } = result;
+    const { hir, typing } = result;
+    const symbolTable = getSymbolTable(result);
     const rootScope = symbolTable.rootScope;
     const mainSymbol = symbolTable.resolve("main", rootScope)!;
     const doubleSymbol = symbolTable.resolve("double", rootScope)!;
@@ -390,7 +390,8 @@ describe("semanticsPipeline", () => {
   it("infers tuple destructuring from forward-declared functions", () => {
     const ast = loadAst("tuples.voyd");
     const result = semanticsPipeline(ast);
-    const { symbolTable, typing } = result;
+    const { typing } = result;
+    const symbolTable = getSymbolTable(result);
     const rootScope = symbolTable.rootScope;
 
     const buildPair = symbolTable.resolve("build_pair", rootScope);
@@ -429,13 +430,14 @@ describe("semanticsPipeline", () => {
     const result = semanticsPipeline(ast);
     const sanitizedHir = stripPatternSpansFromHir(structuredClone(result.hir));
     expect(sanitizedHir).toMatchSnapshot();
-    expect(result.symbolTable.snapshot()).toMatchSnapshot();
+    expect(getSymbolTable(result).snapshot()).toMatchSnapshot();
   });
 
   it("resolves overloaded functions based on argument types", () => {
     const ast = loadAst("function_overloads.voyd");
     const result = semanticsPipeline(ast);
-    const { symbolTable, hir, typing } = result;
+    const { hir, typing } = result;
+    const symbolTable = getSymbolTable(result);
     const rootScope = symbolTable.rootScope;
 
     const addSymbols = symbolTable.resolveAll("add", rootScope);
@@ -517,7 +519,9 @@ describe("semanticsPipeline", () => {
 
   it("tracks overload resolution separately for generic instantiations", () => {
     const ast = loadAst("generic_overload_resolution.voyd");
-    const { symbolTable, hir, typing } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
     const rootScope = symbolTable.rootScope;
 
     const chooseSymbol = symbolTable.resolve("choose", rootScope);

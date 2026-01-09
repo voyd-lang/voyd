@@ -12,13 +12,16 @@ import {
   semanticsPipeline,
   type SemanticsPipelineResult,
 } from "./semantics/pipeline.js";
-import { linkProgramSemantics } from "./semantics/linking.js";
+import { monomorphizeProgram } from "./semantics/linking.js";
 import type { Diagnostic } from "./diagnostics/index.js";
 import { diagnosticFromCode, DiagnosticError } from "./diagnostics/index.js";
 import { codegenErrorToDiagnostic } from "./codegen/diagnostics.js";
 import type { CodegenOptions } from "./codegen/context.js";
 import type { ContinuationBackendKind } from "./codegen/codegen.js";
 import { ModuleExportTable } from "./semantics/modules.js";
+import { createTypeArena } from "./semantics/typing/type-arena.js";
+import { createEffectInterner, createEffectTable } from "./semantics/effects/effect-table.js";
+import { buildProgramCodegenView } from "./semantics/codegen-view/index.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -88,6 +91,9 @@ export const analyzeModules = ({
   const diagnostics: Diagnostic[] = [];
   let halted = false;
 
+  const arena = createTypeArena();
+  const effectInterner = createEffectInterner();
+
   order.forEach((id) => {
     if (halted) return;
     const module = graph.modules.get(id);
@@ -100,6 +106,7 @@ export const analyzeModules = ({
         graph,
         exports,
         dependencies: semantics,
+        typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
       });
       semantics.set(id, result);
       exports.set(id, result.exports);
@@ -175,13 +182,17 @@ export const emitProgram = async ({
     throw new Error("No semantics available for codegen");
   }
 
-  if (linkSemantics !== false) {
-    linkProgramSemantics({ modules, semantics });
-  }
-
   const codegen = await lazyCodegen();
+  const monomorphized =
+    linkSemantics !== false
+      ? monomorphizeProgram({ modules, semantics })
+      : { instances: [], moduleTyping: new Map() };
+  const program = buildProgramCodegenView(modules, {
+    instances: monomorphized.instances,
+    moduleTyping: monomorphized.moduleTyping,
+  });
   const result = codegen.codegenProgram({
-    modules,
+    program,
     entryModuleId: targetModuleId,
     options: codegenOptions,
   });
@@ -217,14 +228,19 @@ export const emitProgramWithContinuationFallback = async ({
     throw new Error("No semantics available for codegen");
   }
 
-  if (linkSemantics !== false) {
-    linkProgramSemantics({ modules, semantics });
-  }
+  const monomorphized =
+    linkSemantics !== false
+      ? monomorphizeProgram({ modules, semantics })
+      : { instances: [], moduleTyping: new Map() };
+  const program = buildProgramCodegenView(modules, {
+    instances: monomorphized.instances,
+    moduleTyping: monomorphized.moduleTyping,
+  });
 
   const codegenImpl = await lazyCodegen();
   const { preferredKind, preferred, fallback } =
     codegenImpl.codegenProgramWithContinuationFallback({
-      modules,
+      program,
       entryModuleId: targetModuleId,
       options: codegenOptions,
     });
@@ -264,13 +280,6 @@ export const compileProgram = async (
   }
 
   const shouldLinkSemantics = options.linkSemantics !== false;
-  if (shouldLinkSemantics) {
-    const { orderedModules } = lowerProgram({ graph, semantics });
-    const reachableModules = orderedModules
-      .map((id) => semantics.get(id))
-      .filter((value): value is SemanticsPipelineResult => Boolean(value));
-    linkProgramSemantics({ modules: reachableModules, semantics });
-  }
 
   try {
     const wasmResult = await emitProgram({
@@ -278,7 +287,7 @@ export const compileProgram = async (
       semantics,
       codegenOptions: options.codegenOptions,
       entryModuleId: options.entryModuleId,
-      linkSemantics: false,
+      linkSemantics: shouldLinkSemantics,
     });
 
     return {

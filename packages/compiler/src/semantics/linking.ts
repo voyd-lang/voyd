@@ -1,18 +1,40 @@
 import { DiagnosticEmitter } from "../diagnostics/index.js";
 import { createTypingState } from "./typing/context.js";
 import type { DependencySemantics, TypingContext } from "./typing/types.js";
-import { createTypeTranslation, mapDependencySymbolToLocal } from "./typing/imports.js";
-import { typeGenericFunctionBody } from "./typing/expressions/call.js";
+import {
+  formatFunctionInstanceKey,
+  typeGenericFunctionBody,
+} from "./typing/expressions/call.js";
 import type { ModuleExportTable } from "./modules.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
+import { makeInstanceKey, type MonomorphizedInstanceInfo } from "./codegen-view/index.js";
+import type { SymbolRef } from "./typing/symbol-ref.js";
+import { getSymbolTable } from "./_internal/symbol-table.js";
+import type { HirExprId, SymbolId, TypeId } from "./ids.js";
 
-export const linkProgramSemantics = ({
+export const monomorphizeProgram = ({
   modules,
   semantics,
 }: {
   modules: readonly SemanticsPipelineResult[];
   semantics: Map<string, SemanticsPipelineResult>;
-}): void => {
+}): {
+  instances: readonly MonomorphizedInstanceInfo[];
+  moduleTyping: ReadonlyMap<
+    string,
+    {
+      functionInstantiationInfo: ReadonlyMap<
+        SymbolId,
+        ReadonlyMap<string, readonly TypeId[]>
+      >;
+      functionInstanceExprTypes: ReadonlyMap<
+        string,
+        ReadonlyMap<HirExprId, TypeId>
+      >;
+      valueTypes: ReadonlyMap<SymbolId, TypeId>;
+    }
+  >;
+} => {
   const { moduleExports, dependencies } = buildDependencyIndex(semantics);
   const typingContexts = new Map<string, TypingContext>();
   const typingContextFor = createTypingContextFactory({
@@ -22,23 +44,31 @@ export const linkProgramSemantics = ({
     typingContexts,
   });
 
-  const modulesById = new Map(modules.map((entry) => [entry.moduleId, entry] as const));
   const touchedModules = new Set<string>();
 
-  modulesById.forEach((caller) => {
-    const callerDep = dependencies.get(caller.moduleId);
-    if (!callerDep) {
-      return;
-    }
+  const requestedInstances: MonomorphizedInstanceInfo[] = [];
 
-    caller.typing.functionInstantiationInfo.forEach((instantiations, localSymbol) => {
-      const metadata = (caller.symbolTable.getSymbol(localSymbol).metadata ?? {}) as
+  modules.forEach((caller) => {
+    const sortedLocalSymbols = Array.from(
+      caller.typing.functionInstantiationInfo.keys()
+    ).sort((a, b) => a - b);
+    sortedLocalSymbols.forEach((localSymbol) => {
+      const instantiations =
+        caller.typing.functionInstantiationInfo.get(localSymbol);
+      if (!instantiations) {
+        return;
+      }
+      const metadata = (getSymbolTable(caller).getSymbol(localSymbol)
+        .metadata ?? {}) as
         | { import?: { moduleId?: unknown; symbol?: unknown } }
         | undefined;
       const importModuleId = metadata?.import?.moduleId;
       const importSymbol = metadata?.import?.symbol;
 
-      if (typeof importModuleId !== "string" || typeof importSymbol !== "number") {
+      if (
+        typeof importModuleId !== "string" ||
+        typeof importSymbol !== "number"
+      ) {
         return;
       }
 
@@ -48,34 +78,37 @@ export const linkProgramSemantics = ({
         return;
       }
 
-      const calleeSignature = callee.typing.functions.getSignature(importSymbol);
+      const calleeSignature =
+        callee.typing.functions.getSignature(importSymbol);
       const typeParams = calleeSignature?.typeParams ?? [];
       if (!calleeSignature || typeParams.length === 0) {
         return;
       }
 
-      const translateTypeArg = createTypeTranslation({
-        sourceArena: caller.typing.arena,
-        targetArena: calleeCtx.arena,
-        sourceEffects: caller.typing.effects,
-        targetEffects: calleeCtx.effects,
-        mapSymbol: (symbol) =>
-          mapDependencySymbolToLocal({
-            owner: symbol,
-            dependency: callerDep,
-            ctx: calleeCtx,
-            allowUnexported: true,
-          }),
-      });
-
-      instantiations.forEach((typeArgs) => {
+      const sortedInstantiations = Array.from(instantiations.entries()).sort(
+        ([a], [b]) => a.localeCompare(b, undefined, { numeric: true })
+      );
+      sortedInstantiations.forEach(([, typeArgs]) => {
         if (typeArgs.length !== typeParams.length) {
           return;
         }
 
-        const translated = typeArgs.map((arg) => translateTypeArg(arg));
+        requestedInstances.push({
+          callee: {
+            moduleId: importModuleId,
+            symbol: importSymbol,
+          } satisfies SymbolRef,
+          typeArgs,
+          instanceKey: makeInstanceKey(
+            importModuleId,
+            formatFunctionInstanceKey(importSymbol, typeArgs)
+          ),
+        });
+
         const substitution = new Map(
-          typeParams.map((param, index) => [param.typeParam, translated[index]!] as const)
+          typeParams.map(
+            (param, index) => [param.typeParam, typeArgs[index]!] as const
+          )
         );
         typeGenericFunctionBody({
           symbol: importSymbol,
@@ -89,17 +122,52 @@ export const linkProgramSemantics = ({
     });
   });
 
-  touchedModules.forEach((moduleId) => {
-    const entry = semantics.get(moduleId);
-    const ctx = typingContexts.get(moduleId);
-    if (!entry || !ctx) {
-      return;
-    }
-    entry.typing.functionInstantiationInfo = ctx.functions.snapshotInstantiationInfo();
-    entry.typing.functionInstances = ctx.functions.snapshotInstances();
-    entry.typing.functionInstanceExprTypes = ctx.functions.snapshotInstanceExprTypes();
-    entry.typing.valueTypes = new Map(ctx.valueTypes);
+  const instanceByKey = new Map<string, MonomorphizedInstanceInfo>();
+  requestedInstances.forEach((info) => {
+    instanceByKey.set(info.instanceKey, info);
   });
+  const instances = Array.from(instanceByKey.values()).sort((a, b) => {
+    const modOrder = a.callee.moduleId.localeCompare(
+      b.callee.moduleId,
+      undefined,
+      {
+        numeric: true,
+      }
+    );
+    if (modOrder !== 0) return modOrder;
+    if (a.callee.symbol !== b.callee.symbol)
+      return a.callee.symbol - b.callee.symbol;
+    return a.instanceKey.localeCompare(b.instanceKey, undefined, {
+      numeric: true,
+    });
+  });
+
+  const moduleTyping = new Map<
+    string,
+    {
+      functionInstantiationInfo: ReadonlyMap<
+        SymbolId,
+        ReadonlyMap<string, readonly TypeId[]>
+      >;
+      functionInstanceExprTypes: ReadonlyMap<
+        string,
+        ReadonlyMap<HirExprId, TypeId>
+      >;
+      valueTypes: ReadonlyMap<SymbolId, TypeId>;
+    }
+  >();
+
+  touchedModules.forEach((moduleId) => {
+    const ctx = typingContexts.get(moduleId);
+    if (!ctx) return;
+    moduleTyping.set(moduleId, {
+      functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
+      functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
+      valueTypes: new Map(ctx.valueTypes),
+    });
+  });
+
+  return { instances, moduleTyping };
 };
 
 const buildDependencyIndex = (
@@ -108,27 +176,25 @@ const buildDependencyIndex = (
   moduleExports: Map<string, ModuleExportTable>;
   dependencies: Map<string, DependencySemantics>;
 } => {
-  const moduleExports = new Map<string, ModuleExportTable>(
-    Array.from(semantics.entries()).map(([id, entry]) => [id, entry.exports])
-  );
-  const dependencies = new Map<string, DependencySemantics>(
-    Array.from(semantics.entries()).map(([id, entry]) => [
-      id,
-      {
-        moduleId: entry.moduleId,
-        packageId: entry.binding.packageId,
-        symbolTable: entry.symbolTable,
-        hir: entry.hir,
-        typing: entry.typing,
-        decls: entry.binding.decls,
-        overloads: collectOverloadOptions(
-          entry.binding.overloads,
-          entry.binding.importedOverloadOptions
-        ),
-        exports: entry.exports,
-      },
-    ])
-  );
+  const moduleExports = new Map<string, ModuleExportTable>();
+  const dependencies = new Map<string, DependencySemantics>();
+
+  semantics.forEach((entry, id) => {
+    moduleExports.set(id, entry.exports);
+    dependencies.set(id, {
+      moduleId: entry.moduleId,
+      packageId: entry.binding.packageId,
+      symbolTable: getSymbolTable(entry),
+      hir: entry.hir,
+      typing: entry.typing,
+      decls: entry.binding.decls,
+      overloads: collectOverloadOptions(
+        entry.binding.overloads,
+        entry.binding.importedOverloadOptions
+      ),
+      exports: entry.exports,
+    });
+  });
 
   return { moduleExports, dependencies };
 };
@@ -155,20 +221,24 @@ const createTypingContextFactory = ({
       return undefined;
     }
 
-    const importsByLocal = new Map<number, { moduleId: string; symbol: number }>();
+    const importsByLocal = new Map<
+      number,
+      { moduleId: string; symbol: number }
+    >();
     const importAliasesByModule = new Map<string, Map<number, number>>();
     entry.binding.imports.forEach((imp) => {
       if (!imp.target) {
         return;
       }
       importsByLocal.set(imp.local, imp.target);
-      const bucket = importAliasesByModule.get(imp.target.moduleId) ?? new Map();
+      const bucket =
+        importAliasesByModule.get(imp.target.moduleId) ?? new Map();
       bucket.set(imp.target.symbol, imp.local);
       importAliasesByModule.set(imp.target.moduleId, bucket);
     });
 
     const ctx: TypingContext = {
-      symbolTable: entry.symbolTable,
+      symbolTable: getSymbolTable(entry),
       hir: entry.hir,
       overloads: collectOverloadOptions(
         entry.binding.overloads,
@@ -189,10 +259,9 @@ const createTypingContextFactory = ({
       tailResumptions: new Map(entry.typing.tailResumptions),
       callResolution: {
         targets: new Map(
-          Array.from(entry.typing.callTargets.entries()).map(([exprId, targets]) => [
-            exprId,
-            new Map(targets),
-          ])
+          Array.from(entry.typing.callTargets.entries()).map(
+            ([exprId, targets]) => [exprId, new Map(targets)]
+          )
         ),
         typeArguments: new Map(entry.typing.callTypeArguments),
         instanceKeys: new Map(entry.typing.callInstanceKeys),

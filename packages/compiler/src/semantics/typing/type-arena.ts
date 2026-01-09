@@ -7,6 +7,7 @@ import type {
   TypeSchemeId,
 } from "../ids.js";
 import type { HirVisibility } from "../hir/index.js";
+import { symbolRefEquals, type SymbolRef } from "./symbol-ref.js";
 
 export type Substitution = ReadonlyMap<TypeParamId, TypeId>;
 
@@ -28,14 +29,14 @@ export interface PrimitiveType {
 
 export interface TraitType {
   kind: "trait";
-  owner: SymbolId;
+  owner: SymbolRef;
   name?: string;
   typeArgs: readonly TypeId[];
 }
 
 export interface NominalObjectType {
   kind: "nominal-object";
-  owner: SymbolId;
+  owner: SymbolRef;
   name?: string;
   typeArgs: readonly TypeId[];
 }
@@ -883,7 +884,7 @@ export const createTypeArena = (): TypeArena => {
           const sameOwner =
             "owner" in leftDesc &&
             "owner" in rightDesc &&
-            leftDesc.owner === rightDesc.owner;
+            symbolRefEquals(leftDesc.owner, rightDesc.owner);
           if (
             !sameOwner ||
             leftDesc.typeArgs.length !== rightDesc.typeArgs.length

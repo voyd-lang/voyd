@@ -1,21 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { semanticsPipeline } from "../../pipeline.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
+import type { SymbolTable } from "../../binder/index.js";
 
 const findSymbolByName = (
   name: string,
   kind: "value" | "parameter",
-  symbolTable: ReturnType<typeof semanticsPipeline>["symbolTable"]
+  symbolTable: SymbolTable
 ) =>
   symbolTable
     .snapshot()
-    .symbols.filter(Boolean)
-    .find((record) => record?.name === name && record?.kind === kind)?.id;
+    .symbols.find((record) => record.name === name && record.kind === kind)?.id;
 
 describe("match expressions", () => {
   it("typechecks unions and narrows match arms", () => {
     const ast = loadAst("unions_match.voyd");
-    const { typing, symbolTable, hir } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing, hir } = semantics;
+    const symbolTable = getSymbolTable(semantics);
 
     const numSymbol = findSymbolByName("num", "value", symbolTable);
     expect(numSymbol).toBeDefined();
@@ -109,7 +112,9 @@ describe("match expressions", () => {
 
   it("infers nominal type arguments for locally declared discriminants when the nominal is unique", () => {
     const ast = loadAst("match_union_nominal_infer_args_local_binding.voyd");
-    const { typing, hir, symbolTable } = semanticsPipeline(ast);
+    const semantics = semanticsPipeline(ast);
+    const { typing, hir } = semantics;
+    const symbolTable = getSymbolTable(semantics);
 
     const matchExpr = Array.from(hir.expressions.values()).find(
       (candidate) => candidate.exprKind === "match"

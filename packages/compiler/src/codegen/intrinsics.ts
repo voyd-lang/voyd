@@ -495,7 +495,7 @@ const requireBooleanKind = ({
 };
 
 const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {
-  const descriptor = ctx.typing.arena.get(typeId);
+  const descriptor = ctx.program.arena.get(typeId);
   if (descriptor.kind === "primitive") {
     switch (descriptor.name) {
       case "i32":
@@ -512,7 +512,7 @@ const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {
 };
 
 const getEqualityKind = (typeId: TypeId, ctx: CodegenContext): EqualityKind => {
-  const descriptor = ctx.typing.arena.get(typeId);
+  const descriptor = ctx.program.arena.get(typeId);
   if (descriptor.kind === "primitive") {
     switch (descriptor.name) {
       case "bool":
@@ -537,7 +537,7 @@ const getBooleanKind = (
   typeId: TypeId,
   ctx: CodegenContext
 ): BooleanKind => {
-  const descriptor = ctx.typing.arena.get(typeId);
+  const descriptor = ctx.program.arena.get(typeId);
   if (
     descriptor.kind === "primitive" &&
     (descriptor.name === "bool" || descriptor.name === "boolean")
@@ -613,7 +613,7 @@ const getFixedArrayDescriptor = (
   typeId: TypeId,
   ctx: CodegenContext
 ): { kind: "fixed-array"; element: TypeId } => {
-  const desc = ctx.typing.arena.get(typeId);
+  const desc = ctx.program.arena.get(typeId);
   if (desc.kind !== "fixed-array") {
     throw new Error("intrinsic requires a fixed-array type");
   }
@@ -693,7 +693,7 @@ const defaultValueForType = (
   typeId: TypeId,
   ctx: CodegenContext
 ): binaryen.ExpressionRef => {
-  const desc = ctx.typing.arena.get(typeId);
+  const desc = ctx.program.arena.get(typeId);
   switch (desc.kind) {
     case "primitive":
       switch (desc.name) {
@@ -741,7 +741,7 @@ const getBooleanLiteralArg = ({
   if (typeof exprId !== "number") {
     throw new Error(`intrinsic ${name} missing argument ${index + 1}`);
   }
-  const expr = ctx.hir.expressions.get(exprId);
+  const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr || expr.exprKind !== "literal" || expr.literalKind !== "boolean") {
     throw new Error(
       `intrinsic ${name} argument ${index + 1} must be a boolean literal`

@@ -99,8 +99,8 @@ const buildClauseEnv = ({
         .map(([symbol, binding]) => {
           const typeId =
             binding.typeId ??
-            ctx.typing.valueTypes.get(symbol) ??
-            ctx.typing.primitives.unknown;
+            ctx.module.types.getValueType(symbol) ??
+            ctx.program.primitives.unknown;
           return {
             symbol,
             typeId,
@@ -170,7 +170,7 @@ const emitClauseFunction = ({
   }
 
   const clause = expr.handlers[clauseIndex]!;
-  const signature = ctx.typing.functions.getSignature(clause.operation);
+  const signature = ctx.program.functions.getSignature(ctx.moduleId, clause.operation);
   if (!signature) {
     throw new Error("missing effect operation signature for handler clause");
   }
@@ -263,12 +263,12 @@ const emitClauseFunction = ({
 
   if (clause.parameters[0]) {
     const continuationTypeId =
-      ctx.typing.valueTypes.get(clause.parameters[0].symbol) ??
-      ctx.typing.primitives.unknown;
-    const continuationDesc = ctx.typing.arena.get(continuationTypeId);
+      ctx.module.types.getValueType(clause.parameters[0].symbol) ??
+      ctx.program.primitives.unknown;
+    const continuationDesc = ctx.program.arena.get(continuationTypeId);
     const resumeTypeId =
       continuationDesc.kind === "function"
-        ? continuationDesc.parameters[0]?.type ?? ctx.typing.primitives.void
+        ? continuationDesc.parameters[0]?.type ?? ctx.program.primitives.void
         : signature.returnType;
     const continuationBinding = allocateTempLocal(
       wasmTypeFor(continuationTypeId, ctx),
@@ -309,9 +309,9 @@ const emitClauseFunction = ({
 
   clause.parameters.slice(clause.parameters[0] ? 1 : 0).forEach((param, index) => {
     const typeId =
-      ctx.typing.valueTypes.get(param.symbol) ??
-      signature.parameters[index]?.type ??
-      ctx.typing.primitives.unknown;
+      ctx.module.types.getValueType(param.symbol) ??
+      signature.parameters[index]?.typeId ??
+      ctx.program.primitives.unknown;
     const wasmType = wasmTypeFor(typeId, ctx);
     const binding = allocateTempLocal(wasmType, fnCtx, typeId);
     initOps.push(
@@ -332,12 +332,12 @@ const emitClauseFunction = ({
 
   const expectedClauseReturnTypeId =
     clause.parameters[0] &&
-    typeof ctx.typing.valueTypes.get(clause.parameters[0].symbol) === "number"
+    typeof ctx.module.types.getValueType(clause.parameters[0].symbol) === "number"
       ? ((): TypeId => {
-          const continuationTypeId = ctx.typing.valueTypes.get(
+          const continuationTypeId = ctx.module.types.getValueType(
             clause.parameters[0].symbol
           ) as TypeId;
-          const desc = ctx.typing.arena.get(continuationTypeId);
+          const desc = ctx.program.arena.get(continuationTypeId);
           return desc.kind === "function" ? desc.returnType : signature.returnType;
         })()
       : signature.returnType;

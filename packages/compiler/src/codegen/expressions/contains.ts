@@ -10,7 +10,7 @@ export const exprContainsTarget = (
   ctx: CodegenContext
 ): boolean => {
   if (exprId === target) return true;
-  const expr = ctx.hir.expressions.get(exprId);
+  const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr) return false;
 
   switch (expr.exprKind) {
@@ -88,7 +88,7 @@ export const stmtContainsTarget = (
   target: HirExprId,
   ctx: CodegenContext
 ): boolean => {
-  const stmt = ctx.hir.statements.get(stmtId);
+  const stmt = ctx.module.hir.statements.get(stmtId);
   if (!stmt) return false;
   switch (stmt.kind) {
     case "expr-stmt":

@@ -1,6 +1,7 @@
 import type { TypeId } from "../ids.js";
 import { getNominalComponent } from "./type-system.js";
 import type { TypingContext } from "./types.js";
+import { localSymbolForSymbolRef } from "./symbol-ref-utils.js";
 
 const ownerSymbolFromType = (
   typeId: TypeId | undefined,
@@ -14,7 +15,10 @@ const ownerSymbolFromType = (
     return undefined;
   }
   const desc = ctx.arena.get(nominal);
-  return desc.kind === "nominal-object" ? desc.owner : undefined;
+  if (desc.kind !== "nominal-object") {
+    return undefined;
+  }
+  return localSymbolForSymbolRef(desc.owner, ctx);
 };
 
 export const indexMemberMetadata = (ctx: TypingContext): void => {

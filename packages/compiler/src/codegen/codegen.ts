@@ -4,7 +4,6 @@ import type {
   CodegenOptions,
   CodegenResult,
   FunctionMetadata,
-  SemanticsPipelineResult,
   RuntimeTypeIdRegistryEntry,
 } from "./context.js";
 import { createRttContext } from "./rtt/index.js";
@@ -26,7 +25,13 @@ import {
   type EffectsBackend,
 } from "./effects/codegen-backend.js";
 import { createEffectsState } from "./effects/state.js";
-import { buildEffectsLoweringInfo } from "../semantics/effects/analysis.js";
+import {
+  buildProgramCodegenView,
+  type ProgramCodegenView,
+  type InstanceKey,
+} from "../semantics/codegen-view/index.js";
+import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
+import type { TypeId } from "../semantics/ids.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
@@ -36,7 +41,7 @@ const DEFAULT_OPTIONS: Required<CodegenOptions> = {
 };
 
 export type CodegenProgramParams = {
-  modules: readonly SemanticsPipelineResult[];
+  program: ProgramCodegenView;
   entryModuleId: string;
   options?: CodegenOptions;
 };
@@ -48,16 +53,17 @@ export const codegen = (
   options: CodegenOptions = {}
 ): CodegenResult =>
   codegenProgram({
-    modules: [semantics],
+    program: buildProgramCodegenView([semantics]),
     entryModuleId: semantics.moduleId,
     options,
   });
 
 export const codegenProgram = ({
-  modules,
+  program,
   entryModuleId,
   options = {},
 }: CodegenProgramParams): CodegenResult => {
+  const modules = Array.from(program.modules.values());
   const mod = new binaryen.Module();
   const mergedOptions: Required<CodegenOptions> = {
     ...DEFAULT_OPTIONS,
@@ -70,25 +76,19 @@ export const codegenProgram = ({
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
-  const functions = new Map<string, FunctionMetadata[]>();
-  const functionInstances = new Map<string, FunctionMetadata>();
+  const functions = new Map<string, Map<number, FunctionMetadata[]>>();
+  const functionInstances = new Map<InstanceKey, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
-  const runtimeTypeIdsByHash = new Map<number, RuntimeTypeIdRegistryEntry>();
+  const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
+  const runtimeTypeIdsByKey = new Map<string, number>();
+  const runtimeTypeIdCounter = { value: 1 };
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
     effectIdOffset: 0,
-    binding: sem.binding,
-    symbolTable: sem.symbolTable,
-    hir: sem.hir,
-    typing: sem.typing,
-    effectsInfo: buildEffectsLoweringInfo({
-      binding: sem.binding,
-      symbolTable: sem.symbolTable,
-      hir: sem.hir,
-      typing: sem.typing,
-    }),
+    program,
+    module: sem,
     options: mergedOptions,
     functions,
     functionInstances,
@@ -97,7 +97,11 @@ export const codegenProgram = ({
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
     functionRefTypes: new Map(),
-    runtimeTypeIdsByHash,
+    runtimeTypeRegistry,
+    runtimeTypeIds: {
+      byKey: runtimeTypeIdsByKey,
+      nextId: runtimeTypeIdCounter,
+    },
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,
@@ -117,7 +121,7 @@ export const codegenProgram = ({
   let effectIdOffset = 0;
   contexts.forEach((ctx) => {
     ctx.effectIdOffset = effectIdOffset;
-    effectIdOffset += ctx.binding.effects.length;
+    effectIdOffset += ctx.module.binding.effects.length;
   });
 
   const siteCounter = { current: 0 };
@@ -159,7 +163,7 @@ export const codegenProgram = ({
 };
 
 export const codegenProgramWithContinuationFallback = ({
-  modules,
+  program,
   entryModuleId,
   options = {},
 }: CodegenProgramParams): {
@@ -175,12 +179,12 @@ export const codegenProgramWithContinuationFallback = ({
   if (preferredKind !== "stack-switch") {
     return {
       preferredKind,
-      preferred: codegenProgram({ modules, entryModuleId, options }),
+      preferred: codegenProgram({ program, entryModuleId, options }),
     };
   }
 
   const preferred = codegenProgram({
-    modules,
+    program,
     entryModuleId,
     options: {
       ...options,
@@ -191,7 +195,7 @@ export const codegenProgramWithContinuationFallback = ({
     },
   });
   const fallback = codegenProgram({
-    modules,
+    program,
     entryModuleId,
     options: {
       ...options,

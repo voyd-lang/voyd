@@ -25,7 +25,7 @@ const setEffectRowFor = ({
 }) => {
   semantics.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
-    const name = semantics.symbolTable.getSymbol(item.symbol).name;
+    const name = semantics.symbols.getName(item.symbol) ?? `${item.symbol}`;
     if (!names.includes(name)) return;
     const signature = semantics.typing.functions.getSignature(item.symbol);
     if (signature) {
@@ -56,7 +56,7 @@ const markEffectful = (semantics: SemanticsPipelineResult): void => {
     if (expr.exprKind !== "call") return;
     const callee = semantics.hir.expressions.get(expr.callee);
     if (callee?.exprKind !== "identifier") return;
-    const calleeName = semantics.symbolTable.getSymbol(callee.symbol).name;
+    const calleeName = semantics.symbols.getName(callee.symbol) ?? `${callee.symbol}`;
     if (calleeName === "effectful_value" || calleeName === "run") {
       semantics.typing.effects.setExprEffect(expr.id, effectRow);
     }

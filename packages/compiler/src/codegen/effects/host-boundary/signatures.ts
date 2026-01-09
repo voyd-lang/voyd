@@ -50,7 +50,7 @@ const buildEffectOperationIndex = (
   const index = new Map<string, EffectOperationIndexEntry>();
 
   contexts.forEach((ctx) => {
-    ctx.binding.effects.forEach((effect, localEffectIndex) => {
+  ctx.module.binding.effects.forEach((effect, localEffectIndex) => {
       const effectId = ctx.effectIdOffset + localEffectIndex;
       effect.operations.forEach((op, opId) => {
         const key = signatureKey(effectId, opId);
@@ -93,7 +93,10 @@ export const collectEffectOperationSignatures = (
           );
         }
 
-        const signature = operation.ctx.typing.functions.getSignature(operation.opSymbol);
+        const signature = operation.ctx.program.functions.getSignature(
+          operation.ctx.moduleId,
+          operation.opSymbol
+        );
         if (!signature) {
           throw new Error("missing effect operation signature");
         }

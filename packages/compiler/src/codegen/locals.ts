@@ -34,7 +34,7 @@ export const getRequiredBinding = (
   const binding = fnCtx.bindings.get(symbol);
   if (!binding) {
     throw new Error(
-      `codegen missing binding for symbol ${ctx.symbolTable.getSymbol(symbol).name}`
+      `codegen missing binding for symbol ${ctx.program.symbols.getLocalName(ctx.moduleId, symbol) ?? symbol}`
     );
   }
   return binding;

@@ -11,7 +11,7 @@ import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
 import type { CodegenContext } from "../context.js";
 import { runEffectfulExport } from "./support/effects-harness.js";
-import { buildEffectsLoweringInfo } from "../../semantics/effects/analysis.js";
+import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -32,6 +32,11 @@ const sanitize = (value: string): string =>
 
 const buildLoweringSnapshot = () => {
   const semantics = loadSemantics();
+  const program = buildProgramCodegenView([semantics]);
+  const moduleView = program.modules.get(semantics.moduleId);
+  if (!moduleView) {
+    throw new Error("missing module view");
+  }
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
@@ -41,16 +46,8 @@ const buildLoweringSnapshot = () => {
     moduleId: semantics.moduleId,
     moduleLabel: sanitize(semantics.hir.module.path),
     effectIdOffset: 0,
-    binding: semantics.binding,
-    symbolTable: semantics.symbolTable,
-    hir: semantics.hir,
-    typing: semantics.typing,
-    effectsInfo: buildEffectsLoweringInfo({
-      binding: semantics.binding,
-      symbolTable: semantics.symbolTable,
-      hir: semantics.hir,
-      typing: semantics.typing,
-    }),
+    program,
+    module: moduleView,
     options: {
       optimize: false,
       validate: true,
@@ -58,13 +55,14 @@ const buildLoweringSnapshot = () => {
       continuationBackend: {},
     },
     functions: new Map(),
-    functionInstances: new Map(),
+    functionInstances: new Map() as any,
     itemsToSymbols: new Map(),
     structTypes: new Map(),
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
     functionRefTypes: new Map(),
-    runtimeTypeIdsByHash: new Map(),
+    runtimeTypeRegistry: new Map(),
+    runtimeTypeIds: { byKey: new Map(), nextId: { value: 1 } },
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,
@@ -91,9 +89,11 @@ const buildLoweringSnapshot = () => {
       siteOrder: site.siteOrder,
       function:
         site.owner.kind === "function"
-          ? semantics.symbolTable.getSymbol(site.owner.symbol).name
+          ? ctx.program.symbols.getLocalName(ctx.moduleId, site.owner.symbol) ??
+            `${site.owner.symbol}`
           : "__lambda__",
-      effect: semantics.symbolTable.getSymbol(site.effectSymbol).name,
+      effect: ctx.program.symbols.getLocalName(ctx.moduleId, site.effectSymbol) ??
+        `${site.effectSymbol}`,
       envFields: site.envFields.map((field) => ({
         name: field.name,
         sourceKind: field.sourceKind,

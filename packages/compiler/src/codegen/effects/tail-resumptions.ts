@@ -6,7 +6,7 @@ export const getTailResumptionPlan = (
   clauseBody: HirExprId,
   ctx: CodegenContext
 ): HirEffectHandlerClause["tailResumption"] | undefined =>
-  ctx.typing.tailResumptions.get(clauseBody);
+  ctx.module.types.getTailResumption(clauseBody);
 
 export const needsTailGuard = (
   clauseBody: HirExprId,
