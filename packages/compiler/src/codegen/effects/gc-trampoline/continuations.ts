@@ -116,7 +116,9 @@ const sameContinuationOwner = (
 };
 
 const shouldCaptureIdentifierSymbol = (symbol: SymbolId, ctx: CodegenContext): boolean =>
-  !ctx.program.symbols.isModuleScoped(ctx.moduleId, symbol);
+  !ctx.program.symbols.isModuleScoped(
+    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
+  );
 
 const collectHandlerClauseLocalSymbols = ({
   handlerExprId,

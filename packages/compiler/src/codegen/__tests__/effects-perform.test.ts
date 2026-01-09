@@ -91,11 +91,20 @@ const buildLoweringSnapshot = () => {
       siteOrder: site.siteOrder,
       function:
         site.owner.kind === "function"
-          ? ctx.program.symbols.getLocalName(ctx.moduleId, site.owner.symbol) ??
-            `${site.owner.symbol}`
+          ? ctx.program.symbols.getName(
+              ctx.program.symbols.idOf({
+                moduleId: ctx.moduleId,
+                symbol: site.owner.symbol,
+              })
+            ) ?? `${site.owner.symbol}`
           : "__lambda__",
-      effect: ctx.program.symbols.getLocalName(ctx.moduleId, site.effectSymbol) ??
-        `${site.effectSymbol}`,
+      effect:
+        ctx.program.symbols.getName(
+          ctx.program.symbols.idOf({
+            moduleId: ctx.moduleId,
+            symbol: site.effectSymbol,
+          })
+        ) ?? `${site.effectSymbol}`,
       envFields: site.envFields.map((field) => ({
         name: field.name,
         sourceKind: field.sourceKind,

@@ -119,7 +119,9 @@ export const definitionOrderForLambda = (
 };
 
 const shouldCaptureIdentifierSymbol = (symbol: SymbolId, ctx: CodegenContext): boolean =>
-  !ctx.program.symbols.isModuleScoped(ctx.moduleId, symbol);
+  !ctx.program.symbols.isModuleScoped(
+    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
+  );
 
 export const definitionOrderForHandlerClause = ({
   clause,
@@ -175,8 +177,9 @@ export const envFieldsFor = ({
     .sort((a, b) => (ordering.get(a) ?? 0) - (ordering.get(b) ?? 0))
     .map((symbol) => {
       const typeId = ctx.module.types.getValueType(symbol) ?? ctx.program.primitives.unknown;
+      const symbolId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol });
       return {
-        name: ctx.program.symbols.getLocalName(ctx.moduleId, symbol) ?? `${symbol}`,
+        name: ctx.program.symbols.getName(symbolId) ?? `${symbol}`,
         symbol,
         typeId,
         wasmType: wasmTypeFor(typeId, ctx),
@@ -205,8 +208,9 @@ export const ensureArgsType = ({
     type: wasmTypeFor(typeId, ctx),
     mutable: false,
   }));
+  const symbolId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: opSymbol });
   const type = defineStructType(ctx.mod, {
-    name: `voydEffectArgs_${sanitizeIdentifier(ctx.program.symbols.getLocalName(ctx.moduleId, opSymbol) ?? `${opSymbol}`)}`,
+    name: `voydEffectArgs_${sanitizeIdentifier(ctx.program.symbols.getName(symbolId) ?? `${opSymbol}`)}`,
     fields,
     final: true,
   });

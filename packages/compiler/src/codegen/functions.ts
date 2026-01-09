@@ -36,6 +36,12 @@ const getFunctionMetas = (
   symbol: number
 ): FunctionMetadata[] | undefined => ctx.functions.get(moduleId)?.get(symbol);
 
+const programSymbolIdOf = (ctx: CodegenContext, moduleId: string, symbol: number) =>
+  ctx.program.symbols.idOf({ moduleId, symbol });
+
+const symbolName = (ctx: CodegenContext, moduleId: string, symbol: number): string =>
+  ctx.program.symbols.getName(programSymbolIdOf(ctx, moduleId, symbol)) ?? `${symbol}`;
+
 const pushFunctionMeta = (
   ctx: CodegenContext,
   moduleId: string,
@@ -67,8 +73,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
     ctx.itemsToSymbols.set(itemId, { moduleId: ctx.moduleId, symbol: item.symbol });
 
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      ctx.moduleId,
-      item.symbol
+      programSymbolIdOf(ctx, ctx.moduleId, item.symbol)
     );
     if (intrinsicMetadata.intrinsic && intrinsicMetadata.intrinsicUsesSignature !== true) {
       continue;
@@ -102,7 +107,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
 
     instantiations.forEach(([instanceId, typeArgs]) => {
       if (typeArgs.some((arg) => arg === unknown)) {
-        const name = ctx.program.symbols.getLocalName(ctx.moduleId, item.symbol) ?? `${item.symbol}`;
+        const name = symbolName(ctx, ctx.moduleId, item.symbol);
         const instanceLabel = ctx.program.functions.formatInstance(
           instanceId
         );
@@ -131,7 +136,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
       const effectful = effectInfo.typeEffectful;
       if (effectful && process.env.DEBUG_EFFECTS === "1") {
         console.log(
-          `[effects] effectful ${ctx.moduleLabel}::${ctx.program.symbols.getLocalName(ctx.moduleId, item.symbol) ?? item.symbol}`,
+          `[effects] effectful ${ctx.moduleLabel}::${symbolName(ctx, ctx.moduleId, item.symbol)}`,
           {
             effectRow: effectInfo.effectRow,
             row: ctx.program.effects.getRow(effectInfo.effectRow),
@@ -165,10 +170,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           optional: param.optional,
           name:
             typeof item.parameters[index]?.symbol === "number"
-              ? ctx.program.symbols.getLocalName(
-                  ctx.moduleId,
-                  item.parameters[index]!.symbol
-                )
+              ? symbolName(ctx, ctx.moduleId, item.parameters[index]!.symbol)
               : undefined,
         })),
         resultTypeId: descriptor.returnType,
@@ -188,8 +190,7 @@ export const compileFunctions = (ctx: CodegenContext): void => {
   for (const item of ctx.module.hir.items.values()) {
     if (item.kind !== "function") continue;
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      ctx.moduleId,
-      item.symbol
+      programSymbolIdOf(ctx, ctx.moduleId, item.symbol)
     );
     if (intrinsicMetadata.intrinsic && intrinsicMetadata.intrinsicUsesSignature !== true) {
       continue;
@@ -213,12 +214,12 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   ctx.module.meta.imports.forEach((imp) => {
-    const target = ctx.program.imports.getTarget(ctx.moduleId, imp.local);
-    if (!target) return;
-    if (target.moduleId === ctx.moduleId) return;
+    const targetId = ctx.program.imports.getTarget(ctx.moduleId, imp.local);
+    if (!targetId) return;
+    const targetRef = ctx.program.symbols.refOf(targetId);
+    if (targetRef.moduleId === ctx.moduleId) return;
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      ctx.moduleId,
-      imp.local
+      programSymbolIdOf(ctx, ctx.moduleId, imp.local)
     );
     if (intrinsicMetadata.intrinsic && intrinsicMetadata.intrinsicUsesSignature !== true) {
       return;
@@ -227,7 +228,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
     const signature = ctx.program.functions.getSignature(ctx.moduleId, imp.local);
     if (!signature) return;
 
-    const targetMetas = getFunctionMetas(ctx, target.moduleId, target.symbol);
+    const targetMetas = getFunctionMetas(ctx, targetRef.moduleId, targetRef.symbol);
     if (!targetMetas || targetMetas.length === 0) {
       return;
     }
@@ -343,8 +344,7 @@ export const emitModuleExports = (
 
   exportEntries.forEach((entry) => {
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      ctx.moduleId,
-      entry.symbol
+      programSymbolIdOf(ctx, ctx.moduleId, entry.symbol)
     );
     if (
       intrinsicMetadata.intrinsic &&
@@ -359,7 +359,7 @@ export const emitModuleExports = (
       return;
     }
     const exportName =
-      entry.alias ?? ctx.program.symbols.getLocalName(ctx.moduleId, entry.symbol) ?? `${entry.symbol}`;
+      entry.alias ?? symbolName(ctx, ctx.moduleId, entry.symbol);
     if (meta.effectful) {
       emitEffectfulWasmExportWrapper({ meta, exportName });
 
@@ -456,8 +456,7 @@ const reportMissingExportedGenericInstantiation = ({
 
   const body = ctx.program.types.getTypeDesc(scheme.body);
   if (body.kind !== "function") return;
-  const functionName =
-    ctx.program.symbols.getLocalName(ctx.moduleId, entry.symbol) ?? `${entry.symbol}`;
+  const functionName = symbolName(ctx, ctx.moduleId, entry.symbol);
 
   ctx.diagnostics.report(
     diagnosticFromCode({
@@ -621,12 +620,10 @@ const makeFunctionName = (
   ctx: CodegenContext,
   typeArgs: readonly TypeId[]
 ): string => {
-  const symbolName = sanitizeIdentifier(
-    ctx.program.symbols.getLocalName(ctx.moduleId, fn.symbol) ?? `${fn.symbol}`
-  );
+  const safeSymbolName = sanitizeIdentifier(symbolName(ctx, ctx.moduleId, fn.symbol));
   const suffix =
     typeArgs.length === 0 ? "" : `__inst_${sanitizeIdentifier(typeArgs.join("_"))}`;
-  return `${ctx.moduleLabel}__${symbolName}_${fn.symbol}${suffix}`;
+  return `${ctx.moduleLabel}__${safeSymbolName}_${fn.symbol}${suffix}`;
 };
 
 const sanitizeIdentifier = (value: string): string =>

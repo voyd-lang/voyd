@@ -6,6 +6,7 @@ import type {
   NodeId,
   ProgramFunctionId,
   ProgramFunctionInstanceId,
+  ProgramSymbolId,
   SymbolId,
   TypeId,
   TypeParamId,
@@ -34,6 +35,8 @@ import {
   getOptionalInfo,
   type OptionalResolverContext,
 } from "../typing/optionals.js";
+import { buildProgramSymbolArena } from "../program-symbol-arena.js";
+import type { ProgramSymbolArena } from "../program-symbol-arena.js";
 
 export type SymbolRef = {
   moduleId: string;
@@ -58,8 +61,8 @@ export type CodegenFunctionParameter = {
 
 export type CodegenTypeDesc =
   | { kind: "primitive"; name: string }
-  | { kind: "trait"; owner: SymbolRef; name?: string; typeArgs: readonly TypeId[] }
-  | { kind: "nominal-object"; owner: SymbolRef; name?: string; typeArgs: readonly TypeId[] }
+  | { kind: "trait"; owner: ProgramSymbolId; name?: string; typeArgs: readonly TypeId[] }
+  | { kind: "nominal-object"; owner: ProgramSymbolId; name?: string; typeArgs: readonly TypeId[] }
   | { kind: "structural-object"; fields: readonly CodegenStructuralField[] }
   | { kind: "function"; parameters: readonly CodegenFunctionParameter[]; returnType: TypeId; effectRow: number }
   | { kind: "union"; members: readonly TypeId[] }
@@ -174,13 +177,13 @@ export type ModuleTypeIndex = {
 };
 
 export type MonomorphizedInstanceInfo = {
-  callee: SymbolRef;
+  callee: ProgramFunctionId;
   typeArgs: readonly TypeId[];
   instanceId: ProgramFunctionInstanceId;
 };
 
 export type MonomorphizedInstanceRequest = {
-  callee: SymbolRef;
+  callee: ProgramFunctionId;
   typeArgs: readonly TypeId[];
 };
 
@@ -193,36 +196,23 @@ export type TypeLoweringIndex = {
     ctx?: CodegenUnificationContext
   ): TypeId;
   unify(a: TypeId, b: TypeId, ctx: CodegenUnificationContext): CodegenUnificationResult;
-  getNominalOwner(typeId: TypeId): SymbolRef | undefined;
+  getNominalOwner(typeId: TypeId): ProgramSymbolId | undefined;
   getNominalAncestry(typeId: TypeId): readonly { nominalId: TypeId; typeId: TypeId }[];
   getStructuralLayout(typeId: TypeId): StructuralLayout | undefined;
   getRuntimeTypeId(typeId: TypeId): number;
 };
 
-export type SymbolIndex = {
-  getName(ref: SymbolRef): string | undefined;
-  getLocalName(moduleId: string, symbol: SymbolId): string | undefined;
-  getPackageId(moduleId: string): string | undefined;
-  getIntrinsicType(moduleId: string, symbol: SymbolId): string | undefined;
-  getIntrinsicFunctionFlags(
-    moduleId: string,
-    symbol: SymbolId
-  ): { intrinsic: boolean; intrinsicUsesSignature: boolean };
-  getIntrinsicName(moduleId: string, symbol: SymbolId): string | undefined;
-  isModuleScoped(moduleId: string, symbol: SymbolId): boolean;
-};
-
 export type ObjectLayoutIndex = {
-  getTemplate(owner: SymbolRef): CodegenObjectTemplate | undefined;
+  getTemplate(owner: ProgramSymbolId): CodegenObjectTemplate | undefined;
   getInfoByNominal(nominal: TypeId): CodegenObjectTypeInfo | undefined;
-  getNominalOwnerRef(nominal: TypeId): SymbolRef | undefined;
-  getNominalInstancesByOwner(owner: SymbolRef): readonly TypeId[];
+  getNominalOwnerRef(nominal: TypeId): ProgramSymbolId | undefined;
+  getNominalInstancesByOwner(owner: ProgramSymbolId): readonly TypeId[];
 };
 
 export type TraitDispatchIndex = {
   getImplsByNominal(nominal: TypeId): readonly CodegenTraitImplInstance[];
-  getImplsByTrait(traitSymbol: SymbolId): readonly CodegenTraitImplInstance[];
-  getTraitMethodImpl(symbol: SymbolId): CodegenTraitMethodImpl | undefined;
+  getImplsByTrait(traitSymbol: ProgramSymbolId): readonly CodegenTraitImplInstance[];
+  getTraitMethodImpl(symbol: ProgramSymbolId): CodegenTraitMethodImpl | undefined;
 };
 
 export type CallLoweringIndex = {
@@ -240,7 +230,6 @@ export type ModuleCodegenMetadata = {
   isPackageRoot: boolean;
   imports: readonly {
     local: SymbolId;
-    target?: { moduleId: string; symbol: SymbolId };
   }[];
   effects: readonly {
     name: string;
@@ -262,8 +251,8 @@ export type ModuleCodegenView = {
 };
 
 export type ImportWiringIndex = {
-  getLocal(moduleId: string, target: SymbolRef): SymbolId | undefined;
-  getTarget(moduleId: string, local: SymbolId): SymbolRef | undefined;
+  getLocal(moduleId: string, target: ProgramSymbolId): SymbolId | undefined;
+  getTarget(moduleId: string, local: SymbolId): ProgramSymbolId | undefined;
 };
 
 export type ProgramEffectIndex = {
@@ -288,7 +277,7 @@ export type ProgramCodegenView = {
     f64: TypeId;
   };
   types: TypeLoweringIndex;
-  symbols: SymbolIndex;
+  symbols: ProgramSymbolArena;
   functions: FunctionLoweringIndex;
   optionals: {
     getOptionalInfo(moduleId: string, typeId: TypeId): CodegenOptionalInfo | undefined;
@@ -302,7 +291,7 @@ export type ProgramCodegenView = {
 };
 
 export type CodegenObjectTemplate = {
-  symbol: SymbolId;
+  symbol: ProgramSymbolId;
   params: readonly { symbol: SymbolId; typeParam: TypeParamId; constraint?: TypeId }[];
   nominal: TypeId;
   structural: TypeId;
@@ -323,16 +312,16 @@ export type CodegenObjectTypeInfo = {
 };
 
 export type CodegenTraitMethodImpl = {
-  traitSymbol: SymbolId;
-  traitMethodSymbol: SymbolId;
+  traitSymbol: ProgramSymbolId;
+  traitMethodSymbol: ProgramSymbolId;
 };
 
 export type CodegenTraitImplInstance = {
   trait: TypeId;
-  traitSymbol: SymbolId;
+  traitSymbol: ProgramSymbolId;
   target: TypeId;
-  methods: readonly { traitMethod: SymbolId; implMethod: SymbolId }[];
-  implSymbol: SymbolId;
+  methods: readonly { traitMethod: ProgramSymbolId; implMethod: ProgramSymbolId }[];
+  implSymbol: ProgramSymbolId;
 };
 
 export const buildProgramCodegenView = (
@@ -365,14 +354,14 @@ export const buildProgramCodegenView = (
   const arena = first.typing.arena;
   const effectsInterner: EffectInterner = first.typing.effects;
 
-  const objectTemplateByOwner = new Map<string, Map<SymbolId, CodegenObjectTemplate>>();
+  const objectTemplateByOwner = new Map<ProgramSymbolId, CodegenObjectTemplate>();
   const objectInfoByNominal = new Map<TypeId, CodegenObjectTypeInfo>();
-  const nominalOwnerByNominal = new Map<TypeId, SymbolRef>();
-  const nominalsByOwner = new Map<string, Map<SymbolId, TypeId[]>>();
+  const nominalOwnerByNominal = new Map<TypeId, ProgramSymbolId>();
+  const nominalsByOwner = new Map<ProgramSymbolId, TypeId[]>();
 
   const traitImplsByNominal = new Map<TypeId, CodegenTraitImplInstance[]>();
-  const traitImplsByTrait = new Map<SymbolId, CodegenTraitImplInstance[]>();
-  const traitMethodImpls = new Map<SymbolId, CodegenTraitMethodImpl>();
+  const traitImplsByTrait = new Map<ProgramSymbolId, CodegenTraitImplInstance[]>();
+  const traitMethodImpls = new Map<ProgramSymbolId, CodegenTraitMethodImpl>();
 
   const callsByModuleRaw = new Map<
     string,
@@ -411,15 +400,12 @@ export const buildProgramCodegenView = (
     a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true })
   );
 
+  const symbols = buildProgramSymbolArena(stableModules);
+
   const moduleMetaById = new Map<string, ModuleCodegenMetadata>();
   const importTargetsByModule = new Map<string, Map<SymbolId, SymbolRef>>();
-  const importLocalsByModule = new Map<
-    string,
-    Map<string, Map<SymbolId, SymbolId>>
-  >();
-
-  const functionRefById: SymbolRef[] = [];
-  const functionIdByModuleAndSymbol = new Map<string, Map<SymbolId, ProgramFunctionId>>();
+  const importTargetIdsByModule = new Map<string, Map<SymbolId, ProgramSymbolId>>();
+  const importLocalsByModule = new Map<string, Map<ProgramSymbolId, SymbolId>>();
 
   const toSymbolRef = (ref: TypingSymbolRef): SymbolRef => ({
     moduleId: ref.moduleId,
@@ -502,14 +488,14 @@ export const buildProgramCodegenView = (
       case "trait":
         return cacheTypeDesc(typeId, {
           kind: "trait",
-          owner: toSymbolRef(desc.owner),
+          owner: symbols.idOf(toSymbolRef(desc.owner)),
           name: desc.name,
           typeArgs: [...desc.typeArgs],
         });
       case "nominal-object":
         return cacheTypeDesc(typeId, {
           kind: "nominal-object",
-          owner: toSymbolRef(desc.owner),
+          owner: symbols.idOf(toSymbolRef(desc.owner)),
           name: desc.name,
           typeArgs: [...desc.typeArgs],
         });
@@ -587,32 +573,52 @@ export const buildProgramCodegenView = (
           },
         };
 
-  const toCodegenTraitMethodImpl = (info: TraitMethodImpl): CodegenTraitMethodImpl => ({
-    traitSymbol: info.traitSymbol,
-    traitMethodSymbol: info.traitMethodSymbol,
+  const toCodegenTraitMethodImpl = ({
+    traitSymbol,
+    traitMethodSymbol,
+  }: {
+    traitSymbol: ProgramSymbolId;
+    traitMethodSymbol: ProgramSymbolId;
+  }): CodegenTraitMethodImpl => ({
+    traitSymbol,
+    traitMethodSymbol,
   });
 
-  const toCodegenTraitImplInstance = (impl: TraitImplInstance): CodegenTraitImplInstance => {
-    const cacheKey = `${impl.implSymbol}:${impl.trait}:${impl.target}`;
+  const toCodegenTraitImplInstance = ({
+    impl,
+    traitSymbol,
+    implSymbol,
+    methods,
+  }: {
+    impl: TraitImplInstance;
+    traitSymbol: ProgramSymbolId;
+    implSymbol: ProgramSymbolId;
+    methods: readonly { traitMethod: ProgramSymbolId; implMethod: ProgramSymbolId }[];
+  }): CodegenTraitImplInstance => {
+    const cacheKey = `${implSymbol}:${impl.trait}:${impl.target}`;
     const cached = traitImplCache.get(cacheKey);
     if (cached) {
       return cached;
     }
     const value: CodegenTraitImplInstance = {
       trait: impl.trait,
-      traitSymbol: impl.traitSymbol,
+      traitSymbol,
       target: impl.target,
-      methods: Array.from(impl.methods.entries())
-        .sort(([a], [b]) => a - b)
-        .map(([traitMethod, implMethod]) => ({ traitMethod, implMethod })),
-      implSymbol: impl.implSymbol,
+      methods,
+      implSymbol,
     };
     traitImplCache.set(cacheKey, value);
     return value;
   };
 
-  const toCodegenObjectTemplate = (template: ObjectTemplate): CodegenObjectTemplate => ({
-    symbol: template.symbol,
+  const toCodegenObjectTemplate = ({
+    template,
+    symbol,
+  }: {
+    template: ObjectTemplate;
+    symbol: ProgramSymbolId;
+  }): CodegenObjectTemplate => ({
+    symbol,
     params: template.params.map((param) => ({
       symbol: param.symbol,
       typeParam: param.typeParam,
@@ -626,14 +632,20 @@ export const buildProgramCodegenView = (
     baseNominal: template.baseNominal,
   });
 
-  const toCodegenObjectTypeInfo = (info: ObjectTypeInfo): CodegenObjectTypeInfo => ({
+  const toCodegenObjectTypeInfo = ({
+    info,
+    traitImpls,
+  }: {
+    info: ObjectTypeInfo;
+    traitImpls?: readonly CodegenTraitImplInstance[];
+  }): CodegenObjectTypeInfo => ({
     nominal: info.nominal,
     structural: info.structural,
     type: info.type,
     fields: info.fields.map(toCodegenStructuralField),
     visibility: info.visibility,
     baseNominal: info.baseNominal,
-    traitImpls: info.traitImpls?.map(toCodegenTraitImplInstance),
+    traitImpls,
   });
 
   const getOrCreateMap = <K, V>(map: Map<K, V>, key: K, create: () => V): V => {
@@ -648,23 +660,13 @@ export const buildProgramCodegenView = (
 
   stableModules.forEach((mod) => {
     const importsByLocal = new Map<SymbolId, SymbolRef>();
-    const localsByTarget = new Map<string, Map<SymbolId, SymbolId>>();
     mod.binding.imports.forEach((imp) => {
       if (!imp.target) return;
       const target = { moduleId: imp.target.moduleId, symbol: imp.target.symbol };
       importsByLocal.set(imp.local, target);
-      const byModule = getOrCreateMap(
-        localsByTarget,
-        target.moduleId,
-        () => new Map<SymbolId, SymbolId>()
-      );
-      if (!byModule.has(target.symbol)) {
-        byModule.set(target.symbol, imp.local);
-      }
     });
 
     importTargetsByModule.set(mod.moduleId, importsByLocal);
-    importLocalsByModule.set(mod.moduleId, localsByTarget);
 
     moduleMetaById.set(mod.moduleId, {
       moduleId: mod.moduleId,
@@ -672,9 +674,6 @@ export const buildProgramCodegenView = (
       isPackageRoot: mod.binding.isPackageRoot,
       imports: mod.binding.imports.map((imp) => ({
         local: imp.local,
-        target: imp.target
-          ? { moduleId: imp.target.moduleId, symbol: imp.target.symbol }
-          : undefined,
       })),
       effects: mod.binding.effects.map((effect) => ({
         name: effect.name,
@@ -684,54 +683,6 @@ export const buildProgramCodegenView = (
           symbol: op.symbol,
         })),
       })),
-    });
-
-    for (const template of mod.typing.objects.templates()) {
-      const owner: SymbolRef = { moduleId: mod.moduleId, symbol: template.symbol };
-      const bySymbol = getOrCreateMap(
-        objectTemplateByOwner,
-        owner.moduleId,
-        () => new Map<SymbolId, CodegenObjectTemplate>()
-      );
-      bySymbol.set(owner.symbol, toCodegenObjectTemplate(template));
-    }
-
-    mod.typing.objectsByNominal.forEach((info, nominal) => {
-      objectInfoByNominal.set(nominal, toCodegenObjectTypeInfo(info));
-      const desc = arena.get(nominal);
-      if (desc.kind !== "nominal-object") {
-        return;
-      }
-      nominalOwnerByNominal.set(nominal, toSymbolRef(desc.owner));
-      const owner = toSymbolRef(desc.owner);
-      const bySymbol = getOrCreateMap(
-        nominalsByOwner,
-        owner.moduleId,
-        () => new Map<SymbolId, TypeId[]>()
-      );
-      const bucket = bySymbol.get(owner.symbol) ?? [];
-      bucket.push(nominal);
-      bySymbol.set(owner.symbol, bucket);
-    });
-
-    const implsByNominal = mod.typing.traitImplsByNominal;
-    implsByNominal.forEach((impls, nominal) => {
-      const mapped = impls.map(toCodegenTraitImplInstance);
-      const bucket = traitImplsByNominal.get(nominal) ?? [];
-      bucket.push(...mapped);
-      traitImplsByNominal.set(nominal, bucket);
-    });
-
-    const implsByTrait = mod.typing.traitImplsByTrait;
-    implsByTrait.forEach((impls, traitSymbol) => {
-      const mapped = impls.map(toCodegenTraitImplInstance);
-      const bucket = traitImplsByTrait.get(traitSymbol) ?? [];
-      bucket.push(...mapped);
-      traitImplsByTrait.set(traitSymbol, bucket);
-    });
-
-    mod.typing.traitMethodImpls.forEach((info, symbol) => {
-      traitMethodImpls.set(symbol, toCodegenTraitMethodImpl(info));
     });
 
     const callSource = moduleTyping.get(mod.moduleId);
@@ -756,10 +707,10 @@ export const buildProgramCodegenView = (
   const resolveImportTarget = (ref: SymbolRef): SymbolRef | undefined =>
     importTargetsByModule.get(ref.moduleId)?.get(ref.symbol);
 
-  const resolveCanonicalFunctionRef = (ref: SymbolRef): SymbolRef => {
+  const resolveCanonicalSymbolRef = (ref: SymbolRef): SymbolRef => {
     let current = ref;
     const visitedByModule = new Map<string, Set<SymbolId>>();
-    // Resolve through imports so imported functions share a single ProgramFunctionId.
+    // Resolve through imports so imported symbols share a single canonical identity.
     while (true) {
       const next = resolveImportTarget(current);
       if (!next) {
@@ -774,44 +725,111 @@ export const buildProgramCodegenView = (
     }
   };
 
-  const stableFunctionRefs: SymbolRef[] = [];
-  const seenFunctionRefs = new Map<string, Set<SymbolId>>();
   stableModules.forEach((mod) => {
-    const functionSymbols = Array.from(mod.typing.functions.signatures, ([symbol]) => symbol).sort(
-      (a, b) => a - b
-    );
-    functionSymbols.forEach((symbol) => {
-      const canonical = resolveCanonicalFunctionRef({ moduleId: mod.moduleId, symbol });
-      const seen = getOrCreateMap(seenFunctionRefs, canonical.moduleId, () => new Set());
-      if (seen.has(canonical.symbol)) {
+    const targets = importTargetsByModule.get(mod.moduleId);
+    if (!targets) return;
+    const targetIdsByLocal = new Map<SymbolId, ProgramSymbolId>();
+    const localsByTargetId = new Map<ProgramSymbolId, SymbolId>();
+
+    targets.forEach((target, local) => {
+      const canonicalTarget = resolveCanonicalSymbolRef(target);
+      const targetId = symbols.idOf(canonicalTarget);
+      targetIdsByLocal.set(local, targetId);
+      if (!localsByTargetId.has(targetId)) {
+        localsByTargetId.set(targetId, local);
+      }
+    });
+
+    importTargetIdsByModule.set(mod.moduleId, targetIdsByLocal);
+    importLocalsByModule.set(mod.moduleId, localsByTargetId);
+  });
+
+  const getProgramFunctionId = (ref: SymbolRef): ProgramFunctionId | undefined =>
+    symbols.tryIdOf(resolveCanonicalSymbolRef(ref));
+
+  const programSymbolIdOf = (moduleId: string, symbol: SymbolId): ProgramSymbolId =>
+    symbols.idOf({ moduleId, symbol });
+
+  const canonicalProgramSymbolIdOf = (
+    moduleId: string,
+    symbol: SymbolId
+  ): ProgramSymbolId => symbols.idOf(resolveCanonicalSymbolRef({ moduleId, symbol }));
+
+  const toCodegenTraitImplInstanceForModule = (
+    impl: TraitImplInstance,
+    moduleId: string
+  ): CodegenTraitImplInstance => {
+    const traitSymbol = canonicalProgramSymbolIdOf(moduleId, impl.traitSymbol);
+    const implSymbol = canonicalProgramSymbolIdOf(moduleId, impl.implSymbol);
+    const methods = Array.from(impl.methods.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([traitMethod, implMethod]) => ({
+        traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
+        implMethod: canonicalProgramSymbolIdOf(moduleId, implMethod),
+      }));
+    return toCodegenTraitImplInstance({ impl, traitSymbol, implSymbol, methods });
+  };
+
+  stableModules.forEach((mod) => {
+    for (const template of mod.typing.objects.templates()) {
+      const ownerId = canonicalProgramSymbolIdOf(mod.moduleId, template.symbol);
+      if (!objectTemplateByOwner.has(ownerId)) {
+        objectTemplateByOwner.set(
+          ownerId,
+          toCodegenObjectTemplate({ template, symbol: ownerId })
+        );
+      }
+    }
+
+    mod.typing.objectsByNominal.forEach((info, nominal) => {
+      const desc = arena.get(nominal);
+      if (desc.kind !== "nominal-object") {
         return;
       }
-      seen.add(canonical.symbol);
-      stableFunctionRefs.push(canonical);
+
+      const ownerRef = toSymbolRef(desc.owner);
+      const ownerId = symbols.idOf(resolveCanonicalSymbolRef(ownerRef));
+      nominalOwnerByNominal.set(nominal, ownerId);
+
+      const bucket = nominalsByOwner.get(ownerId) ?? [];
+      bucket.push(nominal);
+      nominalsByOwner.set(ownerId, bucket);
+
+      objectInfoByNominal.set(
+        nominal,
+        toCodegenObjectTypeInfo({
+          info,
+          traitImpls: info.traitImpls?.map((impl) =>
+            toCodegenTraitImplInstanceForModule(impl, mod.moduleId)
+          ),
+        })
+      );
+    });
+
+    mod.typing.traitImplsByNominal.forEach((impls, nominal) => {
+      const bucket = traitImplsByNominal.get(nominal) ?? [];
+      bucket.push(...impls.map((impl) => toCodegenTraitImplInstanceForModule(impl, mod.moduleId)));
+      traitImplsByNominal.set(nominal, bucket);
+    });
+
+    mod.typing.traitImplsByTrait.forEach((impls, traitSymbol) => {
+      const traitSymbolId = canonicalProgramSymbolIdOf(mod.moduleId, traitSymbol);
+      const bucket = traitImplsByTrait.get(traitSymbolId) ?? [];
+      bucket.push(...impls.map((impl) => toCodegenTraitImplInstanceForModule(impl, mod.moduleId)));
+      traitImplsByTrait.set(traitSymbolId, bucket);
+    });
+
+    mod.typing.traitMethodImpls.forEach((info, symbol) => {
+      const key = programSymbolIdOf(mod.moduleId, symbol);
+      traitMethodImpls.set(
+        key,
+        toCodegenTraitMethodImpl({
+          traitSymbol: canonicalProgramSymbolIdOf(mod.moduleId, info.traitSymbol),
+          traitMethodSymbol: canonicalProgramSymbolIdOf(mod.moduleId, info.traitMethodSymbol),
+        })
+      );
     });
   });
-
-  stableFunctionRefs.sort((a, b) => {
-    const modOrder = a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true });
-    if (modOrder !== 0) return modOrder;
-    return a.symbol - b.symbol;
-  });
-
-  stableFunctionRefs.forEach((ref, index) => {
-    const id = index as ProgramFunctionId;
-    const bySymbol = getOrCreateMap(
-      functionIdByModuleAndSymbol,
-      ref.moduleId,
-      () => new Map<SymbolId, ProgramFunctionId>()
-    );
-    bySymbol.set(ref.symbol, id);
-    functionRefById[id] = ref;
-  });
-
-  const getProgramFunctionId = (ref: SymbolRef): ProgramFunctionId | undefined => {
-    const canonical = resolveCanonicalFunctionRef(ref);
-    return functionIdByModuleAndSymbol.get(canonical.moduleId)?.get(canonical.symbol);
-  };
 
   const recordInstanceKey = (moduleId: string, key: string): void => {
     const normalized = normalizeCallerInstanceKey(key);
@@ -888,21 +906,22 @@ export const buildProgramCodegenView = (
   };
 
   let nextInstanceId = 0;
-  functionRefById.forEach((ref, functionId) => {
-    if (!ref) return;
-    const instantiations = instantiationsByFunctionId.get(functionId as ProgramFunctionId);
+  const stableFunctionIds = Array.from(instantiationsByFunctionId.keys()).sort((a, b) => a - b);
+  stableFunctionIds.forEach((functionId) => {
+    const ref = symbols.refOf(functionId);
+    const instantiations = instantiationsByFunctionId.get(functionId);
     if (!instantiations || instantiations.size === 0) {
       return;
     }
     const sorted = Array.from(instantiations.values()).sort(compareTypeArgs);
     const idsByArgs = getOrCreateMap(
       instanceIdsByFunctionId,
-      functionId as ProgramFunctionId,
+      functionId,
       () => new Map<string, ProgramFunctionInstanceId>()
     );
     const instantiationInfo = getOrCreateMap(
       instantiationInfoByFunctionId,
-      functionId as ProgramFunctionId,
+      functionId,
       () => new Map<ProgramFunctionInstanceId, readonly TypeId[]>()
     );
     sorted.forEach((typeArgs) => {
@@ -911,7 +930,7 @@ export const buildProgramCodegenView = (
       idsByArgs.set(typeArgs.join(","), instanceId);
       instantiationInfo.set(instanceId, typeArgs);
       instanceInfoById[instanceId] = {
-        functionId: functionId as ProgramFunctionId,
+        functionId,
         typeArgs,
         symbolRef: ref,
       };
@@ -988,7 +1007,7 @@ export const buildProgramCodegenView = (
   });
 
   (options?.instances ?? []).forEach((info) => {
-    const instanceId = getProgramFunctionInstanceId(info.callee, info.typeArgs);
+    const instanceId = getInstanceIdForFunctionAndArgs(info.callee, info.typeArgs);
     if (instanceId === undefined) {
       return;
     }
@@ -1001,21 +1020,31 @@ export const buildProgramCodegenView = (
     instanceById.set(instanceId, data);
   });
 
-  nominalsByOwner.forEach((bySymbol) => {
-    bySymbol.forEach((bucket, symbol) => {
-      bucket.sort((a, b) => a - b);
-      bySymbol.set(symbol, bucket);
-    });
+  nominalsByOwner.forEach((bucket, owner) => {
+    bucket.sort((a, b) => a - b);
+    nominalsByOwner.set(owner, bucket);
   });
 
   traitImplsByNominal.forEach((bucket, nominal) => {
     bucket.sort((a, b) => a.implSymbol - b.implSymbol);
-    traitImplsByNominal.set(nominal, bucket);
+    const seen = new Set<ProgramSymbolId>();
+    const unique = bucket.filter((impl) => {
+      if (seen.has(impl.implSymbol)) return false;
+      seen.add(impl.implSymbol);
+      return true;
+    });
+    traitImplsByNominal.set(nominal, unique);
   });
 
   traitImplsByTrait.forEach((bucket, symbol) => {
     bucket.sort((a, b) => a.implSymbol - b.implSymbol);
-    traitImplsByTrait.set(symbol, bucket);
+    const seen = new Set<ProgramSymbolId>();
+    const unique = bucket.filter((impl) => {
+      if (seen.has(impl.implSymbol)) return false;
+      seen.add(impl.implSymbol);
+      return true;
+    });
+    traitImplsByTrait.set(symbol, unique);
   });
 
   allInstances.sort((a, b) => a.instanceId - b.instanceId);
@@ -1029,7 +1058,7 @@ export const buildProgramCodegenView = (
       toCodegenUnificationResult(arena.unify(a, b, ctx as UnificationContext)),
     getNominalOwner: (typeId) => {
       const desc = arena.get(typeId);
-      return desc.kind === "nominal-object" ? toSymbolRef(desc.owner) : undefined;
+      return desc.kind === "nominal-object" ? symbols.idOf(toSymbolRef(desc.owner)) : undefined;
     },
     getNominalAncestry: (typeId) => {
       const seen = new Set<TypeId>();
@@ -1077,33 +1106,14 @@ export const buildProgramCodegenView = (
     getRuntimeTypeId: (typeId) => typeId,
   };
 
-  const symbols: SymbolIndex = {
-    getName: (ref) => {
-      const mod = modulesById.get(ref.moduleId);
-      return mod?.symbols.getName(ref.symbol);
-    },
-    getLocalName: (moduleId, symbol) => modulesById.get(moduleId)?.symbols.getName(symbol),
-    getPackageId: (moduleId) => moduleMetaById.get(moduleId)?.packageId,
-    getIntrinsicType: (moduleId, symbol) =>
-      modulesById.get(moduleId)?.symbols.getIntrinsicType(symbol),
-    getIntrinsicFunctionFlags: (moduleId, symbol) =>
-      modulesById.get(moduleId)?.symbols.getIntrinsicFunctionFlags(symbol) ?? {
-        intrinsic: false,
-        intrinsicUsesSignature: false,
-      },
-    getIntrinsicName: (moduleId, symbol) =>
-      modulesById.get(moduleId)?.symbols.getIntrinsicName(symbol),
-    isModuleScoped: (moduleId, symbol) =>
-      modulesById.get(moduleId)?.symbols.isModuleScoped(symbol) ?? false,
-  };
-
   const optionals = {
     getOptionalInfo: (moduleId: string, typeId: TypeId): CodegenOptionalInfo | undefined => {
       const ctx: OptionalResolverContext = {
         arena,
         unknownType: first.typing.primitives.unknown,
         getObjectStructuralTypeId: (nominal) => objectInfoByNominal.get(nominal)?.structural,
-        getSymbolIntrinsicType: (symbol) => symbols.getIntrinsicType(moduleId, symbol),
+        getSymbolIntrinsicType: (symbol) =>
+          symbols.getIntrinsicType(symbols.idOf({ moduleId, symbol })),
       };
       const info = getOptionalInfo(typeId, ctx);
       return info
@@ -1118,11 +1128,10 @@ export const buildProgramCodegenView = (
   };
 
   const objects: ObjectLayoutIndex = {
-    getTemplate: (owner) => objectTemplateByOwner.get(owner.moduleId)?.get(owner.symbol),
+    getTemplate: (owner) => objectTemplateByOwner.get(owner),
     getInfoByNominal: (nominal) => objectInfoByNominal.get(nominal),
     getNominalOwnerRef: (nominal) => nominalOwnerByNominal.get(nominal),
-    getNominalInstancesByOwner: (owner) =>
-      nominalsByOwner.get(owner.moduleId)?.get(owner.symbol) ?? [],
+    getNominalInstancesByOwner: (owner) => nominalsByOwner.get(owner) ?? [],
   };
 
   const traits: TraitDispatchIndex = {
@@ -1183,7 +1192,13 @@ export const buildProgramCodegenView = (
       if (!typeArgs) return undefined;
       return getProgramFunctionInstanceId({ moduleId, symbol }, typeArgs);
     },
-    getFunctionRef: (functionId) => functionRefById[functionId],
+    getFunctionRef: (functionId) => {
+      try {
+        return symbols.refOf(functionId);
+      } catch {
+        return undefined;
+      }
+    },
     getInstance: (instanceId) => {
       const info = instanceInfoById[instanceId];
       if (!info) {
@@ -1200,9 +1215,7 @@ export const buildProgramCodegenView = (
       if (!info) {
         return `instance${instanceId}`;
       }
-      const name =
-        symbols.getLocalName(info.symbolRef.moduleId, info.symbolRef.symbol) ??
-        `${info.symbolRef.symbol}`;
+      const name = symbols.getName(info.functionId) ?? `${info.symbolRef.symbol}`;
       const args = info.typeArgs.length === 0 ? "" : info.typeArgs.join(",");
       return `${info.symbolRef.moduleId}::${name}<${args}>`;
     },
@@ -1238,9 +1251,8 @@ export const buildProgramCodegenView = (
   };
 
   const imports: ImportWiringIndex = {
-    getLocal: (moduleId, target) =>
-      importLocalsByModule.get(moduleId)?.get(target.moduleId)?.get(target.symbol),
-    getTarget: (moduleId, local) => importTargetsByModule.get(moduleId)?.get(local),
+    getLocal: (moduleId, target) => importLocalsByModule.get(moduleId)?.get(target),
+    getTarget: (moduleId, local) => importTargetIdsByModule.get(moduleId)?.get(local),
   };
 
   const moduleViews = new Map<string, ModuleCodegenView>();

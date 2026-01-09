@@ -23,16 +23,13 @@ import type {
   FixedArrayWasmType,
 } from "./context.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
-import type { CodegenTraitImplInstance, SymbolRef } from "../semantics/codegen-view/index.js";
-import type { ProgramFunctionInstanceId } from "../semantics/ids.js";
+import type { CodegenTraitImplInstance } from "../semantics/codegen-view/index.js";
+import type { ProgramFunctionInstanceId, ProgramSymbolId } from "../semantics/ids.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
-
-const canonicalSymbolKey = (ref: SymbolRef): string =>
-  `${ref.moduleId}#${ref.symbol}`;
 
 const runtimeTypeKeyFor = (
   typeId: TypeId,
@@ -51,11 +48,11 @@ const runtimeTypeKeyFor = (
     case "type-param-ref":
       return `typeparam:${desc.param}`;
     case "nominal-object":
-      return `nominal:${canonicalSymbolKey(desc.owner)}<${desc.typeArgs
+      return `nominal:${desc.owner}<${desc.typeArgs
         .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
         .join(",")}>`;
     case "trait":
-      return `trait:${canonicalSymbolKey(desc.owner)}<${desc.typeArgs
+      return `trait:${desc.owner}<${desc.typeArgs
         .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
         .join(",")}>`;
     case "structural-object":
@@ -117,7 +114,9 @@ const runtimeTypeIdFor = (typeId: TypeId, ctx: CodegenContext): number =>
   })();
 
 const getLocalSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
-  ctx.program.symbols.getLocalName(ctx.moduleId, symbol) ?? `${symbol}`;
+  ctx.program.symbols.getName(
+    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
+  ) ?? `${symbol}`;
 
 export const getFunctionRefType = ({
   params,
@@ -795,7 +794,8 @@ const createMethodLookupEntries = ({
 
   impls.forEach((impl) => {
     impl.methods.forEach(({ traitMethod, implMethod }) => {
-      const metas = ctx.functions.get(ctx.moduleId)?.get(implMethod);
+      const implRef = ctx.program.symbols.refOf(implMethod as ProgramSymbolId);
+      const metas = ctx.functions.get(implRef.moduleId)?.get(implRef.symbol);
       const meta = pickMethodMetadata(metas);
       if (!meta) {
         throw new Error(

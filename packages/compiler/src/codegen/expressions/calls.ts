@@ -12,7 +12,7 @@ import type {
   TypeId,
 } from "../context.js";
 import type { EffectRowId, ProgramFunctionInstanceId } from "../../semantics/ids.js";
-import type { SymbolRef } from "../../semantics/codegen-view/index.js";
+import type { ProgramSymbolId } from "../../semantics/ids.js";
 import { compileIntrinsicCall } from "../intrinsics.js";
 import {
   requiresStructuralConversion,
@@ -237,11 +237,10 @@ export const compileCallExpr = (
       (targets && targets.size === 1
         ? targets.values().next().value
         : undefined);
-    const targetRef =
+    const targetSymbol =
       typeof targetFunctionId === "number"
-        ? ctx.program.functions.getFunctionRef(targetFunctionId)
+        ? localSymbolForProgramSymbolId(targetFunctionId as ProgramSymbolId, ctx)
         : undefined;
-    const targetSymbol = targetRef ? localSymbolForSymbolRef(targetRef, ctx) : undefined;
     if (typeof targetSymbol !== "number") {
       throw new Error("codegen missing overload resolution for indirect call");
     }
@@ -298,14 +297,9 @@ export const compileCallExpr = (
         compileExpr,
       });
     }
-    const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      ctx.moduleId,
-      callee.symbol
-    );
-    const intrinsicName = ctx.program.symbols.getIntrinsicName(
-      ctx.moduleId,
-      callee.symbol
-    );
+    const calleeId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: callee.symbol });
+    const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
+    const intrinsicName = ctx.program.symbols.getIntrinsicName(calleeId);
     const traitDispatch = compileTraitDispatchCall({
       expr,
       calleeSymbol: callee.symbol,
@@ -339,7 +333,7 @@ export const compileCallExpr = (
         expr: compileIntrinsicCall({
           name:
             intrinsicName ??
-            ctx.program.symbols.getLocalName(ctx.moduleId, callee.symbol) ??
+            ctx.program.symbols.getName(calleeId) ??
             `${callee.symbol}`,
           call: expr,
           args,
@@ -414,7 +408,9 @@ const compileTraitDispatchCall = ({
     return undefined;
   }
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const mapping = ctx.program.traits.getTraitMethodImpl(calleeSymbol);
+  const mapping = ctx.program.traits.getTraitMethodImpl(
+    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: calleeSymbol })
+  );
   if (!mapping) {
     return undefined;
   }
@@ -425,9 +421,7 @@ const compileTraitDispatchCall = ({
   );
   const receiverDesc = ctx.program.types.getTypeDesc(receiverTypeId);
   const receiverTraitSymbol =
-    receiverDesc.kind === "trait"
-      ? localSymbolForSymbolRef(receiverDesc.owner, ctx)
-      : undefined;
+    receiverDesc.kind === "trait" ? receiverDesc.owner : undefined;
   if (
     receiverDesc.kind !== "trait" ||
     receiverTraitSymbol !== mapping.traitSymbol
@@ -531,14 +525,15 @@ const compileTraitDispatchCall = ({
   };
 };
 
-const localSymbolForSymbolRef = (
-  ref: SymbolRef,
+const localSymbolForProgramSymbolId = (
+  symbolId: ProgramSymbolId,
   ctx: CodegenContext
 ): SymbolId | undefined => {
+  const ref = ctx.program.symbols.refOf(symbolId);
   if (ref.moduleId === ctx.moduleId) {
     return ref.symbol;
   }
-  return ctx.program.imports.getLocal(ctx.moduleId, ref);
+  return ctx.program.imports.getLocal(ctx.moduleId, symbolId);
 };
 
 const emitResolvedCall = (
@@ -638,7 +633,8 @@ const compileCallArgumentsForParams = (
     const callee = ctx.module.hir.expressions.get(call.callee);
     if (!callee) return "<unknown>";
     if (callee.exprKind === "identifier") {
-      return ctx.program.symbols.getLocalName(ctx.moduleId, callee.symbol) ?? `${callee.symbol}`;
+      const calleeId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: callee.symbol });
+      return ctx.program.symbols.getName(calleeId) ?? `${callee.symbol}`;
     }
     if (callee.exprKind === "overload-set") {
       return callee.name;

@@ -7,9 +7,9 @@ import {
 import type { ModuleExportTable } from "./modules.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
 import type { MonomorphizedInstanceRequest } from "./codegen-view/index.js";
-import type { SymbolRef } from "./typing/symbol-ref.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import type { HirExprId, SymbolId, TypeId } from "./ids.js";
+import { buildProgramSymbolArena, type SymbolRef } from "./program-symbol-arena.js";
 
 export const monomorphizeProgram = ({
   modules,
@@ -38,6 +38,49 @@ export const monomorphizeProgram = ({
     }
   >;
 } => {
+  const stableModules = [...modules].sort((a, b) =>
+    a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true })
+  );
+  const programSymbols = buildProgramSymbolArena(stableModules);
+
+  const importTargetsByModule = new Map<string, Map<SymbolId, SymbolRef>>();
+  stableModules.forEach((mod) => {
+    const byLocal = new Map<SymbolId, SymbolRef>();
+    mod.binding.imports.forEach((imp) => {
+      if (!imp.target) return;
+      byLocal.set(imp.local, { moduleId: imp.target.moduleId, symbol: imp.target.symbol });
+    });
+    importTargetsByModule.set(mod.moduleId, byLocal);
+  });
+
+  const getOrCreateSet = <K, V>(map: Map<K, Set<V>>, key: K, create: () => Set<V>): Set<V> => {
+    const existing = map.get(key);
+    if (existing) return existing;
+    const next = create();
+    map.set(key, next);
+    return next;
+  };
+
+  const resolveImportTarget = (ref: SymbolRef): SymbolRef | undefined =>
+    importTargetsByModule.get(ref.moduleId)?.get(ref.symbol);
+
+  const resolveCanonicalSymbolRef = (ref: SymbolRef): SymbolRef => {
+    let current = ref;
+    const visitedByModule = new Map<string, Set<SymbolId>>();
+    while (true) {
+      const next = resolveImportTarget(current);
+      if (!next) {
+        return current;
+      }
+      const visited = getOrCreateSet(visitedByModule, current.moduleId, () => new Set());
+      if (visited.has(current.symbol)) {
+        return current;
+      }
+      visited.add(current.symbol);
+      current = next;
+    }
+  };
+
   const { moduleExports, dependencies } = buildDependencyIndex(semantics);
   const typingContexts = new Map<string, TypingContext>();
   const typingContextFor = createTypingContextFactory({
@@ -75,14 +118,18 @@ export const monomorphizeProgram = ({
         return;
       }
 
-      const callee = semantics.get(importModuleId);
+      const canonicalCallee = resolveCanonicalSymbolRef({
+        moduleId: importModuleId,
+        symbol: importSymbol,
+      });
+      const callee = semantics.get(canonicalCallee.moduleId);
       const calleeCtx = callee ? typingContextFor(callee.moduleId) : undefined;
       if (!callee || !calleeCtx) {
         return;
       }
 
       const calleeSignature =
-        callee.typing.functions.getSignature(importSymbol);
+        callee.typing.functions.getSignature(canonicalCallee.symbol);
       const typeParams = calleeSignature?.typeParams ?? [];
       if (!calleeSignature || typeParams.length === 0) {
         return;
@@ -97,10 +144,7 @@ export const monomorphizeProgram = ({
         }
 
         requestedInstances.push({
-          callee: {
-            moduleId: importModuleId,
-            symbol: importSymbol,
-          } satisfies SymbolRef,
+          callee: programSymbols.idOf(canonicalCallee),
           typeArgs,
         });
 
@@ -110,13 +154,13 @@ export const monomorphizeProgram = ({
           )
         );
         typeGenericFunctionBody({
-          symbol: importSymbol,
+          symbol: canonicalCallee.symbol,
           signature: calleeSignature,
           substitution,
           ctx: calleeCtx,
           state: createTypingState("relaxed"),
         });
-        touchedModules.add(importModuleId);
+        touchedModules.add(canonicalCallee.moduleId);
       });
     });
   });
@@ -132,16 +176,11 @@ export const monomorphizeProgram = ({
   };
 
   const instanceRequests = new Map<
-    string,
-    Map<SymbolId, Map<string, MonomorphizedInstanceRequest>>
+    MonomorphizedInstanceRequest["callee"],
+    Map<string, MonomorphizedInstanceRequest>
   >();
   requestedInstances.forEach((info) => {
-    const bySymbol = getOrCreateMap(
-      instanceRequests,
-      info.callee.moduleId,
-      () => new Map()
-    );
-    const byArgs = getOrCreateMap(bySymbol, info.callee.symbol, () => new Map());
+    const byArgs = getOrCreateMap(instanceRequests, info.callee, () => new Map());
     const key = info.typeArgs.join(",");
     if (!byArgs.has(key)) {
       byArgs.set(key, info);
@@ -149,23 +188,12 @@ export const monomorphizeProgram = ({
   });
 
   const instances = Array.from(instanceRequests.entries())
-    .flatMap(([, bySymbol]) =>
-      Array.from(bySymbol.values()).flatMap((byArgs) => Array.from(byArgs.values()))
-    )
+    .flatMap(([, byArgs]) => Array.from(byArgs.values()))
     .sort((a, b) => {
-    const modOrder = a.callee.moduleId.localeCompare(
-      b.callee.moduleId,
-      undefined,
-      {
+      if (a.callee !== b.callee) return a.callee - b.callee;
+      return a.typeArgs.join(",").localeCompare(b.typeArgs.join(","), undefined, {
         numeric: true,
-      }
-    );
-    if (modOrder !== 0) return modOrder;
-    if (a.callee.symbol !== b.callee.symbol)
-      return a.callee.symbol - b.callee.symbol;
-    return a.typeArgs.join(",").localeCompare(b.typeArgs.join(","), undefined, {
-      numeric: true,
-    });
+      });
     });
 
   const moduleTyping = new Map<
