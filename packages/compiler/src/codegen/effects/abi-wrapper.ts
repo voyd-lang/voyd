@@ -28,8 +28,8 @@ export const emitPureSurfaceWrapper = (params: {
     locals: [] as binaryen.Type[],
     nextLocalIndex: wrapperParamTypes.length,
     returnTypeId: ctx.program.primitives.unknown,
-    instanceKey: undefined,
-    typeInstanceKey: undefined,
+    instanceId: undefined,
+    typeInstanceId: undefined,
     effectful: false,
   };
 

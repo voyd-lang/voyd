@@ -17,12 +17,9 @@ import {
 } from "../functions.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
-import {
-  buildProgramCodegenView,
-  type InstanceKey,
-} from "../../semantics/codegen-view/index.js";
+import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
-import type { TypeId } from "../../semantics/ids.js";
+import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
 import type {
   CodegenContext,
   FunctionMetadata,
@@ -85,7 +82,7 @@ const buildCodegenProgram = (
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, Map<number, FunctionMetadata[]>>();
-  const functionInstances = new Map<InstanceKey, FunctionMetadata>();
+  const functionInstances = new Map<ProgramFunctionInstanceId, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const runtimeTypeIdsByKey = new Map<string, number>();
@@ -551,7 +548,7 @@ describe("next codegen", () => {
     expect(
       typeLines.some(
         (line) =>
-          line.includes("__lambda_env_12_1") && line.includes("(mut i32")
+          line.includes("__lambda_env_12_") && line.includes("(mut i32")
       )
     ).toBe(true);
     const callRefs = text

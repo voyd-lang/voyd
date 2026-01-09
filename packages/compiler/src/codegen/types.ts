@@ -24,6 +24,7 @@ import type {
 } from "./context.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
 import type { CodegenTraitImplInstance, SymbolRef } from "../semantics/codegen-view/index.js";
+import type { ProgramFunctionInstanceId } from "../semantics/ids.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -425,25 +426,21 @@ export const getSymbolTypeId = (
 const getInstanceExprType = (
   exprId: HirExprId,
   ctx: CodegenContext,
-  instanceKey?: string
+  instanceId?: ProgramFunctionInstanceId
 ): TypeId | undefined => {
-  if (!instanceKey) {
+  if (typeof instanceId !== "number") {
     return undefined;
   }
-  const instanceType = ctx.program.functions.getInstanceExprType(
-    ctx.moduleId,
-    instanceKey,
-    exprId
-  );
+  const instanceType = ctx.program.functions.getInstanceExprType(instanceId, exprId);
   return typeof instanceType === "number" ? instanceType : undefined;
 };
 
 export const getRequiredExprType = (
   exprId: HirExprId,
   ctx: CodegenContext,
-  instanceKey?: string
+  instanceId?: ProgramFunctionInstanceId
 ): TypeId => {
-  const instanceType = getInstanceExprType(exprId, ctx, instanceKey);
+  const instanceType = getInstanceExprType(exprId, ctx, instanceId);
   if (typeof instanceType === "number") {
     return instanceType;
   }
@@ -461,9 +458,9 @@ export const getRequiredExprType = (
 export const getExprBinaryenType = (
   exprId: HirExprId,
   ctx: CodegenContext,
-  instanceKey?: string
+  instanceId?: ProgramFunctionInstanceId
 ): binaryen.Type => {
-  const instanceType = getInstanceExprType(exprId, ctx, instanceKey);
+  const instanceType = getInstanceExprType(exprId, ctx, instanceId);
   if (typeof instanceType === "number") {
     return wasmTypeFor(instanceType, ctx);
   }

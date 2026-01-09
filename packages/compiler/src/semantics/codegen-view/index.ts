@@ -4,6 +4,8 @@ import type { EffectTable } from "../effects/effect-table.js";
 import type {
   HirExprId,
   NodeId,
+  ProgramFunctionId,
+  ProgramFunctionInstanceId,
   SymbolId,
   TypeId,
   TypeParamId,
@@ -114,16 +116,10 @@ export type StructuralLayout =
   | { kind: "other"; kindName: CodegenTypeDesc["kind"] };
 
 export type CallLoweringInfo = {
-  targets?: ReadonlyMap<string, SymbolId>;
+  targets?: ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>;
   typeArgs?: readonly TypeId[];
-  instanceKey?: string;
   traitDispatch: boolean;
 };
-
-export type InstanceKey = string & { readonly __brand: "InstanceKey" };
-
-export const makeInstanceKey = (moduleId: string, localKey: string): InstanceKey =>
-  `${moduleId}::${localKey}` as InstanceKey;
 
 export type CodegenFunctionSignature = {
   typeId: TypeId;
@@ -150,8 +146,24 @@ export type FunctionLoweringIndex = {
   getInstantiationInfo(
     moduleId: string,
     symbol: SymbolId
-  ): ReadonlyMap<string, readonly TypeId[]> | undefined;
-  getInstanceExprType(moduleId: string, key: string, expr: HirExprId): TypeId | undefined;
+  ): ReadonlyMap<ProgramFunctionInstanceId, readonly TypeId[]> | undefined;
+  getInstanceExprType(
+    instanceId: ProgramFunctionInstanceId,
+    expr: HirExprId
+  ): TypeId | undefined;
+  getFunctionId(ref: SymbolRef): ProgramFunctionId | undefined;
+  getInstanceId(
+    moduleId: string,
+    symbol: SymbolId,
+    typeArgs: readonly TypeId[] | undefined
+  ): ProgramFunctionInstanceId | undefined;
+  getFunctionRef(functionId: ProgramFunctionId): SymbolRef | undefined;
+  getInstance(instanceId: ProgramFunctionInstanceId): {
+    functionId: ProgramFunctionId;
+    typeArgs: readonly TypeId[];
+    symbolRef: SymbolRef;
+  };
+  formatInstance(instanceId: ProgramFunctionInstanceId): string;
 };
 
 export type ModuleTypeIndex = {
@@ -164,7 +176,12 @@ export type ModuleTypeIndex = {
 export type MonomorphizedInstanceInfo = {
   callee: SymbolRef;
   typeArgs: readonly TypeId[];
-  instanceKey: InstanceKey;
+  instanceId: ProgramFunctionInstanceId;
+};
+
+export type MonomorphizedInstanceRequest = {
+  callee: SymbolRef;
+  typeArgs: readonly TypeId[];
 };
 
 export type TypeLoweringIndex = {
@@ -214,7 +231,7 @@ export type CallLoweringIndex = {
 
 export type MonomorphizedInstanceIndex = {
   getAll(): readonly MonomorphizedInstanceInfo[];
-  getByKey(instanceKey: InstanceKey): MonomorphizedInstanceInfo | undefined;
+  getById(instanceId: ProgramFunctionInstanceId): MonomorphizedInstanceInfo | undefined;
 };
 
 export type ModuleCodegenMetadata = {
@@ -321,12 +338,16 @@ export type CodegenTraitImplInstance = {
 export const buildProgramCodegenView = (
   modules: readonly SemanticsPipelineResult[],
   options?: {
-    instances?: readonly MonomorphizedInstanceInfo[];
+    instances?: readonly MonomorphizedInstanceRequest[];
     moduleTyping?: ReadonlyMap<
       string,
       {
         functionInstantiationInfo: ReadonlyMap<SymbolId, ReadonlyMap<string, readonly TypeId[]>>;
         functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+        callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolId>>;
+        callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
+        callInstanceKeys: ReadonlyMap<HirExprId, string>;
+        callTraitDispatches: ReadonlySet<HirExprId>;
         valueTypes: ReadonlyMap<SymbolId, TypeId>;
       }
     >;
@@ -344,27 +365,47 @@ export const buildProgramCodegenView = (
   const arena = first.typing.arena;
   const effectsInterner: EffectInterner = first.typing.effects;
 
-  const objectTemplateByOwner = new Map<string, CodegenObjectTemplate>();
+  const objectTemplateByOwner = new Map<string, Map<SymbolId, CodegenObjectTemplate>>();
   const objectInfoByNominal = new Map<TypeId, CodegenObjectTypeInfo>();
   const nominalOwnerByNominal = new Map<TypeId, SymbolRef>();
-  const nominalsByOwner = new Map<string, TypeId[]>();
+  const nominalsByOwner = new Map<string, Map<SymbolId, TypeId[]>>();
 
   const traitImplsByNominal = new Map<TypeId, CodegenTraitImplInstance[]>();
   const traitImplsByTrait = new Map<SymbolId, CodegenTraitImplInstance[]>();
   const traitMethodImpls = new Map<SymbolId, CodegenTraitMethodImpl>();
 
-  const callsByModule = new Map<
+  const callsByModuleRaw = new Map<
     string,
     {
       targets: Map<HirExprId, ReadonlyMap<string, SymbolId>>;
       typeArgs: Map<HirExprId, readonly TypeId[]>;
-      instanceKeys: Map<HirExprId, string>;
+      traitDispatches: Set<HirExprId>;
+    }
+  >();
+  const callsByModule = new Map<
+    string,
+    {
+      targets: Map<HirExprId, ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>>;
+      typeArgs: Map<HirExprId, readonly TypeId[]>;
       traitDispatches: Set<HirExprId>;
     }
   >();
 
   const allInstances: MonomorphizedInstanceInfo[] = [];
-  const instanceByKey = new Map<string, MonomorphizedInstanceInfo>();
+  const instanceById = new Map<ProgramFunctionInstanceId, MonomorphizedInstanceInfo>();
+  const instanceInfoById: {
+    functionId: ProgramFunctionId;
+    typeArgs: readonly TypeId[];
+    symbolRef: SymbolRef;
+  }[] = [];
+  const instanceIdsByFunctionId = new Map<
+    ProgramFunctionId,
+    Map<string, ProgramFunctionInstanceId>
+  >();
+  const instantiationInfoByFunctionId = new Map<
+    ProgramFunctionId,
+    Map<ProgramFunctionInstanceId, readonly TypeId[]>
+  >();
 
   const stableModules = [...modules].sort((a, b) =>
     a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true })
@@ -372,9 +413,13 @@ export const buildProgramCodegenView = (
 
   const moduleMetaById = new Map<string, ModuleCodegenMetadata>();
   const importTargetsByModule = new Map<string, Map<SymbolId, SymbolRef>>();
-  const importLocalsByModule = new Map<string, Map<string, SymbolId>>();
+  const importLocalsByModule = new Map<
+    string,
+    Map<string, Map<SymbolId, SymbolId>>
+  >();
 
-  const symbolRefKey = (ref: SymbolRef): string => `${ref.moduleId}::${ref.symbol}`;
+  const functionRefById: SymbolRef[] = [];
+  const functionIdByModuleAndSymbol = new Map<string, Map<SymbolId, ProgramFunctionId>>();
 
   const toSymbolRef = (ref: TypingSymbolRef): SymbolRef => ({
     moduleId: ref.moduleId,
@@ -384,6 +429,55 @@ export const buildProgramCodegenView = (
   const typeDescCache = new Map<TypeId, CodegenTypeDesc>();
   const schemeCache = new Map<TypeSchemeId, CodegenTypeScheme>();
   const traitImplCache = new Map<string, CodegenTraitImplInstance>();
+
+  const normalizeCallerInstanceKey = (key: string): string => {
+    const lambdaIndex = key.indexOf("::lambda");
+    return lambdaIndex >= 0 ? key.slice(0, lambdaIndex) : key;
+  };
+
+  const parseFunctionInstanceKey = (
+    key: string
+  ): { symbol: SymbolId; typeArgs: TypeId[] } | undefined => {
+    const match = key.match(/^(\d+)<(.*)>$/);
+    if (!match) return undefined;
+    const symbol = Number(match[1]);
+    if (!Number.isFinite(symbol)) return undefined;
+    const argsSegment = match[2] ?? "";
+    const typeArgs =
+      argsSegment.length === 0
+        ? []
+        : argsSegment.split(",").map((value) => Number(value));
+    if (typeArgs.some((arg) => !Number.isFinite(arg))) {
+      return undefined;
+    }
+    return { symbol, typeArgs };
+  };
+
+  const compareTypeArgs = (left: readonly TypeId[], right: readonly TypeId[]): number => {
+    const length = Math.min(left.length, right.length);
+    for (let index = 0; index < length; index += 1) {
+      const diff = left[index]! - right[index]!;
+      if (diff !== 0) return diff;
+    }
+    return left.length - right.length;
+  };
+
+  const instantiationsByFunctionId = new Map<
+    ProgramFunctionId,
+    Map<string, readonly TypeId[]>
+  >();
+
+  const recordInstantiation = (
+    functionId: ProgramFunctionId,
+    typeArgs: readonly TypeId[]
+  ): void => {
+    const key = typeArgs.join(",");
+    const bucket = instantiationsByFunctionId.get(functionId) ?? new Map();
+    if (!bucket.has(key)) {
+      bucket.set(key, [...typeArgs]);
+    }
+    instantiationsByFunctionId.set(functionId, bucket);
+  };
 
   const toCodegenStructuralField = (field: StructuralField): CodegenStructuralField => ({
     name: field.name,
@@ -542,16 +636,30 @@ export const buildProgramCodegenView = (
     traitImpls: info.traitImpls?.map(toCodegenTraitImplInstance),
   });
 
+  const getOrCreateMap = <K, V>(map: Map<K, V>, key: K, create: () => V): V => {
+    const existing = map.get(key);
+    if (existing) {
+      return existing;
+    }
+    const next = create();
+    map.set(key, next);
+    return next;
+  };
+
   stableModules.forEach((mod) => {
     const importsByLocal = new Map<SymbolId, SymbolRef>();
-    const localsByTarget = new Map<string, SymbolId>();
+    const localsByTarget = new Map<string, Map<SymbolId, SymbolId>>();
     mod.binding.imports.forEach((imp) => {
       if (!imp.target) return;
       const target = { moduleId: imp.target.moduleId, symbol: imp.target.symbol };
       importsByLocal.set(imp.local, target);
-      const targetKey = symbolRefKey(target);
-      if (!localsByTarget.has(targetKey)) {
-        localsByTarget.set(targetKey, imp.local);
+      const byModule = getOrCreateMap(
+        localsByTarget,
+        target.moduleId,
+        () => new Map<SymbolId, SymbolId>()
+      );
+      if (!byModule.has(target.symbol)) {
+        byModule.set(target.symbol, imp.local);
       }
     });
 
@@ -580,7 +688,12 @@ export const buildProgramCodegenView = (
 
     for (const template of mod.typing.objects.templates()) {
       const owner: SymbolRef = { moduleId: mod.moduleId, symbol: template.symbol };
-      objectTemplateByOwner.set(symbolRefKey(owner), toCodegenObjectTemplate(template));
+      const bySymbol = getOrCreateMap(
+        objectTemplateByOwner,
+        owner.moduleId,
+        () => new Map<SymbolId, CodegenObjectTemplate>()
+      );
+      bySymbol.set(owner.symbol, toCodegenObjectTemplate(template));
     }
 
     mod.typing.objectsByNominal.forEach((info, nominal) => {
@@ -590,10 +703,15 @@ export const buildProgramCodegenView = (
         return;
       }
       nominalOwnerByNominal.set(nominal, toSymbolRef(desc.owner));
-      const ownerKey = symbolRefKey(toSymbolRef(desc.owner));
-      const bucket = nominalsByOwner.get(ownerKey) ?? [];
+      const owner = toSymbolRef(desc.owner);
+      const bySymbol = getOrCreateMap(
+        nominalsByOwner,
+        owner.moduleId,
+        () => new Map<SymbolId, TypeId[]>()
+      );
+      const bucket = bySymbol.get(owner.symbol) ?? [];
       bucket.push(nominal);
-      nominalsByOwner.set(ownerKey, bucket);
+      bySymbol.set(owner.symbol, bucket);
     });
 
     const implsByNominal = mod.typing.traitImplsByNominal;
@@ -616,29 +734,278 @@ export const buildProgramCodegenView = (
       traitMethodImpls.set(symbol, toCodegenTraitMethodImpl(info));
     });
 
-    callsByModule.set(mod.moduleId, {
+    const callSource = moduleTyping.get(mod.moduleId);
+    callsByModuleRaw.set(mod.moduleId, {
       targets: new Map(
-        Array.from(mod.typing.callTargets.entries()).map(([exprId, targets]) => [
+        Array.from((callSource?.callTargets ?? mod.typing.callTargets).entries()).map(
+          ([exprId, targets]) => [
           exprId,
           new Map(targets),
-        ])
+          ]
+        )
       ),
-      typeArgs: new Map(mod.typing.callTypeArguments),
-      instanceKeys: new Map(mod.typing.callInstanceKeys),
-      traitDispatches: new Set(mod.typing.callTraitDispatches),
+      typeArgs: new Map(callSource?.callTypeArguments ?? mod.typing.callTypeArguments),
+      traitDispatches: new Set(
+        callSource?.callTraitDispatches ?? mod.typing.callTraitDispatches
+      ),
     });
 
     // Instances come from the explicit monomorphization pass when available.
   });
 
-  (options?.instances ?? []).forEach((info) => {
-    allInstances.push(info);
-    instanceByKey.set(info.instanceKey, info);
+  const resolveImportTarget = (ref: SymbolRef): SymbolRef | undefined =>
+    importTargetsByModule.get(ref.moduleId)?.get(ref.symbol);
+
+  const resolveCanonicalFunctionRef = (ref: SymbolRef): SymbolRef => {
+    let current = ref;
+    const visitedByModule = new Map<string, Set<SymbolId>>();
+    // Resolve through imports so imported functions share a single ProgramFunctionId.
+    while (true) {
+      const next = resolveImportTarget(current);
+      if (!next) {
+        return current;
+      }
+      const visited = getOrCreateMap(visitedByModule, current.moduleId, () => new Set());
+      if (visited.has(current.symbol)) {
+        return current;
+      }
+      visited.add(current.symbol);
+      current = next;
+    }
+  };
+
+  const stableFunctionRefs: SymbolRef[] = [];
+  const seenFunctionRefs = new Map<string, Set<SymbolId>>();
+  stableModules.forEach((mod) => {
+    const functionSymbols = Array.from(mod.typing.functions.signatures, ([symbol]) => symbol).sort(
+      (a, b) => a - b
+    );
+    functionSymbols.forEach((symbol) => {
+      const canonical = resolveCanonicalFunctionRef({ moduleId: mod.moduleId, symbol });
+      const seen = getOrCreateMap(seenFunctionRefs, canonical.moduleId, () => new Set());
+      if (seen.has(canonical.symbol)) {
+        return;
+      }
+      seen.add(canonical.symbol);
+      stableFunctionRefs.push(canonical);
+    });
   });
 
-  nominalsByOwner.forEach((bucket, ownerKey) => {
-    bucket.sort((a, b) => a - b);
-    nominalsByOwner.set(ownerKey, bucket);
+  stableFunctionRefs.sort((a, b) => {
+    const modOrder = a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true });
+    if (modOrder !== 0) return modOrder;
+    return a.symbol - b.symbol;
+  });
+
+  stableFunctionRefs.forEach((ref, index) => {
+    const id = index as ProgramFunctionId;
+    const bySymbol = getOrCreateMap(
+      functionIdByModuleAndSymbol,
+      ref.moduleId,
+      () => new Map<SymbolId, ProgramFunctionId>()
+    );
+    bySymbol.set(ref.symbol, id);
+    functionRefById[id] = ref;
+  });
+
+  const getProgramFunctionId = (ref: SymbolRef): ProgramFunctionId | undefined => {
+    const canonical = resolveCanonicalFunctionRef(ref);
+    return functionIdByModuleAndSymbol.get(canonical.moduleId)?.get(canonical.symbol);
+  };
+
+  const recordInstanceKey = (moduleId: string, key: string): void => {
+    const normalized = normalizeCallerInstanceKey(key);
+    const parsed = parseFunctionInstanceKey(normalized);
+    if (!parsed) return;
+    const functionId = getProgramFunctionId({ moduleId, symbol: parsed.symbol });
+    if (functionId === undefined) return;
+    recordInstantiation(functionId, parsed.typeArgs);
+  };
+
+  stableModules.forEach((mod) => {
+    const functionSymbols = Array.from(mod.typing.functions.signatures, ([symbol]) => symbol).sort(
+      (a, b) => a - b
+    );
+    functionSymbols.forEach((symbol) => {
+      const signature = mod.typing.functions.getSignature(symbol);
+      const typeParamCount = signature?.typeParams?.length ?? 0;
+      const functionId = getProgramFunctionId({ moduleId: mod.moduleId, symbol });
+      if (functionId === undefined) {
+        return;
+      }
+      const instantiationSources = [
+        moduleTyping.get(mod.moduleId)?.functionInstantiationInfo.get(symbol),
+        mod.typing.functionInstantiationInfo.get(symbol),
+      ];
+      instantiationSources.forEach((info) => {
+        info?.forEach((typeArgs) => {
+          recordInstantiation(functionId, typeArgs);
+        });
+      });
+      if (typeParamCount === 0) {
+        recordInstantiation(functionId, []);
+      }
+    });
+
+    const instanceExprSources = [
+      moduleTyping.get(mod.moduleId)?.functionInstanceExprTypes,
+      mod.typing.functionInstanceExprTypes,
+    ];
+    instanceExprSources.forEach((instanceExprTypes) => {
+      instanceExprTypes?.forEach((_exprTypes, instanceKey) => {
+        recordInstanceKey(mod.moduleId, instanceKey);
+      });
+    });
+
+    const callTargetsSources = [
+      moduleTyping.get(mod.moduleId)?.callTargets,
+      mod.typing.callTargets,
+    ];
+    callTargetsSources.forEach((callTargets) => {
+      callTargets?.forEach((targets) => {
+        targets.forEach((_targetSymbol, instanceKey) => {
+          recordInstanceKey(mod.moduleId, instanceKey);
+        });
+      });
+    });
+  });
+
+  const getInstanceIdForFunctionAndArgs = (
+    functionId: ProgramFunctionId,
+    typeArgs: readonly TypeId[]
+  ): ProgramFunctionInstanceId | undefined =>
+    instanceIdsByFunctionId.get(functionId)?.get(typeArgs.join(","));
+
+  const getProgramFunctionInstanceId = (
+    ref: SymbolRef,
+    typeArgs: readonly TypeId[]
+  ): ProgramFunctionInstanceId | undefined => {
+    const functionId = getProgramFunctionId(ref);
+    if (functionId === undefined) {
+      return undefined;
+    }
+    return getInstanceIdForFunctionAndArgs(functionId, typeArgs);
+  };
+
+  let nextInstanceId = 0;
+  functionRefById.forEach((ref, functionId) => {
+    if (!ref) return;
+    const instantiations = instantiationsByFunctionId.get(functionId as ProgramFunctionId);
+    if (!instantiations || instantiations.size === 0) {
+      return;
+    }
+    const sorted = Array.from(instantiations.values()).sort(compareTypeArgs);
+    const idsByArgs = getOrCreateMap(
+      instanceIdsByFunctionId,
+      functionId as ProgramFunctionId,
+      () => new Map<string, ProgramFunctionInstanceId>()
+    );
+    const instantiationInfo = getOrCreateMap(
+      instantiationInfoByFunctionId,
+      functionId as ProgramFunctionId,
+      () => new Map<ProgramFunctionInstanceId, readonly TypeId[]>()
+    );
+    sorted.forEach((typeArgs) => {
+      const instanceId = nextInstanceId as ProgramFunctionInstanceId;
+      nextInstanceId += 1;
+      idsByArgs.set(typeArgs.join(","), instanceId);
+      instantiationInfo.set(instanceId, typeArgs);
+      instanceInfoById[instanceId] = {
+        functionId: functionId as ProgramFunctionId,
+        typeArgs,
+        symbolRef: ref,
+      };
+    });
+  });
+
+  const instanceExprTypesById = new Map<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<HirExprId, TypeId>
+  >();
+
+  stableModules.forEach((mod) => {
+    const instanceExprSources = [
+      moduleTyping.get(mod.moduleId)?.functionInstanceExprTypes,
+      mod.typing.functionInstanceExprTypes,
+    ];
+    instanceExprSources.forEach((instanceExprTypes) => {
+      instanceExprTypes?.forEach((exprTypes, instanceKey) => {
+        const normalized = normalizeCallerInstanceKey(instanceKey);
+        const parsed = parseFunctionInstanceKey(normalized);
+        if (!parsed) {
+          return;
+        }
+        const instanceId = getProgramFunctionInstanceId(
+          { moduleId: mod.moduleId, symbol: parsed.symbol },
+          parsed.typeArgs
+        );
+        if (instanceId === undefined) {
+          return;
+        }
+        if (!instanceExprTypesById.has(instanceId)) {
+          instanceExprTypesById.set(instanceId, new Map(exprTypes));
+        }
+      });
+    });
+  });
+
+  const getCallerInstanceId = (
+    moduleId: string,
+    key: string
+  ): ProgramFunctionInstanceId | undefined => {
+    const normalized = normalizeCallerInstanceKey(key);
+    const parsed = parseFunctionInstanceKey(normalized);
+    if (!parsed) return undefined;
+    return getProgramFunctionInstanceId(
+      { moduleId, symbol: parsed.symbol },
+      parsed.typeArgs
+    );
+  };
+
+  callsByModuleRaw.forEach((data, moduleId) => {
+    const mappedTargets = new Map<
+      HirExprId,
+      ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>
+    >();
+    data.targets.forEach((targets, exprId) => {
+      const mapped = new Map<ProgramFunctionInstanceId, ProgramFunctionId>();
+      targets.forEach((targetSymbol, instanceKey) => {
+        const callerInstanceId = getCallerInstanceId(moduleId, instanceKey);
+        const targetFunctionId = getProgramFunctionId({ moduleId, symbol: targetSymbol });
+        if (callerInstanceId === undefined || targetFunctionId === undefined) {
+          return;
+        }
+        mapped.set(callerInstanceId, targetFunctionId);
+      });
+      mappedTargets.set(exprId, mapped);
+    });
+
+    callsByModule.set(moduleId, {
+      targets: mappedTargets,
+      typeArgs: new Map(data.typeArgs),
+      traitDispatches: new Set(data.traitDispatches),
+    });
+  });
+
+  (options?.instances ?? []).forEach((info) => {
+    const instanceId = getProgramFunctionInstanceId(info.callee, info.typeArgs);
+    if (instanceId === undefined) {
+      return;
+    }
+    const data: MonomorphizedInstanceInfo = {
+      callee: info.callee,
+      typeArgs: info.typeArgs,
+      instanceId,
+    };
+    allInstances.push(data);
+    instanceById.set(instanceId, data);
+  });
+
+  nominalsByOwner.forEach((bySymbol) => {
+    bySymbol.forEach((bucket, symbol) => {
+      bucket.sort((a, b) => a - b);
+      bySymbol.set(symbol, bucket);
+    });
   });
 
   traitImplsByNominal.forEach((bucket, nominal) => {
@@ -651,14 +1018,7 @@ export const buildProgramCodegenView = (
     traitImplsByTrait.set(symbol, bucket);
   });
 
-  allInstances.sort((a, b) => {
-    const modOrder = a.callee.moduleId.localeCompare(b.callee.moduleId, undefined, {
-      numeric: true,
-    });
-    if (modOrder !== 0) return modOrder;
-    if (a.callee.symbol !== b.callee.symbol) return a.callee.symbol - b.callee.symbol;
-    return a.instanceKey.localeCompare(b.instanceKey, undefined, { numeric: true });
-  });
+  allInstances.sort((a, b) => a.instanceId - b.instanceId);
 
   const types: TypeLoweringIndex = {
     getTypeDesc: (typeId) => toCodegenTypeDesc(typeId, arena.get(typeId)),
@@ -758,11 +1118,11 @@ export const buildProgramCodegenView = (
   };
 
   const objects: ObjectLayoutIndex = {
-    getTemplate: (owner) => objectTemplateByOwner.get(symbolRefKey(owner)),
+    getTemplate: (owner) => objectTemplateByOwner.get(owner.moduleId)?.get(owner.symbol),
     getInfoByNominal: (nominal) => objectInfoByNominal.get(nominal),
     getNominalOwnerRef: (nominal) => nominalOwnerByNominal.get(nominal),
     getNominalInstancesByOwner: (owner) =>
-      nominalsByOwner.get(symbolRefKey(owner)) ?? [],
+      nominalsByOwner.get(owner.moduleId)?.get(owner.symbol) ?? [],
   };
 
   const traits: TraitDispatchIndex = {
@@ -780,7 +1140,6 @@ export const buildProgramCodegenView = (
       return {
         targets: data.targets.get(expr),
         typeArgs: data.typeArgs.get(expr),
-        instanceKey: data.instanceKeys.get(expr),
         traitDispatch: data.traitDispatches.has(expr),
       };
     },
@@ -811,17 +1170,47 @@ export const buildProgramCodegenView = (
         })),
       };
     },
-    getInstantiationInfo: (moduleId, symbol) =>
-      moduleTyping.get(moduleId)?.functionInstantiationInfo.get(symbol) ??
-      modulesById.get(moduleId)?.typing.functionInstantiationInfo.get(symbol),
-    getInstanceExprType: (moduleId, key, expr) =>
-      moduleTyping.get(moduleId)?.functionInstanceExprTypes.get(key)?.get(expr) ??
-      modulesById.get(moduleId)?.typing.functionInstanceExprTypes.get(key)?.get(expr),
+    getInstantiationInfo: (moduleId, symbol) => {
+      const functionId = getProgramFunctionId({ moduleId, symbol });
+      return typeof functionId === "number"
+        ? instantiationInfoByFunctionId.get(functionId)
+        : undefined;
+    },
+    getInstanceExprType: (instanceId, expr) =>
+      instanceExprTypesById.get(instanceId)?.get(expr),
+    getFunctionId: (ref) => getProgramFunctionId(ref),
+    getInstanceId: (moduleId, symbol, typeArgs) => {
+      if (!typeArgs) return undefined;
+      return getProgramFunctionInstanceId({ moduleId, symbol }, typeArgs);
+    },
+    getFunctionRef: (functionId) => functionRefById[functionId],
+    getInstance: (instanceId) => {
+      const info = instanceInfoById[instanceId];
+      if (!info) {
+        throw new Error(`unknown function instance ${instanceId}`);
+      }
+      return {
+        functionId: info.functionId,
+        typeArgs: info.typeArgs,
+        symbolRef: info.symbolRef,
+      };
+    },
+    formatInstance: (instanceId) => {
+      const info = instanceInfoById[instanceId];
+      if (!info) {
+        return `instance${instanceId}`;
+      }
+      const name =
+        symbols.getLocalName(info.symbolRef.moduleId, info.symbolRef.symbol) ??
+        `${info.symbolRef.symbol}`;
+      const args = info.typeArgs.length === 0 ? "" : info.typeArgs.join(",");
+      return `${info.symbolRef.moduleId}::${name}<${args}>`;
+    },
   };
 
   const instances: MonomorphizedInstanceIndex = {
     getAll: () => allInstances,
-    getByKey: (key) => instanceByKey.get(key),
+    getById: (instanceId) => instanceById.get(instanceId),
   };
 
   const effectGlobalIdsByModule = new Map<string, number[]>();
@@ -850,7 +1239,7 @@ export const buildProgramCodegenView = (
 
   const imports: ImportWiringIndex = {
     getLocal: (moduleId, target) =>
-      importLocalsByModule.get(moduleId)?.get(symbolRefKey(target)),
+      importLocalsByModule.get(moduleId)?.get(target.moduleId)?.get(target.symbol),
     getTarget: (moduleId, local) => importTargetsByModule.get(moduleId)?.get(local),
   };
 

@@ -2,12 +2,11 @@ import { DiagnosticEmitter } from "../diagnostics/index.js";
 import { createTypingState } from "./typing/context.js";
 import type { DependencySemantics, TypingContext } from "./typing/types.js";
 import {
-  formatFunctionInstanceKey,
   typeGenericFunctionBody,
 } from "./typing/expressions/call.js";
 import type { ModuleExportTable } from "./modules.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
-import { makeInstanceKey, type MonomorphizedInstanceInfo } from "./codegen-view/index.js";
+import type { MonomorphizedInstanceRequest } from "./codegen-view/index.js";
 import type { SymbolRef } from "./typing/symbol-ref.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import type { HirExprId, SymbolId, TypeId } from "./ids.js";
@@ -19,7 +18,7 @@ export const monomorphizeProgram = ({
   modules: readonly SemanticsPipelineResult[];
   semantics: Map<string, SemanticsPipelineResult>;
 }): {
-  instances: readonly MonomorphizedInstanceInfo[];
+  instances: readonly MonomorphizedInstanceRequest[];
   moduleTyping: ReadonlyMap<
     string,
     {
@@ -31,6 +30,10 @@ export const monomorphizeProgram = ({
         string,
         ReadonlyMap<HirExprId, TypeId>
       >;
+      callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolId>>;
+      callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
+      callInstanceKeys: ReadonlyMap<HirExprId, string>;
+      callTraitDispatches: ReadonlySet<HirExprId>;
       valueTypes: ReadonlyMap<SymbolId, TypeId>;
     }
   >;
@@ -46,7 +49,7 @@ export const monomorphizeProgram = ({
 
   const touchedModules = new Set<string>();
 
-  const requestedInstances: MonomorphizedInstanceInfo[] = [];
+  const requestedInstances: MonomorphizedInstanceRequest[] = [];
 
   modules.forEach((caller) => {
     const sortedLocalSymbols = Array.from(
@@ -99,10 +102,6 @@ export const monomorphizeProgram = ({
             symbol: importSymbol,
           } satisfies SymbolRef,
           typeArgs,
-          instanceKey: makeInstanceKey(
-            importModuleId,
-            formatFunctionInstanceKey(importSymbol, typeArgs)
-          ),
         });
 
         const substitution = new Map(
@@ -122,11 +121,38 @@ export const monomorphizeProgram = ({
     });
   });
 
-  const instanceByKey = new Map<string, MonomorphizedInstanceInfo>();
+  const getOrCreateMap = <K, V>(map: Map<K, V>, key: K, create: () => V): V => {
+    const existing = map.get(key);
+    if (existing) {
+      return existing;
+    }
+    const next = create();
+    map.set(key, next);
+    return next;
+  };
+
+  const instanceRequests = new Map<
+    string,
+    Map<SymbolId, Map<string, MonomorphizedInstanceRequest>>
+  >();
   requestedInstances.forEach((info) => {
-    instanceByKey.set(info.instanceKey, info);
+    const bySymbol = getOrCreateMap(
+      instanceRequests,
+      info.callee.moduleId,
+      () => new Map()
+    );
+    const byArgs = getOrCreateMap(bySymbol, info.callee.symbol, () => new Map());
+    const key = info.typeArgs.join(",");
+    if (!byArgs.has(key)) {
+      byArgs.set(key, info);
+    }
   });
-  const instances = Array.from(instanceByKey.values()).sort((a, b) => {
+
+  const instances = Array.from(instanceRequests.entries())
+    .flatMap(([, bySymbol]) =>
+      Array.from(bySymbol.values()).flatMap((byArgs) => Array.from(byArgs.values()))
+    )
+    .sort((a, b) => {
     const modOrder = a.callee.moduleId.localeCompare(
       b.callee.moduleId,
       undefined,
@@ -137,10 +163,10 @@ export const monomorphizeProgram = ({
     if (modOrder !== 0) return modOrder;
     if (a.callee.symbol !== b.callee.symbol)
       return a.callee.symbol - b.callee.symbol;
-    return a.instanceKey.localeCompare(b.instanceKey, undefined, {
+    return a.typeArgs.join(",").localeCompare(b.typeArgs.join(","), undefined, {
       numeric: true,
     });
-  });
+    });
 
   const moduleTyping = new Map<
     string,
@@ -153,6 +179,10 @@ export const monomorphizeProgram = ({
         string,
         ReadonlyMap<HirExprId, TypeId>
       >;
+      callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolId>>;
+      callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
+      callInstanceKeys: ReadonlyMap<HirExprId, string>;
+      callTraitDispatches: ReadonlySet<HirExprId>;
       valueTypes: ReadonlyMap<SymbolId, TypeId>;
     }
   >();
@@ -163,6 +193,15 @@ export const monomorphizeProgram = ({
     moduleTyping.set(moduleId, {
       functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
       functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
+      callTargets: new Map(
+        Array.from(ctx.callResolution.targets.entries()).map(([exprId, targets]) => [
+          exprId,
+          new Map(targets),
+        ])
+      ),
+      callTypeArguments: new Map(ctx.callResolution.typeArguments),
+      callInstanceKeys: new Map(ctx.callResolution.instanceKeys),
+      callTraitDispatches: new Set(ctx.callResolution.traitDispatches),
       valueTypes: new Map(ctx.valueTypes),
     });
   });

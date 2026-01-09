@@ -64,7 +64,7 @@ const compileContinuationBlockExpr = ({
     return compileBlockExpr(expr, ctx, fnCtx, compileExpr, tailPosition, expectedResultTypeId);
   }
 
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const statements: binaryen.ExpressionRef[] = [];
   let foundResume = false;
 
@@ -105,7 +105,7 @@ const compileContinuationBlockExpr = ({
 
   statements.push(valueExpr);
   return {
-    expr: ctx.mod.block(null, statements, getExprBinaryenType(expr.id, ctx, typeInstanceKey)),
+    expr: ctx.mod.block(null, statements, getExprBinaryenType(expr.id, ctx, typeInstanceId)),
     usedReturnCall,
   };
 };

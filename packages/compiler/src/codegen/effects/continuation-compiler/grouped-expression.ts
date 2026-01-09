@@ -95,7 +95,7 @@ const compileGroupedContinuationBlockExpr = ({
     );
   }
 
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const started = () => ctx.mod.local.get(startedLocal.index, startedLocal.type);
   const statements: binaryen.ExpressionRef[] = [];
 
@@ -141,7 +141,7 @@ const compileGroupedContinuationBlockExpr = ({
     expr: ctx.mod.block(
       null,
       statements,
-      getExprBinaryenType(expr.id, ctx, typeInstanceKey)
+      getExprBinaryenType(expr.id, ctx, typeInstanceId)
     ),
     usedReturnCall: value.usedReturnCall,
   };

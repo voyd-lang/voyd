@@ -6,6 +6,7 @@ import type {
   HirExprId,
   TypeId,
 } from "./context.js";
+import type { ProgramFunctionInstanceId } from "../semantics/ids.js";
 import {
   getExprBinaryenType,
   getRequiredExprType,
@@ -36,7 +37,7 @@ interface CompileIntrinsicCallParams {
   args: readonly binaryen.ExpressionRef[];
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-  instanceKey?: string;
+  instanceId?: ProgramFunctionInstanceId;
 }
 
 interface EmitNumericIntrinsicParams {
@@ -58,7 +59,7 @@ export const compileIntrinsicCall = ({
   args,
   ctx,
   fnCtx,
-  instanceKey,
+  instanceId,
 }: CompileIntrinsicCallParams): binaryen.ExpressionRef => {
   switch (name) {
     case "~": {
@@ -67,21 +68,21 @@ export const compileIntrinsicCall = ({
     }
     case "__array_new": {
       assertArgCount(name, args, 1);
-      const arrayType = getRequiredExprType(call.id, ctx, instanceKey);
+      const arrayType = getRequiredExprType(call.id, ctx, instanceId);
       const heapType = getFixedArrayHeapType(arrayType, ctx);
       const descriptor = getFixedArrayDescriptor(arrayType, ctx);
       const init = defaultValueForType(descriptor.element, ctx);
       return arrayNew(ctx.mod, heapType, args[0]!, init);
     }
     case "__array_new_fixed": {
-      const arrayType = getRequiredExprType(call.id, ctx, instanceKey);
+      const arrayType = getRequiredExprType(call.id, ctx, instanceId);
       const heapType = getFixedArrayHeapType(arrayType, ctx);
       return arrayNewFixed(ctx.mod, heapType, args as number[]);
     }
     case "__array_get": {
       if (args.length === 2) {
         const arrayType = getFixedArrayDescriptor(
-          getRequiredExprType(call.args[0]!.expr, ctx, instanceKey),
+          getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
           ctx
         );
         const elementType = wasmTypeFor(arrayType.element, ctx);
@@ -92,7 +93,7 @@ export const compileIntrinsicCall = ({
         call,
         ctx,
         index: 2,
-        instanceKey,
+        instanceId,
         name,
       });
       const signed = getBooleanLiteralArg({ name, call, ctx, index: 3 });
@@ -103,7 +104,7 @@ export const compileIntrinsicCall = ({
       const arrayType = getExprBinaryenType(
         call.args[0]!.expr,
         ctx,
-        instanceKey
+        instanceId
       );
       const temp = allocateTempLocal(arrayType, fnCtx);
       const target = ctx.mod.local.get(temp.index, arrayType);
@@ -114,7 +115,7 @@ export const compileIntrinsicCall = ({
           arraySet(ctx.mod, target, args[1]!, args[2]!),
           ctx.mod.local.get(temp.index, arrayType),
         ],
-        getExprBinaryenType(call.id, ctx, instanceKey)
+        getExprBinaryenType(call.id, ctx, instanceId)
       );
     }
     case "__array_len": {
@@ -128,14 +129,14 @@ export const compileIntrinsicCall = ({
           args,
           ctx,
           fnCtx,
-          instanceKey,
+          instanceId,
         });
       }
       assertArgCount(name, args, 5);
       const arrayType = getExprBinaryenType(
         call.args[0]!.expr,
         ctx,
-        instanceKey
+        instanceId
       );
       const temp = allocateTempLocal(arrayType, fnCtx);
       const target = ctx.mod.local.get(temp.index, arrayType);
@@ -146,12 +147,12 @@ export const compileIntrinsicCall = ({
           arrayCopy(ctx.mod, target, args[1]!, args[2]!, args[3]!, args[4]!),
           ctx.mod.local.get(temp.index, arrayType),
         ],
-        getExprBinaryenType(call.id, ctx, instanceKey)
+        getExprBinaryenType(call.id, ctx, instanceId)
       );
     }
     case "__type_to_heap_type": {
       assertArgCount(name, args, 1);
-      return getHeapTypeArg({ call, ctx, index: 0, instanceKey, name });
+      return getHeapTypeArg({ call, ctx, index: 0, instanceId, name });
     }
     case "+":
     case "-":
@@ -161,7 +162,7 @@ export const compileIntrinsicCall = ({
       const operandKind = requireHomogeneousNumericKind(
         call.args.map((a) => a.expr),
         ctx,
-        instanceKey
+        instanceId
       );
       return emitArithmeticIntrinsic({
         op: name,
@@ -178,7 +179,7 @@ export const compileIntrinsicCall = ({
       const operandKind = requireHomogeneousNumericKind(
         call.args.map((a) => a.expr),
         ctx,
-        instanceKey
+        instanceId
       );
       return emitComparisonIntrinsic({
         op: name,
@@ -193,7 +194,7 @@ export const compileIntrinsicCall = ({
       const operandKind = requireHomogeneousEqualityKind({
         argExprIds: call.args.map((a) => a.expr),
         ctx,
-        instanceKey,
+        instanceId,
       });
       return emitEqualityIntrinsic({ op: name, kind: operandKind, args, ctx });
     }
@@ -204,7 +205,7 @@ export const compileIntrinsicCall = ({
       requireBooleanKind({
         argExprIds: call.args.map((a) => a.expr),
         ctx,
-        instanceKey,
+        instanceId,
       });
       return emitBooleanBinaryIntrinsic({
         op: name,
@@ -217,7 +218,7 @@ export const compileIntrinsicCall = ({
       requireBooleanKind({
         argExprIds: call.args.map((a) => a.expr),
         ctx,
-        instanceKey,
+        instanceId,
       });
       return emitBooleanNotIntrinsic({ arg: args[0]!, ctx });
     }
@@ -417,18 +418,18 @@ const emitBooleanNotIntrinsic = ({
 const requireHomogeneousNumericKind = (
   argExprIds: readonly HirExprId[],
   ctx: CodegenContext,
-  instanceKey?: string
+  instanceId?: ProgramFunctionInstanceId
 ): NumericKind => {
   if (argExprIds.length === 0) {
     throw new Error("intrinsic requires at least one operand");
   }
   const firstKind = getNumericKind(
-    getRequiredExprType(argExprIds[0]!, ctx, instanceKey),
+    getRequiredExprType(argExprIds[0]!, ctx, instanceId),
     ctx
   );
   for (let i = 1; i < argExprIds.length; i += 1) {
     const nextKind = getNumericKind(
-      getRequiredExprType(argExprIds[i]!, ctx, instanceKey),
+      getRequiredExprType(argExprIds[i]!, ctx, instanceId),
       ctx
     );
     if (nextKind !== firstKind) {
@@ -441,22 +442,22 @@ const requireHomogeneousNumericKind = (
 const requireHomogeneousEqualityKind = ({
   argExprIds,
   ctx,
-  instanceKey,
+  instanceId,
 }: {
   argExprIds: readonly HirExprId[];
   ctx: CodegenContext;
-  instanceKey?: string;
+  instanceId?: ProgramFunctionInstanceId;
 }): EqualityKind => {
   if (argExprIds.length === 0) {
     throw new Error("intrinsic requires at least one operand");
   }
   const firstKind = getEqualityKind(
-    getRequiredExprType(argExprIds[0]!, ctx, instanceKey),
+    getRequiredExprType(argExprIds[0]!, ctx, instanceId),
     ctx
   );
   for (let i = 1; i < argExprIds.length; i += 1) {
     const nextKind = getEqualityKind(
-      getRequiredExprType(argExprIds[i]!, ctx, instanceKey),
+      getRequiredExprType(argExprIds[i]!, ctx, instanceId),
       ctx
     );
     if (nextKind !== firstKind) {
@@ -469,22 +470,22 @@ const requireHomogeneousEqualityKind = ({
 const requireBooleanKind = ({
   argExprIds,
   ctx,
-  instanceKey,
+  instanceId,
 }: {
   argExprIds: readonly HirExprId[];
   ctx: CodegenContext;
-  instanceKey?: string;
+  instanceId?: ProgramFunctionInstanceId;
 }): BooleanKind => {
   if (argExprIds.length === 0) {
     throw new Error("intrinsic requires at least one operand");
   }
   const firstKind = getBooleanKind(
-    getRequiredExprType(argExprIds[0]!, ctx, instanceKey),
+    getRequiredExprType(argExprIds[0]!, ctx, instanceId),
     ctx
   );
   for (let i = 1; i < argExprIds.length; i += 1) {
     const nextKind = getBooleanKind(
-      getRequiredExprType(argExprIds[i]!, ctx, instanceKey),
+      getRequiredExprType(argExprIds[i]!, ctx, instanceId),
       ctx
     );
     if (nextKind !== firstKind) {
@@ -575,13 +576,13 @@ const getBinaryenTypeArg = ({
   call,
   ctx,
   index,
-  instanceKey,
+  instanceId,
   name,
 }: {
   call: HirCallExpr;
   ctx: CodegenContext;
   index: number;
-  instanceKey?: string;
+  instanceId?: ProgramFunctionInstanceId;
   name?: string;
 }): binaryen.Type => {
   const arg = call.args[index];
@@ -589,23 +590,23 @@ const getBinaryenTypeArg = ({
     const source = name ? `intrinsic ${name}` : "intrinsic";
     throw new Error(`${source} argument ${index + 1} missing`);
   }
-  return getExprBinaryenType(arg.expr, ctx, instanceKey);
+  return getExprBinaryenType(arg.expr, ctx, instanceId);
 };
 
 const getHeapTypeArg = ({
   call,
   ctx,
   index,
-  instanceKey,
+  instanceId,
   name,
 }: {
   call: HirCallExpr;
   ctx: CodegenContext;
   index: number;
-  instanceKey?: string;
+  instanceId?: ProgramFunctionInstanceId;
   name?: string;
 }): HeapTypeRef => {
-  const type = getBinaryenTypeArg({ call, ctx, index, instanceKey, name });
+  const type = getBinaryenTypeArg({ call, ctx, index, instanceId, name });
   return modBinaryenTypeToHeapType(ctx.mod, type);
 };
 
@@ -633,20 +634,20 @@ const emitArrayCopyFromOptions = ({
   args,
   ctx,
   fnCtx,
-  instanceKey,
+  instanceId,
 }: {
   call: HirCallExpr;
   args: readonly binaryen.ExpressionRef[];
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-  instanceKey?: string;
+  instanceId?: ProgramFunctionInstanceId;
 }): binaryen.ExpressionRef => {
   const opts = call.args[1];
   if (!opts) {
     throw new Error("array.copy intrinsic missing options argument");
   }
-  const arrayType = getExprBinaryenType(call.args[0]!.expr, ctx, instanceKey);
-  const optsType = getRequiredExprType(opts.expr, ctx, instanceKey);
+  const arrayType = getExprBinaryenType(call.args[0]!.expr, ctx, instanceId);
+  const optsType = getRequiredExprType(opts.expr, ctx, instanceId);
   const structInfo = getStructuralTypeInfo(optsType, ctx);
   if (!structInfo) {
     throw new Error("array.copy options must be a structural object");
@@ -685,7 +686,7 @@ const emitArrayCopyFromOptions = ({
       copyExpr,
       ctx.mod.local.get(destTemp.index, arrayType),
     ],
-    getExprBinaryenType(call.id, ctx, instanceKey)
+    getExprBinaryenType(call.id, ctx, instanceId)
   );
 };
 

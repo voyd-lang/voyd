@@ -26,6 +26,11 @@ export type TypeParamId = number;
 
 export type EffectRowId = number;
 
+export type ProgramFunctionId = number & { readonly __brand: "ProgramFunctionId" };
+export type ProgramFunctionInstanceId = number & {
+  readonly __brand: "ProgramFunctionInstanceId";
+};
+
 export type {
   SourceSpan,
   DiagnosticSeverity,

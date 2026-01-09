@@ -92,7 +92,7 @@ export const compilePatternInitialization = ({
   compileExpr,
   options,
 }: PatternInitParams): void => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   if (pattern.kind === "destructure") {
     compileDestructurePattern({
       pattern,
@@ -139,7 +139,7 @@ export const compilePatternInitialization = ({
   const initializerType = getRequiredExprType(
     initializer,
     ctx,
-    typeInstanceKey
+    typeInstanceId
   );
   const value = compileExpr({ exprId: initializer, ctx, fnCtx });
 
@@ -237,11 +237,11 @@ const compileTuplePattern = ({
   compileExpr,
   options,
 }: PatternInitParams & { pattern: HirPattern & { kind: "tuple" } }): void => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const initializerType = getRequiredExprType(
     initializer,
     ctx,
-    typeInstanceKey
+    typeInstanceId
   );
   const initializerTemp = allocateTempLocal(
     wasmTypeFor(initializerType, ctx),
@@ -289,11 +289,11 @@ const compileDestructurePattern = ({
   compileExpr,
   options,
 }: PatternInitParams & { pattern: HirPattern & { kind: "destructure" } }): void => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const initializerType = getRequiredExprType(
     initializer,
     ctx,
-    typeInstanceKey
+    typeInstanceId
   );
   const initializerTemp = allocateTempLocal(
     wasmTypeFor(initializerType, ctx),

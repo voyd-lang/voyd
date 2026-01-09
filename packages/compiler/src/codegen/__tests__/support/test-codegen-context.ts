@@ -106,6 +106,15 @@ export const createTestCodegenContext = (): {
         getSignature: () => undefined,
         getInstantiationInfo: () => undefined,
         getInstanceExprType: () => undefined,
+        getFunctionId: () => undefined,
+        getInstanceId: () => undefined,
+        getFunctionRef: () => undefined,
+        getInstance: () => ({
+          functionId: 0 as any,
+          typeArgs: [],
+          symbolRef: { moduleId: "test", symbol: 0 },
+        }),
+        formatInstance: () => "instance0",
       },
       optionals: { getOptionalInfo: () => undefined },
       objects: {
@@ -122,7 +131,7 @@ export const createTestCodegenContext = (): {
       calls: {
         getCallInfo: () => ({ traitDispatch: false }),
       },
-      instances: { getAll: () => [], getByKey: () => undefined },
+      instances: { getAll: () => [], getById: () => undefined },
       imports: {
         getLocal: () => undefined,
         getTarget: () => undefined,

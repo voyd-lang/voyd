@@ -281,8 +281,8 @@ export const ensureContinuationFunction = ({
     locals,
     nextLocalIndex: params.length,
     returnTypeId,
-    instanceKey: undefined,
-    typeInstanceKey: undefined,
+    instanceId: undefined,
+    typeInstanceId: undefined,
     effectful: true,
   };
 

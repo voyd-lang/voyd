@@ -185,8 +185,8 @@ const emitClauseFunction = ({
     locals: [],
     nextLocalIndex: params.length,
     returnTypeId: signature.returnType,
-    instanceKey: undefined,
-    typeInstanceKey: undefined,
+    instanceId: undefined,
+    typeInstanceId: undefined,
     effectful: true,
     currentHandler: { index: 0, type: ctx.effectsRuntime.handlerFrameType },
   };
@@ -500,7 +500,7 @@ export const compileEffectHandlerExpr = (
   );
   pushHandlerScope(fnCtx, { prevHandler: prevHandlerLocal, label: expr.id });
 
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const body = compileExpr({
     exprId: expr.body,
     ctx,
@@ -508,7 +508,7 @@ export const compileEffectHandlerExpr = (
     tailPosition,
     expectedResultTypeId,
   });
-  const resultType = getRequiredExprType(expr.id, ctx, typeInstanceKey);
+  const resultType = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const resultWasmType = wasmTypeFor(resultType, ctx);
   const resultLocal =
     resultWasmType === binaryen.none

@@ -88,8 +88,8 @@ export const compileIfExpr = (
   tailPosition: boolean,
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceKey);
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   let fallback =
     typeof expr.defaultBranch === "number"
       ? compileExpr({
@@ -140,16 +140,16 @@ export const compileMatchExpr = (
   tailPosition: boolean,
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const discriminantTypeId = getRequiredExprType(
     expr.discriminant,
     ctx,
-    typeInstanceKey
+    typeInstanceId
   );
   const discriminantType = getExprBinaryenType(
     expr.discriminant,
     ctx,
-    typeInstanceKey
+    typeInstanceId
   );
   const discriminantTemp = allocateTempLocal(discriminantType, fnCtx);
   const discriminantValue = compileExpr({
@@ -286,7 +286,7 @@ export const compileMatchExpr = (
     expr: ctx.mod.block(
       null,
       [initDiscriminant, finalExpr.expr],
-      getExprBinaryenType(expr.id, ctx, typeInstanceKey)
+      getExprBinaryenType(expr.id, ctx, typeInstanceId)
     ),
     usedReturnCall: finalExpr.usedReturnCall,
   };

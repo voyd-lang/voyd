@@ -22,6 +22,7 @@ import type {
   HirExprId,
   HirItemId,
   HirStmtId,
+  ProgramFunctionInstanceId,
   SymbolId,
   TypeId,
   EffectRowId,
@@ -39,7 +40,6 @@ import type { EffectsState } from "./effects/state.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
 import type { ProgramCodegenView } from "../semantics/codegen-view/index.js";
 import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
-import type { InstanceKey } from "../semantics/codegen-view/index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 
 export interface CodegenOptions {
@@ -70,7 +70,7 @@ export interface FunctionMetadata {
   }[];
   resultTypeId: TypeId;
   typeArgs: readonly TypeId[];
-  instanceKey: string;
+  instanceId: ProgramFunctionInstanceId;
   effectful: boolean;
   effectRow?: EffectRowId;
 }
@@ -136,7 +136,7 @@ export interface CodegenContext {
   diagnostics: DiagnosticEmitter;
   options: Required<CodegenOptions>;
   functions: Map<string, Map<number, FunctionMetadata[]>>;
-  functionInstances: Map<InstanceKey, FunctionMetadata>;
+  functionInstances: Map<ProgramFunctionInstanceId, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
   fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
@@ -215,8 +215,8 @@ export interface FunctionContext {
   nextLocalIndex: number;
   returnTypeId: TypeId;
   currentHandler?: { index: number; type: binaryen.Type };
-  instanceKey?: string;
-  typeInstanceKey?: string;
+  instanceId?: ProgramFunctionInstanceId;
+  typeInstanceId?: ProgramFunctionInstanceId;
   effectful: boolean;
   handlerStack?: HandlerScope[];
   loopStack?: LoopScope[];
@@ -236,7 +236,7 @@ export interface CompiledExpression {
 export interface CompileCallOptions {
   tailPosition?: boolean;
   expectedResultTypeId?: TypeId;
-  typeInstanceKey?: string;
+  typeInstanceId?: ProgramFunctionInstanceId;
 }
 
 export interface ExpressionCompilerParams {

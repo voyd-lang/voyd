@@ -28,10 +28,9 @@ import { createEffectsState } from "./effects/state.js";
 import {
   buildProgramCodegenView,
   type ProgramCodegenView,
-  type InstanceKey,
 } from "../semantics/codegen-view/index.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
-import type { TypeId } from "../semantics/ids.js";
+import type { ProgramFunctionInstanceId, TypeId } from "../semantics/ids.js";
 import { DiagnosticEmitter } from "../diagnostics/index.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
@@ -78,7 +77,7 @@ export const codegenProgram = ({
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, Map<number, FunctionMetadata[]>>();
-  const functionInstances = new Map<InstanceKey, FunctionMetadata>();
+  const functionInstances = new Map<ProgramFunctionInstanceId, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const runtimeTypeIdsByKey = new Map<string, number>();
