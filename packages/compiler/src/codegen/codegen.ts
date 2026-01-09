@@ -88,7 +88,6 @@ export const codegenProgram = ({
     mod,
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
-    effectIdOffset: 0,
     program,
     module: sem,
     diagnostics,
@@ -120,12 +119,6 @@ export const codegenProgram = ({
     },
     outcomeValueTypes,
   }));
-
-  let effectIdOffset = 0;
-  contexts.forEach((ctx) => {
-    ctx.effectIdOffset = effectIdOffset;
-    effectIdOffset += ctx.module.binding.effects.length;
-  });
 
   const siteCounter = { current: 0 };
   contexts.forEach((ctx) => {

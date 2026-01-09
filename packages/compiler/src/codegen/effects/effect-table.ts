@@ -54,10 +54,23 @@ const opResumeKind = (resumable: "resume" | "tail"): ResumeKind =>
 const collectEffects = (
   contexts: readonly CodegenContext[]
 ): EffectTableEffect[] => {
+  if (contexts.length === 0) return [];
   const effects: EffectTableEffect[] = [];
-  contexts.forEach((ctx) => {
-    ctx.module.binding.effects.forEach((effect) => {
-      const effectId = effects.length;
+  const ctxByModule = new Map(contexts.map((ctx) => [ctx.moduleId, ctx]));
+  const program = contexts[0]!.program;
+
+  program.effects.getOrderedModules().forEach((moduleId) => {
+    const ctx = ctxByModule.get(moduleId);
+    const moduleView = program.modules.get(moduleId);
+    if (!moduleView || !ctx) return;
+
+    moduleView.meta.effects.forEach((effect, localEffectIndex) => {
+      const effectId = program.effects.getGlobalId(moduleId, localEffectIndex);
+      if (typeof effectId !== "number") {
+        throw new Error(
+          `missing global effect id for ${moduleId}:${localEffectIndex}`
+        );
+      }
       const label = `${ctx.moduleLabel}::${effect.name}`;
       const ops: EffectTableOp[] = effect.operations.map((op, index) => ({
         id: index,
@@ -73,7 +86,8 @@ const collectEffects = (
       });
     });
   });
-  return effects;
+
+  return effects.sort((a, b) => a.id - b.id);
 };
 
 const writeEffectTableBytes = ({

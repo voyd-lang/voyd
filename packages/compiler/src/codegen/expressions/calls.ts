@@ -534,10 +534,7 @@ const localSymbolForSymbolRef = (
   if (ref.moduleId === ctx.moduleId) {
     return ref.symbol;
   }
-  const match = ctx.module.binding.imports.find(
-    (imp) => imp.target?.moduleId === ref.moduleId && imp.target?.symbol === ref.symbol
-  );
-  return match?.local;
+  return ctx.program.imports.getLocal(ctx.moduleId, ref);
 };
 
 const emitResolvedCall = (

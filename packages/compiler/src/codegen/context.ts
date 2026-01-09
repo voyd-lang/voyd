@@ -131,7 +131,6 @@ export interface CodegenContext {
   mod: binaryen.Module;
   moduleId: string;
   moduleLabel: string;
-  effectIdOffset: number;
   program: ProgramCodegenView;
   module: ModuleCodegenView;
   diagnostics: DiagnosticEmitter;

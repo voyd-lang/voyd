@@ -26,7 +26,13 @@ export const createTestCodegenContext = (): {
 
   const moduleView = {
     moduleId: "test",
-    binding: {} as any,
+    meta: {
+      moduleId: "test",
+      packageId: "test",
+      isPackageRoot: true,
+      imports: [],
+      effects: [],
+    },
     hir: { expressions } as any,
     effects: { isEmpty: () => true, getRow: () => ({ operations: [] }) } as any,
     types: {
@@ -49,7 +55,6 @@ export const createTestCodegenContext = (): {
     mod,
     moduleId: "test",
     moduleLabel: "test",
-    effectIdOffset: 0,
     program: {
       arena: {
         get: (id: number) => {
@@ -60,7 +65,14 @@ export const createTestCodegenContext = (): {
           return desc as any;
         },
       },
-      effects: { isEmpty: () => true, getRow: () => ({ operations: [] }) } as any,
+      effects: {
+        isEmpty: () => true,
+        getRow: () => ({ operations: [] }),
+        getOrderedModules: () => ["test"],
+        getGlobalId: () => undefined,
+        getByGlobalId: () => undefined,
+        getEffectCount: () => 0,
+      } as any,
       primitives: {
         unknown: -1,
         void: -2,
@@ -111,6 +123,10 @@ export const createTestCodegenContext = (): {
         getCallInfo: () => ({ traitDispatch: false }),
       },
       instances: { getAll: () => [], getByKey: () => undefined },
+      imports: {
+        getLocal: () => undefined,
+        getTarget: () => undefined,
+      },
       modules: new Map([["test", moduleView as any]]),
     } as any,
     module: moduleView as any,

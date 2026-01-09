@@ -206,9 +206,10 @@ export const compileFunctions = (ctx: CodegenContext): void => {
 export const registerImportMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
-  ctx.module.binding.imports.forEach((imp) => {
-    if (!imp.target) return;
-    if (imp.target.moduleId === ctx.moduleId) return;
+  ctx.module.meta.imports.forEach((imp) => {
+    const target = ctx.program.imports.getTarget(ctx.moduleId, imp.local);
+    if (!target) return;
+    if (target.moduleId === ctx.moduleId) return;
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
       ctx.moduleId,
       imp.local
@@ -220,7 +221,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
     const signature = ctx.program.functions.getSignature(ctx.moduleId, imp.local);
     if (!signature) return;
 
-    const targetMetas = getFunctionMetas(ctx, imp.target.moduleId, imp.target.symbol);
+    const targetMetas = getFunctionMetas(ctx, target.moduleId, target.symbol);
     if (!targetMetas || targetMetas.length === 0) {
       return;
     }
@@ -301,7 +302,7 @@ export const emitModuleExports = (
     isPublicVisibility(entry.visibility)
   );
   const exportEntries =
-    ctx.module.binding.isPackageRoot || publicExports.length > 0
+    ctx.module.meta.isPackageRoot || publicExports.length > 0
       ? publicExports
       : ctx.module.hir.module.exports.filter((entry) =>
           isPackageVisible(entry.visibility)

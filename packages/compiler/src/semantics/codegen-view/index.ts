@@ -1,4 +1,3 @@
-import type { BindingResult } from "../binding/binding.js";
 import type { HirGraph } from "../hir/index.js";
 import type { HirEffectHandlerClause } from "../hir/index.js";
 import type { EffectInterner } from "../effects/effect-table.js";
@@ -124,18 +123,50 @@ export type MonomorphizedInstanceIndex = {
   getByKey(instanceKey: InstanceKey): MonomorphizedInstanceInfo | undefined;
 };
 
+export type ModuleCodegenMetadata = {
+  moduleId: string;
+  packageId: string;
+  isPackageRoot: boolean;
+  imports: readonly {
+    local: SymbolId;
+    target?: { moduleId: string; symbol: SymbolId };
+  }[];
+  effects: readonly {
+    name: string;
+    operations: readonly {
+      name: string;
+      resumable: "resume" | "tail";
+      symbol: SymbolId;
+    }[];
+  }[];
+};
+
 export type ModuleCodegenView = {
   moduleId: string;
-  binding: BindingResult;
+  meta: ModuleCodegenMetadata;
   hir: HirGraph;
   effects: EffectTable;
   types: ModuleTypeIndex;
   effectsInfo: EffectsLoweringInfo;
 };
 
+export type ImportWiringIndex = {
+  getLocal(moduleId: string, target: SymbolRef): SymbolId | undefined;
+  getTarget(moduleId: string, local: SymbolId): SymbolRef | undefined;
+};
+
+export type ProgramEffectIndex = {
+  getOrderedModules(): readonly string[];
+  getGlobalId(moduleId: string, localEffectIndex: number): number | undefined;
+  getByGlobalId(
+    effectId: number
+  ): { moduleId: string; localEffectIndex: number } | undefined;
+  getEffectCount(): number;
+};
+
 export type ProgramCodegenView = {
   arena: TypeArena;
-  effects: EffectInterner;
+  effects: EffectInterner & ProgramEffectIndex;
   primitives: {
     bool: TypeId;
     void: TypeId;
@@ -156,6 +187,7 @@ export type ProgramCodegenView = {
   traits: TraitDispatchIndex;
   calls: CallLoweringIndex;
   instances: MonomorphizedInstanceIndex;
+  imports: ImportWiringIndex;
   modules: ReadonlyMap<string, ModuleCodegenView>;
 };
 
@@ -211,7 +243,46 @@ export const buildProgramCodegenView = (
     a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true })
   );
 
+  const moduleMetaById = new Map<string, ModuleCodegenMetadata>();
+  const importTargetsByModule = new Map<string, Map<SymbolId, SymbolRef>>();
+  const importLocalsByModule = new Map<string, Map<string, SymbolId>>();
+
   stableModules.forEach((mod) => {
+    const importsByLocal = new Map<SymbolId, SymbolRef>();
+    const localsByTarget = new Map<string, SymbolId>();
+    mod.binding.imports.forEach((imp) => {
+      if (!imp.target) return;
+      const target = { moduleId: imp.target.moduleId, symbol: imp.target.symbol };
+      importsByLocal.set(imp.local, target);
+      const targetKey = symbolRefKey(target);
+      if (!localsByTarget.has(targetKey)) {
+        localsByTarget.set(targetKey, imp.local);
+      }
+    });
+
+    importTargetsByModule.set(mod.moduleId, importsByLocal);
+    importLocalsByModule.set(mod.moduleId, localsByTarget);
+
+    moduleMetaById.set(mod.moduleId, {
+      moduleId: mod.moduleId,
+      packageId: mod.binding.packageId,
+      isPackageRoot: mod.binding.isPackageRoot,
+      imports: mod.binding.imports.map((imp) => ({
+        local: imp.local,
+        target: imp.target
+          ? { moduleId: imp.target.moduleId, symbol: imp.target.symbol }
+          : undefined,
+      })),
+      effects: mod.binding.effects.map((effect) => ({
+        name: effect.name,
+        operations: effect.operations.map((op) => ({
+          name: op.name,
+          resumable: op.resumable,
+          symbol: op.symbol,
+        })),
+      })),
+    });
+
     for (const template of mod.typing.objects.templates()) {
       const owner: SymbolRef = { moduleId: mod.moduleId, symbol: template.symbol };
       objectTemplateByOwner.set(symbolRefKey(owner), template);
@@ -350,7 +421,7 @@ export const buildProgramCodegenView = (
       return mod?.symbols.getName(ref.symbol);
     },
     getLocalName: (moduleId, symbol) => modulesById.get(moduleId)?.symbols.getName(symbol),
-    getPackageId: (moduleId) => modulesById.get(moduleId)?.binding.packageId,
+    getPackageId: (moduleId) => moduleMetaById.get(moduleId)?.packageId,
     getIntrinsicType: (moduleId, symbol) =>
       modulesById.get(moduleId)?.symbols.getIntrinsicType(symbol),
     getIntrinsicFunctionFlags: (moduleId, symbol) =>
@@ -443,11 +514,43 @@ export const buildProgramCodegenView = (
     getByKey: (key) => instanceByKey.get(key),
   };
 
+  const effectGlobalIdsByModule = new Map<string, number[]>();
+  const effectByGlobalId: { moduleId: string; localEffectIndex: number }[] = [];
+
+  stableModules.forEach((mod) => {
+    const meta = moduleMetaById.get(mod.moduleId);
+    if (!meta) return;
+    const ids = effectGlobalIdsByModule.get(mod.moduleId) ?? [];
+    meta.effects.forEach((_effect, localEffectIndex) => {
+      const effectId = effectByGlobalId.length;
+      effectByGlobalId.push({ moduleId: mod.moduleId, localEffectIndex });
+      ids[localEffectIndex] = effectId;
+    });
+    effectGlobalIdsByModule.set(mod.moduleId, ids);
+  });
+
+  const effects: EffectInterner & ProgramEffectIndex = {
+    ...effectsInterner,
+    getOrderedModules: () => stableModules.map((mod) => mod.moduleId),
+    getGlobalId: (moduleId, localEffectIndex) =>
+      effectGlobalIdsByModule.get(moduleId)?.[localEffectIndex],
+    getByGlobalId: (effectId) => effectByGlobalId[effectId],
+    getEffectCount: () => effectByGlobalId.length,
+  };
+
+  const imports: ImportWiringIndex = {
+    getLocal: (moduleId, target) =>
+      importLocalsByModule.get(moduleId)?.get(symbolRefKey(target)),
+    getTarget: (moduleId, local) => importTargetsByModule.get(moduleId)?.get(local),
+  };
+
   const moduleViews = new Map<string, ModuleCodegenView>();
   stableModules.forEach((mod) => {
+    const meta = moduleMetaById.get(mod.moduleId);
+    if (!meta) return;
     moduleViews.set(mod.moduleId, {
       moduleId: mod.moduleId,
-      binding: mod.binding,
+      meta,
       hir: mod.hir,
       effects: mod.typing.effects,
       types: {
@@ -469,7 +572,7 @@ export const buildProgramCodegenView = (
 
   return {
     arena,
-    effects: effectsInterner,
+    effects,
     primitives: {
       bool: first.typing.primitives.bool,
       void: first.typing.primitives.void,
@@ -488,6 +591,7 @@ export const buildProgramCodegenView = (
     traits,
     calls,
     instances,
+    imports,
     modules: moduleViews,
   };
 };

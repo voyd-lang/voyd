@@ -47,7 +47,6 @@ const buildLoweringSnapshot = () => {
     mod,
     moduleId: semantics.moduleId,
     moduleLabel: sanitize(semantics.hir.module.path),
-    effectIdOffset: 0,
     program,
     module: moduleView,
     diagnostics,
