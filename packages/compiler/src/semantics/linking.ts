@@ -10,6 +10,7 @@ import type { MonomorphizedInstanceRequest } from "./codegen-view/index.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import type { HirExprId, SymbolId, TypeId } from "./ids.js";
 import { buildProgramSymbolArena, type SymbolRef } from "./program-symbol-arena.js";
+import { createCanonicalSymbolRefResolver } from "./canonical-symbol-ref.js";
 
 export const monomorphizeProgram = ({
   modules,
@@ -53,33 +54,10 @@ export const monomorphizeProgram = ({
     importTargetsByModule.set(mod.moduleId, byLocal);
   });
 
-  const getOrCreateSet = <K, V>(map: Map<K, Set<V>>, key: K, create: () => Set<V>): Set<V> => {
-    const existing = map.get(key);
-    if (existing) return existing;
-    const next = create();
-    map.set(key, next);
-    return next;
-  };
-
   const resolveImportTarget = (ref: SymbolRef): SymbolRef | undefined =>
     importTargetsByModule.get(ref.moduleId)?.get(ref.symbol);
 
-  const resolveCanonicalSymbolRef = (ref: SymbolRef): SymbolRef => {
-    let current = ref;
-    const visitedByModule = new Map<string, Set<SymbolId>>();
-    while (true) {
-      const next = resolveImportTarget(current);
-      if (!next) {
-        return current;
-      }
-      const visited = getOrCreateSet(visitedByModule, current.moduleId, () => new Set());
-      if (visited.has(current.symbol)) {
-        return current;
-      }
-      visited.add(current.symbol);
-      current = next;
-    }
-  };
+  const canonicalSymbolRef = createCanonicalSymbolRefResolver({ resolveImportTarget });
 
   const { moduleExports, dependencies } = buildDependencyIndex(semantics);
   const typingContexts = new Map<string, TypingContext>();
@@ -118,7 +96,7 @@ export const monomorphizeProgram = ({
         return;
       }
 
-      const canonicalCallee = resolveCanonicalSymbolRef({
+      const canonicalCallee = canonicalSymbolRef({
         moduleId: importModuleId,
         symbol: importSymbol,
       });

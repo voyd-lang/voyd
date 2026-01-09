@@ -36,12 +36,10 @@ import {
   type OptionalResolverContext,
 } from "../typing/optionals.js";
 import { buildProgramSymbolArena } from "../program-symbol-arena.js";
-import type { ProgramSymbolArena } from "../program-symbol-arena.js";
+import type { ProgramSymbolArena, SymbolRef } from "../program-symbol-arena.js";
+import { createCanonicalSymbolRefResolver } from "../canonical-symbol-ref.js";
 
-export type SymbolRef = {
-  moduleId: string;
-  symbol: SymbolId;
-};
+export type { SymbolRef } from "../program-symbol-arena.js";
 
 export type CodegenStructuralField = {
   name: string;
@@ -707,23 +705,8 @@ export const buildProgramCodegenView = (
   const resolveImportTarget = (ref: SymbolRef): SymbolRef | undefined =>
     importTargetsByModule.get(ref.moduleId)?.get(ref.symbol);
 
-  const resolveCanonicalSymbolRef = (ref: SymbolRef): SymbolRef => {
-    let current = ref;
-    const visitedByModule = new Map<string, Set<SymbolId>>();
-    // Resolve through imports so imported symbols share a single canonical identity.
-    while (true) {
-      const next = resolveImportTarget(current);
-      if (!next) {
-        return current;
-      }
-      const visited = getOrCreateMap(visitedByModule, current.moduleId, () => new Set());
-      if (visited.has(current.symbol)) {
-        return current;
-      }
-      visited.add(current.symbol);
-      current = next;
-    }
-  };
+  // Resolve through imports so imported symbols share a single canonical identity.
+  const canonicalSymbolRef = createCanonicalSymbolRefResolver({ resolveImportTarget });
 
   stableModules.forEach((mod) => {
     const targets = importTargetsByModule.get(mod.moduleId);
@@ -732,7 +715,7 @@ export const buildProgramCodegenView = (
     const localsByTargetId = new Map<ProgramSymbolId, SymbolId>();
 
     targets.forEach((target, local) => {
-      const canonicalTarget = resolveCanonicalSymbolRef(target);
+      const canonicalTarget = canonicalSymbolRef(target);
       const targetId = symbols.idOf(canonicalTarget);
       targetIdsByLocal.set(local, targetId);
       if (!localsByTargetId.has(targetId)) {
@@ -745,7 +728,7 @@ export const buildProgramCodegenView = (
   });
 
   const getProgramFunctionId = (ref: SymbolRef): ProgramFunctionId | undefined =>
-    symbols.tryIdOf(resolveCanonicalSymbolRef(ref));
+    symbols.tryIdOf(canonicalSymbolRef(ref));
 
   const programSymbolIdOf = (moduleId: string, symbol: SymbolId): ProgramSymbolId =>
     symbols.idOf({ moduleId, symbol });
@@ -753,7 +736,7 @@ export const buildProgramCodegenView = (
   const canonicalProgramSymbolIdOf = (
     moduleId: string,
     symbol: SymbolId
-  ): ProgramSymbolId => symbols.idOf(resolveCanonicalSymbolRef({ moduleId, symbol }));
+  ): ProgramSymbolId => symbols.idOf(canonicalSymbolRef({ moduleId, symbol }));
 
   const toCodegenTraitImplInstanceForModule = (
     impl: TraitImplInstance,
@@ -788,7 +771,7 @@ export const buildProgramCodegenView = (
       }
 
       const ownerRef = toSymbolRef(desc.owner);
-      const ownerId = symbols.idOf(resolveCanonicalSymbolRef(ownerRef));
+      const ownerId = symbols.idOf(canonicalSymbolRef(ownerRef));
       nominalOwnerByNominal.set(nominal, ownerId);
 
       const bucket = nominalsByOwner.get(ownerId) ?? [];
