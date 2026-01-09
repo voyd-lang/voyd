@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { dirname, resolve, sep } from "node:path";
-import type { ModuleHost } from "../modules/types.js";
+import type { ModuleGraph, ModuleHost, ModulePath } from "../modules/types.js";
 import { analyzeModules, loadModuleGraph } from "../pipeline.js";
+import type { Diagnostic } from "../diagnostics/index.js";
+import { modulePathToString } from "../modules/path.js";
+import type { ModuleExportTable } from "../semantics/modules.js";
+import {
+  semanticsPipeline,
+  type SemanticsPipelineResult,
+} from "../semantics/pipeline.js";
+import { createTypeArena } from "../semantics/typing/type-arena.js";
+import { createEffectTable } from "../semantics/effects/effect-table.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost => {
   const normalized = new Map<string, string>();
@@ -53,6 +62,71 @@ const createMemoryHost = (files: Record<string, string>): ModuleHost => {
     fileExists: async (path: string) => normalized.has(resolve(path)),
     isDirectory: async (path: string) => isDirectoryPath(resolve(path)),
   };
+};
+
+const sortModules = (graph: ModuleGraph): string[] => {
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const order: string[] = [];
+
+  const moduleIdForPath = (path: ModulePath) => modulePathToString(path);
+
+  const visit = (id: string) => {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) return;
+    visiting.add(id);
+
+    const node = graph.modules.get(id);
+    node?.dependencies.forEach((dep) => {
+      const depId = moduleIdForPath(dep.path);
+      if (graph.modules.has(depId)) {
+        visit(depId);
+      }
+    });
+
+    visiting.delete(id);
+    visited.add(id);
+    order.push(id);
+  };
+
+  graph.modules.forEach((_, id) => visit(id));
+  return order;
+};
+
+const analyzeModulesWithSharedInterners = ({
+  graph,
+}: {
+  graph: ModuleGraph;
+}): {
+  semantics: Map<string, SemanticsPipelineResult>;
+  diagnostics: Diagnostic[];
+} => {
+  const order = sortModules(graph);
+  const semantics = new Map<string, SemanticsPipelineResult>();
+  const exports = new Map<string, ModuleExportTable>();
+  const diagnostics: Diagnostic[] = [];
+
+  const arena = createTypeArena();
+  const effects = createEffectTable();
+
+  order.forEach((id) => {
+    const module = graph.modules.get(id);
+    if (!module) {
+      return;
+    }
+    const result = semanticsPipeline({
+      module,
+      graph,
+      exports,
+      dependencies: semantics,
+      typing: { arena, effects },
+    });
+    semantics.set(id, result);
+    exports.set(id, result.exports);
+    diagnostics.push(...result.diagnostics);
+  });
+
+  return { semantics, diagnostics };
 };
 
 describe("module typing across imports", () => {
@@ -173,6 +247,33 @@ describe("module typing across imports", () => {
     expect(paramType).toBeDefined();
 
     expect(paramType).toBe(pointType);
+  });
+
+  it("resolves imported nominal owners from signatures when interners are shared", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}a.voyd`]: `
+pub obj Foo { x: i32 }
+
+pub fn make() -> Foo
+  Foo { x: 41 }
+`,
+      [`${root}${sep}main.voyd`]: `
+use a::make
+
+pub fn main() -> i32
+  make().x
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModulesWithSharedInterners({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
 
   it("type-checks inline modules", async () => {

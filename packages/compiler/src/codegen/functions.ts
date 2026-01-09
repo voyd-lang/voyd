@@ -227,7 +227,10 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
     }
 
     const scheme = ctx.program.arena.getScheme(signature.scheme);
-    const typeParamCount = signature.typeParams.length > 0 ? signature.typeParams.length : scheme.params.length;
+    const typeParamCount =
+      signature.typeParams.length > 0
+        ? signature.typeParams.length
+        : scheme.params.length;
     const instantiationInfo = ctx.program.functions.getInstantiationInfo(ctx.moduleId, imp.local);
     const recordedInstantiations =
       instantiationInfo && instantiationInfo.size > 0
@@ -242,7 +245,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         : [[formatInstanceKey(imp.local, []), []]];
 
       instantiations.forEach(([instanceKey, typeArgs]) => {
-        const targetMeta = pickTargetMeta(targetMetas, typeArgs.length);
+        const targetMeta = pickTargetMeta(targetMetas, typeArgs);
         const effectInfo = effects.functionAbi(imp.local);
         const effectful =
           targetMeta?.effectful ?? (effectInfo ? effectInfo.typeEffectful : false);
@@ -654,6 +657,16 @@ const formatInstanceKey = (
 
 const pickTargetMeta = (
   metas: readonly FunctionMetadata[],
-  typeArgCount: number
-): FunctionMetadata | undefined =>
-  metas.find((meta) => meta.typeArgs.length === typeArgCount) ?? metas[0];
+  typeArgs: readonly TypeId[]
+): FunctionMetadata | undefined => {
+  const exact = metas.find(
+    (meta) =>
+      meta.typeArgs.length === typeArgs.length &&
+      meta.typeArgs.every((arg, index) => arg === typeArgs[index])
+  );
+  if (exact) {
+    return exact;
+  }
+  const byArity = metas.find((meta) => meta.typeArgs.length === typeArgs.length);
+  return byArity ?? metas[0];
+};

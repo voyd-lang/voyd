@@ -145,6 +145,33 @@ pub fn main() -> i32
     expect(instantiations?.size ?? 0).toBeGreaterThan(0);
   });
 
+  it("links multiple imported generic instantiations across modules", async () => {
+    const root = resolve("/proj/src");
+    const std = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `use std::util::all
+
+pub fn main() -> i32
+  let x = id(1.0)
+  id(5)`,
+      [`${std}${sep}util.voyd`]: `pub fn id<T>(value: T) -> T
+  value`,
+    });
+
+    const result = await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root, std },
+      host,
+    });
+
+    if (result.diagnostics.length > 0) {
+      throw new Error(JSON.stringify(result.diagnostics, null, 2));
+    }
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(5);
+  });
+
   it("supports reassigning structural object fields", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

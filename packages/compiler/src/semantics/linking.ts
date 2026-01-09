@@ -1,7 +1,10 @@
 import { DiagnosticEmitter } from "../diagnostics/index.js";
 import { createTypingState } from "./typing/context.js";
 import type { DependencySemantics, TypingContext } from "./typing/types.js";
-import { typeGenericFunctionBody } from "./typing/expressions/call.js";
+import {
+  formatFunctionInstanceKey,
+  typeGenericFunctionBody,
+} from "./typing/expressions/call.js";
 import type { ModuleExportTable } from "./modules.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
 import { makeInstanceKey, type MonomorphizedInstanceInfo } from "./codegen-view/index.js";
@@ -85,7 +88,7 @@ export const monomorphizeProgram = ({
       const sortedInstantiations = Array.from(instantiations.entries()).sort(
         ([a], [b]) => a.localeCompare(b, undefined, { numeric: true })
       );
-      sortedInstantiations.forEach(([instanceKey, typeArgs]) => {
+      sortedInstantiations.forEach(([, typeArgs]) => {
         if (typeArgs.length !== typeParams.length) {
           return;
         }
@@ -96,7 +99,10 @@ export const monomorphizeProgram = ({
             symbol: importSymbol,
           } satisfies SymbolRef,
           typeArgs,
-          instanceKey: makeInstanceKey(importModuleId, instanceKey),
+          instanceKey: makeInstanceKey(
+            importModuleId,
+            formatFunctionInstanceKey(importSymbol, typeArgs)
+          ),
         });
 
         const substitution = new Map(
@@ -116,15 +122,11 @@ export const monomorphizeProgram = ({
     });
   });
 
-  const deduped = new Map<string, MonomorphizedInstanceInfo>();
+  const instanceByKey = new Map<string, MonomorphizedInstanceInfo>();
   requestedInstances.forEach((info) => {
-    if (!info.instanceKey) return;
-    const key = `${info.callee.moduleId}::${info.instanceKey}`;
-    if (!deduped.has(key)) {
-      deduped.set(key, { ...info, instanceKey: makeInstanceKey(info.callee.moduleId, info.instanceKey) });
-    }
+    instanceByKey.set(info.instanceKey, info);
   });
-  const instances = Array.from(deduped.values()).sort((a, b) => {
+  const instances = Array.from(instanceByKey.values()).sort((a, b) => {
     const modOrder = a.callee.moduleId.localeCompare(
       b.callee.moduleId,
       undefined,

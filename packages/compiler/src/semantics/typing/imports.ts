@@ -176,6 +176,10 @@ export const resolveImportedValue = ({
       ctx.table.setSymbolScheme(symbol, scheme);
       const sourceScheme = ctx.arena.getScheme(scheme);
       ctx.valueTypes.set(symbol, sourceScheme.body);
+      ensureImportedOwnerTemplatesAvailable({
+        types: [sourceScheme.body],
+        ctx,
+      });
     }
 
     const signature = dependency.typing.functions.getSignature(target.symbol);
@@ -183,6 +187,14 @@ export const resolveImportedValue = ({
       ctx.functions.setSignature(symbol, signature);
       ctx.table.setSymbolScheme(symbol, signature.scheme);
       ctx.valueTypes.set(symbol, signature.typeId);
+      ensureImportedOwnerTemplatesAvailable({
+        types: [
+          signature.typeId,
+          signature.returnType,
+          ...signature.parameters.map((param) => param.type),
+        ],
+        ctx,
+      });
     }
 
     const resolvedType = ctx.valueTypes.get(symbol);
