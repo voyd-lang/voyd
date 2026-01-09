@@ -87,6 +87,8 @@ const buildCodegenProgram = (
   const functionInstances = new Map<InstanceKey, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
+  const runtimeTypeIdsByKey = new Map<string, number>();
+  const runtimeTypeIdCounter = { value: 1 };
   const contexts: CodegenContext[] = modules.map((sem) => ({
     program,
     module: program.modules.get(sem.moduleId)!,
@@ -103,6 +105,7 @@ const buildCodegenProgram = (
     closureTypes: new Map(),
     functionRefTypes: new Map(),
     runtimeTypeRegistry,
+    runtimeTypeIds: { byKey: runtimeTypeIdsByKey, nextId: runtimeTypeIdCounter },
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,

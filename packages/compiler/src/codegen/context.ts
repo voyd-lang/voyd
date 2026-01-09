@@ -106,6 +106,11 @@ export type RuntimeTypeIdRegistryEntry = {
   typeId: TypeId;
 };
 
+export type RuntimeTypeIdState = {
+  byKey: Map<string, number>;
+  nextId: { value: number };
+};
+
 export interface FixedArrayWasmType {
   type: binaryen.Type;
   heapType: HeapTypeRef;
@@ -136,6 +141,7 @@ export interface CodegenContext {
   closureTypes: Map<string, ClosureTypeInfo>;
   functionRefTypes: Map<string, binaryen.Type>;
   runtimeTypeRegistry: Map<TypeId, RuntimeTypeIdRegistryEntry>;
+  runtimeTypeIds: RuntimeTypeIdState;
   lambdaEnvs: Map<
     string,
     {

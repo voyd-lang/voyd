@@ -102,13 +102,18 @@ const runtimeTypeIdFor = (typeId: TypeId, ctx: CodegenContext): number =>
     const key = runtimeTypeKeyFor(typeId, ctx, new Set());
     const existing = ctx.runtimeTypeRegistry.get(typeId);
     if (!existing) {
-      ctx.runtimeTypeRegistry.set(typeId, {
-        key,
-        moduleId: ctx.moduleId,
-        typeId,
-      });
+      ctx.runtimeTypeRegistry.set(typeId, { key, moduleId: ctx.moduleId, typeId });
     }
-    return typeId;
+
+    const cached = ctx.runtimeTypeIds.byKey.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const id = ctx.runtimeTypeIds.nextId.value;
+    ctx.runtimeTypeIds.nextId.value += 1;
+    ctx.runtimeTypeIds.byKey.set(key, id);
+    return id;
   })();
 
 const getLocalSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>

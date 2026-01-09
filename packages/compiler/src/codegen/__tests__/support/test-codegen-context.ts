@@ -126,6 +126,7 @@ export const createTestCodegenContext = (): {
     closureTypes: new Map(),
     functionRefTypes: new Map(),
     runtimeTypeRegistry: new Map(),
+    runtimeTypeIds: { byKey: new Map(), nextId: { value: 1 } },
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt: { baseType: binaryen.none, extensionHelpers: { i32Array: binaryen.i32 } } as any,
@@ -146,4 +147,3 @@ export const createTestCodegenContext = (): {
 
   return { ctx, descriptors, exprTypes, expressions };
 };
-
