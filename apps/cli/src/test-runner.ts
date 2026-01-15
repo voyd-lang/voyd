@@ -16,7 +16,12 @@ import {
   modulePathToString,
 } from "@voyd/compiler/modules/path.js";
 import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
-import { runEffectfulExport } from "@voyd/compiler/codegen/effects/host-runner.js";
+import {
+  runEffectfulExport,
+  parseEffectTable,
+  type EffectHandler,
+} from "@voyd/compiler/codegen/effects/host-runner.js";
+import type { EffectTableEffect } from "@voyd/compiler/codegen/effects/effect-table-types.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
 
@@ -71,6 +76,46 @@ class TestSkip extends Error {
     this.name = "TestSkip";
   }
 }
+
+type TestOpKind = "fail" | "skip" | "log";
+
+const TEST_OP_HANDLERS: Record<TestOpKind, EffectHandler> = {
+  fail: () => {
+    throw new TestFailure();
+  },
+  skip: () => {
+    throw new TestSkip();
+  },
+  log: () => null,
+};
+
+const testOpKind = (label: string): TestOpKind | undefined => {
+  if (label.endsWith(".fail")) return "fail";
+  if (label.endsWith(".skip")) return "skip";
+  if (label.endsWith(".log")) return "log";
+  return undefined;
+};
+
+const isTestEffect = (effect: EffectTableEffect): boolean =>
+  effect.ops.some((op) => op.label.endsWith(".fail")) &&
+  effect.ops.some((op) => op.label.endsWith(".skip")) &&
+  effect.ops.some((op) => op.label.endsWith(".log"));
+
+const buildTestEffectHandlers = (
+  wasm: Uint8Array
+): Record<string, EffectHandler> => {
+  const table = parseEffectTable(wasm);
+  const effect = table.effects.find(isTestEffect);
+  if (!effect) return {};
+
+  const handlers: Record<string, EffectHandler> = {};
+  effect.ops.forEach((op) => {
+    const kind = testOpKind(op.label);
+    if (!kind) return;
+    handlers[`${effect.id}:${op.id}:${op.resumeKind}`] = TEST_OP_HANDLERS[kind];
+  });
+  return handlers;
+};
 
 const shouldSkipDir = (name: string): boolean => {
   if (name.startsWith(".")) return true;
@@ -197,18 +242,11 @@ const runEffectfulTest = async (
   wasm: Uint8Array,
   exportName: string
 ): Promise<void> => {
+  const handlers = buildTestEffectHandlers(wasm);
   await runEffectfulExport({
     wasm,
     entryName: `${exportName}_effectful`,
-    handlers: {
-      "Test.fail": () => {
-        throw new TestFailure();
-      },
-      "Test.skip": () => {
-        throw new TestSkip();
-      },
-      "Test.log": () => null,
-    },
+    handlers,
   });
 };
 
