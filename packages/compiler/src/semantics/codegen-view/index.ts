@@ -342,10 +342,17 @@ export const buildProgramCodegenView = (
     >;
   }
 ): ProgramCodegenView => {
+  type ModuleTypingOverride = NonNullable<NonNullable<typeof options>["moduleTyping"]> extends ReadonlyMap<
+    string,
+    infer Entry
+  >
+    ? Entry
+    : never;
   const modulesById = new Map<string, SemanticsPipelineResult>(
     modules.map((mod) => [mod.moduleId, mod] as const)
   );
-  const moduleTyping = options?.moduleTyping ?? new Map();
+  const moduleTyping: ReadonlyMap<string, ModuleTypingOverride> =
+    options?.moduleTyping ?? new Map<string, ModuleTypingOverride>();
   const first = modules[0];
   if (!first) {
     throw new Error("buildProgramCodegenView requires at least one module");
@@ -686,16 +693,13 @@ export const buildProgramCodegenView = (
     });
 
     const callSource = moduleTyping.get(mod.moduleId);
+    const callTargets = callSource?.callTargets ?? mod.typing.callTargets;
+    const callTypeArgs = callSource?.callTypeArguments ?? mod.typing.callTypeArguments;
     callsByModuleRaw.set(mod.moduleId, {
       targets: new Map(
-        Array.from((callSource?.callTargets ?? mod.typing.callTargets).entries()).map(
-          ([exprId, targets]) => [
-          exprId,
-          new Map(targets),
-          ]
-        )
+        Array.from(callTargets, ([exprId, targets]) => [exprId, new Map(targets)] as const)
       ),
-      typeArgs: new Map(callSource?.callTypeArguments ?? mod.typing.callTypeArguments),
+      typeArgs: new Map(callTypeArgs),
       traitDispatches: new Set(
         callSource?.callTraitDispatches ?? mod.typing.callTraitDispatches
       ),
