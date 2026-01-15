@@ -11,6 +11,7 @@ import type {
   SymbolId,
   TypeId,
 } from "../context.js";
+import type { ProgramFunctionInstanceId } from "../../semantics/ids.js";
 import type { EffectLoweringResult } from "./effect-lowering.js";
 import { createGcTrampolineBackend } from "./gc-trampoline-backend.js";
 
@@ -28,7 +29,7 @@ export interface EffectsBackend {
     returnTypeId: TypeId;
     expectedResultTypeId?: TypeId;
     tailPosition: boolean;
-    typeInstanceKey?: string;
+    typeInstanceId?: ProgramFunctionInstanceId;
     ctx: CodegenContext;
     fnCtx: FunctionContext;
   }) => CompiledExpression;

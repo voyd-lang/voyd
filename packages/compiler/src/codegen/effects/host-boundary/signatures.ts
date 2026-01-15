@@ -50,8 +50,13 @@ const buildEffectOperationIndex = (
   const index = new Map<string, EffectOperationIndexEntry>();
 
   contexts.forEach((ctx) => {
-  ctx.module.binding.effects.forEach((effect, localEffectIndex) => {
-      const effectId = ctx.effectIdOffset + localEffectIndex;
+    ctx.module.meta.effects.forEach((effect, localEffectIndex) => {
+      const effectId = ctx.program.effects.getGlobalId(ctx.moduleId, localEffectIndex);
+      if (typeof effectId !== "number") {
+        throw new Error(
+          `missing global effect id for ${ctx.moduleId}:${localEffectIndex}`
+        );
+      }
       effect.operations.forEach((op, opId) => {
         const key = signatureKey(effectId, opId);
         const existing = index.get(key);

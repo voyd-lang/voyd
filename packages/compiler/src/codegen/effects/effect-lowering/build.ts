@@ -282,8 +282,9 @@ export const buildEffectLowering = ({
     const ordering = definitionOrderForFunction(item, ctx);
     const params = functionParamSymbols(item);
     const analysis = analyzeExpr({ exprId: item.body, liveAfter: new Set(), ctx });
+    const symbolId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: item.symbol });
     const fnName = sanitizeIdentifier(
-      ctx.program.symbols.getLocalName(ctx.moduleId, item.symbol) ?? `${item.symbol}`
+      ctx.program.symbols.getName(symbolId) ?? `${item.symbol}`
     );
     const contFnName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${item.symbol}`;
 

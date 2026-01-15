@@ -81,6 +81,30 @@ describe("next pipeline API", () => {
     expect(result.semantics?.has("src::main")).toBe(true);
   });
 
+  it("surfaces codegen diagnostics in pipeline results", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+pub fn identity<T>(value: T) -> T
+  value
+
+pub fn main()
+  0
+`,
+    });
+
+    const result = await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    expect(result.wasm).toBeUndefined();
+    expect(result.diagnostics.some((diag) => diag.code === "CG0003")).toBe(
+      true
+    );
+  });
+
   it("orders modules topologically for lowering", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");

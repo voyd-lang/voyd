@@ -65,7 +65,7 @@ const declarePatternLocals = (
 };
 
 const getNominalComponent = (type: TypeId, ctx: CodegenContext): TypeId | undefined => {
-  const desc = ctx.program.arena.get(type);
+  const desc = ctx.program.types.getTypeDesc(type);
   if (desc.kind === "nominal-object") {
     return type;
   }
@@ -88,8 +88,8 @@ export const compileIfExpr = (
   tailPosition: boolean,
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceKey);
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   let fallback =
     typeof expr.defaultBranch === "number"
       ? compileExpr({
@@ -140,16 +140,16 @@ export const compileMatchExpr = (
   tailPosition: boolean,
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const discriminantTypeId = getRequiredExprType(
     expr.discriminant,
     ctx,
-    typeInstanceKey
+    typeInstanceId
   );
   const discriminantType = getExprBinaryenType(
     expr.discriminant,
     ctx,
-    typeInstanceKey
+    typeInstanceId
   );
   const discriminantTemp = allocateTempLocal(discriminantType, fnCtx);
   const discriminantValue = compileExpr({
@@ -286,7 +286,7 @@ export const compileMatchExpr = (
     expr: ctx.mod.block(
       null,
       [initDiscriminant, finalExpr.expr],
-      getExprBinaryenType(expr.id, ctx, typeInstanceKey)
+      getExprBinaryenType(expr.id, ctx, typeInstanceId)
     ),
     usedReturnCall: finalExpr.usedReturnCall,
   };
@@ -333,7 +333,7 @@ const compileMatchCondition = (
       return;
     }
     seen.add(typeId);
-    const desc = ctx.program.arena.get(typeId);
+    const desc = ctx.program.types.getTypeDesc(typeId);
     if (desc.kind === "union") {
       desc.members.forEach((member) => collectTargets(member, seen, targets));
       return;
@@ -464,7 +464,7 @@ const collectNominalComponents = (
     acc.add(nominal);
     return;
   }
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind === "union") {
     desc.members.forEach((member) =>
       collectNominalComponents(member, ctx, acc)

@@ -12,6 +12,7 @@ import type {
   FunctionContext,
   HirLambdaExpr,
 } from "../context.js";
+import type { ProgramFunctionInstanceId } from "../../semantics/ids.js";
 import {
   getClosureTypeInfo,
   getRequiredExprType,
@@ -35,26 +36,32 @@ type LambdaEnvInfo = NonNullable<
   ReturnType<CodegenContext["lambdaEnvs"]["get"]>
 >;
 
-const formatLambdaInstanceKey = (
+const formatLambdaInstanceLabel = (
   exprId: number,
-  outerInstance?: string
+  outerInstanceId?: ProgramFunctionInstanceId
 ): string =>
-  outerInstance ? `${outerInstance}::lambda${exprId}` : `lambda${exprId}`;
+  typeof outerInstanceId === "number"
+    ? `inst${outerInstanceId}_lambda${exprId}`
+    : `lambda${exprId}`;
 
-const makeLambdaKey = (exprId: number, ctx: CodegenContext, outer?: string) =>
-  `${ctx.moduleId}::${formatLambdaInstanceKey(exprId, outer)}`;
+const makeLambdaKey = (
+  exprId: number,
+  ctx: CodegenContext,
+  outerInstanceId?: ProgramFunctionInstanceId
+) =>
+  `${ctx.moduleId}::lambda${exprId}::${outerInstanceId ?? "root"}`;
 
 const makeLambdaFunctionName = ({
   expr,
   ctx,
-  instanceKey,
+  instanceLabel,
 }: {
   expr: HirLambdaExpr;
   ctx: CodegenContext;
-  instanceKey: string;
+  instanceLabel: string;
 }): string => {
-  const safeInstance = instanceKey.replace(/[^a-zA-Z0-9_]/g, "_");
-  return `${ctx.moduleLabel}__lambda_${expr.id}_${safeInstance}`;
+  const safeLabel = instanceLabel.replace(/[^a-zA-Z0-9_]/g, "_");
+  return `${ctx.moduleLabel}__lambda_${expr.id}_${safeLabel}`;
 };
 
 const defineLambdaEnvType = ({
@@ -62,16 +69,16 @@ const defineLambdaEnvType = ({
   captures,
   expr,
   ctx,
-  instanceKey,
+  instanceLabel,
 }: {
   base: ReturnType<typeof getClosureTypeInfo>;
   captures: readonly LambdaCaptureInfo[];
   expr: HirLambdaExpr;
   ctx: CodegenContext;
-  instanceKey: string;
+  instanceLabel: string;
 }): binaryen.Type =>
   defineStructType(ctx.mod, {
-    name: `${ctx.moduleLabel}__lambda_env_${expr.id}_${instanceKey.replace(/[^a-zA-Z0-9_]/g, "_")}`,
+    name: `${ctx.moduleLabel}__lambda_env_${expr.id}_${instanceLabel.replace(/[^a-zA-Z0-9_]/g, "_")}`,
     fields: [
       { name: "__fn", type: binaryen.funcref, mutable: false },
       ...captures.map((capture, index) => ({
@@ -89,19 +96,17 @@ const emitLambdaFunction = ({
   ctx,
   env,
   fnName,
-  instanceKey,
-  typeInstanceKey,
+  typeInstanceId,
   compileExpr,
 }: {
   expr: HirLambdaExpr;
   ctx: CodegenContext;
   env: LambdaEnvInfo;
   fnName: string;
-  instanceKey: string;
-  typeInstanceKey?: string;
+  typeInstanceId?: ProgramFunctionInstanceId;
   compileExpr: ExpressionCompiler;
 }): void => {
-  const desc = ctx.program.arena.get(env.typeId);
+  const desc = ctx.program.types.getTypeDesc(env.typeId);
   if (desc.kind !== "function") {
     throw new Error("lambda missing function type");
   }
@@ -128,8 +133,8 @@ const emitLambdaFunction = ({
       locals: [],
       nextLocalIndex: implParams.length,
       returnTypeId: desc.returnType,
-      instanceKey,
-      typeInstanceKey,
+      instanceId: typeInstanceId,
+      typeInstanceId,
       effectful: true,
       currentHandler: { index: 1, type: handlerParamType },
     };
@@ -207,8 +212,8 @@ const emitLambdaFunction = ({
     locals: [],
     nextLocalIndex: params.length,
     returnTypeId: desc.returnType,
-    instanceKey,
-    typeInstanceKey,
+    instanceId: typeInstanceId,
+    typeInstanceId,
     effectful,
   };
   if (effectful) {
@@ -275,11 +280,11 @@ export const compileLambdaExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  const lambdaTypeId = getRequiredExprType(expr.id, ctx, typeInstanceKey);
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const lambdaTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const base = getClosureTypeInfo(lambdaTypeId, ctx);
-  const lambdaInstanceKey = formatLambdaInstanceKey(expr.id, fnCtx.instanceKey);
-  const key = makeLambdaKey(expr.id, ctx, fnCtx.instanceKey);
+  const lambdaInstanceLabel = formatLambdaInstanceLabel(expr.id, fnCtx.instanceId);
+  const key = makeLambdaKey(expr.id, ctx, fnCtx.instanceId);
 
   let envInfo = ctx.lambdaEnvs.get(key);
   if (!envInfo) {
@@ -303,7 +308,7 @@ export const compileLambdaExpr = (
       captures,
       expr,
       ctx,
-      instanceKey: lambdaInstanceKey,
+      instanceLabel: lambdaInstanceLabel,
     });
     envInfo = { envType, captures, base, typeId: lambdaTypeId };
     ctx.lambdaEnvs.set(key, envInfo);
@@ -315,15 +320,14 @@ export const compileLambdaExpr = (
     fnName = makeLambdaFunctionName({
       expr,
       ctx,
-      instanceKey: lambdaInstanceKey,
+      instanceLabel: lambdaInstanceLabel,
     });
     emitLambdaFunction({
       expr,
       ctx,
       env,
       fnName,
-      instanceKey: lambdaInstanceKey,
-      typeInstanceKey,
+      typeInstanceId,
       compileExpr,
     });
     ctx.lambdaFunctions.set(key, fnName);

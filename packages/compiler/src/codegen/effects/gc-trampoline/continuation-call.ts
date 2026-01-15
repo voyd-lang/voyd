@@ -34,8 +34,8 @@ export const compileContinuationCall = ({
 }): CompiledExpression => {
   const resumeTypeId = continuation.resumeTypeId;
   const resumeWasmType = wasmTypeFor(resumeTypeId, ctx);
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  const callReturnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceKey);
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const callReturnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
   if (resumeWasmType === binaryen.none && expr.args.length > 0) {
     throw new Error("continuation does not take a value");
   }
@@ -49,7 +49,7 @@ export const compileContinuationCall = ({
           if (index > 0) {
             throw new Error("continuation calls accept at most one argument");
           }
-          const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
+          const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
           const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
           return coerceValueToType({
             value: value.expr,
@@ -111,7 +111,7 @@ export const compileContinuationCall = ({
     returnTypeId: callReturnTypeId,
     expectedResultTypeId,
     tailPosition,
-    typeInstanceKey,
+    typeInstanceId,
     ctx,
     fnCtx,
   });

@@ -46,10 +46,10 @@ export const compileEffectOpCall = ({
   if (!signature) {
     throw new Error("codegen missing effect operation signature");
   }
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const args = expr.args.map((arg, index) => {
     const expectedTypeId = signature.parameters[index]?.typeId;
-    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
+    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
     const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
     return coerceValueToType({
       value: value.expr,
@@ -119,7 +119,7 @@ export const compileEffectOpCall = ({
     ctx.mod.unreachable(),
   ];
   return {
-    expr: ctx.mod.block(null, ops, getExprBinaryenType(expr.id, ctx, typeInstanceKey)),
+    expr: ctx.mod.block(null, ops, getExprBinaryenType(expr.id, ctx, typeInstanceId)),
     usedReturnCall: false,
   };
 };

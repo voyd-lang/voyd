@@ -8,6 +8,7 @@ import { createRttContext } from "../rtt/index.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";
 import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
+import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import {
   compileFunctions,
   emitModuleExports,
@@ -16,12 +17,9 @@ import {
 } from "../functions.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
-import {
-  buildProgramCodegenView,
-  type InstanceKey,
-} from "../../semantics/codegen-view/index.js";
+import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
-import type { TypeId } from "../../semantics/ids.js";
+import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
 import type {
   CodegenContext,
   FunctionMetadata,
@@ -84,18 +82,19 @@ const buildCodegenProgram = (
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, Map<number, FunctionMetadata[]>>();
-  const functionInstances = new Map<InstanceKey, FunctionMetadata>();
+  const functionInstances = new Map<ProgramFunctionInstanceId, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const runtimeTypeIdsByKey = new Map<string, number>();
   const runtimeTypeIdCounter = { value: 1 };
+  const diagnostics = new DiagnosticEmitter();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     program,
     module: program.modules.get(sem.moduleId)!,
     mod,
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
-    effectIdOffset: 0,
+    diagnostics,
     options: DEFAULT_OPTIONS,
     functions,
     functionInstances,
@@ -121,12 +120,6 @@ const buildCodegenProgram = (
     },
     outcomeValueTypes,
   }));
-
-  let effectIdOffset = 0;
-  contexts.forEach((ctx) => {
-    ctx.effectIdOffset = effectIdOffset;
-    effectIdOffset += ctx.module.binding.effects.length;
-  });
 
   const siteCounter = { current: 0 };
   contexts.forEach((ctx) => {
@@ -432,9 +425,10 @@ describe("next codegen", () => {
   it("fails codegen for exported generic functions without instantiations", () => {
     const ast = loadAst("uninstantiated_export_generic.voyd");
     const semantics = semanticsPipeline(ast);
-    expect(() => codegen(semantics)).toThrow(
-      /concrete instantiation for exported generic function identity/
-    );
+    const result = codegen(semantics);
+    expect(
+      result.diagnostics.some((diag) => diag.code === "CG0003")
+    ).toBe(true);
   });
 
   it("emits wasm for generic functions", () => {
@@ -554,7 +548,7 @@ describe("next codegen", () => {
     expect(
       typeLines.some(
         (line) =>
-          line.includes("__lambda_env_12_1") && line.includes("(mut i32")
+          line.includes("__lambda_env_12_") && line.includes("(mut i32")
       )
     ).toBe(true);
     const callRefs = text

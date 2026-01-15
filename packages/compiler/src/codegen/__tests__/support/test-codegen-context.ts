@@ -3,6 +3,7 @@ import type { CodegenContext, HirExpression, HirExprId, TypeId } from "../../con
 import { createEffectRuntime } from "../../effects/runtime-abi.js";
 import { createEffectsState } from "../../effects/state.js";
 import { selectEffectsBackend } from "../../effects/codegen-backend.js";
+import { DiagnosticEmitter } from "../../../diagnostics/index.js";
 
 type TypeDescriptor =
   | { kind: "primitive"; name: string }
@@ -17,6 +18,7 @@ export const createTestCodegenContext = (): {
   const mod = new binaryen.Module();
   mod.setFeatures(binaryen.Features.All);
   const effectsRuntime = createEffectRuntime(mod);
+  const diagnostics = new DiagnosticEmitter();
 
   const descriptors = new Map<TypeId, TypeDescriptor>();
   const exprTypes = new Map<HirExprId, TypeId>();
@@ -24,7 +26,13 @@ export const createTestCodegenContext = (): {
 
   const moduleView = {
     moduleId: "test",
-    binding: {} as any,
+    meta: {
+      moduleId: "test",
+      packageId: "test",
+      isPackageRoot: true,
+      imports: [],
+      effects: [],
+    },
     hir: { expressions } as any,
     effects: { isEmpty: () => true, getRow: () => ({ operations: [] }) } as any,
     types: {
@@ -47,18 +55,15 @@ export const createTestCodegenContext = (): {
     mod,
     moduleId: "test",
     moduleLabel: "test",
-    effectIdOffset: 0,
     program: {
-      arena: {
-        get: (id: number) => {
-          const desc = descriptors.get(id);
-          if (!desc) {
-            throw new Error(`missing descriptor for type ${id}`);
-          }
-          return desc as any;
-        },
-      },
-      effects: { isEmpty: () => true, getRow: () => ({ operations: [] }) } as any,
+      effects: {
+        isEmpty: () => true,
+        getRow: () => ({ operations: [] }),
+        getOrderedModules: () => ["test"],
+        getGlobalId: () => undefined,
+        getByGlobalId: () => undefined,
+        getEffectCount: () => 0,
+      } as any,
       primitives: {
         unknown: -1,
         void: -2,
@@ -70,7 +75,16 @@ export const createTestCodegenContext = (): {
         defaultEffectRow: 0,
       } as any,
       types: {
-        getTypeDesc: () => ({} as any),
+        getTypeDesc: (id: number) => {
+          const desc = descriptors.get(id);
+          if (!desc) {
+            throw new Error(`missing descriptor for type ${id}`);
+          }
+          return desc as any;
+        },
+        getScheme: () => ({ id: 0, params: [], body: 0 }),
+        instantiate: () => 0,
+        unify: () => ({ ok: false, conflict: { left: 0, right: 0, message: "unsupported" } }),
         getNominalOwner: () => undefined,
         getNominalAncestry: () => [],
         getStructuralLayout: () => undefined,
@@ -92,6 +106,15 @@ export const createTestCodegenContext = (): {
         getSignature: () => undefined,
         getInstantiationInfo: () => undefined,
         getInstanceExprType: () => undefined,
+        getFunctionId: () => undefined,
+        getInstanceId: () => undefined,
+        getFunctionRef: () => undefined,
+        getInstance: () => ({
+          functionId: 0 as any,
+          typeArgs: [],
+          symbolRef: { moduleId: "test", symbol: 0 },
+        }),
+        formatInstance: () => "instance0",
       },
       optionals: { getOptionalInfo: () => undefined },
       objects: {
@@ -108,10 +131,15 @@ export const createTestCodegenContext = (): {
       calls: {
         getCallInfo: () => ({ traitDispatch: false }),
       },
-      instances: { getAll: () => [], getByKey: () => undefined },
+      instances: { getAll: () => [], getById: () => undefined },
+      imports: {
+        getLocal: () => undefined,
+        getTarget: () => undefined,
+      },
       modules: new Map([["test", moduleView as any]]),
     } as any,
     module: moduleView as any,
+    diagnostics,
     options: {
       optimize: false,
       validate: false,

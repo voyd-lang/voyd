@@ -12,6 +12,7 @@ import { createEffectsState } from "../effects/state.js";
 import type { CodegenContext } from "../context.js";
 import { runEffectfulExport } from "./support/effects-harness.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
+import { DiagnosticEmitter } from "../../diagnostics/index.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -41,13 +42,14 @@ const buildLoweringSnapshot = () => {
   mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
+  const diagnostics = new DiagnosticEmitter();
   const ctx: CodegenContext = {
     mod,
     moduleId: semantics.moduleId,
     moduleLabel: sanitize(semantics.hir.module.path),
-    effectIdOffset: 0,
     program,
     module: moduleView,
+    diagnostics,
     options: {
       optimize: false,
       validate: true,
@@ -89,11 +91,20 @@ const buildLoweringSnapshot = () => {
       siteOrder: site.siteOrder,
       function:
         site.owner.kind === "function"
-          ? ctx.program.symbols.getLocalName(ctx.moduleId, site.owner.symbol) ??
-            `${site.owner.symbol}`
+          ? ctx.program.symbols.getName(
+              ctx.program.symbols.idOf({
+                moduleId: ctx.moduleId,
+                symbol: site.owner.symbol,
+              })
+            ) ?? `${site.owner.symbol}`
           : "__lambda__",
-      effect: ctx.program.symbols.getLocalName(ctx.moduleId, site.effectSymbol) ??
-        `${site.effectSymbol}`,
+      effect:
+        ctx.program.symbols.getName(
+          ctx.program.symbols.idOf({
+            moduleId: ctx.moduleId,
+            symbol: site.effectSymbol,
+          })
+        ) ?? `${site.effectSymbol}`,
       envFields: site.envFields.map((field) => ({
         name: field.name,
         sourceKind: field.sourceKind,

@@ -6,6 +6,7 @@ import type {
   HirExprId,
   TypeId,
 } from "../../context.js";
+import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
 import type { ContinuationCallSite } from "../effect-lowering.js";
 import { ensureDispatcher } from "../dispatcher.js";
 import { handlerCleanupOps } from "../handler-stack.js";
@@ -28,7 +29,7 @@ export const lowerEffectfulCallResult = ({
   returnTypeId,
   expectedResultTypeId,
   tailPosition,
-  typeInstanceKey,
+  typeInstanceId,
   ctx,
   fnCtx,
 }: {
@@ -37,11 +38,11 @@ export const lowerEffectfulCallResult = ({
   returnTypeId: TypeId;
   expectedResultTypeId?: TypeId;
   tailPosition: boolean;
-  typeInstanceKey?: string;
+  typeInstanceId?: ProgramFunctionInstanceId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): CompiledExpression => {
-  const lookupKey = typeInstanceKey ?? fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const lookupKey = typeInstanceId ?? fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const valueType = wasmTypeFor(returnTypeId, ctx);
   const outcomeTemp = allocateTempLocal(ctx.effectsRuntime.outcomeType, fnCtx);
   const ops: binaryen.ExpressionRef[] = [ctx.mod.local.set(outcomeTemp.index, callExpr)];
@@ -151,4 +152,3 @@ export const lowerEffectfulCallResult = ({
     usedReturnCall: false,
   };
 };
-

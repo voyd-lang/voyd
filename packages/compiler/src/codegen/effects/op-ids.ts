@@ -18,8 +18,17 @@ export const getEffectOpIds = (
 
   const resumeKind =
     info.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
+  const effectId = ctx.program.effects.getGlobalId(
+    ctx.moduleId,
+    info.localEffectIndex
+  );
+  if (typeof effectId !== "number") {
+    throw new Error(
+      `codegen missing global effect id for ${ctx.moduleId}:${info.localEffectIndex}`
+    );
+  }
   return {
-    effectId: ctx.effectIdOffset + info.localEffectIndex,
+    effectId,
     opId: info.opIndex,
     resumeKind,
     effectSymbol: info.effectSymbol,

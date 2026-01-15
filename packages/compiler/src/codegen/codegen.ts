@@ -28,10 +28,10 @@ import { createEffectsState } from "./effects/state.js";
 import {
   buildProgramCodegenView,
   type ProgramCodegenView,
-  type InstanceKey,
 } from "../semantics/codegen-view/index.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
-import type { TypeId } from "../semantics/ids.js";
+import type { ProgramFunctionInstanceId, TypeId } from "../semantics/ids.js";
+import { DiagnosticEmitter } from "../diagnostics/index.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
@@ -77,18 +77,19 @@ export const codegenProgram = ({
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, Map<number, FunctionMetadata[]>>();
-  const functionInstances = new Map<InstanceKey, FunctionMetadata>();
+  const functionInstances = new Map<ProgramFunctionInstanceId, FunctionMetadata>();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const runtimeTypeIdsByKey = new Map<string, number>();
   const runtimeTypeIdCounter = { value: 1 };
+  const diagnostics = new DiagnosticEmitter();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
-    effectIdOffset: 0,
     program,
     module: sem,
+    diagnostics,
     options: mergedOptions,
     functions,
     functionInstances,
@@ -117,12 +118,6 @@ export const codegenProgram = ({
     },
     outcomeValueTypes,
   }));
-
-  let effectIdOffset = 0;
-  contexts.forEach((ctx) => {
-    ctx.effectIdOffset = effectIdOffset;
-    effectIdOffset += ctx.module.binding.effects.length;
-  });
 
   const siteCounter = { current: 0 };
   contexts.forEach((ctx) => {
@@ -159,7 +154,7 @@ export const codegenProgram = ({
     }
   }
 
-  return { module: mod, effectTable };
+  return { module: mod, effectTable, diagnostics: [...diagnostics.diagnostics] };
 };
 
 export const codegenProgramWithContinuationFallback = ({

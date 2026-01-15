@@ -60,7 +60,7 @@ const findLambdaByExprId = (
   ctx.module.types.getResolvedExprType(exprId) ??
     ctx.module.types.getExprType(exprId) ??
     ctx.program.primitives.unknown;
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind !== "function") {
     throw new Error("lambda missing function type");
   }
@@ -116,7 +116,9 @@ const sameContinuationOwner = (
 };
 
 const shouldCaptureIdentifierSymbol = (symbol: SymbolId, ctx: CodegenContext): boolean =>
-  !ctx.program.symbols.isModuleScoped(ctx.moduleId, symbol);
+  !ctx.program.symbols.isModuleScoped(
+    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
+  );
 
 const collectHandlerClauseLocalSymbols = ({
   handlerExprId,
@@ -281,8 +283,8 @@ export const ensureContinuationFunction = ({
     locals,
     nextLocalIndex: params.length,
     returnTypeId,
-    instanceKey: undefined,
-    typeInstanceKey: undefined,
+    instanceId: undefined,
+    typeInstanceId: undefined,
     effectful: true,
   };
 

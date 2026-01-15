@@ -33,8 +33,12 @@ export const getRequiredBinding = (
 ): LocalBinding => {
   const binding = fnCtx.bindings.get(symbol);
   if (!binding) {
+    const name =
+      ctx.program.symbols.getName(
+        ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
+      ) ?? `${symbol}`;
     throw new Error(
-      `codegen missing binding for symbol ${ctx.program.symbols.getLocalName(ctx.moduleId, symbol) ?? symbol}`
+      `codegen missing binding for symbol ${name}`
     );
   }
   return binding;

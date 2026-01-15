@@ -172,6 +172,7 @@ export const emitProgram = async ({
 }: EmitProgramOptions): Promise<{
   wasm: Uint8Array;
   module: binaryen.Module;
+  diagnostics: Diagnostic[];
 }> => {
   const { orderedModules, entry } = lowerProgram({ graph, semantics });
   const targetModuleId = entryModuleId ?? entry;
@@ -203,7 +204,7 @@ export const emitProgram = async ({
       : (binary as { binary?: Uint8Array; output?: Uint8Array }).output ??
         (binary as { binary?: Uint8Array }).binary ??
         new Uint8Array();
-  return { wasm, module: result.module };
+  return { wasm, module: result.module, diagnostics: result.diagnostics };
 };
 
 export type ContinuationFallbackBundle = {
@@ -290,12 +291,13 @@ export const compileProgram = async (
       linkSemantics: shouldLinkSemantics,
     });
 
-    return {
-      graph,
-      semantics,
-      wasm: wasmResult.wasm,
-      diagnostics,
-    };
+    diagnostics.push(...wasmResult.diagnostics);
+
+    if (diagnostics.some((diag) => diag.severity === "error")) {
+      return { graph, semantics, diagnostics };
+    }
+
+    return { graph, semantics, wasm: wasmResult.wasm, diagnostics };
   } catch (error) {
     diagnostics.push(
       codegenErrorToDiagnostic(error, {

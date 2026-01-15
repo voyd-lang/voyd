@@ -27,8 +27,8 @@ export const compileObjectLiteralExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  const typeId = getRequiredExprType(expr.id, ctx, typeInstanceKey);
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const typeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo) {
     throw new Error("object literal missing structural type information");
@@ -51,7 +51,7 @@ export const compileObjectLiteralExpr = (
         );
       }
       const expectedTypeId = structInfo.fieldMap.get(entry.name)?.typeId;
-      const actualTypeId = getRequiredExprType(entry.value, ctx, typeInstanceKey);
+      const actualTypeId = getRequiredExprType(entry.value, ctx, typeInstanceId);
       const value = compileExpr({ exprId: entry.value, ctx, fnCtx });
       const coerced = coerceValueToType({
         value: value.expr,
@@ -73,7 +73,7 @@ export const compileObjectLiteralExpr = (
     const spreadType = getRequiredExprType(
       entry.value,
       ctx,
-      typeInstanceKey
+      typeInstanceId
     );
     const spreadInfo = getStructuralTypeInfo(spreadType, ctx);
     if (!spreadInfo) {
@@ -181,7 +181,7 @@ export const compileObjectLiteralExpr = (
     expr: ctx.mod.block(
       null,
       ops,
-      getExprBinaryenType(expr.id, ctx, typeInstanceKey)
+      getExprBinaryenType(expr.id, ctx, typeInstanceId)
     ),
     usedReturnCall: false,
   };
@@ -193,8 +193,8 @@ export const compileTupleExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  const typeId = getRequiredExprType(expr.id, ctx, typeInstanceKey);
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const typeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo) {
     throw new Error("tuple missing structural type information");
@@ -254,7 +254,7 @@ export const compileTupleExpr = (
     expr: ctx.mod.block(
       null,
       ops,
-      getExprBinaryenType(expr.id, ctx, typeInstanceKey)
+      getExprBinaryenType(expr.id, ctx, typeInstanceId)
     ),
     usedReturnCall: false,
   };
@@ -266,11 +266,11 @@ export const compileFieldAccessExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const targetType = getRequiredExprType(
     expr.target,
     ctx,
-    typeInstanceKey
+    typeInstanceId
   );
   const structInfo = getStructuralTypeInfo(targetType, ctx);
   if (!structInfo) {

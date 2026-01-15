@@ -23,16 +23,13 @@ import type {
   FixedArrayWasmType,
 } from "./context.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
-import type { SymbolRef } from "../semantics/typing/symbol-ref.js";
-import type { TraitImplInstance } from "../semantics/typing/types.js";
+import type { CodegenTraitImplInstance } from "../semantics/codegen-view/index.js";
+import type { ProgramFunctionInstanceId, ProgramSymbolId } from "../semantics/ids.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
-
-const canonicalSymbolKey = (ref: SymbolRef): string =>
-  `${ref.moduleId}#${ref.symbol}`;
 
 const runtimeTypeKeyFor = (
   typeId: TypeId,
@@ -44,18 +41,18 @@ const runtimeTypeKeyFor = (
   }
   seen.add(typeId);
 
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   switch (desc.kind) {
     case "primitive":
       return `prim:${desc.name}`;
     case "type-param-ref":
       return `typeparam:${desc.param}`;
     case "nominal-object":
-      return `nominal:${canonicalSymbolKey(desc.owner)}<${desc.typeArgs
+      return `nominal:${desc.owner}<${desc.typeArgs
         .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
         .join(",")}>`;
     case "trait":
-      return `trait:${canonicalSymbolKey(desc.owner)}<${desc.typeArgs
+      return `trait:${desc.owner}<${desc.typeArgs
         .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
         .join(",")}>`;
     case "structural-object":
@@ -117,7 +114,9 @@ const runtimeTypeIdFor = (typeId: TypeId, ctx: CodegenContext): number =>
   })();
 
 const getLocalSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
-  ctx.program.symbols.getLocalName(ctx.moduleId, symbol) ?? `${symbol}`;
+  ctx.program.symbols.getName(
+    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
+  ) ?? `${symbol}`;
 
 export const getFunctionRefType = ({
   params,
@@ -278,7 +277,7 @@ export const getClosureTypeInfo = (
   typeId: TypeId,
   ctx: CodegenContext
 ): ClosureTypeInfo => {
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind !== "function") {
     throw new Error("expected function type for closure info");
   }
@@ -295,7 +294,7 @@ export const getFixedArrayWasmTypes = (
   ctx: CodegenContext,
   seen: Set<TypeId> = new Set()
 ): FixedArrayWasmType => {
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind !== "fixed-array") {
     throw new Error("intrinsic requires a fixed-array type");
   }
@@ -318,7 +317,7 @@ export const wasmTypeFor = (
 ): binaryen.Type => {
   const already = seen.has(typeId);
   if (already) {
-    const desc = ctx.program.arena.get(typeId);
+    const desc = ctx.program.types.getTypeDesc(typeId);
     if (desc.kind === "function") {
       return binaryen.funcref;
     }
@@ -327,7 +326,7 @@ export const wasmTypeFor = (
   seen.add(typeId);
 
   try {
-    const desc = ctx.program.arena.get(typeId);
+    const desc = ctx.program.types.getTypeDesc(typeId);
     if (desc.kind === "primitive") {
       return mapPrimitiveToWasm(desc.name);
     }
@@ -426,25 +425,21 @@ export const getSymbolTypeId = (
 const getInstanceExprType = (
   exprId: HirExprId,
   ctx: CodegenContext,
-  instanceKey?: string
+  instanceId?: ProgramFunctionInstanceId
 ): TypeId | undefined => {
-  if (!instanceKey) {
+  if (typeof instanceId !== "number") {
     return undefined;
   }
-  const instanceType = ctx.program.functions.getInstanceExprType(
-    ctx.moduleId,
-    instanceKey,
-    exprId
-  );
+  const instanceType = ctx.program.functions.getInstanceExprType(instanceId, exprId);
   return typeof instanceType === "number" ? instanceType : undefined;
 };
 
 export const getRequiredExprType = (
   exprId: HirExprId,
   ctx: CodegenContext,
-  instanceKey?: string
+  instanceId?: ProgramFunctionInstanceId
 ): TypeId => {
-  const instanceType = getInstanceExprType(exprId, ctx, instanceKey);
+  const instanceType = getInstanceExprType(exprId, ctx, instanceId);
   if (typeof instanceType === "number") {
     return instanceType;
   }
@@ -462,9 +457,9 @@ export const getRequiredExprType = (
 export const getExprBinaryenType = (
   exprId: HirExprId,
   ctx: CodegenContext,
-  instanceKey?: string
+  instanceId?: ProgramFunctionInstanceId
 ): binaryen.Type => {
-  const instanceType = getInstanceExprType(exprId, ctx, instanceKey);
+  const instanceType = getInstanceExprType(exprId, ctx, instanceId);
   if (typeof instanceType === "number") {
     return wasmTypeFor(instanceType, ctx);
   }
@@ -519,7 +514,7 @@ export const getStructuralTypeInfo = (
   seen.add(typeId);
 
   try {
-    const desc = ctx.program.arena.get(structuralId);
+    const desc = ctx.program.types.getTypeDesc(structuralId);
     if (desc.kind !== "structural-object") {
       return undefined;
     }
@@ -644,7 +639,7 @@ export const resolveStructuralTypeId = (
   typeId: TypeId,
   ctx: CodegenContext
 ): TypeId | undefined => {
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind === "structural-object") {
     return typeId;
   }
@@ -671,7 +666,7 @@ const makeRuntimeTypeLabel = ({
 };
 
 const isUnknownPrimitive = (typeId: TypeId, ctx: CodegenContext): boolean => {
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   return desc.kind === "primitive" && desc.name === "unknown";
 };
 
@@ -722,7 +717,7 @@ const buildRuntimeAncestors = ({
     if (typeof nominalId !== "number") {
       return;
     }
-    const sourceDesc = ctx.program.arena.get(nominalId);
+    const sourceDesc = ctx.program.types.getTypeDesc(nominalId);
     if (
       sourceDesc.kind !== "nominal-object" ||
       sourceDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
@@ -739,7 +734,7 @@ const buildRuntimeAncestors = ({
       if (!info || info.nominal !== candidateNominal) {
         return;
       }
-      const targetDesc = ctx.program.arena.get(candidateNominal);
+      const targetDesc = ctx.program.types.getTypeDesc(candidateNominal);
       if (
         targetDesc.kind !== "nominal-object" ||
         targetDesc.typeArgs.length !== sourceDesc.typeArgs.length ||
@@ -750,7 +745,7 @@ const buildRuntimeAncestors = ({
 
       const compatible = sourceDesc.typeArgs.every((arg, index) => {
         const targetArg = targetDesc.typeArgs[index]!;
-        const forward = ctx.program.arena.unify(arg, targetArg, {
+        const forward = ctx.program.types.unify(arg, targetArg, {
           location: ctx.module.hir.module.ast,
           reason: "nominal instantiation compatibility",
           variance: "covariant",
@@ -786,7 +781,7 @@ const createMethodLookupEntries = ({
   typeLabel,
   runtimeType,
 }: {
-  impls: readonly TraitImplInstance[];
+  impls: readonly CodegenTraitImplInstance[];
   ctx: CodegenContext;
   typeLabel: string;
   runtimeType: binaryen.Type;
@@ -798,12 +793,13 @@ const createMethodLookupEntries = ({
   const hashes = new Map<number, string>();
 
   impls.forEach((impl) => {
-    impl.methods.forEach((implMethodSymbol: number, traitMethodSymbol: number) => {
-      const metas = ctx.functions.get(ctx.moduleId)?.get(implMethodSymbol);
+    impl.methods.forEach(({ traitMethod, implMethod }) => {
+      const implRef = ctx.program.symbols.refOf(implMethod as ProgramSymbolId);
+      const metas = ctx.functions.get(implRef.moduleId)?.get(implRef.symbol);
       const meta = pickMethodMetadata(metas);
       if (!meta) {
         throw new Error(
-          `codegen missing metadata for trait method impl ${implMethodSymbol}`
+          `codegen missing metadata for trait method impl ${implMethod}`
         );
       }
       const handlerParamType = ctx.effectsRuntime.handlerFrameType;
@@ -815,7 +811,7 @@ const createMethodLookupEntries = ({
       const params = meta.effectful
         ? [handlerParamType, ctx.rtt.baseType, ...userParamTypes]
         : [ctx.rtt.baseType, ...userParamTypes];
-      const wrapperName = `${typeLabel}__method_${impl.traitSymbol}_${traitMethodSymbol}`;
+      const wrapperName = `${typeLabel}__method_${impl.traitSymbol}_${traitMethod}`;
       const wrapper = ctx.mod.addFunction(
         wrapperName,
         binaryen.createType(params as number[]),
@@ -854,9 +850,9 @@ const createMethodLookupEntries = ({
       const fnType = bin._BinaryenTypeFromHeapType(heapType, false);
       const hash = traitMethodHash({
         traitSymbol: impl.traitSymbol,
-        methodSymbol: traitMethodSymbol,
+        methodSymbol: traitMethod,
       });
-      const signatureKey = `${impl.traitSymbol}:${traitMethodSymbol}`;
+      const signatureKey = `${impl.traitSymbol}:${traitMethod}`;
       const existing = hashes.get(hash);
       if (existing && existing !== signatureKey) {
         throw new Error(
@@ -892,7 +888,7 @@ const getNominalComponentId = (
   typeId: TypeId,
   ctx: CodegenContext
 ): TypeId | undefined => {
-  const desc = ctx.program.arena.get(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind === "nominal-object") {
     return typeId;
   }

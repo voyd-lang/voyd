@@ -153,7 +153,15 @@ const compileModule = async (entryPath: string, optimize = false) => {
     assertNoDiagnostics(diagnostics);
   }
 
-  const { module } = await emitProgram({ graph, semantics });
+  const { module, diagnostics: codegenDiagnostics } = await emitProgram({
+    graph,
+    semantics,
+  });
+
+  const allDiagnostics = [...diagnostics, ...codegenDiagnostics];
+  if (hasErrorDiagnostics(allDiagnostics)) {
+    assertNoDiagnostics(allDiagnostics);
+  }
 
   if (optimize) {
     binaryen.setShrinkLevel(3);

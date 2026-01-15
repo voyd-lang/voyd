@@ -8,7 +8,7 @@ import binaryen from "binaryen";
 import { analyzeModules, emitProgram, loadModuleGraph } from "@voyd/compiler/pipeline.js";
 import { codegenErrorToDiagnostic } from "@voyd/compiler/codegen/diagnostics.js";
 import type { CodegenOptions } from "@voyd/compiler/codegen/context.js";
-import { formatDiagnostic } from "@voyd/compiler/diagnostics/index.js";
+import { DiagnosticError, formatDiagnostic } from "@voyd/compiler/diagnostics/index.js";
 import type { ModuleHost, ModuleRoots } from "@voyd/compiler/modules/types.js";
 
 const STD_ROOT = "/std";
@@ -58,7 +58,7 @@ export const compileParsedModule = async (
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
   const error = diagnostics.find((diag) => diag.severity === "error");
   if (error) {
-    throw new Error(formatDiagnostic(error));
+    throw new DiagnosticError(error);
   }
 
   try {
@@ -68,12 +68,21 @@ export const compileParsedModule = async (
       codegenOptions: options.codegenOptions,
       entryModuleId: options.entryModuleId,
     });
+    const codegenError = result.diagnostics.find(
+      (diagnostic) => diagnostic.severity === "error"
+    );
+    if (codegenError) {
+      throw new DiagnosticError(codegenError);
+    }
     return result.module;
   } catch (errorThrown) {
+    if (errorThrown instanceof DiagnosticError) {
+      throw errorThrown;
+    }
     const diagnostic = codegenErrorToDiagnostic(errorThrown, {
       moduleId: options.entryModuleId ?? graph.entry,
     });
-    throw new Error(formatDiagnostic(diagnostic));
+    throw new DiagnosticError(diagnostic);
   }
 };
 

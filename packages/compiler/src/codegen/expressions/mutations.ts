@@ -25,7 +25,7 @@ export const compileAssignExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   if (expr.pattern) {
     const ops: binaryen.ExpressionRef[] = [];
     compilePatternInitialization({
@@ -51,14 +51,14 @@ export const compileAssignExpr = (
     throw new Error("assignment missing target expression");
   }
 
-  const valueTypeId = getRequiredExprType(expr.value, ctx, typeInstanceKey);
+  const valueTypeId = getRequiredExprType(expr.value, ctx, typeInstanceId);
   const valueExpr = compileExpr({ exprId: expr.value, ctx, fnCtx });
 
   if (targetExpr.exprKind === "field-access") {
     const structTypeId = getRequiredExprType(
       targetExpr.target,
       ctx,
-      typeInstanceKey
+      typeInstanceId
     );
     const structInfo = getStructuralTypeInfo(structTypeId, ctx);
     if (!structInfo) {
@@ -71,7 +71,7 @@ export const compileAssignExpr = (
     const targetTypeId = getRequiredExprType(
       expr.target,
       ctx,
-      typeInstanceKey
+      typeInstanceId
     );
     const coerced = coerceValueToType({
       value: valueExpr.expr,

@@ -185,8 +185,8 @@ const emitClauseFunction = ({
     locals: [],
     nextLocalIndex: params.length,
     returnTypeId: signature.returnType,
-    instanceKey: undefined,
-    typeInstanceKey: undefined,
+    instanceId: undefined,
+    typeInstanceId: undefined,
     effectful: true,
     currentHandler: { index: 0, type: ctx.effectsRuntime.handlerFrameType },
   };
@@ -265,7 +265,7 @@ const emitClauseFunction = ({
     const continuationTypeId =
       ctx.module.types.getValueType(clause.parameters[0].symbol) ??
       ctx.program.primitives.unknown;
-    const continuationDesc = ctx.program.arena.get(continuationTypeId);
+    const continuationDesc = ctx.program.types.getTypeDesc(continuationTypeId);
     const resumeTypeId =
       continuationDesc.kind === "function"
         ? continuationDesc.parameters[0]?.type ?? ctx.program.primitives.void
@@ -337,7 +337,7 @@ const emitClauseFunction = ({
           const continuationTypeId = ctx.module.types.getValueType(
             clause.parameters[0].symbol
           ) as TypeId;
-          const desc = ctx.program.arena.get(continuationTypeId);
+          const desc = ctx.program.types.getTypeDesc(continuationTypeId);
           return desc.kind === "function" ? desc.returnType : signature.returnType;
         })()
       : signature.returnType;
@@ -500,7 +500,7 @@ export const compileEffectHandlerExpr = (
   );
   pushHandlerScope(fnCtx, { prevHandler: prevHandlerLocal, label: expr.id });
 
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const body = compileExpr({
     exprId: expr.body,
     ctx,
@@ -508,7 +508,7 @@ export const compileEffectHandlerExpr = (
     tailPosition,
     expectedResultTypeId,
   });
-  const resultType = getRequiredExprType(expr.id, ctx, typeInstanceKey);
+  const resultType = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const resultWasmType = wasmTypeFor(resultType, ctx);
   const resultLocal =
     resultWasmType === binaryen.none

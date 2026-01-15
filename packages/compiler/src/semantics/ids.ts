@@ -26,6 +26,13 @@ export type TypeParamId = number;
 
 export type EffectRowId = number;
 
+export type ProgramSymbolId = number & { readonly __brand: "ProgramSymbolId" };
+// Function symbols are a subset of program symbols; use the canonical program-wide id.
+export type ProgramFunctionId = ProgramSymbolId;
+export type ProgramFunctionInstanceId = number & {
+  readonly __brand: "ProgramFunctionInstanceId";
+};
+
 export type {
   SourceSpan,
   DiagnosticSeverity,

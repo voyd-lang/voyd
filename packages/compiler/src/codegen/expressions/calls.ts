@@ -11,8 +11,8 @@ import type {
   SymbolId,
   TypeId,
 } from "../context.js";
-import type { EffectRowId } from "../../semantics/ids.js";
-import type { SymbolRef } from "../../semantics/typing/symbol-ref.js";
+import type { EffectRowId, ProgramFunctionInstanceId } from "../../semantics/ids.js";
+import type { ProgramSymbolId } from "../../semantics/ids.js";
 import { compileIntrinsicCall } from "../intrinsics.js";
 import {
   requiresStructuralConversion,
@@ -38,7 +38,6 @@ import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
 import type { GroupContinuationCfg } from "../effects/continuation-cfg.js";
 import { effectsFacade } from "../effects/facade.js";
-import { makeInstanceKey } from "../../semantics/codegen-view/index.js";
 import { compileOptionalNoneValue } from "../optionals.js";
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
@@ -131,7 +130,7 @@ const compileCallArgExpressionsWithTemps = ({
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): binaryen.ExpressionRef[] => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const tempSpecs = ctx.effectLowering.callArgTemps.get(callId) ?? [];
   const tempsByIndex = new Map(
     tempSpecs.map((entry) => [entry.argIndex, entry.tempId] as const)
@@ -146,7 +145,7 @@ const compileCallArgExpressionsWithTemps = ({
 
   return args.map((arg, index) => {
     const expectedTypeId = expectedTypeIdAt(index);
-    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
+    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
     const tempId = tempsByIndex.get(index);
     if (typeof tempId !== "number") {
       const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
@@ -206,8 +205,8 @@ export const compileCallExpr = (
   options: CompileCallOptions = {}
 ): CompiledExpression => {
   const { tailPosition = false, expectedResultTypeId } = options;
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  const callInstanceKey = fnCtx.instanceKey ?? typeInstanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const callInstanceId = fnCtx.instanceId ?? typeInstanceId;
   const callee = ctx.module.hir.expressions.get(expr.callee);
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
   const expectTraitDispatch = callInfo.traitDispatch;
@@ -232,12 +231,16 @@ export const compileCallExpr = (
 
   if (callee.exprKind === "overload-set") {
     const targets = callInfo.targets;
-    const targetSymbol =
-      (callInstanceKey && targets?.get(callInstanceKey)) ??
-      (typeInstanceKey && targets?.get(typeInstanceKey)) ??
+    const targetFunctionId =
+      (callInstanceId && targets?.get(callInstanceId)) ??
+      (typeInstanceId && targets?.get(typeInstanceId)) ??
       (targets && targets.size === 1
         ? targets.values().next().value
         : undefined);
+    const targetSymbol =
+      typeof targetFunctionId === "number"
+        ? localSymbolForProgramSymbolId(targetFunctionId as ProgramSymbolId, ctx)
+        : undefined;
     if (typeof targetSymbol !== "number") {
       throw new Error("codegen missing overload resolution for indirect call");
     }
@@ -276,12 +279,12 @@ export const compileCallExpr = (
     return emitResolvedCall(targetMeta, args, expr.id, ctx, fnCtx, {
       tailPosition,
       expectedResultTypeId,
-      typeInstanceKey,
+      typeInstanceId,
     });
   }
 
-  const calleeTypeId = getRequiredExprType(expr.callee, ctx, typeInstanceKey);
-  const calleeDesc = ctx.program.arena.get(calleeTypeId);
+  const calleeTypeId = getRequiredExprType(expr.callee, ctx, typeInstanceId);
+  const calleeDesc = ctx.program.types.getTypeDesc(calleeTypeId);
 
   if (callee.exprKind === "identifier") {
     const effects = effectsFacade(ctx);
@@ -294,14 +297,9 @@ export const compileCallExpr = (
         compileExpr,
       });
     }
-    const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      ctx.moduleId,
-      callee.symbol
-    );
-    const intrinsicName = ctx.program.symbols.getIntrinsicName(
-      ctx.moduleId,
-      callee.symbol
-    );
+    const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+    const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
+    const intrinsicName = ctx.program.symbols.getIntrinsicName(calleeId);
     const traitDispatch = compileTraitDispatchCall({
       expr,
       calleeSymbol: callee.symbol,
@@ -335,13 +333,13 @@ export const compileCallExpr = (
         expr: compileIntrinsicCall({
           name:
             intrinsicName ??
-            ctx.program.symbols.getLocalName(ctx.moduleId, callee.symbol) ??
+            ctx.program.symbols.getName(calleeId) ??
             `${callee.symbol}`,
           call: expr,
           args,
           ctx,
           fnCtx,
-          instanceKey: typeInstanceKey,
+          instanceId: typeInstanceId,
         }),
         usedReturnCall: false,
       };
@@ -357,7 +355,7 @@ export const compileCallExpr = (
       return emitResolvedCall(meta, args, expr.id, ctx, fnCtx, {
         tailPosition,
         expectedResultTypeId,
-        typeInstanceKey,
+        typeInstanceId,
       });
     }
   }
@@ -409,21 +407,21 @@ const compileTraitDispatchCall = ({
   if (expr.args.length === 0) {
     return undefined;
   }
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
-  const mapping = ctx.program.traits.getTraitMethodImpl(calleeSymbol);
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const mapping = ctx.program.traits.getTraitMethodImpl(
+    ctx.program.symbols.canonicalIdOf(ctx.moduleId, calleeSymbol)
+  );
   if (!mapping) {
     return undefined;
   }
   const receiverTypeId = getRequiredExprType(
     expr.args[0].expr,
     ctx,
-    typeInstanceKey
+    typeInstanceId
   );
-  const receiverDesc = ctx.program.arena.get(receiverTypeId);
+  const receiverDesc = ctx.program.types.getTypeDesc(receiverTypeId);
   const receiverTraitSymbol =
-    receiverDesc.kind === "trait"
-      ? localSymbolForSymbolRef(receiverDesc.owner, ctx)
-      : undefined;
+    receiverDesc.kind === "trait" ? receiverDesc.owner : undefined;
   if (
     receiverDesc.kind !== "trait" ||
     receiverTraitSymbol !== mapping.traitSymbol
@@ -486,7 +484,7 @@ const compileTraitDispatchCall = ({
       return loadReceiver();
     }
     const expectedTypeId = meta.paramTypeIds[index];
-    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
+    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
     const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
     return coerceValueToType({
       value: value.expr,
@@ -510,16 +508,16 @@ const compileTraitDispatchCall = ({
     ? ctx.effectsBackend.lowerEffectfulCallResult({
         callExpr,
         callId: expr.id,
-        returnTypeId: getRequiredExprType(expr.id, ctx, typeInstanceKey),
+        returnTypeId: getRequiredExprType(expr.id, ctx, typeInstanceId),
         expectedResultTypeId,
         tailPosition,
-        typeInstanceKey,
+        typeInstanceId,
         ctx,
         fnCtx,
       })
     : { expr: callExpr, usedReturnCall: false };
   ops.push(lowered.expr);
-  const binaryenResult = getExprBinaryenType(expr.id, ctx, typeInstanceKey);
+  const binaryenResult = getExprBinaryenType(expr.id, ctx, typeInstanceId);
 
   return {
     expr: ops.length === 1 ? ops[0]! : ctx.mod.block(null, ops, binaryenResult),
@@ -527,17 +525,15 @@ const compileTraitDispatchCall = ({
   };
 };
 
-const localSymbolForSymbolRef = (
-  ref: SymbolRef,
+const localSymbolForProgramSymbolId = (
+  symbolId: ProgramSymbolId,
   ctx: CodegenContext
 ): SymbolId | undefined => {
+  const ref = ctx.program.symbols.refOf(symbolId);
   if (ref.moduleId === ctx.moduleId) {
     return ref.symbol;
   }
-  const match = ctx.module.binding.imports.find(
-    (imp) => imp.target?.moduleId === ref.moduleId && imp.target?.symbol === ref.symbol
-  );
-  return match?.local;
+  return ctx.program.imports.getLocal(ctx.moduleId, symbolId);
 };
 
 const emitResolvedCall = (
@@ -551,9 +547,9 @@ const emitResolvedCall = (
   const {
     tailPosition = false,
     expectedResultTypeId,
-    typeInstanceKey,
+    typeInstanceId,
   } = options;
-  const lookupKey = typeInstanceKey ?? meta.instanceKey;
+  const lookupKey = typeInstanceId ?? meta.instanceId;
   const returnTypeId = getRequiredExprType(callId, ctx, lookupKey);
   const expectedTypeId = expectedResultTypeId ?? returnTypeId;
   const callArgs = meta.effectful
@@ -572,7 +568,7 @@ const emitResolvedCall = (
       returnTypeId,
       expectedResultTypeId,
       tailPosition,
-      typeInstanceKey,
+      typeInstanceId,
       ctx,
       fnCtx,
     });
@@ -611,9 +607,9 @@ const compileCallArguments = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef[] => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   return compileCallArgumentsForParams(call, meta.parameters, ctx, fnCtx, compileExpr, {
-    typeInstanceKey,
+    typeInstanceId,
   });
 };
 
@@ -630,14 +626,15 @@ const compileCallArgumentsForParams = (
   ctx: CodegenContext,
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler,
-  options: { typeInstanceKey: string | undefined }
+  options: { typeInstanceId: ProgramFunctionInstanceId | undefined }
 ): binaryen.ExpressionRef[] => {
-  const { typeInstanceKey } = options;
+  const { typeInstanceId } = options;
   const calleeName = (() => {
     const callee = ctx.module.hir.expressions.get(call.callee);
     if (!callee) return "<unknown>";
     if (callee.exprKind === "identifier") {
-      return ctx.program.symbols.getLocalName(ctx.moduleId, callee.symbol) ?? `${callee.symbol}`;
+      const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+      return ctx.program.symbols.getName(calleeId) ?? `${callee.symbol}`;
     }
     if (callee.exprKind === "overload-set") {
       return callee.name;
@@ -689,7 +686,7 @@ const compileCallArgumentsForParams = (
     }
 
     if (param.label && arg.label === undefined) {
-      const containerTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
+      const containerTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
       const containerInfo = getStructuralTypeInfo(containerTypeId, ctx);
       if (containerInfo) {
         let cursor = paramIndex;
@@ -773,7 +770,7 @@ const compileCallArgumentsForParams = (
     const containerTypeId = getRequiredExprType(
       containerArg.expr,
       ctx,
-      typeInstanceKey
+      typeInstanceId
     );
     const containerInfo = getStructuralTypeInfo(containerTypeId, ctx);
     if (!containerInfo) {
@@ -834,14 +831,14 @@ const compileClosureArguments = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef[] => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const params: CallParam[] = desc.parameters.map((param) => ({
     typeId: param.type,
     label: param.label,
     optional: param.optional,
   }));
   return compileCallArgumentsForParams(call, params, ctx, fnCtx, compileExpr, {
-    typeInstanceKey,
+    typeInstanceId,
   });
 };
 
@@ -879,7 +876,7 @@ const compileClosureCall = ({
       row: ctx.program.effects.getRow(calleeDesc.effectRow),
     });
   }
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const closureValue = compileExpr({ exprId: expr.callee, ctx, fnCtx });
   const closureTemp = allocateTempLocal(base.interfaceType, fnCtx);
   const ops: binaryen.ExpressionRef[] = [
@@ -923,7 +920,7 @@ const compileClosureCall = ({
         returnTypeId: calleeDesc.returnType,
         expectedResultTypeId,
         tailPosition,
-        typeInstanceKey,
+        typeInstanceId,
         ctx,
         fnCtx,
       })
@@ -937,7 +934,7 @@ const compileClosureCall = ({
         : ctx.mod.block(
             null,
             ops,
-            getExprBinaryenType(expr.id, ctx, typeInstanceKey)
+            getExprBinaryenType(expr.id, ctx, typeInstanceId)
           ),
     usedReturnCall: lowered.usedReturnCall,
   };
@@ -960,13 +957,13 @@ const compileCurriedClosureCall = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
-  const typeInstanceKey = fnCtx.typeInstanceKey ?? fnCtx.instanceKey;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   let currentValue = compileExpr({ exprId: expr.callee, ctx, fnCtx });
   let currentTypeId = calleeTypeId;
   let argIndex = 0;
 
   while (argIndex < expr.args.length) {
-    const currentDesc = ctx.program.arena.get(currentTypeId);
+    const currentDesc = ctx.program.types.getTypeDesc(currentTypeId);
     if (currentDesc.kind !== "function") {
       throw new Error("attempted to call a non-function value");
     }
@@ -1011,7 +1008,7 @@ const compileCurriedClosureCall = ({
     const args = [
       ...slice.map((arg, index) => {
       const expectedTypeId = currentDesc.parameters[index]?.type;
-      const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceKey);
+      const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
       const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
       return coerceValueToType({
         value: value.expr,
@@ -1047,7 +1044,7 @@ const compileCurriedClosureCall = ({
         returnTypeId,
           expectedResultTypeId: isFinalSlice ? expectedResultTypeId : undefined,
           tailPosition: tailPosition && isFinalSlice,
-          typeInstanceKey,
+          typeInstanceId,
           ctx,
           fnCtx,
         })
@@ -1090,10 +1087,15 @@ const getFunctionMetadataForCall = ({
   callId: HirExprId;
   ctx: CodegenContext;
 }): FunctionMetadata | undefined => {
-  const rawKey = ctx.program.calls.getCallInfo(ctx.moduleId, callId).instanceKey;
-  const instance = rawKey
-    ? ctx.functionInstances.get(makeInstanceKey(ctx.moduleId, rawKey))
-    : undefined;
+  const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, callId);
+  const typeArgs = callInfo.typeArgs ?? [];
+  const instanceId = ctx.program.functions.getInstanceId(
+    ctx.moduleId,
+    symbol,
+    typeArgs
+  );
+  const instance =
+    instanceId === undefined ? undefined : ctx.functionInstances.get(instanceId);
   if (instance) {
     return instance;
   }
@@ -1101,15 +1103,21 @@ const getFunctionMetadataForCall = ({
   if (!metas || metas.length === 0) {
     return undefined;
   }
-  if (!rawKey) {
+  if (typeArgs.length === 0) {
     const genericMeta = metas.find((meta) => meta.typeArgs.length === 0);
     if (genericMeta) {
       return genericMeta;
     }
   }
+  const exact = metas.find(
+    (meta) =>
+      meta.typeArgs.length === typeArgs.length &&
+      meta.typeArgs.every((arg, index) => arg === typeArgs[index])
+  );
+  if (exact) {
+    return exact;
+  }
   return metas[0];
 };
 
 // Function metadata is stored per-module in `ctx.functions`.
-
-// Instance keys are scoped via `makeInstanceKey`.
