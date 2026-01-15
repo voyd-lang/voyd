@@ -12,7 +12,7 @@ export const getConfigFromCli = (): VoydConfig => {
     .name("voyd")
     .description("Voyd programming language CLI")
     .version(version, "-v, --version", "display the current version")
-    .argument("[index]", "entry voyd file", "./src")
+    .argument("[index]", "entry voyd file (default: ./src)")
     .option("--emit-parser-ast", "write raw parser AST to stdout")
     .option("--emit-core-ast", "write desurfaced AST to stdout")
     .option("--emit-ir-ast", "emit expanded IR AST after semantic phases")
@@ -34,10 +34,12 @@ export const getConfigFromCli = (): VoydConfig => {
   const opts = program.opts();
   const [firstArg, secondArg] = program.args as [string?, string?];
   const isTestCommand = firstArg === "test";
-  const index = isTestCommand ? secondArg : firstArg;
+  const testMode = isTestCommand || opts.test;
+  const indexArg = isTestCommand ? secondArg : firstArg;
+  const defaultIndex = testMode ? "." : "./src";
 
   return {
-    index: index ?? "./src",
+    index: indexArg ?? defaultIndex,
     emitParserAst: opts.emitParserAst,
     emitCoreAst: opts.emitCoreAst,
     emitIrAst: opts.emitIrAst,
@@ -47,7 +49,7 @@ export const getConfigFromCli = (): VoydConfig => {
     decodeMsgPackResponse: opts.msgPack,
     run: opts.run,
     internalTest: opts.internalTest,
-    test: isTestCommand || opts.test,
+    test: testMode,
     testReporter: opts.reporter,
   };
 };
