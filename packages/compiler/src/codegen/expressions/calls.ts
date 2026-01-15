@@ -38,6 +38,7 @@ import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
 import type { GroupContinuationCfg } from "../effects/continuation-cfg.js";
 import { effectsFacade } from "../effects/facade.js";
+import { buildInstanceSubstitution } from "../type-substitution.js";
 import { compileOptionalNoneValue } from "../optionals.js";
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
@@ -283,7 +284,15 @@ export const compileCallExpr = (
     });
   }
 
-  const calleeTypeId = getRequiredExprType(expr.callee, ctx, typeInstanceId);
+  const calleeTypeId = (() => {
+    if (callee.exprKind === "identifier") {
+      const binding = fnCtx.bindings.get(callee.symbol);
+      if (typeof binding?.typeId === "number") {
+        return binding.typeId;
+      }
+    }
+    return getRequiredExprType(expr.callee, ctx, typeInstanceId);
+  })();
   const calleeDesc = ctx.program.types.getTypeDesc(calleeTypeId);
 
   if (callee.exprKind === "identifier") {
@@ -866,17 +875,27 @@ const compileClosureCall = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
-  const base = getClosureTypeInfo(calleeTypeId, ctx);
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const substitution = buildInstanceSubstitution({ ctx, typeInstanceId });
+  const resolvedCalleeTypeId = substitution
+    ? ctx.program.types.substitute(calleeTypeId, substitution)
+    : calleeTypeId;
+  const resolvedDesc = substitution
+    ? ctx.program.types.getTypeDesc(resolvedCalleeTypeId)
+    : calleeDesc;
+  if (resolvedDesc.kind !== "function") {
+    throw new Error("expected function type for closure call");
+  }
+  const base = getClosureTypeInfo(resolvedCalleeTypeId, ctx);
   const effectful =
-    typeof calleeDesc.effectRow === "number" &&
-    !ctx.program.effects.isEmpty(calleeDesc.effectRow);
+    typeof resolvedDesc.effectRow === "number" &&
+    !ctx.program.effects.isEmpty(resolvedDesc.effectRow);
   if (effectful && process.env.DEBUG_EFFECTS === "1") {
     console.log("[effects] closure call", {
-      returnType: calleeDesc.returnType,
-      row: ctx.program.effects.getRow(calleeDesc.effectRow),
+      returnType: resolvedDesc.returnType,
+      row: ctx.program.effects.getRow(resolvedDesc.effectRow),
     });
   }
-  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const closureValue = compileExpr({ exprId: expr.callee, ctx, fnCtx });
   const closureTemp = allocateTempLocal(base.interfaceType, fnCtx);
   const ops: binaryen.ExpressionRef[] = [
@@ -894,7 +913,7 @@ const compileClosureCall = ({
       : refCast(ctx.mod, fnField, base.fnRefType);
   const args = compileClosureArguments(
     expr,
-    calleeDesc,
+    resolvedDesc,
     ctx,
     fnCtx,
     compileExpr
@@ -914,10 +933,10 @@ const compileClosureCall = ({
   );
 
   const lowered = effectful
-    ? ctx.effectsBackend.lowerEffectfulCallResult({
+      ? ctx.effectsBackend.lowerEffectfulCallResult({
         callExpr: call,
         callId: expr.id,
-        returnTypeId: calleeDesc.returnType,
+        returnTypeId: resolvedDesc.returnType,
         expectedResultTypeId,
         tailPosition,
         typeInstanceId,

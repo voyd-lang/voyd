@@ -72,6 +72,9 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
 
   for (const entry of entries) {
     if (!isForm(entry)) continue;
+    if (!ctx.includeTests && isTestEntry(entry)) {
+      continue;
+    }
     const useDecl = parseUseDecl(entry);
     if (useDecl) {
       bindUseDecl(useDecl, ctx);
@@ -230,6 +233,11 @@ const isInlineModuleDecl = (form: Form): boolean => {
     isForm(body) &&
     body.calls("block")
   );
+};
+
+const isTestEntry = (form: Form): boolean => {
+  const attributes = form.attributes as { test?: unknown } | undefined;
+  return Boolean(attributes?.test);
 };
 
 const bindUseDecl = (decl: ParsedUseDecl, ctx: BindingContext): void => {

@@ -17,11 +17,19 @@ import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
 import { DiagnosticError } from "@voyd/compiler/diagnostics/index.js";
 import { formatCliDiagnostic } from "./diagnostics.js";
 import { assertRunnableWasm, emitWasmBytes } from "./wasm-validation.js";
+import { runTests } from "./test-runner.js";
 
 export const exec = () => main().catch(errorHandler);
 
 async function main() {
   const config = getConfig();
+  if (config.test) {
+    return runTests({
+      rootPath: config.index,
+      reporter: config.testReporter,
+    });
+  }
+
   const entryPath = resolveEntryPath(config.index);
 
   if (config.emitParserAst) {

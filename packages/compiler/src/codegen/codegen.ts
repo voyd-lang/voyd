@@ -38,6 +38,7 @@ const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   validate: true,
   emitEffectHelpers: false,
   continuationBackend: {},
+  testMode: false,
 };
 
 export type CodegenProgramParams = {

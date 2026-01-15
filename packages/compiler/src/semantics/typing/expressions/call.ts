@@ -120,7 +120,14 @@ export const typeCallExpr = (
     }
     ctx.table.setExprType(calleeExpr.id, ctx.primitives.unknown);
     ctx.effects.setExprEffect(calleeExpr.id, ctx.effects.emptyRow);
-    const overloaded = typeOverloadedCall(expr, calleeExpr, args, ctx, state);
+    const overloaded = typeOverloadedCall(
+      expr,
+      calleeExpr,
+      args,
+      ctx,
+      state,
+      expectedReturnType
+    );
     return finalizeCall({
       returnType: overloaded.returnType,
       latentEffectRow: overloaded.effectRow,
@@ -1314,7 +1321,8 @@ const typeOverloadedCall = (
   callee: HirOverloadSetExpr,
   argTypes: readonly Arg[],
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  expectedReturnType?: TypeId
 ): { returnType: TypeId; effectRow: number } => {
   const options = ctx.overloads.get(callee.set);
   if (!options) {
@@ -1393,11 +1401,17 @@ const typeOverloadedCall = (
     ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolId>();
   targets.set(instanceKey, selected.symbol);
   ctx.callResolution.targets.set(call.id, targets);
-  ctx.table.setExprType(callee.id, selected.signature.typeId);
-  return {
-    returnType: selected.signature.returnType,
-    effectRow: selected.signature.effectRow,
-  };
+  return typeFunctionCall({
+    args: argTypes,
+    signature: selected.signature,
+    calleeSymbol: selected.symbol,
+    typeArguments: undefined,
+    expectedReturnType,
+    callId: call.id,
+    ctx,
+    state,
+    calleeExprId: callee.id,
+  });
 };
 
 const resolveTraitDispatchOverload = ({

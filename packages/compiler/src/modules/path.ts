@@ -90,8 +90,8 @@ const normalizeRoots = (roots: ModuleRoots): NormalizedRoots => ({
 
 const pickNamespace = (filePath: string, roots: NormalizedRoots): ModulePath["namespace"] => {
   const path = resolve(filePath);
-  if (roots.src && path.startsWith(roots.src)) return "src";
   if (roots.std && path.startsWith(roots.std)) return "std";
+  if (roots.src && path.startsWith(roots.src)) return "src";
   if (roots.pkg && path.startsWith(roots.pkg)) return "pkg";
   return "src";
 };

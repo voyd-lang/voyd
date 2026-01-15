@@ -313,12 +313,19 @@ export const emitModuleExports = (
   const publicExports = ctx.module.hir.module.exports.filter((entry) =>
     isPublicVisibility(entry.visibility)
   );
-  const exportEntries =
+  const baseEntries =
     ctx.module.meta.isPackageRoot || publicExports.length > 0
       ? publicExports
       : ctx.module.hir.module.exports.filter((entry) =>
           isPackageVisible(entry.visibility)
         );
+  const isTestExport = (entry: HirExportEntry): boolean => {
+    const name = entry.alias ?? symbolName(ctx, ctx.moduleId, entry.symbol);
+    return name.startsWith("__test__");
+  };
+  const exportEntries = ctx.options.testMode
+    ? baseEntries.filter(isTestExport)
+    : baseEntries;
 
   const effectfulExports: { meta: FunctionMetadata; exportName: string }[] = [];
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;

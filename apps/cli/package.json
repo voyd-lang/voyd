@@ -4,7 +4,7 @@
   "description": "Voyd CLI",
   "type": "module",
   "bin": {
-    "voyd": "./dist/apps/cli/src/cli.js",
+    "voyd": "./bin/voyd.js",
     "vt": "./src/cli-dev.ts"
   },
   "scripts": {

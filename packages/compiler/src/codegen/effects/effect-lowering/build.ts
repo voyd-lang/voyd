@@ -61,11 +61,19 @@ const resumeValueTypeIdForSite = ({
     if (typeof site.effectSymbol !== "number") {
       throw new Error("perform site missing effect op symbol");
     }
-    if (typeof exprType === "number") {
-      return exprType;
-    }
     const signature = ctx.program.functions.getSignature(ctx.moduleId, site.effectSymbol);
-    return signature?.returnType ?? ctx.program.primitives.unknown;
+    const fallbackType = signature?.returnType ?? ctx.program.primitives.unknown;
+    if (typeof exprType !== "number") {
+      return fallbackType;
+    }
+    const desc = ctx.program.types.getTypeDesc(exprType);
+    if (desc.kind === "type-param-ref") {
+      return fallbackType;
+    }
+    if (desc.kind === "primitive" && desc.name === "unknown") {
+      return fallbackType;
+    }
+    return exprType;
   }
   return exprType ?? ctx.program.primitives.unknown;
 };

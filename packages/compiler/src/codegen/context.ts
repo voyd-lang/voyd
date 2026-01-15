@@ -47,6 +47,7 @@ export interface CodegenOptions {
   validate?: boolean;
   emitEffectHelpers?: boolean;
   continuationBackend?: ContinuationBackendOptions;
+  testMode?: boolean;
 }
 
 export interface CodegenResult {

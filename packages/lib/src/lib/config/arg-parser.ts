@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { VoydConfig } from "./types.js";
 
 const require = createRequire(import.meta.url);
-const { version } = require("../../package.json") as { version: string };
+const { version } = require("@voyd/lib/package.json") as { version: string };
 
 export const getConfigFromCli = (): VoydConfig => {
   const program = new Command();
@@ -25,11 +25,16 @@ export const getConfigFromCli = (): VoydConfig => {
     .option("-m, --msg-pack", "decode message pack response")
     .option("-r, --run", "run the compiled wasm code")
     .option("--internal-test", "run the internal test script")
-    .helpOption("-h, --help", "display help for command");
+    .option("--test", "run voyd tests")
+    .option("--reporter <name>", "test reporter (default: minimal)")
+    .helpOption("-h, --help", "display help for command")
+    .allowExcessArguments();
 
-  program.parse();
+  program.parse(process.argv);
   const opts = program.opts();
-  const [index] = program.args as [string?];
+  const [firstArg, secondArg] = program.args as [string?, string?];
+  const isTestCommand = firstArg === "test";
+  const index = isTestCommand ? secondArg : firstArg;
 
   return {
     index: index ?? "./src",
@@ -42,5 +47,7 @@ export const getConfigFromCli = (): VoydConfig => {
     decodeMsgPackResponse: opts.msgPack,
     run: opts.run,
     internalTest: opts.internalTest,
+    test: isTestCommand || opts.test,
+    testReporter: opts.reporter,
   };
 };

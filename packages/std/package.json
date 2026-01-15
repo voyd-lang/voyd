@@ -6,7 +6,7 @@
   "scripts": {
     "build": "echo 'standard library source bundle'",
     "typecheck": "echo 'no types for voyd std'",
-    "test": "echo 'no tests for std'",
+    "test": "NODE_OPTIONS='--import tsx --conditions=development' voyd test ./src",
     "lint": "echo 'no lint configured'"
   }
 }

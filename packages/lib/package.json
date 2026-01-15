@@ -6,10 +6,23 @@
   "exports": {
     ".": {
       "types": "./src/lib/index.ts",
+      "development": "./src/lib/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./*": "./dist/*"
+    "./package.json": "./package.json",
+    "./*.js": {
+      "types": "./src/lib/*.ts",
+      "development": "./src/lib/*.ts",
+      "import": "./dist/*.js",
+      "default": "./dist/*.js"
+    },
+    "./*": {
+      "types": "./src/lib/*.ts",
+      "development": "./src/lib/*.ts",
+      "import": "./dist/*.js",
+      "default": "./dist/*.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
