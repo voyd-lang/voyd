@@ -1,15 +1,16 @@
-// NOTE: Browser integration needs a proper portability layer. The current pipeline
-// still pulls in Node-only APIs (e.g. node:path) via module graph/build logic.
-// Plan: define compiler-level interfaces for the patterns we use (path handling,
-// module IO, etc.), provide a Node-backed implementation for CLI/tests, and add
-// a browser implementation (URL-style paths + in-memory host). Then expose a
-// browser-friendly entrypoint in @voyd/compiler so @voyd/browser-compiler stays thin.
+// NOTE: Browser integration relies on the browser pipeline entry and the in-memory
+// module host. Node-only filesystem hosts remain in @voyd/compiler/modules/fs-host.
 import binaryen from "binaryen";
-import { analyzeModules, emitProgram, loadModuleGraph } from "@voyd/compiler/pipeline.js";
+import {
+  analyzeModules,
+  emitProgram,
+  loadModuleGraph,
+} from "@voyd/compiler/pipeline-browser.js";
 import { codegenErrorToDiagnostic } from "@voyd/compiler/codegen/diagnostics.js";
 import type { CodegenOptions } from "@voyd/compiler/codegen/context.js";
 import { DiagnosticError, formatDiagnostic } from "@voyd/compiler/diagnostics/index.js";
-import type { ModuleHost, ModuleRoots } from "@voyd/compiler/modules/types.js";
+import { createMemoryModuleHost } from "@voyd/compiler/modules/memory-host.js";
+import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
 
 const STD_ROOT = "/std";
 const SRC_ROOT = "/src";
@@ -47,7 +48,9 @@ export const compileParsedModule = async (
   options: BrowserCompileOptions = {}
 ): Promise<binaryen.Module> => {
   const roots = normalizeRoots(module.roots);
-  const host = createMemoryHost(normalizeFileMap(module.files));
+  const host = createMemoryModuleHost({
+    files: normalizeFileMap(module.files),
+  });
   const entryPath = normalizeEntryPath(module.entryPath, roots);
   const graph = await loadModuleGraph({
     entryPath,
@@ -176,63 +179,4 @@ const normalizePath = (value: string): string => {
   if (normalized === "/") return normalized;
   const trimmed = normalized.replace(/\/+$/, "");
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
-};
-
-const createMemoryHost = (files: Record<string, string>): ModuleHost => {
-  const normalized = new Map<string, string>();
-  const directories = new Map<string, Set<string>>();
-
-  const ensureDir = (dir: string) => {
-    if (!directories.has(dir)) {
-      directories.set(dir, new Set());
-    }
-  };
-
-  const dirname = (path: string) => {
-    const normalizedPath = normalizePath(path);
-    const slash = normalizedPath.lastIndexOf("/");
-    if (slash <= 0) return "/";
-    return normalizedPath.slice(0, slash);
-  };
-
-  const registerPath = (path: string) => {
-    const directParent = dirname(path);
-    ensureDir(directParent);
-    directories.get(directParent)!.add(path);
-
-    let current = directParent;
-    while (true) {
-      const parent = dirname(current);
-      if (parent === current) break;
-      ensureDir(parent);
-      directories.get(parent)!.add(current);
-      current = parent;
-    }
-  };
-
-  Object.entries(files).forEach(([path, contents]) => {
-    const full = normalizePath(path);
-    normalized.set(full, contents);
-    registerPath(full);
-  });
-
-  const isDirectoryPath = (path: string) =>
-    directories.has(path) && !normalized.has(path);
-
-  return {
-    readFile: async (path: string) => {
-      const resolved = normalizePath(path);
-      const file = normalized.get(resolved);
-      if (file === undefined) {
-        throw new Error(`File not found: ${resolved}`);
-      }
-      return file;
-    },
-    readDir: async (path: string) => {
-      const resolved = normalizePath(path);
-      return Array.from(directories.get(resolved) ?? []);
-    },
-    fileExists: async (path: string) => normalized.has(normalizePath(path)),
-    isDirectory: async (path: string) => isDirectoryPath(normalizePath(path)),
-  };
 };

@@ -25,6 +25,15 @@ export interface ModulePath {
   packageName?: string;
 }
 
+export interface ModulePathAdapter {
+  resolve(path: string): string;
+  join(...parts: string[]): string;
+  relative(from: string, to: string): string;
+  dirname(path: string): string;
+  basename(path: string, ext?: string): string;
+  normalize?: (path: string) => string;
+}
+
 export type ModuleOrigin =
   | { kind: "file"; filePath: string }
   | { kind: "inline"; parentId: string; name: string; span?: SourceSpan };
@@ -62,6 +71,7 @@ export interface ModuleGraph {
 }
 
 export interface ModuleHost {
+  path: ModulePathAdapter;
   readFile(path: string): Promise<string>;
   readDir(path: string): Promise<readonly string[]>;
   fileExists(path: string): Promise<boolean>;

@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import binaryen from "binaryen";
 import type { CodegenContext } from "../context.js";
 import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
@@ -7,6 +6,7 @@ import type {
   EffectTableOp,
   EffectTableSidecar,
 } from "./effect-table-types.js";
+import { toBase64 } from "./base64.js";
 
 const TABLE_VERSION = 1;
 export const EFFECT_TABLE_EXPORT = "__voyd_effect_table";
@@ -177,7 +177,7 @@ export const emitEffectTableSection = ({
     version: TABLE_VERSION,
     moduleId: entryModuleId,
     tableExport: exportName,
-    namesBlob: Buffer.from(namesBlob).toString("base64"),
+    namesBlob: toBase64(namesBlob),
     effects: effects.map((effect) => ({
       id: effect.id,
       name: effect.name,

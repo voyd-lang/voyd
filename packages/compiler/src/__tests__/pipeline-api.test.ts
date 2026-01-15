@@ -1,65 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { resolve, dirname, sep } from "node:path";
+import { resolve, sep } from "node:path";
 import {
   analyzeModules,
   compileProgram,
   loadModuleGraph,
   lowerProgram,
 } from "../pipeline.js";
+import { createMemoryModuleHost } from "../modules/memory-host.js";
+import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleHost } from "../modules/types.js";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
 
-const createMemoryHost = (files: Record<string, string>): ModuleHost => {
-  const normalized = new Map<string, string>();
-  const directories = new Map<string, Set<string>>();
-
-  const ensureDir = (dir: string) => {
-    if (!directories.has(dir)) {
-      directories.set(dir, new Set());
-    }
-  };
-
-  const registerPath = (path: string) => {
-    const directParent = dirname(path);
-    ensureDir(directParent);
-    directories.get(directParent)!.add(path);
-
-    let current = directParent;
-    while (true) {
-      const parent = dirname(current);
-      if (parent === current) break;
-      ensureDir(parent);
-      directories.get(parent)!.add(current);
-      current = parent;
-    }
-  };
-
-  Object.entries(files).forEach(([path, contents]) => {
-    const full = resolve(path);
-    normalized.set(full, contents);
-    registerPath(full);
-  });
-
-  const isDirectoryPath = (path: string) =>
-    directories.has(path) && !normalized.has(path);
-
-  return {
-    readFile: async (path: string) => {
-      const resolved = resolve(path);
-      const file = normalized.get(resolved);
-      if (file === undefined) {
-        throw new Error(`File not found: ${resolved}`);
-      }
-      return file;
-    },
-    readDir: async (path: string) => {
-      const resolved = resolve(path);
-      return Array.from(directories.get(resolved) ?? []);
-    },
-    fileExists: async (path: string) => normalized.has(resolve(path)),
-    isDirectory: async (path: string) => isDirectoryPath(resolve(path)),
-  };
-};
+const createMemoryHost = (files: Record<string, string>): ModuleHost =>
+  createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
 
 describe("next pipeline API", () => {
   it("compiles a program from the module graph through codegen", async () => {

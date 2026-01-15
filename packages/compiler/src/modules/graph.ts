@@ -1,4 +1,3 @@
-import { basename, resolve } from "node:path";
 import {
   type Expr,
   Form,
@@ -47,8 +46,8 @@ export const buildModuleGraph = async ({
   const modulesByPath = new Map<string, ModuleNode>();
   const moduleDiagnostics: ModuleDiagnostic[] = [];
 
-  const entryFile = resolve(entryPath);
-  const entryModulePath = modulePathFromFile(entryFile, roots);
+  const entryFile = host.path.resolve(entryPath);
+  const entryModulePath = modulePathFromFile(entryFile, roots, host.path);
   const entryModule = await loadFileModule({
     filePath: entryFile,
     modulePath: entryModulePath,
@@ -84,7 +83,11 @@ export const buildModuleGraph = async ({
       continue;
     }
 
-    const resolvedModulePath = modulePathFromFile(resolvedPath, roots);
+    const resolvedModulePath = modulePathFromFile(
+      resolvedPath,
+      roots,
+      host.path
+    );
     const nextModule = await loadFileModule({
       filePath: resolvedPath,
       modulePath: resolvedModulePath,
@@ -476,13 +479,13 @@ const discoverSubmodules = async ({
     for (const entry of entries) {
       const entryIsDir = await host.isDirectory(entry);
       if (entryIsDir) {
-        const name = basename(entry);
+        const name = host.path.basename(entry);
         await walk(entry, [...segments, name]);
         continue;
       }
 
       if (!entry.endsWith(VOYD_EXTENSION)) continue;
-      const stem = basename(entry, VOYD_EXTENSION);
+      const stem = host.path.basename(entry, VOYD_EXTENSION);
       dependencies.push({
         kind: "export",
         path: {
