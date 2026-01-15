@@ -16,6 +16,7 @@ export const createBindingContext = ({
   graph,
   moduleExports,
   dependencies,
+  includeTests,
 }: BindingInputs): BindingContext => {
   const moduleNode =
     module ??
@@ -66,6 +67,7 @@ export const createBindingContext = ({
     moduleMembers: new Map(),
     pendingStaticMethods: [],
     importedOverloadOptions: new Map(),
+    includeTests: includeTests ?? false,
   };
 };
 

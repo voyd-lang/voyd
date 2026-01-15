@@ -1,0 +1,16 @@
+pub eff Test
+  fail(resume) -> void
+  skip(resume) -> void
+  log(resume) -> void
+
+pub fn assert(cond: boolean) -> void
+  if not cond then:
+    Test::fail()
+
+pub fn assert<T>(value: T, { eq expected: T }) -> void
+  if value != expected then:
+    Test::fail()
+
+pub fn assert<T>(value: T, { neq expected: T }) -> void
+  if value == expected then:
+    Test::fail()

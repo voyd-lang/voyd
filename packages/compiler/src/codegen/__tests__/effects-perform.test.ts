@@ -55,6 +55,7 @@ const buildLoweringSnapshot = () => {
       validate: true,
       emitEffectHelpers: false,
       continuationBackend: {},
+      testMode: false,
     },
     functions: new Map(),
     functionInstances: new Map() as any,

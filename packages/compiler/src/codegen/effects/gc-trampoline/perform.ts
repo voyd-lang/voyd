@@ -84,7 +84,11 @@ export const compileEffectOpCall = ({
     }
   });
 
-  const contRefType = ensureContinuationFunction({ site, ctx });
+  const contRefType = ensureContinuationFunction({
+    site,
+    ctx,
+    typeInstanceId,
+  });
   const env = initStruct(ctx.mod, site.envType, envValues as number[]);
   const contRef = refFunc(ctx.mod, site.contFnName, contRefType);
   const continuation = ctx.effectsRuntime.makeContinuation({

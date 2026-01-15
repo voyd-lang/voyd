@@ -35,6 +35,7 @@ export interface SemanticsPipelineOptions {
   exports?: Map<string, ModuleExportTable>;
   dependencies?: Map<string, SemanticsPipelineResult>;
   typing?: Partial<Pick<TypingResult, "arena" | "effects">>;
+  includeTests?: boolean;
 }
 
 type SemanticsPipelineInput = SemanticsPipelineOptions | Form;
@@ -73,6 +74,8 @@ export const semanticsPipeline = (
           ])
         )
       : undefined,
+    includeTests:
+      "includeTests" in input ? input.includeTests === true : false,
   });
   ensureNoBindingErrors(binding);
 

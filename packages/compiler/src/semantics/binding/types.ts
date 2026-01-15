@@ -44,6 +44,7 @@ export interface BindingInputs {
   graph?: ModuleGraph;
   moduleExports?: Map<string, ModuleExportTable>;
   dependencies?: Map<string, BindingResult>;
+  includeTests?: boolean;
 }
 
 export interface BindingResult {
@@ -116,6 +117,7 @@ export interface BindingContext {
   moduleMembers: ModuleMemberTable;
   pendingStaticMethods: PendingStaticMethod[];
   importedOverloadOptions: Map<OverloadSetId, readonly SymbolId[]>;
+  includeTests: boolean;
 }
 
 export interface BoundUse {

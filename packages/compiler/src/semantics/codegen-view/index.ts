@@ -15,6 +15,7 @@ import type {
 import type {
   ConstraintSet,
   StructuralField,
+  Substitution,
   TypeDescriptor,
   TypeScheme,
   UnificationContext,
@@ -194,6 +195,7 @@ export type TypeLoweringIndex = {
     ctx?: CodegenUnificationContext
   ): TypeId;
   unify(a: TypeId, b: TypeId, ctx: CodegenUnificationContext): CodegenUnificationResult;
+  substitute(typeId: TypeId, subst: Substitution): TypeId;
   getNominalOwner(typeId: TypeId): ProgramSymbolId | undefined;
   getNominalAncestry(typeId: TypeId): readonly { nominalId: TypeId; typeId: TypeId }[];
   getStructuralLayout(typeId: TypeId): StructuralLayout | undefined;
@@ -1049,6 +1051,7 @@ export const buildProgramCodegenView = (
       arena.instantiate(schemeId, args, ctx as UnificationContext | undefined),
     unify: (a, b, ctx) =>
       toCodegenUnificationResult(arena.unify(a, b, ctx as UnificationContext)),
+    substitute: (typeId, subst) => arena.substitute(typeId, subst),
     getNominalOwner: (typeId) => {
       const desc = arena.get(typeId);
       return desc.kind === "nominal-object" ? symbols.idOf(toSymbolRef(desc.owner)) : undefined;

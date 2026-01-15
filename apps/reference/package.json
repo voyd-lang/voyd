@@ -4,7 +4,7 @@
   "private": true,
   "description": "Voyd language reference documentation",
   "scripts": {
-    "build": "echo 'documentation only'",
+    "build": "node -e \"const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/.placeholder','documentation only');\"",
     "typecheck": "echo 'documentation only'",
     "test": "echo 'no tests for reference docs'",
     "lint": "echo 'no lint configured'"

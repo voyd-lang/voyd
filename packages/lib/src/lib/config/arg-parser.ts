@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { VoydConfig } from "./types.js";
 
 const require = createRequire(import.meta.url);
-const { version } = require("../../package.json") as { version: string };
+const { version } = require("@voyd/lib/package.json") as { version: string };
 
 export const getConfigFromCli = (): VoydConfig => {
   const program = new Command();
@@ -12,7 +12,7 @@ export const getConfigFromCli = (): VoydConfig => {
     .name("voyd")
     .description("Voyd programming language CLI")
     .version(version, "-v, --version", "display the current version")
-    .argument("[index]", "entry voyd file", "./src")
+    .argument("[index]", "entry voyd file (default: ./src)")
     .option("--emit-parser-ast", "write raw parser AST to stdout")
     .option("--emit-core-ast", "write desurfaced AST to stdout")
     .option("--emit-ir-ast", "emit expanded IR AST after semantic phases")
@@ -25,14 +25,21 @@ export const getConfigFromCli = (): VoydConfig => {
     .option("-m, --msg-pack", "decode message pack response")
     .option("-r, --run", "run the compiled wasm code")
     .option("--internal-test", "run the internal test script")
-    .helpOption("-h, --help", "display help for command");
+    .option("--test", "run voyd tests")
+    .option("--reporter <name>", "test reporter (default: minimal)")
+    .helpOption("-h, --help", "display help for command")
+    .allowExcessArguments();
 
-  program.parse();
+  program.parse(process.argv);
   const opts = program.opts();
-  const [index] = program.args as [string?];
+  const [firstArg, secondArg] = program.args as [string?, string?];
+  const isTestCommand = firstArg === "test";
+  const testMode = isTestCommand || opts.test;
+  const indexArg = isTestCommand ? secondArg : firstArg;
+  const defaultIndex = testMode ? "." : "./src";
 
   return {
-    index: index ?? "./src",
+    index: indexArg ?? defaultIndex,
     emitParserAst: opts.emitParserAst,
     emitCoreAst: opts.emitCoreAst,
     emitIrAst: opts.emitIrAst,
@@ -42,5 +49,7 @@ export const getConfigFromCli = (): VoydConfig => {
     decodeMsgPackResponse: opts.msgPack,
     run: opts.run,
     internalTest: opts.internalTest,
+    test: testMode,
+    testReporter: opts.reporter,
   };
 };

@@ -18,4 +18,8 @@ export type VoydConfig = {
   index: string;
   /** Run the internal test script */
   internalTest?: boolean;
+  /** Run voyd tests */
+  test?: boolean;
+  /** Select test reporter */
+  testReporter?: string;
 };

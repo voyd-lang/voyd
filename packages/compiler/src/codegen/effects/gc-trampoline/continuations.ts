@@ -7,6 +7,7 @@ import type {
   SymbolId,
   TypeId,
 } from "../../context.js";
+import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
 import type { HirFunction, HirLambdaExpr, HirPattern } from "../../../semantics/hir/index.js";
 import type {
   ContinuationSite,
@@ -18,12 +19,13 @@ import {
   structGetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
 import { allocateTempLocal } from "../../locals.js";
-import { wasmTypeFor } from "../../types.js";
+import { getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { walkHirExpression, walkHirPattern } from "../../hir-walk.js";
 import { buildGroupContinuationCfg } from "../continuation-cfg.js";
 import { createGroupedContinuationExpressionCompiler } from "../continuation-compiler.js";
 import { wrapValueInOutcome } from "../outcome-values.js";
 import { functionRefType } from "./shared.js";
+import { buildInstanceSubstitution } from "../../type-substitution.js";
 import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
@@ -50,21 +52,45 @@ const findFunctionBySymbol = (
 
 const findLambdaByExprId = (
   exprId: HirExprId,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  typeInstanceId?: ProgramFunctionInstanceId
 ): { expr: HirLambdaExpr; returnTypeId: TypeId } => {
   const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr || expr.exprKind !== "lambda") {
     throw new Error(`could not find lambda expression ${exprId}`);
   }
-  const typeId =
-  ctx.module.types.getResolvedExprType(exprId) ??
-    ctx.module.types.getExprType(exprId) ??
-    ctx.program.primitives.unknown;
+  const typeId = getRequiredExprType(exprId, ctx, typeInstanceId);
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind !== "function") {
     throw new Error("lambda missing function type");
   }
   return { expr, returnTypeId: desc.returnType };
+};
+
+const collectIdentifierExprTypes = ({
+  exprId,
+  ctx,
+  typeInstanceId,
+}: {
+  exprId: HirExprId;
+  ctx: CodegenContext;
+  typeInstanceId?: ProgramFunctionInstanceId;
+}): Map<SymbolId, TypeId> => {
+  const types = new Map<SymbolId, TypeId>();
+  walkHirExpression({
+    exprId,
+    ctx,
+    visitor: {
+      onExpr: (id, expr) => {
+        if (expr.exprKind !== "identifier") return;
+        if (!shouldCaptureIdentifierSymbol(expr.symbol, ctx)) return;
+        if (types.has(expr.symbol)) return;
+        types.set(expr.symbol, getRequiredExprType(id, ctx, typeInstanceId));
+      },
+    },
+    visitLambdaBodies: false,
+  });
+  return types;
 };
 
 const collectFunctionLocalSymbols = (fn: HirFunction, ctx: CodegenContext): Set<SymbolId> => {
@@ -198,9 +224,11 @@ const findHandlerClauseByOwner = ({
 export const ensureContinuationFunction = ({
   site,
   ctx,
+  typeInstanceId,
 }: {
   site: ContinuationSite;
   ctx: CodegenContext;
+  typeInstanceId?: ProgramFunctionInstanceId;
 }): binaryen.Type => {
   const built = ctx.effectsState.contBuilt;
   const building = ctx.effectsState.contBuilding;
@@ -222,6 +250,8 @@ export const ensureContinuationFunction = ({
   }
 
   building.add(contName);
+
+  const substitution = buildInstanceSubstitution({ ctx, typeInstanceId });
 
   const continuationBody = (() => {
     if (site.owner.kind === "function") {
@@ -254,7 +284,11 @@ export const ensureContinuationFunction = ({
         resumeKind,
       };
     }
-    const { expr, returnTypeId } = findLambdaByExprId(site.owner.exprId, ctx);
+    const { expr, returnTypeId } = findLambdaByExprId(
+      site.owner.exprId,
+      ctx,
+      typeInstanceId
+    );
     return {
       bodyExprId: expr.body,
       cfgFn: { body: expr.body } as HirFunction,
@@ -267,8 +301,11 @@ export const ensureContinuationFunction = ({
 
   const { cfgFn, returnTypeId, localsToSeed, bodyExprId, resumeSymbol, resumeKind } =
     continuationBody;
+  const resolvedReturnTypeId = substitution
+    ? ctx.program.types.substitute(returnTypeId, substitution)
+    : returnTypeId;
   const params = [binaryen.anyref, resumeBoxType];
-  const returnWasmType = wasmTypeFor(returnTypeId, ctx);
+  const returnWasmType = wasmTypeFor(resolvedReturnTypeId, ctx);
 
   const groupSites = ctx.effectLowering.sites.filter(
     (candidate) =>
@@ -282,14 +319,26 @@ export const ensureContinuationFunction = ({
     tempLocals: new Map(),
     locals,
     nextLocalIndex: params.length,
-    returnTypeId,
-    instanceId: undefined,
-    typeInstanceId: undefined,
+    returnTypeId: resolvedReturnTypeId,
+    instanceId: typeInstanceId,
+    typeInstanceId,
     effectful: true,
   };
 
+  const identifierTypes = collectIdentifierExprTypes({
+    exprId: bodyExprId,
+    ctx,
+    typeInstanceId,
+  });
+
   localsToSeed.forEach((symbol) => {
-    const typeId = ctx.module.types.getValueType(symbol) ?? ctx.program.primitives.unknown;
+    const valueType =
+      identifierTypes.get(symbol) ??
+      ctx.module.types.getValueType(symbol) ??
+      ctx.program.primitives.unknown;
+    const typeId = substitution
+      ? ctx.program.types.substitute(valueType, substitution)
+      : valueType;
     const wasmType = wasmTypeFor(typeId, ctx);
     const seeded = allocateTempLocal(wasmType, fnCtx, typeId);
     fnCtx.bindings.set(symbol, { ...seeded, kind: "local", typeId });
@@ -365,7 +414,7 @@ export const ensureContinuationFunction = ({
           continuationLocal,
           tailGuardLocal,
           resumeKind,
-          resumeTypeId: returnTypeId,
+          resumeTypeId: resolvedReturnTypeId,
         },
       ],
     ]);
@@ -390,7 +439,7 @@ export const ensureContinuationFunction = ({
     ctx,
     fnCtx,
     tailPosition: true,
-    expectedResultTypeId: returnTypeId,
+    expectedResultTypeId: resolvedReturnTypeId,
   });
   const needsWrap = binaryen.getExpressionType(bodyExpr.expr) === returnWasmType;
   const bodyOutcomeExpr = needsWrap

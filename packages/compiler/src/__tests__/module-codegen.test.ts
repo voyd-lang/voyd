@@ -172,6 +172,40 @@ pub fn main() -> i32
     expect((instance.exports.main as () => number)()).toBe(5);
   });
 
+  it("runs generic overloads across modules", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `use util::assertions::all
+
+pub fn main() -> i32
+  let a = assert(5, eq: 5)
+  let b = assert(true)
+  a + b`,
+      [`${root}${sep}util.voyd`]: "pub mod assertions",
+      [`${root}${sep}util${sep}assertions.voyd`]: `pub fn assert(cond: boolean) -> i32
+  if cond then: 1 else: 0
+
+pub fn assert<T>(value: T, { eq expected: T }) -> i32
+  if value == expected then: 1 else: 0
+
+pub fn assert<T>(value: T, { neq expected: T }) -> i32
+  if value != expected then: 1 else: 0`,
+    });
+
+    const result = await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    if (result.diagnostics.length > 0) {
+      throw new Error(JSON.stringify(result.diagnostics, null, 2));
+    }
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(2);
+  });
+
   it("supports reassigning structural object fields", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

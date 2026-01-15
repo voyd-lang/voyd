@@ -4,11 +4,11 @@
   "description": "Voyd CLI",
   "type": "module",
   "bin": {
-    "voyd": "./dist/apps/cli/src/cli.js",
+    "voyd": "./bin/voyd.js",
     "vt": "./src/cli-dev.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config ../../vitest.config.ts src/__tests__",
     "lint": "echo 'no lint configured'"

@@ -7,6 +7,7 @@ import { attachColonClauses } from "./colon-clauses.js";
 import { constructorObjectLiteral } from "./constructor-object-literal.js";
 import { SyntaxMacro } from "./types.js";
 import { functionalMacroExpander } from "./functional-macro-expander/index.js";
+import { testBlockMacro } from "./test-block.js";
 
 /** Caution: Order matters */
 const SYNTAX_MACROS: SyntaxMacro[] = [
@@ -17,6 +18,7 @@ const SYNTAX_MACROS: SyntaxMacro[] = [
   functionalMacroExpander,
   intrinsicAttributeMacro,
   intrinsicTypeAttributeMacro,
+  testBlockMacro,
 ];
 
 export const expandSyntaxMacros = (

@@ -5,11 +5,24 @@
   "main": "./dist/index.js",
   "exports": {
     ".": {
-      "types": "./src/lib/index.ts",
+      "types": "./dist/index.d.ts",
+      "development": "./src/lib/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./*": "./dist/*"
+    "./package.json": "./package.json",
+    "./*.js": {
+      "types": "./dist/*.d.ts",
+      "development": "./src/lib/*.ts",
+      "import": "./dist/*.js",
+      "default": "./dist/*.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "development": "./src/lib/*.ts",
+      "import": "./dist/*.js",
+      "default": "./dist/*.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -31,6 +31,7 @@ export type LoadModulesOptions = {
 
 export type AnalyzeModulesOptions = {
   graph: ModuleGraph;
+  includeTests?: boolean;
 };
 
 export type AnalyzeModulesResult = {
@@ -84,6 +85,7 @@ export const loadModuleGraph = async (
 
 export const analyzeModules = ({
   graph,
+  includeTests,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
   const order = sortModules(graph);
   const semantics = new Map<string, SemanticsPipelineResult>();
@@ -107,6 +109,7 @@ export const analyzeModules = ({
         exports,
         dependencies: semantics,
         typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
+        includeTests,
       });
       semantics.set(id, result);
       exports.set(id, result.exports);

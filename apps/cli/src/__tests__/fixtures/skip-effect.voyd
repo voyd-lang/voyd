@@ -1,0 +1,7 @@
+eff Test
+  fail(resume) -> void
+  skip(resume) -> void
+  log(resume) -> void
+
+test "skip marks test as skipped":
+  Test::skip()

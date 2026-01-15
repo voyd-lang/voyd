@@ -107,7 +107,11 @@ export const lowerEffectfulCallResult = ({
           }
         });
 
-        const contRefType = ensureContinuationFunction({ site: callSite, ctx });
+        const contRefType = ensureContinuationFunction({
+          site: callSite,
+          ctx,
+          typeInstanceId: lookupKey,
+        });
         const frameEnv = initStruct(ctx.mod, callSite.envType, frameEnvValues as number[]);
         const frameCont = ctx.effectsRuntime.makeContinuation({
           fnRef: refFunc(ctx.mod, callSite.contFnName, contRefType),
