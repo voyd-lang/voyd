@@ -44,7 +44,7 @@ type PlannedTest = DiscoveredTest & {
   skipReason?: string;
 };
 
-type TestResult = PlannedTest & {
+type TestResult = Omit<PlannedTest, "status"> & {
   status: "passed" | "failed" | "skipped";
   durationMs: number;
   error?: unknown;

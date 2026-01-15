@@ -68,6 +68,7 @@ const DEFAULT_OPTIONS = {
   validate: true,
   emitEffectHelpers: false,
   continuationBackend: {},
+  testMode: false,
 } as const;
 
 const sanitizeIdentifier = (value: string): string =>
