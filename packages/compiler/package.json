@@ -3,29 +3,29 @@
   "version": "0.9.0",
   "description": "Voyd compiler",
   "type": "module",
-  "main": "./dist/src/pipeline.js",
+  "main": "./dist/pipeline.js",
   "exports": {
     ".": {
-      "types": "./src/pipeline.ts",
+      "types": "./dist/pipeline.d.ts",
       "development": "./src/pipeline.ts",
-      "import": "./dist/src/pipeline.js",
-      "default": "./dist/src/pipeline.js"
+      "import": "./dist/pipeline.js",
+      "default": "./dist/pipeline.js"
     },
     "./*.js": {
-      "types": "./src/*.ts",
+      "types": "./dist/*.d.ts",
       "development": "./src/*.ts",
-      "import": "./dist/src/*.js",
-      "default": "./dist/src/*.js"
+      "import": "./dist/*.js",
+      "default": "./dist/*.js"
     },
     "./*": {
-      "types": "./src/*.ts",
+      "types": "./dist/*.d.ts",
       "development": "./src/*.ts",
-      "import": "./dist/src/*.js",
-      "default": "./dist/src/*.js"
+      "import": "./dist/*.js",
+      "default": "./dist/*.js"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config ../../vitest.config.ts src",
     "test:w": "vitest --config ../../vitest.config.ts src",

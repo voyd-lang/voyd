@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const distCli = resolve(here, "../dist/apps/cli/src/cli.js");
+const distCli = resolve(here, "../dist/cli.js");
 const srcCli = resolve(here, "../src/cli.ts");
 const nodeOptions = process.env.NODE_OPTIONS ?? "";
 const wantsSource =

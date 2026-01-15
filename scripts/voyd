@@ -1,0 +1,31 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(here, "..");
+const distCli = resolve(repoRoot, "apps/cli/dist/cli.js");
+const srcCli = resolve(repoRoot, "apps/cli/src/cli.ts");
+const distCompilerEntry = resolve(repoRoot, "packages/compiler/dist/pipeline.js");
+const distLibEntry = resolve(repoRoot, "packages/lib/dist/index.js");
+const args = process.argv.slice(2);
+const forceDist = process.env.VOYD_USE_DIST === "1";
+const useSource = process.env.VOYD_DEV === "1" || process.env.VOYD_USE_SRC === "1";
+
+if (forceDist && !existsSync(distCli)) {
+  console.error("Voyd CLI dist build not found. Run `npm run build -w @voyd/cli`.");
+  process.exit(1);
+}
+
+const targetCli = !useSource && existsSync(distCli) ? distCli : srcCli;
+const canUseBuiltDeps = existsSync(distCompilerEntry) && existsSync(distLibEntry);
+const needsDevConditions = targetCli !== distCli || !canUseBuiltDeps;
+const nodeArgs = needsDevConditions
+  ? ["--import", "tsx", "--conditions=development", targetCli, ...args]
+  : [targetCli, ...args];
+
+const child = spawn(process.execPath, nodeArgs, { stdio: "inherit" });
+
+child.on("exit", (code) => process.exit(code ?? 1));
