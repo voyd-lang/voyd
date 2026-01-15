@@ -275,7 +275,9 @@ export type ProgramCodegenView = {
     f64: TypeId;
   };
   types: TypeLoweringIndex;
-  symbols: ProgramSymbolArena;
+  symbols: ProgramSymbolArena & {
+    canonicalIdOf(moduleId: string, symbol: SymbolId): ProgramSymbolId;
+  };
   functions: FunctionLoweringIndex;
   optionals: {
     getOptionalInfo(moduleId: string, typeId: TypeId): CodegenOptionalInfo | undefined;
@@ -920,10 +922,7 @@ export const buildProgramCodegenView = (
     });
   });
 
-  const instanceExprTypesById = new Map<
-    ProgramFunctionInstanceId,
-    ReadonlyMap<HirExprId, TypeId>
-  >();
+  const instanceExprTypesById = new Map<ProgramFunctionInstanceId, Map<HirExprId, TypeId>>();
 
   stableModules.forEach((mod) => {
     const instanceExprSources = [
@@ -944,9 +943,16 @@ export const buildProgramCodegenView = (
         if (instanceId === undefined) {
           return;
         }
-        if (!instanceExprTypesById.has(instanceId)) {
+        const bucket = instanceExprTypesById.get(instanceId);
+        if (!bucket) {
           instanceExprTypesById.set(instanceId, new Map(exprTypes));
+          return;
         }
+        exprTypes.forEach((typeId, exprId) => {
+          if (!bucket.has(exprId)) {
+            bucket.set(exprId, typeId);
+          }
+        });
       });
     });
   });
@@ -1096,7 +1102,7 @@ export const buildProgramCodegenView = (
         unknownType: first.typing.primitives.unknown,
         getObjectStructuralTypeId: (nominal) => objectInfoByNominal.get(nominal)?.structural,
         getSymbolIntrinsicType: (symbol) =>
-          symbols.getIntrinsicType(symbols.idOf({ moduleId, symbol })),
+          symbols.getIntrinsicType(canonicalProgramSymbolIdOf(moduleId, symbol)),
       };
       const info = getOptionalInfo(typeId, ctx);
       return info
@@ -1277,7 +1283,10 @@ export const buildProgramCodegenView = (
       f64: first.typing.primitives.f64,
     },
     types,
-    symbols,
+    symbols: {
+      ...symbols,
+      canonicalIdOf: canonicalProgramSymbolIdOf,
+    },
     functions,
     optionals,
     objects,

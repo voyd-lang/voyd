@@ -39,6 +39,9 @@ const getFunctionMetas = (
 const programSymbolIdOf = (ctx: CodegenContext, moduleId: string, symbol: number) =>
   ctx.program.symbols.idOf({ moduleId, symbol });
 
+const canonicalProgramSymbolIdOf = (ctx: CodegenContext, moduleId: string, symbol: number) =>
+  ctx.program.symbols.canonicalIdOf(moduleId, symbol);
+
 const symbolName = (ctx: CodegenContext, moduleId: string, symbol: number): string =>
   ctx.program.symbols.getName(programSymbolIdOf(ctx, moduleId, symbol)) ?? `${symbol}`;
 
@@ -219,7 +222,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
     const targetRef = ctx.program.symbols.refOf(targetId);
     if (targetRef.moduleId === ctx.moduleId) return;
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      programSymbolIdOf(ctx, ctx.moduleId, imp.local)
+      canonicalProgramSymbolIdOf(ctx, ctx.moduleId, imp.local)
     );
     if (intrinsicMetadata.intrinsic && intrinsicMetadata.intrinsicUsesSignature !== true) {
       return;
@@ -276,7 +279,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         const resultType = effectful
           ? ctx.effectsRuntime.outcomeType
           : wasmTypeFor(instantiatedTypeDesc.returnType, ctx);
-        const metadata: FunctionMetadata = {
+      const metadata: FunctionMetadata = {
           moduleId: ctx.moduleId,
           symbol: imp.local,
           wasmName: (targetMeta ?? targetMetas[0]!).wasmName,
@@ -296,7 +299,9 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         effectRow: targetMeta?.effectRow ?? effectInfo?.effectRow,
       };
       pushFunctionMeta(ctx, ctx.moduleId, imp.local, metadata);
-      ctx.functionInstances.set(instanceId, metadata);
+      if (!ctx.functionInstances.has(instanceId)) {
+        ctx.functionInstances.set(instanceId, metadata);
+      }
     });
   });
 };

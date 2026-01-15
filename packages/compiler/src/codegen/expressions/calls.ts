@@ -297,7 +297,7 @@ export const compileCallExpr = (
         compileExpr,
       });
     }
-    const calleeId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: callee.symbol });
+    const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
     const intrinsicName = ctx.program.symbols.getIntrinsicName(calleeId);
     const traitDispatch = compileTraitDispatchCall({
@@ -409,7 +409,7 @@ const compileTraitDispatchCall = ({
   }
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const mapping = ctx.program.traits.getTraitMethodImpl(
-    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: calleeSymbol })
+    ctx.program.symbols.canonicalIdOf(ctx.moduleId, calleeSymbol)
   );
   if (!mapping) {
     return undefined;
@@ -633,7 +633,7 @@ const compileCallArgumentsForParams = (
     const callee = ctx.module.hir.expressions.get(call.callee);
     if (!callee) return "<unknown>";
     if (callee.exprKind === "identifier") {
-      const calleeId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: callee.symbol });
+      const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
       return ctx.program.symbols.getName(calleeId) ?? `${callee.symbol}`;
     }
     if (callee.exprKind === "overload-set") {
