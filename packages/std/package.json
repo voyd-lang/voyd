@@ -4,9 +4,9 @@
   "private": true,
   "description": "Voyd standard library sources",
   "scripts": {
-    "build": "echo 'standard library source bundle'",
+    "build": "node -e \"const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/.placeholder','standard library source bundle');\"",
     "typecheck": "echo 'no types for voyd std'",
-    "test": "NODE_OPTIONS='--import tsx --conditions=development' voyd test ./src",
+    "test": "node ../../scripts/voyd test ./src",
     "lint": "echo 'no lint configured'"
   }
 }

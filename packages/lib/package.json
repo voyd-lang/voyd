@@ -5,20 +5,20 @@
   "main": "./dist/index.js",
   "exports": {
     ".": {
-      "types": "./src/lib/index.ts",
+      "types": "./dist/index.d.ts",
       "development": "./src/lib/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./package.json": "./package.json",
     "./*.js": {
-      "types": "./src/lib/*.ts",
+      "types": "./dist/*.d.ts",
       "development": "./src/lib/*.ts",
       "import": "./dist/*.js",
       "default": "./dist/*.js"
     },
     "./*": {
-      "types": "./src/lib/*.ts",
+      "types": "./dist/*.d.ts",
       "development": "./src/lib/*.ts",
       "import": "./dist/*.js",
       "default": "./dist/*.js"
