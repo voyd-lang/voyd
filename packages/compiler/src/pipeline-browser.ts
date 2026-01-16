@@ -1,5 +1,4 @@
 import { buildModuleGraph } from "./modules/graph.js";
-import { createFsModuleHost } from "./modules/fs-host.js";
 import type { ModuleGraph } from "./modules/types.js";
 import {
   compileProgramWithLoader,
@@ -13,10 +12,12 @@ export * from "./pipeline-shared.js";
 export const loadModuleGraph = async (
   options: LoadModulesOptions
 ): Promise<ModuleGraph> => {
-  const host = options.host ?? createFsModuleHost();
+  if (!options.host) {
+    throw new Error("ModuleHost is required in browser builds");
+  }
   return buildModuleGraph({
     entryPath: options.entryPath,
-    host,
+    host: options.host,
     roots: options.roots,
   });
 };

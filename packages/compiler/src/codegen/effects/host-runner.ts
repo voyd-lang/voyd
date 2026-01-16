@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import { encode, decode } from "@msgpack/msgpack";
 import type binaryen from "binaryen";
 import { EFFECT_TABLE_EXPORT } from "./effect-table.js";
@@ -11,6 +10,7 @@ import {
   MSGPACK_WRITE_VALUE,
   VALUE_TAG,
 } from "./host-boundary.js";
+import { toBase64 } from "./base64.js";
 
 const TABLE_HEADER_SIZE = 12;
 const EFFECT_HEADER_SIZE = 16;
@@ -134,7 +134,7 @@ export const parseEffectTable = (
     throw new Error("Effect table payload is truncated");
   }
   const names = payload.slice(namesStart);
-  const namesBase64 = Buffer.from(names).toString("base64");
+  const namesBase64 = toBase64(names);
 
   const opsByEffect = new Map<number, EffectTableOp[]>();
   const effects: EffectTableEffect[] = effectHeaders.map((header) => {

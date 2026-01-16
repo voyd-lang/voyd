@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { dirname, resolve, sep } from "node:path";
+import { resolve, sep } from "node:path";
+import { createMemoryModuleHost } from "../modules/memory-host.js";
+import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleGraph, ModuleHost, ModulePath } from "../modules/types.js";
 import { analyzeModules, loadModuleGraph } from "../pipeline.js";
 import type { Diagnostic } from "../diagnostics/index.js";
@@ -12,57 +14,8 @@ import {
 import { createTypeArena } from "../semantics/typing/type-arena.js";
 import { createEffectTable } from "../semantics/effects/effect-table.js";
 
-const createMemoryHost = (files: Record<string, string>): ModuleHost => {
-  const normalized = new Map<string, string>();
-  const directories = new Map<string, Set<string>>();
-
-  const ensureDir = (dir: string) => {
-    if (!directories.has(dir)) {
-      directories.set(dir, new Set());
-    }
-  };
-
-  const registerPath = (path: string) => {
-    const directParent = dirname(path);
-    ensureDir(directParent);
-    directories.get(directParent)!.add(path);
-
-    let current = directParent;
-    while (true) {
-      const parent = dirname(current);
-      if (parent === current) break;
-      ensureDir(parent);
-      directories.get(parent)!.add(current);
-      current = parent;
-    }
-  };
-
-  Object.entries(files).forEach(([path, contents]) => {
-    const full = resolve(path);
-    normalized.set(full, contents);
-    registerPath(full);
-  });
-
-  const isDirectoryPath = (path: string) =>
-    directories.has(path) && !normalized.has(path);
-
-  return {
-    readFile: async (path: string) => {
-      const resolved = resolve(path);
-      const file = normalized.get(resolved);
-      if (file === undefined) {
-        throw new Error(`File not found: ${resolved}`);
-      }
-      return file;
-    },
-    readDir: async (path: string) => {
-      const resolved = resolve(path);
-      return Array.from(directories.get(resolved) ?? []);
-    },
-    fileExists: async (path: string) => normalized.has(resolve(path)),
-    isDirectory: async (path: string) => isDirectoryPath(resolve(path)),
-  };
-};
+const createMemoryHost = (files: Record<string, string>): ModuleHost =>
+  createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
 
 const sortModules = (graph: ModuleGraph): string[] => {
   const visited = new Set<string>();

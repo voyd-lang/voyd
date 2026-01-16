@@ -1,10 +1,11 @@
 import { readFile, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
 import type { ModuleHost } from "./types.js";
+import { createNodePathAdapter } from "./node-path-adapter.js";
 
 export const createFsModuleHost = (): ModuleHost => {
   const fileCache = new Map<string, boolean>();
   const dirCache = new Map<string, boolean>();
+  const pathAdapter = createNodePathAdapter();
 
   const isDirectory = async (path: string): Promise<boolean> => {
     const cached = dirCache.get(path);
@@ -27,8 +28,12 @@ export const createFsModuleHost = (): ModuleHost => {
   };
 
   return {
+    path: pathAdapter,
     readFile: (path: string) => readFile(path, "utf8"),
-    readDir: (path: string) => readdir(path).then((entries) => entries.map((entry) => join(path, entry))),
+    readDir: (path: string) =>
+      readdir(path).then((entries) =>
+        entries.map((entry) => pathAdapter.join(path, entry))
+      ),
     fileExists,
     isDirectory,
   };
