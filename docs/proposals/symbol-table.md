@@ -1,7 +1,7 @@
 # Symbol Table Specification
 
-Status: Draft  
-Owner: Compiler Architecture Working Group  
+Status: Implemented
+Owner: Compiler Architecture Working Group
 Scope: `src_next/binder`
 
 ## Overview
@@ -50,27 +50,27 @@ Snapshot
 
 ### Scope Kinds
 
-| Kind      | Description                                              |
-|-----------|----------------------------------------------------------|
-| module    | Top-level file or inline `mod` block                     |
-| function  | Function body, including closures                        |
-| block     | Local block with its own let-bindings                    |
-| impl      | Trait implementation scope                               |
-| trait     | Trait declaration scope                                  |
-| macro     | Compile-time macro body scope (after expansion)          |
+| Kind     | Description                                     |
+| -------- | ----------------------------------------------- |
+| module   | Top-level file or inline `mod` block            |
+| function | Function body, including closures               |
+| block    | Local block with its own let-bindings           |
+| impl     | Trait implementation scope                      |
+| trait    | Trait declaration scope                         |
+| macro    | Compile-time macro body scope (after expansion) |
 
 ### Symbol Kinds
 
-| Kind           | Description                                      |
-|----------------|--------------------------------------------------|
-| value          | Local/global variable or constant                |
-| parameter      | Function parameter                               |
-| type-parameter | Generic type parameter                           |
-| type           | Nominal type alias or object definition          |
-| trait          | Trait declaration                                |
+| Kind           | Description                                         |
+| -------------- | --------------------------------------------------- |
+| value          | Local/global variable or constant                   |
+| parameter      | Function parameter                                  |
+| type-parameter | Generic type parameter                              |
+| type           | Nominal type alias or object definition             |
+| trait          | Trait declaration                                   |
 | impl           | Implementation symbol (methods recorded separately) |
-| module         | Module definition                                |
-| macro          | Functional macro definition                      |
+| module         | Module definition                                   |
+| macro          | Functional macro definition                         |
 
 ## API
 

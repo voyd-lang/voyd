@@ -1,7 +1,7 @@
 # Codegen Diagnostics Boundary (No Semantics Mutation)
 
-Status: Proposed  
-Owner: Compiler Architecture Working Group  
+Status: Implemented
+Owner: Compiler Architecture Working Group
 Scope: `packages/compiler/src/codegen/*`, `packages/compiler/src/pipeline.ts`, tests
 
 ## Goal
