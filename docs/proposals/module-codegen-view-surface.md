@@ -1,7 +1,7 @@
 # Narrow `ModuleCodegenView` Surface (Remove `BindingResult` From Codegen)
 
-Status: Proposed  
-Owner: Compiler Architecture Working Group  
+Status: Implemented
+Owner: Compiler Architecture Working Group
 Scope: `packages/compiler/src/semantics/codegen-view/*`, `packages/compiler/src/codegen/*`, pipeline and tests
 
 ## Goal

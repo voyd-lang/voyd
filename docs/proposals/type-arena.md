@@ -1,6 +1,6 @@
 # Type Arena Specification
 
-Status: Draft
+Status: Implemented
 Owner: Compiler Architecture Working Group
 Scope: `src_next/types`
 
@@ -29,17 +29,17 @@ The type arena is an intern pool and constraint engine for all type information 
 
 ## Type Variants
 
-| Variant          | Purpose                                                              |
-| ---------------- | -------------------------------------------------------------------- |
-| Primitive        | Built-in scalar types (`i32`, `String`, `voyd`, etc.)                |
-| Trait            | Traits declared with `trait`; referenced by `SymbolId`               |
-| NominalObject    | Objects declared with `obj`; referenced by `SymbolId`                |
-| StructuralObject | Reference types defined via structural object literals (`{ ... }`)   |
-| Function         | Signature with parameter list, return type, and effect row           |
-| Union            | Set of alternative `TypeId`s (canonicalized order)                   |
-| Intersection     | Combination of nominal + structural requirements                     |
-| FixedArray       | WASM GC array wrapper with element type                              |
-| TypeParameterRef | Placeholder referring to a `TypeParamId` within a scheme             |
+| Variant          | Purpose                                                            |
+| ---------------- | ------------------------------------------------------------------ |
+| Primitive        | Built-in scalar types (`i32`, `String`, `voyd`, etc.)              |
+| Trait            | Traits declared with `trait`; referenced by `SymbolId`             |
+| NominalObject    | Objects declared with `obj`; referenced by `SymbolId`              |
+| StructuralObject | Reference types defined via structural object literals (`{ ... }`) |
+| Function         | Signature with parameter list, return type, and effect row         |
+| Union            | Set of alternative `TypeId`s (canonicalized order)                 |
+| Intersection     | Combination of nominal + structural requirements                   |
+| FixedArray       | WASM GC array wrapper with element type                            |
+| TypeParameterRef | Placeholder referring to a `TypeParamId` within a scheme           |
 
 Separating traits from nominal objects mirrors the language surface: traits carry behavioral contracts, while nominal objects describe concrete data layouts. Distinguishing their `kind` values keeps downstream passes (effects, impl resolution, code generation) from relying on ad-hoc metadata checks.
 

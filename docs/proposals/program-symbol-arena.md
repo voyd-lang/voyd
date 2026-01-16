@@ -1,7 +1,7 @@
 # Program-Wide Symbol Arena (Whole-Program Symbol Identity)
 
-Status: Proposed  
-Owner: Compiler Architecture Working Group  
+Status: Implemented
+Owner: Compiler Architecture Working Group
 Scope: `packages/compiler/src/semantics/*`, `packages/compiler/src/codegen/*`, pipeline and tests
 
 ## Goal (Non-Incremental)

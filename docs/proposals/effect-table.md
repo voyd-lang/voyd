@@ -1,7 +1,7 @@
 # Effect Table Specification
 
-Status: Draft  
-Owner: Compiler Architecture Working Group  
+Status: Implemented
+Owner: Compiler Architecture Working Group
 Scope: `src_next/effects`
 
 ## Overview

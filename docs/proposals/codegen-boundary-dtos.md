@@ -1,7 +1,7 @@
 # Boundary DTOs for `ProgramCodegenView` (No Typing Internals in Public Shapes)
 
-Status: Proposed  
-Owner: Compiler Architecture Working Group  
+Status: Implemented
+Owner: Compiler Architecture Working Group
 Scope: `packages/compiler/src/semantics/codegen-view/*`, `packages/compiler/src/codegen/*`, tests
 
 ## Goal
