@@ -48,10 +48,7 @@ export const createResumeContinuation = ({
     const bufLenLocal = 2;
     const guardLocal = 3;
     const contLocal = 4;
-    const effectIdExpr = runtime.requestEffectId(
-      ctx.mod.local.get(requestLocal, runtime.effectRequestType)
-    );
-    const opIdExpr = runtime.requestOpId(
+    const opIndexExpr = runtime.requestOpIndex(
       ctx.mod.local.get(requestLocal, runtime.effectRequestType)
     );
 
@@ -80,9 +77,9 @@ export const createResumeContinuation = ({
       ctx,
     });
     const branches = signatures.map((sig) => {
-      const matches = ctx.mod.i32.and(
-        ctx.mod.i32.eq(effectIdExpr, ctx.mod.i32.const(sig.effectId)),
-        ctx.mod.i32.eq(opIdExpr, ctx.mod.i32.const(sig.opId))
+      const matches = ctx.mod.i32.eq(
+        opIndexExpr,
+        ctx.mod.i32.const(sig.opIndex)
       );
       const tag = (() => {
         try {

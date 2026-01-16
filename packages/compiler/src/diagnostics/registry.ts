@@ -61,6 +61,11 @@ type DiagnosticParamsMap = {
     kind: "exported-generic-missing-instantiation";
     functionName: string;
   };
+  CG0004: {
+    kind: "missing-effect-id";
+    effectName: string;
+    fallbackId: string;
+  };
   MD0001:
     | { kind: "missing"; requested: string }
     | { kind: "referenced-from"; importer: string };
@@ -198,6 +203,13 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "codegen",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["CG0003"]>,
+  CG0004: {
+    code: "CG0004",
+    message: (params) =>
+      `public effect ${params.effectName} is missing @effect(id: ...); using fallback id ${params.fallbackId}`,
+    severity: "warning",
+    phase: "codegen",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["CG0004"]>,
   MD0001: {
     code: "MD0001",
     message: (params) =>

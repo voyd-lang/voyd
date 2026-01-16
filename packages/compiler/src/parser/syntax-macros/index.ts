@@ -2,6 +2,7 @@ import { Form } from "../ast/form.js";
 import { interpretWhitespace } from "./interpret-whitespace.js";
 import { intrinsicAttributeMacro } from "./intrinsic-attribute.js";
 import { intrinsicTypeAttributeMacro } from "./intrinsic-type-attribute.js";
+import { effectAttributeMacro } from "./effect-attribute.js";
 import { primary } from "./primary.js";
 import { attachColonClauses } from "./colon-clauses.js";
 import { constructorObjectLiteral } from "./constructor-object-literal.js";
@@ -18,6 +19,7 @@ const SYNTAX_MACROS: SyntaxMacro[] = [
   functionalMacroExpander,
   intrinsicAttributeMacro,
   intrinsicTypeAttributeMacro,
+  effectAttributeMacro,
   testBlockMacro,
 ];
 

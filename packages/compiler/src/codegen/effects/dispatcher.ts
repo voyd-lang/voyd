@@ -47,7 +47,7 @@ export const ensureDispatcher = (ctx: CodegenContext): string => {
 
   const matchFields = (): binaryen.ExpressionRef => {
     const typedFrame = refCast(ctx.mod, loadFrame(), handlerType);
-    const effectMatches = ctx.mod.i32.eq(
+    const effectMatches = ctx.mod.i64.eq(
       ctx.effectsRuntime.handlerEffectId(typedFrame),
       ctx.effectsRuntime.requestEffectId(loadRequest())
     );

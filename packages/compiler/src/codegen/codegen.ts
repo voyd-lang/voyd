@@ -18,6 +18,7 @@ import {
   EFFECT_TABLE_EXPORT,
   emitEffectTableSection,
 } from "./effects/effect-table.js";
+import { buildEffectRegistry } from "./effects/effect-registry.js";
 import { addEffectRuntimeHelpers } from "./effects/runtime-helpers.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
 import {
@@ -113,7 +114,6 @@ export const codegenProgram = ({
     effectLowering: {
       sitesByExpr: new Map(),
       sites: [],
-      argsTypes: new Map(),
       callArgTemps: new Map(),
       tempTypeIds: new Map(),
     },
@@ -128,6 +128,10 @@ export const codegenProgram = ({
     ctx.effectLowering = ctx.effectsBackend.buildLowering({ ctx, siteCounter });
   });
   contexts.forEach(registerFunctionMetadata);
+  const effectRegistry = buildEffectRegistry(contexts);
+  contexts.forEach((ctx) => {
+    ctx.effectsState.effectRegistry = effectRegistry;
+  });
   contexts.forEach(registerImportMetadata);
   contexts.forEach(compileFunctions);
 

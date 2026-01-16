@@ -25,7 +25,6 @@ import {
   parseEffectTable,
   type EffectHandler,
 } from "@voyd/compiler/codegen/effects/host-runner.js";
-import type { EffectTableEffect } from "@voyd/compiler/codegen/effects/effect-table-types.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
 
@@ -100,23 +99,27 @@ const testOpKind = (label: string): TestOpKind | undefined => {
   return undefined;
 };
 
-const isTestEffect = (effect: EffectTableEffect): boolean =>
-  effect.ops.some((op) => op.label.endsWith(".fail")) &&
-  effect.ops.some((op) => op.label.endsWith(".skip")) &&
-  effect.ops.some((op) => op.label.endsWith(".log"));
-
 const buildTestEffectHandlers = (
   wasm: Uint8Array
 ): Record<string, EffectHandler> => {
   const table = parseEffectTable(wasm);
-  const effect = table.effects.find(isTestEffect);
-  if (!effect) return {};
+  let testOps: typeof table.ops | undefined;
+  let bestScore = 0;
+  table.opsByEffectId.forEach((ops) => {
+    const score = ops.reduce((count, op) => {
+      return testOpKind(op.label) ? count + 1 : count;
+    }, 0);
+    if (score === 0 || score <= bestScore) return;
+    bestScore = score;
+    testOps = ops;
+  });
+  if (!testOps || bestScore === 0) return {};
 
   const handlers: Record<string, EffectHandler> = {};
-  effect.ops.forEach((op) => {
+  testOps.forEach((op) => {
     const kind = testOpKind(op.label);
     if (!kind) return;
-    handlers[`${effect.id}:${op.id}:${op.resumeKind}`] = TEST_OP_HANDLERS[kind];
+    handlers[`${op.opIndex}`] = TEST_OP_HANDLERS[kind];
   });
   return handlers;
 };

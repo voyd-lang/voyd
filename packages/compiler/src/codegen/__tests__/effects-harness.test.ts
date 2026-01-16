@@ -7,7 +7,6 @@ import {
   runEffectfulExport,
   parseEffectTable,
 } from "./support/effects-harness.js";
-import { RESUME_KIND } from "../effects/runtime-abi.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import type { SemanticsPipelineResult } from "../../semantics/pipeline.js";
 
@@ -50,41 +49,56 @@ describe("effect table + harness", () => {
     if (!effectTable) return;
 
     const parsed = parseEffectTable(module);
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     expect(parsed.namesBase64).toBe(effectTable.namesBlob);
-    expect(parsed.effects).toMatchInlineSnapshot(`
+    expect(
+      parsed.ops.map((op) => ({
+        opIndex: op.opIndex,
+        effectId: op.effectId,
+        opId: op.opId,
+        resumeKind: op.resumeKind,
+        label: op.label,
+      }))
+    ).toMatchInlineSnapshot(`
       [
         {
-          "id": 0,
-          "label": "_proj_src_effects_smoke_voyd::Log",
-          "name": "_proj_src_effects_smoke_voyd::Log",
-          "ops": [
-            {
-              "id": 0,
-              "label": "_proj_src_effects_smoke_voyd::Log.info",
-              "name": "_proj_src_effects_smoke_voyd::Log.info",
-              "resumeKind": 0,
-            },
-          ],
+          "effectId": "local::/proj/src/effects-smoke.voyd::Log",
+          "label": "/proj/src/effects-smoke.voyd::Log.info",
+          "opId": 0,
+          "opIndex": 0,
+          "resumeKind": 0,
         },
       ]
     `);
+    parsed.ops.forEach((op) => {
+      expect(typeof op.signatureHash).toBe("number");
+    });
 
-    expect(effectTable.effects).toEqual([
-      {
-        id: 0,
-        name: "Log",
-        label: "_proj_src_effects_smoke_voyd::Log",
-        ops: [
-          {
-            id: 0,
-            name: "info",
-            label: "_proj_src_effects_smoke_voyd::Log.info",
-            resumeKind: RESUME_KIND.resume,
-          },
-        ],
-      },
-    ]);
+    expect(
+      effectTable.ops.map((op) => ({
+        opIndex: op.opIndex,
+        effectId: op.effectId,
+        opId: op.opId,
+        resumeKind: op.resumeKind,
+        label: op.label,
+      }))
+    ).toMatchInlineSnapshot(`
+      [
+        {
+          "effectId": "local::/proj/src/effects-smoke.voyd::Log",
+          "label": "/proj/src/effects-smoke.voyd::Log.info",
+          "opId": 0,
+          "opIndex": 0,
+          "resumeKind": 0,
+        },
+      ]
+    `);
+    expect(effectTable.ops[0]?.effectIdHash).toBe(
+      parsed.ops[0]?.effectIdHash.hex
+    );
+    effectTable.ops.forEach((op) => {
+      expect(typeof op.signatureHash).toBe("number");
+    });
   });
 
   it("unwraps Outcome.value from an effectful export", async () => {
@@ -94,17 +108,22 @@ describe("effect table + harness", () => {
       entryName: "main_effectful",
     });
     expect(value).toBe(8);
-    expect(table.effects[0]?.label).toBe("_proj_src_effects_smoke_voyd::Log");
+    expect(table.ops[0]?.label).toBe("/proj/src/effects-smoke.voyd::Log.info");
   });
 
   it("drives an effect request through a handler", async () => {
     const { module } = buildFixtureEffectModule();
+    const parsed = parseEffectTable(module);
+    const op = parsed.ops.find((entry) => entry.label.endsWith("Log.info"));
+    if (!op) {
+      throw new Error("missing Log.info op entry");
+    }
     let calls = 0;
     const result = await runEffectfulExport<number>({
       wasm: module,
       entryName: "main_effectful",
       handlers: {
-        "0:0:0": () => {
+        [`${op.opIndex}`]: () => {
           calls += 1;
           return 99;
         },
@@ -130,42 +149,57 @@ describe("effect table + harness", () => {
     const { module, effectTable } = codegen(semantics, {
       emitEffectHelpers: true,
     });
-    expect(effectTable?.effects).toMatchInlineSnapshot(`
+    expect(
+      effectTable?.ops.map((op) => ({
+        opIndex: op.opIndex,
+        effectId: op.effectId,
+        opId: op.opId,
+        resumeKind: op.resumeKind,
+        label: op.label,
+      }))
+    ).toMatchInlineSnapshot(`
       [
         {
-          "id": 0,
-          "label": "_proj_src_effects_perform_harness_voyd::Log",
-          "name": "Log",
-          "ops": [
-            {
-              "id": 0,
-              "label": "_proj_src_effects_perform_harness_voyd::Log.info",
-              "name": "info",
-              "resumeKind": 0,
-            },
-          ],
+          "effectId": "local::/proj/src/effects-perform-harness.voyd::Log",
+          "label": "/proj/src/effects-perform-harness.voyd::Log.info",
+          "opId": 0,
+          "opIndex": 0,
+          "resumeKind": 0,
         },
       ]
     `);
-
     const parsed = parseEffectTable(module);
-    expect(parsed.effects).toMatchInlineSnapshot(`
+    if (effectTable?.ops[0]) {
+      expect(effectTable.ops[0].effectIdHash).toBe(
+        parsed.ops[0]?.effectIdHash.hex
+      );
+    }
+    effectTable?.ops.forEach((op) => {
+      expect(typeof op.signatureHash).toBe("number");
+    });
+
+    expect(
+      parsed.ops.map((op) => ({
+        opIndex: op.opIndex,
+        effectId: op.effectId,
+        opId: op.opId,
+        resumeKind: op.resumeKind,
+        label: op.label,
+      }))
+    ).toMatchInlineSnapshot(`
       [
         {
-          "id": 0,
-          "label": "_proj_src_effects_perform_harness_voyd::Log",
-          "name": "_proj_src_effects_perform_harness_voyd::Log",
-          "ops": [
-            {
-              "id": 0,
-              "label": "_proj_src_effects_perform_harness_voyd::Log.info",
-              "name": "_proj_src_effects_perform_harness_voyd::Log.info",
-              "resumeKind": 0,
-            },
-          ],
+          "effectId": "local::/proj/src/effects-perform-harness.voyd::Log",
+          "label": "/proj/src/effects-perform-harness.voyd::Log.info",
+          "opId": 0,
+          "opIndex": 0,
+          "resumeKind": 0,
         },
       ]
     `);
+    parsed.ops.forEach((op) => {
+      expect(typeof op.signatureHash).toBe("number");
+    });
 
     const text = module.emitText();
     expect(text).toContain("struct.new $voydEffectRequest");

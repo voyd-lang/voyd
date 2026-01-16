@@ -1,31 +1,23 @@
 import binaryen from "binaryen";
 import type { CodegenContext } from "../context.js";
-import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
-import type {
-  EffectTableEffect,
-  EffectTableOp,
-  EffectTableSidecar,
-} from "./effect-table-types.js";
+import type { EffectTableSidecar } from "./effect-table-types.js";
+import type { EffectRegistry } from "./effect-registry.js";
 import { toBase64 } from "./base64.js";
 
-const TABLE_VERSION = 1;
+const TABLE_VERSION = 2;
 export const EFFECT_TABLE_EXPORT = "__voyd_effect_table";
 
-const TABLE_HEADER_SIZE = 12; // version + effectCount + opCount (u32 each)
-const EFFECT_HEADER_SIZE = 16; // effectId, nameOffset, opsOffset, opCount (u32 each)
-const OP_ENTRY_SIZE = 12; // opId, resumeKind, nameOffset (u32 each)
-
-interface EffectHeader {
-  effectId: number;
-  nameOffset: number;
-  opsOffset: number;
-  opCount: number;
-}
+const TABLE_HEADER_SIZE = 8; // version + opCount (u32 each)
+const OP_ENTRY_SIZE = 28; // effectIdLo, effectIdHi, effectIdName, opId, resumeKind, signatureHash, label (u32 each)
 
 interface OpEntry {
+  effectIdLo: number;
+  effectIdHi: number;
+  effectIdNameOffset: number;
   opId: number;
-  resumeKind: ResumeKind;
-  nameOffset: number;
+  resumeKind: number;
+  signatureHash: number;
+  labelOffset: number;
 }
 
 class NamesBlobBuilder {
@@ -48,84 +40,44 @@ class NamesBlobBuilder {
   }
 }
 
-const opResumeKind = (resumable: "resume" | "tail"): ResumeKind =>
-  resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
+const formatEffectIdHash = (low: number, high: number): string =>
+  `0x${high.toString(16).padStart(8, "0")}${low.toString(16).padStart(8, "0")}`;
 
-const collectEffects = (
-  contexts: readonly CodegenContext[]
-): EffectTableEffect[] => {
-  if (contexts.length === 0) return [];
-  const effects: EffectTableEffect[] = [];
-  const ctxByModule = new Map(contexts.map((ctx) => [ctx.moduleId, ctx]));
-  const program = contexts[0]!.program;
-
-  program.effects.getOrderedModules().forEach((moduleId) => {
-    const ctx = ctxByModule.get(moduleId);
-    const moduleView = program.modules.get(moduleId);
-    if (!moduleView || !ctx) return;
-
-    moduleView.meta.effects.forEach((effect, localEffectIndex) => {
-      const effectId = program.effects.getGlobalId(moduleId, localEffectIndex);
-      if (typeof effectId !== "number") {
-        throw new Error(
-          `missing global effect id for ${moduleId}:${localEffectIndex}`
-        );
-      }
-      const label = `${ctx.moduleLabel}::${effect.name}`;
-      const ops: EffectTableOp[] = effect.operations.map((op, index) => ({
-        id: index,
-        name: op.name,
-        label: `${label}.${op.name}`,
-        resumeKind: opResumeKind(op.resumable),
-      }));
-      effects.push({
-        id: effectId,
-        name: effect.name,
-        label,
-        ops,
-      });
-    });
-  });
-
-  return effects.sort((a, b) => a.id - b.id);
-};
-
-const writeEffectTableBytes = ({
-  effects,
+export const emitEffectTableSection = ({
+  contexts,
+  entryModuleId,
   mod,
-  exportName,
+  exportName = EFFECT_TABLE_EXPORT,
+  registry,
 }: {
-  effects: readonly EffectTableEffect[];
+  contexts: readonly CodegenContext[];
+  entryModuleId: string;
   mod: binaryen.Module;
-  exportName: string;
-}): { sectionBytes: Uint8Array; namesBlob: Uint8Array } => {
-  const names = new NamesBlobBuilder();
-  const effectHeaders: EffectHeader[] = [];
-  const opEntries: OpEntry[] = [];
+  exportName?: string;
+  registry?: EffectRegistry;
+}): EffectTableSidecar => {
+  const first = contexts[0];
+  if (!first) {
+    throw new Error("emitEffectTableSection requires at least one context");
+  }
+  const effectRegistry = registry ?? first.effectsState.effectRegistry;
+  if (!effectRegistry) {
+    throw new Error("missing effect registry");
+  }
 
-  effects.forEach((effect) => {
-    const nameOffset = names.intern(effect.label);
-    const opsOffset = opEntries.length * OP_ENTRY_SIZE;
-    effect.ops.forEach((op) => {
-      opEntries.push({
-        opId: op.id,
-        resumeKind: op.resumeKind,
-        nameOffset: names.intern(op.label),
-      });
-    });
-    effectHeaders.push({
-      effectId: effect.id,
-      nameOffset,
-      opsOffset,
-      opCount: effect.ops.length,
-    });
-  });
+  const names = new NamesBlobBuilder();
+  const opEntries: OpEntry[] = effectRegistry.entries.map((entry) => ({
+    effectIdLo: entry.effectId.hash.low,
+    effectIdHi: entry.effectId.hash.high,
+    effectIdNameOffset: names.intern(entry.effectId.id),
+    opId: entry.opId,
+    resumeKind: entry.resumeKind,
+    signatureHash: entry.signatureHash,
+    labelOffset: names.intern(entry.label),
+  }));
 
   const namesBlob = names.finish();
-  const namesStart =
-    TABLE_HEADER_SIZE +
-    effectHeaders.length * EFFECT_HEADER_SIZE +
-    opEntries.length * OP_ENTRY_SIZE;
+  const namesStart = TABLE_HEADER_SIZE + opEntries.length * OP_ENTRY_SIZE;
   const buffer = new ArrayBuffer(namesStart + namesBlob.byteLength);
   const view = new DataView(buffer);
   let offset = 0;
@@ -136,58 +88,35 @@ const writeEffectTableBytes = ({
   };
 
   write(TABLE_VERSION);
-  write(effectHeaders.length);
   write(opEntries.length);
 
-  effectHeaders.forEach((header) => {
-    write(header.effectId);
-    write(header.nameOffset);
-    write(header.opsOffset);
-    write(header.opCount);
-  });
-
   opEntries.forEach((entry) => {
+    write(entry.effectIdLo);
+    write(entry.effectIdHi);
+    write(entry.effectIdNameOffset);
     write(entry.opId);
     write(entry.resumeKind);
-    write(entry.nameOffset);
+    write(entry.signatureHash);
+    write(entry.labelOffset);
   });
 
   new Uint8Array(buffer, namesStart).set(namesBlob);
-
   const sectionBytes = new Uint8Array(buffer);
   mod.addCustomSection(exportName, sectionBytes);
-  return { sectionBytes, namesBlob };
-};
-
-export const emitEffectTableSection = ({
-  contexts,
-  entryModuleId,
-  mod,
-  exportName = EFFECT_TABLE_EXPORT,
-}: {
-  contexts: readonly CodegenContext[];
-  entryModuleId: string;
-  mod: binaryen.Module;
-  exportName?: string;
-}): EffectTableSidecar => {
-  const effects = collectEffects(contexts);
-  const { namesBlob } = writeEffectTableBytes({ effects, mod, exportName });
 
   return {
     version: TABLE_VERSION,
     moduleId: entryModuleId,
     tableExport: exportName,
     namesBlob: toBase64(namesBlob),
-    effects: effects.map((effect) => ({
-      id: effect.id,
-      name: effect.name,
-      label: effect.label,
-      ops: effect.ops.map((op) => ({
-        id: op.id,
-        name: op.name,
-        label: op.label,
-        resumeKind: op.resumeKind,
-      })),
+    ops: effectRegistry.entries.map((entry) => ({
+      opIndex: entry.opIndex,
+      effectId: entry.effectId.id,
+      effectIdHash: formatEffectIdHash(entry.effectId.hash.low, entry.effectId.hash.high),
+      opId: entry.opId,
+      resumeKind: entry.resumeKind,
+      signatureHash: entry.signatureHash,
+      label: entry.label,
     })),
   };
 };

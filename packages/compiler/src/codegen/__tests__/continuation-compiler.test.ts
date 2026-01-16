@@ -31,18 +31,13 @@ describe("continuation compiler", () => {
     }
 
     const table = parseEffectTable(module);
-    const asyncEffect = table.effects.find((effect) => effect.label.endsWith("Async"));
-    if (!asyncEffect) {
-      throw new Error("expected Async effect in effect table");
-    }
-    const opSuffix = (label: string): string => label.split(".").at(-1) ?? label;
-    const awaitOp = asyncEffect.ops.find((op) => opSuffix(op.label) === "await");
-    const pingOp = asyncEffect.ops.find((op) => opSuffix(op.label) === "ping");
+    const awaitOp = table.ops.find((op) => op.label.endsWith("Async.await"));
+    const pingOp = table.ops.find((op) => op.label.endsWith("Async.ping"));
     if (!awaitOp || !pingOp) {
       throw new Error("expected await and ping ops in effect table");
     }
-    const awaitKey = `${asyncEffect.id}:${awaitOp.id}:${awaitOp.resumeKind}`;
-    const pingKey = `${asyncEffect.id}:${pingOp.id}:${pingOp.resumeKind}`;
+    const awaitKey = `${awaitOp.opIndex}`;
+    const pingKey = `${pingOp.opIndex}`;
 
     const observed: Array<{ opId: number; value: number }> = [];
     const handler: EffectHandler = (request, value) => {
@@ -58,7 +53,7 @@ describe("continuation compiler", () => {
       },
     });
     expect(blockResult.value).toBe(6);
-    expect(observed).toEqual([{ opId: awaitOp.id, value: 5 }]);
+    expect(observed).toEqual([{ opId: awaitOp.opId, value: 5 }]);
     observed.length = 0;
 
     const whileResult = await runEffectfulExport<number>({
@@ -70,11 +65,11 @@ describe("continuation compiler", () => {
       },
     });
     expect(observed).toEqual([
-      { opId: awaitOp.id, value: 1 },
-      { opId: awaitOp.id, value: 2 },
-      { opId: awaitOp.id, value: 3 },
-      { opId: awaitOp.id, value: 4 },
-      { opId: awaitOp.id, value: 5 },
+      { opId: awaitOp.opId, value: 1 },
+      { opId: awaitOp.opId, value: 2 },
+      { opId: awaitOp.opId, value: 3 },
+      { opId: awaitOp.opId, value: 4 },
+      { opId: awaitOp.opId, value: 5 },
     ]);
     expect(whileResult.value).toBe(15);
     observed.length = 0;
@@ -88,14 +83,14 @@ describe("continuation compiler", () => {
       },
     });
     expect(observed).toEqual([
-      { opId: awaitOp.id, value: 11 },
-      { opId: awaitOp.id, value: 13 },
-      { opId: awaitOp.id, value: 14 },
-      { opId: awaitOp.id, value: 21 },
-      { opId: awaitOp.id, value: 23 },
-      { opId: awaitOp.id, value: 31 },
-      { opId: awaitOp.id, value: 33 },
-      { opId: awaitOp.id, value: 34 },
+      { opId: awaitOp.opId, value: 11 },
+      { opId: awaitOp.opId, value: 13 },
+      { opId: awaitOp.opId, value: 14 },
+      { opId: awaitOp.opId, value: 21 },
+      { opId: awaitOp.opId, value: 23 },
+      { opId: awaitOp.opId, value: 31 },
+      { opId: awaitOp.opId, value: 33 },
+      { opId: awaitOp.opId, value: 34 },
     ]);
     expect(nestedResult.value).toBe(180);
     observed.length = 0;
@@ -108,7 +103,7 @@ describe("continuation compiler", () => {
         [pingKey]: handler,
       },
     });
-    expect(observed).toEqual([{ opId: pingOp.id, value: 1 }]);
+    expect(observed).toEqual([{ opId: pingOp.opId, value: 1 }]);
     expect(handlerClauseResult.value).toBe(2);
   });
 });

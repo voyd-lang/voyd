@@ -233,6 +233,9 @@ export type ModuleCodegenMetadata = {
   }[];
   effects: readonly {
     name: string;
+    effectId?: string;
+    visibility: HirVisibility;
+    symbol: SymbolId;
     operations: readonly {
       name: string;
       resumable: "resume" | "tail";
@@ -686,6 +689,9 @@ export const buildProgramCodegenView = (
       })),
       effects: mod.binding.effects.map((effect) => ({
         name: effect.name,
+        effectId: effect.effectId,
+        visibility: effect.visibility,
+        symbol: effect.symbol,
         operations: effect.operations.map((op) => ({
           name: op.name,
           resumable: op.resumable,

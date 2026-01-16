@@ -9,11 +9,16 @@ import type { MsgPackImports } from "./types.js";
 import { stateFor } from "./state.js";
 
 const LINEAR_MEMORY_KEY = Symbol("voyd.effects.hostBoundary.linearMemory");
+const MODULES_WITH_LINEAR_MEMORY = new WeakSet<binaryen.Module>();
 const MSGPACK_IMPORTS_KEY = Symbol("voyd.effects.hostBoundary.msgpackImports");
 
 export const ensureLinearMemory = (ctx: CodegenContext): void => {
   stateFor(ctx, LINEAR_MEMORY_KEY, () => {
+    if (MODULES_WITH_LINEAR_MEMORY.has(ctx.mod)) {
+      return true;
+    }
     ctx.mod.setMemory(1, 1, "memory");
+    MODULES_WITH_LINEAR_MEMORY.add(ctx.mod);
     return true;
   });
 };
@@ -35,6 +40,8 @@ export const ensureMsgPackImports = (ctx: CodegenContext): MsgPackImports =>
     );
 
     const effectParams = binaryen.createType([
+      binaryen.i64,
+      binaryen.i32,
       binaryen.i32,
       binaryen.i32,
       binaryen.i32,

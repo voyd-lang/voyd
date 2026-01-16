@@ -5,7 +5,7 @@ import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegenProgram } from "../index.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
-import { runEffectfulExport } from "./support/effects-harness.js";
+import { runEffectfulExport, parseEffectTable } from "./support/effects-harness.js";
 
 const fixturePath = (name: string) =>
   resolve(import.meta.dirname, "__fixtures__", name);
@@ -33,44 +33,56 @@ describe("effects multi-module ids", () => {
       });
 
     const { module: wasmA } = buildA();
+    const tableA = parseEffectTable(wasmA);
+    const alphaOp = tableA.ops.find((op) => op.label.endsWith("Alpha.ping"));
+    if (!alphaOp) {
+      throw new Error("missing Alpha.ping op entry");
+    }
     const seenA: any[] = [];
     const resultA = await runEffectfulExport<number>({
       wasm: wasmA,
       entryName: "main_effectful",
       handlers: {
-        "0:0:0": (request) => {
+        [`${alphaOp.opIndex}`]: (request) => {
           seenA.push(request);
           return 3;
         },
       },
     });
     expect(resultA.value).toBe(4);
-    expect(seenA[0]?.effectId).toBe(0);
-    expect(seenA[0]?.effectLabel).toContain("effects_multi_module_a_voyd::Alpha");
+    expect(seenA[0]?.effectId).toBe(alphaOp.effectId);
+    expect(seenA[0]?.label).toContain("effects_multi_module_a.voyd::Alpha.ping");
 
     const { module: wasmB } = buildB();
+    const tableB = parseEffectTable(wasmB);
+    const betaOp = tableB.ops.find((op) => op.label.endsWith("Beta.pong"));
+    if (!betaOp) {
+      throw new Error("missing Beta.pong op entry");
+    }
     const seenB: any[] = [];
     const resultB = await runEffectfulExport<number>({
       wasm: wasmB,
       entryName: "main_effectful",
       handlers: {
-        "1:0:0": (request) => {
+        [`${betaOp.opIndex}`]: (request) => {
           seenB.push(request);
           return 7;
         },
       },
     });
     expect(resultB.value).toBe(8);
-    expect(seenB[0]?.effectId).toBe(1);
-    expect(seenB[0]?.effectLabel).toContain("effects_multi_module_b_voyd::Beta");
+    expect(seenB[0]?.effectId).toBe(betaOp.effectId);
+    expect(seenB[0]?.label).toContain("effects_multi_module_b.voyd::Beta.pong");
 
     const { module: wasmASecond } = buildA();
+    const tableASecond = parseEffectTable(wasmASecond);
     const second = await runEffectfulExport<number>({
       wasm: wasmASecond,
       entryName: "main_effectful",
-      handlers: { "0:0:0": () => 10 },
+      handlers: { [`${alphaOp.opIndex}`]: () => 10 },
     });
     expect(second.table.namesBase64).toBe(resultA.table.namesBase64);
-    expect(second.table.effects).toEqual(resultA.table.effects);
+    expect(second.table.ops).toEqual(resultA.table.ops);
+    expect(tableASecond.ops).toEqual(tableA.ops);
   });
 });

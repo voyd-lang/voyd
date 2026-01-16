@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
-import { runEffectfulExport } from "./support/effects-harness.js";
+import { runEffectfulExport, parseEffectTable } from "./support/effects-harness.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -22,13 +22,17 @@ const buildModule = () => {
 describe("effectful exports with non-i32 args", () => {
   it("traps when an effect with unsupported args escapes to JS", async () => {
     const { module } = buildModule();
+    const parsed = parseEffectTable(module);
+    const op = parsed.ops[0];
+    if (!op) {
+      throw new Error("missing effect op entry");
+    }
     await expect(
       runEffectfulExport<number>({
         wasm: module,
         entryName: "main_effectful",
-        handlers: { "0:0:0": () => 1 },
+        handlers: { [`${op.opIndex}`]: () => 1 },
       })
     ).rejects.toThrow();
   });
 });
-

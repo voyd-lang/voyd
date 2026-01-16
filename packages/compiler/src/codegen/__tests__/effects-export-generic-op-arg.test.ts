@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
-import { runEffectfulExport } from "./support/effects-harness.js";
+import { runEffectfulExport, parseEffectTable } from "./support/effects-harness.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -22,8 +22,13 @@ const buildModule = () => {
 describe("effectful exports with generic effect args", () => {
   it("encodes concrete args for generic effect operations", async () => {
     const { module } = buildModule();
+    const parsed = parseEffectTable(module);
+    const takeOp = parsed.ops.find((op) => op.label.endsWith("Box.take"));
+    if (!takeOp) {
+      throw new Error("missing Box.take op entry");
+    }
     const handlers = {
-      "0:0:0": (_request: unknown, ...args: unknown[]) =>
+      [`${takeOp.opIndex}`]: (_request: unknown, ...args: unknown[]) =>
         (args[0] as number) + 1,
     };
 

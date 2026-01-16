@@ -1,7 +1,6 @@
-import { encode, decode } from "@msgpack/msgpack";
+import { decode, encode } from "@msgpack/msgpack";
 import type binaryen from "binaryen";
 import { EFFECT_TABLE_EXPORT } from "./effect-table.js";
-import type { EffectTableEffect, EffectTableOp } from "./effect-table-types.js";
 import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
 import {
   MIN_EFFECT_BUFFER_SIZE,
@@ -12,9 +11,8 @@ import {
 } from "./host-boundary.js";
 import { toBase64 } from "./base64.js";
 
-const TABLE_HEADER_SIZE = 12;
-const EFFECT_HEADER_SIZE = 16;
-const OP_ENTRY_SIZE = 12;
+const TABLE_HEADER_SIZE = 8;
+const OP_ENTRY_SIZE = 28;
 const MSGPACK_OPTS = { useBigInt64: true } as const;
 
 type WasmSource =
@@ -34,21 +32,42 @@ const parseResumeKind = (value: number): ResumeKind => {
   throw new Error(`unsupported resume kind ${value}`);
 };
 
+type EffectIdHash = {
+  low: number;
+  high: number;
+  value: bigint;
+  hex: string;
+};
+
+export interface ParsedEffectOp {
+  opIndex: number;
+  effectId: string;
+  effectIdHash: EffectIdHash;
+  opId: number;
+  resumeKind: ResumeKind;
+  signatureHash: number;
+  label: string;
+}
+
 export interface ParsedEffectTable {
   version: number;
   tableExport: string;
   names: Uint8Array;
   namesBase64: string;
-  effects: EffectTableEffect[];
-  opsByEffect: Map<number, EffectTableOp[]>;
+  ops: ParsedEffectOp[];
+  opsByEffectId: Map<string, ParsedEffectOp[]>;
 }
 
 export interface EffectHandlerRequest {
-  effectId: number;
+  handle: number;
+  opIndex: number;
+  effectId: string;
+  effectIdHash: bigint;
+  effectIdHashHex: string;
   opId: number;
   resumeKind: ResumeKind;
+  signatureHash: number;
   label: string;
-  effectLabel: string;
 }
 
 export type EffectHandler = (
@@ -81,6 +100,18 @@ const decodeName = (names: Uint8Array, offset: number): string => {
   return new TextDecoder().decode(new Uint8Array(bytes));
 };
 
+const effectIdHashFromParts = (low: number, high: number): EffectIdHash => {
+  const value = BigInt.asUintN(64, (BigInt(high) << 32n) | BigInt(low));
+  return {
+    low,
+    high,
+    value,
+    hex: `0x${high.toString(16).padStart(8, "0")}${low
+      .toString(16)
+      .padStart(8, "0")}`,
+  };
+};
+
 export const parseEffectTable = (
   wasm: WasmSource,
   tableExport = EFFECT_TABLE_EXPORT
@@ -107,58 +138,47 @@ export const parseEffectTable = (
   };
 
   const version = read();
-  if (version !== 1) {
+  if (version !== 2) {
     throw new Error(`Unsupported effect table version ${version}`);
   }
-  const effectCount = read();
   const opCount = read();
 
-  const effectHeaders = Array.from({ length: effectCount }, () => ({
-    effectId: read(),
-    nameOffset: read(),
-    opsOffset: read(),
-    opCount: read(),
-  }));
-
-  const opEntries = Array.from({ length: opCount }, () => ({
+  const opEntries = Array.from({ length: opCount }, (_value, opIndex) => ({
+    opIndex,
+    effectIdLo: read(),
+    effectIdHi: read(),
+    effectIdNameOffset: read(),
     opId: read(),
     resumeKind: read(),
-    nameOffset: read(),
+    signatureHash: read(),
+    labelOffset: read(),
   }));
 
-  const namesStart =
-    TABLE_HEADER_SIZE +
-    effectHeaders.length * EFFECT_HEADER_SIZE +
-    opEntries.length * OP_ENTRY_SIZE;
+  const namesStart = TABLE_HEADER_SIZE + opEntries.length * OP_ENTRY_SIZE;
   if (namesStart > payload.length) {
     throw new Error("Effect table payload is truncated");
   }
   const names = payload.slice(namesStart);
   const namesBase64 = toBase64(names);
 
-  const opsByEffect = new Map<number, EffectTableOp[]>();
-  const effects: EffectTableEffect[] = effectHeaders.map((header) => {
-    if (header.opsOffset % OP_ENTRY_SIZE !== 0) {
-      throw new Error("Effect table op offset is misaligned");
-    }
-    const start = header.opsOffset / OP_ENTRY_SIZE;
-    const end = start + header.opCount;
-    if (end > opEntries.length) {
-      throw new Error("Effect table op range exceeds table bounds");
-    }
-    const ops = opEntries.slice(start, end).map((op) => ({
-      id: op.opId,
-      name: decodeName(names, op.nameOffset),
-      label: decodeName(names, op.nameOffset),
-      resumeKind: parseResumeKind(op.resumeKind),
-    }));
-    opsByEffect.set(header.effectId, ops);
+  const ops: ParsedEffectOp[] = opEntries.map((entry) => {
+    const effectId = decodeName(names, entry.effectIdNameOffset);
     return {
-      id: header.effectId,
-      name: decodeName(names, header.nameOffset),
-      label: decodeName(names, header.nameOffset),
-      ops,
+      opIndex: entry.opIndex,
+      effectId,
+      effectIdHash: effectIdHashFromParts(entry.effectIdLo, entry.effectIdHi),
+      opId: entry.opId,
+      resumeKind: parseResumeKind(entry.resumeKind),
+      signatureHash: entry.signatureHash,
+      label: decodeName(names, entry.labelOffset),
     };
+  });
+
+  const opsByEffectId = new Map<string, ParsedEffectOp[]>();
+  ops.forEach((op) => {
+    const bucket = opsByEffectId.get(op.effectId) ?? [];
+    bucket.push(op);
+    opsByEffectId.set(op.effectId, bucket);
   });
 
   return {
@@ -166,8 +186,8 @@ export const parseEffectTable = (
     tableExport,
     names,
     namesBase64,
-    effects,
-    opsByEffect,
+    ops,
+    opsByEffectId,
   };
 };
 
@@ -196,46 +216,34 @@ export const instantiateEffectModule = ({
 const resumeKindName = (kind: ResumeKind): string =>
   kind === RESUME_KIND.tail ? "tail" : "resume";
 
+const handlerKeyCandidates = (request: EffectHandlerRequest): string[] => [
+  `${request.opIndex}`,
+  `${request.effectId}:${request.opId}:${request.signatureHash}`,
+  `${request.effectId}:${request.opId}:${request.resumeKind}:${request.signatureHash}`,
+  `${request.effectId}:${request.opId}:${request.resumeKind}`,
+  `${request.effectIdHash}:${request.opId}:${request.signatureHash}`,
+  `${request.effectIdHash}:${request.opId}:${request.resumeKind}:${request.signatureHash}`,
+  `${request.effectIdHash}:${request.opId}:${request.resumeKind}`,
+  `${request.effectIdHashHex}:${request.opId}:${request.signatureHash}`,
+  `${request.effectIdHashHex}:${request.opId}:${request.resumeKind}:${request.signatureHash}`,
+  `${request.effectIdHashHex}:${request.opId}:${request.resumeKind}`,
+  `${request.label}/${resumeKindName(request.resumeKind)}`,
+  request.label,
+];
+
 const lookupHandler = ({
   handlers,
   request,
 }: {
   handlers?: Record<string, EffectHandler>;
-  request: EffectHandlerRequest & { opLabel: string };
+  request: EffectHandlerRequest;
 }): EffectHandler | undefined => {
   if (!handlers) return undefined;
-  const kind = resumeKindName(request.resumeKind);
-  return (
-    handlers[`${request.effectId}:${request.opId}:${request.resumeKind}`] ??
-    handlers[`${request.effectLabel}.${request.opLabel}/${kind}`] ??
-    handlers[`${request.effectLabel}.${request.opLabel}`]
-  );
-};
-
-const toEffectHandlerRequest = ({
-  table,
-  effectId,
-  opId,
-  resumeKind,
-}: {
-  table: ParsedEffectTable;
-  effectId: number;
-  opId: number;
-  resumeKind: ResumeKind;
-}): EffectHandlerRequest & { opLabel: string } => {
-  const effect = table.effects.find((entry) => entry.id === effectId);
-  const effectLabel = effect?.label ?? `effect#${effectId}`;
-  const opLabel =
-    effect?.ops.find((op) => op.id === opId)?.label ??
-    `${effectLabel}.op#${opId}`;
-  return {
-    effectId,
-    opId,
-    resumeKind,
-    label: opLabel,
-    effectLabel,
-    opLabel,
-  };
+  for (const key of handlerKeyCandidates(request)) {
+    const handler = handlers[key];
+    if (handler) return handler;
+  }
+  return undefined;
 };
 
 type MsgPackHost = {
@@ -333,9 +341,11 @@ export const createMsgPackHost = (): MsgPackHost => {
             },
           }),
         [MSGPACK_WRITE_EFFECT]: (
-          effectId: number,
+          effectId: bigint,
           opId: number,
+          opIndex: number,
           resumeKind: number,
+          handle: number,
           argsPtr: number,
           argCount: number,
           ptr: number,
@@ -351,9 +361,11 @@ export const createMsgPackHost = (): MsgPackHost => {
             len,
             payload: {
               kind: "effect",
-              effectId,
+              effectId: BigInt.asIntN(64, effectId),
               opId,
+              opIndex,
               resumeKind,
+              handle,
               args,
             },
           });
@@ -374,6 +386,45 @@ export const createMsgPackHost = (): MsgPackHost => {
       latestLength = len;
     },
   };
+};
+
+const assignHandles = ({
+  table,
+  handlers,
+}: {
+  table: ParsedEffectTable;
+  handlers?: Record<string, EffectHandler>;
+}): {
+  handleByOpIndex: Map<number, number>;
+  opIndexByHandle: Map<number, number>;
+  handlerByHandle: Map<number, EffectHandler>;
+} => {
+  const handleByOpIndex = new Map<number, number>();
+  const opIndexByHandle = new Map<number, number>();
+  const handlerByHandle = new Map<number, EffectHandler>();
+
+  table.ops.forEach((op) => {
+    const handle = op.opIndex;
+    handleByOpIndex.set(op.opIndex, handle);
+    opIndexByHandle.set(handle, op.opIndex);
+    if (!handlers) return;
+    const request: EffectHandlerRequest = {
+      handle,
+      opIndex: op.opIndex,
+      effectId: op.effectId,
+      effectIdHash: op.effectIdHash.value,
+      effectIdHashHex: op.effectIdHash.hex,
+      opId: op.opId,
+      resumeKind: op.resumeKind,
+      signatureHash: op.signatureHash,
+      label: op.label,
+    };
+    const handler = lookupHandler({ handlers, request });
+    if (!handler) return;
+    handlerByHandle.set(handle, handler);
+  });
+
+  return { handleByOpIndex, opIndexByHandle, handlerByHandle };
 };
 
 export const runEffectfulExport = async <T = unknown>({
@@ -412,6 +463,7 @@ export const runEffectfulExport = async <T = unknown>({
   }
   host.setMemory(memory);
 
+  const initEffects = instance.exports.init_effects as CallableFunction | undefined;
   const effectStatus = instance.exports.effect_status as CallableFunction;
   const effectCont = instance.exports.effect_cont as CallableFunction;
   const resumeEffectful = instance.exports.resume_effectful as CallableFunction;
@@ -427,7 +479,28 @@ export const runEffectfulExport = async <T = unknown>({
     throw new Error("missing effect result helper exports");
   }
 
-  const bufferPtr = 0;
+  if (table.ops.length > 0 && typeof initEffects !== "function") {
+    throw new Error("missing init_effects export for effectful module");
+  }
+
+  const { handleByOpIndex, opIndexByHandle, handlerByHandle } = assignHandles({
+    table,
+    handlers,
+  });
+  const bufferPtr = table.ops.length * 4;
+  if (bufferPtr + bufferSize > memory.buffer.byteLength) {
+    throw new Error("effect buffer exceeds module memory size");
+  }
+
+  const memoryView = new DataView(memory.buffer);
+  table.ops.forEach((op) => {
+    const handle = handleByOpIndex.get(op.opIndex) ?? 0;
+    memoryView.setUint32(op.opIndex * 4, handle, true);
+  });
+  if (typeof initEffects === "function") {
+    initEffects();
+  }
+
   const decodeLast = (): any => {
     const length = host.lastEncodedLength();
     if (length <= 0) {
@@ -453,19 +526,54 @@ export const runEffectfulExport = async <T = unknown>({
 
     if (status === 1) {
       const decoded = decodeLast() as {
-        effectId: number;
+        effectId: bigint;
         opId: number;
+        opIndex: number;
         resumeKind: number;
+        handle: number;
         args: unknown[];
       };
       const resumeKind = parseResumeKind(decoded.resumeKind);
-      const request = toEffectHandlerRequest({
-        table,
-        effectId: decoded.effectId,
-        opId: decoded.opId,
+      const handle = decoded.handle;
+      const opIndex = opIndexByHandle.get(handle) ?? decoded.opIndex;
+      const opEntry = table.ops[opIndex];
+      if (!opEntry) {
+        throw new Error(`Unknown effect op index ${decoded.opIndex}`);
+      }
+      const decodedEffectId =
+        typeof decoded.effectId === "bigint"
+          ? BigInt.asUintN(64, decoded.effectId)
+          : undefined;
+      if (
+        typeof decodedEffectId === "bigint" &&
+        decodedEffectId !== opEntry.effectIdHash.value
+      ) {
+        throw new Error(
+          `Effect id mismatch for opIndex ${opEntry.opIndex} (expected ${opEntry.effectIdHash.hex})`
+        );
+      }
+      if (decoded.opIndex !== opEntry.opIndex) {
+        throw new Error(
+          `Effect op index mismatch for handle ${handle} (expected ${opEntry.opIndex}, got ${decoded.opIndex})`
+        );
+      }
+      const request: EffectHandlerRequest = {
+        handle,
+        opIndex: opEntry.opIndex,
+        effectId: opEntry.effectId,
+        effectIdHash: opEntry.effectIdHash.value,
+        effectIdHashHex: opEntry.effectIdHash.hex,
+        opId: opEntry.opId,
         resumeKind,
-      });
-      const handler = lookupHandler({ handlers, request });
+        signatureHash: opEntry.signatureHash,
+        label: opEntry.label,
+      };
+      if (resumeKind !== opEntry.resumeKind) {
+        throw new Error(
+          `Resume kind mismatch for ${opEntry.label} (expected ${opEntry.resumeKind}, got ${resumeKind})`
+        );
+      }
+      const handler = handlerByHandle.get(handle) ?? lookupHandler({ handlers, request });
       if (!handler) {
         throw new Error(
           `Unhandled effect ${request.label} (${resumeKindName(request.resumeKind)})`

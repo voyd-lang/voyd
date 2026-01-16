@@ -10,7 +10,7 @@ import { createEffectRuntime } from "../effects/runtime-abi.js";
 import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
 import type { CodegenContext } from "../context.js";
-import { runEffectfulExport } from "./support/effects-harness.js";
+import { runEffectfulExport, parseEffectTable } from "./support/effects-harness.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 
@@ -75,7 +75,6 @@ const buildLoweringSnapshot = () => {
     effectLowering: {
       sitesByExpr: new Map(),
       sites: [],
-      argsTypes: new Map(),
       callArgTemps: new Map(),
       tempTypeIds: new Map(),
     },
@@ -117,7 +116,7 @@ describe("effect perform lowering", () => {
   it("records liveness and continuation layouts for perform sites", () => {
     const sites = buildLoweringSnapshot();
     expect(sites.length).toBeGreaterThan(0);
-    expect(sites.map((site) => site.effect)).toContain("Async");
+    expect(sites.map((site) => site.effect)).toContain("await");
     expect(sites.every((site) => site.envFields[0]?.name === "site")).toBe(true);
     expect(
       sites.some((site) =>
@@ -146,16 +145,22 @@ describe("effect perform lowering", () => {
         module.emitText()
       );
     }
+    const parsed = parseEffectTable(module);
+    const hitOp = parsed.ops.find((op) => op.label.endsWith("Log.hit"));
+    const awaitOp = parsed.ops.find((op) => op.label.endsWith("Async.await"));
+    if (!hitOp || !awaitOp) {
+      throw new Error("missing Log.hit or Async.await op entry");
+    }
     let guardHits = 0;
     const result = await runEffectfulExport<number>({
       wasm: module,
       entryName: "main_effectful",
       handlers: {
-        "0:0:0": () => {
+        [`${hitOp.opIndex}`]: () => {
           guardHits += 1;
           return true;
         },
-        "1:0:0": () => 10,
+        [`${awaitOp.opIndex}`]: () => 10,
       },
     });
     expect(guardHits).toBe(1);

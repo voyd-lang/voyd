@@ -122,6 +122,7 @@ export const bindEffectDecl = (
     form: decl.form,
     visibility: decl.visibility,
     symbol: effectSymbol,
+    effectId: decl.effectId,
     typeParameters,
     operations,
     moduleIndex: ctx.nextModuleIndex++,

@@ -1,17 +1,13 @@
 import type { ResumeKind } from "./runtime-abi.js";
 
-export interface EffectTableOp {
-  id: number;
-  name: string;
-  label: string;
+export interface EffectTableOpEntry {
+  opIndex: number;
+  effectId: string;
+  effectIdHash: string;
+  opId: number;
   resumeKind: ResumeKind;
-}
-
-export interface EffectTableEffect {
-  id: number;
-  name: string;
+  signatureHash: number;
   label: string;
-  ops: EffectTableOp[];
 }
 
 export interface EffectTableSidecar {
@@ -19,5 +15,5 @@ export interface EffectTableSidecar {
   moduleId: string;
   tableExport: string;
   namesBlob: string;
-  effects: EffectTableEffect[];
+  ops: EffectTableOpEntry[];
 }

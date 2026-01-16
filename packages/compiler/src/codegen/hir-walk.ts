@@ -49,11 +49,13 @@ export const walkHirExpression = ({
   ctx,
   visitor,
   visitLambdaBodies = false,
+  visitHandlerBodies = false,
 }: {
   exprId: HirExprId;
   ctx: CodegenContext;
   visitor: HirWalkVisitor;
   visitLambdaBodies?: boolean;
+  visitHandlerBodies?: boolean;
 }): boolean => {
   const stop = { value: false };
   walkSemanticsExpression({
@@ -61,7 +63,7 @@ export const walkHirExpression = ({
     hir: ctx.module.hir,
     options: {
       skipLambdas: !visitLambdaBodies,
-      visitHandlerBodies: false,
+      visitHandlerBodies,
     },
     onEnterExpression: (id, expr) =>
       handleAction(visitor.onExpr?.(id, expr), stop),

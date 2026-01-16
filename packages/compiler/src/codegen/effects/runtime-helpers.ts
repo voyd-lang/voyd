@@ -72,7 +72,7 @@ export const addEffectRuntimeHelpers = (ctx: CodegenContext): void => {
   addExportedFunction({
     name: EFFECT_ID_HELPER,
     params: [outcomeType],
-    result: binaryen.i32,
+    result: binaryen.i64,
     body: requestField(effectsRuntime.requestEffectId),
     mod,
   });
