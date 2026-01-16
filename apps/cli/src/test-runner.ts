@@ -15,7 +15,11 @@ import {
   modulePathFromFile,
   modulePathToString,
 } from "@voyd/compiler/modules/path.js";
-import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
+import { createFsModuleHost } from "@voyd/compiler/modules/fs-host.js";
+import type {
+  ModulePathAdapter,
+  ModuleRoots,
+} from "@voyd/compiler/modules/types.js";
 import {
   runEffectfulExport,
   parseEffectTable,
@@ -197,8 +201,12 @@ const parseTestsFromAst = (ast: Form, filePath: string): DiscoveredTest[] => {
   return tests;
 };
 
-const buildModuleLabel = (filePath: string, roots: ModuleRoots): string => {
-  const modulePath = modulePathFromFile(filePath, roots);
+const buildModuleLabel = (
+  filePath: string,
+  roots: ModuleRoots,
+  pathAdapter: ModulePathAdapter
+): string => {
+  const modulePath = modulePathFromFile(filePath, roots, pathAdapter);
   return modulePathToString(modulePath);
 };
 
@@ -299,6 +307,7 @@ export const runTests = async ({
   rootPath: string;
   reporter?: string;
 }): Promise<TestRunSummary> => {
+  const host = createFsModuleHost();
   const { scanRoot, roots } = resolveRoots(rootPath);
   const files = await findVoydFiles(scanRoot);
 
@@ -324,7 +333,7 @@ export const runTests = async ({
 
   const hasOnly = discovered.some((test) => test.modifiers.only);
   const planned: PlannedTest[] = discovered.map((test) => {
-    const moduleLabel = buildModuleLabel(test.filePath, roots);
+    const moduleLabel = buildModuleLabel(test.filePath, roots, host.path);
     const displayName = buildDisplayName(test, moduleLabel);
 
     if (hasOnly && !test.modifiers.only) {
@@ -373,7 +382,7 @@ export const runTests = async ({
   const startRun = Date.now();
 
   for (const [filePath, tests] of byFile.entries()) {
-    const graph = await loadModuleGraph({ entryPath: filePath, roots });
+    const graph = await loadModuleGraph({ entryPath: filePath, roots, host });
     const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
       graph,
       includeTests: true,
