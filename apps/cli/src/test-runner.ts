@@ -21,10 +21,10 @@ import type {
   ModuleRoots,
 } from "@voyd/compiler/modules/types.js";
 import {
-  runEffectfulExport,
-  parseEffectTable,
+  createVoydHost,
   type EffectHandler,
-} from "@voyd/compiler/codegen/effects/host-runner.js";
+  type HostProtocolTable,
+} from "@voyd/js-host";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
 
@@ -100,28 +100,44 @@ const testOpKind = (label: string): TestOpKind | undefined => {
 };
 
 const buildTestEffectHandlers = (
-  wasm: Uint8Array
-): Record<string, EffectHandler> => {
-  const table = parseEffectTable(wasm);
-  let testOps: typeof table.ops | undefined;
+  table: HostProtocolTable
+): Array<{
+  effectId: string;
+  opId: number;
+  signatureHash: string;
+  handler: EffectHandler;
+}> => {
+  const opsByEffectId = new Map<string, HostProtocolTable["ops"]>();
+  table.ops.forEach((op) => {
+    const bucket = opsByEffectId.get(op.effectId) ?? [];
+    bucket.push(op);
+    opsByEffectId.set(op.effectId, bucket);
+  });
+
+  let testOps: HostProtocolTable["ops"] | undefined;
   let bestScore = 0;
-  table.opsByEffectId.forEach((ops) => {
+  opsByEffectId.forEach((ops) => {
     const score = ops.reduce((count, op) => {
-      return testOpKind(op.label) ? count + 1 : count;
+      return testOpKind(op.label ?? "") ? count + 1 : count;
     }, 0);
     if (score === 0 || score <= bestScore) return;
     bestScore = score;
     testOps = ops;
   });
-  if (!testOps || bestScore === 0) return {};
+  if (!testOps || bestScore === 0) return [];
 
-  const handlers: Record<string, EffectHandler> = {};
-  testOps.forEach((op) => {
-    const kind = testOpKind(op.label);
-    if (!kind) return;
-    handlers[`${op.opIndex}`] = TEST_OP_HANDLERS[kind];
+  return testOps.flatMap((op) => {
+    const kind = testOpKind(op.label ?? "");
+    if (!kind) return [];
+    return [
+      {
+        effectId: op.effectId,
+        opId: op.opId,
+        signatureHash: op.signatureHash,
+        handler: TEST_OP_HANDLERS[kind],
+      },
+    ];
   });
-  return handlers;
 };
 
 const shouldSkipDir = (name: string): boolean => {
@@ -253,12 +269,18 @@ const runEffectfulTest = async (
   wasm: Uint8Array,
   exportName: string
 ): Promise<void> => {
-  const handlers = buildTestEffectHandlers(wasm);
-  await runEffectfulExport({
-    wasm,
-    entryName: `${exportName}_effectful`,
-    handlers,
+  const host = await createVoydHost({ wasm });
+  const handlers = buildTestEffectHandlers(host.table);
+  handlers.forEach((entry) => {
+    host.registerHandler(
+      entry.effectId,
+      entry.opId,
+      entry.signatureHash,
+      entry.handler
+    );
   });
+  host.initEffects();
+  await host.runEffectful(exportName);
 };
 
 const formatResultLabel = (result: TestResult): string => {

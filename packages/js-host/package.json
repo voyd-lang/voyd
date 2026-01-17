@@ -1,0 +1,36 @@
+{
+  "name": "@voyd/js-host",
+  "version": "0.9.0",
+  "description": "Voyd JS host runtime",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./*.js": {
+      "types": "./dist/*.d.ts",
+      "development": "./src/*.ts",
+      "import": "./dist/*.js",
+      "default": "./dist/*.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "development": "./src/*.ts",
+      "import": "./dist/*.js",
+      "default": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config ../../vitest.config.ts src --passWithNoTests",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^3.1.2"
+  }
+}
