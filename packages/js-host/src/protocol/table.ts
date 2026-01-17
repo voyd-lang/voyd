@@ -69,13 +69,25 @@ const toBase64 = (data: Uint8Array): string => {
 
 type BinaryenModuleLike = { emitBinary: () => Uint8Array };
 
-const toBytes = (
+const toArrayBuffer = (
   wasm: Uint8Array | ArrayBuffer | BinaryenModuleLike
-): Uint8Array => {
-  if (wasm instanceof Uint8Array) return wasm;
-  if (wasm instanceof ArrayBuffer) return new Uint8Array(wasm);
+): ArrayBuffer => {
+  if (wasm instanceof ArrayBuffer) return wasm;
+  if (wasm instanceof Uint8Array) {
+    if (
+      wasm.buffer instanceof ArrayBuffer &&
+      wasm.byteOffset === 0 &&
+      wasm.byteLength === wasm.buffer.byteLength
+    ) {
+      return wasm.buffer;
+    }
+
+    const copy = new Uint8Array(wasm.byteLength);
+    copy.set(wasm);
+    return copy.buffer;
+  }
   if (typeof (wasm as BinaryenModuleLike).emitBinary === "function") {
-    return (wasm as BinaryenModuleLike).emitBinary();
+    return toArrayBuffer((wasm as BinaryenModuleLike).emitBinary());
   }
   throw new Error("Unsupported wasm input");
 };
@@ -141,7 +153,7 @@ export const parseEffectTable = (
   const module =
     wasm instanceof WebAssembly.Module
       ? wasm
-      : new WebAssembly.Module(toBytes(wasm));
+      : new WebAssembly.Module(toArrayBuffer(wasm));
   const sections = WebAssembly.Module.customSections(module, tableExport);
   if (sections.length === 0) {
     throw new Error(`Missing effect table export ${tableExport}`);

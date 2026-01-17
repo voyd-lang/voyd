@@ -1,4 +1,5 @@
 import path from "node:path";
+import binaryen from "binaryen";
 import { createFsModuleHost } from "@voyd/compiler/modules/fs-host.js";
 import { createMemoryModuleHost } from "@voyd/compiler/modules/memory-host.js";
 import { createNodePathAdapter } from "@voyd/compiler/modules/node-path-adapter.js";
@@ -46,13 +47,15 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       })
     : createFsModuleHost();
 
-  return compileWithLoader({
+  const result = await compileWithLoader({
     entryPath,
     roots,
     host,
     includeTests: options.includeTests,
     loadModuleGraph,
   });
+
+  return finalizeCompile({ options, result });
 };
 
 const resolveSrcRoot = ({
@@ -151,6 +154,40 @@ const resolveFilePath = ({
 
 const ensureVoydExtension = (value: string): string =>
   value.endsWith(".voyd") ? value : `${value}.voyd`;
+
+const finalizeCompile = ({
+  options,
+  result,
+}: {
+  options: CompileOptions;
+  result: CompileResult;
+}): CompileResult => {
+  if (!options.optimize && !options.emitWasmText) {
+    return result;
+  }
+
+  const module = binaryen.readBinary(result.wasm);
+  if (options.optimize) {
+    binaryen.setShrinkLevel(3);
+    binaryen.setOptimizeLevel(3);
+    module.optimize();
+  }
+
+  const wasm = options.optimize ? emitBinary(module) : result.wasm;
+  const wasmText = options.emitWasmText ? module.emitText() : undefined;
+
+  return wasmText ? { ...result, wasm, wasmText } : { ...result, wasm };
+};
+
+const emitBinary = (module: binaryen.Module): Uint8Array => {
+  const emitted = module.emitBinary();
+  if (emitted instanceof Uint8Array) return emitted;
+  return (
+    (emitted as { output?: Uint8Array }).output ??
+    (emitted as { binary?: Uint8Array }).binary ??
+    new Uint8Array()
+  );
+};
 
 const createOverlayModuleHost = ({
   primary,

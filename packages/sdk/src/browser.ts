@@ -18,6 +18,14 @@ export const createSdk = (): VoydSdk => ({
 });
 
 const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
+  if (options.optimize) {
+    throw new Error("optimize is not supported in the browser SDK");
+  }
+
+  if (options.emitWasmText) {
+    throw new Error("emitWasmText is not supported in the browser SDK");
+  }
+
   if (options.source === undefined) {
     throw new Error("compile requires source in browser builds");
   }

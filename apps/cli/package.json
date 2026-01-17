@@ -14,8 +14,7 @@
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
-    "@voyd/compiler": "0.9.0",
-    "@voyd/js-host": "0.9.0",
+    "@voyd/sdk": "0.9.0",
     "@voyd/lib": "0.9.0",
     "@voyd/std": "0.0.0",
     "binaryen": "^123.0.0"

@@ -23,6 +23,18 @@
       "import": "./dist/deno.js",
       "default": "./dist/deno.js"
     },
+    "./compiler": {
+      "types": "./dist/compiler.d.ts",
+      "development": "./src/compiler.ts",
+      "import": "./dist/compiler.js",
+      "default": "./dist/compiler.js"
+    },
+    "./js-host": {
+      "types": "./dist/js-host.d.ts",
+      "development": "./src/js-host.ts",
+      "import": "./dist/js-host.js",
+      "default": "./dist/js-host.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

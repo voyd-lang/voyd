@@ -1,8 +1,7 @@
 import inspector from "node:inspector";
 import fs from "node:fs";
 import { performance } from "node:perf_hooks";
-import { parse } from "@voyd/compiler/parser/parser.js";
-import { BENCH_FILE } from "@voyd/compiler/parser/__tests__/fixtures/benchmark-file.js";
+import { BENCH_FILE, parse } from "@voyd/sdk/compiler";
 
 /**
  * Profile/benchmark the parser.

@@ -18,6 +18,7 @@ import {
 import { runEffectLoop, createMsgPackHost } from "./runtime/dispatch.js";
 import { ensureMemoryCapacity } from "./runtime/memory.js";
 import type { ParsedEffectOp, ParsedEffectTable } from "./protocol/table.js";
+import { registerHandlersByLabelSuffix } from "./handlers.js";
 
 export type HostInitOptions = {
   wasm: Uint8Array | WebAssembly.Module;
@@ -34,14 +35,33 @@ export type VoydHost = {
     signatureHash: SignatureHash,
     handler: EffectHandler
   ) => void;
+  registerHandlersByLabelSuffix: (
+    handlersByLabelSuffix: Record<string, EffectHandler>
+  ) => number;
   initEffects: () => void;
   runPure: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
   runEffectful: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
   run: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
 };
 
+const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
+  if (
+    bytes.buffer instanceof ArrayBuffer &&
+    bytes.byteOffset === 0 &&
+    bytes.byteLength === bytes.buffer.byteLength
+  ) {
+    return bytes.buffer;
+  }
+
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+};
+
 const toModule = (wasm: Uint8Array | WebAssembly.Module): WebAssembly.Module =>
-  wasm instanceof WebAssembly.Module ? wasm : new WebAssembly.Module(wasm);
+  wasm instanceof WebAssembly.Module
+    ? wasm
+    : new WebAssembly.Module(toArrayBuffer(wasm));
 
 const mergeImports = ({
   imports,
@@ -339,6 +359,11 @@ export const createVoydHost = async ({
     table,
     instance,
     registerHandler,
+    registerHandlersByLabelSuffix: (handlersByLabelSuffix) =>
+      registerHandlersByLabelSuffix({
+        host: { table, registerHandler },
+        handlersByLabelSuffix,
+      }),
     initEffects,
     runPure,
     runEffectful,

@@ -10,10 +10,13 @@ export type CompileOptions = {
   files?: Record<string, string>;
   roots?: ModuleRoots;
   includeTests?: boolean;
+  optimize?: boolean;
+  emitWasmText?: boolean;
 };
 
 export type CompileResult = {
   wasm: Uint8Array;
+  wasmText?: string;
   diagnostics: Diagnostic[];
 };
 

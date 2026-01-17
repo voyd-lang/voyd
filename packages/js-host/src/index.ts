@@ -1,6 +1,11 @@
 export { createVoydHost } from "./host.js";
 export type { HostInitOptions, VoydHost } from "./host.js";
 export {
+  buildHandlersByLabelSuffix,
+  registerHandlersByLabelSuffix,
+} from "./handlers.js";
+export type { LabelHandlerHost, LabelHandlerMatch } from "./handlers.js";
+export {
   parseEffectTable,
   formatSignatureHash,
   normalizeSignatureHash,

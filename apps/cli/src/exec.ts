@@ -1,25 +1,23 @@
 import { stdout } from "process";
 import { readFileSync, statSync, existsSync } from "fs";
 import { dirname, join, resolve } from "node:path";
-import binaryen from "binaryen";
 import { getConfig } from "@voyd/lib/config/index.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { testGc } from "@voyd/lib/binaryen-gc/test.js";
-import { parse } from "@voyd/compiler/parser/parser.js";
+import { createSdk } from "@voyd/sdk";
 import {
   analyzeModules,
-  emitProgram,
+  DiagnosticError,
   loadModuleGraph,
-} from "@voyd/compiler/pipeline.js";
-import { getWasmInstance } from "@voyd/lib/wasm.js";
-import type { HirGraph } from "@voyd/compiler/semantics/hir/index.js";
-import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
-import { DiagnosticError } from "@voyd/compiler/diagnostics/index.js";
+  parse,
+} from "@voyd/sdk/compiler";
+import type { Diagnostic, HirGraph } from "@voyd/sdk/compiler";
 import { formatCliDiagnostic } from "./diagnostics.js";
-import { assertRunnableWasm, emitWasmBytes } from "./wasm-validation.js";
 import { runTests } from "./test-runner.js";
 
 export const exec = () => main().catch(errorHandler);
+
+const sdk = createSdk();
 
 async function main() {
   const config = getConfig();
@@ -46,7 +44,7 @@ async function main() {
 
   if (config.emitWasmText) {
     return console.log(
-      await getWasmText(entryPath, config.runBinaryenOptimizationPass)
+      await getWasmText(entryPath, config.runBinaryenOptimizationPass),
     );
   }
 
@@ -55,11 +53,7 @@ async function main() {
   }
 
   if (config.run) {
-    return runWasm(
-      entryPath,
-      config.runBinaryenOptimizationPass,
-      config.decodeMsgPackResponse
-    );
+    return runWasm(entryPath, config.runBinaryenOptimizationPass);
   }
 
   if (config.internalTest) {
@@ -67,7 +61,7 @@ async function main() {
   }
 
   console.log(
-    "I don't know what to do with the supplied options. Maybe try something else ¯_(ツ)_/¯"
+    "I don't know what to do with the supplied options. Maybe try something else ¯_(ツ)_/¯",
   );
 }
 
@@ -92,7 +86,7 @@ const resolveEntryPath = (index: string): string => {
   if (existsSync(packageEntry)) return packageEntry;
 
   throw new Error(
-    `No entry file found in ${resolved}. Expected main.voyd or pkg.voyd.`
+    `No entry file found in ${resolved}. Expected main.voyd or pkg.voyd.`,
   );
 };
 
@@ -101,12 +95,9 @@ const getModuleRoots = (entryPath: string) => ({
   std: resolveStdRoot(),
 });
 
-const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
-  diagnostics.some((diagnostic) => diagnostic.severity === "error");
-
 const assertNoDiagnostics = (diagnostics: readonly Diagnostic[]): void => {
   const error = diagnostics.find(
-    (diagnostic) => diagnostic.severity === "error"
+    (diagnostic) => diagnostic.severity === "error",
   );
   if (error) {
     throw new DiagnosticError(error);
@@ -147,66 +138,26 @@ async function getIrAST(entryPath: string) {
   return serializeHir(entrySemantics.hir);
 }
 
-const emitBinary = (mod: binaryen.Module): Uint8Array => emitWasmBytes(mod);
-
-const compileModule = async (entryPath: string, optimize = false) => {
-  const roots = getModuleRoots(entryPath);
-  const graph = await loadModuleGraph({ entryPath, roots });
-  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
-    graph,
-  });
-  const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
-
-  if (hasErrorDiagnostics(diagnostics)) {
-    assertNoDiagnostics(diagnostics);
-  }
-
-  const { module, diagnostics: codegenDiagnostics } = await emitProgram({
-    graph,
-    semantics,
-  });
-
-  const allDiagnostics = [...diagnostics, ...codegenDiagnostics];
-  if (hasErrorDiagnostics(allDiagnostics)) {
-    assertNoDiagnostics(allDiagnostics);
-  }
-
-  if (optimize) {
-    binaryen.setShrinkLevel(3);
-    binaryen.setOptimizeLevel(3);
-    module.optimize();
-  }
-
-  return module;
-};
-
 async function getWasmText(entryPath: string, optimize = false) {
-  const mod = await compileModule(entryPath, optimize);
-  return mod.emitText();
+  const { wasmText } = await sdk.compile({
+    entryPath,
+    optimize,
+    emitWasmText: true,
+  });
+  if (!wasmText) {
+    throw new Error("Wasm text output was not produced");
+  }
+  return wasmText;
 }
 
 async function emitWasm(entryPath: string, optimize = false) {
-  const mod = await compileModule(entryPath, optimize);
-
-  const wasm = assertRunnableWasm(mod);
+  const { wasm } = await sdk.compile({ entryPath, optimize });
   stdout.write(wasm);
 }
 
-async function runWasm(
-  entryPath: string,
-  optimize = false,
-  _decodeMsgPack = false
-) {
-  const mod = await compileModule(entryPath, optimize);
-
-  const wasm = assertRunnableWasm(mod);
-  const instance = getWasmInstance(wasm);
-  const main = instance.exports.main;
-  if (typeof main !== "function") {
-    throw new Error("No main function exported from wasm module");
-  }
-
-  const result = main();
+async function runWasm(entryPath: string, optimize = false) {
+  const { wasm } = await sdk.compile({ entryPath, optimize });
+  const result = await sdk.run({ wasm, entryName: "main" });
   console.log(result);
 }
 

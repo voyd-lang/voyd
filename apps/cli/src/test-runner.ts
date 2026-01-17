@@ -1,30 +1,24 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { parse } from "@voyd/compiler/parser/parser.js";
-import { isForm } from "@voyd/compiler/parser/index.js";
-import type { Form } from "@voyd/compiler/parser/index.js";
-import type { TestAttribute } from "@voyd/compiler/parser/attributes.js";
 import {
   analyzeModules,
+  createFsModuleHost,
+  DiagnosticError,
   emitProgram,
+  isForm,
   loadModuleGraph,
-} from "@voyd/compiler/pipeline.js";
-import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
-import { DiagnosticError } from "@voyd/compiler/diagnostics/index.js";
-import {
   modulePathFromFile,
   modulePathToString,
-} from "@voyd/compiler/modules/path.js";
-import { createFsModuleHost } from "@voyd/compiler/modules/fs-host.js";
+  parse,
+} from "@voyd/sdk/compiler";
 import type {
+  Diagnostic,
+  Form,
   ModulePathAdapter,
   ModuleRoots,
-} from "@voyd/compiler/modules/types.js";
-import {
-  createVoydHost,
-  type EffectHandler,
-  type HostProtocolTable,
-} from "@voyd/js-host";
+  TestAttribute,
+} from "@voyd/sdk/compiler";
+import { createVoydHost, type EffectHandler } from "@voyd/sdk/js-host";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
 
@@ -80,64 +74,14 @@ class TestSkip extends Error {
   }
 }
 
-type TestOpKind = "fail" | "skip" | "log";
-
-const TEST_OP_HANDLERS: Record<TestOpKind, EffectHandler> = {
-  fail: () => {
+const TEST_OP_HANDLERS: Record<string, EffectHandler> = {
+  ".fail": () => {
     throw new TestFailure();
   },
-  skip: () => {
+  ".skip": () => {
     throw new TestSkip();
   },
-  log: () => null,
-};
-
-const testOpKind = (label: string): TestOpKind | undefined => {
-  if (label.endsWith(".fail")) return "fail";
-  if (label.endsWith(".skip")) return "skip";
-  if (label.endsWith(".log")) return "log";
-  return undefined;
-};
-
-const buildTestEffectHandlers = (
-  table: HostProtocolTable
-): Array<{
-  effectId: string;
-  opId: number;
-  signatureHash: string;
-  handler: EffectHandler;
-}> => {
-  const opsByEffectId = new Map<string, HostProtocolTable["ops"]>();
-  table.ops.forEach((op) => {
-    const bucket = opsByEffectId.get(op.effectId) ?? [];
-    bucket.push(op);
-    opsByEffectId.set(op.effectId, bucket);
-  });
-
-  let testOps: HostProtocolTable["ops"] | undefined;
-  let bestScore = 0;
-  opsByEffectId.forEach((ops) => {
-    const score = ops.reduce((count, op) => {
-      return testOpKind(op.label ?? "") ? count + 1 : count;
-    }, 0);
-    if (score === 0 || score <= bestScore) return;
-    bestScore = score;
-    testOps = ops;
-  });
-  if (!testOps || bestScore === 0) return [];
-
-  return testOps.flatMap((op) => {
-    const kind = testOpKind(op.label ?? "");
-    if (!kind) return [];
-    return [
-      {
-        effectId: op.effectId,
-        opId: op.opId,
-        signatureHash: op.signatureHash,
-        handler: TEST_OP_HANDLERS[kind],
-      },
-    ];
-  });
+  ".log": () => null,
 };
 
 const shouldSkipDir = (name: string): boolean => {
@@ -223,7 +167,7 @@ const parseTestsFromAst = (ast: Form, filePath: string): DiscoveredTest[] => {
 const buildModuleLabel = (
   filePath: string,
   roots: ModuleRoots,
-  pathAdapter: ModulePathAdapter
+  pathAdapter: ModulePathAdapter,
 ): string => {
   const modulePath = modulePathFromFile(filePath, roots, pathAdapter);
   return modulePathToString(modulePath);
@@ -231,7 +175,7 @@ const buildModuleLabel = (
 
 const buildDisplayName = (
   test: DiscoveredTest,
-  moduleLabel: string
+  moduleLabel: string,
 ): string => {
   if (test.description) {
     return `${moduleLabel}::${test.description}`;
@@ -249,7 +193,7 @@ const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
 
 const assertNoDiagnostics = (diagnostics: readonly Diagnostic[]): void => {
   const error = diagnostics.find(
-    (diagnostic) => diagnostic.severity === "error"
+    (diagnostic) => diagnostic.severity === "error",
   );
   if (error) {
     throw new DiagnosticError(error);
@@ -267,19 +211,10 @@ const runPureTest = (wasm: Uint8Array, exportName: string): void => {
 
 const runEffectfulTest = async (
   wasm: Uint8Array,
-  exportName: string
+  exportName: string,
 ): Promise<void> => {
   const host = await createVoydHost({ wasm });
-  const handlers = buildTestEffectHandlers(host.table);
-  handlers.forEach((entry) => {
-    host.registerHandler(
-      entry.effectId,
-      entry.opId,
-      entry.signatureHash,
-      entry.handler
-    );
-  });
-  host.initEffects();
+  host.registerHandlersByLabelSuffix(TEST_OP_HANDLERS);
   await host.runEffectful(exportName);
 };
 
@@ -317,7 +252,7 @@ const reportSummary = (summary: TestRunSummary, reporter: string): void => {
 };
 
 const resolveRoots = (
-  rootPath: string
+  rootPath: string,
 ): { scanRoot: string; roots: ModuleRoots } => {
   const resolved = resolve(rootPath);
   const scanRoot = resolved;
@@ -435,7 +370,7 @@ export const runTests = async ({
     for (const test of tests) {
       const start = Date.now();
       const fnDecl = entrySemantics.binding.functions.find(
-        (fn) => fn.name === test.fnName
+        (fn) => fn.name === test.fnName,
       );
       if (!fnDecl) {
         const error = new Error(`Missing test function ${test.fnName}`);
@@ -451,7 +386,7 @@ export const runTests = async ({
       }
 
       const effectRow = entrySemantics.typing.effects.getFunctionEffect(
-        fnDecl.symbol
+        fnDecl.symbol,
       );
       const isEffectful =
         typeof effectRow === "number" &&

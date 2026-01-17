@@ -30,14 +30,30 @@ type WasmSource =
   | ArrayBuffer
   | WebAssembly.Module;
 
+const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
+  if (
+    bytes.buffer instanceof ArrayBuffer &&
+    bytes.byteOffset === 0 &&
+    bytes.byteLength === bytes.buffer.byteLength
+  ) {
+    return bytes.buffer;
+  }
+
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+};
+
 const toModule = (wasm: WasmSource): WebAssembly.Module => {
   if (wasm instanceof WebAssembly.Module) return wasm;
-  if (wasm instanceof Uint8Array) return new WebAssembly.Module(wasm);
-  if (wasm instanceof ArrayBuffer) {
-    return new WebAssembly.Module(new Uint8Array(wasm));
+  if (wasm instanceof Uint8Array) {
+    return new WebAssembly.Module(toArrayBuffer(wasm));
   }
+  if (wasm instanceof ArrayBuffer) return new WebAssembly.Module(wasm);
   if (typeof (wasm as binaryen.Module).emitBinary === "function") {
-    return new WebAssembly.Module((wasm as binaryen.Module).emitBinary());
+    return new WebAssembly.Module(
+      toArrayBuffer((wasm as binaryen.Module).emitBinary())
+    );
   }
   throw new Error("Unsupported wasm input");
 };

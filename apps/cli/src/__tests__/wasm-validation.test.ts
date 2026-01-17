@@ -6,7 +6,7 @@ import {
   analyzeModules,
   emitProgram,
   loadModuleGraph,
-} from "@voyd/compiler/pipeline.js";
+} from "@voyd/sdk/compiler";
 import { assertRunnableWasm } from "../wasm-validation.js";
 
 describe("wasm validation", () => {

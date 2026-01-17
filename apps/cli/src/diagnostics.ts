@@ -4,7 +4,7 @@ import type {
   Diagnostic,
   DiagnosticSeverity,
   SourceSpan,
-} from "@voyd/compiler/diagnostics/index.js";
+} from "@voyd/sdk/compiler";
 
 type Position = { index: number; line: number; column: number };
 
