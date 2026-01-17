@@ -25,13 +25,19 @@ const buildModule = () => {
 describe("effectful exports & host boundary", () => {
   it("runs effectful main through the msgpack host loop", async () => {
     const { module } = buildModule();
+    const parsed = parseEffectTable(module);
+    const awaitOp = parsed.ops.find((op) => op.label.endsWith(".await"));
+    const logOp = parsed.ops.find((op) => op.label.endsWith(".log"));
+    if (!awaitOp || !logOp) {
+      throw new Error("missing Async ops in effect table");
+    }
     const logs: number[] = [];
     const result = await runEffectfulExport<number>({
       wasm: module,
       entryName: "main_effectful",
       handlers: {
-        "0:0:1": () => 2,
-        "0:1:0": (_req, msg: unknown) => {
+        [`${awaitOp.opIndex}`]: () => 2,
+        [`${logOp.opIndex}`]: (_req, msg: unknown) => {
           const value = typeof msg === "number" ? msg : Number(msg);
           logs.push(value);
           return 0;
@@ -44,14 +50,20 @@ describe("effectful exports & host boundary", () => {
 
   it("traps when the buffer is too small", async () => {
     const { module } = buildModule();
+    const parsed = parseEffectTable(module);
+    const awaitOp = parsed.ops.find((op) => op.label.endsWith(".await"));
+    const logOp = parsed.ops.find((op) => op.label.endsWith(".log"));
+    if (!awaitOp || !logOp) {
+      throw new Error("missing Async ops in effect table");
+    }
     await expect(
       runEffectfulExport({
         wasm: module,
         entryName: "main_effectful",
         bufferSize: 4,
         handlers: {
-          "0:0:1": () => 1,
-          "0:1:0": () => 0,
+          [`${awaitOp.opIndex}`]: () => 1,
+          [`${logOp.opIndex}`]: () => 0,
         },
       })
     ).rejects.toThrow();
@@ -62,7 +74,7 @@ describe("effectful exports & host boundary", () => {
     const parsed = parseEffectTable(module);
     expect(effectTable).toBeDefined();
     if (!effectTable) return;
-    expect(parsed.effects[0]?.ops.map((op) => op.resumeKind)).toEqual([1, 0]);
-    expect(effectTable.effects[0]?.ops.map((op) => op.resumeKind)).toEqual([1, 0]);
+    expect(parsed.ops.map((op) => op.resumeKind)).toEqual([1, 0]);
+    expect(effectTable.ops.map((op) => op.resumeKind)).toEqual([1, 0]);
   });
 });

@@ -15,7 +15,7 @@ import type {
   TypeId,
 } from "../../context.js";
 import { allocateTempLocal } from "../../locals.js";
-import { getExprBinaryenType, wasmTypeFor } from "../../types.js";
+import { getExprBinaryenType, getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { compileCallExpr } from "../../expressions/calls.js";
 import { compileBlockExpr, compileStatement } from "../../expressions/blocks.js";
 import {
@@ -461,7 +461,9 @@ export const createGroupedContinuationExpressionCompiler = ({
       if (!site) {
         throw new Error("missing site metadata for continuation target");
       }
-      const valueType = wasmTypeFor(site.resumeValueTypeId, ctx);
+      const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+      const resumeTypeId = getRequiredExprType(site.exprId, ctx, typeInstanceId);
+      const valueType = wasmTypeFor(resumeTypeId, ctx);
       const started = () => ctx.mod.local.get(startedLocal.index, startedLocal.type);
       const cond = ctx.mod.i32.and(
         ctx.mod.i32.eqz(started()),

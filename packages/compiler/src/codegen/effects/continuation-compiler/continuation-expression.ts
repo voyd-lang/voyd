@@ -14,7 +14,7 @@ import type {
   TypeId,
 } from "../../context.js";
 import { allocateTempLocal } from "../../locals.js";
-import { getExprBinaryenType, wasmTypeFor } from "../../types.js";
+import { getExprBinaryenType, getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { compileCallExpr } from "../../expressions/calls.js";
 import { compileBlockExpr, compileStatement } from "../../expressions/blocks.js";
 import {
@@ -294,10 +294,13 @@ export const createContinuationExpressionCompiler = ({
         return { expr: ctx.mod.nop(), usedReturnCall: false };
       }
 
+      const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
       const resolvedTypeId =
-        resumeValueTypeId ?? ctx.module.types.getResolvedExprType(exprId);
-      const valueType =
-        typeof resolvedTypeId === "number" ? wasmTypeFor(resolvedTypeId, ctx) : resumeLocal.type;
+        typeof resumeValueTypeId === "number" &&
+        ctx.program.types.getTypeDesc(resumeValueTypeId).kind !== "type-param-ref"
+          ? resumeValueTypeId
+          : getRequiredExprType(exprId, ctx, typeInstanceId);
+      const valueType = wasmTypeFor(resolvedTypeId, ctx);
       const payload = ctx.mod.local.get(resumeLocal.index, resumeLocal.type);
       if (valueType !== resumeLocal.type && resumeLocal.type === binaryen.eqref) {
         return {

@@ -24,7 +24,7 @@ import {
   createResumeContinuation,
   createResumeEffectful,
   ensureEffectResultAccessors,
-  ensureLinearMemory,
+  ensureEffectsMemory,
   ensureMsgPackImports,
 } from "./effects/host-boundary.js";
 import { effectsFacade } from "./effects/facade.js";
@@ -409,7 +409,7 @@ export const emitModuleExports = (
     return;
   }
 
-  ensureLinearMemory(ctx);
+  ensureEffectsMemory(ctx);
   const imports = ensureMsgPackImports(ctx);
   const signatures = collectEffectOperationSignatures(ctx, contexts);
   const handleOutcome = createHandleOutcomeDynamic({

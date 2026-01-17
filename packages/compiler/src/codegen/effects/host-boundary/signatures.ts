@@ -5,7 +5,17 @@ import { VALUE_TAG } from "./constants.js";
 import type { EffectOpSignature } from "./types.js";
 import { stateFor } from "./state.js";
 import type { ContinuationSite } from "../effect-lowering/types.js";
-import { performSiteArgTypes } from "../perform-site.js";
+import { walkHirExpression } from "../../hir-walk.js";
+import type {
+  HirExprId,
+  ProgramFunctionInstanceId,
+  SymbolId,
+} from "../../../semantics/ids.js";
+import {
+  getEffectOpInstanceInfo,
+  resolvePerformSignature,
+} from "../effect-registry.js";
+import { ensureEffectArgsType } from "../args-type.js";
 
 const OP_SIGNATURES_KEY = Symbol("voyd.effects.hostBoundary.opSignatures");
 
@@ -36,49 +46,36 @@ const sameTypeList = (
 ): boolean =>
   left.length === right.length && left.every((type, index) => type === right[index]);
 
-type EffectOperationIndexEntry = {
-  ctx: CodegenContext;
-  label: string;
-  opSymbol: number;
-};
-
-const signatureKey = (effectId: number, opId: number): string => `${effectId}:${opId}`;
-
-const buildEffectOperationIndex = (
-  contexts: readonly CodegenContext[]
-): ReadonlyMap<string, EffectOperationIndexEntry> => {
-  const index = new Map<string, EffectOperationIndexEntry>();
-
-  contexts.forEach((ctx) => {
-    ctx.module.meta.effects.forEach((effect, localEffectIndex) => {
-      const effectId = ctx.program.effects.getGlobalId(ctx.moduleId, localEffectIndex);
-      if (typeof effectId !== "number") {
-        throw new Error(
-          `missing global effect id for ${ctx.moduleId}:${localEffectIndex}`
-        );
-      }
-      effect.operations.forEach((op, opId) => {
-        const key = signatureKey(effectId, opId);
-        const existing = index.get(key);
-        const entry: EffectOperationIndexEntry = {
-          ctx,
-          label: `${effect.name}.${op.name}`,
-          opSymbol: op.symbol,
-        };
-        if (!existing) {
-          index.set(key, entry);
-          return;
-        }
-        if (existing.opSymbol !== op.symbol) {
-          throw new Error(
-            `duplicate effect operation id ${key} for ${existing.label} and ${entry.label}`
-          );
-        }
-      });
+const buildOwnerMap = (ctx: CodegenContext): Map<HirExprId, SymbolId> => {
+  const ownerByExpr = new Map<HirExprId, SymbolId>();
+  ctx.module.hir.items.forEach((item) => {
+    if (item.kind !== "function") return;
+    walkHirExpression({
+      exprId: item.body,
+      ctx,
+      visitLambdaBodies: true,
+      visitHandlerBodies: true,
+      visitor: {
+        onExpr: (exprId) => {
+          ownerByExpr.set(exprId, item.symbol);
+        },
+      },
     });
   });
+  return ownerByExpr;
+};
 
-  return index;
+const instancesBySymbol = (
+  ctx: CodegenContext
+): Map<SymbolId, ProgramFunctionInstanceId[]> => {
+  const bySymbol = new Map<SymbolId, ProgramFunctionInstanceId[]>();
+  ctx.functionInstances.forEach((meta, instanceId) => {
+    if (meta.moduleId !== ctx.moduleId) return;
+    const bucket = bySymbol.get(meta.symbol) ?? [];
+    bucket.push(instanceId);
+    bySymbol.set(meta.symbol, bucket);
+  });
+  return bySymbol;
 };
 
 export const collectEffectOperationSignatures = (
@@ -86,61 +83,76 @@ export const collectEffectOperationSignatures = (
   contexts: readonly CodegenContext[] = [ctx]
 ): EffectOpSignature[] =>
   stateFor(ctx, OP_SIGNATURES_KEY, () => {
-    const signaturesByKey = new Map<string, EffectOpSignature>();
-    const opIndex = buildEffectOperationIndex(contexts);
+    const registry = ctx.effectsState.effectRegistry;
+    if (!registry) {
+      throw new Error("missing effect registry for host boundary signatures");
+    }
+
+    const signaturesByIndex = new Map<number, EffectOpSignature>();
 
     contexts.forEach((siteCtx) => {
+      const ownerByExpr = buildOwnerMap(siteCtx);
+      const instances = instancesBySymbol(siteCtx);
+
       siteCtx.effectLowering.sites.filter(isPerformSite).forEach((site) => {
-        const operation = opIndex.get(signatureKey(site.effectId, site.opId));
-        if (!operation) {
-          throw new Error(
-            `missing effect operation declaration for effect=${site.effectId} op=${site.opId}`
-          );
-        }
+        const ownerSymbol = ownerByExpr.get(site.exprId);
+        const owners = ownerSymbol ? instances.get(ownerSymbol) ?? [] : [];
+        const instanceList =
+          owners.length > 0 ? owners : [undefined as ProgramFunctionInstanceId | undefined];
 
-        const signature = operation.ctx.program.functions.getSignature(
-          operation.ctx.moduleId,
-          operation.opSymbol
-        );
-        if (!signature) {
-          throw new Error("missing effect operation signature");
-        }
-
-        const paramTypes = performSiteArgTypes({ exprId: site.exprId, ctx: siteCtx });
-        const params = paramTypes.map((paramType) => wasmTypeFor(paramType, siteCtx));
-        const returnType = wasmTypeFor(site.resumeValueTypeId, siteCtx);
-        const label = operation.label;
-
-        const key = `${site.effectId}:${site.opId}`;
-        const existing = signaturesByKey.get(key);
-        if (!existing) {
-          signaturesByKey.set(key, {
-            effectId: site.effectId,
-            opId: site.opId,
-            params,
-            returnType,
-            argsType: site.argsType,
-            label,
+        instanceList.forEach((typeInstanceId) => {
+          const opInfo = getEffectOpInstanceInfo({
+            ctx: siteCtx,
+            site,
+            typeInstanceId,
+            registry,
           });
-          return;
-        }
-
-        if (
-          existing.returnType !== returnType ||
-          !sameTypeList(existing.params, params)
-        ) {
-          throw new Error(
-            `host boundary signature conflict for ${label} (${key}); ensure it resolves to a single concrete wasm signature`
+          const signature = resolvePerformSignature({
+            site,
+            ctx: siteCtx,
+            typeInstanceId,
+          });
+          const params = signature.params.map((paramType) =>
+            wasmTypeFor(paramType, siteCtx)
           );
-        }
+          const returnType = wasmTypeFor(signature.returnType, siteCtx);
+          const argsType = ensureEffectArgsType({
+            ctx: siteCtx,
+            opIndex: opInfo.opIndex,
+            paramTypes: signature.params,
+          });
 
-        if (!existing.argsType && site.argsType) {
-          existing.argsType = site.argsType;
-        }
+          const existing = signaturesByIndex.get(opInfo.opIndex);
+          if (!existing) {
+            signaturesByIndex.set(opInfo.opIndex, {
+              opIndex: opInfo.opIndex,
+              effectId: opInfo.effectId.hash.value,
+              opId: opInfo.opId,
+              resumeKind: opInfo.resumeKind,
+              signatureHash: opInfo.signatureHash,
+              params,
+              returnType,
+              argsType,
+              label: opInfo.label,
+            });
+            return;
+          }
+
+          if (
+            existing.returnType !== returnType ||
+            !sameTypeList(existing.params, params)
+          ) {
+            throw new Error(
+              `host boundary signature conflict for ${opInfo.label} (opIndex=${opInfo.opIndex}); ensure it resolves to a single concrete wasm signature`
+            );
+          }
+
+          if (!existing.argsType && argsType) {
+            existing.argsType = argsType;
+          }
+        });
       });
     });
 
-    return Array.from(signaturesByKey.values()).sort((a, b) =>
-      a.effectId !== b.effectId ? a.effectId - b.effectId : a.opId - b.opId
-    );
+    return Array.from(signaturesByIndex.values()).sort((a, b) => a.opIndex - b.opIndex);
   });

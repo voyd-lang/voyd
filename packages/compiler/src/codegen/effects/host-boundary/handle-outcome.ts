@@ -7,7 +7,7 @@ import {
 import { getOutcomeValueBoxType, unboxOutcomeValue } from "../outcome-values.js";
 import type { CodegenContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
-import { EFFECT_RESULT_STATUS, VALUE_TAG } from "./constants.js";
+import { EFFECT_RESULT_STATUS, LINEAR_MEMORY_INTERNAL, VALUE_TAG } from "./constants.js";
 import { supportedValueTag } from "./signatures.js";
 import type { EffectOpSignature, MsgPackImports } from "./types.js";
 import { stateFor } from "./state.js";
@@ -55,8 +55,7 @@ const encodeEffectArgs = ({
   requestLocal,
   signatures,
   bufPtrLocal,
-  effectIdExpr,
-  opIdExpr,
+  opIndexExpr,
   argsCountLocal,
 }: {
   ctx: CodegenContext;
@@ -64,8 +63,7 @@ const encodeEffectArgs = ({
   requestLocal: number;
   signatures: readonly EffectOpSignature[];
   bufPtrLocal: number;
-  effectIdExpr: binaryen.ExpressionRef;
-  opIdExpr: binaryen.ExpressionRef;
+  opIndexExpr: binaryen.ExpressionRef;
   argsCountLocal: number;
 }): binaryen.ExpressionRef[] => {
   const ops: binaryen.ExpressionRef[] = [
@@ -77,9 +75,9 @@ const encodeEffectArgs = ({
 
   signatures.forEach((sig) => {
     if (sig.params.length === 0) return;
-    const matches = ctx.mod.i32.and(
-      ctx.mod.i32.eq(effectIdExpr, ctx.mod.i32.const(sig.effectId)),
-      ctx.mod.i32.eq(opIdExpr, ctx.mod.i32.const(sig.opId))
+    const matches = ctx.mod.i32.eq(
+      opIndexExpr,
+      ctx.mod.i32.const(sig.opIndex)
     );
     if (sig.params.some((paramType) => paramType !== binaryen.i32)) {
       ops.push(
@@ -110,7 +108,8 @@ const encodeEffectArgs = ({
           fieldIndex: index,
           fieldType: paramType,
           exprRef: typedArgs,
-        })
+        }),
+        LINEAR_MEMORY_INTERNAL
       );
     });
     ops.push(
@@ -199,10 +198,7 @@ export const createHandleOutcome = ({
     ),
   ];
 
-  const effectIdExpr = runtime.requestEffectId(
-    ctx.mod.local.get(requestLocal, runtime.effectRequestType)
-  );
-  const opIdExpr = runtime.requestOpId(
+  const opIndexExpr = runtime.requestOpIndex(
     ctx.mod.local.get(requestLocal, runtime.effectRequestType)
   );
   const argOps = encodeEffectArgs({
@@ -211,8 +207,7 @@ export const createHandleOutcome = ({
     requestLocal,
     signatures,
     bufPtrLocal,
-    effectIdExpr,
-    opIdExpr,
+    opIndexExpr,
     argsCountLocal,
   });
   const effectOps: binaryen.ExpressionRef[] = [
@@ -237,9 +232,21 @@ export const createHandleOutcome = ({
       ctx.mod.call(
         imports.writeEffect,
         [
-          runtime.requestEffectId(ctx.mod.local.get(requestLocal, runtime.effectRequestType)),
-          runtime.requestOpId(ctx.mod.local.get(requestLocal, runtime.effectRequestType)),
-          runtime.requestResumeKind(ctx.mod.local.get(requestLocal, runtime.effectRequestType)),
+          runtime.requestEffectId(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+          ),
+          runtime.requestOpId(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+          ),
+          runtime.requestOpIndex(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+          ),
+          runtime.requestResumeKind(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+          ),
+          runtime.requestHandle(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+          ),
           ctx.mod.local.get(bufPtrLocal, binaryen.i32),
           ctx.mod.local.get(argsCountLocal, binaryen.i32),
           ctx.mod.local.get(bufPtrLocal, binaryen.i32),
@@ -498,10 +505,7 @@ export const createHandleOutcomeDynamic = ({
       ),
     ];
 
-    const effectIdExpr = runtime.requestEffectId(
-      ctx.mod.local.get(requestLocal, runtime.effectRequestType)
-    );
-    const opIdExpr = runtime.requestOpId(
+    const opIndexExpr = runtime.requestOpIndex(
       ctx.mod.local.get(requestLocal, runtime.effectRequestType)
     );
     const argOps = encodeEffectArgs({
@@ -510,8 +514,7 @@ export const createHandleOutcomeDynamic = ({
       requestLocal,
       signatures,
       bufPtrLocal,
-      effectIdExpr,
-      opIdExpr,
+      opIndexExpr,
       argsCountLocal,
     });
     const effectOps: binaryen.ExpressionRef[] = [
@@ -535,21 +538,27 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.nop()
       ),
       trapOnNonZero(
-        ctx.mod.call(
-          imports.writeEffect,
-          [
-            runtime.requestEffectId(
-              ctx.mod.local.get(requestLocal, runtime.effectRequestType)
-            ),
-            runtime.requestOpId(
-              ctx.mod.local.get(requestLocal, runtime.effectRequestType)
-            ),
-            runtime.requestResumeKind(
-              ctx.mod.local.get(requestLocal, runtime.effectRequestType)
-            ),
-            ctx.mod.local.get(bufPtrLocal, binaryen.i32),
-            ctx.mod.local.get(argsCountLocal, binaryen.i32),
-            ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+      ctx.mod.call(
+        imports.writeEffect,
+        [
+          runtime.requestEffectId(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+          ),
+          runtime.requestOpId(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+          ),
+          runtime.requestOpIndex(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+          ),
+          runtime.requestResumeKind(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+          ),
+          runtime.requestHandle(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+          ),
+          ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+          ctx.mod.local.get(argsCountLocal, binaryen.i32),
+          ctx.mod.local.get(bufPtrLocal, binaryen.i32),
             ctx.mod.local.get(bufLenLocal, binaryen.i32),
           ],
           binaryen.i32

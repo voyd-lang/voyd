@@ -158,7 +158,9 @@ export const ensureContinuationBindFunction = (
     const wrappedReq = ctx.effectsRuntime.makeEffectRequest({
       effectId: ctx.effectsRuntime.requestEffectId(request),
       opId: ctx.effectsRuntime.requestOpId(request),
+      opIndex: ctx.effectsRuntime.requestOpIndex(request),
       resumeKind: ctx.effectsRuntime.requestResumeKind(request),
+      handle: ctx.effectsRuntime.requestHandle(request),
       args: ctx.effectsRuntime.requestArgs(request),
       continuation: bindCont,
       tailGuard: ctx.effectsRuntime.requestTailGuard(request),
@@ -213,7 +215,9 @@ export const wrapRequestContinuationWithFrame = ({
   return ctx.effectsRuntime.makeEffectRequest({
     effectId: ctx.effectsRuntime.requestEffectId(request),
     opId: ctx.effectsRuntime.requestOpId(request),
+    opIndex: ctx.effectsRuntime.requestOpIndex(request),
     resumeKind: ctx.effectsRuntime.requestResumeKind(request),
+    handle: ctx.effectsRuntime.requestHandle(request),
     args: ctx.effectsRuntime.requestArgs(request),
     continuation: bindCont,
     tailGuard: ctx.effectsRuntime.requestTailGuard(request),

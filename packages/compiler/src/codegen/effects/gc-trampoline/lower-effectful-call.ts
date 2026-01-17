@@ -20,7 +20,10 @@ import {
 } from "../../locals.js";
 import { getExprBinaryenType, wasmTypeFor } from "../../types.js";
 import { currentHandlerValue } from "./shared.js";
-import { ensureContinuationFunction } from "./continuations.js";
+import {
+  continuationFunctionName,
+  ensureContinuationFunction,
+} from "./continuations.js";
 import { initStruct, refCast, refFunc } from "@voyd/lib/binaryen-gc/index.js";
 
 export const lowerEffectfulCallResult = ({
@@ -112,9 +115,13 @@ export const lowerEffectfulCallResult = ({
           ctx,
           typeInstanceId: lookupKey,
         });
+        const contFnName = continuationFunctionName({
+          site: callSite,
+          typeInstanceId: lookupKey,
+        });
         const frameEnv = initStruct(ctx.mod, callSite.envType, frameEnvValues as number[]);
         const frameCont = ctx.effectsRuntime.makeContinuation({
-          fnRef: refFunc(ctx.mod, callSite.contFnName, contRefType),
+          fnRef: refFunc(ctx.mod, contFnName, contRefType),
           env: frameEnv,
           site: ctx.mod.i32.const(callSite.siteOrder),
         });

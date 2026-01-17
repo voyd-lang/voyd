@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
+import { createEffectsImports } from "./support/wasm-imports.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -25,7 +26,7 @@ describe("generic effects wasm e2e", () => {
     const wasmBinary = new Uint8Array(module.emitBinary());
     const instance = new WebAssembly.Instance(
       new WebAssembly.Module(wasmBinary),
-      {}
+      createEffectsImports()
     );
     const test1 = instance.exports.test1 as CallableFunction;
     const test2 = instance.exports.test2 as CallableFunction;

@@ -23,7 +23,15 @@ import {
 } from "../../types.js";
 import { handlerCleanupOps } from "../handler-stack.js";
 import { currentHandlerValue } from "./shared.js";
-import { ensureContinuationFunction } from "./continuations.js";
+import {
+  continuationFunctionName,
+  ensureContinuationFunction,
+} from "./continuations.js";
+import { getEffectOpInstanceInfo, resolvePerformSignature } from "../effect-registry.js";
+import { ensureEffectArgsType } from "../args-type.js";
+import { ensureEffectsMemory } from "../host-boundary/imports.js";
+import { EFFECTS_MEMORY_INTERNAL } from "../host-boundary/constants.js";
+import { ensureEffectHandleTable } from "../handle-table.js";
 
 export const compileEffectOpCall = ({
   expr,
@@ -47,6 +55,16 @@ export const compileEffectOpCall = ({
     throw new Error("codegen missing effect operation signature");
   }
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const registry = ctx.effectsState.effectRegistry;
+  if (!registry) {
+    throw new Error("codegen missing effect registry");
+  }
+  const opInfo = getEffectOpInstanceInfo({
+    ctx,
+    site,
+    typeInstanceId,
+    registry,
+  });
   const args = expr.args.map((arg, index) => {
     const expectedTypeId = signature.parameters[index]?.typeId;
     const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
@@ -89,26 +107,50 @@ export const compileEffectOpCall = ({
     ctx,
     typeInstanceId,
   });
+  const contFnName = continuationFunctionName({ site, typeInstanceId });
   const env = initStruct(ctx.mod, site.envType, envValues as number[]);
-  const contRef = refFunc(ctx.mod, site.contFnName, contRefType);
+  const contRef = refFunc(ctx.mod, contFnName, contRefType);
   const continuation = ctx.effectsRuntime.makeContinuation({
     fnRef: contRef,
     env,
     site: ctx.mod.i32.const(site.siteOrder),
   });
-  const argsBoxed = site.argsType
-    ? initStruct(ctx.mod, site.argsType, args as number[])
+  const signatureTypes = resolvePerformSignature({
+    site,
+    ctx,
+    typeInstanceId,
+  });
+  const argsType = ensureEffectArgsType({
+    ctx,
+    opIndex: opInfo.opIndex,
+    paramTypes: signatureTypes.params,
+  });
+  const argsBoxed = argsType
+    ? initStruct(ctx.mod, argsType, args as number[])
     : ctx.mod.ref.null(binaryen.eqref);
+  ensureEffectsMemory(ctx);
+  ensureEffectHandleTable(ctx);
+  const handlePtr = ctx.mod.i32.const(opInfo.opIndex * 4);
+  const handleValue = ctx.mod.i32.load(0, 4, handlePtr, EFFECTS_MEMORY_INTERNAL);
   const request = ctx.effectsRuntime.makeEffectRequest({
-    effectId: ctx.mod.i32.const(site.effectId),
-    opId: ctx.mod.i32.const(site.opId),
-    resumeKind: ctx.mod.i32.const(site.resumeKind),
+    effectId: ctx.mod.i64.const(
+      opInfo.effectId.hash.low,
+      opInfo.effectId.hash.high
+    ),
+    opId: ctx.mod.i32.const(opInfo.opId),
+    opIndex: ctx.mod.i32.const(opInfo.opIndex),
+    resumeKind: ctx.mod.i32.const(opInfo.resumeKind),
+    handle: handleValue,
     args: argsBoxed,
     continuation,
     tailGuard: ctx.effectsRuntime.makeTailGuard(),
   });
 
-  const exprRef = ctx.effectsRuntime.makeOutcomeEffect(request);
+  const exprRef = ctx.mod.block(
+    null,
+    [ctx.effectsRuntime.makeOutcomeEffect(request)],
+    ctx.effectsRuntime.outcomeType
+  );
 
   if (!fnCtx.effectful) {
     return { expr: exprRef, usedReturnCall: false };

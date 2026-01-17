@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
-import { runEffectfulExport } from "./support/effects-harness.js";
+import { runEffectfulExport, parseEffectTable } from "./support/effects-harness.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -20,12 +20,23 @@ const buildModule = () => {
 describe("effectful exports with different return types", () => {
   it("runs both i32 and void effectful exports through the host boundary", async () => {
     const { module } = buildModule();
+    const parsed = parseEffectTable(module);
+    const pickOp = (suffix: string) =>
+      parsed.ops.find((op) => op.label.endsWith(suffix));
+    const asyncOp = pickOp("Async.await");
+    const noopOp = pickOp("Noop.noop");
+    const asyncI64Op = pickOp("AsyncI64.await");
+    const asyncF64Op = pickOp("AsyncF64.await");
+    const asyncF32Op = pickOp("AsyncF32.await");
+    if (!asyncOp || !noopOp || !asyncI64Op || !asyncF64Op || !asyncF32Op) {
+      throw new Error("missing effect ops for multi-return test");
+    }
     const handlers = {
-      "0:0:1": () => 2,
-      "1:0:0": () => 0,
-      "2:0:1": () => 40n,
-      "3:0:1": () => 2.5,
-      "4:0:1": () => 1.25,
+      [`${asyncOp.opIndex}`]: () => 2,
+      [`${noopOp.opIndex}`]: () => 0,
+      [`${asyncI64Op.opIndex}`]: () => 40n,
+      [`${asyncF64Op.opIndex}`]: () => 2.5,
+      [`${asyncF32Op.opIndex}`]: () => 1.25,
     };
 
     const main = await runEffectfulExport<number>({

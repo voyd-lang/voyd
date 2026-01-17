@@ -25,10 +25,12 @@ const OUTCOME_FIELDS = {
 const EFFECT_REQUEST_FIELDS = {
   effectId: 0,
   opId: 1,
-  resumeKind: 2,
-  args: 3,
-  continuation: 4,
-  tailGuard: 5,
+  opIndex: 2,
+  resumeKind: 3,
+  handle: 4,
+  args: 5,
+  continuation: 6,
+  tailGuard: 7,
 } as const;
 
 const CONTINUATION_FIELDS = {
@@ -77,16 +79,20 @@ export interface EffectRuntime {
   makeEffectRequest: (params: {
     effectId: binaryen.ExpressionRef;
     opId: binaryen.ExpressionRef;
+    opIndex: binaryen.ExpressionRef;
     resumeKind: binaryen.ExpressionRef;
+    handle: binaryen.ExpressionRef;
     args: binaryen.ExpressionRef;
     continuation?: binaryen.ExpressionRef;
     tailGuard?: binaryen.ExpressionRef;
   }) => binaryen.ExpressionRef;
   requestEffectId: (request: binaryen.ExpressionRef) => binaryen.ExpressionRef;
   requestOpId: (request: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  requestOpIndex: (request: binaryen.ExpressionRef) => binaryen.ExpressionRef;
   requestResumeKind: (
     request: binaryen.ExpressionRef
   ) => binaryen.ExpressionRef;
+  requestHandle: (request: binaryen.ExpressionRef) => binaryen.ExpressionRef;
   requestArgs: (request: binaryen.ExpressionRef) => binaryen.ExpressionRef;
   requestContinuation: (
     request: binaryen.ExpressionRef
@@ -141,7 +147,7 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
     name: "voydHandlerFrame",
     fields: [
       { name: "prev", type: binaryen.eqref, mutable: false },
-      { name: "effectId", type: binaryen.i32, mutable: false },
+      { name: "effectId", type: binaryen.i64, mutable: false },
       { name: "opId", type: binaryen.i32, mutable: false },
       { name: "resumeKind", type: binaryen.i32, mutable: false },
       { name: "clauseFn", type: binaryen.funcref, mutable: false },
@@ -182,9 +188,11 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
   const effectRequestType = defineStructType(mod, {
     name: "voydEffectRequest",
     fields: [
-      { name: "effectId", type: binaryen.i32, mutable: false },
+      { name: "effectId", type: binaryen.i64, mutable: false },
       { name: "opId", type: binaryen.i32, mutable: false },
+      { name: "opIndex", type: binaryen.i32, mutable: false },
       { name: "resumeKind", type: binaryen.i32, mutable: false },
+      { name: "handle", type: binaryen.i32, mutable: false },
       { name: "args", type: binaryen.eqref, mutable: false },
       { name: "cont", type: continuationType, mutable: false },
       { name: "tailGuard", type: tailGuardType, mutable: false },
@@ -255,14 +263,18 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
   const makeEffectRequest = ({
     effectId,
     opId,
+    opIndex,
     resumeKind,
+    handle,
     args,
     continuation = mod.ref.null(continuationType),
     tailGuard = mod.ref.null(tailGuardType),
   }: {
     effectId: binaryen.ExpressionRef;
     opId: binaryen.ExpressionRef;
+    opIndex: binaryen.ExpressionRef;
     resumeKind: binaryen.ExpressionRef;
+    handle: binaryen.ExpressionRef;
     args: binaryen.ExpressionRef;
     continuation?: binaryen.ExpressionRef;
     tailGuard?: binaryen.ExpressionRef;
@@ -270,7 +282,9 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
     initStruct(mod, effectRequestType, [
       effectId,
       opId,
+      opIndex,
       resumeKind,
+      handle,
       args,
       continuation,
       tailGuard,
@@ -384,11 +398,19 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
     makeEffectRequest,
     requestEffectId: getRequestField(
       EFFECT_REQUEST_FIELDS.effectId,
-      binaryen.i32
+      binaryen.i64
     ),
     requestOpId: getRequestField(EFFECT_REQUEST_FIELDS.opId, binaryen.i32),
+    requestOpIndex: getRequestField(
+      EFFECT_REQUEST_FIELDS.opIndex,
+      binaryen.i32
+    ),
     requestResumeKind: getRequestField(
       EFFECT_REQUEST_FIELDS.resumeKind,
+      binaryen.i32
+    ),
+    requestHandle: getRequestField(
+      EFFECT_REQUEST_FIELDS.handle,
       binaryen.i32
     ),
     requestArgs: getRequestField(EFFECT_REQUEST_FIELDS.args, binaryen.eqref),
@@ -453,7 +475,7 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
         ),
       }),
     handlerPrev: getHandlerField(0, binaryen.eqref),
-    handlerEffectId: getHandlerField(1, binaryen.i32),
+    handlerEffectId: getHandlerField(1, binaryen.i64),
     handlerOpId: getHandlerField(2, binaryen.i32),
     handlerResumeKind: getHandlerField(3, binaryen.i32),
     handlerClauseFn: getHandlerField(4, binaryen.funcref),

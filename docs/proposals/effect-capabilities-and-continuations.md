@@ -88,10 +88,13 @@ module uses that handle whenever it performs the op.
 To avoid mixing effect state with other runtime buffers, the module uses a
 separate Wasm memory for effect handles (multi-memory).
 
-- The module exports a dedicated memory (e.g. `memory_effects`).
+- The module exports a dedicated memory (`effects_memory`).
 - The host writes a `u32` handle table into that memory.
 - The handle table occupies address 0 in the effect memory and is reserved
   exclusively for effect handles.
+- The effect memory is defined by the module and exported for host tooling.
+- MsgPack buffers live in the module's default linear memory export (`memory`).
+- Hosts may grow either memory if buffers or handle tables exceed capacity.
 
 ### 2.1) Generics
 

@@ -1,0 +1,11 @@
+eff Box<T>
+  take(resume, value: T) -> T
+
+fn compute<T>(value: T): Box<T> -> T
+  let result = Box::take(value)
+  result
+
+pub fn main(): (Box<i32>, Box<f64>) -> i32
+  let a = compute<i32>(1)
+  let b = compute<f64>(2.0)
+  a

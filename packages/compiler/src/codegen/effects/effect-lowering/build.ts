@@ -10,7 +10,6 @@ import type {
   TypeId,
 } from "../../context.js";
 import { wasmTypeFor } from "../../types.js";
-import { getEffectOpIds } from "../op-ids.js";
 import { effectsFacade } from "../facade.js";
 import type {
   BuildEffectLoweringParams,
@@ -29,13 +28,11 @@ import {
   lambdaParamSymbols,
   sanitizeIdentifier,
   shouldLowerLambda,
-  ensureArgsType,
 } from "./layout.js";
 import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
 } from "./handler-clause-temp-ids.js";
-import { performSiteArgTypes } from "../perform-site.js";
 
 type TempCaptureKey = string;
 
@@ -131,8 +128,6 @@ export const buildEffectLowering = ({
 }: BuildEffectLoweringParams): EffectLoweringResult => {
   const sites: ContinuationSite[] = [];
   const sitesByExpr = new Map<HirExprId, ContinuationSite>();
-  const argsTypeCache = new Map<SymbolId, binaryen.Type>();
-  const argsTypes = new Map<SymbolId, binaryen.Type>();
   const callArgTemps = new Map<
     HirExprId,
     { argIndex: number; tempId: number; typeId: TypeId }[]
@@ -163,7 +158,7 @@ export const buildEffectLowering = ({
   const emitSitesFor = ({
     analysisSites,
     owner,
-    contFnName,
+    contBaseName,
     ordering,
     params,
     handlerAtSite,
@@ -177,7 +172,7 @@ export const buildEffectLowering = ({
       tempCaptures?: readonly { key: string; callExprId: HirExprId; argIndex: number; typeId: TypeId }[];
     }[];
     owner: ContinuationSite["owner"];
-    contFnName: string;
+    contBaseName: string;
     ordering: Map<SymbolId, number>;
     params: ReadonlySet<SymbolId>;
     handlerAtSite: boolean;
@@ -217,57 +212,34 @@ export const buildEffectLowering = ({
         final: true,
       });
 
-      const performMeta =
+      const lowered: ContinuationSite =
         site.kind === "perform"
           ? (() => {
               if (typeof site.effectSymbol !== "number") {
                 throw new Error("perform site missing effect op symbol");
               }
-              const { effectId, opId, resumeKind, effectSymbol } = getEffectOpIds(site.effectSymbol, ctx);
-              const signature = ctx.program.functions.getSignature(ctx.moduleId, site.effectSymbol);
-              const paramTypes = performSiteArgTypes({ exprId: site.exprId, ctx });
-              const argsType =
-                signature &&
-                ensureArgsType({
-                  opSymbol: site.effectSymbol,
-                  paramTypes,
-                  ctx,
-                  cache: argsTypeCache,
-                });
-              if (argsType) {
-                argsTypes.set(site.effectSymbol, argsType);
-              }
-              return { effectId, opId, resumeKind, effectSymbol, argsType };
+              return {
+                kind: "perform",
+                exprId: site.exprId,
+                siteId: siteCounter.current,
+                siteOrder: siteCounter.current,
+                owner,
+                effectSymbol: site.effectSymbol,
+                contBaseName,
+                baseEnvType,
+                envType,
+                envFields,
+                handlerAtSite,
+                resumeValueTypeId,
+              };
             })()
-          : undefined;
-
-      const lowered: ContinuationSite =
-        site.kind === "perform" && performMeta
-          ? {
-              kind: "perform",
-              exprId: site.exprId,
-              siteId: siteCounter.current,
-              siteOrder: siteCounter.current,
-              owner,
-              effectSymbol: performMeta.effectSymbol,
-              effectId: performMeta.effectId,
-              opId: performMeta.opId,
-              resumeKind: performMeta.resumeKind,
-              contFnName,
-              baseEnvType,
-              envType,
-              envFields,
-              handlerAtSite,
-              resumeValueTypeId,
-              argsType: performMeta.argsType,
-            }
           : {
               kind: "call",
               exprId: site.exprId,
               siteId: siteCounter.current,
               siteOrder: siteCounter.current,
               owner,
-              contFnName,
+              contBaseName,
               baseEnvType,
               envType,
               envFields,
@@ -294,12 +266,12 @@ export const buildEffectLowering = ({
     const fnName = sanitizeIdentifier(
       ctx.program.symbols.getName(symbolId) ?? `${item.symbol}`
     );
-    const contFnName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${item.symbol}`;
+    const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${item.symbol}`;
 
     emitSitesFor({
       analysisSites: analysis.sites,
       owner: { kind: "function", symbol: item.symbol },
-      contFnName,
+      contBaseName,
       ordering,
       params,
       handlerAtSite: true,
@@ -314,13 +286,13 @@ export const buildEffectLowering = ({
     const ordering = definitionOrderForLambda(expr, ctx);
     const params = lambdaParamSymbols(expr);
     const fnName = `lambda_${expr.id}`;
-    const contFnName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${expr.id}`;
+    const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${expr.id}`;
     const analysis = analyzeExpr({ exprId: expr.body, liveAfter: new Set(), ctx });
 
     emitSitesFor({
       analysisSites: analysis.sites,
       owner: { kind: "lambda", exprId: expr.id },
-      contFnName,
+      contBaseName,
       ordering,
       params,
       handlerAtSite: true,
@@ -336,12 +308,12 @@ export const buildEffectLowering = ({
       const params = handlerClauseParamSymbols(clause);
       const analysis = analyzeExpr({ exprId: clause.body, liveAfter: new Set(), ctx });
       const fnName = `handler_${expr.id}_${clauseIndex}`;
-      const contFnName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}`;
+      const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}`;
 
       emitSitesFor({
         analysisSites: analysis.sites,
         owner: { kind: "handler-clause", handlerExprId: expr.id, clauseIndex },
-        contFnName,
+      contBaseName,
         ordering,
         params,
         handlerAtSite: true,
@@ -357,5 +329,5 @@ export const buildEffectLowering = ({
     callArgTemps.set(key, sorted);
   });
 
-  return { sitesByExpr, sites, argsTypes, callArgTemps, tempTypeIds };
+  return { sitesByExpr, sites, callArgTemps, tempTypeIds };
 };

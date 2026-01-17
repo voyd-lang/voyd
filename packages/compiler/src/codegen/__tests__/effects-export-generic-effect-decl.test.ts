@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
-import { runEffectfulExport } from "./support/effects-harness.js";
+import { runEffectfulExport, parseEffectTable } from "./support/effects-harness.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -22,13 +22,19 @@ const buildModule = () => {
 describe("host boundary signature derivation", () => {
   it("does not crash on unused generic effect operations", async () => {
     const { module } = buildModule();
+    const parsed = parseEffectTable(module);
+    const awaitOp = parsed.ops.find((op) => op.label.endsWith("Async.await"));
+    const logOp = parsed.ops.find((op) => op.label.endsWith("Async.log"));
+    if (!awaitOp || !logOp) {
+      throw new Error("missing Async ops in effect table");
+    }
     const logs: number[] = [];
     const result = await runEffectfulExport<number>({
       wasm: module,
       entryName: "main_effectful",
       handlers: {
-        "0:0:1": () => 2,
-        "0:1:0": (_req, msg: unknown) => {
+        [`${awaitOp.opIndex}`]: () => 2,
+        [`${logOp.opIndex}`]: (_req, msg: unknown) => {
           const value = typeof msg === "number" ? msg : Number(msg);
           logs.push(value);
           return 0;
@@ -39,4 +45,3 @@ describe("host boundary signature derivation", () => {
     expect(logs).toEqual([2]);
   });
 });
-

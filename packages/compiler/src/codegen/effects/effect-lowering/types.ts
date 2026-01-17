@@ -5,7 +5,6 @@ import type {
   SymbolId,
   TypeId,
 } from "../../context.js";
-import type { ResumeKind } from "../runtime-abi.js";
 
 export type ContinuationFieldSource =
   | "param"
@@ -27,8 +26,7 @@ export interface ContinuationSiteBase {
   siteId: number;
   siteOrder: number;
   owner: ContinuationSiteOwner;
-  contFnName: string;
-  contRefType?: binaryen.Type;
+  contBaseName: string;
   baseEnvType: binaryen.Type;
   envType: binaryen.Type;
   envFields: readonly ContinuationEnvField[];
@@ -39,10 +37,6 @@ export interface ContinuationSiteBase {
 export interface ContinuationPerformSite extends ContinuationSiteBase {
   kind: "perform";
   effectSymbol: SymbolId;
-  effectId: number;
-  opId: number;
-  resumeKind: ResumeKind;
-  argsType?: binaryen.Type;
 }
 
 export interface ContinuationCallSite extends ContinuationSiteBase {
@@ -54,7 +48,6 @@ export type ContinuationSite = ContinuationPerformSite | ContinuationCallSite;
 export interface EffectLoweringResult {
   sitesByExpr: Map<HirExprId, ContinuationSite>;
   sites: readonly ContinuationSite[];
-  argsTypes: Map<SymbolId, binaryen.Type>;
   callArgTemps: Map<
     HirExprId,
     readonly { argIndex: number; tempId: number; typeId: TypeId }[]

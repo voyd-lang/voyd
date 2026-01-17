@@ -21,9 +21,11 @@ describe("effect runtime ABI helpers", () => {
       fnRef: mod.ref.null(binaryen.funcref),
     });
     const request = runtime.makeEffectRequest({
-      effectId: mod.i32.const(1),
+      effectId: mod.i64.const(1, 0),
       opId: mod.i32.const(2),
+      opIndex: mod.i32.const(0),
       resumeKind: mod.i32.const(RESUME_KIND.resume),
+      handle: mod.i32.const(0),
       args: mod.ref.null(binaryen.eqref),
       continuation,
       tailGuard: guard,
@@ -59,9 +61,11 @@ describe("effect runtime ABI helpers", () => {
     });
     const guard = runtime.makeTailGuard();
     const request = runtime.makeEffectRequest({
-      effectId: mod.i32.const(7),
+      effectId: mod.i64.const(7, 0),
       opId: mod.i32.const(3),
+      opIndex: mod.i32.const(1),
       resumeKind: mod.i32.const(RESUME_KIND.tail),
+      handle: mod.i32.const(2),
       args: mod.ref.null(binaryen.eqref),
       continuation,
       tailGuard: guard,
@@ -99,6 +103,8 @@ describe("effect runtime ABI helpers", () => {
 
     const text = mod.emitText();
     expect(text).toContain("(struct (field $tag i32)");
+    expect(text).toContain("(field $opIndex i32)");
+    expect(text).toContain("(field $handle i32)");
     expect(text).toContain("(field $resumeKind i32)");
     expect(text).toContain("(field $cont (ref null $voydContinuation))");
     expect(text).toContain("(field $tailGuard (ref null $voydTailGuard))");

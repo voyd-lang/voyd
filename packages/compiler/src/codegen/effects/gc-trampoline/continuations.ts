@@ -141,6 +141,47 @@ const sameContinuationOwner = (
   }
 };
 
+const continuationKey = ({
+  site,
+  typeInstanceId,
+}: {
+  site: ContinuationSite;
+  typeInstanceId?: ProgramFunctionInstanceId;
+}): string => {
+  const instanceKey = typeof typeInstanceId === "number" ? `${typeInstanceId}` : "base";
+  return `${site.contBaseName}:${site.owner.kind}:${instanceKey}`;
+};
+
+const continuationName = ({
+  baseName,
+  typeInstanceId,
+}: {
+  baseName: string;
+  typeInstanceId?: ProgramFunctionInstanceId;
+}): string => {
+  if (typeof typeInstanceId !== "number") {
+    return `${baseName}__instbase`;
+  }
+  return `${baseName}__inst${typeInstanceId}`;
+};
+
+export const continuationFunctionName = ({
+  site,
+  typeInstanceId,
+}: {
+  site: ContinuationSite;
+  typeInstanceId?: ProgramFunctionInstanceId;
+}): string =>
+  continuationName({ baseName: site.contBaseName, typeInstanceId });
+
+const signatureMatches = (
+  existing: { returnType: number; envTypes: number[] },
+  next: { returnType: number; envTypes: number[] }
+): boolean =>
+  existing.returnType === next.returnType &&
+  existing.envTypes.length === next.envTypes.length &&
+  existing.envTypes.every((value, index) => value === next.envTypes[index]);
+
 const shouldCaptureIdentifierSymbol = (symbol: SymbolId, ctx: CodegenContext): boolean =>
   !ctx.program.symbols.isModuleScoped(
     ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
@@ -232,24 +273,19 @@ export const ensureContinuationFunction = ({
 }): binaryen.Type => {
   const built = ctx.effectsState.contBuilt;
   const building = ctx.effectsState.contBuilding;
-  const contName = site.contFnName;
+  const contRefTypes = ctx.effectsState.contRefTypeByKey;
+  const contSignatures = ctx.effectsState.contSignatureByKey;
+  const contKey = continuationKey({ site, typeInstanceId });
+  const contName = continuationName({
+    baseName: site.contBaseName,
+    typeInstanceId,
+  });
   const resumeBoxType = binaryen.eqref;
   const provisionalRefType = functionRefType({
     params: [binaryen.anyref, resumeBoxType],
     result: ctx.effectsRuntime.outcomeType,
     ctx,
   });
-
-  if (built.has(contName)) {
-    return site.contRefType ?? provisionalRefType;
-  }
-
-  if (building.has(contName)) {
-    site.contRefType ??= provisionalRefType;
-    return site.contRefType;
-  }
-
-  building.add(contName);
 
   const substitution = buildInstanceSubstitution({ ctx, typeInstanceId });
 
@@ -310,8 +346,34 @@ export const ensureContinuationFunction = ({
   const groupSites = ctx.effectLowering.sites.filter(
     (candidate) =>
       sameContinuationOwner(candidate.owner, site.owner) &&
-      candidate.contFnName === contName
+      candidate.contBaseName === site.contBaseName
   );
+  const signatureInfo = {
+    returnType: returnWasmType,
+    envTypes: groupSites.map((groupSite) => groupSite.envType),
+  };
+  const existingSignature = contSignatures.get(contKey);
+  if (existingSignature) {
+    if (!signatureMatches(existingSignature, signatureInfo)) {
+      throw new Error(
+        `continuation signature mismatch for ${contName} (${contKey})`
+      );
+    }
+  } else {
+    contSignatures.set(contKey, signatureInfo);
+  }
+
+  if (built.has(contKey)) {
+    return contRefTypes.get(contKey) ?? provisionalRefType;
+  }
+
+  if (building.has(contKey)) {
+    const refType = contRefTypes.get(contKey) ?? provisionalRefType;
+    contRefTypes.set(contKey, refType);
+    return refType;
+  }
+
+  building.add(contKey);
 
   const locals: binaryen.Type[] = [];
   const fnCtx: FunctionContext = {
@@ -376,10 +438,10 @@ export const ensureContinuationFunction = ({
 
   const cfgCache = ctx.effectsState.contCfgByName;
   const cfg =
-    cfgCache.get(contName) ??
+    cfgCache.get(site.contBaseName) ??
     (() => {
       const builtCfg = buildGroupContinuationCfg({ fn: cfgFn, groupSites, ctx });
-      cfgCache.set(contName, builtCfg);
+      cfgCache.set(site.contBaseName, builtCfg);
       return builtCfg;
     })();
 
@@ -518,10 +580,8 @@ export const ensureContinuationFunction = ({
 
   const fnHeapType = bin._BinaryenFunctionGetType(fnRef);
   const contRefType = bin._BinaryenTypeFromHeapType(fnHeapType, false);
-  groupSites.forEach((groupSite) => {
-    groupSite.contRefType = contRefType;
-  });
-  building.delete(contName);
-  built.add(contName);
+  contRefTypes.set(contKey, contRefType);
+  building.delete(contKey);
+  built.add(contKey);
   return contRefType;
 };

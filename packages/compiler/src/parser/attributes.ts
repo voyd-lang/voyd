@@ -11,3 +11,7 @@ export type TestAttribute = {
     only?: boolean;
   };
 };
+
+export type EffectAttribute = {
+  id?: string;
+};

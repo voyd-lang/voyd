@@ -14,7 +14,7 @@ import {
   packageVisibility,
 } from "../hir/index.js";
 import { isIdentifierWithValue } from "../utils.js";
-import type { IntrinsicAttribute } from "../../parser/attributes.js";
+import type { EffectAttribute, IntrinsicAttribute } from "../../parser/attributes.js";
 import type { HirBindingKind } from "../hir/index.js";
 import { ensureForm } from "./binders/utils.js";
 
@@ -92,6 +92,7 @@ export interface ParsedEffectDecl {
   name: IdentifierAtom;
   typeParameters: readonly IdentifierAtom[];
   operations: readonly ParsedEffectOperation[];
+  effectId?: string;
 }
 
 interface ParsedFunctionSignature {
@@ -502,6 +503,8 @@ const parseParameter = (expr: Expr): SignatureParam | SignatureParam[] => {
 export const parseEffectDecl = (form: Form): ParsedEffectDecl | null => {
   let index = 0;
   let visibility: HirVisibility = moduleVisibility();
+  const effectAttr = form.attributes?.effect as EffectAttribute | undefined;
+  const effectId = effectAttr?.id;
   const first = form.at(0);
 
   if (isIdentifierWithValue(first, "pub")) {
@@ -555,6 +558,7 @@ export const parseEffectDecl = (form: Form): ParsedEffectDecl | null => {
       name: effectHead.name,
       typeParameters: effectHead.typeParameters,
       operations,
+      effectId,
     };
   }
 
@@ -566,6 +570,7 @@ export const parseEffectDecl = (form: Form): ParsedEffectDecl | null => {
       name: op.name,
       typeParameters: [],
       operations: [op],
+      effectId,
     };
   }
 

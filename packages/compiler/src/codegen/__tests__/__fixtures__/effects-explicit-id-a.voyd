@@ -1,0 +1,7 @@
+@effect(id: "com.example.log")
+eff Log
+  info(resume, value: i32) -> void
+
+pub fn main(): Log -> i32
+  Log::info(1)
+  0

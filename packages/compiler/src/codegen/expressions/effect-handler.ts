@@ -14,6 +14,8 @@ import type {
   FunctionContext,
 } from "../context.js";
 import { effectsFacade } from "../effects/facade.js";
+import { ensureEffectArgsType } from "../effects/args-type.js";
+import { signatureHashFor } from "../effects/effect-registry.js";
 import { allocateTempLocal, loadBindingValue } from "../locals.js";
 import { getRequiredExprType, wasmTypeFor } from "../types.js";
 import {
@@ -24,17 +26,18 @@ import {
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { RESUME_KIND, type ResumeKind } from "../effects/runtime-abi.js";
 import type { HirEffectHandlerExpr } from "../../semantics/hir/index.js";
-import type { TypeId } from "../../semantics/ids.js";
+import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
 import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
 } from "../effects/effect-lowering/handler-clause-temp-ids.js";
+import { buildEffectTypeSubstitution, collectEffectTypeArgs } from "../effects/effect-signature.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
 type HandlerCodegenState = {
   envLayouts: Map<
-    number,
+    string,
     {
       envType: binaryen.Type;
       fields: ClauseEnvField[];
@@ -67,6 +70,12 @@ type ClauseEnvField = {
 const sanitize = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
 
+const handlerInstanceKey = (fnCtx: FunctionContext): string => {
+  const instanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  return typeof instanceId === "number" ? `${instanceId}` : "base";
+};
+
+
 const currentHandlerValue = (
   ctx: CodegenContext,
   fnCtx: FunctionContext
@@ -91,7 +100,8 @@ const buildClauseEnv = ({
   fields: ClauseEnvField[];
 } => {
   const state = handlerState(ctx);
-  const cached = state.envLayouts.get(expr.id);
+  const layoutKey = `${expr.id}:${handlerInstanceKey(fnCtx)}`;
+  const cached = state.envLayouts.get(layoutKey);
   const layout =
     cached ??
     (() => {
@@ -121,7 +131,7 @@ const buildClauseEnv = ({
       });
 
       const next = { envType, fields: captured };
-      state.envLayouts.set(expr.id, next);
+      state.envLayouts.set(layoutKey, next);
       return next;
     })();
 
@@ -154,6 +164,7 @@ const emitClauseFunction = ({
   ctx,
   handlerResumeKind,
   compileExpr,
+  typeInstanceId,
 }: {
   expr: HirEffectHandlerExpr;
   clauseIndex: number;
@@ -161,8 +172,11 @@ const emitClauseFunction = ({
   ctx: CodegenContext;
   handlerResumeKind: ResumeKind;
   compileExpr: ExpressionCompiler;
+  typeInstanceId?: ProgramFunctionInstanceId;
 }): { fnName: string; fnRefType: binaryen.Type } => {
-  const fnName = `${ctx.moduleLabel}__handler_${expr.id}_${clauseIndex}`;
+  const fnName = `${ctx.moduleLabel}__handler_${expr.id}_${clauseIndex}${
+    typeof typeInstanceId === "number" ? `__inst${typeInstanceId}` : "__instbase"
+  }`;
   const state = handlerState(ctx);
   const cachedRefType = state.clauseFnRefTypes.get(fnName);
   if (cachedRefType) {
@@ -174,6 +188,92 @@ const emitClauseFunction = ({
   if (!signature) {
     throw new Error("missing effect operation signature for handler clause");
   }
+  const effectTypeArgs = collectEffectTypeArgs({
+    handlerBody: expr.body,
+    operation: clause.operation,
+    ctx,
+  });
+  const substitution = buildEffectTypeSubstitution({
+    ctx,
+    typeInstanceId,
+    signature,
+    typeArgs: effectTypeArgs,
+  });
+  const activeSubstitution = substitution.size > 0 ? substitution : undefined;
+  const resolveClauseTypeId = ({
+    typeId,
+    fallback,
+  }: {
+    typeId: TypeId;
+    fallback?: TypeId;
+  }): TypeId => {
+    const desc = ctx.program.types.getTypeDesc(typeId);
+    const shouldFallback =
+      desc.kind === "type-param-ref" ||
+      (desc.kind === "primitive" && desc.name === "unknown");
+    const base = shouldFallback && typeof fallback === "number" ? fallback : typeId;
+    return activeSubstitution
+      ? ctx.program.types.substitute(base, activeSubstitution)
+      : base;
+  };
+  const paramOffset = clause.parameters[0] ? 1 : 0;
+  const resolvedParamTypes = clause.parameters
+    .slice(paramOffset)
+    .map((param, index) => {
+      const symbolType = ctx.module.types.getValueType(param.symbol);
+      const fallback = signature.parameters[index]?.typeId;
+      const base =
+        typeof symbolType === "number"
+          ? symbolType
+          : fallback ?? ctx.program.primitives.unknown;
+      return resolveClauseTypeId({ typeId: base, fallback });
+    });
+  const resolvedReturnTypeId = (() => {
+    const continuationParam = clause.parameters[0];
+    if (continuationParam) {
+      const continuationTypeId = ctx.module.types.getValueType(
+        continuationParam.symbol
+      );
+      if (typeof continuationTypeId === "number") {
+        const continuationDesc =
+          ctx.program.types.getTypeDesc(continuationTypeId);
+        if (continuationDesc.kind === "function") {
+          const paramType = continuationDesc.parameters[0]?.type;
+          if (typeof paramType === "number") {
+            return resolveClauseTypeId({
+              typeId: paramType,
+              fallback: signature.returnType,
+            });
+          }
+          return ctx.program.primitives.void;
+        }
+      }
+    }
+    return resolveClauseTypeId({
+      typeId: signature.returnType,
+      fallback: signature.returnType,
+    });
+  })();
+  const registry = ctx.effectsState.effectRegistry;
+  if (!registry) {
+    throw new Error("missing effect registry for handler clause");
+  }
+  const { effectId, opId } = effectsFacade(ctx).effectOpIds(clause.operation);
+  const signatureHash = signatureHashFor({
+    params: resolvedParamTypes,
+    returnType: resolvedReturnTypeId,
+    ctx,
+  });
+  const opIndex =
+    registry.getOpIndex(registry.keyFor(effectId.hash, opId, signatureHash)) ??
+    (() => {
+      throw new Error(`missing effect op index for handler clause ${fnName}`);
+    })();
+  const argsType = ensureEffectArgsType({
+    ctx,
+    opIndex,
+    paramTypes: resolvedParamTypes,
+  });
   const params = [
     ctx.effectsRuntime.handlerFrameType,
     binaryen.anyref,
@@ -184,9 +284,9 @@ const emitClauseFunction = ({
     tempLocals: new Map(),
     locals: [],
     nextLocalIndex: params.length,
-    returnTypeId: signature.returnType,
-    instanceId: undefined,
-    typeInstanceId: undefined,
+    returnTypeId: resolvedReturnTypeId,
+    instanceId: typeInstanceId,
+    typeInstanceId,
     effectful: true,
     currentHandler: { index: 0, type: ctx.effectsRuntime.handlerFrameType },
   };
@@ -226,6 +326,18 @@ const emitClauseFunction = ({
       ctx.mod.local.get(2, ctx.effectsRuntime.effectRequestType)
     )
   );
+  initOps.push(
+    ctx.mod.if(
+      ctx.mod.i32.ne(
+        ctx.effectsRuntime.requestOpIndex(
+          ctx.mod.local.get(requestLocal.index, requestLocal.type)
+        ),
+        ctx.mod.i32.const(opIndex)
+      ),
+      ctx.mod.unreachable(),
+      ctx.mod.nop()
+    )
+  );
 
   const continuationLocal = allocateTempLocal(
     ctx.effectsRuntime.continuationType,
@@ -262,14 +374,17 @@ const emitClauseFunction = ({
   );
 
   if (clause.parameters[0]) {
-    const continuationTypeId =
+    const rawContinuationTypeId =
       ctx.module.types.getValueType(clause.parameters[0].symbol) ??
       ctx.program.primitives.unknown;
+    const continuationTypeId = activeSubstitution
+      ? ctx.program.types.substitute(rawContinuationTypeId, activeSubstitution)
+      : rawContinuationTypeId;
     const continuationDesc = ctx.program.types.getTypeDesc(continuationTypeId);
     const resumeTypeId =
       continuationDesc.kind === "function"
         ? continuationDesc.parameters[0]?.type ?? ctx.program.primitives.void
-        : signature.returnType;
+        : resolvedReturnTypeId;
     const continuationBinding = allocateTempLocal(
       wasmTypeFor(continuationTypeId, ctx),
       fnCtx,
@@ -299,8 +414,7 @@ const emitClauseFunction = ({
     ]);
   }
 
-  const argsType = ctx.effectLowering.argsTypes.get(clause.operation);
-  if (!argsType && signature.parameters.length > 0) {
+  if (!argsType && resolvedParamTypes.length > 0) {
     throw new Error("missing effect args type for handler clause");
   }
   const argsRef = ctx.effectsRuntime.requestArgs(
@@ -308,10 +422,7 @@ const emitClauseFunction = ({
   );
 
   clause.parameters.slice(clause.parameters[0] ? 1 : 0).forEach((param, index) => {
-    const typeId =
-      ctx.module.types.getValueType(param.symbol) ??
-      signature.parameters[index]?.typeId ??
-      ctx.program.primitives.unknown;
+    const typeId = resolvedParamTypes[index] ?? ctx.program.primitives.unknown;
     const wasmType = wasmTypeFor(typeId, ctx);
     const binding = allocateTempLocal(wasmType, fnCtx, typeId);
     initOps.push(
@@ -337,10 +448,15 @@ const emitClauseFunction = ({
           const continuationTypeId = ctx.module.types.getValueType(
             clause.parameters[0].symbol
           ) as TypeId;
-          const desc = ctx.program.types.getTypeDesc(continuationTypeId);
-          return desc.kind === "function" ? desc.returnType : signature.returnType;
+          const resolvedContinuationTypeId = substitution
+            ? ctx.program.types.substitute(continuationTypeId, substitution)
+            : continuationTypeId;
+          const desc = ctx.program.types.getTypeDesc(resolvedContinuationTypeId);
+          return desc.kind === "function"
+            ? desc.returnType
+            : resolvedReturnTypeId;
         })()
-      : signature.returnType;
+      : resolvedReturnTypeId;
   const body = compileExpr({
     exprId: clause.body,
     ctx,
@@ -417,6 +533,7 @@ export const compileEffectHandlerExpr = (
   if (!fnCtx.currentHandler) {
     throw new Error("effect handler requires an effectful function context");
   }
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
 
   const env = buildClauseEnv({ expr, ctx, fnCtx });
   const prevHandlerLocal = allocateTempLocal(
@@ -470,10 +587,11 @@ export const compileEffectHandlerExpr = (
         ctx,
         handlerResumeKind: resumeKind,
         compileExpr,
+        typeInstanceId,
       });
       current = ctx.effectsRuntime.makeHandlerFrame({
         prev: current,
-        effectId: ctx.mod.i32.const(effectId),
+        effectId: ctx.mod.i64.const(effectId.hash.low, effectId.hash.high),
         opId: ctx.mod.i32.const(opId),
         resumeKind: ctx.mod.i32.const(resumeKind),
         clauseFn: refFunc(ctx.mod, fnName, fnRefType),
@@ -500,7 +618,6 @@ export const compileEffectHandlerExpr = (
   );
   pushHandlerScope(fnCtx, { prevHandler: prevHandlerLocal, label: expr.id });
 
-  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const body = compileExpr({
     exprId: expr.body,
     ctx,

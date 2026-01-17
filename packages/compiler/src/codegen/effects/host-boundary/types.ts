@@ -7,11 +7,13 @@ export type MsgPackImports = {
 };
 
 export type EffectOpSignature = {
-  effectId: number;
+  opIndex: number;
+  effectId: bigint;
   opId: number;
+  resumeKind: number;
+  signatureHash: number;
   params: readonly binaryen.Type[];
   returnType: binaryen.Type;
   argsType?: binaryen.Type;
   label: string;
 };
-

@@ -178,6 +178,7 @@ export interface EffectDecl {
   visibility: HirVisibility;
   symbol: SymbolId;
   scope: ScopeId;
+  effectId?: string;
   typeParameters?: TypeParameterDecl[];
   operations: readonly EffectOperationDecl[];
   moduleIndex: number;
