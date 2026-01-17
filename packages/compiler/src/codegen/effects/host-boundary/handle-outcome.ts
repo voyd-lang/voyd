@@ -7,7 +7,7 @@ import {
 import { getOutcomeValueBoxType, unboxOutcomeValue } from "../outcome-values.js";
 import type { CodegenContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
-import { EFFECT_RESULT_STATUS, VALUE_TAG } from "./constants.js";
+import { EFFECT_RESULT_STATUS, LINEAR_MEMORY_INTERNAL, VALUE_TAG } from "./constants.js";
 import { supportedValueTag } from "./signatures.js";
 import type { EffectOpSignature, MsgPackImports } from "./types.js";
 import { stateFor } from "./state.js";
@@ -108,7 +108,8 @@ const encodeEffectArgs = ({
           fieldIndex: index,
           fieldType: paramType,
           exprRef: typedArgs,
-        })
+        }),
+        LINEAR_MEMORY_INTERNAL
       );
     });
     ops.push(

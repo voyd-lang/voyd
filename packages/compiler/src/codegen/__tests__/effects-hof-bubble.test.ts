@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
+import { createEffectsImports } from "./support/wasm-imports.js";
 import { runEffectfulExport, parseEffectTable } from "./support/effects-harness.js";
 
 const fixturePath = resolve(
@@ -47,17 +48,9 @@ describe("effects higher-order functions", () => {
   it("resumes into lambdas with captured variables", () => {
     const { module } = buildModule();
     const wasmBinary = new Uint8Array(module.emitBinary());
-    const noop = () => 0;
-    const noopI64 = () => 0n;
     const instance = new WebAssembly.Instance(
       new WebAssembly.Module(wasmBinary),
-      {
-        env: {
-          __voyd_msgpack_write_value: noop,
-          __voyd_msgpack_write_effect: noop,
-          __voyd_msgpack_read_value: noopI64,
-        },
-      }
+      createEffectsImports({ includeMsgPack: true })
     );
     const handled = instance.exports.handled as CallableFunction;
     expect(handled()).toBe(15);

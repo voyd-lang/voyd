@@ -3,6 +3,8 @@ import type binaryen from "binaryen";
 import { EFFECT_TABLE_EXPORT } from "./effect-table.js";
 import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
 import {
+  EFFECTS_MEMORY_EXPORT,
+  LINEAR_MEMORY_EXPORT,
   MIN_EFFECT_BUFFER_SIZE,
   MSGPACK_READ_VALUE,
   MSGPACK_WRITE_EFFECT,
@@ -14,6 +16,24 @@ import { toBase64 } from "./base64.js";
 const TABLE_HEADER_SIZE = 8;
 const OP_ENTRY_SIZE = 28;
 const MSGPACK_OPTS = { useBigInt64: true } as const;
+const WASM_PAGE_SIZE = 64 * 1024;
+
+const ensureMemoryCapacity = (
+  memory: WebAssembly.Memory,
+  requiredBytes: number,
+  label: string
+): void => {
+  const requiredPages = Math.ceil(requiredBytes / WASM_PAGE_SIZE);
+  const currentPages = memory.buffer.byteLength / WASM_PAGE_SIZE;
+  if (requiredPages <= currentPages) {
+    return;
+  }
+  try {
+    memory.grow(requiredPages - currentPages);
+  } catch (error) {
+    throw new Error(`${label} memory grow failed`, { cause: error });
+  }
+};
 
 type WasmSource =
   | binaryen.Module
@@ -450,18 +470,29 @@ export const runEffectfulExport = async <T = unknown>({
   const mergedImports = {
     ...(imports ?? {}),
     ...host.imports,
-    env: { ...(imports?.env ?? {}), ...(host.imports.env ?? {}) },
+    env: {
+      ...(imports?.env ?? {}),
+      ...(host.imports.env ?? {}),
+    },
   };
   const { instance, table } = instantiateEffectModule({
     wasm,
     imports: mergedImports,
     tableExport,
   });
-  const memory = instance.exports.memory;
-  if (!(memory instanceof WebAssembly.Memory)) {
-    throw new Error("expected module to export memory");
+  const exportedEffectsMemory = instance.exports[
+    EFFECTS_MEMORY_EXPORT as keyof WebAssembly.Exports
+  ];
+  if (!(exportedEffectsMemory instanceof WebAssembly.Memory)) {
+    throw new Error(`expected module to export ${EFFECTS_MEMORY_EXPORT}`);
   }
-  host.setMemory(memory);
+  const msgpackMemory = instance.exports[
+    LINEAR_MEMORY_EXPORT as keyof WebAssembly.Exports
+  ];
+  if (!(msgpackMemory instanceof WebAssembly.Memory)) {
+    throw new Error(`expected module to export ${LINEAR_MEMORY_EXPORT}`);
+  }
+  host.setMemory(msgpackMemory);
 
   const initEffects = instance.exports.init_effects as CallableFunction | undefined;
   const effectStatus = instance.exports.effect_status as CallableFunction;
@@ -487,12 +518,15 @@ export const runEffectfulExport = async <T = unknown>({
     table,
     handlers,
   });
-  const bufferPtr = table.ops.length * 4;
-  if (bufferPtr + bufferSize > memory.buffer.byteLength) {
-    throw new Error("effect buffer exceeds module memory size");
-  }
+  const bufferPtr = 0;
+  ensureMemoryCapacity(
+    msgpackMemory,
+    bufferPtr + bufferSize,
+    LINEAR_MEMORY_EXPORT
+  );
+  ensureMemoryCapacity(exportedEffectsMemory, table.ops.length * 4, EFFECTS_MEMORY_EXPORT);
 
-  const memoryView = new DataView(memory.buffer);
+  const memoryView = new DataView(exportedEffectsMemory.buffer);
   table.ops.forEach((op) => {
     const handle = handleByOpIndex.get(op.opIndex) ?? 0;
     memoryView.setUint32(op.opIndex * 4, handle, true);
@@ -506,7 +540,7 @@ export const runEffectfulExport = async <T = unknown>({
     if (length <= 0) {
       throw new Error("no msgpack payload written to buffer");
     }
-    const bytes = new Uint8Array(memory.buffer, bufferPtr, length);
+    const bytes = new Uint8Array(msgpackMemory.buffer, bufferPtr, length);
     return decode(bytes, MSGPACK_OPTS);
   };
 
@@ -584,7 +618,7 @@ export const runEffectfulExport = async <T = unknown>({
       if (encoded.length > bufferSize) {
         throw new Error("resume payload exceeds buffer size");
       }
-      new Uint8Array(memory.buffer, bufferPtr, encoded.length).set(encoded);
+      new Uint8Array(msgpackMemory.buffer, bufferPtr, encoded.length).set(encoded);
       host.recordLength(encoded.length);
       try {
         result = resumeEffectful(effectCont(result), bufferPtr, bufferSize);

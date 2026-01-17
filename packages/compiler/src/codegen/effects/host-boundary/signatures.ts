@@ -10,7 +10,7 @@ import type {
   HirExprId,
   ProgramFunctionInstanceId,
   SymbolId,
-} from "../../semantics/ids.js";
+} from "../../../semantics/ids.js";
 import {
   getEffectOpInstanceInfo,
   resolvePerformSignature,

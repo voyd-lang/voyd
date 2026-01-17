@@ -31,8 +31,7 @@ import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
 } from "../effects/effect-lowering/handler-clause-temp-ids.js";
-import { buildInstanceSubstitution } from "../type-substitution.js";
-import { walkHirExpression } from "../hir-walk.js";
+import { buildEffectTypeSubstitution, collectEffectTypeArgs } from "../effects/effect-signature.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -76,44 +75,6 @@ const handlerInstanceKey = (fnCtx: FunctionContext): string => {
   return typeof instanceId === "number" ? `${instanceId}` : "base";
 };
 
-const collectEffectTypeArgs = ({
-  handlerBody,
-  operation,
-  ctx,
-}: {
-  handlerBody: HirEffectHandlerExpr["body"];
-  operation: number;
-  ctx: CodegenContext;
-}): readonly TypeId[] | undefined => {
-  const candidates: TypeId[][] = [];
-  walkHirExpression({
-    exprId: handlerBody,
-    ctx,
-    visitLambdaBodies: true,
-    visitHandlerBodies: true,
-    visitor: {
-      onExpr: (exprId) => {
-        const expr = ctx.module.hir.expressions.get(exprId);
-        if (!expr || expr.exprKind !== "call") return;
-        const callee = ctx.module.hir.expressions.get(expr.callee);
-        if (!callee || callee.exprKind !== "identifier") return;
-        if (callee.symbol !== operation) return;
-        const typeArgs = ctx.program.calls.getCallInfo(ctx.moduleId, exprId).typeArgs;
-        if (typeArgs && typeArgs.length > 0) {
-          candidates.push([...typeArgs]);
-        }
-      },
-    },
-  });
-  if (candidates.length === 0) return undefined;
-  const first = candidates[0]!;
-  const compatible = candidates.every(
-    (candidate) =>
-      candidate.length === first.length &&
-      candidate.every((entry, index) => entry === first[index])
-  );
-  return compatible ? first : first;
-};
 
 const currentHandlerValue = (
   ctx: CodegenContext,
@@ -227,31 +188,18 @@ const emitClauseFunction = ({
   if (!signature) {
     throw new Error("missing effect operation signature for handler clause");
   }
-  const substitution = new Map<number, TypeId>();
-  const instanceSubstitution = buildInstanceSubstitution({ ctx, typeInstanceId });
-  instanceSubstitution?.forEach((value, key) => {
-    substitution.set(key, value);
-  });
   const effectTypeArgs = collectEffectTypeArgs({
     handlerBody: expr.body,
     operation: clause.operation,
     ctx,
   });
-  if (
-    effectTypeArgs &&
-    signature.typeParams &&
-    effectTypeArgs.length === signature.typeParams.length
-  ) {
-    signature.typeParams.forEach((param, index) => {
-      const typeArg = effectTypeArgs[index];
-      if (typeof typeArg === "number") {
-        const resolvedArg = instanceSubstitution
-          ? ctx.program.types.substitute(typeArg, instanceSubstitution)
-          : typeArg;
-        substitution.set(param.typeParam, resolvedArg);
-      }
-    });
-  }
+  const substitution = buildEffectTypeSubstitution({
+    ctx,
+    typeInstanceId,
+    signature,
+    typeArgs: effectTypeArgs,
+  });
+  const activeSubstitution = substitution.size > 0 ? substitution : undefined;
   const resolveClauseTypeId = ({
     typeId,
     fallback,
@@ -264,7 +212,9 @@ const emitClauseFunction = ({
       desc.kind === "type-param-ref" ||
       (desc.kind === "primitive" && desc.name === "unknown");
     const base = shouldFallback && typeof fallback === "number" ? fallback : typeId;
-    return substitution.size > 0 ? ctx.program.types.substitute(base, substitution) : base;
+    return activeSubstitution
+      ? ctx.program.types.substitute(base, activeSubstitution)
+      : base;
   };
   const paramOffset = clause.parameters[0] ? 1 : 0;
   const resolvedParamTypes = clause.parameters
@@ -427,8 +377,8 @@ const emitClauseFunction = ({
     const rawContinuationTypeId =
       ctx.module.types.getValueType(clause.parameters[0].symbol) ??
       ctx.program.primitives.unknown;
-    const continuationTypeId = substitution
-      ? ctx.program.types.substitute(rawContinuationTypeId, substitution)
+    const continuationTypeId = activeSubstitution
+      ? ctx.program.types.substitute(rawContinuationTypeId, activeSubstitution)
       : rawContinuationTypeId;
     const continuationDesc = ctx.program.types.getTypeDesc(continuationTypeId);
     const resumeTypeId =

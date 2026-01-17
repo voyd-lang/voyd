@@ -6,11 +6,11 @@ import type {
   SymbolId,
   TypeId,
 } from "../../semantics/ids.js";
-import { isPackageVisible } from "../../semantics/hir/index.js";
+import { isPackageVisible, type HirVisibility } from "../../semantics/hir/index.js";
 import { diagnosticFromCode, normalizeSpan } from "../../diagnostics/index.js";
 import type { SourceSpan } from "../../diagnostics/types.js";
 import { getRequiredExprType } from "../types.js";
-import { buildInstanceSubstitution } from "../type-substitution.js";
+import { buildEffectTypeSubstitution } from "./effect-signature.js";
 import { walkHirExpression } from "../hir-walk.js";
 import type { ContinuationSite } from "./effect-lowering/types.js";
 import { performSiteArgTypes } from "./perform-site.js";
@@ -90,7 +90,7 @@ const resolveEffectId = ({
   ctx: CodegenContext;
   effectName: string;
   explicitId?: string;
-  visibility: { level: string };
+  visibility: HirVisibility;
   spanHint?: SourceSpan;
 }): EffectIdInfo => {
   const fallbackId = `${ctx.module.meta.packageId}::${ctx.moduleId}::${effectName}`;
@@ -219,28 +219,20 @@ export const resolvePerformSignature = ({
 }): { params: readonly TypeId[]; returnType: TypeId } => {
   const signature = ctx.program.functions.getSignature(ctx.moduleId, site.effectSymbol);
   const callTypeArgs = ctx.program.calls.getCallInfo(ctx.moduleId, site.exprId).typeArgs;
-  const substitution = new Map<number, TypeId>();
-  const instanceSubstitution = buildInstanceSubstitution({ ctx, typeInstanceId });
-  instanceSubstitution?.forEach((value, key) => {
-    substitution.set(key, value);
-  });
   const signatureTypeParams = signature?.typeParams ?? [];
   const hasCallTypeArgs =
     signatureTypeParams.length > 0 &&
     callTypeArgs &&
     callTypeArgs.length === signatureTypeParams.length;
-  if (hasCallTypeArgs) {
-    signatureTypeParams.forEach((param, index) => {
-      const typeArg = callTypeArgs[index];
-      if (typeof typeArg !== "number") return;
-      const resolvedArg = instanceSubstitution
-        ? ctx.program.types.substitute(typeArg, instanceSubstitution)
-        : typeArg;
-      substitution.set(param.typeParam, resolvedArg);
-    });
-  }
-  const activeSubstitution =
-    substitution.size > 0 ? substitution : undefined;
+  const substitution = signature
+    ? buildEffectTypeSubstitution({
+        ctx,
+        typeInstanceId,
+        signature,
+        typeArgs: hasCallTypeArgs ? callTypeArgs : undefined,
+      })
+    : new Map();
+  const activeSubstitution = substitution.size > 0 ? substitution : undefined;
   if (signature && (signatureTypeParams.length === 0 || hasCallTypeArgs)) {
     const resolvedParams = signature.parameters.map((param) =>
       resolveTypeId({
@@ -313,7 +305,7 @@ const collectEffectIds = (ctx: CodegenContext): EffectIdInfo[] => {
       effectName: effect.name,
       explicitId: effect.effectId,
       visibility: effect.visibility,
-      span: effectItems.get(effect.symbol)?.span,
+      spanHint: effectItems.get(effect.symbol)?.span,
     })
   );
 };

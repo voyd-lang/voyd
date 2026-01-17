@@ -1,7 +1,7 @@
 # Voyd Host Protocol
 
-Status: Draft  
-Owner: Runtime + Host Integrations  
+Status: Draft
+Owner: Runtime + Host Integrations
 Scope: host <-> wasm integration for effectful modules
 
 ## Overview
@@ -34,8 +34,10 @@ design and compiler changes.
 Effectful modules must export:
 
 - `__voyd_effect_table` (custom section): effect descriptors and op entries.
-- `memory_effects` (Wasm memory): dedicated effect handle memory, compiler-emitted
-  and exported by the module.
+- `memory` (Wasm memory): linear memory used for MsgPack buffers.
+- `effects_memory` (Wasm memory): dedicated linear memory that reserves the
+  handle table at address 0. (Effects use multi-memory; the memory is defined
+  by the module and exported for the host.)
 - `init_effects()`:
   - compiler-emitted function that marks the handle table as ready.
 - `resume_effectful(request: anyref, buf_ptr: i32, buf_len: i32)`:
@@ -78,11 +80,13 @@ different `signature_hash`, and therefore a unique `op_index`.
 ## Capability Handle Table
 
 The host builds a `u32` handle table in `op_index` order and writes it to the
-dedicated effect memory:
+effects memory at address 0:
 
 ```
-memory_effects[0..op_count] = u32 handles
+effects_memory[0..op_count] = u32 handles
 ```
+
+Hosts may grow `effects_memory` before writing if needed.
 
 The host then calls:
 
@@ -90,8 +94,19 @@ The host then calls:
 init_effects()
 ```
 
-The module reads from `memory_effects` during `perform`. This memory is
-exclusive to effect handles and must not be reused for other buffers.
+The module reads from `effects_memory` during `perform`.
+
+## MsgPack Buffer Memory
+
+MsgPack payloads are read/written in the module's linear memory export:
+
+```
+memory[buf_ptr..buf_ptr+buf_len] = msgpack payload
+```
+
+Hosts choose a buffer pointer/length that fits within the exported `memory`.
+Hosts may grow `memory` if the requested buffer does not fit.
+The module defines and exports `memory` directly.
 
 ## Effect Requests
 
@@ -100,6 +115,7 @@ Effect requests include:
 - `effect_id`
 - `op_id`
 - `resume_kind`
+- `op_index` (for debug/validation)
 - `args`
 - `continuation`
 - `tail_guard`
@@ -115,7 +131,7 @@ diagnostics and wasm-side resume decoding.
 3. Validate table version and ABI compatibility.
 4. Build a mapping from `(effect_id, op_id, signature_hash)` to host handlers.
 5. Allocate handles and write a `u32` handle table by `op_index` into
-   `memory_effects`.
+   `effects_memory`.
 6. Call `init_effects`.
 7. Run entry point. When effects occur, dispatch by handle and resume via
    `resume_effectful`.

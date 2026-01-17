@@ -33,6 +33,7 @@ import {
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { ProgramFunctionInstanceId, TypeId } from "../semantics/ids.js";
 import { DiagnosticEmitter } from "../diagnostics/index.js";
+import { createMultiMemoryModule } from "./wasm-module.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
@@ -66,7 +67,7 @@ export const codegenProgram = ({
   options = {},
 }: CodegenProgramParams): CodegenResult => {
   const modules = Array.from(program.modules.values());
-  const mod = new binaryen.Module();
+  const mod = createMultiMemoryModule();
   const mergedOptions: Required<CodegenOptions> = {
     ...DEFAULT_OPTIONS,
     ...options,

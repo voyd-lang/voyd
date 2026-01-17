@@ -29,7 +29,8 @@ import {
 } from "./continuations.js";
 import { getEffectOpInstanceInfo, resolvePerformSignature } from "../effect-registry.js";
 import { ensureEffectArgsType } from "../args-type.js";
-import { ensureLinearMemory } from "../host-boundary/imports.js";
+import { ensureEffectsMemory } from "../host-boundary/imports.js";
+import { EFFECTS_MEMORY_INTERNAL } from "../host-boundary/constants.js";
 import { ensureEffectHandleTable } from "../handle-table.js";
 
 export const compileEffectOpCall = ({
@@ -127,10 +128,10 @@ export const compileEffectOpCall = ({
   const argsBoxed = argsType
     ? initStruct(ctx.mod, argsType, args as number[])
     : ctx.mod.ref.null(binaryen.eqref);
-  ensureLinearMemory(ctx);
+  ensureEffectsMemory(ctx);
   ensureEffectHandleTable(ctx);
   const handlePtr = ctx.mod.i32.const(opInfo.opIndex * 4);
-  const handleValue = ctx.mod.i32.load(0, 4, handlePtr);
+  const handleValue = ctx.mod.i32.load(0, 4, handlePtr, EFFECTS_MEMORY_INTERNAL);
   const request = ctx.effectsRuntime.makeEffectRequest({
     effectId: ctx.mod.i64.const(
       opInfo.effectId.hash.low,
