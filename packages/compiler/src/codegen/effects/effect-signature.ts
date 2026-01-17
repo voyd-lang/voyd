@@ -7,6 +7,241 @@ type EffectSignature = NonNullable<
   ReturnType<CodegenContext["program"]["functions"]["getSignature"]>
 >;
 
+const resolveExprType = (exprId: HirExprId, ctx: CodegenContext): TypeId | undefined => {
+  const resolved = ctx.module.types.getResolvedExprType(exprId);
+  if (typeof resolved === "number") {
+    return resolved;
+  }
+  const typeId = ctx.module.types.getExprType(exprId);
+  return typeof typeId === "number" ? typeId : undefined;
+};
+
+const isUnknownType = (typeId: TypeId, ctx: CodegenContext): boolean => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  return desc.kind === "primitive" && desc.name === "unknown";
+};
+
+const bindTypeParamsFromType = ({
+  expected,
+  actual,
+  bindings,
+  ctx,
+  seen,
+  conflict,
+}: {
+  expected: TypeId;
+  actual: TypeId;
+  bindings: Map<TypeParamId, TypeId>;
+  ctx: CodegenContext;
+  seen: Set<string>;
+  conflict: { value: boolean };
+}): void => {
+  if (conflict.value) {
+    return;
+  }
+  if (isUnknownType(actual, ctx)) {
+    return;
+  }
+  const key = `${expected}:${actual}`;
+  if (seen.has(key)) {
+    return;
+  }
+  seen.add(key);
+
+  const expectedDesc = ctx.program.types.getTypeDesc(expected);
+  if (expectedDesc.kind === "type-param-ref") {
+    const existing = bindings.get(expectedDesc.param);
+    if (!existing || isUnknownType(existing, ctx)) {
+      bindings.set(expectedDesc.param, actual);
+      return;
+    }
+    if (existing !== actual) {
+      conflict.value = true;
+    }
+    return;
+  }
+
+  if (expectedDesc.kind === "nominal-object" || expectedDesc.kind === "trait") {
+    const actualDesc = ctx.program.types.getTypeDesc(actual);
+    if (actualDesc.kind !== expectedDesc.kind || actualDesc.owner !== expectedDesc.owner) {
+      return;
+    }
+    expectedDesc.typeArgs.forEach((typeArg, index) => {
+      const actualArg = actualDesc.typeArgs[index];
+      if (typeof actualArg === "number") {
+        bindTypeParamsFromType({
+          expected: typeArg,
+          actual: actualArg,
+          bindings,
+          ctx,
+          seen,
+          conflict,
+        });
+      }
+    });
+    return;
+  }
+
+  if (expectedDesc.kind === "structural-object") {
+    const actualDesc = ctx.program.types.getTypeDesc(actual);
+    if (actualDesc.kind !== "structural-object") {
+      return;
+    }
+    expectedDesc.fields.forEach((field) => {
+      const candidate = actualDesc.fields.find((entry) => entry.name === field.name);
+      if (candidate) {
+        bindTypeParamsFromType({
+          expected: field.type,
+          actual: candidate.type,
+          bindings,
+          ctx,
+          seen,
+          conflict,
+        });
+      }
+    });
+    return;
+  }
+
+  if (expectedDesc.kind === "function") {
+    const actualDesc = ctx.program.types.getTypeDesc(actual);
+    if (actualDesc.kind !== "function") {
+      return;
+    }
+    if (expectedDesc.parameters.length !== actualDesc.parameters.length) {
+      return;
+    }
+    expectedDesc.parameters.forEach((param, index) => {
+      const actualParam = actualDesc.parameters[index];
+      if (!actualParam) {
+        return;
+      }
+      bindTypeParamsFromType({
+        expected: param.type,
+        actual: actualParam.type,
+        bindings,
+        ctx,
+        seen,
+        conflict,
+      });
+    });
+    bindTypeParamsFromType({
+      expected: expectedDesc.returnType,
+      actual: actualDesc.returnType,
+      bindings,
+      ctx,
+      seen,
+      conflict,
+    });
+    return;
+  }
+
+  if (expectedDesc.kind === "fixed-array") {
+    const actualDesc = ctx.program.types.getTypeDesc(actual);
+    if (actualDesc.kind !== "fixed-array") {
+      return;
+    }
+    bindTypeParamsFromType({
+      expected: expectedDesc.element,
+      actual: actualDesc.element,
+      bindings,
+      ctx,
+      seen,
+      conflict,
+    });
+    return;
+  }
+
+  if (expectedDesc.kind === "intersection") {
+    if (typeof expectedDesc.nominal === "number") {
+      bindTypeParamsFromType({
+        expected: expectedDesc.nominal,
+        actual,
+        bindings,
+        ctx,
+        seen,
+        conflict,
+      });
+    }
+    if (typeof expectedDesc.structural === "number") {
+      bindTypeParamsFromType({
+        expected: expectedDesc.structural,
+        actual,
+        bindings,
+        ctx,
+        seen,
+        conflict,
+      });
+    }
+  }
+};
+
+const inferEffectTypeArgsFromCall = ({
+  ctx,
+  signature,
+  callExprId,
+}: {
+  ctx: CodegenContext;
+  signature: EffectSignature;
+  callExprId: HirExprId;
+}): readonly TypeId[] | undefined => {
+  if (signature.typeParams.length === 0) {
+    return undefined;
+  }
+  const callExpr = ctx.module.hir.expressions.get(callExprId);
+  if (!callExpr || callExpr.exprKind !== "call") {
+    return undefined;
+  }
+
+  const bindings = new Map<TypeParamId, TypeId>();
+  const conflict = { value: false };
+  const seen = new Set<string>();
+
+  signature.parameters.forEach((param, index) => {
+    const arg = callExpr.args[index];
+    if (!arg) {
+      return;
+    }
+    const argType = resolveExprType(arg.expr, ctx);
+    if (typeof argType !== "number") {
+      return;
+    }
+    bindTypeParamsFromType({
+      expected: param.typeId,
+      actual: argType,
+      bindings,
+      ctx,
+      seen,
+      conflict,
+    });
+  });
+
+  const returnType = resolveExprType(callExprId, ctx);
+  if (typeof returnType === "number") {
+    bindTypeParamsFromType({
+      expected: signature.returnType,
+      actual: returnType,
+      bindings,
+      ctx,
+      seen,
+      conflict,
+    });
+  }
+
+  if (conflict.value) {
+    return undefined;
+  }
+
+  const typeArgs = signature.typeParams.map((param) => bindings.get(param.typeParam));
+  if (typeArgs.some((arg) => typeof arg !== "number")) {
+    return undefined;
+  }
+  if (typeArgs.some((arg) => isUnknownType(arg as TypeId, ctx))) {
+    return undefined;
+  }
+  return typeArgs as TypeId[];
+};
+
 export const collectEffectTypeArgs = ({
   ctx,
   handlerBody,
@@ -16,6 +251,10 @@ export const collectEffectTypeArgs = ({
   handlerBody: HirExprId;
   operation: SymbolId;
 }): readonly TypeId[] | undefined => {
+  const signature = ctx.program.functions.getSignature(ctx.moduleId, operation);
+  if (!signature || signature.typeParams.length === 0) {
+    return undefined;
+  }
   const candidates: TypeId[][] = [];
   walkHirExpression({
     exprId: handlerBody,
@@ -29,7 +268,16 @@ export const collectEffectTypeArgs = ({
         const callee = ctx.module.hir.expressions.get(expr.callee);
         if (!callee || callee.exprKind !== "identifier") return;
         if (callee.symbol !== operation) return;
-        const typeArgs = ctx.program.calls.getCallInfo(ctx.moduleId, exprId).typeArgs;
+        const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
+        const inferredTypeArgs =
+          callInfo.typeArgs && callInfo.typeArgs.length > 0
+            ? callInfo.typeArgs
+            : inferEffectTypeArgsFromCall({
+                ctx,
+                signature,
+                callExprId: exprId,
+              });
+        const typeArgs = inferredTypeArgs;
         if (typeArgs && typeArgs.length > 0) {
           candidates.push([...typeArgs]);
         }
