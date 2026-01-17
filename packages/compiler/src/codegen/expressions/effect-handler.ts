@@ -31,7 +31,11 @@ import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
 } from "../effects/effect-lowering/handler-clause-temp-ids.js";
-import { buildEffectTypeSubstitution, collectEffectTypeArgs } from "../effects/effect-signature.js";
+import {
+  buildEffectTypeSubstitution,
+  collectEffectTypeArgs,
+  resolveEffectSignatureTypes,
+} from "../effects/effect-signature.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -200,60 +204,62 @@ const emitClauseFunction = ({
     typeArgs: effectTypeArgs,
   });
   const activeSubstitution = substitution.size > 0 ? substitution : undefined;
-  const resolveClauseTypeId = ({
-    typeId,
-    fallback,
-  }: {
-    typeId: TypeId;
-    fallback?: TypeId;
-  }): TypeId => {
-    const desc = ctx.program.types.getTypeDesc(typeId);
-    const shouldFallback =
-      desc.kind === "type-param-ref" ||
-      (desc.kind === "primitive" && desc.name === "unknown");
-    const base = shouldFallback && typeof fallback === "number" ? fallback : typeId;
-    return activeSubstitution
-      ? ctx.program.types.substitute(base, activeSubstitution)
-      : base;
-  };
+  const signatureParamTypes = signature.parameters.map((param) => param.typeId);
   const paramOffset = clause.parameters[0] ? 1 : 0;
-  const resolvedParamTypes = clause.parameters
-    .slice(paramOffset)
-    .map((param, index) => {
-      const symbolType = ctx.module.types.getValueType(param.symbol);
-      const fallback = signature.parameters[index]?.typeId;
-      const base =
-        typeof symbolType === "number"
-          ? symbolType
-          : fallback ?? ctx.program.primitives.unknown;
-      return resolveClauseTypeId({ typeId: base, fallback });
-    });
-  const resolvedReturnTypeId = (() => {
+  const paramTypes = clause.parameters.slice(paramOffset).map((param, index) => {
+    const symbolType = ctx.module.types.getValueType(param.symbol);
+    const fallback = signatureParamTypes[index];
+    const base =
+      typeof symbolType === "number"
+        ? symbolType
+        : fallback ?? ctx.program.primitives.unknown;
+    return base;
+  });
+  const returnTypeInfo = (() => {
     const continuationParam = clause.parameters[0];
-    if (continuationParam) {
-      const continuationTypeId = ctx.module.types.getValueType(
-        continuationParam.symbol
-      );
-      if (typeof continuationTypeId === "number") {
-        const continuationDesc =
-          ctx.program.types.getTypeDesc(continuationTypeId);
-        if (continuationDesc.kind === "function") {
-          const paramType = continuationDesc.parameters[0]?.type;
-          if (typeof paramType === "number") {
-            return resolveClauseTypeId({
-              typeId: paramType,
-              fallback: signature.returnType,
-            });
-          }
-          return ctx.program.primitives.void;
-        }
-      }
+    if (!continuationParam) {
+      return {
+        returnType: signature.returnType,
+        fallbackReturnType: signature.returnType,
+      };
     }
-    return resolveClauseTypeId({
-      typeId: signature.returnType,
-      fallback: signature.returnType,
-    });
+    const continuationTypeId = ctx.module.types.getValueType(
+      continuationParam.symbol
+    );
+    if (typeof continuationTypeId !== "number") {
+      return {
+        returnType: signature.returnType,
+        fallbackReturnType: signature.returnType,
+      };
+    }
+    const continuationDesc = ctx.program.types.getTypeDesc(continuationTypeId);
+    if (continuationDesc.kind !== "function") {
+      return {
+        returnType: signature.returnType,
+        fallbackReturnType: signature.returnType,
+      };
+    }
+    const paramType = continuationDesc.parameters[0]?.type;
+    if (typeof paramType !== "number") {
+      return { returnType: ctx.program.primitives.void };
+    }
+    return {
+      returnType: paramType,
+      fallbackReturnType: signature.returnType,
+    };
   })();
+  const { params: resolvedParamTypes, returnType: resolvedReturnTypeId } =
+    resolveEffectSignatureTypes({
+      ctx,
+      signature,
+      typeInstanceId,
+      typeArgs: effectTypeArgs,
+      substitution,
+      paramTypes,
+      fallbackParams: signatureParamTypes,
+      returnType: returnTypeInfo.returnType,
+      fallbackReturnType: returnTypeInfo.fallbackReturnType,
+    });
   const registry = ctx.effectsState.effectRegistry;
   if (!registry) {
     throw new Error("missing effect registry for handler clause");

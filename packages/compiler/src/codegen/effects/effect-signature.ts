@@ -7,6 +7,27 @@ type EffectSignature = NonNullable<
   ReturnType<CodegenContext["program"]["functions"]["getSignature"]>
 >;
 
+const shouldFallbackType = (typeId: TypeId, ctx: CodegenContext): boolean => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  return desc.kind === "type-param-ref" || (desc.kind === "primitive" && desc.name === "unknown");
+};
+
+const resolveEffectTypeId = ({
+  typeId,
+  fallback,
+  substitution,
+  ctx,
+}: {
+  typeId: TypeId;
+  fallback?: TypeId;
+  substitution?: Map<TypeParamId, TypeId>;
+  ctx: CodegenContext;
+}): TypeId => {
+  const base =
+    shouldFallbackType(typeId, ctx) && typeof fallback === "number" ? fallback : typeId;
+  return substitution ? ctx.program.types.substitute(base, substitution) : base;
+};
+
 const resolveExprType = (exprId: HirExprId, ctx: CodegenContext): TypeId | undefined => {
   const resolved = ctx.module.types.getResolvedExprType(exprId);
   if (typeof resolved === "number") {
@@ -337,4 +358,51 @@ export const buildEffectTypeSubstitution = ({
   }
 
   return substitution;
+};
+
+export const resolveEffectSignatureTypes = ({
+  ctx,
+  signature,
+  typeInstanceId,
+  typeArgs,
+  substitution,
+  paramTypes,
+  fallbackParams,
+  returnType,
+  fallbackReturnType,
+}: {
+  ctx: CodegenContext;
+  signature?: EffectSignature;
+  typeInstanceId?: ProgramFunctionInstanceId;
+  typeArgs?: readonly TypeId[];
+  substitution?: Map<TypeParamId, TypeId>;
+  paramTypes: readonly TypeId[];
+  fallbackParams?: readonly (TypeId | undefined)[];
+  returnType: TypeId;
+  fallbackReturnType?: TypeId;
+}): { params: readonly TypeId[]; returnType: TypeId } => {
+  const resolvedSubstitution =
+    substitution ??
+    (signature
+      ? buildEffectTypeSubstitution({ ctx, typeInstanceId, signature, typeArgs })
+      : undefined);
+  const activeSubstitution =
+    resolvedSubstitution && resolvedSubstitution.size > 0
+      ? resolvedSubstitution
+      : undefined;
+  const resolvedParams = paramTypes.map((typeId, index) =>
+    resolveEffectTypeId({
+      typeId,
+      fallback: fallbackParams ? fallbackParams[index] : undefined,
+      substitution: activeSubstitution,
+      ctx,
+    })
+  );
+  const resolvedReturnType = resolveEffectTypeId({
+    typeId: returnType,
+    fallback: fallbackReturnType,
+    substitution: activeSubstitution,
+    ctx,
+  });
+  return { params: resolvedParams, returnType: resolvedReturnType };
 };
