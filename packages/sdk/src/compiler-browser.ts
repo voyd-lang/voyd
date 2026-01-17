@@ -8,7 +8,7 @@ import {
 } from "@voyd/compiler/pipeline-browser.js";
 import { codegenErrorToDiagnostic } from "@voyd/compiler/codegen/diagnostics.js";
 import type { CodegenOptions } from "@voyd/compiler/codegen/context.js";
-import { DiagnosticError, formatDiagnostic } from "@voyd/compiler/diagnostics/index.js";
+import { DiagnosticError } from "@voyd/compiler/diagnostics/index.js";
 import { createMemoryModuleHost } from "@voyd/compiler/modules/memory-host.js";
 import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
 
@@ -17,7 +17,8 @@ const SRC_ROOT = "/src";
 const DEFAULT_ENTRY = "index.voyd";
 
 const STD_SOURCES = import.meta.glob<string>("/packages/std/src/**/*.voyd", {
-  as: "raw",
+  query: "?raw",
+  import: "default",
   eager: true,
 });
 

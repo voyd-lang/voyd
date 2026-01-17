@@ -1,4 +1,4 @@
-import type { HostProtocolTable, ResumeKind } from "./types.js";
+import type { HostProtocolTable } from "./types.js";
 import { RESUME_KIND } from "../runtime/constants.js";
 
 const TABLE_HEADER_SIZE = 8;
@@ -14,12 +14,14 @@ type EffectIdHash = {
   hex: string;
 };
 
+export type ResumeKindCode = (typeof RESUME_KIND)[keyof typeof RESUME_KIND];
+
 export type ParsedEffectOp = {
   opIndex: number;
   effectId: string;
   effectIdHash: EffectIdHash;
   opId: number;
-  resumeKind: ResumeKind;
+  resumeKind: ResumeKindCode;
   signatureHash: number;
   label: string;
 };
@@ -65,14 +67,27 @@ const toBase64 = (data: Uint8Array): string => {
   throw new Error("Base64 encoding is unavailable in this environment");
 };
 
-const toBytes = (wasm: Uint8Array | ArrayBuffer): Uint8Array =>
-  wasm instanceof Uint8Array ? wasm : new Uint8Array(wasm);
+type BinaryenModuleLike = { emitBinary: () => Uint8Array };
 
-const parseResumeKind = (value: number): ResumeKind => {
-  if (value === RESUME_KIND.resume) return "resume";
-  if (value === RESUME_KIND.tail) return "tail";
+const toBytes = (
+  wasm: Uint8Array | ArrayBuffer | BinaryenModuleLike
+): Uint8Array => {
+  if (wasm instanceof Uint8Array) return wasm;
+  if (wasm instanceof ArrayBuffer) return new Uint8Array(wasm);
+  if (typeof (wasm as BinaryenModuleLike).emitBinary === "function") {
+    return (wasm as BinaryenModuleLike).emitBinary();
+  }
+  throw new Error("Unsupported wasm input");
+};
+
+const parseResumeKind = (value: number): ResumeKindCode => {
+  if (value === RESUME_KIND.resume) return RESUME_KIND.resume;
+  if (value === RESUME_KIND.tail) return RESUME_KIND.tail;
   throw new Error(`unsupported resume kind ${value}`);
 };
+
+const resumeKindName = (value: ResumeKindCode): "resume" | "tail" =>
+  value === RESUME_KIND.tail ? "tail" : "resume";
 
 const decodeName = (names: Uint8Array, offset: number): string => {
   if (offset < 0 || offset >= names.length) {
@@ -120,7 +135,7 @@ export const normalizeSignatureHash = (hash: string): number => {
 };
 
 export const parseEffectTable = (
-  wasm: Uint8Array | ArrayBuffer | WebAssembly.Module,
+  wasm: Uint8Array | ArrayBuffer | WebAssembly.Module | BinaryenModuleLike,
   tableExport = EFFECT_TABLE_EXPORT
 ): ParsedEffectTable => {
   const module =
@@ -206,7 +221,7 @@ export const toHostProtocolTable = (
     opIndex: op.opIndex,
     effectId: op.effectId,
     opId: op.opId,
-    resumeKind: op.resumeKind,
+    resumeKind: resumeKindName(op.resumeKind),
     signatureHash: formatSignatureHash(op.signatureHash),
     ...(op.label ? { label: op.label } : {}),
   })),

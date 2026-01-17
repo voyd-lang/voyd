@@ -103,9 +103,17 @@ describe("effect table + harness", () => {
 
   it("unwraps Outcome.value from an effectful export", async () => {
     const { module } = loadSmokeModule();
+    const parsed = parseEffectTable(module);
+    const op = parsed.ops[0];
+    if (!op) {
+      throw new Error("missing effect op entry");
+    }
     const { value, table } = await runEffectfulExport<number>({
       wasm: module,
       entryName: "main_effectful",
+      handlers: {
+        [`${op.opIndex}`]: () => 0,
+      },
     });
     expect(value).toBe(8);
     expect(table.ops[0]?.label).toBe("/proj/src/effects-smoke.voyd::Log.info");
@@ -140,7 +148,7 @@ describe("effect table + harness", () => {
         wasm: module,
         entryName: "main_effectful",
       })
-    ).rejects.toThrow(/Unhandled effect .*Log\.info/);
+    ).rejects.toThrow(/Missing handlers/);
   });
 
   it("snapshots the perform fixture via codegen", () => {

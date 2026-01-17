@@ -1,4 +1,4 @@
-import { compile } from "../../browser.js";
+import { compile } from "@voyd/sdk/browser";
 
 type SmokeRunner = () => Promise<number>;
 

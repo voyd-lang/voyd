@@ -1,5 +1,5 @@
 import { decode, encode } from "@msgpack/msgpack";
-import type { EffectHandler, ResumeKind } from "../protocol/types.js";
+import type { EffectHandler } from "../protocol/types.js";
 import type { ParsedEffectTable } from "../protocol/table.js";
 import {
   EFFECT_RESULT_STATUS,
@@ -153,11 +153,14 @@ export const createMsgPackHost = (): MsgPackHost => {
   };
 };
 
-const parseResumeKind = (value: number): ResumeKind => {
-  if (value === RESUME_KIND.resume) return "resume";
-  if (value === RESUME_KIND.tail) return "tail";
+const parseResumeKind = (value: number): number => {
+  if (value === RESUME_KIND.resume) return RESUME_KIND.resume;
+  if (value === RESUME_KIND.tail) return RESUME_KIND.tail;
   throw new Error(`unsupported resume kind ${value}`);
 };
+
+const resumeKindName = (value: number): string =>
+  value === RESUME_KIND.tail ? "tail" : "resume";
 
 export const runEffectLoop = async <T = unknown>({
   entry,
@@ -250,7 +253,9 @@ export const runEffectLoop = async <T = unknown>({
       const handler = handlersByOpIndex[opEntry.opIndex];
       if (!handler) {
         throw new Error(
-          `Unhandled effect ${opEntry.label} (${opEntry.resumeKind})`
+          `Unhandled effect ${opEntry.label} (${resumeKindName(
+            opEntry.resumeKind
+          )})`
         );
       }
       const resumeValue = await handler(...(decoded.args ?? []));

@@ -12,6 +12,7 @@ export default defineConfig({
       "@voyd/lib": resolve(packagesRoot, "lib/src/lib"),
       "@voyd/compiler": resolve(packagesRoot, "compiler/src"),
       "@voyd/browser-compiler": resolve(packagesRoot, "browser-compiler/src"),
+      "@voyd/sdk": resolve(packagesRoot, "sdk/src"),
       "@voyd/js-host": resolve(packagesRoot, "js-host/src"),
     },
   },
@@ -21,7 +22,7 @@ export default defineConfig({
   },
   build: {
     lib: {
-      entry: resolve(projectRoot, "packages/browser-compiler/src/browser.ts"),
+      entry: resolve(projectRoot, "packages/sdk/src/browser.ts"),
       formats: ["es"],
       fileName: () => "browser/index.js",
     },
@@ -39,7 +40,7 @@ export default defineConfig({
     },
     target: "esnext",
     sourcemap: true,
-    outDir: "packages/browser-compiler/dist",
+    outDir: "packages/sdk/dist",
     emptyOutDir: false,
   },
 });
