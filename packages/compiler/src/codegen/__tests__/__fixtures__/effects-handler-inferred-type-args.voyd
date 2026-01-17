@@ -1,0 +1,9 @@
+eff Async<T>
+  await(tail) -> T
+
+pub fn main() -> i32
+  try
+    let value: i32 = Async::await()
+    value + 2
+  Async::await(tail):
+    tail(10)

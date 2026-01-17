@@ -10,7 +10,7 @@ import { isPackageVisible, type HirVisibility } from "../../semantics/hir/index.
 import { diagnosticFromCode, normalizeSpan } from "../../diagnostics/index.js";
 import type { SourceSpan } from "../../diagnostics/types.js";
 import { getRequiredExprType } from "../types.js";
-import { buildEffectTypeSubstitution } from "./effect-signature.js";
+import { resolveEffectSignatureTypes } from "./effect-signature.js";
 import { walkHirExpression } from "../hir-walk.js";
 import type { ContinuationSite } from "./effect-lowering/types.js";
 import { performSiteArgTypes } from "./perform-site.js";
@@ -189,25 +189,6 @@ export const signatureHashFor = ({
   return murmurHash3(`(${paramKeys.join(",")})->${returnKey}`);
 };
 
-const resolveTypeId = ({
-  typeId,
-  fallback,
-  substitution,
-  ctx,
-}: {
-  typeId: TypeId;
-  fallback?: TypeId;
-  substitution?: Map<number, TypeId>;
-  ctx: CodegenContext;
-}): TypeId => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  const shouldFallback =
-    desc.kind === "type-param-ref" ||
-    (desc.kind === "primitive" && desc.name === "unknown");
-  const base = shouldFallback && typeof fallback === "number" ? fallback : typeId;
-  return substitution ? ctx.program.types.substitute(base, substitution) : base;
-};
-
 export const resolvePerformSignature = ({
   site,
   ctx,
@@ -224,31 +205,18 @@ export const resolvePerformSignature = ({
     signatureTypeParams.length > 0 &&
     callTypeArgs &&
     callTypeArgs.length === signatureTypeParams.length;
-  const substitution = signature
-    ? buildEffectTypeSubstitution({
-        ctx,
-        typeInstanceId,
-        signature,
-        typeArgs: hasCallTypeArgs ? callTypeArgs : undefined,
-      })
-    : new Map();
-  const activeSubstitution = substitution.size > 0 ? substitution : undefined;
   if (signature && (signatureTypeParams.length === 0 || hasCallTypeArgs)) {
-    const resolvedParams = signature.parameters.map((param) =>
-      resolveTypeId({
-        typeId: param.typeId,
-        fallback: param.typeId,
-        substitution: activeSubstitution,
-        ctx,
-      })
-    );
-    const resolvedReturn = resolveTypeId({
-      typeId: signature.returnType,
-      fallback: signature.returnType,
-      substitution: activeSubstitution,
+    const paramTypes = signature.parameters.map((param) => param.typeId);
+    return resolveEffectSignatureTypes({
       ctx,
+      signature,
+      typeInstanceId,
+      typeArgs: hasCallTypeArgs ? callTypeArgs : undefined,
+      paramTypes,
+      fallbackParams: paramTypes,
+      returnType: signature.returnType,
+      fallbackReturnType: signature.returnType,
     });
-    return { params: resolvedParams, returnType: resolvedReturn };
   }
   const signatureParams = signature?.parameters.map((param) => param.typeId) ?? [];
   const paramTypes = performSiteArgTypes({
@@ -256,22 +224,17 @@ export const resolvePerformSignature = ({
     ctx,
     typeInstanceId,
   });
-  const resolvedParams = paramTypes.map((typeId, index) =>
-    resolveTypeId({
-      typeId,
-      fallback: signatureParams[index],
-      substitution: activeSubstitution,
-      ctx,
-    })
-  );
   const exprType = getRequiredExprType(site.exprId, ctx, typeInstanceId);
-  const resolvedReturn = resolveTypeId({
-    typeId: exprType,
-    fallback: signature?.returnType,
-    substitution: activeSubstitution,
+  return resolveEffectSignatureTypes({
     ctx,
+    signature,
+    typeInstanceId,
+    typeArgs: hasCallTypeArgs ? callTypeArgs : undefined,
+    paramTypes,
+    fallbackParams: signatureParams,
+    returnType: exprType,
+    fallbackReturnType: signature?.returnType,
   });
-  return { params: resolvedParams, returnType: resolvedReturn };
 };
 
 const buildOwnerMap = (ctx: CodegenContext): Map<HirExprId, SymbolId> => {
