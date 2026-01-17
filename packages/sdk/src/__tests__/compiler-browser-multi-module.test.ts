@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compile } from "../compiler-browser.js";
+import { compile } from "@voyd/sdk/browser";
 
 const toBytes = (
   result: Uint8Array | { binary?: Uint8Array; output?: Uint8Array }

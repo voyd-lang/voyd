@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DiagnosticError } from "@voyd/compiler/diagnostics/index.js";
-import { compile } from "../compiler-browser.js";
+import { compile } from "@voyd/sdk/browser";
 
 describe("browser compiler diagnostics", () => {
   it("preserves structured codegen diagnostics when throwing", async () => {
@@ -25,8 +25,7 @@ pub fn main()
     }
 
     expect(caught.diagnostic.code).toBe("CG0003");
-    expect(caught.diagnostic.span.file).toBe("src::index");
+    expect(caught.diagnostic.span.file).toBe("/src/index.voyd");
     expect(caught.diagnostic.span.end).toBeGreaterThan(caught.diagnostic.span.start);
   });
 });
-

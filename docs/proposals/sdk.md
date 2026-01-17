@@ -1,7 +1,7 @@
 # Voyd SDK Package
 
-Status: Draft  
-Owner: Tooling  
+Status: Implemented
+Owner: Tooling
 Scope: `packages/sdk`
 
 ## Overview

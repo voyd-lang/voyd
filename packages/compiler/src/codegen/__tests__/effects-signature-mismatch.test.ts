@@ -31,6 +31,6 @@ describe("effect signature validation", () => {
         entryName: "main_effectful",
         handlers: { [badKey]: () => 1 },
       })
-    ).rejects.toThrow(/Unhandled effect/);
+    ).rejects.toThrow(/Missing handlers/);
   });
 });

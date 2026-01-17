@@ -1,0 +1,41 @@
+{
+  "name": "@voyd/sdk",
+  "version": "0.9.0",
+  "description": "Voyd SDK",
+  "type": "module",
+  "main": "./dist/node.js",
+  "exports": {
+    ".": {
+      "types": "./dist/node.d.ts",
+      "development": "./src/node.ts",
+      "import": "./dist/node.js",
+      "default": "./dist/node.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "development": "./src/browser.ts",
+      "import": "./dist/browser/index.js",
+      "default": "./dist/browser/index.js"
+    },
+    "./deno": {
+      "types": "./dist/deno.d.ts",
+      "development": "./src/deno.ts",
+      "import": "./dist/deno.js",
+      "default": "./dist/deno.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && vite build -c ../../vite.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config ../../vitest.config.ts src",
+    "test:w": "vitest --config ../../vitest.config.ts src",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@voyd/compiler": "0.9.0",
+    "@voyd/js-host": "0.9.0",
+    "@voyd/lib": "0.9.0",
+    "binaryen": "^123.0.0"
+  }
+}
