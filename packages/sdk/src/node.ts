@@ -76,7 +76,10 @@ const resolveSrcRoot = ({
   }
 
   if (!source) {
-    return path.dirname(path.resolve(entryPath));
+    if (path.isAbsolute(entryPath)) {
+      return path.dirname(path.resolve(entryPath));
+    }
+    return path.resolve(process.cwd());
   }
 
   if (path.isAbsolute(entryPath)) {
