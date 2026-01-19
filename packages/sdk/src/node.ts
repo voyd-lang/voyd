@@ -8,6 +8,8 @@ import { loadModuleGraph } from "@voyd/compiler/pipeline.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { compileWithLoader } from "./shared/compile.js";
 import { createHost, runWithHandlers } from "./shared/host.js";
+import { createCompileResult } from "./shared/result.js";
+import type { CompileArtifacts } from "./shared/compile.js";
 import type { CompileOptions, CompileResult, VoydSdk } from "./shared/types.js";
 
 const DEFAULT_ENTRY = "index.voyd";
@@ -52,10 +54,12 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
     roots,
     host,
     includeTests: options.includeTests,
+    testsOnly: options.testsOnly,
     loadModuleGraph,
   });
 
-  return finalizeCompile({ options, result });
+  const finalized = finalizeCompile({ options, result });
+  return createCompileResult(finalized);
 };
 
 const resolveSrcRoot = ({
@@ -160,8 +164,8 @@ const finalizeCompile = ({
   result,
 }: {
   options: CompileOptions;
-  result: CompileResult;
-}): CompileResult => {
+  result: CompileArtifacts;
+}): CompileArtifacts => {
   if (!options.optimize && !options.emitWasmText) {
     return result;
   }
@@ -175,8 +179,15 @@ const finalizeCompile = ({
 
   const wasm = options.optimize ? emitBinary(module) : result.wasm;
   const wasmText = options.emitWasmText ? module.emitText() : undefined;
+  let testsWasm = result.testsWasm;
+  if (options.optimize && result.testsWasm) {
+    const testsModule = binaryen.readBinary(result.testsWasm);
+    testsModule.optimize();
+    testsWasm = emitBinary(testsModule);
+  }
 
-  return wasmText ? { ...result, wasm, wasmText } : { ...result, wasm };
+  const updated = { ...result, wasm, testsWasm };
+  return wasmText ? { ...updated, wasmText } : updated;
 };
 
 const emitBinary = (module: binaryen.Module): Uint8Array => {
@@ -231,6 +242,13 @@ export type {
   HostInitOptions,
   ModuleRoots,
   RunOptions,
+  TestCase,
+  TestCollection,
+  TestEvent,
+  TestReporter,
+  TestResult,
+  TestRunOptions,
+  TestRunSummary,
   VoydHost,
   VoydSdk,
 } from "./shared/types.js";

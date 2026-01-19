@@ -2,6 +2,7 @@ import { createMemoryModuleHost } from "@voyd/compiler/modules/memory-host.js";
 import { loadModuleGraph } from "@voyd/compiler/pipeline-browser.js";
 import { compileWithLoader } from "./shared/compile.js";
 import { createHost, runWithHandlers } from "./shared/host.js";
+import { createCompileResult } from "./shared/result.js";
 import type { CompileOptions, CompileResult, VoydSdk } from "./shared/types.js";
 import {
   browserParseModule,
@@ -41,13 +42,15 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
   }
 
   const host = createMemoryModuleHost({ files: parsed.files });
-  return compileWithLoader({
+  const result = await compileWithLoader({
     entryPath: parsed.entryPath,
     roots,
     host,
     includeTests: options.includeTests,
+    testsOnly: options.testsOnly,
     loadModuleGraph,
   });
+  return createCompileResult(result);
 };
 
 export {
@@ -66,6 +69,13 @@ export type {
   HostInitOptions,
   ModuleRoots,
   RunOptions,
+  TestCase,
+  TestCollection,
+  TestEvent,
+  TestReporter,
+  TestResult,
+  TestRunOptions,
+  TestRunSummary,
   VoydHost,
   VoydSdk,
 } from "./shared/types.js";

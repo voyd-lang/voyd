@@ -19,6 +19,13 @@ export type {
   HostInitOptions,
   ModuleRoots,
   RunOptions,
+  TestCase,
+  TestCollection,
+  TestEvent,
+  TestReporter,
+  TestResult,
+  TestRunOptions,
+  TestRunSummary,
   VoydHost,
   VoydSdk,
 } from "./shared/types.js";

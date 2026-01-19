@@ -7,6 +7,7 @@ export {
   emitProgram,
   loadModuleGraph,
 } from "@voyd/compiler/pipeline.js";
+export type { TestCase } from "@voyd/compiler/pipeline-shared.js";
 export type {
   Diagnostic,
   DiagnosticSeverity,

@@ -7,7 +7,15 @@ import {
   emitProgram,
   type LoadModuleGraphFn,
 } from "@voyd/compiler/pipeline-shared.js";
-import type { CompileResult } from "./types.js";
+import type { TestCase } from "./types.js";
+
+export type CompileArtifacts = {
+  wasm: Uint8Array;
+  wasmText?: string;
+  diagnostics: Diagnostic[];
+  tests?: readonly TestCase[];
+  testsWasm?: Uint8Array;
+};
 
 const throwIfError = (diagnostics: Diagnostic[]): void => {
   const error = diagnostics.find((diagnostic) => diagnostic.severity === "error");
@@ -20,28 +28,68 @@ export const compileWithLoader = async ({
   roots,
   host,
   includeTests,
+  testsOnly,
   loadModuleGraph,
 }: {
   entryPath: string;
   roots: ModuleRoots;
   host?: ModuleHost;
   includeTests?: boolean;
+  testsOnly?: boolean;
   loadModuleGraph: LoadModuleGraphFn;
-}): Promise<CompileResult> => {
+}): Promise<CompileArtifacts> => {
   const graph = await loadModuleGraph({ entryPath, roots, host });
-  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
+  const shouldIncludeTests = includeTests || testsOnly;
+  const { semantics, diagnostics: semanticDiagnostics, tests } = analyzeModules({
     graph,
-    includeTests,
+    includeTests: shouldIncludeTests,
   });
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
+  const testCases = shouldIncludeTests ? tests : undefined;
 
   throwIfError(diagnostics);
 
   try {
+    if (testsOnly) {
+      const testResult = await emitProgram({
+        graph,
+        semantics,
+        codegenOptions: { testMode: true },
+      });
+      const allDiagnostics = [...diagnostics, ...testResult.diagnostics];
+      throwIfError(allDiagnostics);
+      return {
+        wasm: testResult.wasm,
+        diagnostics: allDiagnostics,
+        tests: testCases,
+        testsWasm: testResult.wasm,
+      };
+    }
+
     const wasmResult = await emitProgram({ graph, semantics });
-    const allDiagnostics = [...diagnostics, ...wasmResult.diagnostics];
-    throwIfError(allDiagnostics);
-    return { wasm: wasmResult.wasm, diagnostics: allDiagnostics };
+    const baseDiagnostics = [...diagnostics, ...wasmResult.diagnostics];
+    throwIfError(baseDiagnostics);
+
+    let testsWasm: Uint8Array | undefined;
+    let allDiagnostics = baseDiagnostics;
+
+    if (shouldIncludeTests && tests.length > 0) {
+      const testResult = await emitProgram({
+        graph,
+        semantics,
+        codegenOptions: { testMode: true },
+      });
+      allDiagnostics = [...baseDiagnostics, ...testResult.diagnostics];
+      throwIfError(allDiagnostics);
+      testsWasm = testResult.wasm;
+    }
+
+    return {
+      wasm: wasmResult.wasm,
+      diagnostics: allDiagnostics,
+      tests: testCases,
+      testsWasm,
+    };
   } catch (error) {
     const diagnostic = codegenErrorToDiagnostic(error, {
       moduleId: graph.entry ?? entryPath,

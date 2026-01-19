@@ -6,6 +6,7 @@ import type {
   ModulePath,
   ModuleRoots,
 } from "./modules/types.js";
+import type { TestAttribute } from "./parser/attributes.js";
 import {
   semanticsPipeline,
   type SemanticsPipelineResult,
@@ -35,6 +36,17 @@ export type AnalyzeModulesOptions = {
 export type AnalyzeModulesResult = {
   semantics: Map<string, SemanticsPipelineResult>;
   diagnostics: Diagnostic[];
+  tests: readonly TestCase[];
+};
+
+export type TestCase = {
+  id: string;
+  moduleId: string;
+  modulePath: string;
+  description?: string;
+  modifiers: { skip?: boolean; only?: boolean };
+  location?: { filePath: string; startLine: number; startColumn: number };
+  effectful: boolean;
 };
 
 export type LowerProgramOptions = {
@@ -121,7 +133,73 @@ export const analyzeModules = ({
     }
   });
 
-  return { semantics, diagnostics };
+  const tests = includeTests ? collectTests({ graph, semantics }) : [];
+  return { semantics, diagnostics, tests };
+};
+
+const collectTests = ({
+  graph,
+  semantics,
+}: {
+  graph: ModuleGraph;
+  semantics: Map<string, SemanticsPipelineResult>;
+}): TestCase[] => {
+  const tests: TestCase[] = [];
+
+  semantics.forEach((entry, moduleId) => {
+    const moduleNode = graph.modules.get(moduleId);
+    if (!moduleNode) {
+      return;
+    }
+
+    const modulePath = modulePathToString(moduleNode.path);
+    entry.binding.functions.forEach((fn) => {
+      const attributes = fn.form?.attributes as
+        | { test?: TestAttribute }
+        | undefined;
+      const test = attributes?.test;
+      if (!test) {
+        return;
+      }
+
+      const location = fn.form?.location;
+      const effectRow = entry.typing.effects.getFunctionEffect(fn.symbol);
+      const effectful =
+        typeof effectRow === "number" &&
+        !entry.typing.effects.isEmpty(effectRow);
+
+      tests.push({
+        id: test.id,
+        moduleId,
+        modulePath,
+        description: test.description,
+        modifiers: normalizeTestModifiers(test.modifiers),
+        location: location
+          ? {
+              filePath: location.filePath,
+              startLine: location.startLine,
+              startColumn: location.startColumn + 1,
+            }
+          : undefined,
+        effectful,
+      });
+    });
+  });
+
+  return tests;
+};
+
+const normalizeTestModifiers = (
+  modifiers?: TestAttribute["modifiers"]
+): { skip?: boolean; only?: boolean } => {
+  if (!modifiers) {
+    return {};
+  }
+
+  return {
+    ...(modifiers.skip ? { skip: true } : {}),
+    ...(modifiers.only ? { only: true } : {}),
+  };
 };
 
 export const lowerProgram = ({

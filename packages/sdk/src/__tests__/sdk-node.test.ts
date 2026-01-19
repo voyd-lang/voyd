@@ -4,13 +4,13 @@ import { createSdk } from "@voyd/sdk";
 describe("node sdk", () => {
   it("compiles and runs a source module", async () => {
     const sdk = createSdk();
-    const { wasm } = await sdk.compile({
+    const result = await sdk.compile({
       source: `pub fn main() -> i32
   42
 `,
     });
 
-    const result = await sdk.run<number>({ wasm, entryName: "main" });
-    expect(result).toBe(42);
+    const output = await result.run<number>({ entryName: "main" });
+    expect(output).toBe(42);
   });
 });

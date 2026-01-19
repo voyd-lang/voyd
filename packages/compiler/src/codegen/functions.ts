@@ -310,6 +310,7 @@ export const emitModuleExports = (
   ctx: CodegenContext,
   contexts: readonly CodegenContext[] = [ctx]
 ): void => {
+  const exportedNames = new Set<string>();
   const publicExports = ctx.module.hir.module.exports.filter((entry) =>
     isPublicVisibility(entry.visibility)
   );
@@ -372,6 +373,10 @@ export const emitModuleExports = (
     }
     const exportName =
       entry.alias ?? symbolName(ctx, ctx.moduleId, entry.symbol);
+    if (exportedNames.has(exportName)) {
+      return;
+    }
+    exportedNames.add(exportName);
     if (meta.effectful) {
       emitEffectfulWasmExportWrapper({ meta, exportName });
 
