@@ -31,7 +31,7 @@ test only "only runs when respected":
 
     const events: TestEvent[] = [];
     const summary = await result.tests!.run({
-      reporter: { onEvent: (event) => events.push(event) },
+      reporter: { onEvent: (event) => { events.push(event); } },
       filter: { only: false },
     });
 
