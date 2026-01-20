@@ -91,16 +91,17 @@ const planTests = ({
   cases: readonly TestCase[];
   filter?: TestRunOptions["filter"];
 }): PlannedTest[] => {
-  const hasOnly = cases.some((test) => test.modifiers.only);
+  const filtered = filter
+    ? cases.flatMap((test) => {
+        const displayName = buildDisplayName(test);
+        const info = buildTestInfo({ test, displayName });
+        return filter(info) ? [{ test, displayName }] : [];
+      })
+    : cases.map((test) => ({ test, displayName: buildDisplayName(test) }));
+  const hasOnly = filtered.some(({ test }) => test.modifiers.only);
   const respectOnly = hasOnly;
 
-  return cases.map((test) => {
-    const displayName = buildDisplayName(test);
-    const info = buildTestInfo({ test, displayName });
-    if (filter && !filter(info)) {
-      return { test, displayName, status: "skipped" };
-    }
-
+  return filtered.map(({ test, displayName }) => {
     if (test.modifiers.skip) {
       return { test, displayName, status: "skipped" };
     }
